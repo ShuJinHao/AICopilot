@@ -16,7 +16,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\Infrastructure\AICopilot.EntityFrameworkCore\AICopilot.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="..\..\Infrastructure\AICopilot.Infrastructure\AICopilot.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\Services\AICopilot.IdentityService\AICopilot.IdentityService.csproj" />
     <ProjectReference Include="..\AICopilot.ServiceDefaults\AICopilot.ServiceDefaults.csproj" />
   </ItemGroup>
 

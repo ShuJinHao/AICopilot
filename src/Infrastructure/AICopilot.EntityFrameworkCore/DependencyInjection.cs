@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -9,19 +10,14 @@ namespace AICopilot.EntityFrameworkCore;
 
 public static class DependencyInjection
 {
-    public static IServiceCollection AddInfrastructures(this IServiceCollection services, IConfiguration configuration)
+    public static void AddEfCore(this IHostApplicationBuilder builder)
     {
-        ConfigureIdentity(services);
+        builder.AddNpgsqlDbContext<AiCopilotDbContext>("ai-copilot");
 
-        return services;
-    }
-
-    private static void ConfigureIdentity(IServiceCollection services)
-    {
-        services.AddIdentityCore<IdentityUser>(options =>
+        builder.Services.AddIdentityCore<IdentityUser>(options =>
         {
-            options.Password.RequiredLength = 8;
             options.Password.RequireNonAlphanumeric = false;
+            options.Password.RequiredLength = 8;
         })
             .AddRoles<IdentityRole>()
             .AddEntityFrameworkStores<AiCopilotDbContext>();
