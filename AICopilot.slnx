@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/Core/" />
+  <Folder Name="/src/Hosts/">
+    <Project Path="src/Hosts/AICopilot.AppHost/AICopilot.AppHost.csproj" />
+    <Project Path="src/Hosts/AICopilot.HttpApi/AICopilot.HttpApi.csproj" />
+    <Project Path="src/Hosts/AICopilot.ServiceDefaults/AICopilot.ServiceDefaults.csproj" />
+  </Folder>
+  <Folder Name="/src/Infrastructure/">
+    <Project Path="src/Infrastructure/AICopilot.EntityFrameworkCore/AICopilot.EntityFrameworkCore.csproj" Id="fc5ebf86-137f-4da9-8e82-8567e320240f" />
+  </Folder>
+  <Folder Name="/src/Services/" />
+  <Folder Name="/src/Shared/" />
+</Solution>
