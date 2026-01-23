@@ -1,4 +1,4 @@
-﻿using AICopilot.Services.Contracts;
+﻿using AICopilot.IdentityService.Contracts;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;

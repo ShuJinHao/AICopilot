@@ -1,4 +1,4 @@
-﻿using AICopilot.Services.Contracts;
+﻿using AICopilot.IdentityService.Contracts;
 using AICopilot.SharedKernel.Messaging;
 using AICopilot.SharedKernel.Result;
 using Microsoft.AspNetCore.Identity;

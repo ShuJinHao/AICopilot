@@ -4,12 +4,12 @@ using AICopilot.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.AddServiceDefaults();
+
 builder.AddInfrastructures();
-builder.AddServiceUseCase();
-builder.AddWebService();
+builder.AddApplicationService();
+builder.AddWebServices();
 
 // Add services to the container.
-
 builder.Services.AddControllers();
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();

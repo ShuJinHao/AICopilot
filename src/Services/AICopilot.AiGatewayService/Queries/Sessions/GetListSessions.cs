@@ -1,0 +1,37 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using AICopilot.Services.Common.Attributes;
+using AICopilot.Services.Common.Contracts;
+using AICopilot.SharedKernel.Messaging;
+using AICopilot.SharedKernel.Result;
+
+namespace AICopilot.AiGatewayService.Queries.Sessions;
+
+public record SessionDto
+{
+    public Guid Id { get; set; }
+    public required string Title { get; set; }
+}
+
+[AuthorizeRequirement("AiGateway.GetListSessions")]
+public record GetListSessionsQuery : IQuery<Result<IList<SessionDto>>>;
+
+public class GetListSessionsQueryHandler(
+    IDataQueryService dataQueryService) : IQueryHandler<GetListSessionsQuery, Result<IList<SessionDto>>>
+{
+    public async Task<Result<IList<SessionDto>>> Handle(GetListSessionsQuery request,
+        CancellationToken cancellationToken)
+    {
+        var queryable = dataQueryService.Sessions
+            .Select(s => new SessionDto
+            {
+                Id = s.Id,
+                Title = s.Title
+            });
+        var result = await dataQueryService.ToListAsync(queryable);
+        return Result.Success(result);
+    }
+}

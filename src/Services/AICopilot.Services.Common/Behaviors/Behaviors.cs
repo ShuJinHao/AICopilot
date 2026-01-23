@@ -1,12 +1,12 @@
 ﻿using AICopilot.Services.Common.Attributes;
+using AICopilot.Services.Common.Contracts;
 using AICopilot.Services.Common.Exceptions;
-using AICopilot.Services.Contracts;
 using MediatR;
 using System;
 using System.Collections.Generic;
 using System.Text;
 
-namespace AICopilot.Services.Common;
+namespace AICopilot.Services.Common.Behaviors;
 
 public class AuthorizationBehavior<TRequest, TResponse>(ICurrentUser user) :
     IPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>
@@ -25,7 +25,9 @@ public class AuthorizationBehavior<TRequest, TResponse>(ICurrentUser user) :
 
         // 1. 用户是否已认证
         if (!user.IsAuthenticated) throw new ForbiddenException("用户未登录");
-
+        // 管理员角色可以访问所有用例
+        if (user.Role == "Admin")
+            return await next(cancellationToken);
         // 2. 获取这些角色包含的权限（可以从数据库查询）
         var userPermissions = LoadPermissions(user.Role!);
 

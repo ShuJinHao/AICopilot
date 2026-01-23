@@ -3,7 +3,7 @@ using Projects;
 var builder = DistributedApplication.CreateBuilder(args);
 
 var postgresdb = builder.AddPostgres("postgres")
-    .WithDataVolume("postgres-aicopilot")
+    .WithDataVolume("postgres-aicopilots")
     .WithPgWeb(pgWeb => pgWeb.WithHostPort(5050))
     .AddDatabase("ai-copilot");
 

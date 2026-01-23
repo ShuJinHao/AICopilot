@@ -21,6 +21,10 @@ public class ConversationTemplateConfiguration : IEntityTypeConfiguration<Conver
             .HasMaxLength(200)
             .HasColumnName("name");
 
+        // 唯一约束
+        builder.HasIndex(ct => ct.Name)
+            .IsUnique();
+
         builder.Property(ct => ct.Description)
             .HasMaxLength(1000)
             .HasColumnName("description"); // 允许为空
@@ -28,6 +32,10 @@ public class ConversationTemplateConfiguration : IEntityTypeConfiguration<Conver
         builder.Property(ct => ct.SystemPrompt)
             .IsRequired()
             .HasColumnName("system_prompt");
+
+        builder.Property(ct => ct.SystemPrompt)
+            .IsRequired()
+            .HasColumnName("model_id");
 
         builder.Property(ct => ct.IsEnabled)
             .IsRequired()

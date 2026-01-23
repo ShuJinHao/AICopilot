@@ -1,4 +1,4 @@
-﻿using AICopilot.Services.Contracts;
+﻿using AICopilot.Services.Common.Contracts;
 using System.Security.Claims;
 
 namespace AICopilot.HttpApi.Infrastructure;
