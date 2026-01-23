@@ -1,6 +1,8 @@
 <Solution>
   <Folder Name="/src/" />
-  <Folder Name="/src/Core/" />
+  <Folder Name="/src/Core/">
+    <Project Path="src/Core/AICopilot.Core.AiGateway/AICopilot.Core.AiGateway.csproj" Id="8f337f21-7397-4254-afdc-cc1e04cca148" />
+  </Folder>
   <Folder Name="/src/Hosts/">
     <Project Path="src/Hosts/AICopilot.AppHost/AICopilot.AppHost.csproj" />
     <Project Path="src/Hosts/AICopilot.HttpApi/AICopilot.HttpApi.csproj" />
