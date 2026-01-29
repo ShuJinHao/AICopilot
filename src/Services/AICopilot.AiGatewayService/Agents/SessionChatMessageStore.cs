@@ -1,6 +1,8 @@
-﻿using AICopilot.Core.AiGateway.Aggregates.Sessions;
+﻿using AICopilot.AiGatewayService.Queries.Sessions;
+using AICopilot.Core.AiGateway.Aggregates.Sessions;
 using AICopilot.Services.Common.Contracts;
 using AICopilot.SharedKernel.Repository;
+using MediatR;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
@@ -11,8 +13,12 @@ using System.Text.Json;
 
 namespace AICopilot.AiGatewayService.Agents;
 
+public record SessionSoreState(Guid SessionId, int MessageCount = 20);
+
 public class SessionChatMessageStore : ChatMessageStore
 {
+    private readonly SessionSoreState? _sessionSoreState;
+
     private readonly IServiceProvider _serviceProvider;
 
     public SessionChatMessageStore(IServiceProvider serviceProvider, JsonElement storeState)
@@ -20,54 +26,28 @@ public class SessionChatMessageStore : ChatMessageStore
         _serviceProvider = serviceProvider;
         if (storeState.ValueKind is JsonValueKind.String)
         {
-            ThreadDbKey = storeState.Deserialize<Guid>();
+            _sessionSoreState = storeState.Deserialize<SessionSoreState>()!;
         }
     }
 
-    private Guid? ThreadDbKey { get; set; }
-
     public override async Task<IEnumerable<ChatMessage>> GetMessagesAsync(CancellationToken cancellationToken = new())
     {
-        using var scope = _serviceProvider.CreateScope();
-        var queryService = scope.ServiceProvider.GetRequiredService<IDataQueryService>();
-
-        // 先按时间倒序(Descending)取最新的 50 条
-        var queryable = queryService.Messages
-            .Where(m => m.SessionId == ThreadDbKey)
-            .OrderByDescending(m => m.CreatedAt)
-            .Take(50);
-
-        var dbMessages = await queryService.ToListAsync(queryable);
-
-        // 在内存中反转回正序(Ascending)，因为语言需要按时间顺序阅读
-        var orderedMessages = dbMessages.OrderBy(m => m.CreatedAt);
-
-        // 将实体转换为 Agent 框架的 ChatMessage
-        var chatMessages = new List<ChatMessage>();
-
-        foreach (var msg in orderedMessages)
-        {
-            var role = msg.Type switch
-            {
-                MessageType.User => ChatRole.User,
-                MessageType.Assistant => ChatRole.Assistant,
-                MessageType.System => ChatRole.System,
-                _ => ChatRole.User
-            };
-            chatMessages.Add(new ChatMessage(role, msg.Content));
-        }
-
-        return chatMessages;
+        if (_sessionSoreState == null) return [];
+        var mediator = _serviceProvider.GetRequiredService<IMediator>();
+        var query = new GetListChatMessagesQuery(_sessionSoreState.SessionId, _sessionSoreState.MessageCount);
+        var result = await mediator.Send(query, cancellationToken);
+        return result.Value!;
     }
 
     public override async Task AddMessagesAsync(IEnumerable<ChatMessage> messages, CancellationToken cancellationToken = new())
     {
-        ThreadDbKey ??= Guid.NewGuid();
+        if (_sessionSoreState == null) return;
+
         using var scope = _serviceProvider.CreateScope();
         var repo = scope.ServiceProvider.GetRequiredService<IRepository<Session>>();
 
         // 加载聚合根
-        var session = await repo.GetByIdAsync(ThreadDbKey, cancellationToken);
+        var session = await repo.GetByIdAsync(_sessionSoreState.SessionId, cancellationToken);
         if (session == null) return;
 
         var hasNewMessage = false;
@@ -100,6 +80,6 @@ public class SessionChatMessageStore : ChatMessageStore
 
     public override JsonElement Serialize(JsonSerializerOptions? jsonSerializerOptions = null)
     {
-        return JsonSerializer.SerializeToElement(ThreadDbKey);
+        return JsonSerializer.SerializeToElement(_sessionSoreState);
     }
 }

@@ -28,6 +28,7 @@ public static class DependencyInjection
             });
 
             builder.AddAiGatewayService();
+            builder.AddIdentityService();
         }
 
         public void AddWebServices()

@@ -1,4 +1,6 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+﻿using AICopilot.AgentPlugin;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
@@ -8,4 +10,11 @@ namespace AICopilot.IdentityService;
 
 public static class DependencyInjection
 {
+    public static void AddIdentityService(this IHostApplicationBuilder builder)
+    {
+        builder.Services.AddAgentPlugin(registrar =>
+        {
+            registrar.RegisterPluginFromAssembly(Assembly.GetExecutingAssembly());
+        });
+    }
 }

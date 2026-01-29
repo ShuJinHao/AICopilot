@@ -1,4 +1,5 @@
 using AICopilot.EntityFrameworkCore;
+using AICopilot.MigrationWorkApp.SeedData;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using System.Diagnostics;
@@ -23,7 +24,7 @@ public class Worker(
             var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
             var userManager = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
             await RunMigrationAsync(dbContext, cancellationToken);
-            await SeedDataAsync(roleManager, userManager, cancellationToken);
+            await SeedDataAsync(dbContext, roleManager, userManager, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -37,25 +38,21 @@ public class Worker(
     private static async Task RunMigrationAsync(AiCopilotDbContext dbContext, CancellationToken cancellationToken)
     {
         var strategy = dbContext.Database.CreateExecutionStrategy();
-        await strategy.ExecuteAsync(async () =>
-        {
-            await dbContext.Database.MigrateAsync(cancellationToken);
-        });
+        await strategy.ExecuteAsync(async () => { await dbContext.Database.MigrateAsync(cancellationToken); });
     }
 
     private static async Task SeedDataAsync(
-        RoleManager<IdentityRole> roleManager, UserManager<IdentityUser> userManager, CancellationToken cancellationToken)
+        AiCopilotDbContext dbContext,
+        RoleManager<IdentityRole> roleManager,
+        UserManager<IdentityUser> userManager,
+        CancellationToken cancellationToken)
     {
         // 创建默认角色
         var roles = new[] { "Admin", "User" };
 
         foreach (var role in roles)
-        {
             if (!await roleManager.RoleExistsAsync(role))
-            {
                 await roleManager.CreateAsync(new IdentityRole(role));
-            }
-        }
 
         // 创建默认管理员账户
         const string adminUserName = "admin";
@@ -71,13 +68,23 @@ public class Worker(
 
             var result = await userManager.CreateAsync(adminUser, adminPassword);
             if (result.Succeeded)
-            {
                 await userManager.AddToRoleAsync(adminUser, "Admin");
-            }
             else
-            {
                 Console.WriteLine("创建管理员失败：" + string.Join(",", result.Errors.Select(e => e.Description)));
-            }
         }
+
+        // 创建默认模型
+        if (!await dbContext.LanguageModels.AnyAsync(cancellationToken: cancellationToken))
+        {
+            await dbContext.LanguageModels.AddRangeAsync(AiGatewayData.LanguageModels(), cancellationToken);
+        }
+
+        // 创建默认对话模板
+        if (!await dbContext.ConversationTemplates.AnyAsync(cancellationToken: cancellationToken))
+        {
+            await dbContext.ConversationTemplates.AddRangeAsync(AiGatewayData.ConversationTemplates(), cancellationToken);
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 }
