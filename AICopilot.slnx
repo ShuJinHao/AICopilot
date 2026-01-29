@@ -2,6 +2,7 @@
   <Folder Name="/src/" />
   <Folder Name="/src/Core/">
     <Project Path="src/Core/AICopilot.Core.AiGateway/AICopilot.Core.AiGateway.csproj" Id="8f337f21-7397-4254-afdc-cc1e04cca148" />
+    <Project Path="src/Core/AICopilot.Core.Rag/AICopilot.Core.Rag.csproj" Id="e1c3ad99-f2c1-422a-aa7b-4b841b156917" />
   </Folder>
   <Folder Name="/src/Hosts/">
     <Project Path="src/Hosts/AICopilot.AppHost/AICopilot.AppHost.csproj" />

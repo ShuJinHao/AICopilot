@@ -15,6 +15,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\Core\AICopilot.Core.Rag\AICopilot.Core.Rag.csproj" />
     <ProjectReference Include="..\..\Services\AICopilot.IdentityService\AICopilot.IdentityService.csproj" />
     <ProjectReference Include="..\..\Services\AICopilot.Services.Common\AICopilot.Services.Common.csproj" />
   </ItemGroup>
