@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\Core\AICopilot.Core.AiGateway\AICopilot.Core.AiGateway.csproj" />
+    <ProjectReference Include="..\..\Core\AICopilot.Core.Rag\AICopilot.Core.Rag.csproj" />
     <ProjectReference Include="..\..\Shared\AICopilot.SharedKernel\AICopilot.SharedKernel.csproj" />
   </ItemGroup>
 

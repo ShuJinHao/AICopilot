@@ -9,6 +9,7 @@ using Microsoft.IdentityModel.Tokens;
 using System.Reflection;
 using System.Text;
 using AICopilot.AiGatewayService;
+using AICopilot.RagService;
 
 namespace AICopilot.HttpApi;
 
@@ -29,6 +30,7 @@ public static class DependencyInjection
 
             builder.AddAiGatewayService();
             builder.AddIdentityService();
+            builder.AddRagService();
         }
 
         public void AddWebServices()

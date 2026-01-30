@@ -1,6 +1,8 @@
 ﻿using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
+using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
+using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.Services.Common.Contracts;
 using Microsoft.EntityFrameworkCore;
 using System;
@@ -15,6 +17,11 @@ public class DataQueryService(AiCopilotDbContext dbContext) : IDataQueryService
     public IQueryable<LanguageModel> LanguageModels => dbContext.LanguageModels.AsNoTracking();
     public IQueryable<Session> Sessions => dbContext.Sessions.AsNoTracking();
     public IQueryable<Message> Messages => dbContext.Messages.AsNoTracking();
+
+    public IQueryable<EmbeddingModel> EmbeddingModels => dbContext.EmbeddingModels.AsNoTracking();
+    public IQueryable<KnowledgeBase> KnowledgeBases => dbContext.KnowledgeBases.AsNoTracking();
+    public IQueryable<Document> Documents => dbContext.Documents.AsNoTracking();
+    public IQueryable<DocumentChunk> DocumentChunks => dbContext.DocumentChunks.AsNoTracking();
 
     public async Task<T?> FirstOrDefaultAsync<T>(IQueryable<T> queryable) where T : class
     {

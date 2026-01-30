@@ -19,6 +19,7 @@
     <ProjectReference Include="..\..\Infrastructure\AICopilot.Infrastructure\AICopilot.Infrastructure.csproj" />
     <ProjectReference Include="..\..\Services\AICopilot.AiGatewayService\AICopilot.AiGatewayService.csproj" />
     <ProjectReference Include="..\..\Services\AICopilot.IdentityService\AICopilot.IdentityService.csproj" />
+    <ProjectReference Include="..\..\Services\AICopilot.RagService\AICopilot.RagService.csproj" />
     <ProjectReference Include="..\AICopilot.ServiceDefaults\AICopilot.ServiceDefaults.csproj" />
   </ItemGroup>
 

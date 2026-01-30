@@ -17,7 +17,7 @@ public static class AiGatewayData
             "通义千问",
             "qwen-flash",
             "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            "sk-99c40cbd9b1a4a9a973f72a90b32f25a",
+            "",
             new ModelParameters
             {
                 MaxTokens = 1000 * 1000,
@@ -32,7 +32,7 @@ public static class AiGatewayData
             "通义千问",
             "qwen3-max-2025-09-23",
             "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            "sk-99c40cbd9b1a4a9a973f72a90b32f25a",
+            "",
             new ModelParameters
             {
                 MaxTokens = 1000 * 1000,
