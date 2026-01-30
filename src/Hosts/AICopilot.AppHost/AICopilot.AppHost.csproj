@@ -16,6 +16,7 @@
   <ItemGroup>
     <ProjectReference Include="..\AICopilot.HttpApi\AICopilot.HttpApi.csproj" />
     <ProjectReference Include="..\AICopilot.MigrationWorkApp\AICopilot.MigrationWorkApp.csproj" />
+    <ProjectReference Include="..\AICopilot.RagWorker\AICopilot.RagWorker.csproj" />
   </ItemGroup>
 
 </Project>

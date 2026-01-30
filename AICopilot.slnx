@@ -8,6 +8,7 @@
     <Project Path="src/Hosts/AICopilot.AppHost/AICopilot.AppHost.csproj" />
     <Project Path="src/Hosts/AICopilot.HttpApi/AICopilot.HttpApi.csproj" />
     <Project Path="src/Hosts/AICopilot.MigrationWorkApp/AICopilot.MigrationWorkApp.csproj" />
+    <Project Path="src/Hosts/AICopilot.RagWorker/AICopilot.RagWorker.csproj" />
     <Project Path="src/Hosts/AICopilot.ServiceDefaults/AICopilot.ServiceDefaults.csproj" />
   </Folder>
   <Folder Name="/src/Infrastructure/">
