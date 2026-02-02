@@ -19,7 +19,7 @@ public class IntentRoutingAgentBuilder
     {
         _agentFactory = agentFactory;
         // 添加系统内置意图
-        _intentListBuilder.AppendLine("- General.Chat: 闲聊、打招呼、情感交互或无法归类的问题。");
+        _intentListBuilder.AppendLine("- General.Chat: 闲聊、打招呼或无法归类的问题。");
 
         // 扫描插件系统，添加业务意图
         // 这里我们假设每个 Plugin 对应一个大类意图，实际项目中可以做得更细致

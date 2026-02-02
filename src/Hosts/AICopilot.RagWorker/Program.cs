@@ -1,18 +1,21 @@
 using AICopilot.EntityFrameworkCore;
+using AICopilot.EventBus;
 using AICopilot.Infrastructure.Storage;
 using AICopilot.RagWorker;
 using AICopilot.RagWorker.Services;
+using AICopilot.RagWorker.Services.Embeddings;
 using AICopilot.RagWorker.Services.Parsers;
 using AICopilot.RagWorker.Services.TokenCounter;
 using AICopilot.Services.Common.Contracts;
 using Microsoft.SemanticKernel.Services;
-using AICopilot.EventBus;
 
-;
+Console.OutputEncoding = System.Text.Encoding.UTF8;
 
 var builder = Host.CreateApplicationBuilder(args);
 
+// 1. 添加 Aspire 服务默认配置
 builder.AddServiceDefaults();
+
 // 2. 注册数据库上下文 (PostgreSQL)
 // 这里的连接字符串名称需与 AppHost 中定义的一致
 builder.AddNpgsqlDbContext<AiCopilotDbContext>("ai-copilot");
@@ -38,6 +41,21 @@ builder.Services.AddScoped<RagAppService>();
 builder.Services.AddSingleton<ITokenCounter, SharpTokenCounter>();
 // 文本分割
 builder.Services.AddSingleton<TextSplitterService>();
+
+// 注册嵌入生成器工厂
+builder.Services.AddSingleton<EmbeddingGeneratorFactory>();
+
+// 注册嵌入服务专用的 HttpClient
+builder.Services.AddHttpClient("EmbeddingClient", client =>
+{
+    client.Timeout = TimeSpan.FromMinutes(20);
+});
+
+// 注册 Qdrant 客户端
+// QdrantClient 是官方客户端，Semantic Kernel 会对其进行封装
+builder.AddQdrantClient("qdrant");
+// 注册 Semantic Kernel 的 Qdrant 向量存储抽象
+builder.Services.AddQdrantVectorStore();
 
 var host = builder.Build();
 host.Run();

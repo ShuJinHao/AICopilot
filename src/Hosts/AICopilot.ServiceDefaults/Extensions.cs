@@ -9,6 +9,7 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 
 namespace Microsoft.Extensions.Hosting;
+
 // Adds common Aspire services: service discovery, resilience, health checks, and OpenTelemetry.
 // This project should be referenced by each service project in your solution.
 // To learn more about using this project, see https://aka.ms/dotnet/aspire/service-defaults
@@ -28,7 +29,13 @@ public static class Extensions
         builder.Services.ConfigureHttpClientDefaults(http =>
         {
             // Turn on resilience by default
-            http.AddStandardResilienceHandler();
+            http.AddStandardResilienceHandler(options =>
+            {
+                // 将默认的 10秒 延长到 5分钟，这对大多数 AI 场景都更友好
+                options.AttemptTimeout.Timeout = TimeSpan.FromMinutes(5);
+                options.TotalRequestTimeout.Timeout = TimeSpan.FromMinutes(10);
+                options.CircuitBreaker.SamplingDuration = TimeSpan.FromMinutes(10);
+            });
 
             // Turn on service discovery by default
             http.AddServiceDiscovery();
