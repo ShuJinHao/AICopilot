@@ -1,6 +1,7 @@
 ﻿using AICopilot.HttpApi.Infrastructure;
 using AICopilot.RagService.Commands.Documents;
 using AICopilot.RagService.Commands.KnowledgeBases;
+using AICopilot.RagService.Queries.KnowledgeBases;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -42,6 +43,13 @@ public class RagController : ApiControllerBase
             new FileUploadStream(file.FileName, stream));
 
         var result = await Sender.Send(command);
+        return ReturnResult(result);
+    }
+
+    [HttpPost("search")]
+    public async Task<IActionResult> Search(SearchKnowledgeBaseQuery query)
+    {
+        var result = await Sender.Send(query);
         return ReturnResult(result);
     }
 }

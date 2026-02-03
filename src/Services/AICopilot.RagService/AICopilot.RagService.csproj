@@ -7,6 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\Infrastructure\AICopilot.Embedding\AICopilot.Embedding.csproj" />
     <ProjectReference Include="..\..\Infrastructure\AICopilot.EventBus\AICopilot.EventBus.csproj" />
     <ProjectReference Include="..\AICopilot.Services.Common\AICopilot.Services.Common.csproj" />
   </ItemGroup>

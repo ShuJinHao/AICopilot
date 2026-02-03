@@ -1,6 +1,6 @@
 ﻿using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
+using AICopilot.Embedding.Models;
 using AICopilot.EntityFrameworkCore;
-using AICopilot.RagWorker.Models;
 using AICopilot.RagWorker.Services.Embeddings;
 using AICopilot.RagWorker.Services.Parsers;
 using AICopilot.Services.Common.Contracts;
@@ -128,7 +128,7 @@ public class RagAppService(
         // [配置建议]
         // - 本地模型: 建议 20 ~ 50 (取决于显卡)
         // - 云端模型: 建议 50 ~ 100
-        const int batchSize = 50;
+        const int batchSize = 5;
 
         // 用于收集所有生成的向量结果
         var allEmbeddings = new List<Embedding<float>>();

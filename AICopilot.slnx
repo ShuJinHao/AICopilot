@@ -12,6 +12,7 @@
     <Project Path="src/Hosts/AICopilot.ServiceDefaults/AICopilot.ServiceDefaults.csproj" />
   </Folder>
   <Folder Name="/src/Infrastructure/">
+    <Project Path="src/Infrastructure/AICopilot.Embedding/AICopilot.Embedding.csproj" Id="6803c21b-818b-4429-adf1-e4c4edda19f7" />
     <Project Path="src/Infrastructure/AICopilot.EntityFrameworkCore/AICopilot.EntityFrameworkCore.csproj" Id="fc5ebf86-137f-4da9-8e82-8567e320240f" />
     <Project Path="src/Infrastructure/AICopilot.EventBus/AICopilot.EventBus.csproj" Id="c2f152c6-04c5-45d2-89b2-6230785f6085" />
     <Project Path="src/Infrastructure/AICopilot.Infrastructure/AICopilot.Infrastructure.csproj" Id="4f9e108f-c28d-4cd4-bd36-7d1bbb40e912" />

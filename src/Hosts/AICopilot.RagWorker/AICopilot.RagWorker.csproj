@@ -18,8 +18,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\Infrastructure\AICopilot.Embedding\AICopilot.Embedding.csproj" />
     <ProjectReference Include="..\..\Infrastructure\AICopilot.Infrastructure\AICopilot.Infrastructure.csproj" />
     <ProjectReference Include="..\..\Services\AICopilot.RagService\AICopilot.RagService.csproj" />
     <ProjectReference Include="..\AICopilot.ServiceDefaults\AICopilot.ServiceDefaults.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Services\Embeddings\" />
   </ItemGroup>
 </Project>

@@ -1,4 +1,5 @@
-﻿using AICopilot.EventBus;
+﻿using AICopilot.Embedding;
+using AICopilot.EventBus;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using System;
@@ -18,5 +19,6 @@ public static class DependencyInjection
         });
 
         builder.AddEventBus();
+        builder.AddEmbedding();
     }
 }

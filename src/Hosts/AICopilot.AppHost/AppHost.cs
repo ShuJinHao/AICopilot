@@ -12,6 +12,7 @@ var rabbitmq = builder.AddRabbitMQ("eventbus")
     .WithLifetime(ContainerLifetime.Persistent);
 
 var qdrant = builder.AddQdrant("qdrant")
+    .WithDataVolume("qdrant-data")
     .WithLifetime(ContainerLifetime.Persistent);
 
 var migration = builder.AddProject<AICopilot_MigrationWorkApp>("aicopilot-migration")
