@@ -17,6 +17,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\Core\AICopilot.Core.AiGateway\AICopilot.Core.AiGateway.csproj" />
     <ProjectReference Include="..\..\Shared\AICopilot.AgentPlugin\AICopilot.AgentPlugin.csproj" />
+    <ProjectReference Include="..\AICopilot.RagService\AICopilot.RagService.csproj" />
     <ProjectReference Include="..\AICopilot.Services.Common\AICopilot.Services.Common.csproj" />
   </ItemGroup>
 

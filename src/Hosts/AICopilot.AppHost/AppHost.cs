@@ -3,7 +3,7 @@ using Projects;
 var builder = DistributedApplication.CreateBuilder(args);
 
 var postgresdb = builder.AddPostgres("postgres")
-    .WithDataVolume("postgres-aicopilots")
+    .WithDataVolume("postgres-aicopilot")
     .WithPgWeb(pgWeb => pgWeb.WithHostPort(5050))
     .AddDatabase("ai-copilot");
 
@@ -12,7 +12,7 @@ var rabbitmq = builder.AddRabbitMQ("eventbus")
     .WithLifetime(ContainerLifetime.Persistent);
 
 var qdrant = builder.AddQdrant("qdrant")
-    .WithDataVolume("qdrant-data")
+    .WithDataVolume("qdrant-datas")
     .WithLifetime(ContainerLifetime.Persistent);
 
 var migration = builder.AddProject<AICopilot_MigrationWorkApp>("aicopilot-migration")
