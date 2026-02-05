@@ -2,9 +2,6 @@
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Agents.AI.Workflows.Reflection;
 using Microsoft.Extensions.Logging;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace AICopilot.AiGatewayService.Workflows;
 
@@ -23,18 +20,39 @@ public class ContextAggregatorExecutor(ILogger<ContextAggregatorExecutor> logger
     // 硬编码预期分支数：Tools + Knowledge = 2
     private const int ExpectedBranchCount = 2;
 
+    // [新增] 锁对象：用于保护 _accumulatedResults 的并发读写安全
+    private readonly object _lock = new();
+
     public async ValueTask HandleAsync(
         BranchResult branchResult,
         IWorkflowContext context,
         CancellationToken cancellationToken = default)
     {
-        // 1. 累积状态
-        // 注意：FanInEdge 可能一次性送来所有结果，也可能分批送来
-        // 因此我们需要 AddRange 并检查总数
-        _accumulatedResults.Add(branchResult);
+        // 用于临时存储需要处理的一批数据
+        List<BranchResult>? batchToProcess = null;
 
-        // 2. 完备性检查
-        if (_accumulatedResults.Count >= ExpectedBranchCount)
+        // 1. [原子操作区域] 累积状态并检查
+        lock (_lock)
+        {
+            _accumulatedResults.Add(branchResult);
+
+            if (_accumulatedResults.Count >= ExpectedBranchCount)
+            {
+                // 如果满足条件，将当前结果复制出来处理，并立即清空原始列表
+                // 这样既防止了并发写入导致的计数错误，也为下一轮做好了准备
+                batchToProcess = new List<BranchResult>(_accumulatedResults);
+                _accumulatedResults.Clear();
+            }
+            else
+            {
+                // 如果未满足条件，仅记录日志，当前线程结束任务
+                logger.LogDebug("聚合进度: {Current}/{Total}，等待其他分支...", _accumulatedResults.Count, ExpectedBranchCount);
+            }
+        }
+
+        // 2. [异步处理区域] 只有拿到 batchToProcess 的那个线程才会执行后续逻辑
+        // 注意：await 操作必须在 lock 块外部执行
+        if (batchToProcess != null)
         {
             logger.LogInformation("并行分支汇聚完成，开始合并上下文。");
 
@@ -44,8 +62,8 @@ public class ContextAggregatorExecutor(ILogger<ContextAggregatorExecutor> logger
 
             var genContext = new GenerationContext { Request = request };
 
-            // 4. 合并数据
-            foreach (var result in _accumulatedResults)
+            // 4. 合并数据 (使用安全的局部变量 batchToProcess)
+            foreach (var result in batchToProcess)
             {
                 switch (result.Type)
                 {
@@ -59,16 +77,8 @@ public class ContextAggregatorExecutor(ILogger<ContextAggregatorExecutor> logger
                 }
             }
 
-            // 5. 清理状态 (为可能的下一轮对话做准备)
-            _accumulatedResults.Clear();
-
-            // 6. 手动发送聚合结果消息，触发下游
+            // 5. 手动发送聚合结果消息，触发下游
             await context.SendMessageAsync(genContext, cancellationToken);
-        }
-        else
-        {
-            // 如果未满足条件，不返回/发送任何值/消息（Task完成但无Output），流程在此暂停等待下一批消息
-            logger.LogDebug("聚合进度: {Current}/{Total}，等待其他分支...", _accumulatedResults.Count, ExpectedBranchCount);
         }
     }
 }

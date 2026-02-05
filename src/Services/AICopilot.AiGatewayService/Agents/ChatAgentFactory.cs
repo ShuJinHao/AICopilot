@@ -42,7 +42,8 @@ public class ChatAgentFactory(IServiceProvider serviceProvider)
                 new OpenAIClientOptions
                 {
                     Endpoint = new Uri(model.BaseUrl),
-                    Transport = new HttpClientPipelineTransport(httpClient)
+                    Transport = new HttpClientPipelineTransport(httpClient),
+                    NetworkTimeout = TimeSpan.FromMinutes(10)
                 })
             .GetChatClient(model.Name)
             .AsIChatClient()

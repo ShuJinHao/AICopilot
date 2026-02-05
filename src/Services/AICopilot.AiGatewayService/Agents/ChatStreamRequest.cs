@@ -32,15 +32,20 @@ public class ChatStreamHandler(
         {
             switch (workflowEvent)
             {
+                // [修改开始] 修复空引用异常
                 case ExecutorFailedEvent evt:
-                    yield return new { content = $"发生错误：{evt.Data.Message}" };
+                    // 尝试将 Data 转换为 Exception，如果 Data 为空或不是 Exception，则提供默认错误信息
+                    var exception = evt.Data as Exception;
+                    var errorMessage = exception?.Message ?? evt.Data?.ToString() ?? "运行过程中发生未知错误";
+
+                    yield return new { content = $"\n\n⚠️ **系统错误**：{errorMessage}" };
                     break;
+                // [修改结束]
 
                 case AgentRunResponseEvent evt:
                     yield return new
                     {
-                        content =
-                            $"\n\n\n```json\n //意图分类\n {evt.Response.Text}\n```\n\n"
+                        content = $"\n\n\n```json\n //意图分类\n {evt.Response.Text}\n```\n\n"
                     };
                     break;
 
@@ -56,14 +61,15 @@ public class ChatStreamHandler(
                             case FunctionCallContent callContent:
                                 yield return new
                                 {
-                                    content =
-                                        $"\n\n```\n正在执行工具：{callContent.Name} \n请求参数：{JsonSerializer.Serialize(callContent.Arguments)}"
+                                    content = $"\n\n```\n正在执行工具：{callContent.Name} \n请求参数：{JsonSerializer.Serialize(callContent.Arguments)}"
                                 };
                                 break;
 
                             case FunctionResultContent callContent:
                                 yield return new
-                                { content = $"\n\n执行结果：{JsonSerializer.Serialize(callContent.Result)}\n```\n\n" };
+                                {
+                                    content = $"\n\n执行结果：{JsonSerializer.Serialize(callContent.Result)}\n```\n\n"
+                                };
                                 break;
                         }
                     }

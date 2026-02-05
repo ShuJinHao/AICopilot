@@ -1,6 +1,7 @@
 ﻿using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
+using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
 using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
@@ -24,6 +25,8 @@ public class AiCopilotDbContext(DbContextOptions<AiCopilotDbContext> options) : 
     public DbSet<KnowledgeBase> KnowledgeBases => Set<KnowledgeBase>();
     public DbSet<Document> Documents => Set<Document>();
     public DbSet<DocumentChunk> DocumentChunks => Set<DocumentChunk>();
+
+    public DbSet<BusinessDatabase> BusinessDatabases => Set<BusinessDatabase>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
