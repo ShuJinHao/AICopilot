@@ -31,7 +31,10 @@ public class ChatAgentFactory(IServiceProvider serviceProvider)
         return (result.model, result.template);
     }
 
-    public ChatClientAgent CreateAgentAsync(LanguageModel model, ConversationTemplate template)
+    public ChatClientAgent CreateAgentAsync(
+        LanguageModel model, ConversationTemplate template,
+        Action<ChatOptions>? configureOptions = null,
+        bool isSaveChatMessage = true)
     {
         using var scope = serviceProvider.CreateScope();
         var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
@@ -42,8 +45,7 @@ public class ChatAgentFactory(IServiceProvider serviceProvider)
                 new OpenAIClientOptions
                 {
                     Endpoint = new Uri(model.BaseUrl),
-                    Transport = new HttpClientPipelineTransport(httpClient),
-                    NetworkTimeout = TimeSpan.FromMinutes(10)
+                    Transport = new HttpClientPipelineTransport(httpClient)
                 })
             .GetChatClient(model.Name)
             .AsIChatClient()
@@ -52,31 +54,46 @@ public class ChatAgentFactory(IServiceProvider serviceProvider)
 
         var chatOptions = new ChatOptions
         {
-            Temperature = template.Specification.Temperature ?? model.Parameters.Temperature
+            Instructions = template.SystemPrompt,
+            Temperature = template.Specification.Temperature ?? model.Parameters.Temperature,
         };
 
-        var agent = chatClientBuilder.BuildAIAgent(new ChatClientAgentOptions
+        // 执行外部传入的配置逻辑（例如挂载工具）
+        configureOptions?.Invoke(chatOptions);
+
+        var agentOptions = new ChatClientAgentOptions
         {
             Name = template.Name,
-            Instructions = template.SystemPrompt,
-            ChatOptions = chatOptions,
-            ChatMessageStoreFactory = context => new SessionChatMessageStore(serviceProvider, context.SerializedState)
-        });
+            ChatOptions = chatOptions
+        };
+
+        // 动态创建会话存储
+        if (isSaveChatMessage)
+        {
+            agentOptions.ChatMessageStoreFactory = context =>
+                new SessionChatMessageStore(serviceProvider, context.SerializedState);
+        }
+
+        var agent = chatClientBuilder.BuildAIAgent(agentOptions, services: serviceProvider);
 
         return agent;
     }
 
-    public async Task<ChatClientAgent> CreateAgentAsync(Guid templateId)
+    public async Task<ChatClientAgent> CreateAgentAsync(Guid templateId,
+        Action<ChatOptions>? configureOptions = null,
+        bool isSaveChatMessage = true)
     {
         var (model, template) = await GetModelAndTemplateAsync(t => t.Id == templateId);
-        return CreateAgentAsync(model, template);
+        return CreateAgentAsync(model, template, configureOptions, isSaveChatMessage);
     }
 
     public async Task<ChatClientAgent> CreateAgentAsync(string templateName,
-        Action<ConversationTemplate>? configureTemplate = null)
+        Action<ConversationTemplate>? configureTemplate = null,
+        Action<ChatOptions>? configureOptions = null,
+        bool isSaveChatMessage = true)
     {
         var (model, template) = await GetModelAndTemplateAsync(t => t.Name == templateName);
         configureTemplate?.Invoke(template);
-        return CreateAgentAsync(model, template);
+        return CreateAgentAsync(model, template, configureOptions, isSaveChatMessage);
     }
 }

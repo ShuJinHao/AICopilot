@@ -20,21 +20,20 @@ public static class DependencyInjection
             cfg.RegisterServicesFromAssembly(Assembly.GetExecutingAssembly());
         });
 
-        builder.Services.AddSingleton<ChatAgentFactory>();
+        builder.Services.AddScoped<ChatAgentFactory>();
 
         builder.Services.AddHttpClient("OpenAI", client =>
         {
             client.Timeout = TimeSpan.FromSeconds(30);
         });
 
-        //builder.Services.AddScoped<TimeAgentPlugin>();
-
         builder.Services.AddAgentPlugin(registrar =>
         {
             registrar.RegisterPluginFromAssembly(Assembly.GetExecutingAssembly());
         });
 
-        builder.Services.AddSingleton<IntentRoutingAgentBuilder>();
+        builder.Services.AddScoped<IntentRoutingAgentBuilder>();
+        builder.Services.AddScoped<DataAnalysisAgentBuilder>();
 
         builder.AddIntentWorkflow();
     }

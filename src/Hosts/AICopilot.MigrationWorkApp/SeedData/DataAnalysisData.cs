@@ -26,6 +26,6 @@ public static class DataAnalysisData
             "Host=localhost;Port=5432;Database=wms_demo;Username=postgres;Password=123456",
             DbProviderType.PostgreSql
         );
-        return [erpDb, wmsDb];
+        return [erpDb];
     }
 }
