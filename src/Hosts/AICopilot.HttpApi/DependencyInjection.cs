@@ -10,6 +10,7 @@ using System.Reflection;
 using System.Text;
 using AICopilot.AiGatewayService;
 using AICopilot.RagService;
+using AICopilot.DataAnalysisService;
 
 namespace AICopilot.HttpApi;
 
@@ -29,8 +30,9 @@ public static class DependencyInjection
             });
 
             builder.AddAiGatewayService();
-            builder.AddIdentityService();
+            //builder.AddIdentityService();
             builder.AddRagService();
+            builder.AddDataAnalysisService();
         }
 
         public void AddWebServices()

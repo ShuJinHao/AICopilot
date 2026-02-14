@@ -1,5 +1,7 @@
 ﻿using AICopilot.AiGatewayService.Agents;
+using AICopilot.Core.AiGateway.Aggregates.Sessions; // 引入实体命名空间
 using AICopilot.Services.Common.Contracts;
+using AICopilot.SharedKernel.Repository; // 引入仓储接口
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Agents.AI.Workflows.Reflection;
@@ -18,11 +20,12 @@ namespace AICopilot.AiGatewayService.Workflows;
 /// 职责：利用聚合后的上下文构建 Agent，注入 RAG 提示词，并执行流式生成。
 /// </summary>
 public class FinalProcessExecutor(
+    IRepository<Session> sessionRepo, // 👈 修改 1: 注入仓储，用于保存用户消息
     IDataQueryService queryService,
     ChatAgentFactory agentFactory,
     ILogger<FinalProcessExecutor> logger) :
     ReflectingExecutor<FinalProcessExecutor>("FinalProcessExecutor"),
-    IMessageHandler<GenerationContext> // <-- 输入类型变更为聚合上下文
+    IMessageHandler<GenerationContext>
 {
     public async ValueTask HandleAsync(
         GenerationContext genContext,
@@ -34,11 +37,19 @@ public class FinalProcessExecutor(
             var request = genContext.Request;
             logger.LogInformation("开始最终生成，SessionId: {SessionId}", request.SessionId);
 
-            // 1. 获取会话关联的模板配置
-            // 我们需要知道当前会话使用的是哪个 Agent 模板（例如"通用助手"或"HR助手"）
-            var session = await queryService.FirstOrDefaultAsync(queryService.Sessions.Where(s => s.Id == request.SessionId));
-
+            // 1. 获取会话 (从仓储获取，以便后续更新)
+            var session = await sessionRepo.GetByIdAsync(request.SessionId, cancellationToken);
             if (session == null) throw new InvalidOperationException("会话不存在");
+
+            // ========================================================================
+            // 👇 修改 2: 在这里手动保存用户的“干净”提问
+            // ========================================================================
+            // 我们在 Store 里拦截了包含 <context> 的消息，所以必须在这里
+            // 把原始的用户输入 (request.Message) 显式存入数据库。
+            session.AddMessage(request.Message, MessageType.User);
+            sessionRepo.Update(session);
+            await sessionRepo.SaveChangesAsync(cancellationToken);
+            // ========================================================================
 
             // 2. 创建基础 Agent 实例
             // 此时 Agent 拥有的是数据库中定义的静态 System Prompt
@@ -73,6 +84,8 @@ public class FinalProcessExecutor(
                 }
 
                 // 使用 XML 标签 <context> 是一种最佳实践
+                // 注意：SessionChatMessageStore 会识别 <context> 标签并拦截不存库，
+                // 这正是我们想要的（只存上面手动存的 clean message，不存这个 dirty prompt）
                 finalUserPrompt = $"""
                                    请基于以下参考信息（包含数据库查询结果或检索文档）回答我的问题：
 
@@ -102,42 +115,36 @@ public class FinalProcessExecutor(
                 logger.LogDebug("增强模式未激活：仅使用用户原始输入。");
             }
 
-            // 将组合后的提示作为单条 User 消息添加
-            // 利用近因效应，让模型在读取完长文本后立刻看到问题，提升注意力。
             inputMessages.Add(new ChatMessage(ChatRole.User, finalUserPrompt));
 
             // 4. 准备执行参数 (ChatOptions)
-            // 将动态加载的工具集挂载到本次执行的选项中
             var runOptions = new ChatClientAgentRunOptions
             {
                 ChatOptions = new ChatOptions
                 {
-                    Tools = genContext.Tools, // <-- 动态挂载工具
+                    Tools = genContext.Tools,
                     Temperature = !string.IsNullOrWhiteSpace(genContext.KnowledgeContext) ? 0.3f : 0.7f,
                 }
             };
 
             // 5. 恢复会话状态 (Thread)
-            // 从持久化存储中恢复之前的对话历史
             var storeThread = new { storeState = new SessionSoreState(request.SessionId) };
             var agentThread = agent.DeserializeThread(JsonSerializer.SerializeToElement(storeThread));
 
             // 6. 执行流式生成
+            // Agent 会生成回答，并且 SessionChatMessageStore 会自动把 Assistant 的回答存入数据库
             await foreach (var update in agent.RunStreamingAsync(
                                inputMessages,
                                agentThread,
                                runOptions,
                                cancellationToken))
             {
-                // 将 Agent 的更新事件（文本块、工具调用状态等）转发到工作流事件流
-                // 这样前端就能通过 SSE 收到实时打字机效果
                 await context.AddEventAsync(new AgentRunUpdateEvent(Id, update), cancellationToken);
             }
         }
         catch (Exception e)
         {
             logger.LogError(e, "最终生成阶段发生错误");
-            // 发送失败事件，让前端能感知到错误
             await context.AddEventAsync(new ExecutorFailedEvent(Id, e), cancellationToken);
             throw;
         }

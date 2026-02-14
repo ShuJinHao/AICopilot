@@ -10,6 +10,8 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace AICopilot.AiGatewayService.Agents;
 
@@ -18,15 +20,40 @@ public record SessionSoreState(Guid SessionId, int MessageCount = 20);
 public class SessionChatMessageStore : ChatMessageStore
 {
     private readonly SessionSoreState? _sessionSoreState;
-
     private readonly IServiceProvider _serviceProvider;
 
     public SessionChatMessageStore(IServiceProvider serviceProvider, JsonElement storeState)
     {
         _serviceProvider = serviceProvider;
-        if (storeState.ValueKind is JsonValueKind.String)
+
+        try
         {
-            _sessionSoreState = storeState.Deserialize<SessionSoreState>()!;
+            // 兼容处理：支持解析对象或字符串格式的状态
+            if (storeState.ValueKind == JsonValueKind.Object)
+            {
+                // 如果是嵌套结构 { "storeState": { ... } }
+                if (storeState.TryGetProperty("storeState", out var innerState))
+                {
+                    _sessionSoreState = innerState.Deserialize<SessionSoreState>();
+                }
+                // 如果是直接对象 { "sessionId": "..." }
+                else
+                {
+                    _sessionSoreState = storeState.Deserialize<SessionSoreState>();
+                }
+            }
+            else if (storeState.ValueKind == JsonValueKind.String)
+            {
+                var json = storeState.GetString();
+                if (!string.IsNullOrEmpty(json))
+                {
+                    _sessionSoreState = JsonSerializer.Deserialize<SessionSoreState>(json);
+                }
+            }
+        }
+        catch
+        {
+            // 忽略解析错误
         }
     }
 
@@ -44,6 +71,7 @@ public class SessionChatMessageStore : ChatMessageStore
         if (_sessionSoreState == null) return;
 
         using var scope = _serviceProvider.CreateScope();
+        // 修正 1: 使用你项目中已有的 IRepository<Session>
         var repo = scope.ServiceProvider.GetRequiredService<IRepository<Session>>();
 
         // 加载聚合根
@@ -51,23 +79,38 @@ public class SessionChatMessageStore : ChatMessageStore
         if (session == null) return;
 
         var hasNewMessage = false;
+
         foreach (var msg in messages)
         {
-            // 将 Agent Role 转换为枚举
-            // msg.Role.ToString() 可能返回 "user", "assistant" 等
-            var roleStr = msg.Role.ToString().ToLower();
-            var msgType = roleStr switch
+            // 修正 2: 使用 .Text 获取内容 (Microsoft.Extensions.AI)
+            var content = msg.Text;
+
+            // 过滤逻辑 1: 跳过空消息
+            if (string.IsNullOrWhiteSpace(content)) continue;
+
+            // 过滤逻辑 2: 核心过滤，防止包含 <context> 的超长 Prompt 存入数据库
+            if (content.Contains("<context>")) continue;
+
+            // 修正 3: 使用 ChatRole 判断是否为工具调用
+            if (msg.Role == ChatRole.Tool) continue;
+
+            // 修正 4: 映射 ChatRole 到你的 MessageType 枚举
+            MessageType msgType;
+            if (msg.Role == ChatRole.User)
             {
-                "user" => MessageType.User,
-                "assistant" => MessageType.Assistant,
-                "system" => MessageType.System,
-                _ => MessageType.Assistant
-            };
+                msgType = MessageType.User;
+            }
+            else if (msg.Role == ChatRole.System)
+            {
+                msgType = MessageType.System;
+            }
+            else
+            {
+                // 默认 Assistant (对应你的 MessageType.Assistant)
+                msgType = MessageType.Assistant;
+            }
 
-            // 获取文本内容
-            if (string.IsNullOrWhiteSpace(msg.Text)) continue;
-
-            session.AddMessage(msg.Text, msgType);
+            session.AddMessage(content, msgType);
             hasNewMessage = true;
         }
 

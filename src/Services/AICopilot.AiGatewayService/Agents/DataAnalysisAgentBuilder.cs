@@ -1,5 +1,7 @@
 ﻿using AICopilot.AgentPlugin;
 using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
+using AICopilot.DataAnalysisService;
+using AICopilot.DataAnalysisService.Plugins;
 using Microsoft.Agents.AI;
 using System;
 using System.Collections.Generic;

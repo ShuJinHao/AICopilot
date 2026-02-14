@@ -20,4 +20,8 @@
     <ProjectReference Include="..\AICopilot.RagWorker\AICopilot.RagWorker.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="Sql\" />
+  </ItemGroup>
+
 </Project>

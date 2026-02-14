@@ -1,4 +1,5 @@
-﻿using System;
+﻿using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
+using System;
 using System.Collections.Generic;
 using System.Text;
 

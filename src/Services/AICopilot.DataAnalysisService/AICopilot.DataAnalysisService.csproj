@@ -9,6 +9,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\Infrastructure\AICopilot.Dapper\AICopilot.Dapper.csproj" />
     <ProjectReference Include="..\..\Shared\AICopilot.AgentPlugin\AICopilot.AgentPlugin.csproj" />
+    <ProjectReference Include="..\..\Shared\AICopilot.Visualization\AICopilot.Visualization.csproj" />
   </ItemGroup>
 
 </Project>
