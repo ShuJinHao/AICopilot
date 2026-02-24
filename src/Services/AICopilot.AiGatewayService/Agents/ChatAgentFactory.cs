@@ -50,6 +50,7 @@ public class ChatAgentFactory(IServiceProvider serviceProvider)
             .GetChatClient(model.Name)
             .AsIChatClient()
             .AsBuilder()
+            .UseFunctionInvocation()
             .UseOpenTelemetry(sourceName: nameof(AiGatewayService), configure: cfg => cfg.EnableSensitiveData = true);
 
         var chatOptions = new ChatOptions

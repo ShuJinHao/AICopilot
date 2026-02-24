@@ -17,7 +17,7 @@ public static class AiGatewayData
             "通义千问",
             "qwen-flash",
             "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            "sk-73ef8d3be2254c7e9e589111c663dcb8",
+            "",
             new ModelParameters
             {
                 MaxTokens = 1000 * 1000,
@@ -32,7 +32,7 @@ public static class AiGatewayData
             "通义千问",
             "qwen3-max-2025-09-23",
             "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            "sk-73ef8d3be2254c7e9e589111c663dcb8",
+            "",
             new ModelParameters
             {
                 MaxTokens = 1000 * 1000,
@@ -195,7 +195,7 @@ public static class AiGatewayData
             }
 
             ### 核心交互原则
-            1. **过程透明（允许）**：在调用工具或构建 SQL 的过程中，你可以简要向用户解释你的思路。
+            1. **禁止废话（严格）**：在探索数据库的过程中，**严禁输出任何解释性的自然语言文本！** 必须直接使用提供的工具（GetTableNames, GetTableSchema, ExecuteSqlQuery）进行数据查询。
             2. **结构化输出（严格）**：你不需要在 JSON 中输出实际的数据行，你只需要提供元数据和可视化配置。
                 - `analysis`: 数据分析字段，如果查询数据失败，此字段可以 null。
                     - `database`: 当前数据库名称。

@@ -33,13 +33,23 @@ public abstract class AgentPluginBase : IAgentPlugin
     /// <summary>
     /// 利用 Microsoft.Extensions.AI 库，将 C# 方法自动转换为 AITool。
     /// </summary>
+    /// <summary>
+    /// 利用 Microsoft.Extensions.AI 库，将 C# 方法自动转换为 AITool。
+    /// </summary>
     public IEnumerable<AITool>? GetAITools()
     {
-        // AIFunctionFactory.Create 是微软提供的工具，
-        // 它会读取方法签名、参数类型和 Description 特性，生成 JSON Schema。
-        // 'this' 参数确保了当工具被调用时，是在当前插件实例上执行的。
         var tools = GetToolMethods()
-            .Select(method => AIFunctionFactory.Create(method, this));
+            .Select(method =>
+            {
+                // 1. 动态抹除 C# 方法名中的 "Async" 后缀
+                var toolName = method.Name.EndsWith("Async")
+                    ? method.Name.Substring(0, method.Name.Length - 5)
+                    : method.Name;
+
+                // 2. 将修改后的纯净名称 (toolName) 强行赋给 AI 工具
+                return AIFunctionFactory.Create(method, this, name: toolName);
+            });
+
         return tools;
     }
 }

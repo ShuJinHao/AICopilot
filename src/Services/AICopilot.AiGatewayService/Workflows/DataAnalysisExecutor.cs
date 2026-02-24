@@ -104,7 +104,42 @@ public class DataAnalysisExecutor(
             // 获取最后一条 Agent 回复消息（最终数据）
             var messages = thread.GetService<IList<ChatMessage>>()!;
             var response = messages.Last();
-            var output = JsonSerializer.Deserialize<DataAnalysisAgentOutputDto>(response.Text);
+            var responseText = response.Text ?? string.Empty;
+
+            DataAnalysisAgentOutputDto? output = null;
+
+            // 尝试安全截取并解析 JSON
+            try
+            {
+                int jsonStart = responseText.IndexOf('{');
+                int jsonEnd = responseText.LastIndexOf('}');
+
+                if (jsonStart >= 0 && jsonEnd > jsonStart)
+                {
+                    var jsonString = responseText.Substring(jsonStart, jsonEnd - jsonStart + 1);
+                    var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                    output = JsonSerializer.Deserialize<DataAnalysisAgentOutputDto>(jsonString, options);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "大模型未返回合法的 JSON 格式。");
+            }
+
+            // 终极兜底：如果 AI 罢工、报错或者只返回了中文，手工伪造一个正常的返回结果防崩溃
+            if (output == null)
+            {
+                output = new DataAnalysisAgentOutputDto
+                {
+                    Analysis = JsonSerializer.SerializeToElement(new
+                    {
+                        database = dbName,
+                        description = "模型分析停止，原话是: " + responseText,
+                        metadata = Array.Empty<object>()
+                    }),
+                    Decision = null // 没有图表
+                };
+            }
 
             // 获取可视化上下文
             var (rawData, schema) = vizContext.GetLastResult();

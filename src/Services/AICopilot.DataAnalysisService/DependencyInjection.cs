@@ -1,10 +1,11 @@
-﻿using Microsoft.Extensions.Hosting;
+﻿using AICopilot.AgentPlugin;
+using AICopilot.Dapper;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using System;
 using System.Collections.Generic;
-using System.Text;
-using AICopilot.Dapper;
-using AICopilot.AgentPlugin;
 using System.Reflection;
+using System.Text;
 
 namespace AICopilot.DataAnalysisService;
 
@@ -14,6 +15,7 @@ public static class DependencyInjection
     {
         // 注册 Dapper 基础服务
         builder.AddDapper();
+        builder.Services.AddScoped<VisualizationContext>();
         // 注册插件加载器
         builder.Services.AddAgentPlugin(registrar =>
         {

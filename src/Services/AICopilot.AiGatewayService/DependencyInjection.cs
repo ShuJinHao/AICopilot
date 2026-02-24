@@ -2,6 +2,7 @@
 using AICopilot.AiGatewayService.Agents;
 using AICopilot.AiGatewayService.Plugins;
 using AICopilot.AiGatewayService.Workflows;
+using AICopilot.DataAnalysisService;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using System;

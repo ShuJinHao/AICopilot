@@ -16,18 +16,6 @@ using System.Text.Json.Serialization;
 
 namespace AICopilot.AiGatewayService.Agents;
 
-[JsonConverter(typeof(JsonStringEnumConverter))]
-public enum ChunkType
-{
-    Error,
-    Text,
-    Widget,
-    FunctionCall,
-    FunctionResult
-}
-
-public record ChatChunk(string Source, ChunkType Type, string Content);
-
 [AuthorizeRequirement("AiGateway.Chat")]
 public record ChatStreamRequest(Guid SessionId, string Message) : IStreamRequest<object>;
 

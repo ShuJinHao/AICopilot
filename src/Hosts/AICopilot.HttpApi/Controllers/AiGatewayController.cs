@@ -86,7 +86,7 @@ public class AiGatewayController : ApiControllerBase
         return ReturnResult(result);
     }
 
-    [HttpPost("/chat")]
+    [HttpPost("chat")]
     public IResult Chat(ChatStreamRequest request)
     {
         var stream = Sender.CreateStream(request);
