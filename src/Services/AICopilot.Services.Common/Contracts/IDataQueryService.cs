@@ -2,6 +2,7 @@
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
 using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
+using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
 using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using System.Collections.Generic;
@@ -28,6 +29,8 @@ public interface IDataQueryService
     public IQueryable<DocumentChunk> DocumentChunks { get; }
 
     public IQueryable<BusinessDatabase> BusinessDatabases { get; }
+
+    public IQueryable<McpServerInfo> McpServerInfos { get; }
 
     Task<T?> FirstOrDefaultAsync<T>(IQueryable<T> queryable) where T : class;
 

@@ -1,208 +1,92 @@
 ﻿<script setup lang="ts">
-import { computed, ref } from 'vue';
-import type { DataTableWidget } from "@/types/protocols.ts";
-import { Filter, Setting } from '@element-plus/icons-vue';
+import { computed } from 'vue';
 
 const props = defineProps<{
-  widget: DataTableWidget
+  widget: any // 接收由 WidgetRenderer 传来的完整组件 JSON
 }>();
 
-// ================== 状态管理 ==================
-
-// 控制列的显示/隐藏：存储当前选中的列 Key
-const visibleColumnKeys = ref<string[]>([]);
-
-// 初始化：默认显示所有列
-if (props.widget.data.columns) {
-  visibleColumnKeys.value = props.widget.data.columns.map(c => c.key);
-}
-
-// 搜索关键词 (可选扩展)
-const searchQuery = ref('');
-
-// ================== 计算属性 ==================
-
-/**
- * 最终用于渲染的列配置
- * 根据 visibleColumnKeys 过滤
- */
-const displayColumns = computed(() => {
-  return props.widget.data.columns.filter(col => visibleColumnKeys.value.includes(col.key));
+// 1. 兼容读取核心数据
+const tableDataRaw = computed(() => {
+  return props.widget.Data || props.widget.data || {};
 });
 
-/**
- * 表格数据
- * Element Plus Table 自带排序和筛选，这里直接透传 rows
- * 如果需要前端全局搜索，可以在这里对 props.widget.data.rows 进行 filter
- */
+const title = computed(() => {
+  return props.widget.Title || props.widget.title || '';
+});
+
+// 2. 核心修复：智能提取列名 (兼容后端传 字符串 或 对象)
+const columns = computed(() => {
+  const cols = tableDataRaw.value.Columns || tableDataRaw.value.columns || [];
+  return cols.map((c: any, index: number) => {
+    // 如果后端直接传了字符串数组 ["order_id"]
+    if (typeof c === 'string') {
+      return { label: c, prop: c }; 
+    }
+    // 如果后端传了对象数组 { Key: 'order_id', Label: '订单ID' }
+    const key = c.Key || c.key || `col_${index}`;
+    const label = c.Label || c.label || key;
+    return { label: label, prop: key };
+  });
+});
+
+// 3. 智能提取行数据 (完美兼容数组行和对象行)
 const tableData = computed(() => {
-  let data = props.widget.data.rows;
-  if (searchQuery.value) {
-    const query = searchQuery.value.toLowerCase();
-    data = data.filter(row =>
-      Object.values(row).some(val => String(val).toLowerCase().includes(query))
-    );
-  }
-  return data;
+  const rows = tableDataRaw.value.Rows || tableDataRaw.value.rows || [];
+  
+  return rows.map((row: any) => {
+    // 情况 A: 后端传来的是二维数组 [ ["1001", "Paid"] ]
+    if (Array.isArray(row)) {
+      const rowData: any = {};
+      // 这里已经加上了明确的类型声明 (col: any, index: number)，彻底消灭 ts 报错
+      columns.value.forEach((col: any, index: number) => {
+        rowData[col.prop] = row[index];
+      });
+      return rowData;
+    } 
+    // 情况 B: 后端传来的是对象 { order_id: "1001", status: "Paid" }
+    else if (typeof row === 'object' && row !== null) {
+      // 因为对象的 key 和列的 prop 已经对齐了，直接解构返回即可
+      return { ...row };
+    }
+    return {};
+  });
 });
-
-// ================== 辅助函数 ==================
-
-/**
- * 获取某一列的所有唯一值，用于生成筛选菜单
- */
-const getColumnFilters = (columnKey: string) => {
-  const values = new Set(props.widget.data.rows.map(row => row[columnKey]));
-  return Array.from(values).map(val => ({ text: String(val), value: val }));
-};
-
-/**
- * 筛选处理函数
- */
-const filterHandler = (value: string, row: any, column: any) => {
-  const property = column['property'];
-  return row[property] === value;
-};
-
-/**
- * 格式化单元格内容
- */
-const formatCell = (row: any, column: any, cellValue: any, index: number) => {
-  const colDef = props.widget.data.columns.find(c => c.key === column.property);
-  if (!colDef || cellValue == null) return cellValue;
-
-  if (colDef.dataType === 'date') {
-    // 简单日期格式化，实际项目中建议用 dayjs
-    try {
-      return new Date(cellValue).toLocaleDateString();
-    } catch { return cellValue; }
-  }
-
-  if (colDef.dataType === 'number') {
-    // 数字千分位
-    return Number(cellValue).toLocaleString();
-  }
-
-  return cellValue;
-};
-
 </script>
 
 <template>
-  <div class="data-table-widget">
-    <div class="widget-header">
-      <div class="title-area">
-        <h3 class="widget-title">{{ widget.title }}</h3>
-        <span class="widget-desc" v-if="widget.description">{{ widget.description }}</span>
-      </div>
-
-      <div class="actions">
-        <el-input
-          v-model="searchQuery"
-          placeholder="Search..."
-          size="small"
-          style="width: 150px; margin-right: 8px;"
-          clearable
-        />
-
-        <el-popover placement="bottom-end" :width="200" trigger="click">
-          <template #reference>
-            <el-button :icon="Setting" circle size="small" />
-          </template>
-          <div class="column-settings">
-            <div class="settings-title">Visible Columns</div>
-            <el-checkbox-group v-model="visibleColumnKeys" direction="vertical">
-              <div v-for="col in widget.data.columns" :key="col.key" class="setting-item">
-                <el-checkbox :value="col.key" :label="col.label" />
-              </div>
-            </el-checkbox-group>
-          </div>
-        </el-popover>
-      </div>
-    </div>
-
-    <div class="table-content">
-      <el-table
-        :data="tableData"
-        style="width: 100%"
-        height="300"
-        stripe
-        border
-        size="small"
-      >
-        <el-table-column
-          v-for="col in displayColumns"
-          :key="col.key"
-          :prop="col.key"
-          :label="col.label"
-          :min-width="120"
-          sortable
-          resizable
-          :filters="getColumnFilters(col.key)"
-          :filter-method="filterHandler"
-          :formatter="formatCell"
-        />
-
-        <template #empty>
-          <el-empty description="No Data" :image-size="60" />
-        </template>
-      </el-table>
-    </div>
+  <div class="table-widget">
+    <h4 v-if="title" class="widget-title">{{ title }}</h4>
+    <el-table 
+      :data="tableData" 
+      border 
+      stripe 
+      style="width: 100%" 
+      max-height="400">
+      
+      <el-table-column 
+        v-for="(col, index) in columns" 
+        :key="index" 
+        :prop="col.prop" 
+        :label="col.label" 
+        min-width="120"
+      />
+      
+    </el-table>
   </div>
 </template>
 
 <style scoped>
-.data-table-widget {
-  width: 100%;
-  background: #fff;
-  border-radius: 8px;
-  border: 1px solid #e4e7ed;
-  padding: 12px;
-  margin-top: 8px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-  display: flex;
-  flex-direction: column;
+.table-widget { 
+  background: #fff; 
+  padding: 15px; 
+  border-radius: 8px; 
+  border: 1px solid #ebeef5; 
+  margin-top: 10px;
 }
-
-.widget-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.title-area {
-  display: flex;
-  flex-direction: column;
-}
-
-.widget-title {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: #303133;
-}
-
-.widget-desc {
-  font-size: 12px;
-  color: #909399;
-}
-
-.column-settings {
-  max-height: 250px;
-  overflow-y: auto;
-}
-
-.settings-title {
-  font-size: 12px;
-  font-weight: bold;
-  color: #606266;
-  margin-bottom: 8px;
-  padding-bottom: 4px;
-  border-bottom: 1px solid #EBEEF5;
-}
-
-.setting-item {
-  margin-bottom: 4px;
+.widget-title { 
+  margin-top: 0; 
+  margin-bottom: 15px; 
+  color: #303133; 
+  font-size: 15px;
 }
 </style>

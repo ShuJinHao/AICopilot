@@ -1,6 +1,8 @@
 ﻿using AICopilot.AiGatewayService.Agents;
 using AICopilot.AiGatewayService.Queries.Sessions;
+using AICopilot.Services.Common.Helper;
 using MediatR;
+using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Agents.AI.Workflows.Reflection;
 using Microsoft.Extensions.AI;
