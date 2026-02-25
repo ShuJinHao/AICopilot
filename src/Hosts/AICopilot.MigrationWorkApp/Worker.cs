@@ -3,6 +3,7 @@ using AICopilot.MigrationWorkApp.SeedData;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using System.Diagnostics;
+using Zilor.AICopilot.MigrationWorkApp.SeedData;
 
 namespace AICopilot.MigrationWorkApp;
 
@@ -100,6 +101,12 @@ public class Worker(
         if (!await dbContext.BusinessDatabases.AnyAsync(cancellationToken: cancellationToken))
         {
             await dbContext.BusinessDatabases.AddRangeAsync(DataAnalysisData.GetDatabases(), cancellationToken);
+        }
+
+        // 创建默认MCPServer
+        if (!await dbContext.McpServerInfos.AnyAsync(cancellationToken: cancellationToken))
+        {
+            await dbContext.McpServerInfos.AddRangeAsync(McpServerInfoData.GetMcpServerInfos(), cancellationToken);
         }
         await dbContext.SaveChangesAsync(cancellationToken);
     }

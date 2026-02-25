@@ -2,6 +2,7 @@
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
 using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
+using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
 using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.Services.Common.Contracts;
@@ -25,6 +26,7 @@ public class DataQueryService(AiCopilotDbContext dbContext) : IDataQueryService
     public IQueryable<DocumentChunk> DocumentChunks => dbContext.DocumentChunks.AsNoTracking();
 
     public IQueryable<BusinessDatabase> BusinessDatabases => dbContext.BusinessDatabases.AsNoTracking();
+    public IQueryable<McpServerInfo> McpServerInfos => dbContext.McpServerInfos.AsNoTracking();
 
     public async Task<T?> FirstOrDefaultAsync<T>(IQueryable<T> queryable) where T : class
     {

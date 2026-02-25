@@ -6,4 +6,8 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\..\Shared\AICopilot.SharedKernel\AICopilot.SharedKernel.csproj" />
+  </ItemGroup>
+
 </Project>

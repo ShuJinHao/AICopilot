@@ -1,6 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using Zilor.AICopilot.Core.McpServer.Aggregates.McpServerInfo;
+using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
 
 public class McpServerConfiguration : IEntityTypeConfiguration<McpServerInfo>
 {
@@ -15,7 +15,7 @@ public class McpServerConfiguration : IEntityTypeConfiguration<McpServerInfo>
             .IsRequired()
             .HasMaxLength(100)
             .HasColumnName("name");
-        
+
         // 保证名称唯一
         builder.HasIndex(b => b.Name).IsUnique();
 
@@ -27,7 +27,7 @@ public class McpServerConfiguration : IEntityTypeConfiguration<McpServerInfo>
         builder.Property(b => b.Command)
             .HasMaxLength(200)
             .HasColumnName("command");
-        
+
         builder.Property(b => b.Arguments)
             .IsRequired()
             .HasMaxLength(1000)

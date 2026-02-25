@@ -2,6 +2,7 @@
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
 using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
+using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
 using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
@@ -27,6 +28,7 @@ public class AiCopilotDbContext(DbContextOptions<AiCopilotDbContext> options) : 
     public DbSet<DocumentChunk> DocumentChunks => Set<DocumentChunk>();
 
     public DbSet<BusinessDatabase> BusinessDatabases => Set<BusinessDatabase>();
+    public DbSet<McpServerInfo> McpServerInfos => Set<McpServerInfo>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
