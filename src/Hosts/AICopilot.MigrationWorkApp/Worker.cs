@@ -3,7 +3,7 @@ using AICopilot.MigrationWorkApp.SeedData;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using System.Diagnostics;
-using Zilor.AICopilot.MigrationWorkApp.SeedData;
+using AICopilot.MigrationWorkApp.SeedData;
 
 namespace AICopilot.MigrationWorkApp;
 

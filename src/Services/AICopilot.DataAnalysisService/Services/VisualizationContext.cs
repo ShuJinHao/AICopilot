@@ -1,9 +1,10 @@
-﻿using AICopilot.Visualization;
+﻿using AICopilot.DataAnalysisService.Plugins;
+using AICopilot.Visualization;
 using System;
 using System.Collections.Generic;
 using System.Text;
 
-namespace AICopilot.DataAnalysisService;
+namespace AICopilot.DataAnalysisService.Services;
 
 /// <summary>
 /// 可视化上下文
@@ -18,6 +19,9 @@ public class VisualizationContext
     // 存储最后一次查询的 Schema 信息（列名、类型等）
     private IEnumerable<SchemaColumn>? _lastResultSchema;
 
+    // 存储数据分析输出结果
+    private DataAnalysisOutputDto _outputDto = new();
+
     /// <summary>
     /// 捕获查询结果
     /// </summary>
@@ -28,11 +32,28 @@ public class VisualizationContext
     }
 
     /// <summary>
+    /// 捕获输出结果
+    /// </summary>
+    public void CaptureOutput(AnalysisDto? analysis, VisualDecisionDto? decision)
+    {
+        _outputDto.Analysis = analysis;
+        _outputDto.Decision = decision;
+    }
+
+    /// <summary>
     /// 获取暂存的数据集
     /// </summary>
     public (IEnumerable<dynamic>? Data, IEnumerable<SchemaColumn>? Schema) GetLastResult()
     {
         return (_lastResultSet, _lastResultSchema);
+    }
+
+    /// <summary>
+    /// 获取输出结果
+    /// </summary>
+    public DataAnalysisOutputDto GetOutput()
+    {
+        return _outputDto;
     }
 
     /// <summary>

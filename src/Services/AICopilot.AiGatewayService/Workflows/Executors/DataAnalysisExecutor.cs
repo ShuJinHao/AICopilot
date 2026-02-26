@@ -1,21 +1,23 @@
-﻿using AICopilot.AiGatewayService.Agents;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Agents.AI;
+using Microsoft.Agents.AI.Workflows;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
+using AICopilot.AiGatewayService.Agents;
 using AICopilot.AiGatewayService.Models;
-using AICopilot.DataAnalysisService;
 using AICopilot.Services.Common.Contracts;
 using AICopilot.Services.Common.Helper;
 using AICopilot.Visualization;
 using AICopilot.Visualization.Widgets;
-using Microsoft.Agents.AI;
-using Microsoft.Agents.AI.Workflows;
-using Microsoft.Agents.AI.Workflows.Reflection;
-using Microsoft.Extensions.AI;
-using Microsoft.Extensions.Logging;
-using System;
-using System.Collections.Generic;
-using System.Text;
-using System.Text.Json;
+using VisualDecisionDto = AICopilot.DataAnalysisService.Plugins.VisualDecisionDto;
+using AICopilot.DataAnalysisService.Services;
 
-namespace AICopilot.AiGatewayService.Workflows;
+namespace AICopilot.AiGatewayService.Workflows.Executors;
 
 /// <summary>
 /// 数据分析执行器
@@ -23,18 +25,17 @@ namespace AICopilot.AiGatewayService.Workflows;
 /// </summary>
 public class DataAnalysisExecutor(
     DataAnalysisAgentBuilder agentBuilder,
-    VisualizationContext vizContext,
     IDataQueryService dataQuery,
-    ILogger<DataAnalysisExecutor> logger)
-    : ReflectingExecutor<DataAnalysisExecutor>("DataAnalysisExecutor"),
-        IMessageHandler<List<IntentResult>, BranchResult>
+    VisualizationContext vizContext,
+    ILogger<DataAnalysisExecutor> logger) :
+    Executor<List<IntentResult>>("DataAnalysisExecutor")
 {
     private const string AnalysisIntentPrefix = "Analysis.";
 
-    public async ValueTask<BranchResult> HandleAsync(
+    public override async ValueTask HandleAsync(
         List<IntentResult> intentResults,
         IWorkflowContext context,
-        CancellationToken cancellationToken = default)
+        CancellationToken ct = default)
     {
         // 1. 筛选数据分析类意图
         // 过滤规则：必须以 Analysis. 开头，且置信度高于 0.6
@@ -47,7 +48,8 @@ public class DataAnalysisExecutor(
         {
             logger.LogDebug("未检测到数据分析意图，跳过执行。");
             // 返回空结果，表示该分支无产出
-            return BranchResult.FromDataAnalysis(string.Empty);
+            await context.SendMessageAsync(BranchResult.FromDataAnalysis(string.Empty), ct);
+            return;
         }
 
         logger.LogInformation("启动数据分析流程，命中目标数据库数量: {Count}", analysisIntents.Count);
@@ -56,10 +58,9 @@ public class DataAnalysisExecutor(
         var output = new StringBuilder();
         foreach (var intent in analysisIntents)
         {
-            output.AppendLine(await ProcessSingleIntentAsync(intent, context, cancellationToken));
+            output.AppendLine(await ProcessSingleIntentAsync(intent, context, ct));
         }
-
-        return BranchResult.FromDataAnalysis(output.ToString());
+        await context.SendMessageAsync(BranchResult.FromDataAnalysis(output.ToString()), ct);
     }
 
     /// <summary>
@@ -101,48 +102,9 @@ public class DataAnalysisExecutor(
             // 记录日志以便调试
             logger.LogInformation("数据库 {DbName} 查询完成。", dbName);
 
-            // 获取最后一条 Agent 回复消息（最终数据）
-            var messages = thread.GetService<IList<ChatMessage>>()!;
-            var response = messages.Last();
-            var responseText = response.Text ?? string.Empty;
-
-            DataAnalysisAgentOutputDto? output = null;
-
-            // 尝试安全截取并解析 JSON
-            try
-            {
-                int jsonStart = responseText.IndexOf('{');
-                int jsonEnd = responseText.LastIndexOf('}');
-
-                if (jsonStart >= 0 && jsonEnd > jsonStart)
-                {
-                    var jsonString = responseText.Substring(jsonStart, jsonEnd - jsonStart + 1);
-                    var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-                    output = JsonSerializer.Deserialize<DataAnalysisAgentOutputDto>(jsonString, options);
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "大模型未返回合法的 JSON 格式。");
-            }
-
-            // 终极兜底：如果 AI 罢工、报错或者只返回了中文，手工伪造一个正常的返回结果防崩溃
-            if (output == null)
-            {
-                output = new DataAnalysisAgentOutputDto
-                {
-                    Analysis = JsonSerializer.SerializeToElement(new
-                    {
-                        database = dbName,
-                        description = "模型分析停止，原话是: " + responseText,
-                        metadata = Array.Empty<object>()
-                    }),
-                    Decision = null // 没有图表
-                };
-            }
-
             // 获取可视化上下文
             var (rawData, schema) = vizContext.GetLastResult();
+            var output = vizContext.GetOutput();
 
             // =========================================================
             // 分流路径 1：旁路输出 (Side Path) -> 前端 Widget
@@ -210,7 +172,6 @@ public class DataAnalysisExecutor(
                 return new DataTableWidget
                 {
                     Title = decision.Title,
-                    Description = decision.Description,
                     Data = data.ToDataTableData(schema)
                 };
 
@@ -219,7 +180,6 @@ public class DataAnalysisExecutor(
                 return new ChartWidget
                 {
                     Title = decision.Title,
-                    Description = decision.Description,
                     Data = new ChartData
                     {
                         Category = decision.ChartConfig!.Category,

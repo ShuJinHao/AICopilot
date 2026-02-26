@@ -40,4 +40,6 @@ public class GenericBridgePlugin : IAgentPlugin
     {
         return AITools;
     }
+
+    public IEnumerable<string>? HighRiskTools { get; init; }
 }

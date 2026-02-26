@@ -1,5 +1,6 @@
 ﻿using AICopilot.AgentPlugin;
 using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
+using AICopilot.DataAnalysisService.Services;
 using AICopilot.Services.Common.Contracts;
 using AICopilot.Services.Common.Helper;
 using AICopilot.Visualization;

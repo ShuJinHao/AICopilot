@@ -1,5 +1,6 @@
 ﻿using AICopilot.AgentPlugin;
 using AICopilot.Dapper;
+using AICopilot.DataAnalysisService.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using System;
