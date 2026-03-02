@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using System.Text.Json.Serialization;
 
-namespace AICopilot.AiGatewayService.Agents;
+namespace AICopilot.AiGatewayService.Models;
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum ChunkType
@@ -13,7 +13,8 @@ public enum ChunkType
     Intent,
     FunctionCall,
     FunctionResult,
-    Widget
+    Widget,
+    ApprovalRequest
 }
 
 public record ChatChunk(string Source, ChunkType Type, string Content);

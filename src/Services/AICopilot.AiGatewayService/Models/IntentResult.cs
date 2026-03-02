@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using System.Text.Json.Serialization;
 
-namespace AICopilot.AiGatewayService.Agents;
+namespace AICopilot.AiGatewayService.Models;
 
 /// <summary>
 /// 意图识别的标准输出结果

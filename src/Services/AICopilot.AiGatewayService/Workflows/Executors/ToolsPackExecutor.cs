@@ -7,7 +7,6 @@ using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.Logging;
 using AICopilot.AgentPlugin;
 using AICopilot.AiGatewayService.Models;
-using AICopilot.AiGatewayService.Agents;
 
 namespace AICopilot.AiGatewayService.Workflows.Executors;
 

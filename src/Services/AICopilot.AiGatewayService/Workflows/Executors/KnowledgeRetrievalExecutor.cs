@@ -10,7 +10,6 @@ using Microsoft.Extensions.Logging;
 using AICopilot.AiGatewayService.Models;
 using AICopilot.RagService.Queries.KnowledgeBases;
 using AICopilot.Services.Common.Contracts;
-using AICopilot.AiGatewayService.Agents;
 
 namespace AICopilot.AiGatewayService.Workflows.Executors;
 
