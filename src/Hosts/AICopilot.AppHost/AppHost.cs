@@ -1,6 +1,7 @@
 using Projects;
 
 var builder = DistributedApplication.CreateBuilder(args);
+builder.AddDockerComposeEnvironment("compose");
 
 //  定义一个固定的密码参数 (Secret)
 var password = builder.AddParameter("pg-password", secret: true);
@@ -44,11 +45,9 @@ builder.AddProject<AICopilot_RagWorker>("rag-worker")
     .WaitFor(qdrant);
 
 builder.AddViteApp("aicopilot-webui", "../../Vues/AICopilot.Web")
-    .WithEndpoint("http", endpointAnnotation =>
-    {
-        endpointAnnotation.Port = 5173;
-    })
+     .WithExternalHttpEndpoints()
     .WaitFor(httpapi)
-    .WithReference(httpapi);
+    .WithReference(httpapi)
+    .PublishAsDockerFile();
 
 builder.Build().Run();

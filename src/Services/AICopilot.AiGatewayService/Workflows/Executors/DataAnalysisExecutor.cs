@@ -121,7 +121,7 @@ public class DataAnalysisExecutor(
                 catch (Exception ex)
                 {
                     logger.LogError(ex, "构建可视化 Widget 失败。Database: {DbName}", dbName);
-                    return $"[系统错误]: 构建可视化 Widget 时发生异常 - {ex.Message}";
+                    // 不中断流程，降级为文本输出
                 }
             }
 
@@ -130,12 +130,14 @@ public class DataAnalysisExecutor(
             // 目标：schema + data -> Combined JSON
             // =========================================================
 
-            // 这里直接使用匿名对象进行拼接：
-            // { "schema": [], "data": [] }
+            // 【核心修复位置】
+            // 以前这里可能只返回了 analysis 和 data，导致 visual_decision 丢失
+            // 或者之前的逻辑不一致。现在强制把三者打包在一起。
             var combinedOutput = new
             {
-                analysis = output.Analysis,         // 直接透传 Agent 生成的 Schema
-                data = rawData ?? []              // 拼接 SQL 查询的实际结果
+                analysis = output.Analysis,         // 分析结果
+                visual_decision = output.Decision,  // 【新增】图表配置
+                data = rawData ?? []                // 原始数据
             };
 
             return combinedOutput.ToJson();

@@ -5,7 +5,9 @@ import { MessageRole } from '@/types/protocols.ts';
 import BlockIntent from './BlockIntent.vue';
 import BlockAnalysis from './BlockAnalysis.vue';
 import BlockFinal from './BlockFinal.vue';
-import type {ChatMessage, IntentChunk} from "@/types/models.ts";
+// 1. 引入生成式 UI 渲染器
+import WidgetRenderer from '../widgets/WidgetRenderer.vue'; 
+import type { ChatMessage, IntentChunk, WidgetChunk } from "@/types/models.ts";
 
 const props = defineProps<{
   message: ChatMessage
@@ -18,8 +20,14 @@ const intents = computed(() =>{
   return chunk?.intents || [];
 });
 
+// 2. 这里的 dataChunks 建议只保留纯文本/分析过程的部分
 const dataChunks = computed(() =>
-  props.message.chunks.filter(chunk => chunk.source === 'DataAnalysisExecutor') || []
+  props.message.chunks.filter(chunk => chunk.source === 'DataAnalysisExecutor' && !('widget' in chunk)) || []
+);
+
+// 3. 新增：提取出所有包含 Widget（图表、卡片）的块
+const widgetChunks = computed(() =>
+  props.message.chunks.filter(chunk => 'widget' in chunk) as WidgetChunk[]
 );
 
 const finalChunks = computed(() =>
@@ -47,6 +55,12 @@ const finalChunks = computed(() =>
         v-if="dataChunks.length > 0"
         :chunks="dataChunks"
         :is-streaming="message.isStreaming"/>
+
+      <WidgetRenderer
+        v-for="(chunk, index) in widgetChunks"
+        :key="'widget-' + index"
+        :data="chunk.widget" 
+      />
 
       <BlockFinal
         v-if="finalChunks.length > 0"

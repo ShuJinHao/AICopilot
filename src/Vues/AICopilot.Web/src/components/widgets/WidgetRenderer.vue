@@ -1,49 +1,38 @@
 ﻿<script setup lang="ts">
 import { defineAsyncComponent, computed } from 'vue';
 
-const props = defineProps<{
-  data: any // 接收由外层传来的完整组件 JSON
-}>();
+const props = defineProps<{ data: any }>();
 
-// 异步按需加载对应的组件
 const ChartWidget = defineAsyncComponent(() => import('./ChartWidget.vue'));
 const StatsWidget = defineAsyncComponent(() => import('./StatsWidget.vue'));
 const DataTableWidget = defineAsyncComponent(() => import('./DataTableWidget.vue'));
 
-// 准确提取组件类型，兼容大小写
+const effectiveWidget = computed(() => {
+  if (!props.data) return null;
+  const decision = props.data.visual_decision || props.data.VisualDecision;
+  if (decision) {
+    return {
+      ...decision,
+      data: props.data.data || props.data.Data || decision.data || decision.Data || []
+    };
+  }
+  return props.data;
+});
+
 const widgetType = computed(() => {
-  if (!props.data) return 'Unknown';
-  return props.data.widget_type || props.data.type || props.data.Type;
+  const w = effectiveWidget.value;
+  return w?.type || w?.Type || w?.widget_type || 'Unknown';
 });
 </script>
 
 <template>
-  <div class="widget-renderer">
-    
-    <ChartWidget 
-      v-if="widgetType === 'Chart'" 
-      :data="data" 
-    />
-    
-    <StatsWidget 
-      v-else-if="widgetType === 'StatsCard'" 
-      :widget="data" 
-    />
-    
-    <DataTableWidget 
-      v-else-if="widgetType === 'DataTable'" 
-      :widget="data" 
-    />
-
+  <div v-if="effectiveWidget" class="widget-renderer">
+    <ChartWidget v-if="widgetType === 'Chart'" :data="effectiveWidget" />
+    <StatsWidget v-else-if="widgetType === 'StatsCard'" :widget="effectiveWidget" />
+    <DataTableWidget v-else-if="widgetType === 'DataTable'" :widget="effectiveWidget" />
     <div v-else class="unknown-widget">
-      <el-alert
-        :title="`暂不支持的组件类型: ${widgetType}`"
-        type="warning"
-        show-icon
-        :closable="false"
-      />
+      <el-alert :title="`未知的组件类型: ${widgetType}`" type="info" :closable="false" />
     </div>
-    
   </div>
 </template>
 

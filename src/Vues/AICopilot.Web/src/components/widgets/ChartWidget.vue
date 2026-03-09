@@ -2,53 +2,81 @@
 import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import * as echarts from 'echarts';
 
-const props = defineProps<{
-  data: any // 接收由 WidgetRenderer 传来的完整 JSON 对象
-}>();
-
+const props = defineProps<{ data: any }>();
 const chartRef = ref<HTMLElement | null>(null);
 let chartInstance: echarts.ECharts | null = null;
 let resizeObserver: ResizeObserver | null = null;
 
 const getChartOption = () => {
-  // 严格按照你图 6 截图中的大写结构解析
-  const widgetData = props.data.Data; 
-  if (!widgetData) return {};
+  const w = props.data;
+  if (!w) return {};
 
-  const chartType = widgetData.Category || 'Bar'; // "Pie", "Bar", "Line"
-  const dataset = widgetData.Dataset; // 包含 Dimensions 和 Source
-  const title = props.data.Title || props.data.title;
+  const config = w.chart_config || w.ChartConfig || {};
+  const type = (w.category || w.Category || config.category || config.Category || 'Bar').toLowerCase();
+  
+  // 数据源
+  const source = Array.isArray(w.data) ? w.data : (w.data?.dataset?.source || []);
 
-  const typeLower = chartType.toLowerCase();
-
-  // ECharts 最简标准配置（直接使用 dataset）
   const option: any = {
-    title: { text: title, left: 'center', textStyle: { fontSize: 14, color: '#333' } },
-    tooltip: { trigger: chartType === 'Pie' ? 'item' : 'axis', confine: true },
+    title: { text: w.title || w.Title, left: 'center', textStyle: { fontSize: 14, fontWeight: 'bold' } },
+    tooltip: { trigger: type === 'pie' ? 'item' : 'axis', confine: true },
     legend: { bottom: 0, type: 'scroll' },
-    grid: { left: '3%', right: '4%', bottom: '15%', containLabel: true },
-    // 注入你截图 6 里的 Dataset
-    dataset: {
-      dimensions: dataset.Dimensions,
-      source: dataset.Source
+    dataset: { source: source },
+    series: []
+  };
+
+  // 【智能字段匹配】
+  // 1. 获取后端建议的 Key
+  let xKey = config.x || config.X;
+  let yKey = config.y || config.Y;
+
+  // 2. 如果数据里没有这个 Key，尝试自动寻找替代品
+  if (source.length > 0) {
+    const keys = Object.keys(source[0]);
+    
+    // 检查 yKey (数值轴) 是否存在
+    if (!keys.includes(yKey)) {
+        // 如果不存在，找第一个数值类型的字段代替
+        const numKey = keys.find(k => typeof source[0][k] === 'number');
+        if (numKey) yKey = numKey;
+    }
+    
+    // 检查 xKey (类目轴) 是否存在
+    if (!keys.includes(xKey)) {
+        // 如果不存在，找第一个字符串类型的字段代替
+        const strKey = keys.find(k => typeof source[0][k] === 'string');
+        if (strKey) xKey = strKey;
+    }
+  }
+
+  const seriesItem: any = {
+    type: type,
+    encode: {
+      itemName: xKey,
+      value: yKey,
+      x: xKey,
+      y: yKey
     }
   };
 
-  // 根据类型进行极其简单的渲染
-  if (chartType === 'Pie') {
-    option.series = [ { type: 'pie', radius: '50%' } ];
+  if (type === 'pie') {
+    seriesItem.radius = ['40%', '70%'];
+    seriesItem.avoidLabelOverlap = true;
+    option.xAxis = undefined;
+    option.yAxis = undefined;
   } else {
     option.xAxis = { type: 'category' };
     option.yAxis = { type: 'value' };
-    // 如果是柱状图或折线图，生成一条线/柱子
-    option.series = [ { type: typeLower } ];
+    option.grid = { left: '3%', right: '4%', bottom: '15%', containLabel: true };
   }
 
+  option.series = [seriesItem];
   return option;
 };
 
 const initChart = () => {
   if (!chartRef.value) return;
+  if (chartInstance) chartInstance.dispose();
   chartInstance = echarts.init(chartRef.value);
   chartInstance.setOption(getChartOption());
 };
@@ -66,25 +94,23 @@ onUnmounted(() => {
 });
 
 watch(() => props.data, () => {
-  chartInstance?.setOption(getChartOption(), true);
+  if (chartInstance) chartInstance.setOption(getChartOption(), true);
 }, { deep: true });
 </script>
 
 <template>
   <div class="chart-container">
     <div ref="chartRef" class="echarts-dom"></div>
+    <div v-if="(!data.data || data.data.length === 0)" style="color:#999;font-size:12px;text-align:center;padding:10px;">
+      (暂未检测到图表数据)
+    </div>
   </div>
 </template>
 
 <style scoped>
 .chart-container {
-  width: 100%;
-  max-width: 600px;
-  background: #fff;
-  border-radius: 8px;
-  border: 1px solid #e4e7ed;
-  padding: 16px;
-  margin-top: 8px;
+  width: 100%; max-width: 600px; background: #fff;
+  border-radius: 8px; border: 1px solid #e4e7ed; padding: 16px; margin-top: 8px;
 }
 .echarts-dom { width: 100%; height: 350px; }
 </style>
