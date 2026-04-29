@@ -442,6 +442,26 @@ public sealed class SecurityHardeningTests
     }
 
     [Fact]
+    public void OutboxDispatcher_ShouldUseSkipLockedAndNotRetryCancellation()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var dispatcherSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Infrastructure",
+            "AICopilot.EntityFrameworkCore",
+            "Outbox",
+            "OutboxDispatcher.cs"));
+
+        dispatcherSource.Should().Contain("BeginTransactionAsync");
+        dispatcherSource.Should().Contain("FOR UPDATE SKIP LOCKED");
+        dispatcherSource.Should().Contain("catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)");
+        dispatcherSource.Should().Contain("without incrementing retry count");
+        dispatcherSource.Should().Contain("catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)");
+        dispatcherSource.Should().Contain("message.MarkFailed(ex.Message");
+    }
+
+    [Fact]
     public void ModuleDbContexts_ShouldExcludeOutboxFromMigrations()
     {
         var solutionRoot = FindSolutionRoot();
@@ -604,6 +624,59 @@ public sealed class SecurityHardeningTests
 
         action.Should().Throw<ArgumentException>()
             .WithMessage("*Connection string is required*");
+    }
+
+    [Fact]
+    public void DapperConnector_ShouldUseReadOnlyTransactionAndBoundedReader()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var source = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Infrastructure",
+            "AICopilot.Dapper",
+            "DapperDatabaseConnector.cs"));
+
+        source.Should().Contain("sqlGuardrail.Validate");
+        source.Should().Contain("BeginTransactionAsync");
+        source.Should().Contain("SET TRANSACTION READ ONLY");
+        source.Should().Contain("SET LOCAL default_transaction_read_only = on");
+        source.Should().Contain("ExecuteReaderAsync");
+        source.Should().Contain("normalizedRows.Count >= maxRows");
+        source.Should().NotContain("QueryAsync(command)).ToList");
+        source.Should().NotContain("rawRows.Take");
+    }
+
+    [Fact]
+    public void DataAnalysisServices_ShouldNotBypassGuardedDatabaseConnector()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var serviceRoot = Path.Combine(solutionRoot, "src", "Services", "AICopilot.DataAnalysisService");
+        var forbiddenPatterns = new[]
+        {
+            "new NpgsqlConnection",
+            "new SqlConnection",
+            "new MySqlConnection",
+            ".QueryAsync(",
+            ".ExecuteReaderAsync(",
+            ".ExecuteNonQuery("
+        };
+
+        var violations = Directory
+            .EnumerateFiles(serviceRoot, "*.cs", SearchOption.AllDirectories)
+            .SelectMany(file => File
+                .ReadLines(file)
+                .Select((line, index) => new
+                {
+                    File = Path.GetRelativePath(solutionRoot, file).Replace('\\', '/'),
+                    LineNumber = index + 1,
+                    Line = line.Trim()
+                }))
+            .Where(item => forbiddenPatterns.Any(pattern => item.Line.Contains(pattern, StringComparison.Ordinal)))
+            .Select(item => $"{item.File}:{item.LineNumber}: {item.Line}")
+            .ToArray();
+
+        violations.Should().BeEmpty("DataAnalysis SQL execution must go through IDatabaseConnector and ISqlGuardrail");
     }
 
     [Fact]

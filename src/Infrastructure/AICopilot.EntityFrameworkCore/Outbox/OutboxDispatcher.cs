@@ -16,10 +16,17 @@ public sealed class OutboxDispatcher(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        while (!stoppingToken.IsCancellationRequested)
+        try
         {
-            await DispatchOnceAsync(stoppingToken);
-            await Task.Delay(PollingDelay, stoppingToken);
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                await DispatchOnceAsync(stoppingToken);
+                await Task.Delay(PollingDelay, stoppingToken);
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Normal host shutdown path.
         }
     }
 
@@ -30,12 +37,18 @@ public sealed class OutboxDispatcher(
         var publishEndpoint = scope.ServiceProvider.GetRequiredService<IPublishEndpoint>();
 
         var now = DateTime.UtcNow;
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
         var messages = await dbContext.OutboxMessages
-            .Where(message => message.ProcessedOnUtc == null
-                              && message.DeadLetteredOnUtc == null
-                              && (message.NextAttemptUtc == null || message.NextAttemptUtc <= now))
-            .OrderBy(message => message.OccurredOnUtc)
-            .Take(BatchSize)
+            .FromSqlInterpolated($"""
+                SELECT *
+                FROM outbox.outbox_messages
+                WHERE processed_on_utc IS NULL
+                  AND dead_lettered_on_utc IS NULL
+                  AND (next_attempt_utc IS NULL OR next_attempt_utc <= {now})
+                ORDER BY occurred_on_utc
+                LIMIT {BatchSize}
+                FOR UPDATE SKIP LOCKED
+                """)
             .ToListAsync(cancellationToken);
 
         foreach (var message in messages)
@@ -50,6 +63,14 @@ public sealed class OutboxDispatcher(
                 await publishEndpoint.Publish(integrationEvent, cancellationToken);
                 message.MarkProcessed(DateTime.UtcNow);
             }
+            catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                logger.LogInformation(ex, "Publishing outbox message {OutboxMessageId} was cancelled; it will be retried without incrementing retry count.", message.Id);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 logger.LogError(ex, "Failed to publish outbox message {OutboxMessageId}.", message.Id);
@@ -61,5 +82,7 @@ public sealed class OutboxDispatcher(
         {
             await dbContext.SaveChangesAsync(cancellationToken);
         }
+
+        await transaction.CommitAsync(cancellationToken);
     }
 }

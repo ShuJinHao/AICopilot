@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using MySql.Data.MySqlClient;
 using Npgsql;
 using System.Data;
+using System.Data.Common;
 using System.Diagnostics;
 
 namespace AICopilot.Dapper;
@@ -71,18 +72,37 @@ public class DapperDatabaseConnector(
 
         try
         {
+            await OpenConnectionAsync(connection, cancellationToken);
+            using var transaction = await BeginTransactionAsync(connection, cancellationToken);
+            await ConfigureReadOnlyTransactionAsync(connection, transaction, database.Provider, cancellationToken);
+
             var command = new CommandDefinition(
                 sql,
                 commandParameters,
+                transaction,
                 commandTimeout: effectiveOptions.CommandTimeoutSeconds,
                 cancellationToken: cancellationToken);
 
-            var rawRows = (await connection.QueryAsync(command)).ToList();
+            using var reader = await connection.ExecuteReaderAsync(command);
+            var maxRows = Math.Max(1, effectiveOptions.MaxRows);
+            var normalizedRows = new List<Dictionary<string, object?>>(maxRows);
+            var isTruncated = false;
+
+            while (await ReadAsync(reader, cancellationToken))
+            {
+                if (normalizedRows.Count >= maxRows)
+                {
+                    isTruncated = true;
+                    break;
+                }
+
+                normalizedRows.Add(NormalizeRecord(reader));
+            }
+
+            await CommitTransactionAsync(transaction, cancellationToken);
             stopwatch.Stop();
 
-            var returnedRowCount = rawRows.Count;
-            var isTruncated = returnedRowCount > effectiveOptions.MaxRows;
-            var normalizedRows = NormalizeRows(rawRows.Take(effectiveOptions.MaxRows));
+            var returnedRowCount = normalizedRows.Count + (isTruncated ? 1 : 0);
 
             return new DatabaseQueryResult(
                 normalizedRows,
@@ -137,38 +157,98 @@ public class DapperDatabaseConnector(
         return dynamicParameters;
     }
 
-    private static List<Dictionary<string, object?>> NormalizeRows(IEnumerable<dynamic> rows)
+    private static Dictionary<string, object?> NormalizeRecord(IDataRecord record)
     {
-        var result = new List<Dictionary<string, object?>>();
-
-        foreach (var row in rows)
+        var result = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        for (var index = 0; index < record.FieldCount; index++)
         {
-            object rowObject = row;
-
-            if (rowObject is IDictionary<string, object?> nullableDictionary)
-            {
-                result.Add(nullableDictionary.ToDictionary(item => item.Key, item => item.Value, StringComparer.OrdinalIgnoreCase));
-                continue;
-            }
-
-            if (rowObject is IDictionary<string, object> dictionary)
-            {
-                result.Add(dictionary.ToDictionary(item => item.Key, item => (object?)item.Value, StringComparer.OrdinalIgnoreCase));
-                continue;
-            }
-
-            var reflected = rowObject.GetType()
-                .GetProperties()
-                .Where(property => property.CanRead)
-                .ToDictionary(
-                    property => property.Name,
-                    property => property.GetValue(rowObject),
-                    StringComparer.OrdinalIgnoreCase);
-
-            result.Add(reflected);
+            var value = record.GetValue(index);
+            result[record.GetName(index)] = value == DBNull.Value ? null : value;
         }
 
         return result;
+    }
+
+    private static async Task OpenConnectionAsync(IDbConnection connection, CancellationToken cancellationToken)
+    {
+        if (connection is DbConnection dbConnection)
+        {
+            await dbConnection.OpenAsync(cancellationToken);
+            return;
+        }
+
+        connection.Open();
+    }
+
+    private static async Task<IDbTransaction> BeginTransactionAsync(
+        IDbConnection connection,
+        CancellationToken cancellationToken)
+    {
+        if (connection is DbConnection dbConnection)
+        {
+            return await dbConnection.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
+        }
+
+        return connection.BeginTransaction(IsolationLevel.ReadCommitted);
+    }
+
+    private static async Task ConfigureReadOnlyTransactionAsync(
+        IDbConnection connection,
+        IDbTransaction transaction,
+        DatabaseProviderType provider,
+        CancellationToken cancellationToken)
+    {
+        if (provider != DatabaseProviderType.PostgreSql)
+        {
+            return;
+        }
+
+        await ExecuteNonQueryAsync(
+            connection,
+            transaction,
+            "SET TRANSACTION READ ONLY",
+            cancellationToken);
+        await ExecuteNonQueryAsync(
+            connection,
+            transaction,
+            "SET LOCAL default_transaction_read_only = on",
+            cancellationToken);
+    }
+
+    private static async Task ExecuteNonQueryAsync(
+        IDbConnection connection,
+        IDbTransaction transaction,
+        string sql,
+        CancellationToken cancellationToken)
+    {
+        var command = new CommandDefinition(
+            sql,
+            transaction: transaction,
+            cancellationToken: cancellationToken);
+        await connection.ExecuteAsync(command);
+    }
+
+    private static async Task CommitTransactionAsync(
+        IDbTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        if (transaction is DbTransaction dbTransaction)
+        {
+            await dbTransaction.CommitAsync(cancellationToken);
+            return;
+        }
+
+        transaction.Commit();
+    }
+
+    private static async Task<bool> ReadAsync(IDataReader reader, CancellationToken cancellationToken)
+    {
+        if (reader is DbDataReader dbDataReader)
+        {
+            return await dbDataReader.ReadAsync(cancellationToken);
+        }
+
+        return reader.Read();
     }
 
     private static void EnsureQueryableDataSource(BusinessDatabaseConnectionInfo database)
