@@ -2,7 +2,7 @@ import { fetchEventSource } from '@microsoft/fetch-event-source'
 import { baseUrl } from '@/appsetting'
 import { apiClient, ApiError, getAccessToken, getProblemDetails } from './apiClient'
 import type { ChatHistoryMessage, StreamCallbacks } from '@/types/app'
-import type { ChatChunk, Session } from '@/types/protocols'
+import type { ChatChunk, FunctionApprovalRequest, Session } from '@/types/protocols'
 
 async function sendEventStream(
   path: string,
@@ -100,6 +100,12 @@ export const chatService = {
       sessionId,
       isOnsiteConfirmed,
       expiresInMinutes
+    })
+  },
+
+  async getPendingApprovals(sessionId: string) {
+    return await apiClient.get<FunctionApprovalRequest[]>('/aigateway/approval/pending', {
+      sessionId
     })
   },
 

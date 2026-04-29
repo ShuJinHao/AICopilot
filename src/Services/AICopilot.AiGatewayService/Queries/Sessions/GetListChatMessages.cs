@@ -1,6 +1,7 @@
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
 using AICopilot.Core.AiGateway.Specifications.Sessions;
 using AICopilot.Services.CrossCutting.Attributes;
+using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Messaging;
 using AICopilot.SharedKernel.Repository;
@@ -11,18 +12,32 @@ namespace AICopilot.AiGatewayService.Queries.Sessions;
 [AuthorizeRequirement("AiGateway.GetSession")]
 public record GetListChatMessagesQuery(Guid SessionId, int Count, bool IsDesc = true) : IQuery<Result<List<AiChatMessage>>>;
 
-public class GetListChatMessagesQueryHandler(IReadRepository<Session> repository)
+public class GetListChatMessagesQueryHandler(
+    IReadRepository<Session> repository,
+    ICurrentUser currentUser)
     : IQueryHandler<GetListChatMessagesQuery, Result<List<AiChatMessage>>>
 {
     public async Task<Result<List<AiChatMessage>>> Handle(
         GetListChatMessagesQuery request,
         CancellationToken cancellationToken)
     {
+        if (currentUser.Id is not { } userId)
+        {
+            return Result.Unauthorized(new ApiProblemDescriptor(
+                AuthProblemCodes.Unauthorized,
+                "Current user id is missing or invalid."));
+        }
+
         var session = await repository.FirstOrDefaultAsync(
-            new SessionWithMessagesByIdSpec(request.SessionId),
+            new SessionWithMessagesByIdForUserSpec(request.SessionId, userId),
             cancellationToken);
 
-        var messages = session?.Messages ?? [];
+        if (session is null)
+        {
+            return Result.NotFound();
+        }
+
+        var messages = session.Messages;
         var ordered = request.IsDesc
             ? messages.OrderByDescending(message => message.CreatedAt)
             : messages.OrderBy(message => message.CreatedAt);

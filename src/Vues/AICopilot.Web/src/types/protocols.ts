@@ -43,7 +43,7 @@ export interface IntentResult {
 export interface FunctionApprovalRequest {
   callId: string
   name: string
-  args: string
+  args: string | Record<string, unknown>
   requiresOnsiteAttestation: boolean
   attestationExpiresAt?: string | null
 }

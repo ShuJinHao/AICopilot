@@ -26,10 +26,13 @@ public record ApprovalDecisionStreamRequest(
 
 public class ChatStreamHandler(
     IReadRepository<Session> sessionRepository,
+    ICurrentUser currentUser,
     ChatWorkflowOrchestrator workflowOrchestrator,
     SessionMessagePersistenceService messagePersistenceService,
     IOperationalBoundaryPolicy operationalBoundaryPolicy,
-    IManufacturingSceneClassifier sceneClassifier)
+    IManufacturingSceneClassifier sceneClassifier,
+    IFinalAgentContextStore finalAgentContextStore,
+    ISessionExecutionLock sessionExecutionLock)
     : IStreamRequestHandler<ChatStreamRequest, ChatChunk>
 {
     public async IAsyncEnumerable<ChatChunk> Handle(
@@ -38,37 +41,51 @@ public class ChatStreamHandler(
     {
         var assistantText = new StringBuilder();
         var pendingMessages = new List<SessionMessageAppend>();
-        if (!string.IsNullOrWhiteSpace(request.Message))
+        Exception? failure = null;
+        IAsyncDisposable? sessionLock = null;
+
+        try
         {
-            pendingMessages.Add(new SessionMessageAppend(request.Message, MessageType.User));
+            sessionLock = await sessionExecutionLock.AcquireAsync(request.SessionId, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            yield break;
+        }
+        catch (Exception exception)
+        {
+            failure = exception;
         }
 
-        Exception? failure = null;
-        await using var enumerator = HandleCore(request, assistantText, ct).GetAsyncEnumerator(ct);
-
-        while (true)
+        if (sessionLock is not null)
         {
-            bool hasNext;
-            try
-            {
-                hasNext = await enumerator.MoveNextAsync();
-            }
-            catch (OperationCanceledException)
-            {
-                yield break;
-            }
-            catch (Exception exception)
-            {
-                failure = exception;
-                break;
-            }
+            await using var acquiredLock = sessionLock;
+            await using var enumerator = HandleCore(request, assistantText, pendingMessages, ct).GetAsyncEnumerator(ct);
 
-            if (!hasNext)
+            while (true)
             {
-                break;
-            }
+                bool hasNext;
+                try
+                {
+                    hasNext = await enumerator.MoveNextAsync();
+                }
+                catch (OperationCanceledException)
+                {
+                    yield break;
+                }
+                catch (Exception exception)
+                {
+                    failure = exception;
+                    break;
+                }
 
-            yield return enumerator.Current;
+                if (!hasNext)
+                {
+                    break;
+                }
+
+                yield return enumerator.Current;
+            }
         }
 
         if (failure != null)
@@ -92,18 +109,44 @@ public class ChatStreamHandler(
     private async IAsyncEnumerable<ChatChunk> HandleCore(
         ChatStreamRequest request,
         StringBuilder assistantText,
+        ICollection<SessionMessageAppend> pendingMessages,
         [EnumeratorCancellation] CancellationToken ct)
     {
         var session = await ChatStreamRuntime.LoadSessionAsync(sessionRepository, request.SessionId, ct);
         if (session == null)
         {
             yield return ChatStreamRuntime.CreateErrorChunk(
-                assistantText,
                 "session_not_found",
                 "未找到对应的会话。",
                 nameof(ChatStreamHandler),
                 "当前会话不存在或已被删除，请刷新后重试。");
             yield break;
+        }
+
+        if (currentUser.Id != session.UserId)
+        {
+            yield return ChatStreamRuntime.CreateErrorChunk(
+                AuthProblemCodes.MissingPermission,
+                "当前用户无权操作该会话。",
+                nameof(ChatStreamHandler),
+                "当前账号无权操作该会话。");
+            yield break;
+        }
+
+        var storedContext = await finalAgentContextStore.GetAsync(request.SessionId, ct);
+        if (storedContext?.PendingApprovals.Count > 0)
+        {
+            yield return ChatStreamRuntime.CreateErrorChunk(
+                AppProblemCodes.ApprovalPending,
+                "当前会话已有待处理审批，请先处理审批请求。",
+                nameof(ChatStreamHandler),
+                "当前会话已有待处理审批，请先处理审批请求。");
+            yield break;
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Message))
+        {
+            pendingMessages.Add(new SessionMessageAppend(request.Message, MessageType.User));
         }
 
         var sceneDecision = sceneClassifier.Classify(request.Message);
