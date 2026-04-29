@@ -426,6 +426,9 @@ export const useChatStore = defineStore('chat', () => {
       }
 
       switch (payload.code) {
+        case 'approval_pending':
+          errorMessage.value = userFacingMessage ?? '当前会话已有待处理审批，请先处理审批请求。'
+          break
         case 'chat_context_expired':
           errorMessage.value = userFacingMessage ?? '审批上下文已过期，请重新发起请求。'
           break

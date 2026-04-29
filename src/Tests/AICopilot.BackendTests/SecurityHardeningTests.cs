@@ -64,6 +64,49 @@ public sealed class SecurityHardeningTests
     }
 
     [Fact]
+    public void AiGatewaySessionAccess_ShouldBeScopedToCurrentUserAndPendingApproval()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var sessionQueryPath = Path.Combine(
+            solutionRoot,
+            "src",
+            "Services",
+            "AICopilot.AiGatewayService",
+            "Queries",
+            "Sessions");
+        var sessionCommandPath = Path.Combine(
+            solutionRoot,
+            "src",
+            "Services",
+            "AICopilot.AiGatewayService",
+            "Commands",
+            "Sessions");
+
+        File.ReadAllText(Path.Combine(sessionQueryPath, "GetListSessions.cs"))
+            .Should().Contain("SessionsByUserOrderedSpec");
+        File.ReadAllText(Path.Combine(sessionQueryPath, "GetSession.cs"))
+            .Should().Contain("SessionByIdForUserSpec");
+        File.ReadAllText(Path.Combine(sessionQueryPath, "GetListChatMessageHistory.cs"))
+            .Should().Contain("SessionWithMessagesByIdForUserSpec");
+        File.ReadAllText(Path.Combine(sessionQueryPath, "GetListChatMessages.cs"))
+            .Should().Contain("SessionWithMessagesByIdForUserSpec");
+        File.ReadAllText(Path.Combine(sessionCommandPath, "DeleteSession.cs"))
+            .Should().Contain("SessionByIdForUserSpec");
+
+        var chatStreamSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Services",
+            "AICopilot.AiGatewayService",
+            "Agents",
+            "ChatStreamRequest.cs"));
+        chatStreamSource.Should().Contain("currentUser.Id != session.UserId");
+        chatStreamSource.Should().Contain("sessionExecutionLock.AcquireAsync(request.SessionId");
+        chatStreamSource.Should().Contain("finalAgentContextStore.GetAsync(request.SessionId");
+        chatStreamSource.Should().Contain("AppProblemCodes.ApprovalPending");
+    }
+
+    [Fact]
     public void ApiControllerBase_ShouldUseConstructorInjectedSender()
     {
         var solutionRoot = FindSolutionRoot();

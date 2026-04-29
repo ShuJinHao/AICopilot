@@ -1,6 +1,7 @@
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
 using AICopilot.Core.AiGateway.Specifications.Sessions;
 using AICopilot.Services.CrossCutting.Attributes;
+using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Messaging;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
@@ -19,14 +20,23 @@ public record SessionDto
 [AuthorizeRequirement("AiGateway.GetListSessions")]
 public record GetListSessionsQuery : IQuery<Result<IList<SessionDto>>>;
 
-public class GetListSessionsQueryHandler(IReadRepository<Session> repository)
+public class GetListSessionsQueryHandler(
+    IReadRepository<Session> repository,
+    ICurrentUser currentUser)
     : IQueryHandler<GetListSessionsQuery, Result<IList<SessionDto>>>
 {
     public async Task<Result<IList<SessionDto>>> Handle(
         GetListSessionsQuery request,
         CancellationToken cancellationToken)
     {
-        var sessions = await repository.ListAsync(new SessionsOrderedSpec(), cancellationToken);
+        if (currentUser.Id is not { } userId)
+        {
+            return Result.Unauthorized(new ApiProblemDescriptor(
+                AuthProblemCodes.Unauthorized,
+                "Current user id is missing or invalid."));
+        }
+
+        var sessions = await repository.ListAsync(new SessionsByUserOrderedSpec(userId), cancellationToken);
         IList<SessionDto> result = sessions.Select(SessionDtoMapper.Map).ToList();
         return Result.Success(result);
     }
