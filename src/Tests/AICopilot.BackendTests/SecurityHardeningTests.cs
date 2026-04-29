@@ -454,6 +454,7 @@ public sealed class SecurityHardeningTests
             "OutboxDispatcher.cs"));
 
         dispatcherSource.Should().Contain("BeginTransactionAsync");
+        dispatcherSource.Should().Contain("CreateExecutionStrategy");
         dispatcherSource.Should().Contain("FOR UPDATE SKIP LOCKED");
         dispatcherSource.Should().Contain("catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)");
         dispatcherSource.Should().Contain("without incrementing retry count");
@@ -644,8 +645,9 @@ public sealed class SecurityHardeningTests
 
         source.Should().Contain("sqlGuardrail.Validate");
         source.Should().Contain("BeginTransactionAsync");
+        source.Should().Contain("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY");
         source.Should().Contain("SET TRANSACTION READ ONLY");
-        source.Should().Contain("SET LOCAL default_transaction_read_only = on");
+        source.Should().Contain("SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE");
         source.Should().Contain("ExecuteReaderAsync");
         source.Should().Contain("normalizedRows.Count >= maxRows");
         source.Should().NotContain("QueryAsync(command)).ToList");

@@ -69,10 +69,15 @@ public class DapperDatabaseConnector(
         using var connection = GetConnection(database);
         var commandParameters = NormalizeParameters(parameters);
         var stopwatch = Stopwatch.StartNew();
+        var resetPostgreSqlReadOnlySession = false;
 
         try
         {
             await OpenConnectionAsync(connection, cancellationToken);
+            resetPostgreSqlReadOnlySession = await ConfigureReadOnlySessionAsync(
+                connection,
+                database.Provider,
+                cancellationToken);
             using var transaction = await BeginTransactionAsync(connection, cancellationToken);
             await ConfigureReadOnlyTransactionAsync(connection, transaction, database.Provider, cancellationToken);
 
@@ -83,20 +88,22 @@ public class DapperDatabaseConnector(
                 commandTimeout: effectiveOptions.CommandTimeoutSeconds,
                 cancellationToken: cancellationToken);
 
-            using var reader = await connection.ExecuteReaderAsync(command);
             var maxRows = Math.Max(1, effectiveOptions.MaxRows);
             var normalizedRows = new List<Dictionary<string, object?>>(maxRows);
             var isTruncated = false;
 
-            while (await ReadAsync(reader, cancellationToken))
+            using (var reader = await connection.ExecuteReaderAsync(command))
             {
-                if (normalizedRows.Count >= maxRows)
+                while (await ReadAsync(reader, cancellationToken))
                 {
-                    isTruncated = true;
-                    break;
-                }
+                    if (normalizedRows.Count >= maxRows)
+                    {
+                        isTruncated = true;
+                        break;
+                    }
 
-                normalizedRows.Add(NormalizeRecord(reader));
+                    normalizedRows.Add(NormalizeRecord(reader));
+                }
             }
 
             await CommitTransactionAsync(transaction, cancellationToken);
@@ -115,6 +122,13 @@ public class DapperDatabaseConnector(
             stopwatch.Stop();
             logger.LogError(ex, "SQL execution failed on database {DatabaseName}. SQL: {Sql}", database.Name, sql);
             throw;
+        }
+        finally
+        {
+            if (resetPostgreSqlReadOnlySession)
+            {
+                await ResetReadOnlySessionAsync(connection, database.Provider, CancellationToken.None);
+            }
         }
     }
 
@@ -192,6 +206,24 @@ public class DapperDatabaseConnector(
         return connection.BeginTransaction(IsolationLevel.ReadCommitted);
     }
 
+    private static async Task<bool> ConfigureReadOnlySessionAsync(
+        IDbConnection connection,
+        DatabaseProviderType provider,
+        CancellationToken cancellationToken)
+    {
+        if (provider != DatabaseProviderType.PostgreSql)
+        {
+            return false;
+        }
+
+        await ExecuteNonQueryAsync(
+            connection,
+            transaction: null,
+            "SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY",
+            cancellationToken);
+        return true;
+    }
+
     private static async Task ConfigureReadOnlyTransactionAsync(
         IDbConnection connection,
         IDbTransaction transaction,
@@ -208,16 +240,28 @@ public class DapperDatabaseConnector(
             transaction,
             "SET TRANSACTION READ ONLY",
             cancellationToken);
+    }
+
+    private static async Task ResetReadOnlySessionAsync(
+        IDbConnection connection,
+        DatabaseProviderType provider,
+        CancellationToken cancellationToken)
+    {
+        if (provider != DatabaseProviderType.PostgreSql || connection.State != ConnectionState.Open)
+        {
+            return;
+        }
+
         await ExecuteNonQueryAsync(
             connection,
-            transaction,
-            "SET LOCAL default_transaction_read_only = on",
+            transaction: null,
+            "SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE",
             cancellationToken);
     }
 
     private static async Task ExecuteNonQueryAsync(
         IDbConnection connection,
-        IDbTransaction transaction,
+        IDbTransaction? transaction,
         string sql,
         CancellationToken cancellationToken)
     {

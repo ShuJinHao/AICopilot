@@ -44,12 +44,12 @@ public sealed class KnowledgeVectorIndexWriter(
 
         await collection.EnsureCollectionExistsAsync(cancellationToken);
 
-        var staleRecordKeys = Enumerable
-            .Range(0, Math.Max(request.PreviousChunkCount, chunks.Count))
-            .Select(index => (object)BuildRecordKey(request.DocumentId, index))
-            .ToArray();
-        if (staleRecordKeys.Length > 0)
+        if (request.PreviousChunkCount > 0)
         {
+            var staleRecordKeys = Enumerable
+                .Range(0, Math.Max(request.PreviousChunkCount, chunks.Count))
+                .Select(index => (object)BuildRecordKey(request.DocumentId, index))
+                .ToArray();
             await collection.DeleteAsync(staleRecordKeys, cancellationToken);
         }
 
