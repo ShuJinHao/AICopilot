@@ -12,13 +12,19 @@ public class KnowledgeBase : IAggregateRoot
 
     public KnowledgeBase(string name, string description, Guid embeddingModelId)
     {
+        ValidateInfo(name, description);
+        ValidateEmbeddingModelId(embeddingModelId);
+
         Id = Guid.NewGuid();
-        Name = name;
-        Description = description;
+        Name = name.Trim();
+        Description = description.Trim();
         EmbeddingModelId = embeddingModelId;
     }
 
-    public Guid Id { get; set; }
+    public Guid Id { get; private set; }
+
+    public uint RowVersion { get; private set; }
+
     public string Name { get; private set; } = string.Empty;
     public string Description { get; private set; } = string.Empty;
 
@@ -54,7 +60,36 @@ public class KnowledgeBase : IAggregateRoot
 
     public void UpdateInfo(string name, string description)
     {
-        Name = name;
-        Description = description;
+        ValidateInfo(name, description);
+
+        Name = name.Trim();
+        Description = description.Trim();
+    }
+
+    public void UpdateEmbeddingModel(Guid embeddingModelId)
+    {
+        ValidateEmbeddingModelId(embeddingModelId);
+        EmbeddingModelId = embeddingModelId;
+    }
+
+    private static void ValidateInfo(string name, string description)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new ArgumentException("Knowledge base name is required.", nameof(name));
+        }
+
+        if (string.IsNullOrWhiteSpace(description))
+        {
+            throw new ArgumentException("Knowledge base description is required.", nameof(description));
+        }
+    }
+
+    private static void ValidateEmbeddingModelId(Guid embeddingModelId)
+    {
+        if (embeddingModelId == Guid.Empty)
+        {
+            throw new ArgumentException("Knowledge base embedding model id is required.", nameof(embeddingModelId));
+        }
     }
 }

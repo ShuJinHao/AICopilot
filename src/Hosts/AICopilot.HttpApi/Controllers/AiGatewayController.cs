@@ -1,4 +1,5 @@
-﻿using AICopilot.AiGatewayService.Agents;
+using AICopilot.AiGatewayService.Agents;
+using AICopilot.AiGatewayService.ApprovalPolicies;
 using AICopilot.AiGatewayService.Commands.ConversationTemplates;
 using AICopilot.AiGatewayService.Commands.LanguageModels;
 using AICopilot.AiGatewayService.Commands.Sessions;
@@ -6,88 +7,153 @@ using AICopilot.AiGatewayService.Queries.ConversationTemplates;
 using AICopilot.AiGatewayService.Queries.LanguageModels;
 using AICopilot.AiGatewayService.Queries.Sessions;
 using AICopilot.HttpApi.Infrastructure;
-using Microsoft.AspNetCore.Mvc;
-using System.Text.Json;
+using MediatR;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace AICopilot.HttpApi.Controllers;
 
 [Route("/api/aigateway")]
-public class AiGatewayController : ApiControllerBase
+[Authorize]
+public class AiGatewayController(ISender sender) : ApiControllerBase(sender)
 {
     [HttpPost("language-model")]
     public async Task<IActionResult> CreateLanguageModel(CreateLanguageModelCommand command)
     {
-        var result = await Sender.Send(command);
+        return ReturnResult(await Sender.Send(command));
+    }
 
-        return ReturnResult(result);
+    [HttpPut("language-model")]
+    public async Task<IActionResult> UpdateLanguageModel(UpdateLanguageModelCommand command)
+    {
+        return ReturnResult(await Sender.Send(command));
     }
 
     [HttpDelete("language-model")]
     public async Task<IActionResult> DeleteLanguageModel(DeleteLanguageModelCommand command)
     {
-        var result = await Sender.Send(command);
+        return ReturnResult(await Sender.Send(command));
+    }
 
-        return ReturnResult(result);
+    [HttpGet("language-model")]
+    public async Task<IActionResult> GetLanguageModel([FromQuery] GetLanguageModelQuery query)
+    {
+        return ReturnResult(await Sender.Send(query));
     }
 
     [HttpGet("language-model/list")]
     public async Task<IActionResult> GetListLanguageModels()
     {
-        var result = await Sender.Send(new GetListLanguageModelsQuery());
-        return ReturnResult(result);
+        return ReturnResult(await Sender.Send(new GetListLanguageModelsQuery()));
     }
 
     [HttpPost("conversation-template")]
     public async Task<IActionResult> CreateConversationTemplate(CreateConversationTemplateCommand command)
     {
-        var result = await Sender.Send(command);
-        return ReturnResult(result);
+        return ReturnResult(await Sender.Send(command));
+    }
+
+    [HttpPut("conversation-template")]
+    public async Task<IActionResult> UpdateConversationTemplate(UpdateConversationTemplateCommand command)
+    {
+        return ReturnResult(await Sender.Send(command));
     }
 
     [HttpDelete("conversation-template")]
     public async Task<IActionResult> DeleteConversationTemplate(DeleteConversationTemplateCommand command)
     {
-        var result = await Sender.Send(command);
-        return ReturnResult(result);
+        return ReturnResult(await Sender.Send(command));
     }
 
     [HttpGet("conversation-template")]
-    public async Task<IActionResult> GetConversationTemplate(GetConversationTemplateQuery query)
+    public async Task<IActionResult> GetConversationTemplate([FromQuery] GetConversationTemplateQuery query)
     {
-        var result = await Sender.Send(query);
-        return ReturnResult(result);
+        return ReturnResult(await Sender.Send(query));
     }
 
     [HttpGet("conversation-template/list")]
     public async Task<IActionResult> GetListConversationTemplates()
     {
-        var result = await Sender.Send(new GetListConversationTemplatesQuery());
-        return ReturnResult(result);
+        return ReturnResult(await Sender.Send(new GetListConversationTemplatesQuery()));
+    }
+
+    [HttpPost("approval-policy")]
+    public async Task<IActionResult> CreateApprovalPolicy(CreateApprovalPolicyCommand command)
+    {
+        return ReturnResult(await Sender.Send(command));
+    }
+
+    [HttpPut("approval-policy")]
+    public async Task<IActionResult> UpdateApprovalPolicy(UpdateApprovalPolicyCommand command)
+    {
+        return ReturnResult(await Sender.Send(command));
+    }
+
+    [HttpDelete("approval-policy")]
+    public async Task<IActionResult> DeleteApprovalPolicy(DeleteApprovalPolicyCommand command)
+    {
+        return ReturnResult(await Sender.Send(command));
+    }
+
+    [HttpGet("approval-policy")]
+    public async Task<IActionResult> GetApprovalPolicy([FromQuery] GetApprovalPolicyQuery query)
+    {
+        return ReturnResult(await Sender.Send(query));
+    }
+
+    [HttpGet("approval-policy/list")]
+    public async Task<IActionResult> GetListApprovalPolicies()
+    {
+        return ReturnResult(await Sender.Send(new GetListApprovalPoliciesQuery()));
     }
 
     [HttpPost("session")]
     public async Task<IActionResult> CreateSession(CreateSessionCommand command)
     {
-        var result = await Sender.Send(command);
-        return ReturnResult(result);
+        return ReturnResult(await Sender.Send(command));
     }
 
     [HttpDelete("session")]
     public async Task<IActionResult> DeleteSession(DeleteSessionCommand command)
     {
-        var result = await Sender.Send(command);
-        return ReturnResult(result);
+        return ReturnResult(await Sender.Send(command));
+    }
+
+    [HttpGet("session")]
+    public async Task<IActionResult> GetSession([FromQuery] GetSessionQuery query)
+    {
+        return ReturnResult(await Sender.Send(query));
     }
 
     [HttpGet("session/list")]
     public async Task<IActionResult> GetListSessions()
     {
-        var result = await Sender.Send(new GetListSessionsQuery());
-        return ReturnResult(result);
+        return ReturnResult(await Sender.Send(new GetListSessionsQuery()));
+    }
+
+    [HttpPut("session/safety-attestation")]
+    public async Task<IActionResult> UpdateSessionSafetyAttestation(UpdateSessionSafetyAttestationCommand command)
+    {
+        return ReturnResult(await Sender.Send(command));
+    }
+
+    [HttpGet("chat-message/list")]
+    public async Task<IActionResult> GetListChatMessages([FromQuery] GetListChatMessageHistoryQuery query)
+    {
+        return ReturnResult(await Sender.Send(query));
     }
 
     [HttpPost("chat")]
+    [EnableRateLimiting("chat")]
     public IResult Chat(ChatStreamRequest request)
+    {
+        var stream = Sender.CreateStream(request);
+        return Results.ServerSentEvents(stream);
+    }
+
+    [HttpPost("approval/decision")]
+    [EnableRateLimiting("chat")]
+    public IResult DecideApproval(ApprovalDecisionStreamRequest request)
     {
         var stream = Sender.CreateStream(request);
         return Results.ServerSentEvents(stream);

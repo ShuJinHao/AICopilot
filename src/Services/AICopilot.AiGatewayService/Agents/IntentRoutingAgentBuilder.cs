@@ -1,10 +1,8 @@
-﻿using AICopilot.AgentPlugin;
-using AICopilot.Services.Common.Contracts;
-using Microsoft.Agents.AI;
-using Microsoft.Extensions.DependencyInjection;
-using System;
-using System.Collections.Generic;
 using System.Text;
+using AICopilot.AgentPlugin;
+using AICopilot.AiGatewayService.BusinessSemantics;
+using AICopilot.Services.Contracts;
+using AICopilot.SharedKernel.Ai;
 
 namespace AICopilot.AiGatewayService.Agents;
 
@@ -13,95 +11,90 @@ public class IntentRoutingAgentBuilder
     private const string AgentName = "IntentRoutingAgent";
 
     private readonly ChatAgentFactory _agentFactory;
-    private readonly IDataQueryService _dataQueryService;
-
-    // 缓存静态的工具意图列表，避免重复反射扫描
-    private readonly string _toolIntentListString;
+    private readonly IKnowledgeBaseReadService _knowledgeBaseReadService;
+    private readonly IBusinessDatabaseReadService _businessDatabaseReadService;
+    private readonly IntentRoutingPromptComposer _promptComposer;
+    private readonly AgentPluginLoader _pluginLoader;
 
     public IntentRoutingAgentBuilder(
         ChatAgentFactory agentFactory,
         AgentPluginLoader pluginLoader,
-        IDataQueryService dataQueryService)
+        IKnowledgeBaseReadService knowledgeBaseReadService,
+        IBusinessDatabaseReadService businessDatabaseReadService,
+        IntentRoutingPromptComposer promptComposer)
     {
         _agentFactory = agentFactory;
-        _dataQueryService = dataQueryService;
-
-        // 添加系统内置意图
-        var sb = new StringBuilder();
-        sb.AppendLine("- General.Chat: 闲聊、打招呼、情感交互或无法归类的问题。");
-
-        // 扫描插件系统，添加工具意图
-        // 这里我们假设每个 Plugin 对应一个大类意图，实际项目中可以做得更细致
-        var allPlugins = pluginLoader.GetAllPlugin();
-        foreach (var plugin in allPlugins)
-        {
-            // 格式：- Action.{PluginName}: {Description}
-            sb.AppendLine($"- Action.{plugin.Name}: {plugin.Description}");
-        }
-        _toolIntentListString = sb.ToString();
+        _pluginLoader = pluginLoader;
+        _knowledgeBaseReadService = knowledgeBaseReadService;
+        _businessDatabaseReadService = businessDatabaseReadService;
+        _promptComposer = promptComposer;
     }
 
-    /// <summary>
-    /// 获取知识库意图列表
-    /// </summary>
+    private string GetToolIntentList()
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("- General.Chat: 闲聊、打招呼、知识解释、诊断建议类自由问答，或无法归类的问题。");
+
+        foreach (var plugin in _pluginLoader.GetAllPlugin().Where(plugin => plugin.ChatExposureMode.CanExposeInChat()))
+        {
+            builder.AppendLine($"- Action.{plugin.Name}: {plugin.Description}");
+        }
+
+        builder.AppendLine("  Routing rule: restart, reboot, shutdown, write parameter, recipe download, PLC write, state change, or any control request must not be routed to Action intents.");
+        builder.AppendLine("  Routing rule: if the user requests a control action, fall back to General.Chat and explain that the assistant only supports observation, diagnosis, suggestion, and knowledge answers.");
+
+        return builder.ToString();
+    }
+
     private async Task<string> GetKnowledgeIntentListAsync()
     {
-        var sb = new StringBuilder();
+        var builder = new StringBuilder();
+        var knowledgeBases = await _knowledgeBaseReadService.ListAsync();
 
-        // 查询所有启用的知识库
-        var kbs = await _dataQueryService.ToListAsync(_dataQueryService.KnowledgeBases);
-
-        foreach (var kb in kbs)
+        foreach (var knowledgeBase in knowledgeBases.OrderBy(knowledgeBase => knowledgeBase.Name))
         {
-            // 格式：- Knowledge.{KbName}: {Description}
-            sb.AppendLine($"- Knowledge.{kb.Name}: {kb.Description}");
+            builder.AppendLine($"- Knowledge.{knowledgeBase.Name}: {knowledgeBase.Description}");
         }
 
-        return sb.ToString();
+        return builder.ToString();
     }
 
-    /// <summary>
-    /// 获取数据分析意图列表
-    /// </summary>
+    private string GetBusinessPolicyIntentList()
+    {
+        return _promptComposer.BuildBusinessPolicyIntentSection();
+    }
+
     private async Task<string> GetDataAnalysisIntentListAsync()
     {
-        var sb = new StringBuilder();
+        var builder = new StringBuilder();
+        builder.Append(_promptComposer.BuildStructuredIntentSection());
 
-        // 查询所有启用的业务数据库
-        var queryable = _dataQueryService.BusinessDatabases.Where(b => b.IsEnabled);
-        var dbs = await _dataQueryService.ToListAsync(queryable);
+        var businessDatabases = await _businessDatabaseReadService.ListEnabledAsync();
 
-        foreach (var db in dbs)
+        foreach (var businessDatabase in businessDatabases)
         {
-            // 格式：- Analysis.{DbName}: {Description}
-            // 示例：- Analysis.ERP_Core: 包含销售订单、客户资料及发货记录。
-            sb.AppendLine($"- Analysis.{db.Name}: {db.Description}");
+            builder.AppendLine($"- Analysis.{businessDatabase.Name}: {businessDatabase.Description}");
         }
 
-        return sb.ToString();
+        return builder.ToString();
     }
 
-    public async Task<ChatClientAgent> BuildAsync()
+    public async Task<ScopedRuntimeAgent> BuildAsync()
     {
         var intents = new StringBuilder();
-
-        // 1. 添加工具意图 (Plugin)
-        intents.Append(_toolIntentListString);
-
-        // 2. 添加知识库意图 (RAG)
+        intents.Append(GetToolIntentList());
         intents.Append(await GetKnowledgeIntentListAsync());
-
-        // 3. 添加数据分析意图 (Text-to-SQL)
+        intents.Append(GetBusinessPolicyIntentList());
         intents.Append(await GetDataAnalysisIntentListAsync());
 
-        var agent = await _agentFactory.CreateAgentAsync(AgentName,
-            template =>
+        var agent = await _agentFactory.CreateAgentAsync(
+            AgentName,
+            systemPrompt =>
             {
-                // 渲染 System Prompt
-                // 确保我们在 Prompt 模板中预留了 {{$IntentList}} 占位符
-                template.SystemPrompt = template.SystemPrompt
+                return systemPrompt
                     .Replace("{{$IntentList}}", intents.ToString());
-            });
+            },
+            isSaveChatMessage: false);
 
         return agent;
     }

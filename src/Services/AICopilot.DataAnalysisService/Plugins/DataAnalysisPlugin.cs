@@ -1,8 +1,11 @@
 ﻿using AICopilot.AgentPlugin;
 using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
+using AICopilot.Core.DataAnalysis.Specifications.BusinessDatabase;
+using AICopilot.DataAnalysisService.BusinessDatabases;
 using AICopilot.DataAnalysisService.Services;
-using AICopilot.Services.Common.Contracts;
-using AICopilot.Services.Common.Helper;
+using AICopilot.Services.Contracts;
+using AICopilot.Services.CrossCutting.Serialization;
+using AICopilot.SharedKernel.Repository;
 using AICopilot.Visualization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -31,15 +34,17 @@ public class DataAnalysisPlugin(
     IDatabaseConnector dbConnector,
     ILogger<DataAnalysisPlugin> logger) : AgentPluginBase
 {
+    private const int MaxToolResultBytes = 256 * 1024;
+    private static readonly DatabaseQueryOptions QueryOptions = new(MaxRows: 200, CommandTimeoutSeconds: 15);
+
     public override string Description => "提供数据库结构查询和SQL执行能力，用于回答涉及业务数据的统计分析问题。";
 
     // 辅助方法：根据名称获取数据库配置
     // 这个方法不暴露给 AI，仅供内部使用
     private async Task<BusinessDatabase> GetDatabaseAsync(IServiceProvider sp, string databaseName, CancellationToken ct)
     {
-        var dataQuery = sp.GetRequiredService<IDataQueryService>();
-        var queryable = dataQuery.BusinessDatabases.Where(d => d.Name == databaseName);
-        var db = await dataQuery.FirstOrDefaultAsync(queryable);
+        var repository = sp.GetRequiredService<IReadRepository<BusinessDatabase>>();
+        var db = await repository.FirstOrDefaultAsync(new BusinessDatabaseByNameSpec(databaseName), ct);
 
         if (db == null)
         {
@@ -51,18 +56,25 @@ public class DataAnalysisPlugin(
             throw new InvalidOperationException($"数据库 '{databaseName}' 已被禁用。");
         }
 
+        if (!db.IsReadOnly)
+        {
+            throw new InvalidOperationException($"数据库 '{databaseName}' 未配置为只读模式，系统已拒绝 AI 查询。");
+        }
+
         return db;
     }
 
     [Description("获取指定数据库中所有表的名称和描述。这是探索数据库结构的第一步。")]
     public async Task<string> GetTableNamesAsync(
         IServiceProvider sp,
-        [Description("目标数据库的名称")] string databaseName)
+        [Description("目标数据库的名称")] string databaseName,
+        CancellationToken cancellationToken = default)
     {
         try
         {
             // 获取数据库配置
-            var db = await GetDatabaseAsync(sp, databaseName, CancellationToken.None);
+            var db = await GetDatabaseAsync(sp, databaseName, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
 
             // 根据数据库类型构建查询元数据的 SQL
             var sql = string.Empty;
@@ -90,20 +102,24 @@ public class DataAnalysisPlugin(
 
             // 执行查询
             // 这里使用了基础设施层的 ExecuteQueryAsync，它返回 IEnumerable<dynamic>
-            var result = await dbConnector.ExecuteQueryAsync(db, sql);
+            var result = await dbConnector.ExecuteQueryAsync(BusinessDatabaseContractMapper.ToConnectionInfo(db), sql, cancellationToken: cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
 
             // 序列化结果
-            return result.ToJson();
+            return LimitToolResult(result.ToJson());
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "获取表名失败。Database: {DbName}", databaseName);
-            return $"获取表名时发生错误: {ex.Message}";
+            return LimitToolResult(BuildSafeFailureMessage("获取表名时发生错误", ex));
         }
     }
 
     // 内部辅助方法：查询单个表的列元数据
-    private async Task<List<ColumnMetadata>> GetColumnsAsync(BusinessDatabase db, string tableName)
+    private async Task<List<ColumnMetadata>> GetColumnsAsync(
+        BusinessDatabase db,
+        string tableName,
+        CancellationToken cancellationToken)
     {
         var sql = string.Empty;
         switch (db.Provider)
@@ -134,7 +150,8 @@ public class DataAnalysisPlugin(
                 return [];
         }
 
-        var result = await dbConnector.ExecuteQueryAsync(db, sql, new { TableName = tableName });
+        var result = await dbConnector.ExecuteQueryAsync(BusinessDatabaseContractMapper.ToConnectionInfo(db), sql, new { TableName = tableName }, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
 
         // Dapper 返回的是 dynamic，需要手动映射到强类型
         var columns = new List<ColumnMetadata>();
@@ -157,7 +174,8 @@ public class DataAnalysisPlugin(
     public async Task<string> GetTableSchemaAsync(
         IServiceProvider sp,
         [Description("目标数据库的名称")] string databaseName,
-        [Description("需要查询的表名列表，如 'Orders, Customers'")] string[] tableNames)
+        [Description("需要查询的表名列表，如 'Orders, Customers'")] string[] tableNames,
+        CancellationToken cancellationToken = default)
     {
         if (tableNames.Length == 0)
         {
@@ -166,13 +184,14 @@ public class DataAnalysisPlugin(
 
         try
         {
-            var db = await GetDatabaseAsync(sp, databaseName, CancellationToken.None);
+            var db = await GetDatabaseAsync(sp, databaseName, cancellationToken);
             var ddlBuilder = new StringBuilder();
 
             foreach (var tableName in tableNames)
             {
                 // 1. 查询列信息
-                var columns = await GetColumnsAsync(db, tableName);
+                cancellationToken.ThrowIfCancellationRequested();
+                var columns = await GetColumnsAsync(db, tableName, cancellationToken);
 
                 if (!columns.Any())
                 {
@@ -205,12 +224,12 @@ public class DataAnalysisPlugin(
                 ddlBuilder.AppendLine();
             }
 
-            return ddlBuilder.ToString();
+            return LimitToolResult(ddlBuilder.ToString());
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "获取表结构失败。Database: {DbName}", databaseName);
-            return $"获取表结构时发生错误: {ex.Message}";
+            return LimitToolResult(BuildSafeFailureMessage("获取表结构时发生错误", ex));
         }
     }
 
@@ -218,19 +237,24 @@ public class DataAnalysisPlugin(
     public async Task<string> ExecuteSqlQueryAsync(
         IServiceProvider sp,
         [Description("目标数据库的名称")] string databaseName,
-        [Description("要执行的 SQL 查询语句 (仅限 SELECT，不需要人类可读，去除换行符)")] string sqlQuery)
+        [Description("要执行的 SQL 查询语句 (仅限 SELECT，不需要人类可读，去除换行符)")] string sqlQuery,
+        CancellationToken cancellationToken = default)
     {
         // 1. 基础校验
         if (string.IsNullOrWhiteSpace(sqlQuery)) return "错误：SQL 语句不能为空。";
 
         try
         {
-            var db = await GetDatabaseAsync(sp, databaseName, CancellationToken.None);
+            var db = await GetDatabaseAsync(sp, databaseName, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
 
             // 2. 执行查询
-            var result = await dbConnector.ExecuteQueryAsync(db, sqlQuery);
-            var data = result.ToList();
-            var firstRow = data.FirstOrDefault() as IDictionary<string, object>;
+            var queryResult = await dbConnector.ExecuteQueryWithMetadataAsync(BusinessDatabaseContractMapper.ToConnectionInfo(db), sqlQuery,
+                options: QueryOptions,
+                cancellationToken: cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            var data = queryResult.Rows.ToList();
+            var firstRow = data.FirstOrDefault();
             var schema = new List<SchemaColumn>();
 
             if (firstRow != null)
@@ -247,16 +271,35 @@ public class DataAnalysisPlugin(
             var vizContext = sp.GetRequiredService<VisualizationContext>();
             vizContext.CaptureResult(data, schema);
 
-            return data.Count == 0 ?
-                // 没有数据
-                "查询执行成功，但未返回任何结果 (0 rows)。" :
-                // LLM 只需要看摘要，不需要看完整的数据，仅取前 5 行
-                data.Take(5).ToJson();
+            var auditLogWriter = sp.GetRequiredService<IAuditLogWriter>();
+            await auditLogWriter.WriteAsync(
+                new AuditLogWriteRequest(
+                    "DataAnalysis",
+                    "DataAnalysis.ExecuteFreeSqlQuery",
+                    "BusinessDatabase",
+                    db.Id.ToString(),
+                    db.Name,
+                    AuditResults.Succeeded,
+                    $"自由 SQL 查询已执行。Rows={queryResult.ReturnedRowCount}; Truncated={queryResult.IsTruncated}; ElapsedMs={queryResult.ElapsedMilliseconds}."));
+            await auditLogWriter.SaveChangesAsync(cancellationToken);
+
+            if (data.Count == 0)
+            {
+                return LimitToolResult("查询执行成功，但未返回任何结果 (0 rows)。");
+            }
+
+            var preview = data.Take(5).ToJson();
+            if (queryResult.IsTruncated)
+            {
+                return LimitToolResult($"查询执行成功，结果已截断。共返回 {queryResult.ReturnedRowCount} 行，当前仅保留前 {data.Count} 行用于后续分析。预览数据：{preview}");
+            }
+
+            return LimitToolResult(preview);
         }
         catch (InvalidOperationException ex) // 捕获安全拦截异常
         {
             logger.LogWarning("SQL 执行被拦截: {Message}", ex.Message);
-            return $"安全警告: 查询被系统拒绝。原因: {ex.Message}";
+            return LimitToolResult($"安全警告: 查询被系统拒绝。原因: {ex.Message}");
         }
         catch (Exception ex)
         {
@@ -264,7 +307,43 @@ public class DataAnalysisPlugin(
             // 我们必须返回详细的数据库错误信息（如 "Column 'xxx' not found"），
             // 这样 Agent 才能看到错误 -> 思考原因 -> 修正 SQL -> 重试。
             logger.LogError(ex, "SQL 执行异常");
-            return $"SQL 执行错误: {ex.Message}\n请检查你的 SQL 语法、表名或列名是否正确，并参考之前的 Schema 定义进行修正。";
+            return LimitToolResult("SQL 执行错误: 查询执行失败，请检查 SQL 语法、表名或列名是否正确。");
         }
     }
+
+    private static string BuildSafeFailureMessage(string prefix, Exception ex)
+    {
+        return ex switch
+        {
+            ArgumentException or InvalidOperationException => $"{prefix}: {ex.Message}",
+            _ => $"{prefix}: 当前只读数据源暂时不可用，请稍后重试或联系管理员检查配置。"
+        };
+    }
+
+    private static string LimitToolResult(string value)
+    {
+        if (Encoding.UTF8.GetByteCount(value) <= MaxToolResultBytes)
+        {
+            return value;
+        }
+
+        const string suffix = "\n[系统提示] 工具输出过大，已截断为前 256KB 预览。";
+        var builder = new StringBuilder(value.Length);
+        var currentBytes = 0;
+        foreach (var ch in value)
+        {
+            var charBytes = Encoding.UTF8.GetByteCount(ch.ToString());
+            if (currentBytes + charBytes + Encoding.UTF8.GetByteCount(suffix) > MaxToolResultBytes)
+            {
+                break;
+            }
+
+            builder.Append(ch);
+            currentBytes += charBytes;
+        }
+
+        builder.Append(suffix);
+        return builder.ToString();
+    }
 }
+

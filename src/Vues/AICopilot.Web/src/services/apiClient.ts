@@ -1,62 +1,174 @@
-﻿import { token, baseUrl } from "@/appsetting";
+import { baseUrl } from '@/appsetting'
 
-/**
- * 基础 API 客户端
- * 封装了 fetch，统一处理 URL 前缀和 JSON 序列化
- */
-export const apiClient = {
-  /**
-   * 获取统一的请求头
-   */
-  getHeaders(): HeadersInit {
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}` // 注入认证头
-    };
-  },
+const TOKEN_KEY = 'aicopilot.auth.token'
 
-  /**
-   * 发送 POST 请求
-   */
-  async post<T>(endpoint: string, body: any): Promise<T> {
-    const response = await fetch(`${baseUrl}${endpoint}`, {
-      method: 'POST',
-      headers: this.getHeaders(),
-      body: JSON.stringify(body)
-    });
+let unauthorizedHandler: ((problem: ApiProblemDetails | null) => void | Promise<void>) | null = null
 
-    if (!response.ok) {
-      // 如果 401，提示 Token 可能过期
-      if (response.status === 401) {
-        console.error("Token 无效或已过期");
-      }
-      throw new Error(`API Error: ${response.statusText}`);
-    }
+type QueryValue = string | number | boolean | null | undefined
+type QueryParams = Record<string, QueryValue>
 
-    // 尝试解析 JSON
-    try {
-      return await response.json();
-    } catch {
-      return {} as T; // 处理空响应
-    }
-  },
+export interface ApiProblemDetails {
+  title?: string
+  detail?: string
+  status?: number
+  code?: string
+  missingPermissions?: string[]
+}
 
-  /**
-   * 发送 GET 请求
-   */
-  async get<T>(endpoint: string): Promise<T> {
-    const response = await fetch(`${baseUrl}${endpoint}`, {
-      method: 'GET',
-      headers: this.getHeaders()
-    });
+export class ApiError extends Error {
+  status: number
+  details?: unknown
 
-    if (!response.ok) {
-      if (response.status === 401) {
-        console.error("Token 无效或已过期，请更新 TEST_TOKEN");
-      }
-      throw new Error(`API Error: ${response.statusText}`);
-    }
-
-    return await response.json();
+  constructor(message: string, status: number, details?: unknown) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.details = details
   }
-};
+}
+
+export function setUnauthorizedHandler(
+  handler: ((problem: ApiProblemDetails | null) => void | Promise<void>) | null
+) {
+  unauthorizedHandler = handler
+}
+
+export function getAccessToken() {
+  return sessionStorage.getItem(TOKEN_KEY)
+}
+
+export function setAccessToken(token: string | null) {
+  if (token) {
+    sessionStorage.setItem(TOKEN_KEY, token)
+    return
+  }
+
+  sessionStorage.removeItem(TOKEN_KEY)
+}
+
+async function parseError(response: Response) {
+  try {
+    return await response.json()
+  } catch {
+    return undefined
+  }
+}
+
+export function getProblemDetails(details: unknown): ApiProblemDetails | null {
+  if (!details || typeof details !== 'object') {
+    return null
+  }
+
+  const candidate = details as Record<string, unknown>
+  return {
+    title: typeof candidate.title === 'string' ? candidate.title : undefined,
+    detail: typeof candidate.detail === 'string' ? candidate.detail : undefined,
+    status: typeof candidate.status === 'number' ? candidate.status : undefined,
+    code: typeof candidate.code === 'string' ? candidate.code : undefined,
+    missingPermissions: Array.isArray(candidate.missingPermissions)
+      ? candidate.missingPermissions.filter((item): item is string => typeof item === 'string')
+      : undefined
+  }
+}
+
+export function getProblemCode(details: unknown) {
+  return getProblemDetails(details)?.code
+}
+
+export function getProblemDetail(details: unknown) {
+  return getProblemDetails(details)?.detail
+}
+
+export function getMissingPermissions(details: unknown) {
+  return getProblemDetails(details)?.missingPermissions ?? []
+}
+
+async function notifyUnauthorized(problem: ApiProblemDetails | null) {
+  if (unauthorizedHandler) {
+    await unauthorizedHandler(problem)
+  }
+}
+
+function buildUrl(endpoint: string, query?: QueryParams) {
+  const url = new URL(`${baseUrl}${endpoint}`, window.location.origin)
+
+  if (query) {
+    for (const [key, value] of Object.entries(query)) {
+      if (value === null || value === undefined || value === '') {
+        continue
+      }
+
+      url.searchParams.set(key, String(value))
+    }
+  }
+
+  return url.toString()
+}
+
+async function request<T>(endpoint: string, init: RequestInit = {}, query?: QueryParams): Promise<T> {
+  const headers = new Headers(init.headers ?? {})
+  headers.set('Accept', 'application/json')
+
+  const token = getAccessToken()
+  const hasAuthToken = Boolean(token)
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+
+  if (init.body && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
+
+  const response = await fetch(buildUrl(endpoint, query), {
+    ...init,
+    headers
+  })
+
+  if (!response.ok) {
+    const details = await parseError(response)
+    if (response.status === 401 && hasAuthToken) {
+      await notifyUnauthorized(getProblemDetails(details))
+    }
+
+    throw new ApiError(`API Error: ${response.status}`, response.status, details)
+  }
+
+  if (response.status === 204) {
+    return undefined as T
+  }
+
+  const text = await response.text()
+  if (!text) {
+    return undefined as T
+  }
+
+  return JSON.parse(text) as T
+}
+
+export const apiClient = {
+  request,
+  get<T>(endpoint: string, query?: QueryParams) {
+    return request<T>(endpoint, { method: 'GET' }, query)
+  },
+  post<T>(endpoint: string, body: unknown) {
+    return request<T>(endpoint, {
+      method: 'POST',
+      body: JSON.stringify(body)
+    })
+  },
+  put<T>(endpoint: string, body: unknown) {
+    return request<T>(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(body)
+    })
+  },
+  delete<T>(endpoint: string, body?: unknown) {
+    return request<T>(
+      endpoint,
+      {
+        method: 'DELETE',
+        body: body === undefined ? undefined : JSON.stringify(body)
+      }
+    )
+  }
+}

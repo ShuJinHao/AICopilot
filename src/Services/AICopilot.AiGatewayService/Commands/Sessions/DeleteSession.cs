@@ -2,7 +2,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
-using AICopilot.Services.Common.Attributes;
+using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.SharedKernel.Messaging;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;

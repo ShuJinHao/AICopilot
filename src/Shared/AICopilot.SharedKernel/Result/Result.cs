@@ -31,9 +31,8 @@ public class Result<T> : IResult
 
     public static implicit operator Result<T>(Result result)
     {
-        return new Result<T>(default(T))
+        return new Result<T>(result.Status)
         {
-            Status = result.Status,
             Errors = result.Errors
         };
     }
@@ -98,11 +97,27 @@ public class Result : Result<Result>
         return new Result(ResultStatus.Forbidden);
     }
 
+    public static Result Forbidden(ApiProblemDescriptor problem)
+    {
+        return new Result(ResultStatus.Forbidden)
+        {
+            Errors = [problem]
+        };
+    }
+
     public static Result Unauthorized(params string[] error)
     {
         return new Result(ResultStatus.Unauthorized)
         {
             Errors = error.AsEnumerable()
+        };
+    }
+
+    public static Result Unauthorized(ApiProblemDescriptor problem)
+    {
+        return new Result(ResultStatus.Unauthorized)
+        {
+            Errors = [problem]
         };
     }
 

@@ -1,176 +1,355 @@
-﻿using AICopilot.AiGatewayService.Models;
-using AICopilot.AiGatewayService.Workflows;
-using AICopilot.Core.AiGateway.Aggregates.Sessions; // 引用实体
-using AICopilot.Services.Common.Attributes;
-using AICopilot.Services.Common.Contracts;
-using AICopilot.Services.Common.Helper;
-using AICopilot.SharedKernel.Repository; // 引用仓储接口
-using MediatR;
-using Microsoft.Agents.AI.Workflows;
-using Microsoft.Extensions.AI;
-using Microsoft.Extensions.DependencyInjection;
-using System;
-using System.Collections.Generic;
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization;
+using AICopilot.AiGatewayService.Approvals;
+using AICopilot.AiGatewayService.Models;
+using AICopilot.AiGatewayService.Safety;
+using AICopilot.AiGatewayService.Sessions;
+using AICopilot.AiGatewayService.Workflows;
+using AICopilot.Core.AiGateway.Aggregates.Sessions;
+using AICopilot.Services.CrossCutting.Attributes;
+using AICopilot.Services.Contracts;
+using AICopilot.SharedKernel.Repository;
+using AICopilot.SharedKernel.Result;
+using MediatR;
 
 namespace AICopilot.AiGatewayService.Agents;
 
 [AuthorizeRequirement("AiGateway.Chat")]
-// CallId 列表：如果不为空，表示这是一次针对特定工具调用的审批响应
-public record ChatStreamRequest(Guid SessionId, string Message, List<string>? CallIds) : IStreamRequest<ChatChunk>;
+public record ChatStreamRequest(Guid SessionId, string Message) : IStreamRequest<ChatChunk>;
+
+[AuthorizeRequirement("AiGateway.Chat")]
+public record ApprovalDecisionStreamRequest(
+    Guid SessionId,
+    string CallId,
+    string Decision,
+    bool OnsiteConfirmed) : IStreamRequest<ChatChunk>;
 
 public class ChatStreamHandler(
-    IDataQueryService queryService,
-    WorkflowFactory workflowFactory)
+    IReadRepository<Session> sessionRepository,
+    ChatWorkflowOrchestrator workflowOrchestrator,
+    SessionMessagePersistenceService messagePersistenceService,
+    IOperationalBoundaryPolicy operationalBoundaryPolicy,
+    IManufacturingSceneClassifier sceneClassifier)
     : IStreamRequestHandler<ChatStreamRequest, ChatChunk>
 {
-    // 内存状态存储：SessionId -> 挂起的 AgentContext
-    private static readonly Dictionary<Guid, FinalAgentContext> AgentContexts = new();
-
-    public async IAsyncEnumerable<ChatChunk> Handle(ChatStreamRequest request, [EnumeratorCancellation] CancellationToken ct)
+    public async IAsyncEnumerable<ChatChunk> Handle(
+        ChatStreamRequest request,
+        [EnumeratorCancellation] CancellationToken ct)
     {
-        // 1. 基础校验
-        if (!queryService.Sessions.Any(session => session.Id == request.SessionId))
+        var assistantText = new StringBuilder();
+        var pendingMessages = new List<SessionMessageAppend>();
+        if (!string.IsNullOrWhiteSpace(request.Message))
         {
-            throw new Exception("未找到会话");
+            pendingMessages.Add(new SessionMessageAppend(request.Message, MessageType.User));
         }
 
-        // 2. 路由判断：是审批响应还是新对话？
-        if (request.CallIds != null && request.CallIds.Count != 0)
+        Exception? failure = null;
+        await using var enumerator = HandleCore(request, assistantText, ct).GetAsyncEnumerator(ct);
+
+        while (true)
         {
-            // --- 分支 A：处理审批响应 ---
-
-            // 尝试从内存中取出之前挂起的 Context
-            AgentContexts.TryGetValue(request.SessionId, out var agentContext);
-            if (agentContext == null)
+            bool hasNext;
+            try
             {
-                throw new Exception("会话已过期或上下文丢失，无法完成审批流程。");
+                hasNext = await enumerator.MoveNextAsync();
+            }
+            catch (OperationCanceledException)
+            {
+                yield break;
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+                break;
             }
 
-            // 更新 Context 状态
-            agentContext.InputText = request.Message; // "批准" 或 "拒绝"
-            agentContext.FunctionApprovalCallIds.AddRange(request.CallIds); // 用户批准的 ID 列表
-
-            // 创建仅包含 AgentRun 阶段的短工作流
-            // 我们不需要重新执行 Build，直接复用现有的 AgentContext
-            var workflow = workflowFactory.CreateFinalAgentRunWorkflow();
-
-            // 启动工作流（传入AgentContext）
-            await using var workflowRun = await InProcessExecution.StreamAsync(workflow, agentContext, cancellationToken: ct);
-
-            // 监听并转发事件
-            await foreach (var chatChunk in RunWorkflow(workflowRun, request.SessionId, ct))
+            if (!hasNext)
             {
-                yield return chatChunk;
+                break;
             }
 
-            // 流程结束后，如果所有审批请求都处理完了，就可以移除缓存
-            if (agentContext.FunctionApprovalRequestContents.Count == 0)
+            yield return enumerator.Current;
+        }
+
+        if (failure != null)
+        {
+            yield return ChatStreamRuntime.CreateErrorChunk(
+                assistantText,
+                failure,
+                nameof(ChatStreamHandler),
+                AppProblemCodes.ChatStreamFailed,
+                "对话执行失败，请稍后重试。");
+        }
+
+        if (assistantText.Length > 0)
+        {
+            pendingMessages.Add(new SessionMessageAppend(assistantText.ToString(), MessageType.Assistant));
+        }
+
+        await messagePersistenceService.AppendBatchAsync(request.SessionId, pendingMessages, ct);
+    }
+
+    private async IAsyncEnumerable<ChatChunk> HandleCore(
+        ChatStreamRequest request,
+        StringBuilder assistantText,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        var session = await ChatStreamRuntime.LoadSessionAsync(sessionRepository, request.SessionId, ct);
+        if (session == null)
+        {
+            yield return ChatStreamRuntime.CreateErrorChunk(
+                assistantText,
+                "session_not_found",
+                "未找到对应的会话。",
+                nameof(ChatStreamHandler),
+                "当前会话不存在或已被删除，请刷新后重试。");
+            yield break;
+        }
+
+        var sceneDecision = sceneClassifier.Classify(request.Message);
+        var blockedByPolicy = operationalBoundaryPolicy.TryBlockControlRequest(request.Message, out var policyDecision);
+        OperationalBoundaryDecision? boundaryDecision = policyDecision;
+
+        if (sceneDecision.Scene == ManufacturingSceneType.ControlBlocked || blockedByPolicy)
+        {
+            boundaryDecision ??= new OperationalBoundaryDecision(
+                AppProblemCodes.ControlActionBlocked,
+                "AICopilot 只提供观察、诊断、建议和知识问答，不执行任何控制动作。",
+                "我不能直接执行重启、写参数、下发配方、写入 PLC 或状态切换。如果需要，我可以继续给出诊断结论、风险提示和人工执行前检查项。");
+            assistantText.Append(boundaryDecision.UserFacingMessage);
+            yield return ChatStreamRuntime.CreateErrorChunk(
+                boundaryDecision.Code,
+                boundaryDecision.Detail,
+                "OperationalBoundaryPolicy",
+                boundaryDecision.UserFacingMessage);
+            yield break;
+        }
+
+        await foreach (var chatChunk in workflowOrchestrator.RunIntentWorkflowAsync(
+                           request,
+                           session,
+                           assistantText,
+                           ct))
+        {
+            yield return chatChunk;
+        }
+    }
+}
+
+public class ApprovalDecisionStreamHandler(
+    IReadRepository<Session> sessionRepository,
+    ICurrentUser currentUser,
+    ChatWorkflowOrchestrator workflowOrchestrator,
+    SessionMessagePersistenceService messagePersistenceService,
+    IFinalAgentContextStore finalAgentContextStore,
+    IFinalAgentContextSerializer finalAgentContextSerializer,
+    ApprovalRequirementResolver approvalRequirementResolver,
+    ISessionExecutionLock sessionExecutionLock)
+    : IStreamRequestHandler<ApprovalDecisionStreamRequest, ChatChunk>
+{
+    public async IAsyncEnumerable<ChatChunk> Handle(
+        ApprovalDecisionStreamRequest request,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        var assistantText = new StringBuilder();
+        var pendingMessages = new List<SessionMessageAppend>();
+        Exception? failure = null;
+        IAsyncDisposable? sessionLock = null;
+
+        try
+        {
+            sessionLock = await sessionExecutionLock.AcquireAsync(request.SessionId, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            yield break;
+        }
+        catch (Exception exception)
+        {
+            failure = exception;
+        }
+
+        if (sessionLock is not null)
+        {
+            await using var acquiredLock = sessionLock;
+            await using var enumerator = HandleCore(request, assistantText, pendingMessages, ct).GetAsyncEnumerator(ct);
+            while (true)
             {
-                AgentContexts.Remove(request.SessionId);
+                bool hasNext;
+                try
+                {
+                    hasNext = await enumerator.MoveNextAsync();
+                }
+                catch (OperationCanceledException)
+                {
+                    yield break;
+                }
+                catch (Exception exception)
+                {
+                    failure = exception;
+                    break;
+                }
+
+                if (!hasNext)
+                {
+                    break;
+                }
+
+                yield return enumerator.Current;
             }
+        }
+
+        if (failure != null)
+        {
+            yield return ChatStreamRuntime.CreateErrorChunk(
+                assistantText,
+                failure,
+                nameof(ApprovalDecisionStreamHandler),
+                AppProblemCodes.ApprovalStreamFailed,
+                "审批处理失败，请稍后重试。");
+        }
+
+        if (assistantText.Length > 0)
+        {
+            pendingMessages.Add(new SessionMessageAppend(assistantText.ToString(), MessageType.Assistant));
+        }
+
+        await messagePersistenceService.AppendBatchAsync(request.SessionId, pendingMessages, ct);
+    }
+
+    private async IAsyncEnumerable<ChatChunk> HandleCore(
+        ApprovalDecisionStreamRequest request,
+        StringBuilder assistantText,
+        ICollection<SessionMessageAppend> pendingMessages,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        var session = await ChatStreamRuntime.LoadSessionAsync(sessionRepository, request.SessionId, ct);
+        if (session == null)
+        {
+            yield return ChatStreamRuntime.CreateErrorChunk(
+                assistantText,
+                "session_not_found",
+                "未找到对应的会话。",
+                nameof(ApprovalDecisionStreamHandler),
+                "当前会话不存在或已被删除，请刷新后重试。");
+            yield break;
+        }
+
+        if (currentUser.Id != session.UserId)
+        {
+            yield return ChatStreamRuntime.CreateErrorChunk(
+                assistantText,
+                AuthProblemCodes.MissingPermission,
+                "当前用户无权操作该会话。",
+                nameof(ApprovalDecisionStreamHandler),
+                "当前账号无权操作该会话。");
+            yield break;
+        }
+
+        var storedContext = await finalAgentContextStore.GetAsync(request.SessionId, ct);
+        if (storedContext == null)
+        {
+            yield return ChatStreamRuntime.CreateErrorChunk(
+                assistantText,
+                AppProblemCodes.ApprovalAlreadyProcessed,
+                "审批上下文已过期，请重新发起本次诊断或建议请求。",
+                nameof(ApprovalDecisionStreamHandler),
+                "审批上下文已过期，请重新发起本次诊断或建议请求。");
+            yield break;
+        }
+
+        var storedApproval = storedContext.PendingApprovals
+            .FirstOrDefault(item => string.Equals(item.CallId, request.CallId, StringComparison.Ordinal));
+        if (storedApproval == null)
+        {
+            yield return ChatStreamRuntime.CreateErrorChunk(
+                assistantText,
+                AppProblemCodes.ApprovalAlreadyProcessed,
+                "该审批请求已处理或已失效。",
+                nameof(ApprovalDecisionStreamHandler),
+                "该审批请求已处理或已失效，请重新发起新的诊断请求。");
+            yield break;
+        }
+
+        bool isApproved;
+        var decision = request.Decision.Trim();
+        if (string.Equals(decision, "approved", StringComparison.OrdinalIgnoreCase))
+        {
+            isApproved = true;
+        }
+        else if (string.Equals(decision, "rejected", StringComparison.OrdinalIgnoreCase))
+        {
+            isApproved = false;
         }
         else
         {
-            // --- 分支 B：处理新对话 ---
-
-            // 创建完整的意图识别工作流 (Intent -> ... -> Build -> Run)
-            var workflow = workflowFactory.CreateIntentWorkflow();
-
-            // 启动工作流（传入用户请求）
-            await using var workflowRun = await InProcessExecution.StreamAsync(workflow, request, cancellationToken: ct);
-
-            // 监听并转发事件
-            await foreach (var chatChunk in RunWorkflow(workflowRun, request.SessionId, ct))
-            {
-                yield return chatChunk;
-            }
-            ;
+            yield return ChatStreamRuntime.CreateErrorChunk(
+                assistantText,
+                "invalid_approval_decision",
+                "审批决策只能是 approved 或 rejected。",
+                nameof(ApprovalDecisionStreamHandler),
+                "审批决策无效，请重新选择批准或拒绝。");
+            yield break;
         }
-    }
 
-    // 事件转换逻辑：将工作流事件转换为前端可消费的 ChatChunk
-    // [增加] 监听函数审批请求对象
-    private async IAsyncEnumerable<ChatChunk> RunWorkflow(StreamingRun workflowRun, Guid sessionId, CancellationToken ct)
-    {
-        await foreach (var workflowEvent in workflowRun.WatchStreamAsync(ct))
+        var toolName = storedApproval.ToolName ?? storedApproval.CallId;
+        var requirement = await approvalRequirementResolver.GetMergedRequirementByToolNameAsync(toolName, ct);
+        var nowUtc = DateTimeOffset.UtcNow;
+
+        if (isApproved && requirement.RequiresOnsiteAttestation)
         {
-            Console.WriteLine(workflowEvent);
-            switch (workflowEvent)
+            if (!session.OnsiteConfirmationExpiresAt.HasValue || !session.OnsiteConfirmedAt.HasValue)
             {
-                case WorkflowOutputEvent evt:
-                    if (evt.Data is FinalAgentContext agentContext && agentContext.FunctionApprovalRequestContents.Count != 0)
-                    {
-                        AgentContexts.TryAdd(sessionId, agentContext);
-                    }
-                    break;
-
-                case ExecutorFailedEvent evt:
-                    yield return new ChatChunk(evt.ExecutorId, ChunkType.Error, evt.Data?.Message ?? string.Empty);
-                    break;
-
-                case AgentRunResponseEvent evt:
-                    switch (evt.ExecutorId)
-                    {
-                        case "IntentRoutingExecutor":
-                            yield return new ChatChunk(evt.ExecutorId, ChunkType.Intent, evt.Response.Text);
-                            break;
-
-                        case "DataAnalysisExecutor":
-                            yield return new ChatChunk(evt.ExecutorId, ChunkType.Widget, evt.Response.Text);
-                            break;
-                    }
-                    break;
-
-                case AgentRunUpdateEvent evt:
-                    foreach (var evtContent in evt.Update.Contents)
-                    {
-#pragma warning disable MEAI001 // 类型仅用于评估，在将来的更新中可能会被更改或删除。取消此诊断以继续。
-                        switch (evtContent)
-                        {
-                            case TextContent content:
-                                yield return new ChatChunk(evt.ExecutorId, ChunkType.Text, content.Text);
-                                break;
-
-                            case FunctionCallContent content:
-                                var fun = new
-                                {
-                                    id = content.CallId,
-                                    name = content.Name,
-                                    args = content.Arguments
-                                };
-                                yield return new ChatChunk(evt.ExecutorId, ChunkType.FunctionCall, fun.ToJson());
-                                break;
-
-                            case FunctionResultContent content:
-                                var result = new
-                                {
-                                    id = content.CallId,
-                                    result = content.Result
-                                };
-                                yield return new ChatChunk(evt.ExecutorId, ChunkType.FunctionResult,
-                                    result.ToJson());
-                                break;
-
-                            case FunctionApprovalRequestContent content:
-                                // 监听函数审批请求对象
-                                var approval = new
-                                {
-                                    callId = content.FunctionCall.CallId,
-                                    name = content.FunctionCall.Name,
-                                    args = content.FunctionCall.Arguments
-                                };
-                                yield return new ChatChunk(evt.ExecutorId, ChunkType.ApprovalRequest,
-                                    approval.ToJson());
-                                break;
-                        }
-#pragma warning restore MEAI001 // 类型仅用于评估，在将来的更新中可能会被更改或删除。取消此诊断以继续。
-                    }
-                    break;
+                yield return ChatStreamRuntime.CreateErrorChunk(
+                    assistantText,
+                    AppProblemCodes.OnsitePresenceRequired,
+                    "该工具能力要求先完成会话级人工在岗声明。",
+                    nameof(ApprovalDecisionStreamHandler),
+                    "该建议需要先确认现场有人在岗，请先设置在岗声明。");
+                yield break;
             }
+
+            if (!session.HasValidOnsiteAttestation(nowUtc))
+            {
+                yield return ChatStreamRuntime.CreateErrorChunk(
+                    assistantText,
+                    AppProblemCodes.OnsitePresenceExpired,
+                    "当前会话的在岗声明已过期，请重新确认人工在场状态。",
+                    nameof(ApprovalDecisionStreamHandler),
+                    "当前会话的在岗声明已过期，请重新确认现场有人在岗。");
+                yield break;
+            }
+
+            if (!request.OnsiteConfirmed)
+            {
+                yield return ChatStreamRuntime.CreateErrorChunk(
+                    assistantText,
+                    AppProblemCodes.ApprovalReconfirmationRequired,
+                    "审批前必须再次显式确认现场有人在岗。",
+                    nameof(ApprovalDecisionStreamHandler),
+                    "批准前需要再次确认现场有人在岗。");
+                yield break;
+            }
+        }
+
+        pendingMessages.Add(new SessionMessageAppend(
+            ChatStreamRuntime.BuildApprovalSummary(
+                toolName,
+                isApproved,
+                request.OnsiteConfirmed,
+                requirement.RequiresOnsiteAttestation),
+            MessageType.User));
+
+        await using var agentContext = await finalAgentContextSerializer.RestoreAsync(storedContext, ct);
+        agentContext.ApprovalDecisions.Add(new FunctionApprovalDecision(request.CallId, isApproved, request.OnsiteConfirmed));
+
+        await foreach (var chatChunk in workflowOrchestrator.ResumeFinalAgentAsync(
+                           agentContext,
+                           session,
+                           assistantText,
+                           ct))
+        {
+            yield return chatChunk;
         }
     }
 }

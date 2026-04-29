@@ -19,18 +19,25 @@ public class BusinessDatabase : IAggregateRoot
         string name,
         string description,
         string connectionString,
-        DbProviderType provider)
+        DbProviderType provider,
+        bool isReadOnly = true)
     {
+        ValidateInfo(name, description);
+        ValidateConnection(connectionString, provider);
+
         Id = Guid.NewGuid();
-        Name = name;
-        Description = description;
-        ConnectionString = connectionString;
+        Name = name.Trim();
+        Description = description.Trim();
+        ConnectionString = connectionString.Trim();
         Provider = provider;
+        IsReadOnly = isReadOnly;
         IsEnabled = true;
         CreatedAt = DateTime.UtcNow;
     }
 
-    public Guid Id { get; set; }
+    public Guid Id { get; private set; }
+
+    public uint RowVersion { get; private set; }
 
     /// <summary>
     /// 数据库标识名称
@@ -55,6 +62,11 @@ public class BusinessDatabase : IAggregateRoot
     public DbProviderType Provider { get; private set; }
 
     /// <summary>
+    /// 是否只允许只读查询
+    /// </summary>
+    public bool IsReadOnly { get; private set; }
+
+    /// <summary>
     /// 是否启用
     /// </summary>
     public bool IsEnabled { get; private set; }
@@ -66,8 +78,16 @@ public class BusinessDatabase : IAggregateRoot
     /// </summary>
     public void UpdateConnection(string connectionString, DbProviderType provider)
     {
-        ConnectionString = connectionString;
+        ValidateConnection(connectionString, provider);
+
+        ConnectionString = connectionString.Trim();
         Provider = provider;
+    }
+
+    public void UpdateSettings(bool isEnabled, bool isReadOnly)
+    {
+        IsEnabled = isEnabled;
+        IsReadOnly = isReadOnly;
     }
 
     /// <summary>
@@ -75,7 +95,35 @@ public class BusinessDatabase : IAggregateRoot
     /// </summary>
     public void UpdateInfo(string name, string description)
     {
-        Name = name;
-        Description = description;
+        ValidateInfo(name, description);
+
+        Name = name.Trim();
+        Description = description.Trim();
+    }
+
+    private static void ValidateInfo(string name, string description)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new ArgumentException("Business database name is required.", nameof(name));
+        }
+
+        if (string.IsNullOrWhiteSpace(description))
+        {
+            throw new ArgumentException("Business database description is required.", nameof(description));
+        }
+    }
+
+    private static void ValidateConnection(string connectionString, DbProviderType provider)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            throw new ArgumentException("Business database connection string is required.", nameof(connectionString));
+        }
+
+        if (!Enum.IsDefined(typeof(DbProviderType), provider))
+        {
+            throw new ArgumentOutOfRangeException(nameof(provider), provider, "Business database provider is invalid.");
+        }
     }
 }

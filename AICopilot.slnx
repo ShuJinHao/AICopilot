@@ -8,12 +8,14 @@
   </Folder>
   <Folder Name="/src/Hosts/">
     <Project Path="src/Hosts/AICopilot.AppHost/AICopilot.AppHost.csproj" />
+    <Project Path="src/Hosts/AICopilot.DataWorker/AICopilot.DataWorker.csproj" />
     <Project Path="src/Hosts/AICopilot.HttpApi/AICopilot.HttpApi.csproj" />
     <Project Path="src/Hosts/AICopilot.MigrationWorkApp/AICopilot.MigrationWorkApp.csproj" />
     <Project Path="src/Hosts/AICopilot.RagWorker/AICopilot.RagWorker.csproj" />
     <Project Path="src/Hosts/AICopilot.ServiceDefaults/AICopilot.ServiceDefaults.csproj" />
   </Folder>
   <Folder Name="/src/Infrastructure/">
+    <Project Path="src/Infrastructure/AICopilot.AiRuntime/AICopilot.AiRuntime.csproj" />
     <Project Path="src/Infrastructure/AICopilot.Dapper/AICopilot.Dapper.csproj" Id="7d0469b8-798c-4508-bd9d-7b80085d5e17" />
     <Project Path="src/Infrastructure/AICopilot.Embedding/AICopilot.Embedding.csproj" Id="6803c21b-818b-4429-adf1-e4c4edda19f7" />
     <Project Path="src/Infrastructure/AICopilot.EntityFrameworkCore/AICopilot.EntityFrameworkCore.csproj" Id="fc5ebf86-137f-4da9-8e82-8567e320240f" />
@@ -26,11 +28,17 @@
     <Project Path="src/Services/AICopilot.IdentityService/AICopilot.IdentityService.csproj" Id="c6f38764-fdcc-4285-b174-687229d5195d" />
     <Project Path="src/Services/AICopilot.McpService/AICopilot.McpService.csproj" Id="f1a32f07-89c7-4feb-878d-e99838b40619" />
     <Project Path="src/Services/AICopilot.RagService/AICopilot.RagService.csproj" Id="b3346dda-ab49-4847-b854-857a0d09369f" />
-    <Project Path="src/Services/AICopilot.Services.Common/AICopilot.Services.Common.csproj" Id="59517a8e-191a-450d-a354-a37ca72ba5db" />
+    <Project Path="src/Services/AICopilot.Services.Contracts/AICopilot.Services.Contracts.csproj" Id="59517a8e-191a-450d-a354-a37ca72ba5db" />
+    <Project Path="src/Services/AICopilot.Services.CrossCutting/AICopilot.Services.CrossCutting.csproj" />
   </Folder>
   <Folder Name="/src/Shared/">
     <Project Path="src/Shared/AICopilot.AgentPlugin/AICopilot.AgentPlugin.csproj" Id="f31c1792-6f2b-4297-a87a-6d4962c5dabd" />
     <Project Path="src/Shared/AICopilot.SharedKernel/AICopilot.SharedKernel.csproj" Id="9d341780-8e35-4092-92b5-1e3356ae8efa" />
     <Project Path="src/Shared/AICopilot.Visualization/AICopilot.Visualization.csproj" Id="1ca00ef7-e8d3-41ae-bb71-4915e45478ce" />
+  </Folder>
+  <Folder Name="/src/Tests/">
+    <Project Path="src/Tests/AICopilot.ArchitectureTests/AICopilot.ArchitectureTests.csproj" />
+    <Project Path="src/Tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj" />
+    <Project Path="src/Tests/AICopilot.Testing.McpServer/AICopilot.Testing.McpServer.csproj" />
   </Folder>
 </Solution>

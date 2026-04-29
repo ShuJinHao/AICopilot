@@ -1,11 +1,10 @@
 ﻿using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
-using AICopilot.Services.Common.Attributes;
-using AICopilot.Services.Common.Contracts;
-using AICopilot.Services.Common.Events;
+using AICopilot.Services.CrossCutting.Attributes;
+using AICopilot.Services.Contracts;
+using AICopilot.Services.Contracts.Events;
 using AICopilot.SharedKernel.Messaging;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
-using MassTransit;
 using System;
 using System.Collections.Generic;
 using System.Security.Cryptography;
@@ -25,7 +24,7 @@ public record UploadDocumentCommand(
 public class UploadDocumentCommandHandler(
     IRepository<KnowledgeBase> kbRepo,
     IFileStorageService fileStorage,
-    IPublishEndpoint publishEndpoint)
+    IIntegrationEventPublisher eventPublisher)
     : ICommandHandler<UploadDocumentCommand, Result<UploadDocumentDto>>
 {
     public async Task<Result<UploadDocumentDto>> Handle(
@@ -77,7 +76,7 @@ public class UploadDocumentCommandHandler(
         await kbRepo.SaveChangesAsync(cancellationToken);
 
         // 7. 发送集成事件 (通知后台 Worker 开始索引)
-        await publishEndpoint.Publish(new DocumentUploadedEvent
+        await eventPublisher.PublishAsync(new DocumentUploadedEvent
         {
             DocumentId = document.Id,
             KnowledgeBaseId = kb.Id,

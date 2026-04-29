@@ -1,0 +1,261 @@
+﻿using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
+using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
+using AICopilot.Core.AiGateway.Specifications.ApprovalPolicy;
+using AICopilot.Core.McpServer.Specifications.McpServerInfo;
+using AICopilot.Services.CrossCutting.Attributes;
+using AICopilot.SharedKernel.Ai;
+using AICopilot.SharedKernel.Messaging;
+using AICopilot.SharedKernel.Repository;
+using AICopilot.SharedKernel.Result;
+
+namespace AICopilot.McpService.McpServers;
+
+public record McpToolPolicySummaryDto
+{
+    public required string ToolName { get; init; }
+    public bool RequiresApproval { get; init; }
+    public bool RequiresOnsiteAttestation { get; init; }
+}
+
+public record McpServerDto
+{
+    public Guid Id { get; init; }
+    public required string Name { get; init; }
+    public required string Description { get; init; }
+    public required McpTransportType TransportType { get; init; }
+    public string? Command { get; init; }
+    public bool HasArguments { get; init; }
+    public string? ArgumentsMasked { get; init; }
+    public ChatExposureMode ChatExposureMode { get; init; }
+    public IReadOnlyCollection<string> AllowedToolNames { get; init; } = [];
+    public IReadOnlyCollection<McpToolPolicySummaryDto> ToolPolicySummaries { get; init; } = [];
+    public bool IsEnabled { get; init; }
+}
+
+public record CreatedMcpServerDto(Guid Id, string Name);
+
+[AuthorizeRequirement("Mcp.CreateServer")]
+public record CreateMcpServerCommand(
+    string Name,
+    string Description,
+    McpTransportType TransportType,
+    string? Command,
+    string Arguments,
+    ChatExposureMode ChatExposureMode = ChatExposureMode.Disabled,
+    IReadOnlyCollection<string>? AllowedToolNames = null,
+    bool IsEnabled = true) : ICommand<Result<CreatedMcpServerDto>>;
+
+public class CreateMcpServerCommandHandler(IRepository<McpServerInfo> repository)
+    : ICommandHandler<CreateMcpServerCommand, Result<CreatedMcpServerDto>>
+{
+    public async Task<Result<CreatedMcpServerDto>> Handle(
+        CreateMcpServerCommand request,
+        CancellationToken cancellationToken)
+    {
+        var entity = new McpServerInfo(
+            request.Name,
+            request.Description,
+            request.TransportType,
+            request.Command,
+            request.Arguments,
+            request.ChatExposureMode,
+            request.AllowedToolNames,
+            request.IsEnabled);
+
+        repository.Add(entity);
+        await repository.SaveChangesAsync(cancellationToken);
+
+        return Result.Success(new CreatedMcpServerDto(entity.Id, entity.Name));
+    }
+}
+
+[AuthorizeRequirement("Mcp.UpdateServer")]
+public record UpdateMcpServerCommand(
+    Guid Id,
+    string Name,
+    string Description,
+    McpTransportType TransportType,
+    string? Command,
+    string Arguments,
+    ChatExposureMode ChatExposureMode = ChatExposureMode.Disabled,
+    IReadOnlyCollection<string>? AllowedToolNames = null,
+    bool IsEnabled = true) : ICommand<Result>;
+
+public class UpdateMcpServerCommandHandler(IRepository<McpServerInfo> repository)
+    : ICommandHandler<UpdateMcpServerCommand, Result>
+{
+    public async Task<Result> Handle(UpdateMcpServerCommand request, CancellationToken cancellationToken)
+    {
+        var entity = await repository.GetByIdAsync(request.Id, cancellationToken);
+        if (entity == null)
+        {
+            return Result.NotFound();
+        }
+
+        entity.Update(
+            request.Name,
+            request.Description,
+            request.TransportType,
+            request.Command,
+            request.Arguments,
+            request.ChatExposureMode,
+            request.AllowedToolNames,
+            request.IsEnabled);
+
+        repository.Update(entity);
+        await repository.SaveChangesAsync(cancellationToken);
+        return Result.Success();
+    }
+}
+
+[AuthorizeRequirement("Mcp.DeleteServer")]
+public record DeleteMcpServerCommand(Guid Id) : ICommand<Result>;
+
+public class DeleteMcpServerCommandHandler(IRepository<McpServerInfo> repository)
+    : ICommandHandler<DeleteMcpServerCommand, Result>
+{
+    public async Task<Result> Handle(DeleteMcpServerCommand request, CancellationToken cancellationToken)
+    {
+        var entity = await repository.GetByIdAsync(request.Id, cancellationToken);
+        if (entity == null)
+        {
+            return Result.Success();
+        }
+
+        repository.Delete(entity);
+        await repository.SaveChangesAsync(cancellationToken);
+        return Result.Success();
+    }
+}
+
+[AuthorizeRequirement("Mcp.GetServer")]
+public record GetMcpServerQuery(Guid Id) : IQuery<Result<McpServerDto>>;
+
+public class GetMcpServerQueryHandler(
+    IReadRepository<McpServerInfo> serverRepository,
+    IReadRepository<ApprovalPolicy> approvalPolicyRepository)
+    : IQueryHandler<GetMcpServerQuery, Result<McpServerDto>>
+{
+    public async Task<Result<McpServerDto>> Handle(GetMcpServerQuery request, CancellationToken cancellationToken)
+    {
+        var server = await serverRepository.FirstOrDefaultAsync(new McpServerInfoByIdSpec(request.Id), cancellationToken);
+        if (server == null)
+        {
+            return Result.NotFound();
+        }
+
+        var policies = await LoadPoliciesAsync([server.Name], cancellationToken);
+        return Result.Success(McpServerDtoMapper.Map(server, policies));
+    }
+
+    private async Task<Dictionary<string, IReadOnlyCollection<ApprovalPolicy>>> LoadPoliciesAsync(
+        IReadOnlyCollection<string> serverNames,
+        CancellationToken cancellationToken)
+    {
+        if (serverNames.Count == 0)
+        {
+            return [];
+        }
+
+        var serverNameSet = new HashSet<string>(serverNames, StringComparer.OrdinalIgnoreCase);
+        var policies = await approvalPolicyRepository.ListAsync(
+            new EnabledApprovalPoliciesByTargetTypeSpec(ApprovalTargetType.McpServer),
+            cancellationToken);
+
+        return policies
+            .Where(policy => serverNameSet.Contains(policy.TargetName))
+            .GroupBy(policy => policy.TargetName, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyCollection<ApprovalPolicy>)group.ToArray(),
+                StringComparer.OrdinalIgnoreCase);
+    }
+
+}
+
+[AuthorizeRequirement("Mcp.GetListServers")]
+public record GetListMcpServersQuery : IQuery<Result<IList<McpServerDto>>>;
+
+public class GetListMcpServersQueryHandler(
+    IReadRepository<McpServerInfo> serverRepository,
+    IReadRepository<ApprovalPolicy> approvalPolicyRepository)
+    : IQueryHandler<GetListMcpServersQuery, Result<IList<McpServerDto>>>
+{
+    public async Task<Result<IList<McpServerDto>>> Handle(
+        GetListMcpServersQuery request,
+        CancellationToken cancellationToken)
+    {
+        var servers = await serverRepository.ListAsync(new McpServerInfosOrderedSpec(), cancellationToken);
+        var serverNames = servers.Select(server => server.Name).ToArray();
+
+        var serverNameSet = new HashSet<string>(serverNames, StringComparer.OrdinalIgnoreCase);
+        var policies = await approvalPolicyRepository.ListAsync(
+            new EnabledApprovalPoliciesByTargetTypeSpec(ApprovalTargetType.McpServer),
+            cancellationToken);
+
+        var policiesByTargetName = policies
+            .Where(policy => serverNameSet.Contains(policy.TargetName))
+            .GroupBy(policy => policy.TargetName, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyCollection<ApprovalPolicy>)group.ToArray(),
+                StringComparer.OrdinalIgnoreCase);
+
+        IList<McpServerDto> result = servers
+            .Select(server => McpServerDtoMapper.Map(server, policiesByTargetName))
+            .ToList();
+        return Result.Success(result);
+    }
+}
+
+internal static class McpServerDtoMapper
+{
+    public static McpServerDto Map(
+        McpServerInfo server,
+        IReadOnlyDictionary<string, IReadOnlyCollection<ApprovalPolicy>> policiesByTargetName)
+    {
+        policiesByTargetName.TryGetValue(server.Name, out var policies);
+
+        return new McpServerDto
+        {
+            Id = server.Id,
+            Name = server.Name,
+            Description = server.Description,
+            TransportType = server.TransportType,
+            Command = server.Command,
+            HasArguments = !string.IsNullOrEmpty(server.Arguments),
+            ArgumentsMasked = string.IsNullOrEmpty(server.Arguments) ? null : "******",
+            ChatExposureMode = server.ChatExposureMode,
+            AllowedToolNames = server.AllowedToolNames,
+            ToolPolicySummaries = BuildToolPolicySummaries(server.AllowedToolNames, policies),
+            IsEnabled = server.IsEnabled
+        };
+    }
+
+    private static IReadOnlyCollection<McpToolPolicySummaryDto> BuildToolPolicySummaries(
+        IReadOnlyCollection<string> allowedToolNames,
+        IReadOnlyCollection<ApprovalPolicy>? policies)
+    {
+        if (allowedToolNames.Count == 0)
+        {
+            return [];
+        }
+
+        var effectivePolicies = policies ?? [];
+        return allowedToolNames
+            .Select(toolName =>
+            {
+                var matchedPolicies = effectivePolicies
+                    .Where(policy => policy.ToolNames.Contains(toolName, StringComparer.OrdinalIgnoreCase))
+                    .ToArray();
+
+                return new McpToolPolicySummaryDto
+                {
+                    ToolName = toolName,
+                    RequiresApproval = matchedPolicies.Length > 0,
+                    RequiresOnsiteAttestation = matchedPolicies.Any(policy => policy.RequiresOnsiteAttestation)
+                };
+            })
+            .ToArray();
+    }
+}

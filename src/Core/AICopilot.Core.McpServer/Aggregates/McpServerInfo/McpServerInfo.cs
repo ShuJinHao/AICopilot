@@ -1,55 +1,128 @@
-﻿using AICopilot.SharedKernel.Domain;
+using AICopilot.SharedKernel.Ai;
+using AICopilot.SharedKernel.Domain;
 
-namespace AICopilot.Core.McpServer.Aggregates.McpServerInfo
+namespace AICopilot.Core.McpServer.Aggregates.McpServerInfo;
+
+/// <summary>
+/// 定义 MCP 服务的配置信息，作为聚合根存在。
+/// </summary>
+public class McpServerInfo : IAggregateRoot
 {
-    /// <summary>
-    /// 定义 MCP 服务的配置信息，作为聚合根存在
-    /// </summary>
-    public class McpServerInfo : IAggregateRoot
+    private readonly List<string> _allowedToolNames = [];
+
+    protected McpServerInfo()
     {
-        protected McpServerInfo()
+    }
+
+    public McpServerInfo(
+        string name,
+        string description,
+        McpTransportType transportType,
+        string? command,
+        string arguments,
+        ChatExposureMode chatExposureMode = ChatExposureMode.Disabled,
+        IEnumerable<string>? allowedToolNames = null,
+        bool isEnabled = true)
+    {
+        Id = Guid.NewGuid();
+        Update(name, description, transportType, command, arguments, chatExposureMode, allowedToolNames, isEnabled);
+    }
+
+    public Guid Id { get; private set; }
+
+    public uint RowVersion { get; private set; }
+
+    public string Name { get; private set; } = string.Empty;
+
+    public string Description { get; private set; } = string.Empty;
+
+    public McpTransportType TransportType { get; private set; }
+
+    public string? Command { get; private set; }
+
+    public string Arguments { get; private set; } = string.Empty;
+
+    public ChatExposureMode ChatExposureMode { get; private set; } = ChatExposureMode.Disabled;
+
+    public IReadOnlyCollection<string> AllowedToolNames => _allowedToolNames.AsReadOnly();
+
+    public bool IsEnabled { get; private set; }
+
+    public void Update(
+        string name,
+        string description,
+        McpTransportType transportType,
+        string? command,
+        string arguments,
+        ChatExposureMode chatExposureMode,
+        IEnumerable<string>? allowedToolNames,
+        bool isEnabled)
+    {
+        Validate(name, description, transportType, command, arguments, chatExposureMode);
+
+        Name = name.Trim();
+        Description = description.Trim();
+        TransportType = transportType;
+        Command = string.IsNullOrWhiteSpace(command) ? null : command.Trim();
+        Arguments = (arguments ?? string.Empty).Trim();
+        ChatExposureMode = chatExposureMode;
+        IsEnabled = isEnabled;
+
+        _allowedToolNames.Clear();
+        _allowedToolNames.AddRange(NormalizeAllowedToolNames(allowedToolNames));
+    }
+
+    private static void Validate(
+        string name,
+        string description,
+        McpTransportType transportType,
+        string? command,
+        string arguments,
+        ChatExposureMode chatExposureMode)
+    {
+        if (string.IsNullOrWhiteSpace(name))
         {
+            throw new ArgumentException("MCP server name is required.", nameof(name));
         }
 
-        public McpServerInfo(
-            string name,
-            string description,
-            McpTransportType transportType,
-            string? command,
-            string arguments,
-            List<string>? sensitiveTools = null)
+        if (string.IsNullOrWhiteSpace(description))
         {
-            Id = Guid.NewGuid();
-            Name = name;
-            Description = description;
-            TransportType = transportType;
-            Command = command;
-            Arguments = arguments;
-            IsEnabled = true;
-            SensitiveTools = sensitiveTools;
+            throw new ArgumentException("MCP server description is required.", nameof(description));
         }
 
-        public Guid Id { get; set; }
+        if (!Enum.IsDefined(typeof(McpTransportType), transportType))
+        {
+            throw new ArgumentOutOfRangeException(nameof(transportType), transportType, "MCP server transport type is invalid.");
+        }
 
-        // 服务名称，作为插件的唯一标识，例如 "github-server"
-        public string Name { get; private set; }
+        if (!Enum.IsDefined(typeof(ChatExposureMode), chatExposureMode))
+        {
+            throw new ArgumentOutOfRangeException(nameof(chatExposureMode), chatExposureMode, "MCP server chat exposure mode is invalid.");
+        }
 
-        // 服务描述
-        public string Description { get; private set; }
+        if (transportType == McpTransportType.Stdio && string.IsNullOrWhiteSpace(command))
+        {
+            throw new ArgumentException("MCP stdio server command is required.", nameof(command));
+        }
 
-        // 传输类型：Stdio 或 Sse
-        public McpTransportType TransportType { get; private set; }
+        if (transportType == McpTransportType.Sse && string.IsNullOrWhiteSpace(arguments))
+        {
+            throw new ArgumentException("MCP server arguments are required.", nameof(arguments));
+        }
 
-        // 针对 Stdio 的配置：可执行文件路径 (如 "node", "python")
-        public string? Command { get; private set; }
+        if (transportType == McpTransportType.Sse
+            && (!Uri.TryCreate(arguments.Trim(), UriKind.Absolute, out var uri)
+                || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)))
+        {
+            throw new ArgumentException("MCP SSE server arguments must be an absolute HTTP or HTTPS URL.", nameof(arguments));
+        }
+    }
 
-        // 针对 Stdio 的配置：启动参数 (如 "build/index.js")
-        // 针对 SSE 的配置：目标 URL
-        public string Arguments { get; private set; }
-
-        // 是否启用
-        public bool IsEnabled { get; private set; }
-
-        public List<string>? SensitiveTools { get; private set; }
+    private static IEnumerable<string> NormalizeAllowedToolNames(IEnumerable<string>? allowedToolNames)
+    {
+        return (allowedToolNames ?? [])
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => name.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase);
     }
 }

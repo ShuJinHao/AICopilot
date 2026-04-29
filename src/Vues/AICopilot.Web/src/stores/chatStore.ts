@@ -1,312 +1,596 @@
-﻿import {defineStore} from 'pinia';
-import {computed, ref} from 'vue';
-import {chatService} from '@/services/chatService.ts';
+import { computed, ref } from 'vue'
+import { defineStore } from 'pinia'
+import { ApiError } from '@/services/apiClient'
+import { chatService } from '@/services/chatService'
 import {
-  type ChatChunk,
-  ChunkType, type FunctionApprovalRequest,
-  type IntentResult,
+  ChunkType,
   MessageRole,
-  type Session, type Widget
-} from "@/types/protocols";
+  type ChatChunk,
+  type ChatErrorPayload,
+  type FunctionApprovalRequest,
+  type IntentResult,
+  type Session
+} from '@/types/protocols'
 import type {
   ApprovalChunk,
   ChatMessage,
   FunctionCall,
-  FunctionCallChunk, IntentChunk,
+  FunctionCallChunk,
+  IntentChunk,
   WidgetChunk
-} from "@/types/models.ts";
+} from '@/types/models'
+
+const CURRENT_SESSION_KEY = 'aicopilot.chat.currentSessionId'
+
+function isApprovalChunk(chunk: ChatChunk): chunk is ApprovalChunk {
+  return chunk.type === ChunkType.ApprovalRequest
+}
 
 export const useChatStore = defineStore('chat', () => {
-  // ================= 状态 (State) =================
-
-  const sessions = ref<Session[]>([]);
-  const currentSessionId = ref<string | null>(null);
-  const messagesMap = ref<Record<string, ChatMessage[]>>({});
-  const isStreaming = ref(false);
-  const isWaitingForApproval = ref(false);
-
-  // ================= 计算属性 =================
+  const sessions = ref<Session[]>([])
+  const currentSessionId = ref<string | null>(sessionStorage.getItem(CURRENT_SESSION_KEY))
+  const messagesMap = ref<Record<string, ChatMessage[]>>({})
+  const isStreaming = ref(false)
+  const isWaitingForApproval = ref(false)
+  const isLoadingHistory = ref(false)
+  const errorMessage = ref('')
 
   const currentMessages = computed(() => {
-    if (!currentSessionId.value) return [];
-    return messagesMap.value[currentSessionId.value] || [];
-  });
+    if (!currentSessionId.value) {
+      return []
+    }
+
+    return messagesMap.value[currentSessionId.value] || []
+  })
 
   const currentSession = computed(() => {
-    if (!currentSessionId.value) return { title: '当前没有选择会话' } as Session;
-    return sessions.value.find(session => session.id === currentSessionId.value)
-  });
+    if (!currentSessionId.value) {
+      return null
+    }
 
-  // ================= 动作 (Actions) =================
+    return sessions.value.find((session) => session.id === currentSessionId.value) ?? null
+  })
 
-  async function init() {
+  function persistCurrentSession(sessionId: string | null) {
+    currentSessionId.value = sessionId
+
+    if (sessionId) {
+      sessionStorage.setItem(CURRENT_SESSION_KEY, sessionId)
+      return
+    }
+
+    sessionStorage.removeItem(CURRENT_SESSION_KEY)
+  }
+
+  function upsertSession(session: Session) {
+    const index = sessions.value.findIndex((item) => item.id === session.id)
+    if (index >= 0) {
+      sessions.value[index] = session
+      return
+    }
+
+    sessions.value = [session, ...sessions.value]
+  }
+
+  function syncWaitingForApproval(sessionId: string | null = currentSessionId.value) {
+    if (!sessionId) {
+      isWaitingForApproval.value = false
+      return
+    }
+
+    const messages = messagesMap.value[sessionId] ?? []
+    isWaitingForApproval.value = messages.some((message) =>
+      message.chunks.some((chunk) => isApprovalChunk(chunk) && chunk.status === 'pending')
+    )
+  }
+
+  async function loadSessions() {
+    sessions.value = await chatService.getSessions()
+  }
+
+  async function loadHistory(sessionId: string, force = false) {
+    if (!force && messagesMap.value[sessionId]?.length) {
+      syncWaitingForApproval(sessionId)
+      return
+    }
+
+    isLoadingHistory.value = true
+
     try {
-      sessions.value = await chatService.getSessions();
-    } catch (error) {
-      console.error('无法加载会话', error);
+      const history = await chatService.getHistory(sessionId)
+      messagesMap.value[sessionId] = history.map((message) => ({
+        sessionId: message.sessionId,
+        role: message.role === MessageRole.User ? MessageRole.User : MessageRole.Assistant,
+        chunks: [
+          {
+            source: message.role === MessageRole.User ? 'User' : 'FinalAgentRunExecutor',
+            type: ChunkType.Text,
+            content: message.content
+          }
+        ],
+        isStreaming: false,
+        timestamp: new Date(message.createdAt).getTime()
+      }))
+      syncWaitingForApproval(sessionId)
+    } finally {
+      isLoadingHistory.value = false
     }
   }
 
-  async function createNewSession() {
-    const newSession = await chatService.createSession();
-    sessions.value.unshift(newSession);
-    currentSessionId.value = newSession.id;
-    messagesMap.value[newSession.id] = [];
-    isStreaming.value = false;
-    isWaitingForApproval.value = false;
+  async function initialize() {
+    errorMessage.value = ''
+    await loadSessions()
+
+    if (sessions.value.length === 0) {
+      await createNewSession()
+      return
+    }
+
+    const restoredSessionId = currentSessionId.value
+    const initialSession =
+      sessions.value.find((session) => session.id === restoredSessionId) ??
+      sessions.value[0] ??
+      null
+
+    if (!initialSession) {
+      persistCurrentSession(null)
+      return
+    }
+
+    await selectSession(initialSession.id)
   }
 
-  async function selectSession(id: string) {
-    currentSessionId.value = id;
-    isWaitingForApproval.value = false;
+  async function createNewSession() {
+    errorMessage.value = ''
+    const newSession = await chatService.createSession()
+    upsertSession(newSession)
+    messagesMap.value[newSession.id] = []
+    persistCurrentSession(newSession.id)
+    isStreaming.value = false
+    isWaitingForApproval.value = false
+    return newSession
+  }
+
+  async function selectSession(id: string, forceReload = false) {
+    errorMessage.value = ''
+    persistCurrentSession(id)
+    await loadHistory(id, forceReload)
+  }
+
+  async function confirmOnsitePresence(expiresInMinutes = 30) {
+    if (!currentSessionId.value) {
+      return
+    }
+
+    errorMessage.value = ''
+    const updatedSession = await chatService.updateSessionSafetyAttestation(
+      currentSessionId.value,
+      true,
+      expiresInMinutes
+    )
+    upsertSession(updatedSession)
+    return updatedSession
+  }
+
+  async function clearOnsitePresence() {
+    if (!currentSessionId.value) {
+      return
+    }
+
+    errorMessage.value = ''
+    const updatedSession = await chatService.updateSessionSafetyAttestation(
+      currentSessionId.value,
+      false
+    )
+    upsertSession(updatedSession)
+    return updatedSession
   }
 
   async function sendMessage(input: string) {
-    if (!currentSessionId.value || isStreaming.value) return;
+    if (!currentSessionId.value || isStreaming.value) {
+      return
+    }
 
-    const sessionId = currentSessionId.value;
+    const sessionId = currentSessionId.value
+    errorMessage.value = ''
 
-    const userMsg: ChatMessage = {
+    addMessage(sessionId, {
       sessionId,
       role: MessageRole.User,
-      chunks : [{
-        source: 'User',
-        type: ChunkType.Text,
-        content: input
-      }],
+      chunks: [
+        {
+          source: 'User',
+          type: ChunkType.Text,
+          content: input
+        }
+      ],
       isStreaming: false,
       timestamp: Date.now()
-    };
-    addMessage(sessionId, userMsg);
+    })
 
-    const aiMsg: ChatMessage = {
+    const assistantMessage = addMessage(sessionId, {
       sessionId,
       role: MessageRole.Assistant,
       chunks: [],
       isStreaming: true,
       timestamp: Date.now()
-    };
-    const targetMsg = addMessage(sessionId, aiMsg);
+    })
 
-    isStreaming.value = true;
-
-    await chatService.sendMessageStream(sessionId, input, {
-      onChunkReceived: (chunk: ChatChunk) => {
-        processChunk(targetMsg!, chunk);
-      },
-      onComplete: () => {
-        isStreaming.value = false;
-        targetMsg.isStreaming = false;
-      },
-      onError: (err) => {
-        isStreaming.value = false;
-      }
-    });
-  }
-
-  async function submitApproval(callId: string, chunk: ApprovalChunk) {
-    if (!currentSessionId.value) return;
-    const sessionId = currentSessionId.value;
+    isStreaming.value = true
 
     try {
-      isStreaming.value = true;
-      let targetMsg = getLastAssistantMessage(sessionId);
-      if (!targetMsg) {
-        targetMsg = addMessage(sessionId, {
-          sessionId,
-          role: MessageRole.Assistant,
-          chunks: [],
-          isStreaming: true,
-          timestamp: Date.now()
-        });
+      await chatService.sendMessageStream(sessionId, input, {
+        onChunkReceived(chunk) {
+          processChunk(assistantMessage, chunk)
+        },
+        onComplete() {
+          isStreaming.value = false
+          assistantMessage.isStreaming = false
+          syncWaitingForApproval(sessionId)
+        },
+        onError(error) {
+          isStreaming.value = false
+          assistantMessage.isStreaming = false
+          errorMessage.value = toFriendlyMessage(error)
+          syncWaitingForApproval(sessionId)
+        }
+      })
+    } catch (error) {
+      errorMessage.value = toFriendlyMessage(error)
+    } finally {
+      isStreaming.value = false
+      assistantMessage.isStreaming = false
+      syncWaitingForApproval(sessionId)
+    }
+  }
+
+  async function submitApproval(
+    callId: string,
+    decision: 'approved' | 'rejected',
+    onsiteConfirmed: boolean,
+    chunk: ApprovalChunk
+  ) {
+    if (!currentSessionId.value || isStreaming.value) {
+      return false
+    }
+
+    const sessionId = currentSessionId.value
+    let approvalFailed = false
+    errorMessage.value = ''
+    isStreaming.value = true
+
+    let targetMessage = getLastAssistantMessage(sessionId)
+    if (!targetMessage) {
+      targetMessage = addMessage(sessionId, {
+        sessionId,
+        role: MessageRole.Assistant,
+        chunks: [],
+        isStreaming: true,
+        timestamp: Date.now()
+      })
+    } else {
+      targetMessage.isStreaming = true
+    }
+
+    try {
+      await chatService.sendApprovalDecisionStream(sessionId, callId, decision, onsiteConfirmed, {
+        onChunkReceived(incomingChunk) {
+          if (incomingChunk.type === ChunkType.Error) {
+            approvalFailed = true
+          }
+
+          processChunk(targetMessage!, incomingChunk)
+        },
+        onComplete() {
+          isStreaming.value = false
+          if (targetMessage) {
+            targetMessage.isStreaming = false
+          }
+
+          chunk.status = approvalFailed ? 'pending' : decision
+          syncWaitingForApproval(sessionId)
+        },
+        onError(error) {
+          approvalFailed = true
+          isStreaming.value = false
+          if (targetMessage) {
+            targetMessage.isStreaming = false
+          }
+
+          chunk.status = 'pending'
+          errorMessage.value = toFriendlyMessage(error)
+          syncWaitingForApproval(sessionId)
+        }
+      })
+    } catch (error) {
+      approvalFailed = true
+      chunk.status = 'pending'
+      errorMessage.value = toFriendlyMessage(error)
+    } finally {
+      isStreaming.value = false
+      if (targetMessage) {
+        targetMessage.isStreaming = false
       }
 
-      const messageText = chunk.status === 'approved' ? "批准" : "拒绝";
-      await chatService.sendMessageStream(
-        sessionId,
-        messageText,
-        {
-          onChunkReceived: (chunk: ChatChunk) => {
-            processChunk(targetMsg!, chunk);
-          },
-          onComplete: () => {
-            isStreaming.value = false;
-            if (targetMsg) targetMsg.isStreaming = false;
-            isWaitingForApproval.value = false;
-          },
-          onError: (err) => {
-            console.error('审批响应流中断:', err);
-            isStreaming.value = false;
-            isWaitingForApproval.value = false;
-          }
-        },
-        [callId]
-      );
-
-    } catch (error) {
-      console.error('提交审批失败:', error);
-      isStreaming.value = false;
+      syncWaitingForApproval(sessionId)
     }
+
+    return !approvalFailed
   }
 
-  // ================= 辅助函数 (Internal) =================
-
-  function addMessage(sid: string, msg: ChatMessage): ChatMessage {
-    if (!messagesMap.value[sid]) {
-      messagesMap.value[sid] = [];
-    }
-    const list = messagesMap.value[sid]!;
-    list.push(msg);
-    return list[list.length - 1]!;
+  function reset() {
+    sessions.value = []
+    persistCurrentSession(null)
+    messagesMap.value = {}
+    isStreaming.value = false
+    isWaitingForApproval.value = false
+    isLoadingHistory.value = false
+    errorMessage.value = ''
   }
 
-  function addTextChunk(msg: ChatMessage, chunk: ChatChunk) {
-    const preChunk = msg.chunks[msg.chunks.length - 1];
-    if (preChunk === undefined) {
-      msg.chunks.push(chunk);
-      return;
+  function addMessage(sessionId: string, message: ChatMessage) {
+    if (!messagesMap.value[sessionId]) {
+      messagesMap.value[sessionId] = []
     }
-    if (preChunk.source === chunk.source && preChunk.type === ChunkType.Text) {
-      preChunk.content += chunk.content;
-    } else {
-      msg.chunks.push(chunk);
-    }
+
+    const list = messagesMap.value[sessionId]!
+    list.push(message)
+    return list[list.length - 1]!
   }
 
-  function addWidgetChunk(msg: ChatMessage, chunk: ChatChunk, parsedWidget: any) {
-    const widgetChunk = {
+  function addTextChunk(message: ChatMessage, chunk: ChatChunk) {
+    const previousChunk = message.chunks[message.chunks.length - 1]
+
+    if (!previousChunk) {
+      message.chunks.push(chunk)
+      return
+    }
+
+    if (previousChunk.source === chunk.source && previousChunk.type === ChunkType.Text) {
+      previousChunk.content += chunk.content
+      return
+    }
+
+    message.chunks.push(chunk)
+  }
+
+  function addWidgetChunk(message: ChatMessage, chunk: ChatChunk, parsedWidget: unknown) {
+    message.chunks.push({
       ...chunk,
       type: ChunkType.Widget,
       widget: parsedWidget
-    } as unknown as WidgetChunk;
-    msg.chunks.push(widgetChunk);
+    } as WidgetChunk)
   }
 
-  function addIntentChunk(msg: ChatMessage, chunk: ChatChunk) {
+  function addIntentChunk(message: ChatMessage, chunk: ChatChunk) {
     try {
-        const intents = JSON.parse(chunk.content) as IntentResult[];
-        const intentChunk = { ...chunk, intents } as IntentChunk;
-        msg.chunks.push(intentChunk);
-    } catch (e) { addTextChunk(msg, chunk); }
+      const intents = JSON.parse(chunk.content) as IntentResult[]
+      message.chunks.push({ ...chunk, intents } as IntentChunk)
+    } catch {
+      addTextChunk(message, chunk)
+    }
   }
 
-  function addFunctionCallChunk(msg: ChatMessage, chunk: ChatChunk) {
+  function addFunctionCallChunk(message: ChatMessage, chunk: ChatChunk) {
     try {
-        const functionCall = JSON.parse(chunk.content) as FunctionCall;
-        functionCall.status = 'calling';
-        const fcChunk = { ...chunk, functionCall } as FunctionCallChunk;
-        msg.chunks.push(fcChunk);
-    } catch (e) { addTextChunk(msg, chunk); }
+      const functionCall = JSON.parse(chunk.content) as FunctionCall
+      functionCall.status = 'calling'
+      message.chunks.push({ ...chunk, functionCall } as FunctionCallChunk)
+    } catch {
+      addTextChunk(message, chunk)
+    }
   }
 
-  function addFunctionResultChunk(msg: ChatMessage, chunk: ChatChunk) {
+  function addFunctionResultChunk(message: ChatMessage, chunk: ChatChunk) {
     try {
-        const functionResult = JSON.parse(chunk.content) as FunctionCall;
-        const functionCallChunks = msg.chunks
-          .filter(c => c.type === ChunkType.FunctionCall) as FunctionCallChunk[];
-        const fcChunk = functionCallChunks.find(c => c.functionCall.id === functionResult.id);
-        if (fcChunk) {
-          fcChunk.functionCall.result = functionResult.result;
-          fcChunk.functionCall.status = 'completed';
-        }
-    } catch (e) {}
+      const functionResult = JSON.parse(chunk.content) as FunctionCall
+      const functionCallChunks = message.chunks.filter(
+        (item) => item.type === ChunkType.FunctionCall
+      ) as FunctionCallChunk[]
+      const functionCallChunk = functionCallChunks.find((item) => item.functionCall.id === functionResult.id)
+
+      if (functionCallChunk) {
+        functionCallChunk.functionCall.result = functionResult.result
+        functionCallChunk.functionCall.status = 'completed'
+      }
+    } catch {
+      // ignore malformed tool result payloads
+    }
   }
 
-  function addApprovalRequestChunk(msg: ChatMessage, chunk: ChatChunk) {
+  function addApprovalRequestChunk(message: ChatMessage, chunk: ChatChunk) {
     try {
-      const requestPayload = JSON.parse(chunk.content) as FunctionApprovalRequest;
-      const approvalChunk: ApprovalChunk = {
+      const request = JSON.parse(chunk.content) as FunctionApprovalRequest
+      message.chunks.push({
         ...chunk,
-        request: requestPayload,
+        request,
         status: 'pending'
-      };
-      msg.chunks.push(approvalChunk);
-      isWaitingForApproval.value = true;
-    } catch (error) {
-      console.error('解析审批请求失败:', error);
+      } as ApprovalChunk)
+      syncWaitingForApproval(message.sessionId)
+    } catch {
+      errorMessage.value = '审批请求解析失败。'
     }
   }
 
-  function getLastAssistantMessage(sid: string): ChatMessage | null {
-    const list = messagesMap.value[sid];
-    if (!list || list.length === 0) return null;
-    const lastMsg = list[list.length - 1]!;
-    if (lastMsg.role === MessageRole.Assistant) {
-      return lastMsg;
+  function addErrorChunk(message: ChatMessage, chunk: ChatChunk) {
+    try {
+      const payload = JSON.parse(chunk.content) as ChatErrorPayload
+      const userFacingMessage = payload.userFacingMessage?.trim() || payload.detail?.trim()
+
+      if (userFacingMessage) {
+        addTextChunk(message, {
+          ...chunk,
+          type: ChunkType.Text,
+          content: userFacingMessage
+        })
+      }
+
+      switch (payload.code) {
+        case 'chat_context_expired':
+          errorMessage.value = userFacingMessage ?? '审批上下文已过期，请重新发起请求。'
+          break
+        case 'rate_limit_exceeded':
+          errorMessage.value = userFacingMessage ?? '请求过于频繁，请稍后再试。'
+          break
+        case 'onsite_presence_required':
+          errorMessage.value = userFacingMessage ?? '该能力需要先确认现场有人在岗。'
+          break
+        case 'onsite_presence_expired':
+          errorMessage.value = userFacingMessage ?? '当前会话的在岗声明已过期，请重新确认。'
+          break
+        case 'approval_reconfirmation_required':
+          errorMessage.value = userFacingMessage ?? '审批前需要再次确认现场有人在岗。'
+          break
+        case 'control_action_blocked':
+        case 'capability_not_allowed':
+          errorMessage.value = userFacingMessage ?? ''
+          break
+        default:
+          errorMessage.value = userFacingMessage ?? '请求失败，请稍后重试。'
+          break
+      }
+    } catch {
+      errorMessage.value = '请求失败，请稍后重试。'
     }
-    return null;
   }
 
-  function processChunk(msg: ChatMessage, chunk: ChatChunk) {
-    // 拦截 Text 中的 visual_decision
+  function getLastAssistantMessage(sessionId: string) {
+    const list = messagesMap.value[sessionId]
+    if (!list?.length) {
+      return null
+    }
+
+    const lastMessage = list[list.length - 1]!
+    return lastMessage.role === MessageRole.Assistant ? lastMessage : null
+  }
+
+  function processChunk(message: ChatMessage, chunk: ChatChunk) {
     if (chunk.type === ChunkType.Text) {
-      const content = chunk.content.trim();
+      const content = chunk.content.trim()
       if (content.includes('"visual_decision"') || content.includes('"VisualDecision"')) {
         try {
-          const jsonMatch = content.match(/(\{[\s\S]*"visual_decision"[\s\S]*?\})/);
+          const jsonMatch = content.match(/(\{[\s\S]*"visual_decision"[\s\S]*?\})/)
           if (jsonMatch) {
-            const jsonStr = jsonMatch[0];
-            const payload = JSON.parse(jsonStr);
-            const decision = payload.visual_decision || payload.VisualDecision;
-            
+            const payload = JSON.parse(jsonMatch[0]) as Record<string, unknown>
+            const decision = payload.visual_decision || payload.VisualDecision
             if (decision) {
-               // 【核心逻辑】：去前面的 FunctionResult 找数据
-               let finalData: any[] = [];
-               
-               // 1. 优先从 JSON 自身找
-               if (payload.data && Array.isArray(payload.data) && payload.data.length > 0) {
-                   finalData = payload.data;
-               } else if (decision.data && Array.isArray(decision.data) && decision.data.length > 0) {
-                   finalData = decision.data;
-               } 
-               else {
-                   // 2. 从消息历史中查找最近的 FunctionResult
-                   // 【修复点】：增加 !c 的判断，防止 TS 报错
-                   for (let i = msg.chunks.length - 1; i >= 0; i--) {
-                       const c = msg.chunks[i];
-                       if (!c) continue; // 关键修复：如果 c 为 undefined 则跳过
+              let finalData: unknown[] = []
 
-                       if (c.type === ChunkType.FunctionCall) {
-                           const fc = (c as FunctionCallChunk).functionCall;
-                           // 确保 status 和 result 都存在
-                           if (fc && fc.status === 'completed' && fc.result) {
-                               try {
-                                   const parsed = JSON.parse(fc.result);
-                                   if (Array.isArray(parsed) && parsed.length > 0) {
-                                       finalData = parsed;
-                                       break; // 找到了就停止
-                                   }
-                               } catch (e) {}
-                           }
-                       }
-                   }
-               }
+              if (Array.isArray(payload.data) && payload.data.length > 0) {
+                finalData = payload.data
+              } else if (
+                typeof decision === 'object' &&
+                decision !== null &&
+                Array.isArray((decision as { data?: unknown[] }).data) &&
+                ((decision as { data?: unknown[] }).data?.length ?? 0) > 0
+              ) {
+                finalData = (decision as { data: unknown[] }).data
+              } else {
+                for (let index = message.chunks.length - 1; index >= 0; index -= 1) {
+                  const existingChunk = message.chunks[index]
+                  if (!existingChunk || existingChunk.type !== ChunkType.FunctionCall) {
+                    continue
+                  }
 
-               // 注入数据
-               const widgetPayload = { ...payload, data: finalData };
-               addWidgetChunk(msg, chunk, widgetPayload);
-               
-               const remainingText = content.replace(jsonStr, '').trim();
-               if (remainingText) addTextChunk(msg, { ...chunk, content: remainingText });
-               return;
+                  const functionCall = (existingChunk as FunctionCallChunk).functionCall
+                  if (functionCall.status !== 'completed' || !functionCall.result) {
+                    continue
+                  }
+
+                  try {
+                    const parsed = JSON.parse(functionCall.result)
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                      finalData = parsed
+                      break
+                    }
+                  } catch {
+                    // ignore invalid JSON payloads
+                  }
+                }
+              }
+
+              addWidgetChunk(message, chunk, { ...payload, data: finalData })
+
+              const remainingText = content.replace(jsonMatch[0], '').trim()
+              if (remainingText) {
+                addTextChunk(message, { ...chunk, content: remainingText })
+              }
+              return
             }
           }
-        } catch (e) { }
+        } catch {
+          // fall back to plain text rendering
+        }
       }
     }
 
     switch (chunk.type) {
-      case ChunkType.Text: addTextChunk(msg, chunk); break;
-      case ChunkType.Intent: addIntentChunk(msg, chunk); break;
-      case ChunkType.FunctionCall: addFunctionCallChunk(msg, chunk); break;
-      case ChunkType.FunctionResult: addFunctionResultChunk(msg, chunk); break;
-      case ChunkType.Widget: 
-        try { addWidgetChunk(msg, chunk, JSON.parse(chunk.content)); } 
-        catch (e) { addTextChunk(msg, chunk); }
-        break;
-      case ChunkType.ApprovalRequest: addApprovalRequestChunk(msg, chunk); break;
+      case ChunkType.Text:
+        addTextChunk(message, chunk)
+        break
+      case ChunkType.Intent:
+        addIntentChunk(message, chunk)
+        break
+      case ChunkType.FunctionCall:
+        addFunctionCallChunk(message, chunk)
+        break
+      case ChunkType.FunctionResult:
+        addFunctionResultChunk(message, chunk)
+        break
+      case ChunkType.Widget:
+        try {
+          addWidgetChunk(message, chunk, JSON.parse(chunk.content))
+        } catch {
+          addTextChunk(message, chunk)
+        }
+        break
+      case ChunkType.ApprovalRequest:
+        addApprovalRequestChunk(message, chunk)
+        break
+      case ChunkType.Error:
+        addErrorChunk(message, chunk)
+        break
     }
   }
 
-  return { sessions, currentSessionId, currentSession, currentMessages, isStreaming, isWaitingForApproval, init, createNewSession, selectSession, sendMessage, submitApproval };
-});
+  function toFriendlyMessage(error: unknown) {
+    if (error instanceof ApiError) {
+      if (error.status === 401) {
+        return '登录状态已失效，请重新登录。'
+      }
+
+      if (error.status === 403) {
+        return '当前账号没有访问该功能的权限。'
+      }
+
+      if (error.status === 429) {
+        return '请求过于频繁，请稍后再试。'
+      }
+
+      if (typeof error.message === 'string' && error.message.trim().length > 0) {
+        return error.message
+      }
+    }
+
+    return '请求失败，请稍后重试。'
+  }
+
+  return {
+    sessions,
+    currentSessionId,
+    currentSession,
+    currentMessages,
+    isStreaming,
+    isWaitingForApproval,
+    isLoadingHistory,
+    errorMessage,
+    initialize,
+    createNewSession,
+    selectSession,
+    confirmOnsitePresence,
+    clearOnsitePresence,
+    sendMessage,
+    submitApproval,
+    reset
+  }
+})

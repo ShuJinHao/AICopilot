@@ -1,4 +1,4 @@
-﻿using AICopilot.DataAnalysisService.Plugins;
+﻿using AICopilot.Services.Contracts;
 using AICopilot.Visualization;
 using System;
 using System.Collections.Generic;
@@ -11,7 +11,7 @@ namespace AICopilot.DataAnalysisService.Services;
 /// 职责：在 Scoped 生命周期内暂存原始的数据库查询结果，
 /// 以便后续的执行器能够获取无损数据用于构建 UI 组件。
 /// </summary>
-public class VisualizationContext
+public class VisualizationContext : IDataAnalysisVisualizationContext
 {
     // 存储最后一次查询的数据行（动态类型）
     private IEnumerable<dynamic>? _lastResultSet;

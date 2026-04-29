@@ -1,37 +1,24 @@
-﻿using AICopilot.Services.Common.Exceptions;
+﻿using AICopilot.Services.CrossCutting.Exceptions;
 using Microsoft.AspNetCore.Diagnostics;
-using Microsoft.AspNetCore.Mvc;
-
 namespace AICopilot.HttpApi.Infrastructure;
 
 public class UseCaseExceptionHandler : IExceptionHandler
 {
-    private readonly Dictionary<Type, Func<HttpContext, Exception, Task>> _exceptionHandlers = new()
-    {
-        { typeof(ForbiddenException), HandleForbiddenExceptionAsync }
-    };
-
     public async ValueTask<bool> TryHandleAsync(HttpContext httpContext, Exception exception,
         CancellationToken cancellationToken)
     {
-        var exceptionType = exception.GetType();
-
-        if (!_exceptionHandlers.TryGetValue(exceptionType, out var handler)) return false;
-
-        await handler.Invoke(httpContext, exception);
-        return true;
-    }
-
-    private static async Task HandleForbiddenExceptionAsync(HttpContext httpContext, Exception exception)
-    {
-        httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
-
-        await httpContext.Response.WriteAsJsonAsync(new ProblemDetails
+        if (exception is not ApiProblemException apiProblemException)
         {
-            Status = StatusCodes.Status403Forbidden,
-            Title = "Forbidden",
-            Type = "https://developer.mozilla.org/zh-CN/docs/Web/HTTP/Status/403",
-            Detail = exception.Message
-        });
+            return false;
+        }
+
+        httpContext.Response.StatusCode = apiProblemException.StatusCode;
+        httpContext.Response.ContentType = "application/problem+json";
+
+        await httpContext.Response.WriteAsJsonAsync(
+            ApiProblemDetailsFactory.Create(apiProblemException.StatusCode, apiProblemException.Problem),
+            cancellationToken);
+
+        return true;
     }
 }

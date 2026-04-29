@@ -10,13 +10,28 @@ public class DocumentChunk : IEntity<int>
 
     internal DocumentChunk(int documentId, int index, string content)
     {
+        if (documentId < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(documentId), "Document chunk document id cannot be negative.");
+        }
+
+        if (index < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(index), "Document chunk index cannot be negative.");
+        }
+
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            throw new ArgumentException("Document chunk content is required.", nameof(content));
+        }
+
         DocumentId = documentId;
         Index = index;
-        Content = content;
+        Content = content.Trim();
         CreatedAt = DateTime.UtcNow;
     }
 
-    public int Id { get; set; }
+    public int Id { get; private set; }
 
     public int DocumentId { get; private set; }
 
@@ -45,6 +60,11 @@ public class DocumentChunk : IEntity<int>
     /// </summary>
     public void SetVectorId(string vectorId)
     {
-        VectorId = vectorId;
+        if (string.IsNullOrWhiteSpace(vectorId))
+        {
+            throw new ArgumentException("Document chunk vector id is required.", nameof(vectorId));
+        }
+
+        VectorId = vectorId.Trim();
     }
 }

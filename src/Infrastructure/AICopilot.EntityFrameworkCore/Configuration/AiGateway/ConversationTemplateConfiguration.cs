@@ -15,6 +15,8 @@ public class ConversationTemplateConfiguration : IEntityTypeConfiguration<Conver
         builder.HasKey(ct => ct.Id);
         builder.Property(ct => ct.Id).HasColumnName("id");
 
+        builder.Property(ct => ct.RowVersion).IsRowVersion();
+
         // 配置属性
         builder.Property(ct => ct.Name)
             .IsRequired()
@@ -51,5 +53,6 @@ public class ConversationTemplateConfiguration : IEntityTypeConfiguration<Conver
             specBuilder.Property(s => s.Temperature)
                 .HasColumnName("temperature");
         });
+        builder.Navigation(ct => ct.Specification).IsRequired();
     }
 }

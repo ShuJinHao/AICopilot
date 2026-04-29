@@ -1,7 +1,4 @@
-﻿using Microsoft.Extensions.AI;
-using System;
-using System.Collections.Generic;
-using System.Text;
+using AICopilot.SharedKernel.Ai;
 
 namespace AICopilot.AgentPlugin;
 
@@ -12,34 +9,18 @@ namespace AICopilot.AgentPlugin;
 /// </summary>
 public class GenericBridgePlugin : IAgentPlugin
 {
-    /// <summary>
-    /// 插件名称。
-    /// 映射自 McpServerInfo.Name。
-    /// 使用 required 关键字强制在初始化时赋值，确保插件标识的完整性。
-    /// </summary>
     public required string Name { get; init; }
 
-    /// <summary>
-    /// 插件描述。
-    /// 映射自 McpServerInfo.Description。
-    /// 这段描述将被注入到 LLM 的 System Prompt 中，用于指导模型何时使用该插件。
-    /// </summary>
     public required string Description { get; init; }
 
-    /// <summary>
-    /// 动态注入的工具列表。
-    /// 这些工具对象由 MCP SDK 在握手阶段解析生成，包含了工具名称、参数 Schema 以及执行回调。
-    /// </summary>
-    public IEnumerable<AITool>? AITools { get; init; }
+    public IEnumerable<AiToolDefinition>? Tools { get; init; }
 
-    /// <summary>
-    /// 实现接口方法，向 Agent 暴露该插件所拥有的所有能力。
-    /// </summary>
-    /// <returns>工具定义集合</returns>
-    public IEnumerable<AITool>? GetAITools()
+    public IEnumerable<AiToolDefinition>? GetTools()
     {
-        return AITools;
+        return Tools;
     }
 
     public IEnumerable<string>? HighRiskTools { get; init; }
+
+    public ChatExposureMode ChatExposureMode { get; init; } = ChatExposureMode.Disabled;
 }

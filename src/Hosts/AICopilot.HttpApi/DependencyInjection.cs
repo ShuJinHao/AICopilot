@@ -1,17 +1,22 @@
-﻿using AICopilot.HttpApi.Infrastructure;
-using AICopilot.IdentityService;
-using AICopilot.Infrastructure.Authentication;
-using AICopilot.Services.Common.Behaviors;
-using AICopilot.Services.Common.Contracts;
-using MediatR;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Tokens;
-using System.Reflection;
-using System.Text;
-using AICopilot.AiGatewayService;
-using AICopilot.RagService;
+﻿using AICopilot.AiGatewayService;
 using AICopilot.DataAnalysisService;
+using AICopilot.HttpApi.Infrastructure;
+using AICopilot.IdentityService;
+using AICopilot.IdentityService.Authorization;
+using AICopilot.Infrastructure.Authentication;
 using AICopilot.McpService;
+using AICopilot.RagService;
+using AICopilot.Services.Contracts;
+using AICopilot.SharedKernel.Result;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.IdentityModel.Tokens;
+using System.Security.Claims;
+using System.Text;
+using System.Text.Json;
+using System.Threading.RateLimiting;
 
 namespace AICopilot.HttpApi;
 
@@ -21,68 +26,361 @@ public static class DependencyInjection
     {
         public void AddApplicationService()
         {
-            builder.Services.AddMediatR(cfg =>
-            {
-                cfg.LicenseKey =
-                    "eyJhbGciOiJSUzI1NiIsImtpZCI6Ikx1Y2t5UGVubnlTb2Z0d2FyZUxpY2Vuc2VLZXkvYmJiMTNhY2I1OTkwNGQ4OWI0Y2IxYzg1ZjA4OGNjZjkiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL2x1Y2t5cGVubnlzb2Z0d2FyZS5jb20iLCJhdWQiOiJMdWNreVBlbm55U29mdHdhcmUiLCJleHAiOiIxNzg0NzY0ODAwIiwiaWF0IjoiMTc1MzIzNjIyMSIsImFjY291bnRfaWQiOiIwMTk4MzUwNDdkNGI3ZmU5YmZlMzdhMWQ2MDQwMzM4NSIsImN1c3RvbWVyX2lkIjoiY3RtXzAxazB0Z2JiNHZ2N2tnZDlyMXBtc2pmNG4xIiwic3ViX2lkIjoiLSIsImVkaXRpb24iOiIwIiwidHlwZSI6IjIifQ.s5kG1QZdtbY_jtqsxQpdOQUSoXFb5MwFGp6AP1rBqPycBn03RUsmFVHaAQJKBMOHvTUGLLJPts1q7TaY7pV2Dut5n0LtnNXaq4r8AZ5rOSQWOAcLfuMUFMLDwhR9BGuPODvNje74evts-4zB6qJKwxcdk8a-DrN1qGEQcB3Zksh1Su02jIDBiUjvAG07wjUdt-n8AdMF2kM-hPAMdxBV4Wr_cqJV_EbimBAiEeMUpey7G4qaLPcsJo0lKu7T6KRjc3YNpiZ9hGh9Tf_JWHMS__ed9wpueK6kvFjwQuBAGjpFb51FFdQDUh2Uuuuo7ldvofBSaX6xIfXjLL1hqQ0MEQ";
-
-                cfg.RegisterServicesFromAssembly(Assembly.GetAssembly(typeof(IdentityService.DependencyInjection))!);
-                cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(AuthorizationBehavior<,>));
-            });
-
+            builder.AddIdentityService();
             builder.AddAiGatewayService();
-            //builder.AddIdentityService();
             builder.AddRagService();
             builder.AddDataAnalysisService();
-
             builder.AddMcpService();
         }
 
         public void AddWebServices()
         {
-            // 从配置文件中读取JwtSettings，并注入到容器中
+            const string authFailureCodeKey = "AuthFailureCode";
+            const string authFailureDetailKey = "AuthFailureDetail";
+            const string authFailureExtensionsKey = "AuthFailureExtensions";
+
             var configurationSection = builder.Configuration.GetSection("JwtSettings");
             var jwtSettings = configurationSection.Get<JwtSettings>();
-            if (jwtSettings is null) throw new NullReferenceException(nameof(jwtSettings));
+            if (jwtSettings is null)
+            {
+                throw new NullReferenceException(nameof(jwtSettings));
+            }
+
+            if (string.IsNullOrWhiteSpace(jwtSettings.SecretKey))
+            {
+                throw new InvalidOperationException("JwtSettings:SecretKey is required; configure it with user-secrets or the JwtSettings__SecretKey environment variable.");
+            }
 
             builder.Services.Configure<JwtSettings>(configurationSection);
 
-            // 添加认证服务
-            builder.Services.AddAuthentication(options =>
-            {
-                // 默认的认证方案和质询方案都设置为 JWT Bearer
-                options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-                options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-            })
-                .AddJwtBearer(options => // 添加 JWT Bearer 认证处理器
+            builder.Services
+                .AddAuthentication(options =>
+                {
+                    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+                    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+                })
+                .AddJwtBearer(options =>
                 {
                     options.TokenValidationParameters = new TokenValidationParameters
                     {
-                        // --- 关键验证项 ---
-                        ValidateIssuer = true, // 验证颁发者
-                        ValidateAudience = true, // 验证受众
-                        ValidateLifetime = true, // 验证生命周期（是否过期）
-                        ValidateIssuerSigningKey = true, // 验证签名密钥
-
-                        // --- 配置具体的值 ---
+                        ValidateIssuer = true,
+                        ValidateAudience = true,
+                        ValidateLifetime = true,
+                        ValidateIssuerSigningKey = true,
                         ValidIssuer = jwtSettings.Issuer,
                         ValidAudience = jwtSettings.Audience,
-                        IssuerSigningKey = new SymmetricSecurityKey(
-                            Encoding.UTF8.GetBytes(jwtSettings.SecretKey)
-                        ),
-
-                        // 允许5分钟的服务器时钟偏差
+                        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSettings.SecretKey)),
                         ClockSkew = TimeSpan.Zero
+                    };
+                    options.Events = new JwtBearerEvents
+                    {
+                        OnTokenValidated = async context =>
+                        {
+                            var userManager = context.HttpContext.RequestServices
+                                .GetRequiredService<UserManager<ApplicationUser>>();
+
+                            var userId = context.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
+                            if (string.IsNullOrWhiteSpace(userId))
+                            {
+                                StoreAuthFailure(
+                                    context.HttpContext,
+                                    new ApiProblemDescriptor(
+                                        AuthProblemCodes.SessionRevoked,
+                                        "当前登录态无效，请重新登录。"));
+                                context.Fail("Missing user id claim.");
+                                return;
+                            }
+
+                            if (!Guid.TryParse(userId, out _))
+                            {
+                                StoreAuthFailure(
+                                    context.HttpContext,
+                                    new ApiProblemDescriptor(
+                                        AuthProblemCodes.SessionRevoked,
+                                        "当前登录态无效，请重新登录。"));
+                                context.Fail("Invalid user id claim.");
+                                return;
+                            }
+
+                            var user = await userManager.FindByIdAsync(userId);
+                            if (user is null)
+                            {
+                                StoreAuthFailure(
+                                    context.HttpContext,
+                                    new ApiProblemDescriptor(
+                                        AuthProblemCodes.UserMissing,
+                                        "当前用户不存在，请重新登录。"));
+                                context.Fail("User was not found.");
+                                return;
+                            }
+
+                            if (IdentityGovernanceHelper.IsUserDisabled(user))
+                            {
+                                StoreAuthFailure(
+                                    context.HttpContext,
+                                    new ApiProblemDescriptor(
+                                        AuthProblemCodes.AccountDisabled,
+                                        "账号已禁用，请联系管理员恢复启用。"));
+                                context.Fail("User account is disabled.");
+                                return;
+                            }
+
+                            var tokenSecurityStamp = context.Principal?.FindFirstValue(JwtClaimTypes.SecurityStamp);
+                            var currentSecurityStamp = user.SecurityStamp ?? string.Empty;
+                            if (!string.Equals(tokenSecurityStamp ?? string.Empty, currentSecurityStamp, StringComparison.Ordinal))
+                            {
+                                StoreAuthFailure(
+                                    context.HttpContext,
+                                    new ApiProblemDescriptor(
+                                        AuthProblemCodes.SessionRevoked,
+                                        "登录态已失效，请重新登录。"));
+                                context.Fail("Security stamp mismatch.");
+                            }
+                        },
+                        OnChallenge = async context =>
+                        {
+                            if (context.Response.HasStarted)
+                            {
+                                return;
+                            }
+
+                            context.HandleResponse();
+                            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                            context.Response.ContentType = "application/problem+json";
+
+                            var problem = new ApiProblemDescriptor(
+                                context.HttpContext.Items[authFailureCodeKey] as string ?? AuthProblemCodes.Unauthorized,
+                                context.HttpContext.Items[authFailureDetailKey] as string
+                                    ?? context.ErrorDescription
+                                    ?? "当前请求未通过身份验证。",
+                                context.HttpContext.Items[authFailureExtensionsKey] as IReadOnlyDictionary<string, object?>);
+
+                            await context.Response.WriteAsJsonAsync(
+                                ApiProblemDetailsFactory.Create(StatusCodes.Status401Unauthorized, problem));
+                        }
                     };
                 });
 
             builder.Services.AddScoped<ICurrentUser, CurrentUser>();
-
             builder.Services.AddHttpContextAccessor();
+            builder.Services.AddRateLimiter(options =>
+            {
+                var defaultTokenLimit = builder.Configuration.GetValue("RateLimiting:Default:TokenLimit", 60);
+                var defaultTokensPerPeriod = builder.Configuration.GetValue("RateLimiting:Default:TokensPerPeriod", 60);
+                var loginTokenLimit = builder.Configuration.GetValue("RateLimiting:Login:TokenLimit", 5);
+                var loginTokensPerPeriod = builder.Configuration.GetValue("RateLimiting:Login:TokensPerPeriod", 5);
+                var chatTokenLimit = builder.Configuration.GetValue("RateLimiting:Chat:TokenLimit", 12);
+                var chatTokensPerPeriod = builder.Configuration.GetValue("RateLimiting:Chat:TokensPerPeriod", 12);
+                var identityManagementTokenLimit = builder.Configuration.GetValue("RateLimiting:IdentityManagement:TokenLimit", 10);
+                var identityManagementTokensPerPeriod = builder.Configuration.GetValue("RateLimiting:IdentityManagement:TokensPerPeriod", 10);
 
+                options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+                options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
+                    RateLimitPartition.GetTokenBucketLimiter(
+                        GetDefaultPolicyPartitionKey(httpContext),
+                        _ => new TokenBucketRateLimiterOptions
+                        {
+                            TokenLimit = defaultTokenLimit,
+                            TokensPerPeriod = defaultTokensPerPeriod,
+                            ReplenishmentPeriod = TimeSpan.FromMinutes(1),
+                            AutoReplenishment = true,
+                            QueueLimit = 0
+                        }));
+
+                options.AddPolicy("login", httpContext =>
+                    RateLimitPartition.GetTokenBucketLimiter(
+                        GetLoginPolicyPartitionKey(httpContext),
+                        _ => new TokenBucketRateLimiterOptions
+                        {
+                            TokenLimit = loginTokenLimit,
+                            TokensPerPeriod = loginTokensPerPeriod,
+                            ReplenishmentPeriod = TimeSpan.FromMinutes(1),
+                            AutoReplenishment = true,
+                            QueueLimit = 0
+                        }));
+
+                options.AddPolicy("identity-management", httpContext =>
+                    RateLimitPartition.GetTokenBucketLimiter(
+                        GetIdentityManagementPolicyPartitionKey(httpContext),
+                        _ => new TokenBucketRateLimiterOptions
+                        {
+                            TokenLimit = identityManagementTokenLimit,
+                            TokensPerPeriod = identityManagementTokensPerPeriod,
+                            ReplenishmentPeriod = TimeSpan.FromMinutes(1),
+                            AutoReplenishment = true,
+                            QueueLimit = 0
+                        }));
+
+                options.AddPolicy("chat", httpContext =>
+                    RateLimitPartition.GetTokenBucketLimiter(
+                        GetChatPolicyPartitionKey(httpContext),
+                        _ => new TokenBucketRateLimiterOptions
+                        {
+                            TokenLimit = chatTokenLimit,
+                            TokensPerPeriod = chatTokensPerPeriod,
+                            ReplenishmentPeriod = TimeSpan.FromMinutes(1),
+                            AutoReplenishment = true,
+                            QueueLimit = 0
+                        }));
+
+                options.OnRejected = async (context, cancellationToken) =>
+                {
+                    var retryAfter = context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfterValue)
+                        ? Math.Max(1, (int)Math.Ceiling(retryAfterValue.TotalSeconds))
+                        : (int?)null;
+
+                    var extensions = retryAfter.HasValue
+                        ? new Dictionary<string, object?>
+                        {
+                            [ApiProblemExtensionKeys.RetryAfterSeconds] = retryAfter.Value
+                        }
+                        : null;
+
+                    if (retryAfter.HasValue)
+                    {
+                        context.HttpContext.Response.Headers.RetryAfter = retryAfter.Value.ToString();
+                    }
+
+                    context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                    context.HttpContext.Response.ContentType = "application/problem+json";
+
+                    await context.HttpContext.Response.WriteAsJsonAsync(
+                        ApiProblemDetailsFactory.Create(
+                            StatusCodes.Status429TooManyRequests,
+                            new ApiProblemDescriptor(
+                                AppProblemCodes.RateLimitExceeded,
+                                "请求过于频繁，请稍后再试。",
+                                extensions)),
+                        cancellationToken);
+                };
+            });
             builder.Services.AddExceptionHandler<UseCaseExceptionHandler>();
-
             builder.Services.AddProblemDetails();
+
+            void StoreAuthFailure(HttpContext httpContext, ApiProblemDescriptor problem)
+            {
+                httpContext.Items[authFailureCodeKey] = problem.Code;
+                httpContext.Items[authFailureDetailKey] = problem.Detail;
+                if (problem.Extensions is not null)
+                {
+                    httpContext.Items[authFailureExtensionsKey] = problem.Extensions;
+                }
+            }
+
+            static string GetDefaultPolicyPartitionKey(HttpContext httpContext)
+            {
+                var userId = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
+                var clientKey = string.IsNullOrWhiteSpace(userId)
+                    ? httpContext.Connection.RemoteIpAddress?.ToString() ?? "anonymous"
+                    : userId;
+
+                return $"{httpContext.Request.Method}:{httpContext.Request.Path}:{clientKey}";
+            }
+
+            static string GetChatPolicyPartitionKey(HttpContext httpContext)
+            {
+                var userId = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
+                return $"chat:{(string.IsNullOrWhiteSpace(userId) ? httpContext.Connection.RemoteIpAddress?.ToString() ?? "anonymous" : userId)}";
+            }
+
+            static string GetLoginPolicyPartitionKey(HttpContext httpContext)
+            {
+                var ipAddress = httpContext.Connection.RemoteIpAddress?.ToString() ?? "anonymous";
+                var username = TryReadLoginUsername(httpContext);
+                var normalizedUsername = string.IsNullOrWhiteSpace(username)
+                    ? "anonymous"
+                    : username.Trim().ToUpperInvariant();
+
+                return $"login:{normalizedUsername}:{ipAddress}";
+            }
+
+            static string GetIdentityManagementPolicyPartitionKey(HttpContext httpContext)
+            {
+                var userId = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
+                var clientKey = string.IsNullOrWhiteSpace(userId)
+                    ? httpContext.Connection.RemoteIpAddress?.ToString() ?? "anonymous"
+                    : userId;
+
+                return $"identity-management:{httpContext.Request.Method}:{httpContext.Request.Path}:{clientKey}";
+            }
+
+            static string? TryReadLoginUsername(HttpContext httpContext)
+            {
+                if (!httpContext.Request.HasJsonContentType())
+                {
+                    return null;
+                }
+
+                if (httpContext.Request.ContentLength is > 8192)
+                {
+                    return null;
+                }
+
+                try
+                {
+                    httpContext.Request.EnableBuffering(bufferThreshold: 4096, bufferLimit: 8192);
+                    if (!httpContext.Request.Body.CanSeek)
+                    {
+                        return null;
+                    }
+
+                    var originalPosition = httpContext.Request.Body.Position;
+                    httpContext.Request.Body.Position = 0;
+
+                    var bodyControlFeature = httpContext.Features.Get<IHttpBodyControlFeature>();
+                    var previousSynchronousIoSetting = bodyControlFeature?.AllowSynchronousIO;
+                    if (bodyControlFeature is not null)
+                    {
+                        bodyControlFeature.AllowSynchronousIO = true;
+                    }
+
+                    try
+                    {
+                        using var document = JsonDocument.Parse(httpContext.Request.Body);
+                        if (document.RootElement.ValueKind != JsonValueKind.Object)
+                        {
+                            return null;
+                        }
+
+                        foreach (var property in document.RootElement.EnumerateObject())
+                        {
+                            if (string.Equals(property.Name, "username", StringComparison.OrdinalIgnoreCase) &&
+                                property.Value.ValueKind == JsonValueKind.String)
+                            {
+                                return property.Value.GetString();
+                            }
+                        }
+
+                        return null;
+                    }
+                    finally
+                    {
+                        httpContext.Request.Body.Position = originalPosition;
+                        if (bodyControlFeature is not null && previousSynchronousIoSetting.HasValue)
+                        {
+                            bodyControlFeature.AllowSynchronousIO = previousSynchronousIoSetting.Value;
+                        }
+                    }
+                }
+                catch (JsonException)
+                {
+                    if (httpContext.Request.Body.CanSeek)
+                    {
+                        httpContext.Request.Body.Position = 0;
+                    }
+
+                    return null;
+                }
+                catch (IOException)
+                {
+                    if (httpContext.Request.Body.CanSeek)
+                    {
+                        httpContext.Request.Body.Position = 0;
+                    }
+
+                    return null;
+                }
+            }
         }
     }
 }

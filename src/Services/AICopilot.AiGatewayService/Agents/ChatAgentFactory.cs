@@ -1,100 +1,96 @@
-﻿using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
+using AICopilot.AiGatewayService.Safety;
+using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
-using AICopilot.Services.Common.Contracts;
-using Microsoft.Agents.AI;
-using Microsoft.Extensions.AI;
-using Microsoft.Extensions.DependencyInjection;
-using OpenAI;
-using System;
-using System.ClientModel;
-using System.ClientModel.Primitives;
-using System.Collections.Generic;
-using System.Linq.Expressions;
-using System.Text;
+using AICopilot.Core.AiGateway.Specifications.ConversationTemplate;
+using AICopilot.Core.AiGateway.Specifications.LanguageModel;
+using AICopilot.Services.Contracts;
+using AICopilot.SharedKernel.Ai;
+using AICopilot.SharedKernel.Repository;
+using AICopilot.SharedKernel.Result;
+using AICopilot.SharedKernel.Specification;
 
 namespace AICopilot.AiGatewayService.Agents;
 
-public class ChatAgentFactory(IServiceProvider serviceProvider)
+public class ChatAgentFactory(
+    IReadRepository<ConversationTemplate> templateRepository,
+    IReadRepository<LanguageModel> modelRepository,
+    IAgentRuntimeFactory runtimeFactory)
 {
     private async Task<(LanguageModel, ConversationTemplate)> GetModelAndTemplateAsync(
-        Expression<Func<ConversationTemplate, bool>> predicate)
+        ISpecification<ConversationTemplate> specification,
+        CancellationToken cancellationToken = default)
     {
-        using var scope = serviceProvider.CreateScope();
-        var data = scope.ServiceProvider.GetRequiredService<IDataQueryService>();
-        var query =
-            from template in data.ConversationTemplates.Where(predicate)
-            join model in data.LanguageModels on template.ModelId equals model.Id
-            select new { model, template };
-
-        var result = await data.FirstOrDefaultAsync(query);
-        if (result == null) throw new Exception("未找对话模板或模型");
-        return (result.model, result.template);
-    }
-
-    public ChatClientAgent CreateAgentAsync(
-        LanguageModel model, ConversationTemplate template,
-        Action<ChatOptions>? configureOptions = null,
-        bool isSaveChatMessage = true)
-    {
-        using var scope = serviceProvider.CreateScope();
-        var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
-        var httpClient = httpClientFactory.CreateClient("OpenAI");
-
-        var chatClientBuilder = new OpenAIClient(
-                new ApiKeyCredential(model.ApiKey ?? string.Empty),
-                new OpenAIClientOptions
-                {
-                    Endpoint = new Uri(model.BaseUrl),
-                    Transport = new HttpClientPipelineTransport(httpClient)
-                })
-            .GetChatClient(model.Name)
-            .AsIChatClient()
-            .AsBuilder()
-            .UseFunctionInvocation()
-            .UseOpenTelemetry(sourceName: nameof(AiGatewayService), configure: cfg => cfg.EnableSensitiveData = true);
-
-        var chatOptions = new ChatOptions
+        var template = await templateRepository.FirstOrDefaultAsync(specification, cancellationToken);
+        if (template is null)
         {
-            Instructions = template.SystemPrompt,
-            Temperature = template.Specification.Temperature ?? model.Parameters.Temperature,
-        };
-
-        // 执行外部传入的配置逻辑（例如挂载工具）
-        configureOptions?.Invoke(chatOptions);
-
-        var agentOptions = new ChatClientAgentOptions
-        {
-            Name = template.Name,
-            ChatOptions = chatOptions
-        };
-
-        // 动态创建会话存储
-        if (isSaveChatMessage)
-        {
-            agentOptions.ChatMessageStoreFactory = context =>
-                new SessionChatMessageStore(serviceProvider, context.SerializedState);
+            throw CreateConfigurationMissingException();
         }
 
-        var agent = chatClientBuilder.BuildAIAgent(agentOptions, services: serviceProvider);
+        var model = await modelRepository.FirstOrDefaultAsync(
+            new LanguageModelByIdSpec(template.ModelId),
+            cancellationToken);
 
-        return agent;
+        if (model is null)
+        {
+            throw CreateConfigurationMissingException();
+        }
+
+        return (model, template);
     }
 
-    public async Task<ChatClientAgent> CreateAgentAsync(Guid templateId,
-        Action<ChatOptions>? configureOptions = null,
-        bool isSaveChatMessage = true)
+    public ScopedRuntimeAgent CreateAgent(
+        LanguageModel model,
+        ConversationTemplate template,
+        Action<AiChatOptions>? configureOptions = null,
+        bool isSaveChatMessage = true,
+        string? instructionsOverride = null)
     {
-        var (model, template) = await GetModelAndTemplateAsync(t => t.Id == templateId);
-        return CreateAgentAsync(model, template, configureOptions, isSaveChatMessage);
+        _ = isSaveChatMessage;
+
+        if (!runtimeFactory.CanCreate(model.Provider))
+        {
+            throw new ChatWorkflowException(
+                AppProblemCodes.ChatConfigurationMissing,
+                $"No chat client provider is registered for '{model.Provider}'.",
+                "The configured model provider is unavailable. Please ask an administrator to review the AI settings.");
+        }
+
+        var chatOptions = new AiChatOptions
+        {
+            Instructions = instructionsOverride ?? template.SystemPrompt,
+            Temperature = template.Specification.Temperature ?? model.Parameters.Temperature
+        };
+
+        configureOptions?.Invoke(chatOptions);
+
+        return runtimeFactory.Create(new AgentRuntimeCreateRequest(model, template, chatOptions));
     }
 
-    public async Task<ChatClientAgent> CreateAgentAsync(string templateName,
-        Action<ConversationTemplate>? configureTemplate = null,
-        Action<ChatOptions>? configureOptions = null,
+    public async Task<ScopedRuntimeAgent> CreateAgentAsync(
+        Guid templateId,
+        Action<AiChatOptions>? configureOptions = null,
         bool isSaveChatMessage = true)
     {
-        var (model, template) = await GetModelAndTemplateAsync(t => t.Name == templateName);
-        configureTemplate?.Invoke(template);
-        return CreateAgentAsync(model, template, configureOptions, isSaveChatMessage);
+        var (model, template) = await GetModelAndTemplateAsync(new ConversationTemplateByIdSpec(templateId));
+        return CreateAgent(model, template, configureOptions, isSaveChatMessage);
+    }
+
+    public async Task<ScopedRuntimeAgent> CreateAgentAsync(
+        string templateName,
+        Func<string, string>? configureInstructions = null,
+        Action<AiChatOptions>? configureOptions = null,
+        bool isSaveChatMessage = true)
+    {
+        var (model, template) = await GetModelAndTemplateAsync(new ConversationTemplateByNameSpec(templateName));
+        var instructions = configureInstructions?.Invoke(template.SystemPrompt);
+        return CreateAgent(model, template, configureOptions, isSaveChatMessage, instructions);
+    }
+
+    private static ChatWorkflowException CreateConfigurationMissingException()
+    {
+        return new ChatWorkflowException(
+            AppProblemCodes.ChatConfigurationMissing,
+            "The conversation template or model configuration could not be found.",
+            "This session is missing an available template or model configuration. Please ask an administrator to review the AI settings.");
     }
 }

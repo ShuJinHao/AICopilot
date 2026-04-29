@@ -1,9 +1,12 @@
-﻿using AICopilot.SharedKernel.Domain;
+using AICopilot.EntityFrameworkCore.AuditLogs;
+using AICopilot.SharedKernel.Domain;
 using AICopilot.SharedKernel.Repository;
 
 namespace AICopilot.EntityFrameworkCore.Repository;
 
-public class EfRepository<T>(AiCopilotDbContext dbContext) : EfReadRepository<T>(dbContext), IRepository<T>
+public class EfRepository<T>(
+    AiCopilotDbContext dbContext,
+    AuditDbContext auditDbContext) : EfReadRepository<T>(dbContext), IRepository<T>
     where T : class, IEntity, IAggregateRoot
 {
     private readonly AiCopilotDbContext _dbContext = dbContext;
@@ -26,6 +29,7 @@ public class EfRepository<T>(AiCopilotDbContext dbContext) : EfReadRepository<T>
 
     public async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
-        return await _dbContext.SaveChangesAsync(cancellationToken);
+        var result = await _dbContext.SaveChangesAsync(cancellationToken);
+        return result + await auditDbContext.SaveChangesAsync(cancellationToken);
     }
 }

@@ -2,6 +2,6 @@
 
 public record ModelParameters
 {
-    public int MaxTokens { get; set; }
-    public float Temperature { get; set; } = 0.7f;
+    public int MaxTokens { get; init; }
+    public float Temperature { get; init; } = 0.7f;
 }

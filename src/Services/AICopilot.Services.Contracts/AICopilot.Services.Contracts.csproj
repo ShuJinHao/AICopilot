@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Core\AICopilot.Core.AiGateway\AICopilot.Core.AiGateway.csproj" />
+    <ProjectReference Include="..\..\Core\AICopilot.Core.DataAnalysis\AICopilot.Core.DataAnalysis.csproj" />
+    <ProjectReference Include="..\..\Core\AICopilot.Core.McpServer\AICopilot.Core.McpServer.csproj" />
+    <ProjectReference Include="..\..\Core\AICopilot.Core.Rag\AICopilot.Core.Rag.csproj" />
+    <ProjectReference Include="..\..\Shared\AICopilot.SharedKernel\AICopilot.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\Shared\AICopilot.Visualization\AICopilot.Visualization.csproj" />
+  </ItemGroup>
+
+</Project>

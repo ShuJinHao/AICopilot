@@ -12,16 +12,41 @@ public class Document : IEntity<int>
 
     internal Document(Guid knowledgeBaseId, string name, string filePath, string extension, string fileHash)
     {
+        if (knowledgeBaseId == Guid.Empty)
+        {
+            throw new ArgumentException("Document knowledge base id is required.", nameof(knowledgeBaseId));
+        }
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new ArgumentException("Document name is required.", nameof(name));
+        }
+
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            throw new ArgumentException("Document file path is required.", nameof(filePath));
+        }
+
+        if (string.IsNullOrWhiteSpace(extension))
+        {
+            throw new ArgumentException("Document extension is required.", nameof(extension));
+        }
+
+        if (string.IsNullOrWhiteSpace(fileHash))
+        {
+            throw new ArgumentException("Document file hash is required.", nameof(fileHash));
+        }
+
         KnowledgeBaseId = knowledgeBaseId;
-        Name = name;
-        FilePath = filePath;
-        Extension = extension;
-        FileHash = fileHash;
+        Name = name.Trim();
+        FilePath = filePath.Trim();
+        Extension = extension.Trim();
+        FileHash = fileHash.Trim();
         Status = DocumentStatus.Pending;
         CreatedAt = DateTime.UtcNow;
     }
 
-    public int Id { get; set; }
+    public int Id { get; private set; }
 
     public Guid KnowledgeBaseId { get; private set; }
 
@@ -75,8 +100,14 @@ public class Document : IEntity<int>
     /// </summary>
     public void StartParsing()
     {
-        if (Status != DocumentStatus.Pending && Status != DocumentStatus.Failed)
+        if (Status != DocumentStatus.Pending &&
+            Status != DocumentStatus.Failed &&
+            Status != DocumentStatus.Parsing &&
+            Status != DocumentStatus.Splitting &&
+            Status != DocumentStatus.Embedding)
+        {
             throw new InvalidOperationException($"当前状态 {Status} 不允许开始解析");
+        }
 
         Status = DocumentStatus.Parsing;
         ErrorMessage = null;
@@ -96,6 +127,16 @@ public class Document : IEntity<int>
     /// </summary>
     public void AddChunk(int index, string content)
     {
+        if (index < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(index), "Document chunk index cannot be negative.");
+        }
+
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            throw new ArgumentException("Document chunk content is required.", nameof(content));
+        }
+
         // 允许在 Splitting 或 Embedding 阶段添加/重新生成切片
         if (Status != DocumentStatus.Splitting && Status != DocumentStatus.Embedding)
             throw new InvalidOperationException($"当前状态 {Status} 不允许添加切片");
@@ -127,6 +168,11 @@ public class Document : IEntity<int>
     /// </summary>
     public void MarkChunkAsEmbedded(int chunkId, string vectorId)
     {
+        if (string.IsNullOrWhiteSpace(vectorId))
+        {
+            throw new ArgumentException("Document chunk vector id is required.", nameof(vectorId));
+        }
+
         var chunk = _chunks.FirstOrDefault(c => c.Id == chunkId);
         chunk?.SetVectorId(vectorId);
     }
@@ -145,8 +191,13 @@ public class Document : IEntity<int>
     /// </summary>
     public void MarkAsFailed(string errorMessage)
     {
+        if (string.IsNullOrWhiteSpace(errorMessage))
+        {
+            throw new ArgumentException("Document failure error message is required.", nameof(errorMessage));
+        }
+
         Status = DocumentStatus.Failed;
-        ErrorMessage = errorMessage;
+        ErrorMessage = errorMessage.Trim();
     }
 
     #endregion 领域行为方法
