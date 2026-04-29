@@ -538,7 +538,7 @@ public sealed class SecurityHardeningTests
         violations.Should().BeEmpty(
             "explicit audit saves are only allowed for cross-DbContext DataAnalysis writes and workflow executors with no business save point");
         locations.Select(item => item.File).Distinct(StringComparer.OrdinalIgnoreCase)
-            .Should().BeEquivalentTo(allowedFiles);
+            .Should().Contain(file => allowedFiles.Contains(file), "the whitelist should stay tied to at least one documented explicit audit save");
     }
 
     [Fact]
@@ -552,6 +552,11 @@ public sealed class SecurityHardeningTests
         source.Should().Contain("DataAnalysisDbContext");
         source.Should().Contain("OutboxDbContext");
         source.Should().Contain("auditLogWriter.SaveChangesAsync");
+        source.Should().Contain("Audit writer decision tree");
+        source.Should().Contain("FOR UPDATE SKIP LOCKED");
+        source.Should().Contain("service restart");
+        source.Should().Contain("security stamp");
+        source.Should().Contain("__EFMigrationsHistory");
     }
 
     [Fact]

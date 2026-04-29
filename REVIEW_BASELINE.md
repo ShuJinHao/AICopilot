@@ -40,6 +40,11 @@ Generated for the current large refactor baseline.
 - `AiCopilotDbContext` is now the main infrastructure migration context for audit logs and Outbox; Identity runtime tables are detached from it.
 - `IdentityStoreDbContext` owns runtime Identity stores and maps audit logs with `ExcludeFromMigrations()` for identity-management transaction atomicity.
 - Runtime audit writing and audit querying use `AuditDbContext`.
+- Audit writer decision tree:
+  - Identity management commands use `IIdentityAuditLogWriter` only, inside `ITransactionalExecutionService`.
+  - Ordinary business commands use `IAuditLogWriter`; repository save flushes business state first and then the scoped audit context.
+  - Explicit `IAuditLogWriter.SaveChangesAsync` is allowed only for documented cross-DbContext execution paths that have no business save point.
+  - New DbContexts must not map `AuditLogEntryConfiguration` unless the transaction boundary is reviewed and added to the architecture whitelist.
 - AiGateway configuration commands stage business changes and audit rows, then commit through one repository save; the EF repository flushes the scoped `AuditDbContext` after the business context save.
 - Identity commands do not inject `IAuditLogWriter` and do not call `auditLogWriter.SaveChangesAsync` directly. `EfTransactionalExecutionService` runs on `IdentityStoreDbContext`, and commits identity changes plus identity audit rows together.
 - Explicit `auditLogWriter.SaveChangesAsync` calls are allowed only where there is no same business save point:
@@ -50,9 +55,19 @@ Generated for the current large refactor baseline.
 
 - `outbox.outbox_messages` is the unified Outbox table for this baseline.
 - Runtime Outbox dispatch and direct integration-event enqueueing use `OutboxDbContext`.
+- Dispatcher horizontal scaling relies on PostgreSQL `FOR UPDATE SKIP LOCKED` while selecting due messages. Multiple dispatcher instances may poll concurrently without claiming the same row.
+- Publish cancellation is not counted as a delivery failure and must not increment retry count; non-cancellation publish failures still use bounded retry and dead-letter behavior.
 - Existing main migrations still own the current Outbox table history. This baseline does not add an Outbox migration.
 - Module DbContexts may map Outbox with `ExcludeFromMigrations()` so they can stage events without owning the table.
 - Business DbContexts keep their Outbox mappings so aggregate domain events can still be staged in the same transaction as business changes.
+
+## Runtime Security And Operations Notes
+
+- JWTs carry role and permission claims for request-time authorization. Identity governance changes that affect authorization, including role changes, disable/enable, and password reset, must refresh the user's security stamp so existing tokens are rejected on the next authenticated request.
+- Login rate limiting is partitioned by normalized username plus client IP when the username can be read from the login request; it falls back to IP when username is absent or unreadable.
+- MCP runtime registration is a startup-time operation. Disabling or changing an MCP server in the database requires service restart before the production chat toolchain reflects the change; hot unregister is intentionally not promised in this baseline.
+- MCP SSE clients use an explicit connection timeout. Stdio MCP arguments use a quoted/escaped parser and still preserve the single-file-path shortcut.
+- RAG indexing may recover documents left in `Parsing`, `Splitting`, or `Embedding`. Re-indexing loads existing chunks, deletes prior vector keys for the document, and then upserts the new vectors.
 
 ## Explicitly Deferred
 
@@ -61,6 +76,7 @@ Generated for the current large refactor baseline.
 - Preview or 0.x package replacement, OpenTelemetry NU1902 remediation, RabbitMQ dedicated user, dashboard image pinning, private image registry, and Serilog adoption require dependency or operations decisions.
 - Cross-DbContext audit atomicity outside Identity remains a future design item; this baseline does not introduce `TransactionScope` or distributed transactions.
 - Cloud and edge alignment work remains out of scope unless explicitly requested.
+- Splitting `__EFMigrationsHistory` by DbContext remains a separate migration governance task. This baseline intentionally keeps the existing shared history table to avoid disturbing already-applied migrations.
 
 ## Required Verification
 

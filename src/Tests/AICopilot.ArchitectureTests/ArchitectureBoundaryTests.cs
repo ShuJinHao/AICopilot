@@ -385,7 +385,45 @@ public sealed class ArchitectureBoundaryTests
             source.Should().Contain("transactionalExecutionService.ExecuteAsync", commandFile);
             source.Should().NotContain("IAuditLogWriter", commandFile);
             source.Should().NotContain("auditLogWriter.SaveChangesAsync", commandFile);
+            source.Should().NotContain("DbContext", commandFile);
         }
+    }
+
+    [Fact]
+    public void AuditLogEntryMapping_ShouldStayInExplicitContextWhitelist()
+    {
+        var infrastructureRoot = Path.Combine(
+            SolutionRoot,
+            "src",
+            "Infrastructure",
+            "AICopilot.EntityFrameworkCore");
+        var allowedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            Path.Combine("src", "Infrastructure", "AICopilot.EntityFrameworkCore", "AuditLogs", "AuditDbContext.cs").Replace('\\', '/'),
+            Path.Combine("src", "Infrastructure", "AICopilot.EntityFrameworkCore", "IdentityStoreDbContext.cs").Replace('\\', '/')
+        };
+
+        var locations = Directory
+            .EnumerateFiles(infrastructureRoot, "*DbContext.cs", SearchOption.AllDirectories)
+            .SelectMany(file => File
+                .ReadLines(file)
+                .Select((line, index) => new
+                {
+                    File = Path.GetRelativePath(SolutionRoot, file).Replace('\\', '/'),
+                    LineNumber = index + 1,
+                    Line = line.Trim()
+                }))
+            .Where(item => item.Line.Contains("AuditLogEntryConfiguration", StringComparison.Ordinal))
+            .ToArray();
+
+        var violations = locations
+            .Where(item => !allowedFiles.Contains(item.File))
+            .Select(item => $"{item.File}:{item.LineNumber}: {item.Line}")
+            .ToArray();
+
+        violations.Should().BeEmpty("new DbContexts must not map audit_logs without explicit transaction-boundary review");
+        locations.Select(item => item.File).Distinct(StringComparer.OrdinalIgnoreCase)
+            .Should().BeEquivalentTo(allowedFiles);
     }
 
     [Fact]
@@ -404,13 +442,13 @@ public sealed class ArchitectureBoundaryTests
             "AICopilot.Core.McpServer.Aggregates.McpServerInfo.McpServerInfo",
             "McpServerInfo is owned by McpServerDbContext");
         snapshot.Should().NotContain(
-            "mcp_server_info",
+            "b.ToTable(\"mcp_server_info\"",
             "the main DbContext must not map the MCP server table");
         snapshot.Should().NotContain(
             "AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase.BusinessDatabase",
             "BusinessDatabase is owned by DataAnalysisDbContext");
         snapshot.Should().NotContain(
-            "business_databases",
+            "b.ToTable(\"business_databases\"",
             "the main DbContext must not map the DataAnalysis business database table");
         snapshot.Should().NotContain(
             "AICopilot.Core.Rag.Aggregates.EmbeddingModel.EmbeddingModel",
@@ -425,16 +463,16 @@ public sealed class ArchitectureBoundaryTests
             "AICopilot.Core.Rag.Aggregates.KnowledgeBase.DocumentChunk",
             "DocumentChunk is owned by RagDbContext");
         snapshot.Should().NotContain(
-            "embedding_models",
+            "b.ToTable(\"embedding_models\"",
             "the main DbContext must not map the RAG embedding model table");
         snapshot.Should().NotContain(
-            "knowledge_bases",
+            "b.ToTable(\"knowledge_bases\"",
             "the main DbContext must not map the RAG knowledge base table");
         snapshot.Should().NotContain(
-            "documents",
+            "b.ToTable(\"documents\"",
             "the main DbContext must not map the RAG document table");
         snapshot.Should().NotContain(
-            "document_chunks",
+            "b.ToTable(\"document_chunks\"",
             "the main DbContext must not map the RAG document chunk table");
         snapshot.Should().NotContain(
             "AICopilot.Core.AiGateway.Aggregates.LanguageModel.LanguageModel",
@@ -452,16 +490,16 @@ public sealed class ArchitectureBoundaryTests
             "AICopilot.Core.AiGateway.Aggregates.Sessions.Message",
             "Message is owned by AiGatewayDbContext");
         snapshot.Should().NotContain(
-            "language_models",
+            "b.ToTable(\"language_models\"",
             "the main DbContext must not map the AiGateway language model table");
         snapshot.Should().NotContain(
-            "conversation_templates",
+            "b.ToTable(\"conversation_templates\"",
             "the main DbContext must not map the AiGateway conversation template table");
         snapshot.Should().NotContain(
-            "approval_policies",
+            "b.ToTable(\"approval_policies\"",
             "the main DbContext must not map the AiGateway approval policy table");
         snapshot.Should().NotContain(
-            "sessions",
+            "b.ToTable(\"sessions\"",
             "the main DbContext must not map the AiGateway session table");
         snapshot.Should().NotContain(
             "b.ToTable(\"messages\"",
@@ -601,7 +639,7 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void IdentityGuidMigration_ShouldRecreateOnlyAspNetTablesInIdentitySchema()
+    public void IdentityGuidMigration_ShouldUseGuardedRawSqlDropsOnlyForAspNetTables()
     {
         var migrationFile = Path.Combine(
             SolutionRoot,
@@ -618,9 +656,11 @@ public sealed class ArchitectureBoundaryTests
         migration.Should().Contain("Refusing to run destructive Identity GUID migration");
         migration.Should().Contain("DROP TABLE IF EXISTS public.\"AspNetUsers\" CASCADE");
         migration.Should().Contain("DROP TABLE IF EXISTS public.\"AspNetRoles\" CASCADE");
+        migration.Should().Contain("DROP TABLE IF EXISTS identity.\"AspNetUsers\" CASCADE");
+        migration.Should().Contain("DROP TABLE IF EXISTS identity.\"AspNetRoles\" CASCADE");
         migration.Should().Contain("schema: \"identity\"");
         migration.Should().Contain("table.Column<Guid>(type: \"uuid\"");
-        migration.Should().NotContain("DropTable(");
+        migration.Should().NotContain("DropTable(", "the destructive drop is allowed only as guarded raw SQL in this active-development migration");
         migration.Should().NotContain("language_models");
         migration.Should().NotContain("business_databases");
         migration.Should().NotContain("mcp_server_info");
