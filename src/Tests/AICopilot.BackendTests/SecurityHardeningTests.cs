@@ -90,8 +90,14 @@ public sealed class SecurityHardeningTests
             .Should().Contain("SessionWithMessagesByIdForUserSpec");
         File.ReadAllText(Path.Combine(sessionQueryPath, "GetListChatMessages.cs"))
             .Should().Contain("SessionWithMessagesByIdForUserSpec");
+        File.ReadAllText(Path.Combine(sessionQueryPath, "GetPendingApprovals.cs"))
+            .Should().Contain("SessionByIdForUserSpec");
+        File.ReadAllText(Path.Combine(sessionQueryPath, "GetPendingApprovals.cs"))
+            .Should().Contain("IFinalAgentContextStore");
         File.ReadAllText(Path.Combine(sessionCommandPath, "DeleteSession.cs"))
             .Should().Contain("SessionByIdForUserSpec");
+        File.ReadAllText(Path.Combine(sessionCommandPath, "DeleteSession.cs"))
+            .Should().Contain("finalAgentContextStore.RemoveAsync");
 
         var chatStreamSource = File.ReadAllText(Path.Combine(
             solutionRoot,
@@ -104,6 +110,58 @@ public sealed class SecurityHardeningTests
         chatStreamSource.Should().Contain("sessionExecutionLock.AcquireAsync(request.SessionId");
         chatStreamSource.Should().Contain("finalAgentContextStore.GetAsync(request.SessionId");
         chatStreamSource.Should().Contain("AppProblemCodes.ApprovalPending");
+
+        var controllerSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Hosts",
+            "AICopilot.HttpApi",
+            "Controllers",
+            "AiGatewayController.cs"));
+        controllerSource.Should().Contain("[HttpGet(\"approval/pending\")]");
+        controllerSource.Should().Contain("GetPendingApprovalsQuery");
+    }
+
+    [Fact]
+    public void FrontendChatApprovalUx_ShouldRecoverPendingApprovalAndScopeSessionState()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var chatStoreSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Vues",
+            "AICopilot.Web",
+            "src",
+            "stores",
+            "chatStore.ts"));
+        var chatServiceSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Vues",
+            "AICopilot.Web",
+            "src",
+            "services",
+            "chatService.ts"));
+        var approvalCardSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Vues",
+            "AICopilot.Web",
+            "src",
+            "components",
+            "chat",
+            "ApprovalCard.vue"));
+
+        chatServiceSource.Should().Contain("/aigateway/approval/pending");
+        chatStoreSource.Should().Contain("refreshPendingApprovals(sessionId)");
+        chatStoreSource.Should().Contain("reconcilePendingApprovalCards");
+        chatStoreSource.Should().Contain("sessionId !== currentSessionId.value");
+        chatStoreSource.Should().Contain("errorSessionId.value !== currentSessionId.value");
+        chatStoreSource.Should().Contain("approval_already_processed");
+        chatStoreSource.Should().Contain("'expired'");
+        approvalCardSource.Should().Contain("isSubmitting");
+        approvalCardSource.Should().Contain("审批上下文已失效");
+        approvalCardSource.Should().NotContain("isProcessing.value = true");
     }
 
     [Fact]

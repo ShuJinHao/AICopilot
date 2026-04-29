@@ -68,7 +68,7 @@ const onsiteStatusType = computed(() => {
 
 async function handleSend() {
   const content = inputValue.value.trim()
-  if (!content || store.isStreaming) {
+  if (!content || isInputDisabled.value) {
     return
   }
 

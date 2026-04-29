@@ -506,6 +506,13 @@ public sealed class Phase25RuntimeSmokeTests
         callId.Should().NotBeNullOrWhiteSpace();
         approvalPayload.RootElement.GetProperty("requiresOnsiteAttestation").GetBoolean().Should().BeTrue();
 
+        var pendingApprovals = await GetJsonAsync<List<PendingApprovalDto>>(
+            $"/api/aigateway/approval/pending?sessionId={sessionId}");
+        pendingApprovals.Should().ContainSingle(item =>
+            item.CallId == callId &&
+            item.Name == GetDiagnosticChecklistToolName() &&
+            item.RequiresOnsiteAttestation);
+
         var blockedByPendingApprovalEvents = await PostChatAsync(new
         {
             sessionId,
@@ -547,6 +554,10 @@ public sealed class Phase25RuntimeSmokeTests
             messages.All(message => message.Content != "this should wait until the pending approval is handled") &&
             messages.Any(message => message.Type == MessageType.User && message.Content.Contains("[审批通过]")) &&
             messages.Any(message => message.Type == MessageType.Assistant && message.Content.Contains("已批准并执行工具")));
+
+        var emptyPendingApprovals = await GetJsonAsync<List<PendingApprovalDto>>(
+            $"/api/aigateway/approval/pending?sessionId={sessionId}");
+        emptyPendingApprovals.Should().BeEmpty();
 
         var rejectApprovalEvents = await PostChatAsync(new
         {
@@ -639,6 +650,9 @@ public sealed class Phase25RuntimeSmokeTests
 
             using var historyResponse = await _fixture.HttpClient.GetAsync($"/api/aigateway/chat-message/list?sessionId={sessionId}");
             historyResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+            using var pendingApprovalResponse = await _fixture.HttpClient.GetAsync($"/api/aigateway/approval/pending?sessionId={sessionId}");
+            pendingApprovalResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
 
             var chatEvents = await PostChatAsync(new
             {
@@ -2084,6 +2098,13 @@ public sealed class Phase25RuntimeSmokeTests
         DateTimeOffset? OnsiteConfirmedAt,
         string? OnsiteConfirmedBy,
         DateTimeOffset? OnsiteConfirmationExpiresAt);
+
+    private sealed record PendingApprovalDto(
+        string CallId,
+        string Name,
+        IReadOnlyDictionary<string, object?> Args,
+        bool RequiresOnsiteAttestation,
+        DateTimeOffset? AttestationExpiresAt);
 
     private sealed record AuditLogListDto(
         IReadOnlyCollection<AuditLogSummaryDto> Items,

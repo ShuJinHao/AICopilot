@@ -47,6 +47,7 @@ async function onReject(payload: { callId: string }, chunk: ApprovalChunk) {
       <ApprovalCard
         v-else-if="chunk.type === ChunkType.ApprovalRequest"
         :chunk="chunk as ApprovalChunk"
+        :is-submitting="store.isStreaming"
         @approve="(payload) => onApprove(payload, chunk as ApprovalChunk)"
         @reject="(payload) => onReject(payload, chunk as ApprovalChunk)"
       />
