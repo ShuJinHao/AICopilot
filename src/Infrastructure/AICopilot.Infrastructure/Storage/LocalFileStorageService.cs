@@ -1,4 +1,4 @@
-﻿using AICopilot.Services.Common.Contracts;
+﻿using AICopilot.Services.Contracts;
 using System;
 using System.Collections.Generic;
 using System.Text;

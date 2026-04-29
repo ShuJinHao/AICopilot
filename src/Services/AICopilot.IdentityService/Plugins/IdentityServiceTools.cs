@@ -18,7 +18,7 @@ public class IdentityServiceTools : AgentPluginBase
         [Description("用于注册新用户的密码")] string password)
     {
         var sender = sp.GetRequiredService<ISender>();
-        var result = await sender.Send(new CreateUserCommand(userName, password));
+        var result = await sender.Send(new CreateUserCommand(userName, password, "User"));
         return result.IsSuccess;
     }
 }

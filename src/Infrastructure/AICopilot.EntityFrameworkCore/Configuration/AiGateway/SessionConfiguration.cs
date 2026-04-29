@@ -29,6 +29,18 @@ public class SessionConfiguration : IEntityTypeConfiguration<Session>
             .IsRequired()
             .HasColumnName("user_id");
 
+        builder.Property(s => s.OnsiteConfirmedAt)
+            .HasColumnType("timestamp with time zone")
+            .HasColumnName("onsite_confirmed_at");
+
+        builder.Property(s => s.OnsiteConfirmedBy)
+            .HasMaxLength(256)
+            .HasColumnName("onsite_confirmed_by");
+
+        builder.Property(s => s.OnsiteConfirmationExpiresAt)
+            .HasColumnType("timestamp with time zone")
+            .HasColumnName("onsite_confirmation_expires_at");
+
         // 为 UserId 创建索引，因为很可能会按用户查询会话
         builder.HasIndex(s => s.UserId)
             .HasDatabaseName("ix_sessions_user_id");

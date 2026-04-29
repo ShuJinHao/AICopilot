@@ -1,2 +1,1 @@
-﻿export const token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYW1laWQiOiIxMmMxZjgyMy1kNTcyLTQ3NmMtOGQ3Yi1kNzU3ZTgzYTdiMmEiLCJ1bmlxdWVfbmFtZSI6ImFkbWluIiwianRpIjoiZWE2ZDVmMTUtMjNmNi00MDdkLThjYTEtYmI3MzhmN2Q4MTkyIiwicm9sZSI6IkFkbWluIiwibmJmIjoxNzcyNTAyNTQxLCJleHAiOjE3NzI1MDQzNDEsImlhdCI6MTc3MjUwMjU0MSwiaXNzIjoiaHR0cHM6Ly9sb2NhbGhvc3QiLCJhdWQiOiJodHRwczovL2xvY2FsaG9zdCJ9.NQaE0Yz_STAVwwa_4oLRrkaZJIxjlJzO0OZKGPaep1I";
-export const baseUrl = '/api';
+export const baseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || '/api'

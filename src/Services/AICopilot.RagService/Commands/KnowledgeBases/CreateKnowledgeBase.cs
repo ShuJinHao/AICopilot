@@ -1,6 +1,6 @@
 ﻿using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
-using AICopilot.Services.Common.Attributes;
+using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.SharedKernel.Messaging;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;

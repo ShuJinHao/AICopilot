@@ -1,12 +1,12 @@
 ﻿using AICopilot.AgentPlugin;
-using AICopilot.Dapper;
+using AICopilot.DataAnalysisService.BusinessDatabases;
 using AICopilot.DataAnalysisService.Services;
+using AICopilot.DataAnalysisService.Semantics;
+using AICopilot.Services.Contracts;
+using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using System;
-using System.Collections.Generic;
 using System.Reflection;
-using System.Text;
 
 namespace AICopilot.DataAnalysisService;
 
@@ -14,10 +14,23 @@ public static class DependencyInjection
 {
     public static void AddDataAnalysisService(this IHostApplicationBuilder builder)
     {
-        // 注册 Dapper 基础服务
-        builder.AddDapper();
+        builder.Services.AddMediatR(cfg =>
+        {
+            cfg.RegisterServicesFromAssembly(Assembly.GetExecutingAssembly());
+        });
+
         builder.Services.AddScoped<VisualizationContext>();
-        // 注册插件加载器
+        builder.Services.AddScoped<IDataAnalysisVisualizationContext>(provider =>
+            provider.GetRequiredService<VisualizationContext>());
+        builder.Services.AddSingleton<ISqlDialectInstructionProvider, SqlDialectInstructionProvider>();
+        builder.Services.AddSingleton<ISemanticDefinitionCatalog, SemanticDefinitionCatalog>();
+        builder.Services.AddSingleton<ISemanticIntentCatalog, SemanticIntentCatalog>();
+        builder.Services.AddSingleton<ISemanticPhysicalMappingProvider, ConfiguredSemanticPhysicalMappingProvider>();
+        builder.Services.AddScoped<ISemanticSourceInspector, SemanticSourceInspector>();
+        builder.Services.AddScoped<ISemanticQueryPlanner, SemanticQueryPlanner>();
+        builder.Services.AddScoped<ISemanticSqlGenerator, SemanticSqlGenerator>();
+        builder.Services.AddScoped<IBusinessDatabaseReadService, BusinessDatabaseReadService>();
+
         builder.Services.AddAgentPlugin(registrar =>
         {
             registrar.RegisterPluginFromAssembly(Assembly.GetExecutingAssembly());

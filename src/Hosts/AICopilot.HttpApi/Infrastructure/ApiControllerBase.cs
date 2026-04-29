@@ -6,9 +6,9 @@ using IResult = AICopilot.SharedKernel.Result.IResult;
 namespace AICopilot.HttpApi.Infrastructure;
 
 [ApiController]
-public abstract class ApiControllerBase : ControllerBase
+public abstract class ApiControllerBase(ISender sender) : ControllerBase
 {
-    public ISender Sender => HttpContext.RequestServices.GetRequiredService<ISender>();
+    protected ISender Sender { get; } = sender;
 
     [NonAction]
     public IActionResult ReturnResult(IResult result)
@@ -30,13 +30,27 @@ public abstract class ApiControllerBase : ControllerBase
                 return result.Errors is null ? BadRequest() : BadRequest(new { errors = result.Errors });
 
             case ResultStatus.Forbidden:
-                return StatusCode(403);
+                return StatusCode(
+                    StatusCodes.Status403Forbidden,
+                    CreateProblemDetails(StatusCodes.Status403Forbidden, result.Errors));
 
             case ResultStatus.Unauthorized:
-                return Unauthorized();
+                return StatusCode(
+                    StatusCodes.Status401Unauthorized,
+                    CreateProblemDetails(StatusCodes.Status401Unauthorized, result.Errors));
 
             default:
                 return BadRequest();
         }
+    }
+
+    private static ProblemDetails CreateProblemDetails(int statusCode, IEnumerable<object>? errors)
+    {
+        var problem = errors?.OfType<ApiProblemDescriptor>().FirstOrDefault();
+        return ApiProblemDetailsFactory.Create(
+            statusCode,
+            problem,
+            errors?.Select(error => error?.ToString())
+                .FirstOrDefault(message => !string.IsNullOrWhiteSpace(message)));
     }
 }

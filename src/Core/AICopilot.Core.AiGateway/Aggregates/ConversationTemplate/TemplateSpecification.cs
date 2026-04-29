@@ -2,6 +2,6 @@
 
 public record TemplateSpecification
 {
-    public int? MaxTokens { get; set; }
-    public float? Temperature { get; set; }
+    public int? MaxTokens { get; init; }
+    public float? Temperature { get; init; }
 }

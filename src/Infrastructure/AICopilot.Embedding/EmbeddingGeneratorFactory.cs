@@ -7,14 +7,19 @@ using System.ClientModel.Primitives;
 using System.Collections.Generic;
 using System.Text;
 
-namespace AICopilot.RagWorker.Services.Embeddings;
+namespace AICopilot.Embedding;
 
 public class EmbeddingGeneratorFactory(IHttpClientFactory httpClientFactory)
 {
     public IEmbeddingGenerator<string, Embedding<float>> CreateGenerator(EmbeddingModel model)
     {
+        if (string.IsNullOrWhiteSpace(model.ApiKey))
+        {
+            throw new InvalidOperationException($"EmbeddingModel ApiKey is required; check configuration for {model.Name}.");
+        }
+
         var endpoint = new Uri(model.BaseUrl);
-        var credential = new ApiKeyCredential(model.ApiKey ?? "sk-empty");
+        var credential = new ApiKeyCredential(model.ApiKey);
 
         var httpClient = httpClientFactory.CreateClient("EmbeddingClient");
 

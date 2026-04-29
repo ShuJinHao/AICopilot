@@ -1,4 +1,4 @@
-﻿using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
+﻿using AICopilot.Services.Contracts;
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -14,13 +14,13 @@ public static class SqlDialectFactory
     /// <summary>
     /// 获取指定数据库类型的方言指南
     /// </summary>
-    public static string GetInstructions(DbProviderType providerType)
+    public static string GetInstructions(DatabaseProviderType providerType)
     {
         return providerType switch
         {
-            DbProviderType.PostgreSql => PostgreSqlInstructions,
-            DbProviderType.SqlServer => SqlServerInstructions,
-            DbProviderType.MySql => MySqlInstructions,
+            DatabaseProviderType.PostgreSql => PostgreSqlInstructions,
+            DatabaseProviderType.SqlServer => SqlServerInstructions,
+            DatabaseProviderType.MySql => MySqlInstructions,
             _ => "请使用标准的 ANSI SQL 语法。"
         };
     }
@@ -53,3 +53,12 @@ public static class SqlDialectFactory
                                               - **日期**: 使用 `NOW()` 或 `CURDATE()`。
                                               """;
 }
+public sealed class SqlDialectInstructionProvider : ISqlDialectInstructionProvider
+{
+    public string GetInstructions(DatabaseProviderType providerType)
+    {
+        return SqlDialectFactory.GetInstructions(providerType);
+    }
+}
+
+

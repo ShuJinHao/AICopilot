@@ -1,11 +1,11 @@
-﻿using AICopilot.Services.Common.Contracts;
+﻿using AICopilot.Services.Contracts;
 using System.Security.Claims;
 
 namespace AICopilot.HttpApi.Infrastructure;
 
 public class CurrentUser : ICurrentUser
 {
-    public string? Id { get; }
+    public Guid? Id { get; }
     public string? UserName { get; }
     public string? Role { get; }
     public bool IsAuthenticated { get; }
@@ -18,7 +18,12 @@ public class CurrentUser : ICurrentUser
 
         if (!user.Identity!.IsAuthenticated) return;
 
-        Id = user.FindFirstValue(ClaimTypes.NameIdentifier);
+        var userIdClaim = user.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (Guid.TryParse(userIdClaim, out var userId))
+        {
+            Id = userId;
+        }
+
         UserName = user.FindFirstValue(ClaimTypes.Name);
         Role = user.FindFirstValue(ClaimTypes.Role);
 

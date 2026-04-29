@@ -2,12 +2,30 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
+import './assets/base.css'
+import './assets/main.css'
 
 import App from './App.vue'
+import router from './router'
+import { setUnauthorizedHandler } from './services/apiClient'
+import { useAuthStore } from './stores/authStore'
+import { useChatStore } from './stores/chatStore'
 
-const app = createApp(App)  // 创建应用实例
+const app = createApp(App)
+const pinia = createPinia()
 
-app.use(createPinia())  // 注册状态管理插件
-app.use(ElementPlus)    // 注册 ElementPlus 插件
+app.use(pinia)
+app.use(ElementPlus)
+app.use(router)
 
-app.mount('#app') // 挂载到 index.html 的 #app 节点
+const authStore = useAuthStore(pinia)
+const chatStore = useChatStore(pinia)
+setUnauthorizedHandler(async (problem) => {
+  authStore.clearAuth(authStore.resolveUnauthorizedMessage(problem))
+  chatStore.reset()
+  if (router.currentRoute.value.path !== '/login') {
+    await router.replace('/login')
+  }
+})
+
+app.mount('#app')

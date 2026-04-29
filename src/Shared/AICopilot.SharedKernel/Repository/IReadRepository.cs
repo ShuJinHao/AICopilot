@@ -1,5 +1,6 @@
 ﻿using System.Linq.Expressions;
 using AICopilot.SharedKernel.Domain;
+using AICopilot.SharedKernel.Specification;
 
 namespace AICopilot.SharedKernel.Repository;
 
@@ -15,7 +16,16 @@ public interface IReadRepository<T> where T : class, IAggregateRoot
     ///     获取 Queryable 查询表达式
     /// </summary>
     /// <returns></returns>
+    [Obsolete("Use Specification-based query methods instead. This method leaks IQueryable outside infrastructure.")]
     IQueryable<T> GetQueryable();
+
+    Task<List<T>> ListAsync(ISpecification<T>? specification = null, CancellationToken cancellationToken = default);
+
+    Task<T?> FirstOrDefaultAsync(ISpecification<T>? specification = null, CancellationToken cancellationToken = default);
+
+    Task<int> CountAsync(ISpecification<T>? specification = null, CancellationToken cancellationToken = default);
+
+    Task<bool> AnyAsync(ISpecification<T>? specification = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     ///     查询具有指定主键的实体
@@ -24,7 +34,8 @@ public interface IReadRepository<T> where T : class, IAggregateRoot
     /// <param name="id">要查找的实体的主键值</param>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    Task<T?> GetByIdAsync<TKey>(TKey id, CancellationToken cancellationToken = default);
+    Task<T?> GetByIdAsync<TKey>(TKey id, CancellationToken cancellationToken = default)
+        where TKey : notnull;
 
     /// <summary>
     ///     查询实体集合

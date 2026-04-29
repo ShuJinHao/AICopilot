@@ -1,33 +1,89 @@
-﻿using AICopilot.SharedKernel.Messaging;
+﻿using AICopilot.IdentityService.Authorization;
+using AICopilot.Services.CrossCutting.Attributes;
+using AICopilot.Services.Contracts;
+using AICopilot.SharedKernel.Messaging;
 using AICopilot.SharedKernel.Result;
 using Microsoft.AspNetCore.Identity;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace AICopilot.IdentityService.Commands;
 
-public record CreatedUserDto(string Id, string UserName);
+public record CreatedUserDto(
+    string UserId,
+    string UserName,
+    string RoleName,
+    bool IsEnabled,
+    string Status);
 
-public record CreateUserCommand(string UserName, string Password) : ICommand<Result<CreatedUserDto>>;
+[AuthorizeRequirement("Identity.CreateUser")]
+public record CreateUserCommand(string UserName, string Password, string RoleName)
+    : ICommand<Result<CreatedUserDto>>;
 
-public class CreateUserCommandHandler(
-    UserManager<IdentityUser> userManager) : ICommandHandler<CreateUserCommand, Result<CreatedUserDto>>
+public sealed class CreateUserCommandHandler(
+    UserManager<ApplicationUser> userManager,
+    RoleManager<IdentityRole<Guid>> roleManager,
+    IIdentityAuditLogWriter auditLogWriter,
+    ITransactionalExecutionService transactionalExecutionService) : ICommandHandler<CreateUserCommand, Result<CreatedUserDto>>
 {
-    public async Task<Result<CreatedUserDto>> Handle(CreateUserCommand command, CancellationToken cancellationToken)
+    public async Task<Result<CreatedUserDto>> Handle(
+        CreateUserCommand command,
+        CancellationToken cancellationToken)
     {
-        var user = new IdentityUser
+        return await transactionalExecutionService.ExecuteAsync(async _ =>
         {
-            UserName = command.UserName
-        };
+            var normalizedUserName = command.UserName.Trim();
+            var normalizedRoleName = command.RoleName.Trim();
 
-        var result = await userManager.CreateAsync(user, command.Password);
-        if (!result.Succeeded)
-            return Result.Failure(result.Errors);
+            if (!await roleManager.RoleExistsAsync(normalizedRoleName))
+            {
+                return Result.NotFound("指定角色不存在");
+            }
 
-        // 默认分配角色
-        await userManager.AddToRoleAsync(user, "User");
+            if (await userManager.FindByNameAsync(normalizedUserName) is not null)
+            {
+                return Result.Invalid("用户名已存在");
+            }
 
-        return Result.Success(new CreatedUserDto(user.Id, user.UserName));
+            var user = new ApplicationUser
+            {
+                UserName = normalizedUserName
+            };
+
+            var result = await userManager.CreateAsync(user, command.Password);
+            if (!result.Succeeded)
+            {
+                return Result.Failure(result.Errors);
+            }
+
+            await SetSingleRoleAsync(user, normalizedRoleName);
+
+            await auditLogWriter.WriteAsync(
+                new AuditLogWriteRequest(
+                    AuditActionGroups.Identity,
+                    "Identity.CreateUser",
+                    "User",
+                    user.Id.ToString(),
+                    user.UserName!,
+                    AuditResults.Succeeded,
+                    $"创建用户：{user.UserName}，初始角色为 {normalizedRoleName}",
+                    ["userName", "roleName"]),
+                cancellationToken);
+            return Result.Success(new CreatedUserDto(
+                user.Id.ToString(),
+                user.UserName!,
+                normalizedRoleName,
+                true,
+                UserGovernanceStatuses.Enabled));
+        }, cancellationToken);
+    }
+
+    private async Task SetSingleRoleAsync(ApplicationUser user, string roleName)
+    {
+        var existingRoles = await userManager.GetRolesAsync(user);
+        if (existingRoles.Count > 0)
+        {
+            await userManager.RemoveFromRolesAsync(user, existingRoles);
+        }
+
+        await userManager.AddToRoleAsync(user, roleName);
     }
 }

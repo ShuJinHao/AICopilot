@@ -1,58 +1,52 @@
-﻿using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
+using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace AICopilot.EntityFrameworkCore.Configuration.DataAnalysis;
 
-public class ConversationTemplateConfiguration : IEntityTypeConfiguration<ConversationTemplate>
+public class BusinessDatabaseConfiguration : IEntityTypeConfiguration<BusinessDatabase>
 {
-    public void Configure(EntityTypeBuilder<ConversationTemplate> builder)
+    public void Configure(EntityTypeBuilder<BusinessDatabase> builder)
     {
-        // 配置表名
-        builder.ToTable("conversation_templates");
+        builder.ToTable("business_databases");
 
-        // 配置主键
-        builder.HasKey(ct => ct.Id);
-        builder.Property(ct => ct.Id).HasColumnName("id");
+        builder.HasKey(db => db.Id);
+        builder.Property(db => db.Id).HasColumnName("id");
 
-        // 配置属性
-        builder.Property(ct => ct.Name)
+        builder.Property(db => db.RowVersion).IsRowVersion();
+
+        builder.Property(db => db.Name)
             .IsRequired()
             .HasMaxLength(200)
             .HasColumnName("name");
 
-        // 唯一约束
-        builder.HasIndex(ct => ct.Name)
+        builder.HasIndex(db => db.Name)
             .IsUnique();
 
-        builder.Property(ct => ct.Description)
+        builder.Property(db => db.Description)
             .HasMaxLength(1000)
-            .HasColumnName("description"); // 允许为空
+            .HasColumnName("description");
 
-        builder.Property(ct => ct.SystemPrompt)
+        builder.Property(db => db.ConnectionString)
             .IsRequired()
-            .HasColumnName("system_prompt");
+            .HasColumnName("connection_string");
 
-        builder.Property(ct => ct.ModelId)
+        builder.Property(db => db.Provider)
             .IsRequired()
-            .HasColumnName("model_id");
+            .HasConversion<string>()
+            .HasMaxLength(50)
+            .HasColumnName("provider");
 
-        builder.Property(ct => ct.IsEnabled)
+        builder.Property(db => db.IsReadOnly)
+            .IsRequired()
+            .HasColumnName("is_read_only");
+
+        builder.Property(db => db.IsEnabled)
             .IsRequired()
             .HasColumnName("is_enabled");
 
-        // 配置值对象 TemplateSpecification (Record)
-        builder.OwnsOne(ct => ct.Specification, specBuilder =>
-        {
-            // 列名将默认为 Specification_MaxTokens 等
-            specBuilder.Property(s => s.MaxTokens)
-                .HasColumnName("max_tokens");
-
-            specBuilder.Property(s => s.Temperature)
-                .HasColumnName("temperature");
-        });
+        builder.Property(db => db.CreatedAt)
+            .IsRequired()
+            .HasColumnName("created_at");
     }
 }

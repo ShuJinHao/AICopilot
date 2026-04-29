@@ -1,11 +1,9 @@
-﻿using AICopilot.Embedding;
-using AICopilot.EventBus;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using System;
-using System.Collections.Generic;
+using AICopilot.RagService.Documents;
+using AICopilot.RagService.KnowledgeBases;
+using AICopilot.Services.Contracts;
 using System.Reflection;
-using System.Text;
 
 namespace AICopilot.RagService;
 
@@ -18,7 +16,12 @@ public static class DependencyInjection
             cfg.RegisterServicesFromAssembly(Assembly.GetExecutingAssembly());
         });
 
-        builder.AddEventBus();
-        builder.AddEmbedding();
+        builder.Services.AddScoped<IKnowledgeRetrievalService, KnowledgeRetrievalService>();
+        builder.Services.AddScoped<IKnowledgeBaseReadService, KnowledgeBaseReadService>();
+    }
+
+    public static void AddRagIndexingService(this IHostApplicationBuilder builder)
+    {
+        builder.Services.AddScoped<IDocumentIndexingService, DocumentIndexingService>();
     }
 }

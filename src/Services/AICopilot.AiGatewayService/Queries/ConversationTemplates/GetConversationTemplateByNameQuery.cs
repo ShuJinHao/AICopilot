@@ -1,35 +1,27 @@
-﻿using AICopilot.Services.Common.Attributes;
-using AICopilot.Services.Common.Contracts;
+using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
+using AICopilot.Core.AiGateway.Specifications.ConversationTemplate;
+using AICopilot.Services.CrossCutting.Attributes;
+using AICopilot.Services.Contracts.AiGateway.Dtos;
 using AICopilot.SharedKernel.Messaging;
+using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace AICopilot.AiGatewayService.Queries.ConversationTemplates;
 
 [AuthorizeRequirement("AiGateway.GetConversationTemplateByName")]
 public record GetConversationTemplateByNameQuery(string Name) : IQuery<Result<ConversationTemplateDto>>;
 
-public class GetConversationTemplateByNameQueryHandler(
-    IDataQueryService dataQueryService) : IQueryHandler<GetConversationTemplateByNameQuery, Result<ConversationTemplateDto>>
+public class GetConversationTemplateByNameQueryHandler(IReadRepository<ConversationTemplate> repository)
+    : IQueryHandler<GetConversationTemplateByNameQuery, Result<ConversationTemplateDto>>
 {
-    public async Task<Result<ConversationTemplateDto>> Handle(GetConversationTemplateByNameQuery request,
+    public async Task<Result<ConversationTemplateDto>> Handle(
+        GetConversationTemplateByNameQuery request,
         CancellationToken cancellationToken)
     {
-        var queryable = dataQueryService.ConversationTemplates
-            .Where(template => template.Name == request.Name)
-            .Select(ct => new ConversationTemplateDto
-            {
-                Id = ct.Id,
-                Name = ct.Name,
-                Description = ct.Description,
-                SystemPrompt = ct.SystemPrompt,
-                MaxTokens = ct.Specification.MaxTokens,
-                Temperature = ct.Specification.Temperature
-            });
-        var result = await dataQueryService.FirstOrDefaultAsync(queryable);
+        var result = await repository.FirstOrDefaultAsync(
+            new ConversationTemplateByNameSpec(request.Name),
+            cancellationToken);
 
-        return result == null ? Result.NotFound() : Result.Success(result);
+        return result == null ? Result.NotFound() : Result.Success(ConversationTemplateDtoMapper.Map(result));
     }
 }

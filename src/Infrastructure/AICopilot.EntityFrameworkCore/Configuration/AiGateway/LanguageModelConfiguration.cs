@@ -1,6 +1,7 @@
-﻿using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
+using AICopilot.EntityFrameworkCore.Security;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace AICopilot.EntityFrameworkCore.Configuration.AiGateway;
 
@@ -8,14 +9,13 @@ public class LanguageModelConfiguration : IEntityTypeConfiguration<LanguageModel
 {
     public void Configure(EntityTypeBuilder<LanguageModel> builder)
     {
-        // 配置表名
         builder.ToTable("language_models");
 
-        // 配置主键
         builder.HasKey(lm => lm.Id);
         builder.Property(lm => lm.Id).HasColumnName("id");
 
-        // 配置属性
+        builder.Property(lm => lm.RowVersion).IsRowVersion();
+
         builder.Property(lm => lm.Provider)
             .IsRequired()
             .HasMaxLength(100)
@@ -25,8 +25,7 @@ public class LanguageModelConfiguration : IEntityTypeConfiguration<LanguageModel
             .IsRequired()
             .HasMaxLength(100)
             .HasColumnName("name");
-        
-        // 唯一约束
+
         builder.HasIndex(lm => new { lm.Provider, lm.Name })
             .IsUnique();
 
@@ -36,11 +35,10 @@ public class LanguageModelConfiguration : IEntityTypeConfiguration<LanguageModel
             .HasColumnName("base_url");
 
         builder.Property(lm => lm.ApiKey)
-            .HasMaxLength(100)
+            .HasConversion<EncryptedStringValueConverter>()
+            .HasMaxLength(2048)
             .HasColumnName("api_key");
 
-        // 配置值对象 ModelParameters
-        // 这会将其属性映射为 "LanguageModels" 表中的列
         builder.OwnsOne(lm => lm.Parameters, parametersBuilder =>
         {
             parametersBuilder.Property(p => p.MaxTokens)

@@ -1,89 +1,128 @@
-﻿import { fetchEventSource } from '@microsoft/fetch-event-source';
-import { apiClient } from './apiClient';
-import { token, baseUrl } from "@/appsetting";
-import type {ChatChunk} from "@/types/protocols.ts";
+import { fetchEventSource } from '@microsoft/fetch-event-source'
+import { baseUrl } from '@/appsetting'
+import { apiClient, ApiError, getAccessToken, getProblemDetails } from './apiClient'
+import type { ChatHistoryMessage, StreamCallbacks } from '@/types/app'
+import type { ChatChunk, Session } from '@/types/protocols'
 
-/**
- * 定义流式回调函数的接口
- * 上层调用者（Store）通过这些回调接收数据
- */
-interface StreamCallbacks {
-  onChunkReceived: (chunk: ChatChunk) => void;       // 当收到数据块时
-  onComplete: () => void;                            // 当流结束时
-  onError: (err: any) => void;                       // 当发生错误时
-}
+async function sendEventStream(
+  path: string,
+  payload: unknown,
+  callbacks: StreamCallbacks
+) {
+  const maxAttempts = 2
 
-export const chatService = {
-  /**
-   * 获取会话列表
-   */
-  async getSessions() {
-    return await apiClient.get<any[]>('/aigateway/session/list');
-  },
-
-  /**
-   * 创建新会话
-   */
-  async createSession() {
-    return await apiClient.post<any>('/aigateway/session', { });
-  },
-
-  /**
-   * 发送消息并接收流式响应
-   * @param sessionId 会话ID
-   * @param message 用户输入的内容
-   * @param callbacks 回调函数集合
-   * @param callIds
-   */
-  async sendMessageStream(sessionId: string, message: string, callbacks: StreamCallbacks, callIds?: string[]) {
-    const ctrl = new AbortController();
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const controller = new AbortController()
 
     try {
-      // 使用微软的库发起 SSE 请求
-      await fetchEventSource(`${baseUrl}/aigateway/chat`, {
+      await fetchEventSource(`${baseUrl}${path}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {})
         },
-        body: JSON.stringify({
-          sessionId: sessionId,
-          message: message,
-          callIds: callIds
-        }),
-        signal: ctrl.signal,
-
-        // 1. 处理连接打开
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+        openWhenHidden: true,
         async onopen(response) {
           if (response.ok) {
-            return; // 连接成功
-          } else {
-            throw new Error(`连接失败: ${response.status}`);
+            return
           }
-        },
 
-        // 2. 处理消息接收
-        onmessage(msg) {
+          let details: unknown
           try {
-            // 解析后端发来的 ChatChunk JSON
-            const chunk: ChatChunk = JSON.parse(msg.data);
-            console.log(chunk);
-            callbacks.onChunkReceived(chunk);
-          } catch (err) {
-            console.error('无法解析区消息块:', err);
+            details = await response.json()
+          } catch {
+            details = undefined
           }
-        },
 
-        // 3. 处理连接关闭
+          throw new ApiError(`Stream open failed: ${response.status}`, response.status, details)
+        },
+        onmessage(event) {
+          if (!event.data || event.data === '[DONE]') {
+            return
+          }
+
+          const chunk = JSON.parse(event.data) as ChatChunk
+          callbacks.onChunkReceived(chunk)
+        },
         onclose() {
-          callbacks.onComplete();
+          callbacks.onComplete()
         },
+        onerror(error) {
+          throw error
+        }
+      })
 
-        // 保持连接，即使页面进入后台
-        openWhenHidden: true
-      });
-    } catch (err) {
-      callbacks.onError(err);
+      return
+    } catch (error) {
+      const isRetryable = !(error instanceof ApiError) && attempt < maxAttempts
+      if (isRetryable) {
+        await new Promise((resolve) => window.setTimeout(resolve, 800 * attempt))
+        continue
+      }
+
+      if (error instanceof ApiError) {
+        const problem = getProblemDetails(error.details)
+        if (problem?.detail) {
+          callbacks.onError(new ApiError(problem.detail, error.status, error.details))
+          return
+        }
+      }
+
+      callbacks.onError(error)
+      return
     }
   }
-};
+}
+
+export const chatService = {
+  async getSessions() {
+    return await apiClient.get<Session[]>('/aigateway/session/list')
+  },
+
+  async createSession() {
+    return await apiClient.post<Session>('/aigateway/session', {})
+  },
+
+  async getHistory(sessionId: string, count = 100) {
+    return await apiClient.get<ChatHistoryMessage[]>(
+      `/aigateway/chat-message/list?sessionId=${sessionId}&count=${count}&isDesc=false`
+    )
+  },
+
+  async updateSessionSafetyAttestation(
+    sessionId: string,
+    isOnsiteConfirmed: boolean,
+    expiresInMinutes?: number
+  ) {
+    return await apiClient.put<Session>('/aigateway/session/safety-attestation', {
+      sessionId,
+      isOnsiteConfirmed,
+      expiresInMinutes
+    })
+  },
+
+  async sendMessageStream(sessionId: string, message: string, callbacks: StreamCallbacks) {
+    await sendEventStream('/aigateway/chat', { sessionId, message }, callbacks)
+  },
+
+  async sendApprovalDecisionStream(
+    sessionId: string,
+    callId: string,
+    decision: 'approved' | 'rejected',
+    onsiteConfirmed: boolean,
+    callbacks: StreamCallbacks
+  ) {
+    await sendEventStream(
+      '/aigateway/approval/decision',
+      {
+        sessionId,
+        callId,
+        decision,
+        onsiteConfirmed
+      },
+      callbacks
+    )
+  }
+}

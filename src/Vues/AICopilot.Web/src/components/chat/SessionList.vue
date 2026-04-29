@@ -1,23 +1,20 @@
-﻿<script setup lang="ts">
-import { computed } from 'vue';
-import { useChatStore } from '@/stores/chatStore.ts';
-import { Plus, ChatDotRound } from '@element-plus/icons-vue';
+<script setup lang="ts">
+import { computed } from 'vue'
+import { ChatDotRound, Plus } from '@element-plus/icons-vue'
+import { useChatStore } from '@/stores/chatStore'
 
-// 连接 Store
-const store = useChatStore();
+const store = useChatStore()
 
-// 计算属性：会话列表
-const sessions = computed(() => store.sessions);
-const currentId = computed(() => store.currentSessionId);
+const sessions = computed(() => store.sessions)
+const currentSessionId = computed(() => store.currentSessionId)
 
-// 处理点击
-const handleSelect = (id: string) => {
-  store.selectSession(id);
-};
+async function handleSelect(id: string) {
+  await store.selectSession(id)
+}
 
-const handleNewChat = () => {
-  store.createNewSession();
-};
+async function handleNewChat() {
+  await store.createNewSession()
+}
 </script>
 
 <template>
@@ -38,7 +35,7 @@ const handleNewChat = () => {
         v-for="session in sessions"
         :key="session.id"
         class="session-item"
-        :class="{ active: currentId === session.id }"
+        :class="{ active: currentSessionId === session.id }"
         @click="handleSelect(session.id)"
       >
         <el-icon class="icon"><ChatDotRound /></el-icon>
@@ -63,7 +60,7 @@ const handleNewChat = () => {
 
 .sidebar-header {
   padding: 20px;
-  flex-shrink: 0; /* 防止头部被压缩 */
+  flex-shrink: 0;
 }
 
 .new-chat-btn {
@@ -72,9 +69,10 @@ const handleNewChat = () => {
 }
 
 .session-list {
-  flex: 1; /* 占据剩余高度 */
-  overflow-y: auto; /* 内部滚动 */
-  padding: 0 12px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 12px 12px;
 }
 
 .session-item {
@@ -94,20 +92,20 @@ const handleNewChat = () => {
 }
 
 .session-item.active {
-  background-color: #e6f0ff; /* 激活态背景色 */
+  background-color: #e6f0ff;
   color: var(--brand-color);
   font-weight: 500;
 }
 
-.session-item .icon {
+.icon {
   margin-right: 10px;
   font-size: 16px;
 }
 
-.session-item .title {
+.title {
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis; /* 文字过长显示省略号 */
+  text-overflow: ellipsis;
 }
 
 .empty-tip {

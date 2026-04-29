@@ -1,6 +1,7 @@
-﻿using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
+using AICopilot.EntityFrameworkCore.Security;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace AICopilot.EntityFrameworkCore.Configuration.Rag;
 
@@ -13,26 +14,28 @@ public class EmbeddingModelConfiguration : IEntityTypeConfiguration<EmbeddingMod
         builder.HasKey(e => e.Id);
         builder.Property(e => e.Id).HasColumnName("id");
 
+        builder.Property(e => e.RowVersion).IsRowVersion();
+
         builder.Property(e => e.Name)
             .IsRequired()
             .HasMaxLength(100)
             .HasColumnName("name");
-        
-        // 建议添加唯一索引，防止同名模型
+
         builder.HasIndex(e => e.Name).IsUnique();
 
         builder.Property(e => e.Provider)
             .IsRequired()
             .HasMaxLength(50)
             .HasColumnName("provider");
-        
+
         builder.Property(e => e.BaseUrl)
             .IsRequired()
             .HasMaxLength(500)
             .HasColumnName("base_url");
-        
+
         builder.Property(e => e.ApiKey)
-            .HasMaxLength(256)
+            .HasConversion<EncryptedStringValueConverter>()
+            .HasMaxLength(2048)
             .HasColumnName("api_key");
 
         builder.Property(e => e.ModelName)
