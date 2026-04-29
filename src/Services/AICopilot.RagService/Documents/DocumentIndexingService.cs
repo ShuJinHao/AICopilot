@@ -1,4 +1,5 @@
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
+using AICopilot.Core.Rag.Specifications.KnowledgeBase;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Repository;
 using Microsoft.Extensions.Logging;
@@ -14,9 +15,8 @@ public sealed class DocumentIndexingService(
 {
     public async Task IndexAsync(int documentId, CancellationToken cancellationToken = default)
     {
-        var knowledgeBase = await repository.GetAsync(
-            knowledgeBase => knowledgeBase.Documents.Any(document => document.Id == documentId),
-            [knowledgeBase => knowledgeBase.Documents],
+        var knowledgeBase = await repository.FirstOrDefaultAsync(
+            new KnowledgeBaseByDocumentIdWithDocumentChunksSpec(documentId),
             cancellationToken);
 
         var document = knowledgeBase?.Documents.FirstOrDefault(item => item.Id == documentId);
@@ -26,7 +26,7 @@ public sealed class DocumentIndexingService(
             return;
         }
 
-        if (document.Status != DocumentStatus.Pending && document.Status != DocumentStatus.Failed)
+        if (!CanStartOrRecoverIndexing(document.Status))
         {
             logger.LogInformation("文档 {DocumentId} 当前状态为 {Status}，无需重复索引。", documentId, document.Status);
             return;
@@ -51,6 +51,7 @@ public sealed class DocumentIndexingService(
             document.CompleteParsing();
             await repository.SaveChangesAsync(cancellationToken);
 
+            var previousChunkCount = document.ChunkCount;
             if (document.Chunks.Count > 0)
             {
                 document.ClearChunks();
@@ -72,7 +73,8 @@ public sealed class DocumentIndexingService(
                     document.Id,
                     document.KnowledgeBaseId,
                     knowledgeBase.EmbeddingModelId,
-                    document.Name),
+                    document.Name,
+                    previousChunkCount),
                 chunks,
                 cancellationToken);
 
@@ -86,5 +88,14 @@ public sealed class DocumentIndexingService(
             document.MarkAsFailed(ex.Message);
             await repository.SaveChangesAsync(cancellationToken);
         }
+    }
+
+    private static bool CanStartOrRecoverIndexing(DocumentStatus status)
+    {
+        return status is DocumentStatus.Pending
+            or DocumentStatus.Failed
+            or DocumentStatus.Parsing
+            or DocumentStatus.Splitting
+            or DocumentStatus.Embedding;
     }
 }

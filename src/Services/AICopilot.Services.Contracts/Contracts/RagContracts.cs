@@ -48,4 +48,5 @@ public sealed record KnowledgeVectorIndexRequest(
     int DocumentId,
     Guid KnowledgeBaseId,
     Guid EmbeddingModelId,
-    string DocumentName);
+    string DocumentName,
+    int PreviousChunkCount = 0);

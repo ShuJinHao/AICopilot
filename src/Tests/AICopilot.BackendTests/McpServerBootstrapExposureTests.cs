@@ -6,12 +6,40 @@ using AICopilot.Infrastructure.Mcp;
 using AICopilot.SharedKernel.Ai;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Reflection;
 
 namespace AICopilot.BackendTests;
 
 [Trait("Suite", "Phase43SafetyQuality")]
 public sealed class McpServerBootstrapExposureTests
 {
+    [Fact]
+    public void ResolveCommandArguments_ShouldHonorQuotesEscapesAndSingleFilePaths()
+    {
+        var tempDirectory = Path.Combine(Path.GetTempPath(), "aicopilot-mcp-args", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDirectory);
+        var tempFile = Path.Combine(tempDirectory, "server with spaces.dll");
+        File.WriteAllText(tempFile, string.Empty);
+
+        try
+        {
+            ResolveCommandArguments(tempFile).Should().Equal(tempFile);
+
+            ResolveCommandArguments("\"C:\\Program Files\\MCP Server\\server.dll\" --flag \"two words\" --name \"hello \\\"world\\\"\" plain\\ value")
+                .Should().Equal(
+                    "C:\\Program Files\\MCP Server\\server.dll",
+                    "--flag",
+                    "two words",
+                    "--name",
+                    "hello \"world\"",
+                    "plain value");
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task StartAsync_ShouldOnlyRegisterEnabledAllowlistedAdvisoryServers()
     {
@@ -81,5 +109,15 @@ public sealed class McpServerBootstrapExposureTests
                 await client.DisposeAsync();
             }
         }
+    }
+
+    private static string[] ResolveCommandArguments(string rawArguments)
+    {
+        var method = typeof(McpServerBootstrap).GetMethod(
+            "ResolveCommandArguments",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        method.Should().NotBeNull();
+        return (string[])method!.Invoke(null, [rawArguments])!;
     }
 }

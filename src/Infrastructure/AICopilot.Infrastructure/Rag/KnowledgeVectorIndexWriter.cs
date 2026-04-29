@@ -44,26 +44,40 @@ public sealed class KnowledgeVectorIndexWriter(
 
         await collection.EnsureCollectionExistsAsync(cancellationToken);
 
-        for (var index = 0; index < chunks.Count; index++)
+        var staleRecordKeys = Enumerable
+            .Range(0, Math.Max(request.PreviousChunkCount, chunks.Count))
+            .Select(index => (object)BuildRecordKey(request.DocumentId, index))
+            .ToArray();
+        if (staleRecordKeys.Length > 0)
         {
-            var recordKey = (ulong)request.DocumentId.GetHashCode() << 32 | (uint)index;
-            await collection.UpsertAsync(new Dictionary<string, object?>
+            await collection.DeleteAsync(staleRecordKeys, cancellationToken);
+        }
+
+        var records = chunks
+            .Select((chunk, index) => new Dictionary<string, object?>
             {
-                ["Key"] = recordKey,
-                ["Text"] = chunks[index],
+                ["Key"] = BuildRecordKey(request.DocumentId, index),
+                ["Text"] = chunk,
                 ["DocumentId"] = request.DocumentId.ToString(),
                 ["DocumentName"] = request.DocumentName,
                 ["KnowledgeBaseId"] = request.KnowledgeBaseId.ToString(),
                 ["ChunkIndex"] = index,
                 ["Embedding"] = embeddings[index].Vector
-            }, cancellationToken);
-        }
+            })
+            .ToArray();
+
+        await collection.UpsertAsync(records, cancellationToken);
 
         logger.LogInformation(
             "文档 {DocumentId} 已向向量集合 {CollectionName} 写入 {Count} 条记录。",
             request.DocumentId,
             collectionName,
             chunks.Count);
+    }
+
+    private static ulong BuildRecordKey(int documentId, int chunkIndex)
+    {
+        return ((ulong)(uint)documentId << 32) | (uint)chunkIndex;
     }
 
     private async Task<List<Embedding<float>>> GenerateEmbeddingsAsync(

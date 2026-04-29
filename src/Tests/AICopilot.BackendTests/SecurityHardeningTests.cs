@@ -680,6 +680,56 @@ public sealed class SecurityHardeningTests
     }
 
     [Fact]
+    public void McpRuntime_ShouldUseQuotedArgumentParserAndSseConnectionTimeout()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var source = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Infrastructure",
+            "AICopilot.Infrastructure",
+            "Mcp",
+            "McpServerBootstrap.cs"));
+
+        source.Should().Contain("ParseCommandArguments");
+        source.Should().Contain("StringBuilder");
+        source.Should().Contain("ConnectionTimeout = SseConnectionTimeout");
+        source.Should().Contain("TransportMode = HttpTransportMode.Sse");
+        source.Should().NotContain("Split(' ', StringSplitOptions.RemoveEmptyEntries)");
+    }
+
+    [Fact]
+    public void RagIndexing_ShouldAllowRecoveryAndDeleteOldVectorsBeforeUpsert()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var indexingSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Services",
+            "AICopilot.RagService",
+            "Documents",
+            "DocumentIndexingService.cs"));
+        var writerSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Infrastructure",
+            "AICopilot.Infrastructure",
+            "Rag",
+            "KnowledgeVectorIndexWriter.cs"));
+
+        indexingSource.Should().Contain("CanStartOrRecoverIndexing");
+        indexingSource.Should().Contain("KnowledgeBaseByDocumentIdWithDocumentChunksSpec");
+        indexingSource.Should().Contain("DocumentStatus.Parsing");
+        indexingSource.Should().Contain("DocumentStatus.Splitting");
+        indexingSource.Should().Contain("DocumentStatus.Embedding");
+        indexingSource.Should().Contain("previousChunkCount");
+        writerSource.Should().Contain("PreviousChunkCount");
+        writerSource.Should().Contain("DeleteAsync(staleRecordKeys");
+        writerSource.Should().Contain("UpsertAsync(records");
+        writerSource.Should().Contain("BuildRecordKey");
+    }
+
+    [Fact]
     public void LanguageModel_ShouldRejectInvalidInput()
     {
         var parameters = new ModelParameters { MaxTokens = 1024, Temperature = 0.2f };
@@ -908,6 +958,13 @@ public sealed class SecurityHardeningTests
 
         var emptyVectorId = () => document.MarkChunkAsEmbedded(0, " ");
         emptyVectorId.Should().Throw<ArgumentException>();
+
+        document.StartEmbedding();
+        document.Status.Should().Be(DocumentStatus.Embedding);
+        document.StartParsing();
+        document.Status.Should().Be(DocumentStatus.Parsing);
+        document.CompleteParsing();
+        document.Status.Should().Be(DocumentStatus.Splitting);
 
         var emptyFailureMessage = () => document.MarkAsFailed(" ");
         emptyFailureMessage.Should().Throw<ArgumentException>();

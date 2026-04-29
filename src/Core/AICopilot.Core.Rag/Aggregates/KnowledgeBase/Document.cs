@@ -100,8 +100,14 @@ public class Document : IEntity<int>
     /// </summary>
     public void StartParsing()
     {
-        if (Status != DocumentStatus.Pending && Status != DocumentStatus.Failed)
+        if (Status != DocumentStatus.Pending &&
+            Status != DocumentStatus.Failed &&
+            Status != DocumentStatus.Parsing &&
+            Status != DocumentStatus.Splitting &&
+            Status != DocumentStatus.Embedding)
+        {
             throw new InvalidOperationException($"当前状态 {Status} 不允许开始解析");
+        }
 
         Status = DocumentStatus.Parsing;
         ErrorMessage = null;

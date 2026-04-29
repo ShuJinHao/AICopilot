@@ -11,6 +11,15 @@ public sealed class KnowledgeBaseByIdWithDocumentsSpec : Specification<Aggregate
     }
 }
 
+public sealed class KnowledgeBaseByDocumentIdWithDocumentChunksSpec : Specification<Aggregates.KnowledgeBase.KnowledgeBase>
+{
+    public KnowledgeBaseByDocumentIdWithDocumentChunksSpec(int documentId)
+    {
+        FilterCondition = knowledgeBase => knowledgeBase.Documents.Any(document => document.Id == documentId);
+        AddInclude("Documents.Chunks");
+    }
+}
+
 public sealed class KnowledgeBasesOrderedWithDocumentsSpec : Specification<Aggregates.KnowledgeBase.KnowledgeBase>
 {
     public KnowledgeBasesOrderedWithDocumentsSpec()
