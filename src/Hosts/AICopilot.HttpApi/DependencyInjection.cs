@@ -9,11 +9,13 @@ using AICopilot.RagService;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Result;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json;
 using System.Threading.RateLimiting;
 
 namespace AICopilot.HttpApi;
@@ -185,14 +187,17 @@ public static class DependencyInjection
                             QueueLimit = 0
                         }));
 
-                options.AddTokenBucketLimiter("login", limiterOptions =>
-                {
-                    limiterOptions.TokenLimit = loginTokenLimit;
-                    limiterOptions.TokensPerPeriod = loginTokensPerPeriod;
-                    limiterOptions.ReplenishmentPeriod = TimeSpan.FromMinutes(1);
-                    limiterOptions.AutoReplenishment = true;
-                    limiterOptions.QueueLimit = 0;
-                });
+                options.AddPolicy("login", httpContext =>
+                    RateLimitPartition.GetTokenBucketLimiter(
+                        GetLoginPolicyPartitionKey(httpContext),
+                        _ => new TokenBucketRateLimiterOptions
+                        {
+                            TokenLimit = loginTokenLimit,
+                            TokensPerPeriod = loginTokensPerPeriod,
+                            ReplenishmentPeriod = TimeSpan.FromMinutes(1),
+                            AutoReplenishment = true,
+                            QueueLimit = 0
+                        }));
 
                 options.AddPolicy("identity-management", httpContext =>
                     RateLimitPartition.GetTokenBucketLimiter(
@@ -278,6 +283,17 @@ public static class DependencyInjection
                 return $"chat:{(string.IsNullOrWhiteSpace(userId) ? httpContext.Connection.RemoteIpAddress?.ToString() ?? "anonymous" : userId)}";
             }
 
+            static string GetLoginPolicyPartitionKey(HttpContext httpContext)
+            {
+                var ipAddress = httpContext.Connection.RemoteIpAddress?.ToString() ?? "anonymous";
+                var username = TryReadLoginUsername(httpContext);
+                var normalizedUsername = string.IsNullOrWhiteSpace(username)
+                    ? "anonymous"
+                    : username.Trim().ToUpperInvariant();
+
+                return $"login:{normalizedUsername}:{ipAddress}";
+            }
+
             static string GetIdentityManagementPolicyPartitionKey(HttpContext httpContext)
             {
                 var userId = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -286,6 +302,96 @@ public static class DependencyInjection
                     : userId;
 
                 return $"identity-management:{httpContext.Request.Method}:{httpContext.Request.Path}:{clientKey}";
+            }
+
+            static string? TryReadLoginUsername(HttpContext httpContext)
+            {
+                if (httpContext.Request.Headers.TryGetValue("X-Login-Username", out var headerUsername) &&
+                    !string.IsNullOrWhiteSpace(headerUsername))
+                {
+                    return headerUsername.ToString();
+                }
+
+                if (httpContext.Request.Query.TryGetValue("username", out var queryUsername) &&
+                    !string.IsNullOrWhiteSpace(queryUsername))
+                {
+                    return queryUsername.ToString();
+                }
+
+                if (!httpContext.Request.HasJsonContentType())
+                {
+                    return null;
+                }
+
+                if (httpContext.Request.ContentLength is > 8192)
+                {
+                    return null;
+                }
+
+                try
+                {
+                    httpContext.Request.EnableBuffering(bufferThreshold: 4096, bufferLimit: 8192);
+                    if (!httpContext.Request.Body.CanSeek)
+                    {
+                        return null;
+                    }
+
+                    var originalPosition = httpContext.Request.Body.Position;
+                    httpContext.Request.Body.Position = 0;
+
+                    var bodyControlFeature = httpContext.Features.Get<IHttpBodyControlFeature>();
+                    var previousSynchronousIoSetting = bodyControlFeature?.AllowSynchronousIO;
+                    if (bodyControlFeature is not null)
+                    {
+                        bodyControlFeature.AllowSynchronousIO = true;
+                    }
+
+                    try
+                    {
+                        using var document = JsonDocument.Parse(httpContext.Request.Body);
+                        if (document.RootElement.ValueKind != JsonValueKind.Object)
+                        {
+                            return null;
+                        }
+
+                        foreach (var property in document.RootElement.EnumerateObject())
+                        {
+                            if (string.Equals(property.Name, "username", StringComparison.OrdinalIgnoreCase) &&
+                                property.Value.ValueKind == JsonValueKind.String)
+                            {
+                                return property.Value.GetString();
+                            }
+                        }
+
+                        return null;
+                    }
+                    finally
+                    {
+                        httpContext.Request.Body.Position = originalPosition;
+                        if (bodyControlFeature is not null && previousSynchronousIoSetting.HasValue)
+                        {
+                            bodyControlFeature.AllowSynchronousIO = previousSynchronousIoSetting.Value;
+                        }
+                    }
+                }
+                catch (JsonException)
+                {
+                    if (httpContext.Request.Body.CanSeek)
+                    {
+                        httpContext.Request.Body.Position = 0;
+                    }
+
+                    return null;
+                }
+                catch (IOException)
+                {
+                    if (httpContext.Request.Body.CanSeek)
+                    {
+                        httpContext.Request.Body.Position = 0;
+                    }
+
+                    return null;
+                }
             }
         }
     }

@@ -11,6 +11,7 @@ using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.Dapper;
 using AICopilot.Dapper.Security;
 using AICopilot.HttpApi.Controllers;
+using AICopilot.Infrastructure.Storage;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.Services.CrossCutting.Serialization;
 using AICopilot.SharedKernel.Ai;
@@ -19,6 +20,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace AICopilot.BackendTests;
@@ -121,6 +123,142 @@ public sealed class SecurityHardeningTests
             .GetMethod(nameof(IdentityController.GetInitializationStatus))!
             .GetCustomAttribute<AuthorizeAttribute>()
             .Should().BeNull();
+    }
+
+    [Fact]
+    public void LoginRateLimiter_ShouldPartitionByUsernameAndIp()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var dependencyInjectionSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Hosts",
+            "AICopilot.HttpApi",
+            "DependencyInjection.cs"));
+
+        dependencyInjectionSource.Should().Contain("options.AddPolicy(\"login\"");
+        dependencyInjectionSource.Should().NotContain("AddTokenBucketLimiter(\"login\"");
+        dependencyInjectionSource.Should().Contain("GetLoginPolicyPartitionKey");
+        dependencyInjectionSource.Should().Contain("TryReadLoginUsername");
+        dependencyInjectionSource.Should().Contain("RemoteIpAddress");
+        dependencyInjectionSource.Should().Contain("JsonDocument.Parse");
+    }
+
+    [Fact]
+    public void UpdateUserRole_ShouldRefreshSecurityStamp()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var source = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Services",
+            "AICopilot.IdentityService",
+            "Commands",
+            "UpdateUserRole.cs"));
+
+        var addRoleIndex = source.IndexOf("userManager.AddToRoleAsync", StringComparison.Ordinal);
+        var refreshIndex = source.IndexOf("IdentityGovernanceHelper.RefreshSecurityStamp(user)", StringComparison.Ordinal);
+        var updateIndex = source.IndexOf("userManager.UpdateAsync(user)", StringComparison.Ordinal);
+        var auditIndex = source.IndexOf("auditLogWriter.WriteAsync", StringComparison.Ordinal);
+
+        addRoleIndex.Should().BeGreaterThanOrEqualTo(0);
+        refreshIndex.Should().BeGreaterThan(addRoleIndex);
+        updateIndex.Should().BeGreaterThan(refreshIndex);
+        auditIndex.Should().BeGreaterThan(updateIndex);
+    }
+
+    [Fact]
+    public async Task LocalFileStorageService_ShouldConstrainAccessToConfiguredRoot()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "aicopilot-storage-tests", Guid.NewGuid().ToString("N"));
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["FileStorage:RootPath"] = root
+            })
+            .Build();
+
+        try
+        {
+            var storage = new LocalFileStorageService(configuration);
+            await using var payload = new MemoryStream([1, 2, 3]);
+
+            var relativePath = await storage.SaveAsync(payload, "../unsafe.txt");
+
+            relativePath.Should().StartWith("uploads/");
+            relativePath.Should().NotContain("..");
+            relativePath.Should().EndWith("unsafe.txt");
+
+            var stored = await storage.GetAsync(relativePath);
+            stored.Should().NotBeNull();
+            await using (stored!)
+            {
+                using var roundTrip = new MemoryStream();
+                await stored.CopyToAsync(roundTrip);
+                roundTrip.ToArray().Should().Equal(1, 2, 3);
+            }
+
+            await storage.DeleteAsync(relativePath);
+            (await storage.GetAsync(relativePath)).Should().BeNull();
+
+            Func<Task> traversalGet = async () => await storage.GetAsync("../escape.txt");
+            Func<Task> nestedTraversalDelete = () => storage.DeleteAsync("uploads/../../escape.txt");
+            Func<Task> absoluteGet = async () => await storage.GetAsync(
+                Path.GetFullPath(Path.Combine(root, "..", "escape.txt")));
+
+            await traversalGet.Should().ThrowAsync<InvalidOperationException>();
+            await nestedTraversalDelete.Should().ThrowAsync<InvalidOperationException>();
+            await absoluteGet.Should().ThrowAsync<InvalidOperationException>();
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void LocalFileStorageService_ShouldNotUseHardcodedDriveRoot()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var source = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Infrastructure",
+            "AICopilot.Infrastructure",
+            "Storage",
+            "LocalFileStorageService.cs"));
+
+        source.Should().Contain("FileStorage:RootPath");
+        source.Should().Contain("SpecialFolder.LocalApplicationData");
+        source.Should().NotContain("D:\\\\");
+    }
+
+    [Fact]
+    public void ChatStreamRuntime_ShouldNotExposeGenericExceptionMessages()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var source = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Services",
+            "AICopilot.AiGatewayService",
+            "Agents",
+            "ChatStreamRuntime.cs"));
+
+        var exceptionParameterIndex = source.IndexOf("Exception exception,", StringComparison.Ordinal);
+        exceptionParameterIndex.Should().BeGreaterThanOrEqualTo(0);
+        var methodStart = source.LastIndexOf("public static ChatChunk CreateErrorChunk(", exceptionParameterIndex, StringComparison.Ordinal);
+        methodStart.Should().BeGreaterThanOrEqualTo(0);
+        var methodEnd = source.IndexOf("public static ChatChunk CreateErrorChunk(", methodStart + 1, StringComparison.Ordinal);
+        methodEnd.Should().BeGreaterThan(methodStart);
+        var method = source[methodStart..methodEnd];
+
+        method.Should().Contain("exception is ChatWorkflowException");
+        method.Should().NotContain("exception.Message");
+        method.Should().Contain("fallbackUserFacingMessage");
     }
 
     [Fact]

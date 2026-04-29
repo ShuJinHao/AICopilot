@@ -1,43 +1,39 @@
-﻿using AICopilot.Services.Contracts;
-using System;
-using System.Collections.Generic;
-using System.Text;
+using AICopilot.Services.Contracts;
+using Microsoft.Extensions.Configuration;
 
 namespace AICopilot.Infrastructure.Storage;
 
-public class LocalFileStorageService : IFileStorageService
+public class LocalFileStorageService(IConfiguration configuration) : IFileStorageService
 {
-    private const string RootPath = "D:\\";
     private const string UploadRoot = "uploads";
+    private readonly string rootPath = ResolveRootPath(configuration);
 
     public async Task<string> SaveAsync(Stream stream, string fileName, CancellationToken cancellationToken = default)
     {
-        // 1. 构建存储路径：uploads/2025/12/01/guid_filename.pdf
-        var datePath = DateTime.Now.ToString("yyyy/MM/dd");
-        var uniqueFileName = $"{Guid.NewGuid()}_{fileName}";
-        var relativePath = Path.Combine(UploadRoot, datePath);
-
-        var fullDirectory = Path.Combine(RootPath, relativePath);
-
-        if (!Directory.Exists(fullDirectory))
+        var safeFileName = Path.GetFileName(fileName);
+        if (string.IsNullOrWhiteSpace(safeFileName))
         {
-            Directory.CreateDirectory(fullDirectory);
+            throw new ArgumentException("File name is required.", nameof(fileName));
         }
 
-        var fullPath = Path.Combine(fullDirectory, uniqueFileName);
+        var datePath = DateTime.Now.ToString("yyyy/MM/dd");
+        var uniqueFileName = $"{Guid.NewGuid()}_{safeFileName}";
+        var relativePath = Path.Combine(UploadRoot, datePath);
+        var fullDirectory = GetSafeFullPath(relativePath);
+        Directory.CreateDirectory(fullDirectory);
 
-        // 2. 写入文件
+        var fullPath = GetSafeFullPath(Path.Combine(relativePath, uniqueFileName));
+
         await using var fileStream = new FileStream(fullPath, FileMode.Create);
         if (stream.CanSeek) stream.Position = 0;
         await stream.CopyToAsync(fileStream, cancellationToken);
 
-        // 3. 返回相对路径（统一使用正斜杠，方便跨平台和URL访问）
         return Path.Combine(relativePath, uniqueFileName).Replace("\\", "/");
     }
 
     public Task<Stream?> GetAsync(string path, CancellationToken cancellationToken = default)
     {
-        var fullPath = Path.Combine(RootPath, path);
+        var fullPath = GetSafeFullPath(path);
 
         if (!File.Exists(fullPath)) return Task.FromResult<Stream?>(null);
 
@@ -47,7 +43,7 @@ public class LocalFileStorageService : IFileStorageService
 
     public Task DeleteAsync(string path, CancellationToken cancellationToken = default)
     {
-        var fullPath = Path.Combine(RootPath, path);
+        var fullPath = GetSafeFullPath(path);
 
         if (File.Exists(fullPath))
         {
@@ -55,5 +51,50 @@ public class LocalFileStorageService : IFileStorageService
         }
 
         return Task.CompletedTask;
+    }
+
+    private string GetSafeFullPath(string relativePath)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath))
+        {
+            throw new ArgumentException("Storage path is required.", nameof(relativePath));
+        }
+
+        if (Path.IsPathFullyQualified(relativePath))
+        {
+            throw new InvalidOperationException("Storage path must be relative to the configured root.");
+        }
+
+        var normalizedPath = relativePath.Replace('/', Path.DirectorySeparatorChar);
+        var fullPath = Path.GetFullPath(Path.Combine(rootPath, normalizedPath));
+        var rootWithSeparator = EnsureTrailingSeparator(rootPath);
+
+        if (!fullPath.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Storage path escapes the configured root.");
+        }
+
+        return fullPath;
+    }
+
+    private static string ResolveRootPath(IConfiguration configuration)
+    {
+        var configuredRoot = configuration["FileStorage:RootPath"];
+        var root = string.IsNullOrWhiteSpace(configuredRoot)
+            ? Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "AICopilot",
+                "storage")
+            : configuredRoot;
+
+        return Path.GetFullPath(root);
+    }
+
+    private static string EnsureTrailingSeparator(string path)
+    {
+        var separator = Path.DirectorySeparatorChar.ToString();
+        return path.EndsWith(separator, StringComparison.Ordinal)
+            ? path
+            : path + separator;
     }
 }

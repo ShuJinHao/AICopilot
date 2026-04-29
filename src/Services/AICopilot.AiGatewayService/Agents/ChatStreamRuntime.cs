@@ -115,7 +115,7 @@ internal static class ChatStreamRuntime
             ? CreateErrorChunk(workflowException.Code, workflowException.Detail, source, workflowException.UserFacingMessage)
             : CreateErrorChunk(
                 fallbackCode,
-                string.IsNullOrWhiteSpace(exception.Message) ? fallbackUserFacingMessage : exception.Message,
+                fallbackUserFacingMessage,
                 source,
                 fallbackUserFacingMessage);
     }

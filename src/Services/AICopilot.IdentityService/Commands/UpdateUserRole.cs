@@ -53,6 +53,13 @@ public sealed class UpdateUserRoleCommandHandler(
                 return Result.Failure(addToRoleResult.Errors);
             }
 
+            IdentityGovernanceHelper.RefreshSecurityStamp(user);
+            var updateSecurityStampResult = await userManager.UpdateAsync(user);
+            if (!updateSecurityStampResult.Succeeded)
+            {
+                return Result.Failure(updateSecurityStampResult.Errors);
+            }
+
             var changedFields = previousRoleName == normalizedRoleName
                 ? Array.Empty<string>()
                 : ["roleName"];
