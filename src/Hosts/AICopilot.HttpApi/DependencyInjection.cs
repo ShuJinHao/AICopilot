@@ -306,18 +306,6 @@ public static class DependencyInjection
 
             static string? TryReadLoginUsername(HttpContext httpContext)
             {
-                if (httpContext.Request.Headers.TryGetValue("X-Login-Username", out var headerUsername) &&
-                    !string.IsNullOrWhiteSpace(headerUsername))
-                {
-                    return headerUsername.ToString();
-                }
-
-                if (httpContext.Request.Query.TryGetValue("username", out var queryUsername) &&
-                    !string.IsNullOrWhiteSpace(queryUsername))
-                {
-                    return queryUsername.ToString();
-                }
-
                 if (!httpContext.Request.HasJsonContentType())
                 {
                     return null;

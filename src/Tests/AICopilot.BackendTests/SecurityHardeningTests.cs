@@ -142,6 +142,8 @@ public sealed class SecurityHardeningTests
         dependencyInjectionSource.Should().Contain("TryReadLoginUsername");
         dependencyInjectionSource.Should().Contain("RemoteIpAddress");
         dependencyInjectionSource.Should().Contain("JsonDocument.Parse");
+        dependencyInjectionSource.Should().NotContain("X-Login-Username");
+        dependencyInjectionSource.Should().NotContain("Request.Query.TryGetValue(\"username\"");
     }
 
     [Fact]
