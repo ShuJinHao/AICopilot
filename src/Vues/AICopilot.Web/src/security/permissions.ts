@@ -16,7 +16,8 @@ export const CONFIG_READ_PERMISSIONS = {
   businessDatabase: [
     'DataAnalysis.GetBusinessDatabase',
     'DataAnalysis.GetListBusinessDatabases'
-  ]
+  ],
+  mcpServer: ['Mcp.GetServer', 'Mcp.GetListServers']
 } as const
 
 export const CONFIG_WRITE_PERMISSIONS = {
@@ -39,6 +40,11 @@ export const CONFIG_WRITE_PERMISSIONS = {
     create: 'DataAnalysis.CreateBusinessDatabase',
     update: 'DataAnalysis.UpdateBusinessDatabase',
     delete: 'DataAnalysis.DeleteBusinessDatabase'
+  },
+  mcpServer: {
+    create: 'Mcp.CreateServer',
+    update: 'Mcp.UpdateServer',
+    delete: 'Mcp.DeleteServer'
   }
 } as const
 

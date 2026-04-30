@@ -14,6 +14,7 @@ import type {
   BusinessDatabaseFormModel,
   ConversationTemplateFormModel,
   LanguageModelFormModel,
+  McpServerFormModel,
   SemanticSourceStatus
 } from '@/types/app'
 
@@ -24,7 +25,9 @@ const languageModelFormRef = ref<FormInstance>()
 const conversationTemplateFormRef = ref<FormInstance>()
 const approvalPolicyFormRef = ref<FormInstance>()
 const businessDatabaseFormRef = ref<FormInstance>()
+const mcpServerFormRef = ref<FormInstance>()
 const toolNameDraft = ref('')
+const mcpToolNameDraft = ref('')
 
 const readySemanticSources = computed(
   () => configStore.semanticSourceStatuses.filter((item) => item.status === 'Ready').length
@@ -72,6 +75,7 @@ const canReadApprovalPolicies = computed(() =>
 const canReadBusinessDatabases = computed(() =>
   authStore.hasAnyPermission(CONFIG_READ_PERMISSIONS.businessDatabase)
 )
+const canReadMcpServers = computed(() => authStore.hasAnyPermission(CONFIG_READ_PERMISSIONS.mcpServer))
 const canReadSemanticSources = computed(() => canReadBusinessDatabases.value)
 
 const canCreateLanguageModels = computed(() =>
@@ -113,6 +117,15 @@ const canUpdateBusinessDatabases = computed(() =>
 const canDeleteBusinessDatabases = computed(() =>
   authStore.hasPermission(CONFIG_WRITE_PERMISSIONS.businessDatabase.delete)
 )
+const canCreateMcpServers = computed(() =>
+  authStore.hasPermission(CONFIG_WRITE_PERMISSIONS.mcpServer.create)
+)
+const canUpdateMcpServers = computed(() =>
+  authStore.hasPermission(CONFIG_WRITE_PERMISSIONS.mcpServer.update)
+)
+const canDeleteMcpServers = computed(() =>
+  authStore.hasPermission(CONFIG_WRITE_PERMISSIONS.mcpServer.delete)
+)
 
 const approvalTargetOptions = [
   { label: 'Plugin', value: 'Plugin' },
@@ -123,6 +136,18 @@ const databaseProviderOptions = [
   { label: 'PostgreSql', value: 1 },
   { label: 'SqlServer', value: 2 },
   { label: 'MySql', value: 3 }
+]
+
+const mcpTransportOptions = [
+  { label: 'Stdio', value: 1 },
+  { label: 'SSE', value: 2 }
+]
+
+const chatExposureOptions = [
+  { label: '禁用', value: 0 },
+  { label: '只观察', value: 1 },
+  { label: '建议模式', value: 2 },
+  { label: '控制模式', value: 3 }
 ]
 
 const languageModelRules: FormRules<LanguageModelFormModel> = {
@@ -173,8 +198,67 @@ const businessDatabaseRules: FormRules<BusinessDatabaseFormModel> = {
   ]
 }
 
+const mcpServerRules: FormRules<McpServerFormModel> = {
+  name: [{ required: true, message: '请输入 MCP 服务名称', trigger: 'blur' }],
+  description: [{ required: true, message: '请输入 MCP 服务说明', trigger: 'blur' }],
+  transportType: [{ required: true, message: '请选择传输类型', trigger: 'change' }],
+  command: [
+    {
+      validator: (_, value, callback) => {
+        if (configStore.currentMcpServer.transportType === 1 && !String(value ?? '').trim()) {
+          callback(new Error('Stdio 服务必须配置启动命令'))
+          return
+        }
+
+        callback()
+      },
+      trigger: 'blur'
+    }
+  ],
+  arguments: [
+    {
+      validator: (_, value, callback) => {
+        const isCreate = configStore.dialogModes.mcpServer === 'create'
+        const transportChanged =
+          configStore.currentMcpServer.originalTransportType !== undefined &&
+          configStore.currentMcpServer.transportType !==
+            configStore.currentMcpServer.originalTransportType
+        const hasExisting = configStore.currentMcpServer.hasArguments && !transportChanged
+
+        if ((isCreate || !hasExisting) && !String(value ?? '').trim()) {
+          callback(new Error('请输入启动参数或 SSE 地址'))
+          return
+        }
+
+        callback()
+      },
+      trigger: 'blur'
+    }
+  ]
+}
+
 function providerLabel(provider: number) {
   return databaseProviderOptions.find((item) => item.value === provider)?.label ?? `Provider-${provider}`
+}
+
+function mcpTransportLabel(transportType: number) {
+  return mcpTransportOptions.find((item) => item.value === transportType)?.label ?? `Transport-${transportType}`
+}
+
+function chatExposureLabel(mode: number) {
+  return chatExposureOptions.find((item) => item.value === mode)?.label ?? `Mode-${mode}`
+}
+
+function chatExposureTagType(mode: number) {
+  switch (mode) {
+    case 1:
+    case 2:
+      return 'success'
+    case 3:
+      return 'danger'
+    default:
+      return 'info'
+  }
 }
 
 function semanticStatusType(status: SemanticSourceStatus['status']) {
@@ -307,6 +391,14 @@ function openCreateBusinessDatabaseDialog() {
   configStore.openCreateBusinessDatabaseDialog()
 }
 
+function openCreateMcpServerDialog() {
+  if (!canCreateMcpServers.value) {
+    return
+  }
+
+  configStore.openCreateMcpServerDialog()
+}
+
 async function openEditLanguageModelDialog(id: string) {
   if (!canUpdateLanguageModels.value) {
     return
@@ -360,6 +452,18 @@ async function openEditBusinessDatabaseDialog(id: string) {
   }
 }
 
+async function openEditMcpServerDialog(id: string) {
+  if (!canUpdateMcpServers.value) {
+    return
+  }
+
+  try {
+    await configStore.openEditMcpServerDialog(id)
+  } catch {
+    // 错误已在 store 中展示
+  }
+}
+
 function addApprovalTool() {
   const nextToolName = toolNameDraft.value.trim()
   if (!nextToolName) {
@@ -380,6 +484,31 @@ function removeApprovalTool(toolName: string) {
   configStore.currentApprovalPolicy.toolNames = configStore.currentApprovalPolicy.toolNames.filter(
     (item) => item !== toolName
   )
+}
+
+function addMcpTool() {
+  const nextToolName = mcpToolNameDraft.value.trim()
+  if (!nextToolName) {
+    return
+  }
+
+  if (
+    !configStore.currentMcpServer.allowedToolNames.some(
+      (item) => item.toLowerCase() === nextToolName.toLowerCase()
+    )
+  ) {
+    configStore.currentMcpServer.allowedToolNames = [
+      ...configStore.currentMcpServer.allowedToolNames,
+      nextToolName
+    ]
+  }
+
+  mcpToolNameDraft.value = ''
+}
+
+function removeMcpTool(toolName: string) {
+  configStore.currentMcpServer.allowedToolNames =
+    configStore.currentMcpServer.allowedToolNames.filter((item) => item !== toolName)
 }
 
 async function saveLanguageModel() {
@@ -448,6 +577,22 @@ async function saveBusinessDatabase() {
   try {
     await configStore.saveBusinessDatabase()
     ElMessage.success(mode === 'create' ? '业务库已创建。' : '业务库已更新。')
+  } catch {
+    // 错误已在 store 中展示
+  }
+}
+
+async function saveMcpServer() {
+  const valid = await validateForm(mcpServerFormRef.value)
+  if (!valid) {
+    return
+  }
+
+  const mode = configStore.dialogModes.mcpServer
+
+  try {
+    await configStore.saveMcpServer()
+    ElMessage.success(mode === 'create' ? 'MCP 服务已创建。' : 'MCP 服务已更新。')
   } catch {
     // 错误已在 store 中展示
   }
@@ -526,6 +671,19 @@ async function deleteBusinessDatabase(id: string, name: string) {
     `确认删除业务库“${name}”吗？`,
     () => configStore.deleteBusinessDatabase(id),
     '业务库已删除。'
+  )
+}
+
+async function deleteMcpServer(id: string, name: string) {
+  if (!canDeleteMcpServers.value) {
+    return
+  }
+
+  await confirmDelete(
+    '删除 MCP 服务',
+    `确认删除 MCP 服务“${name}”吗？`,
+    () => configStore.deleteMcpServer(id),
+    'MCP 服务已删除。'
   )
 }
 
@@ -798,6 +956,14 @@ onMounted(async () => {
               class="section-alert"
             />
 
+            <el-alert
+              title="查询链路会区分业务库停用、非只读配置、SQL 安全拒绝和结果截断；配置管理台保存时始终强制只读。"
+              type="info"
+              show-icon
+              :closable="false"
+              class="section-alert"
+            />
+
             <el-table :data="configStore.businessDatabases" size="small" empty-text="暂无业务库配置">
               <el-table-column prop="name" label="名称" min-width="160" />
               <el-table-column label="数据库类型" width="120">
@@ -842,6 +1008,120 @@ onMounted(async () => {
                       link
                       type="danger"
                       @click="deleteBusinessDatabase(row.id, row.name)"
+                    >
+                      删除
+                    </el-button>
+                  </div>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-card>
+
+          <el-card v-if="canReadMcpServers" class="section-card" shadow="hover">
+            <template #header>
+              <div class="section-header">
+                <div class="section-title">
+                  <span>MCP 服务</span>
+                  <el-tag type="info">{{ configStore.mcpServers.length }}</el-tag>
+                </div>
+                <el-button
+                  v-if="canCreateMcpServers"
+                  type="primary"
+                  plain
+                  size="small"
+                  @click="openCreateMcpServerDialog"
+                >
+                  新增 MCP
+                </el-button>
+              </div>
+            </template>
+
+            <el-alert
+              title="MCP 配置由启动期 bootstrap 读取；启用、禁用、工具暴露或连接参数变更后，需要重启服务才会影响运行时。"
+              type="warning"
+              show-icon
+              :closable="false"
+              class="section-alert"
+            />
+
+            <el-alert
+              v-if="configStore.actionErrors.mcpServer"
+              :title="configStore.actionErrors.mcpServer"
+              type="error"
+              show-icon
+              :closable="false"
+              class="section-alert"
+            />
+
+            <el-table :data="configStore.mcpServers" size="small" empty-text="暂无 MCP 服务">
+              <el-table-column prop="name" label="名称" min-width="160" />
+              <el-table-column label="传输" width="100">
+                <template #default="{ row }">
+                  {{ mcpTransportLabel(row.transportType) }}
+                </template>
+              </el-table-column>
+              <el-table-column label="暴露模式" width="110">
+                <template #default="{ row }">
+                  <el-tag :type="chatExposureTagType(row.chatExposureMode)">
+                    {{ chatExposureLabel(row.chatExposureMode) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="启用状态" width="100">
+                <template #default="{ row }">
+                  <el-tag :type="enabledTagType(row.isEnabled)">
+                    {{ row.isEnabled ? '启用' : '停用' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="参数" width="100">
+                <template #default="{ row }">
+                  <el-tag :type="row.hasArguments ? 'success' : 'warning'">
+                    {{ row.hasArguments ? '已配置' : '未配置' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="允许工具" min-width="220">
+                <template #default="{ row }">
+                  <div v-if="row.allowedToolNames.length > 0" class="chip-list">
+                    <el-tag v-for="toolName in row.allowedToolNames" :key="toolName" size="small">
+                      {{ toolName }}
+                    </el-tag>
+                  </div>
+                  <span v-else class="field-tip">未开放</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="审批" min-width="220">
+                <template #default="{ row }">
+                  <div v-if="row.toolPolicySummaries.length > 0" class="chip-list">
+                    <el-tag
+                      v-for="policy in row.toolPolicySummaries"
+                      :key="`${row.id}-${policy.toolName}`"
+                      :type="policy.requiresApproval ? 'warning' : 'info'"
+                      size="small"
+                    >
+                      {{ policy.toolName }}{{ policy.requiresOnsiteAttestation ? ' / 在岗' : '' }}
+                    </el-tag>
+                  </div>
+                  <span v-else class="field-tip">未绑定审批策略</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="160" fixed="right">
+                <template #default="{ row }">
+                  <div class="table-actions">
+                    <el-button
+                      v-if="canUpdateMcpServers"
+                      link
+                      type="primary"
+                      @click="openEditMcpServerDialog(row.id)"
+                    >
+                      编辑
+                    </el-button>
+                    <el-button
+                      v-if="canDeleteMcpServers"
+                      link
+                      type="danger"
+                      @click="deleteMcpServer(row.id, row.name)"
                     >
                       删除
                     </el-button>
@@ -1312,6 +1592,138 @@ onMounted(async () => {
         <div class="dialog-actions">
           <el-button @click="configStore.closeBusinessDatabaseDialog()">取消</el-button>
           <el-button type="primary" :loading="configStore.submittingStates.businessDatabase" @click="saveBusinessDatabase">
+            保存
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="configStore.dialogStates.mcpServer"
+      :title="configStore.dialogModes.mcpServer === 'create' ? '新增 MCP 服务' : '编辑 MCP 服务'"
+      width="720px"
+      destroy-on-close
+      @closed="configStore.closeMcpServerDialog()"
+    >
+      <el-alert
+        title="运行时只在服务启动时加载 MCP 配置；保存后需重启服务才会影响工具暴露。"
+        type="warning"
+        show-icon
+        :closable="false"
+        class="dialog-alert"
+      />
+
+      <el-alert
+        v-if="configStore.actionErrors.mcpServer"
+        :title="configStore.actionErrors.mcpServer"
+        type="error"
+        show-icon
+        :closable="false"
+        class="dialog-alert"
+      />
+
+      <el-form
+        ref="mcpServerFormRef"
+        :model="configStore.currentMcpServer"
+        :rules="mcpServerRules"
+        label-position="top"
+      >
+        <el-form-item label="服务名称" prop="name">
+          <el-input v-model="configStore.currentMcpServer.name" placeholder="请输入 MCP 服务名称" />
+        </el-form-item>
+        <el-form-item label="服务说明" prop="description">
+          <el-input
+            v-model="configStore.currentMcpServer.description"
+            type="textarea"
+            :rows="3"
+            placeholder="请输入 MCP 服务说明"
+          />
+        </el-form-item>
+        <div class="inline-fields">
+          <el-form-item label="传输类型" prop="transportType">
+            <el-select v-model="configStore.currentMcpServer.transportType" style="width: 100%">
+              <el-option
+                v-for="item in mcpTransportOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="启用状态">
+            <el-switch v-model="configStore.currentMcpServer.isEnabled" />
+          </el-form-item>
+        </div>
+        <el-form-item
+          v-if="configStore.currentMcpServer.transportType === 1"
+          label="启动命令"
+          prop="command"
+        >
+          <el-input v-model="configStore.currentMcpServer.command" placeholder="例如 dotnet、node、python" />
+        </el-form-item>
+        <el-form-item
+          :label="configStore.currentMcpServer.transportType === 2 ? 'SSE 地址' : '启动参数'"
+          prop="arguments"
+        >
+          <el-input
+            v-model="configStore.currentMcpServer.arguments"
+            type="textarea"
+            :rows="3"
+            :placeholder="
+              configStore.dialogModes.mcpServer === 'create'
+                ? '请输入启动参数或 SSE 地址'
+                : '留空表示保留已保存参数'
+            "
+          />
+          <div class="field-tip">
+            当前参数状态：{{ configStore.currentMcpServer.hasArguments ? '已配置' : '未配置' }}。详情不会从后端回传。
+          </div>
+        </el-form-item>
+        <div class="inline-fields">
+          <el-form-item label="聊天暴露模式">
+            <el-select v-model="configStore.currentMcpServer.chatExposureMode" style="width: 100%">
+              <el-option
+                v-for="item in chatExposureOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="运行生效">
+            <el-tag type="warning">重启生效</el-tag>
+            <div class="field-tip">禁用、暴露模式和 allowlist 都不会热卸载已启动工具。</div>
+          </el-form-item>
+        </div>
+        <el-form-item label="允许工具">
+          <div class="tool-editor">
+            <div class="chip-list">
+              <el-tag
+                v-for="toolName in configStore.currentMcpServer.allowedToolNames"
+                :key="toolName"
+                closable
+                @close="removeMcpTool(toolName)"
+              >
+                {{ toolName }}
+              </el-tag>
+            </div>
+            <div class="tool-input-row">
+              <el-input
+                v-model="mcpToolNameDraft"
+                placeholder="输入 MCP 工具名后回车"
+                @keyup.enter="addMcpTool"
+              />
+              <el-button @click="addMcpTool">添加</el-button>
+            </div>
+            <div class="field-tip">只有 allowlist 中的工具才会暴露给聊天链路。</div>
+          </div>
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <div class="dialog-actions">
+          <el-button @click="configStore.closeMcpServerDialog()">取消</el-button>
+          <el-button type="primary" :loading="configStore.submittingStates.mcpServer" @click="saveMcpServer">
             保存
           </el-button>
         </div>

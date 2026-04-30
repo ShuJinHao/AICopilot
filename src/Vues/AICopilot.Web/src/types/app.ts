@@ -209,6 +209,43 @@ export interface BusinessDatabaseFormModel {
   connectionStringMasked?: string | null
 }
 
+export interface McpToolPolicySummary {
+  toolName: string
+  requiresApproval: boolean
+  requiresOnsiteAttestation: boolean
+}
+
+export interface McpServerSummary {
+  id: string
+  name: string
+  description: string
+  transportType: number
+  command?: string | null
+  hasArguments: boolean
+  argumentsMasked?: string | null
+  chatExposureMode: number
+  allowedToolNames: string[]
+  toolPolicySummaries: McpToolPolicySummary[]
+  isEnabled: boolean
+}
+
+export interface McpServerDetail extends McpServerSummary {}
+
+export interface McpServerFormModel {
+  id?: string
+  name: string
+  description: string
+  transportType: number
+  command: string
+  arguments: string
+  chatExposureMode: number
+  allowedToolNames: string[]
+  isEnabled: boolean
+  hasArguments: boolean
+  argumentsMasked?: string | null
+  originalTransportType?: number
+}
+
 export interface SemanticSourceStatus {
   target: string
   databaseName?: string | null

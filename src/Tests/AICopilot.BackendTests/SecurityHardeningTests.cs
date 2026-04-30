@@ -165,6 +165,60 @@ public sealed class SecurityHardeningTests
     }
 
     [Fact]
+    public void FrontendConfig_ShouldExposeMcpManagementAndDataAnalysisSafetyHints()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var configViewSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Vues",
+            "AICopilot.Web",
+            "src",
+            "views",
+            "ConfigView.vue"));
+        var configStoreSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Vues",
+            "AICopilot.Web",
+            "src",
+            "stores",
+            "configStore.ts"));
+        var configServiceSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Vues",
+            "AICopilot.Web",
+            "src",
+            "services",
+            "configService.ts"));
+        var permissionsSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Vues",
+            "AICopilot.Web",
+            "src",
+            "security",
+            "permissions.ts"));
+
+        permissionsSource.Should().Contain("Mcp.GetListServers");
+        permissionsSource.Should().Contain("Mcp.CreateServer");
+        configServiceSource.Should().Contain("/mcp/server/list");
+        configServiceSource.Should().Contain("/mcp/server");
+        configStoreSource.Should().Contain("mcpServers");
+        configStoreSource.Should().Contain("currentMcpServer");
+        configStoreSource.Should().Contain("normalizeToolNames");
+        configStoreSource.Should().Contain("getProblemDetails");
+        configViewSource.Should().Contain("MCP 配置由启动期 bootstrap 读取");
+        configViewSource.Should().Contain("重启服务");
+        configViewSource.Should().Contain("toolPolicySummaries");
+        configViewSource.Should().Contain("留空表示保留已保存参数");
+        configViewSource.Should().Contain("SQL 安全拒绝");
+        configViewSource.Should().Contain("结果截断");
+        configViewSource.Should().Contain("配置管理台保存时始终强制只读");
+    }
+
+    [Fact]
     public void ApiControllerBase_ShouldUseConstructorInjectedSender()
     {
         var solutionRoot = FindSolutionRoot();
@@ -755,6 +809,25 @@ public sealed class SecurityHardeningTests
         source.Should().Contain("normalizedRows.Count >= maxRows");
         source.Should().NotContain("QueryAsync(command)).ToList");
         source.Should().NotContain("rawRows.Take");
+    }
+
+    [Fact]
+    public void DataAnalysisAuditSummaries_ShouldStayReadable()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var source = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Services",
+            "AICopilot.DataAnalysisService",
+            "BusinessDatabases",
+            "BusinessDatabaseManagement.cs"));
+
+        source.Should().Contain("Created business database:");
+        source.Should().Contain("Deleted business database:");
+        source.Should().NotContain("鍒");
+        source.Should().NotContain("锛");
+        source.Should().NotContain("擄");
     }
 
     [Fact]

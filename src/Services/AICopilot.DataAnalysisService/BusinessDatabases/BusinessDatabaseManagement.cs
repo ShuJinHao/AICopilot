@@ -61,7 +61,7 @@ public class CreateBusinessDatabaseCommandHandler(
                 entity.Id.ToString(),
                 entity.Name,
                 AuditResults.Succeeded,
-                $"鍒涘缓涓氬姟搴擄細{entity.Name}锛屽綋鍓嶄繚鎸佸彧璇?{entity.IsReadOnly}",
+                $"Created business database: {entity.Name}; readOnly={entity.IsReadOnly}.",
                 ["name", "description", "connectionString", "provider", "isEnabled", "isReadOnly"]),
             cancellationToken);
         await auditLogWriter.SaveChangesAsync(cancellationToken);
@@ -187,7 +187,7 @@ public class DeleteBusinessDatabaseCommandHandler(
                 request.Id.ToString(),
                 targetName,
                 AuditResults.Succeeded,
-                $"鍒犻櫎涓氬姟搴擄細{targetName}"),
+                $"Deleted business database: {targetName}."),
             cancellationToken);
         await auditLogWriter.SaveChangesAsync(cancellationToken);
 
