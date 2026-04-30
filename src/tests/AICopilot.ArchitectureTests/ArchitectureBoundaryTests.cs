@@ -646,6 +646,70 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
+    public void AICopilotRules_ShouldDocumentCloudBusinessReadOnlyBoundary()
+    {
+        var agentsFile = Path.Combine(SolutionRoot, "AGENTS.md");
+        var businessRulesFile = Path.Combine(SolutionRoot, "资料", "AICopilot业务规则.md");
+
+        var agents = File.ReadAllText(agentsFile);
+        var businessRules = File.ReadAllText(businessRulesFile);
+
+        agents.Should().Contain("Cloud Business Read-only Boundary");
+        agents.Should().Contain("must not directly write to the Cloud database");
+        agents.Should().Contain("must not create, update, delete, backfill, approve, dispatch, or trigger Cloud business records");
+        agents.Should().Contain("Human-in-the-loop approval is not permission");
+        agents.Should().Contain("Cloud AI-facing APIs");
+        agents.Should().Contain("Known-vulnerable dependencies are forbidden");
+        agents.Should().Contain("NU190x");
+        agents.Should().Contain("npm audit");
+
+        businessRules.Should().Contain("`AICopilot` 是分析助手和受控编排系统，不是制造业务主系统");
+        businessRules.Should().Contain("AICopilot 对 `IIoT.CloudPlatform` 只能读取数据和规则");
+        businessRules.Should().Contain("直接写云端数据库");
+        businessRules.Should().Contain("间接调用云端写接口");
+        businessRules.Should().Contain("Human-in-the-loop 不能作为放开云端业务写入的理由");
+        businessRules.Should().Contain("当前默认不存在专门给 AICopilot 使用的云端写 API");
+        businessRules.Should().Contain("AI-facing API");
+    }
+
+    [Fact]
+    public void AICopilotProductionCode_ShouldNotReferenceCloudProjectsOrNamespaces()
+    {
+        var productionRoots = new[]
+        {
+            Path.Combine("src", "core"),
+            Path.Combine("src", "services"),
+            Path.Combine("src", "infrastructure"),
+            Path.Combine("src", "hosts"),
+            Path.Combine("src", "shared")
+        };
+        var forbidden = new Regex(
+            @"\bIIoT\.(CloudPlatform|Core|Services|HttpApi|EmployeeService|MasterDataService|ProductionService|IdentityService)\b|IIoT\.CloudPlatform",
+            RegexOptions.Compiled);
+
+        var violations = productionRoots
+            .SelectMany(root => ScanSource(root, forbidden))
+            .ToArray();
+
+        violations.Should().BeEmpty(
+            "AICopilot must not directly reference Cloud implementation projects or namespaces; Cloud alignment must stay read-only until explicit AI-facing APIs exist");
+
+        var sourceRoot = Path.Combine(SolutionRoot, "src");
+        var projectReferenceViolations = Directory
+            .EnumerateFiles(sourceRoot, "*.csproj", SearchOption.AllDirectories)
+            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+            .Where(file => File.ReadAllText(file).Contains("IIoT.CloudPlatform", StringComparison.Ordinal)
+                           || File.ReadAllText(file).Contains("..\\..\\IIoT.CloudPlatform", StringComparison.Ordinal)
+                           || File.ReadAllText(file).Contains("../../IIoT.CloudPlatform", StringComparison.Ordinal))
+            .Select(file => Path.GetRelativePath(SolutionRoot, file))
+            .ToArray();
+
+        projectReferenceViolations.Should().BeEmpty(
+            "AICopilot projects must not reference Cloud projects directly; future Cloud access must go through explicit AI-facing contracts");
+    }
+
+    [Fact]
     public void MigratingDbContexts_ShouldUseIndependentMigrationHistoryTables()
     {
         var infrastructureRoot = Path.Combine(
