@@ -9,11 +9,6 @@ namespace AICopilot.EntityFrameworkCore.Repository;
 
 public sealed class McpServerRepository(McpServerDbContext dbContext) : IRepository<McpServerInfo>
 {
-    public IQueryable<McpServerInfo> GetQueryable()
-    {
-        return dbContext.McpServerInfos.AsQueryable();
-    }
-
     public async Task<List<McpServerInfo>> ListAsync(
         ISpecification<McpServerInfo>? specification = null,
         CancellationToken cancellationToken = default)

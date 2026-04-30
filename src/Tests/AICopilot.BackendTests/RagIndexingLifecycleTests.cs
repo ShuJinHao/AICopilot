@@ -226,12 +226,6 @@ public sealed class RagIndexingLifecycleTests
             return Task.FromResult(1);
         }
 
-        [Obsolete("Only exists for IReadRepository compatibility in tests.")]
-        public IQueryable<KnowledgeBase> GetQueryable()
-        {
-            return knowledgeBases.AsQueryable();
-        }
-
         public Task<List<KnowledgeBase>> ListAsync(
             ISpecification<KnowledgeBase>? specification = null,
             CancellationToken cancellationToken = default)

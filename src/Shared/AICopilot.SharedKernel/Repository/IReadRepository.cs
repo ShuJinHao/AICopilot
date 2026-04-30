@@ -12,13 +12,6 @@ namespace AICopilot.SharedKernel.Repository;
 /// <typeparam name="T">该仓储操作的实体类型</typeparam>
 public interface IReadRepository<T> where T : class, IAggregateRoot
 {
-    /// <summary>
-    ///     获取 Queryable 查询表达式
-    /// </summary>
-    /// <returns></returns>
-    [Obsolete("Use Specification-based query methods instead. This method leaks IQueryable outside infrastructure.")]
-    IQueryable<T> GetQueryable();
-
     Task<List<T>> ListAsync(ISpecification<T>? specification = null, CancellationToken cancellationToken = default);
 
     Task<T?> FirstOrDefaultAsync(ISpecification<T>? specification = null, CancellationToken cancellationToken = default);

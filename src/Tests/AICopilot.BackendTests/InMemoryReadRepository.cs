@@ -14,12 +14,6 @@ internal sealed class InMemoryReadRepository<T>(IReadOnlyCollection<T> items) : 
     {
     }
 
-    [Obsolete("Only exists for IReadRepository compatibility in tests.")]
-    public IQueryable<T> GetQueryable()
-    {
-        return items.AsQueryable();
-    }
-
     public Task<List<T>> ListAsync(ISpecification<T>? specification = null, CancellationToken cancellationToken = default)
     {
         return Task.FromResult(SpecificationEvaluator.GetQuery(items.AsQueryable(), specification).ToList());

@@ -9,11 +9,6 @@ namespace AICopilot.EntityFrameworkCore.Repository;
 
 public sealed class BusinessDatabaseRepository(DataAnalysisDbContext dbContext) : IRepository<BusinessDatabase>
 {
-    public IQueryable<BusinessDatabase> GetQueryable()
-    {
-        return dbContext.BusinessDatabases.AsQueryable();
-    }
-
     public async Task<List<BusinessDatabase>> ListAsync(
         ISpecification<BusinessDatabase>? specification = null,
         CancellationToken cancellationToken = default)

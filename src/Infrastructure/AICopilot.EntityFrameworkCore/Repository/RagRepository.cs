@@ -10,11 +10,6 @@ namespace AICopilot.EntityFrameworkCore.Repository;
 public sealed class RagRepository<T>(RagDbContext dbContext) : IRepository<T>
     where T : class, IEntity, IAggregateRoot
 {
-    public IQueryable<T> GetQueryable()
-    {
-        return dbContext.Set<T>().AsQueryable();
-    }
-
     public async Task<List<T>> ListAsync(
         ISpecification<T>? specification = null,
         CancellationToken cancellationToken = default)
