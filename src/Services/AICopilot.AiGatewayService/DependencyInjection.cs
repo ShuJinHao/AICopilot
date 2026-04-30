@@ -1,13 +1,16 @@
-﻿using AICopilot.AgentPlugin;
+using AICopilot.AgentPlugin;
+using AICopilot.AiGatewayService.Approvals;
 using AICopilot.AiGatewayService.Agents;
+using AICopilot.AiGatewayService.BusinessSemantics;
+using AICopilot.AiGatewayService.BusinessPolicies;
+using AICopilot.AiGatewayService.Observability;
+using AICopilot.AiGatewayService.Safety;
+using AICopilot.AiGatewayService.Sessions;
 using AICopilot.AiGatewayService.Workflows;
-using AICopilot.DataAnalysisService;
+using AICopilot.AiGatewayService.Workflows.Executors;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using System;
-using System.Collections.Generic;
 using System.Reflection;
-using System.Text;
 
 namespace AICopilot.AiGatewayService;
 
@@ -21,20 +24,37 @@ public static class DependencyInjection
         });
 
         builder.Services.AddScoped<ChatAgentFactory>();
-
-        builder.Services.AddHttpClient("OpenAI", client =>
-        {
-            client.Timeout = TimeSpan.FromSeconds(30);
-        });
+        builder.Services.AddSingleton<ISessionExecutionLock, InMemorySessionExecutionLock>();
+        builder.Services.AddSingleton<IOperationalBoundaryPolicy, ManufacturingOperationalBoundaryPolicy>();
+        builder.Services.AddSingleton<IManufacturingSceneClassifier, KeywordManufacturingSceneClassifier>();
+        builder.Services.AddSingleton<ITextTokenEstimator, SharpTokenTextTokenEstimator>();
+        builder.Services.AddSingleton<ITokenBudgetPolicy, ChatTokenBudgetPolicy>();
+        builder.Services.AddSingleton<IChatTokenTelemetry, ChatTokenTelemetry>();
+        builder.Services.AddScoped<ApprovalRequirementResolver>();
+        builder.Services.AddScoped<ApprovalToolResolver>();
+        builder.Services.AddScoped<IFinalAgentContextSerializer, FinalAgentContextSerializer>();
+        builder.Services.AddScoped<SessionMessagePersistenceService>();
+        builder.Services.AddSingleton<IBusinessPolicyCatalog, BusinessPolicyCatalog>();
+        builder.Services.AddSingleton<ISemanticSummaryProfileCatalog, SemanticSummaryProfileCatalog>();
+        builder.Services.AddSingleton<IBusinessSemanticsCatalog, BusinessSemanticsCatalog>();
 
         builder.Services.AddAgentPlugin(registrar =>
         {
             registrar.RegisterPluginFromAssembly(Assembly.GetExecutingAssembly());
         });
 
+        builder.Services.AddScoped<IntentRoutingPromptComposer>();
         builder.Services.AddScoped<IntentRoutingAgentBuilder>();
         builder.Services.AddScoped<DataAnalysisAgentBuilder>();
 
-        builder.AddIntentWorkflow();
+        builder.Services.AddScoped<IntentRoutingExecutor>();
+        builder.Services.AddScoped<ToolsPackExecutor>();
+        builder.Services.AddScoped<KnowledgeRetrievalExecutor>();
+        builder.Services.AddScoped<DataAnalysisExecutor>();
+        builder.Services.AddScoped<BusinessPolicyExecutor>();
+        builder.Services.AddScoped<ContextAggregatorExecutor>();
+        builder.Services.AddScoped<FinalAgentBuildExecutor>();
+        builder.Services.AddScoped<FinalAgentRunExecutor>();
+        builder.Services.AddScoped<ChatWorkflowOrchestrator>();
     }
 }

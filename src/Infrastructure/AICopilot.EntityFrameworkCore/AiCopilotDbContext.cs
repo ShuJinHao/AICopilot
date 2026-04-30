@@ -1,38 +1,61 @@
-﻿using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
-using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
-using AICopilot.Core.AiGateway.Aggregates.Sessions;
-using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
-using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
-using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
-using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
-using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore;
 using System.Reflection;
+using AICopilot.EntityFrameworkCore.AuditLogs;
+using AICopilot.EntityFrameworkCore.Configuration.AiGateway;
+using AICopilot.EntityFrameworkCore.Configuration.DataAnalysis;
+using AICopilot.EntityFrameworkCore.Configuration.McpServer;
+using AICopilot.EntityFrameworkCore.Configuration.Rag;
+using AICopilot.EntityFrameworkCore.Outbox;
+using AICopilot.SharedKernel.Domain;
+using Microsoft.EntityFrameworkCore;
 
 namespace AICopilot.EntityFrameworkCore;
 
-public class AiCopilotDbContext(DbContextOptions<AiCopilotDbContext> options) : IdentityDbContext(options)
+public class AiCopilotDbContext(DbContextOptions<AiCopilotDbContext> options) : DbContext(options)
 {
-    // AiGateway 实体模型
-    public DbSet<LanguageModel> LanguageModels => Set<LanguageModel>();
+    public DbSet<AuditLogEntry> AuditLogs => Set<AuditLogEntry>();
 
-    public DbSet<ConversationTemplate> ConversationTemplates => Set<ConversationTemplate>();
-    public DbSet<Session> Sessions => Set<Session>();
-    public DbSet<Message> Messages => Set<Message>();
-
-    // RAG 实体模型
-    public DbSet<EmbeddingModel> EmbeddingModels => Set<EmbeddingModel>();
-
-    public DbSet<KnowledgeBase> KnowledgeBases => Set<KnowledgeBase>();
-    public DbSet<Document> Documents => Set<Document>();
-    public DbSet<DocumentChunk> DocumentChunks => Set<DocumentChunk>();
-
-    public DbSet<BusinessDatabase> BusinessDatabases => Set<BusinessDatabase>();
-    public DbSet<McpServerInfo> McpServerInfos => Set<McpServerInfo>();
+    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
-        builder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
+        builder.ApplyConfigurationsFromAssembly(
+            Assembly.GetExecutingAssembly(),
+            type => type != typeof(LanguageModelConfiguration)
+                    && type != typeof(ConversationTemplateConfiguration)
+                    && type != typeof(ApprovalPolicyConfiguration)
+                    && type != typeof(SessionConfiguration)
+                    && type != typeof(MessageConfiguration)
+                    && type != typeof(McpServerConfiguration)
+                    && type != typeof(BusinessDatabaseConfiguration)
+                    && type != typeof(EmbeddingModelConfiguration)
+                    && type != typeof(KnowledgeBaseConfiguration)
+                    && type != typeof(DocumentConfiguration)
+                    && type != typeof(DocumentChunkConfiguration));
+    }
+
+    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        var domainEventEntities = ChangeTracker
+            .Entries()
+            .Select(entry => entry.Entity)
+            .OfType<IHasDomainEvents>()
+            .Where(entity => entity.DomainEvents.Count > 0)
+            .ToArray();
+
+        var domainEvents = domainEventEntities
+            .SelectMany(entity => entity.DomainEvents)
+            .ToArray();
+
+        OutboxMessages.AddRange(domainEvents.Select(OutboxMessage.FromIntegrationEvent));
+
+        var result = await base.SaveChangesAsync(cancellationToken);
+
+        foreach (var entity in domainEventEntities)
+        {
+            entity.ClearDomainEvents();
+        }
+
+        return result;
     }
 }

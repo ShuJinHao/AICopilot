@@ -1,44 +1,63 @@
-﻿<script setup lang="ts">
-import { computed, ref } from 'vue';
-import type { ApprovalChunk } from '@/types/models';
-import ArgumentViewer from './ArgumentViewer.vue';
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import type { ApprovalChunk } from '@/types/models'
+import ArgumentViewer from './ArgumentViewer.vue'
 
-// 定义 Props
 interface Props {
-  chunk: ApprovalChunk;
+  chunk: ApprovalChunk
 }
 
-const props = defineProps<Props>();
+const props = defineProps<Props>()
 
-// 定义 Events
-// 组件只负责展示和交互，具体的 API 调用逻辑交由父组件或 Store 处理
 const emit = defineEmits<{
-  (e: 'approve', callId: string): void;
-  (e: 'reject', callId: string): void;
-}>();
+  (
+    e: 'approve',
+    payload: {
+      callId: string
+      onsiteConfirmed: boolean
+    }
+  ): void
+  (e: 'reject', payload: { callId: string }): void
+}>()
 
-// 本地 loading 状态，防止重复点击
-const isProcessing = ref(false);
+const isProcessing = ref(false)
+const onsiteConfirmed = ref(false)
 
-// 提取核心数据
-const request = computed(() => props.chunk.request);
-const status = computed(() => props.chunk.status);
+const request = computed(() => props.chunk.request)
+const status = computed(() => props.chunk.status)
+const isPending = computed(() => status.value === 'pending')
+const attestationExpiresText = computed(() => {
+  if (!request.value.attestationExpiresAt) {
+    return ''
+  }
 
-// 判断当前是否处于可交互状态
-const isPending = computed(() => status.value === 'pending');
+  return new Date(request.value.attestationExpiresAt).toLocaleString('zh-CN', {
+    hour12: false
+  })
+})
 
-const handleApprove = () => {
-  if (isProcessing.value) return;
-  isProcessing.value = true;
-  // 抛出事件，携带 CallId
-  emit('approve', request.value.callId);
-};
+function handleApprove() {
+  if (isProcessing.value) {
+    return
+  }
 
-const handleReject = () => {
-  if (isProcessing.value) return;
-  isProcessing.value = true;
-  emit('reject', request.value.callId);
-};
+  isProcessing.value = true
+  emit('approve', {
+    callId: request.value.callId,
+    onsiteConfirmed: onsiteConfirmed.value
+  })
+}
+
+function handleReject() {
+  if (isProcessing.value) {
+    return
+  }
+
+  isProcessing.value = true
+  emit('reject', {
+    callId: request.value.callId
+  })
+}
 </script>
 
 <template>
@@ -46,12 +65,16 @@ const handleReject = () => {
     <div class="card-header">
       <div class="header-icon">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+          />
         </svg>
       </div>
       <div class="header-content">
-        <h3 class="title">请求执行敏感操作</h3>
-        <p class="subtitle">AI 正在请求权限以执行外部工具调用</p>
+        <h3 class="title">敏感建议审批</h3>
+        <p class="subtitle">AI 请求执行需要人工复核的外部工具能力。</p>
       </div>
       <div v-if="!isPending" class="status-badge" :class="status">
         {{ status === 'approved' ? '已批准' : '已拒绝' }}
@@ -60,29 +83,39 @@ const handleReject = () => {
 
     <div class="card-body">
       <div class="function-info">
-        <span class="label">目标工具:</span>
+        <span class="label">目标工具</span>
         <code class="function-name">{{ request.name }}</code>
       </div>
 
       <div class="arguments-section">
-        <span class="label">参数详情:</span>
+        <span class="label">参数详情</span>
         <ArgumentViewer :args="request.args" />
+      </div>
+
+      <div v-if="request.requiresOnsiteAttestation" class="onsite-panel">
+        <div class="onsite-title">在岗复核</div>
+        <div class="onsite-text">
+          该建议必须在会话已有在岗声明的前提下，再次确认“现场有人在岗”后才能批准。
+        </div>
+        <div v-if="attestationExpiresText" class="onsite-expiry">
+          当前会话在岗声明有效期至：{{ attestationExpiresText }}
+        </div>
+        <label v-if="isPending" class="onsite-check">
+          <input v-model="onsiteConfirmed" type="checkbox" />
+          <span>现场有人在岗，我已复核执行前条件。</span>
+        </label>
       </div>
     </div>
 
     <div class="card-footer">
       <template v-if="isPending">
-        <button
-          class="btn btn-reject"
-          @click="handleReject"
-          :disabled="isProcessing"
-        >
+        <button class="btn btn-reject" @click="handleReject" :disabled="isProcessing">
           拒绝执行
         </button>
         <button
           class="btn btn-approve"
           @click="handleApprove"
-          :disabled="isProcessing"
+          :disabled="isProcessing || (request.requiresOnsiteAttestation && !onsiteConfirmed)"
         >
           <span v-if="isProcessing">处理中...</span>
           <span v-else>批准执行</span>
@@ -90,59 +123,51 @@ const handleReject = () => {
       </template>
 
       <div v-else class="result-message">
-        <span v-if="status === 'approved'" class="text-success">
-          操作已授权。
-        </span>
-        <span v-else class="text-danger">
-          操作已被用户拦截。
-        </span>
+        <span v-if="status === 'approved'" class="text-success">审批已通过。</span>
+        <span v-else class="text-danger">审批已拒绝。</span>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-/* 卡片容器：默认样式 */
 .approval-card {
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   background: white;
   margin: 12px 0;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
   overflow: hidden;
   transition: all 0.3s ease;
-  max-width: 600px;
+  max-width: 640px;
 }
 
-/* 状态修饰符：已拒绝 */
 .approval-card.rejected {
   opacity: 0.7;
   border-color: #cbd5e1;
   background: #f8fafc;
 }
 
-/* 状态修饰符：已批准 */
 .approval-card.approved {
   border-color: #bbf7d0;
   background: #f0fdf4;
 }
 
-/* --- Header 区域 --- */
 .card-header {
   display: flex;
   align-items: center;
   padding: 12px 16px;
-  background: #fff7ed; /* 浅橙色背景警告 */
+  background: #fff7ed;
   border-bottom: 1px solid #ffedd5;
 }
 
 .approval-card.approved .card-header {
-  background: #dcfce7; /* 浅绿色 */
+  background: #dcfce7;
   border-bottom-color: #bbf7d0;
 }
 
 .approval-card.rejected .card-header {
-  background: #f1f5f9; /* 浅灰色 */
+  background: #f1f5f9;
   border-bottom-color: #e2e8f0;
 }
 
@@ -150,7 +175,7 @@ const handleReject = () => {
   width: 24px;
   height: 24px;
   margin-right: 12px;
-  color: #ea580c; /* 深橙色图标 */
+  color: #ea580c;
 }
 
 .header-content {
@@ -170,23 +195,23 @@ const handleReject = () => {
   color: #64748b;
 }
 
-/* --- Body 区域 --- */
 .card-body {
   padding: 16px;
+  display: grid;
+  gap: 12px;
 }
 
 .function-info {
   display: flex;
   align-items: center;
-  margin-bottom: 12px;
+  gap: 8px;
 }
 
 .label {
   font-size: 0.85rem;
   font-weight: 600;
   color: #64748b;
-  margin-right: 8px;
-  width: 70px; /* 固定宽度对齐 */
+  min-width: 72px;
 }
 
 .function-name {
@@ -198,17 +223,35 @@ const handleReject = () => {
   font-weight: bold;
 }
 
-.risk-alert {
-  margin-top: 12px;
-  padding: 8px;
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  color: #991b1b;
-  font-size: 0.85rem;
-  border-radius: 4px;
+.onsite-panel {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid #dbeafe;
+  display: grid;
+  gap: 6px;
 }
 
-/* --- Footer 区域 --- */
+.onsite-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.onsite-text,
+.onsite-expiry {
+  font-size: 0.82rem;
+  color: #475569;
+}
+
+.onsite-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: #0f172a;
+}
+
 .card-footer {
   padding: 12px 16px;
   background: #f8fafc;
@@ -218,7 +261,6 @@ const handleReject = () => {
   gap: 12px;
 }
 
-/* 按钮样式 */
 .btn {
   padding: 8px 16px;
   border-radius: 6px;
@@ -242,18 +284,17 @@ const handleReject = () => {
 
 .btn-reject:hover:not(:disabled) {
   background: #f1f5f9;
-  color: #ef4444; /* 悬停变红 */
+  color: #ef4444;
   border-color: #ef4444;
 }
 
 .btn-approve {
-  background: #2563eb; /* 品牌蓝 */
+  background: #2563eb;
   color: white;
 }
 
 .btn-approve:hover:not(:disabled) {
   background: #1d4ed8;
-  box-shadow: 0 2px 4px rgba(37, 99, 235, 0.3);
 }
 
 .status-badge {
@@ -278,6 +319,11 @@ const handleReject = () => {
   font-weight: 500;
 }
 
-.text-success { color: #166534; }
-.text-danger { color: #991b1b; }
+.text-success {
+  color: #166534;
+}
+
+.text-danger {
+  color: #991b1b;
+}
 </style>

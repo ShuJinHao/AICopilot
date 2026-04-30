@@ -2,14 +2,18 @@
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
 
+namespace AICopilot.EntityFrameworkCore.Configuration.McpServer;
+
 public class McpServerConfiguration : IEntityTypeConfiguration<McpServerInfo>
 {
     public void Configure(EntityTypeBuilder<McpServerInfo> builder)
     {
-        builder.ToTable("mcp_server_info");
+        builder.ToTable("mcp_server_info", "mcp");
 
         builder.HasKey(b => b.Id);
         builder.Property(b => b.Id).HasColumnName("id");
+
+        builder.Property(b => b.RowVersion).IsRowVersion();
 
         builder.Property(b => b.Name)
             .IsRequired()
@@ -33,6 +37,12 @@ public class McpServerConfiguration : IEntityTypeConfiguration<McpServerInfo>
             .HasMaxLength(1000)
             .HasColumnName("arguments");
 
+        builder.Property(b => b.ChatExposureMode)
+            .IsRequired()
+            .HasConversion<string>()
+            .HasMaxLength(50)
+            .HasColumnName("chat_exposure_mode");
+
         builder.Property(b => b.TransportType)
             .IsRequired()
             .HasConversion<string>() // 存储枚举字符串，增强可读性
@@ -43,7 +53,8 @@ public class McpServerConfiguration : IEntityTypeConfiguration<McpServerInfo>
             .IsRequired()
             .HasColumnName("is_enabled");
 
-        builder.Property(b => b.SensitiveTools)
-            .HasColumnName("sensitive_tools");
+        builder.PrimitiveCollection(b => b.AllowedToolNames)
+            .IsRequired()
+            .HasColumnName("allowed_tool_names");
     }
 }

@@ -21,20 +21,23 @@
   
   
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.2" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.2">
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.6" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.6">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Swashbuckle.AspNetCore.SwaggerUI" Version="10.1.0" />
+    <PackageReference Include="Swashbuckle.AspNetCore.SwaggerUI" Version="10.1.7" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\Infrastructure\AICopilot.Infrastructure\AICopilot.Infrastructure.csproj" />
     <ProjectReference Include="..\..\Services\AICopilot.AiGatewayService\AICopilot.AiGatewayService.csproj" />
+    <ProjectReference Include="..\..\Services\AICopilot.DataAnalysisService\AICopilot.DataAnalysisService.csproj" />
     <ProjectReference Include="..\..\Services\AICopilot.IdentityService\AICopilot.IdentityService.csproj" />
     <ProjectReference Include="..\..\Services\AICopilot.McpService\AICopilot.McpService.csproj" />
     <ProjectReference Include="..\..\Services\AICopilot.RagService\AICopilot.RagService.csproj" />
+    <ProjectReference Include="..\..\Services\AICopilot.Services.Contracts\AICopilot.Services.Contracts.csproj" />
+    <ProjectReference Include="..\..\Services\AICopilot.Services.CrossCutting\AICopilot.Services.CrossCutting.csproj" />
     <ProjectReference Include="..\AICopilot.ServiceDefaults\AICopilot.ServiceDefaults.csproj" />
   </ItemGroup>
 

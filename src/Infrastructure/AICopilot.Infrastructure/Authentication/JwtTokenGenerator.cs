@@ -1,22 +1,20 @@
-﻿using AICopilot.IdentityService.Contracts;
-using Microsoft.AspNetCore.Identity;
-using Microsoft.Extensions.Options;
-using Microsoft.IdentityModel.Tokens;
-using System;
-using System.Collections.Generic;
-using System.IdentityModel.Tokens.Jwt;
+﻿using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using AICopilot.Services.Contracts;
+using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
 
 namespace AICopilot.Infrastructure.Authentication;
 
-public class JwtTokenGenerator(
-    IOptions<JwtSettings> jwtSettings,
-    UserManager<IdentityUser> userManager) : IJwtTokenGenerator
+public class JwtTokenGenerator(IOptions<JwtSettings> jwtSettings) : IJwtTokenGenerator
 {
-    public async Task<string> GenerateTokenAsync(IdentityUser user)
+    public Task<string> GenerateTokenAsync(
+        JwtTokenUser user,
+        CancellationToken cancellationToken = default)
     {
-        // 1. 从配置中读取 JWT 设置
+        _ = cancellationToken;
+
         var issuer = jwtSettings.Value.Issuer;
         var audience = jwtSettings.Value.Audience;
         var secretKey = jwtSettings.Value.SecretKey;
@@ -24,24 +22,17 @@ public class JwtTokenGenerator(
 
         var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey));
 
-        // 2. 准备 Claims (声明)
-        // Claims 是 Token 中包含的用户信息，例如用户ID、用户名、角色等
-        var userClaims = await userManager.GetClaimsAsync(user);
-        var userRoles = await userManager.GetRolesAsync(user);
-
         var authClaims = new List<Claim>
         {
-            new(ClaimTypes.NameIdentifier, user.Id),
-            new(ClaimTypes.Name, user.UserName!),
-            new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()), // 保证 Token 唯一性
+            new(ClaimTypes.NameIdentifier, user.Id.ToString()),
+            new(ClaimTypes.Name, user.UserName),
+            new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+            new(JwtClaimTypes.SecurityStamp, user.SecurityStamp),
         };
 
-        // 添加用户角色到 Claims
-        authClaims.AddRange(userRoles.Select(role => new Claim(ClaimTypes.Role, role)));
-        // 添加自定义 Claims
-        authClaims.AddRange(userClaims);
+        authClaims.AddRange(user.Roles.Select(role => new Claim(ClaimTypes.Role, role)));
+        authClaims.AddRange(user.Claims);
 
-        // 3. 创建 Token 描述符
         var tokenDescriptor = new SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(authClaims),
@@ -51,11 +42,9 @@ public class JwtTokenGenerator(
             SigningCredentials = new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256)
         };
 
-        // 4. 创建 Token
         var tokenHandler = new JwtSecurityTokenHandler();
         var token = tokenHandler.CreateToken(tokenDescriptor);
 
-        // 5. 序列化为字符串
-        return tokenHandler.WriteToken(token);
+        return Task.FromResult(tokenHandler.WriteToken(token));
     }
 }

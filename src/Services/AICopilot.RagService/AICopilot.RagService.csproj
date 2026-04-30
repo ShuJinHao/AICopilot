@@ -7,9 +7,12 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\Infrastructure\AICopilot.Embedding\AICopilot.Embedding.csproj" />
-    <ProjectReference Include="..\..\Infrastructure\AICopilot.EventBus\AICopilot.EventBus.csproj" />
-    <ProjectReference Include="..\AICopilot.Services.Common\AICopilot.Services.Common.csproj" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.6" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AICopilot.Services.Contracts\AICopilot.Services.Contracts.csproj" />
+    <ProjectReference Include="..\AICopilot.Services.CrossCutting\AICopilot.Services.CrossCutting.csproj" />
   </ItemGroup>
 
 </Project>

@@ -13,6 +13,8 @@ public class KnowledgeBaseConfiguration : IEntityTypeConfiguration<KnowledgeBase
         builder.HasKey(kb => kb.Id);
         builder.Property(kb => kb.Id).HasColumnName("id");
 
+        builder.Property(kb => kb.RowVersion).IsRowVersion();
+
         builder.Property(kb => kb.Name)
             .IsRequired()
             .HasMaxLength(200)

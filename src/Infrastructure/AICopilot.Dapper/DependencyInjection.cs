@@ -1,5 +1,5 @@
 ﻿using AICopilot.Dapper.Security;
-using AICopilot.Services.Common.Contracts;
+using AICopilot.Services.Contracts;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using System;
@@ -13,7 +13,7 @@ public static class DependencyInjection
     public static void AddDapper(this IHostApplicationBuilder builder)
     {
         // 注册 SQL 安全服务
-        builder.Services.AddSingleton<ISqlGuardrail, KeywordSqlGuardrail>();
+        builder.Services.AddSingleton<ISqlGuardrail, AstSqlGuardrail>();
         // 注册 数据库连接器
         builder.Services.AddSingleton<IDatabaseConnector, DapperDatabaseConnector>();
     }

@@ -10,18 +10,30 @@ public class Message : IEntity<int>
 
     public Message(Session session, string content, MessageType type)
     {
+        ArgumentNullException.ThrowIfNull(session);
+
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            throw new ArgumentException("Message content is required.", nameof(content));
+        }
+
+        if (!Enum.IsDefined(typeof(MessageType), type))
+        {
+            throw new ArgumentOutOfRangeException(nameof(type), type, "Message type is invalid.");
+        }
+
         Session = session;
         SessionId = session.Id;
-        Content = content;
+        Content = content.Trim();
         Type = type;
         CreatedAt = DateTime.UtcNow;
     }
 
-    public Guid SessionId { get; set; }
-    public string Content { get; set; } = null!;
-    public DateTime CreatedAt { get; set; }
-    public MessageType Type { get; set; }
+    public Guid SessionId { get; private set; }
+    public string Content { get; private set; } = null!;
+    public DateTime CreatedAt { get; private set; }
+    public MessageType Type { get; private set; }
 
-    public Session Session { get; set; } = null!;
-    public int Id { get; set; }
+    public Session Session { get; private set; } = null!;
+    public int Id { get; private set; }
 }

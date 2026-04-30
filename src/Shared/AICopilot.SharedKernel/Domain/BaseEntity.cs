@@ -1,6 +1,20 @@
-﻿namespace AICopilot.SharedKernel.Domain;
+namespace AICopilot.SharedKernel.Domain;
 
-public abstract class BaseEntity<TId> : IEntity<TId>
+public abstract class BaseEntity<TId> : IEntity<TId>, IHasDomainEvents
 {
-    public TId Id { get; set; } = default!;
+    private readonly List<object> _domainEvents = [];
+
+    public TId Id { get; protected set; } = default!;
+
+    public IReadOnlyCollection<object> DomainEvents => _domainEvents.AsReadOnly();
+
+    protected void AddDomainEvent(object domainEvent)
+    {
+        _domainEvents.Add(domainEvent);
+    }
+
+    public void ClearDomainEvents()
+    {
+        _domainEvents.Clear();
+    }
 }
