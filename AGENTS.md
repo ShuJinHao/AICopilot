@@ -16,6 +16,16 @@ For business semantics, the current cloud business is the reference source.
 - If the AI-side logic conflicts with the cloud-side confirmed business, report the conflict first and discuss it with the user.
 - `AICopilot` is an assistant/orchestration system, not the master source of manufacturing business data.
 
+## Cloud Business Read-only Boundary
+
+`AICopilot` may consume confirmed cloud business data for analysis, explanation, summarization, retrieval, and recommendation only.
+- It must not directly write to the Cloud database.
+- It must not create, update, delete, backfill, approve, dispatch, or trigger Cloud business records or Cloud business workflows.
+- It must not use MCP tools, agent workflows, background jobs, direct SQL, or hidden adapters to call Cloud write APIs indirectly.
+- Human-in-the-loop approval is not permission to turn AICopilot into a Cloud business write entrypoint.
+- If the CloudPlatform later exposes explicit AI-facing APIs, AICopilot may call only those APIs that Cloud intentionally designed for AI usage, with explicit permission, audit, and interface contracts.
+- Until such Cloud AI-facing APIs exist and are approved, all Cloud alignment work in AICopilot must remain read-only.
+
 ## Current Architecture
 
 The current repository structure already follows the same broad direction as the cloud-side layered architecture:
@@ -66,6 +76,11 @@ Preview NuGet packages are forbidden by default.
 - If there is no stable package available, stop and discuss it with the user before adding or upgrading the dependency.
 - If the repository already contains preview packages, treat them as existing debt, not as permission to keep expanding preview usage.
 - Do not upgrade one preview package to another preview package without explicit user approval.
+
+Known-vulnerable dependencies are forbidden unless an explicit exception is documented and approved.
+- Do not add NuGet, npm, container image, or tool dependencies with active vulnerability advisories.
+- `NU190x`, `npm audit`, GitHub advisory, Dependabot, and container scan findings must be treated as blockers by default.
+- If a vulnerable dependency cannot be upgraded immediately, record the package, version, advisory, impact, mitigation, owner, and expiry date before merging related work.
 
 ## Scope Rules
 
