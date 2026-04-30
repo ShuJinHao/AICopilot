@@ -217,12 +217,6 @@ public sealed class McpServerManagementTests
             return Task.FromResult(1);
         }
 
-        [Obsolete("Only exists for IReadRepository compatibility in tests.")]
-        public IQueryable<McpServerInfo> GetQueryable()
-        {
-            return servers.AsQueryable();
-        }
-
         public Task<List<McpServerInfo>> ListAsync(
             ISpecification<McpServerInfo>? specification = null,
             CancellationToken cancellationToken = default)

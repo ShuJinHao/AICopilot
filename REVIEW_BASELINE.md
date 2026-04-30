@@ -11,9 +11,11 @@ Generated for the current large refactor baseline.
 ## Review Summary
 
 - Query access is expected to go through Specifications, repositories, or dedicated read services. `IDataQueryService` must remain absent.
+- `IReadRepository` no longer exposes `IQueryable`; query composition must stay inside infrastructure repositories, specifications, or dedicated read services.
 - AiGateway, RAG, DataAnalysis, and MCP now use split business DbContexts on the same physical database with module schemas.
 - HTTP authentication, upload limits, secret placeholders, ApiKey fail-fast behavior, and OpenTelemetry sensitive data gating are part of the security baseline.
 - Identity runtime storage uses `IdentityStoreDbContext`; identity management commands use `ITransactionalExecutionService` and `IIdentityAuditLogWriter` so identity changes, permission sync, and identity audit rows share one EF transaction.
+- Runtime and frontend usability closure has been merged: chat/approval, RAG knowledge management, DataAnalysis configuration feedback, MCP server management, and `/chat`, `/config`, `/knowledge`, `/access` frontend paths are part of the current baseline.
 
 ## Persistence Boundary
 
@@ -65,9 +67,13 @@ Generated for the current large refactor baseline.
 
 - JWTs carry role and permission claims for request-time authorization. Identity governance changes that affect authorization, including role changes, disable/enable, and password reset, must refresh the user's security stamp so existing tokens are rejected on the next authenticated request.
 - Login rate limiting is partitioned by normalized username plus client IP when the username can be read from the login request; it falls back to IP when username is absent or unreadable.
+- Chat session reads, history, delete, normal chat execution, and pending approval lookup are scoped to the current user.
+- New chat execution is blocked while the same session still has a pending approval context.
 - MCP runtime registration is a startup-time operation. Disabling or changing an MCP server in the database requires service restart before the production chat toolchain reflects the change; hot unregister is intentionally not promised in this baseline.
 - MCP SSE clients use an explicit connection timeout. Stdio MCP arguments use a quoted/escaped parser and still preserve the single-file-path shortcut.
 - RAG indexing may recover documents left in `Parsing`, `Splitting`, or `Embedding`. Re-indexing loads existing chunks, deletes prior vector keys for the document, and then upserts the new vectors.
+- RAG management includes embedding models, knowledge bases, document upload/status/delete, and knowledge-base search. Search requires the `Rag.SearchKnowledgeBase` permission.
+- DataAnalysis configuration and execution paths must keep disabled-source, non-read-only-source, SQL safety rejection, and truncation feedback distinct.
 
 ## Explicitly Deferred
 
@@ -81,7 +87,8 @@ Generated for the current large refactor baseline.
 ## Required Verification
 
 - `dotnet build .\AICopilot.slnx --no-restore`
+- `npm run build` from `src/Vues/AICopilot.Web`
 - `dotnet test .\src\Tests\AICopilot.ArchitectureTests\AICopilot.ArchitectureTests.csproj --no-build`
 - `dotnet test .\src\Tests\AICopilot.BackendTests\AICopilot.BackendTests.csproj --no-build`
-- Static checks must keep `IDataQueryService`, Services/Core `IQueryable`, and Services/Core `IPublishEndpoint` at zero results.
+- Static checks must keep `IDataQueryService`, repository queryable escape methods, Services/Core `IQueryable`, and Services/Core `IPublishEndpoint` at zero results.
 - Static checks must keep `AddEntityFrameworkStores<AiCopilotDbContext>` out of production source, keep Identity management commands off `IAuditLogWriter`, and keep `DetachIdentityFromAiCopilotDbContext` free of `DropTable`/`CreateTable`.
