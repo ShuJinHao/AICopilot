@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { reactive, ref } from 'vue'
-import { ApiError } from '@/services/apiClient'
+import { ApiError, getProblemDetails } from '@/services/apiClient'
 import { CONFIG_READ_PERMISSIONS } from '@/security/permissions'
 import { configService } from '@/services/configService'
 import { useAuthStore } from '@/stores/authStore'
@@ -18,6 +18,9 @@ import type {
   LanguageModelDetail,
   LanguageModelFormModel,
   LanguageModelSummary,
+  McpServerDetail,
+  McpServerFormModel,
+  McpServerSummary,
   SemanticSourceStatus
 } from '@/types/app'
 
@@ -26,6 +29,7 @@ type EditableDomain =
   | 'conversationTemplate'
   | 'approvalPolicy'
   | 'businessDatabase'
+  | 'mcpServer'
 
 type LoadingDomain = EditableDomain | 'semanticSource'
 
@@ -78,6 +82,22 @@ function createEmptyBusinessDatabaseForm(): BusinessDatabaseFormModel {
     isReadOnly: true,
     hasConnectionString: false,
     connectionStringMasked: null
+  }
+}
+
+function createEmptyMcpServerForm(): McpServerFormModel {
+  return {
+    name: '',
+    description: '',
+    transportType: 1,
+    command: 'dotnet',
+    arguments: '',
+    chatExposureMode: 0,
+    allowedToolNames: [],
+    isEnabled: true,
+    hasArguments: false,
+    argumentsMasked: null,
+    originalTransportType: 1
   }
 }
 
@@ -139,6 +159,23 @@ function toBusinessDatabaseForm(detail: BusinessDatabaseDetail): BusinessDatabas
   }
 }
 
+function toMcpServerForm(detail: McpServerDetail): McpServerFormModel {
+  return {
+    id: detail.id,
+    name: detail.name,
+    description: detail.description,
+    transportType: detail.transportType,
+    command: detail.command ?? '',
+    arguments: '',
+    chatExposureMode: detail.chatExposureMode,
+    allowedToolNames: [...detail.allowedToolNames],
+    isEnabled: detail.isEnabled,
+    hasArguments: detail.hasArguments,
+    argumentsMasked: detail.argumentsMasked,
+    originalTransportType: detail.transportType
+  }
+}
+
 function normalizeToolNames(toolNames: string[]) {
   return [...new Set(toolNames.map((item) => item.trim()).filter(Boolean))]
 }
@@ -146,6 +183,11 @@ function normalizeToolNames(toolNames: string[]) {
 function toErrorMessage(error: unknown, fallback: string, forbiddenMessage: string) {
   if (error instanceof ApiError && error.status === 403) {
     return forbiddenMessage
+  }
+
+  if (error instanceof ApiError) {
+    const problem = getProblemDetails(error.details)
+    return problem?.detail || problem?.title || fallback
   }
 
   return fallback
@@ -157,6 +199,7 @@ export const useConfigStore = defineStore('config', () => {
   const conversationTemplates = ref<ConversationTemplateSummary[]>([])
   const approvalPolicies = ref<ApprovalPolicySummary[]>([])
   const businessDatabases = ref<BusinessDatabaseSummary[]>([])
+  const mcpServers = ref<McpServerSummary[]>([])
   const semanticSourceStatuses = ref<SemanticSourceStatus[]>([])
 
   const isLoading = ref(false)
@@ -167,6 +210,7 @@ export const useConfigStore = defineStore('config', () => {
     conversationTemplate: false,
     approvalPolicy: false,
     businessDatabase: false,
+    mcpServer: false,
     semanticSource: false
   })
 
@@ -174,28 +218,32 @@ export const useConfigStore = defineStore('config', () => {
     languageModel: false,
     conversationTemplate: false,
     approvalPolicy: false,
-    businessDatabase: false
+    businessDatabase: false,
+    mcpServer: false
   })
 
   const dialogModes = reactive<Record<EditableDomain, ConfigDialogMode>>({
     languageModel: 'create',
     conversationTemplate: 'create',
     approvalPolicy: 'create',
-    businessDatabase: 'create'
+    businessDatabase: 'create',
+    mcpServer: 'create'
   })
 
   const submittingStates = reactive<Record<EditableDomain, boolean>>({
     languageModel: false,
     conversationTemplate: false,
     approvalPolicy: false,
-    businessDatabase: false
+    businessDatabase: false,
+    mcpServer: false
   })
 
   const actionErrors = reactive<Record<EditableDomain, string>>({
     languageModel: '',
     conversationTemplate: '',
     approvalPolicy: '',
-    businessDatabase: ''
+    businessDatabase: '',
+    mcpServer: ''
   })
 
   const currentLanguageModel = ref<LanguageModelFormModel>(createEmptyLanguageModelForm())
@@ -204,6 +252,7 @@ export const useConfigStore = defineStore('config', () => {
   )
   const currentApprovalPolicy = ref<ApprovalPolicyFormModel>(createEmptyApprovalPolicyForm())
   const currentBusinessDatabase = ref<BusinessDatabaseFormModel>(createEmptyBusinessDatabaseForm())
+  const currentMcpServer = ref<McpServerFormModel>(createEmptyMcpServerForm())
   const currentBusinessDatabaseProviderSnapshot = ref(1)
 
   async function refreshLanguageModels() {
@@ -276,6 +325,20 @@ export const useConfigStore = defineStore('config', () => {
     }
   }
 
+  async function refreshMcpServers() {
+    if (!authStore.hasAnyPermission(CONFIG_READ_PERMISSIONS.mcpServer)) {
+      mcpServers.value = []
+      return
+    }
+
+    loadingStates.mcpServer = true
+    try {
+      mcpServers.value = await configService.getMcpServers()
+    } finally {
+      loadingStates.mcpServer = false
+    }
+  }
+
   async function refresh() {
     isLoading.value = true
     errorMessage.value = ''
@@ -286,6 +349,7 @@ export const useConfigStore = defineStore('config', () => {
         refreshConversationTemplates(),
         refreshApprovalPolicies(),
         refreshBusinessDatabases(),
+        refreshMcpServers(),
         refreshSemanticSourceStatuses()
       ])
     } catch (error) {
@@ -652,11 +716,100 @@ export const useConfigStore = defineStore('config', () => {
     }
   }
 
+  function closeMcpServerDialog() {
+    dialogStates.mcpServer = false
+    dialogModes.mcpServer = 'create'
+    actionErrors.mcpServer = ''
+    currentMcpServer.value = createEmptyMcpServerForm()
+  }
+
+  function openCreateMcpServerDialog() {
+    actionErrors.mcpServer = ''
+    dialogModes.mcpServer = 'create'
+    currentMcpServer.value = createEmptyMcpServerForm()
+    dialogStates.mcpServer = true
+  }
+
+  async function openEditMcpServerDialog(id: string) {
+    loadingStates.mcpServer = true
+    actionErrors.mcpServer = ''
+
+    try {
+      const detail = await configService.getMcpServer(id)
+      currentMcpServer.value = toMcpServerForm(detail)
+      dialogModes.mcpServer = 'edit'
+      dialogStates.mcpServer = true
+    } catch (error) {
+      actionErrors.mcpServer = toErrorMessage(
+        error,
+        '加载 MCP 服务详情失败，请稍后重试。',
+        '当前账号没有查看 MCP 服务详情的权限。'
+      )
+      throw error
+    } finally {
+      loadingStates.mcpServer = false
+    }
+  }
+
+  async function saveMcpServer() {
+    submittingStates.mcpServer = true
+    actionErrors.mcpServer = ''
+
+    try {
+      const payload = {
+        ...currentMcpServer.value,
+        name: currentMcpServer.value.name.trim(),
+        description: currentMcpServer.value.description.trim(),
+        command:
+          currentMcpServer.value.transportType === 1
+            ? currentMcpServer.value.command.trim()
+            : '',
+        arguments: currentMcpServer.value.arguments.trim(),
+        allowedToolNames: normalizeToolNames(currentMcpServer.value.allowedToolNames)
+      }
+
+      if (dialogModes.mcpServer === 'create') {
+        await configService.createMcpServer(payload)
+      } else {
+        await configService.updateMcpServer(payload)
+      }
+
+      await refreshMcpServers()
+      closeMcpServerDialog()
+    } catch (error) {
+      actionErrors.mcpServer = toErrorMessage(
+        error,
+        '保存 MCP 服务失败，请稍后重试。',
+        '当前账号没有管理 MCP 服务的权限。'
+      )
+      throw error
+    } finally {
+      submittingStates.mcpServer = false
+    }
+  }
+
+  async function deleteMcpServer(id: string) {
+    actionErrors.mcpServer = ''
+
+    try {
+      await configService.deleteMcpServer(id)
+      await refreshMcpServers()
+    } catch (error) {
+      actionErrors.mcpServer = toErrorMessage(
+        error,
+        '删除 MCP 服务失败，请稍后重试。',
+        '当前账号没有删除 MCP 服务的权限。'
+      )
+      throw error
+    }
+  }
+
   return {
     languageModels,
     conversationTemplates,
     approvalPolicies,
     businessDatabases,
+    mcpServers,
     semanticSourceStatuses,
     isLoading,
     errorMessage,
@@ -669,11 +822,13 @@ export const useConfigStore = defineStore('config', () => {
     currentConversationTemplate,
     currentApprovalPolicy,
     currentBusinessDatabase,
+    currentMcpServer,
     refresh,
     refreshLanguageModels,
     refreshConversationTemplates,
     refreshApprovalPolicies,
     refreshBusinessDatabases,
+    refreshMcpServers,
     refreshSemanticSourceStatuses,
     closeLanguageModelDialog,
     openCreateLanguageModelDialog,
@@ -694,6 +849,11 @@ export const useConfigStore = defineStore('config', () => {
     openCreateBusinessDatabaseDialog,
     openEditBusinessDatabaseDialog,
     saveBusinessDatabase,
-    deleteBusinessDatabase
+    deleteBusinessDatabase,
+    closeMcpServerDialog,
+    openCreateMcpServerDialog,
+    openEditMcpServerDialog,
+    saveMcpServer,
+    deleteMcpServer
   }
 })

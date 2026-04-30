@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { WarningFilled } from '@element-plus/icons-vue'
 import type { ApprovalChunk } from '@/types/models'
 import ArgumentViewer from './ArgumentViewer.vue'
 
 interface Props {
   chunk: ApprovalChunk
+  isSubmitting?: boolean
 }
 
 const props = defineProps<Props>()
@@ -20,12 +22,23 @@ const emit = defineEmits<{
   (e: 'reject', payload: { callId: string }): void
 }>()
 
-const isProcessing = ref(false)
 const onsiteConfirmed = ref(false)
 
 const request = computed(() => props.chunk.request)
 const status = computed(() => props.chunk.status)
 const isPending = computed(() => status.value === 'pending')
+const statusText = computed(() => {
+  switch (status.value) {
+    case 'approved':
+      return '已批准'
+    case 'rejected':
+      return '已拒绝'
+    case 'expired':
+      return '已失效'
+    default:
+      return '待审批'
+  }
+})
 const attestationExpiresText = computed(() => {
   if (!request.value.attestationExpiresAt) {
     return ''
@@ -37,11 +50,10 @@ const attestationExpiresText = computed(() => {
 })
 
 function handleApprove() {
-  if (isProcessing.value) {
+  if (props.isSubmitting || !isPending.value) {
     return
   }
 
-  isProcessing.value = true
   emit('approve', {
     callId: request.value.callId,
     onsiteConfirmed: onsiteConfirmed.value
@@ -49,11 +61,10 @@ function handleApprove() {
 }
 
 function handleReject() {
-  if (isProcessing.value) {
+  if (props.isSubmitting || !isPending.value) {
     return
   }
 
-  isProcessing.value = true
   emit('reject', {
     callId: request.value.callId
   })
@@ -64,20 +75,14 @@ function handleReject() {
   <div class="approval-card" :class="status">
     <div class="card-header">
       <div class="header-icon">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-          />
-        </svg>
+        <el-icon><WarningFilled /></el-icon>
       </div>
       <div class="header-content">
         <h3 class="title">敏感建议审批</h3>
         <p class="subtitle">AI 请求执行需要人工复核的外部工具能力。</p>
       </div>
       <div v-if="!isPending" class="status-badge" :class="status">
-        {{ status === 'approved' ? '已批准' : '已拒绝' }}
+        {{ statusText }}
       </div>
     </div>
 
@@ -109,21 +114,22 @@ function handleReject() {
 
     <div class="card-footer">
       <template v-if="isPending">
-        <button class="btn btn-reject" @click="handleReject" :disabled="isProcessing">
+        <button class="btn btn-reject" @click="handleReject" :disabled="isSubmitting">
           拒绝执行
         </button>
         <button
           class="btn btn-approve"
           @click="handleApprove"
-          :disabled="isProcessing || (request.requiresOnsiteAttestation && !onsiteConfirmed)"
+          :disabled="isSubmitting || (request.requiresOnsiteAttestation && !onsiteConfirmed)"
         >
-          <span v-if="isProcessing">处理中...</span>
+          <span v-if="isSubmitting">处理中...</span>
           <span v-else>批准执行</span>
         </button>
       </template>
 
       <div v-else class="result-message">
         <span v-if="status === 'approved'" class="text-success">审批已通过。</span>
+        <span v-else-if="status === 'expired'" class="text-warning">审批上下文已失效，请重新发起请求。</span>
         <span v-else class="text-danger">审批已拒绝。</span>
       </div>
     </div>
@@ -146,6 +152,12 @@ function handleReject() {
   opacity: 0.7;
   border-color: #cbd5e1;
   background: #f8fafc;
+}
+
+.approval-card.expired {
+  opacity: 0.75;
+  border-color: #fed7aa;
+  background: #fff7ed;
 }
 
 .approval-card.approved {
@@ -171,11 +183,18 @@ function handleReject() {
   border-bottom-color: #e2e8f0;
 }
 
+.approval-card.expired .card-header {
+  background: #ffedd5;
+  border-bottom-color: #fed7aa;
+}
+
 .header-icon {
   width: 24px;
   height: 24px;
   margin-right: 12px;
   color: #ea580c;
+  display: grid;
+  place-items: center;
 }
 
 .header-content {
@@ -314,6 +333,11 @@ function handleReject() {
   color: white;
 }
 
+.status-badge.expired {
+  background: #c2410c;
+  color: white;
+}
+
 .result-message {
   font-size: 0.9rem;
   font-weight: 500;
@@ -325,5 +349,9 @@ function handleReject() {
 
 .text-danger {
   color: #991b1b;
+}
+
+.text-warning {
+  color: #c2410c;
 }
 </style>

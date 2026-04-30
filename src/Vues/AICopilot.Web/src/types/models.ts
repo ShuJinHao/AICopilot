@@ -53,7 +53,8 @@ export interface ApprovalChunk extends ChatChunk {
   // pending: 等待用户操作
   // approved: 用户已批准
   // rejected: 用户已拒绝
-  status: 'pending' | 'approved' | 'rejected';
+  // expired: 审批上下文已失效，不能继续操作
+  status: 'pending' | 'approved' | 'rejected' | 'expired';
 }
 
 /**

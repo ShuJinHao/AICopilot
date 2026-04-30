@@ -506,6 +506,21 @@ public sealed class Phase25RuntimeSmokeTests
         callId.Should().NotBeNullOrWhiteSpace();
         approvalPayload.RootElement.GetProperty("requiresOnsiteAttestation").GetBoolean().Should().BeTrue();
 
+        var pendingApprovals = await GetJsonAsync<List<PendingApprovalDto>>(
+            $"/api/aigateway/approval/pending?sessionId={sessionId}");
+        pendingApprovals.Should().ContainSingle(item =>
+            item.CallId == callId &&
+            item.Name == GetDiagnosticChecklistToolName() &&
+            item.RequiresOnsiteAttestation);
+
+        var blockedByPendingApprovalEvents = await PostChatAsync(new
+        {
+            sessionId,
+            message = "this should wait until the pending approval is handled"
+        });
+
+        ReadSingleError(blockedByPendingApprovalEvents).Code.Should().Be("approval_pending");
+
         await SendJsonAsync(HttpMethod.Put, "/api/aigateway/session/safety-attestation", new
         {
             sessionId,
@@ -536,8 +551,13 @@ public sealed class Phase25RuntimeSmokeTests
         }, messages =>
             messages.Count >= 4 &&
             messages.Any(message => message.Type == MessageType.User && message.Content == "please prepare a diagnostic checklist for device DEV-001") &&
+            messages.All(message => message.Content != "this should wait until the pending approval is handled") &&
             messages.Any(message => message.Type == MessageType.User && message.Content.Contains("[审批通过]")) &&
             messages.Any(message => message.Type == MessageType.Assistant && message.Content.Contains("已批准并执行工具")));
+
+        var emptyPendingApprovals = await GetJsonAsync<List<PendingApprovalDto>>(
+            $"/api/aigateway/approval/pending?sessionId={sessionId}");
+        emptyPendingApprovals.Should().BeEmpty();
 
         var rejectApprovalEvents = await PostChatAsync(new
         {
@@ -592,6 +612,75 @@ public sealed class Phase25RuntimeSmokeTests
         await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/conversation-template", new { id = intentRoutingTemplateId }, HttpStatusCode.NoContent);
         await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/conversation-template", new { id = generalTemplateId }, HttpStatusCode.NoContent);
         await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/language-model", new { id = languageModelId }, HttpStatusCode.NoContent);
+    }
+
+    [Fact]
+    public async Task SessionEndpoints_ShouldNotExposeOtherUsersSessions()
+    {
+        await AuthenticateAsAdminAsync();
+
+        Guid languageModelId = Guid.Empty;
+        Guid generalTemplateId = Guid.Empty;
+        Guid sessionId = Guid.Empty;
+        var userName = $"session-scope-{Guid.NewGuid():N}";
+        const string password = "Password123!";
+
+        try
+        {
+            languageModelId = await CreateLanguageModelAsync(
+                $"session-scope-lm-{Guid.NewGuid():N}",
+                BuildFakeAiBaseUrl(),
+                "sk-session-scope");
+
+            generalTemplateId = await CreateConversationTemplateAsync(
+                $"session-scope-general-{Guid.NewGuid():N}",
+                languageModelId,
+                "session scope",
+                "You are a concise test assistant.");
+
+            sessionId = await CreateSessionAsync(generalTemplateId);
+            await CreateUserAsync(userName, password, "User");
+            await AuthenticateAsync(userName, password);
+
+            var sessionList = await GetJsonAsync<List<SessionDto>>("/api/aigateway/session/list");
+            sessionList.Should().NotContain(item => item.Id == sessionId);
+
+            using var getResponse = await _fixture.HttpClient.GetAsync($"/api/aigateway/session?id={sessionId}");
+            getResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+            using var historyResponse = await _fixture.HttpClient.GetAsync($"/api/aigateway/chat-message/list?sessionId={sessionId}");
+            historyResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+            using var pendingApprovalResponse = await _fixture.HttpClient.GetAsync($"/api/aigateway/approval/pending?sessionId={sessionId}");
+            pendingApprovalResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+            var chatEvents = await PostChatAsync(new
+            {
+                sessionId,
+                message = "hello from a different user"
+            });
+
+            ReadSingleError(chatEvents).Code.Should().Be("missing_permission");
+        }
+        finally
+        {
+            await AuthenticateAsAdminAsync();
+
+            if (sessionId != Guid.Empty)
+            {
+                await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/session", new { id = sessionId }, HttpStatusCode.NoContent);
+            }
+
+            if (generalTemplateId != Guid.Empty)
+            {
+                await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/conversation-template", new { id = generalTemplateId }, HttpStatusCode.NoContent);
+            }
+
+            if (languageModelId != Guid.Empty)
+            {
+                await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/language-model", new { id = languageModelId }, HttpStatusCode.NoContent);
+            }
+        }
     }
 
     [Fact]
@@ -1378,6 +1467,31 @@ public sealed class Phase25RuntimeSmokeTests
         _fixture.SetAuthToken(result.Token);
     }
 
+    private async Task AuthenticateAsync(string userName, string password)
+    {
+        _fixture.ClearAuthToken();
+
+        var result = await PostJsonAsync<LoginUserDto>("/api/identity/login", new
+        {
+            username = userName,
+            password
+        });
+
+        _fixture.SetAuthToken(result.Token);
+    }
+
+    private async Task<Guid> CreateUserAsync(string userName, string password, string roleName)
+    {
+        var created = await PostJsonAsync<CreatedUserDto>("/api/identity/user", new
+        {
+            userName,
+            password,
+            roleName
+        });
+
+        return created.UserId;
+    }
+
     private async Task<Guid> CreateLanguageModelAsync(string name, string baseUrl, string apiKey)
     {
         var created = await PostJsonAsync<CreatedLanguageModelDto>("/api/aigateway/language-model", new
@@ -1883,6 +1997,8 @@ public sealed class Phase25RuntimeSmokeTests
 
     private sealed record LoginUserDto(string UserName, string Token);
 
+    private sealed record CreatedUserDto(Guid UserId, string UserName, string RoleName);
+
     private sealed record CreatedLanguageModelDto(Guid Id, string Provider, string Name);
 
     private sealed record LanguageModelDto(
@@ -1982,6 +2098,13 @@ public sealed class Phase25RuntimeSmokeTests
         DateTimeOffset? OnsiteConfirmedAt,
         string? OnsiteConfirmedBy,
         DateTimeOffset? OnsiteConfirmationExpiresAt);
+
+    private sealed record PendingApprovalDto(
+        string CallId,
+        string Name,
+        IReadOnlyDictionary<string, object?> Args,
+        bool RequiresOnsiteAttestation,
+        DateTimeOffset? AttestationExpiresAt);
 
     private sealed record AuditLogListDto(
         IReadOnlyCollection<AuditLogSummaryDto> Items,

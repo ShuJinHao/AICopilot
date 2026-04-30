@@ -12,6 +12,9 @@ import type {
   LanguageModelDetail,
   LanguageModelFormModel,
   LanguageModelSummary,
+  McpServerDetail,
+  McpServerFormModel,
+  McpServerSummary,
   SemanticSourceStatus
 } from '@/types/app'
 
@@ -162,5 +165,44 @@ export const configService = {
 
   async getSemanticSourceStatuses() {
     return await apiClient.get<SemanticSourceStatus[]>('/data-analysis/semantic-source/status')
+  },
+
+  async getMcpServer(id: string) {
+    return await apiClient.get<McpServerDetail>('/mcp/server', { id })
+  },
+
+  async getMcpServers() {
+    return await apiClient.get<McpServerSummary[]>('/mcp/server/list')
+  },
+
+  async createMcpServer(payload: McpServerFormModel) {
+    return await apiClient.post('/mcp/server', {
+      name: payload.name,
+      description: payload.description,
+      transportType: payload.transportType,
+      command: payload.command || null,
+      arguments: payload.arguments,
+      chatExposureMode: payload.chatExposureMode,
+      allowedToolNames: payload.allowedToolNames,
+      isEnabled: payload.isEnabled
+    })
+  },
+
+  async updateMcpServer(payload: McpServerFormModel) {
+    return await apiClient.put('/mcp/server', {
+      id: payload.id,
+      name: payload.name,
+      description: payload.description,
+      transportType: payload.transportType,
+      command: payload.command || null,
+      arguments: payload.arguments,
+      chatExposureMode: payload.chatExposureMode,
+      allowedToolNames: payload.allowedToolNames,
+      isEnabled: payload.isEnabled
+    })
+  },
+
+  async deleteMcpServer(id: string) {
+    return await apiClient.delete('/mcp/server', { id })
   }
 }

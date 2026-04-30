@@ -158,4 +158,10 @@ public class AiGatewayController(ISender sender) : ApiControllerBase(sender)
         var stream = Sender.CreateStream(request);
         return Results.ServerSentEvents(stream);
     }
+
+    [HttpGet("approval/pending")]
+    public async Task<IActionResult> GetPendingApprovals([FromQuery] GetPendingApprovalsQuery query)
+    {
+        return ReturnResult(await Sender.Send(query));
+    }
 }

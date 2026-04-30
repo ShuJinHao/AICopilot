@@ -33,7 +33,8 @@ export const useChatStore = defineStore('chat', () => {
   const isStreaming = ref(false)
   const isWaitingForApproval = ref(false)
   const isLoadingHistory = ref(false)
-  const errorMessage = ref('')
+  const activeErrorMessage = ref('')
+  const errorSessionId = ref<string | null>(null)
 
   const currentMessages = computed(() => {
     if (!currentSessionId.value) {
@@ -49,6 +50,14 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     return sessions.value.find((session) => session.id === currentSessionId.value) ?? null
+  })
+
+  const errorMessage = computed(() => {
+    if (!currentSessionId.value || errorSessionId.value !== currentSessionId.value) {
+      return ''
+    }
+
+    return activeErrorMessage.value
   })
 
   function persistCurrentSession(sessionId: string | null) {
@@ -72,9 +81,25 @@ export const useChatStore = defineStore('chat', () => {
     sessions.value = [session, ...sessions.value]
   }
 
+  function setSessionError(sessionId: string, message: string) {
+    errorSessionId.value = sessionId
+    activeErrorMessage.value = message
+  }
+
+  function clearSessionError(sessionId: string | null = currentSessionId.value) {
+    if (!sessionId || errorSessionId.value === sessionId) {
+      errorSessionId.value = null
+      activeErrorMessage.value = ''
+    }
+  }
+
   function syncWaitingForApproval(sessionId: string | null = currentSessionId.value) {
     if (!sessionId) {
       isWaitingForApproval.value = false
+      return
+    }
+
+    if (sessionId !== currentSessionId.value) {
       return
     }
 
@@ -88,8 +113,20 @@ export const useChatStore = defineStore('chat', () => {
     sessions.value = await chatService.getSessions()
   }
 
+  async function refreshPendingApprovals(sessionId: string) {
+    try {
+      const pendingApprovals = await chatService.getPendingApprovals(sessionId)
+      reconcilePendingApprovalCards(sessionId, pendingApprovals)
+    } catch (error) {
+      setSessionError(sessionId, toFriendlyMessage(error))
+    } finally {
+      syncWaitingForApproval(sessionId)
+    }
+  }
+
   async function loadHistory(sessionId: string, force = false) {
     if (!force && messagesMap.value[sessionId]?.length) {
+      await refreshPendingApprovals(sessionId)
       syncWaitingForApproval(sessionId)
       return
     }
@@ -111,6 +148,7 @@ export const useChatStore = defineStore('chat', () => {
         isStreaming: false,
         timestamp: new Date(message.createdAt).getTime()
       }))
+      await refreshPendingApprovals(sessionId)
       syncWaitingForApproval(sessionId)
     } finally {
       isLoadingHistory.value = false
@@ -118,7 +156,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function initialize() {
-    errorMessage.value = ''
+    clearSessionError()
     await loadSessions()
 
     if (sessions.value.length === 0) {
@@ -141,7 +179,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function createNewSession() {
-    errorMessage.value = ''
+    clearSessionError()
     const newSession = await chatService.createSession()
     upsertSession(newSession)
     messagesMap.value[newSession.id] = []
@@ -152,8 +190,8 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function selectSession(id: string, forceReload = false) {
-    errorMessage.value = ''
     persistCurrentSession(id)
+    clearSessionError(id)
     await loadHistory(id, forceReload)
   }
 
@@ -162,13 +200,14 @@ export const useChatStore = defineStore('chat', () => {
       return
     }
 
-    errorMessage.value = ''
+    clearSessionError(currentSessionId.value)
     const updatedSession = await chatService.updateSessionSafetyAttestation(
       currentSessionId.value,
       true,
       expiresInMinutes
     )
     upsertSession(updatedSession)
+    await refreshPendingApprovals(updatedSession.id)
     return updatedSession
   }
 
@@ -177,24 +216,25 @@ export const useChatStore = defineStore('chat', () => {
       return
     }
 
-    errorMessage.value = ''
+    clearSessionError(currentSessionId.value)
     const updatedSession = await chatService.updateSessionSafetyAttestation(
       currentSessionId.value,
       false
     )
     upsertSession(updatedSession)
+    await refreshPendingApprovals(updatedSession.id)
     return updatedSession
   }
 
   async function sendMessage(input: string) {
-    if (!currentSessionId.value || isStreaming.value) {
+    if (!currentSessionId.value || isStreaming.value || isWaitingForApproval.value) {
       return
     }
 
     const sessionId = currentSessionId.value
-    errorMessage.value = ''
+    clearSessionError(sessionId)
 
-    addMessage(sessionId, {
+    const userMessage = addMessage(sessionId, {
       sessionId,
       role: MessageRole.User,
       chunks: [
@@ -217,26 +257,36 @@ export const useChatStore = defineStore('chat', () => {
     })
 
     isStreaming.value = true
+    let streamErrorCode: string | null = null
 
     try {
       await chatService.sendMessageStream(sessionId, input, {
         onChunkReceived(chunk) {
+          if (chunk.type === ChunkType.Error) {
+            streamErrorCode = getErrorCode(chunk)
+          }
+
           processChunk(assistantMessage, chunk)
         },
         onComplete() {
           isStreaming.value = false
           assistantMessage.isStreaming = false
+          if (streamErrorCode === 'approval_pending') {
+            removeMessages(sessionId, userMessage, assistantMessage)
+            void refreshPendingApprovals(sessionId)
+          }
+
           syncWaitingForApproval(sessionId)
         },
         onError(error) {
           isStreaming.value = false
           assistantMessage.isStreaming = false
-          errorMessage.value = toFriendlyMessage(error)
+          setSessionError(sessionId, toFriendlyMessage(error))
           syncWaitingForApproval(sessionId)
         }
       })
     } catch (error) {
-      errorMessage.value = toFriendlyMessage(error)
+      setSessionError(sessionId, toFriendlyMessage(error))
     } finally {
       isStreaming.value = false
       assistantMessage.isStreaming = false
@@ -256,7 +306,8 @@ export const useChatStore = defineStore('chat', () => {
 
     const sessionId = currentSessionId.value
     let approvalFailed = false
-    errorMessage.value = ''
+    let approvalErrorCode: string | null = null
+    clearSessionError(sessionId)
     isStreaming.value = true
 
     let targetMessage = getLastAssistantMessage(sessionId)
@@ -277,6 +328,7 @@ export const useChatStore = defineStore('chat', () => {
         onChunkReceived(incomingChunk) {
           if (incomingChunk.type === ChunkType.Error) {
             approvalFailed = true
+            approvalErrorCode = getErrorCode(incomingChunk)
           }
 
           processChunk(targetMessage!, incomingChunk)
@@ -287,7 +339,7 @@ export const useChatStore = defineStore('chat', () => {
             targetMessage.isStreaming = false
           }
 
-          chunk.status = approvalFailed ? 'pending' : decision
+          chunk.status = approvalFailed ? getApprovalFailureStatus(approvalErrorCode) : decision
           syncWaitingForApproval(sessionId)
         },
         onError(error) {
@@ -298,18 +350,22 @@ export const useChatStore = defineStore('chat', () => {
           }
 
           chunk.status = 'pending'
-          errorMessage.value = toFriendlyMessage(error)
+          setSessionError(sessionId, toFriendlyMessage(error))
           syncWaitingForApproval(sessionId)
         }
       })
     } catch (error) {
       approvalFailed = true
       chunk.status = 'pending'
-      errorMessage.value = toFriendlyMessage(error)
+      setSessionError(sessionId, toFriendlyMessage(error))
     } finally {
       isStreaming.value = false
       if (targetMessage) {
         targetMessage.isStreaming = false
+      }
+
+      if (approvalFailed) {
+        await refreshPendingApprovals(sessionId)
       }
 
       syncWaitingForApproval(sessionId)
@@ -325,7 +381,8 @@ export const useChatStore = defineStore('chat', () => {
     isStreaming.value = false
     isWaitingForApproval.value = false
     isLoadingHistory.value = false
-    errorMessage.value = ''
+    activeErrorMessage.value = ''
+    errorSessionId.value = null
   }
 
   function addMessage(sessionId: string, message: ChatMessage) {
@@ -336,6 +393,66 @@ export const useChatStore = defineStore('chat', () => {
     const list = messagesMap.value[sessionId]!
     list.push(message)
     return list[list.length - 1]!
+  }
+
+  function removeMessages(sessionId: string, ...messages: ChatMessage[]) {
+    const list = messagesMap.value[sessionId]
+    if (!list?.length) {
+      return
+    }
+
+    const targets = new Set(messages)
+    messagesMap.value[sessionId] = list.filter((message) => !targets.has(message))
+  }
+
+  function getApprovalChunks(sessionId: string) {
+    return (messagesMap.value[sessionId] ?? [])
+      .flatMap((message) => message.chunks)
+      .filter(isApprovalChunk)
+  }
+
+  function reconcilePendingApprovalCards(
+    sessionId: string,
+    pendingApprovals: FunctionApprovalRequest[]
+  ) {
+    const pendingIds = new Set(pendingApprovals.map((approval) => approval.callId))
+    const existingChunks = getApprovalChunks(sessionId)
+
+    for (const chunk of existingChunks) {
+      if (chunk.status === 'pending' && !pendingIds.has(chunk.request.callId)) {
+        chunk.status = 'expired'
+      }
+    }
+
+    for (const approval of pendingApprovals) {
+      const chunk = existingChunks.find((item) => item.request.callId === approval.callId)
+      if (chunk) {
+        chunk.request = approval
+        if (chunk.status === 'expired') {
+          chunk.status = 'pending'
+        }
+      }
+    }
+
+    const existingIds = new Set(existingChunks.map((chunk) => chunk.request.callId))
+    const missingApprovals = pendingApprovals.filter((approval) => !existingIds.has(approval.callId))
+    if (missingApprovals.length === 0) {
+      return
+    }
+
+    addMessage(sessionId, {
+      sessionId,
+      role: MessageRole.Assistant,
+      chunks: missingApprovals.map((approval) => ({
+        source: 'FinalAgentRunExecutor',
+        type: ChunkType.ApprovalRequest,
+        content: JSON.stringify(approval),
+        request: approval,
+        status: 'pending'
+      }) as ApprovalChunk),
+      isStreaming: false,
+      timestamp: Date.now()
+    })
   }
 
   function addTextChunk(message: ChatMessage, chunk: ChatChunk) {
@@ -408,7 +525,7 @@ export const useChatStore = defineStore('chat', () => {
       } as ApprovalChunk)
       syncWaitingForApproval(message.sessionId)
     } catch {
-      errorMessage.value = '审批请求解析失败。'
+      setSessionError(message.sessionId, '审批请求解析失败。')
     }
   }
 
@@ -426,31 +543,49 @@ export const useChatStore = defineStore('chat', () => {
       }
 
       switch (payload.code) {
+        case 'approval_pending':
+          setSessionError(message.sessionId, userFacingMessage ?? '当前会话已有待处理审批，请先处理审批请求。')
+          break
         case 'chat_context_expired':
-          errorMessage.value = userFacingMessage ?? '审批上下文已过期，请重新发起请求。'
+        case 'approval_already_processed':
+          setSessionError(message.sessionId, userFacingMessage ?? '审批上下文已失效，请重新发起请求。')
           break
         case 'rate_limit_exceeded':
-          errorMessage.value = userFacingMessage ?? '请求过于频繁，请稍后再试。'
+          setSessionError(message.sessionId, userFacingMessage ?? '请求过于频繁，请稍后再试。')
           break
         case 'onsite_presence_required':
-          errorMessage.value = userFacingMessage ?? '该能力需要先确认现场有人在岗。'
+          setSessionError(message.sessionId, userFacingMessage ?? '该能力需要先确认现场有人在岗。')
           break
         case 'onsite_presence_expired':
-          errorMessage.value = userFacingMessage ?? '当前会话的在岗声明已过期，请重新确认。'
+          setSessionError(message.sessionId, userFacingMessage ?? '当前会话的在岗声明已过期，请重新确认。')
           break
         case 'approval_reconfirmation_required':
-          errorMessage.value = userFacingMessage ?? '审批前需要再次确认现场有人在岗。'
+          setSessionError(message.sessionId, userFacingMessage ?? '审批前需要再次确认现场有人在岗。')
+          break
+        case 'approval_stream_failed':
+          setSessionError(message.sessionId, userFacingMessage ?? '审批处理失败，请稍后重试。')
+          break
+        case 'chat_stream_failed':
+          setSessionError(message.sessionId, userFacingMessage ?? '对话执行失败，请稍后重试。')
+          break
+        case 'chat_configuration_missing':
+          setSessionError(message.sessionId, userFacingMessage ?? '当前对话配置不可用，请检查模型和模板配置。')
+          break
+        case 'token_budget_exceeded':
+          setSessionError(message.sessionId, userFacingMessage ?? '当前上下文过长，请新建会话后重试。')
           break
         case 'control_action_blocked':
         case 'capability_not_allowed':
-          errorMessage.value = userFacingMessage ?? ''
+          if (userFacingMessage) {
+            setSessionError(message.sessionId, userFacingMessage)
+          }
           break
         default:
-          errorMessage.value = userFacingMessage ?? '请求失败，请稍后重试。'
+          setSessionError(message.sessionId, userFacingMessage ?? '请求失败，请稍后重试。')
           break
       }
     } catch {
-      errorMessage.value = '请求失败，请稍后重试。'
+      setSessionError(message.sessionId, '请求失败，请稍后重试。')
     }
   }
 
@@ -551,6 +686,21 @@ export const useChatStore = defineStore('chat', () => {
         addErrorChunk(message, chunk)
         break
     }
+  }
+
+  function getErrorCode(chunk: ChatChunk) {
+    try {
+      const payload = JSON.parse(chunk.content) as ChatErrorPayload
+      return payload.code ?? null
+    } catch {
+      return null
+    }
+  }
+
+  function getApprovalFailureStatus(errorCode: string | null): ApprovalChunk['status'] {
+    return errorCode === 'approval_already_processed' || errorCode === 'chat_context_expired'
+      ? 'expired'
+      : 'pending'
   }
 
   function toFriendlyMessage(error: unknown) {

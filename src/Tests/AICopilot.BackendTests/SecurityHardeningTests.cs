@@ -12,6 +12,7 @@ using AICopilot.Dapper;
 using AICopilot.Dapper.Security;
 using AICopilot.HttpApi.Controllers;
 using AICopilot.Infrastructure.Storage;
+using AICopilot.RagService.Queries.KnowledgeBases;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.Services.CrossCutting.Serialization;
 using AICopilot.SharedKernel.Ai;
@@ -61,6 +62,224 @@ public sealed class SecurityHardeningTests
         typeof(AiGatewayController).GetCustomAttribute<AuthorizeAttribute>().Should().NotBeNull();
         typeof(DataAnalysisController).GetCustomAttribute<AuthorizeAttribute>().Should().NotBeNull();
         typeof(McpController).GetCustomAttribute<AuthorizeAttribute>().Should().NotBeNull();
+        typeof(RagController).GetCustomAttribute<AuthorizeAttribute>().Should().NotBeNull();
+    }
+
+    [Fact]
+    public void AiGatewaySessionAccess_ShouldBeScopedToCurrentUserAndPendingApproval()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var sessionQueryPath = Path.Combine(
+            solutionRoot,
+            "src",
+            "Services",
+            "AICopilot.AiGatewayService",
+            "Queries",
+            "Sessions");
+        var sessionCommandPath = Path.Combine(
+            solutionRoot,
+            "src",
+            "Services",
+            "AICopilot.AiGatewayService",
+            "Commands",
+            "Sessions");
+
+        File.ReadAllText(Path.Combine(sessionQueryPath, "GetListSessions.cs"))
+            .Should().Contain("SessionsByUserOrderedSpec");
+        File.ReadAllText(Path.Combine(sessionQueryPath, "GetSession.cs"))
+            .Should().Contain("SessionByIdForUserSpec");
+        File.ReadAllText(Path.Combine(sessionQueryPath, "GetListChatMessageHistory.cs"))
+            .Should().Contain("SessionWithMessagesByIdForUserSpec");
+        File.ReadAllText(Path.Combine(sessionQueryPath, "GetListChatMessages.cs"))
+            .Should().Contain("SessionWithMessagesByIdForUserSpec");
+        File.ReadAllText(Path.Combine(sessionQueryPath, "GetPendingApprovals.cs"))
+            .Should().Contain("SessionByIdForUserSpec");
+        File.ReadAllText(Path.Combine(sessionQueryPath, "GetPendingApprovals.cs"))
+            .Should().Contain("IFinalAgentContextStore");
+        File.ReadAllText(Path.Combine(sessionCommandPath, "DeleteSession.cs"))
+            .Should().Contain("SessionByIdForUserSpec");
+        File.ReadAllText(Path.Combine(sessionCommandPath, "DeleteSession.cs"))
+            .Should().Contain("finalAgentContextStore.RemoveAsync");
+
+        var chatStreamSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Services",
+            "AICopilot.AiGatewayService",
+            "Agents",
+            "ChatStreamRequest.cs"));
+        chatStreamSource.Should().Contain("currentUser.Id != session.UserId");
+        chatStreamSource.Should().Contain("sessionExecutionLock.AcquireAsync(request.SessionId");
+        chatStreamSource.Should().Contain("finalAgentContextStore.GetAsync(request.SessionId");
+        chatStreamSource.Should().Contain("AppProblemCodes.ApprovalPending");
+
+        var controllerSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Hosts",
+            "AICopilot.HttpApi",
+            "Controllers",
+            "AiGatewayController.cs"));
+        controllerSource.Should().Contain("[HttpGet(\"approval/pending\")]");
+        controllerSource.Should().Contain("GetPendingApprovalsQuery");
+    }
+
+    [Fact]
+    public void FrontendChatApprovalUx_ShouldRecoverPendingApprovalAndScopeSessionState()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var chatStoreSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Vues",
+            "AICopilot.Web",
+            "src",
+            "stores",
+            "chatStore.ts"));
+        var chatServiceSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Vues",
+            "AICopilot.Web",
+            "src",
+            "services",
+            "chatService.ts"));
+        var approvalCardSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Vues",
+            "AICopilot.Web",
+            "src",
+            "components",
+            "chat",
+            "ApprovalCard.vue"));
+
+        chatServiceSource.Should().Contain("/aigateway/approval/pending");
+        chatStoreSource.Should().Contain("refreshPendingApprovals(sessionId)");
+        chatStoreSource.Should().Contain("reconcilePendingApprovalCards");
+        chatStoreSource.Should().Contain("sessionId !== currentSessionId.value");
+        chatStoreSource.Should().Contain("errorSessionId.value !== currentSessionId.value");
+        chatStoreSource.Should().Contain("approval_already_processed");
+        chatStoreSource.Should().Contain("'expired'");
+        approvalCardSource.Should().Contain("isSubmitting");
+        approvalCardSource.Should().Contain("审批上下文已失效");
+        approvalCardSource.Should().NotContain("isProcessing.value = true");
+    }
+
+    [Fact]
+    public void FrontendConfig_ShouldExposeMcpManagementAndDataAnalysisSafetyHints()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var configViewSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Vues",
+            "AICopilot.Web",
+            "src",
+            "views",
+            "ConfigView.vue"));
+        var configStoreSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Vues",
+            "AICopilot.Web",
+            "src",
+            "stores",
+            "configStore.ts"));
+        var configServiceSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Vues",
+            "AICopilot.Web",
+            "src",
+            "services",
+            "configService.ts"));
+        var permissionsSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Vues",
+            "AICopilot.Web",
+            "src",
+            "security",
+            "permissions.ts"));
+
+        permissionsSource.Should().Contain("Mcp.GetListServers");
+        permissionsSource.Should().Contain("Mcp.CreateServer");
+        configServiceSource.Should().Contain("/mcp/server/list");
+        configServiceSource.Should().Contain("/mcp/server");
+        configStoreSource.Should().Contain("mcpServers");
+        configStoreSource.Should().Contain("currentMcpServer");
+        configStoreSource.Should().Contain("normalizeToolNames");
+        configStoreSource.Should().Contain("getProblemDetails");
+        configViewSource.Should().Contain("MCP 配置由启动期 bootstrap 读取");
+        configViewSource.Should().Contain("重启服务");
+        configViewSource.Should().Contain("toolPolicySummaries");
+        configViewSource.Should().Contain("留空表示保留已保存参数");
+        configViewSource.Should().Contain("SQL 安全拒绝");
+        configViewSource.Should().Contain("结果截断");
+        configViewSource.Should().Contain("配置管理台保存时始终强制只读");
+    }
+
+    [Fact]
+    public void FrontendKnowledgeManagement_ShouldExposeRagRouteAndUseMultipartUpload()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var vueRoot = Path.Combine(solutionRoot, "src", "Vues", "AICopilot.Web", "src");
+        var permissionsSource = File.ReadAllText(Path.Combine(vueRoot, "security", "permissions.ts"));
+        var authStoreSource = File.ReadAllText(Path.Combine(vueRoot, "stores", "authStore.ts"));
+        var routerSource = File.ReadAllText(Path.Combine(vueRoot, "router", "index.ts"));
+        var appShellSource = File.ReadAllText(Path.Combine(vueRoot, "components", "layout", "AppShell.vue"));
+        var apiClientSource = File.ReadAllText(Path.Combine(vueRoot, "services", "apiClient.ts"));
+        var ragServiceSource = File.ReadAllText(Path.Combine(vueRoot, "services", "ragService.ts"));
+        var ragStoreSource = File.ReadAllText(Path.Combine(vueRoot, "stores", "ragStore.ts"));
+        var knowledgeViewSource = File.ReadAllText(Path.Combine(vueRoot, "views", "KnowledgeView.vue"));
+        var permissionCatalogSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Services",
+            "AICopilot.IdentityService",
+            "Authorization",
+            "PermissionCatalog.cs"));
+        var embeddingManagementSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Services",
+            "AICopilot.RagService",
+            "EmbeddingModels",
+            "EmbeddingModelManagement.cs"));
+
+        permissionsSource.Should().Contain("KNOWLEDGE_READ_PERMISSIONS");
+        permissionsSource.Should().Contain("Rag.SearchKnowledgeBase");
+        authStoreSource.Should().Contain("canManageKnowledge");
+        routerSource.Should().Contain("path: '/knowledge'");
+        routerSource.Should().Contain("ability: 'knowledge'");
+        appShellSource.Should().Contain("canManageKnowledge");
+        appShellSource.Should().Contain("知识库");
+        apiClientSource.Should().Contain("postForm");
+        apiClientSource.Should().Contain("isFormDataBody");
+        ragServiceSource.Should().Contain("/rag/embedding-model/list");
+        ragServiceSource.Should().Contain("/rag/knowledge-base/list");
+        ragServiceSource.Should().Contain("/rag/document");
+        ragServiceSource.Should().Contain("postForm<UploadDocumentResponse>");
+        ragStoreSource.Should().Contain("apiKeyAction");
+        ragStoreSource.Should().Contain("uploadDocument(file: File)");
+        knowledgeViewSource.Should().Contain("Pending");
+        knowledgeViewSource.Should().Contain("Embedding");
+        knowledgeViewSource.Should().Contain("Indexed");
+        knowledgeViewSource.Should().Contain("Failed");
+        knowledgeViewSource.Should().Contain("KNOWLEDGE_WRITE_PERMISSIONS.search");
+        permissionCatalogSource.Should().Contain("Rag.SearchKnowledgeBase");
+        embeddingManagementSource.Should().Contain("request.ApiKey ?? entity.ApiKey");
+    }
+
+    [Fact]
+    public void SearchKnowledgeBaseQuery_ShouldRequireDedicatedRagSearchPermission()
+    {
+        var attribute = typeof(SearchKnowledgeBaseQuery)
+            .GetCustomAttribute<AuthorizeRequirementAttribute>();
+
+        attribute.Should().NotBeNull();
+        attribute!.Permission.Should().Be("Rag.SearchKnowledgeBase");
     }
 
     [Fact]
@@ -657,6 +876,25 @@ public sealed class SecurityHardeningTests
     }
 
     [Fact]
+    public void DataAnalysisAuditSummaries_ShouldStayReadable()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var source = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Services",
+            "AICopilot.DataAnalysisService",
+            "BusinessDatabases",
+            "BusinessDatabaseManagement.cs"));
+
+        source.Should().Contain("Created business database:");
+        source.Should().Contain("Deleted business database:");
+        source.Should().NotContain("鍒");
+        source.Should().NotContain("锛");
+        source.Should().NotContain("擄");
+    }
+
+    [Fact]
     public void DataAnalysisServices_ShouldNotBypassGuardedDatabaseConnector()
     {
         var solutionRoot = FindSolutionRoot();
@@ -718,6 +956,13 @@ public sealed class SecurityHardeningTests
             "AICopilot.RagService",
             "Documents",
             "DocumentIndexingService.cs"));
+        var indexingOptionsSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Services",
+            "AICopilot.RagService",
+            "Documents",
+            "RagIndexingOptions.cs"));
         var writerSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
@@ -732,9 +977,20 @@ public sealed class SecurityHardeningTests
         indexingSource.Should().Contain("DocumentStatus.Splitting");
         indexingSource.Should().Contain("DocumentStatus.Embedding");
         indexingSource.Should().Contain("previousChunkCount");
+        indexingSource.Should().Contain("CreateLinkedTokenSource");
+        indexingSource.Should().Contain("CancelAfter");
+        indexingSource.Should().Contain("文档解析超时，请稍后重试。");
+        indexingSource.Should().Contain("文档向量化超时，请稍后重试。");
+        indexingSource.Should().Contain("RagIndexingTimeoutException");
+        indexingOptionsSource.Should().Contain("Rag:Indexing");
+        indexingOptionsSource.Should().Contain("ParsingTimeoutSeconds");
+        indexingOptionsSource.Should().Contain("EmbeddingTimeoutSeconds");
         writerSource.Should().Contain("PreviousChunkCount");
+        writerSource.Should().Contain("Math.Max(request.PreviousChunkCount, chunks.Count)");
         writerSource.Should().Contain("DeleteAsync(staleRecordKeys");
         writerSource.Should().Contain("UpsertAsync(records");
+        writerSource.IndexOf("DeleteAsync(staleRecordKeys", StringComparison.Ordinal)
+            .Should().BeLessThan(writerSource.IndexOf("UpsertAsync(records", StringComparison.Ordinal));
         writerSource.Should().Contain("BuildRecordKey");
     }
 

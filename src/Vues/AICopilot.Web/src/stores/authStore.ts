@@ -11,7 +11,8 @@ import {
 import {
   ACCESS_MANAGEMENT_PERMISSIONS,
   CHAT_REQUIRED_PERMISSIONS,
-  collectConfigReadPermissions
+  collectConfigReadPermissions,
+  collectKnowledgeReadPermissions
 } from '@/security/permissions'
 import type { CurrentUserProfile, InitializationStatus, LoginRequest } from '@/types/app'
 
@@ -59,6 +60,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   const canUseChat = computed(() => hasAllPermissions(CHAT_REQUIRED_PERMISSIONS))
   const canViewConfig = computed(() => hasAnyPermission(collectConfigReadPermissions()))
+  const canManageKnowledge = computed(() => hasAnyPermission(collectKnowledgeReadPermissions()))
   const canManageAccess = computed(() => hasAnyPermission(ACCESS_MANAGEMENT_PERMISSIONS))
 
   function resolveUnauthorizedMessage(problem?: ApiProblemDetails | null) {
@@ -188,6 +190,7 @@ export const useAuthStore = defineStore('auth', () => {
     permissions,
     canUseChat,
     canViewConfig,
+    canManageKnowledge,
     canManageAccess,
     hasPermission,
     hasAnyPermission,

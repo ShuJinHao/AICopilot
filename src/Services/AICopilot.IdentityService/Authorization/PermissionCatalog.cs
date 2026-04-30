@@ -65,6 +65,7 @@ public sealed class PermissionCatalog : IPermissionCatalog
         new("Rag.GetListDocuments", "Rag", "View Documents", "View the document list under a knowledge base."),
         new("Rag.UploadDocument", "Rag", "Upload Document", "Upload a knowledge base document."),
         new("Rag.DeleteDocument", "Rag", "Delete Document", "Delete a knowledge base document."),
+        new("Rag.SearchKnowledgeBase", "Rag", "Search Knowledge Base", "Search indexed knowledge base documents."),
 
         new("Mcp.GetServer", "Mcp", "View MCP Server", "View MCP server configuration details."),
         new("Mcp.GetListServers", "Mcp", "View MCP Servers", "View the MCP server configuration list."),

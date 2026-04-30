@@ -48,6 +48,7 @@ public sealed class IdentityAccessManagementTests
             permissionDefinitions.Should().Contain(item => item.Code == "Identity.GetListUsers");
             permissionDefinitions.Should().Contain(item => item.Code == "Identity.DisableUser");
             permissionDefinitions.Should().Contain(item => item.Code == "Identity.ResetUserPassword");
+            permissionDefinitions.Should().Contain(item => item.Code == "Rag.SearchKnowledgeBase");
 
             var createdRole = await PostJsonAsync<CreatedRoleDto>("/api/identity/role", new
             {

@@ -209,6 +209,43 @@ export interface BusinessDatabaseFormModel {
   connectionStringMasked?: string | null
 }
 
+export interface McpToolPolicySummary {
+  toolName: string
+  requiresApproval: boolean
+  requiresOnsiteAttestation: boolean
+}
+
+export interface McpServerSummary {
+  id: string
+  name: string
+  description: string
+  transportType: number
+  command?: string | null
+  hasArguments: boolean
+  argumentsMasked?: string | null
+  chatExposureMode: number
+  allowedToolNames: string[]
+  toolPolicySummaries: McpToolPolicySummary[]
+  isEnabled: boolean
+}
+
+export interface McpServerDetail extends McpServerSummary {}
+
+export interface McpServerFormModel {
+  id?: string
+  name: string
+  description: string
+  transportType: number
+  command: string
+  arguments: string
+  chatExposureMode: number
+  allowedToolNames: string[]
+  isEnabled: boolean
+  hasArguments: boolean
+  argumentsMasked?: string | null
+  originalTransportType?: number
+}
+
 export interface SemanticSourceStatus {
   target: string
   databaseName?: string | null
@@ -220,6 +257,88 @@ export interface SemanticSourceStatus {
   providerMatched: boolean
   missingRequiredFields: string[]
   status: string
+}
+
+export type EmbeddingModelApiKeyAction = 'keep' | 'replace' | 'clear'
+
+export interface EmbeddingModelSummary {
+  id: string
+  name: string
+  provider: string
+  baseUrl: string
+  modelName: string
+  dimensions: number
+  maxTokens: number
+  isEnabled: boolean
+  hasApiKey: boolean
+  apiKeyMasked?: string | null
+}
+
+export interface EmbeddingModelDetail extends EmbeddingModelSummary {}
+
+export interface EmbeddingModelFormModel {
+  id?: string
+  name: string
+  provider: string
+  baseUrl: string
+  apiKey: string
+  apiKeyAction: EmbeddingModelApiKeyAction
+  modelName: string
+  dimensions: number
+  maxTokens: number
+  isEnabled: boolean
+  hasApiKey: boolean
+  apiKeyMasked?: string | null
+}
+
+export interface KnowledgeBaseSummary {
+  id: string
+  name: string
+  description: string
+  embeddingModelId: string
+  documentCount: number
+}
+
+export interface KnowledgeBaseDetail extends KnowledgeBaseSummary {}
+
+export interface KnowledgeBaseFormModel {
+  id?: string
+  name: string
+  description: string
+  embeddingModelId: string
+}
+
+export type KnowledgeDocumentStatus =
+  | 'Pending'
+  | 'Parsing'
+  | 'Splitting'
+  | 'Embedding'
+  | 'Indexed'
+  | 'Failed'
+  | number
+
+export interface KnowledgeDocumentSummary {
+  id: number
+  knowledgeBaseId: string
+  name: string
+  extension: string
+  status: KnowledgeDocumentStatus
+  chunkCount: number
+  errorMessage?: string | null
+  createdAt: string
+  processedAt?: string | null
+}
+
+export interface UploadDocumentResponse {
+  id: number
+  status: string
+}
+
+export interface SearchKnowledgeBaseResult {
+  text: string
+  score: number
+  documentId: number
+  documentName?: string | null
 }
 
 export type ConfigDialogMode = 'create' | 'edit'

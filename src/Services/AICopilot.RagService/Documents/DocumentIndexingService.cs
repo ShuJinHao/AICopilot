@@ -3,6 +3,7 @@ using AICopilot.Core.Rag.Specifications.KnowledgeBase;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Repository;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace AICopilot.RagService.Documents;
 
@@ -11,8 +12,14 @@ public sealed class DocumentIndexingService(
     IDocumentContentExtractor contentExtractor,
     IDocumentTextSplitter textSplitter,
     IKnowledgeVectorIndexWriter vectorIndexWriter,
+    IOptions<RagIndexingOptions> options,
     ILogger<DocumentIndexingService> logger) : IDocumentIndexingService
 {
+    private const string ParsingTimeoutFailureMessage = "文档解析超时，请稍后重试。";
+    private const string EmbeddingTimeoutFailureMessage = "文档向量化超时，请稍后重试。";
+
+    private readonly RagIndexingOptions indexingOptions = options.Value;
+
     public async Task IndexAsync(int documentId, CancellationToken cancellationToken = default)
     {
         var knowledgeBase = await repository.FirstOrDefaultAsync(
@@ -40,8 +47,12 @@ public sealed class DocumentIndexingService(
             repository.Update(knowledgeBase);
             await repository.SaveChangesAsync(cancellationToken);
 
-            var text = await contentExtractor.ExtractAsync(
-                new DocumentContentSource(document.FilePath, document.Extension, document.Name),
+            var text = await RunWithTimeoutAsync(
+                phaseCancellationToken => contentExtractor.ExtractAsync(
+                    new DocumentContentSource(document.FilePath, document.Extension, document.Name),
+                    phaseCancellationToken),
+                indexingOptions.ParsingTimeout,
+                ParsingTimeoutFailureMessage,
                 cancellationToken);
             if (string.IsNullOrWhiteSpace(text))
             {
@@ -68,19 +79,34 @@ public sealed class DocumentIndexingService(
             document.StartEmbedding();
             await repository.SaveChangesAsync(cancellationToken);
 
-            await vectorIndexWriter.UpsertAsync(
-                new KnowledgeVectorIndexRequest(
-                    document.Id,
-                    document.KnowledgeBaseId,
-                    knowledgeBase.EmbeddingModelId,
-                    document.Name,
-                    previousChunkCount),
-                chunks,
+            await RunWithTimeoutAsync(
+                phaseCancellationToken => vectorIndexWriter.UpsertAsync(
+                    new KnowledgeVectorIndexRequest(
+                        document.Id,
+                        document.KnowledgeBaseId,
+                        knowledgeBase.EmbeddingModelId,
+                        document.Name,
+                        previousChunkCount),
+                    chunks,
+                    phaseCancellationToken),
+                indexingOptions.EmbeddingTimeout,
+                EmbeddingTimeoutFailureMessage,
                 cancellationToken);
 
             document.MarkAsIndexed();
             await repository.SaveChangesAsync(cancellationToken);
             logger.LogInformation("文档 {DocumentId} 索引完成。", document.Id);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            logger.LogInformation("文档 {DocumentId} 索引已取消。", document.Id);
+            throw;
+        }
+        catch (RagIndexingTimeoutException ex)
+        {
+            logger.LogError(ex, "文档 {DocumentId} 索引超时。", document.Id);
+            document.MarkAsFailed(ex.UserMessage);
+            await repository.SaveChangesAsync(cancellationToken);
         }
         catch (Exception ex)
         {
@@ -97,5 +123,48 @@ public sealed class DocumentIndexingService(
             or DocumentStatus.Parsing
             or DocumentStatus.Splitting
             or DocumentStatus.Embedding;
+    }
+
+    private static async Task<T> RunWithTimeoutAsync<T>(
+        Func<CancellationToken, Task<T>> operation,
+        TimeSpan timeout,
+        string timeoutMessage,
+        CancellationToken cancellationToken)
+    {
+        using var timeoutTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutTokenSource.CancelAfter(timeout);
+
+        try
+        {
+            return await operation(timeoutTokenSource.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && timeoutTokenSource.IsCancellationRequested)
+        {
+            throw new RagIndexingTimeoutException(timeoutMessage);
+        }
+    }
+
+    private static async Task RunWithTimeoutAsync(
+        Func<CancellationToken, Task> operation,
+        TimeSpan timeout,
+        string timeoutMessage,
+        CancellationToken cancellationToken)
+    {
+        using var timeoutTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutTokenSource.CancelAfter(timeout);
+
+        try
+        {
+            await operation(timeoutTokenSource.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && timeoutTokenSource.IsCancellationRequested)
+        {
+            throw new RagIndexingTimeoutException(timeoutMessage);
+        }
+    }
+
+    private sealed class RagIndexingTimeoutException(string userMessage) : Exception(userMessage)
+    {
+        public string UserMessage { get; } = userMessage;
     }
 }

@@ -81,11 +81,13 @@ public class UpdateEmbeddingModelCommandHandler(IRepository<EmbeddingModel> repo
             return Result.NotFound();
         }
 
+        var apiKey = request.ApiKey ?? entity.ApiKey;
+
         entity.Update(
             request.Name,
             request.Provider,
             request.BaseUrl,
-            request.ApiKey,
+            apiKey,
             request.ModelName,
             request.Dimensions,
             request.MaxTokens,

@@ -92,12 +92,16 @@ public class UpdateMcpServerCommandHandler(IRepository<McpServerInfo> repository
             return Result.NotFound();
         }
 
+        var arguments = string.IsNullOrWhiteSpace(request.Arguments)
+            ? entity.Arguments
+            : request.Arguments;
+
         entity.Update(
             request.Name,
             request.Description,
             request.TransportType,
             request.Command,
-            request.Arguments,
+            arguments,
             request.ChatExposureMode,
             request.AllowedToolNames,
             request.IsEnabled);

@@ -5,11 +5,12 @@ import AppShell from '@/components/layout/AppShell.vue'
 import {
   ACCESS_MANAGEMENT_PERMISSIONS,
   CHAT_REQUIRED_PERMISSIONS,
-  collectConfigReadPermissions
+  collectConfigReadPermissions,
+  collectKnowledgeReadPermissions
 } from '@/security/permissions'
 import { useAuthStore } from '@/stores/authStore'
 
-type ProtectedAbility = 'chat' | 'config' | 'access'
+type ProtectedAbility = 'chat' | 'config' | 'knowledge' | 'access'
 
 const route = useRoute()
 const router = useRouter()
@@ -17,7 +18,7 @@ const authStore = useAuthStore()
 
 const ability = computed<ProtectedAbility | undefined>(() => {
   const raw = route.query.ability
-  if (raw === 'chat' || raw === 'config' || raw === 'access') {
+  if (raw === 'chat' || raw === 'config' || raw === 'knowledge' || raw === 'access') {
     return raw
   }
 
@@ -29,16 +30,23 @@ const forbiddenContent = computed(() => {
     case 'chat':
       return {
         title: '没有聊天访问权限',
-        description: '当前账号缺少进入聊天主链所需的完整权限。',
+        description: '当前账号缺少进入聊天主链路所需的完整权限。',
         mode: 'all' as const,
         permissions: [...CHAT_REQUIRED_PERMISSIONS]
       }
     case 'config':
       return {
         title: '没有配置访问权限',
-        description: '当前账号缺少进入配置治理页面所需的读取权限。',
+        description: '当前账号缺少进入配置管理页面所需的读取权限。',
         mode: 'any' as const,
         permissions: collectConfigReadPermissions()
+      }
+    case 'knowledge':
+      return {
+        title: '没有知识库访问权限',
+        description: '当前账号缺少进入知识库页面所需的 RAG 读取权限。',
+        mode: 'any' as const,
+        permissions: collectKnowledgeReadPermissions()
       }
     case 'access':
       return {
@@ -65,6 +73,11 @@ async function goPrimaryPage() {
 
   if (authStore.canViewConfig) {
     await router.replace('/config')
+    return
+  }
+
+  if (authStore.canManageKnowledge) {
+    await router.replace('/knowledge')
     return
   }
 
@@ -138,7 +151,7 @@ async function goPrimaryPage() {
   display: grid;
   gap: 12px;
   padding: 16px 18px;
-  border-radius: 18px;
+  border-radius: 8px;
   background: #f8fafc;
   border: 1px solid rgba(148, 163, 184, 0.2);
 }

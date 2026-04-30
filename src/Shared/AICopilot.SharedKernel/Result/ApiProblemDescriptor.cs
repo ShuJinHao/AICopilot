@@ -18,6 +18,7 @@ public static class AppProblemCodes
     public const string ChatStreamFailed = "chat_stream_failed";
     public const string ApprovalStreamFailed = "approval_stream_failed";
     public const string ApprovalAlreadyProcessed = "approval_already_processed";
+    public const string ApprovalPending = "approval_pending";
     public const string CapabilityNotAllowed = "capability_not_allowed";
     public const string ControlActionBlocked = "control_action_blocked";
     public const string TokenBudgetExceeded = "token_budget_exceeded";

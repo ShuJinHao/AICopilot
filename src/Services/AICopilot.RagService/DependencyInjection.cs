@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using AICopilot.RagService.Documents;
@@ -22,6 +23,8 @@ public static class DependencyInjection
 
     public static void AddRagIndexingService(this IHostApplicationBuilder builder)
     {
+        builder.Services.Configure<RagIndexingOptions>(
+            builder.Configuration.GetSection(RagIndexingOptions.SectionName));
         builder.Services.AddScoped<IDocumentIndexingService, DocumentIndexingService>();
     }
 }

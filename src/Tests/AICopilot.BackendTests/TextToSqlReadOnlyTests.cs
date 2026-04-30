@@ -73,6 +73,42 @@ public sealed class TextToSqlReadOnlyTests
     }
 
     [Fact]
+    public async Task Plugin_ShouldReturnStableMessagesForDisabledDatabaseAndRejectedSql()
+    {
+        var disabledDatabase = new BusinessDatabase(
+            "disabled-db",
+            "test",
+            "Host=localhost;Database=demo;Username=test;Password=test;",
+            DbProviderType.PostgreSql,
+            isReadOnly: true);
+        disabledDatabase.UpdateSettings(isEnabled: false, isReadOnly: true);
+
+        var disabledResult = await CreatePlugin(new RecordingDatabaseConnector())
+            .ExecuteSqlQueryAsync(BuildServiceProvider([disabledDatabase]), disabledDatabase.Name, "SELECT 1");
+
+        disabledResult.Should().Contain("安全警告");
+        disabledResult.Should().Contain("已被禁用");
+
+        var rejectingConnector = new RecordingDatabaseConnector
+        {
+            MetadataExceptionOverride = new InvalidOperationException("Only SELECT queries are allowed.")
+        };
+        var readonlyDatabase = new BusinessDatabase(
+            "readonly-db",
+            "test",
+            "Host=localhost;Database=readonly;Username=test;Password=test;",
+            DbProviderType.PostgreSql,
+            isReadOnly: true);
+
+        var rejectedResult = await CreatePlugin(rejectingConnector)
+            .ExecuteSqlQueryAsync(BuildServiceProvider([readonlyDatabase]), readonlyDatabase.Name, "DROP TABLE users");
+
+        rejectedResult.Should().Contain("安全警告");
+        rejectedResult.Should().Contain("查询被系统拒绝");
+        rejectedResult.Should().Contain("Only SELECT queries are allowed.");
+    }
+
+    [Fact]
     public async Task Plugin_ShouldAllowMetadataAndQueryExecution_OnReadonlyBusinessDatabase()
     {
         var connector = new RecordingDatabaseConnector();
@@ -156,6 +192,7 @@ public sealed class TextToSqlReadOnlyTests
     {
         public List<string> ExecutedSql { get; } = [];
         public DatabaseQueryResult? MetadataResultOverride { get; set; }
+        public Exception? MetadataExceptionOverride { get; set; }
 
         public IDbConnection GetConnection(BusinessDatabaseConnectionInfo database)
         {
@@ -212,6 +249,11 @@ public sealed class TextToSqlReadOnlyTests
             DatabaseQueryOptions? options = null,
             CancellationToken cancellationToken = default)
         {
+            if (MetadataExceptionOverride != null)
+            {
+                throw MetadataExceptionOverride;
+            }
+
             if (MetadataResultOverride != null)
             {
                 ExecutedSql.Add(sql);
