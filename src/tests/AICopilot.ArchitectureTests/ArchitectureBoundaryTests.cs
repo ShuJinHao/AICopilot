@@ -626,16 +626,67 @@ public sealed class ArchitectureBoundaryTests
         var source = File.ReadAllText(workerFile);
 
         source.Should().Contain("GetRequiredService<IdentityStoreDbContext>");
+        source.Should().NotContain("GetRequiredService<AuditDbContext>");
+        source.Should().NotContain("GetRequiredService<OutboxDbContext>");
+        source.Should().Contain("MigrationHistoryBootstrapper.BootstrapLegacyHistoryAsync");
 
-        var mainMigration = source.IndexOf("await RunMigrationAsync(dbContext", StringComparison.Ordinal);
-        var identityMigration = source.IndexOf("await RunMigrationAsync(identityStoreDbContext", StringComparison.Ordinal);
-        var firstModuleMigration = source.IndexOf("await RunMigrationAsync(aiGatewayDbContext", StringComparison.Ordinal);
+        var mainMigration = source.IndexOf("MigrationHistoryTables.AiCopilot", StringComparison.Ordinal);
+        var identityMigration = source.IndexOf("MigrationHistoryTables.IdentityStore", StringComparison.Ordinal);
+        var firstModuleMigration = source.IndexOf("MigrationHistoryTables.AiGateway", StringComparison.Ordinal);
+        var bootstrap = source.IndexOf("await MigrationHistoryBootstrapper.BootstrapLegacyHistoryAsync", StringComparison.Ordinal);
+        var runMigrations = source.IndexOf("foreach (var migrationContext in migrationContexts)", StringComparison.Ordinal);
         var identitySeed = source.IndexOf("await SeedIdentityAsync", StringComparison.Ordinal);
 
         mainMigration.Should().BeGreaterThanOrEqualTo(0);
         identityMigration.Should().BeGreaterThan(mainMigration);
         firstModuleMigration.Should().BeGreaterThan(identityMigration);
-        identitySeed.Should().BeGreaterThan(firstModuleMigration);
+        bootstrap.Should().BeGreaterThan(firstModuleMigration);
+        runMigrations.Should().BeGreaterThan(bootstrap);
+        identitySeed.Should().BeGreaterThan(runMigrations);
+    }
+
+    [Fact]
+    public void MigratingDbContexts_ShouldUseIndependentMigrationHistoryTables()
+    {
+        var infrastructureRoot = Path.Combine(
+            SolutionRoot,
+            "src",
+            "infrastructure",
+            "AICopilot.EntityFrameworkCore");
+        var dependencyInjection = File.ReadAllText(Path.Combine(infrastructureRoot, "DependencyInjection.cs"));
+        var historyTables = File.ReadAllText(Path.Combine(infrastructureRoot, "MigrationHistoryTables.cs"));
+        var bootstrapper = File.ReadAllText(Path.Combine(infrastructureRoot, "MigrationHistoryBootstrapper.cs"));
+
+        var expectedTables = new[]
+        {
+            ("AiCopilot", "public", "__EFMigrationsHistory_AiCopilot", "AiCopilotDbContextFactory.cs"),
+            ("IdentityStore", "identity", "__EFMigrationsHistory_IdentityStore", "IdentityStoreDbContext.cs"),
+            ("AiGateway", "aigateway", "__EFMigrationsHistory_AiGateway", "AiGatewayDbContext.cs"),
+            ("Rag", "rag", "__EFMigrationsHistory_Rag", "RagDbContext.cs"),
+            ("DataAnalysis", "dataanalysis", "__EFMigrationsHistory_DataAnalysis", "DataAnalysisDbContext.cs"),
+            ("McpServer", "mcp", "__EFMigrationsHistory_McpServer", "McpServerDbContext.cs")
+        };
+
+        foreach (var (tableName, schema, historyTableName, factoryFile) in expectedTables)
+        {
+            historyTables.Should().Contain($"\"{schema}\"");
+            historyTables.Should().Contain($"\"{historyTableName}\"");
+            dependencyInjection.Should().Contain(
+                $"ConfigureMigrationHistory(MigrationHistoryTables.{tableName})",
+                $"{tableName} runtime DbContext must write to its own EF migrations history table");
+
+            var factory = File.ReadAllText(Path.Combine(infrastructureRoot, factoryFile));
+            factory.Should().Contain(
+                $"UseNpgsqlWithMigrationHistory(connectionString, MigrationHistoryTables.{tableName})",
+                $"{tableName} design-time migrations must use the same split history table as runtime");
+        }
+
+        historyTables.Should().Contain("LegacyTableName = \"__EFMigrationsHistory\"");
+        bootstrapper.Should().Contain("GetMigrations()");
+        bootstrapper.Should().Contain("partial target history");
+        bootstrapper.Should().Contain("ON CONFLICT (\"MigrationId\") DO NOTHING");
+        dependencyInjection.Should().NotContain("ConfigureMigrationHistory(MigrationHistoryTables.Audit");
+        dependencyInjection.Should().NotContain("ConfigureMigrationHistory(MigrationHistoryTables.Outbox");
     }
 
     [Fact]

@@ -52,7 +52,7 @@ public sealed class AcceptanceClosureVerificationTests
         migrationCommand.CommandText =
             """
             SELECT COUNT(*)
-            FROM "__EFMigrationsHistory"
+            FROM public."__EFMigrationsHistory_AiCopilot"
             WHERE "MigrationId" = '20260423064237_Phase44OnsiteAttestationColumns';
             """;
 

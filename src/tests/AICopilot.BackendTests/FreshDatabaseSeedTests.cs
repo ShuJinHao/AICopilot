@@ -10,6 +10,11 @@ namespace AICopilot.BackendTests;
 [Trait("Runtime", "DockerRequired")]
 public sealed class FreshDatabaseSeedTests
 {
+    private const string AiCopilotFinalMigrationId = "20260429010506_DetachIdentityFromAiCopilotDbContext";
+    private const string AiGatewayInitialMigrationId = "20260428145951_InitialAiGatewaySchema";
+    private const string RagInitialMigrationId = "20260428142303_InitialRagSchema";
+    private const string DataAnalysisInitialMigrationId = "20260427000300_InitialDataAnalysisSchema";
+    private const string McpServerInitialMigrationId = "20260427000100_InitialMcpServerSchema";
     private const string IdentityStoreBaselineMigrationId = "20260429021832_IdentityStoreMigrationBaseline";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -90,14 +95,14 @@ public sealed class FreshDatabaseSeedTests
         (await mcpDbContext.McpServerInfos.CountAsync()).Should().Be(0);
 
         await AssertSplitModuleTablesAsync(dbContext);
-        await AssertIdentityStoreMigrationHistoryAsync(dbContext);
+        await AssertPerContextMigrationHistoryAsync(dbContext);
     }
 
     private static async Task<AiCopilotDbContext> CreateDbContextAsync(AICopilotAppFixture fixture)
     {
         var connectionString = await fixture.GetConnectionStringAsync();
         var options = new DbContextOptionsBuilder<AiCopilotDbContext>()
-            .UseNpgsql(connectionString)
+            .UseNpgsqlWithMigrationHistory(connectionString, MigrationHistoryTables.AiCopilot)
             .Options;
 
         return new AiCopilotDbContext(options);
@@ -107,7 +112,7 @@ public sealed class FreshDatabaseSeedTests
     {
         var connectionString = await fixture.GetConnectionStringAsync();
         var options = new DbContextOptionsBuilder<IdentityStoreDbContext>()
-            .UseNpgsql(connectionString)
+            .UseNpgsqlWithMigrationHistory(connectionString, MigrationHistoryTables.IdentityStore)
             .Options;
 
         return new IdentityStoreDbContext(options);
@@ -117,7 +122,7 @@ public sealed class FreshDatabaseSeedTests
     {
         var connectionString = await fixture.GetConnectionStringAsync();
         var options = new DbContextOptionsBuilder<AiGatewayDbContext>()
-            .UseNpgsql(connectionString)
+            .UseNpgsqlWithMigrationHistory(connectionString, MigrationHistoryTables.AiGateway)
             .Options;
 
         return new AiGatewayDbContext(options);
@@ -127,7 +132,7 @@ public sealed class FreshDatabaseSeedTests
     {
         var connectionString = await fixture.GetConnectionStringAsync();
         var options = new DbContextOptionsBuilder<McpServerDbContext>()
-            .UseNpgsql(connectionString)
+            .UseNpgsqlWithMigrationHistory(connectionString, MigrationHistoryTables.McpServer)
             .Options;
 
         return new McpServerDbContext(options);
@@ -137,7 +142,7 @@ public sealed class FreshDatabaseSeedTests
     {
         var connectionString = await fixture.GetConnectionStringAsync();
         var options = new DbContextOptionsBuilder<DataAnalysisDbContext>()
-            .UseNpgsql(connectionString)
+            .UseNpgsqlWithMigrationHistory(connectionString, MigrationHistoryTables.DataAnalysis)
             .Options;
 
         return new DataAnalysisDbContext(options);
@@ -147,7 +152,7 @@ public sealed class FreshDatabaseSeedTests
     {
         var connectionString = await fixture.GetConnectionStringAsync();
         var options = new DbContextOptionsBuilder<RagDbContext>()
-            .UseNpgsql(connectionString)
+            .UseNpgsqlWithMigrationHistory(connectionString, MigrationHistoryTables.Rag)
             .Options;
 
         return new RagDbContext(options);
@@ -221,30 +226,60 @@ public sealed class FreshDatabaseSeedTests
         }
     }
 
-    private static async Task AssertIdentityStoreMigrationHistoryAsync(AiCopilotDbContext dbContext)
+    private static async Task AssertPerContextMigrationHistoryAsync(AiCopilotDbContext dbContext)
     {
+        var expectedHistoryRows = new[]
+        {
+            (MigrationHistoryTables.AiCopilot, AiCopilotFinalMigrationId),
+            (MigrationHistoryTables.IdentityStore, IdentityStoreBaselineMigrationId),
+            (MigrationHistoryTables.AiGateway, AiGatewayInitialMigrationId),
+            (MigrationHistoryTables.Rag, RagInitialMigrationId),
+            (MigrationHistoryTables.DataAnalysis, DataAnalysisInitialMigrationId),
+            (MigrationHistoryTables.McpServer, McpServerInitialMigrationId)
+        };
+
         await dbContext.Database.OpenConnectionAsync();
         try
         {
-            await using var command = dbContext.Database.GetDbConnection().CreateCommand();
-            command.CommandText = """
-                SELECT COUNT(*)
-                FROM "__EFMigrationsHistory"
-                WHERE "MigrationId" = @migration_id
-                """;
+            foreach (var (historyTable, migrationId) in expectedHistoryRows)
+            {
+                var resolvedHistoryTable = await ResolveTableAsync(dbContext, RegclassName(historyTable));
+                resolvedHistoryTable.Should().NotBeNull(
+                    $"{historyTable.ContextName} must write migrations to its split history table");
 
-            var parameter = command.CreateParameter();
-            parameter.ParameterName = "migration_id";
-            parameter.Value = IdentityStoreBaselineMigrationId;
-            command.Parameters.Add(parameter);
+                var count = await CountMigrationHistoryRowsAsync(dbContext, historyTable, migrationId);
+                count.Should().Be(1, $"{historyTable.ContextName} must have its expected migration history row");
+            }
 
-            var result = await command.ExecuteScalarAsync();
-            Convert.ToInt32(result).Should().Be(1, "IdentityStoreDbContext must have an applied baseline migration");
+            (await ResolveTableAsync(dbContext, "public.\"__EFMigrationsHistory\""))
+                .Should().BeNull("fresh databases must not create the legacy shared EF migrations history table");
         }
         finally
         {
             await dbContext.Database.CloseConnectionAsync();
         }
+    }
+
+    private static async Task<int> CountMigrationHistoryRowsAsync(
+        DbContext dbContext,
+        MigrationHistoryTable historyTable,
+        string migrationId)
+    {
+        await using var command = dbContext.Database.GetDbConnection().CreateCommand();
+        command.CommandText =
+            $"""
+             SELECT COUNT(*)
+             FROM {HistoryTableSql(historyTable)}
+             WHERE "MigrationId" = @migration_id
+             """;
+
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = "migration_id";
+        parameter.Value = migrationId;
+        command.Parameters.Add(parameter);
+
+        var result = await command.ExecuteScalarAsync();
+        return Convert.ToInt32(result);
     }
 
     private static async Task<string?> ResolveTableAsync(DbContext dbContext, string tableName)
@@ -259,6 +294,21 @@ public sealed class FreshDatabaseSeedTests
 
         var result = await command.ExecuteScalarAsync();
         return result is null or DBNull ? null : (string)result;
+    }
+
+    private static string HistoryTableSql(MigrationHistoryTable historyTable)
+    {
+        return $"{QuoteIdentifier(historyTable.Schema)}.{QuoteIdentifier(historyTable.TableName)}";
+    }
+
+    private static string RegclassName(MigrationHistoryTable historyTable)
+    {
+        return $"{historyTable.Schema}.{QuoteIdentifier(historyTable.TableName)}";
+    }
+
+    private static string QuoteIdentifier(string value)
+    {
+        return "\"" + value.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
     }
 
     private sealed record InitializationStatusDto(
