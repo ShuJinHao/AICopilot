@@ -819,6 +819,13 @@ public sealed class SecurityHardeningTests
             "AICopilot.RagService",
             "Documents",
             "DocumentIndexingService.cs"));
+        var indexingOptionsSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Services",
+            "AICopilot.RagService",
+            "Documents",
+            "RagIndexingOptions.cs"));
         var writerSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
@@ -833,9 +840,20 @@ public sealed class SecurityHardeningTests
         indexingSource.Should().Contain("DocumentStatus.Splitting");
         indexingSource.Should().Contain("DocumentStatus.Embedding");
         indexingSource.Should().Contain("previousChunkCount");
+        indexingSource.Should().Contain("CreateLinkedTokenSource");
+        indexingSource.Should().Contain("CancelAfter");
+        indexingSource.Should().Contain("文档解析超时，请稍后重试。");
+        indexingSource.Should().Contain("文档向量化超时，请稍后重试。");
+        indexingSource.Should().Contain("RagIndexingTimeoutException");
+        indexingOptionsSource.Should().Contain("Rag:Indexing");
+        indexingOptionsSource.Should().Contain("ParsingTimeoutSeconds");
+        indexingOptionsSource.Should().Contain("EmbeddingTimeoutSeconds");
         writerSource.Should().Contain("PreviousChunkCount");
+        writerSource.Should().Contain("Math.Max(request.PreviousChunkCount, chunks.Count)");
         writerSource.Should().Contain("DeleteAsync(staleRecordKeys");
         writerSource.Should().Contain("UpsertAsync(records");
+        writerSource.IndexOf("DeleteAsync(staleRecordKeys", StringComparison.Ordinal)
+            .Should().BeLessThan(writerSource.IndexOf("UpsertAsync(records", StringComparison.Ordinal));
         writerSource.Should().Contain("BuildRecordKey");
     }
 
