@@ -1,4 +1,5 @@
 ﻿using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
+using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Messaging;
@@ -25,7 +26,7 @@ public class UpdateLanguageModelCommandHandler(
 {
     public async Task<Result> Handle(UpdateLanguageModelCommand request, CancellationToken cancellationToken)
     {
-        var entity = await repository.GetByIdAsync(request.Id, cancellationToken);
+        var entity = await repository.GetByIdAsync(new LanguageModelId(request.Id), cancellationToken);
         if (entity == null)
         {
             return Result.NotFound();

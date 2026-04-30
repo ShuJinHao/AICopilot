@@ -1,5 +1,6 @@
 using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
+using AICopilot.Core.Rag.Ids;
 using AICopilot.Core.Rag.Specifications.KnowledgeBase;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.SharedKernel.Messaging;
@@ -31,20 +32,21 @@ public class UpdateKnowledgeBaseCommandHandler(
 {
     public async Task<Result> Handle(UpdateKnowledgeBaseCommand request, CancellationToken cancellationToken)
     {
-        var embeddingModel = await embeddingRepository.GetByIdAsync(request.EmbeddingModelId, cancellationToken);
+        var embeddingModelId = new EmbeddingModelId(request.EmbeddingModelId);
+        var embeddingModel = await embeddingRepository.GetByIdAsync(embeddingModelId, cancellationToken);
         if (embeddingModel == null)
         {
             return Result.NotFound("指定的嵌入模型不存在");
         }
 
-        var entity = await repository.GetByIdAsync(request.Id, cancellationToken);
+        var entity = await repository.GetByIdAsync(new KnowledgeBaseId(request.Id), cancellationToken);
         if (entity == null)
         {
             return Result.NotFound();
         }
 
         entity.UpdateInfo(request.Name, request.Description);
-        entity.UpdateEmbeddingModel(request.EmbeddingModelId);
+        entity.UpdateEmbeddingModel(embeddingModelId);
 
         repository.Update(entity);
         await repository.SaveChangesAsync(cancellationToken);
@@ -60,7 +62,7 @@ public class DeleteKnowledgeBaseCommandHandler(IRepository<KnowledgeBase> reposi
 {
     public async Task<Result> Handle(DeleteKnowledgeBaseCommand request, CancellationToken cancellationToken)
     {
-        var entity = await repository.GetByIdAsync(request.Id, cancellationToken);
+        var entity = await repository.GetByIdAsync(new KnowledgeBaseId(request.Id), cancellationToken);
         if (entity == null)
         {
             return Result.Success();
@@ -83,7 +85,7 @@ public class GetKnowledgeBaseQueryHandler(IReadRepository<KnowledgeBase> reposit
         CancellationToken cancellationToken)
     {
         var result = await repository.FirstOrDefaultAsync(
-            new KnowledgeBaseByIdWithDocumentsSpec(request.Id),
+            new KnowledgeBaseByIdWithDocumentsSpec(new KnowledgeBaseId(request.Id)),
             cancellationToken);
 
         return result == null ? Result.NotFound() : Result.Success(Map(result));

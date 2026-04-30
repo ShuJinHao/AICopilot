@@ -1,10 +1,11 @@
 using AICopilot.SharedKernel.Specification;
+using AICopilot.Core.AiGateway.Ids;
 
 namespace AICopilot.Core.AiGateway.Specifications.Sessions;
 
 public sealed class SessionByIdSpec : Specification<Aggregates.Sessions.Session>
 {
-    public SessionByIdSpec(Guid id)
+    public SessionByIdSpec(SessionId id)
     {
         FilterCondition = session => session.Id == id;
     }
@@ -12,7 +13,7 @@ public sealed class SessionByIdSpec : Specification<Aggregates.Sessions.Session>
 
 public sealed class SessionByIdForUserSpec : Specification<Aggregates.Sessions.Session>
 {
-    public SessionByIdForUserSpec(Guid id, Guid userId)
+    public SessionByIdForUserSpec(SessionId id, Guid userId)
     {
         FilterCondition = session => session.Id == id && session.UserId == userId;
     }
@@ -20,7 +21,7 @@ public sealed class SessionByIdForUserSpec : Specification<Aggregates.Sessions.S
 
 public sealed class SessionWithMessagesByIdSpec : Specification<Aggregates.Sessions.Session>
 {
-    public SessionWithMessagesByIdSpec(Guid id)
+    public SessionWithMessagesByIdSpec(SessionId id)
     {
         FilterCondition = session => session.Id == id;
         AddInclude(session => session.Messages);
@@ -29,7 +30,7 @@ public sealed class SessionWithMessagesByIdSpec : Specification<Aggregates.Sessi
 
 public sealed class SessionWithMessagesByIdForUserSpec : Specification<Aggregates.Sessions.Session>
 {
-    public SessionWithMessagesByIdForUserSpec(Guid id, Guid userId)
+    public SessionWithMessagesByIdForUserSpec(SessionId id, Guid userId)
     {
         FilterCondition = session => session.Id == id && session.UserId == userId;
         AddInclude(session => session.Messages);

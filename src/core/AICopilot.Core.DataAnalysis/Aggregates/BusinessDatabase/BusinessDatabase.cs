@@ -1,4 +1,5 @@
-﻿using AICopilot.SharedKernel.Domain;
+using AICopilot.Core.DataAnalysis.Ids;
+using AICopilot.SharedKernel.Domain;
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -9,7 +10,7 @@ namespace AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
 /// 业务数据库聚合根
 /// 代表一个可被AI Agent访问的外部数据源
 /// </summary>
-public class BusinessDatabase : IAggregateRoot
+public class BusinessDatabase : IAggregateRoot<BusinessDatabaseId>
 {
     protected BusinessDatabase()
     {
@@ -25,7 +26,7 @@ public class BusinessDatabase : IAggregateRoot
         ValidateInfo(name, description);
         ValidateConnection(connectionString, provider);
 
-        Id = Guid.NewGuid();
+        Id = BusinessDatabaseId.New();
         Name = name.Trim();
         Description = description.Trim();
         ConnectionString = connectionString.Trim();
@@ -35,7 +36,7 @@ public class BusinessDatabase : IAggregateRoot
         CreatedAt = DateTime.UtcNow;
     }
 
-    public Guid Id { get; private set; }
+    public BusinessDatabaseId Id { get; private set; }
 
     public uint RowVersion { get; private set; }
 

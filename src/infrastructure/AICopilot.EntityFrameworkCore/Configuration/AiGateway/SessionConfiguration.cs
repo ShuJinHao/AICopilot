@@ -1,6 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
+using AICopilot.Core.AiGateway.Ids;
 
 namespace AICopilot.EntityFrameworkCore.Configuration.AiGateway;
 
@@ -13,7 +14,9 @@ public class SessionConfiguration : IEntityTypeConfiguration<Session>
 
         // 配置主键
         builder.HasKey(s => s.Id);
-        builder.Property(s => s.Id).HasColumnName("id");
+        builder.Property(s => s.Id)
+            .HasConversion(id => id.Value, value => new SessionId(value))
+            .HasColumnName("id");
 
         // 配置属性
         builder.Property(s => s.Title)
@@ -22,6 +25,7 @@ public class SessionConfiguration : IEntityTypeConfiguration<Session>
             .HasColumnName("title");
 
         builder.Property(s => s.TemplateId)
+            .HasConversion(id => id.Value, value => new ConversationTemplateId(value))
             .IsRequired()
             .HasColumnName("template_id");
 

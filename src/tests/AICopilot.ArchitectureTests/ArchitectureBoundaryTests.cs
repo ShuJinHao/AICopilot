@@ -6,10 +6,14 @@ using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
+using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
+using AICopilot.Core.DataAnalysis.Ids;
 using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
+using AICopilot.Core.McpServer.Ids;
 using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
+using AICopilot.Core.Rag.Ids;
 using AICopilot.SharedKernel.Domain;
 
 namespace AICopilot.ArchitectureTests;
@@ -48,7 +52,7 @@ public sealed class ArchitectureBoundaryTests
     public void AiGatewayService_ShouldNotReferenceOtherCoreModules()
     {
         var forbidden = new Regex(@"AICopilot\.Core\.(Rag|DataAnalysis|McpServer)", RegexOptions.Compiled);
-        var violations = ScanSource(Path.Combine("src", "Services", "AICopilot.AiGatewayService"), forbidden);
+        var violations = ScanSource(Path.Combine("src", "services", "AICopilot.AiGatewayService"), forbidden);
 
         violations.Should().BeEmpty("AiGatewayService must call other modules through Services.Contracts");
     }
@@ -59,7 +63,7 @@ public sealed class ArchitectureBoundaryTests
         var projectFile = Path.Combine(
             SolutionRoot,
             "src",
-            "Services",
+            "services",
             "AICopilot.AiGatewayService",
             "AICopilot.AiGatewayService.csproj");
 
@@ -84,8 +88,8 @@ public sealed class ArchitectureBoundaryTests
             @"\b(DbContext|DbSet<|IQueryable<|IPublishEndpoint|NpgsqlConnection|NpgsqlDataSource)\b|using\s+(Microsoft\.EntityFrameworkCore|Dapper|Npgsql|MassTransit)\b",
             RegexOptions.Compiled);
 
-        var violations = ScanSource(Path.Combine("src", "Services"), forbidden)
-            .Concat(ScanSource(Path.Combine("src", "Core"), forbidden))
+        var violations = ScanSource(Path.Combine("src", "services"), forbidden)
+            .Concat(ScanSource(Path.Combine("src", "core"), forbidden))
             .ToArray();
 
         violations.Should().BeEmpty("application and domain layers must not depend on persistence or broker details");
@@ -95,7 +99,7 @@ public sealed class ArchitectureBoundaryTests
     public void HttpApiControllers_ShouldNotReferenceCoreModules()
     {
         var forbidden = new Regex(@"AICopilot\.Core\.", RegexOptions.Compiled);
-        var violations = ScanSource(Path.Combine("src", "Hosts", "AICopilot.HttpApi", "Controllers"), forbidden);
+        var violations = ScanSource(Path.Combine("src", "hosts", "AICopilot.HttpApi", "Controllers"), forbidden);
 
         violations.Should().BeEmpty("controllers must speak request/response contracts, not aggregate types");
     }
@@ -134,6 +138,36 @@ public sealed class ArchitectureBoundaryTests
             .ToArray();
 
         publicIdSetters.Should().BeEmpty("hardened aggregate roots must keep identity changes inside the aggregate");
+    }
+
+    [Fact]
+    public void BusinessEntities_ShouldUseStrongTypedIdentifiers()
+    {
+        var expectedIdTypes = new Dictionary<Type, Type>
+        {
+            [typeof(Session)] = typeof(SessionId),
+            [typeof(LanguageModel)] = typeof(LanguageModelId),
+            [typeof(ConversationTemplate)] = typeof(ConversationTemplateId),
+            [typeof(ApprovalPolicy)] = typeof(ApprovalPolicyId),
+            [typeof(KnowledgeBase)] = typeof(KnowledgeBaseId),
+            [typeof(Document)] = typeof(DocumentId),
+            [typeof(EmbeddingModel)] = typeof(EmbeddingModelId),
+            [typeof(BusinessDatabase)] = typeof(BusinessDatabaseId),
+            [typeof(McpServerInfo)] = typeof(McpServerId)
+        };
+
+        var violations = expectedIdTypes
+            .Select(item => new
+            {
+                Entity = item.Key.Name,
+                Expected = item.Value.Name,
+                Actual = item.Key.GetProperty("Id", BindingFlags.Instance | BindingFlags.Public)?.PropertyType.Name
+            })
+            .Where(item => item.Actual != item.Expected)
+            .Select(item => $"{item.Entity}.Id expected {item.Expected}, actual {item.Actual ?? "<missing>"}")
+            .ToArray();
+
+        violations.Should().BeEmpty("core business identifiers must stay strongly typed inside AICopilot");
     }
 
     [Fact]
@@ -203,7 +237,7 @@ public sealed class ArchitectureBoundaryTests
         var migrationRoot = Path.Combine(
             SolutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "Migrations",
             "McpServerDbContext");
@@ -227,7 +261,7 @@ public sealed class ArchitectureBoundaryTests
         var migrationRoot = Path.Combine(
             SolutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "Migrations",
             "DataAnalysisDbContext");
@@ -251,7 +285,7 @@ public sealed class ArchitectureBoundaryTests
         var migrationRoot = Path.Combine(
             SolutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "Migrations",
             "RagDbContext");
@@ -275,7 +309,7 @@ public sealed class ArchitectureBoundaryTests
         var migrationRoot = Path.Combine(
             SolutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "Migrations",
             "AiGatewayDbContext");
@@ -299,7 +333,7 @@ public sealed class ArchitectureBoundaryTests
         var outboxRoot = Path.Combine(
             SolutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "Outbox");
 
@@ -330,7 +364,7 @@ public sealed class ArchitectureBoundaryTests
         var auditRoot = Path.Combine(
             SolutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "AuditLogs");
 
@@ -361,7 +395,7 @@ public sealed class ArchitectureBoundaryTests
         var commandRoot = Path.Combine(
             SolutionRoot,
             "src",
-            "Services",
+            "services",
             "AICopilot.IdentityService",
             "Commands");
         var commandFiles = new[]
@@ -395,12 +429,12 @@ public sealed class ArchitectureBoundaryTests
         var infrastructureRoot = Path.Combine(
             SolutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore");
         var allowedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            Path.Combine("src", "Infrastructure", "AICopilot.EntityFrameworkCore", "AuditLogs", "AuditDbContext.cs").Replace('\\', '/'),
-            Path.Combine("src", "Infrastructure", "AICopilot.EntityFrameworkCore", "IdentityStoreDbContext.cs").Replace('\\', '/')
+            Path.Combine("src", "infrastructure", "AICopilot.EntityFrameworkCore", "AuditLogs", "AuditDbContext.cs").Replace('\\', '/'),
+            Path.Combine("src", "infrastructure", "AICopilot.EntityFrameworkCore", "IdentityStoreDbContext.cs").Replace('\\', '/')
         };
 
         var locations = Directory
@@ -432,7 +466,7 @@ public sealed class ArchitectureBoundaryTests
         var snapshotFile = Path.Combine(
             SolutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "Migrations",
             "AiCopilotDbContextModelSnapshot.cs");
@@ -527,25 +561,25 @@ public sealed class ArchitectureBoundaryTests
         var mainContextFile = Path.Combine(
             SolutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "AiCopilotDbContext.cs");
         var identityContextFile = Path.Combine(
             SolutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "IdentityStoreDbContext.cs");
         var dependencyInjectionFile = Path.Combine(
             SolutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "DependencyInjection.cs");
         var transactionalExecutionFile = Path.Combine(
             SolutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "Transactions",
             "EfTransactionalExecutionService.cs");
@@ -586,7 +620,7 @@ public sealed class ArchitectureBoundaryTests
         var workerFile = Path.Combine(
             SolutionRoot,
             "src",
-            "Hosts",
+            "hosts",
             "AICopilot.MigrationWorkApp",
             "Worker.cs");
         var source = File.ReadAllText(workerFile);
@@ -610,7 +644,7 @@ public sealed class ArchitectureBoundaryTests
         var migrationFile = Path.Combine(
             SolutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "Migrations",
             "IdentityStoreDbContext",
@@ -618,7 +652,7 @@ public sealed class ArchitectureBoundaryTests
         var snapshotFile = Path.Combine(
             SolutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "Migrations",
             "IdentityStoreDbContext",
@@ -644,7 +678,7 @@ public sealed class ArchitectureBoundaryTests
         var migrationFile = Path.Combine(
             SolutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "Migrations",
             "20260429002748_MigrateIdentityKeysToGuid.cs");
@@ -674,7 +708,7 @@ public sealed class ArchitectureBoundaryTests
         var migrationFile = Path.Combine(
             SolutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "Migrations",
             "20260429010506_DetachIdentityFromAiCopilotDbContext.cs");
@@ -691,7 +725,7 @@ public sealed class ArchitectureBoundaryTests
         var snapshotFile = Path.Combine(
             SolutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "Migrations",
             "DataAnalysisDbContext",
@@ -715,7 +749,7 @@ public sealed class ArchitectureBoundaryTests
         var snapshotFile = Path.Combine(
             SolutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "Migrations",
             "RagDbContext",
@@ -757,7 +791,7 @@ public sealed class ArchitectureBoundaryTests
         var snapshotFile = Path.Combine(
             SolutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "Migrations",
             "AiGatewayDbContext",
@@ -808,7 +842,7 @@ public sealed class ArchitectureBoundaryTests
         var snapshotFile = Path.Combine(
             SolutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "Migrations",
             "McpServerDbContext",
@@ -835,7 +869,7 @@ public sealed class ArchitectureBoundaryTests
         var migrationFile = Path.Combine(
             SolutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "Migrations",
             "McpServerDbContext",
@@ -859,7 +893,7 @@ public sealed class ArchitectureBoundaryTests
         var migrationFile = Path.Combine(
             SolutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "Migrations",
             "20260427000200_MoveOutboxToOutboxSchemaAndDetachMcpServer.cs");

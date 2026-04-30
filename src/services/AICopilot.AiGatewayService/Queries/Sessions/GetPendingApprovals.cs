@@ -1,6 +1,7 @@
 using System.Text.Json;
 using AICopilot.AiGatewayService.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
+using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.AiGateway.Specifications.Sessions;
 using AICopilot.Services.Contracts;
 using AICopilot.Services.CrossCutting.Attributes;
@@ -40,7 +41,7 @@ public sealed class GetPendingApprovalsQueryHandler(
         }
 
         var session = await sessionRepository.FirstOrDefaultAsync(
-            new SessionByIdForUserSpec(request.SessionId, userId),
+            new SessionByIdForUserSpec(new SessionId(request.SessionId), userId),
             cancellationToken);
         if (session is null)
         {

@@ -1,4 +1,5 @@
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
+using AICopilot.Core.Rag.Ids;
 using AICopilot.Core.Rag.Specifications.KnowledgeBase;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.Services.Contracts;
@@ -32,7 +33,7 @@ public class GetListDocumentsQueryHandler(IReadRepository<KnowledgeBase> reposit
         CancellationToken cancellationToken)
     {
         var knowledgeBase = await repository.FirstOrDefaultAsync(
-            new KnowledgeBaseByIdWithDocumentsSpec(request.KnowledgeBaseId),
+            new KnowledgeBaseByIdWithDocumentsSpec(new KnowledgeBaseId(request.KnowledgeBaseId)),
             cancellationToken);
 
         IList<KnowledgeDocumentDto> result = knowledgeBase?.Documents
@@ -65,8 +66,9 @@ public class DeleteDocumentCommandHandler(
 {
     public async Task<Result> Handle(DeleteDocumentCommand request, CancellationToken cancellationToken)
     {
+        var documentId = new DocumentId(request.Id);
         var knowledgeBase = await repository.GetAsync(
-            kb => kb.Documents.Any(document => document.Id == request.Id),
+            kb => kb.Documents.Any(document => document.Id == documentId),
             [kb => kb.Documents],
             cancellationToken);
 
@@ -75,8 +77,8 @@ public class DeleteDocumentCommandHandler(
             return Result.Success();
         }
 
-        var document = knowledgeBase.Documents.First(document => document.Id == request.Id);
-        knowledgeBase.RemoveDocument(request.Id);
+        var document = knowledgeBase.Documents.First(document => document.Id == documentId);
+        knowledgeBase.RemoveDocument(documentId);
         repository.Update(knowledgeBase);
         await repository.SaveChangesAsync(cancellationToken);
 

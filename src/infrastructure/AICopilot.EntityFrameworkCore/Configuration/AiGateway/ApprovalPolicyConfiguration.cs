@@ -1,4 +1,5 @@
 using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
+using AICopilot.Core.AiGateway.Ids;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -11,7 +12,9 @@ public class ApprovalPolicyConfiguration : IEntityTypeConfiguration<ApprovalPoli
         builder.ToTable("approval_policies");
 
         builder.HasKey(policy => policy.Id);
-        builder.Property(policy => policy.Id).HasColumnName("id");
+        builder.Property(policy => policy.Id)
+            .HasConversion(id => id.Value, value => new ApprovalPolicyId(value))
+            .HasColumnName("id");
 
         builder.Property(policy => policy.RowVersion).IsRowVersion();
 

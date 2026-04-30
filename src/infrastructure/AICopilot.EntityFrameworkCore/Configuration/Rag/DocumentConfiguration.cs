@@ -1,6 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
+using AICopilot.Core.Rag.Ids;
 
 namespace AICopilot.EntityFrameworkCore.Configuration.Rag;
 
@@ -11,10 +12,13 @@ public class DocumentConfiguration : IEntityTypeConfiguration<Document>
         builder.ToTable("documents");
 
         builder.HasKey(d => d.Id);
-        builder.Property(d => d.Id).HasColumnName("id")
+        builder.Property(d => d.Id)
+            .HasConversion(id => id.Value, value => new DocumentId(value))
+            .HasColumnName("id")
             .ValueGeneratedOnAdd();
 
         builder.Property(d => d.KnowledgeBaseId)
+            .HasConversion(id => id.Value, value => new KnowledgeBaseId(value))
             .IsRequired()
             .HasColumnName("knowledge_base_id");
 

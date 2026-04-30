@@ -1,8 +1,9 @@
-﻿using AICopilot.SharedKernel.Domain;
+using AICopilot.Core.AiGateway.Ids;
+using AICopilot.SharedKernel.Domain;
 
 namespace AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 
-public class ConversationTemplate : IAggregateRoot
+public class ConversationTemplate : IAggregateRoot<ConversationTemplateId>
 {
     public const int MaxNameLength = 200;
     public const int MaxDescriptionLength = 1000;
@@ -16,13 +17,13 @@ public class ConversationTemplate : IAggregateRoot
         string name,
         string description,
         string systemPrompt,
-        Guid modelId,
+        LanguageModelId modelId,
         TemplateSpecification specification)
     {
         ValidateInfo(name, description, systemPrompt, modelId);
         ValidateSpecification(specification);
 
-        Id = Guid.NewGuid();
+        Id = ConversationTemplateId.New();
         Name = name.Trim();
         Description = (description ?? string.Empty).Trim();
         SystemPrompt = systemPrompt.Trim();
@@ -31,7 +32,7 @@ public class ConversationTemplate : IAggregateRoot
         IsEnabled = true;
     }
 
-    public Guid Id { get; private set; }
+    public ConversationTemplateId Id { get; private set; }
 
     public uint RowVersion { get; private set; }
 
@@ -41,7 +42,7 @@ public class ConversationTemplate : IAggregateRoot
 
     public string SystemPrompt { get; private set; } = null!;
 
-    public Guid ModelId { get; private set; }
+    public LanguageModelId ModelId { get; private set; }
 
     public TemplateSpecification Specification { get; private set; } = new();
 
@@ -51,7 +52,7 @@ public class ConversationTemplate : IAggregateRoot
         string name,
         string description,
         string systemPrompt,
-        Guid modelId,
+        LanguageModelId modelId,
         bool isEnabled)
     {
         ValidateInfo(name, description, systemPrompt, modelId);
@@ -73,7 +74,7 @@ public class ConversationTemplate : IAggregateRoot
         string name,
         string description,
         string systemPrompt,
-        Guid modelId)
+        LanguageModelId modelId)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -100,10 +101,6 @@ public class ConversationTemplate : IAggregateRoot
             throw new ArgumentOutOfRangeException(nameof(systemPrompt), $"Conversation template system prompt must not exceed {MaxSystemPromptLength} characters.");
         }
 
-        if (modelId == Guid.Empty)
-        {
-            throw new ArgumentException("Conversation template model id is required.", nameof(modelId));
-        }
     }
 
     private static void ValidateSpecification(TemplateSpecification specification)

@@ -1,8 +1,9 @@
-﻿using AICopilot.SharedKernel.Domain;
+using AICopilot.Core.AiGateway.Ids;
+using AICopilot.SharedKernel.Domain;
 
 namespace AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 
-public class LanguageModel : IAggregateRoot
+public class LanguageModel : IAggregateRoot<LanguageModelId>
 {
     protected LanguageModel()
     {
@@ -13,7 +14,7 @@ public class LanguageModel : IAggregateRoot
         ValidateInfo(provider, name, baseUrl);
         ValidateParameters(parameters);
 
-        Id = Guid.NewGuid();
+        Id = LanguageModelId.New();
         Name = name.Trim();
         Provider = provider.Trim();
         BaseUrl = baseUrl.Trim();
@@ -21,7 +22,7 @@ public class LanguageModel : IAggregateRoot
         Parameters = parameters;
     }
 
-    public Guid Id { get; private set; }
+    public LanguageModelId Id { get; private set; }
 
     public uint RowVersion { get; private set; }
 

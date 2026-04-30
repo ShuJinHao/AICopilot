@@ -1,5 +1,6 @@
 ﻿using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
+using AICopilot.Core.Rag.Ids;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.SharedKernel.Messaging;
 using AICopilot.SharedKernel.Repository;
@@ -29,14 +30,15 @@ public class CreateKnowledgeBaseCommandHandler(
     {
         // 1. 校验嵌入模型是否存在
         // 知识库必须绑定一个具体的 Embedding 模型，因为这决定了向量的维度
-        var embeddingModel = await modelRepo.GetByIdAsync(request.EmbeddingModelId, cancellationToken);
+        var embeddingModelId = new EmbeddingModelId(request.EmbeddingModelId);
+        var embeddingModel = await modelRepo.GetByIdAsync(embeddingModelId, cancellationToken);
         if (embeddingModel == null)
         {
             return Result.NotFound("指定的嵌入模型不存在");
         }
 
         // 2. 创建实体
-        var kb = new KnowledgeBase(request.Name, request.Description, request.EmbeddingModelId);
+        var kb = new KnowledgeBase(request.Name, request.Description, embeddingModelId);
 
         // 3. 持久化
         kbRepo.Add(kb);

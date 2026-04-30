@@ -1,10 +1,11 @@
 using AICopilot.SharedKernel.Specification;
+using AICopilot.Core.McpServer.Ids;
 
 namespace AICopilot.Core.McpServer.Specifications.McpServerInfo;
 
 public sealed class McpServerInfoByIdSpec : Specification<Aggregates.McpServerInfo.McpServerInfo>
 {
-    public McpServerInfoByIdSpec(Guid id)
+    public McpServerInfoByIdSpec(McpServerId id)
     {
         FilterCondition = server => server.Id == id;
     }

@@ -1,4 +1,5 @@
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
+using AICopilot.Core.AiGateway.Ids;
 using AICopilot.EntityFrameworkCore.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
@@ -12,7 +13,9 @@ public class LanguageModelConfiguration : IEntityTypeConfiguration<LanguageModel
         builder.ToTable("language_models");
 
         builder.HasKey(lm => lm.Id);
-        builder.Property(lm => lm.Id).HasColumnName("id");
+        builder.Property(lm => lm.Id)
+            .HasConversion(id => id.Value, value => new LanguageModelId(value))
+            .HasColumnName("id");
 
         builder.Property(lm => lm.RowVersion).IsRowVersion();
 

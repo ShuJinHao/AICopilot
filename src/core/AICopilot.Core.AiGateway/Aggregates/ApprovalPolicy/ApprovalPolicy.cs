@@ -1,8 +1,9 @@
+using AICopilot.Core.AiGateway.Ids;
 using AICopilot.SharedKernel.Domain;
 
 namespace AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
 
-public class ApprovalPolicy : IAggregateRoot
+public class ApprovalPolicy : IAggregateRoot<ApprovalPolicyId>
 {
     private readonly List<string> _toolNames = [];
 
@@ -19,11 +20,11 @@ public class ApprovalPolicy : IAggregateRoot
         bool isEnabled,
         bool requiresOnsiteAttestation)
     {
-        Id = Guid.NewGuid();
+        Id = ApprovalPolicyId.New();
         Update(name, description, targetType, targetName, toolNames, isEnabled, requiresOnsiteAttestation);
     }
 
-    public Guid Id { get; private set; }
+    public ApprovalPolicyId Id { get; private set; }
 
     public uint RowVersion { get; private set; }
 

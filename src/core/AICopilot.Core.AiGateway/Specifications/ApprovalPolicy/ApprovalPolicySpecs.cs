@@ -1,11 +1,12 @@
 using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
+using AICopilot.Core.AiGateway.Ids;
 using AICopilot.SharedKernel.Specification;
 
 namespace AICopilot.Core.AiGateway.Specifications.ApprovalPolicy;
 
 public sealed class ApprovalPolicyByIdSpec : Specification<Aggregates.ApprovalPolicy.ApprovalPolicy>
 {
-    public ApprovalPolicyByIdSpec(Guid id)
+    public ApprovalPolicyByIdSpec(ApprovalPolicyId id)
     {
         FilterCondition = policy => policy.Id == id;
     }

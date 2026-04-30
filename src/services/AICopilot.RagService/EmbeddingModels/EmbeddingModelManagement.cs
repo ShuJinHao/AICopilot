@@ -1,4 +1,5 @@
 using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
+using AICopilot.Core.Rag.Ids;
 using AICopilot.Core.Rag.Specifications.EmbeddingModel;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.SharedKernel.Messaging;
@@ -75,7 +76,7 @@ public class UpdateEmbeddingModelCommandHandler(IRepository<EmbeddingModel> repo
 {
     public async Task<Result> Handle(UpdateEmbeddingModelCommand request, CancellationToken cancellationToken)
     {
-        var entity = await repository.GetByIdAsync(request.Id, cancellationToken);
+        var entity = await repository.GetByIdAsync(new EmbeddingModelId(request.Id), cancellationToken);
         if (entity == null)
         {
             return Result.NotFound();
@@ -107,7 +108,7 @@ public class DeleteEmbeddingModelCommandHandler(IRepository<EmbeddingModel> repo
 {
     public async Task<Result> Handle(DeleteEmbeddingModelCommand request, CancellationToken cancellationToken)
     {
-        var entity = await repository.GetByIdAsync(request.Id, cancellationToken);
+        var entity = await repository.GetByIdAsync(new EmbeddingModelId(request.Id), cancellationToken);
         if (entity == null)
         {
             return Result.Success();
@@ -130,7 +131,7 @@ public class GetEmbeddingModelQueryHandler(IReadRepository<EmbeddingModel> repos
         CancellationToken cancellationToken)
     {
         var result = await repository.FirstOrDefaultAsync(
-            new EmbeddingModelByIdSpec(request.Id),
+            new EmbeddingModelByIdSpec(new EmbeddingModelId(request.Id)),
             cancellationToken);
 
         return result == null ? Result.NotFound() : Result.Success(EmbeddingModelDtoMapper.Map(result));

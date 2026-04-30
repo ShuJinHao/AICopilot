@@ -1,4 +1,5 @@
 using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
+using AICopilot.Core.Rag.Ids;
 using AICopilot.EntityFrameworkCore.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
@@ -12,7 +13,9 @@ public class EmbeddingModelConfiguration : IEntityTypeConfiguration<EmbeddingMod
         builder.ToTable("embedding_models");
 
         builder.HasKey(e => e.Id);
-        builder.Property(e => e.Id).HasColumnName("id");
+        builder.Property(e => e.Id)
+            .HasConversion(id => id.Value, value => new EmbeddingModelId(value))
+            .HasColumnName("id");
 
         builder.Property(e => e.RowVersion).IsRowVersion();
 

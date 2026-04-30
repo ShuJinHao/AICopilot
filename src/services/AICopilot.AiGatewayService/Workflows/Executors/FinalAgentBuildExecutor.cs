@@ -3,6 +3,7 @@ using AICopilot.AiGatewayService.Safety;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
+using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.AiGateway.Specifications.ConversationTemplate;
 using AICopilot.Core.AiGateway.Specifications.LanguageModel;
 using AICopilot.Core.AiGateway.Specifications.Sessions;
@@ -34,7 +35,7 @@ public class FinalAgentBuildExecutor(
         var request = genContext.Request;
         logger.LogInformation("Starting final response build for session {SessionId}.", request.SessionId);
 
-            var session = await sessionRepository.FirstOrDefaultAsync(new SessionByIdSpec(request.SessionId), ct);
+            var session = await sessionRepository.FirstOrDefaultAsync(new SessionByIdSpec(new SessionId(request.SessionId)), ct);
             if (session == null)
             {
                 throw new ChatWorkflowException(

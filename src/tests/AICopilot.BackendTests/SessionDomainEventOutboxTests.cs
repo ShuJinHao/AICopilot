@@ -1,4 +1,5 @@
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
+using AICopilot.Core.AiGateway.Ids;
 using AICopilot.EntityFrameworkCore.Outbox;
 using System.Text.Json;
 
@@ -9,7 +10,7 @@ public sealed class SessionDomainEventOutboxTests
     [Fact]
     public void AddMessage_ShouldAppendMessageAddedDomainEvent()
     {
-        var session = new Session(Guid.NewGuid(), Guid.NewGuid());
+        var session = new Session(Guid.NewGuid(), ConversationTemplateId.New());
 
         session.AddMessage("hello from domain event test", MessageType.User);
 
@@ -26,7 +27,7 @@ public sealed class SessionDomainEventOutboxTests
     [Fact]
     public void SetOnsiteAttestation_ShouldAppendOnsiteAttestationDomainEvent()
     {
-        var session = new Session(Guid.NewGuid(), Guid.NewGuid());
+        var session = new Session(Guid.NewGuid(), ConversationTemplateId.New());
         var confirmedAt = DateTimeOffset.UtcNow;
         var expiresAt = confirmedAt.AddMinutes(5);
 

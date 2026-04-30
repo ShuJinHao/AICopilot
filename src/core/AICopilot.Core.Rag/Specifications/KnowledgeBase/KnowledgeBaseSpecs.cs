@@ -1,10 +1,11 @@
 using AICopilot.SharedKernel.Specification;
+using AICopilot.Core.Rag.Ids;
 
 namespace AICopilot.Core.Rag.Specifications.KnowledgeBase;
 
 public sealed class KnowledgeBaseByIdWithDocumentsSpec : Specification<Aggregates.KnowledgeBase.KnowledgeBase>
 {
-    public KnowledgeBaseByIdWithDocumentsSpec(Guid id)
+    public KnowledgeBaseByIdWithDocumentsSpec(KnowledgeBaseId id)
     {
         FilterCondition = knowledgeBase => knowledgeBase.Id == id;
         AddInclude(knowledgeBase => knowledgeBase.Documents);
@@ -13,7 +14,7 @@ public sealed class KnowledgeBaseByIdWithDocumentsSpec : Specification<Aggregate
 
 public sealed class KnowledgeBaseByDocumentIdWithDocumentChunksSpec : Specification<Aggregates.KnowledgeBase.KnowledgeBase>
 {
-    public KnowledgeBaseByDocumentIdWithDocumentChunksSpec(int documentId)
+    public KnowledgeBaseByDocumentIdWithDocumentChunksSpec(DocumentId documentId)
     {
         FilterCondition = knowledgeBase => knowledgeBase.Documents.Any(document => document.Id == documentId);
         AddInclude("Documents.Chunks");

@@ -1,4 +1,5 @@
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
+using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.AiGateway.Specifications.Sessions;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.Services.Contracts;
@@ -25,7 +26,9 @@ public class GetSessionQueryHandler(
                 "Current user id is missing or invalid."));
         }
 
-        var result = await repository.FirstOrDefaultAsync(new SessionByIdForUserSpec(request.Id, userId), cancellationToken);
+        var result = await repository.FirstOrDefaultAsync(
+            new SessionByIdForUserSpec(new SessionId(request.Id), userId),
+            cancellationToken);
         return result == null ? Result.NotFound() : Result.Success(SessionDtoMapper.Map(result));
     }
 }

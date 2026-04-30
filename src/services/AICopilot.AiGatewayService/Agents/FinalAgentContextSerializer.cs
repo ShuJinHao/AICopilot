@@ -3,6 +3,7 @@ using System.Text.Json.Serialization.Metadata;
 using AICopilot.AiGatewayService.Approvals;
 using AICopilot.AiGatewayService.Workflows;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
+using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.AiGateway.Specifications.Sessions;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
@@ -68,7 +69,7 @@ public sealed class FinalAgentContextSerializer(
         CancellationToken cancellationToken = default)
     {
         var session = await sessionRepository.FirstOrDefaultAsync(
-            new SessionByIdSpec(storedContext.SessionId),
+            new SessionByIdSpec(new SessionId(storedContext.SessionId)),
             cancellationToken);
 
         if (session == null)

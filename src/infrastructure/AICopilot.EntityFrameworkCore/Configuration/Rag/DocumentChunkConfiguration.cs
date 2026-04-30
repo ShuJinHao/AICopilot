@@ -1,6 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
+using AICopilot.Core.Rag.Ids;
 
 namespace AICopilot.EntityFrameworkCore.Configuration.Rag;
 
@@ -15,6 +16,7 @@ public class DocumentChunkConfiguration : IEntityTypeConfiguration<DocumentChunk
             .ValueGeneratedOnAdd();
 
         builder.Property(c => c.DocumentId)
+            .HasConversion(id => id.Value, value => new DocumentId(value))
             .IsRequired()
             .HasColumnName("document_id");
 

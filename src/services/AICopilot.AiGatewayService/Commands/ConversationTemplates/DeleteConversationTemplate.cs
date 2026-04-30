@@ -1,4 +1,5 @@
 ﻿using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
+using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Messaging;
@@ -17,7 +18,7 @@ public class DeleteConversationTemplateCommandHandler(
 {
     public async Task<Result> Handle(DeleteConversationTemplateCommand request, CancellationToken cancellationToken)
     {
-        var model = await modelRepo.GetByIdAsync(request.Id, cancellationToken);
+        var model = await modelRepo.GetByIdAsync(new ConversationTemplateId(request.Id), cancellationToken);
         if (model == null)
         {
             return Result.Success();

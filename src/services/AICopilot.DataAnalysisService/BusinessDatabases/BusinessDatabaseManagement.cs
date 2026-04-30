@@ -1,4 +1,5 @@
 ﻿using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
+using AICopilot.Core.DataAnalysis.Ids;
 using AICopilot.Core.DataAnalysis.Specifications.BusinessDatabase;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.Services.Contracts;
@@ -87,7 +88,7 @@ public class UpdateBusinessDatabaseCommandHandler(
 {
     public async Task<Result> Handle(UpdateBusinessDatabaseCommand request, CancellationToken cancellationToken)
     {
-        var entity = await repository.GetByIdAsync(request.Id, cancellationToken);
+        var entity = await repository.GetByIdAsync(new BusinessDatabaseId(request.Id), cancellationToken);
         if (entity == null)
         {
             return Result.NotFound();
@@ -168,7 +169,7 @@ public class DeleteBusinessDatabaseCommandHandler(
 {
     public async Task<Result> Handle(DeleteBusinessDatabaseCommand request, CancellationToken cancellationToken)
     {
-        var entity = await repository.GetByIdAsync(request.Id, cancellationToken);
+        var entity = await repository.GetByIdAsync(new BusinessDatabaseId(request.Id), cancellationToken);
         if (entity == null)
         {
             return Result.Success();
@@ -205,7 +206,9 @@ public class GetBusinessDatabaseQueryHandler(IReadRepository<BusinessDatabase> r
         GetBusinessDatabaseQuery request,
         CancellationToken cancellationToken)
     {
-        var entity = await repository.FirstOrDefaultAsync(new BusinessDatabaseByIdSpec(request.Id), cancellationToken);
+        var entity = await repository.FirstOrDefaultAsync(
+            new BusinessDatabaseByIdSpec(new BusinessDatabaseId(request.Id)),
+            cancellationToken);
         return entity == null ? Result.NotFound() : Result.Success(BusinessDatabaseDtoMapper.Map(entity));
     }
 }

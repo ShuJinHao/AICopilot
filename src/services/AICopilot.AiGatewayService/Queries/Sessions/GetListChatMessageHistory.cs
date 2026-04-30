@@ -1,4 +1,5 @@
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
+using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.AiGateway.Specifications.Sessions;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.Services.Contracts;
@@ -38,7 +39,7 @@ public class GetListChatMessageHistoryQueryHandler(
 
         var count = request.Count <= 0 ? 100 : request.Count;
         var session = await repository.FirstOrDefaultAsync(
-            new SessionWithMessagesByIdForUserSpec(request.SessionId, userId),
+            new SessionWithMessagesByIdForUserSpec(new SessionId(request.SessionId), userId),
             cancellationToken);
 
         if (session is null)

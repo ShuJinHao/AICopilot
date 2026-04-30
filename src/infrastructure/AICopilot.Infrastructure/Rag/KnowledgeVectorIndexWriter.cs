@@ -1,6 +1,7 @@
 using AICopilot.Embedding;
 using AICopilot.Embedding.Models;
 using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
+using AICopilot.Core.Rag.Ids;
 using AICopilot.Core.Rag.Specifications.EmbeddingModel;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Repository;
@@ -28,7 +29,7 @@ public sealed class KnowledgeVectorIndexWriter(
         }
 
         var embeddingModel = await embeddingModelRepository.FirstOrDefaultAsync(
-            new EmbeddingModelByIdSpec(request.EmbeddingModelId),
+            new EmbeddingModelByIdSpec(new EmbeddingModelId(request.EmbeddingModelId)),
             cancellationToken);
         if (embeddingModel is null)
         {
