@@ -1,0 +1,56 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting" Version="13.2.2" />
+    <PackageReference Include="Aspire.Hosting.Testing" Version="13.2.2" />
+    <PackageReference Include="coverlet.collector" Version="6.0.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="FluentAssertions" Version="8.8.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\hosts\AICopilot.AppHost\AICopilot.AppHost.csproj" />
+    <ProjectReference Include="..\..\hosts\AICopilot.HttpApi\AICopilot.HttpApi.csproj" />
+    <ProjectReference Include="..\..\infrastructure\AICopilot.AiRuntime\AICopilot.AiRuntime.csproj" />
+    <ProjectReference Include="..\..\infrastructure\AICopilot.Dapper\AICopilot.Dapper.csproj" />
+    <ProjectReference Include="..\..\infrastructure\AICopilot.EntityFrameworkCore\AICopilot.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="..\..\infrastructure\AICopilot.Infrastructure\AICopilot.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\services\AICopilot.AiGatewayService\AICopilot.AiGatewayService.csproj" />
+    <ProjectReference Include="..\..\services\AICopilot.DataAnalysisService\AICopilot.DataAnalysisService.csproj" />
+    <ProjectReference Include="..\..\services\AICopilot.McpService\AICopilot.McpService.csproj" />
+    <ProjectReference Include="..\..\services\AICopilot.Services.Contracts\AICopilot.Services.Contracts.csproj" />
+    <ProjectReference Include="..\..\services\AICopilot.Services.CrossCutting\AICopilot.Services.CrossCutting.csproj" />
+    <ProjectReference Include="..\..\shared\AICopilot.AgentPlugin\AICopilot.AgentPlugin.csproj" />
+    <ProjectReference Include="..\AICopilot.Testing.McpServer\AICopilot.Testing.McpServer.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Aspire.Hosting.ApplicationModel" />
+    <Using Include="Aspire.Hosting.Testing" />
+    <Using Include="FluentAssertions" />
+    <Using Include="Microsoft.Extensions.DependencyInjection" />
+    <Using Include="AICopilot.Services.Contracts" />
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>

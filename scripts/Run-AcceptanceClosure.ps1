@@ -39,16 +39,16 @@ function Invoke-Step {
 $results = @()
 
 $results += Invoke-Step -Name "Build HttpApi" -Script {
-    dotnet build src/Hosts/AICopilot.HttpApi/AICopilot.HttpApi.csproj /m:1 /p:UseSharedCompilation=false
+    dotnet build src/hosts/AICopilot.HttpApi/AICopilot.HttpApi.csproj /m:1 /p:UseSharedCompilation=false
 }
 $results += Invoke-Step -Name "Build AppHost" -Script {
-    dotnet build src/Hosts/AICopilot.AppHost/AICopilot.AppHost.csproj /m:1 /p:UseSharedCompilation=false
+    dotnet build src/hosts/AICopilot.AppHost/AICopilot.AppHost.csproj /m:1 /p:UseSharedCompilation=false
 }
 $results += Invoke-Step -Name "Build BackendTests" -Script {
-    dotnet build src/Tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj /m:1 /p:UseSharedCompilation=false
+    dotnet build src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj /m:1 /p:UseSharedCompilation=false
 }
 $results += Invoke-Step -Name "Build Frontend" -Script {
-    Push-Location src/Vues/AICopilot.Web
+    Push-Location src/vues/AICopilot.Web
     try {
         npm run build
     } finally {
@@ -62,7 +62,7 @@ $results += Invoke-Step -Name "Check Architecture Boundaries" -Script {
     powershell -ExecutionPolicy Bypass -File .\scripts\Test-ArchitectureBoundaries.ps1
 }
 $results += Invoke-Step -Name "Run Focused Unit Tests" -Script {
-    dotnet test src/Tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "FullyQualifiedName~SqlGuardrailTests|FullyQualifiedName~SemanticSqlGenerationTests|FullyQualifiedName~TextToSqlReadOnlyTests|FullyQualifiedName~AgentScopeLifecycleTests"
+    dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "FullyQualifiedName~SqlGuardrailTests|FullyQualifiedName~SemanticSqlGenerationTests|FullyQualifiedName~TextToSqlReadOnlyTests|FullyQualifiedName~AgentScopeLifecycleTests"
 }
 
 $dockerInfo = Invoke-Step -Name "Check Docker" -Script {
@@ -72,16 +72,16 @@ $results += $dockerInfo
 
 if ($dockerInfo.Succeeded) {
     $results += Invoke-Step -Name "Run Migration And Redis Verification Tests" -Script {
-        dotnet test src/Tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "FullyQualifiedName~AcceptanceClosureVerificationTests"
+        dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "FullyQualifiedName~AcceptanceClosureVerificationTests"
     }
     $results += Invoke-Step -Name "Run Runtime Smoke - Missing Template Error Chunk" -Script {
-        dotnet test src/Tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "FullyQualifiedName~Phase25RuntimeSmokeTests.ChatFlow_ShouldReturnConfigurationErrorChunk_WhenSessionTemplateIsMissing"
+        dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "FullyQualifiedName~Phase25RuntimeSmokeTests.ChatFlow_ShouldReturnConfigurationErrorChunk_WhenSessionTemplateIsMissing"
     }
     $results += Invoke-Step -Name "Run Runtime Smoke - Concurrent Approval Idempotency" -Script {
-        dotnet test src/Tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "FullyQualifiedName~Phase25RuntimeSmokeTests.ApprovalDecision_ShouldOnlyExecuteOnce_WhenSameCallIsSubmittedConcurrently"
+        dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "FullyQualifiedName~Phase25RuntimeSmokeTests.ApprovalDecision_ShouldOnlyExecuteOnce_WhenSameCallIsSubmittedConcurrently"
     }
     $results += Invoke-Step -Name "Run Runtime Smoke - Onsite Attestation Gate" -Script {
-        dotnet test src/Tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "FullyQualifiedName~Phase43SafetyQualityTests.ApprovalDecision_ShouldRequireValidOnsiteAttestation_AndExplicitReconfirmation"
+        dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "FullyQualifiedName~Phase43SafetyQualityTests.ApprovalDecision_ShouldRequireValidOnsiteAttestation_AndExplicitReconfirmation"
     }
 } else {
     Write-Warning "Docker server is unavailable. Skipping container-backed schema, Redis, and runtime smoke checks."

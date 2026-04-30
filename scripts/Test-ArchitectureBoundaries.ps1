@@ -3,11 +3,11 @@ param()
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$coreRoot = Join-Path $repoRoot "src\Core"
-$servicesRoot = Join-Path $repoRoot "src\Services"
-$infrastructureRoot = Join-Path $repoRoot "src\Infrastructure"
-$agentPluginRoot = Join-Path $repoRoot "src\Shared\AICopilot.AgentPlugin"
-$ragWorkerRoot = Join-Path $repoRoot "src\Hosts\AICopilot.RagWorker"
+$coreRoot = Join-Path $repoRoot "src\core"
+$servicesRoot = Join-Path $repoRoot "src\services"
+$infrastructureRoot = Join-Path $repoRoot "src\infrastructure"
+$agentPluginRoot = Join-Path $repoRoot "src\shared\AICopilot.AgentPlugin"
+$ragWorkerRoot = Join-Path $repoRoot "src\hosts\AICopilot.RagWorker"
 
 $coreForbiddenPatterns = @(
     "using\s+AICopilot\.Services",

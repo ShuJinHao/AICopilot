@@ -1,4 +1,4 @@
-﻿# AICopilot Acceptance Closure Report
+# AICopilot Acceptance Closure Report
 
 - GeneratedAt: 2026-04-24 14:58:52
 - Repository: C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot
@@ -25,28 +25,28 @@
 ```text
 正在确定要还原的项目…
   所有项目均是最新的，无法还原。
-  AICopilot.SharedKernel -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Shared\AICopilot.SharedKernel\bin\Debug\net10.0\AICopilot.SharedKernel.dll
-  AICopilot.Core.AiGateway -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.AiGateway\bin\Debug\net10.0\AICopilot.Core.AiGateway.dll
-  AICopilot.Core.DataAnalysis -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.DataAnalysis\bin\Debug\net10.0\AICopilot.Core.DataAnalysis.dll
-  AICopilot.Core.McpServer -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.McpServer\bin\Debug\net10.0\AICopilot.Core.McpServer.dll
-  AICopilot.Core.Rag -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.Rag\bin\Debug\net10.0\AICopilot.Core.Rag.dll
-  AICopilot.Visualization -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Shared\AICopilot.Visualization\bin\Debug\net10.0\AICopilot.Visualization.dll
-  AICopilot.Services.Contracts -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.Services.Contracts\bin\Debug\net10.0\AICopilot.Services.Contracts.dll
-  AICopilot.AiRuntime -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.AiRuntime\bin\Debug\net10.0\AICopilot.AiRuntime.dll
-  AICopilot.Dapper -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.Dapper\bin\Debug\net10.0\AICopilot.Dapper.dll
-  AICopilot.Embedding -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.Embedding\bin\Debug\net10.0\AICopilot.Embedding.dll
-  AICopilot.EntityFrameworkCore -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.EntityFrameworkCore\bin\Debug\net10.0\AICopilot.EntityFrameworkCore.dll
-  AICopilot.EventBus -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.EventBus\bin\Debug\net10.0\AICopilot.EventBus.dll
-  AICopilot.AgentPlugin -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Shared\AICopilot.AgentPlugin\bin\Debug\net10.0\AICopilot.AgentPlugin.dll
-  AICopilot.Infrastructure -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.Infrastructure\bin\Debug\net10.0\AICopilot.Infrastructure.dll
-  AICopilot.Services.CrossCutting -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.Services.CrossCutting\bin\Debug\net10.0\AICopilot.Services.CrossCutting.dll
-  AICopilot.AiGatewayService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.AiGatewayService\bin\Debug\net10.0\AICopilot.AiGatewayService.dll
-  AICopilot.DataAnalysisService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.DataAnalysisService\bin\Debug\net10.0\AICopilot.DataAnalysisService.dll
-  AICopilot.IdentityService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.IdentityService\bin\Debug\net10.0\AICopilot.IdentityService.dll
-  AICopilot.McpService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.McpService\bin\Debug\net10.0\AICopilot.McpService.dll
-  AICopilot.RagService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.RagService\bin\Debug\net10.0\AICopilot.RagService.dll
-  AICopilot.ServiceDefaults -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.ServiceDefaults\bin\Debug\net10.0\AICopilot.ServiceDefaults.dll
-  AICopilot.HttpApi -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.HttpApi\bin\Debug\net10.0\AICopilot.HttpApi.dll
+  AICopilot.SharedKernel -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\shared\AICopilot.SharedKernel\bin\Debug\net10.0\AICopilot.SharedKernel.dll
+  AICopilot.Core.AiGateway -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.AiGateway\bin\Debug\net10.0\AICopilot.Core.AiGateway.dll
+  AICopilot.Core.DataAnalysis -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.DataAnalysis\bin\Debug\net10.0\AICopilot.Core.DataAnalysis.dll
+  AICopilot.Core.McpServer -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.McpServer\bin\Debug\net10.0\AICopilot.Core.McpServer.dll
+  AICopilot.Core.Rag -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.Rag\bin\Debug\net10.0\AICopilot.Core.Rag.dll
+  AICopilot.Visualization -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\shared\AICopilot.Visualization\bin\Debug\net10.0\AICopilot.Visualization.dll
+  AICopilot.Services.Contracts -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.Services.Contracts\bin\Debug\net10.0\AICopilot.Services.Contracts.dll
+  AICopilot.AiRuntime -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.AiRuntime\bin\Debug\net10.0\AICopilot.AiRuntime.dll
+  AICopilot.Dapper -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.Dapper\bin\Debug\net10.0\AICopilot.Dapper.dll
+  AICopilot.Embedding -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.Embedding\bin\Debug\net10.0\AICopilot.Embedding.dll
+  AICopilot.EntityFrameworkCore -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.EntityFrameworkCore\bin\Debug\net10.0\AICopilot.EntityFrameworkCore.dll
+  AICopilot.EventBus -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.EventBus\bin\Debug\net10.0\AICopilot.EventBus.dll
+  AICopilot.AgentPlugin -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\shared\AICopilot.AgentPlugin\bin\Debug\net10.0\AICopilot.AgentPlugin.dll
+  AICopilot.Infrastructure -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.Infrastructure\bin\Debug\net10.0\AICopilot.Infrastructure.dll
+  AICopilot.Services.CrossCutting -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.Services.CrossCutting\bin\Debug\net10.0\AICopilot.Services.CrossCutting.dll
+  AICopilot.AiGatewayService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.AiGatewayService\bin\Debug\net10.0\AICopilot.AiGatewayService.dll
+  AICopilot.DataAnalysisService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.DataAnalysisService\bin\Debug\net10.0\AICopilot.DataAnalysisService.dll
+  AICopilot.IdentityService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.IdentityService\bin\Debug\net10.0\AICopilot.IdentityService.dll
+  AICopilot.McpService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.McpService\bin\Debug\net10.0\AICopilot.McpService.dll
+  AICopilot.RagService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.RagService\bin\Debug\net10.0\AICopilot.RagService.dll
+  AICopilot.ServiceDefaults -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.ServiceDefaults\bin\Debug\net10.0\AICopilot.ServiceDefaults.dll
+  AICopilot.HttpApi -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.HttpApi\bin\Debug\net10.0\AICopilot.HttpApi.dll
 
 已成功生成。
     0 个警告
@@ -60,31 +60,31 @@
 ```text
 正在确定要还原的项目…
   所有项目均是最新的，无法还原。
-  AICopilot.SharedKernel -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Shared\AICopilot.SharedKernel\bin\Debug\net10.0\AICopilot.SharedKernel.dll
-  AICopilot.Core.AiGateway -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.AiGateway\bin\Debug\net10.0\AICopilot.Core.AiGateway.dll
-  AICopilot.Core.DataAnalysis -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.DataAnalysis\bin\Debug\net10.0\AICopilot.Core.DataAnalysis.dll
-  AICopilot.Core.McpServer -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.McpServer\bin\Debug\net10.0\AICopilot.Core.McpServer.dll
-  AICopilot.Core.Rag -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.Rag\bin\Debug\net10.0\AICopilot.Core.Rag.dll
-  AICopilot.Visualization -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Shared\AICopilot.Visualization\bin\Debug\net10.0\AICopilot.Visualization.dll
-  AICopilot.Services.Contracts -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.Services.Contracts\bin\Debug\net10.0\AICopilot.Services.Contracts.dll
-  AICopilot.AiRuntime -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.AiRuntime\bin\Debug\net10.0\AICopilot.AiRuntime.dll
-  AICopilot.Dapper -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.Dapper\bin\Debug\net10.0\AICopilot.Dapper.dll
-  AICopilot.Embedding -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.Embedding\bin\Debug\net10.0\AICopilot.Embedding.dll
-  AICopilot.EntityFrameworkCore -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.EntityFrameworkCore\bin\Debug\net10.0\AICopilot.EntityFrameworkCore.dll
-  AICopilot.EventBus -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.EventBus\bin\Debug\net10.0\AICopilot.EventBus.dll
-  AICopilot.AgentPlugin -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Shared\AICopilot.AgentPlugin\bin\Debug\net10.0\AICopilot.AgentPlugin.dll
-  AICopilot.Infrastructure -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.Infrastructure\bin\Debug\net10.0\AICopilot.Infrastructure.dll
-  AICopilot.Services.CrossCutting -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.Services.CrossCutting\bin\Debug\net10.0\AICopilot.Services.CrossCutting.dll
-  AICopilot.AiGatewayService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.AiGatewayService\bin\Debug\net10.0\AICopilot.AiGatewayService.dll
-  AICopilot.DataAnalysisService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.DataAnalysisService\bin\Debug\net10.0\AICopilot.DataAnalysisService.dll
-  AICopilot.IdentityService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.IdentityService\bin\Debug\net10.0\AICopilot.IdentityService.dll
-  AICopilot.McpService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.McpService\bin\Debug\net10.0\AICopilot.McpService.dll
-  AICopilot.RagService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.RagService\bin\Debug\net10.0\AICopilot.RagService.dll
-  AICopilot.ServiceDefaults -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.ServiceDefaults\bin\Debug\net10.0\AICopilot.ServiceDefaults.dll
-  AICopilot.HttpApi -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.HttpApi\bin\Debug\net10.0\AICopilot.HttpApi.dll
-  AICopilot.MigrationWorkApp -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.MigrationWorkApp\bin\Debug\net10.0\AICopilot.MigrationWorkApp.dll
-  AICopilot.RagWorker -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.RagWorker\bin\Debug\net10.0\AICopilot.RagWorker.dll
-  AICopilot.AppHost -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.AppHost\bin\Debug\net10.0\AICopilot.AppHost.dll
+  AICopilot.SharedKernel -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\shared\AICopilot.SharedKernel\bin\Debug\net10.0\AICopilot.SharedKernel.dll
+  AICopilot.Core.AiGateway -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.AiGateway\bin\Debug\net10.0\AICopilot.Core.AiGateway.dll
+  AICopilot.Core.DataAnalysis -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.DataAnalysis\bin\Debug\net10.0\AICopilot.Core.DataAnalysis.dll
+  AICopilot.Core.McpServer -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.McpServer\bin\Debug\net10.0\AICopilot.Core.McpServer.dll
+  AICopilot.Core.Rag -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.Rag\bin\Debug\net10.0\AICopilot.Core.Rag.dll
+  AICopilot.Visualization -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\shared\AICopilot.Visualization\bin\Debug\net10.0\AICopilot.Visualization.dll
+  AICopilot.Services.Contracts -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.Services.Contracts\bin\Debug\net10.0\AICopilot.Services.Contracts.dll
+  AICopilot.AiRuntime -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.AiRuntime\bin\Debug\net10.0\AICopilot.AiRuntime.dll
+  AICopilot.Dapper -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.Dapper\bin\Debug\net10.0\AICopilot.Dapper.dll
+  AICopilot.Embedding -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.Embedding\bin\Debug\net10.0\AICopilot.Embedding.dll
+  AICopilot.EntityFrameworkCore -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.EntityFrameworkCore\bin\Debug\net10.0\AICopilot.EntityFrameworkCore.dll
+  AICopilot.EventBus -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.EventBus\bin\Debug\net10.0\AICopilot.EventBus.dll
+  AICopilot.AgentPlugin -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\shared\AICopilot.AgentPlugin\bin\Debug\net10.0\AICopilot.AgentPlugin.dll
+  AICopilot.Infrastructure -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.Infrastructure\bin\Debug\net10.0\AICopilot.Infrastructure.dll
+  AICopilot.Services.CrossCutting -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.Services.CrossCutting\bin\Debug\net10.0\AICopilot.Services.CrossCutting.dll
+  AICopilot.AiGatewayService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.AiGatewayService\bin\Debug\net10.0\AICopilot.AiGatewayService.dll
+  AICopilot.DataAnalysisService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.DataAnalysisService\bin\Debug\net10.0\AICopilot.DataAnalysisService.dll
+  AICopilot.IdentityService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.IdentityService\bin\Debug\net10.0\AICopilot.IdentityService.dll
+  AICopilot.McpService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.McpService\bin\Debug\net10.0\AICopilot.McpService.dll
+  AICopilot.RagService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.RagService\bin\Debug\net10.0\AICopilot.RagService.dll
+  AICopilot.ServiceDefaults -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.ServiceDefaults\bin\Debug\net10.0\AICopilot.ServiceDefaults.dll
+  AICopilot.HttpApi -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.HttpApi\bin\Debug\net10.0\AICopilot.HttpApi.dll
+  AICopilot.MigrationWorkApp -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.MigrationWorkApp\bin\Debug\net10.0\AICopilot.MigrationWorkApp.dll
+  AICopilot.RagWorker -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.RagWorker\bin\Debug\net10.0\AICopilot.RagWorker.dll
+  AICopilot.AppHost -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.AppHost\bin\Debug\net10.0\AICopilot.AppHost.dll
 
 已成功生成。
     0 个警告
@@ -98,33 +98,33 @@
 ```text
 正在确定要还原的项目…
   所有项目均是最新的，无法还原。
-  AICopilot.SharedKernel -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Shared\AICopilot.SharedKernel\bin\Debug\net10.0\AICopilot.SharedKernel.dll
-  AICopilot.Core.AiGateway -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.AiGateway\bin\Debug\net10.0\AICopilot.Core.AiGateway.dll
-  AICopilot.Core.DataAnalysis -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.DataAnalysis\bin\Debug\net10.0\AICopilot.Core.DataAnalysis.dll
-  AICopilot.Core.McpServer -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.McpServer\bin\Debug\net10.0\AICopilot.Core.McpServer.dll
-  AICopilot.Core.Rag -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.Rag\bin\Debug\net10.0\AICopilot.Core.Rag.dll
-  AICopilot.Visualization -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Shared\AICopilot.Visualization\bin\Debug\net10.0\AICopilot.Visualization.dll
-  AICopilot.Services.Contracts -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.Services.Contracts\bin\Debug\net10.0\AICopilot.Services.Contracts.dll
-  AICopilot.AiRuntime -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.AiRuntime\bin\Debug\net10.0\AICopilot.AiRuntime.dll
-  AICopilot.Dapper -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.Dapper\bin\Debug\net10.0\AICopilot.Dapper.dll
-  AICopilot.Embedding -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.Embedding\bin\Debug\net10.0\AICopilot.Embedding.dll
-  AICopilot.EntityFrameworkCore -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.EntityFrameworkCore\bin\Debug\net10.0\AICopilot.EntityFrameworkCore.dll
-  AICopilot.EventBus -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.EventBus\bin\Debug\net10.0\AICopilot.EventBus.dll
-  AICopilot.AgentPlugin -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Shared\AICopilot.AgentPlugin\bin\Debug\net10.0\AICopilot.AgentPlugin.dll
-  AICopilot.Infrastructure -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.Infrastructure\bin\Debug\net10.0\AICopilot.Infrastructure.dll
-  AICopilot.Services.CrossCutting -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.Services.CrossCutting\bin\Debug\net10.0\AICopilot.Services.CrossCutting.dll
-  AICopilot.AiGatewayService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.AiGatewayService\bin\Debug\net10.0\AICopilot.AiGatewayService.dll
-  AICopilot.DataAnalysisService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.DataAnalysisService\bin\Debug\net10.0\AICopilot.DataAnalysisService.dll
-  AICopilot.IdentityService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.IdentityService\bin\Debug\net10.0\AICopilot.IdentityService.dll
-  AICopilot.McpService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.McpService\bin\Debug\net10.0\AICopilot.McpService.dll
-  AICopilot.RagService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.RagService\bin\Debug\net10.0\AICopilot.RagService.dll
-  AICopilot.ServiceDefaults -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.ServiceDefaults\bin\Debug\net10.0\AICopilot.ServiceDefaults.dll
-  AICopilot.HttpApi -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.HttpApi\bin\Debug\net10.0\AICopilot.HttpApi.dll
-  AICopilot.MigrationWorkApp -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.MigrationWorkApp\bin\Debug\net10.0\AICopilot.MigrationWorkApp.dll
-  AICopilot.RagWorker -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.RagWorker\bin\Debug\net10.0\AICopilot.RagWorker.dll
-  AICopilot.AppHost -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.AppHost\bin\Debug\net10.0\AICopilot.AppHost.dll
-  AICopilot.Testing.McpServer -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Tests\AICopilot.Testing.McpServer\bin\Debug\net10.0\AICopilot.Testing.McpServer.dll
-  AICopilot.BackendTests -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Tests\AICopilot.BackendTests\bin\Debug\net10.0\AICopilot.BackendTests.dll
+  AICopilot.SharedKernel -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\shared\AICopilot.SharedKernel\bin\Debug\net10.0\AICopilot.SharedKernel.dll
+  AICopilot.Core.AiGateway -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.AiGateway\bin\Debug\net10.0\AICopilot.Core.AiGateway.dll
+  AICopilot.Core.DataAnalysis -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.DataAnalysis\bin\Debug\net10.0\AICopilot.Core.DataAnalysis.dll
+  AICopilot.Core.McpServer -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.McpServer\bin\Debug\net10.0\AICopilot.Core.McpServer.dll
+  AICopilot.Core.Rag -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.Rag\bin\Debug\net10.0\AICopilot.Core.Rag.dll
+  AICopilot.Visualization -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\shared\AICopilot.Visualization\bin\Debug\net10.0\AICopilot.Visualization.dll
+  AICopilot.Services.Contracts -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.Services.Contracts\bin\Debug\net10.0\AICopilot.Services.Contracts.dll
+  AICopilot.AiRuntime -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.AiRuntime\bin\Debug\net10.0\AICopilot.AiRuntime.dll
+  AICopilot.Dapper -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.Dapper\bin\Debug\net10.0\AICopilot.Dapper.dll
+  AICopilot.Embedding -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.Embedding\bin\Debug\net10.0\AICopilot.Embedding.dll
+  AICopilot.EntityFrameworkCore -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.EntityFrameworkCore\bin\Debug\net10.0\AICopilot.EntityFrameworkCore.dll
+  AICopilot.EventBus -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.EventBus\bin\Debug\net10.0\AICopilot.EventBus.dll
+  AICopilot.AgentPlugin -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\shared\AICopilot.AgentPlugin\bin\Debug\net10.0\AICopilot.AgentPlugin.dll
+  AICopilot.Infrastructure -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.Infrastructure\bin\Debug\net10.0\AICopilot.Infrastructure.dll
+  AICopilot.Services.CrossCutting -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.Services.CrossCutting\bin\Debug\net10.0\AICopilot.Services.CrossCutting.dll
+  AICopilot.AiGatewayService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.AiGatewayService\bin\Debug\net10.0\AICopilot.AiGatewayService.dll
+  AICopilot.DataAnalysisService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.DataAnalysisService\bin\Debug\net10.0\AICopilot.DataAnalysisService.dll
+  AICopilot.IdentityService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.IdentityService\bin\Debug\net10.0\AICopilot.IdentityService.dll
+  AICopilot.McpService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.McpService\bin\Debug\net10.0\AICopilot.McpService.dll
+  AICopilot.RagService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.RagService\bin\Debug\net10.0\AICopilot.RagService.dll
+  AICopilot.ServiceDefaults -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.ServiceDefaults\bin\Debug\net10.0\AICopilot.ServiceDefaults.dll
+  AICopilot.HttpApi -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.HttpApi\bin\Debug\net10.0\AICopilot.HttpApi.dll
+  AICopilot.MigrationWorkApp -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.MigrationWorkApp\bin\Debug\net10.0\AICopilot.MigrationWorkApp.dll
+  AICopilot.RagWorker -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.RagWorker\bin\Debug\net10.0\AICopilot.RagWorker.dll
+  AICopilot.AppHost -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.AppHost\bin\Debug\net10.0\AICopilot.AppHost.dll
+  AICopilot.Testing.McpServer -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\tests\AICopilot.Testing.McpServer\bin\Debug\net10.0\AICopilot.Testing.McpServer.dll
+  AICopilot.BackendTests -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\tests\AICopilot.BackendTests\bin\Debug\net10.0\AICopilot.BackendTests.dll
 
 已成功生成。
     0 个警告
@@ -179,7 +179,7 @@ At line:1 char:1
 + ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     + CategoryInfo          : NotSpecified: ([33m:String) [], RemoteException
     + FullyQualifiedErrorId : NativeCommandError
- 
+
 (!) Some chunks are larger than 500 kB after minification. Consider:
 - Using dynamic import() to code-split the application
 - Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-m
@@ -197,200 +197,200 @@ At C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\scripts\Run-Accep
 +     ~~~~~~~~~~~~~~~~
     + CategoryInfo          : NotSpecified: (warning: in the... Git touches it:String) [], RemoteException
     + FullyQualifiedErrorId : NativeCommandError
- 
-warning: in the working copy of 'src/Core/AICopilot.Core.AiGateway/Aggregates/ConversationTemplate/ConversationTemplate
+
+warning: in the working copy of 'src/core/AICopilot.Core.AiGateway/Aggregates/ConversationTemplate/ConversationTemplate
 .cs', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Core/AICopilot.Core.AiGateway/Aggregates/LanguageModel/LanguageModel.cs', LF will 
+warning: in the working copy of 'src/core/AICopilot.Core.AiGateway/Aggregates/LanguageModel/LanguageModel.cs', LF will
 be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Core/AICopilot.Core.AiGateway/Aggregates/Sessions/Session.cs', LF will be replaced
+warning: in the working copy of 'src/core/AICopilot.Core.AiGateway/Aggregates/Sessions/Session.cs', LF will be replaced
  by CRLF the next time Git touches it
-warning: in the working copy of 'src/Core/AICopilot.Core.DataAnalysis/Aggregates/BusinessDatabase/BusinessDatabase.cs',
+warning: in the working copy of 'src/core/AICopilot.Core.DataAnalysis/Aggregates/BusinessDatabase/BusinessDatabase.cs',
  LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Core/AICopilot.Core.McpServer/Aggregates/McpServerInfo/McpServerInfo.cs', LF will 
+warning: in the working copy of 'src/core/AICopilot.Core.McpServer/Aggregates/McpServerInfo/McpServerInfo.cs', LF will
 be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Core/AICopilot.Core.Rag/Aggregates/EmbeddingModel/EmbeddingModel.cs', LF will be r
+warning: in the working copy of 'src/core/AICopilot.Core.Rag/Aggregates/EmbeddingModel/EmbeddingModel.cs', LF will be r
 eplaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Core/AICopilot.Core.Rag/Aggregates/KnowledgeBase/KnowledgeBase.cs', LF will be rep
+warning: in the working copy of 'src/core/AICopilot.Core.Rag/Aggregates/KnowledgeBase/KnowledgeBase.cs', LF will be rep
 laced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Hosts/AICopilot.AppHost/AICopilot.AppHost.csproj', LF will be replaced by CRLF the
+warning: in the working copy of 'src/hosts/AICopilot.AppHost/AICopilot.AppHost.csproj', LF will be replaced by CRLF the
  next time Git touches it
-warning: in the working copy of 'src/Hosts/AICopilot.AppHost/AppHost.cs', LF will be replaced by CRLF the next time Git
+warning: in the working copy of 'src/hosts/AICopilot.AppHost/AppHost.cs', LF will be replaced by CRLF the next time Git
  touches it
-warning: in the working copy of 'src/Hosts/AICopilot.HttpApi/AICopilot.HttpApi.csproj', LF will be replaced by CRLF the
+warning: in the working copy of 'src/hosts/AICopilot.HttpApi/AICopilot.HttpApi.csproj', LF will be replaced by CRLF the
  next time Git touches it
-warning: in the working copy of 'src/Hosts/AICopilot.HttpApi/Controllers/AiGatewayController.cs', LF will be replaced b
+warning: in the working copy of 'src/hosts/AICopilot.HttpApi/Controllers/AiGatewayController.cs', LF will be replaced b
 y CRLF the next time Git touches it
-warning: in the working copy of 'src/Hosts/AICopilot.HttpApi/Controllers/IdentityController.cs', LF will be replaced by
+warning: in the working copy of 'src/hosts/AICopilot.HttpApi/Controllers/IdentityController.cs', LF will be replaced by
  CRLF the next time Git touches it
-warning: in the working copy of 'src/Hosts/AICopilot.HttpApi/Controllers/RagController.cs', LF will be replaced by CRLF
+warning: in the working copy of 'src/hosts/AICopilot.HttpApi/Controllers/RagController.cs', LF will be replaced by CRLF
  the next time Git touches it
-warning: in the working copy of 'src/Hosts/AICopilot.HttpApi/DependencyInjection.cs', LF will be replaced by CRLF the n
+warning: in the working copy of 'src/hosts/AICopilot.HttpApi/DependencyInjection.cs', LF will be replaced by CRLF the n
 ext time Git touches it
-warning: in the working copy of 'src/Hosts/AICopilot.HttpApi/Infrastructure/ApiControllerBase.cs', LF will be replaced 
+warning: in the working copy of 'src/hosts/AICopilot.HttpApi/Infrastructure/ApiControllerBase.cs', LF will be replaced
 by CRLF the next time Git touches it
-warning: in the working copy of 'src/Hosts/AICopilot.HttpApi/Infrastructure/UseCaseExceptionHandler.cs', LF will be rep
+warning: in the working copy of 'src/hosts/AICopilot.HttpApi/Infrastructure/UseCaseExceptionHandler.cs', LF will be rep
 laced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Hosts/AICopilot.HttpApi/Models/IdentityModels.cs', LF will be replaced by CRLF the
+warning: in the working copy of 'src/hosts/AICopilot.HttpApi/Models/IdentityModels.cs', LF will be replaced by CRLF the
  next time Git touches it
-warning: in the working copy of 'src/Hosts/AICopilot.HttpApi/Program.cs', LF will be replaced by CRLF the next time Git
+warning: in the working copy of 'src/hosts/AICopilot.HttpApi/Program.cs', LF will be replaced by CRLF the next time Git
  touches it
-warning: in the working copy of 'src/Hosts/AICopilot.HttpApi/appsettings.Development.json', LF will be replaced by CRLF
+warning: in the working copy of 'src/hosts/AICopilot.HttpApi/appsettings.Development.json', LF will be replaced by CRLF
  the next time Git touches it
-warning: in the working copy of 'src/Hosts/AICopilot.HttpApi/appsettings.json', LF will be replaced by CRLF the next ti
+warning: in the working copy of 'src/hosts/AICopilot.HttpApi/appsettings.json', LF will be replaced by CRLF the next ti
 me Git touches it
-warning: in the working copy of 'src/Hosts/AICopilot.MigrationWorkApp/AICopilot.MigrationWorkApp.csproj', LF will be re
+warning: in the working copy of 'src/hosts/AICopilot.MigrationWorkApp/AICopilot.MigrationWorkApp.csproj', LF will be re
 placed by CRLF the next time Git touches it
-warning: in the working copy of 'src/Hosts/AICopilot.MigrationWorkApp/Program.cs', LF will be replaced by CRLF the next
+warning: in the working copy of 'src/hosts/AICopilot.MigrationWorkApp/Program.cs', LF will be replaced by CRLF the next
  time Git touches it
-warning: in the working copy of 'src/Hosts/AICopilot.MigrationWorkApp/Worker.cs', LF will be replaced by CRLF the next 
+warning: in the working copy of 'src/hosts/AICopilot.MigrationWorkApp/Worker.cs', LF will be replaced by CRLF the next
 time Git touches it
-warning: in the working copy of 'src/Hosts/AICopilot.RagWorker/AICopilot.RagWorker.csproj', LF will be replaced by CRLF
+warning: in the working copy of 'src/hosts/AICopilot.RagWorker/AICopilot.RagWorker.csproj', LF will be replaced by CRLF
  the next time Git touches it
-warning: in the working copy of 'src/Hosts/AICopilot.RagWorker/Consumers/DocumentUploadedConsumer.cs', LF will be repla
+warning: in the working copy of 'src/hosts/AICopilot.RagWorker/Consumers/DocumentUploadedConsumer.cs', LF will be repla
 ced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Hosts/AICopilot.RagWorker/Program.cs', LF will be replaced by CRLF the next time G
+warning: in the working copy of 'src/hosts/AICopilot.RagWorker/Program.cs', LF will be replaced by CRLF the next time G
 it touches it
-warning: in the working copy of 'src/Hosts/AICopilot.ServiceDefaults/AICopilot.ServiceDefaults.csproj', LF will be repl
+warning: in the working copy of 'src/hosts/AICopilot.ServiceDefaults/AICopilot.ServiceDefaults.csproj', LF will be repl
 aced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Infrastructure/AICopilot.Dapper/AICopilot.Dapper.csproj', LF will be replaced by C
+warning: in the working copy of 'src/infrastructure/AICopilot.Dapper/AICopilot.Dapper.csproj', LF will be replaced by C
 RLF the next time Git touches it
-warning: in the working copy of 'src/Infrastructure/AICopilot.Dapper/DapperDatabaseConnector.cs', LF will be replaced b
+warning: in the working copy of 'src/infrastructure/AICopilot.Dapper/DapperDatabaseConnector.cs', LF will be replaced b
 y CRLF the next time Git touches it
-warning: in the working copy of 'src/Infrastructure/AICopilot.Dapper/DependencyInjection.cs', LF will be replaced by CR
+warning: in the working copy of 'src/infrastructure/AICopilot.Dapper/DependencyInjection.cs', LF will be replaced by CR
 LF the next time Git touches it
-warning: in the working copy of 'src/Infrastructure/AICopilot.Embedding/AICopilot.Embedding.csproj', LF will be replace
+warning: in the working copy of 'src/infrastructure/AICopilot.Embedding/AICopilot.Embedding.csproj', LF will be replace
 d by CRLF the next time Git touches it
-warning: in the working copy of 'src/Infrastructure/AICopilot.Embedding/DependencyInjection.cs', LF will be replaced by
+warning: in the working copy of 'src/infrastructure/AICopilot.Embedding/DependencyInjection.cs', LF will be replaced by
  CRLF the next time Git touches it
-warning: in the working copy of 'src/Infrastructure/AICopilot.Embedding/EmbeddingGeneratorFactory.cs', LF will be repla
+warning: in the working copy of 'src/infrastructure/AICopilot.Embedding/EmbeddingGeneratorFactory.cs', LF will be repla
 ced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Infrastructure/AICopilot.EntityFrameworkCore/AICopilot.EntityFrameworkCore.csproj'
+warning: in the working copy of 'src/infrastructure/AICopilot.EntityFrameworkCore/AICopilot.EntityFrameworkCore.csproj'
 , LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Infrastructure/AICopilot.EntityFrameworkCore/AiCopilotDbContext.cs', LF will be re
+warning: in the working copy of 'src/infrastructure/AICopilot.EntityFrameworkCore/AiCopilotDbContext.cs', LF will be re
 placed by CRLF the next time Git touches it
-warning: in the working copy of 'src/Infrastructure/AICopilot.EntityFrameworkCore/Configuration/AiGateway/LanguageModel
+warning: in the working copy of 'src/infrastructure/AICopilot.EntityFrameworkCore/Configuration/AiGateway/LanguageModel
 Configuration.cs', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Infrastructure/AICopilot.EntityFrameworkCore/Configuration/AiGateway/SessionConfig
+warning: in the working copy of 'src/infrastructure/AICopilot.EntityFrameworkCore/Configuration/AiGateway/SessionConfig
 uration.cs', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Infrastructure/AICopilot.EntityFrameworkCore/Configuration/DataAnalysis/BusinessDa
+warning: in the working copy of 'src/infrastructure/AICopilot.EntityFrameworkCore/Configuration/DataAnalysis/BusinessDa
 tabaseConfiguration.cs', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Infrastructure/AICopilot.EntityFrameworkCore/Configuration/McpServer/McpServerConf
+warning: in the working copy of 'src/infrastructure/AICopilot.EntityFrameworkCore/Configuration/McpServer/McpServerConf
 iguration.cs', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Infrastructure/AICopilot.EntityFrameworkCore/Configuration/Rag/EmbeddingModelConfi
+warning: in the working copy of 'src/infrastructure/AICopilot.EntityFrameworkCore/Configuration/Rag/EmbeddingModelConfi
 guration.cs', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Infrastructure/AICopilot.EntityFrameworkCore/DataQueryService.cs', LF will be repl
+warning: in the working copy of 'src/infrastructure/AICopilot.EntityFrameworkCore/DataQueryService.cs', LF will be repl
 aced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Infrastructure/AICopilot.EntityFrameworkCore/DependencyInjection.cs', LF will be r
+warning: in the working copy of 'src/infrastructure/AICopilot.EntityFrameworkCore/DependencyInjection.cs', LF will be r
 eplaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Infrastructure/AICopilot.EventBus/AICopilot.EventBus.csproj', LF will be replaced 
+warning: in the working copy of 'src/infrastructure/AICopilot.EventBus/AICopilot.EventBus.csproj', LF will be replaced
 by CRLF the next time Git touches it
-warning: in the working copy of 'src/Infrastructure/AICopilot.EventBus/DependencyInjection.cs', LF will be replaced by 
+warning: in the working copy of 'src/infrastructure/AICopilot.EventBus/DependencyInjection.cs', LF will be replaced by
 CRLF the next time Git touches it
-warning: in the working copy of 'src/Infrastructure/AICopilot.Infrastructure/AICopilot.Infrastructure.csproj', LF will 
+warning: in the working copy of 'src/infrastructure/AICopilot.Infrastructure/AICopilot.Infrastructure.csproj', LF will
 be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Infrastructure/AICopilot.Infrastructure/Authentication/JwtTokenGenerator.cs', LF w
+warning: in the working copy of 'src/infrastructure/AICopilot.Infrastructure/Authentication/JwtTokenGenerator.cs', LF w
 ill be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Infrastructure/AICopilot.Infrastructure/DependencyInjection.cs', LF will be replac
+warning: in the working copy of 'src/infrastructure/AICopilot.Infrastructure/DependencyInjection.cs', LF will be replac
 ed by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.AiGatewayService/AICopilot.AiGatewayService.csproj', LF will be
+warning: in the working copy of 'src/services/AICopilot.AiGatewayService/AICopilot.AiGatewayService.csproj', LF will be
  replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.AiGatewayService/Agents/ChatAgentFactory.cs', LF will be replac
+warning: in the working copy of 'src/services/AICopilot.AiGatewayService/Agents/ChatAgentFactory.cs', LF will be replac
 ed by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.AiGatewayService/Agents/ChatStreamRequest.cs', LF will be repla
+warning: in the working copy of 'src/services/AICopilot.AiGatewayService/Agents/ChatStreamRequest.cs', LF will be repla
 ced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.AiGatewayService/Agents/DataAnalysisAgentBuilder.cs', LF will b
+warning: in the working copy of 'src/services/AICopilot.AiGatewayService/Agents/DataAnalysisAgentBuilder.cs', LF will b
 e replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.AiGatewayService/Agents/IntentRoutingAgentBuilder.cs', LF will 
+warning: in the working copy of 'src/services/AICopilot.AiGatewayService/Agents/IntentRoutingAgentBuilder.cs', LF will
 be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.AiGatewayService/Commands/ConversationTemplates/CreateConversat
+warning: in the working copy of 'src/services/AICopilot.AiGatewayService/Commands/ConversationTemplates/CreateConversat
 ionTemplate.cs', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.AiGatewayService/Commands/ConversationTemplates/DeleteConversat
+warning: in the working copy of 'src/services/AICopilot.AiGatewayService/Commands/ConversationTemplates/DeleteConversat
 ionTemplate.cs', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.AiGatewayService/Commands/LanguageModels/CreateLanguageModel.cs
+warning: in the working copy of 'src/services/AICopilot.AiGatewayService/Commands/LanguageModels/CreateLanguageModel.cs
 ', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.AiGatewayService/Commands/LanguageModels/DeleteLanguageModel.cs
+warning: in the working copy of 'src/services/AICopilot.AiGatewayService/Commands/LanguageModels/DeleteLanguageModel.cs
 ', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.AiGatewayService/Commands/Sessions/CreateSession.cs', LF will b
+warning: in the working copy of 'src/services/AICopilot.AiGatewayService/Commands/Sessions/CreateSession.cs', LF will b
 e replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.AiGatewayService/DependencyInjection.cs', LF will be replaced b
+warning: in the working copy of 'src/services/AICopilot.AiGatewayService/DependencyInjection.cs', LF will be replaced b
 y CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.AiGatewayService/Models/IntentResult.cs', LF will be replaced b
+warning: in the working copy of 'src/services/AICopilot.AiGatewayService/Models/IntentResult.cs', LF will be replaced b
 y CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.AiGatewayService/Plugins/SystemOpsPlugin.cs', LF will be replac
+warning: in the working copy of 'src/services/AICopilot.AiGatewayService/Plugins/SystemOpsPlugin.cs', LF will be replac
 ed by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.AiGatewayService/Queries/ConversationTemplates/ConversationTemp
+warning: in the working copy of 'src/services/AICopilot.AiGatewayService/Queries/ConversationTemplates/ConversationTemp
 lateDto.cs', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.AiGatewayService/Queries/ConversationTemplates/GetConversationT
+warning: in the working copy of 'src/services/AICopilot.AiGatewayService/Queries/ConversationTemplates/GetConversationT
 emplate.cs', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.AiGatewayService/Queries/ConversationTemplates/GetConversationT
+warning: in the working copy of 'src/services/AICopilot.AiGatewayService/Queries/ConversationTemplates/GetConversationT
 emplateByNameQuery.cs', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.AiGatewayService/Queries/ConversationTemplates/GetListConversat
+warning: in the working copy of 'src/services/AICopilot.AiGatewayService/Queries/ConversationTemplates/GetListConversat
 ionTemplates.cs', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.AiGatewayService/Queries/LanguageModels/GetListLanguageModels.c
+warning: in the working copy of 'src/services/AICopilot.AiGatewayService/Queries/LanguageModels/GetListLanguageModels.c
 s', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.AiGatewayService/Queries/Sessions/GetListChatMessages.cs', LF w
+warning: in the working copy of 'src/services/AICopilot.AiGatewayService/Queries/Sessions/GetListChatMessages.cs', LF w
 ill be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.AiGatewayService/Queries/Sessions/GetListSessions.cs', LF will 
+warning: in the working copy of 'src/services/AICopilot.AiGatewayService/Queries/Sessions/GetListSessions.cs', LF will
 be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.AiGatewayService/Workflows/BranchResult.cs', LF will be replace
+warning: in the working copy of 'src/services/AICopilot.AiGatewayService/Workflows/BranchResult.cs', LF will be replace
 d by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.AiGatewayService/Workflows/Executors/ContextAggregatorExecutor.
+warning: in the working copy of 'src/services/AICopilot.AiGatewayService/Workflows/Executors/ContextAggregatorExecutor.
 cs', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.AiGatewayService/Workflows/Executors/DataAnalysisExecutor.cs', 
+warning: in the working copy of 'src/services/AICopilot.AiGatewayService/Workflows/Executors/DataAnalysisExecutor.cs',
 LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.AiGatewayService/Workflows/Executors/FinalAgentBuildExecutor.cs
+warning: in the working copy of 'src/services/AICopilot.AiGatewayService/Workflows/Executors/FinalAgentBuildExecutor.cs
 ', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.AiGatewayService/Workflows/Executors/FinalAgentRunExecutor.cs',
+warning: in the working copy of 'src/services/AICopilot.AiGatewayService/Workflows/Executors/FinalAgentRunExecutor.cs',
  LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.AiGatewayService/Workflows/Executors/IntentRoutingExecutor.cs',
+warning: in the working copy of 'src/services/AICopilot.AiGatewayService/Workflows/Executors/IntentRoutingExecutor.cs',
  LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.AiGatewayService/Workflows/Executors/KnowledgeRetrievalExecutor
+warning: in the working copy of 'src/services/AICopilot.AiGatewayService/Workflows/Executors/KnowledgeRetrievalExecutor
 .cs', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.AiGatewayService/Workflows/Executors/ToolsPackExecutor.cs', LF 
+warning: in the working copy of 'src/services/AICopilot.AiGatewayService/Workflows/Executors/ToolsPackExecutor.cs', LF
 will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.AiGatewayService/Workflows/FinalAgentContext.cs', LF will be re
+warning: in the working copy of 'src/services/AICopilot.AiGatewayService/Workflows/FinalAgentContext.cs', LF will be re
 placed by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.AiGatewayService/Workflows/GenerationContext.cs', LF will be re
+warning: in the working copy of 'src/services/AICopilot.AiGatewayService/Workflows/GenerationContext.cs', LF will be re
 placed by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.DataAnalysisService/AICopilot.DataAnalysisService.csproj', LF w
+warning: in the working copy of 'src/services/AICopilot.DataAnalysisService/AICopilot.DataAnalysisService.csproj', LF w
 ill be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.DataAnalysisService/DependencyInjection.cs', LF will be replace
+warning: in the working copy of 'src/services/AICopilot.DataAnalysisService/DependencyInjection.cs', LF will be replace
 d by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.DataAnalysisService/Plugins/DataAnalysisPlugin.cs', LF will be 
+warning: in the working copy of 'src/services/AICopilot.DataAnalysisService/Plugins/DataAnalysisPlugin.cs', LF will be
 replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.IdentityService/AICopilot.IdentityService.csproj', LF will be r
+warning: in the working copy of 'src/services/AICopilot.IdentityService/AICopilot.IdentityService.csproj', LF will be r
 eplaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.IdentityService/Commands/CreateRole.cs', LF will be replaced by
+warning: in the working copy of 'src/services/AICopilot.IdentityService/Commands/CreateRole.cs', LF will be replaced by
  CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.IdentityService/Commands/CreatedUser.cs', LF will be replaced b
+warning: in the working copy of 'src/services/AICopilot.IdentityService/Commands/CreatedUser.cs', LF will be replaced b
 y CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.IdentityService/Commands/LoginUser.cs', LF will be replaced by 
+warning: in the working copy of 'src/services/AICopilot.IdentityService/Commands/LoginUser.cs', LF will be replaced by
 CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.IdentityService/Plugins/IdentityServiceTools.cs', LF will be re
+warning: in the working copy of 'src/services/AICopilot.IdentityService/Plugins/IdentityServiceTools.cs', LF will be re
 placed by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.McpService/AICopilot.McpService.csproj', LF will be replaced by
+warning: in the working copy of 'src/services/AICopilot.McpService/AICopilot.McpService.csproj', LF will be replaced by
  CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.McpService/DependencyInjection.cs', LF will be replaced by CRLF
+warning: in the working copy of 'src/services/AICopilot.McpService/DependencyInjection.cs', LF will be replaced by CRLF
  the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.RagService/AICopilot.RagService.csproj', LF will be replaced by
+warning: in the working copy of 'src/services/AICopilot.RagService/AICopilot.RagService.csproj', LF will be replaced by
  CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.RagService/Commands/Documents/UploadDocument.cs', LF will be re
+warning: in the working copy of 'src/services/AICopilot.RagService/Commands/Documents/UploadDocument.cs', LF will be re
 placed by CRLF the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.RagService/DependencyInjection.cs', LF will be replaced by CRLF
+warning: in the working copy of 'src/services/AICopilot.RagService/DependencyInjection.cs', LF will be replaced by CRLF
  the next time Git touches it
-warning: in the working copy of 'src/Services/AICopilot.RagService/Queries/KnowledgeBases/SearchKnowledgeBase.cs', LF w
+warning: in the working copy of 'src/services/AICopilot.RagService/Queries/KnowledgeBases/SearchKnowledgeBase.cs', LF w
 ill be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/Shared/AICopilot.AgentPlugin/AICopilot.AgentPlugin.csproj', LF will be replaced by
+warning: in the working copy of 'src/shared/AICopilot.AgentPlugin/AICopilot.AgentPlugin.csproj', LF will be replaced by
  CRLF the next time Git touches it
-warning: in the working copy of 'src/Shared/AICopilot.AgentPlugin/AgentPluginBase.cs', LF will be replaced by CRLF the 
+warning: in the working copy of 'src/shared/AICopilot.AgentPlugin/AgentPluginBase.cs', LF will be replaced by CRLF the
 next time Git touches it
-warning: in the working copy of 'src/Shared/AICopilot.AgentPlugin/AgentPluginLoader.cs', LF will be replaced by CRLF th
+warning: in the working copy of 'src/shared/AICopilot.AgentPlugin/AgentPluginLoader.cs', LF will be replaced by CRLF th
 e next time Git touches it
-warning: in the working copy of 'src/Shared/AICopilot.AgentPlugin/GenericBridgePlugin.cs', LF will be replaced by CRLF 
+warning: in the working copy of 'src/shared/AICopilot.AgentPlugin/GenericBridgePlugin.cs', LF will be replaced by CRLF
 the next time Git touches it
-warning: in the working copy of 'src/Shared/AICopilot.AgentPlugin/IAgentPlugin.cs', LF will be replaced by CRLF the nex
+warning: in the working copy of 'src/shared/AICopilot.AgentPlugin/IAgentPlugin.cs', LF will be replaced by CRLF the nex
 t time Git touches it
-warning: in the working copy of 'src/Shared/AICopilot.SharedKernel/Result/Result.cs', LF will be replaced by CRLF the n
+warning: in the working copy of 'src/shared/AICopilot.SharedKernel/Result/Result.cs', LF will be replaced by CRLF the n
 ext time Git touches it
 ```
 
@@ -405,34 +405,34 @@ Architecture boundary check passed.
 ```text
 正在确定要还原的项目…
   所有项目均是最新的，无法还原。
-  AICopilot.Testing.McpServer -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Tests\AICopilot.Testing.McpServer\bin\Debug\net10.0\AICopilot.Testing.McpServer.dll
-  AICopilot.Visualization -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Shared\AICopilot.Visualization\bin\Debug\net10.0\AICopilot.Visualization.dll
-  AICopilot.SharedKernel -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Shared\AICopilot.SharedKernel\bin\Debug\net10.0\AICopilot.SharedKernel.dll
-  AICopilot.AgentPlugin -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Shared\AICopilot.AgentPlugin\bin\Debug\net10.0\AICopilot.AgentPlugin.dll
-  AICopilot.Core.DataAnalysis -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.DataAnalysis\bin\Debug\net10.0\AICopilot.Core.DataAnalysis.dll
-  AICopilot.Core.Rag -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.Rag\bin\Debug\net10.0\AICopilot.Core.Rag.dll
-  AICopilot.Core.AiGateway -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.AiGateway\bin\Debug\net10.0\AICopilot.Core.AiGateway.dll
-  AICopilot.Core.McpServer -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.McpServer\bin\Debug\net10.0\AICopilot.Core.McpServer.dll
-  AICopilot.ServiceDefaults -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.ServiceDefaults\bin\Debug\net10.0\AICopilot.ServiceDefaults.dll
-  AICopilot.Services.Contracts -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.Services.Contracts\bin\Debug\net10.0\AICopilot.Services.Contracts.dll
-  AICopilot.Services.CrossCutting -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.Services.CrossCutting\bin\Debug\net10.0\AICopilot.Services.CrossCutting.dll
-  AICopilot.AiRuntime -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.AiRuntime\bin\Debug\net10.0\AICopilot.AiRuntime.dll
-  AICopilot.Embedding -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.Embedding\bin\Debug\net10.0\AICopilot.Embedding.dll
-  AICopilot.EventBus -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.EventBus\bin\Debug\net10.0\AICopilot.EventBus.dll
-  AICopilot.EntityFrameworkCore -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.EntityFrameworkCore\bin\Debug\net10.0\AICopilot.EntityFrameworkCore.dll
-  AICopilot.Dapper -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.Dapper\bin\Debug\net10.0\AICopilot.Dapper.dll
-  AICopilot.IdentityService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.IdentityService\bin\Debug\net10.0\AICopilot.IdentityService.dll
-  AICopilot.McpService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.McpService\bin\Debug\net10.0\AICopilot.McpService.dll
-  AICopilot.RagService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.RagService\bin\Debug\net10.0\AICopilot.RagService.dll
-  AICopilot.AiGatewayService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.AiGatewayService\bin\Debug\net10.0\AICopilot.AiGatewayService.dll
-  AICopilot.DataAnalysisService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.DataAnalysisService\bin\Debug\net10.0\AICopilot.DataAnalysisService.dll
-  AICopilot.Infrastructure -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.Infrastructure\bin\Debug\net10.0\AICopilot.Infrastructure.dll
-  AICopilot.MigrationWorkApp -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.MigrationWorkApp\bin\Debug\net10.0\AICopilot.MigrationWorkApp.dll
-  AICopilot.RagWorker -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.RagWorker\bin\Debug\net10.0\AICopilot.RagWorker.dll
-  AICopilot.HttpApi -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.HttpApi\bin\Debug\net10.0\AICopilot.HttpApi.dll
-  AICopilot.AppHost -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.AppHost\bin\Debug\net10.0\AICopilot.AppHost.dll
-  AICopilot.BackendTests -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Tests\AICopilot.BackendTests\bin\Debug\net10.0\AICopilot.BackendTests.dll
-C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Tests\AICopilot.BackendTests\bin\Debug\net10.0\AICopilot.BackendTests.dll (.NETCoreApp,Version=v10.0)的测试运行
+  AICopilot.Testing.McpServer -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\tests\AICopilot.Testing.McpServer\bin\Debug\net10.0\AICopilot.Testing.McpServer.dll
+  AICopilot.Visualization -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\shared\AICopilot.Visualization\bin\Debug\net10.0\AICopilot.Visualization.dll
+  AICopilot.SharedKernel -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\shared\AICopilot.SharedKernel\bin\Debug\net10.0\AICopilot.SharedKernel.dll
+  AICopilot.AgentPlugin -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\shared\AICopilot.AgentPlugin\bin\Debug\net10.0\AICopilot.AgentPlugin.dll
+  AICopilot.Core.DataAnalysis -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.DataAnalysis\bin\Debug\net10.0\AICopilot.Core.DataAnalysis.dll
+  AICopilot.Core.Rag -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.Rag\bin\Debug\net10.0\AICopilot.Core.Rag.dll
+  AICopilot.Core.AiGateway -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.AiGateway\bin\Debug\net10.0\AICopilot.Core.AiGateway.dll
+  AICopilot.Core.McpServer -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.McpServer\bin\Debug\net10.0\AICopilot.Core.McpServer.dll
+  AICopilot.ServiceDefaults -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.ServiceDefaults\bin\Debug\net10.0\AICopilot.ServiceDefaults.dll
+  AICopilot.Services.Contracts -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.Services.Contracts\bin\Debug\net10.0\AICopilot.Services.Contracts.dll
+  AICopilot.Services.CrossCutting -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.Services.CrossCutting\bin\Debug\net10.0\AICopilot.Services.CrossCutting.dll
+  AICopilot.AiRuntime -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.AiRuntime\bin\Debug\net10.0\AICopilot.AiRuntime.dll
+  AICopilot.Embedding -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.Embedding\bin\Debug\net10.0\AICopilot.Embedding.dll
+  AICopilot.EventBus -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.EventBus\bin\Debug\net10.0\AICopilot.EventBus.dll
+  AICopilot.EntityFrameworkCore -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.EntityFrameworkCore\bin\Debug\net10.0\AICopilot.EntityFrameworkCore.dll
+  AICopilot.Dapper -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.Dapper\bin\Debug\net10.0\AICopilot.Dapper.dll
+  AICopilot.IdentityService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.IdentityService\bin\Debug\net10.0\AICopilot.IdentityService.dll
+  AICopilot.McpService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.McpService\bin\Debug\net10.0\AICopilot.McpService.dll
+  AICopilot.RagService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.RagService\bin\Debug\net10.0\AICopilot.RagService.dll
+  AICopilot.AiGatewayService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.AiGatewayService\bin\Debug\net10.0\AICopilot.AiGatewayService.dll
+  AICopilot.DataAnalysisService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.DataAnalysisService\bin\Debug\net10.0\AICopilot.DataAnalysisService.dll
+  AICopilot.Infrastructure -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.Infrastructure\bin\Debug\net10.0\AICopilot.Infrastructure.dll
+  AICopilot.MigrationWorkApp -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.MigrationWorkApp\bin\Debug\net10.0\AICopilot.MigrationWorkApp.dll
+  AICopilot.RagWorker -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.RagWorker\bin\Debug\net10.0\AICopilot.RagWorker.dll
+  AICopilot.HttpApi -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.HttpApi\bin\Debug\net10.0\AICopilot.HttpApi.dll
+  AICopilot.AppHost -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.AppHost\bin\Debug\net10.0\AICopilot.AppHost.dll
+  AICopilot.BackendTests -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\tests\AICopilot.BackendTests\bin\Debug\net10.0\AICopilot.BackendTests.dll
+C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\tests\AICopilot.BackendTests\bin\Debug\net10.0\AICopilot.BackendTests.dll (.NETCoreApp,Version=v10.0)的测试运行
 总共 1 个测试文件与指定模式相匹配。
 
 已通过! - 失败:     0，通过:    30，已跳过:     0，总计:    30，持续时间: 510 ms - AICopilot.BackendTests.dll (net10.0)
@@ -547,34 +547,34 @@ Server:
 ```text
 正在确定要还原的项目…
   所有项目均是最新的，无法还原。
-  AICopilot.Testing.McpServer -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Tests\AICopilot.Testing.McpServer\bin\Debug\net10.0\AICopilot.Testing.McpServer.dll
-  AICopilot.Visualization -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Shared\AICopilot.Visualization\bin\Debug\net10.0\AICopilot.Visualization.dll
-  AICopilot.SharedKernel -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Shared\AICopilot.SharedKernel\bin\Debug\net10.0\AICopilot.SharedKernel.dll
-  AICopilot.Core.AiGateway -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.AiGateway\bin\Debug\net10.0\AICopilot.Core.AiGateway.dll
-  AICopilot.Core.Rag -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.Rag\bin\Debug\net10.0\AICopilot.Core.Rag.dll
-  AICopilot.Core.McpServer -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.McpServer\bin\Debug\net10.0\AICopilot.Core.McpServer.dll
-  AICopilot.AgentPlugin -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Shared\AICopilot.AgentPlugin\bin\Debug\net10.0\AICopilot.AgentPlugin.dll
-  AICopilot.Core.DataAnalysis -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.DataAnalysis\bin\Debug\net10.0\AICopilot.Core.DataAnalysis.dll
-  AICopilot.ServiceDefaults -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.ServiceDefaults\bin\Debug\net10.0\AICopilot.ServiceDefaults.dll
-  AICopilot.Services.Contracts -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.Services.Contracts\bin\Debug\net10.0\AICopilot.Services.Contracts.dll
-  AICopilot.EventBus -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.EventBus\bin\Debug\net10.0\AICopilot.EventBus.dll
-  AICopilot.Embedding -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.Embedding\bin\Debug\net10.0\AICopilot.Embedding.dll
-  AICopilot.Dapper -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.Dapper\bin\Debug\net10.0\AICopilot.Dapper.dll
-  AICopilot.Services.CrossCutting -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.Services.CrossCutting\bin\Debug\net10.0\AICopilot.Services.CrossCutting.dll
-  AICopilot.EntityFrameworkCore -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.EntityFrameworkCore\bin\Debug\net10.0\AICopilot.EntityFrameworkCore.dll
-  AICopilot.AiRuntime -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.AiRuntime\bin\Debug\net10.0\AICopilot.AiRuntime.dll
-  AICopilot.RagService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.RagService\bin\Debug\net10.0\AICopilot.RagService.dll
-  AICopilot.IdentityService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.IdentityService\bin\Debug\net10.0\AICopilot.IdentityService.dll
-  AICopilot.DataAnalysisService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.DataAnalysisService\bin\Debug\net10.0\AICopilot.DataAnalysisService.dll
-  AICopilot.McpService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.McpService\bin\Debug\net10.0\AICopilot.McpService.dll
-  AICopilot.AiGatewayService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.AiGatewayService\bin\Debug\net10.0\AICopilot.AiGatewayService.dll
-  AICopilot.MigrationWorkApp -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.MigrationWorkApp\bin\Debug\net10.0\AICopilot.MigrationWorkApp.dll
-  AICopilot.Infrastructure -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.Infrastructure\bin\Debug\net10.0\AICopilot.Infrastructure.dll
-  AICopilot.RagWorker -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.RagWorker\bin\Debug\net10.0\AICopilot.RagWorker.dll
-  AICopilot.HttpApi -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.HttpApi\bin\Debug\net10.0\AICopilot.HttpApi.dll
-  AICopilot.AppHost -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.AppHost\bin\Debug\net10.0\AICopilot.AppHost.dll
-  AICopilot.BackendTests -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Tests\AICopilot.BackendTests\bin\Debug\net10.0\AICopilot.BackendTests.dll
-C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Tests\AICopilot.BackendTests\bin\Debug\net10.0\AICopilot.BackendTests.dll (.NETCoreApp,Version=v10.0)的测试运行
+  AICopilot.Testing.McpServer -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\tests\AICopilot.Testing.McpServer\bin\Debug\net10.0\AICopilot.Testing.McpServer.dll
+  AICopilot.Visualization -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\shared\AICopilot.Visualization\bin\Debug\net10.0\AICopilot.Visualization.dll
+  AICopilot.SharedKernel -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\shared\AICopilot.SharedKernel\bin\Debug\net10.0\AICopilot.SharedKernel.dll
+  AICopilot.Core.AiGateway -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.AiGateway\bin\Debug\net10.0\AICopilot.Core.AiGateway.dll
+  AICopilot.Core.Rag -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.Rag\bin\Debug\net10.0\AICopilot.Core.Rag.dll
+  AICopilot.Core.McpServer -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.McpServer\bin\Debug\net10.0\AICopilot.Core.McpServer.dll
+  AICopilot.AgentPlugin -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\shared\AICopilot.AgentPlugin\bin\Debug\net10.0\AICopilot.AgentPlugin.dll
+  AICopilot.Core.DataAnalysis -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.DataAnalysis\bin\Debug\net10.0\AICopilot.Core.DataAnalysis.dll
+  AICopilot.ServiceDefaults -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.ServiceDefaults\bin\Debug\net10.0\AICopilot.ServiceDefaults.dll
+  AICopilot.Services.Contracts -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.Services.Contracts\bin\Debug\net10.0\AICopilot.Services.Contracts.dll
+  AICopilot.EventBus -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.EventBus\bin\Debug\net10.0\AICopilot.EventBus.dll
+  AICopilot.Embedding -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.Embedding\bin\Debug\net10.0\AICopilot.Embedding.dll
+  AICopilot.Dapper -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.Dapper\bin\Debug\net10.0\AICopilot.Dapper.dll
+  AICopilot.Services.CrossCutting -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.Services.CrossCutting\bin\Debug\net10.0\AICopilot.Services.CrossCutting.dll
+  AICopilot.EntityFrameworkCore -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.EntityFrameworkCore\bin\Debug\net10.0\AICopilot.EntityFrameworkCore.dll
+  AICopilot.AiRuntime -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.AiRuntime\bin\Debug\net10.0\AICopilot.AiRuntime.dll
+  AICopilot.RagService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.RagService\bin\Debug\net10.0\AICopilot.RagService.dll
+  AICopilot.IdentityService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.IdentityService\bin\Debug\net10.0\AICopilot.IdentityService.dll
+  AICopilot.DataAnalysisService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.DataAnalysisService\bin\Debug\net10.0\AICopilot.DataAnalysisService.dll
+  AICopilot.McpService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.McpService\bin\Debug\net10.0\AICopilot.McpService.dll
+  AICopilot.AiGatewayService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.AiGatewayService\bin\Debug\net10.0\AICopilot.AiGatewayService.dll
+  AICopilot.MigrationWorkApp -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.MigrationWorkApp\bin\Debug\net10.0\AICopilot.MigrationWorkApp.dll
+  AICopilot.Infrastructure -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.Infrastructure\bin\Debug\net10.0\AICopilot.Infrastructure.dll
+  AICopilot.RagWorker -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.RagWorker\bin\Debug\net10.0\AICopilot.RagWorker.dll
+  AICopilot.HttpApi -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.HttpApi\bin\Debug\net10.0\AICopilot.HttpApi.dll
+  AICopilot.AppHost -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.AppHost\bin\Debug\net10.0\AICopilot.AppHost.dll
+  AICopilot.BackendTests -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\tests\AICopilot.BackendTests\bin\Debug\net10.0\AICopilot.BackendTests.dll
+C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\tests\AICopilot.BackendTests\bin\Debug\net10.0\AICopilot.BackendTests.dll (.NETCoreApp,Version=v10.0)的测试运行
 总共 1 个测试文件与指定模式相匹配。
 
 已通过! - 失败:     0，通过:     2，已跳过:     0，总计:     2，持续时间: 258 ms - AICopilot.BackendTests.dll (net10.0)
@@ -585,34 +585,34 @@ C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Tests\AICopilot.
 ```text
 正在确定要还原的项目…
   所有项目均是最新的，无法还原。
-  AICopilot.Visualization -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Shared\AICopilot.Visualization\bin\Debug\net10.0\AICopilot.Visualization.dll
-  AICopilot.Testing.McpServer -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Tests\AICopilot.Testing.McpServer\bin\Debug\net10.0\AICopilot.Testing.McpServer.dll
-  AICopilot.SharedKernel -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Shared\AICopilot.SharedKernel\bin\Debug\net10.0\AICopilot.SharedKernel.dll
-  AICopilot.Core.Rag -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.Rag\bin\Debug\net10.0\AICopilot.Core.Rag.dll
-  AICopilot.AgentPlugin -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Shared\AICopilot.AgentPlugin\bin\Debug\net10.0\AICopilot.AgentPlugin.dll
-  AICopilot.Core.DataAnalysis -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.DataAnalysis\bin\Debug\net10.0\AICopilot.Core.DataAnalysis.dll
-  AICopilot.Core.AiGateway -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.AiGateway\bin\Debug\net10.0\AICopilot.Core.AiGateway.dll
-  AICopilot.Core.McpServer -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.McpServer\bin\Debug\net10.0\AICopilot.Core.McpServer.dll
-  AICopilot.ServiceDefaults -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.ServiceDefaults\bin\Debug\net10.0\AICopilot.ServiceDefaults.dll
-  AICopilot.Services.Contracts -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.Services.Contracts\bin\Debug\net10.0\AICopilot.Services.Contracts.dll
-  AICopilot.AiRuntime -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.AiRuntime\bin\Debug\net10.0\AICopilot.AiRuntime.dll
-  AICopilot.Embedding -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.Embedding\bin\Debug\net10.0\AICopilot.Embedding.dll
-  AICopilot.EventBus -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.EventBus\bin\Debug\net10.0\AICopilot.EventBus.dll
-  AICopilot.Dapper -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.Dapper\bin\Debug\net10.0\AICopilot.Dapper.dll
-  AICopilot.EntityFrameworkCore -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.EntityFrameworkCore\bin\Debug\net10.0\AICopilot.EntityFrameworkCore.dll
-  AICopilot.Services.CrossCutting -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.Services.CrossCutting\bin\Debug\net10.0\AICopilot.Services.CrossCutting.dll
-  AICopilot.McpService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.McpService\bin\Debug\net10.0\AICopilot.McpService.dll
-  AICopilot.RagService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.RagService\bin\Debug\net10.0\AICopilot.RagService.dll
-  AICopilot.AiGatewayService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.AiGatewayService\bin\Debug\net10.0\AICopilot.AiGatewayService.dll
-  AICopilot.DataAnalysisService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.DataAnalysisService\bin\Debug\net10.0\AICopilot.DataAnalysisService.dll
-  AICopilot.IdentityService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.IdentityService\bin\Debug\net10.0\AICopilot.IdentityService.dll
-  AICopilot.Infrastructure -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.Infrastructure\bin\Debug\net10.0\AICopilot.Infrastructure.dll
-  AICopilot.MigrationWorkApp -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.MigrationWorkApp\bin\Debug\net10.0\AICopilot.MigrationWorkApp.dll
-  AICopilot.RagWorker -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.RagWorker\bin\Debug\net10.0\AICopilot.RagWorker.dll
-  AICopilot.HttpApi -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.HttpApi\bin\Debug\net10.0\AICopilot.HttpApi.dll
-  AICopilot.AppHost -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.AppHost\bin\Debug\net10.0\AICopilot.AppHost.dll
-  AICopilot.BackendTests -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Tests\AICopilot.BackendTests\bin\Debug\net10.0\AICopilot.BackendTests.dll
-C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Tests\AICopilot.BackendTests\bin\Debug\net10.0\AICopilot.BackendTests.dll (.NETCoreApp,Version=v10.0)的测试运行
+  AICopilot.Visualization -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\shared\AICopilot.Visualization\bin\Debug\net10.0\AICopilot.Visualization.dll
+  AICopilot.Testing.McpServer -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\tests\AICopilot.Testing.McpServer\bin\Debug\net10.0\AICopilot.Testing.McpServer.dll
+  AICopilot.SharedKernel -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\shared\AICopilot.SharedKernel\bin\Debug\net10.0\AICopilot.SharedKernel.dll
+  AICopilot.Core.Rag -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.Rag\bin\Debug\net10.0\AICopilot.Core.Rag.dll
+  AICopilot.AgentPlugin -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\shared\AICopilot.AgentPlugin\bin\Debug\net10.0\AICopilot.AgentPlugin.dll
+  AICopilot.Core.DataAnalysis -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.DataAnalysis\bin\Debug\net10.0\AICopilot.Core.DataAnalysis.dll
+  AICopilot.Core.AiGateway -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.AiGateway\bin\Debug\net10.0\AICopilot.Core.AiGateway.dll
+  AICopilot.Core.McpServer -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.McpServer\bin\Debug\net10.0\AICopilot.Core.McpServer.dll
+  AICopilot.ServiceDefaults -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.ServiceDefaults\bin\Debug\net10.0\AICopilot.ServiceDefaults.dll
+  AICopilot.Services.Contracts -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.Services.Contracts\bin\Debug\net10.0\AICopilot.Services.Contracts.dll
+  AICopilot.AiRuntime -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.AiRuntime\bin\Debug\net10.0\AICopilot.AiRuntime.dll
+  AICopilot.Embedding -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.Embedding\bin\Debug\net10.0\AICopilot.Embedding.dll
+  AICopilot.EventBus -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.EventBus\bin\Debug\net10.0\AICopilot.EventBus.dll
+  AICopilot.Dapper -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.Dapper\bin\Debug\net10.0\AICopilot.Dapper.dll
+  AICopilot.EntityFrameworkCore -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.EntityFrameworkCore\bin\Debug\net10.0\AICopilot.EntityFrameworkCore.dll
+  AICopilot.Services.CrossCutting -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.Services.CrossCutting\bin\Debug\net10.0\AICopilot.Services.CrossCutting.dll
+  AICopilot.McpService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.McpService\bin\Debug\net10.0\AICopilot.McpService.dll
+  AICopilot.RagService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.RagService\bin\Debug\net10.0\AICopilot.RagService.dll
+  AICopilot.AiGatewayService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.AiGatewayService\bin\Debug\net10.0\AICopilot.AiGatewayService.dll
+  AICopilot.DataAnalysisService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.DataAnalysisService\bin\Debug\net10.0\AICopilot.DataAnalysisService.dll
+  AICopilot.IdentityService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.IdentityService\bin\Debug\net10.0\AICopilot.IdentityService.dll
+  AICopilot.Infrastructure -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.Infrastructure\bin\Debug\net10.0\AICopilot.Infrastructure.dll
+  AICopilot.MigrationWorkApp -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.MigrationWorkApp\bin\Debug\net10.0\AICopilot.MigrationWorkApp.dll
+  AICopilot.RagWorker -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.RagWorker\bin\Debug\net10.0\AICopilot.RagWorker.dll
+  AICopilot.HttpApi -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.HttpApi\bin\Debug\net10.0\AICopilot.HttpApi.dll
+  AICopilot.AppHost -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.AppHost\bin\Debug\net10.0\AICopilot.AppHost.dll
+  AICopilot.BackendTests -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\tests\AICopilot.BackendTests\bin\Debug\net10.0\AICopilot.BackendTests.dll
+C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\tests\AICopilot.BackendTests\bin\Debug\net10.0\AICopilot.BackendTests.dll (.NETCoreApp,Version=v10.0)的测试运行
 总共 1 个测试文件与指定模式相匹配。
 
 已通过! - 失败:     0，通过:     1，已跳过:     0，总计:     1，持续时间: 8 s - AICopilot.BackendTests.dll (net10.0)
@@ -623,34 +623,34 @@ C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Tests\AICopilot.
 ```text
 正在确定要还原的项目…
   所有项目均是最新的，无法还原。
-  AICopilot.Visualization -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Shared\AICopilot.Visualization\bin\Debug\net10.0\AICopilot.Visualization.dll
-  AICopilot.Testing.McpServer -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Tests\AICopilot.Testing.McpServer\bin\Debug\net10.0\AICopilot.Testing.McpServer.dll
-  AICopilot.SharedKernel -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Shared\AICopilot.SharedKernel\bin\Debug\net10.0\AICopilot.SharedKernel.dll
-  AICopilot.Core.AiGateway -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.AiGateway\bin\Debug\net10.0\AICopilot.Core.AiGateway.dll
-  AICopilot.Core.Rag -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.Rag\bin\Debug\net10.0\AICopilot.Core.Rag.dll
-  AICopilot.Core.DataAnalysis -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.DataAnalysis\bin\Debug\net10.0\AICopilot.Core.DataAnalysis.dll
-  AICopilot.Core.McpServer -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.McpServer\bin\Debug\net10.0\AICopilot.Core.McpServer.dll
-  AICopilot.AgentPlugin -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Shared\AICopilot.AgentPlugin\bin\Debug\net10.0\AICopilot.AgentPlugin.dll
-  AICopilot.ServiceDefaults -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.ServiceDefaults\bin\Debug\net10.0\AICopilot.ServiceDefaults.dll
-  AICopilot.Services.Contracts -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.Services.Contracts\bin\Debug\net10.0\AICopilot.Services.Contracts.dll
-  AICopilot.Embedding -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.Embedding\bin\Debug\net10.0\AICopilot.Embedding.dll
-  AICopilot.EntityFrameworkCore -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.EntityFrameworkCore\bin\Debug\net10.0\AICopilot.EntityFrameworkCore.dll
-  AICopilot.Services.CrossCutting -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.Services.CrossCutting\bin\Debug\net10.0\AICopilot.Services.CrossCutting.dll
-  AICopilot.EventBus -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.EventBus\bin\Debug\net10.0\AICopilot.EventBus.dll
-  AICopilot.Dapper -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.Dapper\bin\Debug\net10.0\AICopilot.Dapper.dll
-  AICopilot.AiRuntime -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.AiRuntime\bin\Debug\net10.0\AICopilot.AiRuntime.dll
-  AICopilot.AiGatewayService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.AiGatewayService\bin\Debug\net10.0\AICopilot.AiGatewayService.dll
-  AICopilot.RagService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.RagService\bin\Debug\net10.0\AICopilot.RagService.dll
-  AICopilot.McpService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.McpService\bin\Debug\net10.0\AICopilot.McpService.dll
-  AICopilot.IdentityService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.IdentityService\bin\Debug\net10.0\AICopilot.IdentityService.dll
-  AICopilot.DataAnalysisService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.DataAnalysisService\bin\Debug\net10.0\AICopilot.DataAnalysisService.dll
-  AICopilot.Infrastructure -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.Infrastructure\bin\Debug\net10.0\AICopilot.Infrastructure.dll
-  AICopilot.MigrationWorkApp -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.MigrationWorkApp\bin\Debug\net10.0\AICopilot.MigrationWorkApp.dll
-  AICopilot.RagWorker -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.RagWorker\bin\Debug\net10.0\AICopilot.RagWorker.dll
-  AICopilot.HttpApi -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.HttpApi\bin\Debug\net10.0\AICopilot.HttpApi.dll
-  AICopilot.AppHost -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.AppHost\bin\Debug\net10.0\AICopilot.AppHost.dll
-  AICopilot.BackendTests -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Tests\AICopilot.BackendTests\bin\Debug\net10.0\AICopilot.BackendTests.dll
-C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Tests\AICopilot.BackendTests\bin\Debug\net10.0\AICopilot.BackendTests.dll (.NETCoreApp,Version=v10.0)的测试运行
+  AICopilot.Visualization -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\shared\AICopilot.Visualization\bin\Debug\net10.0\AICopilot.Visualization.dll
+  AICopilot.Testing.McpServer -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\tests\AICopilot.Testing.McpServer\bin\Debug\net10.0\AICopilot.Testing.McpServer.dll
+  AICopilot.SharedKernel -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\shared\AICopilot.SharedKernel\bin\Debug\net10.0\AICopilot.SharedKernel.dll
+  AICopilot.Core.AiGateway -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.AiGateway\bin\Debug\net10.0\AICopilot.Core.AiGateway.dll
+  AICopilot.Core.Rag -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.Rag\bin\Debug\net10.0\AICopilot.Core.Rag.dll
+  AICopilot.Core.DataAnalysis -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.DataAnalysis\bin\Debug\net10.0\AICopilot.Core.DataAnalysis.dll
+  AICopilot.Core.McpServer -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.McpServer\bin\Debug\net10.0\AICopilot.Core.McpServer.dll
+  AICopilot.AgentPlugin -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\shared\AICopilot.AgentPlugin\bin\Debug\net10.0\AICopilot.AgentPlugin.dll
+  AICopilot.ServiceDefaults -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.ServiceDefaults\bin\Debug\net10.0\AICopilot.ServiceDefaults.dll
+  AICopilot.Services.Contracts -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.Services.Contracts\bin\Debug\net10.0\AICopilot.Services.Contracts.dll
+  AICopilot.Embedding -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.Embedding\bin\Debug\net10.0\AICopilot.Embedding.dll
+  AICopilot.EntityFrameworkCore -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.EntityFrameworkCore\bin\Debug\net10.0\AICopilot.EntityFrameworkCore.dll
+  AICopilot.Services.CrossCutting -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.Services.CrossCutting\bin\Debug\net10.0\AICopilot.Services.CrossCutting.dll
+  AICopilot.EventBus -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.EventBus\bin\Debug\net10.0\AICopilot.EventBus.dll
+  AICopilot.Dapper -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.Dapper\bin\Debug\net10.0\AICopilot.Dapper.dll
+  AICopilot.AiRuntime -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.AiRuntime\bin\Debug\net10.0\AICopilot.AiRuntime.dll
+  AICopilot.AiGatewayService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.AiGatewayService\bin\Debug\net10.0\AICopilot.AiGatewayService.dll
+  AICopilot.RagService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.RagService\bin\Debug\net10.0\AICopilot.RagService.dll
+  AICopilot.McpService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.McpService\bin\Debug\net10.0\AICopilot.McpService.dll
+  AICopilot.IdentityService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.IdentityService\bin\Debug\net10.0\AICopilot.IdentityService.dll
+  AICopilot.DataAnalysisService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.DataAnalysisService\bin\Debug\net10.0\AICopilot.DataAnalysisService.dll
+  AICopilot.Infrastructure -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.Infrastructure\bin\Debug\net10.0\AICopilot.Infrastructure.dll
+  AICopilot.MigrationWorkApp -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.MigrationWorkApp\bin\Debug\net10.0\AICopilot.MigrationWorkApp.dll
+  AICopilot.RagWorker -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.RagWorker\bin\Debug\net10.0\AICopilot.RagWorker.dll
+  AICopilot.HttpApi -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.HttpApi\bin\Debug\net10.0\AICopilot.HttpApi.dll
+  AICopilot.AppHost -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.AppHost\bin\Debug\net10.0\AICopilot.AppHost.dll
+  AICopilot.BackendTests -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\tests\AICopilot.BackendTests\bin\Debug\net10.0\AICopilot.BackendTests.dll
+C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\tests\AICopilot.BackendTests\bin\Debug\net10.0\AICopilot.BackendTests.dll (.NETCoreApp,Version=v10.0)的测试运行
 总共 1 个测试文件与指定模式相匹配。
 
 已通过! - 失败:     0，通过:     1，已跳过:     0，总计:     1，持续时间: 7 s - AICopilot.BackendTests.dll (net10.0)
@@ -661,34 +661,34 @@ C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Tests\AICopilot.
 ```text
 正在确定要还原的项目…
   所有项目均是最新的，无法还原。
-  AICopilot.SharedKernel -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Shared\AICopilot.SharedKernel\bin\Debug\net10.0\AICopilot.SharedKernel.dll
-  AICopilot.Visualization -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Shared\AICopilot.Visualization\bin\Debug\net10.0\AICopilot.Visualization.dll
-  AICopilot.Testing.McpServer -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Tests\AICopilot.Testing.McpServer\bin\Debug\net10.0\AICopilot.Testing.McpServer.dll
-  AICopilot.Core.DataAnalysis -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.DataAnalysis\bin\Debug\net10.0\AICopilot.Core.DataAnalysis.dll
-  AICopilot.AgentPlugin -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Shared\AICopilot.AgentPlugin\bin\Debug\net10.0\AICopilot.AgentPlugin.dll
-  AICopilot.Core.AiGateway -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.AiGateway\bin\Debug\net10.0\AICopilot.Core.AiGateway.dll
-  AICopilot.Core.Rag -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.Rag\bin\Debug\net10.0\AICopilot.Core.Rag.dll
-  AICopilot.Core.McpServer -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Core\AICopilot.Core.McpServer\bin\Debug\net10.0\AICopilot.Core.McpServer.dll
-  AICopilot.ServiceDefaults -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.ServiceDefaults\bin\Debug\net10.0\AICopilot.ServiceDefaults.dll
-  AICopilot.Services.Contracts -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.Services.Contracts\bin\Debug\net10.0\AICopilot.Services.Contracts.dll
-  AICopilot.EntityFrameworkCore -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.EntityFrameworkCore\bin\Debug\net10.0\AICopilot.EntityFrameworkCore.dll
-  AICopilot.EventBus -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.EventBus\bin\Debug\net10.0\AICopilot.EventBus.dll
-  AICopilot.Embedding -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.Embedding\bin\Debug\net10.0\AICopilot.Embedding.dll
-  AICopilot.AiRuntime -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.AiRuntime\bin\Debug\net10.0\AICopilot.AiRuntime.dll
-  AICopilot.Services.CrossCutting -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.Services.CrossCutting\bin\Debug\net10.0\AICopilot.Services.CrossCutting.dll
-  AICopilot.Dapper -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.Dapper\bin\Debug\net10.0\AICopilot.Dapper.dll
-  AICopilot.IdentityService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.IdentityService\bin\Debug\net10.0\AICopilot.IdentityService.dll
-  AICopilot.AiGatewayService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.AiGatewayService\bin\Debug\net10.0\AICopilot.AiGatewayService.dll
-  AICopilot.McpService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.McpService\bin\Debug\net10.0\AICopilot.McpService.dll
-  AICopilot.DataAnalysisService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.DataAnalysisService\bin\Debug\net10.0\AICopilot.DataAnalysisService.dll
-  AICopilot.RagService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Services\AICopilot.RagService\bin\Debug\net10.0\AICopilot.RagService.dll
-  AICopilot.MigrationWorkApp -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.MigrationWorkApp\bin\Debug\net10.0\AICopilot.MigrationWorkApp.dll
-  AICopilot.Infrastructure -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Infrastructure\AICopilot.Infrastructure\bin\Debug\net10.0\AICopilot.Infrastructure.dll
-  AICopilot.RagWorker -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.RagWorker\bin\Debug\net10.0\AICopilot.RagWorker.dll
-  AICopilot.HttpApi -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.HttpApi\bin\Debug\net10.0\AICopilot.HttpApi.dll
-  AICopilot.AppHost -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Hosts\AICopilot.AppHost\bin\Debug\net10.0\AICopilot.AppHost.dll
-  AICopilot.BackendTests -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Tests\AICopilot.BackendTests\bin\Debug\net10.0\AICopilot.BackendTests.dll
-C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Tests\AICopilot.BackendTests\bin\Debug\net10.0\AICopilot.BackendTests.dll (.NETCoreApp,Version=v10.0)的测试运行
+  AICopilot.SharedKernel -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\shared\AICopilot.SharedKernel\bin\Debug\net10.0\AICopilot.SharedKernel.dll
+  AICopilot.Visualization -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\shared\AICopilot.Visualization\bin\Debug\net10.0\AICopilot.Visualization.dll
+  AICopilot.Testing.McpServer -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\tests\AICopilot.Testing.McpServer\bin\Debug\net10.0\AICopilot.Testing.McpServer.dll
+  AICopilot.Core.DataAnalysis -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.DataAnalysis\bin\Debug\net10.0\AICopilot.Core.DataAnalysis.dll
+  AICopilot.AgentPlugin -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\shared\AICopilot.AgentPlugin\bin\Debug\net10.0\AICopilot.AgentPlugin.dll
+  AICopilot.Core.AiGateway -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.AiGateway\bin\Debug\net10.0\AICopilot.Core.AiGateway.dll
+  AICopilot.Core.Rag -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.Rag\bin\Debug\net10.0\AICopilot.Core.Rag.dll
+  AICopilot.Core.McpServer -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\core\AICopilot.Core.McpServer\bin\Debug\net10.0\AICopilot.Core.McpServer.dll
+  AICopilot.ServiceDefaults -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.ServiceDefaults\bin\Debug\net10.0\AICopilot.ServiceDefaults.dll
+  AICopilot.Services.Contracts -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.Services.Contracts\bin\Debug\net10.0\AICopilot.Services.Contracts.dll
+  AICopilot.EntityFrameworkCore -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.EntityFrameworkCore\bin\Debug\net10.0\AICopilot.EntityFrameworkCore.dll
+  AICopilot.EventBus -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.EventBus\bin\Debug\net10.0\AICopilot.EventBus.dll
+  AICopilot.Embedding -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.Embedding\bin\Debug\net10.0\AICopilot.Embedding.dll
+  AICopilot.AiRuntime -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.AiRuntime\bin\Debug\net10.0\AICopilot.AiRuntime.dll
+  AICopilot.Services.CrossCutting -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.Services.CrossCutting\bin\Debug\net10.0\AICopilot.Services.CrossCutting.dll
+  AICopilot.Dapper -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.Dapper\bin\Debug\net10.0\AICopilot.Dapper.dll
+  AICopilot.IdentityService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.IdentityService\bin\Debug\net10.0\AICopilot.IdentityService.dll
+  AICopilot.AiGatewayService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.AiGatewayService\bin\Debug\net10.0\AICopilot.AiGatewayService.dll
+  AICopilot.McpService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.McpService\bin\Debug\net10.0\AICopilot.McpService.dll
+  AICopilot.DataAnalysisService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.DataAnalysisService\bin\Debug\net10.0\AICopilot.DataAnalysisService.dll
+  AICopilot.RagService -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\services\AICopilot.RagService\bin\Debug\net10.0\AICopilot.RagService.dll
+  AICopilot.MigrationWorkApp -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.MigrationWorkApp\bin\Debug\net10.0\AICopilot.MigrationWorkApp.dll
+  AICopilot.Infrastructure -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\infrastructure\AICopilot.Infrastructure\bin\Debug\net10.0\AICopilot.Infrastructure.dll
+  AICopilot.RagWorker -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.RagWorker\bin\Debug\net10.0\AICopilot.RagWorker.dll
+  AICopilot.HttpApi -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.HttpApi\bin\Debug\net10.0\AICopilot.HttpApi.dll
+  AICopilot.AppHost -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\hosts\AICopilot.AppHost\bin\Debug\net10.0\AICopilot.AppHost.dll
+  AICopilot.BackendTests -> C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\tests\AICopilot.BackendTests\bin\Debug\net10.0\AICopilot.BackendTests.dll
+C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\tests\AICopilot.BackendTests\bin\Debug\net10.0\AICopilot.BackendTests.dll (.NETCoreApp,Version=v10.0)的测试运行
 总共 1 个测试文件与指定模式相匹配。
 
 已通过! - 失败:     0，通过:     1，已跳过:     0，总计:     1，持续时间: 10 s - AICopilot.BackendTests.dll (net10.0)

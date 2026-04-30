@@ -51,7 +51,7 @@ dotnet publish /p:PublishProfile=DefaultContainer /p:ContainerRegistry=localhost
 在项目**根目录**下执行：
 
 ```powershell
-docker build -t shushu/aicopilot-webui:latest src/Vues/AICopilot.Web
+docker build -t shushu/aicopilot-webui:latest src/vues/AICopilot.Web
 
 ```
 

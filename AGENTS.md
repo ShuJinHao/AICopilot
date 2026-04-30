@@ -19,12 +19,12 @@ For business semantics, the current cloud business is the reference source.
 ## Current Architecture
 
 The current repository structure already follows the same broad direction as the cloud-side layered architecture:
-- `src/Core`: domain core, aggregates, entities, value objects, domain rules.
-- `src/Services`: commands, queries, workflows, application orchestration, MediatR handlers.
-- `src/Infrastructure`: EF Core, Dapper, embedding, event bus, provider integration, external technology details.
-- `src/Hosts`: composition root, API, worker, app host, startup wiring.
-- `src/Shared`: shared kernel, contracts, plugin abstractions, cross-cutting shared components.
-- `src/Vues`: frontend only.
+- `src/core`: domain core, aggregates, entities, value objects, domain rules.
+- `src/services`: commands, queries, workflows, application orchestration, MediatR handlers.
+- `src/infrastructure`: EF Core, Dapper, embedding, event bus, provider integration, external technology details.
+- `src/hosts`: composition root, API, worker, app host, startup wiring.
+- `src/shared`: shared kernel, contracts, plugin abstractions, cross-cutting shared components.
+- `src/vues`: frontend only.
 
 This structure must continue to align with the cloud-side DDD layering.
 
@@ -38,7 +38,7 @@ This structure must continue to align with the cloud-side DDD layering.
 - Keep `Hosts` thin. `Hosts` may wire services, expose APIs, and host workers, but must not absorb core business logic.
 - Keep controllers thin. Controllers should forward requests and return results, not hold business logic.
 - Keep `Shared` focused on truly shared abstractions and shared kernel concerns.
-- Keep frontend logic inside `src/Vues`, not backfill it into service or host layers.
+- Keep frontend logic inside `src/vues`, not backfill it into service or host layers.
 - Treat AICopilot Identity user identifiers as `Guid` semantics. `ICurrentUser.Id` and internal identity access contracts must use Guid-typed values; do not add scattered `Guid.Parse(currentUser.Id)` string parsing patterns.
 
 ## Capability Boundary Rules
