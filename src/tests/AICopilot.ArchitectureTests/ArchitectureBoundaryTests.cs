@@ -710,6 +710,21 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
+    public void CloudReadOnlyAlignmentPlan_ShouldKeepCloudWriteToolsOutOfScope()
+    {
+        var alignmentFile = Path.Combine(SolutionRoot, "\u8d44\u6599", "CloudReadOnlyAlignment.md");
+        var alignment = File.ReadAllText(alignmentFile);
+
+        alignment.Should().Contain("Cloud Read-only Alignment");
+        alignment.Should().Contain("No direct Cloud database writes from AICopilot");
+        alignment.Should().Contain("No MCP, Tool, Agent workflow, background job, SQL script, or hidden adapter");
+        alignment.Should().Contain("DataAnalysis may query Cloud data only through read-only sources");
+        alignment.Should().Contain("Future Cloud-related MCP tools must default to query-only behavior");
+        alignment.Should().Contain("Forbidden tool semantics for Cloud business data");
+        alignment.Should().Contain("Write-capable APIs require a separate design decision");
+    }
+
+    [Fact]
     public void MigratingDbContexts_ShouldUseIndependentMigrationHistoryTables()
     {
         var infrastructureRoot = Path.Combine(
