@@ -76,20 +76,20 @@
 
 ```powershell
 cd "C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot"
-dotnet test ".\src\Tests\AICopilot.BackendTests\AICopilot.BackendTests.csproj" --filter "Suite=Phase43SafetyQuality&Runtime!=DockerRequired"
+dotnet test ".\src\tests\AICopilot.BackendTests\AICopilot.BackendTests.csproj" --filter "Suite=Phase43SafetyQuality&Runtime!=DockerRequired"
 ```
 
 ### 4.2 Docker 完整门禁
 
 ```powershell
 cd "C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot"
-dotnet test ".\src\Tests\AICopilot.BackendTests\AICopilot.BackendTests.csproj" --filter "Suite=Phase43SafetyQuality"
+dotnet test ".\src\tests\AICopilot.BackendTests\AICopilot.BackendTests.csproj" --filter "Suite=Phase43SafetyQuality"
 ```
 
 ### 4.3 前端构建
 
 ```powershell
-cd "C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\Vues\AICopilot.Web"
+cd "C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\vues\AICopilot.Web"
 npm run build
 ```
 

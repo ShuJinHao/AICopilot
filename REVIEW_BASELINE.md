@@ -87,8 +87,8 @@ Generated for the current large refactor baseline.
 ## Required Verification
 
 - `dotnet build .\AICopilot.slnx --no-restore`
-- `npm run build` from `src/Vues/AICopilot.Web`
-- `dotnet test .\src\Tests\AICopilot.ArchitectureTests\AICopilot.ArchitectureTests.csproj --no-build`
-- `dotnet test .\src\Tests\AICopilot.BackendTests\AICopilot.BackendTests.csproj --no-build`
+- `npm run build` from `src/vues/AICopilot.Web`
+- `dotnet test .\src\tests\AICopilot.ArchitectureTests\AICopilot.ArchitectureTests.csproj --no-build`
+- `dotnet test .\src\tests\AICopilot.BackendTests\AICopilot.BackendTests.csproj --no-build`
 - Static checks must keep `IDataQueryService`, repository queryable escape methods, Services/Core `IQueryable`, and Services/Core `IPublishEndpoint` at zero results.
 - Static checks must keep `AddEntityFrameworkStores<AiCopilotDbContext>` out of production source, keep Identity management commands off `IAuditLogWriter`, and keep `DetachIdentityFromAiCopilotDbContext` free of `DropTable`/`CreateTable`.
