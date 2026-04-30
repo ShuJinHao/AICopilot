@@ -259,4 +259,86 @@ export interface SemanticSourceStatus {
   status: string
 }
 
+export type EmbeddingModelApiKeyAction = 'keep' | 'replace' | 'clear'
+
+export interface EmbeddingModelSummary {
+  id: string
+  name: string
+  provider: string
+  baseUrl: string
+  modelName: string
+  dimensions: number
+  maxTokens: number
+  isEnabled: boolean
+  hasApiKey: boolean
+  apiKeyMasked?: string | null
+}
+
+export interface EmbeddingModelDetail extends EmbeddingModelSummary {}
+
+export interface EmbeddingModelFormModel {
+  id?: string
+  name: string
+  provider: string
+  baseUrl: string
+  apiKey: string
+  apiKeyAction: EmbeddingModelApiKeyAction
+  modelName: string
+  dimensions: number
+  maxTokens: number
+  isEnabled: boolean
+  hasApiKey: boolean
+  apiKeyMasked?: string | null
+}
+
+export interface KnowledgeBaseSummary {
+  id: string
+  name: string
+  description: string
+  embeddingModelId: string
+  documentCount: number
+}
+
+export interface KnowledgeBaseDetail extends KnowledgeBaseSummary {}
+
+export interface KnowledgeBaseFormModel {
+  id?: string
+  name: string
+  description: string
+  embeddingModelId: string
+}
+
+export type KnowledgeDocumentStatus =
+  | 'Pending'
+  | 'Parsing'
+  | 'Splitting'
+  | 'Embedding'
+  | 'Indexed'
+  | 'Failed'
+  | number
+
+export interface KnowledgeDocumentSummary {
+  id: number
+  knowledgeBaseId: string
+  name: string
+  extension: string
+  status: KnowledgeDocumentStatus
+  chunkCount: number
+  errorMessage?: string | null
+  createdAt: string
+  processedAt?: string | null
+}
+
+export interface UploadDocumentResponse {
+  id: number
+  status: string
+}
+
+export interface SearchKnowledgeBaseResult {
+  text: string
+  score: number
+  documentId: number
+  documentName?: string | null
+}
+
 export type ConfigDialogMode = 'create' | 'edit'

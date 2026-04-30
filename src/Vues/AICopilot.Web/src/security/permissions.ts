@@ -63,6 +63,36 @@ export const ACCESS_MANAGEMENT_PERMISSIONS = [
   'Identity.ResetUserPassword'
 ] as const
 
+export const KNOWLEDGE_READ_PERMISSIONS = [
+  'Rag.GetEmbeddingModel',
+  'Rag.GetListEmbeddingModels',
+  'Rag.GetKnowledgeBase',
+  'Rag.GetListKnowledgeBases',
+  'Rag.GetListDocuments'
+] as const
+
+export const KNOWLEDGE_WRITE_PERMISSIONS = {
+  embeddingModel: {
+    create: 'Rag.CreateEmbeddingModel',
+    update: 'Rag.UpdateEmbeddingModel',
+    delete: 'Rag.DeleteEmbeddingModel'
+  },
+  knowledgeBase: {
+    create: 'Rag.CreateKnowledgeBase',
+    update: 'Rag.UpdateKnowledgeBase',
+    delete: 'Rag.DeleteKnowledgeBase'
+  },
+  document: {
+    upload: 'Rag.UploadDocument',
+    delete: 'Rag.DeleteDocument'
+  },
+  search: 'Rag.SearchKnowledgeBase'
+} as const
+
 export function collectConfigReadPermissions() {
   return Object.values(CONFIG_READ_PERMISSIONS).flat()
+}
+
+export function collectKnowledgeReadPermissions() {
+  return [...KNOWLEDGE_READ_PERMISSIONS]
 }

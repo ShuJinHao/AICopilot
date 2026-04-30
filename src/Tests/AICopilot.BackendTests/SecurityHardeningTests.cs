@@ -12,6 +12,7 @@ using AICopilot.Dapper;
 using AICopilot.Dapper.Security;
 using AICopilot.HttpApi.Controllers;
 using AICopilot.Infrastructure.Storage;
+using AICopilot.RagService.Queries.KnowledgeBases;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.Services.CrossCutting.Serialization;
 using AICopilot.SharedKernel.Ai;
@@ -61,6 +62,7 @@ public sealed class SecurityHardeningTests
         typeof(AiGatewayController).GetCustomAttribute<AuthorizeAttribute>().Should().NotBeNull();
         typeof(DataAnalysisController).GetCustomAttribute<AuthorizeAttribute>().Should().NotBeNull();
         typeof(McpController).GetCustomAttribute<AuthorizeAttribute>().Should().NotBeNull();
+        typeof(RagController).GetCustomAttribute<AuthorizeAttribute>().Should().NotBeNull();
     }
 
     [Fact]
@@ -216,6 +218,68 @@ public sealed class SecurityHardeningTests
         configViewSource.Should().Contain("SQL 安全拒绝");
         configViewSource.Should().Contain("结果截断");
         configViewSource.Should().Contain("配置管理台保存时始终强制只读");
+    }
+
+    [Fact]
+    public void FrontendKnowledgeManagement_ShouldExposeRagRouteAndUseMultipartUpload()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var vueRoot = Path.Combine(solutionRoot, "src", "Vues", "AICopilot.Web", "src");
+        var permissionsSource = File.ReadAllText(Path.Combine(vueRoot, "security", "permissions.ts"));
+        var authStoreSource = File.ReadAllText(Path.Combine(vueRoot, "stores", "authStore.ts"));
+        var routerSource = File.ReadAllText(Path.Combine(vueRoot, "router", "index.ts"));
+        var appShellSource = File.ReadAllText(Path.Combine(vueRoot, "components", "layout", "AppShell.vue"));
+        var apiClientSource = File.ReadAllText(Path.Combine(vueRoot, "services", "apiClient.ts"));
+        var ragServiceSource = File.ReadAllText(Path.Combine(vueRoot, "services", "ragService.ts"));
+        var ragStoreSource = File.ReadAllText(Path.Combine(vueRoot, "stores", "ragStore.ts"));
+        var knowledgeViewSource = File.ReadAllText(Path.Combine(vueRoot, "views", "KnowledgeView.vue"));
+        var permissionCatalogSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Services",
+            "AICopilot.IdentityService",
+            "Authorization",
+            "PermissionCatalog.cs"));
+        var embeddingManagementSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "Services",
+            "AICopilot.RagService",
+            "EmbeddingModels",
+            "EmbeddingModelManagement.cs"));
+
+        permissionsSource.Should().Contain("KNOWLEDGE_READ_PERMISSIONS");
+        permissionsSource.Should().Contain("Rag.SearchKnowledgeBase");
+        authStoreSource.Should().Contain("canManageKnowledge");
+        routerSource.Should().Contain("path: '/knowledge'");
+        routerSource.Should().Contain("ability: 'knowledge'");
+        appShellSource.Should().Contain("canManageKnowledge");
+        appShellSource.Should().Contain("知识库");
+        apiClientSource.Should().Contain("postForm");
+        apiClientSource.Should().Contain("isFormDataBody");
+        ragServiceSource.Should().Contain("/rag/embedding-model/list");
+        ragServiceSource.Should().Contain("/rag/knowledge-base/list");
+        ragServiceSource.Should().Contain("/rag/document");
+        ragServiceSource.Should().Contain("postForm<UploadDocumentResponse>");
+        ragStoreSource.Should().Contain("apiKeyAction");
+        ragStoreSource.Should().Contain("uploadDocument(file: File)");
+        knowledgeViewSource.Should().Contain("Pending");
+        knowledgeViewSource.Should().Contain("Embedding");
+        knowledgeViewSource.Should().Contain("Indexed");
+        knowledgeViewSource.Should().Contain("Failed");
+        knowledgeViewSource.Should().Contain("KNOWLEDGE_WRITE_PERMISSIONS.search");
+        permissionCatalogSource.Should().Contain("Rag.SearchKnowledgeBase");
+        embeddingManagementSource.Should().Contain("request.ApiKey ?? entity.ApiKey");
+    }
+
+    [Fact]
+    public void SearchKnowledgeBaseQuery_ShouldRequireDedicatedRagSearchPermission()
+    {
+        var attribute = typeof(SearchKnowledgeBaseQuery)
+            .GetCustomAttribute<AuthorizeRequirementAttribute>();
+
+        attribute.Should().NotBeNull();
+        attribute!.Permission.Should().Be("Rag.SearchKnowledgeBase");
     }
 
     [Fact]

@@ -108,6 +108,7 @@ function buildUrl(endpoint: string, query?: QueryParams) {
 async function request<T>(endpoint: string, init: RequestInit = {}, query?: QueryParams): Promise<T> {
   const headers = new Headers(init.headers ?? {})
   headers.set('Accept', 'application/json')
+  const isFormDataBody = typeof FormData !== 'undefined' && init.body instanceof FormData
 
   const token = getAccessToken()
   const hasAuthToken = Boolean(token)
@@ -115,7 +116,7 @@ async function request<T>(endpoint: string, init: RequestInit = {}, query?: Quer
     headers.set('Authorization', `Bearer ${token}`)
   }
 
-  if (init.body && !headers.has('Content-Type')) {
+  if (init.body && !headers.has('Content-Type') && !isFormDataBody) {
     headers.set('Content-Type', 'application/json')
   }
 
@@ -154,6 +155,12 @@ export const apiClient = {
     return request<T>(endpoint, {
       method: 'POST',
       body: JSON.stringify(body)
+    })
+  },
+  postForm<T>(endpoint: string, body: FormData) {
+    return request<T>(endpoint, {
+      method: 'POST',
+      body
     })
   },
   put<T>(endpoint: string, body: unknown) {

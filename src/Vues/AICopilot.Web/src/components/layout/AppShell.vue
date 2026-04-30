@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ChatDotRound,
+  Collection,
   DataAnalysis,
   Lock,
   SwitchButton
@@ -19,15 +20,10 @@ const activePath = computed(() => route.path)
 
 const navigationItems = computed(() => {
   return [
-    authStore.canUseChat
-      ? { path: '/chat', label: '聊天', icon: ChatDotRound }
-      : null,
-    authStore.canViewConfig
-      ? { path: '/config', label: '配置管理', icon: DataAnalysis }
-      : null,
-    authStore.canManageAccess
-      ? { path: '/access', label: '权限管理', icon: Lock }
-      : null
+    authStore.canUseChat ? { path: '/chat', label: '聊天', icon: ChatDotRound } : null,
+    authStore.canViewConfig ? { path: '/config', label: '配置管理', icon: DataAnalysis } : null,
+    authStore.canManageKnowledge ? { path: '/knowledge', label: '知识库', icon: Collection } : null,
+    authStore.canManageAccess ? { path: '/access', label: '权限管理', icon: Lock } : null
   ].filter((item): item is { path: string; label: string; icon: typeof ChatDotRound } => item !== null)
 })
 
@@ -114,7 +110,7 @@ async function logout() {
 .brand-mark {
   width: 42px;
   height: 42px;
-  border-radius: 14px;
+  border-radius: 8px;
   display: grid;
   place-items: center;
   background: linear-gradient(135deg, #0f766e, #2563eb);

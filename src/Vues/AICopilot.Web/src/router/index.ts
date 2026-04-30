@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
 
-type ProtectedAbility = 'chat' | 'config' | 'access'
+type ProtectedAbility = 'chat' | 'config' | 'knowledge' | 'access'
 
 function resolveAuthorizedPath(authStore: ReturnType<typeof useAuthStore>) {
   if (authStore.canUseChat) {
@@ -10,6 +10,10 @@ function resolveAuthorizedPath(authStore: ReturnType<typeof useAuthStore>) {
 
   if (authStore.canViewConfig) {
     return '/config'
+  }
+
+  if (authStore.canManageKnowledge) {
+    return '/knowledge'
   }
 
   if (authStore.canManageAccess) {
@@ -28,6 +32,8 @@ function hasRouteAbility(
       return authStore.canUseChat
     case 'config':
       return authStore.canViewConfig
+    case 'knowledge':
+      return authStore.canManageKnowledge
     case 'access':
       return authStore.canManageAccess
     default:
@@ -58,6 +64,12 @@ const router = createRouter({
       name: 'config',
       component: () => import('@/views/ConfigView.vue'),
       meta: { requiresAuth: true, ability: 'config' as ProtectedAbility }
+    },
+    {
+      path: '/knowledge',
+      name: 'knowledge',
+      component: () => import('@/views/KnowledgeView.vue'),
+      meta: { requiresAuth: true, ability: 'knowledge' as ProtectedAbility }
     },
     {
       path: '/access',

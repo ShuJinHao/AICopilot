@@ -1,12 +1,14 @@
-﻿using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
+using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.Services.Contracts;
+using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.SharedKernel.Messaging;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
 
 namespace AICopilot.RagService.Queries.KnowledgeBases;
 
+[AuthorizeRequirement("Rag.SearchKnowledgeBase")]
 public record SearchKnowledgeBaseQuery(
     Guid KnowledgeBaseId,
     string QueryText,
