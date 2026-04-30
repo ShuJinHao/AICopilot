@@ -19,6 +19,7 @@ For business semantics, the current cloud business is the reference source.
 ## Cloud Business Read-only Boundary
 
 `AICopilot` may consume confirmed cloud business data for analysis, explanation, summarization, retrieval, and recommendation only.
+- AICopilot-to-Cloud alignment planning is documented in `资料/CloudReadOnlyAlignment.md`; that document is a read-only preparation guide, not permission to implement Cloud business write tools.
 - It must not directly write to the Cloud database.
 - It must not create, update, delete, backfill, approve, dispatch, or trigger Cloud business records or Cloud business workflows.
 - It must not use MCP tools, agent workflows, background jobs, direct SQL, or hidden adapters to call Cloud write APIs indirectly.
