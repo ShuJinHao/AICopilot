@@ -70,7 +70,7 @@ public sealed class RagDbContextFactory : IDesignTimeDbContextFactory<RagDbConte
                                    "Design-time migration requires ConnectionStrings__ai-copilot or AICOPILOT__DESIGNTIME__CONNECTION.");
 
         var optionsBuilder = new DbContextOptionsBuilder<RagDbContext>();
-        optionsBuilder.UseNpgsql(connectionString);
+        optionsBuilder.UseNpgsqlWithMigrationHistory(connectionString, MigrationHistoryTables.Rag);
 
         return new RagDbContext(optionsBuilder.Options);
     }

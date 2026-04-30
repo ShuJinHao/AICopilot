@@ -17,6 +17,9 @@ Updated: 2026-04-30
 - RAG supports embedding model management, knowledge base management, document upload, indexing status, retryable indexing, vector cleanup, and search.
 - DataAnalysis keeps read-only query execution and shows clearer configuration/runtime safety feedback.
 - MCP server configuration can be managed from the UI; runtime bootstrap changes still require service restart.
+- Source directory casing has been normalized under `src`.
+- Core business aggregate IDs use strong typed identifiers internally while HTTP DTOs and database columns remain Guid-based.
+- EF migration history is split per migration-owning DbContext, with legacy shared-history bootstrap kept for upgrades.
 
 ## Cleanup Decisions
 
@@ -26,8 +29,5 @@ Updated: 2026-04-30
 
 ## Deferred Work
 
-- Directory casing normalization.
-- Strongly typed IDs.
-- Per-DbContext `__EFMigrationsHistory` split.
 - Preview/0.x package replacement and operations dependency decisions.
 - Cloud/Edge alignment work, unless explicitly requested.

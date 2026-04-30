@@ -60,7 +60,7 @@ public sealed class McpServerDbContextFactory : IDesignTimeDbContextFactory<McpS
                                    "Design-time migration requires ConnectionStrings__ai-copilot or AICOPILOT__DESIGNTIME__CONNECTION.");
 
         var optionsBuilder = new DbContextOptionsBuilder<McpServerDbContext>();
-        optionsBuilder.UseNpgsql(connectionString);
+        optionsBuilder.UseNpgsqlWithMigrationHistory(connectionString, MigrationHistoryTables.McpServer);
 
         return new McpServerDbContext(optionsBuilder.Options);
     }

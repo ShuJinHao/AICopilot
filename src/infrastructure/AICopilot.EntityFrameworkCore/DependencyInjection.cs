@@ -23,14 +23,26 @@ public static class DependencyInjection
     public static void AddEfCore(this IHostApplicationBuilder builder)
     {
         SecretStringEncryptor.EnsureConfigured();
-        builder.AddNpgsqlDbContext<AiCopilotDbContext>("ai-copilot");
-        builder.AddNpgsqlDbContext<AiGatewayDbContext>("ai-copilot");
+        builder.AddNpgsqlDbContext<AiCopilotDbContext>(
+            "ai-copilot",
+            configureDbContextOptions: AICopilotNpgsqlOptions.ConfigureMigrationHistory(MigrationHistoryTables.AiCopilot));
+        builder.AddNpgsqlDbContext<AiGatewayDbContext>(
+            "ai-copilot",
+            configureDbContextOptions: AICopilotNpgsqlOptions.ConfigureMigrationHistory(MigrationHistoryTables.AiGateway));
         builder.AddNpgsqlDbContext<AuditDbContext>("ai-copilot");
-        builder.AddNpgsqlDbContext<DataAnalysisDbContext>("ai-copilot");
-        builder.AddNpgsqlDbContext<IdentityStoreDbContext>("ai-copilot");
-        builder.AddNpgsqlDbContext<McpServerDbContext>("ai-copilot");
+        builder.AddNpgsqlDbContext<DataAnalysisDbContext>(
+            "ai-copilot",
+            configureDbContextOptions: AICopilotNpgsqlOptions.ConfigureMigrationHistory(MigrationHistoryTables.DataAnalysis));
+        builder.AddNpgsqlDbContext<IdentityStoreDbContext>(
+            "ai-copilot",
+            configureDbContextOptions: AICopilotNpgsqlOptions.ConfigureMigrationHistory(MigrationHistoryTables.IdentityStore));
+        builder.AddNpgsqlDbContext<McpServerDbContext>(
+            "ai-copilot",
+            configureDbContextOptions: AICopilotNpgsqlOptions.ConfigureMigrationHistory(MigrationHistoryTables.McpServer));
         builder.AddNpgsqlDbContext<OutboxDbContext>("ai-copilot");
-        builder.AddNpgsqlDbContext<RagDbContext>("ai-copilot");
+        builder.AddNpgsqlDbContext<RagDbContext>(
+            "ai-copilot",
+            configureDbContextOptions: AICopilotNpgsqlOptions.ConfigureMigrationHistory(MigrationHistoryTables.Rag));
 
         builder.Services.AddScoped(typeof(IReadRepository<>), typeof(EfReadRepository<>));
         builder.Services.AddScoped(typeof(IRepository<>), typeof(EfRepository<>));

@@ -6,7 +6,7 @@ Generated for the current large refactor baseline.
 
 - Only AICopilot is in scope.
 - IIoT.CloudPlatform and IIoT.EdgeClient remain read-only references.
-- This baseline does not add new business APIs, routes, NuGet packages, directory renames, or strong typed IDs.
+- This baseline does not add new business APIs, routes, or NuGet packages.
 
 ## Review Summary
 
@@ -16,6 +16,7 @@ Generated for the current large refactor baseline.
 - HTTP authentication, upload limits, secret placeholders, ApiKey fail-fast behavior, and OpenTelemetry sensitive data gating are part of the security baseline.
 - Identity runtime storage uses `IdentityStoreDbContext`; identity management commands use `ITransactionalExecutionService` and `IIdentityAuditLogWriter` so identity changes, permission sync, and identity audit rows share one EF transaction.
 - Runtime and frontend usability closure has been merged: chat/approval, RAG knowledge management, DataAnalysis configuration feedback, MCP server management, and `/chat`, `/config`, `/knowledge`, `/access` frontend paths are part of the current baseline.
+- Source directory casing is normalized under `src`, and core business aggregate IDs use strong typed identifiers internally while API DTOs and database columns remain Guid-based.
 
 ## Persistence Boundary
 
@@ -36,6 +37,7 @@ Generated for the current large refactor baseline.
 - Split module migrations may remove old `public` tables only after data has been moved or copied into the owning module schema.
 - MCP module schema migration uses guarded `ALTER TABLE ... SET SCHEMA` and must not silently merge duplicate `public.mcp_server_info` and `mcp.mcp_server_info` states.
 - Fresh database verification must end with module tables in `aigateway`, `rag`, `dataanalysis`, `mcp`, Identity tables in `identity`, and Outbox in `outbox`.
+- EF migration history is split per migration-owning DbContext. The migration runner bootstraps legacy rows from `public.__EFMigrationsHistory` into the per-context history tables before running migrations, and it fails fast if a target history table is partially copied.
 
 ## Audit Boundary
 
@@ -77,12 +79,9 @@ Generated for the current large refactor baseline.
 
 ## Explicitly Deferred
 
-- Directory casing normalization is a separate pure-rename PR.
-- Strong typed IDs are deferred until this baseline is merged and stable.
 - Preview or 0.x package replacement, OpenTelemetry NU1902 remediation, RabbitMQ dedicated user, dashboard image pinning, private image registry, and Serilog adoption require dependency or operations decisions.
 - Cross-DbContext audit atomicity outside Identity remains a future design item; this baseline does not introduce `TransactionScope` or distributed transactions.
 - Cloud and edge alignment work remains out of scope unless explicitly requested.
-- Splitting `__EFMigrationsHistory` by DbContext remains a separate migration governance task. This baseline intentionally keeps the existing shared history table to avoid disturbing already-applied migrations.
 
 ## Required Verification
 

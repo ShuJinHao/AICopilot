@@ -44,7 +44,7 @@ public sealed class IdentityStoreDbContextFactory : IDesignTimeDbContextFactory<
                                    "Design-time migration requires ConnectionStrings__ai-copilot or AICOPILOT__DESIGNTIME__CONNECTION.");
 
         var optionsBuilder = new DbContextOptionsBuilder<IdentityStoreDbContext>();
-        optionsBuilder.UseNpgsql(connectionString);
+        optionsBuilder.UseNpgsqlWithMigrationHistory(connectionString, MigrationHistoryTables.IdentityStore);
 
         return new IdentityStoreDbContext(optionsBuilder.Options);
     }

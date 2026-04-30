@@ -75,7 +75,7 @@ public sealed class AiGatewayDbContextFactory : IDesignTimeDbContextFactory<AiGa
                                    "Design-time migration requires ConnectionStrings__ai-copilot or AICOPILOT__DESIGNTIME__CONNECTION.");
 
         var optionsBuilder = new DbContextOptionsBuilder<AiGatewayDbContext>();
-        optionsBuilder.UseNpgsql(connectionString);
+        optionsBuilder.UseNpgsqlWithMigrationHistory(connectionString, MigrationHistoryTables.AiGateway);
 
         return new AiGatewayDbContext(optionsBuilder.Options);
     }

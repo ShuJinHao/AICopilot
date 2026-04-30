@@ -35,12 +35,23 @@ public class Worker(
             var permissionCatalog = scope.ServiceProvider.GetRequiredService<IPermissionCatalog>();
             var identityAccessService = scope.ServiceProvider.GetRequiredService<IIdentityAccessService>();
 
-            await RunMigrationAsync(dbContext, cancellationToken);
-            await RunMigrationAsync(identityStoreDbContext, cancellationToken);
-            await RunMigrationAsync(aiGatewayDbContext, cancellationToken);
-            await RunMigrationAsync(ragDbContext, cancellationToken);
-            await RunMigrationAsync(dataAnalysisDbContext, cancellationToken);
-            await RunMigrationAsync(mcpServerDbContext, cancellationToken);
+            var migrationContexts = new[]
+            {
+                new MigrationHistoryBootstrapper.MigrationContext(dbContext, MigrationHistoryTables.AiCopilot),
+                new MigrationHistoryBootstrapper.MigrationContext(identityStoreDbContext, MigrationHistoryTables.IdentityStore),
+                new MigrationHistoryBootstrapper.MigrationContext(aiGatewayDbContext, MigrationHistoryTables.AiGateway),
+                new MigrationHistoryBootstrapper.MigrationContext(ragDbContext, MigrationHistoryTables.Rag),
+                new MigrationHistoryBootstrapper.MigrationContext(dataAnalysisDbContext, MigrationHistoryTables.DataAnalysis),
+                new MigrationHistoryBootstrapper.MigrationContext(mcpServerDbContext, MigrationHistoryTables.McpServer)
+            };
+
+            await MigrationHistoryBootstrapper.BootstrapLegacyHistoryAsync(migrationContexts, cancellationToken);
+
+            foreach (var migrationContext in migrationContexts)
+            {
+                await RunMigrationAsync(migrationContext.DbContext, cancellationToken);
+            }
+
             await SeedIdentityAsync(
                 roleManager,
                 userManager,

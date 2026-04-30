@@ -58,11 +58,14 @@ public sealed class MigrationSafetyTests(CoreAICopilotAppFixture fixture)
             """);
 
         var options = new DbContextOptionsBuilder<McpServerDbContext>()
-            .UseNpgsql(database.ConnectionString)
+            .UseNpgsqlWithMigrationHistory(database.ConnectionString, MigrationHistoryTables.McpServer)
             .Options;
 
         await using (var dbContext = new McpServerDbContext(options))
         {
+            await MigrationHistoryBootstrapper.BootstrapLegacyHistoryAsync(
+                [new MigrationHistoryBootstrapper.MigrationContext(dbContext, MigrationHistoryTables.McpServer)],
+                CancellationToken.None);
             await dbContext.Database.MigrateAsync();
         }
 
@@ -82,7 +85,7 @@ public sealed class MigrationSafetyTests(CoreAICopilotAppFixture fixture)
         await using var database = await ScratchDatabase.CreateAsync(await fixture.GetConnectionStringAsync());
 
         var options = new DbContextOptionsBuilder<AiCopilotDbContext>()
-            .UseNpgsql(database.ConnectionString)
+            .UseNpgsqlWithMigrationHistory(database.ConnectionString, MigrationHistoryTables.AiCopilot)
             .Options;
 
         await using (var dbContext = new AiCopilotDbContext(options))
@@ -105,6 +108,188 @@ public sealed class MigrationSafetyTests(CoreAICopilotAppFixture fixture)
         exception.Which.ToString().Should().Contain("Refusing to run destructive Identity GUID migration");
     }
 
+    [Fact]
+    public async Task MigrationHistoryBootstrap_ShouldCopyLegacySharedHistory_ToSplitHistoryTables()
+    {
+        await using var database = await ScratchDatabase.CreateAsync(await fixture.GetConnectionStringAsync());
+
+        await using var aiCopilotDbContext = new AiCopilotDbContext(
+            CreateOptions<AiCopilotDbContext>(database.ConnectionString, MigrationHistoryTables.AiCopilot));
+        await using var identityStoreDbContext = new IdentityStoreDbContext(
+            CreateOptions<IdentityStoreDbContext>(database.ConnectionString, MigrationHistoryTables.IdentityStore));
+        await using var aiGatewayDbContext = new AiGatewayDbContext(
+            CreateOptions<AiGatewayDbContext>(database.ConnectionString, MigrationHistoryTables.AiGateway));
+        await using var ragDbContext = new RagDbContext(
+            CreateOptions<RagDbContext>(database.ConnectionString, MigrationHistoryTables.Rag));
+        await using var dataAnalysisDbContext = new DataAnalysisDbContext(
+            CreateOptions<DataAnalysisDbContext>(database.ConnectionString, MigrationHistoryTables.DataAnalysis));
+        await using var mcpServerDbContext = new McpServerDbContext(
+            CreateOptions<McpServerDbContext>(database.ConnectionString, MigrationHistoryTables.McpServer));
+
+        var migrationContexts = new[]
+        {
+            new MigrationHistoryBootstrapper.MigrationContext(aiCopilotDbContext, MigrationHistoryTables.AiCopilot),
+            new MigrationHistoryBootstrapper.MigrationContext(identityStoreDbContext, MigrationHistoryTables.IdentityStore),
+            new MigrationHistoryBootstrapper.MigrationContext(aiGatewayDbContext, MigrationHistoryTables.AiGateway),
+            new MigrationHistoryBootstrapper.MigrationContext(ragDbContext, MigrationHistoryTables.Rag),
+            new MigrationHistoryBootstrapper.MigrationContext(dataAnalysisDbContext, MigrationHistoryTables.DataAnalysis),
+            new MigrationHistoryBootstrapper.MigrationContext(mcpServerDbContext, MigrationHistoryTables.McpServer)
+        };
+
+        var legacyRows = migrationContexts
+            .Select(context => (
+                context.HistoryTable,
+                MigrationId: context.DbContext.Database.GetMigrations().First()))
+            .ToArray();
+
+        await CreateLegacyHistoryAsync(
+            database.ConnectionString,
+            legacyRows.Select(row => row.MigrationId).ToArray());
+
+        await MigrationHistoryBootstrapper.BootstrapLegacyHistoryAsync(migrationContexts, CancellationToken.None);
+        await MigrationHistoryBootstrapper.BootstrapLegacyHistoryAsync(migrationContexts, CancellationToken.None);
+
+        foreach (var (historyTable, migrationId) in legacyRows)
+        {
+            (await ExecuteScalarAsync(
+                database.ConnectionString,
+                $"SELECT to_regclass('{RegclassName(historyTable)}')::text"))
+                .Should().NotBeNull($"{historyTable.ContextName} split history table must be created");
+
+            (await CountMigrationRowsAsync(database.ConnectionString, historyTable, migrationId))
+                .Should().Be(1, $"{historyTable.ContextName} legacy history row must be copied exactly once");
+        }
+    }
+
+    [Fact]
+    public async Task MigrationHistoryBootstrap_ShouldFail_WhenSplitHistoryIsPartial()
+    {
+        await using var database = await ScratchDatabase.CreateAsync(await fixture.GetConnectionStringAsync());
+        await using var dbContext = new AiCopilotDbContext(
+            CreateOptions<AiCopilotDbContext>(database.ConnectionString, MigrationHistoryTables.AiCopilot));
+
+        var migrations = dbContext.Database.GetMigrations().Take(2).ToArray();
+        migrations.Should().HaveCount(2);
+
+        await CreateLegacyHistoryAsync(database.ConnectionString, migrations);
+        await CreateSplitHistoryAsync(
+            database.ConnectionString,
+            MigrationHistoryTables.AiCopilot,
+            [migrations[0]]);
+
+        var migrationContexts = new[]
+        {
+            new MigrationHistoryBootstrapper.MigrationContext(dbContext, MigrationHistoryTables.AiCopilot)
+        };
+        Func<Task> act = () => MigrationHistoryBootstrapper.BootstrapLegacyHistoryAsync(
+            migrationContexts,
+            CancellationToken.None);
+
+        var exception = await act.Should().ThrowAsync<InvalidOperationException>();
+        exception.Which.Message.Should().Contain("partial target history");
+        exception.Which.Message.Should().Contain(migrations[1]);
+    }
+
+    private static DbContextOptions<TContext> CreateOptions<TContext>(
+        string connectionString,
+        MigrationHistoryTable historyTable)
+        where TContext : DbContext
+    {
+        return new DbContextOptionsBuilder<TContext>()
+            .UseNpgsqlWithMigrationHistory(connectionString, historyTable)
+            .Options;
+    }
+
+    private static async Task CreateLegacyHistoryAsync(
+        string connectionString,
+        IReadOnlyCollection<string> migrationIds)
+    {
+        await ExecuteNonQueryAsync(
+            connectionString,
+            """
+            CREATE TABLE public."__EFMigrationsHistory" (
+                "MigrationId" character varying(150) NOT NULL,
+                "ProductVersion" character varying(32) NOT NULL,
+                CONSTRAINT "PK___EFMigrationsHistory" PRIMARY KEY ("MigrationId")
+            );
+            """);
+
+        foreach (var migrationId in migrationIds)
+        {
+            await InsertMigrationHistoryAsync(
+                connectionString,
+                new MigrationHistoryTable("Legacy", "public", "__EFMigrationsHistory"),
+                migrationId);
+        }
+    }
+
+    private static async Task CreateSplitHistoryAsync(
+        string connectionString,
+        MigrationHistoryTable historyTable,
+        IReadOnlyCollection<string> migrationIds)
+    {
+        await ExecuteNonQueryAsync(
+            connectionString,
+            $"""
+             CREATE SCHEMA IF NOT EXISTS {QuoteIdentifier(historyTable.Schema)};
+             CREATE TABLE {HistoryTableSql(historyTable)} (
+                 "MigrationId" character varying(150) NOT NULL,
+                 "ProductVersion" character varying(32) NOT NULL,
+                 CONSTRAINT {QuoteIdentifier("PK_" + historyTable.TableName)} PRIMARY KEY ("MigrationId")
+             );
+             """);
+
+        foreach (var migrationId in migrationIds)
+        {
+            await InsertMigrationHistoryAsync(connectionString, historyTable, migrationId);
+        }
+    }
+
+    private static async Task InsertMigrationHistoryAsync(
+        string connectionString,
+        MigrationHistoryTable historyTable,
+        string migrationId)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            $"""
+             INSERT INTO {HistoryTableSql(historyTable)} ("MigrationId", "ProductVersion")
+             VALUES (@migration_id, '10.0.6')
+             """;
+
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = "migration_id";
+        parameter.Value = migrationId;
+        command.Parameters.Add(parameter);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static async Task<int> CountMigrationRowsAsync(
+        string connectionString,
+        MigrationHistoryTable historyTable,
+        string migrationId)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            $"""
+             SELECT COUNT(*)
+             FROM {HistoryTableSql(historyTable)}
+             WHERE "MigrationId" = @migration_id
+             """;
+
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = "migration_id";
+        parameter.Value = migrationId;
+        command.Parameters.Add(parameter);
+
+        var result = await command.ExecuteScalarAsync();
+        return Convert.ToInt32(result);
+    }
+
     private static async Task ExecuteNonQueryAsync(string connectionString, string commandText)
     {
         await using var connection = new NpgsqlConnection(connectionString);
@@ -122,6 +307,21 @@ public sealed class MigrationSafetyTests(CoreAICopilotAppFixture fixture)
         command.CommandText = commandText;
         var result = await command.ExecuteScalarAsync();
         return result is null or DBNull ? null : Convert.ToString(result);
+    }
+
+    private static string HistoryTableSql(MigrationHistoryTable historyTable)
+    {
+        return $"{QuoteIdentifier(historyTable.Schema)}.{QuoteIdentifier(historyTable.TableName)}";
+    }
+
+    private static string RegclassName(MigrationHistoryTable historyTable)
+    {
+        return $"{historyTable.Schema}.{QuoteIdentifier(historyTable.TableName)}";
+    }
+
+    private static string QuoteIdentifier(string value)
+    {
+        return "\"" + value.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
     }
 
     private sealed class ScratchDatabase : IAsyncDisposable
