@@ -1,8 +1,9 @@
-﻿using AICopilot.SharedKernel.Domain;
+using AICopilot.Core.Rag.Ids;
+using AICopilot.SharedKernel.Domain;
 
 namespace AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 
-public class EmbeddingModel : IAggregateRoot
+public class EmbeddingModel : IAggregateRoot<EmbeddingModelId>
 {
     protected EmbeddingModel()
     {
@@ -18,11 +19,11 @@ public class EmbeddingModel : IAggregateRoot
         string? apiKey = null,
         bool isEnabled = true)
     {
-        Id = Guid.NewGuid();
+        Id = EmbeddingModelId.New();
         Update(name, provider, baseUrl, apiKey, modelName, dimensions, maxTokens, isEnabled);
     }
 
-    public Guid Id { get; private set; }
+    public EmbeddingModelId Id { get; private set; }
 
     public uint RowVersion { get; private set; }
 

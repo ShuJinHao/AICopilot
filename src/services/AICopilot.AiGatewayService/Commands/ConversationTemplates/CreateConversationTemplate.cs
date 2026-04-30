@@ -1,4 +1,5 @@
 ﻿using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
+using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Messaging;
@@ -31,7 +32,7 @@ public class CreateConversationTemplateCommandHandler(
             request.Name,
             request.Description,
             request.SystemPrompt,
-            request.ModelId,
+            new LanguageModelId(request.ModelId),
             new TemplateSpecification
             {
                 MaxTokens = request.MaxTokens,

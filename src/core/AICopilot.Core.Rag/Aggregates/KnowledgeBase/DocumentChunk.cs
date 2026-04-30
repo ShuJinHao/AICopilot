@@ -1,4 +1,5 @@
-﻿using AICopilot.SharedKernel.Domain;
+using AICopilot.Core.Rag.Ids;
+using AICopilot.SharedKernel.Domain;
 
 namespace AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 
@@ -8,12 +9,8 @@ public class DocumentChunk : IEntity<int>
     {
     }
 
-    internal DocumentChunk(int documentId, int index, string content)
+    internal DocumentChunk(DocumentId documentId, int index, string content)
     {
-        if (documentId < 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(documentId), "Document chunk document id cannot be negative.");
-        }
 
         if (index < 0)
         {
@@ -33,7 +30,7 @@ public class DocumentChunk : IEntity<int>
 
     public int Id { get; private set; }
 
-    public int DocumentId { get; private set; }
+    public DocumentId DocumentId { get; private set; }
 
     /// <summary>
     /// 切片序号

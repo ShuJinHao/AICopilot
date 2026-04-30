@@ -1,6 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
+using AICopilot.Core.Rag.Ids;
 
 namespace AICopilot.EntityFrameworkCore.Configuration.Rag;
 
@@ -11,7 +12,9 @@ public class KnowledgeBaseConfiguration : IEntityTypeConfiguration<KnowledgeBase
         builder.ToTable("knowledge_bases");
 
         builder.HasKey(kb => kb.Id);
-        builder.Property(kb => kb.Id).HasColumnName("id");
+        builder.Property(kb => kb.Id)
+            .HasConversion(id => id.Value, value => new KnowledgeBaseId(value))
+            .HasColumnName("id");
 
         builder.Property(kb => kb.RowVersion).IsRowVersion();
 
@@ -25,6 +28,7 @@ public class KnowledgeBaseConfiguration : IEntityTypeConfiguration<KnowledgeBase
             .HasColumnName("description");
 
         builder.Property(kb => kb.EmbeddingModelId)
+            .HasConversion(id => id.Value, value => new EmbeddingModelId(value))
             .IsRequired()
             .HasColumnName("embedding_model_id");
         

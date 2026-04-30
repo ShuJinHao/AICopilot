@@ -1,6 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
+using AICopilot.Core.AiGateway.Ids;
 
 namespace AICopilot.EntityFrameworkCore.Configuration.AiGateway;
 
@@ -13,7 +14,9 @@ public class ConversationTemplateConfiguration : IEntityTypeConfiguration<Conver
 
         // 配置主键
         builder.HasKey(ct => ct.Id);
-        builder.Property(ct => ct.Id).HasColumnName("id");
+        builder.Property(ct => ct.Id)
+            .HasConversion(id => id.Value, value => new ConversationTemplateId(value))
+            .HasColumnName("id");
 
         builder.Property(ct => ct.RowVersion).IsRowVersion();
 
@@ -36,6 +39,7 @@ public class ConversationTemplateConfiguration : IEntityTypeConfiguration<Conver
             .HasColumnName("system_prompt");
 
         builder.Property(ct => ct.ModelId)
+            .HasConversion(id => id.Value, value => new LanguageModelId(value))
             .IsRequired()
             .HasColumnName("model_id");
 

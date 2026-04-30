@@ -1,8 +1,9 @@
-﻿using AICopilot.SharedKernel.Domain;
+using AICopilot.Core.AiGateway.Ids;
+using AICopilot.SharedKernel.Domain;
 
 namespace AICopilot.Core.AiGateway.Aggregates.Sessions;
 
-public class Session : BaseEntity<Guid>, IAggregateRoot
+public class Session : BaseEntity<SessionId>, IAggregateRoot<SessionId>
 {
     private static readonly TimeSpan MaxOnsiteAttestationLifetime = TimeSpan.FromMinutes(30);
     private readonly List<Message> _messages = [];
@@ -11,19 +12,15 @@ public class Session : BaseEntity<Guid>, IAggregateRoot
     {
     }
 
-    public Session(Guid userId, Guid templateId)
+    public Session(Guid userId, ConversationTemplateId templateId)
     {
         if (userId == Guid.Empty)
         {
             throw new ArgumentException("Session user id is required.", nameof(userId));
         }
 
-        if (templateId == Guid.Empty)
-        {
-            throw new ArgumentException("Session template id is required.", nameof(templateId));
-        }
 
-        Id = Guid.NewGuid();
+        Id = SessionId.New();
         Title = "新会话";
         UserId = userId;
         TemplateId = templateId;
@@ -31,7 +28,7 @@ public class Session : BaseEntity<Guid>, IAggregateRoot
 
     public string Title { get; private set; } = null!;
     public Guid UserId { get; private set; }
-    public Guid TemplateId { get; private set; }
+    public ConversationTemplateId TemplateId { get; private set; }
     public DateTimeOffset? OnsiteConfirmedAt { get; private set; }
     public string? OnsiteConfirmedBy { get; private set; }
     public DateTimeOffset? OnsiteConfirmationExpiresAt { get; private set; }
@@ -52,7 +49,7 @@ public class Session : BaseEntity<Guid>, IAggregateRoot
 
         var message = new Message(this, content, type);
         _messages.Add(message);
-        AddDomainEvent(new MessageAddedToSessionEvent(Id, message.Content, message.Type, message.CreatedAt));
+        AddDomainEvent(new MessageAddedToSessionEvent(Id.Value, message.Content, message.Type, message.CreatedAt));
     }
 
     public void SetOnsiteAttestation(string confirmedBy, DateTimeOffset confirmedAtUtc, DateTimeOffset expiresAtUtc)
@@ -75,7 +72,7 @@ public class Session : BaseEntity<Guid>, IAggregateRoot
         OnsiteConfirmedAt = confirmedAtUtc;
         OnsiteConfirmedBy = confirmedBy.Trim();
         OnsiteConfirmationExpiresAt = expiresAtUtc;
-        AddDomainEvent(new OnsiteAttestationSetEvent(Id, OnsiteConfirmedBy, confirmedAtUtc, expiresAtUtc));
+        AddDomainEvent(new OnsiteAttestationSetEvent(Id.Value, OnsiteConfirmedBy, confirmedAtUtc, expiresAtUtc));
     }
 
     public void ClearOnsiteAttestation()

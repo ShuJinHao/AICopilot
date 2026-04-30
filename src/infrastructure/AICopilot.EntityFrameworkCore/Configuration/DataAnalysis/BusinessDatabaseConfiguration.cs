@@ -1,4 +1,5 @@
 using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
+using AICopilot.Core.DataAnalysis.Ids;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -11,7 +12,9 @@ public class BusinessDatabaseConfiguration : IEntityTypeConfiguration<BusinessDa
         builder.ToTable("business_databases");
 
         builder.HasKey(db => db.Id);
-        builder.Property(db => db.Id).HasColumnName("id");
+        builder.Property(db => db.Id)
+            .HasConversion(id => id.Value, value => new BusinessDatabaseId(value))
+            .HasColumnName("id");
 
         builder.Property(db => db.RowVersion).IsRowVersion();
 

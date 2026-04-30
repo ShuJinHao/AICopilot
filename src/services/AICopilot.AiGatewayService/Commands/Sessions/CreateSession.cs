@@ -1,6 +1,7 @@
 ﻿using AICopilot.AiGatewayService.Queries.ConversationTemplates;
 using AICopilot.AiGatewayService.Queries.Sessions;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
+using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Messaging;
@@ -48,7 +49,7 @@ public class CreateSessionCommandHandler(
             templateId = template.Value!.Id;
         }
 
-        var session = new Session(userId, templateId.Value);
+        var session = new Session(userId, new ConversationTemplateId(templateId.Value));
         repo.Add(session);
         await repo.SaveChangesAsync(ct);
 

@@ -1,3 +1,4 @@
+using AICopilot.Core.McpServer.Ids;
 using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Domain;
 
@@ -6,7 +7,7 @@ namespace AICopilot.Core.McpServer.Aggregates.McpServerInfo;
 /// <summary>
 /// 定义 MCP 服务的配置信息，作为聚合根存在。
 /// </summary>
-public class McpServerInfo : IAggregateRoot
+public class McpServerInfo : IAggregateRoot<McpServerId>
 {
     private readonly List<string> _allowedToolNames = [];
 
@@ -24,11 +25,11 @@ public class McpServerInfo : IAggregateRoot
         IEnumerable<string>? allowedToolNames = null,
         bool isEnabled = true)
     {
-        Id = Guid.NewGuid();
+        Id = McpServerId.New();
         Update(name, description, transportType, command, arguments, chatExposureMode, allowedToolNames, isEnabled);
     }
 
-    public Guid Id { get; private set; }
+    public McpServerId Id { get; private set; }
 
     public uint RowVersion { get; private set; }
 

@@ -1,4 +1,5 @@
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
+using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.AiGateway.Specifications.ConversationTemplate;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.Services.Contracts.AiGateway.Dtos;
@@ -19,7 +20,7 @@ public class GetConversationTemplateQueryHandler(IReadRepository<ConversationTem
         CancellationToken cancellationToken)
     {
         var result = await repository.FirstOrDefaultAsync(
-            new ConversationTemplateByIdSpec(request.Id),
+            new ConversationTemplateByIdSpec(new ConversationTemplateId(request.Id)),
             cancellationToken);
 
         return result == null ? Result.NotFound() : Result.Success(ConversationTemplateDtoMapper.Map(result));

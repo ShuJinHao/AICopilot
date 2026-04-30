@@ -1,6 +1,7 @@
 ﻿using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
 using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
 using AICopilot.Core.AiGateway.Specifications.ApprovalPolicy;
+using AICopilot.Core.McpServer.Ids;
 using AICopilot.Core.McpServer.Specifications.McpServerInfo;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.SharedKernel.Ai;
@@ -86,7 +87,7 @@ public class UpdateMcpServerCommandHandler(IRepository<McpServerInfo> repository
 {
     public async Task<Result> Handle(UpdateMcpServerCommand request, CancellationToken cancellationToken)
     {
-        var entity = await repository.GetByIdAsync(request.Id, cancellationToken);
+        var entity = await repository.GetByIdAsync(new McpServerId(request.Id), cancellationToken);
         if (entity == null)
         {
             return Result.NotFound();
@@ -120,7 +121,7 @@ public class DeleteMcpServerCommandHandler(IRepository<McpServerInfo> repository
 {
     public async Task<Result> Handle(DeleteMcpServerCommand request, CancellationToken cancellationToken)
     {
-        var entity = await repository.GetByIdAsync(request.Id, cancellationToken);
+        var entity = await repository.GetByIdAsync(new McpServerId(request.Id), cancellationToken);
         if (entity == null)
         {
             return Result.Success();
@@ -142,7 +143,9 @@ public class GetMcpServerQueryHandler(
 {
     public async Task<Result<McpServerDto>> Handle(GetMcpServerQuery request, CancellationToken cancellationToken)
     {
-        var server = await serverRepository.FirstOrDefaultAsync(new McpServerInfoByIdSpec(request.Id), cancellationToken);
+        var server = await serverRepository.FirstOrDefaultAsync(
+            new McpServerInfoByIdSpec(new McpServerId(request.Id)),
+            cancellationToken);
         if (server == null)
         {
             return Result.NotFound();

@@ -6,6 +6,7 @@ using AICopilot.AiGatewayService.Models;
 using AICopilot.AiGatewayService.Safety;
 using AICopilot.AiGatewayService.Workflows;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
+using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.AiGateway.Specifications.Sessions;
 using AICopilot.Services.Contracts;
 using AICopilot.Services.CrossCutting.Serialization;
@@ -88,7 +89,7 @@ internal static class ChatStreamRuntime
         Guid sessionId,
         CancellationToken cancellationToken)
     {
-        var session = await repository.FirstOrDefaultAsync(new SessionByIdSpec(sessionId), cancellationToken);
+        var session = await repository.FirstOrDefaultAsync(new SessionByIdSpec(new SessionId(sessionId)), cancellationToken);
         if (session is null)
         {
             return null;

@@ -1,4 +1,5 @@
 ﻿using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
+using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Messaging;
@@ -17,7 +18,7 @@ public class DeleteLanguageModelCommandHandler(
 {
     public async Task<Result> Handle(DeleteLanguageModelCommand request, CancellationToken cancellationToken)
     {
-        var result = await repo.GetByIdAsync(request.Id, cancellationToken);
+        var result = await repo.GetByIdAsync(new LanguageModelId(request.Id), cancellationToken);
         if (result == null)
         {
             return Result.Success();

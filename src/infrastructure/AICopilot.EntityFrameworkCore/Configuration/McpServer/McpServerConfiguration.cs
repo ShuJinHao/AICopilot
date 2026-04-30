@@ -1,6 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
+using AICopilot.Core.McpServer.Ids;
 
 namespace AICopilot.EntityFrameworkCore.Configuration.McpServer;
 
@@ -11,7 +12,9 @@ public class McpServerConfiguration : IEntityTypeConfiguration<McpServerInfo>
         builder.ToTable("mcp_server_info", "mcp");
 
         builder.HasKey(b => b.Id);
-        builder.Property(b => b.Id).HasColumnName("id");
+        builder.Property(b => b.Id)
+            .HasConversion(id => id.Value, value => new McpServerId(value))
+            .HasColumnName("id");
 
         builder.Property(b => b.RowVersion).IsRowVersion();
 

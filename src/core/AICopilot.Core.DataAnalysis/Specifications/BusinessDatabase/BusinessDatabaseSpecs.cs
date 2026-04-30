@@ -1,10 +1,11 @@
 using AICopilot.SharedKernel.Specification;
+using AICopilot.Core.DataAnalysis.Ids;
 
 namespace AICopilot.Core.DataAnalysis.Specifications.BusinessDatabase;
 
 public sealed class BusinessDatabaseByIdSpec : Specification<Aggregates.BusinessDatabase.BusinessDatabase>
 {
-    public BusinessDatabaseByIdSpec(Guid id)
+    public BusinessDatabaseByIdSpec(BusinessDatabaseId id)
     {
         FilterCondition = database => database.Id == id;
     }

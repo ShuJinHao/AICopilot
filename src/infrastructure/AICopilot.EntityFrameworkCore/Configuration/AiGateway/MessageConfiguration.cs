@@ -1,6 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
+using AICopilot.Core.AiGateway.Ids;
 
 namespace AICopilot.EntityFrameworkCore.Configuration.AiGateway;
 
@@ -36,6 +37,7 @@ public class MessageConfiguration : IEntityTypeConfiguration<Message>
 
         // 外键属性的列名改为小写
         builder.Property(m => m.SessionId)
+            .HasConversion(id => id.Value, value => new SessionId(value))
             .IsRequired()
             .HasColumnName("session_id"); // <--- 修改
 

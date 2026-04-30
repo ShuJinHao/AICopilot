@@ -8,6 +8,7 @@ using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
 using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
 using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
+using AICopilot.Core.Rag.Ids;
 using AICopilot.Dapper;
 using AICopilot.Dapper.Security;
 using AICopilot.HttpApi.Controllers;
@@ -35,13 +36,13 @@ public sealed class SecurityHardeningTests
         var httpDevelopmentSettings = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Hosts",
+            "hosts",
             "AICopilot.HttpApi",
             "appsettings.Development.json"));
         var appHostSettings = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Hosts",
+            "hosts",
             "AICopilot.AppHost",
             "appsettings.json"));
         var envTemplate = File.ReadAllText(Path.Combine(solutionRoot, "artifacts", ".env"));
@@ -72,14 +73,14 @@ public sealed class SecurityHardeningTests
         var sessionQueryPath = Path.Combine(
             solutionRoot,
             "src",
-            "Services",
+            "services",
             "AICopilot.AiGatewayService",
             "Queries",
             "Sessions");
         var sessionCommandPath = Path.Combine(
             solutionRoot,
             "src",
-            "Services",
+            "services",
             "AICopilot.AiGatewayService",
             "Commands",
             "Sessions");
@@ -104,7 +105,7 @@ public sealed class SecurityHardeningTests
         var chatStreamSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Services",
+            "services",
             "AICopilot.AiGatewayService",
             "Agents",
             "ChatStreamRequest.cs"));
@@ -116,7 +117,7 @@ public sealed class SecurityHardeningTests
         var controllerSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Hosts",
+            "hosts",
             "AICopilot.HttpApi",
             "Controllers",
             "AiGatewayController.cs"));
@@ -131,7 +132,7 @@ public sealed class SecurityHardeningTests
         var chatStoreSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Vues",
+            "vues",
             "AICopilot.Web",
             "src",
             "stores",
@@ -139,7 +140,7 @@ public sealed class SecurityHardeningTests
         var chatServiceSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Vues",
+            "vues",
             "AICopilot.Web",
             "src",
             "services",
@@ -147,7 +148,7 @@ public sealed class SecurityHardeningTests
         var approvalCardSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Vues",
+            "vues",
             "AICopilot.Web",
             "src",
             "components",
@@ -173,7 +174,7 @@ public sealed class SecurityHardeningTests
         var configViewSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Vues",
+            "vues",
             "AICopilot.Web",
             "src",
             "views",
@@ -181,7 +182,7 @@ public sealed class SecurityHardeningTests
         var configStoreSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Vues",
+            "vues",
             "AICopilot.Web",
             "src",
             "stores",
@@ -189,7 +190,7 @@ public sealed class SecurityHardeningTests
         var configServiceSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Vues",
+            "vues",
             "AICopilot.Web",
             "src",
             "services",
@@ -197,7 +198,7 @@ public sealed class SecurityHardeningTests
         var permissionsSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Vues",
+            "vues",
             "AICopilot.Web",
             "src",
             "security",
@@ -224,7 +225,7 @@ public sealed class SecurityHardeningTests
     public void FrontendKnowledgeManagement_ShouldExposeRagRouteAndUseMultipartUpload()
     {
         var solutionRoot = FindSolutionRoot();
-        var vueRoot = Path.Combine(solutionRoot, "src", "Vues", "AICopilot.Web", "src");
+        var vueRoot = Path.Combine(solutionRoot, "src", "vues", "AICopilot.Web", "src");
         var permissionsSource = File.ReadAllText(Path.Combine(vueRoot, "security", "permissions.ts"));
         var authStoreSource = File.ReadAllText(Path.Combine(vueRoot, "stores", "authStore.ts"));
         var routerSource = File.ReadAllText(Path.Combine(vueRoot, "router", "index.ts"));
@@ -236,14 +237,14 @@ public sealed class SecurityHardeningTests
         var permissionCatalogSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Services",
+            "services",
             "AICopilot.IdentityService",
             "Authorization",
             "PermissionCatalog.cs"));
         var embeddingManagementSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Services",
+            "services",
             "AICopilot.RagService",
             "EmbeddingModels",
             "EmbeddingModelManagement.cs"));
@@ -289,9 +290,9 @@ public sealed class SecurityHardeningTests
         var baseControllerSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Hosts",
+            "hosts",
             "AICopilot.HttpApi",
-            "Infrastructure",
+            "infrastructure",
             "ApiControllerBase.cs"));
         var controllerFiles = new[]
         {
@@ -312,7 +313,7 @@ public sealed class SecurityHardeningTests
             var source = File.ReadAllText(Path.Combine(
                 solutionRoot,
                 "src",
-                "Hosts",
+                "hosts",
                 "AICopilot.HttpApi",
                 "Controllers",
                 controllerFile));
@@ -351,7 +352,7 @@ public sealed class SecurityHardeningTests
         var dependencyInjectionSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Hosts",
+            "hosts",
             "AICopilot.HttpApi",
             "DependencyInjection.cs"));
 
@@ -372,7 +373,7 @@ public sealed class SecurityHardeningTests
         var source = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Services",
+            "services",
             "AICopilot.IdentityService",
             "Commands",
             "UpdateUserRole.cs"));
@@ -447,7 +448,7 @@ public sealed class SecurityHardeningTests
         var source = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.Infrastructure",
             "Storage",
             "LocalFileStorageService.cs"));
@@ -464,7 +465,7 @@ public sealed class SecurityHardeningTests
         var source = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Services",
+            "services",
             "AICopilot.AiGatewayService",
             "Agents",
             "ChatStreamRuntime.cs"));
@@ -489,7 +490,7 @@ public sealed class SecurityHardeningTests
         var source = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "AuditLogs",
             "AuditLogWriter.cs"));
@@ -512,35 +513,35 @@ public sealed class SecurityHardeningTests
         var writerSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "AuditLogs",
             "AuditLogWriter.cs"));
         var querySource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "AuditLogs",
             "AuditLogQueryService.cs"));
         var auditContextSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "AuditLogs",
             "AuditDbContext.cs"));
         var efRepositorySource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "Repository",
             "EfRepository.cs"));
         var dependencyInjectionSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "DependencyInjection.cs"));
 
@@ -576,7 +577,7 @@ public sealed class SecurityHardeningTests
             var source = File.ReadAllText(Path.Combine(
                 solutionRoot,
                 "src",
-                "Services",
+                "services",
                 "AICopilot.IdentityService",
                 "Commands",
                 commandFile));
@@ -596,13 +597,13 @@ public sealed class SecurityHardeningTests
         var dependencyInjectionSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "DependencyInjection.cs"));
         var implementationSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "Transactions",
             "EfTransactionalExecutionService.cs"));
@@ -627,28 +628,28 @@ public sealed class SecurityHardeningTests
         var dispatcherSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "Outbox",
             "OutboxDispatcher.cs"));
         var publisherSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "Outbox",
             "OutboxIntegrationEventPublisher.cs"));
         var outboxContextSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "Outbox",
             "OutboxDbContext.cs"));
         var dependencyInjectionSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "DependencyInjection.cs"));
 
@@ -669,7 +670,7 @@ public sealed class SecurityHardeningTests
         var dispatcherSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "Outbox",
             "OutboxDispatcher.cs"));
@@ -689,8 +690,8 @@ public sealed class SecurityHardeningTests
         var solutionRoot = FindSolutionRoot();
         var moduleContextFiles = new[]
         {
-            Path.Combine("src", "Infrastructure", "AICopilot.EntityFrameworkCore", "DataAnalysisDbContext.cs"),
-            Path.Combine("src", "Infrastructure", "AICopilot.EntityFrameworkCore", "McpServerDbContext.cs")
+            Path.Combine("src", "infrastructure", "AICopilot.EntityFrameworkCore", "DataAnalysisDbContext.cs"),
+            Path.Combine("src", "infrastructure", "AICopilot.EntityFrameworkCore", "McpServerDbContext.cs")
         };
 
         foreach (var moduleContextFile in moduleContextFiles)
@@ -708,14 +709,14 @@ public sealed class SecurityHardeningTests
         var solutionRoot = FindSolutionRoot();
         var commandFiles = new[]
         {
-            Path.Combine("src", "Services", "AICopilot.AiGatewayService", "ApprovalPolicies", "ApprovalPolicyManagement.cs"),
-            Path.Combine("src", "Services", "AICopilot.AiGatewayService", "Commands", "ConversationTemplates", "CreateConversationTemplate.cs"),
-            Path.Combine("src", "Services", "AICopilot.AiGatewayService", "Commands", "ConversationTemplates", "UpdateConversationTemplate.cs"),
-            Path.Combine("src", "Services", "AICopilot.AiGatewayService", "Commands", "ConversationTemplates", "DeleteConversationTemplate.cs"),
-            Path.Combine("src", "Services", "AICopilot.AiGatewayService", "Commands", "LanguageModels", "CreateLanguageModel.cs"),
-            Path.Combine("src", "Services", "AICopilot.AiGatewayService", "Commands", "LanguageModels", "UpdateLanguageModel.cs"),
-            Path.Combine("src", "Services", "AICopilot.AiGatewayService", "Commands", "LanguageModels", "DeleteLanguageModel.cs"),
-            Path.Combine("src", "Services", "AICopilot.AiGatewayService", "Commands", "Sessions", "UpdateSessionSafetyAttestation.cs")
+            Path.Combine("src", "services", "AICopilot.AiGatewayService", "ApprovalPolicies", "ApprovalPolicyManagement.cs"),
+            Path.Combine("src", "services", "AICopilot.AiGatewayService", "Commands", "ConversationTemplates", "CreateConversationTemplate.cs"),
+            Path.Combine("src", "services", "AICopilot.AiGatewayService", "Commands", "ConversationTemplates", "UpdateConversationTemplate.cs"),
+            Path.Combine("src", "services", "AICopilot.AiGatewayService", "Commands", "ConversationTemplates", "DeleteConversationTemplate.cs"),
+            Path.Combine("src", "services", "AICopilot.AiGatewayService", "Commands", "LanguageModels", "CreateLanguageModel.cs"),
+            Path.Combine("src", "services", "AICopilot.AiGatewayService", "Commands", "LanguageModels", "UpdateLanguageModel.cs"),
+            Path.Combine("src", "services", "AICopilot.AiGatewayService", "Commands", "LanguageModels", "DeleteLanguageModel.cs"),
+            Path.Combine("src", "services", "AICopilot.AiGatewayService", "Commands", "Sessions", "UpdateSessionSafetyAttestation.cs")
         };
 
         foreach (var commandFile in commandFiles)
@@ -740,7 +741,7 @@ public sealed class SecurityHardeningTests
         };
 
         var locations = Directory
-            .EnumerateFiles(Path.Combine(solutionRoot, "src", "Services"), "*.cs", SearchOption.AllDirectories)
+            .EnumerateFiles(Path.Combine(solutionRoot, "src", "services"), "*.cs", SearchOption.AllDirectories)
             .SelectMany(file => File
                 .ReadLines(file)
                 .Select((line, index) => new
@@ -860,7 +861,7 @@ public sealed class SecurityHardeningTests
         var source = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.Dapper",
             "DapperDatabaseConnector.cs"));
 
@@ -882,7 +883,7 @@ public sealed class SecurityHardeningTests
         var source = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Services",
+            "services",
             "AICopilot.DataAnalysisService",
             "BusinessDatabases",
             "BusinessDatabaseManagement.cs"));
@@ -898,7 +899,7 @@ public sealed class SecurityHardeningTests
     public void DataAnalysisServices_ShouldNotBypassGuardedDatabaseConnector()
     {
         var solutionRoot = FindSolutionRoot();
-        var serviceRoot = Path.Combine(solutionRoot, "src", "Services", "AICopilot.DataAnalysisService");
+        var serviceRoot = Path.Combine(solutionRoot, "src", "services", "AICopilot.DataAnalysisService");
         var forbiddenPatterns = new[]
         {
             "new NpgsqlConnection",
@@ -933,7 +934,7 @@ public sealed class SecurityHardeningTests
         var source = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.Infrastructure",
             "Mcp",
             "McpServerBootstrap.cs"));
@@ -952,21 +953,21 @@ public sealed class SecurityHardeningTests
         var indexingSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Services",
+            "services",
             "AICopilot.RagService",
             "Documents",
             "DocumentIndexingService.cs"));
         var indexingOptionsSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Services",
+            "services",
             "AICopilot.RagService",
             "Documents",
             "RagIndexingOptions.cs"));
         var writerSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
-            "Infrastructure",
+            "infrastructure",
             "AICopilot.Infrastructure",
             "Rag",
             "KnowledgeVectorIndexWriter.cs"));
@@ -1187,12 +1188,12 @@ public sealed class SecurityHardeningTests
     [Fact]
     public void KnowledgeBaseDocumentAndChunks_ShouldRejectInvalidInput()
     {
-        var embeddingModelId = Guid.NewGuid();
+        var embeddingModelId = EmbeddingModelId.New();
 
         var emptyName = () => new KnowledgeBase(" ", "description", embeddingModelId);
         emptyName.Should().Throw<ArgumentException>();
 
-        var emptyEmbeddingModelId = () => new KnowledgeBase("kb", "description", Guid.Empty);
+        var emptyEmbeddingModelId = () => new KnowledgeBase("kb", "description", new EmbeddingModelId(Guid.Empty));
         emptyEmbeddingModelId.Should().Throw<ArgumentException>();
 
         var knowledgeBase = new KnowledgeBase(" kb ", " description ", embeddingModelId);

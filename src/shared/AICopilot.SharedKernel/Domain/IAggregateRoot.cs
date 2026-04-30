@@ -2,4 +2,4 @@
 
 public interface IAggregateRoot : IEntity;
 
-public interface IAggregateRoot<TId> : IEntity<TId>;
+public interface IAggregateRoot<TId> : IAggregateRoot, IEntity<TId>;

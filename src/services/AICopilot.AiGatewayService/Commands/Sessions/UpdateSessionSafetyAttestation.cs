@@ -1,5 +1,6 @@
 ﻿using AICopilot.AiGatewayService.Queries.Sessions;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
+using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Messaging;
@@ -27,7 +28,7 @@ public class UpdateSessionSafetyAttestationCommandHandler(
         UpdateSessionSafetyAttestationCommand request,
         CancellationToken cancellationToken)
     {
-        var session = await repository.GetByIdAsync(request.SessionId, cancellationToken);
+        var session = await repository.GetByIdAsync(new SessionId(request.SessionId), cancellationToken);
         if (session == null)
         {
             return Result.NotFound();

@@ -1,5 +1,6 @@
 using System.Linq.Expressions;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
+using AICopilot.Core.Rag.Ids;
 using AICopilot.RagService.Documents;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Specification;
@@ -133,7 +134,7 @@ public sealed class RagIndexingLifecycleTests
 
     private static (KnowledgeBase KnowledgeBase, Document Document) CreateKnowledgeBaseWithDocument()
     {
-        var knowledgeBase = new KnowledgeBase("kb", "description", Guid.NewGuid());
+        var knowledgeBase = new KnowledgeBase("kb", "description", EmbeddingModelId.New());
         var document = knowledgeBase.AddDocument("doc.txt", "doc.txt", ".txt", "hash");
 
         return (knowledgeBase, document);

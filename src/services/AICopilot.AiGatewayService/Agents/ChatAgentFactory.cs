@@ -1,6 +1,7 @@
 using AICopilot.AiGatewayService.Safety;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
+using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.AiGateway.Specifications.ConversationTemplate;
 using AICopilot.Core.AiGateway.Specifications.LanguageModel;
 using AICopilot.Services.Contracts;
@@ -67,7 +68,7 @@ public class ChatAgentFactory(
     }
 
     public async Task<ScopedRuntimeAgent> CreateAgentAsync(
-        Guid templateId,
+        ConversationTemplateId templateId,
         Action<AiChatOptions>? configureOptions = null,
         bool isSaveChatMessage = true)
     {

@@ -1,6 +1,7 @@
 using AICopilot.AiGatewayService.Safety;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
+using AICopilot.Core.AiGateway.Ids;
 
 namespace AICopilot.BackendTests;
 
@@ -69,7 +70,7 @@ public sealed class ChatTokenBudgetPolicyTests
             "DemoTemplate",
             "demo",
             systemPrompt,
-            Guid.NewGuid(),
+            LanguageModelId.New(),
             new TemplateSpecification
             {
                 MaxTokens = maxOutputTokens,

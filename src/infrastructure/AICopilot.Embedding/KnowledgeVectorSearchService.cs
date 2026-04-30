@@ -22,7 +22,7 @@ public sealed class KnowledgeVectorSearchService(
         using var generator = embeddingFactory.CreateGenerator(embeddingModel);
         var queryEmbedding = await generator.GenerateVectorAsync(queryText, cancellationToken: cancellationToken);
 
-        var collectionName = $"kb-{knowledgeBase.Id:N}";
+        var collectionName = $"kb-{knowledgeBase.Id.Value:N}";
         var vectorSearchCollection = vectorStore.GetCollection<ulong, VectorDocumentRecord>(
             collectionName,
             VectorDocumentDefinition.Get(embeddingModel.Dimensions));

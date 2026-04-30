@@ -1,4 +1,5 @@
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
+using AICopilot.Core.Rag.Ids;
 using AICopilot.Core.Rag.Specifications.KnowledgeBase;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Repository;
@@ -22,11 +23,12 @@ public sealed class DocumentIndexingService(
 
     public async Task IndexAsync(int documentId, CancellationToken cancellationToken = default)
     {
+        var typedDocumentId = new DocumentId(documentId);
         var knowledgeBase = await repository.FirstOrDefaultAsync(
-            new KnowledgeBaseByDocumentIdWithDocumentChunksSpec(documentId),
+            new KnowledgeBaseByDocumentIdWithDocumentChunksSpec(typedDocumentId),
             cancellationToken);
 
-        var document = knowledgeBase?.Documents.FirstOrDefault(item => item.Id == documentId);
+        var document = knowledgeBase?.Documents.FirstOrDefault(item => item.Id == typedDocumentId);
         if (knowledgeBase is null || document is null)
         {
             logger.LogWarning("文档 {DocumentId} 未在数据库中找到，跳过索引。", documentId);

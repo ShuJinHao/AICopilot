@@ -1,4 +1,5 @@
 ﻿using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
+using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.AiGateway.Specifications.ApprovalPolicy;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.Services.Contracts;
@@ -87,7 +88,7 @@ public class UpdateApprovalPolicyCommandHandler(
 {
     public async Task<Result> Handle(UpdateApprovalPolicyCommand request, CancellationToken cancellationToken)
     {
-        var entity = await repository.GetByIdAsync(request.Id, cancellationToken);
+        var entity = await repository.GetByIdAsync(new ApprovalPolicyId(request.Id), cancellationToken);
         if (entity == null)
         {
             return Result.NotFound();
@@ -168,7 +169,7 @@ public class DeleteApprovalPolicyCommandHandler(
 {
     public async Task<Result> Handle(DeleteApprovalPolicyCommand request, CancellationToken cancellationToken)
     {
-        var entity = await repository.GetByIdAsync(request.Id, cancellationToken);
+        var entity = await repository.GetByIdAsync(new ApprovalPolicyId(request.Id), cancellationToken);
         if (entity == null)
         {
             return Result.Success();
@@ -202,7 +203,9 @@ public class GetApprovalPolicyQueryHandler(IReadRepository<ApprovalPolicy> repos
 {
     public async Task<Result<ApprovalPolicyDto>> Handle(GetApprovalPolicyQuery request, CancellationToken cancellationToken)
     {
-        var result = await repository.FirstOrDefaultAsync(new ApprovalPolicyByIdSpec(request.Id), cancellationToken);
+        var result = await repository.FirstOrDefaultAsync(
+            new ApprovalPolicyByIdSpec(new ApprovalPolicyId(request.Id)),
+            cancellationToken);
         return result == null ? Result.NotFound() : Result.Success(ApprovalPolicyDtoMapper.Map(result));
     }
 }

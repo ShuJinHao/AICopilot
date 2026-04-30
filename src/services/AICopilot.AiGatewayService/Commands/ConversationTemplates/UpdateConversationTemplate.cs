@@ -1,4 +1,5 @@
 ﻿using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
+using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Messaging;
@@ -25,7 +26,9 @@ public class UpdateConversationTemplateCommandHandler(
 {
     public async Task<Result> Handle(UpdateConversationTemplateCommand request, CancellationToken cancellationToken)
     {
-        var entity = await repository.GetByIdAsync(request.Id, cancellationToken);
+        var templateId = new ConversationTemplateId(request.Id);
+        var modelId = new LanguageModelId(request.ModelId);
+        var entity = await repository.GetByIdAsync(templateId, cancellationToken);
         if (entity == null)
         {
             return Result.NotFound();
@@ -48,7 +51,7 @@ public class UpdateConversationTemplateCommandHandler(
             changedFields.Add("systemPrompt");
         }
 
-        if (entity.ModelId != request.ModelId)
+        if (entity.ModelId != modelId)
         {
             changedFields.Add("modelId");
         }
@@ -68,7 +71,7 @@ public class UpdateConversationTemplateCommandHandler(
             changedFields.Add("isEnabled");
         }
 
-        entity.UpdateInfo(request.Name, request.Description, request.SystemPrompt, request.ModelId, request.IsEnabled);
+        entity.UpdateInfo(request.Name, request.Description, request.SystemPrompt, modelId, request.IsEnabled);
         entity.UpdateSpecification(new TemplateSpecification
         {
             MaxTokens = request.MaxTokens,

@@ -1,8 +1,9 @@
-﻿using AICopilot.SharedKernel.Domain;
+using AICopilot.Core.Rag.Ids;
+using AICopilot.SharedKernel.Domain;
 
 namespace AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 
-public class KnowledgeBase : IAggregateRoot
+public class KnowledgeBase : IAggregateRoot<KnowledgeBaseId>
 {
     private readonly List<Document> _documents = [];
 
@@ -10,18 +11,18 @@ public class KnowledgeBase : IAggregateRoot
     {
     }
 
-    public KnowledgeBase(string name, string description, Guid embeddingModelId)
+    public KnowledgeBase(string name, string description, EmbeddingModelId embeddingModelId)
     {
         ValidateInfo(name, description);
         ValidateEmbeddingModelId(embeddingModelId);
 
-        Id = Guid.NewGuid();
+        Id = KnowledgeBaseId.New();
         Name = name.Trim();
         Description = description.Trim();
         EmbeddingModelId = embeddingModelId;
     }
 
-    public Guid Id { get; private set; }
+    public KnowledgeBaseId Id { get; private set; }
 
     public uint RowVersion { get; private set; }
 
@@ -31,7 +32,7 @@ public class KnowledgeBase : IAggregateRoot
     /// <summary>
     /// 嵌入模型ID。一个知识库内的所有文档必须使用相同的嵌入模型。
     /// </summary>
-    public Guid EmbeddingModelId { get; private set; }
+    public EmbeddingModelId EmbeddingModelId { get; private set; }
 
     // 导航属性：对外只暴露只读集合
     public IReadOnlyCollection<Document> Documents => _documents.AsReadOnly();
@@ -49,7 +50,7 @@ public class KnowledgeBase : IAggregateRoot
     /// <summary>
     /// 移除文档
     /// </summary>
-    public void RemoveDocument(int documentId)
+    public void RemoveDocument(DocumentId documentId)
     {
         var doc = _documents.FirstOrDefault(d => d.Id == documentId);
         if (doc != null)
@@ -66,7 +67,7 @@ public class KnowledgeBase : IAggregateRoot
         Description = description.Trim();
     }
 
-    public void UpdateEmbeddingModel(Guid embeddingModelId)
+    public void UpdateEmbeddingModel(EmbeddingModelId embeddingModelId)
     {
         ValidateEmbeddingModelId(embeddingModelId);
         EmbeddingModelId = embeddingModelId;
@@ -85,11 +86,7 @@ public class KnowledgeBase : IAggregateRoot
         }
     }
 
-    private static void ValidateEmbeddingModelId(Guid embeddingModelId)
+    private static void ValidateEmbeddingModelId(EmbeddingModelId embeddingModelId)
     {
-        if (embeddingModelId == Guid.Empty)
-        {
-            throw new ArgumentException("Knowledge base embedding model id is required.", nameof(embeddingModelId));
-        }
     }
 }

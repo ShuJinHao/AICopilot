@@ -1,10 +1,11 @@
 using AICopilot.SharedKernel.Specification;
+using AICopilot.Core.AiGateway.Ids;
 
 namespace AICopilot.Core.AiGateway.Specifications.ConversationTemplate;
 
 public sealed class ConversationTemplateByIdSpec : Specification<Aggregates.ConversationTemplate.ConversationTemplate>
 {
-    public ConversationTemplateByIdSpec(Guid id)
+    public ConversationTemplateByIdSpec(ConversationTemplateId id)
     {
         FilterCondition = template => template.Id == id;
     }

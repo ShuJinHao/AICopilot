@@ -1,8 +1,9 @@
-﻿using AICopilot.SharedKernel.Domain;
+using AICopilot.Core.Rag.Ids;
+using AICopilot.SharedKernel.Domain;
 
 namespace AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 
-public class Document : IEntity<int>
+public class Document : IEntity<DocumentId>
 {
     private readonly List<DocumentChunk> _chunks = [];
 
@@ -10,12 +11,8 @@ public class Document : IEntity<int>
     {
     }
 
-    internal Document(Guid knowledgeBaseId, string name, string filePath, string extension, string fileHash)
+    internal Document(KnowledgeBaseId knowledgeBaseId, string name, string filePath, string extension, string fileHash)
     {
-        if (knowledgeBaseId == Guid.Empty)
-        {
-            throw new ArgumentException("Document knowledge base id is required.", nameof(knowledgeBaseId));
-        }
 
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -46,9 +43,9 @@ public class Document : IEntity<int>
         CreatedAt = DateTime.UtcNow;
     }
 
-    public int Id { get; private set; }
+    public DocumentId Id { get; private set; }
 
-    public Guid KnowledgeBaseId { get; private set; }
+    public KnowledgeBaseId KnowledgeBaseId { get; private set; }
 
     /// <summary>
     /// 原始文件名
