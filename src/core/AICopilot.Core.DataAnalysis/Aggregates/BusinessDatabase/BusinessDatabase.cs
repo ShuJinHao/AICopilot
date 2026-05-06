@@ -23,12 +23,13 @@ public class BusinessDatabase : IAggregateRoot<BusinessDatabaseId>
         DbProviderType provider,
         bool isReadOnly = true,
         BusinessDataExternalSystemType externalSystemType = BusinessDataExternalSystemType.Unknown,
-        bool readOnlyCredentialVerified = false)
+        bool readOnlyCredentialVerified = false,
+        bool isEnabled = true)
     {
         ValidateInfo(name, description);
         ValidateConnection(connectionString, provider);
         ValidateSettings(
-            isEnabled: true,
+            isEnabled,
             isReadOnly,
             externalSystemType,
             readOnlyCredentialVerified);
@@ -41,7 +42,7 @@ public class BusinessDatabase : IAggregateRoot<BusinessDatabaseId>
         IsReadOnly = isReadOnly;
         ExternalSystemType = externalSystemType;
         ReadOnlyCredentialVerified = readOnlyCredentialVerified;
-        IsEnabled = true;
+        IsEnabled = isEnabled;
         CreatedAt = DateTime.UtcNow;
     }
 
