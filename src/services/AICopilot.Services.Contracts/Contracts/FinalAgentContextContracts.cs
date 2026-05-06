@@ -13,7 +13,10 @@ public sealed record StoredToolApprovalRequest(
     string ToolKind,
     string? ToolName,
     string? ServerName,
-    Dictionary<string, object?> Arguments);
+    Dictionary<string, object?> Arguments,
+    string? TargetType = null,
+    string? TargetName = null,
+    string? RuntimeName = null);
 
 public sealed record StoredFinalAgentContext(
     Guid SessionId,

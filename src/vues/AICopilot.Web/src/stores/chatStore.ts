@@ -324,7 +324,7 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     try {
-      await chatService.sendApprovalDecisionStream(sessionId, callId, decision, onsiteConfirmed, {
+      await chatService.sendApprovalDecisionStream(sessionId, callId, decision, onsiteConfirmed, chunk.request, {
         onChunkReceived(incomingChunk) {
           if (incomingChunk.type === ChunkType.Error) {
             approvalFailed = true

@@ -17,6 +17,8 @@ public record BusinessDatabaseDto
     public required DbProviderType Provider { get; init; }
     public bool IsEnabled { get; init; }
     public bool IsReadOnly { get; init; }
+    public required DataSourceExternalSystemType ExternalSystemType { get; init; }
+    public bool ReadOnlyCredentialVerified { get; init; }
     public DateTime CreatedAt { get; init; }
     public bool HasConnectionString { get; init; }
     public string? ConnectionStringMasked { get; init; }
@@ -31,7 +33,9 @@ public record CreateBusinessDatabaseCommand(
     string ConnectionString,
     DbProviderType Provider,
     bool IsEnabled = true,
-    bool IsReadOnly = true) : ICommand<Result<CreatedBusinessDatabaseDto>>;
+    bool IsReadOnly = true,
+    DataSourceExternalSystemType ExternalSystemType = DataSourceExternalSystemType.Unknown,
+    bool ReadOnlyCredentialVerified = false) : ICommand<Result<CreatedBusinessDatabaseDto>>;
 
 public class CreateBusinessDatabaseCommandHandler(
     IRepository<BusinessDatabase> repository,
@@ -42,14 +46,31 @@ public class CreateBusinessDatabaseCommandHandler(
         CreateBusinessDatabaseCommand request,
         CancellationToken cancellationToken)
     {
+        var validationError = BusinessDatabaseSafetyValidator.Validate(
+            request.Provider,
+            request.IsEnabled,
+            request.IsReadOnly,
+            request.ExternalSystemType,
+            request.ReadOnlyCredentialVerified);
+        if (validationError is not null)
+        {
+            return Result.Invalid(validationError);
+        }
+
         var entity = new BusinessDatabase(
             request.Name,
             request.Description,
             request.ConnectionString,
             request.Provider,
-            request.IsReadOnly);
+            request.IsReadOnly,
+            BusinessDatabaseContractMapper.ToDomainExternalSystemType(request.ExternalSystemType),
+            request.ReadOnlyCredentialVerified);
 
-        entity.UpdateSettings(request.IsEnabled, request.IsReadOnly);
+        entity.UpdateSettings(
+            request.IsEnabled,
+            request.IsReadOnly,
+            BusinessDatabaseContractMapper.ToDomainExternalSystemType(request.ExternalSystemType),
+            request.ReadOnlyCredentialVerified);
 
         repository.Add(entity);
         await repository.SaveChangesAsync(cancellationToken);
@@ -62,8 +83,8 @@ public class CreateBusinessDatabaseCommandHandler(
                 entity.Id.ToString(),
                 entity.Name,
                 AuditResults.Succeeded,
-                $"Created business database: {entity.Name}; readOnly={entity.IsReadOnly}.",
-                ["name", "description", "connectionString", "provider", "isEnabled", "isReadOnly"]),
+                $"Created business database: {entity.Name}; readOnly={entity.IsReadOnly}; externalSystem={entity.ExternalSystemType}; readOnlyCredentialVerified={entity.ReadOnlyCredentialVerified}.",
+                ["name", "description", "connectionString", "provider", "isEnabled", "isReadOnly", "externalSystemType", "readOnlyCredentialVerified"]),
             cancellationToken);
         await auditLogWriter.SaveChangesAsync(cancellationToken);
 
@@ -79,7 +100,9 @@ public record UpdateBusinessDatabaseCommand(
     string ConnectionString,
     DbProviderType Provider,
     bool IsEnabled,
-    bool IsReadOnly) : ICommand<Result>;
+    bool IsReadOnly,
+    DataSourceExternalSystemType ExternalSystemType = DataSourceExternalSystemType.Unknown,
+    bool ReadOnlyCredentialVerified = false) : ICommand<Result>;
 
 public class UpdateBusinessDatabaseCommandHandler(
     IRepository<BusinessDatabase> repository,
@@ -88,6 +111,17 @@ public class UpdateBusinessDatabaseCommandHandler(
 {
     public async Task<Result> Handle(UpdateBusinessDatabaseCommand request, CancellationToken cancellationToken)
     {
+        var validationError = BusinessDatabaseSafetyValidator.Validate(
+            request.Provider,
+            request.IsEnabled,
+            request.IsReadOnly,
+            request.ExternalSystemType,
+            request.ReadOnlyCredentialVerified);
+        if (validationError is not null)
+        {
+            return Result.Invalid(validationError);
+        }
+
         var entity = await repository.GetByIdAsync(new BusinessDatabaseId(request.Id), cancellationToken);
         if (entity == null)
         {
@@ -127,13 +161,28 @@ public class UpdateBusinessDatabaseCommandHandler(
             changedFields.Add("isReadOnly");
         }
 
+        var externalSystemType = BusinessDatabaseContractMapper.ToDomainExternalSystemType(request.ExternalSystemType);
+        if (entity.ExternalSystemType != externalSystemType)
+        {
+            changedFields.Add("externalSystemType");
+        }
+
+        if (entity.ReadOnlyCredentialVerified != request.ReadOnlyCredentialVerified)
+        {
+            changedFields.Add("readOnlyCredentialVerified");
+        }
+
         entity.UpdateInfo(request.Name, request.Description);
         if (connectionChanged)
         {
             entity.UpdateConnection(request.ConnectionString, request.Provider);
         }
 
-        entity.UpdateSettings(request.IsEnabled, request.IsReadOnly);
+        entity.UpdateSettings(
+            request.IsEnabled,
+            request.IsReadOnly,
+            externalSystemType,
+            request.ReadOnlyCredentialVerified);
 
         repository.Update(entity);
         await repository.SaveChangesAsync(cancellationToken);
@@ -241,9 +290,49 @@ internal static class BusinessDatabaseDtoMapper
             Provider = db.Provider,
             IsEnabled = db.IsEnabled,
             IsReadOnly = db.IsReadOnly,
+            ExternalSystemType = BusinessDatabaseContractMapper.ToContractExternalSystemType(db.ExternalSystemType),
+            ReadOnlyCredentialVerified = db.ReadOnlyCredentialVerified,
             CreatedAt = db.CreatedAt,
             HasConnectionString = !string.IsNullOrEmpty(db.ConnectionString),
             ConnectionStringMasked = string.IsNullOrEmpty(db.ConnectionString) ? null : "******"
         };
+    }
+}
+
+internal static class BusinessDatabaseSafetyValidator
+{
+    public static string? Validate(
+        DbProviderType provider,
+        bool isEnabled,
+        bool isReadOnly,
+        DataSourceExternalSystemType externalSystemType,
+        bool readOnlyCredentialVerified)
+    {
+        if (!Enum.IsDefined(typeof(DataSourceExternalSystemType), externalSystemType))
+        {
+            return "业务库外部系统类型无效。";
+        }
+
+        if (!isReadOnly)
+        {
+            return "业务库必须配置为只读，AICopilot 不允许保存可写业务库。";
+        }
+
+        if (!isEnabled)
+        {
+            return null;
+        }
+
+        if (externalSystemType == DataSourceExternalSystemType.CloudReadOnly && !readOnlyCredentialVerified)
+        {
+            return "Cloud 只读数据源启用前必须确认数据库账号已按只读权限验证。";
+        }
+
+        if (provider != DbProviderType.PostgreSql && !readOnlyCredentialVerified)
+        {
+            return "SQL Server/MySQL 数据源启用前必须确认数据库账号已按只读权限验证。";
+        }
+
+        return null;
     }
 }

@@ -46,6 +46,24 @@ public class McpServerConfiguration : IEntityTypeConfiguration<McpServerInfo>
             .HasMaxLength(50)
             .HasColumnName("chat_exposure_mode");
 
+        builder.Property(b => b.ExternalSystemType)
+            .IsRequired()
+            .HasConversion<string>()
+            .HasMaxLength(50)
+            .HasColumnName("external_system_type");
+
+        builder.Property(b => b.CapabilityKind)
+            .IsRequired()
+            .HasConversion<string>()
+            .HasMaxLength(50)
+            .HasColumnName("capability_kind");
+
+        builder.Property(b => b.RiskLevel)
+            .IsRequired()
+            .HasConversion<string>()
+            .HasMaxLength(50)
+            .HasColumnName("risk_level");
+
         builder.Property(b => b.TransportType)
             .IsRequired()
             .HasConversion<string>() // 存储枚举字符串，增强可读性

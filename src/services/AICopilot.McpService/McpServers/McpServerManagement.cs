@@ -29,6 +29,9 @@ public record McpServerDto
     public string? ArgumentsMasked { get; init; }
     public ChatExposureMode ChatExposureMode { get; init; }
     public IReadOnlyCollection<string> AllowedToolNames { get; init; } = [];
+    public AiToolExternalSystemType ExternalSystemType { get; init; }
+    public AiToolCapabilityKind CapabilityKind { get; init; }
+    public AiToolRiskLevel RiskLevel { get; init; }
     public IReadOnlyCollection<McpToolPolicySummaryDto> ToolPolicySummaries { get; init; } = [];
     public bool IsEnabled { get; init; }
 }
@@ -44,7 +47,10 @@ public record CreateMcpServerCommand(
     string Arguments,
     ChatExposureMode ChatExposureMode = ChatExposureMode.Disabled,
     IReadOnlyCollection<string>? AllowedToolNames = null,
-    bool IsEnabled = true) : ICommand<Result<CreatedMcpServerDto>>;
+    bool IsEnabled = true,
+    AiToolExternalSystemType ExternalSystemType = AiToolExternalSystemType.Unknown,
+    AiToolCapabilityKind CapabilityKind = AiToolCapabilityKind.Diagnostics,
+    AiToolRiskLevel RiskLevel = AiToolRiskLevel.RequiresApproval) : ICommand<Result<CreatedMcpServerDto>>;
 
 public class CreateMcpServerCommandHandler(IRepository<McpServerInfo> repository)
     : ICommandHandler<CreateMcpServerCommand, Result<CreatedMcpServerDto>>
@@ -61,7 +67,10 @@ public class CreateMcpServerCommandHandler(IRepository<McpServerInfo> repository
             request.Arguments,
             request.ChatExposureMode,
             request.AllowedToolNames,
-            request.IsEnabled);
+            request.IsEnabled,
+            request.ExternalSystemType,
+            request.CapabilityKind,
+            request.RiskLevel);
 
         repository.Add(entity);
         await repository.SaveChangesAsync(cancellationToken);
@@ -80,7 +89,10 @@ public record UpdateMcpServerCommand(
     string Arguments,
     ChatExposureMode ChatExposureMode = ChatExposureMode.Disabled,
     IReadOnlyCollection<string>? AllowedToolNames = null,
-    bool IsEnabled = true) : ICommand<Result>;
+    bool IsEnabled = true,
+    AiToolExternalSystemType ExternalSystemType = AiToolExternalSystemType.Unknown,
+    AiToolCapabilityKind CapabilityKind = AiToolCapabilityKind.Diagnostics,
+    AiToolRiskLevel RiskLevel = AiToolRiskLevel.RequiresApproval) : ICommand<Result>;
 
 public class UpdateMcpServerCommandHandler(IRepository<McpServerInfo> repository)
     : ICommandHandler<UpdateMcpServerCommand, Result>
@@ -105,7 +117,10 @@ public class UpdateMcpServerCommandHandler(IRepository<McpServerInfo> repository
             arguments,
             request.ChatExposureMode,
             request.AllowedToolNames,
-            request.IsEnabled);
+            request.IsEnabled,
+            request.ExternalSystemType,
+            request.CapabilityKind,
+            request.RiskLevel);
 
         repository.Update(entity);
         await repository.SaveChangesAsync(cancellationToken);
@@ -234,6 +249,9 @@ internal static class McpServerDtoMapper
             ArgumentsMasked = string.IsNullOrEmpty(server.Arguments) ? null : "******",
             ChatExposureMode = server.ChatExposureMode,
             AllowedToolNames = server.AllowedToolNames,
+            ExternalSystemType = server.ExternalSystemType,
+            CapabilityKind = server.CapabilityKind,
+            RiskLevel = server.RiskLevel,
             ToolPolicySummaries = BuildToolPolicySummaries(server.AllowedToolNames, policies),
             IsEnabled = server.IsEnabled
         };

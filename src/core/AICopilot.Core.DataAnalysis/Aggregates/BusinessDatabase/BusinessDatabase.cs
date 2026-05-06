@@ -21,10 +21,13 @@ public class BusinessDatabase : IAggregateRoot<BusinessDatabaseId>
         string description,
         string connectionString,
         DbProviderType provider,
-        bool isReadOnly = true)
+        bool isReadOnly = true,
+        BusinessDataExternalSystemType externalSystemType = BusinessDataExternalSystemType.Unknown,
+        bool readOnlyCredentialVerified = false)
     {
         ValidateInfo(name, description);
         ValidateConnection(connectionString, provider);
+        ValidateSettings(isReadOnly, externalSystemType);
 
         Id = BusinessDatabaseId.New();
         Name = name.Trim();
@@ -32,6 +35,8 @@ public class BusinessDatabase : IAggregateRoot<BusinessDatabaseId>
         ConnectionString = connectionString.Trim();
         Provider = provider;
         IsReadOnly = isReadOnly;
+        ExternalSystemType = externalSystemType;
+        ReadOnlyCredentialVerified = readOnlyCredentialVerified;
         IsEnabled = true;
         CreatedAt = DateTime.UtcNow;
     }
@@ -67,6 +72,10 @@ public class BusinessDatabase : IAggregateRoot<BusinessDatabaseId>
     /// </summary>
     public bool IsReadOnly { get; private set; }
 
+    public BusinessDataExternalSystemType ExternalSystemType { get; private set; }
+
+    public bool ReadOnlyCredentialVerified { get; private set; }
+
     /// <summary>
     /// 是否启用
     /// </summary>
@@ -85,10 +94,18 @@ public class BusinessDatabase : IAggregateRoot<BusinessDatabaseId>
         Provider = provider;
     }
 
-    public void UpdateSettings(bool isEnabled, bool isReadOnly)
+    public void UpdateSettings(
+        bool isEnabled,
+        bool isReadOnly,
+        BusinessDataExternalSystemType externalSystemType = BusinessDataExternalSystemType.Unknown,
+        bool readOnlyCredentialVerified = false)
     {
+        ValidateSettings(isReadOnly, externalSystemType);
+
         IsEnabled = isEnabled;
         IsReadOnly = isReadOnly;
+        ExternalSystemType = externalSystemType;
+        ReadOnlyCredentialVerified = readOnlyCredentialVerified;
     }
 
     /// <summary>
@@ -125,6 +142,24 @@ public class BusinessDatabase : IAggregateRoot<BusinessDatabaseId>
         if (!Enum.IsDefined(typeof(DbProviderType), provider))
         {
             throw new ArgumentOutOfRangeException(nameof(provider), provider, "Business database provider is invalid.");
+        }
+    }
+
+    private static void ValidateSettings(
+        bool isReadOnly,
+        BusinessDataExternalSystemType externalSystemType)
+    {
+        if (!Enum.IsDefined(typeof(BusinessDataExternalSystemType), externalSystemType))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(externalSystemType),
+                externalSystemType,
+                "Business data external system type is invalid.");
+        }
+
+        if (externalSystemType == BusinessDataExternalSystemType.CloudReadOnly && !isReadOnly)
+        {
+            throw new InvalidOperationException("Cloud read-only data source must be configured as read-only.");
         }
     }
 }

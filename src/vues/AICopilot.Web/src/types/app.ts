@@ -190,6 +190,8 @@ export interface BusinessDatabaseSummary {
   provider: number
   isEnabled: boolean
   isReadOnly: boolean
+  externalSystemType: number
+  readOnlyCredentialVerified: boolean
   createdAt: string
   hasConnectionString: boolean
   connectionStringMasked?: string | null
@@ -205,6 +207,8 @@ export interface BusinessDatabaseFormModel {
   provider: number
   isEnabled: boolean
   isReadOnly: boolean
+  externalSystemType: number
+  readOnlyCredentialVerified: boolean
   hasConnectionString: boolean
   connectionStringMasked?: string | null
 }
@@ -225,6 +229,9 @@ export interface McpServerSummary {
   argumentsMasked?: string | null
   chatExposureMode: number
   allowedToolNames: string[]
+  externalSystemType: number
+  capabilityKind: number
+  riskLevel: number
   toolPolicySummaries: McpToolPolicySummary[]
   isEnabled: boolean
 }
@@ -240,6 +247,9 @@ export interface McpServerFormModel {
   arguments: string
   chatExposureMode: number
   allowedToolNames: string[]
+  externalSystemType: number
+  capabilityKind: number
+  riskLevel: number
   isEnabled: boolean
   hasArguments: boolean
   argumentsMasked?: string | null

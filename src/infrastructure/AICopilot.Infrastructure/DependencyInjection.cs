@@ -15,6 +15,7 @@ using AICopilot.Services.Contracts;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using System.Reflection;
 
 namespace AICopilot.Infrastructure;
@@ -33,6 +34,19 @@ public static class DependencyInjection
         builder.Services.AddSingleton<IFileStorageService, LocalFileStorageService>();
         builder.Services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
         builder.Services.AddScoped<IChatClientProvider, OpenAiChatClientProvider>();
+        builder.AddDocumentParsers();
+        builder.Services.AddSingleton<ISessionExecutionLock>(serviceProvider =>
+        {
+            var connectionString = builder.Configuration.GetConnectionString("ai-copilot");
+            if (string.IsNullOrWhiteSpace(connectionString))
+            {
+                throw new InvalidOperationException("PostgreSQL session execution lock requires ConnectionStrings:ai-copilot.");
+            }
+
+            return new PostgreSqlSessionExecutionLock(
+                connectionString,
+                serviceProvider.GetRequiredService<ILogger<PostgreSqlSessionExecutionLock>>());
+        });
         builder.AddMcpRuntime();
         builder.Services.AddHttpClient("OpenAI", client =>
         {
@@ -63,13 +77,20 @@ public static class DependencyInjection
         builder.Services.AddScoped<IIntegrationEventPublisher, OutboxIntegrationEventPublisher>();
 
         builder.Services.AddSingleton<IFileStorageService, LocalFileStorageService>();
-        builder.Services.AddSingleton<IDocumentParser, PdfDocumentParser>();
-        builder.Services.AddSingleton<IDocumentParser, TextDocumentParser>();
-        builder.Services.AddSingleton<DocumentParserFactory>();
+        builder.AddDocumentParsers();
         builder.Services.AddSingleton<ITokenCounter, SharpTokenCounter>();
         builder.Services.AddSingleton<IDocumentTextSplitter, TextSplitterService>();
         builder.Services.AddScoped<IDocumentContentExtractor, DocumentContentExtractor>();
         builder.Services.AddScoped<IKnowledgeVectorIndexWriter, KnowledgeVectorIndexWriter>();
+    }
+
+    private static void AddDocumentParsers(this IHostApplicationBuilder builder)
+    {
+        builder.Services.AddSingleton<IDocumentParser, PdfDocumentParser>();
+        builder.Services.AddSingleton<IDocumentParser, TextDocumentParser>();
+        builder.Services.AddSingleton<DocumentParserFactory>();
+        builder.Services.AddSingleton<IDocumentFormatPolicy>(sp =>
+            sp.GetRequiredService<DocumentParserFactory>());
     }
 
     private static void AddFinalAgentContextStore(this IHostApplicationBuilder builder)

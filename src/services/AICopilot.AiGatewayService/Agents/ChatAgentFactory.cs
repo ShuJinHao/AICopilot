@@ -43,11 +43,8 @@ public class ChatAgentFactory(
         LanguageModel model,
         ConversationTemplate template,
         Action<AiChatOptions>? configureOptions = null,
-        bool isSaveChatMessage = true,
         string? instructionsOverride = null)
     {
-        _ = isSaveChatMessage;
-
         if (!runtimeFactory.CanCreate(model.Provider))
         {
             throw new ChatWorkflowException(
@@ -69,22 +66,20 @@ public class ChatAgentFactory(
 
     public async Task<ScopedRuntimeAgent> CreateAgentAsync(
         ConversationTemplateId templateId,
-        Action<AiChatOptions>? configureOptions = null,
-        bool isSaveChatMessage = true)
+        Action<AiChatOptions>? configureOptions = null)
     {
         var (model, template) = await GetModelAndTemplateAsync(new ConversationTemplateByIdSpec(templateId));
-        return CreateAgent(model, template, configureOptions, isSaveChatMessage);
+        return CreateAgent(model, template, configureOptions);
     }
 
     public async Task<ScopedRuntimeAgent> CreateAgentAsync(
         string templateName,
         Func<string, string>? configureInstructions = null,
-        Action<AiChatOptions>? configureOptions = null,
-        bool isSaveChatMessage = true)
+        Action<AiChatOptions>? configureOptions = null)
     {
         var (model, template) = await GetModelAndTemplateAsync(new ConversationTemplateByNameSpec(templateName));
         var instructions = configureInstructions?.Invoke(template.SystemPrompt);
-        return CreateAgent(model, template, configureOptions, isSaveChatMessage, instructions);
+        return CreateAgent(model, template, configureOptions, instructions);
     }
 
     private static ChatWorkflowException CreateConfigurationMissingException()

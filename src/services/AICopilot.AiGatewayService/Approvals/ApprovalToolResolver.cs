@@ -35,7 +35,7 @@ public class ApprovalToolResolver(
             var requirementMap = requirements.GetValueOrDefault(pluginName)
                                  ?? new Dictionary<string, ApprovalRequirement>(StringComparer.OrdinalIgnoreCase);
 
-            tools.AddRange((plugin.GetTools() ?? []).Select(tool => ApplyApprovalRequirement(tool, requirementMap)));
+            tools.AddRange(pluginLoader.GetPluginTools(pluginName).Select(tool => ApplyApprovalRequirement(tool, requirementMap)));
         }
 
         return tools.ToArray();
@@ -72,7 +72,7 @@ public class ApprovalToolResolver(
             var requirementMap = requirements.GetValueOrDefault(plugin.Name)
                                  ?? new Dictionary<string, ApprovalRequirement>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var rawTool in plugin.GetTools() ?? [])
+            foreach (var rawTool in pluginLoader.GetPluginTools(plugin.Name))
             {
                 if (!normalizedToolNames.Contains(rawTool.Name))
                 {
@@ -90,7 +90,8 @@ public class ApprovalToolResolver(
         AiToolDefinition tool,
         IReadOnlyDictionary<string, ApprovalRequirement> requirementMap)
     {
-        return requirementMap.TryGetValue(tool.Name, out var requirement) && requirement.RequiresApproval
+        var policyKey = tool.ToolName ?? tool.Name;
+        return requirementMap.TryGetValue(policyKey, out var requirement) && requirement.RequiresApproval
             ? tool.WithRequiresApproval(true)
             : tool;
     }

@@ -7,13 +7,22 @@ public enum DatabaseProviderType
     MySql = 3
 }
 
+public enum DataSourceExternalSystemType
+{
+    Unknown = 0,
+    CloudReadOnly = 1,
+    NonCloud = 2
+}
+
 public sealed record BusinessDatabaseDescriptor(
     Guid Id,
     string Name,
     string Description,
     DatabaseProviderType Provider,
     bool IsEnabled,
-    bool IsReadOnly);
+    bool IsReadOnly,
+    DataSourceExternalSystemType ExternalSystemType = DataSourceExternalSystemType.Unknown,
+    bool ReadOnlyCredentialVerified = false);
 
 public sealed record BusinessDatabaseConnectionInfo(
     Guid Id,
@@ -22,7 +31,9 @@ public sealed record BusinessDatabaseConnectionInfo(
     string ConnectionString,
     DatabaseProviderType Provider,
     bool IsEnabled,
-    bool IsReadOnly);
+    bool IsReadOnly,
+    DataSourceExternalSystemType ExternalSystemType = DataSourceExternalSystemType.Unknown,
+    bool ReadOnlyCredentialVerified = false);
 
 public interface IBusinessDatabaseReadService
 {

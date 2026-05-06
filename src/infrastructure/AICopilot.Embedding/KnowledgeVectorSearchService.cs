@@ -19,6 +19,9 @@ public sealed class KnowledgeVectorSearchService(
         double minScore,
         CancellationToken cancellationToken = default)
     {
+        var effectiveTopK = Math.Clamp(topK, 1, 20);
+        var effectiveMinScore = Math.Clamp(minScore, 0.0, 1.0);
+
         using var generator = embeddingFactory.CreateGenerator(embeddingModel);
         var queryEmbedding = await generator.GenerateVectorAsync(queryText, cancellationToken: cancellationToken);
 
@@ -29,23 +32,24 @@ public sealed class KnowledgeVectorSearchService(
 
         var searchResults = vectorSearchCollection.SearchAsync(
             queryEmbedding,
-            topK,
+            effectiveTopK,
             cancellationToken: cancellationToken);
 
         var results = new List<KnowledgeVectorSearchResult>();
 
         await foreach (var record in searchResults)
         {
-            if (record.Score < minScore)
+            if (!record.Score.HasValue || record.Score.Value < effectiveMinScore)
             {
                 continue;
             }
 
             results.Add(new KnowledgeVectorSearchResult(
                 record.Record.Text,
-                record.Score ?? 0,
+                record.Score.Value,
                 int.Parse(record.Record.DocumentId),
-                record.Record.DocumentName));
+                record.Record.DocumentName,
+                record.Record.ChunkIndex));
         }
 
         return results;

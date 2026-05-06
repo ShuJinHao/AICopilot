@@ -6,6 +6,7 @@ using AICopilot.Core.AiGateway.Specifications.Sessions;
 using AICopilot.Services.Contracts;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.SharedKernel.Messaging;
+using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
 
@@ -14,6 +15,10 @@ namespace AICopilot.AiGatewayService.Queries.Sessions;
 public sealed record PendingApprovalDto(
     string CallId,
     string Name,
+    string? RuntimeName,
+    string? TargetType,
+    string? TargetName,
+    string? ToolName,
     IReadOnlyDictionary<string, object?> Args,
     bool RequiresOnsiteAttestation,
     DateTimeOffset? AttestationExpiresAt);
@@ -60,12 +65,17 @@ public sealed class GetPendingApprovalsQueryHandler(
             var toolName = string.IsNullOrWhiteSpace(approval.ToolName)
                 ? approval.CallId
                 : approval.ToolName!;
+            var identity = BuildStoredIdentity(approval);
             var requirement = await approvalRequirementResolver
-                .GetMergedRequirementByToolNameAsync(toolName, cancellationToken);
+                .GetMergedRequirementByIdentityAsync(identity, cancellationToken);
 
             approvals.Add(new PendingApprovalDto(
                 approval.CallId,
                 toolName,
+                approval.RuntimeName,
+                approval.TargetType,
+                approval.TargetName,
+                approval.ToolName,
                 NormalizeArguments(approval.Arguments),
                 requirement.RequiresOnsiteAttestation,
                 session.OnsiteConfirmationExpiresAt));
@@ -81,6 +91,24 @@ public sealed class GetPendingApprovalsQueryHandler(
             item => item.Key,
             item => NormalizeJsonElement(item.Value),
             StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static AiToolIdentity? BuildStoredIdentity(StoredToolApprovalRequest approval)
+    {
+        if (!Enum.TryParse<AiToolTargetType>(approval.TargetType, ignoreCase: true, out var targetType)
+            || string.IsNullOrWhiteSpace(approval.TargetName)
+            || string.IsNullOrWhiteSpace(approval.ToolName))
+        {
+            return null;
+        }
+
+        var kind = Enum.TryParse<AiToolCallKind>(approval.ToolKind, ignoreCase: true, out var parsedKind)
+            ? parsedKind
+            : targetType == AiToolTargetType.McpServer
+                ? AiToolCallKind.Mcp
+                : AiToolCallKind.Function;
+
+        return new AiToolIdentity(kind, targetType, approval.TargetName, approval.ToolName);
     }
 
     private static object? NormalizeJsonElement(object? value)

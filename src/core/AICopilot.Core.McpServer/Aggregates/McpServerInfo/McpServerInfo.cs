@@ -23,10 +23,24 @@ public class McpServerInfo : IAggregateRoot<McpServerId>
         string arguments,
         ChatExposureMode chatExposureMode = ChatExposureMode.Disabled,
         IEnumerable<string>? allowedToolNames = null,
-        bool isEnabled = true)
+        bool isEnabled = true,
+        AiToolExternalSystemType externalSystemType = AiToolExternalSystemType.Unknown,
+        AiToolCapabilityKind capabilityKind = AiToolCapabilityKind.Diagnostics,
+        AiToolRiskLevel riskLevel = AiToolRiskLevel.RequiresApproval)
     {
         Id = McpServerId.New();
-        Update(name, description, transportType, command, arguments, chatExposureMode, allowedToolNames, isEnabled);
+        Update(
+            name,
+            description,
+            transportType,
+            command,
+            arguments,
+            chatExposureMode,
+            allowedToolNames,
+            isEnabled,
+            externalSystemType,
+            capabilityKind,
+            riskLevel);
     }
 
     public McpServerId Id { get; private set; }
@@ -47,6 +61,12 @@ public class McpServerInfo : IAggregateRoot<McpServerId>
 
     public IReadOnlyCollection<string> AllowedToolNames => _allowedToolNames.AsReadOnly();
 
+    public AiToolExternalSystemType ExternalSystemType { get; private set; } = AiToolExternalSystemType.Unknown;
+
+    public AiToolCapabilityKind CapabilityKind { get; private set; } = AiToolCapabilityKind.Diagnostics;
+
+    public AiToolRiskLevel RiskLevel { get; private set; } = AiToolRiskLevel.RequiresApproval;
+
     public bool IsEnabled { get; private set; }
 
     public void Update(
@@ -57,9 +77,12 @@ public class McpServerInfo : IAggregateRoot<McpServerId>
         string arguments,
         ChatExposureMode chatExposureMode,
         IEnumerable<string>? allowedToolNames,
-        bool isEnabled)
+        bool isEnabled,
+        AiToolExternalSystemType externalSystemType = AiToolExternalSystemType.Unknown,
+        AiToolCapabilityKind capabilityKind = AiToolCapabilityKind.Diagnostics,
+        AiToolRiskLevel riskLevel = AiToolRiskLevel.RequiresApproval)
     {
-        Validate(name, description, transportType, command, arguments, chatExposureMode);
+        Validate(name, description, transportType, command, arguments, chatExposureMode, externalSystemType, capabilityKind, riskLevel);
 
         Name = name.Trim();
         Description = description.Trim();
@@ -67,6 +90,9 @@ public class McpServerInfo : IAggregateRoot<McpServerId>
         Command = string.IsNullOrWhiteSpace(command) ? null : command.Trim();
         Arguments = (arguments ?? string.Empty).Trim();
         ChatExposureMode = chatExposureMode;
+        ExternalSystemType = externalSystemType;
+        CapabilityKind = capabilityKind;
+        RiskLevel = riskLevel;
         IsEnabled = isEnabled;
 
         _allowedToolNames.Clear();
@@ -79,7 +105,10 @@ public class McpServerInfo : IAggregateRoot<McpServerId>
         McpTransportType transportType,
         string? command,
         string arguments,
-        ChatExposureMode chatExposureMode)
+        ChatExposureMode chatExposureMode,
+        AiToolExternalSystemType externalSystemType,
+        AiToolCapabilityKind capabilityKind,
+        AiToolRiskLevel riskLevel)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -99,6 +128,21 @@ public class McpServerInfo : IAggregateRoot<McpServerId>
         if (!Enum.IsDefined(typeof(ChatExposureMode), chatExposureMode))
         {
             throw new ArgumentOutOfRangeException(nameof(chatExposureMode), chatExposureMode, "MCP server chat exposure mode is invalid.");
+        }
+
+        if (!Enum.IsDefined(typeof(AiToolExternalSystemType), externalSystemType))
+        {
+            throw new ArgumentOutOfRangeException(nameof(externalSystemType), externalSystemType, "MCP server external system type is invalid.");
+        }
+
+        if (!Enum.IsDefined(typeof(AiToolCapabilityKind), capabilityKind))
+        {
+            throw new ArgumentOutOfRangeException(nameof(capabilityKind), capabilityKind, "MCP server capability kind is invalid.");
+        }
+
+        if (!Enum.IsDefined(typeof(AiToolRiskLevel), riskLevel))
+        {
+            throw new ArgumentOutOfRangeException(nameof(riskLevel), riskLevel, "MCP server risk level is invalid.");
         }
 
         if (transportType == McpTransportType.Stdio && string.IsNullOrWhiteSpace(command))

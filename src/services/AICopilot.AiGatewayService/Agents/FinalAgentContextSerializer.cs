@@ -41,14 +41,18 @@ public sealed class FinalAgentContextSerializer(
             SerializerOptions,
             cancellationToken);
 
-        var pendingApprovals = agentContext.FunctionApprovalRequestContents
-            .Select(ToStoredApprovalRequest)
-            .ToArray();
-
         var toolNames = agentContext.RunOptions.Options.Tools
             .Select(tool => tool.Name)
             .Where(name => !string.IsNullOrWhiteSpace(name))
             .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var toolIdentities = agentContext.RunOptions.Options.Tools
+            .Where(tool => tool.Identity is not null)
+            .ToDictionary(tool => tool.Name, tool => tool.Identity!, StringComparer.OrdinalIgnoreCase);
+
+        var pendingApprovals = agentContext.FunctionApprovalRequestContents
+            .Select(request => ToStoredApprovalRequest(request, toolIdentities))
             .ToArray();
 
         return new StoredFinalAgentContext(
@@ -83,8 +87,7 @@ public sealed class FinalAgentContextSerializer(
             options =>
             {
                 options.Tools = tools;
-            },
-            isSaveChatMessage: false);
+            });
 
         try
         {
@@ -130,18 +133,29 @@ public sealed class FinalAgentContextSerializer(
         }
     }
 
-    private static StoredToolApprovalRequest ToStoredApprovalRequest(AiToolApprovalRequest request)
+    private static StoredToolApprovalRequest ToStoredApprovalRequest(
+        AiToolApprovalRequest request,
+        IReadOnlyDictionary<string, AiToolIdentity> toolIdentities)
     {
+        var identity = request.ToolCall.Identity;
+        if (identity is null && toolIdentities.TryGetValue(request.ToolCall.Name, out var mappedIdentity))
+        {
+            identity = mappedIdentity;
+        }
+
         return new StoredToolApprovalRequest(
             request.RequestId,
             request.ToolCall.CallId,
             request.ToolCall.Kind.ToString(),
-            request.ToolCall.Name,
+            request.ToolCall.ToolName ?? identity?.ToolName ?? request.ToolCall.Name,
             request.ToolCall.ServerName,
             request.ToolCall.Arguments.ToDictionary(
                 item => item.Key,
                 item => item.Value,
-                StringComparer.OrdinalIgnoreCase));
+                StringComparer.OrdinalIgnoreCase),
+            identity?.TargetType.ToString(),
+            identity?.TargetName,
+            request.ToolCall.Name);
     }
 
     private static AiToolApprovalRequest ToRuntimeApprovalRequest(StoredToolApprovalRequest storedApproval)
@@ -149,14 +163,20 @@ public sealed class FinalAgentContextSerializer(
         var kind = Enum.TryParse<AiToolCallKind>(storedApproval.ToolKind, ignoreCase: true, out var parsedKind)
             ? parsedKind
             : AiToolCallKind.Function;
+        var targetType = Enum.TryParse<AiToolTargetType>(storedApproval.TargetType, ignoreCase: true, out var parsedTargetType)
+            ? parsedTargetType
+            : (AiToolTargetType?)null;
 
         return new AiToolApprovalRequest(
             storedApproval.RequestId,
             new AiToolCall(
                 storedApproval.CallId,
-                storedApproval.ToolName ?? storedApproval.CallId,
+                storedApproval.RuntimeName ?? storedApproval.ToolName ?? storedApproval.CallId,
                 kind,
                 storedApproval.ServerName,
-                storedApproval.Arguments));
+                storedApproval.Arguments,
+                targetType,
+                storedApproval.TargetName,
+                storedApproval.ToolName));
     }
 }

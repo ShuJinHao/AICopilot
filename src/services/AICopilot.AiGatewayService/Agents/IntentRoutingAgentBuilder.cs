@@ -93,8 +93,7 @@ public class IntentRoutingAgentBuilder
             {
                 return systemPrompt
                     .Replace("{{$IntentList}}", intents.ToString());
-            },
-            isSaveChatMessage: false);
+            });
 
         return agent;
     }

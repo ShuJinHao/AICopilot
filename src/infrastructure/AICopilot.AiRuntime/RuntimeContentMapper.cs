@@ -88,13 +88,19 @@ internal static class RuntimeContentMapper
                 function.Name,
                 AiToolCallKind.Function,
                 null,
-                NormalizeArguments(function.Arguments)),
+                NormalizeArguments(function.Arguments),
+                ResolveTargetType(function.Name),
+                ResolveTargetName(function.Name),
+                ResolveToolName(function.Name)),
             McpServerToolCallContent mcp => new AiToolCall(
                 mcp.CallId,
                 mcp.Name,
                 AiToolCallKind.Mcp,
                 mcp.ServerName,
-                NormalizeArguments(mcp.Arguments)),
+                NormalizeArguments(mcp.Arguments),
+                AiToolTargetType.McpServer,
+                mcp.ServerName,
+                mcp.Name),
             _ => new AiToolCall(
                 toolCall.CallId,
                 toolCall.CallId,
@@ -103,6 +109,27 @@ internal static class RuntimeContentMapper
                 new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase))
         };
 #pragma warning restore MEAI001
+    }
+
+    private static AiToolTargetType? ResolveTargetType(string name)
+    {
+        return AiToolIdentity.TryParseRuntimeName(name, out var identity)
+            ? identity!.TargetType
+            : null;
+    }
+
+    private static string? ResolveTargetName(string name)
+    {
+        return AiToolIdentity.TryParseRuntimeName(name, out var identity)
+            ? identity!.TargetName
+            : null;
+    }
+
+    private static string? ResolveToolName(string name)
+    {
+        return AiToolIdentity.TryParseRuntimeName(name, out var identity)
+            ? identity!.ToolName
+            : null;
     }
 
     private static ChatRole ToChatRole(AiChatRole role)

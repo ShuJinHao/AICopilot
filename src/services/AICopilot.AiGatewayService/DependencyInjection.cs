@@ -8,7 +8,9 @@ using AICopilot.AiGatewayService.Safety;
 using AICopilot.AiGatewayService.Sessions;
 using AICopilot.AiGatewayService.Workflows;
 using AICopilot.AiGatewayService.Workflows.Executors;
+using AICopilot.Services.Contracts;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using System.Reflection;
 
@@ -24,7 +26,7 @@ public static class DependencyInjection
         });
 
         builder.Services.AddScoped<ChatAgentFactory>();
-        builder.Services.AddSingleton<ISessionExecutionLock, InMemorySessionExecutionLock>();
+        builder.Services.TryAddSingleton<ISessionExecutionLock, InMemorySessionExecutionLock>();
         builder.Services.AddSingleton<IOperationalBoundaryPolicy, ManufacturingOperationalBoundaryPolicy>();
         builder.Services.AddSingleton<IManufacturingSceneClassifier, KeywordManufacturingSceneClassifier>();
         builder.Services.AddSingleton<ITextTokenEstimator, SharpTokenTextTokenEstimator>();

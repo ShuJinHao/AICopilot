@@ -80,6 +80,8 @@ function createEmptyBusinessDatabaseForm(): BusinessDatabaseFormModel {
     provider: 1,
     isEnabled: true,
     isReadOnly: true,
+    externalSystemType: 0,
+    readOnlyCredentialVerified: false,
     hasConnectionString: false,
     connectionStringMasked: null
   }
@@ -94,6 +96,9 @@ function createEmptyMcpServerForm(): McpServerFormModel {
     arguments: '',
     chatExposureMode: 0,
     allowedToolNames: [],
+    externalSystemType: 0,
+    capabilityKind: 1,
+    riskLevel: 1,
     isEnabled: true,
     hasArguments: false,
     argumentsMasked: null,
@@ -154,6 +159,8 @@ function toBusinessDatabaseForm(detail: BusinessDatabaseDetail): BusinessDatabas
     provider: detail.provider,
     isEnabled: detail.isEnabled,
     isReadOnly: true,
+    externalSystemType: detail.externalSystemType,
+    readOnlyCredentialVerified: detail.readOnlyCredentialVerified,
     hasConnectionString: detail.hasConnectionString,
     connectionStringMasked: detail.connectionStringMasked
   }
@@ -169,6 +176,9 @@ function toMcpServerForm(detail: McpServerDetail): McpServerFormModel {
     arguments: '',
     chatExposureMode: detail.chatExposureMode,
     allowedToolNames: [...detail.allowedToolNames],
+    externalSystemType: detail.externalSystemType,
+    capabilityKind: detail.capabilityKind,
+    riskLevel: detail.riskLevel,
     isEnabled: detail.isEnabled,
     hasArguments: detail.hasArguments,
     argumentsMasked: detail.argumentsMasked,
@@ -675,7 +685,9 @@ export const useConfigStore = defineStore('config', () => {
         description: currentBusinessDatabase.value.description.trim(),
         connectionString,
         provider,
-        isReadOnly: true
+        isReadOnly: true,
+        externalSystemType: currentBusinessDatabase.value.externalSystemType,
+        readOnlyCredentialVerified: currentBusinessDatabase.value.readOnlyCredentialVerified
       }
 
       if (dialogModes.businessDatabase === 'create') {

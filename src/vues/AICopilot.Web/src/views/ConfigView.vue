@@ -138,6 +138,12 @@ const databaseProviderOptions = [
   { label: 'MySql', value: 3 }
 ]
 
+const dataSourceExternalSystemOptions = [
+  { label: '未标记', value: 0 },
+  { label: 'Cloud 只读', value: 1 },
+  { label: '非 Cloud', value: 2 }
+]
+
 const mcpTransportOptions = [
   { label: 'Stdio', value: 1 },
   { label: 'SSE', value: 2 }
@@ -148,6 +154,26 @@ const chatExposureOptions = [
   { label: '只观察', value: 1 },
   { label: '建议模式', value: 2 },
   { label: '控制模式', value: 3 }
+]
+
+const mcpExternalSystemOptions = [
+  { label: '未知', value: 0 },
+  { label: '内部演示', value: 1 },
+  { label: 'Cloud 只读', value: 2 },
+  { label: '非 Cloud', value: 3 }
+]
+
+const mcpCapabilityOptions = [
+  { label: '只读查询', value: 0 },
+  { label: '诊断', value: 1 },
+  { label: '本地建议', value: 2 },
+  { label: '有副作用', value: 3 }
+]
+
+const mcpRiskOptions = [
+  { label: '低风险', value: 0 },
+  { label: '需审批', value: 1 },
+  { label: '阻断', value: 2 }
 ]
 
 const languageModelRules: FormRules<LanguageModelFormModel> = {
@@ -175,6 +201,27 @@ const businessDatabaseRules: FormRules<BusinessDatabaseFormModel> = {
   name: [{ required: true, message: '请输入业务库名称', trigger: 'blur' }],
   description: [{ required: true, message: '请输入业务库说明', trigger: 'blur' }],
   provider: [{ required: true, message: '请选择数据库类型', trigger: 'change' }],
+  externalSystemType: [{ required: true, message: '请选择外部系统类型', trigger: 'change' }],
+  readOnlyCredentialVerified: [
+    {
+      validator: (_, value, callback) => {
+        const form = configStore.currentBusinessDatabase
+
+        if (!form.isEnabled) {
+          callback()
+          return
+        }
+
+        if ((form.externalSystemType === 1 || form.provider !== 1) && value !== true) {
+          callback(new Error('启用 Cloud 只读或非 PostgreSQL 数据源前，必须确认数据库账号已按只读权限验证'))
+          return
+        }
+
+        callback()
+      },
+      trigger: 'change'
+    }
+  ],
   connectionString: [
     {
       validator: (_, value, callback) => {
@@ -241,12 +288,37 @@ function providerLabel(provider: number) {
   return databaseProviderOptions.find((item) => item.value === provider)?.label ?? `Provider-${provider}`
 }
 
+function externalSystemLabel(externalSystemType: number) {
+  return (
+    dataSourceExternalSystemOptions.find((item) => item.value === externalSystemType)?.label ??
+    `External-${externalSystemType}`
+  )
+}
+
 function mcpTransportLabel(transportType: number) {
   return mcpTransportOptions.find((item) => item.value === transportType)?.label ?? `Transport-${transportType}`
 }
 
 function chatExposureLabel(mode: number) {
   return chatExposureOptions.find((item) => item.value === mode)?.label ?? `Mode-${mode}`
+}
+
+function mcpExternalSystemLabel(externalSystemType: number) {
+  return (
+    mcpExternalSystemOptions.find((item) => item.value === externalSystemType)?.label ??
+    `External-${externalSystemType}`
+  )
+}
+
+function mcpCapabilityLabel(capabilityKind: number) {
+  return (
+    mcpCapabilityOptions.find((item) => item.value === capabilityKind)?.label ??
+    `Capability-${capabilityKind}`
+  )
+}
+
+function mcpRiskLabel(riskLevel: number) {
+  return mcpRiskOptions.find((item) => item.value === riskLevel)?.label ?? `Risk-${riskLevel}`
 }
 
 function chatExposureTagType(mode: number) {
@@ -258,6 +330,17 @@ function chatExposureTagType(mode: number) {
       return 'danger'
     default:
       return 'info'
+  }
+}
+
+function mcpRiskTagType(riskLevel: number) {
+  switch (riskLevel) {
+    case 0:
+      return 'success'
+    case 2:
+      return 'danger'
+    default:
+      return 'warning'
   }
 }
 
@@ -344,6 +427,10 @@ function enabledTagType(enabled: boolean) {
 
 function readonlyTagType(readOnly: boolean) {
   return readOnly ? 'success' : 'danger'
+}
+
+function credentialVerifiedTagType(verified: boolean) {
+  return verified ? 'success' : 'warning'
 }
 
 async function validateForm(formRef: FormInstance | undefined) {
@@ -971,6 +1058,13 @@ onMounted(async () => {
                   {{ providerLabel(row.provider) }}
                 </template>
               </el-table-column>
+              <el-table-column label="外部系统" width="120">
+                <template #default="{ row }">
+                  <el-tag :type="row.externalSystemType === 1 ? 'warning' : 'info'">
+                    {{ externalSystemLabel(row.externalSystemType) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
               <el-table-column label="启用状态" width="100">
                 <template #default="{ row }">
                   <el-tag :type="enabledTagType(row.isEnabled)">
@@ -982,6 +1076,13 @@ onMounted(async () => {
                 <template #default="{ row }">
                   <el-tag :type="readonlyTagType(row.isReadOnly)">
                     {{ row.isReadOnly ? '只读' : '可写' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="只读账号" width="110">
+                <template #default="{ row }">
+                  <el-tag :type="credentialVerifiedTagType(row.readOnlyCredentialVerified)">
+                    {{ row.readOnlyCredentialVerified ? '已验证' : '未验证' }}
                   </el-tag>
                 </template>
               </el-table-column>
@@ -1064,6 +1165,25 @@ onMounted(async () => {
                 <template #default="{ row }">
                   <el-tag :type="chatExposureTagType(row.chatExposureMode)">
                     {{ chatExposureLabel(row.chatExposureMode) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="边界" width="120">
+                <template #default="{ row }">
+                  <el-tag :type="row.externalSystemType === 2 ? 'warning' : 'info'">
+                    {{ mcpExternalSystemLabel(row.externalSystemType) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="能力" width="110">
+                <template #default="{ row }">
+                  {{ mcpCapabilityLabel(row.capabilityKind) }}
+                </template>
+              </el-table-column>
+              <el-table-column label="风险" width="100">
+                <template #default="{ row }">
+                  <el-tag :type="mcpRiskTagType(row.riskLevel)">
+                    {{ mcpRiskLabel(row.riskLevel) }}
                   </el-tag>
                 </template>
               </el-table-column>
@@ -1571,6 +1691,25 @@ onMounted(async () => {
             <el-switch v-model="configStore.currentBusinessDatabase.isEnabled" />
           </el-form-item>
         </div>
+        <div class="inline-fields">
+          <el-form-item label="外部系统类型" prop="externalSystemType">
+            <el-select
+              v-model="configStore.currentBusinessDatabase.externalSystemType"
+              style="width: 100%"
+            >
+              <el-option
+                v-for="item in dataSourceExternalSystemOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="只读账号已验证" prop="readOnlyCredentialVerified">
+            <el-switch v-model="configStore.currentBusinessDatabase.readOnlyCredentialVerified" />
+            <div class="field-tip">这不是权限替代项，必须使用数据库侧只读账号。</div>
+          </el-form-item>
+        </div>
         <el-form-item label="连接字符串" prop="connectionString">
           <el-input
             v-model="configStore.currentBusinessDatabase.connectionString"
@@ -1694,6 +1833,41 @@ onMounted(async () => {
             <el-tag type="warning">重启生效</el-tag>
             <div class="field-tip">禁用、暴露模式和 allowlist 都不会热卸载已启动工具。</div>
           </el-form-item>
+        </div>
+        <div class="inline-fields">
+          <el-form-item label="外部系统边界">
+            <el-select v-model="configStore.currentMcpServer.externalSystemType" style="width: 100%">
+              <el-option
+                v-for="item in mcpExternalSystemOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="工具能力">
+            <el-select v-model="configStore.currentMcpServer.capabilityKind" style="width: 100%">
+              <el-option
+                v-for="item in mcpCapabilityOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="风险等级">
+            <el-select v-model="configStore.currentMcpServer.riskLevel" style="width: 100%">
+              <el-option
+                v-for="item in mcpRiskOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+        </div>
+        <div class="field-tip">
+          Cloud 相关 MCP 只能暴露只读查询语义；审批不会把 Cloud 写工具变成可用能力。
         </div>
         <el-form-item label="允许工具">
           <div class="tool-editor">

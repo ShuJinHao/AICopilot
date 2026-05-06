@@ -1,5 +1,6 @@
 using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
 using AICopilot.Core.AiGateway.Specifications.ApprovalPolicy;
+using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Repository;
 
 namespace AICopilot.AiGatewayService.Approvals;
@@ -70,6 +71,55 @@ public class ApprovalRequirementResolver(IReadRepository<ApprovalPolicy> reposit
         }
 
         return requirement ?? ApprovalRequirement.None;
+    }
+
+    public async Task<ApprovalRequirement> GetMergedRequirementByIdentityAsync(
+        AiToolIdentity? identity,
+        CancellationToken cancellationToken = default)
+    {
+        if (identity is null || string.IsNullOrWhiteSpace(identity.ToolName) || string.IsNullOrWhiteSpace(identity.TargetName))
+        {
+            return ApprovalRequirement.None;
+        }
+
+        var targetType = identity.TargetType switch
+        {
+            AiToolTargetType.McpServer => ApprovalTargetType.McpServer,
+            _ => ApprovalTargetType.Plugin
+        };
+
+        var policies = await repository.ListAsync(
+            new EnabledApprovalPoliciesByTargetTypeSpec(targetType),
+            cancellationToken);
+
+        ApprovalRequirement? requirement = null;
+        foreach (var policy in policies.Where(policy => PolicyTargetMatches(policy, identity)))
+        {
+            if (!policy.ToolNames.Contains(identity.ToolName, StringComparer.OrdinalIgnoreCase)
+                && !policy.ToolNames.Contains(identity.RuntimeName, StringComparer.OrdinalIgnoreCase)
+                && !policy.ToolNames.Any(toolName =>
+                    string.Equals(
+                        AiToolIdentity.CreateRuntimeName(identity.TargetType, policy.TargetName, toolName),
+                        identity.RuntimeName,
+                        StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            requirement = Merge(requirement, policy);
+        }
+
+        return requirement ?? ApprovalRequirement.None;
+    }
+
+    private static bool PolicyTargetMatches(ApprovalPolicy policy, AiToolIdentity identity)
+    {
+        return string.Equals(policy.TargetName, identity.TargetName, StringComparison.OrdinalIgnoreCase)
+               || policy.ToolNames.Any(toolName =>
+                   string.Equals(
+                       AiToolIdentity.CreateRuntimeName(identity.TargetType, policy.TargetName, toolName),
+                       identity.RuntimeName,
+                       StringComparison.OrdinalIgnoreCase));
     }
 
     private static ApprovalRequirement Merge(ApprovalRequirement? current, ApprovalPolicy policy)

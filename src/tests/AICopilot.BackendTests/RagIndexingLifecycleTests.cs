@@ -1,8 +1,10 @@
 using System.Linq.Expressions;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.Core.Rag.Ids;
+using AICopilot.RagService.Commands.Documents;
 using AICopilot.RagService.Documents;
 using AICopilot.SharedKernel.Repository;
+using AICopilot.SharedKernel.Result;
 using AICopilot.SharedKernel.Specification;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -11,6 +13,31 @@ namespace AICopilot.BackendTests;
 
 public sealed class RagIndexingLifecycleTests
 {
+    [Fact]
+    public async Task UploadDocument_ShouldRejectUnsupportedExtensionBeforeSaving()
+    {
+        var knowledgeBase = new KnowledgeBase("kb", "description", EmbeddingModelId.New());
+        var repository = new MutableKnowledgeBaseRepository(knowledgeBase);
+        var fileStorage = new CapturingFileStorage();
+        var eventPublisher = new CapturingEventPublisher();
+        var handler = new UploadDocumentCommandHandler(
+            repository,
+            fileStorage,
+            new FixedDocumentFormatPolicy([".txt", ".md", ".pdf"]),
+            eventPublisher);
+
+        var result = await handler.Handle(
+            new UploadDocumentCommand(
+                knowledgeBase.Id.Value,
+                new FileUploadStream("unsupported.exe", new MemoryStream([1, 2, 3]))),
+            CancellationToken.None);
+
+        result.Status.Should().Be(ResultStatus.Invalid);
+        knowledgeBase.Documents.Should().BeEmpty();
+        fileStorage.SaveCount.Should().Be(0);
+        eventPublisher.PublishedCount.Should().Be(0);
+    }
+
     [Fact]
     public async Task ParsingDocument_ShouldRecoverAndFinishIndexing()
     {
@@ -200,6 +227,49 @@ public sealed class RagIndexingLifecycleTests
 
             var behavior = behaviors.Count > 1 ? behaviors.Dequeue() : behaviors.Peek();
             return behavior(request, chunks, cancellationToken);
+        }
+    }
+
+    private sealed class FixedDocumentFormatPolicy(IReadOnlyCollection<string> supportedExtensions) : IDocumentFormatPolicy
+    {
+        public IReadOnlyCollection<string> SupportedExtensions { get; } = supportedExtensions;
+
+        public bool IsSupported(string extension)
+        {
+            return SupportedExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private sealed class CapturingFileStorage : IFileStorageService
+    {
+        public int SaveCount { get; private set; }
+
+        public Task<string> SaveAsync(Stream stream, string fileName, CancellationToken cancellationToken = default)
+        {
+            SaveCount++;
+            return Task.FromResult(fileName);
+        }
+
+        public Task<Stream?> GetAsync(string path, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<Stream?>(null);
+        }
+
+        public Task DeleteAsync(string path, CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class CapturingEventPublisher : IIntegrationEventPublisher
+    {
+        public int PublishedCount { get; private set; }
+
+        public Task PublishAsync<TEvent>(TEvent message, CancellationToken cancellationToken = default)
+            where TEvent : class
+        {
+            PublishedCount++;
+            return Task.CompletedTask;
         }
     }
 

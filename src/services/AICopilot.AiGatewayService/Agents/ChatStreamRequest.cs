@@ -8,6 +8,7 @@ using AICopilot.AiGatewayService.Workflows;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.Services.Contracts;
+using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
 using MediatR;
@@ -22,7 +23,10 @@ public record ApprovalDecisionStreamRequest(
     Guid SessionId,
     string CallId,
     string Decision,
-    bool OnsiteConfirmed) : IStreamRequest<ChatChunk>;
+    bool OnsiteConfirmed,
+    string? TargetType = null,
+    string? TargetName = null,
+    string? ToolName = null) : IStreamRequest<ChatChunk>;
 
 public class ChatStreamHandler(
     IReadRepository<Session> sessionRepository,
@@ -335,8 +339,20 @@ public class ApprovalDecisionStreamHandler(
             yield break;
         }
 
-        var toolName = storedApproval.ToolName ?? storedApproval.CallId;
-        var requirement = await approvalRequirementResolver.GetMergedRequirementByToolNameAsync(toolName, ct);
+        if (!ApprovalIdentityMatches(request, storedApproval))
+        {
+            yield return ChatStreamRuntime.CreateErrorChunk(
+                assistantText,
+                AppProblemCodes.ApprovalAlreadyProcessed,
+                "审批请求的工具身份与待审批上下文不一致。",
+                nameof(ApprovalDecisionStreamHandler),
+                "审批请求已失效，请重新发起新的诊断请求。");
+            yield break;
+        }
+
+        var identity = BuildStoredIdentity(storedApproval);
+        var toolName = identity?.ToolName ?? storedApproval.ToolName ?? storedApproval.CallId;
+        var requirement = await approvalRequirementResolver.GetMergedRequirementByIdentityAsync(identity, ct);
         var nowUtc = DateTimeOffset.UtcNow;
 
         if (isApproved && requirement.RequiresOnsiteAttestation)
@@ -377,7 +393,7 @@ public class ApprovalDecisionStreamHandler(
 
         pendingMessages.Add(new SessionMessageAppend(
             ChatStreamRuntime.BuildApprovalSummary(
-                toolName,
+                identity is null ? toolName : $"{identity.TargetName}/{identity.ToolName}",
                 isApproved,
                 request.OnsiteConfirmed,
                 requirement.RequiresOnsiteAttestation),
@@ -394,5 +410,39 @@ public class ApprovalDecisionStreamHandler(
         {
             yield return chatChunk;
         }
+    }
+
+    private static bool ApprovalIdentityMatches(
+        ApprovalDecisionStreamRequest request,
+        StoredToolApprovalRequest storedApproval)
+    {
+        if (string.IsNullOrWhiteSpace(request.TargetType)
+            && string.IsNullOrWhiteSpace(request.TargetName)
+            && string.IsNullOrWhiteSpace(request.ToolName))
+        {
+            return true;
+        }
+
+        return string.Equals(request.TargetType, storedApproval.TargetType, StringComparison.OrdinalIgnoreCase)
+               && string.Equals(request.TargetName, storedApproval.TargetName, StringComparison.OrdinalIgnoreCase)
+               && string.Equals(request.ToolName, storedApproval.ToolName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static AiToolIdentity? BuildStoredIdentity(StoredToolApprovalRequest storedApproval)
+    {
+        if (!Enum.TryParse<AiToolTargetType>(storedApproval.TargetType, ignoreCase: true, out var targetType)
+            || string.IsNullOrWhiteSpace(storedApproval.TargetName)
+            || string.IsNullOrWhiteSpace(storedApproval.ToolName))
+        {
+            return null;
+        }
+
+        var kind = Enum.TryParse<AiToolCallKind>(storedApproval.ToolKind, ignoreCase: true, out var parsedKind)
+            ? parsedKind
+            : targetType == AiToolTargetType.McpServer
+                ? AiToolCallKind.Mcp
+                : AiToolCallKind.Function;
+
+        return new AiToolIdentity(kind, targetType, storedApproval.TargetName, storedApproval.ToolName);
     }
 }
