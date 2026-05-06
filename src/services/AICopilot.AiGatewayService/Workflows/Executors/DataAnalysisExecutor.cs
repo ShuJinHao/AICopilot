@@ -203,15 +203,12 @@ public class DataAnalysisExecutor(
                     queryResult.IsTruncated);
 
                 var sourceLabel = BuildBusinessSourceLabel(targetLabel, businessDatabase.ExternalSystemType);
-                var combinedOutput = new
-                {
-                    analysis = BuildSemanticAnalysis(plan, sourceLabel, semanticSummary, queryResult.IsTruncated),
-                    visual_decision = (VisualDecisionDto?)null,
-                    semantic_summary = semanticSummary,
-                    data = normalizedRows
-                };
-
-                return combinedOutput.ToJson();
+                var analysis = BuildSemanticAnalysis(plan, sourceLabel, semanticSummary, queryResult.IsTruncated);
+                return DataAnalysisFinalContextFormatter.FormatSemantic(
+                    analysis,
+                    semanticSummary,
+                    normalizedRows,
+                    queryResult.IsTruncated);
             }
             catch (InvalidOperationException ex)
             {
@@ -307,14 +304,11 @@ public class DataAnalysisExecutor(
                 }
             }
 
-            var combinedOutput = new
-            {
-                analysis = output.Analysis,
-                visual_decision = output.Decision,
-                data = rawData ?? []
-            };
-
-            return combinedOutput.ToJson();
+            return DataAnalysisFinalContextFormatter.FormatFreeForm(
+                output.Analysis,
+                output.Decision,
+                rawData,
+                schema);
         }
         catch (InvalidOperationException ex)
         {
