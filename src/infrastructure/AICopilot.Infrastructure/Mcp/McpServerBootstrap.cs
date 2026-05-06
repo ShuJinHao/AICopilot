@@ -1,8 +1,7 @@
 ﻿using AICopilot.AgentPlugin;
-using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
-using AICopilot.Core.AiGateway.Specifications.ApprovalPolicy;
 using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
 using AICopilot.Core.McpServer.Specifications.McpServerInfo;
+using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Ai;
 using Microsoft.Extensions.AI;
@@ -15,8 +14,8 @@ namespace AICopilot.Infrastructure.Mcp;
 
 public class McpServerBootstrap(
     IReadRepository<McpServerInfo> mcpServerRepository,
-    IReadRepository<ApprovalPolicy> approvalPolicyRepository,
-    AgentPluginLoader agentPluginLoader,
+    IApprovalRequirementReadService approvalRequirementReadService,
+    IAgentPluginRegistry agentPluginRegistry,
     ILogger<McpServerBootstrap> logger)
     : IMcpServerBootstrap
 {
@@ -25,7 +24,9 @@ public class McpServerBootstrap(
     public async IAsyncEnumerable<McpClient> StartAsync([EnumeratorCancellation] CancellationToken ct)
     {
         var mcpServerInfos = await mcpServerRepository.ListAsync(new EnabledMcpServerInfosSpec(), ct);
-        var approvalPolicies = await LoadApprovalPoliciesAsync(mcpServerInfos.Select(server => server.Name).ToArray());
+        var approvalPolicies = await LoadApprovalPoliciesAsync(
+            mcpServerInfos.Select(server => server.Name).ToArray(),
+            ct);
 
         foreach (var mcpServerInfo in mcpServerInfos)
         {
@@ -90,31 +91,31 @@ public class McpServerBootstrap(
         }
     }
 
-    private async Task<Dictionary<string, HashSet<string>>> LoadApprovalPoliciesAsync(string[] serverNames)
+    private async Task<Dictionary<string, HashSet<string>>> LoadApprovalPoliciesAsync(
+        string[] serverNames,
+        CancellationToken cancellationToken)
     {
         if (serverNames.Length == 0)
         {
             return [];
         }
 
-        var serverNameSet = new HashSet<string>(serverNames, StringComparer.OrdinalIgnoreCase);
-        var policies = await approvalPolicyRepository.ListAsync(
-            new EnabledApprovalPoliciesByTargetTypeSpec(ApprovalTargetType.McpServer));
+        var requirements = await approvalRequirementReadService.GetToolRequirementsAsync(
+            AiToolTargetType.McpServer,
+            serverNames,
+            cancellationToken);
 
         var result = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var policy in policies.Where(policy => serverNameSet.Contains(policy.TargetName)))
+        foreach (var requirement in requirements.Where(requirement => requirement.RequiresApproval))
         {
-            if (!result.TryGetValue(policy.TargetName, out var names))
+            if (!result.TryGetValue(requirement.TargetName, out var names))
             {
                 names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                result[policy.TargetName] = names;
+                result[requirement.TargetName] = names;
             }
 
-            foreach (var toolName in policy.ToolNames)
-            {
-                names.Add(toolName);
-            }
+            names.Add(requirement.ToolName);
         }
 
         return result;
@@ -144,7 +145,7 @@ public class McpServerBootstrap(
             ChatExposureMode = mcpServerInfo.ChatExposureMode
         };
 
-        agentPluginLoader.RegisterAgentPlugin(mcpPlugin);
+        agentPluginRegistry.RegisterAgentPlugin(mcpPlugin);
     }
 
     private static AiToolDefinition ToToolDefinition(

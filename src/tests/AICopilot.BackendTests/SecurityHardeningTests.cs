@@ -108,7 +108,7 @@ public sealed class SecurityHardeningTests
             "services",
             "AICopilot.AiGatewayService",
             "Agents",
-            "ChatStreamRequest.cs"));
+            "ChatStreamHandler.cs"));
         chatStreamSource.Should().Contain("currentUser.Id != session.UserId");
         chatStreamSource.Should().Contain("sessionExecutionLock.AcquireAsync(request.SessionId");
         chatStreamSource.Should().Contain("finalAgentContextStore.GetAsync(request.SessionId");
@@ -737,7 +737,7 @@ public sealed class SecurityHardeningTests
             "src/services/AICopilot.AiGatewayService/Workflows/Executors/DataAnalysisExecutor.cs",
             "src/services/AICopilot.AiGatewayService/Workflows/Executors/FinalAgentRunExecutor.cs",
             "src/services/AICopilot.DataAnalysisService/BusinessDatabases/BusinessDatabaseManagement.cs",
-            "src/services/AICopilot.DataAnalysisService/Plugins/DataAnalysisPlugin.cs"
+            "src/services/AICopilot.DataAnalysisService/Plugins/DataAnalysisSqlQueryRunner.cs"
         };
 
         var locations = Directory
@@ -1041,6 +1041,48 @@ public sealed class SecurityHardeningTests
             "Host=localhost;Database=test",
             (DbProviderType)999);
         invalidProvider.Should().Throw<ArgumentOutOfRangeException>();
+
+        var enabledCloudWithoutVerifiedCredential = () => new BusinessDatabase(
+            "cloud-readonly",
+            "cloud readonly source",
+            "Host=localhost;Database=test",
+            DbProviderType.PostgreSql,
+            isReadOnly: true,
+            BusinessDataExternalSystemType.CloudReadOnly,
+            readOnlyCredentialVerified: false,
+            isEnabled: true);
+        enabledCloudWithoutVerifiedCredential.Should().Throw<InvalidOperationException>()
+            .WithMessage("*verified read-only credential*");
+
+        var disabledCloudDraft = new BusinessDatabase(
+            "cloud-readonly-draft",
+            "cloud readonly draft source",
+            "Host=localhost;Database=test",
+            DbProviderType.PostgreSql,
+            isReadOnly: true,
+            BusinessDataExternalSystemType.CloudReadOnly,
+            readOnlyCredentialVerified: false,
+            isEnabled: false);
+        disabledCloudDraft.IsEnabled.Should().BeFalse();
+        disabledCloudDraft.ReadOnlyCredentialVerified.Should().BeFalse();
+        disabledCloudDraft.ExternalSystemType.Should().Be(BusinessDataExternalSystemType.CloudReadOnly);
+
+        var cloudDatabase = new BusinessDatabase(
+            "cloud-readonly",
+            "cloud readonly source",
+            "Host=localhost;Database=test",
+            DbProviderType.PostgreSql,
+            isReadOnly: true,
+            BusinessDataExternalSystemType.CloudReadOnly,
+            readOnlyCredentialVerified: true);
+
+        var enablingCloudWithoutVerifiedCredential = () => cloudDatabase.UpdateSettings(
+            isEnabled: true,
+            isReadOnly: true,
+            BusinessDataExternalSystemType.CloudReadOnly,
+            readOnlyCredentialVerified: false);
+        enablingCloudWithoutVerifiedCredential.Should().Throw<InvalidOperationException>()
+            .WithMessage("*verified read-only credential*");
 
         typeof(BusinessDatabase).GetProperty(nameof(BusinessDatabase.Id))!
             .SetMethod!.IsPrivate.Should().BeTrue();

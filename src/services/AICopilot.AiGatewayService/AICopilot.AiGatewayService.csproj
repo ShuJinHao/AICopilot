@@ -8,12 +8,12 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.6" />
-    <PackageReference Include="SharpToken" Version="2.0.6" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\core\AICopilot.Core.AiGateway\AICopilot.Core.AiGateway.csproj" />
     <ProjectReference Include="..\..\shared\AICopilot.AgentPlugin\AICopilot.AgentPlugin.csproj" />
+    <ProjectReference Include="..\..\shared\AICopilot.AgentPlugin.Runtime\AICopilot.AgentPlugin.Runtime.csproj" />
     <ProjectReference Include="..\AICopilot.Services.Contracts\AICopilot.Services.Contracts.csproj" />
     <ProjectReference Include="..\AICopilot.Services.CrossCutting\AICopilot.Services.CrossCutting.csproj" />
   </ItemGroup>

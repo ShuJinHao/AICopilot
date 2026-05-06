@@ -12,6 +12,7 @@ using AICopilot.EntityFrameworkCore;
 using AICopilot.EntityFrameworkCore.Repository;
 using AICopilot.Infrastructure.Mcp;
 using AICopilot.McpService;
+using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
@@ -295,7 +296,7 @@ public sealed class Phase25RuntimeSmokeTests
                 name = "cfg-db-keep-connection-updated",
                 description = "updated db without replacing connection",
                 connectionString = "",
-                provider = 2,
+                provider = 1,
                 isEnabled = true,
                 isReadOnly = true
             });
@@ -512,6 +513,7 @@ public sealed class Phase25RuntimeSmokeTests
             item.CallId == callId &&
             item.Name == GetDiagnosticChecklistToolName() &&
             item.RequiresOnsiteAttestation);
+        var pendingApproval = pendingApprovals.Single(item => item.CallId == callId);
 
         var blockedByPendingApprovalEvents = await PostChatAsync(new
         {
@@ -535,7 +537,10 @@ public sealed class Phase25RuntimeSmokeTests
             callIds = new[] { callId },
             callId,
             decision = "approved",
-            onsiteConfirmed = true
+            onsiteConfirmed = true,
+            targetType = pendingApproval.TargetType,
+            targetName = pendingApproval.TargetName,
+            toolName = pendingApproval.ToolName
         });
 
         string.Concat(resumedEvents.Where(item => item.Type == "Text").Select(item => item.Content))
@@ -570,6 +575,9 @@ public sealed class Phase25RuntimeSmokeTests
         var rejectCallId = rejectApprovalPayload.RootElement.GetProperty("callId").GetString();
 
         rejectCallId.Should().NotBeNullOrWhiteSpace();
+        var rejectPendingApprovals = await GetJsonAsync<List<PendingApprovalDto>>(
+            $"/api/aigateway/approval/pending?sessionId={sessionId}");
+        var rejectPendingApproval = rejectPendingApprovals.Single(item => item.CallId == rejectCallId);
 
         var rejectedEvents = await PostApprovalDecisionAsync(new
         {
@@ -578,7 +586,10 @@ public sealed class Phase25RuntimeSmokeTests
             callIds = new[] { rejectCallId },
             callId = rejectCallId,
             decision = "rejected",
-            onsiteConfirmed = false
+            onsiteConfirmed = false,
+            targetType = rejectPendingApproval.TargetType,
+            targetName = rejectPendingApproval.TargetName,
+            toolName = rejectPendingApproval.ToolName
         });
 
         rejectedEvents.Should().Contain(item => item.Type == "Text");
@@ -809,6 +820,9 @@ public sealed class Phase25RuntimeSmokeTests
             var callId = approvalPayload.RootElement.GetProperty("callId").GetString();
 
             callId.Should().NotBeNullOrWhiteSpace();
+            var pendingApprovals = await GetJsonAsync<List<PendingApprovalDto>>(
+                $"/api/aigateway/approval/pending?sessionId={sessionId}");
+            var pendingApproval = pendingApprovals.Single(item => item.CallId == callId);
 
             await SendJsonAsync(HttpMethod.Put, "/api/aigateway/session/safety-attestation", new
             {
@@ -824,7 +838,10 @@ public sealed class Phase25RuntimeSmokeTests
                 callIds = new[] { callId },
                 callId,
                 decision = "approved",
-                onsiteConfirmed = true
+                onsiteConfirmed = true,
+                targetType = pendingApproval.TargetType,
+                targetName = pendingApproval.TargetName,
+                toolName = pendingApproval.ToolName
             };
 
             var decisionTasks = new[]
@@ -920,7 +937,7 @@ public sealed class Phase25RuntimeSmokeTests
     }
 
     [Fact]
-    public async Task SemanticChat_ShouldRejectWritableBusinessDatabase()
+    public async Task CreateBusinessDatabase_ShouldRejectWritableBusinessDatabase()
     {
         await AuthenticateAsAdminAsync();
 
@@ -935,12 +952,21 @@ public sealed class Phase25RuntimeSmokeTests
         {
             await DeleteBusinessDatabaseIfExistsAsync(ConfiguredSemanticPhysicalMappingProvider.DefaultDatabaseName);
 
-            businessDatabaseId = await CreateBusinessDatabaseAsync(
-                ConfiguredSemanticPhysicalMappingProvider.DefaultDatabaseName,
-                connectionString: semanticDatabase.ConnectionString,
-                description: "semantic writable device/log database",
-                isReadOnly: false);
+            var exception = await Record.ExceptionAsync(async () =>
+            {
+                businessDatabaseId = await CreateBusinessDatabaseAsync(
+                    ConfiguredSemanticPhysicalMappingProvider.DefaultDatabaseName,
+                    connectionString: semanticDatabase.ConnectionString,
+                    description: "semantic writable device/log database",
+                    isReadOnly: false,
+                    readOnlyCredentialVerified: true);
+            });
 
+            exception.Should().NotBeNull();
+            exception!.Message.Should().Contain("业务库必须配置为只读");
+
+            if (exception is null)
+            {
             languageModelId = await CreateLanguageModelAsync(
                 $"semantic-readonly-lm-{Guid.NewGuid():N}",
                 BuildFakeAiBaseUrl(),
@@ -972,6 +998,7 @@ public sealed class Phase25RuntimeSmokeTests
             var text = string.Concat(events.Where(item => item.Type == "Text").Select(item => item.Content));
             text.Should().Contain("只读模式");
         }
+            }
         finally
         {
             if (sessionId != Guid.Empty)
@@ -1580,7 +1607,8 @@ public sealed class Phase25RuntimeSmokeTests
         string description = "readonly db",
         int provider = 1,
         bool isEnabled = true,
-        bool isReadOnly = true)
+        bool isReadOnly = true,
+        bool readOnlyCredentialVerified = false)
     {
         var created = await PostJsonAsync<CreatedBusinessDatabaseDto>("/api/data-analysis/business-database", new
         {
@@ -1589,7 +1617,8 @@ public sealed class Phase25RuntimeSmokeTests
             connectionString = connectionString ?? "Host=localhost;Database=test;Username=test;Password=test;",
             provider,
             isEnabled,
-            isReadOnly
+            isReadOnly,
+            readOnlyCredentialVerified
         });
 
         return created.Id;
@@ -1930,6 +1959,7 @@ public sealed class Phase25RuntimeSmokeTests
         builder.AddEfCore();
         builder.Services.AddLogging();
         builder.Services.AddSingleton<AgentPluginLoader>();
+        builder.Services.AddSingleton<IApprovalRequirementReadService>(new TestApprovalRequirementReadService());
         builder.Services.AddScoped<IMcpServerBootstrap, TestMcpServerBootstrap>();
 
         return builder.Build();
@@ -2111,6 +2141,10 @@ public sealed class Phase25RuntimeSmokeTests
     private sealed record PendingApprovalDto(
         string CallId,
         string Name,
+        string? RuntimeName,
+        string? TargetType,
+        string? TargetName,
+        string? ToolName,
         IReadOnlyDictionary<string, object?> Args,
         bool RequiresOnsiteAttestation,
         DateTimeOffset? AttestationExpiresAt);

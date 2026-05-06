@@ -1,6 +1,5 @@
 using AICopilot.AgentPlugin;
 using AICopilot.AiGatewayService.Plugins;
-using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
 using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
 using AICopilot.Infrastructure.Mcp;
 using AICopilot.SharedKernel.Ai;
@@ -74,7 +73,7 @@ public sealed class McpServerBootstrapExposureTests
             true);
 
         var serverRepository = new InMemoryReadRepository<McpServerInfo>([exposedServer, controlServer, closedServer]);
-        var approvalPolicyRepository = new InMemoryReadRepository<ApprovalPolicy>();
+        var approvalRequirementReadService = new TestApprovalRequirementReadService();
 
         var services = new ServiceCollection();
         services.AddLogging();
@@ -84,7 +83,7 @@ public sealed class McpServerBootstrapExposureTests
         var loader = provider.GetRequiredService<AgentPluginLoader>();
         await using var bootstrap = new TestMcpServerBootstrap(
             serverRepository,
-            approvalPolicyRepository,
+            approvalRequirementReadService,
             loader,
             NullLogger<McpServerBootstrap>.Instance);
 

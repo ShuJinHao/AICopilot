@@ -64,7 +64,8 @@ public class CreateBusinessDatabaseCommandHandler(
             request.Provider,
             request.IsReadOnly,
             BusinessDatabaseContractMapper.ToDomainExternalSystemType(request.ExternalSystemType),
-            request.ReadOnlyCredentialVerified);
+            request.ReadOnlyCredentialVerified,
+            request.IsEnabled);
 
         entity.UpdateSettings(
             request.IsEnabled,

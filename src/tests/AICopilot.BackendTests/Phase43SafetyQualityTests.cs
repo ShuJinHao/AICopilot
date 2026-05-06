@@ -79,13 +79,19 @@ public sealed class Phase43SafetyQualityTests
 
             callId.Should().NotBeNullOrWhiteSpace();
             approvalPayload.RootElement.GetProperty("requiresOnsiteAttestation").GetBoolean().Should().BeTrue();
+            var pendingApprovals = await GetJsonAsync<List<PendingApprovalDto>>(
+                $"/api/aigateway/approval/pending?sessionId={sessionId}");
+            var pendingApproval = pendingApprovals.Single(item => item.CallId == callId);
 
             var missingOnsiteEvents = await PostApprovalDecisionAsync(new
             {
                 sessionId,
                 callId,
                 decision = "approved",
-                onsiteConfirmed = true
+                onsiteConfirmed = true,
+                targetType = pendingApproval.TargetType,
+                targetName = pendingApproval.TargetName,
+                toolName = pendingApproval.ToolName
             });
 
             ReadSingleError(missingOnsiteEvents).Code.Should().Be("onsite_presence_required");
@@ -108,7 +114,10 @@ public sealed class Phase43SafetyQualityTests
                 sessionId,
                 callId,
                 decision = "approved",
-                onsiteConfirmed = true
+                onsiteConfirmed = true,
+                targetType = pendingApproval.TargetType,
+                targetName = pendingApproval.TargetName,
+                toolName = pendingApproval.ToolName
             });
 
             ReadSingleError(expiredEvents).Code.Should().Be("onsite_presence_expired");
@@ -125,7 +134,10 @@ public sealed class Phase43SafetyQualityTests
                 sessionId,
                 callId,
                 decision = "approved",
-                onsiteConfirmed = false
+                onsiteConfirmed = false,
+                targetType = pendingApproval.TargetType,
+                targetName = pendingApproval.TargetName,
+                toolName = pendingApproval.ToolName
             });
 
             ReadSingleError(missingReconfirmationEvents).Code.Should().Be("approval_reconfirmation_required");
@@ -135,7 +147,10 @@ public sealed class Phase43SafetyQualityTests
                 sessionId,
                 callId,
                 decision = "approved",
-                onsiteConfirmed = true
+                onsiteConfirmed = true,
+                targetType = pendingApproval.TargetType,
+                targetName = pendingApproval.TargetName,
+                toolName = pendingApproval.ToolName
             });
 
             string.Concat(approvedEvents.Where(item => item.Type == "Text").Select(item => item.Content))
@@ -509,6 +524,17 @@ public sealed class Phase43SafetyQualityTests
         DateTimeOffset? OnsiteConfirmedAt,
         string? OnsiteConfirmedBy,
         DateTimeOffset? OnsiteConfirmationExpiresAt);
+
+    private sealed record PendingApprovalDto(
+        string CallId,
+        string Name,
+        string? RuntimeName,
+        string? TargetType,
+        string? TargetName,
+        string? ToolName,
+        IReadOnlyDictionary<string, object?> Args,
+        bool RequiresOnsiteAttestation,
+        DateTimeOffset? AttestationExpiresAt);
 
     private sealed record AuditLogListDto(
         IReadOnlyCollection<AuditLogSummaryDto> Items,

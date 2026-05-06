@@ -1,7 +1,7 @@
 using System.Linq.Expressions;
-using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
 using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
 using AICopilot.McpService.McpServers;
+using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Specification;
@@ -40,7 +40,7 @@ public sealed class McpServerManagementTests
 
         var queryHandler = new GetMcpServerQueryHandler(
             repository,
-            new InMemoryReadRepository<ApprovalPolicy>());
+            new TestApprovalRequirementReadService());
         var dto = await queryHandler.Handle(new GetMcpServerQuery(server.Id), CancellationToken.None);
 
         dto.IsSuccess.Should().BeTrue();
@@ -98,35 +98,23 @@ public sealed class McpServerManagementTests
             true);
 
         var serverRepository = new InMemoryReadRepository<McpServerInfo>([server]);
-        var approvalPolicyRepository = new InMemoryReadRepository<ApprovalPolicy>(
+        var approvalRequirementReadService = new TestApprovalRequirementReadService(
         [
-            new ApprovalPolicy(
-                "echo-approval",
-                "requires approval",
-                ApprovalTargetType.McpServer,
+            new ApprovalToolRequirementDto(
+                AiToolTargetType.McpServer,
                 "advisory-mcp",
-                ["Echo"],
-                isEnabled: true,
-                requiresOnsiteAttestation: true),
-            new ApprovalPolicy(
-                "other-target",
-                "ignored",
-                ApprovalTargetType.McpServer,
+                "Echo",
+                RequiresApproval: true,
+                RequiresOnsiteAttestation: true),
+            new ApprovalToolRequirementDto(
+                AiToolTargetType.McpServer,
                 "another-mcp",
-                ["Inspect"],
-                isEnabled: true,
-                requiresOnsiteAttestation: true),
-            new ApprovalPolicy(
-                "disabled-policy",
-                "ignored",
-                ApprovalTargetType.McpServer,
-                "advisory-mcp",
-                ["Inspect"],
-                isEnabled: false,
-                requiresOnsiteAttestation: true)
+                "Inspect",
+                RequiresApproval: true,
+                RequiresOnsiteAttestation: true)
         ]);
 
-        var handler = new GetMcpServerQueryHandler(serverRepository, approvalPolicyRepository);
+        var handler = new GetMcpServerQueryHandler(serverRepository, approvalRequirementReadService);
 
         var result = await handler.Handle(new GetMcpServerQuery(server.Id), CancellationToken.None);
 
@@ -167,19 +155,17 @@ public sealed class McpServerManagementTests
             true);
 
         var serverRepository = new InMemoryReadRepository<McpServerInfo>([betaServer, alphaServer]);
-        var approvalPolicyRepository = new InMemoryReadRepository<ApprovalPolicy>(
+        var approvalRequirementReadService = new TestApprovalRequirementReadService(
         [
-            new ApprovalPolicy(
-                "beta-approval",
-                "requires approval",
-                ApprovalTargetType.McpServer,
+            new ApprovalToolRequirementDto(
+                AiToolTargetType.McpServer,
                 "beta-mcp",
-                ["Inspect"],
-                isEnabled: true,
-                requiresOnsiteAttestation: false)
+                "Inspect",
+                RequiresApproval: true,
+                RequiresOnsiteAttestation: false)
         ]);
 
-        var handler = new GetListMcpServersQueryHandler(serverRepository, approvalPolicyRepository);
+        var handler = new GetListMcpServersQueryHandler(serverRepository, approvalRequirementReadService);
 
         var result = await handler.Handle(new GetListMcpServersQuery(), CancellationToken.None);
 

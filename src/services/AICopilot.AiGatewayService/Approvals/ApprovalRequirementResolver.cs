@@ -1,5 +1,6 @@
 using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
 using AICopilot.Core.AiGateway.Specifications.ApprovalPolicy;
+using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Repository;
 
@@ -127,5 +128,38 @@ public class ApprovalRequirementResolver(IReadRepository<ApprovalPolicy> reposit
         return new ApprovalRequirement(
             RequiresApproval: true,
             RequiresOnsiteAttestation: (current?.RequiresOnsiteAttestation ?? false) || policy.RequiresOnsiteAttestation);
+    }
+}
+
+public sealed class ApprovalRequirementReadService(ApprovalRequirementResolver resolver) : IApprovalRequirementReadService
+{
+    public async Task<IReadOnlyList<ApprovalToolRequirementDto>> GetToolRequirementsAsync(
+        AiToolTargetType targetType,
+        IReadOnlyCollection<string> targetNames,
+        CancellationToken cancellationToken = default)
+    {
+        if (targetNames.Count == 0)
+        {
+            return [];
+        }
+
+        var approvalTargetType = targetType switch
+        {
+            AiToolTargetType.McpServer => ApprovalTargetType.McpServer,
+            _ => ApprovalTargetType.Plugin
+        };
+        var requirements = await resolver.GetRequirementsForTargetsAsync(
+            approvalTargetType,
+            targetNames.ToArray(),
+            cancellationToken);
+
+        return requirements
+            .SelectMany(target => target.Value.Select(tool => new ApprovalToolRequirementDto(
+                targetType,
+                target.Key,
+                tool.Key,
+                tool.Value.RequiresApproval,
+                tool.Value.RequiresOnsiteAttestation)))
+            .ToArray();
     }
 }

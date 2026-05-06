@@ -1,8 +1,7 @@
 ﻿using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
-using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
-using AICopilot.Core.AiGateway.Specifications.ApprovalPolicy;
 using AICopilot.Core.McpServer.Ids;
 using AICopilot.Core.McpServer.Specifications.McpServerInfo;
+using AICopilot.Services.Contracts;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Messaging;
@@ -189,7 +188,7 @@ public record GetMcpServerQuery(Guid Id) : IQuery<Result<McpServerDto>>;
 
 public class GetMcpServerQueryHandler(
     IReadRepository<McpServerInfo> serverRepository,
-    IReadRepository<ApprovalPolicy> approvalPolicyRepository)
+    IApprovalRequirementReadService approvalRequirementReadService)
     : IQueryHandler<GetMcpServerQuery, Result<McpServerDto>>
 {
     public async Task<Result<McpServerDto>> Handle(GetMcpServerQuery request, CancellationToken cancellationToken)
@@ -206,7 +205,7 @@ public class GetMcpServerQueryHandler(
         return Result.Success(McpServerDtoMapper.Map(server, policies));
     }
 
-    private async Task<Dictionary<string, IReadOnlyCollection<ApprovalPolicy>>> LoadPoliciesAsync(
+    private async Task<Dictionary<string, IReadOnlyCollection<ApprovalToolRequirementDto>>> LoadPoliciesAsync(
         IReadOnlyCollection<string> serverNames,
         CancellationToken cancellationToken)
     {
@@ -215,17 +214,16 @@ public class GetMcpServerQueryHandler(
             return [];
         }
 
-        var serverNameSet = new HashSet<string>(serverNames, StringComparer.OrdinalIgnoreCase);
-        var policies = await approvalPolicyRepository.ListAsync(
-            new EnabledApprovalPoliciesByTargetTypeSpec(ApprovalTargetType.McpServer),
+        var requirements = await approvalRequirementReadService.GetToolRequirementsAsync(
+            AiToolTargetType.McpServer,
+            serverNames,
             cancellationToken);
 
-        return policies
-            .Where(policy => serverNameSet.Contains(policy.TargetName))
-            .GroupBy(policy => policy.TargetName, StringComparer.OrdinalIgnoreCase)
+        return requirements
+            .GroupBy(requirement => requirement.TargetName, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(
                 group => group.Key,
-                group => (IReadOnlyCollection<ApprovalPolicy>)group.ToArray(),
+                group => (IReadOnlyCollection<ApprovalToolRequirementDto>)group.ToArray(),
                 StringComparer.OrdinalIgnoreCase);
     }
 
@@ -236,7 +234,7 @@ public record GetListMcpServersQuery : IQuery<Result<IList<McpServerDto>>>;
 
 public class GetListMcpServersQueryHandler(
     IReadRepository<McpServerInfo> serverRepository,
-    IReadRepository<ApprovalPolicy> approvalPolicyRepository)
+    IApprovalRequirementReadService approvalRequirementReadService)
     : IQueryHandler<GetListMcpServersQuery, Result<IList<McpServerDto>>>
 {
     public async Task<Result<IList<McpServerDto>>> Handle(
@@ -246,17 +244,16 @@ public class GetListMcpServersQueryHandler(
         var servers = await serverRepository.ListAsync(new McpServerInfosOrderedSpec(), cancellationToken);
         var serverNames = servers.Select(server => server.Name).ToArray();
 
-        var serverNameSet = new HashSet<string>(serverNames, StringComparer.OrdinalIgnoreCase);
-        var policies = await approvalPolicyRepository.ListAsync(
-            new EnabledApprovalPoliciesByTargetTypeSpec(ApprovalTargetType.McpServer),
+        var requirements = await approvalRequirementReadService.GetToolRequirementsAsync(
+            AiToolTargetType.McpServer,
+            serverNames,
             cancellationToken);
 
-        var policiesByTargetName = policies
-            .Where(policy => serverNameSet.Contains(policy.TargetName))
-            .GroupBy(policy => policy.TargetName, StringComparer.OrdinalIgnoreCase)
+        var policiesByTargetName = requirements
+            .GroupBy(requirement => requirement.TargetName, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(
                 group => group.Key,
-                group => (IReadOnlyCollection<ApprovalPolicy>)group.ToArray(),
+                group => (IReadOnlyCollection<ApprovalToolRequirementDto>)group.ToArray(),
                 StringComparer.OrdinalIgnoreCase);
 
         IList<McpServerDto> result = servers
@@ -270,7 +267,7 @@ internal static class McpServerDtoMapper
 {
     public static McpServerDto Map(
         McpServerInfo server,
-        IReadOnlyDictionary<string, IReadOnlyCollection<ApprovalPolicy>> policiesByTargetName)
+        IReadOnlyDictionary<string, IReadOnlyCollection<ApprovalToolRequirementDto>> policiesByTargetName)
     {
         policiesByTargetName.TryGetValue(server.Name, out var policies);
 
@@ -295,7 +292,7 @@ internal static class McpServerDtoMapper
 
     private static IReadOnlyCollection<McpToolPolicySummaryDto> BuildToolPolicySummaries(
         IReadOnlyCollection<McpAllowedTool> allowedTools,
-        IReadOnlyCollection<ApprovalPolicy>? policies)
+        IReadOnlyCollection<ApprovalToolRequirementDto>? policies)
     {
         if (allowedTools.Count == 0)
         {
@@ -307,13 +304,13 @@ internal static class McpServerDtoMapper
             .Select(tool =>
             {
                 var matchedPolicies = effectivePolicies
-                    .Where(policy => policy.ToolNames.Contains(tool.ToolName, StringComparer.OrdinalIgnoreCase))
+                    .Where(policy => string.Equals(policy.ToolName, tool.ToolName, StringComparison.OrdinalIgnoreCase))
                     .ToArray();
 
                 return new McpToolPolicySummaryDto
                 {
                     ToolName = tool.ToolName,
-                    RequiresApproval = matchedPolicies.Length > 0,
+                    RequiresApproval = matchedPolicies.Any(policy => policy.RequiresApproval),
                     RequiresOnsiteAttestation = matchedPolicies.Any(policy => policy.RequiresOnsiteAttestation)
                 };
             })

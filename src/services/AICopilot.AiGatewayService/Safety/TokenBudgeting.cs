@@ -1,27 +1,11 @@
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
-using SharpToken;
 
 namespace AICopilot.AiGatewayService.Safety;
 
 public interface ITextTokenEstimator
 {
     int CountTokens(string? text);
-}
-
-public sealed class SharpTokenTextTokenEstimator : ITextTokenEstimator
-{
-    private readonly GptEncoding _encoding = GptEncoding.GetEncoding("cl100k_base");
-
-    public int CountTokens(string? text)
-    {
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return 0;
-        }
-
-        return _encoding.Encode(text).Count;
-    }
 }
 
 public sealed record TokenBudgetDecision(

@@ -41,6 +41,7 @@
     <ProjectReference Include="..\..\services\AICopilot.Services.Contracts\AICopilot.Services.Contracts.csproj" />
     <ProjectReference Include="..\..\services\AICopilot.Services.CrossCutting\AICopilot.Services.CrossCutting.csproj" />
     <ProjectReference Include="..\..\shared\AICopilot.AgentPlugin\AICopilot.AgentPlugin.csproj" />
+    <ProjectReference Include="..\..\shared\AICopilot.AgentPlugin.Runtime\AICopilot.AgentPlugin.Runtime.csproj" />
     <ProjectReference Include="..\AICopilot.Testing.McpServer\AICopilot.Testing.McpServer.csproj" />
   </ItemGroup>
 

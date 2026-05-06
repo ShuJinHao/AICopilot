@@ -5,7 +5,7 @@ using AICopilot.SharedKernel.Ai;
 namespace AICopilot.AiGatewayService.Approvals;
 
 public class ApprovalToolResolver(
-    AgentPluginLoader pluginLoader,
+    IAgentPluginCatalog pluginCatalog,
     ApprovalRequirementResolver approvalRequirementResolver)
 {
     public async Task<AiToolDefinition[]> GetToolsForPluginsAsync(
@@ -26,7 +26,7 @@ public class ApprovalToolResolver(
 
         foreach (var pluginName in pluginNames)
         {
-            var plugin = pluginLoader.GetPlugin(pluginName);
+            var plugin = pluginCatalog.GetPlugin(pluginName);
             if (plugin == null || !plugin.ChatExposureMode.CanExposeInChat())
             {
                 continue;
@@ -35,7 +35,7 @@ public class ApprovalToolResolver(
             var requirementMap = requirements.GetValueOrDefault(pluginName)
                                  ?? new Dictionary<string, ApprovalRequirement>(StringComparer.OrdinalIgnoreCase);
 
-            tools.AddRange(pluginLoader.GetPluginTools(pluginName).Select(tool => ApplyApprovalRequirement(tool, requirementMap)));
+            tools.AddRange(pluginCatalog.GetPluginTools(pluginName).Select(tool => ApplyApprovalRequirement(tool, requirementMap)));
         }
 
         return tools.ToArray();
@@ -58,7 +58,7 @@ public class ApprovalToolResolver(
             return [];
         }
 
-        var plugins = pluginLoader.GetAllPlugin()
+        var plugins = pluginCatalog.GetAllPlugin()
             .Where(plugin => plugin.ChatExposureMode.CanExposeInChat())
             .ToArray();
         var requirements = await approvalRequirementResolver.GetRequirementsForTargetsAsync(
@@ -72,7 +72,7 @@ public class ApprovalToolResolver(
             var requirementMap = requirements.GetValueOrDefault(plugin.Name)
                                  ?? new Dictionary<string, ApprovalRequirement>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var rawTool in pluginLoader.GetPluginTools(plugin.Name))
+            foreach (var rawTool in pluginCatalog.GetPluginTools(plugin.Name))
             {
                 if (!normalizedToolNames.Contains(rawTool.Name))
                 {
