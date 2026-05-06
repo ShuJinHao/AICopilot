@@ -219,6 +219,14 @@ export interface McpToolPolicySummary {
   requiresOnsiteAttestation: boolean
 }
 
+export interface McpAllowedTool {
+  toolName: string
+  externalSystemType?: number | null
+  capabilityKind?: number | null
+  riskLevel?: number | null
+  readOnlyDeclared: boolean
+}
+
 export interface McpServerSummary {
   id: string
   name: string
@@ -228,7 +236,7 @@ export interface McpServerSummary {
   hasArguments: boolean
   argumentsMasked?: string | null
   chatExposureMode: number
-  allowedToolNames: string[]
+  allowedTools: McpAllowedTool[]
   externalSystemType: number
   capabilityKind: number
   riskLevel: number
@@ -246,7 +254,7 @@ export interface McpServerFormModel {
   command: string
   arguments: string
   chatExposureMode: number
-  allowedToolNames: string[]
+  allowedTools: McpAllowedTool[]
   externalSystemType: number
   capabilityKind: number
   riskLevel: number

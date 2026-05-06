@@ -14,6 +14,7 @@ import type {
   BusinessDatabaseFormModel,
   ConversationTemplateFormModel,
   LanguageModelFormModel,
+  McpAllowedTool,
   McpServerFormModel,
   SemanticSourceStatus
 } from '@/types/app'
@@ -580,13 +581,20 @@ function addMcpTool() {
   }
 
   if (
-    !configStore.currentMcpServer.allowedToolNames.some(
-      (item) => item.toLowerCase() === nextToolName.toLowerCase()
+    !configStore.currentMcpServer.allowedTools.some(
+      (item) => item.toolName.toLowerCase() === nextToolName.toLowerCase()
     )
   ) {
-    configStore.currentMcpServer.allowedToolNames = [
-      ...configStore.currentMcpServer.allowedToolNames,
-      nextToolName
+    const nextTool: McpAllowedTool = {
+      toolName: nextToolName,
+      externalSystemType: null,
+      capabilityKind: null,
+      riskLevel: null,
+      readOnlyDeclared: configStore.currentMcpServer.externalSystemType === 2
+    }
+    configStore.currentMcpServer.allowedTools = [
+      ...configStore.currentMcpServer.allowedTools,
+      nextTool
     ]
   }
 
@@ -594,8 +602,8 @@ function addMcpTool() {
 }
 
 function removeMcpTool(toolName: string) {
-  configStore.currentMcpServer.allowedToolNames =
-    configStore.currentMcpServer.allowedToolNames.filter((item) => item !== toolName)
+  configStore.currentMcpServer.allowedTools =
+    configStore.currentMcpServer.allowedTools.filter((item) => item.toolName !== toolName)
 }
 
 async function saveLanguageModel() {
@@ -1203,9 +1211,9 @@ onMounted(async () => {
               </el-table-column>
               <el-table-column label="允许工具" min-width="220">
                 <template #default="{ row }">
-                  <div v-if="row.allowedToolNames.length > 0" class="chip-list">
-                    <el-tag v-for="toolName in row.allowedToolNames" :key="toolName" size="small">
-                      {{ toolName }}
+                  <div v-if="row.allowedTools.length > 0" class="chip-list">
+                    <el-tag v-for="tool in row.allowedTools" :key="tool.toolName" size="small">
+                      {{ tool.toolName }}{{ tool.readOnlyDeclared ? ' / 只读' : '' }}
                     </el-tag>
                   </div>
                   <span v-else class="field-tip">未开放</span>
@@ -1871,15 +1879,56 @@ onMounted(async () => {
         </div>
         <el-form-item label="允许工具">
           <div class="tool-editor">
-            <div class="chip-list">
-              <el-tag
-                v-for="toolName in configStore.currentMcpServer.allowedToolNames"
-                :key="toolName"
-                closable
-                @close="removeMcpTool(toolName)"
+            <div class="mcp-tool-list">
+              <div
+                v-for="tool in configStore.currentMcpServer.allowedTools"
+                :key="tool.toolName"
+                class="mcp-tool-row"
               >
-                {{ toolName }}
-              </el-tag>
+                <el-tag closable @close="removeMcpTool(tool.toolName)">
+                  {{ tool.toolName }}
+                </el-tag>
+                <el-checkbox v-model="tool.readOnlyDeclared">只读声明</el-checkbox>
+                <el-select
+                  v-model="tool.externalSystemType"
+                  clearable
+                  placeholder="继承外部系统"
+                  class="mcp-tool-select"
+                >
+                  <el-option
+                    v-for="item in mcpExternalSystemOptions"
+                    :key="item.value"
+                    :label="item.label"
+                    :value="item.value"
+                  />
+                </el-select>
+                <el-select
+                  v-model="tool.capabilityKind"
+                  clearable
+                  placeholder="继承能力"
+                  class="mcp-tool-select"
+                >
+                  <el-option
+                    v-for="item in mcpCapabilityOptions"
+                    :key="item.value"
+                    :label="item.label"
+                    :value="item.value"
+                  />
+                </el-select>
+                <el-select
+                  v-model="tool.riskLevel"
+                  clearable
+                  placeholder="继承风险"
+                  class="mcp-tool-select"
+                >
+                  <el-option
+                    v-for="item in mcpRiskOptions"
+                    :key="item.value"
+                    :label="item.label"
+                    :value="item.value"
+                  />
+                </el-select>
+              </div>
             </div>
             <div class="tool-input-row">
               <el-input
@@ -1889,7 +1938,7 @@ onMounted(async () => {
               />
               <el-button @click="addMcpTool">添加</el-button>
             </div>
-            <div class="field-tip">只有 allowlist 中的工具才会暴露给聊天链路。</div>
+            <div class="field-tip">CloudReadOnly 工具必须勾选只读声明；每个工具可覆盖服务默认风险元数据。</div>
           </div>
         </el-form-item>
       </el-form>
@@ -2008,6 +2057,22 @@ onMounted(async () => {
   gap: 10px;
 }
 
+.mcp-tool-list {
+  display: grid;
+  gap: 8px;
+}
+
+.mcp-tool-row {
+  display: grid;
+  grid-template-columns: auto auto minmax(120px, 1fr) minmax(120px, 1fr) minmax(120px, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.mcp-tool-select {
+  min-width: 120px;
+}
+
 .secret-mode-group {
   margin-bottom: 10px;
 }
@@ -2046,6 +2111,10 @@ onMounted(async () => {
 
   .inline-fields,
   .tool-input-row {
+    grid-template-columns: 1fr;
+  }
+
+  .mcp-tool-row {
     grid-template-columns: 1fr;
   }
 }

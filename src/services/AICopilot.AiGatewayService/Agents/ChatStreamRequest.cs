@@ -416,11 +416,18 @@ public class ApprovalDecisionStreamHandler(
         ApprovalDecisionStreamRequest request,
         StoredToolApprovalRequest storedApproval)
     {
-        if (string.IsNullOrWhiteSpace(request.TargetType)
-            && string.IsNullOrWhiteSpace(request.TargetName)
-            && string.IsNullOrWhiteSpace(request.ToolName))
+        if (string.IsNullOrWhiteSpace(storedApproval.TargetType)
+            || string.IsNullOrWhiteSpace(storedApproval.TargetName)
+            || string.IsNullOrWhiteSpace(storedApproval.ToolName))
         {
-            return true;
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(request.TargetType)
+            || string.IsNullOrWhiteSpace(request.TargetName)
+            || string.IsNullOrWhiteSpace(request.ToolName))
+        {
+            return false;
         }
 
         return string.Equals(request.TargetType, storedApproval.TargetType, StringComparison.OrdinalIgnoreCase)

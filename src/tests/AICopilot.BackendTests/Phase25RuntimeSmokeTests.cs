@@ -211,7 +211,7 @@ public sealed class Phase25RuntimeSmokeTests
             command = "dotnet",
             arguments = typeof(TestingMcpServerMarker).Assembly.Location,
             chatExposureMode = ChatExposureMode.Disabled,
-            allowedToolNames = Array.Empty<string>(),
+            allowedTools = Array.Empty<object>(),
             isEnabled = false
         });
 
@@ -1611,7 +1611,9 @@ public sealed class Phase25RuntimeSmokeTests
             command,
             arguments,
             chatExposureMode,
-            allowedToolNames = allowedToolNames ?? Array.Empty<string>(),
+            allowedTools = (allowedToolNames ?? Array.Empty<string>())
+                .Select(toolName => new { toolName, readOnlyDeclared = false })
+                .ToArray(),
             isEnabled
         });
 
@@ -2082,8 +2084,15 @@ public sealed class Phase25RuntimeSmokeTests
         bool HasArguments,
         string? ArgumentsMasked,
         ChatExposureMode ChatExposureMode,
-        IReadOnlyCollection<string> AllowedToolNames,
+        IReadOnlyCollection<McpAllowedToolDto> AllowedTools,
         bool IsEnabled);
+
+    private sealed record McpAllowedToolDto(
+        string ToolName,
+        int? ExternalSystemType,
+        int? CapabilityKind,
+        int? RiskLevel,
+        bool ReadOnlyDeclared);
 
     private sealed record CreatedSessionDto(
         Guid Id,

@@ -1176,13 +1176,13 @@ public sealed class SecurityHardeningTests
             " dotnet ",
             " server.dll ",
             ChatExposureMode.Advisory,
-            [" Echo ", "echo", " "]);
+            [new McpAllowedTool(" Echo "), new McpAllowedTool("echo"), new McpAllowedTool(" ")]);
 
         server.Name.Should().Be("server");
         server.Description.Should().Be("description");
         server.Command.Should().Be("dotnet");
         server.Arguments.Should().Be("server.dll");
-        server.AllowedToolNames.Should().Equal("Echo");
+        server.AllowedTools.Select(tool => tool.ToolName).Should().Equal("Echo");
     }
 
     [Fact]

@@ -248,6 +248,8 @@ public sealed class AiToolDefinition
 
     public AiToolRiskLevel RiskLevel { get; init; } = AiToolRiskLevel.Low;
 
+    public bool ReadOnlyDeclared { get; init; }
+
     public MethodInfo? Method { get; init; }
 
     public object? Target { get; init; }
@@ -284,7 +286,8 @@ public sealed class AiToolDefinition
         string toolName,
         AiToolExternalSystemType externalSystemType,
         AiToolCapabilityKind capabilityKind,
-        AiToolRiskLevel riskLevel)
+        AiToolRiskLevel riskLevel,
+        bool readOnlyDeclared = false)
     {
         var kind = targetType == AiToolTargetType.McpServer ? AiToolCallKind.Mcp : Kind;
         return Copy(
@@ -296,6 +299,7 @@ public sealed class AiToolDefinition
             externalSystemType: externalSystemType,
             capabilityKind: capabilityKind,
             riskLevel: riskLevel,
+            readOnlyDeclared: readOnlyDeclared,
             requiresApproval: RequiresApproval || riskLevel == AiToolRiskLevel.RequiresApproval);
     }
 
@@ -313,7 +317,8 @@ public sealed class AiToolDefinition
         string? targetName = null,
         AiToolExternalSystemType? externalSystemType = null,
         AiToolCapabilityKind? capabilityKind = null,
-        AiToolRiskLevel? riskLevel = null)
+        AiToolRiskLevel? riskLevel = null,
+        bool? readOnlyDeclared = null)
     {
         return new AiToolDefinition
         {
@@ -328,6 +333,7 @@ public sealed class AiToolDefinition
             ExternalSystemType = externalSystemType ?? ExternalSystemType,
             CapabilityKind = capabilityKind ?? CapabilityKind,
             RiskLevel = riskLevel ?? RiskLevel,
+            ReadOnlyDeclared = readOnlyDeclared ?? ReadOnlyDeclared,
             Method = Method,
             Target = Target,
             JsonSchema = JsonSchema,

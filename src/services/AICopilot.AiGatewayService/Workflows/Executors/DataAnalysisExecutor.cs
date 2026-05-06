@@ -43,8 +43,6 @@ public class DataAnalysisExecutor(
         SessionRuntimeSnapshot? session,
         CancellationToken ct = default)
     {
-        // 1. 筛选数据分析类意图
-        // 过滤规则：必须以 Analysis. 开头，且置信度高于 0.6
         var analysisIntents = intentResults
             .Where(i => i.Intent.StartsWith(AnalysisIntentPrefix, StringComparison.OrdinalIgnoreCase)
                         && i.Confidence > 0.6)
@@ -53,7 +51,6 @@ public class DataAnalysisExecutor(
         if (analysisIntents.Count == 0)
         {
             logger.LogDebug("未检测到数据分析意图，跳过执行。");
-            // 返回空结果，表示该分支无产出
             return BranchResult.FromDataAnalysis(string.Empty);
         }
 
@@ -71,7 +68,6 @@ public class DataAnalysisExecutor(
             semanticIntents.Count,
             databaseIntents.Count);
 
-        // 2. 遍历处理每一个意图
         var output = new StringBuilder();
         foreach (var intent in semanticIntents)
         {
@@ -206,9 +202,10 @@ public class DataAnalysisExecutor(
                     queryResult.ReturnedRowCount,
                     queryResult.IsTruncated);
 
+                var sourceLabel = BuildBusinessSourceLabel(targetLabel, businessDatabase.ExternalSystemType);
                 var combinedOutput = new
                 {
-                    analysis = BuildSemanticAnalysis(plan, businessDatabase.Name, semanticSummary, queryResult.IsTruncated),
+                    analysis = BuildSemanticAnalysis(plan, sourceLabel, semanticSummary, queryResult.IsTruncated),
                     visual_decision = (VisualDecisionDto?)null,
                     semantic_summary = semanticSummary,
                     data = normalizedRows
@@ -252,8 +249,6 @@ public class DataAnalysisExecutor(
 
         try
         {
-            // 1. 获取数据库配置
-            // 我们需要 BusinessDatabase 实体来决定方言策略
             var db = await businessDatabaseReadService.GetByNameAsync(dbName, ct);
 
             if (db == null || !db.IsEnabled)
@@ -268,14 +263,9 @@ public class DataAnalysisExecutor(
                 return $"[系统提示]: 数据库 {dbName} 未处于只读模式，系统已拒绝本次 AI 查询。";
             }
 
-            // 2. 构建 DBA Agent
-            // 这里会动态注入 PG 或 SQLServer 的方言提示词
             await using var scopedAgent = await agentBuilder.BuildAsync(db);
-            // 创建临时会话线程
             var thread = await scopedAgent.Agent.CreateSessionAsync(ct);
 
-            // 4. 执行 ReAct 循环
-            // Agent 会自动进行: 思考 -> GetTableNames -> 思考 -> GetTableSchema -> 思考 -> ExecuteSQL -> 总结
             await foreach (var update in scopedAgent.Agent.RunStreamingAsync(intent.Query!, thread, cancellationToken: ct))
             {
                 if (sink is null)
@@ -296,17 +286,11 @@ public class DataAnalysisExecutor(
                 }
             }
 
-            // 记录日志以便调试
             logger.LogInformation("数据库 {DbName} 查询完成。", dbName);
 
-            // 获取可视化上下文
             var (rawData, schema) = vizContext.GetLastResult();
             var output = vizContext.GetOutput();
 
-            // =========================================================
-            // 分流路径 1：旁路输出 (Side Path) -> 前端 Widget
-            // 目标：visual_decision + data -> Widget JSON
-            // =========================================================
             if (output is { Decision: not null } && vizContext.HasData)
             {
                 try
@@ -320,14 +304,8 @@ public class DataAnalysisExecutor(
                 catch (Exception ex)
                 {
                     logger.LogError(ex, "构建可视化 Widget 失败。Database: {DbName}", dbName);
-                    // 不中断流程，降级为文本输出
                 }
             }
-
-            // =========================================================
-            // 分流路径 2：主路输出 (Main Path) -> 聚合器 -> Final Agent
-            // 目标：schema + data -> Combined JSON
-            // =========================================================
 
             var combinedOutput = new
             {
@@ -410,13 +388,13 @@ public class DataAnalysisExecutor(
 
     private static AnalysisDto BuildSemanticAnalysis(
         SemanticQueryPlan plan,
-        string databaseName,
+        string sourceLabel,
         SemanticSummaryDto semanticSummary,
         bool isTruncated)
     {
         return new AnalysisDto
         {
-            DatabaseName = databaseName,
+            SourceLabel = sourceLabel,
             Description = BuildSemanticDescription(plan, semanticSummary, isTruncated),
             Metadata = plan.Projection.Fields
                 .Select(field => new MetadataItemDto
@@ -426,6 +404,15 @@ public class DataAnalysisExecutor(
                 })
                 .ToList()
         };
+    }
+
+    private static string BuildBusinessSourceLabel(
+        string targetLabel,
+        DataSourceExternalSystemType externalSystemType)
+    {
+        return externalSystemType == DataSourceExternalSystemType.CloudReadOnly
+            ? $"Cloud {targetLabel}只读视图"
+            : $"{targetLabel}只读数据源";
     }
 
     private static string BuildSemanticDescription(

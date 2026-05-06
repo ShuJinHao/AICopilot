@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace AICopilot.SharedKernel.Ai;
 
 public sealed record AiToolSafetyDecision(bool IsAllowed, string? Reason)
@@ -20,7 +22,25 @@ public static class AiToolSafetyPolicy
         "backfill",
         "correct",
         "upload",
-        "submit"
+        "submit",
+        "set",
+        "modify",
+        "enable",
+        "reset",
+        "start",
+        "stop",
+        "restart",
+        "reboot",
+        "rotate",
+        "grant",
+        "revoke",
+        "apply",
+        "assign",
+        "remove",
+        "archive",
+        "import",
+        "export",
+        "write"
     ];
 
     private static readonly string[] CloudAllowedVerbs =
@@ -39,7 +59,10 @@ public static class AiToolSafetyPolicy
         AiToolCapabilityKind capabilityKind,
         AiToolRiskLevel riskLevel,
         string toolName,
-        string? description)
+        string? description,
+        bool readOnlyDeclared = false,
+        JsonElement? inputSchema = null,
+        JsonElement? returnSchema = null)
     {
         if (riskLevel == AiToolRiskLevel.Blocked)
         {
@@ -51,15 +74,14 @@ public static class AiToolSafetyPolicy
             return AiToolSafetyDecision.Allow;
         }
 
+        if (!readOnlyDeclared)
+        {
+            return new AiToolSafetyDecision(false, "Cloud-related tools must explicitly declare read-only behavior.");
+        }
+
         if (capabilityKind == AiToolCapabilityKind.SideEffecting)
         {
             return new AiToolSafetyDecision(false, "Cloud-related tools must not be side-effecting.");
-        }
-
-        var text = $"{toolName} {description ?? string.Empty}";
-        if (CloudForbiddenVerbs.Any(verb => ContainsToken(text, verb)))
-        {
-            return new AiToolSafetyDecision(false, "Cloud-related tool contains forbidden write semantics.");
         }
 
         if (!CloudAllowedVerbs.Any(verb => StartsWithToken(toolName, verb)))
@@ -67,7 +89,29 @@ public static class AiToolSafetyPolicy
             return new AiToolSafetyDecision(false, "Cloud-related tool must use an approved read-only verb.");
         }
 
+        var safetyText = BuildSafetyText(toolName, description, inputSchema, returnSchema);
+        if (CloudForbiddenVerbs.Any(verb => ContainsToken(safetyText, verb)))
+        {
+            return new AiToolSafetyDecision(false, "Cloud-related tool contains forbidden write semantics.");
+        }
+
         return AiToolSafetyDecision.Allow;
+    }
+
+    private static string BuildSafetyText(
+        string toolName,
+        string? description,
+        JsonElement? inputSchema,
+        JsonElement? returnSchema)
+    {
+        return string.Join(
+            ' ',
+            [
+                toolName,
+                description ?? string.Empty,
+                inputSchema.HasValue ? inputSchema.Value.GetRawText() : string.Empty,
+                returnSchema.HasValue ? returnSchema.Value.GetRawText() : string.Empty
+            ]);
     }
 
     private static bool ContainsToken(string value, string token)

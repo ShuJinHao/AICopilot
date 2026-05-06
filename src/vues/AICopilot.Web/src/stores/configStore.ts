@@ -18,6 +18,7 @@ import type {
   LanguageModelDetail,
   LanguageModelFormModel,
   LanguageModelSummary,
+  McpAllowedTool,
   McpServerDetail,
   McpServerFormModel,
   McpServerSummary,
@@ -95,7 +96,7 @@ function createEmptyMcpServerForm(): McpServerFormModel {
     command: 'dotnet',
     arguments: '',
     chatExposureMode: 0,
-    allowedToolNames: [],
+    allowedTools: [],
     externalSystemType: 0,
     capabilityKind: 1,
     riskLevel: 1,
@@ -175,7 +176,7 @@ function toMcpServerForm(detail: McpServerDetail): McpServerFormModel {
     command: detail.command ?? '',
     arguments: '',
     chatExposureMode: detail.chatExposureMode,
-    allowedToolNames: [...detail.allowedToolNames],
+    allowedTools: detail.allowedTools.map((tool) => ({ ...tool })),
     externalSystemType: detail.externalSystemType,
     capabilityKind: detail.capabilityKind,
     riskLevel: detail.riskLevel,
@@ -188,6 +189,30 @@ function toMcpServerForm(detail: McpServerDetail): McpServerFormModel {
 
 function normalizeToolNames(toolNames: string[]) {
   return [...new Set(toolNames.map((item) => item.trim()).filter(Boolean))]
+}
+
+function normalizeMcpAllowedTools(tools: McpAllowedTool[]) {
+  const normalized = new Map<string, McpAllowedTool>()
+
+  for (const tool of tools) {
+    const toolName = tool.toolName.trim()
+    if (!toolName) {
+      continue
+    }
+
+    const key = toolName.toLowerCase()
+    if (!normalized.has(key)) {
+      normalized.set(key, {
+        toolName,
+        externalSystemType: tool.externalSystemType ?? null,
+        capabilityKind: tool.capabilityKind ?? null,
+        riskLevel: tool.riskLevel ?? null,
+        readOnlyDeclared: Boolean(tool.readOnlyDeclared)
+      })
+    }
+  }
+
+  return [...normalized.values()]
 }
 
 function toErrorMessage(error: unknown, fallback: string, forbiddenMessage: string) {
@@ -777,7 +802,7 @@ export const useConfigStore = defineStore('config', () => {
             ? currentMcpServer.value.command.trim()
             : '',
         arguments: currentMcpServer.value.arguments.trim(),
-        allowedToolNames: normalizeToolNames(currentMcpServer.value.allowedToolNames)
+        allowedTools: normalizeMcpAllowedTools(currentMcpServer.value.allowedTools)
       }
 
       if (dialogModes.mcpServer === 'create') {

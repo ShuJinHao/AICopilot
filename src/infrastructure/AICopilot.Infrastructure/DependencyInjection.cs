@@ -43,6 +43,9 @@ public static class DependencyInjection
                 throw new InvalidOperationException("PostgreSQL session execution lock requires ConnectionStrings:ai-copilot.");
             }
 
+            serviceProvider.GetRequiredService<ILogger<PostgreSqlSessionExecutionLock>>()
+                .LogInformation("Using PostgreSQL advisory session execution lock.");
+
             return new PostgreSqlSessionExecutionLock(
                 connectionString,
                 serviceProvider.GetRequiredService<ILogger<PostgreSqlSessionExecutionLock>>());
@@ -95,7 +98,16 @@ public static class DependencyInjection
 
     private static void AddFinalAgentContextStore(this IHostApplicationBuilder builder)
     {
-        var provider = builder.Configuration["AiGateway:FinalAgentContextStore:Provider"];
+        var deploymentMode = builder.Configuration["AiGateway:Deployment:Mode"] ?? "SingleInstance";
+        var provider = builder.Configuration["AiGateway:FinalAgentContextStore:Provider"] ?? "Memory";
+        var isMultiInstance = string.Equals(deploymentMode, "MultiInstance", StringComparison.OrdinalIgnoreCase);
+
+        if (isMultiInstance && !string.Equals(provider, "Redis", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "AiGateway:Deployment:Mode 配置为 MultiInstance 时，FinalAgentContextStore 必须配置为 Redis。");
+        }
+
         if (string.Equals(provider, "Redis", StringComparison.OrdinalIgnoreCase))
         {
             var redisConnectionString = builder.Configuration.GetConnectionString("final-agent-context-redis");
@@ -109,12 +121,22 @@ public static class DependencyInjection
                 options.Configuration = redisConnectionString;
                 options.InstanceName = "aicopilot:";
             });
-            builder.Services.AddSingleton<IFinalAgentContextStore, RedisFinalAgentContextStore>();
+            builder.Services.AddSingleton<IFinalAgentContextStore>(sp =>
+            {
+                sp.GetRequiredService<ILogger<RedisFinalAgentContextStore>>()
+                    .LogInformation("Using Redis final-agent context store for AiGateway deployment mode {DeploymentMode}.", deploymentMode);
+                return new RedisFinalAgentContextStore(sp.GetRequiredService<Microsoft.Extensions.Caching.Distributed.IDistributedCache>());
+            });
         }
         else
         {
             builder.Services.AddMemoryCache();
-            builder.Services.AddSingleton<IFinalAgentContextStore, MemoryCacheFinalAgentContextStore>();
+            builder.Services.AddSingleton<IFinalAgentContextStore>(sp =>
+            {
+                sp.GetRequiredService<ILogger<MemoryCacheFinalAgentContextStore>>()
+                    .LogWarning("Using memory final-agent context store. This is valid only for SingleInstance AiGateway deployments.");
+                return new MemoryCacheFinalAgentContextStore(sp.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>());
+            });
         }
     }
 }
