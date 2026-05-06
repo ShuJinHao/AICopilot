@@ -24,6 +24,7 @@ public record UploadDocumentCommand(
 public class UploadDocumentCommandHandler(
     IRepository<KnowledgeBase> kbRepo,
     IFileStorageService fileStorage,
+    IDocumentFormatPolicy documentFormatPolicy,
     IIntegrationEventPublisher eventPublisher)
     : ICommandHandler<UploadDocumentCommand, Result<UploadDocumentDto>>
 {
@@ -39,6 +40,13 @@ public class UploadDocumentCommandHandler(
             cancellationToken);
 
         if (kb == null) return Result.NotFound("知识库不存在");
+
+        var extension = Path.GetExtension(request.File.FileName).ToLowerInvariant();
+        if (!documentFormatPolicy.IsSupported(extension))
+        {
+            var supported = string.Join(", ", documentFormatPolicy.SupportedExtensions);
+            return Result.Invalid($"不支持的文件格式: {extension}. 支持的格式: {supported}");
+        }
 
         // 2. 计算文件 Hash (SHA256)
         string fileHash;
@@ -65,7 +73,6 @@ public class UploadDocumentCommandHandler(
         }
 
         // 4. 保存物理文件 (只有当文件不存在时才执行 IO 操作)
-        var extension = Path.GetExtension(request.File.FileName).ToLower();
         var savedPath = await fileStorage.SaveAsync(request.File.Stream, request.File.FileName, cancellationToken);
 
         // 5. 领域模型行为：添加文档

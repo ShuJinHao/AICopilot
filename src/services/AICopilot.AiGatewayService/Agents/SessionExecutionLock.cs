@@ -1,12 +1,8 @@
 using System.Collections.Concurrent;
 using System.Threading;
+using AICopilot.Services.Contracts;
 
 namespace AICopilot.AiGatewayService.Agents;
-
-public interface ISessionExecutionLock
-{
-    ValueTask<IAsyncDisposable> AcquireAsync(Guid sessionId, CancellationToken cancellationToken = default);
-}
 
 public sealed class InMemorySessionExecutionLock : ISessionExecutionLock
 {

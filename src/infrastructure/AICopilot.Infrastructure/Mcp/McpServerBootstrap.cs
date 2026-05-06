@@ -59,6 +59,7 @@ public class McpServerBootstrap(
             var allowlist = new HashSet<string>(mcpServerInfo.AllowedToolNames, StringComparer.OrdinalIgnoreCase);
             var exposedTools = tools
                 .Where(tool => allowlist.Contains(tool.Name))
+                .Where(tool => CanExposeTool(mcpServerInfo, tool))
                 .ToArray();
 
             logger.LogInformation(
@@ -122,7 +123,13 @@ public class McpServerBootstrap(
         HashSet<string> protectedNames)
     {
         var tools = mcpTools
-            .Select(tool => ToToolDefinition(mcpServerInfo.Name, tool, protectedNames))
+            .Select(tool => ToToolDefinition(
+                mcpServerInfo.Name,
+                mcpServerInfo.ExternalSystemType,
+                mcpServerInfo.CapabilityKind,
+                mcpServerInfo.RiskLevel,
+                tool,
+                protectedNames))
             .ToArray();
 
         var mcpPlugin = new GenericBridgePlugin
@@ -138,16 +145,28 @@ public class McpServerBootstrap(
 
     private static AiToolDefinition ToToolDefinition(
         string serverName,
+        AiToolExternalSystemType externalSystemType,
+        AiToolCapabilityKind capabilityKind,
+        AiToolRiskLevel riskLevel,
         McpClientTool tool,
         HashSet<string> protectedNames)
     {
+        var requiresApproval = protectedNames.Contains(tool.Name)
+                               || riskLevel == AiToolRiskLevel.RequiresApproval;
+
         return new AiToolDefinition
         {
-            Name = tool.Name,
+            Name = AiToolIdentity.CreateRuntimeName(AiToolTargetType.McpServer, serverName, tool.Name),
+            ToolName = tool.Name,
             Description = tool.Description,
             Kind = AiToolCallKind.Mcp,
+            TargetType = AiToolTargetType.McpServer,
+            TargetName = serverName,
             ServerName = serverName,
-            RequiresApproval = protectedNames.Contains(tool.Name),
+            RequiresApproval = requiresApproval,
+            ExternalSystemType = externalSystemType,
+            CapabilityKind = capabilityKind,
+            RiskLevel = riskLevel,
             JsonSchema = tool.JsonSchema.Clone(),
             ReturnJsonSchema = tool.ReturnJsonSchema?.Clone(),
             InvokeAsync = async (context, cancellationToken) =>
@@ -161,6 +180,28 @@ public class McpServerBootstrap(
                 return await tool.InvokeAsync(arguments, cancellationToken);
             }
         };
+    }
+
+    private bool CanExposeTool(McpServerInfo server, McpClientTool tool)
+    {
+        var decision = AiToolSafetyPolicy.Evaluate(
+            server.ExternalSystemType,
+            server.CapabilityKind,
+            server.RiskLevel,
+            tool.Name,
+            tool.Description);
+
+        if (decision.IsAllowed)
+        {
+            return true;
+        }
+
+        logger.LogWarning(
+            "MCP server {ServerName} tool {ToolName} was blocked by safety policy: {Reason}",
+            server.Name,
+            tool.Name,
+            decision.Reason);
+        return false;
     }
 
     protected virtual async Task<McpClient> CreateStdioClientAsync(McpServerInfo mcpServerInfo, CancellationToken ct)

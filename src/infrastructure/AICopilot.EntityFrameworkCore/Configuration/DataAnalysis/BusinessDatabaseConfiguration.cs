@@ -44,6 +44,16 @@ public class BusinessDatabaseConfiguration : IEntityTypeConfiguration<BusinessDa
             .IsRequired()
             .HasColumnName("is_read_only");
 
+        builder.Property(db => db.ExternalSystemType)
+            .IsRequired()
+            .HasConversion<string>()
+            .HasMaxLength(50)
+            .HasColumnName("external_system_type");
+
+        builder.Property(db => db.ReadOnlyCredentialVerified)
+            .IsRequired()
+            .HasColumnName("read_only_credential_verified");
+
         builder.Property(db => db.IsEnabled)
             .IsRequired()
             .HasColumnName("is_enabled");

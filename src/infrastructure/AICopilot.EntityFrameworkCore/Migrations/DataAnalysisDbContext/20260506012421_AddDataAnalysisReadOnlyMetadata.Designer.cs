@@ -3,64 +3,48 @@ using System;
 using AICopilot.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
-namespace AICopilot.EntityFrameworkCore.Migrations.McpServerDbContext
+namespace AICopilot.EntityFrameworkCore.Migrations.DataAnalysisDbContext
 {
-    [DbContext(typeof(global::AICopilot.EntityFrameworkCore.McpServerDbContext))]
-    partial class McpServerDbContextModelSnapshot : ModelSnapshot
+    [DbContext(typeof(global::AICopilot.EntityFrameworkCore.DataAnalysisDbContext))]
+    [Migration("20260506012421_AddDataAnalysisReadOnlyMetadata")]
+    partial class AddDataAnalysisReadOnlyMetadata
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasDefaultSchema("mcp")
+                .HasDefaultSchema("dataanalysis")
                 .HasAnnotation("ProductVersion", "10.0.6")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
-            modelBuilder.Entity("AICopilot.Core.McpServer.Aggregates.McpServerInfo.McpServerInfo", b =>
+            modelBuilder.Entity("AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase.BusinessDatabase", b =>
                 {
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.PrimitiveCollection<string[]>("AllowedToolNames")
+                    b.Property<string>("ConnectionString")
                         .IsRequired()
-                        .HasColumnType("text[]")
-                        .HasColumnName("allowed_tool_names");
+                        .HasColumnType("text")
+                        .HasColumnName("connection_string");
 
-                    b.Property<string>("Arguments")
-                        .IsRequired()
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)")
-                        .HasColumnName("arguments");
-
-                    b.Property<string>("CapabilityKind")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)")
-                        .HasColumnName("capability_kind");
-
-                    b.Property<string>("ChatExposureMode")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)")
-                        .HasColumnName("chat_exposure_mode");
-
-                    b.Property<string>("Command")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)")
-                        .HasColumnName("command");
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
 
                     b.Property<string>("Description")
                         .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
                         .HasColumnName("description");
 
                     b.Property<string>("ExternalSystemType")
@@ -73,17 +57,25 @@ namespace AICopilot.EntityFrameworkCore.Migrations.McpServerDbContext
                         .HasColumnType("boolean")
                         .HasColumnName("is_enabled");
 
+                    b.Property<bool>("IsReadOnly")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_read_only");
+
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
                         .HasColumnName("name");
 
-                    b.Property<string>("RiskLevel")
+                    b.Property<string>("Provider")
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)")
-                        .HasColumnName("risk_level");
+                        .HasColumnName("provider");
+
+                    b.Property<bool>("ReadOnlyCredentialVerified")
+                        .HasColumnType("boolean")
+                        .HasColumnName("read_only_credential_verified");
 
                     b.Property<uint>("RowVersion")
                         .IsConcurrencyToken()
@@ -91,18 +83,12 @@ namespace AICopilot.EntityFrameworkCore.Migrations.McpServerDbContext
                         .HasColumnType("xid")
                         .HasColumnName("xmin");
 
-                    b.Property<string>("TransportType")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)")
-                        .HasColumnName("transport_type");
-
                     b.HasKey("Id");
 
                     b.HasIndex("Name")
                         .IsUnique();
 
-                    b.ToTable("mcp_server_info", "mcp");
+                    b.ToTable("business_databases", "dataanalysis");
                 });
 
             modelBuilder.Entity("AICopilot.EntityFrameworkCore.Outbox.OutboxMessage", b =>

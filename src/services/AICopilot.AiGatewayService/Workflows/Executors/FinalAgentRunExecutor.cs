@@ -49,7 +49,10 @@ public class FinalAgentRunExecutor(
                 }
 
                 var response = new AiToolApprovalResponseContent(requestContent, decision.IsApproved);
-                var toolName = requestContent.ToolCall.Name;
+                var identity = requestContent.ToolCall.Identity;
+                var toolName = identity is null
+                    ? requestContent.ToolCall.Name
+                    : $"{identity.TargetType}:{identity.TargetName}/{identity.ToolName}";
                 messages.Add(new AiChatMessage(AiChatRole.User, [response]));
 
                 await auditLogWriter.WriteAsync(

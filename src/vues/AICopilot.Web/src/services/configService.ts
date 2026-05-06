@@ -143,7 +143,9 @@ export const configService = {
       connectionString: payload.connectionString,
       provider: payload.provider,
       isEnabled: payload.isEnabled,
-      isReadOnly: true
+      isReadOnly: true,
+      externalSystemType: payload.externalSystemType,
+      readOnlyCredentialVerified: payload.readOnlyCredentialVerified
     })
   },
 
@@ -155,7 +157,9 @@ export const configService = {
       connectionString: payload.connectionString,
       provider: payload.provider,
       isEnabled: payload.isEnabled,
-      isReadOnly: true
+      isReadOnly: true,
+      externalSystemType: payload.externalSystemType,
+      readOnlyCredentialVerified: payload.readOnlyCredentialVerified
     })
   },
 
@@ -184,6 +188,9 @@ export const configService = {
       arguments: payload.arguments,
       chatExposureMode: payload.chatExposureMode,
       allowedToolNames: payload.allowedToolNames,
+      externalSystemType: payload.externalSystemType,
+      capabilityKind: payload.capabilityKind,
+      riskLevel: payload.riskLevel,
       isEnabled: payload.isEnabled
     })
   },
@@ -198,6 +205,9 @@ export const configService = {
       arguments: payload.arguments,
       chatExposureMode: payload.chatExposureMode,
       allowedToolNames: payload.allowedToolNames,
+      externalSystemType: payload.externalSystemType,
+      capabilityKind: payload.capabilityKind,
+      riskLevel: payload.riskLevel,
       isEnabled: payload.isEnabled
     })
   },

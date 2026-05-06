@@ -25,4 +25,9 @@ public record SearchKnowledgeBaseResult
     /// 来源文档名称
     /// </summary>
     public string? DocumentName { get; init; }
+
+    /// <summary>
+    /// 文档切片序号
+    /// </summary>
+    public int ChunkIndex { get; init; }
 }

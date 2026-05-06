@@ -27,6 +27,14 @@ const onsiteConfirmed = ref(false)
 const request = computed(() => props.chunk.request)
 const status = computed(() => props.chunk.status)
 const isPending = computed(() => status.value === 'pending')
+const targetText = computed(() => {
+  if (!request.value.targetType && !request.value.targetName) {
+    return ''
+  }
+
+  return [request.value.targetType, request.value.targetName].filter(Boolean).join(' / ')
+})
+const toolNameText = computed(() => request.value.toolName || request.value.name)
 const statusText = computed(() => {
   switch (status.value) {
     case 'approved':
@@ -89,7 +97,15 @@ function handleReject() {
     <div class="card-body">
       <div class="function-info">
         <span class="label">目标工具</span>
-        <code class="function-name">{{ request.name }}</code>
+        <code class="function-name">{{ toolNameText }}</code>
+      </div>
+      <div v-if="targetText" class="function-info">
+        <span class="label">工具来源</span>
+        <code class="function-name muted">{{ targetText }}</code>
+      </div>
+      <div v-if="request.runtimeName" class="function-info">
+        <span class="label">运行标识</span>
+        <code class="function-name muted">{{ request.runtimeName }}</code>
       </div>
 
       <div class="arguments-section">
@@ -240,6 +256,12 @@ function handleReject() {
   border-radius: 4px;
   font-family: monospace;
   font-weight: bold;
+  overflow-wrap: anywhere;
+}
+
+.function-name.muted {
+  background: #f1f5f9;
+  color: #475569;
 }
 
 .onsite-panel {

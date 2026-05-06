@@ -118,6 +118,7 @@ export const chatService = {
     callId: string,
     decision: 'approved' | 'rejected',
     onsiteConfirmed: boolean,
+    request: FunctionApprovalRequest,
     callbacks: StreamCallbacks
   ) {
     await sendEventStream(
@@ -126,7 +127,10 @@ export const chatService = {
         sessionId,
         callId,
         decision,
-        onsiteConfirmed
+        onsiteConfirmed,
+        targetType: request.targetType,
+        targetName: request.targetName,
+        toolName: request.toolName
       },
       callbacks
     )

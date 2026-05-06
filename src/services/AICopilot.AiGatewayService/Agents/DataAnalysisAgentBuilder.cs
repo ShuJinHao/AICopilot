@@ -28,7 +28,7 @@ public class DataAnalysisAgentBuilder(
         }, options =>
         {
             options.Tools = tools;
-        }, false);
+        });
 
         return agent;
     }

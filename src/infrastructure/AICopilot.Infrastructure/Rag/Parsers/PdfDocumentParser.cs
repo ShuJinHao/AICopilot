@@ -17,8 +17,14 @@ public class PdfDocumentParser : IDocumentParser
 
             try
             {
-                // PdfPig 需要 Seekable 流，如果流不支持 Seek，需要复制到 MemoryStream
-                using var pdfDocument = PdfDocument.Open(stream);
+                using var buffer = stream.CanSeek ? null : CopyToSeekableStream(stream, cancellationToken);
+                var pdfStream = buffer ?? stream;
+                if (pdfStream.CanSeek)
+                {
+                    pdfStream.Position = 0;
+                }
+
+                using var pdfDocument = PdfDocument.Open(pdfStream);
 
                 foreach (var page in pdfDocument.GetPages())
                 {
@@ -38,5 +44,22 @@ public class PdfDocumentParser : IDocumentParser
 
             return sb.ToString();
         }, cancellationToken);
+    }
+
+    private static MemoryStream CopyToSeekableStream(Stream stream, CancellationToken cancellationToken)
+    {
+        var buffer = new MemoryStream();
+        try
+        {
+            stream.CopyTo(buffer);
+            cancellationToken.ThrowIfCancellationRequested();
+            buffer.Position = 0;
+            return buffer;
+        }
+        catch
+        {
+            buffer.Dispose();
+            throw;
+        }
     }
 }

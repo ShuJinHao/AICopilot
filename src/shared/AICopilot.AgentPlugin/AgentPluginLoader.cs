@@ -44,7 +44,11 @@ public class AgentPluginLoader
     public void RegisterAgentPlugin(IAgentPlugin plugin)
     {
         plugins[plugin.Name] = plugin;
-        tools[plugin.Name] = plugin.GetTools()?.ToArray() ?? [];
+        var pluginTools = (plugin.GetTools() ?? [])
+            .Select(tool => EnsureToolIdentity(plugin, tool))
+            .ToArray();
+        EnsureUniqueToolNames(plugin.Name, pluginTools);
+        tools[plugin.Name] = pluginTools;
     }
 
     public AiToolDefinition[] GetTools(params string[] names)
@@ -61,6 +65,18 @@ public class AgentPluginLoader
         return result.ToArray();
     }
 
+    public AiToolDefinition[] GetPluginTools(string name)
+    {
+        return tools.TryGetValue(name, out var pluginTools)
+            ? pluginTools
+            : [];
+    }
+
+    public AiToolDefinition[] GetAllTools()
+    {
+        return tools.Values.SelectMany(item => item).ToArray();
+    }
+
     public IAgentPlugin? GetPlugin(string name)
     {
         plugins.TryGetValue(name, out var plugin);
@@ -70,5 +86,51 @@ public class AgentPluginLoader
     public IAgentPlugin[] GetAllPlugin()
     {
         return plugins.Values.ToArray();
+    }
+
+    private static AiToolDefinition EnsureToolIdentity(IAgentPlugin plugin, AiToolDefinition tool)
+    {
+        if (tool.Identity is not null)
+        {
+            return tool;
+        }
+
+        var rawToolName = tool.ToolName ?? tool.Name;
+        var risk = plugin.HighRiskTools?.Contains(rawToolName, StringComparer.OrdinalIgnoreCase) == true
+            ? AiToolRiskLevel.RequiresApproval
+            : AiToolRiskLevel.Low;
+
+        return tool.WithIdentity(
+            AiToolTargetType.Plugin,
+            plugin.Name,
+            rawToolName,
+            AiToolExternalSystemType.NonCloud,
+            AiToolCapabilityKind.Diagnostics,
+            risk);
+    }
+
+    private void EnsureUniqueToolNames(string pluginName, AiToolDefinition[] pluginTools)
+    {
+        var duplicateInPlugin = pluginTools
+            .GroupBy(tool => tool.Name, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicateInPlugin is not null)
+        {
+            throw new InvalidOperationException(
+                $"Plugin '{pluginName}' exposes duplicate tool runtime name '{duplicateInPlugin.Key}'.");
+        }
+
+        var existingToolNames = tools
+            .Where(item => !string.Equals(item.Key, pluginName, StringComparison.OrdinalIgnoreCase))
+            .SelectMany(item => item.Value)
+            .Select(tool => tool.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var duplicateGlobal = pluginTools.FirstOrDefault(tool => existingToolNames.Contains(tool.Name));
+        if (duplicateGlobal is not null)
+        {
+            throw new InvalidOperationException(
+                $"Tool runtime name '{duplicateGlobal.Name}' is already registered by another plugin.");
+        }
     }
 }

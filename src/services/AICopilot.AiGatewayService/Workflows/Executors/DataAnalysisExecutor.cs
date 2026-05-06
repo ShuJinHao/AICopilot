@@ -329,14 +329,11 @@ public class DataAnalysisExecutor(
             // 目标：schema + data -> Combined JSON
             // =========================================================
 
-            // 【核心修复位置】
-            // 以前这里可能只返回了 analysis 和 data，导致 visual_decision 丢失
-            // 或者之前的逻辑不一致。现在强制把三者打包在一起。
             var combinedOutput = new
             {
-                analysis = output.Analysis,         // 分析结果
-                visual_decision = output.Decision,  // 【新增】图表配置
-                data = rawData ?? []                // 原始数据
+                analysis = output.Analysis,
+                visual_decision = output.Decision,
+                data = rawData ?? []
             };
 
             return combinedOutput.ToJson();
@@ -558,37 +555,4 @@ public class DataAnalysisExecutor(
         return "业务";
     }
 
-    private static List<Dictionary<string, object?>> NormalizeRows(IEnumerable<dynamic> rows)
-    {
-        var result = new List<Dictionary<string, object?>>();
-
-        foreach (var row in rows)
-        {
-            object rowObject = row;
-
-            if (rowObject is IDictionary<string, object?> nullableDictionary)
-            {
-                result.Add(nullableDictionary.ToDictionary(item => item.Key, item => item.Value, StringComparer.OrdinalIgnoreCase));
-                continue;
-            }
-
-            if (rowObject is IDictionary<string, object> dictionary)
-            {
-                result.Add(dictionary.ToDictionary(item => item.Key, item => (object?)item.Value, StringComparer.OrdinalIgnoreCase));
-                continue;
-            }
-
-            var reflected = rowObject.GetType()
-                .GetProperties()
-                .Where(property => property.CanRead)
-                .ToDictionary(
-                    property => property.Name,
-                    property => property.GetValue(rowObject),
-                    StringComparer.OrdinalIgnoreCase);
-
-            result.Add(reflected);
-        }
-
-        return result;
-    }
 }

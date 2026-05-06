@@ -16,6 +16,30 @@ internal static class BusinessDatabaseContractMapper
         };
     }
 
+    public static DataSourceExternalSystemType ToContractExternalSystemType(
+        BusinessDataExternalSystemType externalSystemType)
+    {
+        return externalSystemType switch
+        {
+            BusinessDataExternalSystemType.CloudReadOnly => DataSourceExternalSystemType.CloudReadOnly,
+            BusinessDataExternalSystemType.NonCloud => DataSourceExternalSystemType.NonCloud,
+            BusinessDataExternalSystemType.Unknown => DataSourceExternalSystemType.Unknown,
+            _ => throw new NotSupportedException($"Unsupported data source external system type: {externalSystemType}")
+        };
+    }
+
+    public static BusinessDataExternalSystemType ToDomainExternalSystemType(
+        DataSourceExternalSystemType externalSystemType)
+    {
+        return externalSystemType switch
+        {
+            DataSourceExternalSystemType.CloudReadOnly => BusinessDataExternalSystemType.CloudReadOnly,
+            DataSourceExternalSystemType.NonCloud => BusinessDataExternalSystemType.NonCloud,
+            DataSourceExternalSystemType.Unknown => BusinessDataExternalSystemType.Unknown,
+            _ => throw new NotSupportedException($"Unsupported data source external system type: {externalSystemType}")
+        };
+    }
+
     public static BusinessDatabaseDescriptor ToDescriptor(BusinessDatabase database)
     {
         return new BusinessDatabaseDescriptor(
@@ -24,7 +48,9 @@ internal static class BusinessDatabaseContractMapper
             database.Description,
             ToContractProvider(database.Provider),
             database.IsEnabled,
-            database.IsReadOnly);
+            database.IsReadOnly,
+            ToContractExternalSystemType(database.ExternalSystemType),
+            database.ReadOnlyCredentialVerified);
     }
 
     public static BusinessDatabaseConnectionInfo ToConnectionInfo(BusinessDatabase database)
@@ -36,6 +62,8 @@ internal static class BusinessDatabaseContractMapper
             database.ConnectionString,
             ToContractProvider(database.Provider),
             database.IsEnabled,
-            database.IsReadOnly);
+            database.IsReadOnly,
+            ToContractExternalSystemType(database.ExternalSystemType),
+            database.ReadOnlyCredentialVerified);
     }
 }

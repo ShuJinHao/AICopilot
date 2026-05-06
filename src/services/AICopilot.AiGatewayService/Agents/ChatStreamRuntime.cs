@@ -68,12 +68,17 @@ internal static class ChatStreamRuntime
 
                 case AiToolApprovalRequestContent content:
                     var toolCall = content.Request.ToolCall;
-                    var toolName = toolCall.Name;
-                    var requirement = await approvalRequirementResolver.GetMergedRequirementByToolNameAsync(toolName, ct);
+                    var identity = toolCall.Identity;
+                    var toolName = identity?.ToolName ?? toolCall.ToolName ?? toolCall.Name;
+                    var requirement = await approvalRequirementResolver.GetMergedRequirementByIdentityAsync(identity, ct);
                     var approval = new
                     {
                         callId = toolCall.CallId,
-                        name = toolCall.Name,
+                        name = toolName,
+                        runtimeName = toolCall.Name,
+                        targetType = identity?.TargetType.ToString(),
+                        targetName = identity?.TargetName,
+                        toolName,
                         args = toolCall.Arguments,
                         requiresOnsiteAttestation = requirement.RequiresOnsiteAttestation,
                         attestationExpiresAt = session?.OnsiteConfirmationExpiresAt

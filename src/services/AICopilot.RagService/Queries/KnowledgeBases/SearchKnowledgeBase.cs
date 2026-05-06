@@ -43,8 +43,8 @@ public class SearchKnowledgeBaseQueryHandler(
             kb,
             embeddingModelConfig,
             request.QueryText,
-            request.TopK,
-            request.MinScore,
+            Math.Clamp(request.TopK, 1, 20),
+            Math.Clamp(request.MinScore, 0.0, 1.0),
             cancellationToken);
 
         var results = new List<SearchKnowledgeBaseResult>(searchResults.Count);
@@ -55,7 +55,8 @@ public class SearchKnowledgeBaseQueryHandler(
                 Text = record.Text,
                 Score = record.Score,
                 DocumentId = record.DocumentId,
-                DocumentName = record.DocumentName
+                DocumentName = record.DocumentName,
+                ChunkIndex = record.ChunkIndex
             });
         }
 

@@ -18,4 +18,5 @@ public sealed record KnowledgeVectorSearchResult(
     string Text,
     double Score,
     int DocumentId,
-    string DocumentName);
+    string DocumentName,
+    int ChunkIndex);
