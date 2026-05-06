@@ -50,7 +50,7 @@ public sealed class McpServerBootstrapExposureTests
             "dotnet",
             string.Empty,
             ChatExposureMode.Advisory,
-            ["Echo"],
+            [new McpAllowedTool("Echo")],
             true);
 
         var controlServer = new McpServerInfo(
@@ -60,7 +60,7 @@ public sealed class McpServerBootstrapExposureTests
             "dotnet",
             string.Empty,
             ChatExposureMode.Control,
-            ["Echo"],
+            [new McpAllowedTool("Echo")],
             true);
 
         var closedServer = new McpServerInfo(

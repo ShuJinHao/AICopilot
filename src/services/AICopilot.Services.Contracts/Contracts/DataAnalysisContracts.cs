@@ -294,9 +294,9 @@ public record DataAnalysisOutputDto
 
 public record AnalysisDto
 {
-    [Description("当前数据库名称")]
-    [JsonPropertyName("database_name")]
-    public string DatabaseName { get; set; } = string.Empty;
+    [Description("业务化只读数据源标签，不包含内部数据库名、物理表名或连接信息")]
+    [JsonPropertyName("source_label")]
+    public string SourceLabel { get; set; } = string.Empty;
 
     [Description("根据用户问题生成的简短数据说明")]
     [JsonPropertyName("description")]

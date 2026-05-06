@@ -1,12 +1,21 @@
-﻿using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
 using AICopilot.Core.McpServer.Ids;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace AICopilot.EntityFrameworkCore.Configuration.McpServer;
 
 public class McpServerConfiguration : IEntityTypeConfiguration<McpServerInfo>
 {
+    private static readonly JsonSerializerOptions AllowedToolsJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        Converters = { new JsonStringEnumConverter() }
+    };
+
     public void Configure(EntityTypeBuilder<McpServerInfo> builder)
     {
         builder.ToTable("mcp_server_info", "mcp");
@@ -23,7 +32,6 @@ public class McpServerConfiguration : IEntityTypeConfiguration<McpServerInfo>
             .HasMaxLength(100)
             .HasColumnName("name");
 
-        // 保证名称唯一
         builder.HasIndex(b => b.Name).IsUnique();
 
         builder.Property(b => b.Description)
@@ -66,7 +74,7 @@ public class McpServerConfiguration : IEntityTypeConfiguration<McpServerInfo>
 
         builder.Property(b => b.TransportType)
             .IsRequired()
-            .HasConversion<string>() // 存储枚举字符串，增强可读性
+            .HasConversion<string>()
             .HasMaxLength(50)
             .HasColumnName("transport_type");
 
@@ -74,8 +82,32 @@ public class McpServerConfiguration : IEntityTypeConfiguration<McpServerInfo>
             .IsRequired()
             .HasColumnName("is_enabled");
 
-        builder.PrimitiveCollection(b => b.AllowedToolNames)
-            .IsRequired()
-            .HasColumnName("allowed_tool_names");
+        builder.Ignore(b => b.AllowedTools);
+
+        builder.Property<List<McpAllowedTool>>("_allowedTools")
+            .HasColumnName("allowed_tools")
+            .HasColumnType("jsonb")
+            .HasConversion(AllowedToolsConverter())
+            .Metadata.SetValueComparer(AllowedToolsComparer());
+    }
+
+    private static ValueConverter<List<McpAllowedTool>, string> AllowedToolsConverter()
+    {
+        return new ValueConverter<List<McpAllowedTool>, string>(
+            tools => JsonSerializer.Serialize(tools, AllowedToolsJsonOptions),
+            payload => string.IsNullOrWhiteSpace(payload)
+                ? new List<McpAllowedTool>()
+                : JsonSerializer.Deserialize<List<McpAllowedTool>>(payload, AllowedToolsJsonOptions) ?? new List<McpAllowedTool>());
+    }
+
+    private static ValueComparer<List<McpAllowedTool>> AllowedToolsComparer()
+    {
+        return new ValueComparer<List<McpAllowedTool>>(
+            (left, right) => JsonSerializer.Serialize(left, AllowedToolsJsonOptions) == JsonSerializer.Serialize(right, AllowedToolsJsonOptions),
+            tools => JsonSerializer.Serialize(tools, AllowedToolsJsonOptions).GetHashCode(StringComparison.Ordinal),
+            tools => JsonSerializer.Deserialize<List<McpAllowedTool>>(
+                         JsonSerializer.Serialize(tools, AllowedToolsJsonOptions),
+                         AllowedToolsJsonOptions)
+                     ?? new List<McpAllowedTool>());
     }
 }

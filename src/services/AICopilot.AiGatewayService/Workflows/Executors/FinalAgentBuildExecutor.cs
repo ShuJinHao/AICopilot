@@ -35,94 +35,94 @@ public class FinalAgentBuildExecutor(
         var request = genContext.Request;
         logger.LogInformation("Starting final response build for session {SessionId}.", request.SessionId);
 
-            var session = await sessionRepository.FirstOrDefaultAsync(new SessionByIdSpec(new SessionId(request.SessionId)), ct);
-            if (session == null)
+        var session = await sessionRepository.FirstOrDefaultAsync(new SessionByIdSpec(new SessionId(request.SessionId)), ct);
+        if (session == null)
+        {
+            throw new ChatWorkflowException(
+                "session_not_found",
+                "未找到当前会话。",
+                "当前会话不存在或已被删除，请刷新后重试。");
+        }
+
+        var template = await templateRepository.FirstOrDefaultAsync(
+            new ConversationTemplateByIdSpec(session.TemplateId),
+            ct);
+
+        if (template == null)
+        {
+            throw new ChatWorkflowException(
+                AppProblemCodes.ChatConfigurationMissing,
+                "当前会话绑定的模板或模型不存在。",
+                "当前会话缺少可用的模板或模型配置，请联系管理员检查 AI 配置。");
+        }
+
+        var model = await modelRepository.FirstOrDefaultAsync(
+            new LanguageModelByIdSpec(template.ModelId),
+            ct);
+
+        if (model == null)
+        {
+            throw new ChatWorkflowException(
+                AppProblemCodes.ChatConfigurationMissing,
+                "当前会话绑定的模型不存在。",
+                "当前会话缺少可用的模型配置，请联系管理员检查 AI 配置。");
+        }
+
+        var finalUserPrompt = BuildFinalUserPrompt(genContext, request.Message, out var hasContext);
+        var tokenBudgetDecision = tokenBudgetPolicy.Evaluate(model, template, finalUserPrompt);
+        if (!tokenBudgetDecision.IsAllowed)
+        {
+            throw new ChatWorkflowException(
+                AppProblemCodes.TokenBudgetExceeded,
+                tokenBudgetDecision.Detail ?? "当前模型 token 预算不足。",
+                tokenBudgetDecision.UserFacingMessage ?? "当前问题超出模型 token 预算，请缩小范围后重试。");
+        }
+
+        ScopedRuntimeAgent? scopedAgent = null;
+        try
+        {
+            scopedAgent = agentFactory.CreateAgent(model, template);
+            var chatOptions = new AiChatOptions
             {
-                throw new ChatWorkflowException(
-                    "session_not_found",
-                    "未找到当前会话。",
-                    "当前会话不存在或已被删除，请刷新后重试。");
+                Tools = genContext.Tools,
+                MaxOutputTokens = tokenBudgetDecision.ReservedOutputTokens
+            };
+
+            if (hasContext)
+            {
+                chatOptions.Temperature = 0.3f;
             }
 
-            var template = await templateRepository.FirstOrDefaultAsync(
-                new ConversationTemplateByIdSpec(session.TemplateId),
-                ct);
+            var runOptions = new RuntimeAgentRunOptions(chatOptions);
 
-            if (template == null)
+            var agentThread = await scopedAgent.Agent.CreateSessionAsync(ct);
+            var finalAgentContext = new FinalAgentContext
             {
-                throw new ChatWorkflowException(
-                    AppProblemCodes.ChatConfigurationMissing,
-                    "当前会话绑定的模板或模型不存在。",
-                    "当前会话缺少可用的模板或模型配置，请联系管理员检查 AI 配置。");
-            }
+                ScopedAgent = scopedAgent,
+                Thread = agentThread,
+                InputText = finalUserPrompt,
+                RunOptions = runOptions,
+                SessionId = request.SessionId,
+                EstimatedInputTokens = tokenBudgetDecision.EstimatedInputTokens,
+                SystemPromptTokenCount = tokenBudgetPolicy.CountSystemPromptTokens(template),
+                TokenTelemetryContext = new ChatTokenTelemetryContext(
+                    request.SessionId,
+                    model.Name,
+                    template.Name,
+                    tokenBudgetDecision.TotalTokenBudget,
+                    tokenBudgetDecision.ReservedOutputTokens)
+            };
 
-            var model = await modelRepository.FirstOrDefaultAsync(
-                new LanguageModelByIdSpec(template.ModelId),
-                ct);
-
-            if (model == null)
+            scopedAgent = null;
+            return finalAgentContext;
+        }
+        finally
+        {
+            if (scopedAgent is not null)
             {
-                throw new ChatWorkflowException(
-                    AppProblemCodes.ChatConfigurationMissing,
-                    "当前会话绑定的模型不存在。",
-                    "当前会话缺少可用的模型配置，请联系管理员检查 AI 配置。");
+                await scopedAgent.DisposeAsync();
             }
-
-            var finalUserPrompt = BuildFinalUserPrompt(genContext, request.Message, out var hasContext);
-            var tokenBudgetDecision = tokenBudgetPolicy.Evaluate(model, template, finalUserPrompt);
-            if (!tokenBudgetDecision.IsAllowed)
-            {
-                throw new ChatWorkflowException(
-                    AppProblemCodes.TokenBudgetExceeded,
-                    tokenBudgetDecision.Detail ?? "当前模型 token 预算不足。",
-                    tokenBudgetDecision.UserFacingMessage ?? "当前问题超出模型 token 预算，请缩小范围后重试。");
-            }
-
-            ScopedRuntimeAgent? scopedAgent = null;
-            try
-            {
-                scopedAgent = agentFactory.CreateAgent(model, template);
-                var chatOptions = new AiChatOptions
-                {
-                    Tools = genContext.Tools,
-                    MaxOutputTokens = tokenBudgetDecision.ReservedOutputTokens
-                };
-
-                if (hasContext)
-                {
-                    chatOptions.Temperature = 0.3f;
-                }
-
-                var runOptions = new RuntimeAgentRunOptions(chatOptions);
-
-                var agentThread = await scopedAgent.Agent.CreateSessionAsync(ct);
-                var finalAgentContext = new FinalAgentContext
-                {
-                    ScopedAgent = scopedAgent,
-                    Thread = agentThread,
-                    InputText = finalUserPrompt,
-                    RunOptions = runOptions,
-                    SessionId = request.SessionId,
-                    EstimatedInputTokens = tokenBudgetDecision.EstimatedInputTokens,
-                    SystemPromptTokenCount = tokenBudgetPolicy.CountSystemPromptTokens(template),
-                    TokenTelemetryContext = new ChatTokenTelemetryContext(
-                        request.SessionId,
-                        model.Name,
-                        template.Name,
-                        tokenBudgetDecision.TotalTokenBudget,
-                        tokenBudgetDecision.ReservedOutputTokens)
-                };
-
-                scopedAgent = null;
-                return finalAgentContext;
-            }
-            finally
-            {
-                if (scopedAgent is not null)
-                {
-                    await scopedAgent.DisposeAsync();
-                }
-            }
+        }
     }
 
     private string BuildFinalUserPrompt(

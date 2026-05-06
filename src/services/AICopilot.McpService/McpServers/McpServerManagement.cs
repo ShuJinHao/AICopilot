@@ -18,6 +18,15 @@ public record McpToolPolicySummaryDto
     public bool RequiresOnsiteAttestation { get; init; }
 }
 
+public record McpAllowedToolDto
+{
+    public required string ToolName { get; init; }
+    public AiToolExternalSystemType? ExternalSystemType { get; init; }
+    public AiToolCapabilityKind? CapabilityKind { get; init; }
+    public AiToolRiskLevel? RiskLevel { get; init; }
+    public bool ReadOnlyDeclared { get; init; }
+}
+
 public record McpServerDto
 {
     public Guid Id { get; init; }
@@ -28,7 +37,7 @@ public record McpServerDto
     public bool HasArguments { get; init; }
     public string? ArgumentsMasked { get; init; }
     public ChatExposureMode ChatExposureMode { get; init; }
-    public IReadOnlyCollection<string> AllowedToolNames { get; init; } = [];
+    public IReadOnlyCollection<McpAllowedToolDto> AllowedTools { get; init; } = [];
     public AiToolExternalSystemType ExternalSystemType { get; init; }
     public AiToolCapabilityKind CapabilityKind { get; init; }
     public AiToolRiskLevel RiskLevel { get; init; }
@@ -46,7 +55,7 @@ public record CreateMcpServerCommand(
     string? Command,
     string Arguments,
     ChatExposureMode ChatExposureMode = ChatExposureMode.Disabled,
-    IReadOnlyCollection<string>? AllowedToolNames = null,
+    IReadOnlyCollection<McpAllowedToolDto>? AllowedTools = null,
     bool IsEnabled = true,
     AiToolExternalSystemType ExternalSystemType = AiToolExternalSystemType.Unknown,
     AiToolCapabilityKind CapabilityKind = AiToolCapabilityKind.Diagnostics,
@@ -66,7 +75,7 @@ public class CreateMcpServerCommandHandler(IRepository<McpServerInfo> repository
             request.Command,
             request.Arguments,
             request.ChatExposureMode,
-            request.AllowedToolNames,
+            McpAllowedToolMapper.ToDomainTools(request.AllowedTools),
             request.IsEnabled,
             request.ExternalSystemType,
             request.CapabilityKind,
@@ -88,7 +97,7 @@ public record UpdateMcpServerCommand(
     string? Command,
     string Arguments,
     ChatExposureMode ChatExposureMode = ChatExposureMode.Disabled,
-    IReadOnlyCollection<string>? AllowedToolNames = null,
+    IReadOnlyCollection<McpAllowedToolDto>? AllowedTools = null,
     bool IsEnabled = true,
     AiToolExternalSystemType ExternalSystemType = AiToolExternalSystemType.Unknown,
     AiToolCapabilityKind CapabilityKind = AiToolCapabilityKind.Diagnostics,
@@ -116,7 +125,7 @@ public class UpdateMcpServerCommandHandler(IRepository<McpServerInfo> repository
             request.Command,
             arguments,
             request.ChatExposureMode,
-            request.AllowedToolNames,
+            McpAllowedToolMapper.ToDomainTools(request.AllowedTools),
             request.IsEnabled,
             request.ExternalSystemType,
             request.CapabilityKind,
@@ -125,6 +134,33 @@ public class UpdateMcpServerCommandHandler(IRepository<McpServerInfo> repository
         repository.Update(entity);
         await repository.SaveChangesAsync(cancellationToken);
         return Result.Success();
+    }
+}
+
+internal static class McpAllowedToolMapper
+{
+    public static IReadOnlyCollection<McpAllowedTool> ToDomainTools(IReadOnlyCollection<McpAllowedToolDto>? tools)
+    {
+        return (tools ?? [])
+            .Select(tool => new McpAllowedTool(
+                tool.ToolName,
+                tool.ExternalSystemType,
+                tool.CapabilityKind,
+                tool.RiskLevel,
+                tool.ReadOnlyDeclared))
+            .ToArray();
+    }
+
+    public static McpAllowedToolDto ToDto(McpAllowedTool tool)
+    {
+        return new McpAllowedToolDto
+        {
+            ToolName = tool.ToolName,
+            ExternalSystemType = tool.ExternalSystemType,
+            CapabilityKind = tool.CapabilityKind,
+            RiskLevel = tool.RiskLevel,
+            ReadOnlyDeclared = tool.ReadOnlyDeclared
+        };
     }
 }
 
@@ -248,35 +284,35 @@ internal static class McpServerDtoMapper
             HasArguments = !string.IsNullOrEmpty(server.Arguments),
             ArgumentsMasked = string.IsNullOrEmpty(server.Arguments) ? null : "******",
             ChatExposureMode = server.ChatExposureMode,
-            AllowedToolNames = server.AllowedToolNames,
+            AllowedTools = server.AllowedTools.Select(McpAllowedToolMapper.ToDto).ToArray(),
             ExternalSystemType = server.ExternalSystemType,
             CapabilityKind = server.CapabilityKind,
             RiskLevel = server.RiskLevel,
-            ToolPolicySummaries = BuildToolPolicySummaries(server.AllowedToolNames, policies),
+            ToolPolicySummaries = BuildToolPolicySummaries(server.AllowedTools, policies),
             IsEnabled = server.IsEnabled
         };
     }
 
     private static IReadOnlyCollection<McpToolPolicySummaryDto> BuildToolPolicySummaries(
-        IReadOnlyCollection<string> allowedToolNames,
+        IReadOnlyCollection<McpAllowedTool> allowedTools,
         IReadOnlyCollection<ApprovalPolicy>? policies)
     {
-        if (allowedToolNames.Count == 0)
+        if (allowedTools.Count == 0)
         {
             return [];
         }
 
         var effectivePolicies = policies ?? [];
-        return allowedToolNames
-            .Select(toolName =>
+        return allowedTools
+            .Select(tool =>
             {
                 var matchedPolicies = effectivePolicies
-                    .Where(policy => policy.ToolNames.Contains(toolName, StringComparer.OrdinalIgnoreCase))
+                    .Where(policy => policy.ToolNames.Contains(tool.ToolName, StringComparer.OrdinalIgnoreCase))
                     .ToArray();
 
                 return new McpToolPolicySummaryDto
                 {
-                    ToolName = toolName,
+                    ToolName = tool.ToolName,
                     RequiresApproval = matchedPolicies.Length > 0,
                     RequiresOnsiteAttestation = matchedPolicies.Any(policy => policy.RequiresOnsiteAttestation)
                 };

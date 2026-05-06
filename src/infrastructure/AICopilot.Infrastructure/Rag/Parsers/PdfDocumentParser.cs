@@ -9,49 +9,55 @@ public class PdfDocumentParser : IDocumentParser
 {
     public string[] SupportedExtensions => [".pdf"];
 
-    public Task<string> ParseAsync(Stream stream, CancellationToken cancellationToken = default)
+    public async Task<string> ParseAsync(Stream stream, CancellationToken cancellationToken = default)
     {
-        return Task.Run(() =>
+        try
         {
-            var sb = new StringBuilder();
-
-            try
+            using var buffer = stream.CanSeek ? null : await CopyToSeekableStreamAsync(stream, cancellationToken);
+            var pdfStream = buffer ?? stream;
+            if (pdfStream.CanSeek)
             {
-                using var buffer = stream.CanSeek ? null : CopyToSeekableStream(stream, cancellationToken);
-                var pdfStream = buffer ?? stream;
-                if (pdfStream.CanSeek)
-                {
-                    pdfStream.Position = 0;
-                }
-
-                using var pdfDocument = PdfDocument.Open(pdfStream);
-
-                foreach (var page in pdfDocument.GetPages())
-                {
-                    // 提取每一页的文本，并用换行符分隔
-                    // 实际生产中可能需要更复杂的版面分析算法来处理多栏排版
-                    var text = page.Text;
-                    if (!string.IsNullOrWhiteSpace(text))
-                    {
-                        sb.AppendLine(text);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException("PDF 解析失败，文件可能已损坏或加密。", ex);
+                pdfStream.Position = 0;
             }
 
-            return sb.ToString();
-        }, cancellationToken);
+            return await Task.Run(() => ExtractText(pdfStream, cancellationToken), cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException("PDF 解析失败，文件可能已损坏或加密。", ex);
+        }
     }
 
-    private static MemoryStream CopyToSeekableStream(Stream stream, CancellationToken cancellationToken)
+    private static string ExtractText(Stream stream, CancellationToken cancellationToken)
+    {
+        var sb = new StringBuilder();
+        using var pdfDocument = PdfDocument.Open(stream);
+
+        foreach (var page in pdfDocument.GetPages())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var text = page.Text;
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                sb.AppendLine(text);
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    private static async Task<MemoryStream> CopyToSeekableStreamAsync(
+        Stream stream,
+        CancellationToken cancellationToken)
     {
         var buffer = new MemoryStream();
         try
         {
-            stream.CopyTo(buffer);
+            await stream.CopyToAsync(buffer, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             buffer.Position = 0;
             return buffer;

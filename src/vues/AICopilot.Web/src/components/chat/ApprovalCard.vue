@@ -27,6 +27,9 @@ const onsiteConfirmed = ref(false)
 const request = computed(() => props.chunk.request)
 const status = computed(() => props.chunk.status)
 const isPending = computed(() => status.value === 'pending')
+const hasStrictIdentity = computed(
+  () => Boolean(request.value.targetType) && Boolean(request.value.targetName) && Boolean(request.value.toolName)
+)
 const targetText = computed(() => {
   if (!request.value.targetType && !request.value.targetName) {
     return ''
@@ -58,7 +61,7 @@ const attestationExpiresText = computed(() => {
 })
 
 function handleApprove() {
-  if (props.isSubmitting || !isPending.value) {
+  if (props.isSubmitting || !isPending.value || !hasStrictIdentity.value) {
     return
   }
 
@@ -69,7 +72,7 @@ function handleApprove() {
 }
 
 function handleReject() {
-  if (props.isSubmitting || !isPending.value) {
+  if (props.isSubmitting || !isPending.value || !hasStrictIdentity.value) {
     return
   }
 
@@ -107,6 +110,9 @@ function handleReject() {
         <span class="label">运行标识</span>
         <code class="function-name muted">{{ request.runtimeName }}</code>
       </div>
+      <div v-if="!hasStrictIdentity" class="identity-warning">
+        审批请求缺少工具身份，请刷新会话后重新发起。
+      </div>
 
       <div class="arguments-section">
         <span class="label">参数详情</span>
@@ -130,13 +136,13 @@ function handleReject() {
 
     <div class="card-footer">
       <template v-if="isPending">
-        <button class="btn btn-reject" @click="handleReject" :disabled="isSubmitting">
+        <button class="btn btn-reject" @click="handleReject" :disabled="isSubmitting || !hasStrictIdentity">
           拒绝执行
         </button>
         <button
           class="btn btn-approve"
           @click="handleApprove"
-          :disabled="isSubmitting || (request.requiresOnsiteAttestation && !onsiteConfirmed)"
+          :disabled="isSubmitting || !hasStrictIdentity || (request.requiresOnsiteAttestation && !onsiteConfirmed)"
         >
           <span v-if="isSubmitting">处理中...</span>
           <span v-else>批准执行</span>
@@ -262,6 +268,15 @@ function handleReject() {
 .function-name.muted {
   background: #f1f5f9;
   color: #475569;
+}
+
+.identity-warning {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #fef2f2;
+  color: #991b1b;
+  font-size: 0.85rem;
+  border: 1px solid #fecaca;
 }
 
 .onsite-panel {

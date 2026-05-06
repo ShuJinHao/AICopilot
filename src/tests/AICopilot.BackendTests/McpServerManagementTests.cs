@@ -25,13 +25,18 @@ public sealed class McpServerManagementTests
                 "dotnet",
                 "server.dll",
                 ChatExposureMode.Advisory,
-                [" Echo ", "echo", "Inspect", " "],
+                [
+                    new McpAllowedToolDto { ToolName = " Echo " },
+                    new McpAllowedToolDto { ToolName = "echo" },
+                    new McpAllowedToolDto { ToolName = "Inspect" },
+                    new McpAllowedToolDto { ToolName = " " }
+                ],
                 true),
             CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
         var server = repository.Items.Should().ContainSingle().Subject;
-        server.AllowedToolNames.Should().Equal("Echo", "Inspect");
+        server.AllowedTools.Select(tool => tool.ToolName).Should().Equal("Echo", "Inspect");
 
         var queryHandler = new GetMcpServerQueryHandler(
             repository,
@@ -53,7 +58,7 @@ public sealed class McpServerManagementTests
             "dotnet",
             "original-server.dll",
             ChatExposureMode.Disabled,
-            ["Echo"],
+            [new McpAllowedTool("Echo")],
             true);
         var repository = new MutableMcpServerRepository(server);
         var handler = new UpdateMcpServerCommandHandler(repository);
@@ -67,7 +72,7 @@ public sealed class McpServerManagementTests
                 "dotnet",
                 "",
                 ChatExposureMode.Advisory,
-                ["Inspect"],
+                [new McpAllowedToolDto { ToolName = "Inspect" }],
                 false),
             CancellationToken.None);
 
@@ -76,7 +81,7 @@ public sealed class McpServerManagementTests
         server.Name.Should().Be("preserve-mcp-updated");
         server.IsEnabled.Should().BeFalse();
         server.ChatExposureMode.Should().Be(ChatExposureMode.Advisory);
-        server.AllowedToolNames.Should().Equal("Inspect");
+        server.AllowedTools.Select(tool => tool.ToolName).Should().Equal("Inspect");
     }
 
     [Fact]
@@ -89,7 +94,7 @@ public sealed class McpServerManagementTests
             "dotnet",
             "server.dll",
             ChatExposureMode.Advisory,
-            ["Echo", "Inspect"],
+            [new McpAllowedTool("Echo"), new McpAllowedTool("Inspect")],
             true);
 
         var serverRepository = new InMemoryReadRepository<McpServerInfo>([server]);
@@ -148,7 +153,7 @@ public sealed class McpServerManagementTests
             "dotnet",
             "alpha.dll",
             ChatExposureMode.ObserveOnly,
-            ["Echo"],
+            [new McpAllowedTool("Echo")],
             true);
 
         var betaServer = new McpServerInfo(
@@ -158,7 +163,7 @@ public sealed class McpServerManagementTests
             "dotnet",
             "beta.dll",
             ChatExposureMode.Advisory,
-            ["Inspect"],
+            [new McpAllowedTool("Inspect")],
             true);
 
         var serverRepository = new InMemoryReadRepository<McpServerInfo>([betaServer, alphaServer]);

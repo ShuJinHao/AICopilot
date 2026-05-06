@@ -1,7 +1,11 @@
 using System.Linq.Expressions;
+using System.Reflection;
+using System.Text.Json;
+using AICopilot.AiGatewayService.Agents;
 using AICopilot.AiGatewayService.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
 using AICopilot.Core.AiGateway.Ids;
+using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Specification;
@@ -17,8 +21,9 @@ public sealed class ToolSafetyAndApprovalIdentityTests
             AiToolExternalSystemType.CloudReadOnly,
             AiToolCapabilityKind.ReadOnlyQuery,
             AiToolRiskLevel.Low,
-            "createDevice",
-            "Create device in Cloud");
+            "queryCreateDevicePlan",
+            "Read Cloud device create plan",
+            readOnlyDeclared: true);
 
         decision.IsAllowed.Should().BeFalse();
         decision.Reason.Should().Contain("forbidden write semantics");
@@ -32,9 +37,93 @@ public sealed class ToolSafetyAndApprovalIdentityTests
             AiToolCapabilityKind.ReadOnlyQuery,
             AiToolRiskLevel.Low,
             "queryDeviceLogs",
-            "Read Cloud device logs");
+            "Read Cloud device logs",
+            readOnlyDeclared: true);
 
         decision.IsAllowed.Should().BeTrue();
+    }
+
+    [Fact]
+    public void CloudReadOnlyToolSafety_ShouldRequireExplicitReadOnlyDeclaration()
+    {
+        var decision = AiToolSafetyPolicy.Evaluate(
+            AiToolExternalSystemType.CloudReadOnly,
+            AiToolCapabilityKind.ReadOnlyQuery,
+            AiToolRiskLevel.Low,
+            "queryDeviceLogs",
+            "Read Cloud device logs");
+
+        decision.IsAllowed.Should().BeFalse();
+        decision.Reason.Should().Contain("read-only");
+    }
+
+    [Theory]
+    [InlineData("getAndSetParameter")]
+    [InlineData("queryAndResetAlarm")]
+    [InlineData("analyzeThenApplyRecipe")]
+    public void CloudReadOnlyToolSafety_ShouldRejectReadVerbWithEmbeddedWriteSemantics(string toolName)
+    {
+        var decision = AiToolSafetyPolicy.Evaluate(
+            AiToolExternalSystemType.CloudReadOnly,
+            AiToolCapabilityKind.ReadOnlyQuery,
+            AiToolRiskLevel.Low,
+            toolName,
+            "Read Cloud data only",
+            readOnlyDeclared: true);
+
+        decision.IsAllowed.Should().BeFalse();
+        decision.Reason.Should().Contain("forbidden write semantics");
+    }
+
+    [Fact]
+    public void CloudReadOnlyToolSafety_ShouldRejectWriteSemanticsInSchema()
+    {
+        using var schema = JsonDocument.Parse("""{"type":"object","properties":{"resetMode":{"type":"string"}}}""");
+
+        var decision = AiToolSafetyPolicy.Evaluate(
+            AiToolExternalSystemType.CloudReadOnly,
+            AiToolCapabilityKind.ReadOnlyQuery,
+            AiToolRiskLevel.Low,
+            "queryDeviceLogs",
+            "Read Cloud device logs",
+            readOnlyDeclared: true,
+            inputSchema: schema.RootElement);
+
+        decision.IsAllowed.Should().BeFalse();
+        decision.Reason.Should().Contain("forbidden write semantics");
+    }
+
+    [Fact]
+    public void ApprovalIdentityMatches_ShouldRejectMissingRequestIdentity()
+    {
+        var stored = CreateStoredApproval();
+        var request = new ApprovalDecisionStreamRequest(
+            Guid.NewGuid(),
+            stored.CallId,
+            "approve",
+            OnsiteConfirmed: true);
+
+        InvokeApprovalIdentityMatches(request, stored).Should().BeFalse();
+    }
+
+    [Fact]
+    public void ApprovalIdentityMatches_ShouldRejectStoredApprovalWithoutIdentity()
+    {
+        var stored = CreateStoredApproval(targetType: null, targetName: null, toolName: null);
+        var request = CreateApprovalDecisionRequest(stored);
+
+        InvokeApprovalIdentityMatches(request, stored).Should().BeFalse();
+    }
+
+    [Fact]
+    public void ApprovalIdentityMatches_ShouldRequireExactToolIdentity()
+    {
+        var stored = CreateStoredApproval();
+        var matchedRequest = CreateApprovalDecisionRequest(stored);
+        var mismatchedRequest = matchedRequest with { TargetName = "server-b" };
+
+        InvokeApprovalIdentityMatches(matchedRequest, stored).Should().BeTrue();
+        InvokeApprovalIdentityMatches(mismatchedRequest, stored).Should().BeFalse();
     }
 
     [Fact]
@@ -133,5 +222,47 @@ public sealed class ToolSafetyAndApprovalIdentityTests
             var query = policies.AsQueryable();
             return specification?.FilterCondition is null ? query : query.Where(specification.FilterCondition);
         }
+    }
+
+    private static StoredToolApprovalRequest CreateStoredApproval(
+        string? targetType = "McpServer",
+        string? targetName = "server-a",
+        string? toolName = "query")
+    {
+        return new StoredToolApprovalRequest(
+            "request-1",
+            "call-1",
+            "Mcp",
+            toolName,
+            targetName,
+            [],
+            targetType,
+            targetName,
+            "mcp__server_a__query");
+    }
+
+    private static ApprovalDecisionStreamRequest CreateApprovalDecisionRequest(
+        StoredToolApprovalRequest storedApproval)
+    {
+        return new ApprovalDecisionStreamRequest(
+            Guid.NewGuid(),
+            storedApproval.CallId,
+            "approve",
+            OnsiteConfirmed: true,
+            storedApproval.TargetType,
+            storedApproval.TargetName,
+            storedApproval.ToolName);
+    }
+
+    private static bool InvokeApprovalIdentityMatches(
+        ApprovalDecisionStreamRequest request,
+        StoredToolApprovalRequest storedApproval)
+    {
+        var method = typeof(ApprovalDecisionStreamHandler).GetMethod(
+            "ApprovalIdentityMatches",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        method.Should().NotBeNull();
+        return (bool)method!.Invoke(null, [request, storedApproval])!;
     }
 }

@@ -9,7 +9,7 @@ namespace AICopilot.Core.McpServer.Aggregates.McpServerInfo;
 /// </summary>
 public class McpServerInfo : IAggregateRoot<McpServerId>
 {
-    private readonly List<string> _allowedToolNames = [];
+    private List<McpAllowedTool> _allowedTools = [];
 
     protected McpServerInfo()
     {
@@ -22,7 +22,7 @@ public class McpServerInfo : IAggregateRoot<McpServerId>
         string? command,
         string arguments,
         ChatExposureMode chatExposureMode = ChatExposureMode.Disabled,
-        IEnumerable<string>? allowedToolNames = null,
+        IEnumerable<McpAllowedTool>? allowedTools = null,
         bool isEnabled = true,
         AiToolExternalSystemType externalSystemType = AiToolExternalSystemType.Unknown,
         AiToolCapabilityKind capabilityKind = AiToolCapabilityKind.Diagnostics,
@@ -36,7 +36,7 @@ public class McpServerInfo : IAggregateRoot<McpServerId>
             command,
             arguments,
             chatExposureMode,
-            allowedToolNames,
+            allowedTools,
             isEnabled,
             externalSystemType,
             capabilityKind,
@@ -59,7 +59,7 @@ public class McpServerInfo : IAggregateRoot<McpServerId>
 
     public ChatExposureMode ChatExposureMode { get; private set; } = ChatExposureMode.Disabled;
 
-    public IReadOnlyCollection<string> AllowedToolNames => _allowedToolNames.AsReadOnly();
+    public IReadOnlyCollection<McpAllowedTool> AllowedTools => _allowedTools.AsReadOnly();
 
     public AiToolExternalSystemType ExternalSystemType { get; private set; } = AiToolExternalSystemType.Unknown;
 
@@ -76,7 +76,7 @@ public class McpServerInfo : IAggregateRoot<McpServerId>
         string? command,
         string arguments,
         ChatExposureMode chatExposureMode,
-        IEnumerable<string>? allowedToolNames,
+        IEnumerable<McpAllowedTool>? allowedTools,
         bool isEnabled,
         AiToolExternalSystemType externalSystemType = AiToolExternalSystemType.Unknown,
         AiToolCapabilityKind capabilityKind = AiToolCapabilityKind.Diagnostics,
@@ -95,8 +95,8 @@ public class McpServerInfo : IAggregateRoot<McpServerId>
         RiskLevel = riskLevel;
         IsEnabled = isEnabled;
 
-        _allowedToolNames.Clear();
-        _allowedToolNames.AddRange(NormalizeAllowedToolNames(allowedToolNames));
+        _allowedTools.Clear();
+        _allowedTools.AddRange(NormalizeAllowedTools(allowedTools, externalSystemType, capabilityKind, riskLevel));
     }
 
     private static void Validate(
@@ -163,11 +163,62 @@ public class McpServerInfo : IAggregateRoot<McpServerId>
         }
     }
 
-    private static IEnumerable<string> NormalizeAllowedToolNames(IEnumerable<string>? allowedToolNames)
+    private static IEnumerable<McpAllowedTool> NormalizeAllowedTools(
+        IEnumerable<McpAllowedTool>? allowedTools,
+        AiToolExternalSystemType serverExternalSystemType,
+        AiToolCapabilityKind serverCapabilityKind,
+        AiToolRiskLevel serverRiskLevel)
     {
-        return (allowedToolNames ?? [])
-            .Where(name => !string.IsNullOrWhiteSpace(name))
-            .Select(name => name.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase);
+        return (allowedTools ?? [])
+            .Where(tool => !string.IsNullOrWhiteSpace(tool.ToolName))
+            .Select(tool => tool.Normalize(serverExternalSystemType, serverCapabilityKind, serverRiskLevel))
+            .GroupBy(tool => tool.ToolName, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First());
+    }
+}
+
+public sealed record McpAllowedTool(
+    string ToolName,
+    AiToolExternalSystemType? ExternalSystemType = null,
+    AiToolCapabilityKind? CapabilityKind = null,
+    AiToolRiskLevel? RiskLevel = null,
+    bool ReadOnlyDeclared = false)
+{
+    public McpAllowedTool Normalize(
+        AiToolExternalSystemType serverExternalSystemType,
+        AiToolCapabilityKind serverCapabilityKind,
+        AiToolRiskLevel serverRiskLevel)
+    {
+        if (!Enum.IsDefined(typeof(AiToolExternalSystemType), ExternalSystemType ?? serverExternalSystemType))
+        {
+            throw new ArgumentOutOfRangeException(nameof(ExternalSystemType), ExternalSystemType, "MCP tool external system type is invalid.");
+        }
+
+        if (!Enum.IsDefined(typeof(AiToolCapabilityKind), CapabilityKind ?? serverCapabilityKind))
+        {
+            throw new ArgumentOutOfRangeException(nameof(CapabilityKind), CapabilityKind, "MCP tool capability kind is invalid.");
+        }
+
+        if (!Enum.IsDefined(typeof(AiToolRiskLevel), RiskLevel ?? serverRiskLevel))
+        {
+            throw new ArgumentOutOfRangeException(nameof(RiskLevel), RiskLevel, "MCP tool risk level is invalid.");
+        }
+
+        return this with { ToolName = ToolName.Trim() };
+    }
+
+    public AiToolExternalSystemType EffectiveExternalSystemType(AiToolExternalSystemType serverDefault)
+    {
+        return ExternalSystemType ?? serverDefault;
+    }
+
+    public AiToolCapabilityKind EffectiveCapabilityKind(AiToolCapabilityKind serverDefault)
+    {
+        return CapabilityKind ?? serverDefault;
+    }
+
+    public AiToolRiskLevel EffectiveRiskLevel(AiToolRiskLevel serverDefault)
+    {
+        return RiskLevel ?? serverDefault;
     }
 }

@@ -38,7 +38,7 @@ public class McpServerBootstrap(
                 continue;
             }
 
-            if (mcpServerInfo.AllowedToolNames.Count == 0)
+            if (mcpServerInfo.AllowedTools.Count == 0)
             {
                 logger.LogInformation(
                     "MCP server {Name} has no explicit allowlist, so it remains closed to the production chat toolchain.",
@@ -56,10 +56,13 @@ public class McpServerBootstrap(
             logger.LogInformation("Connected to MCP server {Name}.", mcpServerInfo.Name);
 
             var tools = await mcpClient.ListToolsAsync(cancellationToken: ct);
-            var allowlist = new HashSet<string>(mcpServerInfo.AllowedToolNames, StringComparer.OrdinalIgnoreCase);
+            var allowlist = mcpServerInfo.AllowedTools.ToDictionary(
+                tool => tool.ToolName,
+                StringComparer.OrdinalIgnoreCase);
             var exposedTools = tools
-                .Where(tool => allowlist.Contains(tool.Name))
-                .Where(tool => CanExposeTool(mcpServerInfo, tool))
+                .Where(tool => allowlist.ContainsKey(tool.Name))
+                .Select(tool => (Tool: tool, Exposure: allowlist[tool.Name]))
+                .Where(candidate => CanExposeTool(mcpServerInfo, candidate.Exposure, candidate.Tool))
                 .ToArray();
 
             logger.LogInformation(
@@ -119,16 +122,17 @@ public class McpServerBootstrap(
 
     private void RegisterMcpPlugin(
         McpServerInfo mcpServerInfo,
-        IList<McpClientTool> mcpTools,
+        IList<(McpClientTool Tool, McpAllowedTool Exposure)> mcpTools,
         HashSet<string> protectedNames)
     {
         var tools = mcpTools
-            .Select(tool => ToToolDefinition(
+            .Select(candidate => ToToolDefinition(
                 mcpServerInfo.Name,
-                mcpServerInfo.ExternalSystemType,
-                mcpServerInfo.CapabilityKind,
-                mcpServerInfo.RiskLevel,
-                tool,
+                candidate.Exposure.EffectiveExternalSystemType(mcpServerInfo.ExternalSystemType),
+                candidate.Exposure.EffectiveCapabilityKind(mcpServerInfo.CapabilityKind),
+                candidate.Exposure.EffectiveRiskLevel(mcpServerInfo.RiskLevel),
+                candidate.Exposure.ReadOnlyDeclared,
+                candidate.Tool,
                 protectedNames))
             .ToArray();
 
@@ -148,6 +152,7 @@ public class McpServerBootstrap(
         AiToolExternalSystemType externalSystemType,
         AiToolCapabilityKind capabilityKind,
         AiToolRiskLevel riskLevel,
+        bool readOnlyDeclared,
         McpClientTool tool,
         HashSet<string> protectedNames)
     {
@@ -167,6 +172,7 @@ public class McpServerBootstrap(
             ExternalSystemType = externalSystemType,
             CapabilityKind = capabilityKind,
             RiskLevel = riskLevel,
+            ReadOnlyDeclared = readOnlyDeclared,
             JsonSchema = tool.JsonSchema.Clone(),
             ReturnJsonSchema = tool.ReturnJsonSchema?.Clone(),
             InvokeAsync = async (context, cancellationToken) =>
@@ -182,14 +188,20 @@ public class McpServerBootstrap(
         };
     }
 
-    private bool CanExposeTool(McpServerInfo server, McpClientTool tool)
+    private bool CanExposeTool(McpServerInfo server, McpAllowedTool exposure, McpClientTool tool)
     {
+        var externalSystemType = exposure.EffectiveExternalSystemType(server.ExternalSystemType);
+        var capabilityKind = exposure.EffectiveCapabilityKind(server.CapabilityKind);
+        var riskLevel = exposure.EffectiveRiskLevel(server.RiskLevel);
         var decision = AiToolSafetyPolicy.Evaluate(
-            server.ExternalSystemType,
-            server.CapabilityKind,
-            server.RiskLevel,
+            externalSystemType,
+            capabilityKind,
+            riskLevel,
             tool.Name,
-            tool.Description);
+            tool.Description,
+            exposure.ReadOnlyDeclared,
+            tool.JsonSchema,
+            tool.ReturnJsonSchema);
 
         if (decision.IsAllowed)
         {
