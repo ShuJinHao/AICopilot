@@ -258,7 +258,11 @@ public sealed class ToolSafetyAndApprovalIdentityTests
         ApprovalDecisionStreamRequest request,
         StoredToolApprovalRequest storedApproval)
     {
-        var method = typeof(ApprovalDecisionStreamHandler).GetMethod(
+        var validatorType = typeof(ApprovalDecisionStreamHandler).Assembly.GetType(
+            "AICopilot.AiGatewayService.Agents.ApprovalDecisionValidator");
+
+        validatorType.Should().NotBeNull();
+        var method = validatorType!.GetMethod(
             "ApprovalIdentityMatches",
             BindingFlags.NonPublic | BindingFlags.Static);
 

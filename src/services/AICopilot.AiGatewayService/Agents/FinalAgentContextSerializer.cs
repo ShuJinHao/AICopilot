@@ -142,6 +142,12 @@ public sealed class FinalAgentContextSerializer(
         {
             identity = mappedIdentity;
         }
+        else if (identity is null)
+        {
+            identity = FindUniqueIdentityByRawToolName(
+                toolIdentities.Values,
+                request.ToolCall.ToolName ?? request.ToolCall.Name);
+        }
 
         return new StoredToolApprovalRequest(
             request.RequestId,
@@ -156,6 +162,18 @@ public sealed class FinalAgentContextSerializer(
             identity?.TargetType.ToString(),
             identity?.TargetName,
             request.ToolCall.Name);
+    }
+
+    private static AiToolIdentity? FindUniqueIdentityByRawToolName(
+        IEnumerable<AiToolIdentity> identities,
+        string rawToolName)
+    {
+        var matches = identities
+            .Where(identity => string.Equals(identity.ToolName, rawToolName, StringComparison.OrdinalIgnoreCase))
+            .Take(2)
+            .ToArray();
+
+        return matches.Length == 1 ? matches[0] : null;
     }
 
     private static AiToolApprovalRequest ToRuntimeApprovalRequest(StoredToolApprovalRequest storedApproval)

@@ -29,10 +29,10 @@ public static class DependencyInjection
         builder.Services.TryAddSingleton<ISessionExecutionLock, InMemorySessionExecutionLock>();
         builder.Services.AddSingleton<IOperationalBoundaryPolicy, ManufacturingOperationalBoundaryPolicy>();
         builder.Services.AddSingleton<IManufacturingSceneClassifier, KeywordManufacturingSceneClassifier>();
-        builder.Services.AddSingleton<ITextTokenEstimator, SharpTokenTextTokenEstimator>();
         builder.Services.AddSingleton<ITokenBudgetPolicy, ChatTokenBudgetPolicy>();
         builder.Services.AddSingleton<IChatTokenTelemetry, ChatTokenTelemetry>();
         builder.Services.AddScoped<ApprovalRequirementResolver>();
+        builder.Services.AddScoped<IApprovalRequirementReadService, ApprovalRequirementReadService>();
         builder.Services.AddScoped<ApprovalToolResolver>();
         builder.Services.AddScoped<IFinalAgentContextSerializer, FinalAgentContextSerializer>();
         builder.Services.AddScoped<SessionMessagePersistenceService>();

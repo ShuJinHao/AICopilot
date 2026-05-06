@@ -108,7 +108,7 @@ public sealed class SecurityHardeningTests
             "services",
             "AICopilot.AiGatewayService",
             "Agents",
-            "ChatStreamRequest.cs"));
+            "ChatStreamHandler.cs"));
         chatStreamSource.Should().Contain("currentUser.Id != session.UserId");
         chatStreamSource.Should().Contain("sessionExecutionLock.AcquireAsync(request.SessionId");
         chatStreamSource.Should().Contain("finalAgentContextStore.GetAsync(request.SessionId");
@@ -1041,6 +1041,34 @@ public sealed class SecurityHardeningTests
             "Host=localhost;Database=test",
             (DbProviderType)999);
         invalidProvider.Should().Throw<ArgumentOutOfRangeException>();
+
+        var enabledCloudWithoutVerifiedCredential = () => new BusinessDatabase(
+            "cloud-readonly",
+            "cloud readonly source",
+            "Host=localhost;Database=test",
+            DbProviderType.PostgreSql,
+            isReadOnly: true,
+            BusinessDataExternalSystemType.CloudReadOnly,
+            readOnlyCredentialVerified: false);
+        enabledCloudWithoutVerifiedCredential.Should().Throw<InvalidOperationException>()
+            .WithMessage("*verified read-only credential*");
+
+        var cloudDatabase = new BusinessDatabase(
+            "cloud-readonly",
+            "cloud readonly source",
+            "Host=localhost;Database=test",
+            DbProviderType.PostgreSql,
+            isReadOnly: true,
+            BusinessDataExternalSystemType.CloudReadOnly,
+            readOnlyCredentialVerified: true);
+
+        var enablingCloudWithoutVerifiedCredential = () => cloudDatabase.UpdateSettings(
+            isEnabled: true,
+            isReadOnly: true,
+            BusinessDataExternalSystemType.CloudReadOnly,
+            readOnlyCredentialVerified: false);
+        enablingCloudWithoutVerifiedCredential.Should().Throw<InvalidOperationException>()
+            .WithMessage("*verified read-only credential*");
 
         typeof(BusinessDatabase).GetProperty(nameof(BusinessDatabase.Id))!
             .SetMethod!.IsPrivate.Should().BeTrue();

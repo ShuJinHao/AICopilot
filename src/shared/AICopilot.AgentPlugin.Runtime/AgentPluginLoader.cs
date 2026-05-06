@@ -4,7 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace AICopilot.AgentPlugin;
 
-public class AgentPluginLoader
+public sealed class AgentPluginLoader : IAgentPluginCatalog, IAgentPluginRegistry
 {
     private readonly IServiceProvider serviceProvider;
     private readonly Dictionary<string, IAgentPlugin> plugins = new(StringComparer.OrdinalIgnoreCase);

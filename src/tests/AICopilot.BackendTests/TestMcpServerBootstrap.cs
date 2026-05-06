@@ -1,9 +1,9 @@
 ﻿using System.ComponentModel;
 using System.IO.Pipes;
 using AICopilot.AgentPlugin;
-using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
 using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
 using AICopilot.Infrastructure.Mcp;
+using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Repository;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -17,10 +17,10 @@ namespace AICopilot.BackendTests;
 
 internal sealed class TestMcpServerBootstrap(
     IReadRepository<McpServerInfo> mcpServerRepository,
-    IReadRepository<ApprovalPolicy> approvalPolicyRepository,
+    IApprovalRequirementReadService approvalRequirementReadService,
     AgentPluginLoader agentPluginLoader,
     ILogger<McpServerBootstrap> logger)
-    : McpServerBootstrap(mcpServerRepository, approvalPolicyRepository, agentPluginLoader, logger), IAsyncDisposable
+    : McpServerBootstrap(mcpServerRepository, approvalRequirementReadService, agentPluginLoader, logger), IAsyncDisposable
 {
     private readonly List<IHost> _serverHosts = [];
 

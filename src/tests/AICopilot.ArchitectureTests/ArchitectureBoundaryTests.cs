@@ -82,6 +82,205 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
+    public void McpService_ShouldNotReferenceAiGatewayCore()
+    {
+        var forbidden = new Regex(@"AICopilot\.Core\.AiGateway\.", RegexOptions.Compiled);
+        var violations = ScanSource(Path.Combine("src", "services", "AICopilot.McpService"), forbidden);
+
+        violations.Should().BeEmpty("McpService must read approval requirements through Services.Contracts");
+    }
+
+    [Fact]
+    public void McpRuntime_ShouldNotReferenceApprovalPolicyCore()
+    {
+        var forbidden = new Regex(
+            @"AICopilot\.Core\.AiGateway\.(Aggregates|Specifications)\.ApprovalPolicy|ApprovalPolicy|EnabledApprovalPolicies",
+            RegexOptions.Compiled);
+        var violations = ScanSource(Path.Combine("src", "infrastructure", "AICopilot.Infrastructure", "Mcp"), forbidden);
+
+        violations.Should().BeEmpty("MCP runtime must not depend on AiGateway ApprovalPolicy internals");
+    }
+
+    [Fact]
+    public void ServiceModules_ShouldOnlyReferenceTheirOwnedCoreModule()
+    {
+        var ownedCoreByService = new Dictionary<string, string?>(StringComparer.Ordinal)
+        {
+            ["AICopilot.AiGatewayService"] = "AICopilot.Core.AiGateway",
+            ["AICopilot.DataAnalysisService"] = "AICopilot.Core.DataAnalysis",
+            ["AICopilot.McpService"] = "AICopilot.Core.McpServer",
+            ["AICopilot.RagService"] = "AICopilot.Core.Rag",
+            ["AICopilot.IdentityService"] = null
+        };
+        var serviceRoot = Path.Combine(SolutionRoot, "src", "services");
+        var coreReference = new Regex(@"AICopilot\.Core\.[A-Za-z0-9_.]+", RegexOptions.Compiled);
+        var violations = new List<string>();
+
+        foreach (var (serviceProject, allowedCore) in ownedCoreByService)
+        {
+            var projectRoot = Path.Combine(serviceRoot, serviceProject);
+            violations.AddRange(ScanSource(projectRoot, serviceProject, allowedCore, coreReference));
+            violations.AddRange(ScanProjectReferences(projectRoot, serviceProject, allowedCore));
+        }
+
+        violations.Should().BeEmpty(
+            "service modules must depend only on their owned Core bounded context; cross-module collaboration must go through Services.Contracts");
+    }
+
+    [Fact]
+    public void ServiceRequests_ShouldDeclareAuthorizeRequirementOrBeExplicitlyPublic()
+    {
+        var publicRequests = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "LoginUserCommand",
+            "GetCurrentUserProfileQuery",
+            "GetInitializationStatusQuery"
+        };
+        var requestDeclaration = new Regex(
+            @"public\s+record\s+(\w+)(?:(?!public\s+record)[\s\S])*?:\s*I(Command|Query)",
+            RegexOptions.Compiled);
+        var serviceRoot = Path.Combine(SolutionRoot, "src", "services");
+        var violations = Directory
+            .EnumerateFiles(serviceRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(file =>
+            {
+                var source = File.ReadAllText(file);
+                return requestDeclaration
+                    .Matches(source)
+                    .Select(match =>
+                    {
+                        var contextStart = match.Index;
+                        for (var i = 0; i < 5 && contextStart > 0; i++)
+                        {
+                            var previousLine = source.LastIndexOf('\n', Math.Max(0, contextStart - 2));
+                            contextStart = previousLine < 0 ? 0 : previousLine + 1;
+                        }
+
+                        return new
+                        {
+                            File = file,
+                            LineNumber = source[..match.Index].Count(character => character == '\n') + 1,
+                            RequestName = match.Groups[1].Value,
+                            Context = source[contextStart..match.Index]
+                        };
+                    });
+            })
+            .Where(item => !publicRequests.Contains(item.RequestName))
+            .Where(item => !item.Context.Contains("[AuthorizeRequirement(", StringComparison.Ordinal))
+            .Select(item => $"{Path.GetRelativePath(SolutionRoot, item.File)}:{item.LineNumber}: {item.RequestName}")
+            .ToArray();
+
+        violations.Should().BeEmpty(
+            "service command/query requests must declare permission requirements unless explicitly public");
+    }
+
+    [Fact]
+    public void PreviewPackages_ShouldStayInExplicitDebtWhitelist()
+    {
+        var allowedPreviewPackages = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Microsoft.SemanticKernel.Connectors.Qdrant|1.74.0-preview"
+        };
+        var sourceRoot = Path.Combine(SolutionRoot, "src");
+        var prerelease = new Regex(@"-(preview|alpha|beta|rc)(\.|$)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        var violations = Directory
+            .EnumerateFiles(sourceRoot, "*.csproj", SearchOption.AllDirectories)
+            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(file => XDocument
+                .Load(file)
+                .Descendants("PackageReference")
+                .Select(reference => new
+                {
+                    File = Path.GetRelativePath(SolutionRoot, file),
+                    Include = reference.Attribute("Include")?.Value ?? string.Empty,
+                    Version = reference.Attribute("Version")?.Value ?? string.Empty
+                }))
+            .Where(package => prerelease.IsMatch(package.Version))
+            .Where(package => !allowedPreviewPackages.Contains($"{package.Include}|{package.Version}"))
+            .Select(package => $"{package.File}: {package.Include} {package.Version}")
+            .ToArray();
+
+        violations.Should().BeEmpty("preview packages require explicit user approval and debt tracking");
+    }
+
+    [Fact]
+    public void AgentPluginAbstractions_ShouldNotContainRuntimeLoaderOrDependencyInjection()
+    {
+        var projectRoot = Path.Combine(SolutionRoot, "src", "shared", "AICopilot.AgentPlugin");
+        var projectFile = Path.Combine(projectRoot, "AICopilot.AgentPlugin.csproj");
+        var forbiddenSource = new Regex(
+            @"\bAgentPluginLoader\b|\bAgentPluginRegistrar\b|\bActivatorUtilities\b|Microsoft\.Extensions\.DependencyInjection",
+            RegexOptions.Compiled);
+        var sourceViolations = ScanSource(Path.Combine("src", "shared", "AICopilot.AgentPlugin"), forbiddenSource);
+        var packageViolations = XDocument
+            .Load(projectFile)
+            .Descendants("PackageReference")
+            .Select(reference => reference.Attribute("Include")?.Value ?? string.Empty)
+            .Where(include => include.StartsWith("Microsoft.Extensions.DependencyInjection", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        sourceViolations.Should().BeEmpty("AgentPlugin shared project must contain abstractions only");
+        packageViolations.Should().BeEmpty("AgentPlugin shared project must not depend on DI runtime packages");
+    }
+
+    [Fact]
+    public void PluginRuntime_ShouldOwnAssemblyScanningAndDiActivation()
+    {
+        var runtimeRoot = Path.Combine(
+            SolutionRoot,
+            "src",
+            "shared",
+            "AICopilot.AgentPlugin.Runtime");
+        var forbiddenOutsideRuntime = new Regex(
+            @"\bActivatorUtilities\b|\.GetTypes\(\).*IAgentPlugin|typeof\(IAgentPlugin\)\.IsAssignableFrom",
+            RegexOptions.Compiled);
+        var violations = Directory
+            .EnumerateFiles(Path.Combine(SolutionRoot, "src"), "*.cs", SearchOption.AllDirectories)
+            .Where(file => !file.StartsWith(runtimeRoot, StringComparison.OrdinalIgnoreCase))
+            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}tests{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(file =>
+            {
+                var relativeFile = Path.GetRelativePath(SolutionRoot, file);
+                return File.ReadLines(file)
+                    .Select((line, index) => new { Line = line.Trim(), LineNumber = index + 1 })
+                    .Where(item => item.Line.Length > 0 && !item.Line.StartsWith("//", StringComparison.Ordinal))
+                    .Where(item => forbiddenOutsideRuntime.IsMatch(item.Line))
+                    .Select(item => $"{relativeFile}:{item.LineNumber}: {item.Line}");
+            })
+            .ToArray();
+
+        violations.Should().BeEmpty("plugin assembly scanning and DI activation belong in AgentPlugin.Runtime");
+    }
+
+    [Fact]
+    public void ServiceProjects_ShouldNotReferenceSharpTokenImplementation()
+    {
+        var serviceRoot = Path.Combine(SolutionRoot, "src", "services");
+        var sourceViolations = ScanSource(Path.Combine("src", "services"), new Regex(@"\bSharpToken\b", RegexOptions.Compiled));
+        var packageViolations = Directory
+            .EnumerateFiles(serviceRoot, "*.csproj", SearchOption.AllDirectories)
+            .SelectMany(file => XDocument
+                .Load(file)
+                .Descendants("PackageReference")
+                .Select(reference => new
+                {
+                    File = Path.GetRelativePath(SolutionRoot, file),
+                    Include = reference.Attribute("Include")?.Value ?? string.Empty
+                }))
+            .Where(package => string.Equals(package.Include, "SharpToken", StringComparison.OrdinalIgnoreCase))
+            .Select(package => $"{package.File}: {package.Include}")
+            .ToArray();
+
+        sourceViolations.Should().BeEmpty("service layer must depend on ITextTokenEstimator, not SharpToken");
+        packageViolations.Should().BeEmpty("service projects must not reference SharpToken directly");
+    }
+
+    [Fact]
     public void ServicesAndCore_ShouldNotReferencePersistenceOrEventBusImplementations()
     {
         var forbidden = new Regex(
@@ -1065,6 +1264,87 @@ public sealed class ArchitectureBoundaryTests
         }
 
         return violations;
+    }
+
+    private static IReadOnlyList<string> ScanSource(
+        string projectRoot,
+        string serviceProject,
+        string? allowedCore,
+        Regex coreReference)
+    {
+        if (!Directory.Exists(projectRoot))
+        {
+            return [];
+        }
+
+        var violations = new List<string>();
+        foreach (var file in Directory.EnumerateFiles(projectRoot, "*.cs", SearchOption.AllDirectories))
+        {
+            if (file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)
+                || file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var lineNumber = 0;
+            foreach (var rawLine in File.ReadLines(file))
+            {
+                lineNumber++;
+                var line = rawLine.Trim();
+                if (line.Length == 0 || line.StartsWith("//", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                foreach (Match match in coreReference.Matches(line))
+                {
+                    var referencedCore = NormalizeCoreReference(match.Value);
+                    if (allowedCore is not null
+                        && string.Equals(referencedCore, allowedCore, StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    violations.Add(
+                        $"{serviceProject}: {Path.GetRelativePath(SolutionRoot, file)}:{lineNumber}: {referencedCore}");
+                }
+            }
+        }
+
+        return violations;
+    }
+
+    private static IReadOnlyList<string> ScanProjectReferences(
+        string projectRoot,
+        string serviceProject,
+        string? allowedCore)
+    {
+        var projectFile = Path.Combine(projectRoot, $"{serviceProject}.csproj");
+        if (!File.Exists(projectFile))
+        {
+            return [];
+        }
+
+        var violations = XDocument
+            .Load(projectFile)
+            .Descendants("ProjectReference")
+            .Select(reference => reference.Attribute("Include")?.Value)
+            .Where(include => !string.IsNullOrWhiteSpace(include))
+            .Select(include => include!.Replace('/', Path.DirectorySeparatorChar))
+            .Where(include => include.Contains($"{Path.DirectorySeparatorChar}Core{Path.DirectorySeparatorChar}AICopilot.Core.", StringComparison.OrdinalIgnoreCase))
+            .Select(include => NormalizeCoreReference(Path.GetFileNameWithoutExtension(include)))
+            .Where(referencedCore => allowedCore is null
+                                     || !string.Equals(referencedCore, allowedCore, StringComparison.Ordinal))
+            .Select(referencedCore => $"{serviceProject}: project reference {referencedCore}")
+            .ToArray();
+
+        return violations;
+    }
+
+    private static string NormalizeCoreReference(string value)
+    {
+        var match = Regex.Match(value, @"AICopilot\.Core\.(AiGateway|DataAnalysis|McpServer|Rag)", RegexOptions.IgnoreCase);
+        return match.Success ? match.Value : value;
     }
 
     private static string FindSolutionRoot()

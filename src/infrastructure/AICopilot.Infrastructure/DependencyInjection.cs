@@ -11,6 +11,7 @@ using AICopilot.Infrastructure.Rag;
 using AICopilot.Infrastructure.Rag.Parsers;
 using AICopilot.Infrastructure.Rag.TokenCounter;
 using AICopilot.Infrastructure.Storage;
+using AICopilot.AiGatewayService.Safety;
 using AICopilot.Services.Contracts;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -34,6 +35,7 @@ public static class DependencyInjection
         builder.Services.AddSingleton<IFileStorageService, LocalFileStorageService>();
         builder.Services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
         builder.Services.AddScoped<IChatClientProvider, OpenAiChatClientProvider>();
+        builder.Services.AddSingleton<ITextTokenEstimator, SharpTokenTextTokenEstimator>();
         builder.AddDocumentParsers();
         builder.Services.AddSingleton<ISessionExecutionLock>(serviceProvider =>
         {

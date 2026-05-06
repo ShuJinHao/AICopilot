@@ -14,17 +14,17 @@ public class IntentRoutingAgentBuilder
     private readonly IKnowledgeBaseReadService _knowledgeBaseReadService;
     private readonly IBusinessDatabaseReadService _businessDatabaseReadService;
     private readonly IntentRoutingPromptComposer _promptComposer;
-    private readonly AgentPluginLoader _pluginLoader;
+    private readonly IAgentPluginCatalog _pluginCatalog;
 
     public IntentRoutingAgentBuilder(
         ChatAgentFactory agentFactory,
-        AgentPluginLoader pluginLoader,
+        IAgentPluginCatalog pluginCatalog,
         IKnowledgeBaseReadService knowledgeBaseReadService,
         IBusinessDatabaseReadService businessDatabaseReadService,
         IntentRoutingPromptComposer promptComposer)
     {
         _agentFactory = agentFactory;
-        _pluginLoader = pluginLoader;
+        _pluginCatalog = pluginCatalog;
         _knowledgeBaseReadService = knowledgeBaseReadService;
         _businessDatabaseReadService = businessDatabaseReadService;
         _promptComposer = promptComposer;
@@ -35,7 +35,7 @@ public class IntentRoutingAgentBuilder
         var builder = new StringBuilder();
         builder.AppendLine("- General.Chat: 闲聊、打招呼、知识解释、诊断建议类自由问答，或无法归类的问题。");
 
-        foreach (var plugin in _pluginLoader.GetAllPlugin().Where(plugin => plugin.ChatExposureMode.CanExposeInChat()))
+        foreach (var plugin in _pluginCatalog.GetAllPlugin().Where(plugin => plugin.ChatExposureMode.CanExposeInChat()))
         {
             builder.AppendLine($"- Action.{plugin.Name}: {plugin.Description}");
         }

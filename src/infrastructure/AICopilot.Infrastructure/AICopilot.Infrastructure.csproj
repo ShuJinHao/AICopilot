@@ -25,6 +25,7 @@
     <ProjectReference Include="..\AICopilot.Embedding\AICopilot.Embedding.csproj" />
     <ProjectReference Include="..\AICopilot.EntityFrameworkCore\AICopilot.EntityFrameworkCore.csproj" />
     <ProjectReference Include="..\AICopilot.EventBus\AICopilot.EventBus.csproj" />
+    <ProjectReference Include="..\..\services\AICopilot.AiGatewayService\AICopilot.AiGatewayService.csproj" />
     <ProjectReference Include="..\..\shared\AICopilot.AgentPlugin\AICopilot.AgentPlugin.csproj" />
   </ItemGroup>
 

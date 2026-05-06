@@ -33,6 +33,7 @@
   </Folder>
   <Folder Name="/src/shared/">
     <Project Path="src/shared/AICopilot.AgentPlugin/AICopilot.AgentPlugin.csproj" Id="f31c1792-6f2b-4297-a87a-6d4962c5dabd" />
+    <Project Path="src/shared/AICopilot.AgentPlugin.Runtime/AICopilot.AgentPlugin.Runtime.csproj" />
     <Project Path="src/shared/AICopilot.SharedKernel/AICopilot.SharedKernel.csproj" Id="9d341780-8e35-4092-92b5-1e3356ae8efa" />
     <Project Path="src/shared/AICopilot.Visualization/AICopilot.Visualization.csproj" Id="1ca00ef7-e8d3-41ae-bb71-4915e45478ce" />
   </Folder>
