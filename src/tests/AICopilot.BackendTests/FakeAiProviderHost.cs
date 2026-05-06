@@ -1448,11 +1448,6 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
         }
 
         using var document = JsonDocument.Parse(jsonText);
-        if (!document.RootElement.TryGetProperty("data", out var dataElement) || dataElement.ValueKind != JsonValueKind.Array)
-        {
-            return false;
-        }
-
         var queryScope = GetSemanticScope(document.RootElement);
         if (document.RootElement.TryGetProperty("semantic_summary", out var summaryElement)
             && summaryElement.ValueKind == JsonValueKind.Object)
@@ -1462,6 +1457,14 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
             {
                 return true;
             }
+        }
+
+        if ((!document.RootElement.TryGetProperty("business_data_preview", out var dataElement)
+                || dataElement.ValueKind != JsonValueKind.Array)
+            && (!document.RootElement.TryGetProperty("data", out dataElement)
+                || dataElement.ValueKind != JsonValueKind.Array))
+        {
+            return false;
         }
 
         var rowCount = dataElement.GetArrayLength();
@@ -1521,6 +1524,11 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
 
     private static string GetSemanticScope(JsonElement root)
     {
+        if (TryGetPropertyCaseInsensitive(root, "query_scope", out var queryScopeElement))
+        {
+            return queryScopeElement.ToString();
+        }
+
         if (!root.TryGetProperty("analysis", out var analysisElement)
             || !analysisElement.TryGetProperty("description", out var descriptionElement))
         {
@@ -1600,6 +1608,11 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
         foreach (var metric in metricsElement.EnumerateArray())
         {
             var label = GetSummaryString(metric, "label");
+            if (string.IsNullOrWhiteSpace(label))
+            {
+                label = GetSummaryString(metric, "name");
+            }
+
             var value = GetSummaryString(metric, "value");
             if (!string.IsNullOrWhiteSpace(label) && !string.IsNullOrWhiteSpace(value))
             {

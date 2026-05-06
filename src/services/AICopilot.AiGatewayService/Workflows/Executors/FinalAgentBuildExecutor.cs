@@ -230,7 +230,7 @@ public class FinalAgentBuildExecutor(
             requirements.Add("关键记录控制在 1 到 3 条，优先选择最能支撑结论的记录。");
             requirements.Add("需要明确说明本次回答所依据的筛选条件、设备编码、日志级别、工序或时间范围（如果参考信息中存在）。");
             requirements.Add("如果查询结果为空，请直接说明未找到匹配数据。");
-            requirements.Add("严禁暴露 SQL、数据库名、物理表名、视图名、连接信息或其他内部实现细节。");
+            requirements.Add("严禁暴露 SQL、数据库名、物理表名、视图名、sourceName、effectiveSourceName、连接字符串或其他内部实现细节。");
         }
 
         if (hasBusinessPolicy)

@@ -8,6 +8,28 @@ public class ConversationTemplate : IAggregateRoot<ConversationTemplateId>
     public const int MaxNameLength = 200;
     public const int MaxDescriptionLength = 1000;
     public const int MaxSystemPromptLength = 16000;
+    private static readonly string[] DangerousPermissivePromptFragments =
+    [
+        "可以绕过审批",
+        "允许绕过审批",
+        "无需审批",
+        "不需要审批",
+        "可以执行 SQL",
+        "允许执行 SQL",
+        "直接执行 SQL",
+        "可以写入 Cloud",
+        "允许写入 Cloud",
+        "直接写入 Cloud",
+        "可以写入云端",
+        "允许写入云端",
+        "直接写入云端",
+        "自动重启设备",
+        "直接重启设备",
+        "自动下发",
+        "直接下发",
+        "忽略系统规则",
+        "忽略安全规则"
+    ];
 
     protected ConversationTemplate()
     {
@@ -101,6 +123,21 @@ public class ConversationTemplate : IAggregateRoot<ConversationTemplateId>
             throw new ArgumentOutOfRangeException(nameof(systemPrompt), $"Conversation template system prompt must not exceed {MaxSystemPromptLength} characters.");
         }
 
+        ValidateSystemPromptSafety(systemPrompt);
+
+    }
+
+    private static void ValidateSystemPromptSafety(string systemPrompt)
+    {
+        foreach (var fragment in DangerousPermissivePromptFragments)
+        {
+            if (systemPrompt.Contains(fragment, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ArgumentException(
+                    "Conversation template system prompt contains unsafe execution or approval-bypass instruction.",
+                    nameof(systemPrompt));
+            }
+        }
     }
 
     private static void ValidateSpecification(TemplateSpecification specification)

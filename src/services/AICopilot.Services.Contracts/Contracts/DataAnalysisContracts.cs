@@ -302,7 +302,7 @@ public record AnalysisDto
     [JsonPropertyName("description")]
     public string Description { get; set; } = string.Empty;
 
-    [Description("鏌ヨ缁撴灉涓瘡涓瓧娈电殑瀹氫箟")]
+    [Description("查询结果中每个字段的业务定义")]
     [JsonPropertyName("metadata")]
     public List<MetadataItemDto> Metadata { get; set; } = [];
 }
@@ -313,19 +313,19 @@ public record MetadataItemDto
     [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
 
-    [Description("浠庤〃缁撴瀯涓幏鍙栫殑瀛楁娉ㄩ噴/璇存槑")]
+    [Description("从表结构或语义映射中获取的字段注释/说明")]
     [JsonPropertyName("description")]
     public string Description { get; set; } = string.Empty;
 }
 
 public record VisualDecisionDto
 {
-    [Description("鍥捐〃绫诲瀷锛屽彲閫夊€? Chart, DataTable, StatsCard")]
+    [Description("图表类型，可选值：Chart、DataTable、StatsCard")]
     [JsonPropertyName("type")]
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public WidgetType Type { get; set; }
 
-    [Description("鍥捐〃鏍囬")]
+    [Description("图表标题")]
     [JsonPropertyName("title")]
     public string Title { get; set; } = string.Empty;
 
@@ -333,31 +333,31 @@ public record VisualDecisionDto
     [JsonPropertyName("description")]
     public string Description { get; set; } = string.Empty;
 
-    [Description("鍙€夊瓧娈碉紝Chart 绫诲瀷鍥捐〃涓撴湁瀛楁")]
+    [Description("可选字段，Chart 类型图表专有字段")]
     [JsonPropertyName("chart_config")]
     public ChartConfig? ChartConfig { get; set; }
 
-    [Description("鍙€夊瓧娈碉紝StatsCard 绫诲瀷鍥捐〃涓撴湁瀛楁")]
+    [Description("可选字段，StatsCard 类型图表专有字段")]
     [JsonPropertyName("unit")]
     public string? Unit { get; set; }
 }
 
 public record ChartConfig
 {
-    [Description("鍥捐〃绫诲瀷锛屽彲閫夊€? Line,Bar,Pie")]
+    [Description("图表类型，可选值：Line、Bar、Pie")]
     [JsonPropertyName("category")]
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public ChartCategory Category { get; set; }
 
-    [Description("浣滀负X杞寸殑瀛楁鍚嶏紝渚嬪 order_date")]
+    [Description("作为 X 轴的字段名，例如 order_date")]
     [JsonPropertyName("x")]
     public string X { get; set; } = string.Empty;
 
-    [Description("浣滀负Y杞寸殑鏁板€煎瓧娈靛悕锛屼緥濡?total_amount")]
+    [Description("作为 Y 轴的数值字段名，例如 total_amount")]
     [JsonPropertyName("y")]
     public string Y { get; set; } = string.Empty;
 
-    [Description("鍙€夛紝鐢ㄤ簬鍒嗙粍鐨勫瓧娈靛悕锛屼緥濡?product_category")]
+    [Description("可选，用于分组的字段名，例如 product_category")]
     [JsonPropertyName("series")]
     public string? Series { get; set; }
 }

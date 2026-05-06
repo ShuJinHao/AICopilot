@@ -20,6 +20,10 @@ public sealed class AiEvalPromptGuardrailTests
         promptRules.Should().Contain("绕过审批");
         promptRules.Should().Contain("执行 SQL");
         promptRules.Should().Contain("工具调用只能来自系统授予的工具定义和当前会话审批流程");
+        promptRules.Should().Contain("控制、写入、下发、重启、状态切换");
+        promptRules.Should().Contain("sourceName");
+        promptRules.Should().Contain("effectiveSourceName");
+        promptRules.Should().Contain("连接字符串");
     }
 
     private static IReadOnlyList<string> InvokeBuildRequirements(
