@@ -1,82 +1,212 @@
-﻿<script setup lang="ts">
-import { computed } from 'vue';
-import { UserFilled, Service } from '@element-plus/icons-vue';
-import { MessageRole } from '@/types/protocols.ts';
-import BlockIntent from './BlockIntent.vue';
-import BlockAnalysis from './BlockAnalysis.vue';
-import BlockFinal from './BlockFinal.vue';
-// 1. 引入生成式 UI 渲染器
-import WidgetRenderer from '../widgets/WidgetRenderer.vue'; 
-import type { ChatMessage, IntentChunk, WidgetChunk } from "@/types/models.ts";
+<script setup lang="ts">
+import { computed } from 'vue'
+import { Cpu, UserFilled } from '@element-plus/icons-vue'
+import { renderMarkdown } from '@/utils/markdown'
+import { ChunkType, MessageRole, type ChatChunk } from '@/types/protocols'
+import { useChatStore } from '@/stores/chatStore'
+import ApprovalCard from './ApprovalCard.vue'
+import FunctionCallItem from './FunctionCallItem.vue'
+import WidgetRenderer from '../widgets/WidgetRenderer.vue'
+import type {
+  ApprovalChunk,
+  ChatMessage,
+  FunctionCallChunk,
+  IntentChunk,
+  WidgetChunk
+} from '@/types/models'
 
 const props = defineProps<{
   message: ChatMessage
-}>();
+}>()
 
-const isUser = computed(() => props.message.role === MessageRole.User);
+const store = useChatStore()
+const isUser = computed(() => props.message.role === MessageRole.User)
+const chunks = computed(() => props.message.chunks)
+const intentChunks = computed(() => chunks.value.filter((chunk) => chunk.type === ChunkType.Intent) as IntentChunk[])
 
-const intents = computed(() =>{
-  const chunk = props.message.chunks.find(chunk => chunk.source === 'IntentRoutingExecutor') as IntentChunk;
-  return chunk?.intents || [];
-});
+function asFunctionCall(chunk: ChatChunk) {
+  return chunk as FunctionCallChunk
+}
 
-// 2. 这里的 dataChunks 建议只保留纯文本/分析过程的部分
-const dataChunks = computed(() =>
-  props.message.chunks.filter(chunk => chunk.source === 'DataAnalysisExecutor' && !('widget' in chunk)) || []
-);
+function asWidget(chunk: ChatChunk) {
+  return chunk as WidgetChunk
+}
 
-// 3. 新增：提取出所有包含 Widget（图表、卡片）的块
-const widgetChunks = computed(() =>
-  props.message.chunks.filter(chunk => 'widget' in chunk) as WidgetChunk[]
-);
+function asApproval(chunk: ChatChunk) {
+  return chunk as ApprovalChunk
+}
 
-const finalChunks = computed(() =>
-  props.message.chunks.filter(chunk => chunk.source === 'FinalAgentRunExecutor' || chunk.source === 'User') || []
-);
+async function approve(payload: { callId: string; onsiteConfirmed: boolean }, chunk: ApprovalChunk) {
+  await store.submitApproval(payload.callId, 'approved', payload.onsiteConfirmed, chunk)
+}
+
+async function reject(payload: { callId: string }, chunk: ApprovalChunk) {
+  await store.submitApproval(payload.callId, 'rejected', false, chunk)
+}
 </script>
 
 <template>
-  <div class="message-row" :class="{ 'row-reverse': isUser }">
-    <div class="avatar-container">
-      <el-avatar
-        :size="36"
-        :icon="isUser ? UserFilled : Service"
-        :class="isUser ? 'avatar-user' : 'avatar-ai'"
-        :style="{ backgroundColor: isUser ? '#f0f0f0' : '#e1f3d8' }"
-      />
+  <article class="message" :class="{ user: isUser }">
+    <div class="avatar">
+      <el-icon>
+        <UserFilled v-if="isUser" />
+        <Cpu v-else />
+      </el-icon>
     </div>
 
-    <div class="content-container">
-      <BlockIntent
-        v-if="intents.length > 0"
-        :intents="intents"/>
+    <div class="message-body">
+      <div class="message-meta">
+        <strong>{{ isUser ? '你' : 'AICopilot' }}</strong>
+        <span>{{ new Date(message.timestamp).toLocaleTimeString('zh-CN', { hour12: false }) }}</span>
+      </div>
 
-      <BlockAnalysis
-        v-if="dataChunks.length > 0"
-        :chunks="dataChunks"
-        :is-streaming="message.isStreaming"/>
+      <section v-if="intentChunks.length > 0" class="intent-strip">
+        <el-tag
+          v-for="intent in intentChunks.flatMap((chunk) => chunk.intents)"
+          :key="`${intent.intent}-${intent.confidence}`"
+          size="small"
+          type="info"
+        >
+          {{ intent.intent }} · {{ Math.round(intent.confidence * 100) }}%
+        </el-tag>
+      </section>
 
-      <WidgetRenderer
-        v-for="(chunk, index) in widgetChunks"
-        :key="'widget-' + index"
-        :data="chunk.widget" 
-      />
+      <div class="chunk-list">
+        <template v-for="(chunk, index) in chunks" :key="`${chunk.source}-${chunk.type}-${index}`">
+          <div
+            v-if="chunk.type === ChunkType.Text"
+            class="text-block markdown-body"
+            v-html="renderMarkdown(chunk.content)"
+          />
 
-      <BlockFinal
-        v-if="finalChunks.length > 0"
-        :chunks="finalChunks"
-        :is-user="isUser"
-        :is-streaming="message.isStreaming"
-      />
+          <FunctionCallItem
+            v-else-if="chunk.type === ChunkType.FunctionCall"
+            :call="asFunctionCall(chunk).functionCall"
+          />
+
+          <WidgetRenderer
+            v-else-if="chunk.type === ChunkType.Widget"
+            :data="asWidget(chunk).widget"
+          />
+
+          <ApprovalCard
+            v-else-if="chunk.type === ChunkType.ApprovalRequest"
+            :chunk="asApproval(chunk)"
+            :is-submitting="store.isStreaming"
+            @approve="(payload) => approve(payload, asApproval(chunk))"
+            @reject="(payload) => reject(payload, asApproval(chunk))"
+          />
+        </template>
+
+        <span v-if="message.isStreaming" class="streaming-caret" />
+      </div>
     </div>
-  </div>
+  </article>
 </template>
 
 <style scoped>
-.message-row { display: flex; margin-bottom: 20px; align-items: flex-start; }
-.row-reverse { flex-direction: row-reverse; }
-.avatar-container { margin: 0 10px; }
-.content-container { max-width: 85%; display: flex; flex-direction: column; gap: 10px; }
-.avatar-user { color: #666; }
-.avatar-ai { background-color: #409eff; color: white; }
+.message {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.message.user {
+  grid-template-columns: minmax(0, 1fr) 34px;
+}
+
+.message.user .avatar {
+  grid-column: 2;
+  grid-row: 1;
+  background: #edf2f7;
+  color: var(--app-text);
+}
+
+.message.user .message-body {
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: end;
+  background: #e7f5f2;
+}
+
+.avatar {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 8px;
+  background: #17202a;
+  color: #ffffff;
+}
+
+.message-body {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  max-width: min(100%, 900px);
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--app-surface);
+}
+
+.message-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
+.message-meta strong {
+  color: var(--app-text);
+  font-size: 13px;
+}
+
+.intent-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chunk-list {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.text-block {
+  color: var(--app-text);
+  overflow-wrap: anywhere;
+}
+
+:deep(.markdown-body p) {
+  margin: 0 0 8px;
+}
+
+:deep(.markdown-body p:last-child) {
+  margin-bottom: 0;
+}
+
+:deep(.markdown-body ul),
+:deep(.markdown-body ol) {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+
+.streaming-caret {
+  width: 8px;
+  height: 18px;
+  border-radius: 2px;
+  background: var(--app-primary);
+  animation: blink 1s infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0.2;
+  }
+}
 </style>

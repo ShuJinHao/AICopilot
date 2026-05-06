@@ -4,42 +4,27 @@ import { WarningFilled } from '@element-plus/icons-vue'
 import type { ApprovalChunk } from '@/types/models'
 import ArgumentViewer from './ArgumentViewer.vue'
 
-interface Props {
+const props = defineProps<{
   chunk: ApprovalChunk
   isSubmitting?: boolean
-}
-
-const props = defineProps<Props>()
+}>()
 
 const emit = defineEmits<{
-  (
-    e: 'approve',
-    payload: {
-      callId: string
-      onsiteConfirmed: boolean
-    }
-  ): void
-  (e: 'reject', payload: { callId: string }): void
+  (event: 'approve', payload: { callId: string; onsiteConfirmed: boolean }): void
+  (event: 'reject', payload: { callId: string }): void
 }>()
 
 const onsiteConfirmed = ref(false)
-
 const request = computed(() => props.chunk.request)
-const status = computed(() => props.chunk.status)
-const isPending = computed(() => status.value === 'pending')
+const isPending = computed(() => props.chunk.status === 'pending')
 const hasStrictIdentity = computed(
   () => Boolean(request.value.targetType) && Boolean(request.value.targetName) && Boolean(request.value.toolName)
 )
-const targetText = computed(() => {
-  if (!request.value.targetType && !request.value.targetName) {
-    return ''
-  }
-
-  return [request.value.targetType, request.value.targetName].filter(Boolean).join(' / ')
-})
-const toolNameText = computed(() => request.value.toolName || request.value.name)
+const targetText = computed(() =>
+  [request.value.targetType, request.value.targetName, request.value.toolName].filter(Boolean).join(' / ')
+)
 const statusText = computed(() => {
-  switch (status.value) {
+  switch (props.chunk.status) {
     case 'approved':
       return '已批准'
     case 'rejected':
@@ -50,345 +35,193 @@ const statusText = computed(() => {
       return '待审批'
   }
 })
-const attestationExpiresText = computed(() => {
-  if (!request.value.attestationExpiresAt) {
-    return ''
+const attestationExpiresText = computed(() =>
+  request.value.attestationExpiresAt
+    ? new Date(request.value.attestationExpiresAt).toLocaleString('zh-CN', { hour12: false })
+    : ''
+)
+
+function approve() {
+  if (isPending.value && hasStrictIdentity.value) {
+    emit('approve', { callId: request.value.callId, onsiteConfirmed: onsiteConfirmed.value })
   }
-
-  return new Date(request.value.attestationExpiresAt).toLocaleString('zh-CN', {
-    hour12: false
-  })
-})
-
-function handleApprove() {
-  if (props.isSubmitting || !isPending.value || !hasStrictIdentity.value) {
-    return
-  }
-
-  emit('approve', {
-    callId: request.value.callId,
-    onsiteConfirmed: onsiteConfirmed.value
-  })
 }
 
-function handleReject() {
-  if (props.isSubmitting || !isPending.value || !hasStrictIdentity.value) {
-    return
+function reject() {
+  if (isPending.value && hasStrictIdentity.value) {
+    emit('reject', { callId: request.value.callId })
   }
-
-  emit('reject', {
-    callId: request.value.callId
-  })
 }
 </script>
 
 <template>
-  <div class="approval-card" :class="status">
-    <div class="card-header">
-      <div class="header-icon">
-        <el-icon><WarningFilled /></el-icon>
+  <section class="approval-card" :class="chunk.status">
+    <header>
+      <el-icon><WarningFilled /></el-icon>
+      <div>
+        <h3>人工审批请求</h3>
+        <p>模型请求调用受控工具，执行前需要人工复核。</p>
       </div>
-      <div class="header-content">
-        <h3 class="title">敏感建议审批</h3>
-        <p class="subtitle">AI 请求执行需要人工复核的外部工具能力。</p>
-      </div>
-      <div v-if="!isPending" class="status-badge" :class="status">
+      <el-tag :type="chunk.status === 'pending' ? 'warning' : chunk.status === 'approved' ? 'success' : 'info'">
         {{ statusText }}
-      </div>
-    </div>
+      </el-tag>
+    </header>
 
-    <div class="card-body">
-      <div class="function-info">
-        <span class="label">目标工具</span>
-        <code class="function-name">{{ toolNameText }}</code>
-      </div>
-      <div v-if="targetText" class="function-info">
-        <span class="label">工具来源</span>
-        <code class="function-name muted">{{ targetText }}</code>
-      </div>
-      <div v-if="request.runtimeName" class="function-info">
-        <span class="label">运行标识</span>
-        <code class="function-name muted">{{ request.runtimeName }}</code>
-      </div>
-      <div v-if="!hasStrictIdentity" class="identity-warning">
-        审批请求缺少工具身份，请刷新会话后重新发起。
-      </div>
+    <div class="approval-body">
+      <dl>
+        <div>
+          <dt>工具</dt>
+          <dd class="mono">{{ request.toolName || request.name }}</dd>
+        </div>
+        <div v-if="targetText">
+          <dt>身份</dt>
+          <dd class="mono">{{ targetText }}</dd>
+        </div>
+        <div v-if="request.runtimeName">
+          <dt>运行标识</dt>
+          <dd class="mono">{{ request.runtimeName }}</dd>
+        </div>
+      </dl>
 
-      <div class="arguments-section">
-        <span class="label">参数详情</span>
+      <el-alert
+        v-if="!hasStrictIdentity"
+        title="审批请求缺少完整工具身份，系统不会允许继续执行。"
+        type="error"
+        :closable="false"
+        show-icon
+      />
+
+      <div class="args-block">
+        <span>参数</span>
         <ArgumentViewer :args="request.args" />
       </div>
 
-      <div v-if="request.requiresOnsiteAttestation" class="onsite-panel">
-        <div class="onsite-title">在岗复核</div>
-        <div class="onsite-text">
-          该建议必须在会话已有在岗声明的前提下，再次确认“现场有人在岗”后才能批准。
-        </div>
-        <div v-if="attestationExpiresText" class="onsite-expiry">
-          当前会话在岗声明有效期至：{{ attestationExpiresText }}
-        </div>
-        <label v-if="isPending" class="onsite-check">
-          <input v-model="onsiteConfirmed" type="checkbox" />
-          <span>现场有人在岗，我已复核执行前条件。</span>
-        </label>
+      <div v-if="request.requiresOnsiteAttestation" class="onsite-block">
+        <strong>现场复核</strong>
+        <p>此工具需要确认现场有人在岗，并再次确认执行前条件。</p>
+        <p v-if="attestationExpiresText">会话在岗声明有效至：{{ attestationExpiresText }}</p>
+        <el-checkbox v-if="isPending" v-model="onsiteConfirmed">
+          现场有人在岗，且已复核执行前条件
+        </el-checkbox>
       </div>
     </div>
 
-    <div class="card-footer">
+    <footer>
       <template v-if="isPending">
-        <button class="btn btn-reject" @click="handleReject" :disabled="isSubmitting || !hasStrictIdentity">
-          拒绝执行
-        </button>
-        <button
-          class="btn btn-approve"
-          @click="handleApprove"
-          :disabled="isSubmitting || !hasStrictIdentity || (request.requiresOnsiteAttestation && !onsiteConfirmed)"
+        <el-button :disabled="isSubmitting || !hasStrictIdentity" @click="reject">拒绝</el-button>
+        <el-button
+          type="primary"
+          :loading="isSubmitting"
+          :disabled="!hasStrictIdentity || (request.requiresOnsiteAttestation && !onsiteConfirmed)"
+          @click="approve"
         >
-          <span v-if="isSubmitting">处理中...</span>
-          <span v-else>批准执行</span>
-        </button>
+          批准
+        </el-button>
       </template>
-
-      <div v-else class="result-message">
-        <span v-if="status === 'approved'" class="text-success">审批已通过。</span>
-        <span v-else-if="status === 'expired'" class="text-warning">审批上下文已失效，请重新发起请求。</span>
-        <span v-else class="text-danger">审批已拒绝。</span>
-      </div>
-    </div>
-  </div>
+      <span v-else class="muted">审批状态：{{ statusText }}</span>
+    </footer>
+  </section>
 </template>
 
 <style scoped>
 .approval-card {
-  border: 1px solid #e2e8f0;
+  display: grid;
+  gap: 0;
+  border: 1px solid #f2c97d;
   border-radius: 8px;
-  background: white;
-  margin: 12px 0;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  background: #fffaf0;
   overflow: hidden;
-  transition: all 0.3s ease;
-  max-width: 640px;
-}
-
-.approval-card.rejected {
-  opacity: 0.7;
-  border-color: #cbd5e1;
-  background: #f8fafc;
-}
-
-.approval-card.expired {
-  opacity: 0.75;
-  border-color: #fed7aa;
-  background: #fff7ed;
 }
 
 .approval-card.approved {
-  border-color: #bbf7d0;
-  background: #f0fdf4;
+  border-color: #9bd3a8;
+  background: #f3fbf4;
 }
 
-.card-header {
+.approval-card.rejected,
+.approval-card.expired {
+  border-color: var(--app-border);
+  background: var(--app-surface-muted);
+}
+
+.approval-card header,
+.approval-card footer {
   display: flex;
   align-items: center;
-  padding: 12px 16px;
-  background: #fff7ed;
-  border-bottom: 1px solid #ffedd5;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
 }
 
-.approval-card.approved .card-header {
-  background: #dcfce7;
-  border-bottom-color: #bbf7d0;
+.approval-card header {
+  border-bottom: 1px solid rgba(180, 83, 9, 0.18);
 }
 
-.approval-card.rejected .card-header {
-  background: #f1f5f9;
-  border-bottom-color: #e2e8f0;
-}
-
-.approval-card.expired .card-header {
-  background: #ffedd5;
-  border-bottom-color: #fed7aa;
-}
-
-.header-icon {
-  width: 24px;
-  height: 24px;
-  margin-right: 12px;
-  color: #ea580c;
-  display: grid;
-  place-items: center;
-}
-
-.header-content {
+.approval-card header > div {
   flex: 1;
+  min-width: 0;
 }
 
-.title {
+.approval-card h3 {
   margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
-  color: #1e293b;
+  font-size: 14px;
+  font-weight: 750;
 }
 
-.subtitle {
-  margin: 0;
-  font-size: 0.8rem;
-  color: #64748b;
+.approval-card p {
+  margin: 2px 0 0;
+  color: var(--app-text-muted);
+  font-size: 12px;
 }
 
-.card-body {
-  padding: 16px;
+.approval-body {
   display: grid;
   gap: 12px;
+  padding: 14px;
 }
 
-.function-info {
-  display: flex;
-  align-items: center;
+dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+dl div {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
   gap: 8px;
 }
 
-.label {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: #64748b;
-  min-width: 72px;
+dt {
+  color: var(--app-text-muted);
 }
 
-.function-name {
-  background: #e0e7ff;
-  color: #4338ca;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-family: monospace;
-  font-weight: bold;
+dd {
+  margin: 0;
   overflow-wrap: anywhere;
 }
 
-.function-name.muted {
-  background: #f1f5f9;
-  color: #475569;
-}
-
-.identity-warning {
-  padding: 8px 10px;
-  border-radius: 6px;
-  background: #fef2f2;
-  color: #991b1b;
-  font-size: 0.85rem;
-  border: 1px solid #fecaca;
-}
-
-.onsite-panel {
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: #f8fafc;
-  border: 1px solid #dbeafe;
+.args-block,
+.onsite-block {
   display: grid;
-  gap: 6px;
-}
-
-.onsite-title {
-  font-size: 0.85rem;
-  font-weight: 700;
-  color: #0f172a;
-}
-
-.onsite-text,
-.onsite-expiry {
-  font-size: 0.82rem;
-  color: #475569;
-}
-
-.onsite-check {
-  display: flex;
-  align-items: center;
   gap: 8px;
-  font-size: 0.85rem;
-  color: #0f172a;
 }
 
-.card-footer {
-  padding: 12px 16px;
-  background: #f8fafc;
-  border-top: 1px solid #e2e8f0;
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
+.args-block > span {
+  color: var(--app-text-muted);
+  font-size: 12px;
+  font-weight: 700;
 }
 
-.btn {
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 0.9rem;
-  font-weight: 500;
-  cursor: pointer;
-  border: 1px solid transparent;
-  transition: all 0.2s;
+.onsite-block {
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  padding: 10px;
+  background: #ffffff;
 }
 
-.btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.btn-reject {
-  background: white;
-  border-color: #cbd5e1;
-  color: #475569;
-}
-
-.btn-reject:hover:not(:disabled) {
-  background: #f1f5f9;
-  color: #ef4444;
-  border-color: #ef4444;
-}
-
-.btn-approve {
-  background: #2563eb;
-  color: white;
-}
-
-.btn-approve:hover:not(:disabled) {
-  background: #1d4ed8;
-}
-
-.status-badge {
-  font-size: 0.8rem;
-  padding: 2px 8px;
-  border-radius: 12px;
-  font-weight: 600;
-}
-
-.status-badge.approved {
-  background: #166534;
-  color: white;
-}
-
-.status-badge.rejected {
-  background: #64748b;
-  color: white;
-}
-
-.status-badge.expired {
-  background: #c2410c;
-  color: white;
-}
-
-.result-message {
-  font-size: 0.9rem;
-  font-weight: 500;
-}
-
-.text-success {
-  color: #166534;
-}
-
-.text-danger {
-  color: #991b1b;
-}
-
-.text-warning {
-  color: #c2410c;
+footer {
+  border-top: 1px solid var(--app-border);
+  background: rgba(255, 255, 255, 0.72);
 }
 </style>

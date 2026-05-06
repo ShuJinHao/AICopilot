@@ -1,64 +1,54 @@
-﻿<script setup lang="ts">
-import { computed } from 'vue';
-import type {StatsCardWidget} from "@/types/protocols.ts";
+<script setup lang="ts">
+import { computed } from 'vue'
+import type { StatsCardWidget } from '@/types/protocols'
 
-// 接收父组件传递的数据
 const props = defineProps<{
   widget: StatsCardWidget
-}>();
+}>()
 
-// 提取核心数据
-const data = computed(() => props.widget.data);
-
-// 格式化样式
-const valueStyle = computed(() => ({
-  color: '#303133',
-  fontWeight: 'bold',
-  fontSize: '24px'
-}));
+const value = computed(() => props.widget.data?.value ?? '-')
+const unit = computed(() => props.widget.data?.unit ?? '')
 </script>
 
 <template>
-  <el-card shadow="hover" class="stats-card">
-    <template #header>
-      <div class="card-header">
-        <span>{{ widget.title || data.label }}</span>
-      </div>
-    </template>
-
-    <div class="card-content">
-      <el-statistic
-        :value="Number(data.value) || 0"
-        :precision="2"
-        :value-style="valueStyle"
-      >
-        <template #suffix>
-          <span>{{ widget.data.unit }}</span>
-        </template>
-      </el-statistic>
-
-    </div>
-  </el-card>
+  <div class="stats-widget">
+    <span class="stats-label">{{ widget.data?.label || widget.title || '指标' }}</span>
+    <strong>{{ value }}<small v-if="unit">{{ unit }}</small></strong>
+    <p v-if="widget.description">{{ widget.description }}</p>
+  </div>
 </template>
 
 <style scoped>
-.stats-card {
-  width: 240px; /* 固定宽度，看起来更整齐 */
-  display: inline-block;
-  margin-right: 12px;
-  margin-bottom: 12px;
-  border-radius: 8px;
+.stats-widget {
+  display: grid;
+  gap: 6px;
+  min-width: 180px;
+  padding: 16px;
 }
 
-.card-header {
-  font-size: 14px;
-  color: #606266;
-  font-weight: 500;
+.stats-label {
+  color: var(--app-text-muted);
+  font-size: 12px;
+  font-weight: 700;
 }
 
-.card-content {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.stats-widget strong {
+  color: var(--app-text);
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.stats-widget small {
+  margin-left: 4px;
+  color: var(--app-text-muted);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.stats-widget p {
+  margin: 0;
+  color: var(--app-text-muted);
+  font-size: 12px;
 }
 </style>

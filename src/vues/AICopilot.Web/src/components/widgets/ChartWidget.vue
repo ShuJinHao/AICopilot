@@ -1,116 +1,154 @@
-﻿<script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue';
-import * as echarts from 'echarts';
+<script setup lang="ts">
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import * as echarts from 'echarts'
+import type { ChartWidget } from '@/types/protocols'
 
-const props = defineProps<{ data: any }>();
-const chartRef = ref<HTMLElement | null>(null);
-let chartInstance: echarts.ECharts | null = null;
-let resizeObserver: ResizeObserver | null = null;
+const props = defineProps<{
+  widget: ChartWidget
+}>()
 
-const getChartOption = () => {
-  const w = props.data;
-  if (!w) return {};
+const chartRef = ref<HTMLElement | null>(null)
+let chartInstance: echarts.ECharts | null = null
+let resizeObserver: ResizeObserver | null = null
 
-  const config = w.chart_config || w.ChartConfig || {};
-  const type = (w.category || w.Category || config.category || config.Category || 'Bar').toLowerCase();
-  
-  // 数据源
-  const source = Array.isArray(w.data) ? w.data : (w.data?.dataset?.source || []);
+const rows = computed(() => props.widget.data?.dataset?.source ?? [])
+const dimensions = computed(() => props.widget.data?.dataset?.dimensions ?? [])
+const encoding = computed(() => props.widget.data?.encoding)
+const category = computed(() => (props.widget.data?.category ?? 'Bar').toLowerCase())
 
-  const option: any = {
-    title: { text: w.title || w.Title, left: 'center', textStyle: { fontSize: 14, fontWeight: 'bold' } },
-    tooltip: { trigger: type === 'pie' ? 'item' : 'axis', confine: true },
-    legend: { bottom: 0, type: 'scroll' },
-    dataset: { source: source },
-    series: []
-  };
+function inferStringField() {
+  const first = rows.value[0]
+  if (!first) return dimensions.value[0] ?? ''
+  return Object.keys(first).find((key) => typeof first[key] === 'string') ?? dimensions.value[0] ?? ''
+}
 
-  // 【智能字段匹配】
-  // 1. 获取后端建议的 Key
-  let xKey = config.x || config.X;
-  let yKey = config.y || config.Y;
+function inferNumberFields() {
+  const first = rows.value[0]
+  if (!first) return dimensions.value.slice(1, 2)
+  const fields = Object.keys(first).filter((key) => typeof first[key] === 'number')
+  return fields.length > 0 ? fields : dimensions.value.slice(1, 2)
+}
 
-  // 2. 如果数据里没有这个 Key，尝试自动寻找替代品
-  if (source.length > 0) {
-    const keys = Object.keys(source[0]);
-    
-    // 检查 yKey (数值轴) 是否存在
-    if (!keys.includes(yKey)) {
-        // 如果不存在，找第一个数值类型的字段代替
-        const numKey = keys.find(k => typeof source[0][k] === 'number');
-        if (numKey) yKey = numKey;
+const option = computed<echarts.EChartsOption>(() => {
+  const xField = encoding.value?.x || inferStringField()
+  const yFields = encoding.value?.y?.length ? encoding.value.y : inferNumberFields()
+  const chartType = category.value === 'line' ? 'line' : category.value === 'pie' ? 'pie' : 'bar'
+
+  if (rows.value.length === 0 || !xField || yFields.length === 0) {
+    return {}
+  }
+
+  if (chartType === 'pie') {
+    const yField = yFields[0] ?? ''
+    if (!yField) {
+      return {}
     }
-    
-    // 检查 xKey (类目轴) 是否存在
-    if (!keys.includes(xKey)) {
-        // 如果不存在，找第一个字符串类型的字段代替
-        const strKey = keys.find(k => typeof source[0][k] === 'string');
-        if (strKey) xKey = strKey;
+
+    return {
+      tooltip: { trigger: 'item', confine: true },
+      legend: { type: 'scroll', bottom: 0 },
+      series: [
+        {
+          type: 'pie',
+          radius: ['42%', '68%'],
+          avoidLabelOverlap: true,
+          data: rows.value.map((row) => ({
+            name: String(row[xField] ?? '-'),
+            value: Number(row[yField] ?? 0)
+          }))
+        }
+      ]
     }
   }
 
-  const seriesItem: any = {
-    type: type,
-    encode: {
-      itemName: xKey,
-      value: yKey,
-      x: xKey,
-      y: yKey
-    }
-  };
-
-  if (type === 'pie') {
-    seriesItem.radius = ['40%', '70%'];
-    seriesItem.avoidLabelOverlap = true;
-    option.xAxis = undefined;
-    option.yAxis = undefined;
-  } else {
-    option.xAxis = { type: 'category' };
-    option.yAxis = { type: 'value' };
-    option.grid = { left: '3%', right: '4%', bottom: '15%', containLabel: true };
+  return {
+    tooltip: { trigger: 'axis', confine: true },
+    legend: { type: 'scroll', bottom: 0 },
+    grid: { left: 24, right: 20, top: 24, bottom: 52, containLabel: true },
+    xAxis: { type: 'category', data: rows.value.map((row) => String(row[xField] ?? '-')) },
+    yAxis: { type: 'value' },
+    series: yFields.map((field) => ({
+      type: chartType,
+      name: field,
+      smooth: chartType === 'line',
+      data: rows.value.map((row) => Number(row[field] ?? 0))
+    }))
   }
+})
 
-  option.series = [seriesItem];
-  return option;
-};
-
-const initChart = () => {
-  if (!chartRef.value) return;
-  if (chartInstance) chartInstance.dispose();
-  chartInstance = echarts.init(chartRef.value);
-  chartInstance.setOption(getChartOption());
-};
+function renderChart() {
+  if (!chartRef.value || rows.value.length === 0) return
+  chartInstance ??= echarts.init(chartRef.value)
+  chartInstance.setOption(option.value, true)
+}
 
 onMounted(async () => {
-  await nextTick();
-  initChart();
-  resizeObserver = new ResizeObserver(() => chartInstance?.resize());
-  if (chartRef.value) resizeObserver.observe(chartRef.value);
-});
+  await nextTick()
+  renderChart()
+  if (chartRef.value) {
+    resizeObserver = new ResizeObserver(() => chartInstance?.resize())
+    resizeObserver.observe(chartRef.value)
+  }
+})
 
-onUnmounted(() => {
-  resizeObserver?.disconnect();
-  chartInstance?.dispose();
-});
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
+  chartInstance?.dispose()
+})
 
-watch(() => props.data, () => {
-  if (chartInstance) chartInstance.setOption(getChartOption(), true);
-}, { deep: true });
+watch(option, () => renderChart(), { deep: true })
 </script>
 
 <template>
-  <div class="chart-container">
-    <div ref="chartRef" class="echarts-dom"></div>
-    <div v-if="(!data.data || data.data.length === 0)" style="color:#999;font-size:12px;text-align:center;padding:10px;">
-      (暂未检测到图表数据)
-    </div>
+  <div class="chart-widget">
+    <header>
+      <h3>{{ widget.title || '图表结果' }}</h3>
+      <p v-if="widget.description">{{ widget.description }}</p>
+    </header>
+
+    <div v-if="rows.length === 0" class="empty-widget">暂无可绘制的数据</div>
+    <div v-else ref="chartRef" class="chart-surface" />
   </div>
 </template>
 
 <style scoped>
-.chart-container {
-  width: 100%; max-width: 600px; background: #fff;
-  border-radius: 8px; border: 1px solid #e4e7ed; padding: 16px; margin-top: 8px;
+.chart-widget {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
 }
-.echarts-dom { width: 100%; height: 350px; }
+
+.chart-widget header {
+  display: grid;
+  gap: 2px;
+  padding-right: 92px;
+}
+
+.chart-widget h3 {
+  margin: 0;
+  color: var(--app-text);
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.chart-widget p {
+  margin: 0;
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
+.chart-surface {
+  width: 100%;
+  height: 320px;
+  min-height: 280px;
+}
+
+.empty-widget {
+  display: grid;
+  height: 160px;
+  place-items: center;
+  border: 1px dashed var(--app-border);
+  border-radius: 8px;
+  color: var(--app-text-muted);
+}
 </style>

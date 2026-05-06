@@ -1,117 +1,124 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { ChatDotRound, Plus } from '@element-plus/icons-vue'
+import { ChatLineRound, Plus } from '@element-plus/icons-vue'
 import { useChatStore } from '@/stores/chatStore'
 
 const store = useChatStore()
 
 const sessions = computed(() => store.sessions)
-const currentSessionId = computed(() => store.currentSessionId)
 
-async function handleSelect(id: string) {
+async function selectSession(id: string) {
   await store.selectSession(id)
 }
 
-async function handleNewChat() {
+async function createSession() {
   await store.createNewSession()
 }
 </script>
 
 <template>
-  <div class="session-sidebar">
-    <div class="sidebar-header">
-      <el-button
-        type="primary"
-        class="new-chat-btn"
-        :icon="Plus"
-        @click="handleNewChat"
-      >
-        新建会话
-      </el-button>
-    </div>
+  <aside class="session-panel">
+    <header>
+      <div>
+        <h2>会话</h2>
+        <span>{{ sessions.length }} 个上下文</span>
+      </div>
+      <el-button type="primary" :icon="Plus" @click="createSession" />
+    </header>
 
     <div class="session-list">
-      <div
+      <button
         v-for="session in sessions"
         :key="session.id"
         class="session-item"
-        :class="{ active: currentSessionId === session.id }"
-        @click="handleSelect(session.id)"
+        :class="{ active: store.currentSessionId === session.id }"
+        type="button"
+        @click="selectSession(session.id)"
       >
-        <el-icon class="icon"><ChatDotRound /></el-icon>
-        <span class="title">{{ session.title }}</span>
-      </div>
+        <el-icon><ChatLineRound /></el-icon>
+        <span>{{ session.title || '未命名会话' }}</span>
+      </button>
 
-      <div v-if="sessions.length === 0" class="empty-tip">
-        暂无历史会话
-      </div>
+      <div v-if="sessions.length === 0" class="empty-state">暂无历史会话</div>
     </div>
-  </div>
+  </aside>
 </template>
 
 <style scoped>
-.session-sidebar {
+.session-panel {
   display: flex;
+  min-height: 0;
   flex-direction: column;
-  height: 100%;
-  background-color: var(--bg-color-secondary);
-  border-right: 1px solid var(--border-color);
+  border-right: 1px solid var(--app-border);
+  background: var(--app-surface-muted);
 }
 
-.sidebar-header {
-  padding: 20px;
-  flex-shrink: 0;
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px;
+  border-bottom: 1px solid var(--app-border);
 }
 
-.new-chat-btn {
-  width: 100%;
-  border-radius: 8px;
+h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+header span {
+  color: var(--app-text-muted);
+  font-size: 12px;
 }
 
 .session-list {
-  flex: 1;
+  display: grid;
+  align-content: start;
+  gap: 6px;
   min-height: 0;
   overflow-y: auto;
-  padding: 0 12px 12px;
+  padding: 10px;
 }
 
 .session-item {
-  display: flex;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 8px;
   align-items: center;
-  padding: 12px 16px;
-  margin-bottom: 8px;
+  border: 1px solid transparent;
   border-radius: 8px;
+  padding: 9px 10px;
+  background: transparent;
+  color: var(--app-text);
   cursor: pointer;
-  color: var(--text-primary);
-  transition: all 0.2s ease;
-  font-size: 14px;
+  text-align: left;
 }
 
-.session-item:hover {
-  background-color: rgba(0, 0, 0, 0.05);
+.session-item:hover,
+.session-item.active {
+  border-color: var(--app-border);
+  background: #ffffff;
 }
 
 .session-item.active {
-  background-color: #e6f0ff;
-  color: var(--brand-color);
-  font-weight: 500;
+  color: var(--app-primary-strong);
+  font-weight: 750;
 }
 
-.icon {
-  margin-right: 10px;
-  font-size: 16px;
-}
-
-.title {
-  white-space: nowrap;
+.session-item span {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.empty-tip {
+.empty-state {
+  border: 1px dashed var(--app-border);
+  border-radius: 8px;
+  padding: 14px;
+  color: var(--app-text-muted);
   text-align: center;
-  color: var(--text-secondary);
-  font-size: 12px;
-  margin-top: 20px;
 }
 </style>

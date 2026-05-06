@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Fold, Plus, Promotion } from '@element-plus/icons-vue'
+import { Connection, Fold, Promotion, Refresh, Warning } from '@element-plus/icons-vue'
 import { useChatStore } from '@/stores/chatStore'
 import MessageItem from './MessageItem.vue'
 import SessionList from './SessionList.vue'
@@ -8,89 +8,42 @@ import SessionList from './SessionList.vue'
 const store = useChatStore()
 const inputValue = ref('')
 const scrollContainer = ref<HTMLElement | null>(null)
-const isMobile = ref(typeof window !== 'undefined' ? window.innerWidth < 960 : false)
+const isMobile = ref(typeof window !== 'undefined' ? window.innerWidth < 980 : false)
 const sessionDrawerVisible = ref(false)
 
-const acceptanceQuestionGroups = [
-  {
-    title: '设备诊断',
-    questions: ['3 号叠片机昨晚报警，帮我看原因', 'DEV-001 为什么停机了？']
-  },
-  {
-    title: '参数建议',
-    questions: ['根据最近良率，给我一个配方建议', 'DEV-001 当前参数需要怎么调？']
-  },
-  {
-    title: '日志根因',
-    questions: ['帮我做一下最近报警的根因关联分析', '查看 DEV-001 最近日志的时间线']
-  },
-  {
-    title: '工艺知识',
-    questions: ['配方修改是覆盖还是新增版本？', '员工修改机台参数需要什么权限？']
-  }
+const currentTitle = computed(() => store.currentSession?.title || '新会话')
+const isInputDisabled = computed(() => store.isStreaming || store.isWaitingForApproval)
+const approvalCount = computed(() =>
+  store.currentMessages.flatMap((message) => message.chunks).filter((chunk) => chunk.type === 'ApprovalRequest').length
+)
+const widgetCount = computed(() =>
+  store.currentMessages.flatMap((message) => message.chunks).filter((chunk) => chunk.type === 'Widget').length
+)
+const onsiteStatus = computed(() => {
+  const expires = store.currentSession?.onsiteConfirmationExpiresAt
+  if (!expires) return { label: '未确认', type: 'info' as const }
+  return new Date(expires).getTime() > Date.now()
+    ? { label: `有效至 ${new Date(expires).toLocaleTimeString('zh-CN', { hour12: false })}`, type: 'success' as const }
+    : { label: '已过期', type: 'warning' as const }
+})
+
+const suggestions = [
+  '查看 DEV-001 最近 24 小时设备日志，并给出根因线索',
+  '列出 LINE-A 当前设备状态，生成关键指标和记录摘要',
+  '查询 DEV-001 配方版本历史，只做只读分析',
+  '根据最近产能数据说明异常波动，不执行任何控制动作'
 ]
 
-const currentTitle = computed(() => store.currentSession?.title || '智能助手')
-const isInputDisabled = computed(() => store.isStreaming || store.isWaitingForApproval)
-const inputPlaceholder = computed(() => {
-  if (store.isWaitingForApproval) {
-    return '请先处理上方的审批请求。'
-  }
-
-  if (store.isStreaming) {
-    return 'AI 正在分析中...'
-  }
-
-  return '输入你的问题，Enter 发送，Shift+Enter 换行'
-})
-
-const onsiteStatusText = computed(() => {
-  if (!store.currentSession?.onsiteConfirmationExpiresAt) {
-    return '未设置'
-  }
-
-  const expiresAt = new Date(store.currentSession.onsiteConfirmationExpiresAt)
-  if (expiresAt.getTime() <= Date.now()) {
-    return '已过期'
-  }
-
-  return `有效至 ${expiresAt.toLocaleString('zh-CN', { hour12: false })}`
-})
-
-const onsiteStatusType = computed(() => {
-  if (!store.currentSession?.onsiteConfirmationExpiresAt) {
-    return 'info'
-  }
-
-  const expiresAt = new Date(store.currentSession.onsiteConfirmationExpiresAt)
-  return expiresAt.getTime() > Date.now() ? 'success' : 'warning'
-})
-
-async function handleSend() {
+async function sendMessage() {
   const content = inputValue.value.trim()
-  if (!content || isInputDisabled.value) {
-    return
-  }
-
+  if (!content || isInputDisabled.value) return
   inputValue.value = ''
   await store.sendMessage(content)
 }
 
-async function applySuggestion(question: string) {
-  inputValue.value = question
-  await handleSend()
-}
-
-async function handleConfirmOnsite() {
-  await store.confirmOnsitePresence(30)
-}
-
-async function handleClearOnsite() {
-  await store.clearOnsitePresence()
-}
-
-async function handleCreateSession() {
-  await store.createNewSession()
+async function useSuggestion(text: string) {
+  inputValue.value = text
+  await sendMessage()
 }
 
 async function scrollToBottom() {
@@ -101,331 +54,308 @@ async function scrollToBottom() {
 }
 
 function handleResize() {
-  isMobile.value = window.innerWidth < 960
-  if (!isMobile.value) {
-    sessionDrawerVisible.value = false
-  }
+  isMobile.value = window.innerWidth < 980
+  if (!isMobile.value) sessionDrawerVisible.value = false
 }
 
-watch(
-  () => store.currentMessages,
-  () => {
-    void scrollToBottom()
-  },
-  { deep: true }
-)
-
-watch(
-  () => store.currentSessionId,
-  () => {
-    void scrollToBottom()
-    sessionDrawerVisible.value = false
-  }
-)
-
-onMounted(() => {
-  window.addEventListener('resize', handleResize)
+watch(() => store.currentMessages, () => void scrollToBottom(), { deep: true })
+watch(() => store.currentSessionId, () => {
+  sessionDrawerVisible.value = false
+  void scrollToBottom()
 })
 
-onBeforeUnmount(() => {
-  window.removeEventListener('resize', handleResize)
-})
+onMounted(() => window.addEventListener('resize', handleResize))
+onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
 </script>
 
 <template>
-  <div class="chat-layout">
-    <div v-if="!isMobile" class="sidebar-wrapper">
-      <SessionList />
-    </div>
+  <div class="workspace">
+    <SessionList v-if="!isMobile" class="sessions" />
 
-    <div class="main-wrapper">
+    <section class="chat-main">
       <header class="chat-header">
-        <div class="header-title">
-          <el-button v-if="isMobile" text @click="sessionDrawerVisible = true">
-            <el-icon><Fold /></el-icon>
-          </el-button>
+        <div class="title-zone">
+          <el-button v-if="isMobile" text :icon="Fold" @click="sessionDrawerVisible = true" />
           <div>
-            <h2>{{ currentTitle }}</h2>
-            <p>AI 只做观测、诊断、建议和知识问答，不执行任何控制动作。</p>
+            <p class="page-kicker">Chat Workspace</p>
+            <h1>{{ currentTitle }}</h1>
           </div>
         </div>
-
-        <div class="header-actions">
-          <div class="onsite-status-card">
-            <div class="onsite-status-title">人工在场</div>
-            <el-tag :type="onsiteStatusType">{{ onsiteStatusText }}</el-tag>
-            <div class="onsite-actions">
-              <el-button size="small" @click="handleConfirmOnsite">确认在岗 30 分钟</el-button>
-              <el-button size="small" text @click="handleClearOnsite">清除声明</el-button>
-            </div>
-          </div>
-
-          <el-button type="primary" plain @click="handleCreateSession">
-            <el-icon><Plus /></el-icon>
-            新建会话
+        <div class="toolbar">
+          <el-tag :type="store.isStreaming ? 'warning' : 'success'">
+            {{ store.isStreaming ? '生成中' : '就绪' }}
+          </el-tag>
+          <el-button :icon="Refresh" @click="store.currentSessionId && store.selectSession(store.currentSessionId, true)">
+            刷新
           </el-button>
         </div>
       </header>
 
-      <main ref="scrollContainer" class="chat-viewport">
-        <div class="messages-list">
-          <el-alert
-            v-if="store.errorMessage"
-            class="message-alert"
-            :title="store.errorMessage"
-            type="error"
-            show-icon
-            :closable="false"
-          />
+      <div ref="scrollContainer" class="message-viewport">
+        <el-alert
+          v-if="store.errorMessage"
+          :title="store.errorMessage"
+          type="error"
+          show-icon
+          :closable="false"
+        />
 
-          <el-skeleton v-if="store.isLoadingHistory" :rows="4" animated />
+        <el-skeleton v-if="store.isLoadingHistory" :rows="5" animated />
 
-          <div v-if="store.currentMessages.length === 0 && !store.isLoadingHistory" class="welcome-banner">
-            <h3>制造业 AI 助手</h3>
-            <p>优先支持设备异常诊断、参数建议、日志根因关联和工艺知识问答。</p>
-
-            <div class="acceptance-groups">
-              <section v-for="group in acceptanceQuestionGroups" :key="group.title" class="acceptance-group">
-                <div class="group-title">{{ group.title }}</div>
-                <div class="suggestion-chips">
-                  <el-tag
-                    v-for="question in group.questions"
-                    :key="question"
-                    class="chip"
-                    @click="applySuggestion(question)"
-                  >
-                    {{ question }}
-                  </el-tag>
-                </div>
-              </section>
-            </div>
+        <section v-if="store.currentMessages.length === 0 && !store.isLoadingHistory" class="empty-chat">
+          <h2>开始一次只读分析</h2>
+          <p>选择一个问题模板，或直接输入设备、日志、配方、产能或知识库问题。</p>
+          <div class="suggestions">
+            <button v-for="item in suggestions" :key="item" type="button" @click="useSuggestion(item)">
+              {{ item }}
+            </button>
           </div>
+        </section>
 
-          <MessageItem
-            v-for="message in store.currentMessages"
-            :key="message.timestamp"
-            :message="message"
-          />
+        <div class="message-list">
+          <MessageItem v-for="message in store.currentMessages" :key="message.timestamp" :message="message" />
         </div>
-      </main>
+      </div>
 
-      <footer class="chat-input-area">
-        <div class="input-container">
-          <el-input
-            v-model="inputValue"
-            type="textarea"
-            :autosize="{ minRows: 1, maxRows: 4 }"
-            :placeholder="inputPlaceholder"
-            :disabled="isInputDisabled"
-            @keydown.enter.prevent="(event: KeyboardEvent) => { if (!event.shiftKey) handleSend() }"
-          />
-          <el-button
-            type="primary"
-            class="send-btn"
-            :disabled="isInputDisabled || !inputValue.trim()"
-            @click="handleSend"
-          >
-            <el-icon><Promotion /></el-icon>
-          </el-button>
-        </div>
-        <div class="footer-tip">
-          AI 生成内容可能不完全准确，涉及现场操作前请先人工复核。
-        </div>
+      <footer class="composer">
+        <el-input
+          v-model="inputValue"
+          type="textarea"
+          :autosize="{ minRows: 1, maxRows: 5 }"
+          :disabled="isInputDisabled"
+          :placeholder="store.isWaitingForApproval ? '请先处理待审批请求' : '输入问题，Enter 发送，Shift + Enter 换行'"
+          @keydown.enter.prevent="(event: KeyboardEvent) => { if (!event.shiftKey) sendMessage() }"
+        />
+        <el-button
+          type="primary"
+          :icon="Promotion"
+          :disabled="isInputDisabled || !inputValue.trim()"
+          @click="sendMessage"
+        />
       </footer>
-    </div>
+    </section>
 
-    <el-drawer v-model="sessionDrawerVisible" :size="300" direction="ltr" title="会话列表">
+    <aside class="context-panel">
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">运行边界</h2>
+            <p class="panel-subtitle">本会话只读分析状态</p>
+          </div>
+          <el-icon><Warning /></el-icon>
+        </div>
+        <div class="panel-body boundary-list">
+          <div>
+            <span>现场确认</span>
+            <el-tag :type="onsiteStatus.type">{{ onsiteStatus.label }}</el-tag>
+          </div>
+          <div>
+            <span>审批请求</span>
+            <strong>{{ approvalCount }}</strong>
+          </div>
+          <div>
+            <span>图表组件</span>
+            <strong>{{ widgetCount }}</strong>
+          </div>
+          <el-button type="primary" plain :icon="Connection" @click="store.confirmOnsitePresence(30)">
+            确认在岗 30 分钟
+          </el-button>
+          <el-button @click="store.clearOnsitePresence()">清除在岗声明</el-button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">回答原则</h2>
+            <p class="panel-subtitle">不会自动控制设备或写业务数据</p>
+          </div>
+        </div>
+        <div class="panel-body rule-list">
+          <span>外部资料只作为事实证据</span>
+          <span>审批不能由 prompt 绕过</span>
+          <span>SQL、库表和连接信息不进入最终回答</span>
+          <span>现场动作必须人工执行</span>
+        </div>
+      </section>
+    </aside>
+
+    <el-drawer v-model="sessionDrawerVisible" size="310px" direction="ltr" title="会话">
       <SessionList />
     </el-drawer>
   </div>
 </template>
 
 <style scoped>
-.chat-layout {
-  display: flex;
-  height: calc(100vh - 116px);
-  width: 100%;
+.workspace {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr) 300px;
+  height: 100%;
+  min-height: 0;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: var(--app-surface);
   overflow: hidden;
-  border-radius: 26px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 16px 48px rgba(15, 23, 42, 0.08);
 }
 
-.sidebar-wrapper {
-  width: 260px;
-  flex-shrink: 0;
-}
-
-.main-wrapper {
-  flex: 1;
-  min-width: 0;
+.chat-main {
   display: flex;
+  min-width: 0;
+  min-height: 0;
   flex-direction: column;
-  background-color: var(--bg-color-primary);
 }
 
 .chat-header {
-  min-height: 84px;
-  border-bottom: 1px solid var(--border-color);
   display: flex;
+  min-height: 76px;
+  flex-shrink: 0;
+  align-items: center;
   justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-  padding: 16px 24px;
+  gap: 14px;
+  border-bottom: 1px solid var(--app-border);
+  padding: 14px 16px;
 }
 
-.header-title {
+.title-zone {
   display: flex;
   align-items: center;
-  gap: 12px;
-}
-
-.header-title h2 {
-  margin: 0;
-  font-weight: 700;
-}
-
-.header-title p {
-  margin: 4px 0 0;
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-
-.header-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.onsite-status-card {
-  display: grid;
-  gap: 6px;
-  padding: 10px 12px;
-  border-radius: 14px;
-  background: rgba(248, 250, 252, 0.9);
-  border: 1px solid rgba(148, 163, 184, 0.18);
-}
-
-.onsite-status-title {
-  font-size: 12px;
-  font-weight: 700;
-  color: #334155;
-}
-
-.onsite-actions {
-  display: flex;
   gap: 8px;
 }
 
-.chat-viewport {
+.chat-header h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.message-viewport {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  padding: 24px;
-  scroll-behavior: smooth;
+  padding: 18px;
+  background: #f8fafc;
 }
 
-.messages-list {
-  max-width: 860px;
+.message-list {
+  display: grid;
+  gap: 14px;
+  max-width: 940px;
   margin: 0 auto;
+}
+
+.empty-chat {
   display: grid;
-  gap: 16px;
+  gap: 12px;
+  max-width: 760px;
+  margin: 42px auto;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  padding: 20px;
+  background: var(--app-surface);
 }
 
-.message-alert {
-  margin-bottom: 6px;
-}
-
-.welcome-banner {
-  display: grid;
-  gap: 16px;
-  padding: 20px 22px;
-  border-radius: 24px;
-  background: linear-gradient(135deg, rgba(15, 118, 110, 0.08), rgba(37, 99, 235, 0.08));
-  border: 1px solid rgba(148, 163, 184, 0.18);
-}
-
-.welcome-banner h3 {
+.empty-chat h2 {
   margin: 0;
   font-size: 22px;
-  color: #0f172a;
+  font-weight: 800;
 }
 
-.welcome-banner p {
+.empty-chat p {
   margin: 0;
-  color: #475569;
+  color: var(--app-text-muted);
 }
 
-.acceptance-groups {
-  display: grid;
-  gap: 12px;
-}
-
-.acceptance-group {
+.suggestions {
   display: grid;
   gap: 8px;
 }
 
-.group-title {
-  font-size: 13px;
-  font-weight: 700;
-  color: #0f172a;
-}
-
-.suggestion-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.chip {
-  cursor: pointer;
-}
-
-.chat-input-area {
-  padding: 24px;
-  border-top: 1px solid var(--border-color);
-  background-color: #fff;
-}
-
-.input-container {
-  max-width: 860px;
-  margin: 0 auto;
-  display: flex;
-  gap: 12px;
-  align-items: flex-end;
-}
-
-.send-btn {
-  height: 40px;
-  width: 40px;
+.suggestions button {
+  border: 1px solid var(--app-border);
   border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--app-surface-muted);
+  color: var(--app-text);
+  cursor: pointer;
+  text-align: left;
 }
 
-.footer-tip {
-  max-width: 860px;
-  margin: 10px auto 0;
-  color: var(--text-secondary);
-  font-size: 12px;
+.suggestions button:hover {
+  border-color: var(--app-primary);
+  color: var(--app-primary-strong);
 }
 
-@media (max-width: 960px) {
-  .chat-layout {
-    height: calc(100vh - 88px);
-    border-radius: 18px;
+.composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px;
+  gap: 10px;
+  flex-shrink: 0;
+  border-top: 1px solid var(--app-border);
+  padding: 14px;
+  background: var(--app-surface);
+}
+
+.context-panel {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  overflow-y: auto;
+  border-left: 1px solid var(--app-border);
+  background: var(--app-surface-muted);
+  padding: 12px;
+}
+
+.boundary-list,
+.rule-list {
+  display: grid;
+  gap: 10px;
+}
+
+.boundary-list > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.boundary-list span,
+.rule-list span {
+  color: var(--app-text-muted);
+}
+
+.boundary-list strong {
+  font-size: 20px;
+}
+
+.rule-list span {
+  border-left: 3px solid var(--app-primary);
+  padding-left: 8px;
+}
+
+@media (max-width: 1180px) {
+  .workspace {
+    grid-template-columns: 260px minmax(0, 1fr);
   }
 
-  .chat-header,
-  .chat-viewport,
-  .chat-input-area {
-    padding: 16px;
+  .context-panel {
+    display: none;
+  }
+}
+
+@media (max-width: 980px) {
+  .workspace {
+    grid-template-columns: 1fr;
+    height: auto;
+    min-height: calc(100vh - 170px);
   }
 
-  .chat-header,
-  .header-actions,
-  .onsite-actions {
-    flex-direction: column;
-    align-items: stretch;
+  .sessions {
+    display: none;
+  }
+
+  .message-viewport {
+    min-height: 55vh;
   }
 }
 </style>
