@@ -1,48 +1,158 @@
-/* src/assets/main.css */
-
-:root {
-  /* 定义语义化颜色变量 */
-  --bg-color-primary: #ffffff;
-  --bg-color-secondary: #f3f5f7; /* 侧边栏背景 */
-  --border-color: #e5e7eb;
-  --text-primary: #1f2937;
-  --text-secondary: #6b7280;
-
-  /* 品牌色 - 对应 Element Plus 的 Primary */
-  --brand-color: #409eff;
-
-  /* 消息气泡颜色 */
-  --bubble-bg-user: #e1effe;
-  --bubble-bg-ai: #f3f4f6;
-}
-
-body {
-  margin: 0;
-  padding: 0;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  background-color: var(--bg-color-primary);
-  color: var(--text-primary);
-  height: 100vh;
-  overflow: hidden; /* 防止整个页面出现滚动条，只让内部组件滚动 */
-}
-
-#app {
+.page {
   height: 100%;
-  width: 100%;
+  min-height: 0;
 }
 
-/* 滚动条美化 */
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.page-kicker {
+  margin: 0 0 4px;
+  color: var(--app-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.page-title {
+  margin: 0;
+  color: var(--app-text);
+  font-size: 22px;
+  font-weight: 750;
+  letter-spacing: 0;
+}
+
+.page-description {
+  margin: 6px 0 0;
+  max-width: 760px;
+  color: var(--app-text-muted);
+}
+
+.panel {
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius);
+  background: var(--app-surface);
+  box-shadow: 0 1px 0 rgba(21, 32, 43, 0.04);
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--app-border);
+}
+
+.panel-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.panel-subtitle {
+  margin: 2px 0 0;
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
+.panel-body {
+  padding: 16px;
+}
+
+.metric-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.metric {
+  min-width: 0;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius);
+  padding: 12px;
+  background: var(--app-surface);
+}
+
+.metric-label {
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
+.metric-value {
+  margin-top: 4px;
+  color: var(--app-text);
+  font-size: 24px;
+  font-weight: 750;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.muted {
+  color: var(--app-text-muted);
+}
+
+.mono {
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+.table-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.danger-text {
+  color: var(--app-danger);
+}
+
+.success-text {
+  color: var(--app-success);
+}
+
+.warning-text {
+  color: var(--app-warning);
+}
+
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #d1d5db;
-  border-radius: 3px;
+  background: #c7d1dc;
+  border-radius: 8px;
 }
 
 ::-webkit-scrollbar-track {
   background: transparent;
+}
+
+@media (max-width: 960px) {
+  body {
+    overflow: auto;
+  }
+
+  .page-header {
+    flex-direction: column;
+  }
+
+  .metric-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .metric-strip {
+    grid-template-columns: 1fr;
+  }
 }

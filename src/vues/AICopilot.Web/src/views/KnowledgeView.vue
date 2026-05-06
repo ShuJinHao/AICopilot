@@ -1,868 +1,338 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { Delete, Edit, Refresh, Search, Upload } from '@element-plus/icons-vue'
-import {
-  KNOWLEDGE_READ_PERMISSIONS,
-  KNOWLEDGE_WRITE_PERMISSIONS
-} from '@/security/permissions'
-import { useAuthStore } from '@/stores/authStore'
+import { computed, onMounted } from 'vue'
+import { ElMessage, ElMessageBox, type UploadRequestOptions } from 'element-plus'
+import { Plus, Refresh, Search, UploadFilled } from '@element-plus/icons-vue'
+import AppShell from '@/components/layout/AppShell.vue'
 import { useRagStore } from '@/stores/ragStore'
-import type {
-  EmbeddingModelFormModel,
-  KnowledgeBaseFormModel,
-  KnowledgeDocumentStatus
-} from '@/types/app'
 
-const authStore = useAuthStore()
-const ragStore = useRagStore()
+const store = useRagStore()
 
-const embeddingModelFormRef = ref<FormInstance>()
-const knowledgeBaseFormRef = ref<FormInstance>()
-const fileInputRef = ref<HTMLInputElement>()
-
-const canReadKnowledge = computed(() => authStore.hasAnyPermission(KNOWLEDGE_READ_PERMISSIONS))
-const canReadEmbeddingModels = computed(() =>
-  authStore.hasAnyPermission(['Rag.GetEmbeddingModel', 'Rag.GetListEmbeddingModels'])
-)
-const canReadKnowledgeBases = computed(() =>
-  authStore.hasAnyPermission(['Rag.GetKnowledgeBase', 'Rag.GetListKnowledgeBases'])
-)
-const canReadDocuments = computed(() => authStore.hasPermission('Rag.GetListDocuments'))
-const canSearchKnowledge = computed(() => authStore.hasPermission(KNOWLEDGE_WRITE_PERMISSIONS.search))
-const canCreateEmbeddingModels = computed(() =>
-  authStore.hasPermission(KNOWLEDGE_WRITE_PERMISSIONS.embeddingModel.create)
-)
-const canUpdateEmbeddingModels = computed(() =>
-  authStore.hasPermission(KNOWLEDGE_WRITE_PERMISSIONS.embeddingModel.update)
-)
-const canDeleteEmbeddingModels = computed(() =>
-  authStore.hasPermission(KNOWLEDGE_WRITE_PERMISSIONS.embeddingModel.delete)
-)
-const canCreateKnowledgeBases = computed(() =>
-  authStore.hasPermission(KNOWLEDGE_WRITE_PERMISSIONS.knowledgeBase.create)
-)
-const canUpdateKnowledgeBases = computed(() =>
-  authStore.hasPermission(KNOWLEDGE_WRITE_PERMISSIONS.knowledgeBase.update)
-)
-const canDeleteKnowledgeBases = computed(() =>
-  authStore.hasPermission(KNOWLEDGE_WRITE_PERMISSIONS.knowledgeBase.delete)
-)
-const canUploadDocuments = computed(() =>
-  authStore.hasPermission(KNOWLEDGE_WRITE_PERMISSIONS.document.upload)
-)
-const canDeleteDocuments = computed(() =>
-  authStore.hasPermission(KNOWLEDGE_WRITE_PERMISSIONS.document.delete)
+const selectedBase = computed(() =>
+  store.knowledgeBases.find((item) => item.id === store.selectedKnowledgeBaseId) ?? null
 )
 
-const selectedKnowledgeBase = computed(
-  () =>
-    ragStore.knowledgeBases.find((item) => item.id === ragStore.selectedKnowledgeBaseId) ?? null
-)
-const hasEmbeddingModels = computed(() => ragStore.embeddingModels.length > 0)
-const canCreateKnowledgeBaseNow = computed(
-  () => canCreateKnowledgeBases.value && hasEmbeddingModels.value
-)
-
-const embeddingModelRules: FormRules<EmbeddingModelFormModel> = {
-  name: [{ required: true, message: '请输入嵌入模型名称', trigger: 'blur' }],
-  provider: [{ required: true, message: '请输入模型提供方', trigger: 'blur' }],
-  baseUrl: [{ required: true, message: '请输入模型服务地址', trigger: 'blur' }],
-  modelName: [{ required: true, message: '请输入模型标识', trigger: 'blur' }],
-  dimensions: [{ required: true, type: 'number', min: 1, message: '向量维度必须大于 0', trigger: 'change' }],
-  maxTokens: [{ required: true, type: 'number', min: 1, message: 'Token 上限必须大于 0', trigger: 'change' }]
-}
-
-const knowledgeBaseRules: FormRules<KnowledgeBaseFormModel> = {
-  name: [{ required: true, message: '请输入知识库名称', trigger: 'blur' }],
-  description: [{ required: true, message: '请输入知识库说明', trigger: 'blur' }],
-  embeddingModelId: [{ required: true, message: '请选择嵌入模型', trigger: 'change' }]
-}
-
-const documentStatusNames: Record<number, string> = {
-  0: 'Pending',
-  1: 'Parsing',
-  2: 'Splitting',
-  3: 'Embedding',
-  4: 'Indexed',
-  5: 'Failed'
-}
-
-function normalizedDocumentStatus(status: KnowledgeDocumentStatus) {
-  return typeof status === 'number' ? documentStatusNames[status] ?? String(status) : status
-}
-
-function documentStatusLabel(status: KnowledgeDocumentStatus) {
-  switch (normalizedDocumentStatus(status)) {
-    case 'Pending':
-      return '等待处理'
-    case 'Parsing':
-      return '解析中'
-    case 'Splitting':
-      return '切片中'
-    case 'Embedding':
-      return '向量化中'
-    case 'Indexed':
-      return '已索引'
-    case 'Failed':
-      return '失败'
-    default:
-      return '未知'
-  }
-}
-
-function documentStatusType(status: KnowledgeDocumentStatus) {
-  switch (normalizedDocumentStatus(status)) {
-    case 'Indexed':
-      return 'success'
-    case 'Failed':
-      return 'danger'
-    case 'Parsing':
-    case 'Splitting':
-    case 'Embedding':
-      return 'warning'
-    default:
-      return 'info'
-  }
-}
-
-function embeddingModelName(id: string) {
-  return ragStore.embeddingModels.find((item) => item.id === id)?.name ?? '未找到模型'
-}
-
-function formatDate(value?: string | null) {
-  if (!value) {
-    return '-'
-  }
-
-  return new Date(value).toLocaleString()
-}
-
-async function refreshAll() {
-  if (!canReadKnowledge.value) {
-    return
-  }
-
-  await ragStore.refresh()
-}
-
-function openCreateEmbeddingModelDialog() {
-  if (!canCreateEmbeddingModels.value) {
-    return
-  }
-
-  ragStore.openCreateEmbeddingModelDialog()
-}
-
-async function openEditEmbeddingModelDialog(id: string) {
-  if (!canUpdateEmbeddingModels.value) {
-    return
-  }
-
-  await ragStore.openEditEmbeddingModelDialog(id)
-}
-
-async function saveEmbeddingModel() {
-  if (!embeddingModelFormRef.value) {
-    return
-  }
-
-  await embeddingModelFormRef.value.validate()
-  await ragStore.saveEmbeddingModel()
-  ElMessage.success('嵌入模型已保存')
-}
-
-async function confirmDeleteEmbeddingModel(id: string) {
-  if (!canDeleteEmbeddingModels.value) {
-    return
-  }
-
-  await ElMessageBox.confirm('确认删除该嵌入模型？已绑定知识库时后端会拒绝删除。', '删除嵌入模型', {
-    type: 'warning'
-  })
-  await ragStore.deleteEmbeddingModel(id)
-  ElMessage.success('嵌入模型已删除')
-}
-
-function openCreateKnowledgeBaseDialog() {
-  if (!canCreateKnowledgeBases.value) {
-    return
-  }
-
-  if (!hasEmbeddingModels.value) {
-    ElMessage.warning('请先创建至少一个嵌入模型。')
-    return
-  }
-
-  ragStore.openCreateKnowledgeBaseDialog()
-}
-
-async function openEditKnowledgeBaseDialog(id: string) {
-  if (!canUpdateKnowledgeBases.value) {
-    return
-  }
-
-  await ragStore.openEditKnowledgeBaseDialog(id)
-}
-
-async function saveKnowledgeBase() {
-  if (!knowledgeBaseFormRef.value) {
-    return
-  }
-
-  await knowledgeBaseFormRef.value.validate()
-  await ragStore.saveKnowledgeBase()
-  ElMessage.success('知识库已保存')
-}
-
-async function confirmDeleteKnowledgeBase(id: string) {
-  if (!canDeleteKnowledgeBases.value) {
-    return
-  }
-
-  await ElMessageBox.confirm('确认删除该知识库？其中的文档和索引也会一并删除。', '删除知识库', {
-    type: 'warning'
-  })
-  await ragStore.deleteKnowledgeBase(id)
-  ElMessage.success('知识库已删除')
-}
-
-function openUploadFilePicker() {
-  if (!canUploadDocuments.value || !selectedKnowledgeBase.value) {
-    return
-  }
-
-  fileInputRef.value?.click()
-}
-
-async function handleDocumentFileChange(event: Event) {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  input.value = ''
-
-  if (!file) {
-    return
-  }
-
-  await ragStore.uploadDocument(file)
-  ElMessage.success('文档已上传，后台将继续索引。')
-}
-
-async function confirmDeleteDocument(id: number) {
-  if (!canDeleteDocuments.value) {
-    return
-  }
-
-  await ElMessageBox.confirm('确认删除该文档？对应索引将不再用于检索。', '删除文档', {
-    type: 'warning'
-  })
-  await ragStore.deleteDocument(id)
-  ElMessage.success('文档已删除')
-}
-
-async function searchKnowledgeBase() {
-  if (!canSearchKnowledge.value) {
-    return
-  }
-
-  await ragStore.searchKnowledgeBase()
-}
-
-onMounted(async () => {
-  await refreshAll()
+onMounted(() => {
+  void store.refresh()
 })
+
+function statusType(status: string | number) {
+  const value = String(status)
+  if (value === 'Indexed') return 'success'
+  if (value === 'Failed') return 'danger'
+  if (value === 'Pending') return 'info'
+  return 'warning'
+}
+
+async function uploadDocument(options: UploadRequestOptions) {
+  if (options.file instanceof File) {
+    await store.uploadDocument(options.file)
+    ElMessage.success('文档已上传')
+  }
+}
+
+async function confirmDelete(title: string, action: () => Promise<void>) {
+  await ElMessageBox.confirm(title, '确认操作', { type: 'warning', confirmButtonText: '确认', cancelButtonText: '取消' })
+  await action()
+  ElMessage.success('操作已完成')
+}
 </script>
 
 <template>
-  <div class="knowledge-page">
-    <section class="page-header">
-      <div>
-        <h1>知识库</h1>
-        <p>管理嵌入模型、知识库文档和检索验证。</p>
+  <AppShell>
+    <div class="page knowledge-page">
+      <header class="page-header">
+        <div>
+          <p class="page-kicker">Knowledge Governance</p>
+          <h1 class="page-title">知识库</h1>
+          <p class="page-description">管理向量模型、知识库、文档解析状态和检索预览。</p>
+        </div>
+        <div class="toolbar">
+          <el-button :icon="Refresh" :loading="store.isLoading" @click="store.refresh()">刷新</el-button>
+          <el-button type="primary" :icon="Plus" @click="store.openCreateKnowledgeBaseDialog()">新增知识库</el-button>
+        </div>
+      </header>
+
+      <div class="metric-strip">
+        <div class="metric">
+          <span class="metric-label">Embedding 模型</span>
+          <strong class="metric-value">{{ store.embeddingModels.length }}</strong>
+        </div>
+        <div class="metric">
+          <span class="metric-label">知识库</span>
+          <strong class="metric-value">{{ store.knowledgeBases.length }}</strong>
+        </div>
+        <div class="metric">
+          <span class="metric-label">当前文档</span>
+          <strong class="metric-value">{{ store.documents.length }}</strong>
+        </div>
+        <div class="metric">
+          <span class="metric-label">检索结果</span>
+          <strong class="metric-value">{{ store.searchResults.length }}</strong>
+        </div>
       </div>
-      <el-button :icon="Refresh" :loading="ragStore.isLoading" @click="refreshAll">刷新</el-button>
-    </section>
 
-    <el-alert
-      v-if="ragStore.errorMessage"
-      :title="ragStore.errorMessage"
-      type="error"
-      show-icon
-      class="page-alert"
-    />
+      <el-alert v-if="store.errorMessage" type="error" show-icon :closable="false" :title="store.errorMessage" />
 
-    <el-alert
-      v-if="!canReadKnowledge"
-      title="当前账号没有知识库管理权限。"
-      type="warning"
-      show-icon
-      class="page-alert"
-    />
-
-    <div v-else class="knowledge-layout">
-      <aside class="kb-sidebar">
-        <div class="panel-header">
-          <div>
-            <h2>知识库列表</h2>
-            <span>{{ ragStore.knowledgeBases.length }} 个知识库</span>
-          </div>
-          <el-button
-            type="primary"
-            size="small"
-            :disabled="!canCreateKnowledgeBaseNow"
-            @click="openCreateKnowledgeBaseDialog"
-          >
-            新增
-          </el-button>
-        </div>
-
-        <el-empty v-if="!ragStore.knowledgeBases.length" description="暂无知识库" />
-        <div v-else class="kb-list">
-          <button
-            v-for="item in ragStore.knowledgeBases"
-            :key="item.id"
-            class="kb-item"
-            :class="{ active: item.id === ragStore.selectedKnowledgeBaseId }"
-            @click="ragStore.selectKnowledgeBase(item.id)"
-          >
-            <span class="kb-name">{{ item.name }}</span>
-            <span class="kb-meta">{{ item.documentCount }} 个文档</span>
-          </button>
-        </div>
-      </aside>
-
-      <main class="knowledge-main">
-        <section v-if="canReadEmbeddingModels" class="panel">
+      <div class="knowledge-grid">
+        <section class="panel">
           <div class="panel-header">
             <div>
-              <h2>嵌入模型</h2>
-              <span>{{ ragStore.embeddingModels.length }} 个配置</span>
+              <h2 class="panel-title">知识库列表</h2>
+              <p class="panel-subtitle">选择一个知识库查看文档和检索效果。</p>
             </div>
-            <el-button
-              type="primary"
-              :disabled="!canCreateEmbeddingModels"
-              @click="openCreateEmbeddingModelDialog"
-            >
-              新增模型
-            </el-button>
           </div>
-
-          <el-table
-            :data="ragStore.embeddingModels"
-            :loading="ragStore.loadingStates.embeddingModel"
-            border
-            empty-text="暂无嵌入模型"
-          >
-            <el-table-column prop="name" label="名称" min-width="160" />
-            <el-table-column prop="provider" label="提供方" width="120" />
-            <el-table-column prop="modelName" label="模型标识" min-width="180" />
-            <el-table-column prop="dimensions" label="维度" width="90" />
-            <el-table-column prop="maxTokens" label="Token" width="90" />
-            <el-table-column label="密钥" width="90">
-              <template #default="{ row }">
-                <el-tag :type="row.hasApiKey ? 'success' : 'info'" size="small">
-                  {{ row.hasApiKey ? '已配置' : '未配置' }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="状态" width="90">
-              <template #default="{ row }">
-                <el-tag :type="row.isEnabled ? 'success' : 'info'" size="small">
-                  {{ row.isEnabled ? '启用' : '停用' }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="150" fixed="right">
-              <template #default="{ row }">
-                <el-button
-                  text
-                  :icon="Edit"
-                  :disabled="!canUpdateEmbeddingModels"
-                  @click="openEditEmbeddingModelDialog(row.id)"
-                />
-                <el-button
-                  text
-                  type="danger"
-                  :icon="Delete"
-                  :disabled="!canDeleteEmbeddingModels"
-                  @click="confirmDeleteEmbeddingModel(row.id)"
-                />
-              </template>
-            </el-table-column>
-          </el-table>
+          <div class="base-list">
+            <button
+              v-for="base in store.knowledgeBases"
+              :key="base.id"
+              type="button"
+              class="base-item"
+              :class="{ active: store.selectedKnowledgeBaseId === base.id }"
+              @click="store.selectKnowledgeBase(base.id)"
+            >
+              <strong>{{ base.name }}</strong>
+              <span>{{ base.description || '无说明' }}</span>
+              <em>{{ base.documentCount }} 个文档</em>
+            </button>
+            <div v-if="store.knowledgeBases.length === 0" class="empty-box">暂无知识库</div>
+          </div>
         </section>
 
-        <section v-if="selectedKnowledgeBase && canReadKnowledgeBases" class="panel">
+        <section class="panel">
           <div class="panel-header">
             <div>
-              <h2>{{ selectedKnowledgeBase.name }}</h2>
-              <span>{{ embeddingModelName(selectedKnowledgeBase.embeddingModelId) }}</span>
+              <h2 class="panel-title">{{ selectedBase?.name || '未选择知识库' }}</h2>
+              <p class="panel-subtitle">{{ selectedBase?.description || '选择知识库后查看文档。' }}</p>
             </div>
-            <div class="panel-actions">
+            <div class="toolbar">
               <el-button
-                :icon="Edit"
-                :disabled="!canUpdateKnowledgeBases"
-                @click="openEditKnowledgeBaseDialog(selectedKnowledgeBase.id)"
+                v-if="selectedBase"
+                @click="store.openEditKnowledgeBaseDialog(selectedBase.id)"
               >
                 编辑
               </el-button>
               <el-button
+                v-if="selectedBase"
                 type="danger"
-                :icon="Delete"
-                :disabled="!canDeleteKnowledgeBases"
-                @click="confirmDeleteKnowledgeBase(selectedKnowledgeBase.id)"
+                plain
+                @click="confirmDelete(`确认删除知识库 ${selectedBase.name}？`, () => store.deleteKnowledgeBase(selectedBase!.id))"
               >
                 删除
               </el-button>
             </div>
           </div>
-          <p class="description-text">{{ selectedKnowledgeBase.description }}</p>
-        </section>
-
-        <section v-if="selectedKnowledgeBase && canReadDocuments" class="panel">
-          <div class="panel-header">
-            <div>
-              <h2>文档</h2>
-              <span>{{ ragStore.documents.length }} 个文档</span>
-            </div>
-            <div class="panel-actions">
-              <el-button :icon="Refresh" @click="ragStore.refreshDocuments()">刷新状态</el-button>
-              <el-button
-                type="primary"
-                :icon="Upload"
-                :disabled="!canUploadDocuments"
-                :loading="ragStore.loadingStates.document"
-                @click="openUploadFilePicker"
-              >
-                上传
-              </el-button>
-              <input
-                ref="fileInputRef"
-                class="file-input"
-                type="file"
-                @change="handleDocumentFileChange"
-              >
-            </div>
-          </div>
-
-          <el-alert
-            v-if="ragStore.actionErrors.document"
-            :title="ragStore.actionErrors.document"
-            type="error"
-            show-icon
-            class="section-alert"
-          />
-
-          <el-table
-            :data="ragStore.documents"
-            :loading="ragStore.loadingStates.document"
-            border
-            empty-text="暂无文档"
-          >
-            <el-table-column prop="name" label="文件名" min-width="180" />
-            <el-table-column label="状态" width="110">
-              <template #default="{ row }">
-                <el-tag :type="documentStatusType(row.status)" size="small">
-                  {{ documentStatusLabel(row.status) }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="chunkCount" label="切片" width="80" />
-            <el-table-column label="创建时间" min-width="160">
-              <template #default="{ row }">{{ formatDate(row.createdAt) }}</template>
-            </el-table-column>
-            <el-table-column label="处理时间" min-width="160">
-              <template #default="{ row }">{{ formatDate(row.processedAt) }}</template>
-            </el-table-column>
-            <el-table-column label="错误" min-width="180">
-              <template #default="{ row }">{{ row.errorMessage || '-' }}</template>
-            </el-table-column>
-            <el-table-column label="操作" width="90" fixed="right">
-              <template #default="{ row }">
-                <el-button
-                  text
-                  type="danger"
-                  :icon="Delete"
-                  :disabled="!canDeleteDocuments"
-                  @click="confirmDeleteDocument(row.id)"
-                />
-              </template>
-            </el-table-column>
-          </el-table>
-        </section>
-
-        <section v-if="selectedKnowledgeBase" class="panel">
-          <div class="panel-header">
-            <div>
-              <h2>检索验证</h2>
-              <span>{{ ragStore.searchResults.length }} 条结果</span>
-            </div>
-          </div>
-
-          <el-alert
-            v-if="ragStore.actionErrors.search"
-            :title="ragStore.actionErrors.search"
-            type="error"
-            show-icon
-            class="section-alert"
-          />
-
-          <div class="search-row">
-            <el-input
-              v-model="ragStore.searchQuery"
-              placeholder="输入检索文本"
-              clearable
-              @keyup.enter="searchKnowledgeBase"
-            />
-            <el-input-number v-model="ragStore.searchTopK" :min="1" :max="20" />
-            <el-input-number v-model="ragStore.searchMinScore" :min="0" :max="1" :step="0.05" />
-            <el-button
-              type="primary"
-              :icon="Search"
-              :disabled="!canSearchKnowledge || !ragStore.searchQuery.trim()"
-              :loading="ragStore.loadingStates.search"
-              @click="searchKnowledgeBase"
+          <div class="panel-body document-zone">
+            <el-upload
+              drag
+              :http-request="uploadDocument"
+              :show-file-list="false"
+              :disabled="!store.selectedKnowledgeBaseId || store.loadingStates.document"
             >
-              检索
-            </el-button>
-          </div>
+              <el-icon><UploadFilled /></el-icon>
+              <div>拖拽或点击上传知识文档</div>
+              <template #tip>
+                <span class="muted">上传后由后端解析、切分并写入向量索引。</span>
+              </template>
+            </el-upload>
 
-          <el-empty v-if="!ragStore.searchResults.length" description="暂无检索结果" />
-          <div v-else class="search-results">
-            <article v-for="item in ragStore.searchResults" :key="`${item.documentId}-${item.score}`">
-              <div class="result-meta">
-                <span>{{ item.documentName || `文档 ${item.documentId}` }}</span>
-                <el-tag size="small">{{ item.score.toFixed(3) }}</el-tag>
+            <el-table :data="store.documents" stripe>
+              <el-table-column prop="name" label="文档" min-width="180" />
+              <el-table-column prop="extension" label="类型" width="80" />
+              <el-table-column label="状态" width="110">
+                <template #default="{ row }">
+                  <el-tag :type="statusType(row.status)">{{ row.status }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="chunkCount" label="Chunks" width="90" />
+              <el-table-column label="操作" width="90">
+                <template #default="{ row }">
+                  <el-button link type="danger" @click="confirmDelete(`确认删除文档 ${row.name}？`, () => store.deleteDocument(row.id))">删除</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </section>
+      </div>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">检索预览</h2>
+            <p class="panel-subtitle">验证知识库召回片段和分数，不接真实模型。</p>
+          </div>
+        </div>
+        <div class="panel-body search-grid">
+          <el-input v-model="store.searchQuery" placeholder="输入检索问题" clearable />
+          <el-input-number v-model="store.searchTopK" :min="1" :max="20" />
+          <el-input-number v-model="store.searchMinScore" :min="0" :max="1" :step="0.05" />
+          <el-button type="primary" :icon="Search" :loading="store.loadingStates.search" @click="store.searchKnowledgeBase()">检索</el-button>
+        </div>
+        <div class="search-results">
+          <article v-for="result in store.searchResults" :key="`${result.documentId}-${result.score}`">
+            <header>
+              <strong>{{ result.documentName || `Document #${result.documentId}` }}</strong>
+              <el-tag type="info">{{ result.score.toFixed(3) }}</el-tag>
+            </header>
+            <p>{{ result.text }}</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Embedding 模型</h2>
+            <p class="panel-subtitle">知识库向量化使用的模型配置。</p>
+          </div>
+          <el-button type="primary" :icon="Plus" @click="store.openCreateEmbeddingModelDialog()">新增模型</el-button>
+        </div>
+        <el-table :data="store.embeddingModels" stripe>
+          <el-table-column prop="name" label="名称" min-width="160" />
+          <el-table-column prop="provider" label="Provider" width="120" />
+          <el-table-column prop="modelName" label="模型" min-width="180" />
+          <el-table-column prop="dimensions" label="维度" width="90" />
+          <el-table-column label="状态" width="100">
+            <template #default="{ row }">
+              <el-tag :type="row.isEnabled ? 'success' : 'info'">{{ row.isEnabled ? '启用' : '停用' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="150" fixed="right">
+            <template #default="{ row }">
+              <div class="table-actions">
+                <el-button link type="primary" @click="store.openEditEmbeddingModelDialog(row.id)">编辑</el-button>
+                <el-button link type="danger" @click="confirmDelete(`确认删除模型 ${row.name}？`, () => store.deleteEmbeddingModel(row.id))">删除</el-button>
               </div>
-              <p>{{ item.text }}</p>
-            </article>
-          </div>
-        </section>
+            </template>
+          </el-table-column>
+        </el-table>
+      </section>
 
-        <section v-if="!selectedKnowledgeBase" class="panel empty-panel">
-          <el-empty description="请选择或创建一个知识库" />
-        </section>
-      </main>
+      <el-drawer v-model="store.dialogStates.knowledgeBase" size="520px" title="知识库">
+        <el-form label-position="top">
+          <el-form-item label="名称"><el-input v-model="store.currentKnowledgeBase.name" /></el-form-item>
+          <el-form-item label="说明"><el-input v-model="store.currentKnowledgeBase.description" /></el-form-item>
+          <el-form-item label="Embedding 模型">
+            <el-select v-model="store.currentKnowledgeBase.embeddingModelId" filterable>
+              <el-option v-for="model in store.embeddingModels" :key="model.id" :label="model.name" :value="model.id" />
+            </el-select>
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="store.closeKnowledgeBaseDialog()">取消</el-button>
+          <el-button type="primary" :loading="store.submittingStates.knowledgeBase" @click="store.saveKnowledgeBase()">保存</el-button>
+        </template>
+      </el-drawer>
+
+      <el-drawer v-model="store.dialogStates.embeddingModel" size="560px" title="Embedding 模型">
+        <el-form label-position="top">
+          <el-form-item label="名称"><el-input v-model="store.currentEmbeddingModel.name" /></el-form-item>
+          <el-form-item label="Provider"><el-input v-model="store.currentEmbeddingModel.provider" /></el-form-item>
+          <el-form-item label="Base URL"><el-input v-model="store.currentEmbeddingModel.baseUrl" /></el-form-item>
+          <el-form-item label="Model Name"><el-input v-model="store.currentEmbeddingModel.modelName" /></el-form-item>
+          <el-form-item label="API Key"><el-input v-model="store.currentEmbeddingModel.apiKey" type="password" show-password /></el-form-item>
+          <el-form-item label="维度"><el-input-number v-model="store.currentEmbeddingModel.dimensions" :min="1" /></el-form-item>
+          <el-form-item label="Max Tokens"><el-input-number v-model="store.currentEmbeddingModel.maxTokens" :min="1" /></el-form-item>
+          <el-form-item label="启用"><el-switch v-model="store.currentEmbeddingModel.isEnabled" /></el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="store.closeEmbeddingModelDialog()">取消</el-button>
+          <el-button type="primary" :loading="store.submittingStates.embeddingModel" @click="store.saveEmbeddingModel()">保存</el-button>
+        </template>
+      </el-drawer>
     </div>
-
-    <el-dialog
-      v-model="ragStore.dialogStates.embeddingModel"
-      :title="ragStore.dialogModes.embeddingModel === 'create' ? '新增嵌入模型' : '编辑嵌入模型'"
-      width="720px"
-      destroy-on-close
-      @closed="ragStore.closeEmbeddingModelDialog()"
-    >
-      <el-alert
-        v-if="ragStore.actionErrors.embeddingModel"
-        :title="ragStore.actionErrors.embeddingModel"
-        type="error"
-        show-icon
-        class="section-alert"
-      />
-
-      <el-form
-        ref="embeddingModelFormRef"
-        :model="ragStore.currentEmbeddingModel"
-        :rules="embeddingModelRules"
-        label-position="top"
-      >
-        <div class="inline-fields">
-          <el-form-item label="名称" prop="name">
-            <el-input v-model="ragStore.currentEmbeddingModel.name" placeholder="例如 OpenAI Embedding" />
-          </el-form-item>
-          <el-form-item label="提供方" prop="provider">
-            <el-input v-model="ragStore.currentEmbeddingModel.provider" placeholder="例如 OpenAI" />
-          </el-form-item>
-        </div>
-        <el-form-item label="服务地址" prop="baseUrl">
-          <el-input v-model="ragStore.currentEmbeddingModel.baseUrl" placeholder="https://api.openai.com/v1" />
-        </el-form-item>
-        <div class="inline-fields">
-          <el-form-item label="模型标识" prop="modelName">
-            <el-input v-model="ragStore.currentEmbeddingModel.modelName" placeholder="text-embedding-3-small" />
-          </el-form-item>
-          <el-form-item label="启用状态">
-            <el-switch v-model="ragStore.currentEmbeddingModel.isEnabled" />
-          </el-form-item>
-        </div>
-        <div class="inline-fields">
-          <el-form-item label="向量维度" prop="dimensions">
-            <el-input-number v-model="ragStore.currentEmbeddingModel.dimensions" :min="1" style="width: 100%" />
-          </el-form-item>
-          <el-form-item label="Token 上限" prop="maxTokens">
-            <el-input-number v-model="ragStore.currentEmbeddingModel.maxTokens" :min="1" style="width: 100%" />
-          </el-form-item>
-        </div>
-        <el-form-item v-if="ragStore.dialogModes.embeddingModel === 'edit'" label="密钥处理">
-          <el-radio-group v-model="ragStore.currentEmbeddingModel.apiKeyAction">
-            <el-radio-button label="keep">保留</el-radio-button>
-            <el-radio-button label="replace">替换</el-radio-button>
-            <el-radio-button label="clear">清空</el-radio-button>
-          </el-radio-group>
-          <div class="field-tip">
-            当前密钥：{{ ragStore.currentEmbeddingModel.hasApiKey ? '已配置' : '未配置' }}
-          </div>
-        </el-form-item>
-        <el-form-item
-          v-if="
-            ragStore.dialogModes.embeddingModel === 'create' ||
-            ragStore.currentEmbeddingModel.apiKeyAction === 'replace'
-          "
-          label="API Key"
-        >
-          <el-input
-            v-model="ragStore.currentEmbeddingModel.apiKey"
-            type="password"
-            show-password
-            placeholder="请输入 API Key，可留空"
-          />
-        </el-form-item>
-      </el-form>
-
-      <template #footer>
-        <div class="dialog-actions">
-          <el-button @click="ragStore.closeEmbeddingModelDialog()">取消</el-button>
-          <el-button
-            type="primary"
-            :loading="ragStore.submittingStates.embeddingModel"
-            @click="saveEmbeddingModel"
-          >
-            保存
-          </el-button>
-        </div>
-      </template>
-    </el-dialog>
-
-    <el-dialog
-      v-model="ragStore.dialogStates.knowledgeBase"
-      :title="ragStore.dialogModes.knowledgeBase === 'create' ? '新增知识库' : '编辑知识库'"
-      width="640px"
-      destroy-on-close
-      @closed="ragStore.closeKnowledgeBaseDialog()"
-    >
-      <el-alert
-        v-if="ragStore.actionErrors.knowledgeBase"
-        :title="ragStore.actionErrors.knowledgeBase"
-        type="error"
-        show-icon
-        class="section-alert"
-      />
-
-      <el-form
-        ref="knowledgeBaseFormRef"
-        :model="ragStore.currentKnowledgeBase"
-        :rules="knowledgeBaseRules"
-        label-position="top"
-      >
-        <el-form-item label="名称" prop="name">
-          <el-input v-model="ragStore.currentKnowledgeBase.name" placeholder="请输入知识库名称" />
-        </el-form-item>
-        <el-form-item label="说明" prop="description">
-          <el-input
-            v-model="ragStore.currentKnowledgeBase.description"
-            type="textarea"
-            :rows="3"
-            placeholder="请输入知识库说明"
-          />
-        </el-form-item>
-        <el-form-item label="嵌入模型" prop="embeddingModelId">
-          <el-select v-model="ragStore.currentKnowledgeBase.embeddingModelId" style="width: 100%">
-            <el-option
-              v-for="item in ragStore.embeddingModels"
-              :key="item.id"
-              :label="`${item.name} / ${item.modelName}`"
-              :value="item.id"
-            />
-          </el-select>
-        </el-form-item>
-      </el-form>
-
-      <template #footer>
-        <div class="dialog-actions">
-          <el-button @click="ragStore.closeKnowledgeBaseDialog()">取消</el-button>
-          <el-button
-            type="primary"
-            :loading="ragStore.submittingStates.knowledgeBase"
-            @click="saveKnowledgeBase"
-          >
-            保存
-          </el-button>
-        </div>
-      </template>
-    </el-dialog>
-  </div>
+  </AppShell>
 </template>
 
 <style scoped>
 .knowledge-page {
   display: grid;
-  gap: 16px;
+  align-content: start;
+  gap: 14px;
+  height: 100%;
+  overflow: auto;
 }
 
-.page-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.page-header h1,
-.panel-header h2 {
-  margin: 0;
-  color: #0f172a;
-}
-
-.page-header h1 {
-  font-size: 24px;
-}
-
-.page-header p,
-.panel-header span,
-.description-text,
-.field-tip {
-  margin: 4px 0 0;
-  color: #64748b;
-  font-size: 13px;
-}
-
-.page-alert,
-.section-alert {
-  margin-bottom: 4px;
-}
-
-.knowledge-layout {
+.knowledge-grid {
   display: grid;
-  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
-  gap: 16px;
-  align-items: start;
+  grid-template-columns: 330px minmax(0, 1fr);
+  gap: 14px;
 }
 
-.kb-sidebar,
-.panel {
-  border: 1px solid #d9e2ec;
-  border-radius: 8px;
-  background: #fff;
-  padding: 16px;
-}
-
-.knowledge-main {
-  display: grid;
-  gap: 16px;
-}
-
-.panel-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 14px;
-}
-
-.panel-actions,
-.dialog-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.kb-list {
-  display: grid;
-  gap: 8px;
-}
-
-.kb-item {
-  width: 100%;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  padding: 12px;
-  background: #fff;
-  text-align: left;
-  cursor: pointer;
-  display: grid;
-  gap: 4px;
-}
-
-.kb-item.active {
-  border-color: #2563eb;
-  background: #eff6ff;
-}
-
-.kb-name {
-  color: #0f172a;
-  font-weight: 600;
-}
-
-.kb-meta {
-  color: #64748b;
-  font-size: 12px;
-}
-
-.description-text {
-  line-height: 1.6;
-}
-
-.file-input {
-  display: none;
-}
-
-.search-row {
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) 120px 140px auto;
-  gap: 8px;
-  align-items: center;
-}
-
+.base-list,
+.document-zone,
 .search-results {
   display: grid;
   gap: 10px;
-  margin-top: 14px;
+}
+
+.base-list {
+  padding: 12px;
+}
+
+.base-item {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  padding: 12px;
+  background: #ffffff;
+  cursor: pointer;
+  text-align: left;
+}
+
+.base-item.active,
+.base-item:hover {
+  border-color: var(--app-primary);
+}
+
+.base-item span,
+.base-item em {
+  color: var(--app-text-muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.empty-box {
+  border: 1px dashed var(--app-border);
+  border-radius: 8px;
+  padding: 16px;
+  color: var(--app-text-muted);
+  text-align: center;
+}
+
+.search-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 140px 140px 100px;
+  gap: 10px;
+}
+
+.search-results {
+  padding: 0 16px 16px;
 }
 
 .search-results article {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--app-border);
   border-radius: 8px;
   padding: 12px;
-  background: #f8fafc;
+  background: var(--app-surface-muted);
+}
+
+.search-results header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .search-results p {
   margin: 8px 0 0;
-  color: #334155;
-  line-height: 1.6;
-  white-space: pre-wrap;
+  color: var(--app-text-muted);
 }
 
-.result-meta {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  color: #0f172a;
-  font-weight: 600;
-}
-
-.inline-fields {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.empty-panel {
-  min-height: 220px;
-  display: grid;
-  place-items: center;
-}
-
-@media (max-width: 960px) {
-  .knowledge-layout,
-  .inline-fields,
-  .search-row {
+@media (max-width: 1080px) {
+  .knowledge-grid,
+  .search-grid {
     grid-template-columns: 1fr;
-  }
-
-  .page-header,
-  .panel-header {
-    display: grid;
   }
 }
 </style>
