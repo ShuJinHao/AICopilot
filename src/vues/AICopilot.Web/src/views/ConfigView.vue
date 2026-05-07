@@ -169,6 +169,13 @@ async function confirmAction(title: string, message: string, action: () => Promi
               </div>
               <el-button type="primary" :icon="Plus" @click="store.openCreateBusinessDatabaseDialog()">新增数据源</el-button>
             </div>
+            <el-alert
+              class="safety-alert"
+              type="info"
+              :closable="false"
+              show-icon
+              title="配置管理台保存时始终强制只读；运行期仍会执行 SQL 安全拒绝、结果截断和连接只读校验。"
+            />
             <el-table :data="store.businessDatabases" stripe>
               <el-table-column prop="name" label="名称" min-width="160" />
               <el-table-column label="Provider" width="120">
@@ -219,6 +226,13 @@ async function confirmAction(title: string, message: string, action: () => Promi
               </div>
               <el-button type="primary" :icon="Plus" @click="store.openCreateMcpServerDialog()">新增 MCP</el-button>
             </div>
+            <el-alert
+              class="safety-alert"
+              type="warning"
+              :closable="false"
+              show-icon
+              title="MCP 配置由启动期 bootstrap 读取；保存配置后需要重启服务，工具才会重新发现并应用安全策略。"
+            />
             <el-table :data="store.mcpServers" stripe>
               <el-table-column prop="name" label="名称" min-width="160" />
               <el-table-column prop="description" label="说明" min-width="220" show-overflow-tooltip />
@@ -233,6 +247,18 @@ async function confirmAction(title: string, message: string, action: () => Promi
                 <template #default="{ row }">
                   <el-tag v-for="tool in row.allowedTools.slice(0, 3)" :key="tool.toolName" class="tool-tag">
                     {{ tool.toolName }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="审批摘要" min-width="180">
+                <template #default="{ row }">
+                  <el-tag
+                    v-for="policy in row.toolPolicySummaries"
+                    :key="policy.toolName"
+                    class="tool-tag"
+                    :type="policy.requiresApproval ? 'warning' : 'info'"
+                  >
+                    {{ policy.toolName }}
                   </el-tag>
                 </template>
               </el-table-column>
@@ -338,6 +364,7 @@ async function confirmAction(title: string, message: string, action: () => Promi
           <el-form-item label="说明"><el-input v-model="store.currentMcpServer.description" /></el-form-item>
           <el-form-item label="Command"><el-input v-model="store.currentMcpServer.command" /></el-form-item>
           <el-form-item label="Arguments"><el-input v-model="store.currentMcpServer.arguments" type="textarea" :rows="3" /></el-form-item>
+          <p class="form-hint">留空表示保留已保存参数。</p>
           <el-form-item label="允许工具"><el-input v-model="mcpAllowedToolsText" type="textarea" :rows="5" placeholder="每行一个工具名，默认声明只读" /></el-form-item>
           <el-form-item label="启用"><el-switch v-model="store.currentMcpServer.isEnabled" /></el-form-item>
         </el-form>
@@ -381,6 +408,16 @@ async function confirmAction(title: string, message: string, action: () => Promi
 
 .semantic-panel {
   margin-top: 14px;
+}
+
+.safety-alert {
+  margin-bottom: 12px;
+}
+
+.form-hint {
+  margin: -8px 0 12px;
+  color: var(--app-text-muted);
+  font-size: 12px;
 }
 
 .tool-tag {
