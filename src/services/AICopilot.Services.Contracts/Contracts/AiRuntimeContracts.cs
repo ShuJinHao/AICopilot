@@ -16,6 +16,19 @@ public sealed record RuntimeAgentUpdate(IReadOnlyList<AiRuntimeContent> Contents
 
 public sealed record StructuredAgentResponse<T>(string? Text, T? Result);
 
+public sealed record ModelProviderFallbackRouteDto(
+    string Provider,
+    IReadOnlyList<string> FallbackProviders);
+
+public sealed record ModelProviderReliabilityDto(
+    bool FallbackEnabled,
+    IReadOnlyList<ModelProviderFallbackRouteDto> FallbackProviders,
+    int CircuitBreakerFailureThreshold,
+    int CircuitBreakerOpenSeconds,
+    int MaxOutputTokens,
+    IReadOnlyList<string> FallbackAllowedScopes,
+    IReadOnlyList<string> FallbackBlockedScopes);
+
 public interface IRuntimeAgentSession;
 
 public interface IRuntimeChatAgent
@@ -76,4 +89,9 @@ public interface IAgentRuntimeFactory
     bool CanCreate(string providerName);
 
     ScopedRuntimeAgent Create(AgentRuntimeCreateRequest request);
+}
+
+public interface IModelProviderReliabilitySnapshotReader
+{
+    ModelProviderReliabilityDto GetSnapshot();
 }

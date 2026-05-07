@@ -5,6 +5,7 @@ using AICopilot.AiGatewayService.Commands.LanguageModels;
 using AICopilot.AiGatewayService.Commands.Sessions;
 using AICopilot.AiGatewayService.Queries.ConversationTemplates;
 using AICopilot.AiGatewayService.Queries.LanguageModels;
+using AICopilot.AiGatewayService.Queries.Runtime;
 using AICopilot.AiGatewayService.Queries.Sessions;
 using AICopilot.HttpApi.Infrastructure;
 using MediatR;
@@ -45,6 +46,12 @@ public class AiGatewayController(ISender sender) : ApiControllerBase(sender)
     public async Task<IActionResult> GetListLanguageModels()
     {
         return ReturnResult(await Sender.Send(new GetListLanguageModelsQuery()));
+    }
+
+    [HttpGet("provider-reliability")]
+    public async Task<IActionResult> GetProviderReliability()
+    {
+        return ReturnResult(await Sender.Send(new GetProviderReliabilityQuery()));
     }
 
     [HttpPost("conversation-template")]

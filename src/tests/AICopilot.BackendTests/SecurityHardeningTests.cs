@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text.Json;
+using AICopilot.AiGatewayService.Queries.Runtime;
 using AICopilot.AiGatewayService.Queries.Sessions;
 using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
@@ -222,6 +223,8 @@ public sealed class SecurityHardeningTests
             "permissions.ts"));
 
         permissionsSource.Should().Contain("Mcp.GetListServers");
+        permissionsSource.Should().Contain("AiGateway.GetProviderReliability");
+        configServiceSource.Should().Contain("/aigateway/provider-reliability");
         permissionsSource.Should().Contain("Mcp.CreateServer");
         configServiceSource.Should().Contain("/mcp/server/list");
         configServiceSource.Should().Contain("/mcp/server");
@@ -236,6 +239,19 @@ public sealed class SecurityHardeningTests
         configViewSource.Should().Contain("SQL 安全拒绝");
         configViewSource.Should().Contain("结果截断");
         configViewSource.Should().Contain("配置管理台保存时始终强制只读");
+        configViewSource.Should().Contain("高风险链路固定不 fallback");
+        configViewSource.Should().Contain("DataAnalysis SQL tool chain");
+        configViewSource.Should().Contain("Provider 可靠性");
+    }
+
+    [Fact]
+    public void GetProviderReliabilityQuery_ShouldRequireDedicatedReadPermission()
+    {
+        var attribute = typeof(GetProviderReliabilityQuery)
+            .GetCustomAttribute<AuthorizeRequirementAttribute>();
+
+        attribute.Should().NotBeNull();
+        attribute!.Permission.Should().Be("AiGateway.GetProviderReliability");
     }
 
     [Fact]

@@ -109,6 +109,37 @@ public sealed class ModelProviderReliabilityTests
             .WithMessage("*MaxOutputTokens 2000*1000*");
     }
 
+    [Fact]
+    public void SnapshotReader_ShouldExposeConfiguredReliabilityOptions()
+    {
+        var reader = new ModelProviderReliabilitySnapshotReader(Options.Create(new ModelProviderReliabilityOptions
+        {
+            EnableFallback = true,
+            CircuitBreakerFailureThreshold = 4,
+            CircuitBreakerOpenSeconds = 120,
+            MaxOutputTokens = 3000,
+            FallbackProviders = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["primary"] = ["secondary", ""],
+                ["*"] = ["backup"]
+            }
+        }));
+
+        var snapshot = reader.GetSnapshot();
+
+        snapshot.FallbackEnabled.Should().BeTrue();
+        snapshot.CircuitBreakerFailureThreshold.Should().Be(4);
+        snapshot.CircuitBreakerOpenSeconds.Should().Be(120);
+        snapshot.MaxOutputTokens.Should().Be(3000);
+        snapshot.FallbackProviders.Should().Contain(route =>
+            route.Provider == "primary"
+            && route.FallbackProviders.SequenceEqual(new[] { "secondary" }));
+        snapshot.FallbackAllowedScopes.Should().Contain("GeneralChat");
+        snapshot.FallbackBlockedScopes.Should().Contain("McpToolCall");
+        snapshot.FallbackBlockedScopes.Should().Contain("ApprovalResume");
+        snapshot.FallbackBlockedScopes.Should().Contain("DataAnalysisSqlToolChain");
+    }
+
     private static AgentRuntimeCreateRequest CreateRequest(
         string provider,
         AiChatOptions? options = null)

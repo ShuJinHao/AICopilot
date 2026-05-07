@@ -22,6 +22,7 @@ import type {
   McpServerDetail,
   McpServerFormModel,
   McpServerSummary,
+  ProviderReliabilityConfig,
   SemanticSourceStatus
 } from '@/types/app'
 
@@ -33,6 +34,7 @@ type EditableDomain =
   | 'mcpServer'
 
 type LoadingDomain = EditableDomain | 'semanticSource'
+type ReadOnlyConfigDomain = 'providerReliability'
 
 function createEmptyLanguageModelForm(): LanguageModelFormModel {
   return {
@@ -239,17 +241,19 @@ export const useConfigStore = defineStore('config', () => {
   const businessDatabases = ref<BusinessDatabaseSummary[]>([])
   const mcpServers = ref<McpServerSummary[]>([])
   const semanticSourceStatuses = ref<SemanticSourceStatus[]>([])
+  const providerReliability = ref<ProviderReliabilityConfig | null>(null)
 
   const isLoading = ref(false)
   const errorMessage = ref('')
 
-  const loadingStates = reactive<Record<LoadingDomain, boolean>>({
+  const loadingStates = reactive<Record<LoadingDomain | ReadOnlyConfigDomain, boolean>>({
     languageModel: false,
     conversationTemplate: false,
     approvalPolicy: false,
     businessDatabase: false,
     mcpServer: false,
-    semanticSource: false
+    semanticSource: false,
+    providerReliability: false
   })
 
   const dialogStates = reactive<Record<EditableDomain, boolean>>({
@@ -304,6 +308,20 @@ export const useConfigStore = defineStore('config', () => {
       languageModels.value = await configService.getLanguageModels()
     } finally {
       loadingStates.languageModel = false
+    }
+  }
+
+  async function refreshProviderReliability() {
+    if (!authStore.hasAnyPermission(CONFIG_READ_PERMISSIONS.providerReliability)) {
+      providerReliability.value = null
+      return
+    }
+
+    loadingStates.providerReliability = true
+    try {
+      providerReliability.value = await configService.getProviderReliability()
+    } finally {
+      loadingStates.providerReliability = false
     }
   }
 
@@ -384,6 +402,7 @@ export const useConfigStore = defineStore('config', () => {
     try {
       await Promise.all([
         refreshLanguageModels(),
+        refreshProviderReliability(),
         refreshConversationTemplates(),
         refreshApprovalPolicies(),
         refreshBusinessDatabases(),
@@ -851,6 +870,7 @@ export const useConfigStore = defineStore('config', () => {
     businessDatabases,
     mcpServers,
     semanticSourceStatuses,
+    providerReliability,
     isLoading,
     errorMessage,
     loadingStates,
@@ -865,6 +885,7 @@ export const useConfigStore = defineStore('config', () => {
     currentMcpServer,
     refresh,
     refreshLanguageModels,
+    refreshProviderReliability,
     refreshConversationTemplates,
     refreshApprovalPolicies,
     refreshBusinessDatabases,

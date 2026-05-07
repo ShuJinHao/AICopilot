@@ -15,6 +15,7 @@ public static class DependencyInjection
         builder.Services.AddSingleton<IModelFallbackPolicy, DefaultModelFallbackPolicy>();
         builder.Services.AddSingleton<IModelCircuitBreaker, InMemoryModelCircuitBreaker>();
         builder.Services.AddSingleton<IModelCostBudgetPolicy, ConfiguredModelCostBudgetPolicy>();
+        builder.Services.AddSingleton<IModelProviderReliabilitySnapshotReader, ModelProviderReliabilitySnapshotReader>();
         builder.Services.AddSingleton<IAgentRuntimeFactory, AgentRuntimeFactory>();
     }
 }

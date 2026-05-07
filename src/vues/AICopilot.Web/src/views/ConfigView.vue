@@ -129,6 +129,33 @@ function safetyPreview(tool: McpAllowedTool) {
   return { type: 'success', text: '可尝试暴露' }
 }
 
+const providerFallbackRoutes = computed(() => store.providerReliability?.fallbackProviders ?? [])
+
+function fallbackScopeLabel(scope: string) {
+  switch (scope) {
+    case 'GeneralChat':
+      return '普通对话'
+    case 'RagSummary':
+      return 'RAG 汇总'
+    case 'DataAnalysisFinalSummary':
+      return 'DataAnalysis 最终总结'
+    case 'McpToolCall':
+      return 'MCP 工具调用'
+    case 'ApprovalResume':
+      return '审批恢复'
+    case 'SideEffectingTool':
+      return '副作用工具'
+    case 'DataAnalysisSqlToolChain':
+      return 'DataAnalysis SQL 工具链'
+    default:
+      return scope
+  }
+}
+
+function outputTokenBudgetLabel(value?: number | null) {
+  return value && value > 0 ? `${value}` : '未设置'
+}
+
 function databaseState(row: BusinessDatabaseSummary) {
   if (!row.isEnabled) return { label: '停用', type: 'info' as const }
   if (!row.isReadOnly || !row.readOnlyCredentialVerified) return { label: '需复核', type: 'warning' as const }
@@ -171,6 +198,10 @@ async function confirmAction(title: string, message: string, action: () => Promi
           <span class="metric-label">MCP 服务</span>
           <strong class="metric-value">{{ store.mcpServers.length }}</strong>
         </div>
+        <div class="metric">
+          <span class="metric-label">Provider 回退</span>
+          <strong class="metric-value">{{ store.providerReliability?.fallbackEnabled ? '启用' : '关闭' }}</strong>
+        </div>
       </div>
 
       <el-alert v-if="store.errorMessage" type="error" show-icon :closable="false" :title="store.errorMessage" />
@@ -204,6 +235,84 @@ async function confirmAction(title: string, message: string, action: () => Promi
                 </template>
               </el-table-column>
             </el-table>
+          </section>
+        </el-tab-pane>
+
+        <el-tab-pane label="可靠性" name="reliability">
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h2 class="panel-title">Provider 可靠性</h2>
+                <p class="panel-subtitle">只读查看模型 Provider 回退、熔断和输出 Token 预算配置。</p>
+              </div>
+              <el-button :icon="Refresh" :loading="store.loadingStates.providerReliability" @click="store.refreshProviderReliability()">刷新</el-button>
+            </div>
+
+            <el-alert
+              class="safety-alert"
+              type="warning"
+              :closable="false"
+              show-icon
+              title="高风险链路固定不 fallback：MCP tool-call、approval resume、side-effecting tool、DataAnalysis SQL tool chain。"
+            />
+
+            <template v-if="store.providerReliability">
+              <div class="reliability-grid">
+                <div class="reliability-item">
+                  <span class="metric-label">Fallback 状态</span>
+                  <el-tag :type="store.providerReliability.fallbackEnabled ? 'success' : 'info'">
+                    {{ store.providerReliability.fallbackEnabled ? '已启用' : '未启用' }}
+                  </el-tag>
+                </div>
+                <div class="reliability-item">
+                  <span class="metric-label">失败阈值</span>
+                  <strong>{{ store.providerReliability.circuitBreakerFailureThreshold }}</strong>
+                </div>
+                <div class="reliability-item">
+                  <span class="metric-label">熔断时长</span>
+                  <strong>{{ store.providerReliability.circuitBreakerOpenSeconds }} 秒</strong>
+                </div>
+                <div class="reliability-item">
+                  <span class="metric-label">输出 Token 上限</span>
+                  <strong>{{ outputTokenBudgetLabel(store.providerReliability.maxOutputTokens) }}</strong>
+                </div>
+              </div>
+
+              <div class="policy-lists">
+                <section>
+                  <h3>允许配置 fallback 的场景</h3>
+                  <div class="scope-list">
+                    <el-tag v-for="scope in store.providerReliability.fallbackAllowedScopes" :key="scope" type="success">
+                      {{ fallbackScopeLabel(scope) }}
+                    </el-tag>
+                  </div>
+                </section>
+                <section>
+                  <h3>固定禁止 fallback 的场景</h3>
+                  <div class="scope-list">
+                    <el-tag v-for="scope in store.providerReliability.fallbackBlockedScopes" :key="scope" type="danger">
+                      {{ fallbackScopeLabel(scope) }}
+                    </el-tag>
+                  </div>
+                </section>
+              </div>
+
+              <el-table :data="providerFallbackRoutes" stripe>
+                <el-table-column prop="provider" label="来源 Provider" width="180" />
+                <el-table-column label="回退 Provider" min-width="260">
+                  <template #default="{ row }">
+                    <template v-if="row.fallbackProviders.length > 0">
+                      <el-tag v-for="provider in row.fallbackProviders" :key="provider" class="tool-tag">
+                        {{ provider }}
+                      </el-tag>
+                    </template>
+                    <span v-else>未配置</span>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </template>
+
+            <el-empty v-else description="当前账号没有查看 Provider Reliability 配置的权限，或配置尚未加载。" />
           </section>
         </el-tab-pane>
 
@@ -586,6 +695,42 @@ async function confirmAction(title: string, message: string, action: () => Promi
   width: 100%;
 }
 
+.reliability-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.reliability-item {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: var(--app-surface-muted);
+}
+
+.policy-lists {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.policy-lists h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.scope-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
@@ -599,6 +744,13 @@ async function confirmAction(title: string, message: string, action: () => Promi
 
 .add-tool-button {
   justify-self: start;
+}
+
+@media (max-width: 960px) {
+  .reliability-grid,
+  .policy-lists {
+    grid-template-columns: 1fr;
+  }
 }
 
 :deep(.el-tabs__content) {

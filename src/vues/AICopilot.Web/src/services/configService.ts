@@ -15,6 +15,7 @@ import type {
   McpServerDetail,
   McpServerFormModel,
   McpServerSummary,
+  ProviderReliabilityConfig,
   SemanticSourceStatus
 } from '@/types/app'
 
@@ -25,6 +26,10 @@ export const configService = {
 
   async getLanguageModels() {
     return await apiClient.get<LanguageModelSummary[]>('/aigateway/language-model/list')
+  },
+
+  async getProviderReliability() {
+    return await apiClient.get<ProviderReliabilityConfig>('/aigateway/provider-reliability')
   },
 
   async createLanguageModel(payload: LanguageModelFormModel) {
