@@ -1,14 +1,22 @@
 import { defineStore } from 'pinia'
 import { reactive, ref } from 'vue'
-import { ApiError, getProblemDetails } from '@/services/apiClient'
+import { RAG_STORE_MESSAGES } from '@/constants/messages'
 import { ragService } from '@/services/ragService'
+import {
+  createDefaultUploadGovernanceForm,
+  createEmptyDocumentGovernanceForm,
+  createEmptyEmbeddingModelForm,
+  createEmptyKnowledgeBaseForm,
+  toDocumentGovernanceForm,
+  toEmbeddingModelForm,
+  toKnowledgeBaseForm
+} from '@/stores/ragFormFactories'
+import { toStoreErrorMessage, useDialogCrud } from '@/stores/useDialogCrud'
 import { useAuthStore } from '@/stores/authStore'
 import type {
   ConfigDialogMode,
-  EmbeddingModelDetail,
   EmbeddingModelFormModel,
   EmbeddingModelSummary,
-  KnowledgeBaseDetail,
   KnowledgeBaseFormModel,
   KnowledgeBaseSummary,
   KnowledgeDocumentGovernanceForm,
@@ -18,105 +26,8 @@ import type {
 } from '@/types/app'
 
 type EditableDomain = 'embeddingModel' | 'knowledgeBase' | 'documentGovernance'
+type CrudDomain = 'embeddingModel' | 'knowledgeBase'
 type LoadingDomain = 'embeddingModel' | 'knowledgeBase' | 'document' | 'search'
-
-function createEmptyEmbeddingModelForm(): EmbeddingModelFormModel {
-  return {
-    name: '',
-    provider: 'OpenAI',
-    baseUrl: 'https://api.openai.com/v1',
-    apiKey: '',
-    apiKeyAction: 'replace',
-    modelName: 'text-embedding-3-small',
-    dimensions: 1536,
-    maxTokens: 8191,
-    isEnabled: true,
-    hasApiKey: false,
-    apiKeyMasked: null
-  }
-}
-
-function createEmptyKnowledgeBaseForm(): KnowledgeBaseFormModel {
-  return {
-    name: '',
-    description: '',
-    embeddingModelId: ''
-  }
-}
-
-function createDefaultUploadGovernanceForm(): UploadDocumentGovernanceForm {
-  return {
-    classification: 'Internal',
-    sourceType: 'UserUploaded',
-    isSanitized: false,
-    allowedForFinalPrompt: true
-  }
-}
-
-function createEmptyDocumentGovernanceForm(): KnowledgeDocumentGovernanceForm {
-  return {
-    id: 0,
-    classification: 'Internal',
-    sourceType: 'UserUploaded',
-    isSanitized: false,
-    allowedForFinalPrompt: true,
-    effectiveFrom: null,
-    effectiveTo: null,
-    blockedReason: null
-  }
-}
-
-function toEmbeddingModelForm(detail: EmbeddingModelDetail): EmbeddingModelFormModel {
-  return {
-    id: detail.id,
-    name: detail.name,
-    provider: detail.provider,
-    baseUrl: detail.baseUrl,
-    apiKey: '',
-    apiKeyAction: 'keep',
-    modelName: detail.modelName,
-    dimensions: detail.dimensions,
-    maxTokens: detail.maxTokens,
-    isEnabled: detail.isEnabled,
-    hasApiKey: detail.hasApiKey,
-    apiKeyMasked: detail.apiKeyMasked
-  }
-}
-
-function toKnowledgeBaseForm(detail: KnowledgeBaseDetail): KnowledgeBaseFormModel {
-  return {
-    id: detail.id,
-    name: detail.name,
-    description: detail.description,
-    embeddingModelId: detail.embeddingModelId
-  }
-}
-
-function toDocumentGovernanceForm(document: KnowledgeDocumentSummary): KnowledgeDocumentGovernanceForm {
-  return {
-    id: document.id,
-    classification: document.classification,
-    sourceType: document.sourceType,
-    isSanitized: document.isSanitized,
-    allowedForFinalPrompt: document.allowedForFinalPrompt,
-    effectiveFrom: document.effectiveFrom ?? null,
-    effectiveTo: document.effectiveTo ?? null,
-    blockedReason: document.blockedReason ?? null
-  }
-}
-
-function toErrorMessage(error: unknown, fallback: string, forbiddenMessage: string) {
-  if (error instanceof ApiError && error.status === 403) {
-    return forbiddenMessage
-  }
-
-  if (error instanceof ApiError) {
-    const problem = getProblemDetails(error.details)
-    return problem?.detail || problem?.title || fallback
-  }
-
-  return fallback
-}
 
 export const useRagStore = defineStore('rag', () => {
   const authStore = useAuthStore()
@@ -166,7 +77,9 @@ export const useRagStore = defineStore('rag', () => {
 
   const currentEmbeddingModel = ref<EmbeddingModelFormModel>(createEmptyEmbeddingModelForm())
   const currentKnowledgeBase = ref<KnowledgeBaseFormModel>(createEmptyKnowledgeBaseForm())
-  const currentDocumentGovernance = ref<KnowledgeDocumentGovernanceForm>(createEmptyDocumentGovernanceForm())
+  const currentDocumentGovernance = ref<KnowledgeDocumentGovernanceForm>(
+    createEmptyDocumentGovernanceForm()
+  )
   const currentDocumentGovernanceName = ref('')
   const uploadGovernanceForm = ref<UploadDocumentGovernanceForm>(createDefaultUploadGovernanceForm())
 
@@ -238,10 +151,10 @@ export const useRagStore = defineStore('rag', () => {
       await Promise.all([refreshEmbeddingModels(), refreshKnowledgeBases()])
       await refreshDocuments()
     } catch (error) {
-      errorMessage.value = toErrorMessage(
+      errorMessage.value = toStoreErrorMessage(
         error,
-        '知识库页面加载失败，请稍后重试。',
-        '当前账号没有查看知识库配置的权限。'
+        RAG_STORE_MESSAGES.pageLoadFailed,
+        RAG_STORE_MESSAGES.pageLoadForbidden
       )
       throw error
     } finally {
@@ -256,167 +169,86 @@ export const useRagStore = defineStore('rag', () => {
     await refreshDocuments()
   }
 
-  function closeEmbeddingModelDialog() {
-    dialogStates.embeddingModel = false
-    dialogModes.embeddingModel = 'create'
-    actionErrors.embeddingModel = ''
-    currentEmbeddingModel.value = createEmptyEmbeddingModelForm()
+  const crudStates = {
+    loadingStates,
+    dialogStates,
+    dialogModes,
+    submittingStates,
+    actionErrors
+  } satisfies {
+    loadingStates: Record<CrudDomain, boolean>
+    dialogStates: Record<CrudDomain, boolean>
+    dialogModes: Record<CrudDomain, ConfigDialogMode>
+    submittingStates: Record<CrudDomain, boolean>
+    actionErrors: Record<CrudDomain, string>
   }
 
-  function openCreateEmbeddingModelDialog() {
-    actionErrors.embeddingModel = ''
-    dialogModes.embeddingModel = 'create'
-    currentEmbeddingModel.value = createEmptyEmbeddingModelForm()
-    dialogStates.embeddingModel = true
-  }
-
-  async function openEditEmbeddingModelDialog(id: string) {
-    loadingStates.embeddingModel = true
-    actionErrors.embeddingModel = ''
-
-    try {
-      const detail = await ragService.getEmbeddingModel(id)
-      currentEmbeddingModel.value = toEmbeddingModelForm(detail)
-      dialogModes.embeddingModel = 'edit'
-      dialogStates.embeddingModel = true
-    } catch (error) {
-      actionErrors.embeddingModel = toErrorMessage(
-        error,
-        '加载嵌入模型详情失败，请稍后重试。',
-        '当前账号没有查看嵌入模型详情的权限。'
-      )
-      throw error
-    } finally {
-      loadingStates.embeddingModel = false
-    }
-  }
-
-  async function saveEmbeddingModel() {
-    submittingStates.embeddingModel = true
-    actionErrors.embeddingModel = ''
-
-    try {
+  const embeddingModelCrud = useDialogCrud({
+    domain: 'embeddingModel',
+    states: crudStates,
+    current: currentEmbeddingModel,
+    messages: RAG_STORE_MESSAGES.embeddingModel,
+    createEmptyForm: createEmptyEmbeddingModelForm,
+    toForm: toEmbeddingModelForm,
+    loadDetail: ragService.getEmbeddingModel,
+    saveForm: async (form, mode) => {
       const payload = {
-        ...currentEmbeddingModel.value,
-        name: currentEmbeddingModel.value.name.trim(),
-        provider: currentEmbeddingModel.value.provider.trim(),
-        baseUrl: currentEmbeddingModel.value.baseUrl.trim(),
-        modelName: currentEmbeddingModel.value.modelName.trim(),
-        apiKey: currentEmbeddingModel.value.apiKey.trim()
+        ...form,
+        name: form.name.trim(),
+        provider: form.provider.trim(),
+        baseUrl: form.baseUrl.trim(),
+        modelName: form.modelName.trim(),
+        apiKey: form.apiKey.trim()
       }
 
-      if (dialogModes.embeddingModel === 'create') {
+      if (mode === 'create') {
         await ragService.createEmbeddingModel(payload)
       } else {
         await ragService.updateEmbeddingModel(payload)
       }
-
-      await refreshEmbeddingModels()
-      closeEmbeddingModelDialog()
-    } catch (error) {
-      actionErrors.embeddingModel = toErrorMessage(
-        error,
-        '保存嵌入模型失败，请稍后重试。',
-        '当前账号没有管理嵌入模型的权限。'
-      )
-      throw error
-    } finally {
-      submittingStates.embeddingModel = false
-    }
-  }
-
-  async function deleteEmbeddingModel(id: string) {
-    actionErrors.embeddingModel = ''
-
-    try {
+    },
+    deleteItem: async (id) => {
       await ragService.deleteEmbeddingModel(id)
+    },
+    afterSave: refreshEmbeddingModels,
+    afterDelete: async () => {
       await refreshEmbeddingModels()
       await refreshKnowledgeBases()
-    } catch (error) {
-      actionErrors.embeddingModel = toErrorMessage(
-        error,
-        '删除嵌入模型失败，请确认没有知识库仍在使用该模型。',
-        '当前账号没有删除嵌入模型的权限。'
-      )
-      throw error
     }
-  }
+  })
 
-  function closeKnowledgeBaseDialog() {
-    dialogStates.knowledgeBase = false
-    dialogModes.knowledgeBase = 'create'
-    actionErrors.knowledgeBase = ''
-    currentKnowledgeBase.value = createEmptyKnowledgeBaseForm()
-  }
-
-  function openCreateKnowledgeBaseDialog() {
-    actionErrors.knowledgeBase = ''
-    dialogModes.knowledgeBase = 'create'
-    currentKnowledgeBase.value = {
-      ...createEmptyKnowledgeBaseForm(),
-      embeddingModelId: embeddingModels.value[0]?.id ?? ''
-    }
-    dialogStates.knowledgeBase = true
-  }
-
-  async function openEditKnowledgeBaseDialog(id: string) {
-    loadingStates.knowledgeBase = true
-    actionErrors.knowledgeBase = ''
-
-    try {
-      const detail = await ragService.getKnowledgeBase(id)
-      currentKnowledgeBase.value = toKnowledgeBaseForm(detail)
-      dialogModes.knowledgeBase = 'edit'
-      dialogStates.knowledgeBase = true
-    } catch (error) {
-      actionErrors.knowledgeBase = toErrorMessage(
-        error,
-        '加载知识库详情失败，请稍后重试。',
-        '当前账号没有查看知识库详情的权限。'
-      )
-      throw error
-    } finally {
-      loadingStates.knowledgeBase = false
-    }
-  }
-
-  async function saveKnowledgeBase() {
-    submittingStates.knowledgeBase = true
-    actionErrors.knowledgeBase = ''
-
-    try {
+  const knowledgeBaseCrud = useDialogCrud({
+    domain: 'knowledgeBase',
+    states: crudStates,
+    current: currentKnowledgeBase,
+    messages: RAG_STORE_MESSAGES.knowledgeBase,
+    createEmptyForm: createEmptyKnowledgeBaseForm,
+    toForm: toKnowledgeBaseForm,
+    loadDetail: ragService.getKnowledgeBase,
+    saveForm: async (form, mode) => {
       const payload = {
-        ...currentKnowledgeBase.value,
-        name: currentKnowledgeBase.value.name.trim(),
-        description: currentKnowledgeBase.value.description.trim()
+        ...form,
+        name: form.name.trim(),
+        description: form.description.trim()
       }
 
-      if (dialogModes.knowledgeBase === 'create') {
+      if (mode === 'create') {
         await ragService.createKnowledgeBase(payload)
       } else {
         await ragService.updateKnowledgeBase(payload)
       }
-
+    },
+    deleteItem: async (id) => {
+      await ragService.deleteKnowledgeBase(id)
+    },
+    afterOpenCreate: () => {
+      currentKnowledgeBase.value.embeddingModelId = embeddingModels.value[0]?.id ?? ''
+    },
+    afterSave: async () => {
       await refreshKnowledgeBases()
       await refreshDocuments()
-      closeKnowledgeBaseDialog()
-    } catch (error) {
-      actionErrors.knowledgeBase = toErrorMessage(
-        error,
-        '保存知识库失败，请稍后重试。',
-        '当前账号没有管理知识库的权限。'
-      )
-      throw error
-    } finally {
-      submittingStates.knowledgeBase = false
-    }
-  }
-
-  async function deleteKnowledgeBase(id: string) {
-    actionErrors.knowledgeBase = ''
-
-    try {
-      await ragService.deleteKnowledgeBase(id)
+    },
+    afterDelete: async (id) => {
       if (selectedKnowledgeBaseId.value === id) {
         selectedKnowledgeBaseId.value = ''
         documents.value = []
@@ -425,19 +257,24 @@ export const useRagStore = defineStore('rag', () => {
 
       await refreshKnowledgeBases()
       await refreshDocuments()
-    } catch (error) {
-      actionErrors.knowledgeBase = toErrorMessage(
-        error,
-        '删除知识库失败，请稍后重试。',
-        '当前账号没有删除知识库的权限。'
-      )
-      throw error
     }
-  }
+  })
+
+  const closeEmbeddingModelDialog = embeddingModelCrud.closeDialog
+  const openCreateEmbeddingModelDialog = embeddingModelCrud.openCreateDialog
+  const openEditEmbeddingModelDialog = embeddingModelCrud.openEditDialog
+  const saveEmbeddingModel = embeddingModelCrud.saveDialog
+  const deleteEmbeddingModel = embeddingModelCrud.deleteDialog
+
+  const closeKnowledgeBaseDialog = knowledgeBaseCrud.closeDialog
+  const openCreateKnowledgeBaseDialog = knowledgeBaseCrud.openCreateDialog
+  const openEditKnowledgeBaseDialog = knowledgeBaseCrud.openEditDialog
+  const saveKnowledgeBase = knowledgeBaseCrud.saveDialog
+  const deleteKnowledgeBase = knowledgeBaseCrud.deleteDialog
 
   async function uploadDocument(file: File) {
     if (!selectedKnowledgeBaseId.value) {
-      actionErrors.document = '请先选择一个知识库。'
+      actionErrors.document = RAG_STORE_MESSAGES.selectKnowledgeBaseFirst
       return
     }
 
@@ -449,10 +286,10 @@ export const useRagStore = defineStore('rag', () => {
       await refreshKnowledgeBases()
       await refreshDocuments()
     } catch (error) {
-      actionErrors.document = toErrorMessage(
+      actionErrors.document = toStoreErrorMessage(
         error,
-        '上传文档失败，请检查文件大小和格式后重试。',
-        '当前账号没有上传知识库文档的权限。'
+        RAG_STORE_MESSAGES.document.uploadFailed,
+        RAG_STORE_MESSAGES.document.uploadForbidden
       )
       throw error
     } finally {
@@ -468,10 +305,10 @@ export const useRagStore = defineStore('rag', () => {
       await refreshKnowledgeBases()
       await refreshDocuments()
     } catch (error) {
-      actionErrors.document = toErrorMessage(
+      actionErrors.document = toStoreErrorMessage(
         error,
-        '删除文档失败，请稍后重试。',
-        '当前账号没有删除知识库文档的权限。'
+        RAG_STORE_MESSAGES.document.deleteFailed,
+        RAG_STORE_MESSAGES.document.deleteForbidden
       )
       throw error
     }
@@ -500,10 +337,10 @@ export const useRagStore = defineStore('rag', () => {
       await refreshDocuments()
       closeDocumentGovernanceDialog()
     } catch (error) {
-      actionErrors.document = toErrorMessage(
+      actionErrors.document = toStoreErrorMessage(
         error,
-        '保存文档治理设置失败，请检查字段后重试。',
-        '当前账号没有编辑知识库文档治理设置的权限。'
+        RAG_STORE_MESSAGES.document.governanceSaveFailed,
+        RAG_STORE_MESSAGES.document.governanceSaveForbidden
       )
       throw error
     } finally {
@@ -528,10 +365,10 @@ export const useRagStore = defineStore('rag', () => {
         searchMinScore.value
       )
     } catch (error) {
-      actionErrors.search = toErrorMessage(
+      actionErrors.search = toStoreErrorMessage(
         error,
-        '检索知识库失败，请稍后重试。',
-        '当前账号没有检索知识库的权限。'
+        RAG_STORE_MESSAGES.search.failed,
+        RAG_STORE_MESSAGES.search.forbidden
       )
       throw error
     } finally {
