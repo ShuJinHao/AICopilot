@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox, type UploadRequestOptions } from 'element-plus'
-import { Plus, Refresh, Search, UploadFilled } from '@element-plus/icons-vue'
+import { Edit, Plus, Refresh, Search, UploadFilled } from '@element-plus/icons-vue'
 import AppShell from '@/components/layout/AppShell.vue'
 import { KNOWLEDGE_WRITE_PERMISSIONS } from '@/security/permissions'
 import { useAuthStore } from '@/stores/authStore'
@@ -14,6 +14,9 @@ const selectedBase = computed(() =>
   store.knowledgeBases.find((item) => item.id === store.selectedKnowledgeBaseId) ?? null
 )
 const canSearchKnowledge = computed(() => authStore.hasPermission(KNOWLEDGE_WRITE_PERMISSIONS.search))
+const canEditDocumentGovernance = computed(() =>
+  authStore.hasPermission(KNOWLEDGE_WRITE_PERMISSIONS.document.governance)
+)
 
 onMounted(() => {
   void store.refresh()
@@ -64,7 +67,11 @@ async function uploadDocument(options: UploadRequestOptions) {
 }
 
 async function confirmDelete(title: string, action: () => Promise<void>) {
-  await ElMessageBox.confirm(title, '确认操作', { type: 'warning', confirmButtonText: '确认', cancelButtonText: '取消' })
+  await ElMessageBox.confirm(title, '确认操作', {
+    type: 'warning',
+    confirmButtonText: '确认',
+    cancelButtonText: '取消'
+  })
   await action()
   ElMessage.success('操作已完成')
 }
@@ -138,10 +145,7 @@ async function confirmDelete(title: string, action: () => Promise<void>) {
               <p class="panel-subtitle">{{ selectedBase?.description || '选择知识库后查看文档。' }}</p>
             </div>
             <div class="toolbar">
-              <el-button
-                v-if="selectedBase"
-                @click="store.openEditKnowledgeBaseDialog(selectedBase.id)"
-              >
+              <el-button v-if="selectedBase" @click="store.openEditKnowledgeBaseDialog(selectedBase.id)">
                 编辑
               </el-button>
               <el-button
@@ -204,8 +208,17 @@ async function confirmDelete(title: string, action: () => Promise<void>) {
                 </template>
               </el-table-column>
               <el-table-column prop="chunkCount" label="Chunks" width="90" />
-              <el-table-column label="操作" width="90">
+              <el-table-column label="操作" width="150">
                 <template #default="{ row }">
+                  <el-button
+                    v-if="canEditDocumentGovernance"
+                    link
+                    type="primary"
+                    :icon="Edit"
+                    @click="store.openEditDocumentGovernanceDialog(row)"
+                  >
+                    治理
+                  </el-button>
                   <el-button link type="danger" @click="confirmDelete(`确认删除文档 ${row.name}？`, () => store.deleteDocument(row.id))">删除</el-button>
                 </template>
               </el-table-column>
@@ -218,7 +231,7 @@ async function confirmDelete(title: string, action: () => Promise<void>) {
         <div class="panel-header">
           <div>
             <h2 class="panel-title">检索预览</h2>
-            <p class="panel-subtitle">验证知识库召回片段和分数，不接真实模型。</p>
+            <p class="panel-subtitle">验证知识库召回片段和分数。</p>
           </div>
         </div>
         <div class="panel-body search-grid">
@@ -288,6 +301,79 @@ async function confirmDelete(title: string, action: () => Promise<void>) {
         <template #footer>
           <el-button @click="store.closeKnowledgeBaseDialog()">取消</el-button>
           <el-button type="primary" :loading="store.submittingStates.knowledgeBase" @click="store.saveKnowledgeBase()">保存</el-button>
+        </template>
+      </el-drawer>
+
+      <el-drawer v-model="store.dialogStates.documentGovernance" size="520px" title="文档治理">
+        <el-form label-position="top">
+          <el-form-item label="文档">
+            <el-input :model-value="store.currentDocumentGovernanceName" disabled />
+          </el-form-item>
+          <el-form-item label="文档等级">
+            <el-select v-model="store.currentDocumentGovernance.classification">
+              <el-option label="公开" value="Public" />
+              <el-option label="内部" value="Internal" />
+              <el-option label="敏感" value="Sensitive" />
+              <el-option label="禁用" value="Forbidden" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="来源类型">
+            <el-select v-model="store.currentDocumentGovernance.sourceType">
+              <el-option label="用户上传" value="UserUploaded" />
+              <el-option label="业务规则" value="BusinessRule" />
+              <el-option label="Cloud 只读文档" value="CloudReadOnlyApiDoc" />
+              <el-option label="运维手册" value="Runbook" />
+              <el-option label="外部资料" value="External" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="已脱敏">
+            <el-switch v-model="store.currentDocumentGovernance.isSanitized" />
+          </el-form-item>
+          <el-form-item label="允许进入回答">
+            <el-switch v-model="store.currentDocumentGovernance.allowedForFinalPrompt" />
+          </el-form-item>
+          <el-form-item label="生效时间">
+            <el-date-picker
+              v-model="store.currentDocumentGovernance.effectiveFrom"
+              type="datetime"
+              value-format="YYYY-MM-DDTHH:mm:ss[Z]"
+              clearable
+            />
+          </el-form-item>
+          <el-form-item label="过期时间">
+            <el-date-picker
+              v-model="store.currentDocumentGovernance.effectiveTo"
+              type="datetime"
+              value-format="YYYY-MM-DDTHH:mm:ss[Z]"
+              clearable
+            />
+          </el-form-item>
+          <el-form-item label="阻断原因">
+            <el-input
+              v-model="store.currentDocumentGovernance.blockedReason"
+              type="textarea"
+              :rows="3"
+              maxlength="500"
+              show-word-limit
+            />
+          </el-form-item>
+          <el-alert
+            v-if="store.actionErrors.document"
+            type="error"
+            show-icon
+            :closable="false"
+            :title="store.actionErrors.document"
+          />
+        </el-form>
+        <template #footer>
+          <el-button @click="store.closeDocumentGovernanceDialog()">取消</el-button>
+          <el-button
+            type="primary"
+            :loading="store.submittingStates.documentGovernance"
+            @click="store.saveDocumentGovernance()"
+          >
+            保存
+          </el-button>
         </template>
       </el-drawer>
 

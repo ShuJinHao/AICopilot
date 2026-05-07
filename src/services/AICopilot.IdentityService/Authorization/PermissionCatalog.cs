@@ -64,6 +64,7 @@ public sealed class PermissionCatalog : IPermissionCatalog
         new("Rag.DeleteKnowledgeBase", "Rag", "Delete Knowledge Base", "Delete a knowledge base."),
         new("Rag.GetListDocuments", "Rag", "View Documents", "View the document list under a knowledge base."),
         new("Rag.UploadDocument", "Rag", "Upload Document", "Upload a knowledge base document."),
+        new("Rag.UpdateDocumentGovernance", "Rag", "Update Document Governance", "Update governance metadata for a knowledge base document."),
         new("Rag.DeleteDocument", "Rag", "Delete Document", "Delete a knowledge base document."),
         new("Rag.SearchKnowledgeBase", "Rag", "Search Knowledge Base", "Search indexed knowledge base documents."),
 

@@ -77,6 +77,78 @@ public class GetListDocumentsQueryHandler(IReadRepository<KnowledgeBase> reposit
 [AuthorizeRequirement("Rag.DeleteDocument")]
 public record DeleteDocumentCommand(int Id) : ICommand<Result>;
 
+[AuthorizeRequirement("Rag.UpdateDocumentGovernance")]
+public record UpdateDocumentGovernanceCommand(
+    int Id,
+    string? Classification,
+    string? SourceType,
+    bool IsSanitized,
+    DateTime? EffectiveFrom,
+    DateTime? EffectiveTo,
+    bool AllowedForFinalPrompt,
+    string? BlockedReason) : ICommand<Result>;
+
+public class UpdateDocumentGovernanceCommandHandler(IRepository<KnowledgeBase> repository)
+    : ICommandHandler<UpdateDocumentGovernanceCommand, Result>
+{
+    public async Task<Result> Handle(UpdateDocumentGovernanceCommand request, CancellationToken cancellationToken)
+    {
+        if (!TryParseEnum(request.Classification, out DocumentClassification classification))
+        {
+            return Result.Invalid("Invalid document classification.");
+        }
+
+        if (!TryParseEnum(request.SourceType, out DocumentSourceType sourceType))
+        {
+            return Result.Invalid("Invalid document source type.");
+        }
+
+        if (request.EffectiveFrom.HasValue &&
+            request.EffectiveTo.HasValue &&
+            request.EffectiveTo.Value < request.EffectiveFrom.Value)
+        {
+            return Result.Invalid("Document effective end time cannot be earlier than start time.");
+        }
+
+        var documentId = new DocumentId(request.Id);
+        var knowledgeBase = await repository.GetAsync(
+            kb => kb.Documents.Any(document => document.Id == documentId),
+            [kb => kb.Documents],
+            cancellationToken);
+
+        if (knowledgeBase == null)
+        {
+            return Result.NotFound("Document not found.");
+        }
+
+        var document = knowledgeBase.Documents.First(document => document.Id == documentId);
+        document.ConfigureGovernance(
+            classification,
+            sourceType,
+            request.IsSanitized,
+            document.ReviewedBy,
+            document.ReviewedAt,
+            request.EffectiveFrom,
+            request.EffectiveTo,
+            request.AllowedForFinalPrompt,
+            request.BlockedReason);
+
+        repository.Update(knowledgeBase);
+        await repository.SaveChangesAsync(cancellationToken);
+
+        return Result.Success();
+    }
+
+    private static bool TryParseEnum<TEnum>(string? value, out TEnum parsed)
+        where TEnum : struct, Enum
+    {
+        parsed = default;
+        return !string.IsNullOrWhiteSpace(value) &&
+               Enum.TryParse(value, ignoreCase: true, out parsed) &&
+               Enum.IsDefined(typeof(TEnum), parsed);
+    }
+}
+
 public class DeleteDocumentCommandHandler(
     IRepository<KnowledgeBase> repository,
     IFileStorageService fileStorage)

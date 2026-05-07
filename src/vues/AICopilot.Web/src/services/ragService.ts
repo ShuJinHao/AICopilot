@@ -6,6 +6,7 @@ import type {
   KnowledgeBaseDetail,
   KnowledgeBaseFormModel,
   KnowledgeBaseSummary,
+  KnowledgeDocumentGovernanceForm,
   KnowledgeDocumentSummary,
   SearchKnowledgeBaseResult,
   UploadDocumentGovernanceForm,
@@ -107,6 +108,19 @@ export const ragService = {
     form.append('isSanitized', String(governance.isSanitized))
     form.append('allowedForFinalPrompt', String(governance.allowedForFinalPrompt))
     return await apiClient.postForm<UploadDocumentResponse>('/rag/document', form)
+  },
+
+  async updateDocumentGovernance(payload: KnowledgeDocumentGovernanceForm) {
+    return await apiClient.put('/rag/document/governance', {
+      id: payload.id,
+      classification: payload.classification,
+      sourceType: payload.sourceType,
+      isSanitized: payload.isSanitized,
+      effectiveFrom: payload.effectiveFrom || null,
+      effectiveTo: payload.effectiveTo || null,
+      allowedForFinalPrompt: payload.allowedForFinalPrompt,
+      blockedReason: payload.blockedReason?.trim() || null
+    })
   },
 
   async deleteDocument(id: number) {
