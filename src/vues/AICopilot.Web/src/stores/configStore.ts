@@ -207,7 +207,10 @@ function normalizeMcpAllowedTools(tools: McpAllowedTool[]) {
         externalSystemType: tool.externalSystemType ?? null,
         capabilityKind: tool.capabilityKind ?? null,
         riskLevel: tool.riskLevel ?? null,
-        readOnlyDeclared: Boolean(tool.readOnlyDeclared)
+        readOnlyDeclared: Boolean(tool.readOnlyDeclared),
+        mcpReadOnlyHint: tool.mcpReadOnlyHint ?? null,
+        mcpDestructiveHint: tool.mcpDestructiveHint ?? null,
+        mcpIdempotentHint: tool.mcpIdempotentHint ?? null
       })
     }
   }

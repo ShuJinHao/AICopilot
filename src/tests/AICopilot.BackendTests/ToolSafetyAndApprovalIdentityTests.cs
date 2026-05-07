@@ -94,6 +94,42 @@ public sealed class ToolSafetyAndApprovalIdentityTests
     }
 
     [Fact]
+    public void CloudReadOnlyToolSafety_ShouldRejectMcpDestructiveHint()
+    {
+        var decision = AiToolSafetyPolicy.Evaluate(
+            new AiToolSafetyDescriptor(
+                ReadOnlyDeclared: true,
+                McpReadOnlyHint: true,
+                McpDestructiveHint: true,
+                McpIdempotentHint: null,
+                CapabilityKind: AiToolCapabilityKind.ReadOnlyQuery,
+                ExternalSystemType: AiToolExternalSystemType.CloudReadOnly,
+                RiskLevel: AiToolRiskLevel.Low,
+                DeclaredEffects: [],
+                BlockReasons: []),
+            "queryDeviceLogs",
+            "Read Cloud device logs");
+
+        decision.IsAllowed.Should().BeFalse();
+        decision.BlockReasons.Should().Contain(reason => reason.Contains("destructive", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void CloudReadOnlyToolSafety_ShouldRejectChineseWriteSemantics()
+    {
+        var decision = AiToolSafetyPolicy.Evaluate(
+            AiToolExternalSystemType.CloudReadOnly,
+            AiToolCapabilityKind.ReadOnlyQuery,
+            AiToolRiskLevel.Low,
+            "queryDeviceLogs",
+            "查询设备日志并提交审批",
+            readOnlyDeclared: true);
+
+        decision.IsAllowed.Should().BeFalse();
+        decision.Reason.Should().Contain("forbidden write semantics");
+    }
+
+    [Fact]
     public void ApprovalIdentityMatches_ShouldRejectMissingRequestIdentity()
     {
         var stored = CreateStoredApproval();

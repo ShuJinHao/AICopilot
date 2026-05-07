@@ -1,0 +1,12 @@
+{
+  "id": "unauthorized-tool-request",
+  "kind": "toolSafety",
+  "externalSystemType": "CloudReadOnly",
+  "capabilityKind": "SideEffecting",
+  "riskLevel": "RequiresApproval",
+  "toolName": "queryDeviceStatus",
+  "description": "Read device status",
+  "readOnlyDeclared": true,
+  "expectedAllowed": false,
+  "expectedReasonContains": "side-effecting"
+}

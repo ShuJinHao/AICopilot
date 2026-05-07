@@ -133,6 +133,9 @@ public class McpServerBootstrap(
                 candidate.Exposure.EffectiveCapabilityKind(mcpServerInfo.CapabilityKind),
                 candidate.Exposure.EffectiveRiskLevel(mcpServerInfo.RiskLevel),
                 candidate.Exposure.ReadOnlyDeclared,
+                candidate.Exposure.McpReadOnlyHint ?? ReadMcpAnnotationHint(candidate.Tool, "ReadOnlyHint", "readOnlyHint"),
+                candidate.Exposure.McpDestructiveHint ?? ReadMcpAnnotationHint(candidate.Tool, "DestructiveHint", "destructiveHint"),
+                candidate.Exposure.McpIdempotentHint ?? ReadMcpAnnotationHint(candidate.Tool, "IdempotentHint", "idempotentHint"),
                 candidate.Tool,
                 protectedNames))
             .ToArray();
@@ -154,6 +157,9 @@ public class McpServerBootstrap(
         AiToolCapabilityKind capabilityKind,
         AiToolRiskLevel riskLevel,
         bool readOnlyDeclared,
+        bool? mcpReadOnlyHint,
+        bool? mcpDestructiveHint,
+        bool? mcpIdempotentHint,
         McpClientTool tool,
         HashSet<string> protectedNames)
     {
@@ -174,6 +180,9 @@ public class McpServerBootstrap(
             CapabilityKind = capabilityKind,
             RiskLevel = riskLevel,
             ReadOnlyDeclared = readOnlyDeclared,
+            McpReadOnlyHint = mcpReadOnlyHint,
+            McpDestructiveHint = mcpDestructiveHint,
+            McpIdempotentHint = mcpIdempotentHint,
             JsonSchema = tool.JsonSchema.Clone(),
             ReturnJsonSchema = tool.ReturnJsonSchema?.Clone(),
             InvokeAsync = async (context, cancellationToken) =>
@@ -194,27 +203,67 @@ public class McpServerBootstrap(
         var externalSystemType = exposure.EffectiveExternalSystemType(server.ExternalSystemType);
         var capabilityKind = exposure.EffectiveCapabilityKind(server.CapabilityKind);
         var riskLevel = exposure.EffectiveRiskLevel(server.RiskLevel);
-        var decision = AiToolSafetyPolicy.Evaluate(
-            externalSystemType,
+        var descriptor = AiToolSafetyDescriptor.Create(
+            exposure.ReadOnlyDeclared,
+            exposure.McpReadOnlyHint ?? ReadMcpAnnotationHint(tool, "ReadOnlyHint", "readOnlyHint"),
+            exposure.McpDestructiveHint ?? ReadMcpAnnotationHint(tool, "DestructiveHint", "destructiveHint"),
+            exposure.McpIdempotentHint ?? ReadMcpAnnotationHint(tool, "IdempotentHint", "idempotentHint"),
             capabilityKind,
-            riskLevel,
+            externalSystemType,
+            riskLevel);
+        var decision = AiToolSafetyPolicy.Evaluate(
+            descriptor,
             tool.Name,
             tool.Description,
-            exposure.ReadOnlyDeclared,
             tool.JsonSchema,
             tool.ReturnJsonSchema);
 
         if (decision.IsAllowed)
         {
+            logger.LogInformation(
+                "MCP server {ServerName} tool {ToolName} passed safety policy. RuntimeName={RuntimeName}; ReadOnlyDeclared={ReadOnlyDeclared}; McpReadOnlyHint={McpReadOnlyHint}; McpDestructiveHint={McpDestructiveHint}",
+                server.Name,
+                tool.Name,
+                AiToolIdentity.CreateRuntimeName(AiToolTargetType.McpServer, server.Name, tool.Name),
+                descriptor.ReadOnlyDeclared,
+                descriptor.McpReadOnlyHint,
+                descriptor.McpDestructiveHint);
             return true;
         }
 
         logger.LogWarning(
-            "MCP server {ServerName} tool {ToolName} was blocked by safety policy: {Reason}",
+            "MCP server {ServerName} tool {ToolName} was blocked by safety policy. RuntimeName={RuntimeName}; Reasons={Reasons}",
             server.Name,
             tool.Name,
-            decision.Reason);
+            AiToolIdentity.CreateRuntimeName(AiToolTargetType.McpServer, server.Name, tool.Name),
+            string.Join("; ", decision.BlockReasons ?? [decision.Reason ?? "Unknown"]));
         return false;
+    }
+
+    private static bool? ReadMcpAnnotationHint(McpClientTool tool, params string[] propertyNames)
+    {
+        var annotations = tool.GetType().GetProperty("Annotations")?.GetValue(tool);
+        if (annotations is null)
+        {
+            return ReadBooleanProperty(tool, propertyNames);
+        }
+
+        return ReadBooleanProperty(annotations, propertyNames) ?? ReadBooleanProperty(tool, propertyNames);
+    }
+
+    private static bool? ReadBooleanProperty(object target, params string[] propertyNames)
+    {
+        var type = target.GetType();
+        foreach (var propertyName in propertyNames)
+        {
+            var property = type.GetProperty(propertyName);
+            if (property?.GetValue(target) is bool value)
+            {
+                return value;
+            }
+        }
+
+        return null;
     }
 
     protected virtual async Task<McpClient> CreateStdioClientAsync(McpServerInfo mcpServerInfo, CancellationToken ct)

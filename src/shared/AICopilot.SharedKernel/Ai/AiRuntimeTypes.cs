@@ -250,6 +250,12 @@ public sealed class AiToolDefinition
 
     public bool ReadOnlyDeclared { get; init; }
 
+    public bool? McpReadOnlyHint { get; init; }
+
+    public bool? McpDestructiveHint { get; init; }
+
+    public bool? McpIdempotentHint { get; init; }
+
     public MethodInfo? Method { get; init; }
 
     public object? Target { get; init; }
@@ -318,7 +324,10 @@ public sealed class AiToolDefinition
         AiToolExternalSystemType? externalSystemType = null,
         AiToolCapabilityKind? capabilityKind = null,
         AiToolRiskLevel? riskLevel = null,
-        bool? readOnlyDeclared = null)
+        bool? readOnlyDeclared = null,
+        bool? mcpReadOnlyHint = null,
+        bool? mcpDestructiveHint = null,
+        bool? mcpIdempotentHint = null)
     {
         return new AiToolDefinition
         {
@@ -334,6 +343,9 @@ public sealed class AiToolDefinition
             CapabilityKind = capabilityKind ?? CapabilityKind,
             RiskLevel = riskLevel ?? RiskLevel,
             ReadOnlyDeclared = readOnlyDeclared ?? ReadOnlyDeclared,
+            McpReadOnlyHint = mcpReadOnlyHint ?? McpReadOnlyHint,
+            McpDestructiveHint = mcpDestructiveHint ?? McpDestructiveHint,
+            McpIdempotentHint = mcpIdempotentHint ?? McpIdempotentHint,
             Method = Method,
             Target = Target,
             JsonSchema = JsonSchema,

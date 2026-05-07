@@ -75,7 +75,13 @@ public sealed class MigrationSafetyTests(CoreAICopilotAppFixture fixture)
             .Should().Be("mcp.mcp_server_info");
         (await ExecuteScalarAsync(
             database.ConnectionString,
-            "SELECT name || ':' || transport_type || ':' || array_to_string(allowed_tool_names, ',') FROM mcp.mcp_server_info"))
+            """
+            SELECT name || ':' || transport_type || ':' ||
+                   string_agg(tool_item ->> 'toolName', ',' ORDER BY tool_item ->> 'toolName')
+            FROM mcp.mcp_server_info
+            CROSS JOIN LATERAL jsonb_array_elements(allowed_tools) AS tool_item
+            GROUP BY name, transport_type
+            """))
             .Should().Be("legacy-mcp:Stdio:read_status,restart");
     }
 

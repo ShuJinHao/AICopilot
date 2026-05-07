@@ -2,9 +2,44 @@ using System.Text.Json;
 
 namespace AICopilot.SharedKernel.Ai;
 
-public sealed record AiToolSafetyDecision(bool IsAllowed, string? Reason)
+public sealed record AiToolSafetyDecision(bool IsAllowed, string? Reason, IReadOnlyList<string>? BlockReasons = null)
 {
-    public static AiToolSafetyDecision Allow { get; } = new(true, null);
+    public static AiToolSafetyDecision Allow { get; } = new(true, null, []);
+}
+
+public sealed record AiToolSafetyDescriptor(
+    bool ReadOnlyDeclared,
+    bool? McpReadOnlyHint,
+    bool? McpDestructiveHint,
+    bool? McpIdempotentHint,
+    AiToolCapabilityKind CapabilityKind,
+    AiToolExternalSystemType ExternalSystemType,
+    AiToolRiskLevel RiskLevel,
+    IReadOnlyList<string> DeclaredEffects,
+    IReadOnlyList<string> BlockReasons)
+{
+    public static AiToolSafetyDescriptor Create(
+        bool readOnlyDeclared,
+        bool? mcpReadOnlyHint,
+        bool? mcpDestructiveHint,
+        bool? mcpIdempotentHint,
+        AiToolCapabilityKind capabilityKind,
+        AiToolExternalSystemType externalSystemType,
+        AiToolRiskLevel riskLevel,
+        IReadOnlyList<string>? declaredEffects = null,
+        IReadOnlyList<string>? blockReasons = null)
+    {
+        return new AiToolSafetyDescriptor(
+            readOnlyDeclared,
+            mcpReadOnlyHint,
+            mcpDestructiveHint,
+            mcpIdempotentHint,
+            capabilityKind,
+            externalSystemType,
+            riskLevel,
+            declaredEffects ?? [],
+            blockReasons ?? []);
+    }
 }
 
 public static class AiToolSafetyPolicy
@@ -40,7 +75,39 @@ public static class AiToolSafetyPolicy
         "archive",
         "import",
         "export",
-        "write"
+        "write",
+        "新增",
+        "创建",
+        "注册",
+        "更新",
+        "修改",
+        "删除",
+        "禁用",
+        "启用",
+        "审批",
+        "派发",
+        "触发",
+        "补录",
+        "纠正",
+        "上传",
+        "提交",
+        "设置",
+        "重置",
+        "开始",
+        "停止",
+        "重启",
+        "下发",
+        "生效",
+        "授权",
+        "撤销",
+        "应用",
+        "分配",
+        "移除",
+        "归档",
+        "导入",
+        "导出",
+        "写入",
+        "同步"
     ];
 
     private static readonly string[] CloudAllowedVerbs =
@@ -64,38 +131,84 @@ public static class AiToolSafetyPolicy
         JsonElement? inputSchema = null,
         JsonElement? returnSchema = null)
     {
-        if (riskLevel == AiToolRiskLevel.Blocked)
+        var descriptor = AiToolSafetyDescriptor.Create(
+            readOnlyDeclared,
+            mcpReadOnlyHint: null,
+            mcpDestructiveHint: null,
+            mcpIdempotentHint: null,
+            capabilityKind,
+            externalSystemType,
+            riskLevel);
+
+        return Evaluate(descriptor, toolName, description, inputSchema, returnSchema);
+    }
+
+    public static AiToolSafetyDecision Evaluate(
+        AiToolSafetyDescriptor descriptor,
+        string toolName,
+        string? description,
+        JsonElement? inputSchema = null,
+        JsonElement? returnSchema = null)
+    {
+        var blockReasons = new List<string>(descriptor.BlockReasons);
+
+        if (descriptor.RiskLevel == AiToolRiskLevel.Blocked)
         {
-            return new AiToolSafetyDecision(false, "Tool risk level is blocked.");
+            blockReasons.Add("Tool risk level is blocked.");
+            return Block(blockReasons);
         }
 
-        if (externalSystemType != AiToolExternalSystemType.CloudReadOnly)
+        if (descriptor.ExternalSystemType != AiToolExternalSystemType.CloudReadOnly)
         {
             return AiToolSafetyDecision.Allow;
         }
 
-        if (!readOnlyDeclared)
+        if (!descriptor.ReadOnlyDeclared)
         {
-            return new AiToolSafetyDecision(false, "Cloud-related tools must explicitly declare read-only behavior.");
+            blockReasons.Add("Cloud-related tools must explicitly declare read-only behavior.");
         }
 
-        if (capabilityKind == AiToolCapabilityKind.SideEffecting)
+        if (descriptor.McpDestructiveHint == true)
         {
-            return new AiToolSafetyDecision(false, "Cloud-related tools must not be side-effecting.");
+            blockReasons.Add("Cloud-related tools must not declare MCP destructive behavior.");
+        }
+
+        if (descriptor.McpReadOnlyHint == false)
+        {
+            blockReasons.Add("Cloud-related tools must not declare MCP non-read-only behavior.");
+        }
+
+        if (descriptor.CapabilityKind == AiToolCapabilityKind.SideEffecting)
+        {
+            blockReasons.Add("Cloud-related tools must not be side-effecting.");
         }
 
         if (!CloudAllowedVerbs.Any(verb => StartsWithToken(toolName, verb)))
         {
-            return new AiToolSafetyDecision(false, "Cloud-related tool must use an approved read-only verb.");
+            blockReasons.Add("Cloud-related tool must use an approved read-only verb.");
         }
 
         var safetyText = BuildSafetyText(toolName, description, inputSchema, returnSchema);
         if (CloudForbiddenVerbs.Any(verb => ContainsToken(safetyText, verb)))
         {
-            return new AiToolSafetyDecision(false, "Cloud-related tool contains forbidden write semantics.");
+            blockReasons.Add("Cloud-related tool contains forbidden write semantics.");
         }
 
-        return AiToolSafetyDecision.Allow;
+        foreach (var effect in descriptor.DeclaredEffects)
+        {
+            if (CloudForbiddenVerbs.Any(verb => ContainsToken(effect, verb)))
+            {
+                blockReasons.Add($"Cloud-related tool declares forbidden effect '{effect}'.");
+            }
+        }
+
+        return blockReasons.Count == 0 ? AiToolSafetyDecision.Allow : Block(blockReasons);
+    }
+
+    private static AiToolSafetyDecision Block(IReadOnlyList<string> blockReasons)
+    {
+        var reason = string.Join(" ", blockReasons.Where(reason => !string.IsNullOrWhiteSpace(reason)));
+        return new AiToolSafetyDecision(false, reason, blockReasons);
     }
 
     private static string BuildSafetyText(
@@ -116,6 +229,11 @@ public static class AiToolSafetyPolicy
 
     private static bool ContainsToken(string value, string token)
     {
+        if (token.Any(ch => ch > 127))
+        {
+            return value.Contains(token, StringComparison.OrdinalIgnoreCase);
+        }
+
         return SplitIdentifier(value).Any(part => string.Equals(part, token, StringComparison.OrdinalIgnoreCase));
     }
 
