@@ -31,6 +31,7 @@ public sealed class PermissionCatalog : IPermissionCatalog
         new("AiGateway.DeleteSession", "AiGateway", "Delete Session", "Delete a chat session."),
         new("AiGateway.GetLanguageModel", "AiGateway", "View Language Model", "View language model configuration details."),
         new("AiGateway.GetListLanguageModels", "AiGateway", "View Language Models", "View the language model configuration list."),
+        new("AiGateway.GetProviderReliability", "AiGateway", "View Provider Reliability", "View model provider fallback, circuit breaker, and output-token budget configuration."),
         new("AiGateway.CreateLanguageModel", "AiGateway", "Create Language Model", "Create a new language model configuration."),
         new("AiGateway.UpdateLanguageModel", "AiGateway", "Update Language Model", "Update an existing language model configuration."),
         new("AiGateway.DeleteLanguageModel", "AiGateway", "Delete Language Model", "Delete a language model configuration."),

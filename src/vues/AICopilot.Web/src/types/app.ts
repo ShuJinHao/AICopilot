@@ -280,6 +280,21 @@ export interface SemanticSourceStatus {
   status: string
 }
 
+export interface ProviderFallbackRoute {
+  provider: string
+  fallbackProviders: string[]
+}
+
+export interface ProviderReliabilityConfig {
+  fallbackEnabled: boolean
+  fallbackProviders: ProviderFallbackRoute[]
+  circuitBreakerFailureThreshold: number
+  circuitBreakerOpenSeconds: number
+  maxOutputTokens: number
+  fallbackAllowedScopes: string[]
+  fallbackBlockedScopes: string[]
+}
+
 export type EmbeddingModelApiKeyAction = 'keep' | 'replace' | 'clear'
 
 export interface EmbeddingModelSummary {

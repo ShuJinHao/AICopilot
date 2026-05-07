@@ -7,6 +7,7 @@ export const CHAT_REQUIRED_PERMISSIONS = [
 
 export const CONFIG_READ_PERMISSIONS = {
   languageModel: ['AiGateway.GetLanguageModel', 'AiGateway.GetListLanguageModels'],
+  providerReliability: ['AiGateway.GetProviderReliability'],
   conversationTemplate: [
     'AiGateway.GetConversationTemplate',
     'AiGateway.GetConversationTemplateByName',
