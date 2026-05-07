@@ -3,13 +3,17 @@ import { computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox, type UploadRequestOptions } from 'element-plus'
 import { Plus, Refresh, Search, UploadFilled } from '@element-plus/icons-vue'
 import AppShell from '@/components/layout/AppShell.vue'
+import { KNOWLEDGE_WRITE_PERMISSIONS } from '@/security/permissions'
+import { useAuthStore } from '@/stores/authStore'
 import { useRagStore } from '@/stores/ragStore'
 
 const store = useRagStore()
+const authStore = useAuthStore()
 
 const selectedBase = computed(() =>
   store.knowledgeBases.find((item) => item.id === store.selectedKnowledgeBaseId) ?? null
 )
+const canSearchKnowledge = computed(() => authStore.hasPermission(KNOWLEDGE_WRITE_PERMISSIONS.search))
 
 onMounted(() => {
   void store.refresh()
@@ -165,7 +169,15 @@ async function confirmDelete(title: string, action: () => Promise<void>) {
           <el-input v-model="store.searchQuery" placeholder="输入检索问题" clearable />
           <el-input-number v-model="store.searchTopK" :min="1" :max="20" />
           <el-input-number v-model="store.searchMinScore" :min="0" :max="1" :step="0.05" />
-          <el-button type="primary" :icon="Search" :loading="store.loadingStates.search" @click="store.searchKnowledgeBase()">检索</el-button>
+          <el-button
+            type="primary"
+            :icon="Search"
+            :loading="store.loadingStates.search"
+            :disabled="!canSearchKnowledge"
+            @click="store.searchKnowledgeBase()"
+          >
+            检索
+          </el-button>
         </div>
         <div class="search-results">
           <article v-for="result in store.searchResults" :key="`${result.documentId}-${result.score}`">
