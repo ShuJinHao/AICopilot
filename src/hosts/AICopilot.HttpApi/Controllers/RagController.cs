@@ -115,6 +115,12 @@ public class RagController(ISender sender) : ApiControllerBase(sender)
         return ReturnResult(await Sender.Send(command));
     }
 
+    [HttpPut("document/governance")]
+    public async Task<IActionResult> UpdateDocumentGovernance(UpdateDocumentGovernanceCommand command)
+    {
+        return ReturnResult(await Sender.Send(command));
+    }
+
     [HttpGet("document/list")]
     public async Task<IActionResult> GetListDocuments([FromQuery] GetListDocumentsQuery query)
     {

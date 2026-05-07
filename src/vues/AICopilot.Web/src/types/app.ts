@@ -360,6 +360,13 @@ export interface UploadDocumentGovernanceForm {
   allowedForFinalPrompt: boolean
 }
 
+export interface KnowledgeDocumentGovernanceForm extends UploadDocumentGovernanceForm {
+  id: number
+  effectiveFrom?: string | null
+  effectiveTo?: string | null
+  blockedReason?: string | null
+}
+
 export interface KnowledgeDocumentSummary {
   id: number
   knowledgeBaseId: string

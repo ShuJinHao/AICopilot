@@ -84,6 +84,7 @@ export const KNOWLEDGE_WRITE_PERMISSIONS = {
   },
   document: {
     upload: 'Rag.UploadDocument',
+    governance: 'Rag.UpdateDocumentGovernance',
     delete: 'Rag.DeleteDocument'
   },
   search: 'Rag.SearchKnowledgeBase'

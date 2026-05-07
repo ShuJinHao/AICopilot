@@ -278,15 +278,19 @@ public sealed class SecurityHardeningTests
         ragServiceSource.Should().Contain("/rag/embedding-model/list");
         ragServiceSource.Should().Contain("/rag/knowledge-base/list");
         ragServiceSource.Should().Contain("/rag/document");
+        ragServiceSource.Should().Contain("/rag/document/governance");
         ragServiceSource.Should().Contain("postForm<UploadDocumentResponse>");
         ragStoreSource.Should().Contain("apiKeyAction");
         ragStoreSource.Should().Contain("uploadDocument(file: File)");
+        ragStoreSource.Should().Contain("saveDocumentGovernance");
         knowledgeViewSource.Should().Contain("Pending");
         knowledgeViewSource.Should().Contain("Embedding");
         knowledgeViewSource.Should().Contain("Indexed");
         knowledgeViewSource.Should().Contain("Failed");
         knowledgeViewSource.Should().Contain("KNOWLEDGE_WRITE_PERMISSIONS.search");
+        knowledgeViewSource.Should().Contain("KNOWLEDGE_WRITE_PERMISSIONS.document.governance");
         permissionCatalogSource.Should().Contain("Rag.SearchKnowledgeBase");
+        permissionCatalogSource.Should().Contain("Rag.UpdateDocumentGovernance");
         embeddingManagementSource.Should().Contain("request.ApiKey ?? entity.ApiKey");
     }
 

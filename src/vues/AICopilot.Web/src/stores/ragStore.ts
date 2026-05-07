@@ -11,13 +11,14 @@ import type {
   KnowledgeBaseDetail,
   KnowledgeBaseFormModel,
   KnowledgeBaseSummary,
+  KnowledgeDocumentGovernanceForm,
   KnowledgeDocumentSummary,
   SearchKnowledgeBaseResult,
   UploadDocumentGovernanceForm
 } from '@/types/app'
 
-type EditableDomain = 'embeddingModel' | 'knowledgeBase'
-type LoadingDomain = EditableDomain | 'document' | 'search'
+type EditableDomain = 'embeddingModel' | 'knowledgeBase' | 'documentGovernance'
+type LoadingDomain = 'embeddingModel' | 'knowledgeBase' | 'document' | 'search'
 
 function createEmptyEmbeddingModelForm(): EmbeddingModelFormModel {
   return {
@@ -52,6 +53,19 @@ function createDefaultUploadGovernanceForm(): UploadDocumentGovernanceForm {
   }
 }
 
+function createEmptyDocumentGovernanceForm(): KnowledgeDocumentGovernanceForm {
+  return {
+    id: 0,
+    classification: 'Internal',
+    sourceType: 'UserUploaded',
+    isSanitized: false,
+    allowedForFinalPrompt: true,
+    effectiveFrom: null,
+    effectiveTo: null,
+    blockedReason: null
+  }
+}
+
 function toEmbeddingModelForm(detail: EmbeddingModelDetail): EmbeddingModelFormModel {
   return {
     id: detail.id,
@@ -75,6 +89,19 @@ function toKnowledgeBaseForm(detail: KnowledgeBaseDetail): KnowledgeBaseFormMode
     name: detail.name,
     description: detail.description,
     embeddingModelId: detail.embeddingModelId
+  }
+}
+
+function toDocumentGovernanceForm(document: KnowledgeDocumentSummary): KnowledgeDocumentGovernanceForm {
+  return {
+    id: document.id,
+    classification: document.classification,
+    sourceType: document.sourceType,
+    isSanitized: document.isSanitized,
+    allowedForFinalPrompt: document.allowedForFinalPrompt,
+    effectiveFrom: document.effectiveFrom ?? null,
+    effectiveTo: document.effectiveTo ?? null,
+    blockedReason: document.blockedReason ?? null
   }
 }
 
@@ -113,28 +140,34 @@ export const useRagStore = defineStore('rag', () => {
 
   const dialogStates = reactive<Record<EditableDomain, boolean>>({
     embeddingModel: false,
-    knowledgeBase: false
+    knowledgeBase: false,
+    documentGovernance: false
   })
 
   const dialogModes = reactive<Record<EditableDomain, ConfigDialogMode>>({
     embeddingModel: 'create',
-    knowledgeBase: 'create'
+    knowledgeBase: 'create',
+    documentGovernance: 'edit'
   })
 
   const submittingStates = reactive<Record<EditableDomain, boolean>>({
     embeddingModel: false,
-    knowledgeBase: false
+    knowledgeBase: false,
+    documentGovernance: false
   })
 
   const actionErrors = reactive<Record<EditableDomain | 'document' | 'search', string>>({
     embeddingModel: '',
     knowledgeBase: '',
+    documentGovernance: '',
     document: '',
     search: ''
   })
 
   const currentEmbeddingModel = ref<EmbeddingModelFormModel>(createEmptyEmbeddingModelForm())
   const currentKnowledgeBase = ref<KnowledgeBaseFormModel>(createEmptyKnowledgeBaseForm())
+  const currentDocumentGovernance = ref<KnowledgeDocumentGovernanceForm>(createEmptyDocumentGovernanceForm())
+  const currentDocumentGovernanceName = ref('')
   const uploadGovernanceForm = ref<UploadDocumentGovernanceForm>(createDefaultUploadGovernanceForm())
 
   function syncSelectedKnowledgeBase() {
@@ -444,6 +477,40 @@ export const useRagStore = defineStore('rag', () => {
     }
   }
 
+  function closeDocumentGovernanceDialog() {
+    dialogStates.documentGovernance = false
+    actionErrors.document = ''
+    currentDocumentGovernance.value = createEmptyDocumentGovernanceForm()
+    currentDocumentGovernanceName.value = ''
+  }
+
+  function openEditDocumentGovernanceDialog(document: KnowledgeDocumentSummary) {
+    actionErrors.document = ''
+    currentDocumentGovernance.value = toDocumentGovernanceForm(document)
+    currentDocumentGovernanceName.value = document.name
+    dialogStates.documentGovernance = true
+  }
+
+  async function saveDocumentGovernance() {
+    submittingStates.documentGovernance = true
+    actionErrors.document = ''
+
+    try {
+      await ragService.updateDocumentGovernance(currentDocumentGovernance.value)
+      await refreshDocuments()
+      closeDocumentGovernanceDialog()
+    } catch (error) {
+      actionErrors.document = toErrorMessage(
+        error,
+        '保存文档治理设置失败，请检查字段后重试。',
+        '当前账号没有编辑知识库文档治理设置的权限。'
+      )
+      throw error
+    } finally {
+      submittingStates.documentGovernance = false
+    }
+  }
+
   async function searchKnowledgeBase() {
     if (!selectedKnowledgeBaseId.value || !searchQuery.value.trim()) {
       searchResults.value = []
@@ -490,6 +557,8 @@ export const useRagStore = defineStore('rag', () => {
     actionErrors,
     currentEmbeddingModel,
     currentKnowledgeBase,
+    currentDocumentGovernance,
+    currentDocumentGovernanceName,
     uploadGovernanceForm,
     refresh,
     refreshEmbeddingModels,
@@ -508,6 +577,9 @@ export const useRagStore = defineStore('rag', () => {
     deleteKnowledgeBase,
     uploadDocument,
     deleteDocument,
+    closeDocumentGovernanceDialog,
+    openEditDocumentGovernanceDialog,
+    saveDocumentGovernance,
     searchKnowledgeBase
   }
 })

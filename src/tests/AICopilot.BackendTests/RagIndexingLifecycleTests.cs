@@ -132,6 +132,66 @@ public sealed class RagIndexingLifecycleTests
     }
 
     [Fact]
+    public async Task UpdateDocumentGovernance_ShouldOnlyChangeGovernanceMetadata()
+    {
+        var (knowledgeBase, document) = CreateKnowledgeBaseWithDocument();
+        document.StartParsing();
+        document.CompleteParsing();
+        document.AddChunk(0, "chunk");
+        document.StartEmbedding();
+        document.MarkAsIndexed();
+        var originalFilePath = document.FilePath;
+        var originalFileHash = document.FileHash;
+        var originalStatus = document.Status;
+        var originalChunkCount = document.ChunkCount;
+        var handler = new UpdateDocumentGovernanceCommandHandler(new MutableKnowledgeBaseRepository(knowledgeBase));
+
+        var result = await handler.Handle(
+            new UpdateDocumentGovernanceCommand(
+                document.Id,
+                DocumentClassification.Forbidden.ToString(),
+                DocumentSourceType.External.ToString(),
+                IsSanitized: true,
+                EffectiveFrom: DateTime.UtcNow.AddDays(-1),
+                EffectiveTo: DateTime.UtcNow.AddDays(1),
+                AllowedForFinalPrompt: false,
+                BlockedReason: " contains unsafe examples "),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        document.Classification.Should().Be(DocumentClassification.Forbidden);
+        document.SourceType.Should().Be(DocumentSourceType.External);
+        document.IsSanitized.Should().BeTrue();
+        document.AllowedForFinalPrompt.Should().BeFalse();
+        document.BlockedReason.Should().Be("contains unsafe examples");
+        document.FilePath.Should().Be(originalFilePath);
+        document.FileHash.Should().Be(originalFileHash);
+        document.Status.Should().Be(originalStatus);
+        document.ChunkCount.Should().Be(originalChunkCount);
+    }
+
+    [Fact]
+    public async Task UpdateDocumentGovernance_ShouldRejectInvalidEffectiveRange()
+    {
+        var (_, document) = CreateKnowledgeBaseWithDocument();
+        var handler = new UpdateDocumentGovernanceCommandHandler(new MutableKnowledgeBaseRepository());
+
+        var result = await handler.Handle(
+            new UpdateDocumentGovernanceCommand(
+                document.Id,
+                DocumentClassification.Internal.ToString(),
+                DocumentSourceType.UserUploaded.ToString(),
+                IsSanitized: false,
+                EffectiveFrom: DateTime.UtcNow.AddDays(1),
+                EffectiveTo: DateTime.UtcNow.AddDays(-1),
+                AllowedForFinalPrompt: true,
+                BlockedReason: null),
+            CancellationToken.None);
+
+        result.Status.Should().Be(ResultStatus.Invalid);
+    }
+
+    [Fact]
     public async Task ParsingDocument_ShouldRecoverAndFinishIndexing()
     {
         var (knowledgeBase, document) = CreateKnowledgeBaseWithDocument();
