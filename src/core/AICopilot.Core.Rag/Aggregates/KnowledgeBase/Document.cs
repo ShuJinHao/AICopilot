@@ -11,9 +11,22 @@ public class Document : IEntity<DocumentId>
     {
     }
 
-    internal Document(KnowledgeBaseId knowledgeBaseId, string name, string filePath, string extension, string fileHash)
+    internal Document(
+        KnowledgeBaseId knowledgeBaseId,
+        string name,
+        string filePath,
+        string extension,
+        string fileHash,
+        DocumentClassification classification = DocumentClassification.Internal,
+        DocumentSourceType sourceType = DocumentSourceType.UserUploaded,
+        bool isSanitized = false,
+        string? reviewedBy = null,
+        DateTime? reviewedAt = null,
+        DateTime? effectiveFrom = null,
+        DateTime? effectiveTo = null,
+        bool allowedForFinalPrompt = true,
+        string? blockedReason = null)
     {
-
         if (string.IsNullOrWhiteSpace(name))
         {
             throw new ArgumentException("Document name is required.", nameof(name));
@@ -41,60 +54,110 @@ public class Document : IEntity<DocumentId>
         FileHash = fileHash.Trim();
         Status = DocumentStatus.Pending;
         CreatedAt = DateTime.UtcNow;
+        ConfigureGovernance(
+            classification,
+            sourceType,
+            isSanitized,
+            reviewedBy,
+            reviewedAt,
+            effectiveFrom,
+            effectiveTo,
+            allowedForFinalPrompt,
+            blockedReason);
     }
 
     public DocumentId Id { get; private set; }
 
     public KnowledgeBaseId KnowledgeBaseId { get; private set; }
 
-    /// <summary>
-    /// 原始文件名
-    /// </summary>
     public string Name { get; private set; } = string.Empty;
 
-    /// <summary>
-    /// 文件存储路径
-    /// </summary>
     public string FilePath { get; private set; } = string.Empty;
 
-    /// <summary>
-    /// 文件扩展名
-    /// </summary>
     public string Extension { get; private set; } = string.Empty;
 
-    /// <summary>
-    /// 文件哈希值
-    /// </summary>
     public string FileHash { get; private set; } = string.Empty;
 
-    /// <summary>
-    /// 文档处理状态
-    /// </summary>
     public DocumentStatus Status { get; private set; }
 
-    /// <summary>
-    /// 切片数量
-    /// </summary>
     public int ChunkCount { get; private set; }
 
-    /// <summary>
-    /// 错误信息
-    /// </summary>
     public string? ErrorMessage { get; private set; }
 
     public DateTime CreatedAt { get; private set; }
     public DateTime? ProcessedAt { get; private set; }
 
-    // 导航属性
+    public DocumentClassification Classification { get; private set; } = DocumentClassification.Internal;
+    public DocumentSourceType SourceType { get; private set; } = DocumentSourceType.UserUploaded;
+    public bool IsSanitized { get; private set; }
+    public string? ReviewedBy { get; private set; }
+    public DateTime? ReviewedAt { get; private set; }
+    public DateTime? EffectiveFrom { get; private set; }
+    public DateTime? EffectiveTo { get; private set; }
+    public bool AllowedForFinalPrompt { get; private set; } = true;
+    public string? BlockedReason { get; private set; }
+
     public KnowledgeBase KnowledgeBase { get; private set; } = null!;
 
     public IReadOnlyCollection<DocumentChunk> Chunks => _chunks.AsReadOnly();
 
-    #region 领域行为方法
+    public void ConfigureGovernance(
+        DocumentClassification classification,
+        DocumentSourceType sourceType,
+        bool isSanitized,
+        string? reviewedBy,
+        DateTime? reviewedAt,
+        DateTime? effectiveFrom,
+        DateTime? effectiveTo,
+        bool allowedForFinalPrompt,
+        string? blockedReason)
+    {
+        if (!Enum.IsDefined(classification))
+        {
+            throw new ArgumentOutOfRangeException(nameof(classification));
+        }
 
-    /// <summary>
-    /// 开始解析文档
-    /// </summary>
+        if (!Enum.IsDefined(sourceType))
+        {
+            throw new ArgumentOutOfRangeException(nameof(sourceType));
+        }
+
+        if (effectiveFrom.HasValue && effectiveTo.HasValue && effectiveTo.Value < effectiveFrom.Value)
+        {
+            throw new ArgumentException("Document effective end time cannot be earlier than start time.", nameof(effectiveTo));
+        }
+
+        Classification = classification;
+        SourceType = sourceType;
+        IsSanitized = isSanitized;
+        ReviewedBy = NormalizeOptionalText(reviewedBy);
+        ReviewedAt = reviewedAt;
+        EffectiveFrom = effectiveFrom;
+        EffectiveTo = effectiveTo;
+        AllowedForFinalPrompt = allowedForFinalPrompt;
+        BlockedReason = NormalizeOptionalText(blockedReason);
+    }
+
+    public bool CanEnterFinalPrompt(DateTime utcNow)
+    {
+        if (!AllowedForFinalPrompt || Classification == DocumentClassification.Forbidden)
+        {
+            return false;
+        }
+
+        if (EffectiveFrom.HasValue && EffectiveFrom.Value > utcNow)
+        {
+            return false;
+        }
+
+        if (EffectiveTo.HasValue && EffectiveTo.Value < utcNow)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
     public void StartParsing()
     {
         if (Status != DocumentStatus.Pending &&
@@ -103,25 +166,19 @@ public class Document : IEntity<DocumentId>
             Status != DocumentStatus.Splitting &&
             Status != DocumentStatus.Embedding)
         {
-            throw new InvalidOperationException($"当前状态 {Status} 不允许开始解析");
+            throw new InvalidOperationException($"Current document status {Status} cannot start parsing.");
         }
 
         Status = DocumentStatus.Parsing;
         ErrorMessage = null;
     }
 
-    /// <summary>
-    /// 完成解析，准备切片
-    /// </summary>
     public void CompleteParsing()
     {
         if (Status != DocumentStatus.Parsing) return;
         Status = DocumentStatus.Splitting;
     }
 
-    /// <summary>
-    /// 添加文档切片
-    /// </summary>
     public void AddChunk(int index, string content)
     {
         if (index < 0)
@@ -134,35 +191,27 @@ public class Document : IEntity<DocumentId>
             throw new ArgumentException("Document chunk content is required.", nameof(content));
         }
 
-        // 允许在 Splitting 或 Embedding 阶段添加/重新生成切片
         if (Status != DocumentStatus.Splitting && Status != DocumentStatus.Embedding)
-            throw new InvalidOperationException($"当前状态 {Status} 不允许添加切片");
+        {
+            throw new InvalidOperationException($"Current document status {Status} cannot add chunks.");
+        }
 
         var chunk = new DocumentChunk(Id, index, content);
         _chunks.Add(chunk);
         ChunkCount = _chunks.Count;
     }
 
-    /// <summary>
-    /// 清空所有切片（例如重新处理时）
-    /// </summary>
     public void ClearChunks()
     {
         _chunks.Clear();
         ChunkCount = 0;
     }
 
-    /// <summary>
-    /// 开始向量化
-    /// </summary>
     public void StartEmbedding()
     {
         Status = DocumentStatus.Embedding;
     }
 
-    /// <summary>
-    /// 标记切片已向量化完成（更新向量ID）
-    /// </summary>
     public void MarkChunkAsEmbedded(int chunkId, string vectorId)
     {
         if (string.IsNullOrWhiteSpace(vectorId))
@@ -174,18 +223,12 @@ public class Document : IEntity<DocumentId>
         chunk?.SetVectorId(vectorId);
     }
 
-    /// <summary>
-    /// 文档处理全部完成
-    /// </summary>
     public void MarkAsIndexed()
     {
         Status = DocumentStatus.Indexed;
         ProcessedAt = DateTime.UtcNow;
     }
 
-    /// <summary>
-    /// 标记处理失败
-    /// </summary>
     public void MarkAsFailed(string errorMessage)
     {
         if (string.IsNullOrWhiteSpace(errorMessage))
@@ -197,15 +240,35 @@ public class Document : IEntity<DocumentId>
         ErrorMessage = errorMessage.Trim();
     }
 
-    #endregion 领域行为方法
+    private static string? NormalizeOptionalText(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+}
+
+public enum DocumentClassification
+{
+    Public = 0,
+    Internal = 1,
+    Sensitive = 2,
+    Forbidden = 3
+}
+
+public enum DocumentSourceType
+{
+    UserUploaded = 0,
+    BusinessRule = 1,
+    CloudReadOnlyApiDoc = 2,
+    Runbook = 3,
+    External = 4
 }
 
 public enum DocumentStatus
 {
-    Pending = 0,      // 等待处理
-    Parsing = 1,      // 正在读取/解析内容
-    Splitting = 2,    // 正在进行文本切片
-    Embedding = 3,    // 正在调用模型生成向量
-    Indexed = 4,      // 索引完成，可用于检索
-    Failed = 5        // 处理失败
+    Pending = 0,
+    Parsing = 1,
+    Splitting = 2,
+    Embedding = 3,
+    Indexed = 4,
+    Failed = 5
 }

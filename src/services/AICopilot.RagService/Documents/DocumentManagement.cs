@@ -20,6 +20,15 @@ public record KnowledgeDocumentDto
     public string? ErrorMessage { get; init; }
     public DateTime CreatedAt { get; init; }
     public DateTime? ProcessedAt { get; init; }
+    public required string Classification { get; init; }
+    public required string SourceType { get; init; }
+    public bool IsSanitized { get; init; }
+    public string? ReviewedBy { get; init; }
+    public DateTime? ReviewedAt { get; init; }
+    public DateTime? EffectiveFrom { get; init; }
+    public DateTime? EffectiveTo { get; init; }
+    public bool AllowedForFinalPrompt { get; init; }
+    public string? BlockedReason { get; init; }
 }
 
 [AuthorizeRequirement("Rag.GetListDocuments")]
@@ -48,7 +57,16 @@ public class GetListDocumentsQueryHandler(IReadRepository<KnowledgeBase> reposit
                 ChunkCount = document.ChunkCount,
                 ErrorMessage = document.ErrorMessage,
                 CreatedAt = document.CreatedAt,
-                ProcessedAt = document.ProcessedAt
+                ProcessedAt = document.ProcessedAt,
+                Classification = document.Classification.ToString(),
+                SourceType = document.SourceType.ToString(),
+                IsSanitized = document.IsSanitized,
+                ReviewedBy = document.ReviewedBy,
+                ReviewedAt = document.ReviewedAt,
+                EffectiveFrom = document.EffectiveFrom,
+                EffectiveTo = document.EffectiveTo,
+                AllowedForFinalPrompt = document.AllowedForFinalPrompt,
+                BlockedReason = document.BlockedReason
             })
             .ToList() ?? [];
 

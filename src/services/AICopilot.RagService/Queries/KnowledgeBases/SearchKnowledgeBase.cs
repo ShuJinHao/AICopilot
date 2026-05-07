@@ -1,6 +1,7 @@
 using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.Core.Rag.Ids;
+using AICopilot.Core.Rag.Specifications.KnowledgeBase;
 using AICopilot.Services.Contracts;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.SharedKernel.Messaging;
@@ -27,7 +28,9 @@ public class SearchKnowledgeBaseQueryHandler(
         SearchKnowledgeBaseQuery request,
         CancellationToken cancellationToken)
     {
-        var kb = await kbRepo.GetByIdAsync(new KnowledgeBaseId(request.KnowledgeBaseId), cancellationToken);
+        var kb = await kbRepo.FirstOrDefaultAsync(
+            new KnowledgeBaseByIdWithDocumentsSpec(new KnowledgeBaseId(request.KnowledgeBaseId)),
+            cancellationToken);
         if (kb == null)
         {
             return Result.NotFound("知识库不存在");

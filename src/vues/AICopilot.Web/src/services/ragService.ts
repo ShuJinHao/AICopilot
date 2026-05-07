@@ -8,6 +8,7 @@ import type {
   KnowledgeBaseSummary,
   KnowledgeDocumentSummary,
   SearchKnowledgeBaseResult,
+  UploadDocumentGovernanceForm,
   UploadDocumentResponse
 } from '@/types/app'
 
@@ -97,10 +98,14 @@ export const ragService = {
     return await apiClient.get<KnowledgeDocumentSummary[]>('/rag/document/list', { knowledgeBaseId })
   },
 
-  async uploadDocument(knowledgeBaseId: string, file: File) {
+  async uploadDocument(knowledgeBaseId: string, file: File, governance: UploadDocumentGovernanceForm) {
     const form = new FormData()
     form.append('knowledgeBaseId', knowledgeBaseId)
     form.append('file', file)
+    form.append('classification', String(governance.classification))
+    form.append('sourceType', String(governance.sourceType))
+    form.append('isSanitized', String(governance.isSanitized))
+    form.append('allowedForFinalPrompt', String(governance.allowedForFinalPrompt))
     return await apiClient.postForm<UploadDocumentResponse>('/rag/document', form)
   },
 

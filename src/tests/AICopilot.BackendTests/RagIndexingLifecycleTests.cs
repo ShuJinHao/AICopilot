@@ -39,6 +39,99 @@ public sealed class RagIndexingLifecycleTests
     }
 
     [Fact]
+    public async Task UploadDocument_ShouldPersistGovernanceMetadata()
+    {
+        var knowledgeBase = new KnowledgeBase("kb", "description", EmbeddingModelId.New());
+        var repository = new MutableKnowledgeBaseRepository(knowledgeBase);
+        var handler = new UploadDocumentCommandHandler(
+            repository,
+            new CapturingFileStorage(),
+            new FixedDocumentFormatPolicy([".txt"]),
+            new CapturingEventPublisher());
+
+        var result = await handler.Handle(
+            new UploadDocumentCommand(
+                knowledgeBase.Id.Value,
+                new FileUploadStream("runbook.txt", new MemoryStream([1, 2, 3])),
+                DocumentClassification.Sensitive.ToString(),
+                DocumentSourceType.Runbook.ToString(),
+                IsSanitized: true,
+                AllowedForFinalPrompt: false,
+                BlockedReason: " contains secrets "),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var document = knowledgeBase.Documents.Should().ContainSingle().Subject;
+        document.Classification.Should().Be(DocumentClassification.Sensitive);
+        document.SourceType.Should().Be(DocumentSourceType.Runbook);
+        document.IsSanitized.Should().BeTrue();
+        document.AllowedForFinalPrompt.Should().BeFalse();
+        document.BlockedReason.Should().Be("contains secrets");
+        document.CanEnterFinalPrompt(DateTime.UtcNow).Should().BeFalse();
+    }
+
+    [Fact]
+    public void DocumentGovernance_ShouldDefaultToCurrentBehaviorAndFilterUnsafeDocuments()
+    {
+        var knowledgeBase = new KnowledgeBase("kb", "description", EmbeddingModelId.New());
+        var document = knowledgeBase.AddDocument("doc.txt", "doc.txt", ".txt", "hash");
+        var now = DateTime.UtcNow;
+
+        document.Classification.Should().Be(DocumentClassification.Internal);
+        document.SourceType.Should().Be(DocumentSourceType.UserUploaded);
+        document.AllowedForFinalPrompt.Should().BeTrue();
+        document.CanEnterFinalPrompt(now).Should().BeTrue();
+
+        document.ConfigureGovernance(
+            DocumentClassification.Internal,
+            DocumentSourceType.UserUploaded,
+            isSanitized: false,
+            reviewedBy: null,
+            reviewedAt: null,
+            effectiveFrom: null,
+            effectiveTo: null,
+            allowedForFinalPrompt: false,
+            blockedReason: null);
+        document.CanEnterFinalPrompt(now).Should().BeFalse();
+
+        document.ConfigureGovernance(
+            DocumentClassification.Forbidden,
+            DocumentSourceType.UserUploaded,
+            isSanitized: false,
+            reviewedBy: null,
+            reviewedAt: null,
+            effectiveFrom: null,
+            effectiveTo: null,
+            allowedForFinalPrompt: true,
+            blockedReason: null);
+        document.CanEnterFinalPrompt(now).Should().BeFalse();
+
+        document.ConfigureGovernance(
+            DocumentClassification.Internal,
+            DocumentSourceType.UserUploaded,
+            isSanitized: false,
+            reviewedBy: null,
+            reviewedAt: null,
+            effectiveFrom: now.AddMinutes(1),
+            effectiveTo: null,
+            allowedForFinalPrompt: true,
+            blockedReason: null);
+        document.CanEnterFinalPrompt(now).Should().BeFalse();
+
+        document.ConfigureGovernance(
+            DocumentClassification.Internal,
+            DocumentSourceType.UserUploaded,
+            isSanitized: false,
+            reviewedBy: null,
+            reviewedAt: null,
+            effectiveFrom: null,
+            effectiveTo: now.AddMinutes(-1),
+            allowedForFinalPrompt: true,
+            blockedReason: null);
+        document.CanEnterFinalPrompt(now).Should().BeFalse();
+    }
+
+    [Fact]
     public async Task ParsingDocument_ShouldRecoverAndFinishIndexing()
     {
         var (knowledgeBase, document) = CreateKnowledgeBaseWithDocument();

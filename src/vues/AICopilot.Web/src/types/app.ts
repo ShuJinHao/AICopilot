@@ -338,6 +338,28 @@ export type KnowledgeDocumentStatus =
   | 'Failed'
   | number
 
+export type KnowledgeDocumentClassification =
+  | 'Public'
+  | 'Internal'
+  | 'Sensitive'
+  | 'Forbidden'
+  | number
+
+export type KnowledgeDocumentSourceType =
+  | 'UserUploaded'
+  | 'BusinessRule'
+  | 'CloudReadOnlyApiDoc'
+  | 'Runbook'
+  | 'External'
+  | number
+
+export interface UploadDocumentGovernanceForm {
+  classification: KnowledgeDocumentClassification
+  sourceType: KnowledgeDocumentSourceType
+  isSanitized: boolean
+  allowedForFinalPrompt: boolean
+}
+
 export interface KnowledgeDocumentSummary {
   id: number
   knowledgeBaseId: string
@@ -348,6 +370,15 @@ export interface KnowledgeDocumentSummary {
   errorMessage?: string | null
   createdAt: string
   processedAt?: string | null
+  classification: KnowledgeDocumentClassification
+  sourceType: KnowledgeDocumentSourceType
+  isSanitized: boolean
+  reviewedBy?: string | null
+  reviewedAt?: string | null
+  effectiveFrom?: string | null
+  effectiveTo?: string | null
+  allowedForFinalPrompt: boolean
+  blockedReason?: string | null
 }
 
 export interface UploadDocumentResponse {

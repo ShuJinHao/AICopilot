@@ -40,9 +40,36 @@ public class KnowledgeBase : IAggregateRoot<KnowledgeBaseId>
     /// <summary>
     /// 添加新文档到知识库
     /// </summary>
-    public Document AddDocument(string name, string filePath, string extension, string fileHash)
+    public Document AddDocument(
+        string name,
+        string filePath,
+        string extension,
+        string fileHash,
+        DocumentClassification classification = DocumentClassification.Internal,
+        DocumentSourceType sourceType = DocumentSourceType.UserUploaded,
+        bool isSanitized = false,
+        string? reviewedBy = null,
+        DateTime? reviewedAt = null,
+        DateTime? effectiveFrom = null,
+        DateTime? effectiveTo = null,
+        bool allowedForFinalPrompt = true,
+        string? blockedReason = null)
     {
-        var document = new Document(Id, name, filePath, extension, fileHash);
+        var document = new Document(
+            Id,
+            name,
+            filePath,
+            extension,
+            fileHash,
+            classification,
+            sourceType,
+            isSanitized,
+            reviewedBy,
+            reviewedAt,
+            effectiveFrom,
+            effectiveTo,
+            allowedForFinalPrompt,
+            blockedReason);
         _documents.Add(document);
         return document;
     }

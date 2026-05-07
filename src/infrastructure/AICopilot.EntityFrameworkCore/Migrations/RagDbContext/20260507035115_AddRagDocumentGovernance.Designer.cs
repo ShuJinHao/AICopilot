@@ -3,6 +3,7 @@ using System;
 using AICopilot.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace AICopilot.EntityFrameworkCore.Migrations.RagDbContext
 {
     [DbContext(typeof(global::AICopilot.EntityFrameworkCore.RagDbContext))]
-    partial class RagDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260507035115_AddRagDocumentGovernance")]
+    partial class AddRagDocumentGovernance
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

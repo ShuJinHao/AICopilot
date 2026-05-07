@@ -27,6 +27,35 @@ function statusType(status: string | number) {
   return 'warning'
 }
 
+function governanceType(row: { classification: string | number; allowedForFinalPrompt: boolean }) {
+  if (!row.allowedForFinalPrompt || String(row.classification) === 'Forbidden') return 'danger'
+  if (String(row.classification) === 'Sensitive') return 'warning'
+  return 'success'
+}
+
+function classificationLabel(value: string | number) {
+  const labels: Record<string, string> = {
+    Public: '公开',
+    Internal: '内部',
+    Sensitive: '敏感',
+    Forbidden: '禁用'
+  }
+
+  return labels[String(value)] ?? String(value)
+}
+
+function sourceTypeLabel(value: string | number) {
+  const labels: Record<string, string> = {
+    UserUploaded: '用户上传',
+    BusinessRule: '业务规则',
+    CloudReadOnlyApiDoc: 'Cloud 只读文档',
+    Runbook: '运维手册',
+    External: '外部资料'
+  }
+
+  return labels[String(value)] ?? String(value)
+}
+
 async function uploadDocument(options: UploadRequestOptions) {
   if (options.file instanceof File) {
     await store.uploadDocument(options.file)
@@ -126,6 +155,23 @@ async function confirmDelete(title: string, action: () => Promise<void>) {
             </div>
           </div>
           <div class="panel-body document-zone">
+            <div class="governance-form">
+              <el-select v-model="store.uploadGovernanceForm.classification" placeholder="文档等级">
+                <el-option label="内部" value="Internal" />
+                <el-option label="公开" value="Public" />
+                <el-option label="敏感" value="Sensitive" />
+                <el-option label="禁用" value="Forbidden" />
+              </el-select>
+              <el-select v-model="store.uploadGovernanceForm.sourceType" placeholder="来源类型">
+                <el-option label="用户上传" value="UserUploaded" />
+                <el-option label="业务规则" value="BusinessRule" />
+                <el-option label="Cloud 只读文档" value="CloudReadOnlyApiDoc" />
+                <el-option label="运维手册" value="Runbook" />
+                <el-option label="外部资料" value="External" />
+              </el-select>
+              <el-switch v-model="store.uploadGovernanceForm.isSanitized" active-text="已脱敏" />
+              <el-switch v-model="store.uploadGovernanceForm.allowedForFinalPrompt" active-text="允许进入回答" />
+            </div>
             <el-upload
               drag
               :http-request="uploadDocument"
@@ -145,6 +191,16 @@ async function confirmDelete(title: string, action: () => Promise<void>) {
               <el-table-column label="状态" width="110">
                 <template #default="{ row }">
                   <el-tag :type="statusType(row.status)">{{ row.status }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="治理" min-width="170">
+                <template #default="{ row }">
+                  <div class="governance-cell">
+                    <el-tag :type="governanceType(row)">{{ classificationLabel(row.classification) }}</el-tag>
+                    <span>{{ sourceTypeLabel(row.sourceType) }}</span>
+                    <small v-if="!row.allowedForFinalPrompt">不进入回答</small>
+                    <small v-else-if="row.isSanitized">已脱敏</small>
+                  </div>
                 </template>
               </el-table-column>
               <el-table-column prop="chunkCount" label="Chunks" width="90" />
@@ -277,6 +333,26 @@ async function confirmDelete(title: string, action: () => Promise<void>) {
   gap: 10px;
 }
 
+.governance-form {
+  display: grid;
+  grid-template-columns: minmax(0, 160px) minmax(0, 180px) auto auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.governance-cell {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 28px;
+}
+
+.governance-cell span,
+.governance-cell small {
+  color: var(--app-text-muted);
+}
+
 .base-list {
   padding: 12px;
 }
@@ -343,7 +419,8 @@ async function confirmDelete(title: string, action: () => Promise<void>) {
 
 @media (max-width: 1080px) {
   .knowledge-grid,
-  .search-grid {
+  .search-grid,
+  .governance-form {
     grid-template-columns: 1fr;
   }
 }

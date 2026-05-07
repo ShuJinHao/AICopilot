@@ -62,6 +62,47 @@ public class DocumentConfiguration : IEntityTypeConfiguration<Document>
 
         builder.Property(d => d.ProcessedAt)
             .HasColumnName("processed_at"); // 允许为空
+
+        builder.Property(d => d.Classification)
+            .IsRequired()
+            .HasMaxLength(50)
+            .HasConversion<string>()
+            .HasDefaultValue(DocumentClassification.Internal)
+            .HasColumnName("classification");
+
+        builder.Property(d => d.SourceType)
+            .IsRequired()
+            .HasMaxLength(50)
+            .HasConversion<string>()
+            .HasDefaultValue(DocumentSourceType.UserUploaded)
+            .HasColumnName("source_type");
+
+        builder.Property(d => d.IsSanitized)
+            .IsRequired()
+            .HasDefaultValue(false)
+            .HasColumnName("is_sanitized");
+
+        builder.Property(d => d.ReviewedBy)
+            .HasMaxLength(100)
+            .HasColumnName("reviewed_by");
+
+        builder.Property(d => d.ReviewedAt)
+            .HasColumnName("reviewed_at");
+
+        builder.Property(d => d.EffectiveFrom)
+            .HasColumnName("effective_from");
+
+        builder.Property(d => d.EffectiveTo)
+            .HasColumnName("effective_to");
+
+        builder.Property(d => d.AllowedForFinalPrompt)
+            .IsRequired()
+            .HasDefaultValue(true)
+            .HasColumnName("allowed_for_final_prompt");
+
+        builder.Property(d => d.BlockedReason)
+            .HasMaxLength(500)
+            .HasColumnName("blocked_reason");
         
         // 配置导航属性 Chunks
         builder.HasMany(d => d.Chunks)

@@ -12,7 +12,8 @@ import type {
   KnowledgeBaseFormModel,
   KnowledgeBaseSummary,
   KnowledgeDocumentSummary,
-  SearchKnowledgeBaseResult
+  SearchKnowledgeBaseResult,
+  UploadDocumentGovernanceForm
 } from '@/types/app'
 
 type EditableDomain = 'embeddingModel' | 'knowledgeBase'
@@ -39,6 +40,15 @@ function createEmptyKnowledgeBaseForm(): KnowledgeBaseFormModel {
     name: '',
     description: '',
     embeddingModelId: ''
+  }
+}
+
+function createDefaultUploadGovernanceForm(): UploadDocumentGovernanceForm {
+  return {
+    classification: 'Internal',
+    sourceType: 'UserUploaded',
+    isSanitized: false,
+    allowedForFinalPrompt: true
   }
 }
 
@@ -125,6 +135,7 @@ export const useRagStore = defineStore('rag', () => {
 
   const currentEmbeddingModel = ref<EmbeddingModelFormModel>(createEmptyEmbeddingModelForm())
   const currentKnowledgeBase = ref<KnowledgeBaseFormModel>(createEmptyKnowledgeBaseForm())
+  const uploadGovernanceForm = ref<UploadDocumentGovernanceForm>(createDefaultUploadGovernanceForm())
 
   function syncSelectedKnowledgeBase() {
     if (
@@ -401,7 +412,7 @@ export const useRagStore = defineStore('rag', () => {
     actionErrors.document = ''
 
     try {
-      await ragService.uploadDocument(selectedKnowledgeBaseId.value, file)
+      await ragService.uploadDocument(selectedKnowledgeBaseId.value, file, uploadGovernanceForm.value)
       await refreshKnowledgeBases()
       await refreshDocuments()
     } catch (error) {
@@ -479,6 +490,7 @@ export const useRagStore = defineStore('rag', () => {
     actionErrors,
     currentEmbeddingModel,
     currentKnowledgeBase,
+    uploadGovernanceForm,
     refresh,
     refreshEmbeddingModels,
     refreshKnowledgeBases,

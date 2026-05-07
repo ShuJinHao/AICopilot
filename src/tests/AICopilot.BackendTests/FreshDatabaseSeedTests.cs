@@ -12,7 +12,7 @@ public sealed class FreshDatabaseSeedTests
 {
     private const string AiCopilotFinalMigrationId = "20260429010506_DetachIdentityFromAiCopilotDbContext";
     private const string AiGatewayInitialMigrationId = "20260428145951_InitialAiGatewaySchema";
-    private const string RagInitialMigrationId = "20260428142303_InitialRagSchema";
+    private const string RagFinalMigrationId = "20260507035115_AddRagDocumentGovernance";
     private const string DataAnalysisInitialMigrationId = "20260427000300_InitialDataAnalysisSchema";
     private const string McpServerInitialMigrationId = "20260427000100_InitialMcpServerSchema";
     private const string IdentityStoreBaselineMigrationId = "20260429021832_IdentityStoreMigrationBaseline";
@@ -233,7 +233,7 @@ public sealed class FreshDatabaseSeedTests
             (MigrationHistoryTables.AiCopilot, AiCopilotFinalMigrationId),
             (MigrationHistoryTables.IdentityStore, IdentityStoreBaselineMigrationId),
             (MigrationHistoryTables.AiGateway, AiGatewayInitialMigrationId),
-            (MigrationHistoryTables.Rag, RagInitialMigrationId),
+            (MigrationHistoryTables.Rag, RagFinalMigrationId),
             (MigrationHistoryTables.DataAnalysis, DataAnalysisInitialMigrationId),
             (MigrationHistoryTables.McpServer, McpServerInitialMigrationId)
         };
