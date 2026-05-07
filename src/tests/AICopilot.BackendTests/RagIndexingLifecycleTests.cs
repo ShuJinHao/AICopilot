@@ -192,6 +192,59 @@ public sealed class RagIndexingLifecycleTests
     }
 
     [Fact]
+    public async Task UpdateDocumentGovernance_ShouldRejectInvalidClassification()
+    {
+        var (_, document) = CreateKnowledgeBaseWithDocument();
+        var handler = new UpdateDocumentGovernanceCommandHandler(new MutableKnowledgeBaseRepository());
+
+        var result = await handler.Handle(
+            new UpdateDocumentGovernanceCommand(
+                document.Id,
+                "UnknownClassification",
+                DocumentSourceType.UserUploaded.ToString(),
+                IsSanitized: false,
+                EffectiveFrom: null,
+                EffectiveTo: null,
+                AllowedForFinalPrompt: true,
+                BlockedReason: null),
+            CancellationToken.None);
+
+        result.Status.Should().Be(ResultStatus.Invalid);
+    }
+
+    [Fact]
+    public async Task DeleteDocument_ShouldRemoveAggregateDocumentAndDeleteStoredFile()
+    {
+        var (knowledgeBase, document) = CreateKnowledgeBaseWithDocument();
+        var fileStorage = new CapturingFileStorage();
+        var handler = new DeleteDocumentCommandHandler(
+            new MutableKnowledgeBaseRepository(knowledgeBase),
+            fileStorage);
+
+        var result = await handler.Handle(new DeleteDocumentCommand(document.Id), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        knowledgeBase.Documents.Should().BeEmpty();
+        fileStorage.DeleteCount.Should().Be(1);
+        fileStorage.DeletedPaths.Should().ContainSingle().Which.Should().Be(document.FilePath);
+    }
+
+    [Fact]
+    public async Task DeleteDocument_ShouldSucceedWithoutDeletingFile_WhenDocumentDoesNotExist()
+    {
+        var fileStorage = new CapturingFileStorage();
+        var handler = new DeleteDocumentCommandHandler(
+            new MutableKnowledgeBaseRepository(),
+            fileStorage);
+
+        var result = await handler.Handle(new DeleteDocumentCommand(404), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        fileStorage.DeleteCount.Should().Be(0);
+        fileStorage.DeletedPaths.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task ParsingDocument_ShouldRecoverAndFinishIndexing()
     {
         var (knowledgeBase, document) = CreateKnowledgeBaseWithDocument();
@@ -397,6 +450,10 @@ public sealed class RagIndexingLifecycleTests
     {
         public int SaveCount { get; private set; }
 
+        public int DeleteCount { get; private set; }
+
+        public List<string> DeletedPaths { get; } = [];
+
         public Task<string> SaveAsync(Stream stream, string fileName, CancellationToken cancellationToken = default)
         {
             SaveCount++;
@@ -410,6 +467,8 @@ public sealed class RagIndexingLifecycleTests
 
         public Task DeleteAsync(string path, CancellationToken cancellationToken = default)
         {
+            DeleteCount++;
+            DeletedPaths.Add(path);
             return Task.CompletedTask;
         }
     }

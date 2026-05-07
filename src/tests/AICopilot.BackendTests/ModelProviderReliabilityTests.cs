@@ -1,7 +1,9 @@
+using AICopilot.AiGatewayService.Queries.Runtime;
 using AICopilot.AiRuntime;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Services.Contracts;
+using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.SharedKernel.Ai;
 using Microsoft.Extensions.Options;
 
@@ -87,6 +89,34 @@ public sealed class ModelProviderReliabilityTests
     }
 
     [Fact]
+    public async Task CircuitBreaker_ShouldOpenAfterConcurrentFailures()
+    {
+        var now = DateTimeOffset.UtcNow;
+        const int failureThreshold = 200;
+        var breaker = new InMemoryModelCircuitBreaker(
+            Options.Create(new ModelProviderReliabilityOptions
+            {
+                CircuitBreakerFailureThreshold = failureThreshold,
+                CircuitBreakerOpenSeconds = 30
+            }),
+            () => now);
+
+        using var start = new ManualResetEventSlim();
+        var failures = Enumerable
+            .Range(0, failureThreshold)
+            .Select(index => Task.Run(() =>
+            {
+                start.Wait();
+                breaker.RecordFailure("primary", new InvalidOperationException($"failure-{index}"));
+            }));
+
+        start.Set();
+        await Task.WhenAll(failures);
+
+        breaker.CanAttempt("primary").Should().BeFalse();
+    }
+
+    [Fact]
     public void CostBudgetPolicy_ShouldRejectRequestsThatExceedConfiguredMaxOutputTokens()
     {
         var policy = new ConfiguredModelCostBudgetPolicy(Options.Create(new ModelProviderReliabilityOptions
@@ -140,6 +170,56 @@ public sealed class ModelProviderReliabilityTests
         snapshot.FallbackBlockedScopes.Should().Contain("DataAnalysisSqlToolChain");
     }
 
+    [Fact]
+    public void SnapshotReader_ShouldNormalizeInvalidNumericReliabilityOptions()
+    {
+        var reader = new ModelProviderReliabilitySnapshotReader(Options.Create(new ModelProviderReliabilityOptions
+        {
+            CircuitBreakerFailureThreshold = -1,
+            CircuitBreakerOpenSeconds = -30,
+            MaxOutputTokens = -100
+        }));
+
+        var snapshot = reader.GetSnapshot();
+
+        snapshot.CircuitBreakerFailureThreshold.Should().Be(1);
+        snapshot.CircuitBreakerOpenSeconds.Should().Be(1);
+        snapshot.MaxOutputTokens.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task GetProviderReliabilityQueryHandler_ShouldReturnSnapshotReaderResult()
+    {
+        var snapshot = new ModelProviderReliabilityDto(
+            FallbackEnabled: true,
+            FallbackProviders: [new ModelProviderFallbackRouteDto("primary", ["secondary"])],
+            CircuitBreakerFailureThreshold: 5,
+            CircuitBreakerOpenSeconds: 90,
+            MaxOutputTokens: 4096,
+            FallbackAllowedScopes: ["GeneralChat"],
+            FallbackBlockedScopes: ["McpToolCall"]);
+        var handler = new GetProviderReliabilityQueryHandler(
+            new StubModelProviderReliabilitySnapshotReader(snapshot));
+
+        var result = await handler.Handle(new GetProviderReliabilityQuery(), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Should().BeSameAs(snapshot);
+    }
+
+    [Fact]
+    public void GetProviderReliabilityQuery_ShouldKeepPermissionRequirement()
+    {
+        var attribute = typeof(GetProviderReliabilityQuery)
+            .GetCustomAttributes(typeof(AuthorizeRequirementAttribute), inherit: false)
+            .Cast<AuthorizeRequirementAttribute>()
+            .Should()
+            .ContainSingle()
+            .Subject;
+
+        attribute.Permission.Should().Be("AiGateway.GetProviderReliability");
+    }
+
     private static AgentRuntimeCreateRequest CreateRequest(
         string provider,
         AiChatOptions? options = null)
@@ -158,5 +238,14 @@ public sealed class ModelProviderReliabilityTests
             new TemplateSpecification());
 
         return new AgentRuntimeCreateRequest(model, template, options ?? new AiChatOptions());
+    }
+
+    private sealed class StubModelProviderReliabilitySnapshotReader(ModelProviderReliabilityDto snapshot)
+        : IModelProviderReliabilitySnapshotReader
+    {
+        public ModelProviderReliabilityDto GetSnapshot()
+        {
+            return snapshot;
+        }
     }
 }

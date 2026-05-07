@@ -1,25 +1,34 @@
 import { defineStore } from 'pinia'
 import { reactive, ref } from 'vue'
-import { ApiError, getProblemDetails } from '@/services/apiClient'
+import { FORM_DEFAULTS } from '@/constants/formDefaults'
+import { CONFIG_STORE_MESSAGES } from '@/constants/messages'
 import { CONFIG_READ_PERMISSIONS } from '@/security/permissions'
 import { configService } from '@/services/configService'
+import {
+  createEmptyApprovalPolicyForm,
+  createEmptyBusinessDatabaseForm,
+  createEmptyConversationTemplateForm,
+  createEmptyLanguageModelForm,
+  createEmptyMcpServerForm,
+  toApprovalPolicyForm,
+  toBusinessDatabaseForm,
+  toConversationTemplateForm,
+  toLanguageModelForm,
+  toMcpServerForm
+} from '@/stores/configFormFactories'
+import { toStoreErrorMessage, useDialogCrud } from '@/stores/useDialogCrud'
 import { useAuthStore } from '@/stores/authStore'
 import type {
-  ApprovalPolicyDetail,
   ApprovalPolicyFormModel,
   ApprovalPolicySummary,
-  BusinessDatabaseDetail,
   BusinessDatabaseFormModel,
   BusinessDatabaseSummary,
   ConfigDialogMode,
-  ConversationTemplateDetail,
   ConversationTemplateFormModel,
   ConversationTemplateSummary,
-  LanguageModelDetail,
   LanguageModelFormModel,
   LanguageModelSummary,
   McpAllowedTool,
-  McpServerDetail,
   McpServerFormModel,
   McpServerSummary,
   ProviderReliabilityConfig,
@@ -35,159 +44,6 @@ type EditableDomain =
 
 type LoadingDomain = EditableDomain | 'semanticSource'
 type ReadOnlyConfigDomain = 'providerReliability'
-
-function createEmptyLanguageModelForm(): LanguageModelFormModel {
-  return {
-    provider: 'OpenAI',
-    name: '',
-    baseUrl: '',
-    apiKey: '',
-    apiKeyAction: 'replace',
-    clearApiKey: false,
-    maxTokens: 2048,
-    temperature: 0.7,
-    hasApiKey: false,
-    apiKeyMasked: null
-  }
-}
-
-function createEmptyConversationTemplateForm(): ConversationTemplateFormModel {
-  return {
-    name: '',
-    description: '',
-    systemPrompt: '',
-    modelId: '',
-    maxTokens: null,
-    temperature: null,
-    isEnabled: true
-  }
-}
-
-function createEmptyApprovalPolicyForm(): ApprovalPolicyFormModel {
-  return {
-    name: '',
-    description: '',
-    targetType: 'Plugin',
-    targetName: '',
-    toolNames: [],
-    isEnabled: true,
-    requiresOnsiteAttestation: false
-  }
-}
-
-function createEmptyBusinessDatabaseForm(): BusinessDatabaseFormModel {
-  return {
-    name: '',
-    description: '',
-    connectionString: '',
-    provider: 1,
-    isEnabled: true,
-    isReadOnly: true,
-    externalSystemType: 0,
-    readOnlyCredentialVerified: false,
-    hasConnectionString: false,
-    connectionStringMasked: null
-  }
-}
-
-function createEmptyMcpServerForm(): McpServerFormModel {
-  return {
-    name: '',
-    description: '',
-    transportType: 1,
-    command: 'dotnet',
-    arguments: '',
-    chatExposureMode: 0,
-    allowedTools: [],
-    externalSystemType: 0,
-    capabilityKind: 1,
-    riskLevel: 1,
-    isEnabled: true,
-    hasArguments: false,
-    argumentsMasked: null,
-    originalTransportType: 1
-  }
-}
-
-function toLanguageModelForm(detail: LanguageModelDetail): LanguageModelFormModel {
-  return {
-    id: detail.id,
-    provider: detail.provider,
-    name: detail.name,
-    baseUrl: detail.baseUrl,
-    apiKey: '',
-    apiKeyAction: 'keep',
-    clearApiKey: false,
-    maxTokens: detail.maxTokens,
-    temperature: detail.temperature,
-    hasApiKey: detail.hasApiKey,
-    apiKeyMasked: detail.apiKeyMasked
-  }
-}
-
-function toConversationTemplateForm(
-  detail: ConversationTemplateDetail
-): ConversationTemplateFormModel {
-  return {
-    id: detail.id,
-    name: detail.name,
-    description: detail.description,
-    systemPrompt: detail.systemPrompt,
-    modelId: detail.modelId,
-    maxTokens: detail.maxTokens ?? null,
-    temperature: detail.temperature ?? null,
-    isEnabled: detail.isEnabled
-  }
-}
-
-function toApprovalPolicyForm(detail: ApprovalPolicyDetail): ApprovalPolicyFormModel {
-  return {
-    id: detail.id,
-    name: detail.name,
-    description: detail.description ?? '',
-    targetType: detail.targetType,
-    targetName: detail.targetName,
-    toolNames: [...detail.toolNames],
-    isEnabled: detail.isEnabled,
-    requiresOnsiteAttestation: detail.requiresOnsiteAttestation
-  }
-}
-
-function toBusinessDatabaseForm(detail: BusinessDatabaseDetail): BusinessDatabaseFormModel {
-  return {
-    id: detail.id,
-    name: detail.name,
-    description: detail.description,
-    connectionString: '',
-    provider: detail.provider,
-    isEnabled: detail.isEnabled,
-    isReadOnly: true,
-    externalSystemType: detail.externalSystemType,
-    readOnlyCredentialVerified: detail.readOnlyCredentialVerified,
-    hasConnectionString: detail.hasConnectionString,
-    connectionStringMasked: detail.connectionStringMasked
-  }
-}
-
-function toMcpServerForm(detail: McpServerDetail): McpServerFormModel {
-  return {
-    id: detail.id,
-    name: detail.name,
-    description: detail.description,
-    transportType: detail.transportType,
-    command: detail.command ?? '',
-    arguments: '',
-    chatExposureMode: detail.chatExposureMode,
-    allowedTools: detail.allowedTools.map((tool) => ({ ...tool })),
-    externalSystemType: detail.externalSystemType,
-    capabilityKind: detail.capabilityKind,
-    riskLevel: detail.riskLevel,
-    isEnabled: detail.isEnabled,
-    hasArguments: detail.hasArguments,
-    argumentsMasked: detail.argumentsMasked,
-    originalTransportType: detail.transportType
-  }
-}
 
 function normalizeToolNames(toolNames: string[]) {
   return [...new Set(toolNames.map((item) => item.trim()).filter(Boolean))]
@@ -218,19 +74,6 @@ function normalizeMcpAllowedTools(tools: McpAllowedTool[]) {
   }
 
   return [...normalized.values()]
-}
-
-function toErrorMessage(error: unknown, fallback: string, forbiddenMessage: string) {
-  if (error instanceof ApiError && error.status === 403) {
-    return forbiddenMessage
-  }
-
-  if (error instanceof ApiError) {
-    const problem = getProblemDetails(error.details)
-    return problem?.detail || problem?.title || fallback
-  }
-
-  return fallback
 }
 
 export const useConfigStore = defineStore('config', () => {
@@ -295,7 +138,7 @@ export const useConfigStore = defineStore('config', () => {
   const currentApprovalPolicy = ref<ApprovalPolicyFormModel>(createEmptyApprovalPolicyForm())
   const currentBusinessDatabase = ref<BusinessDatabaseFormModel>(createEmptyBusinessDatabaseForm())
   const currentMcpServer = ref<McpServerFormModel>(createEmptyMcpServerForm())
-  const currentBusinessDatabaseProviderSnapshot = ref(1)
+  const currentBusinessDatabaseProviderSnapshot = ref<number>(FORM_DEFAULTS.businessDatabase.provider)
 
   async function refreshLanguageModels() {
     if (!authStore.hasAnyPermission(CONFIG_READ_PERMISSIONS.languageModel)) {
@@ -410,10 +253,10 @@ export const useConfigStore = defineStore('config', () => {
         refreshSemanticSourceStatuses()
       ])
     } catch (error) {
-      errorMessage.value = toErrorMessage(
+      errorMessage.value = toStoreErrorMessage(
         error,
-        '配置页面加载失败，请稍后重试。',
-        '当前账号没有查看配置的权限。'
+        CONFIG_STORE_MESSAGES.pageLoadFailed,
+        CONFIG_STORE_MESSAGES.pageLoadForbidden
       )
       throw error
     } finally {
@@ -421,447 +264,209 @@ export const useConfigStore = defineStore('config', () => {
     }
   }
 
-  function closeLanguageModelDialog() {
-    dialogStates.languageModel = false
-    dialogModes.languageModel = 'create'
-    actionErrors.languageModel = ''
-    currentLanguageModel.value = createEmptyLanguageModelForm()
-  }
-
-  function openCreateLanguageModelDialog() {
-    actionErrors.languageModel = ''
-    dialogModes.languageModel = 'create'
-    currentLanguageModel.value = createEmptyLanguageModelForm()
-    dialogStates.languageModel = true
-  }
-
-  async function openEditLanguageModelDialog(id: string) {
-    loadingStates.languageModel = true
-    actionErrors.languageModel = ''
-
-    try {
-      const detail = await configService.getLanguageModel(id)
-      currentLanguageModel.value = toLanguageModelForm(detail)
-      dialogModes.languageModel = 'edit'
-      dialogStates.languageModel = true
-    } catch (error) {
-      actionErrors.languageModel = toErrorMessage(
-        error,
-        '加载模型详情失败，请稍后重试。',
-        '当前账号没有查看模型详情的权限。'
-      )
-      throw error
-    } finally {
-      loadingStates.languageModel = false
-    }
-  }
-
-  async function saveLanguageModel() {
-    submittingStates.languageModel = true
-    actionErrors.languageModel = ''
-
-    try {
+  const languageModelCrud = useDialogCrud({
+    domain: 'languageModel',
+    states: { loadingStates, dialogStates, dialogModes, submittingStates, actionErrors },
+    current: currentLanguageModel,
+    messages: CONFIG_STORE_MESSAGES.languageModel,
+    createEmptyForm: createEmptyLanguageModelForm,
+    toForm: toLanguageModelForm,
+    loadDetail: configService.getLanguageModel,
+    saveForm: async (form, mode) => {
       const payload = {
-        ...currentLanguageModel.value,
-        provider: currentLanguageModel.value.provider.trim(),
-        name: currentLanguageModel.value.name.trim(),
-        baseUrl: currentLanguageModel.value.baseUrl.trim(),
-        apiKey:
-          currentLanguageModel.value.apiKeyAction === 'replace'
-            ? currentLanguageModel.value.apiKey.trim()
-            : '',
-        clearApiKey: currentLanguageModel.value.apiKeyAction === 'clear'
+        ...form,
+        provider: form.provider.trim(),
+        name: form.name.trim(),
+        baseUrl: form.baseUrl.trim(),
+        apiKey: form.apiKeyAction === 'replace' ? form.apiKey.trim() : '',
+        clearApiKey: form.apiKeyAction === 'clear'
       }
 
-      if (dialogModes.languageModel === 'create') {
+      if (mode === 'create') {
         await configService.createLanguageModel(payload)
       } else {
         await configService.updateLanguageModel(payload)
       }
-
-      await refreshLanguageModels()
-      closeLanguageModelDialog()
-    } catch (error) {
-      actionErrors.languageModel = toErrorMessage(
-        error,
-        '保存模型失败，请稍后重试。',
-        '当前账号没有管理模型的权限。'
-      )
-      throw error
-    } finally {
-      submittingStates.languageModel = false
-    }
-  }
-
-  async function deleteLanguageModel(id: string) {
-    actionErrors.languageModel = ''
-
-    try {
+    },
+    deleteItem: async (id) => {
       await configService.deleteLanguageModel(id)
-      await refreshLanguageModels()
-    } catch (error) {
-      actionErrors.languageModel = toErrorMessage(
-        error,
-        '删除模型失败，请稍后重试。',
-        '当前账号没有删除模型的权限。'
-      )
-      throw error
-    }
-  }
+    },
+    afterSave: refreshLanguageModels,
+    afterDelete: refreshLanguageModels
+  })
 
-  function closeConversationTemplateDialog() {
-    dialogStates.conversationTemplate = false
-    dialogModes.conversationTemplate = 'create'
-    actionErrors.conversationTemplate = ''
-    currentConversationTemplate.value = createEmptyConversationTemplateForm()
-  }
-
-  function openCreateConversationTemplateDialog() {
-    actionErrors.conversationTemplate = ''
-    dialogModes.conversationTemplate = 'create'
-    currentConversationTemplate.value = createEmptyConversationTemplateForm()
-    dialogStates.conversationTemplate = true
-  }
-
-  async function openEditConversationTemplateDialog(id: string) {
-    loadingStates.conversationTemplate = true
-    actionErrors.conversationTemplate = ''
-
-    try {
-      const detail = await configService.getConversationTemplate(id)
-      currentConversationTemplate.value = toConversationTemplateForm(detail)
-      dialogModes.conversationTemplate = 'edit'
-      dialogStates.conversationTemplate = true
-    } catch (error) {
-      actionErrors.conversationTemplate = toErrorMessage(
-        error,
-        '加载模板详情失败，请稍后重试。',
-        '当前账号没有查看模板详情的权限。'
-      )
-      throw error
-    } finally {
-      loadingStates.conversationTemplate = false
-    }
-  }
-
-  async function saveConversationTemplate() {
-    submittingStates.conversationTemplate = true
-    actionErrors.conversationTemplate = ''
-
-    try {
+  const conversationTemplateCrud = useDialogCrud({
+    domain: 'conversationTemplate',
+    states: { loadingStates, dialogStates, dialogModes, submittingStates, actionErrors },
+    current: currentConversationTemplate,
+    messages: CONFIG_STORE_MESSAGES.conversationTemplate,
+    createEmptyForm: createEmptyConversationTemplateForm,
+    toForm: toConversationTemplateForm,
+    loadDetail: configService.getConversationTemplate,
+    saveForm: async (form, mode) => {
       const payload = {
-        ...currentConversationTemplate.value,
-        name: currentConversationTemplate.value.name.trim(),
-        description: currentConversationTemplate.value.description.trim(),
-        systemPrompt: currentConversationTemplate.value.systemPrompt.trim()
+        ...form,
+        name: form.name.trim(),
+        description: form.description.trim(),
+        systemPrompt: form.systemPrompt.trim()
       }
 
-      if (dialogModes.conversationTemplate === 'create') {
+      if (mode === 'create') {
         await configService.createConversationTemplate(payload)
       } else {
         await configService.updateConversationTemplate(payload)
       }
-
-      await refreshConversationTemplates()
-      closeConversationTemplateDialog()
-    } catch (error) {
-      actionErrors.conversationTemplate = toErrorMessage(
-        error,
-        '保存模板失败，请稍后重试。',
-        '当前账号没有管理模板的权限。'
-      )
-      throw error
-    } finally {
-      submittingStates.conversationTemplate = false
-    }
-  }
-
-  async function deleteConversationTemplate(id: string) {
-    actionErrors.conversationTemplate = ''
-
-    try {
+    },
+    deleteItem: async (id) => {
       await configService.deleteConversationTemplate(id)
-      await refreshConversationTemplates()
-    } catch (error) {
-      actionErrors.conversationTemplate = toErrorMessage(
-        error,
-        '删除模板失败，请稍后重试。',
-        '当前账号没有删除模板的权限。'
-      )
-      throw error
-    }
-  }
+    },
+    afterSave: refreshConversationTemplates,
+    afterDelete: refreshConversationTemplates
+  })
 
-  function closeApprovalPolicyDialog() {
-    dialogStates.approvalPolicy = false
-    dialogModes.approvalPolicy = 'create'
-    actionErrors.approvalPolicy = ''
-    currentApprovalPolicy.value = createEmptyApprovalPolicyForm()
-  }
-
-  function openCreateApprovalPolicyDialog() {
-    actionErrors.approvalPolicy = ''
-    dialogModes.approvalPolicy = 'create'
-    currentApprovalPolicy.value = createEmptyApprovalPolicyForm()
-    dialogStates.approvalPolicy = true
-  }
-
-  async function openEditApprovalPolicyDialog(id: string) {
-    loadingStates.approvalPolicy = true
-    actionErrors.approvalPolicy = ''
-
-    try {
-      const detail = await configService.getApprovalPolicy(id)
-      currentApprovalPolicy.value = toApprovalPolicyForm(detail)
-      dialogModes.approvalPolicy = 'edit'
-      dialogStates.approvalPolicy = true
-    } catch (error) {
-      actionErrors.approvalPolicy = toErrorMessage(
-        error,
-        '加载审批策略详情失败，请稍后重试。',
-        '当前账号没有查看审批策略详情的权限。'
-      )
-      throw error
-    } finally {
-      loadingStates.approvalPolicy = false
-    }
-  }
-
-  async function saveApprovalPolicy() {
-    submittingStates.approvalPolicy = true
-    actionErrors.approvalPolicy = ''
-
-    try {
+  const approvalPolicyCrud = useDialogCrud({
+    domain: 'approvalPolicy',
+    states: { loadingStates, dialogStates, dialogModes, submittingStates, actionErrors },
+    current: currentApprovalPolicy,
+    messages: CONFIG_STORE_MESSAGES.approvalPolicy,
+    createEmptyForm: createEmptyApprovalPolicyForm,
+    toForm: toApprovalPolicyForm,
+    loadDetail: configService.getApprovalPolicy,
+    saveForm: async (form, mode) => {
       const payload = {
-        ...currentApprovalPolicy.value,
-        name: currentApprovalPolicy.value.name.trim(),
-        description: currentApprovalPolicy.value.description.trim(),
-        targetName: currentApprovalPolicy.value.targetName.trim(),
-        toolNames: normalizeToolNames(currentApprovalPolicy.value.toolNames)
+        ...form,
+        name: form.name.trim(),
+        description: form.description.trim(),
+        targetName: form.targetName.trim(),
+        toolNames: normalizeToolNames(form.toolNames)
       }
 
-      if (dialogModes.approvalPolicy === 'create') {
+      if (mode === 'create') {
         await configService.createApprovalPolicy(payload)
       } else {
         await configService.updateApprovalPolicy(payload)
       }
-
-      await refreshApprovalPolicies()
-      closeApprovalPolicyDialog()
-    } catch (error) {
-      actionErrors.approvalPolicy = toErrorMessage(
-        error,
-        '保存审批策略失败，请稍后重试。',
-        '当前账号没有管理审批策略的权限。'
-      )
-      throw error
-    } finally {
-      submittingStates.approvalPolicy = false
-    }
-  }
-
-  async function deleteApprovalPolicy(id: string) {
-    actionErrors.approvalPolicy = ''
-
-    try {
+    },
+    deleteItem: async (id) => {
       await configService.deleteApprovalPolicy(id)
-      await refreshApprovalPolicies()
-    } catch (error) {
-      actionErrors.approvalPolicy = toErrorMessage(
-        error,
-        '删除审批策略失败，请稍后重试。',
-        '当前账号没有删除审批策略的权限。'
-      )
-      throw error
-    }
-  }
+    },
+    afterSave: refreshApprovalPolicies,
+    afterDelete: refreshApprovalPolicies
+  })
 
-  function closeBusinessDatabaseDialog() {
-    dialogStates.businessDatabase = false
-    dialogModes.businessDatabase = 'create'
-    actionErrors.businessDatabase = ''
-    currentBusinessDatabase.value = createEmptyBusinessDatabaseForm()
-    currentBusinessDatabaseProviderSnapshot.value = 1
-  }
-
-  function openCreateBusinessDatabaseDialog() {
-    actionErrors.businessDatabase = ''
-    dialogModes.businessDatabase = 'create'
-    currentBusinessDatabase.value = createEmptyBusinessDatabaseForm()
-    currentBusinessDatabaseProviderSnapshot.value = 1
-    dialogStates.businessDatabase = true
-  }
-
-  async function openEditBusinessDatabaseDialog(id: string) {
-    loadingStates.businessDatabase = true
-    actionErrors.businessDatabase = ''
-
-    try {
-      const detail = await configService.getBusinessDatabase(id)
-      currentBusinessDatabase.value = toBusinessDatabaseForm(detail)
-      currentBusinessDatabaseProviderSnapshot.value = detail.provider
-      dialogModes.businessDatabase = 'edit'
-      dialogStates.businessDatabase = true
-    } catch (error) {
-      actionErrors.businessDatabase = toErrorMessage(
-        error,
-        '加载业务库详情失败，请稍后重试。',
-        '当前账号没有查看业务库详情的权限。'
-      )
-      throw error
-    } finally {
-      loadingStates.businessDatabase = false
-    }
-  }
-
-  async function saveBusinessDatabase() {
-    submittingStates.businessDatabase = true
-    actionErrors.businessDatabase = ''
-
-    try {
-      const connectionString = currentBusinessDatabase.value.connectionString.trim()
-      const isEditing = dialogModes.businessDatabase === 'edit'
+  const businessDatabaseCrud = useDialogCrud({
+    domain: 'businessDatabase',
+    states: { loadingStates, dialogStates, dialogModes, submittingStates, actionErrors },
+    current: currentBusinessDatabase,
+    messages: CONFIG_STORE_MESSAGES.businessDatabase,
+    createEmptyForm: createEmptyBusinessDatabaseForm,
+    toForm: toBusinessDatabaseForm,
+    loadDetail: configService.getBusinessDatabase,
+    saveForm: async (form, mode) => {
+      const connectionString = form.connectionString.trim()
       const provider =
-        isEditing && connectionString.length === 0
+        mode === 'edit' && connectionString.length === 0
           ? currentBusinessDatabaseProviderSnapshot.value
-          : currentBusinessDatabase.value.provider
-
+          : form.provider
       const payload = {
-        ...currentBusinessDatabase.value,
-        name: currentBusinessDatabase.value.name.trim(),
-        description: currentBusinessDatabase.value.description.trim(),
+        ...form,
+        name: form.name.trim(),
+        description: form.description.trim(),
         connectionString,
         provider,
         isReadOnly: true,
-        externalSystemType: currentBusinessDatabase.value.externalSystemType,
-        readOnlyCredentialVerified: currentBusinessDatabase.value.readOnlyCredentialVerified
+        externalSystemType: form.externalSystemType,
+        readOnlyCredentialVerified: form.readOnlyCredentialVerified
       }
 
-      if (dialogModes.businessDatabase === 'create') {
+      if (mode === 'create') {
         await configService.createBusinessDatabase(payload)
       } else {
         await configService.updateBusinessDatabase(payload)
       }
-
-      await refreshBusinessDatabases()
-      await refreshSemanticSourceStatuses()
-      closeBusinessDatabaseDialog()
-    } catch (error) {
-      actionErrors.businessDatabase = toErrorMessage(
-        error,
-        '保存业务库失败，请稍后重试。',
-        '当前账号没有管理业务库的权限。'
-      )
-      throw error
-    } finally {
-      submittingStates.businessDatabase = false
-    }
-  }
-
-  async function deleteBusinessDatabase(id: string) {
-    actionErrors.businessDatabase = ''
-
-    try {
+    },
+    deleteItem: async (id) => {
       await configService.deleteBusinessDatabase(id)
+    },
+    afterClose: () => {
+      currentBusinessDatabaseProviderSnapshot.value = FORM_DEFAULTS.businessDatabase.provider
+    },
+    afterOpenCreate: () => {
+      currentBusinessDatabaseProviderSnapshot.value = FORM_DEFAULTS.businessDatabase.provider
+    },
+    afterOpenEdit: (detail) => {
+      currentBusinessDatabaseProviderSnapshot.value = detail.provider
+    },
+    afterSave: async () => {
       await refreshBusinessDatabases()
       await refreshSemanticSourceStatuses()
-    } catch (error) {
-      actionErrors.businessDatabase = toErrorMessage(
-        error,
-        '删除业务库失败，请稍后重试。',
-        '当前账号没有删除业务库的权限。'
-      )
-      throw error
+    },
+    afterDelete: async () => {
+      await refreshBusinessDatabases()
+      await refreshSemanticSourceStatuses()
     }
-  }
+  })
 
-  function closeMcpServerDialog() {
-    dialogStates.mcpServer = false
-    dialogModes.mcpServer = 'create'
-    actionErrors.mcpServer = ''
-    currentMcpServer.value = createEmptyMcpServerForm()
-  }
-
-  function openCreateMcpServerDialog() {
-    actionErrors.mcpServer = ''
-    dialogModes.mcpServer = 'create'
-    currentMcpServer.value = createEmptyMcpServerForm()
-    dialogStates.mcpServer = true
-  }
-
-  async function openEditMcpServerDialog(id: string) {
-    loadingStates.mcpServer = true
-    actionErrors.mcpServer = ''
-
-    try {
-      const detail = await configService.getMcpServer(id)
-      currentMcpServer.value = toMcpServerForm(detail)
-      dialogModes.mcpServer = 'edit'
-      dialogStates.mcpServer = true
-    } catch (error) {
-      actionErrors.mcpServer = toErrorMessage(
-        error,
-        '加载 MCP 服务详情失败，请稍后重试。',
-        '当前账号没有查看 MCP 服务详情的权限。'
-      )
-      throw error
-    } finally {
-      loadingStates.mcpServer = false
-    }
-  }
-
-  async function saveMcpServer() {
-    submittingStates.mcpServer = true
-    actionErrors.mcpServer = ''
-
-    try {
+  const mcpServerCrud = useDialogCrud({
+    domain: 'mcpServer',
+    states: { loadingStates, dialogStates, dialogModes, submittingStates, actionErrors },
+    current: currentMcpServer,
+    messages: CONFIG_STORE_MESSAGES.mcpServer,
+    createEmptyForm: createEmptyMcpServerForm,
+    toForm: toMcpServerForm,
+    loadDetail: configService.getMcpServer,
+    saveForm: async (form, mode) => {
       const payload = {
-        ...currentMcpServer.value,
-        name: currentMcpServer.value.name.trim(),
-        description: currentMcpServer.value.description.trim(),
-        command:
-          currentMcpServer.value.transportType === 1
-            ? currentMcpServer.value.command.trim()
-            : '',
-        arguments: currentMcpServer.value.arguments.trim(),
-        allowedTools: normalizeMcpAllowedTools(currentMcpServer.value.allowedTools)
+        ...form,
+        name: form.name.trim(),
+        description: form.description.trim(),
+        command: form.transportType === FORM_DEFAULTS.mcpServer.transportType ? form.command.trim() : '',
+        arguments: form.arguments.trim(),
+        allowedTools: normalizeMcpAllowedTools(form.allowedTools)
       }
 
-      if (dialogModes.mcpServer === 'create') {
+      if (mode === 'create') {
         await configService.createMcpServer(payload)
       } else {
         await configService.updateMcpServer(payload)
       }
-
-      await refreshMcpServers()
-      closeMcpServerDialog()
-    } catch (error) {
-      actionErrors.mcpServer = toErrorMessage(
-        error,
-        '保存 MCP 服务失败，请稍后重试。',
-        '当前账号没有管理 MCP 服务的权限。'
-      )
-      throw error
-    } finally {
-      submittingStates.mcpServer = false
-    }
-  }
-
-  async function deleteMcpServer(id: string) {
-    actionErrors.mcpServer = ''
-
-    try {
+    },
+    deleteItem: async (id) => {
       await configService.deleteMcpServer(id)
-      await refreshMcpServers()
-    } catch (error) {
-      actionErrors.mcpServer = toErrorMessage(
-        error,
-        '删除 MCP 服务失败，请稍后重试。',
-        '当前账号没有删除 MCP 服务的权限。'
-      )
-      throw error
-    }
-  }
+    },
+    afterSave: refreshMcpServers,
+    afterDelete: refreshMcpServers
+  })
+
+  const closeLanguageModelDialog = languageModelCrud.closeDialog
+  const openCreateLanguageModelDialog = languageModelCrud.openCreateDialog
+  const openEditLanguageModelDialog = languageModelCrud.openEditDialog
+  const saveLanguageModel = languageModelCrud.saveDialog
+  const deleteLanguageModel = languageModelCrud.deleteDialog
+
+  const closeConversationTemplateDialog = conversationTemplateCrud.closeDialog
+  const openCreateConversationTemplateDialog = conversationTemplateCrud.openCreateDialog
+  const openEditConversationTemplateDialog = conversationTemplateCrud.openEditDialog
+  const saveConversationTemplate = conversationTemplateCrud.saveDialog
+  const deleteConversationTemplate = conversationTemplateCrud.deleteDialog
+
+  const closeApprovalPolicyDialog = approvalPolicyCrud.closeDialog
+  const openCreateApprovalPolicyDialog = approvalPolicyCrud.openCreateDialog
+  const openEditApprovalPolicyDialog = approvalPolicyCrud.openEditDialog
+  const saveApprovalPolicy = approvalPolicyCrud.saveDialog
+  const deleteApprovalPolicy = approvalPolicyCrud.deleteDialog
+
+  const closeBusinessDatabaseDialog = businessDatabaseCrud.closeDialog
+  const openCreateBusinessDatabaseDialog = businessDatabaseCrud.openCreateDialog
+  const openEditBusinessDatabaseDialog = businessDatabaseCrud.openEditDialog
+  const saveBusinessDatabase = businessDatabaseCrud.saveDialog
+  const deleteBusinessDatabase = businessDatabaseCrud.deleteDialog
+
+  const closeMcpServerDialog = mcpServerCrud.closeDialog
+  const openCreateMcpServerDialog = mcpServerCrud.openCreateDialog
+  const openEditMcpServerDialog = mcpServerCrud.openEditDialog
+  const saveMcpServer = mcpServerCrud.saveDialog
+  const deleteMcpServer = mcpServerCrud.deleteDialog
 
   return {
     languageModels,

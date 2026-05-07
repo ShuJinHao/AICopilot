@@ -197,6 +197,33 @@ public sealed class SecurityHardeningTests
             "src",
             "views",
             "ConfigView.vue"));
+        var providerReliabilityConfigSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "vues",
+            "AICopilot.Web",
+            "src",
+            "views",
+            "config",
+            "ProviderReliabilityConfig.vue"));
+        var businessDatabaseConfigSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "vues",
+            "AICopilot.Web",
+            "src",
+            "views",
+            "config",
+            "BusinessDatabaseConfig.vue"));
+        var mcpConfigSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "vues",
+            "AICopilot.Web",
+            "src",
+            "views",
+            "config",
+            "McpServerConfig.vue"));
         var configStoreSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
@@ -205,6 +232,22 @@ public sealed class SecurityHardeningTests
             "src",
             "stores",
             "configStore.ts"));
+        var configLabelsSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "vues",
+            "AICopilot.Web",
+            "src",
+            "views",
+            "configLabels.ts"));
+        var dialogCrudSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "vues",
+            "AICopilot.Web",
+            "src",
+            "stores",
+            "useDialogCrud.ts"));
         var configServiceSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
@@ -231,17 +274,20 @@ public sealed class SecurityHardeningTests
         configStoreSource.Should().Contain("mcpServers");
         configStoreSource.Should().Contain("currentMcpServer");
         configStoreSource.Should().Contain("normalizeToolNames");
-        configStoreSource.Should().Contain("getProblemDetails");
-        configViewSource.Should().Contain("MCP 配置由启动期 bootstrap 读取");
-        configViewSource.Should().Contain("重启服务");
-        configViewSource.Should().Contain("toolPolicySummaries");
-        configViewSource.Should().Contain("留空表示保留已保存参数");
-        configViewSource.Should().Contain("SQL 安全拒绝");
-        configViewSource.Should().Contain("结果截断");
-        configViewSource.Should().Contain("配置管理台保存时始终强制只读");
-        configViewSource.Should().Contain("高风险链路固定不 fallback");
-        configViewSource.Should().Contain("DataAnalysis SQL tool chain");
-        configViewSource.Should().Contain("Provider 可靠性");
+        configStoreSource.Should().Contain("CONFIG_STORE_MESSAGES");
+        dialogCrudSource.Should().Contain("getProblemDetails");
+        configViewSource.Should().Contain("McpServerConfig");
+        mcpConfigSource.Should().Contain("MCP 配置由启动期 bootstrap 读取");
+        mcpConfigSource.Should().Contain("重启服务");
+        mcpConfigSource.Should().Contain("toolPolicySummaries");
+        mcpConfigSource.Should().Contain("留空表示保留已保存参数");
+        businessDatabaseConfigSource.Should().Contain("SQL 安全拒绝");
+        businessDatabaseConfigSource.Should().Contain("结果截断");
+        businessDatabaseConfigSource.Should().Contain("配置管理台保存时始终强制只读");
+        providerReliabilityConfigSource.Should().Contain("高风险链路固定不回退");
+        providerReliabilityConfigSource.Should().Contain("数据分析 SQL 工具链");
+        providerReliabilityConfigSource.Should().Contain("服务商可靠性");
+        configLabelsSource.Should().Contain("DataAnalysisSqlToolChain");
     }
 
     [Fact]
@@ -266,7 +312,11 @@ public sealed class SecurityHardeningTests
         var apiClientSource = File.ReadAllText(Path.Combine(vueRoot, "services", "apiClient.ts"));
         var ragServiceSource = File.ReadAllText(Path.Combine(vueRoot, "services", "ragService.ts"));
         var ragStoreSource = File.ReadAllText(Path.Combine(vueRoot, "stores", "ragStore.ts"));
+        var ragFormFactorySource = File.ReadAllText(Path.Combine(vueRoot, "stores", "ragFormFactories.ts"));
         var knowledgeViewSource = File.ReadAllText(Path.Combine(vueRoot, "views", "KnowledgeView.vue"));
+        var knowledgeBaseManagementSource = File.ReadAllText(Path.Combine(vueRoot, "views", "knowledge", "KnowledgeBaseManagement.vue"));
+        var knowledgeSearchPanelSource = File.ReadAllText(Path.Combine(vueRoot, "views", "knowledge", "KnowledgeSearchPanel.vue"));
+        var knowledgeLabelsSource = File.ReadAllText(Path.Combine(vueRoot, "views", "knowledgeLabels.ts"));
         var permissionCatalogSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
@@ -296,15 +346,19 @@ public sealed class SecurityHardeningTests
         ragServiceSource.Should().Contain("/rag/document");
         ragServiceSource.Should().Contain("/rag/document/governance");
         ragServiceSource.Should().Contain("postForm<UploadDocumentResponse>");
-        ragStoreSource.Should().Contain("apiKeyAction");
+        ragFormFactorySource.Should().Contain("apiKeyAction");
+        ragStoreSource.Should().Contain("form.apiKey.trim()");
         ragStoreSource.Should().Contain("uploadDocument(file: File)");
         ragStoreSource.Should().Contain("saveDocumentGovernance");
-        knowledgeViewSource.Should().Contain("Pending");
-        knowledgeViewSource.Should().Contain("Embedding");
-        knowledgeViewSource.Should().Contain("Indexed");
-        knowledgeViewSource.Should().Contain("Failed");
-        knowledgeViewSource.Should().Contain("KNOWLEDGE_WRITE_PERMISSIONS.search");
-        knowledgeViewSource.Should().Contain("KNOWLEDGE_WRITE_PERMISSIONS.document.governance");
+        knowledgeViewSource.Should().Contain("KnowledgeBaseManagement");
+        knowledgeBaseManagementSource.Should().Contain("documentStatusLabel");
+        knowledgeBaseManagementSource.Should().Contain("documentStatusType");
+        knowledgeLabelsSource.Should().Contain("Pending");
+        knowledgeLabelsSource.Should().Contain("Embedding");
+        knowledgeLabelsSource.Should().Contain("Indexed");
+        knowledgeLabelsSource.Should().Contain("Failed");
+        knowledgeSearchPanelSource.Should().Contain("KNOWLEDGE_WRITE_PERMISSIONS.search");
+        knowledgeBaseManagementSource.Should().Contain("KNOWLEDGE_WRITE_PERMISSIONS.document.governance");
         permissionCatalogSource.Should().Contain("Rag.SearchKnowledgeBase");
         permissionCatalogSource.Should().Contain("Rag.UpdateDocumentGovernance");
         embeddingManagementSource.Should().Contain("request.ApiKey ?? entity.ApiKey");
@@ -771,6 +825,7 @@ public sealed class SecurityHardeningTests
         var solutionRoot = FindSolutionRoot();
         var allowedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
+            "src/services/AICopilot.AiGatewayService/Workflows/Executors/DataAnalysisAuditRecorder.cs",
             "src/services/AICopilot.AiGatewayService/Workflows/Executors/DataAnalysisExecutor.cs",
             "src/services/AICopilot.AiGatewayService/Workflows/Executors/FinalAgentRunExecutor.cs",
             "src/services/AICopilot.DataAnalysisService/BusinessDatabases/BusinessDatabaseManagement.cs",

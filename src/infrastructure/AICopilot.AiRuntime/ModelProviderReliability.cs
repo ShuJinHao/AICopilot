@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using AICopilot.Services.Contracts;
 using Microsoft.Extensions.Options;
 
@@ -106,7 +107,7 @@ internal sealed class InMemoryModelCircuitBreaker : IModelCircuitBreaker
 {
     private readonly IOptions<ModelProviderReliabilityOptions> options;
     private readonly Func<DateTimeOffset> utcNow;
-    private readonly Dictionary<string, ProviderCircuitState> providerStates = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ProviderCircuitState> providerStates = new(StringComparer.OrdinalIgnoreCase);
 
     public InMemoryModelCircuitBreaker(IOptions<ModelProviderReliabilityOptions> options)
         : this(options, () => DateTimeOffset.UtcNow)
@@ -133,7 +134,7 @@ internal sealed class InMemoryModelCircuitBreaker : IModelCircuitBreaker
 
     public void RecordSuccess(string providerName)
     {
-        providerStates.Remove(providerName);
+        providerStates.TryRemove(providerName, out _);
     }
 
     public void RecordFailure(string providerName, Exception exception)
@@ -146,10 +147,15 @@ internal sealed class InMemoryModelCircuitBreaker : IModelCircuitBreaker
         var currentOptions = options.Value;
         var threshold = Math.Max(1, currentOptions.CircuitBreakerFailureThreshold);
         var openSeconds = Math.Max(1, currentOptions.CircuitBreakerOpenSeconds);
-        var previousFailures = providerStates.TryGetValue(providerName, out var state) ? state.FailureCount : 0;
-        var failureCount = previousFailures + 1;
+        providerStates.AddOrUpdate(
+            providerName,
+            _ => CreateFailureState(1, threshold, openSeconds),
+            (_, state) => CreateFailureState(state.FailureCount + 1, threshold, openSeconds));
+    }
 
-        providerStates[providerName] = failureCount >= threshold
+    private ProviderCircuitState CreateFailureState(int failureCount, int threshold, int openSeconds)
+    {
+        return failureCount >= threshold
             ? new ProviderCircuitState(failureCount, utcNow().AddSeconds(openSeconds))
             : new ProviderCircuitState(failureCount, null);
     }
