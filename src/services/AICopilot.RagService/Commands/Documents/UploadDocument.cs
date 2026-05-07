@@ -19,7 +19,16 @@ public record FileUploadStream(string FileName, Stream Stream);
 [AuthorizeRequirement("Rag.UploadDocument")]
 public record UploadDocumentCommand(
     Guid KnowledgeBaseId,
-    FileUploadStream File) : ICommand<Result<UploadDocumentDto>>;
+    FileUploadStream File,
+    string? Classification = null,
+    string? SourceType = null,
+    bool IsSanitized = false,
+    string? ReviewedBy = null,
+    DateTime? ReviewedAt = null,
+    DateTime? EffectiveFrom = null,
+    DateTime? EffectiveTo = null,
+    bool AllowedForFinalPrompt = true,
+    string? BlockedReason = null) : ICommand<Result<UploadDocumentDto>>;
 
 public class UploadDocumentCommandHandler(
     IRepository<KnowledgeBase> kbRepo,
@@ -40,6 +49,16 @@ public class UploadDocumentCommandHandler(
             cancellationToken);
 
         if (kb == null) return Result.NotFound("知识库不存在");
+
+        if (!TryParseEnum(request.Classification, DocumentClassification.Internal, out var classification))
+        {
+            return Result.Invalid("Invalid document classification.");
+        }
+
+        if (!TryParseEnum(request.SourceType, DocumentSourceType.UserUploaded, out var sourceType))
+        {
+            return Result.Invalid("Invalid document source type.");
+        }
 
         var extension = Path.GetExtension(request.File.FileName).ToLowerInvariant();
         if (!documentFormatPolicy.IsSupported(extension))
@@ -77,7 +96,20 @@ public class UploadDocumentCommandHandler(
 
         // 5. 领域模型行为：添加文档
         // 这一步是纯内存操作，修改了聚合根的状态
-        var document = kb.AddDocument(request.File.FileName, savedPath, extension, fileHash);
+        var document = kb.AddDocument(
+            request.File.FileName,
+            savedPath,
+            extension,
+            fileHash,
+            classification,
+            sourceType,
+            request.IsSanitized,
+            request.ReviewedBy,
+            request.ReviewedAt,
+            request.EffectiveFrom,
+            request.EffectiveTo,
+            request.AllowedForFinalPrompt,
+            request.BlockedReason);
 
         // 6. 持久化到数据库
         await kbRepo.SaveChangesAsync(cancellationToken);
@@ -92,5 +124,17 @@ public class UploadDocumentCommandHandler(
         }, cancellationToken);
 
         return Result.Success(new UploadDocumentDto(document.Id, document.Status.ToString()));
+    }
+
+    private static bool TryParseEnum<TEnum>(string? value, TEnum defaultValue, out TEnum parsed)
+        where TEnum : struct, Enum
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            parsed = defaultValue;
+            return true;
+        }
+
+        return Enum.TryParse(value, ignoreCase: true, out parsed) && Enum.IsDefined(typeof(TEnum), parsed);
     }
 }

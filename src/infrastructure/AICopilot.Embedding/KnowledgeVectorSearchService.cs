@@ -36,6 +36,9 @@ public sealed class KnowledgeVectorSearchService(
             cancellationToken: cancellationToken);
 
         var results = new List<KnowledgeVectorSearchResult>();
+        var finalPromptDocuments = knowledgeBase.Documents
+            .Where(document => document.CanEnterFinalPrompt(DateTime.UtcNow))
+            .ToDictionary(document => document.Id.Value);
 
         await foreach (var record in searchResults)
         {
@@ -44,11 +47,17 @@ public sealed class KnowledgeVectorSearchService(
                 continue;
             }
 
+            if (!int.TryParse(record.Record.DocumentId, out var documentId) ||
+                !finalPromptDocuments.TryGetValue(documentId, out var document))
+            {
+                continue;
+            }
+
             results.Add(new KnowledgeVectorSearchResult(
                 record.Record.Text,
                 record.Score.Value,
-                int.Parse(record.Record.DocumentId),
-                record.Record.DocumentName,
+                document.Id.Value,
+                document.Name,
                 record.Record.ChunkIndex));
         }
 

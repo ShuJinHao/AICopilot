@@ -1,4 +1,4 @@
-﻿using AICopilot.HttpApi.Infrastructure;
+using AICopilot.HttpApi.Infrastructure;
 using AICopilot.RagService.Commands.Documents;
 using AICopilot.RagService.Commands.KnowledgeBases;
 using AICopilot.RagService.Documents;
@@ -79,7 +79,13 @@ public class RagController(ISender sender) : ApiControllerBase(sender)
     [HttpPost("document")]
     [RequestSizeLimit(MaxDocumentUploadBytes)]
     [RequestFormLimits(MultipartBodyLengthLimit = MaxDocumentUploadBytes)]
-    public async Task<IActionResult> UploadDocument([FromForm] Guid knowledgeBaseId, IFormFile? file)
+    public async Task<IActionResult> UploadDocument(
+        [FromForm] Guid knowledgeBaseId,
+        IFormFile? file,
+        [FromForm] string? classification = null,
+        [FromForm] string? sourceType = null,
+        [FromForm] bool? isSanitized = null,
+        [FromForm] bool? allowedForFinalPrompt = null)
     {
         if (file is null || file.Length == 0)
         {
@@ -92,7 +98,14 @@ public class RagController(ISender sender) : ApiControllerBase(sender)
         }
 
         await using var stream = file.OpenReadStream();
-        var command = new UploadDocumentCommand(knowledgeBaseId, new FileUploadStream(file.FileName, stream));
+        var command = new UploadDocumentCommand(
+            knowledgeBaseId,
+            new FileUploadStream(file.FileName, stream),
+            classification,
+            sourceType,
+            isSanitized ?? false,
+            AllowedForFinalPrompt: allowedForFinalPrompt ?? true);
+
         return ReturnResult(await Sender.Send(command));
     }
 
