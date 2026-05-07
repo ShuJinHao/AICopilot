@@ -39,6 +39,7 @@
   </Folder>
   <Folder Name="/src/tests/">
     <Project Path="src/tests/AICopilot.ArchitectureTests/AICopilot.ArchitectureTests.csproj" />
+    <Project Path="src/tests/AICopilot.AiEvalTests/AICopilot.AiEvalTests.csproj" />
     <Project Path="src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj" />
     <Project Path="src/tests/AICopilot.Testing.McpServer/AICopilot.Testing.McpServer.csproj" />
   </Folder>

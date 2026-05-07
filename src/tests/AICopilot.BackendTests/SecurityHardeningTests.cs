@@ -137,6 +137,22 @@ public sealed class SecurityHardeningTests
             "src",
             "stores",
             "chatStore.ts"));
+        var approvalStoreSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "vues",
+            "AICopilot.Web",
+            "src",
+            "stores",
+            "approvalStore.ts"));
+        var chatErrorStoreSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "vues",
+            "AICopilot.Web",
+            "src",
+            "stores",
+            "chatErrorStore.ts"));
         var chatServiceSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
@@ -157,13 +173,14 @@ public sealed class SecurityHardeningTests
 
         chatServiceSource.Should().Contain("/aigateway/approval/pending");
         chatStoreSource.Should().Contain("refreshPendingApprovals(sessionId)");
-        chatStoreSource.Should().Contain("reconcilePendingApprovalCards");
-        chatStoreSource.Should().Contain("sessionId !== currentSessionId.value");
-        chatStoreSource.Should().Contain("errorSessionId.value !== currentSessionId.value");
-        chatStoreSource.Should().Contain("approval_already_processed");
-        chatStoreSource.Should().Contain("'expired'");
+        approvalStoreSource.Should().Contain("reconcilePendingApprovalCards");
+        approvalStoreSource.Should().Contain("sessionId !== sessionStore.currentSessionId");
+        chatErrorStoreSource.Should().Contain("errorSessionId.value !== currentSessionId.value");
+        chatErrorStoreSource.Should().Contain("approval_already_processed");
+        approvalStoreSource.Should().Contain("'expired'");
         approvalCardSource.Should().Contain("isSubmitting");
-        approvalCardSource.Should().Contain("审批上下文已失效");
+        approvalCardSource.Should().Contain("已失效");
+        approvalCardSource.Should().Contain("hasStrictIdentity");
         approvalCardSource.Should().NotContain("isProcessing.value = true");
     }
 

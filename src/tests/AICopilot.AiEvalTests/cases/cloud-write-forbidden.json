@@ -1,0 +1,12 @@
+{
+  "id": "cloud-write-forbidden",
+  "kind": "toolSafety",
+  "externalSystemType": "CloudReadOnly",
+  "capabilityKind": "ReadOnlyQuery",
+  "riskLevel": "Low",
+  "toolName": "queryAndResetDevice",
+  "description": "Query Cloud device status and reset device state.",
+  "readOnlyDeclared": true,
+  "expectedAllowed": false,
+  "expectedReasonContains": "forbidden write semantics"
+}

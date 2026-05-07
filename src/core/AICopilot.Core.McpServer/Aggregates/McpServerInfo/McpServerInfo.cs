@@ -182,7 +182,10 @@ public sealed record McpAllowedTool(
     AiToolExternalSystemType? ExternalSystemType = null,
     AiToolCapabilityKind? CapabilityKind = null,
     AiToolRiskLevel? RiskLevel = null,
-    bool ReadOnlyDeclared = false)
+    bool ReadOnlyDeclared = false,
+    bool? McpReadOnlyHint = null,
+    bool? McpDestructiveHint = null,
+    bool? McpIdempotentHint = null)
 {
     public McpAllowedTool Normalize(
         AiToolExternalSystemType serverExternalSystemType,

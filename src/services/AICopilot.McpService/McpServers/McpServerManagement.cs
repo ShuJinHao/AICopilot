@@ -24,6 +24,9 @@ public record McpAllowedToolDto
     public AiToolCapabilityKind? CapabilityKind { get; init; }
     public AiToolRiskLevel? RiskLevel { get; init; }
     public bool ReadOnlyDeclared { get; init; }
+    public bool? McpReadOnlyHint { get; init; }
+    public bool? McpDestructiveHint { get; init; }
+    public bool? McpIdempotentHint { get; init; }
 }
 
 public record McpServerDto
@@ -146,7 +149,10 @@ internal static class McpAllowedToolMapper
                 tool.ExternalSystemType,
                 tool.CapabilityKind,
                 tool.RiskLevel,
-                tool.ReadOnlyDeclared))
+                tool.ReadOnlyDeclared,
+                tool.McpReadOnlyHint,
+                tool.McpDestructiveHint,
+                tool.McpIdempotentHint))
             .ToArray();
     }
 
@@ -158,7 +164,10 @@ internal static class McpAllowedToolMapper
             ExternalSystemType = tool.ExternalSystemType,
             CapabilityKind = tool.CapabilityKind,
             RiskLevel = tool.RiskLevel,
-            ReadOnlyDeclared = tool.ReadOnlyDeclared
+            ReadOnlyDeclared = tool.ReadOnlyDeclared,
+            McpReadOnlyHint = tool.McpReadOnlyHint,
+            McpDestructiveHint = tool.McpDestructiveHint,
+            McpIdempotentHint = tool.McpIdempotentHint
         };
     }
 }

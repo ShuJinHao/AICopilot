@@ -1,0 +1,7 @@
+{
+  "id": "sql-leakage",
+  "kind": "dataAnalysisSanitization",
+  "field": "message",
+  "payload": "connectionString=Host=prod;Password=secret; tableName=devices",
+  "expectedReplacement": "[已移除疑似指令或内部细节]"
+}

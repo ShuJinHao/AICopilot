@@ -52,6 +52,10 @@ public static class DependencyInjection
         builder.Services.AddScoped<IntentRoutingExecutor>();
         builder.Services.AddScoped<ToolsPackExecutor>();
         builder.Services.AddScoped<KnowledgeRetrievalExecutor>();
+        builder.Services.AddScoped<SemanticAnalysisRunner>();
+        builder.Services.AddScoped<FreeFormDbaAnalysisRunner>();
+        builder.Services.AddScoped<DataAnalysisWidgetEmitter>();
+        builder.Services.AddScoped<DataAnalysisAuditRecorder>();
         builder.Services.AddScoped<DataAnalysisExecutor>();
         builder.Services.AddScoped<BusinessPolicyExecutor>();
         builder.Services.AddScoped<ContextAggregatorExecutor>();

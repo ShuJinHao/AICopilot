@@ -225,6 +225,9 @@ export interface McpAllowedTool {
   capabilityKind?: number | null
   riskLevel?: number | null
   readOnlyDeclared: boolean
+  mcpReadOnlyHint?: boolean | null
+  mcpDestructiveHint?: boolean | null
+  mcpIdempotentHint?: boolean | null
 }
 
 export interface McpServerSummary {
