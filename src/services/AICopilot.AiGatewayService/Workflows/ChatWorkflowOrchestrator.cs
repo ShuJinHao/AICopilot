@@ -42,11 +42,7 @@ public class ChatWorkflowOrchestrator(
         };
 
         var allBranchesTask = Task.WhenAll(branchTasks);
-        _ = allBranchesTask.ContinueWith(
-            task => sink.Complete(task.Exception),
-            CancellationToken.None,
-            TaskContinuationOptions.ExecuteSynchronously,
-            TaskScheduler.Default);
+        _ = CompleteSinkWhenBranchesFinishAsync(allBranchesTask, sink);
 
         await foreach (var chunk in sink.ReadAllAsync(ct))
         {
@@ -107,6 +103,19 @@ public class ChatWorkflowOrchestrator(
             {
                 await finalAgentContextStore.RemoveAsync(agentContext.SessionId, CancellationToken.None);
             }
+        }
+    }
+
+    private static async Task CompleteSinkWhenBranchesFinishAsync(Task branchTask, ChatWorkflowSink sink)
+    {
+        try
+        {
+            await branchTask.ConfigureAwait(false);
+            sink.Complete();
+        }
+        catch (Exception ex)
+        {
+            sink.Complete(ex);
         }
     }
 }
