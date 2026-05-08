@@ -4,7 +4,7 @@ Date: 2026-05-08
 
 Scope: AICopilot backend and AICopilot review records only. Cloud and Edge are out of scope.
 
-This document closes the runtime safety and migration follow-up ledger after PR #27, PR #28, and PR #29. The original Claude review remains an input, not the source of truth. Each item below is judged against the current `main` source and tests.
+This document closes the runtime safety, migration, session semantics, and audit transaction follow-up ledger after PR #27, PR #28, PR #29, and PR #31. The original Claude review remains an input, not the source of truth. Each item below is judged against the current `main` source and tests.
 
 ## Closure Matrix
 
@@ -23,6 +23,7 @@ This document closes the runtime safety and migration follow-up ledger after PR 
 | Multi-DbContext migration history split | Closed by PR #28 | `MigrationHistoryTables`; `MigrationSafetyTests`; migration worker wiring | Split migration history tables are covered for fresh and legacy-bootstrap paths. |
 | Approval policy and template/model long-session semantics | Closed by PR #29 | `SessionPolicySemanticsTests`; `ApprovalToolResolver`; `ApprovalDecisionValidator`; `FinalAgentContextSerializer`; `FinalAgentBuildExecutor` | Safety controls use current configuration. Existing sessions keep `session.TemplateId` but resolve the current template/model configuration; no snapshot schema was added. |
 | Final agent context multi-instance storage | Closed for Redis-backed deployment baseline | `FinalAgentContextDeploymentTests`; `AcceptanceClosureVerificationTests.RedisFinalAgentContextStore_ShouldShareContextAcrossStoreInstances` | Distributed deployment requires Redis-backed context storage. Broader message/context transaction design remains separate backlog. |
+| Cross-DbContext audit atomicity outside Identity | Closed by PR #31 | `AuditTransactionCoordinator`; `AuditTransactionBoundaryTests`; `SecurityHardeningTests` | Non-Identity business/config repositories commit business changes and staged audit rows in one EF transaction; audit save failure rolls back business changes. |
 
 ## Remaining Non-Runtime Items
 
@@ -30,7 +31,6 @@ The following items are intentionally not mixed into the runtime closure PRs:
 
 | Item | Status | Reason |
 | --- | --- | --- |
-| Cross-DbContext audit atomicity outside Identity | Remaining design backlog | Requires transaction-boundary design across command handlers and audit writes; no quick runtime patch should be made without a design pass. |
 | Bootstrap/admin secret operational discipline | Remaining ops backlog | Current code avoids hardcoded production secrets, but deployment secret rotation and bootstrap runbook hardening are operational follow-up work. |
 | API key in-memory zeroization | Deferred compliance backlog | Requires a broader secret-handling policy and may affect DTO/service contracts. |
 | Workflow Graph/Planner, long-term memory, Cloud write integrations | Deferred product scope | These remain out of scope unless explicitly approved. |
@@ -41,4 +41,5 @@ The following items are intentionally not mixed into the runtime closure PRs:
 - PR #27 closed MCP runtime reconciliation.
 - PR #28 closed migration ownership and migration history guardrails.
 - PR #29 closed approval/template long-session semantics.
+- PR #31 closed non-Identity business/config audit transaction atomicity.
 - Remaining items are now tracked in `REVIEW_REMAINING_MATRIX_2026-05-08.md` instead of being treated as open-ended verbal follow-up.

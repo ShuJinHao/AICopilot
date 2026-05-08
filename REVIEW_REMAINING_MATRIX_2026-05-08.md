@@ -2,7 +2,7 @@
 
 Date: 2026-05-08
 
-Baseline: `main` after PR #29 (`250940c`). This matrix reconciles the remaining follow-up items from `REVIEW_FOLLOWUP_2026-04-29.md` and `REVIEW_ACCEPTANCE_2026-05-07.md`.
+Baseline: `main` after PR #31 (`b8a49d9`). This matrix reconciles the remaining follow-up items from `REVIEW_FOLLOWUP_2026-04-29.md` and `REVIEW_ACCEPTANCE_2026-05-07.md`.
 
 Principle: review documents are inputs, not facts. Current source and tests decide whether an item is closed, still real, deferred, or not applicable.
 
@@ -39,7 +39,7 @@ Principle: review documents are inputs, not facts. Current source and tests deci
 | `REVIEW_FOLLOWUP_2026-04-29.md` P1 | Final agent context store multi-instance behavior | Closed for Redis deployment baseline | `FinalAgentContextDeploymentTests`; `AcceptanceClosureVerificationTests.RedisFinalAgentContextStore_ShouldShareContextAcrossStoreInstances` | Broader message/context transactional consistency remains a design item | No |
 | `REVIEW_FOLLOWUP_2026-04-29.md` P1 | Identity migration ownership | Closed | PR #28; `MigrationOwnershipTests`; split context snapshots | None | No |
 | `REVIEW_FOLLOWUP_2026-04-29.md` P1 | Multi-DbContext migration history split | Closed | PR #28; `MigrationSafetyTests`; `MigrationHistoryTables.MigratedContexts` | None | No |
-| `REVIEW_FOLLOWUP_2026-04-29.md` P1 | Cross-DbContext audit atomicity outside Identity | Remaining | Current closure docs intentionally keep this as design backlog | Create a focused audit transaction-boundary plan before code changes | Yes |
+| `REVIEW_FOLLOWUP_2026-04-29.md` P1 | Cross-DbContext audit atomicity outside Identity | Closed | PR #31; `AuditTransactionCoordinator`; `AuditTransactionBoundaryTests`; `SecurityHardeningTests` | None | No |
 | `REVIEW_FOLLOWUP_2026-04-29.md` P2 | Bootstrap/admin secret operational discipline | Remaining | Deployment/runbook concern; no runtime code change in this closure | Add deployment-secret checklist/tests if deployment templates change | Not next unless deployment work starts |
 | `REVIEW_FOLLOWUP_2026-04-29.md` P2 | API key in-memory zeroization | Deferred | Requires a broader secret-handling policy and may affect contracts | Track as compliance backlog | No |
 | `REVIEW_FOLLOWUP_2026-04-29.md` P2 | AST comment-bypass concern | Not applicable | Current guardrails strip or inspect comments before SQL execution paths | Revisit only if SQL parser/query builder is replaced | No |
@@ -53,10 +53,10 @@ Principle: review documents are inputs, not facts. Current source and tests deci
 
 ## Recommended Next Implementation Round
 
-Do not start another broad refactor from this ledger. The next real implementation item should be one of:
+Do not start another broad refactor from this ledger. There is no remaining high-risk Claude review item that should automatically start another implementation round. Future work should be driven by a new business, release, or compliance goal, such as:
 
-1. Audit transaction boundary design and tests for command handlers that write audit records outside the Identity flow.
-2. Final agent context/message consistency design if the product requires stronger guarantees than the current Redis-backed multi-instance baseline.
-3. Deployment-secret and operational hardening if the next workstream is release/deployment rather than runtime behavior.
+1. Final agent context/message consistency design if the product requires stronger guarantees than the current Redis-backed multi-instance baseline.
+2. Deployment-secret and operational hardening if the next workstream is release/deployment rather than runtime behavior.
+3. Feature backlog such as Workflow Graph/Planner, long-term memory, and Cloud write integrations, only after explicit product and cross-project approval.
 
 Feature backlog items such as Workflow Graph/Planner, long-term memory, and Cloud write integrations should remain deferred until they receive explicit product and cross-project approval.
