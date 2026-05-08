@@ -164,6 +164,54 @@ public sealed class MigrationSafetyTests(CoreAICopilotAppFixture fixture)
 
             (await CountMigrationRowsAsync(database.ConnectionString, historyTable, migrationId))
                 .Should().Be(1, $"{historyTable.ContextName} legacy history row must be copied exactly once");
+            (await CountMigrationRowsAsync(database.ConnectionString, historyTable))
+                .Should().Be(1, $"{historyTable.ContextName} split history table must not receive other context rows");
+        }
+    }
+
+    [Fact]
+    public async Task FreshDatabaseMigration_ShouldCreateEverySplitHistoryTable_WithRows()
+    {
+        await using var database = await ScratchDatabase.CreateAsync(await fixture.GetConnectionStringAsync());
+
+        await using var aiCopilotDbContext = new AiCopilotDbContext(
+            CreateOptions<AiCopilotDbContext>(database.ConnectionString, MigrationHistoryTables.AiCopilot));
+        await using var identityStoreDbContext = new IdentityStoreDbContext(
+            CreateOptions<IdentityStoreDbContext>(database.ConnectionString, MigrationHistoryTables.IdentityStore));
+        await using var aiGatewayDbContext = new AiGatewayDbContext(
+            CreateOptions<AiGatewayDbContext>(database.ConnectionString, MigrationHistoryTables.AiGateway));
+        await using var ragDbContext = new RagDbContext(
+            CreateOptions<RagDbContext>(database.ConnectionString, MigrationHistoryTables.Rag));
+        await using var dataAnalysisDbContext = new DataAnalysisDbContext(
+            CreateOptions<DataAnalysisDbContext>(database.ConnectionString, MigrationHistoryTables.DataAnalysis));
+        await using var mcpServerDbContext = new McpServerDbContext(
+            CreateOptions<McpServerDbContext>(database.ConnectionString, MigrationHistoryTables.McpServer));
+
+        var migrationContexts = new[]
+        {
+            new MigrationHistoryBootstrapper.MigrationContext(aiCopilotDbContext, MigrationHistoryTables.AiCopilot),
+            new MigrationHistoryBootstrapper.MigrationContext(identityStoreDbContext, MigrationHistoryTables.IdentityStore),
+            new MigrationHistoryBootstrapper.MigrationContext(aiGatewayDbContext, MigrationHistoryTables.AiGateway),
+            new MigrationHistoryBootstrapper.MigrationContext(ragDbContext, MigrationHistoryTables.Rag),
+            new MigrationHistoryBootstrapper.MigrationContext(dataAnalysisDbContext, MigrationHistoryTables.DataAnalysis),
+            new MigrationHistoryBootstrapper.MigrationContext(mcpServerDbContext, MigrationHistoryTables.McpServer)
+        };
+
+        await MigrationHistoryBootstrapper.BootstrapLegacyHistoryAsync(migrationContexts, CancellationToken.None);
+
+        foreach (var migrationContext in migrationContexts)
+        {
+            await migrationContext.DbContext.Database.MigrateAsync();
+        }
+
+        foreach (var historyTable in MigrationHistoryTables.MigratedContexts)
+        {
+            (await ExecuteScalarAsync(
+                database.ConnectionString,
+                $"SELECT to_regclass('{RegclassName(historyTable)}')::text"))
+                .Should().NotBeNull($"{historyTable.ContextName} split history table must exist after fresh migration");
+            (await CountMigrationRowsAsync(database.ConnectionString, historyTable))
+                .Should().BeGreaterThan(0, $"{historyTable.ContextName} split history table must record applied migrations");
         }
     }
 
@@ -291,6 +339,23 @@ public sealed class MigrationSafetyTests(CoreAICopilotAppFixture fixture)
         parameter.ParameterName = "migration_id";
         parameter.Value = migrationId;
         command.Parameters.Add(parameter);
+
+        var result = await command.ExecuteScalarAsync();
+        return Convert.ToInt32(result);
+    }
+
+    private static async Task<int> CountMigrationRowsAsync(
+        string connectionString,
+        MigrationHistoryTable historyTable)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            $"""
+             SELECT COUNT(*)
+             FROM {HistoryTableSql(historyTable)}
+             """;
 
         var result = await command.ExecuteScalarAsync();
         return Convert.ToInt32(result);
