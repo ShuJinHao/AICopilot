@@ -1,6 +1,6 @@
 using System.Linq.Expressions;
-using AICopilot.EntityFrameworkCore.AuditLogs;
 using AICopilot.EntityFrameworkCore.Specification;
+using AICopilot.EntityFrameworkCore.Transactions;
 using AICopilot.SharedKernel.Domain;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Specification;
@@ -10,7 +10,7 @@ namespace AICopilot.EntityFrameworkCore.Repository;
 
 public sealed class AiGatewayRepository<T>(
     AiGatewayDbContext dbContext,
-    AuditDbContext auditDbContext) : IRepository<T>
+    AuditTransactionCoordinator transactionCoordinator) : IRepository<T>
     where T : class, IEntity, IAggregateRoot
 {
     public async Task<List<T>> ListAsync(
@@ -95,10 +95,9 @@ public sealed class AiGatewayRepository<T>(
         dbContext.Set<T>().Remove(entity);
     }
 
-    public async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
-        var result = await dbContext.SaveChangesAsync(cancellationToken);
-        return result + await auditDbContext.SaveChangesAsync(cancellationToken);
+        return transactionCoordinator.SaveChangesAsync(dbContext, cancellationToken);
     }
 
     private IQueryable<T> ApplySpecification(ISpecification<T>? specification)

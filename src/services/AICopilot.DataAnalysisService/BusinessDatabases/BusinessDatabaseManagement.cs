@@ -74,7 +74,6 @@ public class CreateBusinessDatabaseCommandHandler(
             request.ReadOnlyCredentialVerified);
 
         repository.Add(entity);
-        await repository.SaveChangesAsync(cancellationToken);
 
         await auditLogWriter.WriteAsync(
             new AuditLogWriteRequest(
@@ -87,7 +86,7 @@ public class CreateBusinessDatabaseCommandHandler(
                 $"Created business database: {entity.Name}; readOnly={entity.IsReadOnly}; externalSystem={entity.ExternalSystemType}; readOnlyCredentialVerified={entity.ReadOnlyCredentialVerified}.",
                 ["name", "description", "connectionString", "provider", "isEnabled", "isReadOnly", "externalSystemType", "readOnlyCredentialVerified"]),
             cancellationToken);
-        await auditLogWriter.SaveChangesAsync(cancellationToken);
+        await repository.SaveChangesAsync(cancellationToken);
 
         return Result.Success(new CreatedBusinessDatabaseDto(entity.Id, entity.Name));
     }
@@ -186,7 +185,6 @@ public class UpdateBusinessDatabaseCommandHandler(
             request.ReadOnlyCredentialVerified);
 
         repository.Update(entity);
-        await repository.SaveChangesAsync(cancellationToken);
 
         var summary = connectionChanged
             ? $"Updated business database: {entity.Name}; connection string replaced; readOnly={entity.IsReadOnly}."
@@ -203,7 +201,7 @@ public class UpdateBusinessDatabaseCommandHandler(
                 summary,
                 changedFields),
             cancellationToken);
-        await auditLogWriter.SaveChangesAsync(cancellationToken);
+        await repository.SaveChangesAsync(cancellationToken);
 
         return Result.Success();
     }
@@ -228,7 +226,6 @@ public class DeleteBusinessDatabaseCommandHandler(
         var targetName = entity.Name;
 
         repository.Delete(entity);
-        await repository.SaveChangesAsync(cancellationToken);
 
         await auditLogWriter.WriteAsync(
             new AuditLogWriteRequest(
@@ -240,7 +237,7 @@ public class DeleteBusinessDatabaseCommandHandler(
                 AuditResults.Succeeded,
                 $"Deleted business database: {targetName}."),
             cancellationToken);
-        await auditLogWriter.SaveChangesAsync(cancellationToken);
+        await repository.SaveChangesAsync(cancellationToken);
 
         return Result.Success();
     }
