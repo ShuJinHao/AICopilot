@@ -2,33 +2,43 @@
 
 Date: 2026-05-08
 
-Scope: AICopilot backend runtime, security, and reliability follow-up items only. This note treats the Claude review as audit input, not as verified fact. Each item below is based on the current `main` source state and the regression tests now present in `AICopilot.BackendTests`.
+Scope: AICopilot backend and AICopilot review records only. Cloud and Edge are out of scope.
+
+This document closes the runtime safety and migration follow-up ledger after PR #27, PR #28, and PR #29. The original Claude review remains an input, not the source of truth. Each item below is judged against the current `main` source and tests.
 
 ## Closure Matrix
 
 | Area | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| User role update should revoke old tokens | Fixed with behavior test | `UpdateUserRole` refreshes `SecurityStamp`; `IdentityAccessManagementTests.UpdateUserRole_ShouldRevokeExistingSession` verifies old token returns `401/session_revoked` | No production change needed in this round |
-| Local file storage path traversal | Fixed with behavior/static tests | `LocalFileStorageService` validates configured root and rejects fully qualified/cross-root paths; `SecurityHardeningTests.LocalFileStorage_ShouldRejectUnsafePaths` | No production change needed |
-| Outbox multi-instance claim locking | Fixed with static test | `OutboxDispatcher` claims with transaction and `FOR UPDATE SKIP LOCKED`; covered by `SecurityHardeningTests.OutboxDispatcher_ShouldClaimRowsWithSkipLockedAndHandleCancellation` | No schema or migration change |
-| Outbox host cancellation handling | Fixed with static test | Dispatcher avoids failure retry marking for host cancellation path | No production change needed |
-| Login rate limit partitioning | Fixed with static test | `DependencyInjection.GetLoginPolicyPartitionKey` partitions by username and IP | No production change needed |
-| Chat stream exception message leakage | Fixed with static test | `ChatStreamRuntime.CreateErrorChunk` uses configured generic fallback message for unexpected exceptions | No production change needed |
-| Chat workflow branch stream completion | Closed in this round | `ChatWorkflowOrchestrator` now uses explicit `CompleteSinkWhenBranchesFinishAsync`; `ClaudeFollowupClosureTests` covers sink flush, failure propagation, and source guard against `ContinueWith` | External API unchanged |
-| JWT role claim dual source | Closed in this round | `ClaudeFollowupClosureTests.Authorization_ShouldNotUseJwtRoleClaimAsAuthorizationSource` prevents `[Authorize(Roles=...)]`, `RequireRole`, and unauthorized `ClaimTypes.Role` consumers | `CurrentUser.Role` remains audit/display source; `SecurityStamp` remains authority for session revocation |
-| Dapper read-only execution | Fixed with behavior/static tests | `DapperDatabaseConnector` enforces read-only session/transaction for PostgreSQL and read-only credential checks for other providers | No production change needed |
-| Dapper max row limit | Fixed with static test | Reader loop stops at `maxRows`; no full materialization before truncation | No production change needed |
-| MCP command argument parsing | Fixed with static test | `McpServerBootstrap.ParseCommandArguments` exists and is covered by exposure hardening tests | No production change needed |
-| MCP SSE timeout | Fixed with static test | Bootstrap uses configured SSE timeout while connecting | No production change needed |
-| RAG recoverable indexing states | Fixed with behavior/static tests | `DocumentIndexingService` allows recovery from pending/failed/in-progress timeout states | No production change needed |
-| RAG stale vector cleanup | Fixed with behavior/static tests | `KnowledgeVectorIndexWriter` deletes stale chunk keys before upsert | Vector store transaction semantics are provider-limited; no broader runtime rewrite in this round |
-| Approval policy/template long-session semantics | Deferred | Requires product decision on whether in-flight sessions should freeze or refresh approval policy/template snapshots | Not a P0 runtime patch without product sign-off |
-| MCP disable after startup | Deferred | Dynamic registry revocation after a running server is disabled requires lifecycle design | Record for a separate runtime registry plan |
-| Identity migration ownership | Deferred architecture item | Requires migration ownership strategy | Do not mix with runtime safety fixes |
-| Multi-DbContext migration history split | Deferred architecture item | Requires migration history and deployment strategy | Do not mix with runtime safety fixes |
+| Update user role revokes old sessions | Closed with behavior tests | `IdentityAccessManagementTests.UpdateUserRole_ShouldRevokeExistingSession`; `SecurityHardeningTests.UpdateUserRole_ShouldRefreshSecurityStamp` | Production already refreshes `SecurityStamp`; tests lock the old-token `401/session_revoked` behavior. |
+| Local file storage path containment | Closed with hardening tests | `SecurityHardeningTests.LocalFileStorageService_ShouldConstrainAccessToConfiguredRoot`; `LocalFileStorageService_ShouldNotUseHardcodedDriveRoot` | Storage paths are constrained to configured roots; absolute and traversal paths are rejected. |
+| Outbox multi-instance claim and cancellation semantics | Closed with static/behavior tests | `OutboxDispatcher`; `SecurityHardeningTests.OutboxDispatcher_ShouldUseSkipLockedAndNotRetryCancellation` | Dispatcher uses transactional `FOR UPDATE SKIP LOCKED`; cancellation is not counted as a delivery failure. |
+| Chat workflow branch sink completion | Closed with behavior tests | PR #26; `ChatWorkflowOrchestrator`; `ClaudeFollowupClosureTests` | Branch sink completion now uses explicit async flow instead of detached `ContinueWith`, preserving flush and exception propagation. |
+| JWT role claim authorization dependency | Closed with guard tests | `ClaudeFollowupClosureTests`; `IdentityAccessManagementTests` | Authorization remains permission-attribute based and session revocation is driven by `SecurityStamp`; `CurrentUser.Role` is audit/display data. |
+| MCP argument parsing and SSE timeout | Closed with hardening tests | `McpServerBootstrap.ParseCommandArguments`; `McpRuntimeOptions`; `SecurityHardeningTests` | Command arguments are parsed structurally and runtime timeout options are bounded. |
+| MCP disable/delete/config-change runtime convergence | Closed by PR #27 | `McpRuntimeRegistrySynchronizer`; `McpRuntimeRegistrySynchronizerTests`; `AgentPluginLoader` unregister tests | Future tool resolution converges after refresh. In-flight MCP calls are not force-killed by design. |
+| RAG recoverable states and stale vector cleanup | Closed with lifecycle tests | `DocumentIndexingService`; `KnowledgeVectorIndexWriter`; `RagIndexingLifecycleTests`; `SecurityHardeningTests` | Re-indexing can recover eligible states and vector rebuilds remove stale chunk keys before upsert. |
+| Dapper read-only and row limit handling | Closed with hardening tests | `DapperDatabaseConnector`; data-analysis hardening tests | Row limits are enforced during data reading; only read-only query paths are allowed. |
+| Identity migration ownership | Closed by PR #28 | `MigrationOwnershipTests`; split context snapshots | Current `AiCopilotDbContext` is guarded against re-owning Identity, RAG, MCP, DataAnalysis, and AiGateway tables. |
+| Multi-DbContext migration history split | Closed by PR #28 | `MigrationHistoryTables`; `MigrationSafetyTests`; migration worker wiring | Split migration history tables are covered for fresh and legacy-bootstrap paths. |
+| Approval policy and template/model long-session semantics | Closed by PR #29 | `SessionPolicySemanticsTests`; `ApprovalToolResolver`; `ApprovalDecisionValidator`; `FinalAgentContextSerializer`; `FinalAgentBuildExecutor` | Safety controls use current configuration. Existing sessions keep `session.TemplateId` but resolve the current template/model configuration; no snapshot schema was added. |
+| Final agent context multi-instance storage | Closed for Redis-backed deployment baseline | `FinalAgentContextDeploymentTests`; `AcceptanceClosureVerificationTests.RedisFinalAgentContextStore_ShouldShareContextAcrossStoreInstances` | Distributed deployment requires Redis-backed context storage. Broader message/context transaction design remains separate backlog. |
 
-## Current Round Result
+## Remaining Non-Runtime Items
 
-- Minimal production change: replace `ContinueWith` sink completion in `ChatWorkflowOrchestrator` with an explicit async completion helper.
-- Added regression tests in `ClaudeFollowupClosureTests` for branch sink completion semantics and JWT role-claim authorization guardrails.
-- No API, DTO, route, permission, database, or dependency changes.
+The following items are intentionally not mixed into the runtime closure PRs:
+
+| Item | Status | Reason |
+| --- | --- | --- |
+| Cross-DbContext audit atomicity outside Identity | Remaining design backlog | Requires transaction-boundary design across command handlers and audit writes; no quick runtime patch should be made without a design pass. |
+| Bootstrap/admin secret operational discipline | Remaining ops backlog | Current code avoids hardcoded production secrets, but deployment secret rotation and bootstrap runbook hardening are operational follow-up work. |
+| API key in-memory zeroization | Deferred compliance backlog | Requires a broader secret-handling policy and may affect DTO/service contracts. |
+| Workflow Graph/Planner, long-term memory, Cloud write integrations | Deferred product scope | These remain out of scope unless explicitly approved. |
+| Template/model snapshot freeze for sessions | Deferred product/schema decision | PR #29 records the accepted current-config semantics; snapshot freeze would require schema changes and product agreement. |
+
+## Current Result
+
+- PR #27 closed MCP runtime reconciliation.
+- PR #28 closed migration ownership and migration history guardrails.
+- PR #29 closed approval/template long-session semantics.
+- Remaining items are now tracked in `REVIEW_REMAINING_MATRIX_2026-05-08.md` instead of being treated as open-ended verbal follow-up.
