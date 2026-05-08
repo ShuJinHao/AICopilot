@@ -1,63 +1,62 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using ModelContextProtocol.Client;
+using Microsoft.Extensions.Options;
 
 namespace AICopilot.Infrastructure.Mcp;
 
 public sealed class McpServerManager(
     IServiceScopeFactory scopeFactory,
+    IOptions<McpRuntimeOptions> options,
+    McpRuntimeRegistrySynchronizer synchronizer,
     ILogger<McpServerManager> logger)
     : BackgroundService
 {
-    private readonly IList<McpClient> _mcpClients = [];
-
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        logger.LogInformation("=== MCP Server Manager 启动中 ===");
+        var refreshInterval = options.Value.RefreshInterval;
+        logger.LogInformation(
+            "Starting MCP runtime manager with refresh interval {RefreshIntervalSeconds}s.",
+            refreshInterval.TotalSeconds);
+
+        using var timer = new PeriodicTimer(refreshInterval);
 
         try
         {
-            using var scope = scopeFactory.CreateScope();
-            var bootstrap = scope.ServiceProvider.GetRequiredService<IMcpServerBootstrap>();
-
-            await foreach (var mcpClient in bootstrap.StartAsync(stoppingToken))
+            do
             {
-                _mcpClients.Add(mcpClient);
+                await ReconcileSafelyAsync(synchronizer, stoppingToken);
             }
-
-            logger.LogInformation("=== MCP Server Manager 启动完成，共托管 {Count} 个服务 ===", _mcpClients.Count);
+            while (await timer.WaitForNextTickAsync(stoppingToken));
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
-            logger.LogInformation("MCP Server Manager 启动被取消。");
+            logger.LogInformation("MCP runtime manager was stopped.");
         }
-        catch (Exception ex)
+        finally
         {
-            logger.LogError(ex, "MCP Server Manager 启动失败，HttpApi 将继续运行。");
+            await synchronizer.DisposeAsync();
+            logger.LogInformation("Disposed MCP runtime registrations.");
         }
     }
 
-    public override async Task StopAsync(CancellationToken cancellationToken)
+    private async Task ReconcileSafelyAsync(
+        McpRuntimeRegistrySynchronizer synchronizer,
+        CancellationToken stoppingToken)
     {
-        logger.LogInformation("正在关闭 MCP 服务连接...");
-
-        var closeTasks = _mcpClients.Select(async client =>
+        try
         {
-            try
-            {
-                await client.DisposeAsync();
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "关闭 MCP 客户端时发生错误。");
-            }
-        });
-
-        await Task.WhenAll(closeTasks);
-        _mcpClients.Clear();
-
-        await base.StopAsync(cancellationToken);
-        logger.LogInformation("所有 MCP 服务资源已释放。");
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var registrationProvider = scope.ServiceProvider.GetRequiredService<IMcpRuntimeRegistrationProvider>();
+            await synchronizer.ReconcileAsync(registrationProvider, stoppingToken);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "MCP runtime reconciliation failed; the previous runtime registry remains active.");
+        }
     }
 }

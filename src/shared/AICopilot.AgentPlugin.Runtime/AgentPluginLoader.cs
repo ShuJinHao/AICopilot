@@ -6,6 +6,7 @@ namespace AICopilot.AgentPlugin;
 
 public sealed class AgentPluginLoader : IAgentPluginCatalog, IAgentPluginRegistry
 {
+    private readonly object gate = new();
     private readonly IServiceProvider serviceProvider;
     private readonly Dictionary<string, IAgentPlugin> plugins = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, AiToolDefinition[]> tools = new(StringComparer.OrdinalIgnoreCase);
@@ -43,22 +44,44 @@ public sealed class AgentPluginLoader : IAgentPluginCatalog, IAgentPluginRegistr
 
     public void RegisterAgentPlugin(IAgentPlugin plugin)
     {
-        plugins[plugin.Name] = plugin;
         var pluginTools = (plugin.GetTools() ?? [])
             .Select(tool => EnsureToolIdentity(plugin, tool))
             .ToArray();
-        EnsureUniqueToolNames(plugin.Name, pluginTools);
-        tools[plugin.Name] = pluginTools;
+
+        lock (gate)
+        {
+            EnsureUniqueToolNames(plugin.Name, pluginTools);
+            plugins[plugin.Name] = plugin;
+            tools[plugin.Name] = pluginTools;
+        }
+    }
+
+    public void UnregisterAgentPlugin(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return;
+        }
+
+        lock (gate)
+        {
+            plugins.Remove(name);
+            tools.Remove(name);
+        }
     }
 
     public AiToolDefinition[] GetTools(params string[] names)
     {
         var result = new List<AiToolDefinition>();
-        foreach (var name in names)
+
+        lock (gate)
         {
-            if (tools.TryGetValue(name, out var pluginTools))
+            foreach (var name in names)
             {
-                result.AddRange(pluginTools);
+                if (tools.TryGetValue(name, out var pluginTools))
+                {
+                    result.AddRange(pluginTools);
+                }
             }
         }
 
@@ -67,25 +90,37 @@ public sealed class AgentPluginLoader : IAgentPluginCatalog, IAgentPluginRegistr
 
     public AiToolDefinition[] GetPluginTools(string name)
     {
-        return tools.TryGetValue(name, out var pluginTools)
-            ? pluginTools
-            : [];
+        lock (gate)
+        {
+            return tools.TryGetValue(name, out var pluginTools)
+                ? pluginTools
+                : [];
+        }
     }
 
     public AiToolDefinition[] GetAllTools()
     {
-        return tools.Values.SelectMany(item => item).ToArray();
+        lock (gate)
+        {
+            return tools.Values.SelectMany(item => item).ToArray();
+        }
     }
 
     public IAgentPlugin? GetPlugin(string name)
     {
-        plugins.TryGetValue(name, out var plugin);
-        return plugin;
+        lock (gate)
+        {
+            plugins.TryGetValue(name, out var plugin);
+            return plugin;
+        }
     }
 
     public IAgentPlugin[] GetAllPlugin()
     {
-        return plugins.Values.ToArray();
+        lock (gate)
+        {
+            return plugins.Values.ToArray();
+        }
     }
 
     private static AiToolDefinition EnsureToolIdentity(IAgentPlugin plugin, AiToolDefinition tool)
