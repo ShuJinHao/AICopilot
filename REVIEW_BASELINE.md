@@ -46,14 +46,13 @@ Generated for the current large refactor baseline.
 - Runtime audit writing and audit querying use `AuditDbContext`.
 - Audit writer decision tree:
   - Identity management commands use `IIdentityAuditLogWriter` only, inside `ITransactionalExecutionService`.
-  - Ordinary business commands use `IAuditLogWriter`; repository save flushes business state first and then the scoped audit context.
+  - Ordinary business commands use `IAuditLogWriter`; repository save commits business state and staged audit rows in one EF transaction.
   - Explicit `IAuditLogWriter.SaveChangesAsync` is allowed only for documented cross-DbContext execution paths that have no business save point.
   - New DbContexts must not map `AuditLogEntryConfiguration` unless the transaction boundary is reviewed and added to the architecture whitelist.
-- AiGateway configuration commands stage business changes and audit rows, then commit through one repository save; the EF repository flushes the scoped `AuditDbContext` after the business context save.
+- AiGateway and DataAnalysis configuration commands stage business changes and audit rows, then commit through one repository save; the EF repositories use `AuditTransactionCoordinator` to share one database transaction with `AuditDbContext`.
 - Identity commands do not inject `IAuditLogWriter` and do not call `auditLogWriter.SaveChangesAsync` directly. `EfTransactionalExecutionService` runs on `IdentityStoreDbContext`, and commits identity changes plus identity audit rows together.
 - Explicit `auditLogWriter.SaveChangesAsync` calls are allowed only where there is no same business save point:
-  - DataAnalysis writes that use `DataAnalysisDbContext` while regular runtime audit rows still use `AuditDbContext`.
-  - Workflow executors that only audit read/execution activity and do not save a business aggregate.
+  - Workflow executors and query runners that only audit read/execution activity and do not save a business aggregate.
 
 ## Outbox Boundary
 

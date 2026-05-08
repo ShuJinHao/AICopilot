@@ -1,13 +1,16 @@
 using System.Linq.Expressions;
 using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
 using AICopilot.EntityFrameworkCore.Specification;
+using AICopilot.EntityFrameworkCore.Transactions;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Specification;
 using Microsoft.EntityFrameworkCore;
 
 namespace AICopilot.EntityFrameworkCore.Repository;
 
-public sealed class BusinessDatabaseRepository(DataAnalysisDbContext dbContext) : IRepository<BusinessDatabase>
+public sealed class BusinessDatabaseRepository(
+    DataAnalysisDbContext dbContext,
+    AuditTransactionCoordinator transactionCoordinator) : IRepository<BusinessDatabase>
 {
     public async Task<List<BusinessDatabase>> ListAsync(
         ISpecification<BusinessDatabase>? specification = null,
@@ -93,7 +96,7 @@ public sealed class BusinessDatabaseRepository(DataAnalysisDbContext dbContext) 
 
     public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
-        return dbContext.SaveChangesAsync(cancellationToken);
+        return transactionCoordinator.SaveChangesAsync(dbContext, cancellationToken);
     }
 
     private IQueryable<BusinessDatabase> ApplySpecification(ISpecification<BusinessDatabase>? specification)

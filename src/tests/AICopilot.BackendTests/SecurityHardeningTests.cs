@@ -629,6 +629,27 @@ public sealed class SecurityHardeningTests
             "AICopilot.EntityFrameworkCore",
             "Repository",
             "EfRepository.cs"));
+        var aiGatewayRepositorySource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "infrastructure",
+            "AICopilot.EntityFrameworkCore",
+            "Repository",
+            "AiGatewayRepository.cs"));
+        var businessDatabaseRepositorySource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "infrastructure",
+            "AICopilot.EntityFrameworkCore",
+            "Repository",
+            "BusinessDatabaseRepository.cs"));
+        var transactionCoordinatorSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "infrastructure",
+            "AICopilot.EntityFrameworkCore",
+            "Transactions",
+            "AuditTransactionCoordinator.cs"));
         var dependencyInjectionSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
@@ -643,8 +664,20 @@ public sealed class SecurityHardeningTests
         auditContextSource.Should().Contain("DbSet<AuditLogEntry>");
         auditContextSource.Should().Contain("AuditLogEntryConfiguration");
         auditContextSource.Should().NotContain("ExcludeFromMigrations");
-        efRepositorySource.Should().Contain("auditDbContext.SaveChangesAsync");
+        efRepositorySource.Should().Contain("AuditTransactionCoordinator");
+        efRepositorySource.Should().Contain("transactionCoordinator.SaveChangesAsync");
+        aiGatewayRepositorySource.Should().Contain("AuditTransactionCoordinator");
+        aiGatewayRepositorySource.Should().Contain("transactionCoordinator.SaveChangesAsync");
+        businessDatabaseRepositorySource.Should().Contain("AuditTransactionCoordinator");
+        businessDatabaseRepositorySource.Should().Contain("transactionCoordinator.SaveChangesAsync");
+        transactionCoordinatorSource.Should().Contain("CreateExecutionStrategy");
+        transactionCoordinatorSource.Should().Contain("BeginTransactionAsync");
+        transactionCoordinatorSource.Should().Contain("UseTransactionAsync");
+        transactionCoordinatorSource.Should().Contain("new AuditDbContext");
+        transactionCoordinatorSource.Should().Contain("transactionalAuditDbContext.SaveChangesAsync");
+        transactionCoordinatorSource.Should().NotContain("SetDbConnection");
         dependencyInjectionSource.Should().Contain("AddNpgsqlDbContext<AuditDbContext>");
+        dependencyInjectionSource.Should().Contain("AuditTransactionCoordinator");
     }
 
     [Fact]
@@ -795,7 +828,7 @@ public sealed class SecurityHardeningTests
     }
 
     [Fact]
-    public void AiGatewayConfigCommands_ShouldSaveAuditWithBusinessChanges()
+    public void ConfigCommands_ShouldSaveAuditWithBusinessChanges()
     {
         var solutionRoot = FindSolutionRoot();
         var commandFiles = new[]
@@ -807,7 +840,8 @@ public sealed class SecurityHardeningTests
             Path.Combine("src", "services", "AICopilot.AiGatewayService", "Commands", "LanguageModels", "CreateLanguageModel.cs"),
             Path.Combine("src", "services", "AICopilot.AiGatewayService", "Commands", "LanguageModels", "UpdateLanguageModel.cs"),
             Path.Combine("src", "services", "AICopilot.AiGatewayService", "Commands", "LanguageModels", "DeleteLanguageModel.cs"),
-            Path.Combine("src", "services", "AICopilot.AiGatewayService", "Commands", "Sessions", "UpdateSessionSafetyAttestation.cs")
+            Path.Combine("src", "services", "AICopilot.AiGatewayService", "Commands", "Sessions", "UpdateSessionSafetyAttestation.cs"),
+            Path.Combine("src", "services", "AICopilot.DataAnalysisService", "BusinessDatabases", "BusinessDatabaseManagement.cs")
         };
 
         foreach (var commandFile in commandFiles)
@@ -826,9 +860,7 @@ public sealed class SecurityHardeningTests
         var allowedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "src/services/AICopilot.AiGatewayService/Workflows/Executors/DataAnalysisAuditRecorder.cs",
-            "src/services/AICopilot.AiGatewayService/Workflows/Executors/DataAnalysisExecutor.cs",
             "src/services/AICopilot.AiGatewayService/Workflows/Executors/FinalAgentRunExecutor.cs",
-            "src/services/AICopilot.DataAnalysisService/BusinessDatabases/BusinessDatabaseManagement.cs",
             "src/services/AICopilot.DataAnalysisService/Plugins/DataAnalysisSqlQueryRunner.cs"
         };
 
@@ -851,7 +883,7 @@ public sealed class SecurityHardeningTests
             .ToArray();
 
         violations.Should().BeEmpty(
-            "explicit audit saves are only allowed for cross-DbContext DataAnalysis writes and workflow executors with no business save point");
+            "explicit audit saves are only allowed for workflow/query executors with no business save point");
         locations.Select(item => item.File).Distinct(StringComparer.OrdinalIgnoreCase)
             .Should().Contain(file => allowedFiles.Contains(file), "the whitelist should stay tied to at least one documented explicit audit save");
     }

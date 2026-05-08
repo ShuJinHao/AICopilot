@@ -10,6 +10,7 @@ using AICopilot.EntityFrameworkCore.AuditLogs;
 using AICopilot.EntityFrameworkCore.Outbox;
 using AICopilot.EntityFrameworkCore.Repository;
 using AICopilot.EntityFrameworkCore.Security;
+using AICopilot.EntityFrameworkCore.Transactions;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Repository;
 using Microsoft.AspNetCore.Identity;
@@ -69,7 +70,8 @@ public static class DependencyInjection
         builder.Services.AddScoped<IAuditLogWriter, AuditLogWriter>();
         builder.Services.AddScoped<IIdentityAuditLogWriter, IdentityAuditLogWriter>();
         builder.Services.AddScoped<IAuditLogQueryService, AuditLogQueryService>();
-        builder.Services.AddScoped<ITransactionalExecutionService, Transactions.EfTransactionalExecutionService>();
+        builder.Services.AddScoped<AuditTransactionCoordinator>();
+        builder.Services.AddScoped<ITransactionalExecutionService, EfTransactionalExecutionService>();
 
         builder.Services.AddIdentityCore<ApplicationUser>(options =>
         {
