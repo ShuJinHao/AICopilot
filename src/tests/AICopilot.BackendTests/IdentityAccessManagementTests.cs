@@ -310,6 +310,73 @@ public sealed class IdentityAccessManagementTests
     }
 
     [Fact]
+    public async Task UpdateUserRole_ShouldRevokeExistingSession()
+    {
+        await AuthenticateAsAdminAsync();
+
+        var roleName = $"stamp-role-{Guid.NewGuid():N}";
+        var userName = $"stamp-user-{Guid.NewGuid():N}";
+        string? roleId = null;
+        string? userId = null;
+
+        try
+        {
+            var createdRole = await PostJsonAsync<CreatedRoleDto>("/api/identity/role", new
+            {
+                roleName,
+                permissions = new[]
+                {
+                    "AiGateway.GetListLanguageModels"
+                }
+            });
+            roleId = createdRole.RoleId;
+
+            var createdUser = await PostJsonAsync<CreatedUserDto>("/api/identity/user", new
+            {
+                userName,
+                password = "Password123!",
+                roleName
+            });
+            userId = createdUser.UserId;
+
+            var initialLogin = await LoginAsync(userName, "Password123!");
+
+            await AuthenticateAsAdminAsync();
+            var updatedUser = await PutJsonAsync<UserSummaryDto>("/api/identity/user/role", new
+            {
+                userId,
+                roleName = "User"
+            });
+
+            updatedUser.RoleName.Should().Be("User");
+
+            _fixture.SetAuthToken(initialLogin.Token);
+            using var staleTokenResponse = await _fixture.HttpClient.GetAsync("/api/identity/me");
+            staleTokenResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+            var revokedProblem = await ReadJsonAsync<ProblemDetailsDto>(staleTokenResponse);
+            revokedProblem.Code.Should().Be("session_revoked");
+
+            await AuthenticateAsync(userName, "Password123!");
+            var refreshedProfile = await GetJsonAsync<CurrentUserProfileDto>("/api/identity/me");
+            refreshedProfile.UserName.Should().Be(userName);
+            refreshedProfile.RoleName.Should().Be("User");
+        }
+        finally
+        {
+            await AuthenticateAsAdminAsync();
+            if (!string.IsNullOrWhiteSpace(userId))
+            {
+                await DeleteUserIfExistsAsync(userId);
+            }
+
+            if (!string.IsNullOrWhiteSpace(roleId))
+            {
+                await DeleteRoleIfExistsAsync(roleId);
+            }
+        }
+    }
+
+    [Fact]
     public async Task ResetPassword_ShouldInvalidateOldPassword_AndExistingSession()
     {
         await AuthenticateAsAdminAsync();
