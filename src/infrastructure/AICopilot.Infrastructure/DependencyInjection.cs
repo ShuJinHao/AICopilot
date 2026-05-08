@@ -62,13 +62,18 @@ public static class DependencyInjection
 
     private static void AddMcpRuntime(this IHostApplicationBuilder builder)
     {
+        builder.Services.Configure<McpRuntimeOptions>(builder.Configuration.GetSection("Mcp:Runtime"));
+
         var enabled = builder.Configuration.GetValue("Mcp:Runtime:Enabled", true);
         if (!enabled)
         {
             return;
         }
 
-        builder.Services.AddScoped<IMcpServerBootstrap, McpServerBootstrap>();
+        builder.Services.AddScoped<McpServerBootstrap>();
+        builder.Services.AddScoped<IMcpServerBootstrap>(sp => sp.GetRequiredService<McpServerBootstrap>());
+        builder.Services.AddScoped<IMcpRuntimeRegistrationProvider>(sp => sp.GetRequiredService<McpServerBootstrap>());
+        builder.Services.AddSingleton<McpRuntimeRegistrySynchronizer>();
         builder.Services.AddHostedService<McpServerManager>();
     }
 

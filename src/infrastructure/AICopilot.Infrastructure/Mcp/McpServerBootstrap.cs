@@ -1,5 +1,6 @@
 ﻿using AICopilot.AgentPlugin;
 using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
+using AICopilot.Core.McpServer.Ids;
 using AICopilot.Core.McpServer.Specifications.McpServerInfo;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Repository;
@@ -17,46 +18,65 @@ public class McpServerBootstrap(
     IApprovalRequirementReadService approvalRequirementReadService,
     IAgentPluginRegistry agentPluginRegistry,
     ILogger<McpServerBootstrap> logger)
-    : IMcpServerBootstrap
+    : IMcpServerBootstrap, IMcpRuntimeRegistrationProvider
 {
     private static readonly TimeSpan SseConnectionTimeout = TimeSpan.FromSeconds(15);
 
     public async IAsyncEnumerable<McpClient> StartAsync([EnumeratorCancellation] CancellationToken ct)
     {
-        var mcpServerInfos = await mcpServerRepository.ListAsync(new EnabledMcpServerInfosSpec(), ct);
-        var approvalPolicies = await LoadApprovalPoliciesAsync(
-            mcpServerInfos.Select(server => server.Name).ToArray(),
-            ct);
-
-        foreach (var mcpServerInfo in mcpServerInfos)
+        var candidateServers = await ListCandidateServersAsync(ct);
+        foreach (var candidateServer in candidateServers)
         {
-            if (!mcpServerInfo.ChatExposureMode.CanExposeInChat())
+            var registration = await CreateRegistrationAsync(candidateServer, ct);
+            if (registration is null)
             {
-                logger.LogInformation(
-                    "MCP server {Name} is configured as {ExposureMode} and will not be exposed to the production chat toolchain.",
-                    mcpServerInfo.Name,
-                    mcpServerInfo.ChatExposureMode);
                 continue;
             }
 
-            if (mcpServerInfo.AllowedTools.Count == 0)
+            agentPluginRegistry.RegisterAgentPlugin(registration.Plugin);
+            if (registration.ClientHandle.Client is McpClient mcpClient)
             {
-                logger.LogInformation(
-                    "MCP server {Name} has no explicit allowlist, so it remains closed to the production chat toolchain.",
-                    mcpServerInfo.Name);
-                continue;
+                yield return mcpClient;
             }
-
-            McpClient mcpClient = mcpServerInfo.TransportType switch
+            else
             {
-                McpTransportType.Stdio => await CreateStdioClientAsync(mcpServerInfo, ct),
-                McpTransportType.Sse => await CreateSseClientAsync(mcpServerInfo, ct),
-                _ => throw new NotSupportedException($"Unsupported MCP transport type: {mcpServerInfo.TransportType}")
-            };
+                await registration.DisposeAsync();
+            }
+        }
+    }
 
+    public async Task<IReadOnlyList<McpRuntimeServerState>> ListCandidateServersAsync(
+        CancellationToken cancellationToken)
+    {
+        var mcpServerInfos = await mcpServerRepository.ListAsync(
+            new McpServerInfosOrderedSpec(),
+            cancellationToken);
+
+        return mcpServerInfos
+            .Where(IsRuntimeCandidate)
+            .Select(server => new McpRuntimeServerState(server.Id.Value, server.Name, server.RowVersion))
+            .ToArray();
+    }
+
+    public async Task<McpRuntimeRegistration?> CreateRegistrationAsync(
+        McpRuntimeServerState server,
+        CancellationToken cancellationToken)
+    {
+        var mcpServerInfo = await mcpServerRepository.GetByIdAsync(
+            new McpServerId(server.ServerId),
+            cancellationToken);
+        if (mcpServerInfo is null || !IsRuntimeCandidate(mcpServerInfo))
+        {
+            return null;
+        }
+
+        var mcpClient = await CreateClientAsync(mcpServerInfo, cancellationToken);
+        var clientHandle = new McpRuntimeClientHandle(mcpClient);
+        try
+        {
             logger.LogInformation("Connected to MCP server {Name}.", mcpServerInfo.Name);
 
-            var tools = await mcpClient.ListToolsAsync(cancellationToken: ct);
+            var tools = await mcpClient.ListToolsAsync(cancellationToken: cancellationToken);
             var allowlist = mcpServerInfo.AllowedTools.ToDictionary(
                 tool => tool.ToolName,
                 StringComparer.OrdinalIgnoreCase);
@@ -77,18 +97,53 @@ public class McpServerBootstrap(
                 logger.LogWarning(
                     "MCP server {Name} did not match any allowed tool names and will not be registered.",
                     mcpServerInfo.Name);
-                await mcpClient.DisposeAsync();
-                continue;
+                await clientHandle.DisposeAsync();
+                return null;
             }
 
-            var protectedNames = approvalPolicies.GetValueOrDefault(mcpServerInfo.Name)
-                                 ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var protectedNames = await LoadProtectedToolNamesAsync(mcpServerInfo.Name, cancellationToken);
+            var plugin = BuildMcpPlugin(mcpServerInfo, exposedTools, protectedNames, clientHandle);
 
-            RegisterMcpPlugin(mcpServerInfo, exposedTools, protectedNames);
-            logger.LogInformation("Registered MCP plugin {Name}.", mcpServerInfo.Name);
-
-            yield return mcpClient;
+            return new McpRuntimeRegistration(
+                mcpServerInfo.Id.Value,
+                mcpServerInfo.Name,
+                mcpServerInfo.RowVersion,
+                plugin,
+                clientHandle);
         }
+        catch
+        {
+            await clientHandle.DisposeAsync();
+            throw;
+        }
+    }
+
+    private static bool IsRuntimeCandidate(McpServerInfo server)
+    {
+        return server.IsEnabled
+               && server.ChatExposureMode.CanExposeInChat()
+               && server.AllowedTools.Count > 0;
+    }
+
+    private async Task<McpClient> CreateClientAsync(
+        McpServerInfo mcpServerInfo,
+        CancellationToken cancellationToken)
+    {
+        return mcpServerInfo.TransportType switch
+        {
+            McpTransportType.Stdio => await CreateStdioClientAsync(mcpServerInfo, cancellationToken),
+            McpTransportType.Sse => await CreateSseClientAsync(mcpServerInfo, cancellationToken),
+            _ => throw new NotSupportedException($"Unsupported MCP transport type: {mcpServerInfo.TransportType}")
+        };
+    }
+
+    private async Task<HashSet<string>> LoadProtectedToolNamesAsync(
+        string serverName,
+        CancellationToken cancellationToken)
+    {
+        var approvalPolicies = await LoadApprovalPoliciesAsync([serverName], cancellationToken);
+        return approvalPolicies.GetValueOrDefault(serverName)
+               ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     }
 
     private async Task<Dictionary<string, HashSet<string>>> LoadApprovalPoliciesAsync(
@@ -121,10 +176,11 @@ public class McpServerBootstrap(
         return result;
     }
 
-    private void RegisterMcpPlugin(
+    private GenericBridgePlugin BuildMcpPlugin(
         McpServerInfo mcpServerInfo,
         IList<(McpClientTool Tool, McpAllowedTool Exposure)> mcpTools,
-        HashSet<string> protectedNames)
+        HashSet<string> protectedNames,
+        McpRuntimeClientHandle clientHandle)
     {
         var tools = mcpTools
             .Select(candidate => ToToolDefinition(
@@ -137,18 +193,17 @@ public class McpServerBootstrap(
                 candidate.Exposure.McpDestructiveHint ?? ReadMcpAnnotationHint(candidate.Tool, "DestructiveHint", "destructiveHint"),
                 candidate.Exposure.McpIdempotentHint ?? ReadMcpAnnotationHint(candidate.Tool, "IdempotentHint", "idempotentHint"),
                 candidate.Tool,
-                protectedNames))
+                protectedNames,
+                clientHandle))
             .ToArray();
 
-        var mcpPlugin = new GenericBridgePlugin
+        return new GenericBridgePlugin
         {
             Name = mcpServerInfo.Name,
             Description = mcpServerInfo.Description,
             Tools = tools,
             ChatExposureMode = mcpServerInfo.ChatExposureMode
         };
-
-        agentPluginRegistry.RegisterAgentPlugin(mcpPlugin);
     }
 
     private static AiToolDefinition ToToolDefinition(
@@ -161,7 +216,8 @@ public class McpServerBootstrap(
         bool? mcpDestructiveHint,
         bool? mcpIdempotentHint,
         McpClientTool tool,
-        HashSet<string> protectedNames)
+        HashSet<string> protectedNames,
+        McpRuntimeClientHandle clientHandle)
     {
         var requiresApproval = protectedNames.Contains(tool.Name)
                                || riskLevel == AiToolRiskLevel.RequiresApproval;
@@ -187,6 +243,7 @@ public class McpServerBootstrap(
             ReturnJsonSchema = tool.ReturnJsonSchema?.Clone(),
             InvokeAsync = async (context, cancellationToken) =>
             {
+                using var invocation = clientHandle.AcquireInvocation();
                 var argumentValues = context.Arguments.ToDictionary(
                     item => item.Key,
                     item => item.Value,
