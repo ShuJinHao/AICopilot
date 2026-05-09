@@ -55,6 +55,30 @@ public sealed class McpServerManagementTests
     }
 
     [Fact]
+    public async Task CreateServerCommand_ShouldRejectUnsafeSseEndpointBeforeSaveOrAudit()
+    {
+        var repository = new MutableMcpServerRepository();
+        var auditLogWriter = new CapturingAuditLogWriter();
+        var handler = new CreateMcpServerCommandHandler(repository, auditLogWriter);
+
+        var act = async () => await handler.Handle(
+            new CreateMcpServerCommand(
+                "unsafe-sse",
+                "unsafe server",
+                McpTransportType.Sse,
+                null,
+                "http://169.254.169.254/latest/meta-data",
+                ChatExposureMode.Advisory,
+                [new McpAllowedToolDto { ToolName = "Echo" }],
+                true),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        repository.Items.Should().BeEmpty();
+        auditLogWriter.Requests.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task UpdateServerCommand_WithBlankArguments_ShouldPreserveExistingHiddenArguments()
     {
         var server = new McpServerInfo(
@@ -94,6 +118,43 @@ public sealed class McpServerManagementTests
         audit.ChangedFields.Should().Contain(["name", "description", "chatExposureMode", "allowedTools", "isEnabled"]);
         audit.Summary.Should().NotContain("original-server.dll");
         audit.Summary.Should().Contain("arguments=unchanged");
+    }
+
+    [Fact]
+    public async Task UpdateServerCommand_ShouldRejectUnsafeSseEndpointBeforeSaveOrAudit()
+    {
+        var server = new McpServerInfo(
+            "existing-mcp",
+            "existing server",
+            McpTransportType.Stdio,
+            "dotnet",
+            "server.dll",
+            ChatExposureMode.Disabled,
+            [new McpAllowedTool("Echo")],
+            true);
+        var repository = new MutableMcpServerRepository(server);
+        var auditLogWriter = new CapturingAuditLogWriter();
+        var handler = new UpdateMcpServerCommandHandler(repository, auditLogWriter);
+
+        var act = async () => await handler.Handle(
+            new UpdateMcpServerCommand(
+                server.Id,
+                "updated-mcp",
+                "updated server",
+                McpTransportType.Sse,
+                null,
+                "http://10.0.0.1/sse",
+                ChatExposureMode.Advisory,
+                [new McpAllowedToolDto { ToolName = "Inspect" }],
+                true),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        server.Name.Should().Be("existing-mcp");
+        server.TransportType.Should().Be(McpTransportType.Stdio);
+        server.Arguments.Should().Be("server.dll");
+        server.AllowedTools.Select(tool => tool.ToolName).Should().Equal("Echo");
+        auditLogWriter.Requests.Should().BeEmpty();
     }
 
     [Fact]
