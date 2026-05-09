@@ -49,7 +49,7 @@ Generated for the current large refactor baseline.
   - Ordinary business commands use `IAuditLogWriter`; repository save commits business state and staged audit rows in one EF transaction.
   - Explicit `IAuditLogWriter.SaveChangesAsync` is allowed only for documented cross-DbContext execution paths that have no business save point.
   - New DbContexts must not map `AuditLogEntryConfiguration` unless the transaction boundary is reviewed and added to the architecture whitelist.
-- AiGateway and DataAnalysis configuration commands stage business changes and audit rows, then commit through one repository save; the EF repositories use `AuditTransactionCoordinator` to share one database transaction with `AuditDbContext`.
+- AiGateway, DataAnalysis, RAG, and MCP configuration/governance commands stage business changes and audit rows, then commit through one repository save; the EF repositories use `AuditTransactionCoordinator` to share one database transaction with `AuditDbContext`.
 - Identity commands do not inject `IAuditLogWriter` and do not call `auditLogWriter.SaveChangesAsync` directly. `EfTransactionalExecutionService` runs on `IdentityStoreDbContext`, and commits identity changes plus identity audit rows together.
 - Explicit `auditLogWriter.SaveChangesAsync` calls are allowed only where there is no same business save point:
   - Workflow executors and query runners that only audit read/execution activity and do not save a business aggregate.
@@ -63,6 +63,7 @@ Generated for the current large refactor baseline.
 - Existing main migrations still own the current Outbox table history. This baseline does not add an Outbox migration.
 - Module DbContexts may map Outbox with `ExcludeFromMigrations()` so they can stage events without owning the table.
 - Business DbContexts keep their Outbox mappings so aggregate domain events can still be staged in the same transaction as business changes.
+- RAG document upload stages `DocumentUploadedEvent` through `RagIntegrationEventStager`; the document aggregate changes and the outbox row are committed by one `RagDbContext` transaction.
 
 ## Runtime Security And Operations Notes
 
@@ -70,7 +71,7 @@ Generated for the current large refactor baseline.
 - Login rate limiting is partitioned by normalized username plus client IP when the username can be read from the login request; it falls back to IP when username is absent or unreadable.
 - Chat session reads, history, delete, normal chat execution, and pending approval lookup are scoped to the current user.
 - New chat execution is blocked while the same session still has a pending approval context.
-- MCP runtime registration is a startup-time operation. Disabling or changing an MCP server in the database requires service restart before the production chat toolchain reflects the change; hot unregister is intentionally not promised in this baseline.
+- MCP runtime registration is reconciled at runtime. Disabled, deleted, or changed MCP server rows converge through the runtime registry refresh cycle; in-flight MCP calls are not force-killed.
 - MCP SSE clients use an explicit connection timeout. Stdio MCP arguments use a quoted/escaped parser and still preserve the single-file-path shortcut.
 - RAG indexing may recover documents left in `Parsing`, `Splitting`, or `Embedding`. Re-indexing loads existing chunks, deletes prior vector keys for the document, and then upserts the new vectors.
 - RAG management includes embedding models, knowledge bases, document upload/status/delete, and knowledge-base search. Search requires the `Rag.SearchKnowledgeBase` permission.
@@ -79,7 +80,7 @@ Generated for the current large refactor baseline.
 ## Explicitly Deferred
 
 - Preview or 0.x package replacement, OpenTelemetry NU1902 remediation, RabbitMQ dedicated user, dashboard image pinning, private image registry, and Serilog adoption require dependency or operations decisions.
-- Cross-DbContext audit atomicity outside Identity remains a future design item; this baseline does not introduce `TransactionScope` or distributed transactions.
+- Distributed transactions remain out of scope; current non-Identity configuration/governance writes use same-database EF transactions through `AuditTransactionCoordinator`.
 - Cloud and edge alignment work remains out of scope unless explicitly requested.
 
 ## Required Verification

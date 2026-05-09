@@ -2,7 +2,7 @@
 
 Date: 2026-05-08
 
-Baseline: `main` after PR #31 (`b8a49d9`). This matrix reconciles the remaining follow-up items from `REVIEW_FOLLOWUP_2026-04-29.md` and `REVIEW_ACCEPTANCE_2026-05-07.md`.
+Baseline: `main` after PR #34 (`974b059`). This matrix reconciles the remaining follow-up items from `REVIEW_FOLLOWUP_2026-04-29.md`, `REVIEW_ACCEPTANCE_2026-05-07.md`, and the 5.5 Pro full-code review.
 
 Principle: review documents are inputs, not facts. Current source and tests decide whether an item is closed, still real, deferred, or not applicable.
 
@@ -25,6 +25,7 @@ Principle: review documents are inputs, not facts. Current source and tests deci
 | `REVIEW_FOLLOWUP_2026-04-29.md` P0 | Outbox must avoid duplicate multi-instance claims and must not retry host cancellation | Static-covered | `OutboxDispatcher`; `SecurityHardeningTests.OutboxDispatcher_ShouldUseSkipLockedAndNotRetryCancellation` | Add integration coverage only if the outbox worker changes again | No |
 | `REVIEW_FOLLOWUP_2026-04-29.md` P0 | RAG stuck states should be recoverable | Closed | `DocumentIndexingService`; `RagIndexingLifecycleTests`; `SecurityHardeningTests` | None | No |
 | `REVIEW_FOLLOWUP_2026-04-29.md` P0 | RAG vector rebuild should remove stale chunks | Closed | `KnowledgeVectorIndexWriter`; `RagIndexingLifecycleTests`; `SecurityHardeningTests` | None | No |
+| 5.5 Pro review P1 | RAG document upload and `DocumentUploadedEvent` outbox enqueue should be atomic | Closed | PR #33; `RagIntegrationEventStager`; `RagUploadOutboxAtomicityTests`; `SecurityHardeningTests` | None | No |
 | `REVIEW_FOLLOWUP_2026-04-29.md` P0 | Dapper row limits must not load all rows and truncate afterward | Static-covered | `DapperDatabaseConnector`; data-analysis hardening tests | Add provider-level integration coverage if SQL connector behavior changes | No |
 | `REVIEW_FOLLOWUP_2026-04-29.md` P0 | Dapper/data analysis should remain read-only | Static-covered | `DapperDatabaseConnector`; data-analysis hardening tests | Keep as a guardrail in future query-builder work | No |
 | `REVIEW_FOLLOWUP_2026-04-29.md` P0 | Login throttling must not use a global partition key | Static-covered | Security hardening tests and authentication rate-limit source checks | Add behavior test if rate-limit implementation changes | No |
@@ -40,6 +41,13 @@ Principle: review documents are inputs, not facts. Current source and tests deci
 | `REVIEW_FOLLOWUP_2026-04-29.md` P1 | Identity migration ownership | Closed | PR #28; `MigrationOwnershipTests`; split context snapshots | None | No |
 | `REVIEW_FOLLOWUP_2026-04-29.md` P1 | Multi-DbContext migration history split | Closed | PR #28; `MigrationSafetyTests`; `MigrationHistoryTables.MigratedContexts` | None | No |
 | `REVIEW_FOLLOWUP_2026-04-29.md` P1 | Cross-DbContext audit atomicity outside Identity | Closed | PR #31; `AuditTransactionCoordinator`; `AuditTransactionBoundaryTests`; `SecurityHardeningTests` | None | No |
+| 5.5 Pro review P1 | RAG/MCP configuration and governance writes need same-level audit transaction coverage | Closed | PR #34; `RagRepository`; `McpServerRepository`; `RagMcpAuditCommandTests`; `AuditTransactionBoundaryTests`; `SecurityHardeningTests` | None | No |
+| 5.5 Pro review P2 | MCP SSE endpoint needs explicit target validation | Remaining | `McpServerBootstrap.CreateSseClientAsync` still constructs `new Uri(mcpServerInfo.Arguments)`; current validation only checks absolute HTTP/HTTPS shape | Add endpoint validator for scheme/host/private-address policy | Yes - MCP safety small fix |
+| 5.5 Pro review P2 | MCP frontend still says saved server changes require restart | Remaining | `McpServerConfig.vue` still contains the old bootstrap/restart warning, while PR #27 added runtime reconciliation | Update copy to runtime refresh-cycle wording | Yes - MCP safety small fix |
+| 5.5 Pro review P2 | Dapper failed-query logs include full SQL text | Remaining | `DapperDatabaseConnector` logs `SQL: {Sql}` on failure | Redact or hash SQL in default logs; keep full SQL only behind an explicit diagnostic switch | No |
+| 5.5 Pro review P2 | Dapper truncation wording implies exact total row count | Remaining | `ReturnedRowCount` represents rows kept plus one overflow probe, but `DataAnalysisSqlQueryRunner` says "共返回" | Change wording to "detected more than N rows" semantics | No |
+| 5.5 Pro review P2 | Document delete can leave orphan files if file deletion fails after DB save | Remaining | `DeleteDocumentCommandHandler` saves aggregate removal before `fileStorage.DeleteAsync(document.FilePath)` | Plan a separate file cleanup or pending-deletion design | No |
+| 5.5 Pro review P2 | Module repositories and frontend stores still contain structural duplication | Remaining | Repository templates, `configStore.ts`, and `ragStore.ts` remain maintainability backlog | Handle only after runtime safety fixes; do not mix with security PRs | No |
 | `REVIEW_FOLLOWUP_2026-04-29.md` P2 | Bootstrap/admin secret operational discipline | Remaining | Deployment/runbook concern; no runtime code change in this closure | Add deployment-secret checklist/tests if deployment templates change | Not next unless deployment work starts |
 | `REVIEW_FOLLOWUP_2026-04-29.md` P2 | API key in-memory zeroization | Deferred | Requires a broader secret-handling policy and may affect contracts | Track as compliance backlog | No |
 | `REVIEW_FOLLOWUP_2026-04-29.md` P2 | AST comment-bypass concern | Not applicable | Current guardrails strip or inspect comments before SQL execution paths | Revisit only if SQL parser/query builder is replaced | No |
@@ -53,10 +61,10 @@ Principle: review documents are inputs, not facts. Current source and tests deci
 
 ## Recommended Next Implementation Round
 
-Do not start another broad refactor from this ledger. There is no remaining high-risk Claude review item that should automatically start another implementation round. Future work should be driven by a new business, release, or compliance goal, such as:
+Do not start another broad refactor from this ledger. PR #33 and PR #34 close the two remaining P1 runtime-safety findings from the 5.5 Pro review. If one more implementation round is needed from this ledger, keep it small and make it the MCP safety round:
 
-1. Final agent context/message consistency design if the product requires stronger guarantees than the current Redis-backed multi-instance baseline.
-2. Deployment-secret and operational hardening if the next workstream is release/deployment rather than runtime behavior.
-3. Feature backlog such as Workflow Graph/Planner, long-term memory, and Cloud write integrations, only after explicit product and cross-project approval.
+1. Add MCP SSE endpoint validation and update the MCP frontend runtime-refresh wording in one focused PR.
+2. Keep Dapper logging/truncation wording, document orphan cleanup, and repository/store duplication as backlog unless a release or compliance goal pulls them forward.
+3. Final agent context/message consistency, deployment-secret hardening, Workflow Graph/Planner, long-term memory, and Cloud write integrations still require separate product or release plans.
 
 Feature backlog items such as Workflow Graph/Planner, long-term memory, and Cloud write integrations should remain deferred until they receive explicit product and cross-project approval.
