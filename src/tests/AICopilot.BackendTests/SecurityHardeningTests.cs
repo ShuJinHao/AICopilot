@@ -232,6 +232,24 @@ public sealed class SecurityHardeningTests
             "src",
             "stores",
             "configStore.ts"));
+        var mcpServerStoreSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "vues",
+            "AICopilot.Web",
+            "src",
+            "stores",
+            "config",
+            "mcpServerConfig.ts"));
+        var configNormalizersSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "vues",
+            "AICopilot.Web",
+            "src",
+            "stores",
+            "config",
+            "configNormalizers.ts"));
         var configLabelsSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
@@ -271,9 +289,10 @@ public sealed class SecurityHardeningTests
         permissionsSource.Should().Contain("Mcp.CreateServer");
         configServiceSource.Should().Contain("/mcp/server/list");
         configServiceSource.Should().Contain("/mcp/server");
-        configStoreSource.Should().Contain("mcpServers");
-        configStoreSource.Should().Contain("currentMcpServer");
-        configStoreSource.Should().Contain("normalizeToolNames");
+        configStoreSource.Should().Contain("useMcpServerConfigDomain");
+        mcpServerStoreSource.Should().Contain("mcpServers");
+        mcpServerStoreSource.Should().Contain("currentMcpServer");
+        configNormalizersSource.Should().Contain("normalizeToolNames");
         configStoreSource.Should().Contain("CONFIG_STORE_MESSAGES");
         dialogCrudSource.Should().Contain("getProblemDetails");
         configViewSource.Should().Contain("McpServerConfig");
@@ -312,6 +331,21 @@ public sealed class SecurityHardeningTests
         var apiClientSource = File.ReadAllText(Path.Combine(vueRoot, "services", "apiClient.ts"));
         var ragServiceSource = File.ReadAllText(Path.Combine(vueRoot, "services", "ragService.ts"));
         var ragStoreSource = File.ReadAllText(Path.Combine(vueRoot, "stores", "ragStore.ts"));
+        var embeddingModelStoreSource = File.ReadAllText(Path.Combine(
+            vueRoot,
+            "stores",
+            "rag",
+            "embeddingModelStore.ts"));
+        var documentStoreSource = File.ReadAllText(Path.Combine(
+            vueRoot,
+            "stores",
+            "rag",
+            "documentStore.ts"));
+        var documentGovernanceStoreSource = File.ReadAllText(Path.Combine(
+            vueRoot,
+            "stores",
+            "rag",
+            "documentGovernanceStore.ts"));
         var ragFormFactorySource = File.ReadAllText(Path.Combine(vueRoot, "stores", "ragFormFactories.ts"));
         var knowledgeViewSource = File.ReadAllText(Path.Combine(vueRoot, "views", "KnowledgeView.vue"));
         var knowledgeBaseManagementSource = File.ReadAllText(Path.Combine(vueRoot, "views", "knowledge", "KnowledgeBaseManagement.vue"));
@@ -347,9 +381,10 @@ public sealed class SecurityHardeningTests
         ragServiceSource.Should().Contain("/rag/document/governance");
         ragServiceSource.Should().Contain("postForm<UploadDocumentResponse>");
         ragFormFactorySource.Should().Contain("apiKeyAction");
-        ragStoreSource.Should().Contain("form.apiKey.trim()");
-        ragStoreSource.Should().Contain("uploadDocument(file: File)");
-        ragStoreSource.Should().Contain("saveDocumentGovernance");
+        ragStoreSource.Should().Contain("useEmbeddingModelDomain");
+        embeddingModelStoreSource.Should().Contain("form.apiKey.trim()");
+        documentStoreSource.Should().Contain("uploadDocument(file: File)");
+        documentGovernanceStoreSource.Should().Contain("saveDocumentGovernance");
         knowledgeViewSource.Should().Contain("KnowledgeBaseManagement");
         knowledgeBaseManagementSource.Should().Contain("documentStatusLabel");
         knowledgeBaseManagementSource.Should().Contain("documentStatusType");
