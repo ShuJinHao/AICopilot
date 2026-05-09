@@ -64,6 +64,7 @@ Generated for the current large refactor baseline.
 - Module DbContexts may map Outbox with `ExcludeFromMigrations()` so they can stage events without owning the table.
 - Business DbContexts keep their Outbox mappings so aggregate domain events can still be staged in the same transaction as business changes.
 - RAG document upload stages `DocumentUploadedEvent` through `RagIntegrationEventStager`; the document aggregate changes and the outbox row are committed by one `RagDbContext` transaction.
+- RAG document delete stages `DocumentFileDeletionRequestedEvent` through `RagIntegrationEventStager`; aggregate deletion, audit row, and file-cleanup outbox row commit together, and the RAG worker deletes the physical file asynchronously.
 
 ## Runtime Security And Operations Notes
 

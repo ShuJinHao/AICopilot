@@ -815,6 +815,20 @@ public sealed class SecurityHardeningTests
             "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "RagDbContext.cs"));
+        var documentManagementSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "services",
+            "AICopilot.RagService",
+            "Documents",
+            "DocumentManagement.cs"));
+        var fileDeletionConsumerSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "hosts",
+            "AICopilot.RagWorker",
+            "Consumers",
+            "DocumentFileDeletionRequestedConsumer.cs"));
 
         dispatcherSource.Should().Contain("GetRequiredService<OutboxDbContext>");
         dispatcherSource.Should().NotContain("AiCopilotDbContext");
@@ -834,6 +848,12 @@ public sealed class SecurityHardeningTests
         ragEventStagerSource.Should().Contain("OutboxMessages.Add");
         ragContextSource.Should().Contain("StageIntegrationEvent");
         ragContextSource.Should().Contain("BeginTransactionAsync");
+        documentManagementSource.Should().Contain("IIntegrationEventStager");
+        documentManagementSource.Should().Contain("eventStager.Stage(() => new DocumentFileDeletionRequestedEvent");
+        documentManagementSource.Should().NotContain("IFileStorageService fileStorage");
+        documentManagementSource.Should().NotContain("fileStorage.DeleteAsync");
+        fileDeletionConsumerSource.Should().Contain("IConsumer<DocumentFileDeletionRequestedEvent>");
+        fileDeletionConsumerSource.Should().Contain("fileStorage.DeleteAsync");
     }
 
     [Fact]

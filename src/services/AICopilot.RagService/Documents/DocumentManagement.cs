@@ -3,6 +3,7 @@ using AICopilot.Core.Rag.Ids;
 using AICopilot.Core.Rag.Specifications.KnowledgeBase;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.Services.Contracts;
+using AICopilot.Services.Contracts.Events;
 using AICopilot.SharedKernel.Messaging;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
@@ -216,7 +217,7 @@ public class UpdateDocumentGovernanceCommandHandler(
 
 public class DeleteDocumentCommandHandler(
     IRepository<KnowledgeBase> repository,
-    IFileStorageService fileStorage,
+    IIntegrationEventStager eventStager,
     IAuditLogWriter auditLogWriter)
     : ICommandHandler<DeleteDocumentCommand, Result>
 {
@@ -235,8 +236,17 @@ public class DeleteDocumentCommandHandler(
 
         var document = knowledgeBase.Documents.First(document => document.Id == documentId);
         var targetName = document.Name;
+        var filePath = document.FilePath;
+        var knowledgeBaseId = knowledgeBase.Id.Value;
         knowledgeBase.RemoveDocument(documentId);
         repository.Update(knowledgeBase);
+        eventStager.Stage(() => new DocumentFileDeletionRequestedEvent
+        {
+            DocumentId = request.Id,
+            KnowledgeBaseId = knowledgeBaseId,
+            FilePath = filePath,
+            FileName = targetName
+        });
         await auditLogWriter.WriteAsync(
             new AuditLogWriteRequest(
                 AuditActionGroups.Config,
@@ -249,7 +259,6 @@ public class DeleteDocumentCommandHandler(
             cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
 
-        await fileStorage.DeleteAsync(document.FilePath, cancellationToken);
         return Result.Success();
     }
 }

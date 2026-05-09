@@ -4,6 +4,7 @@ using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.Core.Rag.Ids;
 using AICopilot.RagService.Commands.Documents;
 using AICopilot.RagService.Documents;
+using AICopilot.RagWorker.Consumers;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
 using AICopilot.SharedKernel.Specification;
@@ -347,22 +348,26 @@ public sealed class RagIndexingLifecycleTests
     }
 
     [Fact]
-    public async Task DeleteDocument_ShouldRemoveAggregateDocumentAndDeleteStoredFile()
+    public async Task DeleteDocument_ShouldRemoveAggregateDocumentAndStageFileDeletionEvent()
     {
         var (knowledgeBase, document) = CreateKnowledgeBaseWithDocument();
-        var fileStorage = new CapturingFileStorage();
+        var eventStager = new CapturingEventStager();
         var auditLogWriter = new CapturingAuditLogWriter();
         var handler = new DeleteDocumentCommandHandler(
             new MutableKnowledgeBaseRepository(knowledgeBase),
-            fileStorage,
+            eventStager,
             auditLogWriter);
 
         var result = await handler.Handle(new DeleteDocumentCommand(document.Id), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
         knowledgeBase.Documents.Should().BeEmpty();
-        fileStorage.DeleteCount.Should().Be(1);
-        fileStorage.DeletedPaths.Should().ContainSingle().Which.Should().Be(document.FilePath);
+        var message = eventStager.StagedMessages.Should().ContainSingle().Subject
+            .Should().BeOfType<DocumentFileDeletionRequestedEvent>().Subject;
+        message.DocumentId.Should().Be(document.Id.Value);
+        message.KnowledgeBaseId.Should().Be(knowledgeBase.Id.Value);
+        message.FilePath.Should().Be(document.FilePath);
+        message.FileName.Should().Be(document.Name);
         var audit = auditLogWriter.Requests.Should().ContainSingle().Subject;
         audit.ActionCode.Should().Be("Rag.DeleteDocument");
         audit.TargetId.Should().Be(document.Id.ToString());
@@ -370,21 +375,64 @@ public sealed class RagIndexingLifecycleTests
     }
 
     [Fact]
-    public async Task DeleteDocument_ShouldSucceedWithoutDeletingFile_WhenDocumentDoesNotExist()
+    public async Task DeleteDocument_ShouldSucceedWithoutStagingCleanup_WhenDocumentDoesNotExist()
     {
-        var fileStorage = new CapturingFileStorage();
+        var eventStager = new CapturingEventStager();
         var auditLogWriter = new CapturingAuditLogWriter();
         var handler = new DeleteDocumentCommandHandler(
             new MutableKnowledgeBaseRepository(),
-            fileStorage,
+            eventStager,
             auditLogWriter);
 
         var result = await handler.Handle(new DeleteDocumentCommand(404), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
-        fileStorage.DeleteCount.Should().Be(0);
-        fileStorage.DeletedPaths.Should().BeEmpty();
+        eventStager.StagedMessages.Should().BeEmpty();
         auditLogWriter.Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DocumentFileDeletionRequestedConsumer_ShouldDeleteStoredFile()
+    {
+        var fileStorage = new CapturingFileStorage();
+        var consumer = new DocumentFileDeletionRequestedConsumer(
+            fileStorage,
+            NullLogger<DocumentFileDeletionRequestedConsumer>.Instance);
+
+        await consumer.DeleteFileAsync(
+            new DocumentFileDeletionRequestedEvent
+            {
+                DocumentId = 123,
+                KnowledgeBaseId = Guid.NewGuid(),
+                FilePath = "documents/runbook.txt",
+                FileName = "runbook.txt"
+            },
+            CancellationToken.None);
+
+        fileStorage.DeleteCount.Should().Be(1);
+        fileStorage.DeletedPaths.Should().ContainSingle().Which.Should().Be("documents/runbook.txt");
+    }
+
+    [Fact]
+    public async Task DocumentFileDeletionRequestedConsumer_ShouldPropagateDeleteFailures()
+    {
+        var fileStorage = new CapturingFileStorage(new IOException("delete failed"));
+        var consumer = new DocumentFileDeletionRequestedConsumer(
+            fileStorage,
+            NullLogger<DocumentFileDeletionRequestedConsumer>.Instance);
+
+        Func<Task> act = async () => await consumer.DeleteFileAsync(
+            new DocumentFileDeletionRequestedEvent
+            {
+                DocumentId = 123,
+                KnowledgeBaseId = Guid.NewGuid(),
+                FilePath = "documents/runbook.txt",
+                FileName = "runbook.txt"
+            },
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<IOException>().WithMessage("delete failed");
+        fileStorage.DeleteCount.Should().Be(1);
     }
 
     [Fact]

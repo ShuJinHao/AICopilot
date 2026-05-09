@@ -8,6 +8,7 @@ using AICopilot.EntityFrameworkCore.Outbox;
 using AICopilot.EntityFrameworkCore.Repository;
 using AICopilot.EntityFrameworkCore.Transactions;
 using AICopilot.RagService.Commands.Documents;
+using AICopilot.RagService.Documents;
 using AICopilot.Services.Contracts;
 using AICopilot.Services.Contracts.Events;
 using Microsoft.EntityFrameworkCore;
@@ -103,6 +104,51 @@ public sealed class RagUploadOutboxAtomicityTests(CoreAICopilotAppFixture fixtur
         (await verifyContext.OutboxMessages.AnyAsync()).Should().BeFalse();
     }
 
+    [Fact]
+    public async Task DeleteDocument_ShouldCommitAggregateAuditAndFileDeletionOutboxTogether()
+    {
+        await using var database = await ScratchDatabase.CreateAsync(await fixture.GetConnectionStringAsync());
+        await MigrateRagStoreAsync(database.ConnectionString);
+        var seed = await SeedKnowledgeBaseWithDocumentAsync(database.ConnectionString);
+
+        await using var dbContext = new RagDbContext(
+            CreateOptions<RagDbContext>(database.ConnectionString, MigrationHistoryTables.Rag));
+        await using var auditDbContext = new AuditDbContext(CreateAuditOptions(database.ConnectionString));
+        var repository = new RagRepository<KnowledgeBase>(
+            dbContext,
+            new AuditTransactionCoordinator(auditDbContext));
+        var handler = new DeleteDocumentCommandHandler(
+            repository,
+            new RagIntegrationEventStager(dbContext),
+            new AuditLogWriter(auditDbContext));
+
+        var result = await handler.Handle(new DeleteDocumentCommand(seed.DocumentId), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+
+        await using var verifyContext = new RagDbContext(
+            CreateOptions<RagDbContext>(database.ConnectionString, MigrationHistoryTables.Rag));
+        (await verifyContext.Documents.AnyAsync()).Should().BeFalse();
+        var outboxMessage = await verifyContext.OutboxMessages.SingleAsync();
+        outboxMessage.EventTypeName.Should().Be(typeof(DocumentFileDeletionRequestedEvent).FullName);
+
+        using var payload = JsonDocument.Parse(outboxMessage.Payload);
+        payload.RootElement.GetProperty(nameof(DocumentFileDeletionRequestedEvent.DocumentId)).GetInt32()
+            .Should().Be(seed.DocumentId);
+        payload.RootElement.GetProperty(nameof(DocumentFileDeletionRequestedEvent.KnowledgeBaseId)).GetGuid()
+            .Should().Be(seed.KnowledgeBaseId);
+        payload.RootElement.GetProperty(nameof(DocumentFileDeletionRequestedEvent.FilePath)).GetString()
+            .Should().Be(seed.FilePath);
+        payload.RootElement.GetProperty(nameof(DocumentFileDeletionRequestedEvent.FileName)).GetString()
+            .Should().Be(seed.FileName);
+
+        await using var verifyAudit = new AuditDbContext(CreateAuditOptions(database.ConnectionString));
+        var audit = await verifyAudit.AuditLogs.SingleAsync();
+        audit.ActionCode.Should().Be("Rag.DeleteDocument");
+        audit.TargetId.Should().Be(seed.DocumentId.ToString());
+        audit.TargetName.Should().Be(seed.FileName);
+    }
+
     private static async Task MigrateRagStoreAsync(string connectionString)
     {
         await using var aiCopilot = new AiCopilotDbContext(CreateOptions<AiCopilotDbContext>(
@@ -136,6 +182,42 @@ public sealed class RagUploadOutboxAtomicityTests(CoreAICopilotAppFixture fixtur
 
         return knowledgeBase.Id.Value;
     }
+
+    private static async Task<SeededDocument> SeedKnowledgeBaseWithDocumentAsync(string connectionString)
+    {
+        await using var dbContext = new RagDbContext(CreateOptions<RagDbContext>(
+            connectionString,
+            MigrationHistoryTables.Rag));
+        var embeddingModel = new EmbeddingModel(
+            "delete-test-embedding",
+            "OpenAI",
+            "https://example.local",
+            "text-embedding-test",
+            1536,
+            8191);
+        var knowledgeBase = new KnowledgeBase("delete-test-kb", "test knowledge base", embeddingModel.Id);
+        var document = knowledgeBase.AddDocument(
+            "delete-me.txt",
+            "documents/delete-me.txt",
+            ".txt",
+            "delete-hash");
+
+        dbContext.EmbeddingModels.Add(embeddingModel);
+        dbContext.KnowledgeBases.Add(knowledgeBase);
+        await dbContext.SaveChangesAsync();
+
+        return new SeededDocument(
+            knowledgeBase.Id.Value,
+            document.Id.Value,
+            document.FilePath,
+            document.Name);
+    }
+
+    private sealed record SeededDocument(
+        Guid KnowledgeBaseId,
+        int DocumentId,
+        string FilePath,
+        string FileName);
 
     private static DbContextOptions<TContext> CreateOptions<TContext>(
         string connectionString,
