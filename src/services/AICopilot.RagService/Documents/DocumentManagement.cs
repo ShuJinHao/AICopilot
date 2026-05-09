@@ -88,7 +88,9 @@ public record UpdateDocumentGovernanceCommand(
     bool AllowedForFinalPrompt,
     string? BlockedReason) : ICommand<Result>;
 
-public class UpdateDocumentGovernanceCommandHandler(IRepository<KnowledgeBase> repository)
+public class UpdateDocumentGovernanceCommandHandler(
+    IRepository<KnowledgeBase> repository,
+    IAuditLogWriter auditLogWriter)
     : ICommandHandler<UpdateDocumentGovernanceCommand, Result>
 {
     public async Task<Result> Handle(UpdateDocumentGovernanceCommand request, CancellationToken cancellationToken)
@@ -122,6 +124,7 @@ public class UpdateDocumentGovernanceCommandHandler(IRepository<KnowledgeBase> r
         }
 
         var document = knowledgeBase.Documents.First(document => document.Id == documentId);
+        var changedFields = BuildChangedFields(document, request, classification, sourceType);
         document.ConfigureGovernance(
             classification,
             sourceType,
@@ -134,9 +137,71 @@ public class UpdateDocumentGovernanceCommandHandler(IRepository<KnowledgeBase> r
             request.BlockedReason);
 
         repository.Update(knowledgeBase);
+        await auditLogWriter.WriteAsync(
+            new AuditLogWriteRequest(
+                AuditActionGroups.Config,
+                "Rag.UpdateDocumentGovernance",
+                "KnowledgeDocument",
+                document.Id.ToString(),
+                document.Name,
+                AuditResults.Succeeded,
+                $"Updated document governance: {document.Name}; knowledgeBaseId={knowledgeBase.Id}; changed={(changedFields.Count == 0 ? "none" : string.Join(", ", changedFields))}.",
+                changedFields),
+            cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
 
         return Result.Success();
+    }
+
+    private static IReadOnlyCollection<string> BuildChangedFields(
+        Document document,
+        UpdateDocumentGovernanceCommand request,
+        DocumentClassification classification,
+        DocumentSourceType sourceType)
+    {
+        var changedFields = new List<string>();
+
+        if (document.Classification != classification)
+        {
+            changedFields.Add("classification");
+        }
+
+        if (document.SourceType != sourceType)
+        {
+            changedFields.Add("sourceType");
+        }
+
+        if (document.IsSanitized != request.IsSanitized)
+        {
+            changedFields.Add("isSanitized");
+        }
+
+        if (document.EffectiveFrom != request.EffectiveFrom)
+        {
+            changedFields.Add("effectiveFrom");
+        }
+
+        if (document.EffectiveTo != request.EffectiveTo)
+        {
+            changedFields.Add("effectiveTo");
+        }
+
+        if (document.AllowedForFinalPrompt != request.AllowedForFinalPrompt)
+        {
+            changedFields.Add("allowedForFinalPrompt");
+        }
+
+        if (!string.Equals(document.BlockedReason, NormalizeOptionalText(request.BlockedReason), StringComparison.Ordinal))
+        {
+            changedFields.Add("blockedReason");
+        }
+
+        return changedFields;
+    }
+
+    private static string? NormalizeOptionalText(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 
     private static bool TryParseEnum<TEnum>(string? value, out TEnum parsed)
@@ -151,7 +216,8 @@ public class UpdateDocumentGovernanceCommandHandler(IRepository<KnowledgeBase> r
 
 public class DeleteDocumentCommandHandler(
     IRepository<KnowledgeBase> repository,
-    IFileStorageService fileStorage)
+    IFileStorageService fileStorage,
+    IAuditLogWriter auditLogWriter)
     : ICommandHandler<DeleteDocumentCommand, Result>
 {
     public async Task<Result> Handle(DeleteDocumentCommand request, CancellationToken cancellationToken)
@@ -168,8 +234,19 @@ public class DeleteDocumentCommandHandler(
         }
 
         var document = knowledgeBase.Documents.First(document => document.Id == documentId);
+        var targetName = document.Name;
         knowledgeBase.RemoveDocument(documentId);
         repository.Update(knowledgeBase);
+        await auditLogWriter.WriteAsync(
+            new AuditLogWriteRequest(
+                AuditActionGroups.Config,
+                "Rag.DeleteDocument",
+                "KnowledgeDocument",
+                request.Id.ToString(),
+                targetName,
+                AuditResults.Succeeded,
+                $"Deleted document: {targetName}; knowledgeBaseId={knowledgeBase.Id}."),
+            cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
 
         await fileStorage.DeleteAsync(document.FilePath, cancellationToken);

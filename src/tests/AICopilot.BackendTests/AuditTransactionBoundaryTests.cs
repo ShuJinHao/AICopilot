@@ -1,10 +1,13 @@
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
 using AICopilot.Core.DataAnalysis.Ids;
+using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
+using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.EntityFrameworkCore;
 using AICopilot.EntityFrameworkCore.AuditLogs;
 using AICopilot.EntityFrameworkCore.Repository;
 using AICopilot.EntityFrameworkCore.Transactions;
+using AICopilot.SharedKernel.Ai;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
@@ -128,6 +131,120 @@ public sealed class AuditTransactionBoundaryTests(CoreAICopilotAppFixture fixtur
         (await BusinessDatabaseExistsAsync(database.ConnectionString, "audit-txn-existing")).Should().BeTrue();
     }
 
+    [Fact]
+    public async Task RagRepository_ShouldCommitBusinessAndAuditRowsTogether()
+    {
+        await using var database = await ScratchDatabase.CreateAsync(await fixture.GetConnectionStringAsync());
+        await MigrateRagStoreAsync(database.ConnectionString);
+
+        await using var dbContext = new RagDbContext(CreateOptions<RagDbContext>(
+            database.ConnectionString,
+            MigrationHistoryTables.Rag));
+        await using var auditDbContext = new AuditDbContext(CreateAuditOptions(database.ConnectionString));
+        var repository = new RagRepository<EmbeddingModel>(
+            dbContext,
+            new AuditTransactionCoordinator(auditDbContext));
+        var auditLogWriter = new AuditLogWriter(auditDbContext);
+        var model = CreateEmbeddingModel("audit-txn-rag-model");
+
+        repository.Add(model);
+        await auditLogWriter.WriteAsync(CreateAuditRequest(model.Id.ToString(), model.Name));
+        await repository.SaveChangesAsync();
+
+        await using var verifyRag = new RagDbContext(CreateOptions<RagDbContext>(
+            database.ConnectionString,
+            MigrationHistoryTables.Rag));
+        await using var verifyAudit = new AuditDbContext(CreateAuditOptions(database.ConnectionString));
+        (await verifyRag.EmbeddingModels.AnyAsync(item => item.Id == model.Id)).Should().BeTrue();
+        (await verifyAudit.AuditLogs.AnyAsync(item => item.TargetId == model.Id.ToString())).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task RagRepository_ShouldRollbackBusinessRows_WhenAuditSaveFails()
+    {
+        await using var database = await ScratchDatabase.CreateAsync(await fixture.GetConnectionStringAsync());
+        await MigrateRagStoreAsync(database.ConnectionString);
+
+        await using var dbContext = new RagDbContext(CreateOptions<RagDbContext>(
+            database.ConnectionString,
+            MigrationHistoryTables.Rag));
+        await using var auditDbContext = new AuditDbContext(CreateAuditOptions(database.ConnectionString));
+        var repository = new RagRepository<EmbeddingModel>(
+            dbContext,
+            new AuditTransactionCoordinator(auditDbContext));
+        var auditLogWriter = new AuditLogWriter(auditDbContext);
+        var model = CreateEmbeddingModel("audit-txn-rag-rollback");
+
+        repository.Add(model);
+        await auditLogWriter.WriteAsync(CreateInvalidAuditRequest(model.Id.ToString(), model.Name));
+        Func<Task> act = async () => await repository.SaveChangesAsync();
+
+        await act.Should().ThrowAsync<DbUpdateException>();
+        await using var verifyRag = new RagDbContext(CreateOptions<RagDbContext>(
+            database.ConnectionString,
+            MigrationHistoryTables.Rag));
+        await using var verifyAudit = new AuditDbContext(CreateAuditOptions(database.ConnectionString));
+        (await verifyRag.EmbeddingModels.AnyAsync(item => item.Id == model.Id)).Should().BeFalse();
+        (await verifyAudit.AuditLogs.AnyAsync(item => item.TargetId == model.Id.ToString())).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task McpServerRepository_ShouldRollbackBusinessRows_WhenAuditSaveFails()
+    {
+        await using var database = await ScratchDatabase.CreateAsync(await fixture.GetConnectionStringAsync());
+        await MigrateMcpServerStoreAsync(database.ConnectionString);
+
+        await using var dbContext = new McpServerDbContext(CreateOptions<McpServerDbContext>(
+            database.ConnectionString,
+            MigrationHistoryTables.McpServer));
+        await using var auditDbContext = new AuditDbContext(CreateAuditOptions(database.ConnectionString));
+        var repository = new McpServerRepository(
+            dbContext,
+            new AuditTransactionCoordinator(auditDbContext));
+        var auditLogWriter = new AuditLogWriter(auditDbContext);
+        var server = CreateMcpServer("audit-txn-mcp-rollback");
+
+        repository.Add(server);
+        await auditLogWriter.WriteAsync(CreateInvalidAuditRequest(server.Id.ToString(), server.Name));
+        Func<Task> act = async () => await repository.SaveChangesAsync();
+
+        await act.Should().ThrowAsync<DbUpdateException>();
+        await using var verifyMcp = new McpServerDbContext(CreateOptions<McpServerDbContext>(
+            database.ConnectionString,
+            MigrationHistoryTables.McpServer));
+        await using var verifyAudit = new AuditDbContext(CreateAuditOptions(database.ConnectionString));
+        (await verifyMcp.McpServerInfos.AnyAsync(item => item.Id == server.Id)).Should().BeFalse();
+        (await verifyAudit.AuditLogs.AnyAsync(item => item.TargetId == server.Id.ToString())).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task McpServerRepository_ShouldCommitBusinessAndAuditRowsTogether()
+    {
+        await using var database = await ScratchDatabase.CreateAsync(await fixture.GetConnectionStringAsync());
+        await MigrateMcpServerStoreAsync(database.ConnectionString);
+
+        await using var dbContext = new McpServerDbContext(CreateOptions<McpServerDbContext>(
+            database.ConnectionString,
+            MigrationHistoryTables.McpServer));
+        await using var auditDbContext = new AuditDbContext(CreateAuditOptions(database.ConnectionString));
+        var repository = new McpServerRepository(
+            dbContext,
+            new AuditTransactionCoordinator(auditDbContext));
+        var auditLogWriter = new AuditLogWriter(auditDbContext);
+        var server = CreateMcpServer("audit-txn-mcp-server");
+
+        repository.Add(server);
+        await auditLogWriter.WriteAsync(CreateAuditRequest(server.Id.ToString(), server.Name));
+        await repository.SaveChangesAsync();
+
+        await using var verifyMcp = new McpServerDbContext(CreateOptions<McpServerDbContext>(
+            database.ConnectionString,
+            MigrationHistoryTables.McpServer));
+        await using var verifyAudit = new AuditDbContext(CreateAuditOptions(database.ConnectionString));
+        (await verifyMcp.McpServerInfos.AnyAsync(item => item.Id == server.Id)).Should().BeTrue();
+        (await verifyAudit.AuditLogs.AnyAsync(item => item.TargetId == server.Id.ToString())).Should().BeTrue();
+    }
+
     private static async Task<bool> SaveBusinessDatabaseWithInvalidAuditAsync(
         string connectionString,
         Func<BusinessDatabaseRepository, BusinessDatabase> arrange)
@@ -196,6 +313,31 @@ public sealed class AuditTransactionBoundaryTests(CoreAICopilotAppFixture fixtur
             readOnlyCredentialVerified: true);
     }
 
+    private static EmbeddingModel CreateEmbeddingModel(string name)
+    {
+        return new EmbeddingModel(
+            name,
+            "OpenAI",
+            "https://embedding.example",
+            "text-embedding-3-small",
+            1536,
+            8191,
+            "redacted");
+    }
+
+    private static McpServerInfo CreateMcpServer(string name)
+    {
+        return new McpServerInfo(
+            name,
+            "transaction boundary test server",
+            McpTransportType.Stdio,
+            "dotnet",
+            "server.dll --token redacted",
+            ChatExposureMode.Advisory,
+            [new McpAllowedTool("Echo")],
+            true);
+    }
+
     private static AuditLogWriteRequest CreateAuditRequest(string targetId, string targetName)
     {
         return new AuditLogWriteRequest(
@@ -244,6 +386,32 @@ public sealed class AuditTransactionBoundaryTests(CoreAICopilotAppFixture fixtur
             connectionString,
             MigrationHistoryTables.DataAnalysis));
         await dataAnalysis.Database.MigrateAsync();
+    }
+
+    private static async Task MigrateRagStoreAsync(string connectionString)
+    {
+        await using var aiCopilot = new AiCopilotDbContext(CreateOptions<AiCopilotDbContext>(
+            connectionString,
+            MigrationHistoryTables.AiCopilot));
+        await aiCopilot.Database.MigrateAsync();
+
+        await using var rag = new RagDbContext(CreateOptions<RagDbContext>(
+            connectionString,
+            MigrationHistoryTables.Rag));
+        await rag.Database.MigrateAsync();
+    }
+
+    private static async Task MigrateMcpServerStoreAsync(string connectionString)
+    {
+        await using var aiCopilot = new AiCopilotDbContext(CreateOptions<AiCopilotDbContext>(
+            connectionString,
+            MigrationHistoryTables.AiCopilot));
+        await aiCopilot.Database.MigrateAsync();
+
+        await using var mcpServer = new McpServerDbContext(CreateOptions<McpServerDbContext>(
+            connectionString,
+            MigrationHistoryTables.McpServer));
+        await mcpServer.Database.MigrateAsync();
     }
 
     private static DbContextOptions<TContext> CreateOptions<TContext>(

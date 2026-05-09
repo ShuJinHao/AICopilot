@@ -3,8 +3,10 @@ using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.Core.Rag.Ids;
 using AICopilot.EntityFrameworkCore;
+using AICopilot.EntityFrameworkCore.AuditLogs;
 using AICopilot.EntityFrameworkCore.Outbox;
 using AICopilot.EntityFrameworkCore.Repository;
+using AICopilot.EntityFrameworkCore.Transactions;
 using AICopilot.RagService.Commands.Documents;
 using AICopilot.Services.Contracts;
 using AICopilot.Services.Contracts.Events;
@@ -26,7 +28,10 @@ public sealed class RagUploadOutboxAtomicityTests(CoreAICopilotAppFixture fixtur
 
         await using var dbContext = new RagDbContext(
             CreateOptions<RagDbContext>(database.ConnectionString, MigrationHistoryTables.Rag));
-        var repository = new RagRepository<KnowledgeBase>(dbContext);
+        await using var auditDbContext = new AuditDbContext(CreateAuditOptions(database.ConnectionString));
+        var repository = new RagRepository<KnowledgeBase>(
+            dbContext,
+            new AuditTransactionCoordinator(auditDbContext));
         var stager = new RagIntegrationEventStager(dbContext);
         var handler = new UploadDocumentCommandHandler(
             repository,
@@ -71,7 +76,10 @@ public sealed class RagUploadOutboxAtomicityTests(CoreAICopilotAppFixture fixtur
 
         await using var dbContext = new RagDbContext(
             CreateOptions<RagDbContext>(database.ConnectionString, MigrationHistoryTables.Rag));
-        var repository = new RagRepository<KnowledgeBase>(dbContext);
+        await using var auditDbContext = new AuditDbContext(CreateAuditOptions(database.ConnectionString));
+        var repository = new RagRepository<KnowledgeBase>(
+            dbContext,
+            new AuditTransactionCoordinator(auditDbContext));
         var handler = new UploadDocumentCommandHandler(
             repository,
             fileStorage,
@@ -136,6 +144,13 @@ public sealed class RagUploadOutboxAtomicityTests(CoreAICopilotAppFixture fixtur
     {
         return new DbContextOptionsBuilder<TContext>()
             .UseNpgsqlWithMigrationHistory(connectionString, historyTable)
+            .Options;
+    }
+
+    private static DbContextOptions<AuditDbContext> CreateAuditOptions(string connectionString)
+    {
+        return new DbContextOptionsBuilder<AuditDbContext>()
+            .UseNpgsql(connectionString)
             .Options;
     }
 

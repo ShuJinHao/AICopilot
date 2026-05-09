@@ -1,13 +1,16 @@
 using System.Linq.Expressions;
 using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
 using AICopilot.EntityFrameworkCore.Specification;
+using AICopilot.EntityFrameworkCore.Transactions;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Specification;
 using Microsoft.EntityFrameworkCore;
 
 namespace AICopilot.EntityFrameworkCore.Repository;
 
-public sealed class McpServerRepository(McpServerDbContext dbContext) : IRepository<McpServerInfo>
+public sealed class McpServerRepository(
+    McpServerDbContext dbContext,
+    AuditTransactionCoordinator transactionCoordinator) : IRepository<McpServerInfo>
 {
     public async Task<List<McpServerInfo>> ListAsync(
         ISpecification<McpServerInfo>? specification = null,
@@ -93,7 +96,7 @@ public sealed class McpServerRepository(McpServerDbContext dbContext) : IReposit
 
     public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
-        return dbContext.SaveChangesAsync(cancellationToken);
+        return transactionCoordinator.SaveChangesAsync(dbContext, cancellationToken);
     }
 
     private IQueryable<McpServerInfo> ApplySpecification(ISpecification<McpServerInfo>? specification)

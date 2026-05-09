@@ -2,12 +2,10 @@
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.Core.Rag.Ids;
 using AICopilot.Services.CrossCutting.Attributes;
+using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Messaging;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace AICopilot.RagService.Commands.KnowledgeBases;
 
@@ -21,7 +19,8 @@ public record CreateKnowledgeBaseCommand(
 
 public class CreateKnowledgeBaseCommandHandler(
     IRepository<KnowledgeBase> kbRepo,
-    IReadRepository<EmbeddingModel> modelRepo)
+    IReadRepository<EmbeddingModel> modelRepo,
+    IAuditLogWriter auditLogWriter)
     : ICommandHandler<CreateKnowledgeBaseCommand, Result<CreatedKnowledgeBaseDto>>
 {
     public async Task<Result<CreatedKnowledgeBaseDto>> Handle(
@@ -42,6 +41,17 @@ public class CreateKnowledgeBaseCommandHandler(
 
         // 3. 持久化
         kbRepo.Add(kb);
+        await auditLogWriter.WriteAsync(
+            new AuditLogWriteRequest(
+                AuditActionGroups.Config,
+                "Rag.CreateKnowledgeBase",
+                "KnowledgeBase",
+                kb.Id.ToString(),
+                kb.Name,
+                AuditResults.Succeeded,
+                $"Created knowledge base: {kb.Name}; embeddingModelId={kb.EmbeddingModelId}.",
+                ["name", "description", "embeddingModelId"]),
+            cancellationToken);
         await kbRepo.SaveChangesAsync(cancellationToken);
 
         return Result.Success(new CreatedKnowledgeBaseDto(kb.Id, kb.Name));

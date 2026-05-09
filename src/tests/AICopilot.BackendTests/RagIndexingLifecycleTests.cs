@@ -267,7 +267,10 @@ public sealed class RagIndexingLifecycleTests
         var originalFileHash = document.FileHash;
         var originalStatus = document.Status;
         var originalChunkCount = document.ChunkCount;
-        var handler = new UpdateDocumentGovernanceCommandHandler(new MutableKnowledgeBaseRepository(knowledgeBase));
+        var auditLogWriter = new CapturingAuditLogWriter();
+        var handler = new UpdateDocumentGovernanceCommandHandler(
+            new MutableKnowledgeBaseRepository(knowledgeBase),
+            auditLogWriter);
 
         var result = await handler.Handle(
             new UpdateDocumentGovernanceCommand(
@@ -291,13 +294,19 @@ public sealed class RagIndexingLifecycleTests
         document.FileHash.Should().Be(originalFileHash);
         document.Status.Should().Be(originalStatus);
         document.ChunkCount.Should().Be(originalChunkCount);
+        var audit = auditLogWriter.Requests.Should().ContainSingle().Subject;
+        audit.ActionCode.Should().Be("Rag.UpdateDocumentGovernance");
+        audit.TargetId.Should().Be(document.Id.ToString());
+        audit.ChangedFields.Should().Contain(["classification", "sourceType", "isSanitized", "effectiveFrom", "effectiveTo", "allowedForFinalPrompt", "blockedReason"]);
     }
 
     [Fact]
     public async Task UpdateDocumentGovernance_ShouldRejectInvalidEffectiveRange()
     {
         var (_, document) = CreateKnowledgeBaseWithDocument();
-        var handler = new UpdateDocumentGovernanceCommandHandler(new MutableKnowledgeBaseRepository());
+        var handler = new UpdateDocumentGovernanceCommandHandler(
+            new MutableKnowledgeBaseRepository(),
+            new CapturingAuditLogWriter());
 
         var result = await handler.Handle(
             new UpdateDocumentGovernanceCommand(
@@ -318,7 +327,9 @@ public sealed class RagIndexingLifecycleTests
     public async Task UpdateDocumentGovernance_ShouldRejectInvalidClassification()
     {
         var (_, document) = CreateKnowledgeBaseWithDocument();
-        var handler = new UpdateDocumentGovernanceCommandHandler(new MutableKnowledgeBaseRepository());
+        var handler = new UpdateDocumentGovernanceCommandHandler(
+            new MutableKnowledgeBaseRepository(),
+            new CapturingAuditLogWriter());
 
         var result = await handler.Handle(
             new UpdateDocumentGovernanceCommand(
@@ -340,9 +351,11 @@ public sealed class RagIndexingLifecycleTests
     {
         var (knowledgeBase, document) = CreateKnowledgeBaseWithDocument();
         var fileStorage = new CapturingFileStorage();
+        var auditLogWriter = new CapturingAuditLogWriter();
         var handler = new DeleteDocumentCommandHandler(
             new MutableKnowledgeBaseRepository(knowledgeBase),
-            fileStorage);
+            fileStorage,
+            auditLogWriter);
 
         var result = await handler.Handle(new DeleteDocumentCommand(document.Id), CancellationToken.None);
 
@@ -350,21 +363,28 @@ public sealed class RagIndexingLifecycleTests
         knowledgeBase.Documents.Should().BeEmpty();
         fileStorage.DeleteCount.Should().Be(1);
         fileStorage.DeletedPaths.Should().ContainSingle().Which.Should().Be(document.FilePath);
+        var audit = auditLogWriter.Requests.Should().ContainSingle().Subject;
+        audit.ActionCode.Should().Be("Rag.DeleteDocument");
+        audit.TargetId.Should().Be(document.Id.ToString());
+        audit.TargetName.Should().Be(document.Name);
     }
 
     [Fact]
     public async Task DeleteDocument_ShouldSucceedWithoutDeletingFile_WhenDocumentDoesNotExist()
     {
         var fileStorage = new CapturingFileStorage();
+        var auditLogWriter = new CapturingAuditLogWriter();
         var handler = new DeleteDocumentCommandHandler(
             new MutableKnowledgeBaseRepository(),
-            fileStorage);
+            fileStorage,
+            auditLogWriter);
 
         var result = await handler.Handle(new DeleteDocumentCommand(404), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
         fileStorage.DeleteCount.Should().Be(0);
         fileStorage.DeletedPaths.Should().BeEmpty();
+        auditLogWriter.Requests.Should().BeEmpty();
     }
 
     [Fact]
@@ -649,6 +669,22 @@ public sealed class RagIndexingLifecycleTests
             where TEvent : class
         {
             throw exception;
+        }
+    }
+
+    private sealed class CapturingAuditLogWriter : IAuditLogWriter
+    {
+        public List<AuditLogWriteRequest> Requests { get; } = [];
+
+        public Task WriteAsync(AuditLogWriteRequest request, CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request);
+            return Task.CompletedTask;
+        }
+
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Requests.Count);
         }
     }
 
