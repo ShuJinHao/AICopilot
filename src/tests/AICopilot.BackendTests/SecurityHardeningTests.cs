@@ -629,6 +629,20 @@ public sealed class SecurityHardeningTests
             "AICopilot.EntityFrameworkCore",
             "Repository",
             "EfRepository.cs"));
+        var efRepositoryBaseSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "infrastructure",
+            "AICopilot.EntityFrameworkCore",
+            "Repository",
+            "EfRepositoryBase.cs"));
+        var efReadRepositoryBaseSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "infrastructure",
+            "AICopilot.EntityFrameworkCore",
+            "Repository",
+            "EfReadRepositoryBase.cs"));
         var aiGatewayRepositorySource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
@@ -678,16 +692,19 @@ public sealed class SecurityHardeningTests
         auditContextSource.Should().Contain("DbSet<AuditLogEntry>");
         auditContextSource.Should().Contain("AuditLogEntryConfiguration");
         auditContextSource.Should().NotContain("ExcludeFromMigrations");
-        efRepositorySource.Should().Contain("AuditTransactionCoordinator");
-        efRepositorySource.Should().Contain("transactionCoordinator.SaveChangesAsync");
-        aiGatewayRepositorySource.Should().Contain("AuditTransactionCoordinator");
-        aiGatewayRepositorySource.Should().Contain("transactionCoordinator.SaveChangesAsync");
-        businessDatabaseRepositorySource.Should().Contain("AuditTransactionCoordinator");
-        businessDatabaseRepositorySource.Should().Contain("transactionCoordinator.SaveChangesAsync");
-        ragRepositorySource.Should().Contain("AuditTransactionCoordinator");
-        ragRepositorySource.Should().Contain("transactionCoordinator.SaveChangesAsync");
-        mcpServerRepositorySource.Should().Contain("AuditTransactionCoordinator");
-        mcpServerRepositorySource.Should().Contain("transactionCoordinator.SaveChangesAsync");
+        efRepositorySource.Should().Contain("EfRepositoryBase<AiCopilotDbContext, T>");
+        efRepositoryBaseSource.Should().Contain("AuditTransactionCoordinator");
+        efRepositoryBaseSource.Should().Contain("transactionCoordinator.SaveChangesAsync");
+        efReadRepositoryBaseSource.Should().Contain("SpecificationEvaluator.GetQuery");
+        efReadRepositoryBaseSource.Should().Contain("ApplyIncludes");
+        aiGatewayRepositorySource.Should().Contain("EfRepositoryBase<AiGatewayDbContext, T>");
+        businessDatabaseRepositorySource.Should().Contain("EfRepositoryBase<DataAnalysisDbContext, BusinessDatabase>");
+        ragRepositorySource.Should().Contain("EfRepositoryBase<RagDbContext, T>");
+        mcpServerRepositorySource.Should().Contain("EfRepositoryBase<McpServerDbContext, McpServerInfo>");
+        aiGatewayRepositorySource.Should().NotContain("ApplySpecification");
+        businessDatabaseRepositorySource.Should().NotContain("ApplySpecification");
+        ragRepositorySource.Should().NotContain("ApplySpecification");
+        mcpServerRepositorySource.Should().NotContain("ApplySpecification");
         transactionCoordinatorSource.Should().Contain("CreateExecutionStrategy");
         transactionCoordinatorSource.Should().Contain("BeginTransactionAsync");
         transactionCoordinatorSource.Should().Contain("UseTransactionAsync");
