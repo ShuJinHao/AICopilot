@@ -18,6 +18,13 @@ Generated for the current large refactor baseline.
 - Runtime and frontend usability closure has been merged: chat/approval, RAG knowledge management, DataAnalysis configuration feedback, MCP server management, and `/chat`, `/config`, `/knowledge`, `/access` frontend paths are part of the current baseline.
 - Source directory casing is normalized under `src`, and core business aggregate IDs use strong typed identifiers internally while API DTOs and database columns remain Guid-based.
 
+## Maintainability Baseline
+
+- Module repositories share EF repository bases for CRUD, specification, include, count, and existence logic; module wrappers preserve explicit DI boundaries and transaction behavior.
+- `useConfigStore()` remains the config page facade, while config domain logic lives under `src/stores/config/`.
+- `useRagStore()` remains the knowledge page facade, while embedding model, knowledge base, document, governance, and search logic live under `src/stores/rag/`.
+- Existing facade field and action names remain stable for current Vue pages, and frontend unit tests guard the facade API surface.
+
 ## Persistence Boundary
 
 - `AiGatewayDbContext` owns `aigateway.language_models`, `aigateway.conversation_templates`, `aigateway.approval_policies`, `aigateway.sessions`, and `aigateway.messages`.

@@ -2,7 +2,7 @@
 
 Date: 2026-05-08
 
-Baseline: `main` after PR #37 (`a76d94e`) plus PR #38 RAG document file cleanup. This matrix reconciles the remaining follow-up items from `REVIEW_FOLLOWUP_2026-04-29.md`, `REVIEW_ACCEPTANCE_2026-05-07.md`, and the 5.5 Pro full-code review.
+Baseline: `main` after PR #40 (`2b9fb1a`). This matrix reconciles the remaining follow-up items from `REVIEW_FOLLOWUP_2026-04-29.md`, `REVIEW_ACCEPTANCE_2026-05-07.md`, and the 5.5 Pro full-code review.
 
 Principle: review documents are inputs, not facts. Current source and tests decide whether an item is closed, still real, deferred, or not applicable.
 
@@ -47,7 +47,7 @@ Principle: review documents are inputs, not facts. Current source and tests deci
 | 5.5 Pro review P2 | Dapper failed-query logs include full SQL text | Closed | `DapperDatabaseConnector` logs SQL length/hash/provider/error type only; `TextToSqlReadOnlyTests`; `SecurityHardeningTests` | None | No |
 | 5.5 Pro review P2 | Dapper truncation wording implies exact total row count | Closed | `DataAnalysisSqlQueryRunner`; `DataAnalysisAuditRecorder`; `SemanticAnalysisRunner`; `TextToSqlReadOnlyTests`; `SecurityHardeningTests` | None | No |
 | 5.5 Pro review P2 | Document delete can leave orphan files if file deletion fails after DB save | Closed | PR #38; `DocumentFileDeletionRequestedEvent`; `DocumentFileDeletionRequestedConsumer`; `DeleteDocumentCommandHandler`; `RagUploadOutboxAtomicityTests`; `RagIndexingLifecycleTests`; `SecurityHardeningTests` | None | No |
-| 5.5 Pro review P2 | Module repositories and frontend stores still contain structural duplication | Remaining | Repository templates, `configStore.ts`, and `ragStore.ts` remain maintainability backlog | Handle only after runtime safety fixes; do not mix with security PRs | No |
+| 5.5 Pro review P2 | Module repositories and frontend stores still contain structural duplication | Closed | PR #39; shared EF repository bases for CRUD/spec/include; PR #40; `useConfigStore()` and `useRagStore()` facades with domain modules under `src/stores/config/` and `src/stores/rag/` | None | No |
 | `REVIEW_FOLLOWUP_2026-04-29.md` P2 | Bootstrap/admin secret operational discipline | Remaining | Deployment/runbook concern; no runtime code change in this closure | Add deployment-secret checklist/tests if deployment templates change | Not next unless deployment work starts |
 | `REVIEW_FOLLOWUP_2026-04-29.md` P2 | API key in-memory zeroization | Deferred | Requires a broader secret-handling policy and may affect contracts | Track as compliance backlog | No |
 | `REVIEW_FOLLOWUP_2026-04-29.md` P2 | AST comment-bypass concern | Not applicable | Current guardrails strip or inspect comments before SQL execution paths | Revisit only if SQL parser/query builder is replaced | No |
@@ -61,9 +61,10 @@ Principle: review documents are inputs, not facts. Current source and tests deci
 
 ## Recommended Next Implementation Round
 
-Do not start another broad refactor from this ledger. PR #33 and PR #34 close the two remaining P1 runtime-safety findings from the 5.5 Pro review, and the MCP safety follow-up closes the two highest-signal P2 MCP findings.
+Do not start another broad refactor from this ledger. PR #33 and PR #34 close the two remaining P1 runtime-safety findings from the 5.5 Pro review, the MCP/DataAnalysis/RAG cleanup closes the highest-signal P2 findings, and PR #39/#40 close the structural duplication follow-up.
 
-1. Keep repository/store duplication as backlog unless a release or maintainability goal pulls it forward.
-2. Final agent context/message consistency, deployment-secret hardening, Workflow Graph/Planner, long-term memory, and Cloud write integrations still require separate product or release plans.
+1. Deployment-secret and operational hardening is the next implementation candidate if release or deployment work starts.
+2. Final agent context/message consistency and API key in-memory zeroization remain separate design/compliance backlog.
+3. Workflow Graph/Planner, long-term memory, and Cloud write integrations require separate product approval.
 
 Feature backlog items such as Workflow Graph/Planner, long-term memory, and Cloud write integrations should remain deferred until they receive explicit product and cross-project approval.
