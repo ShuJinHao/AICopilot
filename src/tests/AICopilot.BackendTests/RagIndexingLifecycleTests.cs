@@ -1,4 +1,5 @@
 using System.Linq.Expressions;
+using System.Security.Cryptography;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.Core.Rag.Ids;
 using AICopilot.RagService.Commands.Documents;
@@ -6,6 +7,7 @@ using AICopilot.RagService.Documents;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
 using AICopilot.SharedKernel.Specification;
+using AICopilot.Services.Contracts.Events;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -19,12 +21,13 @@ public sealed class RagIndexingLifecycleTests
         var knowledgeBase = new KnowledgeBase("kb", "description", EmbeddingModelId.New());
         var repository = new MutableKnowledgeBaseRepository(knowledgeBase);
         var fileStorage = new CapturingFileStorage();
-        var eventPublisher = new CapturingEventPublisher();
+        var eventStager = new CapturingEventStager();
         var handler = new UploadDocumentCommandHandler(
             repository,
             fileStorage,
             new FixedDocumentFormatPolicy([".txt", ".md", ".pdf"]),
-            eventPublisher);
+            eventStager,
+            NullLogger<UploadDocumentCommandHandler>.Instance);
 
         var result = await handler.Handle(
             new UploadDocumentCommand(
@@ -35,7 +38,7 @@ public sealed class RagIndexingLifecycleTests
         result.Status.Should().Be(ResultStatus.Invalid);
         knowledgeBase.Documents.Should().BeEmpty();
         fileStorage.SaveCount.Should().Be(0);
-        eventPublisher.PublishedCount.Should().Be(0);
+        eventStager.StagedCount.Should().Be(0);
     }
 
     [Fact]
@@ -43,11 +46,13 @@ public sealed class RagIndexingLifecycleTests
     {
         var knowledgeBase = new KnowledgeBase("kb", "description", EmbeddingModelId.New());
         var repository = new MutableKnowledgeBaseRepository(knowledgeBase);
+        var eventStager = new CapturingEventStager();
         var handler = new UploadDocumentCommandHandler(
             repository,
             new CapturingFileStorage(),
             new FixedDocumentFormatPolicy([".txt"]),
-            new CapturingEventPublisher());
+            eventStager,
+            NullLogger<UploadDocumentCommandHandler>.Instance);
 
         var result = await handler.Handle(
             new UploadDocumentCommand(
@@ -68,6 +73,124 @@ public sealed class RagIndexingLifecycleTests
         document.AllowedForFinalPrompt.Should().BeFalse();
         document.BlockedReason.Should().Be("contains secrets");
         document.CanEnterFinalPrompt(DateTime.UtcNow).Should().BeFalse();
+        eventStager.StagedMessages.Should().ContainSingle()
+            .Which.Should().BeOfType<DocumentUploadedEvent>();
+    }
+
+    [Fact]
+    public async Task UploadDocument_ShouldStageUploadedEventBeforeSavingAggregate()
+    {
+        var knowledgeBase = new KnowledgeBase("kb", "description", EmbeddingModelId.New());
+        var repository = new MutableKnowledgeBaseRepository(knowledgeBase);
+        var saveCountObservedAtStage = -1;
+        var eventStager = new CapturingEventStager(_ => saveCountObservedAtStage = repository.SaveCount);
+        var handler = new UploadDocumentCommandHandler(
+            repository,
+            new CapturingFileStorage(),
+            new FixedDocumentFormatPolicy([".txt"]),
+            eventStager,
+            NullLogger<UploadDocumentCommandHandler>.Instance);
+
+        var result = await handler.Handle(
+            new UploadDocumentCommand(
+                knowledgeBase.Id.Value,
+                new FileUploadStream("runbook.txt", new MemoryStream([1, 2, 3]))),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        repository.SaveCount.Should().Be(1);
+        saveCountObservedAtStage.Should().Be(0);
+        var message = eventStager.StagedMessages.Should().ContainSingle().Subject.Should().BeOfType<DocumentUploadedEvent>().Subject;
+        var document = knowledgeBase.Documents.Should().ContainSingle().Subject;
+        message.DocumentId.Should().Be(document.Id.Value);
+        message.KnowledgeBaseId.Should().Be(knowledgeBase.Id.Value);
+        message.FilePath.Should().Be(document.FilePath);
+        message.FileName.Should().Be("runbook.txt");
+    }
+
+    [Fact]
+    public async Task UploadDocument_ShouldDeleteSavedFile_WhenStagingFails()
+    {
+        var knowledgeBase = new KnowledgeBase("kb", "description", EmbeddingModelId.New());
+        var repository = new MutableKnowledgeBaseRepository(knowledgeBase);
+        var fileStorage = new CapturingFileStorage();
+        var handler = new UploadDocumentCommandHandler(
+            repository,
+            fileStorage,
+            new FixedDocumentFormatPolicy([".txt"]),
+            new ThrowingEventStager(new InvalidOperationException("stage failed")),
+            NullLogger<UploadDocumentCommandHandler>.Instance);
+
+        Func<Task> act = async () => await handler.Handle(
+            new UploadDocumentCommand(
+                knowledgeBase.Id.Value,
+                new FileUploadStream("runbook.txt", new MemoryStream([1, 2, 3]))),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("stage failed");
+        repository.SaveCount.Should().Be(0);
+        fileStorage.DeleteCount.Should().Be(1);
+        fileStorage.DeletedPaths.Should().ContainSingle().Which.Should().Be("runbook.txt");
+    }
+
+    [Fact]
+    public async Task UploadDocument_ShouldDeleteSavedFile_WhenRepositorySaveFails()
+    {
+        var knowledgeBase = new KnowledgeBase("kb", "description", EmbeddingModelId.New());
+        var repository = new MutableKnowledgeBaseRepository(
+            _ => throw new InvalidOperationException("database save failed"),
+            knowledgeBase);
+        var fileStorage = new CapturingFileStorage();
+        var eventStager = new CapturingEventStager();
+        var handler = new UploadDocumentCommandHandler(
+            repository,
+            fileStorage,
+            new FixedDocumentFormatPolicy([".txt"]),
+            eventStager,
+            NullLogger<UploadDocumentCommandHandler>.Instance);
+
+        Func<Task> act = async () => await handler.Handle(
+            new UploadDocumentCommand(
+                knowledgeBase.Id.Value,
+                new FileUploadStream("runbook.txt", new MemoryStream([1, 2, 3]))),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("database save failed");
+        eventStager.StagedCount.Should().Be(1);
+        repository.SaveCount.Should().Be(1);
+        fileStorage.DeleteCount.Should().Be(1);
+        fileStorage.DeletedPaths.Should().ContainSingle().Which.Should().Be("runbook.txt");
+    }
+
+    [Fact]
+    public async Task UploadDocument_ShouldReturnExistingDocumentWithoutFileOrOutboxSideEffects_WhenHashAlreadyExists()
+    {
+        var content = new byte[] { 1, 2, 3 };
+        var fileHash = Sha256Hex(content);
+        var knowledgeBase = new KnowledgeBase("kb", "description", EmbeddingModelId.New());
+        var existingDocument = knowledgeBase.AddDocument("existing.txt", "existing.txt", ".txt", fileHash);
+        var repository = new MutableKnowledgeBaseRepository(knowledgeBase);
+        var fileStorage = new CapturingFileStorage();
+        var eventStager = new CapturingEventStager();
+        var handler = new UploadDocumentCommandHandler(
+            repository,
+            fileStorage,
+            new FixedDocumentFormatPolicy([".txt"]),
+            eventStager,
+            NullLogger<UploadDocumentCommandHandler>.Instance);
+
+        var result = await handler.Handle(
+            new UploadDocumentCommand(
+                knowledgeBase.Id.Value,
+                new FileUploadStream("duplicate.txt", new MemoryStream(content))),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value!.Id.Should().Be(existingDocument.Id.Value);
+        knowledgeBase.Documents.Should().ContainSingle();
+        repository.SaveCount.Should().Be(0);
+        fileStorage.SaveCount.Should().Be(0);
+        eventStager.StagedCount.Should().Be(0);
     }
 
     [Fact]
@@ -385,6 +508,13 @@ public sealed class RagIndexingLifecycleTests
         document.StartEmbedding();
     }
 
+    private static string Sha256Hex(byte[] content)
+    {
+        using var sha256 = SHA256.Create();
+        var hashBytes = sha256.ComputeHash(content);
+        return BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
+    }
+
     private sealed class StubContentExtractor(params Func<CancellationToken, Task<string>>[] behaviors) : IDocumentContentExtractor
     {
         private readonly Queue<Func<CancellationToken, Task<string>>> behaviors = new(behaviors);
@@ -448,6 +578,13 @@ public sealed class RagIndexingLifecycleTests
 
     private sealed class CapturingFileStorage : IFileStorageService
     {
+        private readonly Exception? deleteException;
+
+        public CapturingFileStorage(Exception? deleteException = null)
+        {
+            this.deleteException = deleteException;
+        }
+
         public int SaveCount { get; private set; }
 
         public int DeleteCount { get; private set; }
@@ -469,25 +606,71 @@ public sealed class RagIndexingLifecycleTests
         {
             DeleteCount++;
             DeletedPaths.Add(path);
+            if (deleteException is not null)
+            {
+                throw deleteException;
+            }
+
             return Task.CompletedTask;
         }
     }
 
-    private sealed class CapturingEventPublisher : IIntegrationEventPublisher
+    private sealed class CapturingEventStager(Action<object>? onStage = null) : IIntegrationEventStager
     {
-        public int PublishedCount { get; private set; }
+        public int StagedCount => StagedMessages.Count;
 
-        public Task PublishAsync<TEvent>(TEvent message, CancellationToken cancellationToken = default)
+        public List<object> StagedMessages { get; } = [];
+
+        public void Stage<TEvent>(TEvent message)
             where TEvent : class
         {
-            PublishedCount++;
-            return Task.CompletedTask;
+            StagedMessages.Add(message);
+            onStage?.Invoke(message);
+        }
+
+        public void Stage<TEvent>(Func<TEvent> messageFactory)
+            where TEvent : class
+        {
+            var message = messageFactory();
+            StagedMessages.Add(message);
+            onStage?.Invoke(message);
         }
     }
 
-    private sealed class MutableKnowledgeBaseRepository(params KnowledgeBase[] knowledgeBases) : IRepository<KnowledgeBase>
+    private sealed class ThrowingEventStager(Exception exception) : IIntegrationEventStager
     {
-        private readonly List<KnowledgeBase> knowledgeBases = [..knowledgeBases];
+        public void Stage<TEvent>(TEvent message)
+            where TEvent : class
+        {
+            throw exception;
+        }
+
+        public void Stage<TEvent>(Func<TEvent> messageFactory)
+            where TEvent : class
+        {
+            throw exception;
+        }
+    }
+
+    private sealed class MutableKnowledgeBaseRepository : IRepository<KnowledgeBase>
+    {
+        private readonly List<KnowledgeBase> knowledgeBases;
+        private readonly Func<CancellationToken, Task<int>> saveChanges;
+
+        public MutableKnowledgeBaseRepository(params KnowledgeBase[] knowledgeBases)
+            : this(_ => Task.FromResult(1), knowledgeBases)
+        {
+        }
+
+        public MutableKnowledgeBaseRepository(
+            Func<CancellationToken, Task<int>> saveChanges,
+            params KnowledgeBase[] knowledgeBases)
+        {
+            this.knowledgeBases = [..knowledgeBases];
+            this.saveChanges = saveChanges;
+        }
+
+        public int SaveCount { get; private set; }
 
         public KnowledgeBase Add(KnowledgeBase entity)
         {
@@ -506,7 +689,8 @@ public sealed class RagIndexingLifecycleTests
 
         public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
         {
-            return Task.FromResult(1);
+            SaveCount++;
+            return saveChanges(cancellationToken);
         }
 
         public Task<List<KnowledgeBase>> ListAsync(

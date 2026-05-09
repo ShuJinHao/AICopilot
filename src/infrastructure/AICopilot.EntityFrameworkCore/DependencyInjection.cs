@@ -72,6 +72,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<IAuditLogQueryService, AuditLogQueryService>();
         builder.Services.AddScoped<AuditTransactionCoordinator>();
         builder.Services.AddScoped<ITransactionalExecutionService, EfTransactionalExecutionService>();
+        builder.Services.AddScoped<IIntegrationEventStager, RagIntegrationEventStager>();
 
         builder.Services.AddIdentityCore<ApplicationUser>(options =>
         {

@@ -5,6 +5,7 @@ using AICopilot.Services.Contracts.Events;
 using AICopilot.SharedKernel.Messaging;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
+using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.Security.Cryptography;
@@ -34,7 +35,8 @@ public class UploadDocumentCommandHandler(
     IRepository<KnowledgeBase> kbRepo,
     IFileStorageService fileStorage,
     IDocumentFormatPolicy documentFormatPolicy,
-    IIntegrationEventPublisher eventPublisher)
+    IIntegrationEventStager eventStager,
+    ILogger<UploadDocumentCommandHandler> logger)
     : ICommandHandler<UploadDocumentCommand, Result<UploadDocumentDto>>
 {
     public async Task<Result<UploadDocumentDto>> Handle(
@@ -111,19 +113,43 @@ public class UploadDocumentCommandHandler(
             request.AllowedForFinalPrompt,
             request.BlockedReason);
 
-        // 6. 持久化到数据库
-        await kbRepo.SaveChangesAsync(cancellationToken);
-
-        // 7. 发送集成事件 (通知后台 Worker 开始索引)
-        await eventPublisher.PublishAsync(new DocumentUploadedEvent
+        try
         {
-            DocumentId = document.Id,
-            KnowledgeBaseId = kb.Id,
-            FilePath = savedPath,
-            FileName = request.File.FileName
-        }, cancellationToken);
+            // 6. 暂存集成事件，和文档聚合在同一个 RagDbContext SaveChanges 中提交。
+            eventStager.Stage(() => new DocumentUploadedEvent
+            {
+                DocumentId = document.Id,
+                KnowledgeBaseId = kb.Id,
+                FilePath = savedPath,
+                FileName = request.File.FileName
+            });
+
+            // 7. 持久化到数据库，同时提交文档和 outbox 行。
+            await kbRepo.SaveChangesAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            await TryDeleteSavedFileAsync(savedPath, ex);
+            throw;
+        }
 
         return Result.Success(new UploadDocumentDto(document.Id, document.Status.ToString()));
+    }
+
+    private async Task TryDeleteSavedFileAsync(string savedPath, Exception originalException)
+    {
+        try
+        {
+            await fileStorage.DeleteAsync(savedPath, CancellationToken.None);
+        }
+        catch (Exception cleanupException)
+        {
+            logger.LogWarning(
+                cleanupException,
+                "Failed to clean up uploaded RAG file {FilePath} after document upload transaction failed. Original error: {OriginalError}",
+                savedPath,
+                originalException.Message);
+        }
     }
 
     private static bool TryParseEnum<TEnum>(string? value, TEnum defaultValue, out TEnum parsed)

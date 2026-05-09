@@ -776,6 +776,27 @@ public sealed class SecurityHardeningTests
             "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "DependencyInjection.cs"));
+        var uploadDocumentSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "services",
+            "AICopilot.RagService",
+            "Commands",
+            "Documents",
+            "UploadDocument.cs"));
+        var ragEventStagerSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "infrastructure",
+            "AICopilot.EntityFrameworkCore",
+            "Outbox",
+            "RagIntegrationEventStager.cs"));
+        var ragContextSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "infrastructure",
+            "AICopilot.EntityFrameworkCore",
+            "RagDbContext.cs"));
 
         dispatcherSource.Should().Contain("GetRequiredService<OutboxDbContext>");
         dispatcherSource.Should().NotContain("AiCopilotDbContext");
@@ -785,6 +806,16 @@ public sealed class SecurityHardeningTests
         outboxContextSource.Should().Contain("OutboxMessageConfiguration");
         outboxContextSource.Should().NotContain("ExcludeFromMigrations");
         dependencyInjectionSource.Should().Contain("AddNpgsqlDbContext<OutboxDbContext>");
+        dependencyInjectionSource.Should().Contain("IIntegrationEventStager, RagIntegrationEventStager");
+        uploadDocumentSource.Should().Contain("IIntegrationEventStager");
+        uploadDocumentSource.Should().Contain("eventStager.Stage(() => new DocumentUploadedEvent");
+        uploadDocumentSource.Should().NotContain("IIntegrationEventPublisher");
+        uploadDocumentSource.Should().NotContain("eventPublisher.PublishAsync");
+        ragEventStagerSource.Should().Contain("RagDbContext");
+        ragEventStagerSource.Should().Contain("StageIntegrationEvent");
+        ragEventStagerSource.Should().Contain("OutboxMessages.Add");
+        ragContextSource.Should().Contain("StageIntegrationEvent");
+        ragContextSource.Should().Contain("BeginTransactionAsync");
     }
 
     [Fact]
@@ -815,7 +846,8 @@ public sealed class SecurityHardeningTests
         var moduleContextFiles = new[]
         {
             Path.Combine("src", "infrastructure", "AICopilot.EntityFrameworkCore", "DataAnalysisDbContext.cs"),
-            Path.Combine("src", "infrastructure", "AICopilot.EntityFrameworkCore", "McpServerDbContext.cs")
+            Path.Combine("src", "infrastructure", "AICopilot.EntityFrameworkCore", "McpServerDbContext.cs"),
+            Path.Combine("src", "infrastructure", "AICopilot.EntityFrameworkCore", "RagDbContext.cs")
         };
 
         foreach (var moduleContextFile in moduleContextFiles)
