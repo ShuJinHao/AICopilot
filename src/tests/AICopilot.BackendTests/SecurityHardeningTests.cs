@@ -643,6 +643,20 @@ public sealed class SecurityHardeningTests
             "AICopilot.EntityFrameworkCore",
             "Repository",
             "BusinessDatabaseRepository.cs"));
+        var ragRepositorySource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "infrastructure",
+            "AICopilot.EntityFrameworkCore",
+            "Repository",
+            "RagRepository.cs"));
+        var mcpServerRepositorySource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "infrastructure",
+            "AICopilot.EntityFrameworkCore",
+            "Repository",
+            "McpServerRepository.cs"));
         var transactionCoordinatorSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
@@ -670,6 +684,10 @@ public sealed class SecurityHardeningTests
         aiGatewayRepositorySource.Should().Contain("transactionCoordinator.SaveChangesAsync");
         businessDatabaseRepositorySource.Should().Contain("AuditTransactionCoordinator");
         businessDatabaseRepositorySource.Should().Contain("transactionCoordinator.SaveChangesAsync");
+        ragRepositorySource.Should().Contain("AuditTransactionCoordinator");
+        ragRepositorySource.Should().Contain("transactionCoordinator.SaveChangesAsync");
+        mcpServerRepositorySource.Should().Contain("AuditTransactionCoordinator");
+        mcpServerRepositorySource.Should().Contain("transactionCoordinator.SaveChangesAsync");
         transactionCoordinatorSource.Should().Contain("CreateExecutionStrategy");
         transactionCoordinatorSource.Should().Contain("BeginTransactionAsync");
         transactionCoordinatorSource.Should().Contain("UseTransactionAsync");
@@ -873,7 +891,12 @@ public sealed class SecurityHardeningTests
             Path.Combine("src", "services", "AICopilot.AiGatewayService", "Commands", "LanguageModels", "UpdateLanguageModel.cs"),
             Path.Combine("src", "services", "AICopilot.AiGatewayService", "Commands", "LanguageModels", "DeleteLanguageModel.cs"),
             Path.Combine("src", "services", "AICopilot.AiGatewayService", "Commands", "Sessions", "UpdateSessionSafetyAttestation.cs"),
-            Path.Combine("src", "services", "AICopilot.DataAnalysisService", "BusinessDatabases", "BusinessDatabaseManagement.cs")
+            Path.Combine("src", "services", "AICopilot.DataAnalysisService", "BusinessDatabases", "BusinessDatabaseManagement.cs"),
+            Path.Combine("src", "services", "AICopilot.RagService", "Commands", "KnowledgeBases", "CreateKnowledgeBase.cs"),
+            Path.Combine("src", "services", "AICopilot.RagService", "KnowledgeBases", "KnowledgeBaseManagement.cs"),
+            Path.Combine("src", "services", "AICopilot.RagService", "EmbeddingModels", "EmbeddingModelManagement.cs"),
+            Path.Combine("src", "services", "AICopilot.RagService", "Documents", "DocumentManagement.cs"),
+            Path.Combine("src", "services", "AICopilot.McpService", "McpServers", "McpServerManagement.cs")
         };
 
         foreach (var commandFile in commandFiles)

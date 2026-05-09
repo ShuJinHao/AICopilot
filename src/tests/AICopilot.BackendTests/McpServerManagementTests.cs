@@ -15,7 +15,9 @@ public sealed class McpServerManagementTests
     public async Task CreateServerCommand_ShouldNormalizeAllowlistAndKeepArgumentsHiddenInDto()
     {
         var repository = new MutableMcpServerRepository();
-        var handler = new CreateMcpServerCommandHandler(repository);
+        var auditLogWriter = new CapturingAuditLogWriter();
+        var handler = new CreateMcpServerCommandHandler(repository, auditLogWriter);
+        const string rawArguments = "server.dll --token secret-token";
 
         var result = await handler.Handle(
             new CreateMcpServerCommand(
@@ -23,7 +25,7 @@ public sealed class McpServerManagementTests
                 "stdio server",
                 McpTransportType.Stdio,
                 "dotnet",
-                "server.dll",
+                rawArguments,
                 ChatExposureMode.Advisory,
                 [
                     new McpAllowedToolDto { ToolName = " Echo " },
@@ -46,6 +48,10 @@ public sealed class McpServerManagementTests
         dto.IsSuccess.Should().BeTrue();
         dto.Value!.HasArguments.Should().BeTrue();
         dto.Value.ArgumentsMasked.Should().Be("******");
+        var audit = auditLogWriter.Requests.Should().ContainSingle().Subject;
+        audit.ActionCode.Should().Be("Mcp.CreateServer");
+        audit.Summary.Should().NotContain(rawArguments);
+        audit.Summary.Should().Contain("arguments=redacted");
     }
 
     [Fact]
@@ -61,7 +67,8 @@ public sealed class McpServerManagementTests
             [new McpAllowedTool("Echo")],
             true);
         var repository = new MutableMcpServerRepository(server);
-        var handler = new UpdateMcpServerCommandHandler(repository);
+        var auditLogWriter = new CapturingAuditLogWriter();
+        var handler = new UpdateMcpServerCommandHandler(repository, auditLogWriter);
 
         var result = await handler.Handle(
             new UpdateMcpServerCommand(
@@ -82,6 +89,11 @@ public sealed class McpServerManagementTests
         server.IsEnabled.Should().BeFalse();
         server.ChatExposureMode.Should().Be(ChatExposureMode.Advisory);
         server.AllowedTools.Select(tool => tool.ToolName).Should().Equal("Inspect");
+        var audit = auditLogWriter.Requests.Should().ContainSingle().Subject;
+        audit.ActionCode.Should().Be("Mcp.UpdateServer");
+        audit.ChangedFields.Should().Contain(["name", "description", "chatExposureMode", "allowedTools", "isEnabled"]);
+        audit.Summary.Should().NotContain("original-server.dll");
+        audit.Summary.Should().Contain("arguments=unchanged");
     }
 
     [Fact]
@@ -278,6 +290,22 @@ public sealed class McpServerManagementTests
             return specification?.FilterCondition is null
                 ? query
                 : query.Where(specification.FilterCondition);
+        }
+    }
+
+    private sealed class CapturingAuditLogWriter : IAuditLogWriter
+    {
+        public List<AuditLogWriteRequest> Requests { get; } = [];
+
+        public Task WriteAsync(AuditLogWriteRequest request, CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request);
+            return Task.CompletedTask;
+        }
+
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Requests.Count);
         }
     }
 }

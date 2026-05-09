@@ -63,13 +63,16 @@ public record CreateMcpServerCommand(
     AiToolCapabilityKind CapabilityKind = AiToolCapabilityKind.Diagnostics,
     AiToolRiskLevel RiskLevel = AiToolRiskLevel.RequiresApproval) : ICommand<Result<CreatedMcpServerDto>>;
 
-public class CreateMcpServerCommandHandler(IRepository<McpServerInfo> repository)
+public class CreateMcpServerCommandHandler(
+    IRepository<McpServerInfo> repository,
+    IAuditLogWriter auditLogWriter)
     : ICommandHandler<CreateMcpServerCommand, Result<CreatedMcpServerDto>>
 {
     public async Task<Result<CreatedMcpServerDto>> Handle(
         CreateMcpServerCommand request,
         CancellationToken cancellationToken)
     {
+        var allowedTools = McpAllowedToolMapper.ToDomainTools(request.AllowedTools);
         var entity = new McpServerInfo(
             request.Name,
             request.Description,
@@ -77,13 +80,24 @@ public class CreateMcpServerCommandHandler(IRepository<McpServerInfo> repository
             request.Command,
             request.Arguments,
             request.ChatExposureMode,
-            McpAllowedToolMapper.ToDomainTools(request.AllowedTools),
+            allowedTools,
             request.IsEnabled,
             request.ExternalSystemType,
             request.CapabilityKind,
             request.RiskLevel);
 
         repository.Add(entity);
+        await auditLogWriter.WriteAsync(
+            new AuditLogWriteRequest(
+                AuditActionGroups.Config,
+                "Mcp.CreateServer",
+                "McpServer",
+                entity.Id.ToString(),
+                entity.Name,
+                AuditResults.Succeeded,
+                $"Created MCP server: {entity.Name}; transport={entity.TransportType}; exposure={entity.ChatExposureMode}; enabled={entity.IsEnabled}; risk={entity.RiskLevel}; allowedTools={entity.AllowedTools.Count}; arguments=redacted.",
+                ["name", "description", "transportType", "command", "arguments", "chatExposureMode", "allowedTools", "isEnabled", "externalSystemType", "capabilityKind", "riskLevel"]),
+            cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
 
         return Result.Success(new CreatedMcpServerDto(entity.Id, entity.Name));
@@ -105,7 +119,9 @@ public record UpdateMcpServerCommand(
     AiToolCapabilityKind CapabilityKind = AiToolCapabilityKind.Diagnostics,
     AiToolRiskLevel RiskLevel = AiToolRiskLevel.RequiresApproval) : ICommand<Result>;
 
-public class UpdateMcpServerCommandHandler(IRepository<McpServerInfo> repository)
+public class UpdateMcpServerCommandHandler(
+    IRepository<McpServerInfo> repository,
+    IAuditLogWriter auditLogWriter)
     : ICommandHandler<UpdateMcpServerCommand, Result>
 {
     public async Task<Result> Handle(UpdateMcpServerCommand request, CancellationToken cancellationToken)
@@ -119,6 +135,8 @@ public class UpdateMcpServerCommandHandler(IRepository<McpServerInfo> repository
         var arguments = string.IsNullOrWhiteSpace(request.Arguments)
             ? entity.Arguments
             : request.Arguments;
+        var allowedTools = McpAllowedToolMapper.ToDomainTools(request.AllowedTools);
+        var changedFields = BuildChangedFields(entity, request, arguments, allowedTools);
 
         entity.Update(
             request.Name,
@@ -127,15 +145,104 @@ public class UpdateMcpServerCommandHandler(IRepository<McpServerInfo> repository
             request.Command,
             arguments,
             request.ChatExposureMode,
-            McpAllowedToolMapper.ToDomainTools(request.AllowedTools),
+            allowedTools,
             request.IsEnabled,
             request.ExternalSystemType,
             request.CapabilityKind,
             request.RiskLevel);
 
         repository.Update(entity);
+        await auditLogWriter.WriteAsync(
+            new AuditLogWriteRequest(
+                AuditActionGroups.Config,
+                "Mcp.UpdateServer",
+                "McpServer",
+                entity.Id.ToString(),
+                entity.Name,
+                AuditResults.Succeeded,
+                $"Updated MCP server: {entity.Name}; changed={(changedFields.Count == 0 ? "none" : string.Join(", ", changedFields))}; transport={entity.TransportType}; exposure={entity.ChatExposureMode}; enabled={entity.IsEnabled}; risk={entity.RiskLevel}; allowedTools={entity.AllowedTools.Count}; arguments={(changedFields.Contains("arguments") ? "changed and redacted" : "unchanged")}.",
+                changedFields),
+            cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
         return Result.Success();
+    }
+
+    private static IReadOnlyCollection<string> BuildChangedFields(
+        McpServerInfo entity,
+        UpdateMcpServerCommand request,
+        string arguments,
+        IReadOnlyCollection<McpAllowedTool> allowedTools)
+    {
+        var changedFields = new List<string>();
+
+        if (!string.Equals(entity.Name, request.Name, StringComparison.Ordinal))
+        {
+            changedFields.Add("name");
+        }
+
+        if (!string.Equals(entity.Description, request.Description, StringComparison.Ordinal))
+        {
+            changedFields.Add("description");
+        }
+
+        if (entity.TransportType != request.TransportType)
+        {
+            changedFields.Add("transportType");
+        }
+
+        if (!string.Equals(entity.Command, string.IsNullOrWhiteSpace(request.Command) ? null : request.Command.Trim(), StringComparison.Ordinal))
+        {
+            changedFields.Add("command");
+        }
+
+        if (!string.Equals(entity.Arguments, arguments, StringComparison.Ordinal))
+        {
+            changedFields.Add("arguments");
+        }
+
+        if (entity.ChatExposureMode != request.ChatExposureMode)
+        {
+            changedFields.Add("chatExposureMode");
+        }
+
+        if (!AllowedToolsEqual(entity.AllowedTools, allowedTools))
+        {
+            changedFields.Add("allowedTools");
+        }
+
+        if (entity.IsEnabled != request.IsEnabled)
+        {
+            changedFields.Add("isEnabled");
+        }
+
+        if (entity.ExternalSystemType != request.ExternalSystemType)
+        {
+            changedFields.Add("externalSystemType");
+        }
+
+        if (entity.CapabilityKind != request.CapabilityKind)
+        {
+            changedFields.Add("capabilityKind");
+        }
+
+        if (entity.RiskLevel != request.RiskLevel)
+        {
+            changedFields.Add("riskLevel");
+        }
+
+        return changedFields;
+    }
+
+    private static bool AllowedToolsEqual(
+        IReadOnlyCollection<McpAllowedTool> current,
+        IReadOnlyCollection<McpAllowedTool> requested)
+    {
+        static IOrderedEnumerable<McpAllowedTool> Order(IReadOnlyCollection<McpAllowedTool> tools)
+        {
+            return tools.OrderBy(tool => tool.ToolName, StringComparer.OrdinalIgnoreCase);
+        }
+
+        return Order(current).SequenceEqual(Order(requested));
     }
 }
 
@@ -175,7 +282,9 @@ internal static class McpAllowedToolMapper
 [AuthorizeRequirement("Mcp.DeleteServer")]
 public record DeleteMcpServerCommand(Guid Id) : ICommand<Result>;
 
-public class DeleteMcpServerCommandHandler(IRepository<McpServerInfo> repository)
+public class DeleteMcpServerCommandHandler(
+    IRepository<McpServerInfo> repository,
+    IAuditLogWriter auditLogWriter)
     : ICommandHandler<DeleteMcpServerCommand, Result>
 {
     public async Task<Result> Handle(DeleteMcpServerCommand request, CancellationToken cancellationToken)
@@ -186,7 +295,18 @@ public class DeleteMcpServerCommandHandler(IRepository<McpServerInfo> repository
             return Result.Success();
         }
 
+        var targetName = entity.Name;
         repository.Delete(entity);
+        await auditLogWriter.WriteAsync(
+            new AuditLogWriteRequest(
+                AuditActionGroups.Config,
+                "Mcp.DeleteServer",
+                "McpServer",
+                request.Id.ToString(),
+                targetName,
+                AuditResults.Succeeded,
+                $"Deleted MCP server: {targetName}."),
+            cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
         return Result.Success();
     }

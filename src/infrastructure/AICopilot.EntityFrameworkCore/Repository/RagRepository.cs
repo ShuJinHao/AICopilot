@@ -1,5 +1,6 @@
 using System.Linq.Expressions;
 using AICopilot.EntityFrameworkCore.Specification;
+using AICopilot.EntityFrameworkCore.Transactions;
 using AICopilot.SharedKernel.Domain;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Specification;
@@ -7,7 +8,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AICopilot.EntityFrameworkCore.Repository;
 
-public sealed class RagRepository<T>(RagDbContext dbContext) : IRepository<T>
+public sealed class RagRepository<T>(
+    RagDbContext dbContext,
+    AuditTransactionCoordinator transactionCoordinator) : IRepository<T>
     where T : class, IEntity, IAggregateRoot
 {
     public async Task<List<T>> ListAsync(
@@ -94,7 +97,7 @@ public sealed class RagRepository<T>(RagDbContext dbContext) : IRepository<T>
 
     public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
-        return dbContext.SaveChangesAsync(cancellationToken);
+        return transactionCoordinator.SaveChangesAsync(dbContext, cancellationToken);
     }
 
     private IQueryable<T> ApplySpecification(ISpecification<T>? specification)

@@ -2,6 +2,7 @@ using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.Core.Rag.Ids;
 using AICopilot.Core.Rag.Specifications.EmbeddingModel;
 using AICopilot.Services.CrossCutting.Attributes;
+using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Messaging;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
@@ -35,7 +36,9 @@ public record CreateEmbeddingModelCommand(
     int MaxTokens,
     bool IsEnabled = true) : ICommand<Result<CreatedEmbeddingModelDto>>;
 
-public class CreateEmbeddingModelCommandHandler(IRepository<EmbeddingModel> repository)
+public class CreateEmbeddingModelCommandHandler(
+    IRepository<EmbeddingModel> repository,
+    IAuditLogWriter auditLogWriter)
     : ICommandHandler<CreateEmbeddingModelCommand, Result<CreatedEmbeddingModelDto>>
 {
     public async Task<Result<CreatedEmbeddingModelDto>> Handle(
@@ -53,6 +56,32 @@ public class CreateEmbeddingModelCommandHandler(IRepository<EmbeddingModel> repo
             request.IsEnabled);
 
         repository.Add(entity);
+        var changedFields = new List<string>
+        {
+            "name",
+            "provider",
+            "baseUrl",
+            "modelName",
+            "dimensions",
+            "maxTokens",
+            "isEnabled"
+        };
+        if (!string.IsNullOrWhiteSpace(request.ApiKey))
+        {
+            changedFields.Add("apiKey");
+        }
+
+        await auditLogWriter.WriteAsync(
+            new AuditLogWriteRequest(
+                AuditActionGroups.Config,
+                "Rag.CreateEmbeddingModel",
+                "EmbeddingModel",
+                entity.Id.ToString(),
+                entity.Name,
+                AuditResults.Succeeded,
+                $"Created embedding model: {entity.Name}; provider={entity.Provider}; modelName={entity.ModelName}; dimensions={entity.Dimensions}; apiKey={(string.IsNullOrEmpty(entity.ApiKey) ? "not provided" : "provided and redacted")}.",
+                changedFields),
+            cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
 
         return Result.Success(new CreatedEmbeddingModelDto(entity.Id, entity.Name));
@@ -71,7 +100,9 @@ public record UpdateEmbeddingModelCommand(
     int MaxTokens,
     bool IsEnabled) : ICommand<Result>;
 
-public class UpdateEmbeddingModelCommandHandler(IRepository<EmbeddingModel> repository)
+public class UpdateEmbeddingModelCommandHandler(
+    IRepository<EmbeddingModel> repository,
+    IAuditLogWriter auditLogWriter)
     : ICommandHandler<UpdateEmbeddingModelCommand, Result>
 {
     public async Task<Result> Handle(UpdateEmbeddingModelCommand request, CancellationToken cancellationToken)
@@ -83,6 +114,7 @@ public class UpdateEmbeddingModelCommandHandler(IRepository<EmbeddingModel> repo
         }
 
         var apiKey = request.ApiKey ?? entity.ApiKey;
+        var changedFields = BuildChangedFields(entity, request, apiKey);
 
         entity.Update(
             request.Name,
@@ -95,15 +127,78 @@ public class UpdateEmbeddingModelCommandHandler(IRepository<EmbeddingModel> repo
             request.IsEnabled);
 
         repository.Update(entity);
+        await auditLogWriter.WriteAsync(
+            new AuditLogWriteRequest(
+                AuditActionGroups.Config,
+                "Rag.UpdateEmbeddingModel",
+                "EmbeddingModel",
+                entity.Id.ToString(),
+                entity.Name,
+                AuditResults.Succeeded,
+                $"Updated embedding model: {entity.Name}; changed={(changedFields.Count == 0 ? "none" : string.Join(", ", changedFields))}; apiKey={(changedFields.Contains("apiKey") ? "changed and redacted" : "unchanged")}.",
+                changedFields),
+            cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
         return Result.Success();
+    }
+
+    private static IReadOnlyCollection<string> BuildChangedFields(
+        EmbeddingModel entity,
+        UpdateEmbeddingModelCommand request,
+        string? apiKey)
+    {
+        var changedFields = new List<string>();
+
+        if (!string.Equals(entity.Name, request.Name, StringComparison.Ordinal))
+        {
+            changedFields.Add("name");
+        }
+
+        if (!string.Equals(entity.Provider, request.Provider, StringComparison.Ordinal))
+        {
+            changedFields.Add("provider");
+        }
+
+        if (!string.Equals(entity.BaseUrl, request.BaseUrl, StringComparison.Ordinal))
+        {
+            changedFields.Add("baseUrl");
+        }
+
+        if (!string.Equals(entity.ModelName, request.ModelName, StringComparison.Ordinal))
+        {
+            changedFields.Add("modelName");
+        }
+
+        if (entity.Dimensions != request.Dimensions)
+        {
+            changedFields.Add("dimensions");
+        }
+
+        if (entity.MaxTokens != request.MaxTokens)
+        {
+            changedFields.Add("maxTokens");
+        }
+
+        if (entity.IsEnabled != request.IsEnabled)
+        {
+            changedFields.Add("isEnabled");
+        }
+
+        if (request.ApiKey is not null && !string.Equals(entity.ApiKey, apiKey, StringComparison.Ordinal))
+        {
+            changedFields.Add("apiKey");
+        }
+
+        return changedFields;
     }
 }
 
 [AuthorizeRequirement("Rag.DeleteEmbeddingModel")]
 public record DeleteEmbeddingModelCommand(Guid Id) : ICommand<Result>;
 
-public class DeleteEmbeddingModelCommandHandler(IRepository<EmbeddingModel> repository)
+public class DeleteEmbeddingModelCommandHandler(
+    IRepository<EmbeddingModel> repository,
+    IAuditLogWriter auditLogWriter)
     : ICommandHandler<DeleteEmbeddingModelCommand, Result>
 {
     public async Task<Result> Handle(DeleteEmbeddingModelCommand request, CancellationToken cancellationToken)
@@ -114,7 +209,18 @@ public class DeleteEmbeddingModelCommandHandler(IRepository<EmbeddingModel> repo
             return Result.Success();
         }
 
+        var targetName = entity.Name;
         repository.Delete(entity);
+        await auditLogWriter.WriteAsync(
+            new AuditLogWriteRequest(
+                AuditActionGroups.Config,
+                "Rag.DeleteEmbeddingModel",
+                "EmbeddingModel",
+                request.Id.ToString(),
+                targetName,
+                AuditResults.Succeeded,
+                $"Deleted embedding model: {targetName}."),
+            cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
         return Result.Success();
     }
