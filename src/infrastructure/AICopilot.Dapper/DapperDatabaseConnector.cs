@@ -8,6 +8,8 @@ using Npgsql;
 using System.Data;
 using System.Data.Common;
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace AICopilot.Dapper;
 
@@ -120,7 +122,15 @@ public class DapperDatabaseConnector(
         catch (Exception ex)
         {
             stopwatch.Stop();
-            logger.LogError(ex, "SQL execution failed on database {DatabaseName}. SQL: {Sql}", database.Name, sql);
+            var sqlLogMetadata = BuildSqlLogMetadata(sql);
+            logger.LogError(
+                ex,
+                "SQL execution failed on database {DatabaseName}. Provider={Provider}; SqlLength={SqlLength}; SqlSha256={SqlSha256}; ErrorType={ErrorType}",
+                database.Name,
+                database.Provider,
+                sqlLogMetadata.Length,
+                sqlLogMetadata.Sha256,
+                ex.GetType().Name);
             throw;
         }
         finally
@@ -159,6 +169,15 @@ public class DapperDatabaseConnector(
             _ => parameters
         };
     }
+
+    private static SqlLogMetadata BuildSqlLogMetadata(string sql)
+    {
+        var normalizedSql = sql ?? string.Empty;
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalizedSql))).ToLowerInvariant();
+        return new SqlLogMetadata(normalizedSql.Length, hash);
+    }
+
+    private sealed record SqlLogMetadata(int Length, string Sha256);
 
     private static DynamicParameters ToDynamicParameters(IEnumerable<KeyValuePair<string, object?>> parameters)
     {

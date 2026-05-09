@@ -41,7 +41,7 @@ internal static class DataAnalysisSqlQueryRunner
                 db.Id.ToString(),
                 db.Name,
                 AuditResults.Succeeded,
-                $"自由 SQL 查询已执行。Rows={queryResult.ReturnedRowCount}; Truncated={queryResult.IsTruncated}; ElapsedMs={queryResult.ElapsedMilliseconds}."));
+                $"自由 SQL 查询已执行。RowsObserved={queryResult.ReturnedRowCount}; Truncated={queryResult.IsTruncated}; ElapsedMs={queryResult.ElapsedMilliseconds}."));
         await auditLogWriter.SaveChangesAsync(cancellationToken);
 
         if (data.Count == 0)
@@ -52,7 +52,7 @@ internal static class DataAnalysisSqlQueryRunner
         var preview = data.Take(5).ToJson();
         if (queryResult.IsTruncated)
         {
-            return $"查询执行成功，结果已截断。共返回 {queryResult.ReturnedRowCount} 行，当前仅保留前 {data.Count} 行用于后续分析。预览数据：{preview}";
+            return $"查询执行成功，结果已截断。已检测到至少 {queryResult.ReturnedRowCount} 行，当前仅保留前 {data.Count} 行用于后续分析。预览数据：{preview}";
         }
 
         return preview;

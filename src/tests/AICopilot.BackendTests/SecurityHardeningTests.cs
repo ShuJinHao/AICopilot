@@ -1051,6 +1051,10 @@ public sealed class SecurityHardeningTests
         source.Should().Contain("SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE");
         source.Should().Contain("ExecuteReaderAsync");
         source.Should().Contain("normalizedRows.Count >= maxRows");
+        source.Should().Contain("BuildSqlLogMetadata");
+        source.Should().Contain("SqlSha256");
+        source.Should().Contain("SqlLength");
+        source.Should().NotContain("SQL: {Sql}");
         source.Should().NotContain("QueryAsync(command)).ToList");
         source.Should().NotContain("rawRows.Take");
     }
@@ -1066,9 +1070,29 @@ public sealed class SecurityHardeningTests
             "AICopilot.DataAnalysisService",
             "BusinessDatabases",
             "BusinessDatabaseManagement.cs"));
+        var queryRunnerSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "services",
+            "AICopilot.DataAnalysisService",
+            "Plugins",
+            "DataAnalysisSqlQueryRunner.cs"));
+        var semanticAuditSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "Workflows",
+            "Executors",
+            "DataAnalysisAuditRecorder.cs"));
 
         source.Should().Contain("Created business database:");
         source.Should().Contain("Deleted business database:");
+        queryRunnerSource.Should().Contain("RowsObserved=");
+        queryRunnerSource.Should().Contain("已检测到至少");
+        queryRunnerSource.Should().NotContain("共返回");
+        semanticAuditSource.Should().Contain("RowsObserved=");
+        semanticAuditSource.Should().NotContain("Rows={queryResult.ReturnedRowCount}");
         source.Should().NotContain("鍒");
         source.Should().NotContain("锛");
         source.Should().NotContain("擄");
