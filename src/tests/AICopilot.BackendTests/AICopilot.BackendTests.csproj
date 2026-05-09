@@ -31,6 +31,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\hosts\AICopilot.AppHost\AICopilot.AppHost.csproj" />
     <ProjectReference Include="..\..\hosts\AICopilot.HttpApi\AICopilot.HttpApi.csproj" />
+    <ProjectReference Include="..\..\hosts\AICopilot.RagWorker\AICopilot.RagWorker.csproj" />
     <ProjectReference Include="..\..\infrastructure\AICopilot.AiRuntime\AICopilot.AiRuntime.csproj" />
     <ProjectReference Include="..\..\infrastructure\AICopilot.Dapper\AICopilot.Dapper.csproj" />
     <ProjectReference Include="..\..\infrastructure\AICopilot.EntityFrameworkCore\AICopilot.EntityFrameworkCore.csproj" />

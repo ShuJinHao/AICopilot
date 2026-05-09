@@ -2,7 +2,7 @@
 
 Date: 2026-05-08
 
-Baseline: `main` after PR #36 (`c79f73f`) plus the Dapper log/truncation hardening follow-up. This matrix reconciles the remaining follow-up items from `REVIEW_FOLLOWUP_2026-04-29.md`, `REVIEW_ACCEPTANCE_2026-05-07.md`, and the 5.5 Pro full-code review.
+Baseline: `main` after PR #37 (`a76d94e`) plus PR #38 RAG document file cleanup. This matrix reconciles the remaining follow-up items from `REVIEW_FOLLOWUP_2026-04-29.md`, `REVIEW_ACCEPTANCE_2026-05-07.md`, and the 5.5 Pro full-code review.
 
 Principle: review documents are inputs, not facts. Current source and tests decide whether an item is closed, still real, deferred, or not applicable.
 
@@ -46,7 +46,7 @@ Principle: review documents are inputs, not facts. Current source and tests deci
 | 5.5 Pro review P2 | MCP frontend still says saved server changes require restart | Closed | `McpServerConfig.vue` runtime-refresh wording; `SecurityHardeningTests` static guard | None | No |
 | 5.5 Pro review P2 | Dapper failed-query logs include full SQL text | Closed | `DapperDatabaseConnector` logs SQL length/hash/provider/error type only; `TextToSqlReadOnlyTests`; `SecurityHardeningTests` | None | No |
 | 5.5 Pro review P2 | Dapper truncation wording implies exact total row count | Closed | `DataAnalysisSqlQueryRunner`; `DataAnalysisAuditRecorder`; `SemanticAnalysisRunner`; `TextToSqlReadOnlyTests`; `SecurityHardeningTests` | None | No |
-| 5.5 Pro review P2 | Document delete can leave orphan files if file deletion fails after DB save | Remaining | `DeleteDocumentCommandHandler` saves aggregate removal before `fileStorage.DeleteAsync(document.FilePath)` | Plan a separate file cleanup or pending-deletion design | No |
+| 5.5 Pro review P2 | Document delete can leave orphan files if file deletion fails after DB save | Closed | PR #38; `DocumentFileDeletionRequestedEvent`; `DocumentFileDeletionRequestedConsumer`; `DeleteDocumentCommandHandler`; `RagUploadOutboxAtomicityTests`; `RagIndexingLifecycleTests`; `SecurityHardeningTests` | None | No |
 | 5.5 Pro review P2 | Module repositories and frontend stores still contain structural duplication | Remaining | Repository templates, `configStore.ts`, and `ragStore.ts` remain maintainability backlog | Handle only after runtime safety fixes; do not mix with security PRs | No |
 | `REVIEW_FOLLOWUP_2026-04-29.md` P2 | Bootstrap/admin secret operational discipline | Remaining | Deployment/runbook concern; no runtime code change in this closure | Add deployment-secret checklist/tests if deployment templates change | Not next unless deployment work starts |
 | `REVIEW_FOLLOWUP_2026-04-29.md` P2 | API key in-memory zeroization | Deferred | Requires a broader secret-handling policy and may affect contracts | Track as compliance backlog | No |
@@ -63,7 +63,7 @@ Principle: review documents are inputs, not facts. Current source and tests deci
 
 Do not start another broad refactor from this ledger. PR #33 and PR #34 close the two remaining P1 runtime-safety findings from the 5.5 Pro review, and the MCP safety follow-up closes the two highest-signal P2 MCP findings.
 
-1. Keep document orphan cleanup and repository/store duplication as backlog unless a release or compliance goal pulls them forward.
+1. Keep repository/store duplication as backlog unless a release or maintainability goal pulls it forward.
 2. Final agent context/message consistency, deployment-secret hardening, Workflow Graph/Planner, long-term memory, and Cloud write integrations still require separate product or release plans.
 
 Feature backlog items such as Workflow Graph/Planner, long-term memory, and Cloud write integrations should remain deferred until they receive explicit product and cross-project approval.
