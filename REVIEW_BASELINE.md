@@ -76,6 +76,7 @@ Generated for the current large refactor baseline.
 - RAG indexing may recover documents left in `Parsing`, `Splitting`, or `Embedding`. Re-indexing loads existing chunks, deletes prior vector keys for the document, and then upserts the new vectors.
 - RAG management includes embedding models, knowledge bases, document upload/status/delete, and knowledge-base search. Search requires the `Rag.SearchKnowledgeBase` permission.
 - DataAnalysis configuration and execution paths must keep disabled-source, non-read-only-source, SQL safety rejection, and truncation feedback distinct.
+- DataAnalysis query failure logs must not record full SQL text by default. Dapper failure logs record database/provider, SQL length, SQL hash, and error type. Truncated query row counts are observed lower bounds, not exact totals.
 
 ## Explicitly Deferred
 

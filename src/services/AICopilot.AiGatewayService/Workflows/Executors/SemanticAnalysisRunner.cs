@@ -123,7 +123,7 @@ public sealed class SemanticAnalysisRunner(
                 queryResult,
                 cancellationToken);
             logger.LogInformation(
-                "{TargetLabel}语义查询执行完成。Intent: {Intent}, Target: {Target}, Kind: {Kind}, DatabaseName: {DatabaseName}, Source: {Source}, RowCount: {RowCount}, Truncated: {Truncated}",
+                "{TargetLabel}语义查询执行完成。Intent: {Intent}, Target: {Target}, Kind: {Kind}, DatabaseName: {DatabaseName}, Source: {Source}, RowsObserved: {RowsObserved}, Truncated: {Truncated}",
                 targetLabel,
                 plan.Intent,
                 plan.Target,

@@ -13,6 +13,7 @@ using AICopilot.DataAnalysisService.Services;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Repository;
 using System.Data;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Document = AICopilot.Core.Rag.Aggregates.KnowledgeBase.Document;
@@ -138,6 +139,7 @@ public sealed class TextToSqlReadOnlyTests
     [Fact]
     public async Task Plugin_ShouldSurfaceTruncationMetadata_WhenQueryResultIsTrimmed()
     {
+        var auditLogWriter = new CapturingAuditLogWriter();
         var connector = new RecordingDatabaseConnector
         {
             MetadataResultOverride = new DatabaseQueryResult(
@@ -147,7 +149,7 @@ public sealed class TextToSqlReadOnlyTests
                         ["deviceCode"] = $"DEV-{index:000}"
                     })
                     .ToList(),
-                ReturnedRowCount: 250,
+                ReturnedRowCount: 201,
                 IsTruncated: true,
                 ElapsedMilliseconds: 12)
         };
@@ -160,7 +162,7 @@ public sealed class TextToSqlReadOnlyTests
             DbProviderType.PostgreSql,
             isReadOnly: true);
 
-        var serviceProvider = BuildServiceProvider([semanticDatabase]);
+        var serviceProvider = BuildServiceProvider([semanticDatabase], auditLogWriter);
 
         var result = await plugin.ExecuteSqlQueryAsync(
             serviceProvider,
@@ -168,8 +170,40 @@ public sealed class TextToSqlReadOnlyTests
             "SELECT device_code AS deviceCode FROM device_master_cloud_sim_view ORDER BY device_code");
 
         result.Should().Contain("结果已截断");
-        result.Should().Contain("250");
-        result.Should().Contain("200");
+        result.Should().Contain("至少 201");
+        result.Should().Contain("前 200");
+        result.Should().NotContain("共返回");
+        var audit = auditLogWriter.Requests.Should().ContainSingle().Subject;
+        audit.Summary.Should().Contain("RowsObserved=201");
+        audit.Summary.Should().NotContain("Rows=201");
+    }
+
+    [Fact]
+    public async Task Connector_ShouldRedactSqlWhenExecutionFails()
+    {
+        var logger = new CapturingLogger<DapperDatabaseConnector>();
+        var connector = new DapperDatabaseConnector(new AstSqlGuardrail(), logger);
+        const string sensitiveSql = "SELECT * FROM orders WHERE customer_name = 'secret customer'";
+        var database = new BusinessDatabaseConnectionInfo(
+            Guid.NewGuid(),
+            "broken-readonly-db",
+            "test",
+            "Host=127.0.0.1;Port=1;Database=demo;Username=test;Password=test;Timeout=1;Command Timeout=1",
+            DatabaseProviderType.PostgreSql,
+            IsEnabled: true,
+            IsReadOnly: true);
+
+        var act = async () => await connector.ExecuteQueryWithMetadataAsync(database, sensitiveSql);
+
+        await act.Should().ThrowAsync<Exception>();
+        var log = logger.Entries.Should().ContainSingle(entry => entry.Level == LogLevel.Error).Subject;
+        log.Message.Should().Contain("SqlLength=");
+        log.Message.Should().Contain("SqlSha256=");
+        log.Message.Should().Contain("Provider=PostgreSql");
+        log.Message.Should().Contain("ErrorType=");
+        log.Message.Should().NotContain(sensitiveSql);
+        log.Message.Should().NotContain("secret customer");
+        log.Message.Should().NotContain("SQL:");
     }
 
     private static DataAnalysisPlugin CreatePlugin(IDatabaseConnector connector)
@@ -179,12 +213,14 @@ public sealed class TextToSqlReadOnlyTests
             NullLogger<DataAnalysisPlugin>.Instance);
     }
 
-    private static IServiceProvider BuildServiceProvider(IReadOnlyCollection<BusinessDatabase> businessDatabases)
+    private static IServiceProvider BuildServiceProvider(
+        IReadOnlyCollection<BusinessDatabase> businessDatabases,
+        IAuditLogWriter? auditLogWriter = null)
     {
         var services = new ServiceCollection();
         services.AddSingleton<IReadRepository<BusinessDatabase>>(new InMemoryReadRepository<BusinessDatabase>(businessDatabases));
         services.AddSingleton<VisualizationContext>();
-        services.AddSingleton<IAuditLogWriter, NoOpAuditLogWriter>();
+        services.AddSingleton(auditLogWriter ?? new NoOpAuditLogWriter());
         return services.BuildServiceProvider();
     }
 
@@ -307,4 +343,48 @@ public sealed class TextToSqlReadOnlyTests
             return Task.FromResult(0);
         }
     }
+
+    private sealed class CapturingAuditLogWriter : IAuditLogWriter
+    {
+        public List<AuditLogWriteRequest> Requests { get; } = [];
+
+        public Task WriteAsync(AuditLogWriteRequest request, CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request);
+            return Task.CompletedTask;
+        }
+
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Requests.Count);
+        }
+    }
+
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public List<LogEntry> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull
+        {
+            return null;
+        }
+
+        public bool IsEnabled(LogLevel logLevel)
+        {
+            return true;
+        }
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Entries.Add(new LogEntry(logLevel, formatter(state, exception)));
+        }
+    }
+
+    private sealed record LogEntry(LogLevel Level, string Message);
 }
