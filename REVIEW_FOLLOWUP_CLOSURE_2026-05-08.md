@@ -4,7 +4,7 @@ Date: 2026-05-08
 
 Scope: AICopilot backend and AICopilot review records only. Cloud and Edge are out of scope.
 
-This document closes the runtime safety, migration, session semantics, outbox, and audit transaction follow-up ledger after PR #27, PR #28, PR #29, PR #31, PR #33, and PR #34. The original Claude and 5.5 Pro reviews remain inputs, not the source of truth. Each item below is judged against the current `main` source and tests.
+This document closes the runtime safety, migration, session semantics, outbox, audit transaction, and structural duplication follow-up ledger after PR #27, PR #28, PR #29, PR #31, PR #33, PR #34, PR #39, and PR #40. The original Claude and 5.5 Pro reviews remain inputs, not the source of truth. Each item below is judged against the current `main` source and tests.
 
 ## Closure Matrix
 
@@ -26,6 +26,7 @@ This document closes the runtime safety, migration, session semantics, outbox, a
 | Final agent context multi-instance storage | Closed for Redis-backed deployment baseline | `FinalAgentContextDeploymentTests`; `AcceptanceClosureVerificationTests.RedisFinalAgentContextStore_ShouldShareContextAcrossStoreInstances` | Distributed deployment requires Redis-backed context storage. Broader message/context transaction design remains separate backlog. |
 | Cross-DbContext audit atomicity outside Identity | Closed by PR #31 | `AuditTransactionCoordinator`; `AuditTransactionBoundaryTests`; `SecurityHardeningTests` | Non-Identity business/config repositories commit business changes and staged audit rows in one EF transaction; audit save failure rolls back business changes. |
 | RAG/MCP configuration and governance audit boundary | Closed by PR #34 | `RagRepository`; `McpServerRepository`; `RagMcpAuditCommandTests`; `AuditTransactionBoundaryTests`; `SecurityHardeningTests` | RAG/MCP write commands stage audit rows before repository save; sensitive API keys and MCP arguments are not recorded in audit summaries. |
+| Repository and frontend store structural duplication | Closed by PR #39/#40 | `EfRepositoryBase`; `EfReadRepositoryBase`; `useConfigStore()` facade; `useRagStore()` facade; facade unit tests | Module repositories now share CRUD/spec/include infrastructure while preserving module bindings; config/RAG frontend domain logic is split behind stable facade stores. |
 
 ## Remaining Non-Runtime Items
 
@@ -46,4 +47,6 @@ The following items are intentionally not mixed into the runtime closure PRs:
 - PR #31 closed non-Identity business/config audit transaction atomicity.
 - PR #33 closed RAG upload and outbox atomicity.
 - PR #34 closed RAG/MCP configuration and governance audit transaction coverage.
+- PR #39 closed backend repository CRUD/spec/include duplication through shared EF repository bases.
+- PR #40 closed frontend config/RAG store duplication through facade stores and domain modules.
 - Remaining items are now tracked in `REVIEW_REMAINING_MATRIX_2026-05-08.md` instead of being treated as open-ended verbal follow-up.
