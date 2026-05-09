@@ -156,10 +156,9 @@ public class McpServerInfo : IAggregateRoot<McpServerId>
         }
 
         if (transportType == McpTransportType.Sse
-            && (!Uri.TryCreate(arguments.Trim(), UriKind.Absolute, out var uri)
-                || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)))
+            && !McpSseEndpointValidator.TryValidate(arguments, out _, out var endpointError))
         {
-            throw new ArgumentException("MCP SSE server arguments must be an absolute HTTP or HTTPS URL.", nameof(arguments));
+            throw new ArgumentException(endpointError, nameof(arguments));
         }
     }
 

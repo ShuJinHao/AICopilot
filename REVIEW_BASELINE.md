@@ -72,7 +72,7 @@ Generated for the current large refactor baseline.
 - Chat session reads, history, delete, normal chat execution, and pending approval lookup are scoped to the current user.
 - New chat execution is blocked while the same session still has a pending approval context.
 - MCP runtime registration is reconciled at runtime. Disabled, deleted, or changed MCP server rows converge through the runtime registry refresh cycle; in-flight MCP calls are not force-killed.
-- MCP SSE clients use an explicit connection timeout. Stdio MCP arguments use a quoted/escaped parser and still preserve the single-file-path shortcut.
+- MCP SSE endpoints are validated before configuration persistence and again before runtime connection; localhost, private, link-local, multicast, and unspecified IP targets are rejected. MCP SSE clients use an explicit connection timeout. Stdio MCP arguments use a quoted/escaped parser and still preserve the single-file-path shortcut.
 - RAG indexing may recover documents left in `Parsing`, `Splitting`, or `Embedding`. Re-indexing loads existing chunks, deletes prior vector keys for the document, and then upserts the new vectors.
 - RAG management includes embedding models, knowledge bases, document upload/status/delete, and knowledge-base search. Search requires the `Rag.SearchKnowledgeBase` permission.
 - DataAnalysis configuration and execution paths must keep disabled-source, non-read-only-source, SQL safety rejection, and truncation feedback distinct.

@@ -2,7 +2,7 @@
 
 Date: 2026-05-08
 
-Baseline: `main` after PR #34 (`974b059`). This matrix reconciles the remaining follow-up items from `REVIEW_FOLLOWUP_2026-04-29.md`, `REVIEW_ACCEPTANCE_2026-05-07.md`, and the 5.5 Pro full-code review.
+Baseline: `main` after PR #35 (`44b759d`) plus the MCP SSE endpoint hardening follow-up. This matrix reconciles the remaining follow-up items from `REVIEW_FOLLOWUP_2026-04-29.md`, `REVIEW_ACCEPTANCE_2026-05-07.md`, and the 5.5 Pro full-code review.
 
 Principle: review documents are inputs, not facts. Current source and tests decide whether an item is closed, still real, deferred, or not applicable.
 
@@ -42,8 +42,8 @@ Principle: review documents are inputs, not facts. Current source and tests deci
 | `REVIEW_FOLLOWUP_2026-04-29.md` P1 | Multi-DbContext migration history split | Closed | PR #28; `MigrationSafetyTests`; `MigrationHistoryTables.MigratedContexts` | None | No |
 | `REVIEW_FOLLOWUP_2026-04-29.md` P1 | Cross-DbContext audit atomicity outside Identity | Closed | PR #31; `AuditTransactionCoordinator`; `AuditTransactionBoundaryTests`; `SecurityHardeningTests` | None | No |
 | 5.5 Pro review P1 | RAG/MCP configuration and governance writes need same-level audit transaction coverage | Closed | PR #34; `RagRepository`; `McpServerRepository`; `RagMcpAuditCommandTests`; `AuditTransactionBoundaryTests`; `SecurityHardeningTests` | None | No |
-| 5.5 Pro review P2 | MCP SSE endpoint needs explicit target validation | Remaining | `McpServerBootstrap.CreateSseClientAsync` still constructs `new Uri(mcpServerInfo.Arguments)`; current validation only checks absolute HTTP/HTTPS shape | Add endpoint validator for scheme/host/private-address policy | Yes - MCP safety small fix |
-| 5.5 Pro review P2 | MCP frontend still says saved server changes require restart | Remaining | `McpServerConfig.vue` still contains the old bootstrap/restart warning, while PR #27 added runtime reconciliation | Update copy to runtime refresh-cycle wording | Yes - MCP safety small fix |
+| 5.5 Pro review P2 | MCP SSE endpoint needs explicit target validation | Closed | `McpSseEndpointValidator`; `McpServerInfo`; `McpServerBootstrap`; `McpServerManagementTests`; `SecurityHardeningTests` | None | No |
+| 5.5 Pro review P2 | MCP frontend still says saved server changes require restart | Closed | `McpServerConfig.vue` runtime-refresh wording; `SecurityHardeningTests` static guard | None | No |
 | 5.5 Pro review P2 | Dapper failed-query logs include full SQL text | Remaining | `DapperDatabaseConnector` logs `SQL: {Sql}` on failure | Redact or hash SQL in default logs; keep full SQL only behind an explicit diagnostic switch | No |
 | 5.5 Pro review P2 | Dapper truncation wording implies exact total row count | Remaining | `ReturnedRowCount` represents rows kept plus one overflow probe, but `DataAnalysisSqlQueryRunner` says "共返回" | Change wording to "detected more than N rows" semantics | No |
 | 5.5 Pro review P2 | Document delete can leave orphan files if file deletion fails after DB save | Remaining | `DeleteDocumentCommandHandler` saves aggregate removal before `fileStorage.DeleteAsync(document.FilePath)` | Plan a separate file cleanup or pending-deletion design | No |
@@ -61,10 +61,9 @@ Principle: review documents are inputs, not facts. Current source and tests deci
 
 ## Recommended Next Implementation Round
 
-Do not start another broad refactor from this ledger. PR #33 and PR #34 close the two remaining P1 runtime-safety findings from the 5.5 Pro review. If one more implementation round is needed from this ledger, keep it small and make it the MCP safety round:
+Do not start another broad refactor from this ledger. PR #33 and PR #34 close the two remaining P1 runtime-safety findings from the 5.5 Pro review, and the MCP safety follow-up closes the two highest-signal P2 MCP findings.
 
-1. Add MCP SSE endpoint validation and update the MCP frontend runtime-refresh wording in one focused PR.
-2. Keep Dapper logging/truncation wording, document orphan cleanup, and repository/store duplication as backlog unless a release or compliance goal pulls them forward.
-3. Final agent context/message consistency, deployment-secret hardening, Workflow Graph/Planner, long-term memory, and Cloud write integrations still require separate product or release plans.
+1. Keep Dapper logging/truncation wording, document orphan cleanup, and repository/store duplication as backlog unless a release or compliance goal pulls them forward.
+2. Final agent context/message consistency, deployment-secret hardening, Workflow Graph/Planner, long-term memory, and Cloud write integrations still require separate product or release plans.
 
 Feature backlog items such as Workflow Graph/Planner, long-term memory, and Cloud write integrations should remain deferred until they receive explicit product and cross-project approval.

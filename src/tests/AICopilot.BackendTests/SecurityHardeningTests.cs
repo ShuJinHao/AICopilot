@@ -277,8 +277,8 @@ public sealed class SecurityHardeningTests
         configStoreSource.Should().Contain("CONFIG_STORE_MESSAGES");
         dialogCrudSource.Should().Contain("getProblemDetails");
         configViewSource.Should().Contain("McpServerConfig");
-        mcpConfigSource.Should().Contain("MCP 配置由启动期 bootstrap 读取");
-        mcpConfigSource.Should().Contain("重启服务");
+        mcpConfigSource.Should().Contain("运行时刷新周期内收敛");
+        mcpConfigSource.Should().NotContain("重启服务");
         mcpConfigSource.Should().Contain("toolPolicySummaries");
         mcpConfigSource.Should().Contain("留空表示保留已保存参数");
         businessDatabaseConfigSource.Should().Contain("SQL 安全拒绝");
@@ -956,7 +956,7 @@ public sealed class SecurityHardeningTests
         source.Should().Contain("auditLogWriter.SaveChangesAsync");
         source.Should().Contain("Audit writer decision tree");
         source.Should().Contain("FOR UPDATE SKIP LOCKED");
-        source.Should().Contain("service restart");
+        source.Should().Contain("runtime registry refresh cycle");
         source.Should().Contain("security stamp");
         source.Should().Contain("__EFMigrationsHistory");
     }
@@ -1120,8 +1120,10 @@ public sealed class SecurityHardeningTests
 
         source.Should().Contain("ParseCommandArguments");
         source.Should().Contain("StringBuilder");
+        source.Should().Contain("McpSseEndpointValidator.TryValidate");
         source.Should().Contain("ConnectionTimeout = SseConnectionTimeout");
         source.Should().Contain("TransportMode = HttpTransportMode.Sse");
+        source.Should().NotContain("new Uri(mcpServerInfo.Arguments)");
         source.Should().NotContain("Split(' ', StringSplitOptions.RemoveEmptyEntries)");
     }
 
@@ -1390,6 +1392,14 @@ public sealed class SecurityHardeningTests
             "not-a-url");
         invalidSseUrl.Should().Throw<ArgumentException>();
 
+        var unsafeSseUrl = () => new McpServerInfo(
+            "server",
+            "description",
+            McpTransportType.Sse,
+            null,
+            "http://127.0.0.1/sse");
+        unsafeSseUrl.Should().Throw<ArgumentException>();
+
         var server = new McpServerInfo(
             " server ",
             " description ",
@@ -1404,6 +1414,40 @@ public sealed class SecurityHardeningTests
         server.Command.Should().Be("dotnet");
         server.Arguments.Should().Be("server.dll");
         server.AllowedTools.Select(tool => tool.ToolName).Should().Equal("Echo");
+    }
+
+    [Theory]
+    [InlineData("https://mcp.example.com/sse")]
+    [InlineData("http://8.8.8.8/sse")]
+    public void McpSseEndpointValidator_ShouldAllowPublicHttpEndpoints(string endpoint)
+    {
+        var isValid = McpSseEndpointValidator.TryValidate(endpoint, out var uri, out var errorMessage);
+
+        isValid.Should().BeTrue(errorMessage);
+        uri.Should().NotBeNull();
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("not-a-url")]
+    [InlineData("file:///tmp/mcp.sock")]
+    [InlineData("http://user:pass@mcp.example.com/sse")]
+    [InlineData("https://mcp.example.com/sse#fragment")]
+    [InlineData("http://localhost/sse")]
+    [InlineData("http://dev.localhost/sse")]
+    [InlineData("http://127.0.0.1/sse")]
+    [InlineData("http://[::1]/sse")]
+    [InlineData("http://169.254.169.254/latest/meta-data")]
+    [InlineData("http://10.0.0.1/sse")]
+    [InlineData("http://172.16.0.1/sse")]
+    [InlineData("http://192.168.0.1/sse")]
+    public void McpSseEndpointValidator_ShouldRejectUnsafeEndpoints(string endpoint)
+    {
+        var isValid = McpSseEndpointValidator.TryValidate(endpoint, out var uri, out var errorMessage);
+
+        isValid.Should().BeFalse();
+        uri.Should().BeNull();
+        errorMessage.Should().NotBeNullOrWhiteSpace();
     }
 
     [Fact]

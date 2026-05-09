@@ -340,9 +340,14 @@ public class McpServerBootstrap(
 
     protected virtual async Task<McpClient> CreateSseClientAsync(McpServerInfo mcpServerInfo, CancellationToken ct)
     {
+        if (!McpSseEndpointValidator.TryValidate(mcpServerInfo.Arguments, out var endpoint, out var endpointError))
+        {
+            throw new InvalidOperationException($"MCP SSE server {mcpServerInfo.Name} endpoint is invalid: {endpointError}");
+        }
+
         var transportOptions = new HttpClientTransportOptions
         {
-            Endpoint = new Uri(mcpServerInfo.Arguments),
+            Endpoint = endpoint!,
             TransportMode = HttpTransportMode.Sse,
             ConnectionTimeout = SseConnectionTimeout
         };

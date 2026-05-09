@@ -59,7 +59,7 @@ function policySummary(tool: McpAllowedTool) {
       type="warning"
       :closable="false"
       show-icon
-      title="MCP 配置由启动期 bootstrap 读取；保存配置后需要重启服务，工具才会重新发现并应用安全策略。"
+      title="MCP 配置保存后会在运行时刷新周期内收敛；如果工具未暴露，请检查 allowlist、安全策略、连接状态和 MCP 运行时刷新。"
     />
     <el-table :data="store.mcpServers" stripe>
       <el-table-column prop="name" label="名称" min-width="160" />
