@@ -46,7 +46,6 @@ public sealed class BusinessSemanticsCatalogTests
         [
             SemanticQueryTarget.Device,
             SemanticQueryTarget.DeviceLog,
-            SemanticQueryTarget.Recipe,
             SemanticQueryTarget.Capacity,
             SemanticQueryTarget.ProductionData
         ]);

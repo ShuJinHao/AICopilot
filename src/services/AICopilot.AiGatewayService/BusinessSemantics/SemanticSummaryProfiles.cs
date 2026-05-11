@@ -48,7 +48,6 @@ public sealed class SemanticSummaryProfileCatalog : ISemanticSummaryProfileCatal
         {
             new DeviceSummaryProfile(),
             new DeviceLogSummaryProfile(),
-            new RecipeSummaryProfile(),
             new CapacitySummaryProfile(),
             new ProductionDataSummaryProfile()
         }.ToDictionary(item => item.Target);
@@ -212,76 +211,6 @@ file sealed class DeviceLogSummaryProfile : SemanticSummaryProfileBase
     private static string Describe(Dictionary<string, object?> row)
     {
         return $"设备 {SemanticSummaryFormatting.GetString(row, "deviceCode")}，日志级别 {SemanticSummaryFormatting.GetString(row, "level")}，日志内容 {SemanticSummaryFormatting.GetString(row, "message")}，时间 {SemanticSummaryFormatting.FormatTimestamp(SemanticSummaryFormatting.GetString(row, "occurredAt"))}";
-    }
-}
-
-file sealed class RecipeSummaryProfile : SemanticSummaryProfileBase
-{
-    private static readonly IReadOnlyDictionary<string, string> Labels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-    {
-        ["recipeId"] = "配方标识",
-        ["recipeName"] = "配方名称",
-        ["deviceCode"] = "设备编码",
-        ["processName"] = "工序名称",
-        ["version"] = "版本号",
-        ["isActive"] = "当前生效版本",
-        ["updatedAt"] = "时间"
-    };
-
-    public override SemanticQueryTarget Target => SemanticQueryTarget.Recipe;
-
-    public override IReadOnlyList<string> ExampleQuestions { get; } =
-    [
-        "列出设备 DEV-001 的配方",
-        "查看配方 Recipe-Cut-01 详情",
-        "查看配方 Recipe-Cut-01 的版本历史"
-    ];
-
-    protected override IReadOnlyDictionary<string, string> FieldLabels => Labels;
-
-    public override SemanticSummaryDto Build(
-        SemanticQueryPlan plan,
-        IReadOnlyList<Dictionary<string, object?>> rows,
-        string scope)
-    {
-        var activeVersion = rows
-            .Where(row => SemanticSummaryFormatting.GetBoolean(row, "isActive"))
-            .Select(row => SemanticSummaryFormatting.GetString(row, "version"))
-            .FirstOrDefault(version => !string.IsNullOrWhiteSpace(version) && version != "-");
-
-        var versionChain = rows
-            .Select(row => SemanticSummaryFormatting.GetString(row, "version"))
-            .Where(version => !string.IsNullOrWhiteSpace(version) && version != "-")
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderByDescending(SemanticSummaryFormatting.ParseVersionKey)
-            .ToArray();
-
-        var metrics = new List<SemanticMetricItemDto>
-        {
-            Metric("totalCount", "配方总数", $"{rows.Count} 条"),
-            Metric("activeVersion", "当前生效版本", string.IsNullOrWhiteSpace(activeVersion) ? "未命中" : activeVersion)
-        };
-
-        if (versionChain.Length > 0)
-        {
-            metrics.Add(Metric("versionChain", "版本链", string.Join(" -> ", versionChain)));
-        }
-
-        var recipeName = rows
-            .Select(row => SemanticSummaryFormatting.GetString(row, "recipeName"))
-            .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value) && value != "-");
-
-        var conclusion = !string.IsNullOrWhiteSpace(recipeName)
-            ? $"当前命中 {rows.Count} 条配方记录，{recipeName} 的当前生效版本为 {activeVersion ?? "未命中"}。"
-            : $"当前命中 {rows.Count} 条配方记录。";
-
-        var highlights = rows.Take(3).Select(Describe).ToArray();
-        return new SemanticSummaryDto(plan.Target.ToString(), conclusion, metrics, highlights, scope);
-    }
-
-    private static string Describe(Dictionary<string, object?> row)
-    {
-        return $"配方 {SemanticSummaryFormatting.GetString(row, "recipeName")}，版本 {SemanticSummaryFormatting.GetString(row, "version")}，当前生效版本 {SemanticSummaryFormatting.FormatBoolean(SemanticSummaryFormatting.GetBoolean(row, "isActive"))}，设备 {SemanticSummaryFormatting.GetString(row, "deviceCode")}，工序 {SemanticSummaryFormatting.GetString(row, "processName")}，时间 {SemanticSummaryFormatting.FormatTimestamp(SemanticSummaryFormatting.GetString(row, "updatedAt"))}";
     }
 }
 

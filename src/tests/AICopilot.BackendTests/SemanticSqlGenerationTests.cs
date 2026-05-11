@@ -60,33 +60,6 @@ public sealed class SemanticSqlGenerationTests
     }
 
     [Fact]
-    public void SqlGenerator_ShouldGenerateRecipeVersionHistorySql()
-    {
-        var planningResult = _planner.Plan(
-            "Analysis.Recipe.VersionHistory",
-            """
-            {
-              "fields":["recipeName","deviceCode","version","isActive","updatedAt"],
-              "filters":[
-                {"field":"recipeName","operator":"eq","value":"Recipe-Cut-01"}
-              ],
-              "limit":20
-            }
-            """);
-
-        planningResult.IsSuccess.Should().BeTrue(planningResult.ErrorMessage);
-        _mappingProvider.TryGetMapping(SemanticQueryTarget.Recipe, out var mapping).Should().BeTrue();
-
-        var sql = _sqlGenerator.Generate(planningResult.Plan!, mapping);
-
-        sql.SqlText.Should().Contain("FROM recipe_view t");
-        sql.SqlText.Should().Contain("t.recipe_name = @p0");
-        sql.SqlText.Should().Contain("ORDER BY t.version DESC");
-        sql.SqlText.Should().Contain("LIMIT 20");
-        sql.Parameters.Should().ContainKey("@p0");
-    }
-
-    [Fact]
     public void SqlGenerator_ShouldGenerateProductionRangeSql()
     {
         var planningResult = _planner.Plan(

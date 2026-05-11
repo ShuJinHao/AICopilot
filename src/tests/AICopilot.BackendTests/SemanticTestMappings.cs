@@ -45,26 +45,6 @@ internal sealed class SampleSemanticPhysicalMappingProvider : ISemanticPhysicalM
                 allowedSortFields: ["occurredAt", "level"],
                 databaseName: "SemanticDb",
                 defaultSort: new SemanticSort("occurredAt", SemanticSortDirection.Desc)),
-            [SemanticQueryTarget.Recipe] = new SemanticPhysicalMapping(
-                SemanticQueryTarget.Recipe,
-                DatabaseProviderType.PostgreSql,
-                "recipe_view",
-                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["recipeId"] = "recipe_id",
-                    ["recipeName"] = "recipe_name",
-                    ["deviceId"] = "device_id",
-                    ["deviceCode"] = "device_code",
-                    ["processName"] = "process_name",
-                    ["version"] = "version",
-                    ["isActive"] = "is_active",
-                    ["updatedAt"] = "updated_at"
-                },
-                allowedProjectionFields: ["recipeId", "recipeName", "deviceId", "deviceCode", "processName", "version", "isActive", "updatedAt"],
-                allowedFilterFields: ["recipeId", "recipeName", "deviceId", "deviceCode", "processName", "version", "isActive"],
-                allowedSortFields: ["recipeName", "version", "updatedAt", "processName"],
-                databaseName: "SemanticDb",
-                defaultSort: new SemanticSort("version", SemanticSortDirection.Desc)),
             [SemanticQueryTarget.Capacity] = new SemanticPhysicalMapping(
                 SemanticQueryTarget.Capacity,
                 DatabaseProviderType.PostgreSql,

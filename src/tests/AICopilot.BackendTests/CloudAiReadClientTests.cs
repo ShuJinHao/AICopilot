@@ -28,12 +28,19 @@ public sealed class CloudAiReadClientTests
     [InlineData("DELETE", "/api/v1/ai/read/device-logs")]
     [InlineData("GET", "/api/v1/devices")]
     [InlineData("GET", "/api/v1/ai/read/pass-stations/a/b")]
+    [InlineData("GET", "/api/v1/ai/read/recipes/versions")]
     [InlineData("POST", "/api/v1/ai/read/devices")]
     public void EndpointPolicy_ShouldRejectWriteMethodsAndNonWhitelistedPaths(string method, string path)
     {
         var decision = CloudAiReadEndpointPolicy.Evaluate(new HttpMethod(method), path);
 
         decision.IsAllowed.Should().BeFalse();
+    }
+
+    [Fact]
+    public void SemanticSupport_ShouldNotSupportRecipeTarget()
+    {
+        CloudAiReadSemanticSupport.IsSupported(SemanticQueryTarget.Recipe).Should().BeFalse();
     }
 
     [Theory]

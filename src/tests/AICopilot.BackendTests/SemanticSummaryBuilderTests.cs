@@ -27,7 +27,7 @@ public sealed class SemanticSummaryBuilderTests
     }
 
     [Fact]
-    public void Builder_ShouldSummarizeRecipeVersions()
+    public void Builder_ShouldNotUseRecipeSpecificSummaryProfile()
     {
         var plan = CreatePlan(SemanticQueryTarget.Recipe, SemanticQueryKind.VersionHistory, ("recipeName", "Recipe-Cut-01"));
         var rows = new List<Dictionary<string, object?>>
@@ -38,9 +38,10 @@ public sealed class SemanticSummaryBuilderTests
 
         var summary = SemanticSummaryBuilder.Build(plan, rows);
 
-        summary.Metrics.Should().Contain(item => item.Name == "activeVersion" && item.Value == "V2.0");
-        summary.Metrics.Should().Contain(item => item.Name == "versionChain" && item.Value.Contains("V2.0 -> V1.0"));
-        summary.Highlights.Should().Contain(item => item.Contains("当前生效版本 是"));
+        summary.Metrics.Should().BeEmpty();
+        summary.Highlights.Should().BeEmpty();
+        summary.Conclusion.Should().NotContain("Recipe-Cut-01");
+        summary.Conclusion.Should().NotContain("V2.0");
     }
 
     [Fact]

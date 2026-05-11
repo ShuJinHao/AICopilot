@@ -68,9 +68,6 @@ public sealed class AcceptanceBaselineTests(AICopilotAppFixture fixture) : IClas
                 ("查看设备 DEV-001 最新日志", "Analysis.DeviceLog.Latest", ["DEV-001", "Temperature high", "Warn"]),
                 ("查看设备 DEV-001 在 2026-04-20T00:00:00Z 到 2026-04-20T23:59:59Z 的日志", "Analysis.DeviceLog.Range", ["DEV-001", "Motor overload", "Start completed"]),
                 ("查看设备 DEV-001 的错误日志", "Analysis.DeviceLog.ByLevel", ["DEV-001", "Error", "Motor overload"]),
-                ("列出设备 DEV-001 的配方", "Analysis.Recipe.List", ["Recipe-Cut-01", "V2.0", "DEV-001"]),
-                ("查看配方 Recipe-Cut-01 详情", "Analysis.Recipe.Detail", ["Recipe-Cut-01", "V2.0", "Cutting"]),
-                ("查看配方 Recipe-Cut-01 的版本历史", "Analysis.Recipe.VersionHistory", ["Recipe-Cut-01", "V2.0", "V1.0"]),
                 ("查看设备 DEV-001 在 2026-04-20T00:00:00Z 到 2026-04-21T23:59:59Z 的产能", "Analysis.Capacity.Range", ["DEV-001", "126", "123"]),
                 ("查看设备 DEV-001 的产能", "Analysis.Capacity.ByDevice", ["DEV-001", "Cutting", "126"]),
                 ("查看 Cutting 工序的产能", "Analysis.Capacity.ByProcess", ["Cutting", "DEV-001", "126"]),
@@ -82,6 +79,18 @@ public sealed class AcceptanceBaselineTests(AICopilotAppFixture fixture) : IClas
             foreach (var testCase in cases)
             {
                 await AssertSemanticChatAsync(sessionId, testCase.Message, testCase.Intent, testCase.ExpectedFragments);
+            }
+
+            var recipeBoundaryCases = new (string Message, string Intent)[]
+            {
+                ("列出设备 DEV-001 的配方", "Analysis.Recipe.List"),
+                ("查看配方 Recipe-Cut-01 详情", "Analysis.Recipe.Detail"),
+                ("查看配方 Recipe-Cut-01 的版本历史", "Analysis.Recipe.VersionHistory")
+            };
+
+            foreach (var testCase in recipeBoundaryCases)
+            {
+                await AssertRecipeDataReadBlockedAsync(sessionId, testCase.Message, testCase.Intent);
             }
         }
         finally
@@ -349,6 +358,31 @@ public sealed class AcceptanceBaselineTests(AICopilotAppFixture fixture) : IClas
         text.Contains("recipe_cloud_sim_view", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
         text.Contains("capacity_cloud_sim_view", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
         text.Contains("production_data_cloud_sim_view", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
+        text.Contains("DeviceSemanticReadonly", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
+    }
+
+    private async Task AssertRecipeDataReadBlockedAsync(Guid sessionId, string message, string expectedIntent)
+    {
+        var events = await PostChatAsync(new
+        {
+            sessionId,
+            message
+        });
+
+        events.Should().NotContain(item => item.Type == "Error", "recipe data boundary should be returned for '{0}'", message);
+        events.Should().Contain(item => item.Type == "Intent" && item.Content.Contains(expectedIntent, StringComparison.OrdinalIgnoreCase));
+
+        var text = string.Concat(events.Where(item => item.Type == "Text").Select(item => item.Content));
+        text.Should().NotBeNullOrWhiteSpace();
+        text.Should().Contain("当前 AI 不读取云端配方主数据或配方版本数据");
+        text.Should().Contain("不能查询具体配方");
+        text.Should().NotContain("Recipe-Cut-01");
+        text.Should().NotContain("V2.0");
+        text.Should().NotContain("V1.0");
+        text.Should().NotContain("DEV-001");
+        text.Contains("SELECT", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
+        text.Contains("recipe_cloud_sim_view", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
+        text.Contains("vw_recipe_readonly", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
         text.Contains("DeviceSemanticReadonly", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
     }
 
