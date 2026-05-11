@@ -132,6 +132,7 @@ public sealed class ArchitectureBoundaryTests
     {
         var publicRequests = new HashSet<string>(StringComparer.Ordinal)
         {
+            "FinalizeCloudOidcLoginCommand",
             "LoginUserCommand",
             "GetCurrentUserProfileQuery",
             "GetInitializationStatusQuery"
@@ -599,6 +600,7 @@ public sealed class ArchitectureBoundaryTests
             "Commands");
         var commandFiles = new[]
         {
+            "FinalizeCloudOidcLogin.cs",
             "CreateRole.cs",
             "UpdateRole.cs",
             "DeleteRole.cs",

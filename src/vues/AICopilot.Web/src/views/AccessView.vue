@@ -20,6 +20,19 @@ function openRole(role: RoleSummary) {
 function openUserRole(user: UserSummary) {
   store.openChangeUserRoleDialog(user)
 }
+
+function hasAuditMetadata(row: { metadata?: Record<string, string> }) {
+  return Boolean(row.metadata && Object.keys(row.metadata).length > 0)
+}
+
+function auditMetadataEntries(row: { metadata?: Record<string, string> }) {
+  return Object.entries(row.metadata ?? {}).filter(([, value]) => Boolean(value))
+}
+
+function cloudIdentityLabel(row: { metadata?: Record<string, string> }) {
+  const metadata = row.metadata ?? {}
+  return metadata.cloudEmployeeNo || metadata.cloudUserId || metadata.identityProvider || ''
+}
 </script>
 
 <template>
@@ -163,6 +176,26 @@ function openUserRole(user: UserSummary) {
           <el-table-column prop="actionCode" label="动作" min-width="220" show-overflow-tooltip />
           <el-table-column prop="targetName" label="对象" min-width="160" show-overflow-tooltip />
           <el-table-column prop="operatorUserName" label="操作人" width="140" />
+          <el-table-column label="身份快照" min-width="190">
+            <template #default="{ row }">
+              <div v-if="hasAuditMetadata(row)" class="audit-identity">
+                <el-tag size="small" type="info">{{ row.metadata.identityProvider || 'Identity' }}</el-tag>
+                <span>{{ cloudIdentityLabel(row) }}</span>
+                <el-popover placement="left" width="360" trigger="click">
+                  <template #reference>
+                    <el-button link type="primary">详情</el-button>
+                  </template>
+                  <dl class="audit-metadata">
+                    <template v-for="[key, value] in auditMetadataEntries(row)" :key="key">
+                      <dt>{{ key }}</dt>
+                      <dd>{{ value }}</dd>
+                    </template>
+                  </dl>
+                </el-popover>
+              </div>
+              <span v-else class="muted-text">-</span>
+            </template>
+          </el-table-column>
           <el-table-column label="结果" width="100">
             <template #default="{ row }">
               <el-tag :type="row.result === 'Succeeded' ? 'success' : 'danger'">{{ row.result }}</el-tag>
@@ -295,6 +328,40 @@ function openUserRole(user: UserSummary) {
 .permission-checks {
   display: grid;
   gap: 12px;
+}
+
+.audit-identity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.audit-identity span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audit-metadata {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.45fr) minmax(0, 1fr);
+  gap: 8px 10px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.audit-metadata dt {
+  color: var(--app-text-muted);
+}
+
+.audit-metadata dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.muted-text {
+  color: var(--app-text-muted);
 }
 
 @media (max-width: 1080px) {

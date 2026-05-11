@@ -65,11 +65,14 @@ public sealed class AuditLogQueryService(AuditDbContext auditDbContext) : IAudit
 
         var totalCount = await query.CountAsync(cancellationToken);
 
-        var items = await query
+        var entries = await query
             .OrderByDescending(item => item.CreatedAt)
             .ThenByDescending(item => item.Id)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        var items = entries
             .Select(item => new AuditLogSummaryDto(
                 item.Id,
                 item.ActionGroup,
@@ -81,9 +84,10 @@ public sealed class AuditLogQueryService(AuditDbContext auditDbContext) : IAudit
                 item.OperatorRoleName,
                 item.Result,
                 item.Summary,
-                item.ChangedFields,
+                AuditMetadataCodec.ExtractChangedFields(item.ChangedFields),
+                AuditMetadataCodec.ExtractMetadata(item.ChangedFields),
                 item.CreatedAt))
-            .ToListAsync(cancellationToken);
+            .ToList();
 
         return new AuditLogListDto(page, pageSize, totalCount, items);
     }

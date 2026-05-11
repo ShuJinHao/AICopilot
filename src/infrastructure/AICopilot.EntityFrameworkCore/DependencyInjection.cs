@@ -7,6 +7,7 @@ using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
 using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.EntityFrameworkCore.AuditLogs;
+using AICopilot.EntityFrameworkCore.ExternalIdentities;
 using AICopilot.EntityFrameworkCore.Outbox;
 using AICopilot.EntityFrameworkCore.Repository;
 using AICopilot.EntityFrameworkCore.Security;
@@ -69,6 +70,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<IRepository<McpServerInfo>>(provider => provider.GetRequiredService<McpServerRepository>());
         builder.Services.AddScoped<IAuditLogWriter, AuditLogWriter>();
         builder.Services.AddScoped<IIdentityAuditLogWriter, IdentityAuditLogWriter>();
+        builder.Services.AddScoped<IExternalIdentityBindingStore, ExternalIdentityBindingStore>();
         builder.Services.AddScoped<IAuditLogQueryService, AuditLogQueryService>();
         builder.Services.AddScoped<AuditTransactionCoordinator>();
         builder.Services.AddScoped<ITransactionalExecutionService, EfTransactionalExecutionService>();

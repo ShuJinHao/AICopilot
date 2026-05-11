@@ -2,20 +2,91 @@ using AICopilot.HttpApi.Infrastructure;
 using AICopilot.HttpApi.Models;
 using AICopilot.IdentityService.Commands;
 using AICopilot.IdentityService.Queries;
+using AICopilot.SharedKernel.Result;
 using MediatR;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Options;
 
 namespace AICopilot.HttpApi.Controllers;
 
 [Route("/api/identity")]
-public class IdentityController(ISender sender) : ApiControllerBase(sender)
+public class IdentityController(
+    ISender sender,
+    IAuthenticationSchemeProvider authenticationSchemeProvider,
+    IOptions<CloudOidcOptions> cloudOidcOptions) : ApiControllerBase(sender)
 {
     [HttpPost("login")]
     [EnableRateLimiting("login")]
     public async Task<IActionResult> Login(UserLoginRequest request)
     {
         var result = await Sender.Send(new LoginUserCommand(request.Username, request.Password));
+        return ReturnResult(result);
+    }
+
+    [HttpGet("cloud-oidc/status")]
+    public async Task<IActionResult> GetCloudOidcStatus()
+    {
+        return Ok(new CloudOidcStatusResponse(await IsCloudOidcEnabledAsync()));
+    }
+
+    [HttpGet("cloud-oidc/challenge")]
+    [EnableRateLimiting("login")]
+    public async Task<IActionResult> CloudOidcChallenge()
+    {
+        if (!await IsCloudOidcEnabledAsync())
+        {
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                ApiProblemDetailsFactory.Create(
+                    StatusCodes.Status503ServiceUnavailable,
+                    new ApiProblemDescriptor(
+                        AuthProblemCodes.CloudOidcNotConfigured,
+                        "Cloud OIDC 登录尚未配置。")));
+        }
+
+        var properties = new AuthenticationProperties
+        {
+            RedirectUri = cloudOidcOptions.Value.FrontendCompletionPath
+        };
+
+        return Challenge(properties, CloudOidcAuthenticationDefaults.AuthenticationScheme);
+    }
+
+    [HttpPost("cloud-oidc/finalize")]
+    [EnableRateLimiting("login")]
+    public async Task<IActionResult> FinalizeCloudOidcLogin()
+    {
+        var authenticateResult = await HttpContext.AuthenticateAsync(
+            CloudOidcAuthenticationDefaults.ExternalCookieScheme);
+
+        if (!authenticateResult.Succeeded || authenticateResult.Principal is null)
+        {
+            await HttpContext.SignOutAsync(CloudOidcAuthenticationDefaults.ExternalCookieScheme);
+            return StatusCode(
+                StatusCodes.Status401Unauthorized,
+                ApiProblemDetailsFactory.Create(
+                    StatusCodes.Status401Unauthorized,
+                    new ApiProblemDescriptor(
+                        AuthProblemCodes.CloudOidcInvalidPrincipal,
+                        "Cloud 登录态无效或已过期，请重新从 Cloud 登录。")));
+        }
+
+        if (!CloudOidcPrincipalMapper.TryMap(
+                authenticateResult.Principal,
+                cloudOidcOptions.Value.Issuer,
+                out var profile,
+                out var problem))
+        {
+            await HttpContext.SignOutAsync(CloudOidcAuthenticationDefaults.ExternalCookieScheme);
+            return StatusCode(
+                StatusCodes.Status401Unauthorized,
+                ApiProblemDetailsFactory.Create(StatusCodes.Status401Unauthorized, problem));
+        }
+
+        var result = await Sender.Send(new FinalizeCloudOidcLoginCommand(profile));
+        await HttpContext.SignOutAsync(CloudOidcAuthenticationDefaults.ExternalCookieScheme);
         return ReturnResult(result);
     }
 
@@ -124,5 +195,11 @@ public class IdentityController(ISender sender) : ApiControllerBase(sender)
     public async Task<IActionResult> GetInitializationStatus()
     {
         return ReturnResult(await Sender.Send(new GetInitializationStatusQuery()));
+    }
+
+    private async Task<bool> IsCloudOidcEnabledAsync()
+    {
+        return cloudOidcOptions.Value.IsConfigured()
+            && await authenticationSchemeProvider.GetSchemeAsync(CloudOidcAuthenticationDefaults.AuthenticationScheme) is not null;
     }
 }

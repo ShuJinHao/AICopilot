@@ -6,6 +6,7 @@ using AICopilot.EntityFrameworkCore.Outbox;
 using AICopilot.EventBus;
 using AICopilot.Infrastructure.AiGateway;
 using AICopilot.Infrastructure.Authentication;
+using AICopilot.Infrastructure.CloudIdentity;
 using AICopilot.Infrastructure.Mcp;
 using AICopilot.Infrastructure.Rag;
 using AICopilot.Infrastructure.Rag.Parsers;
@@ -34,6 +35,7 @@ public static class DependencyInjection
 
         builder.Services.AddSingleton<IFileStorageService, LocalFileStorageService>();
         builder.Services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
+        builder.Services.AddHttpClient<ICloudIdentityStatusClient, CloudIdentityStatusClient>();
         builder.Services.AddScoped<IChatClientProvider, OpenAiChatClientProvider>();
         builder.Services.AddSingleton<ITextTokenEstimator, SharpTokenTextTokenEstimator>();
         builder.AddDocumentParsers();

@@ -25,7 +25,7 @@ public sealed class AuditLogWriter(
             OperatorRoleName = currentUser?.Role,
             Result = request.Result,
             Summary = request.Summary,
-            ChangedFields = request.ChangedFields?.ToArray() ?? [],
+            ChangedFields = AuditMetadataCodec.Combine(request.ChangedFields, request.Metadata),
             CreatedAt = DateTime.UtcNow
         };
 

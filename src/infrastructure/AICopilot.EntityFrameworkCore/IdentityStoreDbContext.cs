@@ -1,5 +1,7 @@
 using AICopilot.EntityFrameworkCore.AuditLogs;
 using AICopilot.EntityFrameworkCore.Configuration.Audit;
+using AICopilot.EntityFrameworkCore.Configuration.Identity;
+using AICopilot.EntityFrameworkCore.ExternalIdentities;
 using AICopilot.Services.Contracts;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
@@ -13,10 +15,13 @@ public sealed class IdentityStoreDbContext(DbContextOptions<IdentityStoreDbConte
 {
     public DbSet<AuditLogEntry> AuditLogs => Set<AuditLogEntry>();
 
+    public DbSet<ExternalIdentityBinding> ExternalIdentityBindings => Set<ExternalIdentityBinding>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
         ConfigureIdentitySchema(builder);
+        builder.ApplyConfiguration(new ExternalIdentityBindingConfiguration());
         builder.ApplyConfiguration(new AuditLogEntryConfiguration());
         builder.Entity<AuditLogEntry>()
             .ToTable("audit_logs", table => table.ExcludeFromMigrations());

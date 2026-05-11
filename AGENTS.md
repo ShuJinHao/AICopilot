@@ -20,6 +20,7 @@ For business semantics, the current cloud business is the reference source.
 
 `AICopilot` may consume confirmed cloud business data for analysis, explanation, summarization, retrieval, and recommendation only.
 - AICopilot-to-Cloud alignment planning is documented in `资料/CloudReadOnlyAlignment.md`; that document is a read-only preparation guide, not permission to implement Cloud business write tools.
+- Cloud-AICopilot OIDC identity alignment is documented in `../docs/Cloud-AICopilot-OIDC身份对齐方案.md`, with stage verification recorded in `../docs/Cloud-AICopilot-OIDC开发记录.md`. Any future work involving Cloud login, external identity binding, Cloud user status claims, or Cloud-backed AI login must read those documents first.
 - It must not directly write to the Cloud database.
 - It must not create, update, delete, backfill, approve, dispatch, or trigger Cloud business records or Cloud business workflows.
 - It must not use MCP tools, agent workflows, background jobs, direct SQL, or hidden adapters to call Cloud write APIs indirectly.

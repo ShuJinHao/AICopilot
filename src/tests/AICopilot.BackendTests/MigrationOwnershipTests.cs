@@ -24,6 +24,7 @@ public sealed class MigrationOwnershipTests
             "identity.AspNetUserRoles",
             "identity.AspNetRoleClaims",
             "identity.AspNetUserTokens",
+            "identity.external_identity_bindings",
             "aigateway.language_models",
             "aigateway.conversation_templates",
             "aigateway.approval_policies",
@@ -51,7 +52,8 @@ public sealed class MigrationOwnershipTests
             "identity.AspNetUserLogins",
             "identity.AspNetUserRoles",
             "identity.AspNetRoleClaims",
-            "identity.AspNetUserTokens"
+            "identity.AspNetUserTokens",
+            "identity.external_identity_bindings"
         });
 
         IsExcludedTable(dbContext, null, "audit_logs").Should().BeTrue();
@@ -231,6 +233,7 @@ public sealed class MigrationOwnershipTests
         ("identity", "AspNetUserRoles"),
         ("identity", "AspNetRoleClaims"),
         ("identity", "AspNetUserTokens"),
+        ("identity", "external_identity_bindings"),
         ("aigateway", "language_models"),
         ("aigateway", "conversation_templates"),
         ("aigateway", "approval_policies"),

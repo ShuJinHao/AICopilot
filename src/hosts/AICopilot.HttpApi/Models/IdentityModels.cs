@@ -2,6 +2,8 @@ namespace AICopilot.HttpApi.Models;
 
 public record UserLoginRequest(string Username, string Password);
 
+public record CloudOidcStatusResponse(bool IsEnabled);
+
 public record CreateRoleRequest(string RoleName, IReadOnlyCollection<string> Permissions);
 
 public record UpdateRoleRequest(string RoleId, IReadOnlyCollection<string> Permissions);

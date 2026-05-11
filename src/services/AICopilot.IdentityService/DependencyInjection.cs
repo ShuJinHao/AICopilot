@@ -1,5 +1,6 @@
 using AICopilot.AgentPlugin;
 using AICopilot.IdentityService.Authorization;
+using AICopilot.IdentityService.Services;
 using AICopilot.Services.Contracts;
 using AICopilot.Services.CrossCutting.Behaviors;
 using MediatR;
@@ -21,6 +22,8 @@ public static class DependencyInjection
 
         builder.Services.AddScoped<IPermissionCatalog, PermissionCatalog>();
         builder.Services.AddScoped<IIdentityAccessService, IdentityAccessService>();
+        builder.Services.AddSingleton<ICloudIdentityStatusValidationCache, CloudIdentityStatusValidationCache>();
+        builder.Services.AddScoped<ICloudIdentityStatusValidator, CloudIdentityStatusValidator>();
 
         builder.Services.AddAgentPlugin(registrar =>
         {

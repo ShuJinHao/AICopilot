@@ -8,10 +8,13 @@ using AICopilot.McpService;
 using AICopilot.RagService;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Result;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
 using System.Security.Claims;
 using System.Text;
@@ -52,14 +55,99 @@ public static class DependencyInjection
             }
 
             builder.Services.Configure<JwtSettings>(configurationSection);
+            builder.Services.Configure<CloudOidcOptions>(
+                builder.Configuration.GetSection(CloudOidcOptions.SectionName));
+            builder.Services.Configure<CloudIdentityStatusOptions>(
+                builder.Configuration.GetSection(CloudIdentityStatusOptions.SectionName));
+            var cloudOidcOptions = builder.Configuration
+                .GetSection(CloudOidcOptions.SectionName)
+                .Get<CloudOidcOptions>() ?? new CloudOidcOptions();
+            cloudOidcOptions.EnsureValid();
+            var cloudIdentityStatusOptions = builder.Configuration
+                .GetSection(CloudIdentityStatusOptions.SectionName)
+                .Get<CloudIdentityStatusOptions>() ?? new CloudIdentityStatusOptions();
+            cloudIdentityStatusOptions.EnsureValid();
 
-            builder.Services
+            var authenticationBuilder = builder.Services
                 .AddAuthentication(options =>
                 {
                     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
                     options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-                })
-                .AddJwtBearer(options =>
+                });
+
+            authenticationBuilder.AddCookie(
+                CloudOidcAuthenticationDefaults.ExternalCookieScheme,
+                options =>
+                {
+                    options.Cookie.Name = cloudOidcOptions.ExternalCookieName;
+                    options.Cookie.HttpOnly = true;
+                    options.Cookie.SameSite = SameSiteMode.Lax;
+                    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+                    options.ExpireTimeSpan = TimeSpan.FromMinutes(
+                        Math.Clamp(cloudOidcOptions.ExternalCookieLifetimeMinutes, 1, 15));
+                    options.SlidingExpiration = false;
+                });
+
+            if (cloudOidcOptions.IsConfigured())
+            {
+                authenticationBuilder.AddOpenIdConnect(
+                    CloudOidcAuthenticationDefaults.AuthenticationScheme,
+                    options =>
+                    {
+                        options.Authority = cloudOidcOptions.Issuer.TrimEnd('/');
+                        options.ClientId = cloudOidcOptions.ClientId;
+                        options.ResponseType = OpenIdConnectResponseType.Code;
+                        options.UsePkce = true;
+                        options.CallbackPath = cloudOidcOptions.CallbackPath;
+                        options.SignInScheme = CloudOidcAuthenticationDefaults.ExternalCookieScheme;
+                        options.RequireHttpsMetadata = cloudOidcOptions.RequireHttpsMetadata;
+                        options.SaveTokens = false;
+                        options.GetClaimsFromUserInfoEndpoint = true;
+                        options.MapInboundClaims = false;
+
+                        options.Scope.Clear();
+                        foreach (var scope in cloudOidcOptions.Scopes
+                                     .Where(scope => !string.IsNullOrWhiteSpace(scope))
+                                     .Select(scope => scope.Trim())
+                                     .Distinct(StringComparer.Ordinal))
+                        {
+                            options.Scope.Add(scope);
+                        }
+
+                        options.TokenValidationParameters = new TokenValidationParameters
+                        {
+                            ValidateIssuer = true,
+                            ValidIssuer = cloudOidcOptions.Issuer.TrimEnd('/'),
+                            ValidateAudience = true,
+                            ValidAudience = cloudOidcOptions.ClientId,
+                            NameClaimType = "preferred_username"
+                        };
+
+                        options.ClaimActions.MapUniqueJsonKey("sub", "sub");
+                        options.ClaimActions.MapUniqueJsonKey("preferred_username", "preferred_username");
+                        options.ClaimActions.MapUniqueJsonKey("name", "name");
+                        options.ClaimActions.MapUniqueJsonKey("employee_no", "employee_no");
+                        options.ClaimActions.MapUniqueJsonKey("employee_id", "employee_id");
+                        options.ClaimActions.MapUniqueJsonKey("account_enabled", "account_enabled");
+                        options.ClaimActions.MapUniqueJsonKey("employee_active", "employee_active");
+                        options.ClaimActions.MapUniqueJsonKey("department_id", "department_id");
+                        options.ClaimActions.MapUniqueJsonKey("department_name", "department_name");
+                        options.ClaimActions.MapUniqueJsonKey("tenant_id", "tenant_id");
+                        options.ClaimActions.MapUniqueJsonKey("status_version", "status_version");
+
+                        options.Events.OnRemoteFailure = context =>
+                        {
+                            context.HandleResponse();
+                            context.Response.Redirect(AppendQueryString(
+                                cloudOidcOptions.FrontendCompletionPath,
+                                "error",
+                                "cloud_oidc_failed"));
+                            return Task.CompletedTask;
+                        };
+                    });
+            }
+
+            authenticationBuilder.AddJwtBearer(options =>
                 {
                     options.TokenValidationParameters = new TokenValidationParameters
                     {
@@ -135,6 +223,32 @@ public static class DependencyInjection
                                         AuthProblemCodes.SessionRevoked,
                                         "登录态已失效，请重新登录。"));
                                 context.Fail("Security stamp mismatch.");
+                                return;
+                            }
+
+                            var requiresCloudStatusCheck =
+                                cloudIdentityStatusOptions.Enabled &&
+                                string.Equals(
+                                    context.Principal?.FindFirstValue(ExternalIdentityJwtClaimTypes.IdentityProvider),
+                                    ExternalIdentityProviders.Cloud,
+                                    StringComparison.Ordinal);
+                            if (requiresCloudStatusCheck)
+                            {
+                                var cloudIdentityStatusValidator = context.HttpContext.RequestServices
+                                    .GetRequiredService<ICloudIdentityStatusValidator>();
+                                var cloudIdentityStatus = await cloudIdentityStatusValidator.ValidateAsync(
+                                    user,
+                                    context.Principal!,
+                                    context.HttpContext.RequestAborted);
+                                if (!cloudIdentityStatus.IsValid)
+                                {
+                                    StoreAuthFailure(
+                                        context.HttpContext,
+                                        new ApiProblemDescriptor(
+                                            cloudIdentityStatus.FailureCode ?? AuthProblemCodes.SessionRevoked,
+                                            cloudIdentityStatus.FailureMessage ?? "登录态已失效，请重新登录。"));
+                                    context.Fail(cloudIdentityStatus.FailureMessage ?? "Cloud identity status check failed.");
+                                }
                             }
                         },
                         OnChallenge = async context =>
@@ -380,6 +494,12 @@ public static class DependencyInjection
 
                     return null;
                 }
+            }
+
+            static string AppendQueryString(string path, string key, string value)
+            {
+                var separator = path.Contains('?', StringComparison.Ordinal) ? '&' : '?';
+                return $"{path}{separator}{Uri.EscapeDataString(key)}={Uri.EscapeDataString(value)}";
             }
         }
     }
