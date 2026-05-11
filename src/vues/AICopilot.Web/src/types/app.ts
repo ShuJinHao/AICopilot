@@ -16,6 +16,10 @@ export interface LoginResponse {
   token: string
 }
 
+export interface CloudOidcStatus {
+  isEnabled: boolean
+}
+
 export interface CurrentUserProfile {
   userId: string
   userName: string
@@ -58,6 +62,7 @@ export interface AuditLogSummary {
   result: 'Succeeded' | 'Rejected'
   summary: string
   changedFields: string[]
+  metadata: Record<string, string>
   createdAt: string
 }
 

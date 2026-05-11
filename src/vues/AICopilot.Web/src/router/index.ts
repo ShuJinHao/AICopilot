@@ -54,6 +54,11 @@ const router = createRouter({
       component: () => import('@/views/LoginView.vue')
     },
     {
+      path: '/cloud-login/complete',
+      name: 'cloud-login-complete',
+      component: () => import('@/views/CloudOidcCompleteView.vue')
+    },
+    {
       path: '/chat',
       name: 'chat',
       component: () => import('@/views/ChatView.vue'),

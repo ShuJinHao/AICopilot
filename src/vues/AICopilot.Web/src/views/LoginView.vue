@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { reactive } from 'vue'
+import { onMounted, reactive } from 'vue'
 import { useRouter } from 'vue-router'
-import { Lock, User } from '@element-plus/icons-vue'
+import { Connection, Lock, User } from '@element-plus/icons-vue'
 import { ApiError } from '@/services/apiClient'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -31,6 +31,10 @@ async function handleLogin() {
     }
   }
 }
+
+onMounted(() => {
+  void authStore.ensureCloudOidcStatus()
+})
 </script>
 
 <template>
@@ -123,6 +127,19 @@ async function handleLogin() {
             @click="handleLogin"
           >
             登录
+          </el-button>
+
+          <el-divider>Cloud</el-divider>
+
+          <el-button
+            size="large"
+            class="login-button"
+            :loading="authStore.isCloudLoginSubmitting || authStore.isCloudOidcStatusLoading"
+            :disabled="!authStore.isCloudOidcEnabled"
+            @click="authStore.startCloudOidcLogin()"
+          >
+            <el-icon><Connection /></el-icon>
+            使用 Cloud 登录
           </el-button>
         </el-form>
       </div>

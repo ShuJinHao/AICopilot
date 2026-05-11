@@ -157,6 +157,13 @@ export const apiClient = {
       body: JSON.stringify(body)
     })
   },
+  postWithCredentials<T>(endpoint: string, body: unknown) {
+    return request<T>(endpoint, {
+      method: 'POST',
+      body: JSON.stringify(body),
+      credentials: 'include'
+    })
+  },
   postForm<T>(endpoint: string, body: FormData) {
     return request<T>(endpoint, {
       method: 'POST',

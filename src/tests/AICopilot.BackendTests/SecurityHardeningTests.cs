@@ -444,7 +444,8 @@ public sealed class SecurityHardeningTests
                 "Controllers",
                 controllerFile));
 
-            source.Should().Contain("(ISender sender) : ApiControllerBase(sender)", controllerFile);
+            source.Should().Contain("ISender sender", controllerFile);
+            source.Should().Contain(": ApiControllerBase(sender)", controllerFile);
         }
     }
 

@@ -22,7 +22,8 @@ public sealed record AuditLogWriteRequest(
     string TargetName,
     string Result,
     string Summary,
-    IReadOnlyCollection<string>? ChangedFields = null);
+    IReadOnlyCollection<string>? ChangedFields = null,
+    IReadOnlyDictionary<string, string>? Metadata = null);
 
 public interface IAuditLogWriter
 {
@@ -48,6 +49,7 @@ public sealed record AuditLogSummaryDto(
     string Result,
     string Summary,
     IReadOnlyCollection<string> ChangedFields,
+    IReadOnlyDictionary<string, string> Metadata,
     DateTime CreatedAt);
 
 public sealed record AuditLogListDto(

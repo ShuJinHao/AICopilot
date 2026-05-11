@@ -8,6 +8,11 @@ public static class AuthProblemCodes
     public const string MissingPermission = "missing_permission";
     public const string InvalidCredentials = "invalid_credentials";
     public const string Unauthorized = "unauthorized";
+    public const string CloudOidcNotConfigured = "cloud_oidc_not_configured";
+    public const string CloudOidcInvalidPrincipal = "cloud_oidc_invalid_principal";
+    public const string CloudIdentityInactive = "cloud_identity_inactive";
+    public const string CloudIdentityUnverified = "cloud_identity_unverified";
+    public const string ExternalIdentityConflict = "external_identity_conflict";
 }
 
 public static class AppProblemCodes

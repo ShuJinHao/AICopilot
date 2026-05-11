@@ -2,6 +2,7 @@ using System.Reflection;
 using AICopilot.EntityFrameworkCore.AuditLogs;
 using AICopilot.EntityFrameworkCore.Configuration.AiGateway;
 using AICopilot.EntityFrameworkCore.Configuration.DataAnalysis;
+using AICopilot.EntityFrameworkCore.Configuration.Identity;
 using AICopilot.EntityFrameworkCore.Configuration.McpServer;
 using AICopilot.EntityFrameworkCore.Configuration.Rag;
 using AICopilot.EntityFrameworkCore.Outbox;
@@ -28,6 +29,7 @@ public class AiCopilotDbContext(DbContextOptions<AiCopilotDbContext> options) : 
                     && type != typeof(MessageConfiguration)
                     && type != typeof(McpServerConfiguration)
                     && type != typeof(BusinessDatabaseConfiguration)
+                    && type != typeof(ExternalIdentityBindingConfiguration)
                     && type != typeof(EmbeddingModelConfiguration)
                     && type != typeof(KnowledgeBaseConfiguration)
                     && type != typeof(DocumentConfiguration)

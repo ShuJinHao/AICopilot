@@ -2,6 +2,7 @@ import { apiClient } from './apiClient'
 import type {
   AuditLogListResponse,
   AuditLogQuery,
+  CloudOidcStatus,
   CurrentUserProfile,
   InitializationStatus,
   LoginRequest,
@@ -10,6 +11,11 @@ import type {
   RoleSummary,
   UserSummary
 } from '@/types/app'
+import { baseUrl } from '@/appsetting'
+
+function buildIdentityUrl(path: string) {
+  return `${baseUrl}/identity/${path}`.replace(/([^:]\/)\/+/g, '$1')
+}
 
 export const identityService = {
   async getInitializationStatus() {
@@ -18,6 +24,18 @@ export const identityService = {
 
   async login(payload: LoginRequest) {
     return await apiClient.post<LoginResponse>('/identity/login', payload)
+  },
+
+  async getCloudOidcStatus() {
+    return await apiClient.get<CloudOidcStatus>('/identity/cloud-oidc/status')
+  },
+
+  getCloudOidcChallengeUrl() {
+    return buildIdentityUrl('cloud-oidc/challenge')
+  },
+
+  async finalizeCloudOidcLogin() {
+    return await apiClient.postWithCredentials<LoginResponse>('/identity/cloud-oidc/finalize', {})
   },
 
   async getCurrentUserProfile() {
