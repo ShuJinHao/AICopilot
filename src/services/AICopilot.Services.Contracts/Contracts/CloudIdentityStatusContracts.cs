@@ -65,6 +65,15 @@ public sealed class CloudIdentityStatusOptions
             throw new InvalidOperationException("CloudIdentityStatus:StatusEndpointPath must contain '{cloudUserId}'.");
         }
 
+        var statusPathDecision = CloudAiReadEndpointPolicy.Evaluate(
+            System.Net.Http.HttpMethod.Get,
+            StatusEndpointPath.Replace("{cloudUserId}", "status-check", StringComparison.Ordinal));
+        if (!statusPathDecision.IsAllowed)
+        {
+            throw new InvalidOperationException(
+                $"CloudIdentityStatus:StatusEndpointPath must stay under /api/v1/ai/identity/*: {statusPathDecision.Reason}");
+        }
+
         if (string.IsNullOrWhiteSpace(ServiceAccountToken))
         {
             throw new InvalidOperationException("CloudIdentityStatus:ServiceAccountToken is required when enabled.");

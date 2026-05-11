@@ -30,8 +30,13 @@ internal static class SemanticAnalysisPresentation
         DataSourceExternalSystemType externalSystemType)
     {
         return externalSystemType == DataSourceExternalSystemType.CloudReadOnly
-            ? $"Cloud {targetLabel}只读视图"
+            ? $"Cloud {targetLabel}只读视图（DataAnalysis 补充分析）"
             : $"{targetLabel}只读数据源";
+    }
+
+    public static string BuildCloudAiReadSourceLabel(string targetLabel)
+    {
+        return $"Cloud AiRead API（{targetLabel}正式只读数据）";
     }
 
     public static string GetTargetLabel(SemanticQueryTarget target)

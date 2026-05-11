@@ -8,5 +8,13 @@ public interface ICurrentUser
 
     string? Role { get; }
 
+    string? IdentityProvider { get; }
+
+    string? CloudTenantId { get; }
+
+    string? CloudEmployeeNo { get; }
+
+    string? CloudStatusVersion { get; }
+
     bool IsAuthenticated { get; }
 }

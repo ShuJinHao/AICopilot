@@ -41,7 +41,8 @@ public class IntentRoutingAgentBuilder
         }
 
         builder.AppendLine("  Routing rule: restart, reboot, shutdown, write parameter, recipe download, PLC write, state change, or any control request must not be routed to Action intents.");
-        builder.AppendLine("  Routing rule: if the user requests a control action, fall back to General.Chat and explain that the assistant only supports observation, diagnosis, suggestion, and knowledge answers.");
+        builder.AppendLine("  Routing rule: Cloud business mutations such as modifying recipes, disabling devices, backfilling capacity, deleting logs, uploading production data, approving, dispatching, or submitting must not be routed to Action intents.");
+        builder.AppendLine("  Routing rule: if the user requests a control or Cloud write action, fall back to General.Chat and explain that the assistant only supports observation, diagnosis, suggestion, and knowledge answers.");
 
         return builder.ToString();
     }

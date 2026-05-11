@@ -49,6 +49,26 @@ public sealed class KeywordManufacturingSceneClassifier : IManufacturingSceneCla
         "写 plc",
         "写参数",
         "修改参数",
+        "修改配方",
+        "禁用设备",
+        "启用设备",
+        "删除设备",
+        "删除日志",
+        "删除设备日志",
+        "删除这条设备日志",
+        "补录",
+        "补录产能",
+        "补录昨天",
+        "纠正产能",
+        "上传生产数据",
+        "上传这批生产数据",
+        "上传这批",
+        "提交生产数据",
+        "写入云端",
+        "修改 Cloud",
+        "修改Cloud",
+        "处理 Cloud 业务",
+        "处理Cloud业务",
         "切换状态"
     ];
 
@@ -130,7 +150,8 @@ public sealed class KeywordManufacturingSceneClassifier : IManufacturingSceneCla
             return new ManufacturingSceneDecision(ManufacturingSceneType.FallbackToExistingRouting, "empty message");
         }
 
-        if (ContainsAny(normalized, ControlKeywords))
+        if (ContainsAny(normalized, ControlKeywords) &&
+            !(LooksLikeReadonlyQuestion(normalized) && !LooksLikeExecutionRequest(normalized)))
         {
             return new ManufacturingSceneDecision(ManufacturingSceneType.ControlBlocked, "matched control keyword");
         }
@@ -156,6 +177,55 @@ public sealed class KeywordManufacturingSceneClassifier : IManufacturingSceneCla
         }
 
         return new ManufacturingSceneDecision(ManufacturingSceneType.FallbackToExistingRouting, "no manufacturing scene keyword matched");
+    }
+
+    private static bool LooksLikeReadonlyQuestion(string message)
+    {
+        var questionCues = new[]
+        {
+            "吗",
+            "能否",
+            "能不能",
+            "可以",
+            "需要什么",
+            "是什么",
+            "什么关系",
+            "要检查什么",
+            "覆盖还是",
+            "规则",
+            "解释",
+            "分析",
+            "查看",
+            "查询"
+        };
+
+        return questionCues.Any(cue => message.Contains(cue, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool LooksLikeExecutionRequest(string message)
+    {
+        var executionCues = new[]
+        {
+            "帮我修改",
+            "帮我禁用",
+            "帮我启用",
+            "帮我删除",
+            "帮我上传",
+            "帮我补录",
+            "请修改",
+            "请禁用",
+            "请启用",
+            "请删除",
+            "请上传",
+            "请补录",
+            "立即",
+            "直接执行",
+            "执行一下",
+            "让它生效",
+            "让它立即生效"
+        };
+
+        return executionCues.Any(cue => message.Contains(cue, StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool ContainsAny(string message, IEnumerable<string> keywords)

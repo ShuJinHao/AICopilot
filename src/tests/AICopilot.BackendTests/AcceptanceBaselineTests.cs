@@ -328,7 +328,7 @@ public sealed class AcceptanceBaselineTests(AICopilotAppFixture fixture) : IClas
             message
         });
 
-        events.Should().NotContain(item => item.Type == "Error");
+        events.Should().NotContain(item => item.Type == "Error", "semantic chat should not be blocked for '{0}'", message);
         events.Should().Contain(item => item.Type == "Intent" && item.Content.Contains(expectedIntent, StringComparison.OrdinalIgnoreCase));
 
         var text = string.Concat(events.Where(item => item.Type == "Text").Select(item => item.Content));
@@ -360,7 +360,7 @@ public sealed class AcceptanceBaselineTests(AICopilotAppFixture fixture) : IClas
             message
         });
 
-        events.Should().NotContain(item => item.Type == "Error");
+        events.Should().NotContain(item => item.Type == "Error", "policy chat should not be blocked for '{0}'", message);
         events.Should().Contain(item => item.Type == "Intent" && item.Content.Contains(expectedIntent, StringComparison.OrdinalIgnoreCase));
 
         var text = string.Concat(events.Where(item => item.Type == "Text").Select(item => item.Content));

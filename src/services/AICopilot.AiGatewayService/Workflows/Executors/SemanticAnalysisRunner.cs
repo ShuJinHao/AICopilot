@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 namespace AICopilot.AiGatewayService.Workflows.Executors;
 
 public sealed class SemanticAnalysisRunner(
+    ICloudAiReadClient cloudAiReadClient,
     IBusinessDatabaseReadService businessDatabaseReadService,
     IDatabaseConnector databaseConnector,
     ISemanticQueryPlanner semanticQueryPlanner,
@@ -32,6 +33,11 @@ public sealed class SemanticAnalysisRunner(
 
         var plan = planningResult.Plan!;
         var targetLabel = SemanticAnalysisPresentation.GetTargetLabel(plan.Target);
+        if (cloudAiReadClient.IsEnabled && CloudAiReadSemanticSupport.IsSupported(plan.Target))
+        {
+            return await RunCloudAiReadAsync(plan, targetLabel, cancellationToken);
+        }
+
         if (!semanticPhysicalMappingProvider.TryGetMapping(plan.Target, out var mapping))
         {
             logger.LogInformation(
@@ -166,6 +172,55 @@ public sealed class SemanticAnalysisRunner(
                 plan.Intent,
                 businessDatabase.Name);
             return $"[系统提示]: 当前{targetLabel}数据源暂时不可用，请稍后重试或联系管理员检查连接。";
+        }
+    }
+
+    private async Task<string> RunCloudAiReadAsync(
+        SemanticQueryPlan plan,
+        string targetLabel,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var queryResult = await cloudAiReadClient.QuerySemanticAsync(plan, cancellationToken);
+            var rows = queryResult.Rows.ToList();
+            var semanticSummary = SemanticSummaryBuilder.Build(plan, rows);
+            var analysis = SemanticAnalysisPresentation.BuildAnalysis(
+                plan,
+                SemanticAnalysisPresentation.BuildCloudAiReadSourceLabel(targetLabel),
+                semanticSummary,
+                queryResult.IsTruncated);
+
+            logger.LogInformation(
+                "{TargetLabel}语义查询已通过 Cloud AiRead API 完成。Intent: {Intent}, SourcePath: {SourcePath}, RowsObserved: {RowsObserved}, Truncated: {Truncated}",
+                targetLabel,
+                plan.Intent,
+                queryResult.SourcePath,
+                rows.Count,
+                queryResult.IsTruncated);
+
+            return DataAnalysisFinalContextFormatter.FormatSemantic(
+                analysis,
+                semanticSummary,
+                rows,
+                queryResult.IsTruncated);
+        }
+        catch (CloudAiReadException ex)
+        {
+            logger.LogWarning(
+                ex,
+                "{TargetLabel} Cloud AiRead 查询被拒绝或暂不可用。Intent: {Intent}, Code: {Code}",
+                targetLabel,
+                plan.Intent,
+                ex.Code);
+            return ex.Code switch
+            {
+                CloudAiReadProblemCodes.MissingRequiredParameter => $"[系统提示]: Cloud AiRead {targetLabel}查询缺少必要条件：{ex.Message}请补充设备、时间范围或条码后重试。",
+                CloudAiReadProblemCodes.Unauthorized => $"[系统提示]: Cloud AiRead {targetLabel}查询未通过身份凭据校验，请联系管理员检查只读服务账号。",
+                CloudAiReadProblemCodes.Forbidden => $"[系统提示]: Cloud AiRead {targetLabel}查询权限或设备范围不足，系统已拒绝本次正式数据读取。",
+                CloudAiReadProblemCodes.RequestBlocked => $"[系统提示]: Cloud AiRead {targetLabel}查询未通过只读白名单校验，系统已拒绝执行。",
+                _ => $"[系统提示]: Cloud AiRead {targetLabel}只读接口暂不可用，请稍后重试或联系管理员检查配置。"
+            };
         }
     }
 }

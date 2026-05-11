@@ -37,6 +37,9 @@ export const useAuthStore = defineStore('auth', () => {
   const isCloudOidcEnabled = computed(() => cloudOidcStatus.value?.isEnabled ?? false)
   const userName = computed(() => currentUser.value?.userName ?? '')
   const roleName = computed(() => currentUser.value?.roleName ?? '')
+  const loginSource = computed(() => currentUser.value?.identityProvider === 'Cloud' ? 'Cloud OIDC' : '本地 AI 账号')
+  const cloudEmployeeNo = computed(() => currentUser.value?.cloudEmployeeNo ?? '')
+  const cloudStatusVersion = computed(() => currentUser.value?.cloudStatusVersion ?? '')
   const permissions = computed(() => currentUser.value?.permissions ?? [])
 
   function persistAuth() {
@@ -270,6 +273,9 @@ export const useAuthStore = defineStore('auth', () => {
     isCloudOidcEnabled,
     userName,
     roleName,
+    loginSource,
+    cloudEmployeeNo,
+    cloudStatusVersion,
     permissions,
     canUseChat,
     canViewConfig,
