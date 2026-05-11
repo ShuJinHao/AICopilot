@@ -85,9 +85,15 @@ public class IdentityController(
                 ApiProblemDetailsFactory.Create(StatusCodes.Status401Unauthorized, problem));
         }
 
-        var result = await Sender.Send(new FinalizeCloudOidcLoginCommand(profile));
-        await HttpContext.SignOutAsync(CloudOidcAuthenticationDefaults.ExternalCookieScheme);
-        return ReturnResult(result);
+        try
+        {
+            var result = await Sender.Send(new FinalizeCloudOidcLoginCommand(profile));
+            return ReturnResult(result);
+        }
+        finally
+        {
+            await HttpContext.SignOutAsync(CloudOidcAuthenticationDefaults.ExternalCookieScheme);
+        }
     }
 
     [Authorize]

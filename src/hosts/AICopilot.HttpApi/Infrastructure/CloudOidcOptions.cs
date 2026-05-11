@@ -33,6 +33,11 @@ public sealed class CloudOidcOptions
 
     public void EnsureValid()
     {
+        EnsureValid("Production");
+    }
+
+    public void EnsureValid(string environmentName)
+    {
         if (!Enabled)
         {
             return;
@@ -57,5 +62,41 @@ public sealed class CloudOidcOptions
         {
             throw new InvalidOperationException("CloudOidc:FrontendCompletionPath is required when CloudOidc is enabled.");
         }
+
+        var issuer = ParseHttpUri(Issuer);
+        var isDevelopment = string.Equals(environmentName, "Development", StringComparison.OrdinalIgnoreCase);
+        if (issuer.Scheme == Uri.UriSchemeHttps)
+        {
+            if (!RequireHttpsMetadata)
+            {
+                throw new InvalidOperationException(
+                    "CloudOidc:RequireHttpsMetadata must be true when CloudOidc:Issuer uses HTTPS.");
+            }
+
+            return;
+        }
+
+        if (!isDevelopment || !issuer.IsLoopback)
+        {
+            throw new InvalidOperationException(
+                "CloudOidc:Issuer must use HTTPS outside Development loopback endpoints.");
+        }
+
+        if (RequireHttpsMetadata)
+        {
+            throw new InvalidOperationException(
+                "CloudOidc:RequireHttpsMetadata must be false when Development uses an HTTP loopback issuer.");
+        }
+    }
+
+    private static Uri ParseHttpUri(string issuer)
+    {
+        if (!Uri.TryCreate(issuer, UriKind.Absolute, out var uri) ||
+            (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
+        {
+            throw new InvalidOperationException("CloudOidc:Issuer must be an absolute http/https URI.");
+        }
+
+        return uri;
     }
 }

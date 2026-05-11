@@ -69,6 +69,60 @@ public sealed class CloudOidcLoginTestsControllerSecurity
             .Which.Should().Be(CloudOidcAuthenticationDefaults.ExternalCookieScheme);
     }
 
+    [Fact]
+    public async Task FinalizeCloudOidcLogin_ShouldClearExternalCookie_WhenSenderThrows()
+    {
+        var authService = new RecordingAuthenticationService(
+            AuthenticateResult.Success(new AuthenticationTicket(
+                CreateCloudPrincipal(),
+                CloudOidcAuthenticationDefaults.ExternalCookieScheme)));
+        var controller = CreateController(new ThrowingSender(), authService);
+
+        var act = () => controller.FinalizeCloudOidcLogin();
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Sender should not be called by this test.");
+        controller.HttpContext.Response.Headers.Location.Should().BeEmpty();
+        authService.SignedOutSchemes.Should().ContainSingle()
+            .Which.Should().Be(CloudOidcAuthenticationDefaults.ExternalCookieScheme);
+    }
+
+    [Theory]
+    [InlineData("http://localhost:8080")]
+    [InlineData("http://127.0.0.1:8080")]
+    [InlineData("http://[::1]:8080")]
+    public void CloudOidcOptions_ShouldAllowDevelopmentLoopbackHttpIssuer(string issuer)
+    {
+        var options = CreateCloudOidcOptions(issuer, requireHttpsMetadata: false);
+
+        options.EnsureValid("Development");
+    }
+
+    [Theory]
+    [InlineData("Production", "http://localhost:8080", false)]
+    [InlineData("Production", "https://cloud.example.com", false)]
+    [InlineData("Development", "http://cloud.example.com", false)]
+    [InlineData("Development", "https://cloud.example.com", false)]
+    public void CloudOidcOptions_ShouldRejectInsecureClientMetadataConfiguration(
+        string environmentName,
+        string issuer,
+        bool requireHttpsMetadata)
+    {
+        var options = CreateCloudOidcOptions(issuer, requireHttpsMetadata);
+
+        Action act = () => options.EnsureValid(environmentName);
+
+        act.Should().Throw<InvalidOperationException>();
+    }
+
+    [Fact]
+    public void CloudOidcOptions_ShouldAllowProductionHttpsIssuerWithHttpsMetadata()
+    {
+        var options = CreateCloudOidcOptions("https://cloud.example.com", requireHttpsMetadata: true);
+
+        options.EnsureValid("Production");
+    }
+
     private static IdentityController CreateController(
         ISender sender,
         RecordingAuthenticationService authService)
@@ -100,6 +154,21 @@ public sealed class CloudOidcLoginTestsControllerSecurity
         };
 
         return controller;
+    }
+
+    private static CloudOidcOptions CreateCloudOidcOptions(
+        string issuer,
+        bool requireHttpsMetadata)
+    {
+        return new CloudOidcOptions
+        {
+            Enabled = true,
+            Issuer = issuer,
+            ClientId = "aicopilot",
+            CallbackPath = "/api/identity/cloud-oidc/callback",
+            FrontendCompletionPath = "/cloud-login/complete",
+            RequireHttpsMetadata = requireHttpsMetadata
+        };
     }
 
     private static ClaimsPrincipal CreateCloudPrincipal()

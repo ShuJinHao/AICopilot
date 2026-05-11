@@ -62,7 +62,7 @@ public static class DependencyInjection
             var cloudOidcOptions = builder.Configuration
                 .GetSection(CloudOidcOptions.SectionName)
                 .Get<CloudOidcOptions>() ?? new CloudOidcOptions();
-            cloudOidcOptions.EnsureValid();
+            cloudOidcOptions.EnsureValid(builder.Environment.EnvironmentName);
             var cloudIdentityStatusSection = builder.Configuration.GetSection(CloudIdentityStatusOptions.SectionName);
             var cloudIdentityStatusOptions = cloudIdentityStatusSection.Get<CloudIdentityStatusOptions>()
                 ?? new CloudIdentityStatusOptions();
