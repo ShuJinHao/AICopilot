@@ -8,7 +8,6 @@ public sealed class ConfiguredSemanticPhysicalMappingProvider : ISemanticPhysica
     public const string DefaultDatabaseName = "DeviceSemanticReadonly";
     public const string DefaultDeviceSourceName = "device_master_cloud_sim_view";
     public const string DefaultDeviceLogSourceName = "device_log_cloud_sim_view";
-    public const string DefaultRecipeSourceName = "recipe_cloud_sim_view";
     public const string DefaultCapacitySourceName = "capacity_cloud_sim_view";
     public const string DefaultProductionDataSourceName = "production_data_cloud_sim_view";
 
@@ -69,25 +68,6 @@ public sealed class ConfiguredSemanticPhysicalMappingProvider : ISemanticPhysica
                 ["deviceId", "deviceCode", "level", "source"],
                 ["occurredAt", "level"],
                 new SemanticSort("occurredAt", SemanticSortDirection.Desc)),
-            new SemanticMappingDefaults(
-                SemanticQueryTarget.Recipe,
-                "Recipe",
-                DefaultRecipeSourceName,
-                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["recipeId"] = "recipe_id",
-                    ["recipeName"] = "recipe_name",
-                    ["deviceId"] = "device_id",
-                    ["deviceCode"] = "device_code",
-                    ["processName"] = "process_name",
-                    ["version"] = "version",
-                    ["isActive"] = "is_active",
-                    ["updatedAt"] = "updated_at"
-                },
-                ["recipeId", "recipeName", "deviceId", "deviceCode", "processName", "version", "isActive", "updatedAt"],
-                ["recipeId", "recipeName", "deviceId", "deviceCode", "processName", "version", "isActive"],
-                ["recipeName", "version", "updatedAt", "processName"],
-                new SemanticSort("version", SemanticSortDirection.Desc)),
             new SemanticMappingDefaults(
                 SemanticQueryTarget.Capacity,
                 "Capacity",

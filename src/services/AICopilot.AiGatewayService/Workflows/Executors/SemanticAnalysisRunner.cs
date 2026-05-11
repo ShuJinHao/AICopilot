@@ -16,6 +16,8 @@ public sealed class SemanticAnalysisRunner(
     ILogger<SemanticAnalysisRunner> logger)
 {
     private static readonly DatabaseQueryOptions QueryOptions = new(MaxRows: 200, CommandTimeoutSeconds: 15);
+    private const string RecipeDataReadBoundaryMessage =
+        "[系统提示]: 当前 AI 不读取云端配方主数据或配方版本数据。可以回答配方版本规则问题，但不能查询具体配方、设备配方清单或版本记录。";
 
     public async Task<string> RunAsync(IntentResult intent, CancellationToken cancellationToken)
     {
@@ -33,6 +35,15 @@ public sealed class SemanticAnalysisRunner(
 
         var plan = planningResult.Plan!;
         var targetLabel = SemanticAnalysisPresentation.GetTargetLabel(plan.Target);
+        if (plan.Target == SemanticQueryTarget.Recipe)
+        {
+            logger.LogInformation(
+                "配方数据语义查询已按云端配方禁读边界拒绝。Intent: {Intent}, Kind: {Kind}",
+                plan.Intent,
+                plan.Kind);
+            return RecipeDataReadBoundaryMessage;
+        }
+
         if (cloudAiReadClient.IsEnabled && CloudAiReadSemanticSupport.IsSupported(plan.Target))
         {
             return await RunCloudAiReadAsync(plan, targetLabel, cancellationToken);

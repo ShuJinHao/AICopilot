@@ -17,23 +17,21 @@ public sealed class ConfiguredSemanticPhysicalMappingProviderTests
 
         provider.TryGetMapping(SemanticQueryTarget.Device, out var deviceMapping).Should().BeTrue();
         provider.TryGetMapping(SemanticQueryTarget.DeviceLog, out var deviceLogMapping).Should().BeTrue();
-        provider.TryGetMapping(SemanticQueryTarget.Recipe, out var recipeMapping).Should().BeTrue();
+        provider.TryGetMapping(SemanticQueryTarget.Recipe, out _).Should().BeFalse();
         provider.TryGetMapping(SemanticQueryTarget.Capacity, out var capacityMapping).Should().BeTrue();
         provider.TryGetMapping(SemanticQueryTarget.ProductionData, out var productionMapping).Should().BeTrue();
 
         deviceMapping.DatabaseName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.DefaultDatabaseName);
         deviceLogMapping.DatabaseName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.DefaultDatabaseName);
-        recipeMapping.DatabaseName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.DefaultDatabaseName);
         capacityMapping.DatabaseName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.DefaultDatabaseName);
         productionMapping.DatabaseName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.DefaultDatabaseName);
 
         deviceMapping.SourceName.Should().Be("vw_device_readonly");
         deviceLogMapping.SourceName.Should().Be("vw_device_log_readonly");
-        recipeMapping.SourceName.Should().Be("vw_recipe_readonly");
         capacityMapping.SourceName.Should().Be("vw_capacity_readonly");
         productionMapping.SourceName.Should().Be("vw_production_data_readonly");
 
-        foreach (var target in Enum.GetValues<SemanticQueryTarget>())
+        foreach (var target in Enum.GetValues<SemanticQueryTarget>().Where(target => target != SemanticQueryTarget.Recipe))
         {
             provider.TryGetMapping(target, out var mapping).Should().BeTrue();
             mapping.DatabaseName.Should().NotBeNullOrWhiteSpace();
@@ -56,20 +54,15 @@ public sealed class ConfiguredSemanticPhysicalMappingProviderTests
 
         provider.TryGetMapping(SemanticQueryTarget.Device, out var deviceMapping).Should().BeTrue();
         provider.TryGetMapping(SemanticQueryTarget.DeviceLog, out var deviceLogMapping).Should().BeTrue();
-        provider.TryGetMapping(SemanticQueryTarget.Recipe, out var recipeMapping).Should().BeTrue();
+        provider.TryGetMapping(SemanticQueryTarget.Recipe, out _).Should().BeFalse();
         provider.TryGetMapping(SemanticQueryTarget.Capacity, out var capacityMapping).Should().BeTrue();
         provider.TryGetMapping(SemanticQueryTarget.ProductionData, out var productionMapping).Should().BeTrue();
 
         deviceMapping.DatabaseName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.DefaultDatabaseName);
         deviceMapping.SourceName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.DefaultDeviceSourceName);
         deviceLogMapping.SourceName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.DefaultDeviceLogSourceName);
-        recipeMapping.SourceName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.DefaultRecipeSourceName);
         capacityMapping.SourceName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.DefaultCapacitySourceName);
         productionMapping.SourceName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.DefaultProductionDataSourceName);
-
-        recipeMapping.IsProjectionFieldAllowed("recipeName").Should().BeTrue();
-        recipeMapping.IsFilterFieldAllowed("deviceCode").Should().BeTrue();
-        recipeMapping.IsSortFieldAllowed("version").Should().BeTrue();
 
         capacityMapping.IsProjectionFieldAllowed("outputQty").Should().BeTrue();
         capacityMapping.IsFilterFieldAllowed("processName").Should().BeTrue();
@@ -100,7 +93,7 @@ public sealed class ConfiguredSemanticPhysicalMappingProviderTests
 
         provider.TryGetMapping(SemanticQueryTarget.Device, out var deviceMapping).Should().BeTrue();
         provider.TryGetMapping(SemanticQueryTarget.DeviceLog, out var deviceLogMapping).Should().BeTrue();
-        provider.TryGetMapping(SemanticQueryTarget.Recipe, out var recipeMapping).Should().BeTrue();
+        provider.TryGetMapping(SemanticQueryTarget.Recipe, out _).Should().BeFalse();
         provider.TryGetMapping(SemanticQueryTarget.Capacity, out var capacityMapping).Should().BeTrue();
         provider.TryGetMapping(SemanticQueryTarget.ProductionData, out var productionMapping).Should().BeTrue();
 
@@ -108,13 +101,12 @@ public sealed class ConfiguredSemanticPhysicalMappingProviderTests
         deviceMapping.SourceName.Should().Be("vw_device_master");
         deviceLogMapping.DatabaseName.Should().Be("SharedSemanticDb");
         deviceLogMapping.SourceName.Should().Be("vw_device_log");
-        recipeMapping.SourceName.Should().Be("vw_recipe");
         capacityMapping.SourceName.Should().Be("vw_capacity");
         productionMapping.SourceName.Should().Be("vw_production");
     }
 
     [Fact]
-    public void Provider_ShouldExposeConfigurableRealMappingSettings()
+    public void Provider_ShouldIgnoreRecipeMappingConfiguration()
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -138,23 +130,7 @@ public sealed class ConfiguredSemanticPhysicalMappingProviderTests
 
         var provider = new ConfiguredSemanticPhysicalMappingProvider(configuration);
 
-        provider.TryGetMapping(SemanticQueryTarget.Recipe, out var recipeMapping).Should().BeTrue();
-        recipeMapping.Provider.Should().Be(DatabaseProviderType.SqlServer);
-        recipeMapping.FromClause.Should().Be("recipes r INNER JOIN devices d ON d.id = r.device_id");
-        recipeMapping.FieldMappings["recipeName"].Should().Be("r.recipe_name");
-        recipeMapping.FieldMappings["version"].Should().Be("r.version_no");
-        recipeMapping.IsProjectionFieldAllowed("recipeName").Should().BeTrue();
-        recipeMapping.IsProjectionFieldAllowed("deviceCode").Should().BeFalse();
-        recipeMapping.IsFilterFieldAllowed("recipeName").Should().BeTrue();
-        recipeMapping.IsFilterFieldAllowed("deviceCode").Should().BeFalse();
-        recipeMapping.IsSortFieldAllowed("version").Should().BeTrue();
-        recipeMapping.DefaultSort.Should().NotBeNull();
-        recipeMapping.DefaultSort!.Field.Should().Be("version");
-        recipeMapping.DefaultSort.Direction.Should().Be(SemanticSortDirection.Desc);
-        recipeMapping.DefaultFilters.Should().ContainSingle();
-        recipeMapping.DefaultFilters[0].Field.Should().Be("isActive");
-        recipeMapping.DefaultFilters[0].Operator.Should().Be(SemanticFilterOperator.Equal);
-        recipeMapping.DefaultFilters[0].Value.Should().Be("True");
+        provider.TryGetMapping(SemanticQueryTarget.Recipe, out _).Should().BeFalse();
     }
 
     private static string GetRepositoryFilePath(string relativePath)

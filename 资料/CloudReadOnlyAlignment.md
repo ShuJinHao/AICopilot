@@ -24,7 +24,7 @@ The following Cloud data categories are suitable for read-only analysis after th
 | --- | --- | --- | --- |
 | Employees and permissions | Employee records, access, roles, permissions | Explain access state, inspect permission gaps, summarize onboarding/access issues | Create employees, disable users, change roles, assign permissions |
 | Devices | Device master data, device identity, bootstrap relationship | Explain device status, detect missing metadata, correlate with capacity/log data | Register devices, delete devices, rotate bootstrap secret, edit device profile |
-| Recipes and processes | Process master data, recipe versions, active recipe relationship | Explain recipe version history, compare parameters, answer process/recipe questions | Create/delete recipes, upgrade recipe versions, modify process master data |
+| Recipes and processes | Process master data, recipe versions, active recipe relationship | Explain documented recipe lifecycle rules only; do not read Cloud recipe master data or version records | Read recipe lists/details/version records, compare Cloud recipe parameters, create/delete recipes, upgrade recipe versions, modify process master data |
 | Capacity | Hourly, daily, summary, and range capacity records | Trend analysis, anomaly explanation, report generation | Backfill, correct, delete, or manually submit capacity records |
 | Device logs | Device log records by level, keyword, date, and time range | Troubleshooting, summarization, incident correlation | Insert, rewrite, suppress, or delete logs |
 | Pass station / production data | Production and pass-station records by configured type | Query, inspect, summarize, and explain production flow records | Upload, correct, delete, or re-route production records |
