@@ -8,7 +8,11 @@ public record CurrentUserProfileDto(
     string UserId,
     string UserName,
     string? RoleName,
-    IReadOnlyCollection<string> Permissions);
+    IReadOnlyCollection<string> Permissions,
+    string IdentityProvider,
+    string? CloudTenantId,
+    string? CloudEmployeeNo,
+    string? CloudStatusVersion);
 
 public record GetCurrentUserProfileQuery : IQuery<Result<CurrentUserProfileDto>>;
 
@@ -36,6 +40,10 @@ public sealed class GetCurrentUserProfileQueryHandler(
             access.UserId.ToString(),
             access.UserName,
             access.RoleName,
-            access.Permissions));
+            access.Permissions,
+            string.IsNullOrWhiteSpace(currentUser.IdentityProvider) ? "Local" : currentUser.IdentityProvider,
+            currentUser.CloudTenantId,
+            currentUser.CloudEmployeeNo,
+            currentUser.CloudStatusVersion));
     }
 }

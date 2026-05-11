@@ -101,7 +101,8 @@ public sealed class BusinessSemanticsCatalog : IBusinessSemanticsCatalog
         "Choose Analysis.DeviceLog.* only for device log questions.",
         "Choose Analysis.Recipe.* only for recipe, recipe detail, or recipe version history questions.",
         "Choose Analysis.Capacity.* only for capacity, output, yield, or qualified quantity questions.",
-        "Choose Analysis.ProductionData.* only for production record, station record, or barcode trace questions."
+        "Choose Analysis.ProductionData.* only for production record, station record, or barcode trace questions.",
+        "Analysis intents are read-only. When Cloud AiRead is configured, devices/capacity/device logs/pass-station data use Cloud AiRead as the formal read path; DataAnalysis is a supplemental read-only analysis path."
     ],
     [
         "Recipe version/history questions should choose Analysis.Recipe.VersionHistory before Analysis.Recipe.Detail.",
@@ -111,7 +112,8 @@ public sealed class BusinessSemanticsCatalog : IBusinessSemanticsCatalog
     [
         "If the user question does not clearly match the structured semantic intents, fall back to General.Chat.",
         "Semantic query JSON should prefer structured filters, sort, timeRange, limit, and queryText.",
-        "Typical structured questions include: 列出 LINE-A 产线设备、查看设备 DEV-001 详情、设备 DEV-001 现在是什么状态、查看设备 DEV-001 最新日志、查看配方 Recipe-Cut-01、查看 Recipe-Cut-01 的版本历史、查看 DEV-001 某时间范围的产能、查看 DEV-001 的最新生产记录。"
+        "Typical structured questions include: 列出 LINE-A 产线设备、查看设备 DEV-001 详情、设备 DEV-001 现在是什么状态、查看设备 DEV-001 最新日志、查看配方 Recipe-Cut-01、查看 Recipe-Cut-01 的版本历史、查看 DEV-001 某时间范围的产能、查看 DEV-001 的最新生产记录。",
+        "Never route user requests for modifying recipes, disabling devices, backfilling capacity, deleting logs, or uploading production data as executable actions."
     ]);
 
     public IReadOnlyCollection<BusinessPolicySemanticDescriptor> GetPolicyIntents()

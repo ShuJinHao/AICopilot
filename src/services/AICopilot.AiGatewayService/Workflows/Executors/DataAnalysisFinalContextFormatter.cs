@@ -83,6 +83,8 @@ public static class DataAnalysisFinalContextFormatter
         var context = new
         {
             analysis = BuildSafeAnalysis(analysis, trustSourceLabel: true),
+            source_mode = BuildSourceMode(analysis.SourceLabel),
+            answer_contract = BuildAnswerContract(),
             semantic_summary = BuildSafeSemanticSummary(semanticSummary),
             business_data_preview = BuildBusinessDataPreview(rows, analysis.Metadata),
             query_scope = SanitizeTextValue(semanticSummary.Scope) ?? "结果上限以内的匹配记录",
@@ -101,12 +103,46 @@ public static class DataAnalysisFinalContextFormatter
         var context = new
         {
             analysis = BuildSafeAnalysis(analysis, trustSourceLabel: false),
+            source_mode = "DataAnalysis/Text-to-SQL 补充分析",
+            answer_contract = BuildAnswerContract(),
             visual_decision = BuildSafeVisualDecision(decision),
             business_data_preview = BuildBusinessDataPreview(rows, analysis?.Metadata, schema),
             query_scope = "基于当前只读数据分析结果的业务预览。"
         };
 
         return context.ToJson();
+    }
+
+    private static string BuildSourceMode(string? sourceLabel)
+    {
+        if (!string.IsNullOrWhiteSpace(sourceLabel) &&
+            sourceLabel.Contains("Cloud AiRead API", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Cloud 已有正式只读数据";
+        }
+
+        if (!string.IsNullOrWhiteSpace(sourceLabel) &&
+            sourceLabel.Contains("DataAnalysis", StringComparison.OrdinalIgnoreCase))
+        {
+            return "DataAnalysis/Text-to-SQL 补充分析";
+        }
+
+        return "只读业务数据源";
+    }
+
+    private static object BuildAnswerContract()
+    {
+        return new
+        {
+            must_distinguish = new[]
+            {
+                "Cloud 已有数据",
+                "AI 推断分析",
+                "建议动作",
+                "不能直接执行的动作"
+            },
+            cloud_write_boundary = "AICopilot 不直接修改、提交、下发、补录、删除或上传 Cloud 业务数据。"
+        };
     }
 
     private static object? BuildSafeAnalysis(AnalysisDto? analysis, bool trustSourceLabel)

@@ -25,6 +25,10 @@ export interface CurrentUserProfile {
   userName: string
   roleName?: string | null
   permissions: string[]
+  identityProvider: 'Local' | 'Cloud' | string
+  cloudTenantId?: string | null
+  cloudEmployeeNo?: string | null
+  cloudStatusVersion?: string | null
 }
 
 export interface PermissionDefinition {

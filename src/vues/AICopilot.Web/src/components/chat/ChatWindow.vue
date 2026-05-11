@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Connection, Fold, Promotion, Refresh, Warning } from '@element-plus/icons-vue'
+import { useAuthStore } from '@/stores/authStore'
 import { useChatStore } from '@/stores/chatStore'
 import MessageItem from './MessageItem.vue'
 import SessionList from './SessionList.vue'
 
 const store = useChatStore()
+const authStore = useAuthStore()
 const inputValue = ref('')
 const scrollContainer = ref<HTMLElement | null>(null)
 const isMobile = ref(typeof window !== 'undefined' ? window.innerWidth < 980 : false)
@@ -150,6 +152,14 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
             <el-tag :type="onsiteStatus.type">{{ onsiteStatus.label }}</el-tag>
           </div>
           <div>
+            <span>登录来源</span>
+            <el-tag type="info">{{ authStore.loginSource }}</el-tag>
+          </div>
+          <div v-if="authStore.cloudEmployeeNo">
+            <span>Cloud 员工</span>
+            <strong>{{ authStore.cloudEmployeeNo }}</strong>
+          </div>
+          <div>
             <span>审批请求</span>
             <strong>{{ approvalCount }}</strong>
           </div>
@@ -176,6 +186,21 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
           <span>审批不能由 prompt 绕过</span>
           <span>SQL、库表和连接信息不进入最终回答</span>
           <span>现场动作必须人工执行</span>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">数据源</h2>
+            <p class="panel-subtitle">Cloud 正式数据与补充分析分离</p>
+          </div>
+        </div>
+        <div class="panel-body source-list">
+          <span>Cloud AiRead API：正式业务只读数据</span>
+          <span>DataAnalysis：只读视图、统计和图表补充</span>
+          <span>查询范围：按问题中的设备、工序和时间条件标注</span>
+          <span>AI 建议不会写回 Cloud</span>
         </div>
       </section>
     </aside>
@@ -307,7 +332,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
 }
 
 .boundary-list,
-.rule-list {
+.rule-list,
+.source-list {
   display: grid;
   gap: 10px;
 }
@@ -320,7 +346,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
 }
 
 .boundary-list span,
-.rule-list span {
+.rule-list span,
+.source-list span {
   color: var(--app-text-muted);
 }
 
@@ -328,7 +355,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
   font-size: 20px;
 }
 
-.rule-list span {
+.rule-list span,
+.source-list span {
   border-left: 3px solid var(--app-primary);
   padding-left: 8px;
 }
