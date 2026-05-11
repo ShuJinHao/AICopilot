@@ -92,6 +92,21 @@ public sealed class CloudIdentityStatusValidator(
         }
 
         var status = check.Status;
+        if (!IsStatusForTokenContext(status, tokenContext))
+        {
+            await RevokeCloudSessionAsync(
+                user,
+                tokenContext,
+                null,
+                "cloud-status-identity-mismatch",
+                "Cloud 身份状态响应与当前 AI token 身份不一致，已拒绝当前 Cloud 身份请求。",
+                cancellationToken);
+
+            return CloudIdentityStatusValidationResult.Failure(
+                AuthProblemCodes.CloudIdentityUnverified,
+                "Cloud 身份状态无法确认，请重新登录。");
+        }
+
         if (!status.AccountEnabled || !status.EmployeeActive)
         {
             await RevokeCloudSessionAsync(
@@ -239,6 +254,14 @@ public sealed class CloudIdentityStatusValidator(
             principal.FindFirstValue(ExternalIdentityJwtClaimTypes.IdentityProvider),
             ExternalIdentityProviders.Cloud,
             StringComparison.Ordinal);
+    }
+
+    private static bool IsStatusForTokenContext(
+        CloudIdentityStatusSnapshot status,
+        CloudIdentityTokenContext tokenContext)
+    {
+        return string.Equals(status.TenantId, tokenContext.TenantId, StringComparison.Ordinal)
+            && string.Equals(status.CloudUserId, tokenContext.CloudUserId, StringComparison.OrdinalIgnoreCase);
     }
 
     private static CloudIdentityTokenContext? TryCreateTokenContext(ClaimsPrincipal principal)

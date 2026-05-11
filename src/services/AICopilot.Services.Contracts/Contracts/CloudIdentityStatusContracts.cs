@@ -25,6 +25,30 @@ public sealed class CloudIdentityStatusOptions
 
     public void EnsureValid()
     {
+        EnsureValid(
+            environmentName: "Production",
+            cloudOidcEnabled: false,
+            enabledWasExplicitlyConfigured: true);
+    }
+
+    public void EnsureValid(
+        string environmentName,
+        bool cloudOidcEnabled,
+        bool enabledWasExplicitlyConfigured)
+    {
+        if (!string.Equals(environmentName, "Development", StringComparison.OrdinalIgnoreCase) &&
+            cloudOidcEnabled &&
+            !enabledWasExplicitlyConfigured)
+        {
+            throw new InvalidOperationException(
+                "CloudIdentityStatus:Enabled must be explicitly configured outside Development when CloudOidc is enabled.");
+        }
+
+        EnsureRuntimeOptions();
+    }
+
+    private void EnsureRuntimeOptions()
+    {
         if (!Enabled)
         {
             return;

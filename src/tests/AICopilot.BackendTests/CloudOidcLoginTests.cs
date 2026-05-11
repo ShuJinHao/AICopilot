@@ -152,6 +152,126 @@ public sealed class CloudOidcLoginTests
     }
 
     [Fact]
+    public async Task CloudIdentityStatusValidator_ShouldRejectAndRefreshSecurityStamp_WhenStatusCloudUserMismatchesToken()
+    {
+        var userManager = new InMemoryUserManager();
+        var bindingStore = new InMemoryExternalIdentityBindingStore();
+        var auditWriter = new InMemoryIdentityAuditLogWriter();
+        var user = await CreateBoundCloudUserAsync(userManager, bindingStore);
+        var previousStamp = user.SecurityStamp;
+        var statusClient = new RecordingCloudIdentityStatusClient(
+            CloudIdentityStatusCheckResult.Succeeded(CreateStatusSnapshot(cloudUserId: "different-cloud-user")));
+        var validator = CreateStatusValidator(userManager, bindingStore, auditWriter, statusClient);
+
+        var result = await validator.ValidateAsync(user, CreateCloudPrincipal(), CancellationToken.None);
+
+        result.IsValid.Should().BeFalse();
+        result.FailureCode.Should().Be(AuthProblemCodes.CloudIdentityUnverified);
+        user.SecurityStamp.Should().NotBe(previousStamp);
+        bindingStore.Bindings.Single().StatusVersion.Should().Be("v1");
+        auditWriter.Requests.Should().ContainSingle(request =>
+            request.ActionCode == "Identity.CloudStatusRejected" &&
+            request.Result == AuditResults.Rejected);
+        auditWriter.Requests.Single().Metadata.Should().Contain(new KeyValuePair<string, string>(
+            "rejectionReason",
+            "cloud-status-identity-mismatch"));
+    }
+
+    [Fact]
+    public async Task CloudIdentityStatusValidator_ShouldRejectAndRefreshSecurityStamp_WhenStatusTenantMismatchesToken()
+    {
+        var userManager = new InMemoryUserManager();
+        var bindingStore = new InMemoryExternalIdentityBindingStore();
+        var auditWriter = new InMemoryIdentityAuditLogWriter();
+        var user = await CreateBoundCloudUserAsync(userManager, bindingStore);
+        var previousStamp = user.SecurityStamp;
+        var statusClient = new RecordingCloudIdentityStatusClient(
+            CloudIdentityStatusCheckResult.Succeeded(CreateStatusSnapshot(tenantId: "other-tenant")));
+        var validator = CreateStatusValidator(userManager, bindingStore, auditWriter, statusClient);
+
+        var result = await validator.ValidateAsync(user, CreateCloudPrincipal(), CancellationToken.None);
+
+        result.IsValid.Should().BeFalse();
+        result.FailureCode.Should().Be(AuthProblemCodes.CloudIdentityUnverified);
+        user.SecurityStamp.Should().NotBe(previousStamp);
+        bindingStore.Bindings.Single().StatusVersion.Should().Be("v1");
+        auditWriter.Requests.Should().ContainSingle(request =>
+            request.ActionCode == "Identity.CloudStatusRejected" &&
+            request.Result == AuditResults.Rejected);
+        auditWriter.Requests.Single().Metadata.Should().Contain(new KeyValuePair<string, string>(
+            "rejectionReason",
+            "cloud-status-identity-mismatch"));
+    }
+
+    [Fact]
+    public async Task CloudIdentityStatusValidator_ShouldRefreshSecurityStamp_WhenCloudIdentityNotFound()
+    {
+        var userManager = new InMemoryUserManager();
+        var bindingStore = new InMemoryExternalIdentityBindingStore();
+        var auditWriter = new InMemoryIdentityAuditLogWriter();
+        var user = await CreateBoundCloudUserAsync(userManager, bindingStore);
+        var previousStamp = user.SecurityStamp;
+        var statusClient = new RecordingCloudIdentityStatusClient(
+            CloudIdentityStatusCheckResult.NotFound("not found"));
+        var validator = CreateStatusValidator(userManager, bindingStore, auditWriter, statusClient);
+
+        var result = await validator.ValidateAsync(user, CreateCloudPrincipal(), CancellationToken.None);
+
+        result.IsValid.Should().BeFalse();
+        result.FailureCode.Should().Be(AuthProblemCodes.SessionRevoked);
+        user.SecurityStamp.Should().NotBe(previousStamp);
+        auditWriter.Requests.Single().Metadata.Should().Contain(new KeyValuePair<string, string>(
+            "rejectionReason",
+            "cloud-identity-not-found"));
+    }
+
+    [Fact]
+    public async Task CloudIdentityStatusValidator_ShouldRefreshSecurityStamp_WhenCloudEmployeeInactive()
+    {
+        var userManager = new InMemoryUserManager();
+        var bindingStore = new InMemoryExternalIdentityBindingStore();
+        var auditWriter = new InMemoryIdentityAuditLogWriter();
+        var user = await CreateBoundCloudUserAsync(userManager, bindingStore);
+        var previousStamp = user.SecurityStamp;
+        var statusClient = new RecordingCloudIdentityStatusClient(
+            CloudIdentityStatusCheckResult.Succeeded(CreateStatusSnapshot(employeeActive: false)));
+        var validator = CreateStatusValidator(userManager, bindingStore, auditWriter, statusClient);
+
+        var result = await validator.ValidateAsync(user, CreateCloudPrincipal(), CancellationToken.None);
+
+        result.IsValid.Should().BeFalse();
+        result.FailureCode.Should().Be(AuthProblemCodes.CloudIdentityInactive);
+        user.SecurityStamp.Should().NotBe(previousStamp);
+        bindingStore.Bindings.Single().EmployeeActiveSnapshot.Should().BeFalse();
+        auditWriter.Requests.Single().Metadata.Should().Contain(new KeyValuePair<string, string>(
+            "rejectionReason",
+            "cloud-employee-inactive"));
+    }
+
+    [Fact]
+    public async Task CloudIdentityStatusValidator_ShouldRefreshSecurityStamp_WhenStatusVersionChanged()
+    {
+        var userManager = new InMemoryUserManager();
+        var bindingStore = new InMemoryExternalIdentityBindingStore();
+        var auditWriter = new InMemoryIdentityAuditLogWriter();
+        var user = await CreateBoundCloudUserAsync(userManager, bindingStore);
+        var previousStamp = user.SecurityStamp;
+        var statusClient = new RecordingCloudIdentityStatusClient(
+            CloudIdentityStatusCheckResult.Succeeded(CreateStatusSnapshot(statusVersion: "v2")));
+        var validator = CreateStatusValidator(userManager, bindingStore, auditWriter, statusClient);
+
+        var result = await validator.ValidateAsync(user, CreateCloudPrincipal(statusVersion: "v1"), CancellationToken.None);
+
+        result.IsValid.Should().BeFalse();
+        result.FailureCode.Should().Be(AuthProblemCodes.SessionRevoked);
+        user.SecurityStamp.Should().NotBe(previousStamp);
+        bindingStore.Bindings.Single().StatusVersion.Should().Be("v2");
+        auditWriter.Requests.Single().Metadata.Should().Contain(new KeyValuePair<string, string>(
+            "rejectionReason",
+            "cloud-status-version-changed"));
+    }
+
+    [Fact]
     public async Task CloudIdentityStatusValidator_ShouldRejectWithoutRevoking_WhenCloudUnavailableAndNoCache()
     {
         var userManager = new InMemoryUserManager();
@@ -174,6 +294,31 @@ public sealed class CloudOidcLoginTests
         auditWriter.Requests.Single().Metadata.Should().Contain(new KeyValuePair<string, string>(
             "rejectionReason",
             "cloud-status-unavailable"));
+    }
+
+    [Fact]
+    public void CloudIdentityStatusOptions_ShouldRequireExplicitProductionIntent_WhenCloudOidcEnabled()
+    {
+        var options = new CloudIdentityStatusOptions { Enabled = false };
+
+        Action act = () => options.EnsureValid(
+            environmentName: "Production",
+            cloudOidcEnabled: true,
+            enabledWasExplicitlyConfigured: false);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*CloudIdentityStatus:Enabled*");
+    }
+
+    [Fact]
+    public void CloudIdentityStatusOptions_ShouldAllowExplicitDisabledProductionIntent()
+    {
+        var options = new CloudIdentityStatusOptions { Enabled = false };
+
+        options.EnsureValid(
+            environmentName: "Production",
+            cloudOidcEnabled: true,
+            enabledWasExplicitlyConfigured: true);
     }
 
     private static FinalizeCloudOidcLoginCommandHandler CreateHandler(
@@ -235,13 +380,14 @@ public sealed class CloudOidcLoginTests
 
     private static ClaimsPrincipal CreateCloudPrincipal(
         string cloudUserId = "cloud-user-1",
-        string statusVersion = "v1")
+        string statusVersion = "v1",
+        string tenantId = CloudOidcIdentityProfile.DefaultTenantId)
     {
         return new ClaimsPrincipal(new ClaimsIdentity(
             [
                 new Claim(ExternalIdentityJwtClaimTypes.IdentityProvider, ExternalIdentityProviders.Cloud),
                 new Claim(ExternalIdentityJwtClaimTypes.CloudIssuer, "https://cloud.example.com"),
-                new Claim(ExternalIdentityJwtClaimTypes.CloudTenantId, CloudOidcIdentityProfile.DefaultTenantId),
+                new Claim(ExternalIdentityJwtClaimTypes.CloudTenantId, tenantId),
                 new Claim(ExternalIdentityJwtClaimTypes.CloudUserId, cloudUserId),
                 new Claim(ExternalIdentityJwtClaimTypes.CloudEmployeeId, "employee-1"),
                 new Claim(ExternalIdentityJwtClaimTypes.CloudEmployeeNo, "E0001"),
@@ -254,11 +400,12 @@ public sealed class CloudOidcLoginTests
         string cloudUserId = "cloud-user-1",
         string statusVersion = "v1",
         bool accountEnabled = true,
-        bool employeeActive = true)
+        bool employeeActive = true,
+        string tenantId = CloudOidcIdentityProfile.DefaultTenantId)
     {
         return new CloudIdentityStatusSnapshot(
             cloudUserId,
-            CloudOidcIdentityProfile.DefaultTenantId,
+            tenantId,
             accountEnabled,
             employeeActive,
             statusVersion,

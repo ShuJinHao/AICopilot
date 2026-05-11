@@ -63,10 +63,13 @@ public static class DependencyInjection
                 .GetSection(CloudOidcOptions.SectionName)
                 .Get<CloudOidcOptions>() ?? new CloudOidcOptions();
             cloudOidcOptions.EnsureValid();
-            var cloudIdentityStatusOptions = builder.Configuration
-                .GetSection(CloudIdentityStatusOptions.SectionName)
-                .Get<CloudIdentityStatusOptions>() ?? new CloudIdentityStatusOptions();
-            cloudIdentityStatusOptions.EnsureValid();
+            var cloudIdentityStatusSection = builder.Configuration.GetSection(CloudIdentityStatusOptions.SectionName);
+            var cloudIdentityStatusOptions = cloudIdentityStatusSection.Get<CloudIdentityStatusOptions>()
+                ?? new CloudIdentityStatusOptions();
+            cloudIdentityStatusOptions.EnsureValid(
+                builder.Environment.EnvironmentName,
+                cloudOidcOptions.IsConfigured(),
+                cloudIdentityStatusSection["Enabled"] is not null);
 
             var authenticationBuilder = builder.Services
                 .AddAuthentication(options =>
