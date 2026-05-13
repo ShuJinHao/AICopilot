@@ -20,7 +20,8 @@ public class ApprovalDecisionStreamHandler(
     IFinalAgentContextStore finalAgentContextStore,
     IFinalAgentContextSerializer finalAgentContextSerializer,
     ApprovalRequirementResolver approvalRequirementResolver,
-    ISessionExecutionLock sessionExecutionLock)
+    ISessionExecutionLock sessionExecutionLock,
+    IChatStreamRuntime chatStreamRuntime)
     : IStreamRequestHandler<ApprovalDecisionStreamRequest, ChatChunk>
 {
     public async IAsyncEnumerable<ChatChunk> Handle(
@@ -99,7 +100,7 @@ public class ApprovalDecisionStreamHandler(
         ICollection<SessionMessageAppend> pendingMessages,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        var session = await ChatStreamRuntime.LoadSessionAsync(sessionRepository, request.SessionId, ct);
+        var session = await chatStreamRuntime.LoadSessionAsync(sessionRepository, request.SessionId, ct);
         if (session == null)
         {
             yield return ChatStreamRuntime.CreateErrorChunk(

@@ -17,13 +17,28 @@ namespace AICopilot.AiGatewayService.Agents;
 
 internal sealed record ChatErrorChunkPayload(string? Code, string? Detail, string? UserFacingMessage);
 
-internal static class ChatStreamRuntime
+public interface IChatStreamRuntime
+{
+    IAsyncEnumerable<ChatChunk> CreateUpdateChunksAsync(
+        RuntimeAgentUpdate update,
+        string source,
+        SessionRuntimeSnapshot? session,
+        StringBuilder? assistantText,
+        bool appendAssistantText,
+        CancellationToken ct);
+
+    Task<SessionRuntimeSnapshot?> LoadSessionAsync(
+        IReadRepository<Session> repository,
+        Guid sessionId,
+        CancellationToken cancellationToken);
+}
+
+public sealed class ChatStreamRuntime(ApprovalRequirementResolver approvalRequirementResolver) : IChatStreamRuntime
 {
     private const int MaxFunctionResultPayloadBytes = 256 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    public static async IAsyncEnumerable<ChatChunk> CreateUpdateChunksAsync(
-        ApprovalRequirementResolver approvalRequirementResolver,
+    public async IAsyncEnumerable<ChatChunk> CreateUpdateChunksAsync(
         RuntimeAgentUpdate update,
         string source,
         SessionRuntimeSnapshot? session,
@@ -89,7 +104,7 @@ internal static class ChatStreamRuntime
         }
     }
 
-    public static async Task<SessionRuntimeSnapshot?> LoadSessionAsync(
+    public async Task<SessionRuntimeSnapshot?> LoadSessionAsync(
         IReadRepository<Session> repository,
         Guid sessionId,
         CancellationToken cancellationToken)

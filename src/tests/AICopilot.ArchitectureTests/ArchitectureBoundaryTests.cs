@@ -82,6 +82,27 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
+    public void AiGatewayRuntimeCoordination_ShouldUseDiAndDedicatedToolResultAudit()
+    {
+        var serviceRoot = Path.Combine(SolutionRoot, "src", "services", "AICopilot.AiGatewayService");
+        var runtimeSource = File.ReadAllText(Path.Combine(serviceRoot, "Agents", "ChatStreamRuntime.cs"));
+        var executorSource = File.ReadAllText(Path.Combine(serviceRoot, "Workflows", "Executors", "FinalAgentRunExecutor.cs"));
+        var auditSource = File.ReadAllText(Path.Combine(serviceRoot, "Workflows", "Executors", "ToolExecutionAuditRecorder.cs"));
+        var dependencyInjection = File.ReadAllText(Path.Combine(serviceRoot, "DependencyInjection.cs"));
+
+        runtimeSource.Should().Contain("public interface IChatStreamRuntime");
+        runtimeSource.Should().Contain("public sealed class ChatStreamRuntime");
+        runtimeSource.Should().NotContain("static class ChatStreamRuntime");
+        dependencyInjection.Should().Contain("AddScoped<IChatStreamRuntime, ChatStreamRuntime>");
+
+        executorSource.Should().Contain("ToolExecutionAuditRecorder toolExecutionAuditRecorder");
+        executorSource.Should().Contain("RecordResultAsync");
+        auditSource.Should().Contain("Tool.ExecuteResult");
+        auditSource.Should().Contain("resultSha256");
+        dependencyInjection.Should().Contain("AddScoped<ToolExecutionAuditRecorder>");
+    }
+
+    [Fact]
     public void McpService_ShouldNotReferenceAiGatewayCore()
     {
         var forbidden = new Regex(@"AICopilot\.Core\.AiGateway\.", RegexOptions.Compiled);

@@ -1,7 +1,6 @@
 ﻿using System.Runtime.CompilerServices;
 using System.Text;
 using AICopilot.AiGatewayService.Agents;
-using AICopilot.AiGatewayService.Approvals;
 using AICopilot.AiGatewayService.Models;
 using AICopilot.AiGatewayService.Observability;
 using AICopilot.AiGatewayService.Safety;
@@ -17,7 +16,8 @@ public class FinalAgentRunExecutor(
     IAuditLogWriter auditLogWriter,
     ITextTokenEstimator tokenEstimator,
     IChatTokenTelemetry chatTokenTelemetry,
-    ApprovalRequirementResolver approvalRequirementResolver)
+    ToolExecutionAuditRecorder toolExecutionAuditRecorder,
+    IChatStreamRuntime chatStreamRuntime)
 {
     public const string ExecutorId = nameof(FinalAgentRunExecutor);
 
@@ -30,6 +30,7 @@ public class FinalAgentRunExecutor(
         List<AiChatMessage> messages = [];
         var finalAssistantText = new StringBuilder();
         AiUsageDetails? observedUsage = null;
+        var grantedToolExecutions = new Dictionary<string, GrantedToolExecution>(StringComparer.Ordinal);
 
         var isApprovalResumption = agentContext.FunctionApprovalRequestContents.Count != 0
                                    && agentContext.ApprovalDecisions.Count != 0;
@@ -50,11 +51,15 @@ public class FinalAgentRunExecutor(
                 }
 
                 var response = new AiToolApprovalResponseContent(requestContent, decision.IsApproved);
-                var identity = requestContent.ToolCall.Identity;
-                var toolName = identity is null
-                    ? requestContent.ToolCall.Name
-                    : $"{identity.TargetType}:{identity.TargetName}/{identity.ToolName}";
+                var toolName = FormatToolName(requestContent.ToolCall);
                 messages.Add(new AiChatMessage(AiChatRole.User, [response]));
+
+                if (decision.IsApproved)
+                {
+                    grantedToolExecutions[requestContent.ToolCall.CallId] = new GrantedToolExecution(
+                        toolName,
+                        requestContent.ToolCall.Identity);
+                }
 
                 await auditLogWriter.WriteAsync(
                     new AuditLogWriteRequest(
@@ -108,7 +113,11 @@ public class FinalAgentRunExecutor(
                             break;
                         }
 
-                        safeContents.Add(new AiToolCallContent(EnrichToolCall(toolCallContent.ToolCall, grantedCallTool)));
+                        var enrichedToolCall = EnrichToolCall(toolCallContent.ToolCall, grantedCallTool);
+                        grantedToolExecutions[enrichedToolCall.CallId] = new GrantedToolExecution(
+                            FormatToolName(enrichedToolCall),
+                            enrichedToolCall.Identity);
+                        safeContents.Add(new AiToolCallContent(enrichedToolCall));
                         break;
 
                     case AiToolApprovalRequestContent requestContent:
@@ -127,11 +136,32 @@ public class FinalAgentRunExecutor(
                             "Agent requested approval for tool {ToolName}.",
                             requestContent.Request.ToolCall.Name);
 
+                        var enrichedToolApprovalCall = EnrichToolCall(requestContent.Request.ToolCall, grantedApprovalTool);
                         var enrichedRequest = new AiToolApprovalRequest(
                             requestContent.Request.RequestId,
-                            EnrichToolCall(requestContent.Request.ToolCall, grantedApprovalTool));
+                            enrichedToolApprovalCall);
                         agentContext.FunctionApprovalRequestContents.Add(enrichedRequest);
                         safeContents.Add(new AiToolApprovalRequestContent(enrichedRequest));
+                        break;
+
+                    case AiFunctionResultContent functionResultContent:
+                        if (grantedToolExecutions.TryGetValue(functionResultContent.CallId, out var grantedToolExecution))
+                        {
+                            await toolExecutionAuditRecorder.RecordResultAsync(
+                                functionResultContent,
+                                grantedToolExecution.ToolName,
+                                grantedToolExecution.Identity,
+                                cancellationToken);
+                        }
+                        else
+                        {
+                            logger.LogWarning(
+                                "Runtime returned a tool result for unknown callId {CallId} in session {SessionId}.",
+                                functionResultContent.CallId,
+                                agentContext.SessionId);
+                        }
+
+                        safeContents.Add(content);
                         break;
 
                     case AiUsageContent runtimeUsage:
@@ -151,8 +181,7 @@ public class FinalAgentRunExecutor(
                 continue;
             }
 
-            await foreach (var chunk in ChatStreamRuntime.CreateUpdateChunksAsync(
-                               approvalRequirementResolver,
+            await foreach (var chunk in chatStreamRuntime.CreateUpdateChunksAsync(
                                new RuntimeAgentUpdate(safeContents),
                                ExecutorId,
                                session,
@@ -256,6 +285,14 @@ public class FinalAgentRunExecutor(
             identity.ToolName);
     }
 
+    private static string FormatToolName(AiToolCall toolCall)
+    {
+        var identity = toolCall.Identity;
+        return identity is null
+            ? toolCall.ToolName ?? toolCall.Name
+            : $"{identity.TargetType}:{identity.TargetName}/{identity.ToolName}";
+    }
+
     private static ChatChunk CreateUnauthorizedToolChunk(string toolName)
     {
         return ChatStreamRuntime.CreateErrorChunk(
@@ -291,4 +328,6 @@ public class FinalAgentRunExecutor(
             TotalTokenCount = estimatedInputTokens + estimatedOutputTokens
         };
     }
+
+    private sealed record GrantedToolExecution(string ToolName, AiToolIdentity? Identity);
 }

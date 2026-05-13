@@ -32,6 +32,7 @@ public static class DependencyInjection
         builder.Services.AddSingleton<ITokenBudgetPolicy, ChatTokenBudgetPolicy>();
         builder.Services.AddSingleton<IChatTokenTelemetry, ChatTokenTelemetry>();
         builder.Services.AddScoped<ApprovalRequirementResolver>();
+        builder.Services.AddScoped<IChatStreamRuntime, ChatStreamRuntime>();
         builder.Services.AddScoped<IApprovalRequirementReadService, ApprovalRequirementReadService>();
         builder.Services.AddScoped<ApprovalToolResolver>();
         builder.Services.AddScoped<IFinalAgentContextSerializer, FinalAgentContextSerializer>();
@@ -56,6 +57,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<FreeFormDbaAnalysisRunner>();
         builder.Services.AddScoped<DataAnalysisWidgetEmitter>();
         builder.Services.AddScoped<DataAnalysisAuditRecorder>();
+        builder.Services.AddScoped<ToolExecutionAuditRecorder>();
         builder.Services.AddScoped<DataAnalysisExecutor>();
         builder.Services.AddScoped<BusinessPolicyExecutor>();
         builder.Services.AddScoped<ContextAggregatorExecutor>();

@@ -989,6 +989,7 @@ public sealed class SecurityHardeningTests
         {
             "src/services/AICopilot.AiGatewayService/Workflows/Executors/DataAnalysisAuditRecorder.cs",
             "src/services/AICopilot.AiGatewayService/Workflows/Executors/FinalAgentRunExecutor.cs",
+            "src/services/AICopilot.AiGatewayService/Workflows/Executors/ToolExecutionAuditRecorder.cs",
             "src/services/AICopilot.DataAnalysisService/Plugins/DataAnalysisSqlQueryRunner.cs"
         };
 
