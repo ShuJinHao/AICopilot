@@ -157,6 +157,55 @@ public sealed class AiEvalFakeRuntimeGuardrailTests
         runtimeFactory.LastRun.Options.Options.Tools.Select(tool => tool.ToolName).Should().NotContain("queryAndResetDevice");
     }
 
+    [Fact]
+    public async Task FakeRuntime_ShouldAuditToolExecutionResultSeparatelyFromApprovalDecision()
+    {
+        var grantedTool = CreateGrantedTool();
+        var identity = grantedTool.Identity!;
+        var runtimeFactory = new FakeRuntimeAgentFactory();
+        runtimeFactory.EnqueueScript(new RuntimeAgentUpdate(
+        [
+            new AiToolCallContent(new AiToolCall(
+                "call-audited-tool",
+                grantedTool.Name,
+                grantedTool.Kind,
+                null,
+                new Dictionary<string, object?>(),
+                identity.TargetType,
+                identity.TargetName,
+                identity.ToolName)),
+            new AiFunctionResultContent(
+                "call-audited-tool",
+                new Dictionary<string, object?>
+                {
+                    ["status"] = "ok",
+                    ["rows"] = 1
+                })
+        ]));
+
+        await using var context = await BuildFinalContextAsync(
+            runtimeFactory,
+            "Run read-only diagnostic.",
+            [grantedTool]);
+        var audit = new RecordingAuditLogWriter();
+
+        var chunks = await RunFinalAgentAsync(context, audit);
+
+        chunks.Should().Contain(chunk =>
+            chunk.Type == ChunkType.FunctionResult &&
+            chunk.Content.Contains("call-audited-tool", StringComparison.Ordinal));
+        var toolAudit = audit.Requests.Should().ContainSingle(request =>
+            request.ActionGroup == AuditActionGroups.AiGateway &&
+            request.ActionCode == "Tool.ExecuteResult").Which;
+        toolAudit.TargetType.Should().Be("ToolExecution");
+        toolAudit.TargetId.Should().Be("call-audited-tool");
+        toolAudit.TargetName.Should().Be("Plugin:diagnostic/query_status");
+        toolAudit.Metadata.Should().NotBeNull();
+        toolAudit.Metadata!["resultSha256"].Should().NotBeNullOrWhiteSpace();
+        toolAudit.Metadata["resultBytes"].Should().NotBe("0");
+        audit.Requests.Should().NotContain(request => request.ActionGroup == AuditActionGroups.Approval);
+    }
+
     private static async Task<FinalAgentContext> BuildFinalContextAsync(
         FakeRuntimeAgentFactory runtimeFactory,
         string message,
@@ -191,14 +240,19 @@ public sealed class AiEvalFakeRuntimeGuardrailTests
         });
     }
 
-    private static async Task<IReadOnlyList<ChatChunk>> RunFinalAgentAsync(FinalAgentContext context)
+    private static async Task<IReadOnlyList<ChatChunk>> RunFinalAgentAsync(
+        FinalAgentContext context,
+        RecordingAuditLogWriter? auditLogWriter = null)
     {
+        var auditWriter = auditLogWriter ?? new RecordingAuditLogWriter();
+        var approvalRequirementResolver = new ApprovalRequirementResolver(new InMemoryReadRepository<ApprovalPolicy>());
         var executor = new FinalAgentRunExecutor(
             NullLogger<FinalAgentRunExecutor>.Instance,
-            new NoOpAuditLogWriter(),
+            auditWriter,
             new SimpleTokenEstimator(),
             new NoOpChatTokenTelemetry(),
-            new ApprovalRequirementResolver(new InMemoryReadRepository<ApprovalPolicy>()));
+            new ToolExecutionAuditRecorder(auditWriter),
+            new ChatStreamRuntime(approvalRequirementResolver));
         var chunks = new List<ChatChunk>();
         await foreach (var chunk in executor.ExecuteAsync(context, null, new StringBuilder()))
         {
@@ -283,10 +337,13 @@ public sealed class AiEvalFakeRuntimeGuardrailTests
         }
     }
 
-    private sealed class NoOpAuditLogWriter : IAuditLogWriter
+    private sealed class RecordingAuditLogWriter : IAuditLogWriter
     {
+        public List<AuditLogWriteRequest> Requests { get; } = [];
+
         public Task WriteAsync(AuditLogWriteRequest request, CancellationToken cancellationToken = default)
         {
+            Requests.Add(request);
             return Task.CompletedTask;
         }
 

@@ -2,6 +2,7 @@
 
 public static class AuditActionGroups
 {
+    public const string AiGateway = "AiGateway";
     public const string Identity = "Identity";
     public const string Config = "Config";
     public const string Approval = "Approval";

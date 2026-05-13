@@ -20,7 +20,8 @@ public class ChatStreamHandler(
     IOperationalBoundaryPolicy operationalBoundaryPolicy,
     IManufacturingSceneClassifier sceneClassifier,
     IFinalAgentContextStore finalAgentContextStore,
-    ISessionExecutionLock sessionExecutionLock)
+    ISessionExecutionLock sessionExecutionLock,
+    IChatStreamRuntime chatStreamRuntime)
     : IStreamRequestHandler<ChatStreamRequest, ChatChunk>
 {
     public async IAsyncEnumerable<ChatChunk> Handle(
@@ -100,7 +101,7 @@ public class ChatStreamHandler(
         ICollection<SessionMessageAppend> pendingMessages,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        var session = await ChatStreamRuntime.LoadSessionAsync(sessionRepository, request.SessionId, ct);
+        var session = await chatStreamRuntime.LoadSessionAsync(sessionRepository, request.SessionId, ct);
         if (session == null)
         {
             yield return ChatStreamRuntime.CreateErrorChunk(

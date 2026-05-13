@@ -1,5 +1,4 @@
 using AICopilot.AiGatewayService.Agents;
-using AICopilot.AiGatewayService.Approvals;
 using AICopilot.AiGatewayService.Models;
 using AICopilot.Services.Contracts;
 using Microsoft.Extensions.Logging;
@@ -10,7 +9,7 @@ public sealed class FreeFormDbaAnalysisRunner(
     DataAnalysisAgentBuilder agentBuilder,
     IBusinessDatabaseReadService businessDatabaseReadService,
     IDataAnalysisVisualizationContext vizContext,
-    ApprovalRequirementResolver approvalRequirementResolver,
+    IChatStreamRuntime chatStreamRuntime,
     DataAnalysisWidgetEmitter widgetEmitter,
     ILogger<FreeFormDbaAnalysisRunner> logger)
 {
@@ -51,8 +50,7 @@ public sealed class FreeFormDbaAnalysisRunner(
                     continue;
                 }
 
-                await foreach (var chunk in ChatStreamRuntime.CreateUpdateChunksAsync(
-                                   approvalRequirementResolver,
+                await foreach (var chunk in chatStreamRuntime.CreateUpdateChunksAsync(
                                    update,
                                    DataAnalysisExecutor.ExecutorId,
                                    session,
