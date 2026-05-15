@@ -144,11 +144,11 @@ public class FinalAgentRunExecutor(
                         safeContents.Add(new AiToolApprovalRequestContent(enrichedRequest));
                         break;
 
-                    case AiFunctionResultContent functionResultContent:
-                        if (grantedToolExecutions.TryGetValue(functionResultContent.CallId, out var grantedToolExecution))
+                    case AiFunctionResultContent toolResult:
+                        if (grantedToolExecutions.TryGetValue(toolResult.CallId, out var grantedToolExecution))
                         {
                             await toolExecutionAuditRecorder.RecordResultAsync(
-                                functionResultContent,
+                                toolResult,
                                 grantedToolExecution.ToolName,
                                 grantedToolExecution.Identity,
                                 cancellationToken);
@@ -157,7 +157,7 @@ public class FinalAgentRunExecutor(
                         {
                             logger.LogWarning(
                                 "Runtime returned a tool result for unknown callId {CallId} in session {SessionId}.",
-                                functionResultContent.CallId,
+                                toolResult.CallId,
                                 agentContext.SessionId);
                         }
 

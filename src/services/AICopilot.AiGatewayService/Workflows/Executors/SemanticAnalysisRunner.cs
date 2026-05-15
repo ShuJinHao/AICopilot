@@ -16,8 +16,9 @@ public sealed class SemanticAnalysisRunner(
     ILogger<SemanticAnalysisRunner> logger)
 {
     private static readonly DatabaseQueryOptions QueryOptions = new(MaxRows: 200, CommandTimeoutSeconds: 15);
+    public const string RecipeDataReadBoundaryMarker = "当前 AI 不读取云端配方主数据或配方版本数据";
     private const string RecipeDataReadBoundaryMessage =
-        "[系统提示]: 当前 AI 不读取云端配方主数据或配方版本数据。可以回答配方版本规则问题，但不能查询具体配方、设备配方清单或版本记录。";
+        "[系统提示]: " + RecipeDataReadBoundaryMarker + "。可以回答配方版本规则问题，但不能查询具体配方、设备配方清单或版本记录。";
 
     public async Task<string> RunAsync(IntentResult intent, CancellationToken cancellationToken)
     {

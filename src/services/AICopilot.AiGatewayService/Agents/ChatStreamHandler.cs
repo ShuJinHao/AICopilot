@@ -21,6 +21,7 @@ public class ChatStreamHandler(
     IManufacturingSceneClassifier sceneClassifier,
     IFinalAgentContextStore finalAgentContextStore,
     ISessionExecutionLock sessionExecutionLock,
+    IChatExecutionMetadataAccessor executionMetadataAccessor,
     IChatStreamRuntime chatStreamRuntime)
     : IStreamRequestHandler<ChatStreamRequest, ChatChunk>
 {
@@ -89,7 +90,10 @@ public class ChatStreamHandler(
 
         if (assistantText.Length > 0)
         {
-            pendingMessages.Add(new SessionMessageAppend(assistantText.ToString(), MessageType.Assistant));
+            pendingMessages.Add(new SessionMessageAppend(
+                assistantText.ToString(),
+                MessageType.Assistant,
+                executionMetadataAccessor.ToMessageSnapshot()));
         }
 
         await messagePersistenceService.AppendBatchAsync(request.SessionId, pendingMessages, ct);

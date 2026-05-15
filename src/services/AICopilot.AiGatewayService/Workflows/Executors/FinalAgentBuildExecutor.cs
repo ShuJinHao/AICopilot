@@ -1,4 +1,5 @@
 ﻿using AICopilot.AiGatewayService.Agents;
+using AICopilot.AiGatewayService.Runtime;
 using AICopilot.AiGatewayService.Safety;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
@@ -24,9 +25,12 @@ public class FinalAgentBuildExecutor(
     IReadRepository<ConversationTemplate> templateRepository,
     IReadRepository<LanguageModel> modelRepository,
     ITokenBudgetPolicy tokenBudgetPolicy,
-    ILogger<FinalAgentBuildExecutor> logger)
+    ILogger<FinalAgentBuildExecutor> logger,
+    IChatRuntimeSettingsProvider? runtimeSettingsProvider = null,
+    IChatExecutionMetadataAccessor? executionMetadataAccessor = null)
 {
     public const string ExecutorId = nameof(FinalAgentBuildExecutor);
+    private const string RedactedOriginalQuestionPlaceholder = "[已按安全边界移除原始问题文本]";
 
     public async Task<FinalAgentContext> ExecuteAsync(
         GenerationContext genContext,
@@ -56,19 +60,38 @@ public class FinalAgentBuildExecutor(
                 "当前会话缺少可用的模板或模型配置，请联系管理员检查 AI 配置。");
         }
 
-        var model = await modelRepository.FirstOrDefaultAsync(
-            new LanguageModelByIdSpec(template.ModelId),
-            ct);
+        var modelId = request.FinalModelId.HasValue
+            ? new LanguageModelId(request.FinalModelId.Value)
+            : template.ModelId;
+        var model = await modelRepository.FirstOrDefaultAsync(new LanguageModelByIdSpec(modelId), ct);
 
         if (model == null)
         {
             throw new ChatWorkflowException(
                 AppProblemCodes.ChatConfigurationMissing,
-                "当前会话绑定的模型不存在。",
-                "当前会话缺少可用的模型配置，请联系管理员检查 AI 配置。");
+                request.FinalModelId.HasValue ? "用户选择的模型不存在。" : "当前会话绑定的模型不存在。",
+                request.FinalModelId.HasValue
+                    ? "所选模型不存在或已被删除，请切换模型后重试。"
+                    : "当前会话缺少可用的模型配置，请联系管理员检查 AI 配置。");
         }
 
-        var finalUserPrompt = BuildFinalUserPrompt(genContext, request.Message, out var hasContext);
+        if (!model.IsEnabled || !model.SupportsUsage(LanguageModelUsage.Chat))
+        {
+            throw new ChatWorkflowException(
+                AppProblemCodes.ChatConfigurationMissing,
+                $"Configured model {model.Name} is disabled or not available for chat.",
+                "所选模型当前不可用于对话，请切换模型或联系管理员检查 AI 配置。");
+        }
+
+        var runtimeSettings = runtimeSettingsProvider is null
+            ? new ChatRuntimeSettingsDto(4, 2, 4, 6, 20, 24000)
+            : await runtimeSettingsProvider.GetAsync(ct);
+        var answerHistory = await LoadAnswerHistoryAsync(
+            session.Id,
+            session.UserId,
+            runtimeSettings.AnswerHistoryCount,
+            ct);
+        var finalUserPrompt = BuildFinalUserPrompt(genContext, request.Message, answerHistory, out var hasContext);
         var tokenBudgetDecision = tokenBudgetPolicy.Evaluate(model, template, finalUserPrompt);
         if (!tokenBudgetDecision.IsAllowed)
         {
@@ -87,6 +110,9 @@ public class FinalAgentBuildExecutor(
                 Tools = genContext.Tools,
                 MaxOutputTokens = tokenBudgetDecision.ReservedOutputTokens
             };
+            var metadataAccessor = executionMetadataAccessor ?? new ChatExecutionMetadataAccessor();
+            metadataAccessor.SetFinalModel(model, tokenBudgetDecision.ReservedOutputTokens);
+            var executionMetadata = metadataAccessor.Snapshot();
 
             if (hasContext)
             {
@@ -110,7 +136,8 @@ public class FinalAgentBuildExecutor(
                     model.Name,
                     template.Name,
                     tokenBudgetDecision.TotalTokenBudget,
-                    tokenBudgetDecision.ReservedOutputTokens)
+                    tokenBudgetDecision.ReservedOutputTokens),
+                ExecutionMetadata = executionMetadata
             };
 
             scopedAgent = null;
@@ -128,6 +155,7 @@ public class FinalAgentBuildExecutor(
     private string BuildFinalUserPrompt(
         GenerationContext genContext,
         string originalMessage,
+        IReadOnlyCollection<Message> answerHistory,
         out bool hasContext)
     {
         var hasKnowledge = !string.IsNullOrWhiteSpace(genContext.KnowledgeContext);
@@ -138,7 +166,7 @@ public class FinalAgentBuildExecutor(
         if (!hasContext)
         {
             logger.LogDebug("No auxiliary context injected for session {SessionId}.", genContext.Request.SessionId);
-            return originalMessage;
+            return AppendHistoryIfNeeded(originalMessage, answerHistory);
         }
 
         var contextBuilder = new StringBuilder();
@@ -168,8 +196,12 @@ public class FinalAgentBuildExecutor(
         }
 
         var requirements = BuildRequirements(genContext.Scene, hasDataAnalysis, hasBusinessPolicy, hasKnowledge);
+        var shouldRedactOriginalQuestion = ShouldRedactOriginalQuestion(genContext);
+        var finalQuestion = shouldRedactOriginalQuestion
+            ? RedactedOriginalQuestionPlaceholder
+            : originalMessage;
 
-        return $"""
+        var prompt = $"""
                 请基于以下参考信息回答问题：
 
                 <context>
@@ -180,8 +212,60 @@ public class FinalAgentBuildExecutor(
                 {string.Join(Environment.NewLine, requirements.Select((item, index) => $"{index + 1}. {item}"))}
 
                 用户问题：
-                {originalMessage}
+                {finalQuestion}
                 """;
+        return shouldRedactOriginalQuestion
+            ? prompt
+            : AppendHistoryIfNeeded(prompt, answerHistory);
+    }
+
+    private async Task<IReadOnlyCollection<Message>> LoadAnswerHistoryAsync(
+        SessionId sessionId,
+        Guid userId,
+        int count,
+        CancellationToken cancellationToken)
+    {
+        if (count <= 0)
+        {
+            return [];
+        }
+
+        var sessionWithMessages = await sessionRepository.FirstOrDefaultAsync(
+            new SessionWithMessagesByIdForUserSpec(sessionId, userId),
+            cancellationToken);
+        return sessionWithMessages?.Messages
+            .OrderByDescending(message => message.CreatedAt)
+            .Take(count)
+            .OrderBy(message => message.CreatedAt)
+            .ToArray() ?? [];
+    }
+
+    private static string AppendHistoryIfNeeded(
+        string prompt,
+        IReadOnlyCollection<Message> answerHistory)
+    {
+        if (answerHistory.Count == 0)
+        {
+            return prompt;
+        }
+
+        var history = string.Join(
+            Environment.NewLine,
+            answerHistory.Select(message => $"{message.Type}: {message.Content}"));
+        return $"""
+                <recent_conversation>
+                {history}
+                </recent_conversation>
+
+                {prompt}
+                """;
+    }
+
+    private static bool ShouldRedactOriginalQuestion(GenerationContext genContext)
+    {
+        return genContext.DataAnalysisContext.Contains(
+            SemanticAnalysisRunner.RecipeDataReadBoundaryMarker,
+            StringComparison.Ordinal);
     }
 
     private static List<string> BuildRequirements(

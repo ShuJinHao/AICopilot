@@ -21,6 +21,7 @@ public class ApprovalDecisionStreamHandler(
     IFinalAgentContextSerializer finalAgentContextSerializer,
     ApprovalRequirementResolver approvalRequirementResolver,
     ISessionExecutionLock sessionExecutionLock,
+    IChatExecutionMetadataAccessor executionMetadataAccessor,
     IChatStreamRuntime chatStreamRuntime)
     : IStreamRequestHandler<ApprovalDecisionStreamRequest, ChatChunk>
 {
@@ -88,7 +89,10 @@ public class ApprovalDecisionStreamHandler(
 
         if (assistantText.Length > 0)
         {
-            pendingMessages.Add(new SessionMessageAppend(assistantText.ToString(), MessageType.Assistant));
+            pendingMessages.Add(new SessionMessageAppend(
+                assistantText.ToString(),
+                MessageType.Assistant,
+                executionMetadataAccessor.ToMessageSnapshot()));
         }
 
         await messagePersistenceService.AppendBatchAsync(request.SessionId, pendingMessages, ct);
@@ -134,6 +138,8 @@ public class ApprovalDecisionStreamHandler(
                 "审批上下文已过期，请重新发起本次诊断或建议请求。");
             yield break;
         }
+
+        executionMetadataAccessor.Apply(storedContext.ExecutionMetadata);
 
         var storedApproval = storedContext.PendingApprovals
             .FirstOrDefault(item => string.Equals(item.CallId, request.CallId, StringComparison.Ordinal));
