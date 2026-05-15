@@ -23,10 +23,182 @@ namespace AICopilot.EntityFrameworkCore.Migrations.AiGatewayDbContext
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("AICopilot.Core.AiGateway.Aggregates.AgentTasks.AgentStep", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("description");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("error_message");
+
+                    b.Property<DateTimeOffset?>("FinishedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("finished_at");
+
+                    b.Property<string>("InputJson")
+                        .HasColumnType("text")
+                        .HasColumnName("input_json");
+
+                    b.Property<string>("OutputJson")
+                        .HasColumnType("text")
+                        .HasColumnName("output_json");
+
+                    b.Property<bool>("RequiresApproval")
+                        .HasColumnType("boolean")
+                        .HasColumnName("requires_approval");
+
+                    b.Property<DateTimeOffset?>("StartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("started_at");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("status");
+
+                    b.Property<int>("StepIndex")
+                        .HasColumnType("integer")
+                        .HasColumnName("step_index");
+
+                    b.Property<string>("StepType")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("step_type");
+
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("task_id");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("title");
+
+                    b.Property<string>("ToolCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("tool_code");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TaskId", "StepIndex")
+                        .IsUnique();
+
+                    b.ToTable("agent_steps", "aigateway");
+                });
+
+            modelBuilder.Entity("AICopilot.Core.AiGateway.Aggregates.AgentTasks.AgentTask", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("FinalSummary")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)")
+                        .HasColumnName("final_summary");
+
+                    b.Property<string>("Goal")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("goal");
+
+                    b.Property<Guid?>("ModelId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("model_id");
+
+                    b.Property<string>("PlanJson")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("plan_json");
+
+                    b.Property<string>("RiskLevel")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("risk_level");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("session_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("status");
+
+                    b.Property<string>("TaskCode")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("task_code");
+
+                    b.Property<string>("TaskType")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("task_type");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("title");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<Guid?>("WorkspaceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("workspace_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TaskCode")
+                        .IsUnique();
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("ix_agent_tasks_user_id");
+
+                    b.ToTable("agent_tasks", "aigateway");
+                });
+
             modelBuilder.Entity("AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy.ApprovalPolicy", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
@@ -80,18 +252,223 @@ namespace AICopilot.EntityFrameworkCore.Migrations.AiGatewayDbContext
                     b.ToTable("approval_policies", "aigateway");
                 });
 
+            modelBuilder.Entity("AICopilot.Core.AiGateway.Aggregates.Approvals.ApprovalRequest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("ApprovalComment")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("approval_comment");
+
+                    b.Property<string>("ApprovalType")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("approval_type");
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("approved_at");
+
+                    b.Property<Guid?>("ApprovedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("approved_by");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("RequestedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("requested_by");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("status");
+
+                    b.Property<string>("TargetId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("target_id");
+
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("task_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TaskId")
+                        .HasDatabaseName("ix_approval_requests_task_id");
+
+                    b.ToTable("approval_requests", "aigateway");
+                });
+
+            modelBuilder.Entity("AICopilot.Core.AiGateway.Aggregates.Artifacts.Artifact", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("ArtifactType")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("artifact_type");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedByStepId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by_step_id");
+
+                    b.Property<long>("FileSize")
+                        .HasColumnType("bigint")
+                        .HasColumnName("file_size");
+
+                    b.Property<string>("MimeType")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("mime_type");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("RelativePath")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("relative_path");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("task_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.Property<Guid>("WorkspaceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("workspace_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WorkspaceId", "RelativePath");
+
+                    b.ToTable("artifacts", "aigateway");
+                });
+
+            modelBuilder.Entity("AICopilot.Core.AiGateway.Aggregates.Artifacts.ArtifactWorkspace", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("RootPath")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("root_path");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("task_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("WorkspaceCode")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("workspace_code");
+
+                    b.Property<string>("WorkspaceUrl")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("workspace_url");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TaskId")
+                        .IsUnique();
+
+                    b.HasIndex("WorkspaceCode")
+                        .IsUnique();
+
+                    b.ToTable("artifact_workspaces", "aigateway");
+                });
+
             modelBuilder.Entity("AICopilot.Core.AiGateway.Aggregates.ConversationTemplate.ConversationTemplate", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("id");
+
+                    b.Property<int>("BuiltInVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("built_in_version");
+
+                    b.Property<string>("Code")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("code");
 
                     b.Property<string>("Description")
                         .IsRequired()
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)")
                         .HasColumnName("description");
+
+                    b.Property<bool>("IsBuiltIn")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_built_in");
 
                     b.Property<bool>("IsEnabled")
                         .HasColumnType("boolean")
@@ -113,12 +490,22 @@ namespace AICopilot.EntityFrameworkCore.Migrations.AiGatewayDbContext
                         .HasColumnType("xid")
                         .HasColumnName("xmin");
 
+                    b.Property<string>("Scope")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("scope");
+
                     b.Property<string>("SystemPrompt")
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("system_prompt");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasFilter("code IS NOT NULL");
 
                     b.HasIndex("Name")
                         .IsUnique();
@@ -129,7 +516,6 @@ namespace AICopilot.EntityFrameworkCore.Migrations.AiGatewayDbContext
             modelBuilder.Entity("AICopilot.Core.AiGateway.Aggregates.LanguageModel.LanguageModel", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
@@ -144,11 +530,34 @@ namespace AICopilot.EntityFrameworkCore.Migrations.AiGatewayDbContext
                         .HasColumnType("character varying(100)")
                         .HasColumnName("base_url");
 
+                    b.Property<DateTimeOffset?>("ConnectivityCheckedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("connectivity_checked_at");
+
+                    b.Property<string>("ConnectivityError")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("connectivity_error");
+
+                    b.Property<int>("ConnectivityStatus")
+                        .HasColumnType("integer")
+                        .HasColumnName("connectivity_status");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_enabled");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)")
                         .HasColumnName("name");
+
+                    b.Property<string>("ProtocolType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("protocol_type");
 
                     b.Property<string>("Provider")
                         .IsRequired()
@@ -162,12 +571,105 @@ namespace AICopilot.EntityFrameworkCore.Migrations.AiGatewayDbContext
                         .HasColumnType("xid")
                         .HasColumnName("xmin");
 
+                    b.Property<int>("Usage")
+                        .HasColumnType("integer")
+                        .HasColumnName("usage");
+
                     b.HasKey("Id");
 
                     b.HasIndex("Provider", "Name")
                         .IsUnique();
 
                     b.ToTable("language_models", "aigateway");
+                });
+
+            modelBuilder.Entity("AICopilot.Core.AiGateway.Aggregates.RoutingModel.RoutingModelConfiguration", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_active");
+
+                    b.Property<Guid>("ModelId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("model_id");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsActive")
+                        .IsUnique()
+                        .HasFilter("is_active");
+
+                    b.HasIndex("ModelId");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("routing_model_configurations", "aigateway");
+                });
+
+            modelBuilder.Entity("AICopilot.Core.AiGateway.Aggregates.RuntimeSettings.ChatRuntimeSettings", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("AgentPlanningHistoryCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("agent_planning_history_count");
+
+                    b.Property<int>("AnswerHistoryCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("answer_history_count");
+
+                    b.Property<int>("ContextTokenLimit")
+                        .HasColumnType("integer")
+                        .HasColumnName("context_token_limit");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("RagRewriteHistoryCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("rag_rewrite_history_count");
+
+                    b.Property<int>("RoutingHistoryCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("routing_history_count");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<int>("SummaryThresholdMessages")
+                        .HasColumnType("integer")
+                        .HasColumnName("summary_threshold_messages");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("chat_runtime_settings", "aigateway");
                 });
 
             modelBuilder.Entity("AICopilot.Core.AiGateway.Aggregates.Sessions.Message", b =>
@@ -184,9 +686,35 @@ namespace AICopilot.EntityFrameworkCore.Migrations.AiGatewayDbContext
                         .HasColumnType("text")
                         .HasColumnName("content");
 
+                    b.Property<int?>("ContextWindowTokens")
+                        .HasColumnType("integer")
+                        .HasColumnName("context_window_tokens");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
+
+                    b.Property<Guid?>("FinalModelId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("final_model_id");
+
+                    b.Property<string>("FinalModelName")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("final_model_name");
+
+                    b.Property<int?>("MaxOutputTokens")
+                        .HasColumnType("integer")
+                        .HasColumnName("max_output_tokens");
+
+                    b.Property<Guid?>("RoutingModelId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("routing_model_id");
+
+                    b.Property<string>("RoutingModelName")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("routing_model_name");
 
                     b.Property<Guid>("SessionId")
                         .HasColumnType("uuid")
@@ -208,9 +736,21 @@ namespace AICopilot.EntityFrameworkCore.Migrations.AiGatewayDbContext
             modelBuilder.Entity("AICopilot.Core.AiGateway.Aggregates.Sessions.Session", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("id");
+
+                    b.Property<DateTime?>("LastMessageAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_message_at");
+
+                    b.Property<string>("LastMessageSummary")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("last_message_summary");
+
+                    b.Property<int>("MessageCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("message_count");
 
                     b.Property<DateTimeOffset?>("OnsiteConfirmationExpiresAt")
                         .HasColumnType("timestamp with time zone")
@@ -231,8 +771,8 @@ namespace AICopilot.EntityFrameworkCore.Migrations.AiGatewayDbContext
 
                     b.Property<string>("Title")
                         .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)")
+                        .HasMaxLength(48)
+                        .HasColumnType("character varying(48)")
                         .HasColumnName("title");
 
                     b.Property<Guid>("UserId")
@@ -245,6 +785,95 @@ namespace AICopilot.EntityFrameworkCore.Migrations.AiGatewayDbContext
                         .HasDatabaseName("ix_sessions_user_id");
 
                     b.ToTable("sessions", "aigateway");
+                });
+
+            modelBuilder.Entity("AICopilot.Core.AiGateway.Aggregates.Uploads.UploadRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid?>("AgentTaskId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("agent_task_id");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("content_type");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("file_name");
+
+                    b.Property<long>("FileSize")
+                        .HasColumnType("bigint")
+                        .HasColumnName("file_size");
+
+                    b.Property<Guid?>("KnowledgeBaseId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("knowledge_base_id");
+
+                    b.Property<int?>("RagDocumentId")
+                        .HasColumnType("integer")
+                        .HasColumnName("rag_document_id");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<string>("Scope")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("scope");
+
+                    b.Property<Guid?>("SessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("session_id");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("sha256");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("status");
+
+                    b.Property<string>("StoragePath")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("storage_path");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("KnowledgeBaseId")
+                        .HasDatabaseName("ix_upload_records_knowledge_base_id");
+
+                    b.HasIndex("UserId", "AgentTaskId")
+                        .HasDatabaseName("ix_upload_records_user_agent_task");
+
+                    b.HasIndex("UserId", "SessionId")
+                        .HasDatabaseName("ix_upload_records_user_session");
+
+                    b.ToTable("upload_records", "aigateway");
                 });
 
             modelBuilder.Entity("AICopilot.EntityFrameworkCore.Outbox.OutboxMessage", b =>
@@ -306,6 +935,24 @@ namespace AICopilot.EntityFrameworkCore.Migrations.AiGatewayDbContext
                         });
                 });
 
+            modelBuilder.Entity("AICopilot.Core.AiGateway.Aggregates.AgentTasks.AgentStep", b =>
+                {
+                    b.HasOne("AICopilot.Core.AiGateway.Aggregates.AgentTasks.AgentTask", null)
+                        .WithMany("Steps")
+                        .HasForeignKey("TaskId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("AICopilot.Core.AiGateway.Aggregates.Artifacts.Artifact", b =>
+                {
+                    b.HasOne("AICopilot.Core.AiGateway.Aggregates.Artifacts.ArtifactWorkspace", null)
+                        .WithMany("Artifacts")
+                        .HasForeignKey("WorkspaceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("AICopilot.Core.AiGateway.Aggregates.ConversationTemplate.ConversationTemplate", b =>
                 {
                     b.OwnsOne("AICopilot.Core.AiGateway.Aggregates.ConversationTemplate.TemplateSpecification", "Specification", b1 =>
@@ -340,6 +987,10 @@ namespace AICopilot.EntityFrameworkCore.Migrations.AiGatewayDbContext
                             b1.Property<Guid>("LanguageModelId")
                                 .HasColumnType("uuid");
 
+                            b1.Property<int>("MaxOutputTokens")
+                                .HasColumnType("integer")
+                                .HasColumnName("max_output_tokens");
+
                             b1.Property<int>("MaxTokens")
                                 .HasColumnType("integer")
                                 .HasColumnName("max_tokens");
@@ -370,6 +1021,16 @@ namespace AICopilot.EntityFrameworkCore.Migrations.AiGatewayDbContext
                         .HasConstraintName("fk_messages_sessions_session_id");
 
                     b.Navigation("Session");
+                });
+
+            modelBuilder.Entity("AICopilot.Core.AiGateway.Aggregates.AgentTasks.AgentTask", b =>
+                {
+                    b.Navigation("Steps");
+                });
+
+            modelBuilder.Entity("AICopilot.Core.AiGateway.Aggregates.Artifacts.ArtifactWorkspace", b =>
+                {
+                    b.Navigation("Artifacts");
                 });
 
             modelBuilder.Entity("AICopilot.Core.AiGateway.Aggregates.Sessions.Session", b =>

@@ -4,6 +4,7 @@ using AICopilot.Embedding;
 using AICopilot.EntityFrameworkCore;
 using AICopilot.EntityFrameworkCore.Outbox;
 using AICopilot.EventBus;
+using AICopilot.Infrastructure.Artifacts;
 using AICopilot.Infrastructure.AiGateway;
 using AICopilot.Infrastructure.Authentication;
 using AICopilot.Infrastructure.CloudIdentity;
@@ -13,7 +14,6 @@ using AICopilot.Infrastructure.Rag;
 using AICopilot.Infrastructure.Rag.Parsers;
 using AICopilot.Infrastructure.Rag.TokenCounter;
 using AICopilot.Infrastructure.Storage;
-using AICopilot.AiGatewayService.Safety;
 using AICopilot.Services.Contracts;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -35,10 +35,15 @@ public static class DependencyInjection
         builder.AddAiRuntime();
 
         builder.Services.AddSingleton<IFileStorageService, LocalFileStorageService>();
+        builder.Services.AddSingleton<IArtifactWorkspaceFileStore, LocalArtifactWorkspaceFileStore>();
+        builder.Services.AddSingleton<IAgentTableFileParser, AgentTableFileParser>();
+        builder.Services.AddSingleton<IAgentArtifactDocumentGenerator, AgentArtifactDocumentGenerator>();
         builder.Services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
         builder.Services.AddHttpClient<ICloudIdentityStatusClient, CloudIdentityStatusClient>();
         builder.Services.AddHttpClient<ICloudAiReadClient, CloudAiReadClient>();
         builder.Services.AddScoped<IChatClientProvider, OpenAiChatClientProvider>();
+        builder.Services.AddScoped<IChatClientProvider, AnthropicChatClientProvider>();
+        builder.Services.AddScoped<ILanguageModelConnectivityTester, LanguageModelConnectivityTester>();
         builder.Services.AddSingleton<ITextTokenEstimator, SharpTokenTextTokenEstimator>();
         builder.AddDocumentParsers();
         builder.Services.AddSingleton<ISessionExecutionLock>(serviceProvider =>
@@ -58,6 +63,10 @@ public static class DependencyInjection
         });
         builder.AddMcpRuntime();
         builder.Services.AddHttpClient("OpenAI", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+        builder.Services.AddHttpClient("Anthropic", client =>
         {
             client.Timeout = TimeSpan.FromSeconds(30);
         });

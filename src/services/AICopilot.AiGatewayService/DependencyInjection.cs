@@ -1,11 +1,15 @@
 using AICopilot.AgentPlugin;
+using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.AiGatewayService.Approvals;
 using AICopilot.AiGatewayService.Agents;
 using AICopilot.AiGatewayService.BusinessSemantics;
 using AICopilot.AiGatewayService.BusinessPolicies;
 using AICopilot.AiGatewayService.Observability;
+using AICopilot.AiGatewayService.RoutingModels;
+using AICopilot.AiGatewayService.Runtime;
 using AICopilot.AiGatewayService.Safety;
 using AICopilot.AiGatewayService.Sessions;
+using AICopilot.AiGatewayService.Workspaces;
 using AICopilot.AiGatewayService.Workflows;
 using AICopilot.AiGatewayService.Workflows.Executors;
 using AICopilot.Services.Contracts;
@@ -26,6 +30,12 @@ public static class DependencyInjection
         });
 
         builder.Services.AddScoped<ChatAgentFactory>();
+        builder.Services.AddScoped<IChatExecutionMetadataAccessor, ChatExecutionMetadataAccessor>();
+        builder.Services.AddScoped<IRoutingModelResolver, RoutingModelResolver>();
+        builder.Services.AddScoped<IChatRuntimeSettingsProvider, ChatRuntimeSettingsProvider>();
+        builder.Services.AddScoped<IAgentArtifactWorkspaceService, AgentArtifactWorkspaceService>();
+        builder.Services.AddScoped<IAgentTaskRuntime, AgentTaskRuntime>();
+        builder.Services.AddScoped<AgentAuditRecorder>();
         builder.Services.TryAddSingleton<ISessionExecutionLock, InMemorySessionExecutionLock>();
         builder.Services.AddSingleton<IOperationalBoundaryPolicy, ManufacturingOperationalBoundaryPolicy>();
         builder.Services.AddSingleton<IManufacturingSceneClassifier, KeywordManufacturingSceneClassifier>();

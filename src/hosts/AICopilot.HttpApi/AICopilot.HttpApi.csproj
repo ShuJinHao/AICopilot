@@ -4,6 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>dotnet-AICopilot.HttpApi-0f4d4d7b-50b1-4c15-9808-9cf3a7a22fb7</UserSecretsId>
   </PropertyGroup>
 
 

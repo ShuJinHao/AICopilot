@@ -11,6 +11,10 @@ if (appHostOptions.EnableDockerComposeEnvironment)
 }
 
 var password = builder.AddParameter("pg-password", secret: true);
+var apiKeyEncryptionKey = builder.AddParameter("aicopilot-api-key-encryption-key", secret: true);
+var jwtSecretKey = builder.AddParameter("jwt-secret-key", secret: true);
+var bootstrapAdminUserName = builder.AddParameter("bootstrap-admin-username", secret: true);
+var bootstrapAdminPassword = builder.AddParameter("bootstrap-admin-password", secret: true);
 
 var postgresdb = builder.AddPostgres("postgres", password: password);
 
@@ -69,6 +73,9 @@ if (appHostOptions.PersistentContainers)
 var migration = builder.AddProject<AICopilot_MigrationWorkApp>("aicopilot-migration")
     .WithReference(aiCopilotDatabase)
     .WithReference(cloudDeviceSemanticSimDatabase)
+    .WithEnvironment("AICopilotSecurity__ApiKeyEncryptionKey", apiKeyEncryptionKey)
+    .WithEnvironment("BootstrapAdmin__UserName", bootstrapAdminUserName)
+    .WithEnvironment("BootstrapAdmin__Password", bootstrapAdminPassword)
     .WaitFor(postgresdb);
 
 var httpapi = builder.AddProject<AICopilot_HttpApi>("aicopilot-httpapi")
@@ -82,6 +89,10 @@ var httpapi = builder.AddProject<AICopilot_HttpApi>("aicopilot-httpapi")
     .WithReference(migration)
     .WithReference(qdrant)
     .WithReference(finalAgentContextRedis)
+    .WithEnvironment("AICopilotSecurity__ApiKeyEncryptionKey", apiKeyEncryptionKey)
+    .WithEnvironment("JwtSettings__SecretKey", jwtSecretKey)
+    .WithEnvironment("BootstrapAdmin__UserName", bootstrapAdminUserName)
+    .WithEnvironment("BootstrapAdmin__Password", bootstrapAdminPassword)
     .WithEnvironment("AiGateway__FinalAgentContextStore__Provider", "Redis")
     .WaitForCompletion(migration);
 
@@ -92,6 +103,7 @@ if (appHostOptions.EnableRagWorker)
         .WithReference(rabbitmq)
         .WithReference(qdrant)
         .WithReference(migration)
+        .WithEnvironment("AICopilotSecurity__ApiKeyEncryptionKey", apiKeyEncryptionKey)
         .WaitFor(postgresdb)
         .WaitFor(rabbitmq)
         .WaitFor(qdrant)
@@ -103,6 +115,7 @@ if (appHostOptions.EnableDataWorker)
     builder.AddProject<AICopilot_DataWorker>("data-worker")
         .WithReference(aiCopilotDatabase)
         .WithReference(rabbitmq)
+        .WithEnvironment("AICopilotSecurity__ApiKeyEncryptionKey", apiKeyEncryptionKey)
         .WaitFor(postgresdb)
         .WaitFor(rabbitmq)
         .WaitForCompletion(migration);
