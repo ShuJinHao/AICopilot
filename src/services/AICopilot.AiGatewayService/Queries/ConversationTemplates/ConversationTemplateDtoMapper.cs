@@ -11,9 +11,13 @@ internal static class ConversationTemplateDtoMapper
         {
             Id = template.Id,
             Name = template.Name,
+            Code = template.Code,
             Description = template.Description,
             SystemPrompt = template.SystemPrompt,
             ModelId = template.ModelId,
+            Scope = template.Scope.ToString(),
+            BuiltInVersion = template.BuiltInVersion,
+            IsBuiltIn = template.IsBuiltIn,
             MaxTokens = template.Specification.MaxTokens,
             Temperature = template.Specification.Temperature,
             IsEnabled = template.IsEnabled

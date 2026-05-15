@@ -6,8 +6,18 @@ namespace AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 public class ConversationTemplate : IAggregateRoot<ConversationTemplateId>
 {
     public const int MaxNameLength = 200;
+    public const int MaxCodeLength = 100;
     public const int MaxDescriptionLength = 1000;
     public const int MaxSystemPromptLength = 16000;
+    private static readonly string[] ForbiddenIdentityFragments =
+    [
+        "朝小夕",
+        "朝夕",
+        "小夕",
+        "旧助理名",
+        "旧品牌名"
+    ];
+
     private static readonly string[] DangerousPermissivePromptFragments =
     [
         "可以绕过审批",
@@ -60,11 +70,19 @@ public class ConversationTemplate : IAggregateRoot<ConversationTemplateId>
 
     public string Name { get; private set; } = null!;
 
+    public string? Code { get; private set; }
+
     public string Description { get; private set; } = null!;
 
     public string SystemPrompt { get; private set; } = null!;
 
     public LanguageModelId ModelId { get; private set; }
+
+    public ConversationTemplateScope Scope { get; private set; } = ConversationTemplateScope.General;
+
+    public int BuiltInVersion { get; private set; }
+
+    public bool IsBuiltIn { get; private set; }
 
     public TemplateSpecification Specification { get; private set; } = new();
 
@@ -90,6 +108,24 @@ public class ConversationTemplate : IAggregateRoot<ConversationTemplateId>
     {
         ValidateSpecification(spec);
         Specification = spec;
+    }
+
+    public void MarkBuiltIn(string code, ConversationTemplateScope scope, int version)
+    {
+        ValidateBuiltInMetadata(code, scope, version);
+
+        Code = code.Trim();
+        Scope = scope;
+        BuiltInVersion = version;
+        IsBuiltIn = true;
+    }
+
+    public void ClearBuiltInMetadata()
+    {
+        Code = null;
+        Scope = ConversationTemplateScope.General;
+        BuiltInVersion = 0;
+        IsBuiltIn = false;
     }
 
     private static void ValidateInfo(
@@ -129,6 +165,16 @@ public class ConversationTemplate : IAggregateRoot<ConversationTemplateId>
 
     private static void ValidateSystemPromptSafety(string systemPrompt)
     {
+        foreach (var fragment in ForbiddenIdentityFragments)
+        {
+            if (systemPrompt.Contains(fragment, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ArgumentException(
+                    "Conversation template system prompt contains a forbidden legacy assistant identity.",
+                    nameof(systemPrompt));
+            }
+        }
+
         foreach (var fragment in DangerousPermissivePromptFragments)
         {
             if (systemPrompt.Contains(fragment, StringComparison.OrdinalIgnoreCase))
@@ -137,6 +183,29 @@ public class ConversationTemplate : IAggregateRoot<ConversationTemplateId>
                     "Conversation template system prompt contains unsafe execution or approval-bypass instruction.",
                     nameof(systemPrompt));
             }
+        }
+    }
+
+    private static void ValidateBuiltInMetadata(string code, ConversationTemplateScope scope, int version)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            throw new ArgumentException("Conversation template code is required.", nameof(code));
+        }
+
+        if (code.Trim().Length > MaxCodeLength)
+        {
+            throw new ArgumentOutOfRangeException(nameof(code), $"Conversation template code must not exceed {MaxCodeLength} characters.");
+        }
+
+        if (!Enum.IsDefined(typeof(ConversationTemplateScope), scope))
+        {
+            throw new ArgumentOutOfRangeException(nameof(scope), scope, "Conversation template scope is invalid.");
+        }
+
+        if (version <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(version), "Built-in template version must be greater than zero.");
         }
     }
 

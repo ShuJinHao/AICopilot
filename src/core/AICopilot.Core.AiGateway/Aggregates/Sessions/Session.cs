@@ -5,6 +5,10 @@ namespace AICopilot.Core.AiGateway.Aggregates.Sessions;
 
 public class Session : BaseEntity<SessionId>, IAggregateRoot<SessionId>
 {
+    public const string DefaultTitle = "新会话";
+    public const string UntitledTitle = "未命名会话";
+    public const int MaxTitleLength = 48;
+    public const int MaxMessageSummaryLength = 200;
     private static readonly TimeSpan MaxOnsiteAttestationLifetime = TimeSpan.FromMinutes(30);
     private readonly List<Message> _messages = [];
 
@@ -21,21 +25,25 @@ public class Session : BaseEntity<SessionId>, IAggregateRoot<SessionId>
 
 
         Id = SessionId.New();
-        Title = "新会话";
+        Title = DefaultTitle;
         UserId = userId;
         TemplateId = templateId;
+        MessageCount = 0;
     }
 
     public string Title { get; private set; } = null!;
     public Guid UserId { get; private set; }
     public ConversationTemplateId TemplateId { get; private set; }
+    public string? LastMessageSummary { get; private set; }
+    public DateTime? LastMessageAt { get; private set; }
+    public int MessageCount { get; private set; }
     public DateTimeOffset? OnsiteConfirmedAt { get; private set; }
     public string? OnsiteConfirmedBy { get; private set; }
     public DateTimeOffset? OnsiteConfirmationExpiresAt { get; private set; }
 
     public IReadOnlyCollection<Message> Messages => _messages.AsReadOnly();
 
-    public void AddMessage(string content, MessageType type)
+    public void AddMessage(string content, MessageType type, MessageModelSnapshot? modelSnapshot = null)
     {
         if (string.IsNullOrWhiteSpace(content))
         {
@@ -47,9 +55,22 @@ public class Session : BaseEntity<SessionId>, IAggregateRoot<SessionId>
             throw new ArgumentOutOfRangeException(nameof(type), type, "Message type is invalid.");
         }
 
-        var message = new Message(this, content, type);
+        var message = new Message(this, content, type, modelSnapshot);
         _messages.Add(message);
+        MessageCount++;
+        LastMessageAt = message.CreatedAt;
+        LastMessageSummary = BuildSummary(message.Content);
+        if (type == MessageType.User && IsAutoTitleCandidate())
+        {
+            Title = BuildTitle(message.Content);
+        }
+
         AddDomainEvent(new MessageAddedToSessionEvent(Id.Value, message.Content, message.Type, message.CreatedAt));
+    }
+
+    public void Rename(string title)
+    {
+        Title = BuildTitle(title);
     }
 
     public void SetOnsiteAttestation(string confirmedBy, DateTimeOffset confirmedAtUtc, DateTimeOffset expiresAtUtc)
@@ -88,5 +109,42 @@ public class Session : BaseEntity<SessionId>, IAggregateRoot<SessionId>
                && !string.IsNullOrWhiteSpace(OnsiteConfirmedBy)
                && OnsiteConfirmationExpiresAt.HasValue
                && OnsiteConfirmationExpiresAt.Value > nowUtc;
+    }
+
+    private bool IsAutoTitleCandidate()
+    {
+        return string.Equals(Title, DefaultTitle, StringComparison.Ordinal)
+               || string.Equals(Title, UntitledTitle, StringComparison.Ordinal)
+               || string.IsNullOrWhiteSpace(Title);
+    }
+
+    private static string BuildTitle(string value)
+    {
+        var normalized = NormalizeInlineText(value);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return UntitledTitle;
+        }
+
+        return normalized.Length <= MaxTitleLength
+            ? normalized
+            : normalized[..MaxTitleLength];
+    }
+
+    private static string BuildSummary(string value)
+    {
+        var normalized = NormalizeInlineText(value);
+        return normalized.Length <= MaxMessageSummaryLength
+            ? normalized
+            : normalized[..MaxMessageSummaryLength];
+    }
+
+    private static string NormalizeInlineText(string value)
+    {
+        return string.Join(
+            ' ',
+            (value ?? string.Empty)
+                .Trim()
+                .Split([' ', '\r', '\n', '\t'], StringSplitOptions.RemoveEmptyEntries));
     }
 }

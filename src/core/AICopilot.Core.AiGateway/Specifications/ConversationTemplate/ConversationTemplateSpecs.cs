@@ -19,6 +19,14 @@ public sealed class ConversationTemplateByNameSpec : Specification<Aggregates.Co
     }
 }
 
+public sealed class ConversationTemplateByCodeSpec : Specification<Aggregates.ConversationTemplate.ConversationTemplate>
+{
+    public ConversationTemplateByCodeSpec(string code)
+    {
+        FilterCondition = template => template.Code == code;
+    }
+}
+
 public sealed class ConversationTemplatesOrderedSpec : Specification<Aggregates.ConversationTemplate.ConversationTemplate>
 {
     public ConversationTemplatesOrderedSpec()

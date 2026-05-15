@@ -15,6 +15,12 @@ public record ChatHistoryMessageDto
     public required string Role { get; init; }
     public required string Content { get; init; }
     public DateTime CreatedAt { get; init; }
+    public Guid? FinalModelId { get; init; }
+    public string? FinalModelName { get; init; }
+    public Guid? RoutingModelId { get; init; }
+    public string? RoutingModelName { get; init; }
+    public int? ContextWindowTokens { get; init; }
+    public int? MaxOutputTokens { get; init; }
 }
 
 [AuthorizeRequirement("AiGateway.GetSession")]
@@ -61,7 +67,13 @@ public class GetListChatMessageHistoryQueryHandler(
                 SessionId = message.SessionId,
                 Role = message.Type.ToString(),
                 Content = message.Content,
-                CreatedAt = message.CreatedAt
+                CreatedAt = message.CreatedAt,
+                FinalModelId = message.FinalModelId,
+                FinalModelName = message.FinalModelName,
+                RoutingModelId = message.RoutingModelId,
+                RoutingModelName = message.RoutingModelName,
+                ContextWindowTokens = message.ContextWindowTokens,
+                MaxOutputTokens = message.MaxOutputTokens
             })
             .ToList();
 

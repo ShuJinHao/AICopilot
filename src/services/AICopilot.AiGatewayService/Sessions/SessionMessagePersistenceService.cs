@@ -3,7 +3,7 @@ using AICopilot.SharedKernel.Repository;
 
 namespace AICopilot.AiGatewayService.Sessions;
 
-public sealed record SessionMessageAppend(string? Content, MessageType Type);
+public sealed record SessionMessageAppend(string? Content, MessageType Type, MessageModelSnapshot? ModelSnapshot = null);
 
 public class SessionMessagePersistenceService(IRepository<Session> repository)
 {
@@ -23,7 +23,7 @@ public class SessionMessagePersistenceService(IRepository<Session> repository)
     {
         var normalizedEntries = entries
             .Where(entry => !string.IsNullOrWhiteSpace(entry.Content))
-            .Select(entry => new SessionMessageAppend(entry.Content!.Trim(), entry.Type))
+            .Select(entry => new SessionMessageAppend(entry.Content!.Trim(), entry.Type, entry.ModelSnapshot))
             .ToArray();
         if (normalizedEntries.Length == 0)
         {
@@ -42,7 +42,7 @@ public class SessionMessagePersistenceService(IRepository<Session> repository)
 
         foreach (var entry in normalizedEntries)
         {
-            session.AddMessage(entry.Content!, entry.Type);
+            session.AddMessage(entry.Content!, entry.Type, entry.ModelSnapshot);
         }
 
         repository.Update(session);

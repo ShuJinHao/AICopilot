@@ -1,12 +1,8 @@
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
+using AICopilot.Services.Contracts;
 
 namespace AICopilot.AiGatewayService.Safety;
-
-public interface ITextTokenEstimator
-{
-    int CountTokens(string? text);
-}
 
 public sealed record TokenBudgetDecision(
     bool IsAllowed,
@@ -46,7 +42,10 @@ public sealed class ChatTokenBudgetPolicy(ITextTokenEstimator tokenEstimator) : 
         ArgumentNullException.ThrowIfNull(template);
 
         var totalTokenBudget = Math.Max(model.Parameters.MaxTokens, 1);
-        var reservedOutputTokens = ResolveReservedOutputTokens(totalTokenBudget, template.Specification.MaxTokens);
+        var reservedOutputTokens = ResolveReservedOutputTokens(
+            totalTokenBudget,
+            template.Specification.MaxTokens,
+            model.Parameters.MaxOutputTokens);
         var safetyBuffer = Math.Clamp(totalTokenBudget / 10, 64, 256);
         var estimatedInputTokens = CountSystemPromptTokens(template) + tokenEstimator.CountTokens(finalUserPrompt);
         var availableInputTokens = Math.Max(1, totalTokenBudget - reservedOutputTokens - safetyBuffer);
@@ -69,10 +68,15 @@ public sealed class ChatTokenBudgetPolicy(ITextTokenEstimator tokenEstimator) : 
             "本次问题连同参考信息预计会超过当前模型的 token 预算。请缩小时间范围、减少筛选条件，或分步提问后再试。");
     }
 
-    private static int ResolveReservedOutputTokens(int totalTokenBudget, int? templateMaxTokens)
+    private static int ResolveReservedOutputTokens(
+        int totalTokenBudget,
+        int? templateMaxTokens,
+        int modelDefaultMaxOutputTokens)
     {
         var desiredTokens = templateMaxTokens
-            ?? Math.Min(DefaultReservedOutputTokens, Math.Max(MinimumReservedOutputTokens, totalTokenBudget / 3));
+            ?? (modelDefaultMaxOutputTokens > 0
+                ? modelDefaultMaxOutputTokens
+                : Math.Min(DefaultReservedOutputTokens, Math.Max(MinimumReservedOutputTokens, totalTokenBudget / 3)));
 
         return Math.Clamp(desiredTokens, MinimumReservedOutputTokens, totalTokenBudget);
     }
