@@ -5,6 +5,8 @@ import { ChunkType, MessageRole } from '@/types/protocols'
 import type { ApprovalChunk, ChatMessage } from '@/types/models'
 import { useSessionStore } from './sessionStore'
 
+const unknownModelLabel = '\u672a\u77e5'
+
 function isApprovalChunk(chunk: { type: ChunkType }): chunk is ApprovalChunk {
   return chunk.type === ChunkType.ApprovalRequest
 }
@@ -25,6 +27,12 @@ export const useMessageStore = defineStore('chatMessage', () => {
     messagesMap.value[sessionId] = history.map((message) => ({
       sessionId: message.sessionId,
       role: message.role === MessageRole.User ? MessageRole.User : MessageRole.Assistant,
+      finalModelId: message.role === MessageRole.Assistant ? (message.finalModelId ?? null) : null,
+      finalModelName: message.role === MessageRole.Assistant ? (message.finalModelName ?? unknownModelLabel) : null,
+      routingModelId: message.role === MessageRole.Assistant ? (message.routingModelId ?? null) : null,
+      routingModelName: message.role === MessageRole.Assistant ? (message.routingModelName ?? null) : null,
+      contextWindowTokens: message.role === MessageRole.Assistant ? (message.contextWindowTokens ?? null) : null,
+      maxOutputTokens: message.role === MessageRole.Assistant ? (message.maxOutputTokens ?? null) : null,
       chunks: [
         {
           source: message.role === MessageRole.User ? 'User' : 'FinalAgentRunExecutor',

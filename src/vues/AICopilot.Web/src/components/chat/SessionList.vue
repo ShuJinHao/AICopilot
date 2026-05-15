@@ -88,23 +88,26 @@ header span {
   gap: 8px;
   align-items: center;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 9px 10px;
   background: transparent;
   color: var(--app-text);
   cursor: pointer;
   text-align: left;
+  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .session-item:hover,
 .session-item.active {
   border-color: var(--app-border);
-  background: #ffffff;
+  background: var(--app-surface);
+  box-shadow: var(--shadow-sm);
 }
 
 .session-item.active {
   color: var(--app-primary-strong);
   font-weight: 750;
+  border-color: var(--app-border-strong);
 }
 
 .session-item span {
@@ -116,7 +119,7 @@ header span {
 
 .empty-state {
   border: 1px dashed var(--app-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 14px;
   color: var(--app-text-muted);
   text-align: center;

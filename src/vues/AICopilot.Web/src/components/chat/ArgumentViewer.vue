@@ -43,7 +43,7 @@ function formatValue(value: unknown) {
   display: grid;
   gap: 6px;
   border: 1px solid var(--app-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 8px;
   background: var(--app-surface-muted);
 }
@@ -62,12 +62,13 @@ function formatValue(value: unknown) {
 
 code {
   overflow-wrap: anywhere;
-  border-radius: 6px;
-  background: #ffffff;
+  border-radius: var(--radius-sm);
+  background: var(--app-surface-raised);
   padding: 3px 6px;
   color: var(--app-text);
   font-family: "Cascadia Mono", Consolas, monospace;
   font-size: 12px;
+  border: 1px solid var(--app-border);
 }
 
 .empty {

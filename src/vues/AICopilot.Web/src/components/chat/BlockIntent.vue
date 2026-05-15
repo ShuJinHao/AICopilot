@@ -59,19 +59,19 @@ const getIntentColor = (confidence: number) => {
 </template>
 
 <style scoped>
-.block-intent { background: #fff; border-radius: 8px; border: 1px solid #ebeef5; overflow: hidden; }
-.intent-header { display: flex; align-items: center; padding-left: 10px; color: #606266; width: 100%; }
+.block-intent { background: var(--app-surface); border-radius: var(--radius-md); border: 1px solid var(--app-border); overflow: hidden; }
+.intent-header { display: flex; align-items: center; padding-left: 10px; color: var(--app-text-muted); width: 100%; }
 .intent-tags { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; margin-left: 10px; }
 .label { font-size: 13px; font-weight: 500; margin-right: 8px; white-space: nowrap; }
-.intent-body { padding: 10px 15px; background-color: #f9fafe; font-size: 13px; color: #555; }
-.intent-divider { margin: 8px 0; border-top: 1px dashed #dcdfe6; }
+.intent-body { padding: 10px 15px; background-color: var(--app-surface-muted); font-size: 13px; color: var(--app-text); }
+.intent-divider { margin: 8px 0; border-top: 1px dashed var(--app-border); }
 .info-row { margin-bottom: 4px; display: flex; }
-.info-row .label { color: #888; width: 60px; flex-shrink: 0; }
+.info-row .label { color: var(--app-text-muted); width: 60px; flex-shrink: 0; }
 
 @keyframes rotating { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
 /* 覆盖 Element Plus */
-:deep(.el-collapse-item__header) { height: auto; min-height: 40px; border-bottom: 1px solid #ebeef5; }
-:deep(.el-collapse-item__content) { padding-bottom: 0; }
+:deep(.el-collapse-item__header) { height: auto; min-height: 40px; border-bottom: 1px solid var(--app-border); background: var(--app-surface); color: var(--app-text); }
+:deep(.el-collapse-item__content) { padding-bottom: 0; background: var(--app-surface); }
 :deep(.el-collapse) { border: none; }
 </style>

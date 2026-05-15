@@ -146,6 +146,30 @@ async function request<T>(endpoint: string, init: RequestInit = {}, query?: Quer
   return JSON.parse(text) as T
 }
 
+async function download(endpoint: string, query?: QueryParams): Promise<Blob> {
+  const headers = new Headers()
+  const token = getAccessToken()
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+
+  const response = await fetch(buildUrl(endpoint, query), {
+    method: 'GET',
+    headers
+  })
+
+  if (!response.ok) {
+    const details = await parseError(response)
+    if (response.status === 401 && token) {
+      await notifyUnauthorized(getProblemDetails(details))
+    }
+
+    throw new ApiError(`API Error: ${response.status}`, response.status, details)
+  }
+
+  return await response.blob()
+}
+
 export const apiClient = {
   request,
   get<T>(endpoint: string, query?: QueryParams) {
@@ -184,5 +208,6 @@ export const apiClient = {
         body: body === undefined ? undefined : JSON.stringify(body)
       }
     )
-  }
+  },
+  download
 }

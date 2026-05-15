@@ -1,9 +1,13 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { useConfigStore } from '@/stores/configStore'
 
 const store = useConfigStore()
+const chatModelOptions = computed(() =>
+  store.languageModels.filter((model) => model.isEnabled && model.usages.includes('Chat'))
+)
 
 async function confirmAction(title: string, message: string, action: () => Promise<void>) {
   await ElMessageBox.confirm(message, title, { type: 'warning', confirmButtonText: '确认', cancelButtonText: '取消' })
@@ -55,7 +59,7 @@ async function confirmAction(title: string, message: string, action: () => Promi
       </el-form-item>
       <el-form-item label="模型">
         <el-select v-model="store.currentConversationTemplate.modelId" filterable>
-          <el-option v-for="model in store.languageModels" :key="model.id" :label="model.name" :value="model.id" />
+          <el-option v-for="model in chatModelOptions" :key="model.id" :label="model.name" :value="model.id" />
         </el-select>
       </el-form-item>
       <el-form-item label="启用"><el-switch v-model="store.currentConversationTemplate.isEnabled" /></el-form-item>

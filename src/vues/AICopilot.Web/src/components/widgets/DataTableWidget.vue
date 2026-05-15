@@ -72,6 +72,22 @@ function formatCell(value: unknown) {
 
 .data-table {
   width: 100%;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--app-border);
+}
+
+:deep(.el-table__row) {
+  height: 48px;
+  transition: background-color 0.2s ease;
+}
+
+:deep(.el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell) {
+  background: var(--app-surface-muted);
+}
+
+:deep(.el-table__body tr:hover > td.el-table__cell) {
+  background-color: var(--app-surface-raised);
 }
 
 .empty-widget {
@@ -79,7 +95,7 @@ function formatCell(value: unknown) {
   height: 140px;
   place-items: center;
   border: 1px dashed var(--app-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   color: var(--app-text-muted);
 }
 </style>

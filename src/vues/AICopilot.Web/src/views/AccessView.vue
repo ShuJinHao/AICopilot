@@ -307,9 +307,10 @@ function cloudIdentityLabel(row: { metadata?: Record<string, string> }) {
   display: grid;
   gap: 8px;
   border: 1px solid var(--app-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 12px;
   background: var(--app-surface-muted);
+  box-shadow: var(--shadow-sm);
 }
 
 .permission-groups h3,
@@ -317,6 +318,7 @@ function cloudIdentityLabel(row: { metadata?: Record<string, string> }) {
   margin: 0;
   font-size: 14px;
   font-weight: 750;
+  color: var(--app-text);
 }
 
 .permission-groups div {

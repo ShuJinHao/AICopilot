@@ -166,10 +166,10 @@ onMounted(() => {
   width: min(980px, calc(100vw - 48px));
   grid-template-columns: minmax(0, 1fr) 420px;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: var(--app-shadow);
+  border: 1px solid var(--app-border);
+  border-radius: var(--radius-xl);
+  background: var(--app-surface);
+  box-shadow: var(--shadow-xl);
 }
 
 .product-copy {
@@ -196,7 +196,7 @@ onMounted(() => {
   width: 40px;
   height: 40px;
   place-items: center;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--app-primary);
 }
 
@@ -225,7 +225,7 @@ onMounted(() => {
 
 .capability-list span {
   border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 6px 10px;
   color: #e2e8f0;
   font-size: 12px;
@@ -255,7 +255,7 @@ onMounted(() => {
   display: grid;
   gap: 12px;
   border: 1px solid var(--app-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 14px;
   background: var(--app-surface-muted);
 }

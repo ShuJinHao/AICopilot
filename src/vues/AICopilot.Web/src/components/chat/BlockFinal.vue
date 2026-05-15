@@ -60,7 +60,7 @@ async function onReject(payload: { callId: string }, chunk: ApprovalChunk) {
 <style scoped>
 .message-bubble {
   padding: 10px 14px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   font-size: 14px;
   line-height: 1.6;
   position: relative;
@@ -68,21 +68,28 @@ async function onReject(payload: { callId: string }, chunk: ApprovalChunk) {
 }
 
 .bubble-user {
-  background-color: #95ec69;
-  color: #000;
+  background-color: rgba(15, 118, 110, 0.08);
+  border: 1px solid rgba(15, 118, 110, 0.2);
+  color: var(--app-text);
+}
+
+html.dark .bubble-user {
+  background-color: rgba(20, 184, 166, 0.1);
+  border-color: rgba(20, 184, 166, 0.25);
 }
 
 .bubble-ai {
-  background-color: #fff;
-  border: 1px solid #e4e7ed;
-  color: #333;
+  background-color: var(--app-surface);
+  border: 1px solid var(--app-border);
+  color: var(--app-text);
+  box-shadow: var(--shadow-sm);
 }
 
 .cursor-blink {
   display: inline-block;
   width: 2px;
   height: 14px;
-  background: #333;
+  background: var(--app-text);
   animation: blink 1s infinite;
   vertical-align: middle;
   margin-left: 2px;

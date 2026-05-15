@@ -34,17 +34,23 @@ const option = computed<echarts.EChartsOption>(() => {
   const yFields = encoding.value?.y?.length ? encoding.value.y : inferNumberFields()
   const chartType = category.value === 'line' ? 'line' : category.value === 'pie' ? 'pie' : 'bar'
 
+  const baseOption: echarts.EChartsOption = {
+    color: ['#0f766e', '#3b82f6', '#f59e0b', '#10b981', '#8b5cf6', '#ec4899', '#6366f1'],
+    textStyle: { fontFamily: 'inherit' }
+  }
+
   if (rows.value.length === 0 || !xField || yFields.length === 0) {
-    return {}
+    return baseOption
   }
 
   if (chartType === 'pie') {
     const yField = yFields[0] ?? ''
     if (!yField) {
-      return {}
+      return baseOption
     }
 
     return {
+      ...baseOption,
       tooltip: { trigger: 'item', confine: true },
       legend: { type: 'scroll', bottom: 0 },
       series: [
@@ -52,6 +58,11 @@ const option = computed<echarts.EChartsOption>(() => {
           type: 'pie',
           radius: ['42%', '68%'],
           avoidLabelOverlap: true,
+          itemStyle: {
+            borderRadius: 4,
+            borderColor: 'transparent',
+            borderWidth: 2
+          },
           data: rows.value.map((row) => ({
             name: String(row[xField] ?? '-'),
             value: Number(row[yField] ?? 0)
@@ -62,6 +73,7 @@ const option = computed<echarts.EChartsOption>(() => {
   }
 
   return {
+    ...baseOption,
     tooltip: { trigger: 'axis', confine: true },
     legend: { type: 'scroll', bottom: 0 },
     grid: { left: 24, right: 20, top: 24, bottom: 52, containLabel: true },
@@ -71,6 +83,8 @@ const option = computed<echarts.EChartsOption>(() => {
       type: chartType,
       name: field,
       smooth: chartType === 'line',
+      barMaxWidth: 48,
+      itemStyle: chartType === 'bar' ? { borderRadius: [4, 4, 0, 0] } : undefined,
       data: rows.value.map((row) => Number(row[field] ?? 0))
     }))
   }
@@ -148,7 +162,7 @@ watch(option, () => renderChart(), { deep: true })
   height: 160px;
   place-items: center;
   border: 1px dashed var(--app-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   color: var(--app-text-muted);
 }
 </style>

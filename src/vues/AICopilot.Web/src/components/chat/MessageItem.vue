@@ -15,6 +15,12 @@ import type {
   WidgetChunk
 } from '@/types/models'
 
+const userLabel = '\u4f60'
+const unknownModelLabel = '\u672a\u77e5'
+const responseModelLabel = '\u56de\u7b54\u6a21\u578b\uff1a'
+const routingModelLabel = '\u8def\u7531\u6a21\u578b\uff1a'
+const intentSeparator = '\u00b7'
+
 const props = defineProps<{
   message: ChatMessage
 }>()
@@ -23,6 +29,29 @@ const store = useChatStore()
 const isUser = computed(() => props.message.role === MessageRole.User)
 const chunks = computed(() => props.message.chunks)
 const intentChunks = computed(() => chunks.value.filter((chunk) => chunk.type === ChunkType.Intent) as IntentChunk[])
+const modelBadges = computed(() => {
+  if (isUser.value) {
+    return []
+  }
+
+  const badges: Array<{ key: string; type: 'success' | 'info'; text: string }> = [
+    {
+      key: 'final-model',
+      type: 'success' as const,
+      text: `${responseModelLabel}${props.message.finalModelName?.trim() || unknownModelLabel}`
+    }
+  ]
+
+  if (props.message.routingModelName?.trim()) {
+    badges.push({
+      key: 'routing-model',
+      type: 'info' as const,
+      text: `${routingModelLabel}${props.message.routingModelName.trim()}`
+    })
+  }
+
+  return badges
+})
 
 function asFunctionCall(chunk: ChatChunk) {
   return chunk as FunctionCallChunk
@@ -56,9 +85,21 @@ async function reject(payload: { callId: string }, chunk: ApprovalChunk) {
 
     <div class="message-body">
       <div class="message-meta">
-        <strong>{{ isUser ? '你' : 'AICopilot' }}</strong>
+        <strong>{{ isUser ? userLabel : 'AICopilot' }}</strong>
         <span>{{ new Date(message.timestamp).toLocaleTimeString('zh-CN', { hour12: false }) }}</span>
       </div>
+
+      <section v-if="modelBadges.length > 0" class="model-strip">
+        <el-tag
+          v-for="badge in modelBadges"
+          :key="badge.key"
+          size="small"
+          :type="badge.type"
+          effect="light"
+        >
+          {{ badge.text }}
+        </el-tag>
+      </section>
 
       <section v-if="intentChunks.length > 0" class="intent-strip">
         <el-tag
@@ -67,7 +108,7 @@ async function reject(payload: { callId: string }, chunk: ApprovalChunk) {
           size="small"
           type="info"
         >
-          {{ intent.intent }} · {{ Math.round(intent.confidence * 100) }}%
+          {{ intent.intent }} {{ intentSeparator }} {{ Math.round(intent.confidence * 100) }}%
         </el-tag>
       </section>
 
@@ -119,15 +160,22 @@ async function reject(payload: { callId: string }, chunk: ApprovalChunk) {
 .message.user .avatar {
   grid-column: 2;
   grid-row: 1;
-  background: #edf2f7;
+  background: var(--app-surface-muted);
   color: var(--app-text);
+  border: 1px solid var(--app-border);
 }
 
 .message.user .message-body {
   grid-column: 1;
   grid-row: 1;
   justify-self: end;
-  background: #e7f5f2;
+  background: rgba(15, 118, 110, 0.06);
+  border-color: rgba(15, 118, 110, 0.15);
+}
+
+html.dark .message.user .message-body {
+  background: rgba(20, 184, 166, 0.08);
+  border-color: rgba(20, 184, 166, 0.2);
 }
 
 .avatar {
@@ -135,9 +183,10 @@ async function reject(payload: { callId: string }, chunk: ApprovalChunk) {
   width: 34px;
   height: 34px;
   place-items: center;
-  border-radius: 8px;
-  background: #17202a;
+  border-radius: var(--radius-md);
+  background: var(--app-primary);
   color: #ffffff;
+  box-shadow: var(--shadow-sm);
 }
 
 .message-body {
@@ -146,9 +195,10 @@ async function reject(payload: { callId: string }, chunk: ApprovalChunk) {
   min-width: 0;
   max-width: min(100%, 900px);
   border: 1px solid var(--app-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 12px;
   background: var(--app-surface);
+  box-shadow: var(--shadow-sm);
 }
 
 .message-meta {
@@ -165,6 +215,7 @@ async function reject(payload: { callId: string }, chunk: ApprovalChunk) {
   font-size: 13px;
 }
 
+.model-strip,
 .intent-strip {
   display: flex;
   flex-wrap: wrap;

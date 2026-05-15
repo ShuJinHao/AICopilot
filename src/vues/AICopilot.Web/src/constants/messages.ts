@@ -18,6 +18,14 @@ export const CONFIG_STORE_MESSAGES = {
     deleteFailed: '删除模型失败，请稍后重试。',
     deleteForbidden: '当前账号没有删除模型的权限。'
   },
+  routingModel: {
+    loadFailed: '加载路由模型详情失败，请稍后重试。',
+    loadForbidden: '当前账号没有查看路由模型详情的权限。',
+    saveFailed: '保存路由模型失败，请稍后重试。',
+    saveForbidden: '当前账号没有管理路由模型的权限。',
+    deleteFailed: '删除路由模型失败，请稍后重试。',
+    deleteForbidden: '当前账号没有删除路由模型的权限。'
+  },
   conversationTemplate: {
     loadFailed: '加载模板详情失败，请稍后重试。',
     loadForbidden: '当前账号没有查看模板详情的权限。',
