@@ -72,6 +72,141 @@ const session = {
   onsiteConfirmationExpiresAt: new Date(Date.now() + 30 * 60_000).toISOString()
 }
 
+const agentTask = {
+  id: 'task-1',
+  taskCode: 'AGT-0001',
+  sessionId: session.id,
+  title: 'LINE-A 产物报告',
+  goal: '生成只读产物报告',
+  taskType: 'ReportGeneration',
+  status: 'WaitingApproval',
+  riskLevel: 'Medium',
+  modelId: 'lm1',
+  workspaceId: 'workspace-1',
+  workspaceCode: 'WS-SMOKE-001',
+  planJson: '{}',
+  finalSummary: null,
+  createdAt: now,
+  updatedAt: now,
+  completedAt: null,
+  pendingApprovalCount: 1,
+  lastFailureReason: null,
+  canRetry: true,
+  steps: [
+    {
+      id: 'step-1',
+      stepIndex: 1,
+      title: '读取上传文件',
+      description: '读取会话临时输入',
+      stepType: 'Tool',
+      status: 'Completed',
+      toolCode: 'read_uploaded_file',
+      requiresApproval: false,
+      errorMessage: null
+    },
+    {
+      id: 'step-2',
+      stepIndex: 2,
+      title: '生成 PDF 草稿',
+      description: '写入 draft/ 后等待审批',
+      stepType: 'Tool',
+      status: 'WaitingApproval',
+      toolCode: 'generate_pdf',
+      requiresApproval: true,
+      errorMessage: null
+    }
+  ]
+}
+
+const agentApproval = {
+  id: 'approval-agt-1',
+  taskId: agentTask.id,
+  workspaceCode: agentTask.workspaceCode,
+  type: 'Tool',
+  targetId: 'step-2',
+  targetName: 'generate_pdf',
+  riskLevel: 'High',
+  status: 'Pending',
+  reason: '生成高风险正式格式草稿',
+  requestedAt: now,
+  decidedAt: null,
+  decidedBy: null
+}
+
+const artifactWorkspace = {
+  id: 'workspace-1',
+  workspaceCode: agentTask.workspaceCode,
+  taskId: agentTask.id,
+  status: 'ReadyForFinalize',
+  files: [
+    { name: 'chart-data.json', relativePath: 'charts/chart-data.json', isDirectory: false, fileSize: 128, updatedAt: now },
+    { name: 'report.md', relativePath: 'draft/report.md', isDirectory: false, fileSize: 512, updatedAt: now }
+  ],
+  artifacts: [
+    {
+      id: 'artifact-chart',
+      name: 'chart-data.json',
+      type: 'Json',
+      status: 'Draft',
+      relativePath: 'charts/chart-data.json',
+      fileSize: 128,
+      mimeType: 'application/json',
+      version: 1,
+      updatedAt: now,
+      previewKind: 'chart',
+      downloadUrl: '/api/aigateway/artifact/artifact-chart/download',
+      generatedByStepOrder: 1,
+      requiresApproval: false,
+      approvalStatus: 'Approved',
+      finalizedAt: null
+    },
+    {
+      id: 'artifact-md',
+      name: 'report.md',
+      type: 'Markdown',
+      status: 'Draft',
+      relativePath: 'draft/report.md',
+      fileSize: 512,
+      mimeType: 'text/markdown',
+      version: 1,
+      updatedAt: now,
+      previewKind: 'markdown',
+      downloadUrl: '/api/aigateway/artifact/artifact-md/download',
+      generatedByStepOrder: 1,
+      requiresApproval: false,
+      approvalStatus: 'Approved',
+      finalizedAt: null
+    }
+  ]
+}
+
+const agentAuditSummary = [
+  {
+    id: 'audit-1',
+    taskId: agentTask.id,
+    workspaceCode: agentTask.workspaceCode,
+    actionCode: 'Agent.Plan',
+    targetType: 'AgentTask',
+    targetName: agentTask.title,
+    result: 'Succeeded',
+    summary: '生成 Agent 计划',
+    createdAt: now,
+    metadata: { taskId: agentTask.id, workspaceCode: agentTask.workspaceCode }
+  },
+  {
+    id: 'audit-2',
+    taskId: agentTask.id,
+    workspaceCode: agentTask.workspaceCode,
+    actionCode: 'Agent.ToolExecution',
+    targetType: 'AgentStep',
+    targetName: 'read_uploaded_file',
+    result: 'Succeeded',
+    summary: '低风险工具执行完成',
+    createdAt: now,
+    metadata: { taskId: agentTask.id, workspaceCode: agentTask.workspaceCode, toolName: 'read_uploaded_file' }
+  }
+]
+
 const samples = {
   model: {
     id: 'lm1',
@@ -366,6 +501,40 @@ const api = createServer((request, response) => {
       }
     ],
     '/api/aigateway/approval/pending': [],
+    '/api/aigateway/runtime-settings': {
+      routingHistoryCount: 2,
+      answerHistoryCount: 2,
+      ragRewriteHistoryCount: 2,
+      agentPlanningHistoryCount: 4,
+      summaryThresholdMessages: 12,
+      contextTokenLimit: 4096
+    },
+    '/api/aigateway/workspace-settings': {
+      rootPath: 'C:/ProgramData/AICopilot/artifacts',
+      folders: ['source', 'data', 'charts', 'draft', 'final', 'logs', 'audit'],
+      allowedArtifactTypes: ['Markdown', 'HTML', 'JSON', 'CSV', 'PDF', 'PPTX', 'XLSX'],
+      allowsUserDefinedPath: false
+    },
+    '/api/aigateway/agent/task/by-session': [agentTask],
+    '/api/aigateway/agent/task/task-1/approvals': [agentApproval],
+    '/api/aigateway/agent/approval/pending': [agentApproval],
+    '/api/aigateway/agent/task/task-1/audit-summary': agentAuditSummary,
+    '/api/aigateway/workspace/WS-SMOKE-001': artifactWorkspace,
+    '/api/aigateway/artifact/artifact-chart/download': {
+      labels: ['08:00', '09:00', '10:00'],
+      values: [120, 132, 118],
+      source: 'smoke'
+    },
+    '/api/aigateway/language-model/chat-options': [
+      {
+        id: 'lm1',
+        provider: 'OpenAI',
+        protocolType: 'OpenAICompatible',
+        name: 'gpt-5.5',
+        contextWindowTokens: 128000,
+        maxOutputTokens: 4096
+      }
+    ],
     '/api/aigateway/language-model/list': [samples.model],
     '/api/aigateway/language-model': samples.model,
     '/api/aigateway/conversation-template/list': [samples.template],

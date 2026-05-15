@@ -2,6 +2,7 @@ using AICopilot.AiGatewayService.Safety;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.AiGateway.Ids;
+using AICopilot.Services.Contracts;
 
 namespace AICopilot.BackendTests;
 
@@ -50,7 +51,21 @@ public sealed class ChatTokenBudgetPolicyTests
         decision.ReservedOutputTokens.Should().Be(1024);
     }
 
-    private static LanguageModel CreateModel(int maxTokens)
+    [Fact]
+    public void Evaluate_ShouldTreatOneMillionAsContextWindow_NotOutputLimit()
+    {
+        var policy = new ChatTokenBudgetPolicy(new StubTextTokenEstimator());
+        var model = CreateModel(maxTokens: 1_000_000, maxOutputTokens: 4096);
+        var template = CreateTemplate(systemPrompt: "system prompt", maxOutputTokens: null);
+
+        var decision = policy.Evaluate(model, template, new string('u', 200_000));
+
+        decision.IsAllowed.Should().BeTrue();
+        decision.TotalTokenBudget.Should().Be(1_000_000);
+        decision.ReservedOutputTokens.Should().Be(4096);
+    }
+
+    private static LanguageModel CreateModel(int maxTokens, int maxOutputTokens = 1024)
     {
         return new LanguageModel(
             "OpenAI",
@@ -60,6 +75,7 @@ public sealed class ChatTokenBudgetPolicyTests
             new ModelParameters
             {
                 MaxTokens = maxTokens,
+                MaxOutputTokens = maxOutputTokens,
                 Temperature = 0.2f
             });
     }

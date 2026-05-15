@@ -89,6 +89,17 @@ public sealed class FreshDatabaseSeedTests
             "AiGateway.CreateSession",
             "AiGateway.GetSession",
             "AiGateway.GetListSessions",
+            "AiGateway.RenameSession",
+            "AiGateway.GetAgentTask",
+            "AiGateway.PlanAgentTask",
+            "AiGateway.ApproveAgentTaskPlan",
+            "AiGateway.RunAgentTask",
+            "AiGateway.CancelAgentTask",
+            "AiGateway.Upload",
+            "AiGateway.GetUpload",
+            "AiGateway.GetWorkspace",
+            "AiGateway.DownloadArtifact",
+            "AiGateway.FinalizeWorkspace",
             "AiGateway.Chat");
 
         await using var mcpDbContext = await CreateMcpDbContextAsync(fixture);

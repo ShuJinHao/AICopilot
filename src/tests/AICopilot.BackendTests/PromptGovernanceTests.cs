@@ -38,6 +38,55 @@ public sealed class PromptGovernanceTests
             .WithMessage("*unsafe execution or approval-bypass instruction*");
     }
 
+    [Theory]
+    [InlineData("你是朝小夕。")]
+    [InlineData("你是朝夕。")]
+    [InlineData("你是小夕。")]
+    public void ConversationTemplate_ShouldRejectLegacyAssistantIdentity(string systemPrompt)
+    {
+        var action = () => new ConversationTemplate(
+            "LegacyIdentityTemplate",
+            "旧身份模板",
+            systemPrompt,
+            LanguageModelId.New(),
+            new TemplateSpecification());
+
+        action.Should().Throw<ArgumentException>()
+            .WithMessage("*forbidden legacy assistant identity*");
+    }
+
+    [Fact]
+    public void BuiltInConversationTemplates_ShouldUseAAssistantIdentity_AndAvoidLegacyNames()
+    {
+        BuiltInConversationTemplates.All
+            .Should()
+            .Contain(definition => definition.Code == "identity_base");
+
+        foreach (var definition in BuiltInConversationTemplates.All)
+        {
+            definition.SystemPrompt.Should().Contain("A助理");
+            definition.SystemPrompt.Should().NotContain("朝小夕");
+            definition.SystemPrompt.Should().NotContain("朝夕");
+            definition.SystemPrompt.Should().NotContain("小夕");
+        }
+    }
+
+    [Fact]
+    public void BuiltInConversationTemplates_ShouldCreateGovernedTemplates()
+    {
+        var modelId = LanguageModelId.New();
+        var definition = BuiltInConversationTemplates.Find("agent_planner");
+
+        definition.Should().NotBeNull();
+        var template = BuiltInConversationTemplates.CreateTemplate(definition!, modelId);
+
+        template.Code.Should().Be("agent_planner");
+        template.Scope.Should().Be(ConversationTemplateScope.AgentPlanner);
+        template.BuiltInVersion.Should().Be(BuiltInConversationTemplates.CurrentVersion);
+        template.IsBuiltIn.Should().BeTrue();
+        template.ModelId.Should().Be(modelId);
+    }
+
     [Fact]
     public void ConversationTemplate_UpdateInfo_ShouldRejectDangerousPromptRules()
     {
