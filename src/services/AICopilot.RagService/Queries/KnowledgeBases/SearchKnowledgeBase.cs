@@ -53,13 +53,18 @@ public class SearchKnowledgeBaseQueryHandler(
         var results = new List<SearchKnowledgeBaseResult>(searchResults.Count);
         foreach (var record in searchResults)
         {
+            var isLowConfidence = record.Score < 0.65;
             results.Add(new SearchKnowledgeBaseResult
             {
                 Text = record.Text,
                 Score = record.Score,
                 DocumentId = record.DocumentId,
                 DocumentName = record.DocumentName,
-                ChunkIndex = record.ChunkIndex
+                ChunkIndex = record.ChunkIndex,
+                IsLowConfidence = isLowConfidence,
+                LowConfidenceReason = isLowConfidence
+                    ? "命中分数低于 0.65，请结合更多来源或人工确认。"
+                    : null
             });
         }
 

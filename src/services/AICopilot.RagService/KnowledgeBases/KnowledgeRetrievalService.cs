@@ -27,7 +27,10 @@ public sealed class KnowledgeRetrievalService(IMediator mediator) : IKnowledgeRe
                 item.Text,
                 item.Score,
                 item.DocumentId,
-                item.DocumentName ?? string.Empty))
+                item.DocumentName ?? string.Empty,
+                item.ChunkIndex,
+                item.IsLowConfidence,
+                item.LowConfidenceReason))
             .ToArray();
     }
 }
