@@ -16,8 +16,13 @@ public record UpdateLanguageModelCommand(
     string BaseUrl,
     string? ApiKey,
     bool ClearApiKey,
-    int MaxTokens,
-    float Temperature) : ICommand<Result>;
+    int? MaxTokens = null,
+    int? ContextWindowTokens = null,
+    int? MaxOutputTokens = null,
+    string? ProtocolType = null,
+    bool? IsEnabled = null,
+    IReadOnlyList<string>? Usages = null,
+    float? Temperature = null) : ICommand<Result>;
 
 public class UpdateLanguageModelCommandHandler(
     IRepository<LanguageModel> repository,
@@ -49,14 +54,43 @@ public class UpdateLanguageModelCommandHandler(
             changedFields.Add("baseUrl");
         }
 
-        if (entity.Parameters.MaxTokens != request.MaxTokens)
+        var contextWindowTokens = request.ContextWindowTokens ?? request.MaxTokens ?? entity.Parameters.MaxTokens;
+        var maxOutputTokens = request.MaxOutputTokens ?? entity.Parameters.MaxOutputTokens;
+        var temperature = request.Temperature ?? entity.Parameters.Temperature;
+        var usage = request.Usages is null ? entity.Usage : LanguageModelCommandMapper.ParseUsages(request.Usages);
+        var protocolType = string.IsNullOrWhiteSpace(request.ProtocolType)
+            ? entity.ProtocolType
+            : request.ProtocolType;
+        var isEnabled = request.IsEnabled ?? entity.IsEnabled;
+
+        if (entity.Parameters.MaxTokens != contextWindowTokens)
         {
-            changedFields.Add("maxTokens");
+            changedFields.Add("contextWindowTokens");
         }
 
-        if (Math.Abs(entity.Parameters.Temperature - request.Temperature) > 0.0001f)
+        if (entity.Parameters.MaxOutputTokens != maxOutputTokens)
+        {
+            changedFields.Add("maxOutputTokens");
+        }
+
+        if (Math.Abs(entity.Parameters.Temperature - temperature) > 0.0001f)
         {
             changedFields.Add("temperature");
+        }
+
+        if (!string.Equals(entity.ProtocolType, protocolType, StringComparison.Ordinal))
+        {
+            changedFields.Add("protocolType");
+        }
+
+        if (entity.Usage != usage)
+        {
+            changedFields.Add("usages");
+        }
+
+        if (entity.IsEnabled != isEnabled)
+        {
+            changedFields.Add("isEnabled");
         }
 
         var normalizedApiKey = string.IsNullOrWhiteSpace(request.ApiKey) ? null : request.ApiKey.Trim();
@@ -66,7 +100,13 @@ public class UpdateLanguageModelCommandHandler(
             changedFields.Add("apiKey");
         }
 
-        entity.UpdateInfo(request.Provider, request.Name, request.BaseUrl);
+        var connectivityConfigChanged = changedFields.Contains("provider")
+                                        || changedFields.Contains("name")
+                                        || changedFields.Contains("baseUrl")
+                                        || changedFields.Contains("protocolType")
+                                        || apiKeyChanged;
+
+        entity.UpdateInfo(request.Provider, request.Name, request.BaseUrl, protocolType);
         if (apiKeyChanged)
         {
             entity.UpdateApiKey(request.ClearApiKey ? null : normalizedApiKey);
@@ -74,9 +114,15 @@ public class UpdateLanguageModelCommandHandler(
 
         entity.UpdateParameters(new ModelParameters
         {
-            MaxTokens = request.MaxTokens,
-            Temperature = request.Temperature
+            MaxTokens = contextWindowTokens,
+            MaxOutputTokens = maxOutputTokens,
+            Temperature = temperature
         });
+        entity.UpdateRuntimeFlags(usage, isEnabled);
+        if (connectivityConfigChanged)
+        {
+            entity.ResetConnectivityStatus();
+        }
 
         repository.Update(entity);
 

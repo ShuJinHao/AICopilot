@@ -11,7 +11,8 @@ public sealed class OpenAiChatClientProvider(IHttpClientFactory httpClientFactor
 {
     public bool CanHandle(string providerName)
     {
-        return string.Equals(providerName, "OpenAI", StringComparison.OrdinalIgnoreCase);
+        return string.Equals(providerName, LanguageModelProtocolTypes.OpenAICompatible, StringComparison.OrdinalIgnoreCase)
+               || string.Equals(providerName, "OpenAI", StringComparison.OrdinalIgnoreCase);
     }
 
     public IChatClient CreateClient(LanguageModel model)

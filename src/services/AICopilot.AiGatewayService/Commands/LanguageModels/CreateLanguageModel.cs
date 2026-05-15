@@ -15,7 +15,12 @@ public record CreateLanguageModelCommand(
     string Name,
     string BaseUrl,
     string? ApiKey,
-    int MaxTokens,
+    int? MaxTokens = null,
+    int? ContextWindowTokens = null,
+    int MaxOutputTokens = 1024,
+    string ProtocolType = LanguageModelProtocolTypes.OpenAICompatible,
+    bool IsEnabled = true,
+    IReadOnlyList<string>? Usages = null,
     float Temperature = 0.7f) : ICommand<Result<CreatedLanguageModelDto>>;
 
 public class CreateLanguageModelCommandHandler(
@@ -27,6 +32,10 @@ public class CreateLanguageModelCommandHandler(
         CreateLanguageModelCommand request,
         CancellationToken cancellationToken)
     {
+        var contextWindowTokens = LanguageModelCommandMapper.ResolveContextWindowTokens(
+            request.ContextWindowTokens,
+            request.MaxTokens);
+
         var result = new LanguageModel(
             request.Provider,
             request.Name,
@@ -34,9 +43,13 @@ public class CreateLanguageModelCommandHandler(
             string.IsNullOrWhiteSpace(request.ApiKey) ? null : request.ApiKey.Trim(),
             new ModelParameters
             {
-                MaxTokens = request.MaxTokens,
+                MaxTokens = contextWindowTokens,
+                MaxOutputTokens = request.MaxOutputTokens,
                 Temperature = request.Temperature
-            });
+            },
+            request.ProtocolType,
+            LanguageModelCommandMapper.ParseUsages(request.Usages),
+            request.IsEnabled);
 
         repo.Add(result);
 
@@ -49,7 +62,7 @@ public class CreateLanguageModelCommandHandler(
                 result.Name,
                 AuditResults.Succeeded,
                 $"创建模型配置：{result.Name}",
-                ["provider", "name", "baseUrl", "apiKey", "maxTokens", "temperature"]),
+                ["provider", "name", "baseUrl", "apiKey", "protocolType", "usages", "isEnabled", "contextWindowTokens", "maxOutputTokens", "temperature"]),
             cancellationToken);
         await repo.SaveChangesAsync(cancellationToken);
 

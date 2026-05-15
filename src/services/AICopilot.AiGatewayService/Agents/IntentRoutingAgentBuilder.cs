@@ -1,6 +1,7 @@
 using System.Text;
 using AICopilot.AgentPlugin;
 using AICopilot.AiGatewayService.BusinessSemantics;
+using AICopilot.AiGatewayService.RoutingModels;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
 
@@ -15,19 +16,25 @@ public class IntentRoutingAgentBuilder
     private readonly IBusinessDatabaseReadService _businessDatabaseReadService;
     private readonly IntentRoutingPromptComposer _promptComposer;
     private readonly IAgentPluginCatalog _pluginCatalog;
+    private readonly IRoutingModelResolver _routingModelResolver;
+    private readonly IChatExecutionMetadataAccessor _executionMetadataAccessor;
 
     public IntentRoutingAgentBuilder(
         ChatAgentFactory agentFactory,
         IAgentPluginCatalog pluginCatalog,
         IKnowledgeBaseReadService knowledgeBaseReadService,
         IBusinessDatabaseReadService businessDatabaseReadService,
-        IntentRoutingPromptComposer promptComposer)
+        IntentRoutingPromptComposer promptComposer,
+        IRoutingModelResolver routingModelResolver,
+        IChatExecutionMetadataAccessor executionMetadataAccessor)
     {
         _agentFactory = agentFactory;
         _pluginCatalog = pluginCatalog;
         _knowledgeBaseReadService = knowledgeBaseReadService;
         _businessDatabaseReadService = businessDatabaseReadService;
         _promptComposer = promptComposer;
+        _routingModelResolver = routingModelResolver;
+        _executionMetadataAccessor = executionMetadataAccessor;
     }
 
     private string GetToolIntentList()
@@ -88,13 +95,20 @@ public class IntentRoutingAgentBuilder
         intents.Append(GetBusinessPolicyIntentList());
         intents.Append(await GetDataAnalysisIntentListAsync());
 
-        var agent = await _agentFactory.CreateAgentAsync(
-            AgentName,
-            systemPrompt =>
-            {
-                return systemPrompt
-                    .Replace("{{$IntentList}}", intents.ToString());
-            });
+        string ComposeInstructions(string systemPrompt)
+        {
+            return systemPrompt.Replace("{{$IntentList}}", intents.ToString());
+        }
+
+        var activeRoutingModel = await _routingModelResolver.ResolveActiveModelAsync();
+        var agent = activeRoutingModel is null
+            ? await _agentFactory.CreateAgentAsync(AgentName, ComposeInstructions)
+            : await _agentFactory.CreateAgentAsync(AgentName, activeRoutingModel, ComposeInstructions);
+
+        if (activeRoutingModel is not null)
+        {
+            _executionMetadataAccessor.SetRoutingModel(activeRoutingModel);
+        }
 
         return agent;
     }

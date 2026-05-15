@@ -1,8 +1,11 @@
+using System.Text;
 using System.Text.Json;
 using AICopilot.AiGatewayService.Agents;
 using AICopilot.AiGatewayService.Models;
+using AICopilot.AiGatewayService.Runtime;
 using AICopilot.AiGatewayService.Queries.Sessions;
 using AICopilot.AiGatewayService.Safety;
+using AICopilot.Services.Contracts;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using AICopilot.SharedKernel.Ai;
@@ -12,12 +15,15 @@ namespace AICopilot.AiGatewayService.Workflows.Executors;
 public sealed record IntentRoutingStepResult(
     List<IntentResult> Intents,
     ManufacturingSceneType Scene,
-    string? ResponseText);
+    string? ResponseText,
+    ChatExecutionMetadataSnapshot ExecutionMetadata);
 
 public class IntentRoutingExecutor(
     IMediator mediator,
     IntentRoutingAgentBuilder agentBuilder,
     IManufacturingSceneClassifier sceneClassifier,
+    IChatExecutionMetadataAccessor executionMetadataAccessor,
+    IChatRuntimeSettingsProvider runtimeSettingsProvider,
     ILogger<IntentRoutingExecutor> logger)
 {
     public const string ExecutorId = nameof(IntentRoutingExecutor);
@@ -29,29 +35,64 @@ public class IntentRoutingExecutor(
         logger.LogInformation("Starting intent routing for session {SessionId}.", request.SessionId);
 
         var sceneDecision = sceneClassifier.Classify(request.Message);
+        var runtimeSettings = await runtimeSettingsProvider.GetAsync(cancellationToken);
 
-        var result = await mediator.Send(new GetListChatMessagesQuery(request.SessionId, 4), cancellationToken);
+        var result = await mediator.Send(
+            new GetListChatMessagesQuery(request.SessionId, runtimeSettings.RoutingHistoryCount),
+            cancellationToken);
         var history = result.Value!;
         history.Add(new AiChatMessage(AiChatRole.User, request.Message));
 
-        await using var scopedAgent = await agentBuilder.BuildAsync();
-        var response = await scopedAgent.Agent.RunStructuredAsync<List<IntentResult>>(
-            history,
-            null,
-            JsonSerializerOptions.Web,
-            null,
-            cancellationToken);
-
-        logger.LogDebug("Intent routing raw response: {ResponseText}", response.Text);
+        var responseText = await RunRoutingAsPlainJsonTextAsync(history, cancellationToken);
+        logger.LogDebug("Intent routing raw response: {ResponseText}", responseText);
         logger.LogInformation("Manufacturing scene classified as {Scene} for session {SessionId}.", sceneDecision.Scene, request.SessionId);
 
-        var intentResults = response.Result;
-        if (intentResults == null || intentResults.Count == 0)
+        if (!IntentRoutingResultParser.TryParse(responseText, out var intentResults))
         {
-            logger.LogWarning("Intent routing returned no structured result. Falling back to General.Chat.");
-            intentResults = [new IntentResult { Intent = "General.Chat", Confidence = 1.0, Reasoning = "structured result is empty" }];
+            logger.LogWarning("Intent routing returned unparsable JSON. Falling back to General.Chat.");
+            intentResults = CreateFallbackIntents("routing JSON parse failed");
         }
 
-        return new IntentRoutingStepResult(intentResults, sceneDecision.Scene, response.Text);
+        var normalizedResponseText = JsonSerializer.Serialize(intentResults, JsonSerializerOptions.Web);
+        return new IntentRoutingStepResult(
+            intentResults,
+            sceneDecision.Scene,
+            normalizedResponseText,
+            executionMetadataAccessor.Snapshot());
+    }
+
+    private async Task<string?> RunRoutingAsPlainJsonTextAsync(
+        List<AiChatMessage> history,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var scopedAgent = await agentBuilder.BuildAsync();
+            var session = await scopedAgent.Agent.CreateSessionAsync(cancellationToken);
+            var response = await scopedAgent.Agent.RunStructuredAsync<List<IntentResult>>(
+                history,
+                session,
+                JsonSerializerOptions.Web,
+                new RuntimeAgentRunOptions(new AiChatOptions
+                {
+                    MaxOutputTokens = 512,
+                    Temperature = 0
+                }),
+                cancellationToken);
+
+            return response.Result is { Count: > 0 }
+                ? JsonSerializer.Serialize(response.Result, JsonSerializerOptions.Web)
+                : response.Text;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Intent routing model call failed. Falling back to General.Chat.");
+            return JsonSerializer.Serialize(CreateFallbackIntents("routing model call failed"), JsonSerializerOptions.Web);
+        }
+    }
+
+    private static List<IntentResult> CreateFallbackIntents(string reasoning)
+    {
+        return [new IntentResult { Intent = "General.Chat", Confidence = 1.0, Reasoning = reasoning }];
     }
 }

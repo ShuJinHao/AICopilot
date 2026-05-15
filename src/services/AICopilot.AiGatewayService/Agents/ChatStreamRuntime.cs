@@ -182,6 +182,32 @@ public sealed class ChatStreamRuntime(ApprovalRequirementResolver approvalRequir
             }.ToJson());
     }
 
+    public static ChatChunk? CreateMetadataChunk(
+        ChatExecutionMetadataSnapshot snapshot,
+        string source = "Chat")
+    {
+        if (!snapshot.FinalModelId.HasValue
+            && string.IsNullOrWhiteSpace(snapshot.FinalModelName)
+            && !snapshot.RoutingModelId.HasValue
+            && string.IsNullOrWhiteSpace(snapshot.RoutingModelName)
+            && !snapshot.ContextWindowTokens.HasValue
+            && !snapshot.MaxOutputTokens.HasValue)
+        {
+            return null;
+        }
+
+        return new ChatChunk(
+            source,
+            ChunkType.Metadata,
+            new ChatModelMetadataPayload(
+                snapshot.FinalModelId,
+                snapshot.FinalModelName,
+                snapshot.RoutingModelId,
+                snapshot.RoutingModelName,
+                snapshot.ContextWindowTokens,
+                snapshot.MaxOutputTokens).ToJson());
+    }
+
     public static void AppendAssistantErrorSummary(StringBuilder assistantText, ChatChunk errorChunk)
     {
         var payload = JsonSerializer.Deserialize<ChatErrorChunkPayload>(errorChunk.Content, JsonOptions);
