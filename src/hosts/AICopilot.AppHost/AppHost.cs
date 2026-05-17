@@ -93,6 +93,7 @@ var httpapi = builder.AddProject<AICopilot_HttpApi>("aicopilot-httpapi")
     .WithEnvironment("JwtSettings__SecretKey", jwtSecretKey)
     .WithEnvironment("BootstrapAdmin__UserName", bootstrapAdminUserName)
     .WithEnvironment("BootstrapAdmin__Password", bootstrapAdminPassword)
+    .WithEnvironment("ArtifactWorkspace__RootPath", appHostOptions.ArtifactWorkspaceRootPath)
     .WithEnvironment("AiGateway__FinalAgentContextStore__Provider", "Redis")
     .WaitForCompletion(migration);
 
@@ -115,9 +116,12 @@ if (appHostOptions.EnableDataWorker)
     builder.AddProject<AICopilot_DataWorker>("data-worker")
         .WithReference(aiCopilotDatabase)
         .WithReference(rabbitmq)
+        .WithReference(qdrant)
         .WithEnvironment("AICopilotSecurity__ApiKeyEncryptionKey", apiKeyEncryptionKey)
+        .WithEnvironment("ArtifactWorkspace__RootPath", appHostOptions.ArtifactWorkspaceRootPath)
         .WaitFor(postgresdb)
         .WaitFor(rabbitmq)
+        .WaitFor(qdrant)
         .WaitForCompletion(migration);
 }
 
@@ -142,11 +146,18 @@ internal sealed record AppHostOptions(
     int? PgWebHostPort,
     string PostgresVolumeName,
     string QdrantVolumeName,
-    string RedisVolumeName)
+    string RedisVolumeName,
+    string ArtifactWorkspaceRootPath)
 {
     public static AppHostOptions FromConfiguration(IConfiguration configuration)
     {
         var persistentContainers = configuration.GetValue("AppHost:PersistentContainers", true);
+        var artifactWorkspaceRootPath = Path.GetFullPath(
+            configuration["ArtifactWorkspace:RootPath"]
+            ?? Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "AICopilot",
+                "artifact-workspaces"));
 
         return new AppHostOptions(
             configuration.GetValue("AppHost:EnableDockerComposeEnvironment", true),
@@ -159,6 +170,7 @@ internal sealed record AppHostOptions(
             configuration.GetValue<int?>("AppHost:PgWebHostPort") ?? (persistentContainers ? 5050 : null),
             configuration["AppHost:PostgresVolumeName"] ?? "postgres-aicopilot",
             configuration["AppHost:QdrantVolumeName"] ?? "qdrant-datas",
-            configuration["AppHost:RedisVolumeName"] ?? "redis-aicopilot");
+            configuration["AppHost:RedisVolumeName"] ?? "redis-aicopilot",
+            artifactWorkspaceRootPath);
     }
 }

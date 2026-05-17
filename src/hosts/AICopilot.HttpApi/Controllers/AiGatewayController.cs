@@ -10,6 +10,7 @@ using AICopilot.AiGatewayService.Queries.Runtime;
 using AICopilot.AiGatewayService.Queries.Sessions;
 using AICopilot.AiGatewayService.RoutingModels;
 using AICopilot.AiGatewayService.Runtime;
+using AICopilot.AiGatewayService.Tools;
 using AICopilot.AiGatewayService.Uploads;
 using AICopilot.AiGatewayService.Workspaces;
 using AICopilot.HttpApi.Infrastructure;
@@ -187,6 +188,35 @@ public class AiGatewayController(ISender sender) : ApiControllerBase(sender)
         return ReturnResult(await Sender.Send(new GetListApprovalPoliciesQuery()));
     }
 
+    [HttpGet("tools")]
+    public async Task<IActionResult> GetToolRegistrations()
+    {
+        return ReturnResult(await Sender.Send(new GetListToolRegistrationsQuery()));
+    }
+
+    [HttpGet("tools/{toolCode}")]
+    public async Task<IActionResult> GetToolRegistration(string toolCode)
+    {
+        return ReturnResult(await Sender.Send(new GetToolRegistrationQuery(toolCode)));
+    }
+
+    [HttpPatch("tools/{toolCode}")]
+    public async Task<IActionResult> UpdateToolRegistration(string toolCode, UpdateToolRegistrationRequest request)
+    {
+        return ReturnResult(await Sender.Send(new UpdateToolRegistrationCommand(
+            toolCode,
+            request.DisplayName,
+            request.Description,
+            request.InputSchemaJson,
+            request.OutputSchemaJson,
+            request.RiskLevel,
+            request.RequiredPermission,
+            request.RequiresApproval,
+            request.IsEnabled,
+            request.TimeoutSeconds,
+            request.AuditLevel)));
+    }
+
     [HttpPost("session")]
     public async Task<IActionResult> CreateSession(CreateSessionCommand command)
     {
@@ -235,6 +265,12 @@ public class AiGatewayController(ISender sender) : ApiControllerBase(sender)
         return ReturnResult(await Sender.Send(command));
     }
 
+    [HttpPost("agent/task/retry")]
+    public async Task<IActionResult> RetryAgentTask(RetryAgentTaskCommand command)
+    {
+        return ReturnResult(await Sender.Send(command));
+    }
+
     [HttpPost("agent/task/cancel")]
     public async Task<IActionResult> CancelAgentTask(CancelAgentTaskCommand command)
     {
@@ -269,6 +305,88 @@ public class AiGatewayController(ISender sender) : ApiControllerBase(sender)
     public async Task<IActionResult> GetAgentTaskAuditSummary(Guid id)
     {
         return ReturnResult(await Sender.Send(new GetAgentTaskAuditSummaryQuery(id)));
+    }
+
+    [HttpGet("agent/task/{id:guid}/tool-executions")]
+    public async Task<IActionResult> GetAgentTaskToolExecutions(
+        Guid id,
+        [FromQuery] int pageIndex = 1,
+        [FromQuery] int pageSize = 20,
+        [FromQuery] string? status = null,
+        [FromQuery] string? toolCode = null)
+    {
+        return ReturnResult(await Sender.Send(new GetAgentTaskToolExecutionsQuery(
+            id,
+            pageIndex,
+            pageSize,
+            status,
+            toolCode)));
+    }
+
+    [HttpGet("agent/task/{id:guid}/run-attempts")]
+    public async Task<IActionResult> GetAgentTaskRunAttempts(
+        Guid id,
+        [FromQuery] int pageIndex = 1,
+        [FromQuery] int pageSize = 20)
+    {
+        return ReturnResult(await Sender.Send(new GetAgentTaskRunAttemptsQuery(
+            id,
+            pageIndex,
+            pageSize)));
+    }
+
+    [HttpGet("agent/task/{id:guid}/run-queue")]
+    public async Task<IActionResult> GetAgentTaskRunQueue(
+        Guid id,
+        [FromQuery] int pageIndex = 1,
+        [FromQuery] int pageSize = 20)
+    {
+        return ReturnResult(await Sender.Send(new GetAgentTaskRunQueueQuery(
+            id,
+            pageIndex,
+            pageSize)));
+    }
+
+    [HttpGet("agent/run-queue")]
+    public async Task<IActionResult> GetAgentRunQueue(
+        [FromQuery] int pageIndex = 1,
+        [FromQuery] int pageSize = 20,
+        [FromQuery] string? status = null,
+        [FromQuery] string? triggerType = null,
+        [FromQuery] Guid? taskId = null,
+        [FromQuery] Guid? requestedBy = null,
+        [FromQuery] DateTimeOffset? from = null,
+        [FromQuery] DateTimeOffset? to = null)
+    {
+        return ReturnResult(await Sender.Send(new GetAgentRunQueueQuery(
+            pageIndex,
+            pageSize,
+            status,
+            triggerType,
+            taskId,
+            requestedBy,
+            from,
+            to)));
+    }
+
+    [HttpGet("agent/run-queue/summary")]
+    public async Task<IActionResult> GetAgentRunQueueSummary()
+    {
+        return ReturnResult(await Sender.Send(new GetAgentRunQueueSummaryQuery()));
+    }
+
+    [HttpGet("agent/worker/status")]
+    public async Task<IActionResult> GetAgentWorkerStatus()
+    {
+        return ReturnResult(await Sender.Send(new GetAgentWorkerStatusQuery()));
+    }
+
+    [HttpPost("agent/run-queue/{id:guid}/dead-letter")]
+    public async Task<IActionResult> DeadLetterAgentRunQueueItem(
+        Guid id,
+        [FromBody] DeadLetterAgentRunQueueItemRequest? request = null)
+    {
+        return ReturnResult(await Sender.Send(new DeadLetterAgentRunQueueItemCommand(id, request?.Reason)));
     }
 
     [HttpPost("agent/approval/{id:guid}/approve")]
@@ -335,6 +453,12 @@ public class AiGatewayController(ISender sender) : ApiControllerBase(sender)
         return ReturnResult(await Sender.Send(new GetArtifactWorkspaceSettingsQuery()));
     }
 
+    [HttpPost("workspace/{code}/submit-final-review")]
+    public async Task<IActionResult> SubmitFinalReview(string code)
+    {
+        return ReturnResult(await Sender.Send(new SubmitFinalReviewCommand(code)));
+    }
+
     [HttpPost("workspace/{code}/finalize")]
     public async Task<IActionResult> FinalizeWorkspace(string code)
     {
@@ -387,3 +511,17 @@ public class AiGatewayController(ISender sender) : ApiControllerBase(sender)
         return ReturnResult(await Sender.Send(query));
     }
 }
+
+public sealed record UpdateToolRegistrationRequest(
+    string? DisplayName = null,
+    string? Description = null,
+    string? InputSchemaJson = null,
+    string? OutputSchemaJson = null,
+    AICopilot.SharedKernel.Ai.AiToolRiskLevel? RiskLevel = null,
+    string? RequiredPermission = null,
+    bool? RequiresApproval = null,
+    bool? IsEnabled = null,
+    int? TimeoutSeconds = null,
+    string? AuditLevel = null);
+
+public sealed record DeadLetterAgentRunQueueItemRequest(string? Reason = null);

@@ -64,6 +64,8 @@ public sealed record RagDocumentUploadBridgeRequest(
     Guid KnowledgeBaseId,
     string FileName,
     Stream Stream,
+    string? ContentType = null,
+    long? FileSize = null,
     string? Classification = null,
     string? SourceType = null,
     bool IsSanitized = false);

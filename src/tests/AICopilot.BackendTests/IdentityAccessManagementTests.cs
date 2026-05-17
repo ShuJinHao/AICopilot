@@ -209,6 +209,7 @@ public sealed class IdentityAccessManagementTests
                 "AiGateway.GetUpload",
                 "AiGateway.GetWorkspace",
                 "AiGateway.DownloadArtifact",
+                "AiGateway.SubmitFinalReview",
                 "AiGateway.FinalizeWorkspace",
                 "AiGateway.Chat");
 

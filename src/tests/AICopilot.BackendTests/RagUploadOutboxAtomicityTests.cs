@@ -39,6 +39,8 @@ public sealed class RagUploadOutboxAtomicityTests(CoreAICopilotAppFixture fixtur
             new CapturingFileStorage(),
             new FixedDocumentFormatPolicy([".txt"]),
             stager,
+            new AuditLogWriter(auditDbContext),
+            new TestCurrentUser(role: "Admin"),
             NullLogger<UploadDocumentCommandHandler>.Instance);
 
         var result = await handler.Handle(
@@ -86,6 +88,8 @@ public sealed class RagUploadOutboxAtomicityTests(CoreAICopilotAppFixture fixtur
             fileStorage,
             new FixedDocumentFormatPolicy([".txt"]),
             new ThrowingEventStager(new InvalidOperationException("outbox staging failed")),
+            new AuditLogWriter(auditDbContext),
+            new TestCurrentUser(role: "Admin"),
             NullLogger<UploadDocumentCommandHandler>.Instance);
 
         Func<Task> act = async () => await handler.Handle(
@@ -120,7 +124,8 @@ public sealed class RagUploadOutboxAtomicityTests(CoreAICopilotAppFixture fixtur
         var handler = new DeleteDocumentCommandHandler(
             repository,
             new RagIntegrationEventStager(dbContext),
-            new AuditLogWriter(auditDbContext));
+            new AuditLogWriter(auditDbContext),
+            new TestCurrentUser(role: "Admin"));
 
         var result = await handler.Handle(new DeleteDocumentCommand(seed.DocumentId), CancellationToken.None);
 

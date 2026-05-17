@@ -1,11 +1,13 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using AICopilot.AiGatewayService.Runtime;
+using AICopilot.AiGatewayService.Tools;
 using AICopilot.AiGatewayService.Workspaces;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
+using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
 using AICopilot.Core.AiGateway.Aggregates.Uploads;
 using AICopilot.Core.AiGateway.Ids;
@@ -13,10 +15,12 @@ using AICopilot.Core.AiGateway.Specifications.AgentTasks;
 using AICopilot.Core.AiGateway.Specifications.Approvals;
 using AICopilot.Core.AiGateway.Specifications.Artifacts;
 using AICopilot.Core.AiGateway.Specifications.ConversationTemplate;
+using AICopilot.Core.AiGateway.Specifications.LanguageModel;
 using AICopilot.Core.AiGateway.Specifications.Sessions;
 using AICopilot.Core.AiGateway.Specifications.Uploads;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.Services.Contracts;
+using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Messaging;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
@@ -38,6 +42,9 @@ public sealed record ApproveAgentTaskPlanCommand(Guid Id) : ICommand<Result<Agen
 [AuthorizeRequirement("AiGateway.RunAgentTask")]
 public sealed record RunAgentTaskCommand(Guid Id) : ICommand<Result<AgentTaskDto>>;
 
+[AuthorizeRequirement("AiGateway.RunAgentTask")]
+public sealed record RetryAgentTaskCommand(Guid Id) : ICommand<Result<AgentTaskDto>>;
+
 [AuthorizeRequirement("AiGateway.CancelAgentTask")]
 public sealed record CancelAgentTaskCommand(Guid Id) : ICommand<Result<AgentTaskDto>>;
 
@@ -47,12 +54,19 @@ public sealed class PlanAgentTaskCommandHandler(
     IReadRepository<Session> sessionRepository,
     IReadRepository<UploadRecord> uploadRepository,
     IReadRepository<ConversationTemplate> templateRepository,
+    IReadRepository<LanguageModel> modelRepository,
     IChatRuntimeSettingsProvider runtimeSettingsProvider,
     IAgentArtifactWorkspaceService workspaceService,
     AgentAuditRecorder auditRecorder,
+    IEnumerable<IKnowledgeBaseAccessChecker> knowledgeBaseAccessCheckers,
+    AgentPlanToolGuard planToolGuard,
+    IAgentDynamicPlanner dynamicPlanner,
+    ICloudReadonlyAgentPlanService cloudReadonlyPlanService,
     ICurrentUser currentUser)
     : ICommandHandler<PlanAgentTaskCommand, Result<AgentTaskDto>>
 {
+    private const int PlannerValidationVersion = 1;
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         Converters = { new JsonStringEnumConverter() }
@@ -97,12 +111,105 @@ public sealed class PlanAgentTaskCommandHandler(
             .Where(id => id != Guid.Empty)
             .Distinct()
             .ToArray();
+        if (knowledgeBaseIds.Length > 0)
+        {
+            var accessChecker = knowledgeBaseAccessCheckers.FirstOrDefault();
+            if (accessChecker is null)
+            {
+                return Result.Failure("RAG knowledge base access checker is not configured.");
+            }
+
+            foreach (var knowledgeBaseId in knowledgeBaseIds)
+            {
+                var canRead = await accessChecker.CanReadAsync(
+                    knowledgeBaseId,
+                    userId,
+                    IsAdmin(),
+                    cancellationToken);
+                if (!canRead)
+                {
+                    return Result.NotFound();
+                }
+            }
+        }
+
         _ = await templateRepository.FirstOrDefaultAsync(
             new ConversationTemplateByCodeSpec("agent_planner"),
             cancellationToken);
         var runtimeSettings = await runtimeSettingsProvider.GetAsync(cancellationToken);
         var riskLevel = DetermineRiskLevel(request.TaskType);
-        var steps = BuildPlanSteps(uploadIds.Length > 0, knowledgeBaseIds.Length > 0, request.TaskType, riskLevel);
+        var plannerModelResult = await ResolvePlannerModelAsync(request.ModelId, cancellationToken);
+        if (!plannerModelResult.IsSuccess)
+        {
+            return Result.From(plannerModelResult);
+        }
+
+        var plannerModel = plannerModelResult.Value;
+        PlannerToolCatalog? plannerToolCatalog = null;
+        IReadOnlyCollection<AgentStepPlanDto> steps;
+        if (plannerModel is not null)
+        {
+            var catalogResult = await planToolGuard.GetAvailableToolCatalogAsync(userId, cancellationToken);
+            if (!catalogResult.IsSuccess)
+            {
+                return Result.From(catalogResult);
+            }
+
+            plannerToolCatalog = catalogResult.Value!;
+            if (plannerToolCatalog.AvailableToolCount == 0)
+            {
+                return Result.Failure(new ApiProblemDescriptor(
+                    AppProblemCodes.PlannerToolCatalogEmpty,
+                    "Planner model is available, but no enabled and authorized tools are available for the current user."));
+            }
+
+            var dynamicPlanResult = await dynamicPlanner.CreatePlanAsync(
+                new AgentDynamicPlannerRequest(
+                    request.Goal,
+                    request.TaskType,
+                    uploadIds,
+                    knowledgeBaseIds,
+                    plannerToolCatalog,
+                    plannerModel,
+                    runtimeSettings),
+                cancellationToken);
+            if (!dynamicPlanResult.IsSuccess)
+            {
+                return Result.From(dynamicPlanResult);
+            }
+
+            steps = dynamicPlanResult.Value!;
+        }
+        else
+        {
+            steps = BuildPlanSteps(uploadIds.Length > 0, knowledgeBaseIds.Length > 0, request.TaskType, riskLevel);
+        }
+
+        steps = EnsureMandatorySteps(steps, uploadIds.Length > 0, knowledgeBaseIds.Length > 0, request.TaskType);
+        var guardedStepsResult = await planToolGuard.ValidateStepsAsync(steps, request.TaskType, userId, cancellationToken);
+        if (!guardedStepsResult.IsSuccess)
+        {
+            return Result.From(guardedStepsResult);
+        }
+
+        steps = riskLevel >= AgentTaskRiskLevel.High
+            ? guardedStepsResult.Value!.Select(step => step with { RequiresApproval = true }).ToArray()
+            : guardedStepsResult.Value!;
+        AgentTaskPlanCloudReadonlyIntentDocument? cloudReadonlyIntent = null;
+        if (request.TaskType == AgentTaskType.CloudDataReport)
+        {
+            var cloudIntentResult = await cloudReadonlyPlanService.CreateIntentAsync(
+                request.SessionId,
+                request.Goal,
+                cancellationToken);
+            if (!cloudIntentResult.IsSuccess)
+            {
+                return Result.From(cloudIntentResult);
+            }
+
+            cloudReadonlyIntent = AgentTaskPlanCloudReadonlyIntentDocument.From(cloudIntentResult.Value!);
+        }
+
         var plan = new AgentTaskPlanDocument(
             1,
             "agent_planner",
@@ -111,16 +218,23 @@ public sealed class PlanAgentTaskCommandHandler(
             riskLevel.ToString(),
             uploadIds,
             knowledgeBaseIds,
+            cloudReadonlyIntent,
             steps.Select(step => new AgentTaskPlanStepDocument(
                     step.Title,
                     step.Description,
                     step.StepType,
                     step.ToolCode,
-                    step.RequiresApproval))
+                    step.RequiresApproval,
+                    step.InputJson))
                 .ToArray(),
             new AgentTaskPlanRuntimeSettingsDocument(
                 runtimeSettings.AgentPlanningHistoryCount,
-                runtimeSettings.ContextTokenLimit));
+                runtimeSettings.ContextTokenLimit),
+            plannerModel is null ? "Static" : "Dynamic",
+            plannerModel?.Id.Value,
+            PlannerValidationVersion,
+            plannerToolCatalog?.Version ?? PlannerToolCatalog.CurrentVersion,
+            plannerToolCatalog?.AvailableToolCount ?? 0);
 
         var now = DateTimeOffset.UtcNow;
         var task = new AgentTask(
@@ -130,13 +244,13 @@ public sealed class PlanAgentTaskCommandHandler(
             request.Goal,
             request.TaskType,
             riskLevel,
-            request.ModelId.HasValue ? new LanguageModelId(request.ModelId.Value) : null,
+            plannerModel?.Id,
             JsonSerializer.Serialize(plan, JsonOptions),
             now);
 
         foreach (var step in steps)
         {
-            task.AddStep(step.Title, step.Description, step.StepType, step.ToolCode, step.RequiresApproval, now);
+            task.AddStep(step.Title, step.Description, step.StepType, step.ToolCode, step.RequiresApproval, now, step.InputJson);
         }
 
         var workspace = await workspaceService.CreateForTaskAsync(task, now, cancellationToken);
@@ -182,6 +296,134 @@ public sealed class PlanAgentTaskCommandHandler(
         }
 
         return normalized.Length <= 48 ? normalized : normalized[..48];
+    }
+
+    private bool IsAdmin()
+    {
+        return string.Equals(currentUser.Role, "Admin", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<Result<LanguageModel?>> ResolvePlannerModelAsync(
+        Guid? modelId,
+        CancellationToken cancellationToken)
+    {
+        if (modelId.HasValue)
+        {
+            var model = await modelRepository.FirstOrDefaultAsync(
+                new LanguageModelByIdSpec(new LanguageModelId(modelId.Value)),
+                cancellationToken);
+            return model is not null && IsPlannerModelUsable(model)
+                ? Result.Success<LanguageModel?>(model)
+                : Result.Failure(new ApiProblemDescriptor(
+                    AppProblemCodes.PlannerModelUnavailable,
+                    "Specified planner model is unavailable or does not support Planner usage."));
+        }
+
+        var models = await modelRepository.ListAsync(new LanguageModelsOrderedSpec(), cancellationToken);
+        var plannerModel = models.FirstOrDefault(IsPlannerModelUsable);
+        return Result.Success<LanguageModel?>(plannerModel);
+    }
+
+    private static bool IsPlannerModelUsable(LanguageModel model)
+    {
+        return model.IsEnabled &&
+               model.Usage.HasFlag(LanguageModelUsage.Planner) &&
+               !string.IsNullOrWhiteSpace(model.ApiKey);
+    }
+
+    private static IReadOnlyCollection<AgentStepPlanDto> EnsureMandatorySteps(
+        IReadOnlyCollection<AgentStepPlanDto> steps,
+        bool hasUploads,
+        bool hasKnowledgeBases,
+        AgentTaskType taskType)
+    {
+        var result = steps.ToList();
+        if (hasUploads)
+        {
+            InsertBeforeOutputs(
+                result,
+                "read_uploaded_file",
+                new AgentStepPlanDto(
+                    "Read uploaded files",
+                    "Read task uploads into the controlled workspace source area.",
+                    AgentStepType.FileRead,
+                    "read_uploaded_file",
+                    false));
+            InsertBeforeOutputs(
+                result,
+                "parse_table_file",
+                new AgentStepPlanDto(
+                    "Parse table files",
+                    "Parse CSV, JSON, or XLSX uploads into normalized data.",
+                    AgentStepType.Analysis,
+                    "parse_table_file",
+                    false));
+        }
+
+        if (hasKnowledgeBases)
+        {
+            InsertBeforeOutputs(
+                result,
+                "rag_search",
+                new AgentStepPlanDto(
+                    "Search knowledge bases",
+                    "Retrieve only authorized knowledge base context for the task.",
+                    AgentStepType.RagSearch,
+                    "rag_search",
+                    false));
+        }
+
+        if (taskType == AgentTaskType.CloudDataReport)
+        {
+            InsertBeforeOutputs(
+                result,
+                "query_cloud_data_readonly",
+                new AgentStepPlanDto(
+                    "Query Cloud readonly data",
+                    "Read Cloud business data only through the AiRead readonly boundary.",
+                    AgentStepType.DataQuery,
+                    "query_cloud_data_readonly",
+                    false));
+        }
+
+        if (!ContainsTool(result, "finalize_artifacts"))
+        {
+            result.Add(new AgentStepPlanDto(
+                "Confirm final output",
+                "Wait for final output approval before moving draft artifacts to final.",
+                AgentStepType.Finalize,
+                "finalize_artifacts",
+                true));
+        }
+
+        return result;
+    }
+
+    private static void InsertBeforeOutputs(
+        List<AgentStepPlanDto> steps,
+        string toolCode,
+        AgentStepPlanDto step)
+    {
+        if (ContainsTool(steps, toolCode))
+        {
+            return;
+        }
+
+        var index = steps.FindIndex(item =>
+            item.StepType is AgentStepType.ChartGeneration or AgentStepType.ArtifactGeneration or AgentStepType.Finalize);
+        if (index < 0)
+        {
+            steps.Add(step);
+        }
+        else
+        {
+            steps.Insert(index, step);
+        }
+    }
+
+    private static bool ContainsTool(IEnumerable<AgentStepPlanDto> steps, string toolCode)
+    {
+        return steps.Any(step => string.Equals(step.ToolCode, toolCode, StringComparison.OrdinalIgnoreCase));
     }
 
     private static IReadOnlyCollection<AgentStepPlanDto> BuildPlanSteps(
@@ -288,7 +530,8 @@ public sealed class RunAgentTaskCommandHandler(
     IRepository<AgentTask> repository,
     IReadRepository<ArtifactWorkspace> workspaceRepository,
     IReadRepository<ApprovalRequest> approvalRepository,
-    IAgentTaskRuntime runtime,
+    IReadRepository<AgentTaskRunQueueItem> queueRepository,
+    IAgentTaskRunQueue runQueue,
     ICurrentUser currentUser)
     : ICommandHandler<RunAgentTaskCommand, Result<AgentTaskDto>>
 {
@@ -301,17 +544,120 @@ public sealed class RunAgentTaskCommandHandler(
         }
 
         var task = taskResult.Value!;
-        var result = await runtime.RunAsync(task, cancellationToken);
-        return result.IsSuccess
-            ? Result.Success(await AgentTaskDtoComposer.MapAsync(result.Value!, workspaceRepository, approvalRepository, cancellationToken))
-            : Result.From(result);
+        if (task.Status is not AgentTaskStatus.PlanApproved and not AgentTaskStatus.WaitingToolApproval)
+        {
+            return Result.Invalid("Only approved or waiting-approval agent tasks can be queued for execution.");
+        }
+
+        var queued = await runQueue.EnqueueAsync(
+            task,
+            AgentTaskRunTriggerType.Manual,
+            currentUser.Id!.Value,
+            cancellationToken);
+        return queued.IsSuccess
+            ? Result.Success(await AgentTaskDtoComposer.MapAsync(
+                task,
+                workspaceRepository,
+                approvalRepository,
+                queueRepository,
+                cancellationToken))
+            : Result.From(queued);
+    }
+}
+
+public sealed class RetryAgentTaskCommandHandler(
+    IRepository<AgentTask> repository,
+    IReadRepository<ArtifactWorkspace> workspaceRepository,
+    IRepository<ApprovalRequest> approvalRepository,
+    IReadRepository<AgentTaskRunQueueItem> queueReadRepository,
+    IAgentTaskRunQueue runQueue,
+    ICurrentUser currentUser)
+    : ICommandHandler<RetryAgentTaskCommand, Result<AgentTaskDto>>
+{
+    public async Task<Result<AgentTaskDto>> Handle(RetryAgentTaskCommand request, CancellationToken cancellationToken)
+    {
+        var taskResult = await AgentTaskCommandLoader.LoadTaskAsync(repository, currentUser, request.Id, cancellationToken);
+        if (!taskResult.IsSuccess)
+        {
+            return Result.From(taskResult);
+        }
+
+        var task = taskResult.Value!;
+        var activeQueue = await queueReadRepository.FirstOrDefaultAsync(
+            new ActiveAgentTaskRunQueueItemByTaskSpec(task.Id),
+            cancellationToken);
+        if (activeQueue is not null)
+        {
+            return Result.Failure(new ApiProblemDescriptor(
+                AppProblemCodes.AgentTaskRunInProgress,
+                "Agent task already has an active queued or leased run."));
+        }
+
+        if (task.Status != AgentTaskStatus.Failed)
+        {
+            return Result.Failure(new ApiProblemDescriptor(
+                AppProblemCodes.AgentTaskRetryNotAllowed,
+                "Only failed agent tasks can be retried. Completed, finalized, rejected, and cancelled tasks require a new task."));
+        }
+
+        if (task.WorkspaceId is not null)
+        {
+            var workspace = await workspaceRepository.FirstOrDefaultAsync(
+                new ArtifactWorkspaceByIdSpec(task.WorkspaceId.Value, includeArtifacts: false),
+                cancellationToken);
+            if (workspace?.Status == ArtifactWorkspaceStatus.Finalized)
+            {
+                return Result.Failure(new ApiProblemDescriptor(
+                    AppProblemCodes.AgentTaskRetryNotAllowed,
+                    "Finalized workspaces cannot be retried. Create a new agent task instead."));
+            }
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        await CancelPendingApprovalsAsync(task, approvalRepository, now, cancellationToken);
+        task.PrepareRetry(now);
+        repository.Update(task);
+        await repository.SaveChangesAsync(cancellationToken);
+
+        var queued = await runQueue.EnqueueAsync(
+            task,
+            AgentTaskRunTriggerType.Retry,
+            currentUser.Id!.Value,
+            cancellationToken);
+        return queued.IsSuccess
+            ? Result.Success(await AgentTaskDtoComposer.MapAsync(
+                task,
+                workspaceRepository,
+                approvalRepository,
+                queueReadRepository,
+                cancellationToken))
+            : Result.From(queued);
+    }
+
+    private static async Task CancelPendingApprovalsAsync(
+        AgentTask task,
+        IRepository<ApprovalRequest> approvalRepository,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var approvals = await approvalRepository.ListAsync(
+            new ApprovalRequestsByTaskSpec(task.Id, pendingOnly: true),
+            cancellationToken);
+        foreach (var approval in approvals)
+        {
+            approval.Cancel(now);
+            approvalRepository.Update(approval);
+        }
     }
 }
 
 public sealed class CancelAgentTaskCommandHandler(
     IRepository<AgentTask> repository,
     IReadRepository<ArtifactWorkspace> workspaceRepository,
-    IReadRepository<ApprovalRequest> approvalRepository,
+    IRepository<ApprovalRequest> approvalRepository,
+    IRepository<AgentTaskRunAttempt> runAttemptRepository,
+    IReadRepository<AgentTaskRunQueueItem> queueReadRepository,
+    IAgentTaskRunQueue runQueue,
     ICurrentUser currentUser)
     : ICommandHandler<CancelAgentTaskCommand, Result<AgentTaskDto>>
 {
@@ -324,10 +670,38 @@ public sealed class CancelAgentTaskCommandHandler(
         }
 
         var task = taskResult.Value!;
-        task.Cancel(DateTimeOffset.UtcNow);
+        var now = DateTimeOffset.UtcNow;
+        await runQueue.CancelActiveAsync(task, now, "Agent task cancellation requested.", cancellationToken);
+        var approvals = await approvalRepository.ListAsync(
+            new ApprovalRequestsByTaskSpec(task.Id, pendingOnly: true),
+            cancellationToken);
+        foreach (var approval in approvals)
+        {
+            approval.Cancel(now);
+            approvalRepository.Update(approval);
+        }
+
+        if (task.ActiveRunAttemptId is not null)
+        {
+            var attempt = await runAttemptRepository.FirstOrDefaultAsync(
+                new AgentTaskRunAttemptByIdSpec(task.ActiveRunAttemptId.Value),
+                cancellationToken);
+            if (attempt is not null && !attempt.IsTerminal)
+            {
+                attempt.Cancel(now, "Agent task cancellation requested.");
+                runAttemptRepository.Update(attempt);
+            }
+        }
+
+        task.Cancel(now);
         repository.Update(task);
         await repository.SaveChangesAsync(cancellationToken);
-        return Result.Success(await AgentTaskDtoComposer.MapAsync(task, workspaceRepository, approvalRepository, cancellationToken));
+        return Result.Success(await AgentTaskDtoComposer.MapAsync(
+            task,
+            workspaceRepository,
+            approvalRepository,
+            queueReadRepository,
+            cancellationToken));
     }
 }
 

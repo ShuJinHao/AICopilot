@@ -23,7 +23,8 @@ public sealed class RagMcpAuditCommandTests
         var handler = new CreateKnowledgeBaseCommandHandler(
             knowledgeRepository,
             embeddingRepository,
-            auditLogWriter);
+            auditLogWriter,
+            new TestCurrentUser());
 
         var result = await handler.Handle(
             new CreateKnowledgeBaseCommand("line-docs", "Line runbooks", embeddingModel.Id.Value),
@@ -35,7 +36,7 @@ public sealed class RagMcpAuditCommandTests
         audit.ActionCode.Should().Be("Rag.CreateKnowledgeBase");
         audit.TargetType.Should().Be("KnowledgeBase");
         audit.TargetName.Should().Be("line-docs");
-        audit.ChangedFields.Should().Contain(["name", "description", "embeddingModelId"]);
+        audit.ChangedFields.Should().Contain(["name", "description", "embeddingModelId", "ownerUserId", "accessScope"]);
     }
 
     [Fact]

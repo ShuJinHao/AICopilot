@@ -10,6 +10,21 @@ public interface IKnowledgeRetrievalService
         CancellationToken cancellationToken = default);
 }
 
+public interface IKnowledgeBaseAccessChecker
+{
+    Task<bool> CanReadAsync(
+        Guid knowledgeBaseId,
+        Guid userId,
+        bool isAdmin,
+        CancellationToken cancellationToken = default);
+
+    Task<bool> CanWriteAsync(
+        Guid knowledgeBaseId,
+        Guid userId,
+        bool isAdmin,
+        CancellationToken cancellationToken = default);
+}
+
 public sealed record KnowledgeRetrievalResult(
     string Text,
     double Score,

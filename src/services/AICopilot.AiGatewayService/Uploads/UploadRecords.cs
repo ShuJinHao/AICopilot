@@ -48,6 +48,8 @@ public sealed class UploadRecordCommandHandler(
     IReadRepository<AgentTask> taskRepository,
     IFileStorageService fileStorage,
     IEnumerable<IRagDocumentUploadBridge> ragUploadBridges,
+    IEnumerable<IKnowledgeBaseAccessChecker> knowledgeBaseAccessCheckers,
+    IAuditLogWriter auditLogWriter,
     ICurrentUser currentUser)
     : ICommandHandler<UploadRecordCommand, Result<UploadRecordDto>>
 {
@@ -75,6 +77,22 @@ public sealed class UploadRecordCommandHandler(
         }
 
         var normalizedFile = await NormalizeStreamAsync(request.File, cancellationToken);
+        var fileValidation = await AiGatewayUploadSecurityPolicy.ValidateAndNormalizeAsync(
+            normalizedFile,
+            cancellationToken);
+        if (!fileValidation.IsValid || fileValidation.File is null)
+        {
+            await RecordUploadAuditAsync(
+                AuditResults.Rejected,
+                fileValidation.ErrorMessage ?? "Uploaded file rejected by security policy.",
+                request,
+                null,
+                cancellationToken);
+            await auditLogWriter.SaveChangesAsync(cancellationToken);
+            return Result.Invalid(fileValidation.ErrorMessage ?? "Uploaded file rejected by security policy.");
+        }
+
+        normalizedFile = fileValidation.File;
         var sha256 = await ComputeSha256Async(normalizedFile.Stream, cancellationToken);
         normalizedFile.Stream.Position = 0;
 
@@ -94,6 +112,8 @@ public sealed class UploadRecordCommandHandler(
                     request.KnowledgeBaseId!.Value,
                     normalizedFile.FileName,
                     normalizedFile.Stream,
+                    normalizedFile.ContentType,
+                    normalizedFile.FileSize,
                     SourceType: "UserUploaded"),
                 cancellationToken);
             ragDocumentId = ragResult.DocumentId;
@@ -121,6 +141,12 @@ public sealed class UploadRecordCommandHandler(
             DateTimeOffset.UtcNow);
 
         uploadRepository.Add(record);
+        await RecordUploadAuditAsync(
+            AuditResults.Succeeded,
+            "Uploaded file accepted by security policy.",
+            request,
+            record,
+            cancellationToken);
         await uploadRepository.SaveChangesAsync(cancellationToken);
         return Result.Success(Map(record));
     }
@@ -138,9 +164,23 @@ public sealed class UploadRecordCommandHandler(
 
         if (scope == UploadRecordScope.KnowledgeBase)
         {
-            return request.KnowledgeBaseId.HasValue && request.KnowledgeBaseId.Value != Guid.Empty
-                ? Result.Success()
-                : Result.Invalid("KnowledgeBaseId is required for knowledge-base uploads.");
+            if (!request.KnowledgeBaseId.HasValue || request.KnowledgeBaseId.Value == Guid.Empty)
+            {
+                return Result.Invalid("KnowledgeBaseId is required for knowledge-base uploads.");
+            }
+
+            var accessChecker = knowledgeBaseAccessCheckers.FirstOrDefault();
+            if (accessChecker is null)
+            {
+                return Result.Failure("RAG knowledge base access checker is not configured.");
+            }
+
+            var canWrite = await accessChecker.CanWriteAsync(
+                request.KnowledgeBaseId.Value,
+                userId,
+                IsAdmin(),
+                cancellationToken);
+            return canWrite ? Result.Success() : Result.NotFound();
         }
 
         if (scope == UploadRecordScope.SessionTemp)
@@ -167,6 +207,11 @@ public sealed class UploadRecordCommandHandler(
         return task is null ? Result.NotFound("Agent task not found.") : Result.Success();
     }
 
+    private bool IsAdmin()
+    {
+        return string.Equals(currentUser.Role, "Admin", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static async Task<AiGatewayUploadStream> NormalizeStreamAsync(
         AiGatewayUploadStream file,
         CancellationToken cancellationToken)
@@ -188,6 +233,39 @@ public sealed class UploadRecordCommandHandler(
         using var sha256 = SHA256.Create();
         var hash = await sha256.ComputeHashAsync(stream, cancellationToken);
         return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    private Task RecordUploadAuditAsync(
+        string result,
+        string summary,
+        UploadRecordCommand request,
+        UploadRecord? record,
+        CancellationToken cancellationToken)
+    {
+        var metadata = new Dictionary<string, string>
+        {
+            ["scope"] = request.Scope,
+            ["fileName"] = Path.GetFileName(request.File.FileName),
+            ["contentType"] = request.File.ContentType,
+            ["fileSize"] = request.File.FileSize.ToString()
+        };
+        if (record is not null)
+        {
+            metadata["uploadId"] = record.Id.Value.ToString();
+            metadata["status"] = record.Status.ToString();
+        }
+
+        return auditLogWriter.WriteAsync(
+            new AuditLogWriteRequest(
+                AuditActionGroups.AiGateway,
+                "AiGateway.Upload",
+                "UploadRecord",
+                record?.Id.Value.ToString(),
+                record?.FileName ?? Path.GetFileName(request.File.FileName),
+                result,
+                summary,
+                Metadata: metadata),
+            cancellationToken);
     }
 
     public static UploadRecordDto Map(UploadRecord record)

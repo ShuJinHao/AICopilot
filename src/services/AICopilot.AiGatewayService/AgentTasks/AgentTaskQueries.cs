@@ -21,6 +21,7 @@ public sealed class GetAgentTaskQueryHandler(
     IRepository<AgentTask> repository,
     IReadRepository<ArtifactWorkspace> workspaceRepository,
     IReadRepository<ApprovalRequest> approvalRepository,
+    IReadRepository<AgentTaskRunQueueItem> queueRepository,
     ICurrentUser currentUser)
     : IQueryHandler<GetAgentTaskQuery, Result<AgentTaskDto>>
 {
@@ -36,6 +37,7 @@ public sealed class GetAgentTaskQueryHandler(
             taskResult.Value!,
             workspaceRepository,
             approvalRepository,
+            queueRepository,
             cancellationToken));
     }
 }
@@ -44,6 +46,7 @@ public sealed class GetListAgentTasksBySessionQueryHandler(
     IReadRepository<AgentTask> repository,
     IReadRepository<ArtifactWorkspace> workspaceRepository,
     IReadRepository<ApprovalRequest> approvalRepository,
+    IReadRepository<AgentTaskRunQueueItem> queueRepository,
     ICurrentUser currentUser)
     : IQueryHandler<GetListAgentTasksBySessionQuery, Result<IReadOnlyCollection<AgentTaskDto>>>
 {
@@ -73,6 +76,7 @@ public sealed class GetListAgentTasksBySessionQueryHandler(
                 task,
                 workspaceRepository,
                 approvalRepository,
+                queueRepository,
                 cancellationToken));
         }
 

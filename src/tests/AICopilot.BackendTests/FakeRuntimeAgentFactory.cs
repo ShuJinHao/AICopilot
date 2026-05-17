@@ -12,6 +12,7 @@ internal sealed class FakeRuntimeAgentFactory : IAgentRuntimeFactory
     public const string ProviderName = "FakeEval";
 
     private readonly Queue<IReadOnlyList<RuntimeAgentUpdate>> scripts = [];
+    private readonly Queue<FakeStructuredAgentResponse> structuredScripts = [];
 
     public AgentRuntimeCreateRequest? LastCreateRequest { get; private set; }
 
@@ -30,13 +31,23 @@ internal sealed class FakeRuntimeAgentFactory : IAgentRuntimeFactory
         var script = scripts.Count == 0
             ? [new RuntimeAgentUpdate([new AiTextContent("fake runtime completed")])]
             : scripts.Dequeue();
-        LastAgent = new FakeRuntimeChatAgent(script);
+        LastAgent = new FakeRuntimeChatAgent(script, structuredScripts);
         return new ScopedRuntimeAgent(LastAgent, NoopAsyncDisposable.Instance);
     }
 
     public void EnqueueScript(params RuntimeAgentUpdate[] updates)
     {
         scripts.Enqueue(updates);
+    }
+
+    public void EnqueueStructuredText(string? text)
+    {
+        structuredScripts.Enqueue(new FakeStructuredAgentResponse(text, null));
+    }
+
+    public void EnqueueStructuredResultJson(string resultJson, string? text = null)
+    {
+        structuredScripts.Enqueue(new FakeStructuredAgentResponse(text, resultJson));
     }
 
     public static LanguageModel CreateModel()
@@ -70,6 +81,8 @@ internal sealed class FakeRuntimeAgentFactory : IAgentRuntimeFactory
     }
 }
 
+internal sealed record FakeStructuredAgentResponse(string? Text, string? ResultJson);
+
 internal sealed record FakeRuntimeAgentRun(
     IReadOnlyList<AiChatMessage> Messages,
     string InputText,
@@ -80,7 +93,9 @@ internal sealed class FakeRuntimeAgentSession(Guid id) : IRuntimeAgentSession
     public Guid Id { get; } = id;
 }
 
-internal sealed class FakeRuntimeChatAgent(IReadOnlyList<RuntimeAgentUpdate> script) : IRuntimeChatAgent
+internal sealed class FakeRuntimeChatAgent(
+    IReadOnlyList<RuntimeAgentUpdate> script,
+    Queue<FakeStructuredAgentResponse>? structuredResponses = null) : IRuntimeChatAgent
 {
     public FakeRuntimeAgentRun? LastRun { get; private set; }
 
@@ -116,6 +131,14 @@ internal sealed class FakeRuntimeChatAgent(IReadOnlyList<RuntimeAgentUpdate> scr
     {
         var messageList = messages.ToArray();
         LastRun = new FakeRuntimeAgentRun(messageList, ExtractInputText(messageList), options);
+        if (structuredResponses is not null && structuredResponses.TryDequeue(out var response))
+        {
+            var result = string.IsNullOrWhiteSpace(response.ResultJson)
+                ? default
+                : JsonSerializer.Deserialize<T>(response.ResultJson, serializerOptions);
+            return Task.FromResult(new StructuredAgentResponse<T>(response.Text, result));
+        }
+
         return Task.FromResult(new StructuredAgentResponse<T>("fake structured response", default));
     }
 

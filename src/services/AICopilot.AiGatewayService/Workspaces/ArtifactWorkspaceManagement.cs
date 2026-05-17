@@ -29,7 +29,23 @@ public sealed record ArtifactDto(
     int? GeneratedByStepOrder,
     bool RequiresApproval,
     string ApprovalStatus,
-    DateTimeOffset? FinalizedAt);
+    DateTimeOffset? FinalizedAt)
+{
+    public DateTimeOffset CreatedAt { get; init; }
+
+    public int? GeneratedByStep { get; init; }
+}
+
+public sealed record ArtifactManifestItemDto(
+    Guid ArtifactId,
+    string Type,
+    string Name,
+    string RelativePath,
+    string Status,
+    int Version,
+    int? GeneratedByStep,
+    string DownloadUrl,
+    DateTimeOffset CreatedAt);
 
 public sealed record ArtifactWorkspaceFileDto(
     string Name,
@@ -44,7 +60,10 @@ public sealed record ArtifactWorkspaceDto(
     Guid TaskId,
     string Status,
     IReadOnlyCollection<ArtifactWorkspaceFileDto> Files,
-    IReadOnlyCollection<ArtifactDto> Artifacts);
+    IReadOnlyCollection<ArtifactDto> Artifacts)
+{
+    public IReadOnlyCollection<ArtifactManifestItemDto> Manifest { get; init; } = [];
+}
 
 public sealed record ArtifactDownloadDto(Stream Stream, string FileName, string MimeType, long FileSize);
 
@@ -59,6 +78,9 @@ public sealed record GetArtifactWorkspaceQuery(string Code) : IQuery<Result<Arti
 
 [AuthorizeRequirement("AiGateway.DownloadArtifact")]
 public sealed record DownloadArtifactQuery(Guid Id) : IQuery<Result<ArtifactDownloadDto>>;
+
+[AuthorizeRequirement("AiGateway.SubmitFinalReview")]
+public sealed record SubmitFinalReviewCommand(string Code) : ICommand<Result<ArtifactWorkspaceDto>>;
 
 [AuthorizeRequirement("AiGateway.FinalizeWorkspace")]
 public sealed record FinalizeArtifactWorkspaceCommand(string Code) : ICommand<Result<ArtifactWorkspaceDto>>;
@@ -134,6 +156,7 @@ public sealed class AgentArtifactWorkspaceService(
         AgentStepId? stepId,
         CancellationToken cancellationToken)
     {
+        EnsureCanWriteDraftArtifact(workspace);
         var written = await fileStore.WriteTextAsync(
             workspace.WorkspaceCode,
             relativePath,
@@ -162,6 +185,7 @@ public sealed class AgentArtifactWorkspaceService(
         AgentStepId? stepId,
         CancellationToken cancellationToken)
     {
+        EnsureCanWriteDraftArtifact(workspace);
         var written = await fileStore.WriteBytesAsync(
             workspace.WorkspaceCode,
             relativePath,
@@ -179,6 +203,14 @@ public sealed class AgentArtifactWorkspaceService(
         workspaceRepository.Update(workspace);
         return artifact;
     }
+
+    private static void EnsureCanWriteDraftArtifact(ArtifactWorkspace workspace)
+    {
+        if (workspace.Status == ArtifactWorkspaceStatus.Finalized)
+        {
+            throw new InvalidOperationException($"{AppProblemCodes.ArtifactFinalized}: Finalized workspaces cannot receive draft artifacts.");
+        }
+    }
 }
 
 internal static class ArtifactWorkspaceMapper
@@ -190,6 +222,11 @@ internal static class ArtifactWorkspaceMapper
     {
         var stepIndexes = task?.Steps.ToDictionary(step => step.Id, step => step.StepIndex)
                           ?? new Dictionary<AgentStepId, int>();
+        var artifacts = workspace.Artifacts
+            .OrderBy(artifact => artifact.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .Select(artifact => MapArtifact(artifact, stepIndexes))
+            .ToArray();
+
         return new ArtifactWorkspaceDto(
             workspace.Id,
             workspace.WorkspaceCode,
@@ -202,27 +239,51 @@ internal static class ArtifactWorkspaceMapper
                     item.FileSize,
                     item.UpdatedAt))
                 .ToArray(),
-            workspace.Artifacts
-                .OrderBy(artifact => artifact.RelativePath, StringComparer.OrdinalIgnoreCase)
-                .Select(artifact => new ArtifactDto(
+            artifacts)
+        {
+            Manifest = artifacts
+                .Select(artifact => new ArtifactManifestItemDto(
                     artifact.Id,
+                    artifact.Type,
                     artifact.Name,
-                    artifact.ArtifactType.ToString(),
-                    artifact.Status.ToString(),
                     artifact.RelativePath,
-                    artifact.FileSize,
-                    artifact.MimeType,
+                    artifact.Status,
                     artifact.Version,
-                    artifact.UpdatedAt,
-                    ResolvePreviewKind(artifact),
-                    $"/api/aigateway/artifact/{artifact.Id.Value}/download",
-                    artifact.CreatedByStepId.HasValue && stepIndexes.TryGetValue(artifact.CreatedByStepId.Value, out var stepIndex)
-                        ? stepIndex
-                        : null,
-                    artifact.Status != ArtifactStatus.Final,
-                    ResolveApprovalStatus(artifact),
-                    artifact.Status == ArtifactStatus.Final ? artifact.UpdatedAt : null))
-                .ToArray());
+                    artifact.GeneratedByStep ?? artifact.GeneratedByStepOrder,
+                    artifact.DownloadUrl,
+                    artifact.CreatedAt))
+                .ToArray()
+        };
+    }
+
+    private static ArtifactDto MapArtifact(
+        Artifact artifact,
+        IReadOnlyDictionary<AgentStepId, int> stepIndexes)
+    {
+        int? generatedByStep = artifact.CreatedByStepId.HasValue &&
+                               stepIndexes.TryGetValue(artifact.CreatedByStepId.Value, out var stepIndex)
+            ? stepIndex
+            : null;
+        return new ArtifactDto(
+            artifact.Id,
+            artifact.Name,
+            artifact.ArtifactType.ToString(),
+            artifact.Status.ToString(),
+            artifact.RelativePath,
+            artifact.FileSize,
+            artifact.MimeType,
+            artifact.Version,
+            artifact.UpdatedAt,
+            ResolvePreviewKind(artifact),
+            $"/api/aigateway/artifact/{artifact.Id.Value}/download",
+            generatedByStep,
+            artifact.Status != ArtifactStatus.Final,
+            ResolveApprovalStatus(artifact),
+            artifact.Status == ArtifactStatus.Final ? artifact.UpdatedAt : null)
+        {
+            CreatedAt = artifact.CreatedAt,
+            GeneratedByStep = generatedByStep
+        };
     }
 
     private static string ResolvePreviewKind(Artifact artifact)
@@ -355,12 +416,102 @@ public sealed class DownloadArtifactQueryHandler(
     }
 }
 
-public sealed class FinalizeArtifactWorkspaceCommandHandler(
+public sealed class SubmitFinalReviewCommandHandler(
     IRepository<ArtifactWorkspace> workspaceRepository,
     IRepository<AgentTask> taskRepository,
     IRepository<ApprovalRequest> approvalRepository,
     IArtifactWorkspaceFileStore fileStore,
     AgentAuditRecorder auditRecorder,
+    IAuditLogWriter auditLogWriter,
+    ICurrentUser currentUser)
+    : ICommandHandler<SubmitFinalReviewCommand, Result<ArtifactWorkspaceDto>>
+{
+    public async Task<Result<ArtifactWorkspaceDto>> Handle(
+        SubmitFinalReviewCommand request,
+        CancellationToken cancellationToken)
+    {
+        var access = await WorkspaceAccess.LoadByCodeAsync(
+            workspaceRepository,
+            taskRepository,
+            currentUser,
+            request.Code,
+            includeArtifacts: true,
+            cancellationToken);
+        if (!access.IsSuccess)
+        {
+            return Result.From(access);
+        }
+
+        var workspace = access.Value!.Workspace;
+        var task = access.Value.Task;
+        if (workspace.Status == ArtifactWorkspaceStatus.Finalized)
+        {
+            return Result.Invalid("Workspace is already finalized.");
+        }
+
+        if (workspace.Artifacts.Count == 0)
+        {
+            return Result.Invalid("Workspace has no draft artifacts to submit for final review.");
+        }
+
+        if (task.Status is not AgentTaskStatus.WorkspaceReady and not AgentTaskStatus.WaitingFinalApproval)
+        {
+            return Result.Invalid("Only workspace-ready tasks can submit final review.");
+        }
+
+        var approvals = await approvalRepository.ListAsync(
+            new ApprovalRequestsByTaskSpec(task.Id),
+            cancellationToken);
+        var finalApproval = approvals.FirstOrDefault(item =>
+            item.ApprovalType == AgentApprovalType.FinalOutput &&
+            string.Equals(item.TargetId, workspace.WorkspaceCode, StringComparison.Ordinal));
+
+        if (finalApproval?.Status == AgentApprovalStatus.Rejected)
+        {
+            return Result.Invalid("Workspace final output approval was rejected.");
+        }
+
+        if (finalApproval?.Status == AgentApprovalStatus.Approved)
+        {
+            return Result.Invalid("Workspace final output is already approved; call finalize to publish final artifacts.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        if (finalApproval is null)
+        {
+            finalApproval = new ApprovalRequest(
+                task.Id,
+                AgentApprovalType.FinalOutput,
+                workspace.WorkspaceCode,
+                currentUser.Id!.Value,
+                now);
+            approvalRepository.Add(finalApproval);
+            await auditRecorder.RecordFinalReviewSubmittedAsync(task, workspace, finalApproval, cancellationToken);
+        }
+
+        if (task.Status == AgentTaskStatus.WorkspaceReady)
+        {
+            task.WaitForFinalApproval(now);
+        }
+
+        taskRepository.Update(task);
+        workspaceRepository.Update(workspace);
+        await workspaceRepository.SaveChangesAsync(cancellationToken);
+        await auditLogWriter.SaveChangesAsync(cancellationToken);
+
+        var files = await fileStore.ListAsync(workspace.WorkspaceCode, cancellationToken);
+        return Result.Success(ArtifactWorkspaceMapper.Map(workspace, task, files));
+    }
+}
+
+public sealed class FinalizeArtifactWorkspaceCommandHandler(
+    IRepository<ArtifactWorkspace> workspaceRepository,
+    IRepository<AgentTask> taskRepository,
+    IRepository<AgentTaskRunAttempt> runAttemptRepository,
+    IRepository<ApprovalRequest> approvalRepository,
+    IArtifactWorkspaceFileStore fileStore,
+    AgentAuditRecorder auditRecorder,
+    IAuditLogWriter auditLogWriter,
     ICurrentUser currentUser)
     : ICommandHandler<FinalizeArtifactWorkspaceCommand, Result<ArtifactWorkspaceDto>>
 {
@@ -382,51 +533,56 @@ public sealed class FinalizeArtifactWorkspaceCommandHandler(
 
         var workspace = access.Value!.Workspace;
         var task = access.Value.Task;
-        var userId = currentUser.Id!.Value;
+        if (workspace.Status == ArtifactWorkspaceStatus.Finalized)
+        {
+            var finalizedFiles = await fileStore.ListAsync(workspace.WorkspaceCode, cancellationToken);
+            return Result.Success(ArtifactWorkspaceMapper.Map(workspace, task, finalizedFiles));
+        }
+
         if (workspace.Artifacts.Count == 0)
         {
             return Result.Invalid("Workspace has no draft artifacts to finalize.");
         }
 
         var now = DateTimeOffset.UtcNow;
-        var approval = await approvalRepository.FirstOrDefaultAsync(
-            new PendingApprovalRequestByTaskAndTargetSpec(
-                task.Id,
-                AgentApprovalType.FinalOutput,
-                workspace.WorkspaceCode),
+        var approvals = await approvalRepository.ListAsync(
+            new ApprovalRequestsByTaskSpec(task.Id),
             cancellationToken);
+        var approval = approvals.FirstOrDefault(item =>
+            item.ApprovalType == AgentApprovalType.FinalOutput &&
+            string.Equals(item.TargetId, workspace.WorkspaceCode, StringComparison.Ordinal));
         if (approval is null)
         {
-            var existingFinalApprovals = await approvalRepository.ListAsync(
-                new ApprovalRequestsByTaskSpec(task.Id),
-                cancellationToken);
-            var decidedApproval = existingFinalApprovals.FirstOrDefault(item =>
-                item.ApprovalType == AgentApprovalType.FinalOutput &&
-                item.TargetId == workspace.WorkspaceCode &&
-                item.Status is AgentApprovalStatus.Approved or AgentApprovalStatus.Rejected);
-            if (decidedApproval?.Status == AgentApprovalStatus.Rejected)
-            {
-                return Result.Invalid("Workspace final output approval was rejected.");
-            }
-
-            approval = decidedApproval ?? new ApprovalRequest(
-                task.Id,
-                AgentApprovalType.FinalOutput,
-                workspace.WorkspaceCode,
-                task.UserId,
-                now);
-            if (decidedApproval is null)
-            {
-                approvalRepository.Add(approval);
-            }
+            return Result.Invalid("Final output approval is required before workspace finalization.");
         }
 
         if (approval.Status == AgentApprovalStatus.Pending)
         {
-            approval.Approve(userId, "Workspace final output confirmed.", now);
+            return Result.Invalid("Final output approval is still pending.");
         }
+
+        if (approval.Status == AgentApprovalStatus.Rejected)
+        {
+            return Result.Invalid("Workspace final output approval was rejected.");
+        }
+
+        if (approval.Status is AgentApprovalStatus.Cancelled or AgentApprovalStatus.Expired)
+        {
+            return Result.Invalid("Workspace final output approval is no longer valid.");
+        }
+
+        if (approval.Status != AgentApprovalStatus.Approved)
+        {
+            return Result.Invalid("Final output approval is not approved.");
+        }
+
         foreach (var artifact in workspace.Artifacts.Where(item => item.Status != ArtifactStatus.Final))
         {
+            if (artifact.Status is ArtifactStatus.Rejected or ArtifactStatus.Deleted)
+            {
+                return Result.Invalid($"Artifact {artifact.Name} cannot be finalized from status {artifact.Status}.");
+            }
+
             if (artifact.Status is ArtifactStatus.Draft or ArtifactStatus.Reviewing)
             {
                 artifact.Approve(now);
@@ -446,18 +602,37 @@ public sealed class FinalizeArtifactWorkspaceCommandHandler(
 
         if (task.Status == AgentTaskStatus.WaitingFinalApproval)
         {
+            task.MarkFinalized(now);
+        }
+
+        if (task.Status == AgentTaskStatus.Finalized)
+        {
             task.Complete("产物已确认并输出到 final 目录。", now);
         }
 
+        var activeRunAttemptId = task.ActiveRunAttemptId;
         var finalStep = task.Steps
             .OrderByDescending(step => step.StepIndex)
             .FirstOrDefault(step => string.Equals(step.ToolCode, "finalize_artifacts", StringComparison.OrdinalIgnoreCase));
-        if (finalStep is not null && finalStep.Status == AgentStepStatus.WaitingApproval)
+        if (finalStep is not null &&
+            finalStep.Status is AgentStepStatus.WaitingApproval or AgentStepStatus.Approved)
         {
             finalStep.Complete("""{"status":"finalized"}""", now);
         }
 
-        approvalRepository.Update(approval);
+        if (activeRunAttemptId is not null)
+        {
+            var attempt = await runAttemptRepository.FirstOrDefaultAsync(
+                new AgentTaskRunAttemptByIdSpec(activeRunAttemptId.Value),
+                cancellationToken);
+            if (attempt is not null && !attempt.IsTerminal)
+            {
+                attempt.MarkSucceeded(now, "Workspace final output approved.");
+                runAttemptRepository.Update(attempt);
+                task.ReleaseRunLease(now, clearActiveAttempt: true);
+            }
+        }
+
         workspaceRepository.Update(workspace);
         taskRepository.Update(task);
         await auditRecorder.RecordApprovalDecisionAsync(
@@ -473,6 +648,7 @@ public sealed class FinalizeArtifactWorkspaceCommandHandler(
             "Workspace artifacts finalized.",
             cancellationToken);
         await workspaceRepository.SaveChangesAsync(cancellationToken);
+        await auditLogWriter.SaveChangesAsync(cancellationToken);
 
         var files = await fileStore.ListAsync(workspace.WorkspaceCode, cancellationToken);
         return Result.Success(ArtifactWorkspaceMapper.Map(workspace, task, files));

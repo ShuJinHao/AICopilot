@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Client;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.Json;
 
 namespace AICopilot.Infrastructure.Mcp;
 
@@ -17,7 +18,8 @@ public class McpServerBootstrap(
     IReadRepository<McpServerInfo> mcpServerRepository,
     IApprovalRequirementReadService approvalRequirementReadService,
     IAgentPluginRegistry agentPluginRegistry,
-    ILogger<McpServerBootstrap> logger)
+    ILogger<McpServerBootstrap> logger,
+    McpToolRegistrySynchronizer? toolRegistrySynchronizer = null)
     : IMcpServerBootstrap, IMcpRuntimeRegistrationProvider
 {
     private static readonly TimeSpan SseConnectionTimeout = TimeSpan.FromSeconds(15);
@@ -102,6 +104,7 @@ public class McpServerBootstrap(
             }
 
             var protectedNames = await LoadProtectedToolNamesAsync(mcpServerInfo.Name, cancellationToken);
+            await SyncToolRegistryAsync(mcpServerInfo, exposedTools, cancellationToken);
             var plugin = BuildMcpPlugin(mcpServerInfo, exposedTools, protectedNames, clientHandle);
 
             return new McpRuntimeRegistration(
@@ -204,6 +207,32 @@ public class McpServerBootstrap(
             Tools = tools,
             ChatExposureMode = mcpServerInfo.ChatExposureMode
         };
+    }
+
+    private async Task SyncToolRegistryAsync(
+        McpServerInfo mcpServerInfo,
+        IReadOnlyCollection<(McpClientTool Tool, McpAllowedTool Exposure)> exposedTools,
+        CancellationToken cancellationToken)
+    {
+        if (toolRegistrySynchronizer is null || exposedTools.Count == 0)
+        {
+            return;
+        }
+
+        var discoveredTools = exposedTools
+            .Select(candidate => new McpDiscoveredToolRegistration(
+                AiToolIdentity.CreateRuntimeName(AiToolTargetType.McpServer, mcpServerInfo.Name, candidate.Tool.Name),
+                candidate.Tool.Name,
+                candidate.Tool.Description,
+                JsonSchemaToString(candidate.Tool.JsonSchema),
+                JsonSchemaToString(candidate.Tool.ReturnJsonSchema),
+                candidate.Exposure.EffectiveRiskLevel(mcpServerInfo.RiskLevel)))
+            .ToArray();
+
+        await toolRegistrySynchronizer.UpsertDiscoveredToolsAsync(
+            mcpServerInfo.Name,
+            discoveredTools,
+            cancellationToken);
     }
 
     private static AiToolDefinition ToToolDefinition(
@@ -321,6 +350,13 @@ public class McpServerBootstrap(
         }
 
         return null;
+    }
+
+    private static string JsonSchemaToString(JsonElement? schema)
+    {
+        return schema.HasValue && schema.Value.ValueKind != JsonValueKind.Undefined
+            ? schema.Value.GetRawText()
+            : "{}";
     }
 
     protected virtual async Task<McpClient> CreateStdioClientAsync(McpServerInfo mcpServerInfo, CancellationToken ct)

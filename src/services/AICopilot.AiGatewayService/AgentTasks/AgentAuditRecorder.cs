@@ -134,6 +134,30 @@ public sealed class AgentAuditRecorder(IAuditLogWriter auditLogWriter)
             cancellationToken);
     }
 
+    public Task RecordFinalReviewSubmittedAsync(
+        AgentTask task,
+        ArtifactWorkspace workspace,
+        ApprovalRequest approval,
+        CancellationToken cancellationToken)
+    {
+        return WriteAsync(
+            "Agent.FinalReviewSubmitted",
+            "ApprovalRequest",
+            approval.Id.Value.ToString(),
+            approval.ApprovalType.ToString(),
+            AuditResults.Succeeded,
+            "Workspace final review submitted and is waiting for approval.",
+            new Dictionary<string, string>
+            {
+                ["taskId"] = task.Id.Value.ToString(),
+                ["taskCode"] = task.TaskCode,
+                ["workspaceCode"] = workspace.WorkspaceCode,
+                ["approvalType"] = approval.ApprovalType.ToString(),
+                ["targetId"] = approval.TargetId
+            },
+            cancellationToken);
+    }
+
     private Task WriteAsync(
         string actionCode,
         string targetType,

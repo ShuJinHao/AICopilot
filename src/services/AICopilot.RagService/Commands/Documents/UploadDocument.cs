@@ -1,5 +1,6 @@
 ﻿using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.Services.CrossCutting.Attributes;
+using AICopilot.RagService.KnowledgeBases;
 using AICopilot.Services.Contracts;
 using AICopilot.Services.Contracts.Events;
 using AICopilot.SharedKernel.Messaging;
@@ -15,7 +16,11 @@ namespace AICopilot.RagService.Commands.Documents;
 
 public record UploadDocumentDto(int Id, string Status);
 
-public record FileUploadStream(string FileName, Stream Stream);
+public record FileUploadStream(
+    string FileName,
+    Stream Stream,
+    string? ContentType = null,
+    long? FileSize = null);
 
 [AuthorizeRequirement("Rag.UploadDocument")]
 public record UploadDocumentCommand(
@@ -36,6 +41,8 @@ public class UploadDocumentCommandHandler(
     IFileStorageService fileStorage,
     IDocumentFormatPolicy documentFormatPolicy,
     IIntegrationEventStager eventStager,
+    IAuditLogWriter auditLogWriter,
+    ICurrentUser currentUser,
     ILogger<UploadDocumentCommandHandler> logger)
     : ICommandHandler<UploadDocumentCommand, Result<UploadDocumentDto>>
 {
@@ -43,6 +50,13 @@ public class UploadDocumentCommandHandler(
         UploadDocumentCommand request,
         CancellationToken cancellationToken)
     {
+        if (currentUser.Id is not { } userId)
+        {
+            return Result.Unauthorized(new ApiProblemDescriptor(
+                AuthProblemCodes.Unauthorized,
+                "Current user id is missing or invalid."));
+        }
+
         // 1. 获取知识库聚合根（并急切加载 Documents 集合）
         // 使用我们刚扩展的 GetAsync 方法，通过 includes 参数加载子实体
         var kb = await kbRepo.GetAsync(
@@ -51,6 +65,11 @@ public class UploadDocumentCommandHandler(
             cancellationToken);
 
         if (kb == null) return Result.NotFound("知识库不存在");
+
+        if (!KnowledgeBaseAccessPolicy.CanWrite(kb, userId, KnowledgeBaseAccessPolicy.IsAdmin(currentUser)))
+        {
+            return Result.NotFound();
+        }
 
         if (!TryParseEnum(request.Classification, DocumentClassification.Internal, out var classification))
         {
@@ -62,7 +81,25 @@ public class UploadDocumentCommandHandler(
             return Result.Invalid("Invalid document source type.");
         }
 
-        var extension = Path.GetExtension(request.File.FileName).ToLowerInvariant();
+        var normalizedFile = await RagDocumentUploadSecurityPolicy.NormalizeStreamAsync(request.File, cancellationToken);
+        var securityResult = await RagDocumentUploadSecurityPolicy.ValidateAndNormalizeAsync(
+            normalizedFile,
+            documentFormatPolicy,
+            cancellationToken);
+        if (!securityResult.IsValid || securityResult.File is null)
+        {
+            await RecordUploadAuditAsync(
+                AuditResults.Rejected,
+                securityResult.ErrorMessage ?? "RAG document upload rejected by security policy.",
+                request,
+                null,
+                cancellationToken);
+            await auditLogWriter.SaveChangesAsync(cancellationToken);
+            return Result.Invalid(securityResult.ErrorMessage ?? "RAG document upload rejected by security policy.");
+        }
+
+        normalizedFile = securityResult.File;
+        var extension = Path.GetExtension(normalizedFile.FileName).ToLowerInvariant();
         if (!documentFormatPolicy.IsSupported(extension))
         {
             var supported = string.Join(", ", documentFormatPolicy.SupportedExtensions);
@@ -74,13 +111,13 @@ public class UploadDocumentCommandHandler(
         using (var sha256 = SHA256.Create())
         {
             // 确保流从头开始
-            if (request.File.Stream.CanSeek) request.File.Stream.Position = 0;
+            if (normalizedFile.Stream.CanSeek) normalizedFile.Stream.Position = 0;
 
-            var hashBytes = await sha256.ComputeHashAsync(request.File.Stream, cancellationToken);
+            var hashBytes = await sha256.ComputeHashAsync(normalizedFile.Stream, cancellationToken);
             fileHash = BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
 
             // 计算完 Hash 后，必须重置流位置，否则后续保存文件时会读到空内容
-            if (request.File.Stream.CanSeek) request.File.Stream.Position = 0;
+            if (normalizedFile.Stream.CanSeek) normalizedFile.Stream.Position = 0;
         }
 
         // 3. 检查文件是否已存在 (基于 Hash 实现幂等性)
@@ -94,12 +131,12 @@ public class UploadDocumentCommandHandler(
         }
 
         // 4. 保存物理文件 (只有当文件不存在时才执行 IO 操作)
-        var savedPath = await fileStorage.SaveAsync(request.File.Stream, request.File.FileName, cancellationToken);
+        var savedPath = await fileStorage.SaveAsync(normalizedFile.Stream, normalizedFile.FileName, cancellationToken);
 
         // 5. 领域模型行为：添加文档
         // 这一步是纯内存操作，修改了聚合根的状态
         var document = kb.AddDocument(
-            request.File.FileName,
+            normalizedFile.FileName,
             savedPath,
             extension,
             fileHash,
@@ -121,8 +158,15 @@ public class UploadDocumentCommandHandler(
                 DocumentId = document.Id,
                 KnowledgeBaseId = kb.Id,
                 FilePath = savedPath,
-                FileName = request.File.FileName
+                FileName = normalizedFile.FileName
             });
+
+            await RecordUploadAuditAsync(
+                AuditResults.Succeeded,
+                "RAG document upload accepted by security policy.",
+                request,
+                document,
+                cancellationToken);
 
             // 7. 持久化到数据库，同时提交文档和 outbox 行。
             await kbRepo.SaveChangesAsync(cancellationToken);
@@ -134,6 +178,32 @@ public class UploadDocumentCommandHandler(
         }
 
         return Result.Success(new UploadDocumentDto(document.Id, document.Status.ToString()));
+    }
+
+    private Task RecordUploadAuditAsync(
+        string result,
+        string summary,
+        UploadDocumentCommand request,
+        Document? document,
+        CancellationToken cancellationToken)
+    {
+        return auditLogWriter.WriteAsync(
+            new AuditLogWriteRequest(
+                AuditActionGroups.Config,
+                "Rag.UploadDocument",
+                "KnowledgeDocument",
+                document?.Id.ToString(),
+                document?.Name ?? Path.GetFileName(request.File.FileName),
+                result,
+                summary,
+                Metadata: new Dictionary<string, string>
+                {
+                    ["knowledgeBaseId"] = request.KnowledgeBaseId.ToString(),
+                    ["fileName"] = Path.GetFileName(request.File.FileName),
+                    ["contentType"] = request.File.ContentType ?? string.Empty,
+                    ["fileSize"] = (request.File.FileSize ?? 0).ToString()
+                }),
+            cancellationToken);
     }
 
     private async Task TryDeleteSavedFileAsync(string savedPath, Exception originalException)

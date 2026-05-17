@@ -148,3 +148,108 @@ public readonly record struct UploadRecordId : IStronglyTypedGuidId
 
     public override string ToString() => Value.ToString();
 }
+
+public readonly record struct ToolRegistrationId : IStronglyTypedGuidId
+{
+    public ToolRegistrationId(Guid value)
+    {
+        if (value == Guid.Empty)
+        {
+            throw new ArgumentException("Tool registration id is required.", nameof(value));
+        }
+
+        Value = value;
+    }
+
+    public Guid Value { get; }
+
+    public static ToolRegistrationId New() => new(Guid.NewGuid());
+
+    public static implicit operator Guid(ToolRegistrationId id) => id.Value;
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct ToolExecutionRecordId : IStronglyTypedGuidId
+{
+    public ToolExecutionRecordId(Guid value)
+    {
+        if (value == Guid.Empty)
+        {
+            throw new ArgumentException("Tool execution record id is required.", nameof(value));
+        }
+
+        Value = value;
+    }
+
+    public Guid Value { get; }
+
+    public static ToolExecutionRecordId New() => new(Guid.NewGuid());
+
+    public static implicit operator Guid(ToolExecutionRecordId id) => id.Value;
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct AgentTaskRunAttemptId : IStronglyTypedGuidId
+{
+    public AgentTaskRunAttemptId(Guid value)
+    {
+        if (value == Guid.Empty)
+        {
+            throw new ArgumentException("Agent task run attempt id is required.", nameof(value));
+        }
+
+        Value = value;
+    }
+
+    public Guid Value { get; }
+
+    public static AgentTaskRunAttemptId New() => new(Guid.NewGuid());
+
+    public static implicit operator Guid(AgentTaskRunAttemptId id) => id.Value;
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct AgentTaskRunQueueItemId : IStronglyTypedGuidId
+{
+    public AgentTaskRunQueueItemId(Guid value)
+    {
+        if (value == Guid.Empty)
+        {
+            throw new ArgumentException("Agent task run queue item id is required.", nameof(value));
+        }
+
+        Value = value;
+    }
+
+    public Guid Value { get; }
+
+    public static AgentTaskRunQueueItemId New() => new(Guid.NewGuid());
+
+    public static implicit operator Guid(AgentTaskRunQueueItemId id) => id.Value;
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct AgentWorkerHeartbeatId : IStronglyTypedGuidId
+{
+    public AgentWorkerHeartbeatId(Guid value)
+    {
+        if (value == Guid.Empty)
+        {
+            throw new ArgumentException("Agent worker heartbeat id is required.", nameof(value));
+        }
+
+        Value = value;
+    }
+
+    public Guid Value { get; }
+
+    public static AgentWorkerHeartbeatId New() => new(Guid.NewGuid());
+
+    public static implicit operator Guid(AgentWorkerHeartbeatId id) => id.Value;
+
+    public override string ToString() => Value.ToString();
+}

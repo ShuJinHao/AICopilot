@@ -57,6 +57,20 @@ public sealed class AcceptanceClosureVerificationTests
         approvalPolicyColumns.Should().ContainKey("requires_onsite_attestation");
         approvalPolicyColumns["requires_onsite_attestation"].Should().Be("boolean");
 
+        var queueColumns = await QueryColumnMetadataAsync(
+            connection,
+            "aigateway",
+            "agent_task_run_queue_items",
+            ["task_id", "trigger_type", "status", "requested_by", "run_attempt_id", "lease_expires_at", "available_at"]);
+
+        queueColumns["task_id"].Should().Be("uuid");
+        queueColumns["trigger_type"].Should().Be("character varying");
+        queueColumns["status"].Should().Be("character varying");
+        queueColumns["requested_by"].Should().Be("uuid");
+        queueColumns["run_attempt_id"].Should().Be("uuid");
+        queueColumns["lease_expires_at"].Should().Be("timestamp with time zone");
+        queueColumns["available_at"].Should().Be("timestamp with time zone");
+
         await using var migrationCommand = connection.CreateCommand();
         migrationCommand.CommandText =
             """
@@ -230,6 +244,9 @@ public sealed class AcceptanceClosureVerificationTests
         await ApproveAgentApprovalAsync(planApproval.Id, "Acceptance plan approved.");
 
         task = await PostJsonAsync<AgentTaskDto>("/api/aigateway/agent/task/run", new { id = task.Id });
+        task.IsRunQueued.Should().BeTrue();
+        task.RunQueueStatus.Should().Be("Queued");
+        task = await WaitForTaskStatusAsync(task.Id, "WaitingToolApproval");
         task.Status.Should().Be("WaitingToolApproval");
 
         var draftWorkspace = await GetJsonAsync<ArtifactWorkspaceDto>(
@@ -241,6 +258,11 @@ public sealed class AcceptanceClosureVerificationTests
         draftWorkspace.Artifacts.Should().Contain(item => item.RelativePath == "draft/report.html");
         draftWorkspace.Artifacts.Should().OnlyContain(item => item.Status != "Final");
         draftWorkspace.Artifacts.Should().OnlyContain(item => !item.RelativePath.StartsWith("final/", StringComparison.OrdinalIgnoreCase));
+        draftWorkspace.Manifest.Select(item => item.ArtifactId)
+            .Should()
+            .BeEquivalentTo(draftWorkspace.Artifacts.Select(item => item.Id));
+        draftWorkspace.Manifest.Should().OnlyContain(item =>
+            item.DownloadUrl == $"/api/aigateway/artifact/{item.ArtifactId}/download");
 
         for (var attempt = 0; attempt < 8; attempt++)
         {
@@ -256,15 +278,14 @@ public sealed class AcceptanceClosureVerificationTests
                 await ApproveAgentApprovalAsync(approval.Id, $"Approve {approval.TargetName}.");
             }
 
-            task = await PostJsonAsync<AgentTaskDto>("/api/aigateway/agent/task/run", new { id = task.Id });
+            task = await WaitForTaskToPauseAsync(task.Id);
         }
 
         var finalApproval = (await GetPendingApprovalsAsync(task.Id))
-            .SingleOrDefault(item => item.Type == "FinalOutput");
-        if (finalApproval is not null)
-        {
-            finalApproval.WorkspaceCode.Should().Be(task.WorkspaceCode);
-        }
+            .Should()
+            .ContainSingle(item => item.Type == "FinalOutput")
+            .Subject;
+        finalApproval.WorkspaceCode.Should().Be(task.WorkspaceCode);
 
         draftWorkspace = await GetJsonAsync<ArtifactWorkspaceDto>(
             $"/api/aigateway/workspace/{task.WorkspaceCode}");
@@ -274,6 +295,13 @@ public sealed class AcceptanceClosureVerificationTests
         draftWorkspace.Artifacts.Should().OnlyContain(item => item.Status != "Final");
         draftWorkspace.Artifacts.Should().OnlyContain(item => !item.RelativePath.StartsWith("final/", StringComparison.OrdinalIgnoreCase));
 
+        await PostJsonExpectingStatusAsync(
+            $"/api/aigateway/workspace/{task.WorkspaceCode}/finalize",
+            new { },
+            HttpStatusCode.BadRequest);
+
+        await ApproveAgentApprovalAsync(finalApproval.Id, "Final output approved.");
+
         var finalizedWorkspace = await PostJsonAsync<ArtifactWorkspaceDto>(
             $"/api/aigateway/workspace/{task.WorkspaceCode}/finalize",
             new { });
@@ -281,6 +309,8 @@ public sealed class AcceptanceClosureVerificationTests
         finalizedWorkspace.Artifacts.Should().NotBeEmpty();
         finalizedWorkspace.Artifacts.Should().OnlyContain(item => item.Status == "Final");
         finalizedWorkspace.Artifacts.Should().OnlyContain(item => item.RelativePath.StartsWith("final/", StringComparison.OrdinalIgnoreCase));
+        finalizedWorkspace.Manifest.Should().OnlyContain(item => item.Status == "Final" &&
+                                                                item.RelativePath.StartsWith("final/", StringComparison.OrdinalIgnoreCase));
 
         var downloadedBytes = await DownloadArtifactAsync(finalizedWorkspace.Artifacts.First().Id);
         downloadedBytes.Should().NotBeEmpty();
@@ -413,6 +443,46 @@ public sealed class AcceptanceClosureVerificationTests
         return approvals.Where(item => item.Status == "Pending").ToList();
     }
 
+    private async Task<AgentTaskDto> WaitForTaskStatusAsync(Guid taskId, string expectedStatus)
+    {
+        return await WaitForTaskAsync(
+            taskId,
+            task => string.Equals(task.Status, expectedStatus, StringComparison.OrdinalIgnoreCase),
+            $"status {expectedStatus}");
+    }
+
+    private async Task<AgentTaskDto> WaitForTaskToPauseAsync(Guid taskId)
+    {
+        return await WaitForTaskAsync(
+            taskId,
+            task => !task.IsRunQueued &&
+                    !task.IsRunInProgress &&
+                    task.Status is "WaitingToolApproval" or "WaitingFinalApproval" or "WorkspaceReady" or "Failed",
+            "worker pause");
+    }
+
+    private async Task<AgentTaskDto> WaitForTaskAsync(
+        Guid taskId,
+        Func<AgentTaskDto, bool> predicate,
+        string reason)
+    {
+        AgentTaskDto? latest = null;
+        for (var attempt = 0; attempt < 60; attempt++)
+        {
+            latest = await GetJsonAsync<AgentTaskDto>($"/api/aigateway/agent/task?id={taskId}");
+            if (predicate(latest))
+            {
+                return latest;
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(1));
+        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"Timed out waiting for agent task {taskId} to reach {reason}. " +
+            $"Last status={latest?.Status}, queue={latest?.RunQueueStatus}, queued={latest?.IsRunQueued}, running={latest?.IsRunInProgress}.");
+    }
+
     private async Task ApproveAgentApprovalAsync(Guid approvalId, string comment)
     {
         _ = await PostJsonAsync<AgentApprovalRequestDto>(
@@ -458,6 +528,12 @@ public sealed class AcceptanceClosureVerificationTests
         }
 
         return (await response.Content.ReadFromJsonAsync<T>(JsonOptions))!;
+    }
+
+    private async Task PostJsonExpectingStatusAsync(string uri, object payload, HttpStatusCode statusCode)
+    {
+        using var response = await _fixture.HttpClient.PostAsJsonAsync(uri, payload, JsonOptions);
+        response.StatusCode.Should().Be(statusCode);
     }
 
     private static async Task<Dictionary<string, string>> QueryColumnMetadataAsync(
@@ -564,7 +640,11 @@ public sealed class AcceptanceClosureVerificationTests
         IReadOnlyCollection<AgentStepDto> Steps,
         int PendingApprovalCount,
         string? LastFailureReason,
-        bool CanRetry);
+        bool CanRetry,
+        bool IsRunInProgress = false,
+        Guid? QueuedRunId = null,
+        string? RunQueueStatus = null,
+        bool IsRunQueued = false);
 
     private sealed record AgentStepDto(
         Guid Id,
@@ -597,7 +677,8 @@ public sealed class AcceptanceClosureVerificationTests
         Guid TaskId,
         string Status,
         IReadOnlyCollection<ArtifactWorkspaceFileDto> Files,
-        IReadOnlyCollection<ArtifactDto> Artifacts);
+        IReadOnlyCollection<ArtifactDto> Artifacts,
+        IReadOnlyCollection<ArtifactManifestItemDto> Manifest);
 
     private sealed record ArtifactWorkspaceFileDto(
         string Name,
@@ -622,6 +703,17 @@ public sealed class AcceptanceClosureVerificationTests
         bool RequiresApproval,
         string ApprovalStatus,
         DateTimeOffset? FinalizedAt);
+
+    private sealed record ArtifactManifestItemDto(
+        Guid ArtifactId,
+        string Type,
+        string Name,
+        string RelativePath,
+        string Status,
+        int Version,
+        int? GeneratedByStep,
+        string DownloadUrl,
+        DateTimeOffset CreatedAt);
 
     private sealed record AgentTaskAuditSummaryDto(
         Guid Id,

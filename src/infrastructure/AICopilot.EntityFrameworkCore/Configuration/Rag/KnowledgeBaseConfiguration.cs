@@ -31,6 +31,19 @@ public class KnowledgeBaseConfiguration : IEntityTypeConfiguration<KnowledgeBase
             .HasConversion(id => id.Value, value => new EmbeddingModelId(value))
             .IsRequired()
             .HasColumnName("embedding_model_id");
+
+        builder.Property(kb => kb.OwnerUserId)
+            .HasColumnName("owner_user_id");
+
+        builder.Property(kb => kb.AccessScope)
+            .IsRequired()
+            .HasMaxLength(50)
+            .HasConversion<string>()
+            .HasDefaultValue(KnowledgeBaseAccessScope.OwnerOnly)
+            .HasColumnName("access_scope");
+
+        builder.HasIndex(kb => kb.OwnerUserId)
+            .HasDatabaseName("ix_knowledge_bases_owner_user_id");
         
         // 配置导航属性 Documents
         builder.HasMany(kb => kb.Documents)

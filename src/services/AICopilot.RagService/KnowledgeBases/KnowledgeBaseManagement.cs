@@ -16,6 +16,8 @@ public record KnowledgeBaseDto
     public required string Name { get; init; }
     public required string Description { get; init; }
     public Guid EmbeddingModelId { get; init; }
+    public Guid? OwnerUserId { get; init; }
+    public required string AccessScope { get; init; }
     public int DocumentCount { get; init; }
 }
 
@@ -29,11 +31,19 @@ public record UpdateKnowledgeBaseCommand(
 public class UpdateKnowledgeBaseCommandHandler(
     IRepository<KnowledgeBase> repository,
     IReadRepository<EmbeddingModel> embeddingRepository,
-    IAuditLogWriter auditLogWriter)
+    IAuditLogWriter auditLogWriter,
+    ICurrentUser currentUser)
     : ICommandHandler<UpdateKnowledgeBaseCommand, Result>
 {
     public async Task<Result> Handle(UpdateKnowledgeBaseCommand request, CancellationToken cancellationToken)
     {
+        if (currentUser.Id is not { } userId)
+        {
+            return Result.Unauthorized(new ApiProblemDescriptor(
+                AuthProblemCodes.Unauthorized,
+                "Current user id is missing or invalid."));
+        }
+
         var embeddingModelId = new EmbeddingModelId(request.EmbeddingModelId);
         var embeddingModel = await embeddingRepository.GetByIdAsync(embeddingModelId, cancellationToken);
         if (embeddingModel == null)
@@ -43,6 +53,11 @@ public class UpdateKnowledgeBaseCommandHandler(
 
         var entity = await repository.GetByIdAsync(new KnowledgeBaseId(request.Id), cancellationToken);
         if (entity == null)
+        {
+            return Result.NotFound();
+        }
+
+        if (!KnowledgeBaseAccessPolicy.CanWrite(entity, userId, KnowledgeBaseAccessPolicy.IsAdmin(currentUser)))
         {
             return Result.NotFound();
         }
@@ -88,15 +103,28 @@ public record DeleteKnowledgeBaseCommand(Guid Id) : ICommand<Result>;
 
 public class DeleteKnowledgeBaseCommandHandler(
     IRepository<KnowledgeBase> repository,
-    IAuditLogWriter auditLogWriter)
+    IAuditLogWriter auditLogWriter,
+    ICurrentUser currentUser)
     : ICommandHandler<DeleteKnowledgeBaseCommand, Result>
 {
     public async Task<Result> Handle(DeleteKnowledgeBaseCommand request, CancellationToken cancellationToken)
     {
+        if (currentUser.Id is not { } userId)
+        {
+            return Result.Unauthorized(new ApiProblemDescriptor(
+                AuthProblemCodes.Unauthorized,
+                "Current user id is missing or invalid."));
+        }
+
         var entity = await repository.GetByIdAsync(new KnowledgeBaseId(request.Id), cancellationToken);
         if (entity == null)
         {
             return Result.Success();
+        }
+
+        if (!KnowledgeBaseAccessPolicy.CanWrite(entity, userId, KnowledgeBaseAccessPolicy.IsAdmin(currentUser)))
+        {
+            return Result.NotFound();
         }
 
         var targetName = entity.Name;
@@ -119,7 +147,9 @@ public class DeleteKnowledgeBaseCommandHandler(
 [AuthorizeRequirement("Rag.GetKnowledgeBase")]
 public record GetKnowledgeBaseQuery(Guid Id) : IQuery<Result<KnowledgeBaseDto>>;
 
-public class GetKnowledgeBaseQueryHandler(IReadRepository<KnowledgeBase> repository)
+public class GetKnowledgeBaseQueryHandler(
+    IReadRepository<KnowledgeBase> repository,
+    ICurrentUser currentUser)
     : IQueryHandler<GetKnowledgeBaseQuery, Result<KnowledgeBaseDto>>
 {
     public async Task<Result<KnowledgeBaseDto>> Handle(
@@ -130,7 +160,14 @@ public class GetKnowledgeBaseQueryHandler(IReadRepository<KnowledgeBase> reposit
             new KnowledgeBaseByIdWithDocumentsSpec(new KnowledgeBaseId(request.Id)),
             cancellationToken);
 
-        return result == null ? Result.NotFound() : Result.Success(Map(result));
+        if (result == null || currentUser.Id is not { } userId)
+        {
+            return Result.NotFound();
+        }
+
+        return KnowledgeBaseAccessPolicy.CanRead(result, userId, KnowledgeBaseAccessPolicy.IsAdmin(currentUser))
+            ? Result.Success(Map(result))
+            : Result.NotFound();
     }
 
     private static KnowledgeBaseDto Map(KnowledgeBase knowledgeBase)
@@ -141,6 +178,8 @@ public class GetKnowledgeBaseQueryHandler(IReadRepository<KnowledgeBase> reposit
             Name = knowledgeBase.Name,
             Description = knowledgeBase.Description,
             EmbeddingModelId = knowledgeBase.EmbeddingModelId,
+            OwnerUserId = knowledgeBase.OwnerUserId,
+            AccessScope = knowledgeBase.AccessScope.ToString(),
             DocumentCount = knowledgeBase.Documents.Count
         };
     }
@@ -149,15 +188,26 @@ public class GetKnowledgeBaseQueryHandler(IReadRepository<KnowledgeBase> reposit
 [AuthorizeRequirement("Rag.GetListKnowledgeBases")]
 public record GetListKnowledgeBasesQuery : IQuery<Result<IList<KnowledgeBaseDto>>>;
 
-public class GetListKnowledgeBasesQueryHandler(IReadRepository<KnowledgeBase> repository)
+public class GetListKnowledgeBasesQueryHandler(
+    IReadRepository<KnowledgeBase> repository,
+    ICurrentUser currentUser)
     : IQueryHandler<GetListKnowledgeBasesQuery, Result<IList<KnowledgeBaseDto>>>
 {
     public async Task<Result<IList<KnowledgeBaseDto>>> Handle(
         GetListKnowledgeBasesQuery request,
         CancellationToken cancellationToken)
     {
+        if (currentUser.Id is not { } userId)
+        {
+            return Result.Success<IList<KnowledgeBaseDto>>([]);
+        }
+
         var result = await repository.ListAsync(new KnowledgeBasesOrderedWithDocumentsSpec(), cancellationToken);
-        IList<KnowledgeBaseDto> items = result.Select(Map).ToList();
+        var isAdmin = KnowledgeBaseAccessPolicy.IsAdmin(currentUser);
+        IList<KnowledgeBaseDto> items = result
+            .Where(knowledgeBase => KnowledgeBaseAccessPolicy.CanRead(knowledgeBase, userId, isAdmin))
+            .Select(Map)
+            .ToList();
         return Result.Success(items);
     }
 
@@ -169,6 +219,8 @@ public class GetListKnowledgeBasesQueryHandler(IReadRepository<KnowledgeBase> re
             Name = knowledgeBase.Name,
             Description = knowledgeBase.Description,
             EmbeddingModelId = knowledgeBase.EmbeddingModelId,
+            OwnerUserId = knowledgeBase.OwnerUserId,
+            AccessScope = knowledgeBase.AccessScope.ToString(),
             DocumentCount = knowledgeBase.Documents.Count
         };
     }

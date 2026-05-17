@@ -111,6 +111,7 @@ public sealed class ApproveAgentApprovalCommandHandler(
     IRepository<AgentTask> taskRepository,
     IRepository<ArtifactWorkspace> workspaceRepository,
     AgentAuditRecorder auditRecorder,
+    IAgentTaskRunQueue runQueue,
     ICurrentUser currentUser)
     : ICommandHandler<ApproveAgentApprovalCommand, Result<AgentApprovalRequestDto>>
 {
@@ -126,6 +127,7 @@ public sealed class ApproveAgentApprovalCommandHandler(
             taskRepository,
             workspaceRepository,
             auditRecorder,
+            runQueue,
             currentUser,
             cancellationToken);
     }
@@ -138,6 +140,7 @@ public sealed class ApproveAgentApprovalCommandHandler(
         IRepository<AgentTask> taskRepository,
         IRepository<ArtifactWorkspace> workspaceRepository,
         AgentAuditRecorder auditRecorder,
+        IAgentTaskRunQueue? runQueue,
         ICurrentUser currentUser,
         CancellationToken cancellationToken)
     {
@@ -195,6 +198,17 @@ public sealed class ApproveAgentApprovalCommandHandler(
             cancellationToken);
         await approvalRepository.SaveChangesAsync(cancellationToken);
 
+        if (isApproved &&
+            approval.ApprovalType == AgentApprovalType.ToolCall &&
+            runQueue is not null)
+        {
+            _ = await runQueue.EnqueueAsync(
+                task,
+                AgentTaskRunTriggerType.ApprovalResume,
+                userId,
+                cancellationToken);
+        }
+
         return Result.Success(AgentApprovalDtoMapper.Map(approval, task, workspace));
     }
 
@@ -244,6 +258,14 @@ public sealed class ApproveAgentApprovalCommandHandler(
                     task.WaitForFinalApproval(now);
                 }
 
+                var finalStep = task.Steps
+                    .OrderByDescending(step => step.StepIndex)
+                    .FirstOrDefault(step => string.Equals(step.ToolCode, "finalize_artifacts", StringComparison.OrdinalIgnoreCase));
+                if (finalStep?.Status == AgentStepStatus.WaitingApproval)
+                {
+                    finalStep.Approve();
+                }
+
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(approval.ApprovalType), approval.ApprovalType, "Unknown approval type.");
@@ -288,6 +310,7 @@ public sealed class RejectAgentApprovalCommandHandler(
     IRepository<AgentTask> taskRepository,
     IRepository<ArtifactWorkspace> workspaceRepository,
     AgentAuditRecorder auditRecorder,
+    IAgentTaskRunQueue runQueue,
     ICurrentUser currentUser)
     : ICommandHandler<RejectAgentApprovalCommand, Result<AgentApprovalRequestDto>>
 {
@@ -303,6 +326,7 @@ public sealed class RejectAgentApprovalCommandHandler(
             taskRepository,
             workspaceRepository,
             auditRecorder,
+            runQueue,
             currentUser,
             cancellationToken);
     }

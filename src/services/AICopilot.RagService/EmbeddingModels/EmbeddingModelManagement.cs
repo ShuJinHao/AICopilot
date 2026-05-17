@@ -20,7 +20,7 @@ public record EmbeddingModelDto
     public int MaxTokens { get; init; }
     public bool IsEnabled { get; init; }
     public bool HasApiKey { get; init; }
-    public string? ApiKeyMasked { get; init; }
+    public string? ApiKeyPreview { get; init; }
 }
 
 public record CreatedEmbeddingModelDto(Guid Id, string Name);
@@ -275,7 +275,7 @@ internal static class EmbeddingModelDtoMapper
             MaxTokens = model.MaxTokens,
             IsEnabled = model.IsEnabled,
             HasApiKey = !string.IsNullOrEmpty(model.ApiKey),
-            ApiKeyMasked = string.IsNullOrEmpty(model.ApiKey) ? null : "******"
+            ApiKeyPreview = string.IsNullOrEmpty(model.ApiKey) ? null : "******"
         };
     }
 }

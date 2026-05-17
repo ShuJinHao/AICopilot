@@ -21,7 +21,7 @@ internal static class LanguageModelDtoMapper
             IsEnabled = model.IsEnabled,
             Usages = MapUsages(model.Usage),
             HasApiKey = !string.IsNullOrEmpty(model.ApiKey),
-            ApiKeyMasked = string.IsNullOrEmpty(model.ApiKey) ? null : "******",
+            ApiKeyPreview = string.IsNullOrEmpty(model.ApiKey) ? null : "******",
             ConnectivityStatus = model.ConnectivityStatus.ToString(),
             ConnectivityCheckedAt = model.ConnectivityCheckedAt,
             ConnectivityError = model.ConnectivityError
@@ -39,6 +39,11 @@ internal static class LanguageModelDtoMapper
         if (usage.HasFlag(LanguageModelUsage.Routing))
         {
             values.Add(nameof(LanguageModelUsage.Routing));
+        }
+
+        if (usage.HasFlag(LanguageModelUsage.Planner))
+        {
+            values.Add(nameof(LanguageModelUsage.Planner));
         }
 
         return values.ToArray();

@@ -30,6 +30,36 @@ public static class AppProblemCodes
     public const string OnsitePresenceRequired = "onsite_presence_required";
     public const string OnsitePresenceExpired = "onsite_presence_expired";
     public const string ApprovalReconfirmationRequired = "approval_reconfirmation_required";
+    public const string ToolNotRegistered = "tool_not_registered";
+    public const string ToolDisabled = "tool_disabled";
+    public const string ToolBlocked = "tool_blocked";
+    public const string ToolPermissionDenied = "tool_permission_denied";
+    public const string ToolRequiresApproval = "tool_requires_approval";
+    public const string ToolInputInvalid = "tool_input_invalid";
+    public const string ToolExecutionTimeout = "tool_execution_timeout";
+    public const string CloudReadonlyToolDisabled = "cloud_readonly_tool_disabled";
+    public const string CloudReadonlyIntentUnsupported = "cloud_readonly_intent_unsupported";
+    public const string PlannerModelUnavailable = "planner_model_unavailable";
+    public const string PlannerToolCatalogEmpty = "planner_tool_catalog_empty";
+    public const string PlannerToolSchemaUnsupported = "planner_tool_schema_unsupported";
+    public const string AgentPlanInvalid = "agent_plan_invalid";
+    public const string AgentPlanToolDenied = "agent_plan_tool_denied";
+    public const string AgentPlanSchemaInvalid = "agent_plan_schema_invalid";
+    public const string ToolExecutionNotFound = "tool_execution_not_found";
+    public const string ArtifactFinalized = "artifact_finalized";
+    public const string ArtifactGenerationFailed = "artifact_generation_failed";
+    public const string WorkspaceManifestInvalid = "workspace_manifest_invalid";
+    public const string AgentTaskRunInProgress = "agent_task_run_in_progress";
+    public const string AgentTaskRetryNotAllowed = "agent_task_retry_not_allowed";
+    public const string AgentTaskRunLeaseExpired = "agent_task_run_lease_expired";
+    public const string AgentTaskCancellationRequested = "agent_task_cancellation_requested";
+    public const string AgentTaskRunQueued = "agent_task_run_queued";
+    public const string AgentTaskRunQueueNotFound = "agent_task_run_queue_not_found";
+    public const string AgentTaskRunQueueLeaseExpired = "agent_task_run_queue_lease_expired";
+    public const string AgentWorkerUnavailable = "agent_worker_unavailable";
+    public const string AgentWorkerWorkspaceMismatch = "agent_worker_workspace_mismatch";
+    public const string AgentRunQueueDeadLetterNotAllowed = "agent_run_queue_dead_letter_not_allowed";
+    public const string AgentRunQueueOperationDenied = "agent_run_queue_operation_denied";
 }
 
 public static class ApiProblemExtensionKeys

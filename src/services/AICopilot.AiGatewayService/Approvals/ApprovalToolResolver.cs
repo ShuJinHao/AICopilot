@@ -1,12 +1,16 @@
 using AICopilot.AgentPlugin;
+using AICopilot.AiGatewayService.Tools;
 using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
+using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
 
 namespace AICopilot.AiGatewayService.Approvals;
 
 public class ApprovalToolResolver(
     IAgentPluginCatalog pluginCatalog,
-    ApprovalRequirementResolver approvalRequirementResolver)
+    ApprovalRequirementResolver approvalRequirementResolver,
+    ToolRegistryGuard? toolRegistryGuard = null,
+    ICurrentUser? currentUser = null)
 {
     public async Task<AiToolDefinition[]> GetToolsForPluginsAsync(
         string[] pluginNames,
@@ -35,7 +39,10 @@ public class ApprovalToolResolver(
             var requirementMap = requirements.GetValueOrDefault(pluginName)
                                  ?? new Dictionary<string, ApprovalRequirement>(StringComparer.OrdinalIgnoreCase);
 
-            tools.AddRange(pluginCatalog.GetPluginTools(pluginName).Select(tool => ApplyApprovalRequirement(tool, requirementMap)));
+            var exposedTools = await FilterRegistryControlledToolsAsync(
+                pluginCatalog.GetPluginTools(pluginName),
+                cancellationToken);
+            tools.AddRange(exposedTools.Select(tool => ApplyApprovalRequirement(tool, requirementMap)));
         }
 
         return tools.ToArray();
@@ -79,11 +86,46 @@ public class ApprovalToolResolver(
                     continue;
                 }
 
-                tools.Add(ApplyApprovalRequirement(rawTool, requirementMap));
+                var filtered = await FilterRegistryControlledToolsAsync([rawTool], cancellationToken);
+                tools.AddRange(filtered.Select(tool => ApplyApprovalRequirement(tool, requirementMap)));
             }
         }
 
         return tools.ToArray();
+    }
+
+    private async Task<IReadOnlyCollection<AiToolDefinition>> FilterRegistryControlledToolsAsync(
+        IReadOnlyCollection<AiToolDefinition> tools,
+        CancellationToken cancellationToken)
+    {
+        if (tools.Count == 0)
+        {
+            return [];
+        }
+
+        var userId = currentUser?.Id;
+        var result = new List<AiToolDefinition>();
+        foreach (var tool in tools)
+        {
+            if (tool.TargetType != AiToolTargetType.McpServer)
+            {
+                result.Add(tool);
+                continue;
+            }
+
+            if (toolRegistryGuard is null || userId is null)
+            {
+                continue;
+            }
+
+            var decision = await toolRegistryGuard.ValidateAsync(tool.Name, userId.Value, cancellationToken);
+            if (decision.IsAllowed && decision.Tool is not null)
+            {
+                result.Add(tool.WithRequiresApproval(tool.RequiresApproval || decision.Tool.RequiresApproval));
+            }
+        }
+
+        return result;
     }
 
     private static AiToolDefinition ApplyApprovalRequirement(

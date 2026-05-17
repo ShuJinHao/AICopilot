@@ -243,7 +243,7 @@ public sealed class CloudAiReadClientTests
 
         var act = () => client.GetCapacitySummaryAsync(new CloudAiReadQuery(
             null,
-            [new CloudAiReadFilter("deviceCode", "eq", "DEV-001")],
+            [],
             CreateRange("2026-04-20T00:00:00Z", "2026-04-21T00:00:00Z"),
             null,
             false,
@@ -253,6 +253,34 @@ public sealed class CloudAiReadClientTests
         exception.Which.Code.Should().Be(CloudAiReadProblemCodes.MissingRequiredParameter);
         exception.Which.Message.Should().Contain("设备 ID");
         sendCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Client_ShouldUseDeviceCodeAsCloudDeviceParameter_WhenDeviceIdIsMissing()
+    {
+        HttpRequestMessage? capturedRequest = null;
+        using var httpClient = new HttpClient(new StubHandler(request =>
+        {
+            capturedRequest = request;
+            return CreateOkItemsResponse();
+        }));
+        var client = CreateClient(httpClient);
+
+        await client.GetCapacitySummaryAsync(new CloudAiReadQuery(
+            null,
+            [new CloudAiReadFilter("deviceCode", "eq", "DEV-001")],
+            CreateRange("2026-04-20T00:00:00Z", "2026-04-21T00:00:00Z"),
+            null,
+            false,
+            20));
+
+        capturedRequest.Should().NotBeNull();
+        var query = ParseQuery(capturedRequest!.RequestUri!);
+        query.Should().Contain("deviceId", "DEV-001");
+        query.Should().Contain("deviceCode", "DEV-001");
+        query.Should().Contain("startDate", "2026-04-20");
+        query.Should().Contain("endDate", "2026-04-21");
+        AssertNoLegacyParameters(query);
     }
 
     [Fact]

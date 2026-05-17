@@ -86,6 +86,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<McpServerBootstrap>();
         builder.Services.AddScoped<IMcpServerBootstrap>(sp => sp.GetRequiredService<McpServerBootstrap>());
         builder.Services.AddScoped<IMcpRuntimeRegistrationProvider>(sp => sp.GetRequiredService<McpServerBootstrap>());
+        builder.Services.AddScoped<McpToolRegistrySynchronizer>();
         builder.Services.AddSingleton<McpRuntimeRegistrySynchronizer>();
         builder.Services.AddHostedService<McpServerManager>();
     }

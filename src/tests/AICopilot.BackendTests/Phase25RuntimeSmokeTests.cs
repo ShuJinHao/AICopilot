@@ -56,7 +56,7 @@ public sealed class Phase25RuntimeSmokeTests
         var languageModel = await GetJsonAsync<LanguageModelDto>($"/api/aigateway/language-model?id={languageModelId}");
         languageModel.Name.Should().Be(languageModelName);
         languageModel.HasApiKey.Should().BeTrue();
-        languageModel.ApiKeyMasked.Should().Be("******");
+        languageModel.ApiKeyPreview.Should().Be("******");
         languageModel.ConnectivityStatus.Should().Be("Unknown");
         JsonSerializer.Serialize(languageModel, JsonOptions).Should().NotContain("sk-language-model");
 
@@ -192,7 +192,7 @@ public sealed class Phase25RuntimeSmokeTests
 
         var embeddingModel = await GetJsonAsync<EmbeddingModelDto>($"/api/rag/embedding-model?id={embeddingModelId}");
         embeddingModel.HasApiKey.Should().BeTrue();
-        embeddingModel.ApiKeyMasked.Should().Be("******");
+        embeddingModel.ApiKeyPreview.Should().Be("******");
         JsonSerializer.Serialize(embeddingModel, JsonOptions).Should().NotContain("sk-embedding");
 
         await SendJsonAsync(HttpMethod.Put, "/api/rag/embedding-model", new
@@ -2287,7 +2287,7 @@ public sealed class Phase25RuntimeSmokeTests
         bool IsEnabled,
         IReadOnlyList<string> Usages,
         bool HasApiKey,
-        string? ApiKeyMasked,
+        string? ApiKeyPreview,
         string ConnectivityStatus,
         DateTimeOffset? ConnectivityCheckedAt,
         string? ConnectivityError);
@@ -2352,7 +2352,7 @@ public sealed class Phase25RuntimeSmokeTests
         int MaxTokens,
         bool IsEnabled,
         bool HasApiKey,
-        string? ApiKeyMasked);
+        string? ApiKeyPreview);
 
     private sealed record CreatedKnowledgeBaseDto(Guid Id, string Name);
 

@@ -14,18 +14,19 @@ public enum AgentTaskType
 
 public enum AgentTaskStatus
 {
-    DraftPlan = 0,
+    Draft = 0,
     WaitingPlanApproval = 1,
-    Approved = 2,
+    PlanApproved = 2,
     Running = 3,
     WaitingToolApproval = 4,
     GeneratingArtifacts = 5,
     WorkspaceReady = 6,
     WaitingFinalApproval = 7,
-    Completed = 8,
-    Failed = 9,
-    Cancelled = 10,
-    Rejected = 11
+    Finalized = 8,
+    Completed = 9,
+    Rejected = 10,
+    Failed = 11,
+    Cancelled = 12
 }
 
 public enum AgentTaskRiskLevel
@@ -52,9 +53,37 @@ public enum AgentStepType
 public enum AgentStepStatus
 {
     Pending = 0,
-    Running = 1,
-    WaitingApproval = 2,
-    Completed = 3,
-    Failed = 4,
-    Skipped = 5
+    WaitingApproval = 1,
+    Approved = 2,
+    Running = 3,
+    Completed = 4,
+    Failed = 5,
+    Skipped = 6,
+    Cancelled = 7
+}
+
+public enum AgentTaskRunAttemptStatus
+{
+    Running = 0,
+    WaitingApproval = 1,
+    Succeeded = 2,
+    Failed = 3,
+    Cancelled = 4
+}
+
+public enum AgentTaskRunTriggerType
+{
+    Manual = 0,
+    ApprovalResume = 1,
+    Retry = 2
+}
+
+public enum AgentTaskRunQueueStatus
+{
+    Queued = 0,
+    Leased = 1,
+    Succeeded = 2,
+    Failed = 3,
+    Cancelled = 4,
+    DeadLetter = 5
 }

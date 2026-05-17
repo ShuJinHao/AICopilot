@@ -2,6 +2,7 @@ using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.Core.Rag.Ids;
 using AICopilot.Core.Rag.Specifications.KnowledgeBase;
+using AICopilot.RagService.KnowledgeBases;
 using AICopilot.Services.Contracts;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.SharedKernel.Messaging;
@@ -21,7 +22,8 @@ public record SearchKnowledgeBaseQuery(
 public class SearchKnowledgeBaseQueryHandler(
     IReadRepository<KnowledgeBase> kbRepo,
     IReadRepository<EmbeddingModel> embeddingModelRepo,
-    IKnowledgeVectorSearchService vectorSearchService)
+    IKnowledgeVectorSearchService vectorSearchService,
+    ICurrentUser currentUser)
     : IQueryHandler<SearchKnowledgeBaseQuery, Result<List<SearchKnowledgeBaseResult>>>
 {
     public async Task<Result<List<SearchKnowledgeBaseResult>>> Handle(
@@ -34,6 +36,12 @@ public class SearchKnowledgeBaseQueryHandler(
         if (kb == null)
         {
             return Result.NotFound("知识库不存在");
+        }
+
+        if (currentUser.Id is not { } userId ||
+            !KnowledgeBaseAccessPolicy.CanRead(kb, userId, KnowledgeBaseAccessPolicy.IsAdmin(currentUser)))
+        {
+            return Result.NotFound();
         }
 
         var embeddingModelConfig = await embeddingModelRepo.GetByIdAsync(kb.EmbeddingModelId, cancellationToken);

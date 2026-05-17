@@ -88,6 +88,40 @@ public sealed class AgentArtifactDomainTests
     }
 
     [Fact]
+    public void ArtifactWorkspace_ShouldRejectDraftWritesAfterFinalization()
+    {
+        var workspace = new ArtifactWorkspace(
+            AgentTaskId.New(),
+            "ws_report_final",
+            "agent-workspaces/ws_report_final",
+            "/ai/workspaces/ws_report_final",
+            DateTimeOffset.UtcNow);
+        var artifact = workspace.AddDraftArtifact(
+            ArtifactType.Markdown,
+            "report.md",
+            "draft/report.md",
+            10,
+            "text/markdown",
+            null,
+            DateTimeOffset.UtcNow);
+        artifact.Approve(DateTimeOffset.UtcNow);
+        artifact.MarkFinal("final/report.md", DateTimeOffset.UtcNow);
+        workspace.FinalizeWorkspace(DateTimeOffset.UtcNow);
+
+        var addDraft = () => workspace.AddDraftArtifact(
+            ArtifactType.Markdown,
+            "report-v2.md",
+            "draft/report-v2.md",
+            20,
+            "text/markdown",
+            null,
+            DateTimeOffset.UtcNow);
+
+        addDraft.Should().Throw<InvalidOperationException>()
+            .WithMessage("artifact_finalized:*");
+    }
+
+    [Fact]
     public void ApprovalRequest_ShouldOnlyCompleteOnce()
     {
         var approval = new ApprovalRequest(
@@ -147,7 +181,7 @@ public sealed class AgentArtifactDomainTests
         step.Approve();
 
         step.RequiresApproval.Should().BeTrue();
-        step.Status.Should().Be(AgentStepStatus.Pending);
+        step.Status.Should().Be(AgentStepStatus.Approved);
     }
 
     [Fact]

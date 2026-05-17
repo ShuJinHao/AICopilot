@@ -5,5 +5,6 @@ public enum LanguageModelUsage
 {
     None = 0,
     Chat = 1,
-    Routing = 2
+    Routing = 2,
+    Planner = 4
 }

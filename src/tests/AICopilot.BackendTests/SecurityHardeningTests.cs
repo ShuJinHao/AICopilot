@@ -410,6 +410,47 @@ public sealed class SecurityHardeningTests
     }
 
     [Fact]
+    public void AgentPlanRuntimeAndUpload_ShouldRecheckRagKnowledgeBasePermissions()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var agentTaskCommandsSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "AgentTasks",
+            "AgentTaskCommands.cs"));
+        var agentTaskRuntimeSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "AgentTasks",
+            "AgentTaskRuntime.cs"));
+        var uploadRecordsSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "Uploads",
+            "UploadRecords.cs"));
+
+        agentTaskCommandsSource.Should().Contain("IKnowledgeBaseAccessChecker");
+        agentTaskCommandsSource.Should().Contain("CanReadAsync(");
+        agentTaskCommandsSource.Should().Contain("knowledgeBaseId");
+        agentTaskCommandsSource.Should().Contain("Result.NotFound");
+        agentTaskRuntimeSource.Should().Contain("IKnowledgeBaseAccessChecker");
+        agentTaskRuntimeSource.Should().Contain("CanReadAsync(");
+        agentTaskRuntimeSource.Should().Contain("knowledgeBaseId");
+        agentTaskRuntimeSource.Should().Contain("task.UserId");
+        agentTaskRuntimeSource.Should().Contain("UnauthorizedAccessException");
+        uploadRecordsSource.Should().Contain("IKnowledgeBaseAccessChecker");
+        uploadRecordsSource.Should().Contain("CanWriteAsync(");
+        uploadRecordsSource.Should().Contain("request.KnowledgeBaseId");
+        uploadRecordsSource.Should().Contain("Result.NotFound");
+    }
+
+    [Fact]
     public void ApiControllerBase_ShouldUseConstructorInjectedSender()
     {
         var solutionRoot = FindSolutionRoot();
@@ -991,6 +1032,8 @@ public sealed class SecurityHardeningTests
             "src/services/AICopilot.AiGatewayService/Workflows/Executors/FinalAgentRunExecutor.cs",
             "src/services/AICopilot.AiGatewayService/Workflows/Executors/ToolExecutionAuditRecorder.cs",
             "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceManagement.cs",
+            "src/services/AICopilot.AiGatewayService/Uploads/UploadRecords.cs",
+            "src/services/AICopilot.RagService/Commands/Documents/UploadDocument.cs",
             "src/services/AICopilot.DataAnalysisService/Plugins/DataAnalysisSqlQueryRunner.cs"
         };
 

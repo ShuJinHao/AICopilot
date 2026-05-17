@@ -16,7 +16,8 @@ public sealed class AgentStep : IEntity<AgentStepId>
         string description,
         AgentStepType stepType,
         string? toolCode,
-        bool requiresApproval)
+        bool requiresApproval,
+        string? inputJson = null)
     {
         if (stepIndex <= 0)
         {
@@ -31,6 +32,7 @@ public sealed class AgentStep : IEntity<AgentStepId>
         StepType = stepType;
         ToolCode = NormalizeOptional(toolCode, 100);
         RequiresApproval = requiresApproval;
+        InputJson = NormalizeOptional(inputJson, 16000);
         Status = requiresApproval ? AgentStepStatus.WaitingApproval : AgentStepStatus.Pending;
     }
 
@@ -64,9 +66,9 @@ public sealed class AgentStep : IEntity<AgentStepId>
 
     public void Start(DateTimeOffset nowUtc)
     {
-        if (Status is not AgentStepStatus.Pending)
+        if (Status is not AgentStepStatus.Pending and not AgentStepStatus.Approved)
         {
-            throw new InvalidOperationException("Only pending agent steps can start.");
+            throw new InvalidOperationException("Only pending or approved agent steps can start.");
         }
 
         Status = AgentStepStatus.Running;
@@ -75,9 +77,9 @@ public sealed class AgentStep : IEntity<AgentStepId>
 
     public void Complete(string? outputJson, DateTimeOffset nowUtc)
     {
-        if (Status is not AgentStepStatus.Running and not AgentStepStatus.WaitingApproval)
+        if (Status is not AgentStepStatus.Running and not AgentStepStatus.WaitingApproval and not AgentStepStatus.Approved)
         {
-            throw new InvalidOperationException("Only running or approved-waiting agent steps can complete.");
+            throw new InvalidOperationException("Only running or approved agent steps can complete.");
         }
 
         OutputJson = NormalizeOptional(outputJson, 16000);
@@ -99,7 +101,32 @@ public sealed class AgentStep : IEntity<AgentStepId>
             throw new InvalidOperationException("Only approval-waiting agent steps can be approved.");
         }
 
+        Status = AgentStepStatus.Approved;
+    }
+
+    public void Cancel(DateTimeOffset nowUtc)
+    {
+        if (Status is AgentStepStatus.Completed or AgentStepStatus.Failed or AgentStepStatus.Cancelled)
+        {
+            throw new InvalidOperationException("Completed, failed, or cancelled agent steps cannot be cancelled again.");
+        }
+
+        Status = AgentStepStatus.Cancelled;
+        FinishedAt = nowUtc;
+    }
+
+    public void ResetForRetry()
+    {
+        if (Status == AgentStepStatus.Completed)
+        {
+            return;
+        }
+
         Status = AgentStepStatus.Pending;
+        OutputJson = null;
+        ErrorMessage = null;
+        StartedAt = null;
+        FinishedAt = null;
     }
 
     public void WaitForApproval()

@@ -7,6 +7,7 @@ using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.AiGateway.Aggregates.RoutingModel;
 using AICopilot.Core.AiGateway.Aggregates.RuntimeSettings;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
+using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Core.AiGateway.Aggregates.Uploads;
 using AICopilot.EntityFrameworkCore.Configuration.AiGateway;
 using AICopilot.EntityFrameworkCore.Outbox;
@@ -32,6 +33,12 @@ public sealed class AiGatewayDbContext(DbContextOptions<AiGatewayDbContext> opti
 
     public DbSet<AgentTask> AgentTasks => Set<AgentTask>();
 
+    public DbSet<AgentTaskRunAttempt> AgentTaskRunAttempts => Set<AgentTaskRunAttempt>();
+
+    public DbSet<AgentTaskRunQueueItem> AgentTaskRunQueueItems => Set<AgentTaskRunQueueItem>();
+
+    public DbSet<AgentWorkerHeartbeat> AgentWorkerHeartbeats => Set<AgentWorkerHeartbeat>();
+
     public DbSet<ArtifactWorkspace> ArtifactWorkspaces => Set<ArtifactWorkspace>();
 
     public DbSet<ApprovalRequest> ApprovalRequests => Set<ApprovalRequest>();
@@ -39,6 +46,10 @@ public sealed class AiGatewayDbContext(DbContextOptions<AiGatewayDbContext> opti
     public DbSet<ChatRuntimeSettings> ChatRuntimeSettings => Set<ChatRuntimeSettings>();
 
     public DbSet<UploadRecord> UploadRecords => Set<UploadRecord>();
+
+    public DbSet<ToolRegistration> ToolRegistrations => Set<ToolRegistration>();
+
+    public DbSet<ToolExecutionRecord> ToolExecutionRecords => Set<ToolExecutionRecord>();
 
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
@@ -52,12 +63,17 @@ public sealed class AiGatewayDbContext(DbContextOptions<AiGatewayDbContext> opti
         builder.ApplyConfiguration(new SessionConfiguration());
         builder.ApplyConfiguration(new MessageConfiguration());
         builder.ApplyConfiguration(new AgentTaskConfiguration());
+        builder.ApplyConfiguration(new AgentTaskRunAttemptConfiguration());
+        builder.ApplyConfiguration(new AgentTaskRunQueueItemConfiguration());
+        builder.ApplyConfiguration(new AgentWorkerHeartbeatConfiguration());
         builder.ApplyConfiguration(new AgentStepConfiguration());
         builder.ApplyConfiguration(new ArtifactWorkspaceConfiguration());
         builder.ApplyConfiguration(new ArtifactConfiguration());
         builder.ApplyConfiguration(new ApprovalRequestConfiguration());
         builder.ApplyConfiguration(new ChatRuntimeSettingsConfiguration());
         builder.ApplyConfiguration(new UploadRecordConfiguration());
+        builder.ApplyConfiguration(new ToolRegistrationConfiguration());
+        builder.ApplyConfiguration(new ToolExecutionRecordConfiguration());
         builder.ApplyConfiguration(new OutboxMessageConfiguration());
         builder.Entity<OutboxMessage>().ToTable(
             "outbox_messages",

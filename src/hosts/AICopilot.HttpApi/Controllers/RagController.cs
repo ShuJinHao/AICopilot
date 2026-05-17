@@ -100,7 +100,7 @@ public class RagController(ISender sender) : ApiControllerBase(sender)
         await using var stream = file.OpenReadStream();
         var command = new UploadDocumentCommand(
             knowledgeBaseId,
-            new FileUploadStream(file.FileName, stream),
+            new FileUploadStream(file.FileName, stream, file.ContentType, file.Length),
             classification,
             sourceType,
             isSanitized ?? false,

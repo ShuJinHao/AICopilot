@@ -62,6 +62,16 @@ public sealed class AgentTask : BaseEntity<AgentTaskId>, IAggregateRoot<AgentTas
 
     public ArtifactWorkspaceId? WorkspaceId { get; private set; }
 
+    public AgentTaskRunAttemptId? ActiveRunAttemptId { get; private set; }
+
+    public int RunAttemptCount { get; private set; }
+
+    public Guid? RunLeaseId { get; private set; }
+
+    public string? RunLeaseOwner { get; private set; }
+
+    public DateTimeOffset? RunLeaseExpiresAt { get; private set; }
+
     public string PlanJson { get; private set; } = string.Empty;
 
     public string? FinalSummary { get; private set; }
@@ -74,16 +84,81 @@ public sealed class AgentTask : BaseEntity<AgentTaskId>, IAggregateRoot<AgentTas
 
     public IReadOnlyCollection<AgentStep> Steps => _steps.AsReadOnly();
 
+    public bool IsRunInProgress(DateTimeOffset nowUtc)
+    {
+        return RunLeaseExpiresAt.HasValue && RunLeaseExpiresAt.Value > nowUtc;
+    }
+
+    public void BeginRunAttempt(
+        AgentTaskRunAttemptId attemptId,
+        int attemptNo,
+        Guid leaseId,
+        string leaseOwner,
+        DateTimeOffset leaseExpiresAt,
+        DateTimeOffset nowUtc)
+    {
+        if (attemptNo <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(attemptNo), "Run attempt number must be greater than zero.");
+        }
+
+        ActiveRunAttemptId = attemptId;
+        RunAttemptCount = Math.Max(RunAttemptCount, attemptNo);
+        AcquireRunLease(leaseId, leaseOwner, leaseExpiresAt, nowUtc);
+    }
+
+    public void AcquireRunLease(
+        Guid leaseId,
+        string leaseOwner,
+        DateTimeOffset leaseExpiresAt,
+        DateTimeOffset nowUtc)
+    {
+        if (leaseId == Guid.Empty)
+        {
+            throw new ArgumentException("Run lease id is required.", nameof(leaseId));
+        }
+
+        RunLeaseId = leaseId;
+        RunLeaseOwner = string.IsNullOrWhiteSpace(leaseOwner) ? "agent-runtime" : leaseOwner.Trim()[..Math.Min(leaseOwner.Trim().Length, 120)];
+        RunLeaseExpiresAt = leaseExpiresAt;
+        UpdatedAt = nowUtc;
+    }
+
+    public void RefreshRunLease(DateTimeOffset leaseExpiresAt, DateTimeOffset nowUtc)
+    {
+        if (!RunLeaseId.HasValue)
+        {
+            throw new InvalidOperationException("Cannot refresh an agent run lease that has not been acquired.");
+        }
+
+        RunLeaseExpiresAt = leaseExpiresAt;
+        UpdatedAt = nowUtc;
+    }
+
+    public void ReleaseRunLease(DateTimeOffset nowUtc, bool clearActiveAttempt = false)
+    {
+        RunLeaseId = null;
+        RunLeaseOwner = null;
+        RunLeaseExpiresAt = null;
+        if (clearActiveAttempt)
+        {
+            ActiveRunAttemptId = null;
+        }
+
+        UpdatedAt = nowUtc;
+    }
+
     public AgentStep AddStep(
         string title,
         string description,
         AgentStepType stepType,
         string? toolCode,
         bool requiresApproval,
-        DateTimeOffset nowUtc)
+        DateTimeOffset nowUtc,
+        string? inputJson = null)
     {
         EnsureMutablePlan();
-        var step = new AgentStep(Id, _steps.Count + 1, title, description, stepType, toolCode, requiresApproval);
+        var step = new AgentStep(Id, _steps.Count + 1, title, description, stepType, toolCode, requiresApproval, inputJson);
         _steps.Add(step);
         UpdatedAt = nowUtc;
         return step;
@@ -96,13 +171,13 @@ public sealed class AgentTask : BaseEntity<AgentTaskId>, IAggregateRoot<AgentTas
             throw new InvalidOperationException("Only tasks waiting for plan approval can be approved.");
         }
 
-        Status = AgentTaskStatus.Approved;
+        Status = AgentTaskStatus.PlanApproved;
         UpdatedAt = nowUtc;
     }
 
     public void Start(DateTimeOffset nowUtc)
     {
-        if (Status is not AgentTaskStatus.Approved and not AgentTaskStatus.WaitingToolApproval)
+        if (Status is not AgentTaskStatus.PlanApproved and not AgentTaskStatus.WaitingToolApproval)
         {
             throw new InvalidOperationException("Only approved agent tasks can start.");
         }
@@ -157,7 +232,7 @@ public sealed class AgentTask : BaseEntity<AgentTaskId>, IAggregateRoot<AgentTas
 
     public void WaitForFinalApproval(DateTimeOffset nowUtc)
     {
-        if (Status != AgentTaskStatus.WorkspaceReady)
+        if (Status is not AgentTaskStatus.WorkspaceReady and not AgentTaskStatus.WaitingFinalApproval)
         {
             throw new InvalidOperationException("Only workspace-ready tasks can wait for final approval.");
         }
@@ -166,11 +241,22 @@ public sealed class AgentTask : BaseEntity<AgentTaskId>, IAggregateRoot<AgentTas
         UpdatedAt = nowUtc;
     }
 
-    public void Complete(string finalSummary, DateTimeOffset nowUtc)
+    public void MarkFinalized(DateTimeOffset nowUtc)
     {
         if (Status != AgentTaskStatus.WaitingFinalApproval)
         {
-            throw new InvalidOperationException("Only final-approval-waiting tasks can complete.");
+            throw new InvalidOperationException("Only final-approval-waiting tasks can be finalized.");
+        }
+
+        Status = AgentTaskStatus.Finalized;
+        UpdatedAt = nowUtc;
+    }
+
+    public void Complete(string finalSummary, DateTimeOffset nowUtc)
+    {
+        if (Status is not AgentTaskStatus.WaitingFinalApproval and not AgentTaskStatus.Finalized)
+        {
+            throw new InvalidOperationException("Only final-approval-waiting or finalized tasks can complete.");
         }
 
         FinalSummary = NormalizeRequired(finalSummary, nameof(finalSummary), 4000);
@@ -190,6 +276,7 @@ public sealed class AgentTask : BaseEntity<AgentTaskId>, IAggregateRoot<AgentTas
     public void Cancel(DateTimeOffset nowUtc)
     {
         Status = AgentTaskStatus.Cancelled;
+        ReleaseRunLease(nowUtc, clearActiveAttempt: true);
         UpdatedAt = nowUtc;
         CompletedAt = nowUtc;
     }
@@ -198,8 +285,41 @@ public sealed class AgentTask : BaseEntity<AgentTaskId>, IAggregateRoot<AgentTas
     {
         FinalSummary = NormalizeRequired(reason, nameof(reason), 4000);
         Status = AgentTaskStatus.Rejected;
+        ReleaseRunLease(nowUtc, clearActiveAttempt: true);
         UpdatedAt = nowUtc;
         CompletedAt = nowUtc;
+    }
+
+    public void PrepareRetry(DateTimeOffset nowUtc)
+    {
+        if (Status != AgentTaskStatus.Failed)
+        {
+            throw new InvalidOperationException("Only failed agent tasks can be retried.");
+        }
+
+        var firstFailedIndex = _steps
+            .Where(step => step.Status == AgentStepStatus.Failed)
+            .OrderBy(step => step.StepIndex)
+            .Select(step => (int?)step.StepIndex)
+            .FirstOrDefault();
+        foreach (var step in _steps.OrderBy(step => step.StepIndex))
+        {
+            if (step.Status == AgentStepStatus.Completed)
+            {
+                continue;
+            }
+
+            if (!firstFailedIndex.HasValue || step.StepIndex >= firstFailedIndex.Value)
+            {
+                step.ResetForRetry();
+            }
+        }
+
+        Status = AgentTaskStatus.PlanApproved;
+        FinalSummary = null;
+        CompletedAt = null;
+        ReleaseRunLease(nowUtc, clearActiveAttempt: true);
+        UpdatedAt = nowUtc;
     }
 
     private void EnsureMutablePlan()

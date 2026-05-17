@@ -1,6 +1,7 @@
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.Core.Rag.Ids;
 using AICopilot.Core.Rag.Specifications.KnowledgeBase;
+using AICopilot.RagService.KnowledgeBases;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.Services.Contracts;
 using AICopilot.Services.Contracts.Events;
@@ -35,7 +36,9 @@ public record KnowledgeDocumentDto
 [AuthorizeRequirement("Rag.GetListDocuments")]
 public record GetListDocumentsQuery(Guid KnowledgeBaseId) : IQuery<Result<IList<KnowledgeDocumentDto>>>;
 
-public class GetListDocumentsQueryHandler(IReadRepository<KnowledgeBase> repository)
+public class GetListDocumentsQueryHandler(
+    IReadRepository<KnowledgeBase> repository,
+    ICurrentUser currentUser)
     : IQueryHandler<GetListDocumentsQuery, Result<IList<KnowledgeDocumentDto>>>
 {
     public async Task<Result<IList<KnowledgeDocumentDto>>> Handle(
@@ -45,6 +48,13 @@ public class GetListDocumentsQueryHandler(IReadRepository<KnowledgeBase> reposit
         var knowledgeBase = await repository.FirstOrDefaultAsync(
             new KnowledgeBaseByIdWithDocumentsSpec(new KnowledgeBaseId(request.KnowledgeBaseId)),
             cancellationToken);
+
+        if (knowledgeBase == null ||
+            currentUser.Id is not { } userId ||
+            !KnowledgeBaseAccessPolicy.CanRead(knowledgeBase, userId, KnowledgeBaseAccessPolicy.IsAdmin(currentUser)))
+        {
+            return Result.NotFound();
+        }
 
         IList<KnowledgeDocumentDto> result = knowledgeBase?.Documents
             .OrderByDescending(document => document.CreatedAt)
@@ -91,7 +101,8 @@ public record UpdateDocumentGovernanceCommand(
 
 public class UpdateDocumentGovernanceCommandHandler(
     IRepository<KnowledgeBase> repository,
-    IAuditLogWriter auditLogWriter)
+    IAuditLogWriter auditLogWriter,
+    ICurrentUser currentUser)
     : ICommandHandler<UpdateDocumentGovernanceCommand, Result>
 {
     public async Task<Result> Handle(UpdateDocumentGovernanceCommand request, CancellationToken cancellationToken)
@@ -122,6 +133,12 @@ public class UpdateDocumentGovernanceCommandHandler(
         if (knowledgeBase == null)
         {
             return Result.NotFound("Document not found.");
+        }
+
+        if (currentUser.Id is not { } userId ||
+            !KnowledgeBaseAccessPolicy.CanWrite(knowledgeBase, userId, KnowledgeBaseAccessPolicy.IsAdmin(currentUser)))
+        {
+            return Result.NotFound();
         }
 
         var document = knowledgeBase.Documents.First(document => document.Id == documentId);
@@ -218,7 +235,8 @@ public class UpdateDocumentGovernanceCommandHandler(
 public class DeleteDocumentCommandHandler(
     IRepository<KnowledgeBase> repository,
     IIntegrationEventStager eventStager,
-    IAuditLogWriter auditLogWriter)
+    IAuditLogWriter auditLogWriter,
+    ICurrentUser currentUser)
     : ICommandHandler<DeleteDocumentCommand, Result>
 {
     public async Task<Result> Handle(DeleteDocumentCommand request, CancellationToken cancellationToken)
@@ -232,6 +250,12 @@ public class DeleteDocumentCommandHandler(
         if (knowledgeBase == null)
         {
             return Result.Success();
+        }
+
+        if (currentUser.Id is not { } userId ||
+            !KnowledgeBaseAccessPolicy.CanWrite(knowledgeBase, userId, KnowledgeBaseAccessPolicy.IsAdmin(currentUser)))
+        {
+            return Result.NotFound();
         }
 
         var document = knowledgeBase.Documents.First(document => document.Id == documentId);

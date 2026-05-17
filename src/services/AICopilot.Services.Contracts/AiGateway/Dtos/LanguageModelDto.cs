@@ -14,7 +14,7 @@ public record LanguageModelDto
     public bool IsEnabled { get; init; }
     public IReadOnlyList<string> Usages { get; init; } = [];
     public bool HasApiKey { get; init; }
-    public string? ApiKeyMasked { get; init; }
+    public string? ApiKeyPreview { get; init; }
     public required string ConnectivityStatus { get; init; }
     public DateTimeOffset? ConnectivityCheckedAt { get; init; }
     public string? ConnectivityError { get; init; }

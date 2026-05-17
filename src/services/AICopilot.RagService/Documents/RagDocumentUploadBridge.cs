@@ -13,7 +13,7 @@ public sealed class RagDocumentUploadBridge(IMediator mediator) : IRagDocumentUp
         var result = await mediator.Send(
             new UploadDocumentCommand(
                 request.KnowledgeBaseId,
-                new FileUploadStream(request.FileName, request.Stream),
+                new FileUploadStream(request.FileName, request.Stream, request.ContentType, request.FileSize),
                 request.Classification,
                 request.SourceType,
                 request.IsSanitized),

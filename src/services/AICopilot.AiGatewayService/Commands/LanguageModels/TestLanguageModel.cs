@@ -149,6 +149,11 @@ public class TestLanguageModelCommandHandler(
             values.Add(nameof(LanguageModelUsage.Routing));
         }
 
+        if (usage.Value.HasFlag(LanguageModelUsage.Planner))
+        {
+            values.Add(nameof(LanguageModelUsage.Planner));
+        }
+
         return values;
     }
 

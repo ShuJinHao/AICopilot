@@ -63,6 +63,11 @@ public class AICopilotAppFixture : IAsyncLifetime, IAsyncDisposable
                 await WaitForResourceRunningAsync("rag-worker");
             }
 
+            if (EnableDataWorker)
+            {
+                await WaitForResourceRunningAsync("data-worker");
+            }
+
             HttpClient = RunStage(
                 "Create HttpClient for aicopilot-httpapi",
                 () => _app.CreateHttpClient("aicopilot-httpapi"));
@@ -127,6 +132,9 @@ public class AICopilotAppFixture : IAsyncLifetime, IAsyncDisposable
         SetEnvironmentVariable("BootstrapAdmin__UserName", BootstrapUserName);
         SetEnvironmentVariable("BootstrapAdmin__Password", BootstrapPassword);
         SetEnvironmentVariable("AICopilotSecurity__ApiKeyEncryptionKey", "test-aicopilot-api-key-encryption-key");
+        SetEnvironmentVariable(
+            "ArtifactWorkspace__RootPath",
+            Path.Combine(Path.GetTempPath(), "AICopilotBackendTests", "artifact-workspaces"));
         SetEnvironmentVariable("AppHost__EnableDockerComposeEnvironment", "false");
         SetEnvironmentVariable("AppHost__EnableWebUi", "false");
         SetEnvironmentVariable("AppHost__EnablePgWeb", "false");
@@ -313,5 +321,5 @@ public sealed class CoreAICopilotAppFixture : AICopilotAppFixture
 {
     protected override bool EnableRagWorker => false;
 
-    protected override bool EnableDataWorker => false;
+    protected override bool EnableDataWorker => true;
 }

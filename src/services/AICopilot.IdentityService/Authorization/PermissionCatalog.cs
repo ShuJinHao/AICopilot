@@ -44,7 +44,8 @@ public sealed class PermissionCatalog : IPermissionCatalog
         new("AiGateway.GetUpload", "AiGateway", "View Uploads", "View upload records visible to the current account."),
         new("AiGateway.GetWorkspace", "AiGateway", "View Artifact Workspace", "View controlled Agent artifact workspace files and draft outputs."),
         new("AiGateway.DownloadArtifact", "AiGateway", "Download Artifact", "Download artifacts owned by current account Agent tasks."),
-        new("AiGateway.FinalizeWorkspace", "AiGateway", "Finalize Workspace", "Confirm draft artifacts and move them into final output."),
+        new("AiGateway.SubmitFinalReview", "AiGateway", "Submit Final Review", "Submit workspace draft artifacts for final-output approval."),
+        new("AiGateway.FinalizeWorkspace", "AiGateway", "Finalize Workspace", "Move approved draft artifacts into final output."),
         new("AiGateway.CreateLanguageModel", "AiGateway", "Create Language Model", "Create a new language model configuration."),
         new("AiGateway.UpdateLanguageModel", "AiGateway", "Update Language Model", "Update an existing language model configuration."),
         new("AiGateway.DeleteLanguageModel", "AiGateway", "Delete Language Model", "Delete a language model configuration."),
@@ -64,6 +65,11 @@ public sealed class PermissionCatalog : IPermissionCatalog
         new("AiGateway.CreateApprovalPolicy", "AiGateway", "Create Approval Policy", "Create a new approval policy."),
         new("AiGateway.UpdateApprovalPolicy", "AiGateway", "Update Approval Policy", "Update an existing approval policy."),
         new("AiGateway.DeleteApprovalPolicy", "AiGateway", "Delete Approval Policy", "Delete an approval policy."),
+        new("AiGateway.ToolRegistry.Read", "AiGateway", "View Tool Registry", "View controlled Agent tool registrations and policy metadata."),
+        new("AiGateway.ToolRegistry.Manage", "AiGateway", "Manage Tool Registry", "Update controlled Agent tool enablement, approval, risk, and permission policy."),
+        new("AiGateway.RunQueue.Read", "AiGateway", "View Agent Run Queue", "View Agent run queue operations and queue health across tasks."),
+        new("AiGateway.RunQueue.Manage", "AiGateway", "Manage Agent Run Queue", "Move safe Agent run queue items to dead letter for operations recovery."),
+        new("AiGateway.WorkerStatus.Read", "AiGateway", "View Agent Worker Status", "View Agent DataWorker heartbeat and workspace configuration health."),
 
         new("DataAnalysis.GetBusinessDatabase", "DataAnalysis", "View Business Database", "View business database configuration details."),
         new("DataAnalysis.GetListBusinessDatabases", "DataAnalysis", "View Business Databases", "View the business database configuration list."),
@@ -112,6 +118,7 @@ public sealed class PermissionCatalog : IPermissionCatalog
         "AiGateway.GetUpload",
         "AiGateway.GetWorkspace",
         "AiGateway.DownloadArtifact",
+        "AiGateway.SubmitFinalReview",
         "AiGateway.FinalizeWorkspace",
         "AiGateway.Chat"
     ];

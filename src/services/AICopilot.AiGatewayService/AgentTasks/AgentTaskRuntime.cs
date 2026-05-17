@@ -1,12 +1,17 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
+using System.Globalization;
+using AICopilot.AiGatewayService.Tools;
 using AICopilot.AiGatewayService.Workspaces;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
+using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Core.AiGateway.Aggregates.Uploads;
 using AICopilot.Core.AiGateway.Ids;
+using AICopilot.Core.AiGateway.Specifications.AgentTasks;
 using AICopilot.Core.AiGateway.Specifications.Approvals;
 using AICopilot.Core.AiGateway.Specifications.Artifacts;
 using AICopilot.Core.AiGateway.Specifications.Uploads;
@@ -19,32 +24,62 @@ namespace AICopilot.AiGatewayService.AgentTasks;
 public interface IAgentTaskRuntime
 {
     Task<Result<AgentTask>> RunAsync(AgentTask task, CancellationToken cancellationToken = default);
+
+    Task<Result<AgentTask>> RunAsync(
+        AgentTask task,
+        AgentTaskRunTriggerType triggerType = AgentTaskRunTriggerType.Manual,
+        CancellationToken cancellationToken = default);
 }
 
-public sealed class AgentTaskRuntime(
+internal sealed class AgentTaskRuntime(
     IRepository<AgentTask> taskRepository,
+    IRepository<AgentTaskRunAttempt> runAttemptRepository,
     IRepository<ArtifactWorkspace> workspaceRepository,
     IRepository<ApprovalRequest> approvalRepository,
+    IRepository<ToolExecutionRecord> toolExecutionRepository,
     IReadRepository<UploadRecord> uploadRepository,
     IAgentArtifactWorkspaceService workspaceService,
     IFileStorageService fileStorage,
     IAgentTableFileParser tableFileParser,
     IAgentArtifactDocumentGenerator documentGenerator,
     IKnowledgeRetrievalService knowledgeRetrievalService,
-    ICloudAiReadClient cloudAiReadClient,
-    AgentAuditRecorder auditRecorder)
+    IEnumerable<IKnowledgeBaseAccessChecker> knowledgeBaseAccessCheckers,
+    ICloudReadonlyAgentToolExecutor cloudReadonlyToolExecutor,
+    ICurrentUser currentUser,
+    ToolRegistryGuard toolRegistryGuard,
+    AgentAuditRecorder auditRecorder,
+    IEnumerable<IAgentToolExecutor> toolExecutors)
     : IAgentTaskRuntime
 {
+    private const string ToolExecutionFailedCode = "tool_execution_failed";
+    private const string RunLeaseOwner = "agent-runtime-sync";
+    private static readonly TimeSpan RunLeaseDuration = TimeSpan.FromMinutes(5);
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         Converters = { new JsonStringEnumConverter() },
         WriteIndented = true
     };
 
-    public async Task<Result<AgentTask>> RunAsync(AgentTask task, CancellationToken cancellationToken = default)
+    public Task<Result<AgentTask>> RunAsync(AgentTask task, CancellationToken cancellationToken = default)
     {
+        return RunAsync(task, AgentTaskRunTriggerType.Manual, cancellationToken);
+    }
+
+    public async Task<Result<AgentTask>> RunAsync(
+        AgentTask task,
+        AgentTaskRunTriggerType triggerType = AgentTaskRunTriggerType.Manual,
+        CancellationToken cancellationToken = default)
+    {
+        var attemptResult = await BeginOrResumeAttemptAsync(task, triggerType, cancellationToken);
+        if (!attemptResult.IsSuccess)
+        {
+            return Result.From(attemptResult);
+        }
+
+        var attempt = attemptResult.Value!;
         var now = DateTimeOffset.UtcNow;
-        if (task.Status is AgentTaskStatus.Approved or AgentTaskStatus.WaitingToolApproval)
+        if (task.Status is AgentTaskStatus.PlanApproved or AgentTaskStatus.WaitingToolApproval)
         {
             task.Start(now);
         }
@@ -57,6 +92,7 @@ public sealed class AgentTaskRuntime(
         var plan = DeserializePlan(task.PlanJson);
         var workspace = await LoadWorkspaceAsync(task, cancellationToken);
         var state = new AgentTaskRunState();
+        var executorResolver = CreateExecutorResolver();
 
         foreach (var step in task.Steps.OrderBy(step => step.StepIndex))
         {
@@ -65,7 +101,15 @@ public sealed class AgentTaskRuntime(
                 continue;
             }
 
-            if (RequiresRuntimeApproval(step) && step.Status == AgentStepStatus.Pending)
+            await RefreshRunLeaseAsync(task, attempt, cancellationToken);
+            var toolDecision = await toolRegistryGuard.ValidateAsync(step.ToolCode, task.UserId, cancellationToken);
+            if (!toolDecision.IsAllowed)
+            {
+                return await RejectStepAsync(task, workspace, step, attempt, toolDecision.Problem!, cancellationToken);
+            }
+
+            var toolRegistration = toolDecision.Tool!;
+            if (RequiresRuntimeApproval(step, toolRegistration) && step.Status == AgentStepStatus.Pending)
             {
                 step.WaitForApproval();
             }
@@ -81,8 +125,10 @@ public sealed class AgentTaskRuntime(
                         cancellationToken);
                     task.MarkWorkspaceReady(now);
                     task.WaitForFinalApproval(now);
+                    attempt.WaitForApproval(now, "Waiting for final output approval.");
+                    task.ReleaseRunLease(now, clearActiveAttempt: false);
 
-                    await SaveAsync(task, workspace, cancellationToken);
+                    await SaveAsync(task, workspace, attempt, cancellationToken);
                     return Result.Success(task);
                 }
                 else
@@ -100,20 +146,42 @@ public sealed class AgentTaskRuntime(
                             stepTargetId,
                             cancellationToken);
                         task.WaitForToolApproval(now);
+                        attempt.WaitForApproval(now, "Waiting for tool approval.");
+                        task.ReleaseRunLease(now, clearActiveAttempt: false);
 
-                        await SaveAsync(task, workspace, cancellationToken);
+                        await SaveAsync(task, workspace, attempt, cancellationToken);
                         return Result.Success(task);
                     }
                 }
             }
 
-            if (step.Status != AgentStepStatus.Pending)
+            if (step.Status is not AgentStepStatus.Pending and not AgentStepStatus.Approved)
             {
                 continue;
             }
 
+            ToolExecutionRecord? executionRecord = null;
             try
             {
+                executionRecord = new ToolExecutionRecord(
+                    task.Id,
+                    step.Id,
+                    step.ToolCode ?? toolRegistration.ToolCode,
+                    BuildInputSummary(step, toolRegistration),
+                    DateTimeOffset.UtcNow,
+                    attempt.Id);
+                toolExecutionRepository.Add(executionRecord);
+
+                var inputValidation = ToolInputSchemaValidator.ValidateAndParse(
+                    step.InputJson,
+                    toolRegistration.InputSchemaJson);
+                if (!inputValidation.IsValid)
+                {
+                    throw new AgentToolExecutionException(
+                        AppProblemCodes.AgentPlanSchemaInvalid,
+                        inputValidation.Error ?? "Agent step input does not match registry schema.");
+                }
+
                 step.Start(DateTimeOffset.UtcNow);
                 if (task.Status == AgentTaskStatus.Running &&
                     step.StepType is AgentStepType.ChartGeneration or AgentStepType.ArtifactGeneration)
@@ -121,7 +189,22 @@ public sealed class AgentTaskRuntime(
                     task.BeginArtifactGeneration(DateTimeOffset.UtcNow);
                 }
 
-                var output = await ExecuteStepAsync(task, workspace, plan, step, state, cancellationToken);
+                var executor = executorResolver.Resolve(toolRegistration, step);
+                var executionContext = new AgentToolExecutionContext(
+                    task,
+                    workspace,
+                    plan,
+                    step,
+                    state,
+                    toolRegistration,
+                    cancellationToken);
+                var output = (await ExecuteWithTimeoutAsync(executor, executionContext)).Output;
+                var artifactId = ExtractArtifactId(output);
+                executionRecord.MarkSucceeded(
+                    BuildOutputSummary(output),
+                    artifactId,
+                    BuildAuditMetadata(task, workspace, step, toolRegistration),
+                    DateTimeOffset.UtcNow);
                 step.Complete(JsonSerializer.Serialize(output, JsonOptions), DateTimeOffset.UtcNow);
                 await auditRecorder.RecordToolAsync(
                     task,
@@ -129,33 +212,199 @@ public sealed class AgentTaskRuntime(
                     step,
                     AuditResults.Succeeded,
                     $"Agent step {step.StepIndex} executed.",
-                    ExtractArtifactId(output),
+                    artifactId,
                     cancellationToken);
             }
             catch (Exception ex)
             {
-                step.Fail(ex.Message, DateTimeOffset.UtcNow);
+                var safeMessage = SanitizeSummary(ex.Message, 2000) ?? "Tool execution failed.";
+                if (executionRecord is null)
+                {
+                    executionRecord = new ToolExecutionRecord(
+                        task.Id,
+                        step.Id,
+                        step.ToolCode ?? "unknown",
+                        BuildInputSummary(step, null),
+                        DateTimeOffset.UtcNow,
+                        attempt.Id);
+                    toolExecutionRepository.Add(executionRecord);
+                }
+
+                var errorCode = ResolveExecutionErrorCode(ex, step, toolRegistration);
+                if (executionRecord.Status == ToolExecutionStatus.Running)
+                {
+                    executionRecord.MarkFailed(
+                        errorCode,
+                        safeMessage,
+                        BuildAuditMetadata(task, workspace, step, toolRegistration),
+                        DateTimeOffset.UtcNow);
+                }
+
+                step.Fail(safeMessage, DateTimeOffset.UtcNow);
                 await auditRecorder.RecordToolAsync(
                     task,
                     workspace,
                     step,
                     AuditResults.Rejected,
-                    ex.Message,
+                    safeMessage,
                     null,
                     cancellationToken);
-                task.Fail($"步骤 {step.StepIndex} 执行失败：{ex.Message}", DateTimeOffset.UtcNow);
-                await SaveAsync(task, workspace, cancellationToken);
+                task.Fail($"步骤 {step.StepIndex} 执行失败：{safeMessage}", DateTimeOffset.UtcNow);
+                attempt.MarkFailed(errorCode, safeMessage, DateTimeOffset.UtcNow);
+                task.ReleaseRunLease(DateTimeOffset.UtcNow, clearActiveAttempt: true);
+                await SaveAsync(task, workspace, attempt, cancellationToken);
                 return Result.Success(task);
             }
         }
 
         task.MarkWorkspaceReady(DateTimeOffset.UtcNow);
         task.WaitForFinalApproval(DateTimeOffset.UtcNow);
-        await SaveAsync(task, workspace, cancellationToken);
+        attempt.WaitForApproval(DateTimeOffset.UtcNow, "Waiting for final output approval.");
+        task.ReleaseRunLease(DateTimeOffset.UtcNow, clearActiveAttempt: false);
+        await SaveAsync(task, workspace, attempt, cancellationToken);
         return Result.Success(task);
     }
 
-    private async Task<object> ExecuteStepAsync(
+    private async Task<Result<AgentTaskRunAttempt>> BeginOrResumeAttemptAsync(
+        AgentTask task,
+        AgentTaskRunTriggerType triggerType,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (task.IsRunInProgress(now))
+        {
+            return Result.Failure(new ApiProblemDescriptor(
+                AppProblemCodes.AgentTaskRunInProgress,
+                "Agent task already has an active run lease."));
+        }
+
+        if (task.Status is AgentTaskStatus.WorkspaceReady or AgentTaskStatus.WaitingFinalApproval)
+        {
+            return Result.Invalid("Agent task is waiting for final output approval and cannot be run again.");
+        }
+
+        if (task.ActiveRunAttemptId is not null)
+        {
+            var activeAttempt = await runAttemptRepository.FirstOrDefaultAsync(
+                new AgentTaskRunAttemptByIdSpec(task.ActiveRunAttemptId.Value),
+                cancellationToken);
+            if (activeAttempt is not null && !activeAttempt.IsTerminal)
+            {
+                if (task.Status == AgentTaskStatus.WaitingToolApproval ||
+                    activeAttempt.Status == AgentTaskRunAttemptStatus.WaitingApproval ||
+                    task.Steps.Any(step => step.Status == AgentStepStatus.Approved))
+                {
+                    return await AcquireAttemptLeaseAsync(task, activeAttempt, cancellationToken);
+                }
+
+                var message = "Previous agent task run lease expired. Retry the task before continuing.";
+                activeAttempt.MarkFailed(AppProblemCodes.AgentTaskRunLeaseExpired, message, now);
+                task.Fail(message, now);
+                task.ReleaseRunLease(now, clearActiveAttempt: true);
+                runAttemptRepository.Update(activeAttempt);
+                taskRepository.Update(task);
+                await taskRepository.SaveChangesAsync(cancellationToken);
+                return Result.Failure(new ApiProblemDescriptor(AppProblemCodes.AgentTaskRunLeaseExpired, message));
+            }
+        }
+
+        if (task.Status is not AgentTaskStatus.PlanApproved and not AgentTaskStatus.WaitingToolApproval)
+        {
+            return Result.Invalid("Only approved or waiting-approval agent tasks can be executed.");
+        }
+
+        var attempt = new AgentTaskRunAttempt(
+            task.Id,
+            task.RunAttemptCount + 1,
+            triggerType,
+            RunLeaseOwner,
+            now,
+            RunLeaseDuration);
+        runAttemptRepository.Add(attempt);
+        task.BeginRunAttempt(
+            attempt.Id,
+            attempt.AttemptNo,
+            attempt.LeaseId!.Value,
+            attempt.LeaseOwner ?? RunLeaseOwner,
+            attempt.LeaseExpiresAt!.Value,
+            now);
+        taskRepository.Update(task);
+        await taskRepository.SaveChangesAsync(cancellationToken);
+        return Result.Success(attempt);
+    }
+
+    private async Task<Result<AgentTaskRunAttempt>> AcquireAttemptLeaseAsync(
+        AgentTask task,
+        AgentTaskRunAttempt attempt,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        attempt.AcquireLease(Guid.NewGuid(), RunLeaseOwner, now, RunLeaseDuration);
+        task.AcquireRunLease(
+            attempt.LeaseId!.Value,
+            attempt.LeaseOwner ?? RunLeaseOwner,
+            attempt.LeaseExpiresAt!.Value,
+            now);
+        runAttemptRepository.Update(attempt);
+        taskRepository.Update(task);
+        await taskRepository.SaveChangesAsync(cancellationToken);
+        return Result.Success(attempt);
+    }
+
+    private async Task RefreshRunLeaseAsync(
+        AgentTask task,
+        AgentTaskRunAttempt attempt,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        attempt.RefreshLease(now, RunLeaseDuration);
+        task.AcquireRunLease(
+            attempt.LeaseId!.Value,
+            attempt.LeaseOwner ?? RunLeaseOwner,
+            attempt.LeaseExpiresAt!.Value,
+            now);
+        runAttemptRepository.Update(attempt);
+        taskRepository.Update(task);
+        await taskRepository.SaveChangesAsync(cancellationToken);
+    }
+
+    private AgentToolExecutorResolver CreateExecutorResolver()
+    {
+        return new AgentToolExecutorResolver(
+            toolExecutors.Append(new RuntimeBuiltInAgentToolExecutor(ExecuteBuiltInStepAsync)));
+    }
+
+    private static async Task<AgentToolExecutionResult> ExecuteWithTimeoutAsync(
+        IAgentToolExecutor executor,
+        AgentToolExecutionContext context)
+    {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(context.ToolRegistration.TimeoutSeconds));
+
+        try
+        {
+            return await executor.ExecuteAsync(context with { CancellationToken = timeoutCts.Token });
+        }
+        catch (OperationCanceledException) when (!context.CancellationToken.IsCancellationRequested)
+        {
+            throw new AgentToolExecutionException(
+                AppProblemCodes.ToolExecutionTimeout,
+                $"Tool '{context.ToolRegistration.ToolCode}' exceeded timeout {context.ToolRegistration.TimeoutSeconds} seconds.");
+        }
+    }
+
+    private Task<object> ExecuteBuiltInStepAsync(AgentToolExecutionContext context)
+    {
+        return ExecuteBuiltInStepAsync(
+            context.Task,
+            context.Workspace,
+            context.Plan,
+            context.Step,
+            context.State,
+            context.CancellationToken);
+    }
+
+    private async Task<object> ExecuteBuiltInStepAsync(
         AgentTask task,
         ArtifactWorkspace workspace,
         AgentTaskPlanDocument plan,
@@ -169,7 +418,7 @@ public sealed class AgentTaskRuntime(
             "parse_csv_json" => await ParseTableFileAsync(task.UserId, workspace, step, plan, state, cancellationToken),
             "parse_table_file" => await ParseTableFileAsync(task.UserId, workspace, step, plan, state, cancellationToken),
             "rag_search" => await SearchRagAsync(task, plan, state, cancellationToken),
-            "query_cloud_data_readonly" => QueryCloudReadonly(state),
+            "query_cloud_data_readonly" => await QueryCloudReadonlyAsync(plan, state, cancellationToken),
             "generate_chart_data" => await GenerateChartDataAsync(workspace, step, state, cancellationToken),
             "generate_markdown_report" => await GenerateMarkdownReportAsync(task, workspace, step, state, cancellationToken),
             "generate_html_report" => await GenerateHtmlReportAsync(task, workspace, step, state, cancellationToken),
@@ -315,6 +564,22 @@ public sealed class AgentTaskRuntime(
     {
         foreach (var knowledgeBaseId in plan.KnowledgeBaseIds)
         {
+            var accessChecker = knowledgeBaseAccessCheckers.FirstOrDefault();
+            if (accessChecker is null)
+            {
+                throw new InvalidOperationException("RAG knowledge base access checker is not configured.");
+            }
+
+            var canRead = await accessChecker.CanReadAsync(
+                knowledgeBaseId,
+                task.UserId,
+                IsAdmin(),
+                cancellationToken);
+            if (!canRead)
+            {
+                throw new UnauthorizedAccessException("RAG knowledge base is not visible to the current agent task.");
+            }
+
             var results = await knowledgeRetrievalService.SearchAsync(
                 knowledgeBaseId,
                 task.Goal,
@@ -340,12 +605,29 @@ public sealed class AgentTaskRuntime(
         };
     }
 
-    private object QueryCloudReadonly(AgentTaskRunState state)
+    private bool IsAdmin()
     {
-        state.CloudReadonlySummary = cloudAiReadClient.IsEnabled
-            ? "Cloud AiRead 已启用；MVP 仅保留只读边界，不从自由文本构造写入或任意查询。"
-            : "Cloud AiRead 未启用，本步骤未访问 Cloud。";
-        return new { status = "completed", summary = state.CloudReadonlySummary };
+        return string.Equals(currentUser.Role, "Admin", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<object> QueryCloudReadonlyAsync(
+        AgentTaskPlanDocument plan,
+        AgentTaskRunState state,
+        CancellationToken cancellationToken)
+    {
+        var intent = plan.CloudReadonlyIntent ?? throw new CloudAiReadException(
+            AppProblemCodes.CloudReadonlyIntentUnsupported,
+            "Cloud readonly intent is missing from the agent plan.");
+        var result = await cloudReadonlyToolExecutor.ExecuteAsync(
+            new CloudReadonlyAgentToolRequest(intent.Intent, intent.Query, intent.Confidence),
+            cancellationToken);
+
+        state.CloudReadonlySummary = result.Summary;
+        state.CloudReadonlyRows = result.Rows;
+        state.CloudReadonlySourceLabel = result.SourceLabel;
+        state.CloudReadonlySourcePath = result.SourcePath;
+        state.CloudReadonlyIsTruncated = result.IsTruncated;
+        return result;
     }
 
     private async Task<object> GenerateChartDataAsync(
@@ -416,6 +698,7 @@ public sealed class AgentTaskRuntime(
         CancellationToken cancellationToken)
     {
         var content = await documentGenerator.GeneratePdfAsync(BuildReportDocument(task, state), cancellationToken);
+        EnsureGeneratedContent(content, "PDF");
         var artifact = await workspaceService.WriteDraftBinaryArtifactAsync(
             workspace,
             ArtifactType.Pdf,
@@ -436,6 +719,7 @@ public sealed class AgentTaskRuntime(
         CancellationToken cancellationToken)
     {
         var content = await documentGenerator.GeneratePptxAsync(BuildReportDocument(task, state), cancellationToken);
+        EnsureGeneratedContent(content, "PPTX");
         var artifact = await workspaceService.WriteDraftBinaryArtifactAsync(
             workspace,
             ArtifactType.Pptx,
@@ -456,6 +740,7 @@ public sealed class AgentTaskRuntime(
         CancellationToken cancellationToken)
     {
         var content = await documentGenerator.GenerateXlsxAsync(BuildReportDocument(task, state), cancellationToken);
+        EnsureGeneratedContent(content, "XLSX");
         var artifact = await workspaceService.WriteDraftBinaryArtifactAsync(
             workspace,
             ArtifactType.Xlsx,
@@ -466,6 +751,14 @@ public sealed class AgentTaskRuntime(
             step.Id,
             cancellationToken);
         return new { status = "completed", artifactId = artifact.Id.Value, artifact.RelativePath };
+    }
+
+    private static void EnsureGeneratedContent(byte[] content, string artifactType)
+    {
+        if (content.Length == 0)
+        {
+            throw new InvalidOperationException($"{AppProblemCodes.ArtifactGenerationFailed}: {artifactType} generator returned an empty artifact.");
+        }
     }
 
     private async Task<ArtifactWorkspace> LoadWorkspaceAsync(AgentTask task, CancellationToken cancellationToken)
@@ -525,14 +818,142 @@ public sealed class AgentTaskRuntime(
             approval.Status == AgentApprovalStatus.Approved);
     }
 
-    private static bool RequiresRuntimeApproval(AgentStep step)
+    private async Task<Result<AgentTask>> RejectStepAsync(
+        AgentTask task,
+        ArtifactWorkspace workspace,
+        AgentStep step,
+        AgentTaskRunAttempt attempt,
+        ApiProblemDescriptor problem,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var safeMessage = SanitizeSummary(problem.Detail, 2000) ?? "Tool execution rejected.";
+        var executionRecord = new ToolExecutionRecord(
+            task.Id,
+            step.Id,
+            step.ToolCode ?? "unknown",
+            BuildInputSummary(step, null),
+            now,
+            attempt.Id);
+        executionRecord.MarkRejected(
+            problem.Code,
+            safeMessage,
+            BuildAuditMetadata(task, workspace, step, null),
+            now);
+        toolExecutionRepository.Add(executionRecord);
+
+        step.Fail(safeMessage, now);
+        await auditRecorder.RecordToolAsync(
+            task,
+            workspace,
+            step,
+            AuditResults.Rejected,
+            safeMessage,
+            null,
+            cancellationToken);
+        task.Fail($"步骤 {step.StepIndex} 执行失败：{safeMessage}", now);
+        attempt.MarkFailed(problem.Code, safeMessage, now);
+        task.ReleaseRunLease(now, clearActiveAttempt: true);
+        await SaveAsync(task, workspace, attempt, cancellationToken);
+        return Result.Success(task);
+    }
+
+    private static bool RequiresRuntimeApproval(AgentStep step, ToolRegistration tool)
     {
         if (step.RequiresApproval)
         {
             return true;
         }
 
-        return step.ToolCode is "generate_pdf" or "generate_pptx" or "generate_xlsx" or "finalize_artifacts";
+        return tool.RequiresApproval || tool.RiskLevel == AICopilot.SharedKernel.Ai.AiToolRiskLevel.RequiresApproval;
+    }
+
+    private static string ResolveExecutionErrorCode(Exception ex, AgentStep step, ToolRegistration? tool)
+    {
+        if (ex is AgentToolExecutionException toolExecutionException)
+        {
+            return toolExecutionException.Code;
+        }
+
+        if (ex is CloudAiReadException cloudAiReadException)
+        {
+            return cloudAiReadException.Code;
+        }
+
+        if (ex.Message.StartsWith(AppProblemCodes.ArtifactFinalized, StringComparison.OrdinalIgnoreCase))
+        {
+            return AppProblemCodes.ArtifactFinalized;
+        }
+
+        return step.StepType is AgentStepType.ArtifactGeneration or AgentStepType.ChartGeneration ||
+               tool?.ProviderType == ToolProviderType.Artifact
+            ? AppProblemCodes.ArtifactGenerationFailed
+            : ToolExecutionFailedCode;
+    }
+
+    private static string BuildInputSummary(AgentStep step, ToolRegistration? tool)
+    {
+        var payload = new
+        {
+            stepIndex = step.StepIndex,
+            stepType = step.StepType.ToString(),
+            toolCode = step.ToolCode ?? tool?.ToolCode,
+            targetName = tool?.TargetName,
+            inputJsonLength = step.InputJson?.Length ?? 0
+        };
+        return SanitizeSummary(JsonSerializer.Serialize(payload, JsonOptions), 2000) ?? "{}";
+    }
+
+    private static string? BuildOutputSummary(object output)
+    {
+        return SanitizeSummary(JsonSerializer.Serialize(output, JsonOptions), 4000);
+    }
+
+    private static string BuildAuditMetadata(
+        AgentTask task,
+        ArtifactWorkspace workspace,
+        AgentStep step,
+        ToolRegistration? tool)
+    {
+        var payload = new
+        {
+            taskId = task.Id.Value,
+            taskCode = task.TaskCode,
+            workspaceCode = workspace.WorkspaceCode,
+            stepIndex = step.StepIndex,
+            toolCode = step.ToolCode ?? tool?.ToolCode,
+            providerType = tool?.ProviderType.ToString(),
+            targetType = tool?.TargetType.ToString(),
+            targetName = tool?.TargetName,
+            timeoutSeconds = tool?.TimeoutSeconds,
+            auditLevel = tool?.AuditLevel.ToString(),
+            riskLevel = tool?.RiskLevel.ToString(),
+            requiresApproval = tool?.RequiresApproval
+        };
+        return SanitizeSummary(JsonSerializer.Serialize(payload, JsonOptions), 4000) ?? "{}";
+    }
+
+    private static string? SanitizeSummary(string? value, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var sanitized = Regex.Replace(
+            value,
+            @"(?i)(api[_-]?key|token|password|secret|connection\s*string)\s*[""':=]+\s*[^,""}\s]+",
+            "$1=******");
+        sanitized = Regex.Replace(
+            sanitized,
+            @"[A-Za-z]:\\[^\s""']+",
+            "[redacted-path]");
+        sanitized = Regex.Replace(
+            sanitized,
+            @"(?i)(Host|Username|Password|Database|Port)\s*=\s*[^;""'}]+",
+            "$1=******");
+
+        return sanitized.Length <= maxLength ? sanitized : sanitized[..maxLength];
     }
 
     private static string? ExtractArtifactId(object output)
@@ -568,10 +989,16 @@ public sealed class AgentTaskRuntime(
     private async Task SaveAsync(
         AgentTask task,
         ArtifactWorkspace workspace,
+        AgentTaskRunAttempt? attempt,
         CancellationToken cancellationToken)
     {
         taskRepository.Update(task);
         workspaceRepository.Update(workspace);
+        if (attempt is not null)
+        {
+            runAttemptRepository.Update(attempt);
+        }
+
         await taskRepository.SaveChangesAsync(cancellationToken);
     }
 
@@ -721,6 +1148,40 @@ public sealed class AgentTaskRuntime(
             }
         }
 
+        if (state.CloudReadonlyRows.Count > 0)
+        {
+            var columns = state.CloudReadonlyRows
+                .SelectMany(row => row.Keys)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            var valueColumn = columns.FirstOrDefault(column =>
+                state.CloudReadonlyRows.Any(row =>
+                    row.TryGetValue(column, out var value) && TryParseNumber(value, out _)));
+            if (valueColumn is not null)
+            {
+                var labelColumn = columns.FirstOrDefault(column =>
+                    state.CloudReadonlyRows.Any(row =>
+                        row.TryGetValue(column, out var value) &&
+                        value is not null &&
+                        !TryParseNumber(value, out _))) ?? columns[0];
+                return new
+                {
+                    type = "bar",
+                    source = state.CloudReadonlySourceLabel ?? "cloud-readonly",
+                    labels = state.CloudReadonlyRows
+                        .Take(20)
+                        .Select(row => row.TryGetValue(labelColumn, out var value) ? FormatChartLabel(value) : string.Empty)
+                        .ToArray(),
+                    values = state.CloudReadonlyRows
+                        .Take(20)
+                        .Select(row => row.TryGetValue(valueColumn, out var value) && TryParseNumber(value, out var number) ? number : 0)
+                        .ToArray(),
+                    truncated = state.CloudReadonlyIsTruncated,
+                    generatedAt = DateTimeOffset.UtcNow
+                };
+            }
+        }
+
         return new
         {
             type = "bar",
@@ -830,6 +1291,42 @@ public sealed class AgentTaskRuntime(
                || double.TryParse(value, out number);
     }
 
+    private static bool TryParseNumber(object? value, out double number)
+    {
+        switch (value)
+        {
+            case null:
+                number = 0;
+                return false;
+            case double doubleValue:
+                number = doubleValue;
+                return true;
+            case float floatValue:
+                number = floatValue;
+                return true;
+            case decimal decimalValue:
+                number = (double)decimalValue;
+                return true;
+            case byte or sbyte or short or ushort or int or uint or long or ulong:
+                number = Convert.ToDouble(value, CultureInfo.InvariantCulture);
+                return true;
+            default:
+                return TryParseNumber(Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty, out number);
+        }
+    }
+
+    private static string FormatChartLabel(object? value)
+    {
+        return value switch
+        {
+            null => string.Empty,
+            DateTimeOffset date => date.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture),
+            DateTime date => date.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture),
+            IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
+            _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty
+        };
+    }
+
     private static string SafeFileName(string fileName)
     {
         var name = Path.GetFileName(fileName);
@@ -872,6 +1369,23 @@ public sealed class AgentTaskRuntime(
             .Replace(">", "&gt;", StringComparison.Ordinal)
             .Replace("\"", "&quot;", StringComparison.Ordinal);
     }
+
+    private sealed class RuntimeBuiltInAgentToolExecutor(
+        Func<AgentToolExecutionContext, Task<object>> execute)
+        : IAgentToolExecutor
+    {
+        public bool CanExecute(ToolRegistration tool, AgentStep step)
+        {
+            return tool.ProviderType is ToolProviderType.BuiltIn or ToolProviderType.Artifact or ToolProviderType.CloudReadonly &&
+                   tool.TargetType == ToolRegistrationTargetType.AgentRuntime &&
+                   string.Equals(tool.TargetName, "AgentTaskRuntime", StringComparison.OrdinalIgnoreCase);
+        }
+
+        public async Task<AgentToolExecutionResult> ExecuteAsync(AgentToolExecutionContext context)
+        {
+            return AgentToolExecutionResult.From(await execute(context));
+        }
+    }
 }
 
 internal sealed class AgentTaskRunState
@@ -885,6 +1399,14 @@ internal sealed class AgentTaskRunState
     public List<AgentRagResult> RagResults { get; } = [];
 
     public string? CloudReadonlySummary { get; set; }
+
+    public IReadOnlyList<Dictionary<string, object?>> CloudReadonlyRows { get; set; } = [];
+
+    public string? CloudReadonlySourceLabel { get; set; }
+
+    public string? CloudReadonlySourcePath { get; set; }
+
+    public bool CloudReadonlyIsTruncated { get; set; }
 }
 
 internal sealed record AgentUploadSummary(

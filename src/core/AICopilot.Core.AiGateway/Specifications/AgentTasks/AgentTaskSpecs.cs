@@ -16,6 +16,18 @@ public sealed class AgentTaskByIdForUserSpec : Specification<AgentTask>
     }
 }
 
+public sealed class AgentTaskByIdSpec : Specification<AgentTask>
+{
+    public AgentTaskByIdSpec(AgentTaskId id, bool includeSteps = false)
+    {
+        FilterCondition = task => task.Id == id;
+        if (includeSteps)
+        {
+            AddInclude(task => task.Steps);
+        }
+    }
+}
+
 public sealed class AgentTasksBySessionForUserSpec : Specification<AgentTask>
 {
     public AgentTasksBySessionForUserSpec(SessionId sessionId, Guid userId, bool includeSteps = false)
