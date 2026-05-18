@@ -55,7 +55,26 @@ jobs:
       - name: Backend test project build
         run: dotnet build src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj
 
+      - name: Detect Docker
+        id: docker
+        shell: pwsh
+        run: |
+          $dockerAvailable = $false
+          if (Get-Command docker -ErrorAction SilentlyContinue) {
+            docker info *> $null
+            $dockerAvailable = $LASTEXITCODE -eq 0
+          }
+
+          "available=$($dockerAvailable.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          if ($dockerAvailable) {
+            Write-Host "Docker is available; Docker-backed backend suites will run."
+          }
+          else {
+            Write-Host "Docker is unavailable; Docker-backed backend suites will be skipped."
+          }
+
       - name: Backend Simulation suites
+        if: steps.docker.outputs.available == 'true'
         shell: pwsh
         run: |
           dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "Suite=AgentSimulationAcceptance"
@@ -66,16 +85,14 @@ jobs:
           dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "Suite=Batch9McpToolGovernance"
           dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "Suite=Batch10RunQueueOps"
 
+      - name: Backend Simulation suites skipped
+        if: steps.docker.outputs.available != 'true'
+        run: Write-Host "Docker is unavailable; skipped Docker/Postgres-backed backend simulation suites."
+
       - name: Acceptance with Docker-aware skip
         shell: pwsh
         run: |
-          $dockerAvailable = $false
-          if (Get-Command docker -ErrorAction SilentlyContinue) {
-            docker info *> $null
-            $dockerAvailable = $LASTEXITCODE -eq 0
-          }
-
-          if ($dockerAvailable) {
+          if ('${{ steps.docker.outputs.available }}' -eq 'true') {
             .\scripts\Run-AgentSimulationAcceptance.ps1
           }
           else {
@@ -85,7 +102,9 @@ jobs:
 
       - name: Release-candidate scope guard
         shell: pwsh
-        run: .\scripts\Test-AgentWorkbenchReleaseCandidateScope.ps1 -BaseRef origin/main
+        run: |
+          git fetch origin ${{ github.base_ref }} --depth=1
+          .\scripts\Test-AgentWorkbenchReleaseCandidateScope.ps1 -BaseRef origin/${{ github.base_ref }}
 
       - name: Encoding check
         shell: pwsh
