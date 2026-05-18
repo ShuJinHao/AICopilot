@@ -181,3 +181,14 @@ Updated: 2026-05-15
 - Verification: pre-commit checks passed before grouping: `scripts/Test-TextEncoding.ps1`, `git diff --check`, generated-output inventory, and `scripts/Run-AcceptanceClosure.ps1`.
 - Verification: latest acceptance report was refreshed at `2026-05-15 09:15:26`; all configured steps are marked `PASSED`.
 - Remaining boundary: this phase only prepared local commits and review material. Remote push, GitHub PR creation, branch cleanup, and review feedback handling require a separate explicit instruction.
+
+## 2026-05-18 A Assistant Agent Runtime Offline Simulation Batch 11 Delivery Freeze
+
+- Completed: Batch 0-10 offline Simulation Agent Runtime backend closure was frozen in `资料/A助理AgentRuntime离线Simulation功能闭环Batch11交付冻结报告.md`.
+- Completed: Batch 0-11 acceptance records were indexed in `资料/A助理AgentRuntime离线Simulation功能闭环交付索引.md`, including Batch 0-4 Simulation acceptance and Batch 5-10 focused reports.
+- Completed: the delivery boundary was recorded explicitly: current outputs remain Simulation-marked, `CloudReadonly` defaults to `Disabled`, real Cloud read access requires a separate future plan, and Simulation data must not be presented as real Cloud data.
+- Completed: no backend API route, DTO shape, approval flow, queue behavior, artifact behavior, key protection behavior, MCP runtime behavior, database migration, dependency, shell capability, arbitrary path write entry, or Cloud/Edge/frontend code was changed in Batch 11.
+- Verification: `dotnet build .\src\tests\AICopilot.BackendTests\AICopilot.BackendTests.csproj -c Debug` passed with 0 warnings and 0 errors.
+- Verification: focused backend regressions passed: Batch 5-8 suites 15/15, Batch 9-10 suites 12/12, ToolRegistryGovernance 42/42, and AgentSimulationAcceptance 4/4.
+- Verification: `.\scripts\Run-AgentSimulationAcceptance.ps1` passed scope guard, backend build, Simulation unit tests, and Docker acceptance, refreshing `资料/A助理AgentSimulation离线验收报告.md`.
+- Remaining boundary: this freeze does not include real Cloud integration, real frontend integration, production deployment validation, external MCP discovery/execution, or automated stale-lease recovery. Each requires a separate explicit plan.

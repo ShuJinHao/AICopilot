@@ -148,9 +148,14 @@ public class AICopilotAppFixture : IAsyncLifetime, IAsyncDisposable
         SetEnvironmentVariable("RateLimiting__Login__TokensPerPeriod", "1000");
         SetEnvironmentVariable("RateLimiting__Chat__TokenLimit", "1000");
         SetEnvironmentVariable("RateLimiting__Chat__TokensPerPeriod", "1000");
+        ConfigureAdditionalEnvironment();
     }
 
-    private void SetEnvironmentVariable(string name, string value)
+    protected virtual void ConfigureAdditionalEnvironment()
+    {
+    }
+
+    protected void SetEnvironmentVariable(string name, string value)
     {
         if (!_originalEnvironment.ContainsKey(name))
         {
@@ -322,4 +327,23 @@ public sealed class CoreAICopilotAppFixture : AICopilotAppFixture
     protected override bool EnableRagWorker => false;
 
     protected override bool EnableDataWorker => true;
+}
+
+public sealed class AgentSimulationAICopilotAppFixture : AICopilotAppFixture
+{
+    protected override bool EnableRagWorker => false;
+
+    protected override bool EnableDataWorker => true;
+
+    protected override void ConfigureAdditionalEnvironment()
+    {
+        SetEnvironmentVariable("CloudReadonly__Mode", "Simulation");
+        SetEnvironmentVariable("CloudReadonly__Simulation__Enabled", "true");
+        SetEnvironmentVariable("CloudReadonly__Simulation__SeedData", "true");
+        SetEnvironmentVariable("CloudReadonly__Simulation__DataSet", "ManufacturingDemo");
+        SetEnvironmentVariable("CloudReadonly__Simulation__AlwaysMarkAsSimulation", "true");
+        SetEnvironmentVariable("CloudReadonly__Real__Enabled", "false");
+        SetEnvironmentVariable("CloudReadonly__Real__AllowProductionRead", "false");
+        SetEnvironmentVariable("CloudAiRead__Enabled", "false");
+    }
 }

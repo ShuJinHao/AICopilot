@@ -27,6 +27,7 @@ public record TestLanguageModelCommand(
 
 public class TestLanguageModelCommandHandler(
     IRepository<LanguageModel> repository,
+    ISecretProtector secretProtector,
     ILanguageModelConnectivityTester tester)
     : ICommandHandler<TestLanguageModelCommand, Result<LanguageModelTestResultDto>>
 {
@@ -82,7 +83,7 @@ public class TestLanguageModelCommandHandler(
         return Result.Success(ToDto(outcome));
     }
 
-    private static BuildTestModelResult BuildTestModel(TestLanguageModelCommand request, LanguageModel? persistedModel)
+    private BuildTestModelResult BuildTestModel(TestLanguageModelCommand request, LanguageModel? persistedModel)
     {
         try
         {
@@ -100,7 +101,7 @@ public class TestLanguageModelCommandHandler(
                 ? null
                 : string.IsNullOrWhiteSpace(request.ApiKey)
                     ? persistedModel?.ApiKey
-                    : request.ApiKey.Trim();
+                    : ProtectApiKey(request.ApiKey);
 
             var model = new LanguageModel(
                 ResolveRequired(request.Provider, persistedModel?.Provider),
@@ -119,10 +120,17 @@ public class TestLanguageModelCommandHandler(
 
             return BuildTestModelResult.Ok(model);
         }
-        catch (Exception ex) when (ex is ArgumentException or ArgumentOutOfRangeException)
+        catch (Exception ex) when (ex is ArgumentException or ArgumentOutOfRangeException or InvalidOperationException)
         {
             return BuildTestModelResult.Failed(ex.Message);
         }
+    }
+
+    private string? ProtectApiKey(string? apiKey)
+    {
+        return string.IsNullOrWhiteSpace(apiKey)
+            ? null
+            : secretProtector.Protect(apiKey.Trim());
     }
 
     private static string ResolveRequired(string? requestValue, string? fallbackValue)

@@ -5,7 +5,7 @@ namespace AICopilot.EntityFrameworkCore.Security;
 
 public static class SecretStringEncryptor
 {
-    private const string CipherPrefix = "encv1:";
+    public const string CipherPrefix = "encv1:";
     private const string EncryptionKeyEnvironmentVariable = "AICopilotSecurity__ApiKeyEncryptionKey";
 
     public static string? Encrypt(string? plaintext)
@@ -41,9 +41,10 @@ public static class SecretStringEncryptor
             return storedValue;
         }
 
-        if (!storedValue.StartsWith(CipherPrefix, StringComparison.Ordinal))
+        if (!IsEncrypted(storedValue))
         {
-            return storedValue;
+            throw new InvalidOperationException(
+                $"Stored secret must be encrypted with '{CipherPrefix}'. Re-save the configuration to protect the API key.");
         }
 
         var key = LoadKey();
@@ -66,6 +67,12 @@ public static class SecretStringEncryptor
         using var decryptor = aes.CreateDecryptor();
         var plainBytes = decryptor.TransformFinalBlock(cipherBytes, 0, cipherBytes.Length);
         return Encoding.UTF8.GetString(plainBytes);
+    }
+
+    public static bool IsEncrypted(string? storedValue)
+    {
+        return !string.IsNullOrEmpty(storedValue)
+               && storedValue.StartsWith(CipherPrefix, StringComparison.Ordinal);
     }
 
     public static void EnsureConfigured()

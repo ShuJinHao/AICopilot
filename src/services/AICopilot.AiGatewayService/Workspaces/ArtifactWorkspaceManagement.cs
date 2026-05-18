@@ -73,10 +73,8 @@ public sealed record ArtifactWorkspaceSettingsDto(
     IReadOnlyCollection<string> AllowedArtifactTypes,
     bool AllowsUserDefinedPath);
 
-[AuthorizeRequirement("AiGateway.GetWorkspace")]
 public sealed record GetArtifactWorkspaceQuery(string Code) : IQuery<Result<ArtifactWorkspaceDto>>;
 
-[AuthorizeRequirement("AiGateway.DownloadArtifact")]
 public sealed record DownloadArtifactQuery(Guid Id) : IQuery<Result<ArtifactDownloadDto>>;
 
 [AuthorizeRequirement("AiGateway.SubmitFinalReview")]
@@ -333,20 +331,27 @@ public sealed class GetArtifactWorkspaceSettingsQueryHandler(IArtifactWorkspaceF
 public sealed class GetArtifactWorkspaceQueryHandler(
     IReadRepository<ArtifactWorkspace> workspaceRepository,
     IReadRepository<AgentTask> taskRepository,
+    IReadRepository<ApprovalRequest> approvalRepository,
     IArtifactWorkspaceFileStore fileStore,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IIdentityAccessService identityAccessService)
     : IQueryHandler<GetArtifactWorkspaceQuery, Result<ArtifactWorkspaceDto>>
 {
     public async Task<Result<ArtifactWorkspaceDto>> Handle(
         GetArtifactWorkspaceQuery request,
         CancellationToken cancellationToken)
     {
-        var access = await WorkspaceAccess.LoadByCodeAsync(
+        var access = await WorkspaceAccess.LoadByCodeForOwnerOrPermissionAsync(
             workspaceRepository,
             taskRepository,
             currentUser,
+            identityAccessService,
             request.Code,
             includeArtifacts: true,
+            ownerPermission: AgentApprovalPermissions.GetWorkspace,
+            privilegedPermissions: [AgentApprovalPermissions.ApproveFinalOutput, AgentApprovalPermissions.FinalizeWorkspace],
+            approvalRepository,
+            requireFinalOutputApprovalForPrivilegedAccess: true,
             cancellationToken);
         if (!access.IsSuccess)
         {
@@ -361,23 +366,29 @@ public sealed class GetArtifactWorkspaceQueryHandler(
 public sealed class DownloadArtifactQueryHandler(
     IReadRepository<ArtifactWorkspace> workspaceRepository,
     IReadRepository<AgentTask> taskRepository,
+    IReadRepository<ApprovalRequest> approvalRepository,
     IArtifactWorkspaceFileStore fileStore,
     AgentAuditRecorder auditRecorder,
     IAuditLogWriter auditLogWriter,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IIdentityAccessService identityAccessService)
     : IQueryHandler<DownloadArtifactQuery, Result<ArtifactDownloadDto>>
 {
     public async Task<Result<ArtifactDownloadDto>> Handle(
         DownloadArtifactQuery request,
         CancellationToken cancellationToken)
     {
-        if (currentUser.Id is not { } userId)
+        var currentAccessResult = await AgentApprovalPermissions.LoadCurrentUserAccessAsync(
+            currentUser,
+            identityAccessService,
+            cancellationToken);
+        if (!currentAccessResult.IsSuccess)
         {
-            return Result.Unauthorized(new ApiProblemDescriptor(
-                AuthProblemCodes.Unauthorized,
-                "Current user id is missing or invalid."));
+            return Result.From(currentAccessResult);
         }
 
+        var currentAccess = currentAccessResult.Value!;
+        var userId = currentAccess.UserId;
         var workspace = await workspaceRepository.FirstOrDefaultAsync(
             new ArtifactWorkspaceByArtifactIdSpec(new ArtifactId(request.Id)),
             cancellationToken);
@@ -387,9 +398,29 @@ public sealed class DownloadArtifactQueryHandler(
         }
 
         var task = await taskRepository.FirstOrDefaultAsync(
-            new AgentTaskByIdForUserSpec(workspace.TaskId, userId),
+            new AgentTaskByIdSpec(workspace.TaskId),
             cancellationToken);
         if (task is null)
+        {
+            return Result.NotFound();
+        }
+
+        if (task.UserId == userId)
+        {
+            if (!AgentApprovalPermissions.HasPermission(currentAccess, AgentApprovalPermissions.DownloadArtifact))
+            {
+                return AgentApprovalPermissions.ForbiddenMissing(AgentApprovalPermissions.DownloadArtifact);
+            }
+        }
+        else if (!AgentApprovalPermissions.CanReadFinalReviewWorkspace(currentAccess))
+        {
+            return Result.NotFound();
+        }
+        else if (!await WorkspaceAccess.HasFinalOutputApprovalAsync(
+                     approvalRepository,
+                     task.Id,
+                     workspace.WorkspaceCode,
+                     cancellationToken))
         {
             return Result.NotFound();
         }
@@ -512,19 +543,25 @@ public sealed class FinalizeArtifactWorkspaceCommandHandler(
     IArtifactWorkspaceFileStore fileStore,
     AgentAuditRecorder auditRecorder,
     IAuditLogWriter auditLogWriter,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IIdentityAccessService identityAccessService)
     : ICommandHandler<FinalizeArtifactWorkspaceCommand, Result<ArtifactWorkspaceDto>>
 {
     public async Task<Result<ArtifactWorkspaceDto>> Handle(
         FinalizeArtifactWorkspaceCommand request,
         CancellationToken cancellationToken)
     {
-        var access = await WorkspaceAccess.LoadByCodeAsync(
+        var access = await WorkspaceAccess.LoadByCodeForOwnerOrPermissionAsync(
             workspaceRepository,
             taskRepository,
             currentUser,
+            identityAccessService,
             request.Code,
             includeArtifacts: true,
+            ownerPermission: AgentApprovalPermissions.FinalizeWorkspace,
+            privilegedPermissions: [AgentApprovalPermissions.FinalizeWorkspace],
+            approvalRepository: null,
+            requireFinalOutputApprovalForPrivilegedAccess: false,
             cancellationToken);
         if (!access.IsSuccess)
         {
@@ -691,5 +728,85 @@ internal sealed record WorkspaceAccess(ArtifactWorkspace Workspace, AgentTask Ta
         return task is null
             ? Result.NotFound()
             : Result.Success(new WorkspaceAccess(workspace, task));
+    }
+
+    public static async Task<Result<WorkspaceAccess>> LoadByCodeForOwnerOrPermissionAsync(
+        IReadRepository<ArtifactWorkspace> workspaceRepository,
+        IReadRepository<AgentTask> taskRepository,
+        ICurrentUser currentUser,
+        IIdentityAccessService identityAccessService,
+        string code,
+        bool includeArtifacts,
+        string ownerPermission,
+        IReadOnlyCollection<string> privilegedPermissions,
+        IReadRepository<ApprovalRequest>? approvalRepository,
+        bool requireFinalOutputApprovalForPrivilegedAccess,
+        CancellationToken cancellationToken)
+    {
+        var currentAccessResult = await AgentApprovalPermissions.LoadCurrentUserAccessAsync(
+            currentUser,
+            identityAccessService,
+            cancellationToken);
+        if (!currentAccessResult.IsSuccess)
+        {
+            return Result.From(currentAccessResult);
+        }
+
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            return Result.Invalid("Workspace code is required.");
+        }
+
+        var workspace = await workspaceRepository.FirstOrDefaultAsync(
+            new ArtifactWorkspaceByCodeSpec(code.Trim(), includeArtifacts),
+            cancellationToken);
+        if (workspace is null)
+        {
+            return Result.NotFound();
+        }
+
+        var task = await taskRepository.FirstOrDefaultAsync(
+            new AgentTaskByIdSpec(workspace.TaskId, includeSteps: true),
+            cancellationToken);
+        if (task is null)
+        {
+            return Result.NotFound();
+        }
+
+        var currentAccess = currentAccessResult.Value!;
+        if (task.UserId == currentAccess.UserId)
+        {
+            return AgentApprovalPermissions.HasPermission(currentAccess, ownerPermission)
+                ? Result.Success(new WorkspaceAccess(workspace, task))
+                : AgentApprovalPermissions.ForbiddenMissing(ownerPermission);
+        }
+
+        if (!privilegedPermissions.Any(permission => AgentApprovalPermissions.HasPermission(currentAccess, permission)))
+        {
+            return Result.NotFound();
+        }
+
+        if (requireFinalOutputApprovalForPrivilegedAccess &&
+            (approvalRepository is null ||
+             !await HasFinalOutputApprovalAsync(approvalRepository, task.Id, workspace.WorkspaceCode, cancellationToken)))
+        {
+            return Result.NotFound();
+        }
+
+        return Result.Success(new WorkspaceAccess(workspace, task));
+    }
+
+    public static async Task<bool> HasFinalOutputApprovalAsync(
+        IReadRepository<ApprovalRequest> approvalRepository,
+        AgentTaskId taskId,
+        string workspaceCode,
+        CancellationToken cancellationToken)
+    {
+        var approvals = await approvalRepository.ListAsync(
+            new ApprovalRequestsByTaskSpec(taskId),
+            cancellationToken);
+        return approvals.Any(item =>
+            item.ApprovalType == AgentApprovalType.FinalOutput &&
+            string.Equals(item.TargetId, workspaceCode, StringComparison.Ordinal));
     }
 }

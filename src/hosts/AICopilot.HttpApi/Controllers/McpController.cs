@@ -38,4 +38,10 @@ public class McpController(ISender sender) : ApiControllerBase(sender)
     {
         return ReturnResult(await Sender.Send(new GetListMcpServersQuery()));
     }
+
+    [HttpGet("tool-governance")]
+    public async Task<IActionResult> GetToolGovernance([FromQuery] GetMcpToolGovernanceQuery query)
+    {
+        return ReturnResult(await Sender.Send(query));
+    }
 }

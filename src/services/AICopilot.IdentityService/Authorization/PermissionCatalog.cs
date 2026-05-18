@@ -14,7 +14,7 @@ public sealed class PermissionCatalog : IPermissionCatalog
         new("Identity.GetListPermissions", "Identity", "View Permission Catalog", "View the built-in permission catalog and descriptions."),
         new("Identity.GetListRoles", "Identity", "View Roles", "View roles and their assigned permissions."),
         new("Identity.CreateRole", "Identity", "Create Role", "Create a new role and assign permissions."),
-        new("Identity.UpdateRole", "Identity", "Update Role Permissions", "Update the permission set of an existing role."),
+        new("Identity.UpdateRole", "Identity", "Update Role Permissions", "Change permissions assigned to an existing role."),
         new("Identity.GetListUsers", "Identity", "View Users", "View users and their current role."),
         new("Identity.CreateUser", "Identity", "Create User", "Create a new user and assign an initial role."),
         new("Identity.UpdateUserRole", "Identity", "Update User Role", "Reassign the single effective role of a user."),
@@ -33,6 +33,8 @@ public sealed class PermissionCatalog : IPermissionCatalog
         new("AiGateway.GetAgentTask", "AiGateway", "View Agent Task", "View controlled Agent task plans, status, and steps."),
         new("AiGateway.PlanAgentTask", "AiGateway", "Plan Agent Task", "Create a controlled Agent task plan that requires confirmation before execution."),
         new("AiGateway.ApproveAgentTaskPlan", "AiGateway", "Approve Agent Plan", "Confirm a controlled Agent task plan before execution."),
+        new("AiGateway.ApproveAgentToolCall", "AiGateway", "Approve Agent Tool Call", "Approve or reject controlled Agent tool-call execution."),
+        new("AiGateway.ApproveFinalOutput", "AiGateway", "Approve Final Output", "Approve or reject final Agent workspace output before publication."),
         new("AiGateway.RunAgentTask", "AiGateway", "Run Agent Task", "Start an approved controlled Agent task."),
         new("AiGateway.CancelAgentTask", "AiGateway", "Cancel Agent Task", "Cancel a controlled Agent task."),
         new("AiGateway.GetLanguageModel", "AiGateway", "View Language Model", "View language model configuration details."),
@@ -44,6 +46,7 @@ public sealed class PermissionCatalog : IPermissionCatalog
         new("AiGateway.GetUpload", "AiGateway", "View Uploads", "View upload records visible to the current account."),
         new("AiGateway.GetWorkspace", "AiGateway", "View Artifact Workspace", "View controlled Agent artifact workspace files and draft outputs."),
         new("AiGateway.DownloadArtifact", "AiGateway", "Download Artifact", "Download artifacts owned by current account Agent tasks."),
+        new("AiGateway.EditArtifact", "AiGateway", "Edit Draft Artifact", "Edit controlled text draft artifacts before final review submission."),
         new("AiGateway.SubmitFinalReview", "AiGateway", "Submit Final Review", "Submit workspace draft artifacts for final-output approval."),
         new("AiGateway.FinalizeWorkspace", "AiGateway", "Finalize Workspace", "Move approved draft artifacts into final output."),
         new("AiGateway.CreateLanguageModel", "AiGateway", "Create Language Model", "Create a new language model configuration."),
@@ -118,8 +121,8 @@ public sealed class PermissionCatalog : IPermissionCatalog
         "AiGateway.GetUpload",
         "AiGateway.GetWorkspace",
         "AiGateway.DownloadArtifact",
+        "AiGateway.EditArtifact",
         "AiGateway.SubmitFinalReview",
-        "AiGateway.FinalizeWorkspace",
         "AiGateway.Chat"
     ];
 

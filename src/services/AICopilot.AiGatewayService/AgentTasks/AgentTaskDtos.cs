@@ -149,7 +149,11 @@ public sealed record AgentRunQueueSummaryDto(
     int DeadLetterCount,
     int StaleLeasedCount,
     DateTimeOffset? OldestQueuedAt,
+    long? AverageWaitMs,
+    long? AverageRunMs,
+    long? OldestQueuedWaitMs,
     int ActiveWorkerCount,
+    int WorkspaceMismatchCount,
     DateTimeOffset GeneratedAt);
 
 public sealed record AgentWorkerHeartbeatDto(
@@ -184,7 +188,9 @@ internal static class AgentTaskDtoMapper
         AgentTask task,
         string? workspaceCode = null,
         int pendingApprovalCount = 0,
-        AgentTaskRunQueueItem? activeQueueItem = null)
+        AgentTaskRunQueueItem? activeQueueItem = null,
+        bool canApproveFinal = false,
+        bool? canSubmitFinalReview = null)
     {
         return new AgentTaskDto(
             task.Id,
@@ -214,8 +220,8 @@ internal static class AgentTaskDtoMapper
                 or AgentTaskStatus.GeneratingArtifacts
                 or AgentTaskStatus.WaitingToolApproval,
             task.Status is AgentTaskStatus.Failed,
-            task.Status is AgentTaskStatus.WorkspaceReady,
-            task.Status is AgentTaskStatus.WaitingFinalApproval,
+            task.Status is AgentTaskStatus.WorkspaceReady && (canSubmitFinalReview ?? true),
+            task.Status is AgentTaskStatus.WaitingFinalApproval && canApproveFinal,
             AgentTaskFailureSummaryResolver.Resolve(task),
             task.ActiveRunAttemptId?.Value,
             task.RunAttemptCount,

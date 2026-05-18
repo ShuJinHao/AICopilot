@@ -13,6 +13,7 @@ using AICopilot.Infrastructure.Mcp;
 using AICopilot.Infrastructure.Rag;
 using AICopilot.Infrastructure.Rag.Parsers;
 using AICopilot.Infrastructure.Rag.TokenCounter;
+using AICopilot.Infrastructure.Security;
 using AICopilot.Infrastructure.Storage;
 using AICopilot.Services.Contracts;
 using Microsoft.Extensions.Configuration;
@@ -27,6 +28,7 @@ public static class DependencyInjection
 {
     public static void AddInfrastructures(this IHostApplicationBuilder builder)
     {
+        builder.AddSecretProtection();
         builder.AddEfCore();
         builder.AddDapper();
         builder.AddEmbedding();
@@ -95,6 +97,7 @@ public static class DependencyInjection
         this IHostApplicationBuilder builder,
         Assembly consumerAssembly)
     {
+        builder.AddSecretProtection();
         builder.AddEfCore();
         builder.AddEventBus(consumerAssembly);
         builder.AddEmbedding();
@@ -106,6 +109,11 @@ public static class DependencyInjection
         builder.Services.AddSingleton<IDocumentTextSplitter, TextSplitterService>();
         builder.Services.AddScoped<IDocumentContentExtractor, DocumentContentExtractor>();
         builder.Services.AddScoped<IKnowledgeVectorIndexWriter, KnowledgeVectorIndexWriter>();
+    }
+
+    private static void AddSecretProtection(this IHostApplicationBuilder builder)
+    {
+        builder.Services.AddSingleton<ISecretProtector, SecretProtector>();
     }
 
     private static void AddDocumentParsers(this IHostApplicationBuilder builder)

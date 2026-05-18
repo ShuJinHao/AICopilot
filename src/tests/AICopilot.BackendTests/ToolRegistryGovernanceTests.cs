@@ -27,6 +27,7 @@ using AICopilot.SharedKernel.Result;
 using AICopilot.SharedKernel.Specification;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace AICopilot.BackendTests;
 
@@ -826,7 +827,8 @@ public sealed class ToolRegistryGovernanceTests
             new InMemoryRepository<ArtifactWorkspace>(workspace),
             new AgentAuditRecorder(new CapturingAuditLogWriter()),
             new AgentTaskRunQueue(queueRepository),
-            new TestCurrentUser(UserId));
+            new TestCurrentUser(UserId),
+            new StubIdentityAccessService([AgentApprovalPermissions.ApproveAgentToolCall]));
 
         var result = await handler.Handle(new ApproveAgentApprovalCommand(approval.Id.Value, "approved"), CancellationToken.None);
 
@@ -1293,7 +1295,7 @@ public sealed class ToolRegistryGovernanceTests
                     riskLevel: AiToolRiskLevel.RequiresApproval),
                 CreateTool("generate_markdown_report", ToolProviderType.Artifact)),
             workspaceService,
-            new CloudReadonlyAgentToolExecutor(new FixedSemanticQueryPlanner(semanticPlan), cloudClient));
+            CreateRealCloudReadonlyExecutor(new FixedSemanticQueryPlanner(semanticPlan), cloudClient));
 
         var result = await runtime.RunAsync(task, CancellationToken.None);
 
@@ -1339,7 +1341,7 @@ public sealed class ToolRegistryGovernanceTests
                     riskLevel: AiToolRiskLevel.RequiresApproval),
                 CreateTool("generate_markdown_report", ToolProviderType.Artifact)),
             workspaceService,
-            new CloudReadonlyAgentToolExecutor(
+            CreateRealCloudReadonlyExecutor(
                 new FixedSemanticQueryPlanner(CreateDeviceSemanticPlan()),
                 new FailingCloudAiReadClient(new CloudAiReadException(
                     CloudAiReadProblemCodes.MissingRequiredParameter,
@@ -2169,6 +2171,32 @@ public sealed class ToolRegistryGovernanceTests
         public SemanticPlanningResult Plan(string intent, string? query)
         {
             return SemanticPlanningResult.Success(plan);
+        }
+    }
+
+    private static CloudReadonlyAgentToolExecutor CreateRealCloudReadonlyExecutor(
+        ISemanticQueryPlanner planner,
+        ICloudAiReadClient cloudClient)
+    {
+        var options = Options.Create(new CloudReadonlyOptions
+        {
+            Mode = CloudReadonlyDataSourceMode.Real,
+            Real = new CloudReadonlyRealOptions
+            {
+                Enabled = true,
+                AllowProductionRead = true
+            }
+        });
+        return new CloudReadonlyAgentToolExecutor(new FixedCloudReadonlyDataProviderResolver(
+            new RealCloudReadonlyDataProvider(planner, cloudClient, options)));
+    }
+
+    private sealed class FixedCloudReadonlyDataProviderResolver(ICloudReadonlyDataProvider provider)
+        : ICloudReadonlyDataProviderResolver
+    {
+        public ICloudReadonlyDataProvider Resolve()
+        {
+            return provider;
         }
     }
 

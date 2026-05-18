@@ -10,6 +10,7 @@ using AICopilot.SharedKernel.Messaging;
 using AICopilot.SharedKernel.Paging;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
+using Microsoft.Extensions.Options;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
 
@@ -214,7 +215,9 @@ public sealed class GetAgentRunQueueQueryHandler(
 
 public sealed class GetAgentRunQueueSummaryQueryHandler(
     IReadRepository<AgentTaskRunQueueItem> queueRepository,
-    IReadRepository<AgentWorkerHeartbeat> heartbeatRepository)
+    IReadRepository<AgentWorkerHeartbeat> heartbeatRepository,
+    IAgentWorkspaceFingerprintProvider? workspaceFingerprintProvider = null,
+    IOptions<AgentRunQueueOptions>? options = null)
     : IQueryHandler<GetAgentRunQueueSummaryQuery, Result<AgentRunQueueSummaryDto>>
 {
     public async Task<Result<AgentRunQueueSummaryDto>> Handle(
@@ -229,15 +232,31 @@ public sealed class GetAgentRunQueueSummaryQueryHandler(
             new AgentWorkerHeartbeatAllSpec(),
             cancellationToken);
 
-        return Result.Success(BuildSummary(queueItems, heartbeats, now));
+        var httpApiWorkspaceHash = workspaceFingerprintProvider?.GetWorkspaceRootHash();
+        return Result.Success(BuildSummary(
+            queueItems,
+            heartbeats,
+            now,
+            httpApiWorkspaceHash,
+            options?.Value.HeartbeatActiveWindow));
     }
 
     internal static AgentRunQueueSummaryDto BuildSummary(
         IReadOnlyCollection<AgentTaskRunQueueItem> queueItems,
         IReadOnlyCollection<AgentWorkerHeartbeat> heartbeats,
-        DateTimeOffset nowUtc)
+        DateTimeOffset nowUtc,
+        string? httpApiWorkspaceRootHash = null,
+        TimeSpan? activeHeartbeatWindow = null)
     {
-        var activeSince = nowUtc.Subtract(AgentWorkerStatusCalculator.ActiveHeartbeatWindow);
+        var activeSince = nowUtc.Subtract(activeHeartbeatWindow ?? AgentWorkerStatusCalculator.DefaultActiveHeartbeatWindow);
+        var activeHeartbeats = heartbeats
+            .Where(heartbeat => heartbeat.LastSeenAt >= activeSince)
+            .ToArray();
+        var oldestQueuedAt = queueItems
+            .Where(item => item.Status == AgentTaskRunQueueStatus.Queued)
+            .Select(item => (DateTimeOffset?)item.AvailableAt)
+            .Order()
+            .FirstOrDefault();
         return new AgentRunQueueSummaryDto(
             queueItems.Count(item => item.Status == AgentTaskRunQueueStatus.Queued),
             queueItems.Count(item => item.Status == AgentTaskRunQueueStatus.Leased),
@@ -248,20 +267,44 @@ public sealed class GetAgentRunQueueSummaryQueryHandler(
             queueItems.Count(item => item.Status == AgentTaskRunQueueStatus.Leased &&
                                      item.LeaseExpiresAt.HasValue &&
                                      item.LeaseExpiresAt.Value <= nowUtc),
-            queueItems
-                .Where(item => item.Status == AgentTaskRunQueueStatus.Queued)
-                .Select(item => (DateTimeOffset?)item.AvailableAt)
-                .Order()
-                .FirstOrDefault(),
-            heartbeats.Count(heartbeat => heartbeat.LastSeenAt >= activeSince),
+            oldestQueuedAt,
+            AverageMilliseconds(queueItems
+                .Where(item => item.StartedAt.HasValue)
+                .Select(item => item.StartedAt!.Value - item.AvailableAt)),
+            AverageMilliseconds(queueItems
+                .Where(item => item.StartedAt.HasValue && item.CompletedAt.HasValue)
+                .Select(item => item.CompletedAt!.Value - item.StartedAt!.Value)),
+            oldestQueuedAt.HasValue
+                ? NonNegativeMilliseconds(nowUtc - oldestQueuedAt.Value)
+                : null,
+            activeHeartbeats.Length,
+            string.IsNullOrWhiteSpace(httpApiWorkspaceRootHash)
+                ? 0
+                : activeHeartbeats.Count(heartbeat => heartbeat.WorkspaceRootHash != httpApiWorkspaceRootHash),
             nowUtc);
+    }
+
+    private static long? AverageMilliseconds(IEnumerable<TimeSpan> durations)
+    {
+        var values = durations
+            .Select(NonNegativeMilliseconds)
+            .ToArray();
+        return values.Length == 0
+            ? null
+            : (long)Math.Round(values.Average(), MidpointRounding.AwayFromZero);
+    }
+
+    private static long NonNegativeMilliseconds(TimeSpan duration)
+    {
+        return Math.Max(0, (long)duration.TotalMilliseconds);
     }
 }
 
 public sealed class GetAgentWorkerStatusQueryHandler(
     IReadRepository<AgentTaskRunQueueItem> queueRepository,
     IReadRepository<AgentWorkerHeartbeat> heartbeatRepository,
-    IAgentWorkspaceFingerprintProvider workspaceFingerprintProvider)
+    IAgentWorkspaceFingerprintProvider workspaceFingerprintProvider,
+    IOptions<AgentRunQueueOptions>? options = null)
     : IQueryHandler<GetAgentWorkerStatusQuery, Result<AgentWorkerStatusDto>>
 {
     public async Task<Result<AgentWorkerStatusDto>> Handle(
@@ -280,7 +323,8 @@ public sealed class GetAgentWorkerStatusQueryHandler(
             queueItems,
             heartbeats,
             httpApiWorkspaceHash,
-            now));
+            now,
+            options?.Value.HeartbeatActiveWindow));
     }
 }
 
@@ -302,6 +346,7 @@ public sealed class DeadLetterAgentRunQueueItemCommandHandler(
         }
 
         var now = DateTimeOffset.UtcNow;
+        var oldStatus = item.Status.ToString();
         if (!item.CanMoveToDeadLetter(now))
         {
             return Result.Failure(new ApiProblemDescriptor(
@@ -330,8 +375,13 @@ public sealed class DeadLetterAgentRunQueueItemCommandHandler(
                 {
                     ["queueItemId"] = item.Id.Value.ToString(),
                     ["taskId"] = item.TaskId.Value.ToString(),
-                    ["status"] = item.Status.ToString(),
-                    ["failureCode"] = failureCode
+                    ["attemptId"] = item.RunAttemptId?.Value.ToString() ?? string.Empty,
+                    ["triggerType"] = item.TriggerType.ToString(),
+                    ["oldStatus"] = oldStatus,
+                    ["newStatus"] = item.Status.ToString(),
+                    ["failureCode"] = failureCode,
+                    ["retryAttemptNo"] = string.Empty,
+                    ["availableAt"] = item.AvailableAt.ToString("O")
                 }),
             cancellationToken);
 
@@ -341,15 +391,16 @@ public sealed class DeadLetterAgentRunQueueItemCommandHandler(
 
 internal static class AgentWorkerStatusCalculator
 {
-    public static readonly TimeSpan ActiveHeartbeatWindow = TimeSpan.FromSeconds(30);
+    public static readonly TimeSpan DefaultActiveHeartbeatWindow = TimeSpan.FromSeconds(30);
 
     public static AgentWorkerStatusDto Build(
         IReadOnlyCollection<AgentTaskRunQueueItem> queueItems,
         IReadOnlyCollection<AgentWorkerHeartbeat> heartbeats,
         string httpApiWorkspaceRootHash,
-        DateTimeOffset nowUtc)
+        DateTimeOffset nowUtc,
+        TimeSpan? activeHeartbeatWindow = null)
     {
-        var activeSince = nowUtc.Subtract(ActiveHeartbeatWindow);
+        var activeSince = nowUtc.Subtract(activeHeartbeatWindow ?? DefaultActiveHeartbeatWindow);
         var workers = heartbeats
             .OrderByDescending(heartbeat => heartbeat.LastSeenAt)
             .Select(heartbeat => MapHeartbeat(

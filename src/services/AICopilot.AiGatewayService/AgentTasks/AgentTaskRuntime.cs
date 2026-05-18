@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -18,6 +19,7 @@ using AICopilot.Core.AiGateway.Specifications.Uploads;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
+using Microsoft.Extensions.Options;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
 
@@ -48,16 +50,18 @@ internal sealed class AgentTaskRuntime(
     ICurrentUser currentUser,
     ToolRegistryGuard toolRegistryGuard,
     AgentAuditRecorder auditRecorder,
-    IEnumerable<IAgentToolExecutor> toolExecutors)
+    IEnumerable<IAgentToolExecutor> toolExecutors,
+    IOptions<AgentRunQueueOptions>? runQueueOptions = null)
     : IAgentTaskRuntime
 {
     private const string ToolExecutionFailedCode = "tool_execution_failed";
     private const string RunLeaseOwner = "agent-runtime-sync";
-    private static readonly TimeSpan RunLeaseDuration = TimeSpan.FromMinutes(5);
+    private TimeSpan RunLeaseDuration => runQueueOptions?.Value.LeaseDuration ?? new AgentRunQueueOptions().LeaseDuration;
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         Converters = { new JsonStringEnumConverter() },
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
         WriteIndented = true
     };
 
@@ -203,7 +207,7 @@ internal sealed class AgentTaskRuntime(
                 executionRecord.MarkSucceeded(
                     BuildOutputSummary(output),
                     artifactId,
-                    BuildAuditMetadata(task, workspace, step, toolRegistration),
+                    BuildAuditMetadata(task, workspace, step, toolRegistration, output),
                     DateTimeOffset.UtcNow);
                 step.Complete(JsonSerializer.Serialize(output, JsonOptions), DateTimeOffset.UtcNow);
                 await auditRecorder.RecordToolAsync(
@@ -626,6 +630,9 @@ internal sealed class AgentTaskRuntime(
         state.CloudReadonlyRows = result.Rows;
         state.CloudReadonlySourceLabel = result.SourceLabel;
         state.CloudReadonlySourcePath = result.SourcePath;
+        state.CloudReadonlySourceMode = result.SourceMode;
+        state.CloudReadonlyIsSimulation = result.IsSimulation;
+        state.CloudReadonlyRowCount = result.RowCount;
         state.CloudReadonlyIsTruncated = result.IsTruncated;
         return result;
     }
@@ -636,7 +643,7 @@ internal sealed class AgentTaskRuntime(
         AgentTaskRunState state,
         CancellationToken cancellationToken)
     {
-        var payload = BuildChartPayload(state);
+        var payload = AgentReportComposer.BuildChartPayload(state);
         var content = JsonSerializer.Serialize(payload, JsonOptions);
         var artifact = await workspaceService.WriteDraftTextArtifactAsync(
             workspace,
@@ -657,7 +664,7 @@ internal sealed class AgentTaskRuntime(
         AgentTaskRunState state,
         CancellationToken cancellationToken)
     {
-        var markdown = BuildMarkdownReport(task, state);
+        var markdown = AgentReportComposer.BuildMarkdownReport(task, state);
         var artifact = await workspaceService.WriteDraftTextArtifactAsync(
             workspace,
             ArtifactType.Markdown,
@@ -677,7 +684,7 @@ internal sealed class AgentTaskRuntime(
         AgentTaskRunState state,
         CancellationToken cancellationToken)
     {
-        var html = BuildHtmlReport(task, state);
+        var html = AgentReportComposer.BuildHtmlReport(task, state);
         var artifact = await workspaceService.WriteDraftTextArtifactAsync(
             workspace,
             ArtifactType.Html,
@@ -697,7 +704,7 @@ internal sealed class AgentTaskRuntime(
         AgentTaskRunState state,
         CancellationToken cancellationToken)
     {
-        var content = await documentGenerator.GeneratePdfAsync(BuildReportDocument(task, state), cancellationToken);
+        var content = await documentGenerator.GeneratePdfAsync(AgentReportComposer.BuildReportDocument(task, state), cancellationToken);
         EnsureGeneratedContent(content, "PDF");
         var artifact = await workspaceService.WriteDraftBinaryArtifactAsync(
             workspace,
@@ -718,7 +725,7 @@ internal sealed class AgentTaskRuntime(
         AgentTaskRunState state,
         CancellationToken cancellationToken)
     {
-        var content = await documentGenerator.GeneratePptxAsync(BuildReportDocument(task, state), cancellationToken);
+        var content = await documentGenerator.GeneratePptxAsync(AgentReportComposer.BuildReportDocument(task, state), cancellationToken);
         EnsureGeneratedContent(content, "PPTX");
         var artifact = await workspaceService.WriteDraftBinaryArtifactAsync(
             workspace,
@@ -739,7 +746,7 @@ internal sealed class AgentTaskRuntime(
         AgentTaskRunState state,
         CancellationToken cancellationToken)
     {
-        var content = await documentGenerator.GenerateXlsxAsync(BuildReportDocument(task, state), cancellationToken);
+        var content = await documentGenerator.GenerateXlsxAsync(AgentReportComposer.BuildReportDocument(task, state), cancellationToken);
         EnsureGeneratedContent(content, "XLSX");
         var artifact = await workspaceService.WriteDraftBinaryArtifactAsync(
             workspace,
@@ -913,8 +920,23 @@ internal sealed class AgentTaskRuntime(
         AgentTask task,
         ArtifactWorkspace workspace,
         AgentStep step,
-        ToolRegistration? tool)
+        ToolRegistration? tool,
+        object? output = null)
     {
+        var cloudReadonly = output is CloudReadonlyAgentToolResult cloudResult
+            ? new
+            {
+                cloudResult.SourceMode,
+                cloudResult.IsSimulation,
+                cloudResult.SourceLabel,
+                cloudResult.SourcePath,
+                cloudResult.Intent,
+                cloudResult.Target,
+                cloudResult.Kind,
+                cloudResult.RowCount,
+                cloudResult.IsTruncated
+            }
+            : null;
         var payload = new
         {
             taskId = task.Id.Value,
@@ -928,7 +950,8 @@ internal sealed class AgentTaskRuntime(
             timeoutSeconds = tool?.TimeoutSeconds,
             auditLevel = tool?.AuditLevel.ToString(),
             riskLevel = tool?.RiskLevel.ToString(),
-            requiresApproval = tool?.RequiresApproval
+            requiresApproval = tool?.RequiresApproval,
+            cloudReadonly
         };
         return SanitizeSummary(JsonSerializer.Serialize(payload, JsonOptions), 4000) ?? "{}";
     }
@@ -1168,6 +1191,8 @@ internal sealed class AgentTaskRuntime(
                 {
                     type = "bar",
                     source = state.CloudReadonlySourceLabel ?? "cloud-readonly",
+                    sourceMode = state.CloudReadonlySourceMode,
+                    isSimulation = state.CloudReadonlyIsSimulation,
                     labels = state.CloudReadonlyRows
                         .Take(20)
                         .Select(row => row.TryGetValue(labelColumn, out var value) ? FormatChartLabel(value) : string.Empty)
@@ -1177,6 +1202,7 @@ internal sealed class AgentTaskRuntime(
                         .Select(row => row.TryGetValue(valueColumn, out var value) && TryParseNumber(value, out var number) ? number : 0)
                         .ToArray(),
                     truncated = state.CloudReadonlyIsTruncated,
+                    rowCount = state.CloudReadonlyRowCount,
                     generatedAt = DateTimeOffset.UtcNow
                 };
             }
@@ -1405,6 +1431,12 @@ internal sealed class AgentTaskRunState
     public string? CloudReadonlySourceLabel { get; set; }
 
     public string? CloudReadonlySourcePath { get; set; }
+
+    public string? CloudReadonlySourceMode { get; set; }
+
+    public bool CloudReadonlyIsSimulation { get; set; }
+
+    public int CloudReadonlyRowCount { get; set; }
 
     public bool CloudReadonlyIsTruncated { get; set; }
 }

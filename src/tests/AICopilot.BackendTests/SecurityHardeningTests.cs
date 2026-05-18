@@ -396,7 +396,8 @@ public sealed class SecurityHardeningTests
         knowledgeBaseManagementSource.Should().Contain("KNOWLEDGE_WRITE_PERMISSIONS.document.governance");
         permissionCatalogSource.Should().Contain("Rag.SearchKnowledgeBase");
         permissionCatalogSource.Should().Contain("Rag.UpdateDocumentGovernance");
-        embeddingManagementSource.Should().Contain("request.ApiKey ?? entity.ApiKey");
+        embeddingManagementSource.Should().Contain("request.ApiKey is null");
+        embeddingManagementSource.Should().Contain("ProtectApiKey(request.ApiKey)");
     }
 
     [Fact]

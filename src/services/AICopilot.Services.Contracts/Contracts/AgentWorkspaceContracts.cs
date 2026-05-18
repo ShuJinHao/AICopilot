@@ -96,6 +96,20 @@ public sealed record AgentReportSource(
     double? Score = null,
     bool IsLowConfidence = false);
 
+public sealed record AgentReportMetric(
+    string Name,
+    string Value,
+    string? Unit = null,
+    string? Source = null);
+
+public sealed record AgentReportSourceInfo(
+    string? SourceMode,
+    bool IsSimulation,
+    string? SourceLabel,
+    string? SourcePath,
+    int RowCount,
+    bool IsTruncated);
+
 public sealed record AgentReportDocument(
     string Title,
     string Goal,
@@ -103,7 +117,9 @@ public sealed record AgentReportDocument(
     IReadOnlyList<AgentReportTable> Tables,
     IReadOnlyList<AgentReportSource> Sources,
     string? CloudReadonlySummary,
-    DateTimeOffset GeneratedAt);
+    DateTimeOffset GeneratedAt,
+    IReadOnlyList<AgentReportMetric>? Metrics = null,
+    AgentReportSourceInfo? CloudReadonlySource = null);
 
 public interface IAgentTableFileParser
 {

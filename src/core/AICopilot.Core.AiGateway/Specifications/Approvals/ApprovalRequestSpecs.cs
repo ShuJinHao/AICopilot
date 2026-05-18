@@ -35,6 +35,15 @@ public sealed class ApprovalRequestsByTasksSpec : Specification<ApprovalRequest>
     }
 }
 
+public sealed class PendingApprovalRequestsSpec : Specification<ApprovalRequest>
+{
+    public PendingApprovalRequestsSpec()
+    {
+        FilterCondition = request => request.Status == AgentApprovalStatus.Pending;
+        SetOrderByDescending(request => request.CreatedAt);
+    }
+}
+
 public sealed class ApprovalRequestsByTaskSpec : Specification<ApprovalRequest>
 {
     public ApprovalRequestsByTaskSpec(AgentTaskId taskId, bool pendingOnly = false)

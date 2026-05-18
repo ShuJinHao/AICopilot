@@ -14,7 +14,7 @@ public interface IAgentTaskRunQueue
         CancellationToken cancellationToken,
         DateTimeOffset? availableAt = null);
 
-    Task CancelActiveAsync(
+    Task<IReadOnlyCollection<AgentTaskRunQueueItem>> CancelActiveAsync(
         AgentTask task,
         DateTimeOffset nowUtc,
         string safeMessage,
@@ -66,7 +66,7 @@ internal sealed class AgentTaskRunQueue(
         return Result.Success(item);
     }
 
-    public async Task CancelActiveAsync(
+    public async Task<IReadOnlyCollection<AgentTaskRunQueueItem>> CancelActiveAsync(
         AgentTask task,
         DateTimeOffset nowUtc,
         string safeMessage,
@@ -85,6 +85,8 @@ internal sealed class AgentTaskRunQueue(
         {
             await queueRepository.SaveChangesAsync(cancellationToken);
         }
+
+        return activeItems;
     }
 
     public async Task<Result<AgentTaskRunQueueItem?>> LeaseNextAsync(

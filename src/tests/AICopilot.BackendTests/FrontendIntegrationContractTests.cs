@@ -330,7 +330,11 @@ public sealed class FrontendContractSnapshotTests
             DeadLetterCount: 0,
             StaleLeasedCount: 0,
             OldestQueuedAt: now,
+            AverageWaitMs: 250,
+            AverageRunMs: 500,
+            OldestQueuedWaitMs: 1000,
             ActiveWorkerCount: 1,
+            WorkspaceMismatchCount: 0,
             GeneratedAt: now);
         var worker = new AgentWorkerStatusDto(
             StatusCode: "healthy",
@@ -366,7 +370,7 @@ public sealed class FrontendContractSnapshotTests
         AssertProperties(root.GetProperty("record"), "runAttemptId", "toolCode", "inputSummary", "outputSummary", "status", "auditMetadata");
         AssertProperties(root.GetProperty("registration"), "toolCode", "providerType", "targetType", "inputSchemaJson", "requiresApproval", "runtimeAvailable", "sourceServerName");
         AssertProperties(root.GetProperty("queueItem"), "id", "taskId", "triggerType", "status", "runAttemptId", "leaseExpiresAt", "safeMessage");
-        AssertProperties(root.GetProperty("summary"), "queuedCount", "leasedCount", "failedCount", "deadLetterCount", "staleLeasedCount", "oldestQueuedAt", "activeWorkerCount");
+        AssertProperties(root.GetProperty("summary"), "queuedCount", "leasedCount", "failedCount", "deadLetterCount", "staleLeasedCount", "oldestQueuedAt", "averageWaitMs", "averageRunMs", "oldestQueuedWaitMs", "activeWorkerCount", "workspaceMismatchCount");
         AssertProperties(root.GetProperty("worker"), "statusCode", "hasActiveWorkers", "workspaceConsistent", "httpApiWorkspaceRootHash", "workers");
         root.GetProperty("worker").GetProperty("workers")[0].TryGetProperty("workspaceMatchesHttpApi", out _)
             .Should()

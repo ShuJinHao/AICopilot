@@ -25,6 +25,7 @@ public record CreateLanguageModelCommand(
 
 public class CreateLanguageModelCommandHandler(
     IRepository<LanguageModel> repo,
+    ISecretProtector secretProtector,
     IAuditLogWriter auditLogWriter)
     : ICommandHandler<CreateLanguageModelCommand, Result<CreatedLanguageModelDto>>
 {
@@ -40,7 +41,7 @@ public class CreateLanguageModelCommandHandler(
             request.Provider,
             request.Name,
             request.BaseUrl,
-            string.IsNullOrWhiteSpace(request.ApiKey) ? null : request.ApiKey.Trim(),
+            ProtectApiKey(request.ApiKey),
             new ModelParameters
             {
                 MaxTokens = contextWindowTokens,
@@ -67,5 +68,12 @@ public class CreateLanguageModelCommandHandler(
         await repo.SaveChangesAsync(cancellationToken);
 
         return Result.Success(new CreatedLanguageModelDto(result.Id, result.Provider, result.Name));
+    }
+
+    private string? ProtectApiKey(string? apiKey)
+    {
+        return string.IsNullOrWhiteSpace(apiKey)
+            ? null
+            : secretProtector.Protect(apiKey.Trim());
     }
 }

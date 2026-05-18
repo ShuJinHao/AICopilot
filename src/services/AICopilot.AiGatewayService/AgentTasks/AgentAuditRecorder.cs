@@ -110,6 +110,76 @@ public sealed class AgentAuditRecorder(IAuditLogWriter auditLogWriter)
             cancellationToken);
     }
 
+    public Task RecordArtifactUpdatedAsync(
+        AgentTask task,
+        ArtifactWorkspace workspace,
+        Artifact artifact,
+        int oldVersion,
+        int newVersion,
+        string sha256,
+        string? comment,
+        CancellationToken cancellationToken)
+    {
+        return WriteAsync(
+            "Agent.ArtifactUpdated",
+            "Artifact",
+            artifact.Id.Value.ToString(),
+            artifact.Name,
+            AuditResults.Succeeded,
+            "Agent draft artifact content updated.",
+            ArtifactVersionMetadata(task, workspace, artifact, oldVersion, newVersion, sourceVersion: null, sha256, comment),
+            cancellationToken);
+    }
+
+    public Task RecordArtifactVersionRestoredAsync(
+        AgentTask task,
+        ArtifactWorkspace workspace,
+        Artifact artifact,
+        int sourceVersion,
+        int oldVersion,
+        int newVersion,
+        string sha256,
+        string? comment,
+        CancellationToken cancellationToken)
+    {
+        return WriteAsync(
+            "Agent.ArtifactVersionRestored",
+            "Artifact",
+            artifact.Id.Value.ToString(),
+            artifact.Name,
+            AuditResults.Succeeded,
+            "Agent draft artifact version restored.",
+            ArtifactVersionMetadata(task, workspace, artifact, oldVersion, newVersion, sourceVersion, sha256, comment),
+            cancellationToken);
+    }
+
+    public Task RecordArtifactVersionDownloadAsync(
+        AgentTask task,
+        ArtifactWorkspace workspace,
+        Artifact artifact,
+        int version,
+        CancellationToken cancellationToken)
+    {
+        return WriteAsync(
+            "Agent.ArtifactVersionDownload",
+            "Artifact",
+            artifact.Id.Value.ToString(),
+            artifact.Name,
+            AuditResults.Succeeded,
+            "Agent artifact version downloaded.",
+            new Dictionary<string, string>
+            {
+                ["taskId"] = task.Id.Value.ToString(),
+                ["taskCode"] = task.TaskCode,
+                ["workspaceCode"] = workspace.WorkspaceCode,
+                ["artifactId"] = artifact.Id.Value.ToString(),
+                ["artifactStatus"] = artifact.Status.ToString(),
+                ["version"] = version.ToString(),
+                ["mimeType"] = artifact.MimeType
+            },
+            cancellationToken);
+    }
+
     public Task RecordWorkspaceFinalizedAsync(
         AgentTask task,
         ArtifactWorkspace workspace,
@@ -158,6 +228,38 @@ public sealed class AgentAuditRecorder(IAuditLogWriter auditLogWriter)
             cancellationToken);
     }
 
+    public Task RecordRunQueueOperationAsync(
+        string actionCode,
+        AgentTaskRunQueueItem item,
+        string result,
+        string summary,
+        string oldStatus,
+        AgentTaskRunAttempt? attempt,
+        int? retryAttemptNo,
+        CancellationToken cancellationToken)
+    {
+        return WriteAsync(
+            actionCode,
+            "AgentTaskRunQueueItem",
+            item.Id.Value.ToString(),
+            item.TaskId.Value.ToString(),
+            result,
+            summary,
+            new Dictionary<string, string>
+            {
+                ["queueItemId"] = item.Id.Value.ToString(),
+                ["taskId"] = item.TaskId.Value.ToString(),
+                ["attemptId"] = (attempt?.Id.Value ?? item.RunAttemptId?.Value)?.ToString() ?? string.Empty,
+                ["triggerType"] = item.TriggerType.ToString(),
+                ["oldStatus"] = oldStatus,
+                ["newStatus"] = item.Status.ToString(),
+                ["failureCode"] = item.FailureCode ?? string.Empty,
+                ["retryAttemptNo"] = retryAttemptNo?.ToString() ?? string.Empty,
+                ["availableAt"] = item.AvailableAt.ToString("O")
+            },
+            cancellationToken);
+    }
+
     private Task WriteAsync(
         string actionCode,
         string targetType,
@@ -179,5 +281,41 @@ public sealed class AgentAuditRecorder(IAuditLogWriter auditLogWriter)
                 summary,
                 Metadata: metadata),
             cancellationToken);
+    }
+
+    private static IReadOnlyDictionary<string, string> ArtifactVersionMetadata(
+        AgentTask task,
+        ArtifactWorkspace workspace,
+        Artifact artifact,
+        int oldVersion,
+        int newVersion,
+        int? sourceVersion,
+        string sha256,
+        string? comment)
+    {
+        return new Dictionary<string, string>
+        {
+            ["taskId"] = task.Id.Value.ToString(),
+            ["taskCode"] = task.TaskCode,
+            ["artifactId"] = artifact.Id.Value.ToString(),
+            ["workspaceCode"] = workspace.WorkspaceCode,
+            ["oldVersion"] = oldVersion.ToString(),
+            ["newVersion"] = newVersion.ToString(),
+            ["sourceVersion"] = sourceVersion?.ToString() ?? string.Empty,
+            ["mimeType"] = artifact.MimeType,
+            ["sha256"] = sha256,
+            ["comment"] = NormalizeComment(comment)
+        };
+    }
+
+    private static string NormalizeComment(string? comment)
+    {
+        if (string.IsNullOrWhiteSpace(comment))
+        {
+            return string.Empty;
+        }
+
+        var normalized = comment.Trim();
+        return normalized.Length <= 200 ? normalized : normalized[..200];
     }
 }

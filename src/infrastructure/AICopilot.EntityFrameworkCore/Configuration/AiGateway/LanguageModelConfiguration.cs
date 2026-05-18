@@ -1,6 +1,5 @@
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.AiGateway.Ids;
-using AICopilot.EntityFrameworkCore.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -43,7 +42,6 @@ public class LanguageModelConfiguration : IEntityTypeConfiguration<LanguageModel
             .HasColumnName("base_url");
 
         builder.Property(lm => lm.ApiKey)
-            .HasConversion<EncryptedStringValueConverter>()
             .HasMaxLength(2048)
             .HasColumnName("api_key");
 

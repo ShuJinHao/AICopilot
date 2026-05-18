@@ -477,6 +477,56 @@ public class AiGatewayController(ISender sender) : ApiControllerBase(sender)
         return File(result.Value.Stream, result.Value.MimeType, result.Value.FileName);
     }
 
+    [HttpGet("artifact/{id:guid}/content")]
+    public async Task<IActionResult> GetArtifactContent(Guid id)
+    {
+        return ReturnResult(await Sender.Send(new GetArtifactContentQuery(id)));
+    }
+
+    [HttpPut("artifact/{id:guid}/content")]
+    public async Task<IActionResult> UpdateArtifactContent(Guid id, UpdateArtifactContentRequest request)
+    {
+        return ReturnResult(await Sender.Send(new UpdateArtifactContentCommand(
+            id,
+            request.Content,
+            request.ExpectedVersion,
+            request.Comment)));
+    }
+
+    [HttpGet("artifact/{id:guid}/versions")]
+    public async Task<IActionResult> GetArtifactVersions(Guid id)
+    {
+        return ReturnResult(await Sender.Send(new GetArtifactVersionsQuery(id)));
+    }
+
+    [HttpGet("artifact/{id:guid}/versions/{version:int}/download")]
+    public async Task<IActionResult> DownloadArtifactVersion(Guid id, int version)
+    {
+        var result = await Sender.Send(new DownloadArtifactVersionQuery(id, version));
+        if (!result.IsSuccess || result.Value is null)
+        {
+            return ReturnResult(result);
+        }
+
+        return File(result.Value.Stream, result.Value.MimeType, result.Value.FileName);
+    }
+
+    [HttpGet("artifact/{id:guid}/versions/{fromVersion:int}/diff/{toVersion:int}")]
+    public async Task<IActionResult> GetArtifactVersionDiff(Guid id, int fromVersion, int toVersion)
+    {
+        return ReturnResult(await Sender.Send(new GetArtifactVersionDiffQuery(id, fromVersion, toVersion)));
+    }
+
+    [HttpPost("artifact/{id:guid}/versions/{version:int}/restore")]
+    public async Task<IActionResult> RestoreArtifactVersion(Guid id, int version, RestoreArtifactVersionRequest request)
+    {
+        return ReturnResult(await Sender.Send(new RestoreArtifactVersionCommand(
+            id,
+            version,
+            request.ExpectedVersion,
+            request.Comment)));
+    }
+
     [HttpPut("session/safety-attestation")]
     public async Task<IActionResult> UpdateSessionSafetyAttestation(UpdateSessionSafetyAttestationCommand command)
     {

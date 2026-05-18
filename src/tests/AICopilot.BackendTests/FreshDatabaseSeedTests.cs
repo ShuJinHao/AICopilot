@@ -146,6 +146,8 @@ public sealed class FreshDatabaseSeedTests
         adminPermissions.Should().Contain("Rag.UploadDocument");
         adminPermissions.Should().Contain("AiGateway.ToolRegistry.Read");
         adminPermissions.Should().Contain("AiGateway.ToolRegistry.Manage");
+        adminPermissions.Should().Contain("AiGateway.ApproveAgentToolCall");
+        adminPermissions.Should().Contain("AiGateway.ApproveFinalOutput");
 
         userPermissions.Should().BeEquivalentTo(
             "AiGateway.CreateSession",
@@ -161,9 +163,12 @@ public sealed class FreshDatabaseSeedTests
             "AiGateway.GetUpload",
             "AiGateway.GetWorkspace",
             "AiGateway.DownloadArtifact",
+            "AiGateway.EditArtifact",
             "AiGateway.SubmitFinalReview",
-            "AiGateway.FinalizeWorkspace",
             "AiGateway.Chat");
+        userPermissions.Should().NotContain("AiGateway.ApproveAgentToolCall");
+        userPermissions.Should().NotContain("AiGateway.ApproveFinalOutput");
+        userPermissions.Should().NotContain("AiGateway.FinalizeWorkspace");
 
         await using var mcpDbContext = await CreateMcpDbContextAsync(fixture);
         (await mcpDbContext.McpServerInfos.CountAsync()).Should().Be(0);

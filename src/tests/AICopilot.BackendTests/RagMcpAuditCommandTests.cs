@@ -44,7 +44,7 @@ public sealed class RagMcpAuditCommandTests
     {
         var repository = new InMemoryRepository<EmbeddingModel>();
         var auditLogWriter = new CapturingAuditLogWriter();
-        var handler = new CreateEmbeddingModelCommandHandler(repository, auditLogWriter);
+        var handler = new CreateEmbeddingModelCommandHandler(repository, new TestSecretProtector(), auditLogWriter);
         const string secret = "secret-embedding-key";
 
         var result = await handler.Handle(
@@ -73,7 +73,7 @@ public sealed class RagMcpAuditCommandTests
         var entity = CreateEmbeddingModel("embedding");
         var repository = new InMemoryRepository<EmbeddingModel>(entity);
         var auditLogWriter = new CapturingAuditLogWriter();
-        var handler = new UpdateEmbeddingModelCommandHandler(repository, auditLogWriter);
+        var handler = new UpdateEmbeddingModelCommandHandler(repository, new TestSecretProtector(), auditLogWriter);
         const string secret = "replacement-embedding-key";
 
         var result = await handler.Handle(
@@ -123,6 +123,30 @@ public sealed class RagMcpAuditCommandTests
         public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
         {
             return Task.FromResult(Requests.Count);
+        }
+    }
+
+    private sealed class TestSecretProtector : ISecretProtector
+    {
+        public string? Protect(string? plaintext)
+        {
+            return string.IsNullOrEmpty(plaintext) ? plaintext : $"encv1:{plaintext}";
+        }
+
+        public string? Unprotect(string? storedValue)
+        {
+            return storedValue?.StartsWith("encv1:", StringComparison.Ordinal) == true
+                ? storedValue["encv1:".Length..]
+                : storedValue;
+        }
+
+        public bool IsProtected(string? storedValue)
+        {
+            return storedValue?.StartsWith("encv1:", StringComparison.Ordinal) == true;
+        }
+
+        public void EnsureConfigured()
+        {
         }
     }
 

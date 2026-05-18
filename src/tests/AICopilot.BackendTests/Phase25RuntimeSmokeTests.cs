@@ -9,6 +9,7 @@ using AICopilot.Core.AiGateway.Aggregates.Sessions;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.DataAnalysisService.Semantics;
 using AICopilot.EntityFrameworkCore;
+using AICopilot.EntityFrameworkCore.Security;
 using AICopilot.EntityFrameworkCore.Repository;
 using AICopilot.Infrastructure.Mcp;
 using AICopilot.McpService;
@@ -332,7 +333,9 @@ public sealed class Phase25RuntimeSmokeTests
             await using var dbContext = await CreateAiGatewayDbContextAsync();
             var entity = await dbContext.LanguageModels.SingleAsync(item => item.Id == languageModelId);
 
-            entity.ApiKey.Should().Be("sk-keep-original");
+            entity.ApiKey.Should().StartWith(SecretStringEncryptor.CipherPrefix);
+            entity.ApiKey.Should().NotContain("sk-keep-original");
+            SecretStringEncryptor.Decrypt(entity.ApiKey).Should().Be("sk-keep-original");
             entity.Name.Should().Be("cfg-lm-keep-secret-updated");
             entity.Parameters.MaxTokens.Should().Be(4096);
             entity.Parameters.Temperature.Should().BeApproximately(0.35f, 0.001f);

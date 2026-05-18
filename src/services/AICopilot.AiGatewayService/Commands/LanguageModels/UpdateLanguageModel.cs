@@ -26,6 +26,7 @@ public record UpdateLanguageModelCommand(
 
 public class UpdateLanguageModelCommandHandler(
     IRepository<LanguageModel> repository,
+    ISecretProtector secretProtector,
     IAuditLogWriter auditLogWriter)
     : ICommandHandler<UpdateLanguageModelCommand, Result>
 {
@@ -109,7 +110,7 @@ public class UpdateLanguageModelCommandHandler(
         entity.UpdateInfo(request.Provider, request.Name, request.BaseUrl, protocolType);
         if (apiKeyChanged)
         {
-            entity.UpdateApiKey(request.ClearApiKey ? null : normalizedApiKey);
+            entity.UpdateApiKey(request.ClearApiKey ? null : secretProtector.Protect(normalizedApiKey));
         }
 
         entity.UpdateParameters(new ModelParameters

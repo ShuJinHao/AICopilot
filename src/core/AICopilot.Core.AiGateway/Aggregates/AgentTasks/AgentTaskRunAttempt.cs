@@ -130,7 +130,7 @@ public sealed class AgentTaskRunAttempt : BaseEntity<AgentTaskRunAttemptId>, IAg
     {
         if (IsTerminal)
         {
-            return;
+            throw new InvalidOperationException("Terminal agent run attempts cannot be completed again.");
         }
 
         Status = status;

@@ -35,17 +35,16 @@ public sealed record GetPendingAgentApprovalsQuery : IQuery<Result<IReadOnlyColl
 [AuthorizeRequirement("AiGateway.GetAgentTask")]
 public sealed record GetAgentTaskApprovalsQuery(Guid TaskId) : IQuery<Result<IReadOnlyCollection<AgentApprovalRequestDto>>>;
 
-[AuthorizeRequirement("AiGateway.ApproveAgentTaskPlan")]
 public sealed record ApproveAgentApprovalCommand(Guid Id, string? Comment = null) : ICommand<Result<AgentApprovalRequestDto>>;
 
-[AuthorizeRequirement("AiGateway.ApproveAgentTaskPlan")]
 public sealed record RejectAgentApprovalCommand(Guid Id, string? Comment = null) : ICommand<Result<AgentApprovalRequestDto>>;
 
 public sealed class GetPendingAgentApprovalsQueryHandler(
     IReadRepository<AgentTask> taskRepository,
     IReadRepository<ApprovalRequest> approvalRepository,
     IReadRepository<ArtifactWorkspace> workspaceRepository,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IIdentityAccessService identityAccessService)
     : IQueryHandler<GetPendingAgentApprovalsQuery, Result<IReadOnlyCollection<AgentApprovalRequestDto>>>
 {
     public async Task<Result<IReadOnlyCollection<AgentApprovalRequestDto>>> Handle(
@@ -57,25 +56,55 @@ public sealed class GetPendingAgentApprovalsQueryHandler(
             return AgentApprovalAccess.MissingUser();
         }
 
-        var tasks = await taskRepository.ListAsync(
-            new AgentTasksByUserSpec(userId, includeSteps: true),
+        var accessResult = await AgentApprovalPermissions.LoadCurrentUserAccessAsync(
+            currentUser,
+            identityAccessService,
+            cancellationToken);
+        if (!accessResult.IsSuccess)
+        {
+            return Result.From(accessResult);
+        }
+
+        var currentAccess = accessResult.Value!;
+        var approvals = await approvalRepository.ListAsync(
+            new PendingApprovalRequestsSpec(),
             cancellationToken);
         var dtos = new List<AgentApprovalRequestDto>();
-        foreach (var task in tasks)
+        foreach (var approval in approvals)
         {
-            var approvals = await approvalRepository.ListAsync(
-                new ApprovalRequestsByTaskSpec(task.Id, pendingOnly: true),
+            var task = await taskRepository.FirstOrDefaultAsync(
+                new AgentTaskByIdSpec(approval.TaskId, includeSteps: true),
                 cancellationToken);
-            if (approvals.Count == 0)
+            if (task is null || !CanViewPendingApproval(currentAccess, userId, task, approval))
             {
                 continue;
             }
 
             var workspace = await AgentApprovalAccess.LoadWorkspaceAsync(workspaceRepository, task, cancellationToken);
-            dtos.AddRange(approvals.Select(approval => AgentApprovalDtoMapper.Map(approval, task, workspace)));
+            dtos.Add(AgentApprovalDtoMapper.Map(approval, task, workspace));
         }
 
         return Result.Success<IReadOnlyCollection<AgentApprovalRequestDto>>(dtos.ToArray());
+    }
+
+    private static bool CanViewPendingApproval(
+        CurrentUserAccess currentAccess,
+        Guid userId,
+        AgentTask task,
+        ApprovalRequest approval)
+    {
+        var requiredPermission = AgentApprovalPermissions.GetRequiredDecisionPermission(approval.ApprovalType);
+        if (!AgentApprovalPermissions.HasPermission(currentAccess, requiredPermission))
+        {
+            return false;
+        }
+
+        if (task.UserId == userId)
+        {
+            return true;
+        }
+
+        return AgentApprovalPermissions.AllowsCrossUserDecision(approval.ApprovalType);
     }
 }
 
@@ -112,7 +141,8 @@ public sealed class ApproveAgentApprovalCommandHandler(
     IRepository<ArtifactWorkspace> workspaceRepository,
     AgentAuditRecorder auditRecorder,
     IAgentTaskRunQueue runQueue,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IIdentityAccessService identityAccessService)
     : ICommandHandler<ApproveAgentApprovalCommand, Result<AgentApprovalRequestDto>>
 {
     public async Task<Result<AgentApprovalRequestDto>> Handle(
@@ -129,6 +159,7 @@ public sealed class ApproveAgentApprovalCommandHandler(
             auditRecorder,
             runQueue,
             currentUser,
+            identityAccessService,
             cancellationToken);
     }
 
@@ -142,6 +173,7 @@ public sealed class ApproveAgentApprovalCommandHandler(
         AgentAuditRecorder auditRecorder,
         IAgentTaskRunQueue? runQueue,
         ICurrentUser currentUser,
+        IIdentityAccessService identityAccessService,
         CancellationToken cancellationToken)
     {
         if (currentUser.Id is not { } userId)
@@ -162,14 +194,19 @@ public sealed class ApproveAgentApprovalCommandHandler(
             return Result.NotFound();
         }
 
-        var task = await taskRepository.FirstOrDefaultAsync(
-            new AgentTaskByIdForUserSpec(approval.TaskId, userId, includeSteps: true),
+        var taskResult = await LoadDecisionTaskAsync(
+            approval,
+            userId,
+            taskRepository,
+            currentUser,
+            identityAccessService,
             cancellationToken);
-        if (task is null)
+        if (!taskResult.IsSuccess)
         {
-            return Result.NotFound();
+            return Result.From(taskResult);
         }
 
+        var task = taskResult.Value!;
         var workspace = await AgentApprovalAccess.LoadWorkspaceAsync(workspaceRepository, task, cancellationToken);
         var now = DateTimeOffset.UtcNow;
         if (isApproved)
@@ -210,6 +247,47 @@ public sealed class ApproveAgentApprovalCommandHandler(
         }
 
         return Result.Success(AgentApprovalDtoMapper.Map(approval, task, workspace));
+    }
+
+    private static async Task<Result<AgentTask>> LoadDecisionTaskAsync(
+        ApprovalRequest approval,
+        Guid userId,
+        IReadRepository<AgentTask> taskRepository,
+        ICurrentUser currentUser,
+        IIdentityAccessService identityAccessService,
+        CancellationToken cancellationToken)
+    {
+        var accessResult = await AgentApprovalPermissions.LoadCurrentUserAccessAsync(
+            currentUser,
+            identityAccessService,
+            cancellationToken);
+        if (!accessResult.IsSuccess)
+        {
+            return Result.From(accessResult);
+        }
+
+        var requiredPermission = AgentApprovalPermissions.GetRequiredDecisionPermission(approval.ApprovalType);
+        if (!AgentApprovalPermissions.HasPermission(accessResult.Value, requiredPermission))
+        {
+            return AgentApprovalPermissions.ForbiddenMissing(requiredPermission);
+        }
+
+        var task = await taskRepository.FirstOrDefaultAsync(
+            new AgentTaskByIdSpec(approval.TaskId, includeSteps: true),
+            cancellationToken);
+        if (task is null)
+        {
+            return Result.NotFound();
+        }
+
+        if (task.UserId == userId)
+        {
+            return Result.Success(task);
+        }
+
+        return AgentApprovalPermissions.AllowsCrossUserDecision(approval.ApprovalType)
+            ? Result.Success(task)
+            : Result.NotFound();
     }
 
     private static void ApplyApproval(
@@ -311,7 +389,8 @@ public sealed class RejectAgentApprovalCommandHandler(
     IRepository<ArtifactWorkspace> workspaceRepository,
     AgentAuditRecorder auditRecorder,
     IAgentTaskRunQueue runQueue,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IIdentityAccessService identityAccessService)
     : ICommandHandler<RejectAgentApprovalCommand, Result<AgentApprovalRequestDto>>
 {
     public async Task<Result<AgentApprovalRequestDto>> Handle(
@@ -328,6 +407,7 @@ public sealed class RejectAgentApprovalCommandHandler(
             auditRecorder,
             runQueue,
             currentUser,
+            identityAccessService,
             cancellationToken);
     }
 }

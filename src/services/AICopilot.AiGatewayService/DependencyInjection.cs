@@ -25,6 +25,11 @@ public static class DependencyInjection
 {
     public static void AddAiGatewayService(this IHostApplicationBuilder builder)
     {
+        builder.Services.Configure<CloudReadonlyOptions>(
+            builder.Configuration.GetSection(CloudReadonlyOptions.SectionName));
+        builder.Services.Configure<AgentRunQueueOptions>(
+            builder.Configuration.GetSection(AgentRunQueueOptions.SectionName));
+
         builder.Services.AddMediatR(cfg =>
         {
             cfg.RegisterServicesFromAssembly(Assembly.GetExecutingAssembly());
@@ -41,8 +46,15 @@ public static class DependencyInjection
         builder.Services.AddScoped<IAgentWorkerHeartbeatService, AgentWorkerHeartbeatService>();
         builder.Services.AddScoped<ICloudReadonlyAgentIntentRouter, CloudReadonlyAgentIntentRouter>();
         builder.Services.AddScoped<ICloudReadonlyAgentPlanService, CloudReadonlyAgentPlanService>();
+        builder.Services.AddSingleton<CloudReadonlySimulationDataSet>();
+        builder.Services.AddSingleton<ICloudReadonlySimulationIntentPlanner, CloudReadonlySimulationIntentPlanner>();
+        builder.Services.AddScoped<ICloudReadonlyDataProvider, DisabledCloudReadonlyDataProvider>();
+        builder.Services.AddScoped<ICloudReadonlyDataProvider, SimulationCloudReadonlyDataProvider>();
+        builder.Services.AddScoped<ICloudReadonlyDataProvider, RealCloudReadonlyDataProvider>();
+        builder.Services.AddScoped<ICloudReadonlyDataProviderResolver, CloudReadonlyDataProviderResolver>();
         builder.Services.AddScoped<ICloudReadonlyAgentToolExecutor, CloudReadonlyAgentToolExecutor>();
         builder.Services.AddScoped<IAgentToolExecutor, McpAgentToolExecutor>();
+        builder.Services.AddScoped<IMcpToolRegistryReadService, McpToolRegistryReadService>();
         builder.Services.AddScoped<ToolRegistryGuard>();
         builder.Services.AddScoped<AgentPlanToolGuard>();
         builder.Services.AddScoped<IAgentDynamicPlanner, DefaultAgentDynamicPlanner>();

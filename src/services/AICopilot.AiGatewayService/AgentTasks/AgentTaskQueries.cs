@@ -22,7 +22,8 @@ public sealed class GetAgentTaskQueryHandler(
     IReadRepository<ArtifactWorkspace> workspaceRepository,
     IReadRepository<ApprovalRequest> approvalRepository,
     IReadRepository<AgentTaskRunQueueItem> queueRepository,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IIdentityAccessService identityAccessService)
     : IQueryHandler<GetAgentTaskQuery, Result<AgentTaskDto>>
 {
     public async Task<Result<AgentTaskDto>> Handle(GetAgentTaskQuery request, CancellationToken cancellationToken)
@@ -33,11 +34,21 @@ public sealed class GetAgentTaskQueryHandler(
             return Result.From(taskResult);
         }
 
+        var currentAccessResult = await AgentApprovalPermissions.LoadCurrentUserAccessAsync(
+            currentUser,
+            identityAccessService,
+            cancellationToken);
+        if (!currentAccessResult.IsSuccess)
+        {
+            return Result.From(currentAccessResult);
+        }
+
         return Result.Success(await AgentTaskDtoComposer.MapAsync(
             taskResult.Value!,
             workspaceRepository,
             approvalRepository,
             queueRepository,
+            currentAccessResult.Value,
             cancellationToken));
     }
 }
@@ -47,7 +58,8 @@ public sealed class GetListAgentTasksBySessionQueryHandler(
     IReadRepository<ArtifactWorkspace> workspaceRepository,
     IReadRepository<ApprovalRequest> approvalRepository,
     IReadRepository<AgentTaskRunQueueItem> queueRepository,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IIdentityAccessService identityAccessService)
     : IQueryHandler<GetListAgentTasksBySessionQuery, Result<IReadOnlyCollection<AgentTaskDto>>>
 {
     public async Task<Result<IReadOnlyCollection<AgentTaskDto>>> Handle(
@@ -69,6 +81,15 @@ public sealed class GetListAgentTasksBySessionQueryHandler(
         var tasks = await repository.ListAsync(
             new AgentTasksBySessionForUserSpec(new SessionId(request.SessionId), userId, includeSteps: true),
             cancellationToken);
+        var currentAccessResult = await AgentApprovalPermissions.LoadCurrentUserAccessAsync(
+            currentUser,
+            identityAccessService,
+            cancellationToken);
+        if (!currentAccessResult.IsSuccess)
+        {
+            return Result.From(currentAccessResult);
+        }
+
         var dtos = new List<AgentTaskDto>();
         foreach (var task in tasks)
         {
@@ -77,6 +98,7 @@ public sealed class GetListAgentTasksBySessionQueryHandler(
                 workspaceRepository,
                 approvalRepository,
                 queueRepository,
+                currentAccessResult.Value,
                 cancellationToken));
         }
 

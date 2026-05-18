@@ -29,7 +29,7 @@ public static class BuiltInToolRegistrations
         Low("parse_csv_json", "解析 CSV/JSON", "将 CSV 或 JSON 输入解析为结构化数据。"),
         Low("parse_table_file", "解析表格文件", "将 CSV、JSON 或 XLSX 输入解析为结构化数据。"),
         Low("rag_search", "检索知识库", "基于任务目标检索已授权知识库。"),
-        CloudReadonly("query_cloud_data_readonly", "读取 Cloud 只读数据", "通过未来 Cloud AiRead 边界读取只读业务数据。本批次默认禁用。"),
+        CloudReadonly("query_cloud_data_readonly", "读取 Cloud 只读数据", "Cloud AiRead readonly query boundary. Data source mode is controlled by CloudReadonly configuration."),
         Low("generate_chart_data", "生成图表数据", "基于可用输入生成图表预览数据。", ToolProviderType.Artifact),
         Low("generate_markdown_report", "生成 Markdown 报告", "在受控工作区 draft 目录生成 Markdown 草稿。", ToolProviderType.Artifact),
         Low("generate_html_report", "生成 HTML 报告", "在受控工作区 draft 目录生成 HTML 草稿。", ToolProviderType.Artifact),

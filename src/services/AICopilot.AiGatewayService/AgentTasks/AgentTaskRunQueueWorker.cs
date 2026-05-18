@@ -1,24 +1,27 @@
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Specifications.AgentTasks;
 using AICopilot.AiGatewayService.Tools;
+using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
 
 public sealed class AgentTaskRunQueueWorker(
     IServiceScopeFactory scopeFactory,
-    ILogger<AgentTaskRunQueueWorker> logger)
+    ILogger<AgentTaskRunQueueWorker> logger,
+    IOptions<AgentRunQueueOptions>? options = null)
     : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
-    private static readonly TimeSpan LeaseDuration = TimeSpan.FromMinutes(5);
     private readonly string leaseOwner = $"aicopilot-dataworker:{Environment.MachineName}";
     private readonly string workerId = $"aicopilot-dataworker:{Environment.MachineName}:{Environment.ProcessId}:{Guid.NewGuid():N}";
     private readonly string workerVersion = typeof(AgentTaskRunQueueWorker).Assembly.GetName().Version?.ToString() ?? "unknown";
+    private AgentRunQueueOptions QueueOptions => options?.Value ?? new AgentRunQueueOptions();
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -51,11 +54,18 @@ public sealed class AgentTaskRunQueueWorker(
         var taskRepository = scope.ServiceProvider.GetRequiredService<IRepository<AgentTask>>();
         var attemptRepository = scope.ServiceProvider.GetRequiredService<IRepository<AgentTaskRunAttempt>>();
         var runQueue = scope.ServiceProvider.GetRequiredService<IAgentTaskRunQueue>();
+        var auditRecorder = scope.ServiceProvider.GetService<AgentAuditRecorder>();
 
         await MarkHeartbeatAsync(scope.ServiceProvider, null, cancellationToken);
-        await FailExpiredStartedLeasesAsync(queueRepository, taskRepository, attemptRepository, cancellationToken);
+        await FailExpiredStartedLeasesAsync(
+            queueRepository,
+            taskRepository,
+            attemptRepository,
+            auditRecorder,
+            QueueOptions,
+            cancellationToken);
 
-        var leased = await runQueue.LeaseNextAsync(leaseOwner, LeaseDuration, cancellationToken);
+        var leased = await runQueue.LeaseNextAsync(leaseOwner, QueueOptions.LeaseDuration, cancellationToken);
         if (!leased.IsSuccess || leased.Value is null)
         {
             await MarkHeartbeatAsync(scope.ServiceProvider, null, cancellationToken);
@@ -124,14 +134,22 @@ public sealed class AgentTaskRunQueueWorker(
         IRepository<AgentTaskRunQueueItem> queueRepository,
         IRepository<AgentTask> taskRepository,
         IRepository<AgentTaskRunAttempt> attemptRepository,
+        AgentAuditRecorder? auditRecorder,
+        AgentRunQueueOptions options,
         CancellationToken cancellationToken)
     {
+        if (options.StaleLeaseAction != AgentRunQueueStaleLeaseAction.Fail)
+        {
+            return;
+        }
+
         var now = DateTimeOffset.UtcNow;
         var activeItems = await queueRepository.ListAsync(
             new AgentTaskRunQueueActiveItemsSpec(),
             cancellationToken);
         foreach (var item in activeItems.Where(candidate => candidate.IsExpiredStartedLease(now)))
         {
+            var oldStatus = item.Status.ToString();
             var message = "Agent task run queue lease expired during execution. Retry the task before continuing.";
             item.MarkFailed(AppProblemCodes.AgentTaskRunQueueLeaseExpired, message, now);
             queueRepository.Update(item);
@@ -151,6 +169,19 @@ public sealed class AgentTaskRunQueueWorker(
             {
                 attempt.MarkFailed(AppProblemCodes.AgentTaskRunLeaseExpired, message, now);
                 attemptRepository.Update(attempt);
+            }
+
+            if (auditRecorder is not null)
+            {
+                await auditRecorder.RecordRunQueueOperationAsync(
+                    "Agent.RunQueueStaleLeaseFailed",
+                    item,
+                    AuditResults.Succeeded,
+                    message,
+                    oldStatus,
+                    attempt,
+                    retryAttemptNo: null,
+                    cancellationToken);
             }
         }
 

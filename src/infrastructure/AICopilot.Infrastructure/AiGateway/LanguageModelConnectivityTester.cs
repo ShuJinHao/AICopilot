@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
+using System.Security.Cryptography;
 using AICopilot.AiRuntime;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Services.Contracts;
@@ -10,6 +11,7 @@ namespace AICopilot.Infrastructure.AiGateway;
 
 public sealed class LanguageModelConnectivityTester(
     IEnumerable<IChatClientProvider> providers,
+    ISecretProtector secretProtector,
     ILogger<LanguageModelConnectivityTester> logger) : ILanguageModelConnectivityTester
 {
     public async Task<LanguageModelConnectivityTestOutcome> TestAsync(
@@ -67,7 +69,7 @@ public sealed class LanguageModelConnectivityTester(
             logger.LogWarning(ex, "Language model connectivity test failed for {Provider}/{Model}.", model.Provider, model.Name);
             return new LanguageModelConnectivityTestOutcome(
                 false,
-                SanitizeException(ex, model.ApiKey),
+                SanitizeException(ex, model.ApiKey, TryUnprotect(model.ApiKey)),
                 stopwatch.ElapsedMilliseconds,
                 checkedAt);
         }
@@ -82,7 +84,19 @@ public sealed class LanguageModelConnectivityTester(
         return new LanguageModelConnectivityTestOutcome(false, error, stopwatch.ElapsedMilliseconds, checkedAt);
     }
 
-    private static string SanitizeException(Exception exception, string? apiKey)
+    private string? TryUnprotect(string? storedApiKey)
+    {
+        try
+        {
+            return secretProtector.Unprotect(storedApiKey);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or FormatException or CryptographicException)
+        {
+            return null;
+        }
+    }
+
+    private static string SanitizeException(Exception exception, string? storedApiKey, string? plaintextApiKey)
     {
         var parts = new List<string>();
         var statusCode = ReadExceptionProperty(exception, "Status")
@@ -109,9 +123,14 @@ public sealed class LanguageModelConnectivityTester(
         }
 
         var error = string.Join("; ", parts.Where(part => !string.IsNullOrWhiteSpace(part))).Trim();
-        if (!string.IsNullOrEmpty(apiKey))
+        if (!string.IsNullOrEmpty(storedApiKey))
         {
-            error = error.Replace(apiKey, "***", StringComparison.Ordinal);
+            error = error.Replace(storedApiKey, "***", StringComparison.Ordinal);
+        }
+
+        if (!string.IsNullOrEmpty(plaintextApiKey))
+        {
+            error = error.Replace(plaintextApiKey, "***", StringComparison.Ordinal);
         }
 
         return error.Length <= 1000 ? error : error[..1000];
