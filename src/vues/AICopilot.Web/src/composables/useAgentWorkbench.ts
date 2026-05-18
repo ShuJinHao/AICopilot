@@ -12,6 +12,9 @@ function statusLabel(status?: string | null) {
     WaitingPlanApproval: '待确认计划',
     WaitingApproval: '待审批',
     Running: '执行中',
+    PlanApproved: '计划已批准',
+    WorkspaceReady: '工作区就绪',
+    WaitingFinalApproval: '等待最终审批',
     Completed: '已完成',
     Failed: '失败',
     Cancelled: '已取消',
@@ -187,14 +190,17 @@ export function useAgentWorkbench() {
   const canCreatePlan = computed(() =>
     Boolean(store.currentSessionId && store.selectedModelId && !store.isAgentBusy)
   )
-  const canApprovePlan = computed(() =>
-    latestTask.value?.status === 'WaitingPlanApproval' && !store.isAgentBusy
+  const canRunTask = computed(() =>
+    Boolean(latestTask.value?.canRun && !latestTask.value?.isRunQueued && !latestTask.value?.isRunInProgress && !store.isAgentBusy)
   )
   const canContinueTask = computed(() =>
     Boolean(latestTask.value?.canRetry && !store.isAgentBusy)
   )
+  const canSubmitFinalReview = computed(() =>
+    Boolean(latestTask.value?.canSubmitFinalReview && !store.isAgentBusy)
+  )
   const canFinalizeWorkspace = computed(() =>
-    Boolean(store.currentWorkspace && store.currentWorkspace.status !== 'Finalized' && taskArtifacts.value.length > 0 && !store.isAgentBusy)
+    Boolean(latestTask.value?.canApproveFinal && store.currentWorkspace && store.currentWorkspace.status !== 'Finalized' && taskArtifacts.value.length > 0 && !store.isAgentBusy)
   )
 
   return {
@@ -219,8 +225,9 @@ export function useAgentWorkbench() {
     approvalCount,
     widgetCount,
     canCreatePlan,
-    canApprovePlan,
+    canRunTask,
     canContinueTask,
+    canSubmitFinalReview,
     canFinalizeWorkspace,
     loginSource: computed(() => authStore.loginSource),
     cloudEmployeeNo: computed(() => authStore.cloudEmployeeNo)

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { LoaderCircle, TriangleAlert } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
-import { Loading, WarningFilled } from '@element-plus/icons-vue'
+import AiButton from '@/components/ai/AiButton.vue'
 import { useAuthStore } from '@/stores/authStore'
 
 const route = useRoute()
@@ -48,16 +49,16 @@ onMounted(() => {
   <div class="cloud-login-page">
     <section class="cloud-login-panel">
       <div v-if="!hasFailed" class="state-content">
-        <el-icon class="state-icon loading"><Loading /></el-icon>
+        <span class="state-icon loading"><LoaderCircle class="h-10 w-10 animate-spin" /></span>
         <h1>正在完成 Cloud 登录</h1>
         <p>正在校验 Cloud 身份并换取 AICopilot 登录态。</p>
       </div>
 
       <div v-else class="state-content">
-        <el-icon class="state-icon warning"><WarningFilled /></el-icon>
+        <span class="state-icon warning"><TriangleAlert class="h-10 w-10" /></span>
         <h1>Cloud 登录失败</h1>
         <p>{{ message }}</p>
-        <el-button type="primary" @click="router.replace('/login')">返回登录页</el-button>
+        <AiButton variant="primary" @click="router.replace('/login')">返回登录页</AiButton>
       </div>
     </section>
   </div>
@@ -69,59 +70,56 @@ onMounted(() => {
   min-height: 100vh;
   place-items: center;
   padding: 24px;
-  background: var(--app-bg);
+  background: var(--ai-bg-warm);
 }
 
 .cloud-login-panel {
   display: grid;
-  width: min(420px, calc(100vw - 48px));
-  min-height: 260px;
+  width: min(440px, calc(100vw - 48px));
+  min-height: 280px;
   place-items: center;
-  border: 1px solid var(--app-border);
-  border-radius: var(--radius-lg);
-  padding: 32px;
-  background: var(--app-surface);
-  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--ai-border);
+  border-radius: 30px;
+  padding: 36px;
+  background: var(--ai-surface);
+  box-shadow: var(--ai-shadow-shell);
 }
 
 .state-content {
   display: grid;
   justify-items: center;
-  gap: 12px;
+  gap: 14px;
   text-align: center;
 }
 
 .state-icon {
-  font-size: 42px;
+  display: grid;
+  height: 68px;
+  width: 68px;
+  place-items: center;
+  border-radius: 24px;
 }
 
 .state-icon.loading {
-  color: var(--app-primary);
-  animation: rotate 1s linear infinite;
+  background: #efffbe;
+  color: var(--ai-graphite);
 }
 
 .state-icon.warning {
-  color: var(--app-warning);
+  background: #fff7ed;
+  color: #b45309;
 }
 
 .state-content h1 {
   margin: 0;
-  font-size: 22px;
-  color: var(--app-text);
+  color: var(--ai-text);
+  font-size: 24px;
+  font-weight: 950;
 }
 
 .state-content p {
   margin: 0;
-  color: var(--app-text-muted);
-}
-
-@keyframes rotate {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
+  color: var(--ai-text-muted);
+  font-weight: 700;
 }
 </style>

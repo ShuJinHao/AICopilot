@@ -1,25 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Cpu, UserFilled } from '@element-plus/icons-vue'
+import { Bot, UserRound } from 'lucide-vue-next'
+import AiTag from '@/components/ai/AiTag.vue'
 import { renderMarkdown } from '@/utils/markdown'
 import { ChunkType, MessageRole, type ChatChunk } from '@/types/protocols'
 import { useChatStore } from '@/stores/chatStore'
 import ApprovalCard from './ApprovalCard.vue'
 import FunctionCallItem from './FunctionCallItem.vue'
 import WidgetRenderer from '../widgets/WidgetRenderer.vue'
-import type {
-  ApprovalChunk,
-  ChatMessage,
-  FunctionCallChunk,
-  IntentChunk,
-  WidgetChunk
-} from '@/types/models'
-
-const userLabel = '\u4f60'
-const unknownModelLabel = '\u672a\u77e5'
-const responseModelLabel = '\u56de\u7b54\u6a21\u578b\uff1a'
-const routingModelLabel = '\u8def\u7531\u6a21\u578b\uff1a'
-const intentSeparator = '\u00b7'
+import type { ApprovalChunk, ChatMessage, FunctionCallChunk, IntentChunk, WidgetChunk } from '@/types/models'
 
 const props = defineProps<{
   message: ChatMessage
@@ -34,19 +23,19 @@ const modelBadges = computed(() => {
     return []
   }
 
-  const badges: Array<{ key: string; type: 'success' | 'info'; text: string }> = [
+  const badges: Array<{ key: string; tone: 'success' | 'blue'; text: string }> = [
     {
       key: 'final-model',
-      type: 'success' as const,
-      text: `${responseModelLabel}${props.message.finalModelName?.trim() || unknownModelLabel}`
+      tone: 'success',
+      text: `回答模型：${props.message.finalModelName?.trim() || '未知'}`
     }
   ]
 
   if (props.message.routingModelName?.trim()) {
     badges.push({
       key: 'routing-model',
-      type: 'info' as const,
-      text: `${routingModelLabel}${props.message.routingModelName.trim()}`
+      tone: 'blue',
+      text: `路由模型：${props.message.routingModelName.trim()}`
     })
   }
 
@@ -77,58 +66,35 @@ async function reject(payload: { callId: string }, chunk: ApprovalChunk) {
 <template>
   <article class="message" :class="{ user: isUser }">
     <div class="avatar">
-      <el-icon>
-        <UserFilled v-if="isUser" />
-        <Cpu v-else />
-      </el-icon>
+      <UserRound v-if="isUser" class="h-4 w-4" />
+      <Bot v-else class="h-4 w-4" />
     </div>
 
     <div class="message-body">
       <div class="message-meta">
-        <strong>{{ isUser ? userLabel : 'AICopilot' }}</strong>
+        <strong>{{ isUser ? '你' : 'AICopilot' }}</strong>
         <span>{{ new Date(message.timestamp).toLocaleTimeString('zh-CN', { hour12: false }) }}</span>
       </div>
 
       <section v-if="modelBadges.length > 0" class="model-strip">
-        <el-tag
-          v-for="badge in modelBadges"
-          :key="badge.key"
-          size="small"
-          :type="badge.type"
-          effect="light"
-        >
+        <AiTag v-for="badge in modelBadges" :key="badge.key" :tone="badge.tone">
           {{ badge.text }}
-        </el-tag>
+        </AiTag>
       </section>
 
       <section v-if="intentChunks.length > 0" class="intent-strip">
-        <el-tag
-          v-for="intent in intentChunks.flatMap((chunk) => chunk.intents)"
-          :key="`${intent.intent}-${intent.confidence}`"
-          size="small"
-          type="info"
-        >
-          {{ intent.intent }} {{ intentSeparator }} {{ Math.round(intent.confidence * 100) }}%
-        </el-tag>
+        <AiTag v-for="intent in intentChunks.flatMap((chunk) => chunk.intents)" :key="`${intent.intent}-${intent.confidence}`" tone="neutral">
+          {{ intent.intent }} · {{ Math.round(intent.confidence * 100) }}%
+        </AiTag>
       </section>
 
       <div class="chunk-list">
         <template v-for="(chunk, index) in chunks" :key="`${chunk.source}-${chunk.type}-${index}`">
-          <div
-            v-if="chunk.type === ChunkType.Text"
-            class="text-block markdown-body"
-            v-html="renderMarkdown(chunk.content)"
-          />
+          <div v-if="chunk.type === ChunkType.Text" class="text-block markdown-body" v-html="renderMarkdown(chunk.content)" />
 
-          <FunctionCallItem
-            v-else-if="chunk.type === ChunkType.FunctionCall"
-            :call="asFunctionCall(chunk).functionCall"
-          />
+          <FunctionCallItem v-else-if="chunk.type === ChunkType.FunctionCall" :call="asFunctionCall(chunk).functionCall" />
 
-          <WidgetRenderer
-            v-else-if="chunk.type === ChunkType.Widget"
-            :data="asWidget(chunk).widget"
-          />
+          <WidgetRenderer v-else-if="chunk.type === ChunkType.Widget" :data="asWidget(chunk).widget" />
 
           <ApprovalCard
             v-else-if="chunk.type === ChunkType.ApprovalRequest"
@@ -148,57 +114,53 @@ async function reject(payload: { callId: string }, chunk: ApprovalChunk) {
 <style scoped>
 .message {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 12px;
   align-items: start;
 }
 
 .message.user {
-  grid-template-columns: minmax(0, 1fr) 34px;
+  grid-template-columns: minmax(0, 1fr) 38px;
 }
 
 .message.user .avatar {
   grid-column: 2;
   grid-row: 1;
-  background: var(--app-surface-muted);
-  color: var(--app-text);
-  border: 1px solid var(--app-border);
+  border-color: rgba(200, 255, 61, 0.38);
+  background: #efffbe;
+  color: var(--ai-graphite);
 }
 
 .message.user .message-body {
   grid-column: 1;
   grid-row: 1;
   justify-self: end;
-  background: rgba(15, 118, 110, 0.06);
-  border-color: rgba(15, 118, 110, 0.15);
-}
-
-html.dark .message.user .message-body {
-  background: rgba(20, 184, 166, 0.08);
-  border-color: rgba(20, 184, 166, 0.2);
+  border-color: rgba(200, 255, 61, 0.32);
+  background: rgba(239, 255, 190, 0.92);
 }
 
 .avatar {
   display: grid;
-  width: 34px;
-  height: 34px;
+  width: 38px;
+  height: 38px;
   place-items: center;
-  border-radius: var(--radius-md);
-  background: var(--app-primary);
-  color: #ffffff;
-  box-shadow: var(--shadow-sm);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 15px;
+  background: var(--ai-graphite);
+  color: #f8fafc;
+  box-shadow: 0 10px 24px rgba(63, 111, 115, 0.18);
 }
 
 .message-body {
   display: grid;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
-  max-width: min(100%, 900px);
-  border: 1px solid var(--app-border);
-  border-radius: var(--radius-md);
-  padding: 12px;
-  background: var(--app-surface);
-  box-shadow: var(--shadow-sm);
+  max-width: min(100%, 940px);
+  border: 1px solid var(--ai-border);
+  border-radius: 22px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: var(--ai-shadow-xs);
 }
 
 .message-meta {
@@ -206,13 +168,15 @@ html.dark .message.user .message-body {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  color: var(--app-text-muted);
+  color: var(--ai-text-muted);
   font-size: 12px;
+  font-weight: 700;
 }
 
 .message-meta strong {
-  color: var(--app-text);
+  color: var(--ai-text);
   font-size: 13px;
+  font-weight: 900;
 }
 
 .model-strip,
@@ -224,13 +188,15 @@ html.dark .message.user .message-body {
 
 .chunk-list {
   display: grid;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
 }
 
 .text-block {
-  color: var(--app-text);
+  color: var(--ai-text);
   overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 1.7;
 }
 
 :deep(.markdown-body p) {
@@ -251,7 +217,7 @@ html.dark .message.user .message-body {
   width: 8px;
   height: 18px;
   border-radius: 2px;
-  background: var(--app-primary);
+  background: #c8ff3d;
   animation: blink 1s infinite;
 }
 

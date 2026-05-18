@@ -97,6 +97,15 @@ export interface AgentStep {
   errorMessage?: string | null
 }
 
+export interface AgentTaskFailureSummary {
+  stepIndex?: number | null
+  toolCode?: string | null
+  errorCode: string
+  safeMessage: string
+  canRetry: boolean
+  nextAction: string
+}
+
 export interface AgentTask {
   id: string
   taskCode: string
@@ -117,7 +126,17 @@ export interface AgentTask {
   steps: AgentStep[]
   pendingApprovalCount?: number
   lastFailureReason?: string | null
+  canRun: boolean
   canRetry?: boolean
+  canSubmitFinalReview: boolean
+  canApproveFinal: boolean
+  failureSummary?: AgentTaskFailureSummary | null
+  activeRunAttemptId?: string | null
+  runAttemptCount?: number
+  isRunInProgress: boolean
+  queuedRunId?: string | null
+  runQueueStatus?: string | null
+  isRunQueued: boolean
 }
 
 export interface AgentApprovalRequest {
@@ -166,6 +185,18 @@ export interface ArtifactRecord {
   finalizedAt?: string | null
 }
 
+export interface ArtifactManifestItem {
+  artifactId: string
+  type: string
+  name: string
+  relativePath: string
+  status: string
+  version: number
+  generatedByStep?: number | null
+  downloadUrl: string
+  createdAt: string
+}
+
 export interface ArtifactWorkspaceFile {
   name: string
   relativePath: string
@@ -181,6 +212,81 @@ export interface ArtifactWorkspace {
   status: string
   files: ArtifactWorkspaceFile[]
   artifacts: ArtifactRecord[]
+  manifest?: ArtifactManifestItem[]
+}
+
+export interface AgentRunQueueSummary {
+  queuedCount: number
+  leasedCount: number
+  succeededCount: number
+  failedCount: number
+  cancelledCount: number
+  deadLetterCount: number
+  staleLeasedCount: number
+  oldestQueuedAt?: string | null
+  averageWaitMs?: number | null
+  averageRunMs?: number | null
+  oldestQueuedWaitMs?: number | null
+  activeWorkerCount: number
+  workspaceMismatchCount: number
+  generatedAt: string
+}
+
+export interface AgentRunQueueItem {
+  id: string
+  taskId: string
+  triggerType: string
+  status: string
+  requestedBy: string
+  runAttemptId?: string | null
+  leaseId?: string | null
+  leaseOwner?: string | null
+  leaseExpiresAt?: string | null
+  availableAt: string
+  startedAt?: string | null
+  completedAt?: string | null
+  failureCode?: string | null
+  safeMessage?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AgentRunQueuePage {
+  items: AgentRunQueueItem[]
+  pageIndex: number
+  pageSize: number
+  totalCount: number
+  totalPages: number
+  hasPrevious: boolean
+  hasNext: boolean
+}
+
+export interface AgentWorkerHeartbeat {
+  id?: string
+  workerId: string
+  workerName: string
+  startedAt?: string | null
+  lastSeenAt?: string | null
+  isActive: boolean
+  activeQueueItemId?: string | null
+  activeTaskId?: string | null
+  workspaceRootHash: string
+  version: string
+  workspaceMatchesHttpApi: boolean
+}
+
+export interface AgentWorkerStatus {
+  statusCode: string
+  hasActiveWorkers: boolean
+  workspaceConsistent: boolean
+  httpApiWorkspaceRootHash: string
+  activeWorkerCount: number
+  queuedCount: number
+  leasedCount: number
+  staleLeasedCount: number
+  oldestQueuedAt?: string | null
+  generatedAt: string
+  workers: AgentWorkerHeartbeat[]
 }
 
 export interface ChartWidget extends Widget {

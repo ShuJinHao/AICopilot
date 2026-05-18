@@ -24,7 +24,9 @@ const unit = computed(() => props.widget.data?.unit ?? '')
   gap: 6px;
   min-width: 180px;
   padding: 16px;
-  border-radius: var(--radius-md);
+  border: 1px solid rgba(216, 255, 120, 0.62);
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(239, 255, 190, 0.92), rgba(255, 255, 255, 0.88));
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
@@ -33,29 +35,29 @@ const unit = computed(() => props.widget.data?.unit ?? '')
 }
 
 .stats-label {
-  color: var(--app-text-muted);
+  color: var(--ai-text-muted);
   font-size: 12px;
   font-weight: 700;
 }
 
 .stats-widget strong {
-  color: var(--app-primary-strong);
+  color: var(--ai-text);
   font-size: 32px;
   font-weight: 800;
   line-height: 1.1;
-  letter-spacing: -0.5px;
+  letter-spacing: 0;
 }
 
 .stats-widget small {
   margin-left: 4px;
-  color: var(--app-text-soft);
+  color: var(--ai-text-muted);
   font-size: 14px;
   font-weight: 650;
 }
 
 .stats-widget p {
   margin: 0;
-  color: var(--app-text-muted);
+  color: var(--ai-text-muted);
   font-size: 12px;
 }
 </style>

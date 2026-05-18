@@ -1,0 +1,95 @@
+name: AICopilot Simulation Release Candidate
+
+on:
+  pull_request:
+    branches:
+      - main
+      - 'codex/**'
+      - 'integration/**'
+  workflow_dispatch:
+
+jobs:
+  simulation-rc:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: src/vues/AICopilot.Web/package-lock.json
+
+      - name: Restore frontend dependencies
+        working-directory: src/vues/AICopilot.Web
+        run: npm ci
+
+      - name: Frontend build
+        working-directory: src/vues/AICopilot.Web
+        run: npm run build
+
+      - name: Frontend unit tests
+        working-directory: src/vues/AICopilot.Web
+        run: npm run test:unit
+
+      - name: Frontend smoke tests
+        working-directory: src/vues/AICopilot.Web
+        run: npm run test:smoke
+
+      - name: Frontend vulnerability scan
+        working-directory: src/vues/AICopilot.Web
+        run: npm audit --audit-level=high
+
+      - name: Backend build
+        run: dotnet build src/hosts/AICopilot.HttpApi/AICopilot.HttpApi.csproj
+
+      - name: Backend test project build
+        run: dotnet build src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj
+
+      - name: Backend Simulation suites
+        shell: pwsh
+        run: |
+          dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "Suite=AgentSimulationAcceptance"
+          dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "Suite=Batch5ApprovalHardening"
+          dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "Suite=Batch6SecretProtection"
+          dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "Suite=Batch7ReportArtifacts"
+          dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "Suite=Batch8ArtifactVersioning"
+          dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "Suite=Batch9McpToolGovernance"
+          dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "Suite=Batch10RunQueueOps"
+
+      - name: Acceptance with Docker-aware skip
+        shell: pwsh
+        run: |
+          $dockerAvailable = $false
+          if (Get-Command docker -ErrorAction SilentlyContinue) {
+            docker info *> $null
+            $dockerAvailable = $LASTEXITCODE -eq 0
+          }
+
+          if ($dockerAvailable) {
+            .\scripts\Run-AgentSimulationAcceptance.ps1
+          }
+          else {
+            Write-Host "Docker is unavailable; skipping Docker-required acceptance path."
+            .\scripts\Run-AgentSimulationAcceptance.ps1 -SkipDockerAcceptance
+          }
+
+      - name: Release-candidate scope guard
+        shell: pwsh
+        run: .\scripts\Test-AgentWorkbenchReleaseCandidateScope.ps1 -BaseRef origin/main
+
+      - name: Encoding check
+        shell: pwsh
+        run: .\scripts\Test-TextEncoding.ps1
+
+      - name: Diff whitespace check
+        run: git diff --check

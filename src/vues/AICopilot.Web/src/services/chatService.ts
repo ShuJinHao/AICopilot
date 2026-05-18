@@ -229,7 +229,14 @@ export const chatService = {
     )
   },
 
-  async downloadArtifact(id: string) {
-    return await apiClient.download(`/aigateway/artifact/${encodeURIComponent(id)}/download`)
+  async submitFinalReview(code: string) {
+    return await apiClient.post<ArtifactWorkspace>(
+      `/aigateway/workspace/${encodeURIComponent(code)}/submit-final-review`,
+      {}
+    )
+  },
+
+  async downloadArtifact(downloadUrl: string) {
+    return await apiClient.download(downloadUrl)
   }
 }

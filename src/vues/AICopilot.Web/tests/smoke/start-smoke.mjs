@@ -90,8 +90,18 @@ const agentTask = {
   updatedAt: now,
   completedAt: null,
   pendingApprovalCount: 1,
+  canRun: false,
   lastFailureReason: null,
   canRetry: true,
+  canSubmitFinalReview: true,
+  canApproveFinal: false,
+  failureSummary: null,
+  activeRunAttemptId: null,
+  runAttemptCount: 1,
+  isRunInProgress: false,
+  queuedRunId: null,
+  runQueueStatus: 'Queued',
+  isRunQueued: false,
   steps: [
     {
       id: 'step-1',
@@ -523,7 +533,81 @@ const api = createServer((request, response) => {
     '/api/aigateway/artifact/artifact-chart/download': {
       labels: ['08:00', '09:00', '10:00'],
       values: [120, 132, 118],
-      source: 'smoke'
+      source: '模拟 Cloud 只读数据',
+      sourceMode: 'Simulation',
+      isSimulation: true,
+      sourceLabel: '模拟 Cloud 只读数据'
+    },
+    '/api/aigateway/agent/run-queue/summary': {
+      queuedCount: 1,
+      leasedCount: 0,
+      succeededCount: 2,
+      failedCount: 0,
+      cancelledCount: 0,
+      deadLetterCount: 0,
+      staleLeasedCount: 0,
+      oldestQueuedAt: now,
+      averageWaitMs: 1250,
+      averageRunMs: 3200,
+      oldestQueuedWaitMs: 1250,
+      activeWorkerCount: 1,
+      workspaceMismatchCount: 0,
+      generatedAt: now
+    },
+    '/api/aigateway/agent/run-queue': {
+      items: [
+        {
+          id: 'queue-1',
+          taskId: agentTask.id,
+          triggerType: 'Manual',
+          status: 'Queued',
+          requestedBy: 'u1',
+          runAttemptId: null,
+          leaseId: null,
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          availableAt: now,
+          startedAt: null,
+          completedAt: null,
+          failureCode: null,
+          safeMessage: null,
+          createdAt: now,
+          updatedAt: now
+        }
+      ],
+      pageIndex: 1,
+      pageSize: 8,
+      totalCount: 1,
+      totalPages: 1,
+      hasPrevious: false,
+      hasNext: false
+    },
+    '/api/aigateway/agent/worker/status': {
+      statusCode: 'healthy',
+      hasActiveWorkers: true,
+      workspaceConsistent: true,
+      httpApiWorkspaceRootHash: 'sha256:httpapi',
+      activeWorkerCount: 1,
+      queuedCount: 1,
+      leasedCount: 0,
+      staleLeasedCount: 0,
+      oldestQueuedAt: now,
+      generatedAt: now,
+      workers: [
+        {
+          id: 'worker-heartbeat-1',
+          workerId: 'worker-1',
+          workerName: 'AICopilot.DataWorker',
+          startedAt: now,
+          lastSeenAt: now,
+          isActive: true,
+          activeQueueItemId: null,
+          activeTaskId: null,
+          workspaceRootHash: 'sha256:httpapi',
+          version: 'simulation-rc',
+          workspaceMatchesHttpApi: true
+        }
+      ]
     },
     '/api/aigateway/language-model/chat-options': [
       {

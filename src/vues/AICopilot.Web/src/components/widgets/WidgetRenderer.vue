@@ -1,19 +1,15 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { Grid, Histogram, Warning } from '@element-plus/icons-vue'
-import ChartWidget from './ChartWidget.vue'
-import DataTableWidget from './DataTableWidget.vue'
-import StatsWidget from './StatsWidget.vue'
-import type {
-  ChartWidget as ChartWidgetModel,
-  DataTableWidget as DataTableWidgetModel,
-  StatsCardWidget,
-  Widget
-} from '@/types/protocols'
+import { computed, defineAsyncComponent } from 'vue'
+import { BarChart3, Grid3X3, TriangleAlert } from 'lucide-vue-next'
+import type { ChartWidget as ChartWidgetModel, DataTableWidget as DataTableWidgetModel, StatsCardWidget, Widget } from '@/types/protocols'
 
 const props = defineProps<{
   data: unknown
 }>()
+
+const ChartWidget = defineAsyncComponent(() => import('./ChartWidget.vue'))
+const DataTableWidget = defineAsyncComponent(() => import('./DataTableWidget.vue'))
+const StatsWidget = defineAsyncComponent(() => import('./StatsWidget.vue'))
 
 type NormalizedWidget = Widget | ChartWidgetModel | DataTableWidgetModel | StatsCardWidget
 
@@ -45,15 +41,9 @@ function normalizeWidget(value: unknown): NormalizedWidget | null {
 
 const widget = computed(() => normalizeWidget(props.data))
 const widgetType = computed(() => widget.value?.type ?? 'Unknown')
-const chartWidget = computed(() =>
-  widgetType.value === 'Chart' ? (widget.value as ChartWidgetModel) : null
-)
-const tableWidget = computed(() =>
-  widgetType.value === 'DataTable' ? (widget.value as DataTableWidgetModel) : null
-)
-const statsWidget = computed(() =>
-  widgetType.value === 'StatsCard' ? (widget.value as StatsCardWidget) : null
-)
+const chartWidget = computed(() => (widgetType.value === 'Chart' ? (widget.value as ChartWidgetModel) : null))
+const tableWidget = computed(() => (widgetType.value === 'DataTable' ? (widget.value as DataTableWidgetModel) : null))
+const statsWidget = computed(() => (widgetType.value === 'StatsCard' ? (widget.value as StatsCardWidget) : null))
 </script>
 
 <template>
@@ -62,15 +52,15 @@ const statsWidget = computed(() =>
     <DataTableWidget v-else-if="tableWidget" :widget="tableWidget" />
     <StatsWidget v-else-if="statsWidget" :widget="statsWidget" />
     <div v-else class="widget-empty">
-      <el-icon><Warning /></el-icon>
+      <TriangleAlert class="h-5 w-5" />
       <div>
         <strong>无法识别的组件</strong>
         <span>类型：{{ widgetType }}</span>
       </div>
     </div>
     <div class="widget-kind">
-      <el-icon v-if="widgetType === 'Chart'"><Histogram /></el-icon>
-      <el-icon v-else><Grid /></el-icon>
+      <BarChart3 v-if="widgetType === 'Chart'" class="h-3.5 w-3.5" />
+      <Grid3X3 v-else class="h-3.5 w-3.5" />
       <span>{{ widgetType }}</span>
     </div>
   </section>
@@ -80,10 +70,11 @@ const statsWidget = computed(() =>
 .widget-frame {
   position: relative;
   min-width: 0;
-  border: 1px solid var(--app-border);
-  border-radius: 8px;
-  background: var(--app-surface);
   overflow: hidden;
+  border: 1px solid var(--ai-border);
+  border-radius: 20px;
+  background: var(--ai-surface);
+  box-shadow: var(--ai-shadow-xs);
 }
 
 .widget-kind {
@@ -93,20 +84,21 @@ const statsWidget = computed(() =>
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  border: 1px solid var(--app-border);
-  border-radius: 6px;
-  padding: 3px 7px;
-  background: rgba(255, 255, 255, 0.88);
-  color: var(--app-text-muted);
+  border: 1px solid var(--ai-border);
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--ai-text-muted);
   font-size: 11px;
+  font-weight: 800;
 }
 
 .widget-empty {
   display: flex;
   gap: 10px;
   align-items: center;
-  padding: 16px;
-  color: var(--app-text-muted);
+  padding: 18px;
+  color: var(--ai-text-muted);
 }
 
 .widget-empty div {

@@ -10,9 +10,7 @@ function toRecord(value: string | Record<string, unknown>) {
 
   try {
     const parsed = JSON.parse(value) as unknown
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : { Raw: value }
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : { Raw: value }
   } catch {
     return { Raw: value }
   }
@@ -41,37 +39,40 @@ function formatValue(value: unknown) {
 <style scoped>
 .arg-viewer {
   display: grid;
-  gap: 6px;
-  border: 1px solid var(--app-border);
-  border-radius: var(--radius-md);
-  padding: 8px;
-  background: var(--app-surface-muted);
+  gap: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  padding: 10px;
+  background: var(--ai-graphite);
+  box-shadow: 0 14px 28px rgba(63, 111, 115, 0.18);
 }
 
 .arg-row {
   display: grid;
-  grid-template-columns: minmax(80px, 140px) minmax(0, 1fr);
-  gap: 8px;
+  grid-template-columns: minmax(80px, 150px) minmax(0, 1fr);
+  gap: 10px;
   align-items: start;
 }
 
 .arg-row span {
-  color: var(--app-text-muted);
+  color: var(--ai-graphite-muted);
   font-size: 12px;
+  font-weight: 800;
 }
 
 code {
   overflow-wrap: anywhere;
-  border-radius: var(--radius-sm);
-  background: var(--app-surface-raised);
-  padding: 3px 6px;
-  color: var(--app-text);
-  font-family: "Cascadia Mono", Consolas, monospace;
+  border-radius: 12px;
+  background: var(--ai-graphite-soft);
+  padding: 4px 7px;
+  color: #f8fafc;
+  font-family: 'Cascadia Mono', Consolas, monospace;
   font-size: 12px;
-  border: 1px solid var(--app-border);
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .empty {
-  color: var(--app-text-muted);
+  color: var(--ai-graphite-muted);
+  font-weight: 700;
 }
 </style>

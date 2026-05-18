@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { ChatLineRound, Plus } from '@element-plus/icons-vue'
+import { MessageSquare, Plus } from 'lucide-vue-next'
+import AiButton from '@/components/ai/AiButton.vue'
 import { useChatStore } from '@/stores/chatStore'
 
 const store = useChatStore()
-
 const sessions = computed(() => store.sessions)
 
 async function selectSession(id: string) {
@@ -23,7 +23,9 @@ async function createSession() {
         <h2>会话</h2>
         <span>{{ sessions.length }} 个上下文</span>
       </div>
-      <el-button type="primary" :icon="Plus" @click="createSession" />
+      <AiButton variant="lime" size="icon" aria-label="新建会话" @click="createSession">
+        <Plus class="h-4 w-4" />
+      </AiButton>
     </header>
 
     <div class="session-list">
@@ -35,7 +37,7 @@ async function createSession() {
         type="button"
         @click="selectSession(session.id)"
       >
-        <el-icon><ChatLineRound /></el-icon>
+        <MessageSquare class="h-4 w-4" />
         <span>{{ session.title || '未命名会话' }}</span>
       </button>
 
@@ -49,65 +51,72 @@ async function createSession() {
   display: flex;
   min-height: 0;
   flex-direction: column;
-  border-right: 1px solid var(--app-border);
-  background: var(--app-surface-muted);
+  border-right: 1px solid var(--ai-border);
+  background: rgba(255, 255, 255, 0.68);
 }
 
 header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 14px;
-  border-bottom: 1px solid var(--app-border);
+  gap: 12px;
+  padding: 16px;
+  border-bottom: 1px solid var(--ai-border);
 }
 
 h2 {
   margin: 0;
+  color: var(--ai-text);
   font-size: 15px;
-  font-weight: 800;
+  font-weight: 900;
 }
 
 header span {
-  color: var(--app-text-muted);
+  color: var(--ai-text-muted);
   font-size: 12px;
+  font-weight: 700;
 }
 
 .session-list {
   display: grid;
   align-content: start;
-  gap: 6px;
+  gap: 8px;
   min-height: 0;
   overflow-y: auto;
-  padding: 10px;
+  padding: 12px;
 }
 
 .session-item {
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr);
-  gap: 8px;
+  gap: 10px;
   align-items: center;
   border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  padding: 9px 10px;
+  border-radius: 16px;
+  padding: 11px 12px;
   background: transparent;
-  color: var(--app-text);
+  color: var(--ai-text-muted);
   cursor: pointer;
   text-align: left;
-  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    color 0.2s ease;
 }
 
 .session-item:hover,
 .session-item.active {
-  border-color: var(--app-border);
-  background: var(--app-surface);
-  box-shadow: var(--shadow-sm);
+  border-color: var(--ai-border);
+  background: var(--ai-surface);
+  box-shadow: var(--ai-shadow-xs);
+  color: var(--ai-text);
 }
 
 .session-item.active {
-  color: var(--app-primary-strong);
-  font-weight: 750;
-  border-color: var(--app-border-strong);
+  border-color: #d8ff78;
+  background: #efffbe;
+  font-weight: 850;
 }
 
 .session-item span {
@@ -118,10 +127,12 @@ header span {
 }
 
 .empty-state {
-  border: 1px dashed var(--app-border);
-  border-radius: var(--radius-md);
-  padding: 14px;
-  color: var(--app-text-muted);
+  border: 1px dashed var(--ai-border);
+  border-radius: 18px;
+  padding: 16px;
+  color: var(--ai-text-muted);
   text-align: center;
+  font-size: 13px;
+  font-weight: 700;
 }
 </style>

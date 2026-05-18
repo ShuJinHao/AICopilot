@@ -89,8 +89,19 @@ async function notifyUnauthorized(problem: ApiProblemDetails | null) {
   }
 }
 
+function resolveEndpoint(endpoint: string) {
+  const trimmed = endpoint.trim()
+  if (/^https?:\/\//i.test(trimmed) || trimmed.startsWith('/api/')) {
+    return trimmed
+  }
+
+  const normalizedBase = baseUrl.replace(/\/$/, '')
+  const normalizedEndpoint = trimmed.startsWith('/') ? trimmed : `/${trimmed}`
+  return `${normalizedBase}${normalizedEndpoint}`
+}
+
 function buildUrl(endpoint: string, query?: QueryParams) {
-  const url = new URL(`${baseUrl}${endpoint}`, window.location.origin)
+  const url = new URL(resolveEndpoint(endpoint), window.location.origin)
 
   if (query) {
     for (const [key, value] of Object.entries(query)) {
