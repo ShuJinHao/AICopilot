@@ -99,7 +99,9 @@ test('config agent operations panel renders run queue and worker status', async 
   await expectNoHorizontalOverflow(page)
 })
 
-test('chat stream renders widgets and approval card', async ({ page }) => {
+test('chat stream renders widgets and approval card', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'desktop stream rendering covers widgets and approval card; mobile layout is covered separately')
+
   await expectProtectedShell(page, '/chat')
 
   await page.locator('.command-composer textarea').fill('smoke check agent widgets')
