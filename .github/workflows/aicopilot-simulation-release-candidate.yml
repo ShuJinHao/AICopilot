@@ -61,8 +61,18 @@ jobs:
         run: |
           $dockerAvailable = $false
           if (Get-Command docker -ErrorAction SilentlyContinue) {
-            docker info *> $null
-            $dockerAvailable = $LASTEXITCODE -eq 0
+            $dockerInfoJob = Start-Job -ScriptBlock {
+              docker info *> $null
+              return $LASTEXITCODE
+            }
+            if (Wait-Job $dockerInfoJob -Timeout 20) {
+              $dockerAvailable = (Receive-Job $dockerInfoJob) -eq 0
+            }
+            else {
+              Stop-Job $dockerInfoJob -ErrorAction SilentlyContinue
+              Write-Host "docker info did not finish within 20 seconds."
+            }
+            Remove-Job $dockerInfoJob -Force -ErrorAction SilentlyContinue
           }
 
           "available=$($dockerAvailable.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
