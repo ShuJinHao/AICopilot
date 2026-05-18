@@ -17,9 +17,26 @@ function Invoke-Step {
     )
 
     Write-Host "==> $Name" -ForegroundColor Cyan
-    & $Command
-    if ($LASTEXITCODE -ne 0) {
-        throw "$Name failed with exit code $LASTEXITCODE."
+    $global:LASTEXITCODE = 0
+    try {
+        & $Command
+        $stepSucceeded = $?
+        $exitCode = $LASTEXITCODE
+    }
+    catch {
+        throw "$Name failed. $($_.Exception.Message)"
+    }
+
+    if (-not $stepSucceeded) {
+        if ($null -ne $exitCode) {
+            throw "$Name failed with exit code $exitCode."
+        }
+
+        throw "$Name failed."
+    }
+
+    if ($null -ne $exitCode -and $exitCode -ne 0) {
+        throw "$Name failed with exit code $exitCode."
     }
 
     $script:Results.Add("- PASS: $Name") | Out-Null
