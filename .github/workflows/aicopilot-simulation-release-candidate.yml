@@ -60,13 +60,17 @@ jobs:
         shell: pwsh
         run: |
           $dockerAvailable = $false
+          $dockerServerOs = ""
           if (Get-Command docker -ErrorAction SilentlyContinue) {
             $dockerInfoJob = Start-Job -ScriptBlock {
-              docker info *> $null
-              return $LASTEXITCODE
+              docker info --format '{{.OSType}}' 2>$null
+              if ($LASTEXITCODE -ne 0) {
+                exit $LASTEXITCODE
+              }
             }
             if (Wait-Job $dockerInfoJob -Timeout 20) {
-              $dockerAvailable = (Receive-Job $dockerInfoJob) -eq 0
+              $dockerServerOs = ((Receive-Job $dockerInfoJob | Select-Object -Last 1) ?? "").Trim().ToLowerInvariant()
+              $dockerAvailable = $dockerServerOs -eq "linux"
             }
             else {
               Stop-Job $dockerInfoJob -ErrorAction SilentlyContinue
@@ -77,10 +81,10 @@ jobs:
 
           "available=$($dockerAvailable.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           if ($dockerAvailable) {
-            Write-Host "Docker is available; Docker-backed backend suites will run."
+            Write-Host "Linux Docker is available; Docker/Postgres-backed backend suites will run."
           }
           else {
-            Write-Host "Docker is unavailable; Docker-backed backend suites will be skipped."
+            Write-Host "Linux Docker is unavailable; Docker/Postgres-backed backend suites will be skipped. Detected OSType='$dockerServerOs'."
           }
 
       - name: Backend Simulation suites
@@ -97,7 +101,7 @@ jobs:
 
       - name: Backend Simulation suites skipped
         if: steps.docker.outputs.available != 'true'
-        run: Write-Host "Docker is unavailable; skipped Docker/Postgres-backed backend simulation suites."
+        run: Write-Host "Linux Docker is unavailable; skipped Docker/Postgres-backed backend simulation suites."
 
       - name: Acceptance with Docker-aware skip
         shell: pwsh
@@ -106,7 +110,7 @@ jobs:
             .\scripts\Run-AgentSimulationAcceptance.ps1
           }
           else {
-            Write-Host "Docker is unavailable; skipping Docker-required acceptance path."
+            Write-Host "Linux Docker is unavailable; skipping Docker-required acceptance path."
             .\scripts\Run-AgentSimulationAcceptance.ps1 -SkipDockerAcceptance
           }
 
