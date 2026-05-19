@@ -91,13 +91,31 @@ async function notifyUnauthorized(problem: ApiProblemDetails | null) {
 
 function resolveEndpoint(endpoint: string) {
   const trimmed = endpoint.trim()
-  if (/^https?:\/\//i.test(trimmed) || trimmed.startsWith('/api/')) {
+  if (/^https?:\/\//i.test(trimmed)) {
+    const endpointUrl = new URL(trimmed)
+    if (!isTrustedEndpointOrigin(endpointUrl)) {
+      throw new ApiError('API endpoint origin is not trusted.', 400, {
+        code: 'untrusted_api_endpoint',
+        detail: 'API endpoints must use the current origin or the configured API origin.'
+      })
+    }
+
+    return endpointUrl.toString()
+  }
+
+  if (trimmed === '/api' || trimmed.startsWith('/api/')) {
     return trimmed
   }
 
   const normalizedBase = baseUrl.replace(/\/$/, '')
   const normalizedEndpoint = trimmed.startsWith('/') ? trimmed : `/${trimmed}`
   return `${normalizedBase}${normalizedEndpoint}`
+}
+
+function isTrustedEndpointOrigin(url: URL) {
+  const trustedOrigins = new Set<string>([window.location.origin])
+  trustedOrigins.add(new URL(baseUrl, window.location.origin).origin)
+  return trustedOrigins.has(url.origin)
 }
 
 function buildUrl(endpoint: string, query?: QueryParams) {
