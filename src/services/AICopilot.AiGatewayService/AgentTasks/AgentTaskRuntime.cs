@@ -47,7 +47,7 @@ internal sealed class AgentTaskRuntime(
     IKnowledgeRetrievalService knowledgeRetrievalService,
     IEnumerable<IKnowledgeBaseAccessChecker> knowledgeBaseAccessCheckers,
     ICloudReadonlyAgentToolExecutor cloudReadonlyToolExecutor,
-    ICurrentUser currentUser,
+    IIdentityAccessService identityAccessService,
     ToolRegistryGuard toolRegistryGuard,
     AgentAuditRecorder auditRecorder,
     IEnumerable<IAgentToolExecutor> toolExecutors,
@@ -566,6 +566,7 @@ internal sealed class AgentTaskRuntime(
         AgentTaskRunState state,
         CancellationToken cancellationToken)
     {
+        var isTaskOwnerAdmin = await IsTaskOwnerAdminAsync(task, cancellationToken);
         foreach (var knowledgeBaseId in plan.KnowledgeBaseIds)
         {
             var accessChecker = knowledgeBaseAccessCheckers.FirstOrDefault();
@@ -577,7 +578,7 @@ internal sealed class AgentTaskRuntime(
             var canRead = await accessChecker.CanReadAsync(
                 knowledgeBaseId,
                 task.UserId,
-                IsAdmin(),
+                isTaskOwnerAdmin,
                 cancellationToken);
             if (!canRead)
             {
@@ -609,9 +610,10 @@ internal sealed class AgentTaskRuntime(
         };
     }
 
-    private bool IsAdmin()
+    private async Task<bool> IsTaskOwnerAdminAsync(AgentTask task, CancellationToken cancellationToken)
     {
-        return string.Equals(currentUser.Role, "Admin", StringComparison.OrdinalIgnoreCase);
+        var access = await identityAccessService.GetCurrentUserAccessAsync(task.UserId, cancellationToken);
+        return string.Equals(access?.RoleName, "Admin", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<object> QueryCloudReadonlyAsync(

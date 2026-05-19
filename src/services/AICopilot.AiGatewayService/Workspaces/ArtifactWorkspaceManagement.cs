@@ -625,8 +625,8 @@ public sealed class FinalizeArtifactWorkspaceCommandHandler(
                 artifact.Approve(now);
             }
 
-            var finalPath = $"final/{Path.GetFileName(artifact.RelativePath)}";
-            var currentPath = artifact.RelativePath;
+            var currentPath = ArtifactPathGuard.NormalizeRelativePath(artifact.RelativePath);
+            var finalPath = $"final/{currentPath}";
             await fileStore.CopyAsync(workspace.WorkspaceCode, currentPath, finalPath, artifact.MimeType, cancellationToken);
             artifact.MarkFinal(finalPath, now);
         }

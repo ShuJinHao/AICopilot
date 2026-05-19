@@ -1565,6 +1565,31 @@ public sealed class ToolRegistryGovernanceTests
     }
 
     [Fact]
+    public async Task AgentTaskRuntime_ShouldEvaluateRagAdminAccessFromTaskOwner()
+    {
+        var knowledgeBaseId = Guid.NewGuid();
+        var (task, workspace) = CreateRagApprovedTask(knowledgeBaseId);
+        var executionRepository = new InMemoryRepository<ToolExecutionRecord>();
+        var accessChecker = new RecordingKnowledgeBaseAccessChecker();
+        var runtime = CreateRuntime(
+            new InMemoryRepository<AgentTask>(task),
+            new InMemoryRepository<ArtifactWorkspace>(workspace),
+            new InMemoryRepository<ApprovalRequest>(),
+            executionRepository,
+            CreateGuard(CreateTool("rag_search", ToolProviderType.BuiltIn)),
+            knowledgeBaseAccessCheckers: [accessChecker],
+            identityAccessService: new StubIdentityAccessService([], roleName: "Admin"));
+
+        var result = await runtime.RunAsync(task, CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        task.Status.Should().Be(AgentTaskStatus.WaitingFinalApproval);
+        accessChecker.ObservedUserId.Should().Be(UserId);
+        accessChecker.ObservedIsAdmin.Should().BeTrue();
+        executionRepository.Items.Should().ContainSingle().Which.Status.Should().Be(ToolExecutionStatus.Succeeded);
+    }
+
+    [Fact]
     public async Task AgentTaskRuntime_ShouldFailMcpTool_WhenRegistryInputSchemaDoesNotMatch()
     {
         using var provider = new ServiceCollection().BuildServiceProvider();
@@ -1638,7 +1663,10 @@ public sealed class ToolRegistryGovernanceTests
         IAgentArtifactWorkspaceService? workspaceService = null,
         ICloudReadonlyAgentToolExecutor? cloudReadonlyToolExecutor = null,
         IEnumerable<IAgentToolExecutor>? toolExecutors = null,
-        IRepository<AgentTaskRunAttempt>? runAttemptRepository = null)
+        IRepository<AgentTaskRunAttempt>? runAttemptRepository = null,
+        IEnumerable<IKnowledgeBaseAccessChecker>? knowledgeBaseAccessCheckers = null,
+        IKnowledgeRetrievalService? knowledgeRetrievalService = null,
+        IIdentityAccessService? identityAccessService = null)
     {
         return new AgentTaskRuntime(
             taskRepository,
@@ -1651,10 +1679,10 @@ public sealed class ToolRegistryGovernanceTests
             new NoopFileStorageService(),
             new NoopTableFileParser(),
             new NoopDocumentGenerator(),
-            new NoopKnowledgeRetrievalService(),
-            [],
+            knowledgeRetrievalService ?? new NoopKnowledgeRetrievalService(),
+            knowledgeBaseAccessCheckers ?? [],
             cloudReadonlyToolExecutor ?? new ThrowingCloudReadonlyAgentToolExecutor(),
-            new TestCurrentUser(UserId),
+            identityAccessService ?? new StubIdentityAccessService([]),
             guard,
             new AgentAuditRecorder(new CapturingAuditLogWriter()),
             toolExecutors ?? []);
@@ -1674,6 +1702,31 @@ public sealed class ToolRegistryGovernanceTests
             CreatePlanJson(toolCode),
             now);
         task.AddStep("生成图表数据", "生成图表数据。", AgentStepType.ChartGeneration, toolCode, requiresApproval, now);
+        var workspace = new ArtifactWorkspace(
+            task.Id,
+            $"ws_{Guid.NewGuid():N}",
+            @"C:\aicopilot-workspaces\test",
+            "/api/aigateway/workspaces/test",
+            now);
+        task.AttachWorkspace(workspace.Id, now);
+        task.ApprovePlan(now);
+        return (task, workspace);
+    }
+
+    private static (AgentTask Task, ArtifactWorkspace Workspace) CreateRagApprovedTask(Guid knowledgeBaseId)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var task = new AgentTask(
+            SessionId.New(),
+            UserId,
+            "RAG admin-only search",
+            "RAG admin-only search",
+            AgentTaskType.DataAnalysis,
+            AgentTaskRiskLevel.Low,
+            null,
+            CreateRagPlanJson(knowledgeBaseId),
+            now);
+        task.AddStep("Search RAG", "Search admin-visible knowledge base.", AgentStepType.DataQuery, "rag_search", false, now);
         var workspace = new ArtifactWorkspace(
             task.Id,
             $"ws_{Guid.NewGuid():N}",
@@ -1737,6 +1790,37 @@ public sealed class ToolRegistryGovernanceTests
           }
         }
         """;
+    }
+
+    private static string CreateRagPlanJson(Guid knowledgeBaseId)
+    {
+        var plan = new
+        {
+            version = 1,
+            plannerTemplateCode = "agent_planner",
+            goal = "RAG admin-only search",
+            taskType = "DataAnalysis",
+            riskLevel = "Low",
+            uploadIds = Array.Empty<Guid>(),
+            knowledgeBaseIds = new[] { knowledgeBaseId },
+            steps = new[]
+            {
+                new
+                {
+                    title = "Search RAG",
+                    description = "Search admin-visible knowledge base.",
+                    stepType = "DataQuery",
+                    toolCode = "rag_search",
+                    requiresApproval = false
+                }
+            },
+            runtimeSettings = new
+            {
+                agentPlanningHistoryCount = 30,
+                contextTokenLimit = 12000
+            }
+        };
+        return JsonSerializer.Serialize(plan, JsonSerializerOptions.Web);
     }
 
     private static string CreateCloudPlanJson()
@@ -2208,11 +2292,13 @@ public sealed class ToolRegistryGovernanceTests
         }
     }
 
-    private sealed class StubIdentityAccessService(IReadOnlyCollection<string> permissions) : IIdentityAccessService
+    private sealed class StubIdentityAccessService(
+        IReadOnlyCollection<string> permissions,
+        string? roleName = "User") : IIdentityAccessService
     {
         public Task<CurrentUserAccess?> GetCurrentUserAccessAsync(Guid userId, CancellationToken cancellationToken = default)
         {
-            return Task.FromResult<CurrentUserAccess?>(new CurrentUserAccess(userId, "test-user", "User", permissions));
+            return Task.FromResult<CurrentUserAccess?>(new CurrentUserAccess(userId, "test-user", roleName, permissions));
         }
 
         public Task<IReadOnlyCollection<string>> GetPermissionsAsync(string roleName, CancellationToken cancellationToken = default)
@@ -2226,6 +2312,33 @@ public sealed class ToolRegistryGovernanceTests
             CancellationToken cancellationToken = default)
         {
             return Task.CompletedTask;
+        }
+    }
+
+    private sealed class RecordingKnowledgeBaseAccessChecker : IKnowledgeBaseAccessChecker
+    {
+        public Guid? ObservedUserId { get; private set; }
+
+        public bool? ObservedIsAdmin { get; private set; }
+
+        public Task<bool> CanReadAsync(
+            Guid knowledgeBaseId,
+            Guid userId,
+            bool isAdmin,
+            CancellationToken cancellationToken = default)
+        {
+            ObservedUserId = userId;
+            ObservedIsAdmin = isAdmin;
+            return Task.FromResult(isAdmin);
+        }
+
+        public Task<bool> CanWriteAsync(
+            Guid knowledgeBaseId,
+            Guid userId,
+            bool isAdmin,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(isAdmin);
         }
     }
 

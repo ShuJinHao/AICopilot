@@ -122,6 +122,39 @@ public sealed class AgentApprovalPermissionHardeningTests
         finalized.Artifacts.Should().OnlyContain(item => item.RelativePath.StartsWith("final/", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public async Task Finalize_ShouldPreserveFinalSubpaths_WhenDraftFileNamesCollide()
+    {
+        await AuthenticateAsAdminAsync();
+        var finalTask = await CreateSeededTaskAsync(
+            Guid.NewGuid(),
+            markWaitingFinalApproval: true,
+            includeToolApproval: false,
+            [
+                new SeedArtifactInput(ArtifactType.Json, "charts/report.json", """{"source":"charts"}""", "application/json"),
+                new SeedArtifactInput(ArtifactType.Json, "draft/report.json", """{"source":"draft"}""", "application/json")
+            ]);
+
+        _ = await PostJsonAsync<AgentApprovalRequestDto>(
+            $"/api/aigateway/agent/approval/{finalTask.FinalApprovalId!.Value}/approve",
+            new { comment = "final output approved" });
+
+        var finalized = await PostJsonAsync<ArtifactWorkspaceDto>(
+            $"/api/aigateway/workspace/{finalTask.WorkspaceCode}/finalize",
+            new { });
+
+        var finalPaths = finalized.Artifacts.Select(item => item.RelativePath).ToArray();
+        finalPaths.Should().OnlyHaveUniqueItems();
+        finalPaths.Should().Contain(["final/charts/report.json", "final/draft/report.json"]);
+
+        var chartArtifact = finalized.Artifacts.Single(item => item.RelativePath == "final/charts/report.json");
+        var draftArtifact = finalized.Artifacts.Single(item => item.RelativePath == "final/draft/report.json");
+        var chartContent = await DownloadStringAsync($"/api/aigateway/artifact/{chartArtifact.Id}/download");
+        var draftContent = await DownloadStringAsync($"/api/aigateway/artifact/{draftArtifact.Id}/download");
+        chartContent.Should().Contain("\"charts\"");
+        draftContent.Should().Contain("\"draft\"");
+    }
+
     private async Task<SeededAgentTask> SeedWorkspaceReadyTaskAsync(Guid ownerId, bool includeToolApproval)
     {
         var seeded = await CreateSeededTaskAsync(ownerId, markWaitingFinalApproval: false, includeToolApproval);
@@ -175,15 +208,28 @@ public sealed class AgentApprovalPermissionHardeningTests
     private async Task<SeededAgentTask> CreateSeededTaskAsync(
         Guid ownerId,
         bool markWaitingFinalApproval,
-        bool includeToolApproval)
+        bool includeToolApproval,
+        IReadOnlyCollection<SeedArtifactInput>? artifactInputs = null)
     {
         var now = DateTimeOffset.UtcNow;
         var workspaceCode = $"ws_batch5_{Guid.NewGuid():N}"[..38];
         var workspaceRoot = Path.Combine(GetWorkspaceRoot(), workspaceCode);
-        var draftDirectory = Path.Combine(workspaceRoot, "draft");
-        Directory.CreateDirectory(draftDirectory);
-        var draftPath = Path.Combine(draftDirectory, "report.md");
-        await File.WriteAllTextAsync(draftPath, "# Batch 5 approval hardening", Encoding.UTF8);
+        var artifacts = artifactInputs ?? new[]
+        {
+            new SeedArtifactInput(
+                ArtifactType.Markdown,
+                "draft/report.md",
+                "# Batch 5 approval hardening",
+                "text/markdown")
+        };
+        var artifactFiles = new List<(SeedArtifactInput Artifact, string FullPath)>();
+        foreach (var artifact in artifacts)
+        {
+            var fullPath = Path.Combine(workspaceRoot, artifact.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+            await File.WriteAllTextAsync(fullPath, artifact.Content, Encoding.UTF8);
+            artifactFiles.Add((artifact, fullPath));
+        }
 
         await using var dbContext = await CreateAiGatewayDbContextAsync();
         var task = new AgentTask(
@@ -221,14 +267,17 @@ public sealed class AgentApprovalPermissionHardeningTests
             workspaceRoot,
             $"/workspaces/{workspaceCode}",
             now);
-        workspace.AddDraftArtifact(
-            ArtifactType.Markdown,
-            "report.md",
-            "draft/report.md",
-            new FileInfo(draftPath).Length,
-            "text/markdown",
-            finalStep.Id,
-            now);
+        foreach (var artifact in artifactFiles)
+        {
+            workspace.AddDraftArtifact(
+                artifact.Artifact.Type,
+                Path.GetFileName(artifact.Artifact.RelativePath),
+                artifact.Artifact.RelativePath,
+                new FileInfo(artifact.FullPath).Length,
+                artifact.Artifact.MimeType,
+                finalStep.Id,
+                now);
+        }
 
         task.AttachWorkspace(workspace.Id, now);
         task.ApprovePlan(now);
@@ -344,6 +393,14 @@ public sealed class AgentApprovalPermissionHardeningTests
         return JsonSerializer.Deserialize<T>(body, JsonOptions)!;
     }
 
+    private async Task<string> DownloadStringAsync(string uri)
+    {
+        using var response = await _fixture.HttpClient.GetAsync(uri);
+        var body = await response.Content.ReadAsStringAsync();
+        response.IsSuccessStatusCode.Should().BeTrue($"GET '{uri}' failed: {body}");
+        return body;
+    }
+
     private static async Task<T> ReadJsonAsync<T>(HttpResponseMessage response)
     {
         return (await response.Content.ReadFromJsonAsync<T>(JsonOptions))!;
@@ -369,6 +426,12 @@ public sealed class AgentApprovalPermissionHardeningTests
         string? WorkspaceCode,
         Guid? ToolApprovalId,
         Guid? FinalApprovalId);
+
+    private sealed record SeedArtifactInput(
+        ArtifactType Type,
+        string RelativePath,
+        string Content,
+        string MimeType);
 
     private sealed record LoginUserDto(string UserName, string Token);
 
