@@ -1,4 +1,4 @@
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { chatService } from '@/services/chatService'
 import { ChunkType, MessageRole } from '@/types/protocols'
@@ -10,8 +10,23 @@ import { useChatErrorStore, toFriendlyMessage } from './chatErrorStore'
 import { useMessageStore } from './messageStore'
 import { useSessionStore } from './sessionStore'
 import { useStreamStore } from './streamStore'
+import type {
+  AgentApprovalRequest,
+  AgentTask,
+  AgentTaskAuditSummary,
+  ArtifactRecord,
+  ArtifactWorkspace,
+  UploadRecord
+} from '@/types/protocols'
+
+interface AgentChartPreview {
+  labels: string[]
+  values: number[]
+  source?: string
+}
 
 export const useChatStore = defineStore('chat', () => {
+  const selectedModelStorageKey = 'aicopilot.chat.selectedModelId'
   const sessionStore = useSessionStore()
   const messageStore = useMessageStore()
   const streamStore = useStreamStore()
@@ -26,6 +41,49 @@ export const useChatStore = defineStore('chat', () => {
   const isWaitingForApproval = computed(() => approvalStore.isWaitingForApproval)
   const isLoadingHistory = computed(() => sessionStore.isLoadingHistory)
   const errorMessage = computed(() => errorStore.errorMessage)
+  const chatModels = ref<Awaited<ReturnType<typeof chatService.getSelectableChatModels>>>([])
+  const agentTasks = ref<AgentTask[]>([])
+  const agentApprovals = ref<AgentApprovalRequest[]>([])
+  const agentAuditSummary = ref<AgentTaskAuditSummary[]>([])
+  const uploadedFiles = ref<UploadRecord[]>([])
+  const currentWorkspace = ref<ArtifactWorkspace | null>(null)
+  const chartPreview = ref<AgentChartPreview | null>(null)
+  const isAgentBusy = ref(false)
+  const agentErrorMessage = ref<string | null>(null)
+  const selectedModelId = ref<string | null>(
+    typeof window === 'undefined' ? null : window.localStorage.getItem(selectedModelStorageKey)
+  )
+  const isLoadingChatModels = ref(false)
+  const selectedModel = computed(() =>
+    chatModels.value.find((model) => model.id === selectedModelId.value) ?? null
+  )
+  const latestAgentTask = computed(() => agentTasks.value[0] ?? null)
+  const pendingAgentApprovals = computed(() =>
+    agentApprovals.value.filter((approval) => approval.status === 'Pending')
+  )
+
+  async function loadChatModels() {
+    isLoadingChatModels.value = true
+    try {
+      chatModels.value = await chatService.getSelectableChatModels()
+      if (!chatModels.value.some((model) => model.id === selectedModelId.value)) {
+        setSelectedModel(chatModels.value[0]?.id ?? null)
+      }
+    } finally {
+      isLoadingChatModels.value = false
+    }
+  }
+
+  function setSelectedModel(modelId: string | null) {
+    selectedModelId.value = modelId
+    if (typeof window !== 'undefined') {
+      if (modelId) {
+        window.localStorage.setItem(selectedModelStorageKey, modelId)
+      } else {
+        window.localStorage.removeItem(selectedModelStorageKey)
+      }
+    }
+  }
 
   function bindErrorSession() {
     errorStore.bindCurrentSession(sessionStore.currentSessionId)
@@ -34,6 +92,7 @@ export const useChatStore = defineStore('chat', () => {
   async function loadHistory(sessionId: string, force = false) {
     if (!force && messageStore.messagesMap[sessionId]?.length) {
       await approvalStore.refreshPendingApprovals(sessionId)
+      await loadAgentTasks(sessionId)
       return
     }
 
@@ -42,14 +101,253 @@ export const useChatStore = defineStore('chat', () => {
       const history = await chatService.getHistory(sessionId)
       messageStore.setHistory(sessionId, history)
       await approvalStore.refreshPendingApprovals(sessionId)
+      await loadAgentTasks(sessionId)
     } finally {
       sessionStore.isLoadingHistory = false
     }
   }
 
+  function upsertAgentTask(task: AgentTask) {
+    const index = agentTasks.value.findIndex((item) => item.id === task.id)
+    if (index >= 0) {
+      agentTasks.value.splice(index, 1, task)
+    } else {
+      agentTasks.value.unshift(task)
+    }
+  }
+
+  async function loadAgentTasks(sessionId: string) {
+    try {
+      agentTasks.value = await chatService.getAgentTasksBySession(sessionId)
+      const taskWithWorkspace = agentTasks.value.find((task) => Boolean(task.workspaceCode))
+      if (taskWithWorkspace) {
+        await refreshWorkspace(taskWithWorkspace)
+      } else {
+        currentWorkspace.value = null
+        chartPreview.value = null
+      }
+      await loadAgentApprovals(agentTasks.value[0]?.id ?? null)
+      await loadAgentAuditSummary(agentTasks.value[0]?.id ?? null)
+    } catch {
+      agentTasks.value = []
+      agentApprovals.value = []
+      agentAuditSummary.value = []
+      currentWorkspace.value = null
+      chartPreview.value = null
+    }
+  }
+
+  async function loadAgentApprovals(taskId: string | null = null) {
+    try {
+      agentApprovals.value = taskId
+        ? await chatService.getAgentTaskApprovals(taskId)
+        : await chatService.getPendingAgentApprovals()
+    } catch {
+      agentApprovals.value = []
+    }
+  }
+
+  async function loadAgentAuditSummary(taskId: string | null = null) {
+    if (!taskId) {
+      agentAuditSummary.value = []
+      return
+    }
+
+    try {
+      agentAuditSummary.value = await chatService.getAgentTaskAuditSummary(taskId)
+    } catch {
+      agentAuditSummary.value = []
+    }
+  }
+
+  async function refreshWorkspace(task: AgentTask) {
+    if (!task.workspaceCode) {
+      currentWorkspace.value = null
+      chartPreview.value = null
+      return
+    }
+
+    currentWorkspace.value = await chatService.getWorkspace(task.workspaceCode)
+    await refreshChartPreview()
+  }
+
+  async function refreshChartPreview() {
+    const chartArtifact = currentWorkspace.value?.artifacts.find((artifact) => artifact.previewKind === 'chart')
+    if (!chartArtifact) {
+      chartPreview.value = null
+      return
+    }
+
+    try {
+      const blob = await chatService.downloadArtifact(chartArtifact.id)
+      const payload = JSON.parse(await blob.text()) as {
+        labels?: unknown
+        values?: unknown
+        source?: unknown
+      }
+      chartPreview.value = {
+        labels: Array.isArray(payload.labels) ? payload.labels.map(String) : [],
+        values: Array.isArray(payload.values) ? payload.values.map((value) => Number(value) || 0) : [],
+        source: typeof payload.source === 'string' ? payload.source : undefined
+      }
+    } catch {
+      chartPreview.value = null
+    }
+  }
+
+  async function downloadArtifact(artifact: ArtifactRecord) {
+    const blob = await chatService.downloadArtifact(artifact.id)
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = artifact.name
+    anchor.click()
+    URL.revokeObjectURL(url)
+  }
+
+  async function uploadSessionFile(file: File) {
+    if (!sessionStore.currentSessionId) {
+      return null
+    }
+
+    agentErrorMessage.value = null
+    const uploaded = await chatService.uploadFile('SessionTemp', file, {
+      sessionId: sessionStore.currentSessionId
+    })
+    uploadedFiles.value.unshift(uploaded)
+    return uploaded
+  }
+
+  async function planAgentTask(goal: string) {
+    if (!sessionStore.currentSessionId || !selectedModelId.value || isAgentBusy.value) {
+      return null
+    }
+
+    isAgentBusy.value = true
+    agentErrorMessage.value = null
+    try {
+      const task = await chatService.planAgentTask({
+        sessionId: sessionStore.currentSessionId,
+        goal,
+        taskType: 'ReportGeneration',
+        modelId: selectedModelId.value,
+        uploadIds: uploadedFiles.value.map((item) => item.id),
+        knowledgeBaseIds: []
+      })
+      upsertAgentTask(task)
+      await loadAgentApprovals(task.id)
+      await loadAgentAuditSummary(task.id)
+      await refreshWorkspace(task)
+      return task
+    } catch (error) {
+      agentErrorMessage.value = toFriendlyMessage(error)
+      return null
+    } finally {
+      isAgentBusy.value = false
+    }
+  }
+
+  async function approveAndRunAgentTask(taskId: string) {
+    if (isAgentBusy.value) {
+      return null
+    }
+
+    isAgentBusy.value = true
+    agentErrorMessage.value = null
+    try {
+      const approved = await chatService.approveAgentTaskPlan(taskId)
+      upsertAgentTask(approved)
+      const updated = await chatService.runAgentTask(taskId)
+      upsertAgentTask(updated)
+      await loadAgentApprovals(taskId)
+      await loadAgentAuditSummary(taskId)
+      await refreshWorkspace(updated)
+      return updated
+    } catch (error) {
+      agentErrorMessage.value = toFriendlyMessage(error)
+      return null
+    } finally {
+      isAgentBusy.value = false
+    }
+  }
+
+  async function runAgentTask(taskId: string) {
+    if (isAgentBusy.value) {
+      return null
+    }
+
+    isAgentBusy.value = true
+    agentErrorMessage.value = null
+    try {
+      const updated = await chatService.runAgentTask(taskId)
+      upsertAgentTask(updated)
+      await loadAgentApprovals(taskId)
+      await loadAgentAuditSummary(taskId)
+      await refreshWorkspace(updated)
+      return updated
+    } catch (error) {
+      agentErrorMessage.value = toFriendlyMessage(error)
+      return null
+    } finally {
+      isAgentBusy.value = false
+    }
+  }
+
+  async function decideAgentApproval(
+    approval: AgentApprovalRequest,
+    decision: 'approve' | 'reject',
+    comment?: string | null
+  ) {
+    if (isAgentBusy.value) {
+      return null
+    }
+
+    isAgentBusy.value = true
+    agentErrorMessage.value = null
+    try {
+      const decided = await chatService.decideAgentApproval(approval.id, decision, comment)
+      await loadAgentApprovals(approval.taskId)
+      if (sessionStore.currentSessionId) {
+        await loadAgentTasks(sessionStore.currentSessionId)
+      }
+      await loadAgentAuditSummary(approval.taskId)
+
+      return decided
+    } catch (error) {
+      agentErrorMessage.value = toFriendlyMessage(error)
+      return null
+    } finally {
+      isAgentBusy.value = false
+    }
+  }
+
+  async function finalizeWorkspace(code: string) {
+    if (isAgentBusy.value) {
+      return null
+    }
+
+    isAgentBusy.value = true
+    agentErrorMessage.value = null
+    try {
+      currentWorkspace.value = await chatService.finalizeWorkspace(code)
+      await refreshChartPreview()
+      if (sessionStore.currentSessionId) {
+        await loadAgentTasks(sessionStore.currentSessionId)
+      }
+      await loadAgentApprovals(latestAgentTask.value?.id ?? null)
+      await loadAgentAuditSummary(latestAgentTask.value?.id ?? null)
+      return currentWorkspace.value
+    } catch (error) {
+      agentErrorMessage.value = toFriendlyMessage(error)
+      return null
+    } finally {
+      isAgentBusy.value = false
+    }
+  }
+
   async function initialize() {
     errorStore.clearSessionError()
-    await sessionStore.loadSessions()
+    await Promise.all([sessionStore.loadSessions(), loadChatModels()])
 
     if (sessionStore.sessions.length === 0) {
       await createNewSession()
@@ -127,6 +425,10 @@ export const useChatStore = defineStore('chat', () => {
 
     const sessionId = sessionStore.currentSessionId
     errorStore.clearSessionError(sessionId)
+    if (!selectedModelId.value) {
+      errorStore.setSessionError(sessionId, '当前没有可用的对话模型，请联系管理员启用 Chat 模型。')
+      return
+    }
 
     const userMessage = messageStore.addMessage(sessionId, {
       sessionId,
@@ -145,6 +447,12 @@ export const useChatStore = defineStore('chat', () => {
     const assistantMessage = messageStore.addMessage(sessionId, {
       sessionId,
       role: MessageRole.Assistant,
+      finalModelId: selectedModelId.value,
+      finalModelName: '未知',
+      routingModelId: null,
+      routingModelName: null,
+      contextWindowTokens: null,
+      maxOutputTokens: null,
       chunks: [],
       isStreaming: true,
       timestamp: Date.now()
@@ -154,7 +462,7 @@ export const useChatStore = defineStore('chat', () => {
     let streamErrorCode: string | null = null
 
     try {
-      await chatService.sendMessageStream(sessionId, input, {
+      await chatService.sendMessageStream(sessionId, input, selectedModelId.value, {
         onChunkReceived(chunk) {
           if (chunk.type === ChunkType.Error) {
             streamErrorCode = getErrorCode(chunk)
@@ -212,6 +520,12 @@ export const useChatStore = defineStore('chat', () => {
       targetMessage = messageStore.addMessage(sessionId, {
         sessionId,
         role: MessageRole.Assistant,
+        finalModelId: null,
+        finalModelName: '未知',
+        routingModelId: null,
+        routingModelName: null,
+        contextWindowTokens: null,
+        maxOutputTokens: null,
         chunks: [],
         isStreaming: true,
         timestamp: Date.now()
@@ -280,6 +594,17 @@ export const useChatStore = defineStore('chat', () => {
     streamStore.reset()
     approvalStore.reset()
     errorStore.reset()
+    chatModels.value = []
+    agentTasks.value = []
+    agentApprovals.value = []
+    agentAuditSummary.value = []
+    uploadedFiles.value = []
+    currentWorkspace.value = null
+    chartPreview.value = null
+    agentErrorMessage.value = null
+    isAgentBusy.value = false
+    selectedModelId.value = null
+    isLoadingChatModels.value = false
   }
 
   return {
@@ -290,12 +615,36 @@ export const useChatStore = defineStore('chat', () => {
     isStreaming,
     isWaitingForApproval,
     isLoadingHistory,
+    chatModels,
+    selectedModelId,
+    selectedModel,
+    isLoadingChatModels,
+    agentTasks,
+    latestAgentTask,
+    agentApprovals,
+    pendingAgentApprovals,
+    agentAuditSummary,
+    uploadedFiles,
+    currentWorkspace,
+    chartPreview,
+    isAgentBusy,
+    agentErrorMessage,
     errorMessage,
     initialize,
+    loadChatModels,
+    setSelectedModel,
     createNewSession,
     selectSession,
     confirmOnsitePresence,
     clearOnsitePresence,
+    uploadSessionFile,
+    planAgentTask,
+    approveAndRunAgentTask,
+    runAgentTask,
+    decideAgentApproval,
+    loadAgentAuditSummary,
+    finalizeWorkspace,
+    downloadArtifact,
     sendMessage,
     submitApproval,
     reset

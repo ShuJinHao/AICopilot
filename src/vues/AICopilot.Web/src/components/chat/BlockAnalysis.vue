@@ -52,24 +52,24 @@ const getWidget = (chunk: ChatChunk): WidgetChunk =>
 
 <style scoped>
 .block-analysis { width: 100%; }
-.analysis-card { background: #fafafa; border: 1px solid #dcdfe6; border-radius: 8px; overflow: hidden; }
+.analysis-card { background: var(--app-surface); border: 1px solid var(--app-border); border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-sm); }
 
 /* 头部样式 */
 .analysis-header {
-  background: #f2f6fc;
+  background: var(--app-surface-muted);
   padding: 8px 12px;
   display: flex;
   align-items: center;
-  color: #409eff;
+  color: var(--app-primary);
   font-size: 13px;
   font-weight: 600;
-  border-bottom: 1px solid #ebeef5;
+  border-bottom: 1px solid var(--app-border);
 }
 .header-icon { margin-right: 6px; }
 
 /* 内容区域 */
 .analysis-content { padding: 12px; }
-.text-analysis { font-size: 14px; color: #444; line-height: 1.6; }
+.text-analysis { font-size: 14px; color: var(--app-text); line-height: 1.6; }
 
 /* 间距控制 */
 .mb-3 { margin-bottom: 12px; }

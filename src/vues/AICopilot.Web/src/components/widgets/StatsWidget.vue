@@ -24,6 +24,12 @@ const unit = computed(() => props.widget.data?.unit ?? '')
   gap: 6px;
   min-width: 180px;
   padding: 16px;
+  border-radius: var(--radius-md);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.stats-widget:hover {
+  transform: translateY(-2px);
 }
 
 .stats-label {
@@ -33,16 +39,17 @@ const unit = computed(() => props.widget.data?.unit ?? '')
 }
 
 .stats-widget strong {
-  color: var(--app-text);
-  font-size: 30px;
+  color: var(--app-primary-strong);
+  font-size: 32px;
   font-weight: 800;
   line-height: 1.1;
+  letter-spacing: -0.5px;
 }
 
 .stats-widget small {
   margin-left: 4px;
-  color: var(--app-text-muted);
-  font-size: 13px;
+  color: var(--app-text-soft);
+  font-size: 14px;
   font-weight: 650;
 }
 

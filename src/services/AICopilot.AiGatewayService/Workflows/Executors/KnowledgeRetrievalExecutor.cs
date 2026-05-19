@@ -97,7 +97,12 @@ public class KnowledgeRetrievalExecutor(
             var sb = new StringBuilder();
             foreach (var item in result)
             {
-                sb.AppendLine($"<document id=\"{item.DocumentId}\" name=\"{item.DocumentName}\" score=\"{item.Score:F2}\">");
+                sb.AppendLine($"<document id=\"{item.DocumentId}\" name=\"{item.DocumentName}\" chunk=\"{item.ChunkIndex}\" score=\"{item.Score:F2}\" low_confidence=\"{item.IsLowConfidence}\">");
+                if (item.IsLowConfidence && !string.IsNullOrWhiteSpace(item.LowConfidenceReason))
+                {
+                    sb.AppendLine($"<low_confidence_reason>{item.LowConfidenceReason}</low_confidence_reason>");
+                }
+
                 sb.AppendLine(item.Text);
                 sb.AppendLine("</document>");
                 sb.AppendLine();

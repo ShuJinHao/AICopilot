@@ -25,7 +25,8 @@ internal sealed class AgentRuntimeFactory(
             var context = BuildExecutionContext(request);
             costBudgetPolicy.EnsureWithinBudget(request, context);
             var providers = scope.ServiceProvider.GetServices<IChatClientProvider>().ToArray();
-            var providerCandidates = new[] { request.Model.Provider }
+            var requestedProvider = request.Model.ProtocolType;
+            var providerCandidates = new[] { requestedProvider }
                 .Concat(fallbackPolicy.GetFallbackProviders(request, context))
                 .Where(providerName => !string.IsNullOrWhiteSpace(providerName))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -45,11 +46,11 @@ internal sealed class AgentRuntimeFactory(
                     continue;
                 }
 
-                if (!string.Equals(providerName, request.Model.Provider, StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals(providerName, requestedProvider, StringComparison.OrdinalIgnoreCase))
                 {
                     logger.LogWarning(
                         "Falling back model provider from {RequestedProvider} to {FallbackProvider}. HasTools={HasTools}; HighRisk={HighRisk}.",
-                        request.Model.Provider,
+                        requestedProvider,
                         providerName,
                         context.HasTools,
                         context.IsHighRiskToolChain);
@@ -87,7 +88,7 @@ internal sealed class AgentRuntimeFactory(
                 }
             }
 
-            throw new InvalidOperationException($"No healthy chat client provider is registered for '{request.Model.Provider}'.");
+            throw new InvalidOperationException($"No healthy chat client provider is registered for '{requestedProvider}'.");
         }
         catch
         {
@@ -108,7 +109,7 @@ internal sealed class AgentRuntimeFactory(
     {
         var tools = request.Options.Tools;
         return new ModelProviderExecutionContext(
-            request.Model.Provider,
+            request.Model.ProtocolType,
             tools.Count > 0,
             tools.Any(tool => tool.Kind == AiToolCallKind.Mcp),
             tools.Any(tool => tool.RequiresApproval || tool.RiskLevel == AiToolRiskLevel.RequiresApproval),

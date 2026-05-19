@@ -69,7 +69,7 @@ onMounted(() => {
   min-height: 100vh;
   place-items: center;
   padding: 24px;
-  background: #f3f4f6;
+  background: var(--app-bg);
 }
 
 .cloud-login-panel {
@@ -78,10 +78,10 @@ onMounted(() => {
   min-height: 260px;
   place-items: center;
   border: 1px solid var(--app-border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 32px;
   background: var(--app-surface);
-  box-shadow: var(--app-shadow);
+  box-shadow: var(--shadow-lg);
 }
 
 .state-content {
@@ -101,12 +101,13 @@ onMounted(() => {
 }
 
 .state-icon.warning {
-  color: #d97706;
+  color: var(--app-warning);
 }
 
 .state-content h1 {
   margin: 0;
   font-size: 22px;
+  color: var(--app-text);
 }
 
 .state-content p {

@@ -2,6 +2,7 @@ import {
   ChunkType,
   type ChatChunk,
   type ChatErrorPayload,
+  type ChatModelMetadataPayload,
   type FunctionApprovalRequest,
   type IntentResult
 } from '@/types/protocols'
@@ -39,6 +40,9 @@ export function processChunk(
     case ChunkType.Text:
       addTextChunk(message, chunk)
       break
+    case ChunkType.Metadata:
+      applyMetadataChunk(message, chunk)
+      break
     case ChunkType.Intent:
       addIntentChunk(message, chunk)
       break
@@ -61,6 +65,42 @@ export function processChunk(
     case ChunkType.Error:
       addErrorChunk(message, chunk, callbacks)
       break
+  }
+}
+
+function applyMetadataChunk(message: ChatMessage, chunk: ChatChunk) {
+  try {
+    const metadata = JSON.parse(chunk.content) as ChatModelMetadataPayload
+
+    if (metadata.finalModelId !== undefined) {
+      message.finalModelId = metadata.finalModelId
+    }
+
+    if (typeof metadata.finalModelName === 'string' && metadata.finalModelName.trim()) {
+      message.finalModelName = metadata.finalModelName.trim()
+    } else if (!message.finalModelName) {
+      message.finalModelName = '未知'
+    }
+
+    if (metadata.routingModelId !== undefined) {
+      message.routingModelId = metadata.routingModelId
+    }
+
+    if (typeof metadata.routingModelName === 'string' && metadata.routingModelName.trim()) {
+      message.routingModelName = metadata.routingModelName.trim()
+    }
+
+    if (metadata.contextWindowTokens !== undefined) {
+      message.contextWindowTokens = metadata.contextWindowTokens
+    }
+
+    if (metadata.maxOutputTokens !== undefined) {
+      message.maxOutputTokens = metadata.maxOutputTokens
+    }
+  } catch {
+    if (!message.finalModelName) {
+      message.finalModelName = '未知'
+    }
   }
 }
 

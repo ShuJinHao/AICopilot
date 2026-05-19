@@ -13,6 +13,7 @@ using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
+using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Result;
@@ -176,6 +177,78 @@ public sealed class SessionPolicySemanticsTests
     }
 
     [Fact]
+    public async Task FinalAgentBuildExecutor_ShouldUseRequestedFinalModelAndRecordExecutionMetadata()
+    {
+        var runtimeFactory = new FakeRuntimeAgentFactory();
+        var templateModel = FakeRuntimeAgentFactory.CreateModel();
+        templateModel.UpdateInfo(FakeRuntimeAgentFactory.ProviderName, "template-model", "http://localhost/template-model");
+        var selectedModel = FakeRuntimeAgentFactory.CreateModel();
+        selectedModel.UpdateInfo(FakeRuntimeAgentFactory.ProviderName, "selected-model", "http://localhost/selected-model");
+        selectedModel.UpdateParameters(new ModelParameters { MaxTokens = 1_000_000, MaxOutputTokens = 4096, Temperature = 0.2f });
+
+        var template = new ConversationTemplate(
+            "current-template",
+            "current template",
+            "Current system prompt.",
+            templateModel.Id,
+            new TemplateSpecification { MaxTokens = 384, Temperature = 0.4f });
+        var session = new Session(Guid.NewGuid(), template.Id);
+        var executor = CreateFinalAgentBuildExecutor(
+            runtimeFactory,
+            new RecordingTokenBudgetPolicy(),
+            session,
+            [template],
+            [templateModel, selectedModel]);
+
+        await using var context = await executor.ExecuteAsync(CreateGenerationContext(session.Id, selectedModel.Id));
+
+        runtimeFactory.LastCreateRequest.Should().NotBeNull();
+        runtimeFactory.LastCreateRequest!.Model.Id.Should().Be(selectedModel.Id);
+        context.ExecutionMetadata.FinalModelId.Should().Be(selectedModel.Id.Value);
+        context.ExecutionMetadata.FinalModelName.Should().Be("selected-model");
+        context.ExecutionMetadata.ContextWindowTokens.Should().Be(1_000_000);
+        context.ExecutionMetadata.MaxOutputTokens.Should().Be(384);
+    }
+
+    [Fact]
+    public void Session_ShouldKeepSeparateModelSnapshotsForAssistantMessages()
+    {
+        var session = new Session(Guid.NewGuid(), ConversationTemplateId.New());
+        var firstFinalModelId = Guid.NewGuid();
+        var secondFinalModelId = Guid.NewGuid();
+        var firstRoutingModelId = Guid.NewGuid();
+        var secondRoutingModelId = Guid.NewGuid();
+
+        session.AddMessage(
+            "answer from model a",
+            MessageType.Assistant,
+            new MessageModelSnapshot(firstFinalModelId, "model-a", firstRoutingModelId, "router-a", 64_000, 4096));
+        session.AddMessage(
+            "answer from model b",
+            MessageType.Assistant,
+            new MessageModelSnapshot(secondFinalModelId, "model-b", secondRoutingModelId, "router-b", 1_000_000, 8192));
+
+        var assistantMessages = session.Messages
+            .Where(message => message.Type == MessageType.Assistant)
+            .ToArray();
+
+        assistantMessages.Should().HaveCount(2);
+        assistantMessages[0].FinalModelId.Should().Be(firstFinalModelId);
+        assistantMessages[0].FinalModelName.Should().Be("model-a");
+        assistantMessages[0].RoutingModelId.Should().Be(firstRoutingModelId);
+        assistantMessages[0].RoutingModelName.Should().Be("router-a");
+        assistantMessages[0].ContextWindowTokens.Should().Be(64_000);
+        assistantMessages[0].MaxOutputTokens.Should().Be(4096);
+
+        assistantMessages[1].FinalModelId.Should().Be(secondFinalModelId);
+        assistantMessages[1].FinalModelName.Should().Be("model-b");
+        assistantMessages[1].RoutingModelId.Should().Be(secondRoutingModelId);
+        assistantMessages[1].RoutingModelName.Should().Be("router-b");
+        assistantMessages[1].ContextWindowTokens.Should().Be(1_000_000);
+        assistantMessages[1].MaxOutputTokens.Should().Be(8192);
+    }
+
+    [Fact]
     public async Task FinalAgentBuildExecutor_ShouldReturnConfigurationMissing_WhenCurrentTemplateIsMissing()
     {
         var runtimeFactory = new FakeRuntimeAgentFactory();
@@ -247,11 +320,11 @@ public sealed class SessionPolicySemanticsTests
             NullLogger<FinalAgentBuildExecutor>.Instance);
     }
 
-    private static GenerationContext CreateGenerationContext(Guid sessionId)
+    private static GenerationContext CreateGenerationContext(Guid sessionId, Guid? finalModelId = null)
     {
         return new GenerationContext
         {
-            Request = new ChatStreamRequest(sessionId, "diagnose current session"),
+            Request = new ChatStreamRequest(sessionId, "diagnose current session", finalModelId),
             Scene = ManufacturingSceneType.DeviceAnomalyDiagnosis
         };
     }

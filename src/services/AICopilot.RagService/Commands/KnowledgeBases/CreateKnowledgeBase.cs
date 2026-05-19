@@ -15,18 +15,27 @@ public record CreatedKnowledgeBaseDto(Guid Id, string Name);
 public record CreateKnowledgeBaseCommand(
     string Name,
     string Description,
-    Guid EmbeddingModelId) : ICommand<Result<CreatedKnowledgeBaseDto>>;
+    Guid EmbeddingModelId,
+    string? AccessScope = null) : ICommand<Result<CreatedKnowledgeBaseDto>>;
 
 public class CreateKnowledgeBaseCommandHandler(
     IRepository<KnowledgeBase> kbRepo,
     IReadRepository<EmbeddingModel> modelRepo,
-    IAuditLogWriter auditLogWriter)
+    IAuditLogWriter auditLogWriter,
+    ICurrentUser currentUser)
     : ICommandHandler<CreateKnowledgeBaseCommand, Result<CreatedKnowledgeBaseDto>>
 {
     public async Task<Result<CreatedKnowledgeBaseDto>> Handle(
         CreateKnowledgeBaseCommand request,
         CancellationToken cancellationToken)
     {
+        if (currentUser.Id is not { } userId)
+        {
+            return Result.Unauthorized(new ApiProblemDescriptor(
+                AuthProblemCodes.Unauthorized,
+                "Current user id is missing or invalid."));
+        }
+
         // 1. 校验嵌入模型是否存在
         // 知识库必须绑定一个具体的 Embedding 模型，因为这决定了向量的维度
         var embeddingModelId = new EmbeddingModelId(request.EmbeddingModelId);
@@ -37,7 +46,12 @@ public class CreateKnowledgeBaseCommandHandler(
         }
 
         // 2. 创建实体
-        var kb = new KnowledgeBase(request.Name, request.Description, embeddingModelId);
+        if (!TryParseAccessScope(request.AccessScope, out var accessScope))
+        {
+            return Result.Invalid("Knowledge base access scope is invalid.");
+        }
+
+        var kb = new KnowledgeBase(request.Name, request.Description, embeddingModelId, userId, accessScope);
 
         // 3. 持久化
         kbRepo.Add(kb);
@@ -49,11 +63,22 @@ public class CreateKnowledgeBaseCommandHandler(
                 kb.Id.ToString(),
                 kb.Name,
                 AuditResults.Succeeded,
-                $"Created knowledge base: {kb.Name}; embeddingModelId={kb.EmbeddingModelId}.",
-                ["name", "description", "embeddingModelId"]),
+                $"Created knowledge base: {kb.Name}; embeddingModelId={kb.EmbeddingModelId}; accessScope={kb.AccessScope}.",
+                ["name", "description", "embeddingModelId", "ownerUserId", "accessScope"]),
             cancellationToken);
         await kbRepo.SaveChangesAsync(cancellationToken);
 
         return Result.Success(new CreatedKnowledgeBaseDto(kb.Id, kb.Name));
+    }
+
+    private static bool TryParseAccessScope(string? value, out KnowledgeBaseAccessScope accessScope)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            accessScope = KnowledgeBaseAccessScope.OwnerOnly;
+            return true;
+        }
+
+        return Enum.TryParse(value, ignoreCase: true, out accessScope) && Enum.IsDefined(accessScope);
     }
 }

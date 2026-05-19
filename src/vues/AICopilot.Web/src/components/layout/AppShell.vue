@@ -7,15 +7,19 @@ import {
   DataAnalysis,
   Key,
   Lock,
+  Moon,
+  Sunny,
   SwitchButton
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/authStore'
 import { useChatStore } from '@/stores/chatStore'
+import { useTheme } from '@/composables/useTheme'
 
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 const chatStore = useChatStore()
+const { isDark, toggleTheme } = useTheme()
 
 const activePath = computed(() => route.path)
 const userInitial = computed(() => (authStore.userName || 'A').slice(0, 1).toUpperCase())
@@ -98,6 +102,7 @@ async function logout() {
           <span>生产系统 AI 辅助运行中</span>
         </div>
         <div class="user-zone">
+          <el-button text circle :icon="isDark ? Moon : Sunny" @click="toggleTheme()" class="theme-toggle" />
           <div class="user-avatar">{{ userInitial }}</div>
           <div class="user-copy">
             <strong>{{ authStore.userName || '未登录' }}</strong>
@@ -128,8 +133,12 @@ async function logout() {
   min-height: 0;
   flex-direction: column;
   border-right: 1px solid var(--app-border);
-  background: #17202a;
-  color: #f8fafc;
+  background: var(--app-surface-muted);
+  color: var(--app-text);
+}
+
+html.dark .app-sidebar {
+  background: var(--app-surface);
 }
 
 .brand {
@@ -137,7 +146,7 @@ async function logout() {
   align-items: center;
   gap: 12px;
   padding: 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  border-bottom: 1px solid var(--app-border);
 }
 
 .brand-mark {
@@ -145,9 +154,10 @@ async function logout() {
   width: 40px;
   height: 40px;
   place-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 8px;
-  background: #0f766e;
+  border-radius: var(--radius-md);
+  background: var(--app-primary);
+  color: #fff;
+  box-shadow: var(--shadow-sm);
 }
 
 .brand-copy {
@@ -159,17 +169,18 @@ async function logout() {
 .brand-copy strong {
   font-size: 16px;
   font-weight: 800;
+  color: var(--app-text);
 }
 
 .brand-copy span {
-  color: #b9c5d1;
+  color: var(--app-text-muted);
   font-size: 12px;
 }
 
 .nav-list {
   display: grid;
-  gap: 6px;
-  padding: 14px;
+  gap: var(--space-2);
+  padding: var(--space-4);
 }
 
 .nav-item {
@@ -179,22 +190,25 @@ async function logout() {
   width: 100%;
   align-items: center;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 11px 12px;
   background: transparent;
-  color: #dbe5ef;
+  color: var(--app-text-soft);
   cursor: pointer;
   text-align: left;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }
 
-.nav-item:hover,
-.nav-item.active {
-  border-color: rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.08);
+.nav-item:hover {
+  background: var(--app-surface);
+  border-color: var(--app-border);
 }
 
 .nav-item.active {
-  color: #ffffff;
+  background: var(--app-surface-raised);
+  border-color: var(--app-border-strong);
+  color: var(--app-primary);
+  box-shadow: var(--shadow-sm);
 }
 
 .nav-item span {
@@ -205,34 +219,40 @@ async function logout() {
 
 .nav-item strong {
   font-weight: 750;
+  color: var(--app-text);
 }
 
 .nav-item small {
-  color: #a8b5c3;
+  color: var(--app-text-muted);
   font-size: 12px;
+}
+
+.nav-item.active small {
+  color: var(--app-text-soft);
 }
 
 .sidebar-footer {
   margin-top: auto;
-  padding: 14px;
+  padding: var(--space-4);
 }
 
 .boundary-note {
   display: grid;
   gap: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 8px;
+  border: 1px solid var(--app-border);
+  border-radius: var(--radius-md);
   padding: 12px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--app-surface);
+  box-shadow: var(--shadow-sm);
 }
 
 .boundary-note strong {
-  color: #ffffff;
+  color: var(--app-text);
   font-size: 13px;
 }
 
 .boundary-note span {
-  color: #b9c5d1;
+  color: var(--app-text-muted);
   font-size: 12px;
 }
 
@@ -251,7 +271,7 @@ async function logout() {
   justify-content: space-between;
   gap: 16px;
   border-bottom: 1px solid var(--app-border);
-  background: rgba(255, 255, 255, 0.94);
+  background: var(--app-surface);
   padding: 0 20px;
 }
 
@@ -268,6 +288,7 @@ async function logout() {
   height: 8px;
   border-radius: 50%;
   background: var(--app-success);
+  box-shadow: 0 0 0 2px var(--app-surface), 0 0 0 4px rgba(74, 222, 128, 0.2);
 }
 
 .user-zone {
@@ -276,15 +297,21 @@ async function logout() {
   gap: 10px;
 }
 
+.theme-toggle {
+  margin-right: 8px;
+  font-size: 18px;
+}
+
 .user-avatar {
   display: grid;
   width: 34px;
   height: 34px;
   place-items: center;
-  border-radius: 8px;
-  background: #e6f3f1;
+  border-radius: var(--radius-md);
+  background: var(--app-surface-muted);
   color: var(--app-primary-strong);
   font-weight: 800;
+  border: 1px solid var(--app-border);
 }
 
 .user-copy {
@@ -307,7 +334,7 @@ async function logout() {
   min-height: 0;
   flex: 1;
   overflow: hidden;
-  padding: 18px;
+  padding: var(--space-4);
 }
 
 @media (max-width: 900px) {
@@ -321,6 +348,8 @@ async function logout() {
     position: static;
     max-width: 100vw;
     overflow: hidden;
+    border-right: none;
+    border-bottom: 1px solid var(--app-border);
   }
 
   .brand,

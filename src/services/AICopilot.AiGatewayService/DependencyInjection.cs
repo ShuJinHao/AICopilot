@@ -1,11 +1,16 @@
 using AICopilot.AgentPlugin;
+using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.AiGatewayService.Approvals;
 using AICopilot.AiGatewayService.Agents;
 using AICopilot.AiGatewayService.BusinessSemantics;
 using AICopilot.AiGatewayService.BusinessPolicies;
 using AICopilot.AiGatewayService.Observability;
+using AICopilot.AiGatewayService.RoutingModels;
+using AICopilot.AiGatewayService.Runtime;
 using AICopilot.AiGatewayService.Safety;
 using AICopilot.AiGatewayService.Sessions;
+using AICopilot.AiGatewayService.Tools;
+using AICopilot.AiGatewayService.Workspaces;
 using AICopilot.AiGatewayService.Workflows;
 using AICopilot.AiGatewayService.Workflows.Executors;
 using AICopilot.Services.Contracts;
@@ -20,12 +25,40 @@ public static class DependencyInjection
 {
     public static void AddAiGatewayService(this IHostApplicationBuilder builder)
     {
+        builder.Services.Configure<CloudReadonlyOptions>(
+            builder.Configuration.GetSection(CloudReadonlyOptions.SectionName));
+        builder.Services.Configure<AgentRunQueueOptions>(
+            builder.Configuration.GetSection(AgentRunQueueOptions.SectionName));
+
         builder.Services.AddMediatR(cfg =>
         {
             cfg.RegisterServicesFromAssembly(Assembly.GetExecutingAssembly());
         });
 
         builder.Services.AddScoped<ChatAgentFactory>();
+        builder.Services.AddScoped<IChatExecutionMetadataAccessor, ChatExecutionMetadataAccessor>();
+        builder.Services.AddScoped<IRoutingModelResolver, RoutingModelResolver>();
+        builder.Services.AddScoped<IChatRuntimeSettingsProvider, ChatRuntimeSettingsProvider>();
+        builder.Services.AddScoped<IAgentArtifactWorkspaceService, AgentArtifactWorkspaceService>();
+        builder.Services.AddScoped<IAgentTaskRuntime, AgentTaskRuntime>();
+        builder.Services.AddScoped<IAgentTaskRunQueue, AgentTaskRunQueue>();
+        builder.Services.AddScoped<IAgentWorkspaceFingerprintProvider, AgentWorkspaceFingerprintProvider>();
+        builder.Services.AddScoped<IAgentWorkerHeartbeatService, AgentWorkerHeartbeatService>();
+        builder.Services.AddScoped<ICloudReadonlyAgentIntentRouter, CloudReadonlyAgentIntentRouter>();
+        builder.Services.AddScoped<ICloudReadonlyAgentPlanService, CloudReadonlyAgentPlanService>();
+        builder.Services.AddSingleton<CloudReadonlySimulationDataSet>();
+        builder.Services.AddSingleton<ICloudReadonlySimulationIntentPlanner, CloudReadonlySimulationIntentPlanner>();
+        builder.Services.AddScoped<ICloudReadonlyDataProvider, DisabledCloudReadonlyDataProvider>();
+        builder.Services.AddScoped<ICloudReadonlyDataProvider, SimulationCloudReadonlyDataProvider>();
+        builder.Services.AddScoped<ICloudReadonlyDataProvider, RealCloudReadonlyDataProvider>();
+        builder.Services.AddScoped<ICloudReadonlyDataProviderResolver, CloudReadonlyDataProviderResolver>();
+        builder.Services.AddScoped<ICloudReadonlyAgentToolExecutor, CloudReadonlyAgentToolExecutor>();
+        builder.Services.AddScoped<IAgentToolExecutor, McpAgentToolExecutor>();
+        builder.Services.AddScoped<IMcpToolRegistryReadService, McpToolRegistryReadService>();
+        builder.Services.AddScoped<ToolRegistryGuard>();
+        builder.Services.AddScoped<AgentPlanToolGuard>();
+        builder.Services.AddScoped<IAgentDynamicPlanner, DefaultAgentDynamicPlanner>();
+        builder.Services.AddScoped<AgentAuditRecorder>();
         builder.Services.TryAddSingleton<ISessionExecutionLock, InMemorySessionExecutionLock>();
         builder.Services.AddSingleton<IOperationalBoundaryPolicy, ManufacturingOperationalBoundaryPolicy>();
         builder.Services.AddSingleton<IManufacturingSceneClassifier, KeywordManufacturingSceneClassifier>();

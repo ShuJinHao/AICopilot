@@ -396,7 +396,8 @@ public sealed class SecurityHardeningTests
         knowledgeBaseManagementSource.Should().Contain("KNOWLEDGE_WRITE_PERMISSIONS.document.governance");
         permissionCatalogSource.Should().Contain("Rag.SearchKnowledgeBase");
         permissionCatalogSource.Should().Contain("Rag.UpdateDocumentGovernance");
-        embeddingManagementSource.Should().Contain("request.ApiKey ?? entity.ApiKey");
+        embeddingManagementSource.Should().Contain("request.ApiKey is null");
+        embeddingManagementSource.Should().Contain("ProtectApiKey(request.ApiKey)");
     }
 
     [Fact]
@@ -407,6 +408,47 @@ public sealed class SecurityHardeningTests
 
         attribute.Should().NotBeNull();
         attribute!.Permission.Should().Be("Rag.SearchKnowledgeBase");
+    }
+
+    [Fact]
+    public void AgentPlanRuntimeAndUpload_ShouldRecheckRagKnowledgeBasePermissions()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var agentTaskCommandsSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "AgentTasks",
+            "AgentTaskCommands.cs"));
+        var agentTaskRuntimeSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "AgentTasks",
+            "AgentTaskRuntime.cs"));
+        var uploadRecordsSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "Uploads",
+            "UploadRecords.cs"));
+
+        agentTaskCommandsSource.Should().Contain("IKnowledgeBaseAccessChecker");
+        agentTaskCommandsSource.Should().Contain("CanReadAsync(");
+        agentTaskCommandsSource.Should().Contain("knowledgeBaseId");
+        agentTaskCommandsSource.Should().Contain("Result.NotFound");
+        agentTaskRuntimeSource.Should().Contain("IKnowledgeBaseAccessChecker");
+        agentTaskRuntimeSource.Should().Contain("CanReadAsync(");
+        agentTaskRuntimeSource.Should().Contain("knowledgeBaseId");
+        agentTaskRuntimeSource.Should().Contain("task.UserId");
+        agentTaskRuntimeSource.Should().Contain("UnauthorizedAccessException");
+        uploadRecordsSource.Should().Contain("IKnowledgeBaseAccessChecker");
+        uploadRecordsSource.Should().Contain("CanWriteAsync(");
+        uploadRecordsSource.Should().Contain("request.KnowledgeBaseId");
+        uploadRecordsSource.Should().Contain("Result.NotFound");
     }
 
     [Fact]
@@ -990,6 +1032,9 @@ public sealed class SecurityHardeningTests
             "src/services/AICopilot.AiGatewayService/Workflows/Executors/DataAnalysisAuditRecorder.cs",
             "src/services/AICopilot.AiGatewayService/Workflows/Executors/FinalAgentRunExecutor.cs",
             "src/services/AICopilot.AiGatewayService/Workflows/Executors/ToolExecutionAuditRecorder.cs",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceManagement.cs",
+            "src/services/AICopilot.AiGatewayService/Uploads/UploadRecords.cs",
+            "src/services/AICopilot.RagService/Commands/Documents/UploadDocument.cs",
             "src/services/AICopilot.DataAnalysisService/Plugins/DataAnalysisSqlQueryRunner.cs"
         };
 

@@ -59,6 +59,39 @@ describe('chunkReducer', () => {
     expect(callChunk.functionCall.result).toBe('[1]')
   })
 
+  it('updates assistant model metadata without adding a visible chunk', () => {
+    const message = createMessage()
+    const callbacks = {
+      setSessionError: vi.fn(),
+      onApprovalChunk: vi.fn()
+    }
+
+    processChunk(
+      message,
+      {
+        source: 'executor',
+        type: ChunkType.Metadata,
+        content: JSON.stringify({
+          finalModelId: 'model-final',
+          finalModelName: 'deepseek-v4-pro',
+          routingModelId: 'model-routing',
+          routingModelName: 'deepseek-v4-flash',
+          contextWindowTokens: 1000000,
+          maxOutputTokens: 4096
+        })
+      },
+      callbacks
+    )
+
+    expect(message.chunks).toHaveLength(0)
+    expect(message.finalModelId).toBe('model-final')
+    expect(message.finalModelName).toBe('deepseek-v4-pro')
+    expect(message.routingModelId).toBe('model-routing')
+    expect(message.routingModelName).toBe('deepseek-v4-flash')
+    expect(message.contextWindowTokens).toBe(1000000)
+    expect(message.maxOutputTokens).toBe(4096)
+  })
+
   it('adds approval requests as pending chunks and notifies approval state', () => {
     const message = createMessage()
     const callbacks = {

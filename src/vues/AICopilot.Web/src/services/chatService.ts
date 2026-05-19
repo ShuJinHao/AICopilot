@@ -1,8 +1,17 @@
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import { baseUrl } from '@/appsetting'
 import { apiClient, ApiError, getAccessToken, getProblemDetails } from './apiClient'
-import type { ChatHistoryMessage, StreamCallbacks } from '@/types/app'
-import type { ChatChunk, FunctionApprovalRequest, Session } from '@/types/protocols'
+import type { ChatHistoryMessage, SelectableChatModel, StreamCallbacks } from '@/types/app'
+import type {
+  AgentApprovalRequest,
+  AgentTask,
+  AgentTaskAuditSummary,
+  ArtifactWorkspace,
+  ChatChunk,
+  FunctionApprovalRequest,
+  Session,
+  UploadRecord
+} from '@/types/protocols'
 
 async function sendEventStream(
   path: string,
@@ -91,6 +100,10 @@ export const chatService = {
     )
   },
 
+  async getSelectableChatModels() {
+    return await apiClient.get<SelectableChatModel[]>('/aigateway/language-model/chat-options')
+  },
+
   async updateSessionSafetyAttestation(
     sessionId: string,
     isOnsiteConfirmed: boolean,
@@ -109,8 +122,13 @@ export const chatService = {
     })
   },
 
-  async sendMessageStream(sessionId: string, message: string, callbacks: StreamCallbacks) {
-    await sendEventStream('/aigateway/chat', { sessionId, message }, callbacks)
+  async sendMessageStream(
+    sessionId: string,
+    message: string,
+    finalModelId: string | null,
+    callbacks: StreamCallbacks
+  ) {
+    await sendEventStream('/aigateway/chat', { sessionId, message, finalModelId }, callbacks)
   },
 
   async sendApprovalDecisionStream(
@@ -134,5 +152,84 @@ export const chatService = {
       },
       callbacks
     )
+  },
+
+  async uploadFile(
+    scope: 'SessionTemp' | 'AgentInput' | 'KnowledgeBase',
+    file: File,
+    options: {
+      sessionId?: string | null
+      agentTaskId?: string | null
+      knowledgeBaseId?: string | null
+    } = {}
+  ) {
+    const form = new FormData()
+    form.set('scope', scope)
+    form.set('file', file)
+    if (options.sessionId) form.set('sessionId', options.sessionId)
+    if (options.agentTaskId) form.set('agentTaskId', options.agentTaskId)
+    if (options.knowledgeBaseId) form.set('knowledgeBaseId', options.knowledgeBaseId)
+    return await apiClient.postForm<UploadRecord>('/aigateway/upload', form)
+  },
+
+  async planAgentTask(payload: {
+    sessionId: string
+    goal: string
+    taskType: string
+    modelId?: string | null
+    uploadIds?: string[]
+    knowledgeBaseIds?: string[]
+  }) {
+    return await apiClient.post<AgentTask>('/aigateway/agent/task/plan', payload)
+  },
+
+  async approveAgentTaskPlan(id: string) {
+    return await apiClient.post<AgentTask>('/aigateway/agent/task/approve-plan', { id })
+  },
+
+  async runAgentTask(id: string) {
+    return await apiClient.post<AgentTask>('/aigateway/agent/task/run', { id })
+  },
+
+  async getAgentTasksBySession(sessionId: string) {
+    return await apiClient.get<AgentTask[]>('/aigateway/agent/task/by-session', { sessionId })
+  },
+
+  async getPendingAgentApprovals() {
+    return await apiClient.get<AgentApprovalRequest[]>('/aigateway/agent/approval/pending')
+  },
+
+  async getAgentTaskApprovals(taskId: string) {
+    return await apiClient.get<AgentApprovalRequest[]>(
+      `/aigateway/agent/task/${encodeURIComponent(taskId)}/approvals`
+    )
+  },
+
+  async getAgentTaskAuditSummary(taskId: string) {
+    return await apiClient.get<AgentTaskAuditSummary[]>(
+      `/aigateway/agent/task/${encodeURIComponent(taskId)}/audit-summary`
+    )
+  },
+
+  async decideAgentApproval(id: string, decision: 'approve' | 'reject', comment?: string | null) {
+    return await apiClient.post<AgentApprovalRequest>(
+      `/aigateway/agent/approval/${encodeURIComponent(id)}/${decision}`,
+      { comment }
+    )
+  },
+
+  async getWorkspace(code: string) {
+    return await apiClient.get<ArtifactWorkspace>(`/aigateway/workspace/${encodeURIComponent(code)}`)
+  },
+
+  async finalizeWorkspace(code: string) {
+    return await apiClient.post<ArtifactWorkspace>(
+      `/aigateway/workspace/${encodeURIComponent(code)}/finalize`,
+      {}
+    )
+  },
+
+  async downloadArtifact(id: string) {
+    return await apiClient.download(`/aigateway/artifact/${encodeURIComponent(id)}/download`)
   }
 }

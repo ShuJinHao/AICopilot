@@ -9,6 +9,7 @@ using AICopilot.Core.AiGateway.Aggregates.Sessions;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.DataAnalysisService.Semantics;
 using AICopilot.EntityFrameworkCore;
+using AICopilot.EntityFrameworkCore.Security;
 using AICopilot.EntityFrameworkCore.Repository;
 using AICopilot.Infrastructure.Mcp;
 using AICopilot.McpService;
@@ -56,7 +57,8 @@ public sealed class Phase25RuntimeSmokeTests
         var languageModel = await GetJsonAsync<LanguageModelDto>($"/api/aigateway/language-model?id={languageModelId}");
         languageModel.Name.Should().Be(languageModelName);
         languageModel.HasApiKey.Should().BeTrue();
-        languageModel.ApiKeyMasked.Should().Be("******");
+        languageModel.ApiKeyPreview.Should().Be("******");
+        languageModel.ConnectivityStatus.Should().Be("Unknown");
         JsonSerializer.Serialize(languageModel, JsonOptions).Should().NotContain("sk-language-model");
 
         await SendJsonAsync(HttpMethod.Put, "/api/aigateway/language-model", new
@@ -67,11 +69,70 @@ public sealed class Phase25RuntimeSmokeTests
             baseUrl = BuildFakeAiBaseUrl(),
             apiKey = "sk-language-model-updated",
             maxTokens = 4096,
+            maxOutputTokens = 1024,
+            usages = new[] { "Chat", "Routing" },
             temperature = 0.25
         });
 
         var languageModelList = await GetJsonAsync<List<LanguageModelDto>>("/api/aigateway/language-model/list");
         languageModelList.Should().Contain(item => item.Id == languageModelId && item.Name == "fake-chat-model-updated");
+        languageModelList.Single(item => item.Id == languageModelId).Usages.Should().Contain("Chat").And.Contain("Routing");
+        languageModelList.Single(item => item.Id == languageModelId).ConnectivityStatus.Should().Be("Unknown");
+
+        var failedConnectivityTest = await PostJsonAsync<LanguageModelTestResultDto>("/api/aigateway/language-model/test", new
+        {
+            provider = "OpenAI",
+            protocolType = "OpenAICompatible",
+            name = "fake-chat-model-unsaved",
+            baseUrl = BuildFakeAiBaseUrl(),
+            apiKey = "",
+            contextWindowTokens = 4096,
+            maxOutputTokens = 16,
+            usages = new[] { "Chat" },
+            temperature = 0,
+            persistResult = false
+        });
+        failedConnectivityTest.Success.Should().BeFalse();
+        failedConnectivityTest.Error.Should().Contain("API Key");
+
+        var connectivityTest = await PostJsonAsync<LanguageModelTestResultDto>("/api/aigateway/language-model/test", new
+        {
+            id = languageModelId,
+            persistResult = true
+        });
+        connectivityTest.Success.Should().BeTrue();
+        connectivityTest.Status.Should().Be("Succeeded");
+
+        languageModelList = await GetJsonAsync<List<LanguageModelDto>>("/api/aigateway/language-model/list");
+        languageModelList.Single(item => item.Id == languageModelId).ConnectivityStatus.Should().Be("Succeeded");
+        languageModelList.Single(item => item.Id == languageModelId).ConnectivityCheckedAt.Should().NotBeNull();
+
+        var selectableChatModels = await GetJsonAsync<List<SelectableChatModelDto>>("/api/aigateway/language-model/chat-options");
+        selectableChatModels.Should().Contain(item => item.Id == languageModelId && item.Name == "fake-chat-model-updated");
+
+        var firstRoutingModel = await PostJsonAsync<RoutingModelConfigurationDto>("/api/aigateway/routing-model", new
+        {
+            name = $"cfg-routing-a-{Guid.NewGuid():N}",
+            modelId = languageModelId,
+            isActive = true
+        });
+        firstRoutingModel.IsActive.Should().BeTrue();
+
+        var secondRoutingModel = await PostJsonAsync<RoutingModelConfigurationDto>("/api/aigateway/routing-model", new
+        {
+            name = $"cfg-routing-b-{Guid.NewGuid():N}",
+            modelId = languageModelId,
+            isActive = true
+        });
+
+        var routingModels = await GetJsonAsync<List<RoutingModelConfigurationDto>>("/api/aigateway/routing-model/list");
+        routingModels.Where(item => item.IsActive).Should().ContainSingle()
+            .Which.Id.Should().Be(secondRoutingModel.Id);
+
+        await SendJsonAsync(HttpMethod.Put, "/api/aigateway/routing-model/activate", new { id = firstRoutingModel.Id });
+        routingModels = await GetJsonAsync<List<RoutingModelConfigurationDto>>("/api/aigateway/routing-model/list");
+        routingModels.Where(item => item.IsActive).Should().ContainSingle()
+            .Which.Id.Should().Be(firstRoutingModel.Id);
 
         var templateName = $"cfg-template-{Guid.NewGuid():N}";
         var templateId = await CreateConversationTemplateAsync(
@@ -132,7 +193,7 @@ public sealed class Phase25RuntimeSmokeTests
 
         var embeddingModel = await GetJsonAsync<EmbeddingModelDto>($"/api/rag/embedding-model?id={embeddingModelId}");
         embeddingModel.HasApiKey.Should().BeTrue();
-        embeddingModel.ApiKeyMasked.Should().Be("******");
+        embeddingModel.ApiKeyPreview.Should().Be("******");
         JsonSerializer.Serialize(embeddingModel, JsonOptions).Should().NotContain("sk-embedding");
 
         await SendJsonAsync(HttpMethod.Put, "/api/rag/embedding-model", new
@@ -225,6 +286,8 @@ public sealed class Phase25RuntimeSmokeTests
         await SendJsonAsync(HttpMethod.Delete, "/api/rag/embedding-model", new { id = embeddingModelId }, HttpStatusCode.NoContent);
         await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/approval-policy", new { id = approvalId }, HttpStatusCode.NoContent);
         await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/conversation-template", new { id = templateId }, HttpStatusCode.NoContent);
+        await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/routing-model", new { id = firstRoutingModel.Id }, HttpStatusCode.NoContent);
+        await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/routing-model", new { id = secondRoutingModel.Id }, HttpStatusCode.NoContent);
         await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/language-model", new { id = languageModelId }, HttpStatusCode.NoContent);
 
         var auditLogs = await GetJsonAsync<AuditLogListDto>("/api/identity/audit-log/list?page=1&pageSize=200&actionGroup=Config");
@@ -270,7 +333,9 @@ public sealed class Phase25RuntimeSmokeTests
             await using var dbContext = await CreateAiGatewayDbContextAsync();
             var entity = await dbContext.LanguageModels.SingleAsync(item => item.Id == languageModelId);
 
-            entity.ApiKey.Should().Be("sk-keep-original");
+            entity.ApiKey.Should().StartWith(SecretStringEncryptor.CipherPrefix);
+            entity.ApiKey.Should().NotContain("sk-keep-original");
+            SecretStringEncryptor.Decrypt(entity.ApiKey).Should().Be("sk-keep-original");
             entity.Name.Should().Be("cfg-lm-keep-secret-updated");
             entity.Parameters.MaxTokens.Should().Be(4096);
             entity.Parameters.Temperature.Should().BeApproximately(0.35f, 0.001f);
@@ -425,6 +490,139 @@ public sealed class Phase25RuntimeSmokeTests
             if (businessDatabaseId != Guid.Empty)
             {
                 await SendJsonAsync(HttpMethod.Delete, "/api/data-analysis/business-database", new { id = businessDatabaseId }, HttpStatusCode.NoContent);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ChatFlow_ShouldStreamActualModelMetadataAndPersistMessageSnapshot()
+    {
+        await AuthenticateAsAdminAsync();
+
+        Guid routingModelId = Guid.Empty;
+        Guid finalModelId = Guid.Empty;
+        Guid templateId = Guid.Empty;
+        Guid intentRoutingTemplateId = Guid.Empty;
+        Guid routingConfigurationId = Guid.Empty;
+        Guid sessionId = Guid.Empty;
+        var routingModelName = $"routing-model-{Guid.NewGuid():N}";
+        var finalModelName = $"final-model-{Guid.NewGuid():N}";
+
+        try
+        {
+            routingModelId = await CreateLanguageModelAsync(
+                routingModelName,
+                BuildFakeAiBaseUrl(),
+                "sk-routing-model",
+                usages: ["Routing"]);
+
+            finalModelId = await CreateLanguageModelAsync(
+                finalModelName,
+                BuildFakeAiBaseUrl(),
+                "sk-final-model",
+                contextWindowTokens: 128_000,
+                maxOutputTokens: 2048,
+                usages: ["Chat"]);
+
+            await DeleteConversationTemplateIfExistsAsync("IntentRoutingAgent");
+            intentRoutingTemplateId = await CreateConversationTemplateAsync(
+                "IntentRoutingAgent",
+                finalModelId,
+                "metadata routing",
+                "Select the best matching intent from the list and return a JSON array only. {{$IntentList}}");
+
+            var routingConfiguration = await PostJsonAsync<RoutingModelConfigurationDto>("/api/aigateway/routing-model", new
+            {
+                name = $"routing-config-{Guid.NewGuid():N}",
+                modelId = routingModelId,
+                isActive = true
+            });
+            routingConfigurationId = routingConfiguration.Id;
+
+            templateId = await CreateConversationTemplateAsync(
+                $"metadata-template-{Guid.NewGuid():N}",
+                finalModelId,
+                "metadata chat",
+                "You are a metadata smoke-test assistant.");
+
+            sessionId = await CreateSessionAsync(templateId);
+
+            var events = await PostChatAsync(new
+            {
+                sessionId,
+                message = "请告诉我当前支持哪些只读分析能力。",
+                finalModelId
+            });
+
+            var metadataEvents = events
+                .Where(item => item.Type == "Metadata")
+                .Select(item => JsonSerializer.Deserialize<ChatModelMetadataDto>(item.Content, JsonOptions)!)
+                .ToList();
+
+            metadataEvents.Should().Contain(item => item.RoutingModelName == routingModelName);
+            metadataEvents.Should().Contain(item =>
+                item.FinalModelId == finalModelId &&
+                item.FinalModelName == finalModelName &&
+                item.RoutingModelName == routingModelName &&
+                item.ContextWindowTokens == 128_000 &&
+                item.MaxOutputTokens == 512);
+
+            var firstFinalMetadataIndex = events.FindIndex(item =>
+                item.Type == "Metadata" &&
+                item.Content.Contains(finalModelName, StringComparison.Ordinal));
+            firstFinalMetadataIndex.Should().BeGreaterThanOrEqualTo(0);
+
+            var firstTextIndex = events.FindIndex(item => item.Type == "Text");
+            firstTextIndex.Should().BeGreaterThan(firstFinalMetadataIndex);
+
+            var history = await EventuallyAsync(
+                async () => await GetJsonAsync<List<ChatHistoryMessageDto>>(
+                    $"/api/aigateway/chat-message/list?sessionId={sessionId}&count=20&isDesc=false"),
+                items => items.Count >= 2 && items.Any(item =>
+                    item.Role == "Assistant"
+                    && item.FinalModelId == finalModelId
+                    && item.FinalModelName == finalModelName
+                    && item.RoutingModelId == routingModelId
+                    && item.RoutingModelName == routingModelName));
+
+            var assistantMessage = history.Last(item => item.Role == "Assistant");
+            assistantMessage.FinalModelId.Should().Be(finalModelId);
+            assistantMessage.FinalModelName.Should().Be(finalModelName);
+            assistantMessage.RoutingModelId.Should().Be(routingModelId);
+            assistantMessage.RoutingModelName.Should().Be(routingModelName);
+            assistantMessage.ContextWindowTokens.Should().Be(128_000);
+            assistantMessage.MaxOutputTokens.Should().Be(512);
+        }
+        finally
+        {
+            if (sessionId != Guid.Empty)
+            {
+                await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/session", new { id = sessionId }, HttpStatusCode.NoContent);
+            }
+
+            if (routingConfigurationId != Guid.Empty)
+            {
+                await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/routing-model", new { id = routingConfigurationId }, HttpStatusCode.NoContent);
+            }
+
+            if (templateId != Guid.Empty)
+            {
+                await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/conversation-template", new { id = templateId }, HttpStatusCode.NoContent);
+            }
+
+            if (intentRoutingTemplateId != Guid.Empty)
+            {
+                await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/conversation-template", new { id = intentRoutingTemplateId }, HttpStatusCode.NoContent);
+            }
+
+            if (finalModelId != Guid.Empty)
+            {
+                await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/language-model", new { id = finalModelId }, HttpStatusCode.NoContent);
+            }
+
+            if (routingModelId != Guid.Empty)
+            {
+                await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/language-model", new { id = routingModelId }, HttpStatusCode.NoContent);
             }
         }
     }
@@ -1528,7 +1726,13 @@ public sealed class Phase25RuntimeSmokeTests
         return created.UserId;
     }
 
-    private async Task<Guid> CreateLanguageModelAsync(string name, string baseUrl, string apiKey)
+    private async Task<Guid> CreateLanguageModelAsync(
+        string name,
+        string baseUrl,
+        string apiKey,
+        int contextWindowTokens = 4096,
+        int maxOutputTokens = 1024,
+        IReadOnlyCollection<string>? usages = null)
     {
         var created = await PostJsonAsync<CreatedLanguageModelDto>("/api/aigateway/language-model", new
         {
@@ -1536,7 +1740,10 @@ public sealed class Phase25RuntimeSmokeTests
             name,
             baseUrl,
             apiKey,
-            maxTokens = 4096,
+            maxTokens = contextWindowTokens,
+            contextWindowTokens,
+            maxOutputTokens,
+            usages,
             temperature = 0.2
         });
 
@@ -2073,12 +2280,44 @@ public sealed class Phase25RuntimeSmokeTests
     private sealed record LanguageModelDto(
         Guid Id,
         string Provider,
+        string ProtocolType,
         string Name,
         string BaseUrl,
         int MaxTokens,
+        int ContextWindowTokens,
+        int MaxOutputTokens,
         double Temperature,
+        bool IsEnabled,
+        IReadOnlyList<string> Usages,
         bool HasApiKey,
-        string? ApiKeyMasked);
+        string? ApiKeyPreview,
+        string ConnectivityStatus,
+        DateTimeOffset? ConnectivityCheckedAt,
+        string? ConnectivityError);
+
+    private sealed record LanguageModelTestResultDto(
+        bool Success,
+        string Status,
+        string Message,
+        string? Error,
+        long ElapsedMilliseconds,
+        DateTimeOffset CheckedAt);
+
+    private sealed record SelectableChatModelDto(
+        Guid Id,
+        string Provider,
+        string ProtocolType,
+        string Name,
+        int ContextWindowTokens,
+        int MaxOutputTokens);
+
+    private sealed record RoutingModelConfigurationDto(
+        Guid Id,
+        string Name,
+        Guid ModelId,
+        string ModelName,
+        string ModelProvider,
+        bool IsActive);
 
     private sealed record CreatedConversationTemplateDto(Guid Id, string Name);
 
@@ -2116,7 +2355,7 @@ public sealed class Phase25RuntimeSmokeTests
         int MaxTokens,
         bool IsEnabled,
         bool HasApiKey,
-        string? ApiKeyMasked);
+        string? ApiKeyPreview);
 
     private sealed record CreatedKnowledgeBaseDto(Guid Id, string Name);
 
@@ -2210,7 +2449,21 @@ public sealed class Phase25RuntimeSmokeTests
         Guid SessionId,
         string Role,
         string Content,
-        DateTime CreatedAt);
+        DateTime CreatedAt,
+        Guid? FinalModelId,
+        string? FinalModelName,
+        Guid? RoutingModelId,
+        string? RoutingModelName,
+        int? ContextWindowTokens,
+        int? MaxOutputTokens);
+
+    private sealed record ChatModelMetadataDto(
+        Guid? FinalModelId,
+        string? FinalModelName,
+        Guid? RoutingModelId,
+        string? RoutingModelName,
+        int? ContextWindowTokens,
+        int? MaxOutputTokens);
 
     private sealed record SemanticSourceStatusDto(
         string Target,

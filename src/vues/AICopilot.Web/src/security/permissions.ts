@@ -7,6 +7,7 @@ export const CHAT_REQUIRED_PERMISSIONS = [
 
 export const CONFIG_READ_PERMISSIONS = {
   languageModel: ['AiGateway.GetLanguageModel', 'AiGateway.GetListLanguageModels'],
+  routingModel: ['AiGateway.GetRoutingModel', 'AiGateway.GetListRoutingModels'],
   providerReliability: ['AiGateway.GetProviderReliability'],
   conversationTemplate: [
     'AiGateway.GetConversationTemplate',
@@ -26,6 +27,11 @@ export const CONFIG_WRITE_PERMISSIONS = {
     create: 'AiGateway.CreateLanguageModel',
     update: 'AiGateway.UpdateLanguageModel',
     delete: 'AiGateway.DeleteLanguageModel'
+  },
+  routingModel: {
+    create: 'AiGateway.CreateRoutingModel',
+    update: 'AiGateway.UpdateRoutingModel',
+    delete: 'AiGateway.DeleteRoutingModel'
   },
   conversationTemplate: {
     create: 'AiGateway.CreateConversationTemplate',

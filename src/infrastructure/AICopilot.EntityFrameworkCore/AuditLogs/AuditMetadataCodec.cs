@@ -14,7 +14,21 @@ internal static class AuditMetadataCodec
         "cloudEmployeeNo",
         "cloudStatusVersion",
         "authMethod",
-        "rejectionReason"
+        "rejectionReason",
+        "taskId",
+        "taskCode",
+        "workspaceCode",
+        "stepOrder",
+        "toolName",
+        "artifactId",
+        "artifactStatus",
+        "artifactCount",
+        "failureReason",
+        "riskLevel",
+        "pendingApprovalCount",
+        "approvalType",
+        "targetId",
+        "approvalStatus"
     };
 
     public static string[] Combine(

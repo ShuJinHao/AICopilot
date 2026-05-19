@@ -7,6 +7,12 @@ $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $false
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
+$reportFullPath = [System.IO.Path]::GetFullPath((Join-Path $repoRoot $ReportPath))
+$repoFullPath = [System.IO.Path]::GetFullPath($repoRoot)
+$relativeReportPath = $ReportPath.Replace('\', '/')
+if ($reportFullPath.StartsWith($repoFullPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+    $relativeReportPath = $reportFullPath.Substring($repoFullPath.Length).TrimStart('\', '/').Replace('\', '/')
+}
 
 function Invoke-Step {
     param(
@@ -55,8 +61,19 @@ $results += Invoke-Step -Name "Build Frontend" -Script {
         Pop-Location
     }
 }
+$results += Invoke-Step -Name "Run Frontend Smoke" -Script {
+    Push-Location src/vues/AICopilot.Web
+    try {
+        npm run test:smoke
+    } finally {
+        Pop-Location
+    }
+}
+$results += Invoke-Step -Name "Check Text Encoding" -Script {
+    powershell -ExecutionPolicy Bypass -File .\scripts\Test-TextEncoding.ps1
+}
 $results += Invoke-Step -Name "Check Diff Whitespace" -Script {
-    git diff --check
+    git diff --check -- . ":(exclude)$relativeReportPath"
 }
 $results += Invoke-Step -Name "Check Architecture Boundaries" -Script {
     powershell -ExecutionPolicy Bypass -File .\scripts\Test-ArchitectureBoundaries.ps1
@@ -110,7 +127,7 @@ foreach ($result in $results) {
     $reportLines.Add("")
     $reportLines.Add('```text')
     foreach ($line in ($result.Output -split "`r?`n")) {
-        $reportLines.Add($line)
+        $reportLines.Add($line.TrimEnd())
     }
     $reportLines.Add('```')
     $reportLines.Add("")

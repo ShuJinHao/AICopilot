@@ -1,11 +1,24 @@
 ﻿namespace AICopilot.Services.Contracts;
 
+public interface ITextTokenEstimator
+{
+    int CountTokens(string? text);
+}
+
 public sealed record ChatTokenTelemetryContext(
     Guid? SessionId,
     string ModelName,
     string TemplateName,
     int TotalTokenBudget,
     int ReservedOutputTokens);
+
+public sealed record ChatExecutionMetadataSnapshot(
+    Guid? FinalModelId = null,
+    string? FinalModelName = null,
+    Guid? RoutingModelId = null,
+    string? RoutingModelName = null,
+    int? ContextWindowTokens = null,
+    int? MaxOutputTokens = null);
 
 public sealed record StoredToolApprovalRequest(
     string RequestId,
@@ -28,7 +41,10 @@ public sealed record StoredFinalAgentContext(
     float? Temperature,
     IReadOnlyList<string> ToolNames,
     string SerializedThreadState,
-    IReadOnlyList<StoredToolApprovalRequest> PendingApprovals);
+    IReadOnlyList<StoredToolApprovalRequest> PendingApprovals)
+{
+    public ChatExecutionMetadataSnapshot ExecutionMetadata { get; init; } = new();
+}
 
 public interface IFinalAgentContextStore
 {

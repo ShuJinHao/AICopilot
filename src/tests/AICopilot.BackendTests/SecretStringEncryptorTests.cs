@@ -28,6 +28,15 @@ public sealed class SecretStringEncryptorTests
     }
 
     [Fact]
+    public void Decrypt_ShouldRejectUnprotectedStoredSecret()
+    {
+        var action = () => SecretStringEncryptor.Decrypt("sk-legacy-plaintext");
+
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("*encv1:*");
+    }
+
+    [Fact]
     public void EnsureConfigured_ShouldThrowWhenMasterKeyMissing()
     {
         var original = Environment.GetEnvironmentVariable(EnvVarName);

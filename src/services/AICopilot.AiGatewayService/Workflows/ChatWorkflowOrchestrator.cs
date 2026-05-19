@@ -27,6 +27,14 @@ public class ChatWorkflowOrchestrator(
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var routing = await intentRouting.ExecuteAsync(request, ct);
+        var routingMetadataChunk = ChatStreamRuntime.CreateMetadataChunk(
+            routing.ExecutionMetadata,
+            IntentRoutingExecutor.ExecutorId);
+        if (routingMetadataChunk is not null)
+        {
+            yield return routingMetadataChunk;
+        }
+
         if (!string.IsNullOrWhiteSpace(routing.ResponseText))
         {
             yield return new ChatChunk(IntentRoutingExecutor.ExecutorId, ChunkType.Intent, routing.ResponseText);
@@ -80,6 +88,14 @@ public class ChatWorkflowOrchestrator(
         var completed = false;
         try
         {
+            var finalMetadataChunk = ChatStreamRuntime.CreateMetadataChunk(
+                agentContext.ExecutionMetadata,
+                FinalAgentBuildExecutor.ExecutorId);
+            if (finalMetadataChunk is not null)
+            {
+                yield return finalMetadataChunk;
+            }
+
             await foreach (var chunk in agentRun.ExecuteAsync(agentContext, session, assistantText, ct))
             {
                 yield return chunk;

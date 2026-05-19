@@ -7,12 +7,12 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
 }
 
 .page-kicker {
-  margin: 0 0 4px;
+  margin: 0 0 var(--space-1);
   color: var(--app-primary);
   font-size: 12px;
   font-weight: 700;
@@ -34,17 +34,18 @@
 
 .panel {
   border: 1px solid var(--app-border);
-  border-radius: var(--app-radius);
+  border-radius: var(--radius-md);
   background: var(--app-surface);
-  box-shadow: 0 1px 0 rgba(21, 32, 43, 0.04);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
 .panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 14px 16px;
+  gap: var(--space-3);
+  padding: 14px var(--space-4);
   border-bottom: 1px solid var(--app-border);
 }
 
@@ -61,21 +62,23 @@
 }
 
 .panel-body {
-  padding: 16px;
+  padding: var(--space-4);
 }
 
 .metric-strip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .metric {
   min-width: 0;
   border: 1px solid var(--app-border);
-  border-radius: var(--app-radius);
-  padding: 12px;
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
   background: var(--app-surface);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
 .metric-label {
@@ -84,7 +87,7 @@
 }
 
 .metric-value {
-  margin-top: 4px;
+  margin-top: var(--space-1);
   color: var(--app-text);
   font-size: 24px;
   font-weight: 750;
@@ -123,18 +126,43 @@
   color: var(--app-warning);
 }
 
+/* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #c7d1dc;
-  border-radius: 8px;
+  background: var(--app-border-strong);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--app-text-muted);
 }
 
 ::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* Selection */
+::selection {
+  background-color: var(--app-primary);
+  color: #ffffff;
+}
+
+/* Links & Focus */
+a {
+  transition: color 0.2s ease;
+}
+
+a:hover {
+  color: var(--app-primary);
+}
+
+:focus-visible {
+  outline: 2px solid var(--app-primary);
+  outline-offset: 2px;
 }
 
 @media (max-width: 960px) {

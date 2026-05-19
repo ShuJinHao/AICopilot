@@ -1133,7 +1133,10 @@ public sealed class ArchitectureBoundaryTests
             "b.ToTable(\"document_chunks\", \"rag\");",
             "DocumentChunk must be mapped to the rag schema");
         snapshot.Should().Contain(
-            "b.ToTable(\"outbox_messages\", \"outbox\", t => t.ExcludeFromMigrations());",
+            "b.ToTable(\"outbox_messages\", \"outbox\",",
+            "module contexts may write Outbox rows but must not own the Outbox migration");
+        snapshot.Should().Contain(
+            "t.ExcludeFromMigrations();",
             "module contexts may write Outbox rows but must not own the Outbox migration");
     }
 

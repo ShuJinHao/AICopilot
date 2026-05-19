@@ -127,21 +127,22 @@ function reject() {
 .approval-card {
   display: grid;
   gap: 0;
-  border: 1px solid #f2c97d;
-  border-radius: 8px;
-  background: #fffaf0;
+  border: 1px solid var(--app-warning);
+  border-radius: var(--radius-md);
+  background: var(--app-surface);
+  box-shadow: var(--shadow-sm);
   overflow: hidden;
 }
 
 .approval-card.approved {
-  border-color: #9bd3a8;
-  background: #f3fbf4;
+  border-color: var(--app-success);
 }
 
 .approval-card.rejected,
 .approval-card.expired {
   border-color: var(--app-border);
   background: var(--app-surface-muted);
+  box-shadow: none;
 }
 
 .approval-card header,
@@ -154,7 +155,7 @@ function reject() {
 }
 
 .approval-card header {
-  border-bottom: 1px solid rgba(180, 83, 9, 0.18);
+  border-bottom: 1px solid var(--app-border);
 }
 
 .approval-card header > div {
@@ -166,6 +167,7 @@ function reject() {
   margin: 0;
   font-size: 14px;
   font-weight: 750;
+  color: var(--app-text);
 }
 
 .approval-card p {
@@ -199,6 +201,7 @@ dt {
 dd {
   margin: 0;
   overflow-wrap: anywhere;
+  color: var(--app-text);
 }
 
 .args-block,
@@ -215,13 +218,13 @@ dd {
 
 .onsite-block {
   border: 1px solid var(--app-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 10px;
-  background: #ffffff;
+  background: var(--app-surface-raised);
 }
 
 footer {
   border-top: 1px solid var(--app-border);
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--app-surface-muted);
 }
 </style>

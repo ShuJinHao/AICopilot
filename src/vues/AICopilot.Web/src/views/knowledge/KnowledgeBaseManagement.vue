@@ -212,16 +212,18 @@ async function confirmDelete(title: string, action: () => Promise<void>) {
   display: grid;
   gap: 4px;
   border: 1px solid var(--app-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 12px;
-  background: #ffffff;
+  background: var(--app-surface);
   cursor: pointer;
   text-align: left;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
 .base-item.active,
 .base-item:hover {
   border-color: var(--app-primary);
+  box-shadow: var(--shadow-sm);
 }
 
 .base-item span,
@@ -233,7 +235,7 @@ async function confirmDelete(title: string, action: () => Promise<void>) {
 
 .empty-box {
   border: 1px dashed var(--app-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 16px;
   color: var(--app-text-muted);
   text-align: center;

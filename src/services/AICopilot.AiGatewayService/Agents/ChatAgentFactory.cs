@@ -45,11 +45,27 @@ public class ChatAgentFactory(
         Action<AiChatOptions>? configureOptions = null,
         string? instructionsOverride = null)
     {
-        if (!runtimeFactory.CanCreate(model.Provider))
+        if (!model.IsEnabled)
         {
             throw new ChatWorkflowException(
                 AppProblemCodes.ChatConfigurationMissing,
-                $"No chat client provider is registered for '{model.Provider}'.",
+                $"Language model '{model.Name}' is disabled.",
+                "当前模型已停用，请切换模型或联系管理员检查 AI 配置。");
+        }
+
+        if (string.IsNullOrWhiteSpace(model.ApiKey))
+        {
+            throw new ChatWorkflowException(
+                AppProblemCodes.ChatConfigurationMissing,
+                $"Language model '{model.Name}' is missing an API key.",
+                "当前模型未配置 API Key，请切换模型或联系管理员补充密钥。");
+        }
+
+        if (!runtimeFactory.CanCreate(model.ProtocolType))
+        {
+            throw new ChatWorkflowException(
+                AppProblemCodes.ChatConfigurationMissing,
+                $"No chat client provider is registered for protocol '{model.ProtocolType}'.",
                 "The configured model provider is unavailable. Please ask an administrator to review the AI settings.");
         }
 
@@ -62,6 +78,42 @@ public class ChatAgentFactory(
         configureOptions?.Invoke(chatOptions);
 
         return runtimeFactory.Create(new AgentRuntimeCreateRequest(model, template, chatOptions));
+    }
+
+    public async Task<ScopedRuntimeAgent> CreateAgentAsync(
+        ConversationTemplateId templateId,
+        LanguageModelId modelId,
+        Action<AiChatOptions>? configureOptions = null)
+    {
+        var template = await templateRepository.FirstOrDefaultAsync(new ConversationTemplateByIdSpec(templateId));
+        if (template is null)
+        {
+            throw CreateConfigurationMissingException();
+        }
+
+        var model = await modelRepository.FirstOrDefaultAsync(new LanguageModelByIdSpec(modelId));
+        if (model is null)
+        {
+            throw CreateConfigurationMissingException();
+        }
+
+        return CreateAgent(model, template, configureOptions);
+    }
+
+    public async Task<ScopedRuntimeAgent> CreateAgentAsync(
+        string templateName,
+        LanguageModel model,
+        Func<string, string>? configureInstructions = null,
+        Action<AiChatOptions>? configureOptions = null)
+    {
+        var template = await templateRepository.FirstOrDefaultAsync(new ConversationTemplateByNameSpec(templateName));
+        if (template is null)
+        {
+            throw CreateConfigurationMissingException();
+        }
+
+        var instructions = configureInstructions?.Invoke(template.SystemPrompt);
+        return CreateAgent(model, template, configureOptions, instructions);
     }
 
     public async Task<ScopedRuntimeAgent> CreateAgentAsync(

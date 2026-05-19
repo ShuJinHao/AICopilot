@@ -15,11 +15,60 @@
   --app-warning: #b45309;
   --app-danger: #b42318;
   --app-success: #15803d;
-  --app-radius: 8px;
-  --app-shadow: 0 14px 36px rgba(21, 32, 43, 0.08);
+
+  /* Radius */
+  --app-radius: 8px; /* Legacy support */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-2xl: 20px;
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* Shadows */
+  --app-shadow: 0 14px 36px rgba(21, 32, 43, 0.08); /* Legacy support */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+
   --app-font:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", Arial, sans-serif;
+}
+
+html.dark {
+  color-scheme: dark;
+  --app-bg: #09090b;
+  --app-surface: #18181b;
+  --app-surface-muted: #27272a;
+  --app-surface-raised: #3f3f46;
+  --app-border: #3f3f46;
+  --app-border-strong: #52525b;
+  --app-text: #f4f4f5;
+  --app-text-muted: #a1a1aa;
+  --app-text-soft: #71717a;
+  --app-primary: #14b8a6;
+  --app-primary-strong: #2dd4bf;
+  --app-accent: #3b82f6;
+  --app-warning: #fbbf24;
+  --app-danger: #f87171;
+  --app-success: #4ade80;
+
+  --app-shadow: 0 14px 36px rgba(0, 0, 0, 0.6);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.2);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.4), 0 10px 10px -5px rgba(0, 0, 0, 0.2);
 }
 
 *,

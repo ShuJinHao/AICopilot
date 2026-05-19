@@ -5,7 +5,7 @@ using MediatR;
 namespace AICopilot.AiGatewayService.Agents;
 
 [AuthorizeRequirement("AiGateway.Chat")]
-public record ChatStreamRequest(Guid SessionId, string Message) : IStreamRequest<ChatChunk>;
+public record ChatStreamRequest(Guid SessionId, string Message, Guid? FinalModelId = null) : IStreamRequest<ChatChunk>;
 
 [AuthorizeRequirement("AiGateway.Chat")]
 public record ApprovalDecisionStreamRequest(

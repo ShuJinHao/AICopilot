@@ -1,10 +1,11 @@
-﻿import {
+import type { ChatModelMetadataPayload } from '@/types/protocols'
+import {
   type ChatChunk,
   type FunctionApprovalRequest,
   type IntentResult,
   MessageRole,
   type Widget
-} from "@/types/protocols.ts";
+} from '@/types/protocols'
 
 // ---------------------- 前端数据结构 ----------------------
 
@@ -13,11 +14,11 @@
  * FunctionCallContent + FunctionResultContent 合并
  */
 export interface FunctionCall {
-  id: string;
-  name: string;
-  args: string;
-  result?: string;
-  status: 'calling' | 'completed';
+  id: string
+  name: string
+  args: string
+  result?: string
+  status: 'calling' | 'completed'
 }
 
 /**
@@ -31,14 +32,14 @@ export interface IntentChunk extends ChatChunk {
  * 扩展消息块-函数调用块
  */
 export interface FunctionCallChunk extends ChatChunk {
-  functionCall: FunctionCall;
+  functionCall: FunctionCall
 }
 
 /**
  * 扩展消息块-组件块
  */
 export interface WidgetChunk extends ChatChunk {
-  widget: Widget;
+  widget: Widget
 }
 
 /**
@@ -47,23 +48,23 @@ export interface WidgetChunk extends ChatChunk {
  */
 export interface ApprovalChunk extends ChatChunk {
   // 复用传输层的载体数据
-  request: FunctionApprovalRequest;
+  request: FunctionApprovalRequest
 
   // 审批单的当前状态
   // pending: 等待用户操作
   // approved: 用户已批准
   // rejected: 用户已拒绝
   // expired: 审批上下文已失效，不能继续操作
-  status: 'pending' | 'approved' | 'rejected' | 'expired';
+  status: 'pending' | 'approved' | 'rejected' | 'expired'
 }
 
 /**
  * 前端使用的消息模型
  */
-export interface ChatMessage {
-  sessionId: string;
-  role: MessageRole;
-  chunks: ChatChunk[];
-  isStreaming: boolean;
-  timestamp: number;
+export interface ChatMessage extends ChatModelMetadataPayload {
+  sessionId: string
+  role: MessageRole
+  chunks: ChatChunk[]
+  isStreaming: boolean
+  timestamp: number
 }

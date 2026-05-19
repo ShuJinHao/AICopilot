@@ -120,8 +120,9 @@ async function goPrimaryPage() {
 .forbidden-panel {
   width: min(100%, 760px);
   border: 1px solid var(--app-border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--app-surface);
+  box-shadow: var(--shadow-md);
 }
 
 .result-extra,
@@ -135,7 +136,7 @@ async function goPrimaryPage() {
 .permission-panel {
   width: min(680px, 100%);
   border: 1px solid var(--app-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 14px;
   background: var(--app-surface-muted);
   text-align: left;

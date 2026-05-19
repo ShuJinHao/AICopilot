@@ -28,6 +28,8 @@ public class FinalAgentContext : IAsyncDisposable
 
     public int SystemPromptTokenCount { get; init; }
 
+    public ChatExecutionMetadataSnapshot ExecutionMetadata { get; init; } = new();
+
     public List<AiToolApprovalRequest> FunctionApprovalRequestContents { get; } = [];
 
     public List<FunctionApprovalDecision> ApprovalDecisions { get; } = [];

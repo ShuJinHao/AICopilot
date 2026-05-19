@@ -1,7 +1,9 @@
 export const FORM_DEFAULTS = {
   languageModel: {
-    provider: 'OpenAI',
-    maxTokens: 2048,
+    provider: 'DeepSeek',
+    protocolType: 'OpenAICompatible',
+    contextWindowTokens: 128000,
+    maxOutputTokens: 4096,
     temperature: 0.7
   },
   businessDatabase: {

@@ -1,6 +1,5 @@
 using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.Core.Rag.Ids;
-using AICopilot.EntityFrameworkCore.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -37,7 +36,6 @@ public class EmbeddingModelConfiguration : IEntityTypeConfiguration<EmbeddingMod
             .HasColumnName("base_url");
 
         builder.Property(e => e.ApiKey)
-            .HasConversion<EncryptedStringValueConverter>()
             .HasMaxLength(2048)
             .HasColumnName("api_key");
 

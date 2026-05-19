@@ -30,4 +30,8 @@ public record SearchKnowledgeBaseResult
     /// 文档切片序号
     /// </summary>
     public int ChunkIndex { get; init; }
+
+    public bool IsLowConfidence { get; init; }
+
+    public string? LowConfidenceReason { get; init; }
 }

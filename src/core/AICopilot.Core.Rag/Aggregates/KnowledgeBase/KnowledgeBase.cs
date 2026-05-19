@@ -11,15 +11,23 @@ public class KnowledgeBase : IAggregateRoot<KnowledgeBaseId>
     {
     }
 
-    public KnowledgeBase(string name, string description, EmbeddingModelId embeddingModelId)
+    public KnowledgeBase(
+        string name,
+        string description,
+        EmbeddingModelId embeddingModelId,
+        Guid? ownerUserId = null,
+        KnowledgeBaseAccessScope accessScope = KnowledgeBaseAccessScope.OwnerOnly)
     {
         ValidateInfo(name, description);
         ValidateEmbeddingModelId(embeddingModelId);
+        ValidateAccess(ownerUserId, accessScope);
 
         Id = KnowledgeBaseId.New();
         Name = name.Trim();
         Description = description.Trim();
         EmbeddingModelId = embeddingModelId;
+        OwnerUserId = ownerUserId;
+        AccessScope = accessScope;
     }
 
     public KnowledgeBaseId Id { get; private set; }
@@ -28,6 +36,10 @@ public class KnowledgeBase : IAggregateRoot<KnowledgeBaseId>
 
     public string Name { get; private set; } = string.Empty;
     public string Description { get; private set; } = string.Empty;
+
+    public Guid? OwnerUserId { get; private set; }
+
+    public KnowledgeBaseAccessScope AccessScope { get; private set; } = KnowledgeBaseAccessScope.OwnerOnly;
 
     /// <summary>
     /// 嵌入模型ID。一个知识库内的所有文档必须使用相同的嵌入模型。
@@ -100,6 +112,13 @@ public class KnowledgeBase : IAggregateRoot<KnowledgeBaseId>
         EmbeddingModelId = embeddingModelId;
     }
 
+    public void UpdateAccess(Guid? ownerUserId, KnowledgeBaseAccessScope accessScope)
+    {
+        ValidateAccess(ownerUserId, accessScope);
+        OwnerUserId = ownerUserId;
+        AccessScope = accessScope;
+    }
+
     private static void ValidateInfo(string name, string description)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -116,4 +135,23 @@ public class KnowledgeBase : IAggregateRoot<KnowledgeBaseId>
     private static void ValidateEmbeddingModelId(EmbeddingModelId embeddingModelId)
     {
     }
+
+    private static void ValidateAccess(Guid? ownerUserId, KnowledgeBaseAccessScope accessScope)
+    {
+        if (!Enum.IsDefined(accessScope))
+        {
+            throw new ArgumentOutOfRangeException(nameof(accessScope));
+        }
+
+        if (ownerUserId == Guid.Empty)
+        {
+            throw new ArgumentException("Knowledge base owner user id cannot be empty.", nameof(ownerUserId));
+        }
+    }
+}
+
+public enum KnowledgeBaseAccessScope
+{
+    OwnerOnly = 0,
+    AuthenticatedUsers = 1
 }

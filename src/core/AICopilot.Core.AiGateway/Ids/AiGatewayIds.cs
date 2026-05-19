@@ -65,6 +65,27 @@ public readonly record struct LanguageModelId : IStronglyTypedGuidId
     public override string ToString() => Value.ToString();
 }
 
+public readonly record struct RoutingModelConfigurationId : IStronglyTypedGuidId
+{
+    public RoutingModelConfigurationId(Guid value)
+    {
+        if (value == Guid.Empty)
+        {
+            throw new ArgumentException("Routing model configuration id is required.", nameof(value));
+        }
+
+        Value = value;
+    }
+
+    public Guid Value { get; }
+
+    public static RoutingModelConfigurationId New() => new(Guid.NewGuid());
+
+    public static implicit operator Guid(RoutingModelConfigurationId id) => id.Value;
+
+    public override string ToString() => Value.ToString();
+}
+
 public readonly record struct SessionId : IStronglyTypedGuidId
 {
     public SessionId(Guid value)

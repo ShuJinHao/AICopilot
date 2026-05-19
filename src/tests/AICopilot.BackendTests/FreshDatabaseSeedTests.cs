@@ -1,7 +1,13 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
+using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
+using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
+using AICopilot.Core.AiGateway.Aggregates.RuntimeSettings;
+using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.EntityFrameworkCore;
+using AICopilot.SharedKernel.Ai;
 using Microsoft.EntityFrameworkCore;
 
 namespace AICopilot.BackendTests;
@@ -11,8 +17,8 @@ namespace AICopilot.BackendTests;
 public sealed class FreshDatabaseSeedTests
 {
     private const string AiCopilotFinalMigrationId = "20260429010506_DetachIdentityFromAiCopilotDbContext";
-    private const string AiGatewayInitialMigrationId = "20260428145951_InitialAiGatewaySchema";
-    private const string RagFinalMigrationId = "20260507035115_AddRagDocumentGovernance";
+    private const string AiGatewayInitialMigrationId = "20260515030952_AiGatewayFreshBaseline";
+    private const string RagFinalMigrationId = "20260515030526_AddKnowledgeBaseAccessScope";
     private const string DataAnalysisInitialMigrationId = "20260427000300_InitialDataAnalysisSchema";
     private const string McpServerInitialMigrationId = "20260427000100_InitialMcpServerSchema";
     private const string IdentityStoreBaselineMigrationId = "20260429021832_IdentityStoreMigrationBaseline";
@@ -50,9 +56,63 @@ public sealed class FreshDatabaseSeedTests
         (await identityDbContext.Users.CountAsync()).Should().Be(1);
 
         await using var aiGatewayDbContext = await CreateAiGatewayDbContextAsync(fixture);
-        (await aiGatewayDbContext.LanguageModels.CountAsync()).Should().Be(0);
-        (await aiGatewayDbContext.ConversationTemplates.CountAsync()).Should().Be(0);
-        (await aiGatewayDbContext.ApprovalPolicies.CountAsync()).Should().Be(0);
+        (await aiGatewayDbContext.ChatRuntimeSettings.AnyAsync(settings => settings.Id == ChatRuntimeSettings.GlobalId))
+            .Should().BeTrue();
+
+        var seedModel = await aiGatewayDbContext.LanguageModels.SingleAsync();
+        seedModel.Provider.Should().Be("Example");
+        seedModel.ProtocolType.Should().Be("OpenAICompatible");
+        seedModel.Name.Should().Be("Disabled example model");
+        seedModel.BaseUrl.Should().Be("https://example.invalid/v1");
+        seedModel.ApiKey.Should().BeNull();
+        seedModel.IsEnabled.Should().BeFalse();
+        seedModel.Usage.Should().Be(LanguageModelUsage.Chat | LanguageModelUsage.Routing);
+
+        var templates = await aiGatewayDbContext.ConversationTemplates.ToListAsync();
+        templates.Should().HaveCount(BuiltInConversationTemplates.All.Count);
+        templates.Should().OnlyContain(template => template.IsBuiltIn && template.IsEnabled);
+        templates.Select(template => template.Code)
+            .Should()
+            .BeEquivalentTo(BuiltInConversationTemplates.All.Select(template => template.Code));
+        templates.Select(template => template.SystemPrompt)
+            .Should()
+            .NotContain(prompt => prompt.Contains("朝小夕", StringComparison.OrdinalIgnoreCase) ||
+                                  prompt.Contains("朝夕", StringComparison.OrdinalIgnoreCase));
+
+        var approvalPolicy = await aiGatewayDbContext.ApprovalPolicies.SingleAsync();
+        approvalPolicy.Name.Should().Be("Default Agent Artifact Approval");
+        approvalPolicy.TargetType.Should().Be(ApprovalTargetType.Plugin);
+        approvalPolicy.TargetName.Should().Be("AgentTaskRuntime");
+        approvalPolicy.IsEnabled.Should().BeTrue();
+        approvalPolicy.RequiresOnsiteAttestation.Should().BeFalse();
+        approvalPolicy.ToolNames.Should().Contain(["generate_pdf", "generate_pptx", "generate_xlsx", "finalize_artifacts"]);
+
+        var tools = await aiGatewayDbContext.ToolRegistrations
+            .OrderBy(tool => tool.ToolCode)
+            .ToListAsync();
+        tools.Should().HaveCount(BuiltInToolRegistrations.AgentRuntimeTools.Count);
+        tools.Select(tool => tool.ToolCode)
+            .Should()
+            .BeEquivalentTo(BuiltInToolRegistrations.AgentRuntimeTools.Select(tool => tool.ToolCode));
+        tools.Should().OnlyContain(tool => tool.TargetType == ToolRegistrationTargetType.AgentRuntime);
+        tools.Should().OnlyContain(tool => tool.TargetName == "AgentTaskRuntime");
+
+        var cloudReadonlyTool = tools.Single(tool => tool.ToolCode == "query_cloud_data_readonly");
+        cloudReadonlyTool.ProviderType.Should().Be(ToolProviderType.CloudReadonly);
+        cloudReadonlyTool.IsEnabled.Should().BeFalse();
+        cloudReadonlyTool.RequiresApproval.Should().BeTrue();
+        cloudReadonlyTool.RiskLevel.Should().Be(AiToolRiskLevel.RequiresApproval);
+
+        tools.Where(tool => tool.ToolCode is "generate_pdf" or "generate_pptx" or "generate_xlsx" or "finalize_artifacts")
+            .Should()
+            .OnlyContain(tool => tool.RequiresApproval && tool.RiskLevel == AiToolRiskLevel.RequiresApproval);
+        tools.Should().NotContain(tool =>
+            tool.ToolCode.Contains("shell", StringComparison.OrdinalIgnoreCase) ||
+            tool.ToolCode.Contains("cloud_write", StringComparison.OrdinalIgnoreCase) ||
+            tool.Description.Contains("写入 Cloud", StringComparison.OrdinalIgnoreCase));
+
+        (await aiGatewayDbContext.RoutingModelConfigurations.AnyAsync(configuration => configuration.IsActive))
+            .Should().BeFalse();
 
         await using var ragDbContext = await CreateRagDbContextAsync(fixture);
         (await ragDbContext.EmbeddingModels.CountAsync()).Should().Be(0);
@@ -84,12 +144,31 @@ public sealed class FreshDatabaseSeedTests
         adminPermissions.Should().Contain("Identity.GetListAuditLogs");
         adminPermissions.Should().Contain("DataAnalysis.GetListBusinessDatabases");
         adminPermissions.Should().Contain("Rag.UploadDocument");
+        adminPermissions.Should().Contain("AiGateway.ToolRegistry.Read");
+        adminPermissions.Should().Contain("AiGateway.ToolRegistry.Manage");
+        adminPermissions.Should().Contain("AiGateway.ApproveAgentToolCall");
+        adminPermissions.Should().Contain("AiGateway.ApproveFinalOutput");
 
         userPermissions.Should().BeEquivalentTo(
             "AiGateway.CreateSession",
             "AiGateway.GetSession",
             "AiGateway.GetListSessions",
+            "AiGateway.RenameSession",
+            "AiGateway.GetAgentTask",
+            "AiGateway.PlanAgentTask",
+            "AiGateway.ApproveAgentTaskPlan",
+            "AiGateway.RunAgentTask",
+            "AiGateway.CancelAgentTask",
+            "AiGateway.Upload",
+            "AiGateway.GetUpload",
+            "AiGateway.GetWorkspace",
+            "AiGateway.DownloadArtifact",
+            "AiGateway.EditArtifact",
+            "AiGateway.SubmitFinalReview",
             "AiGateway.Chat");
+        userPermissions.Should().NotContain("AiGateway.ApproveAgentToolCall");
+        userPermissions.Should().NotContain("AiGateway.ApproveFinalOutput");
+        userPermissions.Should().NotContain("AiGateway.FinalizeWorkspace");
 
         await using var mcpDbContext = await CreateMcpDbContextAsync(fixture);
         (await mcpDbContext.McpServerInfos.CountAsync()).Should().Be(0);
@@ -172,6 +251,8 @@ public sealed class FreshDatabaseSeedTests
             "aigateway.language_models",
             "aigateway.conversation_templates",
             "aigateway.approval_policies",
+            "aigateway.tool_registrations",
+            "aigateway.tool_execution_records",
             "aigateway.sessions",
             "aigateway.messages",
             "rag.embedding_models",
@@ -194,6 +275,8 @@ public sealed class FreshDatabaseSeedTests
             "public.language_models",
             "public.conversation_templates",
             "public.approval_policies",
+            "public.tool_registrations",
+            "public.tool_execution_records",
             "public.sessions",
             "public.messages",
             "public.embedding_models",

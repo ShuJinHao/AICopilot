@@ -23,7 +23,8 @@ public sealed class RagMcpAuditCommandTests
         var handler = new CreateKnowledgeBaseCommandHandler(
             knowledgeRepository,
             embeddingRepository,
-            auditLogWriter);
+            auditLogWriter,
+            new TestCurrentUser());
 
         var result = await handler.Handle(
             new CreateKnowledgeBaseCommand("line-docs", "Line runbooks", embeddingModel.Id.Value),
@@ -35,7 +36,7 @@ public sealed class RagMcpAuditCommandTests
         audit.ActionCode.Should().Be("Rag.CreateKnowledgeBase");
         audit.TargetType.Should().Be("KnowledgeBase");
         audit.TargetName.Should().Be("line-docs");
-        audit.ChangedFields.Should().Contain(["name", "description", "embeddingModelId"]);
+        audit.ChangedFields.Should().Contain(["name", "description", "embeddingModelId", "ownerUserId", "accessScope"]);
     }
 
     [Fact]
@@ -43,7 +44,7 @@ public sealed class RagMcpAuditCommandTests
     {
         var repository = new InMemoryRepository<EmbeddingModel>();
         var auditLogWriter = new CapturingAuditLogWriter();
-        var handler = new CreateEmbeddingModelCommandHandler(repository, auditLogWriter);
+        var handler = new CreateEmbeddingModelCommandHandler(repository, new TestSecretProtector(), auditLogWriter);
         const string secret = "secret-embedding-key";
 
         var result = await handler.Handle(
@@ -72,7 +73,7 @@ public sealed class RagMcpAuditCommandTests
         var entity = CreateEmbeddingModel("embedding");
         var repository = new InMemoryRepository<EmbeddingModel>(entity);
         var auditLogWriter = new CapturingAuditLogWriter();
-        var handler = new UpdateEmbeddingModelCommandHandler(repository, auditLogWriter);
+        var handler = new UpdateEmbeddingModelCommandHandler(repository, new TestSecretProtector(), auditLogWriter);
         const string secret = "replacement-embedding-key";
 
         var result = await handler.Handle(
@@ -122,6 +123,30 @@ public sealed class RagMcpAuditCommandTests
         public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
         {
             return Task.FromResult(Requests.Count);
+        }
+    }
+
+    private sealed class TestSecretProtector : ISecretProtector
+    {
+        public string? Protect(string? plaintext)
+        {
+            return string.IsNullOrEmpty(plaintext) ? plaintext : $"encv1:{plaintext}";
+        }
+
+        public string? Unprotect(string? storedValue)
+        {
+            return storedValue?.StartsWith("encv1:", StringComparison.Ordinal) == true
+                ? storedValue["encv1:".Length..]
+                : storedValue;
+        }
+
+        public bool IsProtected(string? storedValue)
+        {
+            return storedValue?.StartsWith("encv1:", StringComparison.Ordinal) == true;
+        }
+
+        public void EnsureConfigured()
+        {
         }
     }
 

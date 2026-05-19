@@ -67,6 +67,12 @@ BenchmarkDotNet.Artifacts/
 project.lock.json
 project.fragment.lock.json
 artifacts/
+!src/core/AICopilot.Core.AiGateway/Aggregates/Artifacts/
+!src/core/AICopilot.Core.AiGateway/Aggregates/Artifacts/**
+!src/core/AICopilot.Core.AiGateway/Specifications/Artifacts/
+!src/core/AICopilot.Core.AiGateway/Specifications/Artifacts/**
+!src/infrastructure/AICopilot.Infrastructure/Artifacts/
+!src/infrastructure/AICopilot.Infrastructure/Artifacts/**
 
 # Tye
 .tye/

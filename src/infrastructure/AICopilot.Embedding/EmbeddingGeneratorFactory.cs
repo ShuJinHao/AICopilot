@@ -1,25 +1,26 @@
-﻿using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
+using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
+using AICopilot.Services.Contracts;
 using Microsoft.Extensions.AI;
 using OpenAI;
-using System;
 using System.ClientModel;
 using System.ClientModel.Primitives;
-using System.Collections.Generic;
-using System.Text;
 
 namespace AICopilot.Embedding;
 
-public class EmbeddingGeneratorFactory(IHttpClientFactory httpClientFactory)
+public class EmbeddingGeneratorFactory(
+    IHttpClientFactory httpClientFactory,
+    ISecretProtector secretProtector)
 {
     public IEmbeddingGenerator<string, Embedding<float>> CreateGenerator(EmbeddingModel model)
     {
-        if (string.IsNullOrWhiteSpace(model.ApiKey))
+        var apiKey = secretProtector.Unprotect(model.ApiKey);
+        if (string.IsNullOrWhiteSpace(apiKey))
         {
             throw new InvalidOperationException($"EmbeddingModel ApiKey is required; check configuration for {model.Name}.");
         }
 
         var endpoint = new Uri(model.BaseUrl);
-        var credential = new ApiKeyCredential(model.ApiKey);
+        var credential = new ApiKeyCredential(apiKey);
 
         var httpClient = httpClientFactory.CreateClient("EmbeddingClient");
 

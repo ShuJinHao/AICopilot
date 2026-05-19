@@ -3,19 +3,26 @@ import type {
   ApprovalPolicyDetail,
   ApprovalPolicyFormModel,
   ApprovalPolicySummary,
+  ArtifactWorkspaceSettings,
   BusinessDatabaseDetail,
   BusinessDatabaseFormModel,
   BusinessDatabaseSummary,
+  ChatRuntimeSettings,
   ConversationTemplateDetail,
   ConversationTemplateFormModel,
   ConversationTemplateSummary,
   LanguageModelDetail,
   LanguageModelFormModel,
   LanguageModelSummary,
+  LanguageModelTestRequest,
+  LanguageModelTestResult,
   McpServerDetail,
   McpServerFormModel,
   McpServerSummary,
   ProviderReliabilityConfig,
+  RoutingModelDetail,
+  RoutingModelFormModel,
+  RoutingModelSummary,
   SemanticSourceStatus
 } from '@/types/app'
 
@@ -32,13 +39,26 @@ export const configService = {
     return await apiClient.get<ProviderReliabilityConfig>('/aigateway/provider-reliability')
   },
 
+  async getRuntimeSettings() {
+    return await apiClient.get<ChatRuntimeSettings>('/aigateway/runtime-settings')
+  },
+
+  async getWorkspaceSettings() {
+    return await apiClient.get<ArtifactWorkspaceSettings>('/aigateway/workspace-settings')
+  },
+
   async createLanguageModel(payload: LanguageModelFormModel) {
     return await apiClient.post('/aigateway/language-model', {
       provider: payload.provider,
+      protocolType: payload.protocolType,
       name: payload.name,
       baseUrl: payload.baseUrl,
       apiKey: payload.apiKey,
       maxTokens: payload.maxTokens,
+      contextWindowTokens: payload.contextWindowTokens,
+      maxOutputTokens: payload.maxOutputTokens,
+      isEnabled: payload.isEnabled,
+      usages: payload.usages,
       temperature: payload.temperature
     })
   },
@@ -47,17 +67,59 @@ export const configService = {
     return await apiClient.put('/aigateway/language-model', {
       id: payload.id,
       provider: payload.provider,
+      protocolType: payload.protocolType,
       name: payload.name,
       baseUrl: payload.baseUrl,
       apiKey: payload.apiKey,
       clearApiKey: payload.clearApiKey,
       maxTokens: payload.maxTokens,
+      contextWindowTokens: payload.contextWindowTokens,
+      maxOutputTokens: payload.maxOutputTokens,
+      isEnabled: payload.isEnabled,
+      usages: payload.usages,
       temperature: payload.temperature
     })
   },
 
+  async testLanguageModel(payload: LanguageModelTestRequest) {
+    return await apiClient.post<LanguageModelTestResult>('/aigateway/language-model/test', payload)
+  },
+
   async deleteLanguageModel(id: string) {
     return await apiClient.delete('/aigateway/language-model', { id })
+  },
+
+  async getRoutingModel(id: string) {
+    return await apiClient.get<RoutingModelDetail>('/aigateway/routing-model', { id })
+  },
+
+  async getRoutingModels() {
+    return await apiClient.get<RoutingModelSummary[]>('/aigateway/routing-model/list')
+  },
+
+  async createRoutingModel(payload: RoutingModelFormModel) {
+    return await apiClient.post('/aigateway/routing-model', {
+      name: payload.name,
+      modelId: payload.modelId,
+      isActive: payload.isActive
+    })
+  },
+
+  async updateRoutingModel(payload: RoutingModelFormModel) {
+    return await apiClient.put('/aigateway/routing-model', {
+      id: payload.id,
+      name: payload.name,
+      modelId: payload.modelId,
+      isActive: payload.isActive
+    })
+  },
+
+  async activateRoutingModel(id: string) {
+    return await apiClient.put('/aigateway/routing-model/activate', { id })
+  },
+
+  async deleteRoutingModel(id: string) {
+    return await apiClient.delete('/aigateway/routing-model', { id })
   },
 
   async getConversationTemplate(id: string) {

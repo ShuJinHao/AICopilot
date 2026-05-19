@@ -63,6 +63,11 @@ public class AICopilotAppFixture : IAsyncLifetime, IAsyncDisposable
                 await WaitForResourceRunningAsync("rag-worker");
             }
 
+            if (EnableDataWorker)
+            {
+                await WaitForResourceRunningAsync("data-worker");
+            }
+
             HttpClient = RunStage(
                 "Create HttpClient for aicopilot-httpapi",
                 () => _app.CreateHttpClient("aicopilot-httpapi"));
@@ -119,10 +124,17 @@ public class AICopilotAppFixture : IAsyncLifetime, IAsyncDisposable
         SetEnvironmentVariable("DOTNET_ENVIRONMENT", "Development");
         SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Development");
         SetEnvironmentVariable("Parameters__pg-password", TestPostgresPassword);
+        SetEnvironmentVariable("Parameters__aicopilot-api-key-encryption-key", "test-aicopilot-api-key-encryption-key");
+        SetEnvironmentVariable("Parameters__jwt-secret-key", "test-aicopilot-jwt-secret-key-at-least-32-bytes");
+        SetEnvironmentVariable("Parameters__bootstrap-admin-username", BootstrapUserName);
+        SetEnvironmentVariable("Parameters__bootstrap-admin-password", BootstrapPassword);
         SetEnvironmentVariable("JwtSettings__SecretKey", "test-aicopilot-jwt-secret-key-at-least-32-bytes");
         SetEnvironmentVariable("BootstrapAdmin__UserName", BootstrapUserName);
         SetEnvironmentVariable("BootstrapAdmin__Password", BootstrapPassword);
         SetEnvironmentVariable("AICopilotSecurity__ApiKeyEncryptionKey", "test-aicopilot-api-key-encryption-key");
+        SetEnvironmentVariable(
+            "ArtifactWorkspace__RootPath",
+            Path.Combine(Path.GetTempPath(), "AICopilotBackendTests", "artifact-workspaces"));
         SetEnvironmentVariable("AppHost__EnableDockerComposeEnvironment", "false");
         SetEnvironmentVariable("AppHost__EnableWebUi", "false");
         SetEnvironmentVariable("AppHost__EnablePgWeb", "false");
@@ -136,9 +148,14 @@ public class AICopilotAppFixture : IAsyncLifetime, IAsyncDisposable
         SetEnvironmentVariable("RateLimiting__Login__TokensPerPeriod", "1000");
         SetEnvironmentVariable("RateLimiting__Chat__TokenLimit", "1000");
         SetEnvironmentVariable("RateLimiting__Chat__TokensPerPeriod", "1000");
+        ConfigureAdditionalEnvironment();
     }
 
-    private void SetEnvironmentVariable(string name, string value)
+    protected virtual void ConfigureAdditionalEnvironment()
+    {
+    }
+
+    protected void SetEnvironmentVariable(string name, string value)
     {
         if (!_originalEnvironment.ContainsKey(name))
         {
@@ -309,5 +326,24 @@ public sealed class CoreAICopilotAppFixture : AICopilotAppFixture
 {
     protected override bool EnableRagWorker => false;
 
-    protected override bool EnableDataWorker => false;
+    protected override bool EnableDataWorker => true;
+}
+
+public sealed class AgentSimulationAICopilotAppFixture : AICopilotAppFixture
+{
+    protected override bool EnableRagWorker => false;
+
+    protected override bool EnableDataWorker => true;
+
+    protected override void ConfigureAdditionalEnvironment()
+    {
+        SetEnvironmentVariable("CloudReadonly__Mode", "Simulation");
+        SetEnvironmentVariable("CloudReadonly__Simulation__Enabled", "true");
+        SetEnvironmentVariable("CloudReadonly__Simulation__SeedData", "true");
+        SetEnvironmentVariable("CloudReadonly__Simulation__DataSet", "ManufacturingDemo");
+        SetEnvironmentVariable("CloudReadonly__Simulation__AlwaysMarkAsSimulation", "true");
+        SetEnvironmentVariable("CloudReadonly__Real__Enabled", "false");
+        SetEnvironmentVariable("CloudReadonly__Real__AllowProductionRead", "false");
+        SetEnvironmentVariable("CloudAiRead__Enabled", "false");
+    }
 }

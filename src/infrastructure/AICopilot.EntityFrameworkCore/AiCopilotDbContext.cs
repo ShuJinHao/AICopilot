@@ -1,10 +1,5 @@
 using System.Reflection;
 using AICopilot.EntityFrameworkCore.AuditLogs;
-using AICopilot.EntityFrameworkCore.Configuration.AiGateway;
-using AICopilot.EntityFrameworkCore.Configuration.DataAnalysis;
-using AICopilot.EntityFrameworkCore.Configuration.Identity;
-using AICopilot.EntityFrameworkCore.Configuration.McpServer;
-using AICopilot.EntityFrameworkCore.Configuration.Rag;
 using AICopilot.EntityFrameworkCore.Outbox;
 using AICopilot.SharedKernel.Domain;
 using Microsoft.EntityFrameworkCore;
@@ -22,18 +17,17 @@ public class AiCopilotDbContext(DbContextOptions<AiCopilotDbContext> options) : 
         base.OnModelCreating(builder);
         builder.ApplyConfigurationsFromAssembly(
             Assembly.GetExecutingAssembly(),
-            type => type != typeof(LanguageModelConfiguration)
-                    && type != typeof(ConversationTemplateConfiguration)
-                    && type != typeof(ApprovalPolicyConfiguration)
-                    && type != typeof(SessionConfiguration)
-                    && type != typeof(MessageConfiguration)
-                    && type != typeof(McpServerConfiguration)
-                    && type != typeof(BusinessDatabaseConfiguration)
-                    && type != typeof(ExternalIdentityBindingConfiguration)
-                    && type != typeof(EmbeddingModelConfiguration)
-                    && type != typeof(KnowledgeBaseConfiguration)
-                    && type != typeof(DocumentConfiguration)
-                    && type != typeof(DocumentChunkConfiguration));
+            ShouldApplyMainContextConfiguration);
+    }
+
+    private static bool ShouldApplyMainContextConfiguration(Type configurationType)
+    {
+        var ns = configurationType.Namespace ?? string.Empty;
+        return !ns.StartsWith("AICopilot.EntityFrameworkCore.Configuration.AiGateway", StringComparison.Ordinal)
+               && !ns.StartsWith("AICopilot.EntityFrameworkCore.Configuration.DataAnalysis", StringComparison.Ordinal)
+               && !ns.StartsWith("AICopilot.EntityFrameworkCore.Configuration.Identity", StringComparison.Ordinal)
+               && !ns.StartsWith("AICopilot.EntityFrameworkCore.Configuration.McpServer", StringComparison.Ordinal)
+               && !ns.StartsWith("AICopilot.EntityFrameworkCore.Configuration.Rag", StringComparison.Ordinal);
     }
 
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)

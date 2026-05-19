@@ -35,6 +35,26 @@ public class MessageConfiguration : IEntityTypeConfiguration<Message>
             .HasMaxLength(50)
             .HasColumnName("type"); // <--- 修改
 
+        builder.Property(m => m.FinalModelId)
+            .HasColumnName("final_model_id");
+
+        builder.Property(m => m.FinalModelName)
+            .HasMaxLength(100)
+            .HasColumnName("final_model_name");
+
+        builder.Property(m => m.RoutingModelId)
+            .HasColumnName("routing_model_id");
+
+        builder.Property(m => m.RoutingModelName)
+            .HasMaxLength(100)
+            .HasColumnName("routing_model_name");
+
+        builder.Property(m => m.ContextWindowTokens)
+            .HasColumnName("context_window_tokens");
+
+        builder.Property(m => m.MaxOutputTokens)
+            .HasColumnName("max_output_tokens");
+
         // 外键属性的列名改为小写
         builder.Property(m => m.SessionId)
             .HasConversion(id => id.Value, value => new SessionId(value))

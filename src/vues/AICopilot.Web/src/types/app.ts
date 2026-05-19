@@ -105,6 +105,12 @@ export interface ChatHistoryMessage {
   role: 'User' | 'Assistant'
   content: string
   createdAt: string
+  finalModelId?: string | null
+  finalModelName?: string | null
+  routingModelId?: string | null
+  routingModelName?: string | null
+  contextWindowTokens?: number | null
+  maxOutputTokens?: number | null
 }
 
 export interface StreamCallbacks {
@@ -116,30 +122,112 @@ export interface StreamCallbacks {
 export interface LanguageModelSummary {
   id: string
   provider: string
+  protocolType: string
   name: string
   baseUrl: string
   maxTokens: number
+  contextWindowTokens: number
+  maxOutputTokens: number
   temperature: number
+  isEnabled: boolean
+  usages: LanguageModelUsage[]
   hasApiKey: boolean
   apiKeyMasked?: string | null
+  connectivityStatus: 'Unknown' | 'Succeeded' | 'Failed' | string
+  connectivityCheckedAt?: string | null
+  connectivityError?: string | null
 }
 
 export interface LanguageModelDetail extends LanguageModelSummary {}
 
 export type LanguageModelApiKeyAction = 'keep' | 'replace' | 'clear'
+export type LanguageModelUsage = 'Chat' | 'Routing'
 
 export interface LanguageModelFormModel {
   id?: string
   provider: string
+  protocolType: string
   name: string
   baseUrl: string
   apiKey: string
   apiKeyAction: LanguageModelApiKeyAction
   clearApiKey: boolean
   maxTokens: number
+  contextWindowTokens: number
+  maxOutputTokens: number
   temperature: number
+  isEnabled: boolean
+  usages: LanguageModelUsage[]
   hasApiKey: boolean
   apiKeyMasked?: string | null
+}
+
+export interface LanguageModelTestRequest {
+  id?: string
+  provider?: string
+  protocolType?: string
+  name?: string
+  baseUrl?: string
+  apiKey?: string
+  clearApiKey?: boolean
+  maxTokens?: number
+  contextWindowTokens?: number
+  maxOutputTokens?: number
+  usages?: LanguageModelUsage[]
+  temperature?: number
+  persistResult?: boolean
+}
+
+export interface LanguageModelTestResult {
+  success: boolean
+  status: 'Succeeded' | 'Failed' | string
+  message: string
+  error?: string | null
+  elapsedMilliseconds: number
+  checkedAt: string
+}
+
+export interface SelectableChatModel {
+  id: string
+  provider: string
+  protocolType: string
+  name: string
+  contextWindowTokens: number
+  maxOutputTokens: number
+}
+
+export interface ChatRuntimeSettings {
+  routingHistoryCount: number
+  answerHistoryCount: number
+  ragRewriteHistoryCount: number
+  agentPlanningHistoryCount: number
+  summaryThresholdMessages: number
+  contextTokenLimit: number
+}
+
+export interface ArtifactWorkspaceSettings {
+  rootPath: string
+  folders: string[]
+  allowedArtifactTypes: string[]
+  allowsUserDefinedPath: boolean
+}
+
+export interface RoutingModelSummary {
+  id: string
+  name: string
+  modelId: string
+  modelName: string
+  modelProvider: string
+  isActive: boolean
+}
+
+export interface RoutingModelDetail extends RoutingModelSummary {}
+
+export interface RoutingModelFormModel {
+  id?: string
+  name: string
+  modelId: string
+  isActive: boolean
 }
 
 export interface ConversationTemplateSummary {

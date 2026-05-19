@@ -47,8 +47,9 @@ const argsText = computed(() => {
 <style scoped>
 .function-call {
   border: 1px solid var(--app-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--app-surface-muted);
+  box-shadow: var(--shadow-sm);
   overflow: hidden;
 }
 
@@ -60,7 +61,7 @@ const argsText = computed(() => {
 }
 
 .function-call.running {
-  border-color: #f2c97d;
+  border-color: var(--app-warning);
 }
 
 .function-call.mini {
@@ -89,10 +90,11 @@ summary {
 pre {
   overflow: auto;
   border: 1px solid var(--app-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   margin: 8px 0 0;
   padding: 10px;
-  background: #ffffff;
+  background: var(--app-surface-raised);
+  color: var(--app-text);
   font-size: 12px;
 }
 </style>

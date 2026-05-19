@@ -1,0 +1,521 @@
+using System.Linq.Expressions;
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
+using AICopilot.AiGatewayService.AgentTasks;
+using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
+using AICopilot.Core.AiGateway.Aggregates.Approvals;
+using AICopilot.Core.AiGateway.Aggregates.Artifacts;
+using AICopilot.Core.AiGateway.Ids;
+using AICopilot.EntityFrameworkCore.Specification;
+using AICopilot.Services.Contracts;
+using AICopilot.SharedKernel.Domain;
+using AICopilot.SharedKernel.Repository;
+using AICopilot.SharedKernel.Result;
+using AICopilot.SharedKernel.Specification;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+
+namespace AICopilot.BackendTests;
+
+[Trait("Suite", "Batch10RunQueueOps")]
+public sealed class AgentRunQueueProductionOpsTests
+{
+    private static readonly Guid UserId = Guid.Parse("11111111-1111-4111-8111-111111111111");
+
+    [Fact]
+    public void AgentRunQueueOptions_ShouldExposeDefaultBackoffPolicy()
+    {
+        var options = new AgentRunQueueOptions();
+
+        options.LeaseDuration.Should().Be(TimeSpan.FromMinutes(5));
+        options.HeartbeatActiveWindow.Should().Be(TimeSpan.FromSeconds(30));
+        options.EffectiveMaxRetryAttempts.Should().Be(3);
+        options.GetRetryBackoff(1).Should().Be(TimeSpan.FromSeconds(30));
+        options.GetRetryBackoff(2).Should().Be(TimeSpan.FromSeconds(60));
+        options.GetRetryBackoff(3).Should().Be(TimeSpan.FromSeconds(120));
+    }
+
+    [Fact]
+    public void AgentRunQueueSummary_ShouldCalculateProductionMetrics()
+    {
+        var task = CreateFailedTask();
+        var now = DateTimeOffset.UtcNow;
+        var oldest = now.AddMinutes(-10);
+        var queued = new AgentTaskRunQueueItem(task.Id, AgentTaskRunTriggerType.Manual, task.UserId, now, oldest);
+        var succeeded = new AgentTaskRunQueueItem(task.Id, AgentTaskRunTriggerType.Manual, task.UserId, now.AddMinutes(-6), now.AddMinutes(-5));
+        succeeded.AcquireLease(Guid.NewGuid(), "worker-1", now.AddMinutes(-4), TimeSpan.FromMinutes(5));
+        succeeded.MarkStarted(null, now.AddMinutes(-4));
+        succeeded.MarkSucceeded(now.AddMinutes(-2), "done");
+        var leased = new AgentTaskRunQueueItem(task.Id, AgentTaskRunTriggerType.Retry, task.UserId, now);
+        leased.AcquireLease(Guid.NewGuid(), "worker-1", now, TimeSpan.FromMinutes(5));
+        var stale = new AgentTaskRunQueueItem(task.Id, AgentTaskRunTriggerType.Retry, task.UserId, now.AddMinutes(-10));
+        stale.AcquireLease(Guid.NewGuid(), "worker-2", now.AddMinutes(-10), TimeSpan.FromSeconds(1));
+        var apiWorker = new AgentWorkerHeartbeat("worker-api", "data-worker", now, "api-hash", "1.0.0");
+        var mismatchWorker = new AgentWorkerHeartbeat("worker-mismatch", "data-worker", now, "worker-hash", "1.0.0");
+
+        var summary = GetAgentRunQueueSummaryQueryHandler.BuildSummary(
+            [queued, succeeded, leased, stale],
+            [apiWorker, mismatchWorker],
+            now,
+            "api-hash",
+            TimeSpan.FromSeconds(30));
+
+        summary.QueuedCount.Should().Be(1);
+        summary.LeasedCount.Should().Be(2);
+        summary.SucceededCount.Should().Be(1);
+        summary.StaleLeasedCount.Should().Be(1);
+        summary.OldestQueuedAt.Should().Be(oldest);
+        summary.OldestQueuedWaitMs.Should().Be(600000);
+        summary.AverageWaitMs.Should().Be(60000);
+        summary.AverageRunMs.Should().Be(120000);
+        summary.ActiveWorkerCount.Should().Be(2);
+        summary.WorkspaceMismatchCount.Should().Be(1);
+    }
+
+    [Fact]
+    public void AgentWorkerStatus_ShouldTreatExpiredHeartbeatAsUnavailable()
+    {
+        var task = CreateFailedTask();
+        var now = DateTimeOffset.UtcNow;
+        var heartbeat = new AgentWorkerHeartbeat("worker-1", "data-worker", now.AddMinutes(-5), "api-hash", "1.0.0");
+
+        var status = AgentWorkerStatusCalculator.Build(
+            [new AgentTaskRunQueueItem(task.Id, AgentTaskRunTriggerType.Manual, task.UserId, now)],
+            [heartbeat],
+            "api-hash",
+            now,
+            TimeSpan.FromSeconds(30));
+
+        status.HasActiveWorkers.Should().BeFalse();
+        status.StatusCode.Should().Be(AppProblemCodes.AgentWorkerUnavailable);
+    }
+
+    [Fact]
+    public async Task RetryAgentTaskCommand_ShouldApplyBackoffLimitAndAudit()
+    {
+        var task = CreateFailedTask();
+        var previousRetry1 = FailedRetryItem(task, DateTimeOffset.UtcNow.AddMinutes(-6));
+        var previousRetry2 = FailedRetryItem(task, DateTimeOffset.UtcNow.AddMinutes(-4));
+        var queueRepository = new InMemoryRepository<AgentTaskRunQueueItem>(previousRetry1, previousRetry2);
+        var audit = new CapturingAuditLogWriter();
+        var handler = new RetryAgentTaskCommandHandler(
+            new InMemoryRepository<AgentTask>(task),
+            new InMemoryRepository<ArtifactWorkspace>(),
+            new InMemoryRepository<ApprovalRequest>(),
+            queueRepository,
+            new AgentTaskRunQueue(queueRepository),
+            new TestCurrentUser(UserId),
+            Options.Create(new AgentRunQueueOptions()),
+            new AgentAuditRecorder(audit));
+
+        var before = DateTimeOffset.UtcNow;
+        var result = await handler.Handle(new RetryAgentTaskCommand(task.Id.Value), CancellationToken.None);
+        var after = DateTimeOffset.UtcNow;
+
+        result.IsSuccess.Should().BeTrue();
+        var queued = queueRepository.Items.Single(item => item.Status == AgentTaskRunQueueStatus.Queued);
+        queued.AvailableAt.Should().BeOnOrAfter(before.AddSeconds(120));
+        queued.AvailableAt.Should().BeOnOrBefore(after.AddSeconds(121));
+        audit.Requests.Should().ContainSingle(request => request.ActionCode == "Agent.RunQueueRetry")
+            .Which.Metadata!["retryAttemptNo"].Should().Be("3");
+
+        var maxedTask = CreateFailedTask();
+        var maxedQueue = new InMemoryRepository<AgentTaskRunQueueItem>(
+            FailedRetryItem(maxedTask, DateTimeOffset.UtcNow.AddMinutes(-9)),
+            FailedRetryItem(maxedTask, DateTimeOffset.UtcNow.AddMinutes(-6)),
+            FailedRetryItem(maxedTask, DateTimeOffset.UtcNow.AddMinutes(-3)));
+        var maxedHandler = new RetryAgentTaskCommandHandler(
+            new InMemoryRepository<AgentTask>(maxedTask),
+            new InMemoryRepository<ArtifactWorkspace>(),
+            new InMemoryRepository<ApprovalRequest>(),
+            maxedQueue,
+            new AgentTaskRunQueue(maxedQueue),
+            new TestCurrentUser(UserId),
+            Options.Create(new AgentRunQueueOptions()));
+
+        var maxed = await maxedHandler.Handle(new RetryAgentTaskCommand(maxedTask.Id.Value), CancellationToken.None);
+
+        maxed.IsSuccess.Should().BeFalse();
+        maxed.Errors!.OfType<ApiProblemDescriptor>().Single().Code
+            .Should().Be(AppProblemCodes.AgentTaskRetryNotAllowed);
+        maxed.Errors!.OfType<ApiProblemDescriptor>().Single().Detail
+            .Should().Contain("retry limit exceeded");
+    }
+
+    [Fact]
+    public async Task CancelAgentTaskCommand_ShouldKeepTerminalTaskUnchanged()
+    {
+        var task = CreateFailedTask();
+        var queueItem = new AgentTaskRunQueueItem(task.Id, AgentTaskRunTriggerType.Manual, task.UserId, DateTimeOffset.UtcNow);
+        queueItem.MarkFailed("failed", "failed", DateTimeOffset.UtcNow);
+        var queueRepository = new InMemoryRepository<AgentTaskRunQueueItem>(queueItem);
+        var handler = new CancelAgentTaskCommandHandler(
+            new InMemoryRepository<AgentTask>(task),
+            new InMemoryRepository<ArtifactWorkspace>(),
+            new InMemoryRepository<ApprovalRequest>(),
+            new InMemoryRepository<AgentTaskRunAttempt>(),
+            queueRepository,
+            new AgentTaskRunQueue(queueRepository),
+            new TestCurrentUser(UserId));
+
+        var result = await handler.Handle(new CancelAgentTaskCommand(task.Id.Value), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        task.Status.Should().Be(AgentTaskStatus.Failed);
+        queueItem.Status.Should().Be(AgentTaskRunQueueStatus.Failed);
+    }
+
+    [Fact]
+    public void AgentTaskRunAttempt_ShouldRejectRepeatedTerminalCompletion()
+    {
+        var task = CreateFailedTask();
+        var attempt = new AgentTaskRunAttempt(
+            task.Id,
+            1,
+            AgentTaskRunTriggerType.Manual,
+            "worker",
+            DateTimeOffset.UtcNow,
+            TimeSpan.FromMinutes(5));
+        attempt.MarkSucceeded(DateTimeOffset.UtcNow, "done");
+
+        var act = () => attempt.MarkFailed("failed", "failed again", DateTimeOffset.UtcNow);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*cannot be completed again*");
+    }
+
+    [Fact]
+    public async Task DataWorker_ShouldFailStaleStartedLeaseAndAudit()
+    {
+        var task = CreateFailedTask();
+        task.PrepareRetry(DateTimeOffset.UtcNow);
+        var now = DateTimeOffset.UtcNow.AddMinutes(-10);
+        var attempt = new AgentTaskRunAttempt(task.Id, 1, AgentTaskRunTriggerType.Manual, "expired-worker", now, TimeSpan.FromSeconds(1));
+        task.BeginRunAttempt(
+            attempt.Id,
+            attempt.AttemptNo,
+            attempt.LeaseId!.Value,
+            attempt.LeaseOwner!,
+            attempt.LeaseExpiresAt!.Value,
+            now);
+        var queueItem = new AgentTaskRunQueueItem(task.Id, AgentTaskRunTriggerType.Manual, task.UserId, now);
+        queueItem.AcquireLease(Guid.NewGuid(), "expired-worker", now, TimeSpan.FromSeconds(1));
+        queueItem.MarkStarted(attempt.Id, now);
+        var queueRepository = new InMemoryRepository<AgentTaskRunQueueItem>(queueItem);
+        var audit = new CapturingAuditLogWriter();
+        using var provider = CreateQueueWorkerProvider(
+            new InMemoryRepository<AgentTask>(task),
+            queueRepository,
+            new InMemoryRepository<AgentTaskRunAttempt>(attempt),
+            new ThrowingRuntime(),
+            audit);
+        var worker = new AgentTaskRunQueueWorker(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<AgentTaskRunQueueWorker>.Instance,
+            Options.Create(new AgentRunQueueOptions()));
+
+        var processed = await worker.ProcessOnceAsync(CancellationToken.None);
+
+        processed.Should().BeFalse();
+        queueItem.Status.Should().Be(AgentTaskRunQueueStatus.Failed);
+        queueItem.FailureCode.Should().Be(AppProblemCodes.AgentTaskRunQueueLeaseExpired);
+        audit.Requests.Should().ContainSingle(request => request.ActionCode == "Agent.RunQueueStaleLeaseFailed")
+            .Which.Metadata!["oldStatus"].Should().Be(AgentTaskRunQueueStatus.Leased.ToString());
+    }
+
+    private static AgentTask CreateFailedTask()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var task = new AgentTask(
+            new SessionId(Guid.NewGuid()),
+            UserId,
+            "Run queue test",
+            "Generate run queue test artifact",
+            AgentTaskType.ReportGeneration,
+            AgentTaskRiskLevel.Low,
+            null,
+            """{"steps":[]}""",
+            now);
+        var step = task.AddStep(
+            "Generate",
+            "Generate output",
+            AgentStepType.ArtifactGeneration,
+            "generate_chart_data",
+            requiresApproval: false,
+            now);
+        task.ApprovePlan(now);
+        task.Start(now);
+        step.Start(now);
+        step.Fail("failed", now);
+        task.Fail("failed", now);
+        return task;
+    }
+
+    private static AgentTaskRunQueueItem FailedRetryItem(AgentTask task, DateTimeOffset now)
+    {
+        var item = new AgentTaskRunQueueItem(task.Id, AgentTaskRunTriggerType.Retry, task.UserId, now);
+        item.MarkFailed("failed", "failed", now.AddSeconds(1));
+        return item;
+    }
+
+    private static ServiceProvider CreateQueueWorkerProvider(
+        InMemoryRepository<AgentTask> taskRepository,
+        InMemoryRepository<AgentTaskRunQueueItem> queueRepository,
+        InMemoryRepository<AgentTaskRunAttempt> attemptRepository,
+        IAgentTaskRuntime runtime,
+        IAuditLogWriter auditLogWriter)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IRepository<AgentTask>>(taskRepository);
+        services.AddSingleton<IRepository<AgentTaskRunQueueItem>>(queueRepository);
+        services.AddSingleton<IRepository<AgentTaskRunAttempt>>(attemptRepository);
+        services.AddSingleton<IAgentTaskRunQueue>(new AgentTaskRunQueue(queueRepository));
+        services.AddSingleton(runtime);
+        services.AddSingleton(auditLogWriter);
+        services.AddSingleton<AgentAuditRecorder>();
+        return services.BuildServiceProvider();
+    }
+
+    private sealed class ThrowingRuntime : IAgentTaskRuntime
+    {
+        public Task<Result<AgentTask>> RunAsync(AgentTask task, CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("Runtime should not be called by this test.");
+        }
+
+        public Task<Result<AgentTask>> RunAsync(
+            AgentTask task,
+            AgentTaskRunTriggerType triggerType = AgentTaskRunTriggerType.Manual,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("Runtime should not be called by this test.");
+        }
+    }
+
+    private sealed class CapturingAuditLogWriter : IAuditLogWriter
+    {
+        public List<AuditLogWriteRequest> Requests { get; } = [];
+
+        public Task WriteAsync(AuditLogWriteRequest request, CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request);
+            return Task.CompletedTask;
+        }
+
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(1);
+        }
+    }
+
+    private sealed class InMemoryRepository<T>(params T[] initialItems) : IRepository<T>
+        where T : class, IEntity, IAggregateRoot
+    {
+        public List<T> Items { get; } = [..initialItems];
+
+        public T Add(T entity)
+        {
+            Items.Add(entity);
+            return entity;
+        }
+
+        public void Update(T entity)
+        {
+        }
+
+        public void Delete(T entity)
+        {
+            Items.Remove(entity);
+        }
+
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(1);
+        }
+
+        public Task<List<T>> ListAsync(ISpecification<T>? specification = null, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(SpecificationEvaluator.GetQuery(Items.AsQueryable(), specification).ToList());
+        }
+
+        public Task<T?> FirstOrDefaultAsync(ISpecification<T>? specification = null, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(SpecificationEvaluator.GetQuery(Items.AsQueryable(), specification).FirstOrDefault());
+        }
+
+        public Task<int> CountAsync(ISpecification<T>? specification = null, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(SpecificationEvaluator.GetQuery(Items.AsQueryable(), specification).Count());
+        }
+
+        public Task<bool> AnyAsync(ISpecification<T>? specification = null, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(SpecificationEvaluator.GetQuery(Items.AsQueryable(), specification).Any());
+        }
+
+        public Task<T?> GetByIdAsync<TKey>(TKey id, CancellationToken cancellationToken = default)
+            where TKey : notnull
+        {
+            return Task.FromResult(Items.FirstOrDefault(item => Equals(GetId(item), id)));
+        }
+
+        public Task<List<T>> GetListAsync(Expression<Func<T, bool>> expression, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items.AsQueryable().Where(expression).ToList());
+        }
+
+        public Task<int> GetCountAsync(Expression<Func<T, bool>> expression, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items.AsQueryable().Count(expression));
+        }
+
+        public Task<T?> GetAsync(
+            Expression<Func<T, bool>> expression,
+            Expression<Func<T, object>>[]? includes = null,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items.AsQueryable().FirstOrDefault(expression));
+        }
+
+        public Task<List<T>> GetListAsync(
+            Expression<Func<T, bool>> expression,
+            Expression<Func<T, object>>[]? includes = null,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items.AsQueryable().Where(expression).ToList());
+        }
+
+        private static object? GetId(T item)
+        {
+            return typeof(T).GetProperty("Id")?.GetValue(item);
+        }
+    }
+}
+
+[Collection(CoreBackendTestCollection.Name)]
+[Trait("Suite", "Batch10RunQueueOps")]
+[Trait("Runtime", "DockerRequired")]
+public sealed class AgentRunQueuePermissionTests
+{
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
+    private readonly AICopilotAppFixture _fixture;
+
+    public AgentRunQueuePermissionTests(CoreAICopilotAppFixture fixture)
+    {
+        _fixture = fixture;
+    }
+
+    [Fact]
+    public async Task RunQueueEndpoints_ShouldRequireOperationsPermissions()
+    {
+        await AuthenticateAsAdminAsync();
+        using var adminSummary = await _fixture.HttpClient.GetAsync("/api/aigateway/agent/run-queue/summary");
+        adminSummary.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var adminWorker = await _fixture.HttpClient.GetAsync("/api/aigateway/agent/worker/status");
+        adminWorker.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var workerOnlyRole = await CreateRoleAsync(
+            $"Batch10WorkerOnly-{Guid.NewGuid():N}",
+            ["AiGateway.WorkerStatus.Read"]);
+        var workerOnlyUser = await CreateUserAsync($"batch10-worker-only-{Guid.NewGuid():N}", workerOnlyRole.RoleName);
+        await AuthenticateAsync(workerOnlyUser.UserName, "Password123!");
+        using var missingRunQueue = await _fixture.HttpClient.GetAsync("/api/aigateway/agent/run-queue/summary");
+        missingRunQueue.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var missingRunQueueProblem = await ReadJsonAsync<ProblemDetailsDto>(missingRunQueue);
+        missingRunQueueProblem.MissingPermissions.Should().Contain("AiGateway.RunQueue.Read");
+
+        await AuthenticateAsAdminAsync();
+        var readOnlyRole = await CreateRoleAsync(
+            $"Batch10RunQueueReadOnly-{Guid.NewGuid():N}",
+            ["AiGateway.RunQueue.Read"]);
+        var readOnlyUser = await CreateUserAsync($"batch10-runqueue-only-{Guid.NewGuid():N}", readOnlyRole.RoleName);
+        await AuthenticateAsync(readOnlyUser.UserName, "Password123!");
+        using var missingWorker = await _fixture.HttpClient.GetAsync("/api/aigateway/agent/worker/status");
+        missingWorker.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var missingWorkerProblem = await ReadJsonAsync<ProblemDetailsDto>(missingWorker);
+        missingWorkerProblem.MissingPermissions.Should().Contain("AiGateway.WorkerStatus.Read");
+        using var missingManage = await _fixture.HttpClient.PostAsJsonAsync(
+            $"/api/aigateway/agent/run-queue/{Guid.NewGuid():D}/dead-letter",
+            new { reason = "test" },
+            JsonOptions);
+        missingManage.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var missingManageProblem = await ReadJsonAsync<ProblemDetailsDto>(missingManage);
+        missingManageProblem.MissingPermissions.Should().Contain("AiGateway.RunQueue.Manage");
+    }
+
+    private async Task<CreatedRoleDto> CreateRoleAsync(string roleName, IReadOnlyCollection<string> permissions)
+    {
+        return await PostJsonAsync<CreatedRoleDto>("/api/identity/role", new
+        {
+            roleName,
+            permissions
+        });
+    }
+
+    private async Task<CreatedUserDto> CreateUserAsync(string userName, string roleName)
+    {
+        return await PostJsonAsync<CreatedUserDto>("/api/identity/user", new
+        {
+            userName,
+            password = "Password123!",
+            roleName
+        });
+    }
+
+    private async Task AuthenticateAsAdminAsync()
+    {
+        await AuthenticateAsync(_fixture.BootstrapAdminUserName, _fixture.BootstrapAdminPassword);
+    }
+
+    private async Task AuthenticateAsync(string userName, string password)
+    {
+        var result = await PostJsonAsync<LoginUserDto>("/api/identity/login", new
+        {
+            username = userName,
+            password
+        });
+        _fixture.SetAuthToken(result.Token);
+    }
+
+    private async Task<T> PostJsonAsync<T>(string uri, object payload)
+    {
+        using var response = await _fixture.HttpClient.PostAsJsonAsync(uri, payload, JsonOptions);
+        var body = await response.Content.ReadAsStringAsync();
+        response.IsSuccessStatusCode.Should().BeTrue($"POST '{uri}' failed: {body}");
+        return JsonSerializer.Deserialize<T>(body, JsonOptions)!;
+    }
+
+    private static async Task<T> ReadJsonAsync<T>(HttpResponseMessage response)
+    {
+        return (await response.Content.ReadFromJsonAsync<T>(JsonOptions))!;
+    }
+
+    private sealed record LoginUserDto(string UserName, string Token);
+
+    private sealed record CreatedRoleDto(
+        string RoleId,
+        string RoleName,
+        IReadOnlyCollection<string> Permissions,
+        bool IsSystemRole,
+        int AssignedUserCount);
+
+    private sealed record CreatedUserDto(
+        string UserId,
+        string UserName,
+        string RoleName,
+        bool IsEnabled,
+        string Status);
+
+    private sealed record ProblemDetailsDto(
+        string? Title,
+        string? Detail,
+        int? Status,
+        string? Code,
+        IReadOnlyCollection<string> MissingPermissions);
+}

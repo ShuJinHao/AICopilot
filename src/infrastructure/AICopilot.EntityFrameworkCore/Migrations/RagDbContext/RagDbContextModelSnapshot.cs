@@ -245,6 +245,14 @@ namespace AICopilot.EntityFrameworkCore.Migrations.RagDbContext
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<string>("AccessScope")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasDefaultValue("OwnerOnly")
+                        .HasColumnName("access_scope");
+
                     b.Property<string>("Description")
                         .IsRequired()
                         .HasMaxLength(1000)
@@ -261,6 +269,10 @@ namespace AICopilot.EntityFrameworkCore.Migrations.RagDbContext
                         .HasColumnType("character varying(200)")
                         .HasColumnName("name");
 
+                    b.Property<Guid?>("OwnerUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("owner_user_id");
+
                     b.Property<uint>("RowVersion")
                         .IsConcurrencyToken()
                         .ValueGeneratedOnAddOrUpdate()
@@ -268,6 +280,9 @@ namespace AICopilot.EntityFrameworkCore.Migrations.RagDbContext
                         .HasColumnName("xmin");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("OwnerUserId")
+                        .HasDatabaseName("ix_knowledge_bases_owner_user_id");
 
                     b.ToTable("knowledge_bases", "rag");
                 });
@@ -325,7 +340,10 @@ namespace AICopilot.EntityFrameworkCore.Migrations.RagDbContext
 
                     b.HasIndex("ProcessedOnUtc", "DeadLetteredOnUtc", "NextAttemptUtc");
 
-                    b.ToTable("outbox_messages", "outbox", t => t.ExcludeFromMigrations());
+                    b.ToTable("outbox_messages", "outbox", t =>
+                        {
+                            t.ExcludeFromMigrations();
+                        });
                 });
 
             modelBuilder.Entity("AICopilot.Core.Rag.Aggregates.KnowledgeBase.Document", b =>

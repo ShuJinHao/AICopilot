@@ -20,7 +20,7 @@ public record EmbeddingModelDto
     public int MaxTokens { get; init; }
     public bool IsEnabled { get; init; }
     public bool HasApiKey { get; init; }
-    public string? ApiKeyMasked { get; init; }
+    public string? ApiKeyPreview { get; init; }
 }
 
 public record CreatedEmbeddingModelDto(Guid Id, string Name);
@@ -38,6 +38,7 @@ public record CreateEmbeddingModelCommand(
 
 public class CreateEmbeddingModelCommandHandler(
     IRepository<EmbeddingModel> repository,
+    ISecretProtector secretProtector,
     IAuditLogWriter auditLogWriter)
     : ICommandHandler<CreateEmbeddingModelCommand, Result<CreatedEmbeddingModelDto>>
 {
@@ -52,7 +53,7 @@ public class CreateEmbeddingModelCommandHandler(
             request.ModelName,
             request.Dimensions,
             request.MaxTokens,
-            request.ApiKey,
+            ProtectApiKey(request.ApiKey),
             request.IsEnabled);
 
         repository.Add(entity);
@@ -86,6 +87,13 @@ public class CreateEmbeddingModelCommandHandler(
 
         return Result.Success(new CreatedEmbeddingModelDto(entity.Id, entity.Name));
     }
+
+    private string? ProtectApiKey(string? apiKey)
+    {
+        return string.IsNullOrWhiteSpace(apiKey)
+            ? null
+            : secretProtector.Protect(apiKey.Trim());
+    }
 }
 
 [AuthorizeRequirement("Rag.UpdateEmbeddingModel")]
@@ -102,6 +110,7 @@ public record UpdateEmbeddingModelCommand(
 
 public class UpdateEmbeddingModelCommandHandler(
     IRepository<EmbeddingModel> repository,
+    ISecretProtector secretProtector,
     IAuditLogWriter auditLogWriter)
     : ICommandHandler<UpdateEmbeddingModelCommand, Result>
 {
@@ -113,7 +122,9 @@ public class UpdateEmbeddingModelCommandHandler(
             return Result.NotFound();
         }
 
-        var apiKey = request.ApiKey ?? entity.ApiKey;
+        var apiKey = request.ApiKey is null
+            ? entity.ApiKey
+            : ProtectApiKey(request.ApiKey);
         var changedFields = BuildChangedFields(entity, request, apiKey);
 
         entity.Update(
@@ -140,6 +151,13 @@ public class UpdateEmbeddingModelCommandHandler(
             cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
         return Result.Success();
+    }
+
+    private string? ProtectApiKey(string? apiKey)
+    {
+        return string.IsNullOrWhiteSpace(apiKey)
+            ? null
+            : secretProtector.Protect(apiKey.Trim());
     }
 
     private static IReadOnlyCollection<string> BuildChangedFields(
@@ -275,7 +293,7 @@ internal static class EmbeddingModelDtoMapper
             MaxTokens = model.MaxTokens,
             IsEnabled = model.IsEnabled,
             HasApiKey = !string.IsNullOrEmpty(model.ApiKey),
-            ApiKeyMasked = string.IsNullOrEmpty(model.ApiKey) ? null : "******"
+            ApiKeyPreview = string.IsNullOrEmpty(model.ApiKey) ? null : "******"
         };
     }
 }

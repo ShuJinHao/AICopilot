@@ -4,6 +4,7 @@ using AICopilot.AiGatewayService.Agents;
 using AICopilot.AiGatewayService.Safety;
 using AICopilot.AiGatewayService.Workflows;
 using AICopilot.AiGatewayService.Workflows.Executors;
+using AICopilot.Core.AiGateway.Aggregates.Sessions;
 using AICopilot.Services.Contracts;
 using AICopilot.Services.Contracts.AiGateway.Dtos;
 using AICopilot.SharedKernel.Ai;
@@ -251,6 +252,26 @@ public sealed class AiEvalBehaviorGuardrailTests
     }
 
     [Fact]
+    public void FinalPromptEval_ShouldRedactOriginalQuestionWhenRecipeDataReadIsBlocked()
+    {
+        var prompt = InvokeBuildFinalUserPrompt(
+            new GenerationContext
+            {
+                Request = new ChatStreamRequest(Guid.NewGuid(), "列出设备 DEV-001 的配方"),
+                Scene = ManufacturingSceneType.DeviceAnomalyDiagnosis,
+                DataAnalysisContext = "[系统提示]: 当前 AI 不读取云端配方主数据或配方版本数据。可以回答配方版本规则问题，但不能查询具体配方、设备配方清单或版本记录。"
+            },
+            "列出设备 DEV-001 的配方",
+            out var hasContext);
+
+        hasContext.Should().BeTrue();
+        prompt.Should().Contain("当前 AI 不读取云端配方主数据或配方版本数据");
+        prompt.Should().Contain("已按安全边界移除原始问题文本");
+        prompt.Should().NotContain("DEV-001");
+        prompt.Should().NotContain("Recipe-Cut-01");
+    }
+
+    [Fact]
     public void FinalPromptEval_ShouldRejectCloudWriteRequestsWithoutExpandingToolBoundary()
     {
         var prompt = InvokeBuildFinalUserPrompt(
@@ -345,9 +366,9 @@ public sealed class AiEvalBehaviorGuardrailTests
             BindingFlags.NonPublic | BindingFlags.Instance);
 
         method.Should().NotBeNull();
-        object?[] arguments = [genContext, originalMessage, false];
+        object?[] arguments = [genContext, originalMessage, Array.Empty<Message>(), false];
         var prompt = (string)method!.Invoke(executor, arguments)!;
-        hasContext = (bool)arguments[2]!;
+        hasContext = (bool)arguments[3]!;
         return prompt;
     }
 

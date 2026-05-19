@@ -65,7 +65,10 @@ public sealed class FinalAgentContextSerializer(
             agentContext.RunOptions.Options.Temperature,
             toolNames,
             serializedThread,
-            pendingApprovals);
+            pendingApprovals)
+        {
+            ExecutionMetadata = agentContext.ExecutionMetadata
+        };
     }
 
     public async Task<FinalAgentContext> RestoreAsync(
@@ -82,12 +85,20 @@ public sealed class FinalAgentContextSerializer(
         }
 
         var tools = await approvalToolResolver.GetToolsByNamesAsync(storedContext.ToolNames, cancellationToken);
-        ScopedRuntimeAgent? scopedAgent = await chatAgentFactory.CreateAgentAsync(
-            session.TemplateId,
-            options =>
-            {
-                options.Tools = tools;
-            });
+        ScopedRuntimeAgent? scopedAgent = storedContext.ExecutionMetadata.FinalModelId.HasValue
+            ? await chatAgentFactory.CreateAgentAsync(
+                session.TemplateId,
+                new LanguageModelId(storedContext.ExecutionMetadata.FinalModelId.Value),
+                options =>
+                {
+                    options.Tools = tools;
+                })
+            : await chatAgentFactory.CreateAgentAsync(
+                session.TemplateId,
+                options =>
+                {
+                    options.Tools = tools;
+                });
 
         try
         {
@@ -113,7 +124,8 @@ public sealed class FinalAgentContextSerializer(
                 SessionId = storedContext.SessionId,
                 EstimatedInputTokens = storedContext.EstimatedInputTokens,
                 SystemPromptTokenCount = storedContext.SystemPromptTokenCount,
-                TokenTelemetryContext = storedContext.TokenTelemetryContext
+                TokenTelemetryContext = storedContext.TokenTelemetryContext,
+                ExecutionMetadata = storedContext.ExecutionMetadata
             };
 
             foreach (var approval in storedContext.PendingApprovals)

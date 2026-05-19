@@ -199,7 +199,22 @@ public sealed class IdentityAccessManagementTests
                 "AiGateway.CreateSession",
                 "AiGateway.GetSession",
                 "AiGateway.GetListSessions",
+                "AiGateway.RenameSession",
+                "AiGateway.GetAgentTask",
+                "AiGateway.PlanAgentTask",
+                "AiGateway.ApproveAgentTaskPlan",
+                "AiGateway.RunAgentTask",
+                "AiGateway.CancelAgentTask",
+                "AiGateway.Upload",
+                "AiGateway.GetUpload",
+                "AiGateway.GetWorkspace",
+                "AiGateway.DownloadArtifact",
+                "AiGateway.EditArtifact",
+                "AiGateway.SubmitFinalReview",
                 "AiGateway.Chat");
+            profile.Permissions.Should().NotContain("AiGateway.ApproveAgentToolCall");
+            profile.Permissions.Should().NotContain("AiGateway.ApproveFinalOutput");
+            profile.Permissions.Should().NotContain("AiGateway.FinalizeWorkspace");
 
             var createdSession = await PostJsonAsync<CreatedSessionDto>("/api/aigateway/session", new
             {

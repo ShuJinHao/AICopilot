@@ -26,6 +26,14 @@ public class ConversationTemplateConfiguration : IEntityTypeConfiguration<Conver
             .HasMaxLength(200)
             .HasColumnName("name");
 
+        builder.Property(ct => ct.Code)
+            .HasMaxLength(100)
+            .HasColumnName("code");
+
+        builder.HasIndex(ct => ct.Code)
+            .IsUnique()
+            .HasFilter("code IS NOT NULL");
+
         // 唯一约束
         builder.HasIndex(ct => ct.Name)
             .IsUnique();
@@ -42,6 +50,20 @@ public class ConversationTemplateConfiguration : IEntityTypeConfiguration<Conver
             .HasConversion(id => id.Value, value => new LanguageModelId(value))
             .IsRequired()
             .HasColumnName("model_id");
+
+        builder.Property(ct => ct.Scope)
+            .HasConversion<string>()
+            .HasMaxLength(50)
+            .IsRequired()
+            .HasColumnName("scope");
+
+        builder.Property(ct => ct.BuiltInVersion)
+            .IsRequired()
+            .HasColumnName("built_in_version");
+
+        builder.Property(ct => ct.IsBuiltIn)
+            .IsRequired()
+            .HasColumnName("is_built_in");
 
         builder.Property(ct => ct.IsEnabled)
             .IsRequired()

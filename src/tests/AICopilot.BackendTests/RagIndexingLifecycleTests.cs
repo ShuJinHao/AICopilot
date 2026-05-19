@@ -28,6 +28,8 @@ public sealed class RagIndexingLifecycleTests
             fileStorage,
             new FixedDocumentFormatPolicy([".txt", ".md", ".pdf"]),
             eventStager,
+            new CapturingAuditLogWriter(),
+            new TestCurrentUser(role: "Admin"),
             NullLogger<UploadDocumentCommandHandler>.Instance);
 
         var result = await handler.Handle(
@@ -53,6 +55,8 @@ public sealed class RagIndexingLifecycleTests
             new CapturingFileStorage(),
             new FixedDocumentFormatPolicy([".txt"]),
             eventStager,
+            new CapturingAuditLogWriter(),
+            new TestCurrentUser(role: "Admin"),
             NullLogger<UploadDocumentCommandHandler>.Instance);
 
         var result = await handler.Handle(
@@ -90,6 +94,8 @@ public sealed class RagIndexingLifecycleTests
             new CapturingFileStorage(),
             new FixedDocumentFormatPolicy([".txt"]),
             eventStager,
+            new CapturingAuditLogWriter(),
+            new TestCurrentUser(role: "Admin"),
             NullLogger<UploadDocumentCommandHandler>.Instance);
 
         var result = await handler.Handle(
@@ -120,6 +126,8 @@ public sealed class RagIndexingLifecycleTests
             fileStorage,
             new FixedDocumentFormatPolicy([".txt"]),
             new ThrowingEventStager(new InvalidOperationException("stage failed")),
+            new CapturingAuditLogWriter(),
+            new TestCurrentUser(role: "Admin"),
             NullLogger<UploadDocumentCommandHandler>.Instance);
 
         Func<Task> act = async () => await handler.Handle(
@@ -148,6 +156,8 @@ public sealed class RagIndexingLifecycleTests
             fileStorage,
             new FixedDocumentFormatPolicy([".txt"]),
             eventStager,
+            new CapturingAuditLogWriter(),
+            new TestCurrentUser(role: "Admin"),
             NullLogger<UploadDocumentCommandHandler>.Instance);
 
         Func<Task> act = async () => await handler.Handle(
@@ -178,6 +188,8 @@ public sealed class RagIndexingLifecycleTests
             fileStorage,
             new FixedDocumentFormatPolicy([".txt"]),
             eventStager,
+            new CapturingAuditLogWriter(),
+            new TestCurrentUser(role: "Admin"),
             NullLogger<UploadDocumentCommandHandler>.Instance);
 
         var result = await handler.Handle(
@@ -271,7 +283,8 @@ public sealed class RagIndexingLifecycleTests
         var auditLogWriter = new CapturingAuditLogWriter();
         var handler = new UpdateDocumentGovernanceCommandHandler(
             new MutableKnowledgeBaseRepository(knowledgeBase),
-            auditLogWriter);
+            auditLogWriter,
+            new TestCurrentUser(role: "Admin"));
 
         var result = await handler.Handle(
             new UpdateDocumentGovernanceCommand(
@@ -307,7 +320,8 @@ public sealed class RagIndexingLifecycleTests
         var (_, document) = CreateKnowledgeBaseWithDocument();
         var handler = new UpdateDocumentGovernanceCommandHandler(
             new MutableKnowledgeBaseRepository(),
-            new CapturingAuditLogWriter());
+            new CapturingAuditLogWriter(),
+            new TestCurrentUser(role: "Admin"));
 
         var result = await handler.Handle(
             new UpdateDocumentGovernanceCommand(
@@ -330,7 +344,8 @@ public sealed class RagIndexingLifecycleTests
         var (_, document) = CreateKnowledgeBaseWithDocument();
         var handler = new UpdateDocumentGovernanceCommandHandler(
             new MutableKnowledgeBaseRepository(),
-            new CapturingAuditLogWriter());
+            new CapturingAuditLogWriter(),
+            new TestCurrentUser(role: "Admin"));
 
         var result = await handler.Handle(
             new UpdateDocumentGovernanceCommand(
@@ -356,7 +371,8 @@ public sealed class RagIndexingLifecycleTests
         var handler = new DeleteDocumentCommandHandler(
             new MutableKnowledgeBaseRepository(knowledgeBase),
             eventStager,
-            auditLogWriter);
+            auditLogWriter,
+            new TestCurrentUser(role: "Admin"));
 
         var result = await handler.Handle(new DeleteDocumentCommand(document.Id), CancellationToken.None);
 
@@ -382,7 +398,8 @@ public sealed class RagIndexingLifecycleTests
         var handler = new DeleteDocumentCommandHandler(
             new MutableKnowledgeBaseRepository(),
             eventStager,
-            auditLogWriter);
+            auditLogWriter,
+            new TestCurrentUser(role: "Admin"));
 
         var result = await handler.Handle(new DeleteDocumentCommand(404), CancellationToken.None);
 

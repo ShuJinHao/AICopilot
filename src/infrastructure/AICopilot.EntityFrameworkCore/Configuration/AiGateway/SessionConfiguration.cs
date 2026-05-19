@@ -20,9 +20,21 @@ public class SessionConfiguration : IEntityTypeConfiguration<Session>
 
         // 配置属性
         builder.Property(s => s.Title)
-            .HasMaxLength(20)
+            .HasMaxLength(Session.MaxTitleLength)
             .IsRequired()
             .HasColumnName("title");
+
+        builder.Property(s => s.LastMessageSummary)
+            .HasMaxLength(Session.MaxMessageSummaryLength)
+            .HasColumnName("last_message_summary");
+
+        builder.Property(s => s.LastMessageAt)
+            .HasColumnType("timestamp with time zone")
+            .HasColumnName("last_message_at");
+
+        builder.Property(s => s.MessageCount)
+            .IsRequired()
+            .HasColumnName("message_count");
 
         builder.Property(s => s.TemplateId)
             .HasConversion(id => id.Value, value => new ConversationTemplateId(value))

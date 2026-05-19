@@ -9,7 +9,7 @@ import {
 import { useAuthStore } from '@/stores/authStore'
 import { useDialogCrud } from '@/stores/useDialogCrud'
 import type { ConfigDomainStates } from '@/stores/config/configStoreTypes'
-import type { LanguageModelFormModel, LanguageModelSummary } from '@/types/app'
+import type { LanguageModelFormModel, LanguageModelSummary, LanguageModelUsage } from '@/types/app'
 
 export function useLanguageModelConfigDomain(states: ConfigDomainStates) {
   const authStore = useAuthStore()
@@ -42,10 +42,13 @@ export function useLanguageModelConfigDomain(states: ConfigDomainStates) {
       const payload = {
         ...form,
         provider: form.provider.trim(),
+        protocolType: form.protocolType.trim(),
         name: form.name.trim(),
         baseUrl: form.baseUrl.trim(),
         apiKey: form.apiKeyAction === 'replace' ? form.apiKey.trim() : '',
-        clearApiKey: form.apiKeyAction === 'clear'
+        clearApiKey: form.apiKeyAction === 'clear',
+        maxTokens: form.contextWindowTokens,
+        usages: form.usages.length > 0 ? form.usages : (['Chat'] as LanguageModelUsage[])
       }
 
       if (mode === 'create') {

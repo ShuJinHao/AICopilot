@@ -115,8 +115,9 @@ const providerFallbackRoutes = computed(() => store.providerReliability?.fallbac
   min-width: 0;
   padding: 10px;
   border: 1px solid var(--app-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--app-surface-muted);
+  box-shadow: var(--shadow-sm);
 }
 
 .policy-lists {

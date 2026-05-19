@@ -4,6 +4,7 @@ using AICopilot.Embedding;
 using AICopilot.EntityFrameworkCore;
 using AICopilot.EntityFrameworkCore.Outbox;
 using AICopilot.EventBus;
+using AICopilot.Infrastructure.Artifacts;
 using AICopilot.Infrastructure.AiGateway;
 using AICopilot.Infrastructure.Authentication;
 using AICopilot.Infrastructure.CloudIdentity;
@@ -12,8 +13,8 @@ using AICopilot.Infrastructure.Mcp;
 using AICopilot.Infrastructure.Rag;
 using AICopilot.Infrastructure.Rag.Parsers;
 using AICopilot.Infrastructure.Rag.TokenCounter;
+using AICopilot.Infrastructure.Security;
 using AICopilot.Infrastructure.Storage;
-using AICopilot.AiGatewayService.Safety;
 using AICopilot.Services.Contracts;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -27,6 +28,7 @@ public static class DependencyInjection
 {
     public static void AddInfrastructures(this IHostApplicationBuilder builder)
     {
+        builder.AddSecretProtection();
         builder.AddEfCore();
         builder.AddDapper();
         builder.AddEmbedding();
@@ -35,10 +37,15 @@ public static class DependencyInjection
         builder.AddAiRuntime();
 
         builder.Services.AddSingleton<IFileStorageService, LocalFileStorageService>();
+        builder.Services.AddSingleton<IArtifactWorkspaceFileStore, LocalArtifactWorkspaceFileStore>();
+        builder.Services.AddSingleton<IAgentTableFileParser, AgentTableFileParser>();
+        builder.Services.AddSingleton<IAgentArtifactDocumentGenerator, AgentArtifactDocumentGenerator>();
         builder.Services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
         builder.Services.AddHttpClient<ICloudIdentityStatusClient, CloudIdentityStatusClient>();
         builder.Services.AddHttpClient<ICloudAiReadClient, CloudAiReadClient>();
         builder.Services.AddScoped<IChatClientProvider, OpenAiChatClientProvider>();
+        builder.Services.AddScoped<IChatClientProvider, AnthropicChatClientProvider>();
+        builder.Services.AddScoped<ILanguageModelConnectivityTester, LanguageModelConnectivityTester>();
         builder.Services.AddSingleton<ITextTokenEstimator, SharpTokenTextTokenEstimator>();
         builder.AddDocumentParsers();
         builder.Services.AddSingleton<ISessionExecutionLock>(serviceProvider =>
@@ -61,6 +68,10 @@ public static class DependencyInjection
         {
             client.Timeout = TimeSpan.FromSeconds(30);
         });
+        builder.Services.AddHttpClient("Anthropic", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
         builder.AddFinalAgentContextStore();
     }
 
@@ -77,6 +88,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<McpServerBootstrap>();
         builder.Services.AddScoped<IMcpServerBootstrap>(sp => sp.GetRequiredService<McpServerBootstrap>());
         builder.Services.AddScoped<IMcpRuntimeRegistrationProvider>(sp => sp.GetRequiredService<McpServerBootstrap>());
+        builder.Services.AddScoped<McpToolRegistrySynchronizer>();
         builder.Services.AddSingleton<McpRuntimeRegistrySynchronizer>();
         builder.Services.AddHostedService<McpServerManager>();
     }
@@ -85,6 +97,7 @@ public static class DependencyInjection
         this IHostApplicationBuilder builder,
         Assembly consumerAssembly)
     {
+        builder.AddSecretProtection();
         builder.AddEfCore();
         builder.AddEventBus(consumerAssembly);
         builder.AddEmbedding();
@@ -96,6 +109,11 @@ public static class DependencyInjection
         builder.Services.AddSingleton<IDocumentTextSplitter, TextSplitterService>();
         builder.Services.AddScoped<IDocumentContentExtractor, DocumentContentExtractor>();
         builder.Services.AddScoped<IKnowledgeVectorIndexWriter, KnowledgeVectorIndexWriter>();
+    }
+
+    private static void AddSecretProtection(this IHostApplicationBuilder builder)
+    {
+        builder.Services.AddSingleton<ISecretProtector, SecretProtector>();
     }
 
     private static void AddDocumentParsers(this IHostApplicationBuilder builder)

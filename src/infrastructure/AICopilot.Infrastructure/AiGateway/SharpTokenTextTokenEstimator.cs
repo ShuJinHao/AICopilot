@@ -1,4 +1,4 @@
-using AICopilot.AiGatewayService.Safety;
+using AICopilot.Services.Contracts;
 using SharpToken;
 
 namespace AICopilot.Infrastructure.AiGateway;
