@@ -1,17 +1,17 @@
 # A助理前后端 Integration 分支说明
 
-日期：2026-05-18
+日期：2026-05-19
 
 ## 分支
 
-建议分支：`integration/aicopilot-agent-workbench-simulation`
+当前分支：`integration/aicopilot-agent-workbench-simulation`
 
-合并来源固定为：
+创建基线：
 
 ```text
-main
-+ 后端 Simulation Runtime PR #46
-+ 前端 Agent Workbench PR
+origin/main @ eb75372
++ 已合并后端 Simulation Runtime PR #46
++ 已合并 Agent Workbench Simulation RC PR #47
 ```
 
 ## 运行边界
@@ -46,8 +46,25 @@ main
 }
 ```
 
+本次本地联调使用 `AppHost__PersistentContainers=false` 启动临时 fresh Docker 资源，避免复用本机已有 `postgres-aicopilot` 持久化卷。未删除、重置或修改任何既有 Docker volume。
+
+运行入口：
+
+- Dashboard：`http://localhost:15132`
+- HttpApi：`http://localhost:5181`
+- Web UI：`http://localhost:54253`
+
 ## 验收入口
 
 - 前端：`npm run build`、`npm run test:unit`、`npm run test:smoke`
 - 后端：`scripts/Run-AgentSimulationAcceptance.ps1`
 - Scope guard：`scripts/Test-AgentWorkbenchReleaseCandidateScope.ps1`
+
+## 2026-05-19 联调状态
+
+- Docker：可用，Linux 模式。
+- AppHost：临时 fresh 环境启动成功，`aicopilot-httpapi`、`data-worker`、`rag-worker`、`aicopilot-webui` 均运行。
+- Simulation Runtime：已通过真实 HttpApi + DataWorker 跑通 CloudReadonly Simulation 任务闭环。
+- 前端：已用真实 Web UI 登录、查看任务、产物、Run Queue、Worker Status，并通过 UI 下载 artifact。
+- RAG：已用本地 fake embedding endpoint 验证知识库创建、文档上传、索引、检索预览。
+- Real CloudReadonly：未启用。
