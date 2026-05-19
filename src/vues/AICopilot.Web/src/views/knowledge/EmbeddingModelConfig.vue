@@ -1,83 +1,90 @@
 <script setup lang="ts">
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus } from 'lucide-vue-next'
+import AiActionGroup from '@/components/ai/AiActionGroup.vue'
+import AiButton from '@/components/ai/AiButton.vue'
+import AiDrawer from '@/components/ai/AiDrawer.vue'
+import AiInput from '@/components/ai/AiInput.vue'
+import AiNumberInput from '@/components/ai/AiNumberInput.vue'
+import AiSwitch from '@/components/ai/AiSwitch.vue'
+import AiTag from '@/components/ai/AiTag.vue'
+import AiTableCard from '@/components/ai/AiTableCard.vue'
+import { confirmAiAction, showAiToast } from '@/composables/useAiFeedback'
 import { useRagStore } from '@/stores/ragStore'
 
 const store = useRagStore()
 
-async function confirmDelete(title: string, action: () => Promise<void>) {
-  await ElMessageBox.confirm(title, '确认操作', {
-    type: 'warning',
-    confirmButtonText: '确认',
-    cancelButtonText: '取消'
-  })
+async function confirmDelete(message: string, action: () => Promise<void>) {
+  if (!(await confirmAiAction(message, '确认操作'))) return
   await action()
-  ElMessage.success('操作已完成')
+  showAiToast('success', '操作已完成')
 }
 </script>
 
 <template>
-  <section class="panel">
+  <section class="config-panel">
     <div class="panel-header">
       <div>
-        <h2 class="panel-title">嵌入模型</h2>
-        <p class="panel-subtitle">知识库向量化使用的模型配置。</p>
+        <h2>嵌入模型</h2>
+        <p>知识库向量化使用的模型配置。</p>
       </div>
-      <el-button type="primary" :icon="Plus" @click="store.openCreateEmbeddingModelDialog()">新增模型</el-button>
+      <AiButton variant="primary" @click="store.openCreateEmbeddingModelDialog()">
+        <Plus class="h-4 w-4" />
+        新增模型
+      </AiButton>
     </div>
-    <el-table :data="store.embeddingModels" stripe>
-      <el-table-column prop="name" label="名称" min-width="160" />
-      <el-table-column prop="provider" label="服务商" width="120" />
-      <el-table-column prop="modelName" label="模型" min-width="180" />
-      <el-table-column prop="dimensions" label="维度" width="90" />
-      <el-table-column label="状态" width="100">
-        <template #default="{ row }">
-          <el-tag :type="row.isEnabled ? 'success' : 'info'">{{ row.isEnabled ? '启用' : '停用' }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="150" fixed="right">
-        <template #default="{ row }">
-          <div class="table-actions">
-            <el-button link type="primary" @click="store.openEditEmbeddingModelDialog(row.id)">编辑</el-button>
-            <el-button
-              link
-              type="danger"
-              @click="confirmDelete(`确认删除模型 ${row.name}？`, () => store.deleteEmbeddingModel(row.id))"
-            >
-              删除
-            </el-button>
-          </div>
-        </template>
-      </el-table-column>
-    </el-table>
+    <AiTableCard :empty="store.embeddingModels.length === 0" empty-text="暂无嵌入模型">
+      <table class="ai-table">
+        <thead>
+          <tr>
+            <th>名称</th>
+            <th>服务商</th>
+            <th>模型</th>
+            <th>维度</th>
+            <th>状态</th>
+            <th class="right">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="row in store.embeddingModels" :key="row.id">
+            <td>{{ row.name }}</td>
+            <td>{{ row.provider }}</td>
+            <td>{{ row.modelName }}</td>
+            <td>{{ row.dimensions }}</td>
+            <td><AiTag :tone="row.isEnabled ? 'success' : 'neutral'">{{ row.isEnabled ? '启用' : '停用' }}</AiTag></td>
+            <td>
+              <AiActionGroup>
+                <AiButton size="sm" @click="store.openEditEmbeddingModelDialog(row.id)">编辑</AiButton>
+                <AiButton size="sm" variant="danger" @click="confirmDelete(`确认删除模型 ${row.name}？`, () => store.deleteEmbeddingModel(row.id))">
+                  删除
+                </AiButton>
+              </AiActionGroup>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </AiTableCard>
   </section>
 
-  <el-drawer v-model="store.dialogStates.embeddingModel" size="560px" title="嵌入模型">
-    <el-form label-position="top">
-      <el-form-item label="名称"><el-input v-model="store.currentEmbeddingModel.name" /></el-form-item>
-      <el-form-item label="服务商"><el-input v-model="store.currentEmbeddingModel.provider" /></el-form-item>
-      <el-form-item label="接口地址"><el-input v-model="store.currentEmbeddingModel.baseUrl" /></el-form-item>
-      <el-form-item label="模型名称"><el-input v-model="store.currentEmbeddingModel.modelName" /></el-form-item>
-      <el-form-item label="密钥">
-        <el-input v-model="store.currentEmbeddingModel.apiKey" type="password" show-password />
-      </el-form-item>
-      <el-form-item label="维度"><el-input-number v-model="store.currentEmbeddingModel.dimensions" :min="1" /></el-form-item>
-      <el-form-item label="最大令牌数">
-        <el-input-number v-model="store.currentEmbeddingModel.maxTokens" :min="1" />
-      </el-form-item>
-      <el-form-item label="启用"><el-switch v-model="store.currentEmbeddingModel.isEnabled" /></el-form-item>
-    </el-form>
-    <template #footer>
-      <el-button @click="store.closeEmbeddingModelDialog()">取消</el-button>
-      <el-button type="primary" :loading="store.submittingStates.embeddingModel" @click="store.saveEmbeddingModel()">
-        保存
-      </el-button>
-    </template>
-  </el-drawer>
+  <AiDrawer v-model="store.dialogStates.embeddingModel" title="嵌入模型" width="580px">
+    <div class="ai-form">
+      <label><span>名称</span><AiInput v-model="store.currentEmbeddingModel.name" /></label>
+      <label><span>服务商</span><AiInput v-model="store.currentEmbeddingModel.provider" /></label>
+      <label><span>接口地址</span><AiInput v-model="store.currentEmbeddingModel.baseUrl" /></label>
+      <label><span>模型名称</span><AiInput v-model="store.currentEmbeddingModel.modelName" /></label>
+      <label><span>密钥</span><AiInput v-model="store.currentEmbeddingModel.apiKey" type="password" autocomplete="new-password" /></label>
+      <label><span>维度</span><AiNumberInput v-model="store.currentEmbeddingModel.dimensions" :min="1" /></label>
+      <label><span>最大令牌数</span><AiNumberInput v-model="store.currentEmbeddingModel.maxTokens" :min="1" /></label>
+      <div class="form-row"><span>启用</span><AiSwitch v-model="store.currentEmbeddingModel.isEnabled" /></div>
+      <footer>
+        <AiButton @click="store.closeEmbeddingModelDialog()">取消</AiButton>
+        <AiButton variant="primary" :disabled="store.submittingStates.embeddingModel" @click="store.saveEmbeddingModel()">
+          {{ store.submittingStates.embeddingModel ? '保存中' : '保存' }}
+        </AiButton>
+      </footer>
+    </div>
+  </AiDrawer>
 </template>
 
 <style scoped>
-:deep(.el-drawer__body) {
-  overflow: auto;
-}
+@import './shared-knowledge.css';
 </style>

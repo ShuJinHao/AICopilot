@@ -1,77 +1,111 @@
-﻿<script setup lang="ts">
-import { Opportunity } from '@element-plus/icons-vue';
-import type {IntentResult} from "@/types/protocols.ts";
+<script setup lang="ts">
+import { BrainCircuit } from 'lucide-vue-next'
+import AiTag from '@/components/ai/AiTag.vue'
+import type { IntentResult } from '@/types/protocols'
 
 defineProps<{
   intents: IntentResult[]
-}>();
+}>()
 
-const getIntentColor = (confidence: number) => {
-  if (confidence > 0.8) return 'success';
-  if (confidence > 0.5) return 'warning';
-  return 'danger';
-};
+function getIntentTone(confidence: number) {
+  if (confidence > 0.8) return 'success'
+  if (confidence > 0.5) return 'warning'
+  return 'danger'
+}
 </script>
 
 <template>
-  <div class="block-intent">
-    <el-collapse :model-value="[]">
-      <el-collapse-item name="intent">
-        <template #title>
-          <div class="intent-header">
-            <el-icon><Opportunity /></el-icon>
-            <span class="label">意图识别</span>
-            <div class="intent-tags" v-if="intents.length > 0">
-              <template v-for="(item) in intents">
-                <el-tag
-                  size="small"
-                  :type="getIntentColor(item.confidence)"
-                  effect="light"
-                  class="ml-2 intent-tag"
-                >
-                  {{ item.intent }} {{ (item.confidence * 100).toFixed(0) }}%
-                </el-tag>
-              </template>
-            </div>
-          </div>
-        </template>
+  <details class="block-intent">
+    <summary>
+      <BrainCircuit class="h-4 w-4" />
+      <span class="label">意图识别</span>
+      <div v-if="intents.length > 0" class="intent-tags">
+        <AiTag v-for="item in intents" :key="`${item.intent}-${item.confidence}`" :tone="getIntentTone(item.confidence)">
+          {{ item.intent }} {{ (item.confidence * 100).toFixed(0) }}%
+        </AiTag>
+      </div>
+    </summary>
 
-        <div class="intent-body" v-if="intents.length > 0">
-          <div v-for="(item, idx) in intents" :key="idx" class="intent-item">
-            <div class="info-row">
-              <span class="label">意图:</span>
-              <span class="value"><strong>{{ item.intent }}</strong></span>
-            </div>
-            <div class="info-row" v-if="item.query">
-              <span class="label">关键词:</span>
-              <span class="value">{{ item.query }}</span>
-            </div>
-            <div class="info-row" v-if="item.reasoning">
-              <span class="label">推理:</span>
-              <span class="value">{{ item.reasoning }}</span>
-            </div>
-            <el-divider v-if="idx < intents.length - 1" class="intent-divider"/>
-          </div>
+    <div v-if="intents.length > 0" class="intent-body">
+      <div v-for="(item, idx) in intents" :key="idx" class="intent-item">
+        <div class="info-row">
+          <span>意图</span>
+          <strong>{{ item.intent }}</strong>
         </div>
-      </el-collapse-item>
-    </el-collapse>
-  </div>
+        <div v-if="item.query" class="info-row">
+          <span>关键词</span>
+          <em>{{ item.query }}</em>
+        </div>
+        <div v-if="item.reasoning" class="info-row">
+          <span>推理</span>
+          <em>{{ item.reasoning }}</em>
+        </div>
+      </div>
+    </div>
+  </details>
 </template>
 
 <style scoped>
-.block-intent { background: var(--app-surface); border-radius: var(--radius-md); border: 1px solid var(--app-border); overflow: hidden; }
-.intent-header { display: flex; align-items: center; padding-left: 10px; color: var(--app-text-muted); width: 100%; }
-.intent-tags { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; margin-left: 10px; }
-.label { font-size: 13px; font-weight: 500; margin-right: 8px; white-space: nowrap; }
-.intent-body { padding: 10px 15px; background-color: var(--app-surface-muted); font-size: 13px; color: var(--app-text); }
-.intent-divider { margin: 8px 0; border-top: 1px dashed var(--app-border); }
-.info-row { margin-bottom: 4px; display: flex; }
-.info-row .label { color: var(--app-text-muted); width: 60px; flex-shrink: 0; }
+.block-intent {
+  overflow: hidden;
+  border: 1px solid var(--ai-border);
+  border-radius: 18px;
+  background: var(--ai-surface);
+}
 
-@keyframes rotating { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+summary {
+  display: flex;
+  min-height: 44px;
+  cursor: pointer;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  color: var(--ai-text-muted);
+  font-size: 13px;
+  font-weight: 900;
+}
 
-/* 覆盖 Element Plus */
-:deep(.el-collapse-item__header) { height: auto; min-height: 40px; border-bottom: 1px solid var(--app-border); background: var(--app-surface); color: var(--app-text); }
-:deep(.el-collapse-item__content) { padding-bottom: 0; background: var(--app-surface); }
-:deep(.el-collapse) { border: none; }
+.intent-tags {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.intent-body {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid var(--ai-border);
+  background: var(--ai-surface-soft);
+  padding: 12px;
+  font-size: 13px;
+}
+
+.intent-item {
+  display: grid;
+  gap: 5px;
+}
+
+.intent-item + .intent-item {
+  border-top: 1px dashed var(--ai-border);
+  padding-top: 10px;
+}
+
+.info-row {
+  display: grid;
+  grid-template-columns: 60px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.info-row span {
+  color: var(--ai-text-muted);
+  font-weight: 800;
+}
+
+.info-row strong,
+.info-row em {
+  min-width: 0;
+  color: var(--ai-text);
+  font-style: normal;
+}
 </style>

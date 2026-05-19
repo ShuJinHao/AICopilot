@@ -1,0 +1,128 @@
+name: AICopilot Simulation Release Candidate
+
+on:
+  pull_request:
+    branches:
+      - main
+      - 'codex/**'
+      - 'integration/**'
+  workflow_dispatch:
+
+jobs:
+  simulation-rc:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: src/vues/AICopilot.Web/package-lock.json
+
+      - name: Restore frontend dependencies
+        working-directory: src/vues/AICopilot.Web
+        run: npm ci
+
+      - name: Frontend build
+        working-directory: src/vues/AICopilot.Web
+        run: npm run build
+
+      - name: Frontend unit tests
+        working-directory: src/vues/AICopilot.Web
+        run: npm run test:unit
+
+      - name: Frontend smoke tests
+        working-directory: src/vues/AICopilot.Web
+        run: npm run test:smoke
+
+      - name: Frontend vulnerability scan
+        working-directory: src/vues/AICopilot.Web
+        run: npm audit --audit-level=high
+
+      - name: Backend build
+        run: dotnet build src/hosts/AICopilot.HttpApi/AICopilot.HttpApi.csproj
+
+      - name: Backend test project build
+        run: dotnet build src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj
+
+      - name: Detect Docker
+        id: docker
+        shell: pwsh
+        run: |
+          $dockerAvailable = $false
+          $dockerServerOs = ""
+          if (Get-Command docker -ErrorAction SilentlyContinue) {
+            $dockerInfoJob = Start-Job -ScriptBlock {
+              docker info --format '{{.OSType}}' 2>$null
+              if ($LASTEXITCODE -ne 0) {
+                exit $LASTEXITCODE
+              }
+            }
+            if (Wait-Job $dockerInfoJob -Timeout 20) {
+              $dockerServerOs = ((Receive-Job $dockerInfoJob | Select-Object -Last 1) ?? "").Trim().ToLowerInvariant()
+              $dockerAvailable = $dockerServerOs -eq "linux"
+            }
+            else {
+              Stop-Job $dockerInfoJob -ErrorAction SilentlyContinue
+              Write-Host "docker info did not finish within 20 seconds."
+            }
+            Remove-Job $dockerInfoJob -Force -ErrorAction SilentlyContinue
+          }
+
+          "available=$($dockerAvailable.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          if ($dockerAvailable) {
+            Write-Host "Linux Docker is available; Docker/Postgres-backed backend suites will run."
+          }
+          else {
+            Write-Host "Linux Docker is unavailable; Docker/Postgres-backed backend suites will be skipped. Detected OSType='$dockerServerOs'."
+          }
+
+      - name: Backend Simulation suites
+        if: steps.docker.outputs.available == 'true'
+        shell: pwsh
+        run: |
+          dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "Suite=AgentSimulationAcceptance"
+          dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "Suite=Batch5ApprovalHardening"
+          dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "Suite=Batch6SecretProtection"
+          dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "Suite=Batch7ReportArtifacts"
+          dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "Suite=Batch8ArtifactVersioning"
+          dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "Suite=Batch9McpToolGovernance"
+          dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "Suite=Batch10RunQueueOps"
+
+      - name: Backend Simulation suites skipped
+        if: steps.docker.outputs.available != 'true'
+        run: Write-Host "Linux Docker is unavailable; skipped Docker/Postgres-backed backend simulation suites."
+
+      - name: Acceptance with Docker-aware skip
+        shell: pwsh
+        run: |
+          if ('${{ steps.docker.outputs.available }}' -eq 'true') {
+            .\scripts\Run-AgentSimulationAcceptance.ps1
+          }
+          else {
+            Write-Host "Linux Docker is unavailable; skipping Docker-required acceptance path."
+            .\scripts\Run-AgentSimulationAcceptance.ps1 -SkipDockerAcceptance
+          }
+
+      - name: Release-candidate scope guard
+        shell: pwsh
+        run: |
+          git fetch origin ${{ github.base_ref }} --depth=1
+          .\scripts\Test-AgentWorkbenchReleaseCandidateScope.ps1 -BaseRef origin/${{ github.base_ref }}
+
+      - name: Encoding check
+        shell: pwsh
+        run: .\scripts\Test-TextEncoding.ps1
+
+      - name: Diff whitespace check
+        run: git diff --check

@@ -23,20 +23,22 @@ function formatCell(value: unknown) {
       <p>{{ rows.length }} 条记录</p>
     </header>
 
-    <el-table v-if="rows.length > 0" :data="rows" stripe border height="360" class="data-table">
-      <el-table-column
-        v-for="column in columns"
-        :key="column.key"
-        :prop="column.key"
-        :label="column.label || column.key"
-        min-width="150"
-        show-overflow-tooltip
-      >
-        <template #default="{ row }">
-          <span>{{ formatCell(row[column.key]) }}</span>
-        </template>
-      </el-table-column>
-    </el-table>
+    <div v-if="rows.length > 0" class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th v-for="column in columns" :key="column.key">{{ column.label || column.key }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="(row, rowIndex) in rows" :key="rowIndex">
+            <td v-for="column in columns" :key="column.key">
+              {{ formatCell(row[column.key]) }}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
 
     <div v-else class="empty-widget">暂无表格数据</div>
   </div>
@@ -60,42 +62,69 @@ function formatCell(value: unknown) {
 
 .table-widget h3 {
   margin: 0;
+  color: var(--ai-text);
   font-size: 15px;
-  font-weight: 750;
+  font-weight: 900;
 }
 
 .table-widget p {
   margin: 0;
-  color: var(--app-text-muted);
+  color: var(--ai-text-muted);
   font-size: 12px;
+  font-weight: 800;
 }
 
-.data-table {
-  width: 100%;
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  border: 1px solid var(--app-border);
+.table-scroll {
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid var(--ai-border);
+  border-radius: 18px;
 }
 
-:deep(.el-table__row) {
-  height: 48px;
-  transition: background-color 0.2s ease;
+table {
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
 }
 
-:deep(.el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell) {
-  background: var(--app-surface-muted);
+th,
+td {
+  border-bottom: 1px solid var(--ai-border);
+  padding: 12px 14px;
+  text-align: left;
+  white-space: nowrap;
+  font-size: 13px;
 }
 
-:deep(.el-table__body tr:hover > td.el-table__cell) {
-  background-color: var(--app-surface-raised);
+th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--ai-surface-soft);
+  color: var(--ai-text-muted);
+  font-weight: 900;
+}
+
+td {
+  color: var(--ai-text);
+  font-weight: 650;
+}
+
+tbody tr:nth-child(even) td {
+  background: rgba(248, 250, 252, 0.72);
+}
+
+tbody tr:hover td {
+  background: #efffbe;
 }
 
 .empty-widget {
   display: grid;
   height: 140px;
   place-items: center;
-  border: 1px dashed var(--app-border);
-  border-radius: var(--radius-md);
-  color: var(--app-text-muted);
+  border: 1px dashed var(--ai-border);
+  border-radius: 18px;
+  color: var(--ai-text-muted);
+  font-weight: 800;
 }
 </style>

@@ -1,14 +1,19 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import * as echarts from 'echarts'
+import { BarChart, LineChart, PieChart } from 'echarts/charts'
+import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
+import { init, use, type ECharts, type EChartsCoreOption } from 'echarts/core'
+import { CanvasRenderer } from 'echarts/renderers'
 import type { ChartWidget } from '@/types/protocols'
+
+use([BarChart, LineChart, PieChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer])
 
 const props = defineProps<{
   widget: ChartWidget
 }>()
 
 const chartRef = ref<HTMLElement | null>(null)
-let chartInstance: echarts.ECharts | null = null
+let chartInstance: ECharts | null = null
 let resizeObserver: ResizeObserver | null = null
 
 const rows = computed(() => props.widget.data?.dataset?.source ?? [])
@@ -29,13 +34,13 @@ function inferNumberFields() {
   return fields.length > 0 ? fields : dimensions.value.slice(1, 2)
 }
 
-const option = computed<echarts.EChartsOption>(() => {
+const option = computed<EChartsCoreOption>(() => {
   const xField = encoding.value?.x || inferStringField()
   const yFields = encoding.value?.y?.length ? encoding.value.y : inferNumberFields()
   const chartType = category.value === 'line' ? 'line' : category.value === 'pie' ? 'pie' : 'bar'
 
-  const baseOption: echarts.EChartsOption = {
-    color: ['#0f766e', '#3b82f6', '#f59e0b', '#10b981', '#8b5cf6', '#ec4899', '#6366f1'],
+  const baseOption: EChartsCoreOption = {
+    color: ['#c8ff3d', '#14b8a6', '#93c5fd', '#c4b5fd', '#fdba74', '#fda4af'],
     textStyle: { fontFamily: 'inherit' }
   }
 
@@ -52,7 +57,7 @@ const option = computed<echarts.EChartsOption>(() => {
     return {
       ...baseOption,
       tooltip: { trigger: 'item', confine: true },
-      legend: { type: 'scroll', bottom: 0 },
+      legend: { type: 'plain', bottom: 0, textStyle: { color: '#667085' } },
       series: [
         {
           type: 'pie',
@@ -75,7 +80,7 @@ const option = computed<echarts.EChartsOption>(() => {
   return {
     ...baseOption,
     tooltip: { trigger: 'axis', confine: true },
-    legend: { type: 'scroll', bottom: 0 },
+    legend: { type: 'plain', bottom: 0, textStyle: { color: '#667085' } },
     grid: { left: 24, right: 20, top: 24, bottom: 52, containLabel: true },
     xAxis: { type: 'category', data: rows.value.map((row) => String(row[xField] ?? '-')) },
     yAxis: { type: 'value' },
@@ -84,7 +89,7 @@ const option = computed<echarts.EChartsOption>(() => {
       name: field,
       smooth: chartType === 'line',
       barMaxWidth: 48,
-      itemStyle: chartType === 'bar' ? { borderRadius: [4, 4, 0, 0] } : undefined,
+      itemStyle: chartType === 'bar' ? { borderRadius: [8, 8, 0, 0] } : undefined,
       data: rows.value.map((row) => Number(row[field] ?? 0))
     }))
   }
@@ -92,7 +97,7 @@ const option = computed<echarts.EChartsOption>(() => {
 
 function renderChart() {
   if (!chartRef.value || rows.value.length === 0) return
-  chartInstance ??= echarts.init(chartRef.value)
+  chartInstance ??= init(chartRef.value)
   chartInstance.setOption(option.value, true)
 }
 
@@ -140,14 +145,14 @@ watch(option, () => renderChart(), { deep: true })
 
 .chart-widget h3 {
   margin: 0;
-  color: var(--app-text);
+  color: var(--ai-text);
   font-size: 15px;
   font-weight: 750;
 }
 
 .chart-widget p {
   margin: 0;
-  color: var(--app-text-muted);
+  color: var(--ai-text-muted);
   font-size: 12px;
 }
 
@@ -161,8 +166,8 @@ watch(option, () => renderChart(), { deep: true })
   display: grid;
   height: 160px;
   place-items: center;
-  border: 1px dashed var(--app-border);
-  border-radius: var(--radius-md);
-  color: var(--app-text-muted);
+  border: 1px dashed var(--ai-border);
+  border-radius: 18px;
+  color: var(--ai-text-muted);
 }
 </style>

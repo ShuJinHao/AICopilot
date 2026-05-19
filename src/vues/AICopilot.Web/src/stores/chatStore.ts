@@ -23,6 +23,9 @@ interface AgentChartPreview {
   labels: string[]
   values: number[]
   source?: string
+  sourceMode?: string
+  sourceLabel?: string
+  isSimulation?: boolean
 }
 
 export const useChatStore = defineStore('chat', () => {
@@ -179,16 +182,22 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     try {
-      const blob = await chatService.downloadArtifact(chartArtifact.id)
+      const blob = await chatService.downloadArtifact(chartArtifact.downloadUrl)
       const payload = JSON.parse(await blob.text()) as {
         labels?: unknown
         values?: unknown
         source?: unknown
+        sourceMode?: unknown
+        sourceLabel?: unknown
+        isSimulation?: unknown
       }
       chartPreview.value = {
         labels: Array.isArray(payload.labels) ? payload.labels.map(String) : [],
         values: Array.isArray(payload.values) ? payload.values.map((value) => Number(value) || 0) : [],
-        source: typeof payload.source === 'string' ? payload.source : undefined
+        source: typeof payload.source === 'string' ? payload.source : undefined,
+        sourceMode: typeof payload.sourceMode === 'string' ? payload.sourceMode : undefined,
+        sourceLabel: typeof payload.sourceLabel === 'string' ? payload.sourceLabel : undefined,
+        isSimulation: typeof payload.isSimulation === 'boolean' ? payload.isSimulation : undefined
       }
     } catch {
       chartPreview.value = null
@@ -196,7 +205,12 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function downloadArtifact(artifact: ArtifactRecord) {
-    const blob = await chatService.downloadArtifact(artifact.id)
+    if (!artifact.downloadUrl) {
+      agentErrorMessage.value = '后端未返回产物下载地址，前端不会自行拼接下载路径。'
+      return
+    }
+
+    const blob = await chatService.downloadArtifact(artifact.downloadUrl)
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = url
@@ -247,7 +261,7 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function approveAndRunAgentTask(taskId: string) {
+  async function submitFinalReview(code: string) {
     if (isAgentBusy.value) {
       return null
     }
@@ -255,14 +269,14 @@ export const useChatStore = defineStore('chat', () => {
     isAgentBusy.value = true
     agentErrorMessage.value = null
     try {
-      const approved = await chatService.approveAgentTaskPlan(taskId)
-      upsertAgentTask(approved)
-      const updated = await chatService.runAgentTask(taskId)
-      upsertAgentTask(updated)
-      await loadAgentApprovals(taskId)
-      await loadAgentAuditSummary(taskId)
-      await refreshWorkspace(updated)
-      return updated
+      currentWorkspace.value = await chatService.submitFinalReview(code)
+      await refreshChartPreview()
+      if (sessionStore.currentSessionId) {
+        await loadAgentTasks(sessionStore.currentSessionId)
+      }
+      await loadAgentApprovals(latestAgentTask.value?.id ?? null)
+      await loadAgentAuditSummary(latestAgentTask.value?.id ?? null)
+      return currentWorkspace.value
     } catch (error) {
       agentErrorMessage.value = toFriendlyMessage(error)
       return null
@@ -639,10 +653,10 @@ export const useChatStore = defineStore('chat', () => {
     clearOnsitePresence,
     uploadSessionFile,
     planAgentTask,
-    approveAndRunAgentTask,
     runAgentTask,
     decideAgentApproval,
     loadAgentAuditSummary,
+    submitFinalReview,
     finalizeWorkspace,
     downloadArtifact,
     sendMessage,

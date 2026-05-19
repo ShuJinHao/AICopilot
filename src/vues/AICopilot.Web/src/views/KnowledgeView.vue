@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
-import { Plus, Refresh } from '@element-plus/icons-vue'
+import { Plus, RefreshCw } from 'lucide-vue-next'
+import AiButton from '@/components/ai/AiButton.vue'
+import AiCard from '@/components/ai/AiCard.vue'
+import AiDataPage from '@/components/ai/AiDataPage.vue'
 import AppShell from '@/components/layout/AppShell.vue'
 import { useRagStore } from '@/stores/ragStore'
 import DocumentGovernanceDrawer from '@/views/knowledge/DocumentGovernanceDrawer.vue'
@@ -17,69 +20,69 @@ onMounted(() => {
 
 <template>
   <AppShell>
-    <div class="page knowledge-page">
-      <header class="page-header">
-        <div>
-          <p class="page-kicker">知识治理</p>
-          <h1 class="page-title">知识库</h1>
-          <p class="page-description">管理向量模型、知识库、文档解析状态和检索预览。</p>
+    <AiDataPage eyebrow="Knowledge Governance" title="知识库" description="管理向量模型、知识库、文档解析状态和检索预览。">
+      <template #actions>
+        <div class="page-actions">
+          <AiButton :disabled="store.isLoading" @click="store.refresh()">
+            <RefreshCw class="h-4 w-4" :class="{ 'animate-spin': store.isLoading }" />
+            刷新
+          </AiButton>
+          <AiButton variant="primary" @click="store.openCreateKnowledgeBaseDialog()">
+            <Plus class="h-4 w-4" />
+            新增知识库
+          </AiButton>
         </div>
-        <div class="toolbar">
-          <el-button :icon="Refresh" :loading="store.isLoading" @click="store.refresh()">刷新</el-button>
-          <el-button type="primary" :icon="Plus" @click="store.openCreateKnowledgeBaseDialog()">新增知识库</el-button>
-        </div>
-      </header>
+      </template>
 
       <div class="metric-strip">
-        <div class="metric">
-          <span class="metric-label">嵌入模型</span>
-          <strong class="metric-value">{{ store.embeddingModels.length }}</strong>
-        </div>
-        <div class="metric">
-          <span class="metric-label">知识库</span>
-          <strong class="metric-value">{{ store.knowledgeBases.length }}</strong>
-        </div>
-        <div class="metric">
-          <span class="metric-label">当前文档</span>
-          <strong class="metric-value">{{ store.documents.length }}</strong>
-        </div>
-        <div class="metric">
-          <span class="metric-label">检索结果</span>
-          <strong class="metric-value">{{ store.searchResults.length }}</strong>
-        </div>
+        <AiCard class="metric" tone="violet"><span>嵌入模型</span><strong>{{ store.embeddingModels.length }}</strong></AiCard>
+        <AiCard class="metric" tone="blue"><span>知识库</span><strong>{{ store.knowledgeBases.length }}</strong></AiCard>
+        <AiCard class="metric" tone="lime"><span>当前文档</span><strong>{{ store.documents.length }}</strong></AiCard>
+        <AiCard class="metric" tone="teal"><span>检索结果</span><strong>{{ store.searchResults.length }}</strong></AiCard>
       </div>
 
-      <el-alert v-if="store.errorMessage" type="error" show-icon :closable="false" :title="store.errorMessage" />
+      <div v-if="store.errorMessage" class="error-note">{{ store.errorMessage }}</div>
 
-      <div class="knowledge-grid">
-        <KnowledgeBaseManagement />
-      </div>
-
+      <KnowledgeBaseManagement />
       <KnowledgeSearchPanel />
       <EmbeddingModelConfig />
       <DocumentGovernanceDrawer />
-    </div>
+    </AiDataPage>
   </AppShell>
 </template>
 
 <style scoped>
-.knowledge-page {
-  display: grid;
-  align-content: start;
-  gap: 14px;
-  height: 100%;
-  overflow: auto;
+@import './config/shared-config.css';
+
+.page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
-.knowledge-grid {
+.metric-strip {
   display: grid;
-  grid-template-columns: 330px minmax(0, 1fr);
-  gap: 14px;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 12px;
 }
 
-@media (max-width: 1080px) {
-  .knowledge-grid {
-    grid-template-columns: 1fr;
+.metric span {
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.metric strong {
+  display: block;
+  margin-top: 12px;
+  color: var(--ai-text);
+  font-size: 30px;
+  font-weight: 950;
+}
+
+@media (max-width: 980px) {
+  .metric-strip {
+    grid-template-columns: 1fr 1fr;
   }
 }
 </style>

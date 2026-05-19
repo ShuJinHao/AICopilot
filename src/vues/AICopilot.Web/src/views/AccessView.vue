@@ -1,6 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
-import { Plus, Refresh } from '@element-plus/icons-vue'
+import { Plus, RefreshCw } from 'lucide-vue-next'
+import AiActionGroup from '@/components/ai/AiActionGroup.vue'
+import AiButton from '@/components/ai/AiButton.vue'
+import AiCard from '@/components/ai/AiCard.vue'
+import AiCheckbox from '@/components/ai/AiCheckbox.vue'
+import AiDataPage from '@/components/ai/AiDataPage.vue'
+import AiDrawer from '@/components/ai/AiDrawer.vue'
+import AiInput from '@/components/ai/AiInput.vue'
+import AiModal from '@/components/ai/AiModal.vue'
+import AiSelect from '@/components/ai/AiSelect.vue'
+import AiTag from '@/components/ai/AiTag.vue'
+import AiTableCard from '@/components/ai/AiTableCard.vue'
 import AppShell from '@/components/layout/AppShell.vue'
 import { useAccessStore } from '@/stores/accessStore'
 import type { RoleSummary, UserSummary } from '@/types/app'
@@ -8,6 +19,7 @@ import type { RoleSummary, UserSummary } from '@/types/app'
 const store = useAccessStore()
 
 const enabledUsers = computed(() => store.users.filter((user) => user.isEnabled).length)
+const roleOptions = computed(() => store.roles.map((role) => ({ label: role.roleName, value: role.roleName })))
 
 onMounted(() => {
   void store.refresh()
@@ -33,260 +45,278 @@ function cloudIdentityLabel(row: { metadata?: Record<string, string> }) {
   const metadata = row.metadata ?? {}
   return metadata.cloudEmployeeNo || metadata.cloudUserId || metadata.identityProvider || ''
 }
+
+function setPermission(code: string, checked: boolean) {
+  const next = new Set(store.currentRoleForm.permissions)
+  if (checked) next.add(code)
+  else next.delete(code)
+  store.currentRoleForm.permissions = [...next]
+}
 </script>
 
 <template>
   <AppShell>
-    <div class="page access-page">
-      <header class="page-header">
-        <div>
-          <p class="page-kicker">Access Governance</p>
-          <h1 class="page-title">权限治理</h1>
-          <p class="page-description">管理用户、角色、权限矩阵和审计日志，确保工具链入口可追踪。</p>
-        </div>
-        <el-button :icon="Refresh" :loading="store.isLoading" @click="store.refresh()">刷新</el-button>
-      </header>
+    <AiDataPage eyebrow="Access Governance" title="权限治理" description="管理用户、角色、权限矩阵和审计日志，确保工具链入口可追踪。">
+      <template #actions>
+        <AiButton :disabled="store.isLoading" @click="store.refresh()">
+          <RefreshCw class="h-4 w-4" :class="{ 'animate-spin': store.isLoading }" />
+          刷新
+        </AiButton>
+      </template>
 
       <div class="metric-strip">
-        <div class="metric">
-          <span class="metric-label">用户</span>
-          <strong class="metric-value">{{ store.users.length }}</strong>
-        </div>
-        <div class="metric">
-          <span class="metric-label">启用用户</span>
-          <strong class="metric-value">{{ enabledUsers }}</strong>
-        </div>
-        <div class="metric">
-          <span class="metric-label">角色</span>
-          <strong class="metric-value">{{ store.roles.length }}</strong>
-        </div>
-        <div class="metric">
-          <span class="metric-label">权限点</span>
-          <strong class="metric-value">{{ store.permissions.length }}</strong>
-        </div>
+        <AiCard class="metric" tone="violet"><span>用户</span><strong>{{ store.users.length }}</strong></AiCard>
+        <AiCard class="metric" tone="blue"><span>启用用户</span><strong>{{ enabledUsers }}</strong></AiCard>
+        <AiCard class="metric" tone="lime"><span>角色</span><strong>{{ store.roles.length }}</strong></AiCard>
+        <AiCard class="metric" tone="teal"><span>权限点</span><strong>{{ store.permissions.length }}</strong></AiCard>
       </div>
 
-      <el-alert v-if="store.errorMessage" type="error" show-icon :closable="false" :title="store.errorMessage" />
+      <div v-if="store.errorMessage" class="error-note">{{ store.errorMessage }}</div>
 
       <div class="access-grid">
-        <section class="panel">
-          <div class="panel-header">
-            <div>
-              <h2 class="panel-title">用户</h2>
-              <p class="panel-subtitle">账号状态、角色分配和密码重置。</p>
-            </div>
-            <el-button type="primary" :icon="Plus" @click="store.openCreateUserDialog()">新增用户</el-button>
-          </div>
-          <el-table :data="store.users" stripe>
-            <el-table-column prop="userName" label="用户名" min-width="160" />
-            <el-table-column prop="roleName" label="角色" min-width="140" />
-            <el-table-column label="状态" width="100">
-              <template #default="{ row }">
-                <el-tag :type="row.isEnabled ? 'success' : 'info'">{{ row.isEnabled ? '启用' : '停用' }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="260" fixed="right">
-              <template #default="{ row }">
-                <div class="table-actions">
-                  <el-button link type="primary" @click="openUserRole(row)">角色</el-button>
-                  <el-button link @click="store.openResetPasswordDialog(row)">重置密码</el-button>
-                  <el-button
-                    v-if="row.isEnabled"
-                    link
-                    type="warning"
-                    @click="store.openDisableUserDialog(row)"
-                  >
-                    停用
-                  </el-button>
-                  <el-button v-else link type="success" @click="store.openEnableUserDialog(row)">启用</el-button>
-                </div>
-              </template>
-            </el-table-column>
-          </el-table>
-        </section>
+        <AiTableCard title="用户" description="账号状态、角色分配和密码重置。" :empty="store.users.length === 0" empty-text="暂无用户">
+          <template #actions>
+            <AiButton variant="primary" @click="store.openCreateUserDialog()">
+              <Plus class="h-4 w-4" />
+              新增用户
+            </AiButton>
+          </template>
+          <table class="ai-table">
+            <thead>
+              <tr>
+                <th>用户名</th>
+                <th>角色</th>
+                <th>状态</th>
+                <th class="right">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in store.users" :key="row.userId">
+                <td>{{ row.userName }}</td>
+                <td>{{ row.roleName }}</td>
+                <td><AiTag :tone="row.isEnabled ? 'success' : 'neutral'">{{ row.isEnabled ? '启用' : '停用' }}</AiTag></td>
+                <td>
+                  <AiActionGroup>
+                    <AiButton size="sm" @click="openUserRole(row)">角色</AiButton>
+                    <AiButton size="sm" @click="store.openResetPasswordDialog(row)">重置密码</AiButton>
+                    <AiButton v-if="row.isEnabled" size="sm" variant="danger" @click="store.openDisableUserDialog(row)">停用</AiButton>
+                    <AiButton v-else size="sm" variant="lime" @click="store.openEnableUserDialog(row)">启用</AiButton>
+                  </AiActionGroup>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </AiTableCard>
 
-        <section class="panel">
-          <div class="panel-header">
-            <div>
-              <h2 class="panel-title">角色</h2>
-              <p class="panel-subtitle">角色对应权限集合和用户数量。</p>
-            </div>
-            <el-button type="primary" :icon="Plus" @click="store.openCreateRoleDialog()">新增角色</el-button>
-          </div>
-          <el-table :data="store.roles" stripe>
-            <el-table-column prop="roleName" label="角色" min-width="150" />
-            <el-table-column prop="assignedUserCount" label="用户数" width="90" />
-            <el-table-column label="系统角色" width="100">
-              <template #default="{ row }">
-                <el-tag :type="row.isSystemRole ? 'warning' : 'info'">{{ row.isSystemRole ? '是' : '否' }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="权限数" width="90">
-              <template #default="{ row }">{{ row.permissions.length }}</template>
-            </el-table-column>
-            <el-table-column label="操作" width="150" fixed="right">
-              <template #default="{ row }">
-                <div class="table-actions">
-                  <el-button link type="primary" @click="openRole(row)">编辑</el-button>
-                  <el-button
-                    link
-                    type="danger"
-                    :disabled="row.isSystemRole"
-                    @click="store.openDeleteRoleDialog(row)"
-                  >
-                    删除
-                  </el-button>
-                </div>
-              </template>
-            </el-table-column>
-          </el-table>
-        </section>
+        <AiTableCard title="角色" description="角色对应权限集合和用户数量。" :empty="store.roles.length === 0" empty-text="暂无角色">
+          <template #actions>
+            <AiButton variant="primary" @click="store.openCreateRoleDialog()">
+              <Plus class="h-4 w-4" />
+              新增角色
+            </AiButton>
+          </template>
+          <table class="ai-table">
+            <thead>
+              <tr>
+                <th>角色</th>
+                <th>用户数</th>
+                <th>系统角色</th>
+                <th>权限数</th>
+                <th class="right">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in store.roles" :key="row.roleId">
+                <td>{{ row.roleName }}</td>
+                <td>{{ row.assignedUserCount }}</td>
+                <td><AiTag :tone="row.isSystemRole ? 'warning' : 'neutral'">{{ row.isSystemRole ? '是' : '否' }}</AiTag></td>
+                <td>{{ row.permissions.length }}</td>
+                <td>
+                  <AiActionGroup>
+                    <AiButton size="sm" @click="openRole(row)">编辑</AiButton>
+                    <AiButton size="sm" variant="danger" :disabled="row.isSystemRole" @click="store.openDeleteRoleDialog(row)">删除</AiButton>
+                  </AiActionGroup>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </AiTableCard>
       </div>
 
-      <section class="panel">
+      <AiCard class="permission-card">
         <div class="panel-header">
           <div>
-            <h2 class="panel-title">权限矩阵</h2>
-            <p class="panel-subtitle">按权限组查看当前系统可分配权限。</p>
+            <h2>权限矩阵</h2>
+            <p>按权限组查看当前系统可分配权限。</p>
           </div>
         </div>
         <div class="permission-groups">
           <section v-for="group in store.permissionGroups" :key="group.group">
             <h3>{{ group.group }}</h3>
             <div>
-              <el-tag v-for="permission in group.items" :key="permission.code" type="info">
+              <AiTag v-for="permission in group.items" :key="permission.code" tone="neutral">
                 {{ permission.displayName || permission.code }}
-              </el-tag>
+              </AiTag>
             </div>
           </section>
         </div>
-      </section>
+      </AiCard>
 
-      <section class="panel">
-        <div class="panel-header">
-          <div>
-            <h2 class="panel-title">审计日志</h2>
-            <p class="panel-subtitle">查看关键配置、权限和工具链操作记录。</p>
-          </div>
-          <el-button :loading="store.isAuditLoading" @click="store.loadAuditLogs()">刷新审计</el-button>
-        </div>
-        <el-table :data="store.auditLogs" stripe>
-          <el-table-column prop="createdAt" label="时间" min-width="170" />
-          <el-table-column prop="actionGroup" label="分组" width="130" />
-          <el-table-column prop="actionCode" label="动作" min-width="220" show-overflow-tooltip />
-          <el-table-column prop="targetName" label="对象" min-width="160" show-overflow-tooltip />
-          <el-table-column prop="operatorUserName" label="操作人" width="140" />
-          <el-table-column label="身份快照" min-width="190">
-            <template #default="{ row }">
-              <div v-if="hasAuditMetadata(row)" class="audit-identity">
-                <el-tag size="small" type="info">{{ row.metadata.identityProvider || 'Identity' }}</el-tag>
-                <span>{{ cloudIdentityLabel(row) }}</span>
-                <el-popover placement="left" width="360" trigger="click">
-                  <template #reference>
-                    <el-button link type="primary">详情</el-button>
-                  </template>
-                  <dl class="audit-metadata">
+      <AiTableCard title="审计日志" description="查看关键配置、权限和工具链操作记录。" :empty="store.auditLogs.length === 0" empty-text="暂无审计日志">
+        <template #actions>
+          <AiButton :disabled="store.isAuditLoading" @click="store.loadAuditLogs()">
+            <RefreshCw class="h-4 w-4" :class="{ 'animate-spin': store.isAuditLoading }" />
+            刷新审计
+          </AiButton>
+        </template>
+        <table class="ai-table">
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th>分组</th>
+              <th>动作</th>
+              <th>对象</th>
+              <th>操作人</th>
+              <th>身份快照</th>
+              <th>结果</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in store.auditLogs" :key="`${row.createdAt}-${row.actionCode}-${row.targetName}`">
+              <td>{{ row.createdAt }}</td>
+              <td>{{ row.actionGroup }}</td>
+              <td>{{ row.actionCode }}</td>
+              <td>{{ row.targetName }}</td>
+              <td>{{ row.operatorUserName }}</td>
+              <td>
+                <details v-if="hasAuditMetadata(row)" class="audit-details">
+                  <summary>
+                    <AiTag tone="neutral">{{ row.metadata?.identityProvider || 'Identity' }}</AiTag>
+                    <span>{{ cloudIdentityLabel(row) }}</span>
+                  </summary>
+                  <dl>
                     <template v-for="[key, value] in auditMetadataEntries(row)" :key="key">
                       <dt>{{ key }}</dt>
                       <dd>{{ value }}</dd>
                     </template>
                   </dl>
-                </el-popover>
-              </div>
-              <span v-else class="muted-text">-</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="结果" width="100">
-            <template #default="{ row }">
-              <el-tag :type="row.result === 'Succeeded' ? 'success' : 'danger'">{{ row.result }}</el-tag>
-            </template>
-          </el-table-column>
-        </el-table>
-      </section>
+                </details>
+                <span v-else class="muted">-</span>
+              </td>
+              <td><AiTag :tone="row.result === 'Succeeded' ? 'success' : 'danger'">{{ row.result }}</AiTag></td>
+            </tr>
+          </tbody>
+        </table>
+      </AiTableCard>
 
-      <el-drawer v-model="store.userDialogVisible" size="460px" title="新增用户">
-        <el-form label-position="top">
-          <el-form-item label="用户名"><el-input v-model="store.currentUserForm.userName" /></el-form-item>
-          <el-form-item label="密码"><el-input v-model="store.currentUserForm.password" type="password" show-password /></el-form-item>
-          <el-form-item label="角色"><el-select v-model="store.currentUserForm.roleName"><el-option v-for="role in store.roles" :key="role.roleId" :label="role.roleName" :value="role.roleName" /></el-select></el-form-item>
-        </el-form>
-        <template #footer>
-          <el-button @click="store.closeCreateUserDialog()">取消</el-button>
-          <el-button type="primary" :loading="store.isSubmittingUser" @click="store.createUser()">保存</el-button>
-        </template>
-      </el-drawer>
+      <AiDrawer v-model="store.userDialogVisible" title="新增用户" width="480px">
+        <div class="ai-form">
+          <label><span>用户名</span><AiInput v-model="store.currentUserForm.userName" /></label>
+          <label><span>密码</span><AiInput v-model="store.currentUserForm.password" type="password" autocomplete="new-password" /></label>
+          <label><span>角色</span><AiSelect v-model="store.currentUserForm.roleName" :options="roleOptions" /></label>
+          <footer>
+            <AiButton @click="store.closeCreateUserDialog()">取消</AiButton>
+            <AiButton variant="primary" :disabled="store.isSubmittingUser" @click="store.createUser()">
+              {{ store.isSubmittingUser ? '保存中' : '保存' }}
+            </AiButton>
+          </footer>
+        </div>
+      </AiDrawer>
 
-      <el-drawer v-model="store.userRoleDialogVisible" size="420px" title="调整角色">
-        <el-form label-position="top">
-          <el-form-item label="用户"><el-input v-model="store.currentUserRoleForm.userName" disabled /></el-form-item>
-          <el-form-item label="角色"><el-select v-model="store.currentUserRoleForm.roleName"><el-option v-for="role in store.roles" :key="role.roleId" :label="role.roleName" :value="role.roleName" /></el-select></el-form-item>
-        </el-form>
-        <template #footer>
-          <el-button @click="store.closeChangeUserRoleDialog()">取消</el-button>
-          <el-button type="primary" :loading="store.isSubmittingUserRole" @click="store.updateUserRole()">保存</el-button>
-        </template>
-      </el-drawer>
+      <AiDrawer v-model="store.userRoleDialogVisible" title="调整角色" width="440px">
+        <div class="ai-form">
+          <label><span>用户</span><AiInput v-model="store.currentUserRoleForm.userName" disabled /></label>
+          <label><span>角色</span><AiSelect v-model="store.currentUserRoleForm.roleName" :options="roleOptions" /></label>
+          <footer>
+            <AiButton @click="store.closeChangeUserRoleDialog()">取消</AiButton>
+            <AiButton variant="primary" :disabled="store.isSubmittingUserRole" @click="store.updateUserRole()">
+              {{ store.isSubmittingUserRole ? '保存中' : '保存' }}
+            </AiButton>
+          </footer>
+        </div>
+      </AiDrawer>
 
-      <el-drawer v-model="store.roleDialogVisible" size="620px" title="角色权限">
-        <el-form label-position="top">
-          <el-form-item label="角色名"><el-input v-model="store.currentRoleForm.roleName" :disabled="store.roleDialogMode === 'edit'" /></el-form-item>
-          <el-form-item label="权限">
-            <el-checkbox-group v-model="store.currentRoleForm.permissions" class="permission-checks">
-              <section v-for="group in store.permissionGroups" :key="group.group">
-                <h3>{{ group.group }}</h3>
-                <el-checkbox v-for="permission in group.items" :key="permission.code" :label="permission.code">
-                  {{ permission.displayName || permission.code }}
-                </el-checkbox>
-              </section>
-            </el-checkbox-group>
-          </el-form-item>
-        </el-form>
-        <template #footer>
-          <el-button @click="store.closeRoleDialog()">取消</el-button>
-          <el-button type="primary" :loading="store.isSubmittingRole" @click="store.saveRole()">保存</el-button>
-        </template>
-      </el-drawer>
+      <AiDrawer v-model="store.roleDialogVisible" title="角色权限" width="660px">
+        <div class="ai-form">
+          <label><span>角色名</span><AiInput v-model="store.currentRoleForm.roleName" :disabled="store.roleDialogMode === 'edit'" /></label>
+          <div class="permission-checks">
+            <section v-for="group in store.permissionGroups" :key="group.group">
+              <h3>{{ group.group }}</h3>
+              <AiCheckbox
+                v-for="permission in group.items"
+                :key="permission.code"
+                :model-value="store.currentRoleForm.permissions.includes(permission.code)"
+                @update:model-value="(value) => setPermission(permission.code, value)"
+              >
+                {{ permission.displayName || permission.code }}
+              </AiCheckbox>
+            </section>
+          </div>
+          <footer>
+            <AiButton @click="store.closeRoleDialog()">取消</AiButton>
+            <AiButton variant="primary" :disabled="store.isSubmittingRole" @click="store.saveRole()">
+              {{ store.isSubmittingRole ? '保存中' : '保存' }}
+            </AiButton>
+          </footer>
+        </div>
+      </AiDrawer>
 
-      <el-dialog v-model="store.userStatusDialogVisible" width="420px" title="账号状态">
-        <p>
+      <AiModal v-model="store.userStatusDialogVisible" title="账号状态" width="420px">
+        <p class="modal-text">
           确认{{ store.currentUserStatusAction.mode === 'disable' ? '停用' : '启用' }}
           {{ store.currentUserStatusAction.userName }}？
         </p>
-        <template #footer>
-          <el-button @click="store.closeUserStatusDialog()">取消</el-button>
-          <el-button type="primary" :loading="store.isSubmittingUserStatus" @click="store.saveUserStatusAction()">确认</el-button>
-        </template>
-      </el-dialog>
+        <div class="modal-actions">
+          <AiButton @click="store.closeUserStatusDialog()">取消</AiButton>
+          <AiButton variant="primary" :disabled="store.isSubmittingUserStatus" @click="store.saveUserStatusAction()">确认</AiButton>
+        </div>
+      </AiModal>
 
-      <el-dialog v-model="store.resetPasswordDialogVisible" width="460px" title="重置密码">
-        <el-form label-position="top">
-          <el-form-item label="用户"><el-input v-model="store.currentResetPasswordForm.userName" disabled /></el-form-item>
-          <el-form-item label="新密码"><el-input v-model="store.currentResetPasswordForm.newPassword" type="password" show-password /></el-form-item>
-        </el-form>
-        <template #footer>
-          <el-button @click="store.closeResetPasswordDialog()">取消</el-button>
-          <el-button type="primary" :loading="store.isSubmittingResetPassword" @click="store.resetUserPassword()">保存</el-button>
-        </template>
-      </el-dialog>
+      <AiModal v-model="store.resetPasswordDialogVisible" title="重置密码" width="460px">
+        <div class="ai-form">
+          <label><span>用户</span><AiInput v-model="store.currentResetPasswordForm.userName" disabled /></label>
+          <label><span>新密码</span><AiInput v-model="store.currentResetPasswordForm.newPassword" type="password" autocomplete="new-password" /></label>
+          <footer>
+            <AiButton @click="store.closeResetPasswordDialog()">取消</AiButton>
+            <AiButton variant="primary" :disabled="store.isSubmittingResetPassword" @click="store.resetUserPassword()">
+              {{ store.isSubmittingResetPassword ? '保存中' : '保存' }}
+            </AiButton>
+          </footer>
+        </div>
+      </AiModal>
 
-      <el-dialog v-model="store.deleteRoleDialogVisible" width="420px" title="删除角色">
-        <p>确认删除角色 {{ store.currentDeleteRoleForm.roleName }}？</p>
-        <template #footer>
-          <el-button @click="store.closeDeleteRoleDialog()">取消</el-button>
-          <el-button type="danger" :loading="store.isSubmittingDeleteRole" @click="store.deleteRole()">删除</el-button>
-        </template>
-      </el-dialog>
-    </div>
+      <AiModal v-model="store.deleteRoleDialogVisible" title="删除角色" width="420px">
+        <p class="modal-text">确认删除角色 {{ store.currentDeleteRoleForm.roleName }}？</p>
+        <div class="modal-actions">
+          <AiButton @click="store.closeDeleteRoleDialog()">取消</AiButton>
+          <AiButton variant="danger" :disabled="store.isSubmittingDeleteRole" @click="store.deleteRole()">删除</AiButton>
+        </div>
+      </AiModal>
+    </AiDataPage>
   </AppShell>
 </template>
 
 <style scoped>
-.access-page {
+@import './config/shared-config.css';
+
+.metric-strip {
   display: grid;
-  align-content: start;
-  gap: 14px;
-  height: 100%;
-  overflow: auto;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.metric span {
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.metric strong {
+  display: block;
+  margin-top: 12px;
+  color: var(--ai-text);
+  font-size: 30px;
+  font-weight: 950;
 }
 
 .access-grid {
@@ -295,30 +325,34 @@ function cloudIdentityLabel(row: { metadata?: Record<string, string> }) {
   gap: 14px;
 }
 
-.permission-groups {
+.permission-card {
+  display: grid;
+  gap: 14px;
+}
+
+.permission-groups,
+.permission-checks {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
-  padding: 16px;
 }
 
 .permission-groups section,
 .permission-checks section {
   display: grid;
   gap: 8px;
-  border: 1px solid var(--app-border);
-  border-radius: var(--radius-md);
+  border: 1px solid var(--ai-border);
+  border-radius: 18px;
   padding: 12px;
-  background: var(--app-surface-muted);
-  box-shadow: var(--shadow-sm);
+  background: var(--ai-surface-soft);
 }
 
 .permission-groups h3,
 .permission-checks h3 {
   margin: 0;
+  color: var(--ai-text);
   font-size: 14px;
-  font-weight: 750;
-  color: var(--app-text);
+  font-weight: 900;
 }
 
 .permission-groups div {
@@ -327,48 +361,55 @@ function cloudIdentityLabel(row: { metadata?: Record<string, string> }) {
   gap: 6px;
 }
 
-.permission-checks {
-  display: grid;
-  gap: 12px;
-}
-
-.audit-identity {
+.audit-details summary {
   display: flex;
+  cursor: pointer;
   align-items: center;
   gap: 8px;
-  min-width: 0;
 }
 
-.audit-identity span {
+.audit-details summary span {
+  max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--ai-text-muted);
 }
 
-.audit-metadata {
+.audit-details dl {
   display: grid;
   grid-template-columns: minmax(110px, 0.45fr) minmax(0, 1fr);
   gap: 8px 10px;
-  margin: 0;
+  margin: 10px 0 0;
   font-size: 12px;
 }
 
-.audit-metadata dt {
-  color: var(--app-text-muted);
+.audit-details dt {
+  color: var(--ai-text-muted);
 }
 
-.audit-metadata dd {
+.audit-details dd {
   margin: 0;
   overflow-wrap: anywhere;
 }
 
-.muted-text {
-  color: var(--app-text-muted);
+.modal-text {
+  margin: 0;
+  color: var(--ai-text);
+  font-weight: 750;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
 }
 
 @media (max-width: 1080px) {
   .access-grid,
-  .permission-groups {
+  .permission-groups,
+  .permission-checks {
     grid-template-columns: 1fr;
   }
 }

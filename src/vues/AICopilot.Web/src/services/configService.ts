@@ -25,6 +25,11 @@ import type {
   RoutingModelSummary,
   SemanticSourceStatus
 } from '@/types/app'
+import type {
+  AgentRunQueuePage,
+  AgentRunQueueSummary,
+  AgentWorkerStatus
+} from '@/types/protocols'
 
 export const configService = {
   async getLanguageModel(id: string) {
@@ -45,6 +50,21 @@ export const configService = {
 
   async getWorkspaceSettings() {
     return await apiClient.get<ArtifactWorkspaceSettings>('/aigateway/workspace-settings')
+  },
+
+  async getAgentRunQueueSummary() {
+    return await apiClient.get<AgentRunQueueSummary>('/aigateway/agent/run-queue/summary')
+  },
+
+  async getAgentRunQueue() {
+    return await apiClient.get<AgentRunQueuePage>('/aigateway/agent/run-queue', {
+      pageIndex: 1,
+      pageSize: 8
+    })
+  },
+
+  async getAgentWorkerStatus() {
+    return await apiClient.get<AgentWorkerStatus>('/aigateway/agent/worker/status')
   },
 
   async createLanguageModel(payload: LanguageModelFormModel) {

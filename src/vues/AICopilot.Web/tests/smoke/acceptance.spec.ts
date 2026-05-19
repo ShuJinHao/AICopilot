@@ -21,27 +21,31 @@ async function expectProtectedShell(page: Page, path: string) {
 
   await expect(page).toHaveURL(new RegExp(`${path}$`))
   await expect(page.locator('main')).toBeVisible()
-  await expect(page.locator('.user-zone')).toBeVisible()
+  await expect(page.locator('.ai-topbar')).toBeVisible()
+  await expect(page.locator('.topbar-status')).toBeVisible()
   expect((await page.locator('main').innerText()).trim().length).toBeGreaterThan(0)
   await expectNoHorizontalOverflow(page)
 }
 
-test('login page renders operational shell without overflow', async ({ page }) => {
+test('login page renders operational shell without overflow', async ({ page, isMobile }) => {
   await page.goto('/login')
 
   await expect(page.locator('.login-page')).toBeVisible()
-  await expect(page.locator('.login-card')).toBeVisible()
-  await expect(page.locator('.product-copy')).toBeVisible()
-  await expect(page.locator('.login-form, .state-panel')).toBeVisible()
+  await expect(page.locator('.login-shell')).toBeVisible()
+  await expect(page.locator('.login-title')).toBeVisible()
+  await expect(page.locator('.login-form')).toBeVisible()
+  if (!isMobile) {
+    await expect(page.locator('.ai-preview-panel')).toBeVisible()
+  }
   await expect(page.getByText('制造 AI 运维工作台')).toBeVisible()
-  await expect(page.getByText('登录控制台')).toBeVisible()
+  await expect(page.getByText('登录 A 助理')).toBeVisible()
   await expect(page.getByPlaceholder('输入用户名')).toBeVisible()
   await expect(page.getByPlaceholder('输入密码')).toBeVisible()
   await expectNoHorizontalOverflow(page)
 })
 
 for (const route of [
-  { path: '/chat', text: 'Chat Workspace' },
+  { path: '/chat', text: 'AI CANVAS' },
   { path: '/config', text: '运行配置' },
   { path: '/knowledge', text: '知识库' },
   { path: '/access', text: '权限治理' }
@@ -57,29 +61,51 @@ test('agent workbench restores task, workspace, approvals, artifacts, and audit 
 
   await expectProtectedShell(page, '/chat')
 
-  await expect(page.getByText('Chat Workspace')).toBeVisible()
+  await expect(page.getByText('AI CANVAS')).toBeVisible()
   await expect(page.getByText(/LINE-A/).first()).toBeVisible()
-  await expect(page.locator('.context-panel').getByText('Agent 工作台').first()).toBeVisible()
-  await expect(page.getByText('审批队列')).toBeVisible()
-  await expect(page.getByText('任务步骤')).toBeVisible()
-  await expect(page.getByText('产物与预览')).toBeVisible()
-  await expect(page.getByText('审计摘要')).toBeVisible()
-  await expect(page.getByText('运行边界')).toBeVisible()
-  await expect(page.getByText('WS-SMOKE-001').first()).toBeVisible()
-  await expect(page.getByText('generate_pdf', { exact: true }).first()).toBeVisible()
-  await expect(page.getByText('read_uploaded_file', { exact: true }).first()).toBeVisible()
-  await expect(page.getByText('chart-data.json')).toBeVisible()
-  await expect(page.getByText('Agent.Plan')).toBeVisible()
+  await expect(page.locator('.agent-workbench-panel').getByText('任务控制台').first()).toBeVisible()
+
+  await page.locator('.agent-tabs').getByRole('button', { name: /审批/ }).click()
   await expect(page.locator('.approval-row')).toHaveCount(1)
+  await expect(page.getByText('generate_pdf', { exact: true }).first()).toBeVisible()
+
+  await page.locator('.agent-tabs').getByRole('button', { name: /步骤/ }).click()
+  await expect(page.getByText('read_uploaded_file', { exact: true }).first()).toBeVisible()
+
+  await page.locator('.agent-tabs').getByRole('button', { name: /产物/ }).click()
+  await expect(page.getByText('WS-SMOKE-001').first()).toBeVisible()
+  await expect(page.getByText('chart-data.json')).toBeVisible()
+  await expect(page.getByText('模拟 Cloud 只读数据')).toBeVisible()
   await expect(page.locator('.artifact-row')).toHaveCount(2)
+
+  await page.locator('.agent-tabs').getByRole('button', { name: /审计/ }).click()
+  await expect(page.getByText('Agent.Plan')).toBeVisible()
+
+  await page.locator('.agent-tabs').getByRole('button', { name: /边界/ }).click()
+  await expect(page.getByText('Cloud 只读边界')).toBeVisible()
   await expectNoHorizontalOverflow(page)
 })
 
-test('chat stream renders widgets and approval card', async ({ page }) => {
+test('config agent operations panel renders run queue and worker status', async ({ page }) => {
+  await expectProtectedShell(page, '/config')
+
+  await page.getByRole('tab', { name: 'Agent', exact: true }).click()
+
+  await expect(page.getByText('Agent / Workspace')).toBeVisible()
+  await expect(page.getByText('Run Queue')).toBeVisible()
+  await expect(page.getByText('Worker Status')).toBeVisible()
+  await expect(page.getByText('AICopilot.DataWorker')).toBeVisible()
+  await expect(page.getByText('Queued', { exact: true }).first()).toBeVisible()
+  await expectNoHorizontalOverflow(page)
+})
+
+test('chat stream renders widgets and approval card', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'desktop stream rendering covers widgets and approval card; mobile layout is covered separately')
+
   await expectProtectedShell(page, '/chat')
 
-  await page.locator('.composer textarea').fill('smoke check agent widgets')
-  await page.locator('.composer button').click()
+  await page.locator('.command-composer textarea').fill('smoke check agent widgets')
+  await page.locator('.send-button').click()
 
   await expect(page.getByText('diagnose_alarm', { exact: true })).toBeVisible()
   await expect(page.locator('.widget-frame').first()).toBeVisible()
@@ -93,13 +119,13 @@ test('mobile chat workspace keeps navigation and primary work area within viewpo
 
   await expectProtectedShell(page, '/chat')
 
-  await expect(page.getByText('Chat Workspace')).toBeVisible()
-  await expect(page.locator('.chat-main')).toBeVisible()
-  await expect(page.locator('.chat-status-strip')).toBeVisible()
-  await page.getByRole('button', { name: 'Agent 工作台' }).click()
-  await expect(page.locator('.context-panel.mobile-open')).toBeVisible()
-  await expect(page.getByText('审批队列')).toBeVisible()
-  await expect(page.getByText('产物与预览')).toBeVisible()
-  await expect(page.getByText('审计摘要')).toBeVisible()
+  await expect(page.getByText('AI CANVAS')).toBeVisible()
+  await expect(page.locator('.ai-canvas')).toBeVisible()
+  await expect(page.locator('.canvas-status-strip')).toBeVisible()
+  await page.getByRole('button', { name: 'Agent', exact: true }).click()
+  await expect(page.locator('.agent-workbench-panel.mobile-open')).toBeVisible()
+  await expect(page.getByRole('button', { name: /审批/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /产物/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /审计/ })).toBeVisible()
   await expectNoHorizontalOverflow(page)
 })

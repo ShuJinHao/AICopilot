@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { ShieldX } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
+import AiButton from '@/components/ai/AiButton.vue'
+import AiTag from '@/components/ai/AiTag.vue'
 import AppShell from '@/components/layout/AppShell.vue'
 import {
   ACCESS_MANAGEMENT_PERMISSIONS,
@@ -18,9 +21,7 @@ const authStore = useAuthStore()
 
 const ability = computed<ProtectedAbility | undefined>(() => {
   const raw = route.query.ability
-  return raw === 'chat' || raw === 'config' || raw === 'knowledge' || raw === 'access'
-    ? raw
-    : undefined
+  return raw === 'chat' || raw === 'config' || raw === 'knowledge' || raw === 'access' ? raw : undefined
 })
 
 const forbiddenContent = computed(() => {
@@ -74,38 +75,30 @@ async function goPrimaryPage() {
 <template>
   <AppShell>
     <div class="forbidden-page">
-      <div class="forbidden-panel">
-        <el-result icon="warning" :title="forbiddenContent.title" :sub-title="forbiddenContent.description">
-          <template #extra>
-            <div class="result-extra">
-              <div class="account-panel">
-                <span>当前账号</span>
-                <div>
-                  <el-tag type="info">{{ authStore.userName || '未登录' }}</el-tag>
-                  <el-tag type="info">{{ authStore.roleName || '未分配角色' }}</el-tag>
-                </div>
-              </div>
+      <section class="forbidden-panel">
+        <span class="forbidden-icon"><ShieldX class="h-10 w-10" /></span>
+        <h1>{{ forbiddenContent.title }}</h1>
+        <p>{{ forbiddenContent.description }}</p>
 
-              <div v-if="forbiddenContent.permissions.length > 0" class="permission-panel">
-                <p>
-                  {{
-                    forbiddenContent.mode === 'all'
-                      ? '需要同时具备以下全部权限：'
-                      : '至少需要具备以下权限中的一项：'
-                  }}
-                </p>
-                <div class="permission-tags">
-                  <el-tag v-for="permission in forbiddenContent.permissions" :key="permission" type="info">
-                    {{ permission }}
-                  </el-tag>
-                </div>
-              </div>
+        <div class="account-panel">
+          <span>当前账号</span>
+          <div>
+            <AiTag tone="neutral">{{ authStore.userName || '未登录' }}</AiTag>
+            <AiTag tone="neutral">{{ authStore.roleName || '未分配角色' }}</AiTag>
+          </div>
+        </div>
 
-              <el-button type="primary" @click="goPrimaryPage">返回可用页面</el-button>
-            </div>
-          </template>
-        </el-result>
-      </div>
+        <div v-if="forbiddenContent.permissions.length > 0" class="permission-panel">
+          <p>{{ forbiddenContent.mode === 'all' ? '需要同时具备以下全部权限：' : '至少需要具备以下权限中的一项：' }}</p>
+          <div class="permission-tags">
+            <AiTag v-for="permission in forbiddenContent.permissions" :key="permission" tone="neutral">
+              {{ permission }}
+            </AiTag>
+          </div>
+        </div>
+
+        <AiButton variant="primary" @click="goPrimaryPage">返回可用页面</AiButton>
+      </section>
     </div>
   </AppShell>
 </template>
@@ -118,28 +111,59 @@ async function goPrimaryPage() {
 }
 
 .forbidden-panel {
+  display: grid;
   width: min(100%, 760px);
-  border: 1px solid var(--app-border);
-  border-radius: var(--radius-lg);
-  background: var(--app-surface);
-  box-shadow: var(--shadow-md);
+  justify-items: center;
+  gap: 16px;
+  border: 1px solid var(--ai-border);
+  border-radius: 30px;
+  background: var(--ai-surface);
+  padding: 36px;
+  text-align: center;
+  box-shadow: var(--ai-shadow-shell);
 }
 
-.result-extra,
+.forbidden-icon {
+  display: grid;
+  height: 72px;
+  width: 72px;
+  place-items: center;
+  border-radius: 26px;
+  background: #fff7ed;
+  color: #b45309;
+}
+
+.forbidden-panel h1 {
+  margin: 0;
+  color: var(--ai-text);
+  font-size: 28px;
+  font-weight: 950;
+}
+
+.forbidden-panel > p {
+  margin: 0;
+  color: var(--ai-text-muted);
+  font-weight: 700;
+}
+
 .account-panel,
 .permission-panel {
   display: grid;
+  width: min(680px, 100%);
   gap: 12px;
+  border: 1px solid var(--ai-border);
+  border-radius: 20px;
+  background: var(--ai-surface-soft);
+  padding: 16px;
+  text-align: left;
 }
 
-.account-panel,
-.permission-panel {
-  width: min(680px, 100%);
-  border: 1px solid var(--app-border);
-  border-radius: var(--radius-md);
-  padding: 14px;
-  background: var(--app-surface-muted);
-  text-align: left;
+.account-panel > span,
+.permission-panel p {
+  margin: 0;
+  color: var(--ai-text-muted);
+  font-size: 13px;
+  font-weight: 850;
 }
 
 .account-panel div,
@@ -147,10 +171,5 @@ async function goPrimaryPage() {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-}
-
-.permission-panel p {
-  margin: 0;
-  color: var(--app-text-muted);
 }
 </style>

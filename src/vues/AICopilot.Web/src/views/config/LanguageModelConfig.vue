@@ -1,7 +1,17 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { computed, ref } from 'vue'
+import { Plus } from 'lucide-vue-next'
+import AiActionGroup from '@/components/ai/AiActionGroup.vue'
+import AiButton from '@/components/ai/AiButton.vue'
+import AiCheckbox from '@/components/ai/AiCheckbox.vue'
+import AiDrawer from '@/components/ai/AiDrawer.vue'
+import AiInput from '@/components/ai/AiInput.vue'
+import AiNumberInput from '@/components/ai/AiNumberInput.vue'
+import AiSelect from '@/components/ai/AiSelect.vue'
+import AiSwitch from '@/components/ai/AiSwitch.vue'
+import AiTag from '@/components/ai/AiTag.vue'
+import AiTableCard from '@/components/ai/AiTableCard.vue'
+import { confirmAiAction, showAiToast } from '@/composables/useAiFeedback'
 import { configService } from '@/services/configService'
 import { useConfigStore } from '@/stores/configStore'
 import type { LanguageModelSummary, LanguageModelTestResult, LanguageModelUsage } from '@/types/app'
@@ -30,6 +40,25 @@ const connectivityLabels: Record<string, string> = {
 const testingModelIds = ref<Set<string>>(new Set())
 const drawerTesting = ref(false)
 
+const usageChat = computed({
+  get: () => store.currentLanguageModel.usages.includes('Chat'),
+  set: (value: boolean) => toggleUsage('Chat', value)
+})
+const usageRouting = computed({
+  get: () => store.currentLanguageModel.usages.includes('Routing'),
+  set: (value: boolean) => toggleUsage('Routing', value)
+})
+
+function toggleUsage(usage: LanguageModelUsage, enabled: boolean) {
+  const next = new Set(store.currentLanguageModel.usages)
+  if (enabled) {
+    next.add(usage)
+  } else {
+    next.delete(usage)
+  }
+  store.currentLanguageModel.usages = [...next]
+}
+
 function protocolLabel(protocolType: string) {
   return protocolLabels[protocolType] ?? protocolType
 }
@@ -38,10 +67,10 @@ function connectivityLabel(status: string) {
   return connectivityLabels[status] ?? status
 }
 
-function connectivityType(status: string) {
+function connectivityTone(status: string) {
   if (status === 'Succeeded') return 'success'
   if (status === 'Failed') return 'danger'
-  return 'info'
+  return 'neutral'
 }
 
 function isTestingModel(id: string) {
@@ -50,12 +79,8 @@ function isTestingModel(id: string) {
 
 function setTestingModel(id: string, value: boolean) {
   const next = new Set(testingModelIds.value)
-  if (value) {
-    next.add(id)
-  } else {
-    next.delete(id)
-  }
-
+  if (value) next.add(id)
+  else next.delete(id)
   testingModelIds.value = next
 }
 
@@ -80,14 +105,10 @@ function buildCurrentLanguageModelTestPayload() {
 
 function showTestResult(result: LanguageModelTestResult) {
   if (result.success) {
-    ElMessage.success(`配置完成，耗时 ${result.elapsedMilliseconds}ms`)
+    showAiToast('success', `配置完成，耗时 ${result.elapsedMilliseconds}ms`)
     return
   }
-
-  ElMessageBox.alert(result.error || result.message || '连接测试失败', '连接测试失败', {
-    type: 'error',
-    confirmButtonText: '确认'
-  })
+  showAiToast('error', result.error || result.message || '连接测试失败')
 }
 
 async function testCurrentLanguageModel() {
@@ -112,168 +133,154 @@ async function testSavedLanguageModel(row: LanguageModelSummary) {
 }
 
 function onProtocolChange(protocolType: string) {
-  if (protocolType !== 'AnthropicMessages') {
-    return
-  }
+  if (protocolType !== 'AnthropicMessages') return
 
   store.currentLanguageModel.baseUrl = 'https://api.anthropic.com'
-  if (
-    !store.currentLanguageModel.provider ||
-    ['OpenAI', 'DeepSeek', '通义千问', '豆包'].includes(store.currentLanguageModel.provider)
-  ) {
+  if (!store.currentLanguageModel.provider || ['OpenAI', 'DeepSeek', '通义千问', '豆包'].includes(store.currentLanguageModel.provider)) {
     store.currentLanguageModel.provider = 'Anthropic'
   }
 }
 
 async function confirmAction(title: string, message: string, action: () => Promise<void>) {
-  await ElMessageBox.confirm(message, title, { type: 'warning', confirmButtonText: '确认', cancelButtonText: '取消' })
+  if (!(await confirmAiAction(message, title))) return
   await action()
-  ElMessage.success('操作已完成')
+  showAiToast('success', '操作已完成')
 }
 </script>
 
 <template>
-  <section class="panel">
+  <section class="config-panel">
     <div class="panel-header">
       <div>
-        <h2 class="panel-title">语言模型</h2>
-        <p class="panel-subtitle">配置最终智能体与路由模型。</p>
+        <h2>语言模型</h2>
+        <p>配置最终智能体与路由模型。</p>
       </div>
-      <el-button type="primary" :icon="Plus" @click="store.openCreateLanguageModelDialog()">新增模型</el-button>
+      <AiButton variant="primary" @click="store.openCreateLanguageModelDialog()">
+        <Plus class="h-4 w-4" />
+        新增模型
+      </AiButton>
     </div>
-    <el-table :data="store.languageModels" stripe>
-      <el-table-column prop="name" label="名称" min-width="180" />
-      <el-table-column prop="provider" label="服务商" width="120" />
-      <el-table-column prop="protocolType" label="协议" width="150">
-        <template #default="{ row }">
-          <el-tag type="info">{{ protocolLabel(row.protocolType) }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="baseUrl" label="接口地址" min-width="220" show-overflow-tooltip />
-      <el-table-column prop="contextWindowTokens" label="上下文窗口" width="130" />
-      <el-table-column prop="maxOutputTokens" label="最大输出" width="110" />
-      <el-table-column label="用途" width="150">
-        <template #default="{ row }">
-          <el-tag v-for="usage in row.usages" :key="usage" size="small" class="usage-tag">
-            {{ usageLabels[usage as keyof typeof usageLabels] ?? usage }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="状态" width="90">
-        <template #default="{ row }">
-          <el-tag :type="row.isEnabled ? 'success' : 'info'">{{ row.isEnabled ? '启用' : '停用' }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="密钥" width="110">
-        <template #default="{ row }">
-          <el-tag :type="row.hasApiKey ? 'success' : 'info'">{{ row.hasApiKey ? '已配置' : '未配置' }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="连通性" width="130">
-        <template #default="{ row }">
-          <el-tooltip
-            v-if="row.connectivityStatus === 'Failed' && row.connectivityError"
-            :content="row.connectivityError"
-            placement="top"
-          >
-            <el-tag :type="connectivityType(row.connectivityStatus)">
-              {{ connectivityLabel(row.connectivityStatus) }}
-            </el-tag>
-          </el-tooltip>
-          <el-tag v-else :type="connectivityType(row.connectivityStatus)">
-            {{ connectivityLabel(row.connectivityStatus) }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="210" fixed="right">
-        <template #default="{ row }">
-          <div class="table-actions">
-            <el-button
-              link
-              type="success"
-              :loading="isTestingModel(row.id)"
-              @click="testSavedLanguageModel(row)"
-            >
-              测试
-            </el-button>
-            <el-button link type="primary" @click="store.openEditLanguageModelDialog(row.id)">编辑</el-button>
-            <el-button
-              link
-              type="danger"
-              @click="confirmAction('删除模型', `确认删除 ${row.name}？`, () => store.deleteLanguageModel(row.id))"
-            >
-              删除
-            </el-button>
-          </div>
-        </template>
-      </el-table-column>
-    </el-table>
+
+    <AiTableCard :empty="store.languageModels.length === 0" empty-text="暂无语言模型">
+      <table class="ai-table">
+        <thead>
+          <tr>
+            <th>名称</th>
+            <th>服务商</th>
+            <th>协议</th>
+            <th>接口地址</th>
+            <th>上下文</th>
+            <th>最大输出</th>
+            <th>用途</th>
+            <th>状态</th>
+            <th>密钥</th>
+            <th>连通性</th>
+            <th class="right">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="row in store.languageModels" :key="row.id">
+            <td>{{ row.name }}</td>
+            <td>{{ row.provider }}</td>
+            <td><AiTag tone="neutral">{{ protocolLabel(row.protocolType) }}</AiTag></td>
+            <td class="truncate-cell">{{ row.baseUrl }}</td>
+            <td>{{ row.contextWindowTokens }}</td>
+            <td>{{ row.maxOutputTokens }}</td>
+            <td>
+              <AiTag v-for="usage in row.usages" :key="usage" tone="blue" class="mr-1">
+                {{ usageLabels[usage as keyof typeof usageLabels] ?? usage }}
+              </AiTag>
+            </td>
+            <td><AiTag :tone="row.isEnabled ? 'success' : 'neutral'">{{ row.isEnabled ? '启用' : '停用' }}</AiTag></td>
+            <td><AiTag :tone="row.hasApiKey ? 'success' : 'neutral'">{{ row.hasApiKey ? '已配置' : '未配置' }}</AiTag></td>
+            <td>
+              <AiTag :tone="connectivityTone(row.connectivityStatus)">
+                {{ connectivityLabel(row.connectivityStatus) }}
+              </AiTag>
+            </td>
+            <td>
+              <AiActionGroup>
+                <AiButton size="sm" variant="lime" :disabled="isTestingModel(row.id)" @click="testSavedLanguageModel(row)">
+                  {{ isTestingModel(row.id) ? '测试中' : '测试' }}
+                </AiButton>
+                <AiButton size="sm" @click="store.openEditLanguageModelDialog(row.id)">编辑</AiButton>
+                <AiButton size="sm" variant="danger" @click="confirmAction('删除模型', `确认删除 ${row.name}？`, () => store.deleteLanguageModel(row.id))">
+                  删除
+                </AiButton>
+              </AiActionGroup>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </AiTableCard>
   </section>
 
-  <el-drawer v-model="store.dialogStates.languageModel" size="520px" title="语言模型">
-    <el-form label-position="top">
-      <el-form-item label="名称"><el-input v-model="store.currentLanguageModel.name" /></el-form-item>
-      <el-form-item label="服务商"><el-input v-model="store.currentLanguageModel.provider" /></el-form-item>
-      <el-form-item label="协议类型">
-        <el-select v-model="store.currentLanguageModel.protocolType" @change="onProtocolChange">
-          <el-option v-for="item in protocolOptions" :key="item.value" :label="item.label" :value="item.value" />
-        </el-select>
-      </el-form-item>
-      <el-form-item label="接口地址"><el-input v-model="store.currentLanguageModel.baseUrl" /></el-form-item>
-      <el-form-item label="密钥">
-        <el-input
+  <AiDrawer v-model="store.dialogStates.languageModel" title="语言模型" width="560px">
+    <div class="ai-form">
+      <label><span>名称</span><AiInput v-model="store.currentLanguageModel.name" /></label>
+      <label><span>服务商</span><AiInput v-model="store.currentLanguageModel.provider" /></label>
+      <label>
+        <span>协议类型</span>
+        <AiSelect
+          v-model="store.currentLanguageModel.protocolType"
+          :options="protocolOptions"
+          @update:model-value="(value) => onProtocolChange(String(value ?? ''))"
+        />
+      </label>
+      <label><span>接口地址</span><AiInput v-model="store.currentLanguageModel.baseUrl" /></label>
+      <label>
+        <span>密钥</span>
+        <AiInput
           v-model="store.currentLanguageModel.apiKey"
           type="password"
-          show-password
-          @input="store.currentLanguageModel.apiKeyAction = 'replace'"
+          autocomplete="new-password"
+          @update:model-value="store.currentLanguageModel.apiKeyAction = 'replace'"
         />
-        <el-checkbox
-          v-if="store.currentLanguageModel.hasApiKey"
-          v-model="store.currentLanguageModel.clearApiKey"
-          @change="store.currentLanguageModel.apiKeyAction = store.currentLanguageModel.clearApiKey ? 'clear' : 'keep'"
-        >
-          清除已有密钥
-        </el-checkbox>
-      </el-form-item>
-      <el-form-item label="用途">
-        <el-checkbox-group v-model="store.currentLanguageModel.usages">
-          <el-checkbox label="Chat">对话回答</el-checkbox>
-          <el-checkbox label="Routing">路由识别</el-checkbox>
-        </el-checkbox-group>
-      </el-form-item>
-      <el-form-item label="启用">
-        <el-switch v-model="store.currentLanguageModel.isEnabled" />
-      </el-form-item>
-      <el-form-item label="上下文窗口">
-        <el-input-number v-model="store.currentLanguageModel.contextWindowTokens" :min="1024" :step="1024" />
-      </el-form-item>
-      <el-form-item label="最大输出">
-        <el-input-number v-model="store.currentLanguageModel.maxOutputTokens" :min="256" :step="256" />
-      </el-form-item>
-      <el-form-item label="温度">
-        <el-input-number v-model="store.currentLanguageModel.temperature" :min="0" :max="2" :step="0.1" />
-      </el-form-item>
-    </el-form>
-    <template #footer>
-      <el-button @click="store.closeLanguageModelDialog()">取消</el-button>
-      <el-button :loading="drawerTesting" @click="testCurrentLanguageModel()">测试连接</el-button>
-      <el-button
-        type="primary"
-        :loading="store.submittingStates.languageModel"
-        @click="store.saveLanguageModel()"
+      </label>
+      <AiCheckbox
+        v-if="store.currentLanguageModel.hasApiKey"
+        v-model="store.currentLanguageModel.clearApiKey"
+        @update:model-value="store.currentLanguageModel.apiKeyAction = store.currentLanguageModel.clearApiKey ? 'clear' : 'keep'"
       >
-        保存
-      </el-button>
-    </template>
-  </el-drawer>
+        清除已有密钥
+      </AiCheckbox>
+      <div>
+        <span class="field-label">用途</span>
+        <div class="inline-options">
+          <AiCheckbox v-model="usageChat">对话回答</AiCheckbox>
+          <AiCheckbox v-model="usageRouting">路由识别</AiCheckbox>
+        </div>
+      </div>
+      <div class="form-row"><span>启用</span><AiSwitch v-model="store.currentLanguageModel.isEnabled" /></div>
+      <label><span>上下文窗口</span><AiNumberInput v-model="store.currentLanguageModel.contextWindowTokens" :min="1024" :step="1024" /></label>
+      <label><span>最大输出</span><AiNumberInput v-model="store.currentLanguageModel.maxOutputTokens" :min="256" :step="256" /></label>
+      <label><span>温度</span><AiNumberInput v-model="store.currentLanguageModel.temperature" :min="0" :max="2" :step="0.1" /></label>
+      <footer>
+        <AiButton @click="store.closeLanguageModelDialog()">取消</AiButton>
+        <AiButton :disabled="drawerTesting" @click="testCurrentLanguageModel()">{{ drawerTesting ? '测试中' : '测试连接' }}</AiButton>
+        <AiButton variant="primary" :disabled="store.submittingStates.languageModel" @click="store.saveLanguageModel()">
+          {{ store.submittingStates.languageModel ? '保存中' : '保存' }}
+        </AiButton>
+      </footer>
+    </div>
+  </AiDrawer>
 </template>
 
 <style scoped>
-:deep(.el-drawer__body) {
-  overflow: auto;
+@import './shared-config.css';
+
+.truncate-cell {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.usage-tag + .usage-tag {
-  margin-left: 4px;
+.field-label {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--ai-text-muted);
+  font-size: 13px;
+  font-weight: 850;
 }
 </style>

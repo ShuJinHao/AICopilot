@@ -7,6 +7,34 @@ export function resolveChatErrorMessage(payload: ChatErrorPayload) {
   const userFacingMessage = payload.userFacingMessage?.trim() || payload.detail?.trim()
 
   switch (payload.code) {
+    case 'missing_permission':
+      return userFacingMessage ?? '当前账号缺少执行该操作的权限。'
+    case 'cloud_readonly_tool_disabled':
+      return userFacingMessage ?? 'Cloud 只读工具尚未启用，请联系管理员在 Tool Registry 中开启。'
+    case 'tool_requires_approval':
+      return userFacingMessage ?? '该工具需要人工审批，请先处理审批队列。'
+    case 'agent_task_run_queued':
+      return userFacingMessage ?? '任务已经进入队列，请勿重复运行。'
+    case 'agent_task_run_in_progress':
+      return userFacingMessage ?? '任务正在执行中，请等待当前运行完成。'
+    case 'agent_worker_unavailable':
+      return userFacingMessage ?? '当前没有可用 DataWorker，请检查 Worker 状态。'
+    case 'agent_worker_workspace_mismatch':
+      return userFacingMessage ?? 'Worker 与 HttpApi 工作区不一致，请先修复部署配置。'
+    case 'artifact_finalized':
+      return userFacingMessage ?? '产物已正式输出，不能继续编辑。'
+    case 'workspace_manifest_invalid':
+      return userFacingMessage ?? '工作区清单无效，请刷新后重试或联系管理员检查产物目录。'
+    case 'planner_model_unavailable':
+      return userFacingMessage ?? '规划模型不可用，请检查模型配置。'
+    case 'tool_disabled':
+      return userFacingMessage ?? '该工具已被禁用，不能执行。'
+    case 'tool_blocked':
+      return userFacingMessage ?? '该工具被安全策略阻断。'
+    case 'tool_permission_denied':
+      return userFacingMessage ?? '当前账号没有调用该工具的权限。'
+    case 'agent_plan_invalid':
+      return userFacingMessage ?? 'Agent 计划未通过后端校验，请调整任务目标后重新生成。'
     case 'approval_pending':
       return userFacingMessage ?? '当前会话已有待处理审批，请先处理审批请求。'
     case 'chat_context_expired':
@@ -35,6 +63,14 @@ export function resolveChatErrorMessage(payload: ChatErrorPayload) {
 
 export function toFriendlyMessage(error: unknown) {
   if (error instanceof ApiError) {
+    const problem = error.details && typeof error.details === 'object'
+      ? error.details as ChatErrorPayload
+      : null
+
+    if (problem?.code || problem?.detail || problem?.userFacingMessage) {
+      return resolveChatErrorMessage(problem)
+    }
+
     if (error.status === 401) {
       return '登录状态已失效，请重新登录。'
     }
