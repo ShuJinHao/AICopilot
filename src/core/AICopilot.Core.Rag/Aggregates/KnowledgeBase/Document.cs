@@ -25,7 +25,12 @@ public class Document : IEntity<DocumentId>
         DateTime? effectiveFrom = null,
         DateTime? effectiveTo = null,
         bool allowedForFinalPrompt = true,
-        string? blockedReason = null)
+        string? blockedReason = null,
+        Guid? documentGroupId = null,
+        int versionNo = 1,
+        DateTime? effectiveAt = null,
+        DateTime? expiredAt = null,
+        KnowledgeCategoryId? categoryId = null)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -64,6 +69,12 @@ public class Document : IEntity<DocumentId>
             effectiveTo,
             allowedForFinalPrompt,
             blockedReason);
+        ConfigureVersioning(
+            documentGroupId ?? Guid.NewGuid(),
+            versionNo,
+            effectiveAt,
+            expiredAt,
+            categoryId);
     }
 
     public DocumentId Id { get; private set; }
@@ -96,6 +107,18 @@ public class Document : IEntity<DocumentId>
     public DateTime? EffectiveTo { get; private set; }
     public bool AllowedForFinalPrompt { get; private set; } = true;
     public string? BlockedReason { get; private set; }
+
+    public KnowledgeCategoryId? CategoryId { get; private set; }
+
+    public Guid DocumentGroupId { get; private set; }
+
+    public int VersionNo { get; private set; } = 1;
+
+    public DateTime? EffectiveAt { get; private set; }
+
+    public DateTime? ExpiredAt { get; private set; }
+
+    public DocumentId? SupersededByDocumentId { get; private set; }
 
     public KnowledgeBase KnowledgeBase { get; private set; } = null!;
 
@@ -140,6 +163,11 @@ public class Document : IEntity<DocumentId>
 
     public bool CanEnterFinalPrompt(DateTime utcNow)
     {
+        if (!IsSearchable(utcNow))
+        {
+            return false;
+        }
+
         if (!AllowedForFinalPrompt || Classification == DocumentClassification.Forbidden)
         {
             return false;
@@ -151,6 +179,64 @@ public class Document : IEntity<DocumentId>
         }
 
         if (EffectiveTo.HasValue && EffectiveTo.Value < utcNow)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    public void ConfigureVersioning(
+        Guid documentGroupId,
+        int versionNo,
+        DateTime? effectiveAt,
+        DateTime? expiredAt,
+        KnowledgeCategoryId? categoryId)
+    {
+        if (documentGroupId == Guid.Empty)
+        {
+            throw new ArgumentException("Document group id is required.", nameof(documentGroupId));
+        }
+
+        if (versionNo <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(versionNo), "Document version number must be positive.");
+        }
+
+        if (effectiveAt.HasValue && expiredAt.HasValue && expiredAt.Value < effectiveAt.Value)
+        {
+            throw new ArgumentException("Document expiration cannot be earlier than effective time.", nameof(expiredAt));
+        }
+
+        DocumentGroupId = documentGroupId;
+        VersionNo = versionNo;
+        EffectiveAt = effectiveAt;
+        ExpiredAt = expiredAt;
+        CategoryId = categoryId;
+    }
+
+    public bool IsSearchable(DateTime utcNow)
+    {
+        if (Status is DocumentStatus.SoftDeleted
+            or DocumentStatus.Deleting
+            or DocumentStatus.Deleted
+            or DocumentStatus.Superseded
+            or DocumentStatus.Failed)
+        {
+            return false;
+        }
+
+        if (Status is not (DocumentStatus.Indexed or DocumentStatus.Active))
+        {
+            return false;
+        }
+
+        if (EffectiveAt.HasValue && EffectiveAt.Value > utcNow)
+        {
+            return false;
+        }
+
+        if (ExpiredAt.HasValue && ExpiredAt.Value < utcNow)
         {
             return false;
         }
@@ -229,6 +315,49 @@ public class Document : IEntity<DocumentId>
         ProcessedAt = DateTime.UtcNow;
     }
 
+    public void Activate()
+    {
+        if (Status is not (DocumentStatus.Indexed or DocumentStatus.Draft or DocumentStatus.Active))
+        {
+            throw new InvalidOperationException($"Current document status {Status} cannot be activated.");
+        }
+
+        Status = DocumentStatus.Active;
+        ProcessedAt ??= DateTime.UtcNow;
+    }
+
+    public void SupersedeBy(DocumentId documentId)
+    {
+        if (documentId.Value <= 0)
+        {
+            throw new ArgumentException("Superseding document id is required.", nameof(documentId));
+        }
+
+        SupersededByDocumentId = documentId;
+        Status = DocumentStatus.Superseded;
+    }
+
+    public void SoftDelete()
+    {
+        Status = DocumentStatus.SoftDeleted;
+    }
+
+    public void MarkDeleting()
+    {
+        if (Status != DocumentStatus.SoftDeleted)
+        {
+            Status = DocumentStatus.SoftDeleted;
+        }
+
+        Status = DocumentStatus.Deleting;
+    }
+
+    public void MarkDeleted()
+    {
+        Status = DocumentStatus.Deleted;
+        ClearChunks();
+    }
+
     public void MarkAsFailed(string errorMessage)
     {
         if (string.IsNullOrWhiteSpace(errorMessage))
@@ -270,5 +399,11 @@ public enum DocumentStatus
     Splitting = 2,
     Embedding = 3,
     Indexed = 4,
-    Failed = 5
+    Failed = 5,
+    Draft = 6,
+    Active = 7,
+    Superseded = 8,
+    SoftDeleted = 9,
+    Deleting = 10,
+    Deleted = 11
 }

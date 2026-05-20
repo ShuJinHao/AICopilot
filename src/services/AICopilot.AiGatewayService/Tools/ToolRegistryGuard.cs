@@ -42,7 +42,7 @@ public sealed class ToolRegistryGuard(
                 $"Tool '{toolCode}' is not registered.");
         }
 
-        if (tool.RiskLevel == AiToolRiskLevel.Blocked)
+        if (tool.RiskLevel is AiToolRiskLevel.Blocked or AiToolRiskLevel.Critical)
         {
             return ToolRegistryDecision.Reject(
                 AppProblemCodes.ToolBlocked,
@@ -56,6 +56,13 @@ public sealed class ToolRegistryGuard(
                     ? AppProblemCodes.CloudReadonlyToolDisabled
                     : AppProblemCodes.ToolDisabled,
                 $"Tool '{tool.ToolCode}' is disabled.");
+        }
+
+        if (!tool.IsExecutableByAgent)
+        {
+            return ToolRegistryDecision.Reject(
+                AppProblemCodes.ToolDisabled,
+                $"Tool '{tool.ToolCode}' is not executable by Agent policy.");
         }
 
         if (tool.ProviderType == ToolProviderType.CloudReadonly)

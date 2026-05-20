@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.AgentPlugin;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Services.Contracts;
@@ -26,11 +27,40 @@ public sealed record ToolRegistrationDto(
     bool IsEnabled,
     int TimeoutSeconds,
     string AuditLevel,
+    string Category,
+    IReadOnlyCollection<string> BusinessDomains,
+    string DataBoundary,
+    bool IsVisibleToPlanner,
+    bool IsExecutableByAgent,
+    int SchemaVersion,
+    int CatalogVersion,
+    string ApprovalPolicy,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
     bool RuntimeAvailable,
     DateTimeOffset? LastDiscoveredAt,
     string? SourceServerName);
+
+public sealed record ToolRegistryCatalogDto(
+    int Version,
+    int AvailableToolCount,
+    bool MockMcpOnly,
+    IReadOnlyDictionary<string, int> RiskSummary,
+    IReadOnlyCollection<AgentPlannerToolSummary> Tools);
+
+public sealed record ToolRunAuditDto(
+    Guid ToolRunId,
+    Guid TaskId,
+    Guid? PlanId,
+    string ToolCode,
+    string ProviderKind,
+    bool IsMock,
+    string ApprovalStatus,
+    string Status,
+    long? DurationMs,
+    string? ResultHash,
+    string? ErrorCode,
+    DateTimeOffset ExecutedAt);
 
 public sealed record ToolExecutionRecordDto(
     Guid Id,
@@ -47,7 +77,11 @@ public sealed record ToolExecutionRecordDto(
     string? ErrorCode,
     string? ErrorMessage,
     string? ArtifactId,
-    string? AuditMetadata);
+    string? AuditMetadata,
+    string ProviderKind = "Unknown",
+    bool IsMock = false,
+    string? ApprovalStatus = null,
+    string? ResultHash = null);
 
 public sealed record ToolExecutionRecordPageDto(
     IReadOnlyCollection<ToolExecutionRecordDto> Items,
@@ -64,6 +98,11 @@ public sealed record GetListToolRegistrationsQuery : IQuery<Result<IReadOnlyColl
 [AuthorizeRequirement("AiGateway.ToolRegistry.Read")]
 public sealed record GetToolRegistrationQuery(string ToolCode) : IQuery<Result<ToolRegistrationDto>>;
 
+[AuthorizeRequirement("AiGateway.ToolRegistry.Read")]
+public sealed record GetToolCatalogQuery(
+    bool SimulationOnly = true,
+    IReadOnlyCollection<string>? BusinessDomains = null) : IQuery<Result<ToolRegistryCatalogDto>>;
+
 [AuthorizeRequirement("AiGateway.ToolRegistry.Manage")]
 public sealed record UpdateToolRegistrationCommand(
     string ToolCode,
@@ -76,7 +115,49 @@ public sealed record UpdateToolRegistrationCommand(
     bool? RequiresApproval = null,
     bool? IsEnabled = null,
     int? TimeoutSeconds = null,
-    string? AuditLevel = null) : ICommand<Result<ToolRegistrationDto>>;
+    string? AuditLevel = null,
+    string? Category = null,
+    IReadOnlyCollection<string>? BusinessDomains = null,
+    string? DataBoundary = null,
+    bool? IsVisibleToPlanner = null,
+    bool? IsExecutableByAgent = null,
+    int? SchemaVersion = null,
+    int? CatalogVersion = null,
+    string? ApprovalPolicy = null) : ICommand<Result<ToolRegistrationDto>>;
+
+[AuthorizeRequirement("AiGateway.ToolRegistry.Manage")]
+public sealed record UpsertToolDefinitionCommand(
+    string ToolCode,
+    string DisplayName,
+    string Description,
+    ToolProviderType ProviderType,
+    ToolRegistrationTargetType TargetType,
+    string TargetName,
+    string InputSchemaJson,
+    string OutputSchemaJson,
+    AiToolRiskLevel RiskLevel,
+    string? RequiredPermission = null,
+    bool RequiresApproval = false,
+    bool IsEnabled = true,
+    int TimeoutSeconds = 120,
+    string AuditLevel = "Standard",
+    string Category = "General",
+    IReadOnlyCollection<string>? BusinessDomains = null,
+    string DataBoundary = nameof(ToolDataBoundary.NoData),
+    bool IsVisibleToPlanner = true,
+    bool IsExecutableByAgent = true,
+    int SchemaVersion = 1,
+    int CatalogVersion = BuiltInToolRegistrations.CurrentCatalogVersion,
+    string ApprovalPolicy = "None") : ICommand<Result<ToolRegistrationDto>>;
+
+[AuthorizeRequirement("AiGateway.ToolRegistry.Manage")]
+public sealed record ActivateToolDefinitionVersionCommand(
+    string ToolCode,
+    int? CatalogVersion = null,
+    int? SchemaVersion = null) : ICommand<Result<ToolRegistrationDto>>;
+
+[AuthorizeRequirement("AiGateway.ToolRegistry.Manage")]
+public sealed record DisableToolDefinitionCommand(string ToolCode) : ICommand<Result<ToolRegistrationDto>>;
 
 public sealed class GetListToolRegistrationsQueryHandler(
     IReadRepository<ToolRegistration> repository,
@@ -115,6 +196,45 @@ public sealed class GetToolRegistrationQueryHandler(
     }
 }
 
+public sealed class GetToolCatalogQueryHandler(
+    AgentPlanToolGuard toolGuard,
+    ICurrentUser currentUser)
+    : IQueryHandler<GetToolCatalogQuery, Result<ToolRegistryCatalogDto>>
+{
+    public async Task<Result<ToolRegistryCatalogDto>> Handle(
+        GetToolCatalogQuery request,
+        CancellationToken cancellationToken)
+    {
+        if (currentUser.Id is not { } userId)
+        {
+            return Result.Unauthorized(new ApiProblemDescriptor(
+                AuthProblemCodes.Unauthorized,
+                "Current user id is missing or invalid."));
+        }
+
+        var catalog = await toolGuard.GetAvailableToolCatalogAsync(
+            userId,
+            request.SimulationOnly,
+            request.BusinessDomains,
+            cancellationToken);
+        if (!catalog.IsSuccess || catalog.Value is null)
+        {
+            return Result.From(catalog);
+        }
+
+        var riskSummary = catalog.Value.Tools
+            .GroupBy(tool => tool.RiskLevel, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+
+        return Result.Success(new ToolRegistryCatalogDto(
+            catalog.Value.Version,
+            catalog.Value.AvailableToolCount,
+            MockMcpOnly: true,
+            riskSummary,
+            catalog.Value.Tools));
+    }
+}
+
 public sealed class UpdateToolRegistrationCommandHandler(
     IRepository<ToolRegistration> repository,
     IAgentPluginCatalog pluginCatalog,
@@ -140,7 +260,12 @@ public sealed class UpdateToolRegistrationCommandHandler(
             return Result.Invalid("AuditLevel is invalid.");
         }
 
-        var changedFields = BuildChangedFields(tool, request, auditLevel);
+        if (!TryParseDataBoundary(request.DataBoundary, out var dataBoundary))
+        {
+            return Result.Invalid("DataBoundary is invalid.");
+        }
+
+        var changedFields = BuildChangedFields(tool, request, auditLevel, dataBoundary);
         tool.Update(
             request.DisplayName ?? tool.DisplayName,
             request.Description ?? tool.Description,
@@ -155,7 +280,15 @@ public sealed class UpdateToolRegistrationCommandHandler(
             request.IsEnabled ?? tool.IsEnabled,
             request.TimeoutSeconds ?? tool.TimeoutSeconds,
             auditLevel,
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            request.Category ?? tool.Category,
+            request.BusinessDomains ?? tool.BusinessDomains,
+            dataBoundary ?? tool.DataBoundary,
+            request.IsVisibleToPlanner ?? tool.IsVisibleToPlanner,
+            request.IsExecutableByAgent ?? tool.IsExecutableByAgent,
+            request.SchemaVersion ?? tool.SchemaVersion,
+            request.CatalogVersion ?? tool.CatalogVersion,
+            request.ApprovalPolicy ?? tool.ApprovalPolicy);
 
         repository.Update(tool);
         await auditLogWriter.WriteAsync(
@@ -176,7 +309,8 @@ public sealed class UpdateToolRegistrationCommandHandler(
     private static IReadOnlyCollection<string> BuildChangedFields(
         ToolRegistration tool,
         UpdateToolRegistrationCommand request,
-        ToolAuditLevel nextAuditLevel)
+        ToolAuditLevel nextAuditLevel,
+        ToolDataBoundary? nextDataBoundary)
     {
         var fields = new List<string>();
         AddIfChanged(request.DisplayName, tool.DisplayName, "displayName");
@@ -209,6 +343,39 @@ public sealed class UpdateToolRegistrationCommandHandler(
             fields.Add("auditLevel");
         }
 
+        AddIfChanged(request.Category, tool.Category, "category");
+        if (request.BusinessDomains is not null &&
+            !request.BusinessDomains.SequenceEqual(tool.BusinessDomains, StringComparer.OrdinalIgnoreCase))
+        {
+            fields.Add("businessDomains");
+        }
+
+        if (nextDataBoundary.HasValue && nextDataBoundary.Value != tool.DataBoundary)
+        {
+            fields.Add("dataBoundary");
+        }
+
+        if (request.IsVisibleToPlanner.HasValue && request.IsVisibleToPlanner.Value != tool.IsVisibleToPlanner)
+        {
+            fields.Add("isVisibleToPlanner");
+        }
+
+        if (request.IsExecutableByAgent.HasValue && request.IsExecutableByAgent.Value != tool.IsExecutableByAgent)
+        {
+            fields.Add("isExecutableByAgent");
+        }
+
+        if (request.SchemaVersion.HasValue && request.SchemaVersion.Value != tool.SchemaVersion)
+        {
+            fields.Add("schemaVersion");
+        }
+
+        if (request.CatalogVersion.HasValue && request.CatalogVersion.Value != tool.CatalogVersion)
+        {
+            fields.Add("catalogVersion");
+        }
+
+        AddIfChanged(request.ApprovalPolicy, tool.ApprovalPolicy, "approvalPolicy");
         return fields;
 
         void AddIfChanged(string? next, string? current, string field)
@@ -218,6 +385,233 @@ public sealed class UpdateToolRegistrationCommandHandler(
                 fields.Add(field);
             }
         }
+    }
+
+    internal static bool TryParseDataBoundary(string? value, out ToolDataBoundary? dataBoundary)
+    {
+        dataBoundary = null;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return true;
+        }
+
+        if (!Enum.TryParse<ToolDataBoundary>(value, ignoreCase: true, out var parsed))
+        {
+            return false;
+        }
+
+        dataBoundary = parsed;
+        return true;
+    }
+}
+
+public sealed class UpsertToolDefinitionCommandHandler(
+    IRepository<ToolRegistration> repository,
+    IAgentPluginCatalog pluginCatalog,
+    IAuditLogWriter auditLogWriter)
+    : ICommandHandler<UpsertToolDefinitionCommand, Result<ToolRegistrationDto>>
+{
+    public async Task<Result<ToolRegistrationDto>> Handle(
+        UpsertToolDefinitionCommand request,
+        CancellationToken cancellationToken)
+    {
+        if (!Enum.TryParse<ToolAuditLevel>(request.AuditLevel, ignoreCase: true, out var auditLevel))
+        {
+            return Result.Invalid("AuditLevel is invalid.");
+        }
+
+        if (!Enum.TryParse<ToolDataBoundary>(request.DataBoundary, ignoreCase: true, out var dataBoundary))
+        {
+            return Result.Invalid("DataBoundary is invalid.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var tool = await repository.GetAsync(
+            item => item.ToolCode == request.ToolCode,
+            cancellationToken: cancellationToken);
+        var created = tool is null;
+        if (tool is null)
+        {
+            tool = new ToolRegistration(
+                request.ToolCode,
+                request.DisplayName,
+                request.Description,
+                request.ProviderType,
+                request.TargetType,
+                request.TargetName,
+                request.InputSchemaJson,
+                request.OutputSchemaJson,
+                request.RiskLevel,
+                request.RequiredPermission,
+                request.RequiresApproval,
+                request.IsEnabled,
+                request.TimeoutSeconds,
+                auditLevel,
+                now,
+                request.Category,
+                request.BusinessDomains,
+                dataBoundary,
+                request.IsVisibleToPlanner,
+                request.IsExecutableByAgent,
+                request.SchemaVersion,
+                request.CatalogVersion,
+                request.ApprovalPolicy);
+            repository.Add(tool);
+        }
+        else
+        {
+            tool.Update(
+                request.DisplayName,
+                request.Description,
+                request.ProviderType,
+                request.TargetType,
+                request.TargetName,
+                request.InputSchemaJson,
+                request.OutputSchemaJson,
+                request.RiskLevel,
+                request.RequiredPermission,
+                request.RequiresApproval,
+                request.IsEnabled,
+                request.TimeoutSeconds,
+                auditLevel,
+                now,
+                request.Category,
+                request.BusinessDomains,
+                dataBoundary,
+                request.IsVisibleToPlanner,
+                request.IsExecutableByAgent,
+                request.SchemaVersion,
+                request.CatalogVersion,
+                request.ApprovalPolicy);
+            repository.Update(tool);
+        }
+
+        await auditLogWriter.WriteAsync(
+            new AuditLogWriteRequest(
+                AuditActionGroups.Config,
+                created ? "AiGateway.CreateToolDefinition" : "AiGateway.UpsertToolDefinition",
+                "ToolRegistration",
+                tool.Id.Value.ToString(),
+                tool.ToolCode,
+                AuditResults.Succeeded,
+                $"{(created ? "Created" : "Updated")} tool definition: {tool.ToolCode}; provider={tool.ProviderType}; risk={tool.RiskLevel}; dataBoundary={tool.DataBoundary}; enabled={tool.IsEnabled}.",
+                ["toolCode", "providerType", "riskLevel", "dataBoundary", "catalogVersion"]),
+            cancellationToken);
+        await repository.SaveChangesAsync(cancellationToken);
+
+        return Result.Success(ToolRegistrationMapper.Map(tool, pluginCatalog));
+    }
+}
+
+public sealed class ActivateToolDefinitionVersionCommandHandler(
+    IRepository<ToolRegistration> repository,
+    IAgentPluginCatalog pluginCatalog,
+    IAuditLogWriter auditLogWriter)
+    : ICommandHandler<ActivateToolDefinitionVersionCommand, Result<ToolRegistrationDto>>
+{
+    public async Task<Result<ToolRegistrationDto>> Handle(
+        ActivateToolDefinitionVersionCommand request,
+        CancellationToken cancellationToken)
+    {
+        var tool = await repository.GetAsync(item => item.ToolCode == request.ToolCode, cancellationToken: cancellationToken);
+        if (tool is null)
+        {
+            return Result.NotFound();
+        }
+
+        tool.Update(
+            tool.DisplayName,
+            tool.Description,
+            tool.ProviderType,
+            tool.TargetType,
+            tool.TargetName,
+            tool.InputSchemaJson,
+            tool.OutputSchemaJson,
+            tool.RiskLevel,
+            tool.RequiredPermission,
+            tool.RequiresApproval,
+            true,
+            tool.TimeoutSeconds,
+            tool.AuditLevel,
+            DateTimeOffset.UtcNow,
+            tool.Category,
+            tool.BusinessDomains,
+            tool.DataBoundary,
+            tool.IsVisibleToPlanner,
+            tool.IsExecutableByAgent,
+            request.SchemaVersion ?? tool.SchemaVersion,
+            request.CatalogVersion ?? tool.CatalogVersion,
+            tool.ApprovalPolicy);
+        repository.Update(tool);
+        await auditLogWriter.WriteAsync(
+            new AuditLogWriteRequest(
+                AuditActionGroups.Config,
+                "AiGateway.ActivateToolDefinitionVersion",
+                "ToolRegistration",
+                tool.Id.Value.ToString(),
+                tool.ToolCode,
+                AuditResults.Succeeded,
+                $"Activated tool definition version: {tool.ToolCode}; catalogVersion={tool.CatalogVersion}; schemaVersion={tool.SchemaVersion}; enabled={tool.IsEnabled}.",
+                ["catalogVersion", "schemaVersion", "isEnabled"]),
+            cancellationToken);
+        await repository.SaveChangesAsync(cancellationToken);
+        return Result.Success(ToolRegistrationMapper.Map(tool, pluginCatalog));
+    }
+}
+
+public sealed class DisableToolDefinitionCommandHandler(
+    IRepository<ToolRegistration> repository,
+    IAgentPluginCatalog pluginCatalog,
+    IAuditLogWriter auditLogWriter)
+    : ICommandHandler<DisableToolDefinitionCommand, Result<ToolRegistrationDto>>
+{
+    public async Task<Result<ToolRegistrationDto>> Handle(
+        DisableToolDefinitionCommand request,
+        CancellationToken cancellationToken)
+    {
+        var tool = await repository.GetAsync(item => item.ToolCode == request.ToolCode, cancellationToken: cancellationToken);
+        if (tool is null)
+        {
+            return Result.NotFound();
+        }
+
+        tool.Update(
+            tool.DisplayName,
+            tool.Description,
+            tool.ProviderType,
+            tool.TargetType,
+            tool.TargetName,
+            tool.InputSchemaJson,
+            tool.OutputSchemaJson,
+            tool.RiskLevel,
+            tool.RequiredPermission,
+            tool.RequiresApproval,
+            false,
+            tool.TimeoutSeconds,
+            tool.AuditLevel,
+            DateTimeOffset.UtcNow,
+            tool.Category,
+            tool.BusinessDomains,
+            tool.DataBoundary,
+            tool.IsVisibleToPlanner,
+            false,
+            tool.SchemaVersion,
+            tool.CatalogVersion,
+            tool.ApprovalPolicy);
+        repository.Update(tool);
+        await auditLogWriter.WriteAsync(
+            new AuditLogWriteRequest(
+                AuditActionGroups.Config,
+                "AiGateway.DisableToolDefinition",
+                "ToolRegistration",
+                tool.Id.Value.ToString(),
+                tool.ToolCode,
+                AuditResults.Succeeded,
+                $"Disabled tool definition: {tool.ToolCode}.",
+                ["isEnabled", "isExecutableByAgent"]),
+            cancellationToken);
+        await repository.SaveChangesAsync(cancellationToken);
+        return Result.Success(ToolRegistrationMapper.Map(tool, pluginCatalog));
     }
 }
 
@@ -244,6 +638,14 @@ internal static class ToolRegistrationMapper
             tool.IsEnabled,
             tool.TimeoutSeconds,
             tool.AuditLevel.ToString(),
+            tool.Category,
+            tool.BusinessDomains,
+            tool.DataBoundary.ToString(),
+            tool.IsVisibleToPlanner,
+            tool.IsExecutableByAgent,
+            tool.SchemaVersion,
+            tool.CatalogVersion,
+            tool.ApprovalPolicy,
             tool.CreatedAt,
             tool.UpdatedAt,
             runtimeAvailable,
@@ -253,6 +655,7 @@ internal static class ToolRegistrationMapper
 
     public static ToolExecutionRecordDto Map(ToolExecutionRecord record)
     {
+        var metadata = ParseMetadata(record.AuditMetadata);
         return new ToolExecutionRecordDto(
             record.Id.Value,
             record.TaskId.Value,
@@ -268,7 +671,45 @@ internal static class ToolRegistrationMapper
             record.ErrorCode,
             ToolExecutionRecordSanitizer.Sanitize(record.ErrorMessage, 2000),
             record.ArtifactId,
-            ToolExecutionRecordSanitizer.Sanitize(record.AuditMetadata, 4000));
+            ToolExecutionRecordSanitizer.Sanitize(record.AuditMetadata, 4000),
+            metadata.TryGetValue("providerKind", out var providerKind)
+                ? providerKind
+                : metadata.TryGetValue("providerType", out var providerType)
+                    ? providerType
+                    : "Unknown",
+            metadata.TryGetValue("isMock", out var isMock) && bool.TryParse(isMock, out var parsedIsMock) && parsedIsMock,
+            metadata.TryGetValue("approvalStatus", out var approvalStatus) ? approvalStatus : null,
+            metadata.TryGetValue("resultHash", out var resultHash) ? resultHash : null);
+    }
+
+    private static IReadOnlyDictionary<string, string> ParseMetadata(string? auditMetadata)
+    {
+        if (string.IsNullOrWhiteSpace(auditMetadata))
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(auditMetadata);
+            if (document.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object)
+            {
+                return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            return document.RootElement
+                .EnumerateObject()
+                .ToDictionary(
+                    property => property.Name,
+                    property => property.Value.ValueKind == System.Text.Json.JsonValueKind.String
+                        ? property.Value.GetString() ?? string.Empty
+                        : property.Value.ToString(),
+                    StringComparer.OrdinalIgnoreCase);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
     }
 }
 

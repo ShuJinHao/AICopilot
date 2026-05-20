@@ -8,7 +8,11 @@ export type ConfigEditableDomain =
   | 'businessDatabase'
   | 'mcpServer'
 
-export type ConfigLoadingDomain = ConfigEditableDomain | 'semanticSource'
+export type ConfigLoadingDomain =
+  | ConfigEditableDomain
+  | 'semanticSource'
+  | 'toolRegistry'
+  | 'cloudReadonlyReadiness'
 export type ReadOnlyConfigDomain = 'providerReliability'
 
 export interface ConfigDomainStates {

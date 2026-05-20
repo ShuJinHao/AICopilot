@@ -1,6 +1,7 @@
 using System.Text.Json;
 using AICopilot.AiGatewayService.Tools;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
+using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Result;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
@@ -10,7 +11,7 @@ public sealed record PlannerToolCatalog(
     int AvailableToolCount,
     IReadOnlyCollection<AgentPlannerToolSummary> Tools)
 {
-    public const int CurrentVersion = 1;
+    public const int CurrentVersion = BuiltInToolRegistrations.CurrentCatalogVersion;
 }
 
 public sealed record AgentPlannerToolSummary(
@@ -27,7 +28,17 @@ public sealed record AgentPlannerToolSummary(
     string AuditLevel = "Standard",
     bool RuntimeAvailable = true,
     PlannerToolSchemaSummary? InputSchema = null,
-    PlannerToolSchemaSummary? OutputSchema = null);
+    PlannerToolSchemaSummary? OutputSchema = null,
+    string Category = "General",
+    IReadOnlyCollection<string>? BusinessDomains = null,
+    string DataBoundary = "NoData",
+    bool IsVisibleToPlanner = true,
+    bool IsExecutableByAgent = true,
+    int SchemaVersion = 1,
+    int CatalogVersion = PlannerToolCatalog.CurrentVersion,
+    string ApprovalPolicy = "None",
+    string ProviderKind = "BuiltIn",
+    bool IsMock = false);
 
 public sealed record PlannerToolSchemaSummary(
     string Type,
@@ -55,6 +66,13 @@ internal static class PlannerToolCatalogBuilder
         var summaries = new List<AgentPlannerToolSummary>();
         foreach (var tool in tools.OrderBy(item => item.ToolCode, StringComparer.OrdinalIgnoreCase))
         {
+            if (!tool.IsVisibleToPlanner ||
+                !tool.IsExecutableByAgent ||
+                tool.RiskLevel is AiToolRiskLevel.Blocked or AiToolRiskLevel.Critical)
+            {
+                continue;
+            }
+
             var runtimeAvailable = tool.ProviderType != ToolProviderType.Mcp ||
                                    runtimeMcpToolCodes.Contains(tool.ToolCode);
             if (!runtimeAvailable)
@@ -88,11 +106,27 @@ internal static class PlannerToolCatalogBuilder
                 tool.AuditLevel.ToString(),
                 runtimeAvailable,
                 inputSchema.Value,
-                outputSchema.Value));
+                outputSchema.Value,
+                Sanitize(tool.Category, 120) ?? "General",
+                tool.BusinessDomains
+                    .Select(domain => Sanitize(domain, 120))
+                    .Where(domain => !string.IsNullOrWhiteSpace(domain))
+                    .Cast<string>()
+                    .ToArray(),
+                tool.DataBoundary.ToString(),
+                tool.IsVisibleToPlanner,
+                tool.IsExecutableByAgent,
+                tool.SchemaVersion,
+                tool.CatalogVersion,
+                Sanitize(tool.ApprovalPolicy, 120) ?? "None",
+                tool.ProviderType.ToString(),
+                tool.ProviderType == ToolProviderType.MockMcp));
         }
 
         return Result.Success(new PlannerToolCatalog(
-            PlannerToolCatalog.CurrentVersion,
+            summaries.Count == 0
+                ? PlannerToolCatalog.CurrentVersion
+                : Math.Max(PlannerToolCatalog.CurrentVersion, summaries.Max(tool => tool.CatalogVersion)),
             summaries.Count,
             summaries));
     }

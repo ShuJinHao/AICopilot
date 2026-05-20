@@ -59,8 +59,17 @@ public class SearchKnowledgeBaseQueryHandler(
             cancellationToken);
 
         var results = new List<SearchKnowledgeBaseResult>(searchResults.Count);
+        var searchableDocumentIds = kb.Documents
+            .Where(document => document.IsSearchable(DateTime.UtcNow))
+            .Select(document => document.Id.Value)
+            .ToHashSet();
         foreach (var record in searchResults)
         {
+            if (!searchableDocumentIds.Contains(record.DocumentId))
+            {
+                continue;
+            }
+
             var isLowConfidence = record.Score < 0.65;
             results.Add(new SearchKnowledgeBaseResult
             {

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AICopilot.AiGatewayService.CloudReadiness;
 using AICopilot.AiGatewayService.Runtime;
 using AICopilot.AiGatewayService.Tools;
 using AICopilot.AiGatewayService.Workspaces;
@@ -35,8 +36,27 @@ public sealed record PlanAgentTaskCommand(
     AgentTaskType TaskType,
     Guid? ModelId,
     IReadOnlyCollection<Guid>? UploadIds = null,
-    IReadOnlyCollection<Guid>? KnowledgeBaseIds = null) : ICommand<Result<AgentTaskDto>>;
+    IReadOnlyCollection<Guid>? KnowledgeBaseIds = null,
+    IReadOnlyCollection<Guid>? DataSourceIds = null,
+    IReadOnlyCollection<string>? BusinessDomains = null,
+    string? QueryMode = null,
+    bool RequiresDataApproval = false,
+    IReadOnlyCollection<string>? ArtifactTypes = null,
+    string? TrialScenarioId = null,
+    string? TrialScenarioTitle = null,
+    bool IsSimulationTrial = false,
+    string? PlannerMode = null,
+    bool ForceStaticPlanner = false,
+    bool IsCloudSandboxTrial = false,
+    bool IsCloudSandboxControlledTrial = false,
+    CloudSandboxGoalIntentDto? CloudSandboxGoalIntent = null) : ICommand<Result<AgentTaskDto>>;
 
+public enum AgentPlannerMode
+{
+    Auto,
+    DynamicOnly,
+    StaticOnly
+}
 [AuthorizeRequirement("AiGateway.ApproveAgentTaskPlan")]
 public sealed record ApproveAgentTaskPlanCommand(Guid Id) : ICommand<Result<AgentTaskDto>>;
 
@@ -63,10 +83,13 @@ public sealed class PlanAgentTaskCommandHandler(
     AgentPlanToolGuard planToolGuard,
     IAgentDynamicPlanner dynamicPlanner,
     ICloudReadonlyAgentPlanService cloudReadonlyPlanService,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IBusinessDatabaseReadService? businessDatabaseReadService = null,
+    CloudReadonlySandboxControlledTrialService? cloudSandboxControlledTrialService = null)
     : ICommandHandler<PlanAgentTaskCommand, Result<AgentTaskDto>>
 {
     private const int PlannerValidationVersion = 1;
+    private const string SimulationBusinessSourceLabel = "AI 独立模拟业务库";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -134,23 +157,127 @@ public sealed class PlanAgentTaskCommandHandler(
             }
         }
 
+        var isCloudSandboxFixedTrialPlan = request.IsCloudSandboxTrial ||
+                                           CloudReadonlySandboxAgentTrialService.IsScenarioId(request.TrialScenarioId);
+        var isCloudSandboxControlledTrialPlan = request.IsCloudSandboxControlledTrial ||
+                                                request.CloudSandboxGoalIntent is not null;
+        var isCloudSandboxTrialPlan = isCloudSandboxFixedTrialPlan || isCloudSandboxControlledTrialPlan;
+        if (isCloudSandboxFixedTrialPlan && !CloudReadonlySandboxAgentTrialService.IsScenarioId(request.TrialScenarioId))
+        {
+            return Result.Invalid("P7 CloudReadonlySandbox agent trial only allows fixed trial scenarios.");
+        }
+
+        if (isCloudSandboxFixedTrialPlan && isCloudSandboxControlledTrialPlan)
+        {
+            return Result.Invalid("CloudReadonlySandbox fixed scenarios and controlled goals cannot be mixed in one plan.");
+        }
+
+        if (isCloudSandboxControlledTrialPlan)
+        {
+            if (cloudSandboxControlledTrialService is null)
+            {
+                return Result.Failure("CloudReadonlySandbox controlled trial service is not configured.");
+            }
+
+            var intentValidation = cloudSandboxControlledTrialService.ValidateIntentForPlan(request.CloudSandboxGoalIntent);
+            if (!intentValidation.IsSuccess)
+            {
+                return Result.From(intentValidation);
+            }
+        }
+
+        var dataSourceIds = (request.DataSourceIds ?? [])
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToArray();
+        BusinessDatabaseDescriptor[] selectedDataSources = [];
+        if (dataSourceIds.Length > 0)
+        {
+            if (businessDatabaseReadService is null)
+            {
+                return Result.Failure("Business database read service is not configured.");
+            }
+
+            var visibleDataSources = await businessDatabaseReadService.ListEnabledAsync(cancellationToken);
+            selectedDataSources = visibleDataSources
+                .Where(source => source.IsSelectableInAgent)
+                .Where(source => dataSourceIds.Contains(source.Id))
+                .ToArray();
+            if (selectedDataSources.Length != dataSourceIds.Length)
+            {
+                return Result.NotFound();
+            }
+
+            if (isCloudSandboxTrialPlan)
+            {
+                return Result.Invalid("P7 CloudReadonlySandbox agent trial cannot bind BusinessDatabase data sources.");
+            }
+
+            if (selectedDataSources.Any(source => source.ExternalSystemType != DataSourceExternalSystemType.SimulationBusiness))
+            {
+                return Result.Invalid("P3 dynamic planner data tasks can only use SimulationBusiness data sources.");
+            }
+        }
+
+        var businessDomains = (request.BusinessDomains ?? [])
+            .Where(domain => !string.IsNullOrWhiteSpace(domain))
+            .Select(domain => domain.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (isCloudSandboxTrialPlan && businessDomains.Length == 0)
+        {
+            if (isCloudSandboxControlledTrialPlan)
+            {
+                businessDomains = request.CloudSandboxGoalIntent?.EndpointCodes.ToArray() ?? [];
+            }
+            else
+            {
+                var trialDomain = CloudReadonlySandboxAgentTrialService.ResolveScenarioDomain(request.TrialScenarioId);
+                businessDomains = string.IsNullOrWhiteSpace(trialDomain) ? [] : [trialDomain];
+            }
+        }
+        var isSimulationOnlyPlan = request.IsSimulationTrial ||
+                                   selectedDataSources.Any(source =>
+                                       source.ExternalSystemType == DataSourceExternalSystemType.SimulationBusiness);
+        var hasBusinessDataSourcesForPlan = !isCloudSandboxTrialPlan &&
+                                            (dataSourceIds.Length > 0 || businessDomains.Length > 0);
+
         _ = await templateRepository.FirstOrDefaultAsync(
             new ConversationTemplateByCodeSpec("agent_planner"),
             cancellationToken);
         var runtimeSettings = await runtimeSettingsProvider.GetAsync(cancellationToken);
         var riskLevel = DetermineRiskLevel(request.TaskType);
-        var plannerModelResult = await ResolvePlannerModelAsync(request.ModelId, cancellationToken);
+        var requestedPlannerMode = NormalizePlannerMode(request.PlannerMode, request.ForceStaticPlanner);
+        var plannerModelResult = requestedPlannerMode == AgentPlannerMode.StaticOnly
+            ? Result.Success<LanguageModel?>(null)
+            : await ResolvePlannerModelAsync(request.ModelId, cancellationToken);
         if (!plannerModelResult.IsSuccess)
         {
             return Result.From(plannerModelResult);
         }
 
         var plannerModel = plannerModelResult.Value;
+        if (plannerModel is null && requestedPlannerMode == AgentPlannerMode.DynamicOnly)
+        {
+            return Result.Failure(new ApiProblemDescriptor(
+                AppProblemCodes.PlannerModelUnavailable,
+                "No enabled planner model is available for DynamicOnly planning."));
+        }
+
+        var effectivePlannerMode = requestedPlannerMode == AgentPlannerMode.StaticOnly ? "Static" : "StaticFallback";
+        string? plannerFallbackReason = plannerModel is null && requestedPlannerMode == AgentPlannerMode.Auto
+            ? "No enabled planner model is available; static fallback was used."
+            : null;
         PlannerToolCatalog? plannerToolCatalog = null;
         IReadOnlyCollection<AgentStepPlanDto> steps;
         if (plannerModel is not null)
         {
-            var catalogResult = await planToolGuard.GetAvailableToolCatalogAsync(userId, cancellationToken);
+            var catalogResult = await planToolGuard.GetAvailableToolCatalogAsync(
+                userId,
+                isSimulationOnlyPlan,
+                businessDomains,
+                isCloudSandboxTrialPlan,
+                cancellationToken);
             if (!catalogResult.IsSuccess)
             {
                 return Result.From(catalogResult);
@@ -172,22 +299,98 @@ public sealed class PlanAgentTaskCommandHandler(
                     knowledgeBaseIds,
                     plannerToolCatalog,
                     plannerModel,
-                    runtimeSettings),
+                    runtimeSettings,
+                    BuildPlannerDataSourceSummaries(selectedDataSources),
+                    businessDomains,
+                    request.QueryMode ?? "TextToSql",
+                    NormalizeArtifactTypes(request.ArtifactTypes)?.ToArray(),
+                request.TrialScenarioId,
+                request.TrialScenarioTitle,
+                request.IsSimulationTrial,
+                request.RequiresDataApproval),
                 cancellationToken);
             if (!dynamicPlanResult.IsSuccess)
             {
+                if (requestedPlannerMode == AgentPlannerMode.Auto &&
+                    dynamicPlanResult.Errors?.OfType<ApiProblemDescriptor>().Any(error =>
+                        string.Equals(error.Code, AppProblemCodes.PlannerModelUnavailable, StringComparison.Ordinal)) == true)
+                {
+                    effectivePlannerMode = "StaticFallback";
+                    plannerFallbackReason = "Planner model failed before producing a valid plan; static fallback was used.";
+                    steps = BuildPlanSteps(
+                        uploadIds.Length > 0,
+                        knowledgeBaseIds.Length > 0,
+                        hasBusinessDataSourcesForPlan,
+                        request.TaskType,
+                        riskLevel,
+                        request.ArtifactTypes,
+                        isCloudSandboxTrialPlan);
+                    goto ValidateAndPersistPlan;
+                }
+
                 return Result.From(dynamicPlanResult);
             }
 
             steps = dynamicPlanResult.Value!;
+            effectivePlannerMode = "Dynamic";
+            plannerFallbackReason = null;
         }
         else
         {
-            steps = BuildPlanSteps(uploadIds.Length > 0, knowledgeBaseIds.Length > 0, request.TaskType, riskLevel);
+            steps = BuildPlanSteps(
+                uploadIds.Length > 0,
+                knowledgeBaseIds.Length > 0,
+                hasBusinessDataSourcesForPlan,
+                request.TaskType,
+                riskLevel,
+                request.ArtifactTypes,
+                isCloudSandboxTrialPlan);
         }
 
-        steps = EnsureMandatorySteps(steps, uploadIds.Length > 0, knowledgeBaseIds.Length > 0, request.TaskType);
-        var guardedStepsResult = await planToolGuard.ValidateStepsAsync(steps, request.TaskType, userId, cancellationToken);
+ValidateAndPersistPlan:
+        var originalToolCodes = steps
+            .Select(step => step.ToolCode)
+            .Where(toolCode => !string.IsNullOrWhiteSpace(toolCode))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        steps = EnsureMandatorySteps(
+            steps,
+            uploadIds.Length > 0,
+            knowledgeBaseIds.Length > 0,
+            hasBusinessDataSourcesForPlan,
+            request.TaskType,
+            request.RequiresDataApproval,
+            request.ArtifactTypes,
+            isCloudSandboxTrialPlan);
+        var forcedStepCodes = steps
+            .Select(step => step.ToolCode)
+            .Where(toolCode => !string.IsNullOrWhiteSpace(toolCode) && !originalToolCodes.Contains(toolCode!))
+            .Select(toolCode => toolCode!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (plannerToolCatalog is null)
+        {
+            var staticCatalogResult = await planToolGuard.GetAvailableToolCatalogAsync(
+                userId,
+                isSimulationOnlyPlan,
+                businessDomains,
+                isCloudSandboxTrialPlan,
+                cancellationToken);
+            if (!staticCatalogResult.IsSuccess)
+            {
+                return Result.From(staticCatalogResult);
+            }
+
+            plannerToolCatalog = staticCatalogResult.Value!;
+        }
+
+        var guardedStepsResult = await planToolGuard.ValidateStepsAsync(
+            steps,
+            request.TaskType,
+            userId,
+            isSimulationOnlyPlan,
+            businessDomains,
+            isCloudSandboxTrialPlan,
+            cancellationToken);
         if (!guardedStepsResult.IsSuccess)
         {
             return Result.From(guardedStepsResult);
@@ -196,8 +399,19 @@ public sealed class PlanAgentTaskCommandHandler(
         steps = riskLevel >= AgentTaskRiskLevel.High
             ? guardedStepsResult.Value!.Select(step => step with { RequiresApproval = true }).ToArray()
             : guardedStepsResult.Value!;
+        var approvalCheckpoints = steps
+            .Where(step => step.RequiresApproval)
+            .Select(step => string.IsNullOrWhiteSpace(step.ToolCode) ? step.Title : step.ToolCode!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var toolApprovalCheckpoints = steps
+            .Where(step => step.RequiresApproval && !string.IsNullOrWhiteSpace(step.ToolCode))
+            .Select(step => step.ToolCode!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var toolRiskSummary = BuildToolRiskSummary(plannerToolCatalog);
         AgentTaskPlanCloudReadonlyIntentDocument? cloudReadonlyIntent = null;
-        if (request.TaskType == AgentTaskType.CloudDataReport)
+        if (request.TaskType == AgentTaskType.CloudDataReport && !isCloudSandboxTrialPlan)
         {
             var cloudIntentResult = await cloudReadonlyPlanService.CreateIntentAsync(
                 request.SessionId,
@@ -231,11 +445,44 @@ public sealed class PlanAgentTaskCommandHandler(
             new AgentTaskPlanRuntimeSettingsDocument(
                 runtimeSettings.AgentPlanningHistoryCount,
                 runtimeSettings.ContextTokenLimit),
-            plannerModel is null ? "Static" : "Dynamic",
+            effectivePlannerMode,
+            plannerFallbackReason,
             plannerModel?.Id.Value,
             PlannerValidationVersion,
             plannerToolCatalog?.Version ?? PlannerToolCatalog.CurrentVersion,
-            plannerToolCatalog?.AvailableToolCount ?? 0);
+            plannerToolCatalog?.AvailableToolCount ?? 0,
+            dataSourceIds,
+            businessDomains,
+            request.QueryMode ?? "TextToSql",
+            request.RequiresDataApproval,
+            NormalizeArtifactTypes(request.ArtifactTypes)?.ToArray(),
+            request.TrialScenarioId,
+            request.TrialScenarioTitle,
+            request.IsSimulationTrial,
+            isCloudSandboxControlledTrialPlan,
+            request.CloudSandboxGoalIntent,
+            new AgentTaskPlanSafetySummaryDocument(
+                isCloudSandboxControlledTrialPlan
+                    ? "CloudSandboxControlledGoal"
+                    : string.IsNullOrWhiteSpace(request.TrialScenarioId)
+                        ? "FreeGoal"
+                        : "TrialScenario",
+                effectivePlannerMode,
+                plannerModel is null ? null : $"{plannerModel.Provider}/{plannerModel.Name}",
+                plannerToolCatalog?.Version ?? PlannerToolCatalog.CurrentVersion,
+                plannerToolCatalog?.AvailableToolCount ?? 0,
+                isSimulationOnlyPlan,
+                request.RequiresDataApproval,
+                toolRiskSummary,
+                MockMcpOnly: !isCloudSandboxTrialPlan),
+            forcedStepCodes,
+            approvalCheckpoints,
+            BuildPlanDataSourceSummaries(selectedDataSources),
+            plannerToolCatalog?.Version ?? PlannerToolCatalog.CurrentVersion,
+            plannerToolCatalog?.AvailableToolCount ?? 0,
+            toolRiskSummary,
+            MockMcpOnly: !isCloudSandboxTrialPlan,
+            toolApprovalCheckpoints);
 
         var now = DateTimeOffset.UtcNow;
         var task = new AgentTask(
@@ -274,6 +521,65 @@ public sealed class PlanAgentTaskCommandHandler(
         return Result.Success(AgentTaskDtoMapper.Map(task, workspace.WorkspaceCode, pendingApprovalCount: 1));
     }
 
+    private static AgentPlannerMode NormalizePlannerMode(string? plannerMode, bool forceStaticPlanner)
+    {
+        if (forceStaticPlanner)
+        {
+            return AgentPlannerMode.StaticOnly;
+        }
+
+        if (string.IsNullOrWhiteSpace(plannerMode))
+        {
+            return AgentPlannerMode.Auto;
+        }
+
+        return Enum.TryParse<AgentPlannerMode>(plannerMode.Trim(), ignoreCase: true, out var mode)
+            ? mode
+            : AgentPlannerMode.Auto;
+    }
+
+    private static IReadOnlyCollection<AgentPlannerDataSourceSummary> BuildPlannerDataSourceSummaries(
+        IReadOnlyCollection<BusinessDatabaseDescriptor> dataSources)
+    {
+        return dataSources
+            .Select(source => new AgentPlannerDataSourceSummary(
+                source.Id,
+                source.Name,
+                source.ExternalSystemType.ToString(),
+                source.BusinessDomain,
+                source.ExternalSystemType == DataSourceExternalSystemType.SimulationBusiness,
+                ResolveSourceLabel(source)))
+            .ToArray();
+    }
+
+    private static IReadOnlyCollection<AgentTaskPlanDataSourceSummaryDocument> BuildPlanDataSourceSummaries(
+        IReadOnlyCollection<BusinessDatabaseDescriptor> dataSources)
+    {
+        return dataSources
+            .Select(source => new AgentTaskPlanDataSourceSummaryDocument(
+                source.Id,
+                source.Name,
+                source.ExternalSystemType.ToString(),
+                source.ExternalSystemType == DataSourceExternalSystemType.SimulationBusiness,
+                ResolveSourceLabel(source),
+                source.BusinessDomain))
+            .ToArray();
+    }
+
+    private static string ResolveSourceLabel(BusinessDatabaseDescriptor source)
+    {
+        return source.ExternalSystemType == DataSourceExternalSystemType.SimulationBusiness
+            ? SimulationBusinessSourceLabel
+            : source.ExternalSystemType.ToString();
+    }
+
+    private static IReadOnlyDictionary<string, int> BuildToolRiskSummary(PlannerToolCatalog? catalog)
+    {
+        return (catalog?.Tools ?? [])
+            .GroupBy(tool => tool.RiskLevel, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+    }
+
     private static Result MissingUser()
     {
         return Result.Unauthorized(new ApiProblemDescriptor(
@@ -293,7 +599,7 @@ public sealed class PlanAgentTaskCommandHandler(
         var normalized = string.Join(' ', (goal ?? string.Empty).Split(default(string[]), StringSplitOptions.RemoveEmptyEntries));
         if (string.IsNullOrWhiteSpace(normalized))
         {
-            return "A助理任务";
+            return "A鍔╃悊浠诲姟";
         }
 
         return normalized.Length <= 48 ? normalized : normalized[..48];
@@ -336,9 +642,14 @@ public sealed class PlanAgentTaskCommandHandler(
         IReadOnlyCollection<AgentStepPlanDto> steps,
         bool hasUploads,
         bool hasKnowledgeBases,
-        AgentTaskType taskType)
+        bool hasBusinessDataSources,
+        AgentTaskType taskType,
+        bool requiresDataApproval,
+        IReadOnlyCollection<string>? artifactTypes,
+        bool isCloudSandboxTrial)
     {
         var result = steps.ToList();
+        var normalizedArtifactTypes = NormalizeArtifactTypes(artifactTypes);
         if (hasUploads)
         {
             InsertBeforeOutputs(
@@ -376,16 +687,43 @@ public sealed class PlanAgentTaskCommandHandler(
 
         if (taskType == AgentTaskType.CloudDataReport)
         {
+            var cloudToolCode = isCloudSandboxTrial ? "query_cloud_sandbox_readonly" : "query_cloud_data_readonly";
             InsertBeforeOutputs(
                 result,
-                "query_cloud_data_readonly",
+                cloudToolCode,
                 new AgentStepPlanDto(
-                    "Query Cloud readonly data",
-                    "Read Cloud business data only through the AiRead readonly boundary.",
+                    isCloudSandboxTrial ? "Query Cloud sandbox readonly data" : "Query Cloud readonly data",
+                    isCloudSandboxTrial
+                        ? "Read Cloud sandbox/staging data only through the SandboxAgentTrial boundary."
+                        : "Read Cloud business data only through the AiRead readonly boundary.",
                     AgentStepType.DataQuery,
-                    "query_cloud_data_readonly",
+                    cloudToolCode,
+                    isCloudSandboxTrial));
+        }
+
+        if (hasBusinessDataSources)
+        {
+            InsertBeforeOutputs(
+                result,
+                "query_business_database_readonly",
+                new AgentStepPlanDto(
+                    "Query business database",
+                    "Run Text-to-SQL only through authorized BusinessDatabase readonly guardrails.",
+                    AgentStepType.DataQuery,
+                    "query_business_database_readonly",
+                    requiresDataApproval));
+            InsertBeforeOutputs(
+                result,
+                "summarize_business_query_result",
+                new AgentStepPlanDto(
+                    "Summarize business query result",
+                    "Summarize readonly business query output with source labels and query hashes.",
+                    AgentStepType.Analysis,
+                    "summarize_business_query_result",
                     false));
         }
+
+        EnsureArtifactSteps(result, hasBusinessDataSources, normalizedArtifactTypes);
 
         if (!ContainsTool(result, "finalize_artifacts"))
         {
@@ -430,37 +768,207 @@ public sealed class PlanAgentTaskCommandHandler(
     private static IReadOnlyCollection<AgentStepPlanDto> BuildPlanSteps(
         bool hasUploads,
         bool hasKnowledgeBases,
+        bool hasBusinessDataSources,
         AgentTaskType taskType,
-        AgentTaskRiskLevel riskLevel)
+        AgentTaskRiskLevel riskLevel,
+        IReadOnlyCollection<string>? artifactTypes,
+        bool isCloudSandboxTrial)
     {
         var steps = new List<AgentStepPlanDto>();
+        var normalizedArtifactTypes = NormalizeArtifactTypes(artifactTypes);
         if (hasUploads)
         {
-            steps.Add(new AgentStepPlanDto("读取上传文件", "读取当前任务绑定的上传文件，复制到受控工作区 source 目录并生成输入摘要。", AgentStepType.FileRead, "read_uploaded_file", false));
-            steps.Add(new AgentStepPlanDto("解析表格文件", "对 CSV、JSON 或 XLSX 输入进行结构化解析，输出规范化 JSON/CSV 数据。", AgentStepType.Analysis, "parse_table_file", false));
+            steps.Add(new AgentStepPlanDto("Read uploaded files", "Read task uploads into the controlled workspace source area.", AgentStepType.FileRead, "read_uploaded_file", false));
+            steps.Add(new AgentStepPlanDto("Parse table files", "Parse CSV, JSON, or XLSX uploads into normalized data.", AgentStepType.Analysis, "parse_table_file", false));
         }
 
         if (hasKnowledgeBases)
         {
-            steps.Add(new AgentStepPlanDto("检索知识库", "基于任务目标检索绑定知识库并保留来源。", AgentStepType.RagSearch, "rag_search", false));
+            steps.Add(new AgentStepPlanDto("Search knowledge bases", "Retrieve only authorized knowledge base context for the task.", AgentStepType.RagSearch, "rag_search", false));
         }
 
         if (taskType == AgentTaskType.CloudDataReport)
         {
-            steps.Add(new AgentStepPlanDto("读取 Cloud 只读数据", "仅通过 Cloud AiRead 只读边界读取业务摘要。", AgentStepType.DataQuery, "query_cloud_data_readonly", false));
+            steps.Add(isCloudSandboxTrial
+                ? new AgentStepPlanDto("Query Cloud sandbox readonly data", "Read Cloud sandbox/staging data only through the SandboxAgentTrial boundary.", AgentStepType.DataQuery, "query_cloud_sandbox_readonly", true)
+                : new AgentStepPlanDto("Query Cloud readonly data", "Read Cloud business data only through the AiRead readonly boundary.", AgentStepType.DataQuery, "query_cloud_data_readonly", false));
         }
 
-        steps.Add(new AgentStepPlanDto("生成图表数据", "基于可用输入生成前端图表预览数据。", AgentStepType.ChartGeneration, "generate_chart_data", false));
-        steps.Add(new AgentStepPlanDto("生成 Markdown 报告", "在受控工作区 draft 目录生成 Markdown 草稿。", AgentStepType.ArtifactGeneration, "generate_markdown_report", false));
-        steps.Add(new AgentStepPlanDto("生成 HTML 报告", "在受控工作区 draft 目录生成 HTML 草稿。", AgentStepType.ArtifactGeneration, "generate_html_report", false));
-        steps.Add(new AgentStepPlanDto("生成 PDF 草稿", "在受控工作区 draft 目录生成基础 PDF 报告草稿。", AgentStepType.ArtifactGeneration, "generate_pdf", true));
-        steps.Add(new AgentStepPlanDto("生成 PPTX 草稿", "在受控工作区 draft 目录生成基础 PPTX 汇报草稿。", AgentStepType.ArtifactGeneration, "generate_pptx", true));
-        steps.Add(new AgentStepPlanDto("生成 XLSX 草稿", "在受控工作区 draft 目录生成基础 XLSX 数据草稿。", AgentStepType.ArtifactGeneration, "generate_xlsx", true));
-        steps.Add(new AgentStepPlanDto("确认正式输出", "正式输出前等待用户确认，不自动进入 final 目录。", AgentStepType.Finalize, "finalize_artifacts", true));
+        steps.Add(new AgentStepPlanDto("Generate chart data", "Generate frontend chart preview data from controlled task inputs.", AgentStepType.ChartGeneration, "generate_chart_data", false));
+        steps.Add(new AgentStepPlanDto("Generate Markdown report", "Generate a Markdown draft in the controlled workspace.", AgentStepType.ArtifactGeneration, "generate_markdown_report", false));
+        steps.Add(new AgentStepPlanDto("Generate HTML report", "Generate an HTML draft in the controlled workspace.", AgentStepType.ArtifactGeneration, "generate_html_report", false));
+        steps.Add(new AgentStepPlanDto("Generate PDF draft", "Generate a basic PDF report draft in the controlled workspace.", AgentStepType.ArtifactGeneration, "generate_pdf", true));
+        steps.Add(new AgentStepPlanDto("Generate PPTX draft", "Generate a basic PPTX presentation draft in the controlled workspace.", AgentStepType.ArtifactGeneration, "generate_pptx", true));
+        steps.Add(new AgentStepPlanDto("Generate XLSX draft", "Generate a basic XLSX data draft in the controlled workspace.", AgentStepType.ArtifactGeneration, "generate_xlsx", true));
+        steps.Add(new AgentStepPlanDto("Confirm final output", "Wait for user approval before moving draft artifacts to final output.", AgentStepType.Finalize, "finalize_artifacts", true));
+
+        if (normalizedArtifactTypes is not null)
+        {
+            steps = steps
+                .Where(step => ShouldKeepStepForArtifacts(step, normalizedArtifactTypes))
+                .ToList();
+        }
 
         return riskLevel >= AgentTaskRiskLevel.High
             ? steps.Select(step => step with { RequiresApproval = true }).ToArray()
             : steps;
+    }
+    private static bool ShouldKeepStepForArtifacts(
+        AgentStepPlanDto step,
+        IReadOnlySet<string> artifactTypes)
+    {
+        return step.ToolCode switch
+        {
+            "generate_chart_data" or "generate_business_chart" => artifactTypes.Contains("chart"),
+            "generate_markdown_report" => artifactTypes.Contains("markdown"),
+            "generate_html_report" => artifactTypes.Contains("html"),
+            "generate_pdf" => artifactTypes.Contains("pdf"),
+            "generate_pptx" => artifactTypes.Contains("pptx"),
+            "generate_xlsx" => artifactTypes.Contains("xlsx"),
+            _ => true
+        };
+    }
+
+    private static void EnsureArtifactSteps(
+        List<AgentStepPlanDto> steps,
+        bool hasBusinessDataSources,
+        IReadOnlySet<string>? artifactTypes)
+    {
+        var hasPlannedOutputs = steps.Any(step =>
+            step.StepType is AgentStepType.ChartGeneration or AgentStepType.ArtifactGeneration);
+        if (artifactTypes is null && hasPlannedOutputs)
+        {
+            artifactTypes = hasBusinessDataSources
+                ? new HashSet<string>(["chart"], StringComparer.OrdinalIgnoreCase)
+                : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+        else if (artifactTypes is null)
+        {
+            artifactTypes = hasBusinessDataSources
+                ? new HashSet<string>(["chart", "markdown"], StringComparer.OrdinalIgnoreCase)
+                : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        if (hasBusinessDataSources)
+        {
+            steps.RemoveAll(step => string.Equals(step.ToolCode, "generate_chart_data", StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (ShouldIncludeArtifact(artifactTypes, "chart"))
+        {
+            var toolCode = hasBusinessDataSources ? "generate_business_chart" : "generate_chart_data";
+            InsertBeforeOutputs(
+                steps,
+                toolCode,
+                new AgentStepPlanDto(
+                    "Generate chart data",
+                    hasBusinessDataSources
+                        ? "Generate controlled chart data from approved BusinessDatabase readonly query results."
+                        : "Generate chart preview data from controlled task inputs.",
+                    AgentStepType.ChartGeneration,
+                    toolCode,
+                    false));
+        }
+
+        if (ShouldIncludeArtifact(artifactTypes, "markdown"))
+        {
+            InsertBeforeOutputs(
+                steps,
+                "generate_markdown_report",
+                new AgentStepPlanDto(
+                    "Generate Markdown report",
+                    "Generate a Markdown draft in the controlled workspace.",
+                    AgentStepType.ArtifactGeneration,
+                    "generate_markdown_report",
+                    false));
+        }
+
+        if (ShouldIncludeArtifact(artifactTypes, "html"))
+        {
+            InsertBeforeOutputs(
+                steps,
+                "generate_html_report",
+                new AgentStepPlanDto(
+                    "Generate HTML report",
+                    "Generate an HTML draft in the controlled workspace.",
+                    AgentStepType.ArtifactGeneration,
+                    "generate_html_report",
+                    false));
+        }
+
+        if (ShouldIncludeArtifact(artifactTypes, "pdf"))
+        {
+            InsertBeforeOutputs(
+                steps,
+                "generate_pdf",
+                new AgentStepPlanDto(
+                    "Generate PDF draft",
+                    "Generate a PDF draft in the controlled workspace.",
+                    AgentStepType.ArtifactGeneration,
+                    "generate_pdf",
+                    true));
+        }
+
+        if (ShouldIncludeArtifact(artifactTypes, "pptx"))
+        {
+            InsertBeforeOutputs(
+                steps,
+                "generate_pptx",
+                new AgentStepPlanDto(
+                    "Generate PPTX draft",
+                    "Generate a PPTX draft in the controlled workspace.",
+                    AgentStepType.ArtifactGeneration,
+                    "generate_pptx",
+                    true));
+        }
+
+        if (ShouldIncludeArtifact(artifactTypes, "xlsx"))
+        {
+            InsertBeforeOutputs(
+                steps,
+                "generate_xlsx",
+                new AgentStepPlanDto(
+                    "Generate XLSX draft",
+                    "Generate an XLSX draft in the controlled workspace.",
+                    AgentStepType.ArtifactGeneration,
+                    "generate_xlsx",
+                    true));
+        }
+    }
+
+    private static bool ShouldIncludeArtifact(IReadOnlySet<string>? artifactTypes, string artifactType)
+    {
+        return artifactTypes is null || artifactTypes.Contains(artifactType);
+    }
+
+    private static IReadOnlySet<string>? NormalizeArtifactTypes(IReadOnlyCollection<string>? artifactTypes)
+    {
+        if (artifactTypes is null || artifactTypes.Count == 0)
+        {
+            return null;
+        }
+
+        var normalized = artifactTypes
+            .Select(NormalizeArtifactType)
+            .Where(item => item is not null)
+            .Select(item => item!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return normalized.Count == 0 ? null : normalized;
+    }
+
+    private static string? NormalizeArtifactType(string? artifactType)
+    {
+        var value = artifactType?.Trim().ToLowerInvariant();
+        return value switch
+        {
+            "chart" or "chartdata" or "chart-data" or "json" => "chart",
+            "markdown" or "md" => "markdown",
+            "html" => "html",
+            "pdf" => "pdf",
+            "ppt" or "pptx" or "presentation" => "pptx",
+            "xls" or "xlsx" or "excel" or "spreadsheet" => "xlsx",
+            _ => null
+        };
     }
 }
 

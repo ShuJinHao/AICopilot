@@ -46,6 +46,11 @@ internal static class LanguageModelDtoMapper
             values.Add(nameof(LanguageModelUsage.Planner));
         }
 
+        if (usage.HasFlag(LanguageModelUsage.Embedding))
+        {
+            values.Add(nameof(LanguageModelUsage.Embedding));
+        }
+
         return values.ToArray();
     }
 }

@@ -103,6 +103,40 @@ public class DocumentConfiguration : IEntityTypeConfiguration<Document>
         builder.Property(d => d.BlockedReason)
             .HasMaxLength(500)
             .HasColumnName("blocked_reason");
+
+        builder.Property(d => d.CategoryId)
+            .HasConversion(
+                id => id.HasValue ? id.Value.Value : (Guid?)null,
+                value => value.HasValue ? new KnowledgeCategoryId(value.Value) : null)
+            .HasColumnName("category_id");
+
+        builder.Property(d => d.DocumentGroupId)
+            .IsRequired()
+            .HasDefaultValueSql("gen_random_uuid()")
+            .HasColumnName("document_group_id");
+
+        builder.Property(d => d.VersionNo)
+            .IsRequired()
+            .HasDefaultValue(1)
+            .HasColumnName("version_no");
+
+        builder.Property(d => d.EffectiveAt)
+            .HasColumnName("effective_at");
+
+        builder.Property(d => d.ExpiredAt)
+            .HasColumnName("expired_at");
+
+        builder.Property(d => d.SupersededByDocumentId)
+            .HasConversion(
+                id => id.HasValue ? id.Value.Value : (int?)null,
+                value => value.HasValue ? new DocumentId(value.Value) : null)
+            .HasColumnName("superseded_by_document_id");
+
+        builder.HasIndex(d => new { d.DocumentGroupId, d.VersionNo })
+            .HasDatabaseName("ix_documents_group_version");
+
+        builder.HasIndex(d => d.Status)
+            .HasDatabaseName("ix_documents_status");
         
         // 配置导航属性 Chunks
         builder.HasMany(d => d.Chunks)

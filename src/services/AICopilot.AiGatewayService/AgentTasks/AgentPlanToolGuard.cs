@@ -2,22 +2,57 @@ using AICopilot.AgentPlugin;
 using AICopilot.AiGatewayService.Tools;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
+using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Result;
+using Microsoft.Extensions.Options;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
 
 public sealed class AgentPlanToolGuard(
     ToolRegistryGuard toolRegistryGuard,
-    IAgentPluginCatalog pluginCatalog)
+    IAgentPluginCatalog pluginCatalog,
+    IOptions<CloudReadonlySandboxAgentTrialOptions>? sandboxAgentTrialOptions = null,
+    IOptions<CloudReadonlySandboxControlledTrialOptions>? sandboxControlledTrialOptions = null)
 {
     public async Task<Result<PlannerToolCatalog>> GetAvailableToolCatalogAsync(
         Guid userId,
         CancellationToken cancellationToken)
     {
+        return await GetAvailableToolCatalogAsync(
+            userId,
+            simulationOnly: false,
+            businessDomains: null,
+            cancellationToken);
+    }
+
+    public async Task<Result<PlannerToolCatalog>> GetAvailableToolCatalogAsync(
+        Guid userId,
+        bool simulationOnly,
+        IReadOnlyCollection<string>? businessDomains,
+        CancellationToken cancellationToken)
+    {
+        return await GetAvailableToolCatalogAsync(
+            userId,
+            simulationOnly,
+            businessDomains,
+            cloudSandboxTrialOnly: false,
+            cancellationToken);
+    }
+
+    public async Task<Result<PlannerToolCatalog>> GetAvailableToolCatalogAsync(
+        Guid userId,
+        bool simulationOnly,
+        IReadOnlyCollection<string>? businessDomains,
+        bool cloudSandboxTrialOnly,
+        CancellationToken cancellationToken)
+    {
         var runtimeMcpTools = ResolveRuntimeMcpToolCodes();
         var tools = await toolRegistryGuard.ListAllowedAsync(userId, cancellationToken);
-        return PlannerToolCatalogBuilder.Build(tools, runtimeMcpTools);
+        var filtered = tools
+            .Where(tool => IsPlannerVisible(tool, simulationOnly, businessDomains, cloudSandboxTrialOnly))
+            .ToArray();
+        return PlannerToolCatalogBuilder.Build(filtered, runtimeMcpTools);
     }
 
     public async Task<IReadOnlyCollection<AgentPlannerToolSummary>> GetAvailableToolSummariesAsync(
@@ -42,6 +77,42 @@ public sealed class AgentPlanToolGuard(
         Guid userId,
         CancellationToken cancellationToken)
     {
+        return await ValidateStepsAsync(
+            steps,
+            taskType,
+            userId,
+            simulationOnly: false,
+            businessDomains: null,
+            cancellationToken);
+    }
+
+    public async Task<Result<IReadOnlyCollection<AgentStepPlanDto>>> ValidateStepsAsync(
+        IEnumerable<AgentStepPlanDto> steps,
+        AgentTaskType taskType,
+        Guid userId,
+        bool simulationOnly,
+        IReadOnlyCollection<string>? businessDomains,
+        CancellationToken cancellationToken)
+    {
+        return await ValidateStepsAsync(
+            steps,
+            taskType,
+            userId,
+            simulationOnly,
+            businessDomains,
+            cloudSandboxTrialOnly: false,
+            cancellationToken);
+    }
+
+    public async Task<Result<IReadOnlyCollection<AgentStepPlanDto>>> ValidateStepsAsync(
+        IEnumerable<AgentStepPlanDto> steps,
+        AgentTaskType taskType,
+        Guid userId,
+        bool simulationOnly,
+        IReadOnlyCollection<string>? businessDomains,
+        bool cloudSandboxTrialOnly,
+        CancellationToken cancellationToken)
+    {
         var runtimeMcpTools = ResolveRuntimeMcpToolCodes();
         var validated = new List<AgentStepPlanDto>();
         foreach (var step in steps)
@@ -59,6 +130,23 @@ public sealed class AgentPlanToolGuard(
             }
 
             var tool = decision.Tool!;
+            if (!tool.IsExecutableByAgent || !tool.IsVisibleToPlanner)
+            {
+                return Result.Failure(new ApiProblemDescriptor(
+                    AppProblemCodes.AgentPlanToolDenied,
+                    $"Tool '{tool.ToolCode}' is not available for planner and agent execution."));
+            }
+
+            if ((simulationOnly || cloudSandboxTrialOnly) &&
+                !IsPlannerVisible(tool, simulationOnly, businessDomains, cloudSandboxTrialOnly))
+            {
+                return Result.Failure(new ApiProblemDescriptor(
+                    AppProblemCodes.AgentPlanToolDenied,
+                    cloudSandboxTrialOnly
+                        ? $"Tool '{tool.ToolCode}' is outside the CloudReadonlySandbox agent trial tool boundary."
+                        : $"Tool '{tool.ToolCode}' is outside the SimulationBusiness tool boundary."));
+            }
+
             if (tool.ProviderType == ToolProviderType.CloudReadonly)
             {
                 if (taskType != AgentTaskType.CloudDataReport ||
@@ -92,7 +180,9 @@ public sealed class AgentPlanToolGuard(
             {
                 RequiresApproval = step.RequiresApproval ||
                                    tool.RequiresApproval ||
-                                   tool.RiskLevel == AiToolRiskLevel.RequiresApproval
+                                   tool.RiskLevel is AiToolRiskLevel.RequiresApproval
+                                       or AiToolRiskLevel.High
+                                       or AiToolRiskLevel.Critical
             });
         }
 
@@ -114,6 +204,78 @@ public sealed class AgentPlanToolGuard(
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
+    private bool IsPlannerVisible(
+        ToolRegistration tool,
+        bool simulationOnly,
+        IReadOnlyCollection<string>? businessDomains,
+        bool cloudSandboxTrialOnly)
+    {
+        if (!tool.IsEnabled ||
+            !tool.IsVisibleToPlanner ||
+            !tool.IsExecutableByAgent ||
+            tool.RiskLevel is AiToolRiskLevel.Blocked or AiToolRiskLevel.Critical)
+        {
+            return false;
+        }
+
+        if (cloudSandboxTrialOnly)
+        {
+            if (sandboxAgentTrialOptions?.Value.Enabled != true &&
+                sandboxControlledTrialOptions?.Value.Enabled != true)
+            {
+                return false;
+            }
+
+            if (tool.ProviderType == ToolProviderType.Mcp)
+            {
+                return false;
+            }
+
+            if (string.Equals(tool.ToolCode, CloudReadonlySandboxAgentTrialMarkers.ToolCode, StringComparison.OrdinalIgnoreCase))
+            {
+                return tool.ProviderType == ToolProviderType.CloudReadonly &&
+                       tool.DataBoundary == ToolDataBoundary.CloudReadonlySandboxOnly;
+            }
+
+            if (tool.DataBoundary is not (ToolDataBoundary.NoData or ToolDataBoundary.ArtifactDraftOnly))
+            {
+                return false;
+            }
+        }
+        else if (tool.DataBoundary == ToolDataBoundary.CloudReadonlySandboxOnly)
+        {
+            return false;
+        }
+
+        if (simulationOnly)
+        {
+            if (tool.ProviderType is ToolProviderType.CloudReadonly or ToolProviderType.Mcp)
+            {
+                return false;
+            }
+
+            if (tool.DataBoundary is not (ToolDataBoundary.NoData
+                or ToolDataBoundary.SimulationBusinessOnly
+                or ToolDataBoundary.RagContextOnly
+                or ToolDataBoundary.ArtifactDraftOnly))
+            {
+                return false;
+            }
+        }
+
+        var requestedDomains = (businessDomains ?? [])
+            .Where(domain => !string.IsNullOrWhiteSpace(domain))
+            .Select(domain => domain.Trim())
+            .ToArray();
+        if (requestedDomains.Length == 0 || tool.BusinessDomains.Length == 0)
+        {
+            return true;
+        }
+
+        return tool.BusinessDomains.Any(domain =>
+            requestedDomains.Contains(domain, StringComparer.OrdinalIgnoreCase));
+    }
+
     private static ApiProblemDescriptor? ValidateStepText(AgentStepPlanDto step)
     {
         var combined = string.Join('\n', step.Title, step.Description, step.ToolCode, step.InputJson);
@@ -122,6 +284,13 @@ public sealed class AgentPlanToolGuard(
             return new ApiProblemDescriptor(
                 AppProblemCodes.AgentPlanToolDenied,
                 "Agent plan contains shell or arbitrary path semantics.");
+        }
+
+        if (ContainsSqlStatementSemantic(combined))
+        {
+            return new ApiProblemDescriptor(
+                AppProblemCodes.AgentPlanToolDenied,
+                "Agent plan contains SQL statement semantics.");
         }
 
         return null;
@@ -155,5 +324,15 @@ public sealed class AgentPlanToolGuard(
         return System.Text.RegularExpressions.Regex.IsMatch(
             value,
             $@"(?i)(^|[^\p{{L}}\p{{N}}_]){System.Text.RegularExpressions.Regex.Escape(token)}([^\p{{L}}\p{{N}}_]|$)");
+    }
+
+    private static bool ContainsSqlStatementSemantic(string value)
+    {
+        return System.Text.RegularExpressions.Regex.IsMatch(
+                   value,
+                   @"(?is)\bselect\b.+\bfrom\b") ||
+               System.Text.RegularExpressions.Regex.IsMatch(
+                   value,
+                   @"(?i)\b(insert\s+into|update\s+\w+|delete\s+from|drop\s+(table|view|database)|alter\s+(table|view)|create\s+(table|view|database)|truncate\s+table|merge\s+into)\b");
     }
 }

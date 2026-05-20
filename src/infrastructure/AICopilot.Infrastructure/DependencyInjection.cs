@@ -43,6 +43,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
         builder.Services.AddHttpClient<ICloudIdentityStatusClient, CloudIdentityStatusClient>();
         builder.Services.AddHttpClient<ICloudAiReadClient, CloudAiReadClient>();
+        builder.Services.AddHttpClient<ICloudReadonlySandboxClient, CloudReadonlySandboxClient>();
         builder.Services.AddScoped<IChatClientProvider, OpenAiChatClientProvider>();
         builder.Services.AddScoped<IChatClientProvider, AnthropicChatClientProvider>();
         builder.Services.AddScoped<ILanguageModelConnectivityTester, LanguageModelConnectivityTester>();
@@ -79,7 +80,7 @@ public static class DependencyInjection
     {
         builder.Services.Configure<McpRuntimeOptions>(builder.Configuration.GetSection("Mcp:Runtime"));
 
-        var enabled = builder.Configuration.GetValue("Mcp:Runtime:Enabled", true);
+        var enabled = builder.Configuration.GetValue("Mcp:Runtime:Enabled", false);
         if (!enabled)
         {
             return;

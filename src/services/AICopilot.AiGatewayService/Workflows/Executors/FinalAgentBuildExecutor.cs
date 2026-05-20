@@ -27,7 +27,8 @@ public class FinalAgentBuildExecutor(
     ITokenBudgetPolicy tokenBudgetPolicy,
     ILogger<FinalAgentBuildExecutor> logger,
     IChatRuntimeSettingsProvider? runtimeSettingsProvider = null,
-    IChatExecutionMetadataAccessor? executionMetadataAccessor = null)
+    IChatExecutionMetadataAccessor? executionMetadataAccessor = null,
+    ITextTokenEstimator? tokenEstimator = null)
 {
     public const string ExecutorId = nameof(FinalAgentBuildExecutor);
     private const string RedactedOriginalQuestionPlaceholder = "[已按安全边界移除原始问题文本]";
@@ -112,6 +113,12 @@ public class FinalAgentBuildExecutor(
             };
             var metadataAccessor = executionMetadataAccessor ?? new ChatExecutionMetadataAccessor();
             metadataAccessor.SetFinalModel(model, tokenBudgetDecision.ReservedOutputTokens);
+            metadataAccessor.SetContextBudget(BuildContextBudgetReport(
+                template,
+                genContext,
+                request.Message,
+                answerHistory,
+                tokenBudgetDecision));
             var executionMetadata = metadataAccessor.Snapshot();
 
             if (hasContext)
@@ -217,6 +224,75 @@ public class FinalAgentBuildExecutor(
         return shouldRedactOriginalQuestion
             ? prompt
             : AppendHistoryIfNeeded(prompt, answerHistory);
+    }
+
+    private ContextBudgetReportDto BuildContextBudgetReport(
+        ConversationTemplate template,
+        GenerationContext genContext,
+        string originalMessage,
+        IReadOnlyCollection<Message> answerHistory,
+        TokenBudgetDecision tokenBudgetDecision)
+    {
+        var segments = new List<ContextBudgetSegmentDto>();
+        var order = 1;
+        segments.Add(new ContextBudgetSegmentDto(
+            "system_policy",
+            tokenBudgetPolicy.CountSystemPromptTokens(template),
+            IsTruncated: false,
+            order++));
+
+        if (answerHistory.Count > 0)
+        {
+            segments.Add(new ContextBudgetSegmentDto(
+                "recent_conversation",
+                CountTokens(string.Join(Environment.NewLine, answerHistory.Select(message => message.Content))),
+                IsTruncated: false,
+                order++));
+        }
+
+        if (!string.IsNullOrWhiteSpace(genContext.DataAnalysisContext))
+        {
+            segments.Add(new ContextBudgetSegmentDto(
+                "business_query_result",
+                CountTokens(genContext.DataAnalysisContext),
+                IsTruncated: genContext.DataAnalysisContext.Contains("truncated=true", StringComparison.OrdinalIgnoreCase),
+                order++));
+        }
+
+        if (!string.IsNullOrWhiteSpace(genContext.BusinessPolicyContext))
+        {
+            segments.Add(new ContextBudgetSegmentDto(
+                "business_policy",
+                CountTokens(genContext.BusinessPolicyContext),
+                IsTruncated: false,
+                order++));
+        }
+
+        if (!string.IsNullOrWhiteSpace(genContext.KnowledgeContext))
+        {
+            segments.Add(new ContextBudgetSegmentDto(
+                "rag_context",
+                CountTokens(genContext.KnowledgeContext),
+                IsTruncated: false,
+                order++));
+        }
+
+        segments.Add(new ContextBudgetSegmentDto(
+            "user_message",
+            CountTokens(originalMessage),
+            IsTruncated: false,
+            order));
+
+        return new ContextBudgetReportDto(
+            tokenBudgetDecision.TotalTokenBudget,
+            tokenBudgetDecision.EstimatedInputTokens,
+            tokenBudgetDecision.ReservedOutputTokens,
+            segments);
+    }
+
+    private int CountTokens(string? text)
+    {
+        return tokenEstimator?.CountTokens(text) ?? Math.Max(1, (text ?? string.Empty).Length / 4);
     }
 
     private async Task<IReadOnlyCollection<Message>> LoadAnswerHistoryAsync(

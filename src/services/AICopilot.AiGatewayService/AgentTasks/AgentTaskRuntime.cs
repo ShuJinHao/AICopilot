@@ -3,7 +3,9 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using System.Security.Cryptography;
 using System.Globalization;
+using AICopilot.AiGatewayService.CloudReadiness;
 using AICopilot.AiGatewayService.Tools;
 using AICopilot.AiGatewayService.Workspaces;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
@@ -17,6 +19,7 @@ using AICopilot.Core.AiGateway.Specifications.Approvals;
 using AICopilot.Core.AiGateway.Specifications.Artifacts;
 using AICopilot.Core.AiGateway.Specifications.Uploads;
 using AICopilot.Services.Contracts;
+using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
 using Microsoft.Extensions.Options;
@@ -51,7 +54,11 @@ internal sealed class AgentTaskRuntime(
     ToolRegistryGuard toolRegistryGuard,
     AgentAuditRecorder auditRecorder,
     IEnumerable<IAgentToolExecutor> toolExecutors,
-    IOptions<AgentRunQueueOptions>? runQueueOptions = null)
+    IOptions<AgentRunQueueOptions>? runQueueOptions = null,
+    IBusinessDatabaseReadService? businessDatabaseReadService = null,
+    IBusinessTextToSqlRuntime? businessTextToSqlRuntime = null,
+    CloudReadonlySandboxAgentTrialService? cloudSandboxAgentTrialService = null,
+    CloudReadonlySandboxControlledTrialService? cloudSandboxControlledTrialService = null)
     : IAgentTaskRuntime
 {
     private const string ToolExecutionFailedCode = "tool_execution_failed";
@@ -423,6 +430,10 @@ internal sealed class AgentTaskRuntime(
             "parse_table_file" => await ParseTableFileAsync(task.UserId, workspace, step, plan, state, cancellationToken),
             "rag_search" => await SearchRagAsync(task, plan, state, cancellationToken),
             "query_cloud_data_readonly" => await QueryCloudReadonlyAsync(plan, state, cancellationToken),
+            "query_cloud_sandbox_readonly" => await QueryCloudReadonlySandboxAsync(plan, state, step, cancellationToken),
+            "query_business_database_readonly" => await QueryBusinessDatabaseReadonlyP1Async(plan, state, cancellationToken),
+            "summarize_business_query_result" => SummarizeBusinessQueryResult(state),
+            "generate_business_chart" => await GenerateChartDataAsync(workspace, step, state, cancellationToken),
             "generate_chart_data" => await GenerateChartDataAsync(workspace, step, state, cancellationToken),
             "generate_markdown_report" => await GenerateMarkdownReportAsync(task, workspace, step, state, cancellationToken),
             "generate_html_report" => await GenerateHtmlReportAsync(task, workspace, step, state, cancellationToken),
@@ -471,6 +482,7 @@ internal sealed class AgentTaskRuntime(
                             bytes,
                             upload.ContentType,
                             step.Id,
+                            sourceMetadata: null,
                             cancellationToken);
                     }
                 }
@@ -535,6 +547,7 @@ internal sealed class AgentTaskRuntime(
                 json,
                 "application/json",
                 step.Id,
+                sourceMetadata: null,
                 cancellationToken);
             await workspaceService.WriteDraftTextArtifactAsync(
                 workspace,
@@ -544,6 +557,7 @@ internal sealed class AgentTaskRuntime(
                 BuildCsv(table),
                 "text/csv",
                 step.Id,
+                sourceMetadata: null,
                 cancellationToken);
         }
 
@@ -639,6 +653,421 @@ internal sealed class AgentTaskRuntime(
         return result;
     }
 
+    private async Task<object> QueryCloudReadonlySandboxAsync(
+        AgentTaskPlanDocument plan,
+        AgentTaskRunState state,
+        AgentStep step,
+        CancellationToken cancellationToken)
+    {
+        if (plan.IsCloudSandboxControlledTrial || plan.CloudSandboxGoalIntent is not null)
+        {
+            return await QueryCloudReadonlySandboxControlledAsync(plan, state, step, cancellationToken);
+        }
+
+        if (cloudSandboxAgentTrialService is null)
+        {
+            throw new InvalidOperationException("CloudReadonlySandbox agent trial service is not configured.");
+        }
+
+        var scenarioId = ReadStepString(step.InputJson, "scenarioId") ?? plan.TrialScenarioId;
+        if (string.IsNullOrWhiteSpace(scenarioId))
+        {
+            throw new InvalidOperationException("CloudReadonlySandbox agent trial scenario id is missing.");
+        }
+
+        var maxRows = ReadStepInt(step.InputJson, "maxRows") ?? 20;
+        var timeoutMs = ReadStepInt(step.InputJson, "timeoutMs") ?? 5000;
+        var result = await cloudSandboxAgentTrialService.RunScenarioAsync(
+            scenarioId,
+            plan.ArtifactTypes,
+            maxRows,
+            timeoutMs,
+            cancellationToken);
+        if (!result.IsSuccess || result.Value is null)
+        {
+            throw new InvalidOperationException($"CloudReadonlySandbox agent trial query failed: {BuildResultErrorSummary(result)}");
+        }
+
+        var queryResult = result.Value.QueryResult;
+        var rows = queryResult.Rows
+            .Select(row => row.ToDictionary(item => item.Key, item => item.Value, StringComparer.OrdinalIgnoreCase))
+            .ToArray();
+
+        state.CloudReadonlySummary =
+            $"CloudReadonly sandbox query executed. sourceType={queryResult.SourceType}; sourceMode={queryResult.SourceMode}; isSandbox={queryResult.IsSandbox.ToString().ToLowerInvariant()}; isSimulation={queryResult.IsSimulation.ToString().ToLowerInvariant()}; sourceLabel={queryResult.SourceLabel}; boundary={queryResult.Boundary}; endpointCode={queryResult.EndpointCode}; queryHash={queryResult.QueryHash}; resultHash={queryResult.ResultHash}; rows={queryResult.RowCount}; truncated={queryResult.IsTruncated.ToString().ToLowerInvariant()}; approvalStatus={queryResult.ApprovalStatus}.";
+        state.CloudReadonlyRows = rows;
+        state.CloudReadonlySourceLabel = queryResult.SourceLabel;
+        state.CloudReadonlySourcePath = queryResult.EndpointCode;
+        state.CloudReadonlySourceMode = queryResult.SourceMode;
+        state.CloudReadonlyIsSimulation = queryResult.IsSimulation;
+        state.CloudReadonlyRowCount = queryResult.RowCount;
+        state.CloudReadonlyIsTruncated = queryResult.IsTruncated;
+        state.BusinessQueryHash = queryResult.QueryHash;
+        state.CloudSandboxQueryResults.Add(new AgentCloudSandboxQuerySummary(
+            queryResult.EndpointCode,
+            queryResult.SourceMode,
+            queryResult.IsSandbox,
+            queryResult.SourceLabel,
+            queryResult.QueryHash,
+            queryResult.ResultHash,
+            queryResult.RowCount,
+            queryResult.IsTruncated,
+            [],
+            CloudReadonlySandboxControlledTrialMarkers.FixedScenarioTrialMode,
+            null,
+            queryResult.Boundary,
+            queryResult.ApprovalStatus));
+
+        return new
+        {
+            status = "completed",
+            trialMode = CloudReadonlySandboxControlledTrialMarkers.FixedScenarioTrialMode,
+            scenarioId = result.Value.ScenarioId,
+            scenarioTitle = result.Value.ScenarioTitle,
+            sourceType = queryResult.SourceType,
+            sourceMode = queryResult.SourceMode,
+            isSandbox = queryResult.IsSandbox,
+            isSimulation = queryResult.IsSimulation,
+            sourceLabel = queryResult.SourceLabel,
+            boundary = queryResult.Boundary,
+            endpointCode = queryResult.EndpointCode,
+            queryHash = queryResult.QueryHash,
+            resultHash = queryResult.ResultHash,
+            rowCount = queryResult.RowCount,
+            isTruncated = queryResult.IsTruncated,
+            approvalStatus = queryResult.ApprovalStatus,
+            rows
+        };
+    }
+
+    private async Task<object> QueryCloudReadonlySandboxControlledAsync(
+        AgentTaskPlanDocument plan,
+        AgentTaskRunState state,
+        AgentStep step,
+        CancellationToken cancellationToken)
+    {
+        if (cloudSandboxControlledTrialService is null)
+        {
+            throw new InvalidOperationException("CloudReadonlySandbox controlled trial service is not configured.");
+        }
+
+        var intent = plan.CloudSandboxGoalIntent
+                     ?? throw new InvalidOperationException("CloudReadonlySandbox controlled trial intent is missing.");
+        var maxRows = ReadStepInt(step.InputJson, "maxRows") ?? intent.MaxRows;
+        var timeoutMs = ReadStepInt(step.InputJson, "timeoutMs") ?? 5000;
+        var result = await cloudSandboxControlledTrialService.RunIntentAsync(
+            intent,
+            plan.ArtifactTypes,
+            maxRows,
+            timeoutMs,
+            cancellationToken);
+        if (!result.IsSuccess || result.Value is null)
+        {
+            throw new InvalidOperationException($"CloudReadonlySandbox controlled trial query failed: {BuildResultErrorSummary(result)}");
+        }
+
+        var queryResult = result.Value.QueryResult;
+        var rows = queryResult.Rows
+            .Select(row => row.ToDictionary(item => item.Key, item => item.Value, StringComparer.OrdinalIgnoreCase))
+            .ToArray();
+
+        state.CloudReadonlySummary =
+            $"CloudReadonly sandbox controlled query executed. trialMode={CloudReadonlySandboxControlledTrialMarkers.TrialMode}; intentId={intent.IntentId}; sourceType={queryResult.SourceType}; sourceMode={queryResult.SourceMode}; isSandbox={queryResult.IsSandbox.ToString().ToLowerInvariant()}; isSimulation={queryResult.IsSimulation.ToString().ToLowerInvariant()}; sourceLabel={queryResult.SourceLabel}; boundary={queryResult.Boundary}; endpointCode={queryResult.EndpointCode}; queryHash={queryResult.QueryHash}; resultHash={queryResult.ResultHash}; rows={queryResult.RowCount}; truncated={queryResult.IsTruncated.ToString().ToLowerInvariant()}; approvalStatus={queryResult.ApprovalStatus}.";
+        state.CloudReadonlyRows = rows;
+        state.CloudReadonlySourceLabel = queryResult.SourceLabel;
+        state.CloudReadonlySourcePath = queryResult.EndpointCode;
+        state.CloudReadonlySourceMode = queryResult.SourceMode;
+        state.CloudReadonlyIsSimulation = queryResult.IsSimulation;
+        state.CloudReadonlyRowCount = queryResult.RowCount;
+        state.CloudReadonlyIsTruncated = queryResult.IsTruncated;
+        state.BusinessQueryHash = queryResult.QueryHash;
+        state.CloudSandboxQueryResults.Add(new AgentCloudSandboxQuerySummary(
+            queryResult.EndpointCode,
+            queryResult.SourceMode,
+            queryResult.IsSandbox,
+            queryResult.SourceLabel,
+            queryResult.QueryHash,
+            queryResult.ResultHash,
+            queryResult.RowCount,
+            queryResult.IsTruncated,
+            [],
+            CloudReadonlySandboxControlledTrialMarkers.TrialMode,
+            intent.IntentId,
+            queryResult.Boundary,
+            queryResult.ApprovalStatus));
+
+        return new
+        {
+            status = "completed",
+            trialMode = CloudReadonlySandboxControlledTrialMarkers.TrialMode,
+            intentId = intent.IntentId,
+            analysisType = intent.AnalysisType,
+            sourceType = queryResult.SourceType,
+            sourceMode = queryResult.SourceMode,
+            isSandbox = queryResult.IsSandbox,
+            isSimulation = queryResult.IsSimulation,
+            sourceLabel = queryResult.SourceLabel,
+            boundary = queryResult.Boundary,
+            endpointCode = queryResult.EndpointCode,
+            queryHash = queryResult.QueryHash,
+            resultHash = queryResult.ResultHash,
+            rowCount = queryResult.RowCount,
+            isTruncated = queryResult.IsTruncated,
+            approvalStatus = queryResult.ApprovalStatus,
+            rows
+        };
+    }
+
+    private async Task<object> QueryBusinessDatabaseReadonlyP1Async(
+        AgentTaskPlanDocument plan,
+        AgentTaskRunState state,
+        CancellationToken cancellationToken)
+    {
+        if (businessDatabaseReadService is null || businessTextToSqlRuntime is null)
+        {
+            throw new InvalidOperationException("Business Text-to-SQL runtime is not configured.");
+        }
+
+        var enabledSources = await businessDatabaseReadService.ListEnabledAsync(cancellationToken);
+        var selectedIds = (plan.DataSourceIds ?? [])
+            .Where(id => id != Guid.Empty)
+            .ToHashSet();
+        var selectedDomains = (plan.BusinessDomains ?? [])
+            .Where(domain => !string.IsNullOrWhiteSpace(domain))
+            .Select(domain => domain.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var source = enabledSources
+            .Where(item => item.IsSelectableInAgent)
+            .Where(item => item.ExternalSystemType == DataSourceExternalSystemType.SimulationBusiness)
+            .Where(item => selectedIds.Count == 0 || selectedIds.Contains(item.Id))
+            .Where(item => selectedDomains.Count == 0 ||
+                           selectedDomains.Contains(item.BusinessDomain) ||
+                           selectedDomains.Contains(item.Category))
+            .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+
+        if (source is null)
+        {
+            throw new InvalidOperationException("No authorized SimulationBusiness data source is available for this agent task.");
+        }
+
+        var draftResult = await businessTextToSqlRuntime.GenerateDraftAsync(
+            new BusinessTextToSqlDraftRequest(
+                source.Id,
+                plan.Goal,
+                plan.BusinessDomains,
+                source.DefaultQueryLimit,
+                PreviewOnly: false),
+            cancellationToken);
+        if (!draftResult.IsSuccess || draftResult.Value is null)
+        {
+            throw new InvalidOperationException($"Business Text-to-SQL draft failed: {BuildResultErrorSummary(draftResult)}");
+        }
+
+        var draft = draftResult.Value;
+        var queryResult = await businessTextToSqlRuntime.ExecuteAsync(
+            new BusinessTextToSqlExecuteRequest(DraftId: draft.DraftId, RequestedLimit: source.DefaultQueryLimit),
+            cancellationToken);
+        if (!queryResult.IsSuccess || queryResult.Value is null)
+        {
+            throw new InvalidOperationException($"Business Text-to-SQL execution failed: {BuildResultErrorSummary(queryResult)}");
+        }
+
+        var result = queryResult.Value;
+        var rows = result.Rows
+            .Select(row => row.ToDictionary(item => item.Key, item => item.Value))
+            .ToArray();
+
+        state.CloudReadonlySummary =
+            $"BusinessDatabase Text-to-SQL executed. sourceType=BusinessDatabase; sourceMode={result.SourceMode}; isSimulation={result.IsSimulation.ToString().ToLowerInvariant()}; sourceLabel={result.SourceLabel}; queryHash={result.QueryHash}; rows={result.RowCount}; truncated={result.IsTruncated.ToString().ToLowerInvariant()}.";
+        state.CloudReadonlyRows = rows;
+        state.CloudReadonlySourceLabel = result.SourceLabel;
+        state.CloudReadonlySourcePath = "BusinessDataSourceCenter/TextToSql";
+        state.CloudReadonlySourceMode = result.SourceMode.ToString();
+        state.CloudReadonlyIsSimulation = result.IsSimulation;
+        state.CloudReadonlyRowCount = result.RowCount;
+        state.CloudReadonlyIsTruncated = result.IsTruncated;
+        state.BusinessQueryHash = result.QueryHash;
+        state.BusinessQueryResults.Add(new AgentBusinessQuerySummary(
+            result.DataSourceId,
+            result.DataSourceName,
+            result.SourceMode.ToString(),
+            result.IsSimulation,
+            result.SourceLabel,
+            result.QueryHash,
+            result.RowCount,
+            result.IsTruncated,
+            ArtifactId: null));
+
+        return new
+        {
+            status = "completed",
+            sourceType = result.SourceType,
+            sourceMode = result.SourceMode.ToString(),
+            isSimulation = result.IsSimulation,
+            sourceLabel = result.SourceLabel,
+            queryHash = result.QueryHash,
+            questionHash = draft.QuestionHash,
+            sqlHash = draft.SqlHash,
+            rowCount = result.RowCount,
+            isTruncated = result.IsTruncated,
+            columns = result.Columns,
+            rows
+        };
+    }
+
+    private static string BuildResultErrorSummary(IResult result)
+    {
+        return result.Errors is null
+            ? result.Status.ToString()
+            : string.Join("; ", result.Errors.Select(error => error?.ToString()).Where(error => !string.IsNullOrWhiteSpace(error)));
+    }
+
+    private static string? ReadStepString(string? inputJson, string propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(inputJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(inputJson);
+            return document.RootElement.ValueKind == JsonValueKind.Object &&
+                   document.RootElement.TryGetProperty(propertyName, out var property) &&
+                   property.ValueKind == JsonValueKind.String
+                ? property.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static int? ReadStepInt(string? inputJson, string propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(inputJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(inputJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                !document.RootElement.TryGetProperty(propertyName, out var property))
+            {
+                return null;
+            }
+
+            return property.ValueKind == JsonValueKind.Number && property.TryGetInt32(out var number)
+                ? number
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private async Task<object> QueryBusinessDatabaseReadonlyAsync(
+        AgentTaskPlanDocument plan,
+        AgentTaskRunState state,
+        CancellationToken cancellationToken)
+    {
+        if (businessDatabaseReadService is null)
+        {
+            throw new InvalidOperationException("Business database read service is not configured.");
+        }
+
+        var enabledSources = await businessDatabaseReadService.ListEnabledAsync(cancellationToken);
+        var selectedIds = (plan.DataSourceIds ?? [])
+            .Where(id => id != Guid.Empty)
+            .ToHashSet();
+        var selectedDomains = (plan.BusinessDomains ?? [])
+            .Where(domain => !string.IsNullOrWhiteSpace(domain))
+            .Select(domain => domain.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var candidates = enabledSources
+            .Where(source => source.IsSelectableInAgent)
+            .Where(source => selectedIds.Count == 0 || selectedIds.Contains(source.Id))
+            .Where(source => selectedDomains.Count == 0 ||
+                             selectedDomains.Contains(source.BusinessDomain) ||
+                             selectedDomains.Contains(source.Category))
+            .ToArray();
+
+        if (candidates.Length == 0)
+        {
+            throw new InvalidOperationException("No authorized BusinessDatabase data source is available for this agent task.");
+        }
+
+        var rows = candidates.Select(source => new Dictionary<string, object?>
+        {
+            ["dataSourceId"] = source.Id,
+            ["dataSourceName"] = source.Name,
+            ["sourceType"] = "BusinessDatabase",
+            ["sourceMode"] = source.ExternalSystemType.ToString(),
+            ["isSimulation"] = source.ExternalSystemType == DataSourceExternalSystemType.SimulationBusiness,
+            ["sourceLabel"] = source.ExternalSystemType == DataSourceExternalSystemType.SimulationBusiness
+                ? "AI 独立模拟业务库"
+                : source.Name,
+            ["businessDomain"] = source.BusinessDomain,
+            ["category"] = source.Category,
+            ["sensitivityLevel"] = source.SensitivityLevel,
+            ["defaultQueryLimit"] = source.DefaultQueryLimit,
+            ["maxQueryLimit"] = source.MaxQueryLimit
+        }).ToArray();
+
+        var hasSimulation = candidates.Any(source => source.ExternalSystemType == DataSourceExternalSystemType.SimulationBusiness);
+        var queryHash = ComputeHash($"{plan.Goal}|{string.Join(',', candidates.Select(source => source.Id))}|{plan.QueryMode ?? "TextToSql"}");
+
+        state.CloudReadonlySummary =
+            $"BusinessDatabase readonly query prepared. sourceType=BusinessDatabase; sourceMode={(hasSimulation ? "SimulationBusiness" : "NonCloud")}; isSimulation={hasSimulation.ToString().ToLowerInvariant()}; sourceLabel={(hasSimulation ? "AI 独立模拟业务库" : string.Join(", ", candidates.Select(source => source.Name)))}; queryHash={queryHash}.";
+        state.CloudReadonlyRows = rows;
+        state.CloudReadonlySourceLabel = hasSimulation ? "AI 独立模拟业务库" : string.Join(", ", candidates.Select(source => source.Name));
+        state.CloudReadonlySourcePath = "BusinessDataSourceCenter";
+        state.CloudReadonlySourceMode = hasSimulation ? "SimulationBusiness" : "NonCloud";
+        state.CloudReadonlyIsSimulation = hasSimulation;
+        state.CloudReadonlyRowCount = rows.Length;
+        state.CloudReadonlyIsTruncated = false;
+        state.BusinessQueryHash = queryHash;
+
+        return new
+        {
+            status = "completed",
+            sourceType = "BusinessDatabase",
+            sourceMode = state.CloudReadonlySourceMode,
+            isSimulation = state.CloudReadonlyIsSimulation,
+            sourceLabel = state.CloudReadonlySourceLabel,
+            queryHash,
+            rowCount = rows.Length,
+            rows
+        };
+    }
+
+    private static object SummarizeBusinessQueryResult(AgentTaskRunState state)
+    {
+        return new
+        {
+            status = "completed",
+            sourceType = "BusinessDatabase",
+            sourceMode = state.CloudReadonlySourceMode,
+            isSimulation = state.CloudReadonlyIsSimulation,
+            sourceLabel = state.CloudReadonlySourceLabel,
+            queryHash = state.BusinessQueryHash,
+            rowCount = state.CloudReadonlyRowCount,
+            summary = state.CloudReadonlySummary ?? "BusinessDatabase readonly query result is not available."
+        };
+    }
+
+    private static string ComputeHash(string value)
+    {
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
+    }
+
     private async Task<object> GenerateChartDataAsync(
         ArtifactWorkspace workspace,
         AgentStep step,
@@ -647,6 +1076,7 @@ internal sealed class AgentTaskRuntime(
     {
         var payload = AgentReportComposer.BuildChartPayload(state);
         var content = JsonSerializer.Serialize(payload, JsonOptions);
+        var sourceMetadata = BuildArtifactSourceMetadata(state);
         var artifact = await workspaceService.WriteDraftTextArtifactAsync(
             workspace,
             ArtifactType.Chart,
@@ -655,6 +1085,7 @@ internal sealed class AgentTaskRuntime(
             content,
             "application/json",
             step.Id,
+            sourceMetadata,
             cancellationToken);
         return new { status = "completed", artifactId = artifact.Id.Value, artifact.RelativePath };
     }
@@ -667,6 +1098,7 @@ internal sealed class AgentTaskRuntime(
         CancellationToken cancellationToken)
     {
         var markdown = AgentReportComposer.BuildMarkdownReport(task, state);
+        var sourceMetadata = BuildArtifactSourceMetadata(state);
         var artifact = await workspaceService.WriteDraftTextArtifactAsync(
             workspace,
             ArtifactType.Markdown,
@@ -675,6 +1107,7 @@ internal sealed class AgentTaskRuntime(
             markdown,
             "text/markdown",
             step.Id,
+            sourceMetadata,
             cancellationToken);
         return new { status = "completed", artifactId = artifact.Id.Value, artifact.RelativePath };
     }
@@ -687,6 +1120,7 @@ internal sealed class AgentTaskRuntime(
         CancellationToken cancellationToken)
     {
         var html = AgentReportComposer.BuildHtmlReport(task, state);
+        var sourceMetadata = BuildArtifactSourceMetadata(state);
         var artifact = await workspaceService.WriteDraftTextArtifactAsync(
             workspace,
             ArtifactType.Html,
@@ -695,6 +1129,7 @@ internal sealed class AgentTaskRuntime(
             html,
             "text/html",
             step.Id,
+            sourceMetadata,
             cancellationToken);
         return new { status = "completed", artifactId = artifact.Id.Value, artifact.RelativePath };
     }
@@ -708,6 +1143,7 @@ internal sealed class AgentTaskRuntime(
     {
         var content = await documentGenerator.GeneratePdfAsync(AgentReportComposer.BuildReportDocument(task, state), cancellationToken);
         EnsureGeneratedContent(content, "PDF");
+        var sourceMetadata = BuildArtifactSourceMetadata(state);
         var artifact = await workspaceService.WriteDraftBinaryArtifactAsync(
             workspace,
             ArtifactType.Pdf,
@@ -716,6 +1152,7 @@ internal sealed class AgentTaskRuntime(
             content,
             "application/pdf",
             step.Id,
+            sourceMetadata,
             cancellationToken);
         return new { status = "completed", artifactId = artifact.Id.Value, artifact.RelativePath };
     }
@@ -729,6 +1166,7 @@ internal sealed class AgentTaskRuntime(
     {
         var content = await documentGenerator.GeneratePptxAsync(AgentReportComposer.BuildReportDocument(task, state), cancellationToken);
         EnsureGeneratedContent(content, "PPTX");
+        var sourceMetadata = BuildArtifactSourceMetadata(state);
         var artifact = await workspaceService.WriteDraftBinaryArtifactAsync(
             workspace,
             ArtifactType.Pptx,
@@ -737,6 +1175,7 @@ internal sealed class AgentTaskRuntime(
             content,
             "application/vnd.openxmlformats-officedocument.presentationml.presentation",
             step.Id,
+            sourceMetadata,
             cancellationToken);
         return new { status = "completed", artifactId = artifact.Id.Value, artifact.RelativePath };
     }
@@ -750,6 +1189,7 @@ internal sealed class AgentTaskRuntime(
     {
         var content = await documentGenerator.GenerateXlsxAsync(AgentReportComposer.BuildReportDocument(task, state), cancellationToken);
         EnsureGeneratedContent(content, "XLSX");
+        var sourceMetadata = BuildArtifactSourceMetadata(state);
         var artifact = await workspaceService.WriteDraftBinaryArtifactAsync(
             workspace,
             ArtifactType.Xlsx,
@@ -758,8 +1198,59 @@ internal sealed class AgentTaskRuntime(
             content,
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             step.Id,
+            sourceMetadata,
             cancellationToken);
         return new { status = "completed", artifactId = artifact.Id.Value, artifact.RelativePath };
+    }
+
+    private static ArtifactSourceMetadata? BuildArtifactSourceMetadata(AgentTaskRunState state)
+    {
+        var cloudSandbox = state.CloudSandboxQueryResults.LastOrDefault();
+        if (cloudSandbox is not null)
+        {
+            return new ArtifactSourceMetadata(
+                cloudSandbox.SourceMode,
+                cloudSandbox.Boundary,
+                IsSimulation: false,
+                cloudSandbox.IsSandbox,
+                cloudSandbox.SourceLabel,
+                cloudSandbox.QueryHash,
+                cloudSandbox.ResultHash,
+                cloudSandbox.RowCount,
+                cloudSandbox.IsTruncated);
+        }
+
+        var business = state.BusinessQueryResults.LastOrDefault();
+        if (business is not null)
+        {
+            return new ArtifactSourceMetadata(
+                business.SourceMode,
+                Boundary: null,
+                business.IsSimulation,
+                IsSandbox: false,
+                business.SourceLabel,
+                business.QueryHash,
+                ResultHash: null,
+                business.RowCount,
+                business.IsTruncated);
+        }
+
+        if (!string.IsNullOrWhiteSpace(state.CloudReadonlySourceMode) ||
+            !string.IsNullOrWhiteSpace(state.CloudReadonlySourceLabel))
+        {
+            return new ArtifactSourceMetadata(
+                state.CloudReadonlySourceMode,
+                Boundary: null,
+                state.CloudReadonlyIsSimulation,
+                IsSandbox: string.Equals(state.CloudReadonlySourceMode, "CloudReadonlySandbox", StringComparison.OrdinalIgnoreCase),
+                state.CloudReadonlySourceLabel,
+                state.BusinessQueryHash,
+                ResultHash: null,
+                state.CloudReadonlyRowCount,
+                state.CloudReadonlyIsTruncated);
+        }
+
+        return null;
     }
 
     private static void EnsureGeneratedContent(byte[] content, string artifactType)
@@ -939,6 +1430,8 @@ internal sealed class AgentTaskRuntime(
                 cloudResult.IsTruncated
             }
             : null;
+        var businessQuery = TryReadBusinessQueryAudit(output);
+        var toolOutputAudit = TryReadToolOutputAudit(output);
         var payload = new
         {
             taskId = task.Id.Value,
@@ -947,15 +1440,133 @@ internal sealed class AgentTaskRuntime(
             stepIndex = step.StepIndex,
             toolCode = step.ToolCode ?? tool?.ToolCode,
             providerType = tool?.ProviderType.ToString(),
+            providerKind = toolOutputAudit.ProviderKind ?? tool?.ProviderType.ToString(),
+            isMock = toolOutputAudit.IsMock ?? (tool?.ProviderType == ToolProviderType.MockMcp),
             targetType = tool?.TargetType.ToString(),
             targetName = tool?.TargetName,
             timeoutSeconds = tool?.TimeoutSeconds,
             auditLevel = tool?.AuditLevel.ToString(),
             riskLevel = tool?.RiskLevel.ToString(),
             requiresApproval = tool?.RequiresApproval,
-            cloudReadonly
+            approvalPolicy = tool?.ApprovalPolicy,
+            approvalStatus = ResolveApprovalStatus(step, tool),
+            dataBoundary = tool?.DataBoundary.ToString(),
+            schemaVersion = tool?.SchemaVersion,
+            toolCatalogVersion = tool?.CatalogVersion,
+            toolRunId = toolOutputAudit.ToolRunId,
+            resultHash = toolOutputAudit.ResultHash,
+            cloudReadonly,
+            businessQuery
         };
         return SanitizeSummary(JsonSerializer.Serialize(payload, JsonOptions), 4000) ?? "{}";
+    }
+
+    private static string ResolveApprovalStatus(AgentStep step, ToolRegistration? tool)
+    {
+        var requiresApproval = step.RequiresApproval ||
+                               tool?.RequiresApproval == true ||
+                               tool?.RiskLevel is AiToolRiskLevel.RequiresApproval
+                                   or AiToolRiskLevel.High
+                                   or AiToolRiskLevel.Critical;
+        if (!requiresApproval)
+        {
+            return "NotRequired";
+        }
+
+        return step.Status is AgentStepStatus.Approved or AgentStepStatus.Running
+            ? "Approved"
+            : "Required";
+    }
+
+    private static ToolOutputAudit TryReadToolOutputAudit(object? output)
+    {
+        if (output is null)
+        {
+            return new ToolOutputAudit(null, null, null, null);
+        }
+
+        try
+        {
+            var serialized = JsonSerializer.Serialize(output, JsonOptions);
+            using var document = JsonDocument.Parse(serialized);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return new ToolOutputAudit(null, null, null, ComputeSha256(serialized));
+            }
+
+            var providerKind = TryGetString(root, "providerKind") ?? TryGetString(root, "providerType");
+            var isMock = TryGetBool(root, "isMock");
+            var toolRunId = TryGetString(root, "toolRunId");
+            var resultHash = TryGetString(root, "resultHash") ?? ComputeSha256(serialized);
+            return new ToolOutputAudit(providerKind, isMock, toolRunId, resultHash);
+        }
+        catch (JsonException)
+        {
+            return new ToolOutputAudit(null, null, null, null);
+        }
+    }
+
+    private static object? TryReadBusinessQueryAudit(object? output)
+    {
+        if (output is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(JsonSerializer.Serialize(output, JsonOptions));
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("sourceType", out var sourceType) ||
+                !string.Equals(sourceType.GetString(), "BusinessDatabase", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            return new
+            {
+                SourceType = sourceType.GetString(),
+                SourceMode = TryGetString(root, "sourceMode"),
+                IsSimulation = TryGetBool(root, "isSimulation"),
+                SourceLabel = TryGetString(root, "sourceLabel"),
+                QueryHash = TryGetString(root, "queryHash"),
+                RowCount = TryGetInt(root, "rowCount"),
+                IsTruncated = TryGetBool(root, "isTruncated")
+            };
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string? TryGetString(JsonElement root, string propertyName)
+    {
+        return root.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+    }
+
+    private static bool? TryGetBool(JsonElement root, string propertyName)
+    {
+        return root.TryGetProperty(propertyName, out var value) && value.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? value.GetBoolean()
+            : null;
+    }
+
+    private static int? TryGetInt(JsonElement root, string propertyName)
+    {
+        return root.TryGetProperty(propertyName, out var value) && value.TryGetInt32(out var result)
+            ? result
+            : null;
+    }
+
+    private static string ComputeSha256(string value)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(value));
+        return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
     private static string? SanitizeSummary(string? value, int maxLength)
@@ -1414,6 +2025,12 @@ internal sealed class AgentTaskRuntime(
             return AgentToolExecutionResult.From(await execute(context));
         }
     }
+
+    private sealed record ToolOutputAudit(
+        string? ProviderKind,
+        bool? IsMock,
+        string? ToolRunId,
+        string? ResultHash);
 }
 
 internal sealed class AgentTaskRunState
@@ -1441,7 +2058,39 @@ internal sealed class AgentTaskRunState
     public int CloudReadonlyRowCount { get; set; }
 
     public bool CloudReadonlyIsTruncated { get; set; }
+
+    public string? BusinessQueryHash { get; set; }
+
+    public List<AgentBusinessQuerySummary> BusinessQueryResults { get; } = [];
+
+    public List<AgentCloudSandboxQuerySummary> CloudSandboxQueryResults { get; } = [];
 }
+
+internal sealed record AgentBusinessQuerySummary(
+    Guid DataSourceId,
+    string DataSourceName,
+    string SourceMode,
+    bool IsSimulation,
+    string SourceLabel,
+    string QueryHash,
+    int RowCount,
+    bool IsTruncated,
+    Guid? ArtifactId);
+
+internal sealed record AgentCloudSandboxQuerySummary(
+    string EndpointCode,
+    string SourceMode,
+    bool IsSandbox,
+    string SourceLabel,
+    string QueryHash,
+    string ResultHash,
+    int RowCount,
+    bool IsTruncated,
+    IReadOnlyCollection<Guid> ArtifactRefs,
+    string? TrialMode,
+    string? IntentId,
+    string? Boundary,
+    string? ApprovalStatus);
 
 internal sealed record AgentUploadSummary(
     Guid Id,

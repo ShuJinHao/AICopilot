@@ -335,9 +335,33 @@ public sealed class MigrationOwnershipTests
         }
     }
 
-    private static string FindAicopilotRoot()
+    private static string FindAicopilotRoot([System.Runtime.CompilerServices.CallerFilePath] string sourceFile = "")
     {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        foreach (var start in new[]
+        {
+            Path.GetDirectoryName(sourceFile),
+            Environment.CurrentDirectory,
+            AppContext.BaseDirectory
+        })
+        {
+            var root = TryFindAicopilotRoot(start);
+            if (root is not null)
+            {
+                return root;
+            }
+        }
+
+        throw new DirectoryNotFoundException("Could not locate the AICopilot repository root.");
+    }
+
+    private static string? TryFindAicopilotRoot(string? start)
+    {
+        if (string.IsNullOrWhiteSpace(start))
+        {
+            return null;
+        }
+
+        var directory = new DirectoryInfo(start);
         while (directory is not null)
         {
             var candidate = Path.Combine(directory.FullName, "src", "infrastructure", "AICopilot.EntityFrameworkCore");
@@ -349,6 +373,6 @@ public sealed class MigrationOwnershipTests
             directory = directory.Parent;
         }
 
-        throw new DirectoryNotFoundException("Could not locate the AICopilot repository root.");
+        return null;
     }
 }

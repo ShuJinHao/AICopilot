@@ -4,12 +4,23 @@ import { apiClient, ApiError, getAccessToken, getProblemDetails } from './apiCli
 import type { ChatHistoryMessage, SelectableChatModel, StreamCallbacks } from '@/types/app'
 import type {
   AgentApprovalRequest,
+  AgentArtifactPreview,
   AgentTask,
   AgentTaskAuditSummary,
+  AgentTrialScenario,
   ArtifactWorkspace,
   ChatChunk,
+  CloudReadonlySandboxControlledPlan,
+  CloudReadonlyPilotConfigPackage,
+  CloudReadonlyPilotContractRehearsal,
+  CloudReadonlyPilotReadinessStatus,
+  CloudSandboxGoalTimeRange,
   FunctionApprovalRequest,
+  PilotApprovalRehearsal,
+  PilotReadinessAssessment,
   Session,
+  TrialCampaign,
+  TrialEvidencePackage,
   UploadRecord
 } from '@/types/protocols'
 
@@ -179,8 +190,164 @@ export const chatService = {
     modelId?: string | null
     uploadIds?: string[]
     knowledgeBaseIds?: string[]
+    dataSourceIds?: string[]
+    businessDomains?: string[]
+    queryMode?: string | null
+    requiresDataApproval?: boolean
+    artifactTypes?: string[]
+    plannerMode?: 'Auto' | 'DynamicOnly' | 'StaticOnly'
   }) {
     return await apiClient.post<AgentTask>('/aigateway/agent/task/plan', payload)
+  },
+
+  async getAgentTrialScenarios() {
+    return await apiClient.get<AgentTrialScenario[]>('/aigateway/agent/trial-scenarios')
+  },
+
+  async createAgentTaskFromTrialScenario(payload: {
+    sessionId: string
+    scenarioId: string
+    promptOverride?: string | null
+    artifactTypes?: string[]
+    dataSourceIds?: string[]
+    plannerMode?: 'Auto' | 'DynamicOnly' | 'StaticOnly'
+  }) {
+    return await apiClient.post<AgentTask>('/aigateway/agent/trial-scenarios/create-task', payload)
+  },
+
+  async getTrialCampaigns() {
+    return await apiClient.get<TrialCampaign[]>('/aigateway/trial-operations/campaigns')
+  },
+
+  async getTrialCampaignDetail(id: string) {
+    return await apiClient.get<TrialCampaign>(
+      `/aigateway/trial-operations/campaigns/${encodeURIComponent(id)}`
+    )
+  },
+
+  async createTrialCampaign(payload: {
+    name: string
+    allowedSourceModes?: string[]
+    ownerDepartment?: string | null
+    startAt?: string | null
+    endAt?: string | null
+    summary?: string | null
+  }) {
+    return await apiClient.post<TrialCampaign>('/aigateway/trial-operations/campaigns', payload)
+  },
+
+  async updateTrialCampaignStatus(id: string, status: string) {
+    return await apiClient.request<TrialCampaign>(
+      `/aigateway/trial-operations/campaigns/${encodeURIComponent(id)}/status`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ status })
+      }
+    )
+  },
+
+  async attachAgentTaskToTrialCampaign(
+    campaignId: string,
+    payload: {
+      taskId: string
+      scenarioId?: string | null
+      trialMode?: string | null
+    }
+  ) {
+    return await apiClient.post<TrialCampaign>(
+      `/aigateway/trial-operations/campaigns/${encodeURIComponent(campaignId)}/attach-task`,
+      payload
+    )
+  },
+
+  async upsertTrialRiskIssue(
+    campaignId: string,
+    payload: {
+      issueId?: string | null
+      severity: string
+      category: string
+      status: string
+      owner?: string | null
+      sourceRef?: string | null
+      resolutionHash?: string | null
+    }
+  ) {
+    return await apiClient.post<TrialCampaign>(
+      `/aigateway/trial-operations/campaigns/${encodeURIComponent(campaignId)}/risks`,
+      payload
+    )
+  },
+
+  async runPilotReadinessEvaluation(campaignId: string) {
+    return await apiClient.post<PilotReadinessAssessment>(
+      `/aigateway/trial-operations/campaigns/${encodeURIComponent(campaignId)}/readiness`,
+      {}
+    )
+  },
+
+  async generateTrialEvidencePackage(campaignId: string) {
+    return await apiClient.post<TrialEvidencePackage>(
+      `/aigateway/trial-operations/campaigns/${encodeURIComponent(campaignId)}/evidence-package`,
+      {}
+    )
+  },
+
+  async getCloudReadonlyPilotReadiness() {
+    return await apiClient.get<CloudReadonlyPilotReadinessStatus>(
+      '/aigateway/cloud-readonly/readiness/pilot-readiness'
+    )
+  },
+
+  async createCloudReadonlyPilotConfigPackage(campaignId: string) {
+    return await apiClient.post<CloudReadonlyPilotConfigPackage>(
+      '/aigateway/cloud-readonly/readiness/pilot-readiness/config-package',
+      {
+        campaignId
+      }
+    )
+  },
+
+  async runCloudReadonlyPilotGateEvaluation(campaignId: string) {
+    return await apiClient.post<CloudReadonlyPilotReadinessStatus>(
+      '/aigateway/cloud-readonly/readiness/pilot-readiness/gate',
+      {
+        campaignId
+      }
+    )
+  },
+
+  async runCloudReadonlyPilotApprovalRehearsal(packageId: string) {
+    return await apiClient.post<PilotApprovalRehearsal>(
+      '/aigateway/cloud-readonly/readiness/pilot-readiness/approval-rehearsal',
+      {
+        packageId
+      }
+    )
+  },
+
+  async runCloudReadonlyPilotContractRehearsal(packageId: string) {
+    return await apiClient.post<CloudReadonlyPilotContractRehearsal>(
+      '/aigateway/cloud-readonly/readiness/pilot-readiness/contract-rehearsal',
+      {
+        packageId,
+        endpointCodes: ['devices', 'capacity_summary', 'device_logs', 'pass_station_records']
+      }
+    )
+  },
+
+  async createCloudSandboxControlledPlan(payload: {
+    sessionId: string
+    goal: string
+    modelId?: string | null
+    artifactTypes?: string[]
+    timeRange?: CloudSandboxGoalTimeRange | null
+    maxRows?: number | null
+    plannerMode?: 'Auto' | 'DynamicOnly' | 'StaticOnly'
+  }) {
+    return await apiClient.post<CloudReadonlySandboxControlledPlan>(
+      '/aigateway/agent/cloud-sandbox-controlled-trial/plan',
+      payload
+    )
   },
 
   async approveAgentTaskPlan(id: string) {
@@ -220,6 +387,12 @@ export const chatService = {
 
   async getWorkspace(code: string) {
     return await apiClient.get<ArtifactWorkspace>(`/aigateway/workspace/${encodeURIComponent(code)}`)
+  },
+
+  async getArtifactPreview(id: string) {
+    return await apiClient.get<AgentArtifactPreview>(
+      `/aigateway/artifact/${encodeURIComponent(id)}/preview`
+    )
   },
 
   async finalizeWorkspace(code: string) {

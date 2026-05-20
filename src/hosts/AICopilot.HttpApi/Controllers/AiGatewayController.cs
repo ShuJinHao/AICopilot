@@ -4,13 +4,16 @@ using AICopilot.AiGatewayService.ApprovalPolicies;
 using AICopilot.AiGatewayService.Commands.ConversationTemplates;
 using AICopilot.AiGatewayService.Commands.LanguageModels;
 using AICopilot.AiGatewayService.Commands.Sessions;
+using AICopilot.AiGatewayService.CloudReadiness;
 using AICopilot.AiGatewayService.Queries.ConversationTemplates;
 using AICopilot.AiGatewayService.Queries.LanguageModels;
 using AICopilot.AiGatewayService.Queries.Runtime;
 using AICopilot.AiGatewayService.Queries.Sessions;
+using AICopilot.AiGatewayService.PromptPolicies;
 using AICopilot.AiGatewayService.RoutingModels;
 using AICopilot.AiGatewayService.Runtime;
 using AICopilot.AiGatewayService.Tools;
+using AICopilot.AiGatewayService.TrialOperations;
 using AICopilot.AiGatewayService.Uploads;
 using AICopilot.AiGatewayService.Workspaces;
 using AICopilot.HttpApi.Infrastructure;
@@ -110,6 +113,12 @@ public class AiGatewayController(ISender sender) : ApiControllerBase(sender)
         return ReturnResult(await Sender.Send(new GetProviderReliabilityQuery()));
     }
 
+    [HttpGet("model-pools")]
+    public async Task<IActionResult> GetModelPools()
+    {
+        return ReturnResult(await Sender.Send(new GetModelPoolsQuery()));
+    }
+
     [HttpGet("runtime-settings")]
     public async Task<IActionResult> GetRuntimeSettings()
     {
@@ -120,6 +129,36 @@ public class AiGatewayController(ISender sender) : ApiControllerBase(sender)
     public async Task<IActionResult> UpdateRuntimeSettings(UpdateChatRuntimeSettingsCommand command)
     {
         return ReturnResult(await Sender.Send(command));
+    }
+
+    [HttpPost("prompt-policy")]
+    public async Task<IActionResult> UpsertPromptPolicy(UpsertPromptPolicyCommand command)
+    {
+        return ReturnResult(await Sender.Send(command));
+    }
+
+    [HttpPut("prompt-policy/activate")]
+    public async Task<IActionResult> ActivatePromptPolicyVersion(ActivatePromptPolicyVersionCommand command)
+    {
+        return ReturnResult(await Sender.Send(command));
+    }
+
+    [HttpGet("prompt-policy")]
+    public async Task<IActionResult> GetPromptPolicy([FromQuery] GetPromptPolicyQuery query)
+    {
+        return ReturnResult(await Sender.Send(query));
+    }
+
+    [HttpGet("prompt-policy/active")]
+    public async Task<IActionResult> GetActivePromptPolicy([FromQuery] GetActivePromptPolicyQuery query)
+    {
+        return ReturnResult(await Sender.Send(query));
+    }
+
+    [HttpGet("prompt-policy/list")]
+    public async Task<IActionResult> GetListPromptPolicies()
+    {
+        return ReturnResult(await Sender.Send(new GetListPromptPoliciesQuery()));
     }
 
     [HttpPost("conversation-template")]
@@ -194,6 +233,12 @@ public class AiGatewayController(ISender sender) : ApiControllerBase(sender)
         return ReturnResult(await Sender.Send(new GetListToolRegistrationsQuery()));
     }
 
+    [HttpGet("tools/catalog")]
+    public async Task<IActionResult> GetToolCatalog([FromQuery] GetToolCatalogQuery query)
+    {
+        return ReturnResult(await Sender.Send(query));
+    }
+
     [HttpGet("tools/{toolCode}")]
     public async Task<IActionResult> GetToolRegistration(string toolCode)
     {
@@ -214,7 +259,33 @@ public class AiGatewayController(ISender sender) : ApiControllerBase(sender)
             request.RequiresApproval,
             request.IsEnabled,
             request.TimeoutSeconds,
-            request.AuditLevel)));
+            request.AuditLevel,
+            request.Category,
+            request.BusinessDomains,
+            request.DataBoundary,
+            request.IsVisibleToPlanner,
+            request.IsExecutableByAgent,
+            request.SchemaVersion,
+            request.CatalogVersion,
+            request.ApprovalPolicy)));
+    }
+
+    [HttpPost("tools/definition")]
+    public async Task<IActionResult> UpsertToolDefinition(UpsertToolDefinitionCommand command)
+    {
+        return ReturnResult(await Sender.Send(command));
+    }
+
+    [HttpPut("tools/definition/activate")]
+    public async Task<IActionResult> ActivateToolDefinitionVersion(ActivateToolDefinitionVersionCommand command)
+    {
+        return ReturnResult(await Sender.Send(command));
+    }
+
+    [HttpPut("tools/definition/disable")]
+    public async Task<IActionResult> DisableToolDefinition(DisableToolDefinitionCommand command)
+    {
+        return ReturnResult(await Sender.Send(command));
     }
 
     [HttpPost("session")]
@@ -247,8 +318,88 @@ public class AiGatewayController(ISender sender) : ApiControllerBase(sender)
         return ReturnResult(await Sender.Send(new GetListSessionsQuery()));
     }
 
+    [HttpGet("agent/trial-scenarios")]
+    public async Task<IActionResult> GetAgentTrialScenarios()
+    {
+        return ReturnResult(await Sender.Send(new GetAgentTrialScenariosQuery()));
+    }
+
+    [HttpPost("agent/trial-scenarios/create-task")]
+    public async Task<IActionResult> CreateAgentTaskFromTrialScenario(
+        CreateAgentTaskFromTrialScenarioCommand command)
+    {
+        return ReturnResult(await Sender.Send(command));
+    }
+
+    [HttpGet("trial-operations/campaigns")]
+    public async Task<IActionResult> GetTrialCampaigns()
+    {
+        return ReturnResult(await Sender.Send(new GetTrialCampaignsQuery()));
+    }
+
+    [HttpGet("trial-operations/campaigns/{id:guid}")]
+    public async Task<IActionResult> GetTrialCampaignDetail(Guid id)
+    {
+        return ReturnResult(await Sender.Send(new GetTrialCampaignDetailQuery(id)));
+    }
+
+    [HttpPost("trial-operations/campaigns")]
+    public async Task<IActionResult> CreateTrialCampaign(CreateTrialCampaignCommand command)
+    {
+        return ReturnResult(await Sender.Send(command));
+    }
+
+    [HttpPatch("trial-operations/campaigns/{id:guid}/status")]
+    public async Task<IActionResult> UpdateTrialCampaignStatus(Guid id, UpdateTrialCampaignStatusRequest request)
+    {
+        return ReturnResult(await Sender.Send(new UpdateTrialCampaignStatusCommand(id, request.Status)));
+    }
+
+    [HttpPost("trial-operations/campaigns/{id:guid}/attach-task")]
+    public async Task<IActionResult> AttachAgentTaskToTrialCampaign(Guid id, AttachAgentTaskToTrialCampaignRequest request)
+    {
+        return ReturnResult(await Sender.Send(new AttachAgentTaskToTrialCampaignCommand(
+            id,
+            request.TaskId,
+            request.ScenarioId,
+            request.TrialMode)));
+    }
+
+    [HttpPost("trial-operations/campaigns/{id:guid}/risks")]
+    public async Task<IActionResult> UpsertTrialRiskIssue(Guid id, UpsertTrialRiskIssueRequest request)
+    {
+        return ReturnResult(await Sender.Send(new UpsertTrialRiskIssueCommand(
+            id,
+            request.IssueId,
+            request.Severity,
+            request.Category,
+            request.Status,
+            request.Owner,
+            request.SourceRef,
+            request.ResolutionHash)));
+    }
+
+    [HttpPost("trial-operations/campaigns/{id:guid}/readiness")]
+    public async Task<IActionResult> RunPilotReadinessEvaluation(Guid id)
+    {
+        return ReturnResult(await Sender.Send(new RunPilotReadinessEvaluationCommand(id)));
+    }
+
+    [HttpPost("trial-operations/campaigns/{id:guid}/evidence-package")]
+    public async Task<IActionResult> GenerateTrialEvidencePackage(Guid id)
+    {
+        return ReturnResult(await Sender.Send(new GenerateTrialEvidencePackageCommand(id)));
+    }
+
     [HttpPost("agent/task/plan")]
     public async Task<IActionResult> PlanAgentTask(PlanAgentTaskCommand command)
+    {
+        return ReturnResult(await Sender.Send(command));
+    }
+
+    [HttpPost("agent/cloud-sandbox-controlled-trial/plan")]
+    public async Task<IActionResult> CreateCloudReadonlySandboxControlledPlan(
+        CreateCloudReadonlySandboxControlledPlanCommand command)
     {
         return ReturnResult(await Sender.Send(command));
     }
@@ -483,6 +634,12 @@ public class AiGatewayController(ISender sender) : ApiControllerBase(sender)
         return ReturnResult(await Sender.Send(new GetArtifactContentQuery(id)));
     }
 
+    [HttpGet("artifact/{id:guid}/preview")]
+    public async Task<IActionResult> GetAgentArtifactPreview(Guid id)
+    {
+        return ReturnResult(await Sender.Send(new GetAgentArtifactPreviewQuery(id)));
+    }
+
     [HttpPut("artifact/{id:guid}/content")]
     public async Task<IActionResult> UpdateArtifactContent(Guid id, UpdateArtifactContentRequest request)
     {
@@ -491,6 +648,31 @@ public class AiGatewayController(ISender sender) : ApiControllerBase(sender)
             request.Content,
             request.ExpectedVersion,
             request.Comment)));
+    }
+
+    [HttpPost("artifact/{id:guid}/revision-comment")]
+    public async Task<IActionResult> CreateArtifactRevisionComment(Guid id, CreateArtifactRevisionCommentRequest request)
+    {
+        return ReturnResult(await Sender.Send(new CreateArtifactRevisionCommentCommand(
+            id,
+            request.Comment,
+            request.ExpectedVersion)));
+    }
+
+    [HttpPost("artifact/{id:guid}/regenerate-draft")]
+    public async Task<IActionResult> RegenerateDraftArtifact(Guid id, RegenerateDraftArtifactRequest request)
+    {
+        return ReturnResult(await Sender.Send(new RegenerateDraftArtifactCommand(
+            id,
+            request.Content,
+            request.ExpectedVersion,
+            request.Comment)));
+    }
+
+    [HttpPost("artifact/{id:guid}/submit-final-approval")]
+    public async Task<IActionResult> SubmitArtifactForFinalApproval(Guid id)
+    {
+        return ReturnResult(await Sender.Send(new SubmitArtifactForFinalApprovalCommand(id)));
     }
 
     [HttpGet("artifact/{id:guid}/versions")]
@@ -572,6 +754,30 @@ public sealed record UpdateToolRegistrationRequest(
     bool? RequiresApproval = null,
     bool? IsEnabled = null,
     int? TimeoutSeconds = null,
-    string? AuditLevel = null);
+    string? AuditLevel = null,
+    string? Category = null,
+    IReadOnlyCollection<string>? BusinessDomains = null,
+    string? DataBoundary = null,
+    bool? IsVisibleToPlanner = null,
+    bool? IsExecutableByAgent = null,
+    int? SchemaVersion = null,
+    int? CatalogVersion = null,
+    string? ApprovalPolicy = null);
 
 public sealed record DeadLetterAgentRunQueueItemRequest(string? Reason = null);
+
+public sealed record UpdateTrialCampaignStatusRequest(string Status);
+
+public sealed record AttachAgentTaskToTrialCampaignRequest(
+    Guid TaskId,
+    string? ScenarioId = null,
+    string? TrialMode = null);
+
+public sealed record UpsertTrialRiskIssueRequest(
+    Guid? IssueId,
+    string Severity,
+    string Category,
+    string Status,
+    string? Owner = null,
+    string? SourceRef = null,
+    string? ResolutionHash = null);

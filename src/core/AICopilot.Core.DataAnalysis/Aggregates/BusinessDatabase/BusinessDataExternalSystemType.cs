@@ -4,5 +4,6 @@ public enum BusinessDataExternalSystemType
 {
     Unknown = 0,
     CloudReadOnly = 1,
-    NonCloud = 2
+    NonCloud = 2,
+    SimulationBusiness = 3
 }

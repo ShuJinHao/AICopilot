@@ -276,7 +276,15 @@ public class Worker(
                     definition.IsEnabled,
                     definition.TimeoutSeconds,
                     definition.AuditLevel,
-                    now));
+                    now,
+                    definition.Category,
+                    definition.BusinessDomains,
+                    definition.DataBoundary,
+                    definition.IsVisibleToPlanner,
+                    definition.IsExecutableByAgent,
+                    definition.SchemaVersion,
+                    definition.CatalogVersion,
+                    definition.ApprovalPolicy));
                 continue;
             }
 
@@ -294,7 +302,15 @@ public class Worker(
                 tool.IsEnabled,
                 tool.TimeoutSeconds,
                 tool.AuditLevel,
-                now);
+                now,
+                definition.Category,
+                definition.BusinessDomains,
+                definition.DataBoundary,
+                definition.IsVisibleToPlanner && tool.IsVisibleToPlanner,
+                definition.IsExecutableByAgent && tool.IsExecutableByAgent,
+                definition.SchemaVersion,
+                definition.CatalogVersion,
+                string.IsNullOrWhiteSpace(tool.ApprovalPolicy) ? definition.ApprovalPolicy : tool.ApprovalPolicy);
         }
 
         var routingConfigurations = await aiGatewayDbContext.RoutingModelConfigurations

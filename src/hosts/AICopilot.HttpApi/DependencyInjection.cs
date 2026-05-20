@@ -61,6 +61,14 @@ public static class DependencyInjection
                 builder.Configuration.GetSection(CloudIdentityStatusOptions.SectionName));
             builder.Services.Configure<CloudReadonlyOptions>(
                 builder.Configuration.GetSection(CloudReadonlyOptions.SectionName));
+            builder.Services.Configure<CloudReadonlySandboxOptions>(
+                builder.Configuration.GetSection(CloudReadonlySandboxOptions.SectionName));
+            builder.Services.Configure<CloudReadonlySandboxAgentTrialOptions>(
+                builder.Configuration.GetSection(CloudReadonlySandboxAgentTrialOptions.SectionName));
+            builder.Services.Configure<CloudReadonlySandboxControlledTrialOptions>(
+                builder.Configuration.GetSection(CloudReadonlySandboxControlledTrialOptions.SectionName));
+            builder.Services.Configure<CloudReadonlyPilotReadinessOptions>(
+                builder.Configuration.GetSection(CloudReadonlyPilotReadinessOptions.SectionName));
             builder.Services.Configure<CloudAiReadOptions>(
                 builder.Configuration.GetSection(CloudAiReadOptions.SectionName));
             var cloudOidcOptions = builder.Configuration
@@ -82,6 +90,22 @@ public static class DependencyInjection
                 .GetSection(CloudReadonlyOptions.SectionName)
                 .Get<CloudReadonlyOptions>() ?? new CloudReadonlyOptions();
             cloudReadonlyOptions.EnsureValid(cloudAiReadOptions);
+            var cloudReadonlySandboxOptions = builder.Configuration
+                .GetSection(CloudReadonlySandboxOptions.SectionName)
+                .Get<CloudReadonlySandboxOptions>() ?? new CloudReadonlySandboxOptions();
+            cloudReadonlySandboxOptions.EnsureValid();
+            var cloudReadonlySandboxAgentTrialOptions = builder.Configuration
+                .GetSection(CloudReadonlySandboxAgentTrialOptions.SectionName)
+                .Get<CloudReadonlySandboxAgentTrialOptions>() ?? new CloudReadonlySandboxAgentTrialOptions();
+            cloudReadonlySandboxAgentTrialOptions.EnsureValid();
+            var cloudReadonlySandboxControlledTrialOptions = builder.Configuration
+                .GetSection(CloudReadonlySandboxControlledTrialOptions.SectionName)
+                .Get<CloudReadonlySandboxControlledTrialOptions>() ?? new CloudReadonlySandboxControlledTrialOptions();
+            cloudReadonlySandboxControlledTrialOptions.EnsureValid();
+            var cloudReadonlyPilotReadinessOptions = builder.Configuration
+                .GetSection(CloudReadonlyPilotReadinessOptions.SectionName)
+                .Get<CloudReadonlyPilotReadinessOptions>() ?? new CloudReadonlyPilotReadinessOptions();
+            cloudReadonlyPilotReadinessOptions.EnsureValid();
 
             var authenticationBuilder = builder.Services
                 .AddAuthentication(options =>

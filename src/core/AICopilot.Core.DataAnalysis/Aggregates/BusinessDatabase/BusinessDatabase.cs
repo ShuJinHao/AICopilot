@@ -24,7 +24,16 @@ public class BusinessDatabase : IAggregateRoot<BusinessDatabaseId>
         bool isReadOnly = true,
         BusinessDataExternalSystemType externalSystemType = BusinessDataExternalSystemType.Unknown,
         bool readOnlyCredentialVerified = false,
-        bool isEnabled = true)
+        bool isEnabled = true,
+        string? category = null,
+        IEnumerable<string>? tags = null,
+        string? ownerDepartment = null,
+        string? businessDomain = null,
+        string? sensitivityLevel = null,
+        int defaultQueryLimit = 200,
+        int maxQueryLimit = 1000,
+        bool isSelectableInChat = true,
+        bool isSelectableInAgent = true)
     {
         ValidateInfo(name, description);
         ValidateConnection(connectionString, provider);
@@ -33,6 +42,7 @@ public class BusinessDatabase : IAggregateRoot<BusinessDatabaseId>
             isReadOnly,
             externalSystemType,
             readOnlyCredentialVerified);
+        ValidateGovernance(defaultQueryLimit, maxQueryLimit);
 
         Id = BusinessDatabaseId.New();
         Name = name.Trim();
@@ -44,6 +54,15 @@ public class BusinessDatabase : IAggregateRoot<BusinessDatabaseId>
         ReadOnlyCredentialVerified = readOnlyCredentialVerified;
         IsEnabled = isEnabled;
         CreatedAt = DateTime.UtcNow;
+        Category = NormalizeOptionalText(category, "General");
+        Tags = NormalizeTags(tags);
+        OwnerDepartment = NormalizeOptionalText(ownerDepartment, string.Empty);
+        BusinessDomain = NormalizeOptionalText(businessDomain, string.Empty);
+        SensitivityLevel = NormalizeOptionalText(sensitivityLevel, "Internal");
+        DefaultQueryLimit = defaultQueryLimit;
+        MaxQueryLimit = maxQueryLimit;
+        IsSelectableInChat = isSelectableInChat;
+        IsSelectableInAgent = isSelectableInAgent;
     }
 
     public BusinessDatabaseId Id { get; private set; }
@@ -88,6 +107,24 @@ public class BusinessDatabase : IAggregateRoot<BusinessDatabaseId>
 
     public DateTime CreatedAt { get; private set; }
 
+    public string Category { get; private set; } = "General";
+
+    public string Tags { get; private set; } = string.Empty;
+
+    public string OwnerDepartment { get; private set; } = string.Empty;
+
+    public string BusinessDomain { get; private set; } = string.Empty;
+
+    public string SensitivityLevel { get; private set; } = "Internal";
+
+    public int DefaultQueryLimit { get; private set; } = 200;
+
+    public int MaxQueryLimit { get; private set; } = 1000;
+
+    public bool IsSelectableInChat { get; private set; } = true;
+
+    public bool IsSelectableInAgent { get; private set; } = true;
+
     /// <summary>
     /// 更新连接信息
     /// </summary>
@@ -126,6 +163,30 @@ public class BusinessDatabase : IAggregateRoot<BusinessDatabaseId>
 
         Name = name.Trim();
         Description = description.Trim();
+    }
+
+    public void UpdateGovernance(
+        string? category,
+        IEnumerable<string>? tags,
+        string? ownerDepartment,
+        string? businessDomain,
+        string? sensitivityLevel,
+        int defaultQueryLimit,
+        int maxQueryLimit,
+        bool isSelectableInChat,
+        bool isSelectableInAgent)
+    {
+        ValidateGovernance(defaultQueryLimit, maxQueryLimit);
+
+        Category = NormalizeOptionalText(category, "General");
+        Tags = NormalizeTags(tags);
+        OwnerDepartment = NormalizeOptionalText(ownerDepartment, string.Empty);
+        BusinessDomain = NormalizeOptionalText(businessDomain, string.Empty);
+        SensitivityLevel = NormalizeOptionalText(sensitivityLevel, "Internal");
+        DefaultQueryLimit = defaultQueryLimit;
+        MaxQueryLimit = maxQueryLimit;
+        IsSelectableInChat = isSelectableInChat;
+        IsSelectableInAgent = isSelectableInAgent;
     }
 
     private static void ValidateInfo(string name, string description)
@@ -173,6 +234,11 @@ public class BusinessDatabase : IAggregateRoot<BusinessDatabaseId>
             throw new InvalidOperationException("Cloud read-only data source must be configured as read-only.");
         }
 
+        if (externalSystemType == BusinessDataExternalSystemType.SimulationBusiness && !isReadOnly)
+        {
+            throw new InvalidOperationException("Simulation business data source must be configured as read-only.");
+        }
+
         if (isEnabled
             && externalSystemType == BusinessDataExternalSystemType.CloudReadOnly
             && !readOnlyCredentialVerified)
@@ -180,5 +246,49 @@ public class BusinessDatabase : IAggregateRoot<BusinessDatabaseId>
             throw new InvalidOperationException(
                 "Enabled Cloud read-only data source must have a verified read-only credential.");
         }
+    }
+
+    private static void ValidateGovernance(int defaultQueryLimit, int maxQueryLimit)
+    {
+        if (defaultQueryLimit <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(defaultQueryLimit), "Default query limit must be positive.");
+        }
+
+        if (maxQueryLimit <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxQueryLimit), "Max query limit must be positive.");
+        }
+
+        if (defaultQueryLimit > maxQueryLimit)
+        {
+            throw new ArgumentException("Default query limit cannot exceed max query limit.", nameof(defaultQueryLimit));
+        }
+
+        if (maxQueryLimit > 10000)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxQueryLimit), "Max query limit cannot exceed 10000 rows.");
+        }
+    }
+
+    private static string NormalizeTags(IEnumerable<string>? tags)
+    {
+        if (tags is null)
+        {
+            return string.Empty;
+        }
+
+        return string.Join(
+            ",",
+            tags
+                .Where(tag => !string.IsNullOrWhiteSpace(tag))
+                .Select(tag => tag.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(32));
+    }
+
+    private static string NormalizeOptionalText(string? value, string defaultValue)
+    {
+        return string.IsNullOrWhiteSpace(value) ? defaultValue : value.Trim();
     }
 }

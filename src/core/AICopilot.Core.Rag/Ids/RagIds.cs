@@ -54,3 +54,45 @@ public readonly record struct KnowledgeBaseId : IStronglyTypedGuidId
 
     public override string ToString() => Value.ToString();
 }
+
+public readonly record struct KnowledgeCategoryId : IStronglyTypedGuidId
+{
+    public KnowledgeCategoryId(Guid value)
+    {
+        if (value == Guid.Empty)
+        {
+            throw new ArgumentException("Knowledge category id is required.", nameof(value));
+        }
+
+        Value = value;
+    }
+
+    public Guid Value { get; }
+
+    public static KnowledgeCategoryId New() => new(Guid.NewGuid());
+
+    public static implicit operator Guid(KnowledgeCategoryId id) => id.Value;
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct KnowledgeSupplementId : IStronglyTypedGuidId
+{
+    public KnowledgeSupplementId(Guid value)
+    {
+        if (value == Guid.Empty)
+        {
+            throw new ArgumentException("Knowledge supplement id is required.", nameof(value));
+        }
+
+        Value = value;
+    }
+
+    public Guid Value { get; }
+
+    public static KnowledgeSupplementId New() => new(Guid.NewGuid());
+
+    public static implicit operator Guid(KnowledgeSupplementId id) => id.Value;
+
+    public override string ToString() => Value.ToString();
+}

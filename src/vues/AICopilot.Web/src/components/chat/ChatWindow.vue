@@ -5,6 +5,7 @@ import {
   Check,
   ChevronRight,
   Download,
+  Eye,
   FileUp,
   FolderOpen,
   History,
@@ -30,16 +31,73 @@ const store = useChatStore()
 const uiLayoutStore = useUiLayoutStore()
 const inputValue = ref('')
 const agentGoal = ref('')
+const cloudSandboxControlledGoal = ref('')
+const selectedTrialScenarioId = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
 const scrollContainer = ref<HTMLElement | null>(null)
 const isMobile = ref(typeof window !== 'undefined' ? window.innerWidth < 1024 : false)
 const sessionDrawerVisible = ref(false)
+
+type AgentPlanPreview = {
+  plannerMode?: string
+  plannerFallbackReason?: string | null
+  plannerToolCatalogVersion?: number
+  plannerAvailableToolCount?: number
+  toolCatalogVersion?: number
+  visibleToolCount?: number
+  toolRiskSummary?: Record<string, number>
+  mockMcpOnly?: boolean
+  toolApprovalCheckpoints?: string[]
+  businessDomains?: string[]
+  artifactTypes?: string[]
+  forcedStepCodes?: string[]
+  approvalCheckpoints?: string[]
+  trialScenarioId?: string | null
+  trialScenarioTitle?: string | null
+  isSimulationTrial?: boolean
+  isCloudSandboxControlledTrial?: boolean
+  cloudSandboxGoalIntent?: {
+    intentId?: string
+    endpointCodes?: string[]
+    maxRows?: number
+    analysisType?: string
+    requiresToolApproval?: boolean
+    requiresFinalApproval?: boolean
+    boundary?: string
+    timeRange?: {
+      from?: string | null
+      to?: string | null
+    }
+  } | null
+  queryMode?: string | null
+  dataSourceSummaries?: Array<{
+    name?: string
+    sourceMode?: string
+    isSimulation?: boolean
+    sourceLabel?: string
+    businessDomain?: string | null
+  }>
+  plannerSafetySummary?: {
+    planSource?: string
+    plannerMode?: string
+    plannerModelSummary?: string | null
+    plannerToolCatalogVersion?: number
+    availableToolCount?: number
+    isSimulationOnly?: boolean
+    requiresDataApproval?: boolean
+    toolRiskSummary?: Record<string, number>
+    mockMcpOnly?: boolean
+  }
+}
 
 const {
   latestTask,
   taskHistory,
   taskSteps,
   taskArtifacts,
+  draftArtifacts,
+  finalArtifacts,
+  currentArtifactPreview,
   pendingAgentApprovals,
   auditSummary,
   completedStepCount,
@@ -67,6 +125,61 @@ const {
 
 const currentTitle = computed(() => store.currentSession?.title || '新会话')
 const isInputDisabled = computed(() => store.isStreaming || store.isWaitingForApproval || !store.selectedModelId)
+const trialScenarios = computed(() => store.agentTrialScenarios)
+const selectedTrialScenario = computed(() =>
+  trialScenarios.value.find((scenario) => scenario.id === selectedTrialScenarioId.value) ?? null
+)
+const latestPlan = computed<AgentPlanPreview | null>(() => parseAgentPlan(latestTask.value?.planJson))
+const latestPlanMode = computed(() => latestPlan.value?.plannerMode || 'Pending')
+const latestPlanDataSource = computed(() => latestPlan.value?.dataSourceSummaries?.[0] ?? null)
+const latestPlanApprovalCount = computed(() => latestPlan.value?.approvalCheckpoints?.length ?? 0)
+const latestPlanForcedSteps = computed(() => latestPlan.value?.forcedStepCodes ?? [])
+const latestPlanToolCatalogVersion = computed(
+  () => latestPlan.value?.toolCatalogVersion ?? latestPlan.value?.plannerToolCatalogVersion
+)
+const latestPlanVisibleToolCount = computed(
+  () => latestPlan.value?.visibleToolCount ?? latestPlan.value?.plannerAvailableToolCount ?? 0
+)
+const latestPlanRiskSummary = computed(
+  () => latestPlan.value?.toolRiskSummary ?? latestPlan.value?.plannerSafetySummary?.toolRiskSummary ?? {}
+)
+const latestPlanRiskLine = computed(() => {
+  const entries = Object.entries(latestPlanRiskSummary.value)
+  return entries.length ? entries.map(([risk, count]) => `${risk}:${count}`).join(' / ') : 'No risk summary'
+})
+const latestPlanMockMcpOnly = computed(
+  () => latestPlan.value?.mockMcpOnly ?? latestPlan.value?.plannerSafetySummary?.mockMcpOnly ?? false
+)
+const latestPlanIsCloudSandbox = computed(
+  () =>
+    latestPlan.value?.queryMode === 'CloudReadonlySandbox' ||
+    latestPlan.value?.isCloudSandboxControlledTrial === true ||
+    latestPlan.value?.trialScenarioId?.startsWith('cloud-sandbox-')
+)
+const latestPlanIsCloudSandboxControlled = computed(
+  () => latestPlan.value?.isCloudSandboxControlledTrial === true
+)
+const latestCloudSandboxIntent = computed(() => latestPlan.value?.cloudSandboxGoalIntent ?? null)
+const trialCampaign = computed(() => store.currentTrialCampaign)
+const trialSummary = computed(() => trialCampaign.value?.summary ?? null)
+const trialReadiness = computed(() => store.currentPilotReadiness)
+const trialEvidencePackage = computed(() => store.currentTrialEvidencePackage)
+const cloudReadonlyPilotReadiness = computed(() => store.currentCloudReadonlyPilotReadiness)
+const cloudReadonlyPilotConfigPackage = computed(() =>
+  store.currentCloudReadonlyPilotConfigPackage ?? cloudReadonlyPilotReadiness.value?.configSummary ?? null
+)
+const pilotApprovalRehearsal = computed(() => store.currentPilotApprovalRehearsal)
+const pilotContractRehearsal = computed(() => store.currentPilotContractRehearsal)
+
+function parseAgentPlan(planJson?: string | null): AgentPlanPreview | null {
+  if (!planJson) return null
+  try {
+    const parsed = JSON.parse(planJson) as AgentPlanPreview
+    return parsed && typeof parsed === 'object' ? parsed : null
+  } catch {
+    return null
+  }
+}
 
 const suggestions = [
   '查看 DEV-001 最近 24 小时设备日志，并给出根因线索',
@@ -81,6 +194,7 @@ const agentTabs = computed<Array<{ value: AgentWorkbenchTab; label: string; coun
   { value: 'approvals', label: '审批', count: pendingAgentApprovals.value.length },
   { value: 'artifacts', label: '产物', count: taskArtifacts.value.length },
   { value: 'audit', label: '审计', count: auditSummary.value.length },
+  { value: 'trial', label: '试用', count: trialSummary.value?.scenarioRunCount ?? store.trialCampaigns.length },
   { value: 'boundary', label: '边界' }
 ])
 
@@ -138,6 +252,77 @@ async function createAgentPlan() {
   await store.planAgentTask(goal)
 }
 
+function selectTrialScenario(scenarioId: string) {
+  selectedTrialScenarioId.value = scenarioId
+  const scenario = selectedTrialScenario.value
+  if (scenario) {
+    agentGoal.value = scenario.defaultPrompt
+  }
+}
+
+async function createTrialScenarioPlan() {
+  const scenario = selectedTrialScenario.value
+  if (!scenario) return
+  const task = await store.createAgentTaskFromTrialScenario(
+    scenario,
+    agentGoal.value.trim() || scenario.defaultPrompt
+  )
+  if (task) {
+    uiLayoutStore.suggestAgentWorkbenchTab('approvals')
+  }
+}
+
+async function createTrialCampaign() {
+  await store.createTrialCampaign()
+  uiLayoutStore.suggestAgentWorkbenchTab('trial')
+}
+
+async function attachLatestTaskToTrialCampaign() {
+  await store.attachLatestTaskToTrialCampaign()
+  uiLayoutStore.suggestAgentWorkbenchTab('trial')
+}
+
+async function runPilotReadinessEvaluation() {
+  await store.runPilotReadinessEvaluation()
+  uiLayoutStore.suggestAgentWorkbenchTab('trial')
+}
+
+async function generateTrialEvidencePackage() {
+  await store.generateTrialEvidencePackage()
+  uiLayoutStore.suggestAgentWorkbenchTab('trial')
+}
+
+async function createCloudReadonlyPilotConfigPackage() {
+  await store.createCloudReadonlyPilotConfigPackage()
+  uiLayoutStore.suggestAgentWorkbenchTab('trial')
+}
+
+async function runCloudReadonlyPilotGateEvaluation() {
+  await store.runCloudReadonlyPilotGateEvaluation()
+  uiLayoutStore.suggestAgentWorkbenchTab('trial')
+}
+
+async function runCloudReadonlyPilotApprovalRehearsal() {
+  await store.runCloudReadonlyPilotApprovalRehearsal()
+  uiLayoutStore.suggestAgentWorkbenchTab('trial')
+}
+
+async function runCloudReadonlyPilotContractRehearsal() {
+  await store.runCloudReadonlyPilotContractRehearsal()
+  uiLayoutStore.suggestAgentWorkbenchTab('trial')
+}
+
+async function createCloudSandboxControlledPlan() {
+  const goal = cloudSandboxControlledGoal.value.trim() || agentGoal.value.trim() || inputValue.value.trim()
+  if (!goal || store.isAgentBusy) return
+  cloudSandboxControlledGoal.value = goal
+  const result = await store.createCloudSandboxControlledPlan(goal)
+  if (result) {
+    agentGoal.value = goal
+    uiLayoutStore.suggestAgentWorkbenchTab('approvals')
+  }
+}
+
 async function runLatestTask() {
   if (!latestTask.value || !canRunTask.value) return
   await store.runAgentTask(latestTask.value.id)
@@ -187,6 +372,10 @@ async function downloadArtifact(artifactId: string) {
   const artifact = taskArtifacts.value.find((item) => item.id === artifactId)
   if (!artifact) return
   await store.downloadArtifact(artifact)
+}
+
+async function previewArtifact(artifactId: string) {
+  await store.loadArtifactPreview(artifactId)
 }
 
 async function scrollToBottom() {
@@ -409,6 +598,9 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
         >
           <X :size="18" />
         </button>
+        <AiTag v-if="!isMobile" :tone="latestPlanIsCloudSandbox ? 'warning' : 'success'">
+          {{ latestPlanIsCloudSandbox ? 'Cloud Sandbox Trial' : 'SimulationBusiness' }}
+        </AiTag>
         <AiTag v-else tone="dark">Cloud 只读</AiTag>
       </div>
 
@@ -427,6 +619,70 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
 
       <div class="agent-tab-content">
         <section v-if="uiLayoutStore.agentWorkbenchTab === 'plan'" class="tab-stack">
+          <div class="trial-scenario-panel">
+            <div class="section-title">
+              <strong>试用模板</strong>
+              <AiTag tone="success">SimulationBusiness</AiTag>
+              <AiTag tone="warning">Cloud Sandbox Trial</AiTag>
+            </div>
+            <div v-if="trialScenarios.length" class="trial-scenario-list">
+              <button
+                v-for="scenario in trialScenarios"
+                :key="scenario.id"
+                type="button"
+                class="trial-scenario-card"
+                :class="{ active: selectedTrialScenarioId === scenario.id }"
+                @click="selectTrialScenario(scenario.id)"
+              >
+                <span>{{ scenario.businessDomain }}</span>
+                <strong>{{ scenario.title }}</strong>
+                <small>{{ scenario.description }}</small>
+                <AiTag :tone="scenario.isCloudSandboxTrial ? 'warning' : 'success'">
+                  {{ scenario.sourceMode || (scenario.isCloudSandboxTrial ? 'CloudReadonlySandbox' : 'SimulationBusiness') }}
+                </AiTag>
+                <em>{{ scenario.defaultArtifactTypes.join(' / ') }}</em>
+              </button>
+            </div>
+            <div v-else class="panel-empty">
+              {{ store.isLoadingAgentTrialScenarios ? '正在加载试用模板' : '暂无可用 SimulationBusiness 试用模板' }}
+            </div>
+            <button
+              class="wide-action"
+              type="button"
+              :disabled="!selectedTrialScenario || store.isAgentBusy"
+              @click="createTrialScenarioPlan"
+            >
+              <ListChecks :size="17" />
+              生成模板计划
+            </button>
+          </div>
+          <div class="trial-scenario-panel controlled-sandbox-panel">
+            <div class="section-title">
+              <strong>Cloud Sandbox Controlled Trial</strong>
+              <AiTag tone="warning">非生产</AiTag>
+            </div>
+            <textarea
+              v-model="cloudSandboxControlledGoal"
+              class="agent-goal compact"
+              rows="3"
+              placeholder="输入受控自由目标，例如：分析最近一周产能交付风险"
+            />
+            <div class="planner-chip-row">
+              <span>devices</span>
+              <span>capacity_summary</span>
+              <span>device_logs</span>
+              <span>pass_station_records</span>
+            </div>
+            <button
+              class="wide-action"
+              type="button"
+              :disabled="store.isAgentBusy || !(cloudSandboxControlledGoal.trim() || agentGoal.trim() || inputValue.trim())"
+              @click="createCloudSandboxControlledPlan"
+            >
+              <ShieldCheck :size="17" />
+              生成受控目标计划
+            </button>
+          </div>
           <div class="metric-grid">
             <div>
               <span>步骤</span>
@@ -439,6 +695,73 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
             <div>
               <span>审批</span>
               <strong>{{ pendingAgentApprovals.length }}</strong>
+            </div>
+          </div>
+          <div v-if="latestPlan" class="planner-preview">
+            <div class="planner-preview-head">
+              <div>
+                <span>Planner</span>
+                <strong>{{ latestPlanMode }}</strong>
+              </div>
+              <AiTag :tone="latestPlanMode === 'Dynamic' ? 'success' : latestPlanMode === 'StaticFallback' ? 'warning' : 'neutral'">
+                {{ latestPlan?.plannerSafetySummary?.planSource || latestPlan?.trialScenarioTitle || 'FreeGoal' }}
+              </AiTag>
+            </div>
+            <div class="planner-preview-grid">
+              <div>
+                <span>Tool Catalog</span>
+                <strong>v{{ latestPlanToolCatalogVersion ?? '-' }} / {{ latestPlanVisibleToolCount }}</strong>
+              </div>
+              <div>
+                <span>Data Source</span>
+                <strong>{{ latestPlanIsCloudSandboxControlled ? 'CloudReadonlySandbox / ControlledGoal' : latestPlanIsCloudSandbox ? 'CloudReadonlySandbox' : latestPlanDataSource?.sourceMode || 'SimulationBusiness' }}</strong>
+              </div>
+              <div>
+                <span>Approval Points</span>
+                <strong>{{ latestPlanApprovalCount }}</strong>
+              </div>
+              <div>
+                <span>Mock MCP</span>
+                <strong>{{ latestPlanMockMcpOnly ? 'Only' : 'Mixed' }}</strong>
+              </div>
+              <div>
+                <span>Tool Risk</span>
+                <strong>{{ latestPlanRiskLine }}</strong>
+              </div>
+            </div>
+            <div class="planner-source-line">
+              <AiTag v-if="latestPlanIsCloudSandbox" tone="warning">Cloud 只读 Sandbox（非生产）</AiTag>
+              <AiTag v-if="latestPlanIsCloudSandboxControlled" tone="warning">SandboxControlledTrial</AiTag>
+              <AiTag v-if="!latestPlanIsCloudSandbox" tone="success">{{ latestPlanDataSource?.sourceLabel || 'AI 独立模拟业务库' }}</AiTag>
+              <span>{{ latestPlanIsCloudSandbox ? latestCloudSandboxIntent?.endpointCodes?.join(' / ') || 'CloudReadonlySandbox' : latestPlanDataSource?.name || 'aicopilot_sim_business' }}</span>
+            </div>
+            <div v-if="latestCloudSandboxIntent" class="planner-intent-grid">
+              <div>
+                <span>Intent</span>
+                <strong>{{ latestCloudSandboxIntent.analysisType || '-' }}</strong>
+              </div>
+              <div>
+                <span>Max Rows</span>
+                <strong>{{ latestCloudSandboxIntent.maxRows ?? '-' }}</strong>
+              </div>
+              <div>
+                <span>Tool Approval</span>
+                <strong>{{ latestCloudSandboxIntent.requiresToolApproval ? 'Required' : 'Not required' }}</strong>
+              </div>
+              <div>
+                <span>Final Approval</span>
+                <strong>{{ latestCloudSandboxIntent.requiresFinalApproval ? 'Required' : 'Not required' }}</strong>
+              </div>
+            </div>
+            <div v-if="latestPlan?.plannerFallbackReason" class="planner-warning">
+              <TriangleAlert :size="15" />
+              <span>{{ latestPlan.plannerFallbackReason }}</span>
+            </div>
+            <div v-if="latestPlanForcedSteps.length" class="planner-chip-row">
+              <span v-for="code in latestPlanForcedSteps" :key="code">{{ code }}</span>
+            </div>
+            <div v-if="latestPlan?.toolApprovalCheckpoints?.length" class="planner-chip-row">
+              <span v-for="code in latestPlan.toolApprovalCheckpoints" :key="code">{{ code }}</span>
             </div>
           </div>
           <div v-if="blockedStep" class="blocked-step">
@@ -519,10 +842,24 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
             <strong>{{ workspaceStatus.label }}</strong>
             <span>{{ store.currentWorkspace?.workspaceCode || '未创建工作区' }}</span>
           </div>
+          <div class="artifact-workspace-summary">
+            <div>
+              <span>草稿区</span>
+              <strong>{{ draftArtifacts.length }}</strong>
+            </div>
+            <div>
+              <span>final 区</span>
+              <strong>{{ finalArtifacts.length }}</strong>
+            </div>
+            <div>
+              <span>版本/锁定</span>
+              <strong>{{ currentArtifactPreview?.artifactStatus || store.currentWorkspace?.status || '-' }}</strong>
+            </div>
+          </div>
           <div v-if="chartBars.length" class="chart-preview">
             <div class="chart-preview-head">
               <span>图表预览</span>
-              <small>{{ store.chartPreview?.source || 'workspace' }}</small>
+              <small>{{ store.chartPreview?.sourceMode || store.chartPreview?.source || 'workspace' }}</small>
             </div>
             <div v-for="bar in chartBars" :key="bar.label" class="chart-bar-row">
               <span>{{ bar.label }}</span>
@@ -536,15 +873,56 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
               <div v-for="artifact in group.artifacts" :key="artifact.id" class="artifact-row">
                 <div>
                   <strong>{{ artifact.name }}</strong>
-                  <span>v{{ artifact.version }} · step {{ artifact.generatedByStepOrder ?? '-' }} · {{ artifact.approvalStatus || artifact.status }}</span>
+                  <span>v{{ artifact.artifactVersion || artifact.version }} · {{ artifact.artifactStatus || artifact.status }} · {{ artifact.approvalStatus || '-' }}</span>
+                  <span class="artifact-source-line">
+                    {{ artifact.sourceMode || 'UnknownSource' }}
+                    <template v-if="artifact.boundary"> · {{ artifact.boundary }}</template>
+                    <template v-if="artifact.sourceLabel"> · {{ artifact.sourceLabel }}</template>
+                  </span>
+                  <span class="artifact-source-line">
+                    hash {{ artifact.queryHash || artifact.resultHash || '-' }} · rows {{ artifact.rowCount ?? 0 }} · truncated {{ artifact.isTruncated ? 'true' : 'false' }}
+                  </span>
                 </div>
-                <button type="button" aria-label="下载产物" @click="downloadArtifact(artifact.id)">
-                  <Download :size="16" />
-                </button>
+                <div class="artifact-actions">
+                  <button type="button" aria-label="预览产物" @click="previewArtifact(artifact.id)">
+                    <Eye :size="16" />
+                  </button>
+                  <button type="button" aria-label="下载产物" @click="downloadArtifact(artifact.id)">
+                    <Download :size="16" />
+                  </button>
+                </div>
               </div>
             </div>
           </template>
           <div v-else class="panel-empty">暂无产物</div>
+          <div v-if="currentArtifactPreview" class="artifact-preview-panel">
+            <div class="section-title">
+              <strong>{{ currentArtifactPreview.name }}</strong>
+              <span>{{ currentArtifactPreview.previewKind }} · v{{ currentArtifactPreview.artifactVersion }}</span>
+            </div>
+            <div class="artifact-preview-meta">
+              <AiTag :tone="currentArtifactPreview.isSandbox ? 'warning' : currentArtifactPreview.isSimulation ? 'success' : 'neutral'">
+                {{ currentArtifactPreview.sourceMode || 'UnknownSource' }}
+              </AiTag>
+              <span>{{ currentArtifactPreview.sourceLabel || '未标记来源' }}</span>
+              <span>hash {{ currentArtifactPreview.queryHash || currentArtifactPreview.resultHash || '-' }}</span>
+              <span>rows {{ currentArtifactPreview.rowCount }} / truncated {{ currentArtifactPreview.isTruncated ? 'true' : 'false' }}</span>
+            </div>
+            <pre v-if="currentArtifactPreview.content" class="artifact-preview-content">{{ currentArtifactPreview.content.slice(0, 1600) }}</pre>
+            <div v-else-if="currentArtifactPreview.rows.length" class="artifact-preview-table">
+              <div class="artifact-preview-table-head">
+                <span v-for="column in currentArtifactPreview.columns" :key="column">{{ column }}</span>
+              </div>
+              <div v-for="(row, index) in currentArtifactPreview.rows.slice(0, 5)" :key="index" class="artifact-preview-table-row">
+                <span v-for="column in currentArtifactPreview.columns" :key="column">{{ row[column] ?? '-' }}</span>
+              </div>
+            </div>
+            <div v-else class="artifact-preview-metadata">
+              <span v-for="(value, key) in currentArtifactPreview.metadata" :key="key">
+                {{ key }}={{ value || '-' }}
+              </span>
+            </div>
+          </div>
           <button class="wide-action" type="button" :disabled="!canFinalizeWorkspace || store.isAgentBusy" @click="finalizeCurrentWorkspace">
             <FolderOpen :size="17" />
             确认正式输出
@@ -564,11 +942,197 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
               <div>
                 <strong>{{ item.actionCode }}</strong>
                 <span>{{ item.summary }}</span>
+                <span v-if="item.metadata?.toolCode || item.metadata?.providerKind || item.metadata?.resultHash" class="audit-meta-line">
+                  {{ item.metadata?.toolCode || 'tool' }}
+                  · {{ item.metadata?.providerKind || item.metadata?.providerType || 'provider' }}
+                  · {{ item.metadata?.isMock === 'True' || item.metadata?.isMock === 'true' ? 'Mock' : 'Runtime' }}
+                  · hash {{ item.metadata?.resultHash || '-' }}
+                </span>
               </div>
               <AiTag :tone="item.result === 'Succeeded' ? 'success' : 'danger'">{{ item.result }}</AiTag>
             </div>
           </div>
           <div v-else class="panel-empty">暂无审计记录</div>
+        </section>
+
+        <section v-else-if="uiLayoutStore.agentWorkbenchTab === 'trial'" class="tab-stack">
+          <div class="trial-ops-card">
+            <div class="section-title">
+              <strong>{{ trialCampaign?.name || '内部试用运营台账' }}</strong>
+              <AiTag :tone="trialCampaign?.readinessStatus === 'ReadyForP11Planning' ? 'success' : trialCampaign?.readinessStatus === 'Blocked' ? 'danger' : 'warning'">
+                {{ trialCampaign?.readinessStatus || 'NotEvaluated' }}
+              </AiTag>
+            </div>
+            <div class="trial-source-line">
+              <span v-for="mode in trialCampaign?.allowedSourceModes || ['SimulationBusiness', 'CloudReadonlySandbox']" :key="mode">
+                {{ mode }}
+              </span>
+            </div>
+            <div class="trial-metric-grid">
+              <div>
+                <span>场景</span>
+                <strong>{{ trialSummary?.scenarioRunCount ?? 0 }}</strong>
+              </div>
+              <div>
+                <span>final</span>
+                <strong>{{ trialSummary?.finalArtifactCount ?? 0 }}</strong>
+              </div>
+              <div>
+                <span>未关风险</span>
+                <strong>{{ trialSummary?.unresolvedRiskCount ?? 0 }}</strong>
+              </div>
+            </div>
+            <div class="two-actions">
+              <button type="button" :disabled="store.isLoadingTrialOperations" @click="createTrialCampaign">
+                <ListChecks :size="16" />
+                新建台账
+              </button>
+              <button type="button" :disabled="!latestTask || store.isLoadingTrialOperations" @click="attachLatestTaskToTrialCampaign">
+                <FolderOpen :size="16" />
+                挂载当前任务
+              </button>
+            </div>
+          </div>
+
+          <div class="trial-ops-card">
+            <div class="section-title">
+              <strong>P10 Pilot Planning 闸门</strong>
+              <span>{{ trialReadiness?.generatedAt || '未评估' }}</span>
+            </div>
+            <div class="two-actions">
+              <button type="button" :disabled="!trialCampaign || store.isLoadingTrialOperations" @click="runPilotReadinessEvaluation">
+                <ShieldCheck :size="16" />
+                运行评估
+              </button>
+              <button type="button" :disabled="!trialCampaign || store.isLoadingTrialOperations" @click="generateTrialEvidencePackage">
+                <History :size="16" />
+                生成证据包
+              </button>
+            </div>
+            <div v-if="trialReadiness?.checks.length" class="trial-check-list">
+              <div v-for="check in trialReadiness.checks" :key="check.code" class="trial-check-row">
+                <div>
+                  <strong>{{ check.label }}</strong>
+                  <span>{{ check.message }}</span>
+                </div>
+                <AiTag :tone="check.status === 'Passed' ? 'success' : check.isBlocking ? 'danger' : 'warning'">
+                  {{ check.status }}
+                </AiTag>
+              </div>
+            </div>
+            <div v-else class="panel-empty">尚未生成准入评估</div>
+          </div>
+
+          <div class="trial-ops-card">
+            <div class="section-title">
+              <strong>P11 Pilot 准入演练</strong>
+              <AiTag :tone="cloudReadonlyPilotReadiness?.status === 'RehearsalPassed' ? 'success' : cloudReadonlyPilotReadiness?.status === 'Blocked' ? 'danger' : 'warning'">
+                {{ cloudReadonlyPilotReadiness?.status || 'NotConfigured' }}
+              </AiTag>
+            </div>
+            <div class="trial-source-line">
+              <span>未启用生产读取</span>
+              <span>未接入真实生产数据</span>
+              <span>query_cloud_data_readonly closed</span>
+            </div>
+            <div class="trial-metric-grid">
+              <div>
+                <span>contract</span>
+                <strong>{{ cloudReadonlyPilotReadiness?.contractCheckSummary.passed ?? 0 }}/{{ cloudReadonlyPilotReadiness?.contractCheckSummary.total ?? 0 }}</strong>
+              </div>
+              <div>
+                <span>blocked</span>
+                <strong>{{ cloudReadonlyPilotReadiness?.contractCheckSummary.blockedByPolicy ?? 0 }}</strong>
+              </div>
+              <div>
+                <span>approval</span>
+                <strong>{{ cloudReadonlyPilotReadiness?.approvalRehearsalStatus || 'NotRun' }}</strong>
+              </div>
+            </div>
+            <div class="two-actions">
+              <button type="button" :disabled="!trialCampaign || store.isLoadingTrialOperations" @click="createCloudReadonlyPilotConfigPackage">
+                <ListChecks :size="16" />
+                配置包
+              </button>
+              <button type="button" :disabled="!trialCampaign || store.isLoadingTrialOperations" @click="runCloudReadonlyPilotGateEvaluation">
+                <ShieldCheck :size="16" />
+                Gate
+              </button>
+            </div>
+            <div class="two-actions">
+              <button type="button" :disabled="!cloudReadonlyPilotConfigPackage || store.isLoadingTrialOperations" @click="runCloudReadonlyPilotApprovalRehearsal">
+                <Check :size="16" />
+                审批演练
+              </button>
+              <button type="button" :disabled="!cloudReadonlyPilotConfigPackage || store.isLoadingTrialOperations" @click="runCloudReadonlyPilotContractRehearsal">
+                <RefreshCw :size="16" />
+                fake contract
+              </button>
+            </div>
+            <div v-if="cloudReadonlyPilotConfigPackage" class="trial-source-line">
+              <span>{{ cloudReadonlyPilotConfigPackage.packageId }}</span>
+              <span>{{ cloudReadonlyPilotConfigPackage.allowedEndpointCodes.join(' / ') }}</span>
+              <span>maxRows {{ cloudReadonlyPilotConfigPackage.maxRows }}</span>
+            </div>
+            <div v-if="pilotApprovalRehearsal?.steps.length" class="trial-check-list">
+              <div v-for="step in pilotApprovalRehearsal.steps" :key="step.code" class="trial-check-row">
+                <div>
+                  <strong>{{ step.label }}</strong>
+                  <span>{{ step.auditRef }}</span>
+                </div>
+                <AiTag :tone="step.status === 'Passed' ? 'success' : step.isBlocking ? 'danger' : 'warning'">
+                  {{ step.status }}
+                </AiTag>
+              </div>
+            </div>
+            <div v-if="pilotContractRehearsal?.checks.length" class="trial-check-list">
+              <div v-for="check in pilotContractRehearsal.checks" :key="check.endpointCode" class="trial-check-row">
+                <div>
+                  <strong>{{ check.endpointCode }}</strong>
+                  <span>{{ check.status }} · rows {{ check.rowCount }} · hash {{ check.resultHash || '-' }}</span>
+                </div>
+                <AiTag :tone="check.status === 'Passed' ? 'success' : check.status === 'BlockedByPolicy' ? 'warning' : 'danger'">
+                  {{ check.policyStatus }}
+                </AiTag>
+              </div>
+            </div>
+            <div v-if="cloudReadonlyPilotReadiness?.blockers.length" class="trial-check-list">
+              <div v-for="blocker in cloudReadonlyPilotReadiness.blockers" :key="blocker" class="trial-check-row">
+                <div>
+                  <strong>阻塞项</strong>
+                  <span>{{ blocker }}</span>
+                </div>
+                <AiTag tone="danger">Blocked</AiTag>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="trialCampaign?.scenarioRuns.length" class="trial-run-list">
+            <div v-for="run in trialCampaign.scenarioRuns" :key="run.runId" class="trial-run-row">
+              <div>
+                <strong>{{ run.scenarioId }}</strong>
+                <span>{{ run.sourceMode }} · {{ run.boundary || 'NonProduction' }} · {{ run.approvalStatus }}</span>
+                <span>hash {{ run.queryHashes[0] || run.resultHashes[0] || '-' }}</span>
+              </div>
+              <AiTag :tone="run.status === 'Passed' ? 'success' : run.status === 'Blocked' || run.status === 'Failed' ? 'danger' : 'warning'">
+                {{ run.status }}
+              </AiTag>
+            </div>
+          </div>
+          <div v-else class="panel-empty">暂无挂载的试用任务</div>
+
+          <div v-if="trialEvidencePackage" class="trial-ops-card">
+            <div class="section-title">
+              <strong>证据包</strong>
+              <span>{{ trialEvidencePackage.readinessStatus }}</span>
+            </div>
+            <div class="trial-metric-grid">
+              <div v-for="metric in trialEvidencePackage.metrics.slice(0, 6)" :key="metric.code">
+                <span>{{ metric.label }}</span>
+                <strong>{{ metric.value }}</strong>
+              </div>
+            </div>
+          </div>
         </section>
 
         <section v-else class="tab-stack">
@@ -744,6 +1308,150 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
 .uploaded-hint {
   color: var(--ai-text-muted);
   font-size: 12px;
+}
+
+.trial-scenario-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.controlled-sandbox-panel {
+  padding: 12px;
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  border-radius: 14px;
+  background: rgba(255, 251, 235, 0.72);
+}
+
+.trial-scenario-list {
+  display: grid;
+  gap: 8px;
+}
+
+.trial-scenario-card {
+  display: grid;
+  gap: 5px;
+  padding: 10px 11px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.82);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.trial-scenario-card.active,
+.trial-scenario-card:hover {
+  border-color: rgba(14, 165, 166, 0.7);
+  background: rgba(240, 253, 250, 0.9);
+}
+
+.trial-scenario-card span {
+  color: #0f766e;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.trial-scenario-card strong {
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.trial-scenario-card small,
+.trial-scenario-card em {
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.35;
+}
+
+.planner-preview {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(14, 165, 166, 0.22);
+  border-radius: 8px;
+  background: rgba(240, 253, 250, 0.72);
+}
+
+.planner-preview-head,
+.planner-source-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.planner-preview-head div,
+.planner-preview-grid div {
+  display: grid;
+  gap: 3px;
+}
+
+.planner-preview span,
+.planner-preview-grid span {
+  color: var(--ai-text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.planner-preview strong {
+  color: var(--ai-text);
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.planner-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.planner-intent-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.planner-intent-grid div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid rgba(245, 158, 11, 0.24);
+  border-radius: 8px;
+  background: rgba(255, 251, 235, 0.72);
+}
+
+.planner-source-line {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.planner-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  color: #92400e;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.planner-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.planner-chip-row span {
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.1);
+  color: #0f766e;
+  font-size: 11px;
+  font-weight: 800;
 }
 
 .task-history-list {
@@ -1168,6 +1876,11 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
   box-shadow: 0 0 0 4px var(--ai-focus);
 }
 
+.agent-goal.compact {
+  min-height: 86px;
+  border-radius: 12px;
+}
+
 .two-actions {
   gap: 8px;
 }
@@ -1254,6 +1967,155 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
 .chart-preview {
   display: grid;
   gap: 8px;
+}
+
+.artifact-workspace-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.artifact-workspace-summary div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  border: 1px solid var(--ai-border);
+  border-radius: 14px;
+  padding: 10px;
+  background: var(--ai-surface);
+}
+
+.artifact-workspace-summary span,
+.artifact-source-line,
+.artifact-preview-meta,
+.artifact-preview-metadata {
+  color: var(--ai-text-muted);
+  font-size: 12px;
+}
+
+.artifact-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.artifact-preview-panel {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--ai-border);
+  border-radius: 16px;
+  padding: 12px;
+  background: var(--ai-surface);
+}
+
+.artifact-preview-meta,
+.artifact-preview-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+}
+
+.artifact-preview-content {
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--ai-border);
+  border-radius: 12px;
+  padding: 10px;
+  background: #0f172a;
+  color: #e5eef6;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.artifact-preview-table {
+  display: grid;
+  overflow-x: auto;
+  border: 1px solid var(--ai-border);
+  border-radius: 12px;
+}
+
+.artifact-preview-table-head,
+.artifact-preview-table-row {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(96px, 1fr);
+}
+
+.artifact-preview-table-head span,
+.artifact-preview-table-row span {
+  min-width: 0;
+  overflow: hidden;
+  padding: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-preview-table-head {
+  background: var(--ai-surface-soft);
+  font-weight: 800;
+}
+
+.trial-ops-card,
+.trial-run-row,
+.trial-check-row {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--ai-border);
+  border-radius: 16px;
+  padding: 12px;
+  background: var(--ai-surface);
+}
+
+.trial-source-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.trial-source-line span {
+  border: 1px solid var(--ai-border);
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.trial-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.trial-metric-grid div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  border: 1px solid var(--ai-border);
+  border-radius: 14px;
+  padding: 10px;
+  background: var(--ai-surface-soft);
+}
+
+.trial-metric-grid span,
+.trial-run-row span,
+.trial-check-row span {
+  color: var(--ai-text-muted);
+  font-size: 12px;
+}
+
+.trial-run-list,
+.trial-check-list {
+  display: grid;
+  gap: 8px;
+}
+
+.trial-run-row,
+.trial-check-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
 }
 
 .chart-preview-head,

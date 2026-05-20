@@ -34,6 +34,42 @@ public sealed record KnowledgeRetrievalResult(
     bool IsLowConfidence,
     string? LowConfidenceReason);
 
+public sealed record KnowledgeCategoryDto(
+    Guid Id,
+    string Name,
+    string BusinessDomain,
+    string Visibility,
+    string Department,
+    int Priority,
+    bool IsEnabled);
+
+public sealed record KnowledgeDocumentVersionDto(
+    Guid DocumentGroupId,
+    int VersionNo,
+    DateTime? EffectiveAt,
+    DateTime? ExpiredAt,
+    int? SupersededByDocumentId,
+    string Status);
+
+public sealed record KnowledgeSupplementDto(
+    Guid Id,
+    string Title,
+    string Content,
+    string Priority,
+    DateTime? EffectiveAt,
+    DateTime? ExpiredAt,
+    Guid? CategoryId,
+    int? DocumentId,
+    bool IsEnabled);
+
+public sealed record KnowledgeSupplementHitDto(
+    Guid SupplementId,
+    string Title,
+    string Priority,
+    string Content,
+    Guid? CategoryId,
+    int? DocumentId);
+
 public interface IDocumentIndexingService
 {
     Task IndexAsync(int documentId, CancellationToken cancellationToken = default);

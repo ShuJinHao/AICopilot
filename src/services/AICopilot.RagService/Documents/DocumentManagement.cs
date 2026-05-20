@@ -262,7 +262,7 @@ public class DeleteDocumentCommandHandler(
         var targetName = document.Name;
         var filePath = document.FilePath;
         var knowledgeBaseId = knowledgeBase.Id.Value;
-        knowledgeBase.RemoveDocument(documentId);
+        document.SoftDelete();
         repository.Update(knowledgeBase);
         eventStager.Stage(() => new DocumentFileDeletionRequestedEvent
         {
@@ -279,7 +279,7 @@ public class DeleteDocumentCommandHandler(
                 request.Id.ToString(),
                 targetName,
                 AuditResults.Succeeded,
-                $"Deleted document: {targetName}; knowledgeBaseId={knowledgeBase.Id}."),
+                $"Soft-deleted document: {targetName}; knowledgeBaseId={knowledgeBase.Id}."),
             cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
 

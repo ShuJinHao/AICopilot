@@ -89,6 +89,43 @@ public sealed class ToolRegistrationConfiguration : IEntityTypeConfiguration<Too
             .IsRequired()
             .HasColumnName("audit_level");
 
+        builder.Property(tool => tool.Category)
+            .IsRequired()
+            .HasMaxLength(120)
+            .HasColumnName("category");
+
+        builder.Property(tool => tool.BusinessDomains)
+            .HasColumnType("text[]")
+            .IsRequired()
+            .HasColumnName("business_domains");
+
+        builder.Property(tool => tool.DataBoundary)
+            .HasConversion<string>()
+            .HasMaxLength(60)
+            .IsRequired()
+            .HasColumnName("data_boundary");
+
+        builder.Property(tool => tool.IsVisibleToPlanner)
+            .IsRequired()
+            .HasColumnName("is_visible_to_planner");
+
+        builder.Property(tool => tool.IsExecutableByAgent)
+            .IsRequired()
+            .HasColumnName("is_executable_by_agent");
+
+        builder.Property(tool => tool.SchemaVersion)
+            .IsRequired()
+            .HasColumnName("schema_version");
+
+        builder.Property(tool => tool.CatalogVersion)
+            .IsRequired()
+            .HasColumnName("catalog_version");
+
+        builder.Property(tool => tool.ApprovalPolicy)
+            .IsRequired()
+            .HasMaxLength(120)
+            .HasColumnName("approval_policy");
+
         builder.Property(tool => tool.CreatedAt)
             .HasColumnType("timestamp with time zone")
             .HasColumnName("created_at");

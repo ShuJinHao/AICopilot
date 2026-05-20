@@ -37,7 +37,35 @@ internal static class AgentReportComposer
             state.CloudReadonlySummary,
             DateTimeOffset.UtcNow,
             BuildMetrics(state, tables, cloudReadonlySource),
-            cloudReadonlySource);
+            cloudReadonlySource,
+            state.BusinessQueryResults
+                .Select(item => new AgentBusinessQueryResultSummaryDto(
+                    item.DataSourceId,
+                    item.DataSourceName,
+                    item.SourceMode,
+                    item.IsSimulation,
+                    item.SourceLabel,
+                    item.QueryHash,
+                    item.RowCount,
+                    item.IsTruncated,
+                    item.ArtifactId))
+                .ToArray(),
+            state.CloudSandboxQueryResults
+                .Select(item => new AgentCloudSandboxQueryResultSummaryDto(
+                    item.EndpointCode,
+                    item.SourceMode,
+                    item.IsSandbox,
+                    item.SourceLabel,
+                    item.QueryHash,
+                    item.ResultHash,
+                    item.RowCount,
+                    item.IsTruncated,
+                    item.ArtifactRefs,
+                    item.TrialMode,
+                    item.IntentId,
+                    item.Boundary,
+                    item.ApprovalStatus))
+                .ToArray());
     }
 
     public static string BuildMarkdownReport(AgentTask task, AgentTaskRunState state)
@@ -52,6 +80,12 @@ internal static class AgentReportComposer
         builder.AppendLine("## Data Source");
         builder.AppendLine("- " + BuildSourceMarker(report.CloudReadonlySource));
         builder.AppendLine("- " + (report.CloudReadonlySummary ?? "CloudReadonly was not accessed."));
+        builder.AppendLine();
+        builder.AppendLine("## Business Query Results");
+        builder.AppendLine(BuildMarkdownBusinessQueryResults(report.BusinessQueryResults ?? []));
+        builder.AppendLine();
+        builder.AppendLine("## Cloud Sandbox Query Results");
+        builder.AppendLine(BuildMarkdownCloudSandboxQueryResults(report.CloudSandboxQueryResults ?? []));
         builder.AppendLine();
         builder.AppendLine("## Metrics Summary");
         builder.AppendLine(BuildMarkdownMetrics(report.Metrics ?? []));
@@ -107,6 +141,10 @@ internal static class AgentReportComposer
         builder.AppendLine("<h2>Data Source</h2>");
         builder.AppendLine($"<p>{EscapeHtml(BuildSourceMarker(report.CloudReadonlySource))}</p>");
         builder.AppendLine($"<p>{EscapeHtml(report.CloudReadonlySummary ?? "CloudReadonly was not accessed.")}</p>");
+        builder.AppendLine("<h2>Business Query Results</h2>");
+        builder.AppendLine(BuildHtmlBusinessQueryResults(report.BusinessQueryResults ?? []));
+        builder.AppendLine("<h2>Cloud Sandbox Query Results</h2>");
+        builder.AppendLine(BuildHtmlCloudSandboxQueryResults(report.CloudSandboxQueryResults ?? []));
         builder.AppendLine("<h2>Metrics Summary</h2>");
         foreach (var metric in report.Metrics ?? [])
         {
@@ -274,7 +312,8 @@ internal static class AgentReportComposer
                     sourceInfo.SourceLabel,
                     sourceInfo.SourcePath,
                     sourceInfo.RowCount,
-                    sourceInfo.IsTruncated
+                    sourceInfo.IsTruncated,
+                    sourceInfo.QueryHash
                 },
             rowCount,
             truncated = isTruncated,
@@ -297,7 +336,8 @@ internal static class AgentReportComposer
             state.CloudReadonlySourceLabel,
             state.CloudReadonlySourcePath,
             state.CloudReadonlyRowCount > 0 ? state.CloudReadonlyRowCount : state.CloudReadonlyRows.Count,
-            state.CloudReadonlyIsTruncated);
+            state.CloudReadonlyIsTruncated,
+            state.BusinessQueryHash);
     }
 
     private static AgentReportTable? BuildCloudReadonlyTable(AgentTaskRunState state)
@@ -390,6 +430,86 @@ internal static class AgentReportComposer
         return builder.ToString();
     }
 
+    private static string BuildMarkdownBusinessQueryResults(
+        IReadOnlyList<AgentBusinessQueryResultSummaryDto> businessQueryResults)
+    {
+        if (businessQueryResults.Count == 0)
+        {
+            return "- No BusinessDatabase query result.";
+        }
+
+        var builder = new StringBuilder();
+        builder.AppendLine("| Data Source | Source Mode | Simulation | Source Label | Query Hash | Rows | Truncated | Artifact |");
+        builder.AppendLine("| --- | --- | --- | --- | --- | ---: | --- | --- |");
+        foreach (var result in businessQueryResults)
+        {
+            builder.AppendLine(
+                $"| {EscapeMarkdownCell(result.DataSourceName)} | {EscapeMarkdownCell(result.SourceMode)} | {EscapeMarkdownCell(FormatBool(result.IsSimulation))} | {EscapeMarkdownCell(result.SourceLabel)} | {EscapeMarkdownCell(result.QueryHash)} | {result.RowCount.ToString(CultureInfo.InvariantCulture)} | {EscapeMarkdownCell(FormatBool(result.IsTruncated))} | {EscapeMarkdownCell(result.ArtifactId?.ToString() ?? string.Empty)} |");
+        }
+
+        return builder.ToString();
+    }
+
+    private static string BuildHtmlBusinessQueryResults(
+        IReadOnlyList<AgentBusinessQueryResultSummaryDto> businessQueryResults)
+    {
+        if (businessQueryResults.Count == 0)
+        {
+            return "<p class=\"muted\">No BusinessDatabase query result.</p>";
+        }
+
+        var builder = new StringBuilder();
+        builder.AppendLine("<table><thead><tr><th>Data Source</th><th>Source Mode</th><th>Simulation</th><th>Source Label</th><th>Query Hash</th><th>Rows</th><th>Truncated</th><th>Artifact</th></tr></thead><tbody>");
+        foreach (var result in businessQueryResults)
+        {
+            builder.AppendLine(
+                $"<tr><td>{EscapeHtml(result.DataSourceName)}</td><td>{EscapeHtml(result.SourceMode)}</td><td>{EscapeHtml(FormatBool(result.IsSimulation))}</td><td>{EscapeHtml(result.SourceLabel)}</td><td>{EscapeHtml(result.QueryHash)}</td><td>{result.RowCount.ToString(CultureInfo.InvariantCulture)}</td><td>{EscapeHtml(FormatBool(result.IsTruncated))}</td><td>{EscapeHtml(result.ArtifactId?.ToString() ?? string.Empty)}</td></tr>");
+        }
+
+        builder.AppendLine("</tbody></table>");
+        return builder.ToString();
+    }
+
+    private static string BuildMarkdownCloudSandboxQueryResults(
+        IReadOnlyList<AgentCloudSandboxQueryResultSummaryDto> cloudSandboxQueryResults)
+    {
+        if (cloudSandboxQueryResults.Count == 0)
+        {
+            return "- No CloudReadonlySandbox query result.";
+        }
+
+        var builder = new StringBuilder();
+        builder.AppendLine("| Trial | Endpoint | Boundary | Source Mode | Sandbox | Source Label | Query Hash | Result Hash | Rows | Truncated | Approval |");
+        builder.AppendLine("| --- | --- | --- | --- | --- | --- | --- | --- | ---: | --- | --- |");
+        foreach (var result in cloudSandboxQueryResults)
+        {
+            builder.AppendLine(
+                $"| {EscapeMarkdownCell(result.TrialMode ?? string.Empty)} | {EscapeMarkdownCell(result.EndpointCode)} | {EscapeMarkdownCell(result.Boundary ?? string.Empty)} | {EscapeMarkdownCell(result.SourceMode)} | {EscapeMarkdownCell(FormatBool(result.IsSandbox))} | {EscapeMarkdownCell(result.SourceLabel)} | {EscapeMarkdownCell(result.QueryHash)} | {EscapeMarkdownCell(result.ResultHash)} | {result.RowCount.ToString(CultureInfo.InvariantCulture)} | {EscapeMarkdownCell(FormatBool(result.IsTruncated))} | {EscapeMarkdownCell(result.ApprovalStatus ?? string.Empty)} |");
+        }
+
+        return builder.ToString();
+    }
+
+    private static string BuildHtmlCloudSandboxQueryResults(
+        IReadOnlyList<AgentCloudSandboxQueryResultSummaryDto> cloudSandboxQueryResults)
+    {
+        if (cloudSandboxQueryResults.Count == 0)
+        {
+            return "<p class=\"muted\">No CloudReadonlySandbox query result.</p>";
+        }
+
+        var builder = new StringBuilder();
+        builder.AppendLine("<table><thead><tr><th>Trial</th><th>Endpoint</th><th>Boundary</th><th>Source Mode</th><th>Sandbox</th><th>Source Label</th><th>Query Hash</th><th>Result Hash</th><th>Rows</th><th>Truncated</th><th>Approval</th></tr></thead><tbody>");
+        foreach (var result in cloudSandboxQueryResults)
+        {
+            builder.AppendLine(
+                $"<tr><td>{EscapeHtml(result.TrialMode ?? string.Empty)}</td><td>{EscapeHtml(result.EndpointCode)}</td><td>{EscapeHtml(result.Boundary ?? string.Empty)}</td><td>{EscapeHtml(result.SourceMode)}</td><td>{EscapeHtml(FormatBool(result.IsSandbox))}</td><td>{EscapeHtml(result.SourceLabel)}</td><td>{EscapeHtml(result.QueryHash)}</td><td>{EscapeHtml(result.ResultHash)}</td><td>{result.RowCount.ToString(CultureInfo.InvariantCulture)}</td><td>{EscapeHtml(FormatBool(result.IsTruncated))}</td><td>{EscapeHtml(result.ApprovalStatus ?? string.Empty)}</td></tr>");
+        }
+
+        builder.AppendLine("</tbody></table>");
+        return builder.ToString();
+    }
+
     private static string BuildMarkdownTable(AgentReportTable table)
     {
         if (table.Columns.Count == 0)
@@ -443,7 +563,8 @@ internal static class AgentReportComposer
             return "sourceMode=Local; isSimulation=false; sourceLabel=Local workspace data";
         }
 
-        return $"sourceMode={sourceInfo.SourceMode ?? "Unknown"}; isSimulation={FormatBool(sourceInfo.IsSimulation)}; sourceLabel={sourceInfo.SourceLabel ?? string.Empty}; rowCount={sourceInfo.RowCount}; truncated={FormatBool(sourceInfo.IsTruncated)}";
+        var queryHash = string.IsNullOrWhiteSpace(sourceInfo.QueryHash) ? string.Empty : $"; queryHash={sourceInfo.QueryHash}";
+        return $"sourceMode={sourceInfo.SourceMode ?? "Unknown"}; isSimulation={FormatBool(sourceInfo.IsSimulation)}; sourceLabel={sourceInfo.SourceLabel ?? string.Empty}; rowCount={sourceInfo.RowCount}; truncated={FormatBool(sourceInfo.IsTruncated)}{queryHash}";
     }
 
     private static bool TryParseNumber(object? value, out double number)

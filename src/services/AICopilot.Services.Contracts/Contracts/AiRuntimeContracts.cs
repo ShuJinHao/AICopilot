@@ -95,3 +95,47 @@ public interface IModelProviderReliabilitySnapshotReader
 {
     ModelProviderReliabilityDto GetSnapshot();
 }
+
+public sealed record ModelEndpointStatsDto(
+    int InFlight,
+    int QueueLength,
+    long SuccessCount,
+    long FailureCount,
+    double AverageDurationMs,
+    double P95DurationMs,
+    long RateLimitCount,
+    long CircuitBreakerOpenCount,
+    long FallbackCount,
+    int StickyStreamingCount = 0,
+    string CircuitState = "Closed",
+    string? LastFailureReason = null);
+
+public sealed record ModelEndpointDto(
+    string EndpointId,
+    string Provider,
+    string BaseUrl,
+    int ConcurrencyLimit,
+    int QueueLimit,
+    int TimeoutMs,
+    int RpmLimit,
+    int TpmLimit,
+    int Weight,
+    int Priority,
+    bool IsHealthy,
+    bool IsCircuitOpen,
+    bool HasApiKey,
+    ModelEndpointStatsDto Stats);
+
+public sealed record ModelPoolDto(
+    string PoolName,
+    string Usage,
+    string Strategy,
+    IReadOnlyList<ModelEndpointDto> Endpoints);
+
+public sealed record ModelPoolSnapshotDto(
+    IReadOnlyList<ModelPoolDto> Pools);
+
+public interface IModelPoolSnapshotReader
+{
+    ModelPoolSnapshotDto GetSnapshot();
+}

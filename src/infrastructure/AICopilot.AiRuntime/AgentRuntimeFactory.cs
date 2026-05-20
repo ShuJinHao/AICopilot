@@ -1,3 +1,5 @@
+using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
+using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
 using Microsoft.Agents.AI;
@@ -5,6 +7,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using System.Diagnostics;
 
 namespace AICopilot.AiRuntime;
 
@@ -15,7 +18,8 @@ internal sealed class AgentRuntimeFactory(
     IModelFallbackPolicy fallbackPolicy,
     IModelCircuitBreaker circuitBreaker,
     IModelCostBudgetPolicy costBudgetPolicy,
-    ILogger<AgentRuntimeFactory> logger) : IAgentRuntimeFactory
+    ILogger<AgentRuntimeFactory> logger,
+    IModelEndpointPoolScheduler? endpointPoolScheduler = null) : IAgentRuntimeFactory
 {
     public ScopedRuntimeAgent Create(AgentRuntimeCreateRequest request)
     {
@@ -25,7 +29,11 @@ internal sealed class AgentRuntimeFactory(
             var context = BuildExecutionContext(request);
             costBudgetPolicy.EnsureWithinBudget(request, context);
             var providers = scope.ServiceProvider.GetServices<IChatClientProvider>().ToArray();
-            var requestedProvider = request.Model.ProtocolType;
+            var endpointSelection = TrySelectEndpoint(request, context);
+            var runtimeModel = endpointSelection is null
+                ? request.Model
+                : CreateEndpointModel(request.Model, endpointSelection);
+            var requestedProvider = runtimeModel.ProtocolType;
             var providerCandidates = new[] { requestedProvider }
                 .Concat(fallbackPolicy.GetFallbackProviders(request, context))
                 .Where(providerName => !string.IsNullOrWhiteSpace(providerName))
@@ -58,8 +66,15 @@ internal sealed class AgentRuntimeFactory(
 
                 try
                 {
+                    var stopwatch = Stopwatch.StartNew();
+                    if (endpointSelection is not null)
+                    {
+                        endpointPoolScheduler?.RecordStarted(endpointSelection.EndpointId);
+                        endpointPoolScheduler?.RecordStickyStreaming(endpointSelection.EndpointId);
+                    }
+
                     var chatClientBuilder = chatClientProvider
-                        .CreateClient(request.Model)
+                        .CreateClient(runtimeModel)
                         .AsBuilder()
                         .UseFunctionInvocation()
                         .UseOpenTelemetry(
@@ -74,11 +89,21 @@ internal sealed class AgentRuntimeFactory(
 
                     var agent = chatClientBuilder.BuildAIAgent(agentOptions, services: scope.ServiceProvider);
                     circuitBreaker.RecordSuccess(providerName);
+                    if (endpointSelection is not null)
+                    {
+                        endpointPoolScheduler?.RecordSucceeded(endpointSelection.EndpointId, stopwatch.Elapsed);
+                    }
+
                     return new ScopedRuntimeAgent(new MicrosoftAgentRuntimeChatAgent(agent), new AgentRuntimeHandle(agent, scope));
                 }
                 catch (Exception ex)
                 {
                     circuitBreaker.RecordFailure(providerName, ex);
+                    if (endpointSelection is not null)
+                    {
+                        endpointPoolScheduler?.RecordFailed(endpointSelection.EndpointId, TimeSpan.Zero, ex);
+                    }
+
                     if (context.IsHighRiskToolChain || string.Equals(providerName, providerCandidates.Last(), StringComparison.OrdinalIgnoreCase))
                     {
                         throw;
@@ -115,6 +140,62 @@ internal sealed class AgentRuntimeFactory(
             tools.Any(tool => tool.RequiresApproval || tool.RiskLevel == AiToolRiskLevel.RequiresApproval),
             tools.Any(tool => tool.CapabilityKind == AiToolCapabilityKind.SideEffecting),
             tools.Any(tool => string.Equals(tool.TargetName, DataAnalysisPluginNames.DataAnalysisPlugin, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private ModelEndpointSelection? TrySelectEndpoint(
+        AgentRuntimeCreateRequest request,
+        ModelProviderExecutionContext context)
+    {
+        if (endpointPoolScheduler is null)
+        {
+            return null;
+        }
+
+        var poolName = ResolvePoolName(request, context);
+        try
+        {
+            return endpointPoolScheduler.SelectEndpoint(poolName);
+        }
+        catch (InvalidOperationException ex)
+        {
+            logger.LogDebug(ex, "Model endpoint pool {PoolName} is not available; falling back to the language model configuration.", poolName);
+            return null;
+        }
+    }
+
+    private static string ResolvePoolName(
+        AgentRuntimeCreateRequest request,
+        ModelProviderExecutionContext context)
+    {
+        if (context.HasDataAnalysisSqlToolChain)
+        {
+            return "TextToSqlPool";
+        }
+
+        return request.Template.Scope switch
+        {
+            ConversationTemplateScope.AgentPlanner => "PlannerPool",
+            ConversationTemplateScope.RagAnswer => "AnswerPool",
+            ConversationTemplateScope.ToolCallPolicy => "PlannerPool",
+            _ when request.Model.SupportsUsage(LanguageModelUsage.Routing) &&
+                   !request.Model.SupportsUsage(LanguageModelUsage.Chat) => "RoutingPool",
+            _ => "AnswerPool"
+        };
+    }
+
+    private static LanguageModel CreateEndpointModel(
+        LanguageModel model,
+        ModelEndpointSelection selection)
+    {
+        return new LanguageModel(
+            model.Provider,
+            model.Name,
+            string.IsNullOrWhiteSpace(selection.BaseUrl) ? model.BaseUrl : selection.BaseUrl,
+            string.IsNullOrWhiteSpace(selection.ApiKey) ? model.ApiKey : selection.ApiKey,
+            model.Parameters,
+            string.IsNullOrWhiteSpace(selection.Provider) ? model.ProtocolType : selection.Provider,
+            model.Usage,
+            model.IsEnabled);
     }
 
     private sealed class AgentRuntimeHandle(ChatClientAgent agent, IServiceScope scope) : IAsyncDisposable
