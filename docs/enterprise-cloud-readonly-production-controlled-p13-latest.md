@@ -1,39 +1,44 @@
-﻿# AICopilot Enterprise CloudReadonly Production Pilot P12 Acceptance
+﻿# AICopilot Enterprise CloudReadonly Production Controlled Pilot P13 Acceptance
 
-- GeneratedAt: 2026-05-21 12:41:26
+- GeneratedAt: 2026-05-21 13:22:27
 - Repository: C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot
-- Boundary: AICopilot only; Cloud/Edge unchanged; production Pilot remains fixed-template, windowed, and approval-gated
-- Default State: CloudReadonlyProductionPilot.Enabled=false; query_cloud_data_readonly remains disabled, hidden, and non-executable
-- Build Output: C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12 for focused tests
+- Boundary: AICopilot only; Cloud/Edge unchanged; production controlled Pilot remains intent-mapped, windowed, approval-gated, and endpoint allowlisted
+- Default State: CloudReadonlyProductionControlledPilot.Enabled=false; FreeGoalEnabled=false; query_cloud_data_readonly remains disabled, hidden, and non-executable
+- Build Output: C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13 for focused tests
 
 ## Summary
 
-- Inherited P11 Acceptance Report Check: PASSED
-- Enterprise CloudReadonly Production Pilot P12 Scope Guard: PASSED
+- Inherited P12 Acceptance: PASSED
+- Enterprise CloudReadonly Production Controlled P13 Scope Guard: PASSED
 - Build HttpApi: PASSED
-- Run P12 Focused Backend Tests: PASSED
+- Run P13 Focused Backend Tests: PASSED
 - Run CloudReadonly Route Contract Tests: PASSED
 - Build Frontend: PASSED
-- Frontend Production Pilot Playwright Smoke: PASSED
+- Frontend Production Controlled Pilot Playwright Smoke: PASSED
 
-## P12 Production Pilot Evidence
+## P13 Production Controlled Pilot Evidence
 
-- Pilot Window: start/end, owner, approver policy, rollback policy, max time range, max rows, timeout, and endpoint allowlist are represented.
-- Gate: P11 RehearsalPassed, default production flags, protected ToolRegistry state, CloudAiRead configuration, and approved window state determine Ready/Blocked.
+- Controlled Intent: user goals are mapped to CloudProductionGoalIntent before any tool can run.
 - Allowed Endpoints: devices, capacity_summary, device_logs, pass_station_records only.
-- Refusals: Recipe, Recipe version, write path, unknown endpoint, out-of-window endpoint, missing P11 gate, expired/paused window, over maxRows, and over time range are blocked.
-- Tool Registry: query_cloud_data_readonly stays closed; query_cloud_production_pilot_readonly is disabled by default and only temporarily usable through the P12 Pilot Window gate.
-- Outputs: sourceMode=CloudReadonlyProductionPilot, sourceLabel=Cloud production readonly Pilot, boundary=ProductionPilot, pilotWindowId, endpointCode, query/result hash, row count, truncation, and approval status are required.
+- Gate: P12 Ready, P13 config, free-goal flag, default production flags, protected ToolRegistry state, CloudAiRead configuration, and Pilot Window intersection determine Ready/Blocked.
+- Refusals: Recipe, Recipe version, write path, unknown endpoint, SQL/payload semantics, out-of-window endpoint, over maxRows, and over time range are blocked.
+- Tool Registry: query_cloud_data_readonly stays closed; query_cloud_production_controlled_readonly is disabled by default and only temporarily usable through the P13 controlled Pilot gate.
+- Outputs: sourceMode=CloudReadonlyProductionControlledPilot, sourceLabel=Cloud production readonly Controlled Pilot, boundary=ProductionControlledPilot, pilotWindowId, intentId, endpointCode, query/result hash, row count, truncation, and approval status are required.
 
 ## Details
 
-### Inherited P11 Acceptance Report Check
+### Inherited P12 Acceptance
 
 ```text
-Using existing P11 acceptance report: .\docs\enterprise-cloud-readonly-pilot-readiness-p11-latest.md
+==> Inherited P11 Acceptance Report Check
+==> Enterprise CloudReadonly Production Pilot P12 Scope Guard
+==> Build HttpApi
+==> Run P12 Focused Backend Tests
+==> Run CloudReadonly Route Contract Tests
+Enterprise CloudReadonly Production Pilot P12 acceptance report written to: C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\enterprise-cloud-readonly-production-pilot-p12-inherited.md
 ```
 
-### Enterprise CloudReadonly Production Pilot P12 Scope Guard
+### Enterprise CloudReadonly Production Controlled P13 Scope Guard
 
 ```text
 Enterprise Data Governance scope guard passed. Checked 30 candidate file(s).
@@ -44,75 +49,75 @@ Enterprise Data Governance scope guard passed. Checked 30 candidate file(s).
 ```text
 正在确定要还原的项目…
   所有项目均是最新的，无法还原。
-  AICopilot.SharedKernel -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\httpapi\AICopilot.SharedKernel.dll
-  AICopilot.Core.AiGateway -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\httpapi\AICopilot.Core.AiGateway.dll
-  AICopilot.Core.DataAnalysis -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\httpapi\AICopilot.Core.DataAnalysis.dll
-  AICopilot.Core.McpServer -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\httpapi\AICopilot.Core.McpServer.dll
-  AICopilot.Core.Rag -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\httpapi\AICopilot.Core.Rag.dll
-  AICopilot.Visualization -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\httpapi\AICopilot.Visualization.dll
-  AICopilot.Services.Contracts -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\httpapi\AICopilot.Services.Contracts.dll
-  AICopilot.AiRuntime -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\httpapi\AICopilot.AiRuntime.dll
-  AICopilot.Dapper -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\httpapi\AICopilot.Dapper.dll
-  AICopilot.Embedding -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\httpapi\AICopilot.Embedding.dll
-  AICopilot.EntityFrameworkCore -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\httpapi\AICopilot.EntityFrameworkCore.dll
-  AICopilot.EventBus -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\httpapi\AICopilot.EventBus.dll
-  AICopilot.AgentPlugin -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\httpapi\AICopilot.AgentPlugin.dll
-  AICopilot.Infrastructure -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\httpapi\AICopilot.Infrastructure.dll
-  AICopilot.AgentPlugin.Runtime -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\httpapi\AICopilot.AgentPlugin.Runtime.dll
-  AICopilot.Services.CrossCutting -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\httpapi\AICopilot.Services.CrossCutting.dll
-  AICopilot.AiGatewayService -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\httpapi\AICopilot.AiGatewayService.dll
-  AICopilot.DataAnalysisService -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\httpapi\AICopilot.DataAnalysisService.dll
-  AICopilot.IdentityService -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\httpapi\AICopilot.IdentityService.dll
-  AICopilot.McpService -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\httpapi\AICopilot.McpService.dll
-  AICopilot.RagService -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\httpapi\AICopilot.RagService.dll
-  AICopilot.ServiceDefaults -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\httpapi\AICopilot.ServiceDefaults.dll
-  AICopilot.HttpApi -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\httpapi\AICopilot.HttpApi.dll
+  AICopilot.SharedKernel -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\httpapi\AICopilot.SharedKernel.dll
+  AICopilot.Core.AiGateway -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\httpapi\AICopilot.Core.AiGateway.dll
+  AICopilot.Core.DataAnalysis -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\httpapi\AICopilot.Core.DataAnalysis.dll
+  AICopilot.Core.McpServer -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\httpapi\AICopilot.Core.McpServer.dll
+  AICopilot.Core.Rag -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\httpapi\AICopilot.Core.Rag.dll
+  AICopilot.Visualization -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\httpapi\AICopilot.Visualization.dll
+  AICopilot.Services.Contracts -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\httpapi\AICopilot.Services.Contracts.dll
+  AICopilot.AiRuntime -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\httpapi\AICopilot.AiRuntime.dll
+  AICopilot.Dapper -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\httpapi\AICopilot.Dapper.dll
+  AICopilot.Embedding -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\httpapi\AICopilot.Embedding.dll
+  AICopilot.EntityFrameworkCore -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\httpapi\AICopilot.EntityFrameworkCore.dll
+  AICopilot.EventBus -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\httpapi\AICopilot.EventBus.dll
+  AICopilot.AgentPlugin -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\httpapi\AICopilot.AgentPlugin.dll
+  AICopilot.Infrastructure -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\httpapi\AICopilot.Infrastructure.dll
+  AICopilot.AgentPlugin.Runtime -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\httpapi\AICopilot.AgentPlugin.Runtime.dll
+  AICopilot.Services.CrossCutting -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\httpapi\AICopilot.Services.CrossCutting.dll
+  AICopilot.AiGatewayService -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\httpapi\AICopilot.AiGatewayService.dll
+  AICopilot.DataAnalysisService -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\httpapi\AICopilot.DataAnalysisService.dll
+  AICopilot.IdentityService -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\httpapi\AICopilot.IdentityService.dll
+  AICopilot.McpService -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\httpapi\AICopilot.McpService.dll
+  AICopilot.RagService -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\httpapi\AICopilot.RagService.dll
+  AICopilot.ServiceDefaults -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\httpapi\AICopilot.ServiceDefaults.dll
+  AICopilot.HttpApi -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\httpapi\AICopilot.HttpApi.dll
 
 已成功生成。
     0 个警告
     0 个错误
 
-已用时间 00:00:47.46
+已用时间 00:00:58.09
 ```
 
-### Run P12 Focused Backend Tests
+### Run P13 Focused Backend Tests
 
 ```text
 正在确定要还原的项目…
   所有项目均是最新的，无法还原。
-  AICopilot.SharedKernel -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\backendtests\AICopilot.SharedKernel.dll
-  AICopilot.Core.Rag -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\backendtests\AICopilot.Core.Rag.dll
-  AICopilot.Core.AiGateway -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\backendtests\AICopilot.Core.AiGateway.dll
-  AICopilot.Core.DataAnalysis -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\backendtests\AICopilot.Core.DataAnalysis.dll
-  AICopilot.Core.McpServer -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\backendtests\AICopilot.Core.McpServer.dll
-  AICopilot.Visualization -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\backendtests\AICopilot.Visualization.dll
-  AICopilot.Services.Contracts -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\backendtests\AICopilot.Services.Contracts.dll
-  AICopilot.EntityFrameworkCore -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\backendtests\AICopilot.EntityFrameworkCore.dll
-  AICopilot.AiRuntime -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\backendtests\AICopilot.AiRuntime.dll
-  AICopilot.Dapper -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\backendtests\AICopilot.Dapper.dll
-  AICopilot.Embedding -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\backendtests\AICopilot.Embedding.dll
-  AICopilot.EventBus -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\backendtests\AICopilot.EventBus.dll
-  AICopilot.AgentPlugin -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\backendtests\AICopilot.AgentPlugin.dll
-  AICopilot.Infrastructure -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\backendtests\AICopilot.Infrastructure.dll
-  AICopilot.AgentPlugin.Runtime -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\backendtests\AICopilot.AgentPlugin.Runtime.dll
-  AICopilot.Services.CrossCutting -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\backendtests\AICopilot.Services.CrossCutting.dll
-  AICopilot.AiGatewayService -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\backendtests\AICopilot.AiGatewayService.dll
-  AICopilot.DataAnalysisService -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\backendtests\AICopilot.DataAnalysisService.dll
-  AICopilot.IdentityService -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\backendtests\AICopilot.IdentityService.dll
-  AICopilot.RagService -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\backendtests\AICopilot.RagService.dll
-  AICopilot.ServiceDefaults -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\backendtests\AICopilot.ServiceDefaults.dll
-  AICopilot.DataWorker -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\backendtests\AICopilot.DataWorker.dll
-  AICopilot.McpService -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\backendtests\AICopilot.McpService.dll
-  AICopilot.HttpApi -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\backendtests\AICopilot.HttpApi.dll
-  AICopilot.MigrationWorkApp -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\backendtests\AICopilot.MigrationWorkApp.dll
-  AICopilot.RagWorker -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\backendtests\AICopilot.RagWorker.dll
-  AICopilot.AppHost -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\backendtests\AICopilot.AppHost.dll
-  AICopilot.Testing.McpServer -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\backendtests\AICopilot.Testing.McpServer.dll
-  AICopilot.BackendTests -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\backendtests\AICopilot.BackendTests.dll
-C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-pilot-p12\backendtests\AICopilot.BackendTests.dll (.NETCoreApp,Version=v10.0)的测试运行
+  AICopilot.SharedKernel -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.SharedKernel.dll
+  AICopilot.Core.Rag -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.Core.Rag.dll
+  AICopilot.Core.AiGateway -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.Core.AiGateway.dll
+  AICopilot.Core.DataAnalysis -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.Core.DataAnalysis.dll
+  AICopilot.Core.McpServer -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.Core.McpServer.dll
+  AICopilot.Visualization -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.Visualization.dll
+  AICopilot.Services.Contracts -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.Services.Contracts.dll
+  AICopilot.EntityFrameworkCore -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.EntityFrameworkCore.dll
+  AICopilot.AiRuntime -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.AiRuntime.dll
+  AICopilot.Dapper -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.Dapper.dll
+  AICopilot.Embedding -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.Embedding.dll
+  AICopilot.EventBus -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.EventBus.dll
+  AICopilot.AgentPlugin -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.AgentPlugin.dll
+  AICopilot.Infrastructure -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.Infrastructure.dll
+  AICopilot.AgentPlugin.Runtime -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.AgentPlugin.Runtime.dll
+  AICopilot.Services.CrossCutting -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.Services.CrossCutting.dll
+  AICopilot.AiGatewayService -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.AiGatewayService.dll
+  AICopilot.DataAnalysisService -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.DataAnalysisService.dll
+  AICopilot.IdentityService -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.IdentityService.dll
+  AICopilot.RagService -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.RagService.dll
+  AICopilot.ServiceDefaults -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.ServiceDefaults.dll
+  AICopilot.DataWorker -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.DataWorker.dll
+  AICopilot.McpService -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.McpService.dll
+  AICopilot.HttpApi -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.HttpApi.dll
+  AICopilot.MigrationWorkApp -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.MigrationWorkApp.dll
+  AICopilot.RagWorker -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.RagWorker.dll
+  AICopilot.AppHost -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.AppHost.dll
+  AICopilot.Testing.McpServer -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.Testing.McpServer.dll
+  AICopilot.BackendTests -> C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.BackendTests.dll
+C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.BackendTests.dll (.NETCoreApp,Version=v10.0)的测试运行
 总共 1 个测试文件与指定模式相匹配。
 
-已通过! - 失败:     0，通过:     4，已跳过:     0，总计:     4，持续时间: 106 ms - AICopilot.BackendTests.dll (net10.0)
+已通过! - 失败:     0，通过:    14，已跳过:     0，总计:    14，持续时间: 141 ms - AICopilot.BackendTests.dll (net10.0)
 ```
 
 ### Run CloudReadonly Route Contract Tests
@@ -152,7 +157,7 @@ C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production
 C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\tests\AICopilot.BackendTests\bin\Debug\net10.0\AICopilot.BackendTests.dll (.NETCoreApp,Version=v10.0)的测试运行
 总共 1 个测试文件与指定模式相匹配。
 
-已通过! - 失败:     0，通过:    20，已跳过:     0，总计:    20，持续时间: 2 s - AICopilot.BackendTests.dll (net10.0)
+已通过! - 失败:     0，通过:    20，已跳过:     0，总计:    20，持续时间: 5 s - AICopilot.BackendTests.dll (net10.0)
 ```
 
 ### Build Frontend
@@ -225,28 +230,28 @@ computing gzip size...
 [2mdist/[22m[36massets/ChatView-CN1-fFLi.js                                           [39m[1m[2m165.01 kB[22m[1m[22m[2m │ gzip:  64.88 kB[22m
 [2mdist/[22m[36massets/index-CoYFDwfy.js                                              [39m[1m[2m222.93 kB[22m[1m[22m[2m │ gzip:  79.15 kB[22m
 [2mdist/[22m[36massets/ChartWidget-DnUH7rxV.js                                        [39m[1m[2m547.15 kB[22m[1m[22m[2m │ gzip: 184.75 kB[22m
-[32m✓ built in 9.77s[39m
+[32m✓ built in 12.77s[39m
 ```
 
-### Frontend Production Pilot Playwright Smoke
+### Frontend Production Controlled Pilot Playwright Smoke
 
 ```text
 > aicopilot-web@0.0.0 test:smoke
-> playwright test --config=playwright.smoke.config.ts --grep P12 production readonly pilot
+> playwright test --config=playwright.smoke.config.ts --grep P13 production controlled pilot
 
 
 Running 2 tests using 2 workers
 
-  -  1 [mobile] › tests\smoke\acceptance.spec.ts:127:1 › agent trial panel shows P12 production readonly pilot gate
-  ok 2 [desktop] › tests\smoke\acceptance.spec.ts:127:1 › agent trial panel shows P12 production readonly pilot gate (2.4s)
+  -  2 [mobile] › tests\smoke\acceptance.spec.ts:147:1 › agent trial panel shows P13 production controlled pilot intent gate
+  ok 1 [desktop] › tests\smoke\acceptance.spec.ts:147:1 › agent trial panel shows P13 production controlled pilot intent gate (3.7s)
 
   1 skipped
-  1 passed (6.3s)
+  1 passed (7.9s)
 ```
 
 ## Remaining Risk
 
-- P12 does not open free-goal production queries, Recipe/version reads, write paths, or Cloud/Edge linkage.
+- P13 does not open arbitrary production queries, Recipe/version reads, write paths, Cloud writes, or Cloud/Edge linkage.
 - Real endpoint/token smoke remains optional and must be run only inside an explicit Pilot Window with approvals.
-- Production Pilot status is an initial fixed-template gate, not a broad production rollout.
+- P13 is a controlled Pilot, not a broad production rollout.
 

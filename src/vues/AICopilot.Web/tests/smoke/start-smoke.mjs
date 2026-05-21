@@ -430,6 +430,96 @@ const productionPilotRun = {
   }
 }
 
+const productionControlledIntent = {
+  intentId: 'pcg-smoke-devices',
+  goalHash: 'sha256:p13-goal-devices',
+  endpointCodes: ['devices'],
+  timeRange: { from: now, to: now },
+  maxRows: 20,
+  artifactTypes: ['Markdown', 'Html'],
+  analysisType: 'DeviceList',
+  warnings: [],
+  rejectedReasons: [],
+  requiresToolApproval: true,
+  requiresFinalApproval: true
+}
+
+const productionControlledStatus = {
+  status: 'Ready',
+  enabled: true,
+  p12GateStatus: 'Ready',
+  pilotWindowId: productionPilotWindow.windowId,
+  windowStatus: productionPilotWindow.status,
+  freeGoalEnabled: true,
+  allowedEndpointCodes: productionPilotWindow.allowedEndpointCodes,
+  toolVisible: true,
+  toolExecutable: true,
+  lastRunAt: now,
+  blockers: [],
+  warnings: [],
+  boundary: 'ProductionControlledPilot'
+}
+
+const productionControlledTask = {
+  ...agentTask,
+  id: 'task-p13-controlled',
+  taskCode: 'AGT-P13',
+  title: 'P13 controlled production goal',
+  taskType: 'CloudDataReport',
+  status: 'WaitingApproval',
+  planJson: JSON.stringify({
+    plannerMode: 'Static',
+    queryMode: 'CloudReadonlyProductionControlledPilot',
+    isCloudProductionControlledPilotTrial: true,
+    cloudProductionGoalIntent: productionControlledIntent,
+    plannerSafetySummary: {
+      planSource: 'CloudProductionControlledGoal',
+      plannerMode: 'Static',
+      plannerModelSummary: null,
+      plannerToolCatalogVersion: 8,
+      availableToolCount: 4,
+      isSimulationOnly: false,
+      requiresDataApproval: true,
+      toolRiskSummary: { High: 1 },
+      mockMcpOnly: false
+    },
+    approvalCheckpoints: ['query_cloud_production_controlled_readonly', 'finalize_artifacts'],
+    toolApprovalCheckpoints: ['query_cloud_production_controlled_readonly', 'finalize_artifacts'],
+    forcedStepCodes: ['query_cloud_production_controlled_readonly', 'finalize_artifacts'],
+    artifactTypes: ['Markdown', 'Html']
+  })
+}
+
+const productionControlledPlan = {
+  task: productionControlledTask,
+  intent: productionControlledIntent
+}
+
+const productionControlledRun = {
+  intentId: productionControlledIntent.intentId,
+  analysisType: productionControlledIntent.analysisType,
+  status: 'Completed',
+  artifactTypes: ['Markdown', 'Html'],
+  boundary: 'ProductionControlledPilot',
+  queryResult: {
+    endpointCode: 'devices',
+    sourceType: 'CloudReadonly',
+    sourceMode: 'CloudReadonlyProductionControlledPilot',
+    isProductionData: true,
+    isSandbox: false,
+    isSimulation: false,
+    sourceLabel: 'Cloud 生产只读 Controlled Pilot',
+    boundary: 'ProductionControlledPilot',
+    pilotWindowId: productionPilotWindow.windowId,
+    intentId: productionControlledIntent.intentId,
+    queryHash: 'sha256:p13-query-devices',
+    resultHash: 'sha256:p13-result-devices',
+    rowCount: 2,
+    isTruncated: false,
+    approvalStatus: 'ToolApprovalRequired'
+  }
+}
+
 const samples = {
   model: {
     id: 'lm1',
@@ -820,6 +910,9 @@ const api = createServer((request, response) => {
     '/api/aigateway/cloud-readonly/readiness/production-pilot/window/status': productionPilotWindow,
     '/api/aigateway/cloud-readonly/readiness/production-pilot/gate': productionPilotStatus,
     '/api/aigateway/cloud-readonly/readiness/production-pilot/run': productionPilotRun,
+    '/api/aigateway/cloud-readonly/readiness/production-controlled-pilot': productionControlledStatus,
+    '/api/aigateway/cloud-readonly/readiness/production-controlled-pilot/run': productionControlledRun,
+    '/api/aigateway/agent/cloud-production-controlled-pilot/plan': productionControlledPlan,
     '/api/aigateway/agent/run-queue/summary': {
       queuedCount: 1,
       leasedCount: 0,

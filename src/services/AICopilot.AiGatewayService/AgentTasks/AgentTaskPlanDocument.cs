@@ -31,6 +31,8 @@ internal sealed record AgentTaskPlanDocument(
     [property: JsonPropertyName("isSimulationTrial")] bool IsSimulationTrial = false,
     [property: JsonPropertyName("isCloudSandboxControlledTrial")] bool IsCloudSandboxControlledTrial = false,
     [property: JsonPropertyName("cloudSandboxGoalIntent")] CloudSandboxGoalIntentDto? CloudSandboxGoalIntent = null,
+    [property: JsonPropertyName("isCloudProductionControlledPilotTrial")] bool IsCloudProductionControlledPilotTrial = false,
+    [property: JsonPropertyName("cloudProductionGoalIntent")] CloudProductionGoalIntentDto? CloudProductionGoalIntent = null,
     [property: JsonPropertyName("plannerSafetySummary")] AgentTaskPlanSafetySummaryDocument? PlannerSafetySummary = null,
     [property: JsonPropertyName("forcedStepCodes")] IReadOnlyCollection<string>? ForcedStepCodes = null,
     [property: JsonPropertyName("approvalCheckpoints")] IReadOnlyCollection<string>? ApprovalCheckpoints = null,

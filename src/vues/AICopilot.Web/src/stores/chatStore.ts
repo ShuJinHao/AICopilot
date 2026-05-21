@@ -21,6 +21,9 @@ import type {
   CloudReadonlyPilotConfigPackage,
   CloudReadonlyPilotContractRehearsal,
   CloudReadonlyPilotReadinessStatus,
+  CloudReadonlyProductionControlledPilotResult,
+  CloudReadonlyProductionControlledPilotStatus,
+  CloudReadonlyProductionControlledPlan,
   CloudReadonlyProductionPilotScenarioResult,
   CloudReadonlyProductionPilotStatus,
   CloudReadonlyProductionPilotWindow,
@@ -76,6 +79,9 @@ export const useChatStore = defineStore('chat', () => {
   const currentCloudReadonlyProductionPilotStatus = ref<CloudReadonlyProductionPilotStatus | null>(null)
   const currentCloudReadonlyProductionPilotWindow = ref<CloudReadonlyProductionPilotWindow | null>(null)
   const currentCloudReadonlyProductionPilotRun = ref<CloudReadonlyProductionPilotScenarioResult | null>(null)
+  const currentCloudReadonlyProductionControlledStatus = ref<CloudReadonlyProductionControlledPilotStatus | null>(null)
+  const currentCloudReadonlyProductionControlledPlan = ref<CloudReadonlyProductionControlledPlan | null>(null)
+  const currentCloudReadonlyProductionControlledRun = ref<CloudReadonlyProductionControlledPilotResult | null>(null)
   const chartPreview = ref<AgentChartPreview | null>(null)
   const isAgentBusy = ref(false)
   const isLoadingAgentTrialScenarios = ref(false)
@@ -510,6 +516,73 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  async function loadCloudReadonlyProductionControlledPilotStatus() {
+    try {
+      currentCloudReadonlyProductionControlledStatus.value =
+        await chatService.getCloudReadonlyProductionControlledPilotStatus()
+      return currentCloudReadonlyProductionControlledStatus.value
+    } catch {
+      currentCloudReadonlyProductionControlledStatus.value = null
+      return null
+    }
+  }
+
+  async function createCloudReadonlyProductionControlledPlan(goal: string) {
+    if (isAgentBusy.value || isLoadingTrialOperations.value) {
+      return null
+    }
+
+    const sessionId = currentSessionId.value
+    if (!sessionId) {
+      agentErrorMessage.value = '璇峰厛鍒涘缓鎴栭€夋嫨浼氳瘽'
+      return null
+    }
+
+    isAgentBusy.value = true
+    agentErrorMessage.value = null
+    try {
+      currentCloudReadonlyProductionControlledPlan.value =
+        await chatService.createCloudReadonlyProductionControlledPlan({
+          sessionId,
+          goal,
+          artifactTypes: ['Markdown', 'Html'],
+          maxRows: 20,
+          plannerMode: 'StaticOnly'
+        })
+      agentTasks.value = [currentCloudReadonlyProductionControlledPlan.value.task, ...agentTasks.value.filter((item) => item.id !== currentCloudReadonlyProductionControlledPlan.value?.task.id)]
+      await loadCloudReadonlyProductionControlledPilotStatus()
+      return currentCloudReadonlyProductionControlledPlan.value
+    } catch (error) {
+      agentErrorMessage.value = toFriendlyMessage(error)
+      return null
+    } finally {
+      isAgentBusy.value = false
+    }
+  }
+
+  async function runCloudReadonlyProductionControlledPilot() {
+    const intentId =
+      currentCloudReadonlyProductionControlledPlan.value?.intent.intentId ??
+      currentCloudReadonlyProductionControlledRun.value?.intentId
+    if (!intentId || isLoadingTrialOperations.value) {
+      return null
+    }
+
+    isLoadingTrialOperations.value = true
+    agentErrorMessage.value = null
+    try {
+      currentCloudReadonlyProductionControlledRun.value =
+        await chatService.runCloudReadonlyProductionControlledPilot(intentId)
+      await loadCloudReadonlyProductionControlledPilotStatus()
+      return currentCloudReadonlyProductionControlledRun.value
+    } catch (error) {
+      agentErrorMessage.value = toFriendlyMessage(error)
+      return null
+    } finally {
+      isLoadingTrialOperations.value = false
+    }
+  }
+
   async function refreshWorkspace(task: AgentTask) {
     if (!task.workspaceCode) {
       currentWorkspace.value = null
@@ -827,7 +900,8 @@ export const useChatStore = defineStore('chat', () => {
       loadAgentTrialScenarios(),
       loadTrialCampaigns(),
       loadCloudReadonlyPilotReadiness(),
-      loadCloudReadonlyProductionPilotStatus()
+      loadCloudReadonlyProductionPilotStatus(),
+      loadCloudReadonlyProductionControlledPilotStatus()
     ])
 
     if (sessionStore.sessions.length === 0) {
@@ -1094,6 +1168,9 @@ export const useChatStore = defineStore('chat', () => {
     currentCloudReadonlyProductionPilotStatus.value = null
     currentCloudReadonlyProductionPilotWindow.value = null
     currentCloudReadonlyProductionPilotRun.value = null
+    currentCloudReadonlyProductionControlledStatus.value = null
+    currentCloudReadonlyProductionControlledPlan.value = null
+    currentCloudReadonlyProductionControlledRun.value = null
     chartPreview.value = null
     agentErrorMessage.value = null
     isAgentBusy.value = false
@@ -1136,6 +1213,9 @@ export const useChatStore = defineStore('chat', () => {
     currentCloudReadonlyProductionPilotStatus,
     currentCloudReadonlyProductionPilotWindow,
     currentCloudReadonlyProductionPilotRun,
+    currentCloudReadonlyProductionControlledStatus,
+    currentCloudReadonlyProductionControlledPlan,
+    currentCloudReadonlyProductionControlledRun,
     chartPreview,
     isAgentBusy,
     agentErrorMessage,
@@ -1166,6 +1246,9 @@ export const useChatStore = defineStore('chat', () => {
     approveCloudReadonlyProductionPilotWindow,
     runCloudReadonlyProductionPilotGate,
     runCloudReadonlyProductionPilotScenario,
+    loadCloudReadonlyProductionControlledPilotStatus,
+    createCloudReadonlyProductionControlledPlan,
+    runCloudReadonlyProductionControlledPilot,
     createAgentTaskFromTrialScenario,
     createCloudSandboxControlledPlan,
     runAgentTask,

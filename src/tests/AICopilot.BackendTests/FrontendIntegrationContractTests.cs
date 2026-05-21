@@ -31,6 +31,7 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
         AssertPath(document, "/api/aigateway/agent/trial-scenarios/create-task", "post");
         AssertPath(document, "/api/aigateway/agent/task/plan", "post");
         AssertPath(document, "/api/aigateway/agent/cloud-sandbox-controlled-trial/plan", "post");
+        AssertPath(document, "/api/aigateway/agent/cloud-production-controlled-pilot/plan", "post");
         AssertPath(document, "/api/aigateway/agent/task/run", "post");
         AssertPath(document, "/api/aigateway/agent/task/retry", "post");
         AssertPath(document, "/api/aigateway/agent/task/cancel", "post");
@@ -85,6 +86,7 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
     [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/sandbox-controlled-trial")]
     [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/pilot-readiness")]
     [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/production-pilot")]
+    [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/production-controlled-pilot")]
     [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/sandbox-agent-trial/run")]
     [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/pilot-readiness/config-package")]
     [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/pilot-readiness/gate")]
@@ -94,6 +96,7 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
     [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-pilot/window/status")]
     [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-pilot/gate")]
     [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-pilot/run")]
+    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-controlled-pilot/run")]
     [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/run")]
     public async Task CloudReadonlyReadinessRoutes_ShouldBeRoutable(string method, string path)
     {

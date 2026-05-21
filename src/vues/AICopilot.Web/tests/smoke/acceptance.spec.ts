@@ -144,6 +144,32 @@ test('agent trial panel shows P12 production readonly pilot gate', async ({ page
   await expectNoHorizontalOverflow(page)
 })
 
+test('agent trial panel shows P13 production controlled pilot intent gate', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'desktop workbench keeps the trial panel visible')
+
+  await expectProtectedShell(page, '/chat')
+
+  await page.getByTestId('agent-tab-trial').click()
+  const panel = page.getByTestId('p13-production-controlled-panel')
+  await expect(panel).toBeVisible()
+  await expect(page.getByTestId('p13-controlled-marker')).toContainText('CloudReadonlyProductionControlledPilot')
+  await expect(page.getByTestId('p13-boundary-marker')).toContainText('ProductionControlledPilot')
+  await expect(page.getByTestId('p13-allowlist')).toContainText('devices')
+
+  await panel.locator('textarea').fill('分析最近一天设备清单')
+  await panel.getByRole('button', { name: /Intent \+ Plan/ }).click()
+  await page.getByTestId('agent-tab-trial').click()
+  await expect(page.getByTestId('p13-production-controlled-intent')).toContainText('pcg-smoke-devices')
+  await expect(page.getByTestId('p13-production-controlled-intent')).toContainText('DeviceList')
+
+  await page.getByTestId('p13-production-controlled-panel').getByRole('button', { name: /Direct smoke/ }).click()
+  const run = page.getByTestId('p13-production-controlled-run')
+  await expect(run).toBeVisible()
+  await expect(run).toContainText('CloudReadonlyProductionControlledPilot')
+  await expect(run).toContainText('ProductionControlledPilot')
+  await expectNoHorizontalOverflow(page)
+})
+
 test('chat stream renders widgets and approval card', async ({ page, isMobile }) => {
   test.skip(isMobile, 'desktop stream rendering covers widgets and approval card; mobile layout is covered separately')
 

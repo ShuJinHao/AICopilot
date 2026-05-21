@@ -32,6 +32,7 @@ const uiLayoutStore = useUiLayoutStore()
 const inputValue = ref('')
 const agentGoal = ref('')
 const cloudSandboxControlledGoal = ref('')
+const cloudProductionControlledGoal = ref('')
 const selectedTrialScenarioId = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
 const scrollContainer = ref<HTMLElement | null>(null)
@@ -64,6 +65,19 @@ type AgentPlanPreview = {
     requiresToolApproval?: boolean
     requiresFinalApproval?: boolean
     boundary?: string
+    timeRange?: {
+      from?: string | null
+      to?: string | null
+    }
+  } | null
+  isCloudProductionControlledPilotTrial?: boolean
+  cloudProductionGoalIntent?: {
+    intentId?: string
+    endpointCodes?: string[]
+    maxRows?: number
+    analysisType?: string
+    requiresToolApproval?: boolean
+    requiresFinalApproval?: boolean
     timeRange?: {
       from?: string | null
       to?: string | null
@@ -173,6 +187,15 @@ const pilotContractRehearsal = computed(() => store.currentPilotContractRehearsa
 const cloudReadonlyProductionPilotStatus = computed(() => store.currentCloudReadonlyProductionPilotStatus)
 const cloudReadonlyProductionPilotWindow = computed(() => store.currentCloudReadonlyProductionPilotWindow)
 const cloudReadonlyProductionPilotRun = computed(() => store.currentCloudReadonlyProductionPilotRun)
+const cloudReadonlyProductionControlledStatus = computed(() => store.currentCloudReadonlyProductionControlledStatus)
+const cloudReadonlyProductionControlledPlan = computed(() => store.currentCloudReadonlyProductionControlledPlan)
+const cloudReadonlyProductionControlledRun = computed(() => store.currentCloudReadonlyProductionControlledRun)
+const cloudProductionControlledIntent = computed(
+  () =>
+    cloudReadonlyProductionControlledPlan.value?.intent ??
+    latestPlan.value?.cloudProductionGoalIntent ??
+    null
+)
 
 function parseAgentPlan(planJson?: string | null): AgentPlanPreview | null {
   if (!planJson) return null
@@ -332,6 +355,22 @@ async function runCloudReadonlyProductionPilotGate() {
 
 async function runCloudReadonlyProductionPilotScenario() {
   await store.runCloudReadonlyProductionPilotScenario()
+  uiLayoutStore.suggestAgentWorkbenchTab('trial')
+}
+
+async function createCloudReadonlyProductionControlledPlan() {
+  const goal = cloudProductionControlledGoal.value.trim() || agentGoal.value.trim() || inputValue.value.trim()
+  if (!goal || store.isAgentBusy) return
+  cloudProductionControlledGoal.value = goal
+  const result = await store.createCloudReadonlyProductionControlledPlan(goal)
+  if (result) {
+    agentGoal.value = goal
+    uiLayoutStore.suggestAgentWorkbenchTab('approvals')
+  }
+}
+
+async function runCloudReadonlyProductionControlledPilot() {
+  await store.runCloudReadonlyProductionControlledPilot()
   uiLayoutStore.suggestAgentWorkbenchTab('trial')
 }
 
@@ -1192,6 +1231,90 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
             </div>
             <div v-if="cloudReadonlyProductionPilotStatus?.blockers.length" class="trial-check-list">
               <div v-for="blocker in cloudReadonlyProductionPilotStatus.blockers" :key="blocker" class="trial-check-row">
+                <div>
+                  <strong>Blocked</strong>
+                  <span>{{ blocker }}</span>
+                </div>
+                <AiTag tone="danger">Blocked</AiTag>
+              </div>
+            </div>
+          </div>
+
+          <div class="trial-ops-card" data-testid="p13-production-controlled-panel">
+            <div class="section-title">
+              <strong>P13 Controlled Production Pilot</strong>
+              <AiTag :tone="cloudReadonlyProductionControlledStatus?.status === 'Ready' ? 'success' : cloudReadonlyProductionControlledStatus?.status === 'Blocked' ? 'danger' : 'warning'">
+                {{ cloudReadonlyProductionControlledStatus?.status || 'Disabled' }}
+              </AiTag>
+            </div>
+            <div class="trial-source-line">
+              <span data-testid="p13-controlled-marker">CloudReadonlyProductionControlledPilot</span>
+              <span data-testid="p13-boundary-marker">ProductionControlledPilot</span>
+              <span>query_cloud_data_readonly closed</span>
+            </div>
+            <div class="trial-metric-grid">
+              <div>
+                <span>P12 gate</span>
+                <strong>{{ cloudReadonlyProductionControlledStatus?.p12GateStatus || 'Required' }}</strong>
+              </div>
+              <div>
+                <span>free goal</span>
+                <strong>{{ cloudReadonlyProductionControlledStatus?.freeGoalEnabled ? 'Enabled' : 'Closed' }}</strong>
+              </div>
+              <div>
+                <span>tool</span>
+                <strong>{{ cloudReadonlyProductionControlledStatus?.toolExecutable ? 'Executable' : 'Closed' }}</strong>
+              </div>
+            </div>
+            <div class="trial-source-line" data-testid="p13-allowlist">
+              <span>{{ cloudReadonlyProductionControlledStatus?.allowedEndpointCodes?.join(' / ') || 'devices / capacity_summary / device_logs / pass_station_records' }}</span>
+            </div>
+            <textarea
+              v-model="cloudProductionControlledGoal"
+              class="agent-goal compact"
+              rows="3"
+              placeholder="输入生产只读受控自由目标，例如：分析最近一天设备异常"
+            />
+            <div class="two-actions">
+              <button
+                type="button"
+                :disabled="store.isAgentBusy || !(cloudProductionControlledGoal.trim() || agentGoal.trim() || inputValue.trim())"
+                @click="createCloudReadonlyProductionControlledPlan"
+              >
+                <ShieldCheck :size="16" />
+                Intent + Plan
+              </button>
+              <button
+                type="button"
+                :disabled="!cloudProductionControlledIntent || store.isLoadingTrialOperations"
+                @click="runCloudReadonlyProductionControlledPilot"
+              >
+                <RefreshCw :size="16" />
+                Direct smoke
+              </button>
+            </div>
+            <div v-if="cloudProductionControlledIntent" class="trial-check-list" data-testid="p13-production-controlled-intent">
+              <div class="trial-check-row">
+                <div>
+                  <strong>{{ cloudProductionControlledIntent.analysisType }}</strong>
+                  <span>{{ cloudProductionControlledIntent.endpointCodes?.join(' / ') }} · maxRows {{ cloudProductionControlledIntent.maxRows }} · {{ cloudProductionControlledIntent.intentId }}</span>
+                  <span>ToolApproval {{ cloudProductionControlledIntent.requiresToolApproval ? 'required' : 'not-required' }} · FinalApproval {{ cloudProductionControlledIntent.requiresFinalApproval ? 'required' : 'not-required' }}</span>
+                </div>
+                <AiTag tone="warning">Intent</AiTag>
+              </div>
+            </div>
+            <div v-if="cloudReadonlyProductionControlledRun" class="trial-check-list" data-testid="p13-production-controlled-run">
+              <div class="trial-check-row">
+                <div>
+                  <strong>{{ cloudReadonlyProductionControlledRun.analysisType }}</strong>
+                  <span>{{ cloudReadonlyProductionControlledRun.queryResult.endpointCode }} · {{ cloudReadonlyProductionControlledRun.queryResult.rowCount }} rows · {{ cloudReadonlyProductionControlledRun.queryResult.resultHash }}</span>
+                  <span>{{ cloudReadonlyProductionControlledRun.queryResult.sourceMode }} · {{ cloudReadonlyProductionControlledRun.queryResult.boundary }}</span>
+                </div>
+                <AiTag tone="success">{{ cloudReadonlyProductionControlledRun.status }}</AiTag>
+              </div>
+            </div>
+            <div v-if="cloudReadonlyProductionControlledStatus?.blockers.length" class="trial-check-list">
+              <div v-for="blocker in cloudReadonlyProductionControlledStatus.blockers" :key="blocker" class="trial-check-row">
                 <div>
                   <strong>Blocked</strong>
                   <span>{{ blocker }}</span>

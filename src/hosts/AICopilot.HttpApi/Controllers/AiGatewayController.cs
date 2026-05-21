@@ -404,6 +404,13 @@ public class AiGatewayController(ISender sender) : ApiControllerBase(sender)
         return ReturnResult(await Sender.Send(command));
     }
 
+    [HttpPost("agent/cloud-production-controlled-pilot/plan")]
+    public async Task<IActionResult> CreateCloudReadonlyProductionControlledPlan(
+        CreateCloudReadonlyProductionControlledPlanCommand command)
+    {
+        return ReturnResult(await Sender.Send(command));
+    }
+
     [HttpPost("agent/task/approve-plan")]
     public async Task<IActionResult> ApproveAgentTaskPlan(ApproveAgentTaskPlanCommand command)
     {

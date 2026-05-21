@@ -60,6 +60,7 @@ internal sealed class AgentTaskRuntime(
     CloudReadonlySandboxAgentTrialService? cloudSandboxAgentTrialService = null,
     CloudReadonlySandboxControlledTrialService? cloudSandboxControlledTrialService = null,
     CloudReadonlyProductionPilotService? cloudReadonlyProductionPilotService = null,
+    CloudReadonlyProductionControlledPilotService? cloudReadonlyProductionControlledPilotService = null,
     CloudReadonlyPilotReadinessService? cloudReadonlyPilotReadinessService = null,
     IReadRepository<ToolRegistration>? toolReadRepository = null)
     : IAgentTaskRuntime
@@ -119,11 +120,15 @@ internal sealed class AgentTaskRuntime(
             var allowProductionPilotTool =
                 plan.IsCloudProductionPilotTrial &&
                 string.Equals(step.ToolCode, CloudReadonlyProductionPilotMarkers.ToolCode, StringComparison.OrdinalIgnoreCase);
+            var allowProductionControlledPilotTool =
+                plan.IsCloudProductionControlledPilotTrial &&
+                string.Equals(step.ToolCode, CloudReadonlyProductionControlledPilotMarkers.ToolCode, StringComparison.OrdinalIgnoreCase);
             var toolDecision = await toolRegistryGuard.ValidateAsync(
                 step.ToolCode,
                 task.UserId,
                 cancellationToken,
-                allowProtectedProductionPilotTool: allowProductionPilotTool);
+                allowProtectedProductionPilotTool: allowProductionPilotTool,
+                allowProtectedProductionControlledPilotTool: allowProductionControlledPilotTool);
             if (!toolDecision.IsAllowed)
             {
                 return await RejectStepAsync(task, workspace, step, attempt, toolDecision.Problem!, cancellationToken);
@@ -442,6 +447,7 @@ internal sealed class AgentTaskRuntime(
             "query_cloud_data_readonly" => await QueryCloudReadonlyAsync(plan, state, cancellationToken),
             "query_cloud_sandbox_readonly" => await QueryCloudReadonlySandboxAsync(plan, state, step, cancellationToken),
             "query_cloud_production_pilot_readonly" => await QueryCloudReadonlyProductionPilotAsync(plan, state, step, cancellationToken),
+            "query_cloud_production_controlled_readonly" => await QueryCloudReadonlyProductionControlledPilotAsync(plan, state, step, cancellationToken),
             "query_business_database_readonly" => await QueryBusinessDatabaseReadonlyP1Async(plan, state, cancellationToken),
             "summarize_business_query_result" => SummarizeBusinessQueryResult(state),
             "generate_business_chart" => await GenerateChartDataAsync(workspace, step, state, cancellationToken),
@@ -911,6 +917,106 @@ internal sealed class AgentTaskRuntime(
             trialMode = "ProductionPilotFixedScenario",
             scenarioId = result.Value.ScenarioId,
             scenarioTitle = result.Value.ScenarioTitle,
+            sourceType = queryResult.SourceType,
+            sourceMode = queryResult.SourceMode,
+            isProductionData = queryResult.IsProductionData,
+            isSandbox = queryResult.IsSandbox,
+            isSimulation = queryResult.IsSimulation,
+            sourceLabel = queryResult.SourceLabel,
+            boundary = queryResult.Boundary,
+            pilotWindowId = queryResult.PilotWindowId,
+            endpointCode = queryResult.EndpointCode,
+            queryHash = queryResult.QueryHash,
+            resultHash = queryResult.ResultHash,
+            rowCount = queryResult.RowCount,
+            isTruncated = queryResult.IsTruncated,
+            approvalStatus = queryResult.ApprovalStatus,
+            rows
+        };
+    }
+
+    private async Task<object> QueryCloudReadonlyProductionControlledPilotAsync(
+        AgentTaskPlanDocument plan,
+        AgentTaskRunState state,
+        AgentStep step,
+        CancellationToken cancellationToken)
+    {
+        if (cloudReadonlyProductionControlledPilotService is null ||
+            cloudReadonlyProductionPilotService is null ||
+            cloudReadonlyPilotReadinessService is null ||
+            toolReadRepository is null)
+        {
+            throw new InvalidOperationException("CloudReadonlyProductionControlledPilot service is not configured.");
+        }
+
+        if (!plan.IsCloudProductionControlledPilotTrial)
+        {
+            throw new InvalidOperationException("CloudReadonlyProductionControlledPilot tool is only allowed inside P13 controlled production Pilot plans.");
+        }
+
+        var intentId = ReadStepString(step.InputJson, "intentId") ?? plan.CloudProductionGoalIntent?.IntentId;
+        if (string.IsNullOrWhiteSpace(intentId))
+        {
+            throw new InvalidOperationException("CloudProductionGoalIntent id is missing.");
+        }
+
+        var maxRows = ReadStepInt(step.InputJson, "maxRows") ?? plan.CloudProductionGoalIntent?.MaxRows ?? 20;
+        var timeoutMs = ReadStepInt(step.InputJson, "timeoutMs") ?? 5000;
+        var protectedTools = await GetCloudReadonlyPilotReadinessQueryHandler.LoadProtectedToolRegistrationsAsync(
+            toolReadRepository,
+            cancellationToken);
+        var p12Status = cloudReadonlyProductionPilotService.BuildStatus(
+            cloudReadonlyPilotReadinessService.BuildStatus(protectedTools),
+            protectedTools);
+        var result = await cloudReadonlyProductionControlledPilotService.RunIntentAsync(
+            intentId,
+            plan.ArtifactTypes,
+            maxRows,
+            timeoutMs,
+            p12Status,
+            protectedTools,
+            cancellationToken);
+        if (!result.IsSuccess || result.Value is null)
+        {
+            throw new InvalidOperationException($"CloudReadonlyProductionControlledPilot query failed: {BuildResultErrorSummary(result)}");
+        }
+
+        var queryResult = result.Value.QueryResult;
+        var rows = queryResult.Rows
+            .Select(row => row.ToDictionary(item => item.Key, item => item.Value, StringComparer.OrdinalIgnoreCase))
+            .ToArray();
+
+        state.CloudReadonlySummary =
+            $"CloudReadonly production controlled Pilot query executed. sourceType={queryResult.SourceType}; sourceMode={queryResult.SourceMode}; isProductionData={queryResult.IsProductionData.ToString().ToLowerInvariant()}; isSandbox={queryResult.IsSandbox.ToString().ToLowerInvariant()}; isSimulation={queryResult.IsSimulation.ToString().ToLowerInvariant()}; sourceLabel={queryResult.SourceLabel}; boundary={queryResult.Boundary}; pilotWindowId={queryResult.PilotWindowId}; intentId={queryResult.IntentId}; endpointCode={queryResult.EndpointCode}; queryHash={queryResult.QueryHash}; resultHash={queryResult.ResultHash}; rows={queryResult.RowCount}; truncated={queryResult.IsTruncated.ToString().ToLowerInvariant()}; approvalStatus={queryResult.ApprovalStatus}.";
+        state.CloudReadonlyRows = rows;
+        state.CloudReadonlySourceLabel = queryResult.SourceLabel;
+        state.CloudReadonlySourcePath = queryResult.EndpointCode;
+        state.CloudReadonlySourceMode = queryResult.SourceMode;
+        state.CloudReadonlyIsSimulation = queryResult.IsSimulation;
+        state.CloudReadonlyRowCount = queryResult.RowCount;
+        state.CloudReadonlyIsTruncated = queryResult.IsTruncated;
+        state.BusinessQueryHash = queryResult.QueryHash;
+        state.CloudSandboxQueryResults.Add(new AgentCloudSandboxQuerySummary(
+            queryResult.EndpointCode,
+            queryResult.SourceMode,
+            queryResult.IsSandbox,
+            queryResult.SourceLabel,
+            queryResult.QueryHash,
+            queryResult.ResultHash,
+            queryResult.RowCount,
+            queryResult.IsTruncated,
+            [],
+            CloudReadonlyProductionControlledPilotMarkers.TrialMode,
+            queryResult.IntentId,
+            queryResult.Boundary,
+            queryResult.ApprovalStatus));
+
+        return new
+        {
+            status = "completed",
+            trialMode = CloudReadonlyProductionControlledPilotMarkers.TrialMode,
+            intentId = result.Value.IntentId,
+            analysisType = result.Value.AnalysisType,
             sourceType = queryResult.SourceType,
             sourceMode = queryResult.SourceMode,
             isProductionData = queryResult.IsProductionData,

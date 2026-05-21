@@ -40,6 +40,9 @@ public static class CloudReadonlyReadinessEndpoints
         group.MapGet("production-pilot", async (ISender sender) =>
             ToHttpResult(await sender.Send(new GetCloudReadonlyProductionPilotStatusQuery())));
 
+        group.MapGet("production-controlled-pilot", async (ISender sender) =>
+            ToHttpResult(await sender.Send(new GetCloudReadonlyProductionControlledPilotStatusQuery())));
+
         group.MapPost("sandbox-agent-trial/run", async (RunCloudReadonlySandboxAgentTrialCommand command, ISender sender) =>
             ToHttpResult(await sender.Send(command)));
 
@@ -65,6 +68,9 @@ public static class CloudReadonlyReadinessEndpoints
             ToHttpResult(await sender.Send(new RunCloudReadonlyProductionPilotGateEvaluationCommand())));
 
         group.MapPost("production-pilot/run", async (RunCloudReadonlyProductionPilotScenarioCommand command, ISender sender) =>
+            ToHttpResult(await sender.Send(command)));
+
+        group.MapPost("production-controlled-pilot/run", async (RunCloudReadonlyProductionControlledPilotCommand command, ISender sender) =>
             ToHttpResult(await sender.Send(command)));
 
         group.MapPost("run", async (RunCloudReadonlyReadinessCheckCommand command, ISender sender) =>

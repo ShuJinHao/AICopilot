@@ -534,6 +534,73 @@ export interface CloudReadonlyProductionPilotScenarioResult {
   boundary: string
 }
 
+export interface CloudReadonlyProductionControlledPilotStatus {
+  status: string
+  enabled: boolean
+  p12GateStatus: string
+  pilotWindowId?: string | null
+  windowStatus?: string | null
+  freeGoalEnabled: boolean
+  allowedEndpointCodes: string[]
+  toolVisible: boolean
+  toolExecutable: boolean
+  lastRunAt?: string | null
+  blockers: string[]
+  warnings: string[]
+  boundary: string
+}
+
+export interface CloudProductionGoalTimeRange {
+  from?: string | null
+  to?: string | null
+}
+
+export interface CloudProductionGoalIntent {
+  intentId: string
+  goalHash: string
+  endpointCodes: string[]
+  timeRange: CloudProductionGoalTimeRange
+  maxRows: number
+  artifactTypes: string[]
+  analysisType: string
+  warnings: string[]
+  rejectedReasons: string[]
+  requiresToolApproval: boolean
+  requiresFinalApproval: boolean
+}
+
+export interface CloudReadonlyProductionControlledPlan {
+  task: AgentTask
+  intent: CloudProductionGoalIntent
+}
+
+export interface CloudProductionControlledQueryResult {
+  endpointCode: string
+  sourceType: string
+  sourceMode: string
+  isProductionData: boolean
+  isSandbox: boolean
+  isSimulation: boolean
+  sourceLabel: string
+  boundary: string
+  pilotWindowId: string
+  intentId: string
+  queryHash: string
+  resultHash: string
+  rowCount: number
+  isTruncated: boolean
+  approvalStatus: string
+}
+
+export interface CloudReadonlyProductionControlledPilotResult {
+  intentId: string
+  analysisType: string
+  status: string
+  queryResult: CloudProductionControlledQueryResult
+  artifactTypes: string[]
+  boundary: string
+}
+
 export interface AgentRunQueueSummary {
   queuedCount: number
   leasedCount: number

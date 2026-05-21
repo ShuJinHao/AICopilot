@@ -14,9 +14,13 @@ import type {
   CloudReadonlyPilotConfigPackage,
   CloudReadonlyPilotContractRehearsal,
   CloudReadonlyPilotReadinessStatus,
+  CloudReadonlyProductionControlledPilotResult,
+  CloudReadonlyProductionControlledPilotStatus,
+  CloudReadonlyProductionControlledPlan,
   CloudReadonlyProductionPilotScenarioResult,
   CloudReadonlyProductionPilotStatus,
   CloudReadonlyProductionPilotWindow,
+  CloudProductionGoalTimeRange,
   CloudSandboxGoalTimeRange,
   FunctionApprovalRequest,
   PilotApprovalRehearsal,
@@ -373,6 +377,39 @@ export const chatService = {
       '/aigateway/cloud-readonly/readiness/production-pilot/run',
       {
         scenarioId,
+        artifactTypes: ['Markdown', 'Html'],
+        maxRows: 20,
+        timeoutMs: 5000
+      }
+    )
+  },
+
+  async getCloudReadonlyProductionControlledPilotStatus() {
+    return await apiClient.get<CloudReadonlyProductionControlledPilotStatus>(
+      '/aigateway/cloud-readonly/readiness/production-controlled-pilot'
+    )
+  },
+
+  async createCloudReadonlyProductionControlledPlan(payload: {
+    sessionId: string
+    goal: string
+    modelId?: string | null
+    artifactTypes?: string[]
+    timeRange?: CloudProductionGoalTimeRange | null
+    maxRows?: number | null
+    plannerMode?: 'Auto' | 'DynamicOnly' | 'StaticOnly'
+  }) {
+    return await apiClient.post<CloudReadonlyProductionControlledPlan>(
+      '/aigateway/agent/cloud-production-controlled-pilot/plan',
+      payload
+    )
+  },
+
+  async runCloudReadonlyProductionControlledPilot(intentId: string) {
+    return await apiClient.post<CloudReadonlyProductionControlledPilotResult>(
+      '/aigateway/cloud-readonly/readiness/production-controlled-pilot/run',
+      {
+        intentId,
         artifactTypes: ['Markdown', 'Html'],
         maxRows: 20,
         timeoutMs: 5000

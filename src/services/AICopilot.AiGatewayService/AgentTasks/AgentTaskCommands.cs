@@ -10,6 +10,7 @@ using AICopilot.Core.AiGateway.Aggregates.Artifacts;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
+using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Core.AiGateway.Aggregates.Uploads;
 using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.AiGateway.Specifications.AgentTasks;
@@ -50,7 +51,9 @@ public sealed record PlanAgentTaskCommand(
     bool IsCloudSandboxTrial = false,
     bool IsCloudSandboxControlledTrial = false,
     CloudSandboxGoalIntentDto? CloudSandboxGoalIntent = null,
-    bool IsCloudProductionPilotTrial = false) : ICommand<Result<AgentTaskDto>>;
+    bool IsCloudProductionPilotTrial = false,
+    bool IsCloudProductionControlledPilotTrial = false,
+    CloudProductionGoalIntentDto? CloudProductionGoalIntent = null) : ICommand<Result<AgentTaskDto>>;
 
 public enum AgentPlannerMode
 {
@@ -86,7 +89,11 @@ public sealed class PlanAgentTaskCommandHandler(
     ICloudReadonlyAgentPlanService cloudReadonlyPlanService,
     ICurrentUser currentUser,
     IBusinessDatabaseReadService? businessDatabaseReadService = null,
-    CloudReadonlySandboxControlledTrialService? cloudSandboxControlledTrialService = null)
+    CloudReadonlySandboxControlledTrialService? cloudSandboxControlledTrialService = null,
+    CloudReadonlyProductionControlledPilotService? cloudProductionControlledPilotService = null,
+    CloudReadonlyProductionPilotService? cloudReadonlyProductionPilotService = null,
+    CloudReadonlyPilotReadinessService? cloudReadonlyPilotReadinessService = null,
+    IReadRepository<ToolRegistration>? toolReadRepository = null)
     : ICommandHandler<PlanAgentTaskCommand, Result<AgentTaskDto>>
 {
     private const int PlannerValidationVersion = 1;
@@ -165,6 +172,8 @@ public sealed class PlanAgentTaskCommandHandler(
         var isCloudSandboxTrialPlan = isCloudSandboxFixedTrialPlan || isCloudSandboxControlledTrialPlan;
         var isCloudProductionPilotTrialPlan = request.IsCloudProductionPilotTrial ||
                                              CloudReadonlyProductionPilotService.IsScenarioId(request.TrialScenarioId);
+        var isCloudProductionControlledPilotPlan = request.IsCloudProductionControlledPilotTrial ||
+                                                   request.CloudProductionGoalIntent is not null;
         if (isCloudSandboxFixedTrialPlan && !CloudReadonlySandboxAgentTrialService.IsScenarioId(request.TrialScenarioId))
         {
             return Result.Invalid("P7 CloudReadonlySandbox agent trial only allows fixed trial scenarios.");
@@ -175,14 +184,47 @@ public sealed class PlanAgentTaskCommandHandler(
             return Result.Invalid("P12 CloudReadonlyProductionPilot only allows fixed Pilot scenarios.");
         }
 
-        if (isCloudProductionPilotTrialPlan && isCloudSandboxTrialPlan)
+        if ((isCloudProductionPilotTrialPlan || isCloudProductionControlledPilotPlan) && isCloudSandboxTrialPlan)
         {
             return Result.Invalid("CloudReadonlySandbox and CloudReadonlyProductionPilot scenarios cannot be mixed in one plan.");
+        }
+
+        if (isCloudProductionPilotTrialPlan && isCloudProductionControlledPilotPlan)
+        {
+            return Result.Invalid("P12 fixed production Pilot and P13 controlled production Pilot cannot be mixed in one plan.");
         }
 
         if (isCloudSandboxFixedTrialPlan && isCloudSandboxControlledTrialPlan)
         {
             return Result.Invalid("CloudReadonlySandbox fixed scenarios and controlled goals cannot be mixed in one plan.");
+        }
+
+        CloudReadonlyProductionPilotStatusDto? p12StatusForControlledPilot = null;
+        IReadOnlyCollection<ToolRegistration>? protectedToolsForControlledPilot = null;
+        if (isCloudProductionControlledPilotPlan)
+        {
+            if (cloudProductionControlledPilotService is null ||
+                cloudReadonlyProductionPilotService is null ||
+                cloudReadonlyPilotReadinessService is null ||
+                toolReadRepository is null)
+            {
+                return Result.Failure("CloudReadonlyProductionControlledPilot services are not configured.");
+            }
+
+            protectedToolsForControlledPilot = await GetCloudReadonlyPilotReadinessQueryHandler.LoadProtectedToolRegistrationsAsync(
+                toolReadRepository,
+                cancellationToken);
+            p12StatusForControlledPilot = cloudReadonlyProductionPilotService.BuildStatus(
+                cloudReadonlyPilotReadinessService.BuildStatus(protectedToolsForControlledPilot),
+                protectedToolsForControlledPilot);
+            var intentValidation = cloudProductionControlledPilotService.ValidateIntentForPlan(
+                request.CloudProductionGoalIntent,
+                p12StatusForControlledPilot,
+                protectedToolsForControlledPilot);
+            if (!intentValidation.IsSuccess)
+            {
+                return Result.From(intentValidation);
+            }
         }
 
         if (isCloudSandboxControlledTrialPlan)
@@ -221,7 +263,7 @@ public sealed class PlanAgentTaskCommandHandler(
                 return Result.NotFound();
             }
 
-            if (isCloudSandboxTrialPlan || isCloudProductionPilotTrialPlan)
+            if (isCloudSandboxTrialPlan || isCloudProductionPilotTrialPlan || isCloudProductionControlledPilotPlan)
             {
                 return Result.Invalid("CloudReadonly agent trial cannot bind BusinessDatabase data sources.");
             }
@@ -254,11 +296,16 @@ public sealed class PlanAgentTaskCommandHandler(
             var trialDomain = CloudReadonlyProductionPilotService.ResolveScenarioDomain(request.TrialScenarioId);
             businessDomains = string.IsNullOrWhiteSpace(trialDomain) ? [] : [trialDomain];
         }
+        else if (isCloudProductionControlledPilotPlan && businessDomains.Length == 0)
+        {
+            businessDomains = request.CloudProductionGoalIntent?.EndpointCodes.ToArray() ?? [];
+        }
         var isSimulationOnlyPlan = request.IsSimulationTrial ||
                                    selectedDataSources.Any(source =>
                                        source.ExternalSystemType == DataSourceExternalSystemType.SimulationBusiness);
         var hasBusinessDataSourcesForPlan = !isCloudSandboxTrialPlan &&
                                             !isCloudProductionPilotTrialPlan &&
+                                            !isCloudProductionControlledPilotPlan &&
                                             (dataSourceIds.Length > 0 || businessDomains.Length > 0);
 
         _ = await templateRepository.FirstOrDefaultAsync(
@@ -267,7 +314,9 @@ public sealed class PlanAgentTaskCommandHandler(
         var runtimeSettings = await runtimeSettingsProvider.GetAsync(cancellationToken);
         var riskLevel = DetermineRiskLevel(request.TaskType);
         var requestedPlannerMode = NormalizePlannerMode(request.PlannerMode, request.ForceStaticPlanner);
-        var plannerModelResult = requestedPlannerMode == AgentPlannerMode.StaticOnly || isCloudProductionPilotTrialPlan
+        var plannerModelResult = requestedPlannerMode == AgentPlannerMode.StaticOnly ||
+                                 isCloudProductionPilotTrialPlan ||
+                                 isCloudProductionControlledPilotPlan
             ? Result.Success<LanguageModel?>(null)
             : await ResolvePlannerModelAsync(request.ModelId, cancellationToken);
         if (!plannerModelResult.IsSuccess)
@@ -297,6 +346,7 @@ public sealed class PlanAgentTaskCommandHandler(
                 businessDomains,
                 isCloudSandboxTrialPlan,
                 isCloudProductionPilotTrialPlan,
+                isCloudProductionControlledPilotPlan,
                 cancellationToken);
             if (!catalogResult.IsSuccess)
             {
@@ -345,7 +395,8 @@ public sealed class PlanAgentTaskCommandHandler(
                         riskLevel,
                         request.ArtifactTypes,
                         isCloudSandboxTrialPlan,
-                        isCloudProductionPilotTrialPlan);
+                        isCloudProductionPilotTrialPlan,
+                        isCloudProductionControlledPilotPlan);
                     goto ValidateAndPersistPlan;
                 }
 
@@ -366,7 +417,8 @@ public sealed class PlanAgentTaskCommandHandler(
                 riskLevel,
                 request.ArtifactTypes,
                 isCloudSandboxTrialPlan,
-                isCloudProductionPilotTrialPlan);
+                isCloudProductionPilotTrialPlan,
+                isCloudProductionControlledPilotPlan);
         }
 
 ValidateAndPersistPlan:
@@ -383,7 +435,8 @@ ValidateAndPersistPlan:
             request.RequiresDataApproval,
             request.ArtifactTypes,
             isCloudSandboxTrialPlan,
-            isCloudProductionPilotTrialPlan);
+            isCloudProductionPilotTrialPlan,
+            isCloudProductionControlledPilotPlan);
         var forcedStepCodes = steps
             .Select(step => step.ToolCode)
             .Where(toolCode => !string.IsNullOrWhiteSpace(toolCode) && !originalToolCodes.Contains(toolCode!))
@@ -398,6 +451,7 @@ ValidateAndPersistPlan:
                 businessDomains,
                 isCloudSandboxTrialPlan,
                 isCloudProductionPilotTrialPlan,
+                isCloudProductionControlledPilotPlan,
                 cancellationToken);
             if (!staticCatalogResult.IsSuccess)
             {
@@ -415,6 +469,7 @@ ValidateAndPersistPlan:
             businessDomains,
             isCloudSandboxTrialPlan,
             isCloudProductionPilotTrialPlan,
+            isCloudProductionControlledPilotPlan,
             cancellationToken);
         if (!guardedStepsResult.IsSuccess)
         {
@@ -436,7 +491,10 @@ ValidateAndPersistPlan:
             .ToArray();
         var toolRiskSummary = BuildToolRiskSummary(plannerToolCatalog);
         AgentTaskPlanCloudReadonlyIntentDocument? cloudReadonlyIntent = null;
-        if (request.TaskType == AgentTaskType.CloudDataReport && !isCloudSandboxTrialPlan && !isCloudProductionPilotTrialPlan)
+        if (request.TaskType == AgentTaskType.CloudDataReport &&
+            !isCloudSandboxTrialPlan &&
+            !isCloudProductionPilotTrialPlan &&
+            !isCloudProductionControlledPilotPlan)
         {
             var cloudIntentResult = await cloudReadonlyPlanService.CreateIntentAsync(
                 request.SessionId,
@@ -486,8 +544,12 @@ ValidateAndPersistPlan:
             request.IsSimulationTrial,
             isCloudSandboxControlledTrialPlan,
             request.CloudSandboxGoalIntent,
+            isCloudProductionControlledPilotPlan,
+            request.CloudProductionGoalIntent,
             new AgentTaskPlanSafetySummaryDocument(
-                isCloudProductionPilotTrialPlan
+                isCloudProductionControlledPilotPlan
+                    ? "CloudProductionControlledGoal"
+                    : isCloudProductionPilotTrialPlan
                     ? "CloudProductionPilotFixedScenario"
                     : isCloudSandboxControlledTrialPlan
                     ? "CloudSandboxControlledGoal"
@@ -501,14 +563,14 @@ ValidateAndPersistPlan:
                 isSimulationOnlyPlan,
                 request.RequiresDataApproval,
                 toolRiskSummary,
-                MockMcpOnly: !isCloudSandboxTrialPlan && !isCloudProductionPilotTrialPlan),
+                MockMcpOnly: !isCloudSandboxTrialPlan && !isCloudProductionPilotTrialPlan && !isCloudProductionControlledPilotPlan),
             forcedStepCodes,
             approvalCheckpoints,
             BuildPlanDataSourceSummaries(selectedDataSources),
             plannerToolCatalog?.Version ?? PlannerToolCatalog.CurrentVersion,
             plannerToolCatalog?.AvailableToolCount ?? 0,
             toolRiskSummary,
-            MockMcpOnly: !isCloudSandboxTrialPlan && !isCloudProductionPilotTrialPlan,
+            MockMcpOnly: !isCloudSandboxTrialPlan && !isCloudProductionPilotTrialPlan && !isCloudProductionControlledPilotPlan,
             toolApprovalCheckpoints,
             isCloudProductionPilotTrialPlan);
 
@@ -675,7 +737,8 @@ ValidateAndPersistPlan:
         bool requiresDataApproval,
         IReadOnlyCollection<string>? artifactTypes,
         bool isCloudSandboxTrial,
-        bool isCloudProductionPilotTrial)
+        bool isCloudProductionPilotTrial,
+        bool isCloudProductionControlledPilotTrial)
     {
         var result = steps.ToList();
         var normalizedArtifactTypes = NormalizeArtifactTypes(artifactTypes);
@@ -716,17 +779,23 @@ ValidateAndPersistPlan:
 
         if (taskType == AgentTaskType.CloudDataReport)
         {
-            var cloudToolCode = isCloudProductionPilotTrial
+            var cloudToolCode = isCloudProductionControlledPilotTrial
+                ? CloudReadonlyProductionControlledPilotMarkers.ToolCode
+                : isCloudProductionPilotTrial
                 ? CloudReadonlyProductionPilotMarkers.ToolCode
                 : isCloudSandboxTrial
                     ? CloudReadonlySandboxAgentTrialMarkers.ToolCode
                     : "query_cloud_data_readonly";
-            var title = isCloudProductionPilotTrial
+            var title = isCloudProductionControlledPilotTrial
+                ? "Query Cloud production controlled readonly data"
+                : isCloudProductionPilotTrial
                 ? "Query Cloud production Pilot readonly data"
                 : isCloudSandboxTrial
                     ? "Query Cloud sandbox readonly data"
                     : "Query Cloud readonly data";
-            var description = isCloudProductionPilotTrial
+            var description = isCloudProductionControlledPilotTrial
+                ? "Read Cloud production data only through the controlled free-goal ProductionControlledPilot boundary."
+                : isCloudProductionPilotTrial
                 ? "Read Cloud production data only through the fixed-template ProductionPilot boundary."
                 : isCloudSandboxTrial
                     ? "Read Cloud sandbox/staging data only through the SandboxAgentTrial boundary."
@@ -739,7 +808,7 @@ ValidateAndPersistPlan:
                     description,
                     AgentStepType.DataQuery,
                     cloudToolCode,
-                    isCloudSandboxTrial || isCloudProductionPilotTrial));
+                    isCloudSandboxTrial || isCloudProductionPilotTrial || isCloudProductionControlledPilotTrial));
         }
 
         if (hasBusinessDataSources)
@@ -814,7 +883,8 @@ ValidateAndPersistPlan:
         AgentTaskRiskLevel riskLevel,
         IReadOnlyCollection<string>? artifactTypes,
         bool isCloudSandboxTrial,
-        bool isCloudProductionPilotTrial)
+        bool isCloudProductionPilotTrial,
+        bool isCloudProductionControlledPilotTrial)
     {
         var steps = new List<AgentStepPlanDto>();
         var normalizedArtifactTypes = NormalizeArtifactTypes(artifactTypes);
@@ -831,7 +901,9 @@ ValidateAndPersistPlan:
 
         if (taskType == AgentTaskType.CloudDataReport)
         {
-            steps.Add(isCloudProductionPilotTrial
+            steps.Add(isCloudProductionControlledPilotTrial
+                ? new AgentStepPlanDto("Query Cloud production controlled readonly data", "Read Cloud production data only through the controlled free-goal ProductionControlledPilot boundary.", AgentStepType.DataQuery, CloudReadonlyProductionControlledPilotMarkers.ToolCode, true)
+                : isCloudProductionPilotTrial
                 ? new AgentStepPlanDto("Query Cloud production Pilot readonly data", "Read Cloud production data only through the fixed-template ProductionPilot boundary.", AgentStepType.DataQuery, CloudReadonlyProductionPilotMarkers.ToolCode, true)
                 : isCloudSandboxTrial
                     ? new AgentStepPlanDto("Query Cloud sandbox readonly data", "Read Cloud sandbox/staging data only through the SandboxAgentTrial boundary.", AgentStepType.DataQuery, CloudReadonlySandboxAgentTrialMarkers.ToolCode, true)
