@@ -363,7 +363,8 @@ public sealed class CloudReadonlyProductionPilotService(
     IOptions<CloudAiReadOptions> cloudAiReadOptions,
     IOptions<CloudReadonlyProductionPilotOptions> pilotOptions,
     ICloudReadonlyProductionPilotStore store,
-    ICloudAiReadClient cloudAiReadClient)
+    ICloudAiReadClient cloudAiReadClient,
+    IProductionPilotOperationsStore? operationsStore = null)
 {
     private static readonly IReadOnlyDictionary<string, ProductionPilotScenario> Scenarios =
         new[]
@@ -419,6 +420,7 @@ public sealed class CloudReadonlyProductionPilotService(
         var warnings = new List<string>();
 
         ValidateBoundary(blockers, warnings, p11Status, persistedToolRegistrations);
+        var emergencyStop = operationsStore?.GetEmergencyStop();
 
         if (!options.Enabled)
         {
@@ -429,6 +431,23 @@ public sealed class CloudReadonlyProductionPilotService(
                 window?.Status,
                 window?.AllowedEndpointCodes ?? [],
                 "NotRequired",
+                ToolVisible: false,
+                ToolExecutable: false,
+                latestRun?.QueryResult.ExecutedAt,
+                blockers,
+                warnings);
+        }
+
+        if (emergencyStop?.IsActive == true)
+        {
+            blockers.Add("Production Pilot emergency stop is active; P12 fixed-template Pilot tools are blocked.");
+            return new CloudReadonlyProductionPilotStatusDto(
+                CloudReadonlyProductionPilotStatuses.EmergencyStopped,
+                Enabled: true,
+                window?.WindowId,
+                window?.Status,
+                window?.AllowedEndpointCodes ?? options.AllowedEndpointCodes,
+                window?.Status == CloudReadonlyProductionPilotWindowStatuses.Approved ? "Approved" : "Required",
                 ToolVisible: false,
                 ToolExecutable: false,
                 latestRun?.QueryResult.ExecutedAt,

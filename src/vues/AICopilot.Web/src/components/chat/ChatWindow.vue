@@ -190,6 +190,9 @@ const cloudReadonlyProductionPilotRun = computed(() => store.currentCloudReadonl
 const cloudReadonlyProductionControlledStatus = computed(() => store.currentCloudReadonlyProductionControlledStatus)
 const cloudReadonlyProductionControlledPlan = computed(() => store.currentCloudReadonlyProductionControlledPlan)
 const cloudReadonlyProductionControlledRun = computed(() => store.currentCloudReadonlyProductionControlledRun)
+const cloudReadonlyProductionOperationsStatus = computed(() => store.currentCloudReadonlyProductionOperationsStatus)
+const productionPilotRunLedger = computed(() => store.currentProductionPilotRunLedger)
+const productionPilotGaReadiness = computed(() => store.currentProductionPilotGaReadiness)
 const cloudProductionControlledIntent = computed(
   () =>
     cloudReadonlyProductionControlledPlan.value?.intent ??
@@ -371,6 +374,26 @@ async function createCloudReadonlyProductionControlledPlan() {
 
 async function runCloudReadonlyProductionControlledPilot() {
   await store.runCloudReadonlyProductionControlledPilot()
+  uiLayoutStore.suggestAgentWorkbenchTab('trial')
+}
+
+async function activateProductionPilotEmergencyStop() {
+  await store.activateProductionPilotEmergencyStop()
+  uiLayoutStore.suggestAgentWorkbenchTab('trial')
+}
+
+async function clearProductionPilotEmergencyStop() {
+  await store.clearProductionPilotEmergencyStop()
+  uiLayoutStore.suggestAgentWorkbenchTab('trial')
+}
+
+async function createProductionPilotIncident() {
+  await store.createProductionPilotIncident()
+  uiLayoutStore.suggestAgentWorkbenchTab('trial')
+}
+
+async function runProductionPilotGaReadinessEvaluation() {
+  await store.runProductionPilotGaReadinessEvaluation()
   uiLayoutStore.suggestAgentWorkbenchTab('trial')
 }
 
@@ -1315,6 +1338,97 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
             </div>
             <div v-if="cloudReadonlyProductionControlledStatus?.blockers.length" class="trial-check-list">
               <div v-for="blocker in cloudReadonlyProductionControlledStatus.blockers" :key="blocker" class="trial-check-row">
+                <div>
+                  <strong>Blocked</strong>
+                  <span>{{ blocker }}</span>
+                </div>
+                <AiTag tone="danger">Blocked</AiTag>
+              </div>
+            </div>
+          </div>
+
+          <div class="trial-ops-card" data-testid="p14-production-operations-panel">
+            <div class="section-title">
+              <strong>P14 Production Pilot Operations</strong>
+              <AiTag :tone="cloudReadonlyProductionOperationsStatus?.status === 'ReadyForP15Planning' ? 'success' : cloudReadonlyProductionOperationsStatus?.status === 'Blocked' || cloudReadonlyProductionOperationsStatus?.emergencyStopActive ? 'danger' : 'warning'">
+                {{ cloudReadonlyProductionOperationsStatus?.status || 'CollectingEvidence' }}
+              </AiTag>
+            </div>
+            <div class="trial-source-line">
+              <span data-testid="p14-non-ga-marker">Production readonly Pilot, not full production rollout</span>
+              <span>query_cloud_data_readonly closed</span>
+            </div>
+            <div class="trial-metric-grid">
+              <div>
+                <span>P12</span>
+                <strong>{{ cloudReadonlyProductionOperationsStatus?.p12PilotStatus || cloudReadonlyProductionPilotStatus?.status || 'Required' }}</strong>
+              </div>
+              <div>
+                <span>P13</span>
+                <strong>{{ cloudReadonlyProductionOperationsStatus?.p13ControlledPilotStatus || cloudReadonlyProductionControlledStatus?.status || 'Required' }}</strong>
+              </div>
+              <div>
+                <span>emergency</span>
+                <strong data-testid="p14-emergency-stop-state">{{ cloudReadonlyProductionOperationsStatus?.emergencyStopActive ? 'Active' : 'Clear' }}</strong>
+              </div>
+              <div>
+                <span>runs</span>
+                <strong>{{ cloudReadonlyProductionOperationsStatus?.runMetrics.totalRuns ?? productionPilotRunLedger.length }}</strong>
+              </div>
+              <div>
+                <span>rows</span>
+                <strong>{{ cloudReadonlyProductionOperationsStatus?.runMetrics.totalRows ?? 0 }}</strong>
+              </div>
+              <div>
+                <span>incidents</span>
+                <strong>{{ cloudReadonlyProductionOperationsStatus?.runMetrics.openIncidentCount ?? 0 }}</strong>
+              </div>
+            </div>
+            <div class="two-actions">
+              <button type="button" :disabled="store.isLoadingTrialOperations" @click="activateProductionPilotEmergencyStop">
+                <TriangleAlert :size="16" />
+                Emergency stop
+              </button>
+              <button type="button" :disabled="store.isLoadingTrialOperations" @click="clearProductionPilotEmergencyStop">
+                <Check :size="16" />
+                Clear stop
+              </button>
+            </div>
+            <div class="two-actions">
+              <button type="button" :disabled="store.isLoadingTrialOperations" @click="createProductionPilotIncident">
+                <ListChecks :size="16" />
+                Open incident
+              </button>
+              <button type="button" :disabled="store.isLoadingTrialOperations" @click="runProductionPilotGaReadinessEvaluation">
+                <ShieldCheck :size="16" />
+                P15 readiness
+              </button>
+            </div>
+            <div v-if="productionPilotRunLedger.length" class="trial-check-list" data-testid="p14-run-ledger">
+              <div v-for="run in productionPilotRunLedger.slice(0, 3)" :key="run.runId" class="trial-check-row">
+                <div>
+                  <strong>{{ run.endpointCode }} · {{ run.sourceMode }}</strong>
+                  <span>{{ run.boundary }} · {{ run.rowCount }} rows · {{ run.resultHash }}</span>
+                  <span>{{ run.approvalStatus }} · {{ run.status }}</span>
+                </div>
+                <AiTag :tone="run.status === 'Completed' ? 'success' : run.status === 'Failed' ? 'danger' : 'warning'">
+                  {{ run.status }}
+                </AiTag>
+              </div>
+            </div>
+            <div v-if="productionPilotGaReadiness" class="trial-check-list" data-testid="p14-ga-readiness">
+              <div class="trial-check-row">
+                <div>
+                  <strong>P15 GA readiness</strong>
+                  <span>{{ productionPilotGaReadiness.status }} · blockers {{ productionPilotGaReadiness.blockers.length }}</span>
+                </div>
+                <AiTag :tone="productionPilotGaReadiness.status === 'ReadyForP15Planning' ? 'success' : 'danger'">
+                  {{ productionPilotGaReadiness.status }}
+                </AiTag>
+              </div>
+            </div>
+            <div v-if="cloudReadonlyProductionOperationsStatus?.blockers.length" class="trial-check-list">
+              <div v-for="blocker in cloudReadonlyProductionOperationsStatus.blockers" :key="blocker" class="trial-check-row">
                 <div>
                   <strong>Blocked</strong>
                   <span>{{ blocker }}</span>

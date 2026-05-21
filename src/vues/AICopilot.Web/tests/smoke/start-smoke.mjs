@@ -520,6 +520,113 @@ const productionControlledRun = {
   }
 }
 
+const productionOperationsLedger = [
+  {
+    runId: 'p13-smoke-run',
+    taskId: 'task-p13-controlled',
+    sourceMode: 'CloudReadonlyProductionControlledPilot',
+    boundary: 'ProductionControlledPilot',
+    trialMode: 'ProductionControlledPilot',
+    pilotWindowId: productionPilotWindow.windowId,
+    intentId: productionControlledIntent.intentId,
+    endpointCode: 'devices',
+    artifactIds: ['artifact-final-1'],
+    approvalStatus: 'Approved',
+    status: 'Completed',
+    durationMs: 31,
+    rowCount: 2,
+    isTruncated: false,
+    queryHash: 'sha256:p13-query-devices',
+    resultHash: 'sha256:p13-result-devices',
+    executedAt: now
+  },
+  {
+    runId: 'p12-smoke-run',
+    taskId: 'task-p12-fixed',
+    sourceMode: 'CloudReadonlyProductionPilot',
+    boundary: 'ProductionPilot',
+    trialMode: 'ProductionPilotFixedScenario',
+    pilotWindowId: productionPilotWindow.windowId,
+    intentId: null,
+    endpointCode: 'devices',
+    artifactIds: ['artifact-final-2'],
+    approvalStatus: 'Approved',
+    status: 'Completed',
+    durationMs: 24,
+    rowCount: 2,
+    isTruncated: false,
+    queryHash: 'sha256:p12-query-devices',
+    resultHash: 'sha256:p12-result-devices',
+    executedAt: now
+  }
+]
+
+const productionOperationsStatus = {
+  status: 'CollectingEvidence',
+  p12PilotStatus: 'Ready',
+  p13ControlledPilotStatus: 'Ready',
+  emergencyStopActive: false,
+  currentWindowIds: [productionPilotWindow.windowId],
+  runMetrics: {
+    totalRuns: productionOperationsLedger.length,
+    succeededRuns: 2,
+    failedRuns: 0,
+    rejectedRuns: 0,
+    timeoutRuns: 0,
+    truncatedRuns: 0,
+    totalRows: 4,
+    finalArtifactCount: 2,
+    openIncidentCount: 0,
+    endpointCounts: { devices: 2 }
+  },
+  blockers: [],
+  warnings: ['Production readonly Pilot, not full production rollout'],
+  lastEvaluatedAt: now
+}
+
+const productionOperationsEmergencyActive = {
+  ...productionOperationsStatus,
+  status: 'EmergencyStopped',
+  emergencyStopActive: true,
+  blockers: ['Production Pilot emergency stop is active; P12 and P13 production readonly tools are blocked.']
+}
+
+const productionOperationsIncident = {
+  incidentId: 'incident-p14-smoke',
+  severity: 'High',
+  category: 'Operations',
+  status: 'Open',
+  owner: 'PilotOps',
+  sourceRef: 'p14-smoke',
+  resolutionHash: 'pending',
+  createdAt: now,
+  updatedAt: now
+}
+
+const productionOperationsGaReadiness = {
+  status: 'ReadyForP15Planning',
+  checks: [
+    {
+      code: 'EmergencyStopDrill',
+      label: 'Emergency stop drill',
+      status: 'Passed',
+      isBlocking: true,
+      message: 'Emergency stop has been activated and cleared.'
+    },
+    {
+      code: 'ProtectedTools',
+      label: 'Protected production tool boundary',
+      status: 'Passed',
+      isBlocking: true,
+      message: 'query_cloud_data_readonly remains disabled, hidden, and non-executable.'
+    }
+  ],
+  blockers: [],
+  warnings: [],
+  metrics: productionOperationsStatus.runMetrics,
+  generatedAt: now
+}
+
 const samples = {
   model: {
     id: 'lm1',
@@ -913,6 +1020,12 @@ const api = createServer((request, response) => {
     '/api/aigateway/cloud-readonly/readiness/production-controlled-pilot': productionControlledStatus,
     '/api/aigateway/cloud-readonly/readiness/production-controlled-pilot/run': productionControlledRun,
     '/api/aigateway/agent/cloud-production-controlled-pilot/plan': productionControlledPlan,
+    '/api/aigateway/cloud-readonly/readiness/production-operations': productionOperationsStatus,
+    '/api/aigateway/cloud-readonly/readiness/production-operations/ledger': productionOperationsLedger,
+    '/api/aigateway/cloud-readonly/readiness/production-operations/emergency-stop': productionOperationsEmergencyActive,
+    '/api/aigateway/cloud-readonly/readiness/production-operations/emergency-stop/clear': productionOperationsStatus,
+    '/api/aigateway/cloud-readonly/readiness/production-operations/incidents': productionOperationsIncident,
+    '/api/aigateway/cloud-readonly/readiness/production-operations/ga-readiness': productionOperationsGaReadiness,
     '/api/aigateway/agent/run-queue/summary': {
       queuedCount: 1,
       leasedCount: 0,

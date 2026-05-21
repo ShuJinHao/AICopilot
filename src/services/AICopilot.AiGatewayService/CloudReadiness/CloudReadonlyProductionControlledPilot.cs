@@ -22,6 +22,7 @@ public static class CloudReadonlyProductionControlledPilotStatuses
     public const string FreeGoalDisabled = "FreeGoalDisabled";
     public const string P12GateRequired = "P12GateRequired";
     public const string Ready = "Ready";
+    public const string EmergencyStopped = "EmergencyStopped";
     public const string Blocked = "Blocked";
     public const string Failed = "Failed";
     public const string Completed = "Completed";
@@ -297,7 +298,8 @@ public sealed class CloudReadonlyProductionControlledPilotService(
     IOptions<CloudAiReadOptions> cloudAiReadOptions,
     IOptions<CloudReadonlyProductionControlledPilotOptions> controlledOptions,
     ICloudReadonlyProductionControlledPilotStore store,
-    ICloudAiReadClient cloudAiReadClient)
+    ICloudAiReadClient cloudAiReadClient,
+    IProductionPilotOperationsStore? operationsStore = null)
 {
     private static readonly IReadOnlyDictionary<string, EndpointSpec> EndpointSpecs =
         new[]
@@ -321,12 +323,31 @@ public sealed class CloudReadonlyProductionControlledPilotService(
         var warnings = new List<string>();
 
         ValidateBoundary(blockers, warnings, p12Status, persistedToolRegistrations);
+        var emergencyStop = operationsStore?.GetEmergencyStop();
 
         if (!options.Enabled)
         {
             return new CloudReadonlyProductionControlledPilotStatusDto(
                 CloudReadonlyProductionControlledPilotStatuses.Disabled,
                 Enabled: false,
+                p12Status.Status,
+                p12Status.PilotWindowId,
+                p12Status.WindowStatus,
+                options.FreeGoalEnabled,
+                p12Status.AllowedEndpointCodes,
+                ToolVisible: false,
+                ToolExecutable: false,
+                latestRun?.QueryResult.ExecutedAt,
+                blockers,
+                warnings);
+        }
+
+        if (emergencyStop?.IsActive == true)
+        {
+            blockers.Add("Production Pilot emergency stop is active; P13 controlled Pilot tools are blocked.");
+            return new CloudReadonlyProductionControlledPilotStatusDto(
+                CloudReadonlyProductionControlledPilotStatuses.EmergencyStopped,
+                Enabled: true,
                 p12Status.Status,
                 p12Status.PilotWindowId,
                 p12Status.WindowStatus,

@@ -17,6 +17,7 @@ import type {
   CloudReadonlyProductionControlledPilotResult,
   CloudReadonlyProductionControlledPilotStatus,
   CloudReadonlyProductionControlledPlan,
+  CloudReadonlyProductionOperationsStatus,
   CloudReadonlyProductionPilotScenarioResult,
   CloudReadonlyProductionPilotStatus,
   CloudReadonlyProductionPilotWindow,
@@ -25,6 +26,9 @@ import type {
   FunctionApprovalRequest,
   PilotApprovalRehearsal,
   PilotReadinessAssessment,
+  ProductionPilotGaReadinessAssessment,
+  ProductionPilotIncident,
+  ProductionPilotRunLedger,
   Session,
   TrialCampaign,
   TrialEvidencePackage,
@@ -414,6 +418,60 @@ export const chatService = {
         maxRows: 20,
         timeoutMs: 5000
       }
+    )
+  },
+
+  async getCloudReadonlyProductionOperationsStatus() {
+    return await apiClient.get<CloudReadonlyProductionOperationsStatus>(
+      '/aigateway/cloud-readonly/readiness/production-operations'
+    )
+  },
+
+  async getProductionPilotRunLedger() {
+    return await apiClient.get<ProductionPilotRunLedger[]>(
+      '/aigateway/cloud-readonly/readiness/production-operations/ledger'
+    )
+  },
+
+  async activateProductionPilotEmergencyStop(reason = 'P14 smoke emergency stop drill') {
+    return await apiClient.post<CloudReadonlyProductionOperationsStatus>(
+      '/aigateway/cloud-readonly/readiness/production-operations/emergency-stop',
+      {
+        reason,
+        activatedBy: 'frontend'
+      }
+    )
+  },
+
+  async clearProductionPilotEmergencyStop(reason = 'P14 smoke emergency stop drill cleared') {
+    return await apiClient.post<CloudReadonlyProductionOperationsStatus>(
+      '/aigateway/cloud-readonly/readiness/production-operations/emergency-stop/clear',
+      {
+        reason,
+        clearedBy: 'frontend'
+      }
+    )
+  },
+
+  async upsertProductionPilotIncident(payload: {
+    incidentId?: string | null
+    severity: string
+    category: string
+    status: string
+    owner?: string | null
+    sourceRef?: string | null
+    resolutionHash?: string | null
+  }) {
+    return await apiClient.post<ProductionPilotIncident>(
+      '/aigateway/cloud-readonly/readiness/production-operations/incidents',
+      payload
+    )
+  },
+
+  async runProductionPilotGaReadinessEvaluation() {
+    return await apiClient.post<ProductionPilotGaReadinessAssessment>(
+      '/aigateway/cloud-readonly/readiness/production-operations/ga-readiness',
+      {}
     )
   },
 

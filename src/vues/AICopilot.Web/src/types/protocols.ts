@@ -601,6 +601,80 @@ export interface CloudReadonlyProductionControlledPilotResult {
   boundary: string
 }
 
+export interface ProductionPilotRunMetrics {
+  totalRuns: number
+  succeededRuns: number
+  failedRuns: number
+  rejectedRuns: number
+  timeoutRuns: number
+  truncatedRuns: number
+  totalRows: number
+  finalArtifactCount: number
+  openIncidentCount: number
+  endpointCounts: Record<string, number>
+}
+
+export interface CloudReadonlyProductionOperationsStatus {
+  status: string
+  p12PilotStatus: string
+  p13ControlledPilotStatus: string
+  emergencyStopActive: boolean
+  currentWindowIds: string[]
+  runMetrics: ProductionPilotRunMetrics
+  blockers: string[]
+  warnings: string[]
+  lastEvaluatedAt: string
+}
+
+export interface ProductionPilotRunLedger {
+  runId: string
+  taskId?: string | null
+  sourceMode: string
+  boundary: string
+  trialMode: string
+  pilotWindowId?: string | null
+  intentId?: string | null
+  endpointCode: string
+  artifactIds: string[]
+  approvalStatus: string
+  status: string
+  durationMs: number
+  rowCount: number
+  isTruncated: boolean
+  queryHash: string
+  resultHash: string
+  executedAt: string
+}
+
+export interface ProductionPilotIncident {
+  incidentId: string
+  severity: string
+  category: string
+  status: string
+  owner?: string | null
+  sourceRef?: string | null
+  resolutionHash?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ProductionPilotGaReadinessCheck {
+  code: string
+  label: string
+  status: string
+  isBlocking: boolean
+  message: string
+}
+
+export interface ProductionPilotGaReadinessAssessment {
+  status: string
+  checks: ProductionPilotGaReadinessCheck[]
+  blockers: string[]
+  warnings: string[]
+  metrics: ProductionPilotRunMetrics
+  generatedAt: string
+}
+
 export interface AgentRunQueueSummary {
   queuedCount: number
   leasedCount: number

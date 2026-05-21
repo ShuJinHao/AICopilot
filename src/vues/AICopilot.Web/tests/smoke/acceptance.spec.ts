@@ -170,6 +170,29 @@ test('agent trial panel shows P13 production controlled pilot intent gate', asyn
   await expectNoHorizontalOverflow(page)
 })
 
+test('agent trial panel shows P14 production operations gate', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'desktop workbench keeps the trial panel visible')
+
+  await expectProtectedShell(page, '/chat')
+
+  await page.getByTestId('agent-tab-trial').click()
+  const panel = page.getByTestId('p14-production-operations-panel')
+  await expect(panel).toBeVisible()
+  await expect(page.getByTestId('p14-non-ga-marker')).toContainText('not full production rollout')
+  await expect(page.getByTestId('p14-run-ledger')).toContainText('CloudReadonlyProductionControlledPilot')
+  await expect(page.getByTestId('p14-run-ledger')).toContainText('sha256:p13-result-devices')
+
+  await panel.getByRole('button', { name: /Emergency stop/ }).click()
+  await expect(page.getByTestId('p14-emergency-stop-state')).toContainText('Active')
+
+  await panel.getByRole('button', { name: /Clear stop/ }).click()
+  await expect(page.getByTestId('p14-emergency-stop-state')).toContainText('Clear')
+
+  await panel.getByRole('button', { name: /P15 readiness/ }).click()
+  await expect(page.getByTestId('p14-ga-readiness')).toContainText('ReadyForP15Planning')
+  await expectNoHorizontalOverflow(page)
+})
+
 test('chat stream renders widgets and approval card', async ({ page, isMobile }) => {
   test.skip(isMobile, 'desktop stream rendering covers widgets and approval card; mobile layout is covered separately')
 

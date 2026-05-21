@@ -87,6 +87,8 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
     [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/pilot-readiness")]
     [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/production-pilot")]
     [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/production-controlled-pilot")]
+    [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/production-operations")]
+    [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/production-operations/ledger")]
     [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/sandbox-agent-trial/run")]
     [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/pilot-readiness/config-package")]
     [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/pilot-readiness/gate")]
@@ -97,6 +99,10 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
     [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-pilot/gate")]
     [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-pilot/run")]
     [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-controlled-pilot/run")]
+    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-operations/emergency-stop")]
+    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-operations/emergency-stop/clear")]
+    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-operations/incidents")]
+    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-operations/ga-readiness")]
     [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/run")]
     public async Task CloudReadonlyReadinessRoutes_ShouldBeRoutable(string method, string path)
     {

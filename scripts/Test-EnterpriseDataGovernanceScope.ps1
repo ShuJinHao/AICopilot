@@ -172,6 +172,7 @@ $cloudReadonlySandboxControlledTrial = "src/services/AICopilot.AiGatewayService/
 $cloudReadonlyPilotReadiness = "src/services/AICopilot.AiGatewayService/CloudReadiness/CloudReadonlyPilotReadiness.cs"
 $cloudReadonlyProductionPilot = "src/services/AICopilot.AiGatewayService/CloudReadiness/CloudReadonlyProductionPilot.cs"
 $cloudReadonlyProductionControlledPilot = "src/services/AICopilot.AiGatewayService/CloudReadiness/CloudReadonlyProductionControlledPilot.cs"
+$cloudReadonlyProductionOperations = "src/services/AICopilot.AiGatewayService/CloudReadiness/CloudReadonlyProductionOperations.cs"
 $artifactAggregate = "src/core/AICopilot.Core.AiGateway/Aggregates/Artifacts/Artifact.cs"
 $artifactWorkspaceManagement = "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceManagement.cs"
 $artifactWorkspaceP9Management = "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceP9Management.cs"
@@ -200,6 +201,7 @@ foreach ($requiredFile in @(
     $cloudReadonlyPilotReadiness,
     $cloudReadonlyProductionPilot,
     $cloudReadonlyProductionControlledPilot,
+    $cloudReadonlyProductionOperations,
     $artifactAggregate,
     $artifactWorkspaceManagement,
     $artifactWorkspaceP9Management,
@@ -517,6 +519,15 @@ if (Test-Path $cloudReadonlyProductionControlledPilot) {
     foreach ($required in @("CloudReadonlyProductionControlledPilotStatusDto", "CloudProductionGoalIntentDto", "CreateCloudReadonlyProductionControlledPlanCommand", "RunCloudReadonlyProductionControlledPilotCommand", "CloudReadonlyProductionControlledPilotStatuses", "CloudReadonlyProductionControlledPilotMarkers.Boundary", "ProductionControlledPilot", "isProductionData", "BlockedByPolicy", "CloudReadonlyProductionControlledPilot is not ready")) {
         if ($content -notmatch [regex]::Escape($required)) {
             Add-Error "Required P13 Production Controlled Pilot marker '$required' is missing from $cloudReadonlyProductionControlledPilot."
+        }
+    }
+}
+
+if (Test-Path $cloudReadonlyProductionOperations) {
+    $content = Get-Content -LiteralPath $cloudReadonlyProductionOperations -Raw
+    foreach ($required in @("CloudReadonlyProductionOperationsStatusDto", "ProductionPilotRunLedgerDto", "ProductionPilotIncidentDto", "ActivateProductionPilotEmergencyStopCommand", "ClearProductionPilotEmergencyStopCommand", "RunProductionPilotGaReadinessEvaluationCommand", "ReadyForP15Planning", "query_cloud_data_readonly")) {
+        if ($content -notmatch [regex]::Escape($required)) {
+            Add-Error "Required P14 Production Operations marker '$required' is missing from $cloudReadonlyProductionOperations."
         }
     }
 }
