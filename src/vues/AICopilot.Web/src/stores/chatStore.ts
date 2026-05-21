@@ -534,7 +534,7 @@ export const useChatStore = defineStore('chat', () => {
 
     const sessionId = currentSessionId.value
     if (!sessionId) {
-      agentErrorMessage.value = '璇峰厛鍒涘缓鎴栭€夋嫨浼氳瘽'
+      agentErrorMessage.value = '请先创建或选择会话后再生成计划'
       return null
     }
 
