@@ -1,5 +1,6 @@
 using AICopilot.DataAnalysisService.BusinessDatabases;
 using AICopilot.DataAnalysisService.Semantics;
+using AICopilot.DataAnalysisService.SimulationBusiness;
 using AICopilot.HttpApi.Infrastructure;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
@@ -28,6 +29,18 @@ public class DataAnalysisController(ISender sender) : ApiControllerBase(sender)
         return ReturnResult(await Sender.Send(command));
     }
 
+    [HttpPost("business-database/permissions/grant")]
+    public async Task<IActionResult> GrantDataSourcePermission(GrantDataSourcePermissionCommand command)
+    {
+        return ReturnResult(await Sender.Send(command));
+    }
+
+    [HttpPost("business-database/permissions/revoke")]
+    public async Task<IActionResult> RevokeDataSourcePermission(RevokeDataSourcePermissionCommand command)
+    {
+        return ReturnResult(await Sender.Send(command));
+    }
+
     [HttpGet("business-database")]
     public async Task<IActionResult> GetBusinessDatabase([FromQuery] GetBusinessDatabaseQuery query)
     {
@@ -38,6 +51,40 @@ public class DataAnalysisController(ISender sender) : ApiControllerBase(sender)
     public async Task<IActionResult> GetListBusinessDatabases()
     {
         return ReturnResult(await Sender.Send(new GetListBusinessDatabasesQuery()));
+    }
+
+    [HttpGet("business-database/authorized")]
+    public async Task<IActionResult> GetMyAuthorizedDataSources()
+    {
+        return ReturnResult(await Sender.Send(new GetMyAuthorizedDataSourcesQuery()));
+    }
+
+    [HttpPost("business-database/query-readonly")]
+    public async Task<IActionResult> ExecuteBusinessDatabaseReadonlyQuery(
+        ExecuteBusinessDatabaseReadonlyQueryCommand command)
+    {
+        return ReturnResult(await Sender.Send(command));
+    }
+
+    [HttpPost("business-database/text-to-sql/draft")]
+    public async Task<IActionResult> GenerateBusinessTextToSql(
+        GenerateBusinessTextToSqlCommand command)
+    {
+        return ReturnResult(await Sender.Send(command));
+    }
+
+    [HttpPost("business-database/text-to-sql/execute")]
+    public async Task<IActionResult> ExecuteBusinessTextToSql(
+        ExecuteBusinessTextToSqlCommand command)
+    {
+        return ReturnResult(await Sender.Send(command));
+    }
+
+    [HttpGet("simulation-business/seed-plan")]
+    public async Task<IActionResult> GetSimulationBusinessSeedPlan(
+        [FromQuery] GetSimulationBusinessSeedPlanQuery query)
+    {
+        return ReturnResult(await Sender.Send(query));
     }
 
     [HttpGet("semantic-source/status")]

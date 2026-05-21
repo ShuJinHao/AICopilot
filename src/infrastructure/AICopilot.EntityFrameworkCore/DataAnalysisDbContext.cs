@@ -11,12 +11,15 @@ public sealed class DataAnalysisDbContext(DbContextOptions<DataAnalysisDbContext
 {
     public DbSet<BusinessDatabase> BusinessDatabases => Set<BusinessDatabase>();
 
+    public DbSet<DataSourcePermissionGrant> DataSourcePermissionGrants => Set<DataSourcePermissionGrant>();
+
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
         builder.HasDefaultSchema("dataanalysis");
         builder.ApplyConfiguration(new BusinessDatabaseConfiguration());
+        builder.ApplyConfiguration(new DataSourcePermissionGrantConfiguration());
         builder.ApplyConfiguration(new OutboxMessageConfiguration());
         builder.Entity<OutboxMessage>().ToTable(
             "outbox_messages",

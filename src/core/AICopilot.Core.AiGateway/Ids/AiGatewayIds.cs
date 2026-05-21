@@ -23,6 +23,27 @@ public readonly record struct ApprovalPolicyId : IStronglyTypedGuidId
     public override string ToString() => Value.ToString();
 }
 
+public readonly record struct PromptPolicyId : IStronglyTypedGuidId
+{
+    public PromptPolicyId(Guid value)
+    {
+        if (value == Guid.Empty)
+        {
+            throw new ArgumentException("Prompt policy id is required.", nameof(value));
+        }
+
+        Value = value;
+    }
+
+    public Guid Value { get; }
+
+    public static PromptPolicyId New() => new(Guid.NewGuid());
+
+    public static implicit operator Guid(PromptPolicyId id) => id.Value;
+
+    public override string ToString() => Value.ToString();
+}
+
 public readonly record struct ConversationTemplateId : IStronglyTypedGuidId
 {
     public ConversationTemplateId(Guid value)

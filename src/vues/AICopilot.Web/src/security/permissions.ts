@@ -19,7 +19,9 @@ export const CONFIG_READ_PERMISSIONS = {
     'DataAnalysis.GetBusinessDatabase',
     'DataAnalysis.GetListBusinessDatabases'
   ],
-  mcpServer: ['Mcp.GetServer', 'Mcp.GetListServers']
+  mcpServer: ['Mcp.GetServer', 'Mcp.GetListServers'],
+  toolRegistry: ['AiGateway.ToolRegistry.Read'],
+  cloudReadonlyReadiness: ['AiGateway.ToolRegistry.Read']
 } as const
 
 export const CONFIG_WRITE_PERMISSIONS = {

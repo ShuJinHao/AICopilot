@@ -152,7 +152,7 @@ public sealed class ToolRegistryGovernanceTests
     }
 
     [Fact]
-    public async Task DynamicPlannerFallback_ShouldUseStaticPlan_WhenNoPlannerModelIsAvailable()
+    public async Task DynamicPlannerFallback_ShouldUseStaticFallbackPlan_WhenNoPlannerModelIsAvailable()
     {
         var session = new Session(UserId, ConversationTemplateId.New());
         var taskRepository = new InMemoryRepository<AgentTask>();
@@ -169,7 +169,8 @@ public sealed class ToolRegistryGovernanceTests
         result.Value!.ModelId.Should().BeNull();
         taskRepository.Items.Should().ContainSingle();
         using var plan = JsonDocument.Parse(result.Value.PlanJson);
-        plan.RootElement.GetProperty("plannerMode").GetString().Should().Be("Static");
+        plan.RootElement.GetProperty("plannerMode").GetString().Should().Be("StaticFallback");
+        plan.RootElement.GetProperty("plannerFallbackReason").GetString().Should().Contain("No enabled planner model");
         plan.RootElement.GetProperty("plannerValidationVersion").GetInt32().Should().Be(1);
         plan.RootElement.GetProperty("steps").EnumerateArray()
             .Select(step => step.GetProperty("toolCode").GetString())
@@ -507,7 +508,7 @@ public sealed class ToolRegistryGovernanceTests
             CancellationToken.None);
         cloudWrite.Errors!.Single().Should().BeEquivalentTo(new ApiProblemDescriptor(
             AppProblemCodes.AgentPlanToolDenied,
-            "Cloud readonly tool 'query_cloud_data_readonly' is not allowed for this plan."));
+            "Agent plan contains SQL statement semantics."));
 
         var shell = await guard.ValidateStepsAsync(
             [new AgentStepPlanDto("Run powershell", "generate report", AgentStepType.ArtifactGeneration, "generate_markdown_report", false)],
@@ -1654,6 +1655,157 @@ public sealed class ToolRegistryGovernanceTests
         record.ErrorCode.Should().Be(AppProblemCodes.AgentPlanSchemaInvalid);
     }
 
+    [Fact]
+    [Trait("Suite", "EnterpriseToolGovernanceP4")]
+    public void BuiltInToolRegistrations_ShouldExposeMockMcpGovernedTools()
+    {
+        var tools = BuiltInToolRegistrations.AgentRuntimeTools;
+
+        tools.Should().Contain(tool => tool.ToolCode == "mock_mcp_health_check" &&
+                                      tool.ProviderType == ToolProviderType.MockMcp &&
+                                      tool.IsEnabled &&
+                                      tool.IsVisibleToPlanner &&
+                                      tool.IsExecutableByAgent &&
+                                      tool.CatalogVersion == BuiltInToolRegistrations.CurrentCatalogVersion);
+        tools.Should().Contain(tool => tool.ToolCode == "mock_mcp_kpi_formula_lookup" &&
+                                      tool.DataBoundary == ToolDataBoundary.RagContextOnly);
+        tools.Should().Contain(tool => tool.ToolCode == "mock_mcp_artifact_quality_check" &&
+                                      tool.DataBoundary == ToolDataBoundary.ArtifactDraftOnly);
+
+        var ticketPreview = tools.Should().ContainSingle(tool => tool.ToolCode == "mock_mcp_external_ticket_preview").Which;
+        ticketPreview.RiskLevel.Should().Be(AiToolRiskLevel.High);
+        ticketPreview.RequiresApproval.Should().BeTrue();
+        ticketPreview.ApprovalPolicy.Should().Be("ToolApproval");
+
+        var cloudReadonly = tools.Should().ContainSingle(tool => tool.ToolCode == "query_cloud_data_readonly").Which;
+        cloudReadonly.IsEnabled.Should().BeFalse();
+        cloudReadonly.IsVisibleToPlanner.Should().BeFalse();
+        cloudReadonly.IsExecutableByAgent.Should().BeFalse();
+    }
+
+    [Fact]
+    [Trait("Suite", "EnterpriseToolGovernanceP4")]
+    public async Task AgentPlanToolGuard_ShouldExposeOnlySimulationBoundaryTools_ForP4Catalog()
+    {
+        var mockTool = CreateTool(
+            "mock_mcp_health_check",
+            ToolProviderType.MockMcp,
+            targetName: "MockMcpProvider");
+        var realMcpTool = CreateTool(
+            "mcp_real_external",
+            ToolProviderType.Mcp,
+            ToolRegistrationTargetType.McpServer,
+            "real-server");
+        var criticalTool = CreateTool(
+            "critical_preview",
+            ToolProviderType.Artifact,
+            riskLevel: AiToolRiskLevel.Critical);
+        var hiddenTool = new ToolRegistration(
+            "hidden_tool",
+            "hidden_tool",
+            "hidden tool",
+            ToolProviderType.BuiltIn,
+            ToolRegistrationTargetType.AgentRuntime,
+            "AgentTaskRuntime",
+            """{"type":"object"}""",
+            """{"type":"object"}""",
+            AiToolRiskLevel.Low,
+            null,
+            false,
+            true,
+            120,
+            ToolAuditLevel.Standard,
+            DateTimeOffset.UtcNow,
+            isVisibleToPlanner: false);
+
+        var guard = CreatePlanToolGuard(CreateGuard([mockTool, realMcpTool, criticalTool, hiddenTool], []));
+
+        var catalog = await guard.GetAvailableToolCatalogAsync(
+            UserId,
+            simulationOnly: true,
+            businessDomains: ["Production"],
+            CancellationToken.None);
+
+        catalog.IsSuccess.Should().BeTrue();
+        catalog.Value!.Version.Should().Be(BuiltInToolRegistrations.CurrentCatalogVersion);
+        catalog.Value.Tools.Select(tool => tool.ToolCode)
+            .Should().BeEquivalentTo(["mock_mcp_health_check"]);
+        var summary = catalog.Value.Tools.Single();
+        summary.ProviderKind.Should().Be(nameof(ToolProviderType.MockMcp));
+        summary.IsMock.Should().BeTrue();
+        summary.CatalogVersion.Should().BeGreaterThan(0);
+        summary.DataBoundary.Should().Be(nameof(ToolDataBoundary.NoData));
+    }
+
+    [Fact]
+    [Trait("Suite", "EnterpriseToolGovernanceP4")]
+    public async Task MockMcpAgentToolExecutor_ShouldReturnMockMarkers_AndResultHash()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var tool = CreateTool(
+            "mock_mcp_kpi_formula_lookup",
+            ToolProviderType.MockMcp,
+            targetName: "MockMcpProvider",
+            inputSchemaJson: """{"type":"object","properties":{"domain":{"type":"string"}}}""");
+        var task = new AgentTask(
+            SessionId.New(),
+            UserId,
+            "Mock MCP KPI",
+            "Mock MCP KPI",
+            AgentTaskType.ReportGeneration,
+            AgentTaskRiskLevel.Low,
+            null,
+            "{}",
+            now);
+        var step = task.AddStep(
+            "Lookup KPI formula",
+            "Lookup mock KPI formula.",
+            AgentStepType.Analysis,
+            tool.ToolCode,
+            false,
+            now,
+            """{"domain":"Production"}""");
+        var workspace = new ArtifactWorkspace(
+            task.Id,
+            $"ws_{Guid.NewGuid():N}",
+            @"C:\aicopilot-workspaces\test",
+            "/api/aigateway/workspaces/test",
+            now);
+        var plan = new AgentTaskPlanDocument(
+            1,
+            "agent_planner",
+            "Mock MCP KPI",
+            AgentTaskType.ReportGeneration.ToString(),
+            AgentTaskRiskLevel.Low.ToString(),
+            [],
+            [],
+            null,
+            [],
+            new AgentTaskPlanRuntimeSettingsDocument(30, 12000),
+            ToolCatalogVersion: BuiltInToolRegistrations.CurrentCatalogVersion,
+            VisibleToolCount: 1,
+            ToolRiskSummary: new Dictionary<string, int> { [AiToolRiskLevel.Low.ToString()] = 1 },
+            MockMcpOnly: true);
+
+        var executor = new MockMcpAgentToolExecutor();
+        var result = await executor.ExecuteAsync(new AgentToolExecutionContext(
+            task,
+            workspace,
+            plan,
+            step,
+            new AgentTaskRunState(),
+            tool,
+            CancellationToken.None));
+
+        var json = JsonSerializer.Serialize(result.Output, JsonSerializerOptions.Web);
+        json.Should().Contain("\"isMock\":true");
+        json.Should().Contain("\"providerKind\":\"MockMcp\"");
+        json.Should().Contain("\"toolRunId\"");
+        json.Should().Contain("\"toolCatalogVersion\"");
+        json.Should().Contain("\"resultHash\"");
+        json.Should().Contain("capacityUtilization");
+    }
+
     private static AgentTaskRuntime CreateRuntime(
         IRepository<AgentTask> taskRepository,
         IRepository<ArtifactWorkspace> workspaceRepository,
@@ -2421,6 +2573,7 @@ public sealed class ToolRegistryGovernanceTests
             string content,
             string mimeType,
             AgentStepId? stepId,
+            ArtifactSourceMetadata? sourceMetadata,
             CancellationToken cancellationToken)
         {
             if (throwOnWrite)
@@ -2428,14 +2581,16 @@ public sealed class ToolRegistryGovernanceTests
                 throw new InvalidOperationException(@"apiKey: sk-test C:\secrets\report.txt Host=db;Password=super-secret;");
             }
 
-            return Task.FromResult(workspace.AddDraftArtifact(
+            var artifact = workspace.AddDraftArtifact(
                 artifactType,
                 name,
                 relativePath,
                 content.Length,
                 mimeType,
                 stepId,
-                DateTimeOffset.UtcNow));
+                DateTimeOffset.UtcNow);
+            artifact.ApplySourceMetadata(sourceMetadata);
+            return Task.FromResult(artifact);
         }
 
         public Task<Artifact> WriteDraftBinaryArtifactAsync(
@@ -2446,16 +2601,19 @@ public sealed class ToolRegistryGovernanceTests
             byte[] content,
             string mimeType,
             AgentStepId? stepId,
+            ArtifactSourceMetadata? sourceMetadata,
             CancellationToken cancellationToken)
         {
-            return Task.FromResult(workspace.AddDraftArtifact(
+            var artifact = workspace.AddDraftArtifact(
                 artifactType,
                 name,
                 relativePath,
                 content.Length,
                 mimeType,
                 stepId,
-                DateTimeOffset.UtcNow));
+                DateTimeOffset.UtcNow);
+            artifact.ApplySourceMetadata(sourceMetadata);
+            return Task.FromResult(artifact);
         }
     }
 
@@ -2479,17 +2637,20 @@ public sealed class ToolRegistryGovernanceTests
             string content,
             string mimeType,
             AgentStepId? stepId,
+            ArtifactSourceMetadata? sourceMetadata,
             CancellationToken cancellationToken)
         {
             TextArtifacts[relativePath] = content;
-            return Task.FromResult(artifactWorkspace.AddDraftArtifact(
+            var artifact = artifactWorkspace.AddDraftArtifact(
                 artifactType,
                 name,
                 relativePath,
                 content.Length,
                 mimeType,
                 stepId,
-                DateTimeOffset.UtcNow));
+                DateTimeOffset.UtcNow);
+            artifact.ApplySourceMetadata(sourceMetadata);
+            return Task.FromResult(artifact);
         }
 
         public Task<Artifact> WriteDraftBinaryArtifactAsync(
@@ -2500,16 +2661,19 @@ public sealed class ToolRegistryGovernanceTests
             byte[] content,
             string mimeType,
             AgentStepId? stepId,
+            ArtifactSourceMetadata? sourceMetadata,
             CancellationToken cancellationToken)
         {
-            return Task.FromResult(artifactWorkspace.AddDraftArtifact(
+            var artifact = artifactWorkspace.AddDraftArtifact(
                 artifactType,
                 name,
                 relativePath,
                 content.Length,
                 mimeType,
                 stepId,
-                DateTimeOffset.UtcNow));
+                DateTimeOffset.UtcNow);
+            artifact.ApplySourceMetadata(sourceMetadata);
+            return Task.FromResult(artifact);
         }
     }
 

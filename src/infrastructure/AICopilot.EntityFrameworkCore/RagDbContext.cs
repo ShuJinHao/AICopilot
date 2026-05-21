@@ -21,6 +21,10 @@ public sealed class RagDbContext(DbContextOptions<RagDbContext> options) : DbCon
 
     public DbSet<DocumentChunk> DocumentChunks => Set<DocumentChunk>();
 
+    public DbSet<KnowledgeCategory> KnowledgeCategories => Set<KnowledgeCategory>();
+
+    public DbSet<KnowledgeSupplement> KnowledgeSupplements => Set<KnowledgeSupplement>();
+
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
     public void StageIntegrationEvent<TEvent>(Func<TEvent> messageFactory)
@@ -34,6 +38,8 @@ public sealed class RagDbContext(DbContextOptions<RagDbContext> options) : DbCon
         builder.HasDefaultSchema("rag");
         builder.ApplyConfiguration(new EmbeddingModelConfiguration());
         builder.ApplyConfiguration(new KnowledgeBaseConfiguration());
+        builder.ApplyConfiguration(new KnowledgeCategoryConfiguration());
+        builder.ApplyConfiguration(new KnowledgeSupplementConfiguration());
         builder.ApplyConfiguration(new DocumentConfiguration());
         builder.ApplyConfiguration(new DocumentChunkConfiguration());
         builder.ApplyConfiguration(new OutboxMessageConfiguration());

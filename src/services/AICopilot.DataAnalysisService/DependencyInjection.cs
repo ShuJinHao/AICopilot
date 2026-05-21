@@ -1,5 +1,6 @@
 ﻿using AICopilot.AgentPlugin;
 using AICopilot.DataAnalysisService.BusinessDatabases;
+using AICopilot.DataAnalysisService.SimulationBusiness;
 using AICopilot.DataAnalysisService.Services;
 using AICopilot.DataAnalysisService.Semantics;
 using AICopilot.Services.Contracts;
@@ -29,7 +30,12 @@ public static class DependencyInjection
         builder.Services.AddScoped<ISemanticSourceInspector, SemanticSourceInspector>();
         builder.Services.AddScoped<ISemanticQueryPlanner, SemanticQueryPlanner>();
         builder.Services.AddScoped<ISemanticSqlGenerator, SemanticSqlGenerator>();
+        builder.Services.AddScoped<BusinessDatabaseAccessService>();
         builder.Services.AddScoped<IBusinessDatabaseReadService, BusinessDatabaseReadService>();
+        builder.Services.AddScoped<BusinessReadonlyQueryExecutor>();
+        builder.Services.AddScoped<IBusinessTextToSqlRuntime, BusinessTextToSqlRuntime>();
+        builder.Services.AddSingleton<BusinessTextToSqlDraftStore>();
+        builder.Services.AddSingleton<ISimulationBusinessSeedGenerator, SimulationBusinessSeedGenerator>();
 
         builder.Services.AddAgentPlugin(registrar =>
         {

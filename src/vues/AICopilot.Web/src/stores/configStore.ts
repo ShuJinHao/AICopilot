@@ -16,6 +16,7 @@ import { useMcpServerConfigDomain } from '@/stores/config/mcpServerConfig'
 import { useProviderReliabilityConfigDomain } from '@/stores/config/providerReliabilityConfig'
 import { useRoutingModelConfigDomain } from '@/stores/config/routingModelConfig'
 import { useSemanticSourceConfigDomain } from '@/stores/config/semanticSourceConfig'
+import { useToolRegistryConfigDomain } from '@/stores/config/toolRegistryConfig'
 import { toStoreErrorMessage } from '@/stores/useDialogCrud'
 import type { ConfigDialogMode } from '@/types/app'
 
@@ -31,6 +32,8 @@ export const useConfigStore = defineStore('config', () => {
     businessDatabase: false,
     mcpServer: false,
     semanticSource: false,
+    toolRegistry: false,
+    cloudReadonlyReadiness: false,
     providerReliability: false
   })
 
@@ -92,6 +95,7 @@ export const useConfigStore = defineStore('config', () => {
     semanticSourceDomain.refreshSemanticSourceStatuses
   )
   const mcpServerDomain = useMcpServerConfigDomain(domainStates)
+  const toolRegistryDomain = useToolRegistryConfigDomain(domainStates)
   const agentWorkspaceDomain = useAgentWorkspaceConfigDomain()
 
   async function refresh() {
@@ -107,6 +111,7 @@ export const useConfigStore = defineStore('config', () => {
         approvalPolicyDomain.refreshApprovalPolicies(),
         businessDatabaseDomain.refreshBusinessDatabases(),
         mcpServerDomain.refreshMcpServers(),
+        toolRegistryDomain.refreshToolRegistry(),
         semanticSourceDomain.refreshSemanticSourceStatuses(),
         agentWorkspaceDomain.refreshAgentWorkspaceSettings()
       ])
@@ -129,6 +134,7 @@ export const useConfigStore = defineStore('config', () => {
     ...approvalPolicyDomain,
     ...businessDatabaseDomain,
     ...mcpServerDomain,
+    ...toolRegistryDomain,
     ...semanticSourceDomain,
     ...providerReliabilityDomain,
     ...agentWorkspaceDomain,

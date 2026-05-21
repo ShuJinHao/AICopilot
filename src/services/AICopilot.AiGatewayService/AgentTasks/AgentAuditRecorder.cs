@@ -180,6 +180,68 @@ public sealed class AgentAuditRecorder(IAuditLogWriter auditLogWriter)
             cancellationToken);
     }
 
+    public Task RecordArtifactPreviewedAsync(
+        AgentTask task,
+        ArtifactWorkspace workspace,
+        Artifact artifact,
+        string previewKind,
+        CancellationToken cancellationToken)
+    {
+        return WriteAsync(
+            "Agent.ArtifactPreviewed",
+            "Artifact",
+            artifact.Id.Value.ToString(),
+            artifact.Name,
+            AuditResults.Succeeded,
+            "Agent artifact preview generated.",
+            new Dictionary<string, string>
+            {
+                ["taskId"] = task.Id.Value.ToString(),
+                ["taskCode"] = task.TaskCode,
+                ["workspaceCode"] = workspace.WorkspaceCode,
+                ["artifactId"] = artifact.Id.Value.ToString(),
+                ["artifactVersion"] = artifact.Version.ToString(),
+                ["artifactStatus"] = artifact.Status.ToString(),
+                ["previewKind"] = previewKind,
+                ["sourceMode"] = artifact.SourceMode ?? string.Empty,
+                ["boundary"] = artifact.Boundary ?? string.Empty,
+                ["isSimulation"] = artifact.IsSimulation.ToString(),
+                ["isSandbox"] = artifact.IsSandbox.ToString(),
+                ["queryHash"] = artifact.QueryHash ?? string.Empty,
+                ["resultHash"] = artifact.ResultHash ?? string.Empty,
+                ["rowCount"] = artifact.RowCount.ToString(),
+                ["isTruncated"] = artifact.IsTruncated.ToString()
+            },
+            cancellationToken);
+    }
+
+    public Task RecordArtifactRevisionCommentAsync(
+        AgentTask task,
+        ArtifactWorkspace workspace,
+        Artifact artifact,
+        string commentHash,
+        CancellationToken cancellationToken)
+    {
+        return WriteAsync(
+            "Agent.ArtifactRevisionCommented",
+            "Artifact",
+            artifact.Id.Value.ToString(),
+            artifact.Name,
+            AuditResults.Succeeded,
+            "Agent draft artifact revision comment recorded.",
+            new Dictionary<string, string>
+            {
+                ["taskId"] = task.Id.Value.ToString(),
+                ["taskCode"] = task.TaskCode,
+                ["workspaceCode"] = workspace.WorkspaceCode,
+                ["artifactId"] = artifact.Id.Value.ToString(),
+                ["artifactVersion"] = artifact.Version.ToString(),
+                ["commentHash"] = commentHash,
+                ["artifactStatus"] = artifact.Status.ToString()
+            },
+            cancellationToken);
+    }
+
     public Task RecordWorkspaceFinalizedAsync(
         AgentTask task,
         ArtifactWorkspace workspace,

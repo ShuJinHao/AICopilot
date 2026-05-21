@@ -25,7 +25,9 @@ public sealed class ToolRegistryGuard(
     public async Task<ToolRegistryDecision> ValidateAsync(
         string? toolCode,
         Guid userId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool allowProtectedProductionPilotTool = false,
+        bool allowProtectedProductionControlledPilotTool = false)
     {
         if (string.IsNullOrWhiteSpace(toolCode))
         {
@@ -42,20 +44,38 @@ public sealed class ToolRegistryGuard(
                 $"Tool '{toolCode}' is not registered.");
         }
 
-        if (tool.RiskLevel == AiToolRiskLevel.Blocked)
+        if (tool.RiskLevel is AiToolRiskLevel.Blocked or AiToolRiskLevel.Critical)
         {
             return ToolRegistryDecision.Reject(
                 AppProblemCodes.ToolBlocked,
                 $"Tool '{tool.ToolCode}' is blocked by registry policy.");
         }
 
-        if (!tool.IsEnabled)
+        var isAllowedProtectedProductionPilotTool =
+            allowProtectedProductionPilotTool &&
+            string.Equals(tool.ToolCode, ProtectedCloudReadonlyToolPolicy.ProductionPilotToolCode, StringComparison.OrdinalIgnoreCase) &&
+            tool.ProviderType == ToolProviderType.CloudReadonly &&
+            tool.DataBoundary == ToolDataBoundary.CloudReadonlyProductionPilotOnly;
+        var isAllowedProtectedProductionControlledPilotTool =
+            allowProtectedProductionControlledPilotTool &&
+            string.Equals(tool.ToolCode, ProtectedCloudReadonlyToolPolicy.ProductionControlledToolCode, StringComparison.OrdinalIgnoreCase) &&
+            tool.ProviderType == ToolProviderType.CloudReadonly &&
+            tool.DataBoundary == ToolDataBoundary.CloudReadonlyProductionControlledOnly;
+
+        if (!tool.IsEnabled && !isAllowedProtectedProductionPilotTool && !isAllowedProtectedProductionControlledPilotTool)
         {
             return ToolRegistryDecision.Reject(
                 tool.ProviderType == ToolProviderType.CloudReadonly
                     ? AppProblemCodes.CloudReadonlyToolDisabled
                     : AppProblemCodes.ToolDisabled,
                 $"Tool '{tool.ToolCode}' is disabled.");
+        }
+
+        if (!tool.IsExecutableByAgent && !isAllowedProtectedProductionPilotTool && !isAllowedProtectedProductionControlledPilotTool)
+        {
+            return ToolRegistryDecision.Reject(
+                AppProblemCodes.ToolDisabled,
+                $"Tool '{tool.ToolCode}' is not executable by Agent policy.");
         }
 
         if (tool.ProviderType == ToolProviderType.CloudReadonly)

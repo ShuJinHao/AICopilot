@@ -77,7 +77,16 @@ export function createEmptyBusinessDatabaseForm(): BusinessDatabaseFormModel {
     externalSystemType: FORM_DEFAULTS.businessDatabase.externalSystemType,
     readOnlyCredentialVerified: false,
     hasConnectionString: false,
-    connectionStringMasked: null
+    connectionStringMasked: null,
+    category: 'General',
+    tags: [],
+    ownerDepartment: '',
+    businessDomain: '',
+    sensitivityLevel: 'Internal',
+    defaultQueryLimit: FORM_DEFAULTS.businessDatabase.defaultQueryLimit,
+    maxQueryLimit: FORM_DEFAULTS.businessDatabase.maxQueryLimit,
+    isSelectableInChat: true,
+    isSelectableInAgent: true
   }
 }
 
@@ -170,7 +179,16 @@ export function toBusinessDatabaseForm(detail: BusinessDatabaseDetail): Business
     externalSystemType: detail.externalSystemType,
     readOnlyCredentialVerified: detail.readOnlyCredentialVerified,
     hasConnectionString: detail.hasConnectionString,
-    connectionStringMasked: detail.connectionStringMasked
+    connectionStringMasked: detail.connectionStringMasked,
+    category: detail.category ?? 'General',
+    tags: [...(detail.tags ?? [])],
+    ownerDepartment: detail.ownerDepartment ?? '',
+    businessDomain: detail.businessDomain ?? '',
+    sensitivityLevel: detail.sensitivityLevel ?? 'Internal',
+    defaultQueryLimit: detail.defaultQueryLimit ?? FORM_DEFAULTS.businessDatabase.defaultQueryLimit,
+    maxQueryLimit: detail.maxQueryLimit ?? FORM_DEFAULTS.businessDatabase.maxQueryLimit,
+    isSelectableInChat: detail.isSelectableInChat ?? true,
+    isSelectableInAgent: detail.isSelectableInAgent ?? true
   }
 }
 

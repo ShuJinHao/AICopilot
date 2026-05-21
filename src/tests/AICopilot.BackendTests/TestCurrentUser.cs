@@ -5,7 +5,9 @@ namespace AICopilot.BackendTests;
 internal sealed class TestCurrentUser(
     Guid? id = null,
     string role = "User",
-    string userName = "test-user") : ICurrentUser
+    string userName = "test-user",
+    string? cloudDepartmentId = null,
+    string? cloudDepartmentName = null) : ICurrentUser
 {
     public Guid? Id { get; } = id ?? Guid.Parse("11111111-1111-4111-8111-111111111111");
 
@@ -18,6 +20,10 @@ internal sealed class TestCurrentUser(
     public string? CloudTenantId => null;
 
     public string? CloudEmployeeNo => null;
+
+    public string? CloudDepartmentId { get; } = cloudDepartmentId;
+
+    public string? CloudDepartmentName { get; } = cloudDepartmentName;
 
     public string? CloudStatusVersion => null;
 

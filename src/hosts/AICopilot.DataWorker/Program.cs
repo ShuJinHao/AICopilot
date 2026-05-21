@@ -40,6 +40,10 @@ internal sealed class WorkerCurrentUser : ICurrentUser
 
     public string? CloudEmployeeNo => null;
 
+    public string? CloudDepartmentId => null;
+
+    public string? CloudDepartmentName => null;
+
     public string? CloudStatusVersion => null;
 
     public bool IsAuthenticated => false;

@@ -66,6 +66,7 @@ public sealed class RagPermissionTests
         var result = await new SearchKnowledgeBaseQueryHandler(
                 new TestRepository<KnowledgeBase>(foreignPrivate),
                 new TestRepository<EmbeddingModel>(embedding),
+                new TestRepository<KnowledgeSupplement>(),
                 vectorSearch,
                 new TestCurrentUser(UserAId))
             .Handle(new SearchKnowledgeBaseQuery(foreignPrivate.Id, "secret"), CancellationToken.None);
@@ -73,6 +74,62 @@ public sealed class RagPermissionTests
         result.Status.Should().Be(ResultStatus.NotFound);
         result.Value.Should().BeNull();
         vectorSearch.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task RagSupplement_ShouldOverrideOlderDocumentInDefaultRetrieval()
+    {
+        var embedding = new EmbeddingModel(
+            "embedding",
+            "OpenAI",
+            "https://example.invalid/v1",
+            "text-embedding-test",
+            1536,
+            8191);
+        var knowledgeBase = new KnowledgeBase(
+            "employee-policy",
+            "employee policy",
+            embedding.Id,
+            UserAId,
+            KnowledgeBaseAccessScope.AuthenticatedUsers);
+        var document = knowledgeBase.AddDocument(
+            "leave-policy.txt",
+            "leave-policy.txt",
+            ".txt",
+            "hash");
+        document.MarkAsIndexed();
+        var supplement = new KnowledgeSupplement(
+            "婚假制度更新",
+            "婚假 15 天，自 2026-05-01 起执行。",
+            KnowledgeSupplementPriority.CriticalOverride,
+            documentId: document.Id);
+        var vectorSearch = new CapturingVectorSearchService(
+            [
+                new KnowledgeVectorSearchResult(
+                    "旧制度：婚假 3 天。",
+                    0.97,
+                    document.Id.Value,
+                    document.Name,
+                    0)
+            ]);
+
+        var result = await new SearchKnowledgeBaseQueryHandler(
+                new TestRepository<KnowledgeBase>(knowledgeBase),
+                new TestRepository<EmbeddingModel>(embedding),
+                new TestRepository<KnowledgeSupplement>(supplement),
+                vectorSearch,
+                new TestCurrentUser(UserAId))
+            .Handle(new SearchKnowledgeBaseQuery(knowledgeBase.Id, "婚假几天", TopK: 3), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var item = result.Value.Should().ContainSingle().Subject;
+        item.Text.Should().Contain("婚假 15 天");
+        item.Text.IndexOf("婚假 15 天", StringComparison.Ordinal)
+            .Should()
+            .BeLessThan(item.Text.IndexOf("婚假 3 天", StringComparison.Ordinal));
+        var hit = item.SupplementHits.Should().ContainSingle().Subject;
+        hit.Priority.Should().Be(KnowledgeSupplementPriority.CriticalOverride.ToString());
+        hit.ContentHash.Should().StartWith("sha256:");
     }
 
     [Fact]
@@ -269,7 +326,8 @@ public sealed class RagPermissionTests
         }
     }
 
-    private sealed class CapturingVectorSearchService : IKnowledgeVectorSearchService
+    private sealed class CapturingVectorSearchService(
+        IReadOnlyList<KnowledgeVectorSearchResult>? results = null) : IKnowledgeVectorSearchService
     {
         public int CallCount { get; private set; }
 
@@ -282,11 +340,11 @@ public sealed class RagPermissionTests
             CancellationToken cancellationToken = default)
         {
             CallCount++;
-            IReadOnlyList<KnowledgeVectorSearchResult> results =
+            IReadOnlyList<KnowledgeVectorSearchResult> defaultResults =
             [
                 new("secret fragment", 0.99, 1, "secret-doc.txt", 0)
             ];
-            return Task.FromResult(results);
+            return Task.FromResult(results ?? defaultResults);
         }
     }
 

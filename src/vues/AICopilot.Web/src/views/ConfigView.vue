@@ -15,31 +15,30 @@ import LanguageModelConfig from '@/views/config/LanguageModelConfig.vue'
 import McpServerConfig from '@/views/config/McpServerConfig.vue'
 import ProviderReliabilityConfig from '@/views/config/ProviderReliabilityConfig.vue'
 import RoutingModelConfig from '@/views/config/RoutingModelConfig.vue'
+import ToolRegistryConfig from '@/views/config/ToolRegistryConfig.vue'
 
 const store = useConfigStore()
 const activeTab = ref('models')
 
 const tabs = [
   { value: 'models', label: '模型' },
-  { value: 'reliability', label: '可靠性' },
+  { value: 'reliability', label: '模型池' },
   { value: 'routing', label: '路由' },
   { value: 'templates', label: '模板' },
-  { value: 'data', label: '数据分析' },
+  { value: 'data', label: '数据源' },
+  { value: 'tools', label: '工具目录' },
   { value: 'mcp', label: 'MCP' },
   { value: 'approval', label: '审批' },
   { value: 'agent', label: 'Agent' }
 ]
 
-const acceptanceSummary = {
-  generatedAt: '2026-05-14',
-  reportPath: '资料/acceptance-closure-latest.md',
-  status: '全部通过'
-}
-
+const activeRoutingModel = computed(
+  () => store.routingModels.find((item) => item.isActive)?.name || '未启用'
+)
+const mockToolCount = computed(
+  () => store.toolRegistrations.filter((tool) => tool.providerType === 'MockMcp').length
+)
 const workspaceFolders = computed(() => store.workspaceSettings?.folders ?? [])
-const allowedArtifactTypes = computed(() => store.workspaceSettings?.allowedArtifactTypes ?? [])
-const activeRoutingModel = computed(() => store.routingModels.find((item) => item.isActive)?.name || '未激活')
-const workspacePathPolicy = computed(() => (store.workspaceSettings?.allowsUserDefinedPath ? '允许用户指定路径' : '固定受控目录'))
 const runQueueItems = computed(() => store.runQueuePage?.items ?? [])
 const workerRows = computed(() => store.workerStatus?.workers ?? [])
 
@@ -50,7 +49,11 @@ onMounted(() => {
 
 <template>
   <AppShell>
-    <AiDataPage eyebrow="Runtime Control" title="运行配置" description="集中管理模型、模板、MCP 工具、只读业务数据源、审批策略和 Agent 工作区边界。">
+    <AiDataPage
+      eyebrow="Runtime Control"
+      title="运行配置"
+      description="集中管理模型、数据源、工具目录、Mock MCP、审批策略和 Agent 工作区边界。"
+    >
       <template #actions>
         <AiButton :disabled="store.isLoading" @click="store.refresh()">
           <RefreshCw class="h-4 w-4" :class="{ 'animate-spin': store.isLoading }" />
@@ -64,23 +67,23 @@ onMounted(() => {
           <strong>{{ store.languageModels.length }}</strong>
         </AiCard>
         <AiCard class="metric" tone="blue">
-          <span>会话模板</span>
-          <strong>{{ store.conversationTemplates.length }}</strong>
-        </AiCard>
-        <AiCard class="metric" tone="lime">
           <span>路由模型</span>
           <strong>{{ activeRoutingModel }}</strong>
         </AiCard>
         <AiCard class="metric" tone="teal">
-          <span>只读数据源</span>
+          <span>业务数据源</span>
           <strong>{{ store.businessDatabases.length }}</strong>
         </AiCard>
+        <AiCard class="metric" tone="lime">
+          <span>工具登记</span>
+          <strong>{{ store.toolRegistrations.length }}</strong>
+        </AiCard>
         <AiCard class="metric" tone="soft">
-          <span>MCP 服务</span>
-          <strong>{{ store.mcpServers.length }}</strong>
+          <span>Mock MCP</span>
+          <strong>{{ mockToolCount }}</strong>
         </AiCard>
         <AiCard class="metric" tone="surface">
-          <span>服务商回退</span>
+          <span>Provider Fallback</span>
           <strong>{{ store.providerReliability?.fallbackEnabled ? '启用' : '关闭' }}</strong>
         </AiCard>
       </div>
@@ -93,80 +96,38 @@ onMounted(() => {
         <RoutingModelConfig v-else-if="activeTab === 'routing'" />
         <ConversationTemplateConfig v-else-if="activeTab === 'templates'" />
         <BusinessDatabaseConfig v-else-if="activeTab === 'data'" />
+        <ToolRegistryConfig v-else-if="activeTab === 'tools'" />
         <McpServerConfig v-else-if="activeTab === 'mcp'" />
         <ApprovalPolicyConfig v-else-if="activeTab === 'approval'" />
 
         <div v-else class="agent-config">
-          <AiCard class="agent-hero" tone="soft">
-            <div>
-              <p class="page-kicker">Agent / Workspace</p>
-              <h2>受控产物运行边界</h2>
-              <p>这里展示 Agent 工作区、运行历史、审批策略和交付验收状态。服务端路径仍由应用托管，不允许用户输入任意写入目录。</p>
-            </div>
-            <div class="acceptance-card">
-              <span>最近验收</span>
-              <strong>{{ acceptanceSummary.status }}</strong>
-              <small>{{ acceptanceSummary.generatedAt }} · {{ acceptanceSummary.reportPath }}</small>
-            </div>
-          </AiCard>
-
-          <AiCard class="agent-config-section">
-            <h2>运行与记忆</h2>
-            <p>聊天、RAG 和 Agent 规划统一读取这些运行参数。</p>
-            <div class="agent-config-grid">
-              <div><span>路由历史</span><strong>{{ store.runtimeSettings?.routingHistoryCount ?? '-' }}</strong></div>
-              <div><span>回答历史</span><strong>{{ store.runtimeSettings?.answerHistoryCount ?? '-' }}</strong></div>
-              <div><span>RAG 改写历史</span><strong>{{ store.runtimeSettings?.ragRewriteHistoryCount ?? '-' }}</strong></div>
-              <div><span>Agent 规划历史</span><strong>{{ store.runtimeSettings?.agentPlanningHistoryCount ?? '-' }}</strong></div>
-              <div><span>摘要阈值</span><strong>{{ store.runtimeSettings?.summaryThresholdMessages ?? '-' }}</strong></div>
-              <div><span>上下文上限</span><strong>{{ store.runtimeSettings?.contextTokenLimit ?? '-' }}</strong></div>
-            </div>
-          </AiCard>
-
-          <AiCard class="agent-config-section">
+          <AiCard class="agent-section" data-testid="agent-config-workspace">
             <div class="section-head">
               <div>
-                <h2>工作区</h2>
-                <p>产物只能写入应用管理的固定目录，正式输出必须经过 finalize。</p>
+                <h2>Agent 工作区</h2>
+                <p>产物写入由后端工作区托管；计划、工具调用和 final 输出仍受审批链控制。</p>
               </div>
               <AiTag :tone="store.workspaceSettings?.allowsUserDefinedPath ? 'warning' : 'success'">
-                {{ workspacePathPolicy }}
+                {{ store.workspaceSettings?.allowsUserDefinedPath ? '开放路径' : '固定受控目录' }}
               </AiTag>
             </div>
             <p class="workspace-root">{{ store.workspaceSettings?.rootPath || '未加载' }}</p>
             <div class="tag-list">
               <AiTag v-for="folder in workspaceFolders" :key="folder" tone="neutral">{{ folder }}/</AiTag>
             </div>
-            <div class="tag-list">
-              <AiTag v-for="type in allowedArtifactTypes" :key="type" tone="teal">{{ type }}</AiTag>
-            </div>
-            <div class="notice" :class="{ warning: store.workspaceSettings?.allowsUserDefinedPath }">
-              {{ store.workspaceSettings?.allowsUserDefinedPath ? '当前策略存在路径开放风险。' : '任意服务端路径写入保持关闭。' }}
-            </div>
           </AiCard>
 
-          <AiCard class="agent-config-section">
-            <h2>审批与交付门禁</h2>
-            <p>计划确认、风险工具、产物确认和正式输出仍统一落到审批与审计链路。</p>
-            <div class="guardrail-grid">
-              <div><span>审批策略入口</span><strong>审批 Tab</strong></div>
-              <div><span>产物下载</span><strong>所有权校验</strong></div>
-              <div><span>Cloud 写入</span><strong>禁止</strong></div>
-              <div><span>Shell / 任意路径</span><strong>未开放</strong></div>
-            </div>
-          </AiCard>
-
-          <AiCard class="agent-config-section">
+          <AiCard class="agent-section" data-testid="agent-config-run-queue">
             <div class="section-head">
               <div>
-                <h2>Run Queue</h2>
-                <p>队列统计和状态全部来自后端运维接口。</p>
+                <h2>运行队列</h2>
+                <p>队列、租约、失败和 worker 状态均来自后端，不在前端推断。</p>
               </div>
               <AiTag :tone="store.runQueueSummary?.staleLeasedCount ? 'warning' : 'success'">
                 {{ store.runQueueSummary?.staleLeasedCount ? '存在陈旧租约' : '队列正常' }}
               </AiTag>
             </div>
-            <div class="agent-config-grid">
+            <div class="agent-grid">
               <div><span>Queued</span><strong>{{ store.runQueueSummary?.queuedCount ?? '-' }}</strong></div>
               <div><span>Leased</span><strong>{{ store.runQueueSummary?.leasedCount ?? '-' }}</strong></div>
               <div><span>Failed</span><strong>{{ store.runQueueSummary?.failedCount ?? '-' }}</strong></div>
@@ -174,7 +135,7 @@ onMounted(() => {
               <div><span>Stale Lease</span><strong>{{ store.runQueueSummary?.staleLeasedCount ?? '-' }}</strong></div>
               <div><span>Worker</span><strong>{{ store.runQueueSummary?.activeWorkerCount ?? '-' }}</strong></div>
             </div>
-            <div class="ops-table" v-if="runQueueItems.length">
+            <div v-if="runQueueItems.length" class="ops-table">
               <div v-for="item in runQueueItems" :key="item.id" class="ops-row">
                 <div>
                   <strong>{{ item.status }}</strong>
@@ -186,23 +147,23 @@ onMounted(() => {
             <div v-else class="panel-empty">暂无队列记录</div>
           </AiCard>
 
-          <AiCard class="agent-config-section">
+          <AiCard class="agent-section" data-testid="agent-config-worker-status">
             <div class="section-head">
               <div>
-                <h2>Worker Status</h2>
-                <p>工作区一致性、心跳和活跃 Worker 由后端统一判定。</p>
+                <h2>Worker 状态</h2>
+                <p>用于确认 DataWorker 和 HttpApi 的工作区配置是否一致。</p>
               </div>
               <AiTag :tone="store.workerStatus?.workspaceConsistent ? 'success' : 'danger'">
                 {{ store.workerStatus?.statusCode || '未加载' }}
               </AiTag>
             </div>
-            <div class="agent-config-grid">
+            <div class="agent-grid">
               <div><span>Active Workers</span><strong>{{ store.workerStatus?.activeWorkerCount ?? '-' }}</strong></div>
               <div><span>Queued</span><strong>{{ store.workerStatus?.queuedCount ?? '-' }}</strong></div>
               <div><span>Leased</span><strong>{{ store.workerStatus?.leasedCount ?? '-' }}</strong></div>
               <div><span>Workspace</span><strong>{{ store.workerStatus?.workspaceConsistent ? '一致' : '不一致' }}</strong></div>
             </div>
-            <div class="ops-table" v-if="workerRows.length">
+            <div v-if="workerRows.length" class="ops-table">
               <div v-for="worker in workerRows" :key="worker.workerId" class="ops-row">
                 <div>
                   <strong>{{ worker.workerName }}</strong>
@@ -227,15 +188,15 @@ onMounted(() => {
 }
 
 .metric {
-  min-height: 112px;
+  min-height: 108px;
 }
 
 .metric span,
-.agent-config-grid span,
-.guardrail-grid span,
-.acceptance-card span,
-.acceptance-card small,
-.workspace-root {
+.agent-grid span,
+.workspace-root,
+.ops-row span,
+.ops-row small,
+.panel-empty {
   color: var(--ai-text-muted);
   font-size: 12px;
   font-weight: 800;
@@ -243,17 +204,16 @@ onMounted(() => {
 
 .metric strong {
   display: block;
-  margin-top: 14px;
+  margin-top: 12px;
   color: var(--ai-text);
-  font-size: 28px;
+  font-size: 26px;
   font-weight: 950;
-  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
-.error-banner,
-.notice {
+.error-banner {
   border: 1px solid #fecaca;
-  border-radius: 18px;
+  border-radius: 14px;
   background: #fef2f2;
   padding: 12px 14px;
   color: #b42318;
@@ -266,49 +226,18 @@ onMounted(() => {
   gap: 16px;
 }
 
-.agent-hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 280px;
-  align-items: stretch;
-  gap: 18px;
-}
-
-.page-kicker {
-  margin: 0 0 8px;
-  color: var(--ai-text-muted);
-  font-size: 12px;
-  font-weight: 900;
-  text-transform: uppercase;
-}
-
-.agent-hero h2,
-.agent-config-section h2 {
+.agent-section h2 {
   margin: 0;
   color: var(--ai-text);
   font-size: 20px;
   font-weight: 950;
 }
 
-.agent-hero p,
-.agent-config-section p {
+.agent-section p {
   margin: 8px 0 0;
   color: var(--ai-text-muted);
   font-weight: 650;
   line-height: 1.7;
-}
-
-.acceptance-card {
-  display: grid;
-  gap: 6px;
-  border: 1px solid var(--ai-border);
-  border-radius: 20px;
-  padding: 16px;
-  background: var(--ai-surface);
-}
-
-.acceptance-card strong {
-  font-size: 30px;
-  font-weight: 950;
 }
 
 .section-head {
@@ -316,32 +245,6 @@ onMounted(() => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-}
-
-.agent-config-grid,
-.guardrail-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 10px;
-  margin-top: 14px;
-}
-
-.agent-config-grid div,
-.guardrail-grid div {
-  display: grid;
-  gap: 5px;
-  border: 1px solid var(--ai-border);
-  border-radius: 16px;
-  padding: 12px;
-  background: var(--ai-surface-soft);
-}
-
-.agent-config-grid strong,
-.guardrail-grid strong {
-  color: var(--ai-text);
-  font-size: 20px;
-  font-weight: 950;
-  font-variant-numeric: tabular-nums;
 }
 
 .workspace-root {
@@ -356,17 +259,27 @@ onMounted(() => {
   margin-top: 12px;
 }
 
-.notice {
-  margin-top: 12px;
-  border-color: #bbf7d0;
-  background: #f0fdf4;
-  color: #15803d;
+.agent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
 }
 
-.notice.warning {
-  border-color: #fed7aa;
-  background: #fff7ed;
-  color: #b45309;
+.agent-grid div {
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--ai-border);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--ai-surface-soft);
+}
+
+.agent-grid strong {
+  color: var(--ai-text);
+  font-size: 20px;
+  font-weight: 950;
+  overflow-wrap: anywhere;
 }
 
 .ops-table {
@@ -381,7 +294,7 @@ onMounted(() => {
   gap: 12px;
   align-items: center;
   border: 1px solid var(--ai-border);
-  border-radius: 14px;
+  border-radius: 8px;
   padding: 11px 12px;
   background: var(--ai-surface-soft);
 }
@@ -399,19 +312,6 @@ onMounted(() => {
   overflow-wrap: anywhere;
 }
 
-.ops-row strong {
-  color: var(--ai-text);
-  font-weight: 900;
-}
-
-.ops-row span,
-.ops-row small,
-.panel-empty {
-  color: var(--ai-text-muted);
-  font-size: 12px;
-  font-weight: 750;
-}
-
 .panel-empty {
   margin-top: 12px;
 }
@@ -422,9 +322,13 @@ onMounted(() => {
   }
 }
 
-@media (max-width: 980px) {
-  .metric-strip,
-  .agent-hero {
+@media (max-width: 760px) {
+  .metric-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .section-head,
+  .ops-row {
     grid-template-columns: 1fr;
   }
 }

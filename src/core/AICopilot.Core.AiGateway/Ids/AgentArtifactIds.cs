@@ -253,3 +253,66 @@ public readonly record struct AgentWorkerHeartbeatId : IStronglyTypedGuidId
 
     public override string ToString() => Value.ToString();
 }
+
+public readonly record struct TrialCampaignId : IStronglyTypedGuidId
+{
+    public TrialCampaignId(Guid value)
+    {
+        if (value == Guid.Empty)
+        {
+            throw new ArgumentException("Trial campaign id is required.", nameof(value));
+        }
+
+        Value = value;
+    }
+
+    public Guid Value { get; }
+
+    public static TrialCampaignId New() => new(Guid.NewGuid());
+
+    public static implicit operator Guid(TrialCampaignId id) => id.Value;
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct TrialScenarioRunId : IStronglyTypedGuidId
+{
+    public TrialScenarioRunId(Guid value)
+    {
+        if (value == Guid.Empty)
+        {
+            throw new ArgumentException("Trial scenario run id is required.", nameof(value));
+        }
+
+        Value = value;
+    }
+
+    public Guid Value { get; }
+
+    public static TrialScenarioRunId New() => new(Guid.NewGuid());
+
+    public static implicit operator Guid(TrialScenarioRunId id) => id.Value;
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct TrialRiskIssueId : IStronglyTypedGuidId
+{
+    public TrialRiskIssueId(Guid value)
+    {
+        if (value == Guid.Empty)
+        {
+            throw new ArgumentException("Trial risk issue id is required.", nameof(value));
+        }
+
+        Value = value;
+    }
+
+    public Guid Value { get; }
+
+    public static TrialRiskIssueId New() => new(Guid.NewGuid());
+
+    public static implicit operator Guid(TrialRiskIssueId id) => id.Value;
+
+    public override string ToString() => Value.ToString();
+}

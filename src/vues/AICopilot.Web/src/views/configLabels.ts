@@ -3,7 +3,8 @@ import type { BusinessDatabaseSummary, McpAllowedTool } from '@/types/app'
 export const DATA_SOURCE_EXTERNAL_SYSTEM = {
   Unknown: 0,
   CloudReadOnly: 1,
-  NonCloud: 2
+  NonCloud: 2,
+  SimulationBusiness: 3
 } as const
 
 export const MCP_RISK_LEVEL = {
@@ -37,6 +38,9 @@ const externalSystemLabels: Record<number, string> = {
   [DATA_SOURCE_EXTERNAL_SYSTEM.CloudReadOnly]: 'Cloud 只读',
   [DATA_SOURCE_EXTERNAL_SYSTEM.NonCloud]: '非云系统'
 }
+
+externalSystemLabels[DATA_SOURCE_EXTERNAL_SYSTEM.SimulationBusiness] =
+  '\u0041\u0049 \u72ec\u7acb\u6a21\u62df\u4e1a\u52a1\u5e93'
 
 const mcpRiskLabels: Record<number, string> = {
   [MCP_RISK_LEVEL.Low]: '低',

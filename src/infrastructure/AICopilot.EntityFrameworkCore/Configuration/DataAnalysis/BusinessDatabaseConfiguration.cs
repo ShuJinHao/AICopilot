@@ -61,5 +61,55 @@ public class BusinessDatabaseConfiguration : IEntityTypeConfiguration<BusinessDa
         builder.Property(db => db.CreatedAt)
             .IsRequired()
             .HasColumnName("created_at");
+
+        builder.Property(db => db.Category)
+            .IsRequired()
+            .HasMaxLength(100)
+            .HasDefaultValue("General")
+            .HasColumnName("category");
+
+        builder.Property(db => db.Tags)
+            .IsRequired()
+            .HasMaxLength(500)
+            .HasDefaultValue(string.Empty)
+            .HasColumnName("tags");
+
+        builder.Property(db => db.OwnerDepartment)
+            .IsRequired()
+            .HasMaxLength(100)
+            .HasDefaultValue(string.Empty)
+            .HasColumnName("owner_department");
+
+        builder.Property(db => db.BusinessDomain)
+            .IsRequired()
+            .HasMaxLength(100)
+            .HasDefaultValue(string.Empty)
+            .HasColumnName("business_domain");
+
+        builder.Property(db => db.SensitivityLevel)
+            .IsRequired()
+            .HasMaxLength(50)
+            .HasDefaultValue("Internal")
+            .HasColumnName("sensitivity_level");
+
+        builder.Property(db => db.DefaultQueryLimit)
+            .IsRequired()
+            .HasDefaultValue(200)
+            .HasColumnName("default_query_limit");
+
+        builder.Property(db => db.MaxQueryLimit)
+            .IsRequired()
+            .HasDefaultValue(1000)
+            .HasColumnName("max_query_limit");
+
+        builder.Property(db => db.IsSelectableInChat)
+            .IsRequired()
+            .HasDefaultValue(true)
+            .HasColumnName("is_selectable_in_chat");
+
+        builder.Property(db => db.IsSelectableInAgent)
+            .IsRequired()
+            .HasDefaultValue(true)
+            .HasColumnName("is_selectable_in_agent");
     }
 }

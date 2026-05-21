@@ -124,6 +124,42 @@ public sealed class ArtifactConfiguration : IEntityTypeConfiguration<Artifact>
             .IsRequired()
             .HasColumnName("status");
 
+        builder.Property(artifact => artifact.SourceMode)
+            .HasMaxLength(80)
+            .HasColumnName("source_mode");
+
+        builder.Property(artifact => artifact.Boundary)
+            .HasMaxLength(120)
+            .HasColumnName("boundary");
+
+        builder.Property(artifact => artifact.IsSimulation)
+            .IsRequired()
+            .HasColumnName("is_simulation");
+
+        builder.Property(artifact => artifact.IsSandbox)
+            .IsRequired()
+            .HasColumnName("is_sandbox");
+
+        builder.Property(artifact => artifact.SourceLabel)
+            .HasMaxLength(200)
+            .HasColumnName("source_label");
+
+        builder.Property(artifact => artifact.QueryHash)
+            .HasMaxLength(128)
+            .HasColumnName("query_hash");
+
+        builder.Property(artifact => artifact.ResultHash)
+            .HasMaxLength(128)
+            .HasColumnName("result_hash");
+
+        builder.Property(artifact => artifact.RowCount)
+            .IsRequired()
+            .HasColumnName("row_count");
+
+        builder.Property(artifact => artifact.IsTruncated)
+            .IsRequired()
+            .HasColumnName("is_truncated");
+
         builder.Property(artifact => artifact.CreatedByStepId)
             .HasConversion(
                 id => id.HasValue ? id.Value.Value : (Guid?)null,
@@ -137,6 +173,10 @@ public sealed class ArtifactConfiguration : IEntityTypeConfiguration<Artifact>
         builder.Property(artifact => artifact.UpdatedAt)
             .HasColumnType("timestamp with time zone")
             .HasColumnName("updated_at");
+
+        builder.Property(artifact => artifact.FinalizedAt)
+            .HasColumnType("timestamp with time zone")
+            .HasColumnName("finalized_at");
 
         builder.HasIndex(artifact => new { artifact.WorkspaceId, artifact.RelativePath });
     }

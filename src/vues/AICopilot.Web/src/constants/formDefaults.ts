@@ -8,7 +8,9 @@ export const FORM_DEFAULTS = {
   },
   businessDatabase: {
     provider: 1,
-    externalSystemType: 0
+    externalSystemType: 0,
+    defaultQueryLimit: 200,
+    maxQueryLimit: 1000
   },
   mcpServer: {
     transportType: 1,

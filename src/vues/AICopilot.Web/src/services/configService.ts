@@ -8,6 +8,10 @@ import type {
   BusinessDatabaseFormModel,
   BusinessDatabaseSummary,
   ChatRuntimeSettings,
+  CloudReadonlyReadiness,
+  CloudReadonlySandboxAgentTrialStatus,
+  CloudReadonlySandboxControlledTrialStatus,
+  CloudReadonlySandboxStatus,
   ConversationTemplateDetail,
   ConversationTemplateFormModel,
   ConversationTemplateSummary,
@@ -23,7 +27,9 @@ import type {
   RoutingModelDetail,
   RoutingModelFormModel,
   RoutingModelSummary,
-  SemanticSourceStatus
+  SemanticSourceStatus,
+  ToolCatalogSummary,
+  ToolRegistrySummary
 } from '@/types/app'
 import type {
   AgentRunQueuePage,
@@ -232,7 +238,16 @@ export const configService = {
       isEnabled: payload.isEnabled,
       isReadOnly: true,
       externalSystemType: payload.externalSystemType,
-      readOnlyCredentialVerified: payload.readOnlyCredentialVerified
+      readOnlyCredentialVerified: payload.readOnlyCredentialVerified,
+      category: payload.category,
+      tags: payload.tags,
+      ownerDepartment: payload.ownerDepartment,
+      businessDomain: payload.businessDomain,
+      sensitivityLevel: payload.sensitivityLevel,
+      defaultQueryLimit: payload.defaultQueryLimit,
+      maxQueryLimit: payload.maxQueryLimit,
+      isSelectableInChat: payload.isSelectableInChat,
+      isSelectableInAgent: payload.isSelectableInAgent
     })
   },
 
@@ -246,7 +261,16 @@ export const configService = {
       isEnabled: payload.isEnabled,
       isReadOnly: true,
       externalSystemType: payload.externalSystemType,
-      readOnlyCredentialVerified: payload.readOnlyCredentialVerified
+      readOnlyCredentialVerified: payload.readOnlyCredentialVerified,
+      category: payload.category,
+      tags: payload.tags,
+      ownerDepartment: payload.ownerDepartment,
+      businessDomain: payload.businessDomain,
+      sensitivityLevel: payload.sensitivityLevel,
+      defaultQueryLimit: payload.defaultQueryLimit,
+      maxQueryLimit: payload.maxQueryLimit,
+      isSelectableInChat: payload.isSelectableInChat,
+      isSelectableInAgent: payload.isSelectableInAgent
     })
   },
 
@@ -264,6 +288,53 @@ export const configService = {
 
   async getMcpServers() {
     return await apiClient.get<McpServerSummary[]>('/mcp/server/list')
+  },
+
+  async getToolRegistrations() {
+    return await apiClient.get<ToolRegistrySummary[]>('/aigateway/tools')
+  },
+
+  async getToolCatalog() {
+    return await apiClient.get<ToolCatalogSummary>('/aigateway/tools/catalog', {
+      simulationOnly: true
+    })
+  },
+
+  async getCloudReadonlyReadiness() {
+    return await apiClient.get<CloudReadonlyReadiness>('/aigateway/cloud-readonly/readiness')
+  },
+
+  async getCloudReadonlyReadinessHistory() {
+    return await apiClient.get<CloudReadonlyReadiness[]>('/aigateway/cloud-readonly/readiness/history')
+  },
+
+  async getCloudReadonlySandboxStatus() {
+    return await apiClient.get<CloudReadonlySandboxStatus>('/aigateway/cloud-readonly/readiness/sandbox')
+  },
+
+  async getCloudReadonlySandboxSmokeHistory() {
+    return await apiClient.get<CloudReadonlySandboxStatus[]>('/aigateway/cloud-readonly/readiness/sandbox/history')
+  },
+
+  async getCloudReadonlySandboxAgentTrialStatus() {
+    return await apiClient.get<CloudReadonlySandboxAgentTrialStatus>(
+      '/aigateway/cloud-readonly/readiness/sandbox-agent-trial'
+    )
+  },
+
+  async getCloudReadonlySandboxControlledTrialStatus() {
+    return await apiClient.get<CloudReadonlySandboxControlledTrialStatus>(
+      '/aigateway/cloud-readonly/readiness/sandbox-controlled-trial'
+    )
+  },
+
+  async runCloudReadonlyReadinessCheck(mode = 'FakeEndpoint') {
+    return await apiClient.post<CloudReadonlyReadiness>('/aigateway/cloud-readonly/readiness/run', {
+      mode,
+      endpointCodes: ['devices', 'capacity_summary', 'device_logs', 'pass_station_records'],
+      maxRows: 20,
+      timeoutMs: 5000
+    })
   },
 
   async createMcpServer(payload: McpServerFormModel) {

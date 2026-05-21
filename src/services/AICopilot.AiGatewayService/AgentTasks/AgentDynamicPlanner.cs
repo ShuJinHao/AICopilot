@@ -19,7 +19,15 @@ public sealed record AgentDynamicPlannerRequest(
     IReadOnlyCollection<Guid> KnowledgeBaseIds,
     PlannerToolCatalog ToolCatalog,
     LanguageModel PlannerModel,
-    ChatRuntimeSettingsDto RuntimeSettings)
+    ChatRuntimeSettingsDto RuntimeSettings,
+    IReadOnlyCollection<AgentPlannerDataSourceSummary>? DataSources = null,
+    IReadOnlyCollection<string>? BusinessDomains = null,
+    string? QueryMode = null,
+    IReadOnlyCollection<string>? ArtifactTypes = null,
+    string? TrialScenarioId = null,
+    string? TrialScenarioTitle = null,
+    bool IsSimulationTrial = false,
+    bool RequiresDataApproval = false)
 {
     public AgentDynamicPlannerRequest(
         string goal,
@@ -45,6 +53,14 @@ public sealed record AgentDynamicPlannerRequest(
 
     public IReadOnlyCollection<AgentPlannerToolSummary> AvailableTools => ToolCatalog.Tools;
 }
+
+public sealed record AgentPlannerDataSourceSummary(
+    Guid Id,
+    string Name,
+    string ExternalSystemType,
+    string? BusinessDomain,
+    bool IsSimulation,
+    string SourceLabel);
 
 public interface IAgentDynamicPlanner
 {
@@ -151,10 +167,40 @@ public sealed class DefaultAgentDynamicPlanner(ChatAgentFactory chatAgentFactory
             taskType = request.TaskType.ToString(),
             uploadIds = request.UploadIds.Select(id => id.ToString("N")).ToArray(),
             knowledgeBaseIds = request.KnowledgeBaseIds.Select(id => id.ToString("N")).ToArray(),
+            dataSources = (request.DataSources ?? []).Select(source => new
+            {
+                id = source.Id.ToString("N"),
+                name = SanitizePlannerField(source.Name, 160),
+                externalSystemType = SanitizePlannerField(source.ExternalSystemType, 80),
+                businessDomain = SanitizePlannerField(source.BusinessDomain, 120),
+                isSimulation = source.IsSimulation,
+                sourceLabel = SanitizePlannerField(source.SourceLabel, 160)
+            }),
+            businessDomains = (request.BusinessDomains ?? [])
+                .Select(domain => SanitizePlannerField(domain, 120))
+                .Where(domain => !string.IsNullOrWhiteSpace(domain))
+                .ToArray(),
+            queryMode = SanitizePlannerField(request.QueryMode, 80),
+            artifactTypes = (request.ArtifactTypes ?? [])
+                .Select(type => SanitizePlannerField(type, 40))
+                .Where(type => !string.IsNullOrWhiteSpace(type))
+                .ToArray(),
+            trialScenario = string.IsNullOrWhiteSpace(request.TrialScenarioId)
+                ? null
+                : new
+                {
+                    id = SanitizePlannerField(request.TrialScenarioId, 160),
+                    title = SanitizePlannerField(request.TrialScenarioTitle, 200),
+                    isSimulationOnly = request.IsSimulationTrial
+                },
             plannerToolCatalog = new
             {
                 version = request.ToolCatalog.Version,
-                availableToolCount = request.ToolCatalog.AvailableToolCount
+                availableToolCount = request.ToolCatalog.AvailableToolCount,
+                mockMcpOnly = true,
+                riskSummary = request.ToolCatalog.Tools
+                    .GroupBy(tool => tool.RiskLevel, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase)
             },
             tools = request.ToolCatalog.Tools.Select(tool => new
             {
@@ -162,10 +208,21 @@ public sealed class DefaultAgentDynamicPlanner(ChatAgentFactory chatAgentFactory
                 displayName = SanitizePlannerField(tool.DisplayName, 160),
                 description = SanitizePlannerField(tool.Description, 1000),
                 providerType = tool.ProviderType,
+                providerKind = tool.ProviderKind,
+                isMock = tool.IsMock,
+                category = SanitizePlannerField(tool.Category, 120),
+                businessDomains = (tool.BusinessDomains ?? [])
+                    .Select(domain => SanitizePlannerField(domain, 120))
+                    .Where(domain => !string.IsNullOrWhiteSpace(domain))
+                    .ToArray(),
+                dataBoundary = tool.DataBoundary,
                 targetType = tool.TargetType,
                 targetName = SanitizePlannerField(tool.TargetName, 200),
                 riskLevel = tool.RiskLevel,
                 requiresApproval = tool.RequiresApproval,
+                approvalPolicy = SanitizePlannerField(tool.ApprovalPolicy, 120),
+                schemaVersion = tool.SchemaVersion,
+                catalogVersion = tool.CatalogVersion,
                 timeoutSeconds = tool.TimeoutSeconds,
                 auditLevel = tool.AuditLevel,
                 runtimeAvailable = tool.RuntimeAvailable,
@@ -177,7 +234,11 @@ public sealed class DefaultAgentDynamicPlanner(ChatAgentFactory chatAgentFactory
                 maxSteps = MaxDynamicSteps,
                 output = "json_only",
                 cloudIntent = "backend_only",
-                forbidden = new[] { "shell", "arbitrary_path", "sql", "cloud_write", "unregistered_tool" }
+                simulationOnly = request.IsSimulationTrial || (request.DataSources ?? []).Any(source => source.IsSimulation),
+                mockMcpOnly = true,
+                externalMcp = "disabled_in_p4",
+                requiresDataApproval = request.RequiresDataApproval,
+                forbidden = new[] { "shell", "arbitrary_path", "sql", "cloud_write", "real_external_mcp", "unregistered_tool", "non_simulation_business_source" }
             },
             runtimeSettings = new
             {

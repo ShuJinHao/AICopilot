@@ -29,7 +29,18 @@ public sealed record ArtifactDto(
     int? GeneratedByStepOrder,
     bool RequiresApproval,
     string ApprovalStatus,
-    DateTimeOffset? FinalizedAt)
+    DateTimeOffset? FinalizedAt,
+    int ArtifactVersion,
+    string ArtifactStatus,
+    string? SourceMode,
+    string? Boundary,
+    bool IsSimulation,
+    bool IsSandbox,
+    string? SourceLabel,
+    string? QueryHash,
+    string? ResultHash,
+    int RowCount,
+    bool IsTruncated)
 {
     public DateTimeOffset CreatedAt { get; init; }
 
@@ -63,6 +74,10 @@ public sealed record ArtifactWorkspaceDto(
     IReadOnlyCollection<ArtifactDto> Artifacts)
 {
     public IReadOnlyCollection<ArtifactManifestItemDto> Manifest { get; init; } = [];
+
+    public IReadOnlyCollection<ArtifactDto> DraftArtifacts { get; init; } = [];
+
+    public IReadOnlyCollection<ArtifactDto> FinalArtifacts { get; init; } = [];
 }
 
 public sealed record ArtifactDownloadDto(Stream Stream, string FileName, string MimeType, long FileSize);
@@ -98,6 +113,7 @@ public interface IAgentArtifactWorkspaceService
         string content,
         string mimeType,
         AgentStepId? stepId,
+        ArtifactSourceMetadata? sourceMetadata,
         CancellationToken cancellationToken);
 
     Task<Artifact> WriteDraftBinaryArtifactAsync(
@@ -108,6 +124,7 @@ public interface IAgentArtifactWorkspaceService
         byte[] content,
         string mimeType,
         AgentStepId? stepId,
+        ArtifactSourceMetadata? sourceMetadata,
         CancellationToken cancellationToken);
 }
 
@@ -152,6 +169,7 @@ public sealed class AgentArtifactWorkspaceService(
         string content,
         string mimeType,
         AgentStepId? stepId,
+        ArtifactSourceMetadata? sourceMetadata,
         CancellationToken cancellationToken)
     {
         EnsureCanWriteDraftArtifact(workspace);
@@ -169,6 +187,7 @@ public sealed class AgentArtifactWorkspaceService(
             written.MimeType,
             stepId,
             DateTimeOffset.UtcNow);
+        artifact.ApplySourceMetadata(sourceMetadata);
         workspaceRepository.Update(workspace);
         return artifact;
     }
@@ -181,6 +200,7 @@ public sealed class AgentArtifactWorkspaceService(
         byte[] content,
         string mimeType,
         AgentStepId? stepId,
+        ArtifactSourceMetadata? sourceMetadata,
         CancellationToken cancellationToken)
     {
         EnsureCanWriteDraftArtifact(workspace);
@@ -198,6 +218,7 @@ public sealed class AgentArtifactWorkspaceService(
             written.MimeType,
             stepId,
             DateTimeOffset.UtcNow);
+        artifact.ApplySourceMetadata(sourceMetadata);
         workspaceRepository.Update(workspace);
         return artifact;
     }
@@ -250,6 +271,12 @@ internal static class ArtifactWorkspaceMapper
                     artifact.GeneratedByStep ?? artifact.GeneratedByStepOrder,
                     artifact.DownloadUrl,
                     artifact.CreatedAt))
+                .ToArray(),
+            DraftArtifacts = artifacts
+                .Where(artifact => artifact.Status != ArtifactStatus.Final.ToString())
+                .ToArray(),
+            FinalArtifacts = artifacts
+                .Where(artifact => artifact.Status == ArtifactStatus.Final.ToString())
                 .ToArray()
         };
     }
@@ -277,7 +304,18 @@ internal static class ArtifactWorkspaceMapper
             generatedByStep,
             artifact.Status != ArtifactStatus.Final,
             ResolveApprovalStatus(artifact),
-            artifact.Status == ArtifactStatus.Final ? artifact.UpdatedAt : null)
+            artifact.FinalizedAt ?? (artifact.Status == ArtifactStatus.Final ? artifact.UpdatedAt : null),
+            artifact.Version,
+            ResolveArtifactStatus(artifact),
+            artifact.SourceMode,
+            artifact.Boundary,
+            artifact.IsSimulation,
+            artifact.IsSandbox,
+            artifact.SourceLabel,
+            artifact.QueryHash,
+            artifact.ResultHash,
+            artifact.RowCount,
+            artifact.IsTruncated)
         {
             CreatedAt = artifact.CreatedAt,
             GeneratedByStep = generatedByStep
@@ -307,6 +345,18 @@ internal static class ArtifactWorkspaceMapper
             ArtifactStatus.Draft or ArtifactStatus.Reviewing => "Pending",
             ArtifactStatus.Approved or ArtifactStatus.Final => "Approved",
             ArtifactStatus.Rejected => "Rejected",
+            _ => artifact.Status.ToString()
+        };
+    }
+
+    private static string ResolveArtifactStatus(Artifact artifact)
+    {
+        return artifact.Status switch
+        {
+            ArtifactStatus.Draft => "Draft",
+            ArtifactStatus.Reviewing or ArtifactStatus.Approved => "FinalPendingApproval",
+            ArtifactStatus.Final => "Final",
+            ArtifactStatus.Deleted => "Deleted",
             _ => artifact.Status.ToString()
         };
     }

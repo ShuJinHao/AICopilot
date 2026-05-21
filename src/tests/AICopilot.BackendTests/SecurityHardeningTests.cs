@@ -328,6 +328,7 @@ public sealed class SecurityHardeningTests
         var authStoreSource = File.ReadAllText(Path.Combine(vueRoot, "stores", "authStore.ts"));
         var routerSource = File.ReadAllText(Path.Combine(vueRoot, "router", "index.ts"));
         var appShellSource = File.ReadAllText(Path.Combine(vueRoot, "components", "layout", "AppShell.vue"));
+        var i18nSource = File.ReadAllText(Path.Combine(vueRoot, "i18n", "index.ts"));
         var apiClientSource = File.ReadAllText(Path.Combine(vueRoot, "services", "apiClient.ts"));
         var ragServiceSource = File.ReadAllText(Path.Combine(vueRoot, "services", "ragService.ts"));
         var ragStoreSource = File.ReadAllText(Path.Combine(vueRoot, "stores", "ragStore.ts"));
@@ -372,7 +373,8 @@ public sealed class SecurityHardeningTests
         routerSource.Should().Contain("path: '/knowledge'");
         routerSource.Should().Contain("ability: 'knowledge'");
         appShellSource.Should().Contain("canManageKnowledge");
-        appShellSource.Should().Contain("知识库");
+        appShellSource.Should().Contain("nav.knowledge");
+        i18nSource.Should().Contain("知识库");
         apiClientSource.Should().Contain("postForm");
         apiClientSource.Should().Contain("isFormDataBody");
         ragServiceSource.Should().Contain("/rag/embedding-model/list");
@@ -387,7 +389,7 @@ public sealed class SecurityHardeningTests
         documentGovernanceStoreSource.Should().Contain("saveDocumentGovernance");
         knowledgeViewSource.Should().Contain("KnowledgeBaseManagement");
         knowledgeBaseManagementSource.Should().Contain("documentStatusLabel");
-        knowledgeBaseManagementSource.Should().Contain("documentStatusType");
+        knowledgeBaseManagementSource.Should().Contain("governanceType");
         knowledgeLabelsSource.Should().Contain("Pending");
         knowledgeLabelsSource.Should().Contain("Embedding");
         knowledgeLabelsSource.Should().Contain("Indexed");
@@ -1032,10 +1034,16 @@ public sealed class SecurityHardeningTests
             "src/services/AICopilot.AiGatewayService/Workflows/Executors/DataAnalysisAuditRecorder.cs",
             "src/services/AICopilot.AiGatewayService/Workflows/Executors/FinalAgentRunExecutor.cs",
             "src/services/AICopilot.AiGatewayService/Workflows/Executors/ToolExecutionAuditRecorder.cs",
+            "src/services/AICopilot.AiGatewayService/CloudReadiness/CloudReadonlyPilotReadiness.cs",
+            "src/services/AICopilot.AiGatewayService/TrialOperations/TrialOperationsManagement.cs",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactVersioningManagement.cs",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceP9Management.cs",
             "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceManagement.cs",
             "src/services/AICopilot.AiGatewayService/Uploads/UploadRecords.cs",
             "src/services/AICopilot.RagService/Commands/Documents/UploadDocument.cs",
-            "src/services/AICopilot.DataAnalysisService/Plugins/DataAnalysisSqlQueryRunner.cs"
+            "src/services/AICopilot.DataAnalysisService/Plugins/DataAnalysisSqlQueryRunner.cs",
+            "src/services/AICopilot.DataAnalysisService/BusinessDatabases/BusinessDatabaseReadonlyQuery.cs",
+            "src/services/AICopilot.DataAnalysisService/BusinessDatabases/BusinessTextToSql.cs"
         };
 
         var locations = Directory
