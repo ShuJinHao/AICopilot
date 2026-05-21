@@ -1,6 +1,6 @@
 ﻿# AICopilot Enterprise CloudReadonly Production Controlled Pilot P13 Acceptance
 
-- GeneratedAt: 2026-05-21 13:22:27
+- GeneratedAt: 2026-05-21 13:42:28
 - Repository: C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot
 - Boundary: AICopilot only; Cloud/Edge unchanged; production controlled Pilot remains intent-mapped, windowed, approval-gated, and endpoint allowlisted
 - Default State: CloudReadonlyProductionControlledPilot.Enabled=false; FreeGoalEnabled=false; query_cloud_data_readonly remains disabled, hidden, and non-executable
@@ -41,7 +41,7 @@ Enterprise CloudReadonly Production Pilot P12 acceptance report written to: C:\U
 ### Enterprise CloudReadonly Production Controlled P13 Scope Guard
 
 ```text
-Enterprise Data Governance scope guard passed. Checked 30 candidate file(s).
+Enterprise Data Governance scope guard passed. Checked 0 candidate file(s).
 ```
 
 ### Build HttpApi
@@ -77,7 +77,7 @@ Enterprise Data Governance scope guard passed. Checked 30 candidate file(s).
     0 个警告
     0 个错误
 
-已用时间 00:00:58.09
+已用时间 00:00:59.45
 ```
 
 ### Run P13 Focused Backend Tests
@@ -117,7 +117,7 @@ Enterprise Data Governance scope guard passed. Checked 30 candidate file(s).
 C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production-controlled-p13\backendtests\AICopilot.BackendTests.dll (.NETCoreApp,Version=v10.0)的测试运行
 总共 1 个测试文件与指定模式相匹配。
 
-已通过! - 失败:     0，通过:    14，已跳过:     0，总计:    14，持续时间: 141 ms - AICopilot.BackendTests.dll (net10.0)
+已通过! - 失败:     0，通过:    14，已跳过:     0，总计:    14，持续时间: 137 ms - AICopilot.BackendTests.dll (net10.0)
 ```
 
 ### Run CloudReadonly Route Contract Tests
@@ -157,7 +157,7 @@ C:\Users\jinha\AppData\Local\Temp\aicopilot-enterprise-cloud-readonly-production
 C:\Users\jinha\Desktop\产线系统架构升级\1\AICopilot\src\tests\AICopilot.BackendTests\bin\Debug\net10.0\AICopilot.BackendTests.dll (.NETCoreApp,Version=v10.0)的测试运行
 总共 1 个测试文件与指定模式相匹配。
 
-已通过! - 失败:     0，通过:    20，已跳过:     0，总计:    20，持续时间: 5 s - AICopilot.BackendTests.dll (net10.0)
+已通过! - 失败:     0，通过:    20，已跳过:     0，总计:    20，持续时间: 3 s - AICopilot.BackendTests.dll (net10.0)
 ```
 
 ### Build Frontend
@@ -211,26 +211,26 @@ computing gzip size...
 [2mdist/[22m[35massets/ChatView-B9_yz51h.css                                          [39m[1m[2m 26.30 kB[22m[1m[22m[2m │ gzip:   4.70 kB[22m
 [2mdist/[22m[35massets/index-DvFWv-08.css                                             [39m[1m[2m 26.98 kB[22m[1m[22m[2m │ gzip:   6.29 kB[22m
 [2mdist/[22m[36massets/_plugin-vue_export-helper-DlAUqK2U.js                          [39m[1m[2m  0.09 kB[22m[1m[22m[2m │ gzip:   0.10 kB[22m
-[2mdist/[22m[36massets/loader-circle-CWlACBGw.js                                      [39m[1m[2m  0.14 kB[22m[1m[22m[2m │ gzip:   0.15 kB[22m
-[2mdist/[22m[36massets/x-Me6AAU5Q.js                                                  [39m[1m[2m  0.52 kB[22m[1m[22m[2m │ gzip:   0.30 kB[22m
-[2mdist/[22m[36massets/StatsWidget-YbbBVlLX.js                                        [39m[1m[2m  0.67 kB[22m[1m[22m[2m │ gzip:   0.42 kB[22m
-[2mdist/[22m[36massets/shield-check-BP3a7Rho.js                                       [39m[1m[2m  0.70 kB[22m[1m[22m[2m │ gzip:   0.42 kB[22m
-[2mdist/[22m[36massets/AiCheckbox.vue_vue_type_script_setup_true_lang-8Ai8L3NC.js     [39m[1m[2m  0.73 kB[22m[1m[22m[2m │ gzip:   0.46 kB[22m
-[2mdist/[22m[36massets/DataTableWidget-Cs7zFI5a.js                                    [39m[1m[2m  1.04 kB[22m[1m[22m[2m │ gzip:   0.62 kB[22m
-[2mdist/[22m[36massets/CloudOidcCompleteView-CqUm5_Eq.js                              [39m[1m[2m  1.62 kB[22m[1m[22m[2m │ gzip:   0.98 kB[22m
-[2mdist/[22m[36massets/ForbiddenView-_YuAAOts.js                                      [39m[1m[2m  3.06 kB[22m[1m[22m[2m │ gzip:   1.60 kB[22m
-[2mdist/[22m[36massets/AiTableCard.vue_vue_type_script_setup_true_lang-CQf-6A-Z.js    [39m[1m[2m  6.71 kB[22m[1m[22m[2m │ gzip:   2.44 kB[22m
-[2mdist/[22m[36massets/LoginView-DvgqXC8k.js                                          [39m[1m[2m  7.89 kB[22m[1m[22m[2m │ gzip:   3.53 kB[22m
-[2mdist/[22m[36massets/AiNumberInput.vue_vue_type_script_setup_true_lang-jXBDujQv.js  [39m[1m[2m  8.93 kB[22m[1m[22m[2m │ gzip:   2.59 kB[22m
-[2mdist/[22m[36massets/AccessView-TammaLOM.js                                         [39m[1m[2m 22.69 kB[22m[1m[22m[2m │ gzip:   6.50 kB[22m
-[2mdist/[22m[36massets/KnowledgeView-B-ckT0nT.js                                      [39m[1m[2m 29.27 kB[22m[1m[22m[2m │ gzip:   7.64 kB[22m
-[2mdist/[22m[36massets/AiButton.vue_vue_type_script_setup_true_lang-ByZB6wwQ.js       [39m[1m[2m 29.76 kB[22m[1m[22m[2m │ gzip:   9.69 kB[22m
-[2mdist/[22m[36massets/AiTag.vue_vue_type_script_setup_true_lang-ionmUi0P.js          [39m[1m[2m 58.27 kB[22m[1m[22m[2m │ gzip:  20.38 kB[22m
-[2mdist/[22m[36massets/ConfigView-vuHLwnp-.js                                         [39m[1m[2m 93.04 kB[22m[1m[22m[2m │ gzip:  21.65 kB[22m
-[2mdist/[22m[36massets/ChatView-CN1-fFLi.js                                           [39m[1m[2m165.01 kB[22m[1m[22m[2m │ gzip:  64.88 kB[22m
-[2mdist/[22m[36massets/index-CoYFDwfy.js                                              [39m[1m[2m222.93 kB[22m[1m[22m[2m │ gzip:  79.15 kB[22m
-[2mdist/[22m[36massets/ChartWidget-DnUH7rxV.js                                        [39m[1m[2m547.15 kB[22m[1m[22m[2m │ gzip: 184.75 kB[22m
-[32m✓ built in 12.77s[39m
+[2mdist/[22m[36massets/loader-circle-DsAHfCRe.js                                      [39m[1m[2m  0.14 kB[22m[1m[22m[2m │ gzip:   0.15 kB[22m
+[2mdist/[22m[36massets/x-Cnfwh-Be.js                                                  [39m[1m[2m  0.52 kB[22m[1m[22m[2m │ gzip:   0.30 kB[22m
+[2mdist/[22m[36massets/StatsWidget-BjA_qWUn.js                                        [39m[1m[2m  0.67 kB[22m[1m[22m[2m │ gzip:   0.42 kB[22m
+[2mdist/[22m[36massets/shield-check-BDsRci3z.js                                       [39m[1m[2m  0.70 kB[22m[1m[22m[2m │ gzip:   0.41 kB[22m
+[2mdist/[22m[36massets/AiCheckbox.vue_vue_type_script_setup_true_lang-BOivx8t0.js     [39m[1m[2m  0.73 kB[22m[1m[22m[2m │ gzip:   0.46 kB[22m
+[2mdist/[22m[36massets/DataTableWidget-CkpwdWu6.js                                    [39m[1m[2m  1.04 kB[22m[1m[22m[2m │ gzip:   0.62 kB[22m
+[2mdist/[22m[36massets/CloudOidcCompleteView-Bi2R7nqx.js                              [39m[1m[2m  1.62 kB[22m[1m[22m[2m │ gzip:   0.97 kB[22m
+[2mdist/[22m[36massets/ForbiddenView-JBttG3s3.js                                      [39m[1m[2m  3.06 kB[22m[1m[22m[2m │ gzip:   1.59 kB[22m
+[2mdist/[22m[36massets/AiTableCard.vue_vue_type_script_setup_true_lang-4fwOCyJX.js    [39m[1m[2m  6.71 kB[22m[1m[22m[2m │ gzip:   2.44 kB[22m
+[2mdist/[22m[36massets/LoginView-CU7Idpsg.js                                          [39m[1m[2m  7.89 kB[22m[1m[22m[2m │ gzip:   3.53 kB[22m
+[2mdist/[22m[36massets/AiNumberInput.vue_vue_type_script_setup_true_lang-BtxkeS9Q.js  [39m[1m[2m  8.93 kB[22m[1m[22m[2m │ gzip:   2.59 kB[22m
+[2mdist/[22m[36massets/AccessView-B06lMq8M.js                                         [39m[1m[2m 22.69 kB[22m[1m[22m[2m │ gzip:   6.50 kB[22m
+[2mdist/[22m[36massets/KnowledgeView-BeLHl0si.js                                      [39m[1m[2m 29.27 kB[22m[1m[22m[2m │ gzip:   7.64 kB[22m
+[2mdist/[22m[36massets/AiButton.vue_vue_type_script_setup_true_lang-wDO2NvNb.js       [39m[1m[2m 29.76 kB[22m[1m[22m[2m │ gzip:   9.69 kB[22m
+[2mdist/[22m[36massets/AiTag.vue_vue_type_script_setup_true_lang-89ddrC8a.js          [39m[1m[2m 58.27 kB[22m[1m[22m[2m │ gzip:  20.38 kB[22m
+[2mdist/[22m[36massets/ConfigView-CgdaGhD_.js                                         [39m[1m[2m 93.04 kB[22m[1m[22m[2m │ gzip:  21.65 kB[22m
+[2mdist/[22m[36massets/ChatView-CQ-I1BA1.js                                           [39m[1m[2m165.01 kB[22m[1m[22m[2m │ gzip:  64.88 kB[22m
+[2mdist/[22m[36massets/index-CPw5-toE.js                                              [39m[1m[2m222.94 kB[22m[1m[22m[2m │ gzip:  79.12 kB[22m
+[2mdist/[22m[36massets/ChartWidget-DTFhv-qP.js                                        [39m[1m[2m547.15 kB[22m[1m[22m[2m │ gzip: 184.75 kB[22m
+[32m✓ built in 11.78s[39m
 ```
 
 ### Frontend Production Controlled Pilot Playwright Smoke
@@ -242,11 +242,11 @@ computing gzip size...
 
 Running 2 tests using 2 workers
 
-  -  2 [mobile] › tests\smoke\acceptance.spec.ts:147:1 › agent trial panel shows P13 production controlled pilot intent gate
-  ok 1 [desktop] › tests\smoke\acceptance.spec.ts:147:1 › agent trial panel shows P13 production controlled pilot intent gate (3.7s)
+  -  1 [mobile] › tests\smoke\acceptance.spec.ts:147:1 › agent trial panel shows P13 production controlled pilot intent gate
+  ok 2 [desktop] › tests\smoke\acceptance.spec.ts:147:1 › agent trial panel shows P13 production controlled pilot intent gate (3.0s)
 
   1 skipped
-  1 passed (7.9s)
+  1 passed (7.5s)
 ```
 
 ## Remaining Risk
