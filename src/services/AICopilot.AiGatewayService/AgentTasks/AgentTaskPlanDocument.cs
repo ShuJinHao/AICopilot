@@ -39,7 +39,8 @@ internal sealed record AgentTaskPlanDocument(
     [property: JsonPropertyName("visibleToolCount")] int VisibleToolCount = 0,
     [property: JsonPropertyName("toolRiskSummary")] IReadOnlyDictionary<string, int>? ToolRiskSummary = null,
     [property: JsonPropertyName("mockMcpOnly")] bool MockMcpOnly = true,
-    [property: JsonPropertyName("toolApprovalCheckpoints")] IReadOnlyCollection<string>? ToolApprovalCheckpoints = null);
+    [property: JsonPropertyName("toolApprovalCheckpoints")] IReadOnlyCollection<string>? ToolApprovalCheckpoints = null,
+    [property: JsonPropertyName("isCloudProductionPilotTrial")] bool IsCloudProductionPilotTrial = false);
 
 internal sealed record AgentTaskPlanCloudReadonlyIntentDocument(
     [property: JsonPropertyName("intent")] string Intent,

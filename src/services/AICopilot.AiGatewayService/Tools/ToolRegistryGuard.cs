@@ -25,7 +25,8 @@ public sealed class ToolRegistryGuard(
     public async Task<ToolRegistryDecision> ValidateAsync(
         string? toolCode,
         Guid userId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool allowProtectedProductionPilotTool = false)
     {
         if (string.IsNullOrWhiteSpace(toolCode))
         {
@@ -49,7 +50,13 @@ public sealed class ToolRegistryGuard(
                 $"Tool '{tool.ToolCode}' is blocked by registry policy.");
         }
 
-        if (!tool.IsEnabled)
+        var isAllowedProtectedProductionPilotTool =
+            allowProtectedProductionPilotTool &&
+            string.Equals(tool.ToolCode, ProtectedCloudReadonlyToolPolicy.ProductionPilotToolCode, StringComparison.OrdinalIgnoreCase) &&
+            tool.ProviderType == ToolProviderType.CloudReadonly &&
+            tool.DataBoundary == ToolDataBoundary.CloudReadonlyProductionPilotOnly;
+
+        if (!tool.IsEnabled && !isAllowedProtectedProductionPilotTool)
         {
             return ToolRegistryDecision.Reject(
                 tool.ProviderType == ToolProviderType.CloudReadonly
@@ -58,7 +65,7 @@ public sealed class ToolRegistryGuard(
                 $"Tool '{tool.ToolCode}' is disabled.");
         }
 
-        if (!tool.IsExecutableByAgent)
+        if (!tool.IsExecutableByAgent && !isAllowedProtectedProductionPilotTool)
         {
             return ToolRegistryDecision.Reject(
                 AppProblemCodes.ToolDisabled,

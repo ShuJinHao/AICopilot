@@ -94,6 +94,12 @@ foreach ($path in $appSettingsFiles) {
     elseif ($json.CloudReadonlyPilotReadiness.Enabled -ne $false) {
         Add-Error "$path must keep CloudReadonlyPilotReadiness.Enabled=false by default."
     }
+    if (-not $json.CloudReadonlyProductionPilot) {
+        Add-Error "$path must define CloudReadonlyProductionPilot for P12 fixed-template production Pilot."
+    }
+    elseif ($json.CloudReadonlyProductionPilot.Enabled -ne $false) {
+        Add-Error "$path must keep CloudReadonlyProductionPilot.Enabled=false by default."
+    }
     if (-not $json.Mcp -or -not $json.Mcp.Runtime) {
         Add-Error "$path must define Mcp.Runtime for P4 mock-only governance."
     }
@@ -155,6 +161,7 @@ $cloudReadonlySandboxClient = "src/infrastructure/AICopilot.Infrastructure/Cloud
 $cloudReadonlySandboxAgentTrial = "src/services/AICopilot.AiGatewayService/CloudReadiness/CloudReadonlySandboxAgentTrial.cs"
 $cloudReadonlySandboxControlledTrial = "src/services/AICopilot.AiGatewayService/CloudReadiness/CloudReadonlySandboxControlledTrial.cs"
 $cloudReadonlyPilotReadiness = "src/services/AICopilot.AiGatewayService/CloudReadiness/CloudReadonlyPilotReadiness.cs"
+$cloudReadonlyProductionPilot = "src/services/AICopilot.AiGatewayService/CloudReadiness/CloudReadonlyProductionPilot.cs"
 $artifactAggregate = "src/core/AICopilot.Core.AiGateway/Aggregates/Artifacts/Artifact.cs"
 $artifactWorkspaceManagement = "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceManagement.cs"
 $artifactWorkspaceP9Management = "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceP9Management.cs"
@@ -181,6 +188,7 @@ foreach ($requiredFile in @(
     $cloudReadonlySandboxAgentTrial,
     $cloudReadonlySandboxControlledTrial,
     $cloudReadonlyPilotReadiness,
+    $cloudReadonlyProductionPilot,
     $artifactAggregate,
     $artifactWorkspaceManagement,
     $artifactWorkspaceP9Management,
@@ -290,6 +298,12 @@ if (Test-Path $builtInToolRegistrations) {
             Add-Error "Required P11 Pilot readiness tool marker '$required' is missing from $builtInToolRegistrations."
         }
     }
+
+    foreach ($required in @("query_cloud_production_pilot_readonly", "CloudReadonlyProductionPilotOnly", "ProductionPilotToolApproval", "IsEnabled: false", "IsVisibleToPlanner: false", "IsExecutableByAgent: false")) {
+        if ($content -notmatch [regex]::Escape($required)) {
+            Add-Error "Required P12 Production Pilot tool marker '$required' is missing from $builtInToolRegistrations."
+        }
+    }
 }
 
 if (Test-Path $plannerToolCatalog) {
@@ -386,6 +400,12 @@ if (Test-Path $cloudReadonlyContracts) {
             Add-Error "Required P11 Pilot readiness contract marker '$required' is missing from $cloudReadonlyContracts."
         }
     }
+
+    foreach ($required in @("CloudReadonlyProductionPilotOptions", "SectionName = ""CloudReadonlyProductionPilot""", "CloudReadonlyProductionPilotMarkers", "SourceMode = ""CloudReadonlyProductionPilot""", "Boundary = ""ProductionPilot""", "ToolCode = ""query_cloud_production_pilot_readonly""")) {
+        if ($content -notmatch [regex]::Escape($required)) {
+            Add-Error "Required P12 Production Pilot contract marker '$required' is missing from $cloudReadonlyContracts."
+        }
+    }
 }
 
 if (Test-Path $cloudReadonlySandboxClient) {
@@ -456,6 +476,15 @@ if (Test-Path $cloudReadonlyPilotReadiness) {
     foreach ($required in @("CloudReadonlyPilotReadinessStatusDto", "CloudReadonlyPilotConfigPackageDto", "PilotApprovalRehearsalDto", "RunCloudReadonlyPilotContractRehearsalCommand", "CloudReadonlyPilotReadinessStatuses", "PilotReadinessRehearsal", "IsProductionData", "BlockedByPolicy", "query_cloud_data_readonly must remain disabled")) {
         if ($content -notmatch [regex]::Escape($required)) {
             Add-Error "Required P11 Pilot readiness marker '$required' is missing from $cloudReadonlyPilotReadiness."
+        }
+    }
+}
+
+if (Test-Path $cloudReadonlyProductionPilot) {
+    $content = Get-Content -LiteralPath $cloudReadonlyProductionPilot -Raw
+    foreach ($required in @("CloudReadonlyProductionPilotStatusDto", "CloudReadonlyProductionPilotWindowDto", "RunCloudReadonlyProductionPilotScenarioCommand", "CloudReadonlyProductionPilotStatuses", "CloudReadonlyProductionPilotMarkers.Boundary", "ProductionPilot", "isProductionData", "CloudReadonlyProductionPilot is not ready")) {
+        if ($content -notmatch [regex]::Escape($required)) {
+            Add-Error "Required P12 Production Pilot marker '$required' is missing from $cloudReadonlyProductionPilot."
         }
     }
 }

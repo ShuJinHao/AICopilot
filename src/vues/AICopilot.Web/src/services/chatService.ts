@@ -14,6 +14,9 @@ import type {
   CloudReadonlyPilotConfigPackage,
   CloudReadonlyPilotContractRehearsal,
   CloudReadonlyPilotReadinessStatus,
+  CloudReadonlyProductionPilotScenarioResult,
+  CloudReadonlyProductionPilotStatus,
+  CloudReadonlyProductionPilotWindow,
   CloudSandboxGoalTimeRange,
   FunctionApprovalRequest,
   PilotApprovalRehearsal,
@@ -331,6 +334,48 @@ export const chatService = {
       {
         packageId,
         endpointCodes: ['devices', 'capacity_summary', 'device_logs', 'pass_station_records']
+      }
+    )
+  },
+
+  async getCloudReadonlyProductionPilotStatus() {
+    return await apiClient.get<CloudReadonlyProductionPilotStatus>(
+      '/aigateway/cloud-readonly/readiness/production-pilot'
+    )
+  },
+
+  async createCloudReadonlyProductionPilotWindow() {
+    return await apiClient.post<CloudReadonlyProductionPilotWindow>(
+      '/aigateway/cloud-readonly/readiness/production-pilot/window',
+      {}
+    )
+  },
+
+  async approveCloudReadonlyProductionPilotWindow(windowId: string) {
+    return await apiClient.post<CloudReadonlyProductionPilotWindow>(
+      '/aigateway/cloud-readonly/readiness/production-pilot/window/status',
+      {
+        windowId,
+        status: 'Approved'
+      }
+    )
+  },
+
+  async runCloudReadonlyProductionPilotGate() {
+    return await apiClient.post<CloudReadonlyProductionPilotStatus>(
+      '/aigateway/cloud-readonly/readiness/production-pilot/gate',
+      {}
+    )
+  },
+
+  async runCloudReadonlyProductionPilotScenario(scenarioId: string) {
+    return await apiClient.post<CloudReadonlyProductionPilotScenarioResult>(
+      '/aigateway/cloud-readonly/readiness/production-pilot/run',
+      {
+        scenarioId,
+        artifactTypes: ['Markdown', 'Html'],
+        maxRows: 20,
+        timeoutMs: 5000
       }
     )
   },

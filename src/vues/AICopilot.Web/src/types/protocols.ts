@@ -479,6 +479,61 @@ export interface CloudReadonlyPilotContractRehearsal {
   generatedAt: string
 }
 
+export interface CloudReadonlyProductionPilotStatus {
+  status: string
+  enabled: boolean
+  pilotWindowId?: string | null
+  windowStatus?: string | null
+  allowedEndpointCodes: string[]
+  approvalStatus: string
+  toolVisible: boolean
+  toolExecutable: boolean
+  lastRunAt?: string | null
+  blockers: string[]
+  warnings: string[]
+}
+
+export interface CloudReadonlyProductionPilotWindow {
+  windowId: string
+  name: string
+  status: string
+  startAt: string
+  endAt: string
+  allowedEndpointCodes: string[]
+  maxTimeRangeDays: number
+  maxRows: number
+  timeoutMs: number
+  ownerDepartment: string
+  approvalPolicy: string
+  rollbackPolicy: string
+}
+
+export interface CloudProductionPilotQueryResult {
+  endpointCode: string
+  sourceType: string
+  sourceMode: string
+  isProductionData: boolean
+  isSandbox: boolean
+  isSimulation: boolean
+  sourceLabel: string
+  boundary: string
+  pilotWindowId: string
+  queryHash: string
+  resultHash: string
+  rowCount: number
+  isTruncated: boolean
+  approvalStatus: string
+}
+
+export interface CloudReadonlyProductionPilotScenarioResult {
+  scenarioId: string
+  scenarioTitle: string
+  status: string
+  queryResult: CloudProductionPilotQueryResult
+  artifactTypes: string[]
+  boundary: string
+}
+
 export interface AgentRunQueueSummary {
   queuedCount: number
   leasedCount: number

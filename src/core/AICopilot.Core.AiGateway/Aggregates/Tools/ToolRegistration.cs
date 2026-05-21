@@ -34,7 +34,8 @@ public enum ToolDataBoundary
     RagContextOnly = 2,
     ArtifactDraftOnly = 3,
     CloudReadonlySandboxOnly = 4,
-    CloudReadonlyPilotReadinessOnly = 5
+    CloudReadonlyPilotReadinessOnly = 5,
+    CloudReadonlyProductionPilotOnly = 6
 }
 
 public sealed class ToolRegistration : BaseEntity<ToolRegistrationId>, IAggregateRoot<ToolRegistrationId>

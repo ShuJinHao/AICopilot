@@ -170,6 +170,9 @@ const cloudReadonlyPilotConfigPackage = computed(() =>
 )
 const pilotApprovalRehearsal = computed(() => store.currentPilotApprovalRehearsal)
 const pilotContractRehearsal = computed(() => store.currentPilotContractRehearsal)
+const cloudReadonlyProductionPilotStatus = computed(() => store.currentCloudReadonlyProductionPilotStatus)
+const cloudReadonlyProductionPilotWindow = computed(() => store.currentCloudReadonlyProductionPilotWindow)
+const cloudReadonlyProductionPilotRun = computed(() => store.currentCloudReadonlyProductionPilotRun)
 
 function parseAgentPlan(planJson?: string | null): AgentPlanPreview | null {
   if (!planJson) return null
@@ -309,6 +312,26 @@ async function runCloudReadonlyPilotApprovalRehearsal() {
 
 async function runCloudReadonlyPilotContractRehearsal() {
   await store.runCloudReadonlyPilotContractRehearsal()
+  uiLayoutStore.suggestAgentWorkbenchTab('trial')
+}
+
+async function createCloudReadonlyProductionPilotWindow() {
+  await store.createCloudReadonlyProductionPilotWindow()
+  uiLayoutStore.suggestAgentWorkbenchTab('trial')
+}
+
+async function approveCloudReadonlyProductionPilotWindow() {
+  await store.approveCloudReadonlyProductionPilotWindow()
+  uiLayoutStore.suggestAgentWorkbenchTab('trial')
+}
+
+async function runCloudReadonlyProductionPilotGate() {
+  await store.runCloudReadonlyProductionPilotGate()
+  uiLayoutStore.suggestAgentWorkbenchTab('trial')
+}
+
+async function runCloudReadonlyProductionPilotScenario() {
+  await store.runCloudReadonlyProductionPilotScenario()
   uiLayoutStore.suggestAgentWorkbenchTab('trial')
 }
 
@@ -1101,6 +1124,76 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
               <div v-for="blocker in cloudReadonlyPilotReadiness.blockers" :key="blocker" class="trial-check-row">
                 <div>
                   <strong>阻塞项</strong>
+                  <span>{{ blocker }}</span>
+                </div>
+                <AiTag tone="danger">Blocked</AiTag>
+              </div>
+            </div>
+          </div>
+
+          <div class="trial-ops-card" data-testid="p12-production-pilot-panel">
+            <div class="section-title">
+              <strong>P12 生产只读 Pilot</strong>
+              <AiTag :tone="cloudReadonlyProductionPilotStatus?.status === 'Ready' ? 'success' : cloudReadonlyProductionPilotStatus?.status === 'Blocked' ? 'danger' : 'warning'">
+                {{ cloudReadonlyProductionPilotStatus?.status || 'Disabled' }}
+              </AiTag>
+            </div>
+            <div class="trial-source-line">
+              <span data-testid="p12-fixed-template-marker">固定模板</span>
+              <span data-testid="p12-production-readonly-marker">CloudReadonlyProductionPilot</span>
+              <span data-testid="p12-gated-marker">Pilot Window + Approval required</span>
+            </div>
+            <div class="trial-metric-grid">
+              <div>
+                <span>window</span>
+                <strong>{{ cloudReadonlyProductionPilotStatus?.pilotWindowId || cloudReadonlyProductionPilotWindow?.windowId || '-' }}</strong>
+              </div>
+              <div>
+                <span>approval</span>
+                <strong>{{ cloudReadonlyProductionPilotStatus?.approvalStatus || 'Required' }}</strong>
+              </div>
+              <div>
+                <span>tool</span>
+                <strong>{{ cloudReadonlyProductionPilotStatus?.toolExecutable ? 'Executable' : 'Closed' }}</strong>
+              </div>
+            </div>
+            <div class="trial-source-line" data-testid="p12-allowlist">
+              <span>{{ cloudReadonlyProductionPilotStatus?.allowedEndpointCodes?.join(' / ') || 'devices / capacity_summary / device_logs / pass_station_records' }}</span>
+            </div>
+            <div class="two-actions">
+              <button type="button" :disabled="store.isLoadingTrialOperations" @click="createCloudReadonlyProductionPilotWindow">
+                <ListChecks :size="16" />
+                Window
+              </button>
+              <button type="button" :disabled="!cloudReadonlyProductionPilotWindow && !cloudReadonlyProductionPilotStatus?.pilotWindowId || store.isLoadingTrialOperations" @click="approveCloudReadonlyProductionPilotWindow">
+                <Check :size="16" />
+                Approve
+              </button>
+            </div>
+            <div class="two-actions">
+              <button type="button" :disabled="store.isLoadingTrialOperations" @click="runCloudReadonlyProductionPilotGate">
+                <ShieldCheck :size="16" />
+                Gate
+              </button>
+              <button type="button" :disabled="cloudReadonlyProductionPilotStatus?.status !== 'Ready' || store.isLoadingTrialOperations" @click="runCloudReadonlyProductionPilotScenario">
+                <RefreshCw :size="16" />
+                Fixed scenario
+              </button>
+            </div>
+            <div v-if="cloudReadonlyProductionPilotRun" class="trial-check-list" data-testid="p12-production-pilot-run">
+              <div class="trial-check-row">
+                <div>
+                  <strong>{{ cloudReadonlyProductionPilotRun.scenarioTitle }}</strong>
+                  <span>{{ cloudReadonlyProductionPilotRun.queryResult.endpointCode }} · {{ cloudReadonlyProductionPilotRun.queryResult.rowCount }} rows · {{ cloudReadonlyProductionPilotRun.queryResult.resultHash }}</span>
+                  <span>{{ cloudReadonlyProductionPilotRun.queryResult.sourceMode }} · {{ cloudReadonlyProductionPilotRun.queryResult.boundary }}</span>
+                </div>
+                <AiTag tone="success">{{ cloudReadonlyProductionPilotRun.status }}</AiTag>
+              </div>
+            </div>
+            <div v-if="cloudReadonlyProductionPilotStatus?.blockers.length" class="trial-check-list">
+              <div v-for="blocker in cloudReadonlyProductionPilotStatus.blockers" :key="blocker" class="trial-check-row">
+                <div>
+                  <strong>Blocked</strong>
                   <span>{{ blocker }}</span>
                 </div>
                 <AiTag tone="danger">Blocked</AiTag>

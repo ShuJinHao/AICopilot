@@ -19,6 +19,7 @@ public sealed record AgentTrialScenarioDto(
     bool RequiresApproval,
     bool IsSimulationOnly,
     bool IsCloudSandboxTrial = false,
+    bool IsCloudProductionPilotTrial = false,
     string? SourceMode = null,
     string? SourceLabel = null);
 
@@ -70,6 +71,46 @@ public sealed class CreateAgentTaskFromTrialScenarioCommandHandler(
         if (scenario is null)
         {
             return Result.NotFound("Trial scenario is not available.");
+        }
+
+        if (scenario.IsCloudProductionPilotTrial)
+        {
+            if (request.DataSourceIds is { Count: > 0 })
+            {
+                return Result.Invalid("P12 production Pilot scenarios cannot bind BusinessDatabase data sources.");
+            }
+
+            var pilotArtifactTypes = NormalizeArtifactTypes(
+                request.ArtifactTypes is { Count: > 0 }
+                    ? request.ArtifactTypes
+                    : scenario.DefaultArtifactTypes);
+            if (pilotArtifactTypes.Length == 0)
+            {
+                return Result.Invalid("At least one artifact type is required.");
+            }
+
+            var pilotGoal = string.IsNullOrWhiteSpace(request.PromptOverride)
+                ? scenario.DefaultPrompt
+                : request.PromptOverride!.Trim();
+            var pilotPlanCommand = new PlanAgentTaskCommand(
+                request.SessionId,
+                pilotGoal,
+                AgentTaskType.CloudDataReport,
+                ModelId: null,
+                UploadIds: [],
+                KnowledgeBaseIds: [],
+                DataSourceIds: [],
+                BusinessDomains: [scenario.BusinessDomain],
+                QueryMode: CloudReadonlyProductionPilotMarkers.SourceMode,
+                RequiresDataApproval: scenario.RequiresApproval,
+                ArtifactTypes: pilotArtifactTypes,
+                TrialScenarioId: scenario.Id,
+                TrialScenarioTitle: scenario.Title,
+                IsSimulationTrial: false,
+                PlannerMode: NormalizePlannerMode(request.PlannerMode),
+                IsCloudProductionPilotTrial: true);
+
+            return await sender.Send(pilotPlanCommand, cancellationToken);
         }
 
         if (scenario.IsCloudSandboxTrial)
@@ -210,6 +251,7 @@ internal static class AgentTrialScenarioCatalog
 
         return simulationDefinitions
             .Concat(CloudSandboxDefinitions.Select(item => item.ToDto([])))
+            .Concat(CloudProductionPilotDefinitions.Select(item => item.ToDto([])))
             .ToArray();
     }
 
@@ -317,6 +359,64 @@ internal static class AgentTrialScenarioCatalog
             IsCloudSandboxTrial: true)
     ];
 
+    private static readonly IReadOnlyCollection<AgentTrialScenarioDefinition> CloudProductionPilotDefinitions =
+    [
+        new(
+            "cloud-production-pilot-devices",
+            "Cloud Production Pilot Device List",
+            "P12 fixed-template production readonly Pilot scenario for device list draft artifacts.",
+            "Device",
+            "Use Cloud production readonly Pilot to query the device list. Outputs must show sourceMode=CloudReadonlyProductionPilot, sourceLabel, endpoint code, hash, row count, truncated status, approval status, and pilot window id.",
+            ["Markdown", "Html"],
+            IsSimulationOnly: false,
+            IsCloudProductionPilotTrial: true),
+        new(
+            "cloud-production-pilot-capacity-summary",
+            "Cloud Production Pilot Capacity Summary",
+            "P12 fixed-template production readonly Pilot scenario for capacity summary draft artifacts.",
+            "Capacity",
+            "Use Cloud production readonly Pilot to query capacity summary and generate chart/report drafts. Outputs must show CloudReadonlyProductionPilot, endpoint code, hash, row count, truncated status, approval status, and pilot window id.",
+            ["Chart", "Markdown", "Html", "Pptx"],
+            IsSimulationOnly: false,
+            IsCloudProductionPilotTrial: true),
+        new(
+            "cloud-production-pilot-device-logs",
+            "Cloud Production Pilot Device Logs",
+            "P12 fixed-template production readonly Pilot scenario for device log draft artifacts.",
+            "Equipment",
+            "Use Cloud production readonly Pilot to query device logs. Outputs must show production readonly Pilot label, endpoint code, hash, row count, truncated status, approval status, and pilot window id.",
+            ["Markdown", "Html", "Xlsx"],
+            IsSimulationOnly: false,
+            IsCloudProductionPilotTrial: true),
+        new(
+            "cloud-production-pilot-pass-station-records",
+            "Cloud Production Pilot Pass Station Records",
+            "P12 fixed-template production readonly Pilot scenario for pass station record draft artifacts.",
+            "Production",
+            "Use Cloud production readonly Pilot to query pass station records. Outputs must show sourceMode=CloudReadonlyProductionPilot, endpoint code, hash, row count, truncated status, approval status, and pilot window id.",
+            ["Chart", "Markdown", "Html", "Xlsx"],
+            IsSimulationOnly: false,
+            IsCloudProductionPilotTrial: true),
+        new(
+            "cloud-production-pilot-device-exception-analysis",
+            "Cloud Production Pilot Device Exception Analysis",
+            "P12 fixed-template production readonly Pilot scenario for device exception analysis drafts.",
+            "Equipment",
+            "Use Cloud production readonly Pilot to analyze device exceptions from the fixed device_logs endpoint. Outputs must show sourceMode, endpoint code, hash, row count, truncated status, approval status, and pilot window id.",
+            ["Chart", "Markdown", "Html", "Pdf"],
+            IsSimulationOnly: false,
+            IsCloudProductionPilotTrial: true),
+        new(
+            "cloud-production-pilot-capacity-delivery-analysis",
+            "Cloud Production Pilot Capacity Delivery Analysis",
+            "P12 fixed-template production readonly Pilot scenario for capacity and delivery analysis drafts.",
+            "Delivery",
+            "Use Cloud production readonly Pilot to analyze delivery risk from the fixed capacity_summary endpoint. Outputs must show sourceMode, endpoint code, hash, row count, truncated status, approval status, and pilot window id.",
+            ["Chart", "Markdown", "Html", "Pptx", "Xlsx"],
+            IsSimulationOnly: false,
+            IsCloudProductionPilotTrial: true)
+    ];
+
     private sealed record AgentTrialScenarioDefinition(
         string Id,
         string Title,
@@ -325,7 +425,8 @@ internal static class AgentTrialScenarioCatalog
         string DefaultPrompt,
         IReadOnlyCollection<string> DefaultArtifactTypes,
         bool IsSimulationOnly = true,
-        bool IsCloudSandboxTrial = false)
+        bool IsCloudSandboxTrial = false,
+        bool IsCloudProductionPilotTrial = false)
     {
         public AgentTrialScenarioDto ToDto(IReadOnlyCollection<Guid> dataSourceIds)
         {
@@ -340,10 +441,15 @@ internal static class AgentTrialScenarioCatalog
                 RequiresApproval: true,
                 IsSimulationOnly,
                 IsCloudSandboxTrial,
-                SourceMode: IsCloudSandboxTrial
+                IsCloudProductionPilotTrial,
+                SourceMode: IsCloudProductionPilotTrial
+                    ? CloudReadonlyProductionPilotMarkers.SourceMode
+                    : IsCloudSandboxTrial
                     ? CloudReadonlySandboxAgentTrialMarkers.SourceMode
                     : "SimulationBusiness",
-                SourceLabel: IsCloudSandboxTrial
+                SourceLabel: IsCloudProductionPilotTrial
+                    ? CloudReadonlyProductionPilotMarkers.SourceLabel
+                    : IsCloudSandboxTrial
                     ? CloudReadonlySandboxAgentTrialMarkers.SourceLabel
                     : SimulationSourceLabel);
         }

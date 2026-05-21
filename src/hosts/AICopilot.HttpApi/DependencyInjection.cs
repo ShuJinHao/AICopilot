@@ -69,6 +69,8 @@ public static class DependencyInjection
                 builder.Configuration.GetSection(CloudReadonlySandboxControlledTrialOptions.SectionName));
             builder.Services.Configure<CloudReadonlyPilotReadinessOptions>(
                 builder.Configuration.GetSection(CloudReadonlyPilotReadinessOptions.SectionName));
+            builder.Services.Configure<CloudReadonlyProductionPilotOptions>(
+                builder.Configuration.GetSection(CloudReadonlyProductionPilotOptions.SectionName));
             builder.Services.Configure<CloudAiReadOptions>(
                 builder.Configuration.GetSection(CloudAiReadOptions.SectionName));
             var cloudOidcOptions = builder.Configuration
@@ -106,6 +108,10 @@ public static class DependencyInjection
                 .GetSection(CloudReadonlyPilotReadinessOptions.SectionName)
                 .Get<CloudReadonlyPilotReadinessOptions>() ?? new CloudReadonlyPilotReadinessOptions();
             cloudReadonlyPilotReadinessOptions.EnsureValid();
+            var cloudReadonlyProductionPilotOptions = builder.Configuration
+                .GetSection(CloudReadonlyProductionPilotOptions.SectionName)
+                .Get<CloudReadonlyProductionPilotOptions>() ?? new CloudReadonlyProductionPilotOptions();
+            cloudReadonlyProductionPilotOptions.EnsureValid();
 
             var authenticationBuilder = builder.Services
                 .AddAuthentication(options =>

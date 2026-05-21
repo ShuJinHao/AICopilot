@@ -124,6 +124,26 @@ test('agent trial panel shows P11 pilot readiness rehearsal evidence', async ({ 
   await expectNoHorizontalOverflow(page)
 })
 
+test('agent trial panel shows P12 production readonly pilot gate', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'desktop workbench keeps the trial panel visible')
+
+  await expectProtectedShell(page, '/chat')
+
+  await page.getByTestId('agent-tab-trial').click()
+  await expect(page.getByTestId('p12-production-pilot-panel')).toBeVisible()
+  await expect(page.getByTestId('p12-fixed-template-marker')).toBeVisible()
+  await expect(page.getByTestId('p12-production-readonly-marker')).toBeVisible()
+  await expect(page.getByTestId('p12-gated-marker')).toBeVisible()
+  await expect(page.getByTestId('p12-allowlist')).toContainText('devices')
+
+  await page.getByRole('button', { name: /Fixed scenario/ }).click()
+  const run = page.getByTestId('p12-production-pilot-run')
+  await expect(run).toBeVisible()
+  await expect(run).toContainText('CloudReadonlyProductionPilot')
+  await expect(run).toContainText('ProductionPilot')
+  await expectNoHorizontalOverflow(page)
+})
+
 test('chat stream renders widgets and approval card', async ({ page, isMobile }) => {
   test.skip(isMobile, 'desktop stream rendering covers widgets and approval card; mobile layout is covered separately')
 

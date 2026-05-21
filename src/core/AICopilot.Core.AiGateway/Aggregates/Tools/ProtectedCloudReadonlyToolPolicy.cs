@@ -6,9 +6,10 @@ public static class ProtectedCloudReadonlyToolPolicy
 {
     public const string ProductionToolCode = "query_cloud_data_readonly";
     public const string PilotReadinessToolCode = "query_cloud_pilot_readiness_readonly";
+    public const string ProductionPilotToolCode = "query_cloud_production_pilot_readonly";
 
     public static readonly FrozenSet<string> ProtectedToolCodes =
-        new[] { ProductionToolCode, PilotReadinessToolCode }
+        new[] { ProductionToolCode, PilotReadinessToolCode, ProductionPilotToolCode }
             .ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     public static bool IsProtected(string? toolCode)

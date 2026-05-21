@@ -28,7 +28,7 @@ public sealed record ToolRegistrationSeed(
 
 public static class BuiltInToolRegistrations
 {
-    public const int CurrentCatalogVersion = 6;
+    public const int CurrentCatalogVersion = 7;
 
     private const string AgentRuntimeTarget = "AgentTaskRuntime";
     private const string MockMcpTarget = "MockMcpProvider";
@@ -42,6 +42,7 @@ public static class BuiltInToolRegistrations
         Low("rag_search", "Search knowledge base", "Search authorized RAG context for the current task.", "RAG", ToolDataBoundary.RagContextOnly),
         CloudReadonly("query_cloud_data_readonly", "Query Cloud readonly data", "Cloud AiRead readonly query boundary. Real mode stays disabled by default."),
         CloudReadonlyPilotReadiness("query_cloud_pilot_readiness_readonly", "Cloud readonly Pilot readiness rehearsal", "Production Pilot readiness descriptor for contract rehearsal only. It must stay disabled, hidden, and non-executable."),
+        CloudReadonlyProductionPilot("query_cloud_production_pilot_readonly", "Cloud readonly production Pilot query", "Fixed-template production Pilot readonly descriptor. It must stay disabled by default and is executable only through the P12 Pilot Window gate."),
         CloudReadonlySandbox("query_cloud_sandbox_readonly", "Query Cloud sandbox readonly data", "Cloud readonly sandbox trial query boundary. Production CloudReadonly remains disabled by default."),
         BusinessReadonly("query_business_database_readonly", "Query business database readonly", "Query authorized SimulationBusiness data through Text-to-SQL readonly guardrails."),
         Low("summarize_business_query_result", "Summarize business query result", "Summarize approved BusinessDatabase readonly query results with source markers.", "DataAnalysis", ToolDataBoundary.SimulationBusinessOnly),
@@ -202,6 +203,33 @@ public static class BuiltInToolRegistrations
             SchemaVersion: 1,
             CatalogVersion: CurrentCatalogVersion,
             ApprovalPolicy: "PilotReadinessRehearsalOnly");
+    }
+
+    private static ToolRegistrationSeed CloudReadonlyProductionPilot(string code, string displayName, string description)
+    {
+        return new ToolRegistrationSeed(
+            code,
+            displayName,
+            description,
+            ToolProviderType.CloudReadonly,
+            ToolRegistrationTargetType.AgentRuntime,
+            AgentRuntimeTarget,
+            """{"type":"object","properties":{"scenarioId":{"type":"string","enum":["cloud-production-pilot-devices","cloud-production-pilot-capacity-summary","cloud-production-pilot-device-logs","cloud-production-pilot-pass-station-records","cloud-production-pilot-device-exception-analysis","cloud-production-pilot-capacity-delivery-analysis"]},"pilotWindowId":{"type":"string"},"endpointCode":{"type":"string","enum":["devices","capacity_summary","device_logs","pass_station_records"]},"maxRows":{"type":"integer"},"timeoutMs":{"type":"integer"}}}""",
+            ObjectSchema,
+            AiToolRiskLevel.High,
+            "AiGateway.ToolRegistry.Execute",
+            RequiresApproval: true,
+            IsEnabled: false,
+            TimeoutSeconds: 30,
+            ToolAuditLevel.Standard,
+            "CloudReadonlyProductionPilot",
+            BusinessDomains: ["Production", "Equipment", "Device", "Capacity", "Delivery"],
+            ToolDataBoundary.CloudReadonlyProductionPilotOnly,
+            IsVisibleToPlanner: false,
+            IsExecutableByAgent: false,
+            SchemaVersion: 1,
+            CatalogVersion: CurrentCatalogVersion,
+            ApprovalPolicy: "ProductionPilotToolApproval");
     }
 
     private static ToolRegistrationSeed BusinessReadonly(string code, string displayName, string description)

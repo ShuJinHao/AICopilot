@@ -376,6 +376,60 @@ const pilotContractRehearsal = {
   ]
 }
 
+const productionPilotWindow = {
+  windowId: 'p12-window-smoke',
+  name: 'P12 fixed-template production readonly Pilot',
+  status: 'Approved',
+  startAt: now,
+  endAt: now,
+  allowedEndpointCodes: ['devices', 'capacity_summary', 'device_logs', 'pass_station_records'],
+  maxTimeRangeDays: 7,
+  maxRows: 50,
+  timeoutMs: 5000,
+  ownerDepartment: 'AI Platform',
+  approvalPolicy: 'ProductionPilotToolApproval',
+  rollbackPolicy: 'EmergencyDisableProductionPilot'
+}
+
+const productionPilotStatus = {
+  status: 'Ready',
+  enabled: true,
+  pilotWindowId: productionPilotWindow.windowId,
+  windowStatus: productionPilotWindow.status,
+  allowedEndpointCodes: productionPilotWindow.allowedEndpointCodes,
+  approvalStatus: 'Approved',
+  toolVisible: true,
+  toolExecutable: true,
+  lastRunAt: now,
+  blockers: [],
+  warnings: []
+}
+
+const productionPilotRun = {
+  scenarioId: 'cloud-production-pilot-devices',
+  scenarioTitle: 'Cloud Production Pilot Device List',
+  status: 'Completed',
+  boundary: 'ProductionPilot',
+  artifactTypes: ['Markdown', 'Html'],
+  queryResult: {
+    endpointCode: 'devices',
+    sourceType: 'CloudReadonly',
+    sourceMode: 'CloudReadonlyProductionPilot',
+    isProductionData: true,
+    isSandbox: false,
+    isSimulation: false,
+    sourceLabel: 'Cloud 生产只读 Pilot',
+    boundary: 'ProductionPilot',
+    pilotWindowId: productionPilotWindow.windowId,
+    queryHash: 'sha256:p12-query-devices',
+    resultHash: 'sha256:p12-result-devices',
+    rowCount: 2,
+    isTruncated: false,
+    approvalStatus: 'ToolApprovalRequired',
+    rows: []
+  }
+}
+
 const samples = {
   model: {
     id: 'lm1',
@@ -761,6 +815,11 @@ const api = createServer((request, response) => {
     '/api/aigateway/cloud-readonly/readiness/pilot-readiness/gate': pilotReadiness,
     '/api/aigateway/cloud-readonly/readiness/pilot-readiness/approval-rehearsal': pilotApprovalRehearsal,
     '/api/aigateway/cloud-readonly/readiness/pilot-readiness/contract-rehearsal': pilotContractRehearsal,
+    '/api/aigateway/cloud-readonly/readiness/production-pilot': productionPilotStatus,
+    '/api/aigateway/cloud-readonly/readiness/production-pilot/window': productionPilotWindow,
+    '/api/aigateway/cloud-readonly/readiness/production-pilot/window/status': productionPilotWindow,
+    '/api/aigateway/cloud-readonly/readiness/production-pilot/gate': productionPilotStatus,
+    '/api/aigateway/cloud-readonly/readiness/production-pilot/run': productionPilotRun,
     '/api/aigateway/agent/run-queue/summary': {
       queuedCount: 1,
       leasedCount: 0,

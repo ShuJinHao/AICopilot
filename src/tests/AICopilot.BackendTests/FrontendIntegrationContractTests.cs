@@ -84,11 +84,16 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
     [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/sandbox-agent-trial")]
     [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/sandbox-controlled-trial")]
     [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/pilot-readiness")]
+    [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/production-pilot")]
     [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/sandbox-agent-trial/run")]
     [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/pilot-readiness/config-package")]
     [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/pilot-readiness/gate")]
     [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/pilot-readiness/approval-rehearsal")]
     [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/pilot-readiness/contract-rehearsal")]
+    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-pilot/window")]
+    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-pilot/window/status")]
+    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-pilot/gate")]
+    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-pilot/run")]
     [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/run")]
     public async Task CloudReadonlyReadinessRoutes_ShouldBeRoutable(string method, string path)
     {
