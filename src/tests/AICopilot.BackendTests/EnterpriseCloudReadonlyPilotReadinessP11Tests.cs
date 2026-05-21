@@ -133,6 +133,56 @@ public sealed class EnterpriseCloudReadonlyPilotReadinessP11Tests
         status.Blockers.Should().Contain(item => item.Contains("CloudAiRead.Enabled", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void EnterpriseCloudReadonlyPilotReadinessP11_ShouldBlock_WhenPersistedProductionToolEnabled()
+    {
+        var service = CreateService(pilot: new CloudReadonlyPilotReadinessOptions { Enabled = true });
+        var unsafeProductionTool = CreateToolFromDefinition(
+            ProtectedCloudReadonlyToolPolicy.ProductionToolCode,
+            isEnabled: true,
+            isVisibleToPlanner: true,
+            isExecutableByAgent: true);
+        var safeReadinessTool = CreateToolFromDefinition(
+            ProtectedCloudReadonlyToolPolicy.PilotReadinessToolCode,
+            isEnabled: false,
+            isVisibleToPlanner: false,
+            isExecutableByAgent: false);
+
+        var status = service.BuildStatus([unsafeProductionTool, safeReadinessTool]);
+
+        status.Status.Should().Be(CloudReadonlyPilotReadinessStatuses.Blocked);
+        status.Blockers.Should().Contain(item =>
+            item.Contains("Persisted ToolRegistry unsafe", StringComparison.Ordinal) &&
+            item.Contains(ProtectedCloudReadonlyToolPolicy.ProductionToolCode, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Seed_ShouldForceProductionCloudReadonlyToolsDisabledHiddenNonExecutable()
+    {
+        var productionTool = CreateToolFromDefinition(
+            ProtectedCloudReadonlyToolPolicy.ProductionToolCode,
+            isEnabled: true,
+            isVisibleToPlanner: true,
+            isExecutableByAgent: true);
+        var readinessTool = CreateToolFromDefinition(
+            ProtectedCloudReadonlyToolPolicy.PilotReadinessToolCode,
+            isEnabled: true,
+            isVisibleToPlanner: true,
+            isExecutableByAgent: true);
+
+        ProtectedCloudReadonlyToolPolicy.ForceDisabled(productionTool, DateTimeOffset.UtcNow);
+        ProtectedCloudReadonlyToolPolicy.ForceDisabled(readinessTool, DateTimeOffset.UtcNow);
+
+        productionTool.IsEnabled.Should().BeFalse();
+        productionTool.IsVisibleToPlanner.Should().BeFalse();
+        productionTool.IsExecutableByAgent.Should().BeFalse();
+        productionTool.ApprovalPolicy.Should().Be("DisabledRealCloudReadonly");
+        readinessTool.IsEnabled.Should().BeFalse();
+        readinessTool.IsVisibleToPlanner.Should().BeFalse();
+        readinessTool.IsExecutableByAgent.Should().BeFalse();
+        readinessTool.ApprovalPolicy.Should().Be("PilotReadinessRehearsalOnly");
+    }
+
     private static CloudReadonlyPilotReadinessService CreateReadyService()
     {
         return CreateService(pilot: new CloudReadonlyPilotReadinessOptions { Enabled = true });
@@ -193,5 +243,39 @@ public sealed class EnterpriseCloudReadonlyPilotReadinessP11Tests
             [],
             ReportArtifactId: null,
             DateTimeOffset.UtcNow);
+    }
+
+    private static ToolRegistration CreateToolFromDefinition(
+        string toolCode,
+        bool isEnabled,
+        bool isVisibleToPlanner,
+        bool isExecutableByAgent)
+    {
+        var definition = ProtectedCloudReadonlyToolPolicy.GetDefinition(toolCode)
+                         ?? throw new InvalidOperationException($"Missing built-in tool definition {toolCode}.");
+        return new ToolRegistration(
+            definition.ToolCode,
+            definition.DisplayName,
+            definition.Description,
+            definition.ProviderType,
+            definition.TargetType,
+            definition.TargetName,
+            definition.InputSchemaJson,
+            definition.OutputSchemaJson,
+            definition.RiskLevel,
+            definition.RequiredPermission,
+            definition.RequiresApproval,
+            isEnabled,
+            definition.TimeoutSeconds,
+            definition.AuditLevel,
+            DateTimeOffset.UtcNow,
+            definition.Category,
+            definition.BusinessDomains,
+            definition.DataBoundary,
+            isVisibleToPlanner,
+            isExecutableByAgent,
+            definition.SchemaVersion,
+            definition.CatalogVersion,
+            definition.ApprovalPolicy);
     }
 }

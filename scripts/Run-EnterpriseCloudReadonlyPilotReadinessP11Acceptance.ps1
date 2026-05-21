@@ -135,9 +135,30 @@ if (-not $SkipFrontend) {
 
             "Frontend HTTP smoke passed at http://127.0.0.1:$port/chat"
         } finally {
-            if ($proc -and -not $proc.HasExited) {
-                Stop-Process -Id $proc.Id -Force
+            if ($proc) {
+                $processIds = New-Object System.Collections.Generic.List[int]
+                $pending = New-Object System.Collections.Generic.Queue[int]
+                $pending.Enqueue($proc.Id)
+                while ($pending.Count -gt 0) {
+                    $parentId = $pending.Dequeue()
+                    $processIds.Add($parentId)
+                    Get-CimInstance Win32_Process -Filter "ParentProcessId = $parentId" -ErrorAction SilentlyContinue |
+                        ForEach-Object { $pending.Enqueue([int]$_.ProcessId) }
+                }
+
+                foreach ($processId in ($processIds | Select-Object -Unique | Sort-Object -Descending)) {
+                    Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+                }
             }
+        }
+    }
+
+    $results += Invoke-Step -Name "Frontend Pilot Readiness Playwright Smoke" -Script {
+        Push-Location src/vues/AICopilot.Web
+        try {
+            npm run test:smoke -- --grep "P11 pilot readiness"
+        } finally {
+            Pop-Location
         }
     }
 }
@@ -167,7 +188,7 @@ $reportLines.Add("- Gate: P10 ReadyForP11Planning, production tool closure, prod
 $reportLines.Add("- Contract Rehearsal: devices, capacity_summary, device_logs, and pass_station_records use fake production-like contracts with sourceMode=CloudReadonlyPilotReadiness and boundary=PilotReadinessRehearsal.")
 $reportLines.Add("- Refusals: Recipe, Recipe version, write path, unknown endpoint, out-of-allowlist endpoint, and production-read flags are blocked by policy.")
 $reportLines.Add("- Tool Registry: query_cloud_data_readonly and query_cloud_pilot_readiness_readonly remain disabled, hidden, and non-executable.")
-$reportLines.Add("- Frontend: trial panel shows P11 status, config package, approval rehearsal, fake contract checks, and explicit no-production-read markers.")
+$reportLines.Add("- Frontend: Playwright smoke covers the Agent trial panel P11 status, config package, approval rehearsal, fake contract checks, and explicit no-production-read markers.")
 $reportLines.Add("")
 $reportLines.Add("## Details")
 $reportLines.Add("")

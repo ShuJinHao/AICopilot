@@ -609,6 +609,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
           v-for="tab in agentTabs"
           :key="tab.value"
           type="button"
+          :data-testid="`agent-tab-${tab.value}`"
           :class="{ active: uiLayoutStore.agentWorkbenchTab === tab.value }"
           @click="setAgentTab(tab.value)"
         >
@@ -909,7 +910,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
               <span>rows {{ currentArtifactPreview.rowCount }} / truncated {{ currentArtifactPreview.isTruncated ? 'true' : 'false' }}</span>
             </div>
             <pre v-if="currentArtifactPreview.content" class="artifact-preview-content">{{ currentArtifactPreview.content.slice(0, 1600) }}</pre>
-            <div v-else-if="currentArtifactPreview.rows.length" class="artifact-preview-table">
+            <div v-else-if="currentArtifactPreview.rows?.length" class="artifact-preview-table">
               <div class="artifact-preview-table-head">
                 <span v-for="column in currentArtifactPreview.columns" :key="column">{{ column }}</span>
               </div>
@@ -1023,7 +1024,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
             <div v-else class="panel-empty">尚未生成准入评估</div>
           </div>
 
-          <div class="trial-ops-card">
+          <div class="trial-ops-card" data-testid="p11-pilot-readiness-panel">
             <div class="section-title">
               <strong>P11 Pilot 准入演练</strong>
               <AiTag :tone="cloudReadonlyPilotReadiness?.status === 'RehearsalPassed' ? 'success' : cloudReadonlyPilotReadiness?.status === 'Blocked' ? 'danger' : 'warning'">
@@ -1031,8 +1032,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
               </AiTag>
             </div>
             <div class="trial-source-line">
-              <span>未启用生产读取</span>
-              <span>未接入真实生产数据</span>
+              <span data-testid="p11-no-production-read">未启用生产读取</span>
+              <span data-testid="p11-no-production-data">未接入真实生产数据</span>
               <span>query_cloud_data_readonly closed</span>
             </div>
             <div class="trial-metric-grid">
@@ -1069,12 +1070,12 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
                 fake contract
               </button>
             </div>
-            <div v-if="cloudReadonlyPilotConfigPackage" class="trial-source-line">
+            <div v-if="cloudReadonlyPilotConfigPackage" class="trial-source-line" data-testid="p11-config-package">
               <span>{{ cloudReadonlyPilotConfigPackage.packageId }}</span>
               <span>{{ cloudReadonlyPilotConfigPackage.allowedEndpointCodes.join(' / ') }}</span>
               <span>maxRows {{ cloudReadonlyPilotConfigPackage.maxRows }}</span>
             </div>
-            <div v-if="pilotApprovalRehearsal?.steps.length" class="trial-check-list">
+            <div v-if="pilotApprovalRehearsal?.steps.length" class="trial-check-list" data-testid="p11-approval-rehearsal">
               <div v-for="step in pilotApprovalRehearsal.steps" :key="step.code" class="trial-check-row">
                 <div>
                   <strong>{{ step.label }}</strong>
@@ -1085,7 +1086,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
                 </AiTag>
               </div>
             </div>
-            <div v-if="pilotContractRehearsal?.checks.length" class="trial-check-list">
+            <div v-if="pilotContractRehearsal?.checks.length" class="trial-check-list" data-testid="p11-contract-rehearsal">
               <div v-for="check in pilotContractRehearsal.checks" :key="check.endpointCode" class="trial-check-row">
                 <div>
                   <strong>{{ check.endpointCode }}</strong>

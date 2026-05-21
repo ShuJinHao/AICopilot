@@ -14,6 +14,10 @@ public interface ICurrentUser
 
     string? CloudEmployeeNo { get; }
 
+    string? CloudDepartmentId { get; }
+
+    string? CloudDepartmentName { get; }
+
     string? CloudStatusVersion { get; }
 
     bool IsAuthenticated { get; }

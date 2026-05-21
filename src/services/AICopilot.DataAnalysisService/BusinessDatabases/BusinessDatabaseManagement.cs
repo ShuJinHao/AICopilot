@@ -37,6 +37,17 @@ public record BusinessDatabaseDto
 
 public record CreatedBusinessDatabaseDto(Guid Id, string Name);
 
+public sealed record DataSourcePermissionGrantDto(
+    Guid Id,
+    Guid DataSourceId,
+    string TargetType,
+    string TargetValue,
+    bool CanQuery,
+    bool CanSchemaView,
+    bool IsEnabled,
+    DateTime CreatedAt,
+    DateTime UpdatedAt);
+
 [AuthorizeRequirement("DataAnalysis.CreateBusinessDatabase")]
 public record CreateBusinessDatabaseCommand(
     string Name,
@@ -363,10 +374,153 @@ public class DeleteBusinessDatabaseCommandHandler(
     }
 }
 
+[AuthorizeRequirement("DataSource.Manage")]
+public sealed record GrantDataSourcePermissionCommand(
+    Guid DataSourceId,
+    string TargetType,
+    string TargetValue,
+    bool CanQuery = true,
+    bool CanSchemaView = false) : ICommand<Result<DataSourcePermissionGrantDto>>;
+
+public sealed class GrantDataSourcePermissionCommandHandler(
+    IReadRepository<BusinessDatabase> databaseRepository,
+    IRepository<DataSourcePermissionGrant> grantRepository,
+    IAuditLogWriter auditLogWriter)
+    : ICommandHandler<GrantDataSourcePermissionCommand, Result<DataSourcePermissionGrantDto>>
+{
+    public async Task<Result<DataSourcePermissionGrantDto>> Handle(
+        GrantDataSourcePermissionCommand request,
+        CancellationToken cancellationToken)
+    {
+        var database = await databaseRepository.FirstOrDefaultAsync(
+            new BusinessDatabaseByIdSpec(new BusinessDatabaseId(request.DataSourceId)),
+            cancellationToken);
+        if (database is null)
+        {
+            return Result.NotFound();
+        }
+
+        if (!Enum.TryParse<DataSourcePermissionGrantTargetType>(
+                request.TargetType,
+                ignoreCase: true,
+                out var targetType))
+        {
+            return Result.Invalid("Data source permission target type is invalid.");
+        }
+
+        if (!request.CanQuery && !request.CanSchemaView)
+        {
+            return Result.Invalid("Data source permission grant must allow query or schema view.");
+        }
+
+        var normalizedTarget = NormalizeGrantTargetValue(request.TargetValue);
+        if (string.IsNullOrWhiteSpace(normalizedTarget))
+        {
+            return Result.Invalid("Data source permission target value is required.");
+        }
+
+        var existing = (await grantRepository.ListAsync(cancellationToken: cancellationToken))
+            .FirstOrDefault(grant =>
+                grant.DataSourceId == database.Id &&
+                grant.TargetType == targetType &&
+                string.Equals(grant.TargetValue, normalizedTarget, StringComparison.OrdinalIgnoreCase));
+
+        var grant = existing ?? new DataSourcePermissionGrant(
+            database.Id,
+            targetType,
+            normalizedTarget,
+            request.CanQuery,
+            request.CanSchemaView);
+        grant.Update(
+            database.Id,
+            targetType,
+            normalizedTarget,
+            request.CanQuery,
+            request.CanSchemaView,
+            isEnabled: true);
+
+        if (existing is null)
+        {
+            grantRepository.Add(grant);
+        }
+        else
+        {
+            grantRepository.Update(grant);
+        }
+
+        await auditLogWriter.WriteAsync(
+            new AuditLogWriteRequest(
+                AuditActionGroups.Config,
+                "DataSource.GrantPermission",
+                "BusinessDatabase",
+                database.Id.ToString(),
+                database.Name,
+                AuditResults.Succeeded,
+                $"Granted data source permission; targetType={targetType}; canQuery={grant.CanQuery}; canSchemaView={grant.CanSchemaView}.",
+                ["dataSourceId", "targetType", "targetValue", "canQuery", "canSchemaView"]),
+            cancellationToken);
+        await grantRepository.SaveChangesAsync(cancellationToken);
+
+        return Result.Success(DataSourcePermissionGrantDtoMapper.Map(grant));
+    }
+
+    private static string NormalizeGrantTargetValue(string targetValue)
+    {
+        if (string.IsNullOrWhiteSpace(targetValue))
+        {
+            return string.Empty;
+        }
+
+        var normalized = targetValue.Trim();
+        return normalized.Length > 160 ? normalized[..160] : normalized;
+    }
+}
+
+[AuthorizeRequirement("DataSource.Manage")]
+public sealed record RevokeDataSourcePermissionCommand(Guid GrantId)
+    : ICommand<Result>;
+
+public sealed class RevokeDataSourcePermissionCommandHandler(
+    IRepository<DataSourcePermissionGrant> grantRepository,
+    IAuditLogWriter auditLogWriter)
+    : ICommandHandler<RevokeDataSourcePermissionCommand, Result>
+{
+    public async Task<Result> Handle(
+        RevokeDataSourcePermissionCommand request,
+        CancellationToken cancellationToken)
+    {
+        var grant = await grantRepository.GetByIdAsync(new DataSourcePermissionGrantId(request.GrantId), cancellationToken);
+        if (grant is null)
+        {
+            return Result.Success();
+        }
+
+        grant.Disable();
+        grantRepository.Update(grant);
+
+        await auditLogWriter.WriteAsync(
+            new AuditLogWriteRequest(
+                AuditActionGroups.Config,
+                "DataSource.RevokePermission",
+                "BusinessDatabase",
+                grant.DataSourceId.ToString(),
+                grant.TargetValue,
+                AuditResults.Succeeded,
+                $"Revoked data source permission; grantId={grant.Id.Value}; targetType={grant.TargetType}.",
+                ["grantId", "dataSourceId", "targetType", "targetValue"]),
+            cancellationToken);
+        await grantRepository.SaveChangesAsync(cancellationToken);
+
+        return Result.Success();
+    }
+}
+
 [AuthorizeRequirement("DataAnalysis.GetBusinessDatabase")]
 public record GetBusinessDatabaseQuery(Guid Id) : IQuery<Result<BusinessDatabaseDto>>;
 
-public class GetBusinessDatabaseQueryHandler(IReadRepository<BusinessDatabase> repository)
+public class GetBusinessDatabaseQueryHandler(
+    IReadRepository<BusinessDatabase> repository,
+    BusinessDatabaseAccessService accessService)
     : IQueryHandler<GetBusinessDatabaseQuery, Result<BusinessDatabaseDto>>
 {
     public async Task<Result<BusinessDatabaseDto>> Handle(
@@ -376,14 +530,25 @@ public class GetBusinessDatabaseQueryHandler(IReadRepository<BusinessDatabase> r
         var entity = await repository.FirstOrDefaultAsync(
             new BusinessDatabaseByIdSpec(new BusinessDatabaseId(request.Id)),
             cancellationToken);
-        return entity == null ? Result.NotFound() : Result.Success(BusinessDatabaseDtoMapper.Map(entity));
+        if (entity is null)
+        {
+            return Result.NotFound();
+        }
+
+        return await accessService.CanViewMetadataAsync(entity, cancellationToken)
+            ? Result.Success(BusinessDatabaseDtoMapper.Map(entity))
+            : Result.Forbidden(new ApiProblemDescriptor(
+                "data_source_forbidden",
+                "Current user is not authorized to view this business data source."));
     }
 }
 
 [AuthorizeRequirement("DataAnalysis.GetListBusinessDatabases")]
 public record GetListBusinessDatabasesQuery : IQuery<Result<IList<BusinessDatabaseDto>>>;
 
-public class GetListBusinessDatabasesQueryHandler(IReadRepository<BusinessDatabase> repository)
+public class GetListBusinessDatabasesQueryHandler(
+    IReadRepository<BusinessDatabase> repository,
+    BusinessDatabaseAccessService accessService)
     : IQueryHandler<GetListBusinessDatabasesQuery, Result<IList<BusinessDatabaseDto>>>
 {
     public async Task<Result<IList<BusinessDatabaseDto>>> Handle(
@@ -391,7 +556,28 @@ public class GetListBusinessDatabasesQueryHandler(IReadRepository<BusinessDataba
         CancellationToken cancellationToken)
     {
         var databases = await repository.ListAsync(new BusinessDatabasesOrderedSpec(), cancellationToken);
-        IList<BusinessDatabaseDto> result = databases.Select(BusinessDatabaseDtoMapper.Map).ToList();
+        var authorized = await accessService.FilterMetadataAuthorizedAsync(databases, cancellationToken);
+        IList<BusinessDatabaseDto> result = authorized.Select(BusinessDatabaseDtoMapper.Map).ToList();
+        return Result.Success(result);
+    }
+}
+
+[AuthorizeRequirement("DataSource.Read")]
+public sealed record GetMyAuthorizedDataSourcesQuery
+    : IQuery<Result<IList<BusinessDatabaseDto>>>;
+
+public sealed class GetMyAuthorizedDataSourcesQueryHandler(
+    IReadRepository<BusinessDatabase> repository,
+    BusinessDatabaseAccessService accessService)
+    : IQueryHandler<GetMyAuthorizedDataSourcesQuery, Result<IList<BusinessDatabaseDto>>>
+{
+    public async Task<Result<IList<BusinessDatabaseDto>>> Handle(
+        GetMyAuthorizedDataSourcesQuery request,
+        CancellationToken cancellationToken)
+    {
+        var databases = await repository.ListAsync(new EnabledBusinessDatabasesSpec(), cancellationToken);
+        var authorized = await accessService.FilterQueryAuthorizedAsync(databases, cancellationToken);
+        IList<BusinessDatabaseDto> result = authorized.Select(BusinessDatabaseDtoMapper.Map).ToList();
         return Result.Success(result);
     }
 }
@@ -434,6 +620,23 @@ internal static class BusinessDatabaseDtoMapper
         return string.IsNullOrWhiteSpace(tags)
             ? []
             : tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    }
+}
+
+internal static class DataSourcePermissionGrantDtoMapper
+{
+    public static DataSourcePermissionGrantDto Map(DataSourcePermissionGrant grant)
+    {
+        return new DataSourcePermissionGrantDto(
+            grant.Id,
+            grant.DataSourceId,
+            grant.TargetType.ToString(),
+            grant.TargetValue,
+            grant.CanQuery,
+            grant.CanSchemaView,
+            grant.IsEnabled,
+            grant.CreatedAt,
+            grant.UpdatedAt);
     }
 }
 

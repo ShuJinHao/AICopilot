@@ -22,3 +22,24 @@ public readonly record struct BusinessDatabaseId : IStronglyTypedGuidId
 
     public override string ToString() => Value.ToString();
 }
+
+public readonly record struct DataSourcePermissionGrantId : IStronglyTypedGuidId
+{
+    public DataSourcePermissionGrantId(Guid value)
+    {
+        if (value == Guid.Empty)
+        {
+            throw new ArgumentException("Data source permission grant id is required.", nameof(value));
+        }
+
+        Value = value;
+    }
+
+    public Guid Value { get; }
+
+    public static DataSourcePermissionGrantId New() => new(Guid.NewGuid());
+
+    public static implicit operator Guid(DataSourcePermissionGrantId id) => id.Value;
+
+    public override string ToString() => Value.ToString();
+}

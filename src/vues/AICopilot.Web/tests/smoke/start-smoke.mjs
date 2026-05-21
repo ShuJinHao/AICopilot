@@ -168,7 +168,18 @@ const artifactWorkspace = {
       generatedByStepOrder: 1,
       requiresApproval: false,
       approvalStatus: 'Approved',
-      finalizedAt: null
+      finalizedAt: null,
+      artifactVersion: 1,
+      artifactStatus: 'Draft',
+      sourceMode: 'SimulationBusiness',
+      boundary: 'AgentArtifactWorkspace',
+      isSimulation: true,
+      isSandbox: false,
+      sourceLabel: 'AI 独立模拟业务库',
+      queryHash: 'sha256:smoke-query-chart',
+      resultHash: 'sha256:smoke-result-chart',
+      rowCount: 2,
+      isTruncated: false
     },
     {
       id: 'artifact-md',
@@ -185,7 +196,18 @@ const artifactWorkspace = {
       generatedByStepOrder: 1,
       requiresApproval: false,
       approvalStatus: 'Approved',
-      finalizedAt: null
+      finalizedAt: null,
+      artifactVersion: 1,
+      artifactStatus: 'Draft',
+      sourceMode: 'SimulationBusiness',
+      boundary: 'AgentArtifactWorkspace',
+      isSimulation: true,
+      isSandbox: false,
+      sourceLabel: 'AI 独立模拟业务库',
+      queryHash: 'sha256:smoke-query-report',
+      resultHash: 'sha256:smoke-result-report',
+      rowCount: 2,
+      isTruncated: false
     }
   ]
 }
@@ -216,6 +238,143 @@ const agentAuditSummary = [
     metadata: { taskId: agentTask.id, workspaceCode: agentTask.workspaceCode, toolName: 'read_uploaded_file' }
   }
 ]
+
+const trialCampaign = {
+  campaignId: 'campaign-smoke',
+  name: 'P11 smoke trial ledger',
+  status: 'Active',
+  allowedSourceModes: ['SimulationBusiness', 'CloudReadonlySandbox'],
+  ownerDepartment: 'AI Platform',
+  startAt: now,
+  endAt: null,
+  summary: {
+    scenarioRunCount: 1,
+    passedRunCount: 1,
+    failedRunCount: 0,
+    blockedRunCount: 0,
+    finalArtifactCount: 1,
+    approvalRejectedCount: 0,
+    unresolvedRiskCount: 0,
+    queryHashSamples: ['sha256:smoke-query-chart'],
+    resultHashSamples: ['sha256:smoke-result-chart']
+  },
+  scenarioRuns: [
+    {
+      runId: 'run-smoke',
+      campaignId: 'campaign-smoke',
+      scenarioId: 'line-a-capacity',
+      trialMode: 'SimulationBusiness',
+      sourceMode: 'SimulationBusiness',
+      boundary: 'AgentArtifactWorkspace',
+      taskId: agentTask.id,
+      artifactIds: ['artifact-chart'],
+      queryHashes: ['sha256:smoke-query-chart'],
+      resultHashes: ['sha256:smoke-result-chart'],
+      approvalStatus: 'Approved',
+      status: 'Passed',
+      startedAt: now,
+      completedAt: now
+    }
+  ],
+  risks: [],
+  readinessStatus: 'ReadyForP11Planning',
+  createdAt: now
+}
+
+const pilotConfigPackage = {
+  packageId: 'pilot-package-smoke',
+  allowedEndpointCodes: ['devices', 'capacity_summary', 'device_logs', 'pass_station_records'],
+  maxTimeRange: 'P7D',
+  maxRows: 200,
+  timeoutMs: 3000,
+  approvalPolicy: 'PilotReadinessRehearsal',
+  rollbackPolicy: 'Disable config and keep production read closed',
+  ownerDepartment: 'AI Platform',
+  evidenceRefs: ['campaign-smoke'],
+  status: 'RehearsalReady'
+}
+
+const pilotReadiness = {
+  status: 'RehearsalPassed',
+  enabled: false,
+  evidencePackageId: 'evidence-smoke',
+  configSummary: pilotConfigPackage,
+  approvalRehearsalStatus: 'Passed',
+  contractCheckSummary: {
+    total: 6,
+    passed: 4,
+    failed: 0,
+    blockedByPolicy: 2
+  },
+  blockers: [],
+  warnings: ['Production read remains disabled'],
+  lastCheckedAt: now
+}
+
+const pilotApprovalRehearsal = {
+  rehearsalId: 'approval-rehearsal-smoke',
+  packageId: pilotConfigPackage.packageId,
+  status: 'Passed',
+  generatedAt: now,
+  steps: [
+    {
+      code: 'production_read_closed',
+      label: '生产读取关闭确认',
+      status: 'Passed',
+      isBlocking: true,
+      approver: 'security',
+      auditRef: 'audit:production-read-closed'
+    },
+    {
+      code: 'emergency_disable',
+      label: '紧急停用确认',
+      status: 'Passed',
+      isBlocking: true,
+      approver: 'owner',
+      auditRef: 'audit:emergency-disable'
+    }
+  ],
+  approvers: ['security', 'owner'],
+  auditRefs: ['audit:production-read-closed', 'audit:emergency-disable']
+}
+
+const pilotContractRehearsal = {
+  rehearsalId: 'contract-rehearsal-smoke',
+  packageId: pilotConfigPackage.packageId,
+  status: 'Passed',
+  sourceMode: 'CloudReadonlyPilotReadiness',
+  boundary: 'PilotReadinessRehearsal',
+  isProductionData: false,
+  generatedAt: now,
+  checks: [
+    {
+      endpointCode: 'devices',
+      method: 'GET',
+      path: '/ai-read/devices',
+      policyStatus: 'Allowed',
+      httpStatus: 200,
+      durationMs: 24,
+      rowCount: 2,
+      isTruncated: false,
+      resultHash: 'sha256:pilot-devices',
+      errorCode: null,
+      status: 'Passed'
+    },
+    {
+      endpointCode: 'recipe_versions',
+      method: 'GET',
+      path: '/ai-read/recipe-versions',
+      policyStatus: 'BlockedByPolicy',
+      httpStatus: null,
+      durationMs: 0,
+      rowCount: 0,
+      isTruncated: false,
+      resultHash: null,
+      errorCode: 'BlockedByPolicy',
+      status: 'BlockedByPolicy'
+    }
+  ]
+}
 
 const samples = {
   model: {
@@ -530,6 +689,30 @@ const api = createServer((request, response) => {
     '/api/aigateway/agent/approval/pending': [agentApproval],
     '/api/aigateway/agent/task/task-1/audit-summary': agentAuditSummary,
     '/api/aigateway/workspace/WS-SMOKE-001': artifactWorkspace,
+    '/api/aigateway/artifact/artifact-chart/preview': {
+      artifactId: 'artifact-chart',
+      name: 'chart-data.json',
+      artifactType: 'Json',
+      previewKind: 'chart',
+      artifactStatus: 'Draft',
+      artifactVersion: 1,
+      relativePath: 'charts/chart-data.json',
+      fileSize: 128,
+      mimeType: 'application/json',
+      sourceMode: 'SimulationBusiness',
+      boundary: 'AgentArtifactWorkspace',
+      isSimulation: true,
+      isSandbox: false,
+      sourceLabel: 'AI 独立模拟业务库',
+      queryHash: 'sha256:smoke-query-chart',
+      resultHash: 'sha256:smoke-result-chart',
+      rowCount: 2,
+      isTruncated: false,
+      content: '{ "sourceLabel": "AI 独立模拟业务库", "queryHash": "sha256:smoke-query-chart" }',
+      columns: [],
+      rows: [],
+      metadata: {}
+    },
     '/api/aigateway/artifact/artifact-chart/download': {
       labels: ['08:00', '09:00', '10:00'],
       values: [120, 132, 118],
@@ -538,6 +721,46 @@ const api = createServer((request, response) => {
       isSimulation: true,
       sourceLabel: '模拟 Cloud 只读数据'
     },
+    '/api/aigateway/trial-operations/campaigns': [trialCampaign],
+    '/api/aigateway/trial-operations/campaigns/campaign-smoke': trialCampaign,
+    '/api/aigateway/trial-operations/campaigns/campaign-smoke/readiness': {
+      campaignId: trialCampaign.campaignId,
+      status: 'ReadyForP11Planning',
+      checks: [
+        {
+          code: 'production_read_closed',
+          label: 'production read closed',
+          status: 'Passed',
+          isBlocking: true,
+          message: 'Real CloudReadonly remains disabled.'
+        }
+      ],
+      blockers: [],
+      warnings: [],
+      metrics: {
+        scenarioRuns: 1,
+        finalArtifacts: 1,
+        unresolvedRisks: 0
+      },
+      generatedAt: now
+    },
+    '/api/aigateway/trial-operations/campaigns/campaign-smoke/evidence-package': {
+      campaignId: trialCampaign.campaignId,
+      readinessStatus: 'ReadyForP11Planning',
+      metrics: [
+        { code: 'scenario_runs', label: 'scenario runs', value: '1' },
+        { code: 'final_artifacts', label: 'final artifacts', value: '1' }
+      ],
+      evidenceItems: [],
+      unresolvedRisks: [],
+      reportArtifactId: null,
+      generatedAt: now
+    },
+    '/api/aigateway/cloud-readonly/readiness/pilot-readiness': pilotReadiness,
+    '/api/aigateway/cloud-readonly/readiness/pilot-readiness/config-package': pilotConfigPackage,
+    '/api/aigateway/cloud-readonly/readiness/pilot-readiness/gate': pilotReadiness,
+    '/api/aigateway/cloud-readonly/readiness/pilot-readiness/approval-rehearsal': pilotApprovalRehearsal,
+    '/api/aigateway/cloud-readonly/readiness/pilot-readiness/contract-rehearsal': pilotContractRehearsal,
     '/api/aigateway/agent/run-queue/summary': {
       queuedCount: 1,
       leasedCount: 0,

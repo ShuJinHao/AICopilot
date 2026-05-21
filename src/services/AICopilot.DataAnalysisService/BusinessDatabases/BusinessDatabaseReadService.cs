@@ -5,14 +5,17 @@ using AICopilot.SharedKernel.Repository;
 
 namespace AICopilot.DataAnalysisService.BusinessDatabases;
 
-public sealed class BusinessDatabaseReadService(IReadRepository<BusinessDatabase> repository)
+public sealed class BusinessDatabaseReadService(
+    IReadRepository<BusinessDatabase> repository,
+    BusinessDatabaseAccessService accessService)
     : IBusinessDatabaseReadService
 {
     public async Task<IReadOnlyList<BusinessDatabaseDescriptor>> ListEnabledAsync(
         CancellationToken cancellationToken = default)
     {
         var databases = await repository.ListAsync(new EnabledBusinessDatabasesSpec(), cancellationToken);
-        return databases
+        var authorized = await accessService.FilterQueryAuthorizedAsync(databases, cancellationToken);
+        return authorized
             .Select(BusinessDatabaseContractMapper.ToDescriptor)
             .ToArray();
     }
@@ -25,8 +28,12 @@ public sealed class BusinessDatabaseReadService(IReadRepository<BusinessDatabase
             new BusinessDatabaseByNameSpec(name),
             cancellationToken);
 
-        return database is null
-            ? null
-            : BusinessDatabaseContractMapper.ToConnectionInfo(database);
+        if (database is null ||
+            !await accessService.CanQueryAsync(database, cancellationToken))
+        {
+            return null;
+        }
+
+        return BusinessDatabaseContractMapper.ToConnectionInfo(database);
     }
 }

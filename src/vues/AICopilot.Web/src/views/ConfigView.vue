@@ -101,7 +101,7 @@ onMounted(() => {
         <ApprovalPolicyConfig v-else-if="activeTab === 'approval'" />
 
         <div v-else class="agent-config">
-          <AiCard class="agent-section">
+          <AiCard class="agent-section" data-testid="agent-config-workspace">
             <div class="section-head">
               <div>
                 <h2>Agent 工作区</h2>
@@ -117,7 +117,7 @@ onMounted(() => {
             </div>
           </AiCard>
 
-          <AiCard class="agent-section">
+          <AiCard class="agent-section" data-testid="agent-config-run-queue">
             <div class="section-head">
               <div>
                 <h2>运行队列</h2>
@@ -147,7 +147,7 @@ onMounted(() => {
             <div v-else class="panel-empty">暂无队列记录</div>
           </AiCard>
 
-          <AiCard class="agent-section">
+          <AiCard class="agent-section" data-testid="agent-config-worker-status">
             <div class="section-head">
               <div>
                 <h2>Worker 状态</h2>

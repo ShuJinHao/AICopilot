@@ -104,6 +104,9 @@ public static class DependencyInjection
         builder.Services.AddScoped<BusinessDatabaseRepository>();
         builder.Services.AddScoped<IReadRepository<BusinessDatabase>>(provider => provider.GetRequiredService<BusinessDatabaseRepository>());
         builder.Services.AddScoped<IRepository<BusinessDatabase>>(provider => provider.GetRequiredService<BusinessDatabaseRepository>());
+        builder.Services.AddScoped<DataSourcePermissionGrantRepository>();
+        builder.Services.AddScoped<IReadRepository<DataSourcePermissionGrant>>(provider => provider.GetRequiredService<DataSourcePermissionGrantRepository>());
+        builder.Services.AddScoped<IRepository<DataSourcePermissionGrant>>(provider => provider.GetRequiredService<DataSourcePermissionGrantRepository>());
         builder.Services.AddScoped<McpServerRepository>();
         builder.Services.AddScoped<IReadRepository<McpServerInfo>>(provider => provider.GetRequiredService<McpServerRepository>());
         builder.Services.AddScoped<IRepository<McpServerInfo>>(provider => provider.GetRequiredService<McpServerRepository>());

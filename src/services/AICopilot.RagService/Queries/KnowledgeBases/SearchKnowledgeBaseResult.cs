@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text;
+using AICopilot.Services.Contracts;
 
 namespace AICopilot.RagService.Queries.KnowledgeBases;
 
@@ -34,4 +35,6 @@ public record SearchKnowledgeBaseResult
     public bool IsLowConfidence { get; init; }
 
     public string? LowConfidenceReason { get; init; }
+
+    public IReadOnlyCollection<KnowledgeSupplementHitDto> SupplementHits { get; init; } = [];
 }

@@ -17,6 +17,9 @@ namespace AICopilot.AiGatewayService.CloudReadiness;
 
 public static class CloudReadonlyPilotReadinessStatuses
 {
+    private const string ScopeGuardBoundaryMarker = "PilotReadinessRehearsal";
+    private const string ScopeGuardProductionToolMarker = "query_cloud_data_readonly must remain disabled";
+
     public const string NotConfigured = "NotConfigured";
     public const string CollectingEvidence = "CollectingEvidence";
     public const string RehearsalReady = "RehearsalReady";
@@ -111,14 +114,26 @@ public sealed record RunCloudReadonlyPilotContractRehearsalCommand(
     int? TimeoutMs = null) : ICommand<Result<CloudReadonlyPilotContractRehearsalDto>>;
 
 public sealed class GetCloudReadonlyPilotReadinessQueryHandler(
-    CloudReadonlyPilotReadinessService pilotReadinessService)
+    CloudReadonlyPilotReadinessService pilotReadinessService,
+    IReadRepository<ToolRegistration> toolRepository)
     : IQueryHandler<GetCloudReadonlyPilotReadinessQuery, Result<CloudReadonlyPilotReadinessStatusDto>>
 {
-    public Task<Result<CloudReadonlyPilotReadinessStatusDto>> Handle(
+    public async Task<Result<CloudReadonlyPilotReadinessStatusDto>> Handle(
         GetCloudReadonlyPilotReadinessQuery request,
         CancellationToken cancellationToken)
     {
-        return Task.FromResult(Result.Success(pilotReadinessService.BuildStatus()));
+        var protectedTools = await LoadProtectedToolRegistrationsAsync(toolRepository, cancellationToken);
+        return Result.Success(pilotReadinessService.BuildStatus(protectedTools));
+    }
+
+    internal static async Task<IReadOnlyCollection<ToolRegistration>> LoadProtectedToolRegistrationsAsync(
+        IReadRepository<ToolRegistration> repository,
+        CancellationToken cancellationToken)
+    {
+        var tools = await repository.ListAsync(cancellationToken: cancellationToken);
+        return tools
+            .Where(tool => ProtectedCloudReadonlyToolPolicy.IsProtected(tool.ToolCode))
+            .ToArray();
     }
 }
 
@@ -141,9 +156,11 @@ public sealed class CreateCloudReadonlyPilotConfigPackageCommandHandler(
             return Result.NotFound();
         }
 
-        var productionTool = await toolRepository.GetAsync(
-            tool => tool.ToolCode == "query_cloud_data_readonly",
-            cancellationToken: cancellationToken);
+        var protectedTools = await GetCloudReadonlyPilotReadinessQueryHandler.LoadProtectedToolRegistrationsAsync(
+            toolRepository,
+            cancellationToken);
+        var productionTool = protectedTools.FirstOrDefault(
+            tool => string.Equals(tool.ToolCode, ProtectedCloudReadonlyToolPolicy.ProductionToolCode, StringComparison.OrdinalIgnoreCase));
         var assessment = PilotReadinessEvaluator.Evaluate(campaign, productionTool);
         if (assessment.Status != PilotReadinessStatus.ReadyForP11Planning.ToString())
         {
@@ -151,7 +168,7 @@ public sealed class CreateCloudReadonlyPilotConfigPackageCommandHandler(
         }
 
         var evidencePackage = TrialEvidencePackageBuilder.Build(campaign, assessment);
-        var result = pilotReadinessService.CreatePackage(request, evidencePackage);
+        var result = pilotReadinessService.CreatePackage(request, evidencePackage, protectedTools);
         if (!result.IsSuccess || result.Value is null)
         {
             return result;
@@ -193,11 +210,13 @@ public sealed class RunCloudReadonlyPilotGateEvaluationCommandHandler(
             return Result.NotFound();
         }
 
-        var productionTool = await toolRepository.GetAsync(
-            tool => tool.ToolCode == "query_cloud_data_readonly",
-            cancellationToken: cancellationToken);
+        var protectedTools = await GetCloudReadonlyPilotReadinessQueryHandler.LoadProtectedToolRegistrationsAsync(
+            toolRepository,
+            cancellationToken);
+        var productionTool = protectedTools.FirstOrDefault(
+            tool => string.Equals(tool.ToolCode, ProtectedCloudReadonlyToolPolicy.ProductionToolCode, StringComparison.OrdinalIgnoreCase));
         var assessment = PilotReadinessEvaluator.Evaluate(campaign, productionTool);
-        var status = pilotReadinessService.EvaluateGate(assessment);
+        var status = pilotReadinessService.EvaluateGate(assessment, protectedTools);
 
         await auditLogWriter.WriteAsync(
             new AuditLogWriteRequest(
@@ -218,6 +237,7 @@ public sealed class RunCloudReadonlyPilotGateEvaluationCommandHandler(
 
 public sealed class RunCloudReadonlyPilotApprovalRehearsalCommandHandler(
     CloudReadonlyPilotReadinessService pilotReadinessService,
+    IReadRepository<ToolRegistration> toolRepository,
     IAuditLogWriter auditLogWriter)
     : ICommandHandler<RunCloudReadonlyPilotApprovalRehearsalCommand, Result<PilotApprovalRehearsalDto>>
 {
@@ -225,7 +245,10 @@ public sealed class RunCloudReadonlyPilotApprovalRehearsalCommandHandler(
         RunCloudReadonlyPilotApprovalRehearsalCommand request,
         CancellationToken cancellationToken)
     {
-        var result = pilotReadinessService.RunApprovalRehearsal(request.PackageId);
+        var protectedTools = await GetCloudReadonlyPilotReadinessQueryHandler.LoadProtectedToolRegistrationsAsync(
+            toolRepository,
+            cancellationToken);
+        var result = pilotReadinessService.RunApprovalRehearsal(request.PackageId, protectedTools);
         if (!result.IsSuccess || result.Value is null)
         {
             return result;
@@ -250,6 +273,7 @@ public sealed class RunCloudReadonlyPilotApprovalRehearsalCommandHandler(
 
 public sealed class RunCloudReadonlyPilotContractRehearsalCommandHandler(
     CloudReadonlyPilotReadinessService pilotReadinessService,
+    IReadRepository<ToolRegistration> toolRepository,
     IAuditLogWriter auditLogWriter)
     : ICommandHandler<RunCloudReadonlyPilotContractRehearsalCommand, Result<CloudReadonlyPilotContractRehearsalDto>>
 {
@@ -257,11 +281,15 @@ public sealed class RunCloudReadonlyPilotContractRehearsalCommandHandler(
         RunCloudReadonlyPilotContractRehearsalCommand request,
         CancellationToken cancellationToken)
     {
+        var protectedTools = await GetCloudReadonlyPilotReadinessQueryHandler.LoadProtectedToolRegistrationsAsync(
+            toolRepository,
+            cancellationToken);
         var result = pilotReadinessService.RunContractRehearsal(
             request.PackageId,
             request.EndpointCodes,
             request.MaxRows,
-            request.TimeoutMs);
+            request.TimeoutMs,
+            protectedTools);
         if (!result.IsSuccess || result.Value is null)
         {
             return result;
@@ -400,23 +428,27 @@ public sealed class CloudReadonlyPilotReadinessService(
             new EndpointSpec("invalid_json", HttpMethod.Get, "/api/v1/ai/read/devices", 0)
         }.ToDictionary(item => item.Code, StringComparer.OrdinalIgnoreCase);
 
-    public CloudReadonlyPilotReadinessStatusDto BuildStatus()
+    public CloudReadonlyPilotReadinessStatusDto BuildStatus(
+        IReadOnlyCollection<ToolRegistration>? persistedToolRegistrations = null)
     {
         var package = store.LatestPackage();
-        return BuildStatus(package, null);
+        return BuildStatus(package, null, persistedToolRegistrations);
     }
 
-    public CloudReadonlyPilotReadinessStatusDto EvaluateGate(PilotReadinessAssessmentDto p10Assessment)
+    public CloudReadonlyPilotReadinessStatusDto EvaluateGate(
+        PilotReadinessAssessmentDto p10Assessment,
+        IReadOnlyCollection<ToolRegistration>? persistedToolRegistrations = null)
     {
         var package = store.LatestPackage();
-        return BuildStatus(package, p10Assessment);
+        return BuildStatus(package, p10Assessment, persistedToolRegistrations);
     }
 
     public Result<CloudReadonlyPilotConfigPackageDto> CreatePackage(
         CreateCloudReadonlyPilotConfigPackageCommand request,
-        TrialEvidencePackageDto evidencePackage)
+        TrialEvidencePackageDto evidencePackage,
+        IReadOnlyCollection<ToolRegistration>? persistedToolRegistrations = null)
     {
-        var status = BuildStatus();
+        var status = BuildStatus(persistedToolRegistrations);
         if (status.Status == CloudReadonlyPilotReadinessStatuses.Blocked)
         {
             return Result.Invalid($"CloudReadonlyPilotReadiness gate is blocked: {string.Join("; ", status.Blockers)}");
@@ -456,7 +488,9 @@ public sealed class CloudReadonlyPilotReadinessService(
         return Result.Success(package);
     }
 
-    public Result<PilotApprovalRehearsalDto> RunApprovalRehearsal(string packageId)
+    public Result<PilotApprovalRehearsalDto> RunApprovalRehearsal(
+        string packageId,
+        IReadOnlyCollection<ToolRegistration>? persistedToolRegistrations = null)
     {
         var package = store.GetPackage(packageId);
         if (package is null)
@@ -464,7 +498,7 @@ public sealed class CloudReadonlyPilotReadinessService(
             return Result.Invalid("CloudReadonlyPilotReadiness config package was not found.");
         }
 
-        var status = BuildStatus(package, null);
+        var status = BuildStatus(package, null, persistedToolRegistrations);
         if (status.Status == CloudReadonlyPilotReadinessStatuses.Blocked)
         {
             return Result.Invalid($"CloudReadonlyPilotReadiness approval rehearsal is blocked: {string.Join("; ", status.Blockers)}");
@@ -496,7 +530,8 @@ public sealed class CloudReadonlyPilotReadinessService(
         string packageId,
         IReadOnlyCollection<string>? endpointCodes,
         int? maxRows,
-        int? timeoutMs)
+        int? timeoutMs,
+        IReadOnlyCollection<ToolRegistration>? persistedToolRegistrations = null)
     {
         var package = store.GetPackage(packageId);
         if (package is null)
@@ -504,7 +539,7 @@ public sealed class CloudReadonlyPilotReadinessService(
             return Result.Invalid("CloudReadonlyPilotReadiness config package was not found.");
         }
 
-        var status = BuildStatus(package, null);
+        var status = BuildStatus(package, null, persistedToolRegistrations);
         if (status.Status == CloudReadonlyPilotReadinessStatuses.Blocked)
         {
             return Result.Invalid($"CloudReadonlyPilotReadiness contract rehearsal is blocked: {string.Join("; ", status.Blockers)}");
@@ -540,11 +575,12 @@ public sealed class CloudReadonlyPilotReadinessService(
 
     private CloudReadonlyPilotReadinessStatusDto BuildStatus(
         CloudReadonlyPilotConfigPackageDto? package,
-        PilotReadinessAssessmentDto? p10Assessment)
+        PilotReadinessAssessmentDto? p10Assessment,
+        IReadOnlyCollection<ToolRegistration>? persistedToolRegistrations)
     {
         var blockers = new List<string>();
         var warnings = new List<string>();
-        ValidateProductionBoundary(blockers, warnings);
+        ValidateProductionBoundary(blockers, warnings, persistedToolRegistrations);
 
         if (p10Assessment is not null)
         {
@@ -589,7 +625,10 @@ public sealed class CloudReadonlyPilotReadinessService(
             latestContract?.GeneratedAt ?? latestApproval?.GeneratedAt);
     }
 
-    private void ValidateProductionBoundary(ICollection<string> blockers, ICollection<string> warnings)
+    private void ValidateProductionBoundary(
+        ICollection<string> blockers,
+        ICollection<string> warnings,
+        IReadOnlyCollection<ToolRegistration>? persistedToolRegistrations)
     {
         var cloudReadonly = cloudReadonlyOptions.Value;
         var cloudAiRead = cloudAiReadOptions.Value;
@@ -619,31 +658,70 @@ public sealed class CloudReadonlyPilotReadinessService(
             warnings.Add("CloudAiRead token is configured but P11 readiness APIs never return token values and never execute real production reads.");
         }
 
-        var productionTool = BuiltInToolRegistrations.AgentRuntimeTools
-            .FirstOrDefault(tool => tool.ToolCode == "query_cloud_data_readonly");
-        if (productionTool is null)
+        ValidateBuiltInProtectedTool(ProtectedCloudReadonlyToolPolicy.ProductionToolCode, blockers);
+        ValidateBuiltInProtectedTool(ProtectedCloudReadonlyToolPolicy.PilotReadinessToolCode, blockers);
+        ValidatePersistedProtectedTools(persistedToolRegistrations, blockers, warnings);
+    }
+
+    private static void ValidateBuiltInProtectedTool(string toolCode, ICollection<string> blockers)
+    {
+        var tool = BuiltInToolRegistrations.AgentRuntimeTools
+            .FirstOrDefault(item => string.Equals(item.ToolCode, toolCode, StringComparison.OrdinalIgnoreCase));
+        if (tool is null)
         {
-            blockers.Add("Tool Registry is missing query_cloud_data_readonly.");
-        }
-        else if (productionTool.IsEnabled || productionTool.IsVisibleToPlanner || productionTool.IsExecutableByAgent)
-        {
-            blockers.Add("query_cloud_data_readonly must remain disabled, hidden, and non-executable during P11.");
+            blockers.Add($"Tool Registry built-in definition is missing {toolCode}.");
+            return;
         }
 
-        var pilotTool = BuiltInToolRegistrations.AgentRuntimeTools
-            .FirstOrDefault(tool => tool.ToolCode == CloudReadonlyPilotReadinessMarkers.ToolCode);
-        if (pilotTool is null)
+        var safetyError = ProtectedCloudReadonlyToolPolicy.ValidateSafeState(
+            tool.ToolCode,
+            tool.IsEnabled,
+            tool.IsVisibleToPlanner,
+            tool.IsExecutableByAgent,
+            tool.ApprovalPolicy);
+        if (safetyError is not null)
         {
-            blockers.Add($"Tool Registry is missing {CloudReadonlyPilotReadinessMarkers.ToolCode}.");
+            blockers.Add($"Built-in {safetyError}");
         }
-        else if (pilotTool.IsEnabled || pilotTool.IsVisibleToPlanner || pilotTool.IsExecutableByAgent)
+
+        if (string.Equals(toolCode, ProtectedCloudReadonlyToolPolicy.PilotReadinessToolCode, StringComparison.OrdinalIgnoreCase) &&
+            tool.DataBoundary != ToolDataBoundary.CloudReadonlyPilotReadinessOnly)
         {
-            blockers.Add($"{CloudReadonlyPilotReadinessMarkers.ToolCode} must remain disabled, hidden, and non-executable.");
+            blockers.Add($"{toolCode} must use the CloudReadonlyPilotReadinessOnly boundary descriptor.");
         }
-        else if (pilotTool.DataBoundary != ToolDataBoundary.CloudReadonlyPilotReadinessOnly ||
-                 pilotTool.ApprovalPolicy != "PilotReadinessRehearsalOnly")
+    }
+
+    private static void ValidatePersistedProtectedTools(
+        IReadOnlyCollection<ToolRegistration>? persistedToolRegistrations,
+        ICollection<string> blockers,
+        ICollection<string> warnings)
+    {
+        if (persistedToolRegistrations is null)
         {
-            blockers.Add($"{CloudReadonlyPilotReadinessMarkers.ToolCode} must use the PilotReadinessRehearsalOnly boundary descriptor.");
+            warnings.Add("P11 Pilot readiness did not receive persisted ToolRegistry state; only built-in definitions were checked.");
+            return;
+        }
+
+        foreach (var toolCode in ProtectedCloudReadonlyToolPolicy.ProtectedToolCodes)
+        {
+            var persistedTool = persistedToolRegistrations.FirstOrDefault(
+                tool => string.Equals(tool.ToolCode, toolCode, StringComparison.OrdinalIgnoreCase));
+            if (persistedTool is null)
+            {
+                blockers.Add($"Persisted ToolRegistry is missing protected tool {toolCode}.");
+                continue;
+            }
+
+            var safetyError = ProtectedCloudReadonlyToolPolicy.ValidateSafeState(
+                persistedTool.ToolCode,
+                persistedTool.IsEnabled,
+                persistedTool.IsVisibleToPlanner,
+                persistedTool.IsExecutableByAgent,
+                persistedTool.ApprovalPolicy);
+            if (safetyError is not null)
+            {
+                blockers.Add($"Persisted ToolRegistry unsafe: {safetyError}");
+            }
         }
     }
 

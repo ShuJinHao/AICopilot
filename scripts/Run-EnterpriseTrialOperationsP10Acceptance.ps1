@@ -135,8 +135,20 @@ if (-not $SkipFrontend) {
 
             "Frontend HTTP smoke passed at http://127.0.0.1:$port/chat"
         } finally {
-            if ($proc -and -not $proc.HasExited) {
-                Stop-Process -Id $proc.Id -Force
+            if ($proc) {
+                $processIds = New-Object System.Collections.Generic.List[int]
+                $pending = New-Object System.Collections.Generic.Queue[int]
+                $pending.Enqueue($proc.Id)
+                while ($pending.Count -gt 0) {
+                    $parentId = $pending.Dequeue()
+                    $processIds.Add($parentId)
+                    Get-CimInstance Win32_Process -Filter "ParentProcessId = $parentId" -ErrorAction SilentlyContinue |
+                        ForEach-Object { $pending.Enqueue([int]$_.ProcessId) }
+                }
+
+                foreach ($processId in ($processIds | Select-Object -Unique | Sort-Object -Descending)) {
+                    Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+                }
             }
         }
     }

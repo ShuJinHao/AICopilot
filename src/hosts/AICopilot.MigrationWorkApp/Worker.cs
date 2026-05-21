@@ -288,6 +288,12 @@ public class Worker(
                 continue;
             }
 
+            if (ProtectedCloudReadonlyToolPolicy.IsProtected(tool.ToolCode))
+            {
+                ProtectedCloudReadonlyToolPolicy.ForceDisabled(tool, now);
+                continue;
+            }
+
             tool.Update(
                 definition.DisplayName,
                 definition.Description,

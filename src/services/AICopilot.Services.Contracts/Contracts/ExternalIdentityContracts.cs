@@ -13,6 +13,8 @@ public static class ExternalIdentityJwtClaimTypes
     public const string CloudUserId = "cloud_user_id";
     public const string CloudEmployeeId = "cloud_employee_id";
     public const string CloudEmployeeNo = "cloud_employee_no";
+    public const string CloudDepartmentId = "cloud_department_id";
+    public const string CloudDepartmentName = "cloud_department_name";
     public const string CloudStatusVersion = "cloud_status_version";
 }
 

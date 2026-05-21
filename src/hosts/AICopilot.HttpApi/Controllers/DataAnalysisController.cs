@@ -29,6 +29,18 @@ public class DataAnalysisController(ISender sender) : ApiControllerBase(sender)
         return ReturnResult(await Sender.Send(command));
     }
 
+    [HttpPost("business-database/permissions/grant")]
+    public async Task<IActionResult> GrantDataSourcePermission(GrantDataSourcePermissionCommand command)
+    {
+        return ReturnResult(await Sender.Send(command));
+    }
+
+    [HttpPost("business-database/permissions/revoke")]
+    public async Task<IActionResult> RevokeDataSourcePermission(RevokeDataSourcePermissionCommand command)
+    {
+        return ReturnResult(await Sender.Send(command));
+    }
+
     [HttpGet("business-database")]
     public async Task<IActionResult> GetBusinessDatabase([FromQuery] GetBusinessDatabaseQuery query)
     {
@@ -39,6 +51,12 @@ public class DataAnalysisController(ISender sender) : ApiControllerBase(sender)
     public async Task<IActionResult> GetListBusinessDatabases()
     {
         return ReturnResult(await Sender.Send(new GetListBusinessDatabasesQuery()));
+    }
+
+    [HttpGet("business-database/authorized")]
+    public async Task<IActionResult> GetMyAuthorizedDataSources()
+    {
+        return ReturnResult(await Sender.Send(new GetMyAuthorizedDataSourcesQuery()));
     }
 
     [HttpPost("business-database/query-readonly")]

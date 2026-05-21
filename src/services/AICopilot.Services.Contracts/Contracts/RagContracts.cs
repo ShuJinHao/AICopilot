@@ -32,7 +32,8 @@ public sealed record KnowledgeRetrievalResult(
     string DocumentName,
     int ChunkIndex,
     bool IsLowConfidence,
-    string? LowConfidenceReason);
+    string? LowConfidenceReason,
+    IReadOnlyCollection<KnowledgeSupplementHitDto>? SupplementHits = null);
 
 public sealed record KnowledgeCategoryDto(
     Guid Id,
@@ -68,7 +69,8 @@ public sealed record KnowledgeSupplementHitDto(
     string Priority,
     string Content,
     Guid? CategoryId,
-    int? DocumentId);
+    int? DocumentId,
+    string? ContentHash = null);
 
 public interface IDocumentIndexingService
 {

@@ -40,6 +40,7 @@ public sealed class ExecuteBusinessDatabaseReadonlyQueryCommandHandler(
 public sealed class BusinessReadonlyQueryExecutor(
     IReadRepository<BusinessDatabase> repository,
     IDatabaseConnector databaseConnector,
+    BusinessDatabaseAccessService accessService,
     IAuditLogWriter auditLogWriter)
 {
     public async Task<Result<BusinessQueryResultDto>> ExecuteAsync(
@@ -57,6 +58,23 @@ public sealed class BusinessReadonlyQueryExecutor(
         if (database is null)
         {
             return Result.NotFound();
+        }
+
+        if (!await accessService.CanQueryAsync(database, cancellationToken))
+        {
+            await WriteAuditAsync(
+                database,
+                sql,
+                AuditResults.Rejected,
+                "Business readonly query rejected because the current user is not authorized for this data source.",
+                rowCount: 0,
+                isTruncated: false,
+                durationMs: 0,
+                auditAction,
+                cancellationToken);
+            return Result.Forbidden(new ApiProblemDescriptor(
+                "data_source_forbidden",
+                "Current user is not authorized to query this business data source."));
         }
 
         if (!database.IsEnabled || !database.IsReadOnly)

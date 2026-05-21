@@ -66,6 +66,7 @@ internal sealed class BusinessTextToSqlRuntime(
     IReadRepository<BusinessDatabase> repository,
     BusinessReadonlyQueryExecutor queryExecutor,
     BusinessTextToSqlDraftStore draftStore,
+    BusinessDatabaseAccessService accessService,
     IAuditLogWriter auditLogWriter)
     : IBusinessTextToSqlRuntime
 {
@@ -84,6 +85,20 @@ internal sealed class BusinessTextToSqlRuntime(
         if (database is null)
         {
             return Result.NotFound();
+        }
+
+        if (!await accessService.CanQueryAsync(database, cancellationToken))
+        {
+            await WriteDraftAuditAsync(
+                database,
+                request.Question,
+                null,
+                AuditResults.Rejected,
+                "Business Text-to-SQL draft rejected because the current user is not authorized for this data source.",
+                cancellationToken);
+            return Result.Forbidden(new ApiProblemDescriptor(
+                "data_source_forbidden",
+                "Current user is not authorized to query this business data source."));
         }
 
         var validation = ValidateSimulationBusinessDatabase(database, request.BusinessDomains);

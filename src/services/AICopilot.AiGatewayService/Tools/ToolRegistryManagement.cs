@@ -265,6 +265,17 @@ public sealed class UpdateToolRegistrationCommandHandler(
             return Result.Invalid("DataBoundary is invalid.");
         }
 
+        var safetyError = ProtectedCloudReadonlyToolPolicy.ValidateSafeState(
+            tool.ToolCode,
+            request.IsEnabled ?? tool.IsEnabled,
+            request.IsVisibleToPlanner ?? tool.IsVisibleToPlanner,
+            request.IsExecutableByAgent ?? tool.IsExecutableByAgent,
+            request.ApprovalPolicy ?? tool.ApprovalPolicy);
+        if (safetyError is not null)
+        {
+            return Result.Invalid(safetyError);
+        }
+
         var changedFields = BuildChangedFields(tool, request, auditLevel, dataBoundary);
         tool.Update(
             request.DisplayName ?? tool.DisplayName,
@@ -289,6 +300,11 @@ public sealed class UpdateToolRegistrationCommandHandler(
             request.SchemaVersion ?? tool.SchemaVersion,
             request.CatalogVersion ?? tool.CatalogVersion,
             request.ApprovalPolicy ?? tool.ApprovalPolicy);
+
+        if (ProtectedCloudReadonlyToolPolicy.IsProtected(tool.ToolCode))
+        {
+            ProtectedCloudReadonlyToolPolicy.ForceDisabled(tool, DateTimeOffset.UtcNow);
+        }
 
         repository.Update(tool);
         await auditLogWriter.WriteAsync(
@@ -425,6 +441,17 @@ public sealed class UpsertToolDefinitionCommandHandler(
             return Result.Invalid("DataBoundary is invalid.");
         }
 
+        var safetyError = ProtectedCloudReadonlyToolPolicy.ValidateSafeState(
+            request.ToolCode,
+            request.IsEnabled,
+            request.IsVisibleToPlanner,
+            request.IsExecutableByAgent,
+            request.ApprovalPolicy);
+        if (safetyError is not null)
+        {
+            return Result.Invalid(safetyError);
+        }
+
         var now = DateTimeOffset.UtcNow;
         var tool = await repository.GetAsync(
             item => item.ToolCode == request.ToolCode,
@@ -456,6 +483,10 @@ public sealed class UpsertToolDefinitionCommandHandler(
                 request.SchemaVersion,
                 request.CatalogVersion,
                 request.ApprovalPolicy);
+            if (ProtectedCloudReadonlyToolPolicy.IsProtected(tool.ToolCode))
+            {
+                ProtectedCloudReadonlyToolPolicy.ForceDisabled(tool, now);
+            }
             repository.Add(tool);
         }
         else
@@ -483,6 +514,10 @@ public sealed class UpsertToolDefinitionCommandHandler(
                 request.SchemaVersion,
                 request.CatalogVersion,
                 request.ApprovalPolicy);
+            if (ProtectedCloudReadonlyToolPolicy.IsProtected(tool.ToolCode))
+            {
+                ProtectedCloudReadonlyToolPolicy.ForceDisabled(tool, now);
+            }
             repository.Update(tool);
         }
 

@@ -11,6 +11,8 @@ public class CurrentUser : ICurrentUser
     public string? IdentityProvider { get; }
     public string? CloudTenantId { get; }
     public string? CloudEmployeeNo { get; }
+    public string? CloudDepartmentId { get; }
+    public string? CloudDepartmentName { get; }
     public string? CloudStatusVersion { get; }
     public bool IsAuthenticated { get; }
 
@@ -33,6 +35,8 @@ public class CurrentUser : ICurrentUser
         IdentityProvider = user.FindFirstValue(ExternalIdentityJwtClaimTypes.IdentityProvider);
         CloudTenantId = user.FindFirstValue(ExternalIdentityJwtClaimTypes.CloudTenantId);
         CloudEmployeeNo = user.FindFirstValue(ExternalIdentityJwtClaimTypes.CloudEmployeeNo);
+        CloudDepartmentId = user.FindFirstValue(ExternalIdentityJwtClaimTypes.CloudDepartmentId);
+        CloudDepartmentName = user.FindFirstValue(ExternalIdentityJwtClaimTypes.CloudDepartmentName);
         CloudStatusVersion = user.FindFirstValue(ExternalIdentityJwtClaimTypes.CloudStatusVersion);
 
         IsAuthenticated = true;
