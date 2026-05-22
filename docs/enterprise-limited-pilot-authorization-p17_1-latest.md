@@ -1,14 +1,14 @@
 ﻿# AICopilot Limited Pilot Authorization P17.1 Acceptance
 
-- GeneratedAt: 2026-05-22 14:09:07
+- GeneratedAt: 2026-05-22 14:23:36
 - Repository: <local-repo>
-- LocalHeadAtGeneration: f8872094cb016000c6f356b68ef5752246d0188a
+- LocalHeadAtGeneration: 9786860ca8e4a224ee7261f7f3db9d28d406e39e
 - Branch: integration/aicopilot-agent-workbench-simulation
 - SubmittedStateNote: after committing this report refresh, use PR #48 current head and GitHub checks as the authoritative submitted-state evidence
 - PullRequest: https://github.com/ShuJinHao/AICopilot/pull/48
-- PullRequestHeadAtGeneration: f8872094cb016000c6f356b68ef5752246d0188a
+- PullRequestHeadAtGeneration: 9786860ca8e4a224ee7261f7f3db9d28d406e39e
 - GitHubCIAtGeneration: simulation-rc status=COMPLETED conclusion=SUCCESS
-- GitHubCIDetails: https://github.com/ShuJinHao/AICopilot/actions/runs/26270877317/job/77323820944
+- GitHubCIDetails: https://github.com/ShuJinHao/AICopilot/actions/runs/26271582391/job/77326061541
 - ExternalReviewEvidence: 5.5 Pro ReviewPending
 - ExternalReviewBlockingPolicy: evidence-only for P17.1 authorization material
 - AuthorizationDecision: AuthorizationDryRunReady
@@ -51,7 +51,7 @@
 ### Enterprise Data Governance Scope Guard
 
 ```text
-Enterprise Data Governance scope guard passed. Checked 5 candidate file(s).
+Enterprise Data Governance scope guard passed. Checked 4 candidate file(s).
 ```
 
 ### P17.0 Preparation Inheritance Check
@@ -81,7 +81,7 @@ External review state is evidence only for P17.1 authorization material.
 ### GitHub PR #48 Current Head And CI Evidence Check
 
 ```text
-PR #48 head f8872094cb016000c6f356b68ef5752246d0188a simulation-rc SUCCESS https://github.com/ShuJinHao/AICopilot/actions/runs/26270877317/job/77323820944
+PR #48 head 9786860ca8e4a224ee7261f7f3db9d28d406e39e simulation-rc SUCCESS https://github.com/ShuJinHao/AICopilot/actions/runs/26271582391/job/77326061541
 ```
 
 ### P17.1 No Execution Claim Check
