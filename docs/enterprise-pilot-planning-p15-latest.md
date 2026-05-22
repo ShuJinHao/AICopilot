@@ -1,12 +1,12 @@
 ﻿# AICopilot Enterprise Pilot Planning P15 Acceptance
 
-- GeneratedAt: 2026-05-22 09:07:48
+- GeneratedAt: 2026-05-22 09:14:23
 - Repository: <local-repo>
-- LocalHead: 1186a1128d395ed5fe2ad155487bdcb24cb9f5f4
+- LocalHead: 37a5c718f440854c81945d3f39e02c544bf78c9a
 - Branch: integration/aicopilot-agent-workbench-simulation
 - WorkingTree: dirty - local P15 changes are not covered by GitHub CI until committed and pushed
-- PullRequest: PR #48 head 1186a1128d395ed5fe2ad155487bdcb24cb9f5f4 https://github.com/ShuJinHao/AICopilot/pull/48
-- GitHubCI: simulation-rc status=COMPLETED conclusion=SUCCESS (covers the current PR head only; rerun after committing and pushing local P15 changes)
+- PullRequest: PR #48 head 37a5c718f440854c81945d3f39e02c544bf78c9a https://github.com/ShuJinHao/AICopilot/pull/48
+- GitHubCI: simulation-rc status=COMPLETED conclusion=FAILURE (covers the current PR head only; rerun after committing and pushing local P15 changes)
 - Boundary: P15 is planning and authorization only; it is not P16 execution and not GA
 - Default State: query_cloud_data_readonly remains disabled, hidden, and non-executable
 - Forbidden: Cloud write, Recipe/version, free SQL, raw payload, rows, token/API key/connection string output
@@ -49,7 +49,7 @@ Using existing P14.2 acceptance report: .\docs\enterprise-cloud-readonly-product
 ### Enterprise Data Governance Scope Guard
 
 ```text
-Enterprise Data Governance scope guard passed. Checked 8 candidate file(s).
+Enterprise Data Governance scope guard passed. Checked 1 candidate file(s).
 ```
 
 ### P15 Planning Package Check
@@ -128,7 +128,7 @@ computing gzip size...
 [2mdist/[22m[36massets/ChatView-DAf4Pjgz.js                                           [39m[1m[2m171.83 kB[22m[1m[22m[2m │ gzip:  66.24 kB[22m
 [2mdist/[22m[36massets/index-CiHYQBsz.js                                              [39m[1m[2m225.45 kB[22m[1m[22m[2m │ gzip:  79.56 kB[22m
 [2mdist/[22m[36massets/ChartWidget-DZ0u8TQC.js                                        [39m[1m[2m547.15 kB[22m[1m[22m[2m │ gzip: 184.75 kB[22m
-[32m✓ built in 9.93s[39m
+[32m✓ built in 12.18s[39m
 ```
 
 ### Frontend P15 Planning Playwright Smoke
@@ -140,11 +140,11 @@ computing gzip size...
 
 Running 2 tests using 2 workers
 
-  -  1 [mobile] › tests\smoke\acceptance.spec.ts:196:1 › agent trial panel shows P15 planning authorization gate
-  ok 2 [desktop] › tests\smoke\acceptance.spec.ts:196:1 › agent trial panel shows P15 planning authorization gate (2.5s)
+  -  1 [mobile] › tests\smoke\acceptance.spec.ts:197:1 › agent trial panel shows P15 planning authorization gate
+  ok 2 [desktop] › tests\smoke\acceptance.spec.ts:197:1 › agent trial panel shows P15 planning authorization gate (3.4s)
 
   1 skipped
-  1 passed (6.4s)
+  1 passed (8.0s)
 ```
 
 ## Remaining Risk

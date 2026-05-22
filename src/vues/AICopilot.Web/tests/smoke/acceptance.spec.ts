@@ -118,9 +118,10 @@ test('agent trial panel shows P11 pilot readiness rehearsal evidence', async ({ 
   await expect(page.getByTestId('p11-approval-rehearsal')).toBeVisible()
 
   await page.getByRole('button', { name: /fake contract/ }).click()
-  await expect(page.getByTestId('p11-contract-rehearsal')).toBeVisible()
-  await expect(page.getByText('devices', { exact: true })).toBeVisible()
-  await expect(page.getByText('recipe_versions', { exact: true })).toBeVisible()
+  const contractRehearsal = page.getByTestId('p11-contract-rehearsal')
+  await expect(contractRehearsal).toBeVisible()
+  await expect(contractRehearsal.getByText('devices', { exact: true })).toBeVisible()
+  await expect(contractRehearsal.getByText('recipe_versions', { exact: true })).toBeVisible()
   await expectNoHorizontalOverflow(page)
 })
 
