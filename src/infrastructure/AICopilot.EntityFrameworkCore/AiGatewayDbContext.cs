@@ -64,6 +64,14 @@ public sealed class AiGatewayDbContext(DbContextOptions<AiGatewayDbContext> opti
 
     public DbSet<ProductionPilotRunLedger> ProductionPilotRunLedgers => Set<ProductionPilotRunLedger>();
 
+    public DbSet<ProductionPilotWindow> ProductionPilotWindows => Set<ProductionPilotWindow>();
+
+    public DbSet<ProductionPilotRun> ProductionPilotRuns => Set<ProductionPilotRun>();
+
+    public DbSet<ProductionControlledPilotIntent> ProductionControlledPilotIntents => Set<ProductionControlledPilotIntent>();
+
+    public DbSet<ProductionControlledPilotRun> ProductionControlledPilotRuns => Set<ProductionControlledPilotRun>();
+
     public DbSet<ProductionPilotGaReadinessAssessment> ProductionPilotGaReadinessAssessments => Set<ProductionPilotGaReadinessAssessment>();
 
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
@@ -96,6 +104,10 @@ public sealed class AiGatewayDbContext(DbContextOptions<AiGatewayDbContext> opti
         builder.ApplyConfiguration(new ProductionPilotEmergencyStopStateConfiguration());
         builder.ApplyConfiguration(new ProductionPilotIncidentConfiguration());
         builder.ApplyConfiguration(new ProductionPilotRunLedgerConfiguration());
+        builder.ApplyConfiguration(new ProductionPilotWindowConfiguration());
+        builder.ApplyConfiguration(new ProductionPilotRunConfiguration());
+        builder.ApplyConfiguration(new ProductionControlledPilotIntentConfiguration());
+        builder.ApplyConfiguration(new ProductionControlledPilotRunConfiguration());
         builder.ApplyConfiguration(new ProductionPilotGaReadinessAssessmentConfiguration());
         builder.ApplyConfiguration(new OutboxMessageConfiguration());
         builder.Entity<OutboxMessage>().ToTable(

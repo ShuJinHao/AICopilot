@@ -1,4 +1,5 @@
 using AICopilot.AiGatewayService.AgentTasks;
+using AICopilot.AiGatewayService.CloudReadiness;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
@@ -594,7 +595,8 @@ public sealed class FinalizeArtifactWorkspaceCommandHandler(
     AgentAuditRecorder auditRecorder,
     IAuditLogWriter auditLogWriter,
     ICurrentUser currentUser,
-    IIdentityAccessService identityAccessService)
+    IIdentityAccessService identityAccessService,
+    CloudReadonlyProductionOperationsService? productionOperationsService = null)
     : ICommandHandler<FinalizeArtifactWorkspaceCommand, Result<ArtifactWorkspaceDto>>
 {
     public async Task<Result<ArtifactWorkspaceDto>> Handle(
@@ -697,6 +699,10 @@ public sealed class FinalizeArtifactWorkspaceCommandHandler(
             task.Complete("产物已确认并输出到 final 目录。", now);
         }
 
+        var backfillWarnings = productionOperationsService?.BackfillFinalArtifactRefs(
+            task.Id.Value,
+            workspace.Artifacts.Where(artifact => artifact.Status == ArtifactStatus.Final).ToArray()) ?? [];
+
         var activeRunAttemptId = task.ActiveRunAttemptId;
         var finalStep = task.Steps
             .OrderByDescending(step => step.StepIndex)
@@ -732,7 +738,9 @@ public sealed class FinalizeArtifactWorkspaceCommandHandler(
             task,
             workspace,
             AuditResults.Succeeded,
-            "Workspace artifacts finalized.",
+            backfillWarnings.Count == 0
+                ? "Workspace artifacts finalized. Production Pilot ledger artifact refs backfilled when applicable."
+                : $"Workspace artifacts finalized. Production Pilot ledger backfill warnings: {string.Join(" | ", backfillWarnings)}",
             cancellationToken);
         await workspaceRepository.SaveChangesAsync(cancellationToken);
         await auditLogWriter.SaveChangesAsync(cancellationToken);

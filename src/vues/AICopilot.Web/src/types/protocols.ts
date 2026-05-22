@@ -615,11 +615,26 @@ export interface ProductionPilotRunMetrics {
   endpointDistribution?: Record<string, number>
 }
 
+export interface ProductionPilotRowsRetentionPolicy {
+  persistenceMode: string
+  runtimeRowsTtlMinutes: number
+  ledgerStoresRows: boolean
+  ledgerStoresRawPayload: boolean
+  reportsReturnRows: boolean
+  artifactUsePolicy: string
+  downloadPolicy: string
+  auditSummary: string
+}
+
 export interface CloudReadonlyProductionOperationsStatus {
   status: string
   p12PilotStatus: string
   p13ControlledPilotStatus: string
   operationsStorePersisted?: boolean
+  p12PilotStorePersisted?: boolean
+  p13ControlledPilotStorePersisted?: boolean
+  artifactRefsBackfillEnabled?: boolean
+  rowsRetentionPolicy?: ProductionPilotRowsRetentionPolicy
   hasP12CompletedRun?: boolean
   hasP13CompletedRun?: boolean
   emergencyStopActive: boolean

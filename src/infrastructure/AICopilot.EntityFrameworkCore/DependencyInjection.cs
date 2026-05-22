@@ -99,6 +99,14 @@ public static class DependencyInjection
         builder.Services.AddScoped<IRepository<ProductionPilotIncident>>(provider => provider.GetRequiredService<AiGatewayRepository<ProductionPilotIncident>>());
         builder.Services.AddScoped<IReadRepository<ProductionPilotRunLedger>>(provider => provider.GetRequiredService<AiGatewayRepository<ProductionPilotRunLedger>>());
         builder.Services.AddScoped<IRepository<ProductionPilotRunLedger>>(provider => provider.GetRequiredService<AiGatewayRepository<ProductionPilotRunLedger>>());
+        builder.Services.AddScoped<IReadRepository<ProductionPilotWindow>>(provider => provider.GetRequiredService<AiGatewayRepository<ProductionPilotWindow>>());
+        builder.Services.AddScoped<IRepository<ProductionPilotWindow>>(provider => provider.GetRequiredService<AiGatewayRepository<ProductionPilotWindow>>());
+        builder.Services.AddScoped<IReadRepository<ProductionPilotRun>>(provider => provider.GetRequiredService<AiGatewayRepository<ProductionPilotRun>>());
+        builder.Services.AddScoped<IRepository<ProductionPilotRun>>(provider => provider.GetRequiredService<AiGatewayRepository<ProductionPilotRun>>());
+        builder.Services.AddScoped<IReadRepository<ProductionControlledPilotIntent>>(provider => provider.GetRequiredService<AiGatewayRepository<ProductionControlledPilotIntent>>());
+        builder.Services.AddScoped<IRepository<ProductionControlledPilotIntent>>(provider => provider.GetRequiredService<AiGatewayRepository<ProductionControlledPilotIntent>>());
+        builder.Services.AddScoped<IReadRepository<ProductionControlledPilotRun>>(provider => provider.GetRequiredService<AiGatewayRepository<ProductionControlledPilotRun>>());
+        builder.Services.AddScoped<IRepository<ProductionControlledPilotRun>>(provider => provider.GetRequiredService<AiGatewayRepository<ProductionControlledPilotRun>>());
         builder.Services.AddScoped<IReadRepository<ProductionPilotGaReadinessAssessment>>(provider => provider.GetRequiredService<AiGatewayRepository<ProductionPilotGaReadinessAssessment>>());
         builder.Services.AddScoped<IRepository<ProductionPilotGaReadinessAssessment>>(provider => provider.GetRequiredService<AiGatewayRepository<ProductionPilotGaReadinessAssessment>>());
         builder.Services.AddScoped(typeof(RagRepository<>));

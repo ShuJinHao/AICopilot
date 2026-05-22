@@ -67,6 +67,90 @@ public readonly record struct ProductionPilotRunLedgerId : IStronglyTypedGuidId
     public override string ToString() => Value.ToString();
 }
 
+public readonly record struct ProductionPilotWindowId : IStronglyTypedGuidId
+{
+    public ProductionPilotWindowId(Guid value)
+    {
+        if (value == Guid.Empty)
+        {
+            throw new ArgumentException("Production Pilot window id is required.", nameof(value));
+        }
+
+        Value = value;
+    }
+
+    public Guid Value { get; }
+
+    public static ProductionPilotWindowId New() => new(Guid.NewGuid());
+
+    public static implicit operator Guid(ProductionPilotWindowId id) => id.Value;
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct ProductionPilotRunId : IStronglyTypedGuidId
+{
+    public ProductionPilotRunId(Guid value)
+    {
+        if (value == Guid.Empty)
+        {
+            throw new ArgumentException("Production Pilot run id is required.", nameof(value));
+        }
+
+        Value = value;
+    }
+
+    public Guid Value { get; }
+
+    public static ProductionPilotRunId New() => new(Guid.NewGuid());
+
+    public static implicit operator Guid(ProductionPilotRunId id) => id.Value;
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct ProductionControlledPilotIntentId : IStronglyTypedGuidId
+{
+    public ProductionControlledPilotIntentId(Guid value)
+    {
+        if (value == Guid.Empty)
+        {
+            throw new ArgumentException("Production controlled Pilot intent id is required.", nameof(value));
+        }
+
+        Value = value;
+    }
+
+    public Guid Value { get; }
+
+    public static ProductionControlledPilotIntentId New() => new(Guid.NewGuid());
+
+    public static implicit operator Guid(ProductionControlledPilotIntentId id) => id.Value;
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct ProductionControlledPilotRunId : IStronglyTypedGuidId
+{
+    public ProductionControlledPilotRunId(Guid value)
+    {
+        if (value == Guid.Empty)
+        {
+            throw new ArgumentException("Production controlled Pilot run id is required.", nameof(value));
+        }
+
+        Value = value;
+    }
+
+    public Guid Value { get; }
+
+    public static ProductionControlledPilotRunId New() => new(Guid.NewGuid());
+
+    public static implicit operator Guid(ProductionControlledPilotRunId id) => id.Value;
+
+    public override string ToString() => Value.ToString();
+}
+
 public readonly record struct ProductionPilotGaReadinessAssessmentId : IStronglyTypedGuidId
 {
     public ProductionPilotGaReadinessAssessmentId(Guid value)

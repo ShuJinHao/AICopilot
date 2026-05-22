@@ -212,6 +212,266 @@ public sealed class ProductionPilotRunLedgerConfiguration : IEntityTypeConfigura
     }
 }
 
+public sealed class ProductionPilotWindowConfiguration : IEntityTypeConfiguration<ProductionPilotWindow>
+{
+    public void Configure(EntityTypeBuilder<ProductionPilotWindow> builder)
+    {
+        builder.ToTable("production_pilot_windows");
+
+        builder.HasKey(window => window.Id);
+        builder.Property(window => window.Id)
+            .HasConversion(id => id.Value, value => new ProductionPilotWindowId(value))
+            .HasColumnName("id");
+
+        builder.Property<uint>("RowVersion").IsRowVersion();
+
+        builder.Property(window => window.WindowId)
+            .IsRequired()
+            .HasMaxLength(160)
+            .HasColumnName("window_id");
+        builder.HasIndex(window => window.WindowId).IsUnique();
+
+        builder.Property(window => window.Name)
+            .IsRequired()
+            .HasMaxLength(200)
+            .HasColumnName("name");
+
+        builder.Property(window => window.Status)
+            .IsRequired()
+            .HasMaxLength(80)
+            .HasColumnName("status");
+
+        builder.Property(window => window.StartAt)
+            .HasColumnType("timestamp with time zone")
+            .HasColumnName("start_at");
+
+        builder.Property(window => window.EndAt)
+            .HasColumnType("timestamp with time zone")
+            .HasColumnName("end_at");
+
+        builder.Property(window => window.AllowedEndpointCodes)
+            .IsRequired()
+            .HasColumnType("text[]")
+            .HasColumnName("allowed_endpoint_codes");
+
+        builder.Property(window => window.MaxTimeRangeDays).HasColumnName("max_time_range_days");
+        builder.Property(window => window.MaxRows).HasColumnName("max_rows");
+        builder.Property(window => window.TimeoutMs).HasColumnName("timeout_ms");
+
+        builder.Property(window => window.OwnerDepartment)
+            .IsRequired()
+            .HasMaxLength(120)
+            .HasColumnName("owner_department");
+
+        builder.Property(window => window.ApprovalPolicy)
+            .IsRequired()
+            .HasMaxLength(120)
+            .HasColumnName("approval_policy");
+
+        builder.Property(window => window.RollbackPolicy)
+            .IsRequired()
+            .HasMaxLength(160)
+            .HasColumnName("rollback_policy");
+
+        builder.Property(window => window.CreatedAt)
+            .HasColumnType("timestamp with time zone")
+            .HasColumnName("created_at");
+
+        builder.Property(window => window.UpdatedAt)
+            .HasColumnType("timestamp with time zone")
+            .HasColumnName("updated_at");
+
+        builder.HasIndex(window => window.Status);
+        builder.HasIndex(window => window.StartAt);
+        builder.HasIndex(window => window.EndAt);
+    }
+}
+
+public sealed class ProductionPilotRunConfiguration : IEntityTypeConfiguration<ProductionPilotRun>
+{
+    public void Configure(EntityTypeBuilder<ProductionPilotRun> builder)
+    {
+        builder.ToTable("production_pilot_runs");
+
+        builder.HasKey(run => run.Id);
+        builder.Property(run => run.Id)
+            .HasConversion(id => id.Value, value => new ProductionPilotRunId(value))
+            .HasColumnName("id");
+
+        builder.Property<uint>("RowVersion").IsRowVersion();
+
+        builder.Property(run => run.RunId)
+            .IsRequired()
+            .HasMaxLength(200)
+            .HasColumnName("run_id");
+        builder.HasIndex(run => run.RunId).IsUnique();
+
+        ConfigureRunCommon(builder);
+
+        builder.Property(run => run.ScenarioId)
+            .IsRequired()
+            .HasMaxLength(160)
+            .HasColumnName("scenario_id");
+
+        builder.Property(run => run.ScenarioTitle)
+            .IsRequired()
+            .HasMaxLength(200)
+            .HasColumnName("scenario_title");
+
+        builder.HasIndex(run => run.ScenarioId);
+    }
+
+    private static void ConfigureRunCommon(EntityTypeBuilder<ProductionPilotRun> builder)
+    {
+        builder.Property(run => run.Status).IsRequired().HasMaxLength(80).HasColumnName("status");
+        builder.Property(run => run.EndpointCode).IsRequired().HasMaxLength(120).HasColumnName("endpoint_code");
+        builder.Property(run => run.SourceType).IsRequired().HasMaxLength(80).HasColumnName("source_type");
+        builder.Property(run => run.SourceMode).IsRequired().HasMaxLength(80).HasColumnName("source_mode");
+        builder.Property(run => run.IsProductionData).HasColumnName("is_production_data");
+        builder.Property(run => run.IsSandbox).HasColumnName("is_sandbox");
+        builder.Property(run => run.IsSimulation).HasColumnName("is_simulation");
+        builder.Property(run => run.SourceLabel).IsRequired().HasMaxLength(200).HasColumnName("source_label");
+        builder.Property(run => run.Boundary).IsRequired().HasMaxLength(120).HasColumnName("boundary");
+        builder.Property(run => run.PilotWindowId).IsRequired().HasMaxLength(160).HasColumnName("pilot_window_id");
+        builder.Property(run => run.QueryHash).IsRequired().HasMaxLength(128).HasColumnName("query_hash");
+        builder.Property(run => run.ResultHash).IsRequired().HasMaxLength(128).HasColumnName("result_hash");
+        builder.Property(run => run.RowCount).HasColumnName("row_count");
+        builder.Property(run => run.IsTruncated).HasColumnName("is_truncated");
+        builder.Property(run => run.ExecutedAt).HasColumnType("timestamp with time zone").HasColumnName("executed_at");
+        builder.Property(run => run.DurationMs).HasColumnName("duration_ms");
+        builder.Property(run => run.ApprovalStatus).IsRequired().HasMaxLength(80).HasColumnName("approval_status");
+        builder.Property(run => run.ArtifactTypes).IsRequired().HasColumnType("text[]").HasColumnName("artifact_types");
+        builder.Property(run => run.CreatedAt).HasColumnType("timestamp with time zone").HasColumnName("created_at");
+        builder.Property(run => run.UpdatedAt).HasColumnType("timestamp with time zone").HasColumnName("updated_at");
+
+        builder.HasIndex(run => run.Status);
+        builder.HasIndex(run => run.EndpointCode);
+        builder.HasIndex(run => run.SourceMode);
+        builder.HasIndex(run => run.Boundary);
+        builder.HasIndex(run => run.ExecutedAt);
+    }
+}
+
+public sealed class ProductionControlledPilotIntentConfiguration : IEntityTypeConfiguration<ProductionControlledPilotIntent>
+{
+    public void Configure(EntityTypeBuilder<ProductionControlledPilotIntent> builder)
+    {
+        builder.ToTable("production_controlled_pilot_intents");
+
+        builder.HasKey(intent => intent.Id);
+        builder.Property(intent => intent.Id)
+            .HasConversion(id => id.Value, value => new ProductionControlledPilotIntentId(value))
+            .HasColumnName("id");
+
+        builder.Property<uint>("RowVersion").IsRowVersion();
+
+        builder.Property(intent => intent.IntentId)
+            .IsRequired()
+            .HasMaxLength(200)
+            .HasColumnName("intent_id");
+        builder.HasIndex(intent => intent.IntentId).IsUnique();
+
+        builder.Property(intent => intent.GoalHash)
+            .IsRequired()
+            .HasMaxLength(128)
+            .HasColumnName("goal_hash");
+
+        builder.Property(intent => intent.EndpointCodes)
+            .IsRequired()
+            .HasColumnType("text[]")
+            .HasColumnName("endpoint_codes");
+
+        builder.Property(intent => intent.TimeRangeFrom)
+            .HasColumnType("timestamp with time zone")
+            .HasColumnName("time_range_from");
+
+        builder.Property(intent => intent.TimeRangeTo)
+            .HasColumnType("timestamp with time zone")
+            .HasColumnName("time_range_to");
+
+        builder.Property(intent => intent.MaxRows).HasColumnName("max_rows");
+
+        builder.Property(intent => intent.ArtifactTypes)
+            .IsRequired()
+            .HasColumnType("text[]")
+            .HasColumnName("artifact_types");
+
+        builder.Property(intent => intent.AnalysisType)
+            .IsRequired()
+            .HasMaxLength(120)
+            .HasColumnName("analysis_type");
+
+        builder.Property(intent => intent.Warnings)
+            .IsRequired()
+            .HasColumnType("text[]")
+            .HasColumnName("warnings");
+
+        builder.Property(intent => intent.RejectedReasons)
+            .IsRequired()
+            .HasColumnType("text[]")
+            .HasColumnName("rejected_reasons");
+
+        builder.Property(intent => intent.RequiresToolApproval).HasColumnName("requires_tool_approval");
+        builder.Property(intent => intent.RequiresFinalApproval).HasColumnName("requires_final_approval");
+        builder.Property(intent => intent.CreatedAt).HasColumnType("timestamp with time zone").HasColumnName("created_at");
+        builder.Property(intent => intent.UpdatedAt).HasColumnType("timestamp with time zone").HasColumnName("updated_at");
+
+        builder.HasIndex(intent => intent.GoalHash);
+        builder.HasIndex(intent => intent.CreatedAt);
+    }
+}
+
+public sealed class ProductionControlledPilotRunConfiguration : IEntityTypeConfiguration<ProductionControlledPilotRun>
+{
+    public void Configure(EntityTypeBuilder<ProductionControlledPilotRun> builder)
+    {
+        builder.ToTable("production_controlled_pilot_runs");
+
+        builder.HasKey(run => run.Id);
+        builder.Property(run => run.Id)
+            .HasConversion(id => id.Value, value => new ProductionControlledPilotRunId(value))
+            .HasColumnName("id");
+
+        builder.Property<uint>("RowVersion").IsRowVersion();
+
+        builder.Property(run => run.RunId)
+            .IsRequired()
+            .HasMaxLength(200)
+            .HasColumnName("run_id");
+        builder.HasIndex(run => run.RunId).IsUnique();
+
+        builder.Property(run => run.IntentId).IsRequired().HasMaxLength(200).HasColumnName("intent_id");
+        builder.Property(run => run.AnalysisType).IsRequired().HasMaxLength(120).HasColumnName("analysis_type");
+        builder.Property(run => run.Status).IsRequired().HasMaxLength(80).HasColumnName("status");
+        builder.Property(run => run.EndpointCode).IsRequired().HasMaxLength(120).HasColumnName("endpoint_code");
+        builder.Property(run => run.SourceType).IsRequired().HasMaxLength(80).HasColumnName("source_type");
+        builder.Property(run => run.SourceMode).IsRequired().HasMaxLength(80).HasColumnName("source_mode");
+        builder.Property(run => run.IsProductionData).HasColumnName("is_production_data");
+        builder.Property(run => run.IsSandbox).HasColumnName("is_sandbox");
+        builder.Property(run => run.IsSimulation).HasColumnName("is_simulation");
+        builder.Property(run => run.SourceLabel).IsRequired().HasMaxLength(200).HasColumnName("source_label");
+        builder.Property(run => run.Boundary).IsRequired().HasMaxLength(120).HasColumnName("boundary");
+        builder.Property(run => run.PilotWindowId).IsRequired().HasMaxLength(160).HasColumnName("pilot_window_id");
+        builder.Property(run => run.QueryHash).IsRequired().HasMaxLength(128).HasColumnName("query_hash");
+        builder.Property(run => run.ResultHash).IsRequired().HasMaxLength(128).HasColumnName("result_hash");
+        builder.Property(run => run.RowCount).HasColumnName("row_count");
+        builder.Property(run => run.IsTruncated).HasColumnName("is_truncated");
+        builder.Property(run => run.ExecutedAt).HasColumnType("timestamp with time zone").HasColumnName("executed_at");
+        builder.Property(run => run.DurationMs).HasColumnName("duration_ms");
+        builder.Property(run => run.ApprovalStatus).IsRequired().HasMaxLength(80).HasColumnName("approval_status");
+        builder.Property(run => run.ArtifactTypes).IsRequired().HasColumnType("text[]").HasColumnName("artifact_types");
+        builder.Property(run => run.CreatedAt).HasColumnType("timestamp with time zone").HasColumnName("created_at");
+        builder.Property(run => run.UpdatedAt).HasColumnType("timestamp with time zone").HasColumnName("updated_at");
+
+        builder.HasIndex(run => run.IntentId);
+        builder.HasIndex(run => run.Status);
+        builder.HasIndex(run => run.EndpointCode);
+        builder.HasIndex(run => run.SourceMode);
+        builder.HasIndex(run => run.Boundary);
+        builder.HasIndex(run => run.ExecutedAt);
+    }
+}
+
 public sealed class ProductionPilotGaReadinessAssessmentConfiguration : IEntityTypeConfiguration<ProductionPilotGaReadinessAssessment>
 {
     public void Configure(EntityTypeBuilder<ProductionPilotGaReadinessAssessment> builder)

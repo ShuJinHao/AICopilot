@@ -5,6 +5,7 @@ using System.Text.Json;
 using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.AiGatewayService.TrialOperations;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
+using AICopilot.Core.AiGateway.Aggregates.ProductionOperations;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Services.Contracts;
 using AICopilot.Services.CrossCutting.Attributes;
@@ -291,6 +292,199 @@ internal sealed class InMemoryCloudReadonlyProductionControlledPilotStore
             return runs.ToArray();
         }
     }
+}
+
+internal sealed class RepositoryCloudReadonlyProductionControlledPilotStore(
+    IRepository<ProductionControlledPilotIntent> intentRepository,
+    IRepository<ProductionControlledPilotRun> runRepository)
+    : ICloudReadonlyProductionControlledPilotStore
+{
+    public void SaveIntent(CloudProductionGoalIntentDto intent)
+    {
+        Execute(async () =>
+        {
+            var existing = (await intentRepository.GetListAsync(
+                item => item.IntentId == intent.IntentId,
+                CancellationToken.None)).FirstOrDefault();
+            if (existing is null)
+            {
+                intentRepository.Add(new ProductionControlledPilotIntent(
+                    intent.IntentId,
+                    intent.GoalHash,
+                    intent.EndpointCodes,
+                    intent.TimeRange.From,
+                    intent.TimeRange.To,
+                    intent.MaxRows,
+                    intent.ArtifactTypes,
+                    intent.AnalysisType,
+                    intent.Warnings,
+                    intent.RejectedReasons,
+                    intent.RequiresToolApproval,
+                    intent.RequiresFinalApproval,
+                    DateTimeOffset.UtcNow));
+            }
+            else
+            {
+                existing.Update(
+                    intent.IntentId,
+                    intent.GoalHash,
+                    intent.EndpointCodes,
+                    intent.TimeRange.From,
+                    intent.TimeRange.To,
+                    intent.MaxRows,
+                    intent.ArtifactTypes,
+                    intent.AnalysisType,
+                    intent.Warnings,
+                    intent.RejectedReasons,
+                    intent.RequiresToolApproval,
+                    intent.RequiresFinalApproval,
+                    DateTimeOffset.UtcNow);
+            }
+
+            await intentRepository.SaveChangesAsync();
+        });
+    }
+
+    public CloudProductionGoalIntentDto? GetIntent(string intentId)
+    {
+        if (string.IsNullOrWhiteSpace(intentId))
+        {
+            return null;
+        }
+
+        return Execute(async () =>
+            (await intentRepository.GetListAsync(
+                item => item.IntentId == intentId,
+                CancellationToken.None)).Select(ToDto).FirstOrDefault());
+    }
+
+    public void SaveRun(CloudReadonlyProductionControlledPilotResultDto result)
+    {
+        Execute(async () =>
+        {
+            var runId = RunIdFor(result);
+            var existing = (await runRepository.GetListAsync(
+                item => item.RunId == runId,
+                CancellationToken.None)).FirstOrDefault();
+            var query = result.QueryResult;
+            if (existing is null)
+            {
+                runRepository.Add(new ProductionControlledPilotRun(
+                    runId,
+                    result.IntentId,
+                    result.AnalysisType,
+                    result.Status,
+                    query.EndpointCode,
+                    query.SourceType,
+                    query.SourceMode,
+                    query.IsProductionData,
+                    query.IsSandbox,
+                    query.IsSimulation,
+                    query.SourceLabel,
+                    query.Boundary,
+                    query.PilotWindowId,
+                    query.QueryHash,
+                    query.ResultHash,
+                    query.RowCount,
+                    query.IsTruncated,
+                    query.ExecutedAt,
+                    query.DurationMs,
+                    query.ApprovalStatus,
+                    result.ArtifactTypes,
+                    DateTimeOffset.UtcNow));
+            }
+            else
+            {
+                existing.Update(
+                    runId,
+                    result.IntentId,
+                    result.AnalysisType,
+                    result.Status,
+                    query.EndpointCode,
+                    query.SourceType,
+                    query.SourceMode,
+                    query.IsProductionData,
+                    query.IsSandbox,
+                    query.IsSimulation,
+                    query.SourceLabel,
+                    query.Boundary,
+                    query.PilotWindowId,
+                    query.QueryHash,
+                    query.ResultHash,
+                    query.RowCount,
+                    query.IsTruncated,
+                    query.ExecutedAt,
+                    query.DurationMs,
+                    query.ApprovalStatus,
+                    result.ArtifactTypes,
+                    DateTimeOffset.UtcNow);
+            }
+
+            await runRepository.SaveChangesAsync();
+        });
+    }
+
+    public IReadOnlyCollection<CloudReadonlyProductionControlledPilotResultDto> ListRuns()
+    {
+        return Execute(async () =>
+            (await runRepository.ListAsync())
+            .OrderByDescending(item => item.ExecutedAt)
+            .Take(20)
+            .Select(ToDto)
+            .ToArray());
+    }
+
+    private static CloudProductionGoalIntentDto ToDto(ProductionControlledPilotIntent intent) =>
+        new(
+            intent.IntentId,
+            intent.GoalHash,
+            intent.EndpointCodes,
+            new CloudProductionGoalTimeRangeDto(intent.TimeRangeFrom, intent.TimeRangeTo),
+            intent.MaxRows,
+            intent.ArtifactTypes,
+            intent.AnalysisType,
+            intent.Warnings,
+            intent.RejectedReasons,
+            intent.RequiresToolApproval,
+            intent.RequiresFinalApproval);
+
+    private static CloudReadonlyProductionControlledPilotResultDto ToDto(ProductionControlledPilotRun run) =>
+        new(
+            run.IntentId,
+            run.AnalysisType,
+            run.Status,
+            new CloudProductionControlledQueryResultDto(
+                run.EndpointCode,
+                run.SourceType,
+                run.SourceMode,
+                run.IsProductionData,
+                run.IsSandbox,
+                run.IsSimulation,
+                run.SourceLabel,
+                run.Boundary,
+                run.PilotWindowId,
+                run.IntentId,
+                run.QueryHash,
+                run.ResultHash,
+                run.RowCount,
+                run.IsTruncated,
+                Rows: [],
+                run.ExecutedAt,
+                run.DurationMs,
+                run.ApprovalStatus),
+            run.ArtifactTypes,
+            run.Boundary);
+
+    private static string RunIdFor(CloudReadonlyProductionControlledPilotResultDto result)
+    {
+        var query = result.QueryResult;
+        var hash = query.ResultHash.Length <= 16 ? query.ResultHash : query.ResultHash[..16];
+        return $"p13_{hash}_{query.ExecutedAt.UtcTicks}";
+    }
+
+    private static void Execute(Func<Task> action) => action().GetAwaiter().GetResult();
+
+    private static T Execute<T>(Func<Task<T>> action) => action().GetAwaiter().GetResult();
 }
 
 public sealed class CloudReadonlyProductionControlledPilotService(

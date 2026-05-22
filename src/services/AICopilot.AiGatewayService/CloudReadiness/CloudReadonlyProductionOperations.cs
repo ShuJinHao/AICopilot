@@ -1,5 +1,6 @@
 using System.Text.Json;
 using AICopilot.AiGatewayService.TrialOperations;
+using AICopilot.Core.AiGateway.Aggregates.Artifacts;
 using AICopilot.Core.AiGateway.Aggregates.ProductionOperations;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Core.AiGateway.Ids;
@@ -50,11 +51,25 @@ public sealed record ProductionPilotRunMetricsDto(
     int OpenIncidentCount,
     IReadOnlyDictionary<string, int> EndpointDistribution);
 
+public sealed record ProductionPilotRowsRetentionPolicyDto(
+    string PersistenceMode,
+    int RuntimeRowsTtlMinutes,
+    bool LedgerStoresRows,
+    bool LedgerStoresRawPayload,
+    bool ReportsReturnRows,
+    string ArtifactUsePolicy,
+    string DownloadPolicy,
+    string AuditSummary);
+
 public sealed record CloudReadonlyProductionOperationsStatusDto(
     string Status,
     string P12PilotStatus,
     string P13ControlledPilotStatus,
     bool OperationsStorePersisted,
+    bool P12PilotStorePersisted,
+    bool P13ControlledPilotStorePersisted,
+    bool ArtifactRefsBackfillEnabled,
+    ProductionPilotRowsRetentionPolicyDto RowsRetentionPolicy,
     bool HasP12CompletedRun,
     bool HasP13CompletedRun,
     bool EmergencyStopActive,
@@ -699,6 +714,10 @@ public sealed class CloudReadonlyProductionOperationsService(
             p12Status.Status,
             p13Status.Status,
             operationsStore is not InMemoryProductionPilotOperationsStore,
+            productionPilotStore is not InMemoryCloudReadonlyProductionPilotStore,
+            controlledPilotStore is not InMemoryCloudReadonlyProductionControlledPilotStore,
+            ArtifactRefsBackfillEnabled: true,
+            RowsRetentionPolicy: RowsRetentionPolicy,
             hasP12CompletedRun,
             hasP13CompletedRun,
             emergency.IsActive,
@@ -712,6 +731,16 @@ public sealed class CloudReadonlyProductionOperationsService(
             warnings,
             DateTimeOffset.UtcNow);
     }
+
+    public static ProductionPilotRowsRetentionPolicyDto RowsRetentionPolicy { get; } = new(
+        "HashOnly",
+        RuntimeRowsTtlMinutes: 60,
+        LedgerStoresRows: false,
+        LedgerStoresRawPayload: false,
+        ReportsReturnRows: false,
+        "Artifacts may use only approved, truncated, source-marked runtime rows; operations evidence stores hashes and counts only.",
+        "Downloads are allowed only through Artifact Workspace permission checks after final approval.",
+        "Operations audit records sourceMode, endpoint, rowCount, truncation, query/result hash, approval status, and artifact refs; no raw rows or payload.");
 
     public IReadOnlyCollection<ProductionPilotRunLedgerDto> BuildLedger()
     {
@@ -789,6 +818,43 @@ public sealed class CloudReadonlyProductionOperationsService(
 
     public void UpsertRunLedger(ProductionPilotRunLedgerDto ledger) =>
         operationsStore.UpsertRunLedger(ledger, DateTimeOffset.UtcNow);
+
+    public IReadOnlyCollection<string> BackfillFinalArtifactRefs(Guid taskId, IReadOnlyCollection<Artifact> finalArtifacts)
+    {
+        var warnings = new List<string>();
+        var ledgers = operationsStore.ListRunLedgers();
+        foreach (var artifact in finalArtifacts.Where(IsProductionPilotArtifact))
+        {
+            var matches = ledgers
+                .Where(ledger => MatchesArtifact(ledger, artifact))
+                .ToArray();
+            if (matches.Length == 0)
+            {
+                warnings.Add($"Missing ProductionPilotRunLedger for final artifact {artifact.Id.Value} with sourceMode={artifact.SourceMode}, queryHash={artifact.QueryHash}, resultHash={artifact.ResultHash}.");
+                continue;
+            }
+
+            foreach (var ledger in matches)
+            {
+                var artifactIds = ledger.ArtifactIds
+                    .Append(artifact.Id.Value)
+                    .Where(value => value != Guid.Empty)
+                    .Distinct()
+                    .OrderBy(value => value)
+                    .ToArray();
+                operationsStore.UpsertRunLedger(
+                    ledger with
+                    {
+                        TaskId = taskId,
+                        ArtifactIds = artifactIds,
+                        ApprovalStatus = "Finalized"
+                    },
+                    DateTimeOffset.UtcNow);
+            }
+        }
+
+        return warnings;
+    }
 
     public void ActivateEmergencyStop(string? reason, string? activatedBy) =>
         operationsStore.ActivateEmergencyStop(reason ?? "P14 emergency stop", activatedBy ?? "system", DateTimeOffset.UtcNow);
@@ -888,6 +954,17 @@ public sealed class CloudReadonlyProductionOperationsService(
         !string.IsNullOrWhiteSpace(item.ResultHash) &&
         !string.IsNullOrWhiteSpace(item.EndpointCode) &&
         !string.IsNullOrWhiteSpace(item.PilotWindowId);
+
+    private static bool IsProductionPilotArtifact(Artifact artifact) =>
+        artifact.Status == ArtifactStatus.Final &&
+        (string.Equals(artifact.SourceMode, CloudReadonlyProductionPilotMarkers.SourceMode, StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(artifact.SourceMode, CloudReadonlyProductionControlledPilotMarkers.SourceMode, StringComparison.OrdinalIgnoreCase));
+
+    private static bool MatchesArtifact(ProductionPilotRunLedgerDto ledger, Artifact artifact) =>
+        string.Equals(ledger.SourceMode, artifact.SourceMode, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(ledger.Boundary, artifact.Boundary, StringComparison.OrdinalIgnoreCase) &&
+        (string.Equals(ledger.QueryHash, artifact.QueryHash, StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(ledger.ResultHash, artifact.ResultHash, StringComparison.OrdinalIgnoreCase));
 }
 
 public sealed class GetCloudReadonlyProductionOperationsStatusQueryHandler(
