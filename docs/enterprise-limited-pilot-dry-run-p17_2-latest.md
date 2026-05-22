@@ -1,14 +1,14 @@
 ﻿# AICopilot Limited Pilot Dry-Run P17.2 Acceptance
 
-- GeneratedAt: 2026-05-22 14:23:36
+- GeneratedAt: 2026-05-22 14:42:41
 - Repository: <local-repo>
-- LocalHeadAtGeneration: 9786860ca8e4a224ee7261f7f3db9d28d406e39e
+- LocalHeadAtGeneration: 8c5fa1b23411ccb7847f4188b49b09fca7e8dff8
 - Branch: integration/aicopilot-agent-workbench-simulation
 - SubmittedStateNote: after committing this report refresh, use PR #48 current head and GitHub checks as the authoritative submitted-state evidence
 - PullRequest: https://github.com/ShuJinHao/AICopilot/pull/48
-- PullRequestHeadAtGeneration: 9786860ca8e4a224ee7261f7f3db9d28d406e39e
+- PullRequestHeadAtGeneration: 8c5fa1b23411ccb7847f4188b49b09fca7e8dff8
 - GitHubCIAtGeneration: simulation-rc status=COMPLETED conclusion=SUCCESS
-- GitHubCIDetails: https://github.com/ShuJinHao/AICopilot/actions/runs/26271582391/job/77326061541
+- GitHubCIDetails: https://github.com/ShuJinHao/AICopilot/actions/runs/26272068951/job/77327643436
 - ExternalReviewEvidence: 5.5 Pro ReviewPending
 - ExternalReviewBlockingPolicy: evidence-only for P17.2 dry-run material
 - DryRunDecision: DryRunEvidenceReady
@@ -70,7 +70,7 @@
 ### Enterprise Data Governance Scope Guard
 
 ```text
-Enterprise Data Governance scope guard passed. Checked 4 candidate file(s).
+Enterprise Data Governance scope guard passed. Checked 5 candidate file(s).
 ```
 
 ### P17.1 Authorization Inheritance Check
@@ -100,7 +100,7 @@ Dry-run evidence is hash-only and contains no real endpoint, credential, raw pay
 ### GitHub PR #48 Current Head And CI Evidence Check
 
 ```text
-PR #48 head 9786860ca8e4a224ee7261f7f3db9d28d406e39e simulation-rc SUCCESS https://github.com/ShuJinHao/AICopilot/actions/runs/26271582391/job/77326061541
+PR #48 head 8c5fa1b23411ccb7847f4188b49b09fca7e8dff8 simulation-rc SUCCESS https://github.com/ShuJinHao/AICopilot/actions/runs/26272068951/job/77327643436
 ```
 
 ### P17.2 No Execution Claim Check
