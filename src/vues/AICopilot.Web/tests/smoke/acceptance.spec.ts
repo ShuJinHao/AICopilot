@@ -193,6 +193,25 @@ test('agent trial panel shows P14 production operations gate', async ({ page, is
   await expectNoHorizontalOverflow(page)
 })
 
+test('agent trial panel shows P15 planning authorization gate', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'desktop workbench keeps the trial panel visible')
+
+  await expectProtectedShell(page, '/chat')
+
+  await page.getByTestId('agent-tab-trial').click()
+  const panel = page.getByTestId('p15-planning-gate-panel')
+  await expect(panel).toBeVisible()
+  await expect(page.getByTestId('p15-planning-marker')).toContainText('not real Pilot execution')
+  await expect(page.getByTestId('p15-not-ga-marker')).toContainText('Not GA')
+  await expect(page.getByTestId('p15-allowlist')).toContainText('devices')
+  await expect(page.getByTestId('p15-allowlist')).toContainText('pass_station_records')
+  await expect(page.getByTestId('p15-blocked-status')).toContainText('ReadyForP16PlanningBlocked')
+  await expect(page.getByTestId('p15-blocker-list')).toContainText('P12/P13 persistence')
+  await expect(page.getByTestId('p15-blocker-list')).toContainText('Artifact refs backfill')
+  await expect(page.getByTestId('p15-blocker-list')).toContainText('Rows retention')
+  await expectNoHorizontalOverflow(page)
+})
+
 test('chat stream renders widgets and approval card', async ({ page, isMobile }) => {
   test.skip(isMobile, 'desktop stream rendering covers widgets and approval card; mobile layout is covered separately')
 

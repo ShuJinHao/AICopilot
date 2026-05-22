@@ -1450,6 +1450,65 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
             </div>
           </div>
 
+          <div class="trial-ops-card" data-testid="p15-planning-gate-panel">
+            <div class="section-title">
+              <strong>P15 Pilot Planning Gate</strong>
+              <AiTag tone="warning">PlanningOnly</AiTag>
+            </div>
+            <div class="trial-source-line">
+              <span data-testid="p15-planning-marker">Planning and authorization gate, not real Pilot execution</span>
+              <span data-testid="p15-not-ga-marker">Not GA</span>
+              <span>query_cloud_data_readonly closed</span>
+            </div>
+            <div class="trial-metric-grid">
+              <div>
+                <span>users</span>
+                <strong>5-10</strong>
+              </div>
+              <div>
+                <span>range</span>
+                <strong>7 days</strong>
+              </div>
+              <div>
+                <span>maxRows</span>
+                <strong>50</strong>
+              </div>
+              <div>
+                <span>status</span>
+                <strong data-testid="p15-blocked-status">ReadyForP16PlanningBlocked</strong>
+              </div>
+            </div>
+            <div class="trial-source-line" data-testid="p15-allowlist">
+              <span>devices</span>
+              <span>capacity_summary</span>
+              <span>device_logs</span>
+              <span>pass_station_records</span>
+            </div>
+            <div class="trial-check-list" data-testid="p15-blocker-list">
+              <div class="trial-check-row">
+                <div>
+                  <strong>P12/P13 persistence</strong>
+                  <span>Window, intent, and run stores must be persisted before P16.</span>
+                </div>
+                <AiTag tone="danger">Blocker</AiTag>
+              </div>
+              <div class="trial-check-row">
+                <div>
+                  <strong>Artifact refs backfill</strong>
+                  <span>Final artifact refs must automatically update ProductionPilotRunLedger.</span>
+                </div>
+                <AiTag tone="danger">Blocker</AiTag>
+              </div>
+              <div class="trial-check-row">
+                <div>
+                  <strong>Rows retention</strong>
+                  <span>Rows masking, TTL, download, and artifact-use policy must be approved.</span>
+                </div>
+                <AiTag tone="danger">Blocker</AiTag>
+              </div>
+            </div>
+          </div>
+
           <div v-if="trialCampaign?.scenarioRuns.length" class="trial-run-list">
             <div v-for="run in trialCampaign.scenarioRuns" :key="run.runId" class="trial-run-row">
               <div>

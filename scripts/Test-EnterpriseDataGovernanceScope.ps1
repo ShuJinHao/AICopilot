@@ -175,6 +175,9 @@ $cloudReadonlyProductionControlledPilot = "src/services/AICopilot.AiGatewayServi
 $cloudReadonlyProductionOperations = "src/services/AICopilot.AiGatewayService/CloudReadiness/CloudReadonlyProductionOperations.cs"
 $productionOperationsAggregate = "src/core/AICopilot.Core.AiGateway/Aggregates/ProductionOperations/ProductionPilotOperations.cs"
 $productionOperationsEfConfig = "src/infrastructure/AICopilot.EntityFrameworkCore/Configuration/AiGateway/ProductionOperationConfiguration.cs"
+$pilotPlanningP15Scope = "docs/enterprise-pilot-planning-p15-scope.md"
+$pilotPlanningP15Plan = "docs/enterprise-pilot-planning-p15-plan.md"
+$pilotPlanningP15Acceptance = "scripts/Run-EnterprisePilotPlanningP15Acceptance.ps1"
 $artifactAggregate = "src/core/AICopilot.Core.AiGateway/Aggregates/Artifacts/Artifact.cs"
 $artifactWorkspaceManagement = "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceManagement.cs"
 $artifactWorkspaceP9Management = "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceP9Management.cs"
@@ -206,6 +209,9 @@ foreach ($requiredFile in @(
     $cloudReadonlyProductionOperations,
     $productionOperationsAggregate,
     $productionOperationsEfConfig,
+    $pilotPlanningP15Scope,
+    $pilotPlanningP15Plan,
+    $pilotPlanningP15Acceptance,
     $artifactAggregate,
     $artifactWorkspaceManagement,
     $artifactWorkspaceP9Management,
@@ -550,6 +556,33 @@ if (Test-Path $productionOperationsEfConfig) {
     foreach ($required in @("production_pilot_emergency_stop_states", "production_pilot_incidents", "production_pilot_run_ledgers", "production_pilot_ga_readiness_assessments", "checks_json")) {
         if ($content -notmatch [regex]::Escape($required)) {
             Add-Error "Required P14.2 Production Operations EF marker '$required' is missing from $productionOperationsEfConfig."
+        }
+    }
+}
+
+if (Test-Path $pilotPlanningP15Scope) {
+    $content = Get-Content -LiteralPath $pilotPlanningP15Scope -Raw
+    foreach ($required in @("P15", "P16", "GA", "query_cloud_data_readonly", "ProductionPilotWindow", "ProductionPilotRun", "ProductionControlledPilotIntent", "ProductionControlledPilotRun", "final artifact refs", "TTL")) {
+        if ($content -notmatch [regex]::Escape($required)) {
+            Add-Error "Required P15 scope marker '$required' is missing from $pilotPlanningP15Scope."
+        }
+    }
+}
+
+if (Test-Path $pilotPlanningP15Plan) {
+    $content = Get-Content -LiteralPath $pilotPlanningP15Plan -Raw
+    foreach ($required in @("P15 is a production readonly Pilot planning and authorization gate", "Allowed endpoints", "Authorization Matrix", "Data Retention Policy", "P16 Blockers", "ReadyForP16Execution")) {
+        if ($content -notmatch [regex]::Escape($required)) {
+            Add-Error "Required P15 planning marker '$required' is missing from $pilotPlanningP15Plan."
+        }
+    }
+}
+
+if (Test-Path $pilotPlanningP15Acceptance) {
+    $content = Get-Content -LiteralPath $pilotPlanningP15Acceptance -Raw
+    foreach ($required in @("Inherited P14.2 Acceptance Report Check", "P15 Planning Package Check", "Frontend P15 Planning Playwright Smoke", "ReadyForP16Execution", "query_cloud_data_readonly remains disabled")) {
+        if ($content -notmatch [regex]::Escape($required)) {
+            Add-Error "Required P15 acceptance marker '$required' is missing from $pilotPlanningP15Acceptance."
         }
     }
 }
