@@ -1,14 +1,14 @@
 ﻿# AICopilot Limited Pilot Preparation P17.0 Acceptance
 
-- GeneratedAt: 2026-05-22 13:47:50
+- GeneratedAt: 2026-05-22 14:07:45
 - Repository: <local-repo>
-- LocalHeadAtGeneration: 73559ff553a7ea8f350d545e441df139d66b350a
+- LocalHeadAtGeneration: f8872094cb016000c6f356b68ef5752246d0188a
 - Branch: integration/aicopilot-agent-workbench-simulation
 - SubmittedStateNote: after committing this report refresh, use PR #48 current head and GitHub checks as the authoritative submitted-state evidence
 - PullRequest: https://github.com/ShuJinHao/AICopilot/pull/48
-- PullRequestHeadAtGeneration: 73559ff553a7ea8f350d545e441df139d66b350a
+- PullRequestHeadAtGeneration: f8872094cb016000c6f356b68ef5752246d0188a
 - GitHubCIAtGeneration: simulation-rc status=COMPLETED conclusion=SUCCESS
-- GitHubCIDetails: https://github.com/ShuJinHao/AICopilot/actions/runs/26269787717/job/77320595609
+- GitHubCIDetails: https://github.com/ShuJinHao/AICopilot/actions/runs/26270877317/job/77323820944
 - P16ReviewResult: 5.5 Pro ReviewPending
 - GoNoGo: BlockedByP16ReviewPending
 - Boundary: P17.0 prepares limited Pilot execution material only; it does not execute a real Pilot and is not GA
@@ -71,7 +71,7 @@ Go/No-Go matrix passed: pending and blocked stay blocked, no blocker enables pre
 ### GitHub PR #48 Current Head And CI Check
 
 ```text
-PR #48 head 73559ff553a7ea8f350d545e441df139d66b350a simulation-rc SUCCESS https://github.com/ShuJinHao/AICopilot/actions/runs/26269787717/job/77320595609
+PR #48 head f8872094cb016000c6f356b68ef5752246d0188a simulation-rc SUCCESS https://github.com/ShuJinHao/AICopilot/actions/runs/26270877317/job/77323820944
 ```
 
 ### P17.0 No Execution Claim Check
