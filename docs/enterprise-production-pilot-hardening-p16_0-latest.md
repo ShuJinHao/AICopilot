@@ -1,6 +1,6 @@
 ﻿# AICopilot Enterprise Production Pilot Hardening P16.0 Acceptance
 
-- GeneratedAt: 2026-05-22 10:41:52
+- GeneratedAt: 2026-05-22 11:03:30
 - Repository: <local-repo>
 - Boundary: AICopilot only; Cloud/Edge unchanged; P16.0 closes engineering blockers before real Pilot execution review
 - Default State: query_cloud_data_readonly remains disabled, hidden, and non-executable
@@ -39,7 +39,7 @@ Using existing P15 acceptance report: .\docs\enterprise-pilot-planning-p15-lates
 ### Enterprise Production Pilot Hardening P16.0 Scope Guard
 
 ```text
-Enterprise Data Governance scope guard passed. Checked 18 candidate file(s).
+Enterprise Data Governance scope guard passed. Checked 3 candidate file(s).
 ```
 
 ### P16.0 Scope Document Check
@@ -87,7 +87,7 @@ P16.0 persistence artifacts passed.
     0 个警告
     0 个错误
 
-已用时间 00:00:58.29
+已用时间 00:01:11.30
 ```
 
 ### Run P16.0 Focused Backend Tests
@@ -127,7 +127,7 @@ P16.0 persistence artifacts passed.
 <temp-build-output>\backendtests\AICopilot.BackendTests.dll (.NETCoreApp,Version=v10.0)的测试运行
 总共 1 个测试文件与指定模式相匹配。
 
-已通过! - 失败:     0，通过:     5，已跳过:     0，总计:     5，持续时间: 213 ms - AICopilot.BackendTests.dll (net10.0)
+已通过! - 失败:     0，通过:     5，已跳过:     0，总计:     5，持续时间: 252 ms - AICopilot.BackendTests.dll (net10.0)
 ```
 
 ### Run CloudReadonly Route Contract Tests
@@ -167,7 +167,7 @@ P16.0 persistence artifacts passed.
 <temp-build-output>\route-contract\AICopilot.BackendTests.dll (.NETCoreApp,Version=v10.0)的测试运行
 总共 1 个测试文件与指定模式相匹配。
 
-已通过! - 失败:     0，通过:    26，已跳过:     0，总计:    26，持续时间: 4 s - AICopilot.BackendTests.dll (net10.0)
+已通过! - 失败:     0，通过:    26，已跳过:     0，总计:    26，持续时间: 13 s - AICopilot.BackendTests.dll (net10.0)
 ```
 
 ### Build Frontend
@@ -240,7 +240,7 @@ computing gzip size...
 [2mdist/[22m[36massets/ChatView-DAf4Pjgz.js                                           [39m[1m[2m171.83 kB[22m[1m[22m[2m │ gzip:  66.24 kB[22m
 [2mdist/[22m[36massets/index-CiHYQBsz.js                                              [39m[1m[2m225.45 kB[22m[1m[22m[2m │ gzip:  79.56 kB[22m
 [2mdist/[22m[36massets/ChartWidget-DZ0u8TQC.js                                        [39m[1m[2m547.15 kB[22m[1m[22m[2m │ gzip: 184.75 kB[22m
-[32m✓ built in 14.41s[39m
+[32m✓ built in 12.97s[39m
 ```
 
 ## Remaining Risk
