@@ -1383,6 +1383,18 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
                 <span>incidents</span>
                 <strong>{{ cloudReadonlyProductionOperationsStatus?.runMetrics.openIncidentCount ?? 0 }}</strong>
               </div>
+              <div>
+                <span>persisted</span>
+                <strong>{{ cloudReadonlyProductionOperationsStatus?.operationsStorePersisted ? 'Yes' : 'No' }}</strong>
+              </div>
+              <div>
+                <span>P12 evidence</span>
+                <strong>{{ cloudReadonlyProductionOperationsStatus?.hasP12CompletedRun ? 'Done' : 'Missing' }}</strong>
+              </div>
+              <div>
+                <span>P13 evidence</span>
+                <strong>{{ cloudReadonlyProductionOperationsStatus?.hasP13CompletedRun ? 'Done' : 'Missing' }}</strong>
+              </div>
             </div>
             <div class="two-actions">
               <button type="button" :disabled="store.isLoadingTrialOperations" @click="activateProductionPilotEmergencyStop">

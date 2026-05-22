@@ -76,7 +76,7 @@ public static class DependencyInjection
         builder.Services.AddSingleton<ICloudReadonlyPilotReadinessStore, InMemoryCloudReadonlyPilotReadinessStore>();
         builder.Services.AddSingleton<ICloudReadonlyProductionPilotStore, InMemoryCloudReadonlyProductionPilotStore>();
         builder.Services.AddSingleton<ICloudReadonlyProductionControlledPilotStore, InMemoryCloudReadonlyProductionControlledPilotStore>();
-        builder.Services.AddSingleton<IProductionPilotOperationsStore, InMemoryProductionPilotOperationsStore>();
+        builder.Services.AddScoped<IProductionPilotOperationsStore, RepositoryProductionPilotOperationsStore>();
         builder.Services.AddScoped<CloudReadonlyReadinessService>();
         builder.Services.AddScoped<CloudReadonlySandboxAgentTrialService>();
         builder.Services.AddScoped<CloudReadonlySandboxControlledTrialService>();

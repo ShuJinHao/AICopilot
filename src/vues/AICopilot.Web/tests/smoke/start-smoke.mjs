@@ -565,6 +565,9 @@ const productionOperationsStatus = {
   status: 'CollectingEvidence',
   p12PilotStatus: 'Ready',
   p13ControlledPilotStatus: 'Ready',
+  operationsStorePersisted: true,
+  hasP12CompletedRun: true,
+  hasP13CompletedRun: true,
   emergencyStopActive: false,
   currentWindowIds: [productionPilotWindow.windowId],
   runMetrics: {

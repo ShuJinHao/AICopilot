@@ -173,6 +173,8 @@ $cloudReadonlyPilotReadiness = "src/services/AICopilot.AiGatewayService/CloudRea
 $cloudReadonlyProductionPilot = "src/services/AICopilot.AiGatewayService/CloudReadiness/CloudReadonlyProductionPilot.cs"
 $cloudReadonlyProductionControlledPilot = "src/services/AICopilot.AiGatewayService/CloudReadiness/CloudReadonlyProductionControlledPilot.cs"
 $cloudReadonlyProductionOperations = "src/services/AICopilot.AiGatewayService/CloudReadiness/CloudReadonlyProductionOperations.cs"
+$productionOperationsAggregate = "src/core/AICopilot.Core.AiGateway/Aggregates/ProductionOperations/ProductionPilotOperations.cs"
+$productionOperationsEfConfig = "src/infrastructure/AICopilot.EntityFrameworkCore/Configuration/AiGateway/ProductionOperationConfiguration.cs"
 $artifactAggregate = "src/core/AICopilot.Core.AiGateway/Aggregates/Artifacts/Artifact.cs"
 $artifactWorkspaceManagement = "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceManagement.cs"
 $artifactWorkspaceP9Management = "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceP9Management.cs"
@@ -202,6 +204,8 @@ foreach ($requiredFile in @(
     $cloudReadonlyProductionPilot,
     $cloudReadonlyProductionControlledPilot,
     $cloudReadonlyProductionOperations,
+    $productionOperationsAggregate,
+    $productionOperationsEfConfig,
     $artifactAggregate,
     $artifactWorkspaceManagement,
     $artifactWorkspaceP9Management,
@@ -525,9 +529,27 @@ if (Test-Path $cloudReadonlyProductionControlledPilot) {
 
 if (Test-Path $cloudReadonlyProductionOperations) {
     $content = Get-Content -LiteralPath $cloudReadonlyProductionOperations -Raw
-    foreach ($required in @("CloudReadonlyProductionOperationsStatusDto", "ProductionPilotRunLedgerDto", "ProductionPilotIncidentDto", "ActivateProductionPilotEmergencyStopCommand", "ClearProductionPilotEmergencyStopCommand", "RunProductionPilotGaReadinessEvaluationCommand", "ReadyForP15Planning", "query_cloud_data_readonly")) {
+    foreach ($required in @("CloudReadonlyProductionOperationsStatusDto", "ProductionPilotRunLedgerDto", "ProductionPilotIncidentDto", "ActivateProductionPilotEmergencyStopCommand", "ClearProductionPilotEmergencyStopCommand", "RunProductionPilotGaReadinessEvaluationCommand", "ReadyForP15Planning", "RepositoryProductionPilotOperationsStore", "HasCompletedP12Evidence", "HasCompletedP13Evidence", "query_cloud_data_readonly")) {
         if ($content -notmatch [regex]::Escape($required)) {
             Add-Error "Required P14 Production Operations marker '$required' is missing from $cloudReadonlyProductionOperations."
+        }
+    }
+}
+
+if (Test-Path $productionOperationsAggregate) {
+    $content = Get-Content -LiteralPath $productionOperationsAggregate -Raw
+    foreach ($required in @("ProductionPilotEmergencyStopState", "ProductionPilotIncident", "ProductionPilotRunLedger", "ProductionPilotGaReadinessAssessment", "QueryHash", "ResultHash")) {
+        if ($content -notmatch [regex]::Escape($required)) {
+            Add-Error "Required P14.2 Production Operations persistence marker '$required' is missing from $productionOperationsAggregate."
+        }
+    }
+}
+
+if (Test-Path $productionOperationsEfConfig) {
+    $content = Get-Content -LiteralPath $productionOperationsEfConfig -Raw
+    foreach ($required in @("production_pilot_emergency_stop_states", "production_pilot_incidents", "production_pilot_run_ledgers", "production_pilot_ga_readiness_assessments", "checks_json")) {
+        if ($content -notmatch [regex]::Escape($required)) {
+            Add-Error "Required P14.2 Production Operations EF marker '$required' is missing from $productionOperationsEfConfig."
         }
     }
 }

@@ -1,8 +1,12 @@
 using System.Text.Json;
 using AICopilot.AiGatewayService.CloudReadiness;
+using AICopilot.Core.AiGateway.Aggregates.ProductionOperations;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
+using AICopilot.SharedKernel.Domain;
+using AICopilot.SharedKernel.Repository;
+using AICopilot.SharedKernel.Specification;
 using Microsoft.Extensions.Options;
 
 namespace AICopilot.BackendTests;
@@ -119,7 +123,7 @@ public sealed class EnterpriseCloudReadonlyProductionOperationsP14Tests
         var fixture = CreateFixture();
         var window = fixture.CreateApprovedWindow();
         var p12Ready = fixture.P12.BuildStatus(RehearsalPassed(), ProtectedTools());
-        await fixture.P12.RunScenarioAsync(
+        var p12Run = await fixture.P12.RunScenarioAsync(
             new RunCloudReadonlyProductionPilotScenarioCommand(
                 "cloud-production-pilot-devices",
                 PilotWindowId: window.WindowId,
@@ -127,6 +131,29 @@ public sealed class EnterpriseCloudReadonlyProductionOperationsP14Tests
             RehearsalPassed(),
             ProtectedTools(),
             CancellationToken.None);
+        var intent = fixture.P13.CreateIntent(
+            "device list",
+            ["Markdown", "Html"],
+            null,
+            10,
+            p12Ready,
+            ProtectedTools()).Value!;
+        var p13Run = await fixture.P13.RunIntentAsync(
+            intent.IntentId,
+            ["Markdown", "Html"],
+            10,
+            5000,
+            p12Ready,
+            ProtectedTools(),
+            CancellationToken.None);
+        fixture.Operations.UpsertRunLedger(CloudReadonlyProductionOperationsService.CreateRunLedger(p12Run.Value!) with
+        {
+            ArtifactIds = [Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1")]
+        });
+        fixture.Operations.UpsertRunLedger(CloudReadonlyProductionOperationsService.CreateRunLedger(p13Run.Value!) with
+        {
+            ArtifactIds = [Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1")]
+        });
         fixture.Operations.ActivateEmergencyStop("p14 drill", "tester");
         fixture.Operations.ClearEmergencyStop("drill completed", "tester");
 
@@ -162,6 +189,75 @@ public sealed class EnterpriseCloudReadonlyProductionOperationsP14Tests
         ready.Status.Should().Be(CloudReadonlyProductionOperationsStatuses.ReadyForP15Planning);
         ready.Checks.Should().Contain(item => item.Code == "EmergencyStopDrill" && item.Status == "Passed");
         ready.Checks.Should().Contain(item => item.Code == "AuditLedger" && item.Status == "Passed");
+        ready.Checks.Should().Contain(item => item.Code == "P12CompletedRun" && item.Status == "Passed");
+        ready.Checks.Should().Contain(item => item.Code == "P13CompletedRun" && item.Status == "Passed");
+        ready.Checks.Should().Contain(item => item.Code == "FinalArtifacts" && item.Status == "Passed");
+    }
+
+    [Fact]
+    public void RepositoryStore_ShouldPersistEmergencyStopIncidentLedgerAndReadinessAcrossStoreInstances()
+    {
+        var repositories = new ProductionOperationsRepositories();
+        var store = repositories.CreateStore();
+        var now = DateTimeOffset.UtcNow;
+
+        store.ActivateEmergencyStop("p14.2 persistent drill", "tester", now);
+        store.UpsertIncident(null, "High", "Operations", ProductionPilotIncidentStatuses.Open, "PilotOps", "run:p12", null, now);
+        store.UpsertRunLedger(CreateLedger("p12-completed", CloudReadonlyProductionPilotMarkers.SourceMode, CloudReadonlyProductionPilotMarkers.Boundary, "ProductionPilotFixedScenario", null), now);
+        store.UpsertRunLedger(CreateLedger("p13-completed", CloudReadonlyProductionControlledPilotMarkers.SourceMode, CloudReadonlyProductionControlledPilotMarkers.Boundary, CloudReadonlyProductionControlledPilotMarkers.TrialMode, "intent-001"), now);
+        store.SaveGaReadinessAssessment(
+            new ProductionPilotGaReadinessAssessmentDto(
+                CloudReadonlyProductionOperationsStatuses.Blocked,
+                [new ProductionPilotGaReadinessCheckDto("BlockingIncidents", "Open blocking incidents", "Blocked", true, "Open high or critical incidents remain.")],
+                ["Open high or critical incidents remain."],
+                [],
+                new ProductionPilotRunMetricsDto(2, 2, 0, 0, 0, 0, 4, 2, 1, new Dictionary<string, int> { ["devices"] = 2 }),
+                now),
+            now);
+
+        var reloaded = repositories.CreateStore();
+        var emergency = reloaded.GetEmergencyStop();
+        var incidents = reloaded.ListIncidents();
+        var ledger = reloaded.ListRunLedgers();
+        var readiness = reloaded.LatestGaReadinessAssessment();
+        var json = JsonSerializer.Serialize(new { ledger, readiness }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        emergency.IsActive.Should().BeTrue();
+        incidents.Should().ContainSingle(item => item.Severity == "High" && item.Status == ProductionPilotIncidentStatuses.Open);
+        ledger.Should().HaveCount(2);
+        readiness.Should().NotBeNull();
+        readiness!.Status.Should().Be(CloudReadonlyProductionOperationsStatuses.Blocked);
+        json.Should().Contain("resultHash");
+        json.Contains("\"rows\"", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
+        json.Contains("payload", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
+        json.Contains("token", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
+    }
+
+    [Fact]
+    public void GaReadiness_ShouldRequireBothP12AndP13CompletedRunEvidence()
+    {
+        var fixture = CreateFixture();
+        var window = fixture.CreateApprovedWindow();
+        var p12Ready = fixture.P12.BuildStatus(RehearsalPassed(), ProtectedTools());
+
+        fixture.Operations.ActivateEmergencyStop("p14 drill", "tester");
+        fixture.Operations.ClearEmergencyStop("drill completed", "tester");
+        fixture.Operations.UpsertRunLedger(CreateLedger(
+            "p12-only",
+            CloudReadonlyProductionPilotMarkers.SourceMode,
+            CloudReadonlyProductionPilotMarkers.Boundary,
+            "ProductionPilotFixedScenario",
+            null,
+            window.WindowId));
+
+        var blocked = fixture.Operations.BuildGaReadinessAssessment(
+            fixture.P12.BuildStatus(RehearsalPassed(), ProtectedTools()),
+            fixture.P13.BuildStatus(p12Ready, ProtectedTools()),
+            ProtectedTools());
+
+        blocked.Status.Should().Be(CloudReadonlyProductionOperationsStatuses.Blocked);
+        blocked.Checks.Should().Contain(item => item.Code == "P12CompletedRun" && item.Status == "Passed");
+        blocked.Checks.Should().Contain(item => item.Code == "P13CompletedRun" && item.Status == "Blocked");
     }
 
     private static OperationsFixture CreateFixture(
@@ -247,6 +343,103 @@ public sealed class EnterpriseCloudReadonlyProductionOperationsP14Tests
             definition.SchemaVersion,
             definition.CatalogVersion,
             definition.ApprovalPolicy);
+    }
+
+    private static ProductionPilotRunLedgerDto CreateLedger(
+        string runId,
+        string sourceMode,
+        string boundary,
+        string trialMode,
+        string? intentId,
+        string pilotWindowId = "window-p14-test") =>
+        new(
+            runId,
+            TaskId: null,
+            sourceMode,
+            boundary,
+            trialMode,
+            pilotWindowId,
+            intentId,
+            "devices",
+            [Guid.Parse("11111111-1111-1111-1111-111111111111")],
+            "Approved",
+            CloudReadonlyProductionPilotStatuses.Completed,
+            15,
+            2,
+            IsTruncated: false,
+            $"sha256:{runId}:query",
+            $"sha256:{runId}:result",
+            DateTimeOffset.UtcNow);
+
+    private sealed class ProductionOperationsRepositories
+    {
+        private readonly MemoryRepository<ProductionPilotEmergencyStopState> emergencyStops = new();
+        private readonly MemoryRepository<ProductionPilotIncident> incidents = new();
+        private readonly MemoryRepository<ProductionPilotRunLedger> runLedgers = new();
+        private readonly MemoryRepository<ProductionPilotGaReadinessAssessment> readinessAssessments = new();
+
+        public RepositoryProductionPilotOperationsStore CreateStore() =>
+            new(emergencyStops, incidents, runLedgers, readinessAssessments);
+    }
+
+    private sealed class MemoryRepository<T> : IRepository<T>
+        where T : class, IEntity, IAggregateRoot
+    {
+        private readonly List<T> items = [];
+
+        public T Add(T entity)
+        {
+            items.Add(entity);
+            return entity;
+        }
+
+        public void Update(T entity)
+        {
+        }
+
+        public void Delete(T entity)
+        {
+            items.Remove(entity);
+        }
+
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(1);
+
+        public Task<List<T>> ListAsync(ISpecification<T>? specification = null, CancellationToken cancellationToken = default) =>
+            Task.FromResult(items.ToList());
+
+        public Task<T?> FirstOrDefaultAsync(ISpecification<T>? specification = null, CancellationToken cancellationToken = default) =>
+            Task.FromResult(items.FirstOrDefault());
+
+        public Task<int> CountAsync(ISpecification<T>? specification = null, CancellationToken cancellationToken = default) =>
+            Task.FromResult(items.Count);
+
+        public Task<bool> AnyAsync(ISpecification<T>? specification = null, CancellationToken cancellationToken = default) =>
+            Task.FromResult(items.Count > 0);
+
+        public Task<T?> GetByIdAsync<TKey>(TKey id, CancellationToken cancellationToken = default)
+            where TKey : notnull =>
+            Task.FromResult(items.FirstOrDefault(item => Equals(GetId(item), id)));
+
+        public Task<List<T>> GetListAsync(System.Linq.Expressions.Expression<Func<T, bool>> expression, CancellationToken cancellationToken = default) =>
+            Task.FromResult(items.AsQueryable().Where(expression).ToList());
+
+        public Task<int> GetCountAsync(System.Linq.Expressions.Expression<Func<T, bool>> expression, CancellationToken cancellationToken = default) =>
+            Task.FromResult(items.AsQueryable().Count(expression));
+
+        public Task<T?> GetAsync(
+            System.Linq.Expressions.Expression<Func<T, bool>> expression,
+            System.Linq.Expressions.Expression<Func<T, object>>[]? includes = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(items.AsQueryable().FirstOrDefault(expression));
+
+        public Task<List<T>> GetListAsync(
+            System.Linq.Expressions.Expression<Func<T, bool>> expression,
+            System.Linq.Expressions.Expression<Func<T, object>>[]? includes = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(items.AsQueryable().Where(expression).ToList());
+
+        private static object? GetId(T item) => typeof(T).GetProperty("Id")?.GetValue(item);
     }
 
     private sealed record OperationsFixture(

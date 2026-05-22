@@ -5,6 +5,7 @@ using AICopilot.Core.AiGateway.Aggregates.Artifacts;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.AiGateway.Aggregates.PromptPolicy;
+using AICopilot.Core.AiGateway.Aggregates.ProductionOperations;
 using AICopilot.Core.AiGateway.Aggregates.RoutingModel;
 using AICopilot.Core.AiGateway.Aggregates.RuntimeSettings;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
@@ -57,6 +58,14 @@ public sealed class AiGatewayDbContext(DbContextOptions<AiGatewayDbContext> opti
 
     public DbSet<TrialCampaign> TrialCampaigns => Set<TrialCampaign>();
 
+    public DbSet<ProductionPilotEmergencyStopState> ProductionPilotEmergencyStopStates => Set<ProductionPilotEmergencyStopState>();
+
+    public DbSet<ProductionPilotIncident> ProductionPilotIncidents => Set<ProductionPilotIncident>();
+
+    public DbSet<ProductionPilotRunLedger> ProductionPilotRunLedgers => Set<ProductionPilotRunLedger>();
+
+    public DbSet<ProductionPilotGaReadinessAssessment> ProductionPilotGaReadinessAssessments => Set<ProductionPilotGaReadinessAssessment>();
+
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
     protected override void OnModelCreating(ModelBuilder builder)
@@ -84,6 +93,10 @@ public sealed class AiGatewayDbContext(DbContextOptions<AiGatewayDbContext> opti
         builder.ApplyConfiguration(new TrialCampaignConfiguration());
         builder.ApplyConfiguration(new TrialScenarioRunConfiguration());
         builder.ApplyConfiguration(new TrialRiskIssueConfiguration());
+        builder.ApplyConfiguration(new ProductionPilotEmergencyStopStateConfiguration());
+        builder.ApplyConfiguration(new ProductionPilotIncidentConfiguration());
+        builder.ApplyConfiguration(new ProductionPilotRunLedgerConfiguration());
+        builder.ApplyConfiguration(new ProductionPilotGaReadinessAssessmentConfiguration());
         builder.ApplyConfiguration(new OutboxMessageConfiguration());
         builder.Entity<OutboxMessage>().ToTable(
             "outbox_messages",

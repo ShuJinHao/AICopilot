@@ -612,12 +612,16 @@ export interface ProductionPilotRunMetrics {
   finalArtifactCount: number
   openIncidentCount: number
   endpointCounts: Record<string, number>
+  endpointDistribution?: Record<string, number>
 }
 
 export interface CloudReadonlyProductionOperationsStatus {
   status: string
   p12PilotStatus: string
   p13ControlledPilotStatus: string
+  operationsStorePersisted?: boolean
+  hasP12CompletedRun?: boolean
+  hasP13CompletedRun?: boolean
   emergencyStopActive: boolean
   currentWindowIds: string[]
   runMetrics: ProductionPilotRunMetrics

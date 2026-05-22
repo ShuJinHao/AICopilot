@@ -571,6 +571,9 @@ public sealed class CloudReadonlyProductionControlledPilotService(
                 queryResult,
                 NormalizeArtifactTypes(artifactTypes, options, artifactRejected));
             store.SaveRun(result);
+            operationsStore?.UpsertRunLedger(
+                CloudReadonlyProductionOperationsService.CreateRunLedger(result),
+                DateTimeOffset.UtcNow);
 
             return Result.Success(result);
         }

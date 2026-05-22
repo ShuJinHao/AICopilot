@@ -652,6 +652,9 @@ public sealed class CloudReadonlyProductionPilotService(
                 queryResult,
                 NormalizeArtifactTypes(request.ArtifactTypes, scenario.ArtifactTypes));
             store.SaveRun(result);
+            operationsStore?.UpsertRunLedger(
+                CloudReadonlyProductionOperationsService.CreateRunLedger(result),
+                DateTimeOffset.UtcNow);
 
             return Result.Success(result);
         }

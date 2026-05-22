@@ -1,5 +1,8 @@
+using System.Text.Json;
 using AICopilot.AiGatewayService.TrialOperations;
+using AICopilot.Core.AiGateway.Aggregates.ProductionOperations;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
+using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Services.Contracts;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.SharedKernel.Messaging;
@@ -51,6 +54,9 @@ public sealed record CloudReadonlyProductionOperationsStatusDto(
     string Status,
     string P12PilotStatus,
     string P13ControlledPilotStatus,
+    bool OperationsStorePersisted,
+    bool HasP12CompletedRun,
+    bool HasP13CompletedRun,
     bool EmergencyStopActive,
     IReadOnlyCollection<string> CurrentWindowIds,
     ProductionPilotRunMetricsDto RunMetrics,
@@ -154,12 +160,22 @@ public interface IProductionPilotOperationsStore
         DateTimeOffset now);
 
     IReadOnlyCollection<ProductionPilotIncidentDto> ListIncidents();
+
+    void UpsertRunLedger(ProductionPilotRunLedgerDto ledger, DateTimeOffset now);
+
+    IReadOnlyCollection<ProductionPilotRunLedgerDto> ListRunLedgers();
+
+    void SaveGaReadinessAssessment(ProductionPilotGaReadinessAssessmentDto assessment, DateTimeOffset now);
+
+    ProductionPilotGaReadinessAssessmentDto? LatestGaReadinessAssessment();
 }
 
 internal sealed class InMemoryProductionPilotOperationsStore : IProductionPilotOperationsStore
 {
     private readonly object sync = new();
     private readonly Dictionary<Guid, ProductionPilotIncidentDto> incidents = [];
+    private readonly Dictionary<string, ProductionPilotRunLedgerDto> runLedgers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<ProductionPilotGaReadinessAssessmentDto> gaReadinessAssessments = [];
     private ProductionPilotEmergencyStopDto emergencyStop = new(false, null, null, null, null, null);
 
     public ProductionPilotEmergencyStopDto GetEmergencyStop()
@@ -228,6 +244,53 @@ internal sealed class InMemoryProductionPilotOperationsStore : IProductionPilotO
         }
     }
 
+    public void UpsertRunLedger(ProductionPilotRunLedgerDto ledger, DateTimeOffset now)
+    {
+        lock (sync)
+        {
+            runLedgers[ledger.RunId] = ledger;
+            foreach (var key in runLedgers.Values
+                         .OrderByDescending(item => item.ExecutedAt)
+                         .Skip(200)
+                         .Select(item => item.RunId)
+                         .ToArray())
+            {
+                runLedgers.Remove(key);
+            }
+        }
+    }
+
+    public IReadOnlyCollection<ProductionPilotRunLedgerDto> ListRunLedgers()
+    {
+        lock (sync)
+        {
+            return runLedgers.Values
+                .OrderByDescending(item => item.ExecutedAt)
+                .Take(200)
+                .ToArray();
+        }
+    }
+
+    public void SaveGaReadinessAssessment(ProductionPilotGaReadinessAssessmentDto assessment, DateTimeOffset now)
+    {
+        lock (sync)
+        {
+            gaReadinessAssessments.Insert(0, assessment);
+            if (gaReadinessAssessments.Count > 20)
+            {
+                gaReadinessAssessments.RemoveRange(20, gaReadinessAssessments.Count - 20);
+            }
+        }
+    }
+
+    public ProductionPilotGaReadinessAssessmentDto? LatestGaReadinessAssessment()
+    {
+        lock (sync)
+        {
+            return gaReadinessAssessments.FirstOrDefault();
+        }
+    }
+
     private static string NormalizeIncidentStatus(string? status)
     {
         var value = Normalize(status, ProductionPilotIncidentStatuses.Open);
@@ -263,11 +326,328 @@ internal sealed class InMemoryProductionPilotOperationsStore : IProductionPilotO
     }
 }
 
+internal sealed class RepositoryProductionPilotOperationsStore(
+    IRepository<ProductionPilotEmergencyStopState> emergencyStopRepository,
+    IRepository<ProductionPilotIncident> incidentRepository,
+    IRepository<ProductionPilotRunLedger> runLedgerRepository,
+    IRepository<ProductionPilotGaReadinessAssessment> gaReadinessRepository)
+    : IProductionPilotOperationsStore
+{
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    public ProductionPilotEmergencyStopDto GetEmergencyStop()
+    {
+        var state = Execute(() => emergencyStopRepository.GetByIdAsync(ProductionPilotEmergencyStopStateId.Default));
+        return state is null
+            ? new ProductionPilotEmergencyStopDto(false, null, null, null, null, null)
+            : ToDto(state);
+    }
+
+    public void ActivateEmergencyStop(string reason, string activatedBy, DateTimeOffset now)
+    {
+        Execute(async () =>
+        {
+            var state = await emergencyStopRepository.GetByIdAsync(ProductionPilotEmergencyStopStateId.Default);
+            if (state is null)
+            {
+                state = ProductionPilotEmergencyStopState.CreateDefault(now);
+                emergencyStopRepository.Add(state);
+            }
+
+            state.Activate(reason, activatedBy, now);
+            await emergencyStopRepository.SaveChangesAsync();
+        });
+    }
+
+    public void ClearEmergencyStop(string reason, string clearedBy, DateTimeOffset now)
+    {
+        Execute(async () =>
+        {
+            var state = await emergencyStopRepository.GetByIdAsync(ProductionPilotEmergencyStopStateId.Default);
+            if (state is null)
+            {
+                state = ProductionPilotEmergencyStopState.CreateDefault(now);
+                emergencyStopRepository.Add(state);
+            }
+
+            state.Clear(reason, clearedBy, now);
+            await emergencyStopRepository.SaveChangesAsync();
+        });
+    }
+
+    public ProductionPilotIncidentDto UpsertIncident(
+        Guid? incidentId,
+        string severity,
+        string category,
+        string status,
+        string? owner,
+        string? sourceRef,
+        string? resolutionHash,
+        DateTimeOffset now)
+    {
+        return Execute(async () =>
+        {
+            ProductionPilotIncident? incident = null;
+            if (incidentId is { } id && id != Guid.Empty)
+            {
+                incident = await incidentRepository.GetByIdAsync(new ProductionPilotIncidentId(id));
+            }
+
+            if (incident is null)
+            {
+                var newIncidentId = incidentId is { } providedId && providedId != Guid.Empty
+                    ? new ProductionPilotIncidentId(providedId)
+                    : (ProductionPilotIncidentId?)null;
+                incident = new ProductionPilotIncident(
+                    newIncidentId,
+                    severity,
+                    category,
+                    status,
+                    owner,
+                    sourceRef,
+                    resolutionHash,
+                    now);
+                incidentRepository.Add(incident);
+            }
+            else
+            {
+                incident.Update(severity, category, status, owner, sourceRef, resolutionHash, now);
+            }
+
+            await incidentRepository.SaveChangesAsync();
+            return ToDto(incident);
+        });
+    }
+
+    public IReadOnlyCollection<ProductionPilotIncidentDto> ListIncidents()
+    {
+        var incidents = Execute(() => incidentRepository.ListAsync());
+        return incidents
+            .OrderByDescending(item => item.UpdatedAt)
+            .Select(ToDto)
+            .ToArray();
+    }
+
+    public void UpsertRunLedger(ProductionPilotRunLedgerDto ledger, DateTimeOffset now)
+    {
+        Execute(async () =>
+        {
+            var existing = (await runLedgerRepository.GetListAsync(
+                item => item.RunId == ledger.RunId,
+                CancellationToken.None)).FirstOrDefault();
+            if (existing is null)
+            {
+                runLedgerRepository.Add(new ProductionPilotRunLedger(
+                    ledger.RunId,
+                    ledger.TaskId,
+                    ledger.SourceMode,
+                    ledger.Boundary,
+                    ledger.TrialMode,
+                    ledger.PilotWindowId,
+                    ledger.IntentId,
+                    ledger.EndpointCode,
+                    ledger.ArtifactIds,
+                    ledger.ApprovalStatus,
+                    ledger.Status,
+                    ledger.DurationMs,
+                    ledger.RowCount,
+                    ledger.IsTruncated,
+                    ledger.QueryHash,
+                    ledger.ResultHash,
+                    ledger.ExecutedAt,
+                    now));
+            }
+            else
+            {
+                existing.Update(
+                    ledger.RunId,
+                    ledger.TaskId,
+                    ledger.SourceMode,
+                    ledger.Boundary,
+                    ledger.TrialMode,
+                    ledger.PilotWindowId,
+                    ledger.IntentId,
+                    ledger.EndpointCode,
+                    ledger.ArtifactIds,
+                    ledger.ApprovalStatus,
+                    ledger.Status,
+                    ledger.DurationMs,
+                    ledger.RowCount,
+                    ledger.IsTruncated,
+                    ledger.QueryHash,
+                    ledger.ResultHash,
+                    ledger.ExecutedAt,
+                    now);
+            }
+
+            await runLedgerRepository.SaveChangesAsync();
+        });
+    }
+
+    public IReadOnlyCollection<ProductionPilotRunLedgerDto> ListRunLedgers()
+    {
+        var ledgers = Execute(() => runLedgerRepository.ListAsync());
+        return ledgers
+            .OrderByDescending(item => item.ExecutedAt)
+            .Take(200)
+            .Select(ToDto)
+            .ToArray();
+    }
+
+    public void SaveGaReadinessAssessment(ProductionPilotGaReadinessAssessmentDto assessment, DateTimeOffset now)
+    {
+        Execute(async () =>
+        {
+            gaReadinessRepository.Add(new ProductionPilotGaReadinessAssessment(
+                assessment.Status,
+                JsonSerializer.Serialize(assessment.Checks, JsonOptions),
+                assessment.Blockers,
+                assessment.Warnings,
+                assessment.Metrics.TotalRuns,
+                assessment.Metrics.SucceededRuns,
+                assessment.Metrics.FailedRuns,
+                assessment.Metrics.RejectedRuns,
+                assessment.Metrics.TimeoutRuns,
+                assessment.Metrics.TruncatedRuns,
+                assessment.Metrics.TotalRows,
+                assessment.Metrics.FinalArtifactCount,
+                assessment.Metrics.OpenIncidentCount,
+                JsonSerializer.Serialize(assessment.Metrics.EndpointDistribution, JsonOptions),
+                assessment.GeneratedAt,
+                now));
+            await gaReadinessRepository.SaveChangesAsync();
+        });
+    }
+
+    public ProductionPilotGaReadinessAssessmentDto? LatestGaReadinessAssessment()
+    {
+        var assessment = Execute(() => gaReadinessRepository.ListAsync())
+            .OrderByDescending(item => item.GeneratedAt)
+            .FirstOrDefault();
+        return assessment is null ? null : ToDto(assessment);
+    }
+
+    private static ProductionPilotEmergencyStopDto ToDto(ProductionPilotEmergencyStopState state) =>
+        new(
+            state.IsActive,
+            state.Reason,
+            state.ActivatedBy,
+            state.ActivatedAt,
+            state.ClearedBy,
+            state.ClearedAt);
+
+    private static ProductionPilotIncidentDto ToDto(ProductionPilotIncident incident) =>
+        new(
+            incident.Id.Value,
+            incident.Severity,
+            incident.Category,
+            incident.Status,
+            incident.Owner,
+            incident.SourceRef,
+            incident.ResolutionHash,
+            incident.CreatedAt,
+            incident.UpdatedAt);
+
+    private static ProductionPilotRunLedgerDto ToDto(ProductionPilotRunLedger ledger) =>
+        new(
+            ledger.RunId,
+            ledger.TaskId,
+            ledger.SourceMode,
+            ledger.Boundary,
+            ledger.TrialMode,
+            ledger.PilotWindowId,
+            ledger.IntentId,
+            ledger.EndpointCode,
+            ledger.ArtifactIds,
+            ledger.ApprovalStatus,
+            ledger.Status,
+            ledger.DurationMs,
+            ledger.RowCount,
+            ledger.IsTruncated,
+            ledger.QueryHash,
+            ledger.ResultHash,
+            ledger.ExecutedAt);
+
+    private static ProductionPilotGaReadinessAssessmentDto ToDto(ProductionPilotGaReadinessAssessment assessment)
+    {
+        var checks = JsonSerializer.Deserialize<List<ProductionPilotGaReadinessCheckDto>>(assessment.ChecksJson, JsonOptions) ?? [];
+        var endpointDistribution = JsonSerializer.Deserialize<Dictionary<string, int>>(assessment.EndpointDistributionJson, JsonOptions)
+                                   ?? new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        return new ProductionPilotGaReadinessAssessmentDto(
+            assessment.Status,
+            checks,
+            assessment.Blockers,
+            assessment.Warnings,
+            new ProductionPilotRunMetricsDto(
+                assessment.TotalRuns,
+                assessment.SucceededRuns,
+                assessment.FailedRuns,
+                assessment.RejectedRuns,
+                assessment.TimeoutRuns,
+                assessment.TruncatedRuns,
+                assessment.TotalRows,
+                assessment.FinalArtifactCount,
+                assessment.OpenIncidentCount,
+                endpointDistribution),
+            assessment.GeneratedAt);
+    }
+
+    private static void Execute(Func<Task> action) => action().GetAwaiter().GetResult();
+
+    private static T Execute<T>(Func<Task<T>> action) => action().GetAwaiter().GetResult();
+}
+
 public sealed class CloudReadonlyProductionOperationsService(
     IProductionPilotOperationsStore operationsStore,
     ICloudReadonlyProductionPilotStore productionPilotStore,
     ICloudReadonlyProductionControlledPilotStore controlledPilotStore)
 {
+    public static ProductionPilotRunLedgerDto CreateRunLedger(CloudReadonlyProductionPilotScenarioResultDto result)
+    {
+        var query = result.QueryResult;
+        return new ProductionPilotRunLedgerDto(
+            $"p12_{StableHashSegment(query.QueryHash)}_{query.ExecutedAt.UtcTicks}",
+            TaskId: null,
+            query.SourceMode,
+            query.Boundary,
+            "ProductionPilotFixedScenario",
+            query.PilotWindowId,
+            IntentId: null,
+            query.EndpointCode,
+            ArtifactIds: [],
+            query.ApprovalStatus,
+            result.Status,
+            query.DurationMs,
+            query.RowCount,
+            query.IsTruncated,
+            query.QueryHash,
+            query.ResultHash,
+            query.ExecutedAt);
+    }
+
+    public static ProductionPilotRunLedgerDto CreateRunLedger(CloudReadonlyProductionControlledPilotResultDto result)
+    {
+        var query = result.QueryResult;
+        return new ProductionPilotRunLedgerDto(
+            $"p13_{StableHashSegment(query.ResultHash)}_{query.ExecutedAt.UtcTicks}",
+            TaskId: null,
+            query.SourceMode,
+            query.Boundary,
+            CloudReadonlyProductionControlledPilotMarkers.TrialMode,
+            query.PilotWindowId,
+            query.IntentId,
+            query.EndpointCode,
+            ArtifactIds: [],
+            query.ApprovalStatus,
+            result.Status,
+            query.DurationMs,
+            query.RowCount,
+            query.IsTruncated,
+            query.QueryHash,
+            query.ResultHash,
+            query.ExecutedAt);
+    }
+
     public CloudReadonlyProductionOperationsStatusDto BuildStatus(
         CloudReadonlyProductionPilotStatusDto p12Status,
         CloudReadonlyProductionControlledPilotStatusDto p13Status)
@@ -275,6 +655,8 @@ public sealed class CloudReadonlyProductionOperationsService(
         var emergency = operationsStore.GetEmergencyStop();
         var ledger = BuildLedger();
         var metrics = BuildMetrics(ledger, operationsStore.ListIncidents());
+        var hasP12CompletedRun = HasCompletedP12Evidence(ledger);
+        var hasP13CompletedRun = HasCompletedP13Evidence(ledger);
         var blockers = new List<string>();
         var warnings = new List<string>();
 
@@ -316,6 +698,9 @@ public sealed class CloudReadonlyProductionOperationsService(
             status,
             p12Status.Status,
             p13Status.Status,
+            operationsStore is not InMemoryProductionPilotOperationsStore,
+            hasP12CompletedRun,
+            hasP13CompletedRun,
             emergency.IsActive,
             new[] { p12Status.PilotWindowId, p13Status.PilotWindowId }
                 .Where(item => !string.IsNullOrWhiteSpace(item))
@@ -330,55 +715,14 @@ public sealed class CloudReadonlyProductionOperationsService(
 
     public IReadOnlyCollection<ProductionPilotRunLedgerDto> BuildLedger()
     {
-        var p12Runs = productionPilotStore.ListRuns()
-            .Select((run, index) =>
-            {
-                var query = run.QueryResult;
-                return new ProductionPilotRunLedgerDto(
-                    $"p12_{query.QueryHash[..Math.Min(16, query.QueryHash.Length)]}_{index}",
-                    TaskId: null,
-                    query.SourceMode,
-                    query.Boundary,
-                    "ProductionPilotFixedScenario",
-                    query.PilotWindowId,
-                    IntentId: null,
-                    query.EndpointCode,
-                    ArtifactIds: [],
-                    query.ApprovalStatus,
-                    run.Status,
-                    query.DurationMs,
-                    query.RowCount,
-                    query.IsTruncated,
-                    query.QueryHash,
-                    query.ResultHash,
-                    query.ExecutedAt);
-            });
+        var persisted = operationsStore.ListRunLedgers();
+        var transient = productionPilotStore.ListRuns()
+            .Select(CreateRunLedger)
+            .Concat(controlledPilotStore.ListRuns().Select(CreateRunLedger));
 
-        var p13Runs = controlledPilotStore.ListRuns()
-            .Select((run, index) =>
-            {
-                var query = run.QueryResult;
-                return new ProductionPilotRunLedgerDto(
-                    $"p13_{query.ResultHash[..Math.Min(16, query.ResultHash.Length)]}_{index}",
-                    TaskId: null,
-                    query.SourceMode,
-                    query.Boundary,
-                    CloudReadonlyProductionControlledPilotMarkers.TrialMode,
-                    query.PilotWindowId,
-                    query.IntentId,
-                    query.EndpointCode,
-                    ArtifactIds: [],
-                    query.ApprovalStatus,
-                    run.Status,
-                    query.DurationMs,
-                    query.RowCount,
-                    query.IsTruncated,
-                    query.QueryHash,
-                    query.ResultHash,
-                    query.ExecutedAt);
-            });
-
-        return p12Runs.Concat(p13Runs)
+        return persisted.Concat(transient)
+            .GroupBy(item => item.RunId, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.OrderByDescending(item => item.ExecutedAt).First())
             .OrderByDescending(item => item.ExecutedAt)
             .Take(50)
             .ToArray();
@@ -402,8 +746,10 @@ public sealed class CloudReadonlyProductionOperationsService(
         AddCheck(checks, blockers, "P13Gate", "P13 controlled Pilot gate", true, p13Status.Status == CloudReadonlyProductionControlledPilotStatuses.Ready ? "Passed" : "Blocked", $"P13 status is {p13Status.Status}.");
         AddCheck(checks, blockers, "EmergencyStopDrill", "Emergency stop drill", true, emergency.DrillCompleted ? "Passed" : "Blocked", emergency.DrillCompleted ? "Emergency stop has been activated and cleared." : "Emergency stop drill has not been completed.");
         AddCheck(checks, blockers, "EmergencyStopActive", "Emergency stop active state", true, emergency.IsActive ? "Blocked" : "Passed", emergency.IsActive ? "Emergency stop is active." : "Emergency stop is not active.");
+        AddCheck(checks, blockers, "P12CompletedRun", "P12 completed run evidence", true, HasCompletedP12Evidence(ledger) ? "Passed" : "Blocked", HasCompletedP12Evidence(ledger) ? "P12 fixed-template production Pilot has completed hash-only run evidence." : "P12 fixed-template production Pilot completed run evidence is missing.");
+        AddCheck(checks, blockers, "P13CompletedRun", "P13 completed run evidence", true, HasCompletedP13Evidence(ledger) ? "Passed" : "Blocked", HasCompletedP13Evidence(ledger) ? "P13 controlled production Pilot has completed hash-only run evidence." : "P13 controlled production Pilot completed run evidence is missing.");
         AddCheck(checks, blockers, "AuditLedger", "Sanitized operations ledger", true, ledger.Count > 0 ? "Passed" : "Blocked", ledger.Count > 0 ? "Production Pilot run ledger has hash-only evidence." : "No production Pilot run ledger evidence exists.");
-        AddCheck(checks, blockers, "FinalArtifacts", "Final artifact evidence", false, metrics.FinalArtifactCount > 0 ? "Passed" : "Warning", metrics.FinalArtifactCount > 0 ? "Final artifacts are present." : "No final artifact reference is present in P14 in-memory ledger.");
+        AddCheck(checks, blockers, "FinalArtifacts", "Final artifact evidence", true, metrics.FinalArtifactCount > 0 ? "Passed" : "Blocked", metrics.FinalArtifactCount > 0 ? "Final artifact references are present." : "No final artifact reference is present in P14.2 persisted ledger.");
         AddCheck(checks, blockers, "ProductionToolBoundary", "query_cloud_data_readonly boundary", true, "Passed", "query_cloud_data_readonly remains closed by the protected ToolRegistry checks.");
         AddProtectedToolCheck(checks, blockers, persistedToolRegistrations);
 
@@ -419,13 +765,15 @@ public sealed class CloudReadonlyProductionOperationsService(
             ? CloudReadonlyProductionOperationsStatuses.Blocked
             : CloudReadonlyProductionOperationsStatuses.ReadyForP15Planning;
 
-        return new ProductionPilotGaReadinessAssessmentDto(
+        var assessment = new ProductionPilotGaReadinessAssessmentDto(
             status,
             checks,
             blockers,
             warnings,
             metrics,
             DateTimeOffset.UtcNow);
+        operationsStore.SaveGaReadinessAssessment(assessment, DateTimeOffset.UtcNow);
+        return assessment;
     }
 
     public ProductionPilotIncidentDto UpsertIncident(UpsertProductionPilotIncidentCommand command) =>
@@ -438,6 +786,9 @@ public sealed class CloudReadonlyProductionOperationsService(
             command.SourceRef,
             command.ResolutionHash,
             DateTimeOffset.UtcNow);
+
+    public void UpsertRunLedger(ProductionPilotRunLedgerDto ledger) =>
+        operationsStore.UpsertRunLedger(ledger, DateTimeOffset.UtcNow);
 
     public void ActivateEmergencyStop(string? reason, string? activatedBy) =>
         operationsStore.ActivateEmergencyStop(reason ?? "P14 emergency stop", activatedBy ?? "system", DateTimeOffset.UtcNow);
@@ -511,6 +862,32 @@ public sealed class CloudReadonlyProductionOperationsService(
     private static bool IsBlockingSeverity(string severity) =>
         severity.Equals("High", StringComparison.OrdinalIgnoreCase) ||
         severity.Equals("Critical", StringComparison.OrdinalIgnoreCase);
+
+    private static string StableHashSegment(string hash) =>
+        hash.Length <= 16 ? hash : hash[..16];
+
+    private static bool HasCompletedP12Evidence(IEnumerable<ProductionPilotRunLedgerDto> ledger) =>
+        ledger.Any(item =>
+            string.Equals(item.SourceMode, CloudReadonlyProductionPilotMarkers.SourceMode, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(item.Boundary, CloudReadonlyProductionPilotMarkers.Boundary, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(item.TrialMode, "ProductionPilotFixedScenario", StringComparison.OrdinalIgnoreCase) &&
+            HasCompletedRunEvidence(item));
+
+    private static bool HasCompletedP13Evidence(IEnumerable<ProductionPilotRunLedgerDto> ledger) =>
+        ledger.Any(item =>
+            string.Equals(item.SourceMode, CloudReadonlyProductionControlledPilotMarkers.SourceMode, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(item.Boundary, CloudReadonlyProductionControlledPilotMarkers.Boundary, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(item.TrialMode, CloudReadonlyProductionControlledPilotMarkers.TrialMode, StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(item.IntentId) &&
+            HasCompletedRunEvidence(item));
+
+    private static bool HasCompletedRunEvidence(ProductionPilotRunLedgerDto item) =>
+        string.Equals(item.Status, CloudReadonlyProductionPilotStatuses.Completed, StringComparison.OrdinalIgnoreCase) &&
+        !string.IsNullOrWhiteSpace(item.ApprovalStatus) &&
+        !string.IsNullOrWhiteSpace(item.QueryHash) &&
+        !string.IsNullOrWhiteSpace(item.ResultHash) &&
+        !string.IsNullOrWhiteSpace(item.EndpointCode) &&
+        !string.IsNullOrWhiteSpace(item.PilotWindowId);
 }
 
 public sealed class GetCloudReadonlyProductionOperationsStatusQueryHandler(
