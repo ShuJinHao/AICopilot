@@ -1,14 +1,14 @@
 ﻿# AICopilot Production Pilot Execution Plan P16.3 Acceptance
 
-- GeneratedAt: 2026-05-22 11:32:12
+- GeneratedAt: 2026-05-22 11:58:48
 - Repository: <local-repo>
-- LocalHeadAtGeneration: 6d8d9fe0e3e70bbe50cdd70cf208b600d37276e2
+- LocalHeadAtGeneration: e9c666543cf64724b5f016a07a2ff89ebf83ea7e
 - Branch: integration/aicopilot-agent-workbench-simulation
 - SubmittedStateNote: after committing this report refresh, use PR #48 current head and GitHub checks as the authoritative submitted-state evidence
 - PullRequest: https://github.com/ShuJinHao/AICopilot/pull/48
-- PullRequestHeadAtGeneration: 6d8d9fe0e3e70bbe50cdd70cf208b600d37276e2
+- PullRequestHeadAtGeneration: e9c666543cf64724b5f016a07a2ff89ebf83ea7e
 - GitHubCIAtGeneration: simulation-rc status=COMPLETED conclusion=SUCCESS
-- GitHubCIDetails: https://github.com/ShuJinHao/AICopilot/actions/runs/26266082934/job/77309510557
+- GitHubCIDetails: https://github.com/ShuJinHao/AICopilot/actions/runs/26266890943/job/77312037769
 - ReviewConclusion: 5.5 Pro ReviewPending
 - GoNoGo: ReadyForLimitedPilotExecutionPlanning
 - Boundary: P16.3 freezes the execution plan only; it does not execute a real Pilot and is not GA
@@ -38,7 +38,7 @@
 ### Enterprise Data Governance Scope Guard
 
 ```text
-Enterprise Data Governance scope guard passed. Checked 6 candidate file(s).
+Enterprise Data Governance scope guard passed. Checked 4 candidate file(s).
 ```
 
 ### P16.0 Hardening Inheritance Check
@@ -62,7 +62,7 @@ P16.3 scope and execution plan package markers passed.
 ### GitHub PR #48 Current Head And CI Check
 
 ```text
-PR #48 head 6d8d9fe0e3e70bbe50cdd70cf208b600d37276e2 simulation-rc SUCCESS https://github.com/ShuJinHao/AICopilot/actions/runs/26266082934/job/77309510557
+PR #48 head e9c666543cf64724b5f016a07a2ff89ebf83ea7e simulation-rc SUCCESS https://github.com/ShuJinHao/AICopilot/actions/runs/26266890943/job/77312037769
 ```
 
 ### P16.3 No Execution Claim Check
