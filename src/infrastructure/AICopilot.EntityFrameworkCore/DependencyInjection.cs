@@ -4,6 +4,7 @@ using AICopilot.Core.AiGateway.Aggregates.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
+using AICopilot.Core.AiGateway.Aggregates.PilotAuthorization;
 using AICopilot.Core.AiGateway.Aggregates.PromptPolicy;
 using AICopilot.Core.AiGateway.Aggregates.ProductionOperations;
 using AICopilot.Core.AiGateway.Aggregates.RoutingModel;
@@ -93,6 +94,8 @@ public static class DependencyInjection
         builder.Services.AddScoped<IRepository<ToolExecutionRecord>>(provider => provider.GetRequiredService<AiGatewayRepository<ToolExecutionRecord>>());
         builder.Services.AddScoped<IReadRepository<TrialCampaign>>(provider => provider.GetRequiredService<AiGatewayRepository<TrialCampaign>>());
         builder.Services.AddScoped<IRepository<TrialCampaign>>(provider => provider.GetRequiredService<AiGatewayRepository<TrialCampaign>>());
+        builder.Services.AddScoped<IReadRepository<PilotAuthorizationSubmission>>(provider => provider.GetRequiredService<AiGatewayRepository<PilotAuthorizationSubmission>>());
+        builder.Services.AddScoped<IRepository<PilotAuthorizationSubmission>>(provider => provider.GetRequiredService<AiGatewayRepository<PilotAuthorizationSubmission>>());
         builder.Services.AddScoped<IReadRepository<ProductionPilotEmergencyStopState>>(provider => provider.GetRequiredService<AiGatewayRepository<ProductionPilotEmergencyStopState>>());
         builder.Services.AddScoped<IRepository<ProductionPilotEmergencyStopState>>(provider => provider.GetRequiredService<AiGatewayRepository<ProductionPilotEmergencyStopState>>());
         builder.Services.AddScoped<IReadRepository<ProductionPilotIncident>>(provider => provider.GetRequiredService<AiGatewayRepository<ProductionPilotIncident>>());

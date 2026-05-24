@@ -4,6 +4,7 @@ using AICopilot.Core.AiGateway.Aggregates.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
+using AICopilot.Core.AiGateway.Aggregates.PilotAuthorization;
 using AICopilot.Core.AiGateway.Aggregates.PromptPolicy;
 using AICopilot.Core.AiGateway.Aggregates.ProductionOperations;
 using AICopilot.Core.AiGateway.Aggregates.RoutingModel;
@@ -58,6 +59,8 @@ public sealed class AiGatewayDbContext(DbContextOptions<AiGatewayDbContext> opti
 
     public DbSet<TrialCampaign> TrialCampaigns => Set<TrialCampaign>();
 
+    public DbSet<PilotAuthorizationSubmission> PilotAuthorizationSubmissions => Set<PilotAuthorizationSubmission>();
+
     public DbSet<ProductionPilotEmergencyStopState> ProductionPilotEmergencyStopStates => Set<ProductionPilotEmergencyStopState>();
 
     public DbSet<ProductionPilotIncident> ProductionPilotIncidents => Set<ProductionPilotIncident>();
@@ -101,6 +104,7 @@ public sealed class AiGatewayDbContext(DbContextOptions<AiGatewayDbContext> opti
         builder.ApplyConfiguration(new TrialCampaignConfiguration());
         builder.ApplyConfiguration(new TrialScenarioRunConfiguration());
         builder.ApplyConfiguration(new TrialRiskIssueConfiguration());
+        builder.ApplyConfiguration(new PilotAuthorizationSubmissionConfiguration());
         builder.ApplyConfiguration(new ProductionPilotEmergencyStopStateConfiguration());
         builder.ApplyConfiguration(new ProductionPilotIncidentConfiguration());
         builder.ApplyConfiguration(new ProductionPilotRunLedgerConfiguration());

@@ -5,6 +5,7 @@ using AICopilot.AiGatewayService.Commands.ConversationTemplates;
 using AICopilot.AiGatewayService.Commands.LanguageModels;
 using AICopilot.AiGatewayService.Commands.Sessions;
 using AICopilot.AiGatewayService.CloudReadiness;
+using AICopilot.AiGatewayService.PilotAuthorization;
 using AICopilot.AiGatewayService.Queries.ConversationTemplates;
 using AICopilot.AiGatewayService.Queries.LanguageModels;
 using AICopilot.AiGatewayService.Queries.Runtime;
@@ -389,6 +390,104 @@ public class AiGatewayController(ISender sender) : ApiControllerBase(sender)
     public async Task<IActionResult> GenerateTrialEvidencePackage(Guid id)
     {
         return ReturnResult(await Sender.Send(new GenerateTrialEvidencePackageCommand(id)));
+    }
+
+    [HttpGet("pilot-authorization/submissions")]
+    public async Task<IActionResult> GetPilotAuthorizationSubmissions()
+    {
+        return ReturnResult(await Sender.Send(new GetPilotAuthorizationSubmissionsQuery()));
+    }
+
+    [HttpGet("pilot-authorization/submissions/{id:guid}")]
+    public async Task<IActionResult> GetPilotAuthorizationSubmission(Guid id)
+    {
+        return ReturnResult(await Sender.Send(new GetPilotAuthorizationSubmissionQuery(id)));
+    }
+
+    [HttpPost("pilot-authorization/submissions")]
+    public async Task<IActionResult> CreatePilotAuthorizationSubmission(PilotAuthorizationSubmissionUpsertRequest request)
+    {
+        return ReturnResult(await Sender.Send(new CreatePilotAuthorizationSubmissionCommand(
+            request.Title,
+            request.BusinessPurpose,
+            request.EndpointCodes,
+            request.MaxRows,
+            request.TimeRangeDays,
+            request.DataOwner,
+            request.ToolOwner,
+            request.FinalOwner,
+            request.RollbackOwner,
+            request.EmergencyOwner,
+            request.EvidenceSummary,
+            request.RollbackSummary)));
+    }
+
+    [HttpPut("pilot-authorization/submissions/{id:guid}")]
+    public async Task<IActionResult> UpdatePilotAuthorizationSubmission(
+        Guid id,
+        PilotAuthorizationSubmissionUpsertRequest request)
+    {
+        return ReturnResult(await Sender.Send(new UpdatePilotAuthorizationSubmissionCommand(
+            id,
+            request.Title,
+            request.BusinessPurpose,
+            request.EndpointCodes,
+            request.MaxRows,
+            request.TimeRangeDays,
+            request.DataOwner,
+            request.ToolOwner,
+            request.FinalOwner,
+            request.RollbackOwner,
+            request.EmergencyOwner,
+            request.EvidenceSummary,
+            request.RollbackSummary)));
+    }
+
+    [HttpPost("pilot-authorization/submissions/{id:guid}/submit")]
+    public async Task<IActionResult> SubmitPilotAuthorizationSubmission(Guid id)
+    {
+        return ReturnResult(await Sender.Send(new SubmitPilotAuthorizationSubmissionCommand(id)));
+    }
+
+    [HttpPost("pilot-authorization/submissions/{id:guid}/approve-credential-window-planning")]
+    public async Task<IActionResult> ApprovePilotAuthorizationCredentialWindowPlanning(
+        Guid id,
+        PilotAuthorizationDecisionRequest request)
+    {
+        return ReturnResult(await Sender.Send(new ApprovePilotAuthorizationCredentialWindowPlanningCommand(
+            id,
+            request.Reason,
+            request.CredentialWindowPlanningSummary)));
+    }
+
+    [HttpPost("pilot-authorization/submissions/{id:guid}/approve-limited-pilot-execution-planning")]
+    public async Task<IActionResult> ApprovePilotAuthorizationLimitedPilotExecutionPlanning(
+        Guid id,
+        PilotAuthorizationDecisionRequest request)
+    {
+        return ReturnResult(await Sender.Send(new ApprovePilotAuthorizationLimitedPilotExecutionPlanningCommand(
+            id,
+            request.Reason)));
+    }
+
+    [HttpPost("pilot-authorization/submissions/{id:guid}/reject")]
+    public async Task<IActionResult> RejectPilotAuthorizationSubmission(
+        Guid id,
+        PilotAuthorizationDecisionRequest request)
+    {
+        return ReturnResult(await Sender.Send(new RejectPilotAuthorizationSubmissionCommand(
+            id,
+            request.Reason ?? "Rejected by Pilot authorization reviewer.")));
+    }
+
+    [HttpPost("pilot-authorization/submissions/{id:guid}/revoke")]
+    public async Task<IActionResult> RevokePilotAuthorizationSubmission(
+        Guid id,
+        PilotAuthorizationDecisionRequest request)
+    {
+        return ReturnResult(await Sender.Send(new RevokePilotAuthorizationSubmissionCommand(
+            id,
+            request.Reason ?? "Revoked by Pilot authorization reviewer.")));
     }
 
     [HttpPost("agent/task/plan")]
