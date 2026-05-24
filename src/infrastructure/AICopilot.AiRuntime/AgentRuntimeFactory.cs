@@ -7,7 +7,6 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using System.Diagnostics;
 
 namespace AICopilot.AiRuntime;
 
@@ -29,7 +28,8 @@ internal sealed class AgentRuntimeFactory(
             var context = BuildExecutionContext(request);
             costBudgetPolicy.EnsureWithinBudget(request, context);
             var providers = scope.ServiceProvider.GetServices<IChatClientProvider>().ToArray();
-            var endpointSelection = TrySelectEndpoint(request, context);
+            var endpointLease = TryAcquireEndpoint(request, context);
+            var endpointSelection = endpointLease?.Selection;
             var runtimeModel = endpointSelection is null
                 ? request.Model
                 : CreateEndpointModel(request.Model, endpointSelection);
@@ -66,10 +66,8 @@ internal sealed class AgentRuntimeFactory(
 
                 try
                 {
-                    var stopwatch = Stopwatch.StartNew();
                     if (endpointSelection is not null)
                     {
-                        endpointPoolScheduler?.RecordStarted(endpointSelection.EndpointId);
                         endpointPoolScheduler?.RecordStickyStreaming(endpointSelection.EndpointId);
                     }
 
@@ -89,20 +87,15 @@ internal sealed class AgentRuntimeFactory(
 
                     var agent = chatClientBuilder.BuildAIAgent(agentOptions, services: scope.ServiceProvider);
                     circuitBreaker.RecordSuccess(providerName);
-                    if (endpointSelection is not null)
-                    {
-                        endpointPoolScheduler?.RecordSucceeded(endpointSelection.EndpointId, stopwatch.Elapsed);
-                    }
 
-                    return new ScopedRuntimeAgent(new MicrosoftAgentRuntimeChatAgent(agent), new AgentRuntimeHandle(agent, scope));
+                    return new ScopedRuntimeAgent(
+                        new MicrosoftAgentRuntimeChatAgent(agent),
+                        new AgentRuntimeHandle(agent, scope, endpointLease));
                 }
                 catch (Exception ex)
                 {
                     circuitBreaker.RecordFailure(providerName, ex);
-                    if (endpointSelection is not null)
-                    {
-                        endpointPoolScheduler?.RecordFailed(endpointSelection.EndpointId, TimeSpan.Zero, ex);
-                    }
+                    endpointLease?.CompleteFailure(ex);
 
                     if (context.IsHighRiskToolChain || string.Equals(providerName, providerCandidates.Last(), StringComparison.OrdinalIgnoreCase))
                     {
@@ -113,7 +106,9 @@ internal sealed class AgentRuntimeFactory(
                 }
             }
 
-            throw new InvalidOperationException($"No healthy chat client provider is registered for '{requestedProvider}'.");
+            var noProviderException = new InvalidOperationException($"No healthy chat client provider is registered for '{requestedProvider}'.");
+            endpointLease?.CompleteFailure(noProviderException);
+            throw noProviderException;
         }
         catch
         {
@@ -142,7 +137,7 @@ internal sealed class AgentRuntimeFactory(
             tools.Any(tool => string.Equals(tool.TargetName, DataAnalysisPluginNames.DataAnalysisPlugin, StringComparison.OrdinalIgnoreCase)));
     }
 
-    private ModelEndpointSelection? TrySelectEndpoint(
+    private ModelEndpointLease? TryAcquireEndpoint(
         AgentRuntimeCreateRequest request,
         ModelProviderExecutionContext context)
     {
@@ -154,9 +149,9 @@ internal sealed class AgentRuntimeFactory(
         var poolName = ResolvePoolName(request, context);
         try
         {
-            return endpointPoolScheduler.SelectEndpoint(poolName);
+            return endpointPoolScheduler.AcquireEndpoint(poolName, request, context);
         }
-        catch (InvalidOperationException ex)
+        catch (ModelEndpointPoolNotConfiguredException ex)
         {
             logger.LogDebug(ex, "Model endpoint pool {PoolName} is not available; falling back to the language model configuration.", poolName);
             return null;
@@ -198,27 +193,37 @@ internal sealed class AgentRuntimeFactory(
             model.IsEnabled);
     }
 
-    private sealed class AgentRuntimeHandle(ChatClientAgent agent, IServiceScope scope) : IAsyncDisposable
+    private sealed class AgentRuntimeHandle(
+        ChatClientAgent agent,
+        IServiceScope scope,
+        ModelEndpointLease? endpointLease) : IAsyncDisposable
     {
         public async ValueTask DisposeAsync()
         {
-            object agentObject = agent;
-            if (agentObject is IAsyncDisposable asyncDisposableAgent)
+            try
             {
-                await asyncDisposableAgent.DisposeAsync();
-            }
-            else if (agentObject is IDisposable disposableAgent)
-            {
-                disposableAgent.Dispose();
-            }
+                object agentObject = agent;
+                if (agentObject is IAsyncDisposable asyncDisposableAgent)
+                {
+                    await asyncDisposableAgent.DisposeAsync();
+                }
+                else if (agentObject is IDisposable disposableAgent)
+                {
+                    disposableAgent.Dispose();
+                }
 
-            if (scope is IAsyncDisposable asyncDisposableScope)
-            {
-                await asyncDisposableScope.DisposeAsync();
+                if (scope is IAsyncDisposable asyncDisposableScope)
+                {
+                    await asyncDisposableScope.DisposeAsync();
+                }
+                else
+                {
+                    scope.Dispose();
+                }
             }
-            else
+            finally
             {
-                scope.Dispose();
+                endpointLease?.Dispose();
             }
         }
     }

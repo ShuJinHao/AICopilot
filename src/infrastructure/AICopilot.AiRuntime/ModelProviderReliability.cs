@@ -18,6 +18,12 @@ public sealed class ModelProviderReliabilityOptions
 
     public int MaxOutputTokens { get; set; }
 
+    public int PerUserRpmLimit { get; set; }
+
+    public int PerRoleRpmLimit { get; set; }
+
+    public int PerTenantRpmLimit { get; set; }
+
     public Dictionary<string, ModelEndpointPoolOptions> EndpointPools { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
@@ -26,6 +32,10 @@ public sealed class ModelEndpointPoolOptions
     public string Usage { get; set; } = "AnswerPool";
 
     public string Strategy { get; set; } = "LeastInFlight";
+
+    public int QueueTimeoutMs { get; set; } = 10000;
+
+    public int ModelConcurrencyLimit { get; set; }
 
     public List<ModelEndpointOptions> Endpoints { get; set; } = [];
 }
@@ -39,6 +49,8 @@ public sealed class ModelEndpointOptions
     public string BaseUrl { get; set; } = string.Empty;
 
     public string? ApiKey { get; set; }
+
+    public string? ApiKeyEnvironmentVariable { get; set; }
 
     public int ConcurrencyLimit { get; set; } = 2;
 
@@ -67,6 +79,11 @@ public sealed record ModelEndpointSelection(
 
 public interface IModelEndpointPoolScheduler : IModelPoolSnapshotReader
 {
+    ModelEndpointLease AcquireEndpoint(
+        string poolName,
+        AgentRuntimeCreateRequest request,
+        ModelProviderExecutionContext context);
+
     ModelEndpointSelection SelectEndpoint(string poolName);
 
     void RecordStarted(string endpointId);
@@ -80,6 +97,56 @@ public interface IModelEndpointPoolScheduler : IModelPoolSnapshotReader
     void RecordFallback(string endpointId);
 
     void RecordStickyStreaming(string endpointId);
+}
+
+public sealed class ModelEndpointLease : IDisposable
+{
+    private readonly Action<ModelEndpointLease, TimeSpan, Exception?> release;
+    private readonly DateTimeOffset startedAt;
+    private int disposed;
+
+    internal ModelEndpointLease(
+        ModelEndpointSelection selection,
+        string modelKey,
+        int tokenEstimate,
+        Func<DateTimeOffset> utcNow,
+        Action<ModelEndpointLease, TimeSpan, Exception?> release)
+    {
+        Selection = selection;
+        ModelKey = modelKey;
+        TokenEstimate = tokenEstimate;
+        this.release = release;
+        startedAt = utcNow();
+        UtcNow = utcNow;
+    }
+
+    public ModelEndpointSelection Selection { get; }
+
+    internal string ModelKey { get; }
+
+    internal int TokenEstimate { get; }
+
+    private Func<DateTimeOffset> UtcNow { get; }
+
+    public void Dispose()
+    {
+        Complete(null);
+    }
+
+    public void CompleteFailure(Exception exception)
+    {
+        Complete(exception);
+    }
+
+    private void Complete(Exception? exception)
+    {
+        if (Interlocked.Exchange(ref disposed, 1) != 0)
+        {
+            return;
+        }
+
+        release(this, UtcNow() - startedAt, exception);
+    }
 }
 
 public sealed record ModelProviderExecutionContext(
@@ -281,12 +348,121 @@ internal sealed class ModelProviderReliabilitySnapshotReader(
     }
 }
 
-internal sealed class InMemoryModelEndpointPoolScheduler(
-    IOptions<ModelProviderReliabilityOptions> options)
-    : IModelEndpointPoolScheduler
+internal sealed class InMemoryModelEndpointPoolScheduler : IModelEndpointPoolScheduler
 {
+    private const string RedactedEndpointMarker = "[redacted-endpoint]";
+    private readonly object gate = new();
+    private readonly IOptions<ModelProviderReliabilityOptions> options;
     private readonly ConcurrentDictionary<string, EndpointRuntimeStats> stats = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ModelRuntimeStats> modelStats = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, QuotaWindow> userWindows = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, QuotaWindow> roleWindows = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, QuotaWindow> tenantWindows = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, long> roundRobinCounters = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Func<DateTimeOffset> utcNow;
+
+    public InMemoryModelEndpointPoolScheduler(IOptions<ModelProviderReliabilityOptions> options)
+        : this(options, () => DateTimeOffset.UtcNow)
+    {
+    }
+
+    internal InMemoryModelEndpointPoolScheduler(
+        IOptions<ModelProviderReliabilityOptions> options,
+        Func<DateTimeOffset> utcNow)
+    {
+        this.options = options;
+        this.utcNow = utcNow;
+    }
+
+    public ModelEndpointLease AcquireEndpoint(
+        string poolName,
+        AgentRuntimeCreateRequest request,
+        ModelProviderExecutionContext context)
+    {
+        var modelKey = BuildModelKey(request);
+        var tokenEstimate = EstimateTokens(request);
+        var currentOptions = options.Value;
+
+        if (!currentOptions.EndpointPools.TryGetValue(poolName, out var pool))
+        {
+            throw new ModelEndpointPoolNotConfiguredException(poolName);
+        }
+
+        var queuedEndpointIds = Array.Empty<string>();
+        var queued = false;
+        var deadline = utcNow().AddMilliseconds(Math.Max(0, pool.QueueTimeoutMs));
+
+        lock (gate)
+        {
+            try
+            {
+                while (true)
+                {
+                    var now = utcNow();
+                    var candidates = GetEnabledCandidates(pool)
+                        .Where(endpoint => !GetStats(endpoint.EndpointId).IsCircuitOpen(now))
+                        .ToArray();
+
+                    if (candidates.Length == 0)
+                    {
+                        throw new InvalidOperationException($"Model endpoint pool '{poolName}' has no healthy endpoint.");
+                    }
+
+                    var available = candidates
+                        .Where(endpoint => CanUseEndpoint(endpoint, modelKey, tokenEstimate, request, currentOptions, now))
+                        .ToArray();
+
+                    if (available.Length > 0)
+                    {
+                        if (queued)
+                        {
+                            DecrementQueue(queuedEndpointIds);
+                            queued = false;
+                        }
+
+                        var selected = string.Equals(pool.Strategy, "WeightedRoundRobin", StringComparison.OrdinalIgnoreCase)
+                            ? SelectWeightedRoundRobin(poolName, available)
+                            : SelectLeastInFlight(available);
+
+                        Reserve(selected, modelKey, tokenEstimate, request, currentOptions, now);
+                        var selection = ToSelection(poolName, selected);
+                        return new ModelEndpointLease(selection, modelKey, tokenEstimate, utcNow, ReleaseLease);
+                    }
+
+                    var queueLimit = candidates.Sum(endpoint => Math.Max(0, endpoint.QueueLimit));
+                    var currentQueueLength = candidates.Max(endpoint => GetStats(endpoint.EndpointId).QueueLength);
+                    if (!queued && (queueLimit <= 0 || currentQueueLength >= queueLimit))
+                    {
+                        throw new InvalidOperationException($"Model endpoint pool '{poolName}' queue is full.");
+                    }
+
+                    if (!queued)
+                    {
+                        queuedEndpointIds = candidates.Select(endpoint => endpoint.EndpointId).ToArray();
+                        IncrementQueue(queuedEndpointIds);
+                        queued = true;
+                    }
+
+                    var remaining = deadline - now;
+                    if (remaining <= TimeSpan.Zero)
+                    {
+                        throw new TimeoutException($"Model endpoint pool '{poolName}' queue wait timed out.");
+                    }
+
+                    Monitor.Wait(gate, remaining);
+                }
+            }
+            catch
+            {
+                if (queued)
+                {
+                    DecrementQueue(queuedEndpointIds);
+                }
+
+                throw;
+            }
+        }
+    }
 
     public ModelEndpointSelection SelectEndpoint(string poolName)
     {
@@ -295,90 +471,282 @@ internal sealed class InMemoryModelEndpointPoolScheduler(
             throw new InvalidOperationException($"Model endpoint pool '{poolName}' is not configured.");
         }
 
-        var candidates = pool.Endpoints
-            .Where(endpoint => endpoint.IsEnabled)
-            .Where(endpoint => !string.IsNullOrWhiteSpace(endpoint.EndpointId))
-            .Where(endpoint => !IsCircuitOpen(endpoint.EndpointId))
-            .Where(endpoint => GetStats(endpoint.EndpointId).InFlight < Math.Max(1, endpoint.ConcurrencyLimit))
-            .ToArray();
-
-        if (candidates.Length == 0)
+        lock (gate)
         {
-            throw new InvalidOperationException($"Model endpoint pool '{poolName}' has no healthy endpoint with available concurrency.");
+            var candidates = GetEnabledCandidates(pool)
+                .Where(endpoint => !GetStats(endpoint.EndpointId).IsCircuitOpen(utcNow()))
+                .Where(endpoint => GetStats(endpoint.EndpointId).InFlight < Math.Max(1, endpoint.ConcurrencyLimit))
+                .ToArray();
+
+            if (candidates.Length == 0)
+            {
+                throw new InvalidOperationException($"Model endpoint pool '{poolName}' has no healthy endpoint with available concurrency.");
+            }
+
+            var selected = string.Equals(pool.Strategy, "WeightedRoundRobin", StringComparison.OrdinalIgnoreCase)
+                ? SelectWeightedRoundRobin(poolName, candidates)
+                : SelectLeastInFlight(candidates);
+
+            return ToSelection(poolName, selected);
         }
-
-        var selected = string.Equals(pool.Strategy, "WeightedRoundRobin", StringComparison.OrdinalIgnoreCase)
-            ? SelectWeightedRoundRobin(poolName, candidates)
-            : SelectLeastInFlight(candidates);
-
-        return new ModelEndpointSelection(
-            poolName,
-            selected.EndpointId,
-            selected.Provider,
-            selected.BaseUrl,
-            !string.IsNullOrWhiteSpace(selected.ApiKey),
-            selected.ApiKey);
     }
 
     public void RecordStarted(string endpointId)
     {
-        GetStats(endpointId).RecordStarted();
+        lock (gate)
+        {
+            GetStats(endpointId).RecordStarted();
+        }
     }
 
     public void RecordSucceeded(string endpointId, TimeSpan duration)
     {
-        GetStats(endpointId).RecordSucceeded(duration);
+        lock (gate)
+        {
+            GetStats(endpointId).RecordSucceeded(duration);
+            Monitor.PulseAll(gate);
+        }
     }
 
     public void RecordFailed(string endpointId, TimeSpan duration, Exception exception)
     {
-        var endpointStats = GetStats(endpointId);
-        endpointStats.RecordFailed(duration, exception);
-        var currentOptions = options.Value;
-        if (endpointStats.ConsecutiveFailures >= Math.Max(1, currentOptions.CircuitBreakerFailureThreshold))
+        lock (gate)
         {
-            endpointStats.OpenCircuit(TimeSpan.FromSeconds(Math.Max(1, currentOptions.CircuitBreakerOpenSeconds)));
+            var endpointStats = GetStats(endpointId);
+            endpointStats.RecordFailed(duration, exception);
+            var currentOptions = options.Value;
+            if (endpointStats.ConsecutiveFailures >= Math.Max(1, currentOptions.CircuitBreakerFailureThreshold))
+            {
+                endpointStats.OpenCircuit(TimeSpan.FromSeconds(Math.Max(1, currentOptions.CircuitBreakerOpenSeconds)), utcNow());
+            }
+
+            Monitor.PulseAll(gate);
         }
     }
 
     public void RecordRateLimited(string endpointId)
     {
-        GetStats(endpointId).RecordRateLimited();
+        lock (gate)
+        {
+            GetStats(endpointId).RecordRateLimited();
+        }
     }
 
     public void RecordFallback(string endpointId)
     {
-        GetStats(endpointId).RecordFallback();
+        lock (gate)
+        {
+            GetStats(endpointId).RecordFallback();
+        }
     }
 
     public void RecordStickyStreaming(string endpointId)
     {
-        GetStats(endpointId).RecordStickyStreaming();
+        lock (gate)
+        {
+            GetStats(endpointId).RecordStickyStreaming();
+        }
     }
 
     public ModelPoolSnapshotDto GetSnapshot()
     {
-        var pools = options.Value.EndpointPools
-            .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
-            .Select(item => new ModelPoolDto(
-                item.Key,
-                item.Value.Usage,
-                item.Value.Strategy,
-                item.Value.Endpoints
-                    .Select(ToEndpointDto)
-                    .ToArray()))
-            .ToArray();
+        lock (gate)
+        {
+            var pools = options.Value.EndpointPools
+                .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(item => new ModelPoolDto(
+                    item.Key,
+                    item.Value.Usage,
+                    item.Value.Strategy,
+                    item.Value.Endpoints
+                        .Select(endpoint => ToEndpointDto(endpoint, item.Value))
+                        .ToArray()))
+                .ToArray();
 
-        return new ModelPoolSnapshotDto(pools);
+            return new ModelPoolSnapshotDto(pools);
+        }
     }
 
-    private ModelEndpointDto ToEndpointDto(ModelEndpointOptions endpoint)
+    private void Reserve(
+        ModelEndpointOptions endpoint,
+        string modelKey,
+        int tokenEstimate,
+        AgentRuntimeCreateRequest request,
+        ModelProviderReliabilityOptions currentOptions,
+        DateTimeOffset now)
+    {
+        GetStats(endpoint.EndpointId).RecordStarted(tokenEstimate, now);
+        GetModelStats(modelKey).RecordStarted();
+        RecordCallerQuota(request.Caller, currentOptions, now);
+    }
+
+    private void ReleaseLease(ModelEndpointLease lease, TimeSpan duration, Exception? exception)
+    {
+        lock (gate)
+        {
+            var endpointStats = GetStats(lease.Selection.EndpointId);
+            var modelRuntimeStats = GetModelStats(lease.ModelKey);
+            modelRuntimeStats.RecordCompleted();
+
+            if (exception is null)
+            {
+                endpointStats.RecordSucceeded(duration);
+            }
+            else
+            {
+                endpointStats.RecordFailed(duration, exception);
+                var currentOptions = options.Value;
+                if (endpointStats.ConsecutiveFailures >= Math.Max(1, currentOptions.CircuitBreakerFailureThreshold))
+                {
+                    endpointStats.OpenCircuit(TimeSpan.FromSeconds(Math.Max(1, currentOptions.CircuitBreakerOpenSeconds)), utcNow());
+                }
+            }
+
+            Monitor.PulseAll(gate);
+        }
+    }
+
+    private bool CanUseEndpoint(
+        ModelEndpointOptions endpoint,
+        string modelKey,
+        int tokenEstimate,
+        AgentRuntimeCreateRequest request,
+        ModelProviderReliabilityOptions currentOptions,
+        DateTimeOffset now)
     {
         var endpointStats = GetStats(endpoint.EndpointId);
+        if (endpointStats.InFlight >= Math.Max(1, endpoint.ConcurrencyLimit))
+        {
+            return false;
+        }
+
+        var pool = FindPool(endpoint.EndpointId);
+        if (pool?.ModelConcurrencyLimit > 0 &&
+            GetModelStats(modelKey).InFlight >= pool.ModelConcurrencyLimit)
+        {
+            return false;
+        }
+
+        if (!endpointStats.CanReserve(tokenEstimate, Math.Max(0, endpoint.RpmLimit), Math.Max(0, endpoint.TpmLimit), now))
+        {
+            endpointStats.RecordRateLimited();
+            return false;
+        }
+
+        return CanUseCallerQuota(request.Caller, currentOptions, now);
+    }
+
+    private bool CanUseCallerQuota(
+        AgentRuntimeCallerContext? caller,
+        ModelProviderReliabilityOptions currentOptions,
+        DateTimeOffset now)
+    {
+        return CanUseQuota(userWindows, BuildUserQuotaKey(caller), currentOptions.PerUserRpmLimit, now)
+               && CanUseQuota(roleWindows, BuildRoleQuotaKey(caller), currentOptions.PerRoleRpmLimit, now)
+               && CanUseQuota(tenantWindows, BuildTenantQuotaKey(caller), currentOptions.PerTenantRpmLimit, now);
+    }
+
+    private void RecordCallerQuota(
+        AgentRuntimeCallerContext? caller,
+        ModelProviderReliabilityOptions currentOptions,
+        DateTimeOffset now)
+    {
+        RecordQuota(userWindows, BuildUserQuotaKey(caller), currentOptions.PerUserRpmLimit, now);
+        RecordQuota(roleWindows, BuildRoleQuotaKey(caller), currentOptions.PerRoleRpmLimit, now);
+        RecordQuota(tenantWindows, BuildTenantQuotaKey(caller), currentOptions.PerTenantRpmLimit, now);
+    }
+
+    private static bool CanUseQuota(
+        ConcurrentDictionary<string, QuotaWindow> windows,
+        string key,
+        int limit,
+        DateTimeOffset now)
+    {
+        return limit <= 0 || windows.GetOrAdd(key, _ => new QuotaWindow()).CanReserve(limit, now);
+    }
+
+    private static void RecordQuota(
+        ConcurrentDictionary<string, QuotaWindow> windows,
+        string key,
+        int limit,
+        DateTimeOffset now)
+    {
+        if (limit <= 0)
+        {
+            return;
+        }
+
+        windows.GetOrAdd(key, _ => new QuotaWindow()).Reserve(now);
+    }
+
+    private static string BuildUserQuotaKey(AgentRuntimeCallerContext? caller)
+    {
+        if (caller?.UserId is { } userId)
+        {
+            return userId.ToString("N");
+        }
+
+        return string.IsNullOrWhiteSpace(caller?.UserName)
+            ? "anonymous"
+            : caller.UserName.Trim();
+    }
+
+    private static string BuildRoleQuotaKey(AgentRuntimeCallerContext? caller)
+    {
+        return string.IsNullOrWhiteSpace(caller?.Role)
+            ? "unknown-role"
+            : caller.Role.Trim();
+    }
+
+    private static string BuildTenantQuotaKey(AgentRuntimeCallerContext? caller)
+    {
+        return string.IsNullOrWhiteSpace(caller?.TenantId)
+            ? "default-tenant"
+            : caller.TenantId.Trim();
+    }
+
+    private ModelEndpointPoolOptions? FindPool(string endpointId)
+    {
+        return options.Value.EndpointPools.Values.FirstOrDefault(pool =>
+            pool.Endpoints.Any(endpoint => string.Equals(endpoint.EndpointId, endpointId, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static IReadOnlyList<ModelEndpointOptions> GetEnabledCandidates(ModelEndpointPoolOptions pool)
+    {
+        return pool.Endpoints
+            .Where(endpoint => endpoint.IsEnabled)
+            .Where(endpoint => !string.IsNullOrWhiteSpace(endpoint.EndpointId))
+            .ToArray();
+    }
+
+    private void IncrementQueue(IEnumerable<string> endpointIds)
+    {
+        foreach (var endpointId in endpointIds)
+        {
+            GetStats(endpointId).IncrementQueue();
+        }
+    }
+
+    private void DecrementQueue(IEnumerable<string> endpointIds)
+    {
+        foreach (var endpointId in endpointIds)
+        {
+            GetStats(endpointId).DecrementQueue();
+        }
+    }
+
+    private ModelEndpointDto ToEndpointDto(ModelEndpointOptions endpoint, ModelEndpointPoolOptions pool)
+    {
+        var endpointStats = GetStats(endpoint.EndpointId);
+        var modelInFlight = pool.ModelConcurrencyLimit <= 0
+            ? 0
+            : modelStats.Values.Sum(item => item.InFlight);
+
         return new ModelEndpointDto(
             endpoint.EndpointId,
             endpoint.Provider,
-            endpoint.BaseUrl,
+            string.IsNullOrWhiteSpace(endpoint.BaseUrl) ? string.Empty : RedactedEndpointMarker,
+            !string.IsNullOrWhiteSpace(endpoint.BaseUrl),
             Math.Max(1, endpoint.ConcurrencyLimit),
             Math.Max(0, endpoint.QueueLimit),
             Math.Max(1, endpoint.TimeoutMs),
@@ -386,20 +754,20 @@ internal sealed class InMemoryModelEndpointPoolScheduler(
             Math.Max(0, endpoint.TpmLimit),
             Math.Max(1, endpoint.Weight),
             endpoint.Priority,
-            endpoint.IsEnabled && !IsCircuitOpen(endpoint.EndpointId),
-            IsCircuitOpen(endpoint.EndpointId),
-            !string.IsNullOrWhiteSpace(endpoint.ApiKey),
-            endpointStats.ToDto());
+            endpoint.IsEnabled && !endpointStats.IsCircuitOpen(utcNow()),
+            endpointStats.IsCircuitOpen(utcNow()),
+            HasConfiguredCredential(endpoint),
+            endpointStats.ToDto(modelInFlight, utcNow()));
     }
 
     private EndpointRuntimeStats GetStats(string endpointId)
     {
-        return stats.GetOrAdd(endpointId, _ => new EndpointRuntimeStats(() => DateTimeOffset.UtcNow));
+        return stats.GetOrAdd(endpointId, _ => new EndpointRuntimeStats());
     }
 
-    private bool IsCircuitOpen(string endpointId)
+    private ModelRuntimeStats GetModelStats(string modelKey)
     {
-        return GetStats(endpointId).IsCircuitOpen;
+        return modelStats.GetOrAdd(modelKey, _ => new ModelRuntimeStats());
     }
 
     private ModelEndpointOptions SelectLeastInFlight(IReadOnlyCollection<ModelEndpointOptions> candidates)
@@ -425,13 +793,58 @@ internal sealed class InMemoryModelEndpointPoolScheduler(
         return expanded[index];
     }
 
-    private sealed class EndpointRuntimeStats(Func<DateTimeOffset> utcNow)
+    private static string BuildModelKey(AgentRuntimeCreateRequest request)
     {
-        private readonly object gate = new();
+        return $"{request.Model.Provider}:{request.Model.Name}".ToLowerInvariant();
+    }
+
+    private static int EstimateTokens(AgentRuntimeCreateRequest request)
+    {
+        return Math.Max(1, request.Options.MaxOutputTokens ?? request.Model.Parameters.MaxOutputTokens);
+    }
+
+    private ModelEndpointSelection ToSelection(string poolName, ModelEndpointOptions endpoint)
+    {
+        var apiKey = ResolveApiKey(endpoint);
+        return new ModelEndpointSelection(
+            poolName,
+            endpoint.EndpointId,
+            endpoint.Provider,
+            endpoint.BaseUrl,
+            !string.IsNullOrWhiteSpace(apiKey),
+            apiKey);
+    }
+
+    private static string? ResolveApiKey(ModelEndpointOptions endpoint)
+    {
+        if (!string.IsNullOrWhiteSpace(endpoint.ApiKeyEnvironmentVariable))
+        {
+            var environmentValue = Environment.GetEnvironmentVariable(endpoint.ApiKeyEnvironmentVariable.Trim());
+            if (!string.IsNullOrWhiteSpace(environmentValue))
+            {
+                return environmentValue;
+            }
+        }
+
+        return string.IsNullOrWhiteSpace(endpoint.ApiKey) ? null : endpoint.ApiKey;
+    }
+
+    private static bool HasConfiguredCredential(ModelEndpointOptions endpoint)
+    {
+        return !string.IsNullOrWhiteSpace(endpoint.ApiKey)
+               || !string.IsNullOrWhiteSpace(endpoint.ApiKeyEnvironmentVariable);
+    }
+
+    private sealed class EndpointRuntimeStats
+    {
         private readonly List<double> durations = [];
+        private readonly Queue<DateTimeOffset> requestWindow = new();
+        private readonly Queue<TokenWindowItem> tokenWindow = new();
         private DateTimeOffset? circuitOpenUntil;
 
         public int InFlight { get; private set; }
+
+        public int QueueLength { get; private set; }
 
         public int ConsecutiveFailures { get; private set; }
 
@@ -449,106 +862,103 @@ internal sealed class InMemoryModelEndpointPoolScheduler(
 
         public string? LastFailureReason { get; private set; }
 
-        public bool IsCircuitOpen
+        public bool IsCircuitOpen(DateTimeOffset now)
         {
-            get
-            {
-                lock (gate)
-                {
-                    return circuitOpenUntil.HasValue && utcNow() < circuitOpenUntil.Value;
-                }
-            }
+            return circuitOpenUntil.HasValue && now < circuitOpenUntil.Value;
         }
 
         public void RecordStarted()
         {
-            lock (gate)
-            {
-                InFlight++;
-            }
+            InFlight++;
+        }
+
+        public void RecordStarted(int tokenEstimate, DateTimeOffset now)
+        {
+            InFlight++;
+            requestWindow.Enqueue(now);
+            tokenWindow.Enqueue(new TokenWindowItem(now, tokenEstimate));
         }
 
         public void RecordSucceeded(TimeSpan duration)
         {
-            lock (gate)
-            {
-                InFlight = Math.Max(0, InFlight - 1);
-                SuccessCount++;
-                ConsecutiveFailures = 0;
-                circuitOpenUntil = null;
-                AddDuration(duration);
-            }
+            InFlight = Math.Max(0, InFlight - 1);
+            SuccessCount++;
+            ConsecutiveFailures = 0;
+            circuitOpenUntil = null;
+            AddDuration(duration);
         }
 
         public void RecordFailed(TimeSpan duration, Exception exception)
         {
-            lock (gate)
-            {
-                InFlight = Math.Max(0, InFlight - 1);
-                FailureCount++;
-                ConsecutiveFailures++;
-                LastFailureReason = exception.GetType().Name;
-                AddDuration(duration);
-            }
+            InFlight = Math.Max(0, InFlight - 1);
+            FailureCount++;
+            ConsecutiveFailures++;
+            LastFailureReason = exception.GetType().Name;
+            AddDuration(duration);
         }
 
-        public void OpenCircuit(TimeSpan duration)
+        public void OpenCircuit(TimeSpan duration, DateTimeOffset now)
         {
-            lock (gate)
-            {
-                circuitOpenUntil = utcNow().Add(duration);
-                CircuitBreakerOpenCount++;
-            }
+            circuitOpenUntil = now.Add(duration);
+            CircuitBreakerOpenCount++;
         }
 
         public void RecordRateLimited()
         {
-            lock (gate)
-            {
-                RateLimitCount++;
-            }
+            RateLimitCount++;
         }
 
         public void RecordFallback()
         {
-            lock (gate)
-            {
-                FallbackCount++;
-            }
+            FallbackCount++;
         }
 
         public void RecordStickyStreaming()
         {
-            lock (gate)
-            {
-                StickyStreamingCount++;
-            }
+            StickyStreamingCount++;
         }
 
-        public ModelEndpointStatsDto ToDto()
+        public void IncrementQueue()
         {
-            lock (gate)
-            {
-                var snapshot = durations.OrderBy(item => item).ToArray();
-                var average = snapshot.Length == 0 ? 0 : snapshot.Average();
-                var p95 = snapshot.Length == 0
-                    ? 0
-                    : snapshot[(int)Math.Floor((snapshot.Length - 1) * 0.95)];
+            QueueLength++;
+        }
 
-                return new ModelEndpointStatsDto(
-                    InFlight,
-                    QueueLength: 0,
-                    SuccessCount,
-                    FailureCount,
-                    average,
-                    p95,
-                    RateLimitCount,
-                    CircuitBreakerOpenCount,
-                    FallbackCount,
-                    StickyStreamingCount,
-                    IsCircuitOpen ? "Open" : "Closed",
-                    LastFailureReason);
-            }
+        public void DecrementQueue()
+        {
+            QueueLength = Math.Max(0, QueueLength - 1);
+        }
+
+        public bool CanReserve(int tokenEstimate, int rpmLimit, int tpmLimit, DateTimeOffset now)
+        {
+            PruneWindows(now);
+            var withinRpm = rpmLimit <= 0 || requestWindow.Count < rpmLimit;
+            var withinTpm = tpmLimit <= 0 || tokenWindow.Sum(item => item.Tokens) + tokenEstimate <= tpmLimit;
+            return withinRpm && withinTpm;
+        }
+
+        public ModelEndpointStatsDto ToDto(int modelInFlight, DateTimeOffset now)
+        {
+            PruneWindows(now);
+            var snapshot = durations.OrderBy(item => item).ToArray();
+            var average = snapshot.Length == 0 ? 0 : snapshot.Average();
+            var p95 = snapshot.Length == 0
+                ? 0
+                : snapshot[(int)Math.Floor((snapshot.Length - 1) * 0.95)];
+
+            return new ModelEndpointStatsDto(
+                InFlight,
+                QueueLength,
+                modelInFlight,
+                SuccessCount,
+                FailureCount,
+                average,
+                p95,
+                RateLimitCount,
+                CircuitBreakerOpenCount,
+                FallbackCount,
+                StickyStreamingCount,
+                IsCircuitOpen(now) ? "Open" : "Closed",
+                LastFailureReason);
         }
 
         private void AddDuration(TimeSpan duration)
@@ -559,8 +969,68 @@ internal sealed class InMemoryModelEndpointPoolScheduler(
                 durations.RemoveAt(0);
             }
         }
+
+        private void PruneWindows(DateTimeOffset now)
+        {
+            var min = now.AddMinutes(-1);
+            while (requestWindow.Count > 0 && requestWindow.Peek() < min)
+            {
+                requestWindow.Dequeue();
+            }
+
+            while (tokenWindow.Count > 0 && tokenWindow.Peek().Timestamp < min)
+            {
+                tokenWindow.Dequeue();
+            }
+        }
+
+        private sealed record TokenWindowItem(DateTimeOffset Timestamp, int Tokens);
+    }
+
+    private sealed class ModelRuntimeStats
+    {
+        public int InFlight { get; private set; }
+
+        public void RecordStarted()
+        {
+            InFlight++;
+        }
+
+        public void RecordCompleted()
+        {
+            InFlight = Math.Max(0, InFlight - 1);
+        }
+    }
+
+    private sealed class QuotaWindow
+    {
+        private readonly Queue<DateTimeOffset> requests = new();
+
+        public bool CanReserve(int limit, DateTimeOffset now)
+        {
+            Prune(now);
+            return requests.Count < limit;
+        }
+
+        public void Reserve(DateTimeOffset now)
+        {
+            Prune(now);
+            requests.Enqueue(now);
+        }
+
+        private void Prune(DateTimeOffset now)
+        {
+            var min = now.AddMinutes(-1);
+            while (requests.Count > 0 && requests.Peek() < min)
+            {
+                requests.Dequeue();
+            }
+        }
     }
 }
+
+internal sealed class ModelEndpointPoolNotConfiguredException(string poolName)
+    : InvalidOperationException($"Model endpoint pool '{poolName}' is not configured.");
 
 internal static class AiFallbackScope
 {
