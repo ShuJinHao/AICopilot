@@ -37,4 +37,6 @@ public record SearchKnowledgeBaseResult
     public string? LowConfidenceReason { get; init; }
 
     public IReadOnlyCollection<KnowledgeSupplementHitDto> SupplementHits { get; init; } = [];
+
+    public KnowledgeRetrievalGovernanceEvidenceDto? GovernanceEvidence { get; init; }
 }
