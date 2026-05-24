@@ -81,6 +81,12 @@ public sealed class PermissionCatalog : IPermissionCatalog
         new("AiGateway.TrialOperations.Read", "AiGateway", "View Trial Operations", "View internal trial campaigns, evidence references, and Pilot readiness state."),
         new("AiGateway.TrialOperations.Manage", "AiGateway", "Manage Trial Operations", "Create campaigns, attach Agent task evidence, and manage trial risk issues."),
         new("AiGateway.TrialOperations.AuditView", "AiGateway", "View Trial Readiness Evidence", "Run Pilot readiness evaluation and generate sanitized evidence packages."),
+        new("PilotAuthorization.Submit", "PilotAuthorization", "Submit Pilot Authorization", "Create, update, and submit the current account's Pilot authorization packages."),
+        new("PilotAuthorization.View", "PilotAuthorization", "View Pilot Authorization", "View the current account's Pilot authorization packages; reviewers can view all packages through review permissions."),
+        new("PilotAuthorization.Review", "PilotAuthorization", "Review Pilot Authorization", "View submitted Pilot authorization packages for review without granting execution."),
+        new("PilotAuthorization.ApprovePlanning", "PilotAuthorization", "Approve Pilot Planning", "Approve credential-window or limited-Pilot planning only; this never grants execution."),
+        new("PilotAuthorization.Reject", "PilotAuthorization", "Reject Pilot Authorization", "Reject or revoke Pilot authorization planning approvals."),
+        new("PilotAuthorization.Audit", "PilotAuthorization", "Audit Pilot Authorization", "View sanitized Pilot authorization audit evidence and state changes."),
 
         new("DataAnalysis.GetBusinessDatabase", "DataAnalysis", "View Business Database", "View business database configuration details."),
         new("DataAnalysis.GetListBusinessDatabases", "DataAnalysis", "View Business Databases", "View the business database configuration list."),
@@ -138,7 +144,9 @@ public sealed class PermissionCatalog : IPermissionCatalog
         "AiGateway.DownloadArtifact",
         "AiGateway.EditArtifact",
         "AiGateway.SubmitFinalReview",
-        "AiGateway.Chat"
+        "AiGateway.Chat",
+        "PilotAuthorization.Submit",
+        "PilotAuthorization.View"
     ];
 
     public IReadOnlyCollection<PermissionDefinition> GetAll()

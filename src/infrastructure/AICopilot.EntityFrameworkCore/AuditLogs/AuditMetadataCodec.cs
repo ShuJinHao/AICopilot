@@ -28,7 +28,13 @@ internal static class AuditMetadataCodec
         "pendingApprovalCount",
         "approvalType",
         "targetId",
-        "approvalStatus"
+        "approvalStatus",
+        "pilotAuthorizationStatus",
+        "endpointCount",
+        "maxRows",
+        "timeRangeDays",
+        "ownerCount",
+        "machineValidationStatus"
     };
 
     public static string[] Combine(

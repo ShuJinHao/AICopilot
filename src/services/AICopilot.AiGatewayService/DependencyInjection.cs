@@ -5,6 +5,7 @@ using AICopilot.AiGatewayService.Agents;
 using AICopilot.AiGatewayService.BusinessSemantics;
 using AICopilot.AiGatewayService.BusinessPolicies;
 using AICopilot.AiGatewayService.Observability;
+using AICopilot.AiGatewayService.PilotAuthorization;
 using AICopilot.AiGatewayService.PromptPolicies;
 using AICopilot.AiGatewayService.RoutingModels;
 using AICopilot.AiGatewayService.Runtime;
@@ -105,6 +106,7 @@ public static class DependencyInjection
         builder.Services.AddSingleton<IBusinessPolicyCatalog, BusinessPolicyCatalog>();
         builder.Services.AddSingleton<ISemanticSummaryProfileCatalog, SemanticSummaryProfileCatalog>();
         builder.Services.AddSingleton<IBusinessSemanticsCatalog, BusinessSemanticsCatalog>();
+        builder.Services.AddSingleton<PilotAuthorizationMachineValidator>();
 
         builder.Services.AddAgentPlugin(registrar =>
         {
