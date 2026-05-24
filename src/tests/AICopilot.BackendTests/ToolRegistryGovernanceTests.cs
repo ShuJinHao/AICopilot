@@ -2531,6 +2531,7 @@ public sealed class ToolRegistryGovernanceTests
             string? actionGroup,
             string? actionCode,
             string? targetType,
+            string? targetId,
             string? targetName,
             string? operatorUserName,
             string? result,

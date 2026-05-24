@@ -404,6 +404,12 @@ public class AiGatewayController(ISender sender) : ApiControllerBase(sender)
         return ReturnResult(await Sender.Send(new GetPilotAuthorizationSubmissionQuery(id)));
     }
 
+    [HttpGet("pilot-authorization/submissions/{id:guid}/audit-timeline")]
+    public async Task<IActionResult> GetPilotAuthorizationAuditTimeline(Guid id)
+    {
+        return ReturnResult(await Sender.Send(new GetPilotAuthorizationAuditTimelineQuery(id)));
+    }
+
     [HttpPost("pilot-authorization/submissions")]
     public async Task<IActionResult> CreatePilotAuthorizationSubmission(PilotAuthorizationSubmissionUpsertRequest request)
     {

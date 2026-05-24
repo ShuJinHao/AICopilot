@@ -79,6 +79,17 @@ public sealed record PilotAuthorizationSubmissionDto(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
 
+public sealed record PilotAuthorizationAuditTimelineItemDto(
+    Guid Id,
+    Guid SubmissionId,
+    string ActionCode,
+    string TargetType,
+    string Result,
+    string Summary,
+    IReadOnlyCollection<string> ChangedFields,
+    IReadOnlyDictionary<string, string> Metadata,
+    DateTime CreatedAt);
+
 public sealed record PilotAuthorizationSubmissionUpsertRequest(
     string Title,
     string BusinessPurpose,
@@ -117,6 +128,10 @@ public sealed record GetPilotAuthorizationSubmissionsQuery
 [AuthorizeRequirement(PilotAuthorizationPermissions.View)]
 public sealed record GetPilotAuthorizationSubmissionQuery(Guid SubmissionId)
     : IQuery<Result<PilotAuthorizationSubmissionDto>>;
+
+[AuthorizeRequirement(PilotAuthorizationPermissions.Audit)]
+public sealed record GetPilotAuthorizationAuditTimelineQuery(Guid SubmissionId)
+    : IQuery<Result<IReadOnlyCollection<PilotAuthorizationAuditTimelineItemDto>>>;
 
 [AuthorizeRequirement(PilotAuthorizationPermissions.Submit)]
 public sealed record CreatePilotAuthorizationSubmissionCommand(
@@ -251,6 +266,65 @@ public sealed class GetPilotAuthorizationSubmissionQueryHandler(
         return !loadResult.IsSuccess || loadResult.Value is null
             ? Result.From(loadResult)
             : Result.Success(PilotAuthorizationMapper.Map(loadResult.Value.Submission));
+    }
+}
+
+public sealed class GetPilotAuthorizationAuditTimelineQueryHandler(
+    IReadRepository<PilotAuthorizationSubmission> repository,
+    ICurrentUser currentUser,
+    IIdentityAccessService identityAccessService,
+    IAuditLogQueryService auditLogQueryService)
+    : IQueryHandler<GetPilotAuthorizationAuditTimelineQuery, Result<IReadOnlyCollection<PilotAuthorizationAuditTimelineItemDto>>>
+{
+    private const int MaxTimelineItems = 500;
+
+    public async Task<Result<IReadOnlyCollection<PilotAuthorizationAuditTimelineItemDto>>> Handle(
+        GetPilotAuthorizationAuditTimelineQuery request,
+        CancellationToken cancellationToken)
+    {
+        var loadResult = await PilotAuthorizationAccess.LoadSubmissionAsync(
+            repository,
+            currentUser,
+            identityAccessService,
+            request.SubmissionId,
+            requireOwnerOrViewAll: true,
+            cancellationToken);
+        if (!loadResult.IsSuccess || loadResult.Value is null)
+        {
+            return Result.From(loadResult);
+        }
+
+        if (!PilotAuthorizationAccess.HasPermission(loadResult.Value.Access, PilotAuthorizationPermissions.Audit))
+        {
+            return Result.Forbidden(new ApiProblemDescriptor(
+                AuthProblemCodes.MissingPermission,
+                "Current account is missing the Pilot authorization audit permission.",
+                new Dictionary<string, object?>
+                {
+                    [ApiProblemExtensionKeys.MissingPermissions] = new[] { PilotAuthorizationPermissions.Audit }
+                }));
+        }
+
+        var logs = await auditLogQueryService.GetListAsync(
+            page: 1,
+            pageSize: MaxTimelineItems,
+            actionGroup: AuditActionGroups.AiGateway,
+            actionCode: null,
+            targetType: "PilotAuthorizationSubmission",
+            targetId: request.SubmissionId.ToString(),
+            targetName: null,
+            operatorUserName: null,
+            result: null,
+            from: null,
+            to: null,
+            cancellationToken);
+
+        return Result.Success<IReadOnlyCollection<PilotAuthorizationAuditTimelineItemDto>>(
+            logs.Items
+                .OrderBy(item => item.CreatedAt)
+                .ThenBy(item => item.Id)
+                .Select(item => PilotAuthorizationAudit.MapTimelineItem(request.SubmissionId, item))
+                .ToArray());
     }
 }
 
@@ -656,7 +730,8 @@ public sealed class PilotAuthorizationMachineValidator
 
     private static readonly (Regex Pattern, string Reason)[] ForbiddenPatterns =
     [
-        (new Regex(@"\b(token|api\s*key|apikey|connection\s*string|raw\s*payload|raw\s*rows|full\s*sql|free\s*sql)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), "Sensitive or unrestricted execution wording is not allowed."),
+        (new Regex(@"\b(token|bearer|x-api-key|api\s*key|apikey|client[_-]?secret|access[_-]?token|refresh[_-]?token|connection\s*string|raw\s*payload|raw\s*rows|full\s*sql|free\s*sql)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), "Sensitive or unrestricted execution wording is not allowed."),
+        (new Regex(@"\b(jdbc|odbc):[^\s]+|\b(postgres|postgresql|mysql|sqlserver|mongodb)://[^\s]+", RegexOptions.IgnoreCase | RegexOptions.Compiled), "Database URL material is not allowed."),
         (new Regex(@"\b(recipe|version)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), "Recipe/version scope is not allowed."),
         (new Regex(@"\b(cloud\s*write|insert\s+into|update\s+\w+|delete\s+from|truncate\s+table|drop\s+table)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), "Cloud write or mutating SQL wording is not allowed.")
     ];
@@ -1175,7 +1250,7 @@ internal static class PilotAuthorizationGateState
 internal static class PilotAuthorizationSafeText
 {
     private static readonly Regex SensitiveTextPattern = new(
-        @"\b(token|bearer|api\s*key|apikey|connection\s*string|raw\s*payload|raw\s*(business\s*)?(rows|records)|full\s*sql|free\s*sql|private\s*key)\b\s*[:=]?\s*[\w\-./+=:;,@]*|\b(sk|pk|rk)-[A-Za-z0-9][A-Za-z0-9_\-]{7,}\b|\b(password|pwd|secret)\s*=\s*[^;\s]+|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b|https?://[^\s]+|\b(postgres|postgresql|mysql|sqlserver|mongodb)://[^\s]+|密钥|令牌|连接串|连接字符串|原始载荷|原始行|原始业务行|完整\s*SQL|自由\s*SQL|私钥|密码",
+        @"\b(?:authorization|proxy-authorization)\s*:\s*Bearer\s+[A-Za-z0-9._~+/=-]+|\b(token|bearer|x-api-key|api\s*key|apikey|connection\s*string|client[_-]?secret|access[_-]?token|refresh[_-]?token|raw\s*payload|raw\s*(business\s*)?(rows|records)|full\s*sql|free\s*sql|private\s*key)\b\s*[:=]?\s*[\w\-./+=:;,@]*|\b(?:openai|azure_openai|anthropic|cohere|gemini)_?api_?key\s*[:=]\s*[A-Za-z0-9._~+/=-]+|\b(sk|pk|rk)-[A-Za-z0-9][A-Za-z0-9_\-]{7,}\b|\b(password|pwd|secret)\s*=\s*[^;\s]+|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b|https?://[^\s]+|\b(jdbc|odbc):[^\s]+|\b(postgres|postgresql|mysql|sqlserver|mongodb)://[^\s]+|密钥|令牌|访问令牌|刷新令牌|凭据|连接串|连接字符串|数据库连接|明文密码|原始载荷|原始行|原始业务行|完整\s*SQL|自由\s*SQL|私钥|密码",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public static string? Redact(string? value)
@@ -1188,6 +1263,22 @@ internal static class PilotAuthorizationSafeText
 
 internal static class PilotAuthorizationAudit
 {
+    private static readonly HashSet<string> SafeMetadataKeys = new(StringComparer.Ordinal)
+    {
+        "pilotAuthorizationStatus",
+        "endpointCount",
+        "maxRows",
+        "timeRangeDays",
+        "ownerCount",
+        "machineValidationStatus"
+    };
+
+    private static readonly HashSet<string> SafeChangedFields = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "security",
+        "status"
+    };
+
     public static Task WriteRejectedDraftAsync(
         IAuditLogWriter auditLogWriter,
         string actionCode,
@@ -1207,6 +1298,25 @@ internal static class PilotAuthorizationAudit
                 ["security"],
                 BuildMetadata(submission)),
             cancellationToken);
+    }
+
+    public static PilotAuthorizationAuditTimelineItemDto MapTimelineItem(
+        Guid submissionId,
+        AuditLogSummaryDto item)
+    {
+        return new PilotAuthorizationAuditTimelineItemDto(
+            item.Id,
+            submissionId,
+            item.ActionCode,
+            item.TargetType,
+            item.Result,
+            PilotAuthorizationSafeText.Redact(item.Summary) ?? string.Empty,
+            item.ChangedFields
+                .Where(field => SafeChangedFields.Contains(field))
+                .OrderBy(field => field, StringComparer.Ordinal)
+                .ToArray(),
+            SanitizeTimelineMetadata(item.Metadata),
+            item.CreatedAt);
     }
 
     public static Task WriteAsync(
@@ -1252,5 +1362,17 @@ internal static class PilotAuthorizationAudit
                 ["ownerCount"] = "5",
                 ["machineValidationStatus"] = submission.MachineValidationStatus
             };
+    }
+
+    private static IReadOnlyDictionary<string, string> SanitizeTimelineMetadata(
+        IReadOnlyDictionary<string, string> metadata)
+    {
+        return metadata
+            .Where(item => SafeMetadataKeys.Contains(item.Key) && !string.IsNullOrWhiteSpace(item.Value))
+            .OrderBy(item => item.Key, StringComparer.Ordinal)
+            .ToDictionary(
+                item => item.Key,
+                item => PilotAuthorizationSafeText.Redact(item.Value.Trim()) ?? string.Empty,
+                StringComparer.Ordinal);
     }
 }

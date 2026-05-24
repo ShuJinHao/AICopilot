@@ -36,6 +36,7 @@ public sealed class GetListAuditLogsQueryHandler(IAuditLogQueryService auditLogQ
             request.ActionGroup,
             request.ActionCode,
             request.TargetType,
+            null,
             request.TargetName,
             request.OperatorUserName,
             request.Result,

@@ -22,10 +22,18 @@ public sealed class PilotAuthorizationWorkflowM2Tests
     [Theory]
     [InlineData("Keep API key abc in the package")]
     [InlineData("Bearer abcdefghijklmnopqrstuvwxyz")]
+    [InlineData("Authorization: Bearer abcdefghijklmnopqrstuvwxyz")]
+    [InlineData("x-api-key: abcdefghijklmnopqrstuvwxyz")]
+    [InlineData("OPENAI_API_KEY=sk-abcdefghijklmnopqrst")]
+    [InlineData("client_secret=abcdefghijklmnopqrst")]
     [InlineData("Connection String=Host=prod;Password=secret")]
+    [InlineData("jdbc:postgresql://prod.example.internal/aicopilot")]
     [InlineData("Attach raw payload rows for diagnostics")]
     [InlineData("select * from devices")]
+    [InlineData("-----BEGIN PRIVATE KEY-----")]
+    [InlineData("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZG1pbiJ9.aBcDeFgHiJkLmNoPqRsTuVwXyZ")]
     [InlineData("请保存连接串和原始业务行")]
+    [InlineData("请保存访问令牌和数据库连接")]
     [InlineData("Endpoint is https://prod.example.test/api")]
     public async Task DraftGuard_ShouldRejectUnsafeCreate_AndNotPersist(string unsafeText)
     {
@@ -230,6 +238,82 @@ public sealed class PilotAuthorizationWorkflowM2Tests
     }
 
     [Fact]
+    public async Task AuditTimeline_ShouldReturnOnlySafePilotAuthorizationSummary()
+    {
+        var repository = new MemoryPilotAuthorizationRepository();
+        var ownerFixture = CreateFixture(DefaultUser(OwnerId), repository);
+        var draft = await ownerFixture.CreateHandler.Handle(CreateCommand(), CancellationToken.None);
+        var submissionId = draft.Value!.SubmissionId;
+        var auditQuery = new FixedAuditLogQueryService(
+            new AuditLogSummaryDto(
+                Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+                AuditActionGroups.AiGateway,
+                PilotAuthorizationAuditActions.Submitted,
+                "PilotAuthorizationSubmission",
+                submissionId.ToString(),
+                "PilotAuthorizationSubmission",
+                "reviewer",
+                "PilotReviewer",
+                AuditResults.Succeeded,
+                "Submitted safely with token=secret-value removed defensively.",
+                ["status", "raw_payload"],
+                new Dictionary<string, string>
+                {
+                    ["pilotAuthorizationStatus"] = "ReviewPending",
+                    ["endpointCount"] = "2",
+                    ["unsafeRaw"] = "token=secret-value"
+                },
+                DateTime.UtcNow.AddMinutes(-1)),
+            new AuditLogSummaryDto(
+                Guid.Parse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
+                AuditActionGroups.AiGateway,
+                PilotAuthorizationAuditActions.ReviewStarted,
+                "PilotAuthorizationSubmission",
+                submissionId.ToString(),
+                "PilotAuthorizationSubmission",
+                "reviewer",
+                "PilotReviewer",
+                AuditResults.Succeeded,
+                "Review started.",
+                ["status"],
+                new Dictionary<string, string>
+                {
+                    ["pilotAuthorizationStatus"] = "ReviewPending",
+                    ["machineValidationStatus"] = "Accepted"
+                },
+                DateTime.UtcNow));
+        var reviewerFixture = CreateFixture(Reviewer(ReviewerId), repository, auditQueryService: auditQuery);
+
+        var timeline = await reviewerFixture.AuditTimelineHandler.Handle(
+            new GetPilotAuthorizationAuditTimelineQuery(submissionId),
+            CancellationToken.None);
+
+        timeline.Status.Should().Be(ResultStatus.Ok);
+        timeline.Value.Should().HaveCount(2);
+        timeline.Value!.First().Summary.Should().NotContain("token=secret-value");
+        timeline.Value.SelectMany(item => item.ChangedFields).Should().NotContain("raw_payload");
+        timeline.Value.SelectMany(item => item.Metadata.Keys).Should().NotContain("unsafeRaw");
+        timeline.Value.SelectMany(item => item.Metadata.Values).Should().NotContain(value =>
+            value.Contains("token", StringComparison.OrdinalIgnoreCase));
+        auditQuery.LastTargetId.Should().Be(submissionId.ToString());
+    }
+
+    [Fact]
+    public async Task AuditTimeline_ShouldRequireAuditPermission()
+    {
+        var repository = new MemoryPilotAuthorizationRepository();
+        var ownerFixture = CreateFixture(DefaultUser(OwnerId), repository);
+        var draft = await ownerFixture.CreateHandler.Handle(CreateCommand(), CancellationToken.None);
+        var ordinaryFixture = CreateFixture(DefaultUser(OwnerId), repository);
+
+        var timeline = await ordinaryFixture.AuditTimelineHandler.Handle(
+            new GetPilotAuthorizationAuditTimelineQuery(draft.Value!.SubmissionId),
+            CancellationToken.None);
+
+        timeline.Status.Should().Be(ResultStatus.Forbidden);
+    }
+
+    [Fact]
     public async Task OrdinaryUser_ShouldNotApprovePlanning()
     {
         var repository = new MemoryPilotAuthorizationRepository();
@@ -329,6 +413,7 @@ public sealed class PilotAuthorizationWorkflowM2Tests
         PermissionOf<SubmitPilotAuthorizationSubmissionCommand>().Should().Be(PilotAuthorizationPermissions.Submit);
         PermissionOf<GetPilotAuthorizationSubmissionsQuery>().Should().Be(PilotAuthorizationPermissions.View);
         PermissionOf<GetPilotAuthorizationSubmissionQuery>().Should().Be(PilotAuthorizationPermissions.View);
+        PermissionOf<GetPilotAuthorizationAuditTimelineQuery>().Should().Be(PilotAuthorizationPermissions.Audit);
         PermissionOf<ApprovePilotAuthorizationCredentialWindowPlanningCommand>().Should().Be(PilotAuthorizationPermissions.ApprovePlanning);
         PermissionOf<ApprovePilotAuthorizationLimitedPilotExecutionPlanningCommand>().Should().Be(PilotAuthorizationPermissions.ApprovePlanning);
         PermissionOf<RejectPilotAuthorizationSubmissionCommand>().Should().Be(PilotAuthorizationPermissions.Reject);
@@ -411,10 +496,12 @@ public sealed class PilotAuthorizationWorkflowM2Tests
     private static PilotAuthorizationTestFixture CreateFixture(
         CurrentUserAccess access,
         MemoryPilotAuthorizationRepository? repository = null,
-        CapturingAuditLogWriter? audit = null)
+        CapturingAuditLogWriter? audit = null,
+        FixedAuditLogQueryService? auditQueryService = null)
     {
         repository ??= new MemoryPilotAuthorizationRepository();
         audit ??= new CapturingAuditLogWriter();
+        auditQueryService ??= new FixedAuditLogQueryService();
         var currentUser = new TestCurrentUser(access.UserId, access.RoleName ?? "User", access.UserName);
         var identity = new TestIdentityAccessService(access);
         return new PilotAuthorizationTestFixture(
@@ -427,7 +514,8 @@ public sealed class PilotAuthorizationWorkflowM2Tests
             new ApprovePilotAuthorizationLimitedPilotExecutionPlanningCommandHandler(repository, currentUser, identity, audit),
             new RejectPilotAuthorizationSubmissionCommandHandler(repository, currentUser, identity, audit),
             new RevokePilotAuthorizationSubmissionCommandHandler(repository, currentUser, identity, audit),
-            new ExpirePilotAuthorizationSubmissionCommandHandler(repository, currentUser, identity, audit));
+            new ExpirePilotAuthorizationSubmissionCommandHandler(repository, currentUser, identity, audit),
+            new GetPilotAuthorizationAuditTimelineQueryHandler(repository, currentUser, identity, auditQueryService));
     }
 
     private static CurrentUserAccess DefaultUser(Guid userId) =>
@@ -466,6 +554,10 @@ public sealed class PilotAuthorizationWorkflowM2Tests
                && !text.Contains("raw business rows", StringComparison.OrdinalIgnoreCase)
                && !text.Contains("connection string", StringComparison.OrdinalIgnoreCase)
                && !text.Contains("full sql", StringComparison.OrdinalIgnoreCase)
+               && !text.Contains("x-api-key", StringComparison.OrdinalIgnoreCase)
+               && !text.Contains("authorization:", StringComparison.OrdinalIgnoreCase)
+               && !text.Contains("client_secret", StringComparison.OrdinalIgnoreCase)
+               && !text.Contains("jdbc:", StringComparison.OrdinalIgnoreCase)
                && !text.Contains("连接串", StringComparison.OrdinalIgnoreCase)
                && !text.Contains("原始业务行", StringComparison.OrdinalIgnoreCase);
     }
@@ -491,7 +583,8 @@ public sealed class PilotAuthorizationWorkflowM2Tests
         ApprovePilotAuthorizationLimitedPilotExecutionPlanningCommandHandler ApproveLimitedHandler,
         RejectPilotAuthorizationSubmissionCommandHandler RejectHandler,
         RevokePilotAuthorizationSubmissionCommandHandler RevokeHandler,
-        ExpirePilotAuthorizationSubmissionCommandHandler ExpireHandler);
+        ExpirePilotAuthorizationSubmissionCommandHandler ExpireHandler,
+        GetPilotAuthorizationAuditTimelineQueryHandler AuditTimelineHandler);
 
     private sealed class TestIdentityAccessService(CurrentUserAccess access) : IIdentityAccessService
     {
@@ -531,6 +624,37 @@ public sealed class PilotAuthorizationWorkflowM2Tests
         public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
         {
             return Task.FromResult(Requests.Count);
+        }
+    }
+
+    private sealed class FixedAuditLogQueryService(params AuditLogSummaryDto[] logs) : IAuditLogQueryService
+    {
+        public string? LastTargetId { get; private set; }
+
+        public Task<AuditLogListDto> GetListAsync(
+            int page,
+            int pageSize,
+            string? actionGroup,
+            string? actionCode,
+            string? targetType,
+            string? targetId,
+            string? targetName,
+            string? operatorUserName,
+            string? result,
+            DateTime? from,
+            DateTime? to,
+            CancellationToken cancellationToken = default)
+        {
+            LastTargetId = targetId;
+            var items = logs
+                .Where(item =>
+                    (string.IsNullOrWhiteSpace(actionGroup) || item.ActionGroup == actionGroup) &&
+                    (string.IsNullOrWhiteSpace(targetType) || item.TargetType == targetType) &&
+                    (string.IsNullOrWhiteSpace(targetId) ||
+                     string.Equals(item.TargetId, targetId, StringComparison.OrdinalIgnoreCase)))
+                .Take(pageSize)
+                .ToArray();
+            return Task.FromResult(new AuditLogListDto(page, pageSize, items.Length, items));
         }
     }
 

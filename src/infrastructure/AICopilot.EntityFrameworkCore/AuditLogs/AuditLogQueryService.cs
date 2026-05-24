@@ -11,6 +11,7 @@ public sealed class AuditLogQueryService(AuditDbContext auditDbContext) : IAudit
         string? actionGroup,
         string? actionCode,
         string? targetType,
+        string? targetId,
         string? targetName,
         string? operatorUserName,
         string? result,
@@ -34,6 +35,11 @@ public sealed class AuditLogQueryService(AuditDbContext auditDbContext) : IAudit
         if (!string.IsNullOrWhiteSpace(targetType))
         {
             query = query.Where(item => item.TargetType == targetType.Trim());
+        }
+
+        if (!string.IsNullOrWhiteSpace(targetId))
+        {
+            query = query.Where(item => item.TargetId == targetId.Trim());
         }
 
         if (!string.IsNullOrWhiteSpace(targetName))

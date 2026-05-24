@@ -19,9 +19,15 @@ public static class PilotAuthorizationSensitiveContentGuard
     private static readonly (Regex Pattern, string Reason)[] ForbiddenPatterns =
     [
         (new Regex(@"\bBearer\s+[A-Za-z0-9._~+/=-]{8,}", RegexOptions.IgnoreCase | RegexOptions.Compiled), "Bearer token material is not allowed."),
+        (new Regex(@"\b(?:authorization|proxy-authorization)\s*:\s*Bearer\s+[A-Za-z0-9._~+/=-]{8,}", RegexOptions.IgnoreCase | RegexOptions.Compiled), "Authorization header material is not allowed."),
+        (new Regex(@"\bx-api-key\s*[:=]\s*[A-Za-z0-9._~+/=-]{8,}", RegexOptions.IgnoreCase | RegexOptions.Compiled), "API key header material is not allowed."),
+        (new Regex(@"\b(?:openai|azure_openai|anthropic|cohere|gemini)_?api_?key\s*[:=]\s*[A-Za-z0-9._~+/=-]{8,}", RegexOptions.IgnoreCase | RegexOptions.Compiled), "Provider API key environment material is not allowed."),
+        (new Regex(@"\b(?:client[_-]?secret|access[_-]?token|refresh[_-]?token|id[_-]?token)\s*[:=]\s*[A-Za-z0-9._~+/=-]{8,}", RegexOptions.IgnoreCase | RegexOptions.Compiled), "OAuth or identity token material is not allowed."),
         (new Regex(@"\b(sk|pk|rk)-[A-Za-z0-9][A-Za-z0-9_\-]{7,}\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), "API key style secret material is not allowed."),
         (new Regex(@"\bapi\s*key\b|\bapikey\b|\btoken\b|\bsecret\b|\bpassword\b|\bpwd\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), "Secret, token, or credential wording is not allowed."),
         (new Regex(@"\b(connection\s*string|data\s+source|initial\s+catalog|user\s+id|uid|server\s*=|host\s*=|database\s*=)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), "Connection string material is not allowed."),
+        (new Regex(@"\b(jdbc|odbc):[^\s]+", RegexOptions.IgnoreCase | RegexOptions.Compiled), "Database driver URL material is not allowed."),
+        (new Regex(@"\bServer\s*=[^;]+;\s*Database\s*=[^;]+;.*\b(User\s+Id|Uid|Password|Pwd)\s*=", RegexOptions.IgnoreCase | RegexOptions.Compiled), "Database connection string material is not allowed."),
         (new Regex(@"\b(raw\s*payload|raw\s*(business\s*)?(rows|records))\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), "Raw payload or raw business rows are not allowed."),
         (new Regex(@"\b(full\s*sql|free\s*sql)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), "Full or free SQL wording is not allowed."),
         (new Regex(@"\b(select\s+.+\s+from|insert\s+into|update\s+\w+\s+set|delete\s+from|drop\s+table|truncate\s+table)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), "SQL text is not allowed."),
@@ -29,7 +35,7 @@ public static class PilotAuthorizationSensitiveContentGuard
         (new Regex(@"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b", RegexOptions.Compiled), "JWT material is not allowed."),
         (new Regex(@"\b(postgres|postgresql|mysql|sqlserver|mongodb)://[^\s]+", RegexOptions.IgnoreCase | RegexOptions.Compiled), "Database URL material is not allowed."),
         (new Regex(@"https?://[^\s]+", RegexOptions.IgnoreCase | RegexOptions.Compiled), "Real endpoint URL material is not allowed."),
-        (new Regex(@"密钥|令牌|连接串|连接字符串|原始载荷|原始行|原始业务行|完整\s*SQL|自由\s*SQL|私钥|密码", RegexOptions.IgnoreCase | RegexOptions.Compiled), "Sensitive Chinese security wording is not allowed.")
+        (new Regex(@"密钥|令牌|访问令牌|刷新令牌|凭据|连接串|连接字符串|数据库连接|明文密码|原始载荷|原始行|原始业务行|完整\s*SQL|自由\s*SQL|私钥|密码", RegexOptions.IgnoreCase | RegexOptions.Compiled), "Sensitive Chinese security wording is not allowed.")
     ];
 
     public static PilotAuthorizationSensitiveContentCheck Check(IEnumerable<PilotAuthorizationSensitiveField> fields)
