@@ -88,6 +88,7 @@ public sealed class GetAgentTaskAuditSummaryQueryHandler(
             actionGroup: AuditActionGroups.AiGateway,
             actionCode: null,
             targetType: null,
+            targetId: null,
             targetName: null,
             operatorUserName: null,
             result: null,

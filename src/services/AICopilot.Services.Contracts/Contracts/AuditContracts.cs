@@ -67,6 +67,7 @@ public interface IAuditLogQueryService
         string? actionGroup,
         string? actionCode,
         string? targetType,
+        string? targetId,
         string? targetName,
         string? operatorUserName,
         string? result,
