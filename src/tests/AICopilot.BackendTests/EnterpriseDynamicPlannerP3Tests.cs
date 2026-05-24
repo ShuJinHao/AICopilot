@@ -410,6 +410,13 @@ public sealed class EnterpriseDynamicPlannerP3Tests
             return Task.FromResult<IReadOnlyList<BusinessDatabaseDescriptor>>(descriptors.ToArray());
         }
 
+        public Task<IReadOnlyList<BusinessDatabaseDescriptor>> ListSelectableAsync(
+            DataSourceSelectionMode selectionMode,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<IReadOnlyList<BusinessDatabaseDescriptor>>(descriptors.ToArray());
+        }
+
         public Task<BusinessDatabaseConnectionInfo?> GetByNameAsync(
             string name,
             CancellationToken cancellationToken = default)

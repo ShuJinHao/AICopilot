@@ -25,6 +25,7 @@ public class DataAnalysisPlugin(
             var db = await DataAnalysisDatabaseResolver.GetEnabledReadOnlyDatabaseAsync(
                 sp,
                 databaseName,
+                DataSourceAccessPurpose.SchemaView,
                 cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -59,6 +60,7 @@ public class DataAnalysisPlugin(
             var db = await DataAnalysisDatabaseResolver.GetEnabledReadOnlyDatabaseAsync(
                 sp,
                 databaseName,
+                DataSourceAccessPurpose.SchemaView,
                 cancellationToken);
             var result = await DataAnalysisMetadataReader.BuildTableSchemaAsync(
                 dbConnector,
@@ -92,6 +94,7 @@ public class DataAnalysisPlugin(
             var db = await DataAnalysisDatabaseResolver.GetEnabledReadOnlyDatabaseAsync(
                 sp,
                 databaseName,
+                DataSourceAccessPurpose.Query,
                 cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
 

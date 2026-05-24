@@ -17,6 +17,14 @@ public enum DataSourceExternalSystemType
     SimulationBusiness = 3
 }
 
+public enum DataSourceSelectionMode
+{
+    Chat = 1,
+    Agent = 2,
+    Query = 3,
+    TextToSql = 4
+}
+
 public sealed record BusinessDatabaseDescriptor(
     Guid Id,
     string Name,
@@ -60,6 +68,15 @@ public sealed record BusinessQueryColumnDto(
     string Name,
     string Type);
 
+public sealed record BusinessQueryGovernanceDto(
+    bool IsSanitizedPreview,
+    DataSourceSelectionMode SelectionMode,
+    int PreviewRowCount,
+    int MaxPreviewRows,
+    IReadOnlyList<string> WarningCodes,
+    IReadOnlyList<string> RedactedColumnHashes,
+    IReadOnlyList<string> AllowedTables);
+
 public sealed record BusinessQueryResultDto(
     Guid DataSourceId,
     string DataSourceName,
@@ -73,7 +90,8 @@ public sealed record BusinessQueryResultDto(
     IReadOnlyList<BusinessQueryColumnDto> Columns,
     IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows,
     DateTimeOffset ExecutedAt,
-    long DurationMs);
+    long DurationMs,
+    BusinessQueryGovernanceDto? Governance = null);
 
 public sealed record BusinessTextToSqlDraftDto(
     Guid DraftId,
@@ -119,6 +137,10 @@ public interface IBusinessTextToSqlRuntime
 public interface IBusinessDatabaseReadService
 {
     Task<IReadOnlyList<BusinessDatabaseDescriptor>> ListEnabledAsync(
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<BusinessDatabaseDescriptor>> ListSelectableAsync(
+        DataSourceSelectionMode selectionMode,
         CancellationToken cancellationToken = default);
 
     Task<BusinessDatabaseConnectionInfo?> GetByNameAsync(

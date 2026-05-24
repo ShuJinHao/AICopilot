@@ -119,6 +119,14 @@ public sealed class SemanticAnalysisRunnerTests
             return Task.FromResult<IReadOnlyList<BusinessDatabaseDescriptor>>([]);
         }
 
+        public Task<IReadOnlyList<BusinessDatabaseDescriptor>> ListSelectableAsync(
+            DataSourceSelectionMode selectionMode,
+            CancellationToken cancellationToken = default)
+        {
+            WasCalled = true;
+            return Task.FromResult<IReadOnlyList<BusinessDatabaseDescriptor>>([]);
+        }
+
         public Task<BusinessDatabaseConnectionInfo?> GetByNameAsync(
             string name,
             CancellationToken cancellationToken = default)

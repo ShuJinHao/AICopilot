@@ -16,7 +16,8 @@ namespace AICopilot.DataAnalysisService.BusinessDatabases;
 public sealed record ExecuteBusinessDatabaseReadonlyQueryCommand(
     Guid DataSourceId,
     string Sql,
-    int? Limit = null) : ICommand<Result<BusinessQueryResultDto>>;
+    int? Limit = null,
+    DataSourceSelectionMode SelectionMode = DataSourceSelectionMode.Query) : ICommand<Result<BusinessQueryResultDto>>;
 
 public sealed class ExecuteBusinessDatabaseReadonlyQueryCommandHandler(
     BusinessReadonlyQueryExecutor executor)
@@ -33,7 +34,8 @@ public sealed class ExecuteBusinessDatabaseReadonlyQueryCommandHandler(
             requireSimulationBusiness: false,
             safetySchema: null,
             auditAction: "DataSource.Query",
-            cancellationToken);
+            cancellationToken,
+            selectionMode: request.SelectionMode);
     }
 }
 
@@ -50,7 +52,8 @@ public sealed class BusinessReadonlyQueryExecutor(
         bool requireSimulationBusiness,
         BusinessQuerySafetySchema? safetySchema,
         string auditAction,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        DataSourceSelectionMode selectionMode = DataSourceSelectionMode.Query)
     {
         var database = await repository.FirstOrDefaultAsync(
             new BusinessDatabaseByIdSpec(new BusinessDatabaseId(dataSourceId)),
@@ -70,6 +73,8 @@ public sealed class BusinessReadonlyQueryExecutor(
                 rowCount: 0,
                 isTruncated: false,
                 durationMs: 0,
+                selectionMode,
+                warningCode: "DATA_SOURCE_FORBIDDEN",
                 auditAction,
                 cancellationToken);
             return Result.Forbidden(new ApiProblemDescriptor(
@@ -87,9 +92,29 @@ public sealed class BusinessReadonlyQueryExecutor(
                 rowCount: 0,
                 isTruncated: false,
                 durationMs: 0,
+                selectionMode,
+                warningCode: "SOURCE_DISABLED_OR_NOT_READONLY",
                 auditAction,
                 cancellationToken);
             return Result.Invalid("Business database is disabled or not readonly.");
+        }
+
+        var credentialError = BusinessDataSourceGovernancePolicy.ValidateReadOnlyCredential(database);
+        if (credentialError is not null)
+        {
+            await WriteAuditAsync(
+                database,
+                sql,
+                AuditResults.Rejected,
+                credentialError,
+                rowCount: 0,
+                isTruncated: false,
+                durationMs: 0,
+                selectionMode,
+                warningCode: "READONLY_CREDENTIAL_UNVERIFIED",
+                auditAction,
+                cancellationToken);
+            return Result.Invalid(credentialError);
         }
 
         if (requireSimulationBusiness &&
@@ -103,12 +128,33 @@ public sealed class BusinessReadonlyQueryExecutor(
                 rowCount: 0,
                 isTruncated: false,
                 durationMs: 0,
+                selectionMode,
+                warningCode: "SIMULATION_BUSINESS_REQUIRED",
                 auditAction,
                 cancellationToken);
             return Result.Invalid("P1 Text-to-SQL only executes SimulationBusiness data sources.");
         }
 
-        var safetyError = BusinessReadonlyQuerySafetyPolicy.Validate(sql, safetySchema);
+        var effectiveSafetySchema = safetySchema ?? BusinessDataSourceGovernancePolicy.ResolveSafetySchema(database);
+        if (effectiveSafetySchema is null)
+        {
+            const string schemaError = "Governed semantic schema is required before executing this business data source.";
+            await WriteAuditAsync(
+                database,
+                sql,
+                AuditResults.Rejected,
+                schemaError,
+                rowCount: 0,
+                isTruncated: false,
+                durationMs: 0,
+                selectionMode,
+                warningCode: "GOVERNED_SCHEMA_REQUIRED",
+                auditAction,
+                cancellationToken);
+            return Result.Invalid(schemaError);
+        }
+
+        var safetyError = BusinessReadonlyQuerySafetyPolicy.Validate(sql, effectiveSafetySchema);
         if (safetyError is not null)
         {
             await WriteAuditAsync(
@@ -119,6 +165,8 @@ public sealed class BusinessReadonlyQueryExecutor(
                 rowCount: 0,
                 isTruncated: false,
                 durationMs: 0,
+                selectionMode,
+                warningCode: BusinessDataSourceGovernancePolicy.ResolveWarningCode(safetyError),
                 auditAction,
                 cancellationToken);
             return Result.Invalid(safetyError);
@@ -137,7 +185,7 @@ public sealed class BusinessReadonlyQueryExecutor(
                 options: queryOptions,
                 cancellationToken: cancellationToken);
 
-            var dto = BusinessQueryResultMapper.Map(database, sql, queryResult);
+            var dto = BusinessQueryResultMapper.Map(database, sql, queryResult, effectiveSafetySchema, selectionMode);
             await WriteAuditAsync(
                 database,
                 sql,
@@ -146,6 +194,8 @@ public sealed class BusinessReadonlyQueryExecutor(
                 queryResult.ReturnedRowCount,
                 queryResult.IsTruncated,
                 queryResult.ElapsedMilliseconds,
+                selectionMode,
+                warningCode: string.Join(",", dto.Governance?.WarningCodes ?? []),
                 auditAction,
                 cancellationToken);
 
@@ -161,6 +211,8 @@ public sealed class BusinessReadonlyQueryExecutor(
                 rowCount: 0,
                 isTruncated: false,
                 durationMs: 0,
+                selectionMode,
+                warningCode: "SQL_GUARDRAIL_REJECTED",
                 auditAction,
                 cancellationToken);
             return Result.Invalid("Business readonly query was rejected by the SQL guardrail.");
@@ -175,6 +227,8 @@ public sealed class BusinessReadonlyQueryExecutor(
                 rowCount: 0,
                 isTruncated: false,
                 durationMs: queryOptions.CommandTimeoutSeconds * 1000L,
+                selectionMode,
+                warningCode: "QUERY_TIMEOUT",
                 auditAction,
                 cancellationToken);
             return Result.Invalid("Business readonly query timed out.");
@@ -200,6 +254,8 @@ public sealed class BusinessReadonlyQueryExecutor(
         int rowCount,
         bool isTruncated,
         long durationMs,
+        DataSourceSelectionMode selectionMode,
+        string warningCode,
         string auditAction,
         CancellationToken cancellationToken)
     {
@@ -218,9 +274,12 @@ public sealed class BusinessReadonlyQueryExecutor(
                     ["queryHash"] = hash,
                     ["sqlLength"] = (sql ?? string.Empty).Length.ToString(),
                     ["sourceMode"] = database.ExternalSystemType.ToString(),
+                    ["dataSourceId"] = database.Id.ToString(),
+                    ["selectionMode"] = selectionMode.ToString(),
                     ["rowCount"] = rowCount.ToString(),
                     ["isTruncated"] = isTruncated.ToString(),
-                    ["durationMs"] = durationMs.ToString()
+                    ["durationMs"] = durationMs.ToString(),
+                    ["warningCode"] = string.IsNullOrWhiteSpace(warningCode) ? "NONE" : warningCode
                 }),
             cancellationToken);
         await auditLogWriter.SaveChangesAsync(cancellationToken);
@@ -229,7 +288,128 @@ public sealed class BusinessReadonlyQueryExecutor(
 
 public sealed record BusinessQuerySafetySchema(
     IReadOnlySet<string> AllowedTables,
-    IReadOnlySet<string> BlockedFieldFragments);
+    IReadOnlySet<string> BlockedFieldFragments,
+    IReadOnlySet<string>? AllowedColumnFragments = null,
+    IReadOnlySet<string>? SensitiveColumnFragments = null);
+
+internal static class BusinessDataSourceGovernancePolicy
+{
+    public static bool IsSelectableForMode(
+        BusinessDatabase database,
+        DataSourceSelectionMode selectionMode)
+    {
+        if (!database.IsEnabled || !database.IsReadOnly)
+        {
+            return false;
+        }
+
+        return selectionMode switch
+        {
+            DataSourceSelectionMode.Agent => database.IsSelectableInAgent &&
+                                             database.ExternalSystemType == BusinessDataExternalSystemType.SimulationBusiness,
+            DataSourceSelectionMode.Chat => database.IsSelectableInChat,
+            DataSourceSelectionMode.TextToSql => database.IsSelectableInChat &&
+                                                 database.ExternalSystemType == BusinessDataExternalSystemType.SimulationBusiness,
+            DataSourceSelectionMode.Query => true,
+            _ => false
+        };
+    }
+
+    public static bool HasExecutableGovernedSchema(BusinessDatabase database)
+    {
+        return database.IsEnabled &&
+               database.IsReadOnly &&
+               ResolveSafetySchema(database) is not null &&
+               ValidateReadOnlyCredential(database) is null;
+    }
+
+    public static string ResolveGovernanceStatus(BusinessDatabase database)
+    {
+        if (!database.IsEnabled)
+        {
+            return "Disabled";
+        }
+
+        if (!database.IsReadOnly)
+        {
+            return "BlockedNotReadOnly";
+        }
+
+        var credentialError = ValidateReadOnlyCredential(database);
+        if (credentialError is not null)
+        {
+            return "BlockedUnverifiedReadOnlyCredential";
+        }
+
+        return ResolveSafetySchema(database) is null
+            ? "BlockedUntilGovernedSchema"
+            : "GovernedSchemaReady";
+    }
+
+    public static BusinessQuerySafetySchema? ResolveSafetySchema(BusinessDatabase database)
+    {
+        return database.ExternalSystemType == BusinessDataExternalSystemType.SimulationBusiness
+            ? SimulationBusinessQuerySchema.SafetySchema
+            : null;
+    }
+
+    public static string? ValidateReadOnlyCredential(BusinessDatabase database)
+    {
+        if (!database.IsEnabled)
+        {
+            return null;
+        }
+
+        if (database.ExternalSystemType == BusinessDataExternalSystemType.CloudReadOnly &&
+            !database.ReadOnlyCredentialVerified)
+        {
+            return "Cloud read-only data source requires a verified readonly credential before execution.";
+        }
+
+        if (database.Provider != DbProviderType.PostgreSql && !database.ReadOnlyCredentialVerified)
+        {
+            return "SQL Server/MySQL data source requires a verified readonly credential before execution.";
+        }
+
+        return null;
+    }
+
+    public static string ResolveWarningCode(string safetyError)
+    {
+        if (safetyError.Contains("Wildcard", StringComparison.OrdinalIgnoreCase))
+        {
+            return "WILDCARD_PROJECTION_REJECTED";
+        }
+
+        if (safetyError.Contains("Table", StringComparison.OrdinalIgnoreCase))
+        {
+            return "TABLE_NOT_ALLOWLISTED";
+        }
+
+        if (safetyError.Contains("Sensitive", StringComparison.OrdinalIgnoreCase))
+        {
+            return "SENSITIVE_FIELD_REJECTED";
+        }
+
+        if (safetyError.Contains("DDL", StringComparison.OrdinalIgnoreCase) ||
+            safetyError.Contains("DML", StringComparison.OrdinalIgnoreCase))
+        {
+            return "WRITE_SQL_REJECTED";
+        }
+
+        if (safetyError.Contains("Multiple", StringComparison.OrdinalIgnoreCase))
+        {
+            return "MULTI_STATEMENT_REJECTED";
+        }
+
+        if (safetyError.Contains("System catalog", StringComparison.OrdinalIgnoreCase))
+        {
+            return "SYSTEM_CATALOG_REJECTED";
+        }
+
+        return "SQL_GOVERNANCE_REJECTED";
+    }
+}
 
 internal static class BusinessReadonlyQuerySafetyPolicy
 {
@@ -300,10 +480,7 @@ internal static class BusinessReadonlyQuerySafetyPolicy
             return "System catalog metadata is not allowed in business queries.";
         }
 
-        var blockedFragments = SensitiveIdentifierFragments
-            .Concat((IEnumerable<string>?)schema?.BlockedFieldFragments ?? Array.Empty<string>())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+        var blockedFragments = AllSensitiveFragments(schema);
         if (blockedFragments.Any(fragment => lower.Contains(fragment.ToLowerInvariant(), StringComparison.Ordinal)))
         {
             return "Sensitive fields such as passwords, tokens, keys, or connection strings are not allowed.";
@@ -311,6 +488,11 @@ internal static class BusinessReadonlyQuerySafetyPolicy
 
         if (schema is not null)
         {
+            if (ContainsWildcardProjection(lower))
+            {
+                return "Wildcard SELECT projections are not allowed in governed business queries.";
+            }
+
             var tableNames = ExtractTableNames(lower).ToArray();
             if (tableNames.Length == 0)
             {
@@ -323,8 +505,40 @@ internal static class BusinessReadonlyQuerySafetyPolicy
                 return $"Table '{blockedTable}' is not allowed for this data source.";
             }
         }
+        else
+        {
+            return "Governed query safety schema is required.";
+        }
 
         return null;
+    }
+
+    public static IReadOnlyList<string> AllSensitiveFragments(BusinessQuerySafetySchema? schema)
+    {
+        return SensitiveIdentifierFragments
+            .Concat((IEnumerable<string>?)schema?.BlockedFieldFragments ?? Array.Empty<string>())
+            .Concat((IEnumerable<string>?)schema?.SensitiveColumnFragments ?? Array.Empty<string>())
+            .Where(fragment => !string.IsNullOrWhiteSpace(fragment))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static bool ContainsWildcardProjection(string normalizedSql)
+    {
+        var selectMatch = Regex.Match(
+            normalizedSql,
+            @"^\s*select\s+(?:all\s+|distinct\s+)?(?<projection>.*?)\bfrom\b",
+            RegexOptions.CultureInvariant | RegexOptions.Singleline);
+        if (!selectMatch.Success)
+        {
+            return false;
+        }
+
+        var projection = selectMatch.Groups["projection"].Value;
+        return Regex.IsMatch(
+            projection,
+            @"(^|,)\s*(?:[a-z_][a-z0-9_]*\.)?\*\s*(,|$)",
+            RegexOptions.CultureInvariant);
     }
 
     private static IEnumerable<string> ExtractTableNames(string normalizedSql)
@@ -350,19 +564,32 @@ internal static class BusinessReadonlyQuerySafetyPolicy
 internal static class BusinessQueryResultMapper
 {
     public const string SimulationSourceLabel = "AI \u72ec\u7acb\u6a21\u62df\u4e1a\u52a1\u5e93";
+    private const int MaxPreviewRows = 50;
+    private const int MaxStringValueLength = 512;
 
     public static BusinessQueryResultDto Map(
         BusinessDatabase database,
         string sql,
-        DatabaseQueryResult queryResult)
+        DatabaseQueryResult queryResult,
+        BusinessQuerySafetySchema safetySchema,
+        DataSourceSelectionMode selectionMode)
     {
-        var rows = queryResult.Rows
-            .Select(row => (IReadOnlyDictionary<string, object?>)row)
-            .ToArray();
+        var sanitization = SanitizeRows(queryResult.Rows, safetySchema);
+        var rows = sanitization.Rows;
 
-        var columns = BuildColumns(queryResult.Rows);
+        var columns = BuildColumns(rows);
         var sourceMode = BusinessDatabaseContractMapper.ToContractExternalSystemType(database.ExternalSystemType);
         var isSimulation = database.ExternalSystemType == BusinessDataExternalSystemType.SimulationBusiness;
+        var warningCodes = new List<string> { "SANITIZED_PREVIEW" };
+        if (queryResult.Rows.Count > rows.Count)
+        {
+            warningCodes.Add("BOUNDED_PREVIEW_APPLIED");
+        }
+
+        if (sanitization.RedactedColumnHashes.Count > 0 || sanitization.RedactedValueCount > 0)
+        {
+            warningCodes.Add("SENSITIVE_VALUE_REDACTED");
+        }
 
         return new BusinessQueryResultDto(
             database.Id,
@@ -377,7 +604,15 @@ internal static class BusinessQueryResultMapper
             columns,
             rows,
             DateTimeOffset.UtcNow,
-            queryResult.ElapsedMilliseconds);
+            queryResult.ElapsedMilliseconds,
+            new BusinessQueryGovernanceDto(
+                IsSanitizedPreview: true,
+                selectionMode,
+                rows.Count,
+                MaxPreviewRows,
+                warningCodes,
+                sanitization.RedactedColumnHashes,
+                safetySchema.AllowedTables.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToArray()));
     }
 
     public static string ComputeQueryHash(string sql)
@@ -387,8 +622,118 @@ internal static class BusinessQueryResultMapper
             .ToLowerInvariant();
     }
 
+    private static SanitizedRows SanitizeRows(
+        IReadOnlyList<Dictionary<string, object?>> rows,
+        BusinessQuerySafetySchema safetySchema)
+    {
+        var blockedFragments = BusinessReadonlyQuerySafetyPolicy.AllSensitiveFragments(safetySchema);
+        var redactedColumnHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var redactedValueCount = 0;
+        var columnMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var sanitizedRows = rows
+            .Take(MaxPreviewRows)
+            .Select(row =>
+            {
+                var sanitized = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                var columnIndex = 0;
+                foreach (var item in row)
+                {
+                    var safeName = ResolveSafeColumnName(item.Key, columnIndex, blockedFragments, redactedColumnHashes, columnMap);
+                    var value = SanitizeValue(item.Key, item.Value, blockedFragments, ref redactedValueCount);
+                    sanitized[safeName] = value;
+                    columnIndex++;
+                }
+
+                return (IReadOnlyDictionary<string, object?>)sanitized;
+            })
+            .ToArray();
+
+        return new SanitizedRows(
+            sanitizedRows,
+            redactedColumnHashes.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToArray(),
+            redactedValueCount);
+    }
+
+    private static string ResolveSafeColumnName(
+        string columnName,
+        int columnIndex,
+        IReadOnlyCollection<string> blockedFragments,
+        ISet<string> redactedColumnHashes,
+        IDictionary<string, string> columnMap)
+    {
+        if (columnMap.TryGetValue(columnName, out var mapped))
+        {
+            return mapped;
+        }
+
+        if (!ContainsSensitiveFragment(columnName, blockedFragments))
+        {
+            columnMap[columnName] = columnName;
+            return columnName;
+        }
+
+        redactedColumnHashes.Add(ComputeQueryHash(columnName));
+        var safeName = $"redacted_column_{columnIndex + 1}";
+        columnMap[columnName] = safeName;
+        return safeName;
+    }
+
+    private static object? SanitizeValue(
+        string columnName,
+        object? value,
+        IReadOnlyCollection<string> blockedFragments,
+        ref int redactedValueCount)
+    {
+        if (value is null)
+        {
+            return null;
+        }
+
+        if (ContainsSensitiveFragment(columnName, blockedFragments))
+        {
+            redactedValueCount++;
+            return "[redacted]";
+        }
+
+        if (value is string text)
+        {
+            if (ContainsSensitiveFragment(text, blockedFragments) ||
+                Regex.IsMatch(text, @"(?i)(sk-[a-z0-9_\-]{8,}|password\s*=|token\s*=|api[_-]?key\s*=|connection\s*string|secret\s*=)"))
+            {
+                redactedValueCount++;
+                return "[redacted]";
+            }
+
+            return text.Length <= MaxStringValueLength
+                ? text
+                : string.Concat(text.AsSpan(0, MaxStringValueLength), "...[truncated]");
+        }
+
+        var valueType = value.GetType();
+        if (valueType.IsPrimitive ||
+            value is decimal ||
+            value is DateTime ||
+            value is DateTimeOffset ||
+            value is Guid)
+        {
+            return value;
+        }
+
+        redactedValueCount++;
+        return "[redacted]";
+    }
+
+    private static bool ContainsSensitiveFragment(
+        string value,
+        IReadOnlyCollection<string> blockedFragments)
+    {
+        return blockedFragments.Any(fragment =>
+            !string.IsNullOrWhiteSpace(fragment) &&
+            value.Contains(fragment, StringComparison.OrdinalIgnoreCase));
+    }
+
     private static IReadOnlyList<BusinessQueryColumnDto> BuildColumns(
-        IReadOnlyList<Dictionary<string, object?>> rows)
+        IReadOnlyList<IReadOnlyDictionary<string, object?>> rows)
     {
         var firstRow = rows.FirstOrDefault();
         if (firstRow is null)
@@ -402,4 +747,9 @@ internal static class BusinessQueryResultMapper
                 column.Value?.GetType().Name ?? "Object"))
             .ToArray();
     }
+
+    private sealed record SanitizedRows(
+        IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows,
+        IReadOnlyList<string> RedactedColumnHashes,
+        int RedactedValueCount);
 }

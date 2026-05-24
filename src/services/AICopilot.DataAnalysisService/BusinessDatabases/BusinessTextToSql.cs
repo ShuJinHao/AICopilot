@@ -70,6 +70,8 @@ internal sealed class BusinessTextToSqlRuntime(
     IAuditLogWriter auditLogWriter)
     : IBusinessTextToSqlRuntime
 {
+    private const string RedactedSqlPreviewMarker = "SQL_PREVIEW_REDACTED_USE_DRAFT_ID";
+
     public async Task<Result<BusinessTextToSqlDraftDto>> GenerateDraftAsync(
         BusinessTextToSqlDraftRequest request,
         CancellationToken cancellationToken = default)
@@ -130,7 +132,7 @@ internal sealed class BusinessTextToSqlRuntime(
             BusinessQueryResultMapper.SimulationSourceLabel,
             BusinessQueryResultMapper.ComputeQueryHash(request.Question),
             BusinessQueryResultMapper.ComputeQueryHash(generated.Sql),
-            generated.Sql,
+            RedactedSqlPreviewMarker,
             generated.Explanation,
             database.DefaultQueryLimit,
             database.MaxQueryLimit,
@@ -138,7 +140,7 @@ internal sealed class BusinessTextToSqlRuntime(
             generated.Warnings,
             now);
 
-        draftStore.Save(draft);
+        draftStore.Save(draft, generated.Sql);
         await WriteDraftAuditAsync(database, request.Question, generated.Sql, AuditResults.Succeeded, "Business Text-to-SQL draft generated.", cancellationToken);
         return Result.Success(draft);
     }
@@ -153,23 +155,18 @@ internal sealed class BusinessTextToSqlRuntime(
 
         if (request.DraftId.HasValue)
         {
-            if (!draftStore.TryGet(request.DraftId.Value, out var draft))
+            if (!draftStore.TryGet(request.DraftId.Value, out var draft, out var storedSql))
             {
                 return Task.FromResult<Result<BusinessQueryResultDto>>(Result.Invalid("Business Text-to-SQL draft was not found or has expired."));
             }
 
             dataSourceId = draft.DataSourceId;
-            sql = draft.SqlPreview;
+            sql = storedSql;
         }
         else
         {
-            if (!request.DataSourceId.HasValue || string.IsNullOrWhiteSpace(request.SqlPreview))
-            {
-                return Task.FromResult<Result<BusinessQueryResultDto>>(Result.Invalid("DraftId or DataSourceId with SqlPreview is required."));
-            }
-
-            dataSourceId = request.DataSourceId.Value;
-            sql = request.SqlPreview;
+            return Task.FromResult<Result<BusinessQueryResultDto>>(Result.Invalid(
+                "Business Text-to-SQL execution requires a governed draft id; free SQL preview execution is not allowed."));
         }
 
         return queryExecutor.ExecuteAsync(
@@ -179,7 +176,8 @@ internal sealed class BusinessTextToSqlRuntime(
             requireSimulationBusiness: true,
             SimulationBusinessQuerySchema.SafetySchema,
             auditAction: "DataSource.TextToSqlExecute",
-            cancellationToken);
+            cancellationToken,
+            selectionMode: DataSourceSelectionMode.TextToSql);
     }
 
     private static string? ValidateSimulationBusinessDatabase(
@@ -189,6 +187,11 @@ internal sealed class BusinessTextToSqlRuntime(
         if (!database.IsEnabled || !database.IsReadOnly)
         {
             return "Business Text-to-SQL requires an enabled readonly data source.";
+        }
+
+        if (!database.IsSelectableInChat)
+        {
+            return "Business Text-to-SQL requires a data source selectable in Chat mode.";
         }
 
         if (database.ExternalSystemType != BusinessDataExternalSystemType.SimulationBusiness)
@@ -257,17 +260,28 @@ internal sealed class BusinessTextToSqlRuntime(
 
 internal sealed class BusinessTextToSqlDraftStore
 {
-    private readonly ConcurrentDictionary<Guid, BusinessTextToSqlDraftDto> _drafts = new();
+    private readonly ConcurrentDictionary<Guid, BusinessTextToSqlDraftEntry> _drafts = new();
 
-    public void Save(BusinessTextToSqlDraftDto draft)
+    public void Save(BusinessTextToSqlDraftDto draft, string sql)
     {
-        _drafts[draft.DraftId] = draft;
+        _drafts[draft.DraftId] = new BusinessTextToSqlDraftEntry(draft, sql);
     }
 
-    public bool TryGet(Guid draftId, out BusinessTextToSqlDraftDto draft)
+    public bool TryGet(Guid draftId, out BusinessTextToSqlDraftDto draft, out string sql)
     {
-        return _drafts.TryGetValue(draftId, out draft!);
+        if (_drafts.TryGetValue(draftId, out var entry))
+        {
+            draft = entry.Draft;
+            sql = entry.Sql;
+            return true;
+        }
+
+        draft = null!;
+        sql = string.Empty;
+        return false;
     }
+
+    private sealed record BusinessTextToSqlDraftEntry(BusinessTextToSqlDraftDto Draft, string Sql);
 }
 
 internal static class SimulationBusinessQuerySchema

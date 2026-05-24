@@ -253,7 +253,9 @@ public sealed class PlanAgentTaskCommandHandler(
                 return Result.Failure("Business database read service is not configured.");
             }
 
-            var visibleDataSources = await businessDatabaseReadService.ListEnabledAsync(cancellationToken);
+            var visibleDataSources = await businessDatabaseReadService.ListSelectableAsync(
+                DataSourceSelectionMode.Agent,
+                cancellationToken);
             selectedDataSources = visibleDataSources
                 .Where(source => source.IsSelectableInAgent)
                 .Where(source => dataSourceIds.Contains(source.Id))

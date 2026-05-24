@@ -62,7 +62,12 @@ public sealed class EnterpriseDataGovernanceP0Tests
             IsTruncated: false,
             ElapsedMilliseconds: 7);
 
-        var dto = BusinessQueryResultMapper.Map(database, sql, result);
+        var dto = BusinessQueryResultMapper.Map(
+            database,
+            sql,
+            result,
+            SimulationBusinessQuerySchema.SafetySchema,
+            DataSourceSelectionMode.TextToSql);
 
         dto.SourceType.Should().Be("BusinessDatabase");
         dto.SourceMode.Should().Be(DataSourceExternalSystemType.SimulationBusiness);
@@ -71,6 +76,8 @@ public sealed class EnterpriseDataGovernanceP0Tests
         dto.QueryHash.Should().HaveLength(64);
         dto.QueryHash.Should().NotContain("secret employee");
         dto.RowCount.Should().Be(1);
+        dto.Governance.Should().NotBeNull();
+        dto.Governance!.IsSanitizedPreview.Should().BeTrue();
     }
 
     [Theory]
