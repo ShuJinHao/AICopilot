@@ -162,6 +162,11 @@ public class TestLanguageModelCommandHandler(
             values.Add(nameof(LanguageModelUsage.Planner));
         }
 
+        if (usage.Value.HasFlag(LanguageModelUsage.Embedding))
+        {
+            values.Add(nameof(LanguageModelUsage.Embedding));
+        }
+
         return values;
     }
 

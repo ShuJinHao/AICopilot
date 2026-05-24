@@ -91,6 +91,17 @@ export function useAgentWorkbench() {
   const taskHistory = computed(() => store.agentTasks.slice(0, 6))
   const taskSteps = computed(() => latestTask.value?.steps ?? [])
   const taskArtifacts = computed(() => store.currentWorkspace?.artifacts ?? [])
+  const draftArtifacts = computed(() =>
+    store.currentWorkspace?.draftArtifacts?.length
+      ? store.currentWorkspace.draftArtifacts
+      : taskArtifacts.value.filter((artifact) => (artifact.artifactStatus || artifact.status) !== 'Final')
+  )
+  const finalArtifacts = computed(() =>
+    store.currentWorkspace?.finalArtifacts?.length
+      ? store.currentWorkspace.finalArtifacts
+      : taskArtifacts.value.filter((artifact) => (artifact.artifactStatus || artifact.status) === 'Final')
+  )
+  const currentArtifactPreview = computed(() => store.currentArtifactPreview)
   const pendingAgentApprovals = computed(() => store.pendingAgentApprovals)
   const auditSummary = computed(() => store.agentAuditSummary.slice(0, 8))
 
@@ -102,10 +113,10 @@ export function useAgentWorkbench() {
   )
   const workspaceFileCount = computed(() => store.currentWorkspace?.files.length ?? 0)
   const draftArtifactCount = computed(() =>
-    taskArtifacts.value.filter((artifact) => artifact.status !== 'Final').length
+    draftArtifacts.value.length
   )
   const finalArtifactCount = computed(() =>
-    taskArtifacts.value.filter((artifact) => artifact.status === 'Final').length
+    finalArtifacts.value.length
   )
 
   const taskStatus = computed(() => ({
@@ -208,6 +219,9 @@ export function useAgentWorkbench() {
     taskHistory,
     taskSteps,
     taskArtifacts,
+    draftArtifacts,
+    finalArtifacts,
+    currentArtifactPreview,
     pendingAgentApprovals,
     auditSummary,
     completedStepCount,

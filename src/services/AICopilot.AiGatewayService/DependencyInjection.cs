@@ -5,6 +5,7 @@ using AICopilot.AiGatewayService.Agents;
 using AICopilot.AiGatewayService.BusinessSemantics;
 using AICopilot.AiGatewayService.BusinessPolicies;
 using AICopilot.AiGatewayService.Observability;
+using AICopilot.AiGatewayService.PromptPolicies;
 using AICopilot.AiGatewayService.RoutingModels;
 using AICopilot.AiGatewayService.Runtime;
 using AICopilot.AiGatewayService.Safety;
@@ -13,6 +14,7 @@ using AICopilot.AiGatewayService.Tools;
 using AICopilot.AiGatewayService.Workspaces;
 using AICopilot.AiGatewayService.Workflows;
 using AICopilot.AiGatewayService.Workflows.Executors;
+using AICopilot.AiGatewayService.CloudReadiness;
 using AICopilot.Services.Contracts;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -27,6 +29,20 @@ public static class DependencyInjection
     {
         builder.Services.Configure<CloudReadonlyOptions>(
             builder.Configuration.GetSection(CloudReadonlyOptions.SectionName));
+        builder.Services.Configure<CloudReadonlySandboxOptions>(
+            builder.Configuration.GetSection(CloudReadonlySandboxOptions.SectionName));
+        builder.Services.Configure<CloudReadonlySandboxAgentTrialOptions>(
+            builder.Configuration.GetSection(CloudReadonlySandboxAgentTrialOptions.SectionName));
+        builder.Services.Configure<CloudReadonlySandboxControlledTrialOptions>(
+            builder.Configuration.GetSection(CloudReadonlySandboxControlledTrialOptions.SectionName));
+        builder.Services.Configure<CloudReadonlyPilotReadinessOptions>(
+            builder.Configuration.GetSection(CloudReadonlyPilotReadinessOptions.SectionName));
+        builder.Services.Configure<CloudReadonlyProductionPilotOptions>(
+            builder.Configuration.GetSection(CloudReadonlyProductionPilotOptions.SectionName));
+        builder.Services.Configure<CloudReadonlyProductionControlledPilotOptions>(
+            builder.Configuration.GetSection(CloudReadonlyProductionControlledPilotOptions.SectionName));
+        builder.Services.Configure<CloudAiReadOptions>(
+            builder.Configuration.GetSection(CloudAiReadOptions.SectionName));
         builder.Services.Configure<AgentRunQueueOptions>(
             builder.Configuration.GetSection(AgentRunQueueOptions.SectionName));
 
@@ -39,6 +55,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<IChatExecutionMetadataAccessor, ChatExecutionMetadataAccessor>();
         builder.Services.AddScoped<IRoutingModelResolver, RoutingModelResolver>();
         builder.Services.AddScoped<IChatRuntimeSettingsProvider, ChatRuntimeSettingsProvider>();
+        builder.Services.AddScoped<IPromptPolicyProvider, PromptPolicyProvider>();
         builder.Services.AddScoped<IAgentArtifactWorkspaceService, AgentArtifactWorkspaceService>();
         builder.Services.AddScoped<IAgentTaskRuntime, AgentTaskRuntime>();
         builder.Services.AddScoped<IAgentTaskRunQueue, AgentTaskRunQueue>();
@@ -53,6 +70,21 @@ public static class DependencyInjection
         builder.Services.AddScoped<ICloudReadonlyDataProvider, RealCloudReadonlyDataProvider>();
         builder.Services.AddScoped<ICloudReadonlyDataProviderResolver, CloudReadonlyDataProviderResolver>();
         builder.Services.AddScoped<ICloudReadonlyAgentToolExecutor, CloudReadonlyAgentToolExecutor>();
+        builder.Services.AddSingleton<ICloudReadonlyReadinessHistoryStore, InMemoryCloudReadonlyReadinessHistoryStore>();
+        builder.Services.AddSingleton<ICloudReadonlySandboxAgentTrialHistoryStore, InMemoryCloudReadonlySandboxAgentTrialHistoryStore>();
+        builder.Services.AddSingleton<ICloudReadonlySandboxControlledTrialIntentStore, InMemoryCloudReadonlySandboxControlledTrialIntentStore>();
+        builder.Services.AddSingleton<ICloudReadonlyPilotReadinessStore, InMemoryCloudReadonlyPilotReadinessStore>();
+        builder.Services.AddScoped<ICloudReadonlyProductionPilotStore, RepositoryCloudReadonlyProductionPilotStore>();
+        builder.Services.AddScoped<ICloudReadonlyProductionControlledPilotStore, RepositoryCloudReadonlyProductionControlledPilotStore>();
+        builder.Services.AddScoped<IProductionPilotOperationsStore, RepositoryProductionPilotOperationsStore>();
+        builder.Services.AddScoped<CloudReadonlyReadinessService>();
+        builder.Services.AddScoped<CloudReadonlySandboxAgentTrialService>();
+        builder.Services.AddScoped<CloudReadonlySandboxControlledTrialService>();
+        builder.Services.AddScoped<CloudReadonlyPilotReadinessService>();
+        builder.Services.AddScoped<CloudReadonlyProductionPilotService>();
+        builder.Services.AddScoped<CloudReadonlyProductionControlledPilotService>();
+        builder.Services.AddScoped<CloudReadonlyProductionOperationsService>();
+        builder.Services.AddScoped<IAgentToolExecutor, MockMcpAgentToolExecutor>();
         builder.Services.AddScoped<IAgentToolExecutor, McpAgentToolExecutor>();
         builder.Services.AddScoped<IMcpToolRegistryReadService, McpToolRegistryReadService>();
         builder.Services.AddScoped<ToolRegistryGuard>();

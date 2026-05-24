@@ -65,7 +65,12 @@ public class KnowledgeBase : IAggregateRoot<KnowledgeBaseId>
         DateTime? effectiveFrom = null,
         DateTime? effectiveTo = null,
         bool allowedForFinalPrompt = true,
-        string? blockedReason = null)
+        string? blockedReason = null,
+        Guid? documentGroupId = null,
+        int versionNo = 1,
+        DateTime? effectiveAt = null,
+        DateTime? expiredAt = null,
+        KnowledgeCategoryId? categoryId = null)
     {
         var document = new Document(
             Id,
@@ -81,7 +86,12 @@ public class KnowledgeBase : IAggregateRoot<KnowledgeBaseId>
             effectiveFrom,
             effectiveTo,
             allowedForFinalPrompt,
-            blockedReason);
+            blockedReason,
+            documentGroupId,
+            versionNo,
+            effectiveAt,
+            expiredAt,
+            categoryId);
         _documents.Add(document);
         return document;
     }

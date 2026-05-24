@@ -403,3 +403,13 @@ public interface ICloudAiReadClient
         SemanticQueryPlan plan,
         CancellationToken cancellationToken = default);
 }
+
+public interface ICloudReadonlySandboxClient
+{
+    Task<JsonDocument> SendJsonAsync(
+        CloudReadonlySandboxOptions options,
+        HttpMethod method,
+        string path,
+        IReadOnlyDictionary<string, string?>? query = null,
+        CancellationToken cancellationToken = default);
+}

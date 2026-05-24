@@ -27,7 +27,11 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
         AssertPath(document, "/api/aigateway/session", "post");
         AssertPath(document, "/api/aigateway/session/list", "get");
         AssertPath(document, "/api/aigateway/upload", "post");
+        AssertPath(document, "/api/aigateway/agent/trial-scenarios", "get");
+        AssertPath(document, "/api/aigateway/agent/trial-scenarios/create-task", "post");
         AssertPath(document, "/api/aigateway/agent/task/plan", "post");
+        AssertPath(document, "/api/aigateway/agent/cloud-sandbox-controlled-trial/plan", "post");
+        AssertPath(document, "/api/aigateway/agent/cloud-production-controlled-pilot/plan", "post");
         AssertPath(document, "/api/aigateway/agent/task/run", "post");
         AssertPath(document, "/api/aigateway/agent/task/retry", "post");
         AssertPath(document, "/api/aigateway/agent/task/cancel", "post");
@@ -44,6 +48,10 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
         AssertPath(document, "/api/aigateway/tools/{toolCode}", "patch");
         AssertPath(document, "/api/aigateway/workspace/{code}", "get");
         AssertPath(document, "/api/aigateway/artifact/{id}/download", "get");
+        AssertPath(document, "/api/aigateway/artifact/{id}/preview", "get");
+        AssertPath(document, "/api/aigateway/artifact/{id}/revision-comment", "post");
+        AssertPath(document, "/api/aigateway/artifact/{id}/regenerate-draft", "post");
+        AssertPath(document, "/api/aigateway/artifact/{id}/submit-final-approval", "post");
         AssertPath(document, "/api/rag/embedding-model/list", "get");
         AssertPath(document, "/api/rag/knowledge-base/list", "get");
         AssertPath(document, "/api/rag/document", "post");
@@ -55,12 +63,60 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
     private static void AssertPath(JsonDocument document, string path, string method)
     {
         var paths = document.RootElement.GetProperty("paths");
+        var availablePaths = paths
+            .EnumerateObject()
+            .Select(property => property.Name)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
         paths.TryGetProperty(path, out var pathElement)
             .Should()
-            .BeTrue($"OpenAPI should expose {path}");
+            .BeTrue($"OpenAPI should expose {path}; available paths: {string.Join(", ", availablePaths)}");
         pathElement.TryGetProperty(method, out _)
             .Should()
             .BeTrue($"OpenAPI should expose {method.ToUpperInvariant()} {path}");
+    }
+
+    [Theory]
+    [InlineData("GET", "/api/aigateway/cloud-readonly/readiness")]
+    [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/history")]
+    [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/sandbox")]
+    [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/sandbox/history")]
+    [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/sandbox-agent-trial")]
+    [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/sandbox-controlled-trial")]
+    [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/pilot-readiness")]
+    [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/production-pilot")]
+    [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/production-controlled-pilot")]
+    [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/production-operations")]
+    [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/production-operations/ledger")]
+    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/sandbox-agent-trial/run")]
+    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/pilot-readiness/config-package")]
+    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/pilot-readiness/gate")]
+    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/pilot-readiness/approval-rehearsal")]
+    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/pilot-readiness/contract-rehearsal")]
+    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-pilot/window")]
+    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-pilot/window/status")]
+    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-pilot/gate")]
+    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-pilot/run")]
+    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-controlled-pilot/run")]
+    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-operations/emergency-stop")]
+    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-operations/emergency-stop/clear")]
+    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-operations/incidents")]
+    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-operations/ga-readiness")]
+    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/run")]
+    public async Task CloudReadonlyReadinessRoutes_ShouldBeRoutable(string method, string path)
+    {
+        using var request = new HttpRequestMessage(new HttpMethod(method), path);
+        if (method == "POST")
+        {
+            request.Content = System.Net.Http.Json.JsonContent.Create(new { mode = "FakeEndpoint" });
+        }
+
+        using var response = await fixture.HttpClient.SendAsync(request);
+
+        response.StatusCode.Should().NotBe(
+            System.Net.HttpStatusCode.NotFound,
+            "P5 CloudReadonly readiness route should be registered even before authentication succeeds");
     }
 }
 
@@ -204,7 +260,18 @@ public sealed class FrontendContractSnapshotTests
             GeneratedByStepOrder: 2,
             RequiresApproval: true,
             ApprovalStatus: "Pending",
-            FinalizedAt: null)
+            FinalizedAt: null,
+            ArtifactVersion: 1,
+            ArtifactStatus: "Draft",
+            SourceMode: "SimulationBusiness",
+            Boundary: "SimulationBusiness",
+            IsSimulation: true,
+            IsSandbox: false,
+            SourceLabel: "AI 独立模拟业务库",
+            QueryHash: "query-hash",
+            ResultHash: "result-hash",
+            RowCount: 12,
+            IsTruncated: false)
         {
             CreatedAt = DateTimeOffset.Parse("2026-05-17T01:10:00Z"),
             GeneratedByStep = 2
@@ -225,6 +292,8 @@ public sealed class FrontendContractSnapshotTests
             ],
             Artifacts: [artifact])
         {
+            DraftArtifacts = [artifact],
+            FinalArtifacts = [],
             Manifest =
             [
                 new ArtifactManifestItemDto(
@@ -245,6 +314,20 @@ public sealed class FrontendContractSnapshotTests
         var root = document.RootElement;
 
         AssertProperties(root, "id", "workspaceCode", "taskId", "status", "files", "artifacts", "manifest");
+        AssertProperties(root, "draftArtifacts", "finalArtifacts");
+        AssertProperties(
+            root.GetProperty("artifacts")[0],
+            "artifactVersion",
+            "artifactStatus",
+            "sourceMode",
+            "boundary",
+            "isSimulation",
+            "isSandbox",
+            "sourceLabel",
+            "queryHash",
+            "resultHash",
+            "rowCount",
+            "isTruncated");
         var manifestItem = root.GetProperty("manifest")[0];
         AssertProperties(
             manifestItem,
@@ -299,6 +382,14 @@ public sealed class FrontendContractSnapshotTests
             IsEnabled: false,
             TimeoutSeconds: 60,
             AuditLevel: "Full",
+            Category: "CloudReadonly",
+            BusinessDomains: [],
+            DataBoundary: "NoData",
+            IsVisibleToPlanner: false,
+            IsExecutableByAgent: false,
+            SchemaVersion: 1,
+            CatalogVersion: 4,
+            ApprovalPolicy: "DisabledRealCloudReadonly",
             CreatedAt: now,
             UpdatedAt: now,
             RuntimeAvailable: true,

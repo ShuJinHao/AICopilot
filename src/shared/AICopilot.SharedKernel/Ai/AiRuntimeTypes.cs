@@ -62,7 +62,9 @@ public enum AiToolExternalSystemType
     Unknown = 0,
     InternalDemo = 1,
     CloudReadOnly = 2,
-    NonCloud = 3
+    NonCloud = 3,
+    SimulationBusiness = 4,
+    MockMcp = 5
 }
 
 public enum AiToolCapabilityKind
@@ -77,7 +79,10 @@ public enum AiToolRiskLevel
 {
     Low = 0,
     RequiresApproval = 1,
-    Blocked = 2
+    Blocked = 2,
+    Medium = 3,
+    High = 4,
+    Critical = 5
 }
 
 public sealed record AiToolIdentity(

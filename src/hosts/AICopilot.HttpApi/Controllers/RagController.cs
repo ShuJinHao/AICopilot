@@ -3,6 +3,7 @@ using AICopilot.RagService.Commands.Documents;
 using AICopilot.RagService.Commands.KnowledgeBases;
 using AICopilot.RagService.Documents;
 using AICopilot.RagService.EmbeddingModels;
+using AICopilot.RagService.Governance;
 using AICopilot.RagService.KnowledgeBases;
 using AICopilot.RagService.Queries.KnowledgeBases;
 using MediatR;
@@ -74,6 +75,54 @@ public class RagController(ISender sender) : ApiControllerBase(sender)
     public async Task<IActionResult> GetListKnowledgeBases()
     {
         return ReturnResult(await Sender.Send(new GetListKnowledgeBasesQuery()));
+    }
+
+    [HttpPost("knowledge-category")]
+    public async Task<IActionResult> UpsertKnowledgeCategory(UpsertKnowledgeCategoryCommand command)
+    {
+        return ReturnResult(await Sender.Send(command));
+    }
+
+    [HttpGet("knowledge-category")]
+    public async Task<IActionResult> GetKnowledgeCategory([FromQuery] GetKnowledgeCategoryQuery query)
+    {
+        return ReturnResult(await Sender.Send(query));
+    }
+
+    [HttpGet("knowledge-category/list")]
+    public async Task<IActionResult> GetListKnowledgeCategories()
+    {
+        return ReturnResult(await Sender.Send(new GetListKnowledgeCategoriesQuery()));
+    }
+
+    [HttpPost("knowledge-supplement")]
+    public async Task<IActionResult> UpsertKnowledgeSupplement(UpsertKnowledgeSupplementCommand command)
+    {
+        return ReturnResult(await Sender.Send(command));
+    }
+
+    [HttpPut("knowledge-supplement/enabled")]
+    public async Task<IActionResult> SetKnowledgeSupplementEnabled(SetKnowledgeSupplementEnabledCommand command)
+    {
+        return ReturnResult(await Sender.Send(command));
+    }
+
+    [HttpGet("knowledge-supplement")]
+    public async Task<IActionResult> GetKnowledgeSupplement([FromQuery] GetKnowledgeSupplementQuery query)
+    {
+        return ReturnResult(await Sender.Send(query));
+    }
+
+    [HttpGet("knowledge-supplement/list")]
+    public async Task<IActionResult> GetListKnowledgeSupplements([FromQuery] GetListKnowledgeSupplementsQuery query)
+    {
+        return ReturnResult(await Sender.Send(query));
+    }
+
+    [HttpGet("knowledge-supplement/applicable")]
+    public async Task<IActionResult> GetApplicableKnowledgeSupplements([FromQuery] GetApplicableKnowledgeSupplementsQuery query)
+    {
+        return ReturnResult(await Sender.Send(query));
     }
 
     [HttpPost("document")]

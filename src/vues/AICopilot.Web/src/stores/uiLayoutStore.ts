@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
 
-export type AgentWorkbenchTab = 'plan' | 'steps' | 'approvals' | 'artifacts' | 'audit' | 'boundary'
+export type AgentWorkbenchTab = 'plan' | 'steps' | 'approvals' | 'artifacts' | 'audit' | 'trial' | 'boundary'
 export type VisualDensity = 'comfortable' | 'compact'
 
 const STORAGE_KEY = 'aicopilot.ui.agentWorkbenchTab'
@@ -14,6 +14,7 @@ function readInitialTab(): AgentWorkbenchTab {
     saved === 'approvals' ||
     saved === 'artifacts' ||
     saved === 'audit' ||
+    saved === 'trial' ||
     saved === 'boundary'
   ) {
     return saved

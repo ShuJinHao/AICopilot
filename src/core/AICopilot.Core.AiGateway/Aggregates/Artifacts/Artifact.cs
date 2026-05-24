@@ -60,11 +60,31 @@ public sealed class Artifact : IEntity<ArtifactId>
 
     public ArtifactStatus Status { get; private set; }
 
+    public string? SourceMode { get; private set; }
+
+    public string? Boundary { get; private set; }
+
+    public bool IsSimulation { get; private set; }
+
+    public bool IsSandbox { get; private set; }
+
+    public string? SourceLabel { get; private set; }
+
+    public string? QueryHash { get; private set; }
+
+    public string? ResultHash { get; private set; }
+
+    public int RowCount { get; private set; }
+
+    public bool IsTruncated { get; private set; }
+
     public AgentStepId? CreatedByStepId { get; private set; }
 
     public DateTimeOffset CreatedAt { get; private set; }
 
     public DateTimeOffset UpdatedAt { get; private set; }
+
+    public DateTimeOffset? FinalizedAt { get; private set; }
 
     public void MarkReviewing(DateTimeOffset nowUtc)
     {
@@ -90,6 +110,7 @@ public sealed class Artifact : IEntity<ArtifactId>
         RelativePath = ArtifactPathGuard.NormalizeFinalPath(finalRelativePath);
         Status = ArtifactStatus.Final;
         UpdatedAt = nowUtc;
+        FinalizedAt = nowUtc;
     }
 
     public void AddVersion(string draftRelativePath, long fileSize, DateTimeOffset nowUtc)
@@ -109,6 +130,25 @@ public sealed class Artifact : IEntity<ArtifactId>
         Version++;
         Status = ArtifactStatus.Draft;
         UpdatedAt = nowUtc;
+        FinalizedAt = null;
+    }
+
+    public void ApplySourceMetadata(ArtifactSourceMetadata? metadata)
+    {
+        if (metadata is null)
+        {
+            return;
+        }
+
+        SourceMode = NormalizeOptional(metadata.SourceMode, 80);
+        Boundary = NormalizeOptional(metadata.Boundary, 120);
+        IsSimulation = metadata.IsSimulation;
+        IsSandbox = metadata.IsSandbox;
+        SourceLabel = NormalizeOptional(metadata.SourceLabel, 200);
+        QueryHash = NormalizeOptional(metadata.QueryHash, 128);
+        ResultHash = NormalizeOptional(metadata.ResultHash, 128);
+        RowCount = Math.Max(0, metadata.RowCount);
+        IsTruncated = metadata.IsTruncated;
     }
 
     private void EnsureStatus(ArtifactStatus expected)
@@ -129,4 +169,23 @@ public sealed class Artifact : IEntity<ArtifactId>
 
         return normalized.Length <= maxLength ? normalized : normalized[..maxLength];
     }
+
+    private static string? NormalizeOptional(string? value, int maxLength)
+    {
+        var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        return normalized is null
+            ? null
+            : normalized.Length <= maxLength ? normalized : normalized[..maxLength];
+    }
 }
+
+public sealed record ArtifactSourceMetadata(
+    string? SourceMode,
+    string? Boundary,
+    bool IsSimulation,
+    bool IsSandbox,
+    string? SourceLabel,
+    string? QueryHash,
+    string? ResultHash,
+    int RowCount,
+    bool IsTruncated);

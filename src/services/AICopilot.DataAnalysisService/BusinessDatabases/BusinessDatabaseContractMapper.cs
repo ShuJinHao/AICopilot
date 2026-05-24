@@ -23,6 +23,7 @@ internal static class BusinessDatabaseContractMapper
         {
             BusinessDataExternalSystemType.CloudReadOnly => DataSourceExternalSystemType.CloudReadOnly,
             BusinessDataExternalSystemType.NonCloud => DataSourceExternalSystemType.NonCloud,
+            BusinessDataExternalSystemType.SimulationBusiness => DataSourceExternalSystemType.SimulationBusiness,
             BusinessDataExternalSystemType.Unknown => DataSourceExternalSystemType.Unknown,
             _ => throw new NotSupportedException($"Unsupported data source external system type: {externalSystemType}")
         };
@@ -35,6 +36,7 @@ internal static class BusinessDatabaseContractMapper
         {
             DataSourceExternalSystemType.CloudReadOnly => BusinessDataExternalSystemType.CloudReadOnly,
             DataSourceExternalSystemType.NonCloud => BusinessDataExternalSystemType.NonCloud,
+            DataSourceExternalSystemType.SimulationBusiness => BusinessDataExternalSystemType.SimulationBusiness,
             DataSourceExternalSystemType.Unknown => BusinessDataExternalSystemType.Unknown,
             _ => throw new NotSupportedException($"Unsupported data source external system type: {externalSystemType}")
         };
@@ -50,7 +52,16 @@ internal static class BusinessDatabaseContractMapper
             database.IsEnabled,
             database.IsReadOnly,
             ToContractExternalSystemType(database.ExternalSystemType),
-            database.ReadOnlyCredentialVerified);
+            database.ReadOnlyCredentialVerified,
+            database.Category,
+            SplitTags(database.Tags),
+            database.OwnerDepartment,
+            database.BusinessDomain,
+            database.SensitivityLevel,
+            database.DefaultQueryLimit,
+            database.MaxQueryLimit,
+            database.IsSelectableInChat,
+            database.IsSelectableInAgent);
     }
 
     public static BusinessDatabaseConnectionInfo ToConnectionInfo(BusinessDatabase database)
@@ -64,6 +75,22 @@ internal static class BusinessDatabaseContractMapper
             database.IsEnabled,
             database.IsReadOnly,
             ToContractExternalSystemType(database.ExternalSystemType),
-            database.ReadOnlyCredentialVerified);
+            database.ReadOnlyCredentialVerified,
+            database.Category,
+            SplitTags(database.Tags),
+            database.OwnerDepartment,
+            database.BusinessDomain,
+            database.SensitivityLevel,
+            database.DefaultQueryLimit,
+            database.MaxQueryLimit,
+            database.IsSelectableInChat,
+            database.IsSelectableInAgent);
+    }
+
+    private static IReadOnlyCollection<string> SplitTags(string tags)
+    {
+        return string.IsNullOrWhiteSpace(tags)
+            ? []
+            : tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 }

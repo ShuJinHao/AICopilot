@@ -323,6 +323,17 @@ public sealed class AgentArtifactDocumentGenerator : IAgentArtifactDocumentGener
         DrawLine(graphics, "Data Source:", titleFont, 40, ref y, page.Width.Point - 80);
         DrawLine(graphics, BuildSourceMarker(document), textFont, 55, ref y, page.Width.Point - 95);
         DrawLine(graphics, document.CloudReadonlySummary ?? "CloudReadonly was not accessed.", textFont, 55, ref y, page.Width.Point - 95);
+        foreach (var result in document.BusinessQueryResults ?? [])
+        {
+            DrawLine(
+                graphics,
+                $"- BusinessDatabase: {result.DataSourceName}; sourceMode={result.SourceMode}; isSimulation={FormatBool(result.IsSimulation)}; sourceLabel={result.SourceLabel}; queryHash={result.QueryHash}; rows={result.RowCount}; truncated={FormatBool(result.IsTruncated)}",
+                textFont,
+                55,
+                ref y,
+                page.Width.Point - 95);
+        }
+
         DrawLine(graphics, "Metrics Summary:", titleFont, 40, ref y, page.Width.Point - 80);
         foreach (var metric in document.Metrics ?? [])
         {
@@ -479,6 +490,10 @@ public sealed class AgentArtifactDocumentGenerator : IAgentArtifactDocumentGener
         {
             builder.AppendLine(document.CloudReadonlySummary);
         }
+        foreach (var result in document.BusinessQueryResults ?? [])
+        {
+            builder.AppendLine($"BusinessDatabase: {result.DataSourceName}; sourceMode={result.SourceMode}; isSimulation={FormatBool(result.IsSimulation)}; sourceLabel={result.SourceLabel}; queryHash={result.QueryHash}; rows={result.RowCount}; truncated={FormatBool(result.IsTruncated)}");
+        }
 
         builder.AppendLine();
         builder.AppendLine("Metrics Summary:");
@@ -513,6 +528,14 @@ public sealed class AgentArtifactDocumentGenerator : IAgentArtifactDocumentGener
             rows.Add(SummaryRow("SourcePath", document.CloudReadonlySource.SourcePath ?? string.Empty));
             rows.Add(SummaryRow("RowCount", document.CloudReadonlySource.RowCount.ToString(CultureInfo.InvariantCulture)));
             rows.Add(SummaryRow("Truncated", FormatBool(document.CloudReadonlySource.IsTruncated)));
+            rows.Add(SummaryRow("QueryHash", document.CloudReadonlySource.QueryHash ?? string.Empty));
+        }
+
+        foreach (var result in document.BusinessQueryResults ?? [])
+        {
+            rows.Add(SummaryRow(
+                $"BusinessQuery:{result.DataSourceName}",
+                $"sourceMode={result.SourceMode}; isSimulation={FormatBool(result.IsSimulation)}; sourceLabel={result.SourceLabel}; queryHash={result.QueryHash}; rows={result.RowCount}; truncated={FormatBool(result.IsTruncated)}"));
         }
 
         foreach (var metric in document.Metrics ?? [])
@@ -577,6 +600,7 @@ public sealed class AgentArtifactDocumentGenerator : IAgentArtifactDocumentGener
             "SourcePath",
             "RowCount",
             "Truncated",
+            "QueryHash",
             "Marker"
         };
         var rows = new List<IReadOnlyDictionary<string, string>>();
@@ -595,7 +619,28 @@ public sealed class AgentArtifactDocumentGenerator : IAgentArtifactDocumentGener
                 ["SourcePath"] = document.CloudReadonlySource.SourcePath ?? string.Empty,
                 ["RowCount"] = document.CloudReadonlySource.RowCount.ToString(CultureInfo.InvariantCulture),
                 ["Truncated"] = FormatBool(document.CloudReadonlySource.IsTruncated),
+                ["QueryHash"] = document.CloudReadonlySource.QueryHash ?? string.Empty,
                 ["Marker"] = BuildSourceMarker(document)
+            });
+        }
+
+        foreach (var result in document.BusinessQueryResults ?? [])
+        {
+            rows.Add(new Dictionary<string, string>
+            {
+                ["SourceType"] = "BusinessDatabase",
+                ["Name"] = result.DataSourceName,
+                ["Detail"] = $"queryHash={result.QueryHash}",
+                ["Score"] = string.Empty,
+                ["IsLowConfidence"] = "false",
+                ["SourceMode"] = result.SourceMode,
+                ["IsSimulation"] = FormatBool(result.IsSimulation),
+                ["SourceLabel"] = result.SourceLabel,
+                ["SourcePath"] = "BusinessDataSourceCenter/TextToSql",
+                ["RowCount"] = result.RowCount.ToString(CultureInfo.InvariantCulture),
+                ["Truncated"] = FormatBool(result.IsTruncated),
+                ["QueryHash"] = result.QueryHash,
+                ["Marker"] = $"sourceMode={result.SourceMode}; isSimulation={FormatBool(result.IsSimulation)}; sourceLabel={result.SourceLabel}; rowCount={result.RowCount}; truncated={FormatBool(result.IsTruncated)}; queryHash={result.QueryHash}"
             });
         }
 
@@ -614,6 +659,7 @@ public sealed class AgentArtifactDocumentGenerator : IAgentArtifactDocumentGener
                 ["SourcePath"] = string.Empty,
                 ["RowCount"] = string.Empty,
                 ["Truncated"] = string.Empty,
+                ["QueryHash"] = string.Empty,
                 ["Marker"] = string.Empty
             });
         }
@@ -633,6 +679,7 @@ public sealed class AgentArtifactDocumentGenerator : IAgentArtifactDocumentGener
                 ["SourcePath"] = string.Empty,
                 ["RowCount"] = "0",
                 ["Truncated"] = "false",
+                ["QueryHash"] = string.Empty,
                 ["Marker"] = BuildSourceMarker(document)
             });
         }
@@ -657,7 +704,8 @@ public sealed class AgentArtifactDocumentGenerator : IAgentArtifactDocumentGener
             return "sourceMode=Local; isSimulation=false; sourceLabel=Local workspace data";
         }
 
-        return $"sourceMode={source.SourceMode ?? "Unknown"}; isSimulation={FormatBool(source.IsSimulation)}; sourceLabel={source.SourceLabel ?? string.Empty}; rowCount={source.RowCount}; truncated={FormatBool(source.IsTruncated)}";
+        var queryHash = string.IsNullOrWhiteSpace(source.QueryHash) ? string.Empty : $"; queryHash={source.QueryHash}";
+        return $"sourceMode={source.SourceMode ?? "Unknown"}; isSimulation={FormatBool(source.IsSimulation)}; sourceLabel={source.SourceLabel ?? string.Empty}; rowCount={source.RowCount}; truncated={FormatBool(source.IsTruncated)}{queryHash}";
     }
 
     private static string FormatBool(bool value)

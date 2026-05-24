@@ -10,6 +10,8 @@ public interface IChatExecutionMetadataAccessor
 
     void SetFinalModel(LanguageModel model, int reservedOutputTokens);
 
+    void SetContextBudget(ContextBudgetReportDto report);
+
     void Apply(ChatExecutionMetadataSnapshot snapshot);
 
     ChatExecutionMetadataSnapshot Snapshot();
@@ -38,6 +40,14 @@ public sealed class ChatExecutionMetadataAccessor : IChatExecutionMetadataAccess
             FinalModelName = model.Name,
             ContextWindowTokens = model.Parameters.MaxTokens,
             MaxOutputTokens = reservedOutputTokens
+        };
+    }
+
+    public void SetContextBudget(ContextBudgetReportDto report)
+    {
+        current = current with
+        {
+            ContextBudgetReport = report
         };
     }
 

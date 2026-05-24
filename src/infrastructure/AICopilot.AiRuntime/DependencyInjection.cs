@@ -16,6 +16,11 @@ public static class DependencyInjection
         builder.Services.AddSingleton<IModelCircuitBreaker, InMemoryModelCircuitBreaker>();
         builder.Services.AddSingleton<IModelCostBudgetPolicy, ConfiguredModelCostBudgetPolicy>();
         builder.Services.AddSingleton<IModelProviderReliabilitySnapshotReader, ModelProviderReliabilitySnapshotReader>();
+        builder.Services.AddSingleton<InMemoryModelEndpointPoolScheduler>();
+        builder.Services.AddSingleton<IModelEndpointPoolScheduler>(provider =>
+            provider.GetRequiredService<InMemoryModelEndpointPoolScheduler>());
+        builder.Services.AddSingleton<IModelPoolSnapshotReader>(provider =>
+            provider.GetRequiredService<InMemoryModelEndpointPoolScheduler>());
         builder.Services.AddSingleton<IAgentRuntimeFactory, AgentRuntimeFactory>();
     }
 }

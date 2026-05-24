@@ -141,7 +141,7 @@ export interface LanguageModelSummary {
 export interface LanguageModelDetail extends LanguageModelSummary {}
 
 export type LanguageModelApiKeyAction = 'keep' | 'replace' | 'clear'
-export type LanguageModelUsage = 'Chat' | 'Routing'
+export type LanguageModelUsage = 'Chat' | 'Routing' | 'Planner' | 'Embedding'
 
 export interface LanguageModelFormModel {
   id?: string
@@ -292,6 +292,17 @@ export interface BusinessDatabaseSummary {
   createdAt: string
   hasConnectionString: boolean
   connectionStringMasked?: string | null
+  category: string
+  tags: string[]
+  ownerDepartment: string
+  businessDomain: string
+  sensitivityLevel: string
+  defaultQueryLimit: number
+  maxQueryLimit: number
+  isSelectableInChat: boolean
+  isSelectableInAgent: boolean
+  isSimulation: boolean
+  sourceLabel: string
 }
 
 export interface BusinessDatabaseDetail extends BusinessDatabaseSummary {}
@@ -308,6 +319,15 @@ export interface BusinessDatabaseFormModel {
   readOnlyCredentialVerified: boolean
   hasConnectionString: boolean
   connectionStringMasked?: string | null
+  category: string
+  tags: string[]
+  ownerDepartment: string
+  businessDomain: string
+  sensitivityLevel: string
+  defaultQueryLimit: number
+  maxQueryLimit: number
+  isSelectableInChat: boolean
+  isSelectableInAgent: boolean
 }
 
 export interface McpToolPolicySummary {
@@ -362,6 +382,130 @@ export interface McpServerFormModel {
   hasArguments: boolean
   argumentsMasked?: string | null
   originalTransportType?: number
+}
+
+export interface ToolRegistrySummary {
+  id: string
+  toolCode: string
+  displayName: string
+  description: string
+  providerType: string
+  targetType: string
+  targetName: string
+  inputSchemaJson: string
+  outputSchemaJson: string
+  riskLevel: string
+  requiredPermission?: string | null
+  requiresApproval: boolean
+  isEnabled: boolean
+  timeoutSeconds: number
+  auditLevel: string
+  category: string
+  businessDomains: string[]
+  dataBoundary: string
+  isVisibleToPlanner: boolean
+  isExecutableByAgent: boolean
+  schemaVersion: number
+  catalogVersion: number
+  approvalPolicy: string
+  createdAt: string
+  updatedAt: string
+  runtimeAvailable: boolean
+  lastDiscoveredAt?: string | null
+  sourceServerName?: string | null
+}
+
+export interface ToolCatalogSummary {
+  version: number
+  availableToolCount: number
+  mockMcpOnly: boolean
+  riskSummary: Record<string, number>
+  tools: Array<{
+    toolCode: string
+    displayName: string
+    description: string
+    providerType: string
+    providerKind: string
+    riskLevel: string
+    requiresApproval: boolean
+    category: string
+    businessDomains?: string[] | null
+    dataBoundary: string
+    schemaVersion: number
+    catalogVersion: number
+    approvalPolicy: string
+    isMock: boolean
+    runtimeAvailable: boolean
+  }>
+}
+
+export interface CloudAiReadEndpointCheck {
+  endpointCode: string
+  method: string
+  path: string
+  policyStatus: string
+  httpStatus?: number | null
+  durationMs: number
+  rowCount: number
+  isTruncated: boolean
+  resultHash?: string | null
+  errorCode?: string | null
+  status: string
+}
+
+export interface CloudReadonlySandboxStatus {
+  status: string
+  sandboxEnabled: boolean
+  baseUrlConfigured: boolean
+  tokenConfigured: boolean
+  lastSmokeAt?: string | null
+  checks: CloudAiReadEndpointCheck[]
+  errors: string[]
+  warnings: string[]
+  boundary: string
+}
+
+export interface CloudReadonlyReadiness {
+  status: string
+  mode: string
+  cloudAiReadEnabled: boolean
+  realEnabled: boolean
+  allowProductionRead: boolean
+  baseUrlConfigured: boolean
+  tokenConfigured: boolean
+  lastCheckedAt?: string | null
+  checks: CloudAiReadEndpointCheck[]
+  errors: string[]
+  warnings: string[]
+  boundary: string
+  sandboxStatus?: CloudReadonlySandboxStatus | null
+}
+
+export interface CloudReadonlySandboxAgentTrialStatus {
+  status: string
+  sandboxSmokeStatus: string
+  trialEnabled: boolean
+  availableScenarioIds: string[]
+  toolVisible: boolean
+  toolExecutable: boolean
+  lastTrialAt?: string | null
+  errors: string[]
+  warnings: string[]
+  boundary: string
+}
+
+export interface CloudReadonlySandboxControlledTrialStatus {
+  status: string
+  sandboxSmokeStatus: string
+  fixedTrialStatus: string
+  controlledTrialEnabled: boolean
+  freeGoalEnabled: boolean
+  toolVisible: boolean
+  toolExecutable: boolean
+  lastTrialAt?: string | null
+  errors: string[]
+  warnings: string[]
+  boundary: string
 }
 
 export interface SemanticSourceStatus {

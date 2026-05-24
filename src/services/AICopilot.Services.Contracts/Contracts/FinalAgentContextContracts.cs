@@ -12,13 +12,26 @@ public sealed record ChatTokenTelemetryContext(
     int TotalTokenBudget,
     int ReservedOutputTokens);
 
+public sealed record ContextBudgetSegmentDto(
+    string Source,
+    int EstimatedTokens,
+    bool IsTruncated,
+    int InjectionOrder);
+
+public sealed record ContextBudgetReportDto(
+    int TotalTokenBudget,
+    int EstimatedInputTokens,
+    int ReservedOutputTokens,
+    IReadOnlyList<ContextBudgetSegmentDto> Segments);
+
 public sealed record ChatExecutionMetadataSnapshot(
     Guid? FinalModelId = null,
     string? FinalModelName = null,
     Guid? RoutingModelId = null,
     string? RoutingModelName = null,
     int? ContextWindowTokens = null,
-    int? MaxOutputTokens = null);
+    int? MaxOutputTokens = null,
+    ContextBudgetReportDto? ContextBudgetReport = null);
 
 public sealed record StoredToolApprovalRequest(
     string RequestId,

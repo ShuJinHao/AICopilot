@@ -65,23 +65,27 @@ test('agent workbench restores task, workspace, approvals, artifacts, and audit 
   await expect(page.getByText(/LINE-A/).first()).toBeVisible()
   await expect(page.locator('.agent-workbench-panel').getByText('任务控制台').first()).toBeVisible()
 
-  await page.locator('.agent-tabs').getByRole('button', { name: /审批/ }).click()
+  await page.getByTestId('agent-tab-approvals').click()
   await expect(page.locator('.approval-row')).toHaveCount(1)
   await expect(page.getByText('generate_pdf', { exact: true }).first()).toBeVisible()
 
-  await page.locator('.agent-tabs').getByRole('button', { name: /步骤/ }).click()
+  await page.getByTestId('agent-tab-steps').click()
   await expect(page.getByText('read_uploaded_file', { exact: true }).first()).toBeVisible()
 
-  await page.locator('.agent-tabs').getByRole('button', { name: /产物/ }).click()
+  await page.waitForTimeout(1000)
+  await page.getByTestId('agent-tab-artifacts').click({ force: true })
+  await page.waitForTimeout(250)
+  await page.getByTestId('agent-tab-artifacts').click({ force: true })
+  await page.waitForFunction(() => sessionStorage.getItem('aicopilot.ui.agentWorkbenchTab') === 'artifacts')
   await expect(page.getByText('WS-SMOKE-001').first()).toBeVisible()
-  await expect(page.getByText('chart-data.json')).toBeVisible()
-  await expect(page.getByText('模拟 Cloud 只读数据')).toBeVisible()
   await expect(page.locator('.artifact-row')).toHaveCount(2)
+  await expect(page.getByText('chart-data.json').first()).toBeVisible()
+  await expect(page.getByText('AI 独立模拟业务库').first()).toBeVisible()
 
-  await page.locator('.agent-tabs').getByRole('button', { name: /审计/ }).click()
+  await page.getByTestId('agent-tab-audit').click()
   await expect(page.getByText('Agent.Plan')).toBeVisible()
 
-  await page.locator('.agent-tabs').getByRole('button', { name: /边界/ }).click()
+  await page.getByTestId('agent-tab-boundary').click()
   await expect(page.getByText('Cloud 只读边界')).toBeVisible()
   await expectNoHorizontalOverflow(page)
 })
@@ -91,11 +95,121 @@ test('config agent operations panel renders run queue and worker status', async 
 
   await page.getByRole('tab', { name: 'Agent', exact: true }).click()
 
-  await expect(page.getByText('Agent / Workspace')).toBeVisible()
-  await expect(page.getByText('Run Queue')).toBeVisible()
-  await expect(page.getByText('Worker Status')).toBeVisible()
+  await expect(page.getByTestId('agent-config-workspace')).toBeVisible()
+  await expect(page.getByTestId('agent-config-run-queue')).toBeVisible()
+  await expect(page.getByTestId('agent-config-worker-status')).toBeVisible()
   await expect(page.getByText('AICopilot.DataWorker')).toBeVisible()
   await expect(page.getByText('Queued', { exact: true }).first()).toBeVisible()
+  await expectNoHorizontalOverflow(page)
+})
+
+test('agent trial panel shows P11 pilot readiness rehearsal evidence', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'desktop workbench keeps the trial panel visible')
+
+  await expectProtectedShell(page, '/chat')
+
+  await page.getByTestId('agent-tab-trial').click()
+  await expect(page.getByTestId('p11-pilot-readiness-panel')).toBeVisible()
+  await expect(page.getByTestId('p11-no-production-read')).toBeVisible()
+  await expect(page.getByTestId('p11-no-production-data')).toBeVisible()
+  await expect(page.getByTestId('p11-config-package')).toBeVisible()
+
+  await page.getByRole('button', { name: /审批演练/ }).click()
+  await expect(page.getByTestId('p11-approval-rehearsal')).toBeVisible()
+
+  await page.getByRole('button', { name: /fake contract/ }).click()
+  const contractRehearsal = page.getByTestId('p11-contract-rehearsal')
+  await expect(contractRehearsal).toBeVisible()
+  await expect(contractRehearsal.getByText('devices', { exact: true })).toBeVisible()
+  await expect(contractRehearsal.getByText('recipe_versions', { exact: true })).toBeVisible()
+  await expectNoHorizontalOverflow(page)
+})
+
+test('agent trial panel shows P12 production readonly pilot gate', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'desktop workbench keeps the trial panel visible')
+
+  await expectProtectedShell(page, '/chat')
+
+  await page.getByTestId('agent-tab-trial').click()
+  await expect(page.getByTestId('p12-production-pilot-panel')).toBeVisible()
+  await expect(page.getByTestId('p12-fixed-template-marker')).toBeVisible()
+  await expect(page.getByTestId('p12-production-readonly-marker')).toBeVisible()
+  await expect(page.getByTestId('p12-gated-marker')).toBeVisible()
+  await expect(page.getByTestId('p12-allowlist')).toContainText('devices')
+
+  await page.getByRole('button', { name: /Fixed scenario/ }).click()
+  const run = page.getByTestId('p12-production-pilot-run')
+  await expect(run).toBeVisible()
+  await expect(run).toContainText('CloudReadonlyProductionPilot')
+  await expect(run).toContainText('ProductionPilot')
+  await expectNoHorizontalOverflow(page)
+})
+
+test('agent trial panel shows P13 production controlled pilot intent gate', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'desktop workbench keeps the trial panel visible')
+
+  await expectProtectedShell(page, '/chat')
+
+  await page.getByTestId('agent-tab-trial').click()
+  const panel = page.getByTestId('p13-production-controlled-panel')
+  await expect(panel).toBeVisible()
+  await expect(page.getByTestId('p13-controlled-marker')).toContainText('CloudReadonlyProductionControlledPilot')
+  await expect(page.getByTestId('p13-boundary-marker')).toContainText('ProductionControlledPilot')
+  await expect(page.getByTestId('p13-allowlist')).toContainText('devices')
+
+  await panel.locator('textarea').fill('分析最近一天设备清单')
+  await panel.getByRole('button', { name: /Intent \+ Plan/ }).click()
+  await page.getByTestId('agent-tab-trial').click()
+  await expect(page.getByTestId('p13-production-controlled-intent')).toContainText('pcg-smoke-devices')
+  await expect(page.getByTestId('p13-production-controlled-intent')).toContainText('DeviceList')
+
+  await page.getByTestId('p13-production-controlled-panel').getByRole('button', { name: /Direct smoke/ }).click()
+  const run = page.getByTestId('p13-production-controlled-run')
+  await expect(run).toBeVisible()
+  await expect(run).toContainText('CloudReadonlyProductionControlledPilot')
+  await expect(run).toContainText('ProductionControlledPilot')
+  await expectNoHorizontalOverflow(page)
+})
+
+test('agent trial panel shows P14 production operations gate', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'desktop workbench keeps the trial panel visible')
+
+  await expectProtectedShell(page, '/chat')
+
+  await page.getByTestId('agent-tab-trial').click()
+  const panel = page.getByTestId('p14-production-operations-panel')
+  await expect(panel).toBeVisible()
+  await expect(page.getByTestId('p14-non-ga-marker')).toContainText('not full production rollout')
+  await expect(page.getByTestId('p14-run-ledger')).toContainText('CloudReadonlyProductionControlledPilot')
+  await expect(page.getByTestId('p14-run-ledger')).toContainText('sha256:p13-result-devices')
+
+  await panel.getByRole('button', { name: /Emergency stop/ }).click()
+  await expect(page.getByTestId('p14-emergency-stop-state')).toContainText('Active')
+
+  await panel.getByRole('button', { name: /Clear stop/ }).click()
+  await expect(page.getByTestId('p14-emergency-stop-state')).toContainText('Clear')
+
+  await panel.getByRole('button', { name: /P15 readiness/ }).click()
+  await expect(page.getByTestId('p14-ga-readiness')).toContainText('ReadyForP15Planning')
+  await expectNoHorizontalOverflow(page)
+})
+
+test('agent trial panel shows P15 planning authorization gate', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'desktop workbench keeps the trial panel visible')
+
+  await expectProtectedShell(page, '/chat')
+
+  await page.getByTestId('agent-tab-trial').click()
+  const panel = page.getByTestId('p15-planning-gate-panel')
+  await expect(panel).toBeVisible()
+  await expect(page.getByTestId('p15-planning-marker')).toContainText('not real Pilot execution')
+  await expect(page.getByTestId('p15-not-ga-marker')).toContainText('Not GA')
+  await expect(page.getByTestId('p15-allowlist')).toContainText('devices')
+  await expect(page.getByTestId('p15-allowlist')).toContainText('pass_station_records')
+  await expect(page.getByTestId('p15-blocked-status')).toContainText('ReadyForP16PlanningBlocked')
+  await expect(page.getByTestId('p15-blocker-list')).toContainText('P12/P13 persistence')
+  await expect(page.getByTestId('p15-blocker-list')).toContainText('Artifact refs backfill')
+  await expect(page.getByTestId('p15-blocker-list')).toContainText('Rows retention')
   await expectNoHorizontalOverflow(page)
 })
 
@@ -124,8 +238,8 @@ test('mobile chat workspace keeps navigation and primary work area within viewpo
   await expect(page.locator('.canvas-status-strip')).toBeVisible()
   await page.getByRole('button', { name: 'Agent', exact: true }).click()
   await expect(page.locator('.agent-workbench-panel.mobile-open')).toBeVisible()
-  await expect(page.getByRole('button', { name: /审批/ })).toBeVisible()
-  await expect(page.getByRole('button', { name: /产物/ })).toBeVisible()
-  await expect(page.getByRole('button', { name: /审计/ })).toBeVisible()
+  await expect(page.getByTestId('agent-tab-approvals')).toBeVisible()
+  await expect(page.getByTestId('agent-tab-artifacts')).toBeVisible()
+  await expect(page.getByTestId('agent-tab-audit')).toBeVisible()
   await expectNoHorizontalOverflow(page)
 })
