@@ -419,7 +419,20 @@ public class AiGatewayController(ISender sender) : ApiControllerBase(sender)
             request.RollbackOwner,
             request.EmergencyOwner,
             request.EvidenceSummary,
-            request.RollbackSummary)));
+            request.RollbackSummary,
+            request.BusinessScope,
+            request.Department,
+            request.PilotOwner,
+            request.ExecutionWindowStart,
+            request.ExecutionWindowEnd,
+            request.RollbackWindowStart,
+            request.RollbackWindowEnd,
+            request.CredentialOwner,
+            request.SecretStorageMode,
+            request.SecretReferenceNameHash,
+            request.PostRunAuditArchiveFormat,
+            request.SignedApprovalRef,
+            request.ExpiresAt)));
     }
 
     [HttpPut("pilot-authorization/submissions/{id:guid}")]
@@ -440,7 +453,20 @@ public class AiGatewayController(ISender sender) : ApiControllerBase(sender)
             request.RollbackOwner,
             request.EmergencyOwner,
             request.EvidenceSummary,
-            request.RollbackSummary)));
+            request.RollbackSummary,
+            request.BusinessScope,
+            request.Department,
+            request.PilotOwner,
+            request.ExecutionWindowStart,
+            request.ExecutionWindowEnd,
+            request.RollbackWindowStart,
+            request.RollbackWindowEnd,
+            request.CredentialOwner,
+            request.SecretStorageMode,
+            request.SecretReferenceNameHash,
+            request.PostRunAuditArchiveFormat,
+            request.SignedApprovalRef,
+            request.ExpiresAt)));
     }
 
     [HttpPost("pilot-authorization/submissions/{id:guid}/submit")]
@@ -488,6 +514,16 @@ public class AiGatewayController(ISender sender) : ApiControllerBase(sender)
         return ReturnResult(await Sender.Send(new RevokePilotAuthorizationSubmissionCommand(
             id,
             request.Reason ?? "Revoked by Pilot authorization reviewer.")));
+    }
+
+    [HttpPost("pilot-authorization/submissions/{id:guid}/expire")]
+    public async Task<IActionResult> ExpirePilotAuthorizationSubmission(
+        Guid id,
+        PilotAuthorizationDecisionRequest request)
+    {
+        return ReturnResult(await Sender.Send(new ExpirePilotAuthorizationSubmissionCommand(
+            id,
+            request.Reason)));
     }
 
     [HttpPost("agent/task/plan")]
