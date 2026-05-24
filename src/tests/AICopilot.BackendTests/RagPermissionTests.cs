@@ -67,8 +67,10 @@ public sealed class RagPermissionTests
                 new TestRepository<KnowledgeBase>(foreignPrivate),
                 new TestRepository<EmbeddingModel>(embedding),
                 new TestRepository<KnowledgeSupplement>(),
+                new TestRepository<KnowledgeCategory>(),
                 vectorSearch,
-                new TestCurrentUser(UserAId))
+                new TestCurrentUser(UserAId),
+                new CapturingAuditLogWriter())
             .Handle(new SearchKnowledgeBaseQuery(foreignPrivate.Id, "secret"), CancellationToken.None);
 
         result.Status.Should().Be(ResultStatus.NotFound);
@@ -117,8 +119,10 @@ public sealed class RagPermissionTests
                 new TestRepository<KnowledgeBase>(knowledgeBase),
                 new TestRepository<EmbeddingModel>(embedding),
                 new TestRepository<KnowledgeSupplement>(supplement),
+                new TestRepository<KnowledgeCategory>(),
                 vectorSearch,
-                new TestCurrentUser(UserAId))
+                new TestCurrentUser(UserAId),
+                new CapturingAuditLogWriter())
             .Handle(new SearchKnowledgeBaseQuery(knowledgeBase.Id, "婚假几天", TopK: 3), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();

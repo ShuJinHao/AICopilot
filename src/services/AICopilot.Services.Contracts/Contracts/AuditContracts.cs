@@ -7,6 +7,7 @@ public static class AuditActionGroups
     public const string Config = "Config";
     public const string Approval = "Approval";
     public const string DataAnalysis = "DataAnalysis";
+    public const string Rag = "Rag";
 }
 
 public static class AuditResults

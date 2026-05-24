@@ -33,7 +33,8 @@ public sealed record KnowledgeRetrievalResult(
     int ChunkIndex,
     bool IsLowConfidence,
     string? LowConfidenceReason,
-    IReadOnlyCollection<KnowledgeSupplementHitDto>? SupplementHits = null);
+    IReadOnlyCollection<KnowledgeSupplementHitDto>? SupplementHits = null,
+    KnowledgeRetrievalGovernanceEvidenceDto? GovernanceEvidence = null);
 
 public sealed record KnowledgeCategoryDto(
     Guid Id,
@@ -70,7 +71,27 @@ public sealed record KnowledgeSupplementHitDto(
     string Content,
     Guid? CategoryId,
     int? DocumentId,
-    string? ContentHash = null);
+    string? ContentHash = null,
+    Guid? SourceDocumentGroupId = null,
+    int? SourceDocumentVersionNo = null,
+    string? WarningCode = null);
+
+public sealed record KnowledgeDocumentCitationDto(
+    int DocumentId,
+    string DocumentName,
+    int ChunkIndex,
+    Guid DocumentGroupId,
+    int VersionNo,
+    string Classification,
+    string SourceType,
+    Guid? CategoryId,
+    string CitationHash);
+
+public sealed record KnowledgeRetrievalGovernanceEvidenceDto(
+    IReadOnlyCollection<KnowledgeDocumentCitationDto> Citations,
+    IReadOnlyCollection<string> WarningCodes,
+    bool HasGovernanceOverride,
+    int FilteredVectorHitCount);
 
 public interface IDocumentIndexingService
 {

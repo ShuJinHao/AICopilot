@@ -31,7 +31,8 @@ public sealed class KnowledgeRetrievalService(IMediator mediator) : IKnowledgeRe
                 item.ChunkIndex,
                 item.IsLowConfidence,
                 item.LowConfidenceReason,
-                item.SupplementHits))
+                item.SupplementHits,
+                item.GovernanceEvidence))
             .ToArray();
     }
 }
