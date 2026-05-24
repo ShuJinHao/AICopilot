@@ -8,7 +8,14 @@ namespace AICopilot.Services.Contracts;
 public sealed record AgentRuntimeCreateRequest(
     LanguageModel Model,
     ConversationTemplate Template,
-    AiChatOptions Options);
+    AiChatOptions Options,
+    AgentRuntimeCallerContext? Caller = null);
+
+public sealed record AgentRuntimeCallerContext(
+    Guid? UserId,
+    string? UserName,
+    string? Role,
+    string? TenantId);
 
 public sealed record RuntimeAgentRunOptions(AiChatOptions Options);
 
@@ -99,6 +106,7 @@ public interface IModelProviderReliabilitySnapshotReader
 public sealed record ModelEndpointStatsDto(
     int InFlight,
     int QueueLength,
+    int ModelInFlight,
     long SuccessCount,
     long FailureCount,
     double AverageDurationMs,
@@ -114,6 +122,7 @@ public sealed record ModelEndpointDto(
     string EndpointId,
     string Provider,
     string BaseUrl,
+    bool HasBaseUrl,
     int ConcurrencyLimit,
     int QueueLimit,
     int TimeoutMs,

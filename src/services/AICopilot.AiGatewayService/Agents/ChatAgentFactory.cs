@@ -15,7 +15,8 @@ namespace AICopilot.AiGatewayService.Agents;
 public class ChatAgentFactory(
     IReadRepository<ConversationTemplate> templateRepository,
     IReadRepository<LanguageModel> modelRepository,
-    IAgentRuntimeFactory runtimeFactory)
+    IAgentRuntimeFactory runtimeFactory,
+    ICurrentUser? currentUser = null)
 {
     private async Task<(LanguageModel, ConversationTemplate)> GetModelAndTemplateAsync(
         ISpecification<ConversationTemplate> specification,
@@ -77,7 +78,21 @@ public class ChatAgentFactory(
 
         configureOptions?.Invoke(chatOptions);
 
-        return runtimeFactory.Create(new AgentRuntimeCreateRequest(model, template, chatOptions));
+        return runtimeFactory.Create(new AgentRuntimeCreateRequest(model, template, chatOptions, CreateCallerContext()));
+    }
+
+    private AgentRuntimeCallerContext? CreateCallerContext()
+    {
+        if (currentUser is null || !currentUser.IsAuthenticated)
+        {
+            return null;
+        }
+
+        return new AgentRuntimeCallerContext(
+            currentUser.Id,
+            currentUser.UserName,
+            currentUser.Role,
+            currentUser.CloudTenantId);
     }
 
     public async Task<ScopedRuntimeAgent> CreateAgentAsync(
