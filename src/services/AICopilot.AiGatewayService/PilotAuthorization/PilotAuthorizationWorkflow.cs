@@ -7,6 +7,9 @@ using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.SharedKernel.Messaging;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace AICopilot.AiGatewayService.PilotAuthorization;
 
@@ -17,6 +20,7 @@ public static class PilotAuthorizationPermissions
     public const string Review = "PilotAuthorization.Review";
     public const string ApprovePlanning = "PilotAuthorization.ApprovePlanning";
     public const string Reject = "PilotAuthorization.Reject";
+    public const string Expire = "PilotAuthorization.Expire";
     public const string Audit = "PilotAuthorization.Audit";
 }
 
@@ -31,6 +35,9 @@ public static class PilotAuthorizationAuditActions
     public const string Rejected = "PilotAuthorization.Rejected";
     public const string Expired = "PilotAuthorization.Expired";
     public const string Revoked = "PilotAuthorization.Revoked";
+    public const string UnsafeDraftRejected = "PilotAuthorization.UnsafeDraftRejected";
+    public const string UnsafeDecisionRejected = "PilotAuthorization.UnsafeDecisionRejected";
+    public const string SelfReviewForbidden = "PilotAuthorization.SelfReviewForbidden";
 }
 
 public sealed record PilotAuthorizationSubmissionDto(
@@ -52,9 +59,23 @@ public sealed record PilotAuthorizationSubmissionDto(
     IReadOnlyCollection<string> MachineRejectedReasons,
     string? EvidenceSummary,
     string? RollbackSummary,
+    string? BusinessScope,
+    string? Department,
+    string? PilotOwner,
+    DateTimeOffset? ExecutionWindowStart,
+    DateTimeOffset? ExecutionWindowEnd,
+    DateTimeOffset? RollbackWindowStart,
+    DateTimeOffset? RollbackWindowEnd,
+    string? CredentialOwner,
+    string? SecretStorageMode,
+    string? SecretReferenceNameHash,
+    string? PostRunAuditArchiveFormat,
+    string? SignedApprovalRef,
+    DateTimeOffset? ExpiresAt,
     string? CredentialWindowPlanningSummary,
     string? LastDecisionStatus,
     string? LastDecisionReason,
+    string GateState,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
 
@@ -70,7 +91,20 @@ public sealed record PilotAuthorizationSubmissionUpsertRequest(
     string RollbackOwner,
     string EmergencyOwner,
     string? EvidenceSummary = null,
-    string? RollbackSummary = null);
+    string? RollbackSummary = null,
+    string? BusinessScope = null,
+    string? Department = null,
+    string? PilotOwner = null,
+    DateTimeOffset? ExecutionWindowStart = null,
+    DateTimeOffset? ExecutionWindowEnd = null,
+    DateTimeOffset? RollbackWindowStart = null,
+    DateTimeOffset? RollbackWindowEnd = null,
+    string? CredentialOwner = null,
+    string? SecretStorageMode = null,
+    string? SecretReferenceNameHash = null,
+    string? PostRunAuditArchiveFormat = null,
+    string? SignedApprovalRef = null,
+    DateTimeOffset? ExpiresAt = null);
 
 public sealed record PilotAuthorizationDecisionRequest(
     string? Reason = null,
@@ -97,7 +131,20 @@ public sealed record CreatePilotAuthorizationSubmissionCommand(
     string RollbackOwner,
     string EmergencyOwner,
     string? EvidenceSummary = null,
-    string? RollbackSummary = null) : ICommand<Result<PilotAuthorizationSubmissionDto>>;
+    string? RollbackSummary = null,
+    string? BusinessScope = null,
+    string? Department = null,
+    string? PilotOwner = null,
+    DateTimeOffset? ExecutionWindowStart = null,
+    DateTimeOffset? ExecutionWindowEnd = null,
+    DateTimeOffset? RollbackWindowStart = null,
+    DateTimeOffset? RollbackWindowEnd = null,
+    string? CredentialOwner = null,
+    string? SecretStorageMode = null,
+    string? SecretReferenceNameHash = null,
+    string? PostRunAuditArchiveFormat = null,
+    string? SignedApprovalRef = null,
+    DateTimeOffset? ExpiresAt = null) : ICommand<Result<PilotAuthorizationSubmissionDto>>;
 
 [AuthorizeRequirement(PilotAuthorizationPermissions.Submit)]
 public sealed record UpdatePilotAuthorizationSubmissionCommand(
@@ -113,7 +160,20 @@ public sealed record UpdatePilotAuthorizationSubmissionCommand(
     string RollbackOwner,
     string EmergencyOwner,
     string? EvidenceSummary = null,
-    string? RollbackSummary = null) : ICommand<Result<PilotAuthorizationSubmissionDto>>;
+    string? RollbackSummary = null,
+    string? BusinessScope = null,
+    string? Department = null,
+    string? PilotOwner = null,
+    DateTimeOffset? ExecutionWindowStart = null,
+    DateTimeOffset? ExecutionWindowEnd = null,
+    DateTimeOffset? RollbackWindowStart = null,
+    DateTimeOffset? RollbackWindowEnd = null,
+    string? CredentialOwner = null,
+    string? SecretStorageMode = null,
+    string? SecretReferenceNameHash = null,
+    string? PostRunAuditArchiveFormat = null,
+    string? SignedApprovalRef = null,
+    DateTimeOffset? ExpiresAt = null) : ICommand<Result<PilotAuthorizationSubmissionDto>>;
 
 [AuthorizeRequirement(PilotAuthorizationPermissions.Submit)]
 public sealed record SubmitPilotAuthorizationSubmissionCommand(Guid SubmissionId)
@@ -136,6 +196,10 @@ public sealed record RejectPilotAuthorizationSubmissionCommand(Guid SubmissionId
 
 [AuthorizeRequirement(PilotAuthorizationPermissions.Reject)]
 public sealed record RevokePilotAuthorizationSubmissionCommand(Guid SubmissionId, string Reason)
+    : ICommand<Result<PilotAuthorizationSubmissionDto>>;
+
+[AuthorizeRequirement(PilotAuthorizationPermissions.Expire)]
+public sealed record ExpirePilotAuthorizationSubmissionCommand(Guid SubmissionId, string? Reason = null)
     : ICommand<Result<PilotAuthorizationSubmissionDto>>;
 
 public sealed class GetPilotAuthorizationSubmissionsQueryHandler(
@@ -229,7 +293,31 @@ public sealed class CreatePilotAuthorizationSubmissionCommandHandler(
                 request.EmergencyOwner,
                 request.EvidenceSummary,
                 request.RollbackSummary,
+                request.BusinessScope,
+                request.Department,
+                request.PilotOwner,
+                request.ExecutionWindowStart,
+                request.ExecutionWindowEnd,
+                request.RollbackWindowStart,
+                request.RollbackWindowEnd,
+                request.CredentialOwner,
+                request.SecretStorageMode,
+                request.SecretReferenceNameHash,
+                request.PostRunAuditArchiveFormat,
+                request.SignedApprovalRef,
+                request.ExpiresAt,
                 DateTimeOffset.UtcNow);
+        }
+        catch (PilotAuthorizationUnsafeContentException ex)
+        {
+            await PilotAuthorizationAudit.WriteRejectedDraftAsync(
+                auditLogWriter,
+                PilotAuthorizationAuditActions.UnsafeDraftRejected,
+                "Unsafe Pilot authorization draft creation was rejected before persistence.",
+                null,
+                cancellationToken);
+            await auditLogWriter.SaveChangesAsync(cancellationToken);
+            return Result.Invalid(ex.Message);
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
         {
@@ -289,7 +377,31 @@ public sealed class UpdatePilotAuthorizationSubmissionCommandHandler(
                 request.EmergencyOwner,
                 request.EvidenceSummary,
                 request.RollbackSummary,
+                request.BusinessScope,
+                request.Department,
+                request.PilotOwner,
+                request.ExecutionWindowStart,
+                request.ExecutionWindowEnd,
+                request.RollbackWindowStart,
+                request.RollbackWindowEnd,
+                request.CredentialOwner,
+                request.SecretStorageMode,
+                request.SecretReferenceNameHash,
+                request.PostRunAuditArchiveFormat,
+                request.SignedApprovalRef,
+                request.ExpiresAt,
                 DateTimeOffset.UtcNow);
+        }
+        catch (PilotAuthorizationUnsafeContentException ex)
+        {
+            await PilotAuthorizationAudit.WriteRejectedDraftAsync(
+                auditLogWriter,
+                PilotAuthorizationAuditActions.UnsafeDraftRejected,
+                "Unsafe Pilot authorization draft update was rejected before persistence.",
+                submission,
+                cancellationToken);
+            await auditLogWriter.SaveChangesAsync(cancellationToken);
+            return Result.Invalid(ex.Message);
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
         {
@@ -400,9 +512,10 @@ public sealed class ApprovePilotAuthorizationCredentialWindowPlanningCommandHand
             request.SubmissionId,
             PilotAuthorizationPermissions.ApprovePlanning,
             PilotAuthorizationAuditActions.ApprovedForCredentialWindowPlanning,
-            submission => submission.ApproveCredentialWindowPlanning(
-                currentUser.Id!.Value,
-                currentUser.UserName,
+            [request.Reason, request.CredentialWindowPlanningSummary],
+            (submission, access) => submission.ApproveCredentialWindowPlanning(
+                access.UserId,
+                access.UserName,
                 request.Reason,
                 request.CredentialWindowPlanningSummary,
                 DateTimeOffset.UtcNow),
@@ -430,9 +543,10 @@ public sealed class ApprovePilotAuthorizationLimitedPilotExecutionPlanningComman
             request.SubmissionId,
             PilotAuthorizationPermissions.ApprovePlanning,
             PilotAuthorizationAuditActions.ApprovedForLimitedPilotExecutionPlanning,
-            submission => submission.ApproveLimitedPilotExecutionPlanning(
-                currentUser.Id!.Value,
-                currentUser.UserName,
+            [request.Reason],
+            (submission, access) => submission.ApproveLimitedPilotExecutionPlanning(
+                access.UserId,
+                access.UserName,
                 request.Reason,
                 DateTimeOffset.UtcNow),
             "Approved limited Pilot execution planning only; execution remains not granted.",
@@ -459,9 +573,10 @@ public sealed class RejectPilotAuthorizationSubmissionCommandHandler(
             request.SubmissionId,
             PilotAuthorizationPermissions.Reject,
             PilotAuthorizationAuditActions.Rejected,
-            submission => submission.Reject(
-                currentUser.Id!.Value,
-                currentUser.UserName,
+            [request.Reason],
+            (submission, access) => submission.Reject(
+                access.UserId,
+                access.UserName,
                 request.Reason,
                 DateTimeOffset.UtcNow),
             "Rejected Pilot authorization package.",
@@ -488,12 +603,43 @@ public sealed class RevokePilotAuthorizationSubmissionCommandHandler(
             request.SubmissionId,
             PilotAuthorizationPermissions.Reject,
             PilotAuthorizationAuditActions.Revoked,
-            submission => submission.Revoke(
-                currentUser.Id!.Value,
-                currentUser.UserName,
+            [request.Reason],
+            (submission, access) => submission.Revoke(
+                access.UserId,
+                access.UserName,
                 request.Reason,
                 DateTimeOffset.UtcNow),
             "Revoked Pilot authorization planning approval.",
+            cancellationToken);
+    }
+}
+
+public sealed class ExpirePilotAuthorizationSubmissionCommandHandler(
+    IRepository<PilotAuthorizationSubmission> repository,
+    ICurrentUser currentUser,
+    IIdentityAccessService identityAccessService,
+    IAuditLogWriter auditLogWriter)
+    : ICommandHandler<ExpirePilotAuthorizationSubmissionCommand, Result<PilotAuthorizationSubmissionDto>>
+{
+    public async Task<Result<PilotAuthorizationSubmissionDto>> Handle(
+        ExpirePilotAuthorizationSubmissionCommand request,
+        CancellationToken cancellationToken)
+    {
+        return await PilotAuthorizationDecisionHandlers.DecideAsync(
+            repository,
+            currentUser,
+            identityAccessService,
+            auditLogWriter,
+            request.SubmissionId,
+            PilotAuthorizationPermissions.Expire,
+            PilotAuthorizationAuditActions.Expired,
+            [request.Reason],
+            (submission, access) => submission.Expire(
+                access.UserId,
+                access.UserName,
+                request.Reason,
+                DateTimeOffset.UtcNow),
+            "Expired Pilot authorization package before any execution permission.",
             cancellationToken);
     }
 }
@@ -544,13 +690,50 @@ public sealed class PilotAuthorizationMachineValidator
                      ("tool owner", submission.ToolOwner),
                      ("final owner", submission.FinalOwner),
                      ("rollback owner", submission.RollbackPlan.RollbackOwner),
-                     ("emergency owner", submission.RollbackPlan.EmergencyOwner)
+                     ("emergency owner", submission.RollbackPlan.EmergencyOwner),
+                     ("business scope", submission.MaterialIntake.BusinessScope),
+                     ("department", submission.MaterialIntake.Department),
+                     ("pilot owner", submission.MaterialIntake.PilotOwner),
+                     ("credential owner", submission.MaterialIntake.CredentialOwner),
+                     ("secret storage mode", submission.MaterialIntake.SecretStorageMode),
+                     ("secret reference name hash", submission.MaterialIntake.SecretReferenceNameHash),
+                     ("post-run audit archive format", submission.MaterialIntake.PostRunAuditArchiveFormat),
+                     ("signed approval ref", submission.MaterialIntake.SignedApprovalRef)
                  })
         {
             if (string.IsNullOrWhiteSpace(value))
             {
                 rejected.Add($"{label} is required.");
             }
+        }
+
+        if (submission.MaterialIntake.ExecutionWindowStart is null
+            || submission.MaterialIntake.ExecutionWindowEnd is null)
+        {
+            rejected.Add("execution window start and end are required.");
+        }
+        else if (submission.MaterialIntake.ExecutionWindowEnd <= submission.MaterialIntake.ExecutionWindowStart)
+        {
+            rejected.Add("execution window end must be after start.");
+        }
+
+        if (submission.MaterialIntake.RollbackWindowStart is null
+            || submission.MaterialIntake.RollbackWindowEnd is null)
+        {
+            rejected.Add("rollback window start and end are required.");
+        }
+        else if (submission.MaterialIntake.RollbackWindowEnd <= submission.MaterialIntake.RollbackWindowStart)
+        {
+            rejected.Add("rollback window end must be after start.");
+        }
+
+        if (submission.ExpiresAt is null)
+        {
+            rejected.Add("expiresAt is required.");
+        }
+        else if (submission.ExpiresAt <= DateTimeOffset.UtcNow)
+        {
+            rejected.Add("expiresAt must be in the future.");
         }
 
         var text = string.Join(
@@ -564,11 +747,25 @@ public sealed class PilotAuthorizationMachineValidator
             submission.RollbackPlan.RollbackOwner,
             submission.RollbackPlan.EmergencyOwner,
             submission.RollbackPlan.RollbackSummary,
-            submission.EvidenceArchive.EvidenceSummary);
+            submission.EvidenceArchive.EvidenceSummary,
+            submission.MaterialIntake.BusinessScope,
+            submission.MaterialIntake.Department,
+            submission.MaterialIntake.PilotOwner,
+            submission.MaterialIntake.CredentialOwner,
+            submission.MaterialIntake.SecretStorageMode,
+            submission.MaterialIntake.SecretReferenceNameHash,
+            submission.MaterialIntake.PostRunAuditArchiveFormat,
+            submission.MaterialIntake.SignedApprovalRef);
 
         rejected.AddRange(ForbiddenPatterns
             .Where(rule => rule.Pattern.IsMatch(text))
             .Select(rule => rule.Reason));
+
+        var sensitiveCheck = PilotAuthorizationSensitiveContentGuard.CheckSubmission(submission);
+        if (!sensitiveCheck.IsSafe)
+        {
+            rejected.Add("Pilot authorization material contains sensitive or unrestricted content.");
+        }
 
         var distinct = rejected
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -662,6 +859,7 @@ internal static class PilotAuthorizationAccess
             PilotAuthorizationPermissions.Review,
             PilotAuthorizationPermissions.ApprovePlanning,
             PilotAuthorizationPermissions.Reject,
+            PilotAuthorizationPermissions.Expire,
             PilotAuthorizationPermissions.Audit);
     }
 
@@ -695,7 +893,8 @@ internal static class PilotAuthorizationDecisionHandlers
         Guid submissionId,
         string requiredPermission,
         string auditAction,
-        Action<PilotAuthorizationSubmission> applyDecision,
+        IReadOnlyCollection<string?> decisionTexts,
+        Action<PilotAuthorizationSubmission, CurrentUserAccess> applyDecision,
         string auditSummary,
         CancellationToken cancellationToken)
     {
@@ -723,9 +922,56 @@ internal static class PilotAuthorizationDecisionHandlers
         }
 
         var submission = loadResult.Value.Submission;
+        var access = loadResult.Value.Access;
         try
         {
-            applyDecision(submission);
+            PilotAuthorizationSensitiveContentGuard.ThrowIfUnsafe(
+                decisionTexts.Select((value, index) =>
+                    new PilotAuthorizationSensitiveField($"decisionText{index}", value)));
+        }
+        catch (PilotAuthorizationUnsafeContentException ex)
+        {
+            await PilotAuthorizationAudit.WriteAsync(
+                auditLogWriter,
+                PilotAuthorizationAuditActions.UnsafeDecisionRejected,
+                AuditResults.Rejected,
+                submission,
+                "Unsafe Pilot authorization decision text was rejected before persistence.",
+                cancellationToken);
+            await auditLogWriter.SaveChangesAsync(cancellationToken);
+            return Result.Invalid(ex.Message);
+        }
+
+        if (submission.RequestedByUserId == access.UserId)
+        {
+            await PilotAuthorizationAudit.WriteAsync(
+                auditLogWriter,
+                PilotAuthorizationAuditActions.SelfReviewForbidden,
+                AuditResults.Rejected,
+                submission,
+                "Pilot authorization self-review was blocked.",
+                cancellationToken);
+            await auditLogWriter.SaveChangesAsync(cancellationToken);
+            return Result.Forbidden(new ApiProblemDescriptor(
+                "pilot_authorization_self_review_forbidden",
+                "Pilot authorization requester cannot review, reject, revoke, or expire their own submission."));
+        }
+
+        try
+        {
+            applyDecision(submission, access);
+        }
+        catch (PilotAuthorizationUnsafeContentException ex)
+        {
+            await PilotAuthorizationAudit.WriteAsync(
+                auditLogWriter,
+                PilotAuthorizationAuditActions.UnsafeDecisionRejected,
+                AuditResults.Rejected,
+                submission,
+                "Unsafe Pilot authorization decision text was rejected before persistence.",
+                cancellationToken);
+            await auditLogWriter.SaveChangesAsync(cancellationToken);
+            return Result.Invalid(ex.Message);
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
         {
@@ -743,6 +989,83 @@ internal static class PilotAuthorizationDecisionHandlers
         await repository.SaveChangesAsync(cancellationToken);
         await auditLogWriter.SaveChangesAsync(cancellationToken);
         return Result.Success(PilotAuthorizationMapper.Map(submission));
+    }
+}
+
+public sealed class PilotAuthorizationExpiryWorker(
+    IServiceScopeFactory scopeFactory,
+    ILogger<PilotAuthorizationExpiryWorker> logger)
+    : BackgroundService
+{
+    private static readonly TimeSpan PollInterval = TimeSpan.FromMinutes(1);
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                var processed = await ProcessOnceAsync(stoppingToken);
+                if (!processed)
+                {
+                    await Task.Delay(PollInterval, stoppingToken);
+                }
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Pilot authorization expiry worker iteration failed.");
+                await Task.Delay(PollInterval, stoppingToken);
+            }
+        }
+    }
+
+    public async Task<bool> ProcessOnceAsync(CancellationToken cancellationToken)
+    {
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var repository = scope.ServiceProvider.GetRequiredService<IRepository<PilotAuthorizationSubmission>>();
+        var auditLogWriter = scope.ServiceProvider.GetRequiredService<IAuditLogWriter>();
+        return await ExpireDueSubmissionsAsync(
+            repository,
+            auditLogWriter,
+            DateTimeOffset.UtcNow,
+            cancellationToken);
+    }
+
+    internal static async Task<bool> ExpireDueSubmissionsAsync(
+        IRepository<PilotAuthorizationSubmission> repository,
+        IAuditLogWriter auditLogWriter,
+        DateTimeOffset nowUtc,
+        CancellationToken cancellationToken)
+    {
+        var dueSubmissions = await repository.ListAsync(
+            new PilotAuthorizationExpiredOpenSubmissionsSpec(nowUtc),
+            cancellationToken);
+
+        foreach (var submission in dueSubmissions)
+        {
+            submission.ExpireBySystem(nowUtc);
+            repository.Update(submission);
+            await PilotAuthorizationAudit.WriteAsync(
+                auditLogWriter,
+                PilotAuthorizationAuditActions.Expired,
+                AuditResults.Succeeded,
+                submission,
+                "Expired Pilot authorization package by DataWorker before any execution permission.",
+                cancellationToken);
+        }
+
+        if (dueSubmissions.Count == 0)
+        {
+            return false;
+        }
+
+        await repository.SaveChangesAsync(cancellationToken);
+        await auditLogWriter.SaveChangesAsync(cancellationToken);
+        return true;
     }
 }
 
@@ -769,18 +1092,90 @@ internal static class PilotAuthorizationMapper
             submission.MachineRejectedReasons,
             PilotAuthorizationSafeText.Redact(submission.EvidenceArchive.EvidenceSummary),
             PilotAuthorizationSafeText.Redact(submission.RollbackPlan.RollbackSummary),
+            PilotAuthorizationSafeText.Redact(submission.MaterialIntake.BusinessScope),
+            PilotAuthorizationSafeText.Redact(submission.MaterialIntake.Department),
+            PilotAuthorizationSafeText.Redact(submission.MaterialIntake.PilotOwner),
+            submission.MaterialIntake.ExecutionWindowStart,
+            submission.MaterialIntake.ExecutionWindowEnd,
+            submission.MaterialIntake.RollbackWindowStart,
+            submission.MaterialIntake.RollbackWindowEnd,
+            PilotAuthorizationSafeText.Redact(submission.MaterialIntake.CredentialOwner),
+            PilotAuthorizationSafeText.Redact(submission.MaterialIntake.SecretStorageMode),
+            PilotAuthorizationSafeText.Redact(submission.MaterialIntake.SecretReferenceNameHash),
+            PilotAuthorizationSafeText.Redact(submission.MaterialIntake.PostRunAuditArchiveFormat),
+            PilotAuthorizationSafeText.Redact(submission.MaterialIntake.SignedApprovalRef),
+            submission.ExpiresAt,
             PilotAuthorizationSafeText.Redact(submission.CredentialWindow.PlanningSummary),
             submission.Review.LastDecisionStatus,
             PilotAuthorizationSafeText.Redact(submission.Review.LastDecisionReason),
+            PilotAuthorizationGateState.Calculate(submission),
             submission.CreatedAt,
             submission.UpdatedAt);
+    }
+}
+
+internal static class PilotAuthorizationGateState
+{
+    public const string BlockedMissingAuthorizationMaterials = "BlockedMissingAuthorizationMaterials";
+    public const string BlockedUnsafeAuthorizationMaterials = "BlockedUnsafeAuthorizationMaterials";
+    public const string ReviewPending = "ReviewPending";
+    public const string ApprovedForCredentialWindowPlanning = "ApprovedForCredentialWindowPlanning";
+    public const string ApprovedForLimitedPilotExecutionPlanning = "ApprovedForLimitedPilotExecutionPlanning";
+    public const string BlockedUntilExplicitM7Authorization = "BlockedUntilExplicitM7Authorization";
+
+    public static string Calculate(PilotAuthorizationSubmission submission)
+    {
+        if (!PilotAuthorizationSensitiveContentGuard.CheckSubmission(submission).IsSafe)
+        {
+            return BlockedUnsafeAuthorizationMaterials;
+        }
+
+        if (HasMissingAuthorizationMaterials(submission))
+        {
+            return BlockedMissingAuthorizationMaterials;
+        }
+
+        return submission.Status switch
+        {
+            PilotAuthorizationSubmissionStatus.ReviewPending => ReviewPending,
+            PilotAuthorizationSubmissionStatus.ApprovedForCredentialWindowPlanning =>
+                BlockedUntilExplicitM7Authorization,
+            PilotAuthorizationSubmissionStatus.ApprovedForLimitedPilotExecutionPlanning =>
+                BlockedUntilExplicitM7Authorization,
+            _ => BlockedUntilExplicitM7Authorization
+        };
+    }
+
+    private static bool HasMissingAuthorizationMaterials(PilotAuthorizationSubmission submission)
+    {
+        return submission.ExpiresAt is null
+               || submission.EndpointCodes.Length == 0
+               || submission.MaxRows is <= 0 or > 50
+               || submission.TimeRangeDays is <= 0 or > 7
+               || string.IsNullOrWhiteSpace(submission.DataOwner)
+               || string.IsNullOrWhiteSpace(submission.ToolOwner)
+               || string.IsNullOrWhiteSpace(submission.FinalOwner)
+               || string.IsNullOrWhiteSpace(submission.RollbackPlan.RollbackOwner)
+               || string.IsNullOrWhiteSpace(submission.RollbackPlan.EmergencyOwner)
+               || string.IsNullOrWhiteSpace(submission.MaterialIntake.BusinessScope)
+               || string.IsNullOrWhiteSpace(submission.MaterialIntake.Department)
+               || string.IsNullOrWhiteSpace(submission.MaterialIntake.PilotOwner)
+               || submission.MaterialIntake.ExecutionWindowStart is null
+               || submission.MaterialIntake.ExecutionWindowEnd is null
+               || submission.MaterialIntake.RollbackWindowStart is null
+               || submission.MaterialIntake.RollbackWindowEnd is null
+               || string.IsNullOrWhiteSpace(submission.MaterialIntake.CredentialOwner)
+               || string.IsNullOrWhiteSpace(submission.MaterialIntake.SecretStorageMode)
+               || string.IsNullOrWhiteSpace(submission.MaterialIntake.SecretReferenceNameHash)
+               || string.IsNullOrWhiteSpace(submission.MaterialIntake.PostRunAuditArchiveFormat)
+               || string.IsNullOrWhiteSpace(submission.MaterialIntake.SignedApprovalRef);
     }
 }
 
 internal static class PilotAuthorizationSafeText
 {
     private static readonly Regex SensitiveTextPattern = new(
-        @"\b(token|api\s*key|apikey|connection\s*string|raw\s*payload|raw\s*(business\s*)?(rows|records)|full\s*sql|free\s*sql)\b\s*[:=]?\s*[\w\-./+=:;,@]*|\b(sk|pk|rk)-[A-Za-z0-9][A-Za-z0-9_\-]{7,}\b|\b(password|pwd|secret)\s*=\s*[^;\s]+",
+        @"\b(token|bearer|api\s*key|apikey|connection\s*string|raw\s*payload|raw\s*(business\s*)?(rows|records)|full\s*sql|free\s*sql|private\s*key)\b\s*[:=]?\s*[\w\-./+=:;,@]*|\b(sk|pk|rk)-[A-Za-z0-9][A-Za-z0-9_\-]{7,}\b|\b(password|pwd|secret)\s*=\s*[^;\s]+|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b|https?://[^\s]+|\b(postgres|postgresql|mysql|sqlserver|mongodb)://[^\s]+|密钥|令牌|连接串|连接字符串|原始载荷|原始行|原始业务行|完整\s*SQL|自由\s*SQL|私钥|密码",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public static string? Redact(string? value)
@@ -793,6 +1188,27 @@ internal static class PilotAuthorizationSafeText
 
 internal static class PilotAuthorizationAudit
 {
+    public static Task WriteRejectedDraftAsync(
+        IAuditLogWriter auditLogWriter,
+        string actionCode,
+        string summary,
+        PilotAuthorizationSubmission? submission,
+        CancellationToken cancellationToken)
+    {
+        return auditLogWriter.WriteAsync(
+            new AuditLogWriteRequest(
+                AuditActionGroups.AiGateway,
+                actionCode,
+                "PilotAuthorizationSubmission",
+                submission?.Id.Value.ToString(),
+                "PilotAuthorizationSubmission",
+                AuditResults.Rejected,
+                summary,
+                ["security"],
+                BuildMetadata(submission)),
+            cancellationToken);
+    }
+
     public static Task WriteAsync(
         IAuditLogWriter auditLogWriter,
         string actionCode,
@@ -821,5 +1237,20 @@ internal static class PilotAuthorizationAudit
                     ["machineValidationStatus"] = submission.MachineValidationStatus
                 }),
             cancellationToken);
+    }
+
+    private static Dictionary<string, string>? BuildMetadata(PilotAuthorizationSubmission? submission)
+    {
+        return submission is null
+            ? null
+            : new Dictionary<string, string>
+            {
+                ["pilotAuthorizationStatus"] = submission.Status.ToString(),
+                ["endpointCount"] = submission.EndpointCodes.Length.ToString(),
+                ["maxRows"] = submission.MaxRows.ToString(),
+                ["timeRangeDays"] = submission.TimeRangeDays.ToString(),
+                ["ownerCount"] = "5",
+                ["machineValidationStatus"] = submission.MachineValidationStatus
+            };
     }
 }

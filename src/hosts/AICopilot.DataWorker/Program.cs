@@ -1,5 +1,6 @@
 using AICopilot.AiGatewayService;
 using AICopilot.AiGatewayService.AgentTasks;
+using AICopilot.AiGatewayService.PilotAuthorization;
 using AICopilot.DataAnalysisService;
 using AICopilot.EntityFrameworkCore;
 using AICopilot.EntityFrameworkCore.Outbox;
@@ -22,6 +23,7 @@ builder.AddRagService();
 builder.Services.AddScoped<ICurrentUser, WorkerCurrentUser>();
 builder.Services.AddHostedService<OutboxDispatcher>();
 builder.Services.AddHostedService<AgentTaskRunQueueWorker>();
+builder.Services.AddHostedService<PilotAuthorizationExpiryWorker>();
 
 var host = builder.Build();
 host.Run();

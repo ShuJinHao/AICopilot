@@ -86,6 +86,7 @@ public sealed class PermissionCatalog : IPermissionCatalog
         new("PilotAuthorization.Review", "PilotAuthorization", "Review Pilot Authorization", "View submitted Pilot authorization packages for review without granting execution."),
         new("PilotAuthorization.ApprovePlanning", "PilotAuthorization", "Approve Pilot Planning", "Approve credential-window or limited-Pilot planning only; this never grants execution."),
         new("PilotAuthorization.Reject", "PilotAuthorization", "Reject Pilot Authorization", "Reject or revoke Pilot authorization planning approvals."),
+        new("PilotAuthorization.Expire", "PilotAuthorization", "Expire Pilot Authorization", "Expire stale Pilot authorization packages without granting execution."),
         new("PilotAuthorization.Audit", "PilotAuthorization", "Audit Pilot Authorization", "View sanitized Pilot authorization audit evidence and state changes."),
 
         new("DataAnalysis.GetBusinessDatabase", "DataAnalysis", "View Business Database", "View business database configuration details."),

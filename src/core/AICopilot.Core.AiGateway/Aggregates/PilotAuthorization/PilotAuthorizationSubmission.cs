@@ -38,6 +38,19 @@ public sealed class PilotAuthorizationSubmission
         string emergencyOwner,
         string? evidenceSummary,
         string? rollbackSummary,
+        string? businessScope,
+        string? department,
+        string? pilotOwner,
+        DateTimeOffset? executionWindowStart,
+        DateTimeOffset? executionWindowEnd,
+        DateTimeOffset? rollbackWindowStart,
+        DateTimeOffset? rollbackWindowEnd,
+        string? credentialOwner,
+        string? secretStorageMode,
+        string? secretReferenceNameHash,
+        string? postRunAuditArchiveFormat,
+        string? signedApprovalRef,
+        DateTimeOffset? expiresAt,
         DateTimeOffset nowUtc)
     {
         if (requestedByUserId == Guid.Empty)
@@ -62,6 +75,19 @@ public sealed class PilotAuthorizationSubmission
             emergencyOwner,
             evidenceSummary,
             rollbackSummary,
+            businessScope,
+            department,
+            pilotOwner,
+            executionWindowStart,
+            executionWindowEnd,
+            rollbackWindowStart,
+            rollbackWindowEnd,
+            credentialOwner,
+            secretStorageMode,
+            secretReferenceNameHash,
+            postRunAuditArchiveFormat,
+            signedApprovalRef,
+            expiresAt,
             nowUtc);
         Status = PilotAuthorizationSubmissionStatus.Draft;
     }
@@ -100,6 +126,11 @@ public sealed class PilotAuthorizationSubmission
 
     public PilotEvidenceArchive EvidenceArchive { get; private set; } = PilotEvidenceArchive.Empty();
 
+    public PilotAuthorizationMaterialIntake MaterialIntake { get; private set; } =
+        PilotAuthorizationMaterialIntake.Empty();
+
+    public DateTimeOffset? ExpiresAt { get; private set; }
+
     public DateTimeOffset CreatedAt { get; private set; }
 
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -117,6 +148,19 @@ public sealed class PilotAuthorizationSubmission
         string emergencyOwner,
         string? evidenceSummary,
         string? rollbackSummary,
+        string? businessScope,
+        string? department,
+        string? pilotOwner,
+        DateTimeOffset? executionWindowStart,
+        DateTimeOffset? executionWindowEnd,
+        DateTimeOffset? rollbackWindowStart,
+        DateTimeOffset? rollbackWindowEnd,
+        string? credentialOwner,
+        string? secretStorageMode,
+        string? secretReferenceNameHash,
+        string? postRunAuditArchiveFormat,
+        string? signedApprovalRef,
+        DateTimeOffset? expiresAt,
         DateTimeOffset nowUtc)
     {
         EnsureEditableDraft();
@@ -133,6 +177,19 @@ public sealed class PilotAuthorizationSubmission
             emergencyOwner,
             evidenceSummary,
             rollbackSummary,
+            businessScope,
+            department,
+            pilotOwner,
+            executionWindowStart,
+            executionWindowEnd,
+            rollbackWindowStart,
+            rollbackWindowEnd,
+            credentialOwner,
+            secretStorageMode,
+            secretReferenceNameHash,
+            postRunAuditArchiveFormat,
+            signedApprovalRef,
+            expiresAt,
             nowUtc);
     }
 
@@ -165,6 +222,7 @@ public sealed class PilotAuthorizationSubmission
         DateTimeOffset nowUtc)
     {
         EnsureStatus(PilotAuthorizationSubmissionStatus.ReviewPending);
+        EnsureDecisionTextIsSafe(reason, credentialWindowSummary);
         Status = PilotAuthorizationSubmissionStatus.ApprovedForCredentialWindowPlanning;
         CredentialWindow = new PilotCredentialWindow(
             NormalizeOptional(credentialWindowSummary, 1000),
@@ -180,6 +238,7 @@ public sealed class PilotAuthorizationSubmission
         DateTimeOffset nowUtc)
     {
         EnsureStatus(PilotAuthorizationSubmissionStatus.ApprovedForCredentialWindowPlanning);
+        EnsureDecisionTextIsSafe(reason);
         Status = PilotAuthorizationSubmissionStatus.ApprovedForLimitedPilotExecutionPlanning;
         Review = Review.MarkDecision(reviewerUserId, reviewerUserName, reason, Status, nowUtc);
         UpdatedAt = nowUtc;
@@ -194,6 +253,7 @@ public sealed class PilotAuthorizationSubmission
             throw new InvalidOperationException("Pilot authorization submission is not reviewable.");
         }
 
+        EnsureDecisionTextIsSafe(reason);
         Status = PilotAuthorizationSubmissionStatus.Rejected;
         Review = Review.MarkDecision(reviewerUserId, reviewerUserName, Require(reason, nameof(reason), 1000), Status, nowUtc);
         UpdatedAt = nowUtc;
@@ -207,20 +267,26 @@ public sealed class PilotAuthorizationSubmission
             throw new InvalidOperationException("Only planning approvals can be revoked.");
         }
 
+        EnsureDecisionTextIsSafe(reason);
         Status = PilotAuthorizationSubmissionStatus.Revoked;
         Review = Review.MarkDecision(reviewerUserId, reviewerUserName, Require(reason, nameof(reason), 1000), Status, nowUtc);
         UpdatedAt = nowUtc;
     }
 
-    public void Expire(DateTimeOffset nowUtc)
+    public void Expire(Guid reviewerUserId, string? reviewerUserName, string? reason, DateTimeOffset nowUtc)
     {
-        if (Status is PilotAuthorizationSubmissionStatus.Rejected
-            or PilotAuthorizationSubmissionStatus.Revoked
-            or PilotAuthorizationSubmissionStatus.Expired)
-        {
-            throw new InvalidOperationException("Terminal Pilot authorization submission cannot expire again.");
-        }
+        EnsureCanExpire();
+        EnsureDecisionTextIsSafe(reason);
+        Status = PilotAuthorizationSubmissionStatus.Expired;
+        Review = Review
+            .MarkDecision(reviewerUserId, reviewerUserName, reason, Status, nowUtc)
+            .MarkExpired(nowUtc);
+        UpdatedAt = nowUtc;
+    }
 
+    public void ExpireBySystem(DateTimeOffset nowUtc)
+    {
+        EnsureCanExpire();
         Status = PilotAuthorizationSubmissionStatus.Expired;
         Review = Review.MarkExpired(nowUtc);
         UpdatedAt = nowUtc;
@@ -239,8 +305,48 @@ public sealed class PilotAuthorizationSubmission
         string emergencyOwner,
         string? evidenceSummary,
         string? rollbackSummary,
+        string? businessScope,
+        string? department,
+        string? pilotOwner,
+        DateTimeOffset? executionWindowStart,
+        DateTimeOffset? executionWindowEnd,
+        DateTimeOffset? rollbackWindowStart,
+        DateTimeOffset? rollbackWindowEnd,
+        string? credentialOwner,
+        string? secretStorageMode,
+        string? secretReferenceNameHash,
+        string? postRunAuditArchiveFormat,
+        string? signedApprovalRef,
+        DateTimeOffset? expiresAt,
         DateTimeOffset nowUtc)
     {
+        PilotAuthorizationSensitiveContentGuard.ThrowIfUnsafe(
+        [
+            new("title", title),
+            new("businessPurpose", businessPurpose),
+            new("endpointCodes", string.Join("\n", endpointCodes ?? Array.Empty<string>())),
+            new("dataOwner", dataOwner),
+            new("toolOwner", toolOwner),
+            new("finalOwner", finalOwner),
+            new("rollbackOwner", rollbackOwner),
+            new("emergencyOwner", emergencyOwner),
+            new("evidenceSummary", evidenceSummary),
+            new("rollbackSummary", rollbackSummary),
+            new("businessScope", businessScope),
+            new("department", department),
+            new("pilotOwner", pilotOwner),
+            new("credentialOwner", credentialOwner),
+            new("secretStorageMode", secretStorageMode),
+            new("secretReferenceNameHash", secretReferenceNameHash),
+            new("postRunAuditArchiveFormat", postRunAuditArchiveFormat),
+            new("signedApprovalRef", signedApprovalRef)
+        ]);
+
+        if (expiresAt is null)
+        {
+            throw new ArgumentException("expiresAt is required.", nameof(expiresAt));
+        }
+
         Title = Require(title, nameof(title), 200);
         BusinessPurpose = Require(businessPurpose, nameof(businessPurpose), 1000);
         EndpointCodes = NormalizeStrings(endpointCodes, 120);
@@ -256,9 +362,39 @@ public sealed class PilotAuthorizationSubmission
         EvidenceArchive = new PilotEvidenceArchive(
             NormalizeOptional(evidenceSummary, 1000),
             []);
+        MaterialIntake = new PilotAuthorizationMaterialIntake(
+            NormalizeOptional(businessScope, 500),
+            NormalizeOptional(department, 160),
+            NormalizeOptional(pilotOwner, 160),
+            executionWindowStart,
+            executionWindowEnd,
+            rollbackWindowStart,
+            rollbackWindowEnd,
+            NormalizeOptional(credentialOwner, 160),
+            NormalizeOptional(secretStorageMode, 120),
+            NormalizeOptional(secretReferenceNameHash, 160),
+            NormalizeOptional(postRunAuditArchiveFormat, 160),
+            NormalizeOptional(signedApprovalRef, 240));
+        ExpiresAt = expiresAt;
         MachineValidationStatus = "NotEvaluated";
         MachineRejectedReasons = [];
         UpdatedAt = nowUtc;
+    }
+
+    private void EnsureCanExpire()
+    {
+        if (Status is PilotAuthorizationSubmissionStatus.Rejected
+            or PilotAuthorizationSubmissionStatus.Revoked
+            or PilotAuthorizationSubmissionStatus.Expired)
+        {
+            throw new InvalidOperationException("Terminal Pilot authorization submission cannot expire again.");
+        }
+    }
+
+    private static void EnsureDecisionTextIsSafe(params string?[] values)
+    {
+        PilotAuthorizationSensitiveContentGuard.ThrowIfUnsafe(
+            values.Select((value, index) => new PilotAuthorizationSensitiveField($"decisionText{index}", value)));
     }
 
     private void EnsureEditableDraft()
@@ -377,4 +513,27 @@ public sealed record PilotRollbackPlan(string RollbackOwner, string EmergencyOwn
 public sealed record PilotEvidenceArchive(string? EvidenceSummary, Guid[] ArtifactIds)
 {
     public static PilotEvidenceArchive Empty() => new(null, []);
+}
+
+public sealed record PilotAuthorizationMaterialIntake(
+    string? BusinessScope,
+    string? Department,
+    string? PilotOwner,
+    DateTimeOffset? ExecutionWindowStart,
+    DateTimeOffset? ExecutionWindowEnd,
+    DateTimeOffset? RollbackWindowStart,
+    DateTimeOffset? RollbackWindowEnd,
+    string? CredentialOwner,
+    string? SecretStorageMode,
+    string? SecretReferenceNameHash,
+    string? PostRunAuditArchiveFormat,
+    string? SignedApprovalRef)
+{
+    private PilotAuthorizationMaterialIntake()
+        : this(null, null, null, null, null, null, null, null, null, null, null, null)
+    {
+    }
+
+    public static PilotAuthorizationMaterialIntake Empty() =>
+        new(null, null, null, null, null, null, null, null, null, null, null, null);
 }

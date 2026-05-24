@@ -24,3 +24,18 @@ public sealed class PilotAuthorizationSubmissionListSpec : Specification<PilotAu
         SetOrderByDescending(submission => submission.UpdatedAt);
     }
 }
+
+public sealed class PilotAuthorizationExpiredOpenSubmissionsSpec : Specification<PilotAuthorizationSubmission>
+{
+    public PilotAuthorizationExpiredOpenSubmissionsSpec(DateTimeOffset nowUtc)
+    {
+        FilterCondition = submission =>
+            submission.ExpiresAt != null
+            && submission.ExpiresAt < nowUtc
+            && submission.Status != PilotAuthorizationSubmissionStatus.Rejected
+            && submission.Status != PilotAuthorizationSubmissionStatus.Revoked
+            && submission.Status != PilotAuthorizationSubmissionStatus.Expired;
+
+        SetOrderBy(submission => submission.ExpiresAt ?? DateTimeOffset.MaxValue);
+    }
+}

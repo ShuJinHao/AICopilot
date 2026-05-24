@@ -138,6 +138,50 @@ public sealed class PilotAuthorizationSubmissionConfiguration : IEntityTypeConfi
                 .HasColumnName("evidence_artifact_ids");
         });
 
+        builder.OwnsOne(submission => submission.MaterialIntake, owned =>
+        {
+            owned.Property(intake => intake.BusinessScope)
+                .HasMaxLength(500)
+                .HasColumnName("business_scope");
+            owned.Property(intake => intake.Department)
+                .HasMaxLength(160)
+                .HasColumnName("department");
+            owned.Property(intake => intake.PilotOwner)
+                .HasMaxLength(160)
+                .HasColumnName("pilot_owner");
+            owned.Property(intake => intake.ExecutionWindowStart)
+                .HasColumnType("timestamp with time zone")
+                .HasColumnName("execution_window_start");
+            owned.Property(intake => intake.ExecutionWindowEnd)
+                .HasColumnType("timestamp with time zone")
+                .HasColumnName("execution_window_end");
+            owned.Property(intake => intake.RollbackWindowStart)
+                .HasColumnType("timestamp with time zone")
+                .HasColumnName("rollback_window_start");
+            owned.Property(intake => intake.RollbackWindowEnd)
+                .HasColumnType("timestamp with time zone")
+                .HasColumnName("rollback_window_end");
+            owned.Property(intake => intake.CredentialOwner)
+                .HasMaxLength(160)
+                .HasColumnName("credential_owner");
+            owned.Property(intake => intake.SecretStorageMode)
+                .HasMaxLength(120)
+                .HasColumnName("secret_storage_mode");
+            owned.Property(intake => intake.SecretReferenceNameHash)
+                .HasMaxLength(160)
+                .HasColumnName("secret_reference_name_hash");
+            owned.Property(intake => intake.PostRunAuditArchiveFormat)
+                .HasMaxLength(160)
+                .HasColumnName("post_run_audit_archive_format");
+            owned.Property(intake => intake.SignedApprovalRef)
+                .HasMaxLength(240)
+                .HasColumnName("signed_approval_ref");
+        });
+
+        builder.Property(submission => submission.ExpiresAt)
+            .HasColumnType("timestamp with time zone")
+            .HasColumnName("expires_at");
+
         builder.Property(submission => submission.CreatedAt)
             .HasColumnType("timestamp with time zone")
             .HasColumnName("created_at");
@@ -148,6 +192,7 @@ public sealed class PilotAuthorizationSubmissionConfiguration : IEntityTypeConfi
 
         builder.HasIndex(submission => submission.RequestedByUserId);
         builder.HasIndex(submission => submission.Status);
+        builder.HasIndex(submission => submission.ExpiresAt);
         builder.HasIndex(submission => submission.UpdatedAt);
     }
 }
