@@ -1,14 +1,15 @@
 # AICopilot Limited Pilot Dry-Run P17.2 Acceptance
 
-- GeneratedAt: 2026-05-26 11:22:04
+- GeneratedAt: 2026-05-26 11:36:26
 - Repository: <local-repo>
-- LocalHeadAtGeneration: ad0092a0afae059edde6e558f2a7edb00b045cd4
+- LocalHeadAtGeneration: a75e4b85518dc52fc3853eb1f41de5defba12781
 - Branch: main
-- SubmittedStateNote: local-only total review package; no push, PR, or remote CI evidence was requested for this refresh
-- PullRequest: local-only
-- PullRequestHeadAtGeneration: local-only
-- GitHubCIAtGeneration: simulation-rc status=SKIPPED conclusion=LOCAL_ONLY
-- GitHubCIDetails: GitHub PR check skipped for local-only total review package
+- SubmittedStateNote: This material originated from a local total review package and is now submitted as PR #56 for remote review.
+- PullRequest: https://github.com/ShuJinHao/AICopilot/pull/56
+- PullRequestHeadAtSubmission: 3a46fa1ca897695349a47071743c2f143d59b1d0
+- GitHubCIAtSubmission: simulation-rc status=COMPLETED conclusion=SUCCESS for PR #56 initial submitted head
+- GitHubCIDetails: https://github.com/ShuJinHao/AICopilot/actions/runs/26433753923
+- SubmittedStateBoundary: PR #56 remote CI verifies review-package scope and release-candidate checks only; dry-run evidence remains fake/fixture and non-executing.
 - ExternalReviewEvidence: 5.5 Pro ReviewPending
 - ExternalReviewBlockingPolicy: evidence-only for P17.2 dry-run material
 - DryRunDecision: DryRunEvidenceReady
@@ -23,7 +24,7 @@
 - P17.2 Scope And Evidence Package Check: PASSED
 - P17.2 Dry-Run Runner Coverage Check: PASSED
 - P17.2 Dry-Run Safety Check: PASSED
-- GitHub PR Evidence Check Skipped For Local Review: PASSED
+- GitHub PR Submitted-State Evidence: PASSED
 - P17.2 No Execution Claim Check: PASSED
 
 ## Positive Dry-Run Evidence
@@ -90,10 +91,10 @@ Dry-run runner produced 8 positive evidence item(s), 6 refusal item(s), 4 emerge
 Dry-run evidence is hash-only and contains no real endpoint, credential, raw payload, or raw business records.
 ```
 
-### GitHub PR Evidence Check Skipped For Local Review
+### GitHub PR Submitted-State Evidence
 
 ```text
-GitHub PR evidence check skipped because this is a local-only total review package; no push or PR was requested.
+PR #56 submitted the review package for remote inspection. Initial submitted head 3a46fa1 completed simulation-rc with SUCCESS. This remote CI result does not change P17.2 dry-run into real Pilot execution.
 ```
 
 ### P17.2 No Execution Claim Check
@@ -108,4 +109,3 @@ P17.2 material records fake/fixture dry-run only.
 - Real endpoint/token use remains outside P17.2 and requires a future explicit approval.
 - External 5.5 Pro review state is evidence only for this dry-run package and must still be considered before any future execution.
 - Future execution still requires approved Pilot Window, approved chain, rollback, emergency stop, and approved runtime credential configuration.
-

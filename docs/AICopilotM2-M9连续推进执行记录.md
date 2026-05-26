@@ -1,11 +1,13 @@
 # AICopilot M2-M9 连续推进执行记录
 
-版本：2026-05-24
+版本：2026-05-26
 
 ## 总体状态
 
 - M1 baseline 已通过 PR #48 合并到 `main`，merge commit 为 `ec5e2bb0b989fee86df81fe6adbb02c3e940d0fa`。
-- 本轮从 M1 合并基线进入 M2-M6 工程推进，并准备 M7-M9 的受控交付材料。
+- PR #55 已通过 `6c0b9cd` 合并到 `main`，M5.1 raw SQL / Text-to-SQL 权限边界已进入主线。
+- 本地 Baseline v2 提交为 `9f09986`，本地 M6 提交为 `ad0092a`，本地 M7 dry-run evidence 提交为 `a75e4b8`。
+- 本轮从 M1/M2/M5 合并基线进入 Baseline v2、M6、M7 dry-run 和 5.5 总审材料收口。
 - 本轮只修改 `AICopilot`。`IIoT.CloudPlatform`、`IIoT.EdgeClient`、AICopilot 前端、真实 Pilot、真实 endpoint/token、Cloud 写、Recipe/version、自由 SQL 全部冻结。
 
 ## M2 Pilot Authorization Workflow
@@ -51,19 +53,24 @@
 
 ## M5 Enterprise Data Source Platformization
 
-- 当前基线已具备企业数据源治理字段、DataSource 权限授权、Text-to-SQL 只读护栏和数据源审计。
-- 本轮将 M5 纳入总审包，保持企业数据源能力为受控只读。
+- 当前基线已具备企业数据源治理字段、DataSource 权限授权、Text-to-SQL 只读护栏、数据源审计和 PR #55 M5.1 权限边界修复。
+- raw readonly SQL 保留为高权限 governed SQL 运维接口，要求 `DataSource.QueryGovernedSql`。
+- Text-to-SQL draft / execute 要求 `DataSource.TextToSql`，execute 必须通过 DraftId；普通 `User` 默认不持有这两个高级数据源权限。
+- Agent 仍走 Text-to-SQL，不走 raw SQL；`CloudReadOnly` 对 Agent/Text-to-SQL 仍显式拒绝。
 - M5 验收口径：不开放 Cloud 写、Recipe/version、自由 SQL，也不开放不受控的 `query_cloud_data_readonly` 执行面。
 
 ## M6 Security & Compliance Hardening
 
-- 本轮新增 Pilot Authorization 审计白名单键，并保留现有文本编码、架构边界、企业数据治理范围脚本。
-- 新增 M2-M9 静态门禁脚本，检查 API、状态、权限、审计安全键、M7 硬停和禁止语义。
-- M6 验收口径：敏感正文不得进入 DTO、审计 metadata、报告、日志或测试样本。
+- 本轮新增 M6 security / compliance hardening 文档、scope guard 和 focused tests。
+- M6 覆盖 secret/DLP/artifact/report/audit/prompt/SQL guardrail 边界，并复用现有脱敏、hash-only evidence、upload policy、Cloud tool safety、artifact download audit、SQL guardrail 和 Pilot hard stop 机制。
+- M6 验收口径：敏感正文不得进入 DTO、审计 metadata、报告、日志、artifact 证据或测试样本。
 
 ## M7 前硬停
 
-- 本轮只准备 M7 执行前授权包，不执行真实 Pilot。
+- 本轮复跑 P17.2 fake/fixture dry-run evidence，覆盖 fixed-template、controlled-goal、拒绝项、emergency stop、rollback 和 hash-only evidence。
+- M7 dry-run evidence 源自本地 fake/fixture 生成；当前已随 PR #56 远端送审，PR head 和 GitHub Checks 作为 submitted-state 证据。
+- PR #56 的远端 CI 只验证 review-package scope 和 release-candidate 门禁，不把 dry-run evidence 变成真实 Pilot 执行授权。
+- 本轮只准备 M7 执行前授权包和 dry-run readiness，不执行真实 Pilot。
 - 未配置真实 endpoint/token。
 - 未开启 Cloud 写或自由 SQL。
 - 未声明 GA。
@@ -72,4 +79,5 @@
 
 - M8 仅作为 Internal GA Candidate 准备口径，必须等待 M7 真实小范围验证完成后才能进入。
 - M9 仅准备 GPT/5.5 Pro 总审包，不等同 GA 发布。
-- GPT/5.5 Pro 审核应在 M2-M6 工程能力和 M7-M9 材料汇总后执行。
+- GPT/5.5 Pro 审核应以 `docs/AICopilotM9GPT总审包.md`、`origin/main..HEAD` diff 和本轮验证结果为入口。
+- PR #56 总审材料、远端 review 和 CI success 不等于真实 Pilot、GA、endpoint/token 配置或生产执行批准。
