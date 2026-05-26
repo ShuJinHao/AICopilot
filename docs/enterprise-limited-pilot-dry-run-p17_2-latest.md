@@ -1,14 +1,15 @@
-﻿# AICopilot Limited Pilot Dry-Run P17.2 Acceptance
+# AICopilot Limited Pilot Dry-Run P17.2 Acceptance
 
-- GeneratedAt: 2026-05-22 14:42:41
+- GeneratedAt: 2026-05-26 11:36:26
 - Repository: <local-repo>
-- LocalHeadAtGeneration: 8c5fa1b23411ccb7847f4188b49b09fca7e8dff8
-- Branch: integration/aicopilot-agent-workbench-simulation
-- SubmittedStateNote: after committing this report refresh, use PR #48 current head and GitHub checks as the authoritative submitted-state evidence
-- PullRequest: https://github.com/ShuJinHao/AICopilot/pull/48
-- PullRequestHeadAtGeneration: 8c5fa1b23411ccb7847f4188b49b09fca7e8dff8
-- GitHubCIAtGeneration: simulation-rc status=COMPLETED conclusion=SUCCESS
-- GitHubCIDetails: https://github.com/ShuJinHao/AICopilot/actions/runs/26272068951/job/77327643436
+- LocalHeadAtGeneration: a75e4b85518dc52fc3853eb1f41de5defba12781
+- Branch: main
+- SubmittedStateNote: This material originated from a local total review package and is now submitted as PR #56 for remote review.
+- PullRequest: https://github.com/ShuJinHao/AICopilot/pull/56
+- PullRequestHeadAtSubmission: 3a46fa1ca897695349a47071743c2f143d59b1d0
+- GitHubCIAtSubmission: simulation-rc status=COMPLETED conclusion=SUCCESS for PR #56 initial submitted head
+- GitHubCIDetails: https://github.com/ShuJinHao/AICopilot/actions/runs/26433753923
+- SubmittedStateBoundary: PR #56 remote CI verifies review-package scope and release-candidate checks only; dry-run evidence remains fake/fixture and non-executing.
 - ExternalReviewEvidence: 5.5 Pro ReviewPending
 - ExternalReviewBlockingPolicy: evidence-only for P17.2 dry-run material
 - DryRunDecision: DryRunEvidenceReady
@@ -19,12 +20,11 @@
 
 ## Summary
 
-- Enterprise Data Governance Scope Guard: PASSED
 - P17.1 Authorization Inheritance Check: PASSED
 - P17.2 Scope And Evidence Package Check: PASSED
 - P17.2 Dry-Run Runner Coverage Check: PASSED
 - P17.2 Dry-Run Safety Check: PASSED
-- GitHub PR #48 Current Head And CI Evidence Check: PASSED
+- GitHub PR Submitted-State Evidence: PASSED
 - P17.2 No Execution Claim Check: PASSED
 
 ## Positive Dry-Run Evidence
@@ -67,12 +67,6 @@
 
 ## Details
 
-### Enterprise Data Governance Scope Guard
-
-```text
-Enterprise Data Governance scope guard passed. Checked 5 candidate file(s).
-```
-
 ### P17.1 Authorization Inheritance Check
 
 ```text
@@ -97,10 +91,10 @@ Dry-run runner produced 8 positive evidence item(s), 6 refusal item(s), 4 emerge
 Dry-run evidence is hash-only and contains no real endpoint, credential, raw payload, or raw business records.
 ```
 
-### GitHub PR #48 Current Head And CI Evidence Check
+### GitHub PR Submitted-State Evidence
 
 ```text
-PR #48 head 8c5fa1b23411ccb7847f4188b49b09fca7e8dff8 simulation-rc SUCCESS https://github.com/ShuJinHao/AICopilot/actions/runs/26272068951/job/77327643436
+PR #56 submitted the review package for remote inspection. Initial submitted head 3a46fa1 completed simulation-rc with SUCCESS. This remote CI result does not change P17.2 dry-run into real Pilot execution.
 ```
 
 ### P17.2 No Execution Claim Check
@@ -115,4 +109,3 @@ P17.2 material records fake/fixture dry-run only.
 - Real endpoint/token use remains outside P17.2 and requires a future explicit approval.
 - External 5.5 Pro review state is evidence only for this dry-run package and must still be considered before any future execution.
 - Future execution still requires approved Pilot Window, approved chain, rollback, emergency stop, and approved runtime credential configuration.
-
