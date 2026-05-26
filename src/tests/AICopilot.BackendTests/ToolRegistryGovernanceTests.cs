@@ -1681,6 +1681,9 @@ public sealed class ToolRegistryGovernanceTests
         cloudReadonly.IsEnabled.Should().BeFalse();
         cloudReadonly.IsVisibleToPlanner.Should().BeFalse();
         cloudReadonly.IsExecutableByAgent.Should().BeFalse();
+
+        var businessReadonly = tools.Should().ContainSingle(tool => tool.ToolCode == "query_business_database_readonly").Which;
+        businessReadonly.RequiredPermission.Should().Be("DataSource.TextToSql");
     }
 
     [Fact]

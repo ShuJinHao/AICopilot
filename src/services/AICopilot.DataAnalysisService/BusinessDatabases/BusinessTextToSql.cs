@@ -10,7 +10,7 @@ using AICopilot.SharedKernel.Result;
 
 namespace AICopilot.DataAnalysisService.BusinessDatabases;
 
-[AuthorizeRequirement("DataSource.Query")]
+[AuthorizeRequirement("DataSource.TextToSql")]
 public sealed record GenerateBusinessTextToSqlCommand(
     Guid DataSourceId,
     string Question,
@@ -18,7 +18,7 @@ public sealed record GenerateBusinessTextToSqlCommand(
     int? RequestedLimit = null,
     bool PreviewOnly = true) : ICommand<Result<BusinessTextToSqlDraftDto>>;
 
-[AuthorizeRequirement("DataSource.Query")]
+[AuthorizeRequirement("DataSource.TextToSql")]
 public sealed record ExecuteBusinessTextToSqlCommand(
     Guid? DraftId = null,
     Guid? DataSourceId = null,

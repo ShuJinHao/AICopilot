@@ -22,7 +22,8 @@ public enum DataSourceSelectionMode
     Chat = 1,
     Agent = 2,
     Query = 3,
-    TextToSql = 4
+    TextToSql = 4,
+    GovernedSql = 5
 }
 
 public sealed record BusinessDatabaseDescriptor(

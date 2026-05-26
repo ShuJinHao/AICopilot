@@ -86,6 +86,8 @@ try {
     $allowedPatterns = @(
         "^docs/AICopilotM5EnterpriseDataSourcePlatformization\.md$",
         "^scripts/Test-AICopilotM5EnterpriseDataSourceScope\.ps1$",
+        "^src/core/AICopilot\.Core\.AiGateway/Aggregates/Tools/BuiltInToolRegistrations\.cs$",
+        "^src/hosts/AICopilot\.MigrationWorkApp/Worker\.cs$",
         "^src/hosts/AICopilot\.HttpApi/Controllers/DataAnalysisController\.cs$",
         "^src/services/AICopilot\.AiGatewayService/AgentTasks/AgentTaskCommands\.cs$",
         "^src/services/AICopilot\.AiGatewayService/AgentTasks/AgentTaskRuntime\.cs$",
@@ -96,12 +98,17 @@ try {
         "^src/services/AICopilot\.DataAnalysisService/Plugins/DataAnalysisDatabaseResolver\.cs$",
         "^src/services/AICopilot\.DataAnalysisService/Plugins/DataAnalysisPlugin\.cs$",
         "^src/services/AICopilot\.DataAnalysisService/Plugins/DataAnalysisSqlQueryRunner\.cs$",
+        "^src/services/AICopilot\.IdentityService/Authorization/PermissionCatalog\.cs$",
         "^src/services/AICopilot\.Services\.Contracts/Contracts/DataSourceContracts\.cs$",
         "^src/tests/AICopilot\.BackendTests/AICopilotM5EnterpriseDataSourcePlatformizationTests\.cs$",
+        "^src/tests/AICopilot\.BackendTests/AICopilotM2M9GovernanceScopeTests\.cs$",
+        "^src/tests/AICopilot\.BackendTests/DataSourceAuthorizationTests\.cs$",
         "^src/tests/AICopilot\.BackendTests/EnterpriseAgentWorkbenchP2Tests\.cs$",
         "^src/tests/AICopilot\.BackendTests/EnterpriseDataGovernanceP0Tests\.cs$",
         "^src/tests/AICopilot\.BackendTests/EnterpriseDynamicPlannerP3Tests\.cs$",
+        "^src/tests/AICopilot\.BackendTests/FreshDatabaseSeedTests\.cs$",
         "^src/tests/AICopilot\.BackendTests/SemanticAnalysisRunnerTests\.cs$",
+        "^src/tests/AICopilot\.BackendTests/ToolRegistryGovernanceTests\.cs$",
         "^src/tests/AICopilot\.BackendTests/TextToSqlReadOnlyTests\.cs$"
     )
 
@@ -145,17 +152,31 @@ Assert-Contains "docs/AICopilotM5EnterpriseDataSourcePlatformization.md" @(
     "free SQL",
     "query_cloud_data_readonly",
     "GA",
-    "CloudReadOnly remains blocked"
+    "CloudReadOnly remains blocked",
+    "DataSource.QueryGovernedSql",
+    "DataSource.TextToSql",
+    "DataSourceSelectionMode.GovernedSql",
+    "role does not receive either"
 )
 
 Assert-Contains "src/services/AICopilot.Services.Contracts/Contracts/DataSourceContracts.cs" @(
     "DataSourceSelectionMode",
+    "GovernedSql",
     "BusinessQueryGovernanceDto",
     "IsSanitizedPreview",
     "RedactedColumnHashes"
 )
 
+Assert-Contains "src/services/AICopilot.IdentityService/Authorization/PermissionCatalog.cs" @(
+    "DataSource.TextToSql",
+    "DataSource.QueryGovernedSql",
+    "UserDefaultPermissions"
+)
+
 Assert-Contains "src/services/AICopilot.DataAnalysisService/BusinessDatabases/BusinessDatabaseReadonlyQuery.cs" @(
+    'AuthorizeRequirement("DataSource.QueryGovernedSql")',
+    "DataSource.QueryGovernedSql",
+    "DataSourceSelectionMode.GovernedSql",
     "BusinessDataSourceGovernancePolicy",
     "Governed semantic schema is required",
     "Wildcard SELECT projections are not allowed",
@@ -165,22 +186,42 @@ Assert-Contains "src/services/AICopilot.DataAnalysisService/BusinessDatabases/Bu
 )
 
 Assert-Contains "src/services/AICopilot.DataAnalysisService/BusinessDatabases/BusinessTextToSql.cs" @(
+    'AuthorizeRequirement("DataSource.TextToSql")',
     "governed draft id",
     "SQL_PREVIEW_REDACTED_USE_DRAFT_ID",
     "free SQL preview execution is not allowed",
     "DataSourceSelectionMode.TextToSql"
 )
 
+Assert-Contains "src/core/AICopilot.Core.AiGateway/Aggregates/Tools/BuiltInToolRegistrations.cs" @(
+    "query_business_database_readonly",
+    "DataSource.TextToSql"
+)
+
+Assert-Contains "src/hosts/AICopilot.MigrationWorkApp/Worker.cs" @(
+    "ResolveBuiltInRequiredPermission",
+    "query_business_database_readonly",
+    "definition.RequiredPermission"
+)
+
 Assert-Contains "src/tests/AICopilot.BackendTests/AICopilotM5EnterpriseDataSourcePlatformizationTests.cs" @(
     'Suite", "AICopilotM5EnterpriseDataSourcePlatformization',
+    "CommandPermissions_ShouldSplitTextToSqlFromRawGovernedSql",
+    "PermissionCatalog_ShouldExposeSplitPermissionsWithoutDefaultUserGrant",
+    "AgentSourceSelection_ShouldRejectCloudReadOnlyEvenIfGrantedAndSelectable",
     "SourceSelection_ShouldApplyAuthorizationAndChatAgentSelectionFlags",
     "QueryExecution_ShouldRejectUngovernedSql",
+    "QueryExecution_ShouldReturnSanitizedBoundedPreviewAndSafeAuditOnly",
+    "TextToSql_ShouldRejectCloudReadOnlyEvenIfSelectable",
     "TextToSqlDraft_ShouldExposeHashOnlyAndExecuteThroughDraftId",
     "CloudReadOnlySource_ShouldRemainBlockedUntilGovernedSchemaExists"
 )
 
 $scopeText = @(
     Read-RepoText "docs/AICopilotM5EnterpriseDataSourcePlatformization.md"
+    Read-RepoText "src/core/AICopilot.Core.AiGateway/Aggregates/Tools/BuiltInToolRegistrations.cs"
+    Read-RepoText "src/hosts/AICopilot.MigrationWorkApp/Worker.cs"
+    Read-RepoText "src/services/AICopilot.IdentityService/Authorization/PermissionCatalog.cs"
     Read-RepoText "src/services/AICopilot.Services.Contracts/Contracts/DataSourceContracts.cs"
     Read-RepoText "src/services/AICopilot.DataAnalysisService/BusinessDatabases/BusinessDatabaseReadonlyQuery.cs"
     Read-RepoText "src/services/AICopilot.DataAnalysisService/BusinessDatabases/BusinessTextToSql.cs"
@@ -198,7 +239,8 @@ $forbiddenClaims = @(
     "已执行真实 Pilot",
     "已配置真实 endpoint",
     "已配置真实 token",
-    "DataAnalysis.ExecuteFreeSqlQuery"
+    "DataAnalysis.ExecuteFreeSqlQuery",
+    'AuthorizeRequirement("DataSource.Query")'
 )
 
 foreach ($claim in $forbiddenClaims) {
@@ -213,6 +255,21 @@ if ($scopeText -match "sk-[A-Za-z0-9_\-]{8,}") {
 
 if ($scopeText -match "ConnectionStrings__|API[_-]?KEY\s*=") {
     Add-Error "Potential credential configuration marker found in M5 scope."
+}
+
+$readonlyQuery = Read-RepoText "src/services/AICopilot.DataAnalysisService/BusinessDatabases/BusinessDatabaseReadonlyQuery.cs"
+if ($readonlyQuery -match 'ExecuteBusinessDatabaseReadonlyQueryCommand\([\s\S]*SelectionMode[\s\S]*\) : ICommand') {
+    Add-Error "Raw readonly SQL command must not accept client-supplied query selection mode."
+}
+
+$textToSql = Read-RepoText "src/services/AICopilot.DataAnalysisService/BusinessDatabases/BusinessTextToSql.cs"
+if ($textToSql -like '*DataSource.Query*') {
+    Add-Error "Text-to-SQL command path must use DataSource.TextToSql, not DataSource.Query."
+}
+
+$toolRegistrations = Read-RepoText "src/core/AICopilot.Core.AiGateway/Aggregates/Tools/BuiltInToolRegistrations.cs"
+if ($toolRegistrations -match 'BusinessReadonly[\s\S]*"DataSource\.Query"') {
+    Add-Error "Business readonly Agent tool must require DataSource.TextToSql, not DataSource.Query."
 }
 
 if ($errors.Count -gt 0) {

@@ -1,8 +1,13 @@
 using System.Data;
+using System.Reflection;
+using System.Text.Json;
+using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
 using AICopilot.Core.DataAnalysis.Ids;
 using AICopilot.DataAnalysisService.BusinessDatabases;
+using AICopilot.IdentityService.Authorization;
 using AICopilot.Services.Contracts;
+using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
 
@@ -12,6 +17,43 @@ namespace AICopilot.BackendTests;
 public sealed class AICopilotM5EnterpriseDataSourcePlatformizationTests
 {
     private static readonly Guid UserId = Guid.Parse("11111111-1111-4111-8111-111111111111");
+
+    [Fact]
+    public void CommandPermissions_ShouldSplitTextToSqlFromRawGovernedSql()
+    {
+        PermissionOf<ExecuteBusinessDatabaseReadonlyQueryCommand>().Should().Be("DataSource.QueryGovernedSql");
+        PermissionOf<GenerateBusinessTextToSqlCommand>().Should().Be("DataSource.TextToSql");
+        PermissionOf<ExecuteBusinessTextToSqlCommand>().Should().Be("DataSource.TextToSql");
+    }
+
+    [Fact]
+    public void PermissionCatalog_ShouldExposeSplitPermissionsWithoutDefaultUserGrant()
+    {
+        var catalog = new PermissionCatalog();
+
+        catalog.GetAll().Select(permission => permission.Code).Should()
+            .Contain("DataSource.TextToSql")
+            .And.Contain("DataSource.QueryGovernedSql")
+            .And.NotContain("DataSource.Query");
+        catalog.GetDefaultPermissions(IdentityRoleNames.Admin).Should()
+            .Contain("DataSource.TextToSql")
+            .And.Contain("DataSource.QueryGovernedSql");
+        catalog.GetDefaultPermissions(IdentityRoleNames.User).Should()
+            .NotContain("DataSource.TextToSql")
+            .And.NotContain("DataSource.QueryGovernedSql");
+    }
+
+    [Fact]
+    public void BusinessDatabaseReadonlyTool_ShouldRequireTextToSqlPermission()
+    {
+        var tool = BuiltInToolRegistrations.AgentRuntimeTools
+            .Should()
+            .ContainSingle(item => item.ToolCode == "query_business_database_readonly")
+            .Subject;
+
+        tool.RequiredPermission.Should().Be("DataSource.TextToSql");
+        tool.RequiredPermission.Should().NotBe("DataSource.Query");
+    }
 
     [Fact]
     public async Task SourceSelection_ShouldApplyAuthorizationAndChatAgentSelectionFlags()
@@ -38,6 +80,20 @@ public sealed class AICopilotM5EnterpriseDataSourcePlatformizationTests
         chatSources.Select(item => item.Name).Should().BeEquivalentTo("sim-both", "sim-chat");
         agentSources.Select(item => item.Name).Should().BeEquivalentTo("sim-both", "sim-agent");
         agentSources.Should().OnlyContain(item => item.ExternalSystemType == DataSourceExternalSystemType.SimulationBusiness);
+    }
+
+    [Fact]
+    public async Task AgentSourceSelection_ShouldRejectCloudReadOnlyEvenIfGrantedAndSelectable()
+    {
+        var cloud = CreateDatabase(
+            "cloud-agent-selectable",
+            BusinessDataExternalSystemType.CloudReadOnly,
+            readOnlyCredentialVerified: true);
+        var service = CreateReadService([cloud], [GrantToRole(cloud, canQuery: true)]);
+
+        var agentSources = await service.ListSelectableAsync(DataSourceSelectionMode.Agent);
+
+        agentSources.Should().BeEmpty();
     }
 
     [Fact]
@@ -79,7 +135,7 @@ public sealed class AICopilotM5EnterpriseDataSourcePlatformizationTests
             limit: 10,
             requireSimulationBusiness: false,
             safetySchema: null,
-            auditAction: "DataSource.Query",
+            auditAction: "DataSource.QueryGovernedSql",
             CancellationToken.None);
 
         result.Status.Should().Be(ResultStatus.Invalid);
@@ -116,11 +172,13 @@ public sealed class AICopilotM5EnterpriseDataSourcePlatformizationTests
             limit: 100,
             requireSimulationBusiness: false,
             safetySchema: null,
-            auditAction: "DataSource.Query",
-            CancellationToken.None);
+            auditAction: "DataSource.QueryGovernedSql",
+            CancellationToken.None,
+            DataSourceSelectionMode.GovernedSql);
 
         result.Status.Should().Be(ResultStatus.Ok);
         result.Value!.Rows.Should().HaveCount(50);
+        result.Value.Governance!.SelectionMode.Should().Be(DataSourceSelectionMode.GovernedSql);
         result.Value.Governance!.WarningCodes.Should()
             .Contain("SANITIZED_PREVIEW")
             .And.Contain("BOUNDED_PREVIEW_APPLIED")
@@ -132,9 +190,17 @@ public sealed class AICopilotM5EnterpriseDataSourcePlatformizationTests
         var auditRequest = audit.Requests.Should().ContainSingle().Subject;
         auditRequest.Metadata!.Should().ContainKey("queryHash");
         auditRequest.Metadata.Should().ContainKey("warningCode");
+        auditRequest.Metadata.Should().Contain("selectionMode", DataSourceSelectionMode.GovernedSql.ToString());
+        auditRequest.ActionCode.Should().Be("DataSource.QueryGovernedSql");
         auditRequest.Summary.Should().NotContain("SELECT employee_id");
         auditRequest.Summary.Should().NotContain("provider-secret");
         auditRequest.Metadata.Values.Should().NotContain(value => value.Contains("SELECT employee_id", StringComparison.OrdinalIgnoreCase));
+
+        var json = JsonSerializer.Serialize(result.Value);
+        json.Should().NotContain("provider-secret");
+        json.Should().NotContain("password=hidden");
+        json.Should().NotContain("api_key");
+        json.Should().NotContain(nameof(DatabaseQueryResult));
     }
 
     [Fact]
@@ -151,6 +217,28 @@ public sealed class AICopilotM5EnterpriseDataSourcePlatformizationTests
                 RequestedLimit: 10));
 
         result.Status.Should().Be(ResultStatus.Invalid);
+        connector.ExecuteCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task TextToSql_ShouldRejectCloudReadOnlyEvenIfSelectable()
+    {
+        var cloud = CreateDatabase(
+            "cloud-text-to-sql",
+            BusinessDataExternalSystemType.CloudReadOnly,
+            readOnlyCredentialVerified: true);
+        var connector = new RecordingDatabaseConnector();
+        var runtime = CreateTextToSqlRuntime(cloud, [GrantToRole(cloud, canQuery: true)], connector, new CapturingAuditLogWriter());
+
+        var result = await runtime.GenerateDraftAsync(
+            new BusinessTextToSqlDraftRequest(
+                cloud.Id,
+                "show device records",
+                RequestedLimit: 10));
+
+        result.Status.Should().Be(ResultStatus.Invalid);
+        result.Errors!.Select(error => error.ToString() ?? string.Empty)
+            .Should().Contain(error => error.Contains("SimulationBusiness", StringComparison.OrdinalIgnoreCase));
         connector.ExecuteCount.Should().Be(0);
     }
 
@@ -193,13 +281,21 @@ public sealed class AICopilotM5EnterpriseDataSourcePlatformizationTests
             limit: 10,
             requireSimulationBusiness: false,
             safetySchema: null,
-            auditAction: "DataSource.Query",
+            auditAction: "DataSource.QueryGovernedSql",
             CancellationToken.None);
 
         result.Status.Should().Be(ResultStatus.Invalid);
         result.Errors!.Select(error => error.ToString() ?? string.Empty)
             .Should().Contain(error => error.Contains("Governed semantic schema", StringComparison.OrdinalIgnoreCase));
         connector.ExecuteCount.Should().Be(0);
+    }
+
+    private static string PermissionOf<TRequest>()
+    {
+        return typeof(TRequest)
+                   .GetCustomAttribute<AuthorizeRequirementAttribute>()?
+                   .Permission
+               ?? throw new InvalidOperationException($"{typeof(TRequest).Name} is missing AuthorizeRequirementAttribute.");
     }
 
     private static BusinessDatabaseReadService CreateReadService(

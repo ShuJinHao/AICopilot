@@ -12,12 +12,11 @@ using AICopilot.SharedKernel.Result;
 
 namespace AICopilot.DataAnalysisService.BusinessDatabases;
 
-[AuthorizeRequirement("DataSource.Query")]
+[AuthorizeRequirement("DataSource.QueryGovernedSql")]
 public sealed record ExecuteBusinessDatabaseReadonlyQueryCommand(
     Guid DataSourceId,
     string Sql,
-    int? Limit = null,
-    DataSourceSelectionMode SelectionMode = DataSourceSelectionMode.Query) : ICommand<Result<BusinessQueryResultDto>>;
+    int? Limit = null) : ICommand<Result<BusinessQueryResultDto>>;
 
 public sealed class ExecuteBusinessDatabaseReadonlyQueryCommandHandler(
     BusinessReadonlyQueryExecutor executor)
@@ -33,9 +32,9 @@ public sealed class ExecuteBusinessDatabaseReadonlyQueryCommandHandler(
             request.Limit,
             requireSimulationBusiness: false,
             safetySchema: null,
-            auditAction: "DataSource.Query",
+            auditAction: "DataSource.QueryGovernedSql",
             cancellationToken,
-            selectionMode: request.SelectionMode);
+            selectionMode: DataSourceSelectionMode.GovernedSql);
     }
 }
 
@@ -310,6 +309,7 @@ internal static class BusinessDataSourceGovernancePolicy
             DataSourceSelectionMode.Chat => database.IsSelectableInChat,
             DataSourceSelectionMode.TextToSql => database.IsSelectableInChat &&
                                                  database.ExternalSystemType == BusinessDataExternalSystemType.SimulationBusiness,
+            DataSourceSelectionMode.GovernedSql => true,
             DataSourceSelectionMode.Query => true,
             _ => false
         };

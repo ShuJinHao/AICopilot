@@ -143,6 +143,8 @@ public sealed class FreshDatabaseSeedTests
         adminPermissions.Should().Contain("Identity.DeleteRole");
         adminPermissions.Should().Contain("Identity.GetListAuditLogs");
         adminPermissions.Should().Contain("DataAnalysis.GetListBusinessDatabases");
+        adminPermissions.Should().Contain("DataSource.TextToSql");
+        adminPermissions.Should().Contain("DataSource.QueryGovernedSql");
         adminPermissions.Should().Contain("Rag.UploadDocument");
         adminPermissions.Should().Contain("AiGateway.ToolRegistry.Read");
         adminPermissions.Should().Contain("AiGateway.ToolRegistry.Manage");
@@ -169,6 +171,8 @@ public sealed class FreshDatabaseSeedTests
         userPermissions.Should().NotContain("AiGateway.ApproveAgentToolCall");
         userPermissions.Should().NotContain("AiGateway.ApproveFinalOutput");
         userPermissions.Should().NotContain("AiGateway.FinalizeWorkspace");
+        userPermissions.Should().NotContain("DataSource.TextToSql");
+        userPermissions.Should().NotContain("DataSource.QueryGovernedSql");
 
         await using var mcpDbContext = await CreateMcpDbContextAsync(fixture);
         (await mcpDbContext.McpServerInfos.CountAsync()).Should().Be(0);

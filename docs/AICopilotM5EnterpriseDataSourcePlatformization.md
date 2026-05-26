@@ -14,10 +14,12 @@ This stage remains planning/readiness/runtime-governance only. It does not autho
 - Business query results now include safe governance metadata and bounded sanitized preview rows. Sensitive column names are replaced with safe redacted column names, sensitive values are redacted, and redacted column identifiers are represented only by hashes.
 - Query audit records only safe summaries: query hash, SQL length, data source id, source mode, selection mode, row count, truncation flag, duration, and warning code. Query text, SQL text, raw rows, payload, provider response, tokens, API keys, secrets, and connection strings are not recorded.
 - Text-to-SQL draft output exposes SQL hash and a redacted preview marker only. The executable SQL is held in the in-memory draft store and execution requires a governed draft id; direct free SQL preview execution is rejected.
+- The public raw readonly SQL endpoint is retained only as a high-permission governed SQL operations API. It requires `DataSource.QueryGovernedSql`, always records `DataSourceSelectionMode.GovernedSql`, and is not part of ordinary Text-to-SQL user access.
+- Text-to-SQL draft and draft-id execution require `DataSource.TextToSql`. The default `User` role does not receive either `DataSource.TextToSql` or `DataSource.QueryGovernedSql`; access must be explicitly granted through role permissions plus per-source grants.
 
 ## Interface Notes
 
-- `DataSourceSelectionMode` was added to internal shared contracts for Chat, Agent, Query, and TextToSql execution contexts.
+- `DataSourceSelectionMode` was added to internal shared contracts for Chat, Agent, Query, TextToSql, and GovernedSql execution contexts.
 - `BusinessQueryResultDto` keeps its existing row shape and adds optional `BusinessQueryGovernanceDto` metadata for sanitized-preview status, warning codes, redacted column hashes, and allowed tables.
 - Existing read-only operational APIs remain read-only. No Cloud API, Edge API, frontend route, appsettings value, secret, endpoint, token, or database migration was added.
 
