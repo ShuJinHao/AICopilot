@@ -202,6 +202,13 @@ public sealed class EnterpriseAgentWorkbenchP2Tests
             return Task.FromResult(descriptors);
         }
 
+        public Task<IReadOnlyList<BusinessDatabaseDescriptor>> ListSelectableAsync(
+            DataSourceSelectionMode selectionMode,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(descriptors);
+        }
+
         public Task<BusinessDatabaseConnectionInfo?> GetByNameAsync(
             string name,
             CancellationToken cancellationToken = default)

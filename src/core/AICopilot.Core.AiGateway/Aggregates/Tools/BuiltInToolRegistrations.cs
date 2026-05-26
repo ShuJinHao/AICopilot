@@ -28,7 +28,7 @@ public sealed record ToolRegistrationSeed(
 
 public static class BuiltInToolRegistrations
 {
-    public const int CurrentCatalogVersion = 8;
+    public const int CurrentCatalogVersion = 9;
 
     private const string AgentRuntimeTarget = "AgentTaskRuntime";
     private const string MockMcpTarget = "MockMcpProvider";
@@ -272,7 +272,7 @@ public static class BuiltInToolRegistrations
             ObjectSchema,
             ObjectSchema,
             AiToolRiskLevel.High,
-            "DataSource.Query",
+            "DataSource.TextToSql",
             RequiresApproval: true,
             IsEnabled: true,
             TimeoutSeconds: 60,

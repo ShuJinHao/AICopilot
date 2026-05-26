@@ -8,6 +8,7 @@ using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.Dapper;
 using AICopilot.Dapper.Security;
+using AICopilot.DataAnalysisService.BusinessDatabases;
 using AICopilot.DataAnalysisService.Plugins;
 using AICopilot.DataAnalysisService.Services;
 using AICopilot.Services.Contracts;
@@ -99,14 +100,15 @@ public sealed class TextToSqlReadOnlyTests
             "test",
             "Host=localhost;Database=readonly;Username=test;Password=test;",
             DbProviderType.PostgreSql,
-            isReadOnly: true);
+            isReadOnly: true,
+            BusinessDataExternalSystemType.SimulationBusiness);
 
         var rejectedResult = await CreatePlugin(rejectingConnector)
             .ExecuteSqlQueryAsync(BuildServiceProvider([readonlyDatabase]), readonlyDatabase.Name, "DROP TABLE users");
 
         rejectedResult.Should().Contain("安全警告");
         rejectedResult.Should().Contain("查询被系统拒绝");
-        rejectedResult.Should().Contain("Only SELECT queries are allowed.");
+        rejectedResult.Should().Contain("Only SELECT");
     }
 
     [Fact]
@@ -119,7 +121,8 @@ public sealed class TextToSqlReadOnlyTests
             "test",
             "Host=localhost;Database=readonly;Username=test;Password=test;",
             DbProviderType.PostgreSql,
-            isReadOnly: true);
+            isReadOnly: true,
+            BusinessDataExternalSystemType.SimulationBusiness);
 
         var serviceProvider = BuildServiceProvider([semanticDatabase]);
 
@@ -128,7 +131,7 @@ public sealed class TextToSqlReadOnlyTests
         var queryResult = await plugin.ExecuteSqlQueryAsync(
             serviceProvider,
             semanticDatabase.Name,
-            "SELECT device_code AS deviceCode FROM device_master_cloud_sim_view ORDER BY device_code LIMIT 1");
+            "SELECT device_code AS deviceCode FROM production_devices ORDER BY device_code LIMIT 1");
 
         connector.ExecutedSql.Should().HaveCount(3);
         tableNames.Should().Contain("devices");
@@ -160,14 +163,15 @@ public sealed class TextToSqlReadOnlyTests
             "test",
             "Host=localhost;Database=readonly;Username=test;Password=test;",
             DbProviderType.PostgreSql,
-            isReadOnly: true);
+            isReadOnly: true,
+            BusinessDataExternalSystemType.SimulationBusiness);
 
         var serviceProvider = BuildServiceProvider([semanticDatabase], auditLogWriter);
 
         var result = await plugin.ExecuteSqlQueryAsync(
             serviceProvider,
             semanticDatabase.Name,
-            "SELECT device_code AS deviceCode FROM device_master_cloud_sim_view ORDER BY device_code");
+            "SELECT device_code AS deviceCode FROM production_devices ORDER BY device_code");
 
         result.Should().Contain("结果已截断");
         result.Should().Contain("至少 201");
@@ -218,7 +222,19 @@ public sealed class TextToSqlReadOnlyTests
         IAuditLogWriter? auditLogWriter = null)
     {
         var services = new ServiceCollection();
+        var currentUser = new TestCurrentUser(role: "Analyst");
+        var grants = businessDatabases
+            .Select(database => new DataSourcePermissionGrant(
+                database.Id,
+                DataSourcePermissionGrantTargetType.User,
+                currentUser.Id!.Value.ToString("D"),
+                canQuery: true,
+                canSchemaView: true))
+            .ToArray();
         services.AddSingleton<IReadRepository<BusinessDatabase>>(new InMemoryReadRepository<BusinessDatabase>(businessDatabases));
+        services.AddSingleton<IReadRepository<DataSourcePermissionGrant>>(new InMemoryReadRepository<DataSourcePermissionGrant>(grants));
+        services.AddSingleton<ICurrentUser>(currentUser);
+        services.AddSingleton<BusinessDatabaseAccessService>();
         services.AddSingleton<VisualizationContext>();
         services.AddSingleton(auditLogWriter ?? new NoOpAuditLogWriter());
         return services.BuildServiceProvider();

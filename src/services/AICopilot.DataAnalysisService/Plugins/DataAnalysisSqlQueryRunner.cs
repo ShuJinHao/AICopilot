@@ -19,6 +19,18 @@ internal static class DataAnalysisSqlQueryRunner
         string sqlQuery,
         CancellationToken cancellationToken)
     {
+        var safetySchema = BusinessDataSourceGovernancePolicy.ResolveSafetySchema(db);
+        if (safetySchema is null)
+        {
+            throw new InvalidOperationException("Governed semantic schema is required before executing this business data source.");
+        }
+
+        var safetyError = BusinessReadonlyQuerySafetyPolicy.Validate(sqlQuery, safetySchema);
+        if (safetyError is not null)
+        {
+            throw new InvalidOperationException(safetyError);
+        }
+
         var queryResult = await dbConnector.ExecuteQueryWithMetadataAsync(
             BusinessDatabaseContractMapper.ToConnectionInfo(db),
             sqlQuery,
@@ -26,7 +38,13 @@ internal static class DataAnalysisSqlQueryRunner
             cancellationToken: cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var data = queryResult.Rows.ToList();
+        var dto = BusinessQueryResultMapper.Map(
+            db,
+            sqlQuery,
+            queryResult,
+            safetySchema,
+            DataSourceSelectionMode.Agent);
+        var data = dto.Rows.ToList();
         var schema = BuildSchema(data.FirstOrDefault());
 
         var vizContext = serviceProvider.GetRequiredService<VisualizationContext>();
@@ -35,13 +53,25 @@ internal static class DataAnalysisSqlQueryRunner
         var auditLogWriter = serviceProvider.GetRequiredService<IAuditLogWriter>();
         await auditLogWriter.WriteAsync(
             new AuditLogWriteRequest(
-                "DataAnalysis",
-                "DataAnalysis.ExecuteFreeSqlQuery",
+                AuditActionGroups.DataAnalysis,
+                "DataAnalysis.ExecuteGovernedSqlQuery",
                 "BusinessDatabase",
                 db.Id.ToString(),
                 db.Name,
                 AuditResults.Succeeded,
-                $"自由 SQL 查询已执行。RowsObserved={queryResult.ReturnedRowCount}; Truncated={queryResult.IsTruncated}; ElapsedMs={queryResult.ElapsedMilliseconds}."));
+                $"Governed SQL query executed. RowsObserved={queryResult.ReturnedRowCount}; Truncated={queryResult.IsTruncated}; ElapsedMs={queryResult.ElapsedMilliseconds}.",
+                Metadata: new Dictionary<string, string>
+                {
+                    ["queryHash"] = BusinessQueryResultMapper.ComputeQueryHash(sqlQuery),
+                    ["sqlLength"] = sqlQuery.Length.ToString(),
+                    ["sourceMode"] = db.ExternalSystemType.ToString(),
+                    ["dataSourceId"] = db.Id.ToString(),
+                    ["selectionMode"] = DataSourceSelectionMode.Agent.ToString(),
+                    ["rowCount"] = queryResult.ReturnedRowCount.ToString(),
+                    ["isTruncated"] = queryResult.IsTruncated.ToString(),
+                    ["durationMs"] = queryResult.ElapsedMilliseconds.ToString(),
+                    ["warningCode"] = string.Join(",", dto.Governance?.WarningCodes ?? [])
+                }));
         await auditLogWriter.SaveChangesAsync(cancellationToken);
 
         if (data.Count == 0)

@@ -57,7 +57,7 @@ public sealed class AICopilotM2M9GovernanceScopeTests
             .Should().Contain("DataSourcePermissionGrant");
         Read("src/services/AICopilot.DataAnalysisService/BusinessDatabases/BusinessTextToSql.cs")
             .Should().Contain("BusinessTextToSql")
-            .And.Contain("DataSource.Query");
+            .And.Contain("DataSource.TextToSql");
 
         Read("docs/AICopilotM2-M9连续推进执行记录.md")
             .Should().Contain("不配置真实 provider endpoint/token")

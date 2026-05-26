@@ -13,9 +13,17 @@ public sealed class BusinessDatabaseReadService(
     public async Task<IReadOnlyList<BusinessDatabaseDescriptor>> ListEnabledAsync(
         CancellationToken cancellationToken = default)
     {
+        return await ListSelectableAsync(DataSourceSelectionMode.Chat, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<BusinessDatabaseDescriptor>> ListSelectableAsync(
+        DataSourceSelectionMode selectionMode,
+        CancellationToken cancellationToken = default)
+    {
         var databases = await repository.ListAsync(new EnabledBusinessDatabasesSpec(), cancellationToken);
         var authorized = await accessService.FilterQueryAuthorizedAsync(databases, cancellationToken);
         return authorized
+            .Where(database => BusinessDataSourceGovernancePolicy.IsSelectableForMode(database, selectionMode))
             .Select(BusinessDatabaseContractMapper.ToDescriptor)
             .ToArray();
     }

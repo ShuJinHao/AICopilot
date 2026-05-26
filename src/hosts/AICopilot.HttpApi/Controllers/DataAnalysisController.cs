@@ -2,6 +2,7 @@ using AICopilot.DataAnalysisService.BusinessDatabases;
 using AICopilot.DataAnalysisService.Semantics;
 using AICopilot.DataAnalysisService.SimulationBusiness;
 using AICopilot.HttpApi.Infrastructure;
+using AICopilot.Services.Contracts;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 
@@ -54,9 +55,10 @@ public class DataAnalysisController(ISender sender) : ApiControllerBase(sender)
     }
 
     [HttpGet("business-database/authorized")]
-    public async Task<IActionResult> GetMyAuthorizedDataSources()
+    public async Task<IActionResult> GetMyAuthorizedDataSources(
+        [FromQuery] DataSourceSelectionMode selectionMode = DataSourceSelectionMode.Chat)
     {
-        return ReturnResult(await Sender.Send(new GetMyAuthorizedDataSourcesQuery()));
+        return ReturnResult(await Sender.Send(new GetMyAuthorizedDataSourcesQuery(selectionMode)));
     }
 
     [HttpPost("business-database/query-readonly")]

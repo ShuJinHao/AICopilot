@@ -33,6 +33,8 @@ public record BusinessDatabaseDto
     public bool IsSelectableInAgent { get; init; }
     public bool IsSimulation { get; init; }
     public string SourceLabel { get; init; } = string.Empty;
+    public bool IsGovernedQueryEnabled { get; init; }
+    public string GovernanceStatus { get; init; } = string.Empty;
 }
 
 public record CreatedBusinessDatabaseDto(Guid Id, string Name);
@@ -563,7 +565,8 @@ public class GetListBusinessDatabasesQueryHandler(
 }
 
 [AuthorizeRequirement("DataSource.Read")]
-public sealed record GetMyAuthorizedDataSourcesQuery
+public sealed record GetMyAuthorizedDataSourcesQuery(
+    DataSourceSelectionMode SelectionMode = DataSourceSelectionMode.Chat)
     : IQuery<Result<IList<BusinessDatabaseDto>>>;
 
 public sealed class GetMyAuthorizedDataSourcesQueryHandler(
@@ -577,7 +580,10 @@ public sealed class GetMyAuthorizedDataSourcesQueryHandler(
     {
         var databases = await repository.ListAsync(new EnabledBusinessDatabasesSpec(), cancellationToken);
         var authorized = await accessService.FilterQueryAuthorizedAsync(databases, cancellationToken);
-        IList<BusinessDatabaseDto> result = authorized.Select(BusinessDatabaseDtoMapper.Map).ToList();
+        IList<BusinessDatabaseDto> result = authorized
+            .Where(database => BusinessDataSourceGovernancePolicy.IsSelectableForMode(database, request.SelectionMode))
+            .Select(BusinessDatabaseDtoMapper.Map)
+            .ToList();
         return Result.Success(result);
     }
 }
@@ -611,7 +617,9 @@ internal static class BusinessDatabaseDtoMapper
             IsSimulation = db.ExternalSystemType == BusinessDataExternalSystemType.SimulationBusiness,
             SourceLabel = db.ExternalSystemType == BusinessDataExternalSystemType.SimulationBusiness
                 ? BusinessQueryResultMapper.SimulationSourceLabel
-                : db.Name
+                : db.Name,
+            IsGovernedQueryEnabled = BusinessDataSourceGovernancePolicy.HasExecutableGovernedSchema(db),
+            GovernanceStatus = BusinessDataSourceGovernancePolicy.ResolveGovernanceStatus(db)
         };
     }
 

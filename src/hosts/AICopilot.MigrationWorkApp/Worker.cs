@@ -303,7 +303,7 @@ public class Worker(
                 definition.InputSchemaJson,
                 definition.OutputSchemaJson,
                 tool.RiskLevel,
-                tool.RequiredPermission,
+                ResolveBuiltInRequiredPermission(tool.RequiredPermission, definition),
                 tool.RequiresApproval,
                 tool.IsEnabled,
                 tool.TimeoutSeconds,
@@ -350,6 +350,19 @@ public class Worker(
         }
 
         await aiGatewayDbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static string? ResolveBuiltInRequiredPermission(
+        string? currentPermission,
+        ToolRegistrationSeed definition)
+    {
+        if (definition.ToolCode == "query_business_database_readonly" &&
+            string.Equals(currentPermission, "DataSource.Query", StringComparison.Ordinal))
+        {
+            return definition.RequiredPermission;
+        }
+
+        return currentPermission;
     }
 
     private static async Task EnsureCloudSemanticSimulationSourceAsync(

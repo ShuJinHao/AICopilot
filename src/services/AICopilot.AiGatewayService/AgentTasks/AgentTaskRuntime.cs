@@ -1045,7 +1045,9 @@ internal sealed class AgentTaskRuntime(
             throw new InvalidOperationException("Business Text-to-SQL runtime is not configured.");
         }
 
-        var enabledSources = await businessDatabaseReadService.ListEnabledAsync(cancellationToken);
+        var enabledSources = await businessDatabaseReadService.ListSelectableAsync(
+            DataSourceSelectionMode.Agent,
+            cancellationToken);
         var selectedIds = (plan.DataSourceIds ?? [])
             .Where(id => id != Guid.Empty)
             .ToHashSet();

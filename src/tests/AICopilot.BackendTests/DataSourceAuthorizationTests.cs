@@ -39,7 +39,7 @@ public sealed class DataSourceAuthorizationTests
             limit: 10,
             requireSimulationBusiness: true,
             SimulationBusinessQuerySchema.SafetySchema,
-            auditAction: "DataSource.Query",
+            auditAction: "DataSource.TextToSqlExecute",
             CancellationToken.None);
 
         result.Status.Should().Be(ResultStatus.Forbidden);
