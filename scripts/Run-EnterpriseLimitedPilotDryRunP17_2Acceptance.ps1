@@ -3,7 +3,8 @@ param(
     [string]$ReportPath = ".\docs\enterprise-limited-pilot-dry-run-p17_2-latest.md",
     [ValidateSet("", "ReviewPending", "BlockedByReview", "NoBlocker")]
     [string]$ReviewResultOverride = "",
-    [switch]$SkipScopeGuard
+    [switch]$SkipScopeGuard,
+    [switch]$SkipGitHubPrCheck
 )
 
 $ErrorActionPreference = "Stop"
@@ -59,6 +60,16 @@ function ConvertTo-ReportSafeOutput {
 }
 
 function Get-PrSummary {
+    if ($SkipGitHubPrCheck) {
+        return [pscustomobject]@{
+            Head = "local-only"
+            Url = "local-only"
+            CiStatus = "SKIPPED"
+            CiConclusion = "LOCAL_ONLY"
+            CiDetails = "GitHub PR check skipped for local-only total review package"
+        }
+    }
+
     try {
         $json = gh pr view 48 --json headRefOid,statusCheckRollup,url 2>$null | ConvertFrom-Json
         $check = $json.statusCheckRollup | Where-Object { $_.name -eq "simulation-rc" } | Select-Object -First 1
@@ -379,17 +390,27 @@ $results += Invoke-Step -Name "P17.2 Dry-Run Safety Check" -Script {
     "Dry-run evidence is hash-only and contains no real endpoint, credential, raw payload, or raw business records."
 }
 
-$results += Invoke-Step -Name "GitHub PR #48 Current Head And CI Evidence Check" -Script {
-    $summary = Get-PrSummary
-    if ($summary.Head -eq "unknown") {
-        throw "Unable to read PR #48."
-    }
+$githubPrStepName = if ($SkipGitHubPrCheck) {
+    "GitHub PR Evidence Check Skipped For Local Review"
+} else {
+    "GitHub PR #48 Current Head And CI Evidence Check"
+}
 
-    if ($summary.CiStatus -ne "COMPLETED" -or $summary.CiConclusion -ne "SUCCESS") {
-        throw "PR #48 simulation-rc is not success. status=$($summary.CiStatus) conclusion=$($summary.CiConclusion)"
-    }
+$results += Invoke-Step -Name $githubPrStepName -Script {
+    if ($SkipGitHubPrCheck) {
+        "GitHub PR evidence check skipped because this is a local-only total review package; no push or PR was requested."
+    } else {
+        $summary = Get-PrSummary
+        if ($summary.Head -eq "unknown") {
+            throw "Unable to read PR #48."
+        }
 
-    "PR #48 head $($summary.Head) simulation-rc SUCCESS $($summary.CiDetails)"
+        if ($summary.CiStatus -ne "COMPLETED" -or $summary.CiConclusion -ne "SUCCESS") {
+            throw "PR #48 simulation-rc is not success. status=$($summary.CiStatus) conclusion=$($summary.CiConclusion)"
+        }
+
+        "PR #48 head $($summary.Head) simulation-rc SUCCESS $($summary.CiDetails)"
+    }
 }
 
 $results += Invoke-Step -Name "P17.2 No Execution Claim Check" -Script {
@@ -429,7 +450,12 @@ $reportLines.Add("- GeneratedAt: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')")
 $reportLines.Add("- Repository: <local-repo>")
 $reportLines.Add("- LocalHeadAtGeneration: $localHead")
 $reportLines.Add("- Branch: $branch")
-$reportLines.Add("- SubmittedStateNote: after committing this report refresh, use PR #48 current head and GitHub checks as the authoritative submitted-state evidence")
+$submittedStateNote = if ($SkipGitHubPrCheck) {
+    "local-only total review package; no push, PR, or remote CI evidence was requested for this refresh"
+} else {
+    "after committing this report refresh, use PR #48 current head and GitHub checks as the authoritative submitted-state evidence"
+}
+$reportLines.Add("- SubmittedStateNote: $submittedStateNote")
 $reportLines.Add("- PullRequest: $($prSummary.Url)")
 $reportLines.Add("- PullRequestHeadAtGeneration: $($prSummary.Head)")
 $reportLines.Add("- GitHubCIAtGeneration: simulation-rc status=$($prSummary.CiStatus) conclusion=$($prSummary.CiConclusion)")

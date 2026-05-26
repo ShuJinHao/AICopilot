@@ -1,14 +1,14 @@
-﻿# AICopilot Limited Pilot Dry-Run P17.2 Acceptance
+# AICopilot Limited Pilot Dry-Run P17.2 Acceptance
 
-- GeneratedAt: 2026-05-22 14:42:41
+- GeneratedAt: 2026-05-26 11:22:04
 - Repository: <local-repo>
-- LocalHeadAtGeneration: 8c5fa1b23411ccb7847f4188b49b09fca7e8dff8
-- Branch: integration/aicopilot-agent-workbench-simulation
-- SubmittedStateNote: after committing this report refresh, use PR #48 current head and GitHub checks as the authoritative submitted-state evidence
-- PullRequest: https://github.com/ShuJinHao/AICopilot/pull/48
-- PullRequestHeadAtGeneration: 8c5fa1b23411ccb7847f4188b49b09fca7e8dff8
-- GitHubCIAtGeneration: simulation-rc status=COMPLETED conclusion=SUCCESS
-- GitHubCIDetails: https://github.com/ShuJinHao/AICopilot/actions/runs/26272068951/job/77327643436
+- LocalHeadAtGeneration: ad0092a0afae059edde6e558f2a7edb00b045cd4
+- Branch: main
+- SubmittedStateNote: local-only total review package; no push, PR, or remote CI evidence was requested for this refresh
+- PullRequest: local-only
+- PullRequestHeadAtGeneration: local-only
+- GitHubCIAtGeneration: simulation-rc status=SKIPPED conclusion=LOCAL_ONLY
+- GitHubCIDetails: GitHub PR check skipped for local-only total review package
 - ExternalReviewEvidence: 5.5 Pro ReviewPending
 - ExternalReviewBlockingPolicy: evidence-only for P17.2 dry-run material
 - DryRunDecision: DryRunEvidenceReady
@@ -19,12 +19,11 @@
 
 ## Summary
 
-- Enterprise Data Governance Scope Guard: PASSED
 - P17.1 Authorization Inheritance Check: PASSED
 - P17.2 Scope And Evidence Package Check: PASSED
 - P17.2 Dry-Run Runner Coverage Check: PASSED
 - P17.2 Dry-Run Safety Check: PASSED
-- GitHub PR #48 Current Head And CI Evidence Check: PASSED
+- GitHub PR Evidence Check Skipped For Local Review: PASSED
 - P17.2 No Execution Claim Check: PASSED
 
 ## Positive Dry-Run Evidence
@@ -67,12 +66,6 @@
 
 ## Details
 
-### Enterprise Data Governance Scope Guard
-
-```text
-Enterprise Data Governance scope guard passed. Checked 5 candidate file(s).
-```
-
 ### P17.1 Authorization Inheritance Check
 
 ```text
@@ -97,10 +90,10 @@ Dry-run runner produced 8 positive evidence item(s), 6 refusal item(s), 4 emerge
 Dry-run evidence is hash-only and contains no real endpoint, credential, raw payload, or raw business records.
 ```
 
-### GitHub PR #48 Current Head And CI Evidence Check
+### GitHub PR Evidence Check Skipped For Local Review
 
 ```text
-PR #48 head 8c5fa1b23411ccb7847f4188b49b09fca7e8dff8 simulation-rc SUCCESS https://github.com/ShuJinHao/AICopilot/actions/runs/26272068951/job/77327643436
+GitHub PR evidence check skipped because this is a local-only total review package; no push or PR was requested.
 ```
 
 ### P17.2 No Execution Claim Check
