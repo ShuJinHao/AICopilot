@@ -1,8 +1,8 @@
 # AICopilot Limited Pilot Dry-Run P17.2 Acceptance
 
-- GeneratedAt: 2026-05-26 11:22:04
+- GeneratedAt: 2026-05-26 11:36:26
 - Repository: <local-repo>
-- LocalHeadAtGeneration: ad0092a0afae059edde6e558f2a7edb00b045cd4
+- LocalHeadAtGeneration: a75e4b85518dc52fc3853eb1f41de5defba12781
 - Branch: main
 - SubmittedStateNote: local-only total review package; no push, PR, or remote CI evidence was requested for this refresh
 - PullRequest: local-only
