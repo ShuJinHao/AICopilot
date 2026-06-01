@@ -61,7 +61,21 @@ public sealed class SecurityHardeningTests
     [Fact]
     public void ManagementControllers_ShouldRequireHttpAuthentication()
     {
-        typeof(AiGatewayController).GetCustomAttribute<AuthorizeAttribute>().Should().NotBeNull();
+        var aiGatewayControllers = new[]
+        {
+            typeof(AiGatewayController),
+            typeof(AiGatewayToolController),
+            typeof(AiGatewaySessionController),
+            typeof(AiGatewayAgentTaskController),
+            typeof(AiGatewayTrialPilotController),
+            typeof(AiGatewayWorkspaceArtifactController)
+        };
+
+        foreach (var controller in aiGatewayControllers)
+        {
+            controller.GetCustomAttribute<AuthorizeAttribute>().Should().NotBeNull(controller.Name);
+        }
+
         typeof(DataAnalysisController).GetCustomAttribute<AuthorizeAttribute>().Should().NotBeNull();
         typeof(McpController).GetCustomAttribute<AuthorizeAttribute>().Should().NotBeNull();
         typeof(RagController).GetCustomAttribute<AuthorizeAttribute>().Should().NotBeNull();
@@ -115,13 +129,7 @@ public sealed class SecurityHardeningTests
         chatStreamSource.Should().Contain("finalAgentContextStore.GetAsync(request.SessionId");
         chatStreamSource.Should().Contain("AppProblemCodes.ApprovalPending");
 
-        var controllerSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "hosts",
-            "AICopilot.HttpApi",
-            "Controllers",
-            "AiGatewayController.cs"));
+        var controllerSource = ReadAiGatewayControllerSources(solutionRoot);
         controllerSource.Should().Contain("[HttpGet(\"approval/pending\")]");
         controllerSource.Should().Contain("GetPendingApprovalsQuery");
     }
@@ -416,20 +424,21 @@ public sealed class SecurityHardeningTests
     public void AgentPlanRuntimeAndUpload_ShouldRecheckRagKnowledgeBasePermissions()
     {
         var solutionRoot = FindSolutionRoot();
-        var agentTaskCommandsSource = File.ReadAllText(Path.Combine(
+        var agentTaskPlanPreparationSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
             "services",
             "AICopilot.AiGatewayService",
             "AgentTasks",
-            "AgentTaskCommands.cs"));
-        var agentTaskRuntimeSource = File.ReadAllText(Path.Combine(
+            "AgentTaskPlanPreparationService.cs"));
+        var agentRuntimeRagToolServiceSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
             "services",
             "AICopilot.AiGatewayService",
             "AgentTasks",
-            "AgentTaskRuntime.cs"));
+            "Runtime",
+            "AgentRuntimeRagToolService.cs"));
         var uploadRecordsSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
@@ -438,15 +447,15 @@ public sealed class SecurityHardeningTests
             "Uploads",
             "UploadRecords.cs"));
 
-        agentTaskCommandsSource.Should().Contain("IKnowledgeBaseAccessChecker");
-        agentTaskCommandsSource.Should().Contain("CanReadAsync(");
-        agentTaskCommandsSource.Should().Contain("knowledgeBaseId");
-        agentTaskCommandsSource.Should().Contain("Result.NotFound");
-        agentTaskRuntimeSource.Should().Contain("IKnowledgeBaseAccessChecker");
-        agentTaskRuntimeSource.Should().Contain("CanReadAsync(");
-        agentTaskRuntimeSource.Should().Contain("knowledgeBaseId");
-        agentTaskRuntimeSource.Should().Contain("task.UserId");
-        agentTaskRuntimeSource.Should().Contain("UnauthorizedAccessException");
+        agentTaskPlanPreparationSource.Should().Contain("IKnowledgeBaseAccessChecker");
+        agentTaskPlanPreparationSource.Should().Contain("CanReadAsync(");
+        agentTaskPlanPreparationSource.Should().Contain("knowledgeBaseId");
+        agentTaskPlanPreparationSource.Should().Contain("Result.NotFound");
+        agentRuntimeRagToolServiceSource.Should().Contain("IKnowledgeBaseAccessChecker");
+        agentRuntimeRagToolServiceSource.Should().Contain("CanReadAsync(");
+        agentRuntimeRagToolServiceSource.Should().Contain("knowledgeBaseId");
+        agentRuntimeRagToolServiceSource.Should().Contain("task.UserId");
+        agentRuntimeRagToolServiceSource.Should().Contain("UnauthorizedAccessException");
         uploadRecordsSource.Should().Contain("IKnowledgeBaseAccessChecker");
         uploadRecordsSource.Should().Contain("CanWriteAsync(");
         uploadRecordsSource.Should().Contain("request.KnowledgeBaseId");
@@ -464,14 +473,13 @@ public sealed class SecurityHardeningTests
             "AICopilot.HttpApi",
             "infrastructure",
             "ApiControllerBase.cs"));
-        var controllerFiles = new[]
-        {
-            "AiGatewayController.cs",
-            "DataAnalysisController.cs",
-            "IdentityController.cs",
-            "McpController.cs",
-            "RagController.cs"
-        };
+        var controllerPath = Path.Combine(solutionRoot, "src", "hosts", "AICopilot.HttpApi", "Controllers");
+        var controllerFiles = Directory.GetFiles(controllerPath, "*Controller.cs")
+            .Select(Path.GetFileName)
+            .Where(file => file is not null)
+            .Cast<string>()
+            .OrderBy(file => file, StringComparer.Ordinal)
+            .ToArray();
 
         baseControllerSource.Should().Contain("ApiControllerBase(ISender sender)");
         baseControllerSource.Should().Contain("protected ISender Sender");
@@ -482,10 +490,7 @@ public sealed class SecurityHardeningTests
         {
             var source = File.ReadAllText(Path.Combine(
                 solutionRoot,
-                "src",
-                "hosts",
-                "AICopilot.HttpApi",
-                "Controllers",
+                controllerPath,
                 controllerFile));
 
             source.Should().Contain("ISender sender", controllerFile);
@@ -520,21 +525,27 @@ public sealed class SecurityHardeningTests
     public void LoginRateLimiter_ShouldPartitionByUsernameAndIp()
     {
         var solutionRoot = FindSolutionRoot();
-        var dependencyInjectionSource = File.ReadAllText(Path.Combine(
+        var httpApiRoot = Path.Combine(
             solutionRoot,
             "src",
             "hosts",
-            "AICopilot.HttpApi",
+            "AICopilot.HttpApi");
+        var dependencyInjectionSource = File.ReadAllText(Path.Combine(
+            httpApiRoot,
             "DependencyInjection.cs"));
+        var rateLimitingSource = File.ReadAllText(Path.Combine(
+            httpApiRoot,
+            "HttpApiRateLimitingConfiguration.cs"));
+        var source = string.Concat(dependencyInjectionSource, Environment.NewLine, rateLimitingSource);
 
-        dependencyInjectionSource.Should().Contain("options.AddPolicy(\"login\"");
-        dependencyInjectionSource.Should().NotContain("AddTokenBucketLimiter(\"login\"");
-        dependencyInjectionSource.Should().Contain("GetLoginPolicyPartitionKey");
-        dependencyInjectionSource.Should().Contain("TryReadLoginUsername");
-        dependencyInjectionSource.Should().Contain("RemoteIpAddress");
-        dependencyInjectionSource.Should().Contain("JsonDocument.Parse");
-        dependencyInjectionSource.Should().NotContain("X-Login-Username");
-        dependencyInjectionSource.Should().NotContain("Request.Query.TryGetValue(\"username\"");
+        source.Should().Contain("options.AddPolicy(\"login\"");
+        source.Should().NotContain("AddTokenBucketLimiter(\"login\"");
+        source.Should().Contain("GetLoginPolicyPartitionKey");
+        source.Should().Contain("TryReadLoginUsername");
+        source.Should().Contain("RemoteIpAddress");
+        source.Should().Contain("JsonDocument.Parse");
+        source.Should().NotContain("X-Login-Username");
+        source.Should().NotContain("Request.Query.TryGetValue(\"username\"");
     }
 
     [Fact]
@@ -1008,7 +1019,7 @@ public sealed class SecurityHardeningTests
             Path.Combine("src", "services", "AICopilot.AiGatewayService", "Commands", "LanguageModels", "UpdateLanguageModel.cs"),
             Path.Combine("src", "services", "AICopilot.AiGatewayService", "Commands", "LanguageModels", "DeleteLanguageModel.cs"),
             Path.Combine("src", "services", "AICopilot.AiGatewayService", "Commands", "Sessions", "UpdateSessionSafetyAttestation.cs"),
-            Path.Combine("src", "services", "AICopilot.DataAnalysisService", "BusinessDatabases", "BusinessDatabaseManagement.cs"),
+            Path.Combine("src", "services", "AICopilot.DataAnalysisService", "BusinessDatabases", "BusinessDatabaseCommandHandlers.cs"),
             Path.Combine("src", "services", "AICopilot.RagService", "Commands", "KnowledgeBases", "CreateKnowledgeBase.cs"),
             Path.Combine("src", "services", "AICopilot.RagService", "KnowledgeBases", "KnowledgeBaseManagement.cs"),
             Path.Combine("src", "services", "AICopilot.RagService", "EmbeddingModels", "EmbeddingModelManagement.cs"),
@@ -1034,15 +1045,24 @@ public sealed class SecurityHardeningTests
             "src/services/AICopilot.AiGatewayService/Workflows/Executors/DataAnalysisAuditRecorder.cs",
             "src/services/AICopilot.AiGatewayService/Workflows/Executors/FinalAgentRunExecutor.cs",
             "src/services/AICopilot.AiGatewayService/Workflows/Executors/ToolExecutionAuditRecorder.cs",
-            "src/services/AICopilot.AiGatewayService/CloudReadiness/CloudReadonlyPilotReadiness.cs",
-            "src/services/AICopilot.AiGatewayService/TrialOperations/TrialOperationsManagement.cs",
-            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactVersioningManagement.cs",
-            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceP9Management.cs",
-            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceManagement.cs",
+            "src/services/AICopilot.AiGatewayService/CloudReadiness/CloudReadonlyPilotReadinessHandlers.cs",
+            "src/services/AICopilot.AiGatewayService/CloudReadiness/CloudReadonlyProductionControlledPilotHandlers.cs",
+            "src/services/AICopilot.AiGatewayService/CloudReadiness/CloudReadonlyProductionOperationsHandlers.cs",
+            "src/services/AICopilot.AiGatewayService/CloudReadiness/CloudReadonlyProductionPilotHandlers.cs",
+            "src/services/AICopilot.AiGatewayService/PilotAuthorization/PilotAuthorizationDecisionCommandHandlers.cs",
+            "src/services/AICopilot.AiGatewayService/PilotAuthorization/PilotAuthorizationSubmissionCommandHandlers.cs",
+            "src/services/AICopilot.AiGatewayService/TrialOperations/TrialCampaignCommandHandlers.cs",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactVersioningCommandHandlers.cs",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactVersioningQueryHandlers.cs",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceCommandHandlers.cs",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceQueryHandlers.cs",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceP9CommandHandlers.cs",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceP9QueryHandlers.cs",
             "src/services/AICopilot.AiGatewayService/Uploads/UploadRecords.cs",
             "src/services/AICopilot.RagService/Commands/Documents/UploadDocument.cs",
+            "src/services/AICopilot.RagService/Queries/KnowledgeBases/SearchKnowledgeBase.cs",
             "src/services/AICopilot.DataAnalysisService/Plugins/DataAnalysisSqlQueryRunner.cs",
-            "src/services/AICopilot.DataAnalysisService/BusinessDatabases/BusinessDatabaseReadonlyQuery.cs",
+            "src/services/AICopilot.DataAnalysisService/BusinessDatabases/BusinessReadonlyQueryAuditRecorder.cs",
             "src/services/AICopilot.DataAnalysisService/BusinessDatabases/BusinessTextToSql.cs"
         };
 
@@ -1190,13 +1210,21 @@ public sealed class SecurityHardeningTests
     public void DataAnalysisAuditSummaries_ShouldStayReadable()
     {
         var solutionRoot = FindSolutionRoot();
-        var source = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "services",
-            "AICopilot.DataAnalysisService",
-            "BusinessDatabases",
-            "BusinessDatabaseManagement.cs"));
+        var source = string.Concat(
+            File.ReadAllText(Path.Combine(
+                solutionRoot,
+                "src",
+                "services",
+                "AICopilot.DataAnalysisService",
+                "BusinessDatabases",
+                "BusinessDatabaseCommandHandlers.cs")),
+            File.ReadAllText(Path.Combine(
+                solutionRoot,
+                "src",
+                "services",
+                "AICopilot.DataAnalysisService",
+                "BusinessDatabases",
+                "BusinessDatabaseDtoMapper.cs")));
         var queryRunnerSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
@@ -1261,16 +1289,20 @@ public sealed class SecurityHardeningTests
     public void McpRuntime_ShouldUseQuotedArgumentParserAndSseConnectionTimeout()
     {
         var solutionRoot = FindSolutionRoot();
-        var source = File.ReadAllText(Path.Combine(
+        var mcpRoot = Path.Combine(
             solutionRoot,
             "src",
             "infrastructure",
             "AICopilot.Infrastructure",
-            "Mcp",
-            "McpServerBootstrap.cs"));
+            "Mcp");
+        var source = string.Concat(
+            File.ReadAllText(Path.Combine(mcpRoot, "McpServerBootstrap.cs")),
+            File.ReadAllText(Path.Combine(mcpRoot, "McpRuntimeClientFactory.cs")));
 
         source.Should().Contain("ParseCommandArguments");
         source.Should().Contain("StringBuilder");
+        source.Should().Contain("McpRuntimeStdioCommandResolver.EnsureAvailable");
+        source.Should().Contain("McpRuntimeStdioCommandUnavailableException");
         source.Should().Contain("McpSseEndpointValidator.TryValidate");
         source.Should().Contain("ConnectionTimeout = SseConnectionTimeout");
         source.Should().Contain("TransportMode = HttpTransportMode.Sse");
@@ -1676,6 +1708,16 @@ public sealed class SecurityHardeningTests
         }
 
         throw new DirectoryNotFoundException("Could not locate AICopilot.slnx from the test output directory.");
+    }
+
+    private static string ReadAiGatewayControllerSources(string solutionRoot)
+    {
+        var controllerPath = Path.Combine(solutionRoot, "src", "hosts", "AICopilot.HttpApi", "Controllers");
+        return string.Join(
+            "\n",
+            Directory.GetFiles(controllerPath, "AiGateway*.cs")
+                .OrderBy(file => file, StringComparer.Ordinal)
+                .Select(File.ReadAllText));
     }
 
     private static void AssertIdentityManagementEndpoint(string actionName)

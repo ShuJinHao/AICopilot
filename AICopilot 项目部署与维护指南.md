@@ -91,10 +91,11 @@ docker compose up -d
 
 ## 五、 关键故障排查 (运维必看)
 
-### 1. 解决 MCP 服务导致的 API 崩溃
+### 1. MCP stdio 运行环境缺失排查
 
-由于后端镜像采用了 **Chiseled (精简)** 镜像，环境内没有 `npx` 导致启动报错。
-**补救方案**：直接在数据库中关闭 MCP 启用开关。
+后端镜像采用 **Chiseled (精简)** 镜像，默认不包含 `npx`。运行时会在启动 MCP stdio server 前检查命令是否存在；如果 `npx` 或配置的 `Command` 不可用，该 MCP server 会被跳过注册并写入 warning 日志，`HttpApi` 不会因此崩溃。
+
+完整 MCP 能力建议在后续版本中迁移到独立 MCP 容器或 SSE endpoint。若临时环境仍需完全关闭 MCP 配置，可使用以下兜底方式：
 
 ```powershell
 # 方式 A：通过 Docker 命令行直接修改
@@ -117,4 +118,3 @@ UPDATE mcp_server_info SET is_enabled = false;
 1. **前后端分离优势**：后端追求极致轻量（Native AOT + Chiseled），前端追求部署灵活（Nginx 反向代理），这是目前最稳健的架构。 
 2. **终端操作细节**：在 Visual Studio 的 PowerShell 终端里，**选中文字按回车(Enter)即复制**，**千万别按 Ctrl+C**（会中止正在构建的任务）。
 3. **配置保存**：VS Code 或 VS 编辑 YAML 后一定要确认 **已保存**，否则 Docker 读取的是旧配置。
-

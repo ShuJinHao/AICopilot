@@ -8,7 +8,7 @@ public sealed class AICopilotM2M9GovernanceScopeTests
     [Fact]
     public void M2Workflow_ShouldExposeRequiredApiRoutesStatesPermissionsAndAuditKeys()
     {
-        var controller = Read("src/hosts/AICopilot.HttpApi/Controllers/AiGatewayController.cs");
+        var controller = ReadAiGatewayControllerSources();
         var aggregate = Read("src/core/AICopilot.Core.AiGateway/Aggregates/PilotAuthorization/PilotAuthorizationSubmission.cs");
         var permissions = Read("src/services/AICopilot.IdentityService/Authorization/PermissionCatalog.cs");
         var auditCodec = Read("src/infrastructure/AICopilot.EntityFrameworkCore/AuditLogs/AuditMetadataCodec.cs");
@@ -88,6 +88,16 @@ public sealed class AICopilotM2M9GovernanceScopeTests
         var fullPath = Path.Combine(RepoRoot, relativePath);
         File.Exists(fullPath).Should().BeTrue($"required governance file should exist: {relativePath}");
         return File.ReadAllText(fullPath);
+    }
+
+    private static string ReadAiGatewayControllerSources()
+    {
+        var controllerPath = Path.Combine(RepoRoot, "src", "hosts", "AICopilot.HttpApi", "Controllers");
+        return string.Join(
+            "\n",
+            Directory.GetFiles(controllerPath, "AiGateway*.cs")
+                .OrderBy(file => file, StringComparer.Ordinal)
+                .Select(File.ReadAllText));
     }
 
     private static string FindRepoRoot()

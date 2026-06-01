@@ -8,8 +8,12 @@ public sealed class AICopilotM2_2ReadinessScopeTests
     [Fact]
     public void Batch5To10ReadinessPackage_ShouldExposeAuditTimelineAndKeepM7HardStopped()
     {
-        var controller = Read("src/hosts/AICopilot.HttpApi/Controllers/AiGatewayController.cs");
-        var workflow = Read("src/services/AICopilot.AiGatewayService/PilotAuthorization/PilotAuthorizationWorkflow.cs");
+        var controller = ReadAiGatewayControllerSources();
+        var workflow = string.Join(
+            "\n",
+            Read("src/services/AICopilot.AiGatewayService/PilotAuthorization/PilotAuthorizationWorkflow.cs"),
+            Read("src/services/AICopilot.AiGatewayService/PilotAuthorization/PilotAuthorizationQueryHandlers.cs"),
+            Read("src/services/AICopilot.AiGatewayService/PilotAuthorization/PilotAuthorizationAudit.cs"));
         var guard = Read("src/core/AICopilot.Core.AiGateway/Aggregates/PilotAuthorization/PilotAuthorizationSensitiveContentGuard.cs");
         var scope = Read("docs/AICopilotM2_2AuthorizationObservabilityReadinessScope.md");
         var m3 = Read("docs/AICopilotM3ModelApiPoolProductionizationDesignFreeze.md");
@@ -59,6 +63,16 @@ public sealed class AICopilotM2_2ReadinessScopeTests
         var fullPath = Path.Combine(RepoRoot, relativePath);
         File.Exists(fullPath).Should().BeTrue($"required readiness file should exist: {relativePath}");
         return File.ReadAllText(fullPath);
+    }
+
+    private static string ReadAiGatewayControllerSources()
+    {
+        var controllerPath = Path.Combine(RepoRoot, "src", "hosts", "AICopilot.HttpApi", "Controllers");
+        return string.Join(
+            "\n",
+            Directory.GetFiles(controllerPath, "AiGateway*.cs")
+                .OrderBy(file => file, StringComparer.Ordinal)
+                .Select(File.ReadAllText));
     }
 
     private static string FindRepoRoot()

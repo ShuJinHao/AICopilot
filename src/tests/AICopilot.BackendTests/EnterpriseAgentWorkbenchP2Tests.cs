@@ -17,15 +17,16 @@ public sealed class EnterpriseAgentWorkbenchP2Tests
     public void TrialScenarioCatalog_ShouldExposeSixSimulationBusinessTemplates()
     {
         var scenarios = AgentTrialScenarioCatalog.Build([CreateSimulationDescriptor()]);
+        var simulationScenarios = scenarios.Where(item => item.IsSimulationOnly).ToArray();
 
-        scenarios.Should().HaveCount(6);
-        scenarios.Should().OnlyContain(item => item.IsSimulationOnly);
-        scenarios.Should().OnlyContain(item => item.RequiresApproval);
-        scenarios.Should().OnlyContain(item => item.DefaultDataSourceIds.Contains(SimulationDataSourceId));
-        scenarios.Should().Contain(item => item.Id == "capacity-analysis" && item.DefaultArtifactTypes.Contains("Pptx"));
-        scenarios.Should().Contain(item => item.Id == "employee-policy-rag" &&
-                                           item.DefaultPrompt.Contains("CriticalOverride", StringComparison.Ordinal) &&
-                                           item.DefaultPrompt.Contains("模拟制度", StringComparison.Ordinal));
+        scenarios.Should().HaveCount(18);
+        simulationScenarios.Should().HaveCount(6);
+        simulationScenarios.Should().OnlyContain(item => item.RequiresApproval);
+        simulationScenarios.Should().OnlyContain(item => item.DefaultDataSourceIds.Contains(SimulationDataSourceId));
+        simulationScenarios.Should().Contain(item => item.Id == "capacity-analysis" && item.DefaultArtifactTypes.Contains("Pptx"));
+        simulationScenarios.Should().Contain(item => item.Id == "employee-policy-rag" &&
+                                                    item.DefaultPrompt.Contains("CriticalOverride", StringComparison.Ordinal) &&
+                                                    item.DefaultPrompt.Contains("模拟制度", StringComparison.Ordinal));
     }
 
     [Fact]

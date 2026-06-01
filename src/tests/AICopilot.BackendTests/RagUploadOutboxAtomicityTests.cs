@@ -133,7 +133,8 @@ public sealed class RagUploadOutboxAtomicityTests(CoreAICopilotAppFixture fixtur
 
         await using var verifyContext = new RagDbContext(
             CreateOptions<RagDbContext>(database.ConnectionString, MigrationHistoryTables.Rag));
-        (await verifyContext.Documents.AnyAsync()).Should().BeFalse();
+        var document = await verifyContext.Documents.SingleAsync();
+        document.Status.Should().Be(DocumentStatus.SoftDeleted);
         var outboxMessage = await verifyContext.OutboxMessages.SingleAsync();
         outboxMessage.EventTypeName.Should().Be(typeof(DocumentFileDeletionRequestedEvent).FullName);
 

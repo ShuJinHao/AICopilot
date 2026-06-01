@@ -3,19 +3,6 @@ using AICopilot.SharedKernel.Domain;
 
 namespace AICopilot.Core.AiGateway.Aggregates.PilotAuthorization;
 
-public enum PilotAuthorizationSubmissionStatus
-{
-    Draft = 0,
-    Submitted = 1,
-    MachineRejected = 2,
-    ReviewPending = 3,
-    ApprovedForCredentialWindowPlanning = 4,
-    ApprovedForLimitedPilotExecutionPlanning = 5,
-    Rejected = 6,
-    Expired = 7,
-    Revoked = 8
-}
-
 public sealed class PilotAuthorizationSubmission
     : BaseEntity<PilotAuthorizationSubmissionId>, IAggregateRoot<PilotAuthorizationSubmissionId>
 {
@@ -442,98 +429,4 @@ public sealed class PilotAuthorizationSubmission
             .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
-}
-
-public sealed record PilotAuthorizationMachineValidationResult(
-    bool IsAccepted,
-    IReadOnlyCollection<string> RejectedReasons)
-{
-    public static PilotAuthorizationMachineValidationResult Accepted() => new(true, []);
-
-    public static PilotAuthorizationMachineValidationResult Rejected(IReadOnlyCollection<string> rejectedReasons) =>
-        new(false, rejectedReasons);
-}
-
-public sealed record PilotAuthorizationReview(
-    DateTimeOffset? SubmittedAt,
-    DateTimeOffset? ReviewStartedAt,
-    Guid? LastReviewerUserId,
-    string? LastReviewerUserName,
-    string? LastDecisionReason,
-    string? LastDecisionStatus,
-    DateTimeOffset? LastDecisionAt,
-    DateTimeOffset? ExpiredAt)
-{
-    public static PilotAuthorizationReview Empty() => new(null, null, null, null, null, null, null, null);
-
-    public PilotAuthorizationReview MarkSubmitted(DateTimeOffset nowUtc) => this with { SubmittedAt = nowUtc };
-
-    public PilotAuthorizationReview MarkReviewStarted(DateTimeOffset nowUtc) => this with { ReviewStartedAt = nowUtc };
-
-    public PilotAuthorizationReview MarkDecision(
-        Guid reviewerUserId,
-        string? reviewerUserName,
-        string? reason,
-        PilotAuthorizationSubmissionStatus decisionStatus,
-        DateTimeOffset nowUtc)
-    {
-        if (reviewerUserId == Guid.Empty)
-        {
-            throw new ArgumentException("Reviewer user id is required.", nameof(reviewerUserId));
-        }
-
-        return this with
-        {
-            LastReviewerUserId = reviewerUserId,
-            LastReviewerUserName = PilotAuthorizationSubmission.NormalizeOptional(reviewerUserName, 160),
-            LastDecisionReason = PilotAuthorizationSubmission.NormalizeOptional(reason, 1000),
-            LastDecisionStatus = decisionStatus.ToString(),
-            LastDecisionAt = nowUtc
-        };
-    }
-
-    public PilotAuthorizationReview MarkExpired(DateTimeOffset nowUtc) => this with { ExpiredAt = nowUtc };
-}
-
-public sealed record PilotCredentialWindow(string? PlanningSummary, DateTimeOffset? PlanningApprovedAt)
-{
-    public static PilotCredentialWindow Empty() => new(null, null);
-}
-
-public sealed record PilotRollbackPlan(string RollbackOwner, string EmergencyOwner, string? RollbackSummary)
-{
-    private PilotRollbackPlan()
-        : this(string.Empty, string.Empty, null)
-    {
-    }
-
-    public static PilotRollbackPlan Empty() => new(string.Empty, string.Empty, null);
-}
-
-public sealed record PilotEvidenceArchive(string? EvidenceSummary, Guid[] ArtifactIds)
-{
-    public static PilotEvidenceArchive Empty() => new(null, []);
-}
-
-public sealed record PilotAuthorizationMaterialIntake(
-    string? BusinessScope,
-    string? Department,
-    string? PilotOwner,
-    DateTimeOffset? ExecutionWindowStart,
-    DateTimeOffset? ExecutionWindowEnd,
-    DateTimeOffset? RollbackWindowStart,
-    DateTimeOffset? RollbackWindowEnd,
-    string? CredentialOwner,
-    string? SecretStorageMode,
-    string? SecretReferenceNameHash,
-    string? PostRunAuditArchiveFormat,
-    string? SignedApprovalRef)
-{
-    private PilotAuthorizationMaterialIntake()
-        : this(null, null, null, null, null, null, null, null, null, null, null, null)
-    {
-    }
-
-    public static PilotAuthorizationMaterialIntake Empty() =>
-        new(null, null, null, null, null, null, null, null, null, null, null, null);
 }

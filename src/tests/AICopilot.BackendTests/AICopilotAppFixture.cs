@@ -11,6 +11,17 @@ public class AICopilotAppFixture : IAsyncLifetime, IAsyncDisposable
     private const string BootstrapUserName = "admin";
     private const string BootstrapPassword = "Password123!";
     private static readonly TimeSpan StageTimeout = TimeSpan.FromMinutes(2);
+    private static readonly string[] ProxyEnvironmentVariables =
+    [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy"
+    ];
+    private const string LocalNoProxy =
+        "localhost,127.0.0.1,::1,[::1],0.0.0.0,host.docker.internal,*.local,169.254.0.0/16";
 
     private readonly Dictionary<string, string?> _originalEnvironment = new(StringComparer.Ordinal);
     private readonly FakeAiProviderHost _fakeAiProvider = new();
@@ -121,6 +132,7 @@ public class AICopilotAppFixture : IAsyncLifetime, IAsyncDisposable
 
     private void ConfigureEnvironment()
     {
+        ConfigureLocalProxyEnvironment();
         SetEnvironmentVariable("DOTNET_ENVIRONMENT", "Development");
         SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Development");
         SetEnvironmentVariable("Parameters__pg-password", TestPostgresPassword);
@@ -146,6 +158,8 @@ public class AICopilotAppFixture : IAsyncLifetime, IAsyncDisposable
         SetEnvironmentVariable("RateLimiting__Default__TokensPerPeriod", "1000");
         SetEnvironmentVariable("RateLimiting__Login__TokenLimit", "1000");
         SetEnvironmentVariable("RateLimiting__Login__TokensPerPeriod", "1000");
+        SetEnvironmentVariable("RateLimiting__IdentityManagement__TokenLimit", "1000");
+        SetEnvironmentVariable("RateLimiting__IdentityManagement__TokensPerPeriod", "1000");
         SetEnvironmentVariable("RateLimiting__Chat__TokenLimit", "1000");
         SetEnvironmentVariable("RateLimiting__Chat__TokensPerPeriod", "1000");
         ConfigureAdditionalEnvironment();
@@ -155,7 +169,18 @@ public class AICopilotAppFixture : IAsyncLifetime, IAsyncDisposable
     {
     }
 
-    protected void SetEnvironmentVariable(string name, string value)
+    private void ConfigureLocalProxyEnvironment()
+    {
+        foreach (var variable in ProxyEnvironmentVariables)
+        {
+            ClearEnvironmentVariable(variable);
+        }
+
+        SetEnvironmentVariable("NO_PROXY", LocalNoProxy);
+        SetEnvironmentVariable("no_proxy", LocalNoProxy);
+    }
+
+    protected void SetEnvironmentVariable(string name, string? value)
     {
         if (!_originalEnvironment.ContainsKey(name))
         {
@@ -163,6 +188,11 @@ public class AICopilotAppFixture : IAsyncLifetime, IAsyncDisposable
         }
 
         Environment.SetEnvironmentVariable(name, value);
+    }
+
+    protected void ClearEnvironmentVariable(string name)
+    {
+        SetEnvironmentVariable(name, null);
     }
 
     private async Task WaitForHealthyResourceAsync(string resourceName)

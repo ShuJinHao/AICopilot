@@ -43,8 +43,9 @@ public sealed class AICopilotM6SecurityComplianceHardeningTests
         Read("src/services/AICopilot.RagService/EmbeddingModels/EmbeddingModelManagement.cs")
             .Should().Contain("ApiKeyPreview = string.IsNullOrEmpty(model.ApiKey) ? null : \"******\"");
         Read("src/infrastructure/AICopilot.AiRuntime/ModelProviderReliability.cs")
+            .Should().Contain("HasApiKey");
+        Read("src/infrastructure/AICopilot.AiRuntime/ModelEndpointPoolScheduler.cs")
             .Should().Contain("[redacted-endpoint]")
-            .And.Contain("HasApiKey")
             .And.Contain("RedactedEndpointMarker");
         Read("src/services/AICopilot.Services.Contracts/Contracts/AiRuntimeContracts.cs")
             .Should().Contain("HasBaseUrl");
@@ -112,7 +113,9 @@ public sealed class AICopilotM6SecurityComplianceHardeningTests
             .And.Contain("warningCodes")
             .And.NotContain("QueryText = request.QueryText");
 
-        var dataQuery = Read("src/services/AICopilot.DataAnalysisService/BusinessDatabases/BusinessDatabaseReadonlyQuery.cs");
+        var dataQuery = string.Concat(
+            Read("src/services/AICopilot.DataAnalysisService/BusinessDatabases/BusinessReadonlyQueryAuditRecorder.cs"),
+            Read("src/services/AICopilot.DataAnalysisService/BusinessDatabases/BusinessQueryResultMapper.cs"));
         dataQuery.Should().Contain("queryHash")
             .And.Contain("sqlLength")
             .And.Contain("Governance")
@@ -122,7 +125,7 @@ public sealed class AICopilotM6SecurityComplianceHardeningTests
     [Fact]
     public void ArtifactDownload_ShouldRequirePermissionAndWriteDownloadAudit()
     {
-        var workspace = Read("src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceManagement.cs");
+        var workspace = Read("src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceQueryHandlers.cs");
 
         workspace.Should().Contain("AgentApprovalPermissions.DownloadArtifact")
             .And.Contain("CanReadFinalReviewWorkspace")

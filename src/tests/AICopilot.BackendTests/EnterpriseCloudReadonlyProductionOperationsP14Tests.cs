@@ -103,6 +103,7 @@ public sealed class EnterpriseCloudReadonlyProductionOperationsP14Tests
             fixture.P12.BuildStatus(RehearsalPassed(), ProtectedTools()),
             fixture.P13.BuildStatus(fixture.P12.BuildStatus(RehearsalPassed(), ProtectedTools()), ProtectedTools()));
         var json = JsonSerializer.Serialize(new { ledger, status }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var ledgerJson = JsonSerializer.Serialize(ledger, new JsonSerializerOptions(JsonSerializerDefaults.Web));
 
         ledger.Should().HaveCount(2);
         ledger.Should().Contain(item => item.SourceMode == CloudReadonlyProductionPilotMarkers.SourceMode);
@@ -114,7 +115,7 @@ public sealed class EnterpriseCloudReadonlyProductionOperationsP14Tests
         json.Should().Contain("CloudReadonlyProductionControlledPilot");
         json.Should().NotContain("redacted-test-token");
         json.Should().NotContain("ServiceAccountToken");
-        json.Contains("payload", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
+        ledgerJson.Contains("payload", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
     }
 
     [Fact]

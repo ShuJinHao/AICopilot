@@ -235,13 +235,15 @@ public static class CloudAiReadEndpointPolicy
             return false;
         }
 
-        if (Uri.TryCreate(rawPath, UriKind.Absolute, out _))
+        var candidate = rawPath.Trim();
+        if (candidate[0] != '/' &&
+            Uri.TryCreate(candidate, UriKind.Absolute, out _))
         {
             error = "Cloud AiRead path must be relative to the configured Cloud base URL.";
             return false;
         }
 
-        var path = rawPath.Split('?', 2)[0].Trim();
+        var path = candidate.Split('?', 2)[0].Trim();
         if (!path.StartsWith('/'))
         {
             path = "/" + path;
