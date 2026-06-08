@@ -49,6 +49,14 @@ internal static class HttpApiAuthenticationConfiguration
 
         if (cloudOidcOptions.IsConfigured())
         {
+            var useHttpCompatibleRemoteCookies = cloudOidcOptions.UseHttpCompatibleRemoteCookies();
+            var remoteCookieSecurePolicy = useHttpCompatibleRemoteCookies
+                ? CookieSecurePolicy.SameAsRequest
+                : CookieSecurePolicy.Always;
+            var remoteCookieSameSite = useHttpCompatibleRemoteCookies
+                ? SameSiteMode.Lax
+                : SameSiteMode.None;
+
             authenticationBuilder.AddOpenIdConnect(
                 CloudOidcAuthenticationDefaults.AuthenticationScheme,
                 options =>
@@ -63,6 +71,10 @@ internal static class HttpApiAuthenticationConfiguration
                     options.SaveTokens = false;
                     options.GetClaimsFromUserInfoEndpoint = true;
                     options.MapInboundClaims = false;
+                    options.CorrelationCookie.SecurePolicy = remoteCookieSecurePolicy;
+                    options.CorrelationCookie.SameSite = remoteCookieSameSite;
+                    options.NonceCookie.SecurePolicy = remoteCookieSecurePolicy;
+                    options.NonceCookie.SameSite = remoteCookieSameSite;
 
                     options.Scope.Clear();
                     foreach (var scope in cloudOidcOptions.Scopes

@@ -140,6 +140,7 @@ public sealed class CloudOidcLoginTestsControllerSecurity
 
         options.GetEffectiveRequireHttpsMetadata().Should().BeFalse();
         options.GetEffectiveExternalCookieName().Should().Be("AICopilot-CloudOidc-External");
+        options.UseHttpCompatibleRemoteCookies().Should().BeTrue();
     }
 
     [Fact]
@@ -161,6 +162,7 @@ public sealed class CloudOidcLoginTestsControllerSecurity
         var options = CreateCloudOidcOptions("https://cloud.example.com", requireHttpsMetadata: true);
 
         options.GetEffectiveExternalCookieName().Should().Be("__Host-AICopilot-CloudOidc-External");
+        options.UseHttpCompatibleRemoteCookies().Should().BeFalse();
     }
 
     private static IdentityController CreateController(

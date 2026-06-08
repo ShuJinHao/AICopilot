@@ -118,6 +118,12 @@ public sealed class CloudOidcOptions
             : RequireHttpsMetadata;
     }
 
+    public bool UseHttpCompatibleRemoteCookies()
+    {
+        var issuer = ParseHttpUri(Issuer);
+        return AllowIntranetHttpOidc && issuer.Scheme == Uri.UriSchemeHttp && IsAllowedIntranetHttpHost(issuer);
+    }
+
     private static Uri ParseHttpUri(string issuer)
     {
         if (!Uri.TryCreate(issuer, UriKind.Absolute, out var uri) ||
