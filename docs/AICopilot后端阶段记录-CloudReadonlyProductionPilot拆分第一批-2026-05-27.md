@@ -72,4 +72,4 @@
 
 - 继续从当前绿色基线进入下一批。
 - 优先候选：`CloudReadonlyProductionControlledPilot.cs` 拆分第一批。
-- 进入前继续执行 `docs/AI执行门禁精华.md`、`docs/计划执行规则.md`、`AICopilot/AGENTS.md` 和 `docs/跨项目对齐规则.md` 门禁。
+- 进入前继续执行 `docs/总规则.md`、`AICopilot/AGENTS.md` 和 `AICopilot/资料/AICopilot业务规则.md` 门禁。

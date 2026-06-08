@@ -123,6 +123,46 @@ public sealed class CloudOidcLoginTestsControllerSecurity
         options.EnsureValid("Production");
     }
 
+    [Theory]
+    [InlineData("http://10.98.90.154:81")]
+    [InlineData("http://192.168.1.10:81")]
+    [InlineData("http://172.16.0.10:81")]
+    [InlineData("http://172.31.255.10:81")]
+    [InlineData("http://localhost:81")]
+    public void CloudOidcOptions_ShouldAllowExplicitIntranetHttpOidc(string issuer)
+    {
+        var options = CreateCloudOidcOptions(
+            issuer,
+            requireHttpsMetadata: true,
+            allowIntranetHttpOidc: true);
+
+        options.EnsureValid("Production");
+
+        options.GetEffectiveRequireHttpsMetadata().Should().BeFalse();
+        options.GetEffectiveExternalCookieName().Should().Be("AICopilot-CloudOidc-External");
+    }
+
+    [Fact]
+    public void CloudOidcOptions_ShouldRejectPublicHttpEvenWhenIntranetHttpOidcIsEnabled()
+    {
+        var options = CreateCloudOidcOptions(
+            "http://cloud.example.com",
+            requireHttpsMetadata: true,
+            allowIntranetHttpOidc: true);
+
+        Action act = () => options.EnsureValid("Production");
+
+        act.Should().Throw<InvalidOperationException>();
+    }
+
+    [Fact]
+    public void CloudOidcOptions_ShouldKeepHostCookiePrefixWhenHttpsMode()
+    {
+        var options = CreateCloudOidcOptions("https://cloud.example.com", requireHttpsMetadata: true);
+
+        options.GetEffectiveExternalCookieName().Should().Be("__Host-AICopilot-CloudOidc-External");
+    }
+
     private static IdentityController CreateController(
         ISender sender,
         RecordingAuthenticationService authService)
@@ -158,12 +198,14 @@ public sealed class CloudOidcLoginTestsControllerSecurity
 
     private static CloudOidcOptions CreateCloudOidcOptions(
         string issuer,
-        bool requireHttpsMetadata)
+        bool requireHttpsMetadata,
+        bool allowIntranetHttpOidc = false)
     {
         return new CloudOidcOptions
         {
             Enabled = true,
             Issuer = issuer,
+            AllowIntranetHttpOidc = allowIntranetHttpOidc,
             ClientId = "aicopilot",
             CallbackPath = "/api/identity/cloud-oidc/callback",
             FrontendCompletionPath = "/cloud-login/complete",

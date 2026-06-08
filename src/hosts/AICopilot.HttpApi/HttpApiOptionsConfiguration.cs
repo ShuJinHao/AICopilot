@@ -14,6 +14,8 @@ internal static class HttpApiOptionsConfiguration
 {
     public static HttpApiValidatedOptions ConfigureAndValidate(IHostApplicationBuilder builder)
     {
+        ApplyIntranetHttpOidcEnvironmentOverride(builder.Configuration);
+
         var configurationSection = builder.Configuration.GetSection("JwtSettings");
         var jwtSettings = configurationSection.Get<JwtSettings>();
         if (jwtSettings is null)
@@ -102,5 +104,16 @@ internal static class HttpApiOptionsConfiguration
         cloudReadonlyProductionControlledPilotOptions.EnsureValid();
 
         return new HttpApiValidatedOptions(jwtSettings, cloudOidcOptions, cloudIdentityStatusOptions);
+    }
+
+    private static void ApplyIntranetHttpOidcEnvironmentOverride(IConfiguration configuration)
+    {
+        var value = configuration[CloudOidcOptions.AllowIntranetHttpOidcEnvironmentVariable];
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        configuration[$"{CloudOidcOptions.SectionName}:{nameof(CloudOidcOptions.AllowIntranetHttpOidc)}"] = value;
     }
 }

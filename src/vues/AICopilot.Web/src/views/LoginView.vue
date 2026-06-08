@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Activity,
@@ -8,6 +8,8 @@ import {
   BrainCircuit,
   Cloud,
   DatabaseZap,
+  Eye,
+  EyeOff,
   KeyRound,
   Lock,
   ShieldCheck,
@@ -24,6 +26,7 @@ const form = reactive({
   username: '',
   password: ''
 })
+const showPassword = ref(false)
 
 const initChecks = computed(() => {
   const status = authStore.initializationStatus
@@ -114,7 +117,22 @@ onMounted(() => {
             <span>密码</span>
             <div class="field-control">
               <Lock :size="21" />
-              <input v-model="form.password" type="password" autocomplete="current-password" placeholder="输入密码" />
+              <input
+                v-model="form.password"
+                :type="showPassword ? 'text' : 'password'"
+                autocomplete="current-password"
+                placeholder="输入密码"
+              />
+              <button
+                class="password-visibility-button"
+                type="button"
+                :aria-label="showPassword ? '隐藏密码' : '显示密码'"
+                :title="showPassword ? '隐藏密码' : '显示密码'"
+                @click="showPassword = !showPassword"
+              >
+                <EyeOff v-if="showPassword" :size="20" />
+                <Eye v-else :size="20" />
+              </button>
             </div>
           </label>
 
@@ -361,6 +379,30 @@ onMounted(() => {
   background: transparent;
   color: var(--ai-text);
   font-size: 16px;
+}
+
+.password-visibility-button {
+  display: grid;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--ai-text-muted);
+  cursor: pointer;
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+
+.password-visibility-button:hover {
+  background: rgba(63, 111, 115, 0.08);
+  color: var(--ai-text);
+}
+
+.password-visibility-button:focus-visible {
+  outline: 3px solid var(--ai-focus);
+  outline-offset: 2px;
 }
 
 .primary-action,

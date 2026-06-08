@@ -36,10 +36,12 @@ internal static class HttpApiAuthenticationConfiguration
             CloudOidcAuthenticationDefaults.ExternalCookieScheme,
             options =>
             {
-                options.Cookie.Name = cloudOidcOptions.ExternalCookieName;
+                options.Cookie.Name = cloudOidcOptions.GetEffectiveExternalCookieName();
                 options.Cookie.HttpOnly = true;
                 options.Cookie.SameSite = SameSiteMode.Lax;
-                options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+                options.Cookie.SecurePolicy = cloudOidcOptions.AllowIntranetHttpOidc
+                    ? CookieSecurePolicy.SameAsRequest
+                    : CookieSecurePolicy.Always;
                 options.ExpireTimeSpan = TimeSpan.FromMinutes(
                     Math.Clamp(cloudOidcOptions.ExternalCookieLifetimeMinutes, 1, 15));
                 options.SlidingExpiration = false;
@@ -57,7 +59,7 @@ internal static class HttpApiAuthenticationConfiguration
                     options.UsePkce = true;
                     options.CallbackPath = cloudOidcOptions.CallbackPath;
                     options.SignInScheme = CloudOidcAuthenticationDefaults.ExternalCookieScheme;
-                    options.RequireHttpsMetadata = cloudOidcOptions.RequireHttpsMetadata;
+                    options.RequireHttpsMetadata = cloudOidcOptions.GetEffectiveRequireHttpsMetadata();
                     options.SaveTokens = false;
                     options.GetClaimsFromUserInfoEndpoint = true;
                     options.MapInboundClaims = false;

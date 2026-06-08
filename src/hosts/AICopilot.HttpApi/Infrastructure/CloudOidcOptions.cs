@@ -1,12 +1,18 @@
+using System.Net;
+
 namespace AICopilot.HttpApi.Infrastructure;
 
 public sealed class CloudOidcOptions
 {
     public const string SectionName = "CloudOidc";
+    public const string AllowIntranetHttpOidcEnvironmentVariable = "ALLOW_INTRANET_HTTP_OIDC";
+    private const string HostCookiePrefix = "__Host-";
 
     public bool Enabled { get; init; }
 
     public string Issuer { get; init; } = string.Empty;
+
+    public bool AllowIntranetHttpOidc { get; init; }
 
     public string ClientId { get; init; } = "aicopilot";
 
@@ -76,17 +82,40 @@ public sealed class CloudOidcOptions
             return;
         }
 
-        if (!isDevelopment || !issuer.IsLoopback)
+        if (isDevelopment && issuer.IsLoopback)
         {
-            throw new InvalidOperationException(
-                "CloudOidc:Issuer must use HTTPS outside Development loopback endpoints.");
+            if (RequireHttpsMetadata)
+            {
+                throw new InvalidOperationException(
+                    "CloudOidc:RequireHttpsMetadata must be false when Development uses an HTTP loopback issuer.");
+            }
+
+            return;
         }
 
-        if (RequireHttpsMetadata)
+        if (AllowIntranetHttpOidc && IsAllowedIntranetHttpHost(issuer))
         {
-            throw new InvalidOperationException(
-                "CloudOidc:RequireHttpsMetadata must be false when Development uses an HTTP loopback issuer.");
+            return;
         }
+
+        throw new InvalidOperationException(
+            "CloudOidc:Issuer must use HTTPS outside Development loopback endpoints or explicit intranet OIDC endpoints.");
+    }
+
+    public string GetEffectiveExternalCookieName()
+    {
+        var cookieName = ExternalCookieName.Trim();
+        return AllowIntranetHttpOidc && cookieName.StartsWith(HostCookiePrefix, StringComparison.Ordinal)
+            ? cookieName[HostCookiePrefix.Length..]
+            : cookieName;
+    }
+
+    public bool GetEffectiveRequireHttpsMetadata()
+    {
+        var issuer = ParseHttpUri(Issuer);
+        return AllowIntranetHttpOidc && issuer.Scheme == Uri.UriSchemeHttp && IsAllowedIntranetHttpHost(issuer)
+            ? false
+            : RequireHttpsMetadata;
     }
 
     private static Uri ParseHttpUri(string issuer)
@@ -98,5 +127,24 @@ public sealed class CloudOidcOptions
         }
 
         return uri;
+    }
+
+    private static bool IsAllowedIntranetHttpHost(Uri uri)
+    {
+        if (uri.IsLoopback)
+        {
+            return true;
+        }
+
+        if (!IPAddress.TryParse(uri.Host, out var address))
+        {
+            return false;
+        }
+
+        var bytes = address.GetAddressBytes();
+        return bytes.Length == 4 &&
+            (bytes[0] == 10 ||
+             (bytes[0] == 192 && bytes[1] == 168) ||
+             (bytes[0] == 172 && bytes[1] is >= 16 and <= 31));
     }
 }

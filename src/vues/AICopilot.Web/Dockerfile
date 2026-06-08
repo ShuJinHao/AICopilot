@@ -16,6 +16,12 @@ RUN npm ci
 # 3. 复制项目源代码
 COPY . .
 
+# Vite reads public frontend configuration at build time.
+ARG VITE_API_BASE_URL=/api
+ARG VITE_CLOUD_PLATFORM_URL=
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+ENV VITE_CLOUD_PLATFORM_URL=$VITE_CLOUD_PLATFORM_URL
+
 # 4. 执行构建 (生成 dist 目录)
 # 注意：这里不会读取 aicopilot_httpapi_http 环境变量，因为代理是在运行时由 Nginx 处理的
 RUN npm run build
