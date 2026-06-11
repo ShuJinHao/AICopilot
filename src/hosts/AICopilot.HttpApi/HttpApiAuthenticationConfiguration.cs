@@ -64,6 +64,7 @@ internal static class HttpApiAuthenticationConfiguration
                     options.Authority = cloudOidcOptions.Issuer.TrimEnd('/');
                     options.ClientId = cloudOidcOptions.ClientId;
                     options.ResponseType = OpenIdConnectResponseType.Code;
+                    options.ResponseMode = OpenIdConnectResponseMode.Query;
                     options.UsePkce = true;
                     options.CallbackPath = cloudOidcOptions.CallbackPath;
                     options.SignInScheme = CloudOidcAuthenticationDefaults.ExternalCookieScheme;

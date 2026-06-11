@@ -15,6 +15,20 @@ namespace AICopilot.BackendTests;
 public sealed class CloudOidcLoginTestsControllerSecurity
 {
     [Fact]
+    public void CloudOidcChallenge_ShouldUseQueryResponseMode()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(),
+            "src",
+            "hosts",
+            "AICopilot.HttpApi",
+            "HttpApiAuthenticationConfiguration.cs"));
+
+        source.Should().Contain("options.ResponseMode = OpenIdConnectResponseMode.Query");
+        source.Should().NotContain("OpenIdConnectResponseMode.FormPost");
+    }
+
+    [Fact]
     public async Task FinalizeCloudOidcLogin_ShouldReturnAiJwtInBodyAndClearExternalCookie()
     {
         var authService = new RecordingAuthenticationService(
@@ -213,6 +227,22 @@ public sealed class CloudOidcLoginTestsControllerSecurity
             FrontendCompletionPath = "/cloud-login/complete",
             RequireHttpsMetadata = requireHttpsMetadata
         };
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "AICopilot.slnx")))
+            {
+                return directory.FullName;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new DirectoryNotFoundException("AICopilot repository root was not found.");
     }
 
     private static ClaimsPrincipal CreateCloudPrincipal()
