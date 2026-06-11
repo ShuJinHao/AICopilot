@@ -1091,10 +1091,10 @@ public sealed class SecurityHardeningTests
     }
 
     [Fact]
-    public void ReviewBaseline_ShouldDocumentAuditAndOutboxBoundaries()
+    public void BusinessRules_ShouldDocumentAuditAndOutboxBoundaries()
     {
         var solutionRoot = FindSolutionRoot();
-        var source = File.ReadAllText(Path.Combine(solutionRoot, "REVIEW_BASELINE.md"));
+        var source = File.ReadAllText(Path.Combine(solutionRoot, "资料", "AICopilot业务规则.md"));
 
         source.Should().Contain("AiCopilotDbContext");
         source.Should().Contain("AuditDbContext");

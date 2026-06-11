@@ -51,14 +51,10 @@ try {
     $reportFileName = "A" + (New-UnicodeString @(0x52A9, 0x7406)) + "AgentSimulation" + (New-UnicodeString @(0x79BB, 0x7EBF, 0x9A8C, 0x6536, 0x62A5, 0x544A)) + ".md"
     $reportPath = Join-Path (Join-Path $repoRoot $reportDirName) $reportFileName
     $simulationSourceLabel = New-UnicodeString @(0x6A21, 0x62DF, 0x0020, 0x0043, 0x006C, 0x006F, 0x0075, 0x0064, 0x0020, 0x53EA, 0x8BFB, 0x6570, 0x636E)
-    $scopeDocName = "A" + (New-UnicodeString @(0x52A9, 0x7406)) + "AgentRuntime" + (New-UnicodeString @(0x79BB, 0x7EBF)) + "Simulation" + (New-UnicodeString @(0x9636, 0x6BB5, 0x8303, 0x56F4, 0x51BB, 0x7ED3)) + ".md"
-    $scopeDocPath = "docs/$scopeDocName"
-    $reportRelativePath = "$reportDirName/$reportFileName"
     $Commands = [System.Collections.Generic.List[string]]::new()
     $Results = [System.Collections.Generic.List[string]]::new()
 
     $changedFiles = @(
-        $scopeDocPath,
         "scripts/Test-AgentSimulationScope.ps1",
         "scripts/Run-AgentSimulationAcceptance.ps1",
         "src/core/AICopilot.Core.AiGateway/Aggregates/Tools/BuiltInToolRegistrations.cs",
@@ -75,8 +71,7 @@ try {
         "src/tests/AICopilot.BackendTests/BackendTestCollection.cs",
         "src/tests/AICopilot.BackendTests/CloudReadonlySimulationTests.cs",
         "src/tests/AICopilot.BackendTests/AgentSimulationAcceptanceTests.cs",
-        "src/tests/AICopilot.BackendTests/ToolRegistryGovernanceTests.cs",
-        $reportRelativePath
+        "src/tests/AICopilot.BackendTests/ToolRegistryGovernanceTests.cs"
     )
 
     $guardCommand = ".\scripts\Test-AgentSimulationScope.ps1 -ChangedFiles `$changedFiles"

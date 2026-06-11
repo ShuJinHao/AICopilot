@@ -1,120 +1,129 @@
-# 🚀 AICopilot 项目部署与维护指南
+# AICopilot 部署与维护指南
 
-## 一、 环境准备
+本文档是 AICopilot 当前部署入口。长期业务边界见 `AGENTS.md` 和 `资料/AICopilot业务规则.md`；历史阶段计划和验收报告不再作为执行入口。
 
-在开始构建前，确保 .NET SDK 和 Aspire 工作负载已正确安装。
+## 1. 部署口径
 
-* **安装 Aspire 工作负载**（解决命令找不到的问题）：
+- 当前部署目录固定为 `deploy/enterprise-ai`。
+- 生产环境使用 Docker Compose 单机编排，镜像从 Harbor 拉取。
+- 真实 `.env` 只在服务器维护，不提交真实密钥。
+- AICopilot 默认保持 Cloud 只读边界，不能注册、修改、删除或触发 Cloud 业务数据。
+- Cloud OIDC 只用于身份对齐；AICopilot 保留本地 AI 用户、AI 角色、AI 权限、审计和 emergency admin。
+
+## 2. 镜像和服务器目录
+
+部署包至少包含：
+
+```text
+deploy/enterprise-ai/
+  .env.example
+  build-and-push.sh
+  docker-compose.yaml
+```
+
+服务器建议目录：
+
+```text
+/srv/enterprise-ai/deploy
+```
+
+真实 `.env` 从 `deploy/enterprise-ai/.env.example` 复制后替换密钥和镜像 tag。
+
+## 3. 关键环境变量
+
+入口和镜像：
+
+```text
+COMPOSE_PROJECT_NAME=enterprise-ai
+AICOPILOT_PUBLIC_URL=http://10.98.90.154:82
+CLOUD_PLATFORM_URL=http://10.98.90.154:81
+AICOPILOT_WEB_PORT=82
+AICOPILOT_HTTPAPI_IMAGE=10.98.90.154:80/enterprise-ai/aicopilot-httpapi:<tag>
+AICOPILOT_MIGRATION_IMAGE=10.98.90.154:80/enterprise-ai/aicopilot-migration:<tag>
+AICOPILOT_DATAWORKER_IMAGE=10.98.90.154:80/enterprise-ai/aicopilot-dataworker:<tag>
+AICOPILOT_RAGWORKER_IMAGE=10.98.90.154:80/enterprise-ai/aicopilot-ragworker:<tag>
+AICOPILOT_WEBUI_IMAGE=10.98.90.154:80/enterprise-ai/aicopilot-webui:<tag>
+```
+
+必须在服务器替换的密钥：
+
+```text
+POSTGRES_PASSWORD
+RABBITMQ_PASSWORD
+QDRANT_KEY
+AICOPILOT_BOOTSTRAP_ADMIN_PASSWORD
+AICOPILOT_API_KEY_ENCRYPTION_KEY
+AICOPILOT_JWT_SECRET_KEY
+CLOUD_AI_SERVICE_ACCOUNT_TOKEN
+```
+
+Cloud 只读和 OIDC 默认：
+
+```text
+CLOUD_READONLY_MODE=Disabled
+CLOUD_READONLY_REAL_ENABLED=false
+CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ=false
+CLOUD_AI_READ_ENABLED=false
+CLOUD_OIDC_ENABLED=true
+CLOUD_OIDC_ISSUER=http://10.98.90.154:81
+ALLOW_INTRANET_HTTP_OIDC=true
+CLOUD_OIDC_CLIENT_ID=aicopilot
+CLOUD_OIDC_REQUIRE_HTTPS_METADATA=false
+```
+
+`CLOUD_AI_SERVICE_ACCOUNT_TOKEN` 只有在 Cloud 明确发放 AI 只读服务账号 token 后才填写；不能写入仓库。
+
+## 4. 构建与发布
+
+本地或 CI 构建前先确认 Docker 可用，且使用 Linux 容器。
+
+```bash
+cd AICopilot
+./deploy/enterprise-ai/build-and-push.sh <tag>
+```
+
+若脚本需要 Harbor 参数，按脚本提示或服务器约定传入；同一批服务镜像使用同一个 `<tag>`。
+
+服务器部署：
+
+```bash
+cd /srv/enterprise-ai/deploy
+docker compose --env-file .env -f docker-compose.yaml pull
+docker compose --env-file .env -f docker-compose.yaml up -d
+docker compose --env-file .env -f docker-compose.yaml ps
+```
+
+首次部署会先运行 `aicopilot-migration`，成功后启动 HttpApi、DataWorker、RagWorker 和 WebUI。
+
+## 5. 验证
+
+本地仓库验证：
+
 ```powershell
-dotnet workload install aspire
-
+pwsh ./scripts/Test-AICopilotBaselineFreezeScope.ps1
+pwsh ./scripts/Test-ArchitectureBoundaries.ps1
+pwsh ./scripts/Test-TextEncoding.ps1
+dotnet build src/hosts/AICopilot.HttpApi/AICopilot.HttpApi.csproj
+dotnet build src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj
 ```
 
+服务器验证：
 
-* **检查 Docker 状态**：确保 Docker Desktop 已启动且运行在 **Linux Containers** 模式。
-
----
-
-## 二、 后端服务发布 (.NET 原生镜像)
-
-利用 .NET 10 的 SDK 直接生成镜像，无需编写 Dockerfile。
-
-### 1. 单个服务手动发布 (手动挡)
-
-适用于在子项目目录下（如 `HttpApi`）进行快速验证。
-
-```powershell
-# 核心命令：指定系统(linux)、架构(x64)、目标(PublishContainer)
-dotnet publish --os linux -a x64 /t:PublishContainer -p:ContainerRegistry=localhost
-
+```bash
+docker compose --env-file .env -f docker-compose.yaml config -q
+docker compose --env-file .env -f docker-compose.yaml ps
+curl -I http://10.98.90.154:82
 ```
 
-> **注意**：`-a` 是架构缩写，`-arch` 可能在部分版本中无法被 MSBuild 识别。
+Cloud OIDC 验证：
 
-### 2. AppHost 一键全家桶发布 (自动挡)
+- Cloud 侧 “打开助手” 指向 `http://10.98.90.154:82/api/identity/cloud-oidc/challenge`。
+- AICopilot 完成 Cloud OIDC 后仍使用本地 AI 权限，不直接映射 Cloud role。
+- 未启用 Cloud 只读 token 时，Cloud 业务读取保持关闭。
 
-在 `AICopilot.AppHost` 目录下执行，会自动带动所有配置好的后端项目。
+## 6. 禁止项
 
-```powershell
-dotnet publish /p:PublishProfile=DefaultContainer /p:ContainerRegistry=localhost
-
-```
-
----
-
-## 三、 前端服务发布 (Dockerfile 模式)
-
-由于 Vue/Vite 项目无法直接用 .NET SDK 打包，需使用标准 Docker 构建。
-
-### 1. 构建前端镜像
-
-在项目**根目录**下执行：
-
-```powershell
-docker build -t shushu/aicopilot-webui:latest src/vues/AICopilot.Web
-
-```
-
-### 2. Nginx 反向代理逻辑 (nginx.conf.template)
-
-前端通过 Nginx 转发请求解决跨域，关键配置：
-
-```nginx
-location /api/ {
-    proxy_pass ${AICOPILOT_HTTPAPI_HTTP}/api/;
-}
-
-```
-
----
-
-## 四、 容器运行与编排 (Docker Compose)
-
-在 `artifacts` 目录下操作，统一管理数据库、消息队列和业务服务。
-
-### 1. 启动服务
-
-```powershell
-# 启动所有服务并在后台运行
-docker compose up -d
-
-```
-
-### 2. 常用管理命令
-
-* **查看运行状态**：`docker compose ps`
-* **查看实时日志**（排查报错关键）：`docker compose logs -f aicopilot-httpapi`
-* **停止并清理容器**：`docker compose down`
-* **重启特定服务**：`docker compose restart aicopilot-httpapi`
-
----
-
-## 五、 关键故障排查 (运维必看)
-
-### 1. MCP stdio 运行环境缺失排查
-
-后端镜像采用 **Chiseled (精简)** 镜像，默认不包含 `npx`。运行时会在启动 MCP stdio server 前检查命令是否存在；如果 `npx` 或配置的 `Command` 不可用，该 MCP server 会被跳过注册并写入 warning 日志，`HttpApi` 不会因此崩溃。
-
-完整 MCP 能力建议在后续版本中迁移到独立 MCP 容器或 SSE endpoint。若临时环境仍需完全关闭 MCP 配置，可使用以下兜底方式：
-
-```powershell
-# 方式 A：通过 Docker 命令行直接修改
-docker exec -it artifacts-postgres-1 psql -U postgres -d ai-copilot -c "UPDATE mcp_server_info SET is_enabled = false;"
-
-# 方式 B：VS 内部/图形化工具连接后执行 SQL
-UPDATE mcp_server_info SET is_enabled = false;
-
-```
-
-### 2. 数据库连接失败排查
-
-* **外部工具连不上**：检查 `docker-compose.yaml` 中 `postgres` 节点是否为 **`ports: - "5432:5432"`**（如果是 `expose` 则外部无法访问）。
-* **密码错误**：检查 `.env` 文件中的 `PG_PASSWORD` 变量。
-
----
-
-## 💡 核心经验总结
-
-1. **前后端分离优势**：后端追求极致轻量（Native AOT + Chiseled），前端追求部署灵活（Nginx 反向代理），这是目前最稳健的架构。 
-2. **终端操作细节**：在 Visual Studio 的 PowerShell 终端里，**选中文字按回车(Enter)即复制**，**千万别按 Ctrl+C**（会中止正在构建的任务）。
-3. **配置保存**：VS Code 或 VS 编辑 YAML 后一定要确认 **已保存**，否则 Docker 读取的是旧配置。
+- 不提交 `.env`、token、API key、JWT secret、数据库密码、Qdrant key。
+- 不通过 MCP、Tool、Agent workflow、后台任务或直接 SQL 调用 Cloud 写接口。
+- 不把 Cloud role 直接映射成 AICopilot role。
+- 不在文档里把 simulation、dry-run 或准备态描述成真实生产试点完成或 GA 通过。
