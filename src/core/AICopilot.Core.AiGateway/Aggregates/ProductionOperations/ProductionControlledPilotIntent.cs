@@ -14,6 +14,8 @@ public sealed class ProductionControlledPilotIntent
         string intentId,
         string goalHash,
         IReadOnlyCollection<string>? endpointCodes,
+        Guid? deviceId,
+        string? passStationTypeKey,
         DateTimeOffset? timeRangeFrom,
         DateTimeOffset? timeRangeTo,
         int maxRows,
@@ -31,6 +33,8 @@ public sealed class ProductionControlledPilotIntent
             intentId,
             goalHash,
             endpointCodes,
+            deviceId,
+            passStationTypeKey,
             timeRangeFrom,
             timeRangeTo,
             maxRows,
@@ -48,6 +52,10 @@ public sealed class ProductionControlledPilotIntent
     public string GoalHash { get; private set; } = string.Empty;
 
     public string[] EndpointCodes { get; private set; } = [];
+
+    public Guid? DeviceId { get; private set; }
+
+    public string? PassStationTypeKey { get; private set; }
 
     public DateTimeOffset? TimeRangeFrom { get; private set; }
 
@@ -75,6 +83,8 @@ public sealed class ProductionControlledPilotIntent
         string intentId,
         string goalHash,
         IReadOnlyCollection<string>? endpointCodes,
+        Guid? deviceId,
+        string? passStationTypeKey,
         DateTimeOffset? timeRangeFrom,
         DateTimeOffset? timeRangeTo,
         int maxRows,
@@ -89,6 +99,10 @@ public sealed class ProductionControlledPilotIntent
         IntentId = ProductionPilotEmergencyStopState.NormalizeRequired(intentId, nameof(intentId), 200);
         GoalHash = ProductionPilotEmergencyStopState.NormalizeRequired(goalHash, nameof(goalHash), 128);
         EndpointCodes = ProductionPilotEmergencyStopState.NormalizeStrings(endpointCodes, 120);
+        DeviceId = deviceId == Guid.Empty ? null : deviceId;
+        PassStationTypeKey = string.IsNullOrWhiteSpace(passStationTypeKey)
+            ? null
+            : ProductionPilotEmergencyStopState.NormalizeRequired(passStationTypeKey, nameof(passStationTypeKey), 80);
         TimeRangeFrom = timeRangeFrom;
         TimeRangeTo = timeRangeTo;
         MaxRows = Math.Max(1, maxRows);

@@ -25,14 +25,12 @@ internal static class CloudAiReadQueryParameterBuilder
 
     public static Dictionary<string, string?> BuildCapacityQueryParameters(CloudAiReadQuery query)
     {
-        var deviceId = RequireFilterValue(query, "deviceId", "请补充设备 ID。", "deviceId", "deviceCode");
+        var deviceId = RequireFilterValue(query, "deviceId", "请补充设备 ID。", "deviceId");
         var (start, end) = RequireTimeRange(query, "请补充产能查询的开始日期和结束日期。");
-        var deviceCode = GetFilterValue(query, "deviceCode");
 
         var parameters = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
             ["deviceId"] = deviceId,
-            ["deviceCode"] = deviceCode,
             ["startDate"] = FormatCloudDate(start),
             ["endDate"] = FormatCloudDate(end),
             ["plcName"] = GetFilterValue(query, "plcName", "processName"),
@@ -44,14 +42,12 @@ internal static class CloudAiReadQueryParameterBuilder
 
     public static Dictionary<string, string?> BuildDeviceLogQueryParameters(CloudAiReadQuery query)
     {
-        var deviceId = RequireFilterValue(query, "deviceId", "请补充设备 ID。", "deviceId", "deviceCode");
+        var deviceId = RequireFilterValue(query, "deviceId", "请补充设备 ID。", "deviceId");
         var (start, end) = RequireTimeRange(query, "请补充日志查询的开始时间和结束时间。");
-        var deviceCode = GetFilterValue(query, "deviceCode");
 
         var parameters = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
             ["deviceId"] = deviceId,
-            ["deviceCode"] = deviceCode,
             ["startTime"] = FormatCloudTime(start),
             ["endTime"] = FormatCloudTime(end),
             ["level"] = GetFilterValue(query, "level"),
@@ -65,11 +61,11 @@ internal static class CloudAiReadQueryParameterBuilder
     public static Dictionary<string, string?> BuildPassStationQueryParameters(CloudAiReadQuery query)
     {
         var (start, end) = RequireTimeRange(query, "请补充过站/生产数据查询的开始时间和结束时间。");
+        var deviceId = RequireFilterValue(query, "deviceId", "请补充设备 ID。", "deviceId");
 
         var parameters = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
-            ["deviceId"] = FirstNonBlank(GetFilterValue(query, "deviceId"), GetFilterValue(query, "deviceCode")),
-            ["deviceCode"] = GetFilterValue(query, "deviceCode"),
+            ["deviceId"] = deviceId,
             ["startTime"] = FormatCloudTime(start),
             ["endTime"] = FormatCloudTime(end),
             ["barcode"] = GetFilterValue(query, "barcode"),

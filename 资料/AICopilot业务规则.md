@@ -34,6 +34,13 @@
 
 Human-in-the-loop 不能把禁止的 Cloud 业务写入变成允许动作。
 
+Cloud AiRead 设备契约：
+
+- `deviceId` 是正式 Cloud 设备身份参数，用于产能、日志、过站记录等业务读取。
+- `deviceCode`/`ClientCode` 只用于设备查询、展示或 bootstrap 寻址，不得作为 `deviceId` 发送。
+- 需要从自然语言里的设备编码定位设备时，必须先走显式设备查询/解析；无法唯一命中时要求用户补充，不做隐式兼容。
+- AICopilot 的 Pilot 场景参数不得直接透传给 Cloud；只有 Cloud 端点真实声明的参数可以进入请求。
+
 ## 3. OIDC 身份边界
 
 - Cloud OIDC 只解决身份、账号有效性、员工有效性。
@@ -74,6 +81,7 @@ Human-in-the-loop 不能把禁止的 Cloud 业务写入变成允许动作。
 - 部署入口只保留 `AICopilot 项目部署与维护指南.md` 和 `deploy/enterprise-ai`。
 - 阶段计划、批次验收报告、PR 草案和一次性 acceptance 输出不得继续作为执行入口；有效结论必须沉淀到长期规则或部署指南后再清理。
 - 清理文档时必须先检查引用，避免留下指向已删除阶段文件的脚本、测试或说明。
+- 旧的 Simulation/Real/Sandbox/Pilot 阶段说明只可作为历史材料，不得覆盖当前部署指南和生产验收口径。
 
 ## 9. 工程边界
 

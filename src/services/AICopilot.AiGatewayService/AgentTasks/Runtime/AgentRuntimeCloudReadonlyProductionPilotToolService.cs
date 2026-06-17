@@ -39,6 +39,10 @@ internal sealed class AgentRuntimeCloudReadonlyProductionPilotToolService(
         var maxRows = AgentRuntimeStepInputReader.ReadInt(step.InputJson, "maxRows") ?? 20;
         var timeoutMs = AgentRuntimeStepInputReader.ReadInt(step.InputJson, "timeoutMs") ?? 5000;
         var windowId = AgentRuntimeStepInputReader.ReadString(step.InputJson, "pilotWindowId");
+        var deviceId = Guid.TryParse(AgentRuntimeStepInputReader.ReadString(step.InputJson, "deviceId"), out var parsedDeviceId)
+            ? parsedDeviceId
+            : (Guid?)null;
+        var passStationTypeKey = AgentRuntimeStepInputReader.ReadString(step.InputJson, "passStationTypeKey");
         var protectedTools = await GetCloudReadonlyPilotReadinessQueryHandler.LoadProtectedToolRegistrationsAsync(
             toolReadRepository,
             cancellationToken);
@@ -48,8 +52,10 @@ internal sealed class AgentRuntimeCloudReadonlyProductionPilotToolService(
                 plan.ArtifactTypes,
                 windowId,
                 TimeRange: null,
-                maxRows,
-                timeoutMs),
+                DeviceId: deviceId,
+                PassStationTypeKey: passStationTypeKey,
+                MaxRows: maxRows,
+                TimeoutMs: timeoutMs),
             cloudReadonlyPilotReadinessService.BuildStatus(protectedTools),
             protectedTools,
             cancellationToken);

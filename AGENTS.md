@@ -19,6 +19,9 @@
 - AICopilot 不得直接写 Cloud 数据库。
 - AICopilot 不得通过 MCP、Tool、Agent workflow、后台任务、直接 SQL 或隐藏适配器间接调用 Cloud 写接口。
 - Human-in-the-loop 不是放开 Cloud 写入的理由。
+- Cloud AiRead 正式设备参数是 `deviceId`；`deviceCode` 只能用于设备查询/解析，不得被当作 `deviceId` 发送给 Cloud。
+- P12/P13 生产只读 Pilot 只能向 Cloud 发送真实端点参数；`scenarioId`、`from`、`to`、`pilotWindowId`、`boundary` 等试点元数据只能留在 AICopilot 内部审计。
+- 开发阶段不保留普通 Real CloudReadonly 与受控 Pilot 的双轨生产读取入口；生产只读读取必须走当前批准的受控入口。
 
 ## OIDC Boundary
 
@@ -39,6 +42,7 @@ Cloud-AICopilot OIDC 身份对齐的长期结论见 `../docs/历史核心记录.
 - `src/hosts` 保持薄，只做组合根、API、worker、启动 wiring。
 - `src/shared` 只放真正共享的抽象和 shared kernel。
 - `src/vues` 放前端逻辑，不回填到 service 或 host。
+- 不为旧 Cloud 读取路径、旧工具 schema、旧配置模式或旧文档入口保留兼容 adapter；需要跨仓库对齐时同步更新契约、服务注册和测试。
 
 ## Capability Boundaries
 

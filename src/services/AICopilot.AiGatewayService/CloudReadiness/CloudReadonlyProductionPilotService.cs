@@ -221,6 +221,15 @@ public sealed class CloudReadonlyProductionPilotService(
             return Result.Invalid("P12 production Pilot endpoint is blocked by policy or not in the active window allowlist.");
         }
 
+        if (!CloudReadonlyProductionPilotScenarioCatalog.TryResolveEndpointPath(
+                endpoint,
+                request.PassStationTypeKey,
+                out var endpointPath,
+                out var endpointPathError))
+        {
+            return Result.Invalid(endpointPathError);
+        }
+
         var effectiveMaxRows = Math.Clamp(request.MaxRows <= 0 ? pilotOptions.Value.DefaultMaxRows : request.MaxRows, 1, window.MaxRows);
         var effectiveTimeoutMs = Math.Clamp(request.TimeoutMs <= 0 ? window.TimeoutMs : request.TimeoutMs, 500, window.TimeoutMs);
         var (from, to) = NormalizeTimeRange(request.TimeRange, window.MaxTimeRangeDays);
@@ -234,7 +243,22 @@ public sealed class CloudReadonlyProductionPilotService(
             return Result.Invalid("P12 production Pilot timeRange exceeds the active window maxTimeRange.");
         }
 
-        var query = CloudReadonlyProductionPilotScenarioCatalog.BuildQuery(scenario, window, effectiveMaxRows, from, to);
+        IReadOnlyDictionary<string, string?> query;
+        try
+        {
+            query = CloudReadonlyProductionPilotScenarioCatalog.BuildQuery(
+                scenario,
+                endpoint,
+                effectiveMaxRows,
+                from,
+                to,
+                request.DeviceId);
+        }
+        catch (CloudAiReadException ex) when (ex.Code == CloudAiReadProblemCodes.MissingRequiredParameter)
+        {
+            return Result.Invalid(ex.Message);
+        }
+
         var stopwatch = Stopwatch.StartNew();
         try
         {
@@ -242,7 +266,7 @@ public sealed class CloudReadonlyProductionPilotService(
             timeoutCts.CancelAfter(TimeSpan.FromMilliseconds(effectiveTimeoutMs));
             using var document = await cloudAiReadClient.SendJsonAsync(
                 endpoint.Method,
-                endpoint.Path,
+                endpointPath,
                 query,
                 timeoutCts.Token);
             stopwatch.Stop();

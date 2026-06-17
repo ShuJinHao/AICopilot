@@ -42,8 +42,6 @@ public sealed class CloudAiReadOptions
 
     public int TimeoutSeconds { get; init; } = 10;
 
-    public string DefaultPassStationTypeKey { get; init; } = "default";
-
     public string[] ExplicitPostQueryPaths { get; init; } = [];
 
     public bool IsConfigured() => Enabled;
@@ -69,11 +67,6 @@ public sealed class CloudAiReadOptions
         if (TimeoutSeconds is < 1 or > 30)
         {
             throw new InvalidOperationException("CloudAiRead:TimeoutSeconds must be between 1 and 30.");
-        }
-
-        if (!CloudAiReadEndpointPolicy.IsSafeRouteSegment(DefaultPassStationTypeKey))
-        {
-            throw new InvalidOperationException("CloudAiRead:DefaultPassStationTypeKey must be a single safe route segment.");
         }
 
         foreach (var path in ExplicitPostQueryPaths)
@@ -362,17 +355,6 @@ public sealed record CloudAiReadPassStationRecordDto(
     string? StationName,
     string? Result,
     DateTimeOffset? OccurredAt,
-    IReadOnlyDictionary<string, object?> AdditionalFields);
-
-public sealed record CloudAiReadRecipeVersionSummaryDto(
-    string? RecipeId,
-    string? RecipeName,
-    string? DeviceId,
-    string? DeviceCode,
-    string? ProcessName,
-    string? Version,
-    bool? IsActive,
-    DateTimeOffset? UpdatedAt,
     IReadOnlyDictionary<string, object?> AdditionalFields);
 
 public interface ICloudAiReadClient

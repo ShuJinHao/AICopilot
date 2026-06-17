@@ -16,7 +16,7 @@ public sealed class CloudReadonlySandboxOptions
 
     public string EnvironmentLabel { get; init; } = "RealSandbox";
 
-    public string DefaultPassStationTypeKey { get; init; } = "default";
+    public string DefaultPassStationTypeKey { get; init; } = "injection";
 
     public string[] ExplicitPostQueryPaths { get; init; } = [];
 

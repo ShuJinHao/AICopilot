@@ -78,21 +78,21 @@ public sealed class EnterpriseCloudReadonlyPilotReadinessP11Tests
     }
 
     [Fact]
-    public void ContractRehearsal_ShouldBlockRecipeWriteUnknownAndOutOfAllowlistEndpoints()
+    public void ContractRehearsal_ShouldBlockWriteUnknownAndOutOfAllowlistEndpoints()
     {
         var service = CreateReadyService();
         var package = service.CreatePackage(CreatePackageCommand(["devices"]), EvidencePackage()).Value!;
 
         var result = service.RunContractRehearsal(
             package.PackageId,
-            ["devices", "recipe", "recipe_versions", "write_path", "unknown_endpoint", "capacity_summary"],
+            ["devices", "write_path", "unknown_endpoint", "capacity_summary"],
             maxRows: 20,
             timeoutMs: 5000);
 
         result.IsSuccess.Should().BeTrue();
         result.Value!.Checks.Should().Contain(check => check.EndpointCode == "devices" && check.Status == "Passed");
-        result.Value.Checks.Should().Contain(check => check.EndpointCode == "recipe" && check.Status == "BlockedByPolicy");
         result.Value.Checks.Should().Contain(check => check.EndpointCode == "write_path" && check.Status == "BlockedByPolicy");
+        result.Value.Checks.Should().Contain(check => check.EndpointCode == "unknown_endpoint" && check.Status == "BlockedByPolicy");
         result.Value.Checks.Should().Contain(check => check.EndpointCode == "capacity_summary" && check.Status == "BlockedByPolicy");
         result.Value.BlockedSamples.Should().NotBeEmpty();
     }

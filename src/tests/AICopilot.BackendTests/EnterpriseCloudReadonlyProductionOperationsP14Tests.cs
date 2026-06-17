@@ -39,7 +39,15 @@ public sealed class EnterpriseCloudReadonlyProductionOperationsP14Tests
             RehearsalPassed(),
             ProtectedTools(),
             CancellationToken.None);
-        var p13Intent = fixture.P13.CreateIntent("device list", ["Markdown"], null, 10, stoppedP12, ProtectedTools());
+        var p13Intent = fixture.P13.CreateIntent(
+            "device list",
+            ["Markdown"],
+            null,
+            deviceId: null,
+            passStationTypeKey: null,
+            maxRows: 10,
+            stoppedP12,
+            ProtectedTools());
 
         p12Run.IsSuccess.Should().BeFalse();
         p12Run.Errors.Should().Contain(error => error.ToString()!.Contains("EmergencyStopped", StringComparison.OrdinalIgnoreCase));
@@ -86,7 +94,9 @@ public sealed class EnterpriseCloudReadonlyProductionOperationsP14Tests
             "device list",
             ["Markdown", "Html"],
             null,
-            10,
+            deviceId: null,
+            passStationTypeKey: null,
+            maxRows: 10,
             p12Status,
             ProtectedTools()).Value!;
         await fixture.P13.RunIntentAsync(
@@ -136,7 +146,9 @@ public sealed class EnterpriseCloudReadonlyProductionOperationsP14Tests
             "device list",
             ["Markdown", "Html"],
             null,
-            10,
+            deviceId: null,
+            passStationTypeKey: null,
+            maxRows: 10,
             p12Ready,
             ProtectedTools()).Value!;
         var p13Run = await fixture.P13.RunIntentAsync(

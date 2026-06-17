@@ -119,6 +119,8 @@ public sealed record RunCloudReadonlyProductionPilotScenarioCommand(
     IReadOnlyCollection<string>? ArtifactTypes = null,
     string? PilotWindowId = null,
     CloudProductionPilotTimeRangeDto? TimeRange = null,
+    Guid? DeviceId = null,
+    string? PassStationTypeKey = null,
     int MaxRows = 20,
     int TimeoutMs = 5000) : ICommand<Result<CloudReadonlyProductionPilotScenarioResultDto>>;
 

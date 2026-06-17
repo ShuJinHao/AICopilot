@@ -7,20 +7,38 @@ internal static class CloudReadonlyProductionControlledPilotQueryProjection
 {
     public static IReadOnlyDictionary<string, string?> BuildQuery(
         CloudProductionGoalIntentDto intent,
-        string pilotWindowId,
+        CloudReadonlyProductionControlledEndpointSpec endpoint,
         int maxRows)
     {
-        return new Dictionary<string, string?>
+        var query = new Dictionary<string, string?>
         {
-            ["intentId"] = intent.IntentId,
-            ["goalHash"] = intent.GoalHash,
-            ["analysisType"] = intent.AnalysisType,
-            ["maxRows"] = maxRows.ToString(),
-            ["from"] = intent.TimeRange.From?.ToString("O"),
-            ["to"] = intent.TimeRange.To?.ToString("O"),
-            ["boundary"] = CloudReadonlyProductionControlledPilotMarkers.Boundary,
-            ["pilotWindowId"] = pilotWindowId
+            ["maxRows"] = maxRows.ToString()
         };
+
+        if (CloudReadonlyProductionControlledPilotGoalPolicy.RequiresDeviceId(endpoint.Code))
+        {
+            if (intent.DeviceId is null || intent.DeviceId == Guid.Empty)
+            {
+                throw new CloudAiReadException(
+                    CloudAiReadProblemCodes.MissingRequiredParameter,
+                    $"P13 endpoint '{endpoint.Code}' requires deviceId.");
+            }
+
+            query["deviceId"] = intent.DeviceId.Value.ToString();
+        }
+
+        if (endpoint.Code == "capacity_summary")
+        {
+            query["startDate"] = intent.TimeRange.From?.UtcDateTime.ToString("yyyy-MM-dd");
+            query["endDate"] = intent.TimeRange.To?.UtcDateTime.ToString("yyyy-MM-dd");
+        }
+        else if (endpoint.Code is "device_logs" or "pass_station_records")
+        {
+            query["startTime"] = intent.TimeRange.From?.ToUniversalTime().ToString("O");
+            query["endTime"] = intent.TimeRange.To?.ToUniversalTime().ToString("O");
+        }
+
+        return query;
     }
 
     public static (IReadOnlyCollection<IReadOnlyDictionary<string, object?>> Rows, bool IsTruncated) ExtractRows(

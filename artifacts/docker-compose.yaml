@@ -1,0 +1,29 @@
+services:
+  aicopilot-httpapi:
+    image: aicopilot-httpapi:local
+    environment:
+      ConnectionStrings__ai-copilot: "Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${PG_USER};Password=${PG_PASSWORD}"
+      AICopilotSecurity__ApiKeyEncryptionKey: "${AICOPILOT_API_KEY_ENCRYPTION_KEY}"
+    depends_on:
+      - postgres
+      - eventbus
+      - qdrant
+
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: "${PG_USER}"
+      POSTGRES_PASSWORD: "${PG_PASSWORD}"
+      POSTGRES_DB: "${POSTGRES_DB}"
+
+  eventbus:
+    image: rabbitmq:4-management
+    environment:
+      RABBITMQ_DEFAULT_USER: "${EVENTBUS_USER}"
+      RABBITMQ_DEFAULT_PASS: "${EVENTBUS_PASSWORD}"
+
+  qdrant:
+    image: qdrant/qdrant:v1.15.5
+    environment:
+      QDRANT__SERVICE__API_KEY: "${QDRANT_KEY}"
+

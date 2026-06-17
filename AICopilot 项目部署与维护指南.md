@@ -61,8 +61,6 @@ Cloud 只读和 OIDC 默认：
 
 ```text
 CLOUD_READONLY_MODE=Disabled
-CLOUD_READONLY_REAL_ENABLED=false
-CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ=false
 CLOUD_AI_READ_ENABLED=false
 CLOUD_OIDC_ENABLED=true
 CLOUD_OIDC_ISSUER=http://10.98.90.154:81
@@ -71,7 +69,26 @@ CLOUD_OIDC_CLIENT_ID=aicopilot
 CLOUD_OIDC_REQUIRE_HTTPS_METADATA=false
 ```
 
-`CLOUD_AI_SERVICE_ACCOUNT_TOKEN` 只有在 Cloud 明确发放 AI 只读服务账号 token 后才填写；不能写入仓库。
+开发期收口要求：生产 Cloud 只读读取不再通过普通 Real CloudReadonly 双轨入口推进；真实 Cloud 读取必须走当前批准的 Cloud AiRead / P12 / P13 受控入口。`CLOUD_AI_SERVICE_ACCOUNT_TOKEN` 只有在 Cloud 明确发放 AI 只读服务账号 token 后才填写；不能写入仓库。
+
+Cloud AiRead 受控读取启用时，必须同时满足：
+
+```text
+CLOUD_AI_READ_ENABLED=true
+CLOUD_AI_READ_BASE_URL=<Cloud Gateway URL>
+CLOUD_AI_SERVICE_ACCOUNT_TOKEN=<Cloud 签发的 AI 只读服务账号 JWT>
+```
+
+Cloud AiRead 契约：
+
+- 设备列表：`GET /api/v1/ai/read/devices`，参数为 `maxRows` 和可选 `keyword`。
+- 产能摘要：`GET /api/v1/ai/read/capacity/summary`，参数为 `deviceId`、`startDate`、`endDate`、`maxRows`。
+- 设备日志：`GET /api/v1/ai/read/device-logs`，参数为 `deviceId`、`startTime`、`endTime`、`maxRows`。
+- 过站记录：`GET /api/v1/ai/read/pass-stations/{typeKey}`，必须显式传入 `{typeKey}`，参数为 `deviceId`、`startTime`、`endTime`、`maxRows`。
+- `deviceCode` 只能用于设备查询/解析，无法唯一命中时不得继续读取业务数据。
+- P12/P13 的 `scenarioId`、`from`、`to`、`boundary`、`intentId`、`goalHash`、`analysisType`、`pilotWindowId` 等只允许留在 AICopilot 内部审计，不得作为 Cloud query 参数。
+- AICopilot 不读取未批准的配方主数据、配方详情或配方版本。
+- Simulation 只能用于联调和演示，不能作为生产验收结果。
 
 ## 4. 构建与发布
 
@@ -127,3 +144,4 @@ Cloud OIDC 验证：
 - 不通过 MCP、Tool、Agent workflow、后台任务或直接 SQL 调用 Cloud 写接口。
 - 不把 Cloud role 直接映射成 AICopilot role。
 - 不在文档里把 simulation、dry-run 或准备态描述成真实生产试点完成或 GA 通过。
+- 不保留旧普通 Real 双轨、旧工具 schema 或旧 query 参数作为生产兼容入口。

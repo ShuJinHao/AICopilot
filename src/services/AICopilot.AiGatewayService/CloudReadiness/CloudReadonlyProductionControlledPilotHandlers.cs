@@ -52,6 +52,8 @@ public sealed class CreateCloudReadonlyProductionControlledPlanCommandHandler(
             request.Goal,
             request.ArtifactTypes,
             request.TimeRange,
+            request.DeviceId,
+            request.PassStationTypeKey,
             request.MaxRows,
             p12Status,
             protectedTools);

@@ -53,13 +53,13 @@ public sealed class EnterpriseCloudReadonlyReadinessP5Tests
     }
 
     [Fact]
-    public async Task RunFakeEndpoint_ShouldBlockRecipeAndWritePath_ByPolicy()
+    public async Task RunFakeEndpoint_ShouldBlockUnknownAndWritePath_ByPolicy()
     {
         var service = CreateService();
 
         var report = await service.RunAsync(
             CloudReadonlyReadinessModes.FakeEndpoint,
-            ["recipe_versions", "write_path"],
+            ["unknown_endpoint", "write_path"],
             maxRows: 20,
             timeoutMs: 5000,
             CancellationToken.None);

@@ -11,9 +11,7 @@ internal static class CloudReadonlySandboxControlledTrialGoalPolicy
             new CloudReadonlySandboxControlledEndpointSpec("devices", HttpMethod.Get, "/api/v1/ai/read/devices"),
             new CloudReadonlySandboxControlledEndpointSpec("capacity_summary", HttpMethod.Get, "/api/v1/ai/read/capacity/summary"),
             new CloudReadonlySandboxControlledEndpointSpec("device_logs", HttpMethod.Get, "/api/v1/ai/read/device-logs"),
-            new CloudReadonlySandboxControlledEndpointSpec("pass_station_records", HttpMethod.Get, "/api/v1/ai/read/pass-stations/default"),
-            new CloudReadonlySandboxControlledEndpointSpec("recipe", HttpMethod.Get, "/api/v1/ai/read/recipes", IsBlockedByPolicy: true),
-            new CloudReadonlySandboxControlledEndpointSpec("recipe_versions", HttpMethod.Get, "/api/v1/ai/read/recipes/versions", IsBlockedByPolicy: true),
+            new CloudReadonlySandboxControlledEndpointSpec("pass_station_records", HttpMethod.Get, "/api/v1/ai/read/pass-stations/injection"),
             new CloudReadonlySandboxControlledEndpointSpec("write_path", HttpMethod.Post, "/api/v1/ai/read/devices/update", IsBlockedByPolicy: true)
         }.ToDictionary(item => item.Code, StringComparer.OrdinalIgnoreCase);
 

@@ -23,9 +23,7 @@ internal static class CloudReadonlyProductionPilotScenarioCatalog
             new EndpointSpec("devices", HttpMethod.Get, "/api/v1/ai/read/devices"),
             new EndpointSpec("capacity_summary", HttpMethod.Get, "/api/v1/ai/read/capacity/summary"),
             new EndpointSpec("device_logs", HttpMethod.Get, "/api/v1/ai/read/device-logs"),
-            new EndpointSpec("pass_station_records", HttpMethod.Get, "/api/v1/ai/read/pass-stations/default"),
-            new EndpointSpec("recipe", HttpMethod.Get, "/api/v1/ai/read/recipes", IsBlockedByPolicy: true),
-            new EndpointSpec("recipe_versions", HttpMethod.Get, "/api/v1/ai/read/recipes/versions", IsBlockedByPolicy: true),
+            new EndpointSpec("pass_station_records", HttpMethod.Get, "/api/v1/ai/read/pass-stations/{typeKey}"),
             new EndpointSpec("write_path", HttpMethod.Post, "/api/v1/ai/read/devices/update", IsBlockedByPolicy: true)
         }.ToDictionary(item => item.Code, StringComparer.OrdinalIgnoreCase);
 
@@ -72,20 +70,67 @@ internal static class CloudReadonlyProductionPilotScenarioCatalog
 
     public static IReadOnlyDictionary<string, string?> BuildQuery(
         ProductionPilotScenario scenario,
-        CloudReadonlyProductionPilotWindowDto window,
+        EndpointSpec endpoint,
         int maxRows,
         DateTimeOffset from,
-        DateTimeOffset to)
+        DateTimeOffset to,
+        Guid? deviceId)
     {
-        return new Dictionary<string, string?>
+        var query = new Dictionary<string, string?>
         {
-            ["scenarioId"] = scenario.Id,
-            ["maxRows"] = maxRows.ToString(),
-            ["from"] = from.ToString("O"),
-            ["to"] = to.ToString("O"),
-            ["boundary"] = CloudReadonlyProductionPilotMarkers.Boundary,
-            ["pilotWindowId"] = window.WindowId
+            ["maxRows"] = maxRows.ToString()
         };
+
+        if (endpoint.Code is "capacity_summary" or "device_logs" or "pass_station_records")
+        {
+            if (deviceId is null || deviceId == Guid.Empty)
+            {
+                throw new CloudAiReadException(
+                    CloudAiReadProblemCodes.MissingRequiredParameter,
+                    $"P12 scenario '{scenario.Id}' requires deviceId.");
+            }
+
+            query["deviceId"] = deviceId.Value.ToString();
+        }
+
+        if (endpoint.Code == "capacity_summary")
+        {
+            query["startDate"] = from.UtcDateTime.ToString("yyyy-MM-dd");
+            query["endDate"] = to.UtcDateTime.ToString("yyyy-MM-dd");
+        }
+        else if (endpoint.Code is "device_logs" or "pass_station_records")
+        {
+            query["startTime"] = from.ToUniversalTime().ToString("O");
+            query["endTime"] = to.ToUniversalTime().ToString("O");
+        }
+
+        return query;
+    }
+
+    public static bool TryResolveEndpointPath(
+        EndpointSpec endpoint,
+        string? passStationTypeKey,
+        out string path,
+        out string error)
+    {
+        path = endpoint.Path;
+        error = string.Empty;
+
+        if (!endpoint.Path.Contains("{typeKey}", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(passStationTypeKey) ||
+            !CloudAiReadEndpointPolicy.IsSafeRouteSegment(passStationTypeKey))
+        {
+            error = "P12 pass_station_records scenario requires a safe passStationTypeKey.";
+            path = string.Empty;
+            return false;
+        }
+
+        path = endpoint.Path.Replace("{typeKey}", Uri.EscapeDataString(passStationTypeKey.Trim()), StringComparison.Ordinal);
+        return true;
     }
 
     public static IReadOnlyCollection<string> NormalizeArtifactTypes(

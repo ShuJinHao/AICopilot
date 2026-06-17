@@ -87,9 +87,14 @@ public sealed class CloudAiReadClient(
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default)
     {
-        var typeKey = string.IsNullOrWhiteSpace(query.PassStationTypeKey)
-            ? options.Value.DefaultPassStationTypeKey
-            : query.PassStationTypeKey.Trim();
+        if (string.IsNullOrWhiteSpace(query.PassStationTypeKey))
+        {
+            throw new CloudAiReadException(
+                CloudAiReadProblemCodes.MissingRequiredParameter,
+                "Cloud AiRead 查询缺少必需参数 passStationTypeKey，请补充过站类型。");
+        }
+
+        var typeKey = query.PassStationTypeKey.Trim();
         var path = $"/api/v1/ai/read/pass-stations/{Uri.EscapeDataString(typeKey)}";
         using var document = await SendJsonAsync(
             HttpMethod.Get,
@@ -104,7 +109,7 @@ public sealed class CloudAiReadClient(
         SemanticQueryPlan plan,
         CancellationToken cancellationToken = default)
     {
-        var query = CloudAiReadQuery.FromSemanticPlan(plan, options.Value.DefaultPassStationTypeKey);
+        var query = CloudAiReadQuery.FromSemanticPlan(plan);
         return plan.Target switch
         {
             SemanticQueryTarget.Device => ToUntyped(await GetDevicesAsync(query, cancellationToken)),

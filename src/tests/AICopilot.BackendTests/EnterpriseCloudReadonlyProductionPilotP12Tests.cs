@@ -46,6 +46,7 @@ public sealed class EnterpriseCloudReadonlyProductionPilotP12Tests
     [Fact]
     public async Task ApprovedWindow_ShouldRunFixedScenarioWithProductionPilotMarkers()
     {
+        var cloudClient = new FakeCloudAiReadClient();
         var service = CreateService(
             cloudAiRead: new CloudAiReadOptions
             {
@@ -54,7 +55,7 @@ public sealed class EnterpriseCloudReadonlyProductionPilotP12Tests
                 ServiceAccountToken = "redacted-test-token"
             },
             pilot: new CloudReadonlyProductionPilotOptions { Enabled = true },
-            cloudAiReadClient: new FakeCloudAiReadClient());
+            cloudAiReadClient: cloudClient);
         var p11Status = RehearsalPassed();
         var window = service.CreateWindow(
             new CreateCloudReadonlyProductionPilotWindowCommand(
@@ -96,6 +97,12 @@ public sealed class EnterpriseCloudReadonlyProductionPilotP12Tests
         result.Value.QueryResult.Rows.Should().OnlyContain(row =>
             Convert.ToString(row["sourceMode"]) == CloudReadonlyProductionPilotMarkers.SourceMode &&
             Convert.ToString(row["boundary"]) == CloudReadonlyProductionPilotMarkers.Boundary);
+        cloudClient.LastQuery.Should().ContainKey("maxRows");
+        cloudClient.LastQuery.Should().NotContainKey("scenarioId");
+        cloudClient.LastQuery.Should().NotContainKey("from");
+        cloudClient.LastQuery.Should().NotContainKey("to");
+        cloudClient.LastQuery.Should().NotContainKey("boundary");
+        cloudClient.LastQuery.Should().NotContainKey("pilotWindowId");
 
         var json = JsonSerializer.Serialize(result.Value, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         json.Should().Contain("CloudReadonlyProductionPilot");
@@ -142,6 +149,37 @@ public sealed class EnterpriseCloudReadonlyProductionPilotP12Tests
 
         outOfAllowlist.IsSuccess.Should().BeFalse();
         outOfAllowlist.Errors.Should().Contain(error => error.ToString()!.Contains("allowlist", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task RunScenario_ShouldRequireDeviceIdForDeviceScopedEndpoints()
+    {
+        var service = CreateService(
+            cloudAiRead: new CloudAiReadOptions
+            {
+                Enabled = true,
+                BaseUrl = "https://cloud.example.invalid",
+                ServiceAccountToken = "redacted-test-token"
+            },
+            pilot: new CloudReadonlyProductionPilotOptions { Enabled = true },
+            cloudAiReadClient: new FakeCloudAiReadClient());
+
+        var window = service.CreateWindow(
+            new CreateCloudReadonlyProductionPilotWindowCommand(AllowedEndpointCodes: ["capacity_summary"]),
+            RehearsalPassed(),
+            ProtectedTools()).Value!;
+        service.UpdateWindowStatus(window.WindowId, CloudReadonlyProductionPilotWindowStatuses.Approved);
+
+        var missingDevice = await service.RunScenarioAsync(
+            new RunCloudReadonlyProductionPilotScenarioCommand(
+                "cloud-production-pilot-capacity-summary",
+                PilotWindowId: window.WindowId),
+            RehearsalPassed(),
+            ProtectedTools(),
+            CancellationToken.None);
+
+        missingDevice.IsSuccess.Should().BeFalse();
+        missingDevice.Errors.Should().Contain(error => error.ToString()!.Contains("deviceId", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -258,8 +296,12 @@ public sealed class EnterpriseCloudReadonlyProductionPilotP12Tests
     {
         public bool IsEnabled => true;
 
+        public IReadOnlyDictionary<string, string?> LastQuery { get; private set; } =
+            new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+
         public Task<JsonDocument> SendJsonAsync(HttpMethod method, string path, IReadOnlyDictionary<string, string?>? query = null, CancellationToken cancellationToken = default)
         {
+            LastQuery = query ?? new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
             if (path.Contains("devices", StringComparison.OrdinalIgnoreCase))
             {
                 return Task.FromResult(JsonDocument.Parse(

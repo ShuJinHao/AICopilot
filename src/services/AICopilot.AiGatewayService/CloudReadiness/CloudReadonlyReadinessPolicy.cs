@@ -31,11 +31,6 @@ internal static class CloudReadonlyReadinessPolicy
             errors.Add("CloudAiRead.TimeoutSeconds must be between 1 and 30.");
         }
 
-        if (!CloudAiReadEndpointPolicy.IsSafeRouteSegment(cloudAiRead.DefaultPassStationTypeKey))
-        {
-            errors.Add("CloudAiRead.DefaultPassStationTypeKey must be a single safe route segment.");
-        }
-
         foreach (var path in cloudAiRead.ExplicitPostQueryPaths)
         {
             var decision = CloudAiReadEndpointPolicy.Evaluate(HttpMethod.Post, path, cloudAiRead.ExplicitPostQueryPaths);

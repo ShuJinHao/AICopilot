@@ -2,7 +2,7 @@
 
 日期：2026-05-19
 
-- 真实 CloudReadonly 尚未启用。
+- 真实 Cloud AiRead / P12 / P13 受控只读尚未完成完整验收。
 - Cloud/Edge 未改，本阶段也不应修改。
 - Simulation 数据不是生产数据，所有报告和图表必须保留 Simulation 标签。
 - PDF/PPTX/XLSX 模板仍是 v1。

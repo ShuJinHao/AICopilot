@@ -120,6 +120,8 @@ public sealed class CloudReadonlyProductionControlledPilotService(
         string goal,
         IReadOnlyCollection<string>? artifactTypes,
         CloudProductionGoalTimeRangeDto? timeRange,
+        Guid? deviceId,
+        string? passStationTypeKey,
         int? maxRows,
         CloudReadonlyProductionPilotStatusDto p12Status,
         IReadOnlyCollection<ToolRegistration>? persistedToolRegistrations = null)
@@ -155,6 +157,15 @@ public sealed class CloudReadonlyProductionControlledPilotService(
             rejected.Add($"BlockedByPolicy: endpoint '{endpointCode}' is not in the active production controlled allowlist.");
         }
 
+        if (endpointCode is not null &&
+            CloudReadonlyProductionControlledPilotGoalPolicy.RequiresDeviceId(endpointCode) &&
+            (deviceId is null || deviceId == Guid.Empty))
+        {
+            rejected.Add($"BlockedByPolicy: endpoint '{endpointCode}' requires deviceId.");
+        }
+
+        var normalizedPassStationTypeKey = NormalizePassStationTypeKey(endpointCode, passStationTypeKey, rejected);
+
         var normalizedArtifactTypes = CloudReadonlyProductionControlledPilotGoalPolicy.NormalizeArtifactTypes(
             artifactTypes,
             options,
@@ -174,6 +185,8 @@ public sealed class CloudReadonlyProductionControlledPilotService(
             $"pcg_{ComputeHash($"{normalizedGoal}|{DateTimeOffset.UtcNow:O}")[..20]}",
             ComputeHash(normalizedGoal),
             endpointCode is null ? [] : [endpointCode],
+            deviceId,
+            normalizedPassStationTypeKey,
             normalizedTimeRange,
             effectiveMaxRows,
             normalizedArtifactTypes,
@@ -237,14 +250,32 @@ public sealed class CloudReadonlyProductionControlledPilotService(
             return Result.Invalid("CloudReadonlyProductionControlledPilot endpoint is blocked by policy.");
         }
 
+        if (!CloudReadonlyProductionControlledPilotGoalPolicy.TryResolveEndpointPath(
+                endpoint,
+                intent.PassStationTypeKey,
+                out var endpointPath,
+                out var endpointPathError))
+        {
+            return Result.Invalid(endpointPathError);
+        }
+
         var options = controlledOptions.Value;
         var effectiveMaxRows = Math.Clamp(maxRows <= 0 ? intent.MaxRows : maxRows, 1, options.MaxRows);
         var effectiveTimeoutMs = Math.Clamp(timeoutMs <= 0 ? options.TimeoutMs : timeoutMs, 500, options.TimeoutMs);
         var pilotWindowId = p12Status.PilotWindowId ?? "none";
-        var query = CloudReadonlyProductionControlledPilotQueryProjection.BuildQuery(
-            intent,
-            pilotWindowId,
-            effectiveMaxRows);
+        IReadOnlyDictionary<string, string?> query;
+        try
+        {
+            query = CloudReadonlyProductionControlledPilotQueryProjection.BuildQuery(
+                intent,
+                endpoint,
+                effectiveMaxRows);
+        }
+        catch (CloudAiReadException ex) when (ex.Code == CloudAiReadProblemCodes.MissingRequiredParameter)
+        {
+            return Result.Invalid(ex.Message);
+        }
+
         var stopwatch = Stopwatch.StartNew();
 
         try
@@ -253,7 +284,7 @@ public sealed class CloudReadonlyProductionControlledPilotService(
             timeoutCts.CancelAfter(TimeSpan.FromMilliseconds(effectiveTimeoutMs));
             using var document = await cloudAiReadClient.SendJsonAsync(
                 endpoint.Method,
-                endpoint.Path,
+                endpointPath,
                 query,
                 timeoutCts.Token);
             stopwatch.Stop();
@@ -359,7 +390,34 @@ public sealed class CloudReadonlyProductionControlledPilotService(
             return Result.Invalid("CloudProductionGoalIntent maxRows is outside the controlled production limit.");
         }
 
+        var endpointCode = intent.EndpointCodes.First();
+        if (CloudReadonlyProductionControlledPilotGoalPolicy.RequiresDeviceId(endpointCode) &&
+            (intent.DeviceId is null || intent.DeviceId == Guid.Empty))
+        {
+            return Result.Invalid("CloudProductionGoalIntent deviceId is required for this endpoint.");
+        }
+
         return Result.Success();
+    }
+
+    private static string? NormalizePassStationTypeKey(
+        string? endpointCode,
+        string? passStationTypeKey,
+        ICollection<string> rejected)
+    {
+        if (!string.Equals(endpointCode, "pass_station_records", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(passStationTypeKey) ||
+            !CloudAiReadEndpointPolicy.IsSafeRouteSegment(passStationTypeKey))
+        {
+            rejected.Add("BlockedByPolicy: endpoint 'pass_station_records' requires a safe passStationTypeKey.");
+            return null;
+        }
+
+        return passStationTypeKey.Trim();
     }
 
     private void ValidateBoundary(

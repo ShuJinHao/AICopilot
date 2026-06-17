@@ -227,7 +227,7 @@ public sealed class EnterpriseCloudReadonlySandboxP6Tests
         BaseUrl = "http://sandbox-cloud.local",
         ServiceAccountToken = "super-secret-token",
         TimeoutSeconds = 10,
-        DefaultPassStationTypeKey = "default"
+        DefaultPassStationTypeKey = "injection"
     };
 
     private sealed class RecordingSandboxClient : ICloudReadonlySandboxClient

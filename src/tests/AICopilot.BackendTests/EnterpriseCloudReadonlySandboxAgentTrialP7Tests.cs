@@ -194,7 +194,7 @@ public sealed class EnterpriseCloudReadonlySandboxAgentTrialP7Tests
         BaseUrl = "http://sandbox-cloud.local",
         ServiceAccountToken = "super-secret-token",
         TimeoutSeconds = 10,
-        DefaultPassStationTypeKey = "default"
+        DefaultPassStationTypeKey = "injection"
     };
 
     private static CloudReadonlyReadinessDto PassedSandboxSmoke() => new(

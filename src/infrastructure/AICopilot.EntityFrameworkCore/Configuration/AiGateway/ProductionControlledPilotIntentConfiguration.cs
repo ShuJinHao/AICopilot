@@ -34,6 +34,13 @@ public sealed class ProductionControlledPilotIntentConfiguration : IEntityTypeCo
             .HasColumnType("text[]")
             .HasColumnName("endpoint_codes");
 
+        builder.Property(intent => intent.DeviceId)
+            .HasColumnName("device_id");
+
+        builder.Property(intent => intent.PassStationTypeKey)
+            .HasMaxLength(80)
+            .HasColumnName("pass_station_type_key");
+
         builder.Property(intent => intent.TimeRangeFrom)
             .HasColumnType("timestamp with time zone")
             .HasColumnName("time_range_from");

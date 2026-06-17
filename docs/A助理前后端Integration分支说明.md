@@ -2,6 +2,8 @@
 
 日期：2026-05-19
 
+> 历史记录：本文只记录 2026-05-19 的 Simulation 联调分支状态，不再作为当前部署、Cloud 只读或生产验收入口。当前口径以 `../AICopilot 项目部署与维护指南.md`、`../AGENTS.md`、`../资料/AICopilot业务规则.md` 和 `frontend-integration-contract-package-2026-05-17.md` 为准。
+
 ## 分支
 
 当前分支：`integration/aicopilot-agent-workbench-simulation`
@@ -20,7 +22,7 @@ origin/main @ eb75372
 - 不接真实 Cloud 生产数据。
 - `CloudReadonly.Mode` 默认仍保持 `Disabled`，联调运行时通过环境变量或联调配置显式启用 `Simulation`。
 - `CloudAiRead.Enabled=false` 默认不变。
-- `CloudReadonly.Real.Enabled=false` 和 `CloudReadonly.Real.AllowProductionRead=false` 默认不变。
+- 不通过普通 Real CloudReadonly 双轨入口接生产 Cloud 数据；真实读取后续必须走 Cloud AiRead / P12 / P13 受控入口。
 - Cloud/Edge 仓库已有脏改不纳入本分支。
 
 ## 联调配置
@@ -34,10 +36,6 @@ origin/main @ eb75372
       "SeedData": true,
       "DataSet": "ManufacturingDemo",
       "AlwaysMarkAsSimulation": true
-    },
-    "Real": {
-      "Enabled": false,
-      "AllowProductionRead": false
     }
   },
   "CloudAiRead": {

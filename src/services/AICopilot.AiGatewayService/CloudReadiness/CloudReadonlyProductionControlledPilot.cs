@@ -40,6 +40,8 @@ public sealed record CloudProductionGoalIntentDto(
     string IntentId,
     string GoalHash,
     IReadOnlyCollection<string> EndpointCodes,
+    Guid? DeviceId,
+    string? PassStationTypeKey,
     CloudProductionGoalTimeRangeDto TimeRange,
     int MaxRows,
     IReadOnlyCollection<string> ArtifactTypes,
@@ -92,6 +94,8 @@ public sealed record CreateCloudReadonlyProductionControlledPlanCommand(
     Guid? ModelId = null,
     IReadOnlyCollection<string>? ArtifactTypes = null,
     CloudProductionGoalTimeRangeDto? TimeRange = null,
+    Guid? DeviceId = null,
+    string? PassStationTypeKey = null,
     int? MaxRows = null,
     string? PlannerMode = null) : ICommand<Result<CloudReadonlyProductionControlledPlanDto>>;
 

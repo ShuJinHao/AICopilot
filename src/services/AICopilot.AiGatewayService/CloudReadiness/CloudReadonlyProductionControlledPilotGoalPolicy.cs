@@ -11,9 +11,7 @@ internal static class CloudReadonlyProductionControlledPilotGoalPolicy
             new CloudReadonlyProductionControlledEndpointSpec("devices", HttpMethod.Get, "/api/v1/ai/read/devices"),
             new CloudReadonlyProductionControlledEndpointSpec("capacity_summary", HttpMethod.Get, "/api/v1/ai/read/capacity/summary"),
             new CloudReadonlyProductionControlledEndpointSpec("device_logs", HttpMethod.Get, "/api/v1/ai/read/device-logs"),
-            new CloudReadonlyProductionControlledEndpointSpec("pass_station_records", HttpMethod.Get, "/api/v1/ai/read/pass-stations/default"),
-            new CloudReadonlyProductionControlledEndpointSpec("recipe", HttpMethod.Get, "/api/v1/ai/read/recipes", IsBlockedByPolicy: true),
-            new CloudReadonlyProductionControlledEndpointSpec("recipe_versions", HttpMethod.Get, "/api/v1/ai/read/recipes/versions", IsBlockedByPolicy: true),
+            new CloudReadonlyProductionControlledEndpointSpec("pass_station_records", HttpMethod.Get, "/api/v1/ai/read/pass-stations/{typeKey}"),
             new CloudReadonlyProductionControlledEndpointSpec("write_path", HttpMethod.Post, "/api/v1/ai/read/devices/update", IsBlockedByPolicy: true)
         }.ToDictionary(item => item.Code, StringComparer.OrdinalIgnoreCase);
 
@@ -28,6 +26,35 @@ internal static class CloudReadonlyProductionControlledPilotGoalPolicy
             .Where(code => EndpointSpecs.TryGetValue(code, out var spec) && !spec.IsBlockedByPolicy)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    public static bool RequiresDeviceId(string endpointCode) =>
+        endpointCode is "capacity_summary" or "device_logs" or "pass_station_records";
+
+    public static bool TryResolveEndpointPath(
+        CloudReadonlyProductionControlledEndpointSpec endpoint,
+        string? passStationTypeKey,
+        out string path,
+        out string error)
+    {
+        path = endpoint.Path;
+        error = string.Empty;
+
+        if (!endpoint.Path.Contains("{typeKey}", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(passStationTypeKey) ||
+            !CloudAiReadEndpointPolicy.IsSafeRouteSegment(passStationTypeKey))
+        {
+            error = "P13 pass_station_records intent requires a safe passStationTypeKey.";
+            path = string.Empty;
+            return false;
+        }
+
+        path = endpoint.Path.Replace("{typeKey}", Uri.EscapeDataString(passStationTypeKey.Trim()), StringComparison.Ordinal);
+        return true;
     }
 
     public static string NormalizeGoal(string? goal) =>

@@ -35,6 +35,7 @@ public sealed class EnterpriseCloudReadonlyProductionControlledPilotP13Tests
     [Fact]
     public async Task ReadyGate_ShouldCreateIntentAndRunWithProductionControlledMarkers()
     {
+        var cloudClient = new FakeCloudAiReadClient();
         var service = CreateService(
             cloudAiRead: ConfiguredCloudAiRead(),
             controlled: new CloudReadonlyProductionControlledPilotOptions
@@ -44,13 +45,15 @@ public sealed class EnterpriseCloudReadonlyProductionControlledPilotP13Tests
                 AllowedEndpointCodes = ["devices", "capacity_summary", "device_logs", "pass_station_records"],
                 MaxRows = 50
             },
-            cloudAiReadClient: new FakeCloudAiReadClient());
+            cloudAiReadClient: cloudClient);
 
         var intent = service.CreateIntent(
             "show device list",
             ["Markdown", "Html"],
             new CloudProductionGoalTimeRangeDto(DateTimeOffset.UtcNow.AddHours(-1), DateTimeOffset.UtcNow),
-            10,
+            deviceId: null,
+            passStationTypeKey: null,
+            maxRows: 10,
             P12Ready(),
             ProtectedTools()).Value!;
         var result = await service.RunIntentAsync(
@@ -78,6 +81,14 @@ public sealed class EnterpriseCloudReadonlyProductionControlledPilotP13Tests
             Convert.ToString(row["sourceMode"]) == CloudReadonlyProductionControlledPilotMarkers.SourceMode &&
             Convert.ToString(row["boundary"]) == CloudReadonlyProductionControlledPilotMarkers.Boundary &&
             Convert.ToString(row["intentId"]) == intent.IntentId);
+        cloudClient.LastQuery.Should().ContainKey("maxRows");
+        cloudClient.LastQuery.Should().NotContainKey("intentId");
+        cloudClient.LastQuery.Should().NotContainKey("goalHash");
+        cloudClient.LastQuery.Should().NotContainKey("analysisType");
+        cloudClient.LastQuery.Should().NotContainKey("from");
+        cloudClient.LastQuery.Should().NotContainKey("to");
+        cloudClient.LastQuery.Should().NotContainKey("boundary");
+        cloudClient.LastQuery.Should().NotContainKey("pilotWindowId");
 
         var json = JsonSerializer.Serialize(result.Value, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         json.Should().Contain("CloudReadonlyProductionControlledPilot");
@@ -103,7 +114,15 @@ public sealed class EnterpriseCloudReadonlyProductionControlledPilotP13Tests
             controlled: new CloudReadonlyProductionControlledPilotOptions { Enabled = true, FreeGoalEnabled = true },
             cloudAiReadClient: new FakeCloudAiReadClient());
 
-        var result = service.CreateIntent(goal, ["Markdown"], null, 10, P12Ready(), ProtectedTools());
+        var result = service.CreateIntent(
+            goal,
+            ["Markdown"],
+            null,
+            deviceId: Guid.NewGuid(),
+            passStationTypeKey: endpointCode == "pass_station_records" ? "injection" : null,
+            maxRows: 10,
+            P12Ready(),
+            ProtectedTools());
 
         result.IsSuccess.Should().BeTrue();
         result.Value!.EndpointCodes.Should().ContainSingle().Which.Should().Be(endpointCode);
@@ -124,7 +143,15 @@ public sealed class EnterpriseCloudReadonlyProductionControlledPilotP13Tests
             controlled: new CloudReadonlyProductionControlledPilotOptions { Enabled = true, FreeGoalEnabled = true },
             cloudAiReadClient: new FakeCloudAiReadClient());
 
-        var result = service.CreateIntent(goal, ["Markdown"], null, 10, P12Ready(), ProtectedTools());
+        var result = service.CreateIntent(
+            goal,
+            ["Markdown"],
+            null,
+            deviceId: Guid.NewGuid(),
+            passStationTypeKey: null,
+            maxRows: 10,
+            P12Ready(),
+            ProtectedTools());
 
         result.IsSuccess.Should().BeFalse();
         result.Errors.Should().Contain(error => error.ToString()!.Contains("BlockedByPolicy", StringComparison.OrdinalIgnoreCase));
@@ -143,10 +170,40 @@ public sealed class EnterpriseCloudReadonlyProductionControlledPilotP13Tests
             },
             cloudAiReadClient: new FakeCloudAiReadClient());
 
-        var result = service.CreateIntent("device list", ["Markdown"], null, 31, P12Ready(), ProtectedTools());
+        var result = service.CreateIntent(
+            "device list",
+            ["Markdown"],
+            null,
+            deviceId: null,
+            passStationTypeKey: null,
+            maxRows: 31,
+            P12Ready(),
+            ProtectedTools());
 
         result.IsSuccess.Should().BeFalse();
         result.Errors.Should().Contain(error => error.ToString()!.Contains("maxRows", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void CreateIntent_ShouldRequireDeviceIdForDeviceScopedEndpoints()
+    {
+        var service = CreateService(
+            cloudAiRead: ConfiguredCloudAiRead(),
+            controlled: new CloudReadonlyProductionControlledPilotOptions { Enabled = true, FreeGoalEnabled = true },
+            cloudAiReadClient: new FakeCloudAiReadClient());
+
+        var result = service.CreateIntent(
+            "capacity summary",
+            ["Markdown"],
+            null,
+            deviceId: null,
+            passStationTypeKey: null,
+            maxRows: 10,
+            P12Ready(),
+            ProtectedTools());
+
+        result.IsSuccess.Should().BeFalse();
+        result.Errors.Should().Contain(error => error.ToString()!.Contains("deviceId", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -266,8 +323,12 @@ public sealed class EnterpriseCloudReadonlyProductionControlledPilotP13Tests
     {
         public bool IsEnabled => true;
 
+        public IReadOnlyDictionary<string, string?> LastQuery { get; private set; } =
+            new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+
         public Task<JsonDocument> SendJsonAsync(HttpMethod method, string path, IReadOnlyDictionary<string, string?>? query = null, CancellationToken cancellationToken = default)
         {
+            LastQuery = query ?? new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
             if (path.Contains("devices", StringComparison.OrdinalIgnoreCase))
             {
                 return Task.FromResult(JsonDocument.Parse(
