@@ -12,13 +12,17 @@
 
 默认只修改 `AICopilot`。修改 Cloud 或 Edge 必须由用户在当前轮明确授权。
 
-## Cloud Boundary
+## Cloud Business Read-only Boundary
 
 - AICopilot 可以读取已批准范围内的 Cloud 业务数据，用于分析、解释、汇总、检索和建议。
 - AICopilot 不得注册、修改、删除、补录、审批、派发或触发 Cloud 业务数据和业务流程。
 - AICopilot 不得直接写 Cloud 数据库。
 - AICopilot 不得通过 MCP、Tool、Agent workflow、后台任务、直接 SQL 或隐藏适配器间接调用 Cloud 写接口。
 - Human-in-the-loop 不是放开 Cloud 写入的理由。
+- AICopilot must not create, update, delete, backfill, approve, dispatch, or trigger Cloud business records.
+- AICopilot must not directly write to the Cloud database.
+- Human-in-the-loop approval is not permission to write Cloud business data.
+- Cloud AI-facing APIs are read-only contract surfaces unless the user explicitly approves a new cross-repository write contract.
 - Cloud AiRead 正式设备参数是 `deviceId`；`deviceCode` 只能用于设备查询/解析，不得被当作 `deviceId` 发送给 Cloud。
 - P12/P13 生产只读 Pilot 只能向 Cloud 发送真实端点参数；`scenarioId`、`from`、`to`、`pilotWindowId`、`boundary` 等试点元数据只能留在 AICopilot 内部审计。
 - 开发阶段不保留普通 Real CloudReadonly 与受控 Pilot 的双轨生产读取入口；生产只读读取必须走当前批准的受控入口。
@@ -60,6 +64,7 @@ Cloud-AICopilot OIDC 身份对齐的长期结论见 `../docs/历史核心记录.
 
 - Preview/prerelease NuGet 包默认禁止。
 - 已知漏洞依赖默认阻断。
+- Known-vulnerable dependencies are forbidden; NU190x and npm audit findings must be handled before acceptance.
 - 禁止硬编码 API key、token、secret、license、provider credential、数据库凭据、MCP 凭据。
 - 模型、prompt、plugin、MCP server、approval threshold 等运行行为优先用配置或明确存储数据，不藏在代码里。
 
