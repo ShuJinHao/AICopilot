@@ -59,6 +59,103 @@ public sealed class SecurityHardeningTests
     }
 
     [Fact]
+    public void DeploymentWorkflows_ShouldUseIntranetRunnerAndHarborOnly()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var imageWorkflow = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            ".github",
+            "workflows",
+            "aicopilot-image.yml"));
+        var deployWorkflow = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            ".github",
+            "workflows",
+            "aicopilot-deploy.yml"));
+
+        imageWorkflow.Should().Contain("runs-on: [self-hosted, iiot-linux-prod]");
+        imageWorkflow.Should().Contain("Self-hosted runner must not run as root.");
+        imageWorkflow.Should().Contain("OCI_REGISTRY");
+        imageWorkflow.Should().Contain("OCI_NAMESPACE");
+        imageWorkflow.Should().Contain("dotnet publish");
+        imageWorkflow.Should().Contain("/t:PublishContainer");
+        imageWorkflow.Should().Contain("NODE_BASE_IMAGE=$image_prefix/base-node:22-alpine");
+        imageWorkflow.Should().Contain("NGINX_BASE_IMAGE=$image_prefix/base-nginx:1.27-alpine");
+        imageWorkflow.Should().NotContain("runs-on: ubuntu-latest");
+        imageWorkflow.Should().NotContain("ghcr.io");
+        imageWorkflow.Should().NotContain("docker/build-push-action");
+        imageWorkflow.Should().NotContain("docker/setup-buildx-action");
+
+        deployWorkflow.Should().Contain("runs-on: [self-hosted, iiot-linux-prod]");
+        deployWorkflow.Should().Contain("Release tag from aicopilot-image (sha-*)");
+        deployWorkflow.Should().Contain("DEPLOY_TARGET_DIR: ${{ secrets.DEPLOY_TARGET_DIR }}");
+        deployWorkflow.Should().Contain("DEPLOY_ENV_FILE: ${{ secrets.DEPLOY_ENV_FILE }}");
+        deployWorkflow.Should().Contain("Self-hosted runner must not run as root.");
+        deployWorkflow.Should().Contain("rsync -a --delete");
+        deployWorkflow.Should().Contain("printf '%s\\n' \"$DEPLOY_ENV_FILE\" > \"$DEPLOY_TARGET_DIR/.env\"");
+        deployWorkflow.Should().Contain("./deploy-release.sh \"$RELEASE_TAG\"");
+        deployWorkflow.Should().NotContain("runs-on: ubuntu-latest");
+        deployWorkflow.Should().NotContain("appleboy/ssh-action");
+        deployWorkflow.Should().NotContain("appleboy/scp-action");
+        deployWorkflow.Should().NotContain("ghcr.io");
+    }
+
+    [Fact]
+    public void DeploymentScriptsAndDocs_ShouldKeepSingleStandardReleasePath()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var deployRoot = Path.Combine(solutionRoot, "deploy", "enterprise-ai");
+        var deployGuide = File.ReadAllText(Path.Combine(solutionRoot, "AICopilot 项目部署与维护指南.md"));
+        var envTemplate = File.ReadAllText(Path.Combine(deployRoot, ".env.example"));
+        var deployRelease = File.ReadAllText(Path.Combine(deployRoot, "deploy-release.sh"));
+        var mirrorBaseImages = File.ReadAllText(Path.Combine(deployRoot, "mirror-base-images.sh"));
+        var buildAndPush = File.ReadAllText(Path.Combine(deployRoot, "build-and-push.sh"));
+        var webDockerfile = File.ReadAllText(Path.Combine(solutionRoot, "src", "vues", "AICopilot.Web", "Dockerfile"));
+
+        deployGuide.Should().Contain("iiot-linux-prod");
+        deployGuide.Should().Contain("DEPLOY_ENV_FILE");
+        deployGuide.Should().Contain("Docker Hub 不作为生产依赖源");
+        deployGuide.Should().Contain("mirror-base-images.sh");
+        deployGuide.Should().Contain("deploy-release.sh");
+        deployGuide.Should().Contain("应急手工构建只在 GitHub Actions 不可用时使用");
+        deployGuide.Should().NotContain("docs/企业AI首次部署记录");
+        File.Exists(Path.Combine(solutionRoot, "docs", "企业AI首次部署记录-2026-06-08.md")).Should().BeFalse();
+        File.Exists(Path.Combine(solutionRoot, "docs", "A助理部署配置说明.md")).Should().BeFalse();
+
+        envTemplate.Should().Contain("POSTGRES_IMAGE=10.98.90.154:80/enterprise-ai/base-postgres:17.6");
+        envTemplate.Should().Contain("RABBITMQ_IMAGE=10.98.90.154:80/enterprise-ai/base-rabbitmq:4.2-management");
+        envTemplate.Should().Contain("QDRANT_IMAGE=10.98.90.154:80/enterprise-ai/base-qdrant:v1.15.5");
+        envTemplate.Should().NotContain("POSTGRES_IMAGE=postgres:");
+        envTemplate.Should().NotContain("RABBITMQ_IMAGE=rabbitmq:");
+        envTemplate.Should().NotContain("QDRANT_IMAGE=qdrant/");
+
+        deployRelease.Should().Contain("APP_IMAGE_KEYS");
+        deployRelease.Should().Contain("INFRA_IMAGE_KEYS");
+        deployRelease.Should().Contain("Release tag must match sha-<hex>");
+        deployRelease.Should().Contain("Image must be mirrored to Harbor");
+        deployRelease.Should().Contain("compose pull");
+        deployRelease.Should().Contain("compose up -d --remove-orphans");
+        deployRelease.Should().Contain("probe_web");
+
+        mirrorBaseImages.Should().Contain("postgres:17.6");
+        mirrorBaseImages.Should().Contain("rabbitmq:4.2-management");
+        mirrorBaseImages.Should().Contain("qdrant/qdrant:v1.15.5");
+        mirrorBaseImages.Should().Contain("node:22-alpine");
+        mirrorBaseImages.Should().Contain("nginx:1.27-alpine");
+        mirrorBaseImages.Should().Contain("docker buildx build");
+
+        buildAndPush.Should().Contain("MIRROR_BASE_IMAGES");
+        buildAndPush.Should().Contain("NODE_BASE_IMAGE");
+        buildAndPush.Should().Contain("NGINX_BASE_IMAGE");
+        buildAndPush.Should().Contain("mirror-base-images.sh");
+
+        webDockerfile.Should().Contain("ARG NODE_BASE_IMAGE=node:22-alpine");
+        webDockerfile.Should().Contain("FROM ${NODE_BASE_IMAGE} AS build");
+        webDockerfile.Should().Contain("ARG NGINX_BASE_IMAGE=nginx:1.27-alpine");
+        webDockerfile.Should().Contain("FROM ${NGINX_BASE_IMAGE}");
+    }
+
+    [Fact]
     public void ManagementControllers_ShouldRequireHttpAuthentication()
     {
         var aiGatewayControllers = new[]

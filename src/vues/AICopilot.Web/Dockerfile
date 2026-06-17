@@ -1,7 +1,8 @@
 # ===============================
 # Stage 1: 构建阶段 (Build Environment)
 # ===============================
-FROM node:20-alpine AS build
+ARG NODE_BASE_IMAGE=node:22-alpine
+FROM ${NODE_BASE_IMAGE} AS build
 
 WORKDIR /app
 
@@ -29,7 +30,8 @@ RUN npm run build
 # ===============================
 # Stage 2: 运行阶段 (Production Runtime)
 # ===============================
-FROM nginx:alpine
+ARG NGINX_BASE_IMAGE=nginx:1.27-alpine
+FROM ${NGINX_BASE_IMAGE}
 
 # 1. 从构建阶段复制打包好的静态文件到 Nginx 默认目录
 COPY --from=build /app/dist /usr/share/nginx/html

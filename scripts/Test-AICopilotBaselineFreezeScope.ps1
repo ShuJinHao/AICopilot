@@ -38,6 +38,9 @@ $requiredDocuments = @{
     )
     "AICopilot 项目部署与维护指南.md" = @(
         "deploy/enterprise-ai",
+        "iiot-linux-prod",
+        "DEPLOY_ENV_FILE",
+        "Docker Hub 不作为生产依赖源",
         "CLOUD_READONLY_MODE=Disabled",
         "CLOUD_OIDC_ENABLED=true",
         "不提交真实密钥"

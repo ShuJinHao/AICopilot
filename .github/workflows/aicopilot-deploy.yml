@@ -1,0 +1,105 @@
+name: aicopilot-deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag from aicopilot-image (sha-*)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, iiot-linux-prod]
+    environment: production
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate release tag input
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_tag='${{ inputs.release_tag }}'
+          if [[ ! "$release_tag" =~ ^sha-[0-9a-f]+$ ]]; then
+            echo "release_tag must match sha-<hex>: $release_tag" >&2
+            exit 1
+          fi
+
+      - name: Validate runner and deploy inputs
+        shell: bash
+        env:
+          DEPLOY_TARGET_DIR: ${{ secrets.DEPLOY_TARGET_DIR }}
+          DEPLOY_ENV_FILE: ${{ secrets.DEPLOY_ENV_FILE }}
+          OCI_REGISTRY: ${{ secrets.OCI_REGISTRY }}
+          OCI_REGISTRY_USERNAME: ${{ secrets.OCI_REGISTRY_USERNAME }}
+          OCI_REGISTRY_PASSWORD: ${{ secrets.OCI_REGISTRY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ "$(id -u)" -eq 0 ]; then
+            echo "Self-hosted runner must not run as root." >&2
+            exit 64
+          fi
+          for required in DEPLOY_TARGET_DIR DEPLOY_ENV_FILE OCI_REGISTRY OCI_REGISTRY_USERNAME OCI_REGISTRY_PASSWORD
+          do
+            if [ -z "${!required:-}" ]; then
+              echo "$required is required for the intranet self-hosted deployment flow." >&2
+              exit 64
+            fi
+          done
+          command -v docker >/dev/null
+          command -v curl >/dev/null
+          docker compose version >/dev/null
+
+      - name: Sync deploy template
+        shell: bash
+        env:
+          DEPLOY_TARGET_DIR: ${{ secrets.DEPLOY_TARGET_DIR }}
+          DEPLOY_ENV_FILE: ${{ secrets.DEPLOY_ENV_FILE }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$DEPLOY_TARGET_DIR"
+          if command -v rsync >/dev/null 2>&1; then
+            rsync -a --delete \
+              --exclude '.env' \
+              deploy/enterprise-ai/ "$DEPLOY_TARGET_DIR/"
+          else
+            find "$DEPLOY_TARGET_DIR" -mindepth 1 -maxdepth 1 \
+              ! -name '.env' \
+              -exec rm -rf {} +
+            cp -R deploy/enterprise-ai/. "$DEPLOY_TARGET_DIR/"
+            rm -f "$DEPLOY_TARGET_DIR/.env"
+          fi
+          umask 077
+          printf '%s\n' "$DEPLOY_ENV_FILE" > "$DEPLOY_TARGET_DIR/.env"
+          chmod +x "$DEPLOY_TARGET_DIR"/*.sh
+
+      - name: Log in to Harbor
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "${{ secrets.OCI_REGISTRY_PASSWORD }}" |
+            docker login "${{ secrets.OCI_REGISTRY }}" \
+              --username "${{ secrets.OCI_REGISTRY_USERNAME }}" \
+              --password-stdin
+
+      - name: Deploy AICopilot stack
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          DEPLOY_TARGET_DIR: ${{ secrets.DEPLOY_TARGET_DIR }}
+        run: |
+          set -euo pipefail
+          cd "$DEPLOY_TARGET_DIR"
+          ./deploy-release.sh "$RELEASE_TAG"
+
+          {
+            echo "### AICopilot deploy"
+            echo "- Release tag: \`$RELEASE_TAG\`"
+            echo "- Target dir: \`$DEPLOY_TARGET_DIR\`"
+          } >> "$GITHUB_STEP_SUMMARY"

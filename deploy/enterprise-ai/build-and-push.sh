@@ -10,23 +10,13 @@ TAG="${TAG:-sha-$(git -C "$REPO_ROOT" rev-parse --short=16 HEAD)}"
 PLATFORM="${PLATFORM:-linux/amd64}"
 CLOUD_PLATFORM_URL="${CLOUD_PLATFORM_URL:-http://10.98.90.154:81}"
 IMAGE_PREFIX="$REGISTRY/$HARBOR_PROJECT"
+BASE_IMAGE_PREFIX="${BASE_IMAGE_PREFIX:-$IMAGE_PREFIX}"
+NODE_BASE_IMAGE="${NODE_BASE_IMAGE:-$BASE_IMAGE_PREFIX/base-node:22-alpine}"
+NGINX_BASE_IMAGE="${NGINX_BASE_IMAGE:-$BASE_IMAGE_PREFIX/base-nginx:1.27-alpine}"
 
-mirror_base_image() {
-  local source_image="$1"
-  local target_image="$2"
-
-  printf 'FROM %s\n' "$source_image" \
-    | docker buildx build \
-      --platform "$PLATFORM" \
-      --pull \
-      --push \
-      --tag "$IMAGE_PREFIX/$target_image" \
-      -
-}
-
-mirror_base_image "postgres:17.6" "base-postgres:17.6"
-mirror_base_image "rabbitmq:4.2-management" "base-rabbitmq:4.2-management"
-mirror_base_image "qdrant/qdrant:v1.15.5" "base-qdrant:v1.15.5"
+if [ "${MIRROR_BASE_IMAGES:-false}" = "true" ]; then
+  "$SCRIPT_DIR/mirror-base-images.sh"
+fi
 
 publish_dotnet_image() {
   local project_path="$1"
@@ -50,6 +40,8 @@ publish_dotnet_image "src/hosts/AICopilot.RagWorker/AICopilot.RagWorker.csproj" 
 docker buildx build \
   --platform "$PLATFORM" \
   --build-arg VITE_CLOUD_PLATFORM_URL="$CLOUD_PLATFORM_URL" \
+  --build-arg NODE_BASE_IMAGE="$NODE_BASE_IMAGE" \
+  --build-arg NGINX_BASE_IMAGE="$NGINX_BASE_IMAGE" \
   --tag "$IMAGE_PREFIX/aicopilot-webui:$TAG" \
   --push \
   "$REPO_ROOT/src/vues/AICopilot.Web"

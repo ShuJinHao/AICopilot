@@ -6,7 +6,10 @@
 
 - 当前部署目录固定为 `deploy/enterprise-ai`。
 - 生产环境使用 Docker Compose 单机编排，镜像从 Harbor 拉取。
-- 真实 `.env` 只在服务器维护，不提交真实密钥。
+- 标准发布走 GitHub Actions 内网 self-hosted runner，label 固定为 `iiot-linux-prod`。
+- runner 必须使用专用非 root 用户运行，例如 `github-runner`；不要把 runner 装成 root 服务。
+- 真实 `.env` 通过 GitHub secret `DEPLOY_ENV_FILE` 注入服务器，不提交真实密钥。
+- Docker Hub 不作为生产依赖源；PostgreSQL、RabbitMQ、Qdrant、Node、Nginx 基础镜像必须先 mirror 到 Harbor。
 - AICopilot 默认保持 Cloud 只读边界，不能注册、修改、删除或触发 Cloud 业务数据。
 - Cloud OIDC 只用于身份对齐；AICopilot 保留本地 AI 用户、AI 角色、AI 权限、审计和 emergency admin。
 
@@ -18,7 +21,9 @@
 deploy/enterprise-ai/
   .env.example
   build-and-push.sh
+  deploy-release.sh
   docker-compose.yaml
+  mirror-base-images.sh
 ```
 
 服务器建议目录：
@@ -27,7 +32,7 @@ deploy/enterprise-ai/
 /srv/enterprise-ai/deploy
 ```
 
-真实 `.env` 从 `deploy/enterprise-ai/.env.example` 复制后替换密钥和镜像 tag。
+真实 `.env` 从 `deploy/enterprise-ai/.env.example` 复制后替换密钥和镜像 tag，并保存到 GitHub secret `DEPLOY_ENV_FILE`。应急手工部署时，才直接放在 `/srv/enterprise-ai/deploy/.env`。
 
 ## 3. 关键环境变量
 
@@ -43,6 +48,9 @@ AICOPILOT_MIGRATION_IMAGE=10.98.90.154:80/enterprise-ai/aicopilot-migration:<tag
 AICOPILOT_DATAWORKER_IMAGE=10.98.90.154:80/enterprise-ai/aicopilot-dataworker:<tag>
 AICOPILOT_RAGWORKER_IMAGE=10.98.90.154:80/enterprise-ai/aicopilot-ragworker:<tag>
 AICOPILOT_WEBUI_IMAGE=10.98.90.154:80/enterprise-ai/aicopilot-webui:<tag>
+POSTGRES_IMAGE=10.98.90.154:80/enterprise-ai/base-postgres:17.6
+RABBITMQ_IMAGE=10.98.90.154:80/enterprise-ai/base-rabbitmq:4.2-management
+QDRANT_IMAGE=10.98.90.154:80/enterprise-ai/base-qdrant:v1.15.5
 ```
 
 必须在服务器替换的密钥：
@@ -92,25 +100,70 @@ Cloud AiRead 契约：
 
 ## 4. 构建与发布
 
-本地或 CI 构建前先确认 Docker 可用，且使用 Linux 容器。
+标准流程：
+
+```text
+git push GitHub
+-> aicopilot-image on [self-hosted, iiot-linux-prod]
+-> build aicopilot-httpapi / migration / dataworker / ragworker / webui
+-> push 10.98.90.154:80/enterprise-ai/*:sha-<git-sha>
+-> manually trigger aicopilot-deploy with release_tag=sha-<git-sha>
+-> sync deploy/enterprise-ai to /srv/enterprise-ai/deploy
+-> write DEPLOY_ENV_FILE to .env
+-> run deploy-release.sh
+```
+
+GitHub secrets：
+
+```text
+OCI_REGISTRY=10.98.90.154:80
+OCI_NAMESPACE=enterprise-ai
+OCI_REGISTRY_USERNAME=<Harbor robot 或用户>
+OCI_REGISTRY_PASSWORD=<Harbor 密码或 token>
+DEPLOY_TARGET_DIR=/srv/enterprise-ai/deploy
+DEPLOY_ENV_FILE=<完整生产 .env 内容>
+```
+
+GitHub variables：
+
+```text
+VITE_CLOUD_PLATFORM_URL=http://10.98.90.154:81
+```
+
+首次使用 runner 前，在能访问 Docker Hub 的机器，或已有本地基础镜像缓存的机器上，把基础镜像同步到 Harbor：
 
 ```bash
 cd AICopilot
-./deploy/enterprise-ai/build-and-push.sh <tag>
+docker login 10.98.90.154:80 --username <Harbor 用户>
+REGISTRY=10.98.90.154:80 HARBOR_PROJECT=enterprise-ai ./deploy/enterprise-ai/mirror-base-images.sh
 ```
 
-若脚本需要 Harbor 参数，按脚本提示或服务器约定传入；同一批服务镜像使用同一个 `<tag>`。
+需要同步的基础镜像：
 
-服务器部署：
+```text
+10.98.90.154:80/enterprise-ai/base-postgres:17.6
+10.98.90.154:80/enterprise-ai/base-rabbitmq:4.2-management
+10.98.90.154:80/enterprise-ai/base-qdrant:v1.15.5
+10.98.90.154:80/enterprise-ai/base-node:22-alpine
+10.98.90.154:80/enterprise-ai/base-nginx:1.27-alpine
+```
+
+应急手工构建只在 GitHub Actions 不可用时使用：
+
+```bash
+cd AICopilot
+REGISTRY=10.98.90.154:80 HARBOR_PROJECT=enterprise-ai TAG=sha-<git-sha> ./deploy/enterprise-ai/build-and-push.sh
+```
+
+应急手工部署只在 `aicopilot-deploy` 不可用时使用：
 
 ```bash
 cd /srv/enterprise-ai/deploy
-docker compose --env-file .env -f docker-compose.yaml pull
-docker compose --env-file .env -f docker-compose.yaml up -d
-docker compose --env-file .env -f docker-compose.yaml ps
+docker login 10.98.90.154:80 --username <Harbor 用户>
+./deploy-release.sh sha-<git-sha>
 ```
 
-首次部署会先运行 `aicopilot-migration`，成功后启动 HttpApi、DataWorker、RagWorker 和 WebUI。
+`deploy-release.sh` 会按 release tag 重写五个应用镜像、拒绝 Docker Hub shorthand、执行 `docker compose pull`、启动 compose，并探测 Web 首页。
 
 ## 5. 验证
 
@@ -130,6 +183,7 @@ dotnet build src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj
 docker compose --env-file .env -f docker-compose.yaml config -q
 docker compose --env-file .env -f docker-compose.yaml ps
 curl -I http://10.98.90.154:82
+curl -I http://10.98.90.154:82/api/identity/cloud-oidc/status
 ```
 
 Cloud OIDC 验证：

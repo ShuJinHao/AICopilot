@@ -1,0 +1,130 @@
+name: aicopilot-image
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "deploy/enterprise-ai/**"
+      - "AICopilot.slnx"
+      - "global.json"
+      - ".github/workflows/aicopilot-image.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-push:
+    runs-on: [self-hosted, iiot-linux-prod]
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Resolve Harbor target
+        id: registry
+        shell: bash
+        env:
+          OCI_REGISTRY: ${{ secrets.OCI_REGISTRY }}
+          OCI_NAMESPACE: ${{ secrets.OCI_NAMESPACE }}
+          OCI_REGISTRY_USERNAME: ${{ secrets.OCI_REGISTRY_USERNAME }}
+          OCI_REGISTRY_PASSWORD: ${{ secrets.OCI_REGISTRY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          registry="${OCI_REGISTRY:-}"
+          namespace="${OCI_NAMESPACE:-enterprise-ai}"
+          if [ -z "$registry" ] || [ -z "$namespace" ]; then
+            echo "OCI_REGISTRY and OCI_NAMESPACE are required for the intranet self-hosted runner flow." >&2
+            exit 64
+          fi
+          if [ -z "${OCI_REGISTRY_USERNAME:-}" ] || [ -z "${OCI_REGISTRY_PASSWORD:-}" ]; then
+            echo "OCI_REGISTRY_USERNAME and OCI_REGISTRY_PASSWORD are required for Harbor push." >&2
+            exit 64
+          fi
+          echo "registry=$registry" >> "$GITHUB_OUTPUT"
+          echo "namespace=$namespace" >> "$GITHUB_OUTPUT"
+          echo "image_prefix=$registry/$namespace" >> "$GITHUB_OUTPUT"
+          echo "release_tag=sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Validate runner and Docker
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$(id -u)" -eq 0 ]; then
+            echo "Self-hosted runner must not run as root." >&2
+            exit 64
+          fi
+          docker version >/dev/null
+          docker buildx version >/dev/null
+
+      - name: Log in to Harbor
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "${{ secrets.OCI_REGISTRY_PASSWORD }}" |
+            docker login "${{ steps.registry.outputs.registry }}" \
+              --username "${{ secrets.OCI_REGISTRY_USERNAME }}" \
+              --password-stdin
+
+      - name: Publish backend images
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_prefix="${{ steps.registry.outputs.image_prefix }}"
+          release_tag="${{ steps.registry.outputs.release_tag }}"
+
+          publish_dotnet_image() {
+            local project_path="$1"
+            local image_name="$2"
+
+            dotnet publish "$project_path" \
+              -c Release \
+              --os linux \
+              --arch x64 \
+              /t:PublishContainer \
+              -p:ContainerRegistry="${{ steps.registry.outputs.registry }}" \
+              -p:ContainerRepository="${{ steps.registry.outputs.namespace }}/$image_name" \
+              -p:ContainerImageTag="$release_tag"
+
+            echo "- \`$image_prefix/$image_name:$release_tag\`" >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          {
+            echo "### AICopilot backend images"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          publish_dotnet_image "src/hosts/AICopilot.HttpApi/AICopilot.HttpApi.csproj" "aicopilot-httpapi"
+          publish_dotnet_image "src/hosts/AICopilot.MigrationWorkApp/AICopilot.MigrationWorkApp.csproj" "aicopilot-migration"
+          publish_dotnet_image "src/hosts/AICopilot.DataWorker/AICopilot.DataWorker.csproj" "aicopilot-dataworker"
+          publish_dotnet_image "src/hosts/AICopilot.RagWorker/AICopilot.RagWorker.csproj" "aicopilot-ragworker"
+
+      - name: Build and push web image
+        shell: bash
+        env:
+          VITE_CLOUD_PLATFORM_URL: ${{ vars.VITE_CLOUD_PLATFORM_URL }}
+        run: |
+          set -euo pipefail
+          image_prefix="${{ steps.registry.outputs.image_prefix }}"
+          release_tag="${{ steps.registry.outputs.release_tag }}"
+          cloud_platform_url="${VITE_CLOUD_PLATFORM_URL:-http://10.98.90.154:81}"
+
+          docker buildx build \
+            --platform linux/amd64 \
+            --push \
+            --build-arg "VITE_CLOUD_PLATFORM_URL=$cloud_platform_url" \
+            --build-arg "NODE_BASE_IMAGE=$image_prefix/base-node:22-alpine" \
+            --build-arg "NGINX_BASE_IMAGE=$image_prefix/base-nginx:1.27-alpine" \
+            --tag "$image_prefix/aicopilot-webui:$release_tag" \
+            src/vues/AICopilot.Web
+
+          {
+            echo "### AICopilot web image"
+            echo "- \`$image_prefix/aicopilot-webui:$release_tag\`"
+          } >> "$GITHUB_STEP_SUMMARY"
