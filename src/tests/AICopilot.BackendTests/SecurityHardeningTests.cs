@@ -83,6 +83,15 @@ public sealed class SecurityHardeningTests
         imageWorkflow.Should().Contain("/t:PublishContainer");
         imageWorkflow.Should().Contain("NODE_BASE_IMAGE=$image_prefix/base-node:22-alpine");
         imageWorkflow.Should().Contain("NGINX_BASE_IMAGE=$image_prefix/base-nginx:1.27-alpine");
+        imageWorkflow.Should().Contain("      - \"src/hosts/**\"");
+        imageWorkflow.Should().Contain("      - \"src/core/**\"");
+        imageWorkflow.Should().Contain("      - \"src/shared/**\"");
+        imageWorkflow.Should().Contain("      - \"src/services/**\"");
+        imageWorkflow.Should().Contain("      - \"src/infrastructure/**\"");
+        imageWorkflow.Should().Contain("      - \"src/vues/AICopilot.Web/**\"");
+        imageWorkflow.Should().NotContain("      - \"src/**\"");
+        imageWorkflow.Should().NotContain("      - \"deploy/enterprise-ai/**\"");
+        imageWorkflow.Should().NotContain("deploy/enterprise-ai/docker-compose");
         imageWorkflow.Should().NotContain("runs-on: ubuntu-latest");
         imageWorkflow.Should().NotContain("ghcr.io");
         imageWorkflow.Should().NotContain("docker/build-push-action");

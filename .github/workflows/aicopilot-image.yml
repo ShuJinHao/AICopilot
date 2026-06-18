@@ -5,8 +5,12 @@ on:
   push:
     branches: [main]
     paths:
-      - "src/**"
-      - "deploy/enterprise-ai/**"
+      - "src/hosts/**"
+      - "src/core/**"
+      - "src/shared/**"
+      - "src/services/**"
+      - "src/infrastructure/**"
+      - "src/vues/AICopilot.Web/**"
       - "AICopilot.slnx"
       - "global.json"
       - ".github/workflows/aicopilot-image.yml"
@@ -104,7 +108,7 @@ jobs:
                 grep -Eq '^src/hosts/AICopilot\.MigrationWorkApp/' "$changed_files" && migration=true
                 grep -Eq '^src/hosts/AICopilot\.DataWorker/' "$changed_files" && dataworker=true
                 grep -Eq '^src/hosts/AICopilot\.RagWorker/' "$changed_files" && ragworker=true
-                grep -Eq '^(src/vues/AICopilot\.Web/|deploy/enterprise-ai/Dockerfile|deploy/enterprise-ai/docker-compose\.yaml)$' "$changed_files" && web=true
+                grep -Eq '^src/vues/AICopilot\.Web/' "$changed_files" && web=true
               fi
             fi
           fi
