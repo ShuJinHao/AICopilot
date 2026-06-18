@@ -73,22 +73,39 @@ jobs:
               web=true
             else
               changed_files="$(mktemp)"
-              git diff --name-only "$before" "$GITHUB_SHA" > "$changed_files"
+              if [ -d .git ]; then
+                git fetch --no-tags --prune --depth=50 origin "${GITHUB_REF_NAME:-main}" || true
+              fi
 
-              if grep -Eq '^(AICopilot\.slnx|global\.json)$' "$changed_files" \
-                || grep -Eq '^src/(core|shared|services|infrastructure)/' "$changed_files" \
-                || grep -Eq '^src/hosts/AICopilot\.ServiceDefaults/' "$changed_files"; then
+              if [ -d .git ] \
+                && git cat-file -e "$before^{commit}" 2>/dev/null \
+                && git cat-file -e "$GITHUB_SHA^{commit}" 2>/dev/null; then
+                git diff --name-only "$before" "$GITHUB_SHA" > "$changed_files"
+              else
+                echo "Git history is unavailable for path filtering; building all AICopilot images." >> "$GITHUB_STEP_SUMMARY"
                 httpapi=true
                 migration=true
                 dataworker=true
                 ragworker=true
+                web=true
               fi
 
-              grep -Eq '^src/hosts/AICopilot\.HttpApi/' "$changed_files" && httpapi=true
-              grep -Eq '^src/hosts/AICopilot\.MigrationWorkApp/' "$changed_files" && migration=true
-              grep -Eq '^src/hosts/AICopilot\.DataWorker/' "$changed_files" && dataworker=true
-              grep -Eq '^src/hosts/AICopilot\.RagWorker/' "$changed_files" && ragworker=true
-              grep -Eq '^(src/vues/AICopilot\.Web/|deploy/enterprise-ai/Dockerfile|deploy/enterprise-ai/docker-compose\.yaml)$' "$changed_files" && web=true
+              if [ "$httpapi" != "true" ] && [ "$migration" != "true" ] && [ "$dataworker" != "true" ] && [ "$ragworker" != "true" ] && [ "$web" != "true" ]; then
+                if grep -Eq '^(AICopilot\.slnx|global\.json)$' "$changed_files" \
+                  || grep -Eq '^src/(core|shared|services|infrastructure)/' "$changed_files" \
+                  || grep -Eq '^src/hosts/AICopilot\.ServiceDefaults/' "$changed_files"; then
+                  httpapi=true
+                  migration=true
+                  dataworker=true
+                  ragworker=true
+                fi
+
+                grep -Eq '^src/hosts/AICopilot\.HttpApi/' "$changed_files" && httpapi=true
+                grep -Eq '^src/hosts/AICopilot\.MigrationWorkApp/' "$changed_files" && migration=true
+                grep -Eq '^src/hosts/AICopilot\.DataWorker/' "$changed_files" && dataworker=true
+                grep -Eq '^src/hosts/AICopilot\.RagWorker/' "$changed_files" && ragworker=true
+                grep -Eq '^(src/vues/AICopilot\.Web/|deploy/enterprise-ai/Dockerfile|deploy/enterprise-ai/docker-compose\.yaml)$' "$changed_files" && web=true
+              fi
             fi
           fi
 
