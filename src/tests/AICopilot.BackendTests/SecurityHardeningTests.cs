@@ -112,6 +112,7 @@ public sealed class SecurityHardeningTests
         var solutionRoot = FindSolutionRoot();
         var deployRoot = Path.Combine(solutionRoot, "deploy", "enterprise-ai");
         var deployGuide = File.ReadAllText(Path.Combine(solutionRoot, "AICopilot 项目部署与维护指南.md"));
+        var deployReadme = File.ReadAllText(Path.Combine(deployRoot, "README.md"));
         var envTemplate = File.ReadAllText(Path.Combine(deployRoot, ".env.example"));
         var deployRelease = File.ReadAllText(Path.Combine(deployRoot, "deploy-release.sh"));
         var mirrorBaseImages = File.ReadAllText(Path.Combine(deployRoot, "mirror-base-images.sh"));
@@ -125,9 +126,19 @@ public sealed class SecurityHardeningTests
         deployGuide.Should().Contain("mirror-base-images.sh");
         deployGuide.Should().Contain("deploy-release.sh");
         deployGuide.Should().Contain("应急手工构建只在 GitHub Actions 不可用时使用");
+        deployGuide.Should().Contain("deploy/enterprise-ai/README.md");
         deployGuide.Should().NotContain("docs/企业AI首次部署记录");
         File.Exists(Path.Combine(solutionRoot, "docs", "企业AI首次部署记录-2026-06-08.md")).Should().BeFalse();
         File.Exists(Path.Combine(solutionRoot, "docs", "A助理部署配置说明.md")).Should().BeFalse();
+
+        deployReadme.Should().Contain("AICopilot enterprise-ai deploy");
+        deployReadme.Should().Contain("aicopilot-image");
+        deployReadme.Should().Contain("aicopilot-deploy");
+        deployReadme.Should().Contain("DEPLOY_ENV_FILE");
+        deployReadme.Should().Contain("iiot-linux-prod");
+        deployReadme.Should().Contain("非 root");
+        deployReadme.Should().Contain("不通过 AICopilot 写 Cloud 业务数据");
+        deployReadme.Should().Contain("./deploy-release.sh sha-<git-sha> --services httpapi,web");
 
         envTemplate.Should().Contain("POSTGRES_IMAGE=10.98.90.154:80/enterprise-ai/base-postgres:17.6");
         envTemplate.Should().Contain("RABBITMQ_IMAGE=10.98.90.154:80/enterprise-ai/base-rabbitmq:4.2-management");

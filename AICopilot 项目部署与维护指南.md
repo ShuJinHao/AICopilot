@@ -5,6 +5,7 @@
 ## 1. 部署口径
 
 - 当前部署目录固定为 `deploy/enterprise-ai`。
+- `deploy/enterprise-ai/README.md` 是部署目录内的自解释入口；新 AI 接手时先读该文件即可执行标准发布和应急发布。
 - 生产环境使用 Docker Compose 单机编排，镜像从 Harbor 拉取。
 - 标准发布走 GitHub Actions 内网 self-hosted runner，label 固定为 `iiot-linux-prod`。
 - runner 必须使用专用非 root 用户运行，例如 `github-runner`；不要把 runner 装成 root 服务。
