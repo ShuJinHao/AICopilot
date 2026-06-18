@@ -21,6 +21,7 @@ deploy/enterprise-ai/
   docker-compose.yaml     # 生产 compose 模板
   mirror-base-images.sh   # 基础镜像同步到 Harbor
   README.md               # 本文件
+  releases/               # 服务器发布状态，workflow 同步时保留，不提交仓库
 ```
 
 ## GitHub 配置
@@ -70,11 +71,12 @@ REGISTRY=10.98.90.154:80 HARBOR_PROJECT=enterprise-ai ./deploy/enterprise-ai/mir
 
 1. 推送代码到 GitHub。
 2. 等 `aicopilot-image` 完成。它会按路径只构建受影响镜像，手动触发时构建全部镜像。
-3. 手动触发 `aicopilot-deploy`。
-4. 输入 `release_tag=sha-<git-sha>`。
-5. 如只发布部分服务，在 `services` 输入 `httpapi`、`migration`、`dataworker`、`ragworker`、`web` 或逗号组合；留空表示全量发布。
+3. 查看 `aicopilot-image` 的 Step Summary 或 `aicopilot-built-services` artifact，确认 `Deploy services input`。
+4. 手动触发 `aicopilot-deploy`。
+5. 输入 `release_tag=sha-<git-sha>`。
+6. 如只发布部分服务，在 `services` 输入 `httpapi`、`migration`、`dataworker`、`ragworker`、`web` 或逗号组合；留空表示全量发布。
 
-发布脚本会同步本目录到服务器、写入 `DEPLOY_ENV_FILE`、登录 Harbor、重写所选应用镜像 tag、执行 `docker compose pull` 和 `docker compose up -d`，最后探测 Web 首页。
+发布脚本会同步本目录到服务器、写入 `DEPLOY_ENV_FILE`、登录 Harbor、重写所选应用镜像 tag、执行 `docker compose pull` 和 `docker compose up -d`，最后探测 Web 首页。按需发布必须已有 `releases/current-release.env`；首次部署必须全量。按需发布会先从当前 release 读取未选服务镜像，避免 `.env` 被 secret 里的旧 tag 覆盖。部署完成后会写入 `releases/current-release.env`、`previous-release.env`、`staged-release.env`、`current-release.summary.md` 和 `history/`，并把 summary 回贴到 GitHub Step Summary。
 
 ## 应急手工构建
 
@@ -101,6 +103,8 @@ docker login 10.98.90.154:80 --username <Harbor 用户>
 ./deploy-release.sh sha-<git-sha> --services httpapi,web
 ```
 
+手工按需部署前确认 `/srv/enterprise-ai/deploy/releases/current-release.env` 存在；没有该文件时先执行全量发布。
+
 ## 验证
 
 仓库侧验证：
@@ -117,6 +121,8 @@ dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --fil
 cd /srv/enterprise-ai/deploy
 docker compose --env-file .env -f docker-compose.yaml config -q
 docker compose --env-file .env -f docker-compose.yaml ps
+test -f releases/current-release.env
+test -f releases/current-release.summary.md
 curl -I http://10.98.90.154:82
 curl -I http://10.98.90.154:82/api/identity/cloud-oidc/status
 ```

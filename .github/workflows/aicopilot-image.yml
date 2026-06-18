@@ -255,3 +255,44 @@ jobs:
             echo "### AICopilot web image"
             echo "- \`$image_prefix/aicopilot-webui:$release_tag\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Emit built services hint
+        if: steps.changes.outputs.any_backend == 'true' || steps.changes.outputs.web == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          services=()
+          if [ "${{ steps.changes.outputs.httpapi }}" = "true" ]; then
+            services+=(httpapi)
+          fi
+          if [ "${{ steps.changes.outputs.migration }}" = "true" ]; then
+            services+=(migration)
+          fi
+          if [ "${{ steps.changes.outputs.dataworker }}" = "true" ]; then
+            services+=(dataworker)
+          fi
+          if [ "${{ steps.changes.outputs.ragworker }}" = "true" ]; then
+            services+=(ragworker)
+          fi
+          if [ "${{ steps.changes.outputs.web }}" = "true" ]; then
+            services+=(web)
+          fi
+
+          services_csv="$(IFS=,; printf '%s' "${services[*]}")"
+          mkdir -p "$RUNNER_TEMP/aicopilot-built-services"
+          printf '%s\n' "$services_csv" > "$RUNNER_TEMP/aicopilot-built-services/services.txt"
+
+          {
+            echo "### AICopilot built services"
+            echo "- Release tag: \`${{ steps.registry.outputs.release_tag }}\`"
+            echo "- Deploy services input: \`$services_csv\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload built services hint
+        if: steps.changes.outputs.any_backend == 'true' || steps.changes.outputs.web == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: aicopilot-built-services
+          path: ${{ runner.temp }}/aicopilot-built-services/services.txt
+          if-no-files-found: error
+          retention-days: 14

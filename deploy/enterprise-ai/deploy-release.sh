@@ -5,6 +5,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_DIR="${DEPLOY_DIR:-$SCRIPT_DIR}"
 ENV_FILE="${ENV_FILE:-$DEPLOY_DIR/.env}"
 COMPOSE_FILE="${COMPOSE_FILE:-$DEPLOY_DIR/docker-compose.yaml}"
+RELEASES_DIR="$DEPLOY_DIR/releases"
+RELEASE_HISTORY_DIR="$RELEASES_DIR/history"
+CURRENT_RELEASE_FILE="$RELEASES_DIR/current-release.env"
+PREVIOUS_RELEASE_FILE="$RELEASES_DIR/previous-release.env"
+STAGED_RELEASE_FILE="$RELEASES_DIR/staged-release.env"
+CURRENT_RELEASE_SUMMARY_FILE="$RELEASES_DIR/current-release.summary.md"
 
 APP_IMAGE_KEYS=(
   AICOPILOT_HTTPAPI_IMAGE
@@ -104,6 +110,111 @@ replace_env_value() {
     }' "$ENV_FILE" > "$tmp_file"
 
   mv "$tmp_file" "$ENV_FILE"
+}
+
+prepare_release_directories() {
+  mkdir -p "$RELEASE_HISTORY_DIR"
+}
+
+safe_release_file_name() {
+  printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '-'
+}
+
+read_manifest_value() {
+  local manifest_path="$1"
+  local key="$2"
+  sed -n "s/^${key}=//p" "$manifest_path" | tail -n 1
+}
+
+load_release_images_from_manifest() {
+  local manifest_path="$1"
+  local key
+  local value
+
+  for key in "${APP_IMAGE_KEYS[@]}"
+  do
+    value="$(read_manifest_value "$manifest_path" "$key")"
+    if [ -z "$value" ]; then
+      printf 'Release manifest is missing %s: %s\n' "$key" "$manifest_path" >&2
+      exit 66
+    fi
+
+    export "$key=$value"
+  done
+}
+
+apply_app_image_values_to_env() {
+  local key
+
+  for key in "${APP_IMAGE_KEYS[@]}"
+  do
+    replace_env_value "$key" "${!key:-}"
+  done
+}
+
+write_release_manifest() {
+  local output_path="$1"
+  local release_id="$2"
+  local deploy_git_sha="$3"
+  local deploy_triggered_by="$4"
+  local deployed_at_utc="$5"
+  local deployed_services="$6"
+  local key
+
+  umask 077
+  {
+    printf 'DEPLOY_RELEASE_ID=%s\n' "$release_id"
+    printf 'DEPLOY_GIT_SHA=%s\n' "$deploy_git_sha"
+    printf 'DEPLOY_TRIGGERED_BY=%s\n' "$deploy_triggered_by"
+    printf 'DEPLOYED_AT_UTC=%s\n' "$deployed_at_utc"
+    printf 'DEPLOY_SERVICES=%s\n' "$deployed_services"
+
+    for key in "${APP_IMAGE_KEYS[@]}"
+    do
+      printf '%s=%s\n' "$key" "${!key:-}"
+    done
+  } > "$output_path"
+}
+
+record_release_history() {
+  local source_file="$1"
+  local release_id="$2"
+  local history_timestamp
+  local safe_release_id
+  local history_file
+
+  history_timestamp="$(date -u +"%Y%m%dT%H%M%SZ")"
+  safe_release_id="$(safe_release_file_name "$release_id")"
+  history_file="$RELEASE_HISTORY_DIR/$history_timestamp-$safe_release_id.env"
+  cp "$source_file" "$history_file"
+  printf '%s\n' "$history_file"
+}
+
+write_release_summary() {
+  local output_path="$1"
+  local release_id="$2"
+  local deploy_git_sha="$3"
+  local deploy_triggered_by="$4"
+  local deployed_at_utc="$5"
+  local deployed_services="$6"
+  local release_notes="${7:-}"
+
+  umask 077
+  {
+    printf '### AICopilot deploy\n\n'
+    printf -- '- Release tag: `%s`\n' "$release_id"
+    printf -- '- Git SHA: `%s`\n' "$deploy_git_sha"
+    printf -- '- Triggered by: `%s`\n' "$deploy_triggered_by"
+    printf -- '- Deployed at UTC: `%s`\n' "$deployed_at_utc"
+    printf -- '- Services: `%s`\n' "${deployed_services:-all}"
+    printf '\n#### Changes\n'
+
+    if [ -n "$release_notes" ]; then
+      printf '%s\n' "$release_notes" | sed '/^[[:space:]]*$/d; s/^/- /'
+    else
+      printf -- '- No git summary available.\n'
+    fi
+  } > "$output_path"
 }
 
 ensure_explicit_registry_image() {
@@ -322,13 +433,33 @@ docker compose version >/dev/null
 
 cd "$DEPLOY_DIR"
 load_dotenv
+prepare_release_directories
 if [ -z "$REQUESTED_SERVICES" ]; then
   apply_release_tag_to_app_images "$RELEASE_TAG"
 else
+  if [ ! -f "$CURRENT_RELEASE_FILE" ]; then
+    printf 'Incremental deploy requires an existing current release: %s\n' "$CURRENT_RELEASE_FILE" >&2
+    exit 64
+  fi
+
+  load_release_images_from_manifest "$CURRENT_RELEASE_FILE"
+  apply_app_image_values_to_env
   apply_release_tag_to_image_keys "$RELEASE_TAG" "${SELECTED_IMAGE_KEYS[@]}"
 fi
 load_dotenv
 ensure_image_policy
+DEPLOY_RELEASE_ID="$RELEASE_TAG"
+DEPLOY_GIT_SHA_VALUE="${DEPLOY_GIT_SHA:-unknown}"
+DEPLOY_TRIGGERED_BY_VALUE="${DEPLOY_TRIGGERED_BY:-manual}"
+DEPLOYED_AT_UTC_VALUE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+DEPLOY_RELEASE_NOTES_VALUE="${DEPLOY_RELEASE_NOTES:-}"
+write_release_manifest \
+  "$STAGED_RELEASE_FILE" \
+  "$DEPLOY_RELEASE_ID" \
+  "$DEPLOY_GIT_SHA_VALUE" \
+  "$DEPLOY_TRIGGERED_BY_VALUE" \
+  "$DEPLOYED_AT_UTC_VALUE" \
+  "$SELECTED_SERVICE_NAMES"
 compose config -q
 if [ -z "$REQUESTED_SERVICES" ]; then
   compose pull
@@ -346,4 +477,25 @@ fi
 compose ps
 probe_web
 
+if [ -f "$CURRENT_RELEASE_FILE" ]; then
+  cp "$CURRENT_RELEASE_FILE" "$PREVIOUS_RELEASE_FILE"
+fi
+
+cp "$STAGED_RELEASE_FILE" "$CURRENT_RELEASE_FILE"
+history_file="$(record_release_history "$CURRENT_RELEASE_FILE" "$DEPLOY_RELEASE_ID")"
+write_release_summary \
+  "$CURRENT_RELEASE_SUMMARY_FILE" \
+  "$DEPLOY_RELEASE_ID" \
+  "$DEPLOY_GIT_SHA_VALUE" \
+  "$DEPLOY_TRIGGERED_BY_VALUE" \
+  "$DEPLOYED_AT_UTC_VALUE" \
+  "$SELECTED_SERVICE_NAMES" \
+  "$DEPLOY_RELEASE_NOTES_VALUE"
+history_summary_file="${history_file%.env}.summary.md"
+cp "$CURRENT_RELEASE_SUMMARY_FILE" "$history_summary_file"
+
 printf 'AICopilot deploy completed for release tag: %s\n' "$RELEASE_TAG"
+printf 'Current release manifest: %s\n' "$CURRENT_RELEASE_FILE"
+printf 'Current release summary: %s\n' "$CURRENT_RELEASE_SUMMARY_FILE"
+printf 'Release history record: %s\n' "$history_file"
+printf 'Release history summary: %s\n' "$history_summary_file"
