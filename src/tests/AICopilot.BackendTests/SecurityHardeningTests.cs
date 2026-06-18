@@ -46,16 +46,18 @@ public sealed class SecurityHardeningTests
             "hosts",
             "AICopilot.AppHost",
             "appsettings.json"));
-        var envTemplate = File.ReadAllText(Path.Combine(solutionRoot, "artifacts", ".env"));
-        var compose = File.ReadAllText(Path.Combine(solutionRoot, "artifacts", "docker-compose.yaml"));
+        var envTemplate = File.ReadAllText(Path.Combine(solutionRoot, "deploy", "enterprise-ai", ".env.example"));
+        var compose = File.ReadAllText(Path.Combine(solutionRoot, "deploy", "enterprise-ai", "docker-compose.yaml"));
 
         httpDevelopmentSettings.Should().NotContain("29ynIx63y0Uq5Yj6wZZYikBElPPW4rqpXKGq4voqmeMDefoJQEC8fQQzYPk95rNp");
         appHostSettings.Should().NotContain("\"pg-password\": \"123456\"");
-        envTemplate.Should().Contain("EVENTBUS_PASSWORD=CHANGE_ME_EVENTBUS_PASSWORD");
-        envTemplate.Should().Contain("PG_PASSWORD=CHANGE_ME_POSTGRES_PASSWORD");
-        envTemplate.Should().Contain("QDRANT_KEY=CHANGE_ME_QDRANT_KEY");
+        File.Exists(Path.Combine(solutionRoot, "artifacts", ".env")).Should().BeFalse();
+        File.Exists(Path.Combine(solutionRoot, "artifacts", "docker-compose.yaml")).Should().BeFalse();
+        envTemplate.Should().Contain("RABBITMQ_PASSWORD=CHANGE_ME_STRONG_RABBITMQ_PASSWORD");
+        envTemplate.Should().Contain("POSTGRES_PASSWORD=CHANGE_ME_STRONG_POSTGRES_PASSWORD");
+        envTemplate.Should().Contain("QDRANT_KEY=CHANGE_ME_STRONG_QDRANT_KEY");
         envTemplate.Should().Contain("AICOPILOT_API_KEY_ENCRYPTION_KEY=CHANGE_ME_32_BYTES_MINIMUM");
-        compose.Should().Contain("AICopilotSecurity__ApiKeyEncryptionKey: \"${AICOPILOT_API_KEY_ENCRYPTION_KEY}\"");
+        compose.Should().Contain("AICopilotSecurity__ApiKeyEncryptionKey: ${AICOPILOT_API_KEY_ENCRYPTION_KEY}");
     }
 
     [Fact]
@@ -93,7 +95,11 @@ public sealed class SecurityHardeningTests
         deployWorkflow.Should().Contain("Self-hosted runner must not run as root.");
         deployWorkflow.Should().Contain("rsync -a --delete");
         deployWorkflow.Should().Contain("printf '%s\\n' \"$DEPLOY_ENV_FILE\" > \"$DEPLOY_TARGET_DIR/.env\"");
-        deployWorkflow.Should().Contain("./deploy-release.sh \"$RELEASE_TAG\"");
+        deployWorkflow.Should().Contain("services:");
+        deployWorkflow.Should().Contain("DEPLOY_SERVICES: ${{ inputs.services }}");
+        deployWorkflow.Should().Contain("deploy_args=(\"$RELEASE_TAG\")");
+        deployWorkflow.Should().Contain("deploy_args+=(--services \"$DEPLOY_SERVICES\")");
+        deployWorkflow.Should().Contain("./deploy-release.sh \"${deploy_args[@]}\"");
         deployWorkflow.Should().NotContain("runs-on: ubuntu-latest");
         deployWorkflow.Should().NotContain("appleboy/ssh-action");
         deployWorkflow.Should().NotContain("appleboy/scp-action");
@@ -115,6 +121,7 @@ public sealed class SecurityHardeningTests
         deployGuide.Should().Contain("iiot-linux-prod");
         deployGuide.Should().Contain("DEPLOY_ENV_FILE");
         deployGuide.Should().Contain("Docker Hub 不作为生产依赖源");
+        deployGuide.Should().Contain("`aicopilot-deploy` 的 `services` 输入为空时按全量发布处理");
         deployGuide.Should().Contain("mirror-base-images.sh");
         deployGuide.Should().Contain("deploy-release.sh");
         deployGuide.Should().Contain("应急手工构建只在 GitHub Actions 不可用时使用");
@@ -133,8 +140,10 @@ public sealed class SecurityHardeningTests
         deployRelease.Should().Contain("INFRA_IMAGE_KEYS");
         deployRelease.Should().Contain("Release tag must match sha-<hex>");
         deployRelease.Should().Contain("Image must be mirrored to Harbor");
+        deployRelease.Should().Contain("normalize_services");
         deployRelease.Should().Contain("compose pull");
         deployRelease.Should().Contain("compose up -d --remove-orphans");
+        deployRelease.Should().Contain("compose up -d \"${RUNTIME_SELECTED_SERVICES[@]}\"");
         deployRelease.Should().Contain("probe_web");
 
         mirrorBaseImages.Should().Contain("postgres:17.6");

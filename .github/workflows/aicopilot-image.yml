@@ -46,7 +46,72 @@ jobs:
           shopt -s dotglob
           cp -a "$extracted"/* "$GITHUB_WORKSPACE"/
 
+      - name: Detect image relevance
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          httpapi=false
+          migration=false
+          dataworker=false
+          ragworker=false
+          web=false
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            httpapi=true
+            migration=true
+            dataworker=true
+            ragworker=true
+            web=true
+          else
+            before="${{ github.event.before }}"
+            if [ -z "$before" ] || printf '%s' "$before" | grep -Eq '^0+$'; then
+              httpapi=true
+              migration=true
+              dataworker=true
+              ragworker=true
+              web=true
+            else
+              changed_files="$(mktemp)"
+              git diff --name-only "$before" "$GITHUB_SHA" > "$changed_files"
+
+              if grep -Eq '^(AICopilot\.slnx|global\.json)$' "$changed_files" \
+                || grep -Eq '^src/(core|shared|services|infrastructure)/' "$changed_files" \
+                || grep -Eq '^src/hosts/AICopilot\.ServiceDefaults/' "$changed_files"; then
+                httpapi=true
+                migration=true
+                dataworker=true
+                ragworker=true
+              fi
+
+              grep -Eq '^src/hosts/AICopilot\.HttpApi/' "$changed_files" && httpapi=true
+              grep -Eq '^src/hosts/AICopilot\.MigrationWorkApp/' "$changed_files" && migration=true
+              grep -Eq '^src/hosts/AICopilot\.DataWorker/' "$changed_files" && dataworker=true
+              grep -Eq '^src/hosts/AICopilot\.RagWorker/' "$changed_files" && ragworker=true
+              grep -Eq '^(src/vues/AICopilot\.Web/|deploy/enterprise-ai/Dockerfile|deploy/enterprise-ai/docker-compose\.yaml)$' "$changed_files" && web=true
+            fi
+          fi
+
+          any_backend=false
+          if [ "$httpapi" = "true" ] || [ "$migration" = "true" ] || [ "$dataworker" = "true" ] || [ "$ragworker" = "true" ]; then
+            any_backend=true
+          fi
+
+          {
+            echo "httpapi=$httpapi"
+            echo "migration=$migration"
+            echo "dataworker=$dataworker"
+            echo "ragworker=$ragworker"
+            echo "web=$web"
+            echo "any_backend=$any_backend"
+          } >> "$GITHUB_OUTPUT"
+
+          if [ "$any_backend" != "true" ] && [ "$web" != "true" ]; then
+            echo "No relevant image changes detected; skipping AICopilot image build." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Setup .NET
+        if: steps.changes.outputs.any_backend == 'true'
         uses: actions/setup-dotnet@v4
         env:
           DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet
@@ -54,6 +119,7 @@ jobs:
           dotnet-version: 10.0.301
 
       - name: Resolve Harbor target
+        if: steps.changes.outputs.any_backend == 'true' || steps.changes.outputs.web == 'true'
         id: registry
         shell: bash
         env:
@@ -79,6 +145,7 @@ jobs:
           echo "release_tag=sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Validate runner and Docker
+        if: steps.changes.outputs.any_backend == 'true' || steps.changes.outputs.web == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -90,6 +157,7 @@ jobs:
           docker buildx version >/dev/null
 
       - name: Log in to Harbor
+        if: steps.changes.outputs.any_backend == 'true' || steps.changes.outputs.web == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -99,6 +167,7 @@ jobs:
               --password-stdin
 
       - name: Publish backend images
+        if: steps.changes.outputs.any_backend == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -125,12 +194,21 @@ jobs:
             echo "### AICopilot backend images"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          publish_dotnet_image "src/hosts/AICopilot.HttpApi/AICopilot.HttpApi.csproj" "aicopilot-httpapi"
-          publish_dotnet_image "src/hosts/AICopilot.MigrationWorkApp/AICopilot.MigrationWorkApp.csproj" "aicopilot-migration"
-          publish_dotnet_image "src/hosts/AICopilot.DataWorker/AICopilot.DataWorker.csproj" "aicopilot-dataworker"
-          publish_dotnet_image "src/hosts/AICopilot.RagWorker/AICopilot.RagWorker.csproj" "aicopilot-ragworker"
+          if [ "${{ steps.changes.outputs.httpapi }}" = "true" ]; then
+            publish_dotnet_image "src/hosts/AICopilot.HttpApi/AICopilot.HttpApi.csproj" "aicopilot-httpapi"
+          fi
+          if [ "${{ steps.changes.outputs.migration }}" = "true" ]; then
+            publish_dotnet_image "src/hosts/AICopilot.MigrationWorkApp/AICopilot.MigrationWorkApp.csproj" "aicopilot-migration"
+          fi
+          if [ "${{ steps.changes.outputs.dataworker }}" = "true" ]; then
+            publish_dotnet_image "src/hosts/AICopilot.DataWorker/AICopilot.DataWorker.csproj" "aicopilot-dataworker"
+          fi
+          if [ "${{ steps.changes.outputs.ragworker }}" = "true" ]; then
+            publish_dotnet_image "src/hosts/AICopilot.RagWorker/AICopilot.RagWorker.csproj" "aicopilot-ragworker"
+          fi
 
       - name: Build and push web image
+        if: steps.changes.outputs.web == 'true'
         shell: bash
         env:
           VITE_CLOUD_PLATFORM_URL: ${{ vars.VITE_CLOUD_PLATFORM_URL }}
@@ -138,6 +216,7 @@ jobs:
           set -euo pipefail
           image_prefix="${{ steps.registry.outputs.image_prefix }}"
           release_tag="${{ steps.registry.outputs.release_tag }}"
+          cache_ref="$image_prefix/aicopilot-webui:buildcache"
           cloud_platform_url="${VITE_CLOUD_PLATFORM_URL:-http://10.98.90.154:81}"
 
           docker buildx build \
@@ -146,6 +225,8 @@ jobs:
             --build-arg "VITE_CLOUD_PLATFORM_URL=$cloud_platform_url" \
             --build-arg "NODE_BASE_IMAGE=$image_prefix/base-node:22-alpine" \
             --build-arg "NGINX_BASE_IMAGE=$image_prefix/base-nginx:1.27-alpine" \
+            --cache-from "type=registry,ref=$cache_ref" \
+            --cache-to "type=registry,ref=$cache_ref,mode=max" \
             --tag "$image_prefix/aicopilot-webui:$release_tag" \
             src/vues/AICopilot.Web
 

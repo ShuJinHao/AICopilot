@@ -148,6 +148,22 @@ apply_release_tag_to_app_images() {
   done
 }
 
+apply_release_tag_to_image_keys() {
+  local release_tag="$1"
+  shift
+  local key
+  local image_ref
+  local image_repository
+
+  for key in "$@"
+  do
+    require_env_value "$key"
+    image_ref="${!key}"
+    image_repository="$(image_repository_from_ref "$image_ref")"
+    replace_env_value "$key" "$image_repository:$release_tag"
+  done
+}
+
 ensure_image_policy() {
   local key
 
@@ -182,8 +198,120 @@ probe_web() {
   exit 1
 }
 
-RELEASE_TAG="${1:-${RELEASE_TAG:-}}"
+RELEASE_TAG="${RELEASE_TAG:-}"
+REQUESTED_SERVICES="${DEPLOY_SERVICES:-}"
+
+while [ "$#" -gt 0 ]
+do
+  case "$1" in
+    --services)
+      shift
+      REQUESTED_SERVICES="${1:-}"
+      ;;
+    --services=*)
+      REQUESTED_SERVICES="${1#--services=}"
+      ;;
+    -*)
+      printf 'Unknown deploy-release option: %s\n' "$1" >&2
+      exit 64
+      ;;
+    *)
+      if [ -n "$RELEASE_TAG" ]; then
+        printf 'Unexpected deploy-release argument: %s\n' "$1" >&2
+        exit 64
+      fi
+      RELEASE_TAG="$1"
+      ;;
+  esac
+  shift
+done
+
 ensure_release_tag "$RELEASE_TAG"
+
+normalize_services() {
+  local services_input="${1:-}"
+  local normalized_services=""
+  local service
+  local normalized
+
+  if [ -z "$services_input" ]; then
+    printf '%s\n' "aicopilot-httpapi aicopilot-migration aicopilot-dataworker aicopilot-ragworker aicopilot-webui"
+    return
+  fi
+
+  for service in $(printf '%s' "$services_input" | tr ',' ' ')
+  do
+    case "$service" in
+      httpapi|aicopilot-httpapi)
+        normalized=aicopilot-httpapi
+        ;;
+      migration|aicopilot-migration)
+        normalized=aicopilot-migration
+        ;;
+      dataworker|aicopilot-dataworker)
+        normalized=aicopilot-dataworker
+        ;;
+      ragworker|aicopilot-ragworker)
+        normalized=aicopilot-ragworker
+        ;;
+      web|webui|aicopilot-webui)
+        normalized=aicopilot-webui
+        ;;
+      *)
+        printf 'Unsupported deploy service: %s\n' "$service" >&2
+        exit 64
+        ;;
+    esac
+
+    case " $normalized_services " in
+      *" $normalized "*)
+        ;;
+      *)
+        normalized_services="$normalized_services $normalized"
+        ;;
+    esac
+  done
+
+  printf '%s\n' "$(printf '%s' "$normalized_services" | awk '{$1=$1; print}')"
+}
+
+image_key_for_service() {
+  case "$1" in
+    aicopilot-httpapi)
+      printf '%s\n' AICOPILOT_HTTPAPI_IMAGE
+      ;;
+    aicopilot-migration)
+      printf '%s\n' AICOPILOT_MIGRATION_IMAGE
+      ;;
+    aicopilot-dataworker)
+      printf '%s\n' AICOPILOT_DATAWORKER_IMAGE
+      ;;
+    aicopilot-ragworker)
+      printf '%s\n' AICOPILOT_RAGWORKER_IMAGE
+      ;;
+    aicopilot-webui)
+      printf '%s\n' AICOPILOT_WEBUI_IMAGE
+      ;;
+    *)
+      printf 'Unsupported deploy service: %s\n' "$1" >&2
+      exit 64
+      ;;
+  esac
+}
+
+SELECTED_SERVICE_NAMES="$(normalize_services "$REQUESTED_SERVICES")"
+SELECTED_IMAGE_KEYS=()
+RUNTIME_SELECTED_SERVICES=()
+RUN_MIGRATION=false
+for service in $SELECTED_SERVICE_NAMES
+do
+  SELECTED_IMAGE_KEYS+=("$(image_key_for_service "$service")")
+  if [ "$service" = "aicopilot-migration" ]; then
+    RUN_MIGRATION=true
+  else
+    RUNTIME_SELECTED_SERVICES+=("$service")
+  fi
+done
 
 command -v docker >/dev/null
 command -v curl >/dev/null
@@ -191,12 +319,27 @@ docker compose version >/dev/null
 
 cd "$DEPLOY_DIR"
 load_dotenv
-apply_release_tag_to_app_images "$RELEASE_TAG"
+if [ -z "$REQUESTED_SERVICES" ]; then
+  apply_release_tag_to_app_images "$RELEASE_TAG"
+else
+  apply_release_tag_to_image_keys "$RELEASE_TAG" "${SELECTED_IMAGE_KEYS[@]}"
+fi
 load_dotenv
 ensure_image_policy
 compose config -q
-compose pull
-compose up -d --remove-orphans
+if [ -z "$REQUESTED_SERVICES" ]; then
+  compose pull
+  compose up -d --remove-orphans
+else
+  compose pull $SELECTED_SERVICE_NAMES
+  compose up -d postgres eventbus qdrant
+  if [ "$RUN_MIGRATION" = "true" ]; then
+    compose up --no-deps --abort-on-container-exit --exit-code-from aicopilot-migration aicopilot-migration
+  fi
+  if [ "${#RUNTIME_SELECTED_SERVICES[@]}" -gt 0 ]; then
+    compose up -d "${RUNTIME_SELECTED_SERVICES[@]}"
+  fi
+fi
 compose ps
 probe_web
 

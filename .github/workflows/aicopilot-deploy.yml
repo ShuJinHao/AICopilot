@@ -7,6 +7,10 @@ on:
         description: Release tag from aicopilot-image (sha-*)
         required: true
         type: string
+      services:
+        description: "Optional comma/space separated services: httpapi,migration,dataworker,ragworker,webui"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -52,6 +56,20 @@ jobs:
           if [[ ! "$release_tag" =~ ^sha-[0-9a-f]+$ ]]; then
             echo "release_tag must match sha-<hex>: $release_tag" >&2
             exit 1
+          fi
+          services='${{ inputs.services }}'
+          if [ -n "$services" ]; then
+            for service in $(printf '%s' "$services" | tr ',' ' ')
+            do
+              case "$service" in
+                httpapi|aicopilot-httpapi|migration|aicopilot-migration|dataworker|aicopilot-dataworker|ragworker|aicopilot-ragworker|web|webui|aicopilot-webui)
+                  ;;
+                *)
+                  echo "Unsupported service: $service" >&2
+                  exit 64
+                  ;;
+              esac
+            done
           fi
 
       - name: Validate runner and deploy inputs
@@ -115,14 +133,20 @@ jobs:
         shell: bash
         env:
           RELEASE_TAG: ${{ inputs.release_tag }}
+          DEPLOY_SERVICES: ${{ inputs.services }}
           DEPLOY_TARGET_DIR: ${{ secrets.DEPLOY_TARGET_DIR }}
         run: |
           set -euo pipefail
           cd "$DEPLOY_TARGET_DIR"
-          ./deploy-release.sh "$RELEASE_TAG"
+          deploy_args=("$RELEASE_TAG")
+          if [ -n "${DEPLOY_SERVICES:-}" ]; then
+            deploy_args+=(--services "$DEPLOY_SERVICES")
+          fi
+          ./deploy-release.sh "${deploy_args[@]}"
 
           {
             echo "### AICopilot deploy"
             echo "- Release tag: \`$RELEASE_TAG\`"
+            echo "- Services: \`${DEPLOY_SERVICES:-all}\`"
             echo "- Target dir: \`$DEPLOY_TARGET_DIR\`"
           } >> "$GITHUB_STEP_SUMMARY"

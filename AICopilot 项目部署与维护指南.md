@@ -109,13 +109,17 @@ Cloud AiRead 契约：
 ```text
 git push GitHub
 -> aicopilot-image on [self-hosted, iiot-linux-prod]
--> build aicopilot-httpapi / migration / dataworker / ragworker / webui
+-> build affected images; shared backend changes build backend images, web changes build webui, manual dispatch builds all
 -> push 10.98.90.154:80/enterprise-ai/*:sha-<git-sha>
--> manually trigger aicopilot-deploy with release_tag=sha-<git-sha>
+-> manually trigger aicopilot-deploy with release_tag=sha-<git-sha>, optionally services=httpapi,web
 -> sync deploy/enterprise-ai to /srv/enterprise-ai/deploy
 -> write DEPLOY_ENV_FILE to .env
 -> run deploy-release.sh
 ```
+
+`aicopilot-image` 会按路径判断需要构建的镜像：只改 `src/hosts/AICopilot.HttpApi/` 时只构建 `aicopilot-httpapi`，只改 `src/vues/AICopilot.Web/` 时只构建 `aicopilot-webui`，改 `src/core/`、`src/shared/`、`src/services/`、`src/infrastructure/` 或手动触发时构建后端应用镜像。Web 镜像使用 Harbor registry cache，第二次构建会复用已有 Docker layer。
+
+`aicopilot-deploy` 的 `services` 输入为空时按全量发布处理；传入 `httpapi`、`migration`、`dataworker`、`ragworker`、`web` 或逗号组合时，只重写对应镜像 tag、只拉取并重启指定应用服务。基础服务 `postgres`、`eventbus`、`qdrant` 会保持可用；只有选择 `migration` 时才运行迁移容器。
 
 GitHub secrets：
 
@@ -165,9 +169,11 @@ REGISTRY=10.98.90.154:80 HARBOR_PROJECT=enterprise-ai TAG=sha-<git-sha> ./deploy
 cd /srv/enterprise-ai/deploy
 docker login 10.98.90.154:80 --username <Harbor 用户>
 ./deploy-release.sh sha-<git-sha>
+# 或按需发布：
+./deploy-release.sh sha-<git-sha> --services httpapi,web
 ```
 
-`deploy-release.sh` 会按 release tag 重写五个应用镜像、拒绝 Docker Hub shorthand、执行 `docker compose pull`、启动 compose，并探测 Web 首页。
+`deploy-release.sh` 会按 release tag 重写所选应用镜像、拒绝 Docker Hub shorthand、执行 `docker compose pull`、启动 compose，并探测 Web 首页。未传 `--services` 时按五个应用镜像全量发布。
 
 ## 5. 验证
 
