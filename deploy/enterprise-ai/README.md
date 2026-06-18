@@ -44,6 +44,8 @@ VITE_CLOUD_PLATFORM_URL=http://10.98.90.154:81
 
 `DEPLOY_ENV_FILE` 内容从 `.env.example` 复制后替换强密码和 token。不得把真实 `.env`、JWT secret、数据库密码、Qdrant key 或 Cloud service token 写入仓库。
 
+Cloud OIDC 首部署管理员收编由 `CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED` 控制，生产模板默认启用，并复用 `AICOPILOT_BOOTSTRAP_ADMIN_USERNAME` 作为唯一允许收编的本地 Admin 用户名；普通同名用户仍拒绝自动绑定。
+
 ## 基础镜像
 
 首次部署前，在能访问 Docker Hub 的机器或已有本地缓存的机器上同步基础镜像：

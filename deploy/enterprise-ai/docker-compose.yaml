@@ -42,6 +42,8 @@ x-aicopilot-common-env: &aicopilot-common-env
   CloudOidc__CallbackPath: /api/identity/cloud-oidc/callback
   CloudOidc__FrontendCompletionPath: /cloud-login/complete
   CloudOidc__RequireHttpsMetadata: ${CLOUD_OIDC_REQUIRE_HTTPS_METADATA:-true}
+  CloudOidc__BootstrapAdminAutoBindEnabled: ${CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED:-true}
+  CloudOidc__BootstrapAdminUserName: ${AICOPILOT_BOOTSTRAP_ADMIN_USERNAME}
 
 services:
   postgres:

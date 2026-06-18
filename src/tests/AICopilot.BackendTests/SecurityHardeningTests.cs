@@ -58,6 +58,8 @@ public sealed class SecurityHardeningTests
         envTemplate.Should().Contain("QDRANT_KEY=CHANGE_ME_STRONG_QDRANT_KEY");
         envTemplate.Should().Contain("AICOPILOT_API_KEY_ENCRYPTION_KEY=CHANGE_ME_32_BYTES_MINIMUM");
         compose.Should().Contain("AICopilotSecurity__ApiKeyEncryptionKey: ${AICOPILOT_API_KEY_ENCRYPTION_KEY}");
+        compose.Should().Contain("CloudOidc__BootstrapAdminAutoBindEnabled: ${CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED:-true}");
+        compose.Should().Contain("CloudOidc__BootstrapAdminUserName: ${AICOPILOT_BOOTSTRAP_ADMIN_USERNAME}");
     }
 
     [Fact]
@@ -152,6 +154,7 @@ public sealed class SecurityHardeningTests
         envTemplate.Should().Contain("POSTGRES_IMAGE=10.98.90.154:80/enterprise-ai/base-postgres:17.6");
         envTemplate.Should().Contain("RABBITMQ_IMAGE=10.98.90.154:80/enterprise-ai/base-rabbitmq:4.2-management");
         envTemplate.Should().Contain("QDRANT_IMAGE=10.98.90.154:80/enterprise-ai/base-qdrant:v1.15.5");
+        envTemplate.Should().Contain("CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED=true");
         envTemplate.Should().NotContain("POSTGRES_IMAGE=postgres:");
         envTemplate.Should().NotContain("RABBITMQ_IMAGE=rabbitmq:");
         envTemplate.Should().NotContain("QDRANT_IMAGE=qdrant/");

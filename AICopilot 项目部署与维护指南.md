@@ -80,7 +80,10 @@ CLOUD_OIDC_ISSUER=http://10.98.90.154:81
 ALLOW_INTRANET_HTTP_OIDC=true
 CLOUD_OIDC_CLIENT_ID=aicopilot
 CLOUD_OIDC_REQUIRE_HTTPS_METADATA=false
+CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED=true
 ```
+
+`CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED=true` 只允许首部署本地 Admin 用户在 Cloud `employee_no` 精确等于 `AICOPILOT_BOOTSTRAP_ADMIN_USERNAME` 且该用户无既有 Cloud 绑定时被收编；普通同名用户和已绑定后 sub 漂移仍拒绝。
 
 开发期收口要求：生产 Cloud 只读读取不再通过普通 Real CloudReadonly 双轨入口推进；真实 Cloud 读取必须走当前批准的 Cloud AiRead / P12 / P13 受控入口。`CLOUD_AI_SERVICE_ACCOUNT_TOKEN` 只有在 Cloud 明确发放 AI 只读服务账号 token 后才填写；不能写入仓库。
 

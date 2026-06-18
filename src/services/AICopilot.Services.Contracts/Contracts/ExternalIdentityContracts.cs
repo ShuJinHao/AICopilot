@@ -35,6 +35,24 @@ public sealed record CloudOidcIdentityProfile(
     public const string DefaultTenantId = "default";
 }
 
+public sealed class CloudOidcBootstrapAdminBindingOptions
+{
+    public const string SectionName = "CloudOidc";
+
+    public bool BootstrapAdminAutoBindEnabled { get; init; }
+
+    public string BootstrapAdminUserName { get; init; } = string.Empty;
+
+    public void EnsureValid()
+    {
+        if (BootstrapAdminAutoBindEnabled && string.IsNullOrWhiteSpace(BootstrapAdminUserName))
+        {
+            throw new InvalidOperationException(
+                "CloudOidc:BootstrapAdminUserName is required when CloudOidc:BootstrapAdminAutoBindEnabled is true.");
+        }
+    }
+}
+
 public sealed record ExternalIdentityBindingSnapshot(
     Guid Id,
     Guid UserId,
