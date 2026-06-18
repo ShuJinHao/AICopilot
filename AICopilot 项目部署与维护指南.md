@@ -8,6 +8,8 @@
 - 生产环境使用 Docker Compose 单机编排，镜像从 Harbor 拉取。
 - 标准发布走 GitHub Actions 内网 self-hosted runner，label 固定为 `iiot-linux-prod`。
 - runner 必须使用专用非 root 用户运行，例如 `github-runner`；不要把 runner 装成 root 服务。
+- 当前服务器 runner 工作目录固定为 `/data/github-runner/aicopilot`，Docker Root Dir 固定为 `/data/docker`，不要把构建缓存放回系统盘。
+- 当前内网环境 Git smart HTTP 可能超时，workflow 使用 GitHub archive/codeload 兜底拉取源码；不要改回只依赖 `actions/checkout`。
 - 真实 `.env` 通过 GitHub secret `DEPLOY_ENV_FILE` 注入服务器，不提交真实密钥。
 - Docker Hub 不作为生产依赖源；PostgreSQL、RabbitMQ、Qdrant、Node、Nginx 基础镜像必须先 mirror 到 Harbor。
 - AICopilot 默认保持 Cloud 只读边界，不能注册、修改、删除或触发 Cloud 业务数据。
@@ -31,6 +33,8 @@ deploy/enterprise-ai/
 ```text
 /srv/enterprise-ai/deploy
 ```
+
+2026-06-18 现场校准：`10.98.90.154` 使用 `/srv/enterprise-ai/deploy` 作为 compose 工作目录，应用入口为 `http://10.98.90.154:82`，镜像项目为 Harbor `enterprise-ai`。
 
 真实 `.env` 从 `deploy/enterprise-ai/.env.example` 复制后替换密钥和镜像 tag，并保存到 GitHub secret `DEPLOY_ENV_FILE`。应急手工部署时，才直接放在 `/srv/enterprise-ai/deploy/.env`。
 
