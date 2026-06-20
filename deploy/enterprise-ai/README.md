@@ -70,13 +70,13 @@ REGISTRY=10.98.90.154:80 HARBOR_PROJECT=enterprise-ai ./deploy/enterprise-ai/mir
 ## 标准发布
 
 1. 推送代码到 GitHub。
-2. 等 `aicopilot-image` 完成。它会按路径只构建受影响镜像，手动触发时构建全部镜像。
+2. 等 push 触发的 `aicopilot-image` 完成。它会按路径只构建受影响镜像；禁止日常部署时手动 `workflow_dispatch` 触发 `aicopilot-image`，因为手动触发会构建全部镜像，只能用于明确的全量重建或灾备。
 3. 查看 `aicopilot-image` 的 Step Summary 或 `aicopilot-built-services` artifact，确认 `Deploy services input`。
 4. 手动触发 `aicopilot-deploy`。
 5. 输入 `release_tag=sha-<git-sha>`。
-6. 如只发布部分服务，在 `services` 输入 `httpapi`、`migration`、`dataworker`、`ragworker`、`web` 或逗号组合；留空表示全量发布。
+6. `services` 必须照上一步的 `Deploy services input` 填，例如 `httpapi,migration,web`；不要人工猜测，不要为了省事留空。留空表示全量发布，只能用于明确的全量发布窗口。
 
-发布脚本会同步本目录到服务器、写入 `DEPLOY_ENV_FILE`、登录 Harbor、重写所选应用镜像 tag、执行 `docker compose pull` 和 `docker compose up -d`，最后探测 Web 首页。按需发布必须已有 `releases/current-release.env`；首次部署必须全量。按需发布会先从当前 release 读取未选服务镜像，避免 `.env` 被 secret 里的旧 tag 覆盖。部署完成后会写入 `releases/current-release.env`、`previous-release.env`、`staged-release.env`、`current-release.summary.md` 和 `history/`，并把 summary 回贴到 GitHub Step Summary。
+发布脚本会同步本目录到服务器、写入 `DEPLOY_ENV_FILE`、登录 Harbor、重写所选应用镜像 tag、执行 `docker compose pull` 和 `docker compose up -d`，最后探测 Web 首页。按需发布会先从当前 release 读取未选服务镜像，避免 `.env` 被 secret 里的旧 tag 覆盖；如果目标机已有旧部署但还没有 `releases/current-release.env`，脚本会用服务器 `.env` 作为初始镜像基线并写入 release manifest，不需要把 `services` 留空。部署完成后会写入 `releases/current-release.env`、`previous-release.env`、`staged-release.env`、`current-release.summary.md` 和 `history/`，并把 summary 回贴到 GitHub Step Summary。
 
 ## 应急手工构建
 
@@ -103,7 +103,7 @@ docker login 10.98.90.154:80 --username <Harbor 用户>
 ./deploy-release.sh sha-<git-sha> --services httpapi,web
 ```
 
-手工按需部署前确认 `/srv/enterprise-ai/deploy/releases/current-release.env` 存在；没有该文件时先执行全量发布。
+手工按需部署仍应填写具体 `--services`；如果目标机没有 `current-release.env`，脚本会以 `.env` 为初始基线生成 release manifest。
 
 ## 验证
 

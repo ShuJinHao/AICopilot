@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       services:
-        description: "Optional comma/space separated services: httpapi,migration,dataworker,ragworker,webui"
+        description: "Copy Deploy services input from push-triggered aicopilot-image Step Summary; empty means full release only"
         required: false
         type: string
 

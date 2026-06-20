@@ -437,13 +437,13 @@ prepare_release_directories
 if [ -z "$REQUESTED_SERVICES" ]; then
   apply_release_tag_to_app_images "$RELEASE_TAG"
 else
-  if [ ! -f "$CURRENT_RELEASE_FILE" ]; then
-    printf 'Incremental deploy requires an existing current release: %s\n' "$CURRENT_RELEASE_FILE" >&2
-    exit 64
+  if [ -f "$CURRENT_RELEASE_FILE" ]; then
+    load_release_images_from_manifest "$CURRENT_RELEASE_FILE"
+    apply_app_image_values_to_env
+  else
+    printf 'No current release manifest found; using .env as the initial image baseline for selected-service deploy: %s\n' "$CURRENT_RELEASE_FILE" >&2
   fi
 
-  load_release_images_from_manifest "$CURRENT_RELEASE_FILE"
-  apply_app_image_values_to_env
   apply_release_tag_to_image_keys "$RELEASE_TAG" "${SELECTED_IMAGE_KEYS[@]}"
 fi
 load_dotenv
