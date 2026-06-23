@@ -54,6 +54,12 @@ public class AiGatewaySessionController(ISender sender) : ApiControllerBase(send
         return ReturnResult(await Sender.Send(query));
     }
 
+    [HttpGet("session/timeline")]
+    public async Task<IActionResult> GetSessionTimeline([FromQuery] GetSessionTimelineQuery query)
+    {
+        return ReturnResult(await Sender.Send(query));
+    }
+
     [HttpPost("chat")]
     [EnableRateLimiting("chat")]
     public IResult Chat(ChatStreamRequest request)

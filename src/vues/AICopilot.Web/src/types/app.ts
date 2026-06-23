@@ -101,16 +101,100 @@ export interface ApiErrorPayload {
 }
 
 export interface ChatHistoryMessage {
+  messageId?: number
+  sequence?: number
   sessionId: string
   role: 'User' | 'Assistant'
   content: string
   createdAt: string
+  renderChunks?: import('@/types/protocols').ChatChunk[] | null
   finalModelId?: string | null
   finalModelName?: string | null
   routingModelId?: string | null
   routingModelName?: string | null
   contextWindowTokens?: number | null
   maxOutputTokens?: number | null
+}
+
+export interface ChatHistoryPage {
+  items: ChatHistoryMessage[]
+  beforeSequence?: number | null
+  afterSequence?: number | null
+  hasMore: boolean
+  hasMoreBefore: boolean
+  hasMoreAfter: boolean
+}
+
+export interface SessionTimelineEvent {
+  sequence: number
+  eventType: string
+  createdAt: string
+  messageId?: number | null
+  agentTaskId?: string | null
+  agentTaskTitle?: string | null
+  agentTaskGoal?: string | null
+  agentTaskStatus?: string | null
+  agentStepId?: string | null
+  agentStepIndex?: number | null
+  agentStepTitle?: string | null
+  agentStepStatus?: string | null
+  agentStepToolCode?: string | null
+  approvalRequestId?: string | null
+  approvalType?: string | null
+  approvalStatus?: string | null
+  approvalTargetName?: string | null
+  approvalDecidedAt?: string | null
+  artifactWorkspaceId?: string | null
+  workspaceCode?: string | null
+  workspaceStatus?: string | null
+  artifactId?: string | null
+  artifactName?: string | null
+  artifactType?: string | null
+  artifactStatus?: string | null
+  artifactRelativePath?: string | null
+  artifactDownloadUrl?: string | null
+  agentStepOutputKind?: string | null
+  agentStepResultCount?: number | null
+  agentStepLowConfidence?: boolean | null
+  agentStepSources?: SessionTimelineStepSource[]
+}
+
+export interface SessionTimelineStepSource {
+  knowledgeBaseId?: string | null
+  documentId?: number | null
+  documentName?: string | null
+  chunkIndex?: number | null
+  score?: number | null
+  isLowConfidence?: boolean | null
+  lowConfidenceReason?: string | null
+  textPreview?: string | null
+}
+
+export interface SessionTimelinePage {
+  items: SessionTimelineEvent[]
+  beforeSequence?: number | null
+  afterSequence?: number | null
+  hasMore: boolean
+  hasMoreBefore: boolean
+  hasMoreAfter: boolean
+}
+
+export interface SkillDefinition {
+  id: string
+  skillCode: string
+  displayName: string
+  description: string
+  allowedToolCodes: string[]
+  riskLevel: string
+  approvalPolicy: string
+  allowedDataSourceModes: string[]
+  allowedKnowledgeScopes: string[]
+  outputComponentTypes: string[]
+  isEnabled: boolean
+  isBuiltIn: boolean
+  version: number
+  createdAt: string
+  updatedAt: string
 }
 
 export interface StreamCallbacks {
@@ -187,31 +271,6 @@ export interface LanguageModelTestResult {
   checkedAt: string
 }
 
-export interface SelectableChatModel {
-  id: string
-  provider: string
-  protocolType: string
-  name: string
-  contextWindowTokens: number
-  maxOutputTokens: number
-}
-
-export interface ChatRuntimeSettings {
-  routingHistoryCount: number
-  answerHistoryCount: number
-  ragRewriteHistoryCount: number
-  agentPlanningHistoryCount: number
-  summaryThresholdMessages: number
-  contextTokenLimit: number
-}
-
-export interface ArtifactWorkspaceSettings {
-  rootPath: string
-  folders: string[]
-  allowedArtifactTypes: string[]
-  allowsUserDefinedPath: boolean
-}
-
 export interface RoutingModelSummary {
   id: string
   name: string
@@ -233,9 +292,13 @@ export interface RoutingModelFormModel {
 export interface ConversationTemplateSummary {
   id: string
   name: string
+  code?: string | null
   description: string
   systemPrompt: string
   modelId: string
+  scope?: string | null
+  builtInVersion?: number
+  isBuiltIn?: boolean
   maxTokens?: number | null
   temperature?: number | null
   isEnabled: boolean
@@ -252,288 +315,6 @@ export interface ConversationTemplateFormModel {
   maxTokens?: number | null
   temperature?: number | null
   isEnabled: boolean
-}
-
-export type ApprovalTargetType = 'Plugin' | 'McpServer'
-
-export interface ApprovalPolicySummary {
-  id: string
-  name: string
-  description?: string | null
-  targetType: ApprovalTargetType
-  targetName: string
-  toolNames: string[]
-  isEnabled: boolean
-  requiresOnsiteAttestation: boolean
-}
-
-export interface ApprovalPolicyDetail extends ApprovalPolicySummary {}
-
-export interface ApprovalPolicyFormModel {
-  id?: string
-  name: string
-  description: string
-  targetType: ApprovalTargetType
-  targetName: string
-  toolNames: string[]
-  isEnabled: boolean
-  requiresOnsiteAttestation: boolean
-}
-
-export interface BusinessDatabaseSummary {
-  id: string
-  name: string
-  description: string
-  provider: number
-  isEnabled: boolean
-  isReadOnly: boolean
-  externalSystemType: number
-  readOnlyCredentialVerified: boolean
-  createdAt: string
-  hasConnectionString: boolean
-  connectionStringMasked?: string | null
-  category: string
-  tags: string[]
-  ownerDepartment: string
-  businessDomain: string
-  sensitivityLevel: string
-  defaultQueryLimit: number
-  maxQueryLimit: number
-  isSelectableInChat: boolean
-  isSelectableInAgent: boolean
-  isSimulation: boolean
-  sourceLabel: string
-}
-
-export interface BusinessDatabaseDetail extends BusinessDatabaseSummary {}
-
-export interface BusinessDatabaseFormModel {
-  id?: string
-  name: string
-  description: string
-  connectionString: string
-  provider: number
-  isEnabled: boolean
-  isReadOnly: boolean
-  externalSystemType: number
-  readOnlyCredentialVerified: boolean
-  hasConnectionString: boolean
-  connectionStringMasked?: string | null
-  category: string
-  tags: string[]
-  ownerDepartment: string
-  businessDomain: string
-  sensitivityLevel: string
-  defaultQueryLimit: number
-  maxQueryLimit: number
-  isSelectableInChat: boolean
-  isSelectableInAgent: boolean
-}
-
-export interface McpToolPolicySummary {
-  toolName: string
-  requiresApproval: boolean
-  requiresOnsiteAttestation: boolean
-}
-
-export interface McpAllowedTool {
-  toolName: string
-  externalSystemType?: number | null
-  capabilityKind?: number | null
-  riskLevel?: number | null
-  readOnlyDeclared: boolean
-  mcpReadOnlyHint?: boolean | null
-  mcpDestructiveHint?: boolean | null
-  mcpIdempotentHint?: boolean | null
-}
-
-export interface McpServerSummary {
-  id: string
-  name: string
-  description: string
-  transportType: number
-  command?: string | null
-  hasArguments: boolean
-  argumentsMasked?: string | null
-  chatExposureMode: number
-  allowedTools: McpAllowedTool[]
-  externalSystemType: number
-  capabilityKind: number
-  riskLevel: number
-  toolPolicySummaries: McpToolPolicySummary[]
-  isEnabled: boolean
-}
-
-export interface McpServerDetail extends McpServerSummary {}
-
-export interface McpServerFormModel {
-  id?: string
-  name: string
-  description: string
-  transportType: number
-  command: string
-  arguments: string
-  chatExposureMode: number
-  allowedTools: McpAllowedTool[]
-  externalSystemType: number
-  capabilityKind: number
-  riskLevel: number
-  isEnabled: boolean
-  hasArguments: boolean
-  argumentsMasked?: string | null
-  originalTransportType?: number
-}
-
-export interface ToolRegistrySummary {
-  id: string
-  toolCode: string
-  displayName: string
-  description: string
-  providerType: string
-  targetType: string
-  targetName: string
-  inputSchemaJson: string
-  outputSchemaJson: string
-  riskLevel: string
-  requiredPermission?: string | null
-  requiresApproval: boolean
-  isEnabled: boolean
-  timeoutSeconds: number
-  auditLevel: string
-  category: string
-  businessDomains: string[]
-  dataBoundary: string
-  isVisibleToPlanner: boolean
-  isExecutableByAgent: boolean
-  schemaVersion: number
-  catalogVersion: number
-  approvalPolicy: string
-  createdAt: string
-  updatedAt: string
-  runtimeAvailable: boolean
-  lastDiscoveredAt?: string | null
-  sourceServerName?: string | null
-}
-
-export interface ToolCatalogSummary {
-  version: number
-  availableToolCount: number
-  mockMcpOnly: boolean
-  riskSummary: Record<string, number>
-  tools: Array<{
-    toolCode: string
-    displayName: string
-    description: string
-    providerType: string
-    providerKind: string
-    riskLevel: string
-    requiresApproval: boolean
-    category: string
-    businessDomains?: string[] | null
-    dataBoundary: string
-    schemaVersion: number
-    catalogVersion: number
-    approvalPolicy: string
-    isMock: boolean
-    runtimeAvailable: boolean
-  }>
-}
-
-export interface CloudAiReadEndpointCheck {
-  endpointCode: string
-  method: string
-  path: string
-  policyStatus: string
-  httpStatus?: number | null
-  durationMs: number
-  rowCount: number
-  isTruncated: boolean
-  resultHash?: string | null
-  errorCode?: string | null
-  status: string
-}
-
-export interface CloudReadonlySandboxStatus {
-  status: string
-  sandboxEnabled: boolean
-  baseUrlConfigured: boolean
-  tokenConfigured: boolean
-  lastSmokeAt?: string | null
-  checks: CloudAiReadEndpointCheck[]
-  errors: string[]
-  warnings: string[]
-  boundary: string
-}
-
-export interface CloudReadonlyReadiness {
-  status: string
-  mode: string
-  cloudAiReadEnabled: boolean
-  realEnabled: boolean
-  allowProductionRead: boolean
-  baseUrlConfigured: boolean
-  tokenConfigured: boolean
-  lastCheckedAt?: string | null
-  checks: CloudAiReadEndpointCheck[]
-  errors: string[]
-  warnings: string[]
-  boundary: string
-  sandboxStatus?: CloudReadonlySandboxStatus | null
-}
-
-export interface CloudReadonlySandboxAgentTrialStatus {
-  status: string
-  sandboxSmokeStatus: string
-  trialEnabled: boolean
-  availableScenarioIds: string[]
-  toolVisible: boolean
-  toolExecutable: boolean
-  lastTrialAt?: string | null
-  errors: string[]
-  warnings: string[]
-  boundary: string
-}
-
-export interface CloudReadonlySandboxControlledTrialStatus {
-  status: string
-  sandboxSmokeStatus: string
-  fixedTrialStatus: string
-  controlledTrialEnabled: boolean
-  freeGoalEnabled: boolean
-  toolVisible: boolean
-  toolExecutable: boolean
-  lastTrialAt?: string | null
-  errors: string[]
-  warnings: string[]
-  boundary: string
-}
-
-export interface SemanticSourceStatus {
-  target: string
-  databaseName?: string | null
-  sourceName?: string | null
-  effectiveSourceName?: string | null
-  isEnabled: boolean
-  isReadOnly: boolean
-  sourceExists: boolean
-  providerMatched: boolean
-  missingRequiredFields: string[]
-  status: string
-}
-
-export interface ProviderFallbackRoute {
-  provider: string
-  fallbackProviders: string[]
-}
-
-export interface ProviderReliabilityConfig {
-  fallbackEnabled: boolean
-  fallbackProviders: ProviderFallbackRoute[]
-  circuitBreakerFailureThreshold: number
-  circuitBreakerOpenSeconds: number
-  maxOutputTokens: number
-  fallbackAllowedScopes: string[]
-  fallbackBlockedScopes: string[]
 }
 
 export type EmbeddingModelApiKeyAction = 'keep' | 'replace' | 'clear'

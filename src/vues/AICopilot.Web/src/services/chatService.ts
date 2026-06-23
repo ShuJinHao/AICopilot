@@ -1,37 +1,22 @@
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import { baseUrl } from '@/appsetting'
 import { apiClient, ApiError, getAccessToken, getProblemDetails } from './apiClient'
-import type { ChatHistoryMessage, SelectableChatModel, StreamCallbacks } from '@/types/app'
+import type {
+  ChatHistoryPage,
+  KnowledgeBaseSummary,
+  SessionTimelinePage,
+  SkillDefinition,
+  StreamCallbacks
+} from '@/types/app'
 import type {
   AgentApprovalRequest,
   AgentArtifactPreview,
   AgentTask,
   AgentTaskAuditSummary,
-  AgentTrialScenario,
   ArtifactWorkspace,
   ChatChunk,
-  CloudReadonlySandboxControlledPlan,
-  CloudReadonlyPilotConfigPackage,
-  CloudReadonlyPilotContractRehearsal,
-  CloudReadonlyPilotReadinessStatus,
-  CloudReadonlyProductionControlledPilotResult,
-  CloudReadonlyProductionControlledPilotStatus,
-  CloudReadonlyProductionControlledPlan,
-  CloudReadonlyProductionOperationsStatus,
-  CloudReadonlyProductionPilotScenarioResult,
-  CloudReadonlyProductionPilotStatus,
-  CloudReadonlyProductionPilotWindow,
-  CloudProductionGoalTimeRange,
-  CloudSandboxGoalTimeRange,
   FunctionApprovalRequest,
-  PilotApprovalRehearsal,
-  PilotReadinessAssessment,
-  ProductionPilotGaReadinessAssessment,
-  ProductionPilotIncident,
-  ProductionPilotRunLedger,
   Session,
-  TrialCampaign,
-  TrialEvidencePackage,
   UploadRecord
 } from '@/types/protocols'
 
@@ -116,14 +101,42 @@ export const chatService = {
     return await apiClient.post<Session>('/aigateway/session', {})
   },
 
-  async getHistory(sessionId: string, count = 100) {
-    return await apiClient.get<ChatHistoryMessage[]>(
-      `/aigateway/chat-message/list?sessionId=${sessionId}&count=${count}&isDesc=false`
-    )
+  async getHistory(sessionId: string, options: {
+    count?: number
+    beforeSequence?: number | null
+    afterSequence?: number | null
+  } = {}) {
+    return await apiClient.get<ChatHistoryPage>('/aigateway/chat-message/list', {
+      sessionId,
+      count: options.count ?? 100,
+      isDesc: false,
+      beforeSequence: options.beforeSequence ?? undefined,
+      afterSequence: options.afterSequence ?? undefined
+    })
   },
 
-  async getSelectableChatModels() {
-    return await apiClient.get<SelectableChatModel[]>('/aigateway/language-model/chat-options')
+  async getTimeline(sessionId: string, options: {
+    count?: number
+    beforeSequence?: number | null
+    afterSequence?: number | null
+  } = {}) {
+    return await apiClient.get<SessionTimelinePage>('/aigateway/session/timeline', {
+      sessionId,
+      count: options.count ?? 200,
+      isDesc: false,
+      beforeSequence: options.beforeSequence ?? undefined,
+      afterSequence: options.afterSequence ?? undefined
+    })
+  },
+
+  async getSkills() {
+    return await apiClient.get<SkillDefinition[]>('/aigateway/skills', {
+      enabledOnly: true
+    })
+  },
+
+  async getKnowledgeBases() {
+    return await apiClient.get<KnowledgeBaseSummary[]>('/rag/knowledge-base/list')
   },
 
   async updateSessionSafetyAttestation(
@@ -147,10 +160,9 @@ export const chatService = {
   async sendMessageStream(
     sessionId: string,
     message: string,
-    finalModelId: string | null,
     callbacks: StreamCallbacks
   ) {
-    await sendEventStream('/aigateway/chat', { sessionId, message, finalModelId }, callbacks)
+    await sendEventStream('/aigateway/chat', { sessionId, message }, callbacks)
   },
 
   async sendApprovalDecisionStream(
@@ -198,296 +210,13 @@ export const chatService = {
     sessionId: string
     goal: string
     taskType: string
-    modelId?: string | null
     uploadIds?: string[]
     knowledgeBaseIds?: string[]
-    dataSourceIds?: string[]
-    businessDomains?: string[]
-    queryMode?: string | null
-    requiresDataApproval?: boolean
     artifactTypes?: string[]
     plannerMode?: 'Auto' | 'DynamicOnly' | 'StaticOnly'
+    skillCode?: string | null
   }) {
     return await apiClient.post<AgentTask>('/aigateway/agent/task/plan', payload)
-  },
-
-  async getAgentTrialScenarios() {
-    return await apiClient.get<AgentTrialScenario[]>('/aigateway/agent/trial-scenarios')
-  },
-
-  async createAgentTaskFromTrialScenario(payload: {
-    sessionId: string
-    scenarioId: string
-    promptOverride?: string | null
-    artifactTypes?: string[]
-    dataSourceIds?: string[]
-    plannerMode?: 'Auto' | 'DynamicOnly' | 'StaticOnly'
-  }) {
-    return await apiClient.post<AgentTask>('/aigateway/agent/trial-scenarios/create-task', payload)
-  },
-
-  async getTrialCampaigns() {
-    return await apiClient.get<TrialCampaign[]>('/aigateway/trial-operations/campaigns')
-  },
-
-  async getTrialCampaignDetail(id: string) {
-    return await apiClient.get<TrialCampaign>(
-      `/aigateway/trial-operations/campaigns/${encodeURIComponent(id)}`
-    )
-  },
-
-  async createTrialCampaign(payload: {
-    name: string
-    allowedSourceModes?: string[]
-    ownerDepartment?: string | null
-    startAt?: string | null
-    endAt?: string | null
-    summary?: string | null
-  }) {
-    return await apiClient.post<TrialCampaign>('/aigateway/trial-operations/campaigns', payload)
-  },
-
-  async updateTrialCampaignStatus(id: string, status: string) {
-    return await apiClient.request<TrialCampaign>(
-      `/aigateway/trial-operations/campaigns/${encodeURIComponent(id)}/status`,
-      {
-        method: 'PATCH',
-        body: JSON.stringify({ status })
-      }
-    )
-  },
-
-  async attachAgentTaskToTrialCampaign(
-    campaignId: string,
-    payload: {
-      taskId: string
-      scenarioId?: string | null
-      trialMode?: string | null
-    }
-  ) {
-    return await apiClient.post<TrialCampaign>(
-      `/aigateway/trial-operations/campaigns/${encodeURIComponent(campaignId)}/attach-task`,
-      payload
-    )
-  },
-
-  async upsertTrialRiskIssue(
-    campaignId: string,
-    payload: {
-      issueId?: string | null
-      severity: string
-      category: string
-      status: string
-      owner?: string | null
-      sourceRef?: string | null
-      resolutionHash?: string | null
-    }
-  ) {
-    return await apiClient.post<TrialCampaign>(
-      `/aigateway/trial-operations/campaigns/${encodeURIComponent(campaignId)}/risks`,
-      payload
-    )
-  },
-
-  async runPilotReadinessEvaluation(campaignId: string) {
-    return await apiClient.post<PilotReadinessAssessment>(
-      `/aigateway/trial-operations/campaigns/${encodeURIComponent(campaignId)}/readiness`,
-      {}
-    )
-  },
-
-  async generateTrialEvidencePackage(campaignId: string) {
-    return await apiClient.post<TrialEvidencePackage>(
-      `/aigateway/trial-operations/campaigns/${encodeURIComponent(campaignId)}/evidence-package`,
-      {}
-    )
-  },
-
-  async getCloudReadonlyPilotReadiness() {
-    return await apiClient.get<CloudReadonlyPilotReadinessStatus>(
-      '/aigateway/cloud-readonly/readiness/pilot-readiness'
-    )
-  },
-
-  async createCloudReadonlyPilotConfigPackage(campaignId: string) {
-    return await apiClient.post<CloudReadonlyPilotConfigPackage>(
-      '/aigateway/cloud-readonly/readiness/pilot-readiness/config-package',
-      {
-        campaignId
-      }
-    )
-  },
-
-  async runCloudReadonlyPilotGateEvaluation(campaignId: string) {
-    return await apiClient.post<CloudReadonlyPilotReadinessStatus>(
-      '/aigateway/cloud-readonly/readiness/pilot-readiness/gate',
-      {
-        campaignId
-      }
-    )
-  },
-
-  async runCloudReadonlyPilotApprovalRehearsal(packageId: string) {
-    return await apiClient.post<PilotApprovalRehearsal>(
-      '/aigateway/cloud-readonly/readiness/pilot-readiness/approval-rehearsal',
-      {
-        packageId
-      }
-    )
-  },
-
-  async runCloudReadonlyPilotContractRehearsal(packageId: string) {
-    return await apiClient.post<CloudReadonlyPilotContractRehearsal>(
-      '/aigateway/cloud-readonly/readiness/pilot-readiness/contract-rehearsal',
-      {
-        packageId,
-        endpointCodes: ['devices', 'capacity_summary', 'device_logs', 'pass_station_records']
-      }
-    )
-  },
-
-  async getCloudReadonlyProductionPilotStatus() {
-    return await apiClient.get<CloudReadonlyProductionPilotStatus>(
-      '/aigateway/cloud-readonly/readiness/production-pilot'
-    )
-  },
-
-  async createCloudReadonlyProductionPilotWindow() {
-    return await apiClient.post<CloudReadonlyProductionPilotWindow>(
-      '/aigateway/cloud-readonly/readiness/production-pilot/window',
-      {}
-    )
-  },
-
-  async approveCloudReadonlyProductionPilotWindow(windowId: string) {
-    return await apiClient.post<CloudReadonlyProductionPilotWindow>(
-      '/aigateway/cloud-readonly/readiness/production-pilot/window/status',
-      {
-        windowId,
-        status: 'Approved'
-      }
-    )
-  },
-
-  async runCloudReadonlyProductionPilotGate() {
-    return await apiClient.post<CloudReadonlyProductionPilotStatus>(
-      '/aigateway/cloud-readonly/readiness/production-pilot/gate',
-      {}
-    )
-  },
-
-  async runCloudReadonlyProductionPilotScenario(scenarioId: string) {
-    return await apiClient.post<CloudReadonlyProductionPilotScenarioResult>(
-      '/aigateway/cloud-readonly/readiness/production-pilot/run',
-      {
-        scenarioId,
-        artifactTypes: ['Markdown', 'Html'],
-        maxRows: 20,
-        timeoutMs: 5000
-      }
-    )
-  },
-
-  async getCloudReadonlyProductionControlledPilotStatus() {
-    return await apiClient.get<CloudReadonlyProductionControlledPilotStatus>(
-      '/aigateway/cloud-readonly/readiness/production-controlled-pilot'
-    )
-  },
-
-  async createCloudReadonlyProductionControlledPlan(payload: {
-    sessionId: string
-    goal: string
-    modelId?: string | null
-    artifactTypes?: string[]
-    timeRange?: CloudProductionGoalTimeRange | null
-    maxRows?: number | null
-    plannerMode?: 'Auto' | 'DynamicOnly' | 'StaticOnly'
-  }) {
-    return await apiClient.post<CloudReadonlyProductionControlledPlan>(
-      '/aigateway/agent/cloud-production-controlled-pilot/plan',
-      payload
-    )
-  },
-
-  async runCloudReadonlyProductionControlledPilot(intentId: string) {
-    return await apiClient.post<CloudReadonlyProductionControlledPilotResult>(
-      '/aigateway/cloud-readonly/readiness/production-controlled-pilot/run',
-      {
-        intentId,
-        artifactTypes: ['Markdown', 'Html'],
-        maxRows: 20,
-        timeoutMs: 5000
-      }
-    )
-  },
-
-  async getCloudReadonlyProductionOperationsStatus() {
-    return await apiClient.get<CloudReadonlyProductionOperationsStatus>(
-      '/aigateway/cloud-readonly/readiness/production-operations'
-    )
-  },
-
-  async getProductionPilotRunLedger() {
-    return await apiClient.get<ProductionPilotRunLedger[]>(
-      '/aigateway/cloud-readonly/readiness/production-operations/ledger'
-    )
-  },
-
-  async activateProductionPilotEmergencyStop(reason = 'P14 smoke emergency stop drill') {
-    return await apiClient.post<CloudReadonlyProductionOperationsStatus>(
-      '/aigateway/cloud-readonly/readiness/production-operations/emergency-stop',
-      {
-        reason,
-        activatedBy: 'frontend'
-      }
-    )
-  },
-
-  async clearProductionPilotEmergencyStop(reason = 'P14 smoke emergency stop drill cleared') {
-    return await apiClient.post<CloudReadonlyProductionOperationsStatus>(
-      '/aigateway/cloud-readonly/readiness/production-operations/emergency-stop/clear',
-      {
-        reason,
-        clearedBy: 'frontend'
-      }
-    )
-  },
-
-  async upsertProductionPilotIncident(payload: {
-    incidentId?: string | null
-    severity: string
-    category: string
-    status: string
-    owner?: string | null
-    sourceRef?: string | null
-    resolutionHash?: string | null
-  }) {
-    return await apiClient.post<ProductionPilotIncident>(
-      '/aigateway/cloud-readonly/readiness/production-operations/incidents',
-      payload
-    )
-  },
-
-  async runProductionPilotGaReadinessEvaluation() {
-    return await apiClient.post<ProductionPilotGaReadinessAssessment>(
-      '/aigateway/cloud-readonly/readiness/production-operations/ga-readiness',
-      {}
-    )
-  },
-
-  async createCloudSandboxControlledPlan(payload: {
-    sessionId: string
-    goal: string
-    modelId?: string | null
-    artifactTypes?: string[]
-    timeRange?: CloudSandboxGoalTimeRange | null
-    maxRows?: number | null
-    plannerMode?: 'Auto' | 'DynamicOnly' | 'StaticOnly'
-  }) {
-    return await apiClient.post<CloudReadonlySandboxControlledPlan>(
-      '/aigateway/agent/cloud-sandbox-controlled-trial/plan',
-      payload
-    )
   },
 
   async approveAgentTaskPlan(id: string) {

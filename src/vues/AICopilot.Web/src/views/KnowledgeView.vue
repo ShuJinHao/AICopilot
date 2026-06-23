@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
-import { Plus, RefreshCw } from 'lucide-vue-next'
+import { computed, onMounted, ref } from 'vue'
+import { Plus, RefreshCw, Search, Settings2 } from 'lucide-vue-next'
 import AiButton from '@/components/ai/AiButton.vue'
-import AiCard from '@/components/ai/AiCard.vue'
 import AiDataPage from '@/components/ai/AiDataPage.vue'
 import AppShell from '@/components/layout/AppShell.vue'
+import { KNOWLEDGE_WRITE_PERMISSIONS } from '@/security/permissions'
+import { useAuthStore } from '@/stores/authStore'
 import { useRagStore } from '@/stores/ragStore'
 import DocumentGovernanceDrawer from '@/views/knowledge/DocumentGovernanceDrawer.vue'
 import EmbeddingModelConfig from '@/views/knowledge/EmbeddingModelConfig.vue'
@@ -12,6 +13,12 @@ import KnowledgeBaseManagement from '@/views/knowledge/KnowledgeBaseManagement.v
 import KnowledgeSearchPanel from '@/views/knowledge/KnowledgeSearchPanel.vue'
 
 const store = useRagStore()
+const authStore = useAuthStore()
+const showSearch = ref(false)
+const showAdvanced = ref(false)
+const canCreateKnowledgeBase = computed(() =>
+  authStore.hasPermission(KNOWLEDGE_WRITE_PERMISSIONS.knowledgeBase.create)
+)
 
 onMounted(() => {
   void store.refresh()
@@ -20,32 +27,35 @@ onMounted(() => {
 
 <template>
   <AppShell>
-    <AiDataPage eyebrow="Knowledge Governance" title="知识库" description="管理向量模型、知识库、文档解析状态和检索预览。">
+    <AiDataPage eyebrow="知识管理" title="知识库" description="上传知识文档，查看解析状态，并按需测试检索。">
       <template #actions>
         <div class="page-actions">
           <AiButton :disabled="store.isLoading" @click="store.refresh()">
             <RefreshCw class="h-4 w-4" :class="{ 'animate-spin': store.isLoading }" />
             刷新
           </AiButton>
-          <AiButton variant="primary" @click="store.openCreateKnowledgeBaseDialog()">
+          <AiButton :class="showSearch ? 'active' : ''" @click="showSearch = !showSearch">
+            <Search class="h-4 w-4" />
+            测试检索
+          </AiButton>
+          <AiButton :class="showAdvanced ? 'active' : ''" @click="showAdvanced = !showAdvanced">
+            <Settings2 class="h-4 w-4" />
+            高级设置
+          </AiButton>
+          <AiButton v-if="canCreateKnowledgeBase" variant="primary" @click="store.openCreateKnowledgeBaseDialog()">
             <Plus class="h-4 w-4" />
             新增知识库
           </AiButton>
         </div>
       </template>
 
-      <div class="metric-strip">
-        <AiCard class="metric" tone="violet"><span>嵌入模型</span><strong>{{ store.embeddingModels.length }}</strong></AiCard>
-        <AiCard class="metric" tone="blue"><span>知识库</span><strong>{{ store.knowledgeBases.length }}</strong></AiCard>
-        <AiCard class="metric" tone="lime"><span>当前文档</span><strong>{{ store.documents.length }}</strong></AiCard>
-        <AiCard class="metric" tone="teal"><span>检索结果</span><strong>{{ store.searchResults.length }}</strong></AiCard>
-      </div>
-
       <div v-if="store.errorMessage" class="error-note">{{ store.errorMessage }}</div>
 
-      <KnowledgeBaseManagement />
-      <KnowledgeSearchPanel />
-      <EmbeddingModelConfig />
+      <div class="knowledge-stack">
+        <KnowledgeBaseManagement />
+        <KnowledgeSearchPanel v-if="showSearch" />
+        <EmbeddingModelConfig v-if="showAdvanced" />
+      </div>
       <DocumentGovernanceDrawer />
     </AiDataPage>
   </AppShell>
@@ -60,29 +70,13 @@ onMounted(() => {
   gap: 10px;
 }
 
-.metric-strip {
+.page-actions :deep(.active) {
+  border-color: #d8ff78;
+  background: #efffbe;
+}
+
+.knowledge-stack {
   display: grid;
-  grid-template-columns: repeat(4, minmax(150px, 1fr));
-  gap: 12px;
-}
-
-.metric span {
-  color: var(--ai-text-muted);
-  font-size: 12px;
-  font-weight: 850;
-}
-
-.metric strong {
-  display: block;
-  margin-top: 12px;
-  color: var(--ai-text);
-  font-size: 30px;
-  font-weight: 950;
-}
-
-@media (max-width: 980px) {
-  .metric-strip {
-    grid-template-columns: 1fr 1fr;
-  }
+  gap: 14px;
 }
 </style>

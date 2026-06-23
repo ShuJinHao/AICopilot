@@ -23,10 +23,10 @@ public sealed record AgentDynamicPlannerRequest(
     IReadOnlyCollection<string>? BusinessDomains = null,
     string? QueryMode = null,
     IReadOnlyCollection<string>? ArtifactTypes = null,
-    string? TrialScenarioId = null,
-    string? TrialScenarioTitle = null,
-    bool IsSimulationTrial = false,
-    bool RequiresDataApproval = false)
+    bool RequiresDataApproval = false,
+    string? SkillCode = null,
+    string? SkillName = null,
+    string? SkillDescription = null)
 {
     public AgentDynamicPlannerRequest(
         string goal,

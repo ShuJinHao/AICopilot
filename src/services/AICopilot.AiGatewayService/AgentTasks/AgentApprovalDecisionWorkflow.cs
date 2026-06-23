@@ -4,6 +4,7 @@ using AICopilot.Core.AiGateway.Aggregates.Artifacts;
 using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.AiGateway.Specifications.AgentTasks;
 using AICopilot.Core.AiGateway.Specifications.Approvals;
+using AICopilot.AiGatewayService.Sessions;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
@@ -23,6 +24,7 @@ internal static class AgentApprovalDecisionWorkflow
         IAgentTaskRunQueue? runQueue,
         ICurrentUser currentUser,
         IIdentityAccessService identityAccessService,
+        MessageTimelineProjectionWriter? timelineProjectionWriter,
         CancellationToken cancellationToken)
     {
         if (currentUser.Id is not { } userId)
@@ -82,6 +84,11 @@ internal static class AgentApprovalDecisionWorkflow
             isApproved ? AuditResults.Succeeded : AuditResults.Rejected,
             BuildDecisionSummary(approval, isApproved, comment),
             cancellationToken);
+        if (timelineProjectionWriter is not null)
+        {
+            await timelineProjectionWriter.StageApprovalDecidedAsync(task, approval, cancellationToken);
+        }
+
         await approvalRepository.SaveChangesAsync(cancellationToken);
 
         if (isApproved &&

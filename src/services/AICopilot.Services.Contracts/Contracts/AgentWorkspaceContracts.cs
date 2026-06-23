@@ -122,21 +122,6 @@ public sealed record AgentBusinessQueryResultSummaryDto(
     bool IsTruncated,
     Guid? ArtifactId = null);
 
-public sealed record AgentCloudSandboxQueryResultSummaryDto(
-    string EndpointCode,
-    string SourceMode,
-    bool IsSandbox,
-    string SourceLabel,
-    string QueryHash,
-    string ResultHash,
-    int RowCount,
-    bool IsTruncated,
-    IReadOnlyCollection<Guid>? ArtifactRefs = null,
-    string? TrialMode = null,
-    string? IntentId = null,
-    string? Boundary = null,
-    string? ApprovalStatus = null);
-
 public sealed record AgentReportDocument(
     string Title,
     string Goal,
@@ -147,8 +132,7 @@ public sealed record AgentReportDocument(
     DateTimeOffset GeneratedAt,
     IReadOnlyList<AgentReportMetric>? Metrics = null,
     AgentReportSourceInfo? CloudReadonlySource = null,
-    IReadOnlyList<AgentBusinessQueryResultSummaryDto>? BusinessQueryResults = null,
-    IReadOnlyList<AgentCloudSandboxQueryResultSummaryDto>? CloudSandboxQueryResults = null);
+    IReadOnlyList<AgentBusinessQueryResultSummaryDto>? BusinessQueryResults = null);
 
 public interface IAgentTableFileParser
 {

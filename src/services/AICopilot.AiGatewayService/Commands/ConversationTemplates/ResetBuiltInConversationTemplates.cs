@@ -49,8 +49,8 @@ public sealed class ResetBuiltInConversationTemplatesCommandHandler(
                     definition.Name,
                     definition.Description,
                     definition.SystemPrompt,
-                    modelId,
-                    isEnabled: true);
+                    template.ModelId,
+                    template.IsEnabled);
                 template.UpdateSpecification(new TemplateSpecification());
                 template.MarkBuiltIn(definition.Code, definition.Scope, definition.Version);
                 repository.Update(template);

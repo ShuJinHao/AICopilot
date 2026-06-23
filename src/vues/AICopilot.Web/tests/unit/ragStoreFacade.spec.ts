@@ -18,6 +18,7 @@ const ragServiceMock = vi.hoisted(() => ({
   deleteKnowledgeBase: vi.fn(),
   uploadDocument: vi.fn(),
   deleteDocument: vi.fn(),
+  retryDocument: vi.fn(),
   updateDocumentGovernance: vi.fn(),
   searchKnowledgeBase: vi.fn()
 }))
@@ -40,6 +41,7 @@ function resetRagServiceMocks() {
   ragServiceMock.getDocuments.mockResolvedValue([])
   ragServiceMock.uploadDocument.mockResolvedValue(undefined)
   ragServiceMock.deleteDocument.mockResolvedValue(undefined)
+  ragServiceMock.retryDocument.mockResolvedValue(undefined)
   ragServiceMock.updateDocumentGovernance.mockResolvedValue(undefined)
   ragServiceMock.searchKnowledgeBase.mockResolvedValue([])
 }
@@ -56,6 +58,7 @@ describe('ragStore facade', () => {
     expect(typeof store.saveEmbeddingModel).toBe('function')
     expect(typeof store.selectKnowledgeBase).toBe('function')
     expect(typeof store.uploadDocument).toBe('function')
+    expect(typeof store.retryDocument).toBe('function')
     expect(typeof store.saveDocumentGovernance).toBe('function')
     expect(typeof store.searchKnowledgeBase).toBe('function')
   })
@@ -109,6 +112,9 @@ describe('ragStore facade', () => {
 
     await store.deleteDocument(42)
     expect(ragServiceMock.deleteDocument).toHaveBeenCalledWith(42)
+
+    await store.retryDocument(42)
+    expect(ragServiceMock.retryDocument).toHaveBeenCalledWith(42)
 
     store.currentDocumentGovernance.id = 42
     await store.saveDocumentGovernance()

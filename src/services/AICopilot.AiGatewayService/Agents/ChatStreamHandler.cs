@@ -30,6 +30,7 @@ public class ChatStreamHandler(
         [EnumeratorCancellation] CancellationToken ct)
     {
         var assistantText = new StringBuilder();
+        var assistantRenderChunks = new List<ChatChunk>();
         var pendingMessages = new List<SessionMessageAppend>();
         Exception? failure = null;
         IAsyncDisposable? sessionLock = null;
@@ -74,26 +75,30 @@ public class ChatStreamHandler(
                     break;
                 }
 
+                assistantRenderChunks.Add(enumerator.Current);
                 yield return enumerator.Current;
             }
         }
 
         if (failure != null)
         {
-            yield return ChatStreamRuntime.CreateErrorChunk(
+            var errorChunk = ChatStreamRuntime.CreateErrorChunk(
                 assistantText,
                 failure,
                 nameof(ChatStreamHandler),
                 AppProblemCodes.ChatStreamFailed,
                 "对话执行失败，请稍后重试。");
+            assistantRenderChunks.Add(errorChunk);
+            yield return errorChunk;
         }
 
-        if (assistantText.Length > 0)
+        if (assistantText.Length > 0 || assistantRenderChunks.Count > 0)
         {
             pendingMessages.Add(new SessionMessageAppend(
-                assistantText.ToString(),
+                assistantText.Length > 0 ? assistantText.ToString() : null,
                 MessageType.Assistant,
-                executionMetadataAccessor.ToMessageSnapshot()));
+                executionMetadataAccessor.ToMessageSnapshot(),
+                assistantRenderChunks));
         }
 
         await messagePersistenceService.AppendBatchAsync(request.SessionId, pendingMessages, ct);

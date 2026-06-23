@@ -1,46 +1,46 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Edit3, UploadCloud } from 'lucide-vue-next'
+import { RefreshCcw, SlidersHorizontal, Trash2, UploadCloud } from 'lucide-vue-next'
 import AiActionGroup from '@/components/ai/AiActionGroup.vue'
 import AiButton from '@/components/ai/AiButton.vue'
 import AiDrawer from '@/components/ai/AiDrawer.vue'
 import AiInput from '@/components/ai/AiInput.vue'
 import AiSelect from '@/components/ai/AiSelect.vue'
-import AiSwitch from '@/components/ai/AiSwitch.vue'
 import AiTag from '@/components/ai/AiTag.vue'
 import AiTableCard from '@/components/ai/AiTableCard.vue'
 import { confirmAiAction, showAiToast } from '@/composables/useAiFeedback'
 import { KNOWLEDGE_WRITE_PERMISSIONS } from '@/security/permissions'
 import { useAuthStore } from '@/stores/authStore'
 import { useRagStore } from '@/stores/ragStore'
-import { classificationLabel, documentStatusLabel, governanceType, sourceTypeLabel } from '@/views/knowledgeLabels'
+import { documentStatusLabel, governanceType } from '@/views/knowledgeLabels'
+import type { KnowledgeDocumentStatus, KnowledgeDocumentSummary } from '@/types/app'
 
 const store = useRagStore()
 const authStore = useAuthStore()
 
 const selectedBase = computed(() => store.knowledgeBases.find((item) => item.id === store.selectedKnowledgeBaseId) ?? null)
 const canEditDocumentGovernance = computed(() => authStore.hasPermission(KNOWLEDGE_WRITE_PERMISSIONS.document.governance))
+const canUploadDocuments = computed(() => authStore.hasPermission(KNOWLEDGE_WRITE_PERMISSIONS.document.upload))
+const canDeleteDocuments = computed(() => authStore.hasPermission(KNOWLEDGE_WRITE_PERMISSIONS.document.delete))
+const canUpdateKnowledgeBase = computed(() => authStore.hasPermission(KNOWLEDGE_WRITE_PERMISSIONS.knowledgeBase.update))
+const canDeleteKnowledgeBase = computed(() => authStore.hasPermission(KNOWLEDGE_WRITE_PERMISSIONS.knowledgeBase.delete))
+const canManageSelectedBase = computed(() => canUpdateKnowledgeBase.value || canDeleteKnowledgeBase.value)
 const embeddingModelOptions = computed(() => store.embeddingModels.map((model) => ({ label: model.name, value: model.id })))
-
-const classificationOptions = [
-  { label: '内部', value: 'Internal' },
-  { label: '公开', value: 'Public' },
-  { label: '敏感', value: 'Sensitive' },
-  { label: '禁用', value: 'Forbidden' }
-]
-const sourceTypeOptions = [
-  { label: '用户上传', value: 'UserUploaded' },
-  { label: '业务规则', value: 'BusinessRule' },
-  { label: 'Cloud 只读文档', value: 'CloudReadOnlyApiDoc' },
-  { label: '运维手册', value: 'Runbook' },
-  { label: '外部资料', value: 'External' }
-]
 
 function mapTone(type: string | undefined) {
   if (type === 'success') return 'success'
   if (type === 'warning') return 'warning'
   if (type === 'danger') return 'danger'
   return 'neutral'
+}
+
+function isFailedStatus(status: KnowledgeDocumentStatus) {
+  return status === 'Failed' || status === 5
+}
+
+function formatDate(value?: string | null) {
+  if (!value) return '-'
+  return new Date(value).toLocaleString('zh-CN', { hour12: false })
 }
 
 async function uploadDocument(event: Event) {
@@ -50,6 +50,12 @@ async function uploadDocument(event: Event) {
   await store.uploadDocument(file)
   showAiToast('success', '文档已上传')
   input.value = ''
+}
+
+async function retryDocument(row: KnowledgeDocumentSummary) {
+  if (!(await confirmAiAction(`确认重新解析并索引文档 ${row.name}？`, '确认重试'))) return
+  await store.retryDocument(row.id)
+  showAiToast('success', '已提交重试')
 }
 
 async function confirmDelete(message: string, action: () => Promise<void>) {
@@ -65,7 +71,7 @@ async function confirmDelete(message: string, action: () => Promise<void>) {
       <div class="panel-header">
         <div>
           <h2>知识库列表</h2>
-          <p>选择一个知识库查看文档和检索效果。</p>
+          <p>选择一个知识库查看文档状态。</p>
         </div>
       </div>
       <div class="base-list">
@@ -91,61 +97,66 @@ async function confirmDelete(message: string, action: () => Promise<void>) {
           <h2>{{ selectedBase?.name || '未选择知识库' }}</h2>
           <p>{{ selectedBase?.description || '选择知识库后查看文档。' }}</p>
         </div>
-        <AiActionGroup v-if="selectedBase">
-          <AiButton @click="store.openEditKnowledgeBaseDialog(selectedBase.id)">编辑</AiButton>
-          <AiButton variant="danger" @click="confirmDelete(`确认删除知识库 ${selectedBase.name}？`, () => store.deleteKnowledgeBase(selectedBase!.id))">
+        <AiActionGroup v-if="selectedBase && canManageSelectedBase">
+          <AiButton v-if="canUpdateKnowledgeBase" @click="store.openEditKnowledgeBaseDialog(selectedBase.id)">编辑</AiButton>
+          <AiButton v-if="canDeleteKnowledgeBase" variant="danger" @click="confirmDelete(`确认删除知识库 ${selectedBase.name}？`, () => store.deleteKnowledgeBase(selectedBase!.id))">
             删除
           </AiButton>
         </AiActionGroup>
       </div>
 
-      <div class="governance-form">
-        <AiSelect v-model="store.uploadGovernanceForm.classification" :options="classificationOptions" placeholder="文档等级" />
-        <AiSelect v-model="store.uploadGovernanceForm.sourceType" :options="sourceTypeOptions" placeholder="来源类型" />
-        <div class="form-row compact-row"><span>已脱敏</span><AiSwitch v-model="store.uploadGovernanceForm.isSanitized" /></div>
-        <div class="form-row compact-row"><span>进入回答</span><AiSwitch v-model="store.uploadGovernanceForm.allowedForFinalPrompt" /></div>
-      </div>
-
-      <label class="upload-box" :class="{ disabled: !store.selectedKnowledgeBaseId || store.loadingStates.document }">
-        <input type="file" :disabled="!store.selectedKnowledgeBaseId || store.loadingStates.document" @change="uploadDocument" />
+      <label class="upload-box" :class="{ disabled: !store.selectedKnowledgeBaseId || store.loadingStates.document || !canUploadDocuments }">
+        <input type="file" :disabled="!store.selectedKnowledgeBaseId || store.loadingStates.document || !canUploadDocuments" @change="uploadDocument" />
         <UploadCloud class="h-8 w-8" />
         <strong>拖拽或点击上传知识文档</strong>
-        <span>上传后由后端解析、切分并写入向量索引。</span>
+        <span>上传后自动解析，完成后可在聊天中检索引用。</span>
       </label>
+      <div v-if="store.actionErrors.document" class="error-note">{{ store.actionErrors.document }}</div>
 
       <AiTableCard :empty="store.documents.length === 0" empty-text="当前知识库暂无文档">
         <table class="ai-table">
           <thead>
             <tr>
               <th>文档</th>
-              <th>类型</th>
               <th>状态</th>
-              <th>治理</th>
-              <th>片段数</th>
+              <th>更新时间</th>
               <th class="right">操作</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="row in store.documents" :key="row.id">
-              <td>{{ row.name }}</td>
-              <td>{{ row.extension }}</td>
-              <td><AiTag :tone="mapTone(governanceType(row))">{{ documentStatusLabel(row.status) }}</AiTag></td>
               <td>
-                <div class="governance-cell">
-                  <AiTag :tone="mapTone(governanceType(row))">{{ classificationLabel(row.classification) }}</AiTag>
-                  <span>{{ sourceTypeLabel(row.sourceType) }}</span>
-                  <small v-if="!row.allowedForFinalPrompt">不进入回答</small>
-                  <small v-else-if="row.isSanitized">已脱敏</small>
+                <div class="document-cell">
+                  <strong>{{ row.name }}</strong>
+                  <span>{{ row.extension || '未知类型' }}</span>
+                  <details class="document-detail-fold">
+                    <summary>文档详情</summary>
+                    <div class="document-detail-grid">
+                      <span>片段数</span>
+                      <strong>{{ row.chunkCount }}</strong>
+                    </div>
+                    <AiButton v-if="canEditDocumentGovernance" size="sm" @click="store.openEditDocumentGovernanceDialog(row)">
+                      <SlidersHorizontal class="h-3.5 w-3.5" />
+                      高级治理
+                    </AiButton>
+                  </details>
                 </div>
               </td>
-              <td>{{ row.chunkCount }}</td>
+              <td>
+                <div class="status-cell">
+                  <AiTag :tone="mapTone(governanceType(row))">{{ documentStatusLabel(row.status) }}</AiTag>
+                  <small v-if="isFailedStatus(row.status) && row.errorMessage">{{ row.errorMessage }}</small>
+                </div>
+              </td>
+              <td>{{ formatDate(row.processedAt || row.createdAt) }}</td>
               <td>
                 <AiActionGroup>
-                  <AiButton v-if="canEditDocumentGovernance" size="sm" @click="store.openEditDocumentGovernanceDialog(row)">
-                    <Edit3 class="h-3.5 w-3.5" />
-                    治理
+                  <AiButton v-if="isFailedStatus(row.status) && canUploadDocuments" size="sm" @click="retryDocument(row)">
+                    <RefreshCcw class="h-3.5 w-3.5" />
+                    重试
                   </AiButton>
-                  <AiButton size="sm" variant="danger" @click="confirmDelete(`确认删除文档 ${row.name}？`, () => store.deleteDocument(row.id))">
+                  <AiButton v-if="canDeleteDocuments" size="sm" variant="danger" @click="confirmDelete(`确认删除文档 ${row.name}？`, () => store.deleteDocument(row.id))">
+                    <Trash2 class="h-3.5 w-3.5" />
                     删除
                   </AiButton>
                 </AiActionGroup>
@@ -161,7 +172,13 @@ async function confirmDelete(message: string, action: () => Promise<void>) {
     <div class="ai-form">
       <label><span>名称</span><AiInput v-model="store.currentKnowledgeBase.name" /></label>
       <label><span>说明</span><AiInput v-model="store.currentKnowledgeBase.description" /></label>
-      <label><span>嵌入模型</span><AiSelect v-model="store.currentKnowledgeBase.embeddingModelId" :options="embeddingModelOptions" /></label>
+      <details class="knowledge-base-advanced">
+        <summary>
+          <SlidersHorizontal class="h-3.5 w-3.5" />
+          高级设置
+        </summary>
+        <label><span>嵌入模型</span><AiSelect v-model="store.currentKnowledgeBase.embeddingModelId" :options="embeddingModelOptions" /></label>
+      </details>
       <footer>
         <AiButton @click="store.closeKnowledgeBaseDialog()">取消</AiButton>
         <AiButton variant="primary" :disabled="store.submittingStates.knowledgeBase" @click="store.saveKnowledgeBase()">
@@ -240,17 +257,6 @@ async function confirmDelete(message: string, action: () => Promise<void>) {
   text-align: center;
 }
 
-.governance-form {
-  display: grid;
-  grid-template-columns: minmax(0, 160px) minmax(0, 190px) auto auto;
-  align-items: center;
-  gap: 10px;
-}
-
-.compact-row {
-  justify-content: flex-start;
-}
-
 .upload-box {
   display: grid;
   cursor: pointer;
@@ -279,17 +285,81 @@ async function confirmDelete(message: string, action: () => Promise<void>) {
   opacity: 0.55;
 }
 
-.governance-cell {
-  display: flex;
+.document-cell,
+.status-cell {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.document-detail-fold {
+  min-width: 0;
+}
+
+.document-detail-fold summary,
+.knowledge-base-advanced summary {
+  display: inline-flex;
   min-height: 28px;
-  flex-wrap: wrap;
+  cursor: pointer;
   align-items: center;
   gap: 6px;
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.knowledge-base-advanced {
+  border: 1px solid var(--ai-border);
+  border-radius: 14px;
+  padding: 8px 10px;
+  background: var(--ai-surface-soft);
+}
+
+.knowledge-base-advanced label {
+  margin-top: 10px;
+}
+
+.document-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(72px, max-content) minmax(0, 1fr);
+  gap: 8px;
+  max-width: 240px;
+  margin: 2px 0 8px;
+  border: 1px solid var(--ai-border);
+  border-radius: 12px;
+  padding: 8px 10px;
+  background: var(--ai-surface-soft);
+}
+
+.document-detail-grid span {
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.document-detail-grid strong {
+  color: var(--ai-text);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.document-cell strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ai-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-cell span,
+.status-cell small {
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 750;
 }
 
 @media (max-width: 1080px) {
-  .knowledge-management,
-  .governance-form {
+  .knowledge-management {
     grid-template-columns: 1fr;
   }
 }

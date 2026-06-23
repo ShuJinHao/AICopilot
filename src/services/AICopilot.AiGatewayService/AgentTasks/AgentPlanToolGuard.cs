@@ -1,21 +1,18 @@
 using AICopilot.AgentPlugin;
+using AICopilot.AiGatewayService.Skills;
 using AICopilot.AiGatewayService.Tools;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Result;
-using Microsoft.Extensions.Options;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
 
 public sealed class AgentPlanToolGuard(
     ToolRegistryGuard toolRegistryGuard,
     IAgentPluginCatalog pluginCatalog,
-    IOptions<CloudReadonlySandboxAgentTrialOptions>? sandboxAgentTrialOptions = null,
-    IOptions<CloudReadonlySandboxControlledTrialOptions>? sandboxControlledTrialOptions = null,
-    IOptions<CloudReadonlyProductionPilotOptions>? productionPilotOptions = null,
-    IOptions<CloudReadonlyProductionControlledPilotOptions>? productionControlledPilotOptions = null)
+    SkillDefinitionGuard? skillDefinitionGuard = null)
 {
     public async Task<Result<PlannerToolCatalog>> GetAvailableToolCatalogAsync(
         Guid userId,
@@ -32,32 +29,28 @@ public sealed class AgentPlanToolGuard(
         Guid userId,
         bool simulationOnly,
         IReadOnlyCollection<string>? businessDomains,
-        CancellationToken cancellationToken)
-    {
-        return await GetAvailableToolCatalogAsync(
-            userId,
-            simulationOnly,
-            businessDomains,
-            cloudSandboxTrialOnly: false,
-            cloudProductionPilotOnly: false,
-            cloudProductionControlledPilotOnly: false,
-            cancellationToken);
-    }
-
-    public async Task<Result<PlannerToolCatalog>> GetAvailableToolCatalogAsync(
-        Guid userId,
-        bool simulationOnly,
-        IReadOnlyCollection<string>? businessDomains,
-        bool cloudSandboxTrialOnly,
-        bool cloudProductionPilotOnly,
-        bool cloudProductionControlledPilotOnly,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? skillCode = null)
     {
         var runtimeMcpTools = ResolveRuntimeMcpToolCodes();
         var tools = await toolRegistryGuard.ListAllowedAsync(userId, cancellationToken);
         var filtered = tools
-            .Where(tool => IsPlannerVisible(tool, simulationOnly, businessDomains, cloudSandboxTrialOnly, cloudProductionPilotOnly, cloudProductionControlledPilotOnly))
+            .Where(tool => IsPlannerVisible(tool, simulationOnly, businessDomains))
             .ToArray();
+        if (skillDefinitionGuard is not null)
+        {
+            var skillFiltered = await skillDefinitionGuard.FilterToolsAsync(
+                filtered,
+                skillCode,
+                cancellationToken);
+            if (!skillFiltered.IsSuccess)
+            {
+                return Result.From(skillFiltered);
+            }
+
+            filtered = skillFiltered.Value!.Tools.ToArray();
+        }
+
         return PlannerToolCatalogBuilder.Build(filtered, runtimeMcpTools);
     }
 
@@ -98,30 +91,8 @@ public sealed class AgentPlanToolGuard(
         Guid userId,
         bool simulationOnly,
         IReadOnlyCollection<string>? businessDomains,
-        CancellationToken cancellationToken)
-    {
-        return await ValidateStepsAsync(
-            steps,
-            taskType,
-            userId,
-            simulationOnly,
-            businessDomains,
-            cloudSandboxTrialOnly: false,
-            cloudProductionPilotOnly: false,
-            cloudProductionControlledPilotOnly: false,
-            cancellationToken);
-    }
-
-    public async Task<Result<IReadOnlyCollection<AgentStepPlanDto>>> ValidateStepsAsync(
-        IEnumerable<AgentStepPlanDto> steps,
-        AgentTaskType taskType,
-        Guid userId,
-        bool simulationOnly,
-        IReadOnlyCollection<string>? businessDomains,
-        bool cloudSandboxTrialOnly,
-        bool cloudProductionPilotOnly,
-        bool cloudProductionControlledPilotOnly,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? skillCode = null)
     {
         var runtimeMcpTools = ResolveRuntimeMcpToolCodes();
         var validated = new List<AgentStepPlanDto>();
@@ -133,43 +104,40 @@ public sealed class AgentPlanToolGuard(
                 return Result.Failure(unsafeProblem);
             }
 
-            var allowProductionPilotTool =
-                cloudProductionPilotOnly &&
-                string.Equals(step.ToolCode, CloudReadonlyProductionPilotMarkers.ToolCode, StringComparison.OrdinalIgnoreCase);
-            var allowProductionControlledPilotTool =
-                cloudProductionControlledPilotOnly &&
-                string.Equals(step.ToolCode, CloudReadonlyProductionControlledPilotMarkers.ToolCode, StringComparison.OrdinalIgnoreCase);
             var decision = await toolRegistryGuard.ValidateAsync(
                 step.ToolCode,
                 userId,
-                cancellationToken,
-                allowProtectedProductionPilotTool: allowProductionPilotTool,
-                allowProtectedProductionControlledPilotTool: allowProductionControlledPilotTool);
+                cancellationToken);
             if (!decision.IsAllowed)
             {
                 return Result.Failure(decision.Problem!);
             }
 
             var tool = decision.Tool!;
-            if ((!tool.IsExecutableByAgent || !tool.IsVisibleToPlanner) && !allowProductionPilotTool && !allowProductionControlledPilotTool)
+            if (!tool.IsExecutableByAgent || !tool.IsVisibleToPlanner)
             {
                 return Result.Failure(new ApiProblemDescriptor(
                     AppProblemCodes.AgentPlanToolDenied,
                     $"Tool '{tool.ToolCode}' is not available for planner and agent execution."));
             }
 
-            if ((simulationOnly || cloudSandboxTrialOnly || cloudProductionPilotOnly || cloudProductionControlledPilotOnly) &&
-                !IsPlannerVisible(tool, simulationOnly, businessDomains, cloudSandboxTrialOnly, cloudProductionPilotOnly, cloudProductionControlledPilotOnly, allowProductionPilotTool, allowProductionControlledPilotTool))
+            if (skillDefinitionGuard is not null)
+            {
+                var skillDecision = await skillDefinitionGuard.ValidateToolAsync(
+                    skillCode,
+                    tool.ToolCode,
+                    cancellationToken);
+                if (!skillDecision.IsSuccess)
+                {
+                    return Result.From(skillDecision);
+                }
+            }
+
+            if (simulationOnly && !IsPlannerVisible(tool, simulationOnly, businessDomains))
             {
                 return Result.Failure(new ApiProblemDescriptor(
                     AppProblemCodes.AgentPlanToolDenied,
-                    cloudProductionControlledPilotOnly
-                        ? $"Tool '{tool.ToolCode}' is outside the CloudReadonlyProductionControlledPilot boundary."
-                        : cloudProductionPilotOnly
-                        ? $"Tool '{tool.ToolCode}' is outside the CloudReadonlyProductionPilot boundary."
-                        : cloudSandboxTrialOnly
-                        ? $"Tool '{tool.ToolCode}' is outside the CloudReadonlySandbox agent trial tool boundary."
-                        : $"Tool '{tool.ToolCode}' is outside the SimulationBusiness tool boundary."));
+                    $"Tool '{tool.ToolCode}' is outside the SimulationBusiness tool boundary."));
             }
 
             if (tool.ProviderType == ToolProviderType.CloudReadonly)
@@ -232,81 +200,12 @@ public sealed class AgentPlanToolGuard(
     private bool IsPlannerVisible(
         ToolRegistration tool,
         bool simulationOnly,
-        IReadOnlyCollection<string>? businessDomains,
-        bool cloudSandboxTrialOnly,
-        bool cloudProductionPilotOnly = false,
-        bool cloudProductionControlledPilotOnly = false,
-        bool allowProductionPilotTool = false,
-        bool allowProductionControlledPilotTool = false)
+        IReadOnlyCollection<string>? businessDomains)
     {
-        if (allowProductionPilotTool)
-        {
-            return productionPilotOptions?.Value.Enabled == true &&
-                   tool.ProviderType == ToolProviderType.CloudReadonly &&
-                   tool.DataBoundary == ToolDataBoundary.CloudReadonlyProductionPilotOnly &&
-                   string.Equals(tool.ToolCode, CloudReadonlyProductionPilotMarkers.ToolCode, StringComparison.OrdinalIgnoreCase);
-        }
-
-        if (allowProductionControlledPilotTool)
-        {
-            return productionControlledPilotOptions?.Value.Enabled == true &&
-                   productionControlledPilotOptions.Value.FreeGoalEnabled &&
-                   tool.ProviderType == ToolProviderType.CloudReadonly &&
-                   tool.DataBoundary == ToolDataBoundary.CloudReadonlyProductionControlledOnly &&
-                   string.Equals(tool.ToolCode, CloudReadonlyProductionControlledPilotMarkers.ToolCode, StringComparison.OrdinalIgnoreCase);
-        }
-
         if (!tool.IsEnabled ||
             !tool.IsVisibleToPlanner ||
             !tool.IsExecutableByAgent ||
             tool.RiskLevel is AiToolRiskLevel.Blocked or AiToolRiskLevel.Critical)
-        {
-            return false;
-        }
-
-        if (cloudSandboxTrialOnly)
-        {
-            if (sandboxAgentTrialOptions?.Value.Enabled != true &&
-                sandboxControlledTrialOptions?.Value.Enabled != true)
-            {
-                return false;
-            }
-
-            if (tool.ProviderType == ToolProviderType.Mcp)
-            {
-                return false;
-            }
-
-            if (string.Equals(tool.ToolCode, CloudReadonlySandboxAgentTrialMarkers.ToolCode, StringComparison.OrdinalIgnoreCase))
-            {
-                return tool.ProviderType == ToolProviderType.CloudReadonly &&
-                       tool.DataBoundary == ToolDataBoundary.CloudReadonlySandboxOnly;
-            }
-
-            if (tool.DataBoundary is not (ToolDataBoundary.NoData or ToolDataBoundary.ArtifactDraftOnly))
-            {
-                return false;
-            }
-        }
-        else if (tool.DataBoundary == ToolDataBoundary.CloudReadonlySandboxOnly)
-        {
-            return false;
-        }
-
-        if (cloudProductionPilotOnly)
-        {
-            return false;
-        }
-        else if (tool.DataBoundary == ToolDataBoundary.CloudReadonlyProductionPilotOnly)
-        {
-            return false;
-        }
-
-        if (cloudProductionControlledPilotOnly)
-        {
-            return false;
-        }
-        else if (tool.DataBoundary == ToolDataBoundary.CloudReadonlyProductionControlledOnly)
         {
             return false;
         }

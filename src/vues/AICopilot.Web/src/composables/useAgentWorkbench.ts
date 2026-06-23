@@ -54,7 +54,7 @@ function statusType(status?: string | null): TagType {
 function approvalKindLabel(type?: string | null) {
   const labels: Record<string, string> = {
     Plan: '计划确认',
-    Tool: '工具审批',
+    Tool: '执行确认',
     Artifact: '产物确认',
     FinalOutput: '最终输出'
   }
@@ -199,7 +199,7 @@ export function useAgentWorkbench() {
   )
 
   const canCreatePlan = computed(() =>
-    Boolean(store.currentSessionId && store.selectedModelId && !store.isAgentBusy)
+    Boolean(store.currentSessionId && !store.isAgentBusy)
   )
   const canRunTask = computed(() =>
     Boolean(latestTask.value?.canRun && !latestTask.value?.isRunQueued && !latestTask.value?.isRunInProgress && !store.isAgentBusy)

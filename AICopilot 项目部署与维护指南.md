@@ -123,6 +123,8 @@ git push GitHub
 
 `aicopilot-image` 会按路径判断需要构建的镜像：只改 `src/hosts/AICopilot.HttpApi/` 时只构建 `aicopilot-httpapi`，只改 `src/vues/AICopilot.Web/` 时只构建 `aicopilot-webui`，改 `src/core/`、`src/shared/`、`src/services/`、`src/infrastructure/` 或手动触发时构建后端应用镜像。Web 镜像使用 Harbor registry cache，第二次构建会复用已有 Docker layer。
 
+应用镜像仓库只保留最近 3 个 `sha-*` tag。`aicopilot-image` 推送成功后会调用 `deploy/enterprise-ai/harbor-retention.sh` 删除超出 3 个的旧 `sha-*` tag；`buildcache` 和基础镜像 tag 不计入应用版本保留。Harbor robot 或用户必须具备删除 tag 权限。删除 tag 后还需要 Harbor Garbage Collection 定期运行，磁盘才会真正释放。
+
 `aicopilot-deploy` 的 `services` 输入为空时按全量发布处理；传入 `httpapi`、`migration`、`dataworker`、`ragworker`、`web` 或逗号组合时，只重写对应镜像 tag、只拉取并重启指定应用服务。基础服务 `postgres`、`eventbus`、`qdrant` 会保持可用；只有选择 `migration` 时才运行迁移容器。
 
 GitHub secrets：
@@ -166,6 +168,8 @@ REGISTRY=10.98.90.154:80 HARBOR_PROJECT=enterprise-ai ./deploy/enterprise-ai/mir
 cd AICopilot
 REGISTRY=10.98.90.154:80 HARBOR_PROJECT=enterprise-ai TAG=sha-<git-sha> ./deploy/enterprise-ai/build-and-push.sh
 ```
+
+应急构建默认也执行 `harbor-retention.sh`，需要提供 `HARBOR_USERNAME` / `HARBOR_PASSWORD` 或 `OCI_REGISTRY_USERNAME` / `OCI_REGISTRY_PASSWORD`，用于删除超出 3 个的旧 `sha-*` tag。
 
 应急手工部署只在 `aicopilot-deploy` 不可用时使用：
 

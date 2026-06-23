@@ -13,6 +13,8 @@ IMAGE_PREFIX="$REGISTRY/$HARBOR_PROJECT"
 BASE_IMAGE_PREFIX="${BASE_IMAGE_PREFIX:-$IMAGE_PREFIX}"
 NODE_BASE_IMAGE="${NODE_BASE_IMAGE:-$BASE_IMAGE_PREFIX/base-node:22-alpine}"
 NGINX_BASE_IMAGE="${NGINX_BASE_IMAGE:-$BASE_IMAGE_PREFIX/base-nginx:1.27-alpine}"
+HARBOR_RETENTION_ENABLED="${HARBOR_RETENTION_ENABLED:-true}"
+HARBOR_KEEP_SHA_TAGS="${HARBOR_KEEP_SHA_TAGS:-3}"
 
 if [ "${MIRROR_BASE_IMAGES:-false}" = "true" ]; then
   "$SCRIPT_DIR/mirror-base-images.sh"
@@ -45,6 +47,18 @@ docker buildx build \
   --tag "$IMAGE_PREFIX/aicopilot-webui:$TAG" \
   --push \
   "$REPO_ROOT/src/vues/AICopilot.Web"
+
+if [ "$HARBOR_RETENTION_ENABLED" = "true" ]; then
+  HARBOR_URL="${HARBOR_URL:-$REGISTRY}" \
+    HARBOR_PROJECT="$HARBOR_PROJECT" \
+    HARBOR_KEEP_SHA_TAGS="$HARBOR_KEEP_SHA_TAGS" \
+    "$SCRIPT_DIR/harbor-retention.sh" \
+      aicopilot-httpapi \
+      aicopilot-migration \
+      aicopilot-dataworker \
+      aicopilot-ragworker \
+      aicopilot-webui
+fi
 
 cat <<EOF
 AICOPILOT_HTTPAPI_IMAGE=$IMAGE_PREFIX/aicopilot-httpapi:$TAG

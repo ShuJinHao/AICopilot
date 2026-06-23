@@ -66,7 +66,8 @@ public sealed class GetToolCatalogQueryHandler(
             userId,
             request.SimulationOnly,
             request.BusinessDomains,
-            cancellationToken);
+            cancellationToken,
+            request.SkillCode);
         if (!catalog.IsSuccess || catalog.Value is null)
         {
             return Result.From(catalog);

@@ -1,15 +1,9 @@
 import { FORM_DEFAULTS } from '@/constants/formDefaults'
 import type {
-  ApprovalPolicyDetail,
-  ApprovalPolicyFormModel,
-  BusinessDatabaseDetail,
-  BusinessDatabaseFormModel,
   ConversationTemplateDetail,
   ConversationTemplateFormModel,
   LanguageModelDetail,
   LanguageModelFormModel,
-  McpServerDetail,
-  McpServerFormModel,
   RoutingModelDetail,
   RoutingModelFormModel
 } from '@/types/app'
@@ -51,61 +45,6 @@ export function createEmptyConversationTemplateForm(): ConversationTemplateFormM
     maxTokens: null,
     temperature: null,
     isEnabled: true
-  }
-}
-
-export function createEmptyApprovalPolicyForm(): ApprovalPolicyFormModel {
-  return {
-    name: '',
-    description: '',
-    targetType: 'Plugin',
-    targetName: '',
-    toolNames: [],
-    isEnabled: true,
-    requiresOnsiteAttestation: false
-  }
-}
-
-export function createEmptyBusinessDatabaseForm(): BusinessDatabaseFormModel {
-  return {
-    name: '',
-    description: '',
-    connectionString: '',
-    provider: FORM_DEFAULTS.businessDatabase.provider,
-    isEnabled: true,
-    isReadOnly: true,
-    externalSystemType: FORM_DEFAULTS.businessDatabase.externalSystemType,
-    readOnlyCredentialVerified: false,
-    hasConnectionString: false,
-    connectionStringMasked: null,
-    category: 'General',
-    tags: [],
-    ownerDepartment: '',
-    businessDomain: '',
-    sensitivityLevel: 'Internal',
-    defaultQueryLimit: FORM_DEFAULTS.businessDatabase.defaultQueryLimit,
-    maxQueryLimit: FORM_DEFAULTS.businessDatabase.maxQueryLimit,
-    isSelectableInChat: true,
-    isSelectableInAgent: true
-  }
-}
-
-export function createEmptyMcpServerForm(): McpServerFormModel {
-  return {
-    name: '',
-    description: '',
-    transportType: FORM_DEFAULTS.mcpServer.transportType,
-    command: FORM_DEFAULTS.mcpServer.command,
-    arguments: '',
-    chatExposureMode: FORM_DEFAULTS.mcpServer.chatExposureMode,
-    allowedTools: [],
-    externalSystemType: FORM_DEFAULTS.mcpServer.externalSystemType,
-    capabilityKind: FORM_DEFAULTS.mcpServer.capabilityKind,
-    riskLevel: FORM_DEFAULTS.mcpServer.riskLevel,
-    isEnabled: true,
-    hasArguments: false,
-    argumentsMasked: null,
-    originalTransportType: FORM_DEFAULTS.mcpServer.transportType
   }
 }
 
@@ -151,63 +90,5 @@ export function toConversationTemplateForm(
     maxTokens: detail.maxTokens ?? null,
     temperature: detail.temperature ?? null,
     isEnabled: detail.isEnabled
-  }
-}
-
-export function toApprovalPolicyForm(detail: ApprovalPolicyDetail): ApprovalPolicyFormModel {
-  return {
-    id: detail.id,
-    name: detail.name,
-    description: detail.description ?? '',
-    targetType: detail.targetType,
-    targetName: detail.targetName,
-    toolNames: [...detail.toolNames],
-    isEnabled: detail.isEnabled,
-    requiresOnsiteAttestation: detail.requiresOnsiteAttestation
-  }
-}
-
-export function toBusinessDatabaseForm(detail: BusinessDatabaseDetail): BusinessDatabaseFormModel {
-  return {
-    id: detail.id,
-    name: detail.name,
-    description: detail.description,
-    connectionString: '',
-    provider: detail.provider,
-    isEnabled: detail.isEnabled,
-    isReadOnly: true,
-    externalSystemType: detail.externalSystemType,
-    readOnlyCredentialVerified: detail.readOnlyCredentialVerified,
-    hasConnectionString: detail.hasConnectionString,
-    connectionStringMasked: detail.connectionStringMasked,
-    category: detail.category ?? 'General',
-    tags: [...(detail.tags ?? [])],
-    ownerDepartment: detail.ownerDepartment ?? '',
-    businessDomain: detail.businessDomain ?? '',
-    sensitivityLevel: detail.sensitivityLevel ?? 'Internal',
-    defaultQueryLimit: detail.defaultQueryLimit ?? FORM_DEFAULTS.businessDatabase.defaultQueryLimit,
-    maxQueryLimit: detail.maxQueryLimit ?? FORM_DEFAULTS.businessDatabase.maxQueryLimit,
-    isSelectableInChat: detail.isSelectableInChat ?? true,
-    isSelectableInAgent: detail.isSelectableInAgent ?? true
-  }
-}
-
-export function toMcpServerForm(detail: McpServerDetail): McpServerFormModel {
-  return {
-    id: detail.id,
-    name: detail.name,
-    description: detail.description,
-    transportType: detail.transportType,
-    command: detail.command ?? '',
-    arguments: '',
-    chatExposureMode: detail.chatExposureMode,
-    allowedTools: detail.allowedTools.map((tool) => ({ ...tool })),
-    externalSystemType: detail.externalSystemType,
-    capabilityKind: detail.capabilityKind,
-    riskLevel: detail.riskLevel,
-    isEnabled: detail.isEnabled,
-    hasArguments: detail.hasArguments,
-    argumentsMasked: detail.argumentsMasked,
-    originalTransportType: detail.transportType
   }
 }

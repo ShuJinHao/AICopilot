@@ -43,9 +43,13 @@ public class Session : BaseEntity<SessionId>, IAggregateRoot<SessionId>
 
     public IReadOnlyCollection<Message> Messages => _messages.AsReadOnly();
 
-    public void AddMessage(string content, MessageType type, MessageModelSnapshot? modelSnapshot = null)
+    public Message AddMessage(
+        string? content,
+        MessageType type,
+        MessageModelSnapshot? modelSnapshot = null,
+        string? renderPayloadJson = null)
     {
-        if (string.IsNullOrWhiteSpace(content))
+        if (string.IsNullOrWhiteSpace(content) && string.IsNullOrWhiteSpace(renderPayloadJson))
         {
             throw new ArgumentException("Message content is required.", nameof(content));
         }
@@ -55,7 +59,7 @@ public class Session : BaseEntity<SessionId>, IAggregateRoot<SessionId>
             throw new ArgumentOutOfRangeException(nameof(type), type, "Message type is invalid.");
         }
 
-        var message = new Message(this, content, type, modelSnapshot);
+        var message = new Message(this, content, type, MessageCount + 1, modelSnapshot, renderPayloadJson);
         _messages.Add(message);
         MessageCount++;
         LastMessageAt = message.CreatedAt;
@@ -66,6 +70,7 @@ public class Session : BaseEntity<SessionId>, IAggregateRoot<SessionId>
         }
 
         AddDomainEvent(new MessageAddedToSessionEvent(Id.Value, message.Content, message.Type, message.CreatedAt));
+        return message;
     }
 
     public void Rename(string title)

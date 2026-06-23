@@ -10,31 +10,14 @@ import { useChatErrorStore, toFriendlyMessage } from './chatErrorStore'
 import { useMessageStore } from './messageStore'
 import { useSessionStore } from './sessionStore'
 import { useStreamStore } from './streamStore'
+import type { KnowledgeBaseSummary, SessionTimelineEvent, SkillDefinition } from '@/types/app'
 import type {
   AgentApprovalRequest,
   AgentArtifactPreview,
   AgentTask,
   AgentTaskAuditSummary,
-  AgentTrialScenario,
   ArtifactRecord,
   ArtifactWorkspace,
-  CloudReadonlyPilotConfigPackage,
-  CloudReadonlyPilotContractRehearsal,
-  CloudReadonlyPilotReadinessStatus,
-  CloudReadonlyProductionControlledPilotResult,
-  CloudReadonlyProductionControlledPilotStatus,
-  CloudReadonlyProductionControlledPlan,
-  CloudReadonlyProductionOperationsStatus,
-  CloudReadonlyProductionPilotScenarioResult,
-  CloudReadonlyProductionPilotStatus,
-  CloudReadonlyProductionPilotWindow,
-  PilotApprovalRehearsal,
-  PilotReadinessAssessment,
-  ProductionPilotGaReadinessAssessment,
-  ProductionPilotIncident,
-  ProductionPilotRunLedger,
-  TrialCampaign,
-  TrialEvidencePackage,
   UploadRecord
 } from '@/types/protocols'
 
@@ -48,8 +31,14 @@ interface AgentChartPreview {
   queryHash?: string
 }
 
+interface HistoryCursorState {
+  beforeSequence: number | null
+  afterSequence: number | null
+  hasMoreBefore: boolean
+  hasMoreAfter: boolean
+}
+
 export const useChatStore = defineStore('chat', () => {
-  const selectedModelStorageKey = 'aicopilot.chat.selectedModelId'
   const sessionStore = useSessionStore()
   const messageStore = useMessageStore()
   const streamStore = useStreamStore()
@@ -64,91 +53,171 @@ export const useChatStore = defineStore('chat', () => {
   const isWaitingForApproval = computed(() => approvalStore.isWaitingForApproval)
   const isLoadingHistory = computed(() => sessionStore.isLoadingHistory)
   const errorMessage = computed(() => errorStore.errorMessage)
-  const chatModels = ref<Awaited<ReturnType<typeof chatService.getSelectableChatModels>>>([])
   const agentTasks = ref<AgentTask[]>([])
-  const agentTrialScenarios = ref<AgentTrialScenario[]>([])
   const agentApprovals = ref<AgentApprovalRequest[]>([])
   const agentAuditSummary = ref<AgentTaskAuditSummary[]>([])
+  const timelineEvents = ref<SessionTimelineEvent[]>([])
+  const availableSkills = ref<SkillDefinition[]>([])
+  const selectedSkillCode = ref<string | null>(null)
+  const availableKnowledgeBases = ref<KnowledgeBaseSummary[]>([])
+  const selectedKnowledgeBaseId = ref<string | null>(null)
   const uploadedFiles = ref<UploadRecord[]>([])
   const currentWorkspace = ref<ArtifactWorkspace | null>(null)
   const currentArtifactPreview = ref<AgentArtifactPreview | null>(null)
-  const trialCampaigns = ref<TrialCampaign[]>([])
-  const currentTrialCampaign = ref<TrialCampaign | null>(null)
-  const currentPilotReadiness = ref<PilotReadinessAssessment | null>(null)
-  const currentTrialEvidencePackage = ref<TrialEvidencePackage | null>(null)
-  const currentCloudReadonlyPilotReadiness = ref<CloudReadonlyPilotReadinessStatus | null>(null)
-  const currentCloudReadonlyPilotConfigPackage = ref<CloudReadonlyPilotConfigPackage | null>(null)
-  const currentPilotApprovalRehearsal = ref<PilotApprovalRehearsal | null>(null)
-  const currentPilotContractRehearsal = ref<CloudReadonlyPilotContractRehearsal | null>(null)
-  const currentCloudReadonlyProductionPilotStatus = ref<CloudReadonlyProductionPilotStatus | null>(null)
-  const currentCloudReadonlyProductionPilotWindow = ref<CloudReadonlyProductionPilotWindow | null>(null)
-  const currentCloudReadonlyProductionPilotRun = ref<CloudReadonlyProductionPilotScenarioResult | null>(null)
-  const currentCloudReadonlyProductionControlledStatus = ref<CloudReadonlyProductionControlledPilotStatus | null>(null)
-  const currentCloudReadonlyProductionControlledPlan = ref<CloudReadonlyProductionControlledPlan | null>(null)
-  const currentCloudReadonlyProductionControlledRun = ref<CloudReadonlyProductionControlledPilotResult | null>(null)
-  const currentCloudReadonlyProductionOperationsStatus = ref<CloudReadonlyProductionOperationsStatus | null>(null)
-  const currentProductionPilotRunLedger = ref<ProductionPilotRunLedger[]>([])
-  const currentProductionPilotIncident = ref<ProductionPilotIncident | null>(null)
-  const currentProductionPilotGaReadiness = ref<ProductionPilotGaReadinessAssessment | null>(null)
   const chartPreview = ref<AgentChartPreview | null>(null)
   const isAgentBusy = ref(false)
-  const isLoadingAgentTrialScenarios = ref(false)
-  const isLoadingTrialOperations = ref(false)
   const agentErrorMessage = ref<string | null>(null)
-  const selectedModelId = ref<string | null>(
-    typeof window === 'undefined' ? null : window.localStorage.getItem(selectedModelStorageKey)
-  )
-  const isLoadingChatModels = ref(false)
-  const selectedModel = computed(() =>
-    chatModels.value.find((model) => model.id === selectedModelId.value) ?? null
-  )
+  const historyCursors = ref<Record<string, HistoryCursorState>>({})
+  const isLoadingOlderHistory = ref(false)
   const latestAgentTask = computed(() => agentTasks.value[0] ?? null)
+  const selectedSkill = computed(() =>
+    availableSkills.value.find((skill) => skill.skillCode === selectedSkillCode.value) ??
+    getDefaultSkill() ??
+    null
+  )
+  const selectedSkillSupportsKnowledge = computed(() =>
+    selectedSkill.value?.allowedKnowledgeScopes?.some((scope) => scope === 'SelectedKnowledgeBase') ?? false
+  )
+  const selectedKnowledgeBase = computed(() =>
+    availableKnowledgeBases.value.find((knowledgeBase) => knowledgeBase.id === selectedKnowledgeBaseId.value) ?? null
+  )
+  const selectedKnowledgeBaseIdsForPlan = computed(() =>
+    selectedSkillSupportsKnowledge.value && selectedKnowledgeBaseId.value ? [selectedKnowledgeBaseId.value] : []
+  )
   const pendingAgentApprovals = computed(() =>
     agentApprovals.value.filter((approval) => approval.status === 'Pending')
   )
-
-  async function loadChatModels() {
-    isLoadingChatModels.value = true
-    try {
-      chatModels.value = await chatService.getSelectableChatModels()
-      if (!chatModels.value.some((model) => model.id === selectedModelId.value)) {
-        setSelectedModel(chatModels.value[0]?.id ?? null)
-      }
-    } finally {
-      isLoadingChatModels.value = false
-    }
-  }
-
-  function setSelectedModel(modelId: string | null) {
-    selectedModelId.value = modelId
-    if (typeof window !== 'undefined') {
-      if (modelId) {
-        window.localStorage.setItem(selectedModelStorageKey, modelId)
-      } else {
-        window.localStorage.removeItem(selectedModelStorageKey)
-      }
-    }
-  }
+  const hasMoreHistoryBefore = computed(() => {
+    const sessionId = sessionStore.currentSessionId
+    return Boolean(sessionId && historyCursors.value[sessionId]?.hasMoreBefore)
+  })
 
   function bindErrorSession() {
     errorStore.bindCurrentSession(sessionStore.currentSessionId)
+  }
+
+  function getDefaultSkill() {
+    return availableSkills.value.find((skill) => skill.skillCode === 'general_report') ??
+      availableSkills.value[0] ??
+      null
+  }
+
+  function getDefaultSkillCode() {
+    return getDefaultSkill()?.skillCode ?? null
+  }
+
+  async function loadSkills() {
+    try {
+      availableSkills.value = await chatService.getSkills()
+      if (
+        !selectedSkillCode.value ||
+        !availableSkills.value.some((skill) => skill.skillCode === selectedSkillCode.value)
+      ) {
+        selectedSkillCode.value = getDefaultSkillCode()
+      }
+    } catch {
+      availableSkills.value = []
+      selectedSkillCode.value = null
+    }
+  }
+
+  function selectSkill(skillCode: string | null) {
+    if (!skillCode) {
+      selectedSkillCode.value = getDefaultSkillCode()
+      return
+    }
+
+    selectedSkillCode.value = availableSkills.value.some((skill) => skill.skillCode === skillCode)
+      ? skillCode
+      : getDefaultSkillCode()
+  }
+
+  async function loadKnowledgeBases() {
+    try {
+      availableKnowledgeBases.value = await chatService.getKnowledgeBases()
+      if (
+        !selectedKnowledgeBaseId.value ||
+        !availableKnowledgeBases.value.some((knowledgeBase) => knowledgeBase.id === selectedKnowledgeBaseId.value)
+      ) {
+        selectedKnowledgeBaseId.value = availableKnowledgeBases.value[0]?.id ?? null
+      }
+    } catch {
+      availableKnowledgeBases.value = []
+      selectedKnowledgeBaseId.value = null
+    }
+  }
+
+  function selectKnowledgeBase(knowledgeBaseId: string | null) {
+    if (!knowledgeBaseId) {
+      selectedKnowledgeBaseId.value = null
+      return
+    }
+
+    selectedKnowledgeBaseId.value = availableKnowledgeBases.value.some(
+      (knowledgeBase) => knowledgeBase.id === knowledgeBaseId
+    )
+      ? knowledgeBaseId
+      : null
   }
 
   async function loadHistory(sessionId: string, force = false) {
     if (!force && messageStore.messagesMap[sessionId]?.length) {
       await approvalStore.refreshPendingApprovals(sessionId)
       await loadAgentTasks(sessionId)
+      await loadTimeline(sessionId)
       return
     }
 
     sessionStore.isLoadingHistory = true
     try {
       const history = await chatService.getHistory(sessionId)
-      messageStore.setHistory(sessionId, history)
+      messageStore.setHistory(sessionId, history.items)
+      updateHistoryCursor(sessionId, history)
       await approvalStore.refreshPendingApprovals(sessionId)
       await loadAgentTasks(sessionId)
+      await loadTimeline(sessionId)
     } finally {
       sessionStore.isLoadingHistory = false
+    }
+  }
+
+  async function loadOlderHistory(sessionId = sessionStore.currentSessionId) {
+    if (!sessionId || isLoadingOlderHistory.value) {
+      return false
+    }
+
+    const cursor = historyCursors.value[sessionId]
+    if (!cursor?.hasMoreBefore || !cursor.beforeSequence) {
+      return false
+    }
+
+    isLoadingOlderHistory.value = true
+    try {
+      const history = await chatService.getHistory(sessionId, {
+        beforeSequence: cursor.beforeSequence
+      })
+      messageStore.prependHistory(sessionId, history.items)
+      updateHistoryCursor(sessionId, history)
+      return history.items.length > 0
+    } finally {
+      isLoadingOlderHistory.value = false
+    }
+  }
+
+  function updateHistoryCursor(
+    sessionId: string,
+    page: {
+      beforeSequence?: number | null
+      afterSequence?: number | null
+      hasMoreBefore?: boolean
+      hasMoreAfter?: boolean
+    }
+  ) {
+    historyCursors.value[sessionId] = {
+      beforeSequence: page.beforeSequence ?? null,
+      afterSequence: page.afterSequence ?? null,
+      hasMoreBefore: Boolean(page.hasMoreBefore),
+      hasMoreAfter: Boolean(page.hasMoreAfter)
     }
   }
 
@@ -184,6 +253,15 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  async function loadTimeline(sessionId: string) {
+    try {
+      const timeline = await chatService.getTimeline(sessionId)
+      timelineEvents.value = timeline.items
+    } catch {
+      timelineEvents.value = []
+    }
+  }
+
   async function loadAgentApprovals(taskId: string | null = null) {
     try {
       agentApprovals.value = taskId
@@ -204,491 +282,6 @@ export const useChatStore = defineStore('chat', () => {
       agentAuditSummary.value = await chatService.getAgentTaskAuditSummary(taskId)
     } catch {
       agentAuditSummary.value = []
-    }
-  }
-
-  async function loadAgentTrialScenarios() {
-    isLoadingAgentTrialScenarios.value = true
-    try {
-      agentTrialScenarios.value = await chatService.getAgentTrialScenarios()
-    } catch {
-      agentTrialScenarios.value = []
-    } finally {
-      isLoadingAgentTrialScenarios.value = false
-    }
-  }
-
-  async function loadTrialCampaigns() {
-    isLoadingTrialOperations.value = true
-    try {
-      trialCampaigns.value = await chatService.getTrialCampaigns()
-      currentTrialCampaign.value =
-        trialCampaigns.value.find((campaign) => campaign.campaignId === currentTrialCampaign.value?.campaignId) ??
-        trialCampaigns.value[0] ??
-        null
-    } catch {
-      trialCampaigns.value = []
-      currentTrialCampaign.value = null
-    } finally {
-      isLoadingTrialOperations.value = false
-    }
-  }
-
-  async function createTrialCampaign() {
-    if (isLoadingTrialOperations.value) {
-      return null
-    }
-
-    isLoadingTrialOperations.value = true
-    agentErrorMessage.value = null
-    try {
-      const campaign = await chatService.createTrialCampaign({
-        name: `内部试用 ${new Date().toLocaleDateString('zh-CN')}`,
-        allowedSourceModes: ['SimulationBusiness', 'CloudReadonlySandbox'],
-        ownerDepartment: 'AI 平台',
-        summary: 'P10 内部试用运营台账，保留任务、产物、hash、审批和审计摘要引用。'
-      })
-      currentTrialCampaign.value = campaign
-      currentPilotReadiness.value = null
-      currentTrialEvidencePackage.value = null
-      await loadTrialCampaigns()
-      return campaign
-    } catch (error) {
-      agentErrorMessage.value = toFriendlyMessage(error)
-      return null
-    } finally {
-      isLoadingTrialOperations.value = false
-    }
-  }
-
-  async function attachLatestTaskToTrialCampaign() {
-    const campaign = currentTrialCampaign.value ?? trialCampaigns.value[0] ?? (await createTrialCampaign())
-    const task = latestAgentTask.value
-    if (!campaign || !task || isLoadingTrialOperations.value) {
-      return null
-    }
-
-    isLoadingTrialOperations.value = true
-    agentErrorMessage.value = null
-    try {
-      currentTrialCampaign.value = await chatService.attachAgentTaskToTrialCampaign(campaign.campaignId, {
-        taskId: task.id,
-        scenarioId: task.taskCode,
-        trialMode: latestAgentTask.value?.planJson?.includes('CloudReadonlySandbox')
-          ? 'CloudReadonlySandbox'
-          : 'AgentTaskEvidence'
-      })
-      await loadTrialCampaigns()
-      return currentTrialCampaign.value
-    } catch (error) {
-      agentErrorMessage.value = toFriendlyMessage(error)
-      return null
-    } finally {
-      isLoadingTrialOperations.value = false
-    }
-  }
-
-  async function runPilotReadinessEvaluation() {
-    const campaign = currentTrialCampaign.value
-    if (!campaign || isLoadingTrialOperations.value) {
-      return null
-    }
-
-    isLoadingTrialOperations.value = true
-    agentErrorMessage.value = null
-    try {
-      currentPilotReadiness.value = await chatService.runPilotReadinessEvaluation(campaign.campaignId)
-      currentTrialCampaign.value = await chatService.getTrialCampaignDetail(campaign.campaignId)
-      await loadTrialCampaigns()
-      return currentPilotReadiness.value
-    } catch (error) {
-      agentErrorMessage.value = toFriendlyMessage(error)
-      return null
-    } finally {
-      isLoadingTrialOperations.value = false
-    }
-  }
-
-  async function generateTrialEvidencePackage() {
-    const campaign = currentTrialCampaign.value
-    if (!campaign || isLoadingTrialOperations.value) {
-      return null
-    }
-
-    isLoadingTrialOperations.value = true
-    agentErrorMessage.value = null
-    try {
-      currentTrialEvidencePackage.value = await chatService.generateTrialEvidencePackage(campaign.campaignId)
-      currentTrialCampaign.value = await chatService.getTrialCampaignDetail(campaign.campaignId)
-      await loadTrialCampaigns()
-      return currentTrialEvidencePackage.value
-    } catch (error) {
-      agentErrorMessage.value = toFriendlyMessage(error)
-      return null
-    } finally {
-      isLoadingTrialOperations.value = false
-    }
-  }
-
-  async function loadCloudReadonlyPilotReadiness() {
-    try {
-      currentCloudReadonlyPilotReadiness.value = await chatService.getCloudReadonlyPilotReadiness()
-      currentCloudReadonlyPilotConfigPackage.value =
-        currentCloudReadonlyPilotReadiness.value.configSummary ?? currentCloudReadonlyPilotConfigPackage.value
-      return currentCloudReadonlyPilotReadiness.value
-    } catch {
-      currentCloudReadonlyPilotReadiness.value = null
-      return null
-    }
-  }
-
-  async function createCloudReadonlyPilotConfigPackage() {
-    const campaign = currentTrialCampaign.value
-    if (!campaign || isLoadingTrialOperations.value) {
-      return null
-    }
-
-    isLoadingTrialOperations.value = true
-    agentErrorMessage.value = null
-    try {
-      currentCloudReadonlyPilotConfigPackage.value =
-        await chatService.createCloudReadonlyPilotConfigPackage(campaign.campaignId)
-      await loadCloudReadonlyPilotReadiness()
-      return currentCloudReadonlyPilotConfigPackage.value
-    } catch (error) {
-      agentErrorMessage.value = toFriendlyMessage(error)
-      return null
-    } finally {
-      isLoadingTrialOperations.value = false
-    }
-  }
-
-  async function runCloudReadonlyPilotGateEvaluation() {
-    const campaign = currentTrialCampaign.value
-    if (!campaign || isLoadingTrialOperations.value) {
-      return null
-    }
-
-    isLoadingTrialOperations.value = true
-    agentErrorMessage.value = null
-    try {
-      currentCloudReadonlyPilotReadiness.value =
-        await chatService.runCloudReadonlyPilotGateEvaluation(campaign.campaignId)
-      currentCloudReadonlyPilotConfigPackage.value =
-        currentCloudReadonlyPilotReadiness.value.configSummary ?? currentCloudReadonlyPilotConfigPackage.value
-      return currentCloudReadonlyPilotReadiness.value
-    } catch (error) {
-      agentErrorMessage.value = toFriendlyMessage(error)
-      return null
-    } finally {
-      isLoadingTrialOperations.value = false
-    }
-  }
-
-  async function runCloudReadonlyPilotApprovalRehearsal() {
-    const packageId =
-      currentCloudReadonlyPilotConfigPackage.value?.packageId ??
-      currentCloudReadonlyPilotReadiness.value?.configSummary?.packageId
-    if (!packageId || isLoadingTrialOperations.value) {
-      return null
-    }
-
-    isLoadingTrialOperations.value = true
-    agentErrorMessage.value = null
-    try {
-      currentPilotApprovalRehearsal.value =
-        await chatService.runCloudReadonlyPilotApprovalRehearsal(packageId)
-      await loadCloudReadonlyPilotReadiness()
-      return currentPilotApprovalRehearsal.value
-    } catch (error) {
-      agentErrorMessage.value = toFriendlyMessage(error)
-      return null
-    } finally {
-      isLoadingTrialOperations.value = false
-    }
-  }
-
-  async function runCloudReadonlyPilotContractRehearsal() {
-    const packageId =
-      currentCloudReadonlyPilotConfigPackage.value?.packageId ??
-      currentCloudReadonlyPilotReadiness.value?.configSummary?.packageId
-    if (!packageId || isLoadingTrialOperations.value) {
-      return null
-    }
-
-    isLoadingTrialOperations.value = true
-    agentErrorMessage.value = null
-    try {
-      currentPilotContractRehearsal.value =
-        await chatService.runCloudReadonlyPilotContractRehearsal(packageId)
-      await loadCloudReadonlyPilotReadiness()
-      return currentPilotContractRehearsal.value
-    } catch (error) {
-      agentErrorMessage.value = toFriendlyMessage(error)
-      return null
-    } finally {
-      isLoadingTrialOperations.value = false
-    }
-  }
-
-  async function loadCloudReadonlyProductionPilotStatus() {
-    try {
-      currentCloudReadonlyProductionPilotStatus.value =
-        await chatService.getCloudReadonlyProductionPilotStatus()
-      return currentCloudReadonlyProductionPilotStatus.value
-    } catch {
-      currentCloudReadonlyProductionPilotStatus.value = null
-      return null
-    }
-  }
-
-  async function createCloudReadonlyProductionPilotWindow() {
-    if (isLoadingTrialOperations.value) {
-      return null
-    }
-
-    isLoadingTrialOperations.value = true
-    agentErrorMessage.value = null
-    try {
-      currentCloudReadonlyProductionPilotWindow.value =
-        await chatService.createCloudReadonlyProductionPilotWindow()
-      await loadCloudReadonlyProductionPilotStatus()
-      return currentCloudReadonlyProductionPilotWindow.value
-    } catch (error) {
-      agentErrorMessage.value = toFriendlyMessage(error)
-      return null
-    } finally {
-      isLoadingTrialOperations.value = false
-    }
-  }
-
-  async function approveCloudReadonlyProductionPilotWindow() {
-    const windowId =
-      currentCloudReadonlyProductionPilotWindow.value?.windowId ??
-      currentCloudReadonlyProductionPilotStatus.value?.pilotWindowId
-    if (!windowId || isLoadingTrialOperations.value) {
-      return null
-    }
-
-    isLoadingTrialOperations.value = true
-    agentErrorMessage.value = null
-    try {
-      currentCloudReadonlyProductionPilotWindow.value =
-        await chatService.approveCloudReadonlyProductionPilotWindow(windowId)
-      await loadCloudReadonlyProductionPilotStatus()
-      return currentCloudReadonlyProductionPilotWindow.value
-    } catch (error) {
-      agentErrorMessage.value = toFriendlyMessage(error)
-      return null
-    } finally {
-      isLoadingTrialOperations.value = false
-    }
-  }
-
-  async function runCloudReadonlyProductionPilotGate() {
-    if (isLoadingTrialOperations.value) {
-      return null
-    }
-
-    isLoadingTrialOperations.value = true
-    agentErrorMessage.value = null
-    try {
-      currentCloudReadonlyProductionPilotStatus.value =
-        await chatService.runCloudReadonlyProductionPilotGate()
-      return currentCloudReadonlyProductionPilotStatus.value
-    } catch (error) {
-      agentErrorMessage.value = toFriendlyMessage(error)
-      return null
-    } finally {
-      isLoadingTrialOperations.value = false
-    }
-  }
-
-  async function runCloudReadonlyProductionPilotScenario(scenarioId = 'cloud-production-pilot-devices') {
-    if (isLoadingTrialOperations.value) {
-      return null
-    }
-
-    isLoadingTrialOperations.value = true
-    agentErrorMessage.value = null
-    try {
-      currentCloudReadonlyProductionPilotRun.value =
-        await chatService.runCloudReadonlyProductionPilotScenario(scenarioId)
-      await loadCloudReadonlyProductionPilotStatus()
-      return currentCloudReadonlyProductionPilotRun.value
-    } catch (error) {
-      agentErrorMessage.value = toFriendlyMessage(error)
-      return null
-    } finally {
-      isLoadingTrialOperations.value = false
-    }
-  }
-
-  async function loadCloudReadonlyProductionControlledPilotStatus() {
-    try {
-      currentCloudReadonlyProductionControlledStatus.value =
-        await chatService.getCloudReadonlyProductionControlledPilotStatus()
-      return currentCloudReadonlyProductionControlledStatus.value
-    } catch {
-      currentCloudReadonlyProductionControlledStatus.value = null
-      return null
-    }
-  }
-
-  async function createCloudReadonlyProductionControlledPlan(goal: string) {
-    if (isAgentBusy.value || isLoadingTrialOperations.value) {
-      return null
-    }
-
-    const sessionId = currentSessionId.value
-    if (!sessionId) {
-      agentErrorMessage.value = '请先创建或选择会话后再生成计划'
-      return null
-    }
-
-    isAgentBusy.value = true
-    agentErrorMessage.value = null
-    try {
-      currentCloudReadonlyProductionControlledPlan.value =
-        await chatService.createCloudReadonlyProductionControlledPlan({
-          sessionId,
-          goal,
-          artifactTypes: ['Markdown', 'Html'],
-          maxRows: 20,
-          plannerMode: 'StaticOnly'
-        })
-      agentTasks.value = [currentCloudReadonlyProductionControlledPlan.value.task, ...agentTasks.value.filter((item) => item.id !== currentCloudReadonlyProductionControlledPlan.value?.task.id)]
-      await loadCloudReadonlyProductionControlledPilotStatus()
-      return currentCloudReadonlyProductionControlledPlan.value
-    } catch (error) {
-      agentErrorMessage.value = toFriendlyMessage(error)
-      return null
-    } finally {
-      isAgentBusy.value = false
-    }
-  }
-
-  async function runCloudReadonlyProductionControlledPilot() {
-    const intentId =
-      currentCloudReadonlyProductionControlledPlan.value?.intent.intentId ??
-      currentCloudReadonlyProductionControlledRun.value?.intentId
-    if (!intentId || isLoadingTrialOperations.value) {
-      return null
-    }
-
-    isLoadingTrialOperations.value = true
-    agentErrorMessage.value = null
-    try {
-      currentCloudReadonlyProductionControlledRun.value =
-        await chatService.runCloudReadonlyProductionControlledPilot(intentId)
-      await loadCloudReadonlyProductionControlledPilotStatus()
-      return currentCloudReadonlyProductionControlledRun.value
-    } catch (error) {
-      agentErrorMessage.value = toFriendlyMessage(error)
-      return null
-    } finally {
-      isLoadingTrialOperations.value = false
-    }
-  }
-
-  async function loadCloudReadonlyProductionOperationsStatus() {
-    try {
-      currentCloudReadonlyProductionOperationsStatus.value =
-        await chatService.getCloudReadonlyProductionOperationsStatus()
-      currentProductionPilotRunLedger.value = await chatService.getProductionPilotRunLedger()
-      return currentCloudReadonlyProductionOperationsStatus.value
-    } catch {
-      currentCloudReadonlyProductionOperationsStatus.value = null
-      currentProductionPilotRunLedger.value = []
-      return null
-    }
-  }
-
-  async function activateProductionPilotEmergencyStop() {
-    if (isLoadingTrialOperations.value) {
-      return null
-    }
-
-    isLoadingTrialOperations.value = true
-    agentErrorMessage.value = null
-    try {
-      currentCloudReadonlyProductionOperationsStatus.value =
-        await chatService.activateProductionPilotEmergencyStop()
-      await loadCloudReadonlyProductionPilotStatus()
-      await loadCloudReadonlyProductionControlledPilotStatus()
-      return currentCloudReadonlyProductionOperationsStatus.value
-    } catch (error) {
-      agentErrorMessage.value = toFriendlyMessage(error)
-      return null
-    } finally {
-      isLoadingTrialOperations.value = false
-    }
-  }
-
-  async function clearProductionPilotEmergencyStop() {
-    if (isLoadingTrialOperations.value) {
-      return null
-    }
-
-    isLoadingTrialOperations.value = true
-    agentErrorMessage.value = null
-    try {
-      currentCloudReadonlyProductionOperationsStatus.value =
-        await chatService.clearProductionPilotEmergencyStop()
-      await loadCloudReadonlyProductionPilotStatus()
-      await loadCloudReadonlyProductionControlledPilotStatus()
-      return currentCloudReadonlyProductionOperationsStatus.value
-    } catch (error) {
-      agentErrorMessage.value = toFriendlyMessage(error)
-      return null
-    } finally {
-      isLoadingTrialOperations.value = false
-    }
-  }
-
-  async function createProductionPilotIncident() {
-    if (isLoadingTrialOperations.value) {
-      return null
-    }
-
-    isLoadingTrialOperations.value = true
-    agentErrorMessage.value = null
-    try {
-      currentProductionPilotIncident.value = await chatService.upsertProductionPilotIncident({
-        severity: 'High',
-        category: 'Operations',
-        status: 'Open',
-        owner: 'PilotOps',
-        sourceRef: 'p14-smoke',
-        resolutionHash: 'pending'
-      })
-      await loadCloudReadonlyProductionOperationsStatus()
-      return currentProductionPilotIncident.value
-    } catch (error) {
-      agentErrorMessage.value = toFriendlyMessage(error)
-      return null
-    } finally {
-      isLoadingTrialOperations.value = false
-    }
-  }
-
-  async function runProductionPilotGaReadinessEvaluation() {
-    if (isLoadingTrialOperations.value) {
-      return null
-    }
-
-    isLoadingTrialOperations.value = true
-    agentErrorMessage.value = null
-    try {
-      currentProductionPilotGaReadiness.value =
-        await chatService.runProductionPilotGaReadinessEvaluation()
-      await loadCloudReadonlyProductionOperationsStatus()
-      return currentProductionPilotGaReadiness.value
-    } catch (error) {
-      agentErrorMessage.value = toFriendlyMessage(error)
-      return null
-    } finally {
-      isLoadingTrialOperations.value = false
     }
   }
 
@@ -806,7 +399,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function planAgentTask(goal: string) {
-    if (!sessionStore.currentSessionId || !selectedModelId.value || isAgentBusy.value) {
+    if (!sessionStore.currentSessionId || isAgentBusy.value) {
       return null
     }
 
@@ -817,84 +410,17 @@ export const useChatStore = defineStore('chat', () => {
         sessionId: sessionStore.currentSessionId,
         goal,
         taskType: 'ReportGeneration',
-        modelId: selectedModelId.value,
         uploadIds: uploadedFiles.value.map((item) => item.id),
-        knowledgeBaseIds: [],
-        plannerMode: 'Auto'
+        knowledgeBaseIds: selectedKnowledgeBaseIdsForPlan.value,
+        plannerMode: 'Auto',
+        skillCode: selectedSkillCode.value
       })
       upsertAgentTask(task)
       await loadAgentApprovals(task.id)
       await loadAgentAuditSummary(task.id)
       await refreshWorkspace(task)
+      await loadTimeline(sessionStore.currentSessionId)
       return task
-    } catch (error) {
-      agentErrorMessage.value = toFriendlyMessage(error)
-      return null
-    } finally {
-      isAgentBusy.value = false
-    }
-  }
-
-  async function createAgentTaskFromTrialScenario(
-    scenario: AgentTrialScenario,
-    promptOverride?: string | null,
-    artifactTypes?: string[]
-  ) {
-    if (!sessionStore.currentSessionId || isAgentBusy.value) {
-      return null
-    }
-
-    isAgentBusy.value = true
-    agentErrorMessage.value = null
-    try {
-      const task = await chatService.createAgentTaskFromTrialScenario({
-        sessionId: sessionStore.currentSessionId,
-        scenarioId: scenario.id,
-        promptOverride: promptOverride?.trim() || null,
-        artifactTypes: artifactTypes?.length ? artifactTypes : scenario.defaultArtifactTypes,
-        dataSourceIds: scenario.defaultDataSourceIds,
-        plannerMode: 'Auto'
-      })
-      upsertAgentTask(task)
-      await loadAgentApprovals(task.id)
-      await loadAgentAuditSummary(task.id)
-      await refreshWorkspace(task)
-      return task
-    } catch (error) {
-      agentErrorMessage.value = toFriendlyMessage(error)
-      return null
-    } finally {
-      isAgentBusy.value = false
-    }
-  }
-
-  async function createCloudSandboxControlledPlan(goal: string, artifactTypes: string[] = ['Markdown', 'Html']) {
-    if (!sessionStore.currentSessionId || isAgentBusy.value) {
-      return null
-    }
-
-    const normalizedGoal = goal.trim()
-    if (!normalizedGoal) {
-      agentErrorMessage.value = '请输入 Cloud Sandbox Controlled Trial 目标'
-      return null
-    }
-
-    isAgentBusy.value = true
-    agentErrorMessage.value = null
-    try {
-      const result = await chatService.createCloudSandboxControlledPlan({
-        sessionId: sessionStore.currentSessionId,
-        goal: normalizedGoal,
-        modelId: selectedModelId.value,
-        artifactTypes,
-        maxRows: 20,
-        plannerMode: 'Auto'
-      })
-      upsertAgentTask(result.task)
-      await loadAgentApprovals(result.task.id)
-      await loadAgentAuditSummary(result.task.id)
-      await refreshWorkspace(result.task)
-      return result
     } catch (error) {
       agentErrorMessage.value = toFriendlyMessage(error)
       return null
@@ -915,6 +441,7 @@ export const useChatStore = defineStore('chat', () => {
       await refreshChartPreview()
       if (sessionStore.currentSessionId) {
         await loadAgentTasks(sessionStore.currentSessionId)
+        await loadTimeline(sessionStore.currentSessionId)
       }
       await loadAgentApprovals(latestAgentTask.value?.id ?? null)
       await loadAgentAuditSummary(latestAgentTask.value?.id ?? null)
@@ -940,6 +467,9 @@ export const useChatStore = defineStore('chat', () => {
       await loadAgentApprovals(taskId)
       await loadAgentAuditSummary(taskId)
       await refreshWorkspace(updated)
+      if (sessionStore.currentSessionId) {
+        await loadTimeline(sessionStore.currentSessionId)
+      }
       return updated
     } catch (error) {
       agentErrorMessage.value = toFriendlyMessage(error)
@@ -965,6 +495,7 @@ export const useChatStore = defineStore('chat', () => {
       await loadAgentApprovals(approval.taskId)
       if (sessionStore.currentSessionId) {
         await loadAgentTasks(sessionStore.currentSessionId)
+        await loadTimeline(sessionStore.currentSessionId)
       }
       await loadAgentAuditSummary(approval.taskId)
 
@@ -989,6 +520,7 @@ export const useChatStore = defineStore('chat', () => {
       await refreshChartPreview()
       if (sessionStore.currentSessionId) {
         await loadAgentTasks(sessionStore.currentSessionId)
+        await loadTimeline(sessionStore.currentSessionId)
       }
       await loadAgentApprovals(latestAgentTask.value?.id ?? null)
       await loadAgentAuditSummary(latestAgentTask.value?.id ?? null)
@@ -1003,16 +535,7 @@ export const useChatStore = defineStore('chat', () => {
 
   async function initialize() {
     errorStore.clearSessionError()
-    await Promise.all([
-      sessionStore.loadSessions(),
-      loadChatModels(),
-      loadAgentTrialScenarios(),
-      loadTrialCampaigns(),
-      loadCloudReadonlyPilotReadiness(),
-      loadCloudReadonlyProductionPilotStatus(),
-      loadCloudReadonlyProductionControlledPilotStatus(),
-      loadCloudReadonlyProductionOperationsStatus()
-    ])
+    await Promise.all([sessionStore.loadSessions(), loadSkills(), loadKnowledgeBases()])
 
     if (sessionStore.sessions.length === 0) {
       await createNewSession()
@@ -1090,10 +613,6 @@ export const useChatStore = defineStore('chat', () => {
 
     const sessionId = sessionStore.currentSessionId
     errorStore.clearSessionError(sessionId)
-    if (!selectedModelId.value) {
-      errorStore.setSessionError(sessionId, '当前没有可用的对话模型，请联系管理员启用 Chat 模型。')
-      return
-    }
 
     const userMessage = messageStore.addMessage(sessionId, {
       sessionId,
@@ -1112,7 +631,7 @@ export const useChatStore = defineStore('chat', () => {
     const assistantMessage = messageStore.addMessage(sessionId, {
       sessionId,
       role: MessageRole.Assistant,
-      finalModelId: selectedModelId.value,
+      finalModelId: null,
       finalModelName: '未知',
       routingModelId: null,
       routingModelName: null,
@@ -1127,7 +646,7 @@ export const useChatStore = defineStore('chat', () => {
     let streamErrorCode: string | null = null
 
     try {
-      await chatService.sendMessageStream(sessionId, input, selectedModelId.value, {
+      await chatService.sendMessageStream(sessionId, input, {
         onChunkReceived(chunk) {
           if (chunk.type === ChunkType.Error) {
             streamErrorCode = getErrorCode(chunk)
@@ -1259,39 +778,22 @@ export const useChatStore = defineStore('chat', () => {
     streamStore.reset()
     approvalStore.reset()
     errorStore.reset()
-    chatModels.value = []
     agentTasks.value = []
-    agentTrialScenarios.value = []
     agentApprovals.value = []
     agentAuditSummary.value = []
+    timelineEvents.value = []
+    availableSkills.value = []
+    selectedSkillCode.value = null
+    availableKnowledgeBases.value = []
+    selectedKnowledgeBaseId.value = null
     uploadedFiles.value = []
     currentWorkspace.value = null
     currentArtifactPreview.value = null
-    trialCampaigns.value = []
-    currentTrialCampaign.value = null
-    currentPilotReadiness.value = null
-    currentTrialEvidencePackage.value = null
-    currentCloudReadonlyPilotReadiness.value = null
-    currentCloudReadonlyPilotConfigPackage.value = null
-    currentPilotApprovalRehearsal.value = null
-    currentPilotContractRehearsal.value = null
-    currentCloudReadonlyProductionPilotStatus.value = null
-    currentCloudReadonlyProductionPilotWindow.value = null
-    currentCloudReadonlyProductionPilotRun.value = null
-    currentCloudReadonlyProductionControlledStatus.value = null
-    currentCloudReadonlyProductionControlledPlan.value = null
-    currentCloudReadonlyProductionControlledRun.value = null
-    currentCloudReadonlyProductionOperationsStatus.value = null
-    currentProductionPilotRunLedger.value = []
-    currentProductionPilotIncident.value = null
-    currentProductionPilotGaReadiness.value = null
     chartPreview.value = null
     agentErrorMessage.value = null
+    historyCursors.value = {}
+    isLoadingOlderHistory.value = false
     isAgentBusy.value = false
-    isLoadingAgentTrialScenarios.value = false
-    isLoadingTrialOperations.value = false
-    selectedModelId.value = null
-    isLoadingChatModels.value = false
   }
 
   return {
@@ -1302,78 +804,41 @@ export const useChatStore = defineStore('chat', () => {
     isStreaming,
     isWaitingForApproval,
     isLoadingHistory,
-    chatModels,
-    selectedModelId,
-    selectedModel,
-    isLoadingChatModels,
+    isLoadingOlderHistory,
+    hasMoreHistoryBefore,
     agentTasks,
-    agentTrialScenarios,
-    isLoadingAgentTrialScenarios,
     latestAgentTask,
     agentApprovals,
     pendingAgentApprovals,
     agentAuditSummary,
+    timelineEvents,
+    availableSkills,
+    selectedSkillCode,
+    selectedSkill,
+    selectedSkillSupportsKnowledge,
+    availableKnowledgeBases,
+    selectedKnowledgeBaseId,
+    selectedKnowledgeBase,
     uploadedFiles,
     currentWorkspace,
     currentArtifactPreview,
-    trialCampaigns,
-    currentTrialCampaign,
-    currentPilotReadiness,
-    currentTrialEvidencePackage,
-    currentCloudReadonlyPilotReadiness,
-    currentCloudReadonlyPilotConfigPackage,
-    currentPilotApprovalRehearsal,
-    currentPilotContractRehearsal,
-    currentCloudReadonlyProductionPilotStatus,
-    currentCloudReadonlyProductionPilotWindow,
-    currentCloudReadonlyProductionPilotRun,
-    currentCloudReadonlyProductionControlledStatus,
-    currentCloudReadonlyProductionControlledPlan,
-    currentCloudReadonlyProductionControlledRun,
-    currentCloudReadonlyProductionOperationsStatus,
-    currentProductionPilotRunLedger,
-    currentProductionPilotIncident,
-    currentProductionPilotGaReadiness,
     chartPreview,
     isAgentBusy,
     agentErrorMessage,
-    isLoadingTrialOperations,
     errorMessage,
     initialize,
-    loadChatModels,
-    setSelectedModel,
+    loadSkills,
+    selectSkill,
+    loadKnowledgeBases,
+    selectKnowledgeBase,
+    loadTimeline,
+    loadOlderHistory,
     createNewSession,
     selectSession,
     confirmOnsitePresence,
     clearOnsitePresence,
     uploadSessionFile,
     planAgentTask,
-    loadAgentTrialScenarios,
-    loadTrialCampaigns,
-    createTrialCampaign,
-    attachLatestTaskToTrialCampaign,
-    runPilotReadinessEvaluation,
-    generateTrialEvidencePackage,
-    loadCloudReadonlyPilotReadiness,
-    createCloudReadonlyPilotConfigPackage,
-    runCloudReadonlyPilotGateEvaluation,
-    runCloudReadonlyPilotApprovalRehearsal,
-    runCloudReadonlyPilotContractRehearsal,
-    loadCloudReadonlyProductionPilotStatus,
-    createCloudReadonlyProductionPilotWindow,
-    approveCloudReadonlyProductionPilotWindow,
-    runCloudReadonlyProductionPilotGate,
-    runCloudReadonlyProductionPilotScenario,
-    loadCloudReadonlyProductionControlledPilotStatus,
-    createCloudReadonlyProductionControlledPlan,
-    runCloudReadonlyProductionControlledPilot,
-    loadCloudReadonlyProductionOperationsStatus,
-    activateProductionPilotEmergencyStop,
-    clearProductionPilotEmergencyStop,
-    createProductionPilotIncident,
-    runProductionPilotGaReadinessEvaluation,
-    createAgentTaskFromTrialScenario,
-    createCloudSandboxControlledPlan,
     runAgentTask,
     decideAgentApproval,
     loadAgentAuditSummary,

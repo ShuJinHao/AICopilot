@@ -4,7 +4,9 @@ using System.Text.Json;
 using AICopilot.AgentPlugin;
 using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.AiGatewayService.Approvals;
+using AICopilot.AiGatewayService.Queries.Sessions;
 using AICopilot.AiGatewayService.Runtime;
+using AICopilot.AiGatewayService.Skills;
 using AICopilot.AiGatewayService.Tools;
 using AICopilot.AiGatewayService.Workspaces;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
@@ -14,6 +16,7 @@ using AICopilot.Core.AiGateway.Aggregates.Artifacts;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
+using AICopilot.Core.AiGateway.Aggregates.Skills;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Core.AiGateway.Aggregates.Uploads;
 using AICopilot.Core.AiGateway.Ids;
@@ -297,6 +300,55 @@ public sealed class ToolRegistryGovernanceTests
             .Which.Should().BeEquivalentTo(new ApiProblemDescriptor(
                 AppProblemCodes.PlannerToolSchemaUnsupported,
                 "Tool registry bad_schema_tool input schema must be a JSON object."));
+    }
+
+    [Fact]
+    public async Task SkillDefinition_ShouldNarrowPlannerCatalog_AfterToolRegistryGuard()
+    {
+        var guard = new AgentPlanToolGuard(
+            CreateGuard(
+                CreateTool("generate_markdown_report", ToolProviderType.Artifact),
+                CreateTool("generate_pdf", ToolProviderType.Artifact, requiresApproval: true, riskLevel: AiToolRiskLevel.RequiresApproval),
+                CreateTool("disabled_tool", ToolProviderType.Artifact, isEnabled: false)),
+            new StubAgentPluginCatalog(),
+            CreateSkillGuard(CreateSkill("restricted_skill", ["generate_markdown_report", "disabled_tool"])));
+
+        var catalog = await guard.GetAvailableToolCatalogAsync(
+            UserId,
+            simulationOnly: false,
+            businessDomains: null,
+            CancellationToken.None,
+            "restricted_skill");
+
+        catalog.IsSuccess.Should().BeTrue();
+        catalog.Value!.Tools.Select(tool => tool.ToolCode)
+            .Should().BeEquivalentTo(["generate_markdown_report"]);
+    }
+
+    [Fact]
+    public async Task SkillDefinition_ShouldRejectPlannerStepOutsideSelectedSkill()
+    {
+        var guard = new AgentPlanToolGuard(
+            CreateGuard(
+                CreateTool("generate_markdown_report", ToolProviderType.Artifact),
+                CreateTool("generate_pdf", ToolProviderType.Artifact, requiresApproval: true, riskLevel: AiToolRiskLevel.RequiresApproval)),
+            new StubAgentPluginCatalog(),
+            CreateSkillGuard(CreateSkill("restricted_skill", ["generate_markdown_report"])));
+
+        var result = await guard.ValidateStepsAsync(
+            [new AgentStepPlanDto("PDF", "Generate PDF.", AgentStepType.ArtifactGeneration, "generate_pdf", true)],
+            AgentTaskType.ReportGeneration,
+            UserId,
+            simulationOnly: false,
+            businessDomains: null,
+            CancellationToken.None,
+            "restricted_skill");
+
+        result.IsSuccess.Should().BeFalse();
+        result.Errors.Should().ContainSingle()
+            .Which.Should().BeEquivalentTo(new ApiProblemDescriptor(
+                AppProblemCodes.AgentPlanToolDenied,
+                "Tool 'generate_pdf' is outside skill 'restricted_skill'."));
     }
 
     [Fact]
@@ -625,6 +677,36 @@ public sealed class ToolRegistryGovernanceTests
         task.ActiveRunAttemptId.Should().Be(attempt.Id);
         executionRepository.Items.Should().ContainSingle()
             .Which.RunAttemptId.Should().Be(attempt.Id);
+    }
+
+    [Fact]
+    public async Task AgentTaskRuntime_ShouldRejectToolOutsidePersistedSkill()
+    {
+        var (task, workspace) = CreateApprovedTask("generate_pdf", skillCode: "restricted_skill");
+        var executionRepository = new InMemoryRepository<ToolExecutionRecord>();
+        var invoked = false;
+        var runtime = CreateRuntime(
+            new InMemoryRepository<AgentTask>(task),
+            new InMemoryRepository<ArtifactWorkspace>(workspace),
+            new InMemoryRepository<ApprovalRequest>(),
+            executionRepository,
+            CreateGuard(CreateTool("generate_pdf", ToolProviderType.Artifact, requiresApproval: true, riskLevel: AiToolRiskLevel.RequiresApproval)),
+            toolExecutors: [new TestAgentToolExecutor(_ =>
+            {
+                invoked = true;
+                return true;
+            })],
+            skillDefinitionGuard: CreateSkillGuard(CreateSkill("restricted_skill", ["generate_markdown_report"])));
+
+        var result = await runtime.RunAsync(task, CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        invoked.Should().BeFalse();
+        task.Status.Should().Be(AgentTaskStatus.Failed);
+        var record = executionRepository.Items.Should().ContainSingle().Which;
+        record.Status.Should().Be(ToolExecutionStatus.Rejected);
+        record.ErrorCode.Should().Be(AppProblemCodes.AgentPlanToolDenied);
+        record.ErrorMessage.Should().Contain("outside skill");
     }
 
     [Fact]
@@ -1566,6 +1648,72 @@ public sealed class ToolRegistryGovernanceTests
     }
 
     [Fact]
+    public async Task AgentTaskRuntime_ShouldBlockMcpTool_WhenRuntimeSafetyPolicyRejectsIt()
+    {
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        var loader = new AgentPluginLoader([], provider);
+        var toolCode = AiToolIdentity.CreateRuntimeName(AiToolTargetType.McpServer, "runtime-mcp", "cloud_read");
+        var invoked = false;
+        loader.RegisterAgentPlugin(new GenericBridgePlugin
+        {
+            Name = "runtime-mcp",
+            Description = "MCP runtime bridge",
+            ChatExposureMode = ChatExposureMode.Advisory,
+            Tools =
+            [
+                new AiToolDefinition
+                {
+                    Name = toolCode,
+                    ToolName = "cloud_read",
+                    Kind = AiToolCallKind.Mcp,
+                    TargetType = AiToolTargetType.McpServer,
+                    TargetName = "runtime-mcp",
+                    ServerName = "runtime-mcp",
+                    ExternalSystemType = AiToolExternalSystemType.CloudReadOnly,
+                    CapabilityKind = AiToolCapabilityKind.ReadOnlyQuery,
+                    RiskLevel = AiToolRiskLevel.Low,
+                    ReadOnlyDeclared = false,
+                    McpReadOnlyHint = true,
+                    McpDestructiveHint = false,
+                    JsonSchema = JsonDocument.Parse("""{"type":"object"}""").RootElement.Clone(),
+                    ReturnJsonSchema = JsonDocument.Parse("""{"type":"object"}""").RootElement.Clone(),
+                    InvokeAsync = (_, _) =>
+                    {
+                        invoked = true;
+                        return ValueTask.FromResult<object?>("unexpected");
+                    }
+                }
+            ]
+        });
+        var (task, workspace) = CreateApprovedTask(toolCode, requiresApproval: true);
+        var approval = new ApprovalRequest(task.Id, AgentApprovalType.ToolCall, task.Steps.Single().Id.Value.ToString(), UserId, DateTimeOffset.UtcNow);
+        approval.Approve(UserId, "approved", DateTimeOffset.UtcNow);
+        var executionRepository = new InMemoryRepository<ToolExecutionRecord>();
+        var runtime = CreateRuntime(
+            new InMemoryRepository<AgentTask>(task),
+            new InMemoryRepository<ArtifactWorkspace>(workspace),
+            new InMemoryRepository<ApprovalRequest>(approval),
+            executionRepository,
+            CreateGuard(CreateTool(
+                toolCode,
+                ToolProviderType.Mcp,
+                ToolRegistrationTargetType.McpServer,
+                "runtime-mcp",
+                requiresApproval: true,
+                riskLevel: AiToolRiskLevel.RequiresApproval)),
+            toolExecutors: [new McpAgentToolExecutor(loader, provider)]);
+
+        var result = await runtime.RunAsync(task, CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        invoked.Should().BeFalse();
+        task.Status.Should().Be(AgentTaskStatus.Failed);
+        var record = executionRepository.Items.Should().ContainSingle().Which;
+        record.Status.Should().Be(ToolExecutionStatus.Failed);
+        record.ErrorCode.Should().Be(AppProblemCodes.ToolBlocked);
+    }
+
+    [Fact]
     public async Task AgentTaskRuntime_ShouldEvaluateRagAdminAccessFromTaskOwner()
     {
         var knowledgeBaseId = Guid.NewGuid();
@@ -1588,6 +1736,133 @@ public sealed class ToolRegistryGovernanceTests
         accessChecker.ObservedUserId.Should().Be(UserId);
         accessChecker.ObservedIsAdmin.Should().BeTrue();
         executionRepository.Items.Should().ContainSingle().Which.Status.Should().Be(ToolExecutionStatus.Succeeded);
+    }
+
+    [Fact]
+    public async Task GetSessionTimeline_ShouldExposeRagStepSummaryWithoutRawOutput()
+    {
+        var knowledgeBaseId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var session = new Session(UserId, ConversationTemplateId.New());
+        var task = new AgentTask(
+            session.Id,
+            UserId,
+            "RAG timeline summary",
+            "RAG timeline summary",
+            AgentTaskType.DataAnalysis,
+            AgentTaskRiskLevel.Low,
+            null,
+            CreateRagPlanJson(knowledgeBaseId),
+            now);
+        var step = task.AddStep(
+            "Search RAG",
+            "Search knowledge base.",
+            AgentStepType.DataQuery,
+            "rag_search",
+            requiresApproval: false,
+            now);
+        var sourceText = $"First paragraph\n{new string('x', 260)}";
+        step.Start(now.AddSeconds(1));
+        step.Complete(JsonSerializer.Serialize(new
+        {
+            status = "completed",
+            lowConfidence = true,
+            sources = new[]
+            {
+                new
+                {
+                    knowledgeBaseId,
+                    documentId = 42,
+                    documentName = "Device manual.pdf",
+                    chunkIndex = 3,
+                    score = 0.72,
+                    isLowConfidence = false,
+                    lowConfidenceReason = (string?)null,
+                    text = sourceText
+                }
+            }
+        }, JsonSerializerOptions.Web), now.AddSeconds(2));
+
+        var timelineEvent = MessageEvent.FromProjection(
+            session.Id,
+            1,
+            MessageEventType.AgentTaskStepCompleted,
+            now.AddSeconds(2),
+            agentTaskId: task.Id,
+            agentStepId: step.Id);
+        var handler = new GetSessionTimelineQueryHandler(
+            new InMemoryRepository<Session>(session),
+            new InMemoryRepository<MessageEvent>(timelineEvent),
+            new InMemoryRepository<AgentTask>(task),
+            new InMemoryRepository<ApprovalRequest>(),
+            new InMemoryRepository<ArtifactWorkspace>(),
+            new TestCurrentUser(UserId));
+
+        var result = await handler.Handle(new GetSessionTimelineQuery(session.Id.Value), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var item = result.Value!.Items.Should().ContainSingle().Which;
+        item.AgentStepOutputKind.Should().Be("RagSearch");
+        item.AgentStepResultCount.Should().Be(1);
+        item.AgentStepLowConfidence.Should().BeTrue();
+        var source = item.AgentStepSources.Should().ContainSingle().Which;
+        source.KnowledgeBaseId.Should().Be(knowledgeBaseId);
+        source.DocumentId.Should().Be(42);
+        source.DocumentName.Should().Be("Device manual.pdf");
+        source.ChunkIndex.Should().Be(3);
+        source.Score.Should().Be(0.72);
+        source.TextPreview.Should().NotContain("\n");
+        source.TextPreview.Should().EndWith("...");
+        source.TextPreview!.Length.Should().BeLessThanOrEqualTo(220);
+    }
+
+    [Fact]
+    public async Task GetSessionTimeline_ShouldResolveApprovalCurrentStateFromAggregate()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var session = new Session(UserId, ConversationTemplateId.New());
+        var task = new AgentTask(
+            session.Id,
+            UserId,
+            "Approve current state",
+            "Approve current state",
+            AgentTaskType.DataAnalysis,
+            AgentTaskRiskLevel.Low,
+            null,
+            """{"steps":[]}""",
+            now);
+        var approval = new ApprovalRequest(
+            task.Id,
+            AgentApprovalType.Plan,
+            task.Id.Value.ToString(),
+            UserId,
+            now.AddSeconds(1));
+        approval.Approve(UserId, "approved", now.AddSeconds(2));
+        var timelineEvent = MessageEvent.FromProjection(
+            session.Id,
+            1,
+            MessageEventType.ApprovalDecided,
+            now.AddSeconds(2),
+            agentTaskId: task.Id,
+            approvalRequestId: approval.Id,
+            payloadJson: """{"approvalStatus":"Pending"}""");
+        var handler = new GetSessionTimelineQueryHandler(
+            new InMemoryRepository<Session>(session),
+            new InMemoryRepository<MessageEvent>(timelineEvent),
+            new InMemoryRepository<AgentTask>(task),
+            new InMemoryRepository<ApprovalRequest>(approval),
+            new InMemoryRepository<ArtifactWorkspace>(),
+            new TestCurrentUser(UserId));
+
+        var result = await handler.Handle(new GetSessionTimelineQuery(session.Id.Value), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var item = result.Value!.Items.Should().ContainSingle().Which;
+        item.EventType.Should().Be(nameof(MessageEventType.ApprovalDecided));
+        item.ApprovalRequestId.Should().Be(approval.Id.Value);
+        item.ApprovalStatus.Should().Be(nameof(AgentApprovalStatus.Approved));
+        item.ApprovalDecidedAt.Should().Be(now.AddSeconds(2));
+        item.ApprovalTargetName.Should().Be(task.Title);
     }
 
     [Fact]
@@ -1821,7 +2096,8 @@ public sealed class ToolRegistryGovernanceTests
         IRepository<AgentTaskRunAttempt>? runAttemptRepository = null,
         IEnumerable<IKnowledgeBaseAccessChecker>? knowledgeBaseAccessCheckers = null,
         IKnowledgeRetrievalService? knowledgeRetrievalService = null,
-        IIdentityAccessService? identityAccessService = null)
+        IIdentityAccessService? identityAccessService = null,
+        SkillDefinitionGuard? skillDefinitionGuard = null)
     {
         return new AgentTaskRuntime(
             taskRepository,
@@ -1840,10 +2116,14 @@ public sealed class ToolRegistryGovernanceTests
             identityAccessService ?? new StubIdentityAccessService([]),
             guard,
             new AgentAuditRecorder(new CapturingAuditLogWriter()),
-            toolExecutors ?? []);
+            toolExecutors ?? [],
+            skillDefinitionGuard: skillDefinitionGuard);
     }
 
-    private static (AgentTask Task, ArtifactWorkspace Workspace) CreateApprovedTask(string toolCode, bool requiresApproval = false)
+    private static (AgentTask Task, ArtifactWorkspace Workspace) CreateApprovedTask(
+        string toolCode,
+        bool requiresApproval = false,
+        string? skillCode = null)
     {
         var now = DateTimeOffset.UtcNow;
         var task = new AgentTask(
@@ -1854,7 +2134,7 @@ public sealed class ToolRegistryGovernanceTests
             AgentTaskType.ReportGeneration,
             AgentTaskRiskLevel.Low,
             null,
-            CreatePlanJson(toolCode),
+            CreatePlanJson(toolCode, skillCode),
             now);
         task.AddStep("生成图表数据", "生成图表数据。", AgentStepType.ChartGeneration, toolCode, requiresApproval, now);
         var workspace = new ArtifactWorkspace(
@@ -1919,32 +2199,36 @@ public sealed class ToolRegistryGovernanceTests
         return (task, workspace);
     }
 
-    private static string CreatePlanJson(string toolCode)
+    private static string CreatePlanJson(string toolCode, string? skillCode = null)
     {
-        return $$"""
+        var plan = new
         {
-          "version": 1,
-          "plannerTemplateCode": "agent_planner",
-          "goal": "生成报告",
-          "taskType": "ReportGeneration",
-          "riskLevel": "Low",
-          "uploadIds": [],
-          "knowledgeBaseIds": [],
-          "steps": [
+            version = 1,
+            plannerTemplateCode = "agent_planner",
+            goal = "生成报告",
+            taskType = "ReportGeneration",
+            riskLevel = "Low",
+            uploadIds = Array.Empty<Guid>(),
+            knowledgeBaseIds = Array.Empty<Guid>(),
+            steps = new[]
             {
-              "title": "生成图表数据",
-              "description": "生成图表数据。",
-              "stepType": "ChartGeneration",
-              "toolCode": "{{toolCode}}",
-              "requiresApproval": false
-            }
-          ],
-          "runtimeSettings": {
-            "agentPlanningHistoryCount": 30,
-            "contextTokenLimit": 12000
-          }
-        }
-        """;
+                new
+                {
+                    title = "生成图表数据",
+                    description = "生成图表数据。",
+                    stepType = "ChartGeneration",
+                    toolCode,
+                    requiresApproval = false
+                }
+            },
+            runtimeSettings = new
+            {
+                agentPlanningHistoryCount = 30,
+                contextTokenLimit = 12000
+            },
+            skillCode
+        };
+        return JsonSerializer.Serialize(plan, JsonSerializerOptions.Web);
     }
 
     private static string CreateRagPlanJson(Guid knowledgeBaseId)
@@ -2061,6 +2345,29 @@ public sealed class ToolRegistryGovernanceTests
     private static AgentPlanToolGuard CreatePlanToolGuard(ToolRegistryGuard guard, params AiToolDefinition[] runtimeTools)
     {
         return new AgentPlanToolGuard(guard, new StubAgentPluginCatalog(runtimeTools));
+    }
+
+    private static SkillDefinitionGuard CreateSkillGuard(params SkillDefinition[] skills)
+    {
+        return new SkillDefinitionGuard(new InMemoryRepository<SkillDefinition>(skills));
+    }
+
+    private static SkillDefinition CreateSkill(string skillCode, IReadOnlyCollection<string> allowedToolCodes)
+    {
+        return new SkillDefinition(
+            skillCode,
+            skillCode,
+            "test skill",
+            allowedToolCodes,
+            AiToolRiskLevel.Low,
+            "None",
+            [],
+            [],
+            ["markdown"],
+            isEnabled: true,
+            isBuiltIn: false,
+            version: 1,
+            DateTimeOffset.UtcNow);
     }
 
     private static Task<Result<IReadOnlyCollection<AgentStepPlanDto>>> ValidateSingleAsync(

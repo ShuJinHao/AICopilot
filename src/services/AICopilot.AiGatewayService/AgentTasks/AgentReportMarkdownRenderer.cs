@@ -21,9 +21,6 @@ internal static class AgentReportMarkdownRenderer
         builder.AppendLine("## Business Query Results");
         builder.AppendLine(BuildMarkdownBusinessQueryResults(report.BusinessQueryResults ?? []));
         builder.AppendLine();
-        builder.AppendLine("## Cloud Sandbox Query Results");
-        builder.AppendLine(BuildMarkdownCloudSandboxQueryResults(report.CloudSandboxQueryResults ?? []));
-        builder.AppendLine();
         builder.AppendLine("## Metrics Summary");
         builder.AppendLine(BuildMarkdownMetrics(report.Metrics ?? []));
         builder.AppendLine();
@@ -95,26 +92,6 @@ internal static class AgentReportMarkdownRenderer
         {
             builder.AppendLine(
                 $"| {AgentReportFormatting.EscapeMarkdownCell(result.DataSourceName)} | {AgentReportFormatting.EscapeMarkdownCell(result.SourceMode)} | {AgentReportFormatting.EscapeMarkdownCell(AgentReportFormatting.FormatBool(result.IsSimulation))} | {AgentReportFormatting.EscapeMarkdownCell(result.SourceLabel)} | {AgentReportFormatting.EscapeMarkdownCell(result.QueryHash)} | {result.RowCount.ToString(CultureInfo.InvariantCulture)} | {AgentReportFormatting.EscapeMarkdownCell(AgentReportFormatting.FormatBool(result.IsTruncated))} | {AgentReportFormatting.EscapeMarkdownCell(result.ArtifactId?.ToString() ?? string.Empty)} |");
-        }
-
-        return builder.ToString();
-    }
-
-    private static string BuildMarkdownCloudSandboxQueryResults(
-        IReadOnlyList<AgentCloudSandboxQueryResultSummaryDto> cloudSandboxQueryResults)
-    {
-        if (cloudSandboxQueryResults.Count == 0)
-        {
-            return "- No CloudReadonlySandbox query result.";
-        }
-
-        var builder = new StringBuilder();
-        builder.AppendLine("| Trial | Endpoint | Boundary | Source Mode | Sandbox | Source Label | Query Hash | Result Hash | Rows | Truncated | Approval |");
-        builder.AppendLine("| --- | --- | --- | --- | --- | --- | --- | --- | ---: | --- | --- |");
-        foreach (var result in cloudSandboxQueryResults)
-        {
-            builder.AppendLine(
-                $"| {AgentReportFormatting.EscapeMarkdownCell(result.TrialMode ?? string.Empty)} | {AgentReportFormatting.EscapeMarkdownCell(result.EndpointCode)} | {AgentReportFormatting.EscapeMarkdownCell(result.Boundary ?? string.Empty)} | {AgentReportFormatting.EscapeMarkdownCell(result.SourceMode)} | {AgentReportFormatting.EscapeMarkdownCell(AgentReportFormatting.FormatBool(result.IsSandbox))} | {AgentReportFormatting.EscapeMarkdownCell(result.SourceLabel)} | {AgentReportFormatting.EscapeMarkdownCell(result.QueryHash)} | {AgentReportFormatting.EscapeMarkdownCell(result.ResultHash)} | {result.RowCount.ToString(CultureInfo.InvariantCulture)} | {AgentReportFormatting.EscapeMarkdownCell(AgentReportFormatting.FormatBool(result.IsTruncated))} | {AgentReportFormatting.EscapeMarkdownCell(result.ApprovalStatus ?? string.Empty)} |");
         }
 
         return builder.ToString();

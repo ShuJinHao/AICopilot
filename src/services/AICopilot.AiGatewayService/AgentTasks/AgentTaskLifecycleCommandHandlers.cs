@@ -1,6 +1,7 @@
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
+using AICopilot.AiGatewayService.Sessions;
 using AICopilot.Core.AiGateway.Specifications.AgentTasks;
 using AICopilot.Core.AiGateway.Specifications.Approvals;
 using AICopilot.Core.AiGateway.Specifications.Artifacts;
@@ -17,7 +18,8 @@ public sealed class ApproveAgentTaskPlanCommandHandler(
     IRepository<ApprovalRequest> approvalRepository,
     IReadRepository<ArtifactWorkspace> workspaceRepository,
     AgentAuditRecorder auditRecorder,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    MessageTimelineProjectionWriter? timelineProjectionWriter = null)
     : ICommandHandler<ApproveAgentTaskPlanCommand, Result<AgentTaskDto>>
 {
     public async Task<Result<AgentTaskDto>> Handle(ApproveAgentTaskPlanCommand request, CancellationToken cancellationToken)
@@ -52,6 +54,10 @@ public sealed class ApproveAgentTaskPlanCommandHandler(
         {
             approval.Approve(userId, "Plan approved.", now);
             approvalRepository.Update(approval);
+            if (timelineProjectionWriter is not null)
+            {
+                await timelineProjectionWriter.StageApprovalDecidedAsync(task, approval, cancellationToken);
+            }
         }
 
         if (task.Status == AgentTaskStatus.WaitingPlanApproval)

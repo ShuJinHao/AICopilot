@@ -412,60 +412,18 @@ public sealed class AgentRunQueuePermissionTests
     }
 
     [Fact]
-    public async Task RunQueueEndpoints_ShouldRequireOperationsPermissions()
+    public async Task RunQueueOperationsEndpoints_ShouldStayHiddenFromPublicChatApi()
     {
         await AuthenticateAsAdminAsync();
         using var adminSummary = await _fixture.HttpClient.GetAsync("/api/aigateway/agent/run-queue/summary");
-        adminSummary.StatusCode.Should().Be(HttpStatusCode.OK);
+        adminSummary.StatusCode.Should().Be(HttpStatusCode.NotFound);
         using var adminWorker = await _fixture.HttpClient.GetAsync("/api/aigateway/agent/worker/status");
-        adminWorker.StatusCode.Should().Be(HttpStatusCode.OK);
-
-        var workerOnlyRole = await CreateRoleAsync(
-            $"Batch10WorkerOnly-{Guid.NewGuid():N}",
-            ["AiGateway.WorkerStatus.Read"]);
-        var workerOnlyUser = await CreateUserAsync($"batch10-worker-only-{Guid.NewGuid():N}", workerOnlyRole.RoleName);
-        await AuthenticateAsync(workerOnlyUser.UserName, "Password123!");
-        using var missingRunQueue = await _fixture.HttpClient.GetAsync("/api/aigateway/agent/run-queue/summary");
-        missingRunQueue.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        var missingRunQueueProblem = await ReadJsonAsync<ProblemDetailsDto>(missingRunQueue);
-        missingRunQueueProblem.MissingPermissions.Should().Contain("AiGateway.RunQueue.Read");
-
-        await AuthenticateAsAdminAsync();
-        var readOnlyRole = await CreateRoleAsync(
-            $"Batch10RunQueueReadOnly-{Guid.NewGuid():N}",
-            ["AiGateway.RunQueue.Read"]);
-        var readOnlyUser = await CreateUserAsync($"batch10-runqueue-only-{Guid.NewGuid():N}", readOnlyRole.RoleName);
-        await AuthenticateAsync(readOnlyUser.UserName, "Password123!");
-        using var missingWorker = await _fixture.HttpClient.GetAsync("/api/aigateway/agent/worker/status");
-        missingWorker.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        var missingWorkerProblem = await ReadJsonAsync<ProblemDetailsDto>(missingWorker);
-        missingWorkerProblem.MissingPermissions.Should().Contain("AiGateway.WorkerStatus.Read");
-        using var missingManage = await _fixture.HttpClient.PostAsJsonAsync(
+        adminWorker.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        using var adminDeadLetter = await _fixture.HttpClient.PostAsJsonAsync(
             $"/api/aigateway/agent/run-queue/{Guid.NewGuid():D}/dead-letter",
             new { reason = "test" },
             JsonOptions);
-        missingManage.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        var missingManageProblem = await ReadJsonAsync<ProblemDetailsDto>(missingManage);
-        missingManageProblem.MissingPermissions.Should().Contain("AiGateway.RunQueue.Manage");
-    }
-
-    private async Task<CreatedRoleDto> CreateRoleAsync(string roleName, IReadOnlyCollection<string> permissions)
-    {
-        return await PostJsonAsync<CreatedRoleDto>("/api/identity/role", new
-        {
-            roleName,
-            permissions
-        });
-    }
-
-    private async Task<CreatedUserDto> CreateUserAsync(string userName, string roleName)
-    {
-        return await PostJsonAsync<CreatedUserDto>("/api/identity/user", new
-        {
-            userName,
-            password = "Password123!",
-            roleName
-        });
+        adminDeadLetter.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     private async Task AuthenticateAsAdminAsync()
@@ -491,31 +449,5 @@ public sealed class AgentRunQueuePermissionTests
         return JsonSerializer.Deserialize<T>(body, JsonOptions)!;
     }
 
-    private static async Task<T> ReadJsonAsync<T>(HttpResponseMessage response)
-    {
-        return (await response.Content.ReadFromJsonAsync<T>(JsonOptions))!;
-    }
-
     private sealed record LoginUserDto(string UserName, string Token);
-
-    private sealed record CreatedRoleDto(
-        string RoleId,
-        string RoleName,
-        IReadOnlyCollection<string> Permissions,
-        bool IsSystemRole,
-        int AssignedUserCount);
-
-    private sealed record CreatedUserDto(
-        string UserId,
-        string UserName,
-        string RoleName,
-        bool IsEnabled,
-        string Status);
-
-    private sealed record ProblemDetailsDto(
-        string? Title,
-        string? Detail,
-        int? Status,
-        string? Code,
-        IReadOnlyCollection<string> MissingPermissions);
 }

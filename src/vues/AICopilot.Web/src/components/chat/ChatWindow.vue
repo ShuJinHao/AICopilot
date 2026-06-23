@@ -1,17 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
-  ArrowUp,
   Check,
   ChevronRight,
   Download,
   Eye,
   FileUp,
   FolderOpen,
-  History,
   ListChecks,
   PanelLeftOpen,
-  PanelRightOpen,
   Play,
   RefreshCw,
   Send,
@@ -23,21 +20,10 @@ import {
 import AiTag from '@/components/ai/AiTag.vue'
 import { useAgentWorkbench } from '@/composables/useAgentWorkbench'
 import { useChatStore } from '@/stores/chatStore'
-import { useUiLayoutStore, type AgentWorkbenchTab } from '@/stores/uiLayoutStore'
+import { useUiLayoutStore } from '@/stores/uiLayoutStore'
 import MessageItem from './MessageItem.vue'
 import SessionList from './SessionList.vue'
-
-const store = useChatStore()
-const uiLayoutStore = useUiLayoutStore()
-const inputValue = ref('')
-const agentGoal = ref('')
-const cloudSandboxControlledGoal = ref('')
-const cloudProductionControlledGoal = ref('')
-const selectedTrialScenarioId = ref('')
-const fileInput = ref<HTMLInputElement | null>(null)
-const scrollContainer = ref<HTMLElement | null>(null)
-const isMobile = ref(typeof window !== 'undefined' ? window.innerWidth < 1024 : false)
-const sessionDrawerVisible = ref(false)
+import type { AgentApprovalRequest } from '@/types/protocols'
 
 type AgentPlanPreview = {
   plannerMode?: string
@@ -47,49 +33,13 @@ type AgentPlanPreview = {
   toolCatalogVersion?: number
   visibleToolCount?: number
   toolRiskSummary?: Record<string, number>
-  mockMcpOnly?: boolean
-  toolApprovalCheckpoints?: string[]
-  businessDomains?: string[]
-  artifactTypes?: string[]
-  forcedStepCodes?: string[]
   approvalCheckpoints?: string[]
-  trialScenarioId?: string | null
-  trialScenarioTitle?: string | null
-  isSimulationTrial?: boolean
-  isCloudSandboxControlledTrial?: boolean
-  cloudSandboxGoalIntent?: {
-    intentId?: string
-    endpointCodes?: string[]
-    maxRows?: number
-    analysisType?: string
-    requiresToolApproval?: boolean
-    requiresFinalApproval?: boolean
-    boundary?: string
-    timeRange?: {
-      from?: string | null
-      to?: string | null
-    }
-  } | null
-  isCloudProductionControlledPilotTrial?: boolean
-  cloudProductionGoalIntent?: {
-    intentId?: string
-    endpointCodes?: string[]
-    maxRows?: number
-    analysisType?: string
-    requiresToolApproval?: boolean
-    requiresFinalApproval?: boolean
-    timeRange?: {
-      from?: string | null
-      to?: string | null
-    }
-  } | null
+  forcedStepCodes?: string[]
   queryMode?: string | null
   dataSourceSummaries?: Array<{
     name?: string
     sourceMode?: string
-    isSimulation?: boolean
     sourceLabel?: string
-    businessDomain?: string | null
   }>
   plannerSafetySummary?: {
     planSource?: string
@@ -97,23 +47,32 @@ type AgentPlanPreview = {
     plannerModelSummary?: string | null
     plannerToolCatalogVersion?: number
     availableToolCount?: number
-    isSimulationOnly?: boolean
-    requiresDataApproval?: boolean
     toolRiskSummary?: Record<string, number>
     mockMcpOnly?: boolean
   }
 }
 
+type TagTone = 'success' | 'warning' | 'dark' | 'lime' | 'danger' | 'neutral' | 'teal' | 'blue'
+
+const store = useChatStore()
+const uiLayoutStore = useUiLayoutStore()
+
+const inputValue = ref('')
+const agentGoal = ref('')
+const fileInput = ref<HTMLInputElement | null>(null)
+const scrollContainer = ref<HTMLElement | null>(null)
+const isMobile = ref(typeof window !== 'undefined' ? window.innerWidth < 1024 : false)
+const sessionDrawerVisible = ref(false)
+const preserveScrollAnchor = ref(false)
+
 const {
   latestTask,
-  taskHistory,
   taskSteps,
   taskArtifacts,
   draftArtifacts,
   finalArtifacts,
   currentArtifactPreview,
   pendingAgentApprovals,
-  auditSummary,
   completedStepCount,
   blockedStep,
   workspaceFileCount,
@@ -126,79 +85,104 @@ const {
   chartBars,
   onsiteStatus,
   agentStageCards,
-  approvalCount,
-  widgetCount,
   canCreatePlan,
   canRunTask,
   canContinueTask,
   canSubmitFinalReview,
-  canFinalizeWorkspace,
-  loginSource,
-  cloudEmployeeNo
+  canFinalizeWorkspace
 } = useAgentWorkbench()
 
 const currentTitle = computed(() => store.currentSession?.title || '新会话')
-const isInputDisabled = computed(() => store.isStreaming || store.isWaitingForApproval || !store.selectedModelId)
-const trialScenarios = computed(() => store.agentTrialScenarios)
-const selectedTrialScenario = computed(() =>
-  trialScenarios.value.find((scenario) => scenario.id === selectedTrialScenarioId.value) ?? null
-)
+const isInputDisabled = computed(() => store.isStreaming || store.isWaitingForApproval)
 const latestPlan = computed<AgentPlanPreview | null>(() => parseAgentPlan(latestTask.value?.planJson))
-const latestPlanMode = computed(() => latestPlan.value?.plannerMode || 'Pending')
 const latestPlanDataSource = computed(() => latestPlan.value?.dataSourceSummaries?.[0] ?? null)
-const latestPlanApprovalCount = computed(() => latestPlan.value?.approvalCheckpoints?.length ?? 0)
-const latestPlanForcedSteps = computed(() => latestPlan.value?.forcedStepCodes ?? [])
 const latestPlanToolCatalogVersion = computed(
-  () => latestPlan.value?.toolCatalogVersion ?? latestPlan.value?.plannerToolCatalogVersion
+  () => latestPlan.value?.toolCatalogVersion ?? latestPlan.value?.plannerToolCatalogVersion ?? latestPlan.value?.plannerSafetySummary?.plannerToolCatalogVersion
 )
 const latestPlanVisibleToolCount = computed(
-  () => latestPlan.value?.visibleToolCount ?? latestPlan.value?.plannerAvailableToolCount ?? 0
+  () => latestPlan.value?.visibleToolCount ?? latestPlan.value?.plannerAvailableToolCount ?? latestPlan.value?.plannerSafetySummary?.availableToolCount ?? 0
 )
 const latestPlanRiskSummary = computed(
   () => latestPlan.value?.toolRiskSummary ?? latestPlan.value?.plannerSafetySummary?.toolRiskSummary ?? {}
 )
 const latestPlanRiskLine = computed(() => {
   const entries = Object.entries(latestPlanRiskSummary.value)
-  return entries.length ? entries.map(([risk, count]) => `${risk}:${count}`).join(' / ') : 'No risk summary'
+  return entries.length ? entries.map(([risk, count]) => `${risk}:${count}`).join(' / ') : '无风险摘要'
 })
-const latestPlanMockMcpOnly = computed(
-  () => latestPlan.value?.mockMcpOnly ?? latestPlan.value?.plannerSafetySummary?.mockMcpOnly ?? false
+const latestPlanSource = computed(() =>
+  sourceModeLabel(
+    latestPlanDataSource.value?.sourceLabel ||
+    latestPlan.value?.plannerSafetySummary?.planSource ||
+    latestPlanDataSource.value?.sourceMode ||
+    'FreeGoal'
+  )
 )
-const latestPlanIsCloudSandbox = computed(
-  () =>
-    latestPlan.value?.queryMode === 'CloudReadonlySandbox' ||
-    latestPlan.value?.isCloudSandboxControlledTrial === true ||
-    latestPlan.value?.trialScenarioId?.startsWith('cloud-sandbox-')
+const latestPlanIsCloudReadonly = computed(() =>
+  latestPlan.value?.queryMode?.includes('CloudReadonly') ||
+  latestPlanDataSource.value?.sourceMode?.includes('CloudReadonly') ||
+  false
 )
-const latestPlanIsCloudSandboxControlled = computed(
-  () => latestPlan.value?.isCloudSandboxControlledTrial === true
+const hasInlineAgentRun = computed(() =>
+  Boolean(
+    latestTask.value ||
+    taskSteps.value.length ||
+    pendingAgentApprovals.value.length ||
+    taskArtifacts.value.length ||
+    store.currentWorkspace ||
+    store.agentErrorMessage
+  )
 )
-const latestCloudSandboxIntent = computed(() => latestPlan.value?.cloudSandboxGoalIntent ?? null)
-const trialCampaign = computed(() => store.currentTrialCampaign)
-const trialSummary = computed(() => trialCampaign.value?.summary ?? null)
-const trialReadiness = computed(() => store.currentPilotReadiness)
-const trialEvidencePackage = computed(() => store.currentTrialEvidencePackage)
-const cloudReadonlyPilotReadiness = computed(() => store.currentCloudReadonlyPilotReadiness)
-const cloudReadonlyPilotConfigPackage = computed(() =>
-  store.currentCloudReadonlyPilotConfigPackage ?? cloudReadonlyPilotReadiness.value?.configSummary ?? null
+const timelineEventItems = computed(() =>
+  store.timelineEvents
+    .filter((event) => event.eventType !== 'Message')
+    .slice(-12)
+    .map((event) => {
+      const status = resolveTimelineStatus(event)
+      const sources = event.agentStepSources ?? []
+      return {
+        key: `${event.sequence}:${event.eventType}`,
+        time: formatTimelineTime(event.createdAt),
+        title: timelineEventTitle(event),
+        subtitle: timelineEventSubtitle(event),
+        status,
+        tone: timelineTone(status, event.eventType),
+        outputKind: event.agentStepOutputKind,
+        resultCount: event.agentStepResultCount ?? sources.length,
+        lowConfidence: event.agentStepLowConfidence,
+        sources
+      }
+    })
 )
-const pilotApprovalRehearsal = computed(() => store.currentPilotApprovalRehearsal)
-const pilotContractRehearsal = computed(() => store.currentPilotContractRehearsal)
-const cloudReadonlyProductionPilotStatus = computed(() => store.currentCloudReadonlyProductionPilotStatus)
-const cloudReadonlyProductionPilotWindow = computed(() => store.currentCloudReadonlyProductionPilotWindow)
-const cloudReadonlyProductionPilotRun = computed(() => store.currentCloudReadonlyProductionPilotRun)
-const cloudReadonlyProductionControlledStatus = computed(() => store.currentCloudReadonlyProductionControlledStatus)
-const cloudReadonlyProductionControlledPlan = computed(() => store.currentCloudReadonlyProductionControlledPlan)
-const cloudReadonlyProductionControlledRun = computed(() => store.currentCloudReadonlyProductionControlledRun)
-const cloudReadonlyProductionOperationsStatus = computed(() => store.currentCloudReadonlyProductionOperationsStatus)
-const productionPilotRunLedger = computed(() => store.currentProductionPilotRunLedger)
-const productionPilotGaReadiness = computed(() => store.currentProductionPilotGaReadiness)
-const cloudProductionControlledIntent = computed(
-  () =>
-    cloudReadonlyProductionControlledPlan.value?.intent ??
-    latestPlan.value?.cloudProductionGoalIntent ??
-    null
+const timelineEventCount = computed(() =>
+  store.timelineEvents.filter((event) => event.eventType !== 'Message').length
 )
+const latestTimelineSummary = computed(() => {
+  const items = timelineEventItems.value
+  return items.length ? items[items.length - 1]!.title : '暂无执行事件'
+})
+const inlineRunSubtitle = computed(() => {
+  if (store.currentWorkspace) {
+    return `${workspaceStatus.value.label} · ${taskArtifacts.value.length} 个产物`
+  }
+
+  if (latestTask.value?.workspaceCode) {
+    return '执行上下文已建立'
+  }
+
+  return '目标和计划将随对话推进'
+})
+const artifactHeaderMeta = computed(() =>
+  store.currentWorkspace
+    ? `${taskArtifacts.value.length} 个产物 · ${workspaceFileCount.value} 个文件`
+    : '等待产物生成'
+)
+
+const suggestions = [
+  '查看 DEV-001 最近 24 小时设备日志，并给出根因线索',
+  '列出 LINE-A 当前设备状态，生成关键指标和记录摘要',
+  '查询 DEV-001 配方版本历史，只做只读分析',
+  '根据最近产能数据说明异常波动，不执行任何控制动作'
+]
 
 function parseAgentPlan(planJson?: string | null): AgentPlanPreview | null {
   if (!planJson) return null
@@ -210,23 +194,6 @@ function parseAgentPlan(planJson?: string | null): AgentPlanPreview | null {
   }
 }
 
-const suggestions = [
-  '查看 DEV-001 最近 24 小时设备日志，并给出根因线索',
-  '列出 LINE-A 当前设备状态，生成关键指标和记录摘要',
-  '查询 DEV-001 配方版本历史，只做只读分析',
-  '根据最近产能数据说明异常波动，不执行任何控制动作'
-]
-
-const agentTabs = computed<Array<{ value: AgentWorkbenchTab; label: string; count?: number }>>(() => [
-  { value: 'plan', label: '计划', count: latestTask.value ? 1 : 0 },
-  { value: 'steps', label: '步骤', count: taskSteps.value.length },
-  { value: 'approvals', label: '审批', count: pendingAgentApprovals.value.length },
-  { value: 'artifacts', label: '产物', count: taskArtifacts.value.length },
-  { value: 'audit', label: '审计', count: auditSummary.value.length },
-  { value: 'trial', label: '试用', count: trialSummary.value?.scenarioRunCount ?? store.trialCampaigns.length },
-  { value: 'boundary', label: '边界' }
-])
-
 function statusTone(type?: string) {
   if (type === 'success') return 'success'
   if (type === 'warning') return 'warning'
@@ -234,13 +201,140 @@ function statusTone(type?: string) {
   return 'neutral'
 }
 
-function setAgentTab(tab: AgentWorkbenchTab) {
-  uiLayoutStore.setAgentWorkbenchTab(tab)
+function formatTimelineTime(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return '--:--'
+  }
+
+  return date.toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit'
+  })
 }
 
-function handleModelChange(event: Event) {
-  const value = (event.target as HTMLSelectElement).value
-  store.setSelectedModel(value || null)
+function approvalTypeLabel(type?: string | null) {
+  if (type === 'Plan') return '计划'
+  if (type === 'Tool') return '工具'
+  if (type === 'ToolCall') return '工具'
+  if (type === 'FinalOutput') return '最终输出'
+  if (type === 'Artifact') return '产物'
+  return '审批'
+}
+
+function approvalDisplayTitle(approval: AgentApprovalRequest) {
+  if (approval.type === 'Plan') return '确认执行计划'
+  if (approval.type === 'FinalOutput') return '确认最终输出'
+  if (approval.type === 'Artifact') return '确认产物'
+  if (approval.type === 'Tool' || approval.type === 'ToolCall') return '需要确认后继续'
+  return '人工审批请求'
+}
+
+function approvalRiskLabel(riskLevel?: string | null) {
+  const normalized = riskLevel?.toLowerCase()
+  if (normalized === 'critical') return '关键风险'
+  if (normalized === 'high') return '高风险'
+  if (normalized === 'medium') return '中风险'
+  if (normalized === 'low') return '低风险'
+  return riskLevel || '待评估'
+}
+
+function approvalMetaLine(approval: AgentApprovalRequest) {
+  return `${approvalRiskLabel(approval.riskLevel)} · ${approval.reason || '等待人工复核'}`
+}
+
+function timelineEventTitle(event: typeof store.timelineEvents[number]) {
+  switch (event.eventType) {
+    case 'AgentTaskPlanCreated':
+      return '计划已生成'
+    case 'ApprovalRequested':
+      return `${approvalTypeLabel(event.approvalType)}待审批`
+    case 'ApprovalDecided':
+      return `${approvalTypeLabel(event.approvalType)}已处理`
+    case 'AgentTaskStepStarted':
+      return '步骤开始'
+    case 'AgentTaskStepCompleted':
+      return '步骤完成'
+    case 'ArtifactReady':
+      return '产物就绪'
+    case 'FinalOutputReady':
+      return '最终输出'
+    default:
+      return event.eventType
+  }
+}
+
+function timelineEventSubtitle(event: typeof store.timelineEvents[number]) {
+  return event.agentStepTitle ||
+    event.approvalTargetName ||
+    event.artifactName ||
+    event.agentTaskTitle ||
+    event.workspaceCode ||
+    event.agentTaskGoal ||
+    '执行事件'
+}
+
+function resolveTimelineStatus(event: typeof store.timelineEvents[number]) {
+  return event.approvalStatus ||
+    event.agentStepStatus ||
+    event.artifactStatus ||
+    event.workspaceStatus ||
+    event.agentTaskStatus ||
+    'Recorded'
+}
+
+function formatTimelineScore(score?: number | null) {
+  if (typeof score !== 'number' || Number.isNaN(score)) {
+    return '相关度 -'
+  }
+
+  return `相关度 ${Math.round(score * 100)}%`
+}
+
+function timelineTone(status: string, eventType: string): TagTone {
+  if (['Approved', 'Completed', 'Final', 'Finalized'].includes(status) || eventType === 'FinalOutputReady') {
+    return 'success'
+  }
+
+  if (['Rejected', 'Failed', 'Cancelled', 'Expired'].includes(status)) {
+    return 'danger'
+  }
+
+  if (['Pending', 'Running', 'WaitingPlanApproval', 'WaitingToolApproval', 'WaitingFinalApproval', 'Recorded'].includes(status) ||
+      eventType === 'ApprovalRequested' ||
+      eventType === 'AgentTaskStepStarted') {
+    return 'warning'
+  }
+
+  return 'neutral'
+}
+
+function sourceModeLabel(value?: string | null) {
+  if (!value) {
+    return '只读分析'
+  }
+
+  if (value === 'SimulationBusiness' || value === 'Simulation') {
+    return 'AI 独立模拟业务库'
+  }
+
+  if (value.includes('CloudReadonly') || value.includes('CloudReadOnly')) {
+    return 'Cloud 只读'
+  }
+
+  if (value === 'FreeGoal') {
+    return '自由目标'
+  }
+
+  if (value === 'workspace' || value === 'Workspace') {
+    return '工作区'
+  }
+
+  if (value === 'UnknownSource') {
+    return '未知来源'
+  }
+
+  return value
 }
 
 async function sendMessage() {
@@ -266,6 +360,16 @@ function openFilePicker() {
   fileInput.value?.click()
 }
 
+function handleSkillChange(event: Event) {
+  const target = event.target as HTMLSelectElement
+  store.selectSkill(target.value || null)
+}
+
+function handleKnowledgeBaseChange(event: Event) {
+  const target = event.target as HTMLSelectElement
+  store.selectKnowledgeBase(target.value || null)
+}
+
 async function handleFileChange(event: Event) {
   const target = event.target as HTMLInputElement
   const file = target.files?.[0]
@@ -275,141 +379,19 @@ async function handleFileChange(event: Event) {
 }
 
 async function createAgentPlan() {
-  const goal = agentGoal.value.trim() || inputValue.value.trim()
+  const goal = inputValue.value.trim() || agentGoal.value.trim()
   if (!goal || !canCreatePlan.value) return
   agentGoal.value = goal
   await store.planAgentTask(goal)
 }
 
-function selectTrialScenario(scenarioId: string) {
-  selectedTrialScenarioId.value = scenarioId
-  const scenario = selectedTrialScenario.value
-  if (scenario) {
-    agentGoal.value = scenario.defaultPrompt
-  }
-}
-
-async function createTrialScenarioPlan() {
-  const scenario = selectedTrialScenario.value
-  if (!scenario) return
-  const task = await store.createAgentTaskFromTrialScenario(
-    scenario,
-    agentGoal.value.trim() || scenario.defaultPrompt
-  )
-  if (task) {
-    uiLayoutStore.suggestAgentWorkbenchTab('approvals')
-  }
-}
-
-async function createTrialCampaign() {
-  await store.createTrialCampaign()
-  uiLayoutStore.suggestAgentWorkbenchTab('trial')
-}
-
-async function attachLatestTaskToTrialCampaign() {
-  await store.attachLatestTaskToTrialCampaign()
-  uiLayoutStore.suggestAgentWorkbenchTab('trial')
-}
-
-async function runPilotReadinessEvaluation() {
-  await store.runPilotReadinessEvaluation()
-  uiLayoutStore.suggestAgentWorkbenchTab('trial')
-}
-
-async function generateTrialEvidencePackage() {
-  await store.generateTrialEvidencePackage()
-  uiLayoutStore.suggestAgentWorkbenchTab('trial')
-}
-
-async function createCloudReadonlyPilotConfigPackage() {
-  await store.createCloudReadonlyPilotConfigPackage()
-  uiLayoutStore.suggestAgentWorkbenchTab('trial')
-}
-
-async function runCloudReadonlyPilotGateEvaluation() {
-  await store.runCloudReadonlyPilotGateEvaluation()
-  uiLayoutStore.suggestAgentWorkbenchTab('trial')
-}
-
-async function runCloudReadonlyPilotApprovalRehearsal() {
-  await store.runCloudReadonlyPilotApprovalRehearsal()
-  uiLayoutStore.suggestAgentWorkbenchTab('trial')
-}
-
-async function runCloudReadonlyPilotContractRehearsal() {
-  await store.runCloudReadonlyPilotContractRehearsal()
-  uiLayoutStore.suggestAgentWorkbenchTab('trial')
-}
-
-async function createCloudReadonlyProductionPilotWindow() {
-  await store.createCloudReadonlyProductionPilotWindow()
-  uiLayoutStore.suggestAgentWorkbenchTab('trial')
-}
-
-async function approveCloudReadonlyProductionPilotWindow() {
-  await store.approveCloudReadonlyProductionPilotWindow()
-  uiLayoutStore.suggestAgentWorkbenchTab('trial')
-}
-
-async function runCloudReadonlyProductionPilotGate() {
-  await store.runCloudReadonlyProductionPilotGate()
-  uiLayoutStore.suggestAgentWorkbenchTab('trial')
-}
-
-async function runCloudReadonlyProductionPilotScenario() {
-  await store.runCloudReadonlyProductionPilotScenario()
-  uiLayoutStore.suggestAgentWorkbenchTab('trial')
-}
-
-async function createCloudReadonlyProductionControlledPlan() {
-  const goal = cloudProductionControlledGoal.value.trim() || agentGoal.value.trim() || inputValue.value.trim()
-  if (!goal || store.isAgentBusy) return
-  cloudProductionControlledGoal.value = goal
-  const result = await store.createCloudReadonlyProductionControlledPlan(goal)
-  if (result) {
-    agentGoal.value = goal
-    uiLayoutStore.suggestAgentWorkbenchTab('approvals')
-  }
-}
-
-async function runCloudReadonlyProductionControlledPilot() {
-  await store.runCloudReadonlyProductionControlledPilot()
-  uiLayoutStore.suggestAgentWorkbenchTab('trial')
-}
-
-async function activateProductionPilotEmergencyStop() {
-  await store.activateProductionPilotEmergencyStop()
-  uiLayoutStore.suggestAgentWorkbenchTab('trial')
-}
-
-async function clearProductionPilotEmergencyStop() {
-  await store.clearProductionPilotEmergencyStop()
-  uiLayoutStore.suggestAgentWorkbenchTab('trial')
-}
-
-async function createProductionPilotIncident() {
-  await store.createProductionPilotIncident()
-  uiLayoutStore.suggestAgentWorkbenchTab('trial')
-}
-
-async function runProductionPilotGaReadinessEvaluation() {
-  await store.runProductionPilotGaReadinessEvaluation()
-  uiLayoutStore.suggestAgentWorkbenchTab('trial')
-}
-
-async function createCloudSandboxControlledPlan() {
-  const goal = cloudSandboxControlledGoal.value.trim() || agentGoal.value.trim() || inputValue.value.trim()
-  if (!goal || store.isAgentBusy) return
-  cloudSandboxControlledGoal.value = goal
-  const result = await store.createCloudSandboxControlledPlan(goal)
-  if (result) {
-    agentGoal.value = goal
-    uiLayoutStore.suggestAgentWorkbenchTab('approvals')
-  }
-}
-
 async function runLatestTask() {
   if (!latestTask.value || !canRunTask.value) return
+  await store.runAgentTask(latestTask.value.id)
+}
+
+async function continueLatestTask() {
+  if (!latestTask.value || !canContinueTask.value) return
   await store.runAgentTask(latestTask.value.id)
 }
 
@@ -426,20 +408,10 @@ async function finalizeCurrentWorkspace() {
   await store.finalizeWorkspace(code)
 }
 
-async function continueLatestTask() {
-  if (!latestTask.value || !canContinueTask.value) return
-  await store.runAgentTask(latestTask.value.id)
-}
-
-async function refreshAuditSummary() {
-  if (!latestTask.value) return
-  await store.loadAgentAuditSummary(latestTask.value.id)
-}
-
 async function approveAgentApproval(approvalId: string) {
   const approval = pendingAgentApprovals.value.find((item) => item.id === approvalId)
   if (!approval) return
-  const decided = await store.decideAgentApproval(approval, 'approve', 'Approved from agent workbench')
+  const decided = await store.decideAgentApproval(approval, 'approve', 'Approved from inline plan card')
   if (decided && approval.type === 'Plan') {
     await store.runAgentTask(approval.taskId)
   }
@@ -463,6 +435,26 @@ async function previewArtifact(artifactId: string) {
   await store.loadArtifactPreview(artifactId)
 }
 
+async function loadOlderMessages() {
+  if (!store.currentSessionId || !scrollContainer.value) {
+    return
+  }
+
+  const container = scrollContainer.value
+  const previousTop = container.scrollTop
+  const previousHeight = container.scrollHeight
+  preserveScrollAnchor.value = true
+  try {
+    const changed = await store.loadOlderHistory(store.currentSessionId)
+    await nextTick()
+    if (changed && scrollContainer.value) {
+      scrollContainer.value.scrollTop = previousTop + (scrollContainer.value.scrollHeight - previousHeight)
+    }
+  } finally {
+    preserveScrollAnchor.value = false
+  }
+}
+
 async function scrollToBottom() {
   await nextTick()
   if (scrollContainer.value) {
@@ -474,35 +466,27 @@ function handleResize() {
   isMobile.value = window.innerWidth < 1024
   if (!isMobile.value) {
     sessionDrawerVisible.value = false
-    uiLayoutStore.setAgentWorkbenchDrawerOpen(false)
   }
 }
 
 watch(
-  [() => pendingAgentApprovals.value.length, () => taskSteps.value.map((step) => step.status).join(','), () => taskArtifacts.value.length],
+  [
+    () => store.currentMessages,
+    () => latestTask.value?.id,
+    () => taskSteps.value.map((step) => step.status).join(','),
+    () => pendingAgentApprovals.value.length,
+    () => taskArtifacts.value.length
+  ],
   () => {
-    if (pendingAgentApprovals.value.length > 0) {
-      uiLayoutStore.suggestAgentWorkbenchTab('approvals')
-      return
-    }
-
-    if (taskSteps.value.some((step) => step.status === 'Running' || step.status === 'WaitingApproval')) {
-      uiLayoutStore.suggestAgentWorkbenchTab('steps')
-      return
-    }
-
-    if (taskArtifacts.value.length > 0) {
-      uiLayoutStore.suggestAgentWorkbenchTab('artifacts')
+    if (!preserveScrollAnchor.value) {
+      void scrollToBottom()
     }
   },
-  { immediate: true }
+  { deep: true }
 )
 
-watch(() => store.currentMessages, () => void scrollToBottom(), { deep: true })
 watch(() => store.currentSessionId, () => {
   sessionDrawerVisible.value = false
-  uiLayoutStore.setAgentWorkbenchDrawerOpen(false)
-  uiLayoutStore.unpinAgentWorkbenchTab()
   void scrollToBottom()
 })
 
@@ -512,41 +496,17 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
 
 <template>
   <div class="command-workbench">
-    <aside v-if="!isMobile" class="session-task-rail" :class="{ collapsed: uiLayoutStore.isSessionRailCollapsed }">
+    <aside v-if="!isMobile" class="session-rail" :class="{ collapsed: uiLayoutStore.isSessionRailCollapsed }">
       <div class="rail-head">
         <div>
-          <span>SESSION RAIL</span>
-          <strong>会话与任务</strong>
+          <span>会话列表</span>
+          <strong>历史会话</strong>
         </div>
         <button type="button" aria-label="折叠会话栏" @click="uiLayoutStore.toggleSessionRail()">
           <PanelLeftOpen :size="18" />
         </button>
       </div>
       <SessionList class="sessions" />
-      <section class="task-history">
-        <header>
-          <History :size="18" />
-          <div>
-            <strong>任务历史</strong>
-            <span>{{ taskHistory.length }} 个 Agent 任务</span>
-          </div>
-        </header>
-        <div class="task-history-list">
-          <button
-            v-for="task in taskHistory"
-            :key="task.id"
-            class="task-history-item"
-            :class="{ active: latestTask?.id === task.id }"
-            type="button"
-          >
-            <strong>{{ task.title }}</strong>
-            <span>{{ task.status }} · {{ task.workspaceCode || '未创建工作区' }}</span>
-          </button>
-          <div v-if="taskHistory.length === 0" class="rail-empty">
-            当前会话还没有 Agent 任务
-          </div>
-        </div>
-      </section>
     </aside>
 
     <section class="ai-canvas">
@@ -556,7 +516,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
             <PanelLeftOpen :size="20" />
           </button>
           <div>
-            <p class="canvas-kicker">AI CANVAS</p>
+            <p class="canvas-kicker">对话工作区</p>
             <h1>{{ currentTitle }}</h1>
           </div>
         </div>
@@ -564,18 +524,9 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
           <AiTag :tone="store.isStreaming ? 'warning' : 'success'">
             {{ store.isStreaming ? '生成中' : '就绪' }}
           </AiTag>
-          <select
-            class="model-selector"
-            :value="store.selectedModelId ?? ''"
-            :disabled="store.isStreaming"
-            aria-label="选择模型"
-            @change="handleModelChange"
-          >
-            <option value="">选择模型</option>
-            <option v-for="model in store.chatModels" :key="model.id" :value="model.id">
-              {{ model.provider }} / {{ model.name }}
-            </option>
-          </select>
+          <AiTag :tone="latestPlanIsCloudReadonly ? 'warning' : 'success'">
+            {{ latestPlanIsCloudReadonly ? 'Cloud 只读' : '只读分析' }}
+          </AiTag>
           <button
             class="soft-action"
             type="button"
@@ -585,28 +536,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
             <RefreshCw :size="17" />
             刷新
           </button>
-          <button
-            v-if="isMobile"
-            class="soft-action"
-            type="button"
-            @click="uiLayoutStore.setAgentWorkbenchDrawerOpen(true)"
-          >
-            <PanelRightOpen :size="17" />
-            Agent
-          </button>
         </div>
       </header>
-
-      <div class="canvas-status-strip">
-        <div v-for="item in agentStageCards" :key="item.label" class="status-tile">
-          <span>{{ item.label }}</span>
-          <AiTag :tone="statusTone(item.type)">{{ item.value }}</AiTag>
-        </div>
-        <div class="status-tile">
-          <span>草稿 / 正式</span>
-          <strong class="ai-number">{{ draftArtifactCount }}/{{ finalArtifactCount }}</strong>
-        </div>
-      </div>
 
       <div ref="scrollContainer" class="message-viewport">
         <div v-if="store.errorMessage" class="canvas-error" role="alert">
@@ -619,6 +550,13 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
           <i />
           <i />
           <i />
+        </div>
+
+        <div v-if="store.hasMoreHistoryBefore && store.currentMessages.length" class="history-loader">
+          <button type="button" :disabled="store.isLoadingOlderHistory" @click="loadOlderMessages">
+            <RefreshCw :size="16" />
+            {{ store.isLoadingOlderHistory ? '加载中' : '加载更早消息' }}
+          </button>
         </div>
 
         <section v-if="store.currentMessages.length === 0 && !store.isLoadingHistory" class="empty-chat">
@@ -634,8 +572,334 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
         </section>
 
         <div class="message-list">
-          <MessageItem v-for="message in store.currentMessages" :key="message.timestamp" :message="message" />
+          <MessageItem
+            v-for="message in store.currentMessages"
+            :key="message.messageId ?? message.timestamp"
+            :message="message"
+          />
         </div>
+
+        <section v-if="hasInlineAgentRun" class="inline-agent-run" data-testid="inline-agent-run">
+          <header class="run-head">
+            <div>
+              <span>目标与计划</span>
+              <h2>{{ latestTask?.title || agentGoal || '当前任务计划' }}</h2>
+              <p>{{ inlineRunSubtitle }}</p>
+            </div>
+            <AiTag :tone="statusTone(taskStatus.type)">{{ taskStatus.label }}</AiTag>
+          </header>
+
+          <div class="run-actions">
+            <button type="button" :disabled="!canRunTask || store.isAgentBusy" @click="runLatestTask">
+              <Play :size="17" />
+              运行计划
+            </button>
+            <button type="button" :disabled="!canContinueTask || store.isAgentBusy" @click="continueLatestTask">
+              <RefreshCw :size="17" />
+              继续
+            </button>
+            <button type="button" :disabled="!canFinalizeWorkspace || store.isAgentBusy" @click="finalizeCurrentWorkspace">
+              <FolderOpen :size="17" />
+              正式输出
+            </button>
+          </div>
+
+          <div v-if="store.agentErrorMessage" class="canvas-error inline-error" role="alert">
+            <TriangleAlert :size="18" />
+            {{ store.agentErrorMessage }}
+          </div>
+
+          <section v-if="latestTask" class="run-card plan-card" data-testid="inline-plan-card">
+            <div class="section-title">
+              <strong>计划</strong>
+              <AiTag :tone="statusTone(taskStatus.type)">
+                {{ taskStatus.label }}
+              </AiTag>
+            </div>
+            <div class="plan-summary">
+              <strong>{{ latestTask.title }}</strong>
+              <span>{{ latestTask.goal }}</span>
+            </div>
+            <div v-if="blockedStep" class="blocked-step">
+              <span>当前阻塞</span>
+              <strong>{{ blockedStep.title }}</strong>
+            </div>
+            <details class="plan-detail-fold" data-testid="plan-technical-details">
+              <summary>
+                <ListChecks :size="15" />
+                <span>计划详情</span>
+                <AiTag tone="neutral">详情</AiTag>
+              </summary>
+              <div class="plan-grid">
+                <div>
+                  <span>来源</span>
+                  <strong>{{ latestPlanSource }}</strong>
+                </div>
+                <div>
+                  <span>工具目录</span>
+                  <strong>v{{ latestPlanToolCatalogVersion ?? '-' }} / {{ latestPlanVisibleToolCount }}</strong>
+                </div>
+                <div>
+                  <span>审批点</span>
+                  <strong>{{ latestPlan?.approvalCheckpoints?.length ?? 0 }}</strong>
+                </div>
+                <div>
+                  <span>风险</span>
+                  <strong>{{ latestPlanRiskLine }}</strong>
+                </div>
+              </div>
+              <div v-if="latestPlan?.forcedStepCodes?.length" class="chip-row">
+                <span v-for="code in latestPlan.forcedStepCodes" :key="code">{{ code }}</span>
+              </div>
+              <div v-if="latestPlan?.plannerFallbackReason" class="planner-warning">
+                <TriangleAlert :size="15" />
+                <span>{{ latestPlan.plannerFallbackReason }}</span>
+              </div>
+            </details>
+          </section>
+
+          <details v-if="latestTask || taskSteps.length || timelineEventItems.length" class="run-card runtime-run-card" data-testid="inline-runtime-card">
+            <summary class="runtime-summary" data-testid="inline-runtime-summary">
+              <span class="timeline-summary-main">
+                <ListChecks :size="18" />
+                <span>
+                  <strong>运行详情</strong>
+                  <small>执行记录与安全边界</small>
+                </span>
+              </span>
+              <AiTag tone="neutral">详情</AiTag>
+            </summary>
+
+            <div class="runtime-sections">
+              <section class="runtime-section-block">
+                <div class="runtime-section-title">
+                  <strong>状态</strong>
+                  <span>阶段、审批和工作区</span>
+                </div>
+                <div class="status-grid">
+                  <div v-for="item in agentStageCards" :key="item.label" class="status-tile">
+                    <span>{{ item.label }}</span>
+                    <AiTag :tone="statusTone(item.type)">{{ item.value }}</AiTag>
+                  </div>
+                  <div class="status-tile">
+                    <span>草稿 / 正式</span>
+                    <strong class="ai-number">{{ draftArtifactCount }}/{{ finalArtifactCount }}</strong>
+                  </div>
+                </div>
+              </section>
+
+              <section class="runtime-section-block">
+                <div class="runtime-section-title">
+                  <strong>安全边界</strong>
+                  <span>AICopilot 只读边界和现场声明</span>
+                </div>
+                <div class="boundary-runtime" data-testid="inline-boundary-row">
+                  <ShieldCheck :size="20" />
+                  <div>
+                    <strong>Cloud 只读边界</strong>
+                    <span>现场确认：{{ onsiteStatus.label }}</span>
+                  </div>
+                  <button type="button" @click="store.confirmOnsitePresence(30)">确认在岗</button>
+                </div>
+              </section>
+
+              <section v-if="timelineEventItems.length" class="runtime-section-block">
+                <div class="runtime-section-title">
+                  <strong>事件</strong>
+                  <span>最新：{{ latestTimelineSummary }}</span>
+                </div>
+                <div class="timeline-list">
+                  <div v-for="item in timelineEventItems" :key="item.key" class="timeline-row">
+                    <time>{{ item.time }}</time>
+                    <div class="timeline-row-main">
+                      <strong>{{ item.title }}</strong>
+                      <span>{{ item.subtitle }}</span>
+                      <details v-if="item.outputKind === 'RagSearch' && item.sources.length" class="timeline-result-fold">
+                        <summary>
+                          检索结果 · {{ item.resultCount }} 条
+                          <template v-if="item.lowConfidence"> · 低置信度</template>
+                        </summary>
+                        <div class="timeline-source-list">
+                          <article v-for="source in item.sources" :key="`${item.key}:${source.documentId}:${source.chunkIndex}`" class="timeline-source-item">
+                            <strong>{{ source.documentName || `文档 ${source.documentId || '-'}` }}</strong>
+                            <small>
+                              {{ formatTimelineScore(source.score) }}
+                              <template v-if="source.isLowConfidence"> · 低置信度</template>
+                              <template v-if="source.lowConfidenceReason"> · {{ source.lowConfidenceReason }}</template>
+                            </small>
+                            <em v-if="source.textPreview">{{ source.textPreview }}</em>
+                          </article>
+                        </div>
+                      </details>
+                    </div>
+                    <AiTag :tone="item.tone">{{ item.status }}</AiTag>
+                  </div>
+                </div>
+              </section>
+
+              <section class="runtime-section-block">
+                <div class="runtime-section-title">
+                  <strong>步骤</strong>
+                  <span>{{ completedStepCount }}/{{ taskSteps.length }} 已完成</span>
+                </div>
+                <div v-if="taskSteps.length" class="step-list">
+                  <div v-for="step in taskSteps" :key="step.id" class="step-row">
+                    <i>{{ step.stepIndex }}</i>
+                    <div>
+                      <strong>{{ step.title }}</strong>
+                      <span v-if="step.errorMessage" class="danger-text">{{ step.errorMessage }}</span>
+                      <details v-if="step.toolCode || step.description" class="step-detail-fold">
+                        <summary>详情</summary>
+                        <span v-if="step.description">{{ step.description }}</span>
+                        <code v-if="step.toolCode">{{ step.toolCode }}</code>
+                      </details>
+                    </div>
+                    <AiTag :tone="step.status === 'Completed' ? 'success' : step.status === 'Failed' ? 'danger' : step.requiresApproval ? 'warning' : 'neutral'">
+                      {{ step.status }}
+                    </AiTag>
+                  </div>
+                </div>
+                <div v-else class="panel-empty">暂无步骤</div>
+              </section>
+            </div>
+          </details>
+
+          <section v-if="approvalGroups.length" class="run-card approvals-run-card" data-testid="inline-approval-card">
+            <div class="section-title">
+              <strong>审批</strong>
+              <span>{{ pendingAgentApprovals.length }} 项待处理</span>
+            </div>
+            <div v-for="group in approvalGroups" :key="group.label" class="approval-group">
+              <div class="group-title">{{ group.label }}</div>
+              <div v-for="approval in group.approvals" :key="approval.id" class="approval-row">
+                <div>
+                  <strong>{{ approvalDisplayTitle(approval) }}</strong>
+                  <span>{{ approvalMetaLine(approval) }}</span>
+                  <details class="approval-detail-fold" data-testid="approval-detail-fold">
+                    <summary>审批详情</summary>
+                    <dl class="approval-detail-grid">
+                      <div>
+                        <dt>类型</dt>
+                        <dd>{{ approvalTypeLabel(approval.type) }}</dd>
+                      </div>
+                      <div>
+                        <dt>对象</dt>
+                        <dd class="mono">{{ approval.targetName }}</dd>
+                      </div>
+                      <div>
+                        <dt>目标 ID</dt>
+                        <dd class="mono">{{ approval.targetId }}</dd>
+                      </div>
+                      <div v-if="approval.workspaceCode">
+                        <dt>工作区</dt>
+                        <dd class="mono">{{ approval.workspaceCode }}</dd>
+                      </div>
+                    </dl>
+                  </details>
+                </div>
+                <div class="approval-actions">
+                  <button type="button" aria-label="批准审批" :disabled="store.isAgentBusy" @click="approveAgentApproval(approval.id)">
+                    <Check :size="16" />
+                  </button>
+                  <button type="button" aria-label="驳回审批" :disabled="store.isAgentBusy" @click="rejectAgentApproval(approval.id)">
+                    <X :size="16" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section v-if="store.currentWorkspace || taskArtifacts.length" class="run-card" data-testid="inline-artifact-card">
+            <div class="section-title">
+              <strong>{{ workspaceStatus.label }}</strong>
+              <span>{{ artifactHeaderMeta }}</span>
+            </div>
+            <div v-if="chartBars.length" class="chart-preview">
+              <div class="chart-preview-head">
+                <span>图表预览</span>
+                <small>{{ sourceModeLabel(store.chartPreview?.sourceLabel || store.chartPreview?.sourceMode || store.chartPreview?.source || 'workspace') }}</small>
+              </div>
+              <div v-for="bar in chartBars" :key="bar.label" class="chart-bar-row">
+                <span>{{ bar.label }}</span>
+                <div><i :style="{ width: bar.width }" /></div>
+                <strong>{{ bar.value }}</strong>
+              </div>
+            </div>
+
+            <details class="artifact-detail-fold" data-testid="artifact-detail-fold">
+              <summary class="artifact-detail-summary">
+                <span class="timeline-summary-main">
+                  <FolderOpen :size="18" />
+                  <span>
+                    <strong>产物详情</strong>
+                    <small>{{ taskArtifacts.length }} 个产物 · {{ workspaceFileCount }} 个工作区文件</small>
+                  </span>
+                </span>
+                <AiTag tone="neutral">详情</AiTag>
+              </summary>
+              <div class="artifact-summary">
+                <div>
+                  <span>工作区</span>
+                  <strong>{{ store.currentWorkspace?.workspaceCode || '-' }}</strong>
+                </div>
+                <div>
+                  <span>文件</span>
+                  <strong>{{ workspaceFileCount }}</strong>
+                </div>
+                <div>
+                  <span>草稿</span>
+                  <strong>{{ draftArtifacts.length }}</strong>
+                </div>
+                <div>
+                  <span>正式</span>
+                  <strong>{{ finalArtifacts.length }}</strong>
+                </div>
+              </div>
+              <template v-if="artifactGroups.length">
+                <div v-for="group in artifactGroups" :key="group.label" class="artifact-group">
+                  <div class="group-title">{{ group.label }}</div>
+                  <div v-for="artifact in group.artifacts" :key="artifact.id" class="artifact-row">
+                    <div>
+                      <strong>{{ artifact.name }}</strong>
+                      <span>v{{ artifact.artifactVersion || artifact.version }} · {{ artifact.artifactStatus || artifact.status }} · {{ artifact.approvalStatus || '-' }}</span>
+                      <span class="artifact-source-line">
+                        {{ artifact.sourceLabel || sourceModeLabel(artifact.sourceMode || 'UnknownSource') }}
+                        <template v-if="artifact.boundary"> · {{ artifact.boundary }}</template>
+                      </span>
+                    </div>
+                    <div class="artifact-actions">
+                      <button type="button" aria-label="预览产物" @click="previewArtifact(artifact.id)">
+                        <Eye :size="16" />
+                      </button>
+                      <button type="button" aria-label="下载产物" @click="downloadArtifact(artifact.id)">
+                        <Download :size="16" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </template>
+              <div v-else class="panel-empty">暂无产物</div>
+              <div v-if="currentArtifactPreview" class="artifact-preview-panel">
+                <div class="section-title">
+                  <strong>{{ currentArtifactPreview.name }}</strong>
+                  <span>{{ currentArtifactPreview.previewKind }} · v{{ currentArtifactPreview.artifactVersion }}</span>
+                </div>
+                <pre v-if="currentArtifactPreview.content" class="artifact-preview-content">{{ currentArtifactPreview.content.slice(0, 1600) }}</pre>
+                <div v-else-if="currentArtifactPreview.rows?.length" class="artifact-preview-table">
+                  <div class="artifact-preview-table-head">
+                    <span v-for="column in currentArtifactPreview.columns" :key="column">{{ column }}</span>
+                  </div>
+                  <div v-for="(row, index) in currentArtifactPreview.rows.slice(0, 5)" :key="index" class="artifact-preview-table-row">
+                    <span v-for="column in currentArtifactPreview.columns" :key="column">{{ row[column] ?? '-' }}</span>
+                  </div>
+                </div>
+              </div>
+            </details>
+            <button class="inline-secondary-action" type="button" :disabled="!canSubmitFinalReview || store.isAgentBusy" @click="submitFinalReview">
+              提交最终审批
+            </button>
+          </section>
+        </section>
       </div>
 
       <footer class="command-composer">
@@ -645,10 +909,53 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
             <FileUp :size="17" />
             上传
           </button>
-          <button class="tool-button" type="button" :disabled="!canCreatePlan || store.isAgentBusy" @click="createAgentPlan">
+          <button class="tool-button" type="button" :disabled="!canCreatePlan || store.isAgentBusy || !inputValue.trim()" @click="createAgentPlan">
             <ListChecks :size="17" />
             计划
           </button>
+          <label
+            v-if="store.availableSkills.length"
+            class="skill-picker"
+            :title="store.selectedSkill?.description || '选择 Skill'"
+          >
+            <Sparkles :size="16" />
+            <select
+              :value="store.selectedSkillCode || ''"
+              :disabled="store.isAgentBusy"
+              aria-label="选择 Skill"
+              @change="handleSkillChange"
+            >
+              <option
+                v-for="skill in store.availableSkills"
+                :key="skill.skillCode"
+                :value="skill.skillCode"
+              >
+                {{ skill.displayName }}
+              </option>
+            </select>
+          </label>
+          <label
+            v-if="store.selectedSkillSupportsKnowledge && store.availableKnowledgeBases.length"
+            class="skill-picker"
+            :title="store.selectedKnowledgeBase?.description || '选择知识库'"
+          >
+            <FolderOpen :size="16" />
+            <select
+              :value="store.selectedKnowledgeBaseId || ''"
+              :disabled="store.isAgentBusy"
+              aria-label="选择知识库"
+              @change="handleKnowledgeBaseChange"
+            >
+              <option value="">不使用知识库</option>
+              <option
+                v-for="knowledgeBase in store.availableKnowledgeBases"
+                :key="knowledgeBase.id"
+                :value="knowledgeBase.id"
+              >
+                {{ knowledgeBase.name }}
+              </option>
+            </select>
+          </label>
           <span v-if="store.uploadedFiles.length" class="uploaded-hint">
             {{ store.uploadedFiles.length }} 个输入文件
           </span>
@@ -657,7 +964,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
           <textarea
             v-model="inputValue"
             :disabled="isInputDisabled"
-            :placeholder="!store.selectedModelId ? '没有可用对话模型' : store.isWaitingForApproval ? '请先处理待审批请求' : '输入问题，Enter 发送，Shift + Enter 换行'"
+            :placeholder="store.isWaitingForApproval ? '请先处理待审批请求' : '输入问题或目标'"
             rows="1"
             @keydown="handleComposerKeydown"
           />
@@ -668,914 +975,6 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
       </footer>
     </section>
 
-    <aside class="agent-workbench-panel" :class="{ 'mobile-open': isMobile && uiLayoutStore.isAgentWorkbenchDrawerOpen }">
-      <div class="agent-panel-head">
-        <div>
-          <span>AGENT WORKBENCH</span>
-          <strong>任务控制台</strong>
-        </div>
-        <button
-          v-if="isMobile"
-          class="drawer-close"
-          type="button"
-          aria-label="关闭 Agent 工作台"
-          @click="uiLayoutStore.setAgentWorkbenchDrawerOpen(false)"
-        >
-          <X :size="18" />
-        </button>
-        <AiTag v-if="!isMobile" :tone="latestPlanIsCloudSandbox ? 'warning' : 'success'">
-          {{ latestPlanIsCloudSandbox ? 'Cloud Sandbox Trial' : 'SimulationBusiness' }}
-        </AiTag>
-        <AiTag v-else tone="dark">Cloud 只读</AiTag>
-      </div>
-
-      <div class="agent-tabs" role="tablist" aria-label="Agent 工作台">
-        <button
-          v-for="tab in agentTabs"
-          :key="tab.value"
-          type="button"
-          :data-testid="`agent-tab-${tab.value}`"
-          :class="{ active: uiLayoutStore.agentWorkbenchTab === tab.value }"
-          @click="setAgentTab(tab.value)"
-        >
-          {{ tab.label }}
-          <span v-if="tab.count !== undefined">{{ tab.count }}</span>
-        </button>
-      </div>
-
-      <div class="agent-tab-content">
-        <section v-if="uiLayoutStore.agentWorkbenchTab === 'plan'" class="tab-stack">
-          <div class="trial-scenario-panel">
-            <div class="section-title">
-              <strong>试用模板</strong>
-              <AiTag tone="success">SimulationBusiness</AiTag>
-              <AiTag tone="warning">Cloud Sandbox Trial</AiTag>
-            </div>
-            <div v-if="trialScenarios.length" class="trial-scenario-list">
-              <button
-                v-for="scenario in trialScenarios"
-                :key="scenario.id"
-                type="button"
-                class="trial-scenario-card"
-                :class="{ active: selectedTrialScenarioId === scenario.id }"
-                @click="selectTrialScenario(scenario.id)"
-              >
-                <span>{{ scenario.businessDomain }}</span>
-                <strong>{{ scenario.title }}</strong>
-                <small>{{ scenario.description }}</small>
-                <AiTag :tone="scenario.isCloudSandboxTrial ? 'warning' : 'success'">
-                  {{ scenario.sourceMode || (scenario.isCloudSandboxTrial ? 'CloudReadonlySandbox' : 'SimulationBusiness') }}
-                </AiTag>
-                <em>{{ scenario.defaultArtifactTypes.join(' / ') }}</em>
-              </button>
-            </div>
-            <div v-else class="panel-empty">
-              {{ store.isLoadingAgentTrialScenarios ? '正在加载试用模板' : '暂无可用 SimulationBusiness 试用模板' }}
-            </div>
-            <button
-              class="wide-action"
-              type="button"
-              :disabled="!selectedTrialScenario || store.isAgentBusy"
-              @click="createTrialScenarioPlan"
-            >
-              <ListChecks :size="17" />
-              生成模板计划
-            </button>
-          </div>
-          <div class="trial-scenario-panel controlled-sandbox-panel">
-            <div class="section-title">
-              <strong>Cloud Sandbox Controlled Trial</strong>
-              <AiTag tone="warning">非生产</AiTag>
-            </div>
-            <textarea
-              v-model="cloudSandboxControlledGoal"
-              class="agent-goal compact"
-              rows="3"
-              placeholder="输入受控自由目标，例如：分析最近一周产能交付风险"
-            />
-            <div class="planner-chip-row">
-              <span>devices</span>
-              <span>capacity_summary</span>
-              <span>device_logs</span>
-              <span>pass_station_records</span>
-            </div>
-            <button
-              class="wide-action"
-              type="button"
-              :disabled="store.isAgentBusy || !(cloudSandboxControlledGoal.trim() || agentGoal.trim() || inputValue.trim())"
-              @click="createCloudSandboxControlledPlan"
-            >
-              <ShieldCheck :size="17" />
-              生成受控目标计划
-            </button>
-          </div>
-          <div class="metric-grid">
-            <div>
-              <span>步骤</span>
-              <strong>{{ completedStepCount }}/{{ taskSteps.length }}</strong>
-            </div>
-            <div>
-              <span>工作区</span>
-              <strong>{{ workspaceFileCount }}</strong>
-            </div>
-            <div>
-              <span>审批</span>
-              <strong>{{ pendingAgentApprovals.length }}</strong>
-            </div>
-          </div>
-          <div v-if="latestPlan" class="planner-preview">
-            <div class="planner-preview-head">
-              <div>
-                <span>Planner</span>
-                <strong>{{ latestPlanMode }}</strong>
-              </div>
-              <AiTag :tone="latestPlanMode === 'Dynamic' ? 'success' : latestPlanMode === 'StaticFallback' ? 'warning' : 'neutral'">
-                {{ latestPlan?.plannerSafetySummary?.planSource || latestPlan?.trialScenarioTitle || 'FreeGoal' }}
-              </AiTag>
-            </div>
-            <div class="planner-preview-grid">
-              <div>
-                <span>Tool Catalog</span>
-                <strong>v{{ latestPlanToolCatalogVersion ?? '-' }} / {{ latestPlanVisibleToolCount }}</strong>
-              </div>
-              <div>
-                <span>Data Source</span>
-                <strong>{{ latestPlanIsCloudSandboxControlled ? 'CloudReadonlySandbox / ControlledGoal' : latestPlanIsCloudSandbox ? 'CloudReadonlySandbox' : latestPlanDataSource?.sourceMode || 'SimulationBusiness' }}</strong>
-              </div>
-              <div>
-                <span>Approval Points</span>
-                <strong>{{ latestPlanApprovalCount }}</strong>
-              </div>
-              <div>
-                <span>Mock MCP</span>
-                <strong>{{ latestPlanMockMcpOnly ? 'Only' : 'Mixed' }}</strong>
-              </div>
-              <div>
-                <span>Tool Risk</span>
-                <strong>{{ latestPlanRiskLine }}</strong>
-              </div>
-            </div>
-            <div class="planner-source-line">
-              <AiTag v-if="latestPlanIsCloudSandbox" tone="warning">Cloud 只读 Sandbox（非生产）</AiTag>
-              <AiTag v-if="latestPlanIsCloudSandboxControlled" tone="warning">SandboxControlledTrial</AiTag>
-              <AiTag v-if="!latestPlanIsCloudSandbox" tone="success">{{ latestPlanDataSource?.sourceLabel || 'AI 独立模拟业务库' }}</AiTag>
-              <span>{{ latestPlanIsCloudSandbox ? latestCloudSandboxIntent?.endpointCodes?.join(' / ') || 'CloudReadonlySandbox' : latestPlanDataSource?.name || 'aicopilot_sim_business' }}</span>
-            </div>
-            <div v-if="latestCloudSandboxIntent" class="planner-intent-grid">
-              <div>
-                <span>Intent</span>
-                <strong>{{ latestCloudSandboxIntent.analysisType || '-' }}</strong>
-              </div>
-              <div>
-                <span>Max Rows</span>
-                <strong>{{ latestCloudSandboxIntent.maxRows ?? '-' }}</strong>
-              </div>
-              <div>
-                <span>Tool Approval</span>
-                <strong>{{ latestCloudSandboxIntent.requiresToolApproval ? 'Required' : 'Not required' }}</strong>
-              </div>
-              <div>
-                <span>Final Approval</span>
-                <strong>{{ latestCloudSandboxIntent.requiresFinalApproval ? 'Required' : 'Not required' }}</strong>
-              </div>
-            </div>
-            <div v-if="latestPlan?.plannerFallbackReason" class="planner-warning">
-              <TriangleAlert :size="15" />
-              <span>{{ latestPlan.plannerFallbackReason }}</span>
-            </div>
-            <div v-if="latestPlanForcedSteps.length" class="planner-chip-row">
-              <span v-for="code in latestPlanForcedSteps" :key="code">{{ code }}</span>
-            </div>
-            <div v-if="latestPlan?.toolApprovalCheckpoints?.length" class="planner-chip-row">
-              <span v-for="code in latestPlan.toolApprovalCheckpoints" :key="code">{{ code }}</span>
-            </div>
-          </div>
-          <div v-if="blockedStep" class="blocked-step">
-            <span>当前阻塞</span>
-            <strong>{{ blockedStep.title }}</strong>
-          </div>
-          <textarea v-model="agentGoal" class="agent-goal" rows="4" placeholder="输入 Agent 任务目标，或复用当前问题生成计划" />
-          <div class="two-actions">
-            <button type="button" :disabled="!canCreatePlan || store.isAgentBusy" @click="createAgentPlan">
-              <ListChecks :size="17" />
-              生成计划
-            </button>
-            <button type="button" :disabled="!canRunTask || store.isAgentBusy" @click="runLatestTask">
-              <Play :size="17" />
-              运行任务
-            </button>
-          </div>
-          <button class="wide-action" type="button" :disabled="!canContinueTask || store.isAgentBusy" @click="continueLatestTask">
-            <RefreshCw :size="17" />
-            继续任务
-          </button>
-          <div v-if="store.agentErrorMessage" class="canvas-error" role="alert">
-            <TriangleAlert :size="18" />
-            {{ store.agentErrorMessage }}
-          </div>
-        </section>
-
-        <section v-else-if="uiLayoutStore.agentWorkbenchTab === 'steps'" class="tab-stack">
-          <div class="section-title">
-            <strong>{{ latestTask?.title || '尚未生成 Agent 任务' }}</strong>
-            <AiTag :tone="statusTone(taskStatus.type)">{{ taskStatus.label }}</AiTag>
-          </div>
-          <div v-if="latestTask?.lastFailureReason" class="canvas-error">
-            <TriangleAlert :size="18" />
-            {{ latestTask.lastFailureReason }}
-          </div>
-          <div v-if="taskSteps.length" class="step-list">
-            <div v-for="step in taskSteps" :key="step.id" class="step-row">
-              <i>{{ step.stepIndex }}</i>
-              <div>
-                <strong>{{ step.title }}</strong>
-                <span v-if="step.toolCode">{{ step.toolCode }}</span>
-                <span v-if="step.errorMessage" class="danger-text">{{ step.errorMessage }}</span>
-              </div>
-              <AiTag :tone="step.status === 'Completed' ? 'success' : step.requiresApproval ? 'warning' : 'neutral'">
-                {{ step.status }}
-              </AiTag>
-            </div>
-          </div>
-          <div v-else class="panel-empty">暂无步骤</div>
-        </section>
-
-        <section v-else-if="uiLayoutStore.agentWorkbenchTab === 'approvals'" class="tab-stack">
-          <template v-if="approvalGroups.length">
-            <div v-for="group in approvalGroups" :key="group.label" class="approval-group">
-              <div class="group-title">{{ group.label }}</div>
-              <div v-for="approval in group.approvals" :key="approval.id" class="approval-row">
-                <div>
-                  <strong>{{ approval.targetName }}</strong>
-                  <span>{{ approval.riskLevel }} · {{ approval.reason || '等待确认' }}</span>
-                </div>
-                <div class="approval-actions">
-                  <button type="button" :disabled="store.isAgentBusy" @click="approveAgentApproval(approval.id)">
-                    <Check :size="16" />
-                  </button>
-                  <button type="button" :disabled="store.isAgentBusy" @click="rejectAgentApproval(approval.id)">
-                    <X :size="16" />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </template>
-          <div v-else class="panel-empty">暂无待审批项</div>
-        </section>
-
-        <section v-else-if="uiLayoutStore.agentWorkbenchTab === 'artifacts'" class="tab-stack">
-          <div class="section-title">
-            <strong>{{ workspaceStatus.label }}</strong>
-            <span>{{ store.currentWorkspace?.workspaceCode || '未创建工作区' }}</span>
-          </div>
-          <div class="artifact-workspace-summary">
-            <div>
-              <span>草稿区</span>
-              <strong>{{ draftArtifacts.length }}</strong>
-            </div>
-            <div>
-              <span>final 区</span>
-              <strong>{{ finalArtifacts.length }}</strong>
-            </div>
-            <div>
-              <span>版本/锁定</span>
-              <strong>{{ currentArtifactPreview?.artifactStatus || store.currentWorkspace?.status || '-' }}</strong>
-            </div>
-          </div>
-          <div v-if="chartBars.length" class="chart-preview">
-            <div class="chart-preview-head">
-              <span>图表预览</span>
-              <small>{{ store.chartPreview?.sourceMode || store.chartPreview?.source || 'workspace' }}</small>
-            </div>
-            <div v-for="bar in chartBars" :key="bar.label" class="chart-bar-row">
-              <span>{{ bar.label }}</span>
-              <div><i :style="{ width: bar.width }" /></div>
-              <strong>{{ bar.value }}</strong>
-            </div>
-          </div>
-          <template v-if="artifactGroups.length">
-            <div v-for="group in artifactGroups" :key="group.label" class="artifact-group">
-              <div class="group-title">{{ group.label }}</div>
-              <div v-for="artifact in group.artifacts" :key="artifact.id" class="artifact-row">
-                <div>
-                  <strong>{{ artifact.name }}</strong>
-                  <span>v{{ artifact.artifactVersion || artifact.version }} · {{ artifact.artifactStatus || artifact.status }} · {{ artifact.approvalStatus || '-' }}</span>
-                  <span class="artifact-source-line">
-                    {{ artifact.sourceMode || 'UnknownSource' }}
-                    <template v-if="artifact.boundary"> · {{ artifact.boundary }}</template>
-                    <template v-if="artifact.sourceLabel"> · {{ artifact.sourceLabel }}</template>
-                  </span>
-                  <span class="artifact-source-line">
-                    hash {{ artifact.queryHash || artifact.resultHash || '-' }} · rows {{ artifact.rowCount ?? 0 }} · truncated {{ artifact.isTruncated ? 'true' : 'false' }}
-                  </span>
-                </div>
-                <div class="artifact-actions">
-                  <button type="button" aria-label="预览产物" @click="previewArtifact(artifact.id)">
-                    <Eye :size="16" />
-                  </button>
-                  <button type="button" aria-label="下载产物" @click="downloadArtifact(artifact.id)">
-                    <Download :size="16" />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </template>
-          <div v-else class="panel-empty">暂无产物</div>
-          <div v-if="currentArtifactPreview" class="artifact-preview-panel">
-            <div class="section-title">
-              <strong>{{ currentArtifactPreview.name }}</strong>
-              <span>{{ currentArtifactPreview.previewKind }} · v{{ currentArtifactPreview.artifactVersion }}</span>
-            </div>
-            <div class="artifact-preview-meta">
-              <AiTag :tone="currentArtifactPreview.isSandbox ? 'warning' : currentArtifactPreview.isSimulation ? 'success' : 'neutral'">
-                {{ currentArtifactPreview.sourceMode || 'UnknownSource' }}
-              </AiTag>
-              <span>{{ currentArtifactPreview.sourceLabel || '未标记来源' }}</span>
-              <span>hash {{ currentArtifactPreview.queryHash || currentArtifactPreview.resultHash || '-' }}</span>
-              <span>rows {{ currentArtifactPreview.rowCount }} / truncated {{ currentArtifactPreview.isTruncated ? 'true' : 'false' }}</span>
-            </div>
-            <pre v-if="currentArtifactPreview.content" class="artifact-preview-content">{{ currentArtifactPreview.content.slice(0, 1600) }}</pre>
-            <div v-else-if="currentArtifactPreview.rows?.length" class="artifact-preview-table">
-              <div class="artifact-preview-table-head">
-                <span v-for="column in currentArtifactPreview.columns" :key="column">{{ column }}</span>
-              </div>
-              <div v-for="(row, index) in currentArtifactPreview.rows.slice(0, 5)" :key="index" class="artifact-preview-table-row">
-                <span v-for="column in currentArtifactPreview.columns" :key="column">{{ row[column] ?? '-' }}</span>
-              </div>
-            </div>
-            <div v-else class="artifact-preview-metadata">
-              <span v-for="(value, key) in currentArtifactPreview.metadata" :key="key">
-                {{ key }}={{ value || '-' }}
-              </span>
-            </div>
-          </div>
-          <button class="wide-action" type="button" :disabled="!canFinalizeWorkspace || store.isAgentBusy" @click="finalizeCurrentWorkspace">
-            <FolderOpen :size="17" />
-            确认正式输出
-          </button>
-          <button class="wide-action muted" type="button" :disabled="!canSubmitFinalReview || store.isAgentBusy" @click="submitFinalReview">
-            提交最终审批
-          </button>
-        </section>
-
-        <section v-else-if="uiLayoutStore.agentWorkbenchTab === 'audit'" class="tab-stack">
-          <button class="wide-action" type="button" :disabled="!latestTask || store.isAgentBusy" @click="refreshAuditSummary">
-            <RefreshCw :size="17" />
-            刷新审计摘要
-          </button>
-          <div v-if="auditSummary.length" class="audit-list">
-            <div v-for="item in auditSummary" :key="item.id" class="audit-row">
-              <div>
-                <strong>{{ item.actionCode }}</strong>
-                <span>{{ item.summary }}</span>
-                <span v-if="item.metadata?.toolCode || item.metadata?.providerKind || item.metadata?.resultHash" class="audit-meta-line">
-                  {{ item.metadata?.toolCode || 'tool' }}
-                  · {{ item.metadata?.providerKind || item.metadata?.providerType || 'provider' }}
-                  · {{ item.metadata?.isMock === 'True' || item.metadata?.isMock === 'true' ? 'Mock' : 'Runtime' }}
-                  · hash {{ item.metadata?.resultHash || '-' }}
-                </span>
-              </div>
-              <AiTag :tone="item.result === 'Succeeded' ? 'success' : 'danger'">{{ item.result }}</AiTag>
-            </div>
-          </div>
-          <div v-else class="panel-empty">暂无审计记录</div>
-        </section>
-
-        <section v-else-if="uiLayoutStore.agentWorkbenchTab === 'trial'" class="tab-stack">
-          <div class="trial-ops-card">
-            <div class="section-title">
-              <strong>{{ trialCampaign?.name || '内部试用运营台账' }}</strong>
-              <AiTag :tone="trialCampaign?.readinessStatus === 'ReadyForP11Planning' ? 'success' : trialCampaign?.readinessStatus === 'Blocked' ? 'danger' : 'warning'">
-                {{ trialCampaign?.readinessStatus || 'NotEvaluated' }}
-              </AiTag>
-            </div>
-            <div class="trial-source-line">
-              <span v-for="mode in trialCampaign?.allowedSourceModes || ['SimulationBusiness', 'CloudReadonlySandbox']" :key="mode">
-                {{ mode }}
-              </span>
-            </div>
-            <div class="trial-metric-grid">
-              <div>
-                <span>场景</span>
-                <strong>{{ trialSummary?.scenarioRunCount ?? 0 }}</strong>
-              </div>
-              <div>
-                <span>final</span>
-                <strong>{{ trialSummary?.finalArtifactCount ?? 0 }}</strong>
-              </div>
-              <div>
-                <span>未关风险</span>
-                <strong>{{ trialSummary?.unresolvedRiskCount ?? 0 }}</strong>
-              </div>
-            </div>
-            <div class="two-actions">
-              <button type="button" :disabled="store.isLoadingTrialOperations" @click="createTrialCampaign">
-                <ListChecks :size="16" />
-                新建台账
-              </button>
-              <button type="button" :disabled="!latestTask || store.isLoadingTrialOperations" @click="attachLatestTaskToTrialCampaign">
-                <FolderOpen :size="16" />
-                挂载当前任务
-              </button>
-            </div>
-          </div>
-
-          <div class="trial-ops-card">
-            <div class="section-title">
-              <strong>P10 Pilot Planning 闸门</strong>
-              <span>{{ trialReadiness?.generatedAt || '未评估' }}</span>
-            </div>
-            <div class="two-actions">
-              <button type="button" :disabled="!trialCampaign || store.isLoadingTrialOperations" @click="runPilotReadinessEvaluation">
-                <ShieldCheck :size="16" />
-                运行评估
-              </button>
-              <button type="button" :disabled="!trialCampaign || store.isLoadingTrialOperations" @click="generateTrialEvidencePackage">
-                <History :size="16" />
-                生成证据包
-              </button>
-            </div>
-            <div v-if="trialReadiness?.checks.length" class="trial-check-list">
-              <div v-for="check in trialReadiness.checks" :key="check.code" class="trial-check-row">
-                <div>
-                  <strong>{{ check.label }}</strong>
-                  <span>{{ check.message }}</span>
-                </div>
-                <AiTag :tone="check.status === 'Passed' ? 'success' : check.isBlocking ? 'danger' : 'warning'">
-                  {{ check.status }}
-                </AiTag>
-              </div>
-            </div>
-            <div v-else class="panel-empty">尚未生成准入评估</div>
-          </div>
-
-          <div class="trial-ops-card" data-testid="p11-pilot-readiness-panel">
-            <div class="section-title">
-              <strong>P11 Pilot 准入演练</strong>
-              <AiTag :tone="cloudReadonlyPilotReadiness?.status === 'RehearsalPassed' ? 'success' : cloudReadonlyPilotReadiness?.status === 'Blocked' ? 'danger' : 'warning'">
-                {{ cloudReadonlyPilotReadiness?.status || 'NotConfigured' }}
-              </AiTag>
-            </div>
-            <div class="trial-source-line">
-              <span data-testid="p11-no-production-read">未启用生产读取</span>
-              <span data-testid="p11-no-production-data">未接入真实生产数据</span>
-              <span>query_cloud_data_readonly closed</span>
-            </div>
-            <div class="trial-metric-grid">
-              <div>
-                <span>contract</span>
-                <strong>{{ cloudReadonlyPilotReadiness?.contractCheckSummary.passed ?? 0 }}/{{ cloudReadonlyPilotReadiness?.contractCheckSummary.total ?? 0 }}</strong>
-              </div>
-              <div>
-                <span>blocked</span>
-                <strong>{{ cloudReadonlyPilotReadiness?.contractCheckSummary.blockedByPolicy ?? 0 }}</strong>
-              </div>
-              <div>
-                <span>approval</span>
-                <strong>{{ cloudReadonlyPilotReadiness?.approvalRehearsalStatus || 'NotRun' }}</strong>
-              </div>
-            </div>
-            <div class="two-actions">
-              <button type="button" :disabled="!trialCampaign || store.isLoadingTrialOperations" @click="createCloudReadonlyPilotConfigPackage">
-                <ListChecks :size="16" />
-                配置包
-              </button>
-              <button type="button" :disabled="!trialCampaign || store.isLoadingTrialOperations" @click="runCloudReadonlyPilotGateEvaluation">
-                <ShieldCheck :size="16" />
-                Gate
-              </button>
-            </div>
-            <div class="two-actions">
-              <button type="button" :disabled="!cloudReadonlyPilotConfigPackage || store.isLoadingTrialOperations" @click="runCloudReadonlyPilotApprovalRehearsal">
-                <Check :size="16" />
-                审批演练
-              </button>
-              <button type="button" :disabled="!cloudReadonlyPilotConfigPackage || store.isLoadingTrialOperations" @click="runCloudReadonlyPilotContractRehearsal">
-                <RefreshCw :size="16" />
-                fake contract
-              </button>
-            </div>
-            <div v-if="cloudReadonlyPilotConfigPackage" class="trial-source-line" data-testid="p11-config-package">
-              <span>{{ cloudReadonlyPilotConfigPackage.packageId }}</span>
-              <span>{{ cloudReadonlyPilotConfigPackage.allowedEndpointCodes.join(' / ') }}</span>
-              <span>maxRows {{ cloudReadonlyPilotConfigPackage.maxRows }}</span>
-            </div>
-            <div v-if="pilotApprovalRehearsal?.steps.length" class="trial-check-list" data-testid="p11-approval-rehearsal">
-              <div v-for="step in pilotApprovalRehearsal.steps" :key="step.code" class="trial-check-row">
-                <div>
-                  <strong>{{ step.label }}</strong>
-                  <span>{{ step.auditRef }}</span>
-                </div>
-                <AiTag :tone="step.status === 'Passed' ? 'success' : step.isBlocking ? 'danger' : 'warning'">
-                  {{ step.status }}
-                </AiTag>
-              </div>
-            </div>
-            <div v-if="pilotContractRehearsal?.checks.length" class="trial-check-list" data-testid="p11-contract-rehearsal">
-              <div v-for="check in pilotContractRehearsal.checks" :key="check.endpointCode" class="trial-check-row">
-                <div>
-                  <strong>{{ check.endpointCode }}</strong>
-                  <span>{{ check.status }} · rows {{ check.rowCount }} · hash {{ check.resultHash || '-' }}</span>
-                </div>
-                <AiTag :tone="check.status === 'Passed' ? 'success' : check.status === 'BlockedByPolicy' ? 'warning' : 'danger'">
-                  {{ check.policyStatus }}
-                </AiTag>
-              </div>
-            </div>
-            <div v-if="cloudReadonlyPilotReadiness?.blockers.length" class="trial-check-list">
-              <div v-for="blocker in cloudReadonlyPilotReadiness.blockers" :key="blocker" class="trial-check-row">
-                <div>
-                  <strong>阻塞项</strong>
-                  <span>{{ blocker }}</span>
-                </div>
-                <AiTag tone="danger">Blocked</AiTag>
-              </div>
-            </div>
-          </div>
-
-          <div class="trial-ops-card" data-testid="p12-production-pilot-panel">
-            <div class="section-title">
-              <strong>P12 生产只读 Pilot</strong>
-              <AiTag :tone="cloudReadonlyProductionPilotStatus?.status === 'Ready' ? 'success' : cloudReadonlyProductionPilotStatus?.status === 'Blocked' ? 'danger' : 'warning'">
-                {{ cloudReadonlyProductionPilotStatus?.status || 'Disabled' }}
-              </AiTag>
-            </div>
-            <div class="trial-source-line">
-              <span data-testid="p12-fixed-template-marker">固定模板</span>
-              <span data-testid="p12-production-readonly-marker">CloudReadonlyProductionPilot</span>
-              <span data-testid="p12-gated-marker">Pilot Window + Approval required</span>
-            </div>
-            <div class="trial-metric-grid">
-              <div>
-                <span>window</span>
-                <strong>{{ cloudReadonlyProductionPilotStatus?.pilotWindowId || cloudReadonlyProductionPilotWindow?.windowId || '-' }}</strong>
-              </div>
-              <div>
-                <span>approval</span>
-                <strong>{{ cloudReadonlyProductionPilotStatus?.approvalStatus || 'Required' }}</strong>
-              </div>
-              <div>
-                <span>tool</span>
-                <strong>{{ cloudReadonlyProductionPilotStatus?.toolExecutable ? 'Executable' : 'Closed' }}</strong>
-              </div>
-            </div>
-            <div class="trial-source-line" data-testid="p12-allowlist">
-              <span>{{ cloudReadonlyProductionPilotStatus?.allowedEndpointCodes?.join(' / ') || 'devices / capacity_summary / device_logs / pass_station_records' }}</span>
-            </div>
-            <div class="two-actions">
-              <button type="button" :disabled="store.isLoadingTrialOperations" @click="createCloudReadonlyProductionPilotWindow">
-                <ListChecks :size="16" />
-                Window
-              </button>
-              <button type="button" :disabled="!cloudReadonlyProductionPilotWindow && !cloudReadonlyProductionPilotStatus?.pilotWindowId || store.isLoadingTrialOperations" @click="approveCloudReadonlyProductionPilotWindow">
-                <Check :size="16" />
-                Approve
-              </button>
-            </div>
-            <div class="two-actions">
-              <button type="button" :disabled="store.isLoadingTrialOperations" @click="runCloudReadonlyProductionPilotGate">
-                <ShieldCheck :size="16" />
-                Gate
-              </button>
-              <button type="button" :disabled="cloudReadonlyProductionPilotStatus?.status !== 'Ready' || store.isLoadingTrialOperations" @click="runCloudReadonlyProductionPilotScenario">
-                <RefreshCw :size="16" />
-                Fixed scenario
-              </button>
-            </div>
-            <div v-if="cloudReadonlyProductionPilotRun" class="trial-check-list" data-testid="p12-production-pilot-run">
-              <div class="trial-check-row">
-                <div>
-                  <strong>{{ cloudReadonlyProductionPilotRun.scenarioTitle }}</strong>
-                  <span>{{ cloudReadonlyProductionPilotRun.queryResult.endpointCode }} · {{ cloudReadonlyProductionPilotRun.queryResult.rowCount }} rows · {{ cloudReadonlyProductionPilotRun.queryResult.resultHash }}</span>
-                  <span>{{ cloudReadonlyProductionPilotRun.queryResult.sourceMode }} · {{ cloudReadonlyProductionPilotRun.queryResult.boundary }}</span>
-                </div>
-                <AiTag tone="success">{{ cloudReadonlyProductionPilotRun.status }}</AiTag>
-              </div>
-            </div>
-            <div v-if="cloudReadonlyProductionPilotStatus?.blockers.length" class="trial-check-list">
-              <div v-for="blocker in cloudReadonlyProductionPilotStatus.blockers" :key="blocker" class="trial-check-row">
-                <div>
-                  <strong>Blocked</strong>
-                  <span>{{ blocker }}</span>
-                </div>
-                <AiTag tone="danger">Blocked</AiTag>
-              </div>
-            </div>
-          </div>
-
-          <div class="trial-ops-card" data-testid="p13-production-controlled-panel">
-            <div class="section-title">
-              <strong>P13 Controlled Production Pilot</strong>
-              <AiTag :tone="cloudReadonlyProductionControlledStatus?.status === 'Ready' ? 'success' : cloudReadonlyProductionControlledStatus?.status === 'Blocked' ? 'danger' : 'warning'">
-                {{ cloudReadonlyProductionControlledStatus?.status || 'Disabled' }}
-              </AiTag>
-            </div>
-            <div class="trial-source-line">
-              <span data-testid="p13-controlled-marker">CloudReadonlyProductionControlledPilot</span>
-              <span data-testid="p13-boundary-marker">ProductionControlledPilot</span>
-              <span>query_cloud_data_readonly closed</span>
-            </div>
-            <div class="trial-metric-grid">
-              <div>
-                <span>P12 gate</span>
-                <strong>{{ cloudReadonlyProductionControlledStatus?.p12GateStatus || 'Required' }}</strong>
-              </div>
-              <div>
-                <span>free goal</span>
-                <strong>{{ cloudReadonlyProductionControlledStatus?.freeGoalEnabled ? 'Enabled' : 'Closed' }}</strong>
-              </div>
-              <div>
-                <span>tool</span>
-                <strong>{{ cloudReadonlyProductionControlledStatus?.toolExecutable ? 'Executable' : 'Closed' }}</strong>
-              </div>
-            </div>
-            <div class="trial-source-line" data-testid="p13-allowlist">
-              <span>{{ cloudReadonlyProductionControlledStatus?.allowedEndpointCodes?.join(' / ') || 'devices / capacity_summary / device_logs / pass_station_records' }}</span>
-            </div>
-            <textarea
-              v-model="cloudProductionControlledGoal"
-              class="agent-goal compact"
-              rows="3"
-              placeholder="输入生产只读受控自由目标，例如：分析最近一天设备异常"
-            />
-            <div class="two-actions">
-              <button
-                type="button"
-                :disabled="store.isAgentBusy || !(cloudProductionControlledGoal.trim() || agentGoal.trim() || inputValue.trim())"
-                @click="createCloudReadonlyProductionControlledPlan"
-              >
-                <ShieldCheck :size="16" />
-                Intent + Plan
-              </button>
-              <button
-                type="button"
-                :disabled="!cloudProductionControlledIntent || store.isLoadingTrialOperations"
-                @click="runCloudReadonlyProductionControlledPilot"
-              >
-                <RefreshCw :size="16" />
-                Direct smoke
-              </button>
-            </div>
-            <div v-if="cloudProductionControlledIntent" class="trial-check-list" data-testid="p13-production-controlled-intent">
-              <div class="trial-check-row">
-                <div>
-                  <strong>{{ cloudProductionControlledIntent.analysisType }}</strong>
-                  <span>{{ cloudProductionControlledIntent.endpointCodes?.join(' / ') }} · maxRows {{ cloudProductionControlledIntent.maxRows }} · {{ cloudProductionControlledIntent.intentId }}</span>
-                  <span>ToolApproval {{ cloudProductionControlledIntent.requiresToolApproval ? 'required' : 'not-required' }} · FinalApproval {{ cloudProductionControlledIntent.requiresFinalApproval ? 'required' : 'not-required' }}</span>
-                </div>
-                <AiTag tone="warning">Intent</AiTag>
-              </div>
-            </div>
-            <div v-if="cloudReadonlyProductionControlledRun" class="trial-check-list" data-testid="p13-production-controlled-run">
-              <div class="trial-check-row">
-                <div>
-                  <strong>{{ cloudReadonlyProductionControlledRun.analysisType }}</strong>
-                  <span>{{ cloudReadonlyProductionControlledRun.queryResult.endpointCode }} · {{ cloudReadonlyProductionControlledRun.queryResult.rowCount }} rows · {{ cloudReadonlyProductionControlledRun.queryResult.resultHash }}</span>
-                  <span>{{ cloudReadonlyProductionControlledRun.queryResult.sourceMode }} · {{ cloudReadonlyProductionControlledRun.queryResult.boundary }}</span>
-                </div>
-                <AiTag tone="success">{{ cloudReadonlyProductionControlledRun.status }}</AiTag>
-              </div>
-            </div>
-            <div v-if="cloudReadonlyProductionControlledStatus?.blockers.length" class="trial-check-list">
-              <div v-for="blocker in cloudReadonlyProductionControlledStatus.blockers" :key="blocker" class="trial-check-row">
-                <div>
-                  <strong>Blocked</strong>
-                  <span>{{ blocker }}</span>
-                </div>
-                <AiTag tone="danger">Blocked</AiTag>
-              </div>
-            </div>
-          </div>
-
-          <div class="trial-ops-card" data-testid="p14-production-operations-panel">
-            <div class="section-title">
-              <strong>P14 Production Pilot Operations</strong>
-              <AiTag :tone="cloudReadonlyProductionOperationsStatus?.status === 'ReadyForP15Planning' ? 'success' : cloudReadonlyProductionOperationsStatus?.status === 'Blocked' || cloudReadonlyProductionOperationsStatus?.emergencyStopActive ? 'danger' : 'warning'">
-                {{ cloudReadonlyProductionOperationsStatus?.status || 'CollectingEvidence' }}
-              </AiTag>
-            </div>
-            <div class="trial-source-line">
-              <span data-testid="p14-non-ga-marker">Production readonly Pilot, not full production rollout</span>
-              <span>query_cloud_data_readonly closed</span>
-            </div>
-            <div class="trial-metric-grid">
-              <div>
-                <span>P12</span>
-                <strong>{{ cloudReadonlyProductionOperationsStatus?.p12PilotStatus || cloudReadonlyProductionPilotStatus?.status || 'Required' }}</strong>
-              </div>
-              <div>
-                <span>P13</span>
-                <strong>{{ cloudReadonlyProductionOperationsStatus?.p13ControlledPilotStatus || cloudReadonlyProductionControlledStatus?.status || 'Required' }}</strong>
-              </div>
-              <div>
-                <span>emergency</span>
-                <strong data-testid="p14-emergency-stop-state">{{ cloudReadonlyProductionOperationsStatus?.emergencyStopActive ? 'Active' : 'Clear' }}</strong>
-              </div>
-              <div>
-                <span>runs</span>
-                <strong>{{ cloudReadonlyProductionOperationsStatus?.runMetrics.totalRuns ?? productionPilotRunLedger.length }}</strong>
-              </div>
-              <div>
-                <span>rows</span>
-                <strong>{{ cloudReadonlyProductionOperationsStatus?.runMetrics.totalRows ?? 0 }}</strong>
-              </div>
-              <div>
-                <span>incidents</span>
-                <strong>{{ cloudReadonlyProductionOperationsStatus?.runMetrics.openIncidentCount ?? 0 }}</strong>
-              </div>
-              <div>
-                <span>persisted</span>
-                <strong>{{ cloudReadonlyProductionOperationsStatus?.operationsStorePersisted ? 'Yes' : 'No' }}</strong>
-              </div>
-              <div>
-                <span>P12 evidence</span>
-                <strong>{{ cloudReadonlyProductionOperationsStatus?.hasP12CompletedRun ? 'Done' : 'Missing' }}</strong>
-              </div>
-              <div>
-                <span>P13 evidence</span>
-                <strong>{{ cloudReadonlyProductionOperationsStatus?.hasP13CompletedRun ? 'Done' : 'Missing' }}</strong>
-              </div>
-            </div>
-            <div class="two-actions">
-              <button type="button" :disabled="store.isLoadingTrialOperations" @click="activateProductionPilotEmergencyStop">
-                <TriangleAlert :size="16" />
-                Emergency stop
-              </button>
-              <button type="button" :disabled="store.isLoadingTrialOperations" @click="clearProductionPilotEmergencyStop">
-                <Check :size="16" />
-                Clear stop
-              </button>
-            </div>
-            <div class="two-actions">
-              <button type="button" :disabled="store.isLoadingTrialOperations" @click="createProductionPilotIncident">
-                <ListChecks :size="16" />
-                Open incident
-              </button>
-              <button type="button" :disabled="store.isLoadingTrialOperations" @click="runProductionPilotGaReadinessEvaluation">
-                <ShieldCheck :size="16" />
-                P15 readiness
-              </button>
-            </div>
-            <div v-if="productionPilotRunLedger.length" class="trial-check-list" data-testid="p14-run-ledger">
-              <div v-for="run in productionPilotRunLedger.slice(0, 3)" :key="run.runId" class="trial-check-row">
-                <div>
-                  <strong>{{ run.endpointCode }} · {{ run.sourceMode }}</strong>
-                  <span>{{ run.boundary }} · {{ run.rowCount }} rows · {{ run.resultHash }}</span>
-                  <span>{{ run.approvalStatus }} · {{ run.status }}</span>
-                </div>
-                <AiTag :tone="run.status === 'Completed' ? 'success' : run.status === 'Failed' ? 'danger' : 'warning'">
-                  {{ run.status }}
-                </AiTag>
-              </div>
-            </div>
-            <div v-if="productionPilotGaReadiness" class="trial-check-list" data-testid="p14-ga-readiness">
-              <div class="trial-check-row">
-                <div>
-                  <strong>P15 GA readiness</strong>
-                  <span>{{ productionPilotGaReadiness.status }} · blockers {{ productionPilotGaReadiness.blockers.length }}</span>
-                </div>
-                <AiTag :tone="productionPilotGaReadiness.status === 'ReadyForP15Planning' ? 'success' : 'danger'">
-                  {{ productionPilotGaReadiness.status }}
-                </AiTag>
-              </div>
-            </div>
-            <div v-if="cloudReadonlyProductionOperationsStatus?.blockers.length" class="trial-check-list">
-              <div v-for="blocker in cloudReadonlyProductionOperationsStatus.blockers" :key="blocker" class="trial-check-row">
-                <div>
-                  <strong>Blocked</strong>
-                  <span>{{ blocker }}</span>
-                </div>
-                <AiTag tone="danger">Blocked</AiTag>
-              </div>
-            </div>
-          </div>
-
-          <div class="trial-ops-card" data-testid="p15-planning-gate-panel">
-            <div class="section-title">
-              <strong>P15 Pilot Planning Gate</strong>
-              <AiTag tone="warning">PlanningOnly</AiTag>
-            </div>
-            <div class="trial-source-line">
-              <span data-testid="p15-planning-marker">Planning and authorization gate, not real Pilot execution</span>
-              <span data-testid="p15-not-ga-marker">Not GA</span>
-              <span>query_cloud_data_readonly closed</span>
-            </div>
-            <div class="trial-metric-grid">
-              <div>
-                <span>users</span>
-                <strong>5-10</strong>
-              </div>
-              <div>
-                <span>range</span>
-                <strong>7 days</strong>
-              </div>
-              <div>
-                <span>maxRows</span>
-                <strong>50</strong>
-              </div>
-              <div>
-                <span>status</span>
-                <strong data-testid="p15-blocked-status">ReadyForP16PlanningBlocked</strong>
-              </div>
-            </div>
-            <div class="trial-source-line" data-testid="p15-allowlist">
-              <span>devices</span>
-              <span>capacity_summary</span>
-              <span>device_logs</span>
-              <span>pass_station_records</span>
-            </div>
-            <div class="trial-check-list" data-testid="p15-blocker-list">
-              <div class="trial-check-row">
-                <div>
-                  <strong>P12/P13 persistence</strong>
-                  <span>Window, intent, and run stores must be persisted before P16.</span>
-                </div>
-                <AiTag tone="danger">Blocker</AiTag>
-              </div>
-              <div class="trial-check-row">
-                <div>
-                  <strong>Artifact refs backfill</strong>
-                  <span>Final artifact refs must automatically update ProductionPilotRunLedger.</span>
-                </div>
-                <AiTag tone="danger">Blocker</AiTag>
-              </div>
-              <div class="trial-check-row">
-                <div>
-                  <strong>Rows retention</strong>
-                  <span>Rows masking, TTL, download, and artifact-use policy must be approved.</span>
-                </div>
-                <AiTag tone="danger">Blocker</AiTag>
-              </div>
-            </div>
-          </div>
-
-          <div v-if="trialCampaign?.scenarioRuns.length" class="trial-run-list">
-            <div v-for="run in trialCampaign.scenarioRuns" :key="run.runId" class="trial-run-row">
-              <div>
-                <strong>{{ run.scenarioId }}</strong>
-                <span>{{ run.sourceMode }} · {{ run.boundary || 'NonProduction' }} · {{ run.approvalStatus }}</span>
-                <span>hash {{ run.queryHashes[0] || run.resultHashes[0] || '-' }}</span>
-              </div>
-              <AiTag :tone="run.status === 'Passed' ? 'success' : run.status === 'Blocked' || run.status === 'Failed' ? 'danger' : 'warning'">
-                {{ run.status }}
-              </AiTag>
-            </div>
-          </div>
-          <div v-else class="panel-empty">暂无挂载的试用任务</div>
-
-          <div v-if="trialEvidencePackage" class="trial-ops-card">
-            <div class="section-title">
-              <strong>证据包</strong>
-              <span>{{ trialEvidencePackage.readinessStatus }}</span>
-            </div>
-            <div class="trial-metric-grid">
-              <div v-for="metric in trialEvidencePackage.metrics.slice(0, 6)" :key="metric.code">
-                <span>{{ metric.label }}</span>
-                <strong>{{ metric.value }}</strong>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section v-else class="tab-stack">
-          <div class="boundary-card">
-            <ShieldCheck :size="24" />
-            <strong>Cloud 只读边界</strong>
-            <span>AICopilot 只做分析、解释、总结和建议，不写回 Cloud 主数据。</span>
-          </div>
-          <div class="boundary-list">
-            <div>
-              <span>现场确认</span>
-              <AiTag :tone="statusTone(onsiteStatus.type)">{{ onsiteStatus.label }}</AiTag>
-            </div>
-            <div>
-              <span>登录来源</span>
-              <strong>{{ loginSource }}</strong>
-            </div>
-            <div v-if="cloudEmployeeNo">
-              <span>Cloud 员工</span>
-              <strong>{{ cloudEmployeeNo }}</strong>
-            </div>
-            <div>
-              <span>会话审批</span>
-              <strong>{{ approvalCount }}</strong>
-            </div>
-            <div>
-              <span>图表组件</span>
-              <strong>{{ widgetCount }}</strong>
-            </div>
-          </div>
-          <button class="wide-action" type="button" @click="store.confirmOnsitePresence(30)">
-            <ArrowUp :size="17" />
-            确认在岗 30 分钟
-          </button>
-          <button class="wide-action muted" type="button" @click="store.clearOnsitePresence()">
-            清除在岗声明
-          </button>
-        </section>
-      </div>
-    </aside>
-
     <div v-if="sessionDrawerVisible" class="mobile-overlay" @click.self="sessionDrawerVisible = false">
       <aside class="mobile-drawer left">
         <button class="drawer-close" type="button" aria-label="关闭会话" @click="sessionDrawerVisible = false">
@@ -1584,19 +983,13 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
         <SessionList />
       </aside>
     </div>
-
-    <div
-      v-if="isMobile && uiLayoutStore.isAgentWorkbenchDrawerOpen"
-      class="agent-mobile-backdrop"
-      @click="uiLayoutStore.setAgentWorkbenchDrawerOpen(false)"
-    />
   </div>
 </template>
 
 <style scoped>
 .command-workbench {
   display: grid;
-  grid-template-columns: minmax(260px, 300px) minmax(0, 1fr) minmax(330px, 380px);
+  grid-template-columns: minmax(260px, 300px) minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   overflow: hidden;
@@ -1606,22 +999,17 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
   box-shadow: var(--ai-shadow-card);
 }
 
-.session-task-rail,
-.agent-workbench-panel {
+.session-rail {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  border-right: 1px solid var(--ai-border);
   background: color-mix(in srgb, var(--ai-surface) 90%, var(--ai-surface-soft));
 }
 
-.session-task-rail {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  border-right: 1px solid var(--ai-border);
-}
-
-.rail-head,
-.agent-panel-head {
+.rail-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1630,23 +1018,31 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
 }
 
 .rail-head div,
-.agent-panel-head div,
-.section-title {
+.section-title,
+.step-row div,
+.approval-row div,
+.artifact-row div {
   display: grid;
-  gap: 3px;
+  gap: 4px;
   min-width: 0;
 }
 
 .rail-head span,
-.agent-panel-head span,
-.canvas-kicker {
-  color: var(--ai-text-soft);
-  font-size: 11px;
-  font-weight: 850;
+.canvas-kicker,
+.run-head span,
+.section-title span,
+.status-tile span,
+.step-row span,
+.approval-row span,
+.artifact-row span,
+.artifact-source-line,
+.panel-empty,
+.uploaded-hint {
+  color: var(--ai-text-muted);
+  font-size: 12px;
 }
 
-.rail-head strong,
-.agent-panel-head strong {
+.rail-head strong {
   font-size: 18px;
   font-weight: 900;
 }
@@ -1654,7 +1050,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
 .rail-head button,
 .icon-button,
 .approval-actions button,
-.artifact-row button,
+.artifact-actions button,
 .drawer-close {
   display: grid;
   width: 38px;
@@ -1671,228 +1067,9 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
   min-height: 0;
 }
 
-.task-history {
-  display: grid;
-  gap: 12px;
-  border-top: 1px solid var(--ai-border);
-  padding: 16px;
-}
-
-.task-history header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.task-history header div,
-.task-history-list,
-.tab-stack,
-.metric-grid div,
-.blocked-step,
-.step-row div,
-.approval-row div,
-.artifact-row div,
-.audit-row div {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.task-history header span,
-.rail-empty,
-.panel-empty,
-.section-title span,
-.step-row span,
-.approval-row span,
-.artifact-row span,
-.audit-row span,
-.boundary-list span,
-.uploaded-hint {
-  color: var(--ai-text-muted);
-  font-size: 12px;
-}
-
-.trial-scenario-panel {
-  display: grid;
-  gap: 12px;
-}
-
-.controlled-sandbox-panel {
-  padding: 12px;
-  border: 1px solid rgba(245, 158, 11, 0.28);
-  border-radius: 14px;
-  background: rgba(255, 251, 235, 0.72);
-}
-
-.trial-scenario-list {
-  display: grid;
-  gap: 8px;
-}
-
-.trial-scenario-card {
-  display: grid;
-  gap: 5px;
-  padding: 10px 11px;
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.82);
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.trial-scenario-card.active,
-.trial-scenario-card:hover {
-  border-color: rgba(14, 165, 166, 0.7);
-  background: rgba(240, 253, 250, 0.9);
-}
-
-.trial-scenario-card span {
-  color: #0f766e;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0;
-  text-transform: uppercase;
-}
-
-.trial-scenario-card strong {
-  font-size: 13px;
-  line-height: 1.25;
-}
-
-.trial-scenario-card small,
-.trial-scenario-card em {
-  color: var(--ai-text-muted);
-  font-size: 12px;
-  font-style: normal;
-  line-height: 1.35;
-}
-
-.planner-preview {
-  display: grid;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid rgba(14, 165, 166, 0.22);
-  border-radius: 8px;
-  background: rgba(240, 253, 250, 0.72);
-}
-
-.planner-preview-head,
-.planner-source-line {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.planner-preview-head div,
-.planner-preview-grid div {
-  display: grid;
-  gap: 3px;
-}
-
-.planner-preview span,
-.planner-preview-grid span {
-  color: var(--ai-text-muted);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0;
-}
-
-.planner-preview strong {
-  color: var(--ai-text);
-  font-size: 13px;
-  line-height: 1.3;
-}
-
-.planner-preview-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.planner-intent-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.planner-intent-grid div {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-  padding: 8px;
-  border: 1px solid rgba(245, 158, 11, 0.24);
-  border-radius: 8px;
-  background: rgba(255, 251, 235, 0.72);
-}
-
-.planner-source-line {
-  justify-content: flex-start;
-  flex-wrap: wrap;
-}
-
-.planner-warning {
-  display: flex;
-  align-items: flex-start;
-  gap: 7px;
-  color: #92400e;
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-.planner-chip-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.planner-chip-row span {
-  padding: 4px 7px;
-  border-radius: 999px;
-  background: rgba(15, 118, 110, 0.1);
-  color: #0f766e;
-  font-size: 11px;
-  font-weight: 800;
-}
-
-.task-history-list {
-  max-height: 220px;
-  overflow-y: auto;
-}
-
-.task-history-item {
-  display: grid;
-  gap: 4px;
-  border: 1px solid var(--ai-border);
-  border-radius: 16px;
-  padding: 11px;
-  background: var(--ai-surface);
-  color: var(--ai-text);
-  cursor: pointer;
-  text-align: left;
-}
-
-.task-history-item.active {
-  border-color: var(--ai-graphite);
-  box-shadow: 0 0 0 4px rgba(63, 111, 115, 0.12);
-}
-
-.task-history-item strong,
-.task-history-item span,
-.step-row strong,
-.approval-row strong,
-.artifact-row strong,
-.audit-row strong {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .ai-canvas {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   min-width: 0;
   min-height: 0;
   background: var(--ai-canvas);
@@ -1916,9 +1093,11 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
 .soft-action,
 .tool-button,
 .send-button,
-.two-actions,
-.wide-action,
-.boundary-list div {
+.run-actions,
+.run-actions button,
+.inline-secondary-action,
+.boundary-runtime,
+.boundary-runtime button {
   display: flex;
   align-items: center;
 }
@@ -1930,7 +1109,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
 
 .canvas-kicker {
   margin: 0 0 4px;
-  color: var(--ai-text-soft);
+  font-weight: 850;
 }
 
 .canvas-header h1 {
@@ -1949,27 +1128,13 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
   justify-content: flex-end;
 }
 
-.model-selector {
-  min-height: 40px;
-  width: 230px;
-  border: 1px solid var(--ai-border);
-  border-radius: 999px;
-  padding: 0 14px;
-  outline: none;
-  background: var(--ai-surface);
-  color: var(--ai-text);
-  font-weight: 800;
-}
-
-.model-selector option {
-  color: var(--ai-graphite);
-}
-
 .soft-action,
 .tool-button,
-.wide-action {
+.run-actions button,
+.inline-secondary-action,
+.boundary-runtime button {
   gap: 8px;
-  min-height: 40px;
+  min-height: 38px;
   border: 1px solid var(--ai-border);
   border-radius: 999px;
   padding: 0 13px;
@@ -1981,18 +1146,11 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
 
 .soft-action:disabled,
 .tool-button:disabled,
-.wide-action:disabled,
+.run-actions button:disabled,
+.inline-secondary-action:disabled,
 .send-button:disabled {
   cursor: not-allowed;
   opacity: 0.48;
-}
-
-.canvas-status-strip {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10px;
-  border-bottom: 1px solid var(--ai-border);
-  padding: 12px 20px;
 }
 
 .status-tile {
@@ -2010,8 +1168,6 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
 
 .status-tile span {
   overflow: hidden;
-  color: var(--ai-text-muted);
-  font-size: 12px;
   font-weight: 800;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2021,16 +1177,44 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
   min-height: 0;
   overflow-y: auto;
   padding: 22px;
-  background:
-    radial-gradient(circle at 70% 12%, rgba(200, 255, 61, 0.13), transparent 28%),
-    var(--ai-canvas);
+  background: var(--ai-canvas);
 }
 
-.message-list {
+.message-list,
+.inline-agent-run,
+.history-loader,
+.loading-lines {
   display: grid;
   gap: 16px;
   max-width: 980px;
   margin: 0 auto;
+}
+
+.history-loader {
+  justify-items: center;
+  margin-bottom: 14px;
+}
+
+.history-loader button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  border: 1px solid var(--ai-border);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: var(--ai-surface);
+  color: var(--ai-text-muted);
+  font-weight: 800;
+}
+
+.history-loader button:disabled {
+  cursor: progress;
+  opacity: 0.62;
+}
+
+.inline-agent-run {
+  margin-top: 18px;
 }
 
 .canvas-error {
@@ -2047,11 +1231,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
   font-weight: 800;
 }
 
-.loading-lines {
-  display: grid;
-  gap: 12px;
-  max-width: 980px;
-  margin: 0 auto;
+.inline-error {
+  margin: 0;
 }
 
 .loading-lines i {
@@ -2066,7 +1247,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
   max-width: 760px;
   margin: 42px auto;
   border: 1px solid var(--ai-border);
-  border-radius: 28px;
+  border-radius: 24px;
   padding: 28px;
   background: var(--ai-surface);
   box-shadow: var(--ai-shadow-canvas);
@@ -2103,6 +1284,624 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
   text-align: left;
 }
 
+.run-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid rgba(14, 165, 166, 0.2);
+  border-radius: 20px;
+  padding: 16px;
+  background: rgba(240, 253, 250, 0.74);
+}
+
+.run-head h2 {
+  margin: 4px 0 0;
+  color: var(--ai-text);
+  font-size: 18px;
+  font-weight: 950;
+  line-height: 1.3;
+}
+
+.run-head p {
+  margin: 5px 0 0;
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.run-actions {
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.run-actions button:first-child {
+  background: var(--ai-graphite);
+  color: white;
+}
+
+.run-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--ai-border);
+  border-radius: 18px;
+  padding: 14px;
+  background: var(--ai-surface);
+  box-shadow: var(--ai-shadow-xs);
+}
+
+.runtime-run-card {
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.runtime-summary,
+.artifact-detail-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.runtime-summary::-webkit-details-marker,
+.artifact-detail-summary::-webkit-details-marker {
+  display: none;
+}
+
+.timeline-summary-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.timeline-summary-main > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.timeline-summary-main strong,
+.timeline-summary-main small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-summary-main small,
+.timeline-row span,
+.timeline-row time {
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.timeline-list {
+  display: grid;
+  gap: 8px;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.runtime-sections {
+  display: grid;
+  gap: 14px;
+  padding: 0 14px 14px;
+}
+
+.runtime-section-block {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.runtime-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.runtime-section-title strong {
+  color: var(--ai-text);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.runtime-section-title span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-row {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--ai-border);
+  border-radius: 15px;
+  padding: 10px;
+  background: var(--ai-surface-soft);
+}
+
+.timeline-row div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.timeline-row-main {
+  align-content: center;
+}
+
+.timeline-row strong,
+.timeline-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-result-fold {
+  min-width: 0;
+}
+
+.timeline-result-fold summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.timeline-source-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.timeline-source-item {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  border: 1px solid var(--ai-border);
+  border-radius: 10px;
+  padding: 8px;
+  background: var(--ai-surface);
+}
+
+.timeline-source-item strong,
+.timeline-source-item small,
+.timeline-source-item em {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.timeline-source-item strong {
+  color: var(--ai-text);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.timeline-source-item small,
+.timeline-source-item em {
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+  line-height: 1.55;
+}
+
+.section-title {
+  grid-auto-flow: column;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.section-title strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-grid,
+.artifact-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.plan-grid div,
+.artifact-summary div,
+.plan-summary,
+.blocked-step {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  border: 1px solid var(--ai-border);
+  border-radius: 14px;
+  padding: 10px;
+  background: var(--ai-surface-soft);
+}
+
+.plan-grid span,
+.artifact-summary span,
+.plan-summary span,
+.blocked-step span {
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.plan-grid strong,
+.artifact-summary strong,
+.plan-summary strong,
+.blocked-step strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ai-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-detail-fold,
+.step-detail-fold,
+.approval-detail-fold {
+  min-width: 0;
+}
+
+.plan-detail-fold {
+  overflow: hidden;
+  border: 1px solid var(--ai-border);
+  border-radius: 14px;
+  background: var(--ai-surface-soft);
+}
+
+.plan-detail-fold summary,
+.step-detail-fold summary,
+.approval-detail-fold summary {
+  display: inline-flex;
+  min-height: 32px;
+  cursor: pointer;
+  align-items: center;
+  gap: 7px;
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.plan-detail-fold summary {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 10px;
+}
+
+.plan-detail-fold summary > span {
+  min-width: 0;
+  flex: 1;
+}
+
+.plan-detail-fold .plan-grid,
+.plan-detail-fold .chip-row,
+.plan-detail-fold .planner-warning {
+  margin: 0 10px 10px;
+}
+
+.step-detail-fold,
+.approval-detail-fold {
+  margin-top: 3px;
+}
+
+.step-detail-fold span,
+.step-detail-fold code,
+.approval-detail-fold dd {
+  display: block;
+  min-width: 0;
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--ai-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.step-detail-fold code,
+.approval-detail-fold .mono {
+  border-radius: 8px;
+  padding: 2px 6px;
+  background: var(--ai-surface-soft);
+  color: var(--ai-graphite);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.approval-detail-grid {
+  display: grid;
+  gap: 6px;
+  margin: 2px 0 0;
+}
+
+.approval-detail-grid div {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.approval-detail-grid dt {
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.approval-detail-grid dd {
+  margin: 0;
+  color: var(--ai-text);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.intent-line,
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.intent-line span,
+.chip-row span {
+  border: 1px solid var(--ai-border);
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.planner-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  color: #92400e;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.step-list,
+.approval-group,
+.artifact-group {
+  display: grid;
+  gap: 8px;
+}
+
+.step-row,
+.approval-row,
+.artifact-row {
+  display: grid;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--ai-border);
+  border-radius: 16px;
+  padding: 10px;
+  background: var(--ai-surface);
+}
+
+.step-row {
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+}
+
+.step-row i {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--ai-graphite);
+  color: var(--ai-lime);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.approval-row,
+.artifact-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.step-row strong,
+.step-row span,
+.approval-row strong,
+.approval-row span,
+.artifact-row strong,
+.artifact-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.approval-actions,
+.artifact-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.group-title {
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.panel-empty {
+  display: grid;
+  min-height: 84px;
+  place-items: center;
+  border: 1px dashed var(--ai-border);
+  border-radius: 16px;
+}
+
+.chart-preview {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--ai-border);
+  border-radius: 16px;
+  padding: 12px;
+  background: var(--ai-surface-soft);
+}
+
+.chart-preview-head,
+.chart-bar-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.chart-bar-row {
+  grid-template-columns: 86px minmax(0, 1fr) auto;
+}
+
+.chart-bar-row div {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--ai-border);
+}
+
+.chart-bar-row i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ai-teal);
+}
+
+.artifact-preview-panel {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--ai-border);
+  border-radius: 16px;
+  padding: 12px;
+  background: var(--ai-surface-soft);
+}
+
+.artifact-detail-fold {
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--ai-border);
+  border-radius: 16px;
+  background: var(--ai-surface-soft);
+}
+
+.artifact-detail-fold .artifact-summary,
+.artifact-detail-fold .artifact-group,
+.artifact-detail-fold .artifact-preview-panel,
+.artifact-detail-fold .panel-empty {
+  margin: 0 12px 12px;
+}
+
+.artifact-detail-fold .artifact-summary {
+  margin-top: 0;
+}
+
+.artifact-preview-content {
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--ai-border);
+  border-radius: 12px;
+  padding: 10px;
+  background: #0f172a;
+  color: #e5eef6;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.artifact-preview-table {
+  display: grid;
+  overflow-x: auto;
+  border: 1px solid var(--ai-border);
+  border-radius: 12px;
+}
+
+.artifact-preview-table-head,
+.artifact-preview-table-row {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(96px, 1fr);
+}
+
+.artifact-preview-table-head span,
+.artifact-preview-table-row span {
+  min-width: 0;
+  overflow: hidden;
+  padding: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-preview-table-head {
+  background: var(--ai-surface);
+  font-weight: 800;
+}
+
+.inline-secondary-action {
+  justify-content: center;
+  width: max-content;
+}
+
+.boundary-runtime {
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid rgba(63, 111, 115, 0.18);
+  border-radius: 16px;
+  padding: 12px;
+  background: var(--ai-surface-soft);
+  color: var(--ai-text);
+}
+
+.boundary-runtime div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  margin-right: auto;
+}
+
+.boundary-runtime span {
+  color: var(--ai-text-muted);
+  font-size: 12px;
+}
+
+.boundary-runtime button {
+  background: var(--ai-surface);
+  color: var(--ai-text);
+}
+
+.danger-text {
+  color: #b42318;
+}
+
 .command-composer {
   display: grid;
   gap: 10px;
@@ -2124,6 +1923,37 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
 .tool-button {
   min-height: 34px;
   color: var(--ai-text-muted);
+}
+
+.skill-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  max-width: 220px;
+  border: 1px solid rgba(63, 111, 115, 0.18);
+  border-radius: 999px;
+  padding: 0 10px;
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--ai-accent);
+  box-shadow: var(--ai-shadow-xs);
+}
+
+.skill-picker select {
+  min-width: 0;
+  max-width: 168px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--ai-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.skill-picker select:disabled {
+  color: var(--ai-text-muted);
+  cursor: not-allowed;
 }
 
 .uploaded-hint {
@@ -2174,398 +2004,6 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
   cursor: pointer;
 }
 
-.agent-workbench-panel {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
-  border-left: 1px solid var(--ai-border);
-  padding: 14px;
-}
-
-.agent-panel-head {
-  padding: 4px 4px 14px;
-}
-
-.agent-tabs {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 7px;
-  border-radius: 20px;
-  padding: 6px;
-  background: var(--ai-surface-soft);
-}
-
-.agent-tabs button {
-  display: inline-flex;
-  min-height: 38px;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  border: 0;
-  border-radius: 15px;
-  background: transparent;
-  color: var(--ai-text-muted);
-  cursor: pointer;
-  font-weight: 850;
-}
-
-.agent-tabs button.active {
-  background: var(--ai-surface);
-  color: var(--ai-text);
-  box-shadow: var(--ai-shadow-xs);
-}
-
-.agent-tabs span {
-  border-radius: 999px;
-  padding: 1px 6px;
-  background: var(--ai-lime);
-  color: var(--ai-graphite);
-  font-size: 10px;
-}
-
-.agent-tab-content {
-  min-height: 0;
-  overflow-y: auto;
-  padding-top: 14px;
-}
-
-.tab-stack {
-  gap: 12px;
-}
-
-.metric-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.metric-grid div,
-.blocked-step,
-.chart-preview,
-.boundary-card,
-.boundary-list {
-  border: 1px solid var(--ai-border);
-  border-radius: 18px;
-  padding: 12px;
-  background: var(--ai-surface);
-}
-
-.metric-grid span,
-.blocked-step span {
-  color: var(--ai-text-muted);
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.metric-grid strong {
-  font-size: 24px;
-  font-variant-numeric: tabular-nums;
-}
-
-.agent-goal {
-  width: 100%;
-  resize: vertical;
-  border: 1px solid var(--ai-border);
-  border-radius: 18px;
-  padding: 12px;
-  outline: none;
-  background: var(--ai-surface);
-  color: var(--ai-text);
-  font: inherit;
-}
-
-.agent-goal:focus {
-  border-color: rgba(63, 111, 115, 0.34);
-  box-shadow: 0 0 0 4px var(--ai-focus);
-}
-
-.agent-goal.compact {
-  min-height: 86px;
-  border-radius: 12px;
-}
-
-.two-actions {
-  gap: 8px;
-}
-
-.two-actions button,
-.wide-action {
-  justify-content: center;
-  width: 100%;
-  min-height: 42px;
-  border-color: var(--ai-border);
-  background: var(--ai-graphite);
-  color: white;
-}
-
-.wide-action.muted {
-  background: var(--ai-surface);
-  color: var(--ai-text);
-}
-
-.step-list,
-.approval-group,
-.artifact-group,
-.audit-list,
-.boundary-list {
-  display: grid;
-  gap: 8px;
-}
-
-.step-row,
-.approval-row,
-.artifact-row,
-.audit-row {
-  display: grid;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid var(--ai-border);
-  border-radius: 16px;
-  padding: 10px;
-  background: var(--ai-surface);
-}
-
-.step-row {
-  grid-template-columns: 30px minmax(0, 1fr) auto;
-}
-
-.step-row i {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border-radius: 999px;
-  background: var(--ai-graphite);
-  color: var(--ai-lime);
-  font-size: 12px;
-  font-style: normal;
-  font-weight: 900;
-}
-
-.approval-row,
-.artifact-row,
-.audit-row {
-  grid-template-columns: minmax(0, 1fr) auto;
-}
-
-.approval-actions {
-  display: flex;
-  gap: 6px;
-}
-
-.group-title {
-  color: var(--ai-text-muted);
-  font-size: 12px;
-  font-weight: 850;
-}
-
-.panel-empty {
-  display: grid;
-  min-height: 110px;
-  place-items: center;
-  border: 1px dashed var(--ai-border);
-  border-radius: 18px;
-}
-
-.chart-preview {
-  display: grid;
-  gap: 8px;
-}
-
-.artifact-workspace-summary {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.artifact-workspace-summary div {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-  border: 1px solid var(--ai-border);
-  border-radius: 14px;
-  padding: 10px;
-  background: var(--ai-surface);
-}
-
-.artifact-workspace-summary span,
-.artifact-source-line,
-.artifact-preview-meta,
-.artifact-preview-metadata {
-  color: var(--ai-text-muted);
-  font-size: 12px;
-}
-
-.artifact-actions {
-  display: flex;
-  gap: 6px;
-}
-
-.artifact-preview-panel {
-  display: grid;
-  gap: 10px;
-  border: 1px solid var(--ai-border);
-  border-radius: 16px;
-  padding: 12px;
-  background: var(--ai-surface);
-}
-
-.artifact-preview-meta,
-.artifact-preview-metadata {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 10px;
-  align-items: center;
-}
-
-.artifact-preview-content {
-  max-height: 260px;
-  overflow: auto;
-  border: 1px solid var(--ai-border);
-  border-radius: 12px;
-  padding: 10px;
-  background: #0f172a;
-  color: #e5eef6;
-  font-size: 12px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.artifact-preview-table {
-  display: grid;
-  overflow-x: auto;
-  border: 1px solid var(--ai-border);
-  border-radius: 12px;
-}
-
-.artifact-preview-table-head,
-.artifact-preview-table-row {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(96px, 1fr);
-}
-
-.artifact-preview-table-head span,
-.artifact-preview-table-row span {
-  min-width: 0;
-  overflow: hidden;
-  padding: 8px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.artifact-preview-table-head {
-  background: var(--ai-surface-soft);
-  font-weight: 800;
-}
-
-.trial-ops-card,
-.trial-run-row,
-.trial-check-row {
-  display: grid;
-  gap: 10px;
-  border: 1px solid var(--ai-border);
-  border-radius: 16px;
-  padding: 12px;
-  background: var(--ai-surface);
-}
-
-.trial-source-line {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.trial-source-line span {
-  border: 1px solid var(--ai-border);
-  border-radius: 999px;
-  padding: 4px 8px;
-  color: var(--ai-text-muted);
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.trial-metric-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.trial-metric-grid div {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-  border: 1px solid var(--ai-border);
-  border-radius: 14px;
-  padding: 10px;
-  background: var(--ai-surface-soft);
-}
-
-.trial-metric-grid span,
-.trial-run-row span,
-.trial-check-row span {
-  color: var(--ai-text-muted);
-  font-size: 12px;
-}
-
-.trial-run-list,
-.trial-check-list {
-  display: grid;
-  gap: 8px;
-}
-
-.trial-run-row,
-.trial-check-row {
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-}
-
-.chart-preview-head,
-.chart-bar-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: center;
-}
-
-.chart-bar-row {
-  grid-template-columns: 86px minmax(0, 1fr) auto;
-}
-
-.chart-bar-row div {
-  height: 8px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: var(--ai-border);
-}
-
-.chart-bar-row i {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--ai-teal);
-}
-
-.boundary-card {
-  display: grid;
-  gap: 8px;
-  background: var(--ai-graphite);
-  color: white;
-}
-
-.boundary-card span {
-  color: #cbd5e1;
-}
-
-.boundary-list div {
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.danger-text {
-  color: #b42318;
-}
-
 .mobile-overlay {
   position: fixed;
   inset: 0;
@@ -2588,41 +2026,22 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
   left: 0;
 }
 
-.mobile-drawer.right {
-  right: 0;
-}
-
 .drawer-close {
   margin-left: auto;
   margin-bottom: 14px;
 }
 
-.agent-panel-head .drawer-close {
-  margin-bottom: 0;
-}
-
-.mobile-panel-note {
-  border-radius: 18px;
-  padding: 14px;
-  background: var(--ai-surface-soft);
-  color: var(--ai-text-muted);
-  font-weight: 800;
-}
-
-.agent-mobile-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 70;
-  background: rgba(48, 83, 86, 0.34);
-}
-
 @media (max-width: 1280px) {
   .command-workbench {
-    grid-template-columns: 260px minmax(0, 1fr) 340px;
+    grid-template-columns: 260px minmax(0, 1fr);
   }
 
-  .canvas-status-strip {
+  .status-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .plan-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -2641,24 +2060,38 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
     justify-content: flex-start;
   }
 
-  .model-selector {
-    width: min(260px, 100%);
+  .message-viewport {
+    padding: 16px;
+  }
+}
+
+@media (max-width: 720px) {
+  .status-grid,
+  .plan-grid,
+  .artifact-summary {
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .agent-workbench-panel {
-    position: fixed;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 80;
-    width: min(390px, 90vw);
-    transform: translateX(110%);
-    transition: transform 0.2s ease;
-    box-shadow: var(--ai-shadow-shell);
+  .run-head,
+  .boundary-runtime {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
-  .agent-workbench-panel.mobile-open {
-    transform: translateX(0);
+  .inline-secondary-action {
+    width: 100%;
+  }
+
+  .step-row,
+  .approval-row,
+  .artifact-row,
+  .timeline-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .approval-actions,
+  .artifact-actions {
+    justify-content: flex-start;
   }
 }
 </style>

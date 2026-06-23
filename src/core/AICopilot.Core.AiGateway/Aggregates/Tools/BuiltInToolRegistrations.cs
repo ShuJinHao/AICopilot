@@ -28,7 +28,7 @@ public sealed record ToolRegistrationSeed(
 
 public static class BuiltInToolRegistrations
 {
-    public const int CurrentCatalogVersion = 9;
+    public const int CurrentCatalogVersion = 10;
 
     private const string AgentRuntimeTarget = "AgentTaskRuntime";
     private const string MockMcpTarget = "MockMcpProvider";
@@ -41,10 +41,6 @@ public static class BuiltInToolRegistrations
         Low("parse_table_file", "Parse table file", "Parse CSV, JSON, or XLSX input into structured table data.", "Workspace", ToolDataBoundary.ArtifactDraftOnly),
         Low("rag_search", "Search knowledge base", "Search authorized RAG context for the current task.", "RAG", ToolDataBoundary.RagContextOnly),
         CloudReadonly("query_cloud_data_readonly", "Query Cloud readonly data", "Cloud AiRead readonly query boundary. Real mode stays disabled by default."),
-        CloudReadonlyPilotReadiness("query_cloud_pilot_readiness_readonly", "Cloud readonly Pilot readiness rehearsal", "Production Pilot readiness descriptor for contract rehearsal only. It must stay disabled, hidden, and non-executable."),
-        CloudReadonlyProductionPilot("query_cloud_production_pilot_readonly", "Cloud readonly production Pilot query", "Fixed-template production Pilot readonly descriptor. It must stay disabled by default and is executable only through the P12 Pilot Window gate."),
-        CloudReadonlyProductionControlled("query_cloud_production_controlled_readonly", "Cloud readonly production controlled query", "Controlled free-goal production Pilot readonly descriptor. It must stay disabled by default and is executable only through the P13 controlled Pilot gate."),
-        CloudReadonlySandbox("query_cloud_sandbox_readonly", "Query Cloud sandbox readonly data", "Cloud readonly sandbox trial query boundary. Production CloudReadonly remains disabled by default."),
         BusinessReadonly("query_business_database_readonly", "Query business database readonly", "Query authorized SimulationBusiness data through Text-to-SQL readonly guardrails."),
         Low("summarize_business_query_result", "Summarize business query result", "Summarize approved BusinessDatabase readonly query results with source markers.", "DataAnalysis", ToolDataBoundary.SimulationBusinessOnly),
         Low("generate_business_chart", "Generate business chart", "Generate controlled chart data from approved BusinessDatabase readonly query results.", "Artifacts", ToolDataBoundary.SimulationBusinessOnly, ToolProviderType.Artifact),
@@ -59,6 +55,14 @@ public static class BuiltInToolRegistrations
         MockMcp("mock_mcp_kpi_formula_lookup", "Mock MCP KPI formula lookup", "Return deterministic KPI formula notes for capacity, quality, and inventory analysis.", ToolDataBoundary.RagContextOnly, AiToolRiskLevel.Low, requiresApproval: false, inputSchema: """{"type":"object","properties":{"domain":{"type":"string","enum":["Production","Quality","Inventory","Sales","Employee"]}}}"""),
         MockMcp("mock_mcp_artifact_quality_check", "Mock MCP artifact quality check", "Check that draft artifacts keep SimulationBusiness source markers.", ToolDataBoundary.ArtifactDraftOnly, AiToolRiskLevel.Medium, requiresApproval: false, inputSchema: """{"type":"object","properties":{"artifactType":{"type":"string"},"contentPreview":{"type":"string"}}}"""),
         MockMcp("mock_mcp_external_ticket_preview", "Mock MCP external ticket preview", "Create an external ticket preview without sending it to any real external system.", ToolDataBoundary.ArtifactDraftOnly, AiToolRiskLevel.High, requiresApproval: true, inputSchema: """{"type":"object","properties":{"title":{"type":"string"},"summary":{"type":"string"}},"required":["title"]}""")
+    ];
+
+    public static IReadOnlyCollection<string> ObsoleteAgentRuntimeToolCodes { get; } =
+    [
+        "query_cloud_sandbox_readonly",
+        "query_cloud_pilot_readiness_readonly",
+        "query_cloud_production_pilot_readonly",
+        "query_cloud_production_controlled_readonly"
     ];
 
     private static ToolRegistrationSeed Low(
@@ -150,114 +154,6 @@ public static class BuiltInToolRegistrations
             SchemaVersion: 1,
             CatalogVersion: CurrentCatalogVersion,
             ApprovalPolicy: "DisabledRealCloudReadonly");
-    }
-
-    private static ToolRegistrationSeed CloudReadonlySandbox(string code, string displayName, string description)
-    {
-        return new ToolRegistrationSeed(
-            code,
-            displayName,
-            description,
-            ToolProviderType.CloudReadonly,
-            ToolRegistrationTargetType.AgentRuntime,
-            AgentRuntimeTarget,
-            """{"type":"object","properties":{"scenarioId":{"type":"string"},"endpointCode":{"type":"string","enum":["devices","capacity_summary","device_logs","pass_station_records"]},"maxRows":{"type":"integer"},"timeoutMs":{"type":"integer"}}}""",
-            ObjectSchema,
-            AiToolRiskLevel.High,
-            "AiGateway.ToolRegistry.Execute",
-            RequiresApproval: true,
-            IsEnabled: true,
-            TimeoutSeconds: 30,
-            ToolAuditLevel.Standard,
-            "CloudReadonlySandbox",
-            BusinessDomains: ["Production", "Equipment", "Device", "Capacity", "Delivery"],
-            ToolDataBoundary.CloudReadonlySandboxOnly,
-            IsVisibleToPlanner: true,
-            IsExecutableByAgent: true,
-            SchemaVersion: 1,
-            CatalogVersion: CurrentCatalogVersion,
-            ApprovalPolicy: "SandboxAgentTrial");
-    }
-
-    private static ToolRegistrationSeed CloudReadonlyPilotReadiness(string code, string displayName, string description)
-    {
-        return new ToolRegistrationSeed(
-            code,
-            displayName,
-            description,
-            ToolProviderType.CloudReadonly,
-            ToolRegistrationTargetType.AgentRuntime,
-            AgentRuntimeTarget,
-            """{"type":"object","properties":{"packageId":{"type":"string"},"endpointCode":{"type":"string","enum":["devices","capacity_summary","device_logs","pass_station_records"]},"maxRows":{"type":"integer"},"timeoutMs":{"type":"integer"}}}""",
-            ObjectSchema,
-            AiToolRiskLevel.High,
-            "AiGateway.ToolRegistry.AuditView",
-            RequiresApproval: true,
-            IsEnabled: false,
-            TimeoutSeconds: 30,
-            ToolAuditLevel.Standard,
-            "CloudReadonlyPilotReadiness",
-            BusinessDomains: ["Production", "Equipment", "Device", "Capacity", "Delivery"],
-            ToolDataBoundary.CloudReadonlyPilotReadinessOnly,
-            IsVisibleToPlanner: false,
-            IsExecutableByAgent: false,
-            SchemaVersion: 1,
-            CatalogVersion: CurrentCatalogVersion,
-            ApprovalPolicy: "PilotReadinessRehearsalOnly");
-    }
-
-    private static ToolRegistrationSeed CloudReadonlyProductionPilot(string code, string displayName, string description)
-    {
-        return new ToolRegistrationSeed(
-            code,
-            displayName,
-            description,
-            ToolProviderType.CloudReadonly,
-            ToolRegistrationTargetType.AgentRuntime,
-            AgentRuntimeTarget,
-            """{"type":"object","properties":{"scenarioId":{"type":"string","enum":["cloud-production-pilot-devices","cloud-production-pilot-capacity-summary","cloud-production-pilot-device-logs","cloud-production-pilot-pass-station-records","cloud-production-pilot-device-exception-analysis","cloud-production-pilot-capacity-delivery-analysis"]},"pilotWindowId":{"type":"string"},"endpointCode":{"type":"string","enum":["devices","capacity_summary","device_logs","pass_station_records"]},"maxRows":{"type":"integer"},"timeoutMs":{"type":"integer"}}}""",
-            ObjectSchema,
-            AiToolRiskLevel.High,
-            "AiGateway.ToolRegistry.Execute",
-            RequiresApproval: true,
-            IsEnabled: false,
-            TimeoutSeconds: 30,
-            ToolAuditLevel.Standard,
-            "CloudReadonlyProductionPilot",
-            BusinessDomains: ["Production", "Equipment", "Device", "Capacity", "Delivery"],
-            ToolDataBoundary.CloudReadonlyProductionPilotOnly,
-            IsVisibleToPlanner: false,
-            IsExecutableByAgent: false,
-            SchemaVersion: 1,
-            CatalogVersion: CurrentCatalogVersion,
-            ApprovalPolicy: "ProductionPilotToolApproval");
-    }
-
-    private static ToolRegistrationSeed CloudReadonlyProductionControlled(string code, string displayName, string description)
-    {
-        return new ToolRegistrationSeed(
-            code,
-            displayName,
-            description,
-            ToolProviderType.CloudReadonly,
-            ToolRegistrationTargetType.AgentRuntime,
-            AgentRuntimeTarget,
-            """{"type":"object","properties":{"intentId":{"type":"string"},"pilotWindowId":{"type":"string"},"endpointCode":{"type":"string","enum":["devices","capacity_summary","device_logs","pass_station_records"]},"maxRows":{"type":"integer"},"timeoutMs":{"type":"integer"}},"required":["intentId"]}""",
-            ObjectSchema,
-            AiToolRiskLevel.High,
-            "AiGateway.ToolRegistry.Execute",
-            RequiresApproval: true,
-            IsEnabled: false,
-            TimeoutSeconds: 30,
-            ToolAuditLevel.Standard,
-            "CloudReadonlyProductionControlled",
-            BusinessDomains: ["Production", "Equipment", "Device", "Capacity", "Delivery"],
-            ToolDataBoundary.CloudReadonlyProductionControlledOnly,
-            IsVisibleToPlanner: false,
-            IsExecutableByAgent: false,
-            SchemaVersion: 1,
-            CatalogVersion: CurrentCatalogVersion,
-            ApprovalPolicy: "ProductionControlledPilotToolApproval");
     }
 
     private static ToolRegistrationSeed BusinessReadonly(string code, string displayName, string description)

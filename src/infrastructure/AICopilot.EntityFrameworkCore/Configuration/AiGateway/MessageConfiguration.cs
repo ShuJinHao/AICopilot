@@ -23,9 +23,16 @@ public class MessageConfiguration : IEntityTypeConfiguration<Message>
             .IsRequired()
             .HasColumnName("content");
 
+        builder.Property(m => m.RenderPayloadJson)
+            .HasColumnName("render_payload_json");
+
         builder.Property(m => m.CreatedAt)
             .IsRequired()
             .HasColumnName("created_at"); //
+
+        builder.Property(m => m.Sequence)
+            .IsRequired()
+            .HasColumnName("sequence");
 
         // 配置枚举 MessageType
         // 将枚举存储为字符串（"User", "Assistant"）而不是整数
@@ -68,5 +75,12 @@ public class MessageConfiguration : IEntityTypeConfiguration<Message>
             .HasConstraintName("fk_messages_sessions_session_id")
             .IsRequired()
             .OnDelete(DeleteBehavior.Cascade); // 当 Session 被删除时，其 Messages 也被删除
+
+        builder.HasIndex(m => new { m.SessionId, m.Sequence })
+            .IsUnique()
+            .HasDatabaseName("ix_messages_session_id_sequence");
+
+        builder.HasIndex(m => m.SessionId)
+            .HasDatabaseName("IX_messages_session_id");
     }
 }

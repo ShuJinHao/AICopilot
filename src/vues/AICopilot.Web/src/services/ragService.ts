@@ -127,6 +127,10 @@ export const ragService = {
     return await apiClient.delete('/rag/document', { id })
   },
 
+  async retryDocument(id: number) {
+    return await apiClient.post('/rag/document/retry', { id })
+  },
+
   async searchKnowledgeBase(
     knowledgeBaseId: string,
     queryText: string,

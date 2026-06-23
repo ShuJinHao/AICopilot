@@ -296,3 +296,33 @@ jobs:
           path: ${{ runner.temp }}/aicopilot-built-services/services.txt
           if-no-files-found: error
           retention-days: 14
+
+      - name: Prune old Harbor image tags
+        if: steps.changes.outputs.any_backend == 'true' || steps.changes.outputs.web == 'true'
+        shell: bash
+        env:
+          HARBOR_URL: ${{ steps.registry.outputs.registry }}
+          HARBOR_PROJECT: ${{ steps.registry.outputs.namespace }}
+          HARBOR_USERNAME: ${{ secrets.OCI_REGISTRY_USERNAME }}
+          HARBOR_PASSWORD: ${{ secrets.OCI_REGISTRY_PASSWORD }}
+          HARBOR_KEEP_SHA_TAGS: 3
+        run: |
+          set -euo pipefail
+          repositories=()
+          if [ "${{ steps.changes.outputs.httpapi }}" = "true" ]; then
+            repositories+=(aicopilot-httpapi)
+          fi
+          if [ "${{ steps.changes.outputs.migration }}" = "true" ]; then
+            repositories+=(aicopilot-migration)
+          fi
+          if [ "${{ steps.changes.outputs.dataworker }}" = "true" ]; then
+            repositories+=(aicopilot-dataworker)
+          fi
+          if [ "${{ steps.changes.outputs.ragworker }}" = "true" ]; then
+            repositories+=(aicopilot-ragworker)
+          fi
+          if [ "${{ steps.changes.outputs.web }}" = "true" ]; then
+            repositories+=(aicopilot-webui)
+          fi
+
+          bash deploy/enterprise-ai/harbor-retention.sh "${repositories[@]}"

@@ -43,7 +43,6 @@ public static class DependencyInjection
         builder.Services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
         builder.Services.AddHttpClient<ICloudIdentityStatusClient, CloudIdentityStatusClient>();
         builder.Services.AddHttpClient<ICloudAiReadClient, CloudAiReadClient>();
-        builder.Services.AddHttpClient<ICloudReadonlySandboxClient, CloudReadonlySandboxClient>();
         builder.Services.AddScoped<IChatClientProvider, OpenAiChatClientProvider>();
         builder.Services.AddScoped<IChatClientProvider, AnthropicChatClientProvider>();
         builder.Services.AddScoped<ILanguageModelConnectivityTester, LanguageModelConnectivityTester>();

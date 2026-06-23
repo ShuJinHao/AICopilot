@@ -5,12 +5,9 @@ namespace AICopilot.Core.AiGateway.Aggregates.Tools;
 public static class ProtectedCloudReadonlyToolPolicy
 {
     public const string ProductionToolCode = "query_cloud_data_readonly";
-    public const string PilotReadinessToolCode = "query_cloud_pilot_readiness_readonly";
-    public const string ProductionPilotToolCode = "query_cloud_production_pilot_readonly";
-    public const string ProductionControlledToolCode = "query_cloud_production_controlled_readonly";
 
     public static readonly FrozenSet<string> ProtectedToolCodes =
-        new[] { ProductionToolCode, PilotReadinessToolCode, ProductionPilotToolCode, ProductionControlledToolCode }
+        new[] { ProductionToolCode }
             .ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     public static bool IsProtected(string? toolCode)

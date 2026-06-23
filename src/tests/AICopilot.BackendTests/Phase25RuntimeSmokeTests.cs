@@ -431,15 +431,47 @@ public sealed class Phase25RuntimeSmokeTests
 
             events.Should().Contain(item => item.Type == "Text");
 
-            var history = await EventuallyAsync(
-                async () => await GetJsonAsync<List<ChatHistoryMessageDto>>(
+            var historyPage = await EventuallyAsync(
+                async () => await GetJsonAsync<ChatHistoryMessagePageDto>(
                     $"/api/aigateway/chat-message/list?sessionId={sessionId}&count=20&isDesc=false"),
-                items => items.Count >= 2 &&
-                         items.Any(item => item.Role == "User" && item.Content.Contains("当前能力范围")) &&
-                         items.Any(item => item.Role == "Assistant"));
+                page => page.Items.Count >= 2 &&
+                        page.Items.Any(item => item.Role == "User" && item.Content.Contains("当前能力范围")) &&
+                        page.Items.Any(item => item.Role == "Assistant"));
+            var history = historyPage.Items;
 
             history.Should().OnlyContain(item => item.Role == "User" || item.Role == "Assistant");
-            history.Should().BeInAscendingOrder(item => item.CreatedAt);
+            history.Should().BeInAscendingOrder(item => item.Sequence);
+            history.Should().OnlyContain(item => item.MessageId > 0 && item.Sequence > 0);
+            historyPage.BeforeSequence.Should().Be(history.Min(item => item.Sequence));
+            historyPage.AfterSequence.Should().Be(history.Max(item => item.Sequence));
+            history.Should().Contain(item =>
+                item.Role == "Assistant" &&
+                item.RenderChunks.Any(chunk =>
+                    chunk.Type == "Text" ||
+                    chunk.Type == "Widget" ||
+                    chunk.Type == "Error"));
+            history.SelectMany(item => item.RenderChunks)
+                .Should()
+                .OnlyContain(chunk =>
+                    chunk.Type == "Text" ||
+                    chunk.Type == "Widget" ||
+                    chunk.Type == "Error",
+                    "message history may restore stable result cards, but runtime details belong to the session timeline");
+
+            await using (var dbContext = await CreateAiGatewayDbContextAsync())
+            {
+                var messageEvents = await dbContext.MessageEvents
+                    .Include(item => item.Message)
+                    .Where(item => item.SessionId == sessionId)
+                    .OrderBy(item => item.Sequence)
+                    .ToListAsync();
+
+                messageEvents.Should().HaveCountGreaterThanOrEqualTo(2);
+                messageEvents.Should().OnlyContain(item => item.EventType == MessageEventType.Message);
+                messageEvents.Should().OnlyContain(item => item.MessageId.HasValue && item.Message != null);
+                messageEvents.Select(item => item.Sequence).Should().Equal(history.Select(item => item.Sequence));
+                messageEvents.Select(item => item.MessageId!.Value).Should().Equal(history.Select(item => item.MessageId));
+            }
 
             var semanticStatuses = await GetJsonAsync<List<SemanticSourceStatusDto>>("/api/data-analysis/semantic-source/status");
 
@@ -575,17 +607,17 @@ public sealed class Phase25RuntimeSmokeTests
             var firstTextIndex = events.FindIndex(item => item.Type == "Text");
             firstTextIndex.Should().BeGreaterThan(firstFinalMetadataIndex);
 
-            var history = await EventuallyAsync(
-                async () => await GetJsonAsync<List<ChatHistoryMessageDto>>(
+            var historyPage = await EventuallyAsync(
+                async () => await GetJsonAsync<ChatHistoryMessagePageDto>(
                     $"/api/aigateway/chat-message/list?sessionId={sessionId}&count=20&isDesc=false"),
-                items => items.Count >= 2 && items.Any(item =>
+                page => page.Items.Count >= 2 && page.Items.Any(item =>
                     item.Role == "Assistant"
                     && item.FinalModelId == finalModelId
                     && item.FinalModelName == finalModelName
                     && item.RoutingModelId == routingModelId
                     && item.RoutingModelName == routingModelName));
 
-            var assistantMessage = history.Last(item => item.Role == "Assistant");
+            var assistantMessage = historyPage.Items.Last(item => item.Role == "Assistant");
             assistantMessage.FinalModelId.Should().Be(finalModelId);
             assistantMessage.FinalModelName.Should().Be(finalModelName);
             assistantMessage.RoutingModelId.Should().Be(routingModelId);
@@ -2446,16 +2478,27 @@ public sealed class Phase25RuntimeSmokeTests
         DateTime CreatedAt);
 
     private sealed record ChatHistoryMessageDto(
+        int MessageId,
+        int Sequence,
         Guid SessionId,
         string Role,
         string Content,
         DateTime CreatedAt,
+        IReadOnlyCollection<ChatChunkDto> RenderChunks,
         Guid? FinalModelId,
         string? FinalModelName,
         Guid? RoutingModelId,
         string? RoutingModelName,
         int? ContextWindowTokens,
         int? MaxOutputTokens);
+
+    private sealed record ChatHistoryMessagePageDto(
+        IReadOnlyList<ChatHistoryMessageDto> Items,
+        int? BeforeSequence,
+        int? AfterSequence,
+        bool HasMore,
+        bool HasMoreBefore,
+        bool HasMoreAfter);
 
     private sealed record ChatModelMetadataDto(
         Guid? FinalModelId,

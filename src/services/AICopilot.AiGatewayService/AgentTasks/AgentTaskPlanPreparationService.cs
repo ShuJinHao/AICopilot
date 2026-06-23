@@ -1,7 +1,5 @@
-using AICopilot.AiGatewayService.CloudReadiness;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
-using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Core.AiGateway.Aggregates.Uploads;
 using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.AiGateway.Specifications.Sessions;
@@ -16,12 +14,7 @@ internal sealed class AgentTaskPlanPreparationService(
     IReadRepository<Session> sessionRepository,
     IReadRepository<UploadRecord> uploadRepository,
     IEnumerable<IKnowledgeBaseAccessChecker> knowledgeBaseAccessCheckers,
-    IBusinessDatabaseReadService? businessDatabaseReadService,
-    CloudReadonlySandboxControlledTrialService? cloudSandboxControlledTrialService,
-    CloudReadonlyProductionControlledPilotService? cloudProductionControlledPilotService,
-    CloudReadonlyProductionPilotService? cloudReadonlyProductionPilotService,
-    CloudReadonlyPilotReadinessService? cloudReadonlyPilotReadinessService,
-    IReadRepository<ToolRegistration>? toolReadRepository)
+    IBusinessDatabaseReadService? businessDatabaseReadService)
 {
     public async Task<Result<AgentTaskPlanPreparation>> PrepareAsync(
         PlanAgentTaskCommand request,
@@ -83,80 +76,6 @@ internal sealed class AgentTaskPlanPreparationService(
             }
         }
 
-        var isCloudSandboxFixedTrialPlan = request.IsCloudSandboxTrial ||
-                                           CloudReadonlySandboxAgentTrialService.IsScenarioId(request.TrialScenarioId);
-        var isCloudSandboxControlledTrialPlan = request.IsCloudSandboxControlledTrial ||
-                                                request.CloudSandboxGoalIntent is not null;
-        var isCloudSandboxTrialPlan = isCloudSandboxFixedTrialPlan || isCloudSandboxControlledTrialPlan;
-        var isCloudProductionPilotTrialPlan = request.IsCloudProductionPilotTrial ||
-                                             CloudReadonlyProductionPilotService.IsScenarioId(request.TrialScenarioId);
-        var isCloudProductionControlledPilotPlan = request.IsCloudProductionControlledPilotTrial ||
-                                                   request.CloudProductionGoalIntent is not null;
-        if (isCloudSandboxFixedTrialPlan && !CloudReadonlySandboxAgentTrialService.IsScenarioId(request.TrialScenarioId))
-        {
-            return Result.Invalid("P7 CloudReadonlySandbox agent trial only allows fixed trial scenarios.");
-        }
-
-        if (isCloudProductionPilotTrialPlan && !CloudReadonlyProductionPilotService.IsScenarioId(request.TrialScenarioId))
-        {
-            return Result.Invalid("P12 CloudReadonlyProductionPilot only allows fixed Pilot scenarios.");
-        }
-
-        if ((isCloudProductionPilotTrialPlan || isCloudProductionControlledPilotPlan) && isCloudSandboxTrialPlan)
-        {
-            return Result.Invalid("CloudReadonlySandbox and CloudReadonlyProductionPilot scenarios cannot be mixed in one plan.");
-        }
-
-        if (isCloudProductionPilotTrialPlan && isCloudProductionControlledPilotPlan)
-        {
-            return Result.Invalid("P12 fixed production Pilot and P13 controlled production Pilot cannot be mixed in one plan.");
-        }
-
-        if (isCloudSandboxFixedTrialPlan && isCloudSandboxControlledTrialPlan)
-        {
-            return Result.Invalid("CloudReadonlySandbox fixed scenarios and controlled goals cannot be mixed in one plan.");
-        }
-
-        if (isCloudProductionControlledPilotPlan)
-        {
-            if (cloudProductionControlledPilotService is null ||
-                cloudReadonlyProductionPilotService is null ||
-                cloudReadonlyPilotReadinessService is null ||
-                toolReadRepository is null)
-            {
-                return Result.Failure("CloudReadonlyProductionControlledPilot services are not configured.");
-            }
-
-            var protectedToolsForControlledPilot = await GetCloudReadonlyPilotReadinessQueryHandler.LoadProtectedToolRegistrationsAsync(
-                toolReadRepository,
-                cancellationToken);
-            var p12StatusForControlledPilot = cloudReadonlyProductionPilotService.BuildStatus(
-                cloudReadonlyPilotReadinessService.BuildStatus(protectedToolsForControlledPilot),
-                protectedToolsForControlledPilot);
-            var intentValidation = cloudProductionControlledPilotService.ValidateIntentForPlan(
-                request.CloudProductionGoalIntent,
-                p12StatusForControlledPilot,
-                protectedToolsForControlledPilot);
-            if (!intentValidation.IsSuccess)
-            {
-                return Result.From(intentValidation);
-            }
-        }
-
-        if (isCloudSandboxControlledTrialPlan)
-        {
-            if (cloudSandboxControlledTrialService is null)
-            {
-                return Result.Failure("CloudReadonlySandbox controlled trial service is not configured.");
-            }
-
-            var intentValidation = cloudSandboxControlledTrialService.ValidateIntentForPlan(request.CloudSandboxGoalIntent);
-            if (!intentValidation.IsSuccess)
-            {
-                return Result.From(intentValidation);
-            }
-        }
-
         var dataSourceIds = (request.DataSourceIds ?? [])
             .Where(id => id != Guid.Empty)
             .Distinct()
@@ -181,11 +100,6 @@ internal sealed class AgentTaskPlanPreparationService(
                 return Result.NotFound();
             }
 
-            if (isCloudSandboxTrialPlan || isCloudProductionPilotTrialPlan || isCloudProductionControlledPilotPlan)
-            {
-                return Result.Invalid("CloudReadonly agent trial cannot bind BusinessDatabase data sources.");
-            }
-
             if (selectedDataSources.Any(source => source.ExternalSystemType != DataSourceExternalSystemType.SimulationBusiness))
             {
                 return Result.Invalid("P3 dynamic planner data tasks can only use SimulationBusiness data sources.");
@@ -197,35 +111,10 @@ internal sealed class AgentTaskPlanPreparationService(
             .Select(domain => domain.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        if (isCloudSandboxTrialPlan && businessDomains.Length == 0)
-        {
-            if (isCloudSandboxControlledTrialPlan)
-            {
-                businessDomains = request.CloudSandboxGoalIntent?.EndpointCodes.ToArray() ?? [];
-            }
-            else
-            {
-                var trialDomain = CloudReadonlySandboxAgentTrialService.ResolveScenarioDomain(request.TrialScenarioId);
-                businessDomains = string.IsNullOrWhiteSpace(trialDomain) ? [] : [trialDomain];
-            }
-        }
-        else if (isCloudProductionPilotTrialPlan && businessDomains.Length == 0)
-        {
-            var trialDomain = CloudReadonlyProductionPilotService.ResolveScenarioDomain(request.TrialScenarioId);
-            businessDomains = string.IsNullOrWhiteSpace(trialDomain) ? [] : [trialDomain];
-        }
-        else if (isCloudProductionControlledPilotPlan && businessDomains.Length == 0)
-        {
-            businessDomains = request.CloudProductionGoalIntent?.EndpointCodes.ToArray() ?? [];
-        }
 
-        var isSimulationOnlyPlan = request.IsSimulationTrial ||
-                                   selectedDataSources.Any(source =>
-                                       source.ExternalSystemType == DataSourceExternalSystemType.SimulationBusiness);
-        var hasBusinessDataSourcesForPlan = !isCloudSandboxTrialPlan &&
-                                            !isCloudProductionPilotTrialPlan &&
-                                            !isCloudProductionControlledPilotPlan &&
-                                            (dataSourceIds.Length > 0 || businessDomains.Length > 0);
+        var isSimulationOnlyPlan = selectedDataSources.Any(source =>
+            source.ExternalSystemType == DataSourceExternalSystemType.SimulationBusiness);
+        var hasBusinessDataSourcesForPlan = dataSourceIds.Length > 0 || businessDomains.Length > 0;
 
         return Result.Success(new AgentTaskPlanPreparation(
             userId,
@@ -234,11 +123,6 @@ internal sealed class AgentTaskPlanPreparationService(
             dataSourceIds,
             selectedDataSources,
             businessDomains,
-            isCloudSandboxFixedTrialPlan,
-            isCloudSandboxControlledTrialPlan,
-            isCloudSandboxTrialPlan,
-            isCloudProductionPilotTrialPlan,
-            isCloudProductionControlledPilotPlan,
             isSimulationOnlyPlan,
             hasBusinessDataSourcesForPlan));
     }

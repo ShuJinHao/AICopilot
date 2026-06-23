@@ -1,7 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using AICopilot.AiGatewayService.CloudReadiness;
 using AICopilot.AiGatewayService.Runtime;
+using AICopilot.AiGatewayService.Sessions;
+using AICopilot.AiGatewayService.Skills;
 using AICopilot.AiGatewayService.Tools;
 using AICopilot.AiGatewayService.Workspaces;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
@@ -10,6 +11,7 @@ using AICopilot.Core.AiGateway.Aggregates.Artifacts;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
+using AICopilot.Core.AiGateway.Aggregates.Skills;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Core.AiGateway.Aggregates.Uploads;
 using AICopilot.Core.AiGateway.Ids;
@@ -43,17 +45,9 @@ public sealed record PlanAgentTaskCommand(
     string? QueryMode = null,
     bool RequiresDataApproval = false,
     IReadOnlyCollection<string>? ArtifactTypes = null,
-    string? TrialScenarioId = null,
-    string? TrialScenarioTitle = null,
-    bool IsSimulationTrial = false,
     string? PlannerMode = null,
     bool ForceStaticPlanner = false,
-    bool IsCloudSandboxTrial = false,
-    bool IsCloudSandboxControlledTrial = false,
-    CloudSandboxGoalIntentDto? CloudSandboxGoalIntent = null,
-    bool IsCloudProductionPilotTrial = false,
-    bool IsCloudProductionControlledPilotTrial = false,
-    CloudProductionGoalIntentDto? CloudProductionGoalIntent = null) : ICommand<Result<AgentTaskDto>>;
+    string? SkillCode = null) : ICommand<Result<AgentTaskDto>>;
 
 public enum AgentPlannerMode
 {
@@ -89,11 +83,8 @@ public sealed class PlanAgentTaskCommandHandler(
     ICloudReadonlyAgentPlanService cloudReadonlyPlanService,
     ICurrentUser currentUser,
     IBusinessDatabaseReadService? businessDatabaseReadService = null,
-    CloudReadonlySandboxControlledTrialService? cloudSandboxControlledTrialService = null,
-    CloudReadonlyProductionControlledPilotService? cloudProductionControlledPilotService = null,
-    CloudReadonlyProductionPilotService? cloudReadonlyProductionPilotService = null,
-    CloudReadonlyPilotReadinessService? cloudReadonlyPilotReadinessService = null,
-    IReadRepository<ToolRegistration>? toolReadRepository = null)
+    MessageTimelineProjectionWriter? timelineProjectionWriter = null,
+    SkillDefinitionGuard? skillDefinitionGuard = null)
     : ICommandHandler<PlanAgentTaskCommand, Result<AgentTaskDto>>
 {
     private const int PlannerValidationVersion = 1;
@@ -114,12 +105,7 @@ public sealed class PlanAgentTaskCommandHandler(
             sessionRepository,
             uploadRepository,
             knowledgeBaseAccessCheckers,
-            businessDatabaseReadService,
-            cloudSandboxControlledTrialService,
-            cloudProductionControlledPilotService,
-            cloudReadonlyProductionPilotService,
-            cloudReadonlyPilotReadinessService,
-            toolReadRepository);
+            businessDatabaseReadService);
         var preparationResult = await preparationService.PrepareAsync(
             request,
             userId,
@@ -131,16 +117,26 @@ public sealed class PlanAgentTaskCommandHandler(
         }
 
         var preparation = preparationResult.Value!;
+        var skillResult = skillDefinitionGuard is null
+            ? Result.Success<SkillDefinition?>(null)
+            : await skillDefinitionGuard.ResolveAsync(request.SkillCode, cancellationToken);
+        if (!skillResult.IsSuccess)
+        {
+            return Result.From(skillResult);
+        }
+
+        var selectedSkill = skillResult.Value;
 
         _ = await templateRepository.FirstOrDefaultAsync(
             new ConversationTemplateByCodeSpec("agent_planner"),
             cancellationToken);
         var runtimeSettings = await runtimeSettingsProvider.GetAsync(cancellationToken);
         var riskLevel = AgentTaskPlanMetadataBuilder.DetermineRiskLevel(request.TaskType);
+        var requestedArtifactTypes = AgentTaskPlanStepBuilder.NormalizeArtifactTypes(request.ArtifactTypes)?.ToArray();
+        var skillDefaultArtifactTypes = AgentTaskPlanStepBuilder.NormalizeArtifactTypes(selectedSkill?.OutputComponentTypes)?.ToArray();
+        var effectiveArtifactTypes = requestedArtifactTypes ?? skillDefaultArtifactTypes;
         var requestedPlannerMode = AgentTaskPlanMetadataBuilder.NormalizePlannerMode(request.PlannerMode, request.ForceStaticPlanner);
-        var plannerModelResult = requestedPlannerMode == AgentPlannerMode.StaticOnly ||
-                                 preparation.IsCloudProductionPilotTrialPlan ||
-                                 preparation.IsCloudProductionControlledPilotPlan
+        var plannerModelResult = requestedPlannerMode == AgentPlannerMode.StaticOnly
             ? Result.Success<LanguageModel?>(null)
             : await ResolvePlannerModelAsync(request.ModelId, cancellationToken);
         if (!plannerModelResult.IsSuccess)
@@ -168,10 +164,8 @@ public sealed class PlanAgentTaskCommandHandler(
                 userId,
                 preparation.IsSimulationOnlyPlan,
                 preparation.BusinessDomains,
-                preparation.IsCloudSandboxTrialPlan,
-                preparation.IsCloudProductionPilotTrialPlan,
-                preparation.IsCloudProductionControlledPilotPlan,
-                cancellationToken);
+                cancellationToken,
+                selectedSkill?.SkillCode ?? request.SkillCode);
             if (!catalogResult.IsSuccess)
             {
                 return Result.From(catalogResult);
@@ -197,11 +191,11 @@ public sealed class PlanAgentTaskCommandHandler(
                     AgentTaskPlanMetadataBuilder.BuildPlannerDataSourceSummaries(preparation.SelectedDataSources),
                     preparation.BusinessDomains,
                     request.QueryMode ?? "TextToSql",
-                    AgentTaskPlanStepBuilder.NormalizeArtifactTypes(request.ArtifactTypes)?.ToArray(),
-                request.TrialScenarioId,
-                request.TrialScenarioTitle,
-                request.IsSimulationTrial,
-                request.RequiresDataApproval),
+                    effectiveArtifactTypes,
+                    request.RequiresDataApproval,
+                    selectedSkill?.SkillCode,
+                    selectedSkill?.DisplayName,
+                    selectedSkill?.Description),
                 cancellationToken);
             if (!dynamicPlanResult.IsSuccess)
             {
@@ -217,10 +211,7 @@ public sealed class PlanAgentTaskCommandHandler(
                         preparation.HasBusinessDataSourcesForPlan,
                         request.TaskType,
                         riskLevel,
-                        request.ArtifactTypes,
-                        preparation.IsCloudSandboxTrialPlan,
-                        preparation.IsCloudProductionPilotTrialPlan,
-                        preparation.IsCloudProductionControlledPilotPlan);
+                        effectiveArtifactTypes);
                     goto ValidateAndPersistPlan;
                 }
 
@@ -239,10 +230,7 @@ public sealed class PlanAgentTaskCommandHandler(
                 preparation.HasBusinessDataSourcesForPlan,
                 request.TaskType,
                 riskLevel,
-                request.ArtifactTypes,
-                preparation.IsCloudSandboxTrialPlan,
-                preparation.IsCloudProductionPilotTrialPlan,
-                preparation.IsCloudProductionControlledPilotPlan);
+                effectiveArtifactTypes);
         }
 
 ValidateAndPersistPlan:
@@ -257,10 +245,7 @@ ValidateAndPersistPlan:
             preparation.HasBusinessDataSourcesForPlan,
             request.TaskType,
             request.RequiresDataApproval,
-            request.ArtifactTypes,
-            preparation.IsCloudSandboxTrialPlan,
-            preparation.IsCloudProductionPilotTrialPlan,
-            preparation.IsCloudProductionControlledPilotPlan);
+            effectiveArtifactTypes);
         var forcedStepCodes = steps
             .Select(step => step.ToolCode)
             .Where(toolCode => !string.IsNullOrWhiteSpace(toolCode) && !originalToolCodes.Contains(toolCode!))
@@ -273,10 +258,8 @@ ValidateAndPersistPlan:
                 userId,
                 preparation.IsSimulationOnlyPlan,
                 preparation.BusinessDomains,
-                preparation.IsCloudSandboxTrialPlan,
-                preparation.IsCloudProductionPilotTrialPlan,
-                preparation.IsCloudProductionControlledPilotPlan,
-                cancellationToken);
+                cancellationToken,
+                selectedSkill?.SkillCode ?? request.SkillCode);
             if (!staticCatalogResult.IsSuccess)
             {
                 return Result.From(staticCatalogResult);
@@ -291,10 +274,8 @@ ValidateAndPersistPlan:
             userId,
             preparation.IsSimulationOnlyPlan,
             preparation.BusinessDomains,
-            preparation.IsCloudSandboxTrialPlan,
-            preparation.IsCloudProductionPilotTrialPlan,
-            preparation.IsCloudProductionControlledPilotPlan,
-            cancellationToken);
+            cancellationToken,
+            selectedSkill?.SkillCode ?? request.SkillCode);
         if (!guardedStepsResult.IsSuccess)
         {
             return Result.From(guardedStepsResult);
@@ -315,10 +296,7 @@ ValidateAndPersistPlan:
             .ToArray();
         var toolRiskSummary = AgentTaskPlanMetadataBuilder.BuildToolRiskSummary(plannerToolCatalog);
         AgentTaskPlanCloudReadonlyIntentDocument? cloudReadonlyIntent = null;
-        if (request.TaskType == AgentTaskType.CloudDataReport &&
-            !preparation.IsCloudSandboxTrialPlan &&
-            !preparation.IsCloudProductionPilotTrialPlan &&
-            !preparation.IsCloudProductionControlledPilotPlan)
+        if (request.TaskType == AgentTaskType.CloudDataReport)
         {
             var cloudIntentResult = await cloudReadonlyPlanService.CreateIntentAsync(
                 request.SessionId,
@@ -362,24 +340,9 @@ ValidateAndPersistPlan:
             preparation.BusinessDomains,
             request.QueryMode ?? "TextToSql",
             request.RequiresDataApproval,
-            AgentTaskPlanStepBuilder.NormalizeArtifactTypes(request.ArtifactTypes)?.ToArray(),
-            request.TrialScenarioId,
-            request.TrialScenarioTitle,
-            request.IsSimulationTrial,
-            preparation.IsCloudSandboxControlledTrialPlan,
-            request.CloudSandboxGoalIntent,
-            preparation.IsCloudProductionControlledPilotPlan,
-            request.CloudProductionGoalIntent,
+            effectiveArtifactTypes,
             new AgentTaskPlanSafetySummaryDocument(
-                preparation.IsCloudProductionControlledPilotPlan
-                    ? "CloudProductionControlledGoal"
-                    : preparation.IsCloudProductionPilotTrialPlan
-                    ? "CloudProductionPilotFixedScenario"
-                    : preparation.IsCloudSandboxControlledTrialPlan
-                    ? "CloudSandboxControlledGoal"
-                    : string.IsNullOrWhiteSpace(request.TrialScenarioId)
-                        ? "FreeGoal"
-                        : "TrialScenario",
+                "FreeGoal",
                 effectivePlannerMode,
                 plannerModel is null ? null : $"{plannerModel.Provider}/{plannerModel.Name}",
                 plannerToolCatalog?.Version ?? PlannerToolCatalog.CurrentVersion,
@@ -387,16 +350,17 @@ ValidateAndPersistPlan:
                 preparation.IsSimulationOnlyPlan,
                 request.RequiresDataApproval,
                 toolRiskSummary,
-                MockMcpOnly: !preparation.IsCloudSandboxTrialPlan && !preparation.IsCloudProductionPilotTrialPlan && !preparation.IsCloudProductionControlledPilotPlan),
+                MockMcpOnly: true),
             forcedStepCodes,
             approvalCheckpoints,
             AgentTaskPlanMetadataBuilder.BuildPlanDataSourceSummaries(preparation.SelectedDataSources),
             plannerToolCatalog?.Version ?? PlannerToolCatalog.CurrentVersion,
             plannerToolCatalog?.AvailableToolCount ?? 0,
             toolRiskSummary,
-            MockMcpOnly: !preparation.IsCloudSandboxTrialPlan && !preparation.IsCloudProductionPilotTrialPlan && !preparation.IsCloudProductionControlledPilotPlan,
+            MockMcpOnly: true,
             toolApprovalCheckpoints,
-            preparation.IsCloudProductionPilotTrialPlan);
+            SkillCode: selectedSkill?.SkillCode,
+            SkillName: selectedSkill?.DisplayName);
 
         var now = DateTimeOffset.UtcNow;
         var task = new AgentTask(
@@ -425,6 +389,11 @@ ValidateAndPersistPlan:
             now);
         repository.Add(task);
         approvalRepository.Add(approval);
+        if (timelineProjectionWriter is not null)
+        {
+            await timelineProjectionWriter.StageAgentTaskPlanCreatedAsync(task, approval, cancellationToken);
+        }
+
         await auditRecorder.RecordPlanAsync(
             task,
             AuditResults.Succeeded,

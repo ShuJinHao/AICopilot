@@ -40,4 +40,34 @@ public sealed class SessionHistoryMetadataTests
         session.Title.Should().Be("人工命名");
         session.MessageCount.Should().Be(1);
     }
+
+    [Fact]
+    public void AddMessage_ShouldAssignStableSessionSequence()
+    {
+        var session = new Session(Guid.NewGuid(), ConversationTemplateId.New());
+
+        session.AddMessage("第一条", MessageType.User);
+        session.AddMessage("第二条", MessageType.Assistant);
+
+        session.Messages
+            .OrderBy(message => message.Sequence)
+            .Select(message => message.Sequence)
+            .Should()
+            .Equal(1, 2);
+    }
+
+    [Fact]
+    public void MessageEvent_ForMessage_ShouldReferenceTrackedMessageWithoutCopyingRenderState()
+    {
+        var session = new Session(Guid.NewGuid(), ConversationTemplateId.New());
+        var message = session.AddMessage("结构化回答", MessageType.Assistant, renderPayloadJson: """[{"source":"Final","type":"Text","content":"结构化回答"}]""");
+
+        var messageEvent = MessageEvent.ForMessage(session.Id, 3, message);
+
+        messageEvent.EventType.Should().Be(MessageEventType.Message);
+        messageEvent.SessionId.Should().Be(session.Id);
+        messageEvent.Sequence.Should().Be(3);
+        messageEvent.Message.Should().BeSameAs(message);
+        messageEvent.PayloadJson.Should().BeNull("message events point at the Message aggregate instead of duplicating render payload");
+    }
 }

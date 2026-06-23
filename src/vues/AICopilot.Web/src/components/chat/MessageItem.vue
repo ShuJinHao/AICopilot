@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Bot, UserRound } from 'lucide-vue-next'
+import { Activity, Bot, UserRound } from 'lucide-vue-next'
 import AiTag from '@/components/ai/AiTag.vue'
 import { renderMarkdown } from '@/utils/markdown'
 import { ChunkType, MessageRole, type ChatChunk } from '@/types/protocols'
@@ -18,6 +18,14 @@ const store = useChatStore()
 const isUser = computed(() => props.message.role === MessageRole.User)
 const chunks = computed(() => props.message.chunks)
 const intentChunks = computed(() => chunks.value.filter((chunk) => chunk.type === ChunkType.Intent) as IntentChunk[])
+const functionCallChunks = computed(() => chunks.value.filter((chunk) => chunk.type === ChunkType.FunctionCall) as FunctionCallChunk[])
+const visibleChunks = computed(() =>
+  chunks.value.filter((chunk) =>
+    chunk.type === ChunkType.Text ||
+    chunk.type === ChunkType.Widget ||
+    chunk.type === ChunkType.ApprovalRequest
+  )
+)
 const modelBadges = computed(() => {
   if (isUser.value) {
     return []
@@ -41,6 +49,8 @@ const modelBadges = computed(() => {
 
   return badges
 })
+const runtimeDetailCount = computed(() => modelBadges.value.length + intentChunks.value.length + functionCallChunks.value.length)
+const hasRuntimeDetails = computed(() => !isUser.value && runtimeDetailCount.value > 0)
 
 function asFunctionCall(chunk: ChatChunk) {
   return chunk as FunctionCallChunk
@@ -76,23 +86,9 @@ async function reject(payload: { callId: string }, chunk: ApprovalChunk) {
         <span>{{ new Date(message.timestamp).toLocaleTimeString('zh-CN', { hour12: false }) }}</span>
       </div>
 
-      <section v-if="modelBadges.length > 0" class="model-strip">
-        <AiTag v-for="badge in modelBadges" :key="badge.key" :tone="badge.tone">
-          {{ badge.text }}
-        </AiTag>
-      </section>
-
-      <section v-if="intentChunks.length > 0" class="intent-strip">
-        <AiTag v-for="intent in intentChunks.flatMap((chunk) => chunk.intents)" :key="`${intent.intent}-${intent.confidence}`" tone="neutral">
-          {{ intent.intent }} · {{ Math.round(intent.confidence * 100) }}%
-        </AiTag>
-      </section>
-
       <div class="chunk-list">
-        <template v-for="(chunk, index) in chunks" :key="`${chunk.source}-${chunk.type}-${index}`">
+        <template v-for="(chunk, index) in visibleChunks" :key="`${chunk.source}-${chunk.type}-${index}`">
           <div v-if="chunk.type === ChunkType.Text" class="text-block markdown-body" v-html="renderMarkdown(chunk.content)" />
-
-          <FunctionCallItem v-else-if="chunk.type === ChunkType.FunctionCall" :call="asFunctionCall(chunk).functionCall" />
 
           <WidgetRenderer v-else-if="chunk.type === ChunkType.Widget" :data="asWidget(chunk).widget" />
 
@@ -107,6 +103,45 @@ async function reject(payload: { callId: string }, chunk: ApprovalChunk) {
 
         <span v-if="message.isStreaming" class="streaming-caret" />
       </div>
+
+      <details v-if="hasRuntimeDetails" class="runtime-details">
+        <summary>
+          <Activity :size="16" />
+          <span>运行详情</span>
+          <AiTag tone="neutral">详情</AiTag>
+        </summary>
+
+        <div class="runtime-body">
+          <section v-if="modelBadges.length > 0" class="runtime-section">
+            <span class="runtime-label">模型</span>
+            <div class="model-strip">
+              <AiTag v-for="badge in modelBadges" :key="badge.key" :tone="badge.tone">
+                {{ badge.text }}
+              </AiTag>
+            </div>
+          </section>
+
+          <section v-if="intentChunks.length > 0" class="runtime-section">
+            <span class="runtime-label">意图</span>
+            <div class="intent-strip">
+              <AiTag v-for="intent in intentChunks.flatMap((chunk) => chunk.intents)" :key="`${intent.intent}-${intent.confidence}`" tone="neutral">
+                {{ intent.intent }} · {{ Math.round(intent.confidence * 100) }}%
+              </AiTag>
+            </div>
+          </section>
+
+          <section v-if="functionCallChunks.length > 0" class="runtime-section">
+            <span class="runtime-label">工具</span>
+            <div class="runtime-calls">
+              <FunctionCallItem
+                v-for="(chunk, index) in functionCallChunks"
+                :key="`${chunk.functionCall.id}-${index}`"
+                :call="asFunctionCall(chunk).functionCall"
+              />
+            </div>
+          </section>
+        </div>
+      </details>
     </div>
   </article>
 </template>
@@ -184,6 +219,48 @@ async function reject(payload: { callId: string }, chunk: ApprovalChunk) {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.runtime-details {
+  overflow: hidden;
+  border: 1px solid var(--ai-border);
+  border-radius: 12px;
+  background: var(--ai-surface-soft);
+}
+
+.runtime-details summary {
+  display: flex;
+  min-height: 38px;
+  cursor: pointer;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.runtime-body {
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid var(--ai-border);
+  padding: 12px;
+}
+
+.runtime-section {
+  display: grid;
+  gap: 8px;
+}
+
+.runtime-label {
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.runtime-calls {
+  display: grid;
+  gap: 10px;
 }
 
 .chunk-list {

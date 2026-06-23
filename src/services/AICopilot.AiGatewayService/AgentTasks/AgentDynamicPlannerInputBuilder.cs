@@ -12,6 +12,14 @@ internal static class AgentDynamicPlannerInputBuilder
         {
             goal = SanitizePlannerField(request.Goal, 2000),
             taskType = request.TaskType.ToString(),
+            skill = string.IsNullOrWhiteSpace(request.SkillCode)
+                ? null
+                : new
+                {
+                    code = SanitizePlannerField(request.SkillCode, 120),
+                    name = SanitizePlannerField(request.SkillName, 160),
+                    description = SanitizePlannerField(request.SkillDescription, 1000)
+                },
             uploadIds = request.UploadIds.Select(id => id.ToString("N")).ToArray(),
             knowledgeBaseIds = request.KnowledgeBaseIds.Select(id => id.ToString("N")).ToArray(),
             dataSources = (request.DataSources ?? []).Select(source => new
@@ -32,14 +40,6 @@ internal static class AgentDynamicPlannerInputBuilder
                 .Select(type => SanitizePlannerField(type, 40))
                 .Where(type => !string.IsNullOrWhiteSpace(type))
                 .ToArray(),
-            trialScenario = string.IsNullOrWhiteSpace(request.TrialScenarioId)
-                ? null
-                : new
-                {
-                    id = SanitizePlannerField(request.TrialScenarioId, 160),
-                    title = SanitizePlannerField(request.TrialScenarioTitle, 200),
-                    isSimulationOnly = request.IsSimulationTrial
-                },
             plannerToolCatalog = new
             {
                 version = request.ToolCatalog.Version,
@@ -81,7 +81,7 @@ internal static class AgentDynamicPlannerInputBuilder
                 maxSteps = AgentDynamicPlannerLimits.MaxDynamicSteps,
                 output = "json_only",
                 cloudIntent = "backend_only",
-                simulationOnly = request.IsSimulationTrial || (request.DataSources ?? []).Any(source => source.IsSimulation),
+                simulationOnly = (request.DataSources ?? []).Any(source => source.IsSimulation),
                 mockMcpOnly = true,
                 externalMcp = "disabled_in_p4",
                 requiresDataApproval = request.RequiresDataApproval,

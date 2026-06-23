@@ -24,8 +24,8 @@
 - Human-in-the-loop approval is not permission to write Cloud business data.
 - Cloud AI-facing APIs are read-only contract surfaces unless the user explicitly approves a new cross-repository write contract.
 - Cloud AiRead 正式设备参数是 `deviceId`；`deviceCode` 只能用于设备查询/解析，不得被当作 `deviceId` 发送给 Cloud。
-- P12/P13 生产只读 Pilot 只能向 Cloud 发送真实端点参数；`scenarioId`、`from`、`to`、`pilotWindowId`、`boundary` 等试点元数据只能留在 AICopilot 内部审计。
-- 开发阶段不保留普通 Real CloudReadonly 与受控 Pilot 的双轨生产读取入口；生产只读读取必须走当前批准的受控入口。
+- Cloud 只读读取只能向 Cloud 发送真实端点参数；`scenarioId`、`from`、`to`、`pilotWindowId`、`boundary` 等试点元数据不得透传给 Cloud。
+- 开发阶段已物理删除 Trial/Pilot/Production Readiness 运营线；不得把旧试点运营能力重新接回普通产品导航、Skill 或后台接口。
 
 ## OIDC Boundary
 

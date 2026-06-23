@@ -85,6 +85,35 @@ public sealed class PromptGovernanceTests
         template.BuiltInVersion.Should().Be(BuiltInConversationTemplates.CurrentVersion);
         template.IsBuiltIn.Should().BeTrue();
         template.ModelId.Should().Be(modelId);
+
+        foreach (var builtInDefinition in BuiltInConversationTemplates.All)
+        {
+            var action = () => BuiltInConversationTemplates.CreateTemplate(builtInDefinition, modelId);
+            action.Should().NotThrow($"built-in template {builtInDefinition.Code} must pass prompt safety validation");
+        }
+    }
+
+    [Fact]
+    public void BuiltInConversationTemplates_ShouldDefineCurrentAgentSlotPrompts()
+    {
+        BuiltInConversationTemplates.Find("IntentRoutingAgent")!.SystemPrompt
+            .Should().Contain("{{$IntentList}}")
+            .And.Contain("Skill")
+            .And.Contain("JSON");
+
+        BuiltInConversationTemplates.Find("agent_planner")!.SystemPrompt
+            .Should().Contain("plannerToolCatalog")
+            .And.Contain("不能调用工具")
+            .And.Contain("运行详情");
+
+        BuiltInConversationTemplates.Find("agent_executor")!.SystemPrompt
+            .Should().Contain("最终执行 Agent")
+            .And.Contain("运行详情")
+            .And.Contain("Cloud 业务数据默认只读");
+
+        BuiltInConversationTemplates.Find("chat_answer")!.SystemPrompt
+            .Should().Contain("运行详情")
+            .And.Contain("Cloud 业务数据边界是只读分析");
     }
 
     [Fact]

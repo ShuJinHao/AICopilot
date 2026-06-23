@@ -1,4 +1,3 @@
-using AICopilot.AiGatewayService.CloudReadiness;
 using AICopilot.AiGatewayService.Workspaces;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
@@ -20,12 +19,6 @@ internal sealed class AgentBuiltInToolDispatcher(
     IIdentityAccessService identityAccessService,
     IBusinessDatabaseReadService? businessDatabaseReadService,
     IBusinessTextToSqlRuntime? businessTextToSqlRuntime,
-    CloudReadonlySandboxAgentTrialService? cloudSandboxAgentTrialService,
-    CloudReadonlySandboxControlledTrialService? cloudSandboxControlledTrialService,
-    CloudReadonlyProductionPilotService? cloudReadonlyProductionPilotService,
-    CloudReadonlyProductionControlledPilotService? cloudReadonlyProductionControlledPilotService,
-    CloudReadonlyPilotReadinessService? cloudReadonlyPilotReadinessService,
-    IReadRepository<ToolRegistration>? toolReadRepository,
     AgentRuntimeArtifactBuilder artifactBuilder)
 {
     private readonly AgentRuntimeFileInputToolService fileInputTools = new(
@@ -39,14 +32,7 @@ internal sealed class AgentBuiltInToolDispatcher(
         knowledgeBaseAccessCheckers,
         identityAccessService);
 
-    private readonly AgentRuntimeCloudReadonlyToolService cloudReadonlyTools = new(
-        cloudReadonlyToolExecutor,
-        cloudSandboxAgentTrialService,
-        cloudSandboxControlledTrialService,
-        cloudReadonlyProductionPilotService,
-        cloudReadonlyProductionControlledPilotService,
-        cloudReadonlyPilotReadinessService,
-        toolReadRepository);
+    private readonly AgentRuntimeCloudReadonlyToolService cloudReadonlyTools = new(cloudReadonlyToolExecutor);
 
     private readonly AgentRuntimeBusinessQueryToolService businessQueryTools = new(
         businessDatabaseReadService,
@@ -78,9 +64,6 @@ internal sealed class AgentBuiltInToolDispatcher(
             "parse_table_file" => await fileInputTools.ParseTableFileAsync(task.UserId, workspace, step, plan, state, cancellationToken),
             "rag_search" => await ragTools.SearchRagAsync(task, plan, state, cancellationToken),
             "query_cloud_data_readonly" => await cloudReadonlyTools.QueryCloudReadonlyAsync(plan, state, cancellationToken),
-            "query_cloud_sandbox_readonly" => await cloudReadonlyTools.QueryCloudReadonlySandboxAsync(plan, state, step, cancellationToken),
-            "query_cloud_production_pilot_readonly" => await cloudReadonlyTools.QueryCloudReadonlyProductionPilotAsync(plan, state, step, cancellationToken),
-            "query_cloud_production_controlled_readonly" => await cloudReadonlyTools.QueryCloudReadonlyProductionControlledPilotAsync(plan, state, step, cancellationToken),
             "query_business_database_readonly" => await businessQueryTools.QueryBusinessDatabaseReadonlyP1Async(plan, state, cancellationToken),
             "summarize_business_query_result" => businessQueryTools.SummarizeBusinessQueryResult(state),
             "generate_business_chart" => await artifactBuilder.GenerateChartDataAsync(workspace, step, state, cancellationToken),

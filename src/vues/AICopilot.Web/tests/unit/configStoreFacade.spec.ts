@@ -6,32 +6,20 @@ import { useConfigStore } from '@/stores/configStore'
 
 const configServiceMock = vi.hoisted(() => ({
   getLanguageModels: vi.fn(),
-  getProviderReliability: vi.fn(),
   getConversationTemplates: vi.fn(),
-  getApprovalPolicies: vi.fn(),
-  getBusinessDatabases: vi.fn(),
-  getMcpServers: vi.fn(),
-  getSemanticSourceStatuses: vi.fn(),
+  getRoutingModels: vi.fn(),
   getLanguageModel: vi.fn(),
   createLanguageModel: vi.fn(),
   updateLanguageModel: vi.fn(),
   deleteLanguageModel: vi.fn(),
+  getRoutingModel: vi.fn(),
+  createRoutingModel: vi.fn(),
+  updateRoutingModel: vi.fn(),
+  deleteRoutingModel: vi.fn(),
   getConversationTemplate: vi.fn(),
   createConversationTemplate: vi.fn(),
   updateConversationTemplate: vi.fn(),
-  deleteConversationTemplate: vi.fn(),
-  getApprovalPolicy: vi.fn(),
-  createApprovalPolicy: vi.fn(),
-  updateApprovalPolicy: vi.fn(),
-  deleteApprovalPolicy: vi.fn(),
-  getBusinessDatabase: vi.fn(),
-  createBusinessDatabase: vi.fn(),
-  updateBusinessDatabase: vi.fn(),
-  deleteBusinessDatabase: vi.fn(),
-  getMcpServer: vi.fn(),
-  createMcpServer: vi.fn(),
-  updateMcpServer: vi.fn(),
-  deleteMcpServer: vi.fn()
+  deleteConversationTemplate: vi.fn()
 }))
 
 vi.mock('@/services/configService', () => ({
@@ -48,15 +36,11 @@ vi.mock('@/stores/authStore', () => ({
 function resetConfigServiceMocks() {
   vi.clearAllMocks()
   configServiceMock.getLanguageModels.mockResolvedValue([])
-  configServiceMock.getProviderReliability.mockResolvedValue(null)
+  configServiceMock.getRoutingModels.mockResolvedValue([])
   configServiceMock.getConversationTemplates.mockResolvedValue([])
-  configServiceMock.getApprovalPolicies.mockResolvedValue([])
-  configServiceMock.getBusinessDatabases.mockResolvedValue([])
-  configServiceMock.getMcpServers.mockResolvedValue([])
-  configServiceMock.getSemanticSourceStatuses.mockResolvedValue([])
   configServiceMock.createLanguageModel.mockResolvedValue(undefined)
-  configServiceMock.updateBusinessDatabase.mockResolvedValue(undefined)
-  configServiceMock.createMcpServer.mockResolvedValue(undefined)
+  configServiceMock.createRoutingModel.mockResolvedValue(undefined)
+  configServiceMock.createConversationTemplate.mockResolvedValue(undefined)
 }
 
 describe('configStore facade', () => {
@@ -69,9 +53,11 @@ describe('configStore facade', () => {
     const store = useConfigStore()
 
     expect(typeof store.saveLanguageModel).toBe('function')
-    expect(typeof store.openEditBusinessDatabaseDialog).toBe('function')
-    expect(typeof store.saveMcpServer).toBe('function')
-    expect(typeof store.refreshProviderReliability).toBe('function')
+    expect(typeof store.saveRoutingModel).toBe('function')
+    expect(typeof store.saveConversationTemplate).toBe('function')
+    expect(typeof store.refreshAgentSlots).toBe('function')
+    expect('saveMcpServer' in store).toBe(false)
+    expect('openEditBusinessDatabaseDialog' in store).toBe(false)
   })
 
   it('preserves language model payload trimming through the facade', async () => {
@@ -95,66 +81,14 @@ describe('configStore facade', () => {
     )
   })
 
-  it('preserves business database provider snapshot when edit connection string is blank', async () => {
-    configServiceMock.getBusinessDatabase.mockResolvedValue({
-      id: 'db-1',
-      name: 'MES',
-      description: '',
-      provider: 2,
-      isEnabled: true,
-      externalSystemType: 2,
-      readOnlyCredentialVerified: true,
-      hasConnectionString: true,
-      connectionStringMasked: '***'
-    })
+  it('refreshes only fixed agent slot domains', async () => {
     const store = useConfigStore()
 
-    await store.openEditBusinessDatabaseDialog('db-1')
-    store.currentBusinessDatabase.connectionString = ''
-    store.currentBusinessDatabase.provider = 1
+    await store.refresh()
 
-    await store.saveBusinessDatabase()
-
-    expect(configServiceMock.updateBusinessDatabase).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: 'db-1',
-        provider: 2,
-        connectionString: '',
-        isReadOnly: true
-      })
-    )
-  })
-
-  it('preserves MCP allowed tool normalization through the facade', async () => {
-    const store = useConfigStore()
-
-    store.openCreateMcpServerDialog()
-    store.currentMcpServer.name = ' Runtime MCP '
-    store.currentMcpServer.description = ' Tools '
-    store.currentMcpServer.command = ' dotnet '
-    store.currentMcpServer.arguments = ' run '
-    store.currentMcpServer.allowedTools = [
-      { toolName: ' queryData ', readOnlyDeclared: true },
-      { toolName: 'QueryData', readOnlyDeclared: false },
-      { toolName: ' ' }
-    ]
-
-    await store.saveMcpServer()
-
-    expect(configServiceMock.createMcpServer).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: 'Runtime MCP',
-        description: 'Tools',
-        command: 'dotnet',
-        arguments: 'run',
-        allowedTools: [
-          expect.objectContaining({
-            toolName: 'queryData',
-            readOnlyDeclared: true
-          })
-        ]
-      })
-    )
+    expect(configServiceMock.getLanguageModels).toHaveBeenCalledOnce()
+    expect(configServiceMock.getRoutingModels).toHaveBeenCalledOnce()
+    expect(configServiceMock.getConversationTemplates).toHaveBeenCalledOnce()
   })
 
   it('keeps configStore.ts as a facade without direct CRUD implementations', () => {
@@ -162,7 +96,11 @@ describe('configStore facade', () => {
     const source = readFileSync(sourcePath, 'utf8')
 
     expect(source).toContain('useLanguageModelConfigDomain')
-    expect(source).toContain('useBusinessDatabaseConfigDomain')
+    expect(source).toContain('useRoutingModelConfigDomain')
+    expect(source).toContain('useConversationTemplateConfigDomain')
+    expect(source).not.toContain('useBusinessDatabaseConfigDomain')
+    expect(source).not.toContain('useMcpServerConfigDomain')
+    expect(source).not.toContain('useProviderReliabilityConfigDomain')
     expect(source).not.toContain('useDialogCrud({')
     expect(source).not.toContain('configService.')
   })

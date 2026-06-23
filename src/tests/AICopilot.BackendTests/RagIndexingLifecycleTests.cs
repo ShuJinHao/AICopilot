@@ -414,6 +414,36 @@ public sealed class RagIndexingLifecycleTests
     }
 
     [Fact]
+    public async Task RetryDocumentIndexing_ShouldStageIndexingEventForFailedDocument()
+    {
+        var (knowledgeBase, document) = CreateKnowledgeBaseWithDocument();
+        document.MarkAsFailed("parse failed");
+        var repository = new MutableKnowledgeBaseRepository(knowledgeBase);
+        var eventStager = new CapturingEventStager();
+        var auditLogWriter = new CapturingAuditLogWriter();
+        var handler = new RetryDocumentIndexingCommandHandler(
+            repository,
+            eventStager,
+            auditLogWriter,
+            new TestCurrentUser(role: "Admin"));
+
+        var result = await handler.Handle(new RetryDocumentIndexingCommand(document.Id), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        document.Status.Should().Be(DocumentStatus.Failed);
+        repository.SaveCount.Should().Be(1);
+        var message = eventStager.StagedMessages.Should().ContainSingle().Subject
+            .Should().BeOfType<DocumentUploadedEvent>().Subject;
+        message.DocumentId.Should().Be(document.Id.Value);
+        message.KnowledgeBaseId.Should().Be(knowledgeBase.Id.Value);
+        message.FilePath.Should().Be(document.FilePath);
+        message.FileName.Should().Be(document.Name);
+        var audit = auditLogWriter.Requests.Should().ContainSingle().Subject;
+        audit.ActionCode.Should().Be("Rag.RetryDocumentIndexing");
+        audit.TargetId.Should().Be(document.Id.ToString());
+    }
+
+    [Fact]
     public async Task DocumentFileDeletionRequestedConsumer_ShouldDeleteStoredFile()
     {
         var fileStorage = new CapturingFileStorage();

@@ -82,7 +82,17 @@ Cloud AiRead 设备契约：
 - 它不能覆盖 Cloud 业务只读规则。
 - 若未来允许调用 Cloud AI-facing API，审批规则必须与 Cloud 权限、Cloud 审计和接口契约一起设计。
 
-## 8. 文档入口
+## 8. 对话产品规则
+
+- 主产品形态是 Codex-like 对话流，不是任务控制台、试点运营台或系统调试台。
+- 普通用户默认只看到用户问题、AI 最终回答、Plan/Goal 摘要、审批卡和结果卡。
+- 模型名、路由模型、意图置信度、工具调用、工具参数、运行事件、中间步骤和风险细节默认折叠到运行详情。
+- `render_payload_json` 只能恢复稳定消息内容，例如文本、图表或错误结果；不得作为审批、工具调用、意图识别或运行状态的权威来源。
+- 审批、AgentTask、AgentStep、Artifact 和 Workspace 的当前状态必须从各自权威聚合读取，并通过 `message_events` / session timeline 投影进入对话流。
+- 历史消息刷新不得把 `Intent`、`FunctionCall`、`FunctionResult`、`ApprovalRequest` 或 `Metadata` chunk 作为普通消息重新摊开。
+- 开发阶段已物理删除 Trial/Pilot/Production Readiness 运营线；后续不得把旧试点运营能力重新接回普通产品导航。
+
+## 9. 文档入口
 
 - 长期规则入口只保留 `AGENTS.md`、本文档和工作区 `docs/历史核心记录.md`。
 - 部署入口只保留 `AICopilot 项目部署与维护指南.md` 和 `deploy/enterprise-ai`。
@@ -90,7 +100,7 @@ Cloud AiRead 设备契约：
 - 清理文档时必须先检查引用，避免留下指向已删除阶段文件的脚本、测试或说明。
 - 旧的 Simulation/Real/Sandbox/Pilot 阶段说明只可作为历史材料，不得覆盖当前部署指南和生产验收口径。
 
-## 9. 工程边界
+## 10. 工程边界
 
 - `AiCopilotDbContext` 是主基础设施迁移上下文，`AuditDbContext` 负责审计查询和运行时审计写入，`DataAnalysisDbContext` 只承载数据分析配置，`OutboxDbContext` 承载 outbox。
 - 审计写入必须遵守 Audit writer decision tree：有业务保存点的命令应把业务变更和审计行放在同一事务；`auditLogWriter.SaveChangesAsync` 只允许出现在没有业务保存点且已被白名单记录的执行路径。

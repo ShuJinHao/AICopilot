@@ -142,7 +142,7 @@ body,
 
 body {
   margin: 0;
-  overflow: hidden;
+  overflow: auto;
   background: var(--app-bg);
   color: var(--app-text);
   font-family: var(--app-font);

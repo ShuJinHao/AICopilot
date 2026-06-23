@@ -47,9 +47,6 @@ const navigationItems = computed<NavigationItem[]>(() => {
       : null,
     authStore.canManageKnowledge
       ? { path: '/knowledge', label: t('nav.knowledge'), description: '文档、向量、检索', icon: BookOpen }
-      : null,
-    authStore.canManageAccess
-      ? { path: '/access', label: t('nav.access'), description: '用户、角色、审计', icon: ShieldCheck }
       : null
   ]
 
@@ -82,7 +79,7 @@ async function logout() {
         <Sparkles :size="22" stroke-width="2.5" />
       </div>
 
-      <nav class="dock-nav">
+      <nav class="dock-nav" aria-label="主要导航">
         <AiTooltip v-for="item in navigationItems" :key="item.path" :content="item.label">
           <button
             class="dock-button"
@@ -98,7 +95,19 @@ async function logout() {
 
       <div class="dock-spacer" />
 
-      <div class="dock-nav">
+      <div class="dock-nav" aria-label="系统操作">
+        <AiTooltip v-if="authStore.canManageAccess" :content="t('nav.access')">
+          <button
+            class="dock-button"
+            :class="{ active: activePath === '/access' }"
+            type="button"
+            :aria-label="t('nav.access')"
+            @click="navigate('/access')"
+          >
+            <ShieldCheck :size="20" stroke-width="2.3" />
+          </button>
+        </AiTooltip>
+
         <AiTooltip :content="t('nav.cloud')">
           <button
             class="dock-button"
@@ -166,7 +175,9 @@ async function logout() {
 .ai-app-shell {
   display: grid;
   grid-template-columns: 96px minmax(0, 1fr);
+  height: 100%;
   min-height: 100%;
+  overflow: hidden;
   padding: 24px;
   background:
     radial-gradient(circle at 18% 10%, rgba(200, 255, 61, 0.13), transparent 26%),
@@ -354,6 +365,7 @@ async function logout() {
 
 .ai-content-main {
   min-height: 0;
+  overflow-y: auto;
   padding: 0 28px 28px;
 }
 

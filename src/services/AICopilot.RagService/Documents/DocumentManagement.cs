@@ -88,6 +88,9 @@ public class GetListDocumentsQueryHandler(
 [AuthorizeRequirement("Rag.DeleteDocument")]
 public record DeleteDocumentCommand(int Id) : ICommand<Result>;
 
+[AuthorizeRequirement("Rag.UploadDocument")]
+public record RetryDocumentIndexingCommand(int Id) : ICommand<Result>;
+
 [AuthorizeRequirement("Rag.UpdateDocumentGovernance")]
 public record UpdateDocumentGovernanceCommand(
     int Id,
@@ -284,5 +287,70 @@ public class DeleteDocumentCommandHandler(
         await repository.SaveChangesAsync(cancellationToken);
 
         return Result.Success();
+    }
+}
+
+public class RetryDocumentIndexingCommandHandler(
+    IRepository<KnowledgeBase> repository,
+    IIntegrationEventStager eventStager,
+    IAuditLogWriter auditLogWriter,
+    ICurrentUser currentUser)
+    : ICommandHandler<RetryDocumentIndexingCommand, Result>
+{
+    public async Task<Result> Handle(RetryDocumentIndexingCommand request, CancellationToken cancellationToken)
+    {
+        var documentId = new DocumentId(request.Id);
+        var knowledgeBase = await repository.GetAsync(
+            kb => kb.Documents.Any(document => document.Id == documentId),
+            [kb => kb.Documents],
+            cancellationToken);
+
+        if (knowledgeBase == null)
+        {
+            return Result.NotFound("Document not found.");
+        }
+
+        if (currentUser.Id is not { } userId ||
+            !KnowledgeBaseAccessPolicy.CanWrite(knowledgeBase, userId, KnowledgeBaseAccessPolicy.IsAdmin(currentUser)))
+        {
+            return Result.NotFound();
+        }
+
+        var document = knowledgeBase.Documents.First(document => document.Id == documentId);
+        if (!CanRetryIndexing(document.Status))
+        {
+            return Result.Invalid("Document status does not allow retry.");
+        }
+
+        eventStager.Stage(() => new DocumentUploadedEvent
+        {
+            DocumentId = document.Id,
+            KnowledgeBaseId = knowledgeBase.Id.Value,
+            FilePath = document.FilePath,
+            FileName = document.Name
+        });
+
+        await auditLogWriter.WriteAsync(
+            new AuditLogWriteRequest(
+                AuditActionGroups.Config,
+                "Rag.RetryDocumentIndexing",
+                "KnowledgeDocument",
+                document.Id.ToString(),
+                document.Name,
+                AuditResults.Succeeded,
+                $"Queued document indexing retry: {document.Name}; knowledgeBaseId={knowledgeBase.Id}; status={document.Status}."),
+            cancellationToken);
+        await repository.SaveChangesAsync(cancellationToken);
+
+        return Result.Success();
+    }
+
+    private static bool CanRetryIndexing(DocumentStatus status)
+    {
+        return status is DocumentStatus.Pending
+            or DocumentStatus.Failed
+            or DocumentStatus.Parsing
+            or DocumentStatus.Splitting
+            or DocumentStatus.Embedding;
     }
 }

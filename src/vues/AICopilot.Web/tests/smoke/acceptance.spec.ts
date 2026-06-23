@@ -45,8 +45,8 @@ test('login page renders operational shell without overflow', async ({ page, isM
 })
 
 for (const route of [
-  { path: '/chat', text: 'AI CANVAS' },
-  { path: '/config', text: '运行配置' },
+  { path: '/chat', text: '对话工作区' },
+  { path: '/config', text: 'AI 配置' },
   { path: '/knowledge', text: '知识库' },
   { path: '/access', text: '权限治理' }
 ]) {
@@ -56,160 +56,197 @@ for (const route of [
   })
 }
 
-test('agent workbench restores task, workspace, approvals, artifacts, and audit summary', async ({ page, isMobile }) => {
-  test.skip(isMobile, 'desktop workbench keeps the three-column panel visible')
+test('inline agent run restores task, workspace, approvals, and artifacts', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'desktop inline execution card covers the restored task data')
 
   await expectProtectedShell(page, '/chat')
 
-  await expect(page.getByText('AI CANVAS')).toBeVisible()
+  await expect(page.getByText('对话工作区')).toBeVisible()
   await expect(page.getByText(/LINE-A/).first()).toBeVisible()
-  await expect(page.locator('.agent-workbench-panel').getByText('任务控制台').first()).toBeVisible()
+  await expect(page.locator('.agent-workbench-panel')).toHaveCount(0)
+  await expect(page.getByText('任务控制台')).toHaveCount(0)
+  await expect(page.getByText('任务历史')).toHaveCount(0)
+  await expect(page.getByTestId('inline-agent-run')).toBeVisible()
+  await expect(page.locator('.canvas-status-strip')).toHaveCount(0)
+  await expect(page.getByTestId('inline-status-card')).toHaveCount(0)
+  await expect(page.getByTestId('inline-timeline-card')).toHaveCount(0)
+  await expect(page.getByTestId('inline-steps-card')).toHaveCount(0)
+  await expect(page.getByTestId('inline-runtime-card')).toBeVisible()
+  await expect(page.getByTestId('inline-runtime-card').getByText('执行记录与安全边界')).toBeVisible()
+  await expect(page.getByText('步骤、事件和安全边界已折叠')).toHaveCount(0)
+  await expect(page.getByText(/\d+\/\d+ 步 ·/)).toHaveCount(0)
+  await expect(page.getByText(/\d+ 个事件/)).toHaveCount(0)
+  await expect(page.locator('.status-tile').first()).toBeHidden()
+  await expect(page.locator('.boundary-inline')).toHaveCount(0)
+  await expect(page.getByText('Cloud 只读边界')).toBeHidden()
 
-  await page.getByTestId('agent-tab-approvals').click()
+  await expect(page.getByTestId('inline-approval-card')).toBeVisible()
+  await expect(page.getByTestId('inline-approval-card').getByText('执行确认')).toBeVisible()
+  await expect(page.getByTestId('inline-approval-card').getByText('工具审批')).toHaveCount(0)
   await expect(page.locator('.approval-row')).toHaveCount(1)
+  await expect(page.getByText('generate_pdf', { exact: true }).first()).toBeHidden()
+  const approvalDetail = page.getByTestId('approval-detail-fold').first()
+  await expect(approvalDetail.getByText('generate_pdf', { exact: true })).toBeHidden()
+  await approvalDetail.locator('summary').click()
+  await expect(approvalDetail.getByText('generate_pdf', { exact: true })).toBeVisible()
+  await approvalDetail.locator('summary').click()
+  await expect(approvalDetail.getByText('generate_pdf', { exact: true })).toBeHidden()
+
+  await expect(page.getByTestId('inline-plan-card').getByText('工具目录')).toBeHidden()
+  await page.getByTestId('plan-technical-details').locator('summary').click()
+  await expect(page.getByTestId('inline-plan-card').getByText('工具目录')).toBeVisible()
+
+  await expect(page.locator('.step-row').first()).toBeHidden()
+  await expect(page.getByText('read_uploaded_file', { exact: true }).first()).toBeHidden()
+  await expect(page.locator('.timeline-row').first()).toBeHidden()
+  await page.getByTestId('inline-runtime-summary').click()
+  await expect(page.locator('.status-tile').first()).toBeVisible()
+  await expect(page.getByTestId('inline-boundary-row')).toBeVisible()
+  await expect(page.getByText('Cloud 只读边界')).toBeVisible()
+  await expect(page.locator('.step-row').first()).toBeVisible()
+  await expect(page.locator('.timeline-row').first()).toBeVisible()
+  await expect(page.getByText('工具待审批').first()).toBeVisible()
+  await page.locator('.step-detail-fold').filter({ hasText: 'read_uploaded_file' }).locator('summary').click()
+  await expect(page.getByText('read_uploaded_file', { exact: true }).first()).toBeVisible()
+  await page.locator('.step-detail-fold').filter({ hasText: 'generate_pdf' }).locator('summary').click()
   await expect(page.getByText('generate_pdf', { exact: true }).first()).toBeVisible()
 
-  await page.getByTestId('agent-tab-steps').click()
-  await expect(page.getByText('read_uploaded_file', { exact: true }).first()).toBeVisible()
-
-  await page.waitForTimeout(1000)
-  await page.getByTestId('agent-tab-artifacts').click({ force: true })
-  await page.waitForTimeout(250)
-  await page.getByTestId('agent-tab-artifacts').click({ force: true })
-  await page.waitForFunction(() => sessionStorage.getItem('aicopilot.ui.agentWorkbenchTab') === 'artifacts')
-  await expect(page.getByText('WS-SMOKE-001').first()).toBeVisible()
+  const artifactCard = page.getByTestId('inline-artifact-card')
+  await expect(artifactCard).toBeVisible()
+  await expect(artifactCard.getByText('WS-SMOKE-001', { exact: true })).toBeHidden()
+  await expect(page.getByTestId('artifact-detail-fold')).toBeVisible()
+  await expect(page.locator('.artifact-row').first()).toBeHidden()
+  await expect(page.locator('.artifact-row').filter({ hasText: 'chart-data.json' }).first()).toBeHidden()
+  await expect(page.getByText('AI 独立模拟业务库').first()).toBeHidden()
+  await page.getByTestId('artifact-detail-fold').locator('summary').click()
+  await expect(artifactCard.getByText('WS-SMOKE-001', { exact: true })).toBeVisible()
   await expect(page.locator('.artifact-row')).toHaveCount(2)
-  await expect(page.getByText('chart-data.json').first()).toBeVisible()
+  await expect(page.locator('.artifact-row').first()).toBeVisible()
+  await expect(page.locator('.artifact-row').filter({ hasText: 'chart-data.json' }).first()).toBeVisible()
   await expect(page.getByText('AI 独立模拟业务库').first()).toBeVisible()
 
-  await page.getByTestId('agent-tab-audit').click()
-  await expect(page.getByText('Agent.Plan')).toBeVisible()
-
-  await page.getByTestId('agent-tab-boundary').click()
-  await expect(page.getByText('Cloud 只读边界')).toBeVisible()
   await expectNoHorizontalOverflow(page)
 })
 
-test('config agent operations panel renders run queue and worker status', async ({ page }) => {
+test('chat shell does not preload internal operations or expose model selection', async ({ page }) => {
+  const requestedPaths: string[] = []
+  page.on('request', (request) => {
+    const url = new URL(request.url())
+    requestedPaths.push(url.pathname)
+  })
+
+  await expectProtectedShell(page, '/chat')
+
+  await expect(page.locator('.model-selector')).toHaveCount(0)
+  await expect(page.locator('select[aria-label="选择模型"]')).toHaveCount(0)
+  await expect(page.locator('nav[aria-label="主要导航"] button[aria-label="权限治理"]')).toHaveCount(0)
+  await expect(page.locator('[aria-label="系统操作"] button[aria-label="权限治理"]')).toBeVisible()
+  await expect(page.getByLabel('选择 Skill')).toBeVisible()
+  await expect(page.getByLabel('选择 Skill')).toHaveValue('general_report')
+  await expect(page.getByLabel('选择知识库')).toBeVisible()
+  await expect(page.getByLabel('选择知识库')).toHaveValue('kb1')
+  const composerInput = page.locator('.command-composer textarea')
+  await expect(composerInput).toHaveAttribute('placeholder', '输入问题或目标')
+  await expect(composerInput).not.toHaveAttribute('placeholder', /Goal|Shift \+ Enter/)
+  await expect(page.getByText('只读分析').first()).toBeVisible()
+  await expect(page.getByText('SimulationBusiness')).toHaveCount(0)
+  await expect(page.locator('.agent-workbench-panel')).toHaveCount(0)
+  await expect(page.getByText('任务控制台')).toHaveCount(0)
+  await expect(page.getByText('任务历史')).toHaveCount(0)
+  await expect(page.getByText('历史异常数').first()).toBeVisible()
+  await expect(page.getByText('history_approval', { exact: true }).first()).toBeHidden()
+  await expect(page.getByText('回答模型：未知', { exact: true }).first()).toBeHidden()
+  await page.locator('.runtime-details summary').first().click()
+  await expect(page.getByText('回答模型：未知', { exact: true }).first()).toBeVisible()
+
+  const forbiddenInitialLoads = [
+    '/api/aigateway/language-model/chat-options',
+    '/api/aigateway/agent/run-queue/summary',
+    '/api/aigateway/agent/run-queue',
+    '/api/aigateway/agent/worker/status'
+  ]
+
+  for (const path of forbiddenInitialLoads) {
+    expect(requestedPaths).not.toContain(path)
+  }
+})
+
+test('config renders fixed agent slots without internal operations preload', async ({ page }) => {
+  const requestedPaths: string[] = []
+  page.on('request', (request) => {
+    const url = new URL(request.url())
+    requestedPaths.push(url.pathname)
+  })
+
   await expectProtectedShell(page, '/config')
 
-  await page.getByRole('tab', { name: 'Agent', exact: true }).click()
+  const plannerSlot = page.getByTestId('agent-slot-planner')
 
-  await expect(page.getByTestId('agent-config-workspace')).toBeVisible()
-  await expect(page.getByTestId('agent-config-run-queue')).toBeVisible()
-  await expect(page.getByTestId('agent-config-worker-status')).toBeVisible()
-  await expect(page.getByText('AICopilot.DataWorker')).toBeVisible()
-  await expect(page.getByText('Queued', { exact: true }).first()).toBeVisible()
+  await expect(page.getByTestId('agent-slot-intent')).toBeVisible()
+  await expect(plannerSlot).toBeVisible()
+  await expect(page.getByTestId('agent-slot-executor')).toBeVisible()
+  await expect(page.getByText('IntentRoutingAgent', { exact: true }).first()).toBeHidden()
+  await expect(page.getByText('agent_planner', { exact: true }).first()).toBeHidden()
+  await expect(page.getByText('agent_executor', { exact: true }).first()).toBeHidden()
+  await expect(page.getByText('受控 Agent 计划生成约束').first()).toBeHidden()
+  await plannerSlot.getByText('配置详情').click()
+  await expect(plannerSlot.getByText('agent_planner', { exact: true })).toBeVisible()
+  await expect(plannerSlot.getByText('受控 Agent 计划生成约束')).toBeVisible()
+  await expect(page.getByText('你是 A助理的计划生成 Agent。只能输出计划，不能调用工具。')).toBeHidden()
+  await plannerSlot.getByText('预览提示词').click()
+  await expect(page.getByText('你是 A助理的计划生成 Agent。只能输出计划，不能调用工具。')).toBeVisible()
+  await expect(page.getByText('模型池')).toHaveCount(0)
+  await expect(page.getByText('工具目录')).toHaveCount(0)
+  await expect(page.getByText('运行队列')).toHaveCount(0)
+
+  const forbiddenInitialLoads = [
+    '/api/aigateway/provider-reliability',
+    '/api/data-analysis/business-database/list',
+    '/api/mcp/server/list',
+    '/api/aigateway/approval-policy/list',
+    '/api/aigateway/tools',
+    '/api/aigateway/tools/catalog',
+    '/api/aigateway/agent/run-queue/summary',
+    '/api/aigateway/agent/run-queue',
+    '/api/aigateway/agent/worker/status',
+    '/api/aigateway/workspace-settings'
+  ]
+
+  for (const path of forbiddenInitialLoads) {
+    expect(requestedPaths).not.toContain(path)
+  }
   await expectNoHorizontalOverflow(page)
 })
 
-test('agent trial panel shows P11 pilot readiness rehearsal evidence', async ({ page, isMobile }) => {
-  test.skip(isMobile, 'desktop workbench keeps the trial panel visible')
+test('knowledge page keeps retrieval and embedding controls collapsed by default', async ({ page }) => {
+  await expectProtectedShell(page, '/knowledge')
 
-  await expectProtectedShell(page, '/chat')
+  await expect(page.getByText('报警处置手册.pdf')).toBeVisible()
+  await expect(page.getByRole('button', { name: /测试检索/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /高级设置/ })).toBeVisible()
+  await expect(page.getByText('检索预览')).toHaveCount(0)
+  await expect(page.getByText('嵌入模型')).toHaveCount(0)
+  await expect(page.getByText(/切分|向量索引/)).toHaveCount(0)
+  await expect(page.getByText('片段数').first()).toBeHidden()
+  await expect(page.getByText('高级治理').first()).toBeHidden()
 
-  await page.getByTestId('agent-tab-trial').click()
-  await expect(page.getByTestId('p11-pilot-readiness-panel')).toBeVisible()
-  await expect(page.getByTestId('p11-no-production-read')).toBeVisible()
-  await expect(page.getByTestId('p11-no-production-data')).toBeVisible()
-  await expect(page.getByTestId('p11-config-package')).toBeVisible()
+  await page.getByRole('button', { name: /新增知识库/ }).click()
+  const knowledgeDrawer = page.locator('aside').filter({ hasText: '知识库' }).first()
+  await expect(knowledgeDrawer.getByText('名称')).toBeVisible()
+  await expect(knowledgeDrawer.getByText('嵌入模型')).toBeHidden()
+  await knowledgeDrawer.locator('.knowledge-base-advanced summary').click()
+  await expect(knowledgeDrawer.getByText('嵌入模型')).toBeVisible()
+  await page.getByRole('button', { name: '关闭' }).click()
 
-  await page.getByRole('button', { name: /审批演练/ }).click()
-  await expect(page.getByTestId('p11-approval-rehearsal')).toBeVisible()
+  const documentDetail = page.locator('.document-detail-fold').first()
+  await documentDetail.locator('summary').click()
+  await expect(documentDetail.getByText('片段数')).toBeVisible()
 
-  await page.getByRole('button', { name: /fake contract/ }).click()
-  const contractRehearsal = page.getByTestId('p11-contract-rehearsal')
-  await expect(contractRehearsal).toBeVisible()
-  await expect(contractRehearsal.getByText('devices', { exact: true })).toBeVisible()
-  await expect(contractRehearsal.getByText('recipe_versions', { exact: true })).toBeVisible()
-  await expectNoHorizontalOverflow(page)
-})
+  await page.getByRole('button', { name: /测试检索/ }).click()
+  await expect(page.getByText('检索预览')).toBeVisible()
 
-test('agent trial panel shows P12 production readonly pilot gate', async ({ page, isMobile }) => {
-  test.skip(isMobile, 'desktop workbench keeps the trial panel visible')
-
-  await expectProtectedShell(page, '/chat')
-
-  await page.getByTestId('agent-tab-trial').click()
-  await expect(page.getByTestId('p12-production-pilot-panel')).toBeVisible()
-  await expect(page.getByTestId('p12-fixed-template-marker')).toBeVisible()
-  await expect(page.getByTestId('p12-production-readonly-marker')).toBeVisible()
-  await expect(page.getByTestId('p12-gated-marker')).toBeVisible()
-  await expect(page.getByTestId('p12-allowlist')).toContainText('devices')
-
-  await page.getByRole('button', { name: /Fixed scenario/ }).click()
-  const run = page.getByTestId('p12-production-pilot-run')
-  await expect(run).toBeVisible()
-  await expect(run).toContainText('CloudReadonlyProductionPilot')
-  await expect(run).toContainText('ProductionPilot')
-  await expectNoHorizontalOverflow(page)
-})
-
-test('agent trial panel shows P13 production controlled pilot intent gate', async ({ page, isMobile }) => {
-  test.skip(isMobile, 'desktop workbench keeps the trial panel visible')
-
-  await expectProtectedShell(page, '/chat')
-
-  await page.getByTestId('agent-tab-trial').click()
-  const panel = page.getByTestId('p13-production-controlled-panel')
-  await expect(panel).toBeVisible()
-  await expect(page.getByTestId('p13-controlled-marker')).toContainText('CloudReadonlyProductionControlledPilot')
-  await expect(page.getByTestId('p13-boundary-marker')).toContainText('ProductionControlledPilot')
-  await expect(page.getByTestId('p13-allowlist')).toContainText('devices')
-
-  await panel.locator('textarea').fill('分析最近一天设备清单')
-  await panel.getByRole('button', { name: /Intent \+ Plan/ }).click()
-  await page.getByTestId('agent-tab-trial').click()
-  await expect(page.getByTestId('p13-production-controlled-intent')).toContainText('pcg-smoke-devices')
-  await expect(page.getByTestId('p13-production-controlled-intent')).toContainText('DeviceList')
-
-  await page.getByTestId('p13-production-controlled-panel').getByRole('button', { name: /Direct smoke/ }).click()
-  const run = page.getByTestId('p13-production-controlled-run')
-  await expect(run).toBeVisible()
-  await expect(run).toContainText('CloudReadonlyProductionControlledPilot')
-  await expect(run).toContainText('ProductionControlledPilot')
-  await expectNoHorizontalOverflow(page)
-})
-
-test('agent trial panel shows P14 production operations gate', async ({ page, isMobile }) => {
-  test.skip(isMobile, 'desktop workbench keeps the trial panel visible')
-
-  await expectProtectedShell(page, '/chat')
-
-  await page.getByTestId('agent-tab-trial').click()
-  const panel = page.getByTestId('p14-production-operations-panel')
-  await expect(panel).toBeVisible()
-  await expect(page.getByTestId('p14-non-ga-marker')).toContainText('not full production rollout')
-  await expect(page.getByTestId('p14-run-ledger')).toContainText('CloudReadonlyProductionControlledPilot')
-  await expect(page.getByTestId('p14-run-ledger')).toContainText('sha256:p13-result-devices')
-
-  await panel.getByRole('button', { name: /Emergency stop/ }).click()
-  await expect(page.getByTestId('p14-emergency-stop-state')).toContainText('Active')
-
-  await panel.getByRole('button', { name: /Clear stop/ }).click()
-  await expect(page.getByTestId('p14-emergency-stop-state')).toContainText('Clear')
-
-  await panel.getByRole('button', { name: /P15 readiness/ }).click()
-  await expect(page.getByTestId('p14-ga-readiness')).toContainText('ReadyForP15Planning')
-  await expectNoHorizontalOverflow(page)
-})
-
-test('agent trial panel shows P15 planning authorization gate', async ({ page, isMobile }) => {
-  test.skip(isMobile, 'desktop workbench keeps the trial panel visible')
-
-  await expectProtectedShell(page, '/chat')
-
-  await page.getByTestId('agent-tab-trial').click()
-  const panel = page.getByTestId('p15-planning-gate-panel')
-  await expect(panel).toBeVisible()
-  await expect(page.getByTestId('p15-planning-marker')).toContainText('not real Pilot execution')
-  await expect(page.getByTestId('p15-not-ga-marker')).toContainText('Not GA')
-  await expect(page.getByTestId('p15-allowlist')).toContainText('devices')
-  await expect(page.getByTestId('p15-allowlist')).toContainText('pass_station_records')
-  await expect(page.getByTestId('p15-blocked-status')).toContainText('ReadyForP16PlanningBlocked')
-  await expect(page.getByTestId('p15-blocker-list')).toContainText('P12/P13 persistence')
-  await expect(page.getByTestId('p15-blocker-list')).toContainText('Artifact refs backfill')
-  await expect(page.getByTestId('p15-blocker-list')).toContainText('Rows retention')
+  await page.getByRole('button', { name: /高级设置/ }).click()
+  await expect(page.getByText('嵌入模型')).toBeVisible()
   await expectNoHorizontalOverflow(page)
 })
 
@@ -221,10 +258,18 @@ test('chat stream renders widgets and approval card', async ({ page, isMobile })
   await page.locator('.command-composer textarea').fill('smoke check agent widgets')
   await page.locator('.send-button').click()
 
-  await expect(page.getByText('diagnose_alarm', { exact: true })).toBeVisible()
+  await expect(page.getByText('diagnose_alarm', { exact: true })).toBeHidden()
   await expect(page.locator('.widget-frame').first()).toBeVisible()
   expect(await page.locator('.widget-frame').count()).toBeGreaterThanOrEqual(4)
-  await expect(page.locator('.approval-card')).toBeVisible()
+  const approvalCard = page.locator('.approval-card').first()
+  await expect(approvalCard).toBeVisible()
+  await expect(approvalCard.getByText('需要确认后继续')).toBeVisible()
+  await expect(approvalCard.getByText('此动作需要确认现场有人在岗，并再次确认执行前条件。')).toBeVisible()
+  await expect(approvalCard.getByText('此工具需要确认现场有人在岗，并再次确认执行前条件。')).toHaveCount(0)
+  await expect(approvalCard.getByText('高风险工具确认')).toBeHidden()
+  await approvalCard.locator('.approval-detail-fold summary').click()
+  await expect(approvalCard.getByText('高风险工具确认')).toBeVisible()
+  await expect(page.getByText('diagnose_alarm', { exact: true })).toBeVisible()
   await expectNoHorizontalOverflow(page)
 })
 
@@ -233,13 +278,13 @@ test('mobile chat workspace keeps navigation and primary work area within viewpo
 
   await expectProtectedShell(page, '/chat')
 
-  await expect(page.getByText('AI CANVAS')).toBeVisible()
+  await expect(page.getByText('对话工作区')).toBeVisible()
   await expect(page.locator('.ai-canvas')).toBeVisible()
-  await expect(page.locator('.canvas-status-strip')).toBeVisible()
-  await page.getByRole('button', { name: 'Agent', exact: true }).click()
-  await expect(page.locator('.agent-workbench-panel.mobile-open')).toBeVisible()
-  await expect(page.getByTestId('agent-tab-approvals')).toBeVisible()
-  await expect(page.getByTestId('agent-tab-artifacts')).toBeVisible()
-  await expect(page.getByTestId('agent-tab-audit')).toBeVisible()
+  await expect(page.locator('.canvas-status-strip')).toHaveCount(0)
+  await expect(page.getByTestId('inline-runtime-card')).toBeVisible()
+  await expect(page.locator('.agent-workbench-panel')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Agent', exact: true })).toHaveCount(0)
+  await page.getByRole('button', { name: '打开会话' }).click()
+  await expect(page.locator('.mobile-drawer.left')).toBeVisible()
   await expectNoHorizontalOverflow(page)
 })

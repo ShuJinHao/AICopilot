@@ -1,4 +1,5 @@
-﻿using AICopilot.Infrastructure.AiGateway;
+﻿using AICopilot.Core.AiGateway.Aggregates.Sessions;
+using AICopilot.Infrastructure.AiGateway;
 using AICopilot.Services.Contracts;
 using System.Net;
 using System.Net.Http.Json;
@@ -326,6 +327,59 @@ public sealed class AcceptanceClosureVerificationTests
         auditSummary.Should().Contain(item => item.ActionCode == "Agent.WorkspaceFinalize" &&
                                              item.WorkspaceCode == task.WorkspaceCode);
         auditSummary.Should().OnlyContain(item => item.TaskId == task.Id);
+
+        var timelineEvents = await QueryMessageTimelineEventsAsync(session.Id);
+        timelineEvents.Select(item => item.Sequence).Should().BeInAscendingOrder();
+        timelineEvents.Select(item => item.Sequence).Should().OnlyHaveUniqueItems();
+
+        var taskEvents = timelineEvents
+            .Where(item => item.AgentTaskId == task.Id)
+            .ToList();
+        taskEvents.Should().OnlyContain(item => item.MessageId == null);
+        taskEvents.Should().OnlyContain(item => item.PayloadJson == null);
+        taskEvents.Should().Contain(item =>
+            item.EventType == nameof(MessageEventType.AgentTaskPlanCreated) &&
+            item.ApprovalRequestId.HasValue &&
+            item.ArtifactWorkspaceId == finalizedWorkspace.Id);
+        taskEvents.Should().Contain(item =>
+            item.EventType == nameof(MessageEventType.ApprovalRequested) &&
+            item.ApprovalRequestId.HasValue);
+        taskEvents.Should().Contain(item =>
+            item.EventType == nameof(MessageEventType.ApprovalDecided) &&
+            item.ApprovalRequestId.HasValue);
+        taskEvents.Should().Contain(item =>
+            item.EventType == nameof(MessageEventType.AgentTaskStepStarted) &&
+            item.AgentStepId.HasValue);
+        taskEvents.Should().Contain(item =>
+            item.EventType == nameof(MessageEventType.AgentTaskStepCompleted) &&
+            item.AgentStepId.HasValue);
+        taskEvents.Should().Contain(item =>
+            item.EventType == nameof(MessageEventType.ArtifactReady) &&
+            item.ArtifactWorkspaceId == finalizedWorkspace.Id &&
+            item.ArtifactId.HasValue);
+        taskEvents.Should().ContainSingle(item =>
+            item.EventType == nameof(MessageEventType.FinalOutputReady) &&
+            item.ArtifactWorkspaceId == finalizedWorkspace.Id);
+
+        var timeline = await GetJsonAsync<SessionTimelinePageDto>(
+            $"/api/aigateway/session/timeline?sessionId={session.Id}&count=200");
+        timeline.Items.Select(item => item.Sequence).Should().BeInAscendingOrder();
+        timeline.Items.Should().Contain(item =>
+            item.EventType == nameof(MessageEventType.AgentTaskPlanCreated) &&
+            item.AgentTaskId == task.Id &&
+            item.AgentTaskStatus == "Completed");
+        timeline.Items.Should().Contain(item =>
+            item.EventType == nameof(MessageEventType.ApprovalDecided) &&
+            item.ApprovalRequestId.HasValue &&
+            item.ApprovalStatus == "Approved");
+        timeline.Items.Should().Contain(item =>
+            item.EventType == nameof(MessageEventType.FinalOutputReady) &&
+            item.WorkspaceCode == finalizedWorkspace.WorkspaceCode &&
+            item.WorkspaceStatus == "Finalized");
+        timeline.Items.Should().Contain(item =>
+            item.EventType == nameof(MessageEventType.ArtifactReady) &&
+            item.ArtifactStatus == "Final" &&
+            item.ArtifactDownloadUrl != null);
     }
 
     [Fact]
@@ -369,6 +423,22 @@ public sealed class AcceptanceClosureVerificationTests
         auditSummary.Should().Contain(item => item.ActionCode == "Agent.ApprovalDecision" &&
                                              item.Result == "Rejected");
         auditSummary.Should().NotContain(item => item.ActionCode == "Agent.ToolExecution");
+
+        var timeline = await GetJsonAsync<SessionTimelinePageDto>(
+            $"/api/aigateway/session/timeline?sessionId={session.Id}&count=200");
+        timeline.Items.Should().Contain(item =>
+            item.EventType == nameof(MessageEventType.AgentTaskPlanCreated) &&
+            item.AgentTaskId == task.Id &&
+            item.AgentTaskStatus == "Rejected");
+        timeline.Items.Should().Contain(item =>
+            item.EventType == nameof(MessageEventType.ApprovalRequested) &&
+            item.ApprovalRequestId == planApproval.Id &&
+            item.ApprovalStatus == "Rejected");
+        timeline.Items.Should().Contain(item =>
+            item.EventType == nameof(MessageEventType.ApprovalDecided) &&
+            item.ApprovalRequestId == planApproval.Id &&
+            item.ApprovalStatus == "Rejected" &&
+            item.ApprovalDecidedAt.HasValue);
     }
 
     private static ServiceProvider CreateRedisServiceProvider(string redisConnectionString)
@@ -593,6 +663,49 @@ public sealed class AcceptanceClosureVerificationTests
         return result;
     }
 
+    private async Task<List<MessageTimelineEventRow>> QueryMessageTimelineEventsAsync(Guid sessionId)
+    {
+        var connectionString = await _fixture.GetConnectionStringAsync();
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            SELECT sequence,
+                   event_type,
+                   message_id,
+                   agent_task_id,
+                   agent_step_id,
+                   approval_request_id,
+                   artifact_workspace_id,
+                   artifact_id,
+                   payload_json
+            FROM aigateway.message_events
+            WHERE session_id = @sessionId
+            ORDER BY sequence;
+            """;
+        command.Parameters.AddWithValue("sessionId", sessionId);
+
+        var result = new List<MessageTimelineEventRow>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            result.Add(new MessageTimelineEventRow(
+                reader.GetInt32(0),
+                reader.GetString(1),
+                reader.IsDBNull(2) ? null : reader.GetInt32(2),
+                reader.IsDBNull(3) ? null : reader.GetGuid(3),
+                reader.IsDBNull(4) ? null : reader.GetGuid(4),
+                reader.IsDBNull(5) ? null : reader.GetGuid(5),
+                reader.IsDBNull(6) ? null : reader.GetGuid(6),
+                reader.IsDBNull(7) ? null : reader.GetGuid(7),
+                reader.IsDBNull(8) ? null : reader.GetString(8)));
+        }
+
+        return result;
+    }
+
     private sealed record LoginUserDto(string UserName, string Token);
 
     private sealed record CreatedSessionDto(
@@ -726,4 +839,52 @@ public sealed class AcceptanceClosureVerificationTests
         string Summary,
         DateTime CreatedAt,
         IReadOnlyDictionary<string, string> Metadata);
+
+    private sealed record SessionTimelinePageDto(
+        IReadOnlyList<SessionTimelineEventDto> Items,
+        int? BeforeSequence,
+        int? AfterSequence,
+        bool HasMore,
+        bool HasMoreBefore,
+        bool HasMoreAfter);
+
+    private sealed record SessionTimelineEventDto(
+        int Sequence,
+        string EventType,
+        DateTimeOffset CreatedAt,
+        int? MessageId,
+        Guid? AgentTaskId,
+        string? AgentTaskTitle,
+        string? AgentTaskGoal,
+        string? AgentTaskStatus,
+        Guid? AgentStepId,
+        int? AgentStepIndex,
+        string? AgentStepTitle,
+        string? AgentStepStatus,
+        string? AgentStepToolCode,
+        Guid? ApprovalRequestId,
+        string? ApprovalType,
+        string? ApprovalStatus,
+        string? ApprovalTargetName,
+        DateTimeOffset? ApprovalDecidedAt,
+        Guid? ArtifactWorkspaceId,
+        string? WorkspaceCode,
+        string? WorkspaceStatus,
+        Guid? ArtifactId,
+        string? ArtifactName,
+        string? ArtifactType,
+        string? ArtifactStatus,
+        string? ArtifactRelativePath,
+        string? ArtifactDownloadUrl);
+
+    private sealed record MessageTimelineEventRow(
+        int Sequence,
+        string EventType,
+        int? MessageId,
+        Guid? AgentTaskId,
+        Guid? AgentStepId,
+        Guid? ApprovalRequestId,
+        Guid? ArtifactWorkspaceId,
+        Guid? ArtifactId,
+        string? PayloadJson);
 }

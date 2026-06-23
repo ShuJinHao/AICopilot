@@ -33,30 +33,6 @@ export const CONFIG_STORE_MESSAGES = {
     saveForbidden: '当前账号没有管理模板的权限。',
     deleteFailed: '删除模板失败，请稍后重试。',
     deleteForbidden: '当前账号没有删除模板的权限。'
-  },
-  approvalPolicy: {
-    loadFailed: '加载审批策略详情失败，请稍后重试。',
-    loadForbidden: '当前账号没有查看审批策略详情的权限。',
-    saveFailed: '保存审批策略失败，请稍后重试。',
-    saveForbidden: '当前账号没有管理审批策略的权限。',
-    deleteFailed: '删除审批策略失败，请稍后重试。',
-    deleteForbidden: '当前账号没有删除审批策略的权限。'
-  },
-  businessDatabase: {
-    loadFailed: '加载业务库详情失败，请稍后重试。',
-    loadForbidden: '当前账号没有查看业务库详情的权限。',
-    saveFailed: '保存业务库失败，请稍后重试。',
-    saveForbidden: '当前账号没有管理业务库的权限。',
-    deleteFailed: '删除业务库失败，请稍后重试。',
-    deleteForbidden: '当前账号没有删除业务库的权限。'
-  },
-  mcpServer: {
-    loadFailed: '加载 MCP 服务详情失败，请稍后重试。',
-    loadForbidden: '当前账号没有查看 MCP 服务详情的权限。',
-    saveFailed: '保存 MCP 服务失败，请稍后重试。',
-    saveForbidden: '当前账号没有管理 MCP 服务的权限。',
-    deleteFailed: '删除 MCP 服务失败，请稍后重试。',
-    deleteForbidden: '当前账号没有删除 MCP 服务的权限。'
   }
 } as const satisfies Record<string, unknown>
 

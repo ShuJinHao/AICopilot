@@ -37,18 +37,6 @@ internal static class HttpApiOptionsConfiguration
             builder.Configuration.GetSection(CloudIdentityStatusOptions.SectionName));
         builder.Services.Configure<CloudReadonlyOptions>(
             builder.Configuration.GetSection(CloudReadonlyOptions.SectionName));
-        builder.Services.Configure<CloudReadonlySandboxOptions>(
-            builder.Configuration.GetSection(CloudReadonlySandboxOptions.SectionName));
-        builder.Services.Configure<CloudReadonlySandboxAgentTrialOptions>(
-            builder.Configuration.GetSection(CloudReadonlySandboxAgentTrialOptions.SectionName));
-        builder.Services.Configure<CloudReadonlySandboxControlledTrialOptions>(
-            builder.Configuration.GetSection(CloudReadonlySandboxControlledTrialOptions.SectionName));
-        builder.Services.Configure<CloudReadonlyPilotReadinessOptions>(
-            builder.Configuration.GetSection(CloudReadonlyPilotReadinessOptions.SectionName));
-        builder.Services.Configure<CloudReadonlyProductionPilotOptions>(
-            builder.Configuration.GetSection(CloudReadonlyProductionPilotOptions.SectionName));
-        builder.Services.Configure<CloudReadonlyProductionControlledPilotOptions>(
-            builder.Configuration.GetSection(CloudReadonlyProductionControlledPilotOptions.SectionName));
         builder.Services.Configure<CloudAiReadOptions>(
             builder.Configuration.GetSection(CloudAiReadOptions.SectionName));
 
@@ -79,36 +67,6 @@ internal static class HttpApiOptionsConfiguration
             .GetSection(CloudReadonlyOptions.SectionName)
             .Get<CloudReadonlyOptions>() ?? new CloudReadonlyOptions();
         cloudReadonlyOptions.EnsureValid(cloudAiReadOptions);
-
-        var cloudReadonlySandboxOptions = builder.Configuration
-            .GetSection(CloudReadonlySandboxOptions.SectionName)
-            .Get<CloudReadonlySandboxOptions>() ?? new CloudReadonlySandboxOptions();
-        cloudReadonlySandboxOptions.EnsureValid();
-
-        var cloudReadonlySandboxAgentTrialOptions = builder.Configuration
-            .GetSection(CloudReadonlySandboxAgentTrialOptions.SectionName)
-            .Get<CloudReadonlySandboxAgentTrialOptions>() ?? new CloudReadonlySandboxAgentTrialOptions();
-        cloudReadonlySandboxAgentTrialOptions.EnsureValid();
-
-        var cloudReadonlySandboxControlledTrialOptions = builder.Configuration
-            .GetSection(CloudReadonlySandboxControlledTrialOptions.SectionName)
-            .Get<CloudReadonlySandboxControlledTrialOptions>() ?? new CloudReadonlySandboxControlledTrialOptions();
-        cloudReadonlySandboxControlledTrialOptions.EnsureValid();
-
-        var cloudReadonlyPilotReadinessOptions = builder.Configuration
-            .GetSection(CloudReadonlyPilotReadinessOptions.SectionName)
-            .Get<CloudReadonlyPilotReadinessOptions>() ?? new CloudReadonlyPilotReadinessOptions();
-        cloudReadonlyPilotReadinessOptions.EnsureValid();
-
-        var cloudReadonlyProductionPilotOptions = builder.Configuration
-            .GetSection(CloudReadonlyProductionPilotOptions.SectionName)
-            .Get<CloudReadonlyProductionPilotOptions>() ?? new CloudReadonlyProductionPilotOptions();
-        cloudReadonlyProductionPilotOptions.EnsureValid();
-
-        var cloudReadonlyProductionControlledPilotOptions = builder.Configuration
-            .GetSection(CloudReadonlyProductionControlledPilotOptions.SectionName)
-            .Get<CloudReadonlyProductionControlledPilotOptions>() ?? new CloudReadonlyProductionControlledPilotOptions();
-        cloudReadonlyProductionControlledPilotOptions.EnsureValid();
 
         return new HttpApiValidatedOptions(jwtSettings, cloudOidcOptions, cloudIdentityStatusOptions);
     }

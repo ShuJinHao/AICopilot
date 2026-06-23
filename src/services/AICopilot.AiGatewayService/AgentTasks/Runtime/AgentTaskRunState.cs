@@ -31,8 +31,6 @@ internal sealed class AgentTaskRunState
     public string? BusinessQueryHash { get; set; }
 
     public List<AgentBusinessQuerySummary> BusinessQueryResults { get; } = [];
-
-    public List<AgentCloudSandboxQuerySummary> CloudSandboxQueryResults { get; } = [];
 }
 
 internal sealed record AgentBusinessQuerySummary(
@@ -45,21 +43,6 @@ internal sealed record AgentBusinessQuerySummary(
     int RowCount,
     bool IsTruncated,
     Guid? ArtifactId);
-
-internal sealed record AgentCloudSandboxQuerySummary(
-    string EndpointCode,
-    string SourceMode,
-    bool IsSandbox,
-    string SourceLabel,
-    string QueryHash,
-    string ResultHash,
-    int RowCount,
-    bool IsTruncated,
-    IReadOnlyCollection<Guid> ArtifactRefs,
-    string? TrialMode,
-    string? IntentId,
-    string? Boundary,
-    string? ApprovalStatus);
 
 internal sealed record AgentUploadSummary(
     Guid Id,

@@ -62,6 +62,8 @@ export interface ApprovalChunk extends ChatChunk {
  * 前端使用的消息模型
  */
 export interface ChatMessage extends ChatModelMetadataPayload {
+  messageId?: number
+  sequence?: number
   sessionId: string
   role: MessageRole
   chunks: ChatChunk[]

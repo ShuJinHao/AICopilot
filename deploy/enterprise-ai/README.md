@@ -76,6 +76,8 @@ REGISTRY=10.98.90.154:80 HARBOR_PROJECT=enterprise-ai ./deploy/enterprise-ai/mir
 5. 输入 `release_tag=sha-<git-sha>`。
 6. `services` 必须照上一步的 `Deploy services input` 填，例如 `httpapi,migration,web`；不要人工猜测，不要为了省事留空。留空表示全量发布，只能用于明确的全量发布窗口。
 
+应用镜像仓库只保留最近 3 个 `sha-*` tag。`aicopilot-image` 推送成功后会调用 `harbor-retention.sh` 清理超出 3 个的旧 tag；`buildcache` 和基础镜像 tag 不计入应用版本保留。Harbor robot 或用户必须具备删除 tag 权限，并开启 Harbor Garbage Collection 定期回收磁盘。
+
 发布脚本会同步本目录到服务器、写入 `DEPLOY_ENV_FILE`、登录 Harbor、重写所选应用镜像 tag、执行 `docker compose pull` 和 `docker compose up -d`，最后探测 Web 首页。按需发布会先从当前 release 读取未选服务镜像，避免 `.env` 被 secret 里的旧 tag 覆盖；如果目标机已有旧部署但还没有 `releases/current-release.env`，脚本会用服务器 `.env` 作为初始镜像基线并写入 release manifest，不需要把 `services` 留空。部署完成后会写入 `releases/current-release.env`、`previous-release.env`、`staged-release.env`、`current-release.summary.md` 和 `history/`，并把 summary 回贴到 GitHub Step Summary。
 
 ## 应急手工构建
@@ -86,6 +88,8 @@ REGISTRY=10.98.90.154:80 HARBOR_PROJECT=enterprise-ai ./deploy/enterprise-ai/mir
 cd AICopilot
 REGISTRY=10.98.90.154:80 HARBOR_PROJECT=enterprise-ai TAG=sha-<git-sha> ./deploy/enterprise-ai/build-and-push.sh
 ```
+
+应急构建默认也会执行 `harbor-retention.sh`。执行前需要导出 `HARBOR_USERNAME` / `HARBOR_PASSWORD`，或复用 `OCI_REGISTRY_USERNAME` / `OCI_REGISTRY_PASSWORD`。
 
 ## 应急手工部署
 

@@ -46,22 +46,6 @@ internal static class AgentReportDocumentBuilder
                     item.RowCount,
                     item.IsTruncated,
                     item.ArtifactId))
-                .ToArray(),
-            state.CloudSandboxQueryResults
-                .Select(item => new AgentCloudSandboxQueryResultSummaryDto(
-                    item.EndpointCode,
-                    item.SourceMode,
-                    item.IsSandbox,
-                    item.SourceLabel,
-                    item.QueryHash,
-                    item.ResultHash,
-                    item.RowCount,
-                    item.IsTruncated,
-                    item.ArtifactRefs,
-                    item.TrialMode,
-                    item.IntentId,
-                    item.Boundary,
-                    item.ApprovalStatus))
                 .ToArray());
     }
 

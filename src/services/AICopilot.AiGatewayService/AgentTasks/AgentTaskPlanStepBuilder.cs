@@ -1,6 +1,4 @@
-using AICopilot.AiGatewayService.CloudReadiness;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
-using AICopilot.Services.Contracts;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
 
@@ -13,10 +11,7 @@ internal static class AgentTaskPlanStepBuilder
         bool hasBusinessDataSources,
         AgentTaskType taskType,
         bool requiresDataApproval,
-        IReadOnlyCollection<string>? artifactTypes,
-        bool isCloudSandboxTrial,
-        bool isCloudProductionPilotTrial,
-        bool isCloudProductionControlledPilotTrial)
+        IReadOnlyCollection<string>? artifactTypes)
     {
         var result = steps.ToList();
         var normalizedArtifactTypes = NormalizeArtifactTypes(artifactTypes);
@@ -57,36 +52,15 @@ internal static class AgentTaskPlanStepBuilder
 
         if (taskType == AgentTaskType.CloudDataReport)
         {
-            var cloudToolCode = isCloudProductionControlledPilotTrial
-                ? CloudReadonlyProductionControlledPilotMarkers.ToolCode
-                : isCloudProductionPilotTrial
-                ? CloudReadonlyProductionPilotMarkers.ToolCode
-                : isCloudSandboxTrial
-                    ? CloudReadonlySandboxAgentTrialMarkers.ToolCode
-                    : "query_cloud_data_readonly";
-            var title = isCloudProductionControlledPilotTrial
-                ? "Query Cloud production controlled readonly data"
-                : isCloudProductionPilotTrial
-                ? "Query Cloud production Pilot readonly data"
-                : isCloudSandboxTrial
-                    ? "Query Cloud sandbox readonly data"
-                    : "Query Cloud readonly data";
-            var description = isCloudProductionControlledPilotTrial
-                ? "Read Cloud production data only through the controlled free-goal ProductionControlledPilot boundary."
-                : isCloudProductionPilotTrial
-                ? "Read Cloud production data only through the fixed-template ProductionPilot boundary."
-                : isCloudSandboxTrial
-                    ? "Read Cloud sandbox/staging data only through the SandboxAgentTrial boundary."
-                    : "Read Cloud business data only through the AiRead readonly boundary.";
             InsertBeforeOutputs(
                 result,
-                cloudToolCode,
+                "query_cloud_data_readonly",
                 new AgentStepPlanDto(
-                    title,
-                    description,
+                    "Query Cloud readonly data",
+                    "Read Cloud business data only through the AiRead readonly boundary.",
                     AgentStepType.DataQuery,
-                    cloudToolCode,
-                    isCloudSandboxTrial || isCloudProductionPilotTrial || isCloudProductionControlledPilotTrial));
+                    "query_cloud_data_readonly",
+                    false));
         }
 
         if (hasBusinessDataSources)
@@ -132,10 +106,7 @@ internal static class AgentTaskPlanStepBuilder
         bool hasBusinessDataSources,
         AgentTaskType taskType,
         AgentTaskRiskLevel riskLevel,
-        IReadOnlyCollection<string>? artifactTypes,
-        bool isCloudSandboxTrial,
-        bool isCloudProductionPilotTrial,
-        bool isCloudProductionControlledPilotTrial)
+        IReadOnlyCollection<string>? artifactTypes)
     {
         var steps = new List<AgentStepPlanDto>();
         var normalizedArtifactTypes = NormalizeArtifactTypes(artifactTypes);
@@ -152,13 +123,7 @@ internal static class AgentTaskPlanStepBuilder
 
         if (taskType == AgentTaskType.CloudDataReport)
         {
-            steps.Add(isCloudProductionControlledPilotTrial
-                ? new AgentStepPlanDto("Query Cloud production controlled readonly data", "Read Cloud production data only through the controlled free-goal ProductionControlledPilot boundary.", AgentStepType.DataQuery, CloudReadonlyProductionControlledPilotMarkers.ToolCode, true)
-                : isCloudProductionPilotTrial
-                ? new AgentStepPlanDto("Query Cloud production Pilot readonly data", "Read Cloud production data only through the fixed-template ProductionPilot boundary.", AgentStepType.DataQuery, CloudReadonlyProductionPilotMarkers.ToolCode, true)
-                : isCloudSandboxTrial
-                    ? new AgentStepPlanDto("Query Cloud sandbox readonly data", "Read Cloud sandbox/staging data only through the SandboxAgentTrial boundary.", AgentStepType.DataQuery, CloudReadonlySandboxAgentTrialMarkers.ToolCode, true)
-                    : new AgentStepPlanDto("Query Cloud readonly data", "Read Cloud business data only through the AiRead readonly boundary.", AgentStepType.DataQuery, "query_cloud_data_readonly", false));
+            steps.Add(new AgentStepPlanDto("Query Cloud readonly data", "Read Cloud business data only through the AiRead readonly boundary.", AgentStepType.DataQuery, "query_cloud_data_readonly", false));
         }
 
         steps.Add(new AgentStepPlanDto("Generate chart data", "Generate frontend chart preview data from controlled task inputs.", AgentStepType.ChartGeneration, "generate_chart_data", false));

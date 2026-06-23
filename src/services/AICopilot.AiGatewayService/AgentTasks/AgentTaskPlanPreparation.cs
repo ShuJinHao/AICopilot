@@ -9,10 +9,5 @@ internal sealed record AgentTaskPlanPreparation(
     Guid[] DataSourceIds,
     BusinessDatabaseDescriptor[] SelectedDataSources,
     string[] BusinessDomains,
-    bool IsCloudSandboxFixedTrialPlan,
-    bool IsCloudSandboxControlledTrialPlan,
-    bool IsCloudSandboxTrialPlan,
-    bool IsCloudProductionPilotTrialPlan,
-    bool IsCloudProductionControlledPilotPlan,
     bool IsSimulationOnlyPlan,
     bool HasBusinessDataSourcesForPlan);

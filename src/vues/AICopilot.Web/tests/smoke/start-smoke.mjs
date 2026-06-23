@@ -21,21 +21,6 @@ const permissions = [
   'AiGateway.CreateConversationTemplate',
   'AiGateway.UpdateConversationTemplate',
   'AiGateway.DeleteConversationTemplate',
-  'AiGateway.GetApprovalPolicy',
-  'AiGateway.GetListApprovalPolicies',
-  'AiGateway.CreateApprovalPolicy',
-  'AiGateway.UpdateApprovalPolicy',
-  'AiGateway.DeleteApprovalPolicy',
-  'DataAnalysis.GetBusinessDatabase',
-  'DataAnalysis.GetListBusinessDatabases',
-  'DataAnalysis.CreateBusinessDatabase',
-  'DataAnalysis.UpdateBusinessDatabase',
-  'DataAnalysis.DeleteBusinessDatabase',
-  'Mcp.GetServer',
-  'Mcp.GetListServers',
-  'Mcp.CreateServer',
-  'Mcp.UpdateServer',
-  'Mcp.DeleteServer',
   'Rag.GetEmbeddingModel',
   'Rag.GetListEmbeddingModels',
   'Rag.GetKnowledgeBase',
@@ -239,467 +224,65 @@ const agentAuditSummary = [
   }
 ]
 
-const trialCampaign = {
-  campaignId: 'campaign-smoke',
-  name: 'P11 smoke trial ledger',
-  status: 'Active',
-  allowedSourceModes: ['SimulationBusiness', 'CloudReadonlySandbox'],
-  ownerDepartment: 'AI Platform',
-  startAt: now,
-  endAt: null,
-  summary: {
-    scenarioRunCount: 1,
-    passedRunCount: 1,
-    failedRunCount: 0,
-    blockedRunCount: 0,
-    finalArtifactCount: 1,
-    approvalRejectedCount: 0,
-    unresolvedRiskCount: 0,
-    queryHashSamples: ['sha256:smoke-query-chart'],
-    resultHashSamples: ['sha256:smoke-result-chart']
-  },
-  scenarioRuns: [
-    {
-      runId: 'run-smoke',
-      campaignId: 'campaign-smoke',
-      scenarioId: 'line-a-capacity',
-      trialMode: 'SimulationBusiness',
-      sourceMode: 'SimulationBusiness',
-      boundary: 'AgentArtifactWorkspace',
-      taskId: agentTask.id,
-      artifactIds: ['artifact-chart'],
-      queryHashes: ['sha256:smoke-query-chart'],
-      resultHashes: ['sha256:smoke-result-chart'],
-      approvalStatus: 'Approved',
-      status: 'Passed',
-      startedAt: now,
-      completedAt: now
-    }
-  ],
-  risks: [],
-  readinessStatus: 'ReadyForP11Planning',
-  createdAt: now
-}
-
-const pilotConfigPackage = {
-  packageId: 'pilot-package-smoke',
-  allowedEndpointCodes: ['devices', 'capacity_summary', 'device_logs', 'pass_station_records'],
-  maxTimeRange: 'P7D',
-  maxRows: 200,
-  timeoutMs: 3000,
-  approvalPolicy: 'PilotReadinessRehearsal',
-  rollbackPolicy: 'Disable config and keep production read closed',
-  ownerDepartment: 'AI Platform',
-  evidenceRefs: ['campaign-smoke'],
-  status: 'RehearsalReady'
-}
-
-const pilotReadiness = {
-  status: 'RehearsalPassed',
-  enabled: false,
-  evidencePackageId: 'evidence-smoke',
-  configSummary: pilotConfigPackage,
-  approvalRehearsalStatus: 'Passed',
-  contractCheckSummary: {
-    total: 6,
-    passed: 4,
-    failed: 0,
-    blockedByPolicy: 2
-  },
-  blockers: [],
-  warnings: ['Production read remains disabled'],
-  lastCheckedAt: now
-}
-
-const pilotApprovalRehearsal = {
-  rehearsalId: 'approval-rehearsal-smoke',
-  packageId: pilotConfigPackage.packageId,
-  status: 'Passed',
-  generatedAt: now,
-  steps: [
-    {
-      code: 'production_read_closed',
-      label: '生产读取关闭确认',
-      status: 'Passed',
-      isBlocking: true,
-      approver: 'security',
-      auditRef: 'audit:production-read-closed'
-    },
-    {
-      code: 'emergency_disable',
-      label: '紧急停用确认',
-      status: 'Passed',
-      isBlocking: true,
-      approver: 'owner',
-      auditRef: 'audit:emergency-disable'
-    }
-  ],
-  approvers: ['security', 'owner'],
-  auditRefs: ['audit:production-read-closed', 'audit:emergency-disable']
-}
-
-const pilotContractRehearsal = {
-  rehearsalId: 'contract-rehearsal-smoke',
-  packageId: pilotConfigPackage.packageId,
-  status: 'Passed',
-  sourceMode: 'CloudReadonlyPilotReadiness',
-  boundary: 'PilotReadinessRehearsal',
-  isProductionData: false,
-  generatedAt: now,
-  checks: [
-    {
-      endpointCode: 'devices',
-      method: 'GET',
-      path: '/ai-read/devices',
-      policyStatus: 'Allowed',
-      httpStatus: 200,
-      durationMs: 24,
-      rowCount: 2,
-      isTruncated: false,
-      resultHash: 'sha256:pilot-devices',
-      errorCode: null,
-      status: 'Passed'
-    },
-    {
-      endpointCode: 'recipe_versions',
-      method: 'GET',
-      path: '/ai-read/recipe-versions',
-      policyStatus: 'BlockedByPolicy',
-      httpStatus: null,
-      durationMs: 0,
-      rowCount: 0,
-      isTruncated: false,
-      resultHash: null,
-      errorCode: 'BlockedByPolicy',
-      status: 'BlockedByPolicy'
-    }
-  ]
-}
-
-const productionPilotWindow = {
-  windowId: 'p12-window-smoke',
-  name: 'P12 fixed-template production readonly Pilot',
-  status: 'Approved',
-  startAt: now,
-  endAt: now,
-  allowedEndpointCodes: ['devices', 'capacity_summary', 'device_logs', 'pass_station_records'],
-  maxTimeRangeDays: 7,
-  maxRows: 50,
-  timeoutMs: 5000,
-  ownerDepartment: 'AI Platform',
-  approvalPolicy: 'ProductionPilotToolApproval',
-  rollbackPolicy: 'EmergencyDisableProductionPilot'
-}
-
-const productionPilotStatus = {
-  status: 'Ready',
-  enabled: true,
-  pilotWindowId: productionPilotWindow.windowId,
-  windowStatus: productionPilotWindow.status,
-  allowedEndpointCodes: productionPilotWindow.allowedEndpointCodes,
-  approvalStatus: 'Approved',
-  toolVisible: true,
-  toolExecutable: true,
-  lastRunAt: now,
-  blockers: [],
-  warnings: []
-}
-
-const productionPilotRun = {
-  scenarioId: 'cloud-production-pilot-devices',
-  scenarioTitle: 'Cloud Production Pilot Device List',
-  status: 'Completed',
-  boundary: 'ProductionPilot',
-  artifactTypes: ['Markdown', 'Html'],
-  queryResult: {
-    endpointCode: 'devices',
-    sourceType: 'CloudReadonly',
-    sourceMode: 'CloudReadonlyProductionPilot',
-    isProductionData: true,
-    isSandbox: false,
-    isSimulation: false,
-    sourceLabel: 'Cloud 生产只读 Pilot',
-    boundary: 'ProductionPilot',
-    pilotWindowId: productionPilotWindow.windowId,
-    queryHash: 'sha256:p12-query-devices',
-    resultHash: 'sha256:p12-result-devices',
-    rowCount: 2,
-    isTruncated: false,
-    approvalStatus: 'ToolApprovalRequired',
-    rows: []
-  }
-}
-
-const productionControlledIntent = {
-  intentId: 'pcg-smoke-devices',
-  goalHash: 'sha256:p13-goal-devices',
-  endpointCodes: ['devices'],
-  timeRange: { from: now, to: now },
-  maxRows: 20,
-  artifactTypes: ['Markdown', 'Html'],
-  analysisType: 'DeviceList',
-  warnings: [],
-  rejectedReasons: [],
-  requiresToolApproval: true,
-  requiresFinalApproval: true
-}
-
-const productionControlledStatus = {
-  status: 'Ready',
-  enabled: true,
-  p12GateStatus: 'Ready',
-  pilotWindowId: productionPilotWindow.windowId,
-  windowStatus: productionPilotWindow.status,
-  freeGoalEnabled: true,
-  allowedEndpointCodes: productionPilotWindow.allowedEndpointCodes,
-  toolVisible: true,
-  toolExecutable: true,
-  lastRunAt: now,
-  blockers: [],
-  warnings: [],
-  boundary: 'ProductionControlledPilot'
-}
-
-const productionControlledTask = {
-  ...agentTask,
-  id: 'task-p13-controlled',
-  taskCode: 'AGT-P13',
-  title: 'P13 controlled production goal',
-  taskType: 'CloudDataReport',
-  status: 'WaitingApproval',
-  planJson: JSON.stringify({
-    plannerMode: 'Static',
-    queryMode: 'CloudReadonlyProductionControlledPilot',
-    isCloudProductionControlledPilotTrial: true,
-    cloudProductionGoalIntent: productionControlledIntent,
-    plannerSafetySummary: {
-      planSource: 'CloudProductionControlledGoal',
-      plannerMode: 'Static',
-      plannerModelSummary: null,
-      plannerToolCatalogVersion: 8,
-      availableToolCount: 4,
-      isSimulationOnly: false,
-      requiresDataApproval: true,
-      toolRiskSummary: { High: 1 },
-      mockMcpOnly: false
-    },
-    approvalCheckpoints: ['query_cloud_production_controlled_readonly', 'finalize_artifacts'],
-    toolApprovalCheckpoints: ['query_cloud_production_controlled_readonly', 'finalize_artifacts'],
-    forcedStepCodes: ['query_cloud_production_controlled_readonly', 'finalize_artifacts'],
-    artifactTypes: ['Markdown', 'Html']
-  })
-}
-
-const productionControlledPlan = {
-  task: productionControlledTask,
-  intent: productionControlledIntent
-}
-
-const productionControlledRun = {
-  intentId: productionControlledIntent.intentId,
-  analysisType: productionControlledIntent.analysisType,
-  status: 'Completed',
-  artifactTypes: ['Markdown', 'Html'],
-  boundary: 'ProductionControlledPilot',
-  queryResult: {
-    endpointCode: 'devices',
-    sourceType: 'CloudReadonly',
-    sourceMode: 'CloudReadonlyProductionControlledPilot',
-    isProductionData: true,
-    isSandbox: false,
-    isSimulation: false,
-    sourceLabel: 'Cloud 生产只读 Controlled Pilot',
-    boundary: 'ProductionControlledPilot',
-    pilotWindowId: productionPilotWindow.windowId,
-    intentId: productionControlledIntent.intentId,
-    queryHash: 'sha256:p13-query-devices',
-    resultHash: 'sha256:p13-result-devices',
-    rowCount: 2,
-    isTruncated: false,
-    approvalStatus: 'ToolApprovalRequired'
-  }
-}
-
-const productionOperationsLedger = [
-  {
-    runId: 'p13-smoke-run',
-    taskId: 'task-p13-controlled',
-    sourceMode: 'CloudReadonlyProductionControlledPilot',
-    boundary: 'ProductionControlledPilot',
-    trialMode: 'ProductionControlledPilot',
-    pilotWindowId: productionPilotWindow.windowId,
-    intentId: productionControlledIntent.intentId,
-    endpointCode: 'devices',
-    artifactIds: ['artifact-final-1'],
-    approvalStatus: 'Approved',
-    status: 'Completed',
-    durationMs: 31,
-    rowCount: 2,
-    isTruncated: false,
-    queryHash: 'sha256:p13-query-devices',
-    resultHash: 'sha256:p13-result-devices',
-    executedAt: now
-  },
-  {
-    runId: 'p12-smoke-run',
-    taskId: 'task-p12-fixed',
-    sourceMode: 'CloudReadonlyProductionPilot',
-    boundary: 'ProductionPilot',
-    trialMode: 'ProductionPilotFixedScenario',
-    pilotWindowId: productionPilotWindow.windowId,
-    intentId: null,
-    endpointCode: 'devices',
-    artifactIds: ['artifact-final-2'],
-    approvalStatus: 'Approved',
-    status: 'Completed',
-    durationMs: 24,
-    rowCount: 2,
-    isTruncated: false,
-    queryHash: 'sha256:p12-query-devices',
-    resultHash: 'sha256:p12-result-devices',
-    executedAt: now
-  }
-]
-
-const productionOperationsStatus = {
-  status: 'CollectingEvidence',
-  p12PilotStatus: 'Ready',
-  p13ControlledPilotStatus: 'Ready',
-  operationsStorePersisted: true,
-  hasP12CompletedRun: true,
-  hasP13CompletedRun: true,
-  emergencyStopActive: false,
-  currentWindowIds: [productionPilotWindow.windowId],
-  runMetrics: {
-    totalRuns: productionOperationsLedger.length,
-    succeededRuns: 2,
-    failedRuns: 0,
-    rejectedRuns: 0,
-    timeoutRuns: 0,
-    truncatedRuns: 0,
-    totalRows: 4,
-    finalArtifactCount: 2,
-    openIncidentCount: 0,
-    endpointCounts: { devices: 2 }
-  },
-  blockers: [],
-  warnings: ['Production readonly Pilot, not full production rollout'],
-  lastEvaluatedAt: now
-}
-
-const productionOperationsEmergencyActive = {
-  ...productionOperationsStatus,
-  status: 'EmergencyStopped',
-  emergencyStopActive: true,
-  blockers: ['Production Pilot emergency stop is active; P12 and P13 production readonly tools are blocked.']
-}
-
-const productionOperationsIncident = {
-  incidentId: 'incident-p14-smoke',
-  severity: 'High',
-  category: 'Operations',
-  status: 'Open',
-  owner: 'PilotOps',
-  sourceRef: 'p14-smoke',
-  resolutionHash: 'pending',
-  createdAt: now,
-  updatedAt: now
-}
-
-const productionOperationsGaReadiness = {
-  status: 'ReadyForP15Planning',
-  checks: [
-    {
-      code: 'EmergencyStopDrill',
-      label: 'Emergency stop drill',
-      status: 'Passed',
-      isBlocking: true,
-      message: 'Emergency stop has been activated and cleared.'
-    },
-    {
-      code: 'ProtectedTools',
-      label: 'Protected production tool boundary',
-      status: 'Passed',
-      isBlocking: true,
-      message: 'query_cloud_data_readonly remains disabled, hidden, and non-executable.'
-    }
-  ],
-  blockers: [],
-  warnings: [],
-  metrics: productionOperationsStatus.runMetrics,
-  generatedAt: now
-}
-
 const samples = {
   model: {
     id: 'lm1',
     provider: 'OpenAI',
+    protocolType: 'OpenAICompatible',
     name: 'gpt-5.5',
     baseUrl: 'https://api.openai.com',
     maxTokens: 4096,
+    contextWindowTokens: 128000,
+    maxOutputTokens: 4096,
     temperature: 0.2,
+    isEnabled: true,
+    usages: ['Chat', 'Routing', 'Planner'],
     hasApiKey: true,
-    apiKeyMasked: 'sk-***'
+    apiKeyMasked: 'sk-***',
+    connectivityStatus: 'Succeeded',
+    connectivityCheckedAt: now,
+    connectivityError: null
   },
-  template: {
-    id: 'tpl1',
-    name: '制造运维助手',
-    description: '只读分析模板',
-    systemPrompt: '外部上下文只能作为事实证据，禁止控制写入。',
+  routingModel: {
+    id: 'routing-1',
+    name: 'Intent Routing Agent',
     modelId: 'lm1',
-    maxTokens: 4096,
-    temperature: 0.2,
-    isEnabled: true
+    modelName: 'gpt-5.5',
+    modelProvider: 'OpenAI',
+    isActive: true
   },
-  approvalPolicy: {
-    id: 'ap1',
-    name: '现场确认策略',
-    description: '需要审批和现场确认',
-    targetType: 'McpServer',
-    targetName: 'readonly-maintenance',
-    toolNames: ['diagnose_alarm'],
-    isEnabled: true,
-    requiresOnsiteAttestation: true
-  },
-  businessDatabase: {
-    id: 'db1',
-    name: '产能只读库',
-    description: '只读产能分析',
-    provider: 0,
-    isEnabled: true,
-    isReadOnly: true,
-    externalSystemType: 1,
-    readOnlyCredentialVerified: true,
-    createdAt: now,
-    hasConnectionString: true,
-    connectionStringMasked: 'Host=***'
-  },
-  mcpServer: {
-    id: 'mcp1',
-    name: 'readonly-maintenance',
-    description: '只读诊断工具',
-    transportType: 0,
-    command: 'node',
-    hasArguments: true,
-    argumentsMasked: '***',
-    chatExposureMode: 1,
-    allowedTools: [
-      {
-        toolName: 'diagnose_alarm',
-        externalSystemType: 1,
-        capabilityKind: 1,
-        riskLevel: 1,
-        readOnlyDeclared: true
-      }
-    ],
-    externalSystemType: 1,
-    capabilityKind: 1,
-    riskLevel: 1,
-    toolPolicySummaries: [
-      { toolName: 'diagnose_alarm', requiresApproval: true, requiresOnsiteAttestation: true }
-    ],
-    isEnabled: true
-  },
+  templates: [
+    {
+      id: 'tpl-intent',
+      name: 'IntentRoutingAgent',
+      description: '意图识别和 Skill 路由约束',
+      systemPrompt: '你是 A助理的意图识别 Agent。可选意图列表：{{$IntentList}}',
+      modelId: 'lm1',
+      maxTokens: 2048,
+      temperature: 0,
+      isEnabled: true
+    },
+    {
+      id: 'tpl-planner',
+      name: 'agent_planner',
+      description: '受控 Agent 计划生成约束',
+      systemPrompt: '你是 A助理的计划生成 Agent。只能输出计划，不能调用工具。',
+      modelId: 'lm1',
+      maxTokens: 4096,
+      temperature: 0,
+      isEnabled: true
+    },
+    {
+      id: 'tpl-executor',
+      name: 'agent_executor',
+      description: '受控 Agent 步骤执行约束',
+      systemPrompt: '你是 A助理的最终执行 Agent。只能执行已经确认或审批的计划步骤。',
+      modelId: 'lm1',
+      maxTokens: 4096,
+      temperature: 0.2,
+      isEnabled: true
+    }
+  ],
   embeddingModel: {
     id: 'em1',
     name: 'text-embedding',
@@ -909,35 +492,185 @@ const api = createServer((request, response) => {
     },
     '/api/aigateway/session/list': [session],
     '/api/aigateway/session': session,
-    '/api/aigateway/chat-message/list': [
+    '/api/aigateway/skills': [
       {
-        sessionId: session.id,
-        role: 'User',
-        content: '查看 LINE-A 当前设备状态',
-        createdAt: now
+        id: 'skill-general',
+        skillCode: 'general_report',
+        displayName: '通用报告',
+        description: '默认分析与报告 Skill',
+        allowedToolCodes: ['read_uploaded_file', 'generate_markdown_report', 'finalize_artifacts'],
+        riskLevel: 'High',
+        approvalPolicy: 'ToolApproval',
+        allowedDataSourceModes: ['SimulationBusiness'],
+        allowedKnowledgeScopes: ['SelectedKnowledgeBase'],
+        outputComponentTypes: ['chart', 'markdown', 'pdf'],
+        isEnabled: true,
+        isBuiltIn: true,
+        version: 1,
+        createdAt: now,
+        updatedAt: now
       },
       {
-        sessionId: session.id,
-        role: 'Assistant',
-        content: '历史回答：已完成只读分析。',
-        createdAt: now
+        id: 'skill-knowledge',
+        skillCode: 'knowledge_research',
+        displayName: '知识检索',
+        description: '知识库检索与摘要 Skill',
+        allowedToolCodes: ['rag_search', 'generate_markdown_report', 'finalize_artifacts'],
+        riskLevel: 'Low',
+        approvalPolicy: 'FinalOutputApproval',
+        allowedDataSourceModes: [],
+        allowedKnowledgeScopes: ['SelectedKnowledgeBase'],
+        outputComponentTypes: ['markdown'],
+        isEnabled: true,
+        isBuiltIn: true,
+        version: 1,
+        createdAt: now,
+        updatedAt: now
       }
     ],
+    '/api/aigateway/agent/task/plan': agentTask,
+    '/api/aigateway/chat-message/list': {
+      items: [
+        {
+          messageId: 1,
+          sequence: 1,
+          sessionId: session.id,
+          role: 'User',
+          content: '查看 LINE-A 当前设备状态',
+          createdAt: now,
+          renderChunks: [
+            {
+              source: 'User',
+              type: 'Text',
+              content: '查看 LINE-A 当前设备状态'
+            }
+          ]
+        },
+        {
+          messageId: 2,
+          sequence: 2,
+          sessionId: session.id,
+          role: 'Assistant',
+          content: '历史回答：已完成只读分析。',
+          createdAt: now,
+          renderChunks: [
+            {
+              source: 'FinalAgentRunExecutor',
+              type: 'Text',
+              content: '历史回答：已完成只读分析。'
+            },
+            {
+              source: 'DataAnalysisExecutor',
+              type: 'Widget',
+              content: JSON.stringify({
+                id: 'history-widget-1',
+                type: 'StatsCard',
+                title: '历史异常数',
+                description: '来自持久化 renderChunks',
+                data: { label: '历史异常数', value: 3, unit: '条' }
+              })
+            },
+            {
+              source: 'FinalAgentRunExecutor',
+              type: 'ApprovalRequest',
+              content: JSON.stringify({
+                callId: 'history-approval-1',
+                name: 'history_approval',
+                runtimeName: 'history_approval',
+                targetType: 'McpServer',
+                targetName: 'readonly-maintenance',
+                toolName: 'history_approval',
+                args: {},
+                requiresOnsiteAttestation: false
+              })
+            }
+          ]
+        }
+      ],
+      beforeSequence: 1,
+      afterSequence: 2,
+      hasMore: false,
+      hasMoreBefore: false,
+      hasMoreAfter: false
+    },
+    '/api/aigateway/session/timeline': {
+      items: [
+        {
+          sequence: 3,
+          eventType: 'AgentTaskPlanCreated',
+          createdAt: now,
+          agentTaskId: agentTask.id,
+          agentTaskTitle: agentTask.title,
+          agentTaskGoal: agentTask.goal,
+          agentTaskStatus: agentTask.status,
+          approvalRequestId: agentApproval.id,
+          approvalType: 'Plan',
+          approvalStatus: 'Approved',
+          approvalTargetName: agentTask.title,
+          artifactWorkspaceId: artifactWorkspace.id,
+          workspaceCode: artifactWorkspace.workspaceCode,
+          workspaceStatus: artifactWorkspace.status
+        },
+        {
+          sequence: 4,
+          eventType: 'AgentTaskStepCompleted',
+          createdAt: now,
+          agentTaskId: agentTask.id,
+          agentTaskTitle: agentTask.title,
+          agentTaskStatus: agentTask.status,
+          agentStepId: 'step-1',
+          agentStepIndex: 1,
+          agentStepTitle: '读取上传文件',
+          agentStepStatus: 'Completed',
+          agentStepToolCode: 'read_uploaded_file',
+          artifactWorkspaceId: artifactWorkspace.id,
+          workspaceCode: artifactWorkspace.workspaceCode,
+          workspaceStatus: artifactWorkspace.status
+        },
+        {
+          sequence: 5,
+          eventType: 'ApprovalRequested',
+          createdAt: now,
+          agentTaskId: agentTask.id,
+          agentTaskTitle: agentTask.title,
+          agentTaskStatus: agentTask.status,
+          agentStepId: 'step-2',
+          agentStepIndex: 2,
+          agentStepTitle: '生成 PDF 草稿',
+          agentStepStatus: 'WaitingApproval',
+          approvalRequestId: agentApproval.id,
+          approvalType: 'ToolCall',
+          approvalStatus: agentApproval.status,
+          approvalTargetName: agentApproval.targetName,
+          artifactWorkspaceId: artifactWorkspace.id,
+          workspaceCode: artifactWorkspace.workspaceCode,
+          workspaceStatus: artifactWorkspace.status
+        },
+        {
+          sequence: 6,
+          eventType: 'ArtifactReady',
+          createdAt: now,
+          agentTaskId: agentTask.id,
+          agentTaskTitle: agentTask.title,
+          agentTaskStatus: agentTask.status,
+          artifactWorkspaceId: artifactWorkspace.id,
+          workspaceCode: artifactWorkspace.workspaceCode,
+          workspaceStatus: artifactWorkspace.status,
+          artifactId: 'artifact-chart',
+          artifactName: 'chart-data.json',
+          artifactType: 'Json',
+          artifactStatus: 'Draft',
+          artifactRelativePath: 'charts/chart-data.json',
+          artifactDownloadUrl: '/api/aigateway/artifact/artifact-chart/download'
+        }
+      ],
+      beforeSequence: 3,
+      afterSequence: 6,
+      hasMore: false,
+      hasMoreBefore: false,
+      hasMoreAfter: false
+    },
     '/api/aigateway/approval/pending': [],
-    '/api/aigateway/runtime-settings': {
-      routingHistoryCount: 2,
-      answerHistoryCount: 2,
-      ragRewriteHistoryCount: 2,
-      agentPlanningHistoryCount: 4,
-      summaryThresholdMessages: 12,
-      contextTokenLimit: 4096
-    },
-    '/api/aigateway/workspace-settings': {
-      rootPath: 'C:/ProgramData/AICopilot/artifacts',
-      folders: ['source', 'data', 'charts', 'draft', 'final', 'logs', 'audit'],
-      allowedArtifactTypes: ['Markdown', 'HTML', 'JSON', 'CSV', 'PDF', 'PPTX', 'XLSX'],
-      allowsUserDefinedPath: false
-    },
     '/api/aigateway/agent/task/by-session': [agentTask],
     '/api/aigateway/agent/task/task-1/approvals': [agentApproval],
     '/api/aigateway/agent/approval/pending': [agentApproval],
@@ -975,169 +708,17 @@ const api = createServer((request, response) => {
       isSimulation: true,
       sourceLabel: '模拟 Cloud 只读数据'
     },
-    '/api/aigateway/trial-operations/campaigns': [trialCampaign],
-    '/api/aigateway/trial-operations/campaigns/campaign-smoke': trialCampaign,
-    '/api/aigateway/trial-operations/campaigns/campaign-smoke/readiness': {
-      campaignId: trialCampaign.campaignId,
-      status: 'ReadyForP11Planning',
-      checks: [
-        {
-          code: 'production_read_closed',
-          label: 'production read closed',
-          status: 'Passed',
-          isBlocking: true,
-          message: 'Real CloudReadonly remains disabled.'
-        }
-      ],
-      blockers: [],
-      warnings: [],
-      metrics: {
-        scenarioRuns: 1,
-        finalArtifacts: 1,
-        unresolvedRisks: 0
-      },
-      generatedAt: now
-    },
-    '/api/aigateway/trial-operations/campaigns/campaign-smoke/evidence-package': {
-      campaignId: trialCampaign.campaignId,
-      readinessStatus: 'ReadyForP11Planning',
-      metrics: [
-        { code: 'scenario_runs', label: 'scenario runs', value: '1' },
-        { code: 'final_artifacts', label: 'final artifacts', value: '1' }
-      ],
-      evidenceItems: [],
-      unresolvedRisks: [],
-      reportArtifactId: null,
-      generatedAt: now
-    },
-    '/api/aigateway/cloud-readonly/readiness/pilot-readiness': pilotReadiness,
-    '/api/aigateway/cloud-readonly/readiness/pilot-readiness/config-package': pilotConfigPackage,
-    '/api/aigateway/cloud-readonly/readiness/pilot-readiness/gate': pilotReadiness,
-    '/api/aigateway/cloud-readonly/readiness/pilot-readiness/approval-rehearsal': pilotApprovalRehearsal,
-    '/api/aigateway/cloud-readonly/readiness/pilot-readiness/contract-rehearsal': pilotContractRehearsal,
-    '/api/aigateway/cloud-readonly/readiness/production-pilot': productionPilotStatus,
-    '/api/aigateway/cloud-readonly/readiness/production-pilot/window': productionPilotWindow,
-    '/api/aigateway/cloud-readonly/readiness/production-pilot/window/status': productionPilotWindow,
-    '/api/aigateway/cloud-readonly/readiness/production-pilot/gate': productionPilotStatus,
-    '/api/aigateway/cloud-readonly/readiness/production-pilot/run': productionPilotRun,
-    '/api/aigateway/cloud-readonly/readiness/production-controlled-pilot': productionControlledStatus,
-    '/api/aigateway/cloud-readonly/readiness/production-controlled-pilot/run': productionControlledRun,
-    '/api/aigateway/agent/cloud-production-controlled-pilot/plan': productionControlledPlan,
-    '/api/aigateway/cloud-readonly/readiness/production-operations': productionOperationsStatus,
-    '/api/aigateway/cloud-readonly/readiness/production-operations/ledger': productionOperationsLedger,
-    '/api/aigateway/cloud-readonly/readiness/production-operations/emergency-stop': productionOperationsEmergencyActive,
-    '/api/aigateway/cloud-readonly/readiness/production-operations/emergency-stop/clear': productionOperationsStatus,
-    '/api/aigateway/cloud-readonly/readiness/production-operations/incidents': productionOperationsIncident,
-    '/api/aigateway/cloud-readonly/readiness/production-operations/ga-readiness': productionOperationsGaReadiness,
-    '/api/aigateway/agent/run-queue/summary': {
-      queuedCount: 1,
-      leasedCount: 0,
-      succeededCount: 2,
-      failedCount: 0,
-      cancelledCount: 0,
-      deadLetterCount: 0,
-      staleLeasedCount: 0,
-      oldestQueuedAt: now,
-      averageWaitMs: 1250,
-      averageRunMs: 3200,
-      oldestQueuedWaitMs: 1250,
-      activeWorkerCount: 1,
-      workspaceMismatchCount: 0,
-      generatedAt: now
-    },
-    '/api/aigateway/agent/run-queue': {
-      items: [
-        {
-          id: 'queue-1',
-          taskId: agentTask.id,
-          triggerType: 'Manual',
-          status: 'Queued',
-          requestedBy: 'u1',
-          runAttemptId: null,
-          leaseId: null,
-          leaseOwner: null,
-          leaseExpiresAt: null,
-          availableAt: now,
-          startedAt: null,
-          completedAt: null,
-          failureCode: null,
-          safeMessage: null,
-          createdAt: now,
-          updatedAt: now
-        }
-      ],
-      pageIndex: 1,
-      pageSize: 8,
-      totalCount: 1,
-      totalPages: 1,
-      hasPrevious: false,
-      hasNext: false
-    },
-    '/api/aigateway/agent/worker/status': {
-      statusCode: 'healthy',
-      hasActiveWorkers: true,
-      workspaceConsistent: true,
-      httpApiWorkspaceRootHash: 'sha256:httpapi',
-      activeWorkerCount: 1,
-      queuedCount: 1,
-      leasedCount: 0,
-      staleLeasedCount: 0,
-      oldestQueuedAt: now,
-      generatedAt: now,
-      workers: [
-        {
-          id: 'worker-heartbeat-1',
-          workerId: 'worker-1',
-          workerName: 'AICopilot.DataWorker',
-          startedAt: now,
-          lastSeenAt: now,
-          isActive: true,
-          activeQueueItemId: null,
-          activeTaskId: null,
-          workspaceRootHash: 'sha256:httpapi',
-          version: 'simulation-rc',
-          workspaceMatchesHttpApi: true
-        }
-      ]
-    },
-    '/api/aigateway/language-model/chat-options': [
-      {
-        id: 'lm1',
-        provider: 'OpenAI',
-        protocolType: 'OpenAICompatible',
-        name: 'gpt-5.5',
-        contextWindowTokens: 128000,
-        maxOutputTokens: 4096
-      }
-    ],
     '/api/aigateway/language-model/list': [samples.model],
     '/api/aigateway/language-model': samples.model,
-    '/api/aigateway/conversation-template/list': [samples.template],
-    '/api/aigateway/conversation-template': samples.template,
-    '/api/aigateway/approval-policy/list': [samples.approvalPolicy],
-    '/api/aigateway/approval-policy': samples.approvalPolicy,
-    '/api/data-analysis/business-database/list': [samples.businessDatabase],
-    '/api/data-analysis/business-database': samples.businessDatabase,
-    '/api/data-analysis/semantic-source/status': [
-      {
-        target: 'Capacity',
-        databaseName: null,
-        sourceName: null,
-        effectiveSourceName: null,
-        isEnabled: true,
-        isReadOnly: true,
-        sourceExists: true,
-        providerMatched: true,
-        missingRequiredFields: [],
-        status: 'Ready'
-      }
-    ],
-    '/api/mcp/server/list': [samples.mcpServer],
-    '/api/mcp/server': samples.mcpServer,
+    '/api/aigateway/routing-model/list': [samples.routingModel],
+    '/api/aigateway/routing-model': samples.routingModel,
+    '/api/aigateway/conversation-template/list': samples.templates,
+    '/api/aigateway/conversation-template': samples.templates[0],
     '/api/rag/embedding-model/list': [samples.embeddingModel],
     '/api/rag/embedding-model': samples.embeddingModel,
     '/api/rag/knowledge-base/list': [samples.knowledgeBase],
     '/api/rag/knowledge-base': samples.knowledgeBase,
+    '/api/rag/document/retry': {},
     '/api/rag/document/list': [
       {
         id: 1,
