@@ -71,12 +71,15 @@ export const useChatStore = defineStore('chat', () => {
   const isLoadingOlderHistory = ref(false)
   const latestAgentTask = computed(() => agentTasks.value[0] ?? null)
   const selectedSkill = computed(() =>
-    availableSkills.value.find((skill) => skill.skillCode === selectedSkillCode.value) ??
-    getDefaultSkill() ??
-    null
+    selectedSkillCode.value
+      ? availableSkills.value.find((skill) => skill.skillCode === selectedSkillCode.value) ?? null
+      : null
   )
+  const isSkillAutoMode = computed(() => !selectedSkillCode.value)
   const selectedSkillSupportsKnowledge = computed(() =>
-    selectedSkill.value?.allowedKnowledgeScopes?.some((scope) => scope === 'SelectedKnowledgeBase') ?? false
+    isSkillAutoMode.value ||
+    selectedSkill.value?.allowedKnowledgeScopes?.some((scope) => scope === 'SelectedKnowledgeBase') ||
+    false
   )
   const selectedKnowledgeBase = computed(() =>
     availableKnowledgeBases.value.find((knowledgeBase) => knowledgeBase.id === selectedKnowledgeBaseId.value) ?? null
@@ -96,24 +99,11 @@ export const useChatStore = defineStore('chat', () => {
     errorStore.bindCurrentSession(sessionStore.currentSessionId)
   }
 
-  function getDefaultSkill() {
-    return availableSkills.value.find((skill) => skill.skillCode === 'general_report') ??
-      availableSkills.value[0] ??
-      null
-  }
-
-  function getDefaultSkillCode() {
-    return getDefaultSkill()?.skillCode ?? null
-  }
-
   async function loadSkills() {
     try {
       availableSkills.value = await chatService.getSkills()
-      if (
-        !selectedSkillCode.value ||
-        !availableSkills.value.some((skill) => skill.skillCode === selectedSkillCode.value)
-      ) {
-        selectedSkillCode.value = getDefaultSkillCode()
+      if (selectedSkillCode.value && !availableSkills.value.some((skill) => skill.skillCode === selectedSkillCode.value)) {
+        selectedSkillCode.value = null
       }
     } catch {
       availableSkills.value = []
@@ -123,13 +113,13 @@ export const useChatStore = defineStore('chat', () => {
 
   function selectSkill(skillCode: string | null) {
     if (!skillCode) {
-      selectedSkillCode.value = getDefaultSkillCode()
+      selectedSkillCode.value = null
       return
     }
 
     selectedSkillCode.value = availableSkills.value.some((skill) => skill.skillCode === skillCode)
       ? skillCode
-      : getDefaultSkillCode()
+      : null
   }
 
   async function loadKnowledgeBases() {
@@ -139,7 +129,7 @@ export const useChatStore = defineStore('chat', () => {
         !selectedKnowledgeBaseId.value ||
         !availableKnowledgeBases.value.some((knowledgeBase) => knowledgeBase.id === selectedKnowledgeBaseId.value)
       ) {
-        selectedKnowledgeBaseId.value = availableKnowledgeBases.value[0]?.id ?? null
+        selectedKnowledgeBaseId.value = null
       }
     } catch {
       availableKnowledgeBases.value = []
@@ -413,7 +403,7 @@ export const useChatStore = defineStore('chat', () => {
         uploadIds: uploadedFiles.value.map((item) => item.id),
         knowledgeBaseIds: selectedKnowledgeBaseIdsForPlan.value,
         plannerMode: 'Auto',
-        skillCode: selectedSkillCode.value
+        skillCode: selectedSkillCode.value || null
       })
       upsertAgentTask(task)
       await loadAgentApprovals(task.id)
@@ -573,6 +563,27 @@ export const useChatStore = defineStore('chat', () => {
     errorStore.clearSessionError(id)
     approvalStore.sync(id)
     await loadHistory(id, forceReload)
+  }
+
+  async function deleteSession(id: string) {
+    const wasCurrent = sessionStore.currentSessionId === id
+    await sessionStore.deleteSession(id)
+    delete messageStore.messagesMap[id]
+    delete historyCursors.value[id]
+    if (wasCurrent) {
+      agentTasks.value = []
+      agentApprovals.value = []
+      agentAuditSummary.value = []
+      timelineEvents.value = []
+      currentWorkspace.value = null
+      currentArtifactPreview.value = null
+      chartPreview.value = null
+      if (sessionStore.currentSessionId) {
+        await selectSession(sessionStore.currentSessionId, true)
+      } else {
+        await createNewSession()
+      }
+    }
   }
 
   async function confirmOnsitePresence(expiresInMinutes = 30) {
@@ -815,6 +826,7 @@ export const useChatStore = defineStore('chat', () => {
     availableSkills,
     selectedSkillCode,
     selectedSkill,
+    isSkillAutoMode,
     selectedSkillSupportsKnowledge,
     availableKnowledgeBases,
     selectedKnowledgeBaseId,
@@ -835,6 +847,7 @@ export const useChatStore = defineStore('chat', () => {
     loadOlderHistory,
     createNewSession,
     selectSession,
+    deleteSession,
     confirmOnsitePresence,
     clearOnsitePresence,
     uploadSessionFile,

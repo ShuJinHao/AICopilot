@@ -200,6 +200,7 @@ public sealed class IdentityAccessManagementTests
                 "AiGateway.GetSession",
                 "AiGateway.GetListSessions",
                 "AiGateway.RenameSession",
+                "AiGateway.DeleteSession",
                 "AiGateway.GetAgentTask",
                 "AiGateway.PlanAgentTask",
                 "AiGateway.ApproveAgentTaskPlan",

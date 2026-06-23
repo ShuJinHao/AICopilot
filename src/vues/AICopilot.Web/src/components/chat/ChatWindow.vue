@@ -36,6 +36,9 @@ type AgentPlanPreview = {
   approvalCheckpoints?: string[]
   forcedStepCodes?: string[]
   queryMode?: string | null
+  skillCode?: string | null
+  skillName?: string | null
+  taskType?: string | null
   dataSourceSummaries?: Array<{
     name?: string
     sourceMode?: string
@@ -111,6 +114,8 @@ const latestPlanRiskLine = computed(() => {
 })
 const latestPlanSource = computed(() =>
   sourceModeLabel(
+    latestPlan.value?.skillName ||
+    latestPlan.value?.skillCode ||
     latestPlanDataSource.value?.sourceLabel ||
     latestPlan.value?.plannerSafetySummary?.planSource ||
     latestPlanDataSource.value?.sourceMode ||
@@ -337,7 +342,7 @@ function sourceModeLabel(value?: string | null) {
   return value
 }
 
-async function sendMessage() {
+async function sendDirectMessage() {
   const content = inputValue.value.trim()
   if (!content || isInputDisabled.value) return
   inputValue.value = ''
@@ -347,13 +352,13 @@ async function sendMessage() {
 function handleComposerKeydown(event: KeyboardEvent) {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault()
-    void sendMessage()
+    void createAgentPlan()
   }
 }
 
 async function useSuggestion(text: string) {
   inputValue.value = text
-  await sendMessage()
+  await createAgentPlan()
 }
 
 function openFilePicker() {
@@ -382,6 +387,7 @@ async function createAgentPlan() {
   const goal = inputValue.value.trim() || agentGoal.value.trim()
   if (!goal || !canCreatePlan.value) return
   agentGoal.value = goal
+  inputValue.value = ''
   await store.planAgentTask(goal)
 }
 
@@ -909,14 +915,14 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
             <FileUp :size="17" />
             上传
           </button>
-          <button class="tool-button" type="button" :disabled="!canCreatePlan || store.isAgentBusy || !inputValue.trim()" @click="createAgentPlan">
-            <ListChecks :size="17" />
-            计划
+          <button class="tool-button" type="button" :disabled="isInputDisabled || !inputValue.trim()" @click="sendDirectMessage">
+            <Send :size="17" />
+            直接回答
           </button>
           <label
             v-if="store.availableSkills.length"
             class="skill-picker"
-            :title="store.selectedSkill?.description || '选择 Skill'"
+            :title="store.selectedSkill?.description || '意图识别将自动选择 Skill'"
           >
             <Sparkles :size="16" />
             <select
@@ -925,6 +931,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
               aria-label="选择 Skill"
               @change="handleSkillChange"
             >
+              <option value="">自动识别 Skill</option>
               <option
                 v-for="skill in store.availableSkills"
                 :key="skill.skillCode"
@@ -968,8 +975,9 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
             rows="1"
             @keydown="handleComposerKeydown"
           />
-          <button class="send-button" type="button" :disabled="isInputDisabled || !inputValue.trim()" aria-label="发送" @click="sendMessage">
-            <Send :size="19" />
+          <button class="send-button" type="button" :disabled="!canCreatePlan || store.isAgentBusy || !inputValue.trim()" aria-label="生成计划" @click="createAgentPlan">
+            <ListChecks :size="19" />
+            <span>生成计划</span>
           </button>
         </div>
       </footer>
@@ -1994,14 +2002,18 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
 }
 
 .send-button {
+  gap: 8px;
   justify-content: center;
-  width: 46px;
+  min-width: 112px;
   height: 46px;
   border: 0;
   border-radius: 999px;
+  padding: 0 18px;
   background: var(--ai-lime);
   color: var(--ai-graphite);
   cursor: pointer;
+  font-weight: 900;
+  white-space: nowrap;
 }
 
 .mobile-overlay {

@@ -101,6 +101,10 @@ export const chatService = {
     return await apiClient.post<Session>('/aigateway/session', {})
   },
 
+  async deleteSession(id: string) {
+    return await apiClient.delete('/aigateway/session', { id })
+  },
+
   async getHistory(sessionId: string, options: {
     count?: number
     beforeSequence?: number | null

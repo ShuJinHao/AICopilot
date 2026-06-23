@@ -4,6 +4,7 @@ using System.Text.Json;
 using AICopilot.AgentPlugin;
 using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.AiGatewayService.Approvals;
+using AICopilot.AiGatewayService.Models;
 using AICopilot.AiGatewayService.Queries.Sessions;
 using AICopilot.AiGatewayService.Runtime;
 using AICopilot.AiGatewayService.Skills;
@@ -349,6 +350,54 @@ public sealed class ToolRegistryGovernanceTests
             .Which.Should().BeEquivalentTo(new ApiProblemDescriptor(
                 AppProblemCodes.AgentPlanToolDenied,
                 "Tool 'generate_pdf' is outside skill 'restricted_skill'."));
+    }
+
+    [Fact]
+    public void IntentRoutingSkillAutoSelector_ShouldChooseHighestConfidenceSkillIntent()
+    {
+        var selected = IntentRoutingSkillAutoSelector.SelectBestSkillCode([
+            new IntentResult { Intent = "Skill.general_report", Confidence = 0.42 },
+            new IntentResult { Intent = "Analysis.Device.List", Confidence = 0.99 },
+            new IntentResult { Intent = "Skill.cloud_readonly", Confidence = 0.88 }
+        ]);
+
+        selected.Should().Be("cloud_readonly");
+    }
+
+    [Fact]
+    public async Task PlanAgentTask_ShouldUseAutoSelectedCloudReadonlySkill()
+    {
+        var session = new Session(UserId, ConversationTemplateId.New());
+        var taskRepository = new InMemoryRepository<AgentTask>();
+        var skillGuard = CreateSkillGuard(CreateSkill(
+            "cloud_readonly",
+            [
+                "query_cloud_data_readonly",
+                "generate_chart_data",
+                "generate_markdown_report",
+                "generate_html_report",
+                "finalize_artifacts"
+            ]));
+        var handler = CreatePlanHandler(
+            session,
+            CreateAgentRuntimeGuardWithCloudEnabled(),
+            taskRepository: taskRepository,
+            skillDefinitionGuard: skillGuard,
+            skillAutoSelector: new FixedSkillAutoSelector("cloud_readonly"));
+
+        var result = await handler.Handle(
+            new PlanAgentTaskCommand(session.Id.Value, "查看 DEV-001 最近设备日志", AgentTaskType.ReportGeneration, null),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var task = taskRepository.Items.Should().ContainSingle().Which;
+        task.TaskType.Should().Be(AgentTaskType.CloudDataReport);
+        task.Steps.Should().Contain(step => step.ToolCode == "query_cloud_data_readonly");
+        using var plan = JsonDocument.Parse(task.PlanJson);
+        plan.RootElement.GetProperty("skillCode").GetString().Should().Be("cloud_readonly");
+        plan.RootElement.GetProperty("taskType").GetString().Should().Be("CloudDataReport");
+        plan.RootElement.GetProperty("plannerSafetySummary").GetProperty("planSource").GetString()
+            .Should().Be("Skill.cloud_readonly");
     }
 
     [Fact]
@@ -2389,7 +2438,9 @@ public sealed class ToolRegistryGovernanceTests
         IReadOnlyCollection<LanguageModel>? models = null,
         ICloudReadonlyAgentPlanService? cloudReadonlyPlanService = null,
         IReadOnlyCollection<AiToolDefinition>? runtimeTools = null,
-        InMemoryRepository<AgentTask>? taskRepository = null)
+        InMemoryRepository<AgentTask>? taskRepository = null,
+        SkillDefinitionGuard? skillDefinitionGuard = null,
+        IAgentSkillAutoSelector? skillAutoSelector = null)
     {
         return new PlanAgentTaskCommandHandler(
             taskRepository ?? new InMemoryRepository<AgentTask>(),
@@ -2402,10 +2453,12 @@ public sealed class ToolRegistryGovernanceTests
             new ThrowingWorkspaceService(),
             new AgentAuditRecorder(new CapturingAuditLogWriter()),
             [],
-            CreatePlanToolGuard(guard, (runtimeTools ?? []).ToArray()),
+            new AgentPlanToolGuard(guard, new StubAgentPluginCatalog((runtimeTools ?? []).ToArray()), skillDefinitionGuard),
             dynamicPlanner ?? new ThrowingDynamicPlanner(),
             cloudReadonlyPlanService ?? new FixedCloudReadonlyAgentPlanService(),
-            new TestCurrentUser(UserId));
+            new TestCurrentUser(UserId),
+            skillDefinitionGuard: skillDefinitionGuard,
+            skillAutoSelector: skillAutoSelector);
     }
 
     private static LanguageModel CreatePlannerModel()
@@ -2646,6 +2699,17 @@ public sealed class ToolRegistryGovernanceTests
             CancellationToken cancellationToken = default)
         {
             return Task.FromResult(result);
+        }
+    }
+
+    private sealed class FixedSkillAutoSelector(string? skillCode) : IAgentSkillAutoSelector
+    {
+        public Task<string?> SelectSkillCodeAsync(
+            Guid sessionId,
+            string goal,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(skillCode);
         }
     }
 

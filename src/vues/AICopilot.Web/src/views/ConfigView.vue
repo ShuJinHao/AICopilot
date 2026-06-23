@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { Bot, ClipboardList, Network, Play, RefreshCw } from 'lucide-vue-next'
+import { Bot, ClipboardList, Network, RefreshCw, Sparkles } from 'lucide-vue-next'
 import AiButton from '@/components/ai/AiButton.vue'
 import AiCard from '@/components/ai/AiCard.vue'
 import AiCheckbox from '@/components/ai/AiCheckbox.vue'
@@ -20,7 +20,8 @@ import type {
   ConversationTemplateSummary,
   LanguageModelSummary,
   LanguageModelTestResult,
-  LanguageModelUsage
+  LanguageModelUsage,
+  SkillDefinition
 } from '@/types/app'
 
 type AgentSlotKey = 'intent' | 'planner' | 'executor'
@@ -110,6 +111,8 @@ const connectivityLabels: Record<string, string> = {
 
 const testingModelIds = ref<Set<string>>(new Set())
 const drawerTesting = ref(false)
+const skillDefinitions = ref<SkillDefinition[]>([])
+const isLoadingSkills = ref(false)
 
 const activeRoutingModel = computed(
   () => store.routingModels.find((item) => item.isActive) ?? null
@@ -135,6 +138,11 @@ const fixedSlots = computed(() =>
       ready: Boolean(template && model && model.isEnabled && model.hasApiKey)
     }
   })
+)
+const sortedSkills = computed(() =>
+  [...skillDefinitions.value].sort((a, b) =>
+    Number(b.isBuiltIn) - Number(a.isBuiltIn) ||
+    a.displayName.localeCompare(b.displayName, 'zh-CN'))
 )
 
 const usageChat = computed({
@@ -188,6 +196,26 @@ function connectivityTone(status?: string | null) {
   if (status === 'Succeeded') return 'success'
   if (status === 'Failed') return 'danger'
   return 'neutral'
+}
+
+function listText(values: string[], empty = '未限制') {
+  return values.length ? values.join(' / ') : empty
+}
+
+function skillTone(skill: SkillDefinition) {
+  if (!skill.isEnabled) return 'neutral'
+  if (skill.skillCode === 'cloud_readonly') return 'warning'
+  if (skill.riskLevel === 'Low') return 'success'
+  return 'teal'
+}
+
+async function refreshSkillDefinitions() {
+  isLoadingSkills.value = true
+  try {
+    skillDefinitions.value = await configService.getSkills()
+  } finally {
+    isLoadingSkills.value = false
+  }
 }
 
 function promptLength(template?: ConversationTemplateSummary | null) {
@@ -324,6 +352,7 @@ async function openTemplateDialog(slot: AgentSlotDefinition, template?: Conversa
 
 onMounted(() => {
   void store.refreshAgentSlots()
+  void refreshSkillDefinitions()
 })
 </script>
 
@@ -459,6 +488,68 @@ onMounted(() => {
           </section>
         </AiCard>
       </div>
+
+      <section class="skill-section" data-testid="skill-definition-section">
+        <header class="skill-section-head">
+          <div class="slot-title">
+            <Sparkles class="h-5 w-5" />
+            <div>
+              <h2>Skill 能力</h2>
+              <p>意图识别会自动选择 Skill，Skill 再收窄本次可用的数据源、知识库、工具和输出类型。</p>
+            </div>
+          </div>
+          <AiButton size="sm" :disabled="isLoadingSkills" @click="refreshSkillDefinitions()">
+            <RefreshCw class="h-4 w-4" :class="{ 'animate-spin': isLoadingSkills }" />
+            刷新
+          </AiButton>
+        </header>
+
+        <div class="skill-grid">
+          <AiCard
+            v-for="skill in sortedSkills"
+            :key="skill.id"
+            class="skill-card"
+            :data-testid="`skill-card-${skill.skillCode}`"
+          >
+            <header class="skill-card-head">
+              <div>
+                <h3>{{ skill.displayName }}</h3>
+                <code>{{ skill.skillCode }}</code>
+              </div>
+              <AiTag :tone="skillTone(skill)">
+                {{ skill.isEnabled ? skill.riskLevel : '停用' }}
+              </AiTag>
+            </header>
+            <p>{{ skill.description }}</p>
+            <div class="skill-meta-grid">
+              <div>
+                <span>数据源</span>
+                <strong>{{ listText(skill.allowedDataSourceModes) }}</strong>
+              </div>
+              <div>
+                <span>知识库</span>
+                <strong>{{ listText(skill.allowedKnowledgeScopes) }}</strong>
+              </div>
+              <div>
+                <span>审批</span>
+                <strong>{{ skill.approvalPolicy || '-' }}</strong>
+              </div>
+              <div>
+                <span>输出</span>
+                <strong>{{ listText(skill.outputComponentTypes, 'text') }}</strong>
+              </div>
+            </div>
+            <details class="skill-tool-fold">
+              <summary>允许工具 · {{ skill.allowedToolCodes.length }}</summary>
+              <div class="tool-chip-list">
+                <code v-for="toolCode in skill.allowedToolCodes" :key="`${skill.skillCode}:${toolCode}`">
+                  {{ toolCode }}
+                </code>
+              </div>
+            </details>
+          </AiCard>
+        </div>
+      </section>
     </AiDataPage>
 
     <AiDrawer v-model="store.dialogStates.languageModel" title="模型槽位" width="620px">
@@ -564,6 +655,107 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
+}
+
+.skill-section {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.skill-section-head,
+.skill-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.skill-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.skill-card {
+  display: grid;
+  gap: 12px;
+}
+
+.skill-card h3 {
+  margin: 0;
+  color: var(--ai-text);
+  font-size: 17px;
+  font-weight: 950;
+}
+
+.skill-card code {
+  color: var(--ai-accent);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.skill-card p {
+  margin: 0;
+  color: var(--ai-text-muted);
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1.6;
+}
+
+.skill-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.skill-meta-grid div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.skill-meta-grid span {
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.skill-meta-grid strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ai-text);
+  font-size: 13px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-tool-fold summary {
+  display: inline-flex;
+  min-height: 32px;
+  cursor: pointer;
+  align-items: center;
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.tool-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tool-chip-list code {
+  border: 1px solid rgba(63, 111, 115, 0.16);
+  border-radius: 999px;
+  padding: 5px 8px;
+  background: rgba(248, 250, 252, 0.84);
 }
 
 .slot-card {
@@ -769,7 +961,8 @@ onMounted(() => {
 }
 
 @media (max-width: 1240px) {
-  .slot-grid {
+  .slot-grid,
+  .skill-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -777,11 +970,13 @@ onMounted(() => {
 @media (max-width: 760px) {
   .model-grid,
   .form-grid,
-  .technical-grid {
+  .technical-grid,
+  .skill-meta-grid {
     grid-template-columns: 1fr;
   }
 
   .slot-head,
+  .skill-section-head,
   .section-title,
   .form-row {
     align-items: flex-start;

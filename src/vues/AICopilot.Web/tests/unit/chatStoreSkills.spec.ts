@@ -159,29 +159,46 @@ describe('chatStore skills', () => {
     })
   })
 
-  it('selects the built-in general skill after loading skills', async () => {
+  it('keeps skill selection in auto mode after loading skills', async () => {
     const store = useChatStore()
 
     await store.loadSkills()
 
     expect(store.availableSkills).toHaveLength(3)
-    expect(store.selectedSkillCode).toBe('general_report')
-    expect(store.selectedSkill?.displayName).toBe('通用报告')
+    expect(store.selectedSkillCode).toBeNull()
+    expect(store.selectedSkill).toBeNull()
+    expect(store.isSkillAutoMode).toBe(true)
   })
 
-  it('falls back to the built-in general skill when the selection is empty or unknown', async () => {
+  it('falls back to auto mode when the selection is empty or unknown', async () => {
     const store = useChatStore()
     chatServiceMock.getSkills.mockResolvedValue([...skills].reverse())
 
     await store.loadSkills()
     store.selectSkill('missing_skill')
 
-    expect(store.selectedSkillCode).toBe('general_report')
-    expect(store.selectedSkill?.displayName).toBe('通用报告')
+    expect(store.selectedSkillCode).toBeNull()
+    expect(store.selectedSkill).toBeNull()
 
     store.selectSkill(null)
 
-    expect(store.selectedSkillCode).toBe('general_report')
+    expect(store.selectedSkillCode).toBeNull()
+    expect(store.isSkillAutoMode).toBe(true)
+  })
+
+  it('omits skill code in auto mode so the backend can route it', async () => {
+    const sessionStore = useSessionStore()
+    sessionStore.persistCurrentSession('session-1')
+    const store = useChatStore()
+    await store.loadSkills()
+
+    await store.planAgentTask('查看 Cloud 设备日志')
+
+    expect(chatServiceMock.planAgentTask).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'session-1',
+      goal: '查看 Cloud 设备日志',
+      skillCode: null
+    }))
   })
 
   it('sends the selected skill code when planning an agent task', async () => {

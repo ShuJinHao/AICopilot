@@ -84,7 +84,8 @@ public sealed class PlanAgentTaskCommandHandler(
     ICurrentUser currentUser,
     IBusinessDatabaseReadService? businessDatabaseReadService = null,
     MessageTimelineProjectionWriter? timelineProjectionWriter = null,
-    SkillDefinitionGuard? skillDefinitionGuard = null)
+    SkillDefinitionGuard? skillDefinitionGuard = null,
+    IAgentSkillAutoSelector? skillAutoSelector = null)
     : ICommandHandler<PlanAgentTaskCommand, Result<AgentTaskDto>>
 {
     private const int PlannerValidationVersion = 1;
@@ -117,21 +118,26 @@ public sealed class PlanAgentTaskCommandHandler(
         }
 
         var preparation = preparationResult.Value!;
+        var effectiveSkillCode = await ResolveEffectiveSkillCodeAsync(request, cancellationToken);
         var skillResult = skillDefinitionGuard is null
             ? Result.Success<SkillDefinition?>(null)
-            : await skillDefinitionGuard.ResolveAsync(request.SkillCode, cancellationToken);
+            : await skillDefinitionGuard.ResolveAsync(effectiveSkillCode, cancellationToken);
         if (!skillResult.IsSuccess)
         {
             return Result.From(skillResult);
         }
 
         var selectedSkill = skillResult.Value;
+        var effectiveTaskType = ResolveEffectiveTaskType(request.TaskType, selectedSkill);
+        var effectiveQueryMode = request.QueryMode ??
+            (effectiveTaskType == AgentTaskType.CloudDataReport ? "CloudReadonly" : "TextToSql");
+        var effectivePlanSource = selectedSkill is null ? "FreeGoal" : $"Skill.{selectedSkill.SkillCode}";
 
         _ = await templateRepository.FirstOrDefaultAsync(
             new ConversationTemplateByCodeSpec("agent_planner"),
             cancellationToken);
         var runtimeSettings = await runtimeSettingsProvider.GetAsync(cancellationToken);
-        var riskLevel = AgentTaskPlanMetadataBuilder.DetermineRiskLevel(request.TaskType);
+        var riskLevel = AgentTaskPlanMetadataBuilder.DetermineRiskLevel(effectiveTaskType);
         var requestedArtifactTypes = AgentTaskPlanStepBuilder.NormalizeArtifactTypes(request.ArtifactTypes)?.ToArray();
         var skillDefaultArtifactTypes = AgentTaskPlanStepBuilder.NormalizeArtifactTypes(selectedSkill?.OutputComponentTypes)?.ToArray();
         var effectiveArtifactTypes = requestedArtifactTypes ?? skillDefaultArtifactTypes;
@@ -165,7 +171,7 @@ public sealed class PlanAgentTaskCommandHandler(
                 preparation.IsSimulationOnlyPlan,
                 preparation.BusinessDomains,
                 cancellationToken,
-                selectedSkill?.SkillCode ?? request.SkillCode);
+                selectedSkill?.SkillCode ?? effectiveSkillCode);
             if (!catalogResult.IsSuccess)
             {
                 return Result.From(catalogResult);
@@ -182,7 +188,7 @@ public sealed class PlanAgentTaskCommandHandler(
             var dynamicPlanResult = await dynamicPlanner.CreatePlanAsync(
                 new AgentDynamicPlannerRequest(
                     request.Goal,
-                    request.TaskType,
+                    effectiveTaskType,
                     preparation.UploadIds,
                     preparation.KnowledgeBaseIds,
                     plannerToolCatalog,
@@ -190,7 +196,7 @@ public sealed class PlanAgentTaskCommandHandler(
                     runtimeSettings,
                     AgentTaskPlanMetadataBuilder.BuildPlannerDataSourceSummaries(preparation.SelectedDataSources),
                     preparation.BusinessDomains,
-                    request.QueryMode ?? "TextToSql",
+                    effectiveQueryMode,
                     effectiveArtifactTypes,
                     request.RequiresDataApproval,
                     selectedSkill?.SkillCode,
@@ -209,7 +215,7 @@ public sealed class PlanAgentTaskCommandHandler(
                         preparation.UploadIds.Length > 0,
                         preparation.KnowledgeBaseIds.Length > 0,
                         preparation.HasBusinessDataSourcesForPlan,
-                        request.TaskType,
+                        effectiveTaskType,
                         riskLevel,
                         effectiveArtifactTypes);
                     goto ValidateAndPersistPlan;
@@ -228,7 +234,7 @@ public sealed class PlanAgentTaskCommandHandler(
                 preparation.UploadIds.Length > 0,
                 preparation.KnowledgeBaseIds.Length > 0,
                 preparation.HasBusinessDataSourcesForPlan,
-                request.TaskType,
+                effectiveTaskType,
                 riskLevel,
                 effectiveArtifactTypes);
         }
@@ -243,7 +249,7 @@ ValidateAndPersistPlan:
             preparation.UploadIds.Length > 0,
             preparation.KnowledgeBaseIds.Length > 0,
             preparation.HasBusinessDataSourcesForPlan,
-            request.TaskType,
+            effectiveTaskType,
             request.RequiresDataApproval,
             effectiveArtifactTypes);
         var forcedStepCodes = steps
@@ -259,7 +265,7 @@ ValidateAndPersistPlan:
                 preparation.IsSimulationOnlyPlan,
                 preparation.BusinessDomains,
                 cancellationToken,
-                selectedSkill?.SkillCode ?? request.SkillCode);
+                selectedSkill?.SkillCode ?? effectiveSkillCode);
             if (!staticCatalogResult.IsSuccess)
             {
                 return Result.From(staticCatalogResult);
@@ -270,12 +276,12 @@ ValidateAndPersistPlan:
 
         var guardedStepsResult = await planToolGuard.ValidateStepsAsync(
             steps,
-            request.TaskType,
+            effectiveTaskType,
             userId,
             preparation.IsSimulationOnlyPlan,
             preparation.BusinessDomains,
             cancellationToken,
-            selectedSkill?.SkillCode ?? request.SkillCode);
+            selectedSkill?.SkillCode ?? effectiveSkillCode);
         if (!guardedStepsResult.IsSuccess)
         {
             return Result.From(guardedStepsResult);
@@ -296,7 +302,7 @@ ValidateAndPersistPlan:
             .ToArray();
         var toolRiskSummary = AgentTaskPlanMetadataBuilder.BuildToolRiskSummary(plannerToolCatalog);
         AgentTaskPlanCloudReadonlyIntentDocument? cloudReadonlyIntent = null;
-        if (request.TaskType == AgentTaskType.CloudDataReport)
+        if (effectiveTaskType == AgentTaskType.CloudDataReport)
         {
             var cloudIntentResult = await cloudReadonlyPlanService.CreateIntentAsync(
                 request.SessionId,
@@ -314,7 +320,7 @@ ValidateAndPersistPlan:
             1,
             "agent_planner",
             request.Goal,
-            request.TaskType.ToString(),
+            effectiveTaskType.ToString(),
             riskLevel.ToString(),
             preparation.UploadIds,
             preparation.KnowledgeBaseIds,
@@ -338,11 +344,11 @@ ValidateAndPersistPlan:
             plannerToolCatalog?.AvailableToolCount ?? 0,
             preparation.DataSourceIds,
             preparation.BusinessDomains,
-            request.QueryMode ?? "TextToSql",
+            effectiveQueryMode,
             request.RequiresDataApproval,
             effectiveArtifactTypes,
             new AgentTaskPlanSafetySummaryDocument(
-                "FreeGoal",
+                effectivePlanSource,
                 effectivePlannerMode,
                 plannerModel is null ? null : $"{plannerModel.Provider}/{plannerModel.Name}",
                 plannerToolCatalog?.Version ?? PlannerToolCatalog.CurrentVersion,
@@ -368,7 +374,7 @@ ValidateAndPersistPlan:
             userId,
             AgentTaskPlanMetadataBuilder.BuildTitle(request.Goal),
             request.Goal,
-            request.TaskType,
+            effectiveTaskType,
             riskLevel,
             plannerModel?.Id,
             JsonSerializer.Serialize(plan, JsonOptions),
@@ -414,6 +420,31 @@ ValidateAndPersistPlan:
     private bool IsAdmin()
     {
         return string.Equals(currentUser.Role, "Admin", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<string?> ResolveEffectiveSkillCodeAsync(
+        PlanAgentTaskCommand request,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(request.SkillCode))
+        {
+            return request.SkillCode.Trim();
+        }
+
+        return skillAutoSelector is null
+            ? null
+            : await skillAutoSelector.SelectSkillCodeAsync(request.SessionId, request.Goal, cancellationToken);
+    }
+
+    private static AgentTaskType ResolveEffectiveTaskType(AgentTaskType requestedTaskType, SkillDefinition? skill)
+    {
+        return skill?.SkillCode switch
+        {
+            "cloud_readonly" => AgentTaskType.CloudDataReport,
+            "data_analysis" => AgentTaskType.DataAnalysis,
+            "knowledge_research" => AgentTaskType.RagAnswer,
+            _ => requestedTaskType
+        };
     }
 
     private async Task<Result<LanguageModel?>> ResolvePlannerModelAsync(

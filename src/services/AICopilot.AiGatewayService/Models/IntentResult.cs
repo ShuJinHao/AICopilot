@@ -13,6 +13,7 @@ public record IntentResult
     /// <summary>
     /// 意图标识符
     /// 规范：
+    /// - Skill 类：Skill.{SkillCode}
     /// - 工具类：Action.{PluginName}
     /// - 知识类：Knowledge.{KnowledgeBaseName}
     /// - 自由数据分析：Analysis.{BusinessDatabaseName}
