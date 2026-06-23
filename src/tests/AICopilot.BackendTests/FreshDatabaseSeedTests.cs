@@ -8,6 +8,7 @@ using AICopilot.Core.AiGateway.Aggregates.RuntimeSettings;
 using AICopilot.Core.AiGateway.Aggregates.Skills;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.EntityFrameworkCore;
+using AICopilot.EntityFrameworkCore.Security;
 using AICopilot.SharedKernel.Ai;
 using Microsoft.EntityFrameworkCore;
 
@@ -23,6 +24,11 @@ public sealed class FreshDatabaseSeedTests
     private const string DataAnalysisInitialMigrationId = "20260427000300_InitialDataAnalysisSchema";
     private const string McpServerInitialMigrationId = "20260427000100_InitialMcpServerSchema";
     private const string IdentityStoreBaselineMigrationId = "20260429021832_IdentityStoreMigrationBaseline";
+    private const string PrivateMiniMaxProvider = "MiniMax Private";
+    private const string PrivateMiniMaxModelName = "MiniMax-M3-AWQ-INT4";
+    private const string PrivateMiniMaxBaseUrl = "http://10.98.200.20:40034/v1";
+    private const string PrivateMiniMaxPlaceholderApiKey = "dummy-key";
+    private const string PrivateMiniMaxRoutingConfigurationName = "MiniMax private routing model";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -61,13 +67,18 @@ public sealed class FreshDatabaseSeedTests
             .Should().BeTrue();
 
         var seedModel = await aiGatewayDbContext.LanguageModels.SingleAsync();
-        seedModel.Provider.Should().Be("Example");
-        seedModel.ProtocolType.Should().Be("OpenAICompatible");
-        seedModel.Name.Should().Be("Disabled example model");
-        seedModel.BaseUrl.Should().Be("https://example.invalid/v1");
-        seedModel.ApiKey.Should().BeNull();
-        seedModel.IsEnabled.Should().BeFalse();
-        seedModel.Usage.Should().Be(LanguageModelUsage.Chat | LanguageModelUsage.Routing);
+        seedModel.Provider.Should().Be(PrivateMiniMaxProvider);
+        seedModel.ProtocolType.Should().Be(LanguageModelProtocolTypes.OpenAICompatible);
+        seedModel.Name.Should().Be(PrivateMiniMaxModelName);
+        seedModel.BaseUrl.Should().Be(PrivateMiniMaxBaseUrl);
+        seedModel.ApiKey.Should().StartWith(SecretStringEncryptor.CipherPrefix);
+        SecretStringEncryptor.Decrypt(seedModel.ApiKey)
+            .Should().Be(PrivateMiniMaxPlaceholderApiKey);
+        seedModel.IsEnabled.Should().BeTrue();
+        seedModel.Usage.Should().Be(LanguageModelUsage.Chat | LanguageModelUsage.Routing | LanguageModelUsage.Planner);
+        seedModel.Parameters.MaxTokens.Should().Be(32768);
+        seedModel.Parameters.MaxOutputTokens.Should().Be(4096);
+        seedModel.Parameters.Temperature.Should().BeApproximately(0.2f, 0.0001f);
 
         var templates = await aiGatewayDbContext.ConversationTemplates.ToListAsync();
         templates.Should().HaveCount(BuiltInConversationTemplates.All.Count);
@@ -75,6 +86,10 @@ public sealed class FreshDatabaseSeedTests
         templates.Select(template => template.Code)
             .Should()
             .BeEquivalentTo(BuiltInConversationTemplates.All.Select(template => template.Code));
+        templates
+            .Where(template => template.Code is "IntentRoutingAgent" or "agent_planner" or "agent_executor")
+            .Should()
+            .OnlyContain(template => template.ModelId == seedModel.Id);
         templates.Select(template => template.SystemPrompt)
             .Should()
             .NotContain(prompt => prompt.Contains("朝小夕", StringComparison.OrdinalIgnoreCase) ||
@@ -154,8 +169,9 @@ public sealed class FreshDatabaseSeedTests
                 !toolCode.Contains("write", StringComparison.OrdinalIgnoreCase),
                 "Cloud write tools must never enter a built-in skill allowlist");
 
-        (await aiGatewayDbContext.RoutingModelConfigurations.AnyAsync(configuration => configuration.IsActive))
-            .Should().BeFalse();
+        var activeRoutingConfiguration = await aiGatewayDbContext.RoutingModelConfigurations.SingleAsync(configuration => configuration.IsActive);
+        activeRoutingConfiguration.Name.Should().Be(PrivateMiniMaxRoutingConfigurationName);
+        activeRoutingConfiguration.ModelId.Should().Be(seedModel.Id);
 
         await using var ragDbContext = await CreateRagDbContextAsync(fixture);
         (await ragDbContext.EmbeddingModels.CountAsync()).Should().Be(0);
