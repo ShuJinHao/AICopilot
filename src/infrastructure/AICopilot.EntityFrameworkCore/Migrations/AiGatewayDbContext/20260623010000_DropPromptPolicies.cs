@@ -1,4 +1,5 @@
 using System;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -6,6 +7,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace AICopilot.EntityFrameworkCore.Migrations.AiGatewayDbContext;
 
 [Migration("20260623010000_DropPromptPolicies")]
+[DbContext(typeof(global::AICopilot.EntityFrameworkCore.AiGatewayDbContext))]
 public partial class DropPromptPolicies : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)
