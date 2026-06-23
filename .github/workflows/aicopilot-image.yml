@@ -2,6 +2,11 @@ name: aicopilot-image
 
 on:
   workflow_dispatch:
+    inputs:
+      services:
+        description: "Optional image services to build (comma/space separated); empty means all. Supported: httpapi,migration,dataworker,ragworker,web"
+        required: false
+        type: string
   push:
     branches: [main]
     paths:
@@ -62,11 +67,39 @@ jobs:
           web=false
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            httpapi=true
-            migration=true
-            dataworker=true
-            ragworker=true
-            web=true
+            services_input="${{ inputs.services }}"
+            if [ -z "$services_input" ]; then
+              httpapi=true
+              migration=true
+              dataworker=true
+              ragworker=true
+              web=true
+            else
+              for service in $(printf '%s' "$services_input" | tr ',' ' ')
+              do
+                case "$service" in
+                  httpapi|aicopilot-httpapi)
+                    httpapi=true
+                    ;;
+                  migration|aicopilot-migration)
+                    migration=true
+                    ;;
+                  dataworker|aicopilot-dataworker)
+                    dataworker=true
+                    ;;
+                  ragworker|aicopilot-ragworker)
+                    ragworker=true
+                    ;;
+                  web|webui|aicopilot-webui)
+                    web=true
+                    ;;
+                  *)
+                    echo "Unsupported image service: $service" >&2
+                    exit 64
+                    ;;
+                esac
+              done
+            fi
           else
             before="${{ github.event.before }}"
             if [ -z "$before" ] || printf '%s' "$before" | grep -Eq '^0+$'; then
