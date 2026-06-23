@@ -5,10 +5,23 @@ import './assets/main.css'
 
 import App from './App.vue'
 import router from './router'
+import { recoverFromStaleChunkLoad } from './router/chunkReloadGuard'
 import { i18n } from './i18n'
 import { setUnauthorizedHandler } from './services/apiClient'
 import { useAuthStore } from './stores/authStore'
 import { useChatStore } from './stores/chatStore'
+
+window.addEventListener('error', (event) => {
+  if (recoverFromStaleChunkLoad(event.error ?? event.message)) {
+    event.preventDefault()
+  }
+})
+
+window.addEventListener('unhandledrejection', (event) => {
+  if (recoverFromStaleChunkLoad(event.reason)) {
+    event.preventDefault()
+  }
+})
 
 const app = createApp(App)
 const pinia = createPinia()

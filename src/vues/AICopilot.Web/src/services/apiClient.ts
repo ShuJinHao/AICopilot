@@ -7,6 +7,10 @@ let unauthorizedHandler: ((problem: ApiProblemDetails | null) => void | Promise<
 type QueryValue = string | number | boolean | null | undefined
 type QueryParams = Record<string, QueryValue>
 
+export interface ApiRequestOptions {
+  timeoutMs?: number
+}
+
 export interface ApiProblemDetails {
   title?: string
   detail?: string
@@ -28,7 +32,7 @@ export class ApiError extends Error {
 }
 
 export function setUnauthorizedHandler(
-  handler: ((problem: ApiProblemDetails | null) => void | Promise<void>) | null
+  handler: ((problem: ApiProblemDetails | null) => void | Promise<void>) | null,
 ) {
   unauthorizedHandler = handler
 }
@@ -67,7 +71,7 @@ export function getProblemDetails(details: unknown): ApiProblemDetails | null {
     code: typeof candidate.code === 'string' ? candidate.code : undefined,
     missingPermissions: Array.isArray(candidate.missingPermissions)
       ? candidate.missingPermissions.filter((item): item is string => typeof item === 'string')
-      : undefined
+      : undefined,
   }
 }
 
@@ -96,7 +100,7 @@ function resolveEndpoint(endpoint: string) {
     if (!isTrustedEndpointOrigin(endpointUrl)) {
       throw new ApiError('API endpoint origin is not trusted.', 400, {
         code: 'untrusted_api_endpoint',
-        detail: 'API endpoints must use the current origin or the configured API origin.'
+        detail: 'API endpoints must use the current origin or the configured API origin.',
       })
     }
 
@@ -134,7 +138,31 @@ function buildUrl(endpoint: string, query?: QueryParams) {
   return url.toString()
 }
 
-async function request<T>(endpoint: string, init: RequestInit = {}, query?: QueryParams): Promise<T> {
+function createTimeoutSignal(timeoutMs: number | undefined, existingSignal?: AbortSignal | null) {
+  if (
+    existingSignal ||
+    timeoutMs === undefined ||
+    timeoutMs <= 0 ||
+    typeof AbortController === 'undefined'
+  ) {
+    return null
+  }
+
+  const controller = new AbortController()
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), timeoutMs)
+
+  return {
+    signal: controller.signal,
+    clear: () => globalThis.clearTimeout(timeoutId),
+  }
+}
+
+async function request<T>(
+  endpoint: string,
+  init: RequestInit = {},
+  query?: QueryParams,
+  options: ApiRequestOptions = {},
+): Promise<T> {
   const headers = new Headers(init.headers ?? {})
   headers.set('Accept', 'application/json')
   const isFormDataBody = typeof FormData !== 'undefined' && init.body instanceof FormData
@@ -149,94 +177,134 @@ async function request<T>(endpoint: string, init: RequestInit = {}, query?: Quer
     headers.set('Content-Type', 'application/json')
   }
 
-  const response = await fetch(buildUrl(endpoint, query), {
-    ...init,
-    headers
-  })
+  const timeout = createTimeoutSignal(options.timeoutMs, init.signal)
 
-  if (!response.ok) {
-    const details = await parseError(response)
-    if (response.status === 401 && hasAuthToken) {
-      await notifyUnauthorized(getProblemDetails(details))
+  try {
+    const response = await fetch(buildUrl(endpoint, query), {
+      ...init,
+      headers,
+      signal: init.signal ?? timeout?.signal,
+    })
+
+    if (!response.ok) {
+      const details = await parseError(response)
+      if (response.status === 401 && hasAuthToken) {
+        await notifyUnauthorized(getProblemDetails(details))
+      }
+
+      throw new ApiError(`API Error: ${response.status}`, response.status, details)
     }
 
-    throw new ApiError(`API Error: ${response.status}`, response.status, details)
-  }
+    if (response.status === 204) {
+      return undefined as T
+    }
 
-  if (response.status === 204) {
-    return undefined as T
-  }
+    const text = await response.text()
+    if (!text) {
+      return undefined as T
+    }
 
-  const text = await response.text()
-  if (!text) {
-    return undefined as T
+    return JSON.parse(text) as T
+  } finally {
+    timeout?.clear()
   }
-
-  return JSON.parse(text) as T
 }
 
-async function download(endpoint: string, query?: QueryParams): Promise<Blob> {
+async function download(
+  endpoint: string,
+  query?: QueryParams,
+  options: ApiRequestOptions = {},
+): Promise<Blob> {
   const headers = new Headers()
   const token = getAccessToken()
   if (token) {
     headers.set('Authorization', `Bearer ${token}`)
   }
 
-  const response = await fetch(buildUrl(endpoint, query), {
-    method: 'GET',
-    headers
-  })
+  const timeout = createTimeoutSignal(options.timeoutMs)
 
-  if (!response.ok) {
-    const details = await parseError(response)
-    if (response.status === 401 && token) {
-      await notifyUnauthorized(getProblemDetails(details))
+  try {
+    const response = await fetch(buildUrl(endpoint, query), {
+      method: 'GET',
+      headers,
+      signal: timeout?.signal,
+    })
+
+    if (!response.ok) {
+      const details = await parseError(response)
+      if (response.status === 401 && token) {
+        await notifyUnauthorized(getProblemDetails(details))
+      }
+
+      throw new ApiError(`API Error: ${response.status}`, response.status, details)
     }
 
-    throw new ApiError(`API Error: ${response.status}`, response.status, details)
+    return await response.blob()
+  } finally {
+    timeout?.clear()
   }
-
-  return await response.blob()
 }
 
 export const apiClient = {
   request,
-  get<T>(endpoint: string, query?: QueryParams) {
-    return request<T>(endpoint, { method: 'GET' }, query)
+  get<T>(endpoint: string, query?: QueryParams, options?: ApiRequestOptions) {
+    return request<T>(endpoint, { method: 'GET' }, query, options)
   },
-  post<T>(endpoint: string, body: unknown) {
-    return request<T>(endpoint, {
-      method: 'POST',
-      body: JSON.stringify(body)
-    })
+  post<T>(endpoint: string, body: unknown, options?: ApiRequestOptions) {
+    return request<T>(
+      endpoint,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      },
+      undefined,
+      options,
+    )
   },
-  postWithCredentials<T>(endpoint: string, body: unknown) {
-    return request<T>(endpoint, {
-      method: 'POST',
-      body: JSON.stringify(body),
-      credentials: 'include'
-    })
+  postWithCredentials<T>(endpoint: string, body: unknown, options?: ApiRequestOptions) {
+    return request<T>(
+      endpoint,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+        credentials: 'include',
+      },
+      undefined,
+      options,
+    )
   },
-  postForm<T>(endpoint: string, body: FormData) {
-    return request<T>(endpoint, {
-      method: 'POST',
-      body
-    })
+  postForm<T>(endpoint: string, body: FormData, options?: ApiRequestOptions) {
+    return request<T>(
+      endpoint,
+      {
+        method: 'POST',
+        body,
+      },
+      undefined,
+      options,
+    )
   },
-  put<T>(endpoint: string, body: unknown) {
-    return request<T>(endpoint, {
-      method: 'PUT',
-      body: JSON.stringify(body)
-    })
+  put<T>(endpoint: string, body: unknown, options?: ApiRequestOptions) {
+    return request<T>(
+      endpoint,
+      {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      },
+      undefined,
+      options,
+    )
   },
-  delete<T>(endpoint: string, body?: unknown) {
+  delete<T>(endpoint: string, body?: unknown, options?: ApiRequestOptions) {
     return request<T>(
       endpoint,
       {
         method: 'DELETE',
-        body: body === undefined ? undefined : JSON.stringify(body)
-      }
+        body: body === undefined ? undefined : JSON.stringify(body),
+      },
+      undefined,
+      options,
     )
   },
-  download
+  download,
 }

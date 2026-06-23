@@ -213,6 +213,7 @@ public sealed class IdentityAccessManagementTests
                 "AiGateway.EditArtifact",
                 "AiGateway.SubmitFinalReview",
                 "AiGateway.Chat",
+                "AiGateway.ToolRegistry.Read",
                 "Rag.GetKnowledgeBase",
                 "Rag.GetListKnowledgeBases",
                 "Rag.GetListDocuments",

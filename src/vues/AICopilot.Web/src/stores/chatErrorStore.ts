@@ -79,6 +79,10 @@ export function toFriendlyMessage(error: unknown) {
       return '当前账号没有访问该功能的权限。'
     }
 
+    if (error.status === 400) {
+      return '请求没有通过后端校验，请调整目标或检查模型配置后重试。'
+    }
+
     if (error.status === 429) {
       return '请求过于频繁，请稍后再试。'
     }

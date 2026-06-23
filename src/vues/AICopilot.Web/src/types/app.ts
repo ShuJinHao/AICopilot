@@ -197,6 +197,56 @@ export interface SkillDefinition {
   updatedAt: string
 }
 
+export interface PlannerToolPropertySummary {
+  name: string
+  type: string
+  enum: string[]
+  required: boolean
+}
+
+export interface PlannerToolSchemaSummary {
+  type: string
+  required: string[]
+  properties: PlannerToolPropertySummary[]
+  itemsType?: string | null
+  isTruncated: boolean
+}
+
+export interface AgentPlannerToolSummary {
+  toolCode: string
+  displayName: string
+  description: string
+  providerType: string
+  targetType: string
+  targetName: string
+  inputSchemaJson: string
+  requiresApproval: boolean
+  riskLevel: string
+  timeoutSeconds: number
+  auditLevel: string
+  runtimeAvailable: boolean
+  inputSchema?: PlannerToolSchemaSummary | null
+  outputSchema?: PlannerToolSchemaSummary | null
+  category: string
+  businessDomains?: string[] | null
+  dataBoundary: string
+  isVisibleToPlanner: boolean
+  isExecutableByAgent: boolean
+  schemaVersion: number
+  catalogVersion: number
+  approvalPolicy: string
+  providerKind: string
+  isMock: boolean
+}
+
+export interface ToolRegistryCatalog {
+  version: number
+  availableToolCount: number
+  mockMcpOnly: boolean
+  riskSummary: Record<string, number>
+  tools: AgentPlannerToolSummary[]
+}
+
 export interface StreamCallbacks {
   onChunkReceived: (chunk: import('@/types/protocols').ChatChunk) => void
   onComplete: () => void

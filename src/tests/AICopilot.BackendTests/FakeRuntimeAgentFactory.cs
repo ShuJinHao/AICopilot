@@ -45,6 +45,11 @@ internal sealed class FakeRuntimeAgentFactory : IAgentRuntimeFactory
         structuredScripts.Enqueue(new FakeStructuredAgentResponse(text, null));
     }
 
+    public void EnqueueText(string? text)
+    {
+        scripts.Enqueue([new RuntimeAgentUpdate([new AiTextContent(text ?? string.Empty)])]);
+    }
+
     public void EnqueueStructuredResultJson(string resultJson, string? text = null)
     {
         structuredScripts.Enqueue(new FakeStructuredAgentResponse(text, resultJson));

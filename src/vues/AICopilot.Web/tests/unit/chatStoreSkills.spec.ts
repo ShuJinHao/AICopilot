@@ -5,6 +5,7 @@ import { useSessionStore } from '@/stores/sessionStore'
 
 const chatServiceMock = vi.hoisted(() => ({
   getSkills: vi.fn(),
+  getToolCatalog: vi.fn(),
   getKnowledgeBases: vi.fn(),
   planAgentTask: vi.fn(),
   getAgentTaskApprovals: vi.fn(),
@@ -106,6 +107,67 @@ const knowledgeBases = [
   }
 ]
 
+const toolCatalog = {
+  version: 1,
+  availableToolCount: 2,
+  mockMcpOnly: true,
+  riskSummary: { Low: 2 },
+  tools: [
+    {
+      toolCode: 'rag_search',
+      displayName: '知识库检索',
+      description: '检索已授权知识库',
+      providerType: 'BuiltIn',
+      targetType: 'AgentRuntime',
+      targetName: 'AgentTaskRuntime',
+      inputSchemaJson: '{}',
+      requiresApproval: false,
+      riskLevel: 'Low',
+      timeoutSeconds: 120,
+      auditLevel: 'Standard',
+      runtimeAvailable: true,
+      inputSchema: null,
+      outputSchema: null,
+      category: 'Knowledge',
+      businessDomains: [],
+      dataBoundary: 'NoData',
+      isVisibleToPlanner: true,
+      isExecutableByAgent: true,
+      schemaVersion: 1,
+      catalogVersion: 1,
+      approvalPolicy: 'None',
+      providerKind: 'BuiltIn',
+      isMock: false
+    },
+    {
+      toolCode: 'generate_markdown_report',
+      displayName: '报告生成',
+      description: '生成 Markdown 报告',
+      providerType: 'BuiltIn',
+      targetType: 'AgentRuntime',
+      targetName: 'AgentTaskRuntime',
+      inputSchemaJson: '{}',
+      requiresApproval: false,
+      riskLevel: 'Low',
+      timeoutSeconds: 120,
+      auditLevel: 'Standard',
+      runtimeAvailable: true,
+      inputSchema: null,
+      outputSchema: null,
+      category: 'Artifact',
+      businessDomains: [],
+      dataBoundary: 'NoData',
+      isVisibleToPlanner: true,
+      isExecutableByAgent: true,
+      schemaVersion: 1,
+      catalogVersion: 1,
+      approvalPolicy: 'None',
+      providerKind: 'BuiltIn',
+      isMock: false
+    }
+  ]
+}
+
 const plannedTask = {
   id: 'task-1',
   taskCode: 'AGT-1',
@@ -145,6 +207,7 @@ describe('chatStore skills', () => {
     vi.stubGlobal('sessionStorage', createSessionStorageMock())
     vi.clearAllMocks()
     chatServiceMock.getSkills.mockResolvedValue(skills)
+    chatServiceMock.getToolCatalog.mockResolvedValue(toolCatalog)
     chatServiceMock.getKnowledgeBases.mockResolvedValue(knowledgeBases)
     chatServiceMock.planAgentTask.mockResolvedValue(plannedTask)
     chatServiceMock.getAgentTaskApprovals.mockResolvedValue([])
@@ -241,6 +304,24 @@ describe('chatStore skills', () => {
     expect(chatServiceMock.planAgentTask).toHaveBeenLastCalledWith(expect.objectContaining({
       skillCode: 'data_analysis',
       knowledgeBaseIds: []
+    }))
+  })
+
+  it('sends selected plugin tools as a planner preference without leaving auto skill mode', async () => {
+    const sessionStore = useSessionStore()
+    sessionStore.persistCurrentSession('session-1')
+    const store = useChatStore()
+
+    await store.loadSkills()
+    await store.loadPluginTools()
+    store.togglePluginTool('rag_search')
+
+    await store.planAgentTask('查资料并生成报告')
+
+    expect(chatServiceMock.getToolCatalog).toHaveBeenCalledWith(null)
+    expect(chatServiceMock.planAgentTask).toHaveBeenCalledWith(expect.objectContaining({
+      skillCode: null,
+      preferredToolCodes: ['rag_search']
     }))
   })
 })

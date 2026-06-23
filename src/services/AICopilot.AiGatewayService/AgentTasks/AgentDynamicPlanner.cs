@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using AICopilot.AiGatewayService.Agents;
@@ -94,18 +95,13 @@ public sealed class DefaultAgentDynamicPlanner(ChatAgentFactory chatAgentFactory
                 });
 
             var payload = JsonSerializer.Serialize(AgentDynamicPlannerInputBuilder.Build(request), JsonOptions);
-            var response = await scopedAgent.Agent.RunStructuredAsync<JsonElement>(
-                [new AiChatMessage(AiChatRole.User, payload)],
-                null,
-                JsonOptions,
-                new RuntimeAgentRunOptions(new AiChatOptions
-                {
-                    Temperature = 0,
-                    MaxOutputTokens = Math.Clamp(request.PlannerModel.Parameters.MaxOutputTokens, 512, 4096),
-                    Tools = []
-                }),
+            var responseText = await RunPlannerAsPlainTextAsync(
+                scopedAgent,
+                payload,
+                request.PlannerModel,
                 cancellationToken);
 
+            var response = new StructuredAgentResponse<JsonElement>(responseText, default);
             using var document = AgentDynamicPlannerResponseParser.ParsePlannerResponse(response);
             var parseResult = AgentDynamicPlannerResponseParser.ParsePlanDocument(document.RootElement);
             return parseResult.IsSuccess
@@ -124,5 +120,39 @@ public sealed class DefaultAgentDynamicPlanner(ChatAgentFactory chatAgentFactory
                 AppProblemCodes.AgentPlanInvalid,
                 $"Planner returned invalid JSON: {ex.Message}"));
         }
+        catch (Exception ex)
+        {
+            return Result.Failure(new ApiProblemDescriptor(
+                AppProblemCodes.PlannerModelUnavailable,
+                $"Planner model call failed before a valid plan was produced: {ex.Message}"));
+        }
+    }
+
+    private static async Task<string> RunPlannerAsPlainTextAsync(
+        ScopedRuntimeAgent scopedAgent,
+        string payload,
+        LanguageModel plannerModel,
+        CancellationToken cancellationToken)
+    {
+        var session = await scopedAgent.Agent.CreateSessionAsync(cancellationToken);
+        var builder = new StringBuilder();
+        await foreach (var update in scopedAgent.Agent.RunStreamingAsync(
+                [new AiChatMessage(AiChatRole.User, payload)],
+                session,
+                new RuntimeAgentRunOptions(new AiChatOptions
+                {
+                    Temperature = 0,
+                    MaxOutputTokens = Math.Clamp(plannerModel.Parameters.MaxOutputTokens, 512, 4096),
+                    Tools = []
+                }),
+                cancellationToken))
+        {
+            foreach (var content in update.Contents.OfType<AiTextContent>())
+            {
+                builder.Append(content.Text);
+            }
+        }
+
+        return builder.ToString();
     }
 }

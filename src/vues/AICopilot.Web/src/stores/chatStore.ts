@@ -10,7 +10,12 @@ import { useChatErrorStore, toFriendlyMessage } from './chatErrorStore'
 import { useMessageStore } from './messageStore'
 import { useSessionStore } from './sessionStore'
 import { useStreamStore } from './streamStore'
-import type { KnowledgeBaseSummary, SessionTimelineEvent, SkillDefinition } from '@/types/app'
+import type {
+  AgentPlannerToolSummary,
+  KnowledgeBaseSummary,
+  SessionTimelineEvent,
+  SkillDefinition
+} from '@/types/app'
 import type {
   AgentApprovalRequest,
   AgentArtifactPreview,
@@ -59,6 +64,9 @@ export const useChatStore = defineStore('chat', () => {
   const timelineEvents = ref<SessionTimelineEvent[]>([])
   const availableSkills = ref<SkillDefinition[]>([])
   const selectedSkillCode = ref<string | null>(null)
+  const availablePluginTools = ref<AgentPlannerToolSummary[]>([])
+  const selectedToolCodes = ref<string[]>([])
+  const isLoadingPluginTools = ref(false)
   const availableKnowledgeBases = ref<KnowledgeBaseSummary[]>([])
   const selectedKnowledgeBaseId = ref<string | null>(null)
   const uploadedFiles = ref<UploadRecord[]>([])
@@ -74,6 +82,9 @@ export const useChatStore = defineStore('chat', () => {
     selectedSkillCode.value
       ? availableSkills.value.find((skill) => skill.skillCode === selectedSkillCode.value) ?? null
       : null
+  )
+  const selectedPluginTools = computed(() =>
+    availablePluginTools.value.filter((tool) => selectedToolCodes.value.includes(tool.toolCode))
   )
   const isSkillAutoMode = computed(() => !selectedSkillCode.value)
   const selectedSkillSupportsKnowledge = computed(() =>
@@ -114,12 +125,43 @@ export const useChatStore = defineStore('chat', () => {
   function selectSkill(skillCode: string | null) {
     if (!skillCode) {
       selectedSkillCode.value = null
+      void loadPluginTools()
       return
     }
 
     selectedSkillCode.value = availableSkills.value.some((skill) => skill.skillCode === skillCode)
       ? skillCode
       : null
+    void loadPluginTools()
+  }
+
+  async function loadPluginTools() {
+    isLoadingPluginTools.value = true
+    try {
+      const catalog = await chatService.getToolCatalog(selectedSkillCode.value)
+      availablePluginTools.value = catalog.tools
+      const availableCodes = new Set(catalog.tools.map((tool) => tool.toolCode))
+      selectedToolCodes.value = selectedToolCodes.value.filter((code) => availableCodes.has(code))
+    } catch {
+      availablePluginTools.value = []
+      selectedToolCodes.value = []
+    } finally {
+      isLoadingPluginTools.value = false
+    }
+  }
+
+  function togglePluginTool(toolCode: string) {
+    if (!availablePluginTools.value.some((tool) => tool.toolCode === toolCode)) {
+      return
+    }
+
+    selectedToolCodes.value = selectedToolCodes.value.includes(toolCode)
+      ? selectedToolCodes.value.filter((code) => code !== toolCode)
+      : [...selectedToolCodes.value, toolCode]
+  }
+
+  function clearPluginTools() {
+    selectedToolCodes.value = []
   }
 
   async function loadKnowledgeBases() {
@@ -403,7 +445,8 @@ export const useChatStore = defineStore('chat', () => {
         uploadIds: uploadedFiles.value.map((item) => item.id),
         knowledgeBaseIds: selectedKnowledgeBaseIdsForPlan.value,
         plannerMode: 'Auto',
-        skillCode: selectedSkillCode.value || null
+        skillCode: selectedSkillCode.value || null,
+        preferredToolCodes: selectedToolCodes.value
       })
       upsertAgentTask(task)
       await loadAgentApprovals(task.id)
@@ -526,6 +569,7 @@ export const useChatStore = defineStore('chat', () => {
   async function initialize() {
     errorStore.clearSessionError()
     await Promise.all([sessionStore.loadSessions(), loadSkills(), loadKnowledgeBases()])
+    await loadPluginTools()
 
     if (sessionStore.sessions.length === 0) {
       await createNewSession()
@@ -795,6 +839,9 @@ export const useChatStore = defineStore('chat', () => {
     timelineEvents.value = []
     availableSkills.value = []
     selectedSkillCode.value = null
+    availablePluginTools.value = []
+    selectedToolCodes.value = []
+    isLoadingPluginTools.value = false
     availableKnowledgeBases.value = []
     selectedKnowledgeBaseId.value = null
     uploadedFiles.value = []
@@ -827,6 +874,10 @@ export const useChatStore = defineStore('chat', () => {
     selectedSkillCode,
     selectedSkill,
     isSkillAutoMode,
+    availablePluginTools,
+    selectedToolCodes,
+    selectedPluginTools,
+    isLoadingPluginTools,
     selectedSkillSupportsKnowledge,
     availableKnowledgeBases,
     selectedKnowledgeBaseId,
@@ -841,6 +892,9 @@ export const useChatStore = defineStore('chat', () => {
     initialize,
     loadSkills,
     selectSkill,
+    loadPluginTools,
+    togglePluginTool,
+    clearPluginTools,
     loadKnowledgeBases,
     selectKnowledgeBase,
     loadTimeline,

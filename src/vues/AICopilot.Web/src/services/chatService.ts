@@ -6,7 +6,8 @@ import type {
   KnowledgeBaseSummary,
   SessionTimelinePage,
   SkillDefinition,
-  StreamCallbacks
+  StreamCallbacks,
+  ToolRegistryCatalog
 } from '@/types/app'
 import type {
   AgentApprovalRequest,
@@ -139,6 +140,13 @@ export const chatService = {
     })
   },
 
+  async getToolCatalog(skillCode?: string | null) {
+    return await apiClient.get<ToolRegistryCatalog>('/aigateway/tools/catalog', {
+      simulationOnly: false,
+      skillCode: skillCode || undefined
+    })
+  },
+
   async getKnowledgeBases() {
     return await apiClient.get<KnowledgeBaseSummary[]>('/rag/knowledge-base/list')
   },
@@ -219,6 +227,7 @@ export const chatService = {
     artifactTypes?: string[]
     plannerMode?: 'Auto' | 'DynamicOnly' | 'StaticOnly'
     skillCode?: string | null
+    preferredToolCodes?: string[]
   }) {
     return await apiClient.post<AgentTask>('/aigateway/agent/task/plan', payload)
   },

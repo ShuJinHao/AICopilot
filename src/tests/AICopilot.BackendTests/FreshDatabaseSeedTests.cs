@@ -228,6 +228,7 @@ public sealed class FreshDatabaseSeedTests
             "AiGateway.EditArtifact",
             "AiGateway.SubmitFinalReview",
             "AiGateway.Chat",
+            "AiGateway.ToolRegistry.Read",
             "Rag.GetKnowledgeBase",
             "Rag.GetListKnowledgeBases",
             "Rag.GetListDocuments",

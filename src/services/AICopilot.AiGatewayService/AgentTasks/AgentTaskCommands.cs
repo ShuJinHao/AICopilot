@@ -47,7 +47,8 @@ public sealed record PlanAgentTaskCommand(
     IReadOnlyCollection<string>? ArtifactTypes = null,
     string? PlannerMode = null,
     bool ForceStaticPlanner = false,
-    string? SkillCode = null) : ICommand<Result<AgentTaskDto>>;
+    string? SkillCode = null,
+    IReadOnlyCollection<string>? PreferredToolCodes = null) : ICommand<Result<AgentTaskDto>>;
 
 public enum AgentPlannerMode
 {
@@ -178,6 +179,13 @@ public sealed class PlanAgentTaskCommandHandler(
             }
 
             plannerToolCatalog = catalogResult.Value!;
+            var preferredCatalogResult = ApplyPreferredToolCodes(plannerToolCatalog, request.PreferredToolCodes);
+            if (!preferredCatalogResult.IsSuccess)
+            {
+                return Result.From(preferredCatalogResult);
+            }
+
+            plannerToolCatalog = preferredCatalogResult.Value!;
             if (plannerToolCatalog.AvailableToolCount == 0)
             {
                 return Result.Failure(new ApiProblemDescriptor(
@@ -205,12 +213,10 @@ public sealed class PlanAgentTaskCommandHandler(
                 cancellationToken);
             if (!dynamicPlanResult.IsSuccess)
             {
-                if (requestedPlannerMode == AgentPlannerMode.Auto &&
-                    dynamicPlanResult.Errors?.OfType<ApiProblemDescriptor>().Any(error =>
-                        string.Equals(error.Code, AppProblemCodes.PlannerModelUnavailable, StringComparison.Ordinal)) == true)
+                if (requestedPlannerMode == AgentPlannerMode.Auto && CanFallbackToStaticPlan(dynamicPlanResult))
                 {
                     effectivePlannerMode = "StaticFallback";
-                    plannerFallbackReason = "Planner model failed before producing a valid plan; static fallback was used.";
+                    plannerFallbackReason = BuildPlannerFallbackReason(dynamicPlanResult);
                     steps = AgentTaskPlanStepBuilder.BuildPlanSteps(
                         preparation.UploadIds.Length > 0,
                         preparation.KnowledgeBaseIds.Length > 0,
@@ -272,6 +278,13 @@ ValidateAndPersistPlan:
             }
 
             plannerToolCatalog = staticCatalogResult.Value!;
+            var preferredCatalogResult = ApplyPreferredToolCodes(plannerToolCatalog, request.PreferredToolCodes);
+            if (!preferredCatalogResult.IsSuccess)
+            {
+                return Result.From(preferredCatalogResult);
+            }
+
+            plannerToolCatalog = preferredCatalogResult.Value!;
         }
 
         var guardedStepsResult = await planToolGuard.ValidateStepsAsync(
@@ -473,5 +486,59 @@ ValidateAndPersistPlan:
         return model.IsEnabled &&
                model.Usage.HasFlag(LanguageModelUsage.Planner) &&
                !string.IsNullOrWhiteSpace(model.ApiKey);
+    }
+
+    private static bool CanFallbackToStaticPlan(Result<IReadOnlyCollection<AgentStepPlanDto>> dynamicPlanResult)
+    {
+        return dynamicPlanResult.Errors?.OfType<ApiProblemDescriptor>().Any(error =>
+            string.Equals(error.Code, AppProblemCodes.PlannerModelUnavailable, StringComparison.Ordinal) ||
+            string.Equals(error.Code, AppProblemCodes.AgentPlanInvalid, StringComparison.Ordinal)) == true;
+    }
+
+    private static string BuildPlannerFallbackReason(Result<IReadOnlyCollection<AgentStepPlanDto>> dynamicPlanResult)
+    {
+        var detail = dynamicPlanResult.Errors?
+            .OfType<ApiProblemDescriptor>()
+            .Select(error => error.Detail)
+            .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+
+        return string.IsNullOrWhiteSpace(detail)
+            ? "Planner model failed before producing a valid plan; static fallback was used."
+            : $"Planner model did not produce a valid executable plan; static fallback was used. Detail: {detail}";
+    }
+
+    private static Result<PlannerToolCatalog> ApplyPreferredToolCodes(
+        PlannerToolCatalog catalog,
+        IReadOnlyCollection<string>? preferredToolCodes)
+    {
+        var preferred = preferredToolCodes?
+            .Where(code => !string.IsNullOrWhiteSpace(code))
+            .Select(code => code.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (preferred is null || preferred.Length == 0)
+        {
+            return Result.Success(catalog);
+        }
+
+        var tools = catalog.Tools
+            .Where(tool => preferred.Contains(tool.ToolCode, StringComparer.OrdinalIgnoreCase))
+            .ToArray();
+        var missing = preferred
+            .Where(code => tools.All(tool => !string.Equals(tool.ToolCode, code, StringComparison.OrdinalIgnoreCase)))
+            .ToArray();
+
+        if (missing.Length > 0)
+        {
+            return Result.Failure(new ApiProblemDescriptor(
+                AppProblemCodes.AgentPlanToolDenied,
+                $"Preferred tool is unavailable or outside the current skill boundary: {string.Join(", ", missing)}."));
+        }
+
+        return Result.Success(new PlannerToolCatalog(
+            catalog.Version,
+            tools.Length,
+            tools));
     }
 }

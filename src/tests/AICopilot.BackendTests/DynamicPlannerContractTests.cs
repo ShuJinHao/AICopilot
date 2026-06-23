@@ -22,7 +22,7 @@ public sealed class DynamicPlannerContractTests
     public async Task DefaultDynamicPlanner_ShouldRejectInvalidOutputs(string responseText, string expectedDetail)
     {
         var runtimeFactory = new FakeRuntimeAgentFactory();
-        runtimeFactory.EnqueueStructuredText(responseText);
+        runtimeFactory.EnqueueText(responseText);
         var (planner, request) = CreatePlanner(runtimeFactory);
 
         var result = await planner.CreatePlanAsync(request, CancellationToken.None);
@@ -53,7 +53,7 @@ public sealed class DynamicPlannerContractTests
             }
         });
         var runtimeFactory = new FakeRuntimeAgentFactory();
-        runtimeFactory.EnqueueStructuredText(responseText);
+        runtimeFactory.EnqueueText(responseText);
         var (planner, request) = CreatePlanner(runtimeFactory);
 
         var result = await planner.CreatePlanAsync(request, CancellationToken.None);
@@ -69,7 +69,7 @@ public sealed class DynamicPlannerContractTests
     public async Task DefaultDynamicPlanner_ShouldRedactSecretsPathsAndSqlFromPlannerInput()
     {
         var runtimeFactory = new FakeRuntimeAgentFactory();
-        runtimeFactory.EnqueueStructuredText(
+        runtimeFactory.EnqueueText(
             """{"steps":[{"title":"x","description":"x","stepType":"Analysis","toolCode":"generate_markdown_report"}]}""");
         var (planner, request) = CreatePlanner(
             runtimeFactory,

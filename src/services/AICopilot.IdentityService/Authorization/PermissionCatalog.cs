@@ -133,6 +133,7 @@ public sealed class PermissionCatalog : IPermissionCatalog
         "AiGateway.EditArtifact",
         "AiGateway.SubmitFinalReview",
         "AiGateway.Chat",
+        "AiGateway.ToolRegistry.Read",
         "Rag.GetKnowledgeBase",
         "Rag.GetListKnowledgeBases",
         "Rag.GetListDocuments",

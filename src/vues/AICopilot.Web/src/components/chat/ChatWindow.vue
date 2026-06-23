@@ -8,13 +8,17 @@ import {
   FileUp,
   FolderOpen,
   ListChecks,
+  MessageCircle,
   PanelLeftOpen,
   Play,
+  Plus,
   RefreshCw,
   Send,
   ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
   TriangleAlert,
+  Wrench,
   X
 } from 'lucide-vue-next'
 import AiTag from '@/components/ai/AiTag.vue'
@@ -23,6 +27,7 @@ import { useChatStore } from '@/stores/chatStore'
 import { useUiLayoutStore } from '@/stores/uiLayoutStore'
 import MessageItem from './MessageItem.vue'
 import SessionList from './SessionList.vue'
+import type { AgentPlannerToolSummary } from '@/types/app'
 import type { AgentApprovalRequest } from '@/types/protocols'
 
 type AgentPlanPreview = {
@@ -56,12 +61,15 @@ type AgentPlanPreview = {
 }
 
 type TagTone = 'success' | 'warning' | 'dark' | 'lime' | 'danger' | 'neutral' | 'teal' | 'blue'
+type ComposerMode = 'plan' | 'chat'
 
 const store = useChatStore()
 const uiLayoutStore = useUiLayoutStore()
 
 const inputValue = ref('')
 const agentGoal = ref('')
+const composerMode = ref<ComposerMode>('plan')
+const composerOptionsOpen = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 const scrollContainer = ref<HTMLElement | null>(null)
 const isMobile = ref(typeof window !== 'undefined' ? window.innerWidth < 1024 : false)
@@ -127,6 +135,44 @@ const latestPlanIsCloudReadonly = computed(() =>
   latestPlanDataSource.value?.sourceMode?.includes('CloudReadonly') ||
   false
 )
+const planTypeValue = computed({
+  get: () => store.selectedSkillCode || 'auto',
+  set: (value: string) => {
+    store.selectSkill(value === 'auto' ? null : value)
+  }
+})
+const selectedPlanTypeLabel = computed(() =>
+  store.selectedSkill?.displayName || '自动识别'
+)
+const selectedPluginLine = computed(() => {
+  if (store.selectedPluginTools.length > 0) {
+    return `${store.selectedPluginTools.length} 个插件能力`
+  }
+
+  if (store.availablePluginTools.length > 0) {
+    return '可选插件能力'
+  }
+
+  return '无可选插件'
+})
+const composerPrimaryLabel = computed(() => composerMode.value === 'plan' ? '生成计划' : '发送')
+const composerPrimaryIcon = computed(() => composerMode.value === 'plan' ? ListChecks : Send)
+const composerPlaceholder = computed(() => {
+  if (store.isWaitingForApproval) {
+    return '请先处理待审批请求'
+  }
+
+  return composerMode.value === 'plan'
+    ? '输入目标，先生成可确认的计划'
+    : '输入一个简单问题，直接回答'
+})
+const isComposerSubmitDisabled = computed(() =>
+  !inputValue.value.trim() ||
+  (composerMode.value === 'plan'
+    ? !canCreatePlan.value || store.isAgentBusy
+    : isInputDisabled.value)
+)
+const visiblePluginTools = computed(() => store.availablePluginTools.slice(0, 12))
 const hasInlineAgentRun = computed(() =>
   Boolean(
     latestTask.value ||
@@ -352,7 +398,7 @@ async function sendDirectMessage() {
 function handleComposerKeydown(event: KeyboardEvent) {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault()
-    void createAgentPlan()
+    void submitComposer()
   }
 }
 
@@ -367,7 +413,7 @@ function openFilePicker() {
 
 function handleSkillChange(event: Event) {
   const target = event.target as HTMLSelectElement
-  store.selectSkill(target.value || null)
+  planTypeValue.value = target.value || 'auto'
 }
 
 function handleKnowledgeBaseChange(event: Event) {
@@ -389,6 +435,36 @@ async function createAgentPlan() {
   agentGoal.value = goal
   inputValue.value = ''
   await store.planAgentTask(goal)
+}
+
+async function submitComposer() {
+  if (composerMode.value === 'chat') {
+    await sendDirectMessage()
+    return
+  }
+
+  await createAgentPlan()
+}
+
+function setComposerMode(mode: ComposerMode) {
+  composerMode.value = mode
+}
+
+function togglePluginTool(toolCode: string) {
+  store.togglePluginTool(toolCode)
+}
+
+function pluginToolLabel(tool: AgentPlannerToolSummary) {
+  return tool.displayName || tool.toolCode
+}
+
+function pluginToolMeta(tool: AgentPlannerToolSummary) {
+  const parts = [
+    tool.category || tool.providerKind || '能力',
+    tool.requiresApproval ? '需确认' : '只读'
+  ]
+
+  return parts.filter(Boolean).join(' · ')
 }
 
 async function runLatestTask() {
@@ -598,7 +674,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
           <div class="run-actions">
             <button type="button" :disabled="!canRunTask || store.isAgentBusy" @click="runLatestTask">
               <Play :size="17" />
-              运行计划
+              确认执行
             </button>
             <button type="button" :disabled="!canContinueTask || store.isAgentBusy" @click="continueLatestTask">
               <RefreshCw :size="17" />
@@ -626,14 +702,26 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
               <strong>{{ latestTask.title }}</strong>
               <span>{{ latestTask.goal }}</span>
             </div>
+            <div v-if="taskSteps.length" class="plan-steps-preview" data-testid="plan-steps-preview">
+              <div v-for="step in taskSteps.slice(0, 6)" :key="step.id" class="plan-step-preview">
+                <i>{{ step.stepIndex }}</i>
+                <div>
+                  <strong>{{ step.title }}</strong>
+                  <span>{{ step.description || '按计划执行该步骤' }}</span>
+                </div>
+                <AiTag :tone="step.requiresApproval ? 'warning' : 'neutral'">
+                  {{ step.requiresApproval ? '需确认' : '只读' }}
+                </AiTag>
+              </div>
+            </div>
             <div v-if="blockedStep" class="blocked-step">
               <span>当前阻塞</span>
               <strong>{{ blockedStep.title }}</strong>
             </div>
             <details class="plan-detail-fold" data-testid="plan-technical-details">
               <summary>
-                <ListChecks :size="15" />
-                <span>计划详情</span>
+                <SlidersHorizontal :size="15" />
+                <span>技术详情</span>
                 <AiTag tone="neutral">详情</AiTag>
               </summary>
               <div class="plan-grid">
@@ -909,75 +997,156 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
       </div>
 
       <footer class="command-composer">
-        <div class="composer-tools">
-          <input ref="fileInput" class="hidden-file" type="file" @change="handleFileChange">
-          <button class="tool-button" type="button" :disabled="store.isAgentBusy" @click="openFilePicker">
-            <FileUp :size="17" />
-            上传
-          </button>
-          <button class="tool-button" type="button" :disabled="isInputDisabled || !inputValue.trim()" @click="sendDirectMessage">
-            <Send :size="17" />
-            直接回答
-          </button>
-          <label
-            v-if="store.availableSkills.length"
-            class="skill-picker"
-            :title="store.selectedSkill?.description || '意图识别将自动选择 Skill'"
-          >
-            <Sparkles :size="16" />
-            <select
-              :value="store.selectedSkillCode || ''"
-              :disabled="store.isAgentBusy"
-              aria-label="选择 Skill"
-              @change="handleSkillChange"
+        <div class="composer-mode-bar">
+          <div class="mode-switch" role="group" aria-label="输入模式">
+            <button
+              type="button"
+              :class="{ active: composerMode === 'plan' }"
+              @click="setComposerMode('plan')"
             >
-              <option value="">自动识别 Skill</option>
-              <option
-                v-for="skill in store.availableSkills"
-                :key="skill.skillCode"
-                :value="skill.skillCode"
-              >
-                {{ skill.displayName }}
-              </option>
-            </select>
-          </label>
-          <label
-            v-if="store.selectedSkillSupportsKnowledge && store.availableKnowledgeBases.length"
-            class="skill-picker"
-            :title="store.selectedKnowledgeBase?.description || '选择知识库'"
-          >
-            <FolderOpen :size="16" />
-            <select
-              :value="store.selectedKnowledgeBaseId || ''"
-              :disabled="store.isAgentBusy"
-              aria-label="选择知识库"
-              @change="handleKnowledgeBaseChange"
+              <ListChecks :size="16" />
+              计划模式
+            </button>
+            <button
+              type="button"
+              :class="{ active: composerMode === 'chat' }"
+              @click="setComposerMode('chat')"
             >
-              <option value="">不使用知识库</option>
-              <option
-                v-for="knowledgeBase in store.availableKnowledgeBases"
-                :key="knowledgeBase.id"
-                :value="knowledgeBase.id"
-              >
-                {{ knowledgeBase.name }}
-              </option>
-            </select>
-          </label>
-          <span v-if="store.uploadedFiles.length" class="uploaded-hint">
-            {{ store.uploadedFiles.length }} 个输入文件
+              <MessageCircle :size="16" />
+              聊天模式
+            </button>
+          </div>
+          <button
+            class="composer-add-button"
+            type="button"
+            :aria-expanded="composerOptionsOpen"
+            @click="composerOptionsOpen = !composerOptionsOpen"
+          >
+            <Plus :size="17" />
+            添加
+          </button>
+          <span class="composer-context-line">
+            {{ selectedPlanTypeLabel }} · {{ selectedPluginLine }}
           </span>
         </div>
+
+        <div v-if="composerOptionsOpen" class="composer-options-panel">
+          <input ref="fileInput" class="hidden-file" type="file" @change="handleFileChange">
+          <section class="composer-option-group">
+            <div class="option-title">
+              <Sparkles :size="17" />
+              <span>计划类型</span>
+            </div>
+            <label class="select-field">
+              <select
+                :value="planTypeValue"
+                :disabled="store.isAgentBusy"
+                aria-label="选择计划类型"
+                @change="handleSkillChange"
+              >
+                <option value="auto">自动识别</option>
+                <option
+                  v-for="skill in store.availableSkills"
+                  :key="skill.skillCode"
+                  :value="skill.skillCode"
+                >
+                  {{ skill.displayName }}
+                </option>
+              </select>
+            </label>
+            <p>{{ store.selectedSkill?.description || '系统会根据目标自动选择最合适的只读分析路径。' }}</p>
+          </section>
+
+          <section class="composer-option-group">
+            <div class="option-title">
+              <FileUp :size="17" />
+              <span>输入材料</span>
+            </div>
+            <button class="tool-button" type="button" :disabled="store.isAgentBusy" @click="openFilePicker">
+              上传文件
+            </button>
+            <span class="uploaded-hint">
+              {{ store.uploadedFiles.length ? `${store.uploadedFiles.length} 个输入文件` : '未上传文件' }}
+            </span>
+          </section>
+
+          <section
+            v-if="store.selectedSkillSupportsKnowledge && store.availableKnowledgeBases.length"
+            class="composer-option-group"
+          >
+            <div class="option-title">
+              <FolderOpen :size="17" />
+              <span>知识库</span>
+            </div>
+            <label class="select-field">
+              <select
+                :value="store.selectedKnowledgeBaseId || ''"
+                :disabled="store.isAgentBusy"
+                aria-label="选择知识库"
+                @change="handleKnowledgeBaseChange"
+              >
+                <option value="">不使用知识库</option>
+                <option
+                  v-for="knowledgeBase in store.availableKnowledgeBases"
+                  :key="knowledgeBase.id"
+                  :value="knowledgeBase.id"
+                >
+                  {{ knowledgeBase.name }}
+                </option>
+              </select>
+            </label>
+            <p>{{ store.selectedKnowledgeBase?.description || '管理员建库后，普通用户可选择资料参与分析。' }}</p>
+          </section>
+
+          <section class="composer-option-group plugin-option-group">
+            <div class="option-title">
+              <Wrench :size="17" />
+              <span>插件能力</span>
+              <small v-if="store.isLoadingPluginTools">加载中</small>
+            </div>
+            <div v-if="visiblePluginTools.length" class="plugin-tool-grid">
+              <button
+                v-for="tool in visiblePluginTools"
+                :key="tool.toolCode"
+                type="button"
+                class="plugin-tool-chip"
+                :class="{ active: store.selectedToolCodes.includes(tool.toolCode) }"
+                :title="tool.description"
+                @click="togglePluginTool(tool.toolCode)"
+              >
+                <strong>{{ pluginToolLabel(tool) }}</strong>
+                <span>{{ pluginToolMeta(tool) }}</span>
+              </button>
+            </div>
+            <div v-else class="panel-empty compact">当前计划类型暂无可选插件能力</div>
+            <button
+              v-if="store.selectedToolCodes.length"
+              class="quiet-link"
+              type="button"
+              @click="store.clearPluginTools()"
+            >
+              清空插件选择
+            </button>
+          </section>
+        </div>
+
         <div class="composer-input-row">
           <textarea
             v-model="inputValue"
             :disabled="isInputDisabled"
-            :placeholder="store.isWaitingForApproval ? '请先处理待审批请求' : '输入问题或目标'"
+            :placeholder="composerPlaceholder"
             rows="1"
             @keydown="handleComposerKeydown"
           />
-          <button class="send-button" type="button" :disabled="!canCreatePlan || store.isAgentBusy || !inputValue.trim()" aria-label="生成计划" @click="createAgentPlan">
-            <ListChecks :size="19" />
-            <span>生成计划</span>
+          <button
+            class="send-button"
+            type="button"
+            :disabled="isComposerSubmitDisabled"
+            :aria-label="composerPrimaryLabel"
+            @click="submitComposer"
+          >
+            <component :is="composerPrimaryIcon" :size="19" />
+            <span>{{ composerPrimaryLabel }}</span>
           </button>
         </div>
       </footer>
@@ -1541,7 +1710,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
 .plan-grid div,
 .artifact-summary div,
 .plan-summary,
-.blocked-step {
+.blocked-step,
+.plan-step-preview {
   display: grid;
   gap: 4px;
   min-width: 0;
@@ -1554,7 +1724,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
 .plan-grid span,
 .artifact-summary span,
 .plan-summary span,
-.blocked-step span {
+.blocked-step span,
+.plan-step-preview span {
   color: var(--ai-text-muted);
   font-size: 12px;
   font-weight: 800;
@@ -1563,12 +1734,42 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
 .plan-grid strong,
 .artifact-summary strong,
 .plan-summary strong,
-.blocked-step strong {
+.blocked-step strong,
+.plan-step-preview strong {
   min-width: 0;
   overflow: hidden;
   color: var(--ai-text);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.plan-steps-preview {
+  display: grid;
+  gap: 8px;
+}
+
+.plan-step-preview {
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.plan-step-preview i {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--ai-graphite);
+  color: white;
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.plan-step-preview div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
 }
 
 .plan-detail-fold,
@@ -1919,9 +2120,56 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
   box-shadow: 0 -12px 30px rgba(70, 64, 55, 0.06);
 }
 
-.composer-tools {
+.composer-mode-bar {
+  display: flex;
+  align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.mode-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--ai-border);
+  border-radius: 999px;
+  padding: 4px;
+  background: var(--ai-surface);
+  box-shadow: var(--ai-shadow-xs);
+}
+
+.mode-switch button,
+.composer-add-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 12px;
+  background: transparent;
+  color: var(--ai-text-muted);
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.mode-switch button.active {
+  background: var(--ai-graphite);
+  color: white;
+  box-shadow: var(--ai-shadow-xs);
+}
+
+.composer-add-button {
+  border: 1px solid var(--ai-border);
+  background: var(--ai-surface);
+}
+
+.composer-context-line {
+  min-width: 0;
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 850;
 }
 
 .hidden-file {
@@ -1967,6 +2215,133 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
 .uploaded-hint {
   color: var(--ai-text-muted);
   font-weight: 800;
+}
+
+.composer-options-panel {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.85fr) minmax(150px, 0.65fr) minmax(200px, 1fr) minmax(280px, 1.4fr);
+  gap: 10px;
+  border: 1px solid var(--ai-border);
+  border-radius: 18px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: var(--ai-shadow-xs);
+}
+
+.composer-option-group {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.option-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--ai-text);
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.option-title span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.option-title small,
+.composer-option-group p {
+  margin: 0;
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.5;
+}
+
+.select-field {
+  min-width: 0;
+  border: 1px solid var(--ai-border);
+  border-radius: 12px;
+  background: var(--ai-surface);
+}
+
+.select-field select {
+  width: 100%;
+  min-height: 36px;
+  border: 0;
+  outline: none;
+  padding: 0 10px;
+  background: transparent;
+  color: var(--ai-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.plugin-option-group {
+  min-width: 0;
+}
+
+.plugin-tool-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.plugin-tool-chip {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  border: 1px solid var(--ai-border);
+  border-radius: 13px;
+  padding: 9px 10px;
+  background: var(--ai-surface);
+  color: var(--ai-text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.plugin-tool-chip.active {
+  border-color: rgba(63, 111, 115, 0.35);
+  background: rgba(240, 253, 250, 0.86);
+  box-shadow: 0 0 0 3px rgba(63, 111, 115, 0.09);
+}
+
+.plugin-tool-chip strong,
+.plugin-tool-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-tool-chip strong {
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.plugin-tool-chip span {
+  color: var(--ai-text-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.quiet-link {
+  width: fit-content;
+  border: 0;
+  background: transparent;
+  color: var(--ai-accent);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.panel-empty.compact {
+  padding: 10px;
+  font-size: 12px;
 }
 
 .composer-input-row {
@@ -2055,6 +2430,10 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
   .plan-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .composer-options-panel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 1024px) {
@@ -2097,8 +2476,24 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
   .step-row,
   .approval-row,
   .artifact-row,
-  .timeline-row {
+  .timeline-row,
+  .plan-step-preview {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .composer-options-panel,
+  .plugin-tool-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .composer-input-row {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 10px;
+  }
+
+  .send-button {
+    width: 100%;
   }
 
   .approval-actions,

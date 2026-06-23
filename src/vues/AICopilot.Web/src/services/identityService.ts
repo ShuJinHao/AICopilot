@@ -9,9 +9,11 @@ import type {
   LoginResponse,
   PermissionDefinition,
   RoleSummary,
-  UserSummary
+  UserSummary,
 } from '@/types/app'
 import { baseUrl } from '@/appsetting'
+
+const ROUTE_GUARD_REQUEST_TIMEOUT_MS = 10000
 
 function buildIdentityUrl(path: string) {
   return `${baseUrl}/identity/${path}`.replace(/([^:]\/)\/+/g, '$1')
@@ -19,7 +21,9 @@ function buildIdentityUrl(path: string) {
 
 export const identityService = {
   async getInitializationStatus() {
-    return await apiClient.get<InitializationStatus>('/identity/initialization-status')
+    return await apiClient.get<InitializationStatus>('/identity/initialization-status', undefined, {
+      timeoutMs: ROUTE_GUARD_REQUEST_TIMEOUT_MS,
+    })
   },
 
   async login(payload: LoginRequest) {
@@ -39,7 +43,9 @@ export const identityService = {
   },
 
   async getCurrentUserProfile() {
-    return await apiClient.get<CurrentUserProfile>('/identity/me')
+    return await apiClient.get<CurrentUserProfile>('/identity/me', undefined, {
+      timeoutMs: ROUTE_GUARD_REQUEST_TIMEOUT_MS,
+    })
   },
 
   async getAuditLogs(query: AuditLogQuery) {
@@ -88,5 +94,5 @@ export const identityService = {
 
   async resetUserPassword(payload: { userId: string; newPassword: string }) {
     return await apiClient.put<void>('/identity/user/password/reset', payload)
-  }
+  },
 }

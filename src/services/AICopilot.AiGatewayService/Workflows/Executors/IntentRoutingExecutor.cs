@@ -69,20 +69,25 @@ public class IntentRoutingExecutor(
         {
             await using var scopedAgent = await agentBuilder.BuildAsync();
             var session = await scopedAgent.Agent.CreateSessionAsync(cancellationToken);
-            var response = await scopedAgent.Agent.RunStructuredAsync<List<IntentResult>>(
-                history,
-                session,
-                JsonSerializerOptions.Web,
-                new RuntimeAgentRunOptions(new AiChatOptions
+            var builder = new StringBuilder();
+            await foreach (var update in scopedAgent.Agent.RunStreamingAsync(
+                    history,
+                    session,
+                    new RuntimeAgentRunOptions(new AiChatOptions
+                    {
+                        MaxOutputTokens = 512,
+                        Temperature = 0,
+                        Tools = []
+                    }),
+                    cancellationToken))
+            {
+                foreach (var content in update.Contents.OfType<AiTextContent>())
                 {
-                    MaxOutputTokens = 512,
-                    Temperature = 0
-                }),
-                cancellationToken);
+                    builder.Append(content.Text);
+                }
+            }
 
-            return response.Result is { Count: > 0 }
-                ? JsonSerializer.Serialize(response.Result, JsonSerializerOptions.Web)
-                : response.Text;
+            return builder.ToString();
         }
         catch (Exception ex)
         {

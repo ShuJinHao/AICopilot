@@ -236,6 +236,98 @@ public sealed class ToolRegistryGovernanceTests
     }
 
     [Fact]
+    public async Task DynamicPlannerFallback_ShouldUseStaticFallbackPlan_WhenPlannerReturnsInvalidPlanInAutoMode()
+    {
+        var session = new Session(UserId, ConversationTemplateId.New());
+        var plannerModel = CreatePlannerModel();
+        var taskRepository = new InMemoryRepository<AgentTask>();
+        var handler = CreatePlanHandler(
+            session,
+            CreateAgentRuntimeGuardWithCloudEnabled(),
+            new FailingDynamicPlanner(AppProblemCodes.AgentPlanInvalid, "Planner returned invalid JSON: HTTP 400"),
+            [plannerModel],
+            taskRepository: taskRepository);
+
+        var result = await handler.Handle(
+            new PlanAgentTaskCommand(session.Id.Value, "generate a report", AgentTaskType.ReportGeneration, null),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var task = taskRepository.Items.Should().ContainSingle().Which;
+        using var plan = JsonDocument.Parse(task.PlanJson);
+        plan.RootElement.GetProperty("plannerMode").GetString().Should().Be("StaticFallback");
+        plan.RootElement.GetProperty("plannerFallbackReason").GetString()
+            .Should().Contain("static fallback was used");
+    }
+
+    [Fact]
+    public async Task PreferredToolCodes_ShouldNarrowPlannerCatalog_WithoutBypassingMandatorySafetySteps()
+    {
+        var session = new Session(UserId, ConversationTemplateId.New());
+        var plannerModel = CreatePlannerModel();
+        var dynamicPlanner = new FixedDynamicPlanner(
+            new AgentStepPlanDto(
+                "Build markdown",
+                "Generate markdown report.",
+                AgentStepType.ArtifactGeneration,
+                "generate_markdown_report",
+                false));
+        var handler = CreatePlanHandler(
+            session,
+            CreateAgentRuntimeGuardWithCloudEnabled(),
+            dynamicPlanner,
+            [plannerModel]);
+
+        var result = await handler.Handle(
+            new PlanAgentTaskCommand(
+                session.Id.Value,
+                "generate a markdown report",
+                AgentTaskType.ReportGeneration,
+                null,
+                PreferredToolCodes: ["generate_markdown_report"]),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        dynamicPlanner.LastRequest!.ToolCatalog.Tools
+            .Select(tool => tool.ToolCode)
+            .Should().BeEquivalentTo(["generate_markdown_report"]);
+        using var plan = JsonDocument.Parse(result.Value!.PlanJson);
+        plan.RootElement.GetProperty("plannerAvailableToolCount").GetInt32().Should().Be(1);
+        plan.RootElement.GetProperty("steps").EnumerateArray()
+            .Select(step => step.GetProperty("toolCode").GetString())
+            .Should().Contain("finalize_artifacts");
+    }
+
+    [Fact]
+    public async Task PreferredToolCodes_ShouldRejectToolOutsideCurrentCatalog()
+    {
+        var session = new Session(UserId, ConversationTemplateId.New());
+        var plannerModel = CreatePlannerModel();
+        var handler = CreatePlanHandler(
+            session,
+            CreateGuard(
+                CreateTool("generate_markdown_report", ToolProviderType.Artifact),
+                CreateTool("finalize_artifacts", ToolProviderType.Artifact, requiresApproval: true, riskLevel: AiToolRiskLevel.RequiresApproval)),
+            new FixedDynamicPlanner(),
+            [plannerModel]);
+
+        var result = await handler.Handle(
+            new PlanAgentTaskCommand(
+                session.Id.Value,
+                "generate a report",
+                AgentTaskType.ReportGeneration,
+                null,
+                PreferredToolCodes: ["generate_pdf"]),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeFalse();
+        result.Errors.Should().ContainSingle()
+            .Which.Should().BeEquivalentTo(new ApiProblemDescriptor(
+                AppProblemCodes.AgentPlanToolDenied,
+                "Preferred tool is unavailable or outside the current skill boundary: generate_pdf."));
+    }
+
+    [Fact]
     public async Task PlannerToolCatalog_ShouldFilterUnavailableTools_AndExposeSanitizedSchemaSummaries()
     {
         var mcpToolCode = AiToolIdentity.CreateRuntimeName(AiToolTargetType.McpServer, "runtime-mcp", "read_status");
@@ -2733,6 +2825,17 @@ public sealed class ToolRegistryGovernanceTests
         {
             LastRequest = request;
             return Task.FromResult(Result.Success<IReadOnlyCollection<AgentStepPlanDto>>(steps));
+        }
+    }
+
+    private sealed class FailingDynamicPlanner(string code, string detail) : IAgentDynamicPlanner
+    {
+        public Task<Result<IReadOnlyCollection<AgentStepPlanDto>>> CreatePlanAsync(
+            AgentDynamicPlannerRequest request,
+            CancellationToken cancellationToken)
+        {
+            Result<IReadOnlyCollection<AgentStepPlanDto>> result = Result.Failure(new ApiProblemDescriptor(code, detail));
+            return Task.FromResult(result);
         }
     }
 
