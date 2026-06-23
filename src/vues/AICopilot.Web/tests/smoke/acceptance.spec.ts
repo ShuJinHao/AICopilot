@@ -128,7 +128,7 @@ test('inline agent run restores task, workspace, approvals, and artifacts', asyn
   await expectNoHorizontalOverflow(page)
 })
 
-test('chat shell does not preload internal operations or expose model selection', async ({ page }) => {
+test('chat shell does not preload internal operations or expose model selection', async ({ page, isMobile }) => {
   const requestedPaths: string[] = []
   page.on('request', (request) => {
     const url = new URL(request.url())
@@ -141,12 +141,14 @@ test('chat shell does not preload internal operations or expose model selection'
   await expect(page.locator('select[aria-label="选择模型"]')).toHaveCount(0)
   await expect(page.locator('nav[aria-label="主要导航"] button[aria-label="权限治理"]')).toHaveCount(0)
   await expect(page.locator('[aria-label="系统操作"] button[aria-label="权限治理"]')).toBeVisible()
-  await expect(page.getByLabel('选择 Skill')).toBeVisible()
-  await expect(page.getByLabel('选择 Skill')).toHaveValue('general_report')
-  await expect(page.getByLabel('选择知识库')).toBeVisible()
-  await expect(page.getByLabel('选择知识库')).toHaveValue('kb1')
+  await expect(page.getByRole('button', { name: /计划模式/ })).toHaveClass(/active/)
+  await expect(page.getByRole('button', { name: /聊天模式/ })).toBeVisible()
+  await page.getByRole('button', { name: /添加/ }).click()
+  await expect(page.getByLabel('选择计划类型')).toBeVisible()
+  await expect(page.getByLabel('选择计划类型')).toHaveValue('auto')
+  await expect(page.getByText('插件能力', { exact: true })).toBeVisible()
   const composerInput = page.locator('.command-composer textarea')
-  await expect(composerInput).toHaveAttribute('placeholder', '输入问题或目标')
+  await expect(composerInput).toHaveAttribute('placeholder', '输入目标，先生成可确认的计划')
   await expect(composerInput).not.toHaveAttribute('placeholder', /Goal|Shift \+ Enter/)
   await expect(page.getByText('只读分析').first()).toBeVisible()
   await expect(page.getByText('SimulationBusiness')).toHaveCount(0)
@@ -156,8 +158,10 @@ test('chat shell does not preload internal operations or expose model selection'
   await expect(page.getByText('历史异常数').first()).toBeVisible()
   await expect(page.getByText('history_approval', { exact: true }).first()).toBeHidden()
   await expect(page.getByText('回答模型：未知', { exact: true }).first()).toBeHidden()
-  await page.locator('.runtime-details summary').first().click()
-  await expect(page.getByText('回答模型：未知', { exact: true }).first()).toBeVisible()
+  if (!isMobile) {
+    await page.locator('.runtime-details summary').first().click()
+    await expect(page.getByText('回答模型：未知', { exact: true }).first()).toBeVisible()
+  }
 
   const forbiddenInitialLoads = [
     '/api/aigateway/language-model/chat-options',
@@ -255,6 +259,7 @@ test('chat stream renders widgets and approval card', async ({ page, isMobile })
 
   await expectProtectedShell(page, '/chat')
 
+  await page.getByRole('button', { name: /聊天模式/ }).click()
   await page.locator('.command-composer textarea').fill('smoke check agent widgets')
   await page.locator('.send-button').click()
 
