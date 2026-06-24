@@ -76,7 +76,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<IFinalAgentContextSerializer, FinalAgentContextSerializer>();
         builder.Services.AddScoped<SessionMessagePersistenceService>();
         builder.Services.AddScoped<MessageTimelineProjectionWriter>();
-        builder.Services.AddScoped<IAgentSkillAutoSelector, IntentRoutingSkillAutoSelector>();
+        builder.Services.AddScoped<IAgentSkillAutoSelector, AgentSkillRouterAutoSelector>();
         builder.Services.AddSingleton<IBusinessPolicyCatalog, BusinessPolicyCatalog>();
         builder.Services.AddSingleton<ISemanticSummaryProfileCatalog, SemanticSummaryProfileCatalog>();
         builder.Services.AddSingleton<IBusinessSemanticsCatalog, BusinessSemanticsCatalog>();

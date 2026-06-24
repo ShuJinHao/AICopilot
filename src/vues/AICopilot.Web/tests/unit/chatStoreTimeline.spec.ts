@@ -10,6 +10,7 @@ const chatServiceMock = vi.hoisted(() => ({
   decideAgentApproval: vi.fn(),
   getAgentTaskApprovals: vi.fn(),
   getAgentTasksBySession: vi.fn(),
+  getWorkspace: vi.fn(),
   getAgentTaskAuditSummary: vi.fn()
 }))
 
@@ -44,6 +45,14 @@ describe('chatStore timeline', () => {
     chatServiceMock.getPendingApprovals.mockResolvedValue([])
     chatServiceMock.getAgentTaskApprovals.mockResolvedValue([])
     chatServiceMock.getAgentTasksBySession.mockResolvedValue([])
+    chatServiceMock.getWorkspace.mockResolvedValue({
+      workspaceCode: 'ws-old',
+      status: 'WorkspaceReady',
+      files: [],
+      artifacts: [],
+      draftArtifacts: [],
+      finalArtifacts: []
+    })
     chatServiceMock.getAgentTaskAuditSummary.mockResolvedValue([])
     chatServiceMock.getTimeline.mockResolvedValue({
       items: [],
@@ -205,5 +214,71 @@ describe('chatStore timeline', () => {
     await store.loadTimeline('session-1')
 
     expect(store.timelineEvents).toEqual([])
+  })
+
+  it('refreshes the current agent task snapshot and timeline for runtime polling', async () => {
+    const sessionStore = useSessionStore()
+    sessionStore.persistCurrentSession('session-1')
+    chatServiceMock.getAgentTasksBySession.mockResolvedValue([
+      {
+        id: 'task-1',
+        sessionId: 'session-1',
+        title: '设备日志分析',
+        status: 'Running',
+        workspaceCode: null
+      }
+    ])
+    chatServiceMock.getTimeline.mockResolvedValue({
+      items: [
+        {
+          sequence: 11,
+          eventType: 'AgentStepStarted',
+          createdAt: '2026-06-22T07:03:00Z',
+          agentTaskId: 'task-1',
+          agentStepStatus: 'Running'
+        }
+      ],
+      beforeSequence: 11,
+      afterSequence: 11,
+      hasMore: false,
+      hasMoreBefore: false,
+      hasMoreAfter: false
+    })
+
+    const store = useChatStore()
+    await store.refreshAgentTaskSnapshot('task-1')
+
+    expect(chatServiceMock.getAgentTasksBySession).toHaveBeenCalledWith('session-1')
+    expect(chatServiceMock.getTimeline).toHaveBeenCalledWith('session-1')
+    expect(store.latestAgentTask?.id).toBe('task-1')
+    expect(store.timelineEvents[0]?.eventType).toBe('AgentStepStarted')
+  })
+
+  it('does not show an older task workspace on the latest task run block', async () => {
+    const sessionStore = useSessionStore()
+    sessionStore.persistCurrentSession('session-1')
+    chatServiceMock.getAgentTasksBySession.mockResolvedValue([
+      {
+        id: 'task-latest',
+        sessionId: 'session-1',
+        title: '新计划',
+        status: 'WaitingPlanApproval',
+        workspaceCode: null
+      },
+      {
+        id: 'task-old',
+        sessionId: 'session-1',
+        title: '旧报告',
+        status: 'Completed',
+        workspaceCode: 'ws-old'
+      }
+    ])
+
+    const store = useChatStore()
+    await store.refreshAgentTaskSnapshot('task-latest')
+
+    expect(chatServiceMock.getWorkspace).not.toHaveBeenCalled()
+    expect(store.latestAgentTask?.id).toBe('task-latest')
+    expect(store.currentWorkspace).toBeNull()
   })
 })

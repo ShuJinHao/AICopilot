@@ -49,6 +49,7 @@ This document is the backend-owned frontend integration contract. Frontend code 
 | `planner_model_unavailable` | Planner model is unavailable. |
 | `planner_tool_catalog_empty` | Planner tool catalog is empty. |
 | `planner_tool_schema_unsupported` | Planner tool schema is unsupported. |
+| `agent_skill_selection_required` | Agent plan requires a selected or auto-routed Skill. |
 | `agent_plan_invalid` | Agent plan is invalid. |
 | `agent_plan_tool_denied` | Agent plan requested a denied tool. |
 | `agent_plan_schema_invalid` | Agent plan schema is invalid. |
@@ -92,4 +93,3 @@ Cloud read-only requests must use the current Cloud API contract directly:
 | Pass station records | `/api/v1/ai/read/pass-stations/{typeKey}` | `deviceId`, `startTime`, `endTime`, `maxRows`; route `{typeKey}` must be explicit, for example `injection` |
 
 `deviceCode` is a searchable/display field only. It must not be sent as `deviceId`. Recipe master data and recipe version data are outside the AICopilot Cloud read-only boundary.
-

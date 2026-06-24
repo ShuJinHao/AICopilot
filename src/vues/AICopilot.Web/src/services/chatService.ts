@@ -240,6 +240,10 @@ export const chatService = {
     return await apiClient.post<AgentTask>('/aigateway/agent/task/run', { id })
   },
 
+  async retryAgentTask(id: string) {
+    return await apiClient.post<AgentTask>('/aigateway/agent/task/retry', { id })
+  },
+
   async getAgentTasksBySession(sessionId: string) {
     return await apiClient.get<AgentTask[]>('/aigateway/agent/task/by-session', { sessionId })
   },

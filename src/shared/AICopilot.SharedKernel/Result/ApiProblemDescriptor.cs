@@ -42,6 +42,7 @@ public static class AppProblemCodes
     public const string PlannerModelUnavailable = "planner_model_unavailable";
     public const string PlannerToolCatalogEmpty = "planner_tool_catalog_empty";
     public const string PlannerToolSchemaUnsupported = "planner_tool_schema_unsupported";
+    public const string AgentSkillSelectionRequired = "agent_skill_selection_required";
     public const string AgentPlanInvalid = "agent_plan_invalid";
     public const string AgentPlanToolDenied = "agent_plan_tool_denied";
     public const string AgentPlanSchemaInvalid = "agent_plan_schema_invalid";

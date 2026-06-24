@@ -30,4 +30,17 @@ public sealed class IntentRoutingResultParserTests
         parsed.Should().BeFalse();
         intents.Should().BeEmpty();
     }
+
+    [Fact]
+    public void TryParse_ShouldNormalizeSimplifiedSkillSelection()
+    {
+        var parsed = IntentRoutingResultParser.TryParse(
+            """{"skillCode":"device_log_analysis","reason":"用户要求查看设备日志并分析根因"}""",
+            out var intents);
+
+        parsed.Should().BeTrue();
+        intents.Should().ContainSingle();
+        intents[0].Intent.Should().Be("Skill.device_log_analysis");
+        intents[0].Reasoning.Should().Be("用户要求查看设备日志并分析根因");
+    }
 }

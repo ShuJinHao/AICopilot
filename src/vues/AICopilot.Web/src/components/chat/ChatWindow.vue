@@ -44,6 +44,7 @@ type AgentPlanPreview = {
   skillCode?: string | null
   skillName?: string | null
   taskType?: string | null
+  skillRoutingReason?: string | null
   dataSourceSummaries?: Array<{
     name?: string
     sourceMode?: string
@@ -62,6 +63,14 @@ type AgentPlanPreview = {
 
 type TagTone = 'success' | 'warning' | 'dark' | 'lime' | 'danger' | 'neutral' | 'teal' | 'blue'
 type ComposerMode = 'plan' | 'chat'
+type PrimaryTaskActionKind =
+  | 'approve-and-run'
+  | 'run'
+  | 'retry'
+  | 'submit-final-review'
+  | 'finalize'
+  | 'queued'
+  | 'running'
 
 const store = useChatStore()
 const uiLayoutStore = useUiLayoutStore()
@@ -75,6 +84,8 @@ const scrollContainer = ref<HTMLElement | null>(null)
 const isMobile = ref(typeof window !== 'undefined' ? window.innerWidth < 1024 : false)
 const sessionDrawerVisible = ref(false)
 const preserveScrollAnchor = ref(false)
+const runtimePollingTimer = ref<number | null>(null)
+const runtimePollingTaskId = ref<string | null>(null)
 
 const {
   latestTask,
@@ -96,6 +107,7 @@ const {
   chartBars,
   onsiteStatus,
   agentStageCards,
+  agentRunNotice,
   canCreatePlan,
   canRunTask,
   canContinueTask,
@@ -227,6 +239,86 @@ const artifactHeaderMeta = computed(() =>
     ? `${taskArtifacts.value.length} 个产物 · ${workspaceFileCount.value} 个文件`
     : '等待产物生成'
 )
+const shouldPollRuntimeSnapshot = computed(() => {
+  const task = latestTask.value
+  if (!task) return false
+
+  return Boolean(
+    task.isRunQueued ||
+    task.isRunInProgress ||
+    task.status === 'Running' ||
+    task.status === 'GeneratingArtifacts'
+  )
+})
+const primaryTaskAction = computed(() => {
+  const task = latestTask.value
+  if (!task) return null
+
+  if (task.isRunQueued) {
+    return {
+      kind: 'queued' as PrimaryTaskActionKind,
+      label: '已入队',
+      icon: RefreshCw,
+      disabled: true
+    }
+  }
+
+  if (task.isRunInProgress || task.status === 'Running' || task.status === 'GeneratingArtifacts') {
+    return {
+      kind: 'running' as PrimaryTaskActionKind,
+      label: '执行中',
+      icon: RefreshCw,
+      disabled: true
+    }
+  }
+
+  switch (task.status) {
+    case 'WaitingPlanApproval':
+      return {
+        kind: 'approve-and-run' as PrimaryTaskActionKind,
+        label: '确认计划并执行',
+        icon: Play,
+        disabled: store.isAgentBusy
+      }
+    case 'PlanApproved':
+      return {
+        kind: 'run' as PrimaryTaskActionKind,
+        label: '执行',
+        icon: Play,
+        disabled: !canRunTask.value
+      }
+    case 'WaitingToolApproval':
+      return {
+        kind: 'run' as PrimaryTaskActionKind,
+        label: '继续执行',
+        icon: Play,
+        disabled: !canRunTask.value
+      }
+    case 'Failed':
+      return {
+        kind: 'retry' as PrimaryTaskActionKind,
+        label: '重试',
+        icon: RefreshCw,
+        disabled: !canContinueTask.value
+      }
+    case 'WorkspaceReady':
+      return {
+        kind: 'submit-final-review' as PrimaryTaskActionKind,
+        label: '提交最终审核',
+        icon: FolderOpen,
+        disabled: !canSubmitFinalReview.value
+      }
+    case 'WaitingFinalApproval':
+      return {
+        kind: 'finalize' as PrimaryTaskActionKind,
+        label: '确认正式输出',
+        icon: Check,
+        disabled: !canFinalizeWorkspace.value
+      }
+    default:
+      return null
+  }
+})
 
 const suggestions = [
   '查看 DEV-001 最近 24 小时设备日志，并给出根因线索',
@@ -467,16 +559,6 @@ function pluginToolMeta(tool: AgentPlannerToolSummary) {
   return parts.filter(Boolean).join(' · ')
 }
 
-async function runLatestTask() {
-  if (!latestTask.value || !canRunTask.value) return
-  await store.runAgentTask(latestTask.value.id)
-}
-
-async function continueLatestTask() {
-  if (!latestTask.value || !canContinueTask.value) return
-  await store.runAgentTask(latestTask.value.id)
-}
-
 async function submitFinalReview() {
   const code = store.currentWorkspace?.workspaceCode || latestTask.value?.workspaceCode
   if (!code || !canSubmitFinalReview.value) return
@@ -490,13 +572,41 @@ async function finalizeCurrentWorkspace() {
   await store.finalizeWorkspace(code)
 }
 
+async function runPrimaryTaskAction() {
+  const task = latestTask.value
+  const action = primaryTaskAction.value
+  if (!task || !action || action.disabled) return
+
+  switch (action.kind) {
+    case 'approve-and-run':
+      await store.approveAndRunAgentTask(task.id)
+      return
+    case 'run':
+      await store.runAgentTask(task.id)
+      return
+    case 'retry':
+      await store.retryAgentTask(task.id)
+      return
+    case 'submit-final-review':
+      await submitFinalReview()
+      return
+    case 'finalize':
+      await finalizeCurrentWorkspace()
+      return
+    default:
+      return
+  }
+}
+
 async function approveAgentApproval(approvalId: string) {
   const approval = pendingAgentApprovals.value.find((item) => item.id === approvalId)
   if (!approval) return
-  const decided = await store.decideAgentApproval(approval, 'approve', 'Approved from inline plan card')
-  if (decided && approval.type === 'Plan') {
-    await store.runAgentTask(approval.taskId)
+  if (approval.type === 'Plan') {
+    await store.approveAndRunAgentTask(approval.taskId)
+    return
   }
+
+  await store.decideAgentApproval(approval, 'approve', 'Approved from inline approval card')
 }
 
 async function rejectAgentApproval(approvalId: string) {
@@ -551,6 +661,27 @@ function handleResize() {
   }
 }
 
+function stopRuntimePolling() {
+  if (runtimePollingTimer.value !== null && typeof window !== 'undefined') {
+    window.clearInterval(runtimePollingTimer.value)
+  }
+  runtimePollingTimer.value = null
+  runtimePollingTaskId.value = null
+}
+
+function startRuntimePolling(taskId: string) {
+  if (typeof window === 'undefined') return
+  if (runtimePollingTimer.value !== null && runtimePollingTaskId.value === taskId) return
+
+  stopRuntimePolling()
+  runtimePollingTaskId.value = taskId
+  runtimePollingTimer.value = window.setInterval(() => {
+    if (!store.isAgentBusy) {
+      void store.refreshAgentTaskSnapshot(taskId)
+    }
+  }, 3500)
+}
+
 watch(
   [
     () => store.currentMessages,
@@ -569,11 +700,28 @@ watch(
 
 watch(() => store.currentSessionId, () => {
   sessionDrawerVisible.value = false
+  stopRuntimePolling()
   void scrollToBottom()
 })
 
+watch(
+  [() => latestTask.value?.id, () => shouldPollRuntimeSnapshot.value],
+  ([taskId, shouldPoll]) => {
+    if (taskId && shouldPoll) {
+      startRuntimePolling(taskId)
+      return
+    }
+
+    stopRuntimePolling()
+  },
+  { immediate: true }
+)
+
 onMounted(() => window.addEventListener('resize', handleResize))
-onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', handleResize)
+  stopRuntimePolling()
+})
 </script>
 
 <template>
@@ -661,338 +809,374 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
           />
         </div>
 
-        <section v-if="hasInlineAgentRun" class="inline-agent-run" data-testid="inline-agent-run">
-          <header class="run-head">
-            <div>
-              <span>目标与计划</span>
-              <h2>{{ latestTask?.title || agentGoal || '当前任务计划' }}</h2>
-              <p>{{ inlineRunSubtitle }}</p>
-            </div>
-            <AiTag :tone="statusTone(taskStatus.type)">{{ taskStatus.label }}</AiTag>
-          </header>
-
-          <div class="run-actions">
-            <button type="button" :disabled="!canRunTask || store.isAgentBusy" @click="runLatestTask">
-              <Play :size="17" />
-              确认执行
-            </button>
-            <button type="button" :disabled="!canContinueTask || store.isAgentBusy" @click="continueLatestTask">
-              <RefreshCw :size="17" />
-              继续
-            </button>
-            <button type="button" :disabled="!canFinalizeWorkspace || store.isAgentBusy" @click="finalizeCurrentWorkspace">
-              <FolderOpen :size="17" />
-              正式输出
-            </button>
+        <section v-if="hasInlineAgentRun" class="agent-run-thread" data-testid="inline-agent-run">
+          <div class="agent-avatar">
+            <Sparkles :size="18" />
           </div>
+          <article class="agent-run-card">
+            <header class="agent-run-header">
+              <div>
+                <span>AI 工作流</span>
+                <h2>{{ latestTask?.title || agentGoal || '当前任务计划' }}</h2>
+                <p>{{ latestTask?.goal || inlineRunSubtitle }}</p>
+              </div>
+              <AiTag :tone="statusTone(taskStatus.type)">{{ taskStatus.label }}</AiTag>
+            </header>
 
-          <div v-if="store.agentErrorMessage" class="canvas-error inline-error" role="alert">
-            <TriangleAlert :size="18" />
-            {{ store.agentErrorMessage }}
-          </div>
+            <div class="agent-run-context">
+              <span>
+                <Sparkles :size="14" />
+                Skill：{{ latestPlan?.skillName || latestPlan?.skillCode || selectedPlanTypeLabel }}
+              </span>
+              <span>
+                <Wrench :size="14" />
+                工具 {{ latestPlanVisibleToolCount }}
+              </span>
+              <span>
+                <ShieldCheck :size="14" />
+                {{ latestPlanIsCloudReadonly ? 'Cloud 只读' : '只读分析' }}
+              </span>
+              <span v-if="timelineEventCount">
+                <ListChecks :size="14" />
+                {{ latestTimelineSummary }}
+              </span>
+            </div>
 
-          <section v-if="latestTask" class="run-card plan-card" data-testid="inline-plan-card">
-            <div class="section-title">
-              <strong>计划</strong>
-              <AiTag :tone="statusTone(taskStatus.type)">
-                {{ taskStatus.label }}
-              </AiTag>
+            <div v-if="store.agentErrorMessage" class="canvas-error inline-error" role="alert">
+              <TriangleAlert :size="18" />
+              {{ store.agentErrorMessage }}
             </div>
-            <div class="plan-summary">
-              <strong>{{ latestTask.title }}</strong>
-              <span>{{ latestTask.goal }}</span>
+
+            <div v-if="agentRunNotice" class="agent-run-notice" :class="`notice-${agentRunNotice.tone}`">
+              <RefreshCw v-if="agentRunNotice.tone !== 'danger'" :size="15" />
+              <TriangleAlert v-else :size="15" />
+              <span>
+                <strong>{{ agentRunNotice.title }}</strong>
+                <small>{{ agentRunNotice.detail }}</small>
+              </span>
             </div>
-            <div v-if="taskSteps.length" class="plan-steps-preview" data-testid="plan-steps-preview">
-              <div v-for="step in taskSteps.slice(0, 6)" :key="step.id" class="plan-step-preview">
-                <i>{{ step.stepIndex }}</i>
-                <div>
-                  <strong>{{ step.title }}</strong>
-                  <span>{{ step.description || '按计划执行该步骤' }}</span>
-                </div>
-                <AiTag :tone="step.requiresApproval ? 'warning' : 'neutral'">
-                  {{ step.requiresApproval ? '需确认' : '只读' }}
-                </AiTag>
+
+            <section v-if="latestTask" class="agent-plan" data-testid="inline-plan-card">
+              <div class="section-title">
+                <strong>计划</strong>
+                <span>{{ taskSteps.length }} 个步骤</span>
               </div>
-            </div>
-            <div v-if="blockedStep" class="blocked-step">
-              <span>当前阻塞</span>
-              <strong>{{ blockedStep.title }}</strong>
-            </div>
-            <details class="plan-detail-fold" data-testid="plan-technical-details">
-              <summary>
-                <SlidersHorizontal :size="15" />
-                <span>技术详情</span>
-                <AiTag tone="neutral">详情</AiTag>
-              </summary>
-              <div class="plan-grid">
-                <div>
-                  <span>来源</span>
-                  <strong>{{ latestPlanSource }}</strong>
-                </div>
-                <div>
-                  <span>工具目录</span>
-                  <strong>v{{ latestPlanToolCatalogVersion ?? '-' }} / {{ latestPlanVisibleToolCount }}</strong>
-                </div>
-                <div>
-                  <span>审批点</span>
-                  <strong>{{ latestPlan?.approvalCheckpoints?.length ?? 0 }}</strong>
-                </div>
-                <div>
-                  <span>风险</span>
-                  <strong>{{ latestPlanRiskLine }}</strong>
-                </div>
-              </div>
-              <div v-if="latestPlan?.forcedStepCodes?.length" class="chip-row">
-                <span v-for="code in latestPlan.forcedStepCodes" :key="code">{{ code }}</span>
-              </div>
+              <p class="agent-plan-goal">{{ latestTask.goal }}</p>
+              <p v-if="latestPlan?.skillRoutingReason" class="agent-skill-reason">
+                {{ latestPlan.skillRoutingReason }}
+              </p>
               <div v-if="latestPlan?.plannerFallbackReason" class="planner-warning">
                 <TriangleAlert :size="15" />
                 <span>{{ latestPlan.plannerFallbackReason }}</span>
               </div>
-            </details>
-          </section>
+              <ol v-if="taskSteps.length" class="agent-step-preview" data-testid="plan-steps-preview">
+                <li v-for="step in taskSteps.slice(0, 5)" :key="step.id">
+                  <i>{{ step.stepIndex }}</i>
+                  <span>{{ step.title }}</span>
+                  <AiTag :tone="step.requiresApproval ? 'warning' : 'neutral'">
+                    {{ step.requiresApproval ? '需确认' : '只读' }}
+                  </AiTag>
+                </li>
+              </ol>
+              <div v-if="blockedStep" class="agent-blocked-step">
+                <TriangleAlert :size="15" />
+                <span>当前阻塞：{{ blockedStep.title }}</span>
+              </div>
+            </section>
 
-          <details v-if="latestTask || taskSteps.length || timelineEventItems.length" class="run-card runtime-run-card" data-testid="inline-runtime-card">
-            <summary class="runtime-summary" data-testid="inline-runtime-summary">
-              <span class="timeline-summary-main">
-                <ListChecks :size="18" />
-                <span>
-                  <strong>运行详情</strong>
-                  <small>执行记录与安全边界</small>
-                </span>
-              </span>
-              <AiTag tone="neutral">详情</AiTag>
-            </summary>
-
-            <div class="runtime-sections">
-              <section class="runtime-section-block">
-                <div class="runtime-section-title">
-                  <strong>状态</strong>
-                  <span>阶段、审批和工作区</span>
-                </div>
-                <div class="status-grid">
-                  <div v-for="item in agentStageCards" :key="item.label" class="status-tile">
-                    <span>{{ item.label }}</span>
-                    <AiTag :tone="statusTone(item.type)">{{ item.value }}</AiTag>
-                  </div>
-                  <div class="status-tile">
-                    <span>草稿 / 正式</span>
-                    <strong class="ai-number">{{ draftArtifactCount }}/{{ finalArtifactCount }}</strong>
-                  </div>
-                </div>
-              </section>
-
-              <section class="runtime-section-block">
-                <div class="runtime-section-title">
-                  <strong>安全边界</strong>
-                  <span>AICopilot 只读边界和现场声明</span>
-                </div>
-                <div class="boundary-runtime" data-testid="inline-boundary-row">
-                  <ShieldCheck :size="20" />
+            <section v-if="approvalGroups.length" class="agent-approval-panel" data-testid="inline-approval-card">
+              <div class="section-title">
+                <strong>需要确认</strong>
+                <span>{{ pendingAgentApprovals.length }} 项待处理</span>
+              </div>
+              <div v-for="group in approvalGroups" :key="group.label" class="approval-group">
+                <div v-for="approval in group.approvals" :key="approval.id" class="approval-row">
                   <div>
-                    <strong>Cloud 只读边界</strong>
-                    <span>现场确认：{{ onsiteStatus.label }}</span>
-                  </div>
-                  <button type="button" @click="store.confirmOnsitePresence(30)">确认在岗</button>
-                </div>
-              </section>
-
-              <section v-if="timelineEventItems.length" class="runtime-section-block">
-                <div class="runtime-section-title">
-                  <strong>事件</strong>
-                  <span>最新：{{ latestTimelineSummary }}</span>
-                </div>
-                <div class="timeline-list">
-                  <div v-for="item in timelineEventItems" :key="item.key" class="timeline-row">
-                    <time>{{ item.time }}</time>
-                    <div class="timeline-row-main">
-                      <strong>{{ item.title }}</strong>
-                      <span>{{ item.subtitle }}</span>
-                      <details v-if="item.outputKind === 'RagSearch' && item.sources.length" class="timeline-result-fold">
-                        <summary>
-                          检索结果 · {{ item.resultCount }} 条
-                          <template v-if="item.lowConfidence"> · 低置信度</template>
-                        </summary>
-                        <div class="timeline-source-list">
-                          <article v-for="source in item.sources" :key="`${item.key}:${source.documentId}:${source.chunkIndex}`" class="timeline-source-item">
-                            <strong>{{ source.documentName || `文档 ${source.documentId || '-'}` }}</strong>
-                            <small>
-                              {{ formatTimelineScore(source.score) }}
-                              <template v-if="source.isLowConfidence"> · 低置信度</template>
-                              <template v-if="source.lowConfidenceReason"> · {{ source.lowConfidenceReason }}</template>
-                            </small>
-                            <em v-if="source.textPreview">{{ source.textPreview }}</em>
-                          </article>
+                    <strong>{{ approvalDisplayTitle(approval) }}</strong>
+                    <span>{{ approvalMetaLine(approval) }}</span>
+                    <details class="approval-detail-fold" data-testid="approval-detail-fold">
+                      <summary>审批详情</summary>
+                      <dl class="approval-detail-grid">
+                        <div>
+                          <dt>类型</dt>
+                          <dd>{{ approvalTypeLabel(approval.type) }}</dd>
                         </div>
-                      </details>
-                    </div>
-                    <AiTag :tone="item.tone">{{ item.status }}</AiTag>
+                        <div>
+                          <dt>对象</dt>
+                          <dd class="mono">{{ approval.targetName }}</dd>
+                        </div>
+                        <div>
+                          <dt>目标 ID</dt>
+                          <dd class="mono">{{ approval.targetId }}</dd>
+                        </div>
+                        <div v-if="approval.workspaceCode">
+                          <dt>工作区</dt>
+                          <dd class="mono">{{ approval.workspaceCode }}</dd>
+                        </div>
+                      </dl>
+                    </details>
+                  </div>
+                  <div class="approval-actions">
+                    <button type="button" aria-label="批准审批" :disabled="store.isAgentBusy" @click="approveAgentApproval(approval.id)">
+                      <Check :size="16" />
+                    </button>
+                    <button type="button" aria-label="驳回审批" :disabled="store.isAgentBusy" @click="rejectAgentApproval(approval.id)">
+                      <X :size="16" />
+                    </button>
                   </div>
                 </div>
-              </section>
+              </div>
+            </section>
 
-              <section class="runtime-section-block">
-                <div class="runtime-section-title">
-                  <strong>步骤</strong>
-                  <span>{{ completedStepCount }}/{{ taskSteps.length }} 已完成</span>
-                </div>
-                <div v-if="taskSteps.length" class="step-list">
-                  <div v-for="step in taskSteps" :key="step.id" class="step-row">
-                    <i>{{ step.stepIndex }}</i>
-                    <div>
-                      <strong>{{ step.title }}</strong>
-                      <span v-if="step.errorMessage" class="danger-text">{{ step.errorMessage }}</span>
-                      <details v-if="step.toolCode || step.description" class="step-detail-fold">
-                        <summary>详情</summary>
-                        <span v-if="step.description">{{ step.description }}</span>
-                        <code v-if="step.toolCode">{{ step.toolCode }}</code>
-                      </details>
-                    </div>
-                    <AiTag :tone="step.status === 'Completed' ? 'success' : step.status === 'Failed' ? 'danger' : step.requiresApproval ? 'warning' : 'neutral'">
-                      {{ step.status }}
-                    </AiTag>
-                  </div>
-                </div>
-                <div v-else class="panel-empty">暂无步骤</div>
-              </section>
-            </div>
-          </details>
-
-          <section v-if="approvalGroups.length" class="run-card approvals-run-card" data-testid="inline-approval-card">
-            <div class="section-title">
-              <strong>审批</strong>
-              <span>{{ pendingAgentApprovals.length }} 项待处理</span>
-            </div>
-            <div v-for="group in approvalGroups" :key="group.label" class="approval-group">
-              <div class="group-title">{{ group.label }}</div>
-              <div v-for="approval in group.approvals" :key="approval.id" class="approval-row">
-                <div>
-                  <strong>{{ approvalDisplayTitle(approval) }}</strong>
-                  <span>{{ approvalMetaLine(approval) }}</span>
-                  <details class="approval-detail-fold" data-testid="approval-detail-fold">
-                    <summary>审批详情</summary>
-                    <dl class="approval-detail-grid">
-                      <div>
-                        <dt>类型</dt>
-                        <dd>{{ approvalTypeLabel(approval.type) }}</dd>
-                      </div>
-                      <div>
-                        <dt>对象</dt>
-                        <dd class="mono">{{ approval.targetName }}</dd>
-                      </div>
-                      <div>
-                        <dt>目标 ID</dt>
-                        <dd class="mono">{{ approval.targetId }}</dd>
-                      </div>
-                      <div v-if="approval.workspaceCode">
-                        <dt>工作区</dt>
-                        <dd class="mono">{{ approval.workspaceCode }}</dd>
-                      </div>
-                    </dl>
-                  </details>
-                </div>
-                <div class="approval-actions">
-                  <button type="button" aria-label="批准审批" :disabled="store.isAgentBusy" @click="approveAgentApproval(approval.id)">
-                    <Check :size="16" />
+            <section v-if="store.currentWorkspace || taskArtifacts.length" class="agent-artifacts" data-testid="inline-artifact-card">
+              <div class="section-title">
+                <strong>输出</strong>
+                <span>{{ workspaceStatus.label }} · {{ taskArtifacts.length }} 个产物</span>
+              </div>
+              <div class="artifact-attachment-row" aria-label="输出产物附件">
+                <div
+                  v-for="artifact in taskArtifacts.slice(0, 4)"
+                  :key="artifact.id"
+                  class="artifact-attachment"
+                >
+                  <button type="button" class="artifact-preview-trigger" @click="previewArtifact(artifact.id)">
+                    <FolderOpen :size="16" />
+                    <span>{{ artifact.name }}</span>
+                    <small>{{ artifact.previewKind }}</small>
                   </button>
-                  <button type="button" aria-label="驳回审批" :disabled="store.isAgentBusy" @click="rejectAgentApproval(approval.id)">
-                    <X :size="16" />
+                  <button
+                    type="button"
+                    class="artifact-download-trigger"
+                    :disabled="!artifact.downloadUrl"
+                    :aria-label="`下载 ${artifact.name}`"
+                    @click="downloadArtifact(artifact.id)"
+                  >
+                    <Download :size="15" />
                   </button>
                 </div>
               </div>
-            </div>
-          </section>
+            </section>
 
-          <section v-if="store.currentWorkspace || taskArtifacts.length" class="run-card" data-testid="inline-artifact-card">
-            <div class="section-title">
-              <strong>{{ workspaceStatus.label }}</strong>
-              <span>{{ artifactHeaderMeta }}</span>
-            </div>
-            <div v-if="chartBars.length" class="chart-preview">
-              <div class="chart-preview-head">
-                <span>图表预览</span>
-                <small>{{ sourceModeLabel(store.chartPreview?.sourceLabel || store.chartPreview?.sourceMode || store.chartPreview?.source || 'workspace') }}</small>
-              </div>
-              <div v-for="bar in chartBars" :key="bar.label" class="chart-bar-row">
-                <span>{{ bar.label }}</span>
-                <div><i :style="{ width: bar.width }" /></div>
-                <strong>{{ bar.value }}</strong>
-              </div>
+            <div v-if="primaryTaskAction" class="run-actions">
+              <button type="button" :disabled="primaryTaskAction.disabled" @click="runPrimaryTaskAction">
+                <component :is="primaryTaskAction.icon" :size="17" />
+                {{ primaryTaskAction.label }}
+              </button>
             </div>
 
-            <details class="artifact-detail-fold" data-testid="artifact-detail-fold">
-              <summary class="artifact-detail-summary">
+            <details v-if="latestTask || taskSteps.length || timelineEventItems.length || taskArtifacts.length" class="agent-thinking-details" data-testid="inline-runtime-card">
+              <summary data-testid="inline-runtime-summary">
                 <span class="timeline-summary-main">
-                  <FolderOpen :size="18" />
+                  <ListChecks :size="18" />
                   <span>
-                    <strong>产物详情</strong>
-                    <small>{{ taskArtifacts.length }} 个产物 · {{ workspaceFileCount }} 个工作区文件</small>
+                    <strong>思考与执行记录</strong>
+                    <small>{{ completedStepCount }}/{{ taskSteps.length }} 步完成 · {{ latestTimelineSummary }}</small>
                   </span>
                 </span>
-                <AiTag tone="neutral">详情</AiTag>
+                <AiTag tone="neutral">展开</AiTag>
               </summary>
-              <div class="artifact-summary">
-                <div>
-                  <span>工作区</span>
-                  <strong>{{ store.currentWorkspace?.workspaceCode || '-' }}</strong>
-                </div>
-                <div>
-                  <span>文件</span>
-                  <strong>{{ workspaceFileCount }}</strong>
-                </div>
-                <div>
-                  <span>草稿</span>
-                  <strong>{{ draftArtifacts.length }}</strong>
-                </div>
-                <div>
-                  <span>正式</span>
-                  <strong>{{ finalArtifacts.length }}</strong>
-                </div>
-              </div>
-              <template v-if="artifactGroups.length">
-                <div v-for="group in artifactGroups" :key="group.label" class="artifact-group">
-                  <div class="group-title">{{ group.label }}</div>
-                  <div v-for="artifact in group.artifacts" :key="artifact.id" class="artifact-row">
+
+              <div class="runtime-sections">
+                <section class="runtime-section-block">
+                  <div class="runtime-section-title">
+                    <strong>运行状态</strong>
+                    <span>阶段、审批和工作区</span>
+                  </div>
+                  <div class="status-grid compact-status-grid">
+                    <div v-for="item in agentStageCards" :key="item.label" class="status-tile">
+                      <span>{{ item.label }}</span>
+                      <AiTag :tone="statusTone(item.type)">{{ item.value }}</AiTag>
+                    </div>
+                    <div class="status-tile">
+                      <span>草稿 / 正式</span>
+                      <strong class="ai-number">{{ draftArtifactCount }}/{{ finalArtifactCount }}</strong>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="runtime-section-block">
+                  <div class="runtime-section-title">
+                    <strong>安全边界</strong>
+                    <span>AICopilot 只读边界和现场声明</span>
+                  </div>
+                  <div class="boundary-runtime" data-testid="inline-boundary-row">
+                    <ShieldCheck :size="20" />
                     <div>
-                      <strong>{{ artifact.name }}</strong>
-                      <span>v{{ artifact.artifactVersion || artifact.version }} · {{ artifact.artifactStatus || artifact.status }} · {{ artifact.approvalStatus || '-' }}</span>
-                      <span class="artifact-source-line">
-                        {{ artifact.sourceLabel || sourceModeLabel(artifact.sourceMode || 'UnknownSource') }}
-                        <template v-if="artifact.boundary"> · {{ artifact.boundary }}</template>
-                      </span>
+                      <strong>Cloud 只读边界</strong>
+                      <span>现场确认：{{ onsiteStatus.label }}</span>
                     </div>
-                    <div class="artifact-actions">
-                      <button type="button" aria-label="预览产物" @click="previewArtifact(artifact.id)">
-                        <Eye :size="16" />
-                      </button>
-                      <button type="button" aria-label="下载产物" @click="downloadArtifact(artifact.id)">
-                        <Download :size="16" />
-                      </button>
+                    <button type="button" @click="store.confirmOnsitePresence(30)">确认在岗</button>
+                  </div>
+                </section>
+
+                <section v-if="latestTask" class="runtime-section-block" data-testid="plan-technical-details">
+                  <div class="runtime-section-title">
+                    <strong>计划详情</strong>
+                    <span>Skill、工具目录和审批点</span>
+                  </div>
+                  <div class="plan-grid">
+                    <div>
+                      <span>来源</span>
+                      <strong>{{ latestPlanSource }}</strong>
+                    </div>
+                    <div>
+                      <span>工具目录</span>
+                      <strong>v{{ latestPlanToolCatalogVersion ?? '-' }} / {{ latestPlanVisibleToolCount }}</strong>
+                    </div>
+                    <div>
+                      <span>审批点</span>
+                      <strong>{{ latestPlan?.approvalCheckpoints?.length ?? 0 }}</strong>
+                    </div>
+                    <div>
+                      <span>风险</span>
+                      <strong>{{ latestPlanRiskLine }}</strong>
                     </div>
                   </div>
-                </div>
-              </template>
-              <div v-else class="panel-empty">暂无产物</div>
-              <div v-if="currentArtifactPreview" class="artifact-preview-panel">
-                <div class="section-title">
-                  <strong>{{ currentArtifactPreview.name }}</strong>
-                  <span>{{ currentArtifactPreview.previewKind }} · v{{ currentArtifactPreview.artifactVersion }}</span>
-                </div>
-                <pre v-if="currentArtifactPreview.content" class="artifact-preview-content">{{ currentArtifactPreview.content.slice(0, 1600) }}</pre>
-                <div v-else-if="currentArtifactPreview.rows?.length" class="artifact-preview-table">
-                  <div class="artifact-preview-table-head">
-                    <span v-for="column in currentArtifactPreview.columns" :key="column">{{ column }}</span>
+                  <div v-if="latestPlan?.forcedStepCodes?.length" class="chip-row">
+                    <span v-for="code in latestPlan.forcedStepCodes" :key="code">{{ code }}</span>
                   </div>
-                  <div v-for="(row, index) in currentArtifactPreview.rows.slice(0, 5)" :key="index" class="artifact-preview-table-row">
-                    <span v-for="column in currentArtifactPreview.columns" :key="column">{{ row[column] ?? '-' }}</span>
+                </section>
+
+                <section class="runtime-section-block">
+                  <div class="runtime-section-title">
+                    <strong>步骤</strong>
+                    <span>{{ completedStepCount }}/{{ taskSteps.length }} 已完成</span>
                   </div>
-                </div>
+                  <div v-if="taskSteps.length" class="step-list">
+                    <div v-for="step in taskSteps" :key="step.id" class="step-row">
+                      <i>{{ step.stepIndex }}</i>
+                      <div>
+                        <strong>{{ step.title }}</strong>
+                        <span v-if="step.errorMessage" class="danger-text">{{ step.errorMessage }}</span>
+                        <details v-if="step.toolCode || step.description" class="step-detail-fold">
+                          <summary>详情</summary>
+                          <span v-if="step.description">{{ step.description }}</span>
+                          <code v-if="step.toolCode">{{ step.toolCode }}</code>
+                        </details>
+                      </div>
+                      <AiTag :tone="step.status === 'Completed' ? 'success' : step.status === 'Failed' ? 'danger' : step.requiresApproval ? 'warning' : 'neutral'">
+                        {{ step.status }}
+                      </AiTag>
+                    </div>
+                  </div>
+                  <div v-else class="panel-empty">暂无步骤</div>
+                </section>
+
+                <section v-if="timelineEventItems.length" class="runtime-section-block">
+                  <div class="runtime-section-title">
+                    <strong>事件</strong>
+                    <span>最新：{{ latestTimelineSummary }}</span>
+                  </div>
+                  <div class="timeline-list">
+                    <div v-for="item in timelineEventItems" :key="item.key" class="timeline-row">
+                      <time>{{ item.time }}</time>
+                      <div class="timeline-row-main">
+                        <strong>{{ item.title }}</strong>
+                        <span>{{ item.subtitle }}</span>
+                        <details v-if="item.outputKind === 'RagSearch' && item.sources.length" class="timeline-result-fold">
+                          <summary>
+                            检索结果 · {{ item.resultCount }} 条
+                            <template v-if="item.lowConfidence"> · 低置信度</template>
+                          </summary>
+                          <div class="timeline-source-list">
+                            <article v-for="source in item.sources" :key="`${item.key}:${source.documentId}:${source.chunkIndex}`" class="timeline-source-item">
+                              <strong>{{ source.documentName || `文档 ${source.documentId || '-'}` }}</strong>
+                              <small>
+                                {{ formatTimelineScore(source.score) }}
+                                <template v-if="source.isLowConfidence"> · 低置信度</template>
+                                <template v-if="source.lowConfidenceReason"> · {{ source.lowConfidenceReason }}</template>
+                              </small>
+                              <em v-if="source.textPreview">{{ source.textPreview }}</em>
+                            </article>
+                          </div>
+                        </details>
+                      </div>
+                      <AiTag :tone="item.tone">{{ item.status }}</AiTag>
+                    </div>
+                  </div>
+                </section>
+
+                <section v-if="store.currentWorkspace || taskArtifacts.length" class="runtime-section-block">
+                  <div class="runtime-section-title">
+                    <strong>产物详情</strong>
+                    <span>{{ artifactHeaderMeta }}</span>
+                  </div>
+                  <div v-if="chartBars.length" class="chart-preview">
+                    <div class="chart-preview-head">
+                      <span>图表预览</span>
+                      <small>{{ sourceModeLabel(store.chartPreview?.sourceLabel || store.chartPreview?.sourceMode || store.chartPreview?.source || 'workspace') }}</small>
+                    </div>
+                    <div v-for="bar in chartBars" :key="bar.label" class="chart-bar-row">
+                      <span>{{ bar.label }}</span>
+                      <div><i :style="{ width: bar.width }" /></div>
+                      <strong>{{ bar.value }}</strong>
+                    </div>
+                  </div>
+
+                  <div class="artifact-summary">
+                    <div>
+                      <span>工作区</span>
+                      <strong>{{ store.currentWorkspace?.workspaceCode || '-' }}</strong>
+                    </div>
+                    <div>
+                      <span>文件</span>
+                      <strong>{{ workspaceFileCount }}</strong>
+                    </div>
+                    <div>
+                      <span>草稿</span>
+                      <strong>{{ draftArtifacts.length }}</strong>
+                    </div>
+                    <div>
+                      <span>正式</span>
+                      <strong>{{ finalArtifacts.length }}</strong>
+                    </div>
+                  </div>
+                  <template v-if="artifactGroups.length">
+                    <div v-for="group in artifactGroups" :key="group.label" class="artifact-group">
+                      <div class="group-title">{{ group.label }}</div>
+                      <div v-for="artifact in group.artifacts" :key="artifact.id" class="artifact-row">
+                        <div>
+                          <strong>{{ artifact.name }}</strong>
+                          <span>v{{ artifact.artifactVersion || artifact.version }} · {{ artifact.artifactStatus || artifact.status }} · {{ artifact.approvalStatus || '-' }}</span>
+                          <span class="artifact-source-line">
+                            {{ artifact.sourceLabel || sourceModeLabel(artifact.sourceMode || 'UnknownSource') }}
+                            <template v-if="artifact.boundary"> · {{ artifact.boundary }}</template>
+                          </span>
+                        </div>
+                        <div class="artifact-actions">
+                          <button type="button" aria-label="预览产物" @click="previewArtifact(artifact.id)">
+                            <Eye :size="16" />
+                          </button>
+                          <button type="button" aria-label="下载产物" @click="downloadArtifact(artifact.id)">
+                            <Download :size="16" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+                  <div v-else class="panel-empty">暂无产物</div>
+                  <div v-if="currentArtifactPreview" class="artifact-preview-panel">
+                    <div class="section-title">
+                      <strong>{{ currentArtifactPreview.name }}</strong>
+                      <span>{{ currentArtifactPreview.previewKind }} · v{{ currentArtifactPreview.artifactVersion }}</span>
+                    </div>
+                    <pre v-if="currentArtifactPreview.content" class="artifact-preview-content">{{ currentArtifactPreview.content.slice(0, 1600) }}</pre>
+                    <div v-else-if="currentArtifactPreview.rows?.length" class="artifact-preview-table">
+                      <div class="artifact-preview-table-head">
+                        <span v-for="column in currentArtifactPreview.columns" :key="column">{{ column }}</span>
+                      </div>
+                      <div v-for="(row, index) in currentArtifactPreview.rows.slice(0, 5)" :key="index" class="artifact-preview-table-row">
+                        <span v-for="column in currentArtifactPreview.columns" :key="column">{{ row[column] ?? '-' }}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <button class="inline-secondary-action" type="button" :disabled="!canSubmitFinalReview || store.isAgentBusy" @click="submitFinalReview">
+                    提交最终审批
+                  </button>
+                </section>
               </div>
             </details>
-            <button class="inline-secondary-action" type="button" :disabled="!canSubmitFinalReview || store.isAgentBusy" @click="submitFinalReview">
-              提交最终审批
-            </button>
-          </section>
+          </article>
         </section>
       </div>
 
@@ -1359,6 +1543,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
 
 .message-list,
 .inline-agent-run,
+.agent-run-thread,
 .history-loader,
 .loading-lines {
   display: grid;
@@ -1392,6 +1577,329 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
 
 .inline-agent-run {
   margin-top: 18px;
+}
+
+.agent-run-thread {
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: flex-start;
+  margin-top: 16px;
+}
+
+.agent-avatar {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid rgba(63, 111, 115, 0.24);
+  border-radius: 999px;
+  background: var(--ai-graphite);
+  color: var(--ai-lime);
+  box-shadow: var(--ai-shadow-xs);
+}
+
+.agent-run-card {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid rgba(210, 207, 198, 0.84);
+  border-radius: 18px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: var(--ai-shadow-xs);
+}
+
+.agent-run-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+}
+
+.agent-run-header div,
+.agent-plan,
+.agent-approval-panel,
+.agent-artifacts {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.agent-run-header span,
+.agent-run-context span,
+.agent-plan-goal,
+.agent-step-preview li span,
+.agent-blocked-step,
+.artifact-attachment small {
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.agent-run-header h2 {
+  margin: 0;
+  color: var(--ai-text);
+  font-size: 18px;
+  font-weight: 950;
+  line-height: 1.35;
+}
+
+.agent-run-header p {
+  margin: 0;
+  color: var(--ai-text-muted);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.55;
+}
+
+.agent-run-context,
+.artifact-attachment-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+}
+
+.agent-run-context span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  border: 1px solid var(--ai-border);
+  border-radius: 999px;
+  padding: 0 9px;
+  background: var(--ai-surface-soft);
+  color: var(--ai-text);
+}
+
+.agent-run-notice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  border: 1px solid var(--ai-border);
+  border-radius: 12px;
+  padding: 9px 10px;
+  background: var(--ai-surface-soft);
+}
+
+.agent-run-notice span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.agent-run-notice strong,
+.agent-run-notice small {
+  overflow-wrap: anywhere;
+}
+
+.agent-run-notice strong {
+  color: var(--ai-text);
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.agent-run-notice small {
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.agent-run-notice svg {
+  margin-top: 2px;
+}
+
+.notice-warning {
+  border-color: rgba(217, 119, 6, 0.26);
+  background: rgba(255, 251, 235, 0.82);
+  color: #92400e;
+}
+
+.notice-success {
+  border-color: rgba(22, 163, 74, 0.22);
+  background: rgba(240, 253, 244, 0.82);
+  color: #166534;
+}
+
+.notice-danger {
+  border-color: rgba(220, 38, 38, 0.24);
+  background: rgba(254, 242, 242, 0.84);
+  color: #991b1b;
+}
+
+.agent-plan,
+.agent-approval-panel,
+.agent-artifacts {
+  border-left: 2px solid rgba(63, 111, 115, 0.2);
+  padding-left: 12px;
+}
+
+.agent-plan-goal {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.agent-skill-reason {
+  margin: 0;
+  border-left: 2px solid rgba(63, 111, 115, 0.24);
+  padding-left: 9px;
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.55;
+}
+
+.agent-step-preview {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-step-preview li {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.agent-step-preview i {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--ai-surface-soft);
+  color: var(--ai-graphite);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 950;
+}
+
+.agent-step-preview li > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ai-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-blocked-step {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #92400e;
+}
+
+.agent-thinking-details {
+  overflow: hidden;
+  border: 1px solid var(--ai-border);
+  border-radius: 14px;
+  background: var(--ai-surface-soft);
+}
+
+.agent-thinking-details > summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 11px 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.agent-thinking-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.agent-thinking-details[open] > summary {
+  border-bottom: 1px solid var(--ai-border);
+}
+
+.agent-thinking-details .runtime-sections {
+  padding: 12px;
+}
+
+.compact-status-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.artifact-attachment {
+  display: inline-grid;
+  grid-template-columns: minmax(0, 1fr) 30px;
+  gap: 6px;
+  align-items: center;
+  max-width: 260px;
+  border: 1px solid var(--ai-border);
+  border-radius: 12px;
+  padding: 4px;
+  background: var(--ai-surface-soft);
+  color: var(--ai-text);
+}
+
+.artifact-preview-trigger {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    "icon name"
+    "icon meta";
+  gap: 2px 8px;
+  align-items: center;
+  min-width: 0;
+  border: 0;
+  border-radius: 8px;
+  padding: 5px 6px;
+  background: transparent;
+  color: var(--ai-text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.artifact-preview-trigger:hover,
+.artifact-download-trigger:hover:not(:disabled) {
+  background: rgba(63, 111, 115, 0.08);
+}
+
+.artifact-preview-trigger svg {
+  grid-area: icon;
+}
+
+.artifact-preview-trigger span,
+.artifact-preview-trigger small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-preview-trigger span {
+  grid-area: name;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.artifact-preview-trigger small {
+  grid-area: meta;
+}
+
+.artifact-download-trigger {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ai-graphite);
+  cursor: pointer;
+}
+
+.artifact-download-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .canvas-error {
@@ -2113,9 +2621,9 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
 
 .command-composer {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   border-top: 1px solid var(--ai-border);
-  padding: 14px 18px 18px;
+  padding: 10px 18px 14px;
   background: rgba(251, 250, 247, 0.88);
   box-shadow: 0 -12px 30px rgba(70, 64, 55, 0.06);
 }
@@ -2125,6 +2633,9 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  max-width: 980px;
+  width: 100%;
+  margin: 0 auto;
 }
 
 .mode-switch {
@@ -2144,10 +2655,10 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
   align-items: center;
   justify-content: center;
   gap: 7px;
-  min-height: 34px;
+  min-height: 30px;
   border: 0;
   border-radius: 999px;
-  padding: 0 12px;
+  padding: 0 10px;
   background: transparent;
   color: var(--ai-text-muted);
   cursor: pointer;
@@ -2346,10 +2857,13 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
 
 .composer-input-row {
   gap: 10px;
-  min-height: 60px;
+  max-width: 980px;
+  width: 100%;
+  min-height: 52px;
+  margin: 0 auto;
   border: 1px solid var(--ai-border);
-  border-radius: 24px;
-  padding: 10px 10px 10px 18px;
+  border-radius: 18px;
+  padding: 8px 8px 8px 14px;
   background: var(--ai-surface);
   box-shadow: var(--ai-shadow-xs);
 }
@@ -2362,8 +2876,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
 .composer-input-row textarea {
   width: 100%;
   min-width: 0;
-  max-height: 160px;
-  resize: vertical;
+  max-height: 130px;
+  resize: none;
   border: 0;
   outline: none;
   background: transparent;
@@ -2380,7 +2894,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
   gap: 8px;
   justify-content: center;
   min-width: 112px;
-  height: 46px;
+  height: 38px;
   border: 0;
   border-radius: 999px;
   padding: 0 18px;

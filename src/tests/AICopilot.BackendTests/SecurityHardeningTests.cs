@@ -612,6 +612,26 @@ public sealed class SecurityHardeningTests
     }
 
     [Fact]
+    public void ApiControllerBase_ShouldReturnProblemDetailsForErrorBranches()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var baseControllerSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "hosts",
+            "AICopilot.HttpApi",
+            "Infrastructure",
+            "ApiControllerBase.cs"));
+
+        baseControllerSource.Should().Contain("case ResultStatus.Error:");
+        baseControllerSource.Should().Contain("case ResultStatus.Invalid:");
+        baseControllerSource.Should().Contain("case ResultStatus.NotFound:");
+        baseControllerSource.Should().Contain("CreateProblemDetails(StatusCodes.Status400BadRequest, result.Errors)");
+        baseControllerSource.Should().Contain("CreateProblemDetails(StatusCodes.Status404NotFound, result.Errors)");
+        baseControllerSource.Should().NotContain("new { errors = result.Errors }");
+    }
+
+    [Fact]
     public void IdentityManagementWrites_ShouldRequireAuthAndManagementRateLimit()
     {
         AssertIdentityManagementEndpoint(nameof(IdentityController.CreateRole));

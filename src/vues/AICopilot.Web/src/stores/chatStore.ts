@@ -265,9 +265,9 @@ export const useChatStore = defineStore('chat', () => {
   async function loadAgentTasks(sessionId: string) {
     try {
       agentTasks.value = await chatService.getAgentTasksBySession(sessionId)
-      const taskWithWorkspace = agentTasks.value.find((task) => Boolean(task.workspaceCode))
-      if (taskWithWorkspace) {
-        await refreshWorkspace(taskWithWorkspace)
+      const latestTask = agentTasks.value[0] ?? null
+      if (latestTask?.workspaceCode) {
+        await refreshWorkspace(latestTask)
       } else {
         currentWorkspace.value = null
         currentArtifactPreview.value = null
@@ -315,6 +315,24 @@ export const useChatStore = defineStore('chat', () => {
     } catch {
       agentAuditSummary.value = []
     }
+  }
+
+  async function refreshAgentTaskSnapshot(taskId: string) {
+    if (sessionStore.currentSessionId) {
+      await loadAgentTasks(sessionStore.currentSessionId)
+      await loadTimeline(sessionStore.currentSessionId)
+    } else {
+      await loadAgentApprovals(taskId)
+      await loadAgentAuditSummary(taskId)
+    }
+  }
+
+  function findPendingPlanApproval(taskId: string) {
+    return agentApprovals.value.find((approval) =>
+      approval.taskId === taskId &&
+      approval.type === 'Plan' &&
+      approval.status === 'Pending'
+    ) ?? null
   }
 
   async function refreshWorkspace(task: AgentTask) {
@@ -506,7 +524,74 @@ export const useChatStore = defineStore('chat', () => {
       return updated
     } catch (error) {
       agentErrorMessage.value = toFriendlyMessage(error)
+      await refreshAgentTaskSnapshot(taskId)
       return null
+    } finally {
+      isAgentBusy.value = false
+    }
+  }
+
+  async function retryAgentTask(taskId: string) {
+    if (isAgentBusy.value) {
+      return null
+    }
+
+    isAgentBusy.value = true
+    agentErrorMessage.value = null
+    try {
+      const updated = await chatService.retryAgentTask(taskId)
+      upsertAgentTask(updated)
+      await loadAgentApprovals(taskId)
+      await loadAgentAuditSummary(taskId)
+      await refreshWorkspace(updated)
+      if (sessionStore.currentSessionId) {
+        await loadTimeline(sessionStore.currentSessionId)
+      }
+      return updated
+    } catch (error) {
+      agentErrorMessage.value = toFriendlyMessage(error)
+      await refreshAgentTaskSnapshot(taskId)
+      return null
+    } finally {
+      isAgentBusy.value = false
+    }
+  }
+
+  async function approveAndRunAgentTask(taskId: string) {
+    if (isAgentBusy.value) {
+      return null
+    }
+
+    isAgentBusy.value = true
+    agentErrorMessage.value = null
+    let planApproved = false
+    try {
+      const pendingPlanApproval = findPendingPlanApproval(taskId)
+      if (pendingPlanApproval) {
+        await chatService.decideAgentApproval(
+          pendingPlanApproval.id,
+          'approve',
+          'Approved from primary plan CTA'
+        )
+      } else {
+        const approved = await chatService.approveAgentTaskPlan(taskId)
+        upsertAgentTask(approved)
+      }
+
+      planApproved = true
+      const updated = await chatService.runAgentTask(taskId)
+      upsertAgentTask(updated)
+      await loadAgentApprovals(taskId)
+      await loadAgentAuditSummary(taskId)
+      await refreshWorkspace(updated)
+      if (sessionStore.currentSessionId) {
+        await loadTimeline(sessionStore.currentSessionId)
+      }
+      return updated
+    } catch (error) {
+      agentErrorMessage.value = toFriendlyMessage(error)
+      await refreshAgentTaskSnapshot(taskId)
+      return planApproved ? (agentTasks.value.find((task) => task.id === taskId) ?? null) : null
     } finally {
       isAgentBusy.value = false
     }
@@ -907,7 +992,10 @@ export const useChatStore = defineStore('chat', () => {
     uploadSessionFile,
     planAgentTask,
     runAgentTask,
+    retryAgentTask,
+    approveAndRunAgentTask,
     decideAgentApproval,
+    refreshAgentTaskSnapshot,
     loadAgentAuditSummary,
     loadArtifactPreview,
     submitFinalReview,

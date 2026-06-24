@@ -119,7 +119,17 @@ public sealed class PlanAgentTaskCommandHandler(
         }
 
         var preparation = preparationResult.Value!;
-        var effectiveSkillCode = await ResolveEffectiveSkillCodeAsync(request, cancellationToken);
+        var skillSelection = await ResolveEffectiveSkillAsync(request, cancellationToken);
+        if (AutoSkillSelectionRequired(request) && string.IsNullOrWhiteSpace(skillSelection?.SkillCode))
+        {
+            return Result.Failure(new ApiProblemDescriptor(
+                AppProblemCodes.AgentSkillSelectionRequired,
+                skillSelection?.Reason?.Trim() is { Length: > 0 } reason
+                    ? reason
+                    : "无法自动识别合适的 Skill。请补充任务目标，或手动选择一个 Skill 后重新生成计划。"));
+        }
+
+        var effectiveSkillCode = skillSelection?.SkillCode;
         var skillResult = skillDefinitionGuard is null
             ? Result.Success<SkillDefinition?>(null)
             : await skillDefinitionGuard.ResolveAsync(effectiveSkillCode, cancellationToken);
@@ -379,7 +389,8 @@ ValidateAndPersistPlan:
             MockMcpOnly: true,
             toolApprovalCheckpoints,
             SkillCode: selectedSkill?.SkillCode,
-            SkillName: selectedSkill?.DisplayName);
+            SkillName: selectedSkill?.DisplayName,
+            SkillRoutingReason: skillSelection?.Reason);
 
         var now = DateTimeOffset.UtcNow;
         var task = new AgentTask(
@@ -435,18 +446,24 @@ ValidateAndPersistPlan:
         return string.Equals(currentUser.Role, "Admin", StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task<string?> ResolveEffectiveSkillCodeAsync(
+    private async Task<AgentSkillSelection?> ResolveEffectiveSkillAsync(
         PlanAgentTaskCommand request,
         CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(request.SkillCode))
         {
-            return request.SkillCode.Trim();
+            return new AgentSkillSelection(request.SkillCode.Trim(), "用户手动选择 Skill。");
         }
 
         return skillAutoSelector is null
             ? null
-            : await skillAutoSelector.SelectSkillCodeAsync(request.SessionId, request.Goal, cancellationToken);
+            : await skillAutoSelector.SelectSkillAsync(request.SessionId, request.Goal, cancellationToken);
+    }
+
+    private bool AutoSkillSelectionRequired(PlanAgentTaskCommand request)
+    {
+        return skillAutoSelector is not null &&
+               string.IsNullOrWhiteSpace(request.SkillCode);
     }
 
     private static AgentTaskType ResolveEffectiveTaskType(AgentTaskType requestedTaskType, SkillDefinition? skill)

@@ -41,6 +41,7 @@ public static class IntentRoutingResultParser
             }
 
             intents = intents
+                .Select(NormalizeIntent)
                 .Where(intent => !string.IsNullOrWhiteSpace(intent.Intent))
                 .ToList();
 
@@ -50,6 +51,23 @@ public static class IntentRoutingResultParser
         {
             return false;
         }
+    }
+
+    private static IntentResult NormalizeIntent(IntentResult intent)
+    {
+        if (string.IsNullOrWhiteSpace(intent.Intent) &&
+            !string.IsNullOrWhiteSpace(intent.SkillCode))
+        {
+            intent.Intent = $"Skill.{intent.SkillCode.Trim()}";
+        }
+
+        if (string.IsNullOrWhiteSpace(intent.Reasoning) &&
+            !string.IsNullOrWhiteSpace(intent.Reason))
+        {
+            intent.Reasoning = intent.Reason.Trim();
+        }
+
+        return intent;
     }
 
     private static string? ExtractJson(string text)

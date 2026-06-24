@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { ApiError } from '@/services/apiClient'
 import { useChatStore } from '@/stores/chatStore'
 import { useSessionStore } from '@/stores/sessionStore'
 
@@ -8,9 +9,15 @@ const chatServiceMock = vi.hoisted(() => ({
   getToolCatalog: vi.fn(),
   getKnowledgeBases: vi.fn(),
   planAgentTask: vi.fn(),
+  approveAgentTaskPlan: vi.fn(),
+  decideAgentApproval: vi.fn(),
+  runAgentTask: vi.fn(),
+  retryAgentTask: vi.fn(),
+  getAgentTasksBySession: vi.fn(),
   getAgentTaskApprovals: vi.fn(),
   getAgentTaskAuditSummary: vi.fn(),
-  getTimeline: vi.fn()
+  getTimeline: vi.fn(),
+  downloadArtifact: vi.fn()
 }))
 
 vi.mock('@/services/chatService', () => ({
@@ -201,6 +208,32 @@ const plannedTask = {
   isRunQueued: false
 }
 
+function createTask(overrides: Partial<typeof plannedTask> = {}) {
+  return {
+    ...plannedTask,
+    ...overrides
+  }
+}
+
+function createPlanApproval(overrides = {}) {
+  return {
+    id: 'approval-1',
+    taskId: 'task-1',
+    targetId: 'task-1',
+    type: 'Plan',
+    status: 'Pending',
+    targetName: '计划确认',
+    reason: '执行前确认计划',
+    riskLevel: 'Low',
+    requestedAt: '2026-06-22T07:00:00Z',
+    decidedAt: null,
+    decidedBy: null,
+    decision: null,
+    comment: null,
+    ...overrides
+  }
+}
+
 describe('chatStore skills', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -210,8 +243,22 @@ describe('chatStore skills', () => {
     chatServiceMock.getToolCatalog.mockResolvedValue(toolCatalog)
     chatServiceMock.getKnowledgeBases.mockResolvedValue(knowledgeBases)
     chatServiceMock.planAgentTask.mockResolvedValue(plannedTask)
+    chatServiceMock.approveAgentTaskPlan.mockResolvedValue(createTask({ status: 'PlanApproved', canRun: true }))
+    chatServiceMock.decideAgentApproval.mockResolvedValue(createPlanApproval({ status: 'Approved' }))
+    chatServiceMock.runAgentTask.mockResolvedValue(createTask({
+      status: 'Running',
+      canRun: false,
+      isRunInProgress: true
+    }))
+    chatServiceMock.retryAgentTask.mockResolvedValue(createTask({
+      status: 'Running',
+      canRetry: false,
+      isRunInProgress: true
+    }))
+    chatServiceMock.getAgentTasksBySession.mockResolvedValue([plannedTask])
     chatServiceMock.getAgentTaskApprovals.mockResolvedValue([])
     chatServiceMock.getAgentTaskAuditSummary.mockResolvedValue([])
+    chatServiceMock.downloadArtifact.mockResolvedValue(new Blob(['report']))
     chatServiceMock.getTimeline.mockResolvedValue({
       items: [],
       beforeSequence: null,
@@ -323,5 +370,114 @@ describe('chatStore skills', () => {
       skillCode: null,
       preferredToolCodes: ['rag_search']
     }))
+  })
+
+  it('approves a pending plan approval before running the task', async () => {
+    const sessionStore = useSessionStore()
+    sessionStore.persistCurrentSession('session-1')
+    const store = useChatStore()
+    store.agentApprovals = [createPlanApproval()]
+
+    await store.approveAndRunAgentTask('task-1')
+
+    expect(chatServiceMock.decideAgentApproval).toHaveBeenCalledWith(
+      'approval-1',
+      'approve',
+      'Approved from primary plan CTA'
+    )
+    expect(chatServiceMock.approveAgentTaskPlan).not.toHaveBeenCalled()
+    expect(chatServiceMock.runAgentTask).toHaveBeenCalledWith('task-1')
+  })
+
+  it('keeps the approved plan state visible when run fails after approval', async () => {
+    const sessionStore = useSessionStore()
+    sessionStore.persistCurrentSession('session-1')
+    const approvedTask = createTask({
+      status: 'PlanApproved',
+      canRun: true
+    })
+    const store = useChatStore()
+    chatServiceMock.getAgentTasksBySession.mockResolvedValue([approvedTask])
+    chatServiceMock.runAgentTask.mockRejectedValue(new ApiError('API Error: 400', 400, {
+      code: 'agent_worker_unavailable',
+      detail: '没有可用 DataWorker，任务尚未入队。'
+    }))
+
+    await store.approveAndRunAgentTask('task-1')
+
+    expect(chatServiceMock.approveAgentTaskPlan).toHaveBeenCalledWith('task-1')
+    expect(store.latestAgentTask?.status).toBe('PlanApproved')
+    expect(store.agentErrorMessage).toBe('没有可用 DataWorker，任务尚未入队。')
+  })
+
+  it('uses the retry endpoint for failed tasks', async () => {
+    const store = useChatStore()
+
+    await store.retryAgentTask('task-1')
+
+    expect(chatServiceMock.retryAgentTask).toHaveBeenCalledWith('task-1')
+    expect(chatServiceMock.runAgentTask).not.toHaveBeenCalled()
+  })
+
+  it('downloads artifacts only through the backend supplied download URL', async () => {
+    const click = vi.fn()
+    const anchor = {
+      href: '',
+      download: '',
+      click
+    }
+    const createObjectURL = vi.fn(() => 'blob:artifact')
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal('document', {
+      createElement: vi.fn(() => anchor)
+    })
+    vi.stubGlobal('URL', {
+      createObjectURL,
+      revokeObjectURL
+    })
+    const store = useChatStore()
+
+    await store.downloadArtifact({
+      id: 'artifact-1',
+      taskId: 'task-1',
+      name: 'report.pdf',
+      type: 'Report',
+      status: 'Draft',
+      relativePath: 'draft/report.pdf',
+      fileSize: 1024,
+      mimeType: 'application/pdf',
+      version: 1,
+      updatedAt: '2026-06-22T07:00:00Z',
+      previewKind: 'pdf',
+      downloadUrl: '/api/aigateway/artifact/artifact-1/download'
+    })
+
+    expect(chatServiceMock.downloadArtifact).toHaveBeenCalledWith('/api/aigateway/artifact/artifact-1/download')
+    expect(anchor.href).toBe('blob:artifact')
+    expect(anchor.download).toBe('report.pdf')
+    expect(click).toHaveBeenCalledOnce()
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:artifact')
+  })
+
+  it('does not fabricate an artifact download path when the backend omits it', async () => {
+    const store = useChatStore()
+
+    await store.downloadArtifact({
+      id: 'artifact-1',
+      taskId: 'task-1',
+      name: 'report.pdf',
+      type: 'Report',
+      status: 'Draft',
+      relativePath: 'draft/report.pdf',
+      fileSize: 1024,
+      mimeType: 'application/pdf',
+      version: 1,
+      updatedAt: '2026-06-22T07:00:00Z',
+      previewKind: 'pdf',
+      downloadUrl: ''
+    })
+
+    expect(chatServiceMock.downloadArtifact).not.toHaveBeenCalled()
+    expect(store.agentErrorMessage).toContain('后端未返回产物下载地址')
   })
 })

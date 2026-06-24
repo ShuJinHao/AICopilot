@@ -90,4 +90,23 @@ describe('apiClient endpoint trust', () => {
     await apiClient.get('/identity/me', undefined, { timeoutMs: 1000 })
     expect(fetchMock.mock.calls[1][1]?.signal).toBeInstanceOf(AbortSignal)
   })
+
+  it('reads code and detail from ProblemDetails error payloads', async () => {
+    installBrowserGlobals()
+    const { getProblemDetails } = await loadApiClient()
+
+    expect(getProblemDetails({
+      title: 'Bad Request',
+      status: 400,
+      code: 'agent_plan_tool_denied',
+      detail: 'toolCode is not allowed by the selected skill.',
+      errors: ['legacy field should be ignored']
+    })).toEqual({
+      title: 'Bad Request',
+      status: 400,
+      code: 'agent_plan_tool_denied',
+      detail: 'toolCode is not allowed by the selected skill.',
+      missingPermissions: undefined
+    })
+  })
 })

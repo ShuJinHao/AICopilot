@@ -668,7 +668,8 @@ public sealed class Phase25RuntimeSmokeTests
         var languageModelId = await CreateLanguageModelAsync(
             languageModelName,
             BuildFakeAiBaseUrl(),
-            "sk-chat");
+            "sk-chat",
+            usages: ["Chat", "Routing"]);
 
         var generalTemplateName = $"GeneralAgent-{Guid.NewGuid():N}";
         var generalTemplateId = await CreateConversationTemplateAsync(
@@ -683,6 +684,7 @@ public sealed class Phase25RuntimeSmokeTests
             languageModelId,
             "意图识别",
             "你负责从下面的意图列表中选择最匹配的一项，并返回 JSON 数组。{{$IntentList}}");
+        var routingConfigurationId = await CreateActiveRoutingModelAsync(languageModelId);
 
         var approvalId = await CreateApprovalPolicyAsync(
             $"chat-approval-{Guid.NewGuid():N}",
@@ -852,6 +854,7 @@ public sealed class Phase25RuntimeSmokeTests
         await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/approval-policy", new { id = approvalId }, HttpStatusCode.NoContent);
         await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/conversation-template", new { id = intentRoutingTemplateId }, HttpStatusCode.NoContent);
         await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/conversation-template", new { id = generalTemplateId }, HttpStatusCode.NoContent);
+        await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/routing-model", new { id = routingConfigurationId }, HttpStatusCode.NoContent);
         await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/language-model", new { id = languageModelId }, HttpStatusCode.NoContent);
     }
 
@@ -1004,6 +1007,7 @@ public sealed class Phase25RuntimeSmokeTests
         await AuthenticateAsAdminAsync();
 
         Guid languageModelId = Guid.Empty;
+        Guid routingConfigurationId = Guid.Empty;
         Guid generalTemplateId = Guid.Empty;
         Guid intentRoutingTemplateId = Guid.Empty;
         Guid approvalId = Guid.Empty;
@@ -1014,7 +1018,8 @@ public sealed class Phase25RuntimeSmokeTests
             languageModelId = await CreateLanguageModelAsync(
                 $"approval-lock-lm-{Guid.NewGuid():N}",
                 BuildFakeAiBaseUrl(),
-                "sk-approval-lock");
+                "sk-approval-lock",
+                usages: ["Chat", "Routing"]);
 
             generalTemplateId = await CreateConversationTemplateAsync(
                 $"approval-lock-general-{Guid.NewGuid():N}",
@@ -1028,6 +1033,7 @@ public sealed class Phase25RuntimeSmokeTests
                 languageModelId,
                 "审批串行化意图识别",
                 "从意图列表中选择最匹配的一项，并返回 JSON 数组。{{$IntentList}}");
+            routingConfigurationId = await CreateActiveRoutingModelAsync(languageModelId);
 
             approvalId = await CreateApprovalPolicyAsync(
                 $"approval-lock-{Guid.NewGuid():N}",
@@ -1131,6 +1137,11 @@ public sealed class Phase25RuntimeSmokeTests
                 await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/conversation-template", new { id = generalTemplateId }, HttpStatusCode.NoContent);
             }
 
+            if (routingConfigurationId != Guid.Empty)
+            {
+                await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/routing-model", new { id = routingConfigurationId }, HttpStatusCode.NoContent);
+            }
+
             if (languageModelId != Guid.Empty)
             {
                 await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/language-model", new { id = languageModelId }, HttpStatusCode.NoContent);
@@ -1174,6 +1185,7 @@ public sealed class Phase25RuntimeSmokeTests
         var semanticDatabase = await ProvisionSemanticBusinessDatabaseAsync();
         Guid businessDatabaseId = Guid.Empty;
         Guid languageModelId = Guid.Empty;
+        Guid routingConfigurationId = Guid.Empty;
         Guid generalTemplateId = Guid.Empty;
         Guid intentRoutingTemplateId = Guid.Empty;
         Guid sessionId = Guid.Empty;
@@ -1266,6 +1278,7 @@ public sealed class Phase25RuntimeSmokeTests
         var semanticDatabase = await ProvisionSemanticBusinessDatabaseAsync();
         Guid businessDatabaseId = Guid.Empty;
         Guid languageModelId = Guid.Empty;
+        Guid routingConfigurationId = Guid.Empty;
         Guid generalTemplateId = Guid.Empty;
         Guid intentRoutingTemplateId = Guid.Empty;
         Guid sessionId = Guid.Empty;
@@ -1282,7 +1295,8 @@ public sealed class Phase25RuntimeSmokeTests
             languageModelId = await CreateLanguageModelAsync(
                 $"semantic-lm-{Guid.NewGuid():N}",
                 BuildFakeAiBaseUrl(),
-                "sk-semantic-chat");
+                "sk-semantic-chat",
+                usages: ["Chat", "Routing"]);
 
             generalTemplateId = await CreateConversationTemplateAsync(
                 $"SemanticAgent-{Guid.NewGuid():N}",
@@ -1296,6 +1310,7 @@ public sealed class Phase25RuntimeSmokeTests
                 languageModelId,
                 "intent routing",
                 "You must choose the best intent from the list and return a JSON array. {{$IntentList}}");
+            routingConfigurationId = await CreateActiveRoutingModelAsync(languageModelId);
 
             sessionId = await CreateSessionAsync(generalTemplateId);
 
@@ -1440,6 +1455,11 @@ public sealed class Phase25RuntimeSmokeTests
                 await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/conversation-template", new { id = generalTemplateId }, HttpStatusCode.NoContent);
             }
 
+            if (routingConfigurationId != Guid.Empty)
+            {
+                await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/routing-model", new { id = routingConfigurationId }, HttpStatusCode.NoContent);
+            }
+
             if (languageModelId != Guid.Empty)
             {
                 await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/language-model", new { id = languageModelId }, HttpStatusCode.NoContent);
@@ -1546,6 +1566,7 @@ public sealed class Phase25RuntimeSmokeTests
         var semanticDatabase = await ProvisionSemanticBusinessDatabaseAsync();
         Guid businessDatabaseId = Guid.Empty;
         Guid languageModelId = Guid.Empty;
+        Guid routingConfigurationId = Guid.Empty;
         Guid generalTemplateId = Guid.Empty;
         Guid intentRoutingTemplateId = Guid.Empty;
         Guid sessionId = Guid.Empty;
@@ -1563,7 +1584,8 @@ public sealed class Phase25RuntimeSmokeTests
             languageModelId = await CreateLanguageModelAsync(
                 $"semantic-business-lm-{Guid.NewGuid():N}",
                 BuildFakeAiBaseUrl(),
-                "sk-semantic-business");
+                "sk-semantic-business",
+                usages: ["Chat", "Routing"]);
 
             generalTemplateId = await CreateConversationTemplateAsync(
                 $"SemanticBusinessAgent-{Guid.NewGuid():N}",
@@ -1577,6 +1599,7 @@ public sealed class Phase25RuntimeSmokeTests
                 languageModelId,
                 "intent routing",
                 "You must choose the best intent from the list and return a JSON array. {{$IntentList}}");
+            routingConfigurationId = await CreateActiveRoutingModelAsync(languageModelId);
 
             sessionId = await CreateSessionAsync(generalTemplateId);
 
@@ -1633,6 +1656,11 @@ public sealed class Phase25RuntimeSmokeTests
                 await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/conversation-template", new { id = generalTemplateId }, HttpStatusCode.NoContent);
             }
 
+            if (routingConfigurationId != Guid.Empty)
+            {
+                await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/routing-model", new { id = routingConfigurationId }, HttpStatusCode.NoContent);
+            }
+
             if (languageModelId != Guid.Empty)
             {
                 await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/language-model", new { id = languageModelId }, HttpStatusCode.NoContent);
@@ -1651,6 +1679,7 @@ public sealed class Phase25RuntimeSmokeTests
         await AuthenticateAsAdminAsync();
 
         Guid languageModelId = Guid.Empty;
+        Guid routingConfigurationId = Guid.Empty;
         Guid generalTemplateId = Guid.Empty;
         Guid intentRoutingTemplateId = Guid.Empty;
         Guid sessionId = Guid.Empty;
@@ -1660,7 +1689,8 @@ public sealed class Phase25RuntimeSmokeTests
             languageModelId = await CreateLanguageModelAsync(
                 $"policy-lm-{Guid.NewGuid():N}",
                 BuildFakeAiBaseUrl(),
-                "sk-policy");
+                "sk-policy",
+                usages: ["Chat", "Routing"]);
 
             generalTemplateId = await CreateConversationTemplateAsync(
                 $"PolicyAgent-{Guid.NewGuid():N}",
@@ -1674,6 +1704,7 @@ public sealed class Phase25RuntimeSmokeTests
                 languageModelId,
                 "intent routing",
                 "You must choose the best intent from the list and return a JSON array. {{$IntentList}}");
+            routingConfigurationId = await CreateActiveRoutingModelAsync(languageModelId);
 
             sessionId = await CreateSessionAsync(generalTemplateId);
 
@@ -1711,6 +1742,11 @@ public sealed class Phase25RuntimeSmokeTests
             if (generalTemplateId != Guid.Empty)
             {
                 await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/conversation-template", new { id = generalTemplateId }, HttpStatusCode.NoContent);
+            }
+
+            if (routingConfigurationId != Guid.Empty)
+            {
+                await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/routing-model", new { id = routingConfigurationId }, HttpStatusCode.NoContent);
             }
 
             if (languageModelId != Guid.Empty)
@@ -1780,6 +1816,18 @@ public sealed class Phase25RuntimeSmokeTests
         });
 
         created.Id.Should().NotBeEmpty();
+        return created.Id;
+    }
+
+    private async Task<Guid> CreateActiveRoutingModelAsync(Guid modelId)
+    {
+        var created = await PostJsonAsync<RoutingModelConfigurationDto>("/api/aigateway/routing-model", new
+        {
+            name = $"runtime-routing-{Guid.NewGuid():N}",
+            modelId,
+            isActive = true
+        });
+
         return created.Id;
     }
 

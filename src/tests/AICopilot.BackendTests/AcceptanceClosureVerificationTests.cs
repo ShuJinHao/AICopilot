@@ -225,6 +225,7 @@ public sealed class AcceptanceClosureVerificationTests
         {
             sessionId = session.Id,
             goal = "Generate a controlled acceptance report from the uploaded CSV.",
+            skillCode = "artifact_report",
             taskType = 2,
             modelId = (Guid?)null,
             uploadIds = new[] { upload.Id },
@@ -393,6 +394,7 @@ public sealed class AcceptanceClosureVerificationTests
         {
             sessionId = session.Id,
             goal = "Create a report that should be rejected before execution.",
+            skillCode = "artifact_report",
             taskType = 2,
             modelId = (Guid?)null,
             uploadIds = Array.Empty<Guid>(),

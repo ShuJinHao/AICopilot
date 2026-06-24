@@ -16,6 +16,27 @@ describe('chatErrorStore', () => {
     ).toBe('custom approval message')
   })
 
+  it('keeps planner and worker diagnostics visible', () => {
+    expect(
+      resolveChatErrorMessage({
+        code: 'agent_plan_tool_denied',
+        detail: 'toolCode query_device_logs is not allowed by skill general_report.'
+      })
+    ).toBe('toolCode query_device_logs is not allowed by skill general_report.')
+
+    expect(
+      resolveChatErrorMessage({
+        code: 'agent_worker_unavailable'
+      })
+    ).toBe('当前没有可用 DataWorker，请检查 Worker 状态。')
+
+    expect(
+      resolveChatErrorMessage({
+        code: 'agent_skill_selection_required'
+      })
+    ).toBe('无法自动识别合适的 Skill，请补充任务目标或手动选择 Skill 后重试。')
+  })
+
   it('scopes active errors to the current session', () => {
     const store = useChatErrorStore()
 

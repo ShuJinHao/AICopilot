@@ -445,15 +445,27 @@ public sealed class ToolRegistryGovernanceTests
     }
 
     [Fact]
-    public void IntentRoutingSkillAutoSelector_ShouldChooseHighestConfidenceSkillIntent()
+    public void AgentSkillRouterAutoSelector_ParseSelection_ShouldParseSimplifiedSkillObject()
     {
-        var selected = IntentRoutingSkillAutoSelector.SelectBestSkillCode([
-            new IntentResult { Intent = "Skill.general_report", Confidence = 0.42 },
-            new IntentResult { Intent = "Analysis.Device.List", Confidence = 0.99 },
-            new IntentResult { Intent = "Skill.cloud_readonly", Confidence = 0.88 }
-        ]);
+        var selected = AgentSkillRouterAutoSelector.ParseSelection(
+            """
+            ```json
+            {"skillCode":"cloud_readonly","reason":"用户要求查看云端设备日志并生成报告。"}
+            ```
+            """);
 
-        selected.Should().Be("cloud_readonly");
+        selected.Should().Be(new AgentSkillSelection(
+            "cloud_readonly",
+            "用户要求查看云端设备日志并生成报告。"));
+    }
+
+    [Fact]
+    public void AgentSkillRouterAutoSelector_ParseSelection_ShouldKeepNoMatchReason()
+    {
+        var selected = AgentSkillRouterAutoSelector.ParseSelection(
+            """{"skillCode":null,"reason":"目标不明确，需要用户补充。"}""");
+
+        selected.Should().Be(new AgentSkillSelection(null, "目标不明确，需要用户补充。"));
     }
 
     [Fact]
@@ -487,9 +499,34 @@ public sealed class ToolRegistryGovernanceTests
         task.Steps.Should().Contain(step => step.ToolCode == "query_cloud_data_readonly");
         using var plan = JsonDocument.Parse(task.PlanJson);
         plan.RootElement.GetProperty("skillCode").GetString().Should().Be("cloud_readonly");
+        plan.RootElement.GetProperty("skillRoutingReason").GetString().Should().Be("test selector");
         plan.RootElement.GetProperty("taskType").GetString().Should().Be("CloudDataReport");
         plan.RootElement.GetProperty("plannerSafetySummary").GetProperty("planSource").GetString()
             .Should().Be("Skill.cloud_readonly");
+    }
+
+    [Fact]
+    public async Task PlanAgentTask_ShouldRejectWhenAutoSkillSelectorCannotMatch()
+    {
+        var session = new Session(UserId, ConversationTemplateId.New());
+        var taskRepository = new InMemoryRepository<AgentTask>();
+        var handler = CreatePlanHandler(
+            session,
+            CreateAgentRuntimeGuardWithCloudEnabled(),
+            taskRepository: taskRepository,
+            skillDefinitionGuard: CreateSkillGuard(),
+            skillAutoSelector: new FixedSkillAutoSelector(null, "目标不明确，需要用户补充。"));
+
+        var result = await handler.Handle(
+            new PlanAgentTaskCommand(session.Id.Value, "帮我看看", AgentTaskType.ReportGeneration, null),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeFalse();
+        result.Errors.Should().ContainSingle()
+            .Which.Should().BeEquivalentTo(new ApiProblemDescriptor(
+                AppProblemCodes.AgentSkillSelectionRequired,
+                "目标不明确，需要用户补充。"));
+        taskRepository.Items.Should().BeEmpty();
     }
 
     [Fact]
@@ -2794,14 +2831,14 @@ public sealed class ToolRegistryGovernanceTests
         }
     }
 
-    private sealed class FixedSkillAutoSelector(string? skillCode) : IAgentSkillAutoSelector
+    private sealed class FixedSkillAutoSelector(string? skillCode, string? reason = "test selector") : IAgentSkillAutoSelector
     {
-        public Task<string?> SelectSkillCodeAsync(
+        public Task<AgentSkillSelection?> SelectSkillAsync(
             Guid sessionId,
             string goal,
             CancellationToken cancellationToken)
         {
-            return Task.FromResult(skillCode);
+            return Task.FromResult<AgentSkillSelection?>(new AgentSkillSelection(skillCode, reason));
         }
     }
 

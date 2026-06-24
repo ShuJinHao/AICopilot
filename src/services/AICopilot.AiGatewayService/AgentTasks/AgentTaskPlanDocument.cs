@@ -35,7 +35,8 @@ internal sealed record AgentTaskPlanDocument(
     [property: JsonPropertyName("mockMcpOnly")] bool MockMcpOnly = true,
     [property: JsonPropertyName("toolApprovalCheckpoints")] IReadOnlyCollection<string>? ToolApprovalCheckpoints = null,
     [property: JsonPropertyName("skillCode")] string? SkillCode = null,
-    [property: JsonPropertyName("skillName")] string? SkillName = null);
+    [property: JsonPropertyName("skillName")] string? SkillName = null,
+    [property: JsonPropertyName("skillRoutingReason")] string? SkillRoutingReason = null);
 
 internal sealed record AgentTaskPlanCloudReadonlyIntentDocument(
     [property: JsonPropertyName("intent")] string Intent,

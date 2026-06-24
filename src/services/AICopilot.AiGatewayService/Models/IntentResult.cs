@@ -24,6 +24,13 @@ public record IntentResult
     public string Intent { get; set; } = string.Empty;
 
     /// <summary>
+    /// Agent Skill 自动选择的简化输出字段。
+    /// 当模型只返回 skillCode 时，解析器会把它规范化为 Skill.{SkillCode} 意图。
+    /// </summary>
+    [JsonPropertyName("skillCode")]
+    public string? SkillCode { get; set; }
+
+    /// <summary>
     /// 置信度 (0.0 - 1.0)
     /// 用于下游节点的“置信度门控”机制
     /// </summary>
@@ -36,6 +43,12 @@ public record IntentResult
     /// </summary>
     [JsonPropertyName("reasoning")]
     public string? Reasoning { get; set; }
+
+    /// <summary>
+    /// Agent Skill 自动选择的简化依据字段。
+    /// </summary>
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
 
     /// <summary>
     /// 检索参数

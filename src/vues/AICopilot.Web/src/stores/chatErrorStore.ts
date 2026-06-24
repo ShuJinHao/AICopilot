@@ -35,6 +35,18 @@ export function resolveChatErrorMessage(payload: ChatErrorPayload) {
       return userFacingMessage ?? '当前账号没有调用该工具的权限。'
     case 'agent_plan_invalid':
       return userFacingMessage ?? 'Agent 计划未通过后端校验，请调整任务目标后重新生成。'
+    case 'agent_plan_tool_denied':
+      return userFacingMessage ?? '计划包含当前 Skill 不允许的工具，请调整 Skill 或重新生成计划。'
+    case 'agent_plan_schema_invalid':
+      return userFacingMessage ?? '计划步骤输入不符合工具 schema，请重新生成计划。'
+    case 'planner_tool_catalog_empty':
+      return userFacingMessage ?? '当前 Skill 没有可用工具，请检查 Skill 与 Tool Registry 配置。'
+    case 'planner_tool_schema_unsupported':
+      return userFacingMessage ?? 'Planner 收到不支持的工具 schema，请检查工具注册信息。'
+    case 'agent_skill_selection_required':
+      return userFacingMessage ?? '无法自动识别合适的 Skill，请补充任务目标或手动选择 Skill 后重试。'
+    case 'agent_task_retry_not_allowed':
+      return userFacingMessage ?? '当前任务状态不允许重试。'
     case 'approval_pending':
       return userFacingMessage ?? '当前会话已有待处理审批，请先处理审批请求。'
     case 'chat_context_expired':
