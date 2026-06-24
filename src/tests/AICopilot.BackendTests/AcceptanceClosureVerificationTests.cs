@@ -221,7 +221,7 @@ public sealed class AcceptanceClosureVerificationTests
             $"acceptance-{Guid.NewGuid():N}.csv",
             "station,count\nA,2\nB,3\nC,5\n");
 
-        var task = await PostJsonAsync<AgentTaskDto>("/api/aigateway/agent/task/plan", new
+        var task = await PostPlanStreamAsync(new
         {
             sessionId = session.Id,
             goal = "Generate a controlled acceptance report from the uploaded CSV.",
@@ -232,12 +232,8 @@ public sealed class AcceptanceClosureVerificationTests
             knowledgeBaseIds = Array.Empty<Guid>()
         });
 
-        task.Status.Should().Be("WaitingPlanApproval");
-        task.WorkspaceCode.Should().NotBeNullOrWhiteSpace();
-
-        var initialWorkspace = await GetJsonAsync<ArtifactWorkspaceDto>(
-            $"/api/aigateway/workspace/{task.WorkspaceCode}");
-        initialWorkspace.Artifacts.Should().BeEmpty();
+        task.Status.Should().Be("Draft");
+        task.WorkspaceCode.Should().BeNull();
 
         var planApproval = (await GetPendingApprovalsAsync(task.Id))
             .Should()
@@ -250,6 +246,7 @@ public sealed class AcceptanceClosureVerificationTests
         task.RunQueueStatus.Should().Be("Queued");
         task = await WaitForTaskStatusAsync(task.Id, "WaitingToolApproval");
         task.Status.Should().Be("WaitingToolApproval");
+        task.WorkspaceCode.Should().NotBeNullOrWhiteSpace();
 
         var draftWorkspace = await GetJsonAsync<ArtifactWorkspaceDto>(
             $"/api/aigateway/workspace/{task.WorkspaceCode}");
@@ -341,7 +338,7 @@ public sealed class AcceptanceClosureVerificationTests
         taskEvents.Should().Contain(item =>
             item.EventType == nameof(MessageEventType.AgentTaskPlanCreated) &&
             item.ApprovalRequestId.HasValue &&
-            item.ArtifactWorkspaceId == finalizedWorkspace.Id);
+            item.ArtifactWorkspaceId == null);
         taskEvents.Should().Contain(item =>
             item.EventType == nameof(MessageEventType.ApprovalRequested) &&
             item.ApprovalRequestId.HasValue);
@@ -390,7 +387,7 @@ public sealed class AcceptanceClosureVerificationTests
 
         var templateId = await CreateConversationTemplateAsync();
         var session = await PostJsonAsync<CreatedSessionDto>("/api/aigateway/session", new { templateId });
-        var task = await PostJsonAsync<AgentTaskDto>("/api/aigateway/agent/task/plan", new
+        var task = await PostPlanStreamAsync(new
         {
             sessionId = session.Id,
             goal = "Create a report that should be rejected before execution.",
@@ -415,10 +412,7 @@ public sealed class AcceptanceClosureVerificationTests
 
         var rejectedTask = await GetJsonAsync<AgentTaskDto>($"/api/aigateway/agent/task?id={task.Id}");
         rejectedTask.Status.Should().Be("Rejected");
-
-        var workspace = await GetJsonAsync<ArtifactWorkspaceDto>(
-            $"/api/aigateway/workspace/{task.WorkspaceCode}");
-        workspace.Artifacts.Should().BeEmpty();
+        rejectedTask.WorkspaceCode.Should().BeNull();
 
         var auditSummary = await GetJsonAsync<List<AgentTaskAuditSummaryDto>>(
             $"/api/aigateway/agent/task/{task.Id}/audit-summary");
@@ -600,6 +594,61 @@ public sealed class AcceptanceClosureVerificationTests
         }
 
         return (await response.Content.ReadFromJsonAsync<T>(JsonOptions))!;
+    }
+
+    private async Task<AgentTaskDto> PostPlanStreamAsync(object payload)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/aigateway/agent/task/plan-stream")
+        {
+            Content = JsonContent.Create(payload, options: JsonOptions)
+        };
+
+        using var response = await _fixture.HttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.Content.Headers.ContentType?.MediaType.Should().Be("text/event-stream");
+
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        using var reader = new StreamReader(stream);
+        var buffer = new StringBuilder();
+
+        while (true)
+        {
+            var line = await reader.ReadLineAsync();
+            if (line is null)
+            {
+                break;
+            }
+
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                if (buffer.Length == 0)
+                {
+                    continue;
+                }
+
+                var data = buffer.ToString();
+                buffer.Clear();
+                if (data == "[DONE]")
+                {
+                    break;
+                }
+
+                var chunk = JsonSerializer.Deserialize<ChatChunkDto>(data, JsonOptions)!;
+                if (chunk.Type == "AgentTask")
+                {
+                    return JsonSerializer.Deserialize<AgentTaskDto>(chunk.Content, JsonOptions)!;
+                }
+
+                continue;
+            }
+
+            if (line.StartsWith("data:", StringComparison.Ordinal))
+            {
+                buffer.Append(line["data:".Length..].TrimStart());
+            }
+        }
+
+        throw new Xunit.Sdk.XunitException("Plan stream completed without an AgentTask chunk.");
     }
 
     private async Task PostJsonExpectingStatusAsync(string uri, object payload, HttpStatusCode statusCode)
@@ -889,4 +938,6 @@ public sealed class AcceptanceClosureVerificationTests
         Guid? ArtifactWorkspaceId,
         Guid? ArtifactId,
         string? PayloadJson);
+
+    private sealed record ChatChunkDto(string Type, string Source, string Content);
 }

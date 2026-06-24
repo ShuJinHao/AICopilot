@@ -13,7 +13,7 @@ public sealed class DataAnalysisWidgetEmitter(ILogger<DataAnalysisWidgetEmitter>
         DataAnalysisOutputDto output,
         IEnumerable<dynamic>? rawData,
         IEnumerable<SchemaColumn>? schema,
-        ChatWorkflowSink? sink,
+        AgentWorkflowSink? sink,
         string databaseName,
         CancellationToken cancellationToken)
     {

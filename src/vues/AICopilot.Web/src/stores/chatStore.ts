@@ -2,11 +2,11 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { chatService } from '@/services/chatService'
 import { ChunkType, MessageRole } from '@/types/protocols'
-import type { ApprovalChunk } from '@/types/models'
+import type { ApprovalChunk, ChatMessage } from '@/types/models'
 import { processChunk, getErrorCode } from '@/protocol/chunkReducer'
 import { getApprovalFailureStatus } from '@/protocol/approvalProtocol'
 import { useApprovalStore } from './approvalStore'
-import { useChatErrorStore, toFriendlyMessage } from './chatErrorStore'
+import { resolveChatErrorMessage, useChatErrorStore, toFriendlyMessage } from './chatErrorStore'
 import { useMessageStore } from './messageStore'
 import { useSessionStore } from './sessionStore'
 import { useStreamStore } from './streamStore'
@@ -133,6 +133,44 @@ export const useChatStore = defineStore('chat', () => {
       ? skillCode
       : null
     void loadPluginTools()
+  }
+
+  function addPlanConversationMessages(sessionId: string, goal: string) {
+    messageStore.addMessage(sessionId, {
+      sessionId,
+      role: MessageRole.User,
+      chunks: [
+        {
+          source: 'User',
+          type: ChunkType.Text,
+          content: goal
+        }
+      ],
+      isStreaming: false,
+      timestamp: Date.now()
+    })
+
+    return messageStore.addMessage(sessionId, {
+      sessionId,
+      role: MessageRole.Assistant,
+      finalModelId: null,
+      finalModelName: '未知',
+      routingModelId: null,
+      routingModelName: null,
+      contextWindowTokens: null,
+      maxOutputTokens: null,
+      chunks: [],
+      isStreaming: true,
+      timestamp: Date.now()
+    })
+  }
+
+  function appendPlanStreamError(message: ChatMessage, content: string) {
+    message.chunks.push({
+      source: 'PlanAgentTaskStream',
+      type: ChunkType.Text,
+      content
+    })
   }
 
   async function loadPluginTools() {
@@ -449,15 +487,20 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function planAgentTask(goal: string) {
-    if (!sessionStore.currentSessionId || isAgentBusy.value) {
+    if (!sessionStore.currentSessionId || isAgentBusy.value || streamStore.isStreaming) {
       return null
     }
 
+    const sessionId = sessionStore.currentSessionId
+    const assistantMessage = addPlanConversationMessages(sessionId, goal)
     isAgentBusy.value = true
     agentErrorMessage.value = null
+    streamStore.start()
+    let plannedTask: AgentTask | null = null
+    let streamErrorMessage: string | null = null
     try {
-      const task = await chatService.planAgentTask({
-        sessionId: sessionStore.currentSessionId,
+      await chatService.planAgentTaskStream({
+        sessionId,
         goal,
         taskType: 'ReportGeneration',
         uploadIds: uploadedFiles.value.map((item) => item.id),
@@ -465,17 +508,61 @@ export const useChatStore = defineStore('chat', () => {
         plannerMode: 'Auto',
         skillCode: selectedSkillCode.value || null,
         preferredToolCodes: selectedToolCodes.value
+      }, {
+        onChunkReceived(chunk) {
+          if (chunk.type === ChunkType.Error) {
+            try {
+              streamErrorMessage = resolveChatErrorMessage(JSON.parse(chunk.content))
+            } catch {
+              streamErrorMessage = '请求失败，请稍后重试。'
+            }
+          }
+
+          processChunk(assistantMessage, chunk, {
+            setSessionError: errorStore.setSessionError,
+            onApprovalChunk: approvalStore.sync,
+            onAgentTaskChunk: (_sessionId, task) => {
+              plannedTask = task
+              upsertAgentTask(task)
+            }
+          })
+        },
+        onComplete() {
+          streamStore.stop()
+          assistantMessage.isStreaming = false
+          approvalStore.sync(sessionId)
+        },
+        onError(error) {
+          streamStore.stop()
+          assistantMessage.isStreaming = false
+          streamErrorMessage = toFriendlyMessage(error)
+          agentErrorMessage.value = streamErrorMessage
+          appendPlanStreamError(assistantMessage, streamErrorMessage)
+          approvalStore.sync(sessionId)
+        }
       })
-      upsertAgentTask(task)
-      await loadAgentApprovals(task.id)
-      await loadAgentAuditSummary(task.id)
-      await refreshWorkspace(task)
-      await loadTimeline(sessionStore.currentSessionId)
-      return task
+
+      const completedTask = plannedTask as AgentTask | null
+      if (!completedTask) {
+        if (streamErrorMessage) {
+          agentErrorMessage.value = streamErrorMessage
+        }
+        return null
+      }
+
+      await loadAgentApprovals(completedTask.id)
+      await loadAgentAuditSummary(completedTask.id)
+      await refreshWorkspace(completedTask)
+      await loadTimeline(sessionId)
+      return completedTask
     } catch (error) {
-      agentErrorMessage.value = toFriendlyMessage(error)
+      const message = toFriendlyMessage(error)
+      agentErrorMessage.value = message
+      appendPlanStreamError(assistantMessage, message)
       return null
     } finally {
+      streamStore.stop()
+      assistantMessage.isStreaming = false
       isAgentBusy.value = false
     }
   }

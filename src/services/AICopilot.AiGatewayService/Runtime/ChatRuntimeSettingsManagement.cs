@@ -27,13 +27,13 @@ public sealed record UpdateChatRuntimeSettingsCommand(
     int SummaryThresholdMessages,
     int ContextTokenLimit) : ICommand<Result<ChatRuntimeSettingsDto>>;
 
-public interface IChatRuntimeSettingsProvider
+public interface IAgentRuntimeSettingsProvider
 {
     Task<ChatRuntimeSettingsDto> GetAsync(CancellationToken cancellationToken = default);
 }
 
-public sealed class ChatRuntimeSettingsProvider(IRepository<ChatRuntimeSettings> repository)
-    : IChatRuntimeSettingsProvider
+public sealed class AgentRuntimeSettingsProvider(IRepository<ChatRuntimeSettings> repository)
+    : IAgentRuntimeSettingsProvider
 {
     public async Task<ChatRuntimeSettingsDto> GetAsync(CancellationToken cancellationToken = default)
     {
@@ -61,7 +61,7 @@ public sealed class ChatRuntimeSettingsProvider(IRepository<ChatRuntimeSettings>
     }
 }
 
-public sealed class GetChatRuntimeSettingsQueryHandler(IChatRuntimeSettingsProvider provider)
+public sealed class GetChatRuntimeSettingsQueryHandler(IAgentRuntimeSettingsProvider provider)
     : IQueryHandler<GetChatRuntimeSettingsQuery, Result<ChatRuntimeSettingsDto>>
 {
     public async Task<Result<ChatRuntimeSettingsDto>> Handle(
@@ -107,6 +107,6 @@ public sealed class UpdateChatRuntimeSettingsCommandHandler(IRepository<ChatRunt
         }
 
         await repository.SaveChangesAsync(cancellationToken);
-        return Result.Success(ChatRuntimeSettingsProvider.Map(settings));
+        return Result.Success(AgentRuntimeSettingsProvider.Map(settings));
     }
 }

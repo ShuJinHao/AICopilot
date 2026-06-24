@@ -25,7 +25,7 @@ internal static class ApprovalDecisionValidator
 
         if (!ApprovalIdentityMatches(request, storedApproval))
         {
-            return ApprovalDecisionValidation.Failed(ChatStreamRuntime.CreateErrorChunk(
+            return ApprovalDecisionValidation.Failed(AgentStreamRuntime.CreateErrorChunk(
                 assistantText,
                 AppProblemCodes.ApprovalAlreadyProcessed,
                 "审批请求的工具身份与待审批上下文不一致。",
@@ -65,7 +65,7 @@ internal static class ApprovalDecisionValidator
             return true;
         }
 
-        error = ChatStreamRuntime.CreateErrorChunk(
+        error = AgentStreamRuntime.CreateErrorChunk(
             assistantText,
             "invalid_approval_decision",
             "审批决策只能是 approved 或 rejected。",
@@ -131,7 +131,7 @@ internal static class ApprovalDecisionValidator
 
         if (!session.OnsiteConfirmationExpiresAt.HasValue || !session.OnsiteConfirmedAt.HasValue)
         {
-            error = ChatStreamRuntime.CreateErrorChunk(
+            error = AgentStreamRuntime.CreateErrorChunk(
                 assistantText,
                 AppProblemCodes.OnsitePresenceRequired,
                 "该工具能力要求先完成会话级人工在岗声明。",
@@ -142,7 +142,7 @@ internal static class ApprovalDecisionValidator
 
         if (!session.HasValidOnsiteAttestation(DateTimeOffset.UtcNow))
         {
-            error = ChatStreamRuntime.CreateErrorChunk(
+            error = AgentStreamRuntime.CreateErrorChunk(
                 assistantText,
                 AppProblemCodes.OnsitePresenceExpired,
                 "当前会话的在岗声明已过期，请重新确认人工在场状态。",
@@ -153,7 +153,7 @@ internal static class ApprovalDecisionValidator
 
         if (!request.OnsiteConfirmed)
         {
-            error = ChatStreamRuntime.CreateErrorChunk(
+            error = AgentStreamRuntime.CreateErrorChunk(
                 assistantText,
                 AppProblemCodes.ApprovalReconfirmationRequired,
                 "审批前必须再次显式确认现场有人在岗。",

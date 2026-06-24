@@ -27,7 +27,7 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
         AssertPath(document, "/api/aigateway/session", "post");
         AssertPath(document, "/api/aigateway/session/list", "get");
         AssertPath(document, "/api/aigateway/upload", "post");
-        AssertPath(document, "/api/aigateway/agent/task/plan", "post");
+        AssertPath(document, "/api/aigateway/agent/task/plan-stream", "post");
         AssertPath(document, "/api/aigateway/agent/task/run", "post");
         AssertPath(document, "/api/aigateway/agent/task/retry", "post");
         AssertPath(document, "/api/aigateway/agent/task/cancel", "post");
@@ -53,6 +53,7 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
 
         AssertMissingPath(document, "/api/aigateway/agent/trial-scenarios");
         AssertMissingPath(document, "/api/aigateway/agent/trial-scenarios/create-task");
+        AssertMissingPath(document, "/api/aigateway/agent/task/plan");
         AssertMissingPath(document, "/api/aigateway/agent/cloud-sandbox-controlled-trial/plan");
         AssertMissingPath(document, "/api/aigateway/agent/cloud-production-controlled-pilot/plan");
         AssertMissingPath(document, "/api/aigateway/agent/task/{id}/run-queue");

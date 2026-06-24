@@ -1,15 +1,34 @@
 using System.Text.RegularExpressions;
 using AICopilot.AiGatewayService.Models;
 using AICopilot.AiGatewayService.Workflows;
+using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 
 namespace AICopilot.BackendTests;
 
 public sealed class ClaudeFollowupClosureTests
 {
     [Fact]
-    public async Task ChatWorkflowSink_ShouldFlushWrittenChunksBeforeCompletion()
+    public void AgentTaskStatusValues_ShouldPreserveHistoricalPersistenceValues()
     {
-        var sink = new ChatWorkflowSink();
+        ((int)AgentTaskStatus.WaitingPlanApproval).Should().Be(1);
+        ((int)AgentTaskStatus.PlanApproved).Should().Be(2);
+        ((int)AgentTaskStatus.Running).Should().Be(3);
+        ((int)AgentTaskStatus.WaitingToolApproval).Should().Be(4);
+        ((int)AgentTaskStatus.GeneratingArtifacts).Should().Be(5);
+        ((int)AgentTaskStatus.WorkspaceReady).Should().Be(6);
+        ((int)AgentTaskStatus.WaitingFinalApproval).Should().Be(7);
+        ((int)AgentTaskStatus.Finalized).Should().Be(8);
+        ((int)AgentTaskStatus.Completed).Should().Be(9);
+        ((int)AgentTaskStatus.Rejected).Should().Be(10);
+        ((int)AgentTaskStatus.Failed).Should().Be(11);
+        ((int)AgentTaskStatus.Cancelled).Should().Be(12);
+        ((int)AgentTaskStatus.Draft).Should().Be(100);
+    }
+
+    [Fact]
+    public async Task AgentWorkflowSink_ShouldFlushWrittenChunksBeforeCompletion()
+    {
+        var sink = new AgentWorkflowSink();
         await sink.WriteAsync(new ChatChunk("data-analysis", ChunkType.Text, "first"), CancellationToken.None);
         await sink.WriteAsync(new ChatChunk("data-analysis", ChunkType.Text, "second"), CancellationToken.None);
 
@@ -21,9 +40,9 @@ public sealed class ClaudeFollowupClosureTests
     }
 
     [Fact]
-    public async Task ChatWorkflowSink_ShouldPropagateBranchFailureToReader()
+    public async Task AgentWorkflowSink_ShouldPropagateBranchFailureToReader()
     {
-        var sink = new ChatWorkflowSink();
+        var sink = new AgentWorkflowSink();
         var failure = new InvalidOperationException("branch failed");
 
         sink.Complete(failure);
@@ -34,7 +53,7 @@ public sealed class ClaudeFollowupClosureTests
     }
 
     [Fact]
-    public void ChatWorkflowOrchestrator_ShouldUseExplicitSinkCompletionFlow()
+    public void AgentWorkflowPipeline_ShouldUseExplicitSinkCompletionFlow()
     {
         var solutionRoot = FindSolutionRoot();
         var source = File.ReadAllText(Path.Combine(
@@ -43,12 +62,189 @@ public sealed class ClaudeFollowupClosureTests
             "services",
             "AICopilot.AiGatewayService",
             "Workflows",
-            "ChatWorkflowOrchestrator.cs"));
+            "AgentWorkflowPipeline.cs"));
 
         source.Should().NotContain(".ContinueWith(");
         source.Should().Contain("CompleteSinkWhenBranchesFinishAsync");
         source.Should().Contain("await branchTask.ConfigureAwait(false)");
         source.Should().Contain("sink.Complete(ex)");
+    }
+
+    [Fact]
+    public void AgentWorkflowPipeline_PlanDraft_ShouldUseCapabilityDiscoveryOnly()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var source = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "Workflows",
+            "AgentWorkflowPipeline.cs"));
+        var method = ExtractMethodBody(source, "RunPlanDraftWorkflowAsync");
+
+        method.Should().Contain("toolsPack.DiscoverAsync");
+        method.Should().NotContain("toolsPack.ExecuteAsync");
+        method.Should().NotContain("dataAnalysis.ExecuteAsync");
+        method.Should().NotContain("agentRun.ExecuteAsync");
+        method.Should().NotContain("RunAgentTaskCommand");
+    }
+
+    [Fact]
+    public void PlanAgentTaskStreamHandler_ShouldOnlyCreatePlanDraftAndEmitAgentTaskChunk()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var source = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "AgentTasks",
+            "PlanAgentTaskStreamHandler.cs"));
+
+        source.Should().Contain("new PlanAgentTaskCommand");
+        source.Should().Contain("ChunkType.AgentTask");
+        source.Should().Contain("ChunkType.AgentEvent");
+        source.Should().Contain("\"plan_draft_started\"");
+        source.Should().Contain("\"plan_draft_ready\"");
+        source.Should().Contain("\"plan_draft_failed\"");
+        source.Should().NotContain("RunAgentTaskCommand");
+        source.Should().NotContain("RetryAgentTaskCommand");
+        source.Should().NotContain("IAgentTaskRunQueue");
+    }
+
+    [Fact]
+    public void PlanAgentTaskStreamEndpoint_ShouldUseServerSentEvents()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var source = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "hosts",
+            "AICopilot.HttpApi",
+            "Controllers",
+            "AiGatewayAgentTaskController.cs"));
+
+        source.Should().Contain("[HttpPost(\"agent/task/plan-stream\")]");
+        source.Should().Contain("Sender.CreateStream(request)");
+        source.Should().Contain("Results.ServerSentEvents(stream)");
+        source.Should().NotContain("[HttpPost(\"agent/task/plan\")]");
+    }
+
+    [Fact]
+    public void PlanAgentTaskCommand_ShouldCreatePlanDraftWithoutExecutableToolPreparation()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var source = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "AgentTasks",
+            "AgentTaskCommands.cs"));
+
+        source.Should().Contain("workflowPipeline.RunPlanDraftWorkflowAsync");
+        source.Should().Contain("PlanKind: AgentTaskPlanKinds.PlanDraft");
+        source.Should().Contain("IsExecutable: false");
+        source.Should().NotContain("planToolGuard.GetAvailableToolCatalogAsync");
+        source.Should().NotContain("dynamicPlanner.CreatePlanAsync");
+        source.Should().NotContain("cloudReadonlyPlanService.CreateIntentAsync");
+        source.Should().NotContain("ResolvePlannerModelAsync");
+        source.Should().NotContain("AppProblemCodes.PlannerToolCatalogEmpty");
+        source.Should().NotContain("ValidateStepsAsync(");
+    }
+
+    [Fact]
+    public void PlanAgentTaskCommand_ShouldNotCreateArtifactWorkspaceForPlanDraft()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var source = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "AgentTasks",
+            "AgentTaskCommands.cs"));
+
+        source.Should().NotContain("IAgentArtifactWorkspaceService");
+        source.Should().NotContain("CreateForTaskAsync(task");
+        source.Should().NotContain("task.AttachWorkspace");
+        source.Should().Contain("AgentTaskDtoMapper.Map(task, pendingApprovalCount: 1)");
+    }
+
+    [Fact]
+    public void PlanDraftConfirmationService_ShouldOwnExecutablePlanToolValidation()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var source = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "AgentTasks",
+            "AgentPlanDraftConfirmationService.cs"));
+
+        source.Should().Contain("planToolGuard.ValidateStepsAsync");
+        source.Should().Contain("cloudReadonlyPlanService.CreateIntentAsync");
+        source.Should().Contain("CloudReadonlyIntent = cloudReadonlyIntent");
+        source.Should().Contain("PlanKind = AgentTaskPlanKinds.ExecutablePlan");
+        source.Should().Contain("IsExecutable = true");
+        source.Should().Contain("task.ConfirmExecutablePlan");
+    }
+
+    [Fact]
+    public void ApprovePlanCommand_ShouldConfirmDraftBeforeApprovingAuditRecord()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var source = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "AgentTasks",
+            "AgentTaskLifecycleCommandHandlers.cs"));
+
+        var confirmationIndex = source.IndexOf("planDraftConfirmationService.ConfirmAsync", StringComparison.Ordinal);
+        var taskApprovalIndex = source.IndexOf("task.ApprovePlan(now)", StringComparison.Ordinal);
+        var approvalRecordIndex = source.IndexOf("approval.Approve(userId", StringComparison.Ordinal);
+
+        confirmationIndex.Should().BeGreaterThanOrEqualTo(0);
+        taskApprovalIndex.Should().BeGreaterThan(confirmationIndex);
+        approvalRecordIndex.Should().BeGreaterThan(taskApprovalIndex);
+    }
+
+    [Fact]
+    public void SharedAgentRuntimeTypes_ShouldUseAgentPrefix_NotChatPrefix()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var forbiddenSharedRuntimeNames = new[]
+        {
+            "ChatAgentFactory",
+            "IChatExecutionMetadataAccessor",
+            "ChatExecutionMetadataAccessor",
+            "IChatStreamRuntime",
+            "ChatStreamRuntime",
+            "ChatWorkflowException",
+            "IChatRuntimeSettingsProvider",
+            "ChatRuntimeSettingsProvider"
+        };
+
+        var violations = new List<string>();
+        foreach (var file in EnumerateProductionSources(solutionRoot))
+        {
+            var normalizedFile = NormalizePath(file);
+            var source = File.ReadAllText(file);
+            foreach (var name in forbiddenSharedRuntimeNames)
+            {
+                if (source.Contains(name, StringComparison.Ordinal))
+                {
+                    violations.Add($"{normalizedFile}: {name}");
+                }
+            }
+        }
+
+        violations.Should().BeEmpty(
+            "shared agent runtime infrastructure must use Agent* naming so it is not mistaken for chat-only code.");
     }
 
     [Fact]
@@ -107,7 +303,7 @@ public sealed class ClaudeFollowupClosureTests
             "ClaimTypes.Role is limited to token issuance and CurrentUser audit display, not authorization decisions.");
     }
 
-    private static async Task<List<ChatChunk>> ReadAllAsync(ChatWorkflowSink sink)
+    private static async Task<List<ChatChunk>> ReadAllAsync(AgentWorkflowSink sink)
     {
         var chunks = new List<ChatChunk>();
         await foreach (var chunk in sink.ReadAllAsync(CancellationToken.None))
@@ -116,6 +312,33 @@ public sealed class ClaudeFollowupClosureTests
         }
 
         return chunks;
+    }
+
+    private static string ExtractMethodBody(string source, string methodName)
+    {
+        var methodIndex = source.IndexOf(methodName, StringComparison.Ordinal);
+        methodIndex.Should().BeGreaterThanOrEqualTo(0);
+        var openBrace = source.IndexOf('{', methodIndex);
+        openBrace.Should().BeGreaterThanOrEqualTo(0);
+
+        var depth = 0;
+        for (var index = openBrace; index < source.Length; index++)
+        {
+            if (source[index] == '{')
+            {
+                depth++;
+            }
+            else if (source[index] == '}')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return source[openBrace..(index + 1)];
+                }
+            }
+        }
+
+        throw new InvalidOperationException($"Could not extract method body for {methodName}.");
     }
 
     private static IEnumerable<string> EnumerateProductionSources(string solutionRoot)

@@ -37,7 +37,7 @@ public sealed class AgentTask : BaseEntity<AgentTaskId>, IAggregateRoot<AgentTas
         RiskLevel = riskLevel;
         ModelId = modelId;
         PlanJson = NormalizeRequired(planJson, nameof(planJson), 32000);
-        Status = AgentTaskStatus.WaitingPlanApproval;
+        Status = AgentTaskStatus.Draft;
         CreatedAt = nowUtc;
         UpdatedAt = nowUtc;
     }
@@ -172,6 +172,31 @@ public sealed class AgentTask : BaseEntity<AgentTaskId>, IAggregateRoot<AgentTas
         }
 
         Status = AgentTaskStatus.PlanApproved;
+        UpdatedAt = nowUtc;
+    }
+
+    public void ConfirmExecutablePlan(
+        string planJson,
+        IReadOnlyCollection<int> approvalRequiredStepIndexes,
+        DateTimeOffset nowUtc)
+    {
+        if (Status is not AgentTaskStatus.Draft and not AgentTaskStatus.WaitingPlanApproval)
+        {
+            throw new InvalidOperationException("Only draft or plan-approval-waiting tasks can be confirmed.");
+        }
+
+        PlanJson = NormalizeRequired(planJson, nameof(planJson), 32000);
+        Status = AgentTaskStatus.WaitingPlanApproval;
+        var approvalIndexes = approvalRequiredStepIndexes
+            .ToHashSet();
+        foreach (var step in _steps)
+        {
+            if (approvalIndexes.Contains(step.StepIndex) && !step.RequiresApproval)
+            {
+                step.WaitForApproval();
+            }
+        }
+
         UpdatedAt = nowUtc;
     }
 
@@ -324,9 +349,9 @@ public sealed class AgentTask : BaseEntity<AgentTaskId>, IAggregateRoot<AgentTas
 
     private void EnsureMutablePlan()
     {
-        if (Status != AgentTaskStatus.WaitingPlanApproval)
+        if (Status is not AgentTaskStatus.Draft and not AgentTaskStatus.WaitingPlanApproval)
         {
-            throw new InvalidOperationException("Agent task steps can only be added before plan approval.");
+            throw new InvalidOperationException("Agent task steps can only be added before plan confirmation.");
         }
     }
 

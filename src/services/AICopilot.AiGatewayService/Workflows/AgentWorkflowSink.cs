@@ -3,7 +3,7 @@ using AICopilot.AiGatewayService.Models;
 
 namespace AICopilot.AiGatewayService.Workflows;
 
-public sealed class ChatWorkflowSink
+public sealed class AgentWorkflowSink
 {
     private readonly Channel<ChatChunk> channel = Channel.CreateUnbounded<ChatChunk>(
         new UnboundedChannelOptions

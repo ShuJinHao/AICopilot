@@ -4,7 +4,7 @@ using AICopilot.Services.Contracts;
 
 namespace AICopilot.AiGatewayService.Agents;
 
-public interface IChatExecutionMetadataAccessor
+public interface IAgentExecutionMetadataAccessor
 {
     void SetRoutingModel(LanguageModel model);
 
@@ -19,7 +19,7 @@ public interface IChatExecutionMetadataAccessor
     MessageModelSnapshot ToMessageSnapshot();
 }
 
-public sealed class ChatExecutionMetadataAccessor : IChatExecutionMetadataAccessor
+public sealed class AgentExecutionMetadataAccessor : IAgentExecutionMetadataAccessor
 {
     private ChatExecutionMetadataSnapshot current = new();
 

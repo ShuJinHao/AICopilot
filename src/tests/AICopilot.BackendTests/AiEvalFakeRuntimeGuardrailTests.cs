@@ -217,12 +217,12 @@ public sealed class AiEvalFakeRuntimeGuardrailTests
         var model = FakeRuntimeAgentFactory.CreateModel();
         var template = FakeRuntimeAgentFactory.CreateTemplate(model);
         var session = new Session(Guid.NewGuid(), template.Id);
-        var chatAgentFactory = new ChatAgentFactory(
+        var configuredAgentFactory = new ConfiguredAgentRuntimeFactory(
             new InMemoryReadRepository<ConversationTemplate>([template]),
             new InMemoryReadRepository<LanguageModel>([model]),
             runtimeFactory);
         var executor = new FinalAgentBuildExecutor(
-            chatAgentFactory,
+            configuredAgentFactory,
             new InMemoryReadRepository<Session>([session]),
             new InMemoryReadRepository<ConversationTemplate>([template]),
             new InMemoryReadRepository<LanguageModel>([model]),
@@ -252,7 +252,7 @@ public sealed class AiEvalFakeRuntimeGuardrailTests
             new SimpleTokenEstimator(),
             new NoOpChatTokenTelemetry(),
             new ToolExecutionAuditRecorder(auditWriter),
-            new ChatStreamRuntime(approvalRequirementResolver));
+            new AgentStreamRuntime(approvalRequirementResolver));
         var chunks = new List<ChatChunk>();
         await foreach (var chunk in executor.ExecuteAsync(context, null, new StringBuilder()))
         {

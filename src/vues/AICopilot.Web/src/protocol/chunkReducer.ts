@@ -1,5 +1,7 @@
 import {
   ChunkType,
+  type AgentEventPayload,
+  type AgentTask,
   type ChatChunk,
   type ChatErrorPayload,
   type ChatModelMetadataPayload,
@@ -8,6 +10,7 @@ import {
 } from '@/types/protocols'
 import type {
   ApprovalChunk,
+  AgentEventChunk,
   ChatMessage,
   FunctionCall,
   FunctionCallChunk,
@@ -20,6 +23,7 @@ import { parseWidgetFromTextChunk } from './widgetPayloadParser'
 export interface ChunkReducerCallbacks {
   setSessionError: (sessionId: string, message: string) => void
   onApprovalChunk: (sessionId: string) => void
+  onAgentTaskChunk?: (sessionId: string, task: AgentTask) => void
 }
 
 export function processChunk(
@@ -61,6 +65,12 @@ export function processChunk(
       break
     case ChunkType.ApprovalRequest:
       addApprovalRequestChunk(message, chunk, callbacks)
+      break
+    case ChunkType.AgentEvent:
+      addAgentEventChunk(message, chunk, callbacks)
+      break
+    case ChunkType.AgentTask:
+      addAgentTaskChunk(message, chunk, callbacks)
       break
     case ChunkType.Error:
       addErrorChunk(message, chunk, callbacks)
@@ -188,6 +198,35 @@ function addApprovalRequestChunk(
     callbacks.onApprovalChunk(message.sessionId)
   } catch {
     callbacks.setSessionError(message.sessionId, '审批请求解析失败。')
+  }
+}
+
+function addAgentEventChunk(
+  message: ChatMessage,
+  chunk: ChatChunk,
+  callbacks: ChunkReducerCallbacks
+) {
+  try {
+    const event = JSON.parse(chunk.content) as AgentEventPayload
+    message.chunks.push({
+      ...chunk,
+      event
+    } as AgentEventChunk)
+  } catch {
+    callbacks.setSessionError(message.sessionId, '运行状态事件解析失败。')
+  }
+}
+
+function addAgentTaskChunk(
+  message: ChatMessage,
+  chunk: ChatChunk,
+  callbacks: ChunkReducerCallbacks
+) {
+  try {
+    const task = JSON.parse(chunk.content) as AgentTask
+    callbacks.onAgentTaskChunk?.(message.sessionId, task)
+  } catch {
+    callbacks.setSessionError(message.sessionId, '任务状态解析失败。')
   }
 }
 

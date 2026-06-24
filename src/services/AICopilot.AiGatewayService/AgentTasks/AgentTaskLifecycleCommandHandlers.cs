@@ -19,6 +19,7 @@ public sealed class ApproveAgentTaskPlanCommandHandler(
     IReadRepository<ArtifactWorkspace> workspaceRepository,
     AgentAuditRecorder auditRecorder,
     ICurrentUser currentUser,
+    AgentPlanDraftConfirmationService planDraftConfirmationService,
     MessageTimelineProjectionWriter? timelineProjectionWriter = null)
     : ICommandHandler<ApproveAgentTaskPlanCommand, Result<AgentTaskDto>>
 {
@@ -39,7 +40,7 @@ public sealed class ApproveAgentTaskPlanCommandHandler(
                 AgentApprovalType.Plan,
                 task.Id.Value.ToString()),
             cancellationToken);
-        if (approval is null && task.Status == AgentTaskStatus.WaitingPlanApproval)
+        if (approval is null && task.Status is AgentTaskStatus.Draft or AgentTaskStatus.WaitingPlanApproval)
         {
             approval = new ApprovalRequest(
                 task.Id,
@@ -50,6 +51,17 @@ public sealed class ApproveAgentTaskPlanCommandHandler(
             approvalRepository.Add(approval);
         }
 
+        if (task.Status is AgentTaskStatus.Draft or AgentTaskStatus.WaitingPlanApproval)
+        {
+            var confirmation = await planDraftConfirmationService.ConfirmAsync(task, now, cancellationToken);
+            if (!confirmation.IsSuccess)
+            {
+                return Result.From(confirmation);
+            }
+
+            task.ApprovePlan(now);
+        }
+
         if (approval is not null)
         {
             approval.Approve(userId, "Plan approved.", now);
@@ -58,11 +70,6 @@ public sealed class ApproveAgentTaskPlanCommandHandler(
             {
                 await timelineProjectionWriter.StageApprovalDecidedAsync(task, approval, cancellationToken);
             }
-        }
-
-        if (task.Status == AgentTaskStatus.WaitingPlanApproval)
-        {
-            task.ApprovePlan(now);
         }
 
         repository.Update(task);

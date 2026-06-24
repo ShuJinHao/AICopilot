@@ -17,6 +17,7 @@ public sealed class ApproveAgentApprovalCommandHandler(
     IAgentTaskRunQueue runQueue,
     ICurrentUser currentUser,
     IIdentityAccessService identityAccessService,
+    AgentPlanDraftConfirmationService planDraftConfirmationService,
     MessageTimelineProjectionWriter? timelineProjectionWriter = null)
     : ICommandHandler<ApproveAgentApprovalCommand, Result<AgentApprovalRequestDto>>
 {
@@ -35,6 +36,7 @@ public sealed class ApproveAgentApprovalCommandHandler(
             runQueue,
             currentUser,
             identityAccessService,
+            planDraftConfirmationService,
             timelineProjectionWriter,
             cancellationToken);
     }
@@ -50,6 +52,7 @@ public sealed class ApproveAgentApprovalCommandHandler(
         IAgentTaskRunQueue? runQueue,
         ICurrentUser currentUser,
         IIdentityAccessService identityAccessService,
+        AgentPlanDraftConfirmationService planDraftConfirmationService,
         MessageTimelineProjectionWriter? timelineProjectionWriter,
         CancellationToken cancellationToken)
     {
@@ -64,6 +67,7 @@ public sealed class ApproveAgentApprovalCommandHandler(
             runQueue,
             currentUser,
             identityAccessService,
+            planDraftConfirmationService,
             timelineProjectionWriter,
             cancellationToken);
     }
@@ -77,6 +81,7 @@ public sealed class RejectAgentApprovalCommandHandler(
     IAgentTaskRunQueue runQueue,
     ICurrentUser currentUser,
     IIdentityAccessService identityAccessService,
+    AgentPlanDraftConfirmationService planDraftConfirmationService,
     MessageTimelineProjectionWriter? timelineProjectionWriter = null)
     : ICommandHandler<RejectAgentApprovalCommand, Result<AgentApprovalRequestDto>>
 {
@@ -95,6 +100,7 @@ public sealed class RejectAgentApprovalCommandHandler(
             runQueue,
             currentUser,
             identityAccessService,
+            planDraftConfirmationService,
             timelineProjectionWriter,
             cancellationToken);
     }

@@ -12,7 +12,7 @@ using AICopilot.SharedKernel.Specification;
 
 namespace AICopilot.AiGatewayService.Agents;
 
-public class ChatAgentFactory(
+public class ConfiguredAgentRuntimeFactory(
     IReadRepository<ConversationTemplate> templateRepository,
     IReadRepository<LanguageModel> modelRepository,
     IAgentRuntimeFactory runtimeFactory,
@@ -48,7 +48,7 @@ public class ChatAgentFactory(
     {
         if (!model.IsEnabled)
         {
-            throw new ChatWorkflowException(
+            throw new AgentWorkflowException(
                 AppProblemCodes.ChatConfigurationMissing,
                 $"Language model '{model.Name}' is disabled.",
                 "当前模型已停用，请切换模型或联系管理员检查 AI 配置。");
@@ -56,7 +56,7 @@ public class ChatAgentFactory(
 
         if (string.IsNullOrWhiteSpace(model.ApiKey))
         {
-            throw new ChatWorkflowException(
+            throw new AgentWorkflowException(
                 AppProblemCodes.ChatConfigurationMissing,
                 $"Language model '{model.Name}' is missing an API key.",
                 "当前模型未配置 API Key，请切换模型或联系管理员补充密钥。");
@@ -64,7 +64,7 @@ public class ChatAgentFactory(
 
         if (!runtimeFactory.CanCreate(model.ProtocolType))
         {
-            throw new ChatWorkflowException(
+            throw new AgentWorkflowException(
                 AppProblemCodes.ChatConfigurationMissing,
                 $"No chat client provider is registered for protocol '{model.ProtocolType}'.",
                 "The configured model provider is unavailable. Please ask an administrator to review the AI settings.");
@@ -149,9 +149,9 @@ public class ChatAgentFactory(
         return CreateAgent(model, template, configureOptions, instructions);
     }
 
-    private static ChatWorkflowException CreateConfigurationMissingException()
+    private static AgentWorkflowException CreateConfigurationMissingException()
     {
-        return new ChatWorkflowException(
+        return new AgentWorkflowException(
             AppProblemCodes.ChatConfigurationMissing,
             "The conversation template or model configuration could not be found.",
             "This session is missing an available template or model configuration. Please ask an administrator to review the AI settings.");

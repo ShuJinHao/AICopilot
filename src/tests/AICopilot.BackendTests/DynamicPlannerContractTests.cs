@@ -120,7 +120,7 @@ public sealed class DynamicPlannerContractTests
             "Return backend controlled JSON.",
             model.Id,
             new TemplateSpecification { MaxTokens = 512, Temperature = 0.1f });
-        var factory = new ChatAgentFactory(
+        var factory = new ConfiguredAgentRuntimeFactory(
             new InMemoryReadRepository<ConversationTemplate>([template]),
             new InMemoryReadRepository<LanguageModel>([model]),
             runtimeFactory);

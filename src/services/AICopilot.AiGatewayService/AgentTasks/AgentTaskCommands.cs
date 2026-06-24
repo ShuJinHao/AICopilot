@@ -1,30 +1,23 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using AICopilot.AiGatewayService.Runtime;
+using AICopilot.AiGatewayService.Agents;
+using AICopilot.AiGatewayService.Models;
 using AICopilot.AiGatewayService.Sessions;
 using AICopilot.AiGatewayService.Skills;
 using AICopilot.AiGatewayService.Tools;
-using AICopilot.AiGatewayService.Workspaces;
+using AICopilot.AiGatewayService.Workflows;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Approvals;
-using AICopilot.Core.AiGateway.Aggregates.Artifacts;
-using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
-using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
 using AICopilot.Core.AiGateway.Aggregates.Skills;
-using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Core.AiGateway.Aggregates.Uploads;
 using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.AiGateway.Specifications.AgentTasks;
 using AICopilot.Core.AiGateway.Specifications.Approvals;
-using AICopilot.Core.AiGateway.Specifications.Artifacts;
-using AICopilot.Core.AiGateway.Specifications.ConversationTemplate;
-using AICopilot.Core.AiGateway.Specifications.LanguageModel;
 using AICopilot.Core.AiGateway.Specifications.Sessions;
 using AICopilot.Core.AiGateway.Specifications.Uploads;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.Services.Contracts;
-using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Messaging;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
@@ -50,12 +43,6 @@ public sealed record PlanAgentTaskCommand(
     string? SkillCode = null,
     IReadOnlyCollection<string>? PreferredToolCodes = null) : ICommand<Result<AgentTaskDto>>;
 
-public enum AgentPlannerMode
-{
-    Auto,
-    DynamicOnly,
-    StaticOnly
-}
 [AuthorizeRequirement("AiGateway.ApproveAgentTaskPlan")]
 public sealed record ApproveAgentTaskPlanCommand(Guid Id) : ICommand<Result<AgentTaskDto>>;
 
@@ -73,23 +60,17 @@ public sealed class PlanAgentTaskCommandHandler(
     IRepository<ApprovalRequest> approvalRepository,
     IReadRepository<Session> sessionRepository,
     IReadRepository<UploadRecord> uploadRepository,
-    IReadRepository<ConversationTemplate> templateRepository,
-    IReadRepository<LanguageModel> modelRepository,
-    IChatRuntimeSettingsProvider runtimeSettingsProvider,
-    IAgentArtifactWorkspaceService workspaceService,
     AgentAuditRecorder auditRecorder,
     IEnumerable<IKnowledgeBaseAccessChecker> knowledgeBaseAccessCheckers,
-    AgentPlanToolGuard planToolGuard,
-    IAgentDynamicPlanner dynamicPlanner,
-    ICloudReadonlyAgentPlanService cloudReadonlyPlanService,
     ICurrentUser currentUser,
     IBusinessDatabaseReadService? businessDatabaseReadService = null,
     MessageTimelineProjectionWriter? timelineProjectionWriter = null,
     SkillDefinitionGuard? skillDefinitionGuard = null,
-    IAgentSkillAutoSelector? skillAutoSelector = null)
+    IAgentSkillAutoSelector? skillAutoSelector = null,
+    AgentWorkflowPipeline? workflowPipeline = null)
     : ICommandHandler<PlanAgentTaskCommand, Result<AgentTaskDto>>
 {
-    private const int PlannerValidationVersion = 1;
+    private const int PlanDraftValidationVersion = 1;
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -119,143 +100,66 @@ public sealed class PlanAgentTaskCommandHandler(
         }
 
         var preparation = preparationResult.Value!;
+        var capabilityGaps = new List<string>();
+        AgentPlanDraftWorkflowResult? workflowDraft = null;
+        if (workflowPipeline is not null)
+        {
+            workflowDraft = await workflowPipeline.RunPlanDraftWorkflowAsync(
+                new ChatStreamRequest(request.SessionId, request.Goal),
+                cancellationToken);
+        }
+
         var skillSelection = await ResolveEffectiveSkillAsync(request, cancellationToken);
+        skillSelection ??= SelectSkillFromWorkflow(workflowDraft);
         if (AutoSkillSelectionRequired(request) && string.IsNullOrWhiteSpace(skillSelection?.SkillCode))
         {
-            return Result.Failure(new ApiProblemDescriptor(
-                AppProblemCodes.AgentSkillSelectionRequired,
-                skillSelection?.Reason?.Trim() is { Length: > 0 } reason
-                    ? reason
-                    : "无法自动识别合适的 Skill。请补充任务目标，或手动选择一个 Skill 后重新生成计划。"));
+            capabilityGaps.Add(skillSelection?.Reason?.Trim() is { Length: > 0 } reason
+                ? $"Skill 自动识别未命中：{reason}"
+                : "Skill 自动识别未命中；当前仅生成通用计划草案。");
         }
 
         var effectiveSkillCode = skillSelection?.SkillCode;
-        var skillResult = skillDefinitionGuard is null
-            ? Result.Success<SkillDefinition?>(null)
-            : await skillDefinitionGuard.ResolveAsync(effectiveSkillCode, cancellationToken);
-        if (!skillResult.IsSuccess)
+        SkillDefinition? selectedSkill = null;
+        if (skillDefinitionGuard is not null)
         {
-            return Result.From(skillResult);
-        }
+            var skillResult = await skillDefinitionGuard.ResolveAsync(effectiveSkillCode, cancellationToken);
+            if (!skillResult.IsSuccess)
+            {
+                if (!string.IsNullOrWhiteSpace(request.SkillCode))
+                {
+                    return Result.From(skillResult);
+                }
 
-        var selectedSkill = skillResult.Value;
+                capabilityGaps.Add(DescribeProblem("Skill 自动识别结果不可用", skillResult));
+                effectiveSkillCode = null;
+            }
+            else
+            {
+                selectedSkill = skillResult.Value;
+            }
+        }
         var effectiveTaskType = ResolveEffectiveTaskType(request.TaskType, selectedSkill);
         var effectiveQueryMode = request.QueryMode ??
             (effectiveTaskType == AgentTaskType.CloudDataReport ? "CloudReadonly" : "TextToSql");
         var effectivePlanSource = selectedSkill is null ? "FreeGoal" : $"Skill.{selectedSkill.SkillCode}";
 
-        _ = await templateRepository.FirstOrDefaultAsync(
-            new ConversationTemplateByCodeSpec("agent_planner"),
-            cancellationToken);
-        var runtimeSettings = await runtimeSettingsProvider.GetAsync(cancellationToken);
         var riskLevel = AgentTaskPlanMetadataBuilder.DetermineRiskLevel(effectiveTaskType);
         var requestedArtifactTypes = AgentTaskPlanStepBuilder.NormalizeArtifactTypes(request.ArtifactTypes)?.ToArray();
         var skillDefaultArtifactTypes = AgentTaskPlanStepBuilder.NormalizeArtifactTypes(selectedSkill?.OutputComponentTypes)?.ToArray();
         var effectiveArtifactTypes = requestedArtifactTypes ?? skillDefaultArtifactTypes;
-        var requestedPlannerMode = AgentTaskPlanMetadataBuilder.NormalizePlannerMode(request.PlannerMode, request.ForceStaticPlanner);
-        var plannerModelResult = requestedPlannerMode == AgentPlannerMode.StaticOnly
-            ? Result.Success<LanguageModel?>(null)
-            : await ResolvePlannerModelAsync(request.ModelId, cancellationToken);
-        if (!plannerModelResult.IsSuccess)
-        {
-            return Result.From(plannerModelResult);
-        }
+        var effectivePlannerMode = "PlanDraft";
+        string? plannerFallbackReason = null;
+        var plannerToolCatalogVersion = PlannerToolCatalog.CurrentVersion;
+        var plannerToolCount = 0;
+        var toolRiskSummary = AgentTaskPlanMetadataBuilder.BuildToolRiskSummary(null);
+        var steps = AgentTaskPlanStepBuilder.BuildPlanSteps(
+            preparation.UploadIds.Length > 0,
+            preparation.KnowledgeBaseIds.Length > 0,
+            preparation.HasBusinessDataSourcesForPlan,
+            effectiveTaskType,
+            riskLevel,
+            effectiveArtifactTypes);
 
-        var plannerModel = plannerModelResult.Value;
-        if (plannerModel is null && requestedPlannerMode == AgentPlannerMode.DynamicOnly)
-        {
-            return Result.Failure(new ApiProblemDescriptor(
-                AppProblemCodes.PlannerModelUnavailable,
-                "No enabled planner model is available for DynamicOnly planning."));
-        }
-
-        var effectivePlannerMode = requestedPlannerMode == AgentPlannerMode.StaticOnly ? "Static" : "StaticFallback";
-        string? plannerFallbackReason = plannerModel is null && requestedPlannerMode == AgentPlannerMode.Auto
-            ? "No enabled planner model is available; static fallback was used."
-            : null;
-        PlannerToolCatalog? plannerToolCatalog = null;
-        IReadOnlyCollection<AgentStepPlanDto> steps;
-        if (plannerModel is not null)
-        {
-            var catalogResult = await planToolGuard.GetAvailableToolCatalogAsync(
-                userId,
-                preparation.IsSimulationOnlyPlan,
-                preparation.BusinessDomains,
-                cancellationToken,
-                selectedSkill?.SkillCode ?? effectiveSkillCode);
-            if (!catalogResult.IsSuccess)
-            {
-                return Result.From(catalogResult);
-            }
-
-            plannerToolCatalog = catalogResult.Value!;
-            var preferredCatalogResult = ApplyPreferredToolCodes(plannerToolCatalog, request.PreferredToolCodes);
-            if (!preferredCatalogResult.IsSuccess)
-            {
-                return Result.From(preferredCatalogResult);
-            }
-
-            plannerToolCatalog = preferredCatalogResult.Value!;
-            if (plannerToolCatalog.AvailableToolCount == 0)
-            {
-                return Result.Failure(new ApiProblemDescriptor(
-                    AppProblemCodes.PlannerToolCatalogEmpty,
-                    "Planner model is available, but no enabled and authorized tools are available for the current user."));
-            }
-
-            var dynamicPlanResult = await dynamicPlanner.CreatePlanAsync(
-                new AgentDynamicPlannerRequest(
-                    request.Goal,
-                    effectiveTaskType,
-                    preparation.UploadIds,
-                    preparation.KnowledgeBaseIds,
-                    plannerToolCatalog,
-                    plannerModel,
-                    runtimeSettings,
-                    AgentTaskPlanMetadataBuilder.BuildPlannerDataSourceSummaries(preparation.SelectedDataSources),
-                    preparation.BusinessDomains,
-                    effectiveQueryMode,
-                    effectiveArtifactTypes,
-                    request.RequiresDataApproval,
-                    selectedSkill?.SkillCode,
-                    selectedSkill?.DisplayName,
-                    selectedSkill?.Description),
-                cancellationToken);
-            if (!dynamicPlanResult.IsSuccess)
-            {
-                if (requestedPlannerMode == AgentPlannerMode.Auto && CanFallbackToStaticPlan(dynamicPlanResult))
-                {
-                    effectivePlannerMode = "StaticFallback";
-                    plannerFallbackReason = BuildPlannerFallbackReason(dynamicPlanResult);
-                    steps = AgentTaskPlanStepBuilder.BuildPlanSteps(
-                        preparation.UploadIds.Length > 0,
-                        preparation.KnowledgeBaseIds.Length > 0,
-                        preparation.HasBusinessDataSourcesForPlan,
-                        effectiveTaskType,
-                        riskLevel,
-                        effectiveArtifactTypes);
-                    goto ValidateAndPersistPlan;
-                }
-
-                return Result.From(dynamicPlanResult);
-            }
-
-            steps = dynamicPlanResult.Value!;
-            effectivePlannerMode = "Dynamic";
-            plannerFallbackReason = null;
-        }
-        else
-        {
-            steps = AgentTaskPlanStepBuilder.BuildPlanSteps(
-                preparation.UploadIds.Length > 0,
-                preparation.KnowledgeBaseIds.Length > 0,
-                preparation.HasBusinessDataSourcesForPlan,
-                effectiveTaskType,
-                riskLevel,
-                effectiveArtifactTypes);
-        }
-
-ValidateAndPersistPlan:
         var originalToolCodes = steps
             .Select(step => step.ToolCode)
             .Where(toolCode => !string.IsNullOrWhiteSpace(toolCode))
@@ -274,45 +178,10 @@ ValidateAndPersistPlan:
             .Select(toolCode => toolCode!)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        if (plannerToolCatalog is null)
-        {
-            var staticCatalogResult = await planToolGuard.GetAvailableToolCatalogAsync(
-                userId,
-                preparation.IsSimulationOnlyPlan,
-                preparation.BusinessDomains,
-                cancellationToken,
-                selectedSkill?.SkillCode ?? effectiveSkillCode);
-            if (!staticCatalogResult.IsSuccess)
-            {
-                return Result.From(staticCatalogResult);
-            }
-
-            plannerToolCatalog = staticCatalogResult.Value!;
-            var preferredCatalogResult = ApplyPreferredToolCodes(plannerToolCatalog, request.PreferredToolCodes);
-            if (!preferredCatalogResult.IsSuccess)
-            {
-                return Result.From(preferredCatalogResult);
-            }
-
-            plannerToolCatalog = preferredCatalogResult.Value!;
-        }
-
-        var guardedStepsResult = await planToolGuard.ValidateStepsAsync(
-            steps,
-            effectiveTaskType,
-            userId,
-            preparation.IsSimulationOnlyPlan,
-            preparation.BusinessDomains,
-            cancellationToken,
-            selectedSkill?.SkillCode ?? effectiveSkillCode);
-        if (!guardedStepsResult.IsSuccess)
-        {
-            return Result.From(guardedStepsResult);
-        }
 
         steps = riskLevel >= AgentTaskRiskLevel.High
-            ? guardedStepsResult.Value!.Select(step => step with { RequiresApproval = true }).ToArray()
-            : guardedStepsResult.Value!;
+            ? steps.Select(step => step with { RequiresApproval = true }).ToArray()
+            : steps;
         var approvalCheckpoints = steps
             .Where(step => step.RequiresApproval)
             .Select(step => string.IsNullOrWhiteSpace(step.ToolCode) ? step.Title : step.ToolCode!)
@@ -323,21 +192,7 @@ ValidateAndPersistPlan:
             .Select(step => step.ToolCode!)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        var toolRiskSummary = AgentTaskPlanMetadataBuilder.BuildToolRiskSummary(plannerToolCatalog);
         AgentTaskPlanCloudReadonlyIntentDocument? cloudReadonlyIntent = null;
-        if (effectiveTaskType == AgentTaskType.CloudDataReport)
-        {
-            var cloudIntentResult = await cloudReadonlyPlanService.CreateIntentAsync(
-                request.SessionId,
-                request.Goal,
-                cancellationToken);
-            if (!cloudIntentResult.IsSuccess)
-            {
-                return Result.From(cloudIntentResult);
-            }
-
-            cloudReadonlyIntent = AgentTaskPlanCloudReadonlyIntentDocument.From(cloudIntentResult.Value!);
-        }
 
         var plan = new AgentTaskPlanDocument(
             1,
@@ -356,15 +211,13 @@ ValidateAndPersistPlan:
                     step.RequiresApproval,
                     step.InputJson))
                 .ToArray(),
-            new AgentTaskPlanRuntimeSettingsDocument(
-                runtimeSettings.AgentPlanningHistoryCount,
-                runtimeSettings.ContextTokenLimit),
+            new AgentTaskPlanRuntimeSettingsDocument(0, 0),
             effectivePlannerMode,
             plannerFallbackReason,
-            plannerModel?.Id.Value,
-            PlannerValidationVersion,
-            plannerToolCatalog?.Version ?? PlannerToolCatalog.CurrentVersion,
-            plannerToolCatalog?.AvailableToolCount ?? 0,
+            request.ModelId,
+            PlanDraftValidationVersion,
+            plannerToolCatalogVersion,
+            plannerToolCount,
             preparation.DataSourceIds,
             preparation.BusinessDomains,
             effectiveQueryMode,
@@ -373,9 +226,9 @@ ValidateAndPersistPlan:
             new AgentTaskPlanSafetySummaryDocument(
                 effectivePlanSource,
                 effectivePlannerMode,
-                plannerModel is null ? null : $"{plannerModel.Provider}/{plannerModel.Name}",
-                plannerToolCatalog?.Version ?? PlannerToolCatalog.CurrentVersion,
-                plannerToolCatalog?.AvailableToolCount ?? 0,
+                PlannerModelSummary: null,
+                plannerToolCatalogVersion,
+                plannerToolCount,
                 preparation.IsSimulationOnlyPlan,
                 request.RequiresDataApproval,
                 toolRiskSummary,
@@ -383,14 +236,20 @@ ValidateAndPersistPlan:
             forcedStepCodes,
             approvalCheckpoints,
             AgentTaskPlanMetadataBuilder.BuildPlanDataSourceSummaries(preparation.SelectedDataSources),
-            plannerToolCatalog?.Version ?? PlannerToolCatalog.CurrentVersion,
-            plannerToolCatalog?.AvailableToolCount ?? 0,
+            plannerToolCatalogVersion,
+            plannerToolCount,
             toolRiskSummary,
             MockMcpOnly: true,
             toolApprovalCheckpoints,
             SkillCode: selectedSkill?.SkillCode,
             SkillName: selectedSkill?.DisplayName,
-            SkillRoutingReason: skillSelection?.Reason);
+            SkillRoutingReason: skillSelection?.Reason,
+            PlanKind: AgentTaskPlanKinds.PlanDraft,
+            IsExecutable: false,
+            CapabilityGaps: capabilityGaps
+                .Where(gap => !string.IsNullOrWhiteSpace(gap))
+                .Distinct(StringComparer.Ordinal)
+                .ToArray());
 
         var now = DateTimeOffset.UtcNow;
         var task = new AgentTask(
@@ -400,7 +259,7 @@ ValidateAndPersistPlan:
             request.Goal,
             effectiveTaskType,
             riskLevel,
-            plannerModel?.Id,
+            request.ModelId.HasValue ? new(request.ModelId.Value) : null,
             JsonSerializer.Serialize(plan, JsonOptions),
             now);
 
@@ -409,8 +268,6 @@ ValidateAndPersistPlan:
             task.AddStep(step.Title, step.Description, step.StepType, step.ToolCode, step.RequiresApproval, now, step.InputJson);
         }
 
-        var workspace = await workspaceService.CreateForTaskAsync(task, now, cancellationToken);
-        task.AttachWorkspace(workspace.Id, now);
         var approval = new ApprovalRequest(
             task.Id,
             AgentApprovalType.Plan,
@@ -427,11 +284,11 @@ ValidateAndPersistPlan:
         await auditRecorder.RecordPlanAsync(
             task,
             AuditResults.Succeeded,
-            "Agent task plan generated and is waiting for user approval.",
+            "Agent task PlanDraft generated and is awaiting user confirmation.",
             pendingApprovalCount: 1,
             cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
-        return Result.Success(AgentTaskDtoMapper.Map(task, workspace.WorkspaceCode, pendingApprovalCount: 1));
+        return Result.Success(AgentTaskDtoMapper.Map(task, pendingApprovalCount: 1));
     }
 
     private static Result MissingUser()
@@ -477,85 +334,47 @@ ValidateAndPersistPlan:
         };
     }
 
-    private async Task<Result<LanguageModel?>> ResolvePlannerModelAsync(
-        Guid? modelId,
-        CancellationToken cancellationToken)
+    private static AgentSkillSelection? SelectSkillFromWorkflow(AgentPlanDraftWorkflowResult? workflowDraft)
     {
-        if (modelId.HasValue)
+        var skillIntent = workflowDraft?.Intents
+            .Where(intent => intent.Intent.StartsWith("Skill.", StringComparison.OrdinalIgnoreCase) ||
+                             !string.IsNullOrWhiteSpace(intent.SkillCode))
+            .OrderByDescending(intent => intent.Confidence)
+            .FirstOrDefault();
+        if (skillIntent is null)
         {
-            var model = await modelRepository.FirstOrDefaultAsync(
-                new LanguageModelByIdSpec(new LanguageModelId(modelId.Value)),
-                cancellationToken);
-            return model is not null && IsPlannerModelUsable(model)
-                ? Result.Success<LanguageModel?>(model)
-                : Result.Failure(new ApiProblemDescriptor(
-                    AppProblemCodes.PlannerModelUnavailable,
-                    "Specified planner model is unavailable or does not support Planner usage."));
+            return null;
         }
 
-        var models = await modelRepository.ListAsync(new LanguageModelsOrderedSpec(), cancellationToken);
-        var plannerModel = models.FirstOrDefault(IsPlannerModelUsable);
-        return Result.Success<LanguageModel?>(plannerModel);
+        var skillCode = !string.IsNullOrWhiteSpace(skillIntent.SkillCode)
+            ? skillIntent.SkillCode
+            : skillIntent.Intent["Skill.".Length..];
+        if (string.IsNullOrWhiteSpace(skillCode))
+        {
+            return null;
+        }
+
+        var reason = skillIntent.Reason ??
+                     skillIntent.Reasoning ??
+                     $"Unified workflow selected Skill.{skillCode}.";
+        return new AgentSkillSelection(skillCode.Trim(), reason);
     }
 
-    private static bool IsPlannerModelUsable(LanguageModel model)
+    private static string DescribeProblem<T>(string prefix, Result<T> result)
     {
-        return model.IsEnabled &&
-               model.Usage.HasFlag(LanguageModelUsage.Planner) &&
-               !string.IsNullOrWhiteSpace(model.ApiKey);
-    }
-
-    private static bool CanFallbackToStaticPlan(Result<IReadOnlyCollection<AgentStepPlanDto>> dynamicPlanResult)
-    {
-        return dynamicPlanResult.Errors?.OfType<ApiProblemDescriptor>().Any(error =>
-            string.Equals(error.Code, AppProblemCodes.PlannerModelUnavailable, StringComparison.Ordinal) ||
-            string.Equals(error.Code, AppProblemCodes.AgentPlanInvalid, StringComparison.Ordinal)) == true;
-    }
-
-    private static string BuildPlannerFallbackReason(Result<IReadOnlyCollection<AgentStepPlanDto>> dynamicPlanResult)
-    {
-        var detail = dynamicPlanResult.Errors?
+        var problem = result.Errors?
             .OfType<ApiProblemDescriptor>()
-            .Select(error => error.Detail)
+            .FirstOrDefault();
+        if (problem is not null)
+        {
+            return $"{prefix}: {problem.Code} - {problem.Detail}";
+        }
+
+        var detail = result.Errors?
+            .Select(error => error?.ToString())
             .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
-
         return string.IsNullOrWhiteSpace(detail)
-            ? "Planner model failed before producing a valid plan; static fallback was used."
-            : $"Planner model did not produce a valid executable plan; static fallback was used. Detail: {detail}";
-    }
-
-    private static Result<PlannerToolCatalog> ApplyPreferredToolCodes(
-        PlannerToolCatalog catalog,
-        IReadOnlyCollection<string>? preferredToolCodes)
-    {
-        var preferred = preferredToolCodes?
-            .Where(code => !string.IsNullOrWhiteSpace(code))
-            .Select(code => code.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-
-        if (preferred is null || preferred.Length == 0)
-        {
-            return Result.Success(catalog);
-        }
-
-        var tools = catalog.Tools
-            .Where(tool => preferred.Contains(tool.ToolCode, StringComparer.OrdinalIgnoreCase))
-            .ToArray();
-        var missing = preferred
-            .Where(code => tools.All(tool => !string.Equals(tool.ToolCode, code, StringComparison.OrdinalIgnoreCase)))
-            .ToArray();
-
-        if (missing.Length > 0)
-        {
-            return Result.Failure(new ApiProblemDescriptor(
-                AppProblemCodes.AgentPlanToolDenied,
-                $"Preferred tool is unavailable or outside the current skill boundary: {string.Join(", ", missing)}."));
-        }
-
-        return Result.Success(new PlannerToolCatalog(
-            catalog.Version,
-            tools.Length,
-            tools));
+            ? prefix
+            : $"{prefix}: {detail}";
     }
 }

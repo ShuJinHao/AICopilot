@@ -69,7 +69,7 @@ public interface IAgentDynamicPlanner
         CancellationToken cancellationToken);
 }
 
-public sealed class DefaultAgentDynamicPlanner(ChatAgentFactory chatAgentFactory) : IAgentDynamicPlanner
+public sealed class DefaultAgentDynamicPlanner(ConfiguredAgentRuntimeFactory configuredAgentFactory) : IAgentDynamicPlanner
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -83,7 +83,7 @@ public sealed class DefaultAgentDynamicPlanner(ChatAgentFactory chatAgentFactory
     {
         try
         {
-            await using var scopedAgent = await chatAgentFactory.CreateAgentAsync(
+            await using var scopedAgent = await configuredAgentFactory.CreateAgentAsync(
                 "agent_planner",
                 request.PlannerModel,
                 AgentDynamicPlannerPromptComposer.ComposeInstructions,
@@ -108,7 +108,7 @@ public sealed class DefaultAgentDynamicPlanner(ChatAgentFactory chatAgentFactory
                 ? Result.Success<IReadOnlyCollection<AgentStepPlanDto>>(parseResult.Value!)
                 : Result.From(parseResult);
         }
-        catch (ChatWorkflowException ex)
+        catch (AgentWorkflowException ex)
         {
             return Result.Failure(new ApiProblemDescriptor(
                 AppProblemCodes.PlannerModelUnavailable,

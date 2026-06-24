@@ -23,7 +23,7 @@ public interface IFinalAgentContextSerializer
 }
 
 public sealed class FinalAgentContextSerializer(
-    ChatAgentFactory chatAgentFactory,
+    ConfiguredAgentRuntimeFactory configuredAgentFactory,
     ApprovalToolResolver approvalToolResolver,
     IReadRepository<Session> sessionRepository) : IFinalAgentContextSerializer
 {
@@ -86,14 +86,14 @@ public sealed class FinalAgentContextSerializer(
 
         var tools = await approvalToolResolver.GetToolsByNamesAsync(storedContext.ToolNames, cancellationToken);
         ScopedRuntimeAgent? scopedAgent = storedContext.ExecutionMetadata.FinalModelId.HasValue
-            ? await chatAgentFactory.CreateAgentAsync(
+            ? await configuredAgentFactory.CreateAgentAsync(
                 session.TemplateId,
                 new LanguageModelId(storedContext.ExecutionMetadata.FinalModelId.Value),
                 options =>
                 {
                     options.Tools = tools;
                 })
-            : await chatAgentFactory.CreateAgentAsync(
+            : await configuredAgentFactory.CreateAgentAsync(
                 session.TemplateId,
                 options =>
                 {

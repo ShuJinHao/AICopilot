@@ -2,6 +2,7 @@ using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.HttpApi.Infrastructure;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace AICopilot.HttpApi.Controllers;
 
@@ -9,10 +10,12 @@ namespace AICopilot.HttpApi.Controllers;
 [Authorize]
 public class AiGatewayAgentTaskController(ISender sender) : ApiControllerBase(sender)
 {
-    [HttpPost("agent/task/plan")]
-    public async Task<IActionResult> PlanAgentTask(PlanAgentTaskCommand command)
+    [HttpPost("agent/task/plan-stream")]
+    [EnableRateLimiting("chat")]
+    public IResult PlanAgentTaskStream(PlanAgentTaskStreamRequest request)
     {
-        return ReturnResult(await Sender.Send(command));
+        var stream = Sender.CreateStream(request);
+        return Results.ServerSentEvents(stream);
     }
 
     [HttpPost("agent/task/approve-plan")]

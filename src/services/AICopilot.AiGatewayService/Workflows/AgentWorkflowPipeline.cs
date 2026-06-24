@@ -5,10 +5,17 @@ using AICopilot.AiGatewayService.Models;
 using AICopilot.AiGatewayService.Safety;
 using AICopilot.AiGatewayService.Workflows.Executors;
 using AICopilot.Services.Contracts;
+using AICopilot.SharedKernel.Ai;
 
 namespace AICopilot.AiGatewayService.Workflows;
 
-public class ChatWorkflowOrchestrator(
+public sealed record AgentPlanDraftWorkflowResult(
+    string Scene,
+    IReadOnlyCollection<IntentResult> Intents,
+    IReadOnlyCollection<AiToolDefinition> Tools,
+    ChatExecutionMetadataSnapshot ExecutionMetadata);
+
+public class AgentWorkflowPipeline(
     IntentRoutingExecutor intentRouting,
     ToolsPackExecutor toolsPack,
     KnowledgeRetrievalExecutor knowledgeRetrieval,
@@ -20,6 +27,19 @@ public class ChatWorkflowOrchestrator(
     IFinalAgentContextStore finalAgentContextStore,
     IFinalAgentContextSerializer finalAgentContextSerializer)
 {
+    public async Task<AgentPlanDraftWorkflowResult> RunPlanDraftWorkflowAsync(
+        ChatStreamRequest request,
+        CancellationToken ct = default)
+    {
+        var routing = await intentRouting.ExecuteAsync(request, ct);
+        var tools = await toolsPack.DiscoverAsync(routing.Intents, ct);
+        return new AgentPlanDraftWorkflowResult(
+            routing.Scene.ToString(),
+            routing.Intents,
+            tools.Tools ?? [],
+            routing.ExecutionMetadata);
+    }
+
     public async IAsyncEnumerable<ChatChunk> RunIntentWorkflowAsync(
         ChatStreamRequest request,
         SessionRuntimeSnapshot? session,
@@ -27,7 +47,7 @@ public class ChatWorkflowOrchestrator(
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var routing = await intentRouting.ExecuteAsync(request, ct);
-        var routingMetadataChunk = ChatStreamRuntime.CreateMetadataChunk(
+        var routingMetadataChunk = AgentStreamRuntime.CreateMetadataChunk(
             routing.ExecutionMetadata,
             IntentRoutingExecutor.ExecutorId);
         if (routingMetadataChunk is not null)
@@ -40,7 +60,7 @@ public class ChatWorkflowOrchestrator(
             yield return new ChatChunk(IntentRoutingExecutor.ExecutorId, ChunkType.Intent, routing.ResponseText);
         }
 
-        var sink = new ChatWorkflowSink();
+        var sink = new AgentWorkflowSink();
         var branchTasks = new[]
         {
             toolsPack.ExecuteAsync(routing.Intents, ct),
@@ -88,7 +108,7 @@ public class ChatWorkflowOrchestrator(
         var completed = false;
         try
         {
-            var finalMetadataChunk = ChatStreamRuntime.CreateMetadataChunk(
+            var finalMetadataChunk = AgentStreamRuntime.CreateMetadataChunk(
                 agentContext.ExecutionMetadata,
                 FinalAgentBuildExecutor.ExecutorId);
             if (finalMetadataChunk is not null)
@@ -122,7 +142,7 @@ public class ChatWorkflowOrchestrator(
         }
     }
 
-    private static async Task CompleteSinkWhenBranchesFinishAsync(Task branchTask, ChatWorkflowSink sink)
+    private static async Task CompleteSinkWhenBranchesFinishAsync(Task branchTask, AgentWorkflowSink sink)
     {
         try
         {

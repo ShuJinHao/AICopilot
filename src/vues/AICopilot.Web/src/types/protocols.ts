@@ -19,7 +19,9 @@ export enum ChunkType {
   Widget = 'Widget',
   FunctionResult = 'FunctionResult',
   FunctionCall = 'FunctionCall',
-  ApprovalRequest = 'ApprovalRequest'
+  ApprovalRequest = 'ApprovalRequest',
+  AgentEvent = 'AgentEvent',
+  AgentTask = 'AgentTask'
 }
 
 export interface ChatChunk {
@@ -68,6 +70,15 @@ export interface Widget {
   title: string
   description: string
   data: unknown
+}
+
+export interface AgentEventPayload {
+  stage: string
+  code?: string | null
+  detail: string
+  recoverable: boolean
+  suggestedAction?: string | null
+  metadata: Record<string, string>
 }
 
 export interface UploadRecord {

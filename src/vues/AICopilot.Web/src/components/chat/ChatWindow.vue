@@ -31,6 +31,9 @@ import type { AgentPlannerToolSummary } from '@/types/app'
 import type { AgentApprovalRequest } from '@/types/protocols'
 
 type AgentPlanPreview = {
+  planKind?: string
+  isExecutable?: boolean
+  capabilityGaps?: string[]
   plannerMode?: string
   plannerFallbackReason?: string | null
   plannerToolCatalogVersion?: number
@@ -132,6 +135,75 @@ const latestPlanRiskLine = computed(() => {
   const entries = Object.entries(latestPlanRiskSummary.value)
   return entries.length ? entries.map(([risk, count]) => `${risk}:${count}`).join(' / ') : '无风险摘要'
 })
+const latestPlanCapabilityGaps = computed(() =>
+  (latestPlan.value?.capabilityGaps ?? [])
+    .filter((item) => item && item.trim().length > 0)
+)
+const latestPlanKindLabel = computed(() => {
+  if (!latestPlan.value) return '计划草案'
+  if (latestPlan.value.planKind === 'ExecutablePlan' || latestPlan.value.isExecutable) {
+    return '可执行计划'
+  }
+
+  return '计划草案'
+})
+const previewPlanSteps = computed(() => taskSteps.value.slice(0, 4))
+const hiddenPlanStepCount = computed(() => Math.max(0, taskSteps.value.length - previewPlanSteps.value.length))
+const compactOutputArtifacts = computed(() => taskArtifacts.value.slice(0, 3))
+const hiddenOutputArtifactCount = computed(() => Math.max(0, taskArtifacts.value.length - compactOutputArtifacts.value.length))
+const hasRuntimeDetails = computed(() =>
+  Boolean(latestTask.value || taskSteps.value.length || timelineEventItems.value.length || taskArtifacts.value.length || approvalGroups.value.length)
+)
+const isPlanDraftTask = computed(() =>
+  latestTask.value?.status === 'Draft' ||
+  latestPlan.value?.planKind === 'PlanDraft' ||
+  latestPlan.value?.isExecutable === false
+)
+const visibleBlockedStep = computed(() => {
+  const task = latestTask.value
+  const step = blockedStep.value
+  if (!task || !step || isPlanDraftTask.value || task.isRunQueued || task.isRunInProgress) {
+    return null
+  }
+
+  return ['WaitingApproval', 'Failed'].includes(step.status) ? step : null
+})
+const visibleOutputArtifacts = computed(() => isPlanDraftTask.value ? [] : compactOutputArtifacts.value)
+const hiddenVisibleOutputArtifactCount = computed(() =>
+  isPlanDraftTask.value ? 0 : hiddenOutputArtifactCount.value
+)
+const agentRunReply = computed(() => {
+  const task = latestTask.value
+  if (store.agentErrorMessage) {
+    return '这次请求没有进入执行，我保留了当前上下文，下面给出后端返回的真实原因。'
+  }
+
+  if (!task) {
+    return '我会先理解目标，再根据模式决定是直接回答还是给出计划草案。'
+  }
+
+  if (task.status === 'Draft' || task.status === 'WaitingPlanApproval') {
+    return `我已整理出${latestPlanKindLabel.value}，确认前不会执行 Cloud 查询、工具调用或 Worker 任务。`
+  }
+
+  if (task.isRunQueued) {
+    return '计划已确认，任务正在等待 Worker 执行。'
+  }
+
+  if (task.isRunInProgress || task.status === 'Running' || task.status === 'GeneratingArtifacts') {
+    return `正在按计划执行，当前进度 ${completedStepCount.value}/${taskSteps.value.length}。`
+  }
+
+  if (task.status === 'Failed') {
+    return '执行已停止，错误原因会显示在当前对话块里，重试会基于已确认计划继续。'
+  }
+
+  if (task.status === 'WorkspaceReady' || task.status === 'WaitingFinalApproval') {
+    return '执行结果已生成，待确认后形成正式输出。'
+  }
+
+  return inlineRunSubtitle.value
+})
 const latestPlanSource = computed(() =>
   sourceModeLabel(
     latestPlan.value?.skillName ||
@@ -224,6 +296,10 @@ const latestTimelineSummary = computed(() => {
   return items.length ? items[items.length - 1]!.title : '暂无执行事件'
 })
 const inlineRunSubtitle = computed(() => {
+  if (isPlanDraftTask.value) {
+    return '等待确认 · 未执行'
+  }
+
   if (store.currentWorkspace) {
     return `${workspaceStatus.value.label} · ${taskArtifacts.value.length} 个产物`
   }
@@ -273,6 +349,7 @@ const primaryTaskAction = computed(() => {
   }
 
   switch (task.status) {
+    case 'Draft':
     case 'WaitingPlanApproval':
       return {
         kind: 'approve-and-run' as PrimaryTaskActionKind,
@@ -478,6 +555,16 @@ function sourceModeLabel(value?: string | null) {
   }
 
   return value
+}
+
+function planStepTag(step: { requiresApproval: boolean }) {
+  if (isPlanDraftTask.value) {
+    return { tone: 'neutral' as const, label: '建议' }
+  }
+
+  return step.requiresApproval
+    ? { tone: 'warning' as const, label: '需确认' }
+    : { tone: 'neutral' as const, label: '只读' }
 }
 
 async function sendDirectMessage() {
@@ -790,9 +877,13 @@ onBeforeUnmount(() => {
         </div>
 
         <section v-if="store.currentMessages.length === 0 && !store.isLoadingHistory" class="empty-chat">
-          <Sparkles :size="28" />
-          <h2>开始一次只读分析</h2>
-          <p>选择真实工作场景，或直接输入设备、日志、配方、产能、知识库问题。</p>
+          <div class="empty-chat-copy">
+            <Sparkles :size="24" />
+            <div>
+              <h2>开始一次只读分析</h2>
+              <p>输入目标后，计划模式先给出草案；确认前不会执行 Cloud 查询、MCP 工具或 Worker。</p>
+            </div>
+          </div>
           <div class="suggestions">
             <button v-for="item in suggestions" :key="item" type="button" @click="useSuggestion(item)">
               {{ item }}
@@ -813,17 +904,20 @@ onBeforeUnmount(() => {
           <div class="agent-avatar">
             <Sparkles :size="18" />
           </div>
-          <article class="agent-run-card">
+          <article class="agent-run-message">
             <header class="agent-run-header">
               <div>
-                <span>AI 工作流</span>
-                <h2>{{ latestTask?.title || agentGoal || '当前任务计划' }}</h2>
-                <p>{{ latestTask?.goal || inlineRunSubtitle }}</p>
+                <span>AICopilot</span>
+                <p>{{ agentRunReply }}</p>
               </div>
               <AiTag :tone="statusTone(taskStatus.type)">{{ taskStatus.label }}</AiTag>
             </header>
 
             <div class="agent-run-context">
+              <span>
+                <ListChecks :size="14" />
+                {{ latestPlanKindLabel }}
+              </span>
               <span>
                 <Sparkles :size="14" />
                 Skill：{{ latestPlan?.skillName || latestPlan?.skillCode || selectedPlanTypeLabel }}
@@ -858,7 +952,7 @@ onBeforeUnmount(() => {
 
             <section v-if="latestTask" class="agent-plan" data-testid="inline-plan-card">
               <div class="section-title">
-                <strong>计划</strong>
+                <strong>{{ latestTask.title || agentGoal || '计划摘要' }}</strong>
                 <span>{{ taskSteps.length }} 个步骤</span>
               </div>
               <p class="agent-plan-goal">{{ latestTask.goal }}</p>
@@ -869,91 +963,29 @@ onBeforeUnmount(() => {
                 <TriangleAlert :size="15" />
                 <span>{{ latestPlan.plannerFallbackReason }}</span>
               </div>
-              <ol v-if="taskSteps.length" class="agent-step-preview" data-testid="plan-steps-preview">
-                <li v-for="step in taskSteps.slice(0, 5)" :key="step.id">
+              <div v-if="latestPlanCapabilityGaps.length" class="planner-warning capability-gap-list">
+                <TriangleAlert :size="15" />
+                <div>
+                  <strong>当前只是计划草案，确认执行前还有能力缺口</strong>
+                  <span v-for="gap in latestPlanCapabilityGaps.slice(0, 3)" :key="gap">{{ gap }}</span>
+                </div>
+              </div>
+              <ol v-if="previewPlanSteps.length" class="agent-step-preview" data-testid="plan-steps-preview">
+                <li v-for="step in previewPlanSteps" :key="step.id">
                   <i>{{ step.stepIndex }}</i>
                   <span>{{ step.title }}</span>
-                  <AiTag :tone="step.requiresApproval ? 'warning' : 'neutral'">
-                    {{ step.requiresApproval ? '需确认' : '只读' }}
+                  <AiTag :tone="planStepTag(step).tone">
+                    {{ planStepTag(step).label }}
                   </AiTag>
                 </li>
+                <li v-if="hiddenPlanStepCount" class="agent-step-more">
+                  <i>…</i>
+                  <span>还有 {{ hiddenPlanStepCount }} 个步骤在思考与执行记录中</span>
+                </li>
               </ol>
-              <div v-if="blockedStep" class="agent-blocked-step">
+              <div v-if="visibleBlockedStep" class="agent-blocked-step">
                 <TriangleAlert :size="15" />
-                <span>当前阻塞：{{ blockedStep.title }}</span>
-              </div>
-            </section>
-
-            <section v-if="approvalGroups.length" class="agent-approval-panel" data-testid="inline-approval-card">
-              <div class="section-title">
-                <strong>需要确认</strong>
-                <span>{{ pendingAgentApprovals.length }} 项待处理</span>
-              </div>
-              <div v-for="group in approvalGroups" :key="group.label" class="approval-group">
-                <div v-for="approval in group.approvals" :key="approval.id" class="approval-row">
-                  <div>
-                    <strong>{{ approvalDisplayTitle(approval) }}</strong>
-                    <span>{{ approvalMetaLine(approval) }}</span>
-                    <details class="approval-detail-fold" data-testid="approval-detail-fold">
-                      <summary>审批详情</summary>
-                      <dl class="approval-detail-grid">
-                        <div>
-                          <dt>类型</dt>
-                          <dd>{{ approvalTypeLabel(approval.type) }}</dd>
-                        </div>
-                        <div>
-                          <dt>对象</dt>
-                          <dd class="mono">{{ approval.targetName }}</dd>
-                        </div>
-                        <div>
-                          <dt>目标 ID</dt>
-                          <dd class="mono">{{ approval.targetId }}</dd>
-                        </div>
-                        <div v-if="approval.workspaceCode">
-                          <dt>工作区</dt>
-                          <dd class="mono">{{ approval.workspaceCode }}</dd>
-                        </div>
-                      </dl>
-                    </details>
-                  </div>
-                  <div class="approval-actions">
-                    <button type="button" aria-label="批准审批" :disabled="store.isAgentBusy" @click="approveAgentApproval(approval.id)">
-                      <Check :size="16" />
-                    </button>
-                    <button type="button" aria-label="驳回审批" :disabled="store.isAgentBusy" @click="rejectAgentApproval(approval.id)">
-                      <X :size="16" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            <section v-if="store.currentWorkspace || taskArtifacts.length" class="agent-artifacts" data-testid="inline-artifact-card">
-              <div class="section-title">
-                <strong>输出</strong>
-                <span>{{ workspaceStatus.label }} · {{ taskArtifacts.length }} 个产物</span>
-              </div>
-              <div class="artifact-attachment-row" aria-label="输出产物附件">
-                <div
-                  v-for="artifact in taskArtifacts.slice(0, 4)"
-                  :key="artifact.id"
-                  class="artifact-attachment"
-                >
-                  <button type="button" class="artifact-preview-trigger" @click="previewArtifact(artifact.id)">
-                    <FolderOpen :size="16" />
-                    <span>{{ artifact.name }}</span>
-                    <small>{{ artifact.previewKind }}</small>
-                  </button>
-                  <button
-                    type="button"
-                    class="artifact-download-trigger"
-                    :disabled="!artifact.downloadUrl"
-                    :aria-label="`下载 ${artifact.name}`"
-                    @click="downloadArtifact(artifact.id)"
-                  >
-                    <Download :size="15" />
-                  </button>
-                </div>
+                <span>当前阻塞：{{ visibleBlockedStep.title }}</span>
               </div>
             </section>
 
@@ -964,7 +996,21 @@ onBeforeUnmount(() => {
               </button>
             </div>
 
-            <details v-if="latestTask || taskSteps.length || timelineEventItems.length || taskArtifacts.length" class="agent-thinking-details" data-testid="inline-runtime-card">
+            <div v-if="visibleOutputArtifacts.length" class="agent-output-strip" aria-label="输出产物">
+              <button
+                v-for="artifact in visibleOutputArtifacts"
+                :key="artifact.id"
+                type="button"
+                class="agent-output-pill"
+                @click="previewArtifact(artifact.id)"
+              >
+                <FolderOpen :size="15" />
+                <span>{{ artifact.name }}</span>
+              </button>
+              <span v-if="hiddenVisibleOutputArtifactCount">+{{ hiddenVisibleOutputArtifactCount }}</span>
+            </div>
+
+            <details v-if="hasRuntimeDetails" class="agent-thinking-details" data-testid="inline-runtime-card">
               <summary data-testid="inline-runtime-summary">
                 <span class="timeline-summary-main">
                   <ListChecks :size="18" />
@@ -1006,6 +1052,50 @@ onBeforeUnmount(() => {
                       <span>现场确认：{{ onsiteStatus.label }}</span>
                     </div>
                     <button type="button" @click="store.confirmOnsitePresence(30)">确认在岗</button>
+                  </div>
+                </section>
+
+                <section v-if="approvalGroups.length" class="runtime-section-block" data-testid="inline-approval-card">
+                  <div class="runtime-section-title">
+                    <strong>确认项</strong>
+                    <span>{{ pendingAgentApprovals.length }} 项待处理</span>
+                  </div>
+                  <div v-for="group in approvalGroups" :key="group.label" class="approval-group">
+                    <div v-for="approval in group.approvals" :key="approval.id" class="approval-row">
+                      <div>
+                        <strong>{{ approvalDisplayTitle(approval) }}</strong>
+                        <span>{{ approvalMetaLine(approval) }}</span>
+                        <details class="approval-detail-fold" data-testid="approval-detail-fold">
+                          <summary>审批详情</summary>
+                          <dl class="approval-detail-grid">
+                            <div>
+                              <dt>类型</dt>
+                              <dd>{{ approvalTypeLabel(approval.type) }}</dd>
+                            </div>
+                            <div>
+                              <dt>对象</dt>
+                              <dd class="mono">{{ approval.targetName }}</dd>
+                            </div>
+                            <div>
+                              <dt>目标 ID</dt>
+                              <dd class="mono">{{ approval.targetId }}</dd>
+                            </div>
+                            <div v-if="approval.workspaceCode">
+                              <dt>工作区</dt>
+                              <dd class="mono">{{ approval.workspaceCode }}</dd>
+                            </div>
+                          </dl>
+                        </details>
+                      </div>
+                      <div class="approval-actions">
+                        <button type="button" aria-label="批准审批" :disabled="store.isAgentBusy" @click="approveAgentApproval(approval.id)">
+                          <Check :size="16" />
+                        </button>
+                        <button type="button" aria-label="驳回审批" :disabled="store.isAgentBusy" @click="rejectAgentApproval(approval.id)">
+                          <X :size="16" />
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </section>
 
@@ -1537,7 +1627,7 @@ onBeforeUnmount(() => {
 .message-viewport {
   min-height: 0;
   overflow-y: auto;
-  padding: 22px;
+  padding: 18px 22px 24px;
   background: var(--ai-canvas);
 }
 
@@ -1582,7 +1672,8 @@ onBeforeUnmount(() => {
 .agent-run-thread {
   grid-template-columns: 34px minmax(0, 1fr);
   align-items: flex-start;
-  margin-top: 16px;
+  max-width: 900px;
+  margin-top: 2px;
 }
 
 .agent-avatar {
@@ -1597,15 +1688,15 @@ onBeforeUnmount(() => {
   box-shadow: var(--ai-shadow-xs);
 }
 
-.agent-run-card {
+.agent-run-message {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
-  border: 1px solid rgba(210, 207, 198, 0.84);
-  border-radius: 18px;
-  padding: 16px;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: var(--ai-shadow-xs);
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .agent-run-header {
@@ -1616,9 +1707,7 @@ onBeforeUnmount(() => {
 }
 
 .agent-run-header div,
-.agent-plan,
-.agent-approval-panel,
-.agent-artifacts {
+.agent-plan {
   display: grid;
   gap: 8px;
   min-width: 0;
@@ -1635,19 +1724,11 @@ onBeforeUnmount(() => {
   font-weight: 800;
 }
 
-.agent-run-header h2 {
-  margin: 0;
-  color: var(--ai-text);
-  font-size: 18px;
-  font-weight: 950;
-  line-height: 1.35;
-}
-
 .agent-run-header p {
   margin: 0;
-  color: var(--ai-text-muted);
+  color: var(--ai-text);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 760;
   line-height: 1.55;
 }
 
@@ -1655,7 +1736,7 @@ onBeforeUnmount(() => {
 .artifact-attachment-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 7px;
+  gap: 6px 12px;
   align-items: center;
 }
 
@@ -1663,12 +1744,12 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  min-height: 28px;
-  border: 1px solid var(--ai-border);
-  border-radius: 999px;
-  padding: 0 9px;
-  background: var(--ai-surface-soft);
-  color: var(--ai-text);
+  min-height: 22px;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--ai-text-muted);
 }
 
 .agent-run-notice {
@@ -1728,11 +1809,11 @@ onBeforeUnmount(() => {
   color: #991b1b;
 }
 
-.agent-plan,
-.agent-approval-panel,
-.agent-artifacts {
-  border-left: 2px solid rgba(63, 111, 115, 0.2);
-  padding-left: 12px;
+.agent-plan {
+  display: grid;
+  gap: 9px;
+  border-left: 2px solid rgba(63, 111, 115, 0.24);
+  padding: 1px 0 1px 12px;
 }
 
 .agent-plan-goal {
@@ -1787,6 +1868,21 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
+.agent-step-preview .agent-step-more {
+  grid-template-columns: 28px minmax(0, 1fr);
+}
+
+.agent-step-preview .agent-step-more i {
+  background: transparent;
+  color: var(--ai-text-muted);
+}
+
+.agent-step-preview .agent-step-more span {
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
 .agent-blocked-step {
   display: flex;
   align-items: center;
@@ -1796,9 +1892,9 @@ onBeforeUnmount(() => {
 
 .agent-thinking-details {
   overflow: hidden;
-  border: 1px solid var(--ai-border);
-  border-radius: 14px;
-  background: var(--ai-surface-soft);
+  border: 1px solid rgba(63, 111, 115, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.28);
 }
 
 .agent-thinking-details > summary {
@@ -1806,7 +1902,7 @@ onBeforeUnmount(() => {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
-  padding: 11px 12px;
+  padding: 9px 10px;
   cursor: pointer;
   list-style: none;
 }
@@ -1820,7 +1916,7 @@ onBeforeUnmount(() => {
 }
 
 .agent-thinking-details .runtime-sections {
-  padding: 12px;
+  padding: 10px;
 }
 
 .compact-status-grid {
@@ -1902,6 +1998,42 @@ onBeforeUnmount(() => {
   opacity: 0.45;
 }
 
+.agent-output-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+  min-width: 0;
+}
+
+.agent-output-strip > span,
+.agent-output-pill {
+  min-height: 30px;
+  border: 1px solid var(--ai-border);
+  border-radius: 999px;
+  padding: 0 10px;
+  background: rgba(255, 255, 255, 0.64);
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.agent-output-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  color: var(--ai-text);
+  cursor: pointer;
+}
+
+.agent-output-pill span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .canvas-error {
   display: flex;
   align-items: center;
@@ -1928,44 +2060,61 @@ onBeforeUnmount(() => {
 
 .empty-chat {
   display: grid;
-  gap: 14px;
-  max-width: 760px;
-  margin: 42px auto;
-  border: 1px solid var(--ai-border);
-  border-radius: 24px;
-  padding: 28px;
-  background: var(--ai-surface);
-  box-shadow: var(--ai-shadow-canvas);
+  gap: 16px;
+  max-width: 880px;
+  margin: 24px auto 18px;
+  padding: 8px 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.empty-chat-copy {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.empty-chat-copy > svg {
+  margin-top: 2px;
+  color: var(--ai-graphite);
 }
 
 .empty-chat h2 {
   margin: 0;
-  font-size: 28px;
+  font-size: 20px;
   font-weight: 950;
 }
 
 .empty-chat p {
-  margin: 0;
+  margin: 4px 0 0;
   color: var(--ai-text-muted);
+  font-size: 13px;
+  font-weight: 760;
+  line-height: 1.55;
 }
 
 .suggestions {
-  display: grid;
-  gap: 9px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 760px;
 }
 
 .suggestions button {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
+  max-width: 100%;
   border: 1px solid var(--ai-border);
-  border-radius: 18px;
-  padding: 13px 14px;
-  background: var(--ai-surface-soft);
+  border-radius: 999px;
+  padding: 8px 11px;
+  background: rgba(255, 255, 255, 0.54);
   color: var(--ai-text);
   cursor: pointer;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 850;
   text-align: left;
 }
 
@@ -2402,6 +2551,30 @@ onBeforeUnmount(() => {
   color: #92400e;
   font-size: 12px;
   line-height: 1.35;
+}
+
+.capability-gap-list {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.capability-gap-list div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+.capability-gap-list strong {
+  color: #92400e;
+  font-size: 12px;
+}
+
+.capability-gap-list span {
+  overflow-wrap: anywhere;
+  color: var(--ai-text-muted);
 }
 
 .step-list,

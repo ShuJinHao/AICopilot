@@ -20,14 +20,14 @@ using System.Text;
 namespace AICopilot.AiGatewayService.Workflows.Executors;
 
 public class FinalAgentBuildExecutor(
-    ChatAgentFactory agentFactory,
+    ConfiguredAgentRuntimeFactory agentFactory,
     IReadRepository<Session> sessionRepository,
     IReadRepository<ConversationTemplate> templateRepository,
     IReadRepository<LanguageModel> modelRepository,
     ITokenBudgetPolicy tokenBudgetPolicy,
     ILogger<FinalAgentBuildExecutor> logger,
-    IChatRuntimeSettingsProvider? runtimeSettingsProvider = null,
-    IChatExecutionMetadataAccessor? executionMetadataAccessor = null,
+    IAgentRuntimeSettingsProvider? runtimeSettingsProvider = null,
+    IAgentExecutionMetadataAccessor? executionMetadataAccessor = null,
     ITextTokenEstimator? tokenEstimator = null)
 {
     public const string ExecutorId = nameof(FinalAgentBuildExecutor);
@@ -43,7 +43,7 @@ public class FinalAgentBuildExecutor(
         var session = await sessionRepository.FirstOrDefaultAsync(new SessionByIdSpec(new SessionId(request.SessionId)), ct);
         if (session == null)
         {
-            throw new ChatWorkflowException(
+            throw new AgentWorkflowException(
                 "session_not_found",
                 "未找到当前会话。",
                 "当前会话不存在或已被删除，请刷新后重试。");
@@ -55,7 +55,7 @@ public class FinalAgentBuildExecutor(
 
         if (template == null)
         {
-            throw new ChatWorkflowException(
+            throw new AgentWorkflowException(
                 AppProblemCodes.ChatConfigurationMissing,
                 "当前会话绑定的模板或模型不存在。",
                 "当前会话缺少可用的模板或模型配置，请联系管理员检查 AI 配置。");
@@ -68,7 +68,7 @@ public class FinalAgentBuildExecutor(
 
         if (model == null)
         {
-            throw new ChatWorkflowException(
+            throw new AgentWorkflowException(
                 AppProblemCodes.ChatConfigurationMissing,
                 request.FinalModelId.HasValue ? "用户选择的模型不存在。" : "当前会话绑定的模型不存在。",
                 request.FinalModelId.HasValue
@@ -78,7 +78,7 @@ public class FinalAgentBuildExecutor(
 
         if (!model.IsEnabled || !model.SupportsUsage(LanguageModelUsage.Chat))
         {
-            throw new ChatWorkflowException(
+            throw new AgentWorkflowException(
                 AppProblemCodes.ChatConfigurationMissing,
                 $"Configured model {model.Name} is disabled or not available for chat.",
                 "所选模型当前不可用于对话，请切换模型或联系管理员检查 AI 配置。");
@@ -96,7 +96,7 @@ public class FinalAgentBuildExecutor(
         var tokenBudgetDecision = tokenBudgetPolicy.Evaluate(model, template, finalUserPrompt);
         if (!tokenBudgetDecision.IsAllowed)
         {
-            throw new ChatWorkflowException(
+            throw new AgentWorkflowException(
                 AppProblemCodes.TokenBudgetExceeded,
                 tokenBudgetDecision.Detail ?? "当前模型 token 预算不足。",
                 tokenBudgetDecision.UserFacingMessage ?? "当前问题超出模型 token 预算，请缩小范围后重试。");
@@ -111,7 +111,7 @@ public class FinalAgentBuildExecutor(
                 Tools = genContext.Tools,
                 MaxOutputTokens = tokenBudgetDecision.ReservedOutputTokens
             };
-            var metadataAccessor = executionMetadataAccessor ?? new ChatExecutionMetadataAccessor();
+            var metadataAccessor = executionMetadataAccessor ?? new AgentExecutionMetadataAccessor();
             metadataAccessor.SetFinalModel(model, tokenBudgetDecision.ReservedOutputTokens);
             metadataAccessor.SetContextBudget(BuildContextBudgetReport(
                 template,

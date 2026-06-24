@@ -14,7 +14,7 @@ export type AgentRunNotice = {
 
 function statusLabel(status?: string | null) {
   const labels: Record<string, string> = {
-    Draft: '草稿',
+    Draft: '计划草案',
     Planned: '已规划',
     WaitingPlanApproval: '待确认计划',
     WaitingApproval: '待审批',
@@ -44,6 +44,7 @@ function statusType(status?: string | null): TagType {
     case 'Succeeded':
       return 'success'
     case 'WaitingPlanApproval':
+    case 'Draft':
     case 'WaitingApproval':
     case 'ReadyForFinalize':
     case 'Pending':

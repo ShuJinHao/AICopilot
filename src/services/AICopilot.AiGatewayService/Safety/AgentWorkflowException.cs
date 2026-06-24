@@ -1,6 +1,6 @@
 namespace AICopilot.AiGatewayService.Safety;
 
-public sealed class ChatWorkflowException(string code, string detail, string userFacingMessage) : Exception(detail)
+public sealed class AgentWorkflowException(string code, string detail, string userFacingMessage) : Exception(detail)
 {
     public string Code { get; } = code;
 

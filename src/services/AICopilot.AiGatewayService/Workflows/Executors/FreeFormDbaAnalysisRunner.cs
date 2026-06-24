@@ -9,13 +9,13 @@ public sealed class FreeFormDbaAnalysisRunner(
     DataAnalysisAgentBuilder agentBuilder,
     IBusinessDatabaseReadService businessDatabaseReadService,
     IDataAnalysisVisualizationContext vizContext,
-    IChatStreamRuntime chatStreamRuntime,
+    IAgentStreamRuntime chatStreamRuntime,
     DataAnalysisWidgetEmitter widgetEmitter,
     ILogger<FreeFormDbaAnalysisRunner> logger)
 {
     public async Task<string> RunAsync(
         IntentResult intent,
-        ChatWorkflowSink? sink,
+        AgentWorkflowSink? sink,
         SessionRuntimeSnapshot? session,
         CancellationToken cancellationToken)
     {

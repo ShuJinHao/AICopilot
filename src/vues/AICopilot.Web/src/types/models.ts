@@ -1,4 +1,4 @@
-import type { ChatModelMetadataPayload } from '@/types/protocols'
+import type { AgentEventPayload, ChatModelMetadataPayload } from '@/types/protocols'
 import {
   type ChatChunk,
   type FunctionApprovalRequest,
@@ -56,6 +56,10 @@ export interface ApprovalChunk extends ChatChunk {
   // rejected: 用户已拒绝
   // expired: 审批上下文已失效，不能继续操作
   status: 'pending' | 'approved' | 'rejected' | 'expired'
+}
+
+export interface AgentEventChunk extends ChatChunk {
+  event: AgentEventPayload
 }
 
 /**

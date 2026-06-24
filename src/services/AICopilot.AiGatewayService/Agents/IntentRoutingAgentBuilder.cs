@@ -14,23 +14,23 @@ public class IntentRoutingAgentBuilder
 {
     private const string AgentName = "IntentRoutingAgent";
 
-    private readonly ChatAgentFactory _agentFactory;
+    private readonly ConfiguredAgentRuntimeFactory _agentFactory;
     private readonly IKnowledgeBaseReadService _knowledgeBaseReadService;
     private readonly IBusinessDatabaseReadService _businessDatabaseReadService;
     private readonly IntentRoutingPromptComposer _promptComposer;
     private readonly IAgentPluginCatalog _pluginCatalog;
     private readonly IRoutingModelResolver _routingModelResolver;
-    private readonly IChatExecutionMetadataAccessor _executionMetadataAccessor;
+    private readonly IAgentExecutionMetadataAccessor _executionMetadataAccessor;
     private readonly IReadRepository<SkillDefinition> _skillRepository;
 
     public IntentRoutingAgentBuilder(
-        ChatAgentFactory agentFactory,
+        ConfiguredAgentRuntimeFactory agentFactory,
         IAgentPluginCatalog pluginCatalog,
         IKnowledgeBaseReadService knowledgeBaseReadService,
         IBusinessDatabaseReadService businessDatabaseReadService,
         IntentRoutingPromptComposer promptComposer,
         IRoutingModelResolver routingModelResolver,
-        IChatExecutionMetadataAccessor executionMetadataAccessor,
+        IAgentExecutionMetadataAccessor executionMetadataAccessor,
         IReadRepository<SkillDefinition> skillRepository)
     {
         _agentFactory = agentFactory;

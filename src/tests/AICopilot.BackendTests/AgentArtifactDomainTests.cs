@@ -28,6 +28,10 @@ public sealed class AgentArtifactDomainTests
         var startBeforeApproval = () => task.Start(now);
         startBeforeApproval.Should().Throw<InvalidOperationException>();
 
+        task.ConfirmExecutablePlan(task.PlanJson, Array.Empty<int>(), now);
+        var startBeforePlanApproval = () => task.Start(now);
+        startBeforePlanApproval.Should().Throw<InvalidOperationException>();
+
         task.ApprovePlan(now);
         task.Start(now);
 

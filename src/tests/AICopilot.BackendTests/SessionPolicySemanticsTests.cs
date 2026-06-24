@@ -267,7 +267,7 @@ public sealed class SessionPolicySemanticsTests
             await using var _ = await executor.ExecuteAsync(CreateGenerationContext(session.Id));
         };
 
-        var exception = await act.Should().ThrowAsync<ChatWorkflowException>();
+        var exception = await act.Should().ThrowAsync<AgentWorkflowException>();
         exception.Which.Code.Should().Be(AppProblemCodes.ChatConfigurationMissing);
     }
 
@@ -293,7 +293,7 @@ public sealed class SessionPolicySemanticsTests
         LanguageModel model)
     {
         return new FinalAgentContextSerializer(
-            new ChatAgentFactory(
+            new ConfiguredAgentRuntimeFactory(
                 new InMemoryReadRepository<ConversationTemplate>([template]),
                 new InMemoryReadRepository<LanguageModel>([model]),
                 runtimeFactory),
@@ -309,7 +309,7 @@ public sealed class SessionPolicySemanticsTests
         IReadOnlyCollection<LanguageModel> models)
     {
         return new FinalAgentBuildExecutor(
-            new ChatAgentFactory(
+            new ConfiguredAgentRuntimeFactory(
                 new InMemoryReadRepository<ConversationTemplate>(templates),
                 new InMemoryReadRepository<LanguageModel>(models),
                 runtimeFactory),

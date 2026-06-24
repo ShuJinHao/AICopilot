@@ -61,62 +61,117 @@ const agentTask = {
   id: 'task-1',
   taskCode: 'AGT-0001',
   sessionId: session.id,
-  title: 'LINE-A 产物报告',
-  goal: '生成只读产物报告',
-  taskType: 'ReportGeneration',
-  status: 'WaitingApproval',
-  riskLevel: 'Medium',
+  title: 'DEV-001 日志根因分析计划',
+  goal: '查看 DEV-001 最近 24 小时设备日志，并给出根因线索',
+  taskType: 'PlanDraft',
+  status: 'Draft',
+  riskLevel: 'Low',
   modelId: 'lm1',
-  workspaceId: 'workspace-1',
-  workspaceCode: 'WS-SMOKE-001',
-  planJson: '{}',
+  workspaceId: null,
+  workspaceCode: null,
+  planJson: JSON.stringify({
+    planKind: 'PlanDraft',
+    isExecutable: false,
+    skillName: '设备日志分析',
+    visibleToolCount: 0,
+    capabilityGaps: ['确认执行后才检查可执行工具目录。'],
+    queryMode: null
+  }),
   finalSummary: null,
   createdAt: now,
   updatedAt: now,
   completedAt: null,
-  pendingApprovalCount: 1,
+  pendingApprovalCount: 0,
   canRun: false,
   lastFailureReason: null,
-  canRetry: true,
-  canSubmitFinalReview: true,
+  canRetry: false,
+  canSubmitFinalReview: false,
   canApproveFinal: false,
   failureSummary: null,
   activeRunAttemptId: null,
-  runAttemptCount: 1,
+  runAttemptCount: 0,
   isRunInProgress: false,
   queuedRunId: null,
-  runQueueStatus: 'Queued',
+  runQueueStatus: null,
   isRunQueued: false,
   steps: [
     {
       id: 'step-1',
       stepIndex: 1,
-      title: '读取上传文件',
-      description: '读取会话临时输入',
-      stepType: 'Tool',
-      status: 'Completed',
-      toolCode: 'read_uploaded_file',
+      title: '理解目标并确认设备范围',
+      description: '识别 DEV-001、时间范围和只读分析边界',
+      stepType: 'Plan',
+      status: 'Draft',
+      toolCode: null,
       requiresApproval: false,
       errorMessage: null
     },
     {
       id: 'step-2',
       stepIndex: 2,
-      title: '生成 PDF 草稿',
-      description: '写入 draft/ 后等待审批',
-      stepType: 'Tool',
-      status: 'WaitingApproval',
-      toolCode: 'generate_pdf',
-      requiresApproval: true,
+      title: '规划日志读取和异常时间线汇总',
+      description: '确认后才检查日志查询工具和 schema',
+      stepType: 'Plan',
+      status: 'Draft',
+      toolCode: null,
+      requiresApproval: false,
+      errorMessage: null
+    },
+    {
+      id: 'step-3',
+      stepIndex: 3,
+      title: '输出根因线索和下一步建议',
+      description: '确认后进入可执行计划并由 Worker 执行',
+      stepType: 'Plan',
+      status: 'Draft',
+      toolCode: null,
+      requiresApproval: false,
       errorMessage: null
     }
   ]
 }
 
+let agentTaskState = agentTask
+
+function toExecutablePlanTask(task) {
+  return {
+    ...task,
+    status: 'PlanApproved',
+    planJson: JSON.stringify({
+      planKind: 'ExecutablePlan',
+      isExecutable: true,
+      skillName: '设备日志分析',
+      visibleToolCount: 2,
+      capabilityGaps: [],
+      queryMode: 'CloudReadonly'
+    }),
+    canRun: true,
+    updatedAt: new Date().toISOString(),
+    steps: task.steps.map((step) => ({
+      ...step,
+      status: 'Pending',
+      stepType: 'Tool',
+      toolCode: step.stepIndex === 1 ? 'resolve_device' : step.stepIndex === 2 ? 'query_device_logs' : 'generate_markdown_report'
+    }))
+  }
+}
+
+function toQueuedTask(task) {
+  return {
+    ...task,
+    status: 'PlanApproved',
+    canRun: false,
+    isRunQueued: true,
+    queuedRunId: 'run-smoke-1',
+    runQueueStatus: 'Queued',
+    updatedAt: new Date().toISOString()
+  }
+}
+
 const agentApproval = {
   id: 'approval-agt-1',
   taskId: agentTask.id,
-  workspaceCode: agentTask.workspaceCode,
+  workspaceCode: null,
   type: 'Tool',
   targetId: 'step-2',
   targetName: 'generate_pdf',
@@ -413,6 +468,43 @@ function sendChatStream(response) {
   response.end()
 }
 
+function sendPlanStream(response) {
+  response.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+    'Access-Control-Allow-Origin': '*'
+  })
+
+  sendEvent(response, {
+    source: 'PlanAgentTaskStreamHandler',
+    type: 'AgentEvent',
+    content: JSON.stringify({
+      stage: 'plan_draft_started',
+      detail: 'PlanDraft generation started.',
+      recoverable: true,
+      suggestedAction: null,
+      metadata: {
+        executesCloudQuery: 'false',
+        executesMcpTool: 'false',
+        queuesWorker: 'false'
+      }
+    })
+  })
+  sendEvent(response, {
+    source: 'PlanAgentTaskStreamHandler',
+    type: 'Text',
+    content: '我已生成计划草案：设备日志分析\n计划包含 3 个步骤，确认前不会启动 Worker。\n'
+  })
+  sendEvent(response, {
+    source: 'PlanAgentTaskStreamHandler',
+    type: 'AgentTask',
+    content: JSON.stringify(agentTask)
+  })
+  response.write('data: [DONE]\n\n')
+  response.end()
+}
+
 const api = createServer((request, response) => {
   const path = new URL(request.url ?? '/', `http://${request.headers.host ?? '127.0.0.1'}`).pathname
 
@@ -428,6 +520,33 @@ const api = createServer((request, response) => {
 
   if (request.method === 'POST' && path === '/api/aigateway/chat') {
     sendChatStream(response)
+    return
+  }
+
+  if (request.method === 'POST' && path === '/api/aigateway/agent/task/plan-stream') {
+    sendPlanStream(response)
+    return
+  }
+
+  if (request.method === 'POST' && path === '/api/aigateway/agent/task/approve-plan') {
+    agentTaskState = toExecutablePlanTask(agentTaskState)
+    sendJson(response, agentTaskState)
+    return
+  }
+
+  if (request.method === 'POST' && path === '/api/aigateway/agent/task/run') {
+    agentTaskState = toQueuedTask(agentTaskState)
+    sendJson(response, agentTaskState)
+    return
+  }
+
+  if (request.method === 'POST' && path === '/api/aigateway/agent/task/retry') {
+    agentTaskState = toQueuedTask({
+      ...agentTaskState,
+      status: 'PlanApproved',
+      canRetry: false
+    })
+    sendJson(response, agentTaskState)
     return
   }
 
@@ -528,7 +647,6 @@ const api = createServer((request, response) => {
         updatedAt: now
       }
     ],
-    '/api/aigateway/agent/task/plan': agentTask,
     '/api/aigateway/chat-message/list': {
       items: [
         {
@@ -599,81 +717,29 @@ const api = createServer((request, response) => {
           sequence: 3,
           eventType: 'AgentTaskPlanCreated',
           createdAt: now,
-          agentTaskId: agentTask.id,
-          agentTaskTitle: agentTask.title,
-          agentTaskGoal: agentTask.goal,
-          agentTaskStatus: agentTask.status,
-          approvalRequestId: agentApproval.id,
-          approvalType: 'Plan',
-          approvalStatus: 'Approved',
-          approvalTargetName: agentTask.title,
-          artifactWorkspaceId: artifactWorkspace.id,
-          workspaceCode: artifactWorkspace.workspaceCode,
-          workspaceStatus: artifactWorkspace.status
-        },
-        {
-          sequence: 4,
-          eventType: 'AgentTaskStepCompleted',
-          createdAt: now,
-          agentTaskId: agentTask.id,
-          agentTaskTitle: agentTask.title,
-          agentTaskStatus: agentTask.status,
-          agentStepId: 'step-1',
-          agentStepIndex: 1,
-          agentStepTitle: '读取上传文件',
-          agentStepStatus: 'Completed',
-          agentStepToolCode: 'read_uploaded_file',
-          artifactWorkspaceId: artifactWorkspace.id,
-          workspaceCode: artifactWorkspace.workspaceCode,
-          workspaceStatus: artifactWorkspace.status
-        },
-        {
-          sequence: 5,
-          eventType: 'ApprovalRequested',
-          createdAt: now,
-          agentTaskId: agentTask.id,
-          agentTaskTitle: agentTask.title,
-          agentTaskStatus: agentTask.status,
-          agentStepId: 'step-2',
-          agentStepIndex: 2,
-          agentStepTitle: '生成 PDF 草稿',
-          agentStepStatus: 'WaitingApproval',
-          approvalRequestId: agentApproval.id,
-          approvalType: 'ToolCall',
-          approvalStatus: agentApproval.status,
-          approvalTargetName: agentApproval.targetName,
-          artifactWorkspaceId: artifactWorkspace.id,
-          workspaceCode: artifactWorkspace.workspaceCode,
-          workspaceStatus: artifactWorkspace.status
-        },
-        {
-          sequence: 6,
-          eventType: 'ArtifactReady',
-          createdAt: now,
-          agentTaskId: agentTask.id,
-          agentTaskTitle: agentTask.title,
-          agentTaskStatus: agentTask.status,
-          artifactWorkspaceId: artifactWorkspace.id,
-          workspaceCode: artifactWorkspace.workspaceCode,
-          workspaceStatus: artifactWorkspace.status,
-          artifactId: 'artifact-chart',
-          artifactName: 'chart-data.json',
-          artifactType: 'Json',
-          artifactStatus: 'Draft',
-          artifactRelativePath: 'charts/chart-data.json',
-          artifactDownloadUrl: '/api/aigateway/artifact/artifact-chart/download'
+          agentTaskId: agentTaskState.id,
+          agentTaskTitle: agentTaskState.title,
+          agentTaskGoal: agentTaskState.goal,
+          agentTaskStatus: agentTaskState.status,
+          approvalRequestId: null,
+          approvalType: null,
+          approvalStatus: null,
+          approvalTargetName: null,
+          artifactWorkspaceId: null,
+          workspaceCode: null,
+          workspaceStatus: null
         }
       ],
       beforeSequence: 3,
-      afterSequence: 6,
+      afterSequence: 3,
       hasMore: false,
       hasMoreBefore: false,
       hasMoreAfter: false
     },
     '/api/aigateway/approval/pending': [],
-    '/api/aigateway/agent/task/by-session': [agentTask],
-    '/api/aigateway/agent/task/task-1/approvals': [agentApproval],
-    '/api/aigateway/agent/approval/pending': [agentApproval],
+    '/api/aigateway/agent/task/by-session': [agentTaskState],
+    '/api/aigateway/agent/task/task-1/approvals': [],
+    '/api/aigateway/agent/approval/pending': [],
     '/api/aigateway/agent/task/task-1/audit-summary': agentAuditSummary,
     '/api/aigateway/workspace/WS-SMOKE-001': artifactWorkspace,
     '/api/aigateway/artifact/artifact-chart/preview': {

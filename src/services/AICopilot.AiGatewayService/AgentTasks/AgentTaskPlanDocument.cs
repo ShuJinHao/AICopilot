@@ -36,7 +36,16 @@ internal sealed record AgentTaskPlanDocument(
     [property: JsonPropertyName("toolApprovalCheckpoints")] IReadOnlyCollection<string>? ToolApprovalCheckpoints = null,
     [property: JsonPropertyName("skillCode")] string? SkillCode = null,
     [property: JsonPropertyName("skillName")] string? SkillName = null,
-    [property: JsonPropertyName("skillRoutingReason")] string? SkillRoutingReason = null);
+    [property: JsonPropertyName("skillRoutingReason")] string? SkillRoutingReason = null,
+    [property: JsonPropertyName("planKind")] string PlanKind = AgentTaskPlanKinds.ExecutablePlan,
+    [property: JsonPropertyName("isExecutable")] bool IsExecutable = true,
+    [property: JsonPropertyName("capabilityGaps")] IReadOnlyCollection<string>? CapabilityGaps = null);
+
+internal static class AgentTaskPlanKinds
+{
+    public const string PlanDraft = "PlanDraft";
+    public const string ExecutablePlan = "ExecutablePlan";
+}
 
 internal sealed record AgentTaskPlanCloudReadonlyIntentDocument(
     [property: JsonPropertyName("intent")] string Intent,

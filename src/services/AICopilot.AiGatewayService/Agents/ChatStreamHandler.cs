@@ -15,14 +15,14 @@ namespace AICopilot.AiGatewayService.Agents;
 public class ChatStreamHandler(
     IReadRepository<Session> sessionRepository,
     ICurrentUser currentUser,
-    ChatWorkflowOrchestrator workflowOrchestrator,
+    AgentWorkflowPipeline workflowPipeline,
     SessionMessagePersistenceService messagePersistenceService,
     IOperationalBoundaryPolicy operationalBoundaryPolicy,
     IManufacturingSceneClassifier sceneClassifier,
     IFinalAgentContextStore finalAgentContextStore,
     ISessionExecutionLock sessionExecutionLock,
-    IChatExecutionMetadataAccessor executionMetadataAccessor,
-    IChatStreamRuntime chatStreamRuntime)
+    IAgentExecutionMetadataAccessor executionMetadataAccessor,
+    IAgentStreamRuntime chatStreamRuntime)
     : IStreamRequestHandler<ChatStreamRequest, ChatChunk>
 {
     public async IAsyncEnumerable<ChatChunk> Handle(
@@ -82,7 +82,7 @@ public class ChatStreamHandler(
 
         if (failure != null)
         {
-            var errorChunk = ChatStreamRuntime.CreateErrorChunk(
+            var errorChunk = AgentStreamRuntime.CreateErrorChunk(
                 assistantText,
                 failure,
                 nameof(ChatStreamHandler),
@@ -113,7 +113,7 @@ public class ChatStreamHandler(
         var session = await chatStreamRuntime.LoadSessionAsync(sessionRepository, request.SessionId, ct);
         if (session == null)
         {
-            yield return ChatStreamRuntime.CreateErrorChunk(
+            yield return AgentStreamRuntime.CreateErrorChunk(
                 "session_not_found",
                 "未找到对应的会话。",
                 nameof(ChatStreamHandler),
@@ -123,7 +123,7 @@ public class ChatStreamHandler(
 
         if (currentUser.Id != session.UserId)
         {
-            yield return ChatStreamRuntime.CreateErrorChunk(
+            yield return AgentStreamRuntime.CreateErrorChunk(
                 AuthProblemCodes.MissingPermission,
                 "当前用户无权操作该会话。",
                 nameof(ChatStreamHandler),
@@ -134,7 +134,7 @@ public class ChatStreamHandler(
         var storedContext = await finalAgentContextStore.GetAsync(request.SessionId, ct);
         if (storedContext?.PendingApprovals.Count > 0)
         {
-            yield return ChatStreamRuntime.CreateErrorChunk(
+            yield return AgentStreamRuntime.CreateErrorChunk(
                 AppProblemCodes.ApprovalPending,
                 "当前会话已有待处理审批，请先处理审批请求。",
                 nameof(ChatStreamHandler),
@@ -158,7 +158,7 @@ public class ChatStreamHandler(
                 "AICopilot 只提供观察、诊断、建议和知识问答，不执行任何控制动作。",
                 "我不能直接执行重启、写参数、下发配方、写入 PLC 或状态切换。如果需要，我可以继续给出诊断结论、风险提示和人工执行前检查项。");
             assistantText.Append(boundaryDecision.UserFacingMessage);
-            yield return ChatStreamRuntime.CreateErrorChunk(
+            yield return AgentStreamRuntime.CreateErrorChunk(
                 boundaryDecision.Code,
                 boundaryDecision.Detail,
                 "OperationalBoundaryPolicy",
@@ -166,7 +166,7 @@ public class ChatStreamHandler(
             yield break;
         }
 
-        await foreach (var chatChunk in workflowOrchestrator.RunIntentWorkflowAsync(
+        await foreach (var chatChunk in workflowPipeline.RunIntentWorkflowAsync(
                            request,
                            session,
                            assistantText,

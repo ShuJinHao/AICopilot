@@ -15,7 +15,9 @@ public enum ChunkType
     FunctionCall,
     FunctionResult,
     Widget,
-    ApprovalRequest
+    ApprovalRequest,
+    AgentEvent,
+    AgentTask
 }
 
 public record ChatChunk(string Source, ChunkType Type, string Content);

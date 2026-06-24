@@ -3,12 +3,13 @@ import { createPinia, setActivePinia } from 'pinia'
 import { ApiError } from '@/services/apiClient'
 import { useChatStore } from '@/stores/chatStore'
 import { useSessionStore } from '@/stores/sessionStore'
+import { ChunkType, MessageRole } from '@/types/protocols'
 
 const chatServiceMock = vi.hoisted(() => ({
   getSkills: vi.fn(),
   getToolCatalog: vi.fn(),
   getKnowledgeBases: vi.fn(),
-  planAgentTask: vi.fn(),
+  planAgentTaskStream: vi.fn(),
   approveAgentTaskPlan: vi.fn(),
   decideAgentApproval: vi.fn(),
   runAgentTask: vi.fn(),
@@ -215,6 +216,27 @@ function createTask(overrides: Partial<typeof plannedTask> = {}) {
   }
 }
 
+function mockPlanAgentTaskStream(task = plannedTask) {
+  chatServiceMock.planAgentTaskStream.mockImplementation(async (_payload, callbacks) => {
+    callbacks.onChunkReceived({
+      source: 'PlanAgentTaskStreamHandler',
+      type: ChunkType.Text,
+      content: '正在理解目标并识别可用能力...\n'
+    })
+    callbacks.onChunkReceived({
+      source: 'PlanAgentTaskStreamHandler',
+      type: ChunkType.Text,
+      content: `我已生成计划草案：${task.title}\n`
+    })
+    callbacks.onChunkReceived({
+      source: 'PlanAgentTaskStreamHandler',
+      type: ChunkType.AgentTask,
+      content: JSON.stringify(task)
+    })
+    callbacks.onComplete()
+  })
+}
+
 function createPlanApproval(overrides = {}) {
   return {
     id: 'approval-1',
@@ -242,7 +264,7 @@ describe('chatStore skills', () => {
     chatServiceMock.getSkills.mockResolvedValue(skills)
     chatServiceMock.getToolCatalog.mockResolvedValue(toolCatalog)
     chatServiceMock.getKnowledgeBases.mockResolvedValue(knowledgeBases)
-    chatServiceMock.planAgentTask.mockResolvedValue(plannedTask)
+    mockPlanAgentTaskStream(plannedTask)
     chatServiceMock.approveAgentTaskPlan.mockResolvedValue(createTask({ status: 'PlanApproved', canRun: true }))
     chatServiceMock.decideAgentApproval.mockResolvedValue(createPlanApproval({ status: 'Approved' }))
     chatServiceMock.runAgentTask.mockResolvedValue(createTask({
@@ -304,11 +326,11 @@ describe('chatStore skills', () => {
 
     await store.planAgentTask('查看 Cloud 设备日志')
 
-    expect(chatServiceMock.planAgentTask).toHaveBeenCalledWith(expect.objectContaining({
+    expect(chatServiceMock.planAgentTaskStream).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'session-1',
       goal: '查看 Cloud 设备日志',
       skillCode: null
-    }))
+    }), expect.any(Object))
   })
 
   it('sends the selected skill code when planning an agent task', async () => {
@@ -320,11 +342,51 @@ describe('chatStore skills', () => {
 
     await store.planAgentTask('查手册')
 
-    expect(chatServiceMock.planAgentTask).toHaveBeenCalledWith(expect.objectContaining({
+    expect(chatServiceMock.planAgentTaskStream).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'session-1',
       goal: '查手册',
       skillCode: 'knowledge_research'
+    }), expect.any(Object))
+  })
+
+  it('adds plan mode goal and PlanDraft reply to the conversation flow', async () => {
+    const sessionStore = useSessionStore()
+    sessionStore.persistCurrentSession('session-1')
+    const store = useChatStore()
+    mockPlanAgentTaskStream(createTask({
+      title: '设备日志分析',
+      goal: '查看 DEV-001 最近 24 小时日志',
+      status: 'WaitingPlanApproval',
+      planJson: JSON.stringify({
+        planKind: 'PlanDraft',
+        isExecutable: false,
+        skillName: '设备日志分析',
+        capabilityGaps: ['No enabled and authorized tools are currently available for this PlanDraft.']
+      }),
+      steps: [
+        {
+          id: 'step-1',
+          stepIndex: 1,
+          title: '读取设备日志',
+          description: '只读查询最近 24 小时日志',
+          stepType: 'Tool',
+          status: 'Pending',
+          toolCode: 'query_device_logs',
+          requiresApproval: false,
+          errorMessage: null
+        }
+      ]
     }))
+
+    await store.planAgentTask('查看 DEV-001 最近 24 小时日志')
+
+    expect(store.currentMessages).toHaveLength(2)
+    expect(store.currentMessages[0]?.role).toBe(MessageRole.User)
+    expect(store.currentMessages[0]?.chunks[0]?.content).toBe('查看 DEV-001 最近 24 小时日志')
+    expect(store.currentMessages[1]?.role).toBe(MessageRole.Assistant)
+    expect(store.currentMessages[1]?.isStreaming).toBe(false)
+    expect(store.currentMessages[1]?.chunks[0]?.content).toContain('我已生成计划草案')
+    expect(store.latestAgentTask?.title).toBe('设备日志分析')
   })
 
   it('sends the selected knowledge base only for skills that allow knowledge retrieval', async () => {
@@ -339,19 +401,19 @@ describe('chatStore skills', () => {
 
     await store.planAgentTask('查设备手册')
 
-    expect(chatServiceMock.planAgentTask).toHaveBeenLastCalledWith(expect.objectContaining({
+    expect(chatServiceMock.planAgentTaskStream).toHaveBeenLastCalledWith(expect.objectContaining({
       skillCode: 'knowledge_research',
       knowledgeBaseIds: ['kb-2']
-    }))
+    }), expect.any(Object))
 
     store.selectSkill('data_analysis')
 
     await store.planAgentTask('分析产能')
 
-    expect(chatServiceMock.planAgentTask).toHaveBeenLastCalledWith(expect.objectContaining({
+    expect(chatServiceMock.planAgentTaskStream).toHaveBeenLastCalledWith(expect.objectContaining({
       skillCode: 'data_analysis',
       knowledgeBaseIds: []
-    }))
+    }), expect.any(Object))
   })
 
   it('sends selected plugin tools as a planner preference without leaving auto skill mode', async () => {
@@ -366,10 +428,10 @@ describe('chatStore skills', () => {
     await store.planAgentTask('查资料并生成报告')
 
     expect(chatServiceMock.getToolCatalog).toHaveBeenCalledWith(null)
-    expect(chatServiceMock.planAgentTask).toHaveBeenCalledWith(expect.objectContaining({
+    expect(chatServiceMock.planAgentTaskStream).toHaveBeenCalledWith(expect.objectContaining({
       skillCode: null,
       preferredToolCodes: ['rag_search']
-    }))
+    }), expect.any(Object))
   })
 
   it('approves a pending plan approval before running the task', async () => {

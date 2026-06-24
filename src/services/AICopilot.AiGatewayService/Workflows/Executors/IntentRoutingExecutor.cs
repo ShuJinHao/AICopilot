@@ -22,8 +22,8 @@ public class IntentRoutingExecutor(
     IMediator mediator,
     IntentRoutingAgentBuilder agentBuilder,
     IManufacturingSceneClassifier sceneClassifier,
-    IChatExecutionMetadataAccessor executionMetadataAccessor,
-    IChatRuntimeSettingsProvider runtimeSettingsProvider,
+    IAgentExecutionMetadataAccessor executionMetadataAccessor,
+    IAgentRuntimeSettingsProvider runtimeSettingsProvider,
     ILogger<IntentRoutingExecutor> logger)
 {
     public const string ExecutorId = nameof(IntentRoutingExecutor);

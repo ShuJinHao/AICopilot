@@ -17,7 +17,7 @@ public class FinalAgentRunExecutor(
     ITextTokenEstimator tokenEstimator,
     IChatTokenTelemetry chatTokenTelemetry,
     ToolExecutionAuditRecorder toolExecutionAuditRecorder,
-    IChatStreamRuntime chatStreamRuntime)
+    IAgentStreamRuntime chatStreamRuntime)
 {
     public const string ExecutorId = nameof(FinalAgentRunExecutor);
 
@@ -295,7 +295,7 @@ public class FinalAgentRunExecutor(
 
     private static ChatChunk CreateUnauthorizedToolChunk(string toolName)
     {
-        return ChatStreamRuntime.CreateErrorChunk(
+        return AgentStreamRuntime.CreateErrorChunk(
             AppProblemCodes.CapabilityNotAllowed,
             $"AI runtime requested unauthorized tool '{toolName}'.",
             ExecutorId,

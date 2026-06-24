@@ -218,18 +218,21 @@ export const chatService = {
     return await apiClient.postForm<UploadRecord>('/aigateway/upload', form)
   },
 
-  async planAgentTask(payload: {
-    sessionId: string
-    goal: string
-    taskType: string
-    uploadIds?: string[]
-    knowledgeBaseIds?: string[]
-    artifactTypes?: string[]
-    plannerMode?: 'Auto' | 'DynamicOnly' | 'StaticOnly'
-    skillCode?: string | null
-    preferredToolCodes?: string[]
-  }) {
-    return await apiClient.post<AgentTask>('/aigateway/agent/task/plan', payload)
+  async planAgentTaskStream(
+    payload: {
+      sessionId: string
+      goal: string
+      taskType: string
+      uploadIds?: string[]
+      knowledgeBaseIds?: string[]
+      artifactTypes?: string[]
+      plannerMode?: 'Auto' | 'DynamicOnly' | 'StaticOnly'
+      skillCode?: string | null
+      preferredToolCodes?: string[]
+    },
+    callbacks: StreamCallbacks
+  ) {
+    await sendEventStream('/aigateway/agent/task/plan-stream', payload, callbacks)
   },
 
   async approveAgentTaskPlan(id: string) {

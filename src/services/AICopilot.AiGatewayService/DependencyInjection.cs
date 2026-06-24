@@ -38,10 +38,10 @@ public static class DependencyInjection
             cfg.RegisterServicesFromAssembly(Assembly.GetExecutingAssembly());
         });
 
-        builder.Services.AddScoped<ChatAgentFactory>();
-        builder.Services.AddScoped<IChatExecutionMetadataAccessor, ChatExecutionMetadataAccessor>();
+        builder.Services.AddScoped<ConfiguredAgentRuntimeFactory>();
+        builder.Services.AddScoped<IAgentExecutionMetadataAccessor, AgentExecutionMetadataAccessor>();
         builder.Services.AddScoped<IRoutingModelResolver, RoutingModelResolver>();
-        builder.Services.AddScoped<IChatRuntimeSettingsProvider, ChatRuntimeSettingsProvider>();
+        builder.Services.AddScoped<IAgentRuntimeSettingsProvider, AgentRuntimeSettingsProvider>();
         builder.Services.AddScoped<IAgentArtifactWorkspaceService, AgentArtifactWorkspaceService>();
         builder.Services.AddScoped<IAgentTaskRuntime, AgentTaskRuntime>();
         builder.Services.AddScoped<IAgentTaskRunQueue, AgentTaskRunQueue>();
@@ -62,6 +62,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<ToolRegistryGuard>();
         builder.Services.AddScoped<SkillDefinitionGuard>();
         builder.Services.AddScoped<AgentPlanToolGuard>();
+        builder.Services.AddScoped<AgentPlanDraftConfirmationService>();
         builder.Services.AddScoped<IAgentDynamicPlanner, DefaultAgentDynamicPlanner>();
         builder.Services.AddScoped<AgentAuditRecorder>();
         builder.Services.TryAddSingleton<ISessionExecutionLock, InMemorySessionExecutionLock>();
@@ -70,7 +71,7 @@ public static class DependencyInjection
         builder.Services.AddSingleton<ITokenBudgetPolicy, ChatTokenBudgetPolicy>();
         builder.Services.AddSingleton<IChatTokenTelemetry, ChatTokenTelemetry>();
         builder.Services.AddScoped<ApprovalRequirementResolver>();
-        builder.Services.AddScoped<IChatStreamRuntime, ChatStreamRuntime>();
+        builder.Services.AddScoped<IAgentStreamRuntime, AgentStreamRuntime>();
         builder.Services.AddScoped<IApprovalRequirementReadService, ApprovalRequirementReadService>();
         builder.Services.AddScoped<ApprovalToolResolver>();
         builder.Services.AddScoped<IFinalAgentContextSerializer, FinalAgentContextSerializer>();
@@ -103,6 +104,6 @@ public static class DependencyInjection
         builder.Services.AddScoped<ContextAggregatorExecutor>();
         builder.Services.AddScoped<FinalAgentBuildExecutor>();
         builder.Services.AddScoped<FinalAgentRunExecutor>();
-        builder.Services.AddScoped<ChatWorkflowOrchestrator>();
+        builder.Services.AddScoped<AgentWorkflowPipeline>();
     }
 }

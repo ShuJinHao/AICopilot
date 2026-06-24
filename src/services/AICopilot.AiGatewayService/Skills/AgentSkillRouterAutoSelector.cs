@@ -20,9 +20,9 @@ public interface IAgentSkillAutoSelector
 }
 
 public sealed class AgentSkillRouterAutoSelector(
-    ChatAgentFactory chatAgentFactory,
+    ConfiguredAgentRuntimeFactory configuredAgentFactory,
     IRoutingModelResolver routingModelResolver,
-    IChatExecutionMetadataAccessor executionMetadataAccessor,
+    IAgentExecutionMetadataAccessor executionMetadataAccessor,
     IReadRepository<SkillDefinition> skillRepository,
     ILogger<AgentSkillRouterAutoSelector> logger) : IAgentSkillAutoSelector
 {
@@ -91,11 +91,11 @@ public sealed class AgentSkillRouterAutoSelector(
         var activeRoutingModel = await routingModelResolver.ResolveActiveModelAsync();
         var instructions = BuildInstructions(skills);
         await using var scopedAgent = activeRoutingModel is null
-            ? await chatAgentFactory.CreateAgentAsync(
+            ? await configuredAgentFactory.CreateAgentAsync(
                 "IntentRoutingAgent",
                 _ => instructions,
                 ConfigureRouterOptions)
-            : await chatAgentFactory.CreateAgentAsync(
+            : await configuredAgentFactory.CreateAgentAsync(
                 "IntentRoutingAgent",
                 activeRoutingModel,
                 _ => instructions,

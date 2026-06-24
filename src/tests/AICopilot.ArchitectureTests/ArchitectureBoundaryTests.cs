@@ -85,15 +85,15 @@ public sealed class ArchitectureBoundaryTests
     public void AiGatewayRuntimeCoordination_ShouldUseDiAndDedicatedToolResultAudit()
     {
         var serviceRoot = Path.Combine(SolutionRoot, "src", "services", "AICopilot.AiGatewayService");
-        var runtimeSource = File.ReadAllText(Path.Combine(serviceRoot, "Agents", "ChatStreamRuntime.cs"));
+        var runtimeSource = File.ReadAllText(Path.Combine(serviceRoot, "Agents", "AgentStreamRuntime.cs"));
         var executorSource = File.ReadAllText(Path.Combine(serviceRoot, "Workflows", "Executors", "FinalAgentRunExecutor.cs"));
         var auditSource = File.ReadAllText(Path.Combine(serviceRoot, "Workflows", "Executors", "ToolExecutionAuditRecorder.cs"));
         var dependencyInjection = File.ReadAllText(Path.Combine(serviceRoot, "DependencyInjection.cs"));
 
-        runtimeSource.Should().Contain("public interface IChatStreamRuntime");
-        runtimeSource.Should().Contain("public sealed class ChatStreamRuntime");
-        runtimeSource.Should().NotContain("static class ChatStreamRuntime");
-        dependencyInjection.Should().Contain("AddScoped<IChatStreamRuntime, ChatStreamRuntime>");
+        runtimeSource.Should().Contain("public interface IAgentStreamRuntime");
+        runtimeSource.Should().Contain("public sealed class AgentStreamRuntime");
+        runtimeSource.Should().NotContain("static class AgentStreamRuntime");
+        dependencyInjection.Should().Contain("AddScoped<IAgentStreamRuntime, AgentStreamRuntime>");
 
         executorSource.Should().Contain("ToolExecutionAuditRecorder toolExecutionAuditRecorder");
         executorSource.Should().Contain("RecordResultAsync");

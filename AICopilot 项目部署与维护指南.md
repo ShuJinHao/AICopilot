@@ -6,10 +6,12 @@
 
 - 当前部署目录固定为 `deploy/enterprise-ai`。
 - `deploy/enterprise-ai/README.md` 是部署目录内的自解释入口；新 AI 接手时先读该文件即可执行标准发布和应急发布。
+- 多 agent 并行部署只按 `../docs/上传部署总览.md` 的“多 agent 并行部署”执行；AICopilot agent 只负责 AI 镜像、AI deploy 和 Web/OIDC 验证。
 - 生产环境使用 Docker Compose 单机编排，镜像从 Harbor 拉取。
 - 标准发布走 GitHub Actions 内网 self-hosted runner，label 固定为 `iiot-linux-prod`。
 - runner 必须使用专用非 root 用户运行，例如 `github-runner`；不要把 runner 装成 root 服务。
 - 当前服务器 runner 工作目录固定为 `/data/github-runner/aicopilot`，Docker Root Dir 固定为 `/data/docker`，不要把构建缓存放回系统盘。
+- AICopilot 应用镜像不保留历史版本；Harbor 和服务器本机只保留当前生产正在运行的 `sha-*` 应用镜像。
 - 当前内网环境 Git smart HTTP 可能超时，workflow 使用 GitHub archive/codeload 兜底拉取源码；不要改回只依赖 `actions/checkout`。
 - 真实 `.env` 通过 GitHub secret `DEPLOY_ENV_FILE` 注入服务器，不提交真实密钥。
 - Docker Hub 不作为生产依赖源；PostgreSQL、RabbitMQ、Qdrant、Node、Nginx 基础镜像必须先 mirror 到 Harbor。
@@ -123,7 +125,11 @@ git push GitHub
 
 `aicopilot-image` 会按路径判断需要构建的镜像：只改 `src/hosts/AICopilot.HttpApi/` 时只构建 `aicopilot-httpapi`，只改 `src/vues/AICopilot.Web/` 时只构建 `aicopilot-webui`，改 `src/core/`、`src/shared/`、`src/services/`、`src/infrastructure/` 或手动触发时构建后端应用镜像。Web 镜像使用 Harbor registry cache，第二次构建会复用已有 Docker layer。
 
-应用镜像仓库只保留最近 3 个 `sha-*` tag。`aicopilot-image` 推送成功后会调用 `deploy/enterprise-ai/harbor-retention.sh` 删除超出 3 个的旧 `sha-*` tag；`buildcache` 和基础镜像 tag 不计入应用版本保留。Harbor robot 或用户必须具备删除 tag 权限。删除 tag 后还需要 Harbor Garbage Collection 定期运行，磁盘才会真正释放。
+应用镜像仓库只保留当前生产 `sha-*` tag。`aicopilot-image` 推送成功后必须删除同一应用仓库内其他旧 `sha-*` tag；`buildcache` 和基础镜像 tag 不计入应用版本保留。Harbor robot 或用户必须具备删除 tag 权限。删除 tag 后还需要 Harbor Garbage Collection 在删 tag 后运行，磁盘才会真正释放。
+
+AICopilot 发布成功且服务器验证通过后，必须清理 Docker/BuildKit build cache、服务器本机未被当前容器引用的旧 AICopilot 应用镜像，并执行或确认 Harbor GC。服务器本机 Docker 管理镜像和 containerd 管理内容必须分开统计、分开清理；containerd 侧未确认 namespace、image ref、snapshot lease 和运行容器引用前不得强删。发布摘要必须输出清理前后 `df`、`docker system df`、containerd snapshots/content 占用和 Harbor registry 占用。基础镜像、数据库卷、Qdrant/RabbitMQ/PostgreSQL 数据、备份、配置和 secrets 不属于清理对象。回滚不依赖旧镜像保留；需要回滚时重新构建或重新拉取目标 git sha 后部署。
+
+`/data` 达到 80% 必须告警并输出占用摘要，达到 85% 必须先清理再继续普通部署，达到 90% 阻断非应急部署。发布后清理是主线，还必须配置周级兜底清理 cron，避免部署中断后 build cache、旧镜像和旧 Harbor blob 长期堆积。
 
 `aicopilot-deploy` 的 `services` 输入为空时按全量发布处理；传入 `httpapi`、`migration`、`dataworker`、`ragworker`、`web` 或逗号组合时，只重写对应镜像 tag、只拉取并重启指定应用服务。基础服务 `postgres`、`eventbus`、`qdrant` 会保持可用；只有选择 `migration` 时才运行迁移容器。
 
@@ -169,7 +175,7 @@ cd AICopilot
 REGISTRY=10.98.90.154:80 HARBOR_PROJECT=enterprise-ai TAG=sha-<git-sha> ./deploy/enterprise-ai/build-and-push.sh
 ```
 
-应急构建默认也执行 `harbor-retention.sh`，需要提供 `HARBOR_USERNAME` / `HARBOR_PASSWORD` 或 `OCI_REGISTRY_USERNAME` / `OCI_REGISTRY_PASSWORD`，用于删除超出 3 个的旧 `sha-*` tag。
+应急构建默认也执行 `harbor-retention.sh`，需要提供 `HARBOR_USERNAME` / `HARBOR_PASSWORD` 或 `OCI_REGISTRY_USERNAME` / `OCI_REGISTRY_PASSWORD`，用于删除当前生产 tag 之外的旧 `sha-*` tag。
 
 应急手工部署只在 `aicopilot-deploy` 不可用时使用：
 

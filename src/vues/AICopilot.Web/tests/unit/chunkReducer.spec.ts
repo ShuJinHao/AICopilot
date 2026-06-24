@@ -123,6 +123,104 @@ describe('chunkReducer', () => {
     expect(callbacks.onApprovalChunk).toHaveBeenCalledWith('session-1')
   })
 
+  it('routes agent task chunks to the task callback without adding visible chunks', () => {
+    const message = createMessage()
+    const callbacks = {
+      setSessionError: vi.fn(),
+      onApprovalChunk: vi.fn(),
+      onAgentTaskChunk: vi.fn()
+    }
+
+    processChunk(
+      message,
+      {
+        source: 'PlanAgentTaskStreamHandler',
+        type: ChunkType.AgentTask,
+        content: JSON.stringify({
+          id: 'task-1',
+          taskCode: 'AGT-001',
+          sessionId: 'session-1',
+          title: '设备日志分析',
+          goal: '查看 DEV-001 最近 24 小时日志',
+          taskType: 'CloudDataReport',
+          status: 'Draft',
+          riskLevel: 'Low',
+          planJson: '{}',
+          createdAt: '2026-06-24T00:00:00Z',
+          updatedAt: '2026-06-24T00:00:00Z',
+          steps: [],
+          canRun: false,
+          canSubmitFinalReview: false,
+          canApproveFinal: false,
+          isRunInProgress: false,
+          isRunQueued: false
+        })
+      },
+      callbacks
+    )
+
+    expect(message.chunks).toHaveLength(0)
+    expect(callbacks.onAgentTaskChunk).toHaveBeenCalledWith(
+      'session-1',
+      expect.objectContaining({ id: 'task-1', status: 'Draft' })
+    )
+  })
+
+  it('stores agent event chunks as structured runtime details', () => {
+    const message = createMessage()
+    const callbacks = {
+      setSessionError: vi.fn(),
+      onApprovalChunk: vi.fn()
+    }
+
+    processChunk(
+      message,
+      {
+        source: 'PlanAgentTaskStreamHandler',
+        type: ChunkType.AgentEvent,
+        content: JSON.stringify({
+          stage: 'capability_discovery',
+          detail: 'Discovering capabilities without execution.',
+          recoverable: true,
+          suggestedAction: null,
+          metadata: { executesCloudQuery: 'false' }
+        })
+      },
+      callbacks
+    )
+
+    expect(message.chunks).toHaveLength(1)
+    expect(message.chunks[0]?.type).toBe(ChunkType.AgentEvent)
+    expect(message.chunks[0]).toMatchObject({
+      event: {
+        stage: 'capability_discovery',
+        metadata: { executesCloudQuery: 'false' }
+      }
+    })
+  })
+
+  it('reports invalid agent task chunks as session errors', () => {
+    const message = createMessage()
+    const callbacks = {
+      setSessionError: vi.fn(),
+      onApprovalChunk: vi.fn(),
+      onAgentTaskChunk: vi.fn()
+    }
+
+    processChunk(
+      message,
+      {
+        source: 'PlanAgentTaskStreamHandler',
+        type: ChunkType.AgentTask,
+        content: 'not-json'
+      },
+      callbacks
+    )
+
+    expect(callbacks.onAgentTaskChunk).not.toHaveBeenCalled()
+    expect(callbacks.setSessionError).toHaveBeenCalledWith('session-1', '任务状态解析失败。')
+  })
+
   it('extracts structured error codes', () => {
     expect(
       getErrorCode({

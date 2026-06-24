@@ -17,7 +17,7 @@ namespace AICopilot.AiGatewayService.Agents;
 
 internal sealed record ChatErrorChunkPayload(string? Code, string? Detail, string? UserFacingMessage);
 
-public interface IChatStreamRuntime
+public interface IAgentStreamRuntime
 {
     IAsyncEnumerable<ChatChunk> CreateUpdateChunksAsync(
         RuntimeAgentUpdate update,
@@ -33,7 +33,7 @@ public interface IChatStreamRuntime
         CancellationToken cancellationToken);
 }
 
-public sealed class ChatStreamRuntime(ApprovalRequirementResolver approvalRequirementResolver) : IChatStreamRuntime
+public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequirementResolver) : IAgentStreamRuntime
 {
     private const int MaxFunctionResultPayloadBytes = 256 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -132,7 +132,7 @@ public sealed class ChatStreamRuntime(ApprovalRequirementResolver approvalRequir
         string fallbackCode,
         string fallbackUserFacingMessage)
     {
-        return exception is ChatWorkflowException workflowException
+        return exception is AgentWorkflowException workflowException
             ? CreateErrorChunk(workflowException.Code, workflowException.Detail, source, workflowException.UserFacingMessage)
             : CreateErrorChunk(
                 fallbackCode,

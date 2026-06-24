@@ -245,6 +245,7 @@ public sealed class AgentRunQueueProductionOpsTests
             "generate_chart_data",
             requiresApproval: false,
             now);
+        task.ConfirmExecutablePlan(task.PlanJson, Array.Empty<int>(), now);
         task.ApprovePlan(now);
         task.Start(now);
         step.Start(now);

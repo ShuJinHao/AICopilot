@@ -194,7 +194,7 @@ public sealed class SecurityHardeningTests
         deployReadme.Should().Contain("iiot-linux-prod");
         deployReadme.Should().Contain("非 root");
         deployReadme.Should().Contain("不通过 AICopilot 写 Cloud 业务数据");
-        deployReadme.Should().Contain("应用镜像仓库只保留最近 3 个 `sha-*` tag");
+        deployReadme.Should().Contain("应用镜像仓库只保留当前生产 `sha-*` tag");
         deployReadme.Should().Contain("./deploy-release.sh sha-<git-sha> --services httpapi,web");
 
         envTemplate.Should().Contain("POSTGRES_IMAGE=10.98.90.154:80/enterprise-ai/base-postgres:17.6");
@@ -214,8 +214,10 @@ public sealed class SecurityHardeningTests
         deployRelease.Should().Contain("compose up -d --remove-orphans");
         deployRelease.Should().Contain("compose up -d \"${RUNTIME_SELECTED_SERVICES[@]}\"");
         deployRelease.Should().Contain("probe_web");
+        deployRelease.Should().Contain("post-release-cleanup.sh");
 
         harborRetention.Should().Contain("HARBOR_KEEP_SHA_TAGS");
+        harborRetention.Should().Contain("HARBOR_KEEP_SHA_TAG");
         harborRetention.Should().Contain("sha-[0-9a-f]");
         harborRetention.Should().Contain("Harbor GC must run");
 
@@ -774,7 +776,7 @@ public sealed class SecurityHardeningTests
     }
 
     [Fact]
-    public void ChatStreamRuntime_ShouldNotExposeGenericExceptionMessages()
+    public void AgentStreamRuntime_ShouldNotExposeGenericExceptionMessages()
     {
         var solutionRoot = FindSolutionRoot();
         var source = File.ReadAllText(Path.Combine(
@@ -783,7 +785,7 @@ public sealed class SecurityHardeningTests
             "services",
             "AICopilot.AiGatewayService",
             "Agents",
-            "ChatStreamRuntime.cs"));
+            "AgentStreamRuntime.cs"));
 
         var exceptionParameterIndex = source.IndexOf("Exception exception,", StringComparison.Ordinal);
         exceptionParameterIndex.Should().BeGreaterThanOrEqualTo(0);
@@ -793,7 +795,7 @@ public sealed class SecurityHardeningTests
         methodEnd.Should().BeGreaterThan(methodStart);
         var method = source[methodStart..methodEnd];
 
-        method.Should().Contain("exception is ChatWorkflowException");
+        method.Should().Contain("exception is AgentWorkflowException");
         method.Should().NotContain("exception.Message");
         method.Should().Contain("fallbackUserFacingMessage");
     }

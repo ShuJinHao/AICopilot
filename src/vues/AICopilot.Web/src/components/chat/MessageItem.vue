@@ -8,7 +8,7 @@ import { useChatStore } from '@/stores/chatStore'
 import ApprovalCard from './ApprovalCard.vue'
 import FunctionCallItem from './FunctionCallItem.vue'
 import WidgetRenderer from '../widgets/WidgetRenderer.vue'
-import type { ApprovalChunk, ChatMessage, FunctionCallChunk, IntentChunk, WidgetChunk } from '@/types/models'
+import type { AgentEventChunk, ApprovalChunk, ChatMessage, FunctionCallChunk, IntentChunk, WidgetChunk } from '@/types/models'
 
 const props = defineProps<{
   message: ChatMessage
@@ -17,6 +17,7 @@ const props = defineProps<{
 const store = useChatStore()
 const isUser = computed(() => props.message.role === MessageRole.User)
 const chunks = computed(() => props.message.chunks)
+const agentEventChunks = computed(() => chunks.value.filter((chunk) => chunk.type === ChunkType.AgentEvent) as AgentEventChunk[])
 const intentChunks = computed(() => chunks.value.filter((chunk) => chunk.type === ChunkType.Intent) as IntentChunk[])
 const functionCallChunks = computed(() => chunks.value.filter((chunk) => chunk.type === ChunkType.FunctionCall) as FunctionCallChunk[])
 const visibleChunks = computed(() =>
@@ -49,7 +50,12 @@ const modelBadges = computed(() => {
 
   return badges
 })
-const runtimeDetailCount = computed(() => modelBadges.value.length + intentChunks.value.length + functionCallChunks.value.length)
+const runtimeDetailCount = computed(() =>
+  modelBadges.value.length +
+  agentEventChunks.value.length +
+  intentChunks.value.length +
+  functionCallChunks.value.length
+)
 const hasRuntimeDetails = computed(() => !isUser.value && runtimeDetailCount.value > 0)
 
 function asFunctionCall(chunk: ChatChunk) {
@@ -62,6 +68,23 @@ function asWidget(chunk: ChatChunk) {
 
 function asApproval(chunk: ChatChunk) {
   return chunk as ApprovalChunk
+}
+
+function agentEventLabel(stage: string) {
+  switch (stage) {
+    case 'plan_draft_started':
+      return '计划草案开始'
+    case 'intent_understanding':
+      return '理解目标'
+    case 'capability_discovery':
+      return '发现能力'
+    case 'plan_draft_ready':
+      return '草案就绪'
+    case 'plan_draft_failed':
+      return '草案失败'
+    default:
+      return stage
+  }
 }
 
 async function approve(payload: { callId: string; onsiteConfirmed: boolean }, chunk: ApprovalChunk) {
@@ -121,6 +144,16 @@ async function reject(payload: { callId: string }, chunk: ApprovalChunk) {
             </div>
           </section>
 
+          <section v-if="agentEventChunks.length > 0" class="runtime-section">
+            <span class="runtime-label">过程</span>
+            <div class="agent-event-list">
+              <div v-for="(chunk, index) in agentEventChunks" :key="`${chunk.event.stage}-${index}`" class="agent-event-row">
+                <strong>{{ agentEventLabel(chunk.event.stage) }}</strong>
+                <span>{{ chunk.event.detail }}</span>
+              </div>
+            </div>
+          </section>
+
           <section v-if="intentChunks.length > 0" class="runtime-section">
             <span class="runtime-label">意图</span>
             <div class="intent-strip">
@@ -171,7 +204,12 @@ async function reject(payload: { callId: string }, chunk: ApprovalChunk) {
   grid-row: 1;
   justify-self: end;
   border-color: rgba(200, 255, 61, 0.32);
+  border-style: solid;
+  border-width: 1px;
+  border-radius: 18px;
+  padding: 12px 14px;
   background: rgba(239, 255, 190, 0.92);
+  box-shadow: var(--ai-shadow-xs);
 }
 
 .avatar {
@@ -191,11 +229,11 @@ async function reject(payload: { callId: string }, chunk: ApprovalChunk) {
   gap: 12px;
   min-width: 0;
   max-width: min(100%, 940px);
-  border: 1px solid var(--ai-border);
-  border-radius: 22px;
-  padding: 14px;
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: var(--ai-shadow-xs);
+  border: 0;
+  border-radius: 0;
+  padding: 2px 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .message-meta {
@@ -219,6 +257,41 @@ async function reject(payload: { callId: string }, chunk: ApprovalChunk) {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.agent-event-list {
+  display: grid;
+  gap: 6px;
+}
+
+.agent-event-row {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  min-width: 0;
+  border: 1px solid rgba(63, 111, 115, 0.12);
+  border-radius: 8px;
+  padding: 7px 8px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.agent-event-row strong,
+.agent-event-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.agent-event-row strong {
+  color: var(--ai-text);
+  font-weight: 900;
+}
+
+.agent-event-row span {
+  color: var(--ai-text-muted);
+  font-weight: 750;
 }
 
 .runtime-details {

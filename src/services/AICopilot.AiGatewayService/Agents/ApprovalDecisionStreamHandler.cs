@@ -15,14 +15,14 @@ namespace AICopilot.AiGatewayService.Agents;
 public class ApprovalDecisionStreamHandler(
     IReadRepository<Session> sessionRepository,
     ICurrentUser currentUser,
-    ChatWorkflowOrchestrator workflowOrchestrator,
+    AgentWorkflowPipeline workflowPipeline,
     SessionMessagePersistenceService messagePersistenceService,
     IFinalAgentContextStore finalAgentContextStore,
     IFinalAgentContextSerializer finalAgentContextSerializer,
     ApprovalRequirementResolver approvalRequirementResolver,
     ISessionExecutionLock sessionExecutionLock,
-    IChatExecutionMetadataAccessor executionMetadataAccessor,
-    IChatStreamRuntime chatStreamRuntime)
+    IAgentExecutionMetadataAccessor executionMetadataAccessor,
+    IAgentStreamRuntime chatStreamRuntime)
     : IStreamRequestHandler<ApprovalDecisionStreamRequest, ChatChunk>
 {
     public async IAsyncEnumerable<ChatChunk> Handle(
@@ -81,7 +81,7 @@ public class ApprovalDecisionStreamHandler(
 
         if (failure != null)
         {
-            var errorChunk = ChatStreamRuntime.CreateErrorChunk(
+            var errorChunk = AgentStreamRuntime.CreateErrorChunk(
                 assistantText,
                 failure,
                 nameof(ApprovalDecisionStreamHandler),
@@ -112,7 +112,7 @@ public class ApprovalDecisionStreamHandler(
         var session = await chatStreamRuntime.LoadSessionAsync(sessionRepository, request.SessionId, ct);
         if (session == null)
         {
-            yield return ChatStreamRuntime.CreateErrorChunk(
+            yield return AgentStreamRuntime.CreateErrorChunk(
                 assistantText,
                 "session_not_found",
                 "未找到对应的会话。",
@@ -123,7 +123,7 @@ public class ApprovalDecisionStreamHandler(
 
         if (currentUser.Id != session.UserId)
         {
-            yield return ChatStreamRuntime.CreateErrorChunk(
+            yield return AgentStreamRuntime.CreateErrorChunk(
                 assistantText,
                 AuthProblemCodes.MissingPermission,
                 "当前用户无权操作该会话。",
@@ -135,7 +135,7 @@ public class ApprovalDecisionStreamHandler(
         var storedContext = await finalAgentContextStore.GetAsync(request.SessionId, ct);
         if (storedContext == null)
         {
-            yield return ChatStreamRuntime.CreateErrorChunk(
+            yield return AgentStreamRuntime.CreateErrorChunk(
                 assistantText,
                 AppProblemCodes.ApprovalAlreadyProcessed,
                 "审批上下文已过期，请重新发起本次诊断或建议请求。",
@@ -150,7 +150,7 @@ public class ApprovalDecisionStreamHandler(
             .FirstOrDefault(item => string.Equals(item.CallId, request.CallId, StringComparison.Ordinal));
         if (storedApproval == null)
         {
-            yield return ChatStreamRuntime.CreateErrorChunk(
+            yield return AgentStreamRuntime.CreateErrorChunk(
                 assistantText,
                 AppProblemCodes.ApprovalAlreadyProcessed,
                 "该审批请求已处理或已失效。",
@@ -173,7 +173,7 @@ public class ApprovalDecisionStreamHandler(
         }
 
         pendingMessages.Add(new SessionMessageAppend(
-            ChatStreamRuntime.BuildApprovalSummary(
+            AgentStreamRuntime.BuildApprovalSummary(
                 validation.Identity is null
                     ? validation.ToolName
                     : $"{validation.Identity.TargetName}/{validation.Identity.ToolName}",
@@ -188,7 +188,7 @@ public class ApprovalDecisionStreamHandler(
             validation.IsApproved,
             request.OnsiteConfirmed));
 
-        await foreach (var chatChunk in workflowOrchestrator.ResumeFinalAgentAsync(
+        await foreach (var chatChunk in workflowPipeline.ResumeFinalAgentAsync(
                            agentContext,
                            session,
                            assistantText,
