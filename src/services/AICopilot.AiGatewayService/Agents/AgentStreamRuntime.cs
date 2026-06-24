@@ -51,12 +51,18 @@ public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequi
             switch (evtContent)
             {
                 case AiTextContent content:
-                    if (appendAssistantText)
+                    var sanitized = ModelOutputSanitizer.Strip(content.Text);
+                    if (string.IsNullOrEmpty(sanitized.CleanText))
                     {
-                        assistantText?.Append(content.Text);
+                        break;
                     }
 
-                    yield return new ChatChunk(source, ChunkType.Text, content.Text);
+                    if (appendAssistantText)
+                    {
+                        assistantText?.Append(sanitized.CleanText);
+                    }
+
+                    yield return new ChatChunk(source, ChunkType.Text, sanitized.CleanText);
                     break;
 
                 case AiToolCallContent content:

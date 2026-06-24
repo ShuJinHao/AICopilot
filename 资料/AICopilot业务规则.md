@@ -87,6 +87,9 @@ Cloud AiRead 设备契约：
 - 主产品形态是 Codex-like 对话流，不是任务控制台、试点运营台或系统调试台。
 - 普通用户默认只看到用户问题、AI 最终回答、Plan/Goal 摘要、审批卡和结果卡。
 - 模型名、路由模型、意图置信度、工具调用、工具参数、运行事件、中间步骤和风险细节默认折叠到运行详情。
+- 前端必须完整展示后端错误契约中的 `code`、`detail`、`userFacingMessage` 和失败类 `AgentEvent` 详情；不得用泛化文案覆盖真实诊断信息。
+- 前端会话级 Agent 运行状态必须按会话隔离；新建会话、切换会话和切换 Plan/Chat 模式时不得残留其他会话的任务、错误、工作区、产物或上传文件。
+- 模型推理标签例如 `<mm:think>`、`<think>` 或裸 `mm:think` 不得出现在用户可见正文；如保留，只能进入默认折叠的运行详情。
 - `render_payload_json` 只能恢复稳定消息内容，例如文本、图表或错误结果；不得作为审批、工具调用、意图识别或运行状态的权威来源。
 - 审批、AgentTask、AgentStep、Artifact 和 Workspace 的当前状态必须从各自权威聚合读取，并通过 `message_events` / session timeline 投影进入对话流。
 - 历史消息刷新不得把 `Intent`、`FunctionCall`、`FunctionResult`、`ApprovalRequest` 或 `Metadata` chunk 作为普通消息重新摊开。

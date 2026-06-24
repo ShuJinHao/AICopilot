@@ -469,7 +469,7 @@ describe('chatStore skills', () => {
 
     expect(chatServiceMock.approveAgentTaskPlan).toHaveBeenCalledWith('task-1')
     expect(store.latestAgentTask?.status).toBe('PlanApproved')
-    expect(store.agentErrorMessage).toBe('没有可用 DataWorker，任务尚未入队。')
+    expect(store.errorMessage).toBe('没有可用 DataWorker，任务尚未入队。')
   })
 
   it('uses the retry endpoint for failed tasks', async () => {
@@ -522,6 +522,8 @@ describe('chatStore skills', () => {
   })
 
   it('does not fabricate an artifact download path when the backend omits it', async () => {
+    const sessionStore = useSessionStore()
+    sessionStore.persistCurrentSession('session-1')
     const store = useChatStore()
 
     await store.downloadArtifact({
@@ -540,6 +542,6 @@ describe('chatStore skills', () => {
     })
 
     expect(chatServiceMock.downloadArtifact).not.toHaveBeenCalled()
-    expect(store.agentErrorMessage).toContain('后端未返回产物下载地址')
+    expect(store.errorMessage).toContain('后端未返回产物下载地址')
   })
 })

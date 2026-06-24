@@ -199,6 +199,66 @@ describe('chunkReducer', () => {
     })
   })
 
+  it('promotes failed plan draft agent events into session errors', () => {
+    const message = createMessage()
+    const callbacks = {
+      setSessionError: vi.fn(),
+      onApprovalChunk: vi.fn()
+    }
+
+    processChunk(
+      message,
+      {
+        source: 'PlanAgentTaskStreamHandler',
+        type: ChunkType.AgentEvent,
+        content: JSON.stringify({
+          stage: 'plan_draft_failed',
+          code: 'planner_model_unavailable',
+          detail: 'Planner model is not configured.',
+          recoverable: true,
+          suggestedAction: '请先配置模型。',
+          metadata: {}
+        })
+      },
+      callbacks
+    )
+
+    expect(callbacks.setSessionError).toHaveBeenCalledWith(
+      'session-1',
+      'Planner model is not configured. 请先配置模型。'
+    )
+  })
+
+  it('strips model thinking tags from visible text chunks', () => {
+    const message = createMessage()
+    const callbacks = {
+      setSessionError: vi.fn(),
+      onApprovalChunk: vi.fn()
+    }
+
+    processChunk(
+      message,
+      {
+        source: 'assistant',
+        type: ChunkType.Text,
+        content: '<mm:think>内部推理</mm:think>最终回答'
+      },
+      callbacks
+    )
+    processChunk(
+      message,
+      {
+        source: 'assistant',
+        type: ChunkType.Text,
+        content: '\nmm:think用户说了半句\n继续回答'
+      },
+      callbacks
+    )
+
+    expect(message.chunks).toHaveLength(1)
+    expect(message.chunks[0]?.content).toBe('最终回答继续回答')
+  })
+
   it('reports invalid agent task chunks as session errors', () => {
     const message = createMessage()
     const callbacks = {

@@ -18,6 +18,7 @@ import type {
   WidgetChunk
 } from '@/types/models'
 import { resolveChatErrorMessage } from '@/stores/chatErrorStore'
+import { stripThinkingTags } from './modelOutputSanitizer'
 import { parseWidgetFromTextChunk } from './widgetPayloadParser'
 
 export interface ChunkReducerCallbacks {
@@ -124,19 +125,27 @@ export function getErrorCode(chunk: ChatChunk) {
 }
 
 function addTextChunk(message: ChatMessage, chunk: ChatChunk) {
+  const sanitizedContent = stripThinkingTags(chunk.content)
+  if (!sanitizedContent) {
+    return
+  }
+
+  const sanitizedChunk = sanitizedContent === chunk.content
+    ? chunk
+    : { ...chunk, content: sanitizedContent }
   const previousChunk = message.chunks[message.chunks.length - 1]
 
   if (!previousChunk) {
-    message.chunks.push(chunk)
+    message.chunks.push(sanitizedChunk)
     return
   }
 
-  if (previousChunk.source === chunk.source && previousChunk.type === ChunkType.Text) {
-    previousChunk.content += chunk.content
+  if (previousChunk.source === sanitizedChunk.source && previousChunk.type === ChunkType.Text) {
+    previousChunk.content += sanitizedChunk.content
     return
   }
 
-  message.chunks.push(chunk)
+  message.chunks.push(sanitizedChunk)
 }
 
 function addWidgetChunk(message: ChatMessage, chunk: ChatChunk, parsedWidget: unknown) {
@@ -212,6 +221,13 @@ function addAgentEventChunk(
       ...chunk,
       event
     } as AgentEventChunk)
+
+    if (event.stage === 'plan_draft_failed') {
+      const detail = event.suggestedAction
+        ? `${event.detail} ${event.suggestedAction}`
+        : event.detail
+      callbacks.setSessionError(message.sessionId, detail)
+    }
   } catch {
     callbacks.setSessionError(message.sessionId, '运行状态事件解析失败。')
   }

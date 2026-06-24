@@ -9,6 +9,12 @@ import { useApprovalStore } from './approvalStore'
 import { resolveChatErrorMessage, useChatErrorStore, toFriendlyMessage } from './chatErrorStore'
 import { useMessageStore } from './messageStore'
 import { useSessionStore } from './sessionStore'
+import {
+  createReactiveSessionScopedState,
+  resetSessionScopedState,
+  type AgentChartPreview,
+  type SessionScopedState
+} from './sessionScopedState'
 import { useStreamStore } from './streamStore'
 import type {
   AgentPlannerToolSummary,
@@ -25,16 +31,6 @@ import type {
   ArtifactWorkspace,
   UploadRecord
 } from '@/types/protocols'
-
-interface AgentChartPreview {
-  labels: string[]
-  values: number[]
-  source?: string
-  sourceMode?: string
-  sourceLabel?: string
-  isSimulation?: boolean
-  queryHash?: string
-}
 
 interface HistoryCursorState {
   beforeSequence: number | null
@@ -58,10 +54,17 @@ export const useChatStore = defineStore('chat', () => {
   const isWaitingForApproval = computed(() => approvalStore.isWaitingForApproval)
   const isLoadingHistory = computed(() => sessionStore.isLoadingHistory)
   const errorMessage = computed(() => errorStore.errorMessage)
-  const agentTasks = ref<AgentTask[]>([])
-  const agentApprovals = ref<AgentApprovalRequest[]>([])
-  const agentAuditSummary = ref<AgentTaskAuditSummary[]>([])
-  const timelineEvents = ref<SessionTimelineEvent[]>([])
+  const scopedState = createReactiveSessionScopedState()
+  const scopedField = <K extends keyof SessionScopedState>(key: K) => computed({
+    get: () => scopedState[key],
+    set: (value: SessionScopedState[K]) => {
+      scopedState[key] = value
+    }
+  })
+  const agentTasks = scopedField('agentTasks')
+  const agentApprovals = scopedField('agentApprovals')
+  const agentAuditSummary = scopedField('agentAuditSummary')
+  const timelineEvents = scopedField('timelineEvents')
   const availableSkills = ref<SkillDefinition[]>([])
   const selectedSkillCode = ref<string | null>(null)
   const availablePluginTools = ref<AgentPlannerToolSummary[]>([])
@@ -69,12 +72,11 @@ export const useChatStore = defineStore('chat', () => {
   const isLoadingPluginTools = ref(false)
   const availableKnowledgeBases = ref<KnowledgeBaseSummary[]>([])
   const selectedKnowledgeBaseId = ref<string | null>(null)
-  const uploadedFiles = ref<UploadRecord[]>([])
-  const currentWorkspace = ref<ArtifactWorkspace | null>(null)
-  const currentArtifactPreview = ref<AgentArtifactPreview | null>(null)
-  const chartPreview = ref<AgentChartPreview | null>(null)
-  const isAgentBusy = ref(false)
-  const agentErrorMessage = ref<string | null>(null)
+  const uploadedFiles = scopedField('uploadedFiles')
+  const currentWorkspace = scopedField('currentWorkspace')
+  const currentArtifactPreview = scopedField('currentArtifactPreview')
+  const chartPreview = scopedField('chartPreview')
+  const isAgentBusy = scopedField('isAgentBusy')
   const historyCursors = ref<Record<string, HistoryCursorState>>({})
   const isLoadingOlderHistory = ref(false)
   const latestAgentTask = computed(() => agentTasks.value[0] ?? null)
@@ -108,6 +110,23 @@ export const useChatStore = defineStore('chat', () => {
 
   function bindErrorSession() {
     errorStore.bindCurrentSession(sessionStore.currentSessionId)
+  }
+
+  function clearCurrentSessionError() {
+    errorStore.bindCurrentSession(sessionStore.currentSessionId)
+    errorStore.clearSessionError(sessionStore.currentSessionId)
+  }
+
+  function setCurrentSessionError(message: string) {
+    const sessionId = sessionStore.currentSessionId
+    if (sessionId) {
+      errorStore.bindCurrentSession(sessionId)
+      errorStore.setSessionError(sessionId, message)
+    }
+  }
+
+  function resetCurrentSessionState() {
+    resetSessionScopedState(scopedState)
   }
 
   async function loadSkills() {
@@ -460,7 +479,7 @@ export const useChatStore = defineStore('chat', () => {
 
   async function downloadArtifact(artifact: ArtifactRecord) {
     if (!artifact.downloadUrl) {
-      agentErrorMessage.value = '后端未返回产物下载地址，前端不会自行拼接下载路径。'
+      setCurrentSessionError('后端未返回产物下载地址，前端不会自行拼接下载路径。')
       return
     }
 
@@ -478,7 +497,7 @@ export const useChatStore = defineStore('chat', () => {
       return null
     }
 
-    agentErrorMessage.value = null
+    clearCurrentSessionError()
     const uploaded = await chatService.uploadFile('SessionTemp', file, {
       sessionId: sessionStore.currentSessionId
     })
@@ -494,7 +513,7 @@ export const useChatStore = defineStore('chat', () => {
     const sessionId = sessionStore.currentSessionId
     const assistantMessage = addPlanConversationMessages(sessionId, goal)
     isAgentBusy.value = true
-    agentErrorMessage.value = null
+    clearCurrentSessionError()
     streamStore.start()
     let plannedTask: AgentTask | null = null
     let streamErrorMessage: string | null = null
@@ -536,7 +555,7 @@ export const useChatStore = defineStore('chat', () => {
           streamStore.stop()
           assistantMessage.isStreaming = false
           streamErrorMessage = toFriendlyMessage(error)
-          agentErrorMessage.value = streamErrorMessage
+          setCurrentSessionError(streamErrorMessage)
           appendPlanStreamError(assistantMessage, streamErrorMessage)
           approvalStore.sync(sessionId)
         }
@@ -545,7 +564,7 @@ export const useChatStore = defineStore('chat', () => {
       const completedTask = plannedTask as AgentTask | null
       if (!completedTask) {
         if (streamErrorMessage) {
-          agentErrorMessage.value = streamErrorMessage
+          setCurrentSessionError(streamErrorMessage)
         }
         return null
       }
@@ -557,7 +576,7 @@ export const useChatStore = defineStore('chat', () => {
       return completedTask
     } catch (error) {
       const message = toFriendlyMessage(error)
-      agentErrorMessage.value = message
+      setCurrentSessionError(message)
       appendPlanStreamError(assistantMessage, message)
       return null
     } finally {
@@ -573,7 +592,7 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     isAgentBusy.value = true
-    agentErrorMessage.value = null
+    clearCurrentSessionError()
     try {
       currentWorkspace.value = await chatService.submitFinalReview(code)
       await refreshChartPreview()
@@ -585,7 +604,7 @@ export const useChatStore = defineStore('chat', () => {
       await loadAgentAuditSummary(latestAgentTask.value?.id ?? null)
       return currentWorkspace.value
     } catch (error) {
-      agentErrorMessage.value = toFriendlyMessage(error)
+      setCurrentSessionError(toFriendlyMessage(error))
       return null
     } finally {
       isAgentBusy.value = false
@@ -598,7 +617,7 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     isAgentBusy.value = true
-    agentErrorMessage.value = null
+    clearCurrentSessionError()
     try {
       const updated = await chatService.runAgentTask(taskId)
       upsertAgentTask(updated)
@@ -610,7 +629,7 @@ export const useChatStore = defineStore('chat', () => {
       }
       return updated
     } catch (error) {
-      agentErrorMessage.value = toFriendlyMessage(error)
+      setCurrentSessionError(toFriendlyMessage(error))
       await refreshAgentTaskSnapshot(taskId)
       return null
     } finally {
@@ -624,7 +643,7 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     isAgentBusy.value = true
-    agentErrorMessage.value = null
+    clearCurrentSessionError()
     try {
       const updated = await chatService.retryAgentTask(taskId)
       upsertAgentTask(updated)
@@ -636,7 +655,7 @@ export const useChatStore = defineStore('chat', () => {
       }
       return updated
     } catch (error) {
-      agentErrorMessage.value = toFriendlyMessage(error)
+      setCurrentSessionError(toFriendlyMessage(error))
       await refreshAgentTaskSnapshot(taskId)
       return null
     } finally {
@@ -650,7 +669,7 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     isAgentBusy.value = true
-    agentErrorMessage.value = null
+    clearCurrentSessionError()
     let planApproved = false
     try {
       const pendingPlanApproval = findPendingPlanApproval(taskId)
@@ -676,7 +695,7 @@ export const useChatStore = defineStore('chat', () => {
       }
       return updated
     } catch (error) {
-      agentErrorMessage.value = toFriendlyMessage(error)
+      setCurrentSessionError(toFriendlyMessage(error))
       await refreshAgentTaskSnapshot(taskId)
       return planApproved ? (agentTasks.value.find((task) => task.id === taskId) ?? null) : null
     } finally {
@@ -694,7 +713,7 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     isAgentBusy.value = true
-    agentErrorMessage.value = null
+    clearCurrentSessionError()
     try {
       const decided = await chatService.decideAgentApproval(approval.id, decision, comment)
       await loadAgentApprovals(approval.taskId)
@@ -706,7 +725,7 @@ export const useChatStore = defineStore('chat', () => {
 
       return decided
     } catch (error) {
-      agentErrorMessage.value = toFriendlyMessage(error)
+      setCurrentSessionError(toFriendlyMessage(error))
       return null
     } finally {
       isAgentBusy.value = false
@@ -719,7 +738,7 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     isAgentBusy.value = true
-    agentErrorMessage.value = null
+    clearCurrentSessionError()
     try {
       currentWorkspace.value = await chatService.finalizeWorkspace(code)
       await refreshChartPreview()
@@ -731,7 +750,7 @@ export const useChatStore = defineStore('chat', () => {
       await loadAgentAuditSummary(latestAgentTask.value?.id ?? null)
       return currentWorkspace.value
     } catch (error) {
-      agentErrorMessage.value = toFriendlyMessage(error)
+      setCurrentSessionError(toFriendlyMessage(error))
       return null
     } finally {
       isAgentBusy.value = false
@@ -765,6 +784,7 @@ export const useChatStore = defineStore('chat', () => {
 
   async function createNewSession() {
     errorStore.clearSessionError()
+    resetCurrentSessionState()
     const newSession = await sessionStore.createSession()
     messageStore.messagesMap[newSession.id] = []
     streamStore.stop()
@@ -774,6 +794,8 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function selectSession(id: string, forceReload = false) {
+    streamStore.stop()
+    resetCurrentSessionState()
     sessionStore.persistCurrentSession(id)
     bindErrorSession()
     errorStore.clearSessionError(id)
@@ -787,13 +809,7 @@ export const useChatStore = defineStore('chat', () => {
     delete messageStore.messagesMap[id]
     delete historyCursors.value[id]
     if (wasCurrent) {
-      agentTasks.value = []
-      agentApprovals.value = []
-      agentAuditSummary.value = []
-      timelineEvents.value = []
-      currentWorkspace.value = null
-      currentArtifactPreview.value = null
-      chartPreview.value = null
+      resetCurrentSessionState()
       if (sessionStore.currentSessionId) {
         await selectSession(sessionStore.currentSessionId, true)
       } else {
@@ -1005,10 +1021,7 @@ export const useChatStore = defineStore('chat', () => {
     streamStore.reset()
     approvalStore.reset()
     errorStore.reset()
-    agentTasks.value = []
-    agentApprovals.value = []
-    agentAuditSummary.value = []
-    timelineEvents.value = []
+    resetCurrentSessionState()
     availableSkills.value = []
     selectedSkillCode.value = null
     availablePluginTools.value = []
@@ -1016,14 +1029,8 @@ export const useChatStore = defineStore('chat', () => {
     isLoadingPluginTools.value = false
     availableKnowledgeBases.value = []
     selectedKnowledgeBaseId.value = null
-    uploadedFiles.value = []
-    currentWorkspace.value = null
-    currentArtifactPreview.value = null
-    chartPreview.value = null
-    agentErrorMessage.value = null
     historyCursors.value = {}
     isLoadingOlderHistory.value = false
-    isAgentBusy.value = false
   }
 
   return {
@@ -1059,7 +1066,6 @@ export const useChatStore = defineStore('chat', () => {
     currentArtifactPreview,
     chartPreview,
     isAgentBusy,
-    agentErrorMessage,
     errorMessage,
     initialize,
     loadSkills,
@@ -1074,6 +1080,7 @@ export const useChatStore = defineStore('chat', () => {
     createNewSession,
     selectSession,
     deleteSession,
+    clearCurrentSessionError,
     confirmOnsitePresence,
     clearOnsitePresence,
     uploadSessionFile,

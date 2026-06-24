@@ -3,6 +3,67 @@ import { defineStore } from 'pinia'
 import { ApiError } from '@/services/apiClient'
 import type { ChatErrorPayload } from '@/types/protocols'
 
+type ProblemLike = ChatErrorPayload & {
+  title?: string
+  errors?: unknown
+}
+
+function toTrimmedString(value: unknown) {
+  return typeof value === 'string' && value.trim().length > 0
+    ? value.trim()
+    : null
+}
+
+function collectValidationErrors(errors: unknown): string[] {
+  if (!errors) {
+    return []
+  }
+
+  if (Array.isArray(errors)) {
+    return errors
+      .map(toTrimmedString)
+      .filter((item): item is string => Boolean(item))
+  }
+
+  if (typeof errors !== 'object') {
+    return []
+  }
+
+  const messages: string[] = []
+  for (const [field, value] of Object.entries(errors as Record<string, unknown>)) {
+    const fieldMessages = Array.isArray(value)
+      ? value.map(toTrimmedString).filter((item): item is string => Boolean(item))
+      : [toTrimmedString(value)].filter((item): item is string => Boolean(item))
+
+    for (const message of fieldMessages) {
+      messages.push(field ? `${field}: ${message}` : message)
+    }
+  }
+
+  return messages
+}
+
+export function extractErrorDetail(details: unknown) {
+  if (!details || typeof details !== 'object') {
+    return null
+  }
+
+  const problem = details as ProblemLike
+  const directMessage =
+    toTrimmedString(problem.userFacingMessage) ??
+    toTrimmedString(problem.detail)
+  if (directMessage) {
+    return directMessage
+  }
+
+  const validationErrors = collectValidationErrors(problem.errors)
+  if (validationErrors.length > 0) {
+    return validationErrors.join('；')
+  }
+
+  return toTrimmedString(problem.title)
+}
+
 export function resolveChatErrorMessage(payload: ChatErrorPayload) {
   const userFacingMessage = payload.userFacingMessage?.trim() || payload.detail?.trim()
 
@@ -83,16 +144,17 @@ export function toFriendlyMessage(error: unknown) {
       return resolveChatErrorMessage(problem)
     }
 
+    const detail = extractErrorDetail(error.details)
+    if (detail) {
+      return detail
+    }
+
     if (error.status === 401) {
       return '登录状态已失效，请重新登录。'
     }
 
     if (error.status === 403) {
       return '当前账号没有访问该功能的权限。'
-    }
-
-    if (error.status === 400) {
-      return '请求没有通过后端校验，请调整目标或检查模型配置后重试。'
     }
 
     if (error.status === 429) {

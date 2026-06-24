@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onClickOutside, useEventListener } from '@vueuse/core'
 import {
   Check,
   ChevronRight,
@@ -82,6 +83,8 @@ const inputValue = ref('')
 const agentGoal = ref('')
 const composerMode = ref<ComposerMode>('plan')
 const composerOptionsOpen = ref(false)
+const composerAddButton = ref<HTMLElement | null>(null)
+const composerOptionsPanel = ref<HTMLElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const scrollContainer = ref<HTMLElement | null>(null)
 const isMobile = ref(typeof window !== 'undefined' ? window.innerWidth < 1024 : false)
@@ -174,7 +177,7 @@ const hiddenVisibleOutputArtifactCount = computed(() =>
 )
 const agentRunReply = computed(() => {
   const task = latestTask.value
-  if (store.agentErrorMessage) {
+  if (store.errorMessage) {
     return '这次请求没有进入执行，我保留了当前上下文，下面给出后端返回的真实原因。'
   }
 
@@ -264,7 +267,7 @@ const hasInlineAgentRun = computed(() =>
     pendingAgentApprovals.value.length ||
     taskArtifacts.value.length ||
     store.currentWorkspace ||
-    store.agentErrorMessage
+    store.errorMessage
   )
 )
 const timelineEventItems = computed(() =>
@@ -627,6 +630,8 @@ async function submitComposer() {
 
 function setComposerMode(mode: ComposerMode) {
   composerMode.value = mode
+  composerOptionsOpen.value = false
+  store.clearCurrentSessionError()
 }
 
 function togglePluginTool(toolCode: string) {
@@ -787,8 +792,23 @@ watch(
 
 watch(() => store.currentSessionId, () => {
   sessionDrawerVisible.value = false
+  composerOptionsOpen.value = false
   stopRuntimePolling()
   void scrollToBottom()
+})
+
+onClickOutside(
+  composerOptionsPanel,
+  () => {
+    composerOptionsOpen.value = false
+  },
+  { ignore: [composerAddButton] }
+)
+
+useEventListener('keydown', (event: KeyboardEvent) => {
+  if (event.key === 'Escape' && composerOptionsOpen.value) {
+    composerOptionsOpen.value = false
+  }
 })
 
 watch(
@@ -936,9 +956,9 @@ onBeforeUnmount(() => {
               </span>
             </div>
 
-            <div v-if="store.agentErrorMessage" class="canvas-error inline-error" role="alert">
+            <div v-if="store.errorMessage" class="canvas-error inline-error" role="alert">
               <TriangleAlert :size="18" />
-              {{ store.agentErrorMessage }}
+              {{ store.errorMessage }}
             </div>
 
             <div v-if="agentRunNotice" class="agent-run-notice" :class="`notice-${agentRunNotice.tone}`">
@@ -1291,6 +1311,7 @@ onBeforeUnmount(() => {
             </button>
           </div>
           <button
+            ref="composerAddButton"
             class="composer-add-button"
             type="button"
             :aria-expanded="composerOptionsOpen"
@@ -1304,7 +1325,7 @@ onBeforeUnmount(() => {
           </span>
         </div>
 
-        <div v-if="composerOptionsOpen" class="composer-options-panel">
+        <div v-if="composerOptionsOpen" ref="composerOptionsPanel" class="composer-options-panel">
           <input ref="fileInput" class="hidden-file" type="file" @change="handleFileChange">
           <section class="composer-option-group">
             <div class="option-title">

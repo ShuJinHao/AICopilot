@@ -46,6 +46,7 @@ Cloud-AICopilot OIDC 身份对齐的长期结论见 `../docs/历史核心记录.
 - `src/hosts` 保持薄，只做组合根、API、worker、启动 wiring。
 - `src/shared` 只放真正共享的抽象和 shared kernel。
 - `src/vues` 放前端逻辑，不回填到 service 或 host。
+- 修改 AICopilot 前端前必须先读 `src/vues/AICopilot.Web/AGENTS.md`，遵守前端错误契约、会话状态和 UI 状态规则。
 - 不为旧 Cloud 读取路径、旧工具 schema、旧配置模式或旧文档入口保留兼容 adapter；需要跨仓库对齐时同步更新契约、服务注册和测试。
 
 ## Unified Agent Workflow

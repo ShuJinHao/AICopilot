@@ -103,6 +103,20 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
+    public void AICopilotWeb_ShouldKeepAgentRunErrorsSessionScoped()
+    {
+        var webRoot = Path.Combine(SolutionRoot, "src", "vues", "AICopilot.Web");
+        var webRules = File.ReadAllText(Path.Combine(webRoot, "AGENTS.md"));
+        var chatStore = File.ReadAllText(Path.Combine(webRoot, "src", "stores", "chatStore.ts"));
+
+        webRules.Should().Contain("Backend Errors Are Contract Data");
+        webRules.Should().Contain("Session State Must Be Scoped");
+        chatStore.Should().NotContain("agentErrorMessage");
+        chatStore.Should().Contain("createReactiveSessionScopedState");
+        chatStore.Should().Contain("resetSessionScopedState");
+    }
+
+    [Fact]
     public void McpService_ShouldNotReferenceAiGatewayCore()
     {
         var forbidden = new Regex(@"AICopilot\.Core\.AiGateway\.", RegexOptions.Compiled);

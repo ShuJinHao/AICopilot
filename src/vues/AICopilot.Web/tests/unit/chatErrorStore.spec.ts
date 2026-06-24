@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { resolveChatErrorMessage, useChatErrorStore } from '@/stores/chatErrorStore'
+import { ApiError } from '@/services/apiClient'
+import { resolveChatErrorMessage, toFriendlyMessage, useChatErrorStore } from '@/stores/chatErrorStore'
 
 describe('chatErrorStore', () => {
   beforeEach(() => {
@@ -50,5 +51,32 @@ describe('chatErrorStore', () => {
 
     store.clearSessionError('session-1')
     expect(store.errorMessage).toBe('')
+  })
+
+  it('uses backend detail for unknown error codes', () => {
+    expect(
+      resolveChatErrorMessage({
+        code: 'unknown_backend_code',
+        detail: '后端返回的真实失败原因'
+      })
+    ).toBe('后端返回的真实失败原因')
+  })
+
+  it('extracts ProblemDetails and ASP.NET validation errors from ApiError details', () => {
+    expect(
+      toFriendlyMessage(new ApiError('API Error: 400', 400, {
+        title: 'Validation failed',
+        errors: {
+          Goal: ['The Goal field is required.'],
+          SkillCode: ['Skill is invalid.']
+        }
+      }))
+    ).toBe('Goal: The Goal field is required.；SkillCode: Skill is invalid.')
+
+    expect(
+      toFriendlyMessage(new ApiError('API Error: 400', 400, {
+        detail: 'Planner model is not configured.'
+      }))
+    ).toBe('Planner model is not configured.')
   })
 })
