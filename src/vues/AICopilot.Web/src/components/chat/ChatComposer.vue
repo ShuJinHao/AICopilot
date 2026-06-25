@@ -2,7 +2,6 @@
 import { computed, ref, watch } from 'vue'
 import { onClickOutside, useEventListener } from '@vueuse/core'
 import {
-  FileUp,
   FolderOpen,
   ListChecks,
   MessageCircle,
@@ -22,10 +21,10 @@ const { canCreatePlan } = useAgentWorkbench()
 
 const inputValue = ref('')
 const agentGoal = ref('')
-const composerMode = ref<ComposerMode>('plan')
-const composerOptionsOpen = ref(false)
-const composerAddButton = ref<HTMLElement | null>(null)
-const composerOptionsPanel = ref<HTMLElement | null>(null)
+const composerMode = ref<ComposerMode>('chat')
+const planAdvancedOpen = ref(false)
+const planAdvancedButton = ref<HTMLElement | null>(null)
+const planAdvancedPanel = ref<HTMLElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 
 const isInputDisabled = computed(() => store.isStreaming || store.isWaitingForApproval)
@@ -35,20 +34,12 @@ const planTypeValue = computed({
     store.selectSkill(value === 'auto' ? null : value)
   }
 })
-const selectedPlanTypeLabel = computed(() =>
-  store.selectedSkill?.displayName || '自动识别'
+const attachmentSummary = computed(() =>
+  store.uploadedFiles.length ? `${store.uploadedFiles.length} 个附件` : '未添加附件'
 )
-const selectedPluginLine = computed(() => {
-  if (store.selectedPluginTools.length > 0) {
-    return `${store.selectedPluginTools.length} 个插件能力`
-  }
-
-  if (store.availablePluginTools.length > 0) {
-    return '可选插件能力'
-  }
-
-  return '无可选插件'
-})
+const planPathSummary = computed(() =>
+  store.selectedSkill ? `${store.selectedSkill.displayName} · 手动指定` : '自动选择执行路径'
+)
 const composerPrimaryLabel = computed(() => composerMode.value === 'plan' ? '生成计划' : '发送')
 const composerPrimaryIcon = computed(() => composerMode.value === 'plan' ? ListChecks : Send)
 const composerPlaceholder = computed(() => {
@@ -67,6 +58,13 @@ const isComposerSubmitDisabled = computed(() =>
     : isInputDisabled.value)
 )
 const visiblePluginTools = computed(() => store.availablePluginTools.slice(0, 12))
+
+const skillDisplayDescriptions: Record<string, string> = {
+  cloud_readonly: '查询和分析 Cloud 只读业务数据',
+  data_analysis: '查询和分析产线数据',
+  knowledge_search: '从知识库检索相关文档',
+  free_goal_chat: '普通对话，不调用工具'
+}
 
 async function sendDirectMessage() {
   const content = inputValue.value.trim()
@@ -123,7 +121,7 @@ async function submitComposer() {
 
 function setComposerMode(mode: ComposerMode) {
   composerMode.value = mode
-  composerOptionsOpen.value = false
+  planAdvancedOpen.value = false
   store.clearCurrentSessionError()
 }
 
@@ -144,25 +142,42 @@ function pluginToolMeta(tool: AgentPlannerToolSummary) {
   return parts.filter(Boolean).join(' · ')
 }
 
+function skillDisplayDescription(skillCode: string, fallback?: string) {
+  const normalizedCode = skillCode.toLowerCase()
+  if (skillDisplayDescriptions[normalizedCode]) {
+    return skillDisplayDescriptions[normalizedCode]
+  }
+
+  if (normalizedCode.includes('cloud') || normalizedCode.includes('data')) {
+    return '查询和分析业务数据'
+  }
+
+  if (normalizedCode.includes('knowledge') || normalizedCode.includes('rag')) {
+    return '从知识库检索相关资料'
+  }
+
+  return fallback || '系统根据目标自动选择执行路径'
+}
+
 onClickOutside(
-  composerOptionsPanel,
+  planAdvancedPanel,
   () => {
-    composerOptionsOpen.value = false
+    planAdvancedOpen.value = false
   },
-  { ignore: [composerAddButton] }
+  { ignore: [planAdvancedButton] }
 )
 
 useEventListener('keydown', (event: KeyboardEvent) => {
-  if (event.key === 'Escape' && composerOptionsOpen.value) {
-    composerOptionsOpen.value = false
+  if (event.key === 'Escape' && planAdvancedOpen.value) {
+    planAdvancedOpen.value = false
   }
 })
 
 watch(() => store.currentSessionId, () => {
   inputValue.value = ''
   agentGoal.value = ''
-  composerMode.value = 'plan'
-  composerOptionsOpen.value = false
+  composerMode.value = 'chat'
+  planAdvancedOpen.value = false
 })
 </script>
 
@@ -172,42 +187,68 @@ watch(() => store.currentSessionId, () => {
       <div class="mode-switch" role="group" aria-label="输入模式">
         <button
           type="button"
-          :class="{ active: composerMode === 'plan' }"
-          @click="setComposerMode('plan')"
-        >
-          <ListChecks :size="16" />
-          计划模式
-        </button>
-        <button
-          type="button"
           :class="{ active: composerMode === 'chat' }"
           @click="setComposerMode('chat')"
         >
           <MessageCircle :size="16" />
           聊天模式
         </button>
+        <button
+          type="button"
+          :class="{ active: composerMode === 'plan' }"
+          @click="setComposerMode('plan')"
+        >
+          <ListChecks :size="16" />
+          计划模式
+        </button>
       </div>
       <button
-        ref="composerAddButton"
         class="composer-add-button"
         type="button"
-        :aria-expanded="composerOptionsOpen"
-        @click="composerOptionsOpen = !composerOptionsOpen"
+        :disabled="store.isAgentBusy"
+        @click="openFilePicker"
       >
         <Plus :size="17" />
         添加
       </button>
       <span class="composer-context-line">
-        {{ selectedPlanTypeLabel }} · {{ selectedPluginLine }}
+        <template v-if="composerMode === 'plan'">
+          {{ planPathSummary }} · {{ attachmentSummary }}
+        </template>
+        <template v-else>
+          普通聊天 · {{ attachmentSummary }}
+        </template>
       </span>
     </div>
 
-    <div v-if="composerOptionsOpen" ref="composerOptionsPanel" class="composer-options-panel">
-      <input ref="fileInput" class="hidden-file" type="file" @change="handleFileChange">
+    <input ref="fileInput" class="hidden-file" type="file" @change="handleFileChange">
+
+    <div v-if="composerMode === 'plan'" class="composer-plan-strip">
+      <div>
+        <strong>输入目标，系统会自动生成可确认的计划</strong>
+        <span>默认自动选择 Skill、工具和知识库；需要人工覆盖时再展开高级选项。</span>
+      </div>
+      <button
+        ref="planAdvancedButton"
+        class="composer-advanced-toggle"
+        type="button"
+        :aria-expanded="planAdvancedOpen"
+        @click="planAdvancedOpen = !planAdvancedOpen"
+      >
+        <Sparkles :size="16" />
+        高级选项
+      </button>
+    </div>
+
+    <div
+      v-if="composerMode === 'plan' && planAdvancedOpen"
+      ref="planAdvancedPanel"
+      class="composer-options-panel"
+    >
       <section class="composer-option-group">
         <div class="option-title">
           <Sparkles :size="17" />
-          <span>计划类型</span>
+          <span>执行路径</span>
         </div>
         <label class="select-field">
           <select
@@ -222,24 +263,11 @@ watch(() => store.currentSessionId, () => {
               :key="skill.skillCode"
               :value="skill.skillCode"
             >
-              {{ skill.displayName }}
+              {{ skill.displayName }} · {{ skillDisplayDescription(skill.skillCode, skill.description) }}
             </option>
           </select>
         </label>
-        <p>{{ store.selectedSkill?.description || '系统会根据目标自动选择最合适的只读分析路径。' }}</p>
-      </section>
-
-      <section class="composer-option-group">
-        <div class="option-title">
-          <FileUp :size="17" />
-          <span>输入材料</span>
-        </div>
-        <button class="tool-button" type="button" :disabled="store.isAgentBusy" @click="openFilePicker">
-          上传文件
-        </button>
-        <span class="uploaded-hint">
-          {{ store.uploadedFiles.length ? `${store.uploadedFiles.length} 个输入文件` : '未上传文件' }}
-        </span>
+        <p>{{ store.selectedSkill ? skillDisplayDescription(store.selectedSkill.skillCode, store.selectedSkill.description) : '保持自动识别，系统会根据目标选择合适路径。' }}</p>
       </section>
 
       <section
@@ -267,7 +295,7 @@ watch(() => store.currentSessionId, () => {
             </option>
           </select>
         </label>
-        <p>{{ store.selectedKnowledgeBase?.description || '管理员建库后，普通用户可选择资料参与分析。' }}</p>
+        <p>{{ store.selectedKnowledgeBase?.description || '需要限定资料范围时再手动选择。' }}</p>
       </section>
 
       <section class="composer-option-group plugin-option-group">

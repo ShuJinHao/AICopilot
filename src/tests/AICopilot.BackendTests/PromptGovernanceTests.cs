@@ -96,7 +96,7 @@ public sealed class PromptGovernanceTests
     [Fact]
     public void BuiltInConversationTemplates_ShouldUseCurrentPromptVersion()
     {
-        BuiltInConversationTemplates.CurrentVersion.Should().Be(3);
+        BuiltInConversationTemplates.CurrentVersion.Should().Be(4);
         BuiltInConversationTemplates.All
             .Should()
             .OnlyContain(definition => definition.Version == BuiltInConversationTemplates.CurrentVersion);
@@ -113,6 +113,8 @@ public sealed class PromptGovernanceTests
             .And.Contain("不能伪造")
             .And.Contain("不能承诺写入")
             .And.Contain("不能承诺变更云端业务记录")
+            .And.Contain("可以通过受控只读接口读取、查询和分析 Cloud 业务数据")
+            .And.Contain("当前未接入 Cloud AiRead")
             .And.Contain("不能暴露 SQL")
             .And.Contain("不能暴露 SQL、数据库名、物理表名");
     }
@@ -133,7 +135,7 @@ public sealed class PromptGovernanceTests
         BuiltInConversationTemplates.Find("agent_executor")!.SystemPrompt
             .Should().Contain("最终执行 Agent")
             .And.Contain("运行详情")
-            .And.Contain("Cloud 业务数据默认只读");
+            .And.Contain("可以读取、查询和分析已授权只读数据");
 
         BuiltInConversationTemplates.Find("chat_answer")!.SystemPrompt
             .Should().Contain("运行详情")

@@ -1,5 +1,6 @@
 import { apiClient } from './apiClient'
 import type {
+  CloudReadonlyStatus,
   ConversationTemplateDetail,
   ConversationTemplateFormModel,
   ConversationTemplateSummary,
@@ -142,5 +143,9 @@ export const configService = {
     return await apiClient.get<SkillDefinition[]>('/aigateway/skills', {
       enabledOnly: false
     })
+  },
+
+  async getCloudReadonlyStatus() {
+    return await apiClient.get<CloudReadonlyStatus>('/aigateway/cloud-readonly/status')
   }
 }

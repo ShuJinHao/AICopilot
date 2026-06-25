@@ -17,6 +17,7 @@ import { showAiToast } from '@/composables/useAiFeedback'
 import { configService } from '@/services/configService'
 import { useConfigStore } from '@/stores/configStore'
 import type {
+  CloudReadonlyStatus,
   ConversationTemplateSummary,
   LanguageModelSummary,
   LanguageModelTestResult,
@@ -113,6 +114,9 @@ const testingModelIds = ref<Set<string>>(new Set())
 const drawerTesting = ref(false)
 const skillDefinitions = ref<SkillDefinition[]>([])
 const isLoadingSkills = ref(false)
+const cloudReadonlyStatus = ref<CloudReadonlyStatus | null>(null)
+const isLoadingCloudReadonlyStatus = ref(false)
+const advancedConfigOpen = ref(false)
 
 const activeRoutingModel = computed(
   () => store.routingModels.find((item) => item.isActive) ?? null
@@ -139,6 +143,27 @@ const fixedSlots = computed(() =>
     }
   })
 )
+const primaryModel = computed(() => fixedSlots.value.find((slot) => slot.model)?.model ?? null)
+const allSlotsReady = computed(() => fixedSlots.value.every((slot) => slot.ready))
+const isTestingAnySlotModel = computed(() =>
+  fixedSlots.value.some((slot) => isTestingModel(slot.model?.id))
+)
+const slotsUseSingleModel = computed(() => {
+  const slots = fixedSlots.value
+  if (slots.some((slot) => !slot.model)) {
+    return false
+  }
+
+  const firstModel = slots[0]?.model
+  if (!firstModel) {
+    return false
+  }
+
+  return slots.every((slot) =>
+    slot.model?.id === firstModel.id &&
+    slot.model?.provider === firstModel.provider
+  )
+})
 const sortedSkills = computed(() =>
   [...skillDefinitions.value].sort((a, b) =>
     Number(b.isBuiltIn) - Number(a.isBuiltIn) ||
@@ -198,6 +223,36 @@ function connectivityTone(status?: string | null) {
   return 'neutral'
 }
 
+function cloudReadonlyStatusLabel(status?: string | null) {
+  const labels: Record<string, string> = {
+    Disabled: '未接入',
+    Simulation: '模拟数据',
+    RealReady: '正式只读可用',
+    RealMissingBaseUrl: '缺少地址',
+    RealMissingToken: '缺少凭据',
+    RealNotAllowed: '未放行'
+  }
+  return status ? labels[status] ?? status : '未加载'
+}
+
+function cloudReadonlyStatusTone(status?: string | null) {
+  if (status === 'RealReady') return 'success'
+  if (status === 'Simulation') return 'warning'
+  if (status === 'Disabled') return 'neutral'
+  return 'danger'
+}
+
+function yesNo(value?: boolean | null) {
+  return value ? '是' : '否'
+}
+
+function temperatureLabel(value?: number | null) {
+  if (typeof value !== 'number') return '-'
+  if (value <= 0.2) return `稳定 (${value})`
+  if (value <= 0.7) return `均衡 (${value})`
+  return `创造 (${value})`
+}
+
 function listText(values: string[], empty = '未限制') {
   return values.length ? values.join(' / ') : empty
 }
@@ -209,6 +264,15 @@ function skillTone(skill: SkillDefinition) {
   return 'teal'
 }
 
+function skillDisplayDescription(skill: SkillDefinition) {
+  const code = skill.skillCode.toLowerCase()
+  if (code === 'cloud_readonly') return '查询和分析 Cloud 只读业务数据'
+  if (code.includes('data')) return '查询和分析产线数据'
+  if (code.includes('knowledge') || code.includes('rag')) return '从知识库检索相关文档'
+  if (code.includes('chat')) return '普通对话，不调用工具'
+  return skill.description || '自动选择合适能力'
+}
+
 async function refreshSkillDefinitions() {
   isLoadingSkills.value = true
   try {
@@ -216,6 +280,23 @@ async function refreshSkillDefinitions() {
   } finally {
     isLoadingSkills.value = false
   }
+}
+
+async function refreshCloudReadonlyStatus() {
+  isLoadingCloudReadonlyStatus.value = true
+  try {
+    cloudReadonlyStatus.value = await configService.getCloudReadonlyStatus()
+  } finally {
+    isLoadingCloudReadonlyStatus.value = false
+  }
+}
+
+async function refreshAllAgentSettings() {
+  await Promise.all([
+    store.refreshAgentSlots(),
+    refreshSkillDefinitions(),
+    refreshCloudReadonlyStatus()
+  ])
 }
 
 function promptLength(template?: ConversationTemplateSummary | null) {
@@ -305,6 +386,58 @@ async function testSlotModel(model?: LanguageModelSummary | null) {
   }
 }
 
+async function testAllSlotModels() {
+  const slots = fixedSlots.value
+  const modelIds = new Set(slots.map((slot) => slot.model?.id).filter(Boolean) as string[])
+  modelIds.forEach((id) => setTestingModel(id, true))
+
+  const failures: string[] = []
+  try {
+    for (const slot of slots) {
+      if (!slot.model) {
+        failures.push(`${slot.title}未配置模型`)
+        continue
+      }
+
+      const result = await configService.testLanguageModel({ id: slot.model.id, persistResult: true })
+      if (!result.success) {
+        failures.push(`${slot.title}: ${result.error || result.message || '连接测试失败'}`)
+      }
+    }
+
+    await store.refreshLanguageModels()
+    if (failures.length) {
+      showAiToast('error', failures.join('；'))
+      return
+    }
+
+    showAiToast('success', '三个阶段连接测试均通过')
+  } finally {
+    modelIds.forEach((id) => setTestingModel(id, false))
+  }
+}
+
+function openPrimaryModelDialog() {
+  const defaultSlot = slotDefinitions.find((slot) => slot.key === 'executor') ?? slotDefinitions[0]
+  if (!defaultSlot) return
+
+  if (slotsUseSingleModel.value && primaryModel.value) {
+    openModelDialog(defaultSlot, primaryModel.value)
+    return
+  }
+
+  if (!primaryModel.value) {
+    openModelDialog(defaultSlot)
+    return
+  }
+
+  advancedConfigOpen.value = true
+}
+
+function onAdvancedConfigToggle(event: Event) {
+  advancedConfigOpen.value = (event.currentTarget as HTMLDetailsElement).open
+}
+
 function openModelDialog(slot: AgentSlotDefinition, model?: LanguageModelSummary | null) {
   if (model) {
     void store.openEditLanguageModelDialog(model.id)
@@ -351,8 +484,7 @@ async function openTemplateDialog(slot: AgentSlotDefinition, template?: Conversa
 }
 
 onMounted(() => {
-  void store.refreshAgentSlots()
-  void refreshSkillDefinitions()
+  void refreshAllAgentSettings()
 })
 </script>
 
@@ -361,16 +493,136 @@ onMounted(() => {
     <AiDataPage
       eyebrow="AI 设置"
       title="AI 配置"
-      description="固定维护意图识别、计划生成和最终执行三个能力槽位。"
+      description="先维护主模型连接和 Cloud 只读状态；三阶段模型、提示词和 Skill 边界放在高级设置。"
     >
       <template #actions>
-        <AiButton :disabled="store.isLoading" @click="store.refreshAgentSlots()">
-          <RefreshCw class="h-4 w-4" :class="{ 'animate-spin': store.isLoading }" />
+        <AiButton :disabled="store.isLoading || isLoadingSkills || isLoadingCloudReadonlyStatus" @click="refreshAllAgentSettings()">
+          <RefreshCw class="h-4 w-4" :class="{ 'animate-spin': store.isLoading || isLoadingCloudReadonlyStatus }" />
           刷新
         </AiButton>
       </template>
 
       <div v-if="store.errorMessage" class="error-banner">{{ store.errorMessage }}</div>
+
+      <div class="primary-config-grid">
+        <AiCard class="primary-model-card" tone="teal" data-testid="primary-model-config-card">
+          <header class="slot-head">
+            <div class="slot-title">
+              <Bot class="h-5 w-5" />
+              <div>
+                <h2>模型连接</h2>
+                <p>普通运维只需要确认模型可用；内部三阶段配置默认收进高级设置。</p>
+              </div>
+            </div>
+            <AiTag :tone="allSlotsReady ? 'success' : 'warning'">
+              {{ allSlotsReady ? '可用' : '需完善' }}
+            </AiTag>
+          </header>
+
+          <div v-if="slotsUseSingleModel && primaryModel" class="model-grid">
+            <div>
+              <span>服务商 / 模型</span>
+              <strong>{{ modelLabel(primaryModel) }}</strong>
+            </div>
+            <div>
+              <span>协议</span>
+              <strong>{{ protocolLabel(primaryModel.protocolType) }}</strong>
+            </div>
+            <div>
+              <span>上下文容量</span>
+              <strong>{{ primaryModel.contextWindowTokens ?? '-' }}</strong>
+            </div>
+            <div>
+              <span>回答长度</span>
+              <strong>{{ primaryModel.maxOutputTokens ?? '-' }}</strong>
+            </div>
+            <div>
+              <span>回答稳定性 / 创造性</span>
+              <strong>{{ temperatureLabel(primaryModel.temperature) }}</strong>
+            </div>
+            <div>
+              <span>连通性</span>
+              <AiTag :tone="connectivityTone(primaryModel.connectivityStatus)">
+                {{ connectivityLabel(primaryModel.connectivityStatus) }}
+              </AiTag>
+            </div>
+          </div>
+          <div v-else class="prompt-missing">
+            高级配置：各阶段使用不同模型或尚未完全配置。展开高级设置查看意图识别、计划生成和最终执行的独立槽位。
+          </div>
+
+          <div class="action-row">
+            <AiButton size="sm" @click="openPrimaryModelDialog()">
+              {{ slotsUseSingleModel && primaryModel ? '编辑模型' : '查看高级配置' }}
+            </AiButton>
+            <AiButton size="sm" variant="lime" :disabled="isTestingAnySlotModel" @click="testAllSlotModels()">
+              {{ isTestingAnySlotModel ? '测试中' : '测试连接' }}
+            </AiButton>
+            <AiButton size="sm" @click="advancedConfigOpen = true">
+              高级设置
+            </AiButton>
+          </div>
+        </AiCard>
+
+        <AiCard class="cloud-status-card" tone="blue" data-testid="cloud-readonly-status-card">
+          <header class="slot-head">
+            <div class="slot-title">
+              <Network class="h-5 w-5" />
+              <div>
+                <h2>Cloud 只读数据</h2>
+                <p>可读取和分析已授权数据，禁止新增、修改、删除、审批或触发业务流程。</p>
+              </div>
+            </div>
+            <AiTag :tone="cloudReadonlyStatusTone(cloudReadonlyStatus?.status)">
+              {{ cloudReadonlyStatusLabel(cloudReadonlyStatus?.status) }}
+            </AiTag>
+          </header>
+
+          <p class="cloud-status-message">
+            {{ cloudReadonlyStatus?.message || '正在读取 Cloud 只读配置状态。' }}
+          </p>
+
+          <div class="model-grid">
+            <div>
+              <span>模式</span>
+              <strong>{{ cloudReadonlyStatus?.mode || '-' }}</strong>
+            </div>
+            <div>
+              <span>状态</span>
+              <strong>{{ cloudReadonlyStatusLabel(cloudReadonlyStatus?.status) }}</strong>
+            </div>
+            <div>
+              <span>BaseUrl 已配置</span>
+              <strong>{{ yesNo(cloudReadonlyStatus?.baseUrlConfigured) }}</strong>
+            </div>
+            <div>
+              <span>凭据已配置</span>
+              <strong>{{ yesNo(cloudReadonlyStatus?.tokenConfigured) }}</strong>
+            </div>
+            <div>
+              <span>正式只读放行</span>
+              <strong>{{ yesNo(cloudReadonlyStatus?.productionReadAllowed) }}</strong>
+            </div>
+          </div>
+
+          <div class="action-row">
+            <AiButton size="sm" :disabled="isLoadingCloudReadonlyStatus" @click="refreshCloudReadonlyStatus()">
+              <RefreshCw class="h-4 w-4" :class="{ 'animate-spin': isLoadingCloudReadonlyStatus }" />
+              刷新状态
+            </AiButton>
+          </div>
+        </AiCard>
+      </div>
+
+      <details class="advanced-config-fold" :open="advancedConfigOpen" @toggle="onAdvancedConfigToggle">
+        <summary>
+          <span>高级设置</span>
+          <small>三阶段模型、System Prompt、Skill 工具边界</small>
+        </summary>
+        <div class="advanced-config-body">
+          <div v-if="!slotsUseSingleModel" class="advanced-config-note">
+            当前三阶段模型不完全一致，系统会保留独立配置。只有三个阶段的 modelId 和 provider 全部一致时，主界面才合并为单模型卡片。
+          </div>
 
       <div class="slot-grid">
         <AiCard
@@ -520,7 +772,7 @@ onMounted(() => {
                 {{ skill.isEnabled ? skill.riskLevel : '停用' }}
               </AiTag>
             </header>
-            <p>{{ skill.description }}</p>
+            <p>{{ skillDisplayDescription(skill) }}</p>
             <div class="skill-meta-grid">
               <div>
                 <span>数据源</span>
@@ -550,6 +802,8 @@ onMounted(() => {
           </AiCard>
         </div>
       </section>
+        </div>
+      </details>
     </AiDataPage>
 
     <AiDrawer v-model="store.dialogStates.languageModel" title="模型槽位" width="620px">
@@ -651,6 +905,77 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.primary-config-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(340px, 0.9fr);
+  gap: 16px;
+}
+
+.primary-model-card,
+.cloud-status-card {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+}
+
+.cloud-status-message {
+  margin: 0;
+  color: var(--ai-text-muted);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.7;
+}
+
+.advanced-config-fold {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.64);
+  box-shadow: var(--ai-shadow-xs);
+}
+
+.advanced-config-fold > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 54px;
+  cursor: pointer;
+  padding: 0 16px;
+  color: var(--ai-text);
+  font-weight: 950;
+  list-style: none;
+}
+
+.advanced-config-fold > summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced-config-fold > summary small {
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.advanced-config-body {
+  display: grid;
+  gap: 16px;
+  padding: 0 14px 14px;
+}
+
+.advanced-config-note {
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: rgba(255, 251, 235, 0.84);
+  color: #92400e;
+  font-size: 13px;
+  font-weight: 850;
+  line-height: 1.6;
+}
+
 .slot-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -961,6 +1286,7 @@ onMounted(() => {
 }
 
 @media (max-width: 1240px) {
+  .primary-config-grid,
   .slot-grid,
   .skill-grid {
     grid-template-columns: 1fr;
@@ -978,6 +1304,7 @@ onMounted(() => {
   .slot-head,
   .skill-section-head,
   .section-title,
+  .advanced-config-fold > summary,
   .form-row {
     align-items: flex-start;
     flex-direction: column;

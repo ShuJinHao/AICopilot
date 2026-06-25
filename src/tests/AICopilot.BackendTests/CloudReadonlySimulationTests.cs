@@ -1,5 +1,6 @@
 using System.Text.Json;
 using AICopilot.AiGatewayService.AgentTasks;
+using AICopilot.AiGatewayService.Runtime;
 using Microsoft.Extensions.Options;
 
 namespace AICopilot.BackendTests;
@@ -76,6 +77,68 @@ public sealed class CloudReadonlySimulationTests
 
         var exception = await action.Should().ThrowAsync<CloudAiReadException>();
         exception.Which.Code.Should().Be(CloudAiReadProblemCodes.NotConfigured);
+    }
+
+    [Fact]
+    public void CloudReadonlyStatus_ShouldReturnSanitizedRealReady()
+    {
+        var status = CloudReadonlyStatusEvaluator.Evaluate(
+            new CloudReadonlyOptions
+            {
+                Mode = CloudReadonlyDataSourceMode.Real,
+                Real = new CloudReadonlyRealOptions
+                {
+                    Enabled = true,
+                    AllowProductionRead = true
+                }
+            },
+            new CloudAiReadOptions
+            {
+                Enabled = true,
+                BaseUrl = "https://cloud.internal.example",
+                ServiceAccountToken = "secret-token"
+            });
+
+        status.Status.Should().Be(CloudReadonlyRuntimeStatuses.RealReady);
+        status.BaseUrlConfigured.Should().BeTrue();
+        status.TokenConfigured.Should().BeTrue();
+        status.ProductionReadAllowed.Should().BeTrue();
+        status.Message.Should().Contain("可读取和分析数据");
+
+        var serialized = JsonSerializer.Serialize(status);
+        serialized.Should().NotContain("secret-token");
+        serialized.Should().NotContain("cloud.internal.example");
+    }
+
+    [Theory]
+    [InlineData(null, "secret-token", true, CloudReadonlyRuntimeStatuses.RealMissingBaseUrl)]
+    [InlineData("https://cloud.internal.example", "", true, CloudReadonlyRuntimeStatuses.RealMissingToken)]
+    [InlineData("https://cloud.internal.example", "secret-token", false, CloudReadonlyRuntimeStatuses.RealNotAllowed)]
+    public void CloudReadonlyStatus_ShouldExposeConfigurationStateOnly(
+        string? baseUrl,
+        string token,
+        bool productionReadAllowed,
+        string expectedStatus)
+    {
+        var status = CloudReadonlyStatusEvaluator.Evaluate(
+            new CloudReadonlyOptions
+            {
+                Mode = CloudReadonlyDataSourceMode.Real,
+                Real = new CloudReadonlyRealOptions
+                {
+                    Enabled = true,
+                    AllowProductionRead = productionReadAllowed
+                }
+            },
+            new CloudAiReadOptions
+            {
+                Enabled = true,
+                BaseUrl = baseUrl ?? string.Empty,
+                ServiceAccountToken = token
+            });
+
+        status.Status.Should().Be(expectedStatus);
+        JsonSerializer.Serialize(status).Should().NotContain("secret-token");
     }
 
     private static SimulationCloudReadonlyDataProvider CreateSimulationProvider()

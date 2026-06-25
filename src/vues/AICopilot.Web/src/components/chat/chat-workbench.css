@@ -1409,6 +1409,11 @@
   background: var(--ai-surface);
 }
 
+.composer-add-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
 .composer-context-line {
   min-width: 0;
   color: var(--ai-text-muted);
@@ -1418,6 +1423,68 @@
 
 .hidden-file {
   display: none;
+}
+
+.composer-plan-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  max-width: 980px;
+  width: 100%;
+  margin: 0 auto;
+  border: 1px solid rgba(63, 111, 115, 0.16);
+  border-radius: 16px;
+  padding: 10px 12px;
+  background: rgba(248, 250, 252, 0.78);
+}
+
+.composer-plan-strip > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.composer-plan-strip strong,
+.composer-plan-strip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-plan-strip strong {
+  color: var(--ai-text);
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.composer-plan-strip span {
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.composer-advanced-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  border: 1px solid var(--ai-border);
+  border-radius: 999px;
+  padding: 0 12px;
+  background: var(--ai-surface);
+  color: var(--ai-accent);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.composer-advanced-toggle[aria-expanded='true'] {
+  border-color: rgba(63, 111, 115, 0.32);
+  background: rgba(240, 253, 250, 0.9);
 }
 
 .tool-button {
@@ -1463,8 +1530,11 @@
 
 .composer-options-panel {
   display: grid;
-  grid-template-columns: minmax(190px, 0.85fr) minmax(150px, 0.65fr) minmax(200px, 1fr) minmax(280px, 1.4fr);
+  grid-template-columns: minmax(220px, 0.95fr) minmax(220px, 1fr) minmax(300px, 1.35fr);
   gap: 10px;
+  max-width: 980px;
+  width: 100%;
+  margin: 0 auto;
   border: 1px solid var(--ai-border);
   border-radius: 18px;
   padding: 12px;
@@ -1737,6 +1807,20 @@
     align-items: stretch;
     flex-direction: column;
     padding: 10px;
+  }
+
+  .composer-plan-strip {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .composer-plan-strip strong,
+  .composer-plan-strip span {
+    white-space: normal;
+  }
+
+  .composer-advanced-toggle {
+    width: 100%;
   }
 
   .send-button {

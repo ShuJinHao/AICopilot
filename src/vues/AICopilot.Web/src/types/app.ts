@@ -20,6 +20,24 @@ export interface CloudOidcStatus {
   isEnabled: boolean
 }
 
+export type CloudReadonlyRuntimeStatus =
+  | 'Disabled'
+  | 'Simulation'
+  | 'RealReady'
+  | 'RealMissingBaseUrl'
+  | 'RealMissingToken'
+  | 'RealNotAllowed'
+  | string
+
+export interface CloudReadonlyStatus {
+  mode: string
+  status: CloudReadonlyRuntimeStatus
+  baseUrlConfigured: boolean
+  tokenConfigured: boolean
+  productionReadAllowed: boolean
+  message: string
+}
+
 export interface CurrentUserProfile {
   userId: string
   userName: string

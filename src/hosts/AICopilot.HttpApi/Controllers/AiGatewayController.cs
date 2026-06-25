@@ -112,6 +112,12 @@ public class AiGatewayController(ISender sender) : ApiControllerBase(sender)
         return ReturnResult(await Sender.Send(new GetChatRuntimeSettingsQuery()));
     }
 
+    [HttpGet("cloud-readonly/status")]
+    public async Task<IActionResult> GetCloudReadonlyStatus()
+    {
+        return ReturnResult(await Sender.Send(new GetCloudReadonlyStatusQuery()));
+    }
+
     [HttpPut("runtime-settings")]
     public async Task<IActionResult> UpdateRuntimeSettings(UpdateChatRuntimeSettingsCommand command)
     {

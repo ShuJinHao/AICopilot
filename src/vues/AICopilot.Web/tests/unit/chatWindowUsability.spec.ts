@@ -16,8 +16,9 @@ const chatEmptyStateSource = readFileSync(
 )
 
 describe('ChatWindow usability defaults', () => {
-  it('starts in plan mode', () => {
-    expect(chatComposerSource).toContain("const composerMode = ref<ComposerMode>('plan')")
+  it('starts in chat mode', () => {
+    expect(chatComposerSource).toContain("const composerMode = ref<ComposerMode>('chat')")
+    expect(chatComposerSource).toContain("composerMode.value = 'chat'")
     expect(chatComposerSource).toContain("composerPrimaryLabel = computed(() => composerMode.value === 'plan' ? '生成计划' : '发送')")
   })
 
@@ -35,13 +36,21 @@ describe('ChatWindow usability defaults', () => {
     expect(chatEmptyStateSource).toContain('需要拆解步骤时，再手动切换到计划模式')
   })
 
-  it('clears session errors and closes options when switching modes', () => {
+  it('clears session errors and closes advanced plan options when switching modes', () => {
     const start = chatComposerSource.indexOf('function setComposerMode(mode: ComposerMode)')
     const end = chatComposerSource.indexOf('function togglePluginTool', start)
     const block = chatComposerSource.slice(start, end)
 
-    expect(block).toContain('composerOptionsOpen.value = false')
+    expect(block).toContain('planAdvancedOpen.value = false')
     expect(block).toContain('store.clearCurrentSessionError()')
+  })
+
+  it('keeps Add as an attachment action and hides skill controls behind Plan advanced options', () => {
+    expect(chatComposerSource).toContain('@click="openFilePicker"')
+    expect(chatComposerSource).not.toContain('composerOptionsOpen')
+    expect(chatComposerSource).toContain("v-if=\"composerMode === 'plan' && planAdvancedOpen\"")
+    expect(chatComposerSource).toContain('aria-label="选择计划类型"')
+    expect(chatComposerSource).toContain('默认自动选择 Skill、工具和知识库')
   })
 
   it('keeps ChatWindow as an orchestration layer', () => {
