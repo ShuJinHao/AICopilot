@@ -94,6 +94,30 @@ public sealed class PromptGovernanceTests
     }
 
     [Fact]
+    public void BuiltInConversationTemplates_ShouldUseCurrentPromptVersion()
+    {
+        BuiltInConversationTemplates.CurrentVersion.Should().Be(3);
+        BuiltInConversationTemplates.All
+            .Should()
+            .OnlyContain(definition => definition.Version == BuiltInConversationTemplates.CurrentVersion);
+    }
+
+    [Fact]
+    public void BuiltInConversationTemplates_ShouldDefineChatAnswerHardConstraints()
+    {
+        var prompt = BuiltInConversationTemplates.Find("chat_answer")!.SystemPrompt;
+
+        prompt.Should().Contain("信息不足")
+            .And.Contain("未找到")
+            .And.Contain("工具不可用")
+            .And.Contain("不能伪造")
+            .And.Contain("不能承诺写入")
+            .And.Contain("不能承诺变更云端业务记录")
+            .And.Contain("不能暴露 SQL")
+            .And.Contain("不能暴露 SQL、数据库名、物理表名");
+    }
+
+    [Fact]
     public void BuiltInConversationTemplates_ShouldDefineCurrentAgentSlotPrompts()
     {
         BuiltInConversationTemplates.Find("IntentRoutingAgent")!.SystemPrompt

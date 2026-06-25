@@ -209,6 +209,18 @@ public sealed class AgentArtifactDomainTests
     }
 
     [Fact]
+    public void ChatRuntimeSettings_ShouldUseTenAnswerHistoryMessagesByDefault()
+    {
+        var settings = ChatRuntimeSettings.CreateDefault(DateTimeOffset.UtcNow);
+
+        settings.AnswerHistoryCount.Should().Be(10);
+        settings.RoutingHistoryCount.Should().Be(4);
+        settings.RagRewriteHistoryCount.Should().Be(4);
+        settings.AgentPlanningHistoryCount.Should().Be(6);
+        settings.SummaryThresholdMessages.Should().Be(20);
+    }
+
+    [Fact]
     public void UploadRecord_ShouldRecordKnowledgeBaseBindingWithoutServerPath()
     {
         var record = new UploadRecord(

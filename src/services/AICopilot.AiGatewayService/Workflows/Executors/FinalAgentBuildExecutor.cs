@@ -85,15 +85,44 @@ public class FinalAgentBuildExecutor(
         }
 
         var runtimeSettings = runtimeSettingsProvider is null
-            ? new ChatRuntimeSettingsDto(4, 2, 4, 6, 20, 24000)
+            ? new ChatRuntimeSettingsDto(4, 10, 4, 6, 20, 24000)
             : await runtimeSettingsProvider.GetAsync(ct);
         var answerHistory = await LoadAnswerHistoryAsync(
             session.Id,
             session.UserId,
             runtimeSettings.AnswerHistoryCount,
             ct);
-        var finalUserPrompt = BuildFinalUserPrompt(genContext, request.Message, answerHistory, out var hasContext);
+        var effectiveAnswerHistory = answerHistory;
+        var finalUserPrompt = BuildFinalUserPrompt(genContext, request.Message, effectiveAnswerHistory, out var hasContext);
         var tokenBudgetDecision = tokenBudgetPolicy.Evaluate(model, template, finalUserPrompt);
+        if (!tokenBudgetDecision.IsAllowed && answerHistory.Count > 0)
+        {
+            foreach (var candidateHistory in BuildHistoryBudgetFallbacks(answerHistory))
+            {
+                var candidatePrompt = BuildFinalUserPrompt(
+                    genContext,
+                    request.Message,
+                    candidateHistory,
+                    out var candidateHasContext);
+                var candidateDecision = tokenBudgetPolicy.Evaluate(model, template, candidatePrompt);
+                if (!candidateDecision.IsAllowed)
+                {
+                    continue;
+                }
+
+                logger.LogInformation(
+                    "Reduced final answer history from {OriginalCount} to {ReducedCount} messages for session {SessionId} due to token budget.",
+                    answerHistory.Count,
+                    candidateHistory.Count,
+                    request.SessionId);
+                effectiveAnswerHistory = candidateHistory;
+                finalUserPrompt = candidatePrompt;
+                tokenBudgetDecision = candidateDecision;
+                hasContext = candidateHasContext;
+                break;
+            }
+        }
+
         if (!tokenBudgetDecision.IsAllowed)
         {
             throw new AgentWorkflowException(
@@ -117,7 +146,7 @@ public class FinalAgentBuildExecutor(
                 template,
                 genContext,
                 request.Message,
-                answerHistory,
+                effectiveAnswerHistory,
                 tokenBudgetDecision));
             var executionMetadata = metadataAccessor.Snapshot();
 
@@ -173,7 +202,16 @@ public class FinalAgentBuildExecutor(
         if (!hasContext)
         {
             logger.LogDebug("No auxiliary context injected for session {SessionId}.", genContext.Request.SessionId);
-            return AppendHistoryIfNeeded(originalMessage, answerHistory);
+            var noContextPrompt = $"""
+                    请回答用户问题，并遵守以下基础回答要求：
+
+                    回答要求：
+                    {string.Join(Environment.NewLine, BuildBaseAnswerRequirements().Select((item, index) => $"{index + 1}. {item}"))}
+
+                    用户问题：
+                    {originalMessage}
+                    """;
+            return AppendHistoryIfNeeded(noContextPrompt, answerHistory);
         }
 
         var contextBuilder = new StringBuilder();
@@ -316,6 +354,23 @@ public class FinalAgentBuildExecutor(
             .ToArray() ?? [];
     }
 
+    private static IEnumerable<IReadOnlyCollection<Message>> BuildHistoryBudgetFallbacks(
+        IReadOnlyCollection<Message> answerHistory)
+    {
+        var count = answerHistory.Count;
+        if (count == 0)
+        {
+            yield break;
+        }
+
+        foreach (var targetCount in new[] { 6, 4, 2, 0 }.Where(targetCount => targetCount < count).Distinct())
+        {
+            yield return targetCount == 0
+                ? []
+                : answerHistory.TakeLast(targetCount).ToArray();
+        }
+    }
+
     private static string AppendHistoryIfNeeded(
         string prompt,
         IReadOnlyCollection<Message> answerHistory)
@@ -342,6 +397,21 @@ public class FinalAgentBuildExecutor(
         return genContext.DataAnalysisContext.Contains(
             SemanticAnalysisRunner.RecipeDataReadBoundaryMarker,
             StringComparison.Ordinal);
+    }
+
+    private static List<string> BuildBaseAnswerRequirements()
+    {
+        return
+        [
+            "尽量使用与用户相同的语言作答。",
+            "保持回答专业、简洁、面向业务。",
+            "信息不足以回答时，请明确说明信息不足，严禁编造。",
+            "没有匹配数据、知识库未命中、工具不可用或授权数据来源不可用时，请如实说明未找到或当前不可用，并说明需要用户补充什么条件。",
+            "Cloud 业务数据默认只读，只能提供观察、诊断、解释、汇总和建议，不能承诺写入、删除、补录、审批、派发、下发、控制设备、重启设备、修改参数、修改配方或变更业务状态。",
+            "如果用户提出控制、写入、下发、重启或修改 Cloud 业务数据的请求，必须明确拒绝，并说明需要人工在对应系统中执行或等待未来显式授权的 AI action API。",
+            "不得声称已经读取未提供的数据、调用未授权工具、生成不存在的文件或完成实际未完成的动作。",
+            "严禁暴露 SQL、数据库名、物理表名、视图名、sourceName、effectiveSourceName、连接字符串、密钥、内部路径或其他内部实现细节。"
+        ];
     }
 
     private static List<string> BuildRequirements(

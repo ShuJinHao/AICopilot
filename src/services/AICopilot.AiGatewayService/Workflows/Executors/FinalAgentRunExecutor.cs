@@ -20,6 +20,7 @@ public class FinalAgentRunExecutor(
     IAgentStreamRuntime chatStreamRuntime)
 {
     public const string ExecutorId = nameof(FinalAgentRunExecutor);
+    private static readonly TimeSpan ModelResponseTimeout = TimeSpan.FromSeconds(90);
 
     public async IAsyncEnumerable<ChatChunk> ExecuteAsync(
         FinalAgentContext agentContext,
@@ -31,6 +32,7 @@ public class FinalAgentRunExecutor(
         var finalAssistantText = new StringBuilder();
         AiUsageDetails? observedUsage = null;
         var grantedToolExecutions = new Dictionary<string, GrantedToolExecution>(StringComparer.Ordinal);
+        var suspendForApproval = false;
 
         var isApprovalResumption = agentContext.FunctionApprovalRequestContents.Count != 0
                                    && agentContext.ApprovalDecisions.Count != 0;
@@ -85,12 +87,16 @@ public class FinalAgentRunExecutor(
             messages.Add(new AiChatMessage(AiChatRole.User, agentContext.InputText));
         }
 
-        await foreach (var update in agentContext.Agent.RunStreamingAsync(
-                           messages,
-                           agentContext.Thread,
-                           agentContext.RunOptions,
-                           cancellationToken))
+        using var modelResponseTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        await using var updateEnumerator = agentContext.Agent.RunStreamingAsync(
+            messages,
+            agentContext.Thread,
+            agentContext.RunOptions,
+            modelResponseTimeoutCts.Token).GetAsyncEnumerator(modelResponseTimeoutCts.Token);
+
+        while (await MoveNextModelUpdateAsync(updateEnumerator, modelResponseTimeoutCts, cancellationToken))
         {
+            var update = updateEnumerator.Current;
             var safeContents = new List<AiRuntimeContent>();
             foreach (var content in update.Contents)
             {
@@ -191,6 +197,19 @@ public class FinalAgentRunExecutor(
             {
                 yield return chunk;
             }
+
+            if (!isApprovalResumption && agentContext.FunctionApprovalRequestContents.Count > 0)
+            {
+                suspendForApproval = true;
+                break;
+            }
+        }
+
+        if (suspendForApproval)
+        {
+            logger.LogInformation(
+                "Suspended final agent run for tool approval in session {SessionId}.",
+                agentContext.SessionId);
         }
 
         var usage = HasUsage(observedUsage)
@@ -308,6 +327,36 @@ public class FinalAgentRunExecutor(
                && (usage.InputTokenCount > 0
                    || usage.OutputTokenCount > 0
                    || usage.TotalTokenCount > 0);
+    }
+
+    private static async Task<bool> MoveNextModelUpdateAsync(
+        IAsyncEnumerator<RuntimeAgentUpdate> updateEnumerator,
+        CancellationTokenSource modelResponseTimeoutCts,
+        CancellationToken cancellationToken)
+    {
+        modelResponseTimeoutCts.CancelAfter(ModelResponseTimeout);
+        try
+        {
+            return await updateEnumerator
+                .MoveNextAsync()
+                .AsTask()
+                .WaitAsync(modelResponseTimeoutCts.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested
+                                                 && modelResponseTimeoutCts.IsCancellationRequested)
+        {
+            throw new AgentWorkflowException(
+                AppProblemCodes.ModelRequestTimeout,
+                $"Model provider did not produce the next response chunk within {ModelResponseTimeout.TotalSeconds:N0} seconds.",
+                "模型响应超时，请稍后重试或缩小问题范围。");
+        }
+        finally
+        {
+            if (!modelResponseTimeoutCts.IsCancellationRequested)
+            {
+                modelResponseTimeoutCts.CancelAfter(Timeout.InfiniteTimeSpan);
+            }
+        }
     }
 
     private static AiUsageDetails BuildEstimatedUsage(

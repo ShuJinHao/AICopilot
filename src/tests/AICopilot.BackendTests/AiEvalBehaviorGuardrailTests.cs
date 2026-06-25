@@ -291,6 +291,32 @@ public sealed class AiEvalBehaviorGuardrailTests
     }
 
     [Fact]
+    public void FinalPromptEval_ShouldWrapNoContextPromptWithBaseRequirements()
+    {
+        var originalMessage = "你好，帮我看看不存在的设备 DEV-404。";
+
+        var prompt = InvokeBuildFinalUserPrompt(
+            new GenerationContext
+            {
+                Request = new ChatStreamRequest(Guid.NewGuid(), originalMessage),
+                Scene = ManufacturingSceneType.DeviceAnomalyDiagnosis
+            },
+            originalMessage,
+            out var hasContext);
+
+        hasContext.Should().BeFalse();
+        prompt.Should().NotBe(originalMessage);
+        prompt.Should().Contain("请回答用户问题，并遵守以下基础回答要求");
+        prompt.Should().Contain("严禁编造");
+        prompt.Should().Contain("未找到或当前不可用");
+        prompt.Should().Contain("Cloud 业务数据默认只读");
+        prompt.Should().Contain("必须明确拒绝");
+        prompt.Should().Contain("不得声称已经读取未提供的数据");
+        prompt.Should().Contain("严禁暴露 SQL、数据库名、物理表名");
+        prompt.Should().Contain(originalMessage);
+    }
+
+    [Fact]
     public void FinalPromptEval_ShouldNotRequireSourcesWhenRagIsEmpty()
     {
         var requirements = InvokeBuildRequirements(

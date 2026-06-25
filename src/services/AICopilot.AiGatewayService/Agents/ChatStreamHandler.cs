@@ -39,7 +39,7 @@ public class ChatStreamHandler(
         {
             sessionLock = await sessionExecutionLock.AcquireAsync(request.SessionId, ct);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             yield break;
         }
@@ -60,7 +60,7 @@ public class ChatStreamHandler(
                 {
                     hasNext = await enumerator.MoveNextAsync();
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
                     yield break;
                 }

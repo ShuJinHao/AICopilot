@@ -81,7 +81,7 @@ const uiLayoutStore = useUiLayoutStore()
 
 const inputValue = ref('')
 const agentGoal = ref('')
-const composerMode = ref<ComposerMode>('plan')
+const composerMode = ref<ComposerMode>('chat')
 const composerOptionsOpen = ref(false)
 const composerAddButton = ref<HTMLElement | null>(null)
 const composerOptionsPanel = ref<HTMLElement | null>(null)
@@ -266,8 +266,7 @@ const hasInlineAgentRun = computed(() =>
     taskSteps.value.length ||
     pendingAgentApprovals.value.length ||
     taskArtifacts.value.length ||
-    store.currentWorkspace ||
-    store.errorMessage
+    store.currentWorkspace
   )
 )
 const timelineEventItems = computed(() =>
@@ -900,8 +899,8 @@ onBeforeUnmount(() => {
           <div class="empty-chat-copy">
             <Sparkles :size="24" />
             <div>
-              <h2>开始一次只读分析</h2>
-              <p>输入目标后，计划模式先给出草案；确认前不会执行 Cloud 查询、MCP 工具或 Worker。</p>
+              <h2>直接开始对话</h2>
+              <p>输入问题后我会先直接回答；需要拆解步骤时，再手动切换到计划模式。</p>
             </div>
           </div>
           <div class="suggestions">

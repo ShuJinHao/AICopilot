@@ -1,4 +1,5 @@
 ﻿using System.Runtime.CompilerServices;
+using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using AICopilot.AiGatewayService.Approvals;
@@ -12,6 +13,7 @@ using AICopilot.Services.Contracts;
 using AICopilot.Services.CrossCutting.Serialization;
 using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Repository;
+using AICopilot.SharedKernel.Result;
 
 namespace AICopilot.AiGatewayService.Agents;
 
@@ -138,13 +140,38 @@ public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequi
         string fallbackCode,
         string fallbackUserFacingMessage)
     {
-        return exception is AgentWorkflowException workflowException
-            ? CreateErrorChunk(workflowException.Code, workflowException.Detail, source, workflowException.UserFacingMessage)
-            : CreateErrorChunk(
-                fallbackCode,
-                fallbackUserFacingMessage,
+        if (exception is AgentWorkflowException workflowException)
+        {
+            return CreateErrorChunk(
+                workflowException.Code,
+                workflowException.Detail,
                 source,
-                fallbackUserFacingMessage);
+                workflowException.UserFacingMessage);
+        }
+
+        if (exception is TimeoutException or TaskCanceledException or OperationCanceledException)
+        {
+            return CreateErrorChunk(
+                AppProblemCodes.ModelRequestTimeout,
+                "Model provider did not return a response before the configured timeout.",
+                source,
+                "模型响应超时，请稍后重试或缩小问题范围。");
+        }
+
+        if (exception is HttpRequestException)
+        {
+            return CreateErrorChunk(
+                AppProblemCodes.ModelProviderUnavailable,
+                "Model provider request failed before a response could be completed.",
+                source,
+                "模型服务暂时不可用，请稍后重试或联系管理员检查模型网络。");
+        }
+
+        return CreateErrorChunk(
+            fallbackCode,
+            fallbackUserFacingMessage,
+            source,
+            fallbackUserFacingMessage);
     }
 
     public static ChatChunk CreateErrorChunk(

@@ -12,7 +12,7 @@ public sealed record BuiltInConversationTemplateDefinition(
 
 public static class BuiltInConversationTemplates
 {
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
 
     public static readonly IReadOnlyList<BuiltInConversationTemplateDefinition> All =
     [
@@ -44,11 +44,12 @@ public static class BuiltInConversationTemplates
             ConversationTemplateScope.ChatAnswer,
             CurrentVersion,
             """
-            你是 A助理。请用清晰、直接、可执行的方式回答用户问题。
-            默认优先输出结论、依据和下一步建议；模型、意图、工具调用、工具参数和中间步骤属于运行详情，除非用户要求或系统以详情卡展示，否则不要摊开。
-            如果问题需要工具、知识库、上传文件或只读数据源支持，应说明需要对应数据或工具。
-            不确定的信息必须说明不确定，不能伪造来源、结果或文件。
-            Cloud 业务数据边界是只读分析，不能承诺变更云端业务记录。
+            你是 A助理。请用与用户相同的语言，清晰、直接、专业地回答。
+            默认输出结论、依据和下一步建议；模型、意图、工具调用、工具参数和中间步骤属于运行详情，除非用户要求或系统以详情卡展示，否则不要摊开。
+            信息不足、查询为空、知识库未命中、工具不可用、上传文件不存在或数据来源不可用时，应说明未找到、当前不可用或需要补充的条件，不能伪造来源、结果、文件或已经完成的动作。
+            Cloud 业务数据边界是只读分析，只能做观察、诊断、解释、汇总和建议；不能承诺变更云端业务记录，不能承诺写入、删除、补录、审批、派发、下发、控制设备、重启设备、修改参数、修改配方或变更业务状态。
+            不能暴露 SQL、数据库名、物理表名、视图名、sourceName、effectiveSourceName、连接字符串、密钥、内部路径或其他内部实现细节。
+            如果用户要求越过只读边界或执行受限动作，应明确拒绝，并说明只能提供分析和人工操作建议。
             """),
         new(
             "title_generation",

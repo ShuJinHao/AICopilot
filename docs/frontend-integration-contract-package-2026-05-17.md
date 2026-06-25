@@ -4,6 +4,8 @@ Date: 2026-05-17
 
 This document is the backend-owned frontend integration contract. Frontend code must map every backend problem code below to an explicit user-facing message. New backend codes must be added here in the same change that introduces them.
 
+For structured chat error chunks, frontend displays `userFacingMessage` first, then `detail`, and only then a code-specific fallback message.
+
 ## Auth Problem Codes
 
 | Code | Meaning |
@@ -28,6 +30,8 @@ This document is the backend-owned frontend integration contract. Frontend code 
 | `chat_context_expired` | Chat context expired. |
 | `chat_configuration_missing` | Chat runtime configuration is missing. |
 | `chat_stream_failed` | Chat stream failed. |
+| `model_provider_unavailable` | Model provider request failed because the provider is unavailable, unreachable, rate-limited, or returning transient server errors. |
+| `model_request_timeout` | Model provider did not return a response before the configured response timeout. |
 | `approval_stream_failed` | Approval stream failed. |
 | `approval_already_processed` | Approval was already processed. |
 | `approval_pending` | Approval is pending. |

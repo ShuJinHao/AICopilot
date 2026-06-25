@@ -52,7 +52,7 @@ public sealed class ChatRuntimeSettings : BaseEntity<ChatRuntimeSettingsId>, IAg
     {
         return new ChatRuntimeSettings(
             routingHistoryCount: 4,
-            answerHistoryCount: 2,
+            answerHistoryCount: 10,
             ragRewriteHistoryCount: 4,
             agentPlanningHistoryCount: 6,
             summaryThresholdMessages: 20,

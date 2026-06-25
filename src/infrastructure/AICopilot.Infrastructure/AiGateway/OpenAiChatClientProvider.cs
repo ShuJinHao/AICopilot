@@ -32,6 +32,7 @@ public sealed class OpenAiChatClientProvider(
             new OpenAIClientOptions
             {
                 Endpoint = new Uri(model.BaseUrl),
+                RetryPolicy = new ClientRetryPolicy(0),
                 Transport = new HttpClientPipelineTransport(httpClient)
             });
 

@@ -291,4 +291,32 @@ describe('chunkReducer', () => {
     ).toBe('approval_pending')
     expect(getErrorCode({ source: 'executor', type: ChunkType.Error, content: 'not-json' })).toBeNull()
   })
+
+  it('shows backend user-facing message from error chunks', () => {
+    const message = createMessage()
+    const callbacks = {
+      setSessionError: vi.fn(),
+      onApprovalChunk: vi.fn()
+    }
+
+    processChunk(
+      message,
+      {
+        source: 'ChatStreamHandler',
+        type: ChunkType.Error,
+        content: JSON.stringify({
+          code: 'model_request_timeout',
+          detail: 'Model provider did not return in time.',
+          userFacingMessage: '模型这次响应超时，请稍后重试。'
+        })
+      },
+      callbacks
+    )
+
+    expect(message.chunks).toContainEqual(expect.objectContaining({
+      type: ChunkType.Text,
+      content: '模型这次响应超时，请稍后重试。'
+    }))
+    expect(callbacks.setSessionError).toHaveBeenCalledWith('session-1', '模型这次响应超时，请稍后重试。')
+  })
 })

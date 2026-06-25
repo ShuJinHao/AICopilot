@@ -129,6 +129,10 @@ export function resolveChatErrorMessage(payload: ChatErrorPayload) {
       return userFacingMessage ?? '当前对话配置不可用，请检查模型和模板配置。'
     case 'token_budget_exceeded':
       return userFacingMessage ?? '当前上下文过长，请新建会话后重试。'
+    case 'model_provider_unavailable':
+      return userFacingMessage ?? '模型服务暂时不可用，请稍后重试或联系管理员检查模型网络。'
+    case 'model_request_timeout':
+      return userFacingMessage ?? '模型响应超时，请稍后重试或缩小问题范围。'
     default:
       return userFacingMessage ?? '请求失败，请稍后重试。'
   }

@@ -62,6 +62,13 @@ describe('chatErrorStore', () => {
     ).toBe('后端返回的真实失败原因')
   })
 
+  it('has explicit messages for model provider failures', () => {
+    expect(resolveChatErrorMessage({ code: 'model_provider_unavailable' }))
+      .toBe('模型服务暂时不可用，请稍后重试或联系管理员检查模型网络。')
+    expect(resolveChatErrorMessage({ code: 'model_request_timeout' }))
+      .toBe('模型响应超时，请稍后重试或缩小问题范围。')
+  })
+
   it('extracts ProblemDetails and ASP.NET validation errors from ApiError details', () => {
     expect(
       toFriendlyMessage(new ApiError('API Error: 400', 400, {
