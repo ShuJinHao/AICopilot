@@ -80,7 +80,7 @@ public sealed class GetToolCatalogQueryHandler(
         return Result.Success(new ToolRegistryCatalogDto(
             catalog.Value.Version,
             catalog.Value.AvailableToolCount,
-            MockMcpOnly: true,
+            PlannerToolCatalogMetadata.IsMockMcpOnly(catalog.Value.Tools),
             riskSummary,
             catalog.Value.Tools));
     }

@@ -225,7 +225,37 @@ describe('chunkReducer', () => {
 
     expect(callbacks.setSessionError).toHaveBeenCalledWith(
       'session-1',
-      'Planner model is not configured. 请先配置模型。'
+      '规划模型不可用，请检查模型配置。'
+    )
+  })
+
+  it('uses a safe fallback for unknown plan draft failures', () => {
+    const message = createMessage()
+    const callbacks = {
+      setSessionError: vi.fn(),
+      onApprovalChunk: vi.fn()
+    }
+
+    processChunk(
+      message,
+      {
+        source: 'PlanAgentTaskStreamHandler',
+        type: ChunkType.AgentEvent,
+        content: JSON.stringify({
+          stage: 'plan_draft_failed',
+          code: 'unknown_planner_failure',
+          detail: 'Provider endpoint /internal/model failed.',
+          recoverable: true,
+          suggestedAction: '检查内部 endpoint。',
+          metadata: {}
+        })
+      },
+      callbacks
+    )
+
+    expect(callbacks.setSessionError).toHaveBeenCalledWith(
+      'session-1',
+      '计划草案生成失败，请调整目标后重试。'
     )
   })
 
@@ -318,5 +348,35 @@ describe('chunkReducer', () => {
       content: '模型这次响应超时，请稍后重试。'
     }))
     expect(callbacks.setSessionError).toHaveBeenCalledWith('session-1', '模型这次响应超时，请稍后重试。')
+  })
+
+  it('does not render raw error detail as visible text', () => {
+    const message = createMessage()
+    const callbacks = {
+      setSessionError: vi.fn(),
+      onApprovalChunk: vi.fn()
+    }
+
+    processChunk(
+      message,
+      {
+        source: 'ChatStreamHandler',
+        type: ChunkType.Error,
+        content: JSON.stringify({
+          code: 'unknown_backend_code',
+          detail: 'SQL table dbo.SecretTable failed at /internal/model.'
+        })
+      },
+      callbacks
+    )
+
+    expect(message.chunks).toContainEqual(expect.objectContaining({
+      type: ChunkType.Text,
+      content: '请求失败，请稍后重试。'
+    }))
+    expect(message.chunks).not.toContainEqual(expect.objectContaining({
+      content: expect.stringContaining('SecretTable')
+    }))
+    expect(callbacks.setSessionError).toHaveBeenCalledWith('session-1', '请求失败，请稍后重试。')
   })
 })

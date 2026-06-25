@@ -32,7 +32,7 @@ internal sealed record AgentTaskPlanDocument(
     [property: JsonPropertyName("toolCatalogVersion")] int ToolCatalogVersion = PlannerToolCatalog.CurrentVersion,
     [property: JsonPropertyName("visibleToolCount")] int VisibleToolCount = 0,
     [property: JsonPropertyName("toolRiskSummary")] IReadOnlyDictionary<string, int>? ToolRiskSummary = null,
-    [property: JsonPropertyName("mockMcpOnly")] bool MockMcpOnly = true,
+    [property: JsonPropertyName("mockMcpOnly")] bool MockMcpOnly = false,
     [property: JsonPropertyName("toolApprovalCheckpoints")] IReadOnlyCollection<string>? ToolApprovalCheckpoints = null,
     [property: JsonPropertyName("skillCode")] string? SkillCode = null,
     [property: JsonPropertyName("skillName")] string? SkillName = null,
@@ -88,7 +88,7 @@ internal sealed record AgentTaskPlanSafetySummaryDocument(
     [property: JsonPropertyName("isSimulationOnly")] bool IsSimulationOnly,
     [property: JsonPropertyName("requiresDataApproval")] bool RequiresDataApproval,
     [property: JsonPropertyName("toolRiskSummary")] IReadOnlyDictionary<string, int>? ToolRiskSummary = null,
-    [property: JsonPropertyName("mockMcpOnly")] bool MockMcpOnly = true);
+    [property: JsonPropertyName("mockMcpOnly")] bool MockMcpOnly = false);
 
 internal sealed record AgentTaskPlanDataSourceSummaryDocument(
     [property: JsonPropertyName("id")] Guid Id,

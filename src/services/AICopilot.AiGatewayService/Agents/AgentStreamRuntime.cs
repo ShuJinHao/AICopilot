@@ -2,6 +2,7 @@
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using AICopilot.AiGatewayService.Approvals;
 using AICopilot.AiGatewayService.Models;
 using AICopilot.AiGatewayService.Safety;
@@ -39,6 +40,21 @@ public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequi
 {
     private const int MaxFunctionResultPayloadBytes = 256 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly Regex SensitiveAssignmentRegex = new(
+        @"(?i)\b(api[-_ ]?key|authorization|bearer|token|secret|password|pwd|connection\s*string)\b\s*[:=]\s*[^;\s,}\]]+",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex ConnectionSegmentRegex = new(
+        @"(?i)\b(password|pwd|user id|uid|host|server|database|data source)\s*=\s*[^;]+",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex InternalPathRegex = new(
+        @"(/Users/[^\s]+|[A-Za-z]:\\[^\s]+)",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex StackTraceRegex = new(
+        @"(?m)^\s*at\s+.+\(.+\)",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex SqlStatementRegex = new(
+        @"(?is)\b(select|insert|update|delete|merge|drop|alter|create)\b.+\b(from|into|table|where|values)\b",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     public async IAsyncEnumerable<ChatChunk> CreateUpdateChunksAsync(
         RuntimeAgentUpdate update,
@@ -144,7 +160,7 @@ public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequi
         {
             return CreateErrorChunk(
                 workflowException.Code,
-                workflowException.Detail,
+                BuildSafeWorkflowDetail(workflowException.Code),
                 source,
                 workflowException.UserFacingMessage);
         }
@@ -210,8 +226,8 @@ public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequi
             new
             {
                 code,
-                detail,
-                userFacingMessage
+                detail = SanitizeErrorText(detail),
+                userFacingMessage = userFacingMessage is null ? null : SanitizeErrorText(userFacingMessage)
             }.ToJson());
     }
 
@@ -279,6 +295,86 @@ public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequi
         return onsiteConfirmed
             ? $"[审批通过] {toolName}（已再次确认现场有人在岗）"
             : $"[审批通过] {toolName}";
+    }
+
+    private static string SanitizeErrorText(string detail)
+    {
+        if (string.IsNullOrWhiteSpace(detail))
+        {
+            return string.Empty;
+        }
+
+        var sanitized = detail.Trim();
+        if (StackTraceRegex.IsMatch(sanitized))
+        {
+            return "错误详情包含内部堆栈信息，已按安全策略隐藏。";
+        }
+
+        if (SqlStatementRegex.IsMatch(sanitized))
+        {
+            return "错误详情包含内部查询信息，已按安全策略隐藏。";
+        }
+
+        sanitized = SensitiveAssignmentRegex.Replace(sanitized, match =>
+        {
+            var separatorIndex = match.Value.IndexOfAny([':', '=']);
+            return separatorIndex < 0
+                ? "[redacted]"
+                : $"{match.Value[..(separatorIndex + 1)]}[redacted]";
+        });
+        sanitized = ConnectionSegmentRegex.Replace(sanitized, match =>
+        {
+            var separatorIndex = match.Value.IndexOf('=');
+            return separatorIndex < 0
+                ? "[redacted]"
+                : $"{match.Value[..(separatorIndex + 1)]}[redacted]";
+        });
+        sanitized = InternalPathRegex.Replace(sanitized, "[internal-path]");
+
+        return sanitized.Length <= 1000
+            ? sanitized
+            : $"{sanitized[..1000]}...";
+    }
+
+    private static string BuildSafeWorkflowDetail(string code)
+    {
+        return code switch
+        {
+            AppProblemCodes.ChatConfigurationMissing =>
+                "错误码 chat_configuration_missing：对话运行配置不可用，请管理员检查模板、模型或密钥配置。",
+            AppProblemCodes.TokenBudgetExceeded =>
+                "错误码 token_budget_exceeded：当前输入上下文超过模型 token 预算，请缩小问题范围或减少历史内容。",
+            AppProblemCodes.ModelRequestTimeout =>
+                "错误码 model_request_timeout：模型调用超过配置的超时时间。",
+            AppProblemCodes.ModelProviderUnavailable =>
+                "错误码 model_provider_unavailable：模型服务暂时不可用或网络请求未完成。",
+            AppProblemCodes.ChatContextExpired =>
+                "错误码 chat_context_expired：待恢复的对话上下文已过期，请重新发起请求。",
+            AppProblemCodes.ApprovalAlreadyProcessed =>
+                "错误码 approval_already_processed：该审批已处理，不能重复提交。",
+            AppProblemCodes.ApprovalPending =>
+                "错误码 approval_pending：当前会话已有等待处理的审批。",
+            AppProblemCodes.ControlActionBlocked =>
+                "错误码 control_action_blocked：该动作被 AICopilot 只读安全边界拦截。",
+            AppProblemCodes.CapabilityNotAllowed =>
+                "错误码 capability_not_allowed：当前能力不允许执行该操作。",
+            AppProblemCodes.AgentPlanInvalid =>
+                "错误码 agent_plan_invalid：计划内容未通过校验。",
+            AppProblemCodes.AgentPlanToolDenied =>
+                "错误码 agent_plan_tool_denied：计划引用了当前 Skill 或安全策略不允许的工具。",
+            AppProblemCodes.AgentPlanSchemaInvalid =>
+                "错误码 agent_plan_schema_invalid：工具输入未通过 schema 校验。",
+            AppProblemCodes.ToolBlocked =>
+                "错误码 tool_blocked：该工具被安全策略阻止执行。",
+            AppProblemCodes.ToolExecutionNotFound =>
+                "错误码 tool_execution_not_found：未找到可执行的工具运行时。",
+            AppProblemCodes.ToolExecutionTimeout =>
+                "错误码 tool_execution_timeout：工具执行超过配置的超时时间。",
+            AppProblemCodes.CloudReadonlyIntentUnsupported =>
+                "错误码 cloud_readonly_intent_unsupported：当前 Cloud 只读接口不支持该查询意图。",
+            _ =>
+                $"错误码 {code}：请求未能完成，详情已按安全策略隐藏。"
+        };
     }
 
     private static string LimitFunctionResultPayload(string payload)

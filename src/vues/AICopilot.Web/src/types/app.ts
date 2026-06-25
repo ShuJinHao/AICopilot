@@ -242,7 +242,6 @@ export interface AgentPlannerToolSummary {
 export interface ToolRegistryCatalog {
   version: number
   availableToolCount: number
-  mockMcpOnly: boolean
   riskSummary: Record<string, number>
   tools: AgentPlannerToolSummary[]
 }

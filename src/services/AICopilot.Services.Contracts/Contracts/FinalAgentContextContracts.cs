@@ -44,6 +44,10 @@ public sealed record StoredToolApprovalRequest(
     string? TargetName = null,
     string? RuntimeName = null);
 
+public sealed record StoredFinalAgentInputMessage(
+    string Role,
+    string Text);
+
 public sealed record StoredFinalAgentContext(
     Guid SessionId,
     string InputText,
@@ -57,6 +61,8 @@ public sealed record StoredFinalAgentContext(
     IReadOnlyList<StoredToolApprovalRequest> PendingApprovals)
 {
     public ChatExecutionMetadataSnapshot ExecutionMetadata { get; init; } = new();
+
+    public IReadOnlyList<StoredFinalAgentInputMessage> InputMessages { get; init; } = [];
 }
 
 public interface IFinalAgentContextStore

@@ -108,6 +108,13 @@ Cloud AiRead 契约：
 - AICopilot 不读取未批准的配方主数据、配方详情或配方版本。
 - Simulation 只能用于联调和演示，不能作为生产验收结果。
 
+AiGateway 会话并发锁：
+
+- 生产组合根必须使用 PostgreSQL advisory `ISessionExecutionLock`，依赖 `ConnectionStrings:ai-copilot`。
+- `InMemorySessionExecutionLock` 只允许作为服务层测试/本地 fallback，不得成为生产或多实例部署的实际锁实现。
+- 多实例部署前必须先验证每个 `AICOPILOT_HTTPAPI_IMAGE` 实例都走 PostgreSQL advisory lock；如果后续改为其他分布式锁，必须同步更新部署文档和并发验收用例。
+- 同一 session 的并发 Chat、Plan、Approval 请求必须被串行化或返回明确锁错误，不允许并发执行同一会话工作流。
+
 ## 4. 构建与发布
 
 标准流程：

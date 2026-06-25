@@ -17,13 +17,13 @@ describe('chatErrorStore', () => {
     ).toBe('custom approval message')
   })
 
-  it('keeps planner and worker diagnostics visible', () => {
+  it('keeps known error codes visible without exposing raw detail', () => {
     expect(
       resolveChatErrorMessage({
         code: 'agent_plan_tool_denied',
         detail: 'toolCode query_device_logs is not allowed by skill general_report.'
       })
-    ).toBe('toolCode query_device_logs is not allowed by skill general_report.')
+    ).toBe('计划包含当前 Skill 不允许的工具，请调整 Skill 或重新生成计划。')
 
     expect(
       resolveChatErrorMessage({
@@ -53,13 +53,13 @@ describe('chatErrorStore', () => {
     expect(store.errorMessage).toBe('')
   })
 
-  it('uses backend detail for unknown error codes', () => {
+  it('does not expose backend detail for unknown error codes', () => {
     expect(
       resolveChatErrorMessage({
         code: 'unknown_backend_code',
         detail: '后端返回的真实失败原因'
       })
-    ).toBe('后端返回的真实失败原因')
+    ).toBe('请求失败，请稍后重试。')
   })
 
   it('has explicit messages for model provider failures', () => {
@@ -84,6 +84,12 @@ describe('chatErrorStore', () => {
       toFriendlyMessage(new ApiError('API Error: 400', 400, {
         detail: 'Planner model is not configured.'
       }))
-    ).toBe('Planner model is not configured.')
+    ).toBe('请求失败，请稍后重试。')
+  })
+
+  it('does not expose raw ApiError messages', () => {
+    expect(
+      toFriendlyMessage(new ApiError('Provider endpoint /internal/model failed', 500, null))
+    ).toBe('请求失败，请稍后重试。')
   })
 })

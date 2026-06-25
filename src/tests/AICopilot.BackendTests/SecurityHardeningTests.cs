@@ -375,6 +375,34 @@ public sealed class SecurityHardeningTests
     }
 
     [Fact]
+    public void StreamHandlers_ShouldAuthorizeSessionBeforeLockAndPersistence()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var handlerFiles = new[]
+        {
+            Path.Combine(solutionRoot, "src", "services", "AICopilot.AiGatewayService", "Agents", "ChatStreamHandler.cs"),
+            Path.Combine(solutionRoot, "src", "services", "AICopilot.AiGatewayService", "Agents", "ApprovalDecisionStreamHandler.cs"),
+            Path.Combine(solutionRoot, "src", "services", "AICopilot.AiGatewayService", "AgentTasks", "PlanAgentTaskStreamHandler.cs")
+        };
+
+        foreach (var handlerFile in handlerFiles)
+        {
+            var source = File.ReadAllText(handlerFile);
+            var loadSessionIndex = source.IndexOf("chatStreamRuntime.LoadSessionAsync", StringComparison.Ordinal);
+            var userCheckIndex = source.IndexOf("currentUser.Id != session.UserId", StringComparison.Ordinal);
+            var acquireLockIndex = source.IndexOf("sessionExecutionLock.AcquireAsync(request.SessionId", StringComparison.Ordinal);
+            var appendIndex = source.IndexOf("messagePersistenceService.AppendBatchAsync(request.SessionId", StringComparison.Ordinal);
+
+            loadSessionIndex.Should().BeGreaterThanOrEqualTo(0, handlerFile);
+            userCheckIndex.Should().BeGreaterThan(loadSessionIndex, handlerFile);
+            acquireLockIndex.Should().BeGreaterThan(userCheckIndex, handlerFile);
+            appendIndex.Should().BeGreaterThan(acquireLockIndex, handlerFile);
+            source.Should().Contain("if (pendingMessages.Count > 0)");
+            source.Should().Contain("yield return earlyErrorChunk;");
+        }
+    }
+
+    [Fact]
     public void FrontendConfig_ShouldKeepInternalConfigDomainsButExposeOnlyAgentSlots()
     {
         var solutionRoot = FindSolutionRoot();

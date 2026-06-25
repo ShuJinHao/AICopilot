@@ -89,6 +89,10 @@ public sealed class FreeFormDbaAnalysisRunner(
             logger.LogWarning(ex, "执行数据分析意图时命中安全限制。Database: {DbName}", dbName);
             return $"[系统提示]: 查询数据库 {dbName} 的请求被系统安全策略拒绝。";
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "执行数据分析意图失败。Database: {DbName}", dbName);

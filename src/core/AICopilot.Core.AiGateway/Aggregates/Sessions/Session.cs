@@ -108,6 +108,14 @@ public class Session : BaseEntity<SessionId>, IAggregateRoot<SessionId>
         OnsiteConfirmationExpiresAt = null;
     }
 
+    public void EnsureMessageCountAtLeast(int messageCount)
+    {
+        if (messageCount > MessageCount)
+        {
+            MessageCount = messageCount;
+        }
+    }
+
     public bool HasValidOnsiteAttestation(DateTimeOffset nowUtc)
     {
         return OnsiteConfirmedAt.HasValue

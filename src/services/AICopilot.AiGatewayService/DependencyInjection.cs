@@ -15,6 +15,7 @@ using AICopilot.AiGatewayService.Workspaces;
 using AICopilot.AiGatewayService.Workflows;
 using AICopilot.AiGatewayService.Workflows.Executors;
 using AICopilot.Services.Contracts;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
@@ -32,6 +33,10 @@ public static class DependencyInjection
             builder.Configuration.GetSection(CloudAiReadOptions.SectionName));
         builder.Services.Configure<AgentRunQueueOptions>(
             builder.Configuration.GetSection(AgentRunQueueOptions.SectionName));
+        builder.Services.Configure<MockMcpOptions>(
+            builder.Configuration.GetSection(MockMcpOptions.SectionName));
+        builder.Services.Configure<AgentModelCallTimeoutOptions>(
+            builder.Configuration.GetSection(AgentModelCallTimeoutOptions.SectionName));
 
         builder.Services.AddMediatR(cfg =>
         {
@@ -56,7 +61,15 @@ public static class DependencyInjection
         builder.Services.AddScoped<ICloudReadonlyDataProvider, RealCloudReadonlyDataProvider>();
         builder.Services.AddScoped<ICloudReadonlyDataProviderResolver, CloudReadonlyDataProviderResolver>();
         builder.Services.AddScoped<ICloudReadonlyAgentToolExecutor, CloudReadonlyAgentToolExecutor>();
-        builder.Services.AddScoped<IAgentToolExecutor, MockMcpAgentToolExecutor>();
+        var mockMcpEnabled = builder.Environment.IsDevelopment() &&
+                             builder.Configuration
+                                 .GetSection(MockMcpOptions.SectionName)
+                                 .Get<MockMcpOptions>() is { Enabled: true };
+        if (mockMcpEnabled)
+        {
+            builder.Services.AddScoped<IAgentToolExecutor, MockMcpAgentToolExecutor>();
+        }
+
         builder.Services.AddScoped<IAgentToolExecutor, McpAgentToolExecutor>();
         builder.Services.AddScoped<IMcpToolRegistryReadService, McpToolRegistryReadService>();
         builder.Services.AddScoped<ToolRegistryGuard>();

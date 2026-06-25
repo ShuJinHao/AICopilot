@@ -50,6 +50,23 @@ public class CreateSessionCommandHandler(
 
             templateId = template.Id;
         }
+        else
+        {
+            var template = await templateRepository.FirstOrDefaultAsync(
+                new ConversationTemplateByIdSpec(new ConversationTemplateId(templateId.Value)),
+                ct);
+            if (template is null)
+            {
+                return Result.NotFound();
+            }
+
+            if (!template.IsEnabled)
+            {
+                return Result.Failure(new ApiProblemDescriptor(
+                    AppProblemCodes.ChatConfigurationMissing,
+                    "The selected conversation template is disabled."));
+            }
+        }
 
         var session = new Session(userId, new ConversationTemplateId(templateId.Value));
         repo.Add(session);

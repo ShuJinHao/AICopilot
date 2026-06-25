@@ -196,7 +196,6 @@ public sealed class AgentArtifactDomainTests
             answerHistoryCount: -1,
             ragRewriteHistoryCount: 100,
             agentPlanningHistoryCount: 100,
-            summaryThresholdMessages: 1,
             contextTokenLimit: 100,
             DateTimeOffset.UtcNow);
 
@@ -204,7 +203,6 @@ public sealed class AgentArtifactDomainTests
         settings.AnswerHistoryCount.Should().Be(0);
         settings.RagRewriteHistoryCount.Should().Be(20);
         settings.AgentPlanningHistoryCount.Should().Be(30);
-        settings.SummaryThresholdMessages.Should().Be(5);
         settings.ContextTokenLimit.Should().Be(4000);
     }
 
@@ -217,7 +215,6 @@ public sealed class AgentArtifactDomainTests
         settings.RoutingHistoryCount.Should().Be(4);
         settings.RagRewriteHistoryCount.Should().Be(4);
         settings.AgentPlanningHistoryCount.Should().Be(6);
-        settings.SummaryThresholdMessages.Should().Be(20);
     }
 
     [Fact]

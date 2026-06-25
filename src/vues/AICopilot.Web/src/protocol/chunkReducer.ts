@@ -20,6 +20,7 @@ import type {
 import { resolveChatErrorMessage } from '@/stores/chatErrorStore'
 import { stripThinkingTags } from './modelOutputSanitizer'
 import { parseWidgetFromTextChunk } from './widgetPayloadParser'
+import { formatPlanDraftFailure } from './agentEventDisplay'
 
 export interface ChunkReducerCallbacks {
   setSessionError: (sessionId: string, message: string) => void
@@ -223,10 +224,7 @@ function addAgentEventChunk(
     } as AgentEventChunk)
 
     if (event.stage === 'plan_draft_failed') {
-      const detail = event.suggestedAction
-        ? `${event.detail} ${event.suggestedAction}`
-        : event.detail
-      callbacks.setSessionError(message.sessionId, detail)
+      callbacks.setSessionError(message.sessionId, formatPlanDraftFailure(event))
     }
   } catch {
     callbacks.setSessionError(message.sessionId, '运行状态事件解析失败。')
@@ -253,7 +251,7 @@ function addErrorChunk(
 ) {
   try {
     const payload = JSON.parse(chunk.content) as ChatErrorPayload
-    const userFacingMessage = payload.userFacingMessage?.trim() || payload.detail?.trim()
+    const userFacingMessage = resolveChatErrorMessage(payload)
 
     if (userFacingMessage) {
       addTextChunk(message, {

@@ -82,7 +82,7 @@ async function sendEventStream(
       if (error instanceof ApiError) {
         const problem = getProblemDetails(error.details)
         if (problem?.detail) {
-          callbacks.onError(new ApiError(problem.detail, error.status, error.details))
+          callbacks.onError(new ApiError('AICopilot stream request failed.', error.status, error.details))
           return
         }
       }

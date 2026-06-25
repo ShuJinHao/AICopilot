@@ -67,7 +67,13 @@ public sealed class FinalAgentContextSerializer(
             serializedThread,
             pendingApprovals)
         {
-            ExecutionMetadata = agentContext.ExecutionMetadata
+            ExecutionMetadata = agentContext.ExecutionMetadata,
+            InputMessages = agentContext.InputMessages
+                .Where(message => !string.IsNullOrWhiteSpace(message.Text))
+                .Select(message => new StoredFinalAgentInputMessage(
+                    message.Role.ToString(),
+                    message.Text!))
+                .ToArray()
         };
     }
 
@@ -120,6 +126,7 @@ public sealed class FinalAgentContextSerializer(
                 ScopedAgent = scopedAgent,
                 Thread = thread,
                 InputText = storedContext.InputText,
+                InputMessages = RestoreInputMessages(storedContext),
                 RunOptions = runOptions,
                 SessionId = storedContext.SessionId,
                 EstimatedInputTokens = storedContext.EstimatedInputTokens,
@@ -208,5 +215,25 @@ public sealed class FinalAgentContextSerializer(
                 targetType,
                 storedApproval.TargetName,
                 storedApproval.ToolName));
+    }
+
+    private static IReadOnlyList<AiChatMessage> RestoreInputMessages(StoredFinalAgentContext storedContext)
+    {
+        if (storedContext.InputMessages.Count == 0)
+        {
+            return [new AiChatMessage(AiChatRole.User, storedContext.InputText)];
+        }
+
+        return storedContext.InputMessages
+            .Where(message => !string.IsNullOrWhiteSpace(message.Text))
+            .Select(message => new AiChatMessage(ParseRole(message.Role), message.Text))
+            .ToArray();
+    }
+
+    private static AiChatRole ParseRole(string role)
+    {
+        return Enum.TryParse<AiChatRole>(role, ignoreCase: true, out var parsed)
+            ? parsed
+            : AiChatRole.User;
     }
 }

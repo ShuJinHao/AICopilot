@@ -47,6 +47,10 @@ public class ToolsPackExecutor(
 
             return BranchResult.FromTools(tools);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception e)
         {
             logger.LogError(e, "Failed to load tool pack.");

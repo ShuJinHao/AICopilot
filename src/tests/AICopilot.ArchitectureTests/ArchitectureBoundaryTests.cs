@@ -108,12 +108,21 @@ public sealed class ArchitectureBoundaryTests
         var webRoot = Path.Combine(SolutionRoot, "src", "vues", "AICopilot.Web");
         var webRules = File.ReadAllText(Path.Combine(webRoot, "AGENTS.md"));
         var chatStore = File.ReadAllText(Path.Combine(webRoot, "src", "stores", "chatStore.ts"));
+        var agentTaskStore = File.ReadAllText(Path.Combine(webRoot, "src", "stores", "agentTaskStore.ts"));
+        var artifactWorkspaceStore = File.ReadAllText(Path.Combine(webRoot, "src", "stores", "artifactWorkspaceStore.ts"));
 
         webRules.Should().Contain("Backend Errors Are Contract Data");
         webRules.Should().Contain("Session State Must Be Scoped");
         chatStore.Should().NotContain("agentErrorMessage");
-        chatStore.Should().Contain("createReactiveSessionScopedState");
-        chatStore.Should().Contain("resetSessionScopedState");
+        chatStore.Should().Contain("agentTaskStore.reset()");
+        chatStore.Should().Contain("artifactWorkspaceStore.reset()");
+        chatStore.Should().Contain("catalogStore.resetSelections()");
+        agentTaskStore.Should().Contain("function reset()");
+        agentTaskStore.Should().Contain("agentApprovals.value = []");
+        agentTaskStore.Should().Contain("timelineEvents.value = []");
+        artifactWorkspaceStore.Should().Contain("function reset()");
+        artifactWorkspaceStore.Should().Contain("currentWorkspace.value = null");
+        artifactWorkspaceStore.Should().Contain("currentArtifactPreview.value = null");
     }
 
     [Fact]

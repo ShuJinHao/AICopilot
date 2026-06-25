@@ -202,13 +202,16 @@ public sealed class SessionPolicySemanticsTests
             [template],
             [model]);
 
-        await using var _ = await executor.ExecuteAsync(CreateGenerationContext(session.Id));
+        await using var context = await executor.ExecuteAsync(CreateGenerationContext(session.Id));
 
-        tokenBudgetPolicy.LastFinalUserPrompt.Should().NotBeNull();
-        var historyLineCount = tokenBudgetPolicy.LastFinalUserPrompt!
-            .Split(Environment.NewLine)
-            .Count(line => line.StartsWith("User: history-", StringComparison.Ordinal));
-        historyLineCount.Should().Be(10);
+        context.InputText.Should().NotContain("<recent_conversation>");
+        context.InputText.Should().NotContain("history-12");
+        var historyMessages = context.InputMessages
+            .Where(message => message.Text?.StartsWith("history-", StringComparison.Ordinal) == true)
+            .ToArray();
+        historyMessages.Should().HaveCount(10);
+        historyMessages.Should().Contain(message => message.Text == "history-12");
+        historyMessages.Should().NotContain(message => message.Text == "history-01");
         tokenBudgetPolicy.LastFinalUserPrompt.Should()
             .Contain("history-12")
             .And.NotContain("history-01");
@@ -244,7 +247,9 @@ public sealed class SessionPolicySemanticsTests
 
         tokenBudgetPolicy.EvaluateCalls.Should().BeGreaterThan(1);
         context.InputText.Should().NotContain("history-03");
-        context.InputText.Should().Contain("history-10");
+        context.InputText.Should().NotContain("history-10");
+        context.InputMessages.Select(message => message.Text).Should().NotContain("history-03");
+        context.InputMessages.Select(message => message.Text).Should().Contain("history-10");
     }
 
     [Fact]

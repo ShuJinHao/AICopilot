@@ -118,7 +118,6 @@ const knowledgeBases = [
 const toolCatalog = {
   version: 1,
   availableToolCount: 2,
-  mockMcpOnly: true,
   riskSummary: { Low: 2 },
   tools: [
     {
@@ -469,7 +468,7 @@ describe('chatStore skills', () => {
 
     expect(chatServiceMock.approveAgentTaskPlan).toHaveBeenCalledWith('task-1')
     expect(store.latestAgentTask?.status).toBe('PlanApproved')
-    expect(store.errorMessage).toBe('没有可用 DataWorker，任务尚未入队。')
+    expect(store.errorMessage).toBe('当前没有可用 DataWorker，请检查 Worker 状态。')
   })
 
   it('uses the retry endpoint for failed tasks', async () => {

@@ -131,7 +131,75 @@ const agentTask = {
   ]
 }
 
-let agentTaskState = agentTask
+function toRestoredApprovalTask(task) {
+  return {
+    ...task,
+    taskType: 'ExecutablePlan',
+    status: 'WaitingToolApproval',
+    riskLevel: 'High',
+    workspaceId: 'workspace-1',
+    workspaceCode: 'WS-SMOKE-001',
+    planJson: JSON.stringify({
+      planKind: 'ExecutablePlan',
+      isExecutable: true,
+      skillName: '设备日志分析',
+      visibleToolCount: 2,
+      capabilityGaps: [],
+      queryMode: 'CloudReadonly',
+      dataSourceSummaries: [
+        {
+          name: 'Cloud AiRead',
+          sourceMode: 'CloudReadonly',
+          sourceLabel: 'Cloud 只读'
+        }
+      ]
+    }),
+    pendingApprovalCount: 1,
+    canRun: false,
+    canRetry: true,
+    canSubmitFinalReview: false,
+    canApproveFinal: false,
+    updatedAt: now,
+    runAttemptCount: 1,
+    steps: [
+      {
+        id: 'step-1',
+        stepIndex: 1,
+        title: '读取上传数据',
+        description: '读取用户上传文件到受控工作区',
+        stepType: 'Tool',
+        status: 'Completed',
+        toolCode: 'read_uploaded_file',
+        requiresApproval: false,
+        errorMessage: null
+      },
+      {
+        id: 'step-2',
+        stepIndex: 2,
+        title: '生成 PDF 草稿',
+        description: '生成高风险正式格式草稿，需要确认后继续',
+        stepType: 'Tool',
+        status: 'WaitingApproval',
+        toolCode: 'generate_pdf',
+        requiresApproval: true,
+        errorMessage: null
+      },
+      {
+        id: 'step-3',
+        stepIndex: 3,
+        title: '生成根因分析报告',
+        description: '输出 Markdown 报告草稿',
+        stepType: 'Tool',
+        status: 'Pending',
+        toolCode: 'generate_markdown_report',
+        requiresApproval: false,
+        errorMessage: null
+      }
+    ]
+  }
+}
+
+let agentTaskState = toRestoredApprovalTask(agentTask)
 
 function toExecutablePlanTask(task) {
   return {
@@ -171,7 +239,7 @@ function toQueuedTask(task) {
 const agentApproval = {
   id: 'approval-agt-1',
   taskId: agentTask.id,
-  workspaceCode: null,
+  workspaceCode: 'WS-SMOKE-001',
   type: 'Tool',
   targetId: 'step-2',
   targetName: 'generate_pdf',
@@ -185,7 +253,7 @@ const agentApproval = {
 
 const artifactWorkspace = {
   id: 'workspace-1',
-  workspaceCode: agentTask.workspaceCode,
+  workspaceCode: 'WS-SMOKE-001',
   taskId: agentTask.id,
   status: 'ReadyForFinalize',
   files: [
@@ -256,26 +324,26 @@ const agentAuditSummary = [
   {
     id: 'audit-1',
     taskId: agentTask.id,
-    workspaceCode: agentTask.workspaceCode,
+    workspaceCode: 'WS-SMOKE-001',
     actionCode: 'Agent.Plan',
     targetType: 'AgentTask',
     targetName: agentTask.title,
     result: 'Succeeded',
     summary: '生成 Agent 计划',
     createdAt: now,
-    metadata: { taskId: agentTask.id, workspaceCode: agentTask.workspaceCode }
+    metadata: { taskId: agentTask.id, workspaceCode: 'WS-SMOKE-001' }
   },
   {
     id: 'audit-2',
     taskId: agentTask.id,
-    workspaceCode: agentTask.workspaceCode,
+    workspaceCode: 'WS-SMOKE-001',
     actionCode: 'Agent.ToolExecution',
     targetType: 'AgentStep',
     targetName: 'read_uploaded_file',
     result: 'Succeeded',
     summary: '低风险工具执行完成',
     createdAt: now,
-    metadata: { taskId: agentTask.id, workspaceCode: agentTask.workspaceCode, toolName: 'read_uploaded_file' }
+    metadata: { taskId: agentTask.id, workspaceCode: 'WS-SMOKE-001', toolName: 'read_uploaded_file' }
   }
 ]
 
@@ -715,19 +783,19 @@ const api = createServer((request, response) => {
       items: [
         {
           sequence: 3,
-          eventType: 'AgentTaskPlanCreated',
+          eventType: 'ApprovalRequested',
           createdAt: now,
           agentTaskId: agentTaskState.id,
           agentTaskTitle: agentTaskState.title,
           agentTaskGoal: agentTaskState.goal,
           agentTaskStatus: agentTaskState.status,
-          approvalRequestId: null,
-          approvalType: null,
-          approvalStatus: null,
-          approvalTargetName: null,
-          artifactWorkspaceId: null,
-          workspaceCode: null,
-          workspaceStatus: null
+          approvalRequestId: agentApproval.id,
+          approvalType: agentApproval.type,
+          approvalStatus: agentApproval.status,
+          approvalTargetName: agentApproval.targetName,
+          artifactWorkspaceId: artifactWorkspace.id,
+          workspaceCode: artifactWorkspace.workspaceCode,
+          workspaceStatus: artifactWorkspace.status
         }
       ],
       beforeSequence: 3,
@@ -738,7 +806,7 @@ const api = createServer((request, response) => {
     },
     '/api/aigateway/approval/pending': [],
     '/api/aigateway/agent/task/by-session': [agentTaskState],
-    '/api/aigateway/agent/task/task-1/approvals': [],
+    '/api/aigateway/agent/task/task-1/approvals': agentTaskState.status === 'WaitingToolApproval' ? [agentApproval] : [],
     '/api/aigateway/agent/approval/pending': [],
     '/api/aigateway/agent/task/task-1/audit-summary': agentAuditSummary,
     '/api/aigateway/workspace/WS-SMOKE-001': artifactWorkspace,

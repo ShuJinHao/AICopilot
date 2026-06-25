@@ -8,6 +8,7 @@ import { useChatStore } from '@/stores/chatStore'
 import ApprovalCard from './ApprovalCard.vue'
 import FunctionCallItem from './FunctionCallItem.vue'
 import WidgetRenderer from '../widgets/WidgetRenderer.vue'
+import { formatAgentEventDetail } from '@/protocol/agentEventDisplay'
 import type { AgentEventChunk, ApprovalChunk, ChatMessage, FunctionCallChunk, IntentChunk, WidgetChunk } from '@/types/models'
 
 const props = defineProps<{
@@ -149,7 +150,7 @@ async function reject(payload: { callId: string }, chunk: ApprovalChunk) {
             <div class="agent-event-list">
               <div v-for="(chunk, index) in agentEventChunks" :key="`${chunk.event.stage}-${index}`" class="agent-event-row">
                 <strong>{{ agentEventLabel(chunk.event.stage) }}</strong>
-                <span>{{ chunk.event.detail }}</span>
+                <span>{{ formatAgentEventDetail(chunk.event) }}</span>
               </div>
             </div>
           </section>

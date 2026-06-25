@@ -76,6 +76,10 @@ public sealed class AgentSkillRouterAutoSelector(
                 selection.Reason);
             return new AgentSkillSelection(enabledSkill.SkillCode, selection.Reason);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Agent skill router failed for session {SessionId}; returning no automatic skill selection.", sessionId);

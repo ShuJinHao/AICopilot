@@ -49,11 +49,9 @@ export function extractErrorDetail(details: unknown) {
   }
 
   const problem = details as ProblemLike
-  const directMessage =
-    toTrimmedString(problem.userFacingMessage) ??
-    toTrimmedString(problem.detail)
-  if (directMessage) {
-    return directMessage
+  const userFacingMessage = toTrimmedString(problem.userFacingMessage)
+  if (userFacingMessage) {
+    return userFacingMessage
   }
 
   const validationErrors = collectValidationErrors(problem.errors)
@@ -61,11 +59,11 @@ export function extractErrorDetail(details: unknown) {
     return validationErrors.join('；')
   }
 
-  return toTrimmedString(problem.title)
+  return null
 }
 
 export function resolveChatErrorMessage(payload: ChatErrorPayload) {
-  const userFacingMessage = payload.userFacingMessage?.trim() || payload.detail?.trim()
+  const userFacingMessage = toTrimmedString(payload.userFacingMessage)
 
   switch (payload.code) {
     case 'missing_permission':
@@ -144,7 +142,7 @@ export function toFriendlyMessage(error: unknown) {
       ? error.details as ChatErrorPayload
       : null
 
-    if (problem?.code || problem?.detail || problem?.userFacingMessage) {
+    if (problem?.code || problem?.userFacingMessage) {
       return resolveChatErrorMessage(problem)
     }
 
@@ -165,9 +163,7 @@ export function toFriendlyMessage(error: unknown) {
       return '请求过于频繁，请稍后再试。'
     }
 
-    if (typeof error.message === 'string' && error.message.trim().length > 0) {
-      return error.message
-    }
+    return '请求失败，请稍后重试。'
   }
 
   return '请求失败，请稍后重试。'

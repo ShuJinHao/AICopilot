@@ -41,10 +41,7 @@ public static class BuiltInSkillDefinitions
                 "generate_pdf",
                 "generate_pptx",
                 "generate_xlsx",
-                "finalize_artifacts",
-                "mock_mcp_health_check",
-                "mock_mcp_kpi_formula_lookup",
-                "mock_mcp_artifact_quality_check"
+                "finalize_artifacts"
             ],
             AiToolRiskLevel.High,
             "ToolApproval",
@@ -63,8 +60,7 @@ public static class BuiltInSkillDefinitions
                 "generate_markdown_report",
                 "generate_html_report",
                 "generate_xlsx",
-                "finalize_artifacts",
-                "mock_mcp_kpi_formula_lookup"
+                "finalize_artifacts"
             ],
             AiToolRiskLevel.High,
             "ToolApproval",
@@ -79,8 +75,7 @@ public static class BuiltInSkillDefinitions
                 "rag_search",
                 "generate_markdown_report",
                 "generate_html_report",
-                "finalize_artifacts",
-                "mock_mcp_kpi_formula_lookup"
+                "finalize_artifacts"
             ],
             AiToolRiskLevel.Low,
             "FinalOutputApproval",
@@ -101,8 +96,7 @@ public static class BuiltInSkillDefinitions
                 "generate_pdf",
                 "generate_pptx",
                 "generate_xlsx",
-                "finalize_artifacts",
-                "mock_mcp_artifact_quality_check"
+                "finalize_artifacts"
             ],
             AiToolRiskLevel.High,
             "ToolApproval",

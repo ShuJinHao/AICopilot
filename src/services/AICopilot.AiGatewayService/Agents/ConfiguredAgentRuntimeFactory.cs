@@ -28,6 +28,11 @@ public class ConfiguredAgentRuntimeFactory(
             throw CreateConfigurationMissingException();
         }
 
+        if (!template.IsEnabled)
+        {
+            throw CreateTemplateDisabledException();
+        }
+
         var model = await modelRepository.FirstOrDefaultAsync(
             new LanguageModelByIdSpec(template.ModelId),
             cancellationToken);
@@ -46,6 +51,11 @@ public class ConfiguredAgentRuntimeFactory(
         Action<AiChatOptions>? configureOptions = null,
         string? instructionsOverride = null)
     {
+        if (!template.IsEnabled)
+        {
+            throw CreateTemplateDisabledException();
+        }
+
         if (!model.IsEnabled)
         {
             throw new AgentWorkflowException(
@@ -106,6 +116,11 @@ public class ConfiguredAgentRuntimeFactory(
             throw CreateConfigurationMissingException();
         }
 
+        if (!template.IsEnabled)
+        {
+            throw CreateTemplateDisabledException();
+        }
+
         var model = await modelRepository.FirstOrDefaultAsync(new LanguageModelByIdSpec(modelId));
         if (model is null)
         {
@@ -125,6 +140,11 @@ public class ConfiguredAgentRuntimeFactory(
         if (template is null)
         {
             throw CreateConfigurationMissingException();
+        }
+
+        if (!template.IsEnabled)
+        {
+            throw CreateTemplateDisabledException();
         }
 
         var instructions = configureInstructions?.Invoke(template.SystemPrompt);
@@ -155,5 +175,13 @@ public class ConfiguredAgentRuntimeFactory(
             AppProblemCodes.ChatConfigurationMissing,
             "The conversation template or model configuration could not be found.",
             "This session is missing an available template or model configuration. Please ask an administrator to review the AI settings.");
+    }
+
+    private static AgentWorkflowException CreateTemplateDisabledException()
+    {
+        return new AgentWorkflowException(
+            AppProblemCodes.ChatConfigurationMissing,
+            "The conversation template is disabled.",
+            "当前会话绑定的模板已停用，请切换模板或联系管理员检查 AI 配置。");
     }
 }

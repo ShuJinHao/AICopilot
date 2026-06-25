@@ -16,7 +16,6 @@ public sealed class ChatRuntimeSettings : BaseEntity<ChatRuntimeSettingsId>, IAg
         int answerHistoryCount,
         int ragRewriteHistoryCount,
         int agentPlanningHistoryCount,
-        int summaryThresholdMessages,
         int contextTokenLimit,
         DateTimeOffset nowUtc)
     {
@@ -26,7 +25,6 @@ public sealed class ChatRuntimeSettings : BaseEntity<ChatRuntimeSettingsId>, IAg
             answerHistoryCount,
             ragRewriteHistoryCount,
             agentPlanningHistoryCount,
-            summaryThresholdMessages,
             contextTokenLimit,
             nowUtc);
         CreatedAt = nowUtc;
@@ -39,8 +37,6 @@ public sealed class ChatRuntimeSettings : BaseEntity<ChatRuntimeSettingsId>, IAg
     public int RagRewriteHistoryCount { get; private set; }
 
     public int AgentPlanningHistoryCount { get; private set; }
-
-    public int SummaryThresholdMessages { get; private set; }
 
     public int ContextTokenLimit { get; private set; }
 
@@ -55,7 +51,6 @@ public sealed class ChatRuntimeSettings : BaseEntity<ChatRuntimeSettingsId>, IAg
             answerHistoryCount: 10,
             ragRewriteHistoryCount: 4,
             agentPlanningHistoryCount: 6,
-            summaryThresholdMessages: 20,
             contextTokenLimit: 24000,
             nowUtc);
     }
@@ -65,7 +60,6 @@ public sealed class ChatRuntimeSettings : BaseEntity<ChatRuntimeSettingsId>, IAg
         int answerHistoryCount,
         int ragRewriteHistoryCount,
         int agentPlanningHistoryCount,
-        int summaryThresholdMessages,
         int contextTokenLimit,
         DateTimeOffset nowUtc)
     {
@@ -73,7 +67,6 @@ public sealed class ChatRuntimeSettings : BaseEntity<ChatRuntimeSettingsId>, IAg
         AnswerHistoryCount = Clamp(answerHistoryCount, 0, 50);
         RagRewriteHistoryCount = Clamp(ragRewriteHistoryCount, 0, 20);
         AgentPlanningHistoryCount = Clamp(agentPlanningHistoryCount, 0, 30);
-        SummaryThresholdMessages = Clamp(summaryThresholdMessages, 5, 200);
         ContextTokenLimit = Clamp(contextTokenLimit, 4000, 200000);
         UpdatedAt = nowUtc;
     }

@@ -84,7 +84,14 @@ public class FinalAgentRunExecutor(
         }
         else
         {
-            messages.Add(new AiChatMessage(AiChatRole.User, agentContext.InputText));
+            if (agentContext.InputMessages.Count == 0)
+            {
+                messages.Add(new AiChatMessage(AiChatRole.User, agentContext.InputText));
+            }
+            else
+            {
+                messages.AddRange(agentContext.InputMessages);
+            }
         }
 
         using var modelResponseTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -219,7 +226,7 @@ public class FinalAgentRunExecutor(
         if (HasUsage(usage))
         {
             var estimatedInputTokens = isApprovalResumption
-                ? agentContext.SystemPromptTokenCount + tokenEstimator.CountTokens(agentContext.InputText)
+                ? agentContext.EstimatedInputTokens
                 : agentContext.EstimatedInputTokens;
 
             chatTokenTelemetry.RecordUsage(
@@ -366,7 +373,7 @@ public class FinalAgentRunExecutor(
         ITextTokenEstimator tokenEstimator)
     {
         var estimatedInputTokens = isApprovalResumption
-            ? agentContext.SystemPromptTokenCount + tokenEstimator.CountTokens(agentContext.InputText)
+            ? agentContext.EstimatedInputTokens
             : agentContext.EstimatedInputTokens;
         var estimatedOutputTokens = tokenEstimator.CountTokens(assistantText);
 

@@ -2161,15 +2161,15 @@ public sealed class ToolRegistryGovernanceTests
 
     [Fact]
     [Trait("Suite", "EnterpriseToolGovernanceP4")]
-    public void BuiltInToolRegistrations_ShouldExposeMockMcpGovernedTools()
+    public void BuiltInToolRegistrations_ShouldSeedMockMcpToolsDisabledByDefault()
     {
         var tools = BuiltInToolRegistrations.AgentRuntimeTools;
 
         tools.Should().Contain(tool => tool.ToolCode == "mock_mcp_health_check" &&
                                       tool.ProviderType == ToolProviderType.MockMcp &&
-                                      tool.IsEnabled &&
-                                      tool.IsVisibleToPlanner &&
-                                      tool.IsExecutableByAgent &&
+                                      !tool.IsEnabled &&
+                                      !tool.IsVisibleToPlanner &&
+                                      !tool.IsExecutableByAgent &&
                                       tool.CatalogVersion == BuiltInToolRegistrations.CurrentCatalogVersion);
         tools.Should().Contain(tool => tool.ToolCode == "mock_mcp_kpi_formula_lookup" &&
                                       tool.DataBoundary == ToolDataBoundary.RagContextOnly);
@@ -2192,7 +2192,7 @@ public sealed class ToolRegistryGovernanceTests
 
     [Fact]
     [Trait("Suite", "EnterpriseToolGovernanceP4")]
-    public async Task AgentPlanToolGuard_ShouldExposeOnlySimulationBoundaryTools_ForP4Catalog()
+    public async Task AgentPlanToolGuard_ShouldNotExposeMockMcpTools_WhenMockRuntimeIsDisabled()
     {
         var mockTool = CreateTool(
             "mock_mcp_health_check",
@@ -2235,13 +2235,7 @@ public sealed class ToolRegistryGovernanceTests
 
         catalog.IsSuccess.Should().BeTrue();
         catalog.Value!.Version.Should().Be(BuiltInToolRegistrations.CurrentCatalogVersion);
-        catalog.Value.Tools.Select(tool => tool.ToolCode)
-            .Should().BeEquivalentTo(["mock_mcp_health_check"]);
-        var summary = catalog.Value.Tools.Single();
-        summary.ProviderKind.Should().Be(nameof(ToolProviderType.MockMcp));
-        summary.IsMock.Should().BeTrue();
-        summary.CatalogVersion.Should().BeGreaterThan(0);
-        summary.DataBoundary.Should().Be(nameof(ToolDataBoundary.NoData));
+        catalog.Value.Tools.Should().BeEmpty();
     }
 
     [Fact]
@@ -2292,7 +2286,7 @@ public sealed class ToolRegistryGovernanceTests
             ToolCatalogVersion: BuiltInToolRegistrations.CurrentCatalogVersion,
             VisibleToolCount: 1,
             ToolRiskSummary: new Dictionary<string, int> { [AiToolRiskLevel.Low.ToString()] = 1 },
-            MockMcpOnly: true);
+            MockMcpOnly: false);
 
         var executor = new MockMcpAgentToolExecutor();
         var result = await executor.ExecuteAsync(new AgentToolExecutionContext(
@@ -3002,7 +2996,7 @@ public sealed class ToolRegistryGovernanceTests
     {
         public Task<ChatRuntimeSettingsDto> GetAsync(CancellationToken cancellationToken = default)
         {
-            return Task.FromResult(new ChatRuntimeSettingsDto(6, 12, 4, 30, 40, 12000));
+            return Task.FromResult(new ChatRuntimeSettingsDto(6, 12, 4, 30, 12000));
         }
     }
 

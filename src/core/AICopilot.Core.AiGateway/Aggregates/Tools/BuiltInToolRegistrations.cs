@@ -28,7 +28,7 @@ public sealed record ToolRegistrationSeed(
 
 public static class BuiltInToolRegistrations
 {
-    public const int CurrentCatalogVersion = 10;
+    public const int CurrentCatalogVersion = 11;
 
     private const string AgentRuntimeTarget = "AgentTaskRuntime";
     private const string MockMcpTarget = "MockMcpProvider";
@@ -204,14 +204,14 @@ public static class BuiltInToolRegistrations
             riskLevel,
             null,
             requiresApproval,
-            IsEnabled: true,
+            IsEnabled: false,
             TimeoutSeconds: 30,
             ToolAuditLevel.Standard,
             "MockMcp",
             BusinessDomains: ["Production", "Quality", "Inventory", "Sales", "Employee"],
             dataBoundary,
-            IsVisibleToPlanner: true,
-            IsExecutableByAgent: true,
+            IsVisibleToPlanner: false,
+            IsExecutableByAgent: false,
             SchemaVersion: 1,
             CatalogVersion: CurrentCatalogVersion,
             ApprovalPolicy: requiresApproval ? "ToolApproval" : "None");

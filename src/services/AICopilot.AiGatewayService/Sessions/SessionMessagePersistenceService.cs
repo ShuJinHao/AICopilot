@@ -58,6 +58,7 @@ public class SessionMessagePersistenceService(
         var nextEventSequence = Math.Max(
             existingEvents.Count == 0 ? 0 : existingEvents.Max(item => item.Sequence),
             session.Messages.Count == 0 ? 0 : session.Messages.Max(item => item.Sequence));
+        session.EnsureMessageCountAtLeast(nextEventSequence);
 
         foreach (var entry in normalizedEntries)
         {

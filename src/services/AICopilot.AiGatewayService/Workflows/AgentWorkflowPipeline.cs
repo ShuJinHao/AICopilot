@@ -6,6 +6,7 @@ using AICopilot.AiGatewayService.Safety;
 using AICopilot.AiGatewayService.Workflows.Executors;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
+using Microsoft.Extensions.Logging;
 
 namespace AICopilot.AiGatewayService.Workflows;
 
@@ -25,7 +26,8 @@ public class AgentWorkflowPipeline(
     FinalAgentBuildExecutor agentBuild,
     FinalAgentRunExecutor agentRun,
     IFinalAgentContextStore finalAgentContextStore,
-    IFinalAgentContextSerializer finalAgentContextSerializer)
+    IFinalAgentContextSerializer finalAgentContextSerializer,
+    ILogger<AgentWorkflowPipeline> logger)
 {
     public async Task<AgentPlanDraftWorkflowResult> RunPlanDraftWorkflowAsync(
         ChatStreamRequest request,
@@ -63,10 +65,22 @@ public class AgentWorkflowPipeline(
         var sink = new AgentWorkflowSink();
         var branchTasks = new[]
         {
-            toolsPack.ExecuteAsync(routing.Intents, ct),
-            knowledgeRetrieval.ExecuteAsync(routing.Intents, ct),
-            dataAnalysis.ExecuteAsync(routing.Intents, sink, session, ct),
-            businessPolicy.ExecuteAsync(routing.Intents, request.Message, ct)
+            RunBranchSafelyAsync(
+                BranchType.Tools,
+                () => toolsPack.ExecuteAsync(routing.Intents, ct),
+                ct),
+            RunBranchSafelyAsync(
+                BranchType.Knowledge,
+                () => knowledgeRetrieval.ExecuteAsync(routing.Intents, ct),
+                ct),
+            RunBranchSafelyAsync(
+                BranchType.DataAnalysis,
+                () => dataAnalysis.ExecuteAsync(routing.Intents, sink, session, ct),
+                ct),
+            RunBranchSafelyAsync(
+                BranchType.BusinessPolicy,
+                () => businessPolicy.ExecuteAsync(routing.Intents, request.Message, ct),
+                ct)
         };
 
         var allBranchesTask = Task.WhenAll(branchTasks);
@@ -153,5 +167,37 @@ public class AgentWorkflowPipeline(
         {
             sink.Complete(ex);
         }
+    }
+
+    private async Task<BranchResult> RunBranchSafelyAsync(
+        BranchType branchType,
+        Func<Task<BranchResult>> execute,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await execute().ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Agent workflow branch {BranchType} failed; continuing with an empty branch result.", branchType);
+            return CreateEmptyBranchResult(branchType);
+        }
+    }
+
+    private static BranchResult CreateEmptyBranchResult(BranchType branchType)
+    {
+        return branchType switch
+        {
+            BranchType.Tools => BranchResult.FromTools([]),
+            BranchType.Knowledge => BranchResult.FromKnowledge(string.Empty),
+            BranchType.DataAnalysis => BranchResult.FromDataAnalysis(string.Empty),
+            BranchType.BusinessPolicy => BranchResult.FromBusinessPolicy(string.Empty),
+            _ => throw new ArgumentOutOfRangeException(nameof(branchType), branchType, "Unknown branch type.")
+        };
     }
 }

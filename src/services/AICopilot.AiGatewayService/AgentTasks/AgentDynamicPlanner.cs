@@ -9,6 +9,7 @@ using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Result;
+using Microsoft.Extensions.Options;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
 
@@ -69,7 +70,9 @@ public interface IAgentDynamicPlanner
         CancellationToken cancellationToken);
 }
 
-public sealed class DefaultAgentDynamicPlanner(ConfiguredAgentRuntimeFactory configuredAgentFactory) : IAgentDynamicPlanner
+public sealed class DefaultAgentDynamicPlanner(
+    ConfiguredAgentRuntimeFactory configuredAgentFactory,
+    IOptions<AgentModelCallTimeoutOptions>? modelCallTimeoutOptions = null) : IAgentDynamicPlanner
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -111,7 +114,9 @@ public sealed class DefaultAgentDynamicPlanner(ConfiguredAgentRuntimeFactory con
         catch (AgentWorkflowException ex)
         {
             return Result.Failure(new ApiProblemDescriptor(
-                AppProblemCodes.PlannerModelUnavailable,
+                ex.Code == AppProblemCodes.ModelRequestTimeout
+                    ? AppProblemCodes.ModelRequestTimeout
+                    : AppProblemCodes.PlannerModelUnavailable,
                 ex.UserFacingMessage));
         }
         catch (JsonException ex)
@@ -120,39 +125,62 @@ public sealed class DefaultAgentDynamicPlanner(ConfiguredAgentRuntimeFactory con
                 AppProblemCodes.AgentPlanInvalid,
                 $"Planner returned invalid JSON: {ex.Message}"));
         }
-        catch (Exception ex)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
         {
             return Result.Failure(new ApiProblemDescriptor(
                 AppProblemCodes.PlannerModelUnavailable,
-                $"Planner model call failed before a valid plan was produced: {ex.Message}"));
+                "Planner model call failed before a valid plan was produced."));
         }
     }
 
-    private static async Task<string> RunPlannerAsPlainTextAsync(
+    private async Task<string> RunPlannerAsPlainTextAsync(
         ScopedRuntimeAgent scopedAgent,
         string payload,
         LanguageModel plannerModel,
         CancellationToken cancellationToken)
     {
-        var session = await scopedAgent.Agent.CreateSessionAsync(cancellationToken);
-        var builder = new StringBuilder();
-        await foreach (var update in scopedAgent.Agent.RunStreamingAsync(
-                [new AiChatMessage(AiChatRole.User, payload)],
-                session,
-                new RuntimeAgentRunOptions(new AiChatOptions
-                {
-                    Temperature = 0,
-                    MaxOutputTokens = Math.Clamp(plannerModel.Parameters.MaxOutputTokens, 512, 4096),
-                    Tools = []
-                }),
-                cancellationToken))
-        {
-            foreach (var content in update.Contents.OfType<AiTextContent>())
-            {
-                builder.Append(content.Text);
-            }
-        }
+        var timeout = (modelCallTimeoutOptions?.Value ?? new AgentModelCallTimeoutOptions()).PlannerTimeout;
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(timeout);
 
-        return builder.ToString();
+        try
+        {
+            var timeoutToken = timeoutCts.Token;
+            var session = await scopedAgent.Agent.CreateSessionAsync(timeoutToken);
+            var builder = new StringBuilder();
+            await foreach (var update in scopedAgent.Agent.RunStreamingAsync(
+                    [new AiChatMessage(AiChatRole.User, payload)],
+                    session,
+                    new RuntimeAgentRunOptions(new AiChatOptions
+                    {
+                        Temperature = 0,
+                        MaxOutputTokens = Math.Clamp(plannerModel.Parameters.MaxOutputTokens, 512, 4096),
+                        Tools = []
+                    }),
+                    timeoutToken))
+            {
+                foreach (var content in update.Contents.OfType<AiTextContent>())
+                {
+                    builder.Append(content.Text);
+                }
+            }
+
+            return builder.ToString();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
+        {
+            throw new AgentWorkflowException(
+                AppProblemCodes.ModelRequestTimeout,
+                $"Agent planner model call exceeded {timeout.TotalSeconds:N0} seconds.",
+                "任务规划模型响应超时，请稍后重试。");
+        }
     }
 }

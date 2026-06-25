@@ -143,7 +143,7 @@ public sealed class DynamicPlannerContractTests
                     "Low")
             ],
             model,
-            new ChatRuntimeSettingsDto(6, 12, 4, 30, 40, 12000));
+            new ChatRuntimeSettingsDto(6, 12, 4, 30, 12000));
 
         return (new DefaultAgentDynamicPlanner(factory), request);
     }

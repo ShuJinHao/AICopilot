@@ -967,10 +967,6 @@ namespace AICopilot.EntityFrameworkCore.Migrations.AiGatewayDbContext
                         .HasColumnType("xid")
                         .HasColumnName("xmin");
 
-                    b.Property<int>("SummaryThresholdMessages")
-                        .HasColumnType("integer")
-                        .HasColumnName("summary_threshold_messages");
-
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");

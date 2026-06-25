@@ -22,7 +22,7 @@ public sealed class ChatErrorContractTests
         var payload = ReadPayload(chunk.Content);
 
         payload.Code.Should().Be(AppProblemCodes.ChatConfigurationMissing);
-        payload.Detail.Should().Be("Conversation template is missing.");
+        payload.Detail.Should().Be("错误码 chat_configuration_missing：对话运行配置不可用，请管理员检查模板、模型或密钥配置。");
         payload.UserFacingMessage.Should().Be("当前对话模板不存在，请联系管理员检查配置。");
     }
 
@@ -74,6 +74,28 @@ public sealed class ChatErrorContractTests
         payload.Detail.Should().Be("对话执行失败，请稍后重试。");
         payload.UserFacingMessage.Should().Be("对话执行失败，请稍后重试。");
         chunk.Content.Should().NotContain("database password");
+    }
+
+    [Fact]
+    public void WorkflowExceptionDetail_ShouldUseWhitelistedSafeDetail()
+    {
+        var chunk = AgentStreamRuntime.CreateErrorChunk(
+            new AgentWorkflowException(
+                AppProblemCodes.ChatStreamFailed,
+                "Language model 'private-model' failed at https://provider.example/v1 with SELECT * FROM production.devices WHERE apiKey=secret at /Users/test/project/file.cs",
+                "对话执行失败，请稍后重试。"),
+            "test",
+            AppProblemCodes.ChatStreamFailed,
+            "对话执行失败，请稍后重试。");
+
+        var payload = ReadPayload(chunk.Content);
+
+        payload.Detail.Should().Be("错误码 chat_stream_failed：请求未能完成，详情已按安全策略隐藏。");
+        chunk.Content.Should().NotContain("production.devices");
+        chunk.Content.Should().NotContain("private-model");
+        chunk.Content.Should().NotContain("provider.example");
+        chunk.Content.Should().NotContain("secret");
+        chunk.Content.Should().NotContain("/Users/test");
     }
 
     [Fact]

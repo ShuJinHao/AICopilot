@@ -75,6 +75,9 @@ public sealed class Phase43SafetyQualityTests
                 message = "please prepare a diagnostic checklist for device DEV-001"
             });
 
+            approvalEvents.Should().Contain(
+                item => item.Type == "ApprovalRequest",
+                string.Join(" | ", approvalEvents.Select(item => $"{item.Type}:{item.Content}")));
             var approvalChunk = approvalEvents.Single(item => item.Type == "ApprovalRequest");
             using var approvalPayload = JsonDocument.Parse(approvalChunk.Content);
             var callId = approvalPayload.RootElement.GetProperty("callId").GetString();

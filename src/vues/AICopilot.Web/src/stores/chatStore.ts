@@ -6,30 +6,17 @@ import type { ApprovalChunk, ChatMessage } from '@/types/models'
 import { processChunk, getErrorCode } from '@/protocol/chunkReducer'
 import { getApprovalFailureStatus } from '@/protocol/approvalProtocol'
 import { useApprovalStore } from './approvalStore'
+import { useAgentCatalogStore } from './agentCatalogStore'
+import { useAgentTaskStore } from './agentTaskStore'
+import { useArtifactWorkspaceStore } from './artifactWorkspaceStore'
 import { resolveChatErrorMessage, useChatErrorStore, toFriendlyMessage } from './chatErrorStore'
 import { useMessageStore } from './messageStore'
 import { useSessionStore } from './sessionStore'
-import {
-  createReactiveSessionScopedState,
-  resetSessionScopedState,
-  type AgentChartPreview,
-  type SessionScopedState
-} from './sessionScopedState'
 import { useStreamStore } from './streamStore'
 import type {
-  AgentPlannerToolSummary,
-  KnowledgeBaseSummary,
-  SessionTimelineEvent,
-  SkillDefinition
-} from '@/types/app'
-import type {
   AgentApprovalRequest,
-  AgentArtifactPreview,
   AgentTask,
-  AgentTaskAuditSummary,
-  ArtifactRecord,
-  ArtifactWorkspace,
-  UploadRecord
+  ArtifactRecord
 } from '@/types/protocols'
 
 interface HistoryCursorState {
@@ -44,6 +31,9 @@ export const useChatStore = defineStore('chat', () => {
   const messageStore = useMessageStore()
   const streamStore = useStreamStore()
   const approvalStore = useApprovalStore()
+  const catalogStore = useAgentCatalogStore()
+  const agentTaskStore = useAgentTaskStore()
+  const artifactWorkspaceStore = useArtifactWorkspaceStore()
   const errorStore = useChatErrorStore()
 
   const sessions = computed(() => sessionStore.sessions)
@@ -54,54 +44,78 @@ export const useChatStore = defineStore('chat', () => {
   const isWaitingForApproval = computed(() => approvalStore.isWaitingForApproval)
   const isLoadingHistory = computed(() => sessionStore.isLoadingHistory)
   const errorMessage = computed(() => errorStore.errorMessage)
-  const scopedState = createReactiveSessionScopedState()
-  const scopedField = <K extends keyof SessionScopedState>(key: K) => computed({
-    get: () => scopedState[key],
-    set: (value: SessionScopedState[K]) => {
-      scopedState[key] = value
+  const agentTasks = computed({
+    get: () => agentTaskStore.agentTasks,
+    set: (value) => {
+      agentTaskStore.agentTasks = value
     }
   })
-  const agentTasks = scopedField('agentTasks')
-  const agentApprovals = scopedField('agentApprovals')
-  const agentAuditSummary = scopedField('agentAuditSummary')
-  const timelineEvents = scopedField('timelineEvents')
-  const availableSkills = ref<SkillDefinition[]>([])
-  const selectedSkillCode = ref<string | null>(null)
-  const availablePluginTools = ref<AgentPlannerToolSummary[]>([])
-  const selectedToolCodes = ref<string[]>([])
-  const isLoadingPluginTools = ref(false)
-  const availableKnowledgeBases = ref<KnowledgeBaseSummary[]>([])
-  const selectedKnowledgeBaseId = ref<string | null>(null)
-  const uploadedFiles = scopedField('uploadedFiles')
-  const currentWorkspace = scopedField('currentWorkspace')
-  const currentArtifactPreview = scopedField('currentArtifactPreview')
-  const chartPreview = scopedField('chartPreview')
-  const isAgentBusy = scopedField('isAgentBusy')
+  const agentApprovals = computed({
+    get: () => agentTaskStore.agentApprovals,
+    set: (value) => {
+      agentTaskStore.agentApprovals = value
+    }
+  })
+  const agentAuditSummary = computed({
+    get: () => agentTaskStore.agentAuditSummary,
+    set: (value) => {
+      agentTaskStore.agentAuditSummary = value
+    }
+  })
+  const timelineEvents = computed({
+    get: () => agentTaskStore.timelineEvents,
+    set: (value) => {
+      agentTaskStore.timelineEvents = value
+    }
+  })
+  const availableSkills = computed(() => catalogStore.availableSkills)
+  const selectedSkillCode = computed(() => catalogStore.selectedSkillCode)
+  const availablePluginTools = computed(() => catalogStore.availablePluginTools)
+  const selectedToolCodes = computed(() => catalogStore.selectedToolCodes)
+  const isLoadingPluginTools = computed(() => catalogStore.isLoadingPluginTools)
+  const availableKnowledgeBases = computed(() => catalogStore.availableKnowledgeBases)
+  const selectedKnowledgeBaseId = computed(() => catalogStore.selectedKnowledgeBaseId)
+  const uploadedFiles = computed({
+    get: () => artifactWorkspaceStore.uploadedFiles,
+    set: (value) => {
+      artifactWorkspaceStore.uploadedFiles = value
+    }
+  })
+  const currentWorkspace = computed({
+    get: () => artifactWorkspaceStore.currentWorkspace,
+    set: (value) => {
+      artifactWorkspaceStore.currentWorkspace = value
+    }
+  })
+  const currentArtifactPreview = computed({
+    get: () => artifactWorkspaceStore.currentArtifactPreview,
+    set: (value) => {
+      artifactWorkspaceStore.currentArtifactPreview = value
+    }
+  })
+  const chartPreview = computed({
+    get: () => artifactWorkspaceStore.chartPreview,
+    set: (value) => {
+      artifactWorkspaceStore.chartPreview = value
+    }
+  })
+  const isAgentBusy = computed({
+    get: () => agentTaskStore.isAgentBusy,
+    set: (value: boolean) => {
+      agentTaskStore.isAgentBusy = value
+    }
+  })
   const historyCursors = ref<Record<string, HistoryCursorState>>({})
   const isLoadingOlderHistory = ref(false)
-  const latestAgentTask = computed(() => agentTasks.value[0] ?? null)
-  const selectedSkill = computed(() =>
-    selectedSkillCode.value
-      ? availableSkills.value.find((skill) => skill.skillCode === selectedSkillCode.value) ?? null
-      : null
-  )
-  const selectedPluginTools = computed(() =>
-    availablePluginTools.value.filter((tool) => selectedToolCodes.value.includes(tool.toolCode))
-  )
-  const isSkillAutoMode = computed(() => !selectedSkillCode.value)
-  const selectedSkillSupportsKnowledge = computed(() =>
-    isSkillAutoMode.value ||
-    selectedSkill.value?.allowedKnowledgeScopes?.some((scope) => scope === 'SelectedKnowledgeBase') ||
-    false
-  )
-  const selectedKnowledgeBase = computed(() =>
-    availableKnowledgeBases.value.find((knowledgeBase) => knowledgeBase.id === selectedKnowledgeBaseId.value) ?? null
-  )
-  const selectedKnowledgeBaseIdsForPlan = computed(() =>
-    selectedSkillSupportsKnowledge.value && selectedKnowledgeBaseId.value ? [selectedKnowledgeBaseId.value] : []
-  )
+  const latestAgentTask = computed(() => agentTaskStore.latestAgentTask)
+  const selectedSkill = computed(() => catalogStore.selectedSkill)
+  const selectedPluginTools = computed(() => catalogStore.selectedPluginTools)
+  const isSkillAutoMode = computed(() => catalogStore.isSkillAutoMode)
+  const selectedSkillSupportsKnowledge = computed(() => catalogStore.selectedSkillSupportsKnowledge)
+  const selectedKnowledgeBase = computed(() => catalogStore.selectedKnowledgeBase)
+  const selectedKnowledgeBaseIdsForPlan = computed(() => catalogStore.selectedKnowledgeBaseIdsForPlan)
   const pendingAgentApprovals = computed(() =>
-    agentApprovals.value.filter((approval) => approval.status === 'Pending')
+    agentTaskStore.pendingAgentApprovals
   )
   const hasMoreHistoryBefore = computed(() => {
     const sessionId = sessionStore.currentSessionId
@@ -126,32 +140,37 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function resetCurrentSessionState() {
-    resetSessionScopedState(scopedState)
+    agentTaskStore.reset()
+    artifactWorkspaceStore.reset()
+    catalogStore.resetSelections()
   }
 
   async function loadSkills() {
-    try {
-      availableSkills.value = await chatService.getSkills()
-      if (selectedSkillCode.value && !availableSkills.value.some((skill) => skill.skillCode === selectedSkillCode.value)) {
-        selectedSkillCode.value = null
-      }
-    } catch {
-      availableSkills.value = []
-      selectedSkillCode.value = null
-    }
+    await catalogStore.loadSkills()
   }
 
   function selectSkill(skillCode: string | null) {
-    if (!skillCode) {
-      selectedSkillCode.value = null
-      void loadPluginTools()
-      return
-    }
+    catalogStore.selectSkill(skillCode)
+  }
 
-    selectedSkillCode.value = availableSkills.value.some((skill) => skill.skillCode === skillCode)
-      ? skillCode
-      : null
-    void loadPluginTools()
+  async function loadPluginTools() {
+    await catalogStore.loadPluginTools()
+  }
+
+  function togglePluginTool(toolCode: string) {
+    catalogStore.togglePluginTool(toolCode)
+  }
+
+  function clearPluginTools() {
+    catalogStore.clearPluginTools()
+  }
+
+  async function loadKnowledgeBases() {
+    await catalogStore.loadKnowledgeBases()
+  }
+
+  function selectKnowledgeBase(knowledgeBaseId: string | null) {
+    catalogStore.selectKnowledgeBase(knowledgeBaseId)
   }
 
   function addPlanConversationMessages(sessionId: string, goal: string) {
@@ -192,62 +211,6 @@ export const useChatStore = defineStore('chat', () => {
     })
   }
 
-  async function loadPluginTools() {
-    isLoadingPluginTools.value = true
-    try {
-      const catalog = await chatService.getToolCatalog(selectedSkillCode.value)
-      availablePluginTools.value = catalog.tools
-      const availableCodes = new Set(catalog.tools.map((tool) => tool.toolCode))
-      selectedToolCodes.value = selectedToolCodes.value.filter((code) => availableCodes.has(code))
-    } catch {
-      availablePluginTools.value = []
-      selectedToolCodes.value = []
-    } finally {
-      isLoadingPluginTools.value = false
-    }
-  }
-
-  function togglePluginTool(toolCode: string) {
-    if (!availablePluginTools.value.some((tool) => tool.toolCode === toolCode)) {
-      return
-    }
-
-    selectedToolCodes.value = selectedToolCodes.value.includes(toolCode)
-      ? selectedToolCodes.value.filter((code) => code !== toolCode)
-      : [...selectedToolCodes.value, toolCode]
-  }
-
-  function clearPluginTools() {
-    selectedToolCodes.value = []
-  }
-
-  async function loadKnowledgeBases() {
-    try {
-      availableKnowledgeBases.value = await chatService.getKnowledgeBases()
-      if (
-        !selectedKnowledgeBaseId.value ||
-        !availableKnowledgeBases.value.some((knowledgeBase) => knowledgeBase.id === selectedKnowledgeBaseId.value)
-      ) {
-        selectedKnowledgeBaseId.value = null
-      }
-    } catch {
-      availableKnowledgeBases.value = []
-      selectedKnowledgeBaseId.value = null
-    }
-  }
-
-  function selectKnowledgeBase(knowledgeBaseId: string | null) {
-    if (!knowledgeBaseId) {
-      selectedKnowledgeBaseId.value = null
-      return
-    }
-
-    selectedKnowledgeBaseId.value = availableKnowledgeBases.value.some(
-      (knowledgeBase) => knowledgeBase.id === knowledgeBaseId
-    )
-      ? knowledgeBaseId
-      : null
-  }
 
   async function loadHistory(sessionId: string, force = false) {
     if (!force && messageStore.messagesMap[sessionId]?.length) {
@@ -311,67 +274,30 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function upsertAgentTask(task: AgentTask) {
-    const index = agentTasks.value.findIndex((item) => item.id === task.id)
-    if (index >= 0) {
-      agentTasks.value.splice(index, 1, task)
-    } else {
-      agentTasks.value.unshift(task)
-    }
+    agentTaskStore.upsertAgentTask(task)
   }
 
   async function loadAgentTasks(sessionId: string) {
-    try {
-      agentTasks.value = await chatService.getAgentTasksBySession(sessionId)
-      const latestTask = agentTasks.value[0] ?? null
-      if (latestTask?.workspaceCode) {
-        await refreshWorkspace(latestTask)
-      } else {
-        currentWorkspace.value = null
-        currentArtifactPreview.value = null
-        chartPreview.value = null
-      }
-      await loadAgentApprovals(agentTasks.value[0]?.id ?? null)
-      await loadAgentAuditSummary(agentTasks.value[0]?.id ?? null)
-    } catch {
-      agentTasks.value = []
-      agentApprovals.value = []
-      agentAuditSummary.value = []
-      currentWorkspace.value = null
-      currentArtifactPreview.value = null
-      chartPreview.value = null
+    const latestTask = await agentTaskStore.loadAgentTasks(sessionId)
+    if (latestTask?.workspaceCode) {
+      await refreshWorkspace(latestTask)
+    } else {
+      artifactWorkspaceStore.reset()
     }
+    await loadAgentApprovals(latestTask?.id ?? null)
+    await loadAgentAuditSummary(latestTask?.id ?? null)
   }
 
   async function loadTimeline(sessionId: string) {
-    try {
-      const timeline = await chatService.getTimeline(sessionId)
-      timelineEvents.value = timeline.items
-    } catch {
-      timelineEvents.value = []
-    }
+    await agentTaskStore.loadTimeline(sessionId)
   }
 
   async function loadAgentApprovals(taskId: string | null = null) {
-    try {
-      agentApprovals.value = taskId
-        ? await chatService.getAgentTaskApprovals(taskId)
-        : await chatService.getPendingAgentApprovals()
-    } catch {
-      agentApprovals.value = []
-    }
+    await agentTaskStore.loadAgentApprovals(taskId)
   }
 
   async function loadAgentAuditSummary(taskId: string | null = null) {
-    if (!taskId) {
-      agentAuditSummary.value = []
-      return
-    }
-
-    try {
-      agentAuditSummary.value = await chatService.getAgentTaskAuditSummary(taskId)
-    } catch {
-      agentAuditSummary.value = []
-    }
+    await agentTaskStore.loadAgentAuditSummary(taskId)
   }
 
   async function refreshAgentTaskSnapshot(taskId: string) {
@@ -385,96 +311,19 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function findPendingPlanApproval(taskId: string) {
-    return agentApprovals.value.find((approval) =>
-      approval.taskId === taskId &&
-      approval.type === 'Plan' &&
-      approval.status === 'Pending'
-    ) ?? null
+    return agentTaskStore.findPendingPlanApproval(taskId)
   }
 
   async function refreshWorkspace(task: AgentTask) {
-    if (!task.workspaceCode) {
-      currentWorkspace.value = null
-      currentArtifactPreview.value = null
-      chartPreview.value = null
-      return
-    }
-
-    currentWorkspace.value = await chatService.getWorkspace(task.workspaceCode)
-    const firstArtifact = currentWorkspace.value.artifacts[0]
-    currentArtifactPreview.value = firstArtifact
-      ? await loadArtifactPreview(firstArtifact.id)
-      : null
-    await refreshChartPreview()
+    await artifactWorkspaceStore.refreshWorkspace(task)
   }
 
   async function loadArtifactPreview(artifactId: string) {
-    try {
-      currentArtifactPreview.value = await chatService.getArtifactPreview(artifactId)
-      return currentArtifactPreview.value
-    } catch {
-      currentArtifactPreview.value = null
-      return null
-    }
+    return artifactWorkspaceStore.loadArtifactPreview(artifactId)
   }
 
   async function refreshChartPreview() {
-    const chartArtifact = currentWorkspace.value?.artifacts.find((artifact) => artifact.previewKind === 'chart')
-    if (!chartArtifact) {
-      chartPreview.value = null
-      return
-    }
-
-    try {
-      const blob = await chatService.downloadArtifact(chartArtifact.downloadUrl)
-      const payload = JSON.parse(await blob.text()) as {
-        labels?: unknown
-        values?: unknown
-        source?: unknown
-        sourceMode?: unknown
-        sourceLabel?: unknown
-        isSimulation?: unknown
-        queryHash?: unknown
-        sourceInfo?: {
-          sourceMode?: unknown
-          sourceLabel?: unknown
-          isSimulation?: unknown
-          queryHash?: unknown
-        }
-      }
-      const sourceInfo = payload.sourceInfo
-      chartPreview.value = {
-        labels: Array.isArray(payload.labels) ? payload.labels.map(String) : [],
-        values: Array.isArray(payload.values) ? payload.values.map((value) => Number(value) || 0) : [],
-        source: typeof payload.source === 'string' ? payload.source : undefined,
-        sourceMode:
-          typeof payload.sourceMode === 'string'
-            ? payload.sourceMode
-            : typeof sourceInfo?.sourceMode === 'string'
-              ? sourceInfo.sourceMode
-              : undefined,
-        sourceLabel:
-          typeof payload.sourceLabel === 'string'
-            ? payload.sourceLabel
-            : typeof sourceInfo?.sourceLabel === 'string'
-              ? sourceInfo.sourceLabel
-              : undefined,
-        isSimulation:
-          typeof payload.isSimulation === 'boolean'
-            ? payload.isSimulation
-            : typeof sourceInfo?.isSimulation === 'boolean'
-              ? sourceInfo.isSimulation
-              : undefined,
-        queryHash:
-          typeof payload.queryHash === 'string'
-            ? payload.queryHash
-            : typeof sourceInfo?.queryHash === 'string'
-              ? sourceInfo.queryHash
-              : undefined
-      }
-    } catch {
-      chartPreview.value = null
-    }
+    await artifactWorkspaceStore.refreshChartPreview()
   }
 
   async function downloadArtifact(artifact: ArtifactRecord) {
@@ -483,13 +332,7 @@ export const useChatStore = defineStore('chat', () => {
       return
     }
 
-    const blob = await chatService.downloadArtifact(artifact.downloadUrl)
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = artifact.name
-    anchor.click()
-    URL.revokeObjectURL(url)
+    await artifactWorkspaceStore.downloadArtifact(artifact)
   }
 
   async function uploadSessionFile(file: File) {
@@ -498,11 +341,7 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     clearCurrentSessionError()
-    const uploaded = await chatService.uploadFile('SessionTemp', file, {
-      sessionId: sessionStore.currentSessionId
-    })
-    uploadedFiles.value.unshift(uploaded)
-    return uploaded
+    return artifactWorkspaceStore.uploadSessionFile(sessionStore.currentSessionId, file)
   }
 
   async function planAgentTask(goal: string) {
@@ -594,7 +433,7 @@ export const useChatStore = defineStore('chat', () => {
     isAgentBusy.value = true
     clearCurrentSessionError()
     try {
-      currentWorkspace.value = await chatService.submitFinalReview(code)
+      artifactWorkspaceStore.currentWorkspace = await chatService.submitFinalReview(code)
       await refreshChartPreview()
       if (sessionStore.currentSessionId) {
         await loadAgentTasks(sessionStore.currentSessionId)
@@ -740,7 +579,7 @@ export const useChatStore = defineStore('chat', () => {
     isAgentBusy.value = true
     clearCurrentSessionError()
     try {
-      currentWorkspace.value = await chatService.finalizeWorkspace(code)
+      artifactWorkspaceStore.currentWorkspace = await chatService.finalizeWorkspace(code)
       await refreshChartPreview()
       if (sessionStore.currentSessionId) {
         await loadAgentTasks(sessionStore.currentSessionId)
@@ -1021,14 +860,8 @@ export const useChatStore = defineStore('chat', () => {
     streamStore.reset()
     approvalStore.reset()
     errorStore.reset()
+    catalogStore.reset()
     resetCurrentSessionState()
-    availableSkills.value = []
-    selectedSkillCode.value = null
-    availablePluginTools.value = []
-    selectedToolCodes.value = []
-    isLoadingPluginTools.value = false
-    availableKnowledgeBases.value = []
-    selectedKnowledgeBaseId.value = null
     historyCursors.value = {}
     isLoadingOlderHistory.value = false
   }

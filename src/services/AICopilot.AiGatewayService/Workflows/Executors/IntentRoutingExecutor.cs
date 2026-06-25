@@ -9,6 +9,8 @@ using AICopilot.Services.Contracts;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using AICopilot.SharedKernel.Ai;
+using AICopilot.SharedKernel.Result;
+using Microsoft.Extensions.Options;
 
 namespace AICopilot.AiGatewayService.Workflows.Executors;
 
@@ -24,7 +26,8 @@ public class IntentRoutingExecutor(
     IManufacturingSceneClassifier sceneClassifier,
     IAgentExecutionMetadataAccessor executionMetadataAccessor,
     IAgentRuntimeSettingsProvider runtimeSettingsProvider,
-    ILogger<IntentRoutingExecutor> logger)
+    ILogger<IntentRoutingExecutor> logger,
+    IOptions<AgentModelCallTimeoutOptions>? modelCallTimeoutOptions = null)
 {
     public const string ExecutorId = nameof(IntentRoutingExecutor);
 
@@ -65,10 +68,15 @@ public class IntentRoutingExecutor(
         List<AiChatMessage> history,
         CancellationToken cancellationToken)
     {
+        var timeout = (modelCallTimeoutOptions?.Value ?? new AgentModelCallTimeoutOptions()).RoutingTimeout;
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(timeout);
+
         try
         {
             await using var scopedAgent = await agentBuilder.BuildAsync();
-            var session = await scopedAgent.Agent.CreateSessionAsync(cancellationToken);
+            var timeoutToken = timeoutCts.Token;
+            var session = await scopedAgent.Agent.CreateSessionAsync(timeoutToken);
             var builder = new StringBuilder();
             await foreach (var update in scopedAgent.Agent.RunStreamingAsync(
                     history,
@@ -79,7 +87,7 @@ public class IntentRoutingExecutor(
                         Temperature = 0,
                         Tools = []
                     }),
-                    cancellationToken))
+                    timeoutToken))
             {
                 foreach (var content in update.Contents.OfType<AiTextContent>())
                 {
@@ -88,6 +96,18 @@ public class IntentRoutingExecutor(
             }
 
             return builder.ToString();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested
+                                                 && timeoutCts.IsCancellationRequested)
+        {
+            throw new AgentWorkflowException(
+                AppProblemCodes.ModelRequestTimeout,
+                $"Intent routing model call exceeded {timeout.TotalSeconds:N0} seconds.",
+                "意图识别模型响应超时，请稍后重试。");
         }
         catch (Exception ex)
         {

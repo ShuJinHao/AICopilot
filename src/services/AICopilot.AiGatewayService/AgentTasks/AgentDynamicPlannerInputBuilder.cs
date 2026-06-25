@@ -44,7 +44,7 @@ internal static class AgentDynamicPlannerInputBuilder
             {
                 version = request.ToolCatalog.Version,
                 availableToolCount = request.ToolCatalog.AvailableToolCount,
-                mockMcpOnly = true,
+                mockMcpOnly = PlannerToolCatalogMetadata.IsMockMcpOnly(request.ToolCatalog.Tools),
                 riskSummary = request.ToolCatalog.Tools
                     .GroupBy(tool => tool.RiskLevel, StringComparer.OrdinalIgnoreCase)
                     .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase)
@@ -82,8 +82,8 @@ internal static class AgentDynamicPlannerInputBuilder
                 output = "json_only",
                 cloudIntent = "backend_only",
                 simulationOnly = (request.DataSources ?? []).Any(source => source.IsSimulation),
-                mockMcpOnly = true,
-                externalMcp = "disabled_in_p4",
+                mockMcpOnly = PlannerToolCatalogMetadata.IsMockMcpOnly(request.ToolCatalog.Tools),
+                externalMcp = "registered_runtime_only",
                 requiresDataApproval = request.RequiresDataApproval,
                 forbidden = new[] { "shell", "arbitrary_path", "sql", "cloud_write", "real_external_mcp", "unregistered_tool", "non_simulation_business_source" }
             },

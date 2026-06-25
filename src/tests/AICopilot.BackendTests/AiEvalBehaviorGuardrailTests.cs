@@ -392,9 +392,9 @@ public sealed class AiEvalBehaviorGuardrailTests
             BindingFlags.NonPublic | BindingFlags.Instance);
 
         method.Should().NotBeNull();
-        object?[] arguments = [genContext, originalMessage, Array.Empty<Message>(), false];
+        object?[] arguments = [genContext, originalMessage, false, false];
         var prompt = (string)method!.Invoke(executor, arguments)!;
-        hasContext = (bool)arguments[3]!;
+        hasContext = (bool)arguments[2]!;
         return prompt;
     }
 

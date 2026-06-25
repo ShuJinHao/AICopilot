@@ -61,6 +61,14 @@ public class FinalAgentBuildExecutor(
                 "当前会话缺少可用的模板或模型配置，请联系管理员检查 AI 配置。");
         }
 
+        if (!template.IsEnabled)
+        {
+            throw new AgentWorkflowException(
+                AppProblemCodes.ChatConfigurationMissing,
+                "当前会话绑定的模板已停用。",
+                "当前会话绑定的模板已停用，请切换模板或联系管理员检查 AI 配置。");
+        }
+
         var modelId = request.FinalModelId.HasValue
             ? new LanguageModelId(request.FinalModelId.Value)
             : template.ModelId;
@@ -85,26 +93,27 @@ public class FinalAgentBuildExecutor(
         }
 
         var runtimeSettings = runtimeSettingsProvider is null
-            ? new ChatRuntimeSettingsDto(4, 10, 4, 6, 20, 24000)
+            ? new ChatRuntimeSettingsDto(4, 10, 4, 6, 24000)
             : await runtimeSettingsProvider.GetAsync(ct);
         var answerHistory = await LoadAnswerHistoryAsync(
             session.Id,
             session.UserId,
             runtimeSettings.AnswerHistoryCount,
             ct);
-        var effectiveAnswerHistory = answerHistory;
-        var finalUserPrompt = BuildFinalUserPrompt(genContext, request.Message, effectiveAnswerHistory, out var hasContext);
-        var tokenBudgetDecision = tokenBudgetPolicy.Evaluate(model, template, finalUserPrompt);
-        if (!tokenBudgetDecision.IsAllowed && answerHistory.Count > 0)
+        var finalUserPrompt = BuildFinalUserPrompt(
+            genContext,
+            request.Message,
+            out var hasContext,
+            out var includeHistory);
+        var effectiveAnswerHistory = includeHistory ? answerHistory : [];
+        var inputMessages = BuildFinalInputMessages(effectiveAnswerHistory, finalUserPrompt);
+        var tokenBudgetDecision = tokenBudgetPolicy.Evaluate(model, template, BuildTokenBudgetInput(inputMessages));
+        if (!tokenBudgetDecision.IsAllowed && effectiveAnswerHistory.Count > 0)
         {
-            foreach (var candidateHistory in BuildHistoryBudgetFallbacks(answerHistory))
+            foreach (var candidateHistory in BuildHistoryBudgetFallbacks(effectiveAnswerHistory))
             {
-                var candidatePrompt = BuildFinalUserPrompt(
-                    genContext,
-                    request.Message,
-                    candidateHistory,
-                    out var candidateHasContext);
-                var candidateDecision = tokenBudgetPolicy.Evaluate(model, template, candidatePrompt);
+                var candidateMessages = BuildFinalInputMessages(candidateHistory, finalUserPrompt);
+                var candidateDecision = tokenBudgetPolicy.Evaluate(model, template, BuildTokenBudgetInput(candidateMessages));
                 if (!candidateDecision.IsAllowed)
                 {
                     continue;
@@ -112,13 +121,12 @@ public class FinalAgentBuildExecutor(
 
                 logger.LogInformation(
                     "Reduced final answer history from {OriginalCount} to {ReducedCount} messages for session {SessionId} due to token budget.",
-                    answerHistory.Count,
+                    effectiveAnswerHistory.Count,
                     candidateHistory.Count,
                     request.SessionId);
                 effectiveAnswerHistory = candidateHistory;
-                finalUserPrompt = candidatePrompt;
+                inputMessages = candidateMessages;
                 tokenBudgetDecision = candidateDecision;
-                hasContext = candidateHasContext;
                 break;
             }
         }
@@ -163,6 +171,7 @@ public class FinalAgentBuildExecutor(
                 ScopedAgent = scopedAgent,
                 Thread = agentThread,
                 InputText = finalUserPrompt,
+                InputMessages = inputMessages,
                 RunOptions = runOptions,
                 SessionId = request.SessionId,
                 EstimatedInputTokens = tokenBudgetDecision.EstimatedInputTokens,
@@ -191,13 +200,14 @@ public class FinalAgentBuildExecutor(
     private string BuildFinalUserPrompt(
         GenerationContext genContext,
         string originalMessage,
-        IReadOnlyCollection<Message> answerHistory,
-        out bool hasContext)
+        out bool hasContext,
+        out bool includeHistory)
     {
         var hasKnowledge = !string.IsNullOrWhiteSpace(genContext.KnowledgeContext);
         var hasDataAnalysis = !string.IsNullOrWhiteSpace(genContext.DataAnalysisContext);
         var hasBusinessPolicy = !string.IsNullOrWhiteSpace(genContext.BusinessPolicyContext);
         hasContext = hasKnowledge || hasDataAnalysis || hasBusinessPolicy;
+        includeHistory = true;
 
         if (!hasContext)
         {
@@ -211,7 +221,7 @@ public class FinalAgentBuildExecutor(
                     用户问题：
                     {originalMessage}
                     """;
-            return AppendHistoryIfNeeded(noContextPrompt, answerHistory);
+            return noContextPrompt;
         }
 
         var contextBuilder = new StringBuilder();
@@ -242,6 +252,7 @@ public class FinalAgentBuildExecutor(
 
         var requirements = BuildRequirements(genContext.Scene, hasDataAnalysis, hasBusinessPolicy, hasKnowledge);
         var shouldRedactOriginalQuestion = ShouldRedactOriginalQuestion(genContext);
+        includeHistory = !shouldRedactOriginalQuestion;
         var finalQuestion = shouldRedactOriginalQuestion
             ? RedactedOriginalQuestionPlaceholder
             : originalMessage;
@@ -259,9 +270,7 @@ public class FinalAgentBuildExecutor(
                 用户问题：
                 {finalQuestion}
                 """;
-        return shouldRedactOriginalQuestion
-            ? prompt
-            : AppendHistoryIfNeeded(prompt, answerHistory);
+        return prompt;
     }
 
     private ContextBudgetReportDto BuildContextBudgetReport(
@@ -371,25 +380,41 @@ public class FinalAgentBuildExecutor(
         }
     }
 
-    private static string AppendHistoryIfNeeded(
-        string prompt,
-        IReadOnlyCollection<Message> answerHistory)
+    private static IReadOnlyList<AiChatMessage> BuildFinalInputMessages(
+        IReadOnlyCollection<Message> answerHistory,
+        string finalUserPrompt)
     {
-        if (answerHistory.Count == 0)
+        var messages = new List<AiChatMessage>(answerHistory.Count + 1);
+        foreach (var historyMessage in answerHistory)
         {
-            return prompt;
+            if (string.IsNullOrWhiteSpace(historyMessage.Content))
+            {
+                continue;
+            }
+
+            messages.Add(new AiChatMessage(MapRole(historyMessage.Type), historyMessage.Content));
         }
 
-        var history = string.Join(
-            Environment.NewLine,
-            answerHistory.Select(message => $"{message.Type}: {message.Content}"));
-        return $"""
-                <recent_conversation>
-                {history}
-                </recent_conversation>
+        messages.Add(new AiChatMessage(AiChatRole.User, finalUserPrompt));
+        return messages;
+    }
 
-                {prompt}
-                """;
+    private static string BuildTokenBudgetInput(IReadOnlyList<AiChatMessage> inputMessages)
+    {
+        return string.Join(
+            Environment.NewLine,
+            inputMessages.Select(message => message.Text));
+    }
+
+    private static AiChatRole MapRole(MessageType type)
+    {
+        return type switch
+        {
+            MessageType.Assistant => AiChatRole.Assistant,
+            MessageType.System => AiChatRole.System,
+            MessageType.Tool => AiChatRole.Tool,
+            _ => AiChatRole.User
+        };
     }
 
     private static bool ShouldRedactOriginalQuestion(GenerationContext genContext)

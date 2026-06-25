@@ -6,13 +6,17 @@ using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Result;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
 
 public sealed class AgentPlanToolGuard(
     ToolRegistryGuard toolRegistryGuard,
     IAgentPluginCatalog pluginCatalog,
-    SkillDefinitionGuard? skillDefinitionGuard = null)
+    SkillDefinitionGuard? skillDefinitionGuard = null,
+    IOptions<MockMcpOptions>? mockMcpOptions = null,
+    IHostEnvironment? hostEnvironment = null)
 {
     public async Task<Result<PlannerToolCatalog>> GetAvailableToolCatalogAsync(
         Guid userId,
@@ -161,6 +165,13 @@ public sealed class AgentPlanToolGuard(
                     $"MCP tool '{tool.ToolCode}' is not available in the current runtime."));
             }
 
+            if (tool.ProviderType == ToolProviderType.MockMcp && !IsMockMcpRuntimeAvailable())
+            {
+                return Result.Failure(new ApiProblemDescriptor(
+                    AppProblemCodes.AgentPlanToolDenied,
+                    $"Mock MCP tool '{tool.ToolCode}' is not available in the current runtime."));
+            }
+
             var schemaValidation = ToolInputSchemaValidator.ValidateAndParse(step.InputJson, tool.InputSchemaJson);
             if (!schemaValidation.IsValid)
             {
@@ -210,6 +221,11 @@ public sealed class AgentPlanToolGuard(
             return false;
         }
 
+        if (tool.ProviderType == ToolProviderType.MockMcp && !IsMockMcpRuntimeAvailable())
+        {
+            return false;
+        }
+
         if (simulationOnly)
         {
             if (tool.ProviderType is ToolProviderType.CloudReadonly or ToolProviderType.Mcp)
@@ -237,6 +253,12 @@ public sealed class AgentPlanToolGuard(
 
         return tool.BusinessDomains.Any(domain =>
             requestedDomains.Contains(domain, StringComparer.OrdinalIgnoreCase));
+    }
+
+    private bool IsMockMcpRuntimeAvailable()
+    {
+        return hostEnvironment?.IsDevelopment() == true &&
+               mockMcpOptions?.Value.Enabled == true;
     }
 
     private static ApiProblemDescriptor? ValidateStepText(AgentStepPlanDto step)

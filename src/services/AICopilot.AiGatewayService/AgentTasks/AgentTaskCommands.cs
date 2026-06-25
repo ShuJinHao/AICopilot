@@ -19,6 +19,7 @@ using AICopilot.Core.AiGateway.Specifications.Uploads;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Messaging;
+using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
 using Microsoft.Extensions.Options;
@@ -149,9 +150,11 @@ public sealed class PlanAgentTaskCommandHandler(
         var effectiveArtifactTypes = requestedArtifactTypes ?? skillDefaultArtifactTypes;
         var effectivePlannerMode = "PlanDraft";
         string? plannerFallbackReason = null;
-        var plannerToolCatalogVersion = PlannerToolCatalog.CurrentVersion;
-        var plannerToolCount = 0;
-        var toolRiskSummary = AgentTaskPlanMetadataBuilder.BuildToolRiskSummary(null);
+        var plannerToolCatalog = BuildPlannerToolCatalog(workflowDraft);
+        var plannerToolCatalogVersion = plannerToolCatalog.Version;
+        var plannerToolCount = plannerToolCatalog.AvailableToolCount;
+        var toolRiskSummary = AgentTaskPlanMetadataBuilder.BuildToolRiskSummary(plannerToolCatalog);
+        var mockMcpOnly = PlannerToolCatalogMetadata.IsMockMcpOnly(plannerToolCatalog.Tools);
         var steps = AgentTaskPlanStepBuilder.BuildPlanSteps(
             preparation.UploadIds.Length > 0,
             preparation.KnowledgeBaseIds.Length > 0,
@@ -232,14 +235,14 @@ public sealed class PlanAgentTaskCommandHandler(
                 preparation.IsSimulationOnlyPlan,
                 request.RequiresDataApproval,
                 toolRiskSummary,
-                MockMcpOnly: true),
+                mockMcpOnly),
             forcedStepCodes,
             approvalCheckpoints,
             AgentTaskPlanMetadataBuilder.BuildPlanDataSourceSummaries(preparation.SelectedDataSources),
             plannerToolCatalogVersion,
             plannerToolCount,
             toolRiskSummary,
-            MockMcpOnly: true,
+            mockMcpOnly,
             toolApprovalCheckpoints,
             SkillCode: selectedSkill?.SkillCode,
             SkillName: selectedSkill?.DisplayName,
@@ -332,6 +335,47 @@ public sealed class PlanAgentTaskCommandHandler(
             "knowledge_research" => AgentTaskType.RagAnswer,
             _ => requestedTaskType
         };
+    }
+
+    private static PlannerToolCatalog BuildPlannerToolCatalog(AgentPlanDraftWorkflowResult? workflowDraft)
+    {
+        if (workflowDraft is null || workflowDraft.Tools.Count == 0)
+        {
+            return new PlannerToolCatalog(PlannerToolCatalog.CurrentVersion, 0, []);
+        }
+
+        var tools = workflowDraft.Tools
+            .Select(tool =>
+            {
+                var toolCode = string.IsNullOrWhiteSpace(tool.ToolName) ? tool.Name : tool.ToolName!;
+                var targetType = tool.TargetType?.ToString() ?? "AgentRuntime";
+                var providerKind = tool.TargetType == AiToolTargetType.McpServer ? "Mcp" : "Plugin";
+                return new AgentPlannerToolSummary(
+                    toolCode,
+                    toolCode,
+                    tool.Description ?? string.Empty,
+                    providerKind,
+                    targetType,
+                    tool.TargetName ?? string.Empty,
+                    tool.JsonSchema?.GetRawText() ?? "{}",
+                    tool.RequiresApproval,
+                    tool.RiskLevel.ToString(),
+                    ProviderKind: providerKind,
+                    IsMock: IsMockTool(tool));
+            })
+            .ToArray();
+
+        return new PlannerToolCatalog(
+            PlannerToolCatalog.CurrentVersion,
+            tools.Length,
+            tools);
+    }
+
+    private static bool IsMockTool(AiToolDefinition tool)
+    {
+        return tool.AdditionalProperties.TryGetValue("isMock", out var isMockValue) &&
+               bool.TryParse(Convert.ToString(isMockValue, System.Globalization.CultureInfo.InvariantCulture), out var isMock) &&
+               isMock;
     }
 
     private static AgentSkillSelection? SelectSkillFromWorkflow(AgentPlanDraftWorkflowResult? workflowDraft)

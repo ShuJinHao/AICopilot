@@ -30,6 +30,10 @@ public sealed class DataAnalysisWidgetEmitter(ILogger<DataAnalysisWidgetEmitter>
                 await sink.WriteAsync(new ChatChunk(DataAnalysisExecutor.ExecutorId, ChunkType.Widget, widget.ToJson()), cancellationToken);
             }
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "构建可视化 Widget 失败。Database: {DbName}", databaseName);

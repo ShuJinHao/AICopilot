@@ -3,7 +3,6 @@ import { defineStore } from 'pinia'
 import { identityService } from '@/services/identityService'
 import {
   getProblemCode,
-  getProblemDetail,
   setAccessToken,
   type ApiError,
   type ApiProblemDetails
@@ -73,27 +72,26 @@ export const useAuthStore = defineStore('auth', () => {
   function resolveUnauthorizedMessage(problem?: ApiProblemDetails | null) {
     switch (problem?.code) {
       case 'account_disabled':
-        return problem.detail || '账号已禁用，请联系管理员恢复启用。'
+        return '账号已禁用，请联系管理员恢复启用。'
       case 'user_missing':
-        return problem.detail || '当前用户不存在，请重新登录。'
+        return '当前用户不存在，请重新登录。'
       case 'session_revoked':
-        return problem.detail || '登录态已失效，请重新登录。'
+        return '登录态已失效，请重新登录。'
       default:
-        return problem?.detail || '登录态已失效，请重新登录。'
+        return '登录态已失效，请重新登录。'
     }
   }
 
   function resolveLoginErrorMessage(error: unknown) {
     const apiError = error as ApiError | undefined
     if (apiError?.status === 401) {
-      const detail = getProblemDetail(apiError.details)
       const code = getProblemCode(apiError.details)
       if (code === 'account_disabled') {
-        return detail || '账号已禁用，请联系管理员恢复启用。'
+        return '账号已禁用，请联系管理员恢复启用。'
       }
 
       if (code === 'invalid_credentials') {
-        return detail || '登录失败，请检查用户名和密码。'
+        return '登录失败，请检查用户名和密码。'
       }
     }
 
@@ -102,22 +100,21 @@ export const useAuthStore = defineStore('auth', () => {
 
   function resolveCloudLoginErrorMessage(error: unknown) {
     const apiError = error as ApiError | undefined
-    const detail = getProblemDetail(apiError?.details)
     const code = getProblemCode(apiError?.details)
 
     switch (code) {
       case 'cloud_oidc_not_configured':
-        return detail || 'Cloud 登录尚未配置。'
+        return 'Cloud 登录尚未配置。'
       case 'cloud_oidc_invalid_principal':
-        return detail || 'Cloud 登录态无效或已过期，请重新登录。'
+        return 'Cloud 登录态无效或已过期，请重新登录。'
       case 'cloud_identity_inactive':
-        return detail || 'Cloud 账号或员工状态无效，无法登录 AICopilot。'
+        return 'Cloud 账号或员工状态无效，无法登录 AICopilot。'
       case 'external_identity_conflict':
-        return detail || 'Cloud 身份与现有 AI 账号存在冲突，请联系 AI 管理员处理。'
+        return 'Cloud 身份与现有 AI 账号存在冲突，请联系 AI 管理员处理。'
       case 'account_disabled':
-        return detail || 'AICopilot 本地账号已禁用，请联系 AI 管理员。'
+        return 'AICopilot 本地账号已禁用，请联系 AI 管理员。'
       default:
-        return detail || 'Cloud 登录失败，请重新从 Cloud 登录。'
+        return 'Cloud 登录失败，请重新从 Cloud 登录。'
     }
   }
 
