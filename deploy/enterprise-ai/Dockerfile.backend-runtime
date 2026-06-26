@@ -15,10 +15,13 @@ WORKDIR /app
 COPY . .
 
 ARG APP_DLL
-ENV APP_DLL=${APP_DLL} \
-    DOTNET_RUNNING_IN_CONTAINER=true \
+RUN test -n "${APP_DLL}" \
+    && test -f "${APP_DLL}" \
+    && ln -sf "${APP_DLL}" AICopilot.App.dll
+
+ENV DOTNET_RUNNING_IN_CONTAINER=true \
     TZ=Asia/Shanghai
 
 USER app
 
-ENTRYPOINT ["sh", "-c", "exec dotnet \"$APP_DLL\""]
+ENTRYPOINT ["dotnet", "AICopilot.App.dll"]
