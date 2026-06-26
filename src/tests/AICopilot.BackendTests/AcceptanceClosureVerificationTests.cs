@@ -1,4 +1,5 @@
-﻿using AICopilot.Infrastructure.AiGateway;
+﻿using AICopilot.Core.AiGateway.Aggregates.Sessions;
+using AICopilot.Infrastructure.AiGateway;
 using AICopilot.Services.Contracts;
 using System.Net;
 using System.Net.Http.Json;
@@ -220,22 +221,19 @@ public sealed class AcceptanceClosureVerificationTests
             $"acceptance-{Guid.NewGuid():N}.csv",
             "station,count\nA,2\nB,3\nC,5\n");
 
-        var task = await PostJsonAsync<AgentTaskDto>("/api/aigateway/agent/task/plan", new
+        var task = await PostPlanStreamAsync(new
         {
             sessionId = session.Id,
             goal = "Generate a controlled acceptance report from the uploaded CSV.",
+            skillCode = "artifact_report",
             taskType = 2,
             modelId = (Guid?)null,
             uploadIds = new[] { upload.Id },
             knowledgeBaseIds = Array.Empty<Guid>()
         });
 
-        task.Status.Should().Be("WaitingPlanApproval");
-        task.WorkspaceCode.Should().NotBeNullOrWhiteSpace();
-
-        var initialWorkspace = await GetJsonAsync<ArtifactWorkspaceDto>(
-            $"/api/aigateway/workspace/{task.WorkspaceCode}");
-        initialWorkspace.Artifacts.Should().BeEmpty();
+        task.Status.Should().Be("Draft");
+        task.WorkspaceCode.Should().BeNull();
 
         var planApproval = (await GetPendingApprovalsAsync(task.Id))
             .Should()
@@ -248,6 +246,7 @@ public sealed class AcceptanceClosureVerificationTests
         task.RunQueueStatus.Should().Be("Queued");
         task = await WaitForTaskStatusAsync(task.Id, "WaitingToolApproval");
         task.Status.Should().Be("WaitingToolApproval");
+        task.WorkspaceCode.Should().NotBeNullOrWhiteSpace();
 
         var draftWorkspace = await GetJsonAsync<ArtifactWorkspaceDto>(
             $"/api/aigateway/workspace/{task.WorkspaceCode}");
@@ -326,6 +325,59 @@ public sealed class AcceptanceClosureVerificationTests
         auditSummary.Should().Contain(item => item.ActionCode == "Agent.WorkspaceFinalize" &&
                                              item.WorkspaceCode == task.WorkspaceCode);
         auditSummary.Should().OnlyContain(item => item.TaskId == task.Id);
+
+        var timelineEvents = await QueryMessageTimelineEventsAsync(session.Id);
+        timelineEvents.Select(item => item.Sequence).Should().BeInAscendingOrder();
+        timelineEvents.Select(item => item.Sequence).Should().OnlyHaveUniqueItems();
+
+        var taskEvents = timelineEvents
+            .Where(item => item.AgentTaskId == task.Id)
+            .ToList();
+        taskEvents.Should().OnlyContain(item => item.MessageId == null);
+        taskEvents.Should().OnlyContain(item => item.PayloadJson == null);
+        taskEvents.Should().Contain(item =>
+            item.EventType == nameof(MessageEventType.AgentTaskPlanCreated) &&
+            item.ApprovalRequestId.HasValue &&
+            item.ArtifactWorkspaceId == null);
+        taskEvents.Should().Contain(item =>
+            item.EventType == nameof(MessageEventType.ApprovalRequested) &&
+            item.ApprovalRequestId.HasValue);
+        taskEvents.Should().Contain(item =>
+            item.EventType == nameof(MessageEventType.ApprovalDecided) &&
+            item.ApprovalRequestId.HasValue);
+        taskEvents.Should().Contain(item =>
+            item.EventType == nameof(MessageEventType.AgentTaskStepStarted) &&
+            item.AgentStepId.HasValue);
+        taskEvents.Should().Contain(item =>
+            item.EventType == nameof(MessageEventType.AgentTaskStepCompleted) &&
+            item.AgentStepId.HasValue);
+        taskEvents.Should().Contain(item =>
+            item.EventType == nameof(MessageEventType.ArtifactReady) &&
+            item.ArtifactWorkspaceId == finalizedWorkspace.Id &&
+            item.ArtifactId.HasValue);
+        taskEvents.Should().ContainSingle(item =>
+            item.EventType == nameof(MessageEventType.FinalOutputReady) &&
+            item.ArtifactWorkspaceId == finalizedWorkspace.Id);
+
+        var timeline = await GetJsonAsync<SessionTimelinePageDto>(
+            $"/api/aigateway/session/timeline?sessionId={session.Id}&count=200");
+        timeline.Items.Select(item => item.Sequence).Should().BeInAscendingOrder();
+        timeline.Items.Should().Contain(item =>
+            item.EventType == nameof(MessageEventType.AgentTaskPlanCreated) &&
+            item.AgentTaskId == task.Id &&
+            item.AgentTaskStatus == "Completed");
+        timeline.Items.Should().Contain(item =>
+            item.EventType == nameof(MessageEventType.ApprovalDecided) &&
+            item.ApprovalRequestId.HasValue &&
+            item.ApprovalStatus == "Approved");
+        timeline.Items.Should().Contain(item =>
+            item.EventType == nameof(MessageEventType.FinalOutputReady) &&
+            item.WorkspaceCode == finalizedWorkspace.WorkspaceCode &&
+            item.WorkspaceStatus == "Finalized");
+        timeline.Items.Should().Contain(item =>
+            item.EventType == nameof(MessageEventType.ArtifactReady) &&
+            item.ArtifactStatus == "Final" &&
+            item.ArtifactDownloadUrl != null);
     }
 
     [Fact]
@@ -335,10 +387,11 @@ public sealed class AcceptanceClosureVerificationTests
 
         var templateId = await CreateConversationTemplateAsync();
         var session = await PostJsonAsync<CreatedSessionDto>("/api/aigateway/session", new { templateId });
-        var task = await PostJsonAsync<AgentTaskDto>("/api/aigateway/agent/task/plan", new
+        var task = await PostPlanStreamAsync(new
         {
             sessionId = session.Id,
             goal = "Create a report that should be rejected before execution.",
+            skillCode = "artifact_report",
             taskType = 2,
             modelId = (Guid?)null,
             uploadIds = Array.Empty<Guid>(),
@@ -359,16 +412,29 @@ public sealed class AcceptanceClosureVerificationTests
 
         var rejectedTask = await GetJsonAsync<AgentTaskDto>($"/api/aigateway/agent/task?id={task.Id}");
         rejectedTask.Status.Should().Be("Rejected");
-
-        var workspace = await GetJsonAsync<ArtifactWorkspaceDto>(
-            $"/api/aigateway/workspace/{task.WorkspaceCode}");
-        workspace.Artifacts.Should().BeEmpty();
+        rejectedTask.WorkspaceCode.Should().BeNull();
 
         var auditSummary = await GetJsonAsync<List<AgentTaskAuditSummaryDto>>(
             $"/api/aigateway/agent/task/{task.Id}/audit-summary");
         auditSummary.Should().Contain(item => item.ActionCode == "Agent.ApprovalDecision" &&
                                              item.Result == "Rejected");
         auditSummary.Should().NotContain(item => item.ActionCode == "Agent.ToolExecution");
+
+        var timeline = await GetJsonAsync<SessionTimelinePageDto>(
+            $"/api/aigateway/session/timeline?sessionId={session.Id}&count=200");
+        timeline.Items.Should().Contain(item =>
+            item.EventType == nameof(MessageEventType.AgentTaskPlanCreated) &&
+            item.AgentTaskId == task.Id &&
+            item.AgentTaskStatus == "Rejected");
+        timeline.Items.Should().Contain(item =>
+            item.EventType == nameof(MessageEventType.ApprovalRequested) &&
+            item.ApprovalRequestId == planApproval.Id &&
+            item.ApprovalStatus == "Rejected");
+        timeline.Items.Should().Contain(item =>
+            item.EventType == nameof(MessageEventType.ApprovalDecided) &&
+            item.ApprovalRequestId == planApproval.Id &&
+            item.ApprovalStatus == "Rejected" &&
+            item.ApprovalDecidedAt.HasValue);
     }
 
     private static ServiceProvider CreateRedisServiceProvider(string redisConnectionString)
@@ -530,6 +596,61 @@ public sealed class AcceptanceClosureVerificationTests
         return (await response.Content.ReadFromJsonAsync<T>(JsonOptions))!;
     }
 
+    private async Task<AgentTaskDto> PostPlanStreamAsync(object payload)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/aigateway/agent/task/plan-stream")
+        {
+            Content = JsonContent.Create(payload, options: JsonOptions)
+        };
+
+        using var response = await _fixture.HttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.Content.Headers.ContentType?.MediaType.Should().Be("text/event-stream");
+
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        using var reader = new StreamReader(stream);
+        var buffer = new StringBuilder();
+
+        while (true)
+        {
+            var line = await reader.ReadLineAsync();
+            if (line is null)
+            {
+                break;
+            }
+
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                if (buffer.Length == 0)
+                {
+                    continue;
+                }
+
+                var data = buffer.ToString();
+                buffer.Clear();
+                if (data == "[DONE]")
+                {
+                    break;
+                }
+
+                var chunk = JsonSerializer.Deserialize<ChatChunkDto>(data, JsonOptions)!;
+                if (chunk.Type == "AgentTask")
+                {
+                    return JsonSerializer.Deserialize<AgentTaskDto>(chunk.Content, JsonOptions)!;
+                }
+
+                continue;
+            }
+
+            if (line.StartsWith("data:", StringComparison.Ordinal))
+            {
+                buffer.Append(line["data:".Length..].TrimStart());
+            }
+        }
+
+        throw new Xunit.Sdk.XunitException("Plan stream completed without an AgentTask chunk.");
+    }
+
     private async Task PostJsonExpectingStatusAsync(string uri, object payload, HttpStatusCode statusCode)
     {
         using var response = await _fixture.HttpClient.PostAsJsonAsync(uri, payload, JsonOptions);
@@ -588,6 +709,49 @@ public sealed class AcceptanceClosureVerificationTests
         while (await reader.ReadAsync())
         {
             result.Add(reader.GetString(0));
+        }
+
+        return result;
+    }
+
+    private async Task<List<MessageTimelineEventRow>> QueryMessageTimelineEventsAsync(Guid sessionId)
+    {
+        var connectionString = await _fixture.GetConnectionStringAsync();
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            SELECT sequence,
+                   event_type,
+                   message_id,
+                   agent_task_id,
+                   agent_step_id,
+                   approval_request_id,
+                   artifact_workspace_id,
+                   artifact_id,
+                   payload_json
+            FROM aigateway.message_events
+            WHERE session_id = @sessionId
+            ORDER BY sequence;
+            """;
+        command.Parameters.AddWithValue("sessionId", sessionId);
+
+        var result = new List<MessageTimelineEventRow>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            result.Add(new MessageTimelineEventRow(
+                reader.GetInt32(0),
+                reader.GetString(1),
+                reader.IsDBNull(2) ? null : reader.GetInt32(2),
+                reader.IsDBNull(3) ? null : reader.GetGuid(3),
+                reader.IsDBNull(4) ? null : reader.GetGuid(4),
+                reader.IsDBNull(5) ? null : reader.GetGuid(5),
+                reader.IsDBNull(6) ? null : reader.GetGuid(6),
+                reader.IsDBNull(7) ? null : reader.GetGuid(7),
+                reader.IsDBNull(8) ? null : reader.GetString(8)));
         }
 
         return result;
@@ -726,4 +890,54 @@ public sealed class AcceptanceClosureVerificationTests
         string Summary,
         DateTime CreatedAt,
         IReadOnlyDictionary<string, string> Metadata);
+
+    private sealed record SessionTimelinePageDto(
+        IReadOnlyList<SessionTimelineEventDto> Items,
+        int? BeforeSequence,
+        int? AfterSequence,
+        bool HasMore,
+        bool HasMoreBefore,
+        bool HasMoreAfter);
+
+    private sealed record SessionTimelineEventDto(
+        int Sequence,
+        string EventType,
+        DateTimeOffset CreatedAt,
+        int? MessageId,
+        Guid? AgentTaskId,
+        string? AgentTaskTitle,
+        string? AgentTaskGoal,
+        string? AgentTaskStatus,
+        Guid? AgentStepId,
+        int? AgentStepIndex,
+        string? AgentStepTitle,
+        string? AgentStepStatus,
+        string? AgentStepToolCode,
+        Guid? ApprovalRequestId,
+        string? ApprovalType,
+        string? ApprovalStatus,
+        string? ApprovalTargetName,
+        DateTimeOffset? ApprovalDecidedAt,
+        Guid? ArtifactWorkspaceId,
+        string? WorkspaceCode,
+        string? WorkspaceStatus,
+        Guid? ArtifactId,
+        string? ArtifactName,
+        string? ArtifactType,
+        string? ArtifactStatus,
+        string? ArtifactRelativePath,
+        string? ArtifactDownloadUrl);
+
+    private sealed record MessageTimelineEventRow(
+        int Sequence,
+        string EventType,
+        int? MessageId,
+        Guid? AgentTaskId,
+        Guid? AgentStepId,
+        Guid? ApprovalRequestId,
+        Guid? ArtifactWorkspaceId,
+        Guid? ArtifactId,
+        string? PayloadJson);
+
+    private sealed record ChatChunkDto(string Type, string Source, string Content);
 }

@@ -2,6 +2,11 @@ name: aicopilot-image
 
 on:
   workflow_dispatch:
+    inputs:
+      services:
+        description: "Optional image services to build (comma/space separated); empty means all. Supported: httpapi,migration,dataworker,ragworker,web"
+        required: false
+        type: string
   push:
     branches: [main]
     paths:
@@ -11,6 +16,7 @@ on:
       - "src/services/**"
       - "src/infrastructure/**"
       - "src/vues/AICopilot.Web/**"
+      - "deploy/enterprise-ai/Dockerfile.backend-runtime"
       - "AICopilot.slnx"
       - "global.json"
       - ".github/workflows/aicopilot-image.yml"
@@ -62,11 +68,39 @@ jobs:
           web=false
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            httpapi=true
-            migration=true
-            dataworker=true
-            ragworker=true
-            web=true
+            services_input="${{ inputs.services }}"
+            if [ -z "$services_input" ]; then
+              httpapi=true
+              migration=true
+              dataworker=true
+              ragworker=true
+              web=true
+            else
+              for service in $(printf '%s' "$services_input" | tr ',' ' ')
+              do
+                case "$service" in
+                  httpapi|aicopilot-httpapi)
+                    httpapi=true
+                    ;;
+                  migration|aicopilot-migration)
+                    migration=true
+                    ;;
+                  dataworker|aicopilot-dataworker)
+                    dataworker=true
+                    ;;
+                  ragworker|aicopilot-ragworker)
+                    ragworker=true
+                    ;;
+                  web|webui|aicopilot-webui)
+                    web=true
+                    ;;
+                  *)
+                    echo "Unsupported image service: $service" >&2
+                    exit 64
+                    ;;
+                esac
+              done
+            fi
           else
             before="${{ github.event.before }}"
             if [ -z "$before" ] || printf '%s' "$before" | grep -Eq '^0+$'; then
@@ -97,7 +131,8 @@ jobs:
               if [ "$httpapi" != "true" ] && [ "$migration" != "true" ] && [ "$dataworker" != "true" ] && [ "$ragworker" != "true" ] && [ "$web" != "true" ]; then
                 if grep -Eq '^(AICopilot\.slnx|global\.json)$' "$changed_files" \
                   || grep -Eq '^src/(core|shared|services|infrastructure)/' "$changed_files" \
-                  || grep -Eq '^src/hosts/AICopilot\.ServiceDefaults/' "$changed_files"; then
+                  || grep -Eq '^src/hosts/AICopilot\.ServiceDefaults/' "$changed_files" \
+                  || grep -Eq '^deploy/enterprise-ai/Dockerfile\.backend-runtime$' "$changed_files"; then
                   httpapi=true
                   migration=true
                   dataworker=true
@@ -198,15 +233,27 @@ jobs:
           publish_dotnet_image() {
             local project_path="$1"
             local image_name="$2"
+            local app_dll="$3"
+            local publish_dir="$RUNNER_TEMP/aicopilot-container-publish/$image_name"
 
+            rm -rf "$publish_dir"
+            mkdir -p "$publish_dir"
             dotnet publish "$project_path" \
               -c Release \
               --os linux \
               --arch x64 \
-              /t:PublishContainer \
-              -p:ContainerRegistry="${{ steps.registry.outputs.registry }}" \
-              -p:ContainerRepository="${{ steps.registry.outputs.namespace }}/$image_name" \
-              -p:ContainerImageTag="$release_tag"
+              --self-contained false \
+              -p:UseAppHost=false \
+              -o "$publish_dir"
+
+            docker buildx build \
+              --platform linux/amd64 \
+              --build-arg RUNTIME_BASE_IMAGE="${DOTNET_RUNTIME_BASE_IMAGE:-mcr.microsoft.com/dotnet/aspnet:10.0-noble}" \
+              --build-arg APP_DLL="$app_dll" \
+              --tag "$image_prefix/$image_name:$release_tag" \
+              --push \
+              --file deploy/enterprise-ai/Dockerfile.backend-runtime \
+              "$publish_dir"
 
             echo "- \`$image_prefix/$image_name:$release_tag\`" >> "$GITHUB_STEP_SUMMARY"
           }
@@ -216,16 +263,16 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [ "${{ steps.changes.outputs.httpapi }}" = "true" ]; then
-            publish_dotnet_image "src/hosts/AICopilot.HttpApi/AICopilot.HttpApi.csproj" "aicopilot-httpapi"
+            publish_dotnet_image "src/hosts/AICopilot.HttpApi/AICopilot.HttpApi.csproj" "aicopilot-httpapi" "AICopilot.HttpApi.dll"
           fi
           if [ "${{ steps.changes.outputs.migration }}" = "true" ]; then
-            publish_dotnet_image "src/hosts/AICopilot.MigrationWorkApp/AICopilot.MigrationWorkApp.csproj" "aicopilot-migration"
+            publish_dotnet_image "src/hosts/AICopilot.MigrationWorkApp/AICopilot.MigrationWorkApp.csproj" "aicopilot-migration" "AICopilot.MigrationWorkApp.dll"
           fi
           if [ "${{ steps.changes.outputs.dataworker }}" = "true" ]; then
-            publish_dotnet_image "src/hosts/AICopilot.DataWorker/AICopilot.DataWorker.csproj" "aicopilot-dataworker"
+            publish_dotnet_image "src/hosts/AICopilot.DataWorker/AICopilot.DataWorker.csproj" "aicopilot-dataworker" "AICopilot.DataWorker.dll"
           fi
           if [ "${{ steps.changes.outputs.ragworker }}" = "true" ]; then
-            publish_dotnet_image "src/hosts/AICopilot.RagWorker/AICopilot.RagWorker.csproj" "aicopilot-ragworker"
+            publish_dotnet_image "src/hosts/AICopilot.RagWorker/AICopilot.RagWorker.csproj" "aicopilot-ragworker" "AICopilot.RagWorker.dll"
           fi
 
       - name: Build and push web image
@@ -296,3 +343,33 @@ jobs:
           path: ${{ runner.temp }}/aicopilot-built-services/services.txt
           if-no-files-found: error
           retention-days: 14
+
+      - name: Prune old Harbor image tags
+        if: steps.changes.outputs.any_backend == 'true' || steps.changes.outputs.web == 'true'
+        shell: bash
+        env:
+          HARBOR_URL: ${{ steps.registry.outputs.registry }}
+          HARBOR_PROJECT: ${{ steps.registry.outputs.namespace }}
+          HARBOR_USERNAME: ${{ secrets.OCI_REGISTRY_USERNAME }}
+          HARBOR_PASSWORD: ${{ secrets.OCI_REGISTRY_PASSWORD }}
+          HARBOR_KEEP_SHA_TAGS: 3
+        run: |
+          set -euo pipefail
+          repositories=()
+          if [ "${{ steps.changes.outputs.httpapi }}" = "true" ]; then
+            repositories+=(aicopilot-httpapi)
+          fi
+          if [ "${{ steps.changes.outputs.migration }}" = "true" ]; then
+            repositories+=(aicopilot-migration)
+          fi
+          if [ "${{ steps.changes.outputs.dataworker }}" = "true" ]; then
+            repositories+=(aicopilot-dataworker)
+          fi
+          if [ "${{ steps.changes.outputs.ragworker }}" = "true" ]; then
+            repositories+=(aicopilot-ragworker)
+          fi
+          if [ "${{ steps.changes.outputs.web }}" = "true" ]; then
+            repositories+=(aicopilot-webui)
+          fi
+
+          bash deploy/enterprise-ai/harbor-retention.sh "${repositories[@]}"

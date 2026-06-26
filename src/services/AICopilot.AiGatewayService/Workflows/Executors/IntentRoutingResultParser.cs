@@ -1,4 +1,5 @@
 using System.Text.Json;
+using AICopilot.AiGatewayService.Agents;
 using AICopilot.AiGatewayService.Models;
 
 namespace AICopilot.AiGatewayService.Workflows.Executors;
@@ -13,7 +14,8 @@ public static class IntentRoutingResultParser
             return false;
         }
 
-        var json = ExtractJson(text);
+        var cleanText = ModelOutputSanitizer.Strip(text).CleanText;
+        var json = ExtractJson(cleanText);
         if (string.IsNullOrWhiteSpace(json))
         {
             return false;
@@ -41,6 +43,7 @@ public static class IntentRoutingResultParser
             }
 
             intents = intents
+                .Select(NormalizeIntent)
                 .Where(intent => !string.IsNullOrWhiteSpace(intent.Intent))
                 .ToList();
 
@@ -50,6 +53,23 @@ public static class IntentRoutingResultParser
         {
             return false;
         }
+    }
+
+    private static IntentResult NormalizeIntent(IntentResult intent)
+    {
+        if (string.IsNullOrWhiteSpace(intent.Intent) &&
+            !string.IsNullOrWhiteSpace(intent.SkillCode))
+        {
+            intent.Intent = $"Skill.{intent.SkillCode.Trim()}";
+        }
+
+        if (string.IsNullOrWhiteSpace(intent.Reasoning) &&
+            !string.IsNullOrWhiteSpace(intent.Reason))
+        {
+            intent.Reasoning = intent.Reason.Trim();
+        }
+
+        return intent;
     }
 
     private static string? ExtractJson(string text)

@@ -1,6 +1,7 @@
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
+using AICopilot.AiGatewayService.Sessions;
 using AICopilot.Core.AiGateway.Specifications.AgentTasks;
 using AICopilot.Core.AiGateway.Specifications.Approvals;
 using AICopilot.Core.AiGateway.Specifications.Artifacts;
@@ -17,7 +18,9 @@ public sealed class ApproveAgentTaskPlanCommandHandler(
     IRepository<ApprovalRequest> approvalRepository,
     IReadRepository<ArtifactWorkspace> workspaceRepository,
     AgentAuditRecorder auditRecorder,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    AgentPlanDraftConfirmationService planDraftConfirmationService,
+    MessageTimelineProjectionWriter? timelineProjectionWriter = null)
     : ICommandHandler<ApproveAgentTaskPlanCommand, Result<AgentTaskDto>>
 {
     public async Task<Result<AgentTaskDto>> Handle(ApproveAgentTaskPlanCommand request, CancellationToken cancellationToken)
@@ -37,7 +40,7 @@ public sealed class ApproveAgentTaskPlanCommandHandler(
                 AgentApprovalType.Plan,
                 task.Id.Value.ToString()),
             cancellationToken);
-        if (approval is null && task.Status == AgentTaskStatus.WaitingPlanApproval)
+        if (approval is null && task.Status is AgentTaskStatus.Draft or AgentTaskStatus.WaitingPlanApproval)
         {
             approval = new ApprovalRequest(
                 task.Id,
@@ -48,15 +51,25 @@ public sealed class ApproveAgentTaskPlanCommandHandler(
             approvalRepository.Add(approval);
         }
 
+        if (task.Status is AgentTaskStatus.Draft or AgentTaskStatus.WaitingPlanApproval)
+        {
+            var confirmation = await planDraftConfirmationService.ConfirmAsync(task, now, cancellationToken);
+            if (!confirmation.IsSuccess)
+            {
+                return Result.From(confirmation);
+            }
+
+            task.ApprovePlan(now);
+        }
+
         if (approval is not null)
         {
             approval.Approve(userId, "Plan approved.", now);
             approvalRepository.Update(approval);
-        }
-
-        if (task.Status == AgentTaskStatus.WaitingPlanApproval)
-        {
-            task.ApprovePlan(now);
+            if (timelineProjectionWriter is not null)
+            {
+                await timelineProjectionWriter.StageApprovalDecidedAsync(task, approval, cancellationToken);
+            }
         }
 
         repository.Update(task);

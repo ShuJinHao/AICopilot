@@ -13,6 +13,7 @@ public record IntentResult
     /// <summary>
     /// 意图标识符
     /// 规范：
+    /// - Skill 类：Skill.{SkillCode}
     /// - 工具类：Action.{PluginName}
     /// - 知识类：Knowledge.{KnowledgeBaseName}
     /// - 自由数据分析：Analysis.{BusinessDatabaseName}
@@ -21,6 +22,13 @@ public record IntentResult
     /// </summary>
     [JsonPropertyName("intent")]
     public string Intent { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Agent Skill 自动选择的简化输出字段。
+    /// 当模型只返回 skillCode 时，解析器会把它规范化为 Skill.{SkillCode} 意图。
+    /// </summary>
+    [JsonPropertyName("skillCode")]
+    public string? SkillCode { get; set; }
 
     /// <summary>
     /// 置信度 (0.0 - 1.0)
@@ -35,6 +43,12 @@ public record IntentResult
     /// </summary>
     [JsonPropertyName("reasoning")]
     public string? Reasoning { get; set; }
+
+    /// <summary>
+    /// Agent Skill 自动选择的简化依据字段。
+    /// </summary>
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
 
     /// <summary>
     /// 检索参数

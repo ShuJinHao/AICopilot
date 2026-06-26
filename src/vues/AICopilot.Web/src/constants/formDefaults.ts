@@ -6,20 +6,6 @@ export const FORM_DEFAULTS = {
     maxOutputTokens: 4096,
     temperature: 0.7
   },
-  businessDatabase: {
-    provider: 1,
-    externalSystemType: 0,
-    defaultQueryLimit: 200,
-    maxQueryLimit: 1000
-  },
-  mcpServer: {
-    transportType: 1,
-    command: 'dotnet',
-    chatExposureMode: 0,
-    externalSystemType: 0,
-    capabilityKind: 1,
-    riskLevel: 1
-  },
   embeddingModel: {
     provider: 'OpenAI',
     baseUrl: 'https://api.openai.com/v1',

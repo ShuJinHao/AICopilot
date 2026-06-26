@@ -8,20 +8,11 @@ export const CHAT_REQUIRED_PERMISSIONS = [
 export const CONFIG_READ_PERMISSIONS = {
   languageModel: ['AiGateway.GetLanguageModel', 'AiGateway.GetListLanguageModels'],
   routingModel: ['AiGateway.GetRoutingModel', 'AiGateway.GetListRoutingModels'],
-  providerReliability: ['AiGateway.GetProviderReliability'],
   conversationTemplate: [
     'AiGateway.GetConversationTemplate',
     'AiGateway.GetConversationTemplateByName',
     'AiGateway.GetListConversationTemplates'
-  ],
-  approvalPolicy: ['AiGateway.GetApprovalPolicy', 'AiGateway.GetListApprovalPolicies'],
-  businessDatabase: [
-    'DataAnalysis.GetBusinessDatabase',
-    'DataAnalysis.GetListBusinessDatabases'
-  ],
-  mcpServer: ['Mcp.GetServer', 'Mcp.GetListServers'],
-  toolRegistry: ['AiGateway.ToolRegistry.Read'],
-  cloudReadonlyReadiness: ['AiGateway.ToolRegistry.Read']
+  ]
 } as const
 
 export const CONFIG_WRITE_PERMISSIONS = {
@@ -39,21 +30,6 @@ export const CONFIG_WRITE_PERMISSIONS = {
     create: 'AiGateway.CreateConversationTemplate',
     update: 'AiGateway.UpdateConversationTemplate',
     delete: 'AiGateway.DeleteConversationTemplate'
-  },
-  approvalPolicy: {
-    create: 'AiGateway.CreateApprovalPolicy',
-    update: 'AiGateway.UpdateApprovalPolicy',
-    delete: 'AiGateway.DeleteApprovalPolicy'
-  },
-  businessDatabase: {
-    create: 'DataAnalysis.CreateBusinessDatabase',
-    update: 'DataAnalysis.UpdateBusinessDatabase',
-    delete: 'DataAnalysis.DeleteBusinessDatabase'
-  },
-  mcpServer: {
-    create: 'Mcp.CreateServer',
-    update: 'Mcp.UpdateServer',
-    delete: 'Mcp.DeleteServer'
   }
 } as const
 

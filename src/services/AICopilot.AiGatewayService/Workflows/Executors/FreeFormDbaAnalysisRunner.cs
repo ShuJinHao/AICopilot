@@ -9,13 +9,13 @@ public sealed class FreeFormDbaAnalysisRunner(
     DataAnalysisAgentBuilder agentBuilder,
     IBusinessDatabaseReadService businessDatabaseReadService,
     IDataAnalysisVisualizationContext vizContext,
-    IChatStreamRuntime chatStreamRuntime,
+    IAgentStreamRuntime chatStreamRuntime,
     DataAnalysisWidgetEmitter widgetEmitter,
     ILogger<FreeFormDbaAnalysisRunner> logger)
 {
     public async Task<string> RunAsync(
         IntentResult intent,
-        ChatWorkflowSink? sink,
+        AgentWorkflowSink? sink,
         SessionRuntimeSnapshot? session,
         CancellationToken cancellationToken)
     {
@@ -39,6 +39,7 @@ public sealed class FreeFormDbaAnalysisRunner(
 
             await using var scopedAgent = await agentBuilder.BuildAsync(db);
             var thread = await scopedAgent.Agent.CreateSessionAsync(cancellationToken);
+            var thinkTagFilter = new StreamingThinkTagFilter();
 
             await foreach (var update in scopedAgent.Agent.RunStreamingAsync(
                                intent.Query!,
@@ -56,10 +57,19 @@ public sealed class FreeFormDbaAnalysisRunner(
                                    session,
                                    assistantText: null,
                                    appendAssistantText: false,
-                                   cancellationToken))
+                                   cancellationToken,
+                                   thinkTagFilter))
                 {
                     await sink.WriteAsync(chunk, cancellationToken);
                 }
+            }
+
+            var cleanRemainder = thinkTagFilter.Flush();
+            if (!string.IsNullOrEmpty(cleanRemainder) && sink is not null)
+            {
+                await sink.WriteAsync(
+                    new ChatChunk(DataAnalysisExecutor.ExecutorId, ChunkType.Text, cleanRemainder),
+                    cancellationToken);
             }
 
             logger.LogInformation("数据库 {DbName} 查询完成。", dbName);
@@ -88,6 +98,10 @@ public sealed class FreeFormDbaAnalysisRunner(
         {
             logger.LogWarning(ex, "执行数据分析意图时命中安全限制。Database: {DbName}", dbName);
             return $"[系统提示]: 查询数据库 {dbName} 的请求被系统安全策略拒绝。";
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {

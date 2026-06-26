@@ -27,6 +27,7 @@ public sealed class AcceptanceBaselineTests(AICopilotAppFixture fixture) : IClas
         var semanticDatabase = await ProvisionSemanticBusinessDatabaseAsync();
         Guid businessDatabaseId = Guid.Empty;
         Guid languageModelId = Guid.Empty;
+        Guid routingConfigurationId = Guid.Empty;
         Guid generalTemplateId = Guid.Empty;
         Guid intentRoutingTemplateId = Guid.Empty;
         Guid sessionId = Guid.Empty;
@@ -57,6 +58,7 @@ public sealed class AcceptanceBaselineTests(AICopilotAppFixture fixture) : IClas
                 languageModelId,
                 "intent routing",
                 "You must choose the best intent from the list and return a JSON array. {{$IntentList}}");
+            routingConfigurationId = await CreateActiveRoutingModelAsync(languageModelId);
 
             sessionId = await CreateSessionAsync(generalTemplateId);
 
@@ -110,6 +112,11 @@ public sealed class AcceptanceBaselineTests(AICopilotAppFixture fixture) : IClas
                 await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/conversation-template", new { id = generalTemplateId }, HttpStatusCode.NoContent);
             }
 
+            if (routingConfigurationId != Guid.Empty)
+            {
+                await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/routing-model", new { id = routingConfigurationId }, HttpStatusCode.NoContent);
+            }
+
             if (languageModelId != Guid.Empty)
             {
                 await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/language-model", new { id = languageModelId }, HttpStatusCode.NoContent);
@@ -128,6 +135,7 @@ public sealed class AcceptanceBaselineTests(AICopilotAppFixture fixture) : IClas
         await AuthenticateAsAdminAsync();
 
         Guid languageModelId = Guid.Empty;
+        Guid routingConfigurationId = Guid.Empty;
         Guid generalTemplateId = Guid.Empty;
         Guid intentRoutingTemplateId = Guid.Empty;
         Guid sessionId = Guid.Empty;
@@ -151,6 +159,7 @@ public sealed class AcceptanceBaselineTests(AICopilotAppFixture fixture) : IClas
                 languageModelId,
                 "intent routing",
                 "You must choose the best intent from the list and return a JSON array. {{$IntentList}}");
+            routingConfigurationId = await CreateActiveRoutingModelAsync(languageModelId);
 
             sessionId = await CreateSessionAsync(generalTemplateId);
 
@@ -188,6 +197,11 @@ public sealed class AcceptanceBaselineTests(AICopilotAppFixture fixture) : IClas
             if (generalTemplateId != Guid.Empty)
             {
                 await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/conversation-template", new { id = generalTemplateId }, HttpStatusCode.NoContent);
+            }
+
+            if (routingConfigurationId != Guid.Empty)
+            {
+                await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/routing-model", new { id = routingConfigurationId }, HttpStatusCode.NoContent);
             }
 
             if (languageModelId != Guid.Empty)
@@ -251,7 +265,20 @@ public sealed class AcceptanceBaselineTests(AICopilotAppFixture fixture) : IClas
             baseUrl,
             apiKey,
             maxTokens = 4096,
+            usages = new[] { "Chat", "Routing" },
             temperature = 0.2
+        });
+
+        return created.Id;
+    }
+
+    private async Task<Guid> CreateActiveRoutingModelAsync(Guid modelId)
+    {
+        var created = await PostJsonAsync<RoutingModelConfigurationDto>("/api/aigateway/routing-model", new
+        {
+            name = $"acceptance-routing-{Guid.NewGuid():N}",
+            modelId,
+            isActive = true
         });
 
         return created.Id;
@@ -510,6 +537,8 @@ public sealed class AcceptanceBaselineTests(AICopilotAppFixture fixture) : IClas
     private sealed record LoginUserDto(string Token, string UserName);
 
     private sealed record CreatedLanguageModelDto(Guid Id, string Name);
+
+    private sealed record RoutingModelConfigurationDto(Guid Id);
 
     private sealed record CreatedConversationTemplateDto(Guid Id, string Name);
 

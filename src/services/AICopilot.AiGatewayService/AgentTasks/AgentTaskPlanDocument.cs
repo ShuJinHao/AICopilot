@@ -1,6 +1,5 @@
 using System.Text.Json.Serialization;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
-using AICopilot.AiGatewayService.CloudReadiness;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
 
@@ -26,13 +25,6 @@ internal sealed record AgentTaskPlanDocument(
     [property: JsonPropertyName("queryMode")] string? QueryMode = null,
     [property: JsonPropertyName("requiresDataApproval")] bool RequiresDataApproval = false,
     [property: JsonPropertyName("artifactTypes")] IReadOnlyCollection<string>? ArtifactTypes = null,
-    [property: JsonPropertyName("trialScenarioId")] string? TrialScenarioId = null,
-    [property: JsonPropertyName("trialScenarioTitle")] string? TrialScenarioTitle = null,
-    [property: JsonPropertyName("isSimulationTrial")] bool IsSimulationTrial = false,
-    [property: JsonPropertyName("isCloudSandboxControlledTrial")] bool IsCloudSandboxControlledTrial = false,
-    [property: JsonPropertyName("cloudSandboxGoalIntent")] CloudSandboxGoalIntentDto? CloudSandboxGoalIntent = null,
-    [property: JsonPropertyName("isCloudProductionControlledPilotTrial")] bool IsCloudProductionControlledPilotTrial = false,
-    [property: JsonPropertyName("cloudProductionGoalIntent")] CloudProductionGoalIntentDto? CloudProductionGoalIntent = null,
     [property: JsonPropertyName("plannerSafetySummary")] AgentTaskPlanSafetySummaryDocument? PlannerSafetySummary = null,
     [property: JsonPropertyName("forcedStepCodes")] IReadOnlyCollection<string>? ForcedStepCodes = null,
     [property: JsonPropertyName("approvalCheckpoints")] IReadOnlyCollection<string>? ApprovalCheckpoints = null,
@@ -40,9 +32,20 @@ internal sealed record AgentTaskPlanDocument(
     [property: JsonPropertyName("toolCatalogVersion")] int ToolCatalogVersion = PlannerToolCatalog.CurrentVersion,
     [property: JsonPropertyName("visibleToolCount")] int VisibleToolCount = 0,
     [property: JsonPropertyName("toolRiskSummary")] IReadOnlyDictionary<string, int>? ToolRiskSummary = null,
-    [property: JsonPropertyName("mockMcpOnly")] bool MockMcpOnly = true,
+    [property: JsonPropertyName("mockMcpOnly")] bool MockMcpOnly = false,
     [property: JsonPropertyName("toolApprovalCheckpoints")] IReadOnlyCollection<string>? ToolApprovalCheckpoints = null,
-    [property: JsonPropertyName("isCloudProductionPilotTrial")] bool IsCloudProductionPilotTrial = false);
+    [property: JsonPropertyName("skillCode")] string? SkillCode = null,
+    [property: JsonPropertyName("skillName")] string? SkillName = null,
+    [property: JsonPropertyName("skillRoutingReason")] string? SkillRoutingReason = null,
+    [property: JsonPropertyName("planKind")] string PlanKind = AgentTaskPlanKinds.ExecutablePlan,
+    [property: JsonPropertyName("isExecutable")] bool IsExecutable = true,
+    [property: JsonPropertyName("capabilityGaps")] IReadOnlyCollection<string>? CapabilityGaps = null);
+
+internal static class AgentTaskPlanKinds
+{
+    public const string PlanDraft = "PlanDraft";
+    public const string ExecutablePlan = "ExecutablePlan";
+}
 
 internal sealed record AgentTaskPlanCloudReadonlyIntentDocument(
     [property: JsonPropertyName("intent")] string Intent,
@@ -85,7 +88,7 @@ internal sealed record AgentTaskPlanSafetySummaryDocument(
     [property: JsonPropertyName("isSimulationOnly")] bool IsSimulationOnly,
     [property: JsonPropertyName("requiresDataApproval")] bool RequiresDataApproval,
     [property: JsonPropertyName("toolRiskSummary")] IReadOnlyDictionary<string, int>? ToolRiskSummary = null,
-    [property: JsonPropertyName("mockMcpOnly")] bool MockMcpOnly = true);
+    [property: JsonPropertyName("mockMcpOnly")] bool MockMcpOnly = false);
 
 internal sealed record AgentTaskPlanDataSourceSummaryDocument(
     [property: JsonPropertyName("id")] Guid Id,

@@ -66,7 +66,8 @@ public sealed class GetToolCatalogQueryHandler(
             userId,
             request.SimulationOnly,
             request.BusinessDomains,
-            cancellationToken);
+            cancellationToken,
+            request.SkillCode);
         if (!catalog.IsSuccess || catalog.Value is null)
         {
             return Result.From(catalog);
@@ -79,7 +80,7 @@ public sealed class GetToolCatalogQueryHandler(
         return Result.Success(new ToolRegistryCatalogDto(
             catalog.Value.Version,
             catalog.Value.AvailableToolCount,
-            MockMcpOnly: true,
+            PlannerToolCatalogMetadata.IsMockMcpOnly(catalog.Value.Tools),
             riskSummary,
             catalog.Value.Tools));
     }

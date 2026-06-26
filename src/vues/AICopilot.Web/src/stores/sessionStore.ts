@@ -50,6 +50,14 @@ export const useSessionStore = defineStore('chatSession', () => {
     return newSession
   }
 
+  async function deleteSession(id: string) {
+    await chatService.deleteSession(id)
+    sessions.value = sessions.value.filter((session) => session.id !== id)
+    if (currentSessionId.value === id) {
+      persistCurrentSession(sessions.value[0]?.id ?? null)
+    }
+  }
+
   function reset() {
     sessions.value = []
     persistCurrentSession(null)
@@ -65,6 +73,7 @@ export const useSessionStore = defineStore('chatSession', () => {
     upsertSession,
     loadSessions,
     createSession,
+    deleteSession,
     reset
   }
 })

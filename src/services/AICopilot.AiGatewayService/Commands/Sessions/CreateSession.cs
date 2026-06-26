@@ -1,13 +1,13 @@
-﻿using AICopilot.AiGatewayService.Queries.ConversationTemplates;
+﻿using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.AiGatewayService.Queries.Sessions;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
 using AICopilot.Core.AiGateway.Ids;
+using AICopilot.Core.AiGateway.Specifications.ConversationTemplate;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Messaging;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
-using MediatR;
 
 namespace AICopilot.AiGatewayService.Commands.Sessions;
 
@@ -23,7 +23,7 @@ public record CreateSessionCommand(Guid? TemplateId) : ICommand<Result<CreatedSe
 
 public class CreateSessionCommandHandler(
     IRepository<Session> repo,
-    IMediator mediator,
+    IReadRepository<ConversationTemplate> templateRepository,
     ICurrentUser user)
     : ICommandHandler<CreateSessionCommand, Result<CreatedSessionDto>>
 {
@@ -40,13 +40,32 @@ public class CreateSessionCommandHandler(
 
         if (templateId == null)
         {
-            var template = await mediator.Send(new GetConversationTemplateByNameQuery("GeneralAgent"), ct);
-            if (!template.IsSuccess)
+            var template = await templateRepository.FirstOrDefaultAsync(
+                new ConversationTemplateByCodeSpec("chat_answer"),
+                ct);
+            if (template is null || !template.IsEnabled)
             {
                 return Result.NotFound();
             }
 
-            templateId = template.Value!.Id;
+            templateId = template.Id;
+        }
+        else
+        {
+            var template = await templateRepository.FirstOrDefaultAsync(
+                new ConversationTemplateByIdSpec(new ConversationTemplateId(templateId.Value)),
+                ct);
+            if (template is null)
+            {
+                return Result.NotFound();
+            }
+
+            if (!template.IsEnabled)
+            {
+                return Result.Failure(new ApiProblemDescriptor(
+                    AppProblemCodes.ChatConfigurationMissing,
+                    "The selected conversation template is disabled."));
+            }
         }
 
         var session = new Session(userId, new ConversationTemplateId(templateId.Value));

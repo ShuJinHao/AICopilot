@@ -1,22 +1,14 @@
 import { defineStore } from 'pinia'
 import { reactive, ref } from 'vue'
 import { CONFIG_STORE_MESSAGES } from '@/constants/messages'
-import { useAgentWorkspaceConfigDomain } from '@/stores/config/agentWorkspaceConfig'
-import { useApprovalPolicyConfigDomain } from '@/stores/config/approvalPolicyConfig'
-import { useBusinessDatabaseConfigDomain } from '@/stores/config/businessDatabaseConfig'
 import { useConversationTemplateConfigDomain } from '@/stores/config/conversationTemplateConfig'
 import type {
   ConfigDomainStates,
   ConfigEditableDomain,
-  ConfigLoadingDomain,
-  ReadOnlyConfigDomain
+  ConfigLoadingDomain
 } from '@/stores/config/configStoreTypes'
 import { useLanguageModelConfigDomain } from '@/stores/config/languageModelConfig'
-import { useMcpServerConfigDomain } from '@/stores/config/mcpServerConfig'
-import { useProviderReliabilityConfigDomain } from '@/stores/config/providerReliabilityConfig'
 import { useRoutingModelConfigDomain } from '@/stores/config/routingModelConfig'
-import { useSemanticSourceConfigDomain } from '@/stores/config/semanticSourceConfig'
-import { useToolRegistryConfigDomain } from '@/stores/config/toolRegistryConfig'
 import { toStoreErrorMessage } from '@/stores/useDialogCrud'
 import type { ConfigDialogMode } from '@/types/app'
 
@@ -24,53 +16,34 @@ export const useConfigStore = defineStore('config', () => {
   const isLoading = ref(false)
   const errorMessage = ref('')
 
-  const loadingStates = reactive<Record<ConfigLoadingDomain | ReadOnlyConfigDomain, boolean>>({
+  const loadingStates = reactive<Record<ConfigLoadingDomain, boolean>>({
     languageModel: false,
     routingModel: false,
-    conversationTemplate: false,
-    approvalPolicy: false,
-    businessDatabase: false,
-    mcpServer: false,
-    semanticSource: false,
-    toolRegistry: false,
-    cloudReadonlyReadiness: false,
-    providerReliability: false
+    conversationTemplate: false
   })
 
   const dialogStates = reactive<Record<ConfigEditableDomain, boolean>>({
     languageModel: false,
     routingModel: false,
-    conversationTemplate: false,
-    approvalPolicy: false,
-    businessDatabase: false,
-    mcpServer: false
+    conversationTemplate: false
   })
 
   const dialogModes = reactive<Record<ConfigEditableDomain, ConfigDialogMode>>({
     languageModel: 'create',
     routingModel: 'create',
-    conversationTemplate: 'create',
-    approvalPolicy: 'create',
-    businessDatabase: 'create',
-    mcpServer: 'create'
+    conversationTemplate: 'create'
   })
 
   const submittingStates = reactive<Record<ConfigEditableDomain, boolean>>({
     languageModel: false,
     routingModel: false,
-    conversationTemplate: false,
-    approvalPolicy: false,
-    businessDatabase: false,
-    mcpServer: false
+    conversationTemplate: false
   })
 
   const actionErrors = reactive<Record<ConfigEditableDomain, string>>({
     languageModel: '',
     routingModel: '',
-    conversationTemplate: '',
-    approvalPolicy: '',
-    businessDatabase: '',
-    mcpServer: ''
+    conversationTemplate: ''
   })
 
   const domainStates: ConfigDomainStates = {
@@ -86,17 +59,7 @@ export const useConfigStore = defineStore('config', () => {
     domainStates,
     languageModelDomain.refreshLanguageModels
   )
-  const providerReliabilityDomain = useProviderReliabilityConfigDomain(domainStates)
   const conversationTemplateDomain = useConversationTemplateConfigDomain(domainStates)
-  const approvalPolicyDomain = useApprovalPolicyConfigDomain(domainStates)
-  const semanticSourceDomain = useSemanticSourceConfigDomain(domainStates)
-  const businessDatabaseDomain = useBusinessDatabaseConfigDomain(
-    domainStates,
-    semanticSourceDomain.refreshSemanticSourceStatuses
-  )
-  const mcpServerDomain = useMcpServerConfigDomain(domainStates)
-  const toolRegistryDomain = useToolRegistryConfigDomain(domainStates)
-  const agentWorkspaceDomain = useAgentWorkspaceConfigDomain()
 
   async function refresh() {
     isLoading.value = true
@@ -106,14 +69,29 @@ export const useConfigStore = defineStore('config', () => {
       await Promise.all([
         languageModelDomain.refreshLanguageModels(),
         routingModelDomain.refreshRoutingModels(),
-        providerReliabilityDomain.refreshProviderReliability(),
-        conversationTemplateDomain.refreshConversationTemplates(),
-        approvalPolicyDomain.refreshApprovalPolicies(),
-        businessDatabaseDomain.refreshBusinessDatabases(),
-        mcpServerDomain.refreshMcpServers(),
-        toolRegistryDomain.refreshToolRegistry(),
-        semanticSourceDomain.refreshSemanticSourceStatuses(),
-        agentWorkspaceDomain.refreshAgentWorkspaceSettings()
+        conversationTemplateDomain.refreshConversationTemplates()
+      ])
+    } catch (error) {
+      errorMessage.value = toStoreErrorMessage(
+        error,
+        CONFIG_STORE_MESSAGES.pageLoadFailed,
+        CONFIG_STORE_MESSAGES.pageLoadForbidden
+      )
+      throw error
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  async function refreshAgentSlots() {
+    isLoading.value = true
+    errorMessage.value = ''
+
+    try {
+      await Promise.all([
+        languageModelDomain.refreshLanguageModels(),
+        routingModelDomain.refreshRoutingModels(),
+        conversationTemplateDomain.refreshConversationTemplates()
       ])
     } catch (error) {
       errorMessage.value = toStoreErrorMessage(
@@ -131,13 +109,6 @@ export const useConfigStore = defineStore('config', () => {
     ...languageModelDomain,
     ...routingModelDomain,
     ...conversationTemplateDomain,
-    ...approvalPolicyDomain,
-    ...businessDatabaseDomain,
-    ...mcpServerDomain,
-    ...toolRegistryDomain,
-    ...semanticSourceDomain,
-    ...providerReliabilityDomain,
-    ...agentWorkspaceDomain,
     isLoading,
     errorMessage,
     loadingStates,
@@ -145,6 +116,7 @@ export const useConfigStore = defineStore('config', () => {
     dialogModes,
     submittingStates,
     actionErrors,
-    refresh
+    refresh,
+    refreshAgentSlots
   }
 })

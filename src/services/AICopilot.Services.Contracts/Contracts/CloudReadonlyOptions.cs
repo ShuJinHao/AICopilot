@@ -17,7 +17,7 @@ public sealed class CloudReadonlyOptions
 
     public CloudReadonlyRealOptions Real { get; init; } = new();
 
-    public void EnsureValid(CloudAiReadOptions? cloudAiReadOptions = null)
+    public void EnsureValid(CloudAiReadOptions? cloudAiReadOptions = null, string? environmentName = null)
     {
         if (!Enum.IsDefined(Mode))
         {
@@ -26,6 +26,12 @@ public sealed class CloudReadonlyOptions
 
         if (Mode == CloudReadonlyDataSourceMode.Simulation)
         {
+            if (!IsDevelopmentEnvironment(environmentName))
+            {
+                throw new InvalidOperationException(
+                    "CloudReadonly:Mode=Simulation is only allowed in Development.");
+            }
+
             if (!Simulation.Enabled)
             {
                 throw new InvalidOperationException("CloudReadonly:Simulation:Enabled must be true when CloudReadonly:Mode is Simulation.");
@@ -55,6 +61,12 @@ public sealed class CloudReadonlyOptions
             }
         }
     }
+
+    private static bool IsDevelopmentEnvironment(string? environmentName)
+    {
+        return string.Equals(environmentName, "Development", StringComparison.OrdinalIgnoreCase);
+    }
+
 }
 
 public sealed class CloudReadonlySimulationOptions

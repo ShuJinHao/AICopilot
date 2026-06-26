@@ -43,9 +43,9 @@ public static class DependencyInjection
         builder.Services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
         builder.Services.AddHttpClient<ICloudIdentityStatusClient, CloudIdentityStatusClient>();
         builder.Services.AddHttpClient<ICloudAiReadClient, CloudAiReadClient>();
-        builder.Services.AddHttpClient<ICloudReadonlySandboxClient, CloudReadonlySandboxClient>();
         builder.Services.AddScoped<IChatClientProvider, OpenAiChatClientProvider>();
         builder.Services.AddScoped<IChatClientProvider, AnthropicChatClientProvider>();
+        builder.Services.AddTransient<AiProviderRetryHandler>();
         builder.Services.AddScoped<ILanguageModelConnectivityTester, LanguageModelConnectivityTester>();
         builder.Services.AddSingleton<ITextTokenEstimator, SharpTokenTextTokenEstimator>();
         builder.AddDocumentParsers();
@@ -68,11 +68,11 @@ public static class DependencyInjection
         builder.Services.AddHttpClient("OpenAI", client =>
         {
             client.Timeout = TimeSpan.FromSeconds(30);
-        });
+        }).AddHttpMessageHandler<AiProviderRetryHandler>();
         builder.Services.AddHttpClient("Anthropic", client =>
         {
             client.Timeout = TimeSpan.FromSeconds(30);
-        });
+        }).AddHttpMessageHandler<AiProviderRetryHandler>();
         builder.AddFinalAgentContextStore();
     }
 

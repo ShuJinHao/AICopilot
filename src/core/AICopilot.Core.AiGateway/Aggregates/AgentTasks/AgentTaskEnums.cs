@@ -1,5 +1,8 @@
+using System.Text.Json.Serialization;
+
 namespace AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum AgentTaskType
 {
     GeneralAgent = 0,
@@ -14,7 +17,6 @@ public enum AgentTaskType
 
 public enum AgentTaskStatus
 {
-    Draft = 0,
     WaitingPlanApproval = 1,
     PlanApproved = 2,
     Running = 3,
@@ -26,7 +28,8 @@ public enum AgentTaskStatus
     Completed = 9,
     Rejected = 10,
     Failed = 11,
-    Cancelled = 12
+    Cancelled = 12,
+    Draft = 100
 }
 
 public enum AgentTaskRiskLevel

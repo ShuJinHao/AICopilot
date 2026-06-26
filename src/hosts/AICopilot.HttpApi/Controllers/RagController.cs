@@ -164,6 +164,12 @@ public class RagController(ISender sender) : ApiControllerBase(sender)
         return ReturnResult(await Sender.Send(command));
     }
 
+    [HttpPost("document/retry")]
+    public async Task<IActionResult> RetryDocumentIndexing(RetryDocumentIndexingCommand command)
+    {
+        return ReturnResult(await Sender.Send(command));
+    }
+
     [HttpPut("document/governance")]
     public async Task<IActionResult> UpdateDocumentGovernance(UpdateDocumentGovernanceCommand command)
     {

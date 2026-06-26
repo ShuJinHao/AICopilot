@@ -1,7 +1,6 @@
 using AICopilot.AiGatewayService.ApprovalPolicies;
 using AICopilot.AiGatewayService.Commands.ConversationTemplates;
 using AICopilot.AiGatewayService.Commands.LanguageModels;
-using AICopilot.AiGatewayService.PromptPolicies;
 using AICopilot.AiGatewayService.Queries.ConversationTemplates;
 using AICopilot.AiGatewayService.Queries.LanguageModels;
 using AICopilot.AiGatewayService.Queries.Runtime;
@@ -113,40 +112,16 @@ public class AiGatewayController(ISender sender) : ApiControllerBase(sender)
         return ReturnResult(await Sender.Send(new GetChatRuntimeSettingsQuery()));
     }
 
+    [HttpGet("cloud-readonly/status")]
+    public async Task<IActionResult> GetCloudReadonlyStatus()
+    {
+        return ReturnResult(await Sender.Send(new GetCloudReadonlyStatusQuery()));
+    }
+
     [HttpPut("runtime-settings")]
     public async Task<IActionResult> UpdateRuntimeSettings(UpdateChatRuntimeSettingsCommand command)
     {
         return ReturnResult(await Sender.Send(command));
-    }
-
-    [HttpPost("prompt-policy")]
-    public async Task<IActionResult> UpsertPromptPolicy(UpsertPromptPolicyCommand command)
-    {
-        return ReturnResult(await Sender.Send(command));
-    }
-
-    [HttpPut("prompt-policy/activate")]
-    public async Task<IActionResult> ActivatePromptPolicyVersion(ActivatePromptPolicyVersionCommand command)
-    {
-        return ReturnResult(await Sender.Send(command));
-    }
-
-    [HttpGet("prompt-policy")]
-    public async Task<IActionResult> GetPromptPolicy([FromQuery] GetPromptPolicyQuery query)
-    {
-        return ReturnResult(await Sender.Send(query));
-    }
-
-    [HttpGet("prompt-policy/active")]
-    public async Task<IActionResult> GetActivePromptPolicy([FromQuery] GetActivePromptPolicyQuery query)
-    {
-        return ReturnResult(await Sender.Send(query));
-    }
-
-    [HttpGet("prompt-policy/list")]
-    public async Task<IActionResult> GetListPromptPolicies()
-    {
-        return ReturnResult(await Sender.Send(new GetListPromptPoliciesQuery()));
     }
 
     [HttpPost("conversation-template")]

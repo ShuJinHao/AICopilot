@@ -11,5 +11,6 @@ public enum ConversationTemplateScope
     AgentExecutor = 6,
     ToolCallPolicy = 7,
     ArtifactGeneration = 8,
-    FailureHandling = 9
+    FailureHandling = 9,
+    IntentRouting = 10
 }

@@ -5,6 +5,7 @@ using AICopilot.AiGatewayService.Queries.Sessions;
 using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
+using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
 using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
 using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
@@ -13,6 +14,7 @@ using AICopilot.Core.Rag.Ids;
 using AICopilot.Dapper;
 using AICopilot.Dapper.Security;
 using AICopilot.HttpApi.Controllers;
+using AICopilot.IdentityService.Authorization;
 using AICopilot.Infrastructure.Storage;
 using AICopilot.RagService.Queries.KnowledgeBases;
 using AICopilot.Services.CrossCutting.Attributes;
@@ -30,6 +32,45 @@ namespace AICopilot.BackendTests;
 
 public sealed class SecurityHardeningTests
 {
+    [Fact]
+    public void PermissionCatalog_ShouldNotExposeLegacyTrialPilotOrOperationsPermissions()
+    {
+        var catalog = new PermissionCatalog();
+        var permissionCodes = catalog.GetAll()
+            .Select(permission => permission.Code)
+            .ToArray();
+        var legacyPermissions = new[]
+        {
+            "AiGateway.TrialOperations.Read",
+            "AiGateway.TrialOperations.Manage",
+            "AiGateway.TrialOperations.AuditView",
+            "AiGateway.RunQueue.Read",
+            "AiGateway.RunQueue.Manage",
+            "AiGateway.WorkerStatus.Read",
+            "PilotAuthorization.Submit",
+            "PilotAuthorization.View",
+            "PilotAuthorization.Review",
+            "PilotAuthorization.ApprovePlanning",
+            "PilotAuthorization.Reject",
+            "PilotAuthorization.Expire",
+            "PilotAuthorization.Audit"
+        };
+
+        permissionCodes.Should().NotIntersectWith(legacyPermissions);
+        catalog.GetDefaultPermissions(IdentityRoleNames.User)
+            .Should()
+            .NotIntersectWith(legacyPermissions);
+    }
+
+    [Fact]
+    public void BuiltInTools_ShouldNotExposeLegacyTrialPilotToolCodes()
+    {
+        BuiltInToolRegistrations.AgentRuntimeTools
+            .Select(tool => tool.ToolCode)
+            .Should()
+            .NotIntersectWith(BuiltInToolRegistrations.ObsoleteAgentRuntimeToolCodes);
+    }
+
     [Fact]
     public void DeploymentConfig_ShouldNotCarryKnownWeakSecrets()
     {
@@ -83,6 +124,9 @@ public sealed class SecurityHardeningTests
         imageWorkflow.Should().Contain("OCI_NAMESPACE");
         imageWorkflow.Should().Contain("dotnet publish");
         imageWorkflow.Should().Contain("/t:PublishContainer");
+        imageWorkflow.Should().Contain("Prune old Harbor image tags");
+        imageWorkflow.Should().Contain("HARBOR_KEEP_SHA_TAGS: 3");
+        imageWorkflow.Should().Contain("bash deploy/enterprise-ai/harbor-retention.sh");
         imageWorkflow.Should().Contain("NODE_BASE_IMAGE=$image_prefix/base-node:22-alpine");
         imageWorkflow.Should().Contain("NGINX_BASE_IMAGE=$image_prefix/base-nginx:1.27-alpine");
         imageWorkflow.Should().Contain("      - \"src/hosts/**\"");
@@ -126,6 +170,7 @@ public sealed class SecurityHardeningTests
         var deployReadme = File.ReadAllText(Path.Combine(deployRoot, "README.md"));
         var envTemplate = File.ReadAllText(Path.Combine(deployRoot, ".env.example"));
         var deployRelease = File.ReadAllText(Path.Combine(deployRoot, "deploy-release.sh"));
+        var harborRetention = File.ReadAllText(Path.Combine(deployRoot, "harbor-retention.sh"));
         var mirrorBaseImages = File.ReadAllText(Path.Combine(deployRoot, "mirror-base-images.sh"));
         var buildAndPush = File.ReadAllText(Path.Combine(deployRoot, "build-and-push.sh"));
         var webDockerfile = File.ReadAllText(Path.Combine(solutionRoot, "src", "vues", "AICopilot.Web", "Dockerfile"));
@@ -149,6 +194,7 @@ public sealed class SecurityHardeningTests
         deployReadme.Should().Contain("iiot-linux-prod");
         deployReadme.Should().Contain("非 root");
         deployReadme.Should().Contain("不通过 AICopilot 写 Cloud 业务数据");
+        deployReadme.Should().Contain("应用镜像仓库只保留当前生产 `sha-*` tag");
         deployReadme.Should().Contain("./deploy-release.sh sha-<git-sha> --services httpapi,web");
 
         envTemplate.Should().Contain("POSTGRES_IMAGE=10.98.90.154:80/enterprise-ai/base-postgres:17.6");
@@ -168,6 +214,12 @@ public sealed class SecurityHardeningTests
         deployRelease.Should().Contain("compose up -d --remove-orphans");
         deployRelease.Should().Contain("compose up -d \"${RUNTIME_SELECTED_SERVICES[@]}\"");
         deployRelease.Should().Contain("probe_web");
+        deployRelease.Should().Contain("post-release-cleanup.sh");
+
+        harborRetention.Should().Contain("HARBOR_KEEP_SHA_TAGS");
+        harborRetention.Should().Contain("HARBOR_KEEP_SHA_TAG");
+        harborRetention.Should().Contain("sha-[0-9a-f]");
+        harborRetention.Should().Contain("Harbor GC must run");
 
         mirrorBaseImages.Should().Contain("postgres:17.6");
         mirrorBaseImages.Should().Contain("rabbitmq:4.2-management");
@@ -180,6 +232,7 @@ public sealed class SecurityHardeningTests
         buildAndPush.Should().Contain("NODE_BASE_IMAGE");
         buildAndPush.Should().Contain("NGINX_BASE_IMAGE");
         buildAndPush.Should().Contain("mirror-base-images.sh");
+        buildAndPush.Should().Contain("harbor-retention.sh");
 
         webDockerfile.Should().Contain("ARG NODE_BASE_IMAGE=node:22-alpine");
         webDockerfile.Should().Contain("FROM ${NODE_BASE_IMAGE} AS build");
@@ -196,7 +249,6 @@ public sealed class SecurityHardeningTests
             typeof(AiGatewayToolController),
             typeof(AiGatewaySessionController),
             typeof(AiGatewayAgentTaskController),
-            typeof(AiGatewayTrialPilotController),
             typeof(AiGatewayWorkspaceArtifactController)
         };
 
@@ -323,127 +375,89 @@ public sealed class SecurityHardeningTests
     }
 
     [Fact]
-    public void FrontendConfig_ShouldExposeMcpManagementAndDataAnalysisSafetyHints()
+    public void StreamHandlers_ShouldAuthorizeSessionBeforeLockAndPersistence()
     {
         var solutionRoot = FindSolutionRoot();
-        var configViewSource = File.ReadAllText(Path.Combine(
+        var handlerFiles = new[]
+        {
+            Path.Combine(solutionRoot, "src", "services", "AICopilot.AiGatewayService", "Agents", "ChatStreamHandler.cs"),
+            Path.Combine(solutionRoot, "src", "services", "AICopilot.AiGatewayService", "Agents", "ApprovalDecisionStreamHandler.cs"),
+            Path.Combine(solutionRoot, "src", "services", "AICopilot.AiGatewayService", "AgentTasks", "PlanAgentTaskStreamHandler.cs")
+        };
+
+        foreach (var handlerFile in handlerFiles)
+        {
+            var source = File.ReadAllText(handlerFile);
+            var loadSessionIndex = source.IndexOf("chatStreamRuntime.LoadSessionAsync", StringComparison.Ordinal);
+            var userCheckIndex = source.IndexOf("currentUser.Id != session.UserId", StringComparison.Ordinal);
+            var acquireLockIndex = source.IndexOf("sessionExecutionLock.AcquireAsync(request.SessionId", StringComparison.Ordinal);
+            var appendIndex = source.IndexOf("messagePersistenceService.AppendBatchAsync(request.SessionId", StringComparison.Ordinal);
+
+            loadSessionIndex.Should().BeGreaterThanOrEqualTo(0, handlerFile);
+            userCheckIndex.Should().BeGreaterThan(loadSessionIndex, handlerFile);
+            acquireLockIndex.Should().BeGreaterThan(userCheckIndex, handlerFile);
+            appendIndex.Should().BeGreaterThan(acquireLockIndex, handlerFile);
+            source.Should().Contain("if (pendingMessages.Count > 0)");
+            source.Should().Contain("yield return earlyErrorChunk;");
+        }
+    }
+
+    [Fact]
+    public void FrontendConfig_ShouldKeepInternalConfigDomainsButExposeOnlyAgentSlots()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var frontendRoot = Path.Combine(
             solutionRoot,
             "src",
             "vues",
             "AICopilot.Web",
-            "src",
+            "src");
+        var configViewSource = File.ReadAllText(Path.Combine(
+            frontendRoot,
             "views",
             "ConfigView.vue"));
-        var providerReliabilityConfigSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "vues",
-            "AICopilot.Web",
-            "src",
-            "views",
-            "config",
-            "ProviderReliabilityConfig.vue"));
-        var businessDatabaseConfigSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "vues",
-            "AICopilot.Web",
-            "src",
-            "views",
-            "config",
-            "BusinessDatabaseConfig.vue"));
-        var mcpConfigSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "vues",
-            "AICopilot.Web",
-            "src",
-            "views",
-            "config",
-            "McpServerConfig.vue"));
         var configStoreSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "vues",
-            "AICopilot.Web",
-            "src",
+            frontendRoot,
             "stores",
             "configStore.ts"));
-        var mcpServerStoreSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "vues",
-            "AICopilot.Web",
-            "src",
-            "stores",
-            "config",
-            "mcpServerConfig.ts"));
-        var configNormalizersSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "vues",
-            "AICopilot.Web",
-            "src",
-            "stores",
-            "config",
-            "configNormalizers.ts"));
-        var configLabelsSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "vues",
-            "AICopilot.Web",
-            "src",
-            "views",
-            "configLabels.ts"));
-        var dialogCrudSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "vues",
-            "AICopilot.Web",
-            "src",
-            "stores",
-            "useDialogCrud.ts"));
         var configServiceSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "vues",
-            "AICopilot.Web",
-            "src",
+            frontendRoot,
             "services",
             "configService.ts"));
         var permissionsSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "vues",
-            "AICopilot.Web",
-            "src",
+            frontendRoot,
             "security",
             "permissions.ts"));
 
-        permissionsSource.Should().Contain("Mcp.GetListServers");
-        permissionsSource.Should().Contain("AiGateway.GetProviderReliability");
-        configServiceSource.Should().Contain("/aigateway/provider-reliability");
-        permissionsSource.Should().Contain("Mcp.CreateServer");
-        configServiceSource.Should().Contain("/mcp/server/list");
-        configServiceSource.Should().Contain("/mcp/server");
-        configStoreSource.Should().Contain("useMcpServerConfigDomain");
-        mcpServerStoreSource.Should().Contain("mcpServers");
-        mcpServerStoreSource.Should().Contain("currentMcpServer");
-        configNormalizersSource.Should().Contain("normalizeToolNames");
+        File.Exists(Path.Combine(frontendRoot, "views", "config", "McpServerConfig.vue")).Should().BeFalse();
+        File.Exists(Path.Combine(frontendRoot, "views", "config", "BusinessDatabaseConfig.vue")).Should().BeFalse();
+        File.Exists(Path.Combine(frontendRoot, "views", "config", "ProviderReliabilityConfig.vue")).Should().BeFalse();
+        File.Exists(Path.Combine(frontendRoot, "views", "configLabels.ts")).Should().BeFalse();
+        File.Exists(Path.Combine(frontendRoot, "stores", "config", "mcpServerConfig.ts")).Should().BeFalse();
+        File.Exists(Path.Combine(frontendRoot, "stores", "config", "businessDatabaseConfig.ts")).Should().BeFalse();
+
+        permissionsSource.Should().NotContain("Mcp.GetListServers");
+        permissionsSource.Should().NotContain("Mcp.CreateServer");
+        permissionsSource.Should().NotContain("DataAnalysis.GetListBusinessDatabases");
+        permissionsSource.Should().NotContain("AiGateway.GetProviderReliability");
+        configServiceSource.Should().NotContain("/aigateway/provider-reliability");
+        configServiceSource.Should().NotContain("/mcp/server/list");
+        configServiceSource.Should().NotContain("/mcp/server");
+        configServiceSource.Should().NotContain("/data-analysis/business-database");
         configStoreSource.Should().Contain("CONFIG_STORE_MESSAGES");
-        dialogCrudSource.Should().Contain("getProblemDetails");
-        configViewSource.Should().Contain("McpServerConfig");
-        mcpConfigSource.Should().Contain("运行时刷新周期内收敛");
-        mcpConfigSource.Should().NotContain("重启服务");
-        mcpConfigSource.Should().Contain("toolPolicySummaries");
-        mcpConfigSource.Should().Contain("留空表示保留已保存参数");
-        businessDatabaseConfigSource.Should().Contain("SQL 安全拒绝");
-        businessDatabaseConfigSource.Should().Contain("结果截断");
-        businessDatabaseConfigSource.Should().Contain("配置管理台保存时始终强制只读");
-        providerReliabilityConfigSource.Should().Contain("高风险链路固定不回退");
-        providerReliabilityConfigSource.Should().Contain("数据分析 SQL 工具链");
-        providerReliabilityConfigSource.Should().Contain("服务商可靠性");
-        configLabelsSource.Should().Contain("DataAnalysisSqlToolChain");
+        configStoreSource.Should().Contain("useLanguageModelConfigDomain");
+        configStoreSource.Should().Contain("useRoutingModelConfigDomain");
+        configStoreSource.Should().Contain("useConversationTemplateConfigDomain");
+        configStoreSource.Should().NotContain("useMcpServerConfigDomain");
+        configStoreSource.Should().NotContain("useBusinessDatabaseConfigDomain");
+        configStoreSource.Should().NotContain("useProviderReliabilityConfigDomain");
+        configViewSource.Should().Contain("IntentRoutingAgent");
+        configViewSource.Should().Contain("agent_planner");
+        configViewSource.Should().Contain("agent_executor");
+        configViewSource.Should().Contain("refreshAgentSlots");
+        configViewSource.Should().NotContain("McpServerConfig");
+        configViewSource.Should().NotContain("BusinessDatabaseConfig");
+        configViewSource.Should().NotContain("ProviderReliabilityConfig");
     }
 
     [Fact]
@@ -628,6 +642,26 @@ public sealed class SecurityHardeningTests
     }
 
     [Fact]
+    public void ApiControllerBase_ShouldReturnProblemDetailsForErrorBranches()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var baseControllerSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "hosts",
+            "AICopilot.HttpApi",
+            "Infrastructure",
+            "ApiControllerBase.cs"));
+
+        baseControllerSource.Should().Contain("case ResultStatus.Error:");
+        baseControllerSource.Should().Contain("case ResultStatus.Invalid:");
+        baseControllerSource.Should().Contain("case ResultStatus.NotFound:");
+        baseControllerSource.Should().Contain("CreateProblemDetails(StatusCodes.Status400BadRequest, result.Errors)");
+        baseControllerSource.Should().Contain("CreateProblemDetails(StatusCodes.Status404NotFound, result.Errors)");
+        baseControllerSource.Should().NotContain("new { errors = result.Errors }");
+    }
+
+    [Fact]
     public void IdentityManagementWrites_ShouldRequireAuthAndManagementRateLimit()
     {
         AssertIdentityManagementEndpoint(nameof(IdentityController.CreateRole));
@@ -770,7 +804,7 @@ public sealed class SecurityHardeningTests
     }
 
     [Fact]
-    public void ChatStreamRuntime_ShouldNotExposeGenericExceptionMessages()
+    public void AgentStreamRuntime_ShouldNotExposeGenericExceptionMessages()
     {
         var solutionRoot = FindSolutionRoot();
         var source = File.ReadAllText(Path.Combine(
@@ -779,7 +813,7 @@ public sealed class SecurityHardeningTests
             "services",
             "AICopilot.AiGatewayService",
             "Agents",
-            "ChatStreamRuntime.cs"));
+            "AgentStreamRuntime.cs"));
 
         var exceptionParameterIndex = source.IndexOf("Exception exception,", StringComparison.Ordinal);
         exceptionParameterIndex.Should().BeGreaterThanOrEqualTo(0);
@@ -789,7 +823,7 @@ public sealed class SecurityHardeningTests
         methodEnd.Should().BeGreaterThan(methodStart);
         var method = source[methodStart..methodEnd];
 
-        method.Should().Contain("exception is ChatWorkflowException");
+        method.Should().Contain("exception is AgentWorkflowException");
         method.Should().NotContain("exception.Message");
         method.Should().Contain("fallbackUserFacingMessage");
     }
@@ -1174,13 +1208,6 @@ public sealed class SecurityHardeningTests
             "src/services/AICopilot.AiGatewayService/Workflows/Executors/DataAnalysisAuditRecorder.cs",
             "src/services/AICopilot.AiGatewayService/Workflows/Executors/FinalAgentRunExecutor.cs",
             "src/services/AICopilot.AiGatewayService/Workflows/Executors/ToolExecutionAuditRecorder.cs",
-            "src/services/AICopilot.AiGatewayService/CloudReadiness/CloudReadonlyPilotReadinessHandlers.cs",
-            "src/services/AICopilot.AiGatewayService/CloudReadiness/CloudReadonlyProductionControlledPilotHandlers.cs",
-            "src/services/AICopilot.AiGatewayService/CloudReadiness/CloudReadonlyProductionOperationsHandlers.cs",
-            "src/services/AICopilot.AiGatewayService/CloudReadiness/CloudReadonlyProductionPilotHandlers.cs",
-            "src/services/AICopilot.AiGatewayService/PilotAuthorization/PilotAuthorizationDecisionCommandHandlers.cs",
-            "src/services/AICopilot.AiGatewayService/PilotAuthorization/PilotAuthorizationSubmissionCommandHandlers.cs",
-            "src/services/AICopilot.AiGatewayService/TrialOperations/TrialCampaignCommandHandlers.cs",
             "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactVersioningCommandHandlers.cs",
             "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactVersioningQueryHandlers.cs",
             "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceCommandHandlers.cs",

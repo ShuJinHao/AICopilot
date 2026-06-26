@@ -13,7 +13,7 @@ public sealed class DataAnalysisWidgetEmitter(ILogger<DataAnalysisWidgetEmitter>
         DataAnalysisOutputDto output,
         IEnumerable<dynamic>? rawData,
         IEnumerable<SchemaColumn>? schema,
-        ChatWorkflowSink? sink,
+        AgentWorkflowSink? sink,
         string databaseName,
         CancellationToken cancellationToken)
     {
@@ -29,6 +29,10 @@ public sealed class DataAnalysisWidgetEmitter(ILogger<DataAnalysisWidgetEmitter>
             {
                 await sink.WriteAsync(new ChatChunk(DataAnalysisExecutor.ExecutorId, ChunkType.Widget, widget.ToJson()), cancellationToken);
             }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {

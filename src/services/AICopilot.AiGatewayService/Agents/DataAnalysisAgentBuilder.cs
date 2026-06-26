@@ -4,7 +4,7 @@ using AICopilot.Services.Contracts;
 namespace AICopilot.AiGatewayService.Agents;
 
 public class DataAnalysisAgentBuilder(
-    ChatAgentFactory agentFactory,
+    ConfiguredAgentRuntimeFactory agentFactory,
     ISqlDialectInstructionProvider sqlDialectInstructionProvider,
     ApprovalToolResolver approvalToolResolver)
 {

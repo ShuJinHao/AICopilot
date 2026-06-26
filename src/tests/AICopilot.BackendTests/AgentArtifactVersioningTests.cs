@@ -294,6 +294,7 @@ public sealed class AgentArtifactVersioningTests
             now);
 
         task.AttachWorkspace(workspace.Id, now);
+        task.ConfirmExecutablePlan(task.PlanJson, Array.Empty<int>(), now);
         task.ApprovePlan(now);
         task.MarkWorkspaceReady(now);
 

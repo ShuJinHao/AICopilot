@@ -12,7 +12,6 @@ public sealed record ChatRuntimeSettingsDto(
     int AnswerHistoryCount,
     int RagRewriteHistoryCount,
     int AgentPlanningHistoryCount,
-    int SummaryThresholdMessages,
     int ContextTokenLimit);
 
 [AuthorizeRequirement("AiGateway.GetRuntimeSettings")]
@@ -24,16 +23,15 @@ public sealed record UpdateChatRuntimeSettingsCommand(
     int AnswerHistoryCount,
     int RagRewriteHistoryCount,
     int AgentPlanningHistoryCount,
-    int SummaryThresholdMessages,
     int ContextTokenLimit) : ICommand<Result<ChatRuntimeSettingsDto>>;
 
-public interface IChatRuntimeSettingsProvider
+public interface IAgentRuntimeSettingsProvider
 {
     Task<ChatRuntimeSettingsDto> GetAsync(CancellationToken cancellationToken = default);
 }
 
-public sealed class ChatRuntimeSettingsProvider(IRepository<ChatRuntimeSettings> repository)
-    : IChatRuntimeSettingsProvider
+public sealed class AgentRuntimeSettingsProvider(IRepository<ChatRuntimeSettings> repository)
+    : IAgentRuntimeSettingsProvider
 {
     public async Task<ChatRuntimeSettingsDto> GetAsync(CancellationToken cancellationToken = default)
     {
@@ -56,12 +54,11 @@ public sealed class ChatRuntimeSettingsProvider(IRepository<ChatRuntimeSettings>
             settings.AnswerHistoryCount,
             settings.RagRewriteHistoryCount,
             settings.AgentPlanningHistoryCount,
-            settings.SummaryThresholdMessages,
             settings.ContextTokenLimit);
     }
 }
 
-public sealed class GetChatRuntimeSettingsQueryHandler(IChatRuntimeSettingsProvider provider)
+public sealed class GetChatRuntimeSettingsQueryHandler(IAgentRuntimeSettingsProvider provider)
     : IQueryHandler<GetChatRuntimeSettingsQuery, Result<ChatRuntimeSettingsDto>>
 {
     public async Task<Result<ChatRuntimeSettingsDto>> Handle(
@@ -88,7 +85,6 @@ public sealed class UpdateChatRuntimeSettingsCommandHandler(IRepository<ChatRunt
                 request.AnswerHistoryCount,
                 request.RagRewriteHistoryCount,
                 request.AgentPlanningHistoryCount,
-                request.SummaryThresholdMessages,
                 request.ContextTokenLimit,
                 now);
             repository.Add(settings);
@@ -100,13 +96,12 @@ public sealed class UpdateChatRuntimeSettingsCommandHandler(IRepository<ChatRunt
                 request.AnswerHistoryCount,
                 request.RagRewriteHistoryCount,
                 request.AgentPlanningHistoryCount,
-                request.SummaryThresholdMessages,
                 request.ContextTokenLimit,
                 now);
             repository.Update(settings);
         }
 
         await repository.SaveChangesAsync(cancellationToken);
-        return Result.Success(ChatRuntimeSettingsProvider.Map(settings));
+        return Result.Success(AgentRuntimeSettingsProvider.Map(settings));
     }
 }

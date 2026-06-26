@@ -6,8 +6,10 @@
 
 - 生产环境使用 Docker Compose 单机编排，服务器目录为 `/srv/enterprise-ai/deploy`。
 - 标准发布走 GitHub Actions：`aicopilot-image` 构建镜像，`aicopilot-deploy` 部署镜像。
+- 多 agent 并行部署只按 [上传部署总览](../../../docs/上传部署总览.md) 的“多 agent 并行部署”执行；本目录只描述 AICopilot 自身发布步骤。
 - 两个 workflow 都必须跑在内网 self-hosted runner `[self-hosted, iiot-linux-prod]`，runner 必须是非 root 专用用户。
 - 应用镜像和基础镜像全部来自 Harbor，不从 Docker Hub 作为生产依赖源直接拉取。
+- AICopilot 应用镜像不保留历史版本；Harbor 和服务器本机只保留当前生产正在运行的 `sha-*` 应用镜像。
 - 真实 `.env` 只通过 GitHub secret `DEPLOY_ENV_FILE` 注入服务器，不提交到仓库。
 - AICopilot 对 Cloud 业务数据保持只读边界；不得通过 MCP、Tool、Agent workflow、后台任务或隐藏适配器写 Cloud。
 
@@ -20,6 +22,8 @@ deploy/enterprise-ai/
   deploy-release.sh       # 服务器发布脚本，支持全量和 --services 按需发布
   docker-compose.yaml     # 生产 compose 模板
   mirror-base-images.sh   # 基础镜像同步到 Harbor
+  post-release-cleanup.sh  # 发布成功后清理 build cache、旧应用镜像、旧 Harbor tag 并触发 GC
+  cron/                   # 周级兜底清理 cron 模板
   README.md               # 本文件
   releases/               # 服务器发布状态，workflow 同步时保留，不提交仓库
 ```
@@ -76,6 +80,12 @@ REGISTRY=10.98.90.154:80 HARBOR_PROJECT=enterprise-ai ./deploy/enterprise-ai/mir
 5. 输入 `release_tag=sha-<git-sha>`。
 6. `services` 必须照上一步的 `Deploy services input` 填，例如 `httpapi,migration,web`；不要人工猜测，不要为了省事留空。留空表示全量发布，只能用于明确的全量发布窗口。
 
+应用镜像仓库只保留当前生产 `sha-*` tag。`aicopilot-image` 推送成功后必须清理同一应用仓库内其他旧 tag；`buildcache` 和基础镜像 tag 不计入应用版本保留。Harbor robot 或用户必须具备删除 tag 权限，并在删 tag 后执行或确认 Harbor Garbage Collection 回收磁盘。
+
+部署成功并完成服务器验证后，必须清理 Docker/BuildKit build cache、服务器本机未被当前容器引用的旧 AICopilot 应用镜像，并输出清理前后磁盘摘要。Docker 管理镜像和 containerd 管理内容必须分开统计、分开清理；containerd 侧未确认 namespace、image ref、snapshot lease 和运行容器引用前不得强删。基础镜像、数据库卷、Qdrant/RabbitMQ/PostgreSQL 数据、备份、配置和 secrets 不清理。回滚不依赖旧镜像保留；需要回滚时重新构建或重新拉取目标 git sha 后部署。
+
+`/data` 达到 80% 必须告警并输出占用摘要，达到 85% 必须先清理再继续普通部署，达到 90% 阻断非应急部署。发布后清理是主线，还必须配置周级兜底清理 cron，避免部署中断后 build cache、旧镜像和旧 Harbor blob 长期堆积。
+
 发布脚本会同步本目录到服务器、写入 `DEPLOY_ENV_FILE`、登录 Harbor、重写所选应用镜像 tag、执行 `docker compose pull` 和 `docker compose up -d`，最后探测 Web 首页。按需发布会先从当前 release 读取未选服务镜像，避免 `.env` 被 secret 里的旧 tag 覆盖；如果目标机已有旧部署但还没有 `releases/current-release.env`，脚本会用服务器 `.env` 作为初始镜像基线并写入 release manifest，不需要把 `services` 留空。部署完成后会写入 `releases/current-release.env`、`previous-release.env`、`staged-release.env`、`current-release.summary.md` 和 `history/`，并把 summary 回贴到 GitHub Step Summary。
 
 ## 应急手工构建
@@ -86,6 +96,8 @@ REGISTRY=10.98.90.154:80 HARBOR_PROJECT=enterprise-ai ./deploy/enterprise-ai/mir
 cd AICopilot
 REGISTRY=10.98.90.154:80 HARBOR_PROJECT=enterprise-ai TAG=sha-<git-sha> ./deploy/enterprise-ai/build-and-push.sh
 ```
+
+应急构建默认也会执行 `harbor-retention.sh`。执行前需要导出 `HARBOR_USERNAME` / `HARBOR_PASSWORD`，或复用 `OCI_REGISTRY_USERNAME` / `OCI_REGISTRY_PASSWORD`。
 
 ## 应急手工部署
 

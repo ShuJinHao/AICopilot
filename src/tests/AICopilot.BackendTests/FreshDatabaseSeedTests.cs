@@ -5,8 +5,10 @@ using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.AiGateway.Aggregates.RuntimeSettings;
+using AICopilot.Core.AiGateway.Aggregates.Skills;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.EntityFrameworkCore;
+using AICopilot.EntityFrameworkCore.Security;
 using AICopilot.SharedKernel.Ai;
 using Microsoft.EntityFrameworkCore;
 
@@ -22,6 +24,11 @@ public sealed class FreshDatabaseSeedTests
     private const string DataAnalysisInitialMigrationId = "20260427000300_InitialDataAnalysisSchema";
     private const string McpServerInitialMigrationId = "20260427000100_InitialMcpServerSchema";
     private const string IdentityStoreBaselineMigrationId = "20260429021832_IdentityStoreMigrationBaseline";
+    private const string PrivateMiniMaxProvider = "MiniMax Private";
+    private const string PrivateMiniMaxModelName = "MiniMax-M3-AWQ-INT4";
+    private const string PrivateMiniMaxBaseUrl = "http://10.98.200.20:40034/v1";
+    private const string PrivateMiniMaxPlaceholderApiKey = "dummy-key";
+    private const string PrivateMiniMaxRoutingConfigurationName = "MiniMax private routing model";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -60,13 +67,18 @@ public sealed class FreshDatabaseSeedTests
             .Should().BeTrue();
 
         var seedModel = await aiGatewayDbContext.LanguageModels.SingleAsync();
-        seedModel.Provider.Should().Be("Example");
-        seedModel.ProtocolType.Should().Be("OpenAICompatible");
-        seedModel.Name.Should().Be("Disabled example model");
-        seedModel.BaseUrl.Should().Be("https://example.invalid/v1");
-        seedModel.ApiKey.Should().BeNull();
-        seedModel.IsEnabled.Should().BeFalse();
-        seedModel.Usage.Should().Be(LanguageModelUsage.Chat | LanguageModelUsage.Routing);
+        seedModel.Provider.Should().Be(PrivateMiniMaxProvider);
+        seedModel.ProtocolType.Should().Be(LanguageModelProtocolTypes.OpenAICompatible);
+        seedModel.Name.Should().Be(PrivateMiniMaxModelName);
+        seedModel.BaseUrl.Should().Be(PrivateMiniMaxBaseUrl);
+        seedModel.ApiKey.Should().StartWith(SecretStringEncryptor.CipherPrefix);
+        SecretStringEncryptor.Decrypt(seedModel.ApiKey)
+            .Should().Be(PrivateMiniMaxPlaceholderApiKey);
+        seedModel.IsEnabled.Should().BeTrue();
+        seedModel.Usage.Should().Be(LanguageModelUsage.Chat | LanguageModelUsage.Routing | LanguageModelUsage.Planner);
+        seedModel.Parameters.MaxTokens.Should().Be(32768);
+        seedModel.Parameters.MaxOutputTokens.Should().Be(4096);
+        seedModel.Parameters.Temperature.Should().BeApproximately(0.2f, 0.0001f);
 
         var templates = await aiGatewayDbContext.ConversationTemplates.ToListAsync();
         templates.Should().HaveCount(BuiltInConversationTemplates.All.Count);
@@ -74,6 +86,10 @@ public sealed class FreshDatabaseSeedTests
         templates.Select(template => template.Code)
             .Should()
             .BeEquivalentTo(BuiltInConversationTemplates.All.Select(template => template.Code));
+        templates
+            .Where(template => template.Code is "IntentRoutingAgent" or "agent_planner" or "agent_executor")
+            .Should()
+            .OnlyContain(template => template.ModelId == seedModel.Id);
         templates.Select(template => template.SystemPrompt)
             .Should()
             .NotContain(prompt => prompt.Contains("朝小夕", StringComparison.OrdinalIgnoreCase) ||
@@ -94,6 +110,9 @@ public sealed class FreshDatabaseSeedTests
         tools.Select(tool => tool.ToolCode)
             .Should()
             .BeEquivalentTo(BuiltInToolRegistrations.AgentRuntimeTools.Select(tool => tool.ToolCode));
+        tools.Select(tool => tool.ToolCode)
+            .Should()
+            .NotIntersectWith(BuiltInToolRegistrations.ObsoleteAgentRuntimeToolCodes);
         tools.Should().OnlyContain(tool => tool.TargetType == ToolRegistrationTargetType.AgentRuntime);
         var toolTargets = BuiltInToolRegistrations.AgentRuntimeTools
             .ToDictionary(tool => tool.ToolCode, tool => tool.TargetName, StringComparer.OrdinalIgnoreCase);
@@ -115,8 +134,44 @@ public sealed class FreshDatabaseSeedTests
             tool.ToolCode.Contains("cloud_write", StringComparison.OrdinalIgnoreCase) ||
             tool.Description.Contains("写入 Cloud", StringComparison.OrdinalIgnoreCase));
 
-        (await aiGatewayDbContext.RoutingModelConfigurations.AnyAsync(configuration => configuration.IsActive))
-            .Should().BeFalse();
+        var registeredToolCodes = tools
+            .Select(tool => tool.ToolCode)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var missingSeedToolCodes = BuiltInSkillDefinitions.All
+            .SelectMany(skill => skill.AllowedToolCodes)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(toolCode => !registeredToolCodes.Contains(toolCode))
+            .ToArray();
+        missingSeedToolCodes.Should().BeEmpty("built-in skills may only narrow already governed tool registrations");
+
+        var skills = await aiGatewayDbContext.SkillDefinitions
+            .OrderBy(skill => skill.SkillCode)
+            .ToListAsync();
+        skills.Should().HaveCount(BuiltInSkillDefinitions.All.Count);
+        skills.Should().OnlyContain(skill => skill.IsBuiltIn);
+        skills.SelectMany(skill => skill.AllowedToolCodes)
+            .Should()
+            .OnlyContain(toolCode => registeredToolCodes.Contains(toolCode));
+        skills.SelectMany(skill => skill.AllowedToolCodes)
+            .Should()
+            .NotIntersectWith(BuiltInToolRegistrations.ObsoleteAgentRuntimeToolCodes);
+
+        var toolByCode = tools.ToDictionary(tool => tool.ToolCode, StringComparer.OrdinalIgnoreCase);
+        var cloudReadonlySkill = skills.Single(skill => skill.SkillCode == "cloud_readonly");
+        cloudReadonlySkill.AllowedToolCodes
+            .Where(toolCode => toolByCode[toolCode].ProviderType == ToolProviderType.CloudReadonly)
+            .Should()
+            .BeEquivalentTo("query_cloud_data_readonly");
+        cloudReadonlySkill.AllowedToolCodes
+            .Should()
+            .OnlyContain(toolCode =>
+                toolByCode[toolCode].ProviderType != ToolProviderType.CloudReadonly ||
+                !toolCode.Contains("write", StringComparison.OrdinalIgnoreCase),
+                "Cloud write tools must never enter a built-in skill allowlist");
+
+        var activeRoutingConfiguration = await aiGatewayDbContext.RoutingModelConfigurations.SingleAsync(configuration => configuration.IsActive);
+        activeRoutingConfiguration.Name.Should().Be(PrivateMiniMaxRoutingConfigurationName);
+        activeRoutingConfiguration.ModelId.Should().Be(seedModel.Id);
 
         await using var ragDbContext = await CreateRagDbContextAsync(fixture);
         (await ragDbContext.EmbeddingModels.CountAsync()).Should().Be(0);
@@ -160,6 +215,7 @@ public sealed class FreshDatabaseSeedTests
             "AiGateway.GetSession",
             "AiGateway.GetListSessions",
             "AiGateway.RenameSession",
+            "AiGateway.DeleteSession",
             "AiGateway.GetAgentTask",
             "AiGateway.PlanAgentTask",
             "AiGateway.ApproveAgentTaskPlan",
@@ -172,13 +228,23 @@ public sealed class FreshDatabaseSeedTests
             "AiGateway.EditArtifact",
             "AiGateway.SubmitFinalReview",
             "AiGateway.Chat",
-            "PilotAuthorization.Submit",
-            "PilotAuthorization.View");
+            "AiGateway.ToolRegistry.Read",
+            "Rag.GetKnowledgeBase",
+            "Rag.GetListKnowledgeBases",
+            "Rag.GetListDocuments",
+            "Rag.UploadDocument",
+            "Rag.DeleteDocument",
+            "Rag.SearchKnowledgeBase");
         userPermissions.Should().NotContain("AiGateway.ApproveAgentToolCall");
         userPermissions.Should().NotContain("AiGateway.ApproveFinalOutput");
         userPermissions.Should().NotContain("AiGateway.FinalizeWorkspace");
         userPermissions.Should().NotContain("DataSource.TextToSql");
         userPermissions.Should().NotContain("DataSource.QueryGovernedSql");
+        userPermissions.Should().NotContain("Rag.GetListEmbeddingModels");
+        userPermissions.Should().NotContain("Rag.CreateKnowledgeBase");
+        userPermissions.Should().NotContain("Rag.UpdateKnowledgeBase");
+        userPermissions.Should().NotContain("Rag.DeleteKnowledgeBase");
+        userPermissions.Should().NotContain("Rag.UpdateDocumentGovernance");
 
         await using var mcpDbContext = await CreateMcpDbContextAsync(fixture);
         (await mcpDbContext.McpServerInfos.CountAsync()).Should().Be(0);

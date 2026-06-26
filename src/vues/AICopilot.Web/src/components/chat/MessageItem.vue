@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Bot, UserRound } from 'lucide-vue-next'
+import { Activity, Bot, UserRound } from 'lucide-vue-next'
 import AiTag from '@/components/ai/AiTag.vue'
 import { renderMarkdown } from '@/utils/markdown'
 import { ChunkType, MessageRole, type ChatChunk } from '@/types/protocols'
@@ -8,7 +8,8 @@ import { useChatStore } from '@/stores/chatStore'
 import ApprovalCard from './ApprovalCard.vue'
 import FunctionCallItem from './FunctionCallItem.vue'
 import WidgetRenderer from '../widgets/WidgetRenderer.vue'
-import type { ApprovalChunk, ChatMessage, FunctionCallChunk, IntentChunk, WidgetChunk } from '@/types/models'
+import { formatAgentEventDetail } from '@/protocol/agentEventDisplay'
+import type { AgentEventChunk, ApprovalChunk, ChatMessage, FunctionCallChunk, IntentChunk, WidgetChunk } from '@/types/models'
 
 const props = defineProps<{
   message: ChatMessage
@@ -17,7 +18,16 @@ const props = defineProps<{
 const store = useChatStore()
 const isUser = computed(() => props.message.role === MessageRole.User)
 const chunks = computed(() => props.message.chunks)
+const agentEventChunks = computed(() => chunks.value.filter((chunk) => chunk.type === ChunkType.AgentEvent) as AgentEventChunk[])
 const intentChunks = computed(() => chunks.value.filter((chunk) => chunk.type === ChunkType.Intent) as IntentChunk[])
+const functionCallChunks = computed(() => chunks.value.filter((chunk) => chunk.type === ChunkType.FunctionCall) as FunctionCallChunk[])
+const visibleChunks = computed(() =>
+  chunks.value.filter((chunk) =>
+    chunk.type === ChunkType.Text ||
+    chunk.type === ChunkType.Widget ||
+    chunk.type === ChunkType.ApprovalRequest
+  )
+)
 const modelBadges = computed(() => {
   if (isUser.value) {
     return []
@@ -41,6 +51,13 @@ const modelBadges = computed(() => {
 
   return badges
 })
+const runtimeDetailCount = computed(() =>
+  modelBadges.value.length +
+  agentEventChunks.value.length +
+  intentChunks.value.length +
+  functionCallChunks.value.length
+)
+const hasRuntimeDetails = computed(() => !isUser.value && runtimeDetailCount.value > 0)
 
 function asFunctionCall(chunk: ChatChunk) {
   return chunk as FunctionCallChunk
@@ -52,6 +69,23 @@ function asWidget(chunk: ChatChunk) {
 
 function asApproval(chunk: ChatChunk) {
   return chunk as ApprovalChunk
+}
+
+function agentEventLabel(stage: string) {
+  switch (stage) {
+    case 'plan_draft_started':
+      return '计划草案开始'
+    case 'intent_understanding':
+      return '理解目标'
+    case 'capability_discovery':
+      return '发现能力'
+    case 'plan_draft_ready':
+      return '草案就绪'
+    case 'plan_draft_failed':
+      return '草案失败'
+    default:
+      return stage
+  }
 }
 
 async function approve(payload: { callId: string; onsiteConfirmed: boolean }, chunk: ApprovalChunk) {
@@ -76,23 +110,9 @@ async function reject(payload: { callId: string }, chunk: ApprovalChunk) {
         <span>{{ new Date(message.timestamp).toLocaleTimeString('zh-CN', { hour12: false }) }}</span>
       </div>
 
-      <section v-if="modelBadges.length > 0" class="model-strip">
-        <AiTag v-for="badge in modelBadges" :key="badge.key" :tone="badge.tone">
-          {{ badge.text }}
-        </AiTag>
-      </section>
-
-      <section v-if="intentChunks.length > 0" class="intent-strip">
-        <AiTag v-for="intent in intentChunks.flatMap((chunk) => chunk.intents)" :key="`${intent.intent}-${intent.confidence}`" tone="neutral">
-          {{ intent.intent }} · {{ Math.round(intent.confidence * 100) }}%
-        </AiTag>
-      </section>
-
       <div class="chunk-list">
-        <template v-for="(chunk, index) in chunks" :key="`${chunk.source}-${chunk.type}-${index}`">
+        <template v-for="(chunk, index) in visibleChunks" :key="`${chunk.source}-${chunk.type}-${index}`">
           <div v-if="chunk.type === ChunkType.Text" class="text-block markdown-body" v-html="renderMarkdown(chunk.content)" />
-
-          <FunctionCallItem v-else-if="chunk.type === ChunkType.FunctionCall" :call="asFunctionCall(chunk).functionCall" />
 
           <WidgetRenderer v-else-if="chunk.type === ChunkType.Widget" :data="asWidget(chunk).widget" />
 
@@ -107,6 +127,55 @@ async function reject(payload: { callId: string }, chunk: ApprovalChunk) {
 
         <span v-if="message.isStreaming" class="streaming-caret" />
       </div>
+
+      <details v-if="hasRuntimeDetails" class="runtime-details">
+        <summary>
+          <Activity :size="16" />
+          <span>运行详情</span>
+          <AiTag tone="neutral">详情</AiTag>
+        </summary>
+
+        <div class="runtime-body">
+          <section v-if="modelBadges.length > 0" class="runtime-section">
+            <span class="runtime-label">模型</span>
+            <div class="model-strip">
+              <AiTag v-for="badge in modelBadges" :key="badge.key" :tone="badge.tone">
+                {{ badge.text }}
+              </AiTag>
+            </div>
+          </section>
+
+          <section v-if="agentEventChunks.length > 0" class="runtime-section">
+            <span class="runtime-label">过程</span>
+            <div class="agent-event-list">
+              <div v-for="(chunk, index) in agentEventChunks" :key="`${chunk.event.stage}-${index}`" class="agent-event-row">
+                <strong>{{ agentEventLabel(chunk.event.stage) }}</strong>
+                <span>{{ formatAgentEventDetail(chunk.event) }}</span>
+              </div>
+            </div>
+          </section>
+
+          <section v-if="intentChunks.length > 0" class="runtime-section">
+            <span class="runtime-label">意图</span>
+            <div class="intent-strip">
+              <AiTag v-for="intent in intentChunks.flatMap((chunk) => chunk.intents)" :key="`${intent.intent}-${intent.confidence}`" tone="neutral">
+                {{ intent.intent }} · {{ Math.round(intent.confidence * 100) }}%
+              </AiTag>
+            </div>
+          </section>
+
+          <section v-if="functionCallChunks.length > 0" class="runtime-section">
+            <span class="runtime-label">工具</span>
+            <div class="runtime-calls">
+              <FunctionCallItem
+                v-for="(chunk, index) in functionCallChunks"
+                :key="`${chunk.functionCall.id}-${index}`"
+                :call="asFunctionCall(chunk).functionCall"
+              />
+            </div>
+          </section>
+        </div>
+      </details>
     </div>
   </article>
 </template>
@@ -136,7 +205,12 @@ async function reject(payload: { callId: string }, chunk: ApprovalChunk) {
   grid-row: 1;
   justify-self: end;
   border-color: rgba(200, 255, 61, 0.32);
+  border-style: solid;
+  border-width: 1px;
+  border-radius: 18px;
+  padding: 12px 14px;
   background: rgba(239, 255, 190, 0.92);
+  box-shadow: var(--ai-shadow-xs);
 }
 
 .avatar {
@@ -156,11 +230,11 @@ async function reject(payload: { callId: string }, chunk: ApprovalChunk) {
   gap: 12px;
   min-width: 0;
   max-width: min(100%, 940px);
-  border: 1px solid var(--ai-border);
-  border-radius: 22px;
-  padding: 14px;
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: var(--ai-shadow-xs);
+  border: 0;
+  border-radius: 0;
+  padding: 2px 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .message-meta {
@@ -184,6 +258,83 @@ async function reject(payload: { callId: string }, chunk: ApprovalChunk) {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.agent-event-list {
+  display: grid;
+  gap: 6px;
+}
+
+.agent-event-row {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  min-width: 0;
+  border: 1px solid rgba(63, 111, 115, 0.12);
+  border-radius: 8px;
+  padding: 7px 8px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.agent-event-row strong,
+.agent-event-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.agent-event-row strong {
+  color: var(--ai-text);
+  font-weight: 900;
+}
+
+.agent-event-row span {
+  color: var(--ai-text-muted);
+  font-weight: 750;
+}
+
+.runtime-details {
+  overflow: hidden;
+  border: 1px solid var(--ai-border);
+  border-radius: 12px;
+  background: var(--ai-surface-soft);
+}
+
+.runtime-details summary {
+  display: flex;
+  min-height: 38px;
+  cursor: pointer;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.runtime-body {
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid var(--ai-border);
+  padding: 12px;
+}
+
+.runtime-section {
+  display: grid;
+  gap: 8px;
+}
+
+.runtime-label {
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.runtime-calls {
+  display: grid;
+  gap: 10px;
 }
 
 .chunk-list {

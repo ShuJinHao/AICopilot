@@ -15,14 +15,14 @@ namespace AICopilot.AiGatewayService.Agents;
 public class ApprovalDecisionStreamHandler(
     IReadRepository<Session> sessionRepository,
     ICurrentUser currentUser,
-    ChatWorkflowOrchestrator workflowOrchestrator,
+    AgentWorkflowPipeline workflowPipeline,
     SessionMessagePersistenceService messagePersistenceService,
     IFinalAgentContextStore finalAgentContextStore,
     IFinalAgentContextSerializer finalAgentContextSerializer,
     ApprovalRequirementResolver approvalRequirementResolver,
     ISessionExecutionLock sessionExecutionLock,
-    IChatExecutionMetadataAccessor executionMetadataAccessor,
-    IChatStreamRuntime chatStreamRuntime)
+    IAgentExecutionMetadataAccessor executionMetadataAccessor,
+    IAgentStreamRuntime chatStreamRuntime)
     : IStreamRequestHandler<ApprovalDecisionStreamRequest, ChatChunk>
 {
     public async IAsyncEnumerable<ChatChunk> Handle(
@@ -30,27 +30,87 @@ public class ApprovalDecisionStreamHandler(
         [EnumeratorCancellation] CancellationToken ct)
     {
         var assistantText = new StringBuilder();
+        var assistantRenderChunks = new List<ChatChunk>();
         var pendingMessages = new List<SessionMessageAppend>();
-        Exception? failure = null;
-        IAsyncDisposable? sessionLock = null;
+        SessionRuntimeSnapshot? session = null;
+        ChatChunk? earlyErrorChunk = null;
 
         try
         {
-            sessionLock = await sessionExecutionLock.AcquireAsync(request.SessionId, ct);
+            session = await chatStreamRuntime.LoadSessionAsync(sessionRepository, request.SessionId, ct);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             yield break;
         }
         catch (Exception exception)
         {
-            failure = exception;
+            earlyErrorChunk = AgentStreamRuntime.CreateErrorChunk(
+                exception,
+                nameof(ApprovalDecisionStreamHandler),
+                AppProblemCodes.ApprovalStreamFailed,
+                "审批处理失败，请稍后重试。");
         }
 
-        if (sessionLock is not null)
+        if (earlyErrorChunk is not null)
         {
-            await using var acquiredLock = sessionLock;
-            await using var enumerator = HandleCore(request, assistantText, pendingMessages, ct).GetAsyncEnumerator(ct);
+            yield return earlyErrorChunk;
+            yield break;
+        }
+
+        if (session == null)
+        {
+            yield return AgentStreamRuntime.CreateErrorChunk(
+                "session_not_found",
+                "未找到对应的会话。",
+                nameof(ApprovalDecisionStreamHandler),
+                "当前会话不存在或已被删除，请刷新后重试。");
+            yield break;
+        }
+
+        if (currentUser.Id != session.UserId)
+        {
+            yield return AgentStreamRuntime.CreateErrorChunk(
+                AuthProblemCodes.MissingPermission,
+                "当前用户无权操作该会话。",
+                nameof(ApprovalDecisionStreamHandler),
+                "当前账号无权操作该会话。");
+            yield break;
+        }
+
+        IAsyncDisposable? sessionLock = null;
+        try
+        {
+            sessionLock = await sessionExecutionLock.AcquireAsync(request.SessionId, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            yield break;
+        }
+        catch (Exception exception)
+        {
+            earlyErrorChunk = AgentStreamRuntime.CreateErrorChunk(
+                exception,
+                nameof(ApprovalDecisionStreamHandler),
+                AppProblemCodes.ApprovalStreamFailed,
+                "审批处理失败，请稍后重试。");
+        }
+
+        if (earlyErrorChunk is not null)
+        {
+            yield return earlyErrorChunk;
+            yield break;
+        }
+
+        if (sessionLock is null)
+        {
+            yield break;
+        }
+
+        Exception? failure = null;
+        await using (sessionLock)
+        {
+            await using var enumerator = HandleCore(request, session, assistantText, pendingMessages, ct).GetAsyncEnumerator(ct);
             while (true)
             {
                 bool hasNext;
@@ -58,7 +118,7 @@ public class ApprovalDecisionStreamHandler(
                 {
                     hasNext = await enumerator.MoveNextAsync();
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
                     yield break;
                 }
@@ -73,64 +133,49 @@ public class ApprovalDecisionStreamHandler(
                     break;
                 }
 
+                assistantRenderChunks.Add(enumerator.Current);
                 yield return enumerator.Current;
             }
         }
 
         if (failure != null)
         {
-            yield return ChatStreamRuntime.CreateErrorChunk(
+            var errorChunk = AgentStreamRuntime.CreateErrorChunk(
                 assistantText,
                 failure,
                 nameof(ApprovalDecisionStreamHandler),
                 AppProblemCodes.ApprovalStreamFailed,
                 "审批处理失败，请稍后重试。");
+            assistantRenderChunks.Add(errorChunk);
+            yield return errorChunk;
         }
 
-        if (assistantText.Length > 0)
+        if (assistantText.Length > 0 || assistantRenderChunks.Count > 0)
         {
             pendingMessages.Add(new SessionMessageAppend(
-                assistantText.ToString(),
+                assistantText.Length > 0 ? assistantText.ToString() : null,
                 MessageType.Assistant,
-                executionMetadataAccessor.ToMessageSnapshot()));
+                executionMetadataAccessor.ToMessageSnapshot(),
+                assistantRenderChunks));
         }
 
-        await messagePersistenceService.AppendBatchAsync(request.SessionId, pendingMessages, ct);
+        if (pendingMessages.Count > 0)
+        {
+            await messagePersistenceService.AppendBatchAsync(request.SessionId, pendingMessages, ct);
+        }
     }
 
     private async IAsyncEnumerable<ChatChunk> HandleCore(
         ApprovalDecisionStreamRequest request,
+        SessionRuntimeSnapshot session,
         StringBuilder assistantText,
         ICollection<SessionMessageAppend> pendingMessages,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        var session = await chatStreamRuntime.LoadSessionAsync(sessionRepository, request.SessionId, ct);
-        if (session == null)
-        {
-            yield return ChatStreamRuntime.CreateErrorChunk(
-                assistantText,
-                "session_not_found",
-                "未找到对应的会话。",
-                nameof(ApprovalDecisionStreamHandler),
-                "当前会话不存在或已被删除，请刷新后重试。");
-            yield break;
-        }
-
-        if (currentUser.Id != session.UserId)
-        {
-            yield return ChatStreamRuntime.CreateErrorChunk(
-                assistantText,
-                AuthProblemCodes.MissingPermission,
-                "当前用户无权操作该会话。",
-                nameof(ApprovalDecisionStreamHandler),
-                "当前账号无权操作该会话。");
-            yield break;
-        }
-
         var storedContext = await finalAgentContextStore.GetAsync(request.SessionId, ct);
         if (storedContext == null)
         {
-            yield return ChatStreamRuntime.CreateErrorChunk(
+            yield return AgentStreamRuntime.CreateErrorChunk(
                 assistantText,
                 AppProblemCodes.ApprovalAlreadyProcessed,
                 "审批上下文已过期，请重新发起本次诊断或建议请求。",
@@ -145,7 +190,7 @@ public class ApprovalDecisionStreamHandler(
             .FirstOrDefault(item => string.Equals(item.CallId, request.CallId, StringComparison.Ordinal));
         if (storedApproval == null)
         {
-            yield return ChatStreamRuntime.CreateErrorChunk(
+            yield return AgentStreamRuntime.CreateErrorChunk(
                 assistantText,
                 AppProblemCodes.ApprovalAlreadyProcessed,
                 "该审批请求已处理或已失效。",
@@ -168,7 +213,7 @@ public class ApprovalDecisionStreamHandler(
         }
 
         pendingMessages.Add(new SessionMessageAppend(
-            ChatStreamRuntime.BuildApprovalSummary(
+            AgentStreamRuntime.BuildApprovalSummary(
                 validation.Identity is null
                     ? validation.ToolName
                     : $"{validation.Identity.TargetName}/{validation.Identity.ToolName}",
@@ -183,7 +228,7 @@ public class ApprovalDecisionStreamHandler(
             validation.IsApproved,
             request.OnsiteConfirmed));
 
-        await foreach (var chatChunk in workflowOrchestrator.ResumeFinalAgentAsync(
+        await foreach (var chatChunk in workflowPipeline.ResumeFinalAgentAsync(
                            agentContext,
                            session,
                            assistantText,

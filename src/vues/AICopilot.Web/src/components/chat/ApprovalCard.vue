@@ -43,6 +43,7 @@ const statusTone = computed(() => {
   if (props.chunk.status === 'pending') return 'warning'
   return 'neutral'
 })
+const approvalTitle = computed(() => '需要确认后继续')
 const attestationExpiresText = computed(() =>
   request.value.attestationExpiresAt
     ? new Date(request.value.attestationExpiresAt).toLocaleString('zh-CN', { hour12: false })
@@ -67,40 +68,47 @@ function reject() {
     <header>
       <span class="approval-icon"><ShieldAlert class="h-5 w-5" /></span>
       <div>
-        <h3>人工审批请求</h3>
-        <p>模型请求调用受控工具，执行前需要人工复核。</p>
+        <h3>{{ approvalTitle }}</h3>
+        <p>该动作需要人工复核后才能继续。</p>
       </div>
       <AiTag :tone="statusTone">{{ statusText }}</AiTag>
     </header>
 
     <div class="approval-body">
-      <dl>
-        <div>
-          <dt>工具</dt>
-          <dd class="mono">{{ request.toolName || request.name }}</dd>
-        </div>
-        <div v-if="targetText">
-          <dt>身份</dt>
-          <dd class="mono">{{ targetText }}</dd>
-        </div>
-        <div v-if="request.runtimeName">
-          <dt>运行标识</dt>
-          <dd class="mono">{{ request.runtimeName }}</dd>
-        </div>
-      </dl>
-
       <div v-if="!hasStrictIdentity" class="alert-danger">
-        审批请求缺少完整工具身份，系统不会允许继续执行。
+        审批请求缺少完整执行身份，系统不会允许继续执行。
       </div>
 
-      <div class="args-block">
-        <span>参数</span>
-        <ArgumentViewer :args="request.args" />
-      </div>
+      <details class="approval-detail-fold">
+        <summary>审批详情</summary>
+        <dl>
+          <div v-if="request.name">
+            <dt>请求</dt>
+            <dd>{{ request.name }}</dd>
+          </div>
+          <div>
+            <dt>工具</dt>
+            <dd class="mono">{{ request.toolName || request.name }}</dd>
+          </div>
+          <div v-if="targetText">
+            <dt>身份</dt>
+            <dd class="mono">{{ targetText }}</dd>
+          </div>
+          <div v-if="request.runtimeName">
+            <dt>运行标识</dt>
+            <dd class="mono">{{ request.runtimeName }}</dd>
+          </div>
+        </dl>
+
+        <div class="args-block">
+          <span>参数</span>
+          <ArgumentViewer :args="request.args" />
+        </div>
+      </details>
 
       <div v-if="request.requiresOnsiteAttestation" class="onsite-block">
         <strong>现场复核</strong>
-        <p>此工具需要确认现场有人在岗，并再次确认执行前条件。</p>
+        <p>此动作需要确认现场有人在岗，并再次确认执行前条件。</p>
         <p v-if="attestationExpiresText">在岗声明有效至：{{ attestationExpiresText }}</p>
         <AiCheckbox v-if="isPending" v-model="onsiteConfirmed">
           现场有人在岗，且已复核执行前条件
@@ -227,7 +235,8 @@ dd {
 }
 
 .args-block,
-.onsite-block {
+.onsite-block,
+.approval-detail-fold {
   display: grid;
   gap: 8px;
 }
@@ -236,6 +245,24 @@ dd {
   color: var(--ai-text-muted);
   font-size: 12px;
   font-weight: 800;
+}
+
+.approval-detail-fold {
+  border: 1px solid var(--ai-border);
+  border-radius: 16px;
+  padding: 10px 12px;
+  background: var(--ai-surface-soft);
+}
+
+.approval-detail-fold summary {
+  cursor: pointer;
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.approval-detail-fold[open] summary {
+  margin-bottom: 8px;
 }
 
 .onsite-block {

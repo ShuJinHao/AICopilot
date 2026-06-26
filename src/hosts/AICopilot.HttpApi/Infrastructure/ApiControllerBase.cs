@@ -21,13 +21,19 @@ public abstract class ApiControllerBase(ISender sender) : ControllerBase
                     return value is null ? NoContent() : Ok(value);
                 }
             case ResultStatus.Error:
-                return result.Errors is null ? BadRequest() : BadRequest(new { errors = result.Errors });
+                return StatusCode(
+                    StatusCodes.Status400BadRequest,
+                    CreateProblemDetails(StatusCodes.Status400BadRequest, result.Errors));
 
             case ResultStatus.NotFound:
-                return result.Errors is null ? NotFound() : NotFound(new { errors = result.Errors });
+                return StatusCode(
+                    StatusCodes.Status404NotFound,
+                    CreateProblemDetails(StatusCodes.Status404NotFound, result.Errors));
 
             case ResultStatus.Invalid:
-                return result.Errors is null ? BadRequest() : BadRequest(new { errors = result.Errors });
+                return StatusCode(
+                    StatusCodes.Status400BadRequest,
+                    CreateProblemDetails(StatusCodes.Status400BadRequest, result.Errors));
 
             case ResultStatus.Forbidden:
                 return StatusCode(
@@ -40,7 +46,9 @@ public abstract class ApiControllerBase(ISender sender) : ControllerBase
                     CreateProblemDetails(StatusCodes.Status401Unauthorized, result.Errors));
 
             default:
-                return BadRequest();
+                return StatusCode(
+                    StatusCodes.Status400BadRequest,
+                    CreateProblemDetails(StatusCodes.Status400BadRequest, result.Errors));
         }
     }
 

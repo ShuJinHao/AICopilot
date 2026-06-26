@@ -1,4 +1,4 @@
-import type { ChatModelMetadataPayload } from '@/types/protocols'
+import type { AgentEventPayload, ChatModelMetadataPayload } from '@/types/protocols'
 import {
   type ChatChunk,
   type FunctionApprovalRequest,
@@ -58,10 +58,16 @@ export interface ApprovalChunk extends ChatChunk {
   status: 'pending' | 'approved' | 'rejected' | 'expired'
 }
 
+export interface AgentEventChunk extends ChatChunk {
+  event: AgentEventPayload
+}
+
 /**
  * 前端使用的消息模型
  */
 export interface ChatMessage extends ChatModelMetadataPayload {
+  messageId?: number
+  sequence?: number
   sessionId: string
   role: MessageRole
   chunks: ChatChunk[]

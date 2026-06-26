@@ -1,6 +1,4 @@
-using AICopilot.AiGatewayService.CloudReadiness;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
-using AICopilot.Services.Contracts;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
 
@@ -13,10 +11,7 @@ internal static class AgentTaskPlanStepBuilder
         bool hasBusinessDataSources,
         AgentTaskType taskType,
         bool requiresDataApproval,
-        IReadOnlyCollection<string>? artifactTypes,
-        bool isCloudSandboxTrial,
-        bool isCloudProductionPilotTrial,
-        bool isCloudProductionControlledPilotTrial)
+        IReadOnlyCollection<string>? artifactTypes)
     {
         var result = steps.ToList();
         var normalizedArtifactTypes = NormalizeArtifactTypes(artifactTypes);
@@ -26,8 +21,8 @@ internal static class AgentTaskPlanStepBuilder
                 result,
                 "read_uploaded_file",
                 new AgentStepPlanDto(
-                    "Read uploaded files",
-                    "Read task uploads into the controlled workspace source area.",
+                    "读取上传文件",
+                    "将本次任务上传的文件读取到受控工作区。",
                     AgentStepType.FileRead,
                     "read_uploaded_file",
                     false));
@@ -35,8 +30,8 @@ internal static class AgentTaskPlanStepBuilder
                 result,
                 "parse_table_file",
                 new AgentStepPlanDto(
-                    "Parse table files",
-                    "Parse CSV, JSON, or XLSX uploads into normalized data.",
+                    "解析表格文件",
+                    "将 CSV、JSON 或 XLSX 上传文件解析为结构化数据。",
                     AgentStepType.Analysis,
                     "parse_table_file",
                     false));
@@ -48,8 +43,8 @@ internal static class AgentTaskPlanStepBuilder
                 result,
                 "rag_search",
                 new AgentStepPlanDto(
-                    "Search knowledge bases",
-                    "Retrieve only authorized knowledge base context for the task.",
+                    "检索知识库",
+                    "只检索当前任务已授权的知识库内容。",
                     AgentStepType.RagSearch,
                     "rag_search",
                     false));
@@ -57,36 +52,15 @@ internal static class AgentTaskPlanStepBuilder
 
         if (taskType == AgentTaskType.CloudDataReport)
         {
-            var cloudToolCode = isCloudProductionControlledPilotTrial
-                ? CloudReadonlyProductionControlledPilotMarkers.ToolCode
-                : isCloudProductionPilotTrial
-                ? CloudReadonlyProductionPilotMarkers.ToolCode
-                : isCloudSandboxTrial
-                    ? CloudReadonlySandboxAgentTrialMarkers.ToolCode
-                    : "query_cloud_data_readonly";
-            var title = isCloudProductionControlledPilotTrial
-                ? "Query Cloud production controlled readonly data"
-                : isCloudProductionPilotTrial
-                ? "Query Cloud production Pilot readonly data"
-                : isCloudSandboxTrial
-                    ? "Query Cloud sandbox readonly data"
-                    : "Query Cloud readonly data";
-            var description = isCloudProductionControlledPilotTrial
-                ? "Read Cloud production data only through the controlled free-goal ProductionControlledPilot boundary."
-                : isCloudProductionPilotTrial
-                ? "Read Cloud production data only through the fixed-template ProductionPilot boundary."
-                : isCloudSandboxTrial
-                    ? "Read Cloud sandbox/staging data only through the SandboxAgentTrial boundary."
-                    : "Read Cloud business data only through the AiRead readonly boundary.";
             InsertBeforeOutputs(
                 result,
-                cloudToolCode,
+                "query_cloud_data_readonly",
                 new AgentStepPlanDto(
-                    title,
-                    description,
+                    "查询 Cloud 只读数据",
+                    "仅通过 AiRead 只读边界读取 Cloud 业务数据。",
                     AgentStepType.DataQuery,
-                    cloudToolCode,
-                    isCloudSandboxTrial || isCloudProductionPilotTrial || isCloudProductionControlledPilotTrial));
+                    "query_cloud_data_readonly",
+                    false));
         }
 
         if (hasBusinessDataSources)
@@ -95,8 +69,8 @@ internal static class AgentTaskPlanStepBuilder
                 result,
                 "query_business_database_readonly",
                 new AgentStepPlanDto(
-                    "Query business database",
-                    "Run Text-to-SQL only through authorized BusinessDatabase readonly guardrails.",
+                    "查询只读业务库",
+                    "仅通过已授权的 BusinessDatabase 只读边界执行查询。",
                     AgentStepType.DataQuery,
                     "query_business_database_readonly",
                     requiresDataApproval));
@@ -104,8 +78,8 @@ internal static class AgentTaskPlanStepBuilder
                 result,
                 "summarize_business_query_result",
                 new AgentStepPlanDto(
-                    "Summarize business query result",
-                    "Summarize readonly business query output with source labels and query hashes.",
+                    "总结查询结果",
+                    "基于只读查询结果生成来源明确的摘要。",
                     AgentStepType.Analysis,
                     "summarize_business_query_result",
                     false));
@@ -116,8 +90,8 @@ internal static class AgentTaskPlanStepBuilder
         if (!ContainsTool(result, "finalize_artifacts"))
         {
             result.Add(new AgentStepPlanDto(
-                "Confirm final output",
-                "Wait for final output approval before moving draft artifacts to final.",
+                "确认最终产物",
+                "等待用户确认后，才允许将草稿产物转为最终输出。",
                 AgentStepType.Finalize,
                 "finalize_artifacts",
                 true));
@@ -132,42 +106,33 @@ internal static class AgentTaskPlanStepBuilder
         bool hasBusinessDataSources,
         AgentTaskType taskType,
         AgentTaskRiskLevel riskLevel,
-        IReadOnlyCollection<string>? artifactTypes,
-        bool isCloudSandboxTrial,
-        bool isCloudProductionPilotTrial,
-        bool isCloudProductionControlledPilotTrial)
+        IReadOnlyCollection<string>? artifactTypes)
     {
         var steps = new List<AgentStepPlanDto>();
         var normalizedArtifactTypes = NormalizeArtifactTypes(artifactTypes);
         if (hasUploads)
         {
-            steps.Add(new AgentStepPlanDto("Read uploaded files", "Read task uploads into the controlled workspace source area.", AgentStepType.FileRead, "read_uploaded_file", false));
-            steps.Add(new AgentStepPlanDto("Parse table files", "Parse CSV, JSON, or XLSX uploads into normalized data.", AgentStepType.Analysis, "parse_table_file", false));
+            steps.Add(new AgentStepPlanDto("读取上传文件", "将本次任务上传的文件读取到受控工作区。", AgentStepType.FileRead, "read_uploaded_file", false));
+            steps.Add(new AgentStepPlanDto("解析表格文件", "将 CSV、JSON 或 XLSX 上传文件解析为结构化数据。", AgentStepType.Analysis, "parse_table_file", false));
         }
 
         if (hasKnowledgeBases)
         {
-            steps.Add(new AgentStepPlanDto("Search knowledge bases", "Retrieve only authorized knowledge base context for the task.", AgentStepType.RagSearch, "rag_search", false));
+            steps.Add(new AgentStepPlanDto("检索知识库", "只检索当前任务已授权的知识库内容。", AgentStepType.RagSearch, "rag_search", false));
         }
 
         if (taskType == AgentTaskType.CloudDataReport)
         {
-            steps.Add(isCloudProductionControlledPilotTrial
-                ? new AgentStepPlanDto("Query Cloud production controlled readonly data", "Read Cloud production data only through the controlled free-goal ProductionControlledPilot boundary.", AgentStepType.DataQuery, CloudReadonlyProductionControlledPilotMarkers.ToolCode, true)
-                : isCloudProductionPilotTrial
-                ? new AgentStepPlanDto("Query Cloud production Pilot readonly data", "Read Cloud production data only through the fixed-template ProductionPilot boundary.", AgentStepType.DataQuery, CloudReadonlyProductionPilotMarkers.ToolCode, true)
-                : isCloudSandboxTrial
-                    ? new AgentStepPlanDto("Query Cloud sandbox readonly data", "Read Cloud sandbox/staging data only through the SandboxAgentTrial boundary.", AgentStepType.DataQuery, CloudReadonlySandboxAgentTrialMarkers.ToolCode, true)
-                    : new AgentStepPlanDto("Query Cloud readonly data", "Read Cloud business data only through the AiRead readonly boundary.", AgentStepType.DataQuery, "query_cloud_data_readonly", false));
+            steps.Add(new AgentStepPlanDto("查询 Cloud 只读数据", "仅通过 AiRead 只读边界读取 Cloud 业务数据。", AgentStepType.DataQuery, "query_cloud_data_readonly", false));
         }
 
-        steps.Add(new AgentStepPlanDto("Generate chart data", "Generate frontend chart preview data from controlled task inputs.", AgentStepType.ChartGeneration, "generate_chart_data", false));
-        steps.Add(new AgentStepPlanDto("Generate Markdown report", "Generate a Markdown draft in the controlled workspace.", AgentStepType.ArtifactGeneration, "generate_markdown_report", false));
-        steps.Add(new AgentStepPlanDto("Generate HTML report", "Generate an HTML draft in the controlled workspace.", AgentStepType.ArtifactGeneration, "generate_html_report", false));
-        steps.Add(new AgentStepPlanDto("Generate PDF draft", "Generate a basic PDF report draft in the controlled workspace.", AgentStepType.ArtifactGeneration, "generate_pdf", true));
-        steps.Add(new AgentStepPlanDto("Generate PPTX draft", "Generate a basic PPTX presentation draft in the controlled workspace.", AgentStepType.ArtifactGeneration, "generate_pptx", true));
-        steps.Add(new AgentStepPlanDto("Generate XLSX draft", "Generate a basic XLSX data draft in the controlled workspace.", AgentStepType.ArtifactGeneration, "generate_xlsx", true));
-        steps.Add(new AgentStepPlanDto("Confirm final output", "Wait for user approval before moving draft artifacts to final output.", AgentStepType.Finalize, "finalize_artifacts", true));
+        steps.Add(new AgentStepPlanDto("生成图表数据", "基于受控任务输入生成前端图表预览数据。", AgentStepType.ChartGeneration, "generate_chart_data", false));
+        steps.Add(new AgentStepPlanDto("生成 Markdown 报告", "在受控工作区生成 Markdown 草稿。", AgentStepType.ArtifactGeneration, "generate_markdown_report", false));
+        steps.Add(new AgentStepPlanDto("生成 HTML 报告", "在受控工作区生成 HTML 草稿。", AgentStepType.ArtifactGeneration, "generate_html_report", false));
+        steps.Add(new AgentStepPlanDto("生成 PDF 草稿", "在受控工作区生成 PDF 报告草稿。", AgentStepType.ArtifactGeneration, "generate_pdf", true));
+        steps.Add(new AgentStepPlanDto("生成 PPTX 草稿", "在受控工作区生成 PPTX 演示草稿。", AgentStepType.ArtifactGeneration, "generate_pptx", true));
+        steps.Add(new AgentStepPlanDto("生成 XLSX 草稿", "在受控工作区生成 XLSX 数据草稿。", AgentStepType.ArtifactGeneration, "generate_xlsx", true));
+        steps.Add(new AgentStepPlanDto("确认最终产物", "等待用户确认后，才允许将草稿产物转为最终输出。", AgentStepType.Finalize, "finalize_artifacts", true));
 
         if (normalizedArtifactTypes is not null)
         {
@@ -271,10 +236,10 @@ internal static class AgentTaskPlanStepBuilder
                 steps,
                 toolCode,
                 new AgentStepPlanDto(
-                    "Generate chart data",
+                    "生成图表数据",
                     hasBusinessDataSources
-                        ? "Generate controlled chart data from approved BusinessDatabase readonly query results."
-                        : "Generate chart preview data from controlled task inputs.",
+                        ? "基于已批准的 BusinessDatabase 只读查询结果生成受控图表数据。"
+                        : "基于受控任务输入生成图表预览数据。",
                     AgentStepType.ChartGeneration,
                     toolCode,
                     false));
@@ -286,8 +251,8 @@ internal static class AgentTaskPlanStepBuilder
                 steps,
                 "generate_markdown_report",
                 new AgentStepPlanDto(
-                    "Generate Markdown report",
-                    "Generate a Markdown draft in the controlled workspace.",
+                    "生成 Markdown 报告",
+                    "在受控工作区生成 Markdown 草稿。",
                     AgentStepType.ArtifactGeneration,
                     "generate_markdown_report",
                     false));
@@ -299,8 +264,8 @@ internal static class AgentTaskPlanStepBuilder
                 steps,
                 "generate_html_report",
                 new AgentStepPlanDto(
-                    "Generate HTML report",
-                    "Generate an HTML draft in the controlled workspace.",
+                    "生成 HTML 报告",
+                    "在受控工作区生成 HTML 草稿。",
                     AgentStepType.ArtifactGeneration,
                     "generate_html_report",
                     false));
@@ -312,8 +277,8 @@ internal static class AgentTaskPlanStepBuilder
                 steps,
                 "generate_pdf",
                 new AgentStepPlanDto(
-                    "Generate PDF draft",
-                    "Generate a PDF draft in the controlled workspace.",
+                    "生成 PDF 草稿",
+                    "在受控工作区生成 PDF 报告草稿。",
                     AgentStepType.ArtifactGeneration,
                     "generate_pdf",
                     true));
@@ -325,8 +290,8 @@ internal static class AgentTaskPlanStepBuilder
                 steps,
                 "generate_pptx",
                 new AgentStepPlanDto(
-                    "Generate PPTX draft",
-                    "Generate a PPTX draft in the controlled workspace.",
+                    "生成 PPTX 草稿",
+                    "在受控工作区生成 PPTX 演示草稿。",
                     AgentStepType.ArtifactGeneration,
                     "generate_pptx",
                     true));
@@ -338,8 +303,8 @@ internal static class AgentTaskPlanStepBuilder
                 steps,
                 "generate_xlsx",
                 new AgentStepPlanDto(
-                    "Generate XLSX draft",
-                    "Generate an XLSX draft in the controlled workspace.",
+                    "生成 XLSX 草稿",
+                    "在受控工作区生成 XLSX 数据草稿。",
                     AgentStepType.ArtifactGeneration,
                     "generate_xlsx",
                     true));

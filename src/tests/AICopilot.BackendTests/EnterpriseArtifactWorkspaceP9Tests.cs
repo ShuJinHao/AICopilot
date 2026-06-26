@@ -160,6 +160,7 @@ public sealed class EnterpriseArtifactWorkspaceP9Tests
             "generate_report",
             requiresApproval: false,
             now);
+        task.ConfirmExecutablePlan(task.PlanJson, Array.Empty<int>(), now);
         task.ApprovePlan(now);
         return task;
     }

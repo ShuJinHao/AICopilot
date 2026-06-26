@@ -3,14 +3,32 @@ using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.AiGateway.Aggregates.RoutingModel;
 using AICopilot.Core.AiGateway.Aggregates.RuntimeSettings;
+using AICopilot.Core.AiGateway.Aggregates.Skills;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.EntityFrameworkCore;
+using AICopilot.EntityFrameworkCore.Security;
 using Microsoft.EntityFrameworkCore;
 
 namespace AICopilot.MigrationWorkApp;
 
 internal static class MigrationWorkerAiGatewaySeeder
 {
+    public const string PrivateMiniMaxProvider = "MiniMax Private";
+    public const string PrivateMiniMaxModelName = "MiniMax-M3-AWQ-INT4";
+    public const string PrivateMiniMaxBaseUrl = "http://10.98.200.20:40034/v1";
+    public const string PrivateMiniMaxPlaceholderApiKey = "dummy-key";
+    public const string PrivateMiniMaxRoutingConfigurationName = "MiniMax private routing model";
+
+    private static readonly LanguageModelUsage PrivateMiniMaxUsages =
+        LanguageModelUsage.Chat | LanguageModelUsage.Routing | LanguageModelUsage.Planner;
+
+    private static readonly string[] ForcedPrivateMiniMaxTemplateCodes =
+    [
+        "IntentRoutingAgent",
+        "agent_planner",
+        "agent_executor"
+    ];
+
     public static async Task SeedDefaultsAsync(
         AiGatewayDbContext aiGatewayDbContext,
         CancellationToken cancellationToken)
@@ -24,43 +42,46 @@ internal static class MigrationWorkerAiGatewaySeeder
             aiGatewayDbContext.ChatRuntimeSettings.Add(ChatRuntimeSettings.CreateDefault(now));
         }
 
-        var seedModel = await aiGatewayDbContext.LanguageModels.FirstOrDefaultAsync(
+        var obsoleteExampleModel = await aiGatewayDbContext.LanguageModels.FirstOrDefaultAsync(
             model => model.Provider == "Example" && model.Name == "Disabled example model",
             cancellationToken);
-        if (seedModel is null)
+
+        var privateMiniMaxModel = await aiGatewayDbContext.LanguageModels.FirstOrDefaultAsync(
+            model => model.Provider == PrivateMiniMaxProvider && model.Name == PrivateMiniMaxModelName,
+            cancellationToken);
+        if (privateMiniMaxModel is null)
         {
-            seedModel = new LanguageModel(
-                "Example",
-                "Disabled example model",
-                "https://example.invalid/v1",
-                null,
+            privateMiniMaxModel = new LanguageModel(
+                PrivateMiniMaxProvider,
+                PrivateMiniMaxModelName,
+                PrivateMiniMaxBaseUrl,
+                ProtectSeedApiKey(PrivateMiniMaxPlaceholderApiKey),
                 new ModelParameters
                 {
-                    MaxTokens = 8192,
-                    MaxOutputTokens = 1024,
-                    Temperature = 0.7f
+                    MaxTokens = 32768,
+                    MaxOutputTokens = 4096,
+                    Temperature = 0.2f
                 },
                 LanguageModelProtocolTypes.OpenAICompatible,
-                LanguageModelUsage.Chat | LanguageModelUsage.Routing,
-                isEnabled: false);
-            aiGatewayDbContext.LanguageModels.Add(seedModel);
+                PrivateMiniMaxUsages,
+                isEnabled: true);
+            aiGatewayDbContext.LanguageModels.Add(privateMiniMaxModel);
         }
         else
         {
-            seedModel.UpdateInfo(
-                "Example",
-                "Disabled example model",
-                "https://example.invalid/v1",
+            privateMiniMaxModel.UpdateInfo(
+                PrivateMiniMaxProvider,
+                PrivateMiniMaxModelName,
+                PrivateMiniMaxBaseUrl,
                 LanguageModelProtocolTypes.OpenAICompatible);
-            seedModel.UpdateApiKey(null);
-            seedModel.UpdateParameters(new ModelParameters
+            EnsureSeedApiKey(privateMiniMaxModel);
+            privateMiniMaxModel.UpdateParameters(new ModelParameters
             {
-                MaxTokens = 8192,
-                MaxOutputTokens = 1024,
-                Temperature = 0.7f
+                MaxTokens = 32768,
+                MaxOutputTokens = 4096,
+                Temperature = 0.2f
             });
-            seedModel.UpdateRuntimeFlags(LanguageModelUsage.Chat | LanguageModelUsage.Routing, isEnabled: false);
-            seedModel.ResetConnectivityStatus();
+            privateMiniMaxModel.UpdateRuntimeFlags(PrivateMiniMaxUsages, isEnabled: true);
         }
 
         foreach (var definition in BuiltInConversationTemplates.All)
@@ -71,16 +92,20 @@ internal static class MigrationWorkerAiGatewaySeeder
             if (template is null)
             {
                 aiGatewayDbContext.ConversationTemplates.Add(
-                    BuiltInConversationTemplates.CreateTemplate(definition, seedModel.Id));
+                    BuiltInConversationTemplates.CreateTemplate(definition, privateMiniMaxModel.Id));
                 continue;
             }
+
+            var modelId = ShouldBindTemplateToPrivateMiniMax(definition, template, obsoleteExampleModel)
+                ? privateMiniMaxModel.Id
+                : template.ModelId;
 
             template.UpdateInfo(
                 definition.Name,
                 definition.Description,
                 definition.SystemPrompt,
-                seedModel.Id,
-                isEnabled: true);
+                modelId,
+                template.IsEnabled);
             template.MarkBuiltIn(definition.Code, definition.Scope, definition.Version);
         }
 
@@ -116,6 +141,12 @@ internal static class MigrationWorkerAiGatewaySeeder
                 isEnabled: true,
                 requiresOnsiteAttestation: false);
         }
+
+        var obsoleteToolCodes = BuiltInToolRegistrations.ObsoleteAgentRuntimeToolCodes.ToArray();
+        var obsoleteTools = await aiGatewayDbContext.ToolRegistrations
+            .Where(tool => obsoleteToolCodes.Contains(tool.ToolCode))
+            .ToListAsync(cancellationToken);
+        aiGatewayDbContext.ToolRegistrations.RemoveRange(obsoleteTools);
 
         foreach (var definition in BuiltInToolRegistrations.AgentRuntimeTools)
         {
@@ -182,37 +213,141 @@ internal static class MigrationWorkerAiGatewaySeeder
                 string.IsNullOrWhiteSpace(tool.ApprovalPolicy) ? definition.ApprovalPolicy : tool.ApprovalPolicy);
         }
 
+        await SeedSkillDefinitionsAsync(aiGatewayDbContext, now, cancellationToken);
+
         var routingConfigurations = await aiGatewayDbContext.RoutingModelConfigurations
             .ToListAsync(cancellationToken);
-        var languageModels = await aiGatewayDbContext.LanguageModels.ToListAsync(cancellationToken);
-        var usableRoutingModel = languageModels
-            .FirstOrDefault(model => model.IsEnabled && model.SupportsUsage(LanguageModelUsage.Routing));
-        var activeConfiguration = routingConfigurations.FirstOrDefault(configuration => configuration.IsActive);
-        if (activeConfiguration is not null &&
-            languageModels.All(model =>
-                model.Id != activeConfiguration.ModelId ||
-                !model.IsEnabled ||
-                !model.SupportsUsage(LanguageModelUsage.Routing)))
+        var privateMiniMaxRoutingConfiguration = routingConfigurations.FirstOrDefault(configuration =>
+            configuration.ModelId == privateMiniMaxModel.Id ||
+            string.Equals(configuration.Name, PrivateMiniMaxRoutingConfigurationName, StringComparison.Ordinal));
+        foreach (var configuration in routingConfigurations.Where(configuration => configuration.IsActive))
         {
-            activeConfiguration.Deactivate();
+            configuration.Deactivate();
         }
 
-        if (usableRoutingModel is null)
-        {
-            foreach (var configuration in routingConfigurations.Where(configuration => configuration.IsActive))
-            {
-                configuration.Deactivate();
-            }
-        }
-        else if (routingConfigurations.All(configuration => !configuration.IsActive))
+        if (privateMiniMaxRoutingConfiguration is null)
         {
             aiGatewayDbContext.RoutingModelConfigurations.Add(new RoutingModelConfiguration(
-                "Default routing model",
-                usableRoutingModel.Id,
+                PrivateMiniMaxRoutingConfigurationName,
+                privateMiniMaxModel.Id,
                 isActive: true));
+        }
+        else
+        {
+            privateMiniMaxRoutingConfiguration.Update(
+                PrivateMiniMaxRoutingConfigurationName,
+                privateMiniMaxModel.Id);
+            privateMiniMaxRoutingConfiguration.Activate();
+        }
+
+        if (obsoleteExampleModel is not null)
+        {
+            aiGatewayDbContext.LanguageModels.Remove(obsoleteExampleModel);
         }
 
         await aiGatewayDbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task SeedSkillDefinitionsAsync(
+        AiGatewayDbContext aiGatewayDbContext,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var trackedToolEntries = aiGatewayDbContext.ChangeTracker
+            .Entries<ToolRegistration>()
+            .ToArray();
+        var deletedToolCodes = trackedToolEntries
+            .Where(entry => entry.State == EntityState.Deleted)
+            .Select(entry => entry.Entity.ToolCode)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var trackedActiveToolCodes = trackedToolEntries
+            .Where(entry => entry.State != EntityState.Deleted)
+            .Select(entry => entry.Entity.ToolCode);
+        var persistedToolCodes = await aiGatewayDbContext.ToolRegistrations
+            .Select(tool => tool.ToolCode)
+            .ToListAsync(cancellationToken);
+        var existingToolCodeSet = persistedToolCodes
+            .Concat(trackedActiveToolCodes)
+            .Where(toolCode => !deletedToolCodes.Contains(toolCode))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var definition in BuiltInSkillDefinitions.All)
+        {
+            var allowedToolCodes = definition.AllowedToolCodes
+                .Where(existingToolCodeSet.Contains)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            if (allowedToolCodes.Length == 0)
+            {
+                continue;
+            }
+
+            var skill = await aiGatewayDbContext.SkillDefinitions.FirstOrDefaultAsync(
+                item => item.SkillCode == definition.SkillCode,
+                cancellationToken);
+            if (skill is null)
+            {
+                aiGatewayDbContext.SkillDefinitions.Add(new SkillDefinition(
+                    definition.SkillCode,
+                    definition.DisplayName,
+                    definition.Description,
+                    allowedToolCodes,
+                    definition.RiskLevel,
+                    definition.ApprovalPolicy,
+                    definition.AllowedDataSourceModes,
+                    definition.AllowedKnowledgeScopes,
+                    definition.OutputComponentTypes,
+                    definition.IsEnabled,
+                    isBuiltIn: true,
+                    definition.Version,
+                    now));
+                continue;
+            }
+
+            skill.Update(
+                definition.DisplayName,
+                definition.Description,
+                allowedToolCodes,
+                definition.RiskLevel,
+                definition.ApprovalPolicy,
+                definition.AllowedDataSourceModes,
+                definition.AllowedKnowledgeScopes,
+                definition.OutputComponentTypes,
+                skill.IsEnabled && definition.IsEnabled,
+                isBuiltIn: true,
+                definition.Version,
+                now);
+        }
+    }
+
+    private static bool ShouldBindTemplateToPrivateMiniMax(
+        BuiltInConversationTemplateDefinition definition,
+        ConversationTemplate template,
+        LanguageModel? obsoleteExampleModel)
+    {
+        return ForcedPrivateMiniMaxTemplateCodes.Contains(definition.Code, StringComparer.OrdinalIgnoreCase) ||
+               (obsoleteExampleModel is not null && template.ModelId == obsoleteExampleModel.Id);
+    }
+
+    private static void EnsureSeedApiKey(LanguageModel model)
+    {
+        if (string.IsNullOrWhiteSpace(model.ApiKey))
+        {
+            model.UpdateApiKey(ProtectSeedApiKey(PrivateMiniMaxPlaceholderApiKey));
+            model.ResetConnectivityStatus();
+            return;
+        }
+
+        if (!SecretStringEncryptor.IsEncrypted(model.ApiKey))
+        {
+            model.UpdateApiKey(ProtectSeedApiKey(model.ApiKey));
+            model.ResetConnectivityStatus();
+        }
+    }
+
+    private static string? ProtectSeedApiKey(string? apiKey)
+    {
+        return SecretStringEncryptor.Encrypt(apiKey);
     }
 
     private static string? ResolveBuiltInRequiredPermission(

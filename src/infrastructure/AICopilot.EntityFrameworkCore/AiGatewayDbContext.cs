@@ -4,14 +4,11 @@ using AICopilot.Core.AiGateway.Aggregates.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
-using AICopilot.Core.AiGateway.Aggregates.PilotAuthorization;
-using AICopilot.Core.AiGateway.Aggregates.PromptPolicy;
-using AICopilot.Core.AiGateway.Aggregates.ProductionOperations;
 using AICopilot.Core.AiGateway.Aggregates.RoutingModel;
 using AICopilot.Core.AiGateway.Aggregates.RuntimeSettings;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
+using AICopilot.Core.AiGateway.Aggregates.Skills;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
-using AICopilot.Core.AiGateway.Aggregates.TrialOperations;
 using AICopilot.Core.AiGateway.Aggregates.Uploads;
 using AICopilot.EntityFrameworkCore.Configuration.AiGateway;
 using AICopilot.EntityFrameworkCore.Outbox;
@@ -29,13 +26,13 @@ public sealed class AiGatewayDbContext(DbContextOptions<AiGatewayDbContext> opti
 
     public DbSet<ApprovalPolicy> ApprovalPolicies => Set<ApprovalPolicy>();
 
-    public DbSet<PromptPolicy> PromptPolicies => Set<PromptPolicy>();
-
     public DbSet<RoutingModelConfiguration> RoutingModelConfigurations => Set<RoutingModelConfiguration>();
 
     public DbSet<Session> Sessions => Set<Session>();
 
     public DbSet<Message> Messages => Set<Message>();
+
+    public DbSet<MessageEvent> MessageEvents => Set<MessageEvent>();
 
     public DbSet<AgentTask> AgentTasks => Set<AgentTask>();
 
@@ -55,27 +52,9 @@ public sealed class AiGatewayDbContext(DbContextOptions<AiGatewayDbContext> opti
 
     public DbSet<ToolRegistration> ToolRegistrations => Set<ToolRegistration>();
 
+    public DbSet<SkillDefinition> SkillDefinitions => Set<SkillDefinition>();
+
     public DbSet<ToolExecutionRecord> ToolExecutionRecords => Set<ToolExecutionRecord>();
-
-    public DbSet<TrialCampaign> TrialCampaigns => Set<TrialCampaign>();
-
-    public DbSet<PilotAuthorizationSubmission> PilotAuthorizationSubmissions => Set<PilotAuthorizationSubmission>();
-
-    public DbSet<ProductionPilotEmergencyStopState> ProductionPilotEmergencyStopStates => Set<ProductionPilotEmergencyStopState>();
-
-    public DbSet<ProductionPilotIncident> ProductionPilotIncidents => Set<ProductionPilotIncident>();
-
-    public DbSet<ProductionPilotRunLedger> ProductionPilotRunLedgers => Set<ProductionPilotRunLedger>();
-
-    public DbSet<ProductionPilotWindow> ProductionPilotWindows => Set<ProductionPilotWindow>();
-
-    public DbSet<ProductionPilotRun> ProductionPilotRuns => Set<ProductionPilotRun>();
-
-    public DbSet<ProductionControlledPilotIntent> ProductionControlledPilotIntents => Set<ProductionControlledPilotIntent>();
-
-    public DbSet<ProductionControlledPilotRun> ProductionControlledPilotRuns => Set<ProductionControlledPilotRun>();
-
-    public DbSet<ProductionPilotGaReadinessAssessment> ProductionPilotGaReadinessAssessments => Set<ProductionPilotGaReadinessAssessment>();
 
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
@@ -85,10 +64,10 @@ public sealed class AiGatewayDbContext(DbContextOptions<AiGatewayDbContext> opti
         builder.ApplyConfiguration(new LanguageModelConfiguration());
         builder.ApplyConfiguration(new ConversationTemplateConfiguration());
         builder.ApplyConfiguration(new ApprovalPolicyConfiguration());
-        builder.ApplyConfiguration(new PromptPolicyConfiguration());
         builder.ApplyConfiguration(new RoutingModelConfigurationConfiguration());
         builder.ApplyConfiguration(new SessionConfiguration());
         builder.ApplyConfiguration(new MessageConfiguration());
+        builder.ApplyConfiguration(new MessageEventConfiguration());
         builder.ApplyConfiguration(new AgentTaskConfiguration());
         builder.ApplyConfiguration(new AgentTaskRunAttemptConfiguration());
         builder.ApplyConfiguration(new AgentTaskRunQueueItemConfiguration());
@@ -100,19 +79,8 @@ public sealed class AiGatewayDbContext(DbContextOptions<AiGatewayDbContext> opti
         builder.ApplyConfiguration(new ChatRuntimeSettingsConfiguration());
         builder.ApplyConfiguration(new UploadRecordConfiguration());
         builder.ApplyConfiguration(new ToolRegistrationConfiguration());
+        builder.ApplyConfiguration(new SkillDefinitionConfiguration());
         builder.ApplyConfiguration(new ToolExecutionRecordConfiguration());
-        builder.ApplyConfiguration(new TrialCampaignConfiguration());
-        builder.ApplyConfiguration(new TrialScenarioRunConfiguration());
-        builder.ApplyConfiguration(new TrialRiskIssueConfiguration());
-        builder.ApplyConfiguration(new PilotAuthorizationSubmissionConfiguration());
-        builder.ApplyConfiguration(new ProductionPilotEmergencyStopStateConfiguration());
-        builder.ApplyConfiguration(new ProductionPilotIncidentConfiguration());
-        builder.ApplyConfiguration(new ProductionPilotRunLedgerConfiguration());
-        builder.ApplyConfiguration(new ProductionPilotWindowConfiguration());
-        builder.ApplyConfiguration(new ProductionPilotRunConfiguration());
-        builder.ApplyConfiguration(new ProductionControlledPilotIntentConfiguration());
-        builder.ApplyConfiguration(new ProductionControlledPilotRunConfiguration());
-        builder.ApplyConfiguration(new ProductionPilotGaReadinessAssessmentConfiguration());
         builder.ApplyConfiguration(new OutboxMessageConfiguration());
         builder.Entity<OutboxMessage>().ToTable(
             "outbox_messages",

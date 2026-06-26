@@ -1,0 +1,4 @@
+# Replace /srv/enterprise-ai/deploy with the real AICopilot deploy directory before installing.
+# Runs a weekly post-release cleanup at 04:45 every Sunday in the server's local time zone.
+# Requires Harbor credentials in the cron environment or in a sourced operator wrapper.
+45 4 * * 0 cd /srv/enterprise-ai/deploy && release_tag=$(sed -n 's/^DEPLOY_RELEASE_ID=//p' releases/current-release.env | tail -n 1) && ./post-release-cleanup.sh --release-tag "$release_tag" >> ./releases/post-release-cleanup.cron.log 2>&1

@@ -1,5 +1,4 @@
 using AICopilot.AiRuntime;
-using AICopilot.Core.AiGateway.Aggregates.PromptPolicy;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.DataAnalysisService.BusinessDatabases;
 using Microsoft.Extensions.Options;
@@ -44,42 +43,6 @@ public sealed class EnterpriseDataGovernanceP1Tests
             .Validate(sql, SimulationBusinessQuerySchema.SafetySchema)
             .Should()
             .NotBeNull();
-    }
-
-    [Fact]
-    public void PromptPolicy_ShouldActivateOnlyCurrentEnabledVersion()
-    {
-        var now = DateTimeOffset.UtcNow;
-        var policy = new PromptPolicy(
-            "text-to-sql.default",
-            "Text to SQL default",
-            PromptPolicyUsage.TextToSql,
-            isEnabled: true,
-            now);
-
-        var first = policy.AddVersion(
-            "Generate readonly SQL only.",
-            "No DDL or DML.",
-            "Inject schema allowlist.",
-            "Return SQL preview and explanation.",
-            activate: true,
-            now);
-        var second = policy.AddVersion(
-            "Generate SimulationBusiness readonly SQL only.",
-            "No secrets, no system catalogs.",
-            "Inject source labels and limit policy.",
-            "Return draft contract.",
-            activate: false,
-            now.AddMinutes(1));
-
-        policy.ActiveVersionNo.Should().Be(first.VersionNo);
-        policy.ActiveVersion.Should().BeSameAs(first);
-
-        policy.ActivateVersion(second.VersionNo, now.AddMinutes(2));
-
-        policy.ActiveVersionNo.Should().Be(second.VersionNo);
-        policy.ActiveVersion.Should().BeSameAs(second);
-        policy.ActiveVersion!.SystemPrompt.Should().Contain("SimulationBusiness");
     }
 
     [Fact]

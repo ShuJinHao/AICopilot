@@ -4,6 +4,7 @@ using AICopilot.Core.AiGateway.Aggregates.Artifacts;
 using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.AiGateway.Specifications.AgentTasks;
 using AICopilot.Core.AiGateway.Specifications.Approvals;
+using AICopilot.AiGatewayService.Sessions;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
@@ -23,6 +24,8 @@ internal static class AgentApprovalDecisionWorkflow
         IAgentTaskRunQueue? runQueue,
         ICurrentUser currentUser,
         IIdentityAccessService identityAccessService,
+        AgentPlanDraftConfirmationService planDraftConfirmationService,
+        MessageTimelineProjectionWriter? timelineProjectionWriter,
         CancellationToken cancellationToken)
     {
         if (currentUser.Id is not { } userId)
@@ -60,8 +63,19 @@ internal static class AgentApprovalDecisionWorkflow
         var now = DateTimeOffset.UtcNow;
         if (isApproved)
         {
+            var approvalResult = await ApplyApprovalAsync(
+                task,
+                workspace,
+                approval,
+                now,
+                planDraftConfirmationService,
+                cancellationToken);
+            if (!approvalResult.IsSuccess)
+            {
+                return Result.From(approvalResult);
+            }
+
             approval.Approve(userId, comment, now);
-            ApplyApproval(task, workspace, approval, now);
         }
         else
         {
@@ -82,6 +96,11 @@ internal static class AgentApprovalDecisionWorkflow
             isApproved ? AuditResults.Succeeded : AuditResults.Rejected,
             BuildDecisionSummary(approval, isApproved, comment),
             cancellationToken);
+        if (timelineProjectionWriter is not null)
+        {
+            await timelineProjectionWriter.StageApprovalDecidedAsync(task, approval, cancellationToken);
+        }
+
         await approvalRepository.SaveChangesAsync(cancellationToken);
 
         if (isApproved &&
@@ -139,17 +158,25 @@ internal static class AgentApprovalDecisionWorkflow
             : Result.NotFound();
     }
 
-    private static void ApplyApproval(
+    private static async Task<Result> ApplyApprovalAsync(
         AgentTask task,
         ArtifactWorkspace? workspace,
         ApprovalRequest approval,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        AgentPlanDraftConfirmationService planDraftConfirmationService,
+        CancellationToken cancellationToken)
     {
         switch (approval.ApprovalType)
         {
             case AgentApprovalType.Plan:
-                if (task.Status == AgentTaskStatus.WaitingPlanApproval)
+                if (task.Status is AgentTaskStatus.Draft or AgentTaskStatus.WaitingPlanApproval)
                 {
+                    var confirmation = await planDraftConfirmationService.ConfirmAsync(task, now, cancellationToken);
+                    if (!confirmation.IsSuccess)
+                    {
+                        return Result.From(confirmation);
+                    }
+
                     task.ApprovePlan(now);
                 }
 
@@ -197,6 +224,8 @@ internal static class AgentApprovalDecisionWorkflow
             default:
                 throw new ArgumentOutOfRangeException(nameof(approval.ApprovalType), approval.ApprovalType, "Unknown approval type.");
         }
+
+        return Result.Success();
     }
 
     private static void ApplyRejection(

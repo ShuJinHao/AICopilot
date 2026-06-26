@@ -84,10 +84,27 @@ export function useDocumentDomain(states: RagDomainStates, options: DocumentDoma
     }
   }
 
+  async function retryDocument(id: number) {
+    states.actionErrors.document = ''
+
+    try {
+      await ragService.retryDocument(id)
+      await refreshDocuments()
+    } catch (error) {
+      states.actionErrors.document = toStoreErrorMessage(
+        error,
+        RAG_STORE_MESSAGES.document.uploadFailed,
+        RAG_STORE_MESSAGES.document.uploadForbidden
+      )
+      throw error
+    }
+  }
+
   return {
     uploadGovernanceForm,
     refreshDocuments,
     uploadDocument,
-    deleteDocument
+    deleteDocument,
+    retryDocument
   }
 }

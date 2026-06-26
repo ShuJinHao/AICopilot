@@ -1,12 +1,24 @@
+using System.Text.Json;
+using AICopilot.AiGatewayService.Models;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
+using AICopilot.Core.AiGateway.Ids;
+using AICopilot.Core.AiGateway.Specifications.Sessions;
 using AICopilot.SharedKernel.Repository;
 
 namespace AICopilot.AiGatewayService.Sessions;
 
-public sealed record SessionMessageAppend(string? Content, MessageType Type, MessageModelSnapshot? ModelSnapshot = null);
+public sealed record SessionMessageAppend(
+    string? Content,
+    MessageType Type,
+    MessageModelSnapshot? ModelSnapshot = null,
+    IReadOnlyCollection<ChatChunk>? RenderChunks = null);
 
-public class SessionMessagePersistenceService(IRepository<Session> repository)
+public class SessionMessagePersistenceService(
+    IRepository<Session> repository,
+    IRepository<MessageEvent> messageEventRepository)
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
     public async Task AppendAsync(
         Guid sessionId,
         string? content,
@@ -22,8 +34,8 @@ public class SessionMessagePersistenceService(IRepository<Session> repository)
         CancellationToken cancellationToken = default)
     {
         var normalizedEntries = entries
-            .Where(entry => !string.IsNullOrWhiteSpace(entry.Content))
-            .Select(entry => new SessionMessageAppend(entry.Content!.Trim(), entry.Type, entry.ModelSnapshot))
+            .Select(NormalizeEntry)
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.Content) || entry.RenderChunks?.Count > 0)
             .ToArray();
         if (normalizedEntries.Length == 0)
         {
@@ -40,12 +52,72 @@ public class SessionMessagePersistenceService(IRepository<Session> repository)
             return;
         }
 
+        var existingEvents = await messageEventRepository.ListAsync(
+            new MessageEventsBySessionSpec(new SessionId(sessionId)),
+            cancellationToken);
+        var nextEventSequence = Math.Max(
+            existingEvents.Count == 0 ? 0 : existingEvents.Max(item => item.Sequence),
+            session.Messages.Count == 0 ? 0 : session.Messages.Max(item => item.Sequence));
+        session.EnsureMessageCountAtLeast(nextEventSequence);
+
         foreach (var entry in normalizedEntries)
         {
-            session.AddMessage(entry.Content!, entry.Type, entry.ModelSnapshot);
+            var message = session.AddMessage(
+                entry.Content,
+                entry.Type,
+                entry.ModelSnapshot,
+                SerializeRenderChunks(entry));
+            messageEventRepository.Add(MessageEvent.ForMessage(
+                session.Id,
+                ++nextEventSequence,
+                message));
         }
 
         repository.Update(session);
         await repository.SaveChangesAsync(cancellationToken);
+    }
+
+    private static SessionMessageAppend NormalizeEntry(SessionMessageAppend entry)
+    {
+        var content = string.IsNullOrWhiteSpace(entry.Content) ? null : entry.Content.Trim();
+        var chunks = entry.RenderChunks?
+            .Where(chunk => IsStableRenderChunk(chunk) && !string.IsNullOrWhiteSpace(chunk.Content))
+            .ToArray();
+        if (chunks is { Length: > 0 })
+        {
+            return entry with { Content = content, RenderChunks = chunks };
+        }
+
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return entry with { Content = null, RenderChunks = [] };
+        }
+
+        return entry with
+        {
+            Content = content,
+            RenderChunks =
+            [
+                new ChatChunk(
+                    entry.Type == MessageType.User ? "User" : "FinalAgentRunExecutor",
+                    ChunkType.Text,
+                    content)
+            ]
+        };
+    }
+
+    private static string? SerializeRenderChunks(SessionMessageAppend entry)
+    {
+        if (entry.RenderChunks is not { Count: > 0 })
+        {
+            return null;
+        }
+
+        return JsonSerializer.Serialize(entry.RenderChunks, JsonOptions);
+    }
+
+    private static bool IsStableRenderChunk(ChatChunk chunk)
+    {
+        return chunk.Type is ChunkType.Text or ChunkType.Widget or ChunkType.Error;
     }
 }

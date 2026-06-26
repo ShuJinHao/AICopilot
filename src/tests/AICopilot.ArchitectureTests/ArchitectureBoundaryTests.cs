@@ -85,21 +85,44 @@ public sealed class ArchitectureBoundaryTests
     public void AiGatewayRuntimeCoordination_ShouldUseDiAndDedicatedToolResultAudit()
     {
         var serviceRoot = Path.Combine(SolutionRoot, "src", "services", "AICopilot.AiGatewayService");
-        var runtimeSource = File.ReadAllText(Path.Combine(serviceRoot, "Agents", "ChatStreamRuntime.cs"));
+        var runtimeSource = File.ReadAllText(Path.Combine(serviceRoot, "Agents", "AgentStreamRuntime.cs"));
         var executorSource = File.ReadAllText(Path.Combine(serviceRoot, "Workflows", "Executors", "FinalAgentRunExecutor.cs"));
         var auditSource = File.ReadAllText(Path.Combine(serviceRoot, "Workflows", "Executors", "ToolExecutionAuditRecorder.cs"));
         var dependencyInjection = File.ReadAllText(Path.Combine(serviceRoot, "DependencyInjection.cs"));
 
-        runtimeSource.Should().Contain("public interface IChatStreamRuntime");
-        runtimeSource.Should().Contain("public sealed class ChatStreamRuntime");
-        runtimeSource.Should().NotContain("static class ChatStreamRuntime");
-        dependencyInjection.Should().Contain("AddScoped<IChatStreamRuntime, ChatStreamRuntime>");
+        runtimeSource.Should().Contain("public interface IAgentStreamRuntime");
+        runtimeSource.Should().Contain("public sealed class AgentStreamRuntime");
+        runtimeSource.Should().NotContain("static class AgentStreamRuntime");
+        dependencyInjection.Should().Contain("AddScoped<IAgentStreamRuntime, AgentStreamRuntime>");
 
         executorSource.Should().Contain("ToolExecutionAuditRecorder toolExecutionAuditRecorder");
         executorSource.Should().Contain("RecordResultAsync");
         auditSource.Should().Contain("Tool.ExecuteResult");
         auditSource.Should().Contain("resultSha256");
         dependencyInjection.Should().Contain("AddScoped<ToolExecutionAuditRecorder>");
+    }
+
+    [Fact]
+    public void AICopilotWeb_ShouldKeepAgentRunErrorsSessionScoped()
+    {
+        var webRoot = Path.Combine(SolutionRoot, "src", "vues", "AICopilot.Web");
+        var webRules = File.ReadAllText(Path.Combine(webRoot, "AGENTS.md"));
+        var chatStore = File.ReadAllText(Path.Combine(webRoot, "src", "stores", "chatStore.ts"));
+        var agentTaskStore = File.ReadAllText(Path.Combine(webRoot, "src", "stores", "agentTaskStore.ts"));
+        var artifactWorkspaceStore = File.ReadAllText(Path.Combine(webRoot, "src", "stores", "artifactWorkspaceStore.ts"));
+
+        webRules.Should().Contain("Backend Errors Are Contract Data");
+        webRules.Should().Contain("Session State Must Be Scoped");
+        chatStore.Should().NotContain("agentErrorMessage");
+        chatStore.Should().Contain("agentTaskStore.reset()");
+        chatStore.Should().Contain("artifactWorkspaceStore.reset()");
+        chatStore.Should().Contain("catalogStore.resetSelections()");
+        agentTaskStore.Should().Contain("function reset()");
+        agentTaskStore.Should().Contain("agentApprovals.value = []");
+        agentTaskStore.Should().Contain("timelineEvents.value = []");
+        artifactWorkspaceStore.Should().Contain("function reset()");
+        artifactWorkspaceStore.Should().Contain("currentWorkspace.value = null");
+        artifactWorkspaceStore.Should().Contain("currentArtifactPreview.value = null");
     }
 
     [Fact]

@@ -2,8 +2,11 @@ using System.Text;
 using AICopilot.AgentPlugin;
 using AICopilot.AiGatewayService.BusinessSemantics;
 using AICopilot.AiGatewayService.RoutingModels;
+using AICopilot.Core.AiGateway.Aggregates.Skills;
+using AICopilot.Core.AiGateway.Specifications.Skills;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
+using AICopilot.SharedKernel.Repository;
 
 namespace AICopilot.AiGatewayService.Agents;
 
@@ -11,22 +14,24 @@ public class IntentRoutingAgentBuilder
 {
     private const string AgentName = "IntentRoutingAgent";
 
-    private readonly ChatAgentFactory _agentFactory;
+    private readonly ConfiguredAgentRuntimeFactory _agentFactory;
     private readonly IKnowledgeBaseReadService _knowledgeBaseReadService;
     private readonly IBusinessDatabaseReadService _businessDatabaseReadService;
     private readonly IntentRoutingPromptComposer _promptComposer;
     private readonly IAgentPluginCatalog _pluginCatalog;
     private readonly IRoutingModelResolver _routingModelResolver;
-    private readonly IChatExecutionMetadataAccessor _executionMetadataAccessor;
+    private readonly IAgentExecutionMetadataAccessor _executionMetadataAccessor;
+    private readonly IReadRepository<SkillDefinition> _skillRepository;
 
     public IntentRoutingAgentBuilder(
-        ChatAgentFactory agentFactory,
+        ConfiguredAgentRuntimeFactory agentFactory,
         IAgentPluginCatalog pluginCatalog,
         IKnowledgeBaseReadService knowledgeBaseReadService,
         IBusinessDatabaseReadService businessDatabaseReadService,
         IntentRoutingPromptComposer promptComposer,
         IRoutingModelResolver routingModelResolver,
-        IChatExecutionMetadataAccessor executionMetadataAccessor)
+        IAgentExecutionMetadataAccessor executionMetadataAccessor,
+        IReadRepository<SkillDefinition> skillRepository)
     {
         _agentFactory = agentFactory;
         _pluginCatalog = pluginCatalog;
@@ -35,6 +40,37 @@ public class IntentRoutingAgentBuilder
         _promptComposer = promptComposer;
         _routingModelResolver = routingModelResolver;
         _executionMetadataAccessor = executionMetadataAccessor;
+        _skillRepository = skillRepository;
+    }
+
+    private async Task<string> GetSkillIntentListAsync()
+    {
+        var skills = await _skillRepository.ListAsync(new EnabledSkillDefinitionsSpec());
+        if (skills.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var builder = new StringBuilder();
+        builder.AppendLine("Available Skills:");
+        foreach (var skill in skills)
+        {
+            var outputs = skill.OutputComponentTypes.Length == 0
+                ? "text"
+                : string.Join(",", skill.OutputComponentTypes);
+            var dataModes = skill.AllowedDataSourceModes.Length == 0
+                ? "none"
+                : string.Join(",", skill.AllowedDataSourceModes);
+            var knowledgeScopes = skill.AllowedKnowledgeScopes.Length == 0
+                ? "none"
+                : string.Join(",", skill.AllowedKnowledgeScopes);
+            builder.AppendLine(
+                $"- Skill.{skill.SkillCode}: {skill.DisplayName}. {skill.Description} risk={skill.RiskLevel}; approval={skill.ApprovalPolicy}; data={dataModes}; knowledge={knowledgeScopes}; outputs={outputs}.");
+        }
+
+        builder.AppendLine("  Routing rule: choose only one enabled Skill that best fits the user goal. If no Skill fits, choose General.Chat.");
+        builder.AppendLine("  Routing rule: Skill selection narrows allowed tools; it never expands ToolRegistry or Cloud readonly safety policy.");
+        return builder.ToString();
     }
 
     private string GetToolIntentList()
@@ -90,6 +126,7 @@ public class IntentRoutingAgentBuilder
     public async Task<ScopedRuntimeAgent> BuildAsync()
     {
         var intents = new StringBuilder();
+        intents.Append(await GetSkillIntentListAsync());
         intents.Append(GetToolIntentList());
         intents.Append(await GetKnowledgeIntentListAsync());
         intents.Append(GetBusinessPolicyIntentList());

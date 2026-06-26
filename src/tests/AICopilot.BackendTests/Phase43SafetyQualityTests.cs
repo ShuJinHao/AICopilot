@@ -35,6 +35,7 @@ public sealed class Phase43SafetyQualityTests
         await AuthenticateAsAdminAsync();
 
         Guid languageModelId = Guid.Empty;
+        Guid routingConfigurationId = Guid.Empty;
         Guid generalTemplateId = Guid.Empty;
         Guid intentRoutingTemplateId = Guid.Empty;
         Guid approvalPolicyId = Guid.Empty;
@@ -50,6 +51,7 @@ public sealed class Phase43SafetyQualityTests
                 languageModelId,
                 "intent routing",
                 "Select the best matching intent from the list and return a JSON array only. {{$IntentList}}");
+            routingConfigurationId = await CreateActiveRoutingModelAsync(languageModelId);
 
             generalTemplateId = await CreateConversationTemplateAsync(
                 $"phase43-general-{Guid.NewGuid():N}",
@@ -73,6 +75,9 @@ public sealed class Phase43SafetyQualityTests
                 message = "please prepare a diagnostic checklist for device DEV-001"
             });
 
+            approvalEvents.Should().Contain(
+                item => item.Type == "ApprovalRequest",
+                string.Join(" | ", approvalEvents.Select(item => $"{item.Type}:{item.Content}")));
             var approvalChunk = approvalEvents.Single(item => item.Type == "ApprovalRequest");
             using var approvalPayload = JsonDocument.Parse(approvalChunk.Content);
             var callId = approvalPayload.RootElement.GetProperty("callId").GetString();
@@ -190,6 +195,11 @@ public sealed class Phase43SafetyQualityTests
                 await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/conversation-template", new { id = intentRoutingTemplateId }, HttpStatusCode.NoContent);
             }
 
+            if (routingConfigurationId != Guid.Empty)
+            {
+                await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/routing-model", new { id = routingConfigurationId }, HttpStatusCode.NoContent);
+            }
+
             if (languageModelId != Guid.Empty)
             {
                 await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/language-model", new { id = languageModelId }, HttpStatusCode.NoContent);
@@ -203,6 +213,7 @@ public sealed class Phase43SafetyQualityTests
         await AuthenticateAsAdminAsync();
 
         Guid languageModelId = Guid.Empty;
+        Guid routingConfigurationId = Guid.Empty;
         Guid generalTemplateId = Guid.Empty;
         Guid intentRoutingTemplateId = Guid.Empty;
         Guid sessionId = Guid.Empty;
@@ -217,6 +228,7 @@ public sealed class Phase43SafetyQualityTests
                 languageModelId,
                 "intent routing",
                 "Select the best matching intent from the list and return a JSON array only. {{$IntentList}}");
+            routingConfigurationId = await CreateActiveRoutingModelAsync(languageModelId);
 
             generalTemplateId = await CreateConversationTemplateAsync(
                 $"phase43-control-general-{Guid.NewGuid():N}",
@@ -255,6 +267,11 @@ public sealed class Phase43SafetyQualityTests
             if (intentRoutingTemplateId != Guid.Empty)
             {
                 await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/conversation-template", new { id = intentRoutingTemplateId }, HttpStatusCode.NoContent);
+            }
+
+            if (routingConfigurationId != Guid.Empty)
+            {
+                await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/routing-model", new { id = routingConfigurationId }, HttpStatusCode.NoContent);
             }
 
             if (languageModelId != Guid.Empty)
@@ -313,7 +330,20 @@ public sealed class Phase43SafetyQualityTests
             baseUrl = new Uri(_fixture.FakeAiBaseUri, "/v1").ToString().TrimEnd('/'),
             apiKey = "sk-test",
             maxTokens = 1024,
+            usages = new[] { "Chat", "Routing" },
             temperature = 0.2
+        });
+
+        return created.Id;
+    }
+
+    private async Task<Guid> CreateActiveRoutingModelAsync(Guid modelId)
+    {
+        var created = await PostJsonAsync<RoutingModelConfigurationDto>("/api/aigateway/routing-model", new
+        {
+            name = $"phase43-routing-{Guid.NewGuid():N}",
+            modelId,
+            isActive = true
         });
 
         return created.Id;
@@ -509,6 +539,8 @@ public sealed class Phase43SafetyQualityTests
     private sealed record LoginUserDto(string UserName, string Token);
 
     private sealed record CreatedLanguageModelDto(Guid Id, string Provider, string Name);
+
+    private sealed record RoutingModelConfigurationDto(Guid Id);
 
     private sealed record CreatedConversationTemplateDto(Guid Id, string Name);
 

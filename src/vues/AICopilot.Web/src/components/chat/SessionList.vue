@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { MessageSquare, Plus } from 'lucide-vue-next'
+import { MessageSquare, Plus, Trash2 } from 'lucide-vue-next'
 import AiButton from '@/components/ai/AiButton.vue'
 import { useChatStore } from '@/stores/chatStore'
 
@@ -13,6 +13,14 @@ async function selectSession(id: string) {
 
 async function createSession() {
   await store.createNewSession()
+}
+
+async function deleteSession(id: string, title?: string | null) {
+  if (!window.confirm(`确认删除会话「${title || '未命名会话'}」？`)) {
+    return
+  }
+
+  await store.deleteSession(id)
 }
 </script>
 
@@ -29,17 +37,28 @@ async function createSession() {
     </header>
 
     <div class="session-list">
-      <button
+      <div
         v-for="session in sessions"
         :key="session.id"
         class="session-item"
         :class="{ active: store.currentSessionId === session.id }"
-        type="button"
+        role="button"
+        tabindex="0"
         @click="selectSession(session.id)"
+        @keydown.enter.prevent="selectSession(session.id)"
+        @keydown.space.prevent="selectSession(session.id)"
       >
         <MessageSquare class="h-4 w-4" />
         <span>{{ session.title || '未命名会话' }}</span>
-      </button>
+        <button
+          class="delete-session"
+          type="button"
+          aria-label="删除会话"
+          @click.stop="deleteSession(session.id, session.title)"
+        >
+          <Trash2 class="h-4 w-4" />
+        </button>
+      </div>
 
       <div v-if="sessions.length === 0" class="empty-state">暂无历史会话</div>
     </div>
@@ -88,7 +107,7 @@ header span {
 
 .session-item {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr);
+  grid-template-columns: 22px minmax(0, 1fr) 28px;
   gap: 10px;
   align-items: center;
   border: 1px solid transparent;
@@ -124,6 +143,35 @@ header span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.delete-session {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ai-text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.2s ease,
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.session-item:hover .delete-session,
+.session-item:focus-within .delete-session {
+  opacity: 1;
+}
+
+.delete-session:hover {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b42318;
 }
 
 .empty-state {

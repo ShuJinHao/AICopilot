@@ -14,6 +14,15 @@ public sealed record PlannerToolCatalog(
     public const int CurrentVersion = BuiltInToolRegistrations.CurrentCatalogVersion;
 }
 
+public static class PlannerToolCatalogMetadata
+{
+    public static bool IsMockMcpOnly(IEnumerable<AgentPlannerToolSummary> tools)
+    {
+        var toolList = tools.ToArray();
+        return toolList.Length > 0 && toolList.All(tool => tool.IsMock);
+    }
+}
+
 public sealed record AgentPlannerToolSummary(
     string ToolCode,
     string DisplayName,

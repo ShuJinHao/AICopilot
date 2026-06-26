@@ -1,8 +1,8 @@
 using AICopilot.AiGatewayService.AgentTasks;
-using AICopilot.AiGatewayService.CloudReadiness;
 using AICopilot.HttpApi.Infrastructure;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace AICopilot.HttpApi.Controllers;
 
@@ -10,37 +10,12 @@ namespace AICopilot.HttpApi.Controllers;
 [Authorize]
 public class AiGatewayAgentTaskController(ISender sender) : ApiControllerBase(sender)
 {
-    [HttpGet("agent/trial-scenarios")]
-    public async Task<IActionResult> GetAgentTrialScenarios()
+    [HttpPost("agent/task/plan-stream")]
+    [EnableRateLimiting("chat")]
+    public IResult PlanAgentTaskStream(PlanAgentTaskStreamRequest request)
     {
-        return ReturnResult(await Sender.Send(new GetAgentTrialScenariosQuery()));
-    }
-
-    [HttpPost("agent/trial-scenarios/create-task")]
-    public async Task<IActionResult> CreateAgentTaskFromTrialScenario(
-        CreateAgentTaskFromTrialScenarioCommand command)
-    {
-        return ReturnResult(await Sender.Send(command));
-    }
-
-    [HttpPost("agent/task/plan")]
-    public async Task<IActionResult> PlanAgentTask(PlanAgentTaskCommand command)
-    {
-        return ReturnResult(await Sender.Send(command));
-    }
-
-    [HttpPost("agent/cloud-sandbox-controlled-trial/plan")]
-    public async Task<IActionResult> CreateCloudReadonlySandboxControlledPlan(
-        CreateCloudReadonlySandboxControlledPlanCommand command)
-    {
-        return ReturnResult(await Sender.Send(command));
-    }
-
-    [HttpPost("agent/cloud-production-controlled-pilot/plan")]
-    public async Task<IActionResult> CreateCloudReadonlyProductionControlledPlan(
-        CreateCloudReadonlyProductionControlledPlanCommand command)
-    {
-        return ReturnResult(await Sender.Send(command));
+        var stream = Sender.CreateStream(request);
+        return Results.ServerSentEvents(stream);
     }
 
     [HttpPost("agent/task/approve-plan")]
@@ -123,60 +98,6 @@ public class AiGatewayAgentTaskController(ISender sender) : ApiControllerBase(se
             id,
             pageIndex,
             pageSize)));
-    }
-
-    [HttpGet("agent/task/{id:guid}/run-queue")]
-    public async Task<IActionResult> GetAgentTaskRunQueue(
-        Guid id,
-        [FromQuery] int pageIndex = 1,
-        [FromQuery] int pageSize = 20)
-    {
-        return ReturnResult(await Sender.Send(new GetAgentTaskRunQueueQuery(
-            id,
-            pageIndex,
-            pageSize)));
-    }
-
-    [HttpGet("agent/run-queue")]
-    public async Task<IActionResult> GetAgentRunQueue(
-        [FromQuery] int pageIndex = 1,
-        [FromQuery] int pageSize = 20,
-        [FromQuery] string? status = null,
-        [FromQuery] string? triggerType = null,
-        [FromQuery] Guid? taskId = null,
-        [FromQuery] Guid? requestedBy = null,
-        [FromQuery] DateTimeOffset? from = null,
-        [FromQuery] DateTimeOffset? to = null)
-    {
-        return ReturnResult(await Sender.Send(new GetAgentRunQueueQuery(
-            pageIndex,
-            pageSize,
-            status,
-            triggerType,
-            taskId,
-            requestedBy,
-            from,
-            to)));
-    }
-
-    [HttpGet("agent/run-queue/summary")]
-    public async Task<IActionResult> GetAgentRunQueueSummary()
-    {
-        return ReturnResult(await Sender.Send(new GetAgentRunQueueSummaryQuery()));
-    }
-
-    [HttpGet("agent/worker/status")]
-    public async Task<IActionResult> GetAgentWorkerStatus()
-    {
-        return ReturnResult(await Sender.Send(new GetAgentWorkerStatusQuery()));
-    }
-
-    [HttpPost("agent/run-queue/{id:guid}/dead-letter")]
-    public async Task<IActionResult> DeadLetterAgentRunQueueItem(
-        Guid id,
-        [FromBody] DeadLetterAgentRunQueueItemRequest? request = null)
-    {
-        return ReturnResult(await Sender.Send(new DeadLetterAgentRunQueueItemCommand(id, request?.Reason)));
     }
 
     [HttpPost("agent/approval/{id:guid}/approve")]

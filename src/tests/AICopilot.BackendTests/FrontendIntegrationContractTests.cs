@@ -3,6 +3,7 @@ using System.Text.Json;
 using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.AiGatewayService.Tools;
 using AICopilot.AiGatewayService.Workspaces;
+using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.RagService.EmbeddingModels;
 using AICopilot.Services.Contracts.AiGateway.Dtos;
 using AICopilot.SharedKernel.Result;
@@ -27,11 +28,7 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
         AssertPath(document, "/api/aigateway/session", "post");
         AssertPath(document, "/api/aigateway/session/list", "get");
         AssertPath(document, "/api/aigateway/upload", "post");
-        AssertPath(document, "/api/aigateway/agent/trial-scenarios", "get");
-        AssertPath(document, "/api/aigateway/agent/trial-scenarios/create-task", "post");
-        AssertPath(document, "/api/aigateway/agent/task/plan", "post");
-        AssertPath(document, "/api/aigateway/agent/cloud-sandbox-controlled-trial/plan", "post");
-        AssertPath(document, "/api/aigateway/agent/cloud-production-controlled-pilot/plan", "post");
+        AssertPath(document, "/api/aigateway/agent/task/plan-stream", "post");
         AssertPath(document, "/api/aigateway/agent/task/run", "post");
         AssertPath(document, "/api/aigateway/agent/task/retry", "post");
         AssertPath(document, "/api/aigateway/agent/task/cancel", "post");
@@ -39,10 +36,6 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
         AssertPath(document, "/api/aigateway/agent/task/{id}/audit-summary", "get");
         AssertPath(document, "/api/aigateway/agent/task/{id}/tool-executions", "get");
         AssertPath(document, "/api/aigateway/agent/task/{id}/run-attempts", "get");
-        AssertPath(document, "/api/aigateway/agent/task/{id}/run-queue", "get");
-        AssertPath(document, "/api/aigateway/agent/run-queue", "get");
-        AssertPath(document, "/api/aigateway/agent/run-queue/summary", "get");
-        AssertPath(document, "/api/aigateway/agent/worker/status", "get");
         AssertPath(document, "/api/aigateway/tools", "get");
         AssertPath(document, "/api/aigateway/tools/{toolCode}", "get");
         AssertPath(document, "/api/aigateway/tools/{toolCode}", "patch");
@@ -58,6 +51,19 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
         AssertPath(document, "/api/rag/document/list", "get");
         AssertPath(document, "/api/rag/document/governance", "put");
         AssertPath(document, "/api/rag/search", "post");
+
+        AssertMissingPath(document, "/api/aigateway/agent/trial-scenarios");
+        AssertMissingPath(document, "/api/aigateway/agent/trial-scenarios/create-task");
+        AssertMissingPath(document, "/api/aigateway/agent/task/plan");
+        AssertMissingPath(document, "/api/aigateway/agent/cloud-sandbox-controlled-trial/plan");
+        AssertMissingPath(document, "/api/aigateway/agent/cloud-production-controlled-pilot/plan");
+        AssertMissingPath(document, "/api/aigateway/agent/task/{id}/run-queue");
+        AssertMissingPath(document, "/api/aigateway/agent/run-queue");
+        AssertMissingPath(document, "/api/aigateway/agent/run-queue/summary");
+        AssertMissingPath(document, "/api/aigateway/agent/worker/status");
+        AssertMissingPath(document, "/api/aigateway/cloud-readonly/readiness");
+        AssertMissingPath(document, "/api/aigateway/trial-operations/campaigns");
+        AssertMissingPath(document, "/api/aigateway/pilot-authorization/submissions");
     }
 
     private static void AssertPath(JsonDocument document, string path, string method)
@@ -77,47 +83,14 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
             .BeTrue($"OpenAPI should expose {method.ToUpperInvariant()} {path}");
     }
 
-    [Theory]
-    [InlineData("GET", "/api/aigateway/cloud-readonly/readiness")]
-    [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/history")]
-    [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/sandbox")]
-    [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/sandbox/history")]
-    [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/sandbox-agent-trial")]
-    [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/sandbox-controlled-trial")]
-    [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/pilot-readiness")]
-    [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/production-pilot")]
-    [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/production-controlled-pilot")]
-    [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/production-operations")]
-    [InlineData("GET", "/api/aigateway/cloud-readonly/readiness/production-operations/ledger")]
-    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/sandbox-agent-trial/run")]
-    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/pilot-readiness/config-package")]
-    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/pilot-readiness/gate")]
-    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/pilot-readiness/approval-rehearsal")]
-    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/pilot-readiness/contract-rehearsal")]
-    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-pilot/window")]
-    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-pilot/window/status")]
-    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-pilot/gate")]
-    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-pilot/run")]
-    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-controlled-pilot/run")]
-    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-operations/emergency-stop")]
-    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-operations/emergency-stop/clear")]
-    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-operations/incidents")]
-    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/production-operations/ga-readiness")]
-    [InlineData("POST", "/api/aigateway/cloud-readonly/readiness/run")]
-    public async Task CloudReadonlyReadinessRoutes_ShouldBeRoutable(string method, string path)
+    private static void AssertMissingPath(JsonDocument document, string path)
     {
-        using var request = new HttpRequestMessage(new HttpMethod(method), path);
-        if (method == "POST")
-        {
-            request.Content = System.Net.Http.Json.JsonContent.Create(new { mode = "FakeEndpoint" });
-        }
-
-        using var response = await fixture.HttpClient.SendAsync(request);
-
-        response.StatusCode.Should().NotBe(
-            System.Net.HttpStatusCode.NotFound,
-            "P5 CloudReadonly readiness route should be registered even before authentication succeeds");
+        var paths = document.RootElement.GetProperty("paths");
+        paths.TryGetProperty(path, out _)
+            .Should()
+            .BeFalse($"OpenAPI should not expose legacy product route {path}");
     }
+
 }
 
 public sealed class OpenApiContractFixture : AICopilotAppFixture
@@ -131,6 +104,30 @@ public sealed class OpenApiContractFixture : AICopilotAppFixture
 public sealed class FrontendContractSnapshotTests
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    [Theory]
+    [InlineData("ReportGeneration", AgentTaskType.ReportGeneration)]
+    [InlineData("CloudDataReport", AgentTaskType.CloudDataReport)]
+    [InlineData("DataAnalysis", AgentTaskType.DataAnalysis)]
+    public void PlanAgentTaskStreamRequest_ShouldAcceptFrontendStringTaskType(
+        string taskType,
+        AgentTaskType expected)
+    {
+        var sessionId = Guid.NewGuid();
+        var json = $$"""
+        {
+          "sessionId": "{{sessionId}}",
+          "goal": "生成可确认的计划",
+          "taskType": "{{taskType}}",
+          "modelId": null
+        }
+        """;
+
+        var request = JsonSerializer.Deserialize<PlanAgentTaskStreamRequest>(json, JsonOptions);
+
+        request.Should().NotBeNull();
+        request!.TaskType.Should().Be(expected);
+    }
 
     [Fact]
     public void AgentTaskDto_ShouldExposeFrontendComputedStateFieldsAndPlanMetadata()

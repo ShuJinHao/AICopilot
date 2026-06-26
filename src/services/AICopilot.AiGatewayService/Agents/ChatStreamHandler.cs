@@ -15,14 +15,14 @@ namespace AICopilot.AiGatewayService.Agents;
 public class ChatStreamHandler(
     IReadRepository<Session> sessionRepository,
     ICurrentUser currentUser,
-    ChatWorkflowOrchestrator workflowOrchestrator,
+    AgentWorkflowPipeline workflowPipeline,
     SessionMessagePersistenceService messagePersistenceService,
     IOperationalBoundaryPolicy operationalBoundaryPolicy,
     IManufacturingSceneClassifier sceneClassifier,
     IFinalAgentContextStore finalAgentContextStore,
     ISessionExecutionLock sessionExecutionLock,
-    IChatExecutionMetadataAccessor executionMetadataAccessor,
-    IChatStreamRuntime chatStreamRuntime)
+    IAgentExecutionMetadataAccessor executionMetadataAccessor,
+    IAgentStreamRuntime chatStreamRuntime)
     : IStreamRequestHandler<ChatStreamRequest, ChatChunk>
 {
     public async IAsyncEnumerable<ChatChunk> Handle(
@@ -30,27 +30,87 @@ public class ChatStreamHandler(
         [EnumeratorCancellation] CancellationToken ct)
     {
         var assistantText = new StringBuilder();
+        var assistantRenderChunks = new List<ChatChunk>();
         var pendingMessages = new List<SessionMessageAppend>();
-        Exception? failure = null;
-        IAsyncDisposable? sessionLock = null;
+        SessionRuntimeSnapshot? session = null;
+        ChatChunk? earlyErrorChunk = null;
 
         try
         {
-            sessionLock = await sessionExecutionLock.AcquireAsync(request.SessionId, ct);
+            session = await chatStreamRuntime.LoadSessionAsync(sessionRepository, request.SessionId, ct);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             yield break;
         }
         catch (Exception exception)
         {
-            failure = exception;
+            earlyErrorChunk = AgentStreamRuntime.CreateErrorChunk(
+                exception,
+                nameof(ChatStreamHandler),
+                AppProblemCodes.ChatStreamFailed,
+                "对话执行失败，请稍后重试。");
         }
 
-        if (sessionLock is not null)
+        if (earlyErrorChunk is not null)
         {
-            await using var acquiredLock = sessionLock;
-            await using var enumerator = HandleCore(request, assistantText, pendingMessages, ct).GetAsyncEnumerator(ct);
+            yield return earlyErrorChunk;
+            yield break;
+        }
+
+        if (session == null)
+        {
+            yield return AgentStreamRuntime.CreateErrorChunk(
+                "session_not_found",
+                "未找到对应的会话。",
+                nameof(ChatStreamHandler),
+                "当前会话不存在或已被删除，请刷新后重试。");
+            yield break;
+        }
+
+        if (currentUser.Id != session.UserId)
+        {
+            yield return AgentStreamRuntime.CreateErrorChunk(
+                AuthProblemCodes.MissingPermission,
+                "当前用户无权操作该会话。",
+                nameof(ChatStreamHandler),
+                "当前账号无权操作该会话。");
+            yield break;
+        }
+
+        IAsyncDisposable? sessionLock = null;
+        try
+        {
+            sessionLock = await sessionExecutionLock.AcquireAsync(request.SessionId, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            yield break;
+        }
+        catch (Exception exception)
+        {
+            earlyErrorChunk = AgentStreamRuntime.CreateErrorChunk(
+                exception,
+                nameof(ChatStreamHandler),
+                AppProblemCodes.ChatStreamFailed,
+                "对话执行失败，请稍后重试。");
+        }
+
+        if (earlyErrorChunk is not null)
+        {
+            yield return earlyErrorChunk;
+            yield break;
+        }
+
+        if (sessionLock is null)
+        {
+            yield break;
+        }
+
+        Exception? failure = null;
+        await using (sessionLock)
+        {
+            await using var enumerator = HandleCore(request, session, assistantText, pendingMessages, ct).GetAsyncEnumerator(ct);
 
             while (true)
             {
@@ -59,7 +119,7 @@ public class ChatStreamHandler(
                 {
                     hasNext = await enumerator.MoveNextAsync();
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
                     yield break;
                 }
@@ -74,62 +134,49 @@ public class ChatStreamHandler(
                     break;
                 }
 
+                assistantRenderChunks.Add(enumerator.Current);
                 yield return enumerator.Current;
             }
         }
 
         if (failure != null)
         {
-            yield return ChatStreamRuntime.CreateErrorChunk(
+            var errorChunk = AgentStreamRuntime.CreateErrorChunk(
                 assistantText,
                 failure,
                 nameof(ChatStreamHandler),
                 AppProblemCodes.ChatStreamFailed,
                 "对话执行失败，请稍后重试。");
+            assistantRenderChunks.Add(errorChunk);
+            yield return errorChunk;
         }
 
-        if (assistantText.Length > 0)
+        if (assistantText.Length > 0 || assistantRenderChunks.Count > 0)
         {
             pendingMessages.Add(new SessionMessageAppend(
-                assistantText.ToString(),
+                assistantText.Length > 0 ? assistantText.ToString() : null,
                 MessageType.Assistant,
-                executionMetadataAccessor.ToMessageSnapshot()));
+                executionMetadataAccessor.ToMessageSnapshot(),
+                assistantRenderChunks));
         }
 
-        await messagePersistenceService.AppendBatchAsync(request.SessionId, pendingMessages, ct);
+        if (pendingMessages.Count > 0)
+        {
+            await messagePersistenceService.AppendBatchAsync(request.SessionId, pendingMessages, ct);
+        }
     }
 
     private async IAsyncEnumerable<ChatChunk> HandleCore(
         ChatStreamRequest request,
+        SessionRuntimeSnapshot session,
         StringBuilder assistantText,
         ICollection<SessionMessageAppend> pendingMessages,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        var session = await chatStreamRuntime.LoadSessionAsync(sessionRepository, request.SessionId, ct);
-        if (session == null)
-        {
-            yield return ChatStreamRuntime.CreateErrorChunk(
-                "session_not_found",
-                "未找到对应的会话。",
-                nameof(ChatStreamHandler),
-                "当前会话不存在或已被删除，请刷新后重试。");
-            yield break;
-        }
-
-        if (currentUser.Id != session.UserId)
-        {
-            yield return ChatStreamRuntime.CreateErrorChunk(
-                AuthProblemCodes.MissingPermission,
-                "当前用户无权操作该会话。",
-                nameof(ChatStreamHandler),
-                "当前账号无权操作该会话。");
-            yield break;
-        }
-
         var storedContext = await finalAgentContextStore.GetAsync(request.SessionId, ct);
         if (storedContext?.PendingApprovals.Count > 0)
         {
-            yield return ChatStreamRuntime.CreateErrorChunk(
+            yield return AgentStreamRuntime.CreateErrorChunk(
                 AppProblemCodes.ApprovalPending,
                 "当前会话已有待处理审批，请先处理审批请求。",
                 nameof(ChatStreamHandler),
@@ -153,7 +200,7 @@ public class ChatStreamHandler(
                 "AICopilot 只提供观察、诊断、建议和知识问答，不执行任何控制动作。",
                 "我不能直接执行重启、写参数、下发配方、写入 PLC 或状态切换。如果需要，我可以继续给出诊断结论、风险提示和人工执行前检查项。");
             assistantText.Append(boundaryDecision.UserFacingMessage);
-            yield return ChatStreamRuntime.CreateErrorChunk(
+            yield return AgentStreamRuntime.CreateErrorChunk(
                 boundaryDecision.Code,
                 boundaryDecision.Detail,
                 "OperationalBoundaryPolicy",
@@ -161,7 +208,7 @@ public class ChatStreamHandler(
             yield break;
         }
 
-        await foreach (var chatChunk in workflowOrchestrator.RunIntentWorkflowAsync(
+        await foreach (var chatChunk in workflowPipeline.RunIntentWorkflowAsync(
                            request,
                            session,
                            assistantText,

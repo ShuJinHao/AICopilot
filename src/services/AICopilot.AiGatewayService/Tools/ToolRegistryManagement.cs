@@ -97,7 +97,8 @@ public sealed record GetToolRegistrationQuery(string ToolCode) : IQuery<Result<T
 [AuthorizeRequirement("AiGateway.ToolRegistry.Read")]
 public sealed record GetToolCatalogQuery(
     bool SimulationOnly = true,
-    IReadOnlyCollection<string>? BusinessDomains = null) : IQuery<Result<ToolRegistryCatalogDto>>;
+    IReadOnlyCollection<string>? BusinessDomains = null,
+    string? SkillCode = null) : IQuery<Result<ToolRegistryCatalogDto>>;
 
 [AuthorizeRequirement("AiGateway.ToolRegistry.Manage")]
 public sealed record UpdateToolRegistrationCommand(

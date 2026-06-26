@@ -4,19 +4,19 @@ function installBrowserGlobals(origin = 'https://app.example.test') {
   const storage = new Map<string, string>()
 
   vi.stubGlobal('window', {
-    location: { origin }
+    location: { origin },
   })
   vi.stubGlobal('sessionStorage', {
     getItem: vi.fn((key: string) => storage.get(key) ?? null),
     setItem: vi.fn((key: string, value: string) => storage.set(key, value)),
-    removeItem: vi.fn((key: string) => storage.delete(key))
+    removeItem: vi.fn((key: string) => storage.delete(key)),
   })
 }
 
 async function loadApiClient(apiBaseUrl = '/api') {
   vi.resetModules()
   vi.doMock('@/appsetting', () => ({
-    baseUrl: apiBaseUrl
+    baseUrl: apiBaseUrl,
   }))
 
   return await import('@/services/apiClient')
@@ -25,7 +25,7 @@ async function loadApiClient(apiBaseUrl = '/api') {
 function createJsonResponse() {
   return new Response('{}', {
     status: 200,
-    headers: { 'Content-Type': 'application/json' }
+    headers: { 'Content-Type': 'application/json' },
   })
 }
 
@@ -70,9 +70,43 @@ describe('apiClient endpoint trust', () => {
     const { apiClient, setAccessToken } = await loadApiClient()
 
     setAccessToken('external-token')
-    await expect(apiClient.download('https://evil.example.test/artifact.bin')).rejects.toMatchObject({
-      status: 400
+    await expect(
+      apiClient.download('https://evil.example.test/artifact.bin'),
+    ).rejects.toMatchObject({
+      status: 400,
     })
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('adds an abort signal only when a request timeout is explicitly provided', async () => {
+    installBrowserGlobals()
+    const fetchMock = vi.fn(async () => createJsonResponse())
+    vi.stubGlobal('fetch', fetchMock)
+    const { apiClient } = await loadApiClient()
+
+    await apiClient.get('/identity/me')
+    expect(fetchMock.mock.calls[0][1]?.signal).toBeUndefined()
+
+    await apiClient.get('/identity/me', undefined, { timeoutMs: 1000 })
+    expect(fetchMock.mock.calls[1][1]?.signal).toBeInstanceOf(AbortSignal)
+  })
+
+  it('reads code and detail from ProblemDetails error payloads', async () => {
+    installBrowserGlobals()
+    const { getProblemDetails } = await loadApiClient()
+
+    expect(getProblemDetails({
+      title: 'Bad Request',
+      status: 400,
+      code: 'agent_plan_tool_denied',
+      detail: 'toolCode is not allowed by the selected skill.',
+      errors: ['legacy field should be ignored']
+    })).toEqual({
+      title: 'Bad Request',
+      status: 400,
+      code: 'agent_plan_tool_denied',
+      detail: 'toolCode is not allowed by the selected skill.',
+      missingPermissions: undefined
+    })
   })
 })

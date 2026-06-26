@@ -28,6 +28,10 @@ public sealed class AgentArtifactDomainTests
         var startBeforeApproval = () => task.Start(now);
         startBeforeApproval.Should().Throw<InvalidOperationException>();
 
+        task.ConfirmExecutablePlan(task.PlanJson, Array.Empty<int>(), now);
+        var startBeforePlanApproval = () => task.Start(now);
+        startBeforePlanApproval.Should().Throw<InvalidOperationException>();
+
         task.ApprovePlan(now);
         task.Start(now);
 
@@ -192,7 +196,6 @@ public sealed class AgentArtifactDomainTests
             answerHistoryCount: -1,
             ragRewriteHistoryCount: 100,
             agentPlanningHistoryCount: 100,
-            summaryThresholdMessages: 1,
             contextTokenLimit: 100,
             DateTimeOffset.UtcNow);
 
@@ -200,8 +203,18 @@ public sealed class AgentArtifactDomainTests
         settings.AnswerHistoryCount.Should().Be(0);
         settings.RagRewriteHistoryCount.Should().Be(20);
         settings.AgentPlanningHistoryCount.Should().Be(30);
-        settings.SummaryThresholdMessages.Should().Be(5);
         settings.ContextTokenLimit.Should().Be(4000);
+    }
+
+    [Fact]
+    public void ChatRuntimeSettings_ShouldUseTenAnswerHistoryMessagesByDefault()
+    {
+        var settings = ChatRuntimeSettings.CreateDefault(DateTimeOffset.UtcNow);
+
+        settings.AnswerHistoryCount.Should().Be(10);
+        settings.RoutingHistoryCount.Should().Be(4);
+        settings.RagRewriteHistoryCount.Should().Be(4);
+        settings.AgentPlanningHistoryCount.Should().Be(6);
     }
 
     [Fact]

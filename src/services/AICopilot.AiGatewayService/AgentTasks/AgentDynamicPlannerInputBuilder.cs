@@ -12,6 +12,14 @@ internal static class AgentDynamicPlannerInputBuilder
         {
             goal = SanitizePlannerField(request.Goal, 2000),
             taskType = request.TaskType.ToString(),
+            skill = string.IsNullOrWhiteSpace(request.SkillCode)
+                ? null
+                : new
+                {
+                    code = SanitizePlannerField(request.SkillCode, 120),
+                    name = SanitizePlannerField(request.SkillName, 160),
+                    description = SanitizePlannerField(request.SkillDescription, 1000)
+                },
             uploadIds = request.UploadIds.Select(id => id.ToString("N")).ToArray(),
             knowledgeBaseIds = request.KnowledgeBaseIds.Select(id => id.ToString("N")).ToArray(),
             dataSources = (request.DataSources ?? []).Select(source => new
@@ -32,19 +40,11 @@ internal static class AgentDynamicPlannerInputBuilder
                 .Select(type => SanitizePlannerField(type, 40))
                 .Where(type => !string.IsNullOrWhiteSpace(type))
                 .ToArray(),
-            trialScenario = string.IsNullOrWhiteSpace(request.TrialScenarioId)
-                ? null
-                : new
-                {
-                    id = SanitizePlannerField(request.TrialScenarioId, 160),
-                    title = SanitizePlannerField(request.TrialScenarioTitle, 200),
-                    isSimulationOnly = request.IsSimulationTrial
-                },
             plannerToolCatalog = new
             {
                 version = request.ToolCatalog.Version,
                 availableToolCount = request.ToolCatalog.AvailableToolCount,
-                mockMcpOnly = true,
+                mockMcpOnly = PlannerToolCatalogMetadata.IsMockMcpOnly(request.ToolCatalog.Tools),
                 riskSummary = request.ToolCatalog.Tools
                     .GroupBy(tool => tool.RiskLevel, StringComparer.OrdinalIgnoreCase)
                     .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase)
@@ -81,9 +81,9 @@ internal static class AgentDynamicPlannerInputBuilder
                 maxSteps = AgentDynamicPlannerLimits.MaxDynamicSteps,
                 output = "json_only",
                 cloudIntent = "backend_only",
-                simulationOnly = request.IsSimulationTrial || (request.DataSources ?? []).Any(source => source.IsSimulation),
-                mockMcpOnly = true,
-                externalMcp = "disabled_in_p4",
+                simulationOnly = (request.DataSources ?? []).Any(source => source.IsSimulation),
+                mockMcpOnly = PlannerToolCatalogMetadata.IsMockMcpOnly(request.ToolCatalog.Tools),
+                externalMcp = "registered_runtime_only",
                 requiresDataApproval = request.RequiresDataApproval,
                 forbidden = new[] { "shell", "arbitrary_path", "sql", "cloud_write", "real_external_mcp", "unregistered_tool", "non_simulation_business_source" }
             },

@@ -43,8 +43,6 @@ public sealed class PermissionCatalog : IPermissionCatalog
         new("AiGateway.GetModelPools", "AiGateway", "View Model Pools", "View model endpoint pool routing, limits, health, and aggregate runtime statistics."),
         new("AiGateway.GetRuntimeSettings", "AiGateway", "View Runtime Settings", "View chat and Agent runtime memory settings."),
         new("AiGateway.UpdateRuntimeSettings", "AiGateway", "Update Runtime Settings", "Update chat and Agent runtime memory settings."),
-        new("AiGateway.GetPromptPolicy", "AiGateway", "View Prompt Policy", "View active and versioned prompt policy configuration."),
-        new("AiGateway.ManagePromptPolicy", "AiGateway", "Manage Prompt Policy", "Create, update, and activate versioned prompt policy configuration."),
         new("AiGateway.Upload", "AiGateway", "Upload Files", "Upload session files, Agent task inputs, or knowledge-base documents through the controlled upload entrypoint."),
         new("AiGateway.GetUpload", "AiGateway", "View Uploads", "View upload records visible to the current account."),
         new("AiGateway.GetWorkspace", "AiGateway", "View Artifact Workspace", "View controlled Agent artifact workspace files and draft outputs."),
@@ -75,19 +73,6 @@ public sealed class PermissionCatalog : IPermissionCatalog
         new("AiGateway.ToolRegistry.Manage", "AiGateway", "Manage Tool Registry", "Update controlled Agent tool enablement, approval, risk, and permission policy."),
         new("AiGateway.ToolRegistry.Execute", "AiGateway", "Execute Governed Tools", "Execute controlled Agent tools through registry, approval, and audit policy."),
         new("AiGateway.ToolRegistry.AuditView", "AiGateway", "View Tool Audit", "View governed tool execution audit summaries and statistics."),
-        new("AiGateway.RunQueue.Read", "AiGateway", "View Agent Run Queue", "View Agent run queue operations and queue health across tasks."),
-        new("AiGateway.RunQueue.Manage", "AiGateway", "Manage Agent Run Queue", "Move safe Agent run queue items to dead letter for operations recovery."),
-        new("AiGateway.WorkerStatus.Read", "AiGateway", "View Agent Worker Status", "View Agent DataWorker heartbeat and workspace configuration health."),
-        new("AiGateway.TrialOperations.Read", "AiGateway", "View Trial Operations", "View internal trial campaigns, evidence references, and Pilot readiness state."),
-        new("AiGateway.TrialOperations.Manage", "AiGateway", "Manage Trial Operations", "Create campaigns, attach Agent task evidence, and manage trial risk issues."),
-        new("AiGateway.TrialOperations.AuditView", "AiGateway", "View Trial Readiness Evidence", "Run Pilot readiness evaluation and generate sanitized evidence packages."),
-        new("PilotAuthorization.Submit", "PilotAuthorization", "Submit Pilot Authorization", "Create, update, and submit the current account's Pilot authorization packages."),
-        new("PilotAuthorization.View", "PilotAuthorization", "View Pilot Authorization", "View the current account's Pilot authorization packages; reviewers can view all packages through review permissions."),
-        new("PilotAuthorization.Review", "PilotAuthorization", "Review Pilot Authorization", "View submitted Pilot authorization packages for review without granting execution."),
-        new("PilotAuthorization.ApprovePlanning", "PilotAuthorization", "Approve Pilot Planning", "Approve credential-window or limited-Pilot planning only; this never grants execution."),
-        new("PilotAuthorization.Reject", "PilotAuthorization", "Reject Pilot Authorization", "Reject or revoke Pilot authorization planning approvals."),
-        new("PilotAuthorization.Expire", "PilotAuthorization", "Expire Pilot Authorization", "Expire stale Pilot authorization packages without granting execution."),
-        new("PilotAuthorization.Audit", "PilotAuthorization", "Audit Pilot Authorization", "View sanitized Pilot authorization audit evidence and state changes."),
 
         new("DataAnalysis.GetBusinessDatabase", "DataAnalysis", "View Business Database", "View business database configuration details."),
         new("DataAnalysis.GetListBusinessDatabases", "DataAnalysis", "View Business Databases", "View the business database configuration list."),
@@ -135,6 +120,7 @@ public sealed class PermissionCatalog : IPermissionCatalog
         "AiGateway.GetSession",
         "AiGateway.GetListSessions",
         "AiGateway.RenameSession",
+        "AiGateway.DeleteSession",
         "AiGateway.GetAgentTask",
         "AiGateway.PlanAgentTask",
         "AiGateway.ApproveAgentTaskPlan",
@@ -147,8 +133,13 @@ public sealed class PermissionCatalog : IPermissionCatalog
         "AiGateway.EditArtifact",
         "AiGateway.SubmitFinalReview",
         "AiGateway.Chat",
-        "PilotAuthorization.Submit",
-        "PilotAuthorization.View"
+        "AiGateway.ToolRegistry.Read",
+        "Rag.GetKnowledgeBase",
+        "Rag.GetListKnowledgeBases",
+        "Rag.GetListDocuments",
+        "Rag.UploadDocument",
+        "Rag.DeleteDocument",
+        "Rag.SearchKnowledgeBase"
     ];
 
     public IReadOnlyCollection<PermissionDefinition> GetAll()

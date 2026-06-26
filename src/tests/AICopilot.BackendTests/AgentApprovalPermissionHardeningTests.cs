@@ -182,6 +182,7 @@ public sealed class AgentApprovalPermissionHardeningTests
             "generate_pdf",
             requiresApproval: true,
             now);
+        task.ConfirmExecutablePlan(task.PlanJson, Array.Empty<int>(), now);
         task.ApprovePlan(now);
         task.Start(now);
         task.WaitForToolApproval(now);
@@ -280,6 +281,7 @@ public sealed class AgentApprovalPermissionHardeningTests
         }
 
         task.AttachWorkspace(workspace.Id, now);
+        task.ConfirmExecutablePlan(task.PlanJson, Array.Empty<int>(), now);
         task.ApprovePlan(now);
         task.MarkWorkspaceReady(now);
         if (markWaitingFinalApproval)

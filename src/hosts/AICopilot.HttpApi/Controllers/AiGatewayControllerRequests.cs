@@ -21,21 +21,3 @@ public sealed record UpdateToolRegistrationRequest(
     int? SchemaVersion = null,
     int? CatalogVersion = null,
     string? ApprovalPolicy = null);
-
-public sealed record DeadLetterAgentRunQueueItemRequest(string? Reason = null);
-
-public sealed record UpdateTrialCampaignStatusRequest(string Status);
-
-public sealed record AttachAgentTaskToTrialCampaignRequest(
-    Guid TaskId,
-    string? ScenarioId = null,
-    string? TrialMode = null);
-
-public sealed record UpsertTrialRiskIssueRequest(
-    Guid? IssueId,
-    string Severity,
-    string Category,
-    string Status,
-    string? Owner = null,
-    string? SourceRef = null,
-    string? ResolutionHash = null);

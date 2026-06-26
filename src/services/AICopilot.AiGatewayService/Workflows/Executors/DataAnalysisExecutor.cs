@@ -21,7 +21,7 @@ public class DataAnalysisExecutor(
 
     public async Task<BranchResult> ExecuteAsync(
         List<IntentResult> intentResults,
-        ChatWorkflowSink? sink,
+        AgentWorkflowSink? sink,
         SessionRuntimeSnapshot? session,
         CancellationToken ct = default)
     {

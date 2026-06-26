@@ -34,10 +34,6 @@ public sealed class ChatRuntimeSettingsConfiguration : IEntityTypeConfiguration<
             .IsRequired()
             .HasColumnName("agent_planning_history_count");
 
-        builder.Property(settings => settings.SummaryThresholdMessages)
-            .IsRequired()
-            .HasColumnName("summary_threshold_messages");
-
         builder.Property(settings => settings.ContextTokenLimit)
             .IsRequired()
             .HasColumnName("context_token_limit");

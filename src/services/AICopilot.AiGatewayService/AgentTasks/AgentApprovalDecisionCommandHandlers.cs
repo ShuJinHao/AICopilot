@@ -1,6 +1,7 @@
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
+using AICopilot.AiGatewayService.Sessions;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Messaging;
 using AICopilot.SharedKernel.Repository;
@@ -15,7 +16,9 @@ public sealed class ApproveAgentApprovalCommandHandler(
     AgentAuditRecorder auditRecorder,
     IAgentTaskRunQueue runQueue,
     ICurrentUser currentUser,
-    IIdentityAccessService identityAccessService)
+    IIdentityAccessService identityAccessService,
+    AgentPlanDraftConfirmationService planDraftConfirmationService,
+    MessageTimelineProjectionWriter? timelineProjectionWriter = null)
     : ICommandHandler<ApproveAgentApprovalCommand, Result<AgentApprovalRequestDto>>
 {
     public async Task<Result<AgentApprovalRequestDto>> Handle(
@@ -33,6 +36,8 @@ public sealed class ApproveAgentApprovalCommandHandler(
             runQueue,
             currentUser,
             identityAccessService,
+            planDraftConfirmationService,
+            timelineProjectionWriter,
             cancellationToken);
     }
 
@@ -47,6 +52,8 @@ public sealed class ApproveAgentApprovalCommandHandler(
         IAgentTaskRunQueue? runQueue,
         ICurrentUser currentUser,
         IIdentityAccessService identityAccessService,
+        AgentPlanDraftConfirmationService planDraftConfirmationService,
+        MessageTimelineProjectionWriter? timelineProjectionWriter,
         CancellationToken cancellationToken)
     {
         return await AgentApprovalDecisionWorkflow.DecideAsync(
@@ -60,6 +67,8 @@ public sealed class ApproveAgentApprovalCommandHandler(
             runQueue,
             currentUser,
             identityAccessService,
+            planDraftConfirmationService,
+            timelineProjectionWriter,
             cancellationToken);
     }
 }
@@ -71,7 +80,9 @@ public sealed class RejectAgentApprovalCommandHandler(
     AgentAuditRecorder auditRecorder,
     IAgentTaskRunQueue runQueue,
     ICurrentUser currentUser,
-    IIdentityAccessService identityAccessService)
+    IIdentityAccessService identityAccessService,
+    AgentPlanDraftConfirmationService planDraftConfirmationService,
+    MessageTimelineProjectionWriter? timelineProjectionWriter = null)
     : ICommandHandler<RejectAgentApprovalCommand, Result<AgentApprovalRequestDto>>
 {
     public async Task<Result<AgentApprovalRequestDto>> Handle(
@@ -89,6 +100,8 @@ public sealed class RejectAgentApprovalCommandHandler(
             runQueue,
             currentUser,
             identityAccessService,
+            planDraftConfirmationService,
+            timelineProjectionWriter,
             cancellationToken);
     }
 }

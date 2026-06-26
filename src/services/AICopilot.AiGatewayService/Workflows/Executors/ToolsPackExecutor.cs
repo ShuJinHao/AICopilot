@@ -11,7 +11,14 @@ public class ToolsPackExecutor(
     public const string ExecutorId = nameof(ToolsPackExecutor);
     private const string ActionIntentPrefix = "Action.";
 
-    public async Task<BranchResult> ExecuteAsync(
+    public Task<BranchResult> ExecuteAsync(
+        List<IntentResult> intentResults,
+        CancellationToken ct = default)
+    {
+        return DiscoverAsync(intentResults, ct);
+    }
+
+    public async Task<BranchResult> DiscoverAsync(
         List<IntentResult> intentResults,
         CancellationToken ct = default)
     {
@@ -39,6 +46,10 @@ public class ToolsPackExecutor(
             logger.LogInformation("Loaded {Count} tool functions.", tools.Length);
 
             return BranchResult.FromTools(tools);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception e)
         {

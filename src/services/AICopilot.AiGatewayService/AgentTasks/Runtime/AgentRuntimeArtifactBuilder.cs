@@ -148,21 +148,6 @@ internal sealed class AgentRuntimeArtifactBuilder(
 
     private static ArtifactSourceMetadata? BuildArtifactSourceMetadata(AgentTaskRunState state)
     {
-        var cloudSandbox = state.CloudSandboxQueryResults.LastOrDefault();
-        if (cloudSandbox is not null)
-        {
-            return new ArtifactSourceMetadata(
-                cloudSandbox.SourceMode,
-                cloudSandbox.Boundary,
-                IsSimulation: false,
-                cloudSandbox.IsSandbox,
-                cloudSandbox.SourceLabel,
-                cloudSandbox.QueryHash,
-                cloudSandbox.ResultHash,
-                cloudSandbox.RowCount,
-                cloudSandbox.IsTruncated);
-        }
-
         var business = state.BusinessQueryResults.LastOrDefault();
         if (business is not null)
         {
@@ -185,7 +170,7 @@ internal sealed class AgentRuntimeArtifactBuilder(
                 state.CloudReadonlySourceMode,
                 Boundary: null,
                 state.CloudReadonlyIsSimulation,
-                IsSandbox: string.Equals(state.CloudReadonlySourceMode, "CloudReadonlySandbox", StringComparison.OrdinalIgnoreCase),
+                IsSandbox: false,
                 state.CloudReadonlySourceLabel,
                 state.BusinessQueryHash,
                 ResultHash: null,

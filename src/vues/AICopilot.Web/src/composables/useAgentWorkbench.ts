@@ -4,10 +4,17 @@ import { useChatStore } from '@/stores/chatStore'
 import type { AgentApprovalRequest, AgentStep, AgentTask, ArtifactRecord } from '@/types/protocols'
 
 type TagType = 'success' | 'warning' | 'info' | 'danger' | 'primary'
+type AgentRunNoticeTone = 'success' | 'warning' | 'danger'
+
+export type AgentRunNotice = {
+  tone: AgentRunNoticeTone
+  title: string
+  detail: string
+}
 
 function statusLabel(status?: string | null) {
   const labels: Record<string, string> = {
-    Draft: '草稿',
+    Draft: '计划草案',
     Planned: '已规划',
     WaitingPlanApproval: '待确认计划',
     WaitingApproval: '待审批',
@@ -37,6 +44,7 @@ function statusType(status?: string | null): TagType {
     case 'Succeeded':
       return 'success'
     case 'WaitingPlanApproval':
+    case 'Draft':
     case 'WaitingApproval':
     case 'ReadyForFinalize':
     case 'Pending':
@@ -54,7 +62,7 @@ function statusType(status?: string | null): TagType {
 function approvalKindLabel(type?: string | null) {
   const labels: Record<string, string> = {
     Plan: '计划确认',
-    Tool: '工具审批',
+    Tool: '执行确认',
     Artifact: '产物确认',
     FinalOutput: '最终输出'
   }
@@ -81,6 +89,39 @@ function stepStatusRank(step: AgentStep) {
   if (step.status === 'Failed') return 2
   if (step.status !== 'Completed') return 3
   return 4
+}
+
+export function resolveAgentRunNotice(task?: AgentTask | null): AgentRunNotice | null {
+  if (!task) return null
+
+  if (task.isRunQueued) {
+    const queueStatus = task.runQueueStatus || 'Queued'
+    return {
+      tone: queueStatus === 'Leased' ? 'success' : 'warning',
+      title: queueStatus === 'Leased' ? 'Worker 已接手执行' : '任务已入队，等待 Worker 接手',
+      detail: task.queuedRunId
+        ? `队列状态：${queueStatus} · 运行单 ${task.queuedRunId.slice(0, 8)}`
+        : `队列状态：${queueStatus}`
+    }
+  }
+
+  if (task.isRunInProgress || task.status === 'Running' || task.status === 'GeneratingArtifacts') {
+    return {
+      tone: 'warning',
+      title: '正在执行计划步骤',
+      detail: '执行进度会自动刷新；需要确认的步骤会停在审批节点。'
+    }
+  }
+
+  if (task.status === 'Failed' && (task.failureSummary || task.lastFailureReason)) {
+    return {
+      tone: 'danger',
+      title: task.failureSummary?.errorCode || '执行失败',
+      detail: task.failureSummary?.safeMessage || task.lastFailureReason || '任务失败，可查看执行记录后重试。'
+    }
+  }
+
+  return null
 }
 
 export function useAgentWorkbench() {
@@ -199,7 +240,7 @@ export function useAgentWorkbench() {
   )
 
   const canCreatePlan = computed(() =>
-    Boolean(store.currentSessionId && store.selectedModelId && !store.isAgentBusy)
+    Boolean(store.currentSessionId && !store.isAgentBusy)
   )
   const canRunTask = computed(() =>
     Boolean(latestTask.value?.canRun && !latestTask.value?.isRunQueued && !latestTask.value?.isRunInProgress && !store.isAgentBusy)
@@ -213,6 +254,7 @@ export function useAgentWorkbench() {
   const canFinalizeWorkspace = computed(() =>
     Boolean(latestTask.value?.canApproveFinal && store.currentWorkspace && store.currentWorkspace.status !== 'Finalized' && taskArtifacts.value.length > 0 && !store.isAgentBusy)
   )
+  const agentRunNotice = computed(() => resolveAgentRunNotice(latestTask.value))
 
   return {
     latestTask,
@@ -236,6 +278,7 @@ export function useAgentWorkbench() {
     chartBars,
     onsiteStatus,
     agentStageCards,
+    agentRunNotice,
     approvalCount,
     widgetCount,
     canCreatePlan,

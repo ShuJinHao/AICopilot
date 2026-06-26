@@ -18,6 +18,8 @@ public class FinalAgentContext : IAsyncDisposable
 
     public required string InputText { get; set; }
 
+    public required IReadOnlyList<AiChatMessage> InputMessages { get; set; }
+
     public required RuntimeAgentRunOptions RunOptions { get; init; }
 
     public Guid SessionId { get; init; }

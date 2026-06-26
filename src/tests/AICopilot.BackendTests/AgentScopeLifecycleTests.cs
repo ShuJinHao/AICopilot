@@ -20,7 +20,7 @@ public sealed class AgentScopeLifecycleTests
 
         await using var serviceProvider = builder.Services.BuildServiceProvider(validateScopes: true);
         using var requestScope = serviceProvider.CreateScope();
-        var factory = new ChatAgentFactory(
+        var factory = new ConfiguredAgentRuntimeFactory(
             templateRepository: new InMemoryReadRepository<ConversationTemplate>(),
             modelRepository: new InMemoryReadRepository<LanguageModel>(),
             runtimeFactory: serviceProvider.GetRequiredService<IAgentRuntimeFactory>());

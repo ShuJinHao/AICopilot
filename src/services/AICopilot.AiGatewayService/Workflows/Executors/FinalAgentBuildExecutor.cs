@@ -20,14 +20,14 @@ using System.Text;
 namespace AICopilot.AiGatewayService.Workflows.Executors;
 
 public class FinalAgentBuildExecutor(
-    ChatAgentFactory agentFactory,
+    ConfiguredAgentRuntimeFactory agentFactory,
     IReadRepository<Session> sessionRepository,
     IReadRepository<ConversationTemplate> templateRepository,
     IReadRepository<LanguageModel> modelRepository,
     ITokenBudgetPolicy tokenBudgetPolicy,
     ILogger<FinalAgentBuildExecutor> logger,
-    IChatRuntimeSettingsProvider? runtimeSettingsProvider = null,
-    IChatExecutionMetadataAccessor? executionMetadataAccessor = null,
+    IAgentRuntimeSettingsProvider? runtimeSettingsProvider = null,
+    IAgentExecutionMetadataAccessor? executionMetadataAccessor = null,
     ITextTokenEstimator? tokenEstimator = null)
 {
     public const string ExecutorId = nameof(FinalAgentBuildExecutor);
@@ -43,7 +43,7 @@ public class FinalAgentBuildExecutor(
         var session = await sessionRepository.FirstOrDefaultAsync(new SessionByIdSpec(new SessionId(request.SessionId)), ct);
         if (session == null)
         {
-            throw new ChatWorkflowException(
+            throw new AgentWorkflowException(
                 "session_not_found",
                 "未找到当前会话。",
                 "当前会话不存在或已被删除，请刷新后重试。");
@@ -55,10 +55,18 @@ public class FinalAgentBuildExecutor(
 
         if (template == null)
         {
-            throw new ChatWorkflowException(
+            throw new AgentWorkflowException(
                 AppProblemCodes.ChatConfigurationMissing,
                 "当前会话绑定的模板或模型不存在。",
                 "当前会话缺少可用的模板或模型配置，请联系管理员检查 AI 配置。");
+        }
+
+        if (!template.IsEnabled)
+        {
+            throw new AgentWorkflowException(
+                AppProblemCodes.ChatConfigurationMissing,
+                "当前会话绑定的模板已停用。",
+                "当前会话绑定的模板已停用，请切换模板或联系管理员检查 AI 配置。");
         }
 
         var modelId = request.FinalModelId.HasValue
@@ -68,7 +76,7 @@ public class FinalAgentBuildExecutor(
 
         if (model == null)
         {
-            throw new ChatWorkflowException(
+            throw new AgentWorkflowException(
                 AppProblemCodes.ChatConfigurationMissing,
                 request.FinalModelId.HasValue ? "用户选择的模型不存在。" : "当前会话绑定的模型不存在。",
                 request.FinalModelId.HasValue
@@ -78,25 +86,54 @@ public class FinalAgentBuildExecutor(
 
         if (!model.IsEnabled || !model.SupportsUsage(LanguageModelUsage.Chat))
         {
-            throw new ChatWorkflowException(
+            throw new AgentWorkflowException(
                 AppProblemCodes.ChatConfigurationMissing,
                 $"Configured model {model.Name} is disabled or not available for chat.",
                 "所选模型当前不可用于对话，请切换模型或联系管理员检查 AI 配置。");
         }
 
         var runtimeSettings = runtimeSettingsProvider is null
-            ? new ChatRuntimeSettingsDto(4, 2, 4, 6, 20, 24000)
+            ? new ChatRuntimeSettingsDto(4, 10, 4, 6, 24000)
             : await runtimeSettingsProvider.GetAsync(ct);
         var answerHistory = await LoadAnswerHistoryAsync(
             session.Id,
             session.UserId,
             runtimeSettings.AnswerHistoryCount,
             ct);
-        var finalUserPrompt = BuildFinalUserPrompt(genContext, request.Message, answerHistory, out var hasContext);
-        var tokenBudgetDecision = tokenBudgetPolicy.Evaluate(model, template, finalUserPrompt);
+        var finalUserPrompt = BuildFinalUserPrompt(
+            genContext,
+            request.Message,
+            out var hasContext,
+            out var includeHistory);
+        var effectiveAnswerHistory = includeHistory ? answerHistory : [];
+        var inputMessages = BuildFinalInputMessages(effectiveAnswerHistory, finalUserPrompt);
+        var tokenBudgetDecision = tokenBudgetPolicy.Evaluate(model, template, BuildTokenBudgetInput(inputMessages));
+        if (!tokenBudgetDecision.IsAllowed && effectiveAnswerHistory.Count > 0)
+        {
+            foreach (var candidateHistory in BuildHistoryBudgetFallbacks(effectiveAnswerHistory))
+            {
+                var candidateMessages = BuildFinalInputMessages(candidateHistory, finalUserPrompt);
+                var candidateDecision = tokenBudgetPolicy.Evaluate(model, template, BuildTokenBudgetInput(candidateMessages));
+                if (!candidateDecision.IsAllowed)
+                {
+                    continue;
+                }
+
+                logger.LogInformation(
+                    "Reduced final answer history from {OriginalCount} to {ReducedCount} messages for session {SessionId} due to token budget.",
+                    effectiveAnswerHistory.Count,
+                    candidateHistory.Count,
+                    request.SessionId);
+                effectiveAnswerHistory = candidateHistory;
+                inputMessages = candidateMessages;
+                tokenBudgetDecision = candidateDecision;
+                break;
+            }
+        }
+
         if (!tokenBudgetDecision.IsAllowed)
         {
-            throw new ChatWorkflowException(
+            throw new AgentWorkflowException(
                 AppProblemCodes.TokenBudgetExceeded,
                 tokenBudgetDecision.Detail ?? "当前模型 token 预算不足。",
                 tokenBudgetDecision.UserFacingMessage ?? "当前问题超出模型 token 预算，请缩小范围后重试。");
@@ -111,13 +148,13 @@ public class FinalAgentBuildExecutor(
                 Tools = genContext.Tools,
                 MaxOutputTokens = tokenBudgetDecision.ReservedOutputTokens
             };
-            var metadataAccessor = executionMetadataAccessor ?? new ChatExecutionMetadataAccessor();
+            var metadataAccessor = executionMetadataAccessor ?? new AgentExecutionMetadataAccessor();
             metadataAccessor.SetFinalModel(model, tokenBudgetDecision.ReservedOutputTokens);
             metadataAccessor.SetContextBudget(BuildContextBudgetReport(
                 template,
                 genContext,
                 request.Message,
-                answerHistory,
+                effectiveAnswerHistory,
                 tokenBudgetDecision));
             var executionMetadata = metadataAccessor.Snapshot();
 
@@ -134,6 +171,7 @@ public class FinalAgentBuildExecutor(
                 ScopedAgent = scopedAgent,
                 Thread = agentThread,
                 InputText = finalUserPrompt,
+                InputMessages = inputMessages,
                 RunOptions = runOptions,
                 SessionId = request.SessionId,
                 EstimatedInputTokens = tokenBudgetDecision.EstimatedInputTokens,
@@ -162,18 +200,28 @@ public class FinalAgentBuildExecutor(
     private string BuildFinalUserPrompt(
         GenerationContext genContext,
         string originalMessage,
-        IReadOnlyCollection<Message> answerHistory,
-        out bool hasContext)
+        out bool hasContext,
+        out bool includeHistory)
     {
         var hasKnowledge = !string.IsNullOrWhiteSpace(genContext.KnowledgeContext);
         var hasDataAnalysis = !string.IsNullOrWhiteSpace(genContext.DataAnalysisContext);
         var hasBusinessPolicy = !string.IsNullOrWhiteSpace(genContext.BusinessPolicyContext);
         hasContext = hasKnowledge || hasDataAnalysis || hasBusinessPolicy;
+        includeHistory = true;
 
         if (!hasContext)
         {
             logger.LogDebug("No auxiliary context injected for session {SessionId}.", genContext.Request.SessionId);
-            return AppendHistoryIfNeeded(originalMessage, answerHistory);
+            var noContextPrompt = $"""
+                    请回答用户问题，并遵守以下基础回答要求：
+
+                    回答要求：
+                    {string.Join(Environment.NewLine, BuildBaseAnswerRequirements().Select((item, index) => $"{index + 1}. {item}"))}
+
+                    用户问题：
+                    {originalMessage}
+                    """;
+            return noContextPrompt;
         }
 
         var contextBuilder = new StringBuilder();
@@ -204,6 +252,7 @@ public class FinalAgentBuildExecutor(
 
         var requirements = BuildRequirements(genContext.Scene, hasDataAnalysis, hasBusinessPolicy, hasKnowledge);
         var shouldRedactOriginalQuestion = ShouldRedactOriginalQuestion(genContext);
+        includeHistory = !shouldRedactOriginalQuestion;
         var finalQuestion = shouldRedactOriginalQuestion
             ? RedactedOriginalQuestionPlaceholder
             : originalMessage;
@@ -221,9 +270,7 @@ public class FinalAgentBuildExecutor(
                 用户问题：
                 {finalQuestion}
                 """;
-        return shouldRedactOriginalQuestion
-            ? prompt
-            : AppendHistoryIfNeeded(prompt, answerHistory);
+        return prompt;
     }
 
     private ContextBudgetReportDto BuildContextBudgetReport(
@@ -316,25 +363,58 @@ public class FinalAgentBuildExecutor(
             .ToArray() ?? [];
     }
 
-    private static string AppendHistoryIfNeeded(
-        string prompt,
+    private static IEnumerable<IReadOnlyCollection<Message>> BuildHistoryBudgetFallbacks(
         IReadOnlyCollection<Message> answerHistory)
     {
-        if (answerHistory.Count == 0)
+        var count = answerHistory.Count;
+        if (count == 0)
         {
-            return prompt;
+            yield break;
         }
 
-        var history = string.Join(
-            Environment.NewLine,
-            answerHistory.Select(message => $"{message.Type}: {message.Content}"));
-        return $"""
-                <recent_conversation>
-                {history}
-                </recent_conversation>
+        foreach (var targetCount in new[] { 6, 4, 2, 0 }.Where(targetCount => targetCount < count).Distinct())
+        {
+            yield return targetCount == 0
+                ? []
+                : answerHistory.TakeLast(targetCount).ToArray();
+        }
+    }
 
-                {prompt}
-                """;
+    private static IReadOnlyList<AiChatMessage> BuildFinalInputMessages(
+        IReadOnlyCollection<Message> answerHistory,
+        string finalUserPrompt)
+    {
+        var messages = new List<AiChatMessage>(answerHistory.Count + 1);
+        foreach (var historyMessage in answerHistory)
+        {
+            if (string.IsNullOrWhiteSpace(historyMessage.Content))
+            {
+                continue;
+            }
+
+            messages.Add(new AiChatMessage(MapRole(historyMessage.Type), historyMessage.Content));
+        }
+
+        messages.Add(new AiChatMessage(AiChatRole.User, finalUserPrompt));
+        return messages;
+    }
+
+    private static string BuildTokenBudgetInput(IReadOnlyList<AiChatMessage> inputMessages)
+    {
+        return string.Join(
+            Environment.NewLine,
+            inputMessages.Select(message => message.Text));
+    }
+
+    private static AiChatRole MapRole(MessageType type)
+    {
+        return type switch
+        {
+            MessageType.Assistant => AiChatRole.Assistant,
+            MessageType.System => AiChatRole.System,
+            MessageType.Tool => AiChatRole.Tool,
+            _ => AiChatRole.User
+        };
     }
 
     private static bool ShouldRedactOriginalQuestion(GenerationContext genContext)
@@ -342,6 +422,21 @@ public class FinalAgentBuildExecutor(
         return genContext.DataAnalysisContext.Contains(
             SemanticAnalysisRunner.RecipeDataReadBoundaryMarker,
             StringComparison.Ordinal);
+    }
+
+    private static List<string> BuildBaseAnswerRequirements()
+    {
+        return
+        [
+            "尽量使用与用户相同的语言作答。",
+            "保持回答专业、简洁、面向业务。",
+            "信息不足以回答时，请明确说明信息不足，严禁编造。",
+            "没有匹配数据、知识库未命中、工具不可用或授权数据来源不可用时，请如实说明未找到或当前不可用，并说明需要用户补充什么条件。",
+            "Cloud 业务数据默认只读，只能提供观察、诊断、解释、汇总和建议，不能承诺写入、删除、补录、审批、派发、下发、控制设备、重启设备、修改参数、修改配方或变更业务状态。",
+            "如果用户提出控制、写入、下发、重启或修改 Cloud 业务数据的请求，必须明确拒绝，并说明需要人工在对应系统中执行或等待未来显式授权的 AI action API。",
+            "不得声称已经读取未提供的数据、调用未授权工具、生成不存在的文件或完成实际未完成的动作。",
+            "严禁暴露 SQL、数据库名、物理表名、视图名、sourceName、effectiveSourceName、连接字符串、密钥、内部路径或其他内部实现细节。"
+        ];
     }
 
     private static List<string> BuildRequirements(

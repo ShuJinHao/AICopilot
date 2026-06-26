@@ -177,6 +177,82 @@ public sealed class SessionPolicySemanticsTests
     }
 
     [Fact]
+    public async Task FinalAgentBuildExecutor_ShouldUseTenAnswerHistoryMessages_WhenRuntimeSettingsProviderIsMissing()
+    {
+        var runtimeFactory = new FakeRuntimeAgentFactory();
+        var model = FakeRuntimeAgentFactory.CreateModel();
+        model.UpdateParameters(new ModelParameters { MaxTokens = 8192, Temperature = 0.2f });
+        var template = new ConversationTemplate(
+            "current-template",
+            "current template",
+            "Current system prompt.",
+            model.Id,
+            new TemplateSpecification { MaxTokens = 384, Temperature = 0.4f });
+        var session = new Session(Guid.NewGuid(), template.Id);
+        for (var index = 1; index <= 12; index++)
+        {
+            session.AddMessage($"history-{index:00}", MessageType.User);
+        }
+
+        var tokenBudgetPolicy = new RecordingTokenBudgetPolicy();
+        var executor = CreateFinalAgentBuildExecutor(
+            runtimeFactory,
+            tokenBudgetPolicy,
+            session,
+            [template],
+            [model]);
+
+        await using var context = await executor.ExecuteAsync(CreateGenerationContext(session.Id));
+
+        context.InputText.Should().NotContain("<recent_conversation>");
+        context.InputText.Should().NotContain("history-12");
+        var historyMessages = context.InputMessages
+            .Where(message => message.Text?.StartsWith("history-", StringComparison.Ordinal) == true)
+            .ToArray();
+        historyMessages.Should().HaveCount(10);
+        historyMessages.Should().Contain(message => message.Text == "history-12");
+        historyMessages.Should().NotContain(message => message.Text == "history-01");
+        tokenBudgetPolicy.LastFinalUserPrompt.Should()
+            .Contain("history-12")
+            .And.NotContain("history-01");
+    }
+
+    [Fact]
+    public async Task FinalAgentBuildExecutor_ShouldReduceAnswerHistory_WhenTokenBudgetRejectsFullHistory()
+    {
+        var runtimeFactory = new FakeRuntimeAgentFactory();
+        var model = FakeRuntimeAgentFactory.CreateModel();
+        model.UpdateParameters(new ModelParameters { MaxTokens = 8192, Temperature = 0.2f });
+        var template = new ConversationTemplate(
+            "current-template",
+            "current template",
+            "Current system prompt.",
+            model.Id,
+            new TemplateSpecification { MaxTokens = 384, Temperature = 0.4f });
+        var session = new Session(Guid.NewGuid(), template.Id);
+        for (var index = 1; index <= 10; index++)
+        {
+            session.AddMessage($"history-{index:00}", MessageType.User);
+        }
+
+        var tokenBudgetPolicy = new RejectFullHistoryTokenBudgetPolicy();
+        var executor = CreateFinalAgentBuildExecutor(
+            runtimeFactory,
+            tokenBudgetPolicy,
+            session,
+            [template],
+            [model]);
+
+        await using var context = await executor.ExecuteAsync(CreateGenerationContext(session.Id));
+
+        tokenBudgetPolicy.EvaluateCalls.Should().BeGreaterThan(1);
+        context.InputText.Should().NotContain("history-03");
+        context.InputText.Should().NotContain("history-10");
+        context.InputMessages.Select(message => message.Text).Should().NotContain("history-03");
+        context.InputMessages.Select(message => message.Text).Should().Contain("history-10");
+    }
+
+    [Fact]
     public async Task FinalAgentBuildExecutor_ShouldUseRequestedFinalModelAndRecordExecutionMetadata()
     {
         var runtimeFactory = new FakeRuntimeAgentFactory();
@@ -267,7 +343,7 @@ public sealed class SessionPolicySemanticsTests
             await using var _ = await executor.ExecuteAsync(CreateGenerationContext(session.Id));
         };
 
-        var exception = await act.Should().ThrowAsync<ChatWorkflowException>();
+        var exception = await act.Should().ThrowAsync<AgentWorkflowException>();
         exception.Which.Code.Should().Be(AppProblemCodes.ChatConfigurationMissing);
     }
 
@@ -293,7 +369,7 @@ public sealed class SessionPolicySemanticsTests
         LanguageModel model)
     {
         return new FinalAgentContextSerializer(
-            new ChatAgentFactory(
+            new ConfiguredAgentRuntimeFactory(
                 new InMemoryReadRepository<ConversationTemplate>([template]),
                 new InMemoryReadRepository<LanguageModel>([model]),
                 runtimeFactory),
@@ -309,7 +385,7 @@ public sealed class SessionPolicySemanticsTests
         IReadOnlyCollection<LanguageModel> models)
     {
         return new FinalAgentBuildExecutor(
-            new ChatAgentFactory(
+            new ConfiguredAgentRuntimeFactory(
                 new InMemoryReadRepository<ConversationTemplate>(templates),
                 new InMemoryReadRepository<LanguageModel>(models),
                 runtimeFactory),
@@ -447,6 +523,8 @@ public sealed class SessionPolicySemanticsTests
 
         public ConversationTemplate? LastTemplate { get; private set; }
 
+        public string? LastFinalUserPrompt { get; private set; }
+
         public int CountSystemPromptTokens(ConversationTemplate template)
         {
             return template.SystemPrompt.Length;
@@ -459,6 +537,41 @@ public sealed class SessionPolicySemanticsTests
         {
             LastModel = model;
             LastTemplate = template;
+            LastFinalUserPrompt = finalUserPrompt;
+            return new TokenBudgetDecision(
+                true,
+                CountSystemPromptTokens(template) + finalUserPrompt.Length,
+                template.Specification.MaxTokens ?? 512,
+                model.Parameters.MaxTokens);
+        }
+    }
+
+    private sealed class RejectFullHistoryTokenBudgetPolicy : ITokenBudgetPolicy
+    {
+        public int EvaluateCalls { get; private set; }
+
+        public int CountSystemPromptTokens(ConversationTemplate template)
+        {
+            return template.SystemPrompt.Length;
+        }
+
+        public TokenBudgetDecision Evaluate(
+            LanguageModel model,
+            ConversationTemplate template,
+            string finalUserPrompt)
+        {
+            EvaluateCalls++;
+            if (finalUserPrompt.Contains("history-03", StringComparison.Ordinal))
+            {
+                return new TokenBudgetDecision(
+                    false,
+                    4096,
+                    384,
+                    model.Parameters.MaxTokens,
+                    "full history rejected",
+                    "full history rejected");
+            }
+
             return new TokenBudgetDecision(
                 true,
                 CountSystemPromptTokens(template) + finalUserPrompt.Length,

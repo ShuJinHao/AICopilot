@@ -9,6 +9,7 @@ namespace AICopilot.MigrationWorkApp;
 public class Worker(
     IServiceProvider serviceProvider,
     IConfiguration configuration,
+    IHostEnvironment hostEnvironment,
     IHostApplicationLifetime hostApplicationLifetime) : BackgroundService
 {
     public const string ActivitySourceName = "Migrations";
@@ -49,7 +50,11 @@ public class Worker(
                 configuration,
                 cancellationToken);
             await MigrationWorkerAiGatewaySeeder.SeedDefaultsAsync(aiGatewayDbContext, cancellationToken);
-            await MigrationWorkerCloudSimulationSeeder.EnsureSourceAsync(configuration, cancellationToken);
+            await MigrationWorkerCloudSimulationSeeder.EnsureSourceAsync(
+                configuration,
+                hostEnvironment.EnvironmentName,
+                dataAnalysisDbContext,
+                cancellationToken);
         }
         catch (Exception ex)
         {

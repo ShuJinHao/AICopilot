@@ -200,6 +200,7 @@ public sealed class IdentityAccessManagementTests
                 "AiGateway.GetSession",
                 "AiGateway.GetListSessions",
                 "AiGateway.RenameSession",
+                "AiGateway.DeleteSession",
                 "AiGateway.GetAgentTask",
                 "AiGateway.PlanAgentTask",
                 "AiGateway.ApproveAgentTaskPlan",
@@ -212,11 +213,24 @@ public sealed class IdentityAccessManagementTests
                 "AiGateway.EditArtifact",
                 "AiGateway.SubmitFinalReview",
                 "AiGateway.Chat",
-                "PilotAuthorization.Submit",
-                "PilotAuthorization.View");
+                "AiGateway.ToolRegistry.Read",
+                "Rag.GetKnowledgeBase",
+                "Rag.GetListKnowledgeBases",
+                "Rag.GetListDocuments",
+                "Rag.UploadDocument",
+                "Rag.DeleteDocument",
+                "Rag.SearchKnowledgeBase");
             profile.Permissions.Should().NotContain("AiGateway.ApproveAgentToolCall");
             profile.Permissions.Should().NotContain("AiGateway.ApproveFinalOutput");
             profile.Permissions.Should().NotContain("AiGateway.FinalizeWorkspace");
+            profile.Permissions.Should().NotContain("Rag.CreateKnowledgeBase");
+            profile.Permissions.Should().NotContain("Rag.UpdateKnowledgeBase");
+            profile.Permissions.Should().NotContain("Rag.DeleteKnowledgeBase");
+            profile.Permissions.Should().NotContain("Rag.CreateEmbeddingModel");
+            profile.Permissions.Should().NotContain("Rag.UpdateEmbeddingModel");
+            profile.Permissions.Should().NotContain("Rag.DeleteEmbeddingModel");
+            profile.Permissions.Should().NotContain("Rag.UpdateDocumentGovernance");
+            profile.Permissions.Should().NotContain("Rag.ManageKnowledgeGovernance");
 
             var createdSession = await PostJsonAsync<CreatedSessionDto>("/api/aigateway/session", new
             {

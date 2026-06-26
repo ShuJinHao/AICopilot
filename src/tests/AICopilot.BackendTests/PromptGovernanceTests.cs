@@ -85,6 +85,61 @@ public sealed class PromptGovernanceTests
         template.BuiltInVersion.Should().Be(BuiltInConversationTemplates.CurrentVersion);
         template.IsBuiltIn.Should().BeTrue();
         template.ModelId.Should().Be(modelId);
+
+        foreach (var builtInDefinition in BuiltInConversationTemplates.All)
+        {
+            var action = () => BuiltInConversationTemplates.CreateTemplate(builtInDefinition, modelId);
+            action.Should().NotThrow($"built-in template {builtInDefinition.Code} must pass prompt safety validation");
+        }
+    }
+
+    [Fact]
+    public void BuiltInConversationTemplates_ShouldUseCurrentPromptVersion()
+    {
+        BuiltInConversationTemplates.CurrentVersion.Should().Be(4);
+        BuiltInConversationTemplates.All
+            .Should()
+            .OnlyContain(definition => definition.Version == BuiltInConversationTemplates.CurrentVersion);
+    }
+
+    [Fact]
+    public void BuiltInConversationTemplates_ShouldDefineChatAnswerHardConstraints()
+    {
+        var prompt = BuiltInConversationTemplates.Find("chat_answer")!.SystemPrompt;
+
+        prompt.Should().Contain("信息不足")
+            .And.Contain("未找到")
+            .And.Contain("工具不可用")
+            .And.Contain("不能伪造")
+            .And.Contain("不能承诺写入")
+            .And.Contain("不能承诺变更云端业务记录")
+            .And.Contain("可以通过受控只读接口读取、查询和分析 Cloud 业务数据")
+            .And.Contain("当前未接入 Cloud AiRead")
+            .And.Contain("不能暴露 SQL")
+            .And.Contain("不能暴露 SQL、数据库名、物理表名");
+    }
+
+    [Fact]
+    public void BuiltInConversationTemplates_ShouldDefineCurrentAgentSlotPrompts()
+    {
+        BuiltInConversationTemplates.Find("IntentRoutingAgent")!.SystemPrompt
+            .Should().Contain("{{$IntentList}}")
+            .And.Contain("Skill")
+            .And.Contain("JSON");
+
+        BuiltInConversationTemplates.Find("agent_planner")!.SystemPrompt
+            .Should().Contain("plannerToolCatalog")
+            .And.Contain("不能调用工具")
+            .And.Contain("运行详情");
+
+        BuiltInConversationTemplates.Find("agent_executor")!.SystemPrompt
+            .Should().Contain("最终执行 Agent")
+            .And.Contain("运行详情")
+            .And.Contain("可以读取、查询和分析已授权只读数据");
+
+        BuiltInConversationTemplates.Find("chat_answer")!.SystemPrompt
+            .Should().Contain("运行详情")
+            .And.Contain("Cloud 业务数据边界是只读分析");
     }
 
     [Fact]

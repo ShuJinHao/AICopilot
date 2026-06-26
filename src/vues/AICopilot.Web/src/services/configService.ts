@@ -1,17 +1,6 @@
 import { apiClient } from './apiClient'
 import type {
-  ApprovalPolicyDetail,
-  ApprovalPolicyFormModel,
-  ApprovalPolicySummary,
-  ArtifactWorkspaceSettings,
-  BusinessDatabaseDetail,
-  BusinessDatabaseFormModel,
-  BusinessDatabaseSummary,
-  ChatRuntimeSettings,
-  CloudReadonlyReadiness,
-  CloudReadonlySandboxAgentTrialStatus,
-  CloudReadonlySandboxControlledTrialStatus,
-  CloudReadonlySandboxStatus,
+  CloudReadonlyStatus,
   ConversationTemplateDetail,
   ConversationTemplateFormModel,
   ConversationTemplateSummary,
@@ -20,22 +9,12 @@ import type {
   LanguageModelSummary,
   LanguageModelTestRequest,
   LanguageModelTestResult,
-  McpServerDetail,
-  McpServerFormModel,
-  McpServerSummary,
-  ProviderReliabilityConfig,
   RoutingModelDetail,
   RoutingModelFormModel,
   RoutingModelSummary,
-  SemanticSourceStatus,
-  ToolCatalogSummary,
-  ToolRegistrySummary
+  SkillDefinition,
+  ToolRegistryCatalog
 } from '@/types/app'
-import type {
-  AgentRunQueuePage,
-  AgentRunQueueSummary,
-  AgentWorkerStatus
-} from '@/types/protocols'
 
 export const configService = {
   async getLanguageModel(id: string) {
@@ -44,33 +23,6 @@ export const configService = {
 
   async getLanguageModels() {
     return await apiClient.get<LanguageModelSummary[]>('/aigateway/language-model/list')
-  },
-
-  async getProviderReliability() {
-    return await apiClient.get<ProviderReliabilityConfig>('/aigateway/provider-reliability')
-  },
-
-  async getRuntimeSettings() {
-    return await apiClient.get<ChatRuntimeSettings>('/aigateway/runtime-settings')
-  },
-
-  async getWorkspaceSettings() {
-    return await apiClient.get<ArtifactWorkspaceSettings>('/aigateway/workspace-settings')
-  },
-
-  async getAgentRunQueueSummary() {
-    return await apiClient.get<AgentRunQueueSummary>('/aigateway/agent/run-queue/summary')
-  },
-
-  async getAgentRunQueue() {
-    return await apiClient.get<AgentRunQueuePage>('/aigateway/agent/run-queue', {
-      pageIndex: 1,
-      pageSize: 8
-    })
-  },
-
-  async getAgentWorkerStatus() {
-    return await apiClient.get<AgentWorkerStatus>('/aigateway/agent/worker/status')
   },
 
   async createLanguageModel(payload: LanguageModelFormModel) {
@@ -184,193 +136,23 @@ export const configService = {
     return await apiClient.delete('/aigateway/conversation-template', { id })
   },
 
-  async getApprovalPolicy(id: string) {
-    return await apiClient.get<ApprovalPolicyDetail>('/aigateway/approval-policy', { id })
+  async resetBuiltInConversationTemplates(modelId: string) {
+    return await apiClient.post('/aigateway/conversation-template/reset-builtins', { modelId })
   },
 
-  async getApprovalPolicies() {
-    return await apiClient.get<ApprovalPolicySummary[]>('/aigateway/approval-policy/list')
-  },
-
-  async createApprovalPolicy(payload: ApprovalPolicyFormModel) {
-    return await apiClient.post('/aigateway/approval-policy', {
-      name: payload.name,
-      description: payload.description || null,
-      targetType: payload.targetType,
-      targetName: payload.targetName,
-      toolNames: payload.toolNames,
-      isEnabled: payload.isEnabled,
-      requiresOnsiteAttestation: payload.requiresOnsiteAttestation
+  async getSkills() {
+    return await apiClient.get<SkillDefinition[]>('/aigateway/skills', {
+      enabledOnly: false
     })
-  },
-
-  async updateApprovalPolicy(payload: ApprovalPolicyFormModel) {
-    return await apiClient.put('/aigateway/approval-policy', {
-      id: payload.id,
-      name: payload.name,
-      description: payload.description || null,
-      targetType: payload.targetType,
-      targetName: payload.targetName,
-      toolNames: payload.toolNames,
-      isEnabled: payload.isEnabled,
-      requiresOnsiteAttestation: payload.requiresOnsiteAttestation
-    })
-  },
-
-  async deleteApprovalPolicy(id: string) {
-    return await apiClient.delete('/aigateway/approval-policy', { id })
-  },
-
-  async getBusinessDatabase(id: string) {
-    return await apiClient.get<BusinessDatabaseDetail>('/data-analysis/business-database', { id })
-  },
-
-  async getBusinessDatabases() {
-    return await apiClient.get<BusinessDatabaseSummary[]>('/data-analysis/business-database/list')
-  },
-
-  async createBusinessDatabase(payload: BusinessDatabaseFormModel) {
-    return await apiClient.post('/data-analysis/business-database', {
-      name: payload.name,
-      description: payload.description,
-      connectionString: payload.connectionString,
-      provider: payload.provider,
-      isEnabled: payload.isEnabled,
-      isReadOnly: true,
-      externalSystemType: payload.externalSystemType,
-      readOnlyCredentialVerified: payload.readOnlyCredentialVerified,
-      category: payload.category,
-      tags: payload.tags,
-      ownerDepartment: payload.ownerDepartment,
-      businessDomain: payload.businessDomain,
-      sensitivityLevel: payload.sensitivityLevel,
-      defaultQueryLimit: payload.defaultQueryLimit,
-      maxQueryLimit: payload.maxQueryLimit,
-      isSelectableInChat: payload.isSelectableInChat,
-      isSelectableInAgent: payload.isSelectableInAgent
-    })
-  },
-
-  async updateBusinessDatabase(payload: BusinessDatabaseFormModel) {
-    return await apiClient.put('/data-analysis/business-database', {
-      id: payload.id,
-      name: payload.name,
-      description: payload.description,
-      connectionString: payload.connectionString,
-      provider: payload.provider,
-      isEnabled: payload.isEnabled,
-      isReadOnly: true,
-      externalSystemType: payload.externalSystemType,
-      readOnlyCredentialVerified: payload.readOnlyCredentialVerified,
-      category: payload.category,
-      tags: payload.tags,
-      ownerDepartment: payload.ownerDepartment,
-      businessDomain: payload.businessDomain,
-      sensitivityLevel: payload.sensitivityLevel,
-      defaultQueryLimit: payload.defaultQueryLimit,
-      maxQueryLimit: payload.maxQueryLimit,
-      isSelectableInChat: payload.isSelectableInChat,
-      isSelectableInAgent: payload.isSelectableInAgent
-    })
-  },
-
-  async deleteBusinessDatabase(id: string) {
-    return await apiClient.delete('/data-analysis/business-database', { id })
-  },
-
-  async getSemanticSourceStatuses() {
-    return await apiClient.get<SemanticSourceStatus[]>('/data-analysis/semantic-source/status')
-  },
-
-  async getMcpServer(id: string) {
-    return await apiClient.get<McpServerDetail>('/mcp/server', { id })
-  },
-
-  async getMcpServers() {
-    return await apiClient.get<McpServerSummary[]>('/mcp/server/list')
-  },
-
-  async getToolRegistrations() {
-    return await apiClient.get<ToolRegistrySummary[]>('/aigateway/tools')
   },
 
   async getToolCatalog() {
-    return await apiClient.get<ToolCatalogSummary>('/aigateway/tools/catalog', {
-      simulationOnly: true
+    return await apiClient.get<ToolRegistryCatalog>('/aigateway/tools/catalog', {
+      simulationOnly: false
     })
   },
 
-  async getCloudReadonlyReadiness() {
-    return await apiClient.get<CloudReadonlyReadiness>('/aigateway/cloud-readonly/readiness')
-  },
-
-  async getCloudReadonlyReadinessHistory() {
-    return await apiClient.get<CloudReadonlyReadiness[]>('/aigateway/cloud-readonly/readiness/history')
-  },
-
-  async getCloudReadonlySandboxStatus() {
-    return await apiClient.get<CloudReadonlySandboxStatus>('/aigateway/cloud-readonly/readiness/sandbox')
-  },
-
-  async getCloudReadonlySandboxSmokeHistory() {
-    return await apiClient.get<CloudReadonlySandboxStatus[]>('/aigateway/cloud-readonly/readiness/sandbox/history')
-  },
-
-  async getCloudReadonlySandboxAgentTrialStatus() {
-    return await apiClient.get<CloudReadonlySandboxAgentTrialStatus>(
-      '/aigateway/cloud-readonly/readiness/sandbox-agent-trial'
-    )
-  },
-
-  async getCloudReadonlySandboxControlledTrialStatus() {
-    return await apiClient.get<CloudReadonlySandboxControlledTrialStatus>(
-      '/aigateway/cloud-readonly/readiness/sandbox-controlled-trial'
-    )
-  },
-
-  async runCloudReadonlyReadinessCheck(mode = 'FakeEndpoint') {
-    return await apiClient.post<CloudReadonlyReadiness>('/aigateway/cloud-readonly/readiness/run', {
-      mode,
-      endpointCodes: ['devices', 'capacity_summary', 'device_logs', 'pass_station_records'],
-      maxRows: 20,
-      timeoutMs: 5000
-    })
-  },
-
-  async createMcpServer(payload: McpServerFormModel) {
-    return await apiClient.post('/mcp/server', {
-      name: payload.name,
-      description: payload.description,
-      transportType: payload.transportType,
-      command: payload.command || null,
-      arguments: payload.arguments,
-      chatExposureMode: payload.chatExposureMode,
-      allowedTools: payload.allowedTools,
-      externalSystemType: payload.externalSystemType,
-      capabilityKind: payload.capabilityKind,
-      riskLevel: payload.riskLevel,
-      isEnabled: payload.isEnabled
-    })
-  },
-
-  async updateMcpServer(payload: McpServerFormModel) {
-    return await apiClient.put('/mcp/server', {
-      id: payload.id,
-      name: payload.name,
-      description: payload.description,
-      transportType: payload.transportType,
-      command: payload.command || null,
-      arguments: payload.arguments,
-      chatExposureMode: payload.chatExposureMode,
-      allowedTools: payload.allowedTools,
-      externalSystemType: payload.externalSystemType,
-      capabilityKind: payload.capabilityKind,
-      riskLevel: payload.riskLevel,
-      isEnabled: payload.isEnabled
-    })
-  },
-
-  async deleteMcpServer(id: string) {
-    return await apiClient.delete('/mcp/server', { id })
+  async getCloudReadonlyStatus() {
+    return await apiClient.get<CloudReadonlyStatus>('/aigateway/cloud-readonly/status')
   }
 }

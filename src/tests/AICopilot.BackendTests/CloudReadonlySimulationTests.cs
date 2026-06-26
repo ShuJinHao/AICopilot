@@ -1,5 +1,6 @@
 using System.Text.Json;
 using AICopilot.AiGatewayService.AgentTasks;
+using AICopilot.AiGatewayService.Runtime;
 using Microsoft.Extensions.Options;
 
 namespace AICopilot.BackendTests;
@@ -54,6 +55,52 @@ public sealed class CloudReadonlySimulationTests
     }
 
     [Fact]
+    public void CloudReadonlyOptions_ShouldAllowSimulationOnlyInDevelopment()
+    {
+        var options = CreateSimulationOptions();
+
+        options.EnsureValid(environmentName: "Development");
+
+        var action = () => options.EnsureValid(environmentName: "Production");
+        action.Should()
+            .Throw<InvalidOperationException>()
+            .WithMessage("*Simulation is only allowed in Development*");
+    }
+
+    [Fact]
+    public void CloudReadonlyOptions_ShouldAllowDisabledInProduction()
+    {
+        var options = new CloudReadonlyOptions
+        {
+            Mode = CloudReadonlyDataSourceMode.Disabled
+        };
+
+        options.EnsureValid(environmentName: "Production");
+    }
+
+    [Fact]
+    public void CloudReadonlyOptions_ShouldAllowRealInProduction_WhenAiReadConfigured()
+    {
+        var options = new CloudReadonlyOptions
+        {
+            Mode = CloudReadonlyDataSourceMode.Real,
+            Real = new CloudReadonlyRealOptions
+            {
+                Enabled = true,
+                AllowProductionRead = true
+            }
+        };
+        var aiRead = new CloudAiReadOptions
+        {
+            Enabled = true,
+            BaseUrl = "https://cloud.internal.example",
+            ServiceAccountToken = "secret-token"
+        };
+
+        options.EnsureValid(aiRead, "Production");
+    }
+
+    [Fact]
     public async Task RealProvider_ShouldRequireCloudReadonlyAndCloudAiReadDoubleEnable()
     {
         var provider = new RealCloudReadonlyDataProvider(
@@ -78,21 +125,88 @@ public sealed class CloudReadonlySimulationTests
         exception.Which.Code.Should().Be(CloudAiReadProblemCodes.NotConfigured);
     }
 
+    [Fact]
+    public void CloudReadonlyStatus_ShouldReturnSanitizedRealReady()
+    {
+        var status = CloudReadonlyStatusEvaluator.Evaluate(
+            new CloudReadonlyOptions
+            {
+                Mode = CloudReadonlyDataSourceMode.Real,
+                Real = new CloudReadonlyRealOptions
+                {
+                    Enabled = true,
+                    AllowProductionRead = true
+                }
+            },
+            new CloudAiReadOptions
+            {
+                Enabled = true,
+                BaseUrl = "https://cloud.internal.example",
+                ServiceAccountToken = "secret-token"
+            });
+
+        status.Status.Should().Be(CloudReadonlyRuntimeStatuses.RealReady);
+        status.BaseUrlConfigured.Should().BeTrue();
+        status.TokenConfigured.Should().BeTrue();
+        status.ProductionReadAllowed.Should().BeTrue();
+        status.Message.Should().Contain("可读取和分析数据");
+
+        var serialized = JsonSerializer.Serialize(status);
+        serialized.Should().NotContain("secret-token");
+        serialized.Should().NotContain("cloud.internal.example");
+    }
+
+    [Theory]
+    [InlineData(null, "secret-token", true, CloudReadonlyRuntimeStatuses.RealMissingBaseUrl)]
+    [InlineData("https://cloud.internal.example", "", true, CloudReadonlyRuntimeStatuses.RealMissingToken)]
+    [InlineData("https://cloud.internal.example", "secret-token", false, CloudReadonlyRuntimeStatuses.RealNotAllowed)]
+    public void CloudReadonlyStatus_ShouldExposeConfigurationStateOnly(
+        string? baseUrl,
+        string token,
+        bool productionReadAllowed,
+        string expectedStatus)
+    {
+        var status = CloudReadonlyStatusEvaluator.Evaluate(
+            new CloudReadonlyOptions
+            {
+                Mode = CloudReadonlyDataSourceMode.Real,
+                Real = new CloudReadonlyRealOptions
+                {
+                    Enabled = true,
+                    AllowProductionRead = productionReadAllowed
+                }
+            },
+            new CloudAiReadOptions
+            {
+                Enabled = true,
+                BaseUrl = baseUrl ?? string.Empty,
+                ServiceAccountToken = token
+            });
+
+        status.Status.Should().Be(expectedStatus);
+        JsonSerializer.Serialize(status).Should().NotContain("secret-token");
+    }
+
     private static SimulationCloudReadonlyDataProvider CreateSimulationProvider()
     {
         return new SimulationCloudReadonlyDataProvider(
             new CloudReadonlySimulationDataSet(),
-            Options.Create(new CloudReadonlyOptions
+            Options.Create(CreateSimulationOptions()));
+    }
+
+    private static CloudReadonlyOptions CreateSimulationOptions()
+    {
+        return new CloudReadonlyOptions
+        {
+            Mode = CloudReadonlyDataSourceMode.Simulation,
+            Simulation = new CloudReadonlySimulationOptions
             {
-                Mode = CloudReadonlyDataSourceMode.Simulation,
-                Simulation = new CloudReadonlySimulationOptions
-                {
-                    Enabled = true,
-                    SeedData = true,
-                    DataSet = "ManufacturingDemo",
-                    AlwaysMarkAsSimulation = true
-                }
-            }));
+                Enabled = true,
+                SeedData = true,
+                DataSet = "ManufacturingDemo",
+                AlwaysMarkAsSimulation = true
+            }
+        };
     }
 
     private sealed class FixedSemanticQueryPlanner : ISemanticQueryPlanner

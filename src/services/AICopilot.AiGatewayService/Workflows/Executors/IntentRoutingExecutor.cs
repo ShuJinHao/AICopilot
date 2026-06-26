@@ -9,6 +9,8 @@ using AICopilot.Services.Contracts;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using AICopilot.SharedKernel.Ai;
+using AICopilot.SharedKernel.Result;
+using Microsoft.Extensions.Options;
 
 namespace AICopilot.AiGatewayService.Workflows.Executors;
 
@@ -22,9 +24,10 @@ public class IntentRoutingExecutor(
     IMediator mediator,
     IntentRoutingAgentBuilder agentBuilder,
     IManufacturingSceneClassifier sceneClassifier,
-    IChatExecutionMetadataAccessor executionMetadataAccessor,
-    IChatRuntimeSettingsProvider runtimeSettingsProvider,
-    ILogger<IntentRoutingExecutor> logger)
+    IAgentExecutionMetadataAccessor executionMetadataAccessor,
+    IAgentRuntimeSettingsProvider runtimeSettingsProvider,
+    ILogger<IntentRoutingExecutor> logger,
+    IOptions<AgentModelCallTimeoutOptions>? modelCallTimeoutOptions = null)
 {
     public const string ExecutorId = nameof(IntentRoutingExecutor);
 
@@ -50,7 +53,7 @@ public class IntentRoutingExecutor(
         if (!IntentRoutingResultParser.TryParse(responseText, out var intentResults))
         {
             logger.LogWarning("Intent routing returned unparsable JSON. Falling back to General.Chat.");
-            intentResults = CreateFallbackIntents("routing JSON parse failed");
+            intentResults = CreateFallbackIntents(request.Message, "routing JSON parse failed");
         }
 
         var normalizedResponseText = JsonSerializer.Serialize(intentResults, JsonSerializerOptions.Web);
@@ -65,34 +68,65 @@ public class IntentRoutingExecutor(
         List<AiChatMessage> history,
         CancellationToken cancellationToken)
     {
+        var timeout = (modelCallTimeoutOptions?.Value ?? new AgentModelCallTimeoutOptions()).RoutingTimeout;
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(timeout);
+
         try
         {
             await using var scopedAgent = await agentBuilder.BuildAsync();
-            var session = await scopedAgent.Agent.CreateSessionAsync(cancellationToken);
-            var response = await scopedAgent.Agent.RunStructuredAsync<List<IntentResult>>(
-                history,
-                session,
-                JsonSerializerOptions.Web,
-                new RuntimeAgentRunOptions(new AiChatOptions
+            var timeoutToken = timeoutCts.Token;
+            var session = await scopedAgent.Agent.CreateSessionAsync(timeoutToken);
+            var builder = new StringBuilder();
+            var thinkTagFilter = new StreamingThinkTagFilter();
+            await foreach (var update in scopedAgent.Agent.RunStreamingAsync(
+                    history,
+                    session,
+                    new RuntimeAgentRunOptions(new AiChatOptions
+                    {
+                        MaxOutputTokens = 512,
+                        Temperature = 0,
+                        Tools = []
+                    }),
+                    timeoutToken))
+            {
+                foreach (var content in update.Contents.OfType<AiTextContent>())
                 {
-                    MaxOutputTokens = 512,
-                    Temperature = 0
-                }),
-                cancellationToken);
+                    builder.Append(thinkTagFilter.Append(content.Text));
+                }
+            }
 
-            return response.Result is { Count: > 0 }
-                ? JsonSerializer.Serialize(response.Result, JsonSerializerOptions.Web)
-                : response.Text;
+            builder.Append(thinkTagFilter.Flush());
+            return builder.ToString();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested
+                                                 && timeoutCts.IsCancellationRequested)
+        {
+            throw new AgentWorkflowException(
+                AppProblemCodes.ModelRequestTimeout,
+                $"Intent routing model call exceeded {timeout.TotalSeconds:N0} seconds.",
+                "意图识别模型响应超时，请稍后重试。");
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Intent routing model call failed. Falling back to General.Chat.");
-            return JsonSerializer.Serialize(CreateFallbackIntents("routing model call failed"), JsonSerializerOptions.Web);
+            return JsonSerializer.Serialize(
+                CreateFallbackIntents(history.LastOrDefault()?.Text, "routing model call failed"),
+                JsonSerializerOptions.Web);
         }
     }
 
-    private static List<IntentResult> CreateFallbackIntents(string reasoning)
+    private static List<IntentResult> CreateFallbackIntents(string? message, string reasoning)
     {
+        if (IntentRoutingFallbackClassifier.TryClassify(message, reasoning, out var semanticFallback))
+        {
+            return semanticFallback;
+        }
+
         return [new IntentResult { Intent = "General.Chat", Confidence = 1.0, Reasoning = reasoning }];
     }
 }

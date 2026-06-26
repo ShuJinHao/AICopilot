@@ -112,6 +112,10 @@ public sealed class SemanticAnalysisRunner(
         {
             generatedSql = semanticSqlGenerator.Generate(plan, mapping);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             logger.LogWarning(
@@ -174,6 +178,10 @@ public sealed class SemanticAnalysisRunner(
                 plan.Intent,
                 businessDatabase.Name);
             return $"[系统提示]: 当前{targetLabel}查询请求被系统安全策略拒绝。";
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {

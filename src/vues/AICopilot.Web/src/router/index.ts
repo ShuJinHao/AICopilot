@@ -1,5 +1,9 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
+import {
+  clearStaleChunkReloadFlag,
+  recoverFromStaleChunkLoad
+} from './chunkReloadGuard'
 
 type ProtectedAbility = 'chat' | 'config' | 'knowledge' | 'access'
 
@@ -135,6 +139,14 @@ router.beforeEach(async (to) => {
   }
 
   return true
+})
+
+router.onError((error) => {
+  recoverFromStaleChunkLoad(error)
+})
+
+router.afterEach(() => {
+  clearStaleChunkReloadFlag()
 })
 
 export default router

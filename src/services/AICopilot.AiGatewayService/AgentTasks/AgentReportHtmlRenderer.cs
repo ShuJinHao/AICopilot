@@ -24,8 +24,6 @@ internal static class AgentReportHtmlRenderer
         builder.AppendLine($"<p>{AgentReportFormatting.EscapeHtml(report.CloudReadonlySummary ?? "CloudReadonly was not accessed.")}</p>");
         builder.AppendLine("<h2>Business Query Results</h2>");
         builder.AppendLine(BuildHtmlBusinessQueryResults(report.BusinessQueryResults ?? []));
-        builder.AppendLine("<h2>Cloud Sandbox Query Results</h2>");
-        builder.AppendLine(BuildHtmlCloudSandboxQueryResults(report.CloudSandboxQueryResults ?? []));
         builder.AppendLine("<h2>Metrics Summary</h2>");
         foreach (var metric in report.Metrics ?? [])
         {
@@ -87,26 +85,6 @@ internal static class AgentReportHtmlRenderer
         {
             builder.AppendLine(
                 $"<tr><td>{AgentReportFormatting.EscapeHtml(result.DataSourceName)}</td><td>{AgentReportFormatting.EscapeHtml(result.SourceMode)}</td><td>{AgentReportFormatting.EscapeHtml(AgentReportFormatting.FormatBool(result.IsSimulation))}</td><td>{AgentReportFormatting.EscapeHtml(result.SourceLabel)}</td><td>{AgentReportFormatting.EscapeHtml(result.QueryHash)}</td><td>{result.RowCount.ToString(CultureInfo.InvariantCulture)}</td><td>{AgentReportFormatting.EscapeHtml(AgentReportFormatting.FormatBool(result.IsTruncated))}</td><td>{AgentReportFormatting.EscapeHtml(result.ArtifactId?.ToString() ?? string.Empty)}</td></tr>");
-        }
-
-        builder.AppendLine("</tbody></table>");
-        return builder.ToString();
-    }
-
-    private static string BuildHtmlCloudSandboxQueryResults(
-        IReadOnlyList<AgentCloudSandboxQueryResultSummaryDto> cloudSandboxQueryResults)
-    {
-        if (cloudSandboxQueryResults.Count == 0)
-        {
-            return "<p class=\"muted\">No CloudReadonlySandbox query result.</p>";
-        }
-
-        var builder = new StringBuilder();
-        builder.AppendLine("<table><thead><tr><th>Trial</th><th>Endpoint</th><th>Boundary</th><th>Source Mode</th><th>Sandbox</th><th>Source Label</th><th>Query Hash</th><th>Result Hash</th><th>Rows</th><th>Truncated</th><th>Approval</th></tr></thead><tbody>");
-        foreach (var result in cloudSandboxQueryResults)
-        {
-            builder.AppendLine(
-                $"<tr><td>{AgentReportFormatting.EscapeHtml(result.TrialMode ?? string.Empty)}</td><td>{AgentReportFormatting.EscapeHtml(result.EndpointCode)}</td><td>{AgentReportFormatting.EscapeHtml(result.Boundary ?? string.Empty)}</td><td>{AgentReportFormatting.EscapeHtml(result.SourceMode)}</td><td>{AgentReportFormatting.EscapeHtml(AgentReportFormatting.FormatBool(result.IsSandbox))}</td><td>{AgentReportFormatting.EscapeHtml(result.SourceLabel)}</td><td>{AgentReportFormatting.EscapeHtml(result.QueryHash)}</td><td>{AgentReportFormatting.EscapeHtml(result.ResultHash)}</td><td>{result.RowCount.ToString(CultureInfo.InvariantCulture)}</td><td>{AgentReportFormatting.EscapeHtml(AgentReportFormatting.FormatBool(result.IsTruncated))}</td><td>{AgentReportFormatting.EscapeHtml(result.ApprovalStatus ?? string.Empty)}</td></tr>");
         }
 
         builder.AppendLine("</tbody></table>");

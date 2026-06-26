@@ -21,6 +21,8 @@ public static class AppProblemCodes
     public const string ChatContextExpired = "chat_context_expired";
     public const string ChatConfigurationMissing = "chat_configuration_missing";
     public const string ChatStreamFailed = "chat_stream_failed";
+    public const string ModelProviderUnavailable = "model_provider_unavailable";
+    public const string ModelRequestTimeout = "model_request_timeout";
     public const string ApprovalStreamFailed = "approval_stream_failed";
     public const string ApprovalAlreadyProcessed = "approval_already_processed";
     public const string ApprovalPending = "approval_pending";
@@ -42,6 +44,7 @@ public static class AppProblemCodes
     public const string PlannerModelUnavailable = "planner_model_unavailable";
     public const string PlannerToolCatalogEmpty = "planner_tool_catalog_empty";
     public const string PlannerToolSchemaUnsupported = "planner_tool_schema_unsupported";
+    public const string AgentSkillSelectionRequired = "agent_skill_selection_required";
     public const string AgentPlanInvalid = "agent_plan_invalid";
     public const string AgentPlanToolDenied = "agent_plan_tool_denied";
     public const string AgentPlanSchemaInvalid = "agent_plan_schema_invalid";

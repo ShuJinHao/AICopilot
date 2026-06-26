@@ -7,23 +7,6 @@ internal static class AgentTaskPlanMetadataBuilder
 {
     private const string SimulationBusinessSourceLabel = "AI 独立模拟业务库";
 
-    public static AgentPlannerMode NormalizePlannerMode(string? plannerMode, bool forceStaticPlanner)
-    {
-        if (forceStaticPlanner)
-        {
-            return AgentPlannerMode.StaticOnly;
-        }
-
-        if (string.IsNullOrWhiteSpace(plannerMode))
-        {
-            return AgentPlannerMode.Auto;
-        }
-
-        return Enum.TryParse<AgentPlannerMode>(plannerMode.Trim(), ignoreCase: true, out var mode)
-            ? mode
-            : AgentPlannerMode.Auto;
-    }
-
     public static IReadOnlyCollection<AgentPlannerDataSourceSummary> BuildPlannerDataSourceSummaries(
         IReadOnlyCollection<BusinessDatabaseDescriptor> dataSources)
     {
