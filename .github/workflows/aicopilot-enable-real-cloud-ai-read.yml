@@ -1,0 +1,185 @@
+name: aicopilot-enable-real-cloud-ai-read
+
+on:
+  workflow_dispatch:
+    inputs:
+      cloud_ai_read_base_url:
+        description: Cloud AiRead base URL
+        required: false
+        default: http://10.98.90.154:81
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  enable:
+    runs-on: [self-hosted, iiot-linux-prod]
+    environment: production
+    timeout-minutes: 15
+
+    steps:
+      - name: Enable real Cloud AiRead on AICopilot server
+        shell: bash
+        env:
+          DEPLOY_TARGET_DIR: ${{ secrets.DEPLOY_TARGET_DIR }}
+          CLOUD_AI_READ_BASE_URL_SECRET: ${{ secrets.CLOUD_AI_READ_BASE_URL }}
+          CLOUD_AI_READ_BASE_URL_INPUT: ${{ inputs.cloud_ai_read_base_url }}
+          CLOUD_AI_SERVICE_ACCOUNT_TOKEN: ${{ secrets.CLOUD_AI_SERVICE_ACCOUNT_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ "$(id -u)" -eq 0 ]; then
+            echo "Self-hosted runner must not run as root." >&2
+            exit 64
+          fi
+
+          command -v docker >/dev/null
+          command -v curl >/dev/null
+          docker compose version >/dev/null
+
+          deploy_dir="${DEPLOY_TARGET_DIR:-/srv/enterprise-ai/deploy}"
+          env_file="$deploy_dir/.env"
+          compose_file="$deploy_dir/docker-compose.yaml"
+          cloud_ai_read_base_url="${CLOUD_AI_READ_BASE_URL_SECRET:-${CLOUD_AI_READ_BASE_URL_INPUT:-http://10.98.90.154:81}}"
+
+          if [ ! -d "$deploy_dir" ]; then
+            echo "Missing deploy directory: $deploy_dir" >&2
+            exit 66
+          fi
+
+          if [ ! -f "$env_file" ]; then
+            echo "Missing deploy environment file: $env_file" >&2
+            exit 66
+          fi
+
+          if [ ! -f "$compose_file" ]; then
+            echo "Missing compose file: $compose_file" >&2
+            exit 66
+          fi
+
+          if [ -z "${CLOUD_AI_SERVICE_ACCOUNT_TOKEN:-}" ]; then
+            echo "CLOUD_AI_SERVICE_ACCOUNT_TOKEN GitHub environment secret is not configured." >&2
+            exit 64
+          fi
+
+          case "$cloud_ai_read_base_url" in
+            http://*|https://*)
+              ;;
+            *)
+              echo "Cloud AiRead base URL must be absolute HTTP/HTTPS: $cloud_ai_read_base_url" >&2
+              exit 64
+              ;;
+          esac
+
+          emit_line() {
+            printf '%s\n' "$1"
+            printf '%s\n' "$1" >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          set_env_value() {
+            local key="$1"
+            local value="$2"
+            local tmp_file
+            tmp_file="$(mktemp "$deploy_dir/.env.XXXXXX")"
+            awk -v key="$key" -v value="$value" '
+              BEGIN { prefix = key "="; updated = 0 }
+              index($0, prefix) == 1 {
+                print key "=" value
+                updated = 1
+                next
+              }
+              { print }
+              END {
+                if (!updated) {
+                  print key "=" value
+                }
+              }
+            ' "$env_file" > "$tmp_file"
+            chmod 600 "$tmp_file"
+            mv "$tmp_file" "$env_file"
+          }
+
+          {
+            echo "# Enable AICopilot real Cloud AiRead"
+            echo ""
+            echo "- Deploy directory: \`$deploy_dir\`"
+            echo "- Cloud AiRead base URL: \`$cloud_ai_read_base_url\`"
+            echo "- CLOUD_AI_SERVICE_ACCOUNT_TOKEN_CONFIGURED=yes"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          probe_url="${cloud_ai_read_base_url%/}/api/v1/ai/read/devices?maxRows=5"
+          body_file="$(mktemp "${RUNNER_TEMP:-/tmp}/ai-read-devices.XXXXXX")"
+          trap 'rm -f "$body_file"' EXIT
+
+          status_code="$(curl -sS --max-time 15 -o "$body_file" -w "%{http_code}" \
+            -H "Authorization: Bearer $CLOUD_AI_SERVICE_ACCOUNT_TOKEN" \
+            "$probe_url" || true)"
+
+          emit_line "- Preflight probe URL: $probe_url"
+          emit_line "- Preflight HTTP status: ${status_code:-curl_error}"
+
+          case "${status_code:-}" in
+            200)
+              emit_line "- Preflight diagnosis: ai_read_ready"
+              ;;
+            401)
+              emit_line "- Preflight diagnosis: token_invalid_or_expired"
+              exit 65
+              ;;
+            403)
+              emit_line "- Preflight diagnosis: token_missing_permission_or_scope"
+              exit 65
+              ;;
+            000|"")
+              emit_line "- Preflight diagnosis: cloud_endpoint_unreachable"
+              exit 69
+              ;;
+            *)
+              emit_line "- Preflight diagnosis: unexpected_status"
+              {
+                echo ""
+                echo "Response preview:"
+                echo '```json'
+                head -c 500 "$body_file" || true
+                echo ""
+                echo '```'
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 65
+              ;;
+          esac
+
+          umask 077
+          set_env_value CLOUD_READONLY_MODE Real
+          set_env_value CLOUD_READONLY_REAL_ENABLED true
+          set_env_value CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ true
+          set_env_value CLOUD_AI_READ_ENABLED true
+          set_env_value CLOUD_AI_READ_BASE_URL "$cloud_ai_read_base_url"
+          set_env_value CLOUD_AI_SERVICE_ACCOUNT_TOKEN "$CLOUD_AI_SERVICE_ACCOUNT_TOKEN"
+
+          emit_line "- Server .env updated for real Cloud AiRead."
+
+          cd "$deploy_dir"
+          docker compose --env-file "$env_file" -f "$compose_file" config -q
+          docker compose --env-file "$env_file" -f "$compose_file" up -d --no-deps --force-recreate \
+            aicopilot-httpapi \
+            aicopilot-dataworker
+
+          docker compose --env-file "$env_file" -f "$compose_file" ps
+
+          emit_line "- Recreated services: aicopilot-httpapi, aicopilot-dataworker."
+
+          docker compose --env-file "$env_file" -f "$compose_file" exec -T aicopilot-httpapi sh -lc '
+            printf "CloudReadonly__Mode=%s\n" "${CloudReadonly__Mode:-}"
+            printf "CloudReadonly__Real__Enabled=%s\n" "${CloudReadonly__Real__Enabled:-}"
+            printf "CloudReadonly__Real__AllowProductionRead=%s\n" "${CloudReadonly__Real__AllowProductionRead:-}"
+            printf "CloudAiRead__Enabled=%s\n" "${CloudAiRead__Enabled:-}"
+            printf "CloudAiRead__BaseUrl=%s\n" "${CloudAiRead__BaseUrl:-}"
+            if [ -n "${CloudAiRead__ServiceAccountToken:-}" ]; then
+              printf "CloudAiRead__ServiceAccountToken_CONFIGURED=yes\n"
+            else
+              printf "CloudAiRead__ServiceAccountToken_CONFIGURED=no\n"
+            fi
+          ' | tee -a "$GITHUB_STEP_SUMMARY"
+
+          emit_line "- Real Cloud AiRead enablement completed."
