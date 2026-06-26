@@ -24,140 +24,21 @@ public sealed class AgentSimulationAcceptanceTests
     }
 
     [Fact]
-    public async Task OfflineSimulation_ShouldRunCloudReadonlyAgentRuntimeClosure()
+    public async Task OfflineSimulation_ShouldKeepProductionCloudReadonlyToolProtected()
     {
         await AuthenticateAsAdminAsync();
-        await EnableCloudReadonlyToolAsync();
-
-        var templateId = await CreateConversationTemplateAsync();
-        var session = await PostJsonAsync<CreatedSessionDto>("/api/aigateway/session", new { templateId });
-        var task = await PostJsonAsync<AgentTaskDto>("/api/aigateway/agent/task/plan", new
-        {
-            sessionId = session.Id,
-            goal = "汇总查看 LINE-A 最近 7 天产线运行周报，只读查看 Simulation 数据。",
-            taskType = 7,
-            modelId = (Guid?)null,
-            uploadIds = Array.Empty<Guid>(),
-            knowledgeBaseIds = Array.Empty<Guid>()
-        });
-
-        task.Status.Should().Be("WaitingPlanApproval");
-        task.PlanJson.Should().Contain("Analysis.Line.WeeklyReport");
-        task.PlanJson.Should().Contain("Simulation");
-
-        var planApproval = (await GetPendingApprovalsAsync(task.Id))
-            .Should()
-            .ContainSingle(item => item.Type == "Plan")
-            .Subject;
-        await ApproveAgentApprovalAsync(planApproval.Id, "Simulation plan approved.");
-
-        task = await PostJsonAsync<AgentTaskDto>("/api/aigateway/agent/task/run", new { id = task.Id });
-        task.IsRunQueued.Should().BeTrue();
-        task.RunQueueStatus.Should().Be("Queued");
-
-        task = await WaitForTaskToPauseAsync(task.Id);
-        for (var attempt = 0; attempt < 10; attempt++)
-        {
-            var pendingApprovals = await GetPendingApprovalsAsync(task.Id);
-            if (pendingApprovals.Any(item => item.Type == "FinalOutput"))
-            {
-                break;
-            }
-
-            pendingApprovals.Should().NotBeEmpty("Simulation runtime should pause at approved tool boundaries.");
-            foreach (var approval in pendingApprovals.Where(item => item.Type != "FinalOutput"))
-            {
-                await ApproveAgentApprovalAsync(approval.Id, $"Approve Simulation tool {approval.TargetName}.");
-            }
-
-            task = await WaitForTaskToPauseAsync(task.Id);
-            task.Status.Should().NotBe("Failed", task.LastFailureReason ?? "Simulation task failed without a reason.");
-        }
-
-        var finalApproval = (await GetPendingApprovalsAsync(task.Id))
-            .Should()
-            .ContainSingle(item => item.Type == "FinalOutput")
-            .Subject;
-
-        var draftWorkspace = await GetJsonAsync<ArtifactWorkspaceDto>(
-            $"/api/aigateway/workspace/{task.WorkspaceCode}");
-        draftWorkspace.Artifacts.Should().Contain(item => item.RelativePath == "charts/chart-data.json");
-        draftWorkspace.Artifacts.Should().Contain(item => item.RelativePath == "draft/report.md");
-        draftWorkspace.Artifacts.Should().Contain(item => item.RelativePath == "draft/report.html");
-        draftWorkspace.Artifacts.Should().Contain(item => item.RelativePath == "draft/report.pdf");
-        draftWorkspace.Artifacts.Should().Contain(item => item.RelativePath == "draft/report.pptx");
-        draftWorkspace.Artifacts.Should().Contain(item => item.RelativePath == "draft/report.xlsx");
-        draftWorkspace.Artifacts.Should().OnlyContain(item => item.Status != "Final");
-
-        var chartArtifact = draftWorkspace.Artifacts.Single(item => item.RelativePath == "charts/chart-data.json");
-        var chartJson = await DownloadArtifactTextAsync(chartArtifact.Id);
-        using var chartDocument = JsonDocument.Parse(chartJson.TrimStart('\uFEFF'));
-        var chartRoot = chartDocument.RootElement;
-        chartRoot.GetProperty("schemaVersion").GetInt32().Should().Be(2);
-        chartRoot.GetProperty("series").GetArrayLength().Should().BeGreaterThan(0);
-        chartRoot.GetProperty("sourceInfo").GetProperty("sourceMode").GetString().Should().Be("Simulation");
-        chartRoot.GetProperty("sourceInfo").GetProperty("isSimulation").GetBoolean().Should().BeTrue();
-        chartRoot.GetProperty("sourceInfo").GetProperty("sourceLabel").GetString().Should().Be(SimulationLabel);
-
-        var markdownArtifact = draftWorkspace.Artifacts.Single(item => item.RelativePath == "draft/report.md");
-        var markdown = await DownloadArtifactTextAsync(markdownArtifact.Id);
-        markdown.Should().Contain("sourceMode=Simulation");
-        markdown.Should().Contain("isSimulation=true");
-        markdown.Should().Contain(SimulationLabel);
-
-        var htmlArtifact = draftWorkspace.Artifacts.Single(item => item.RelativePath == "draft/report.html");
-        var html = await DownloadArtifactTextAsync(htmlArtifact.Id);
-        html.Should().Contain("sourceMode=Simulation");
-        html.Should().Contain("isSimulation=true");
-        html.Should().Contain(SimulationLabel);
-
-        var executions = await GetJsonAsync<ToolExecutionRecordPageDto>(
-            $"/api/aigateway/agent/task/{task.Id}/tool-executions?pageSize=50");
-        var cloudExecution = executions.Items.Should()
-            .ContainSingle(item => item.ToolCode == "query_cloud_data_readonly")
-            .Subject;
-        cloudExecution.Status.Should().Be("Succeeded");
-        cloudExecution.OutputSummary.Should().Contain("sourceMode");
-        cloudExecution.OutputSummary.Should().Contain("Simulation");
-        cloudExecution.AuditMetadata.Should().Contain("isSimulation");
-        cloudExecution.AuditMetadata.Should().Contain("模拟 Cloud 只读数据");
-
-        var attempts = await GetJsonDocumentAsync($"/api/aigateway/agent/task/{task.Id}/run-attempts?pageSize=20");
-        attempts.RootElement.GetProperty("items").GetArrayLength().Should().BeGreaterThan(0);
-        var queue = await GetJsonDocumentAsync($"/api/aigateway/agent/task/{task.Id}/run-queue?pageSize=20");
-        queue.RootElement.GetProperty("items").GetArrayLength().Should().BeGreaterThan(0);
-        var workers = await GetJsonDocumentAsync("/api/aigateway/agent/worker/status");
-        workers.RootElement.GetProperty("workers").GetArrayLength().Should().BeGreaterThan(0);
-
-        await ApproveAgentApprovalAsync(finalApproval.Id, "Simulation final output approved.");
-        var finalizedWorkspace = await PostJsonAsync<ArtifactWorkspaceDto>(
-            $"/api/aigateway/workspace/{task.WorkspaceCode}/finalize",
-            new { });
-        finalizedWorkspace.Status.Should().Be("Finalized");
-        finalizedWorkspace.Artifacts.Should().OnlyContain(item => item.Status == "Final");
-        finalizedWorkspace.Artifacts.Should().OnlyContain(item => item.RelativePath.StartsWith("final/", StringComparison.OrdinalIgnoreCase));
-
-        var downloadedBytes = await DownloadArtifactBytesAsync(finalizedWorkspace.Artifacts.First().Id);
-        downloadedBytes.Should().NotBeEmpty();
-
-        var auditSummary = await GetJsonAsync<List<AgentTaskAuditSummaryDto>>(
-            $"/api/aigateway/agent/task/{task.Id}/audit-summary");
-        auditSummary.Should().Contain(item => item.ActionCode == "Agent.ToolExecution" &&
-                                             item.Metadata.ContainsKey("toolName") &&
-                                             item.Metadata["toolName"] == "query_cloud_data_readonly");
-        auditSummary.Should().Contain(item => item.ActionCode == "Agent.WorkspaceFinalize");
-        auditSummary.Should().Contain(item => item.ActionCode == "Agent.ArtifactDownload");
-    }
-
-    private async Task EnableCloudReadonlyToolAsync()
-    {
-        _ = await PatchJsonAsync<ToolRegistrationDto>(
+        await PatchJsonExpectingStatusAsync(
             "/api/aigateway/tools/query_cloud_data_readonly",
             new
             {
                 isEnabled = true,
                 requiresApproval = true
-            });
+            },
+            HttpStatusCode.BadRequest);
+
+        var tool = await GetJsonAsync<ToolRegistrationDto>("/api/aigateway/tools/query_cloud_data_readonly");
+        tool.IsEnabled.Should().BeFalse();
+        tool.RequiresApproval.Should().BeTrue();
     }
 
     private async Task AuthenticateAsAdminAsync()
@@ -276,6 +157,13 @@ public sealed class AgentSimulationAcceptanceTests
         var body = await response.Content.ReadAsStringAsync();
         response.IsSuccessStatusCode.Should().BeTrue($"PATCH '{uri}' failed: {body}");
         return JsonSerializer.Deserialize<T>(body, JsonOptions)!;
+    }
+
+    private async Task PatchJsonExpectingStatusAsync(string uri, object payload, HttpStatusCode expectedStatus)
+    {
+        using var response = await _fixture.HttpClient.PatchAsJsonAsync(uri, payload, JsonOptions);
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(expectedStatus, $"PATCH '{uri}' returned: {body}");
     }
 
     private sealed record LoginUserDto(string UserName, string Token);

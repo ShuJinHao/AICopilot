@@ -28,7 +28,6 @@ public sealed class CloudAiReadClientTests
     [InlineData("DELETE", "/api/v1/ai/read/device-logs")]
     [InlineData("GET", "/api/v1/devices")]
     [InlineData("GET", "/api/v1/ai/read/pass-stations/a/b")]
-    [InlineData("GET", "/api/v1/ai/read/recipes/versions")]
     [InlineData("POST", "/api/v1/ai/read/devices")]
     public void EndpointPolicy_ShouldRejectWriteMethodsAndNonWhitelistedPaths(string method, string path)
     {
@@ -256,17 +255,17 @@ public sealed class CloudAiReadClientTests
     }
 
     [Fact]
-    public async Task Client_ShouldUseDeviceCodeAsCloudDeviceParameter_WhenDeviceIdIsMissing()
+    public async Task Client_ShouldNotSendHttpWhenDeviceCodeIsProvidedWithoutDeviceId()
     {
-        HttpRequestMessage? capturedRequest = null;
-        using var httpClient = new HttpClient(new StubHandler(request =>
+        var sendCount = 0;
+        using var httpClient = new HttpClient(new StubHandler(_ =>
         {
-            capturedRequest = request;
+            sendCount++;
             return CreateOkItemsResponse();
         }));
         var client = CreateClient(httpClient);
 
-        await client.GetCapacitySummaryAsync(new CloudAiReadQuery(
+        var act = () => client.GetCapacitySummaryAsync(new CloudAiReadQuery(
             null,
             [new CloudAiReadFilter("deviceCode", "eq", "DEV-001")],
             CreateRange("2026-04-20T00:00:00Z", "2026-04-21T00:00:00Z"),
@@ -274,13 +273,10 @@ public sealed class CloudAiReadClientTests
             false,
             20));
 
-        capturedRequest.Should().NotBeNull();
-        var query = ParseQuery(capturedRequest!.RequestUri!);
-        query.Should().Contain("deviceId", "DEV-001");
-        query.Should().Contain("deviceCode", "DEV-001");
-        query.Should().Contain("startDate", "2026-04-20");
-        query.Should().Contain("endDate", "2026-04-21");
-        AssertNoLegacyParameters(query);
+        var exception = await act.Should().ThrowAsync<CloudAiReadException>();
+        exception.Which.Code.Should().Be(CloudAiReadProblemCodes.MissingRequiredParameter);
+        exception.Which.Message.Should().Contain("deviceId");
+        sendCount.Should().Be(0);
     }
 
     [Fact]
@@ -321,15 +317,41 @@ public sealed class CloudAiReadClientTests
 
         var act = () => client.GetPassStationRecordsAsync(new CloudAiReadQuery(
             null,
-            [new CloudAiReadFilter("barcode", "eq", "CELL-001")],
+            [new CloudAiReadFilter("deviceId", "eq", "device-1"), new CloudAiReadFilter("barcode", "eq", "CELL-001")],
             null,
+            null,
+            false,
+            20,
+            PassStationTypeKey: "stacking"));
+
+        var exception = await act.Should().ThrowAsync<CloudAiReadException>();
+        exception.Which.Code.Should().Be(CloudAiReadProblemCodes.MissingRequiredParameter);
+        exception.Which.Message.Should().Contain("时间");
+        sendCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Client_ShouldNotSendHttpWhenPassStationTypeKeyIsMissing()
+    {
+        var sendCount = 0;
+        using var httpClient = new HttpClient(new StubHandler(_ =>
+        {
+            sendCount++;
+            return CreateOkItemsResponse();
+        }));
+        var client = CreateClient(httpClient);
+
+        var act = () => client.GetPassStationRecordsAsync(new CloudAiReadQuery(
+            null,
+            [new CloudAiReadFilter("deviceId", "eq", "device-1")],
+            CreateRange("2026-04-20T00:00:00Z", "2026-04-21T00:00:00Z"),
             null,
             false,
             20));
 
         var exception = await act.Should().ThrowAsync<CloudAiReadException>();
         exception.Which.Code.Should().Be(CloudAiReadProblemCodes.MissingRequiredParameter);
-        exception.Which.Message.Should().Contain("时间");
+        exception.Which.Message.Should().Contain("passStationTypeKey");
         sendCount.Should().Be(0);
     }
 
@@ -430,7 +452,8 @@ public sealed class CloudAiReadClientTests
                      "to",
                      "timeField",
                      "sortField",
-                     "sortDirection"
+                     "sortDirection",
+                     "deviceCode"
                  })
         {
             query.Should().NotContainKey(legacyParameter);

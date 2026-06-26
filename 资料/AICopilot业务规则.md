@@ -1,80 +1,100 @@
 # AICopilot 业务规则
 
-## 适用范围
-
-本文档约束 `AICopilot` 自身业务边界。云端制造业务事实以 `IIoT.CloudPlatform` 为准，客户端现场运行事实以 `IIoT.EdgeClient` 为准。
-
-`AICopilot` 是分析助手和受控编排系统，不是制造业务主系统，不是云端业务数据写入入口。
+本文档约束 `AICopilot` 自身业务边界。工作区总规则见 `../../docs/总规则.md`。
 
 ## 1. 核心职责
 
-`AICopilot` 当前只承担以下能力：
-- 意图路由：判断用户请求应进入聊天、知识检索、数据分析或工具链。
-- RAG 知识检索：基于文档和规则做问答、解释、总结。
-- DataAnalysis：基于只读数据源做结构化查询、统计、分析。
+`AICopilot` 是分析助手和受控编排系统，不是制造业务主系统。
+
+`AICopilot` 只承担 AI 助手和受控编排能力：
+
+- 意图路由：判断请求进入聊天、知识检索、数据分析或工具链。
+- RAG：基于文档和规则做问答、解释、总结。
+- DataAnalysis / Text-to-SQL：基于只读数据源做查询、统计、分析。
 - MCP 工具执行：只执行已配置、已授权、符合安全边界的工具。
-- Human-in-the-loop：控制 AICopilot 自身高风险工具链，不授权云端业务写入。
+- Human-in-the-loop：控制 AICopilot 自身高风险动作。
 
-## 2. 云端业务只读边界
+`AICopilot` 不是 Cloud 制造主数据系统，不是 Edge 现场运行系统。
 
-AICopilot 对 `IIoT.CloudPlatform` 只能读取数据和规则，并基于读取结果做分析处理。这里的数据仅限已批准读取范围；云端配方主数据和配方版本数据不在允许读取范围内。
+## 2. Cloud 只读边界
 
-允许的行为：
-- 读取云端规则、接口说明、业务文档和只读数据。
+允许：
+
+- AICopilot 对 `IIoT.CloudPlatform` 只能读取数据和规则。
+- 读取已批准范围内的 Cloud 规则、接口说明、业务文档和只读数据。
 - 分析、解释、汇总、检索、趋势判断和异常说明。
-- 生成建议、草稿或排查思路，但不提交为正式业务数据。
+- 生成建议、草稿或排查思路。
 
-禁止的行为：
+禁止：
+
 - 注册、修改、删除设备。
 - 创建、修改、删除人员、角色、权限。
-- 读取云端配方主数据、设备配方清单、具体配方详情或配方版本记录。
-- 创建、修改、切换或删除配方版本。
+- 读取或修改未批准的配方主数据、设备配方清单、配方详情或配方版本。
 - 写入、补录、删除或修正产能、日志、生产数据、过站数据。
-- 触发云端业务流程、派发业务任务或代办审批。
+- 触发 Cloud 业务流程、派发任务或代办审批。
+- 直接写 Cloud 数据库。
 - 直接写云端数据库。
+- 通过 MCP、Tool、Agent workflow、后台任务或隐藏适配器间接调用 Cloud 写接口。
 - 通过 MCP、Tool、Agent workflow、后台任务或隐藏适配器间接调用云端写接口。
 
-Human-in-the-loop 不能作为放开云端业务写入的理由。审批只能约束 AICopilot 自身工具链风险，不能把 AICopilot 变成云端业务操作端。
-
-## 3. 未来 AI-facing Cloud API 预留
-
+Human-in-the-loop 不能把禁止的 Cloud 业务写入变成允许动作。
+Human-in-the-loop 不能作为放开云端业务写入的理由。
 当前默认不存在专门给 AICopilot 使用的云端写 API。
 
-如果未来 `IIoT.CloudPlatform` 明确提供 AI-facing API，必须先满足以下条件：
-- API 由云端主动设计和暴露，不由 AICopilot 反向拼接或绕过。
-- API 契约、权限、审计、幂等、错误码和允许动作清单明确。
-- 用户明确批准 AICopilot 调用该 API。
-- AICopilot 仍不能直接写云端数据库，也不能调用未列入允许清单的云端写接口。
+Cloud AiRead 设备契约：
 
-在上述条件全部满足前，AICopilot 与云端对齐只能做只读接入。
+- `deviceId` 是正式 Cloud 设备身份参数，用于产能、日志、过站记录等业务读取。
+- `deviceCode`/`ClientCode` 只用于设备查询、展示或 bootstrap 寻址，不得作为 `deviceId` 发送。
+- 需要从自然语言里的设备编码定位设备时，必须先走显式设备查询/解析；无法唯一命中时要求用户补充，不做隐式兼容。
+- AICopilot 的 Pilot 场景参数不得直接透传给 Cloud；只有 Cloud 端点真实声明的参数可以进入请求。
+
+## 3. OIDC 身份边界
+
+- Cloud OIDC 只解决身份、账号有效性、员工有效性。
+- AICopilot 保留本地 AI 用户、AI 角色、AI 权限、SecurityStamp、本地禁用、审计和 emergency admin。
+- Cloud role 不直接映射 AI role。
+- AICopilot 不读取 Cloud Cookie、不接收 Cloud 密码、不直连 Cloud 用户表。
+- EdgeClient 不参与 Cloud-AICopilot OIDC 身份对齐。
 
 ## 4. RAG 规则
 
-RAG 只能用于知识检索、规则解释和文档问答。
-- 文档内容不能反向覆盖云端业务规则。
-- 文档中的建议不能自动变成业务数据。
-- 如果 RAG 结果与云端确认业务冲突，以云端规则为准，并报告冲突。
+- RAG 只能用于知识检索、规则解释和文档问答。
+- 文档内容不能反向覆盖 Cloud 已确认业务规则。
+- RAG 结果与 Cloud 规则冲突时，以 Cloud 规则为准，并报告冲突。
 
 ## 5. DataAnalysis 规则
 
-DataAnalysis 只能连接只读业务数据源。
-- 数据库连接必须按只读源管理。
+- DataAnalysis 只能连接只读业务数据源。
 - SQL 必须经过只读 guardrail。
 - 查询结果只用于分析展示，不产生业务写入。
-- 不允许为配方主数据或配方版本配置云端只读源；配方相关具体数据问题只能返回禁读边界提示。
 - 不能为了分析便利放宽 `MaxRows`、read-only session 或 SQL 安全检查。
 
 ## 6. MCP 规则
 
-MCP 是受控工具入口，不是云端业务写入口。
-- 当前允许优先接入查询型、诊断型、只读型工具。
+- MCP 是受控工具入口，不是 Cloud 业务写入口。
 - 工具描述必须说明是否只读。
 - 涉及文件、外部系统、命令执行或其他副作用的工具必须保持审批约束。
-- 不允许配置直接或间接调用云端写接口的 MCP 工具。
+- 不允许配置直接或间接调用 Cloud 写接口的 MCP 工具。
 
 ## 7. Human-in-the-loop 规则
 
-Human-in-the-loop 是 AICopilot 自身高风险动作的安全闸门。
-- 它不能覆盖云端业务只读规则。
-- 它不能把禁止的云端业务写入变成允许动作。
-- 如果未来允许调用云端 AI-facing API，审批规则必须与云端权限、云端审计和接口契约一起设计。
+- Human-in-the-loop 是 AICopilot 自身高风险动作的安全闸门。
+- 它不能覆盖 Cloud 业务只读规则。
+- 若未来允许调用 Cloud AI-facing API，审批规则必须与 Cloud 权限、Cloud 审计和接口契约一起设计。
+
+## 8. 文档入口
+
+- 长期规则入口只保留 `AGENTS.md`、本文档和工作区 `docs/历史核心记录.md`。
+- 部署入口只保留 `AICopilot 项目部署与维护指南.md` 和 `deploy/enterprise-ai`。
+- 阶段计划、批次验收报告、PR 草案和一次性 acceptance 输出不得继续作为执行入口；有效结论必须沉淀到长期规则或部署指南后再清理。
+- 清理文档时必须先检查引用，避免留下指向已删除阶段文件的脚本、测试或说明。
+- 旧的 Simulation/Real/Sandbox/Pilot 阶段说明只可作为历史材料，不得覆盖当前部署指南和生产验收口径。
+
+## 9. 工程边界
+
+- `AiCopilotDbContext` 是主基础设施迁移上下文，`AuditDbContext` 负责审计查询和运行时审计写入，`DataAnalysisDbContext` 只承载数据分析配置，`OutboxDbContext` 承载 outbox。
+- 审计写入必须遵守 Audit writer decision tree：有业务保存点的命令应把业务变更和审计行放在同一事务；`auditLogWriter.SaveChangesAsync` 只允许出现在没有业务保存点且已被白名单记录的执行路径。
+- Outbox 多实例调度必须使用 PostgreSQL `FOR UPDATE SKIP LOCKED` 或等价互斥策略，不能让多 worker 重复发布同一消息。
+- MCP runtime 配置变更必须进入 runtime registry refresh cycle，禁用、删除或配置变更后不能继续暴露未来工具解析。
+- 身份安全以 security stamp 驱动会话失效；Cloud role 不直接成为 AICopilot 本地 role。
+- 多 DbContext 迁移历史必须通过 `__EFMigrationsHistory` 的上下文隔离或迁移历史表拆分规则治理，不能让单一上下文回滚污染其他上下文状态。

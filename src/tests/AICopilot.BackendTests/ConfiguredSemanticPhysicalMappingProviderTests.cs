@@ -10,7 +10,11 @@ public sealed class ConfiguredSemanticPhysicalMappingProviderTests
     public void Provider_ShouldLoadExplicitRealSourceTemplateMappings()
     {
         var configuration = new ConfigurationBuilder()
-            .AddJsonFile(GetRepositoryFilePath(@"src\hosts\AICopilot.HttpApi\appsettings.RealSource.template.json"))
+            .AddJsonFile(GetRepositoryFilePath(Path.Combine(
+                "src",
+                "hosts",
+                "AICopilot.HttpApi",
+                "appsettings.RealSource.template.json")))
             .Build();
 
         var provider = new ConfiguredSemanticPhysicalMappingProvider(configuration);

@@ -93,6 +93,7 @@ var httpapi = builder.AddProject<AICopilot_HttpApi>("aicopilot-httpapi")
     .WithEnvironment("JwtSettings__SecretKey", jwtSecretKey)
     .WithEnvironment("BootstrapAdmin__UserName", bootstrapAdminUserName)
     .WithEnvironment("BootstrapAdmin__Password", bootstrapAdminPassword)
+    .WithEnvironment("CloudOidc__BootstrapAdminUserName", bootstrapAdminUserName)
     .WithEnvironment("ArtifactWorkspace__RootPath", appHostOptions.ArtifactWorkspaceRootPath)
     .WithEnvironment("AiGateway__FinalAgentContextStore__Provider", "Redis")
     .WaitForCompletion(migration);

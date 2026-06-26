@@ -15,6 +15,20 @@ namespace AICopilot.BackendTests;
 public sealed class CloudOidcLoginTestsControllerSecurity
 {
     [Fact]
+    public void CloudOidcChallenge_ShouldUseQueryResponseMode()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(),
+            "src",
+            "hosts",
+            "AICopilot.HttpApi",
+            "HttpApiAuthenticationConfiguration.cs"));
+
+        source.Should().Contain("options.ResponseMode = OpenIdConnectResponseMode.Query");
+        source.Should().NotContain("OpenIdConnectResponseMode.FormPost");
+    }
+
+    [Fact]
     public async Task FinalizeCloudOidcLogin_ShouldReturnAiJwtInBodyAndClearExternalCookie()
     {
         var authService = new RecordingAuthenticationService(
@@ -123,6 +137,48 @@ public sealed class CloudOidcLoginTestsControllerSecurity
         options.EnsureValid("Production");
     }
 
+    [Theory]
+    [InlineData("http://10.98.90.154:81")]
+    [InlineData("http://192.168.1.10:81")]
+    [InlineData("http://172.16.0.10:81")]
+    [InlineData("http://172.31.255.10:81")]
+    [InlineData("http://localhost:81")]
+    public void CloudOidcOptions_ShouldAllowExplicitIntranetHttpOidc(string issuer)
+    {
+        var options = CreateCloudOidcOptions(
+            issuer,
+            requireHttpsMetadata: true,
+            allowIntranetHttpOidc: true);
+
+        options.EnsureValid("Production");
+
+        options.GetEffectiveRequireHttpsMetadata().Should().BeFalse();
+        options.GetEffectiveExternalCookieName().Should().Be("AICopilot-CloudOidc-External");
+        options.UseHttpCompatibleRemoteCookies().Should().BeTrue();
+    }
+
+    [Fact]
+    public void CloudOidcOptions_ShouldRejectPublicHttpEvenWhenIntranetHttpOidcIsEnabled()
+    {
+        var options = CreateCloudOidcOptions(
+            "http://cloud.example.com",
+            requireHttpsMetadata: true,
+            allowIntranetHttpOidc: true);
+
+        Action act = () => options.EnsureValid("Production");
+
+        act.Should().Throw<InvalidOperationException>();
+    }
+
+    [Fact]
+    public void CloudOidcOptions_ShouldKeepHostCookiePrefixWhenHttpsMode()
+    {
+        var options = CreateCloudOidcOptions("https://cloud.example.com", requireHttpsMetadata: true);
+
+        options.GetEffectiveExternalCookieName().Should().Be("__Host-AICopilot-CloudOidc-External");
+        options.UseHttpCompatibleRemoteCookies().Should().BeFalse();
+    }
+
     private static IdentityController CreateController(
         ISender sender,
         RecordingAuthenticationService authService)
@@ -158,17 +214,35 @@ public sealed class CloudOidcLoginTestsControllerSecurity
 
     private static CloudOidcOptions CreateCloudOidcOptions(
         string issuer,
-        bool requireHttpsMetadata)
+        bool requireHttpsMetadata,
+        bool allowIntranetHttpOidc = false)
     {
         return new CloudOidcOptions
         {
             Enabled = true,
             Issuer = issuer,
+            AllowIntranetHttpOidc = allowIntranetHttpOidc,
             ClientId = "aicopilot",
             CallbackPath = "/api/identity/cloud-oidc/callback",
             FrontendCompletionPath = "/cloud-login/complete",
             RequireHttpsMetadata = requireHttpsMetadata
         };
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "AICopilot.slnx")))
+            {
+                return directory.FullName;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new DirectoryNotFoundException("AICopilot repository root was not found.");
     }
 
     private static ClaimsPrincipal CreateCloudPrincipal()

@@ -95,17 +95,21 @@ public sealed class FreshDatabaseSeedTests
             .Should()
             .BeEquivalentTo(BuiltInToolRegistrations.AgentRuntimeTools.Select(tool => tool.ToolCode));
         tools.Should().OnlyContain(tool => tool.TargetType == ToolRegistrationTargetType.AgentRuntime);
-        tools.Should().OnlyContain(tool => tool.TargetName == "AgentTaskRuntime");
+        var toolTargets = BuiltInToolRegistrations.AgentRuntimeTools
+            .ToDictionary(tool => tool.ToolCode, tool => tool.TargetName, StringComparer.OrdinalIgnoreCase);
+        tools.Should().OnlyContain(tool => tool.TargetName == toolTargets[tool.ToolCode]);
 
         var cloudReadonlyTool = tools.Single(tool => tool.ToolCode == "query_cloud_data_readonly");
         cloudReadonlyTool.ProviderType.Should().Be(ToolProviderType.CloudReadonly);
         cloudReadonlyTool.IsEnabled.Should().BeFalse();
         cloudReadonlyTool.RequiresApproval.Should().BeTrue();
-        cloudReadonlyTool.RiskLevel.Should().Be(AiToolRiskLevel.RequiresApproval);
+        cloudReadonlyTool.RiskLevel.Should().Be(AiToolRiskLevel.High);
 
         tools.Where(tool => tool.ToolCode is "generate_pdf" or "generate_pptx" or "generate_xlsx" or "finalize_artifacts")
             .Should()
-            .OnlyContain(tool => tool.RequiresApproval && tool.RiskLevel == AiToolRiskLevel.RequiresApproval);
+            .OnlyContain(tool => tool.RequiresApproval &&
+                                 (tool.RiskLevel == AiToolRiskLevel.RequiresApproval ||
+                                  tool.RiskLevel == AiToolRiskLevel.High));
         tools.Should().NotContain(tool =>
             tool.ToolCode.Contains("shell", StringComparison.OrdinalIgnoreCase) ||
             tool.ToolCode.Contains("cloud_write", StringComparison.OrdinalIgnoreCase) ||
@@ -167,7 +171,9 @@ public sealed class FreshDatabaseSeedTests
             "AiGateway.DownloadArtifact",
             "AiGateway.EditArtifact",
             "AiGateway.SubmitFinalReview",
-            "AiGateway.Chat");
+            "AiGateway.Chat",
+            "PilotAuthorization.Submit",
+            "PilotAuthorization.View");
         userPermissions.Should().NotContain("AiGateway.ApproveAgentToolCall");
         userPermissions.Should().NotContain("AiGateway.ApproveFinalOutput");
         userPermissions.Should().NotContain("AiGateway.FinalizeWorkspace");

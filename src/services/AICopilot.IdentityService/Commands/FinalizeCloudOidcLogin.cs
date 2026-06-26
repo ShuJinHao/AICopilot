@@ -4,6 +4,7 @@ using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Messaging;
 using AICopilot.SharedKernel.Result;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Options;
 
 namespace AICopilot.IdentityService.Commands;
 
@@ -16,6 +17,7 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
     IExternalIdentityBindingStore bindingStore,
     IIdentityAuditLogWriter auditLogWriter,
     IJwtTokenGenerator jwtTokenGenerator,
+    IOptions<CloudOidcBootstrapAdminBindingOptions> bootstrapAdminBindingOptions,
     ITransactionalExecutionService transactionalExecutionService)
     : ICommandHandler<FinalizeCloudOidcLoginCommand, Result<LoginUserDto>>
 {
@@ -70,10 +72,13 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
             profile.Subject,
             cancellationToken);
 
-        var isFirstBinding = binding is null;
-        var user = binding is null
-            ? await CreateBoundUserAsync(profile, now, cancellationToken)
-            : await LoadBoundUserAsync(profile, binding, now, cancellationToken);
+        var resolution = binding is null
+            ? await ResolveFirstBindingUserAsync(profile, now, cancellationToken)
+            : new CloudOidcLoginResolution(
+                await LoadBoundUserAsync(profile, binding, now, cancellationToken),
+                IsFirstBinding: false,
+                IsBootstrapAdminAdoption: false);
+        var user = resolution.User;
 
         if (user is null)
         {
@@ -109,22 +114,20 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
         await auditLogWriter.WriteAsync(
             new AuditLogWriteRequest(
                 AuditActionGroups.Identity,
-                isFirstBinding ? "Identity.CloudOidcFirstBind" : "Identity.CloudOidcLogin",
+                ResolveLoginAuditActionCode(resolution),
                 "ExternalIdentityBinding",
                 user.Id.ToString(),
                 user.UserName ?? profile.PreferredUserName,
                 AuditResults.Succeeded,
-                isFirstBinding
-                    ? $"Cloud 身份首次绑定 AI 用户：{profile.Subject} -> {user.UserName}"
-                    : $"Cloud 身份复用已绑定 AI 用户：{profile.Subject} -> {user.UserName}",
-                BuildChangedFields(profile, includeBindingFields: isFirstBinding),
+                ResolveLoginAuditSummary(profile, user, resolution),
+                BuildChangedFields(profile, includeBindingFields: resolution.IsFirstBinding),
                 BuildAuditMetadata(profile)),
             cancellationToken);
 
         return Result.Success(new LoginUserDto(user.UserName!, token));
     }
 
-    private async Task<ApplicationUser?> CreateBoundUserAsync(
+    private async Task<CloudOidcLoginResolution> ResolveFirstBindingUserAsync(
         CloudOidcIdentityProfile profile,
         DateTime now,
         CancellationToken cancellationToken)
@@ -133,6 +136,19 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
         var existingUser = await userManager.FindByNameAsync(localUserName);
         if (existingUser is not null)
         {
+            var adoptedUser = await TryAdoptBootstrapAdminAsync(
+                existingUser,
+                profile,
+                now,
+                cancellationToken);
+            if (adoptedUser is not null)
+            {
+                return new CloudOidcLoginResolution(
+                    adoptedUser,
+                    IsFirstBinding: true,
+                    IsBootstrapAdminAdoption: true);
+            }
+
             await WriteRejectedAuditAsync(
                 "Identity.CloudOidcBindingConflict",
                 profile,
@@ -140,7 +156,7 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
                 cancellationToken,
                 existingUser.Id.ToString(),
                 existingUser.UserName);
-            return null;
+            return CloudOidcLoginResolution.RejectedFirstBinding;
         }
 
         if (!await roleManager.RoleExistsAsync(IdentityRoleNames.User))
@@ -150,7 +166,7 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
                 profile,
                 "AI 默认 User 角色不存在，拒绝 Cloud 登录。",
                 cancellationToken);
-            return null;
+            return CloudOidcLoginResolution.RejectedFirstBinding;
         }
 
         var user = new ApplicationUser
@@ -167,7 +183,7 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
                 profile,
                 "Cloud 身份 JIT 创建 AI 用户失败。",
                 cancellationToken);
-            return null;
+            return CloudOidcLoginResolution.RejectedFirstBinding;
         }
 
         var roleResult = await userManager.AddToRoleAsync(user, IdentityRoleNames.User);
@@ -181,12 +197,67 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
                 cancellationToken,
                 user.Id.ToString(),
                 user.UserName);
+            return CloudOidcLoginResolution.RejectedFirstBinding;
+        }
+
+        await CreateBindingAsync(user.Id, profile, now, cancellationToken);
+
+        return new CloudOidcLoginResolution(
+            user,
+            IsFirstBinding: true,
+            IsBootstrapAdminAdoption: false);
+    }
+
+    private async Task<ApplicationUser?> TryAdoptBootstrapAdminAsync(
+        ApplicationUser existingUser,
+        CloudOidcIdentityProfile profile,
+        DateTime now,
+        CancellationToken cancellationToken)
+    {
+        var options = bootstrapAdminBindingOptions.Value;
+        if (!options.BootstrapAdminAutoBindEnabled ||
+            string.IsNullOrWhiteSpace(options.BootstrapAdminUserName) ||
+            string.IsNullOrWhiteSpace(profile.EmployeeNo) ||
+            string.IsNullOrWhiteSpace(existingUser.UserName))
+        {
             return null;
         }
 
-        await bindingStore.CreateAsync(
+        var bootstrapAdminUserName = options.BootstrapAdminUserName.Trim();
+        if (!string.Equals(profile.EmployeeNo, bootstrapAdminUserName, StringComparison.Ordinal) ||
+            !string.Equals(existingUser.UserName, bootstrapAdminUserName, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var roles = await userManager.GetRolesAsync(existingUser);
+        if (!roles.Contains(IdentityRoleNames.Admin, StringComparer.Ordinal))
+        {
+            return null;
+        }
+
+        var existingUserBinding = await bindingStore.FindByUserProviderAsync(
+            existingUser.Id,
+            ExternalIdentityProviders.Cloud,
+            cancellationToken);
+        if (existingUserBinding is not null)
+        {
+            return null;
+        }
+
+        await CreateBindingAsync(existingUser.Id, profile, now, cancellationToken);
+        return existingUser;
+    }
+
+    private Task CreateBindingAsync(
+        Guid userId,
+        CloudOidcIdentityProfile profile,
+        DateTime now,
+        CancellationToken cancellationToken)
+    {
+        return bindingStore.CreateAsync(
             new CreateExternalIdentityBindingRequest(
-                user.Id,
+                userId,
                 ExternalIdentityProviders.Cloud,
                 profile.TenantId,
                 profile.Subject,
@@ -200,8 +271,6 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
                 profile.EmployeeActive,
                 now),
             cancellationToken);
-
-        return user;
     }
 
     private async Task<ApplicationUser?> LoadBoundUserAsync(
@@ -257,6 +326,31 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
                 userRoles.ToArray(),
                 userClaims.Concat(cloudClaims).ToArray()),
             cancellationToken);
+    }
+
+    private static string ResolveLoginAuditActionCode(CloudOidcLoginResolution resolution)
+    {
+        if (resolution.IsBootstrapAdminAdoption)
+        {
+            return "Identity.CloudOidcBootstrapAdminAdopted";
+        }
+
+        return resolution.IsFirstBinding ? "Identity.CloudOidcFirstBind" : "Identity.CloudOidcLogin";
+    }
+
+    private static string ResolveLoginAuditSummary(
+        CloudOidcIdentityProfile profile,
+        ApplicationUser user,
+        CloudOidcLoginResolution resolution)
+    {
+        if (resolution.IsBootstrapAdminAdoption)
+        {
+            return $"Cloud 身份收编首部署 AI 管理员：{profile.Subject} -> {user.UserName}";
+        }
+
+        return resolution.IsFirstBinding
+            ? $"Cloud 身份首次绑定 AI 用户：{profile.Subject} -> {user.UserName}"
+            : $"Cloud 身份复用已绑定 AI 用户：{profile.Subject} -> {user.UserName}";
     }
 
     private async Task WriteRejectedAuditAsync(
@@ -415,5 +509,16 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
         {
             metadata[key] = value.Trim();
         }
+    }
+
+    private sealed record CloudOidcLoginResolution(
+        ApplicationUser? User,
+        bool IsFirstBinding,
+        bool IsBootstrapAdminAdoption)
+    {
+        public static CloudOidcLoginResolution RejectedFirstBinding { get; } = new(
+            User: null,
+            IsFirstBinding: true,
+            IsBootstrapAdminAdoption: false);
     }
 }

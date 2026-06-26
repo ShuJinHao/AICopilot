@@ -9,7 +9,7 @@
   <ItemGroup>
     <PackageReference Include="Aspire.Qdrant.Client" Version="13.2.2" />
     <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.5.0" />
-    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.6" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.9" />
     <PackageReference Include="Microsoft.SemanticKernel.Connectors.Qdrant" Version="1.74.0-preview" />
   </ItemGroup>
 

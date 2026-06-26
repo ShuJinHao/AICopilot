@@ -16,26 +16,25 @@
 
 ```text
 CloudReadonly.Mode=Disabled
-CloudReadonly.Real.Enabled=false
-CloudReadonly.Real.AllowProductionRead=false
+CloudAiRead.Enabled=false
 ```
 
 ## Readiness 内容
 
 - CloudAiRead connectivity test。
-- Real provider sandbox 验收。
+- Cloud AiRead / P12 / P13 受控入口验收。
 - 只读 intent 白名单。
 - Recipe 主数据和版本继续禁止。
 - 查询时间范围、返回行数、请求频率限制。
 - Cloud 查询审计和错误码映射。
-- Real / Simulation 数据结构对齐测试。
+- Cloud AiRead 当前参数契约测试：`deviceId`、`startDate`/`endDate`、`startTime`/`endTime`、显式 `passStationTypeKey`。
 - 数据脱敏策略。
-- 前端 Real / Simulation 标签区分。
+- 前端真实 Cloud 只读验收状态和 Simulation 历史材料区分。
 
 ## 灰度路线
 
 ```text
-Disabled -> Simulation -> Real Sandbox -> Real Restricted Internal -> Real Pilot -> Production
+Disabled -> CloudAiRead Contract -> P12/P13 Controlled Pilot -> Production Acceptance
 ```
 
 不得跳过中间阶段。

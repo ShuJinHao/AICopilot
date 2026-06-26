@@ -175,7 +175,7 @@ public sealed class TextToSqlReadOnlyTests
 
         result.Should().Contain("结果已截断");
         result.Should().Contain("至少 201");
-        result.Should().Contain("前 200");
+        result.Should().Contain("前 50");
         result.Should().NotContain("共返回");
         var audit = auditLogWriter.Requests.Should().ContainSingle().Subject;
         audit.Summary.Should().Contain("RowsObserved=201");

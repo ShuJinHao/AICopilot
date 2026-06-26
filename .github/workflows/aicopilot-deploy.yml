@@ -1,0 +1,192 @@
+name: aicopilot-deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag from aicopilot-image (sha-*)
+        required: true
+        type: string
+      services:
+        description: "Copy Deploy services input from push-triggered aicopilot-image Step Summary; empty means full release only"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, iiot-linux-prod]
+    environment: production
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@v4
+        continue-on-error: true
+
+      - name: Checkout via archive fallback
+        if: steps.checkout.outcome != 'success'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/source-${GITHUB_SHA}.zip"
+          extract_root="$(mktemp -d "$RUNNER_TEMP/source.XXXXXX")"
+          rm -f "$archive"
+          curl --fail --location --retry 5 --retry-delay 5 --connect-timeout 20 --max-time 300 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://codeload.github.com/${GITHUB_REPOSITORY}/zip/${GITHUB_SHA}" \
+            -o "$archive"
+          unzip -q "$archive" -d "$extract_root"
+          extracted="$(find "$extract_root" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+          find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          shopt -s dotglob
+          cp -a "$extracted"/* "$GITHUB_WORKSPACE"/
+
+      - name: Validate release tag input
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_tag='${{ inputs.release_tag }}'
+          if [[ ! "$release_tag" =~ ^sha-[0-9a-f]+$ ]]; then
+            echo "release_tag must match sha-<hex>: $release_tag" >&2
+            exit 1
+          fi
+          services='${{ inputs.services }}'
+          if [ -n "$services" ]; then
+            for service in $(printf '%s' "$services" | tr ',' ' ')
+            do
+              case "$service" in
+                httpapi|aicopilot-httpapi|migration|aicopilot-migration|dataworker|aicopilot-dataworker|ragworker|aicopilot-ragworker|web|webui|aicopilot-webui)
+                  ;;
+                *)
+                  echo "Unsupported service: $service" >&2
+                  exit 64
+                  ;;
+              esac
+            done
+          fi
+
+      - name: Validate runner and deploy inputs
+        shell: bash
+        env:
+          DEPLOY_TARGET_DIR: ${{ secrets.DEPLOY_TARGET_DIR }}
+          DEPLOY_ENV_FILE: ${{ secrets.DEPLOY_ENV_FILE }}
+          OCI_REGISTRY: ${{ secrets.OCI_REGISTRY }}
+          OCI_REGISTRY_USERNAME: ${{ secrets.OCI_REGISTRY_USERNAME }}
+          OCI_REGISTRY_PASSWORD: ${{ secrets.OCI_REGISTRY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ "$(id -u)" -eq 0 ]; then
+            echo "Self-hosted runner must not run as root." >&2
+            exit 64
+          fi
+          for required in DEPLOY_TARGET_DIR DEPLOY_ENV_FILE OCI_REGISTRY OCI_REGISTRY_USERNAME OCI_REGISTRY_PASSWORD
+          do
+            if [ -z "${!required:-}" ]; then
+              echo "$required is required for the intranet self-hosted deployment flow." >&2
+              exit 64
+            fi
+          done
+          command -v docker >/dev/null
+          command -v curl >/dev/null
+          docker compose version >/dev/null
+
+      - name: Sync deploy template
+        shell: bash
+        env:
+          DEPLOY_TARGET_DIR: ${{ secrets.DEPLOY_TARGET_DIR }}
+          DEPLOY_ENV_FILE: ${{ secrets.DEPLOY_ENV_FILE }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$DEPLOY_TARGET_DIR"
+          if command -v rsync >/dev/null 2>&1; then
+            rsync -a --delete \
+              --exclude '.env' \
+              --exclude 'releases/' \
+              deploy/enterprise-ai/ "$DEPLOY_TARGET_DIR/"
+          else
+            find "$DEPLOY_TARGET_DIR" -mindepth 1 -maxdepth 1 \
+              ! -name '.env' \
+              ! -name 'releases' \
+              -exec rm -rf {} +
+            cp -R deploy/enterprise-ai/. "$DEPLOY_TARGET_DIR/"
+            rm -f "$DEPLOY_TARGET_DIR/.env"
+          fi
+          umask 077
+          printf '%s\n' "$DEPLOY_ENV_FILE" > "$DEPLOY_TARGET_DIR/.env"
+          chmod +x "$DEPLOY_TARGET_DIR"/*.sh
+
+      - name: Log in to Harbor
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "${{ secrets.OCI_REGISTRY_PASSWORD }}" |
+            docker login "${{ secrets.OCI_REGISTRY }}" \
+              --username "${{ secrets.OCI_REGISTRY_USERNAME }}" \
+              --password-stdin
+
+      - name: Deploy AICopilot stack
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          DEPLOY_SERVICES: ${{ inputs.services }}
+          DEPLOY_GIT_SHA: ${{ github.sha }}
+          DEPLOY_TRIGGERED_BY: ${{ github.actor }}
+          DEPLOY_TARGET_DIR: ${{ secrets.DEPLOY_TARGET_DIR }}
+        run: |
+          set -euo pipefail
+          release_git_sha="${RELEASE_TAG#sha-}"
+          if ! git cat-file -e "$release_git_sha^{commit}" 2>/dev/null; then
+            release_git_sha="$DEPLOY_GIT_SHA"
+          fi
+
+          previous_sha=""
+          current_release_file="$DEPLOY_TARGET_DIR/releases/current-release.env"
+          if [ -f "$current_release_file" ]; then
+            previous_sha="$(sed -n 's/^DEPLOY_GIT_SHA=//p' "$current_release_file" | tail -n 1)"
+          fi
+
+          release_notes=""
+          if [ -n "$previous_sha" ] \
+            && git cat-file -e "$previous_sha^{commit}" 2>/dev/null \
+            && git cat-file -e "$release_git_sha^{commit}" 2>/dev/null; then
+            release_notes="$(git log --oneline --no-decorate "$previous_sha..$release_git_sha" || true)"
+          fi
+          if [ -z "$release_notes" ] && git cat-file -e "$release_git_sha^{commit}" 2>/dev/null; then
+            release_notes="$(git log --oneline --no-decorate -n 20 "$release_git_sha" || true)"
+          fi
+          if [ -z "$release_notes" ]; then
+            release_notes="AICopilot deploy $RELEASE_TAG"
+          fi
+
+          cd "$DEPLOY_TARGET_DIR"
+          deploy_args=("$RELEASE_TAG")
+          if [ -n "${DEPLOY_SERVICES:-}" ]; then
+            deploy_args+=(--services "$DEPLOY_SERVICES")
+          fi
+          DEPLOY_GIT_SHA="$release_git_sha" \
+            DEPLOY_TRIGGERED_BY="$DEPLOY_TRIGGERED_BY" \
+            DEPLOY_RELEASE_NOTES="$release_notes" \
+            ./deploy-release.sh "${deploy_args[@]}"
+
+          summary_path="$DEPLOY_TARGET_DIR/releases/current-release.summary.md"
+          if [ -f "$summary_path" ]; then
+            cat "$summary_path" >> "$GITHUB_STEP_SUMMARY"
+            {
+              echo ""
+              echo "- Target dir: \`$DEPLOY_TARGET_DIR\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "### AICopilot deploy"
+              echo "- Release tag: \`$RELEASE_TAG\`"
+              echo "- Services: \`${DEPLOY_SERVICES:-all}\`"
+              echo "- Target dir: \`$DEPLOY_TARGET_DIR\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi

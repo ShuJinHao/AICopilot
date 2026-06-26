@@ -180,7 +180,7 @@ public sealed class MigrationOwnershipTests
             "MigrationHistoryTables.McpServer");
 
         AssertFileContains(
-            Path.Combine(root, "src", "hosts", "AICopilot.MigrationWorkApp", "Worker.cs"),
+            Path.Combine(root, "src", "hosts", "AICopilot.MigrationWorkApp", "MigrationWorkerDatabaseMigrator.cs"),
             "MigrationHistoryTables.AiCopilot",
             "MigrationHistoryTables.IdentityStore",
             "MigrationHistoryTables.AiGateway",

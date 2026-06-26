@@ -46,22 +46,165 @@ public sealed class SecurityHardeningTests
             "hosts",
             "AICopilot.AppHost",
             "appsettings.json"));
-        var envTemplate = File.ReadAllText(Path.Combine(solutionRoot, "artifacts", ".env"));
-        var compose = File.ReadAllText(Path.Combine(solutionRoot, "artifacts", "docker-compose.yaml"));
+        var envTemplate = File.ReadAllText(Path.Combine(solutionRoot, "deploy", "enterprise-ai", ".env.example"));
+        var compose = File.ReadAllText(Path.Combine(solutionRoot, "deploy", "enterprise-ai", "docker-compose.yaml"));
 
         httpDevelopmentSettings.Should().NotContain("29ynIx63y0Uq5Yj6wZZYikBElPPW4rqpXKGq4voqmeMDefoJQEC8fQQzYPk95rNp");
         appHostSettings.Should().NotContain("\"pg-password\": \"123456\"");
-        envTemplate.Should().Contain("EVENTBUS_PASSWORD=CHANGE_ME_EVENTBUS_PASSWORD");
-        envTemplate.Should().Contain("PG_PASSWORD=CHANGE_ME_POSTGRES_PASSWORD");
-        envTemplate.Should().Contain("QDRANT_KEY=CHANGE_ME_QDRANT_KEY");
+        File.Exists(Path.Combine(solutionRoot, "artifacts", ".env")).Should().BeFalse();
+        File.Exists(Path.Combine(solutionRoot, "artifacts", "docker-compose.yaml")).Should().BeFalse();
+        envTemplate.Should().Contain("RABBITMQ_PASSWORD=CHANGE_ME_STRONG_RABBITMQ_PASSWORD");
+        envTemplate.Should().Contain("POSTGRES_PASSWORD=CHANGE_ME_STRONG_POSTGRES_PASSWORD");
+        envTemplate.Should().Contain("QDRANT_KEY=CHANGE_ME_STRONG_QDRANT_KEY");
         envTemplate.Should().Contain("AICOPILOT_API_KEY_ENCRYPTION_KEY=CHANGE_ME_32_BYTES_MINIMUM");
-        compose.Should().Contain("AICopilotSecurity__ApiKeyEncryptionKey: \"${AICOPILOT_API_KEY_ENCRYPTION_KEY}\"");
+        compose.Should().Contain("AICopilotSecurity__ApiKeyEncryptionKey: ${AICOPILOT_API_KEY_ENCRYPTION_KEY}");
+        compose.Should().Contain("CloudOidc__BootstrapAdminAutoBindEnabled: ${CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED:-true}");
+        compose.Should().Contain("CloudOidc__BootstrapAdminUserName: ${AICOPILOT_BOOTSTRAP_ADMIN_USERNAME}");
+    }
+
+    [Fact]
+    public void DeploymentWorkflows_ShouldUseIntranetRunnerAndHarborOnly()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var imageWorkflow = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            ".github",
+            "workflows",
+            "aicopilot-image.yml"));
+        var deployWorkflow = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            ".github",
+            "workflows",
+            "aicopilot-deploy.yml"));
+
+        imageWorkflow.Should().Contain("runs-on: [self-hosted, iiot-linux-prod]");
+        imageWorkflow.Should().Contain("Self-hosted runner must not run as root.");
+        imageWorkflow.Should().Contain("OCI_REGISTRY");
+        imageWorkflow.Should().Contain("OCI_NAMESPACE");
+        imageWorkflow.Should().Contain("dotnet publish");
+        imageWorkflow.Should().Contain("/t:PublishContainer");
+        imageWorkflow.Should().Contain("NODE_BASE_IMAGE=$image_prefix/base-node:22-alpine");
+        imageWorkflow.Should().Contain("NGINX_BASE_IMAGE=$image_prefix/base-nginx:1.27-alpine");
+        imageWorkflow.Should().Contain("      - \"src/hosts/**\"");
+        imageWorkflow.Should().Contain("      - \"src/core/**\"");
+        imageWorkflow.Should().Contain("      - \"src/shared/**\"");
+        imageWorkflow.Should().Contain("      - \"src/services/**\"");
+        imageWorkflow.Should().Contain("      - \"src/infrastructure/**\"");
+        imageWorkflow.Should().Contain("      - \"src/vues/AICopilot.Web/**\"");
+        imageWorkflow.Should().NotContain("      - \"src/**\"");
+        imageWorkflow.Should().NotContain("      - \"deploy/enterprise-ai/**\"");
+        imageWorkflow.Should().NotContain("deploy/enterprise-ai/docker-compose");
+        imageWorkflow.Should().NotContain("runs-on: ubuntu-latest");
+        imageWorkflow.Should().NotContain("ghcr.io");
+        imageWorkflow.Should().NotContain("docker/build-push-action");
+        imageWorkflow.Should().NotContain("docker/setup-buildx-action");
+
+        deployWorkflow.Should().Contain("runs-on: [self-hosted, iiot-linux-prod]");
+        deployWorkflow.Should().Contain("Release tag from aicopilot-image (sha-*)");
+        deployWorkflow.Should().Contain("DEPLOY_TARGET_DIR: ${{ secrets.DEPLOY_TARGET_DIR }}");
+        deployWorkflow.Should().Contain("DEPLOY_ENV_FILE: ${{ secrets.DEPLOY_ENV_FILE }}");
+        deployWorkflow.Should().Contain("Self-hosted runner must not run as root.");
+        deployWorkflow.Should().Contain("rsync -a --delete");
+        deployWorkflow.Should().Contain("printf '%s\\n' \"$DEPLOY_ENV_FILE\" > \"$DEPLOY_TARGET_DIR/.env\"");
+        deployWorkflow.Should().Contain("services:");
+        deployWorkflow.Should().Contain("DEPLOY_SERVICES: ${{ inputs.services }}");
+        deployWorkflow.Should().Contain("deploy_args=(\"$RELEASE_TAG\")");
+        deployWorkflow.Should().Contain("deploy_args+=(--services \"$DEPLOY_SERVICES\")");
+        deployWorkflow.Should().Contain("./deploy-release.sh \"${deploy_args[@]}\"");
+        deployWorkflow.Should().NotContain("runs-on: ubuntu-latest");
+        deployWorkflow.Should().NotContain("appleboy/ssh-action");
+        deployWorkflow.Should().NotContain("appleboy/scp-action");
+        deployWorkflow.Should().NotContain("ghcr.io");
+    }
+
+    [Fact]
+    public void DeploymentScriptsAndDocs_ShouldKeepSingleStandardReleasePath()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var deployRoot = Path.Combine(solutionRoot, "deploy", "enterprise-ai");
+        var deployGuide = File.ReadAllText(Path.Combine(solutionRoot, "AICopilot 项目部署与维护指南.md"));
+        var deployReadme = File.ReadAllText(Path.Combine(deployRoot, "README.md"));
+        var envTemplate = File.ReadAllText(Path.Combine(deployRoot, ".env.example"));
+        var deployRelease = File.ReadAllText(Path.Combine(deployRoot, "deploy-release.sh"));
+        var mirrorBaseImages = File.ReadAllText(Path.Combine(deployRoot, "mirror-base-images.sh"));
+        var buildAndPush = File.ReadAllText(Path.Combine(deployRoot, "build-and-push.sh"));
+        var webDockerfile = File.ReadAllText(Path.Combine(solutionRoot, "src", "vues", "AICopilot.Web", "Dockerfile"));
+
+        deployGuide.Should().Contain("iiot-linux-prod");
+        deployGuide.Should().Contain("DEPLOY_ENV_FILE");
+        deployGuide.Should().Contain("Docker Hub 不作为生产依赖源");
+        deployGuide.Should().Contain("`aicopilot-deploy` 的 `services` 输入为空时按全量发布处理");
+        deployGuide.Should().Contain("mirror-base-images.sh");
+        deployGuide.Should().Contain("deploy-release.sh");
+        deployGuide.Should().Contain("应急手工构建只在 GitHub Actions 不可用时使用");
+        deployGuide.Should().Contain("deploy/enterprise-ai/README.md");
+        deployGuide.Should().NotContain("docs/企业AI首次部署记录");
+        File.Exists(Path.Combine(solutionRoot, "docs", "企业AI首次部署记录-2026-06-08.md")).Should().BeFalse();
+        File.Exists(Path.Combine(solutionRoot, "docs", "A助理部署配置说明.md")).Should().BeFalse();
+
+        deployReadme.Should().Contain("AICopilot enterprise-ai deploy");
+        deployReadme.Should().Contain("aicopilot-image");
+        deployReadme.Should().Contain("aicopilot-deploy");
+        deployReadme.Should().Contain("DEPLOY_ENV_FILE");
+        deployReadme.Should().Contain("iiot-linux-prod");
+        deployReadme.Should().Contain("非 root");
+        deployReadme.Should().Contain("不通过 AICopilot 写 Cloud 业务数据");
+        deployReadme.Should().Contain("./deploy-release.sh sha-<git-sha> --services httpapi,web");
+
+        envTemplate.Should().Contain("POSTGRES_IMAGE=10.98.90.154:80/enterprise-ai/base-postgres:17.6");
+        envTemplate.Should().Contain("RABBITMQ_IMAGE=10.98.90.154:80/enterprise-ai/base-rabbitmq:4.2-management");
+        envTemplate.Should().Contain("QDRANT_IMAGE=10.98.90.154:80/enterprise-ai/base-qdrant:v1.15.5");
+        envTemplate.Should().Contain("CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED=true");
+        envTemplate.Should().NotContain("POSTGRES_IMAGE=postgres:");
+        envTemplate.Should().NotContain("RABBITMQ_IMAGE=rabbitmq:");
+        envTemplate.Should().NotContain("QDRANT_IMAGE=qdrant/");
+
+        deployRelease.Should().Contain("APP_IMAGE_KEYS");
+        deployRelease.Should().Contain("INFRA_IMAGE_KEYS");
+        deployRelease.Should().Contain("Release tag must match sha-<hex>");
+        deployRelease.Should().Contain("Image must be mirrored to Harbor");
+        deployRelease.Should().Contain("normalize_services");
+        deployRelease.Should().Contain("compose pull");
+        deployRelease.Should().Contain("compose up -d --remove-orphans");
+        deployRelease.Should().Contain("compose up -d \"${RUNTIME_SELECTED_SERVICES[@]}\"");
+        deployRelease.Should().Contain("probe_web");
+
+        mirrorBaseImages.Should().Contain("postgres:17.6");
+        mirrorBaseImages.Should().Contain("rabbitmq:4.2-management");
+        mirrorBaseImages.Should().Contain("qdrant/qdrant:v1.15.5");
+        mirrorBaseImages.Should().Contain("node:22-alpine");
+        mirrorBaseImages.Should().Contain("nginx:1.27-alpine");
+        mirrorBaseImages.Should().Contain("docker buildx build");
+
+        buildAndPush.Should().Contain("MIRROR_BASE_IMAGES");
+        buildAndPush.Should().Contain("NODE_BASE_IMAGE");
+        buildAndPush.Should().Contain("NGINX_BASE_IMAGE");
+        buildAndPush.Should().Contain("mirror-base-images.sh");
+
+        webDockerfile.Should().Contain("ARG NODE_BASE_IMAGE=node:22-alpine");
+        webDockerfile.Should().Contain("FROM ${NODE_BASE_IMAGE} AS build");
+        webDockerfile.Should().Contain("ARG NGINX_BASE_IMAGE=nginx:1.27-alpine");
+        webDockerfile.Should().Contain("FROM ${NGINX_BASE_IMAGE}");
     }
 
     [Fact]
     public void ManagementControllers_ShouldRequireHttpAuthentication()
     {
-        typeof(AiGatewayController).GetCustomAttribute<AuthorizeAttribute>().Should().NotBeNull();
+        var aiGatewayControllers = new[]
+        {
+            typeof(AiGatewayController),
+            typeof(AiGatewayToolController),
+            typeof(AiGatewaySessionController),
+            typeof(AiGatewayAgentTaskController),
+            typeof(AiGatewayTrialPilotController),
+            typeof(AiGatewayWorkspaceArtifactController)
+        };
+
+        foreach (var controller in aiGatewayControllers)
+        {
+            controller.GetCustomAttribute<AuthorizeAttribute>().Should().NotBeNull(controller.Name);
+        }
+
         typeof(DataAnalysisController).GetCustomAttribute<AuthorizeAttribute>().Should().NotBeNull();
         typeof(McpController).GetCustomAttribute<AuthorizeAttribute>().Should().NotBeNull();
         typeof(RagController).GetCustomAttribute<AuthorizeAttribute>().Should().NotBeNull();
@@ -115,13 +258,7 @@ public sealed class SecurityHardeningTests
         chatStreamSource.Should().Contain("finalAgentContextStore.GetAsync(request.SessionId");
         chatStreamSource.Should().Contain("AppProblemCodes.ApprovalPending");
 
-        var controllerSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "hosts",
-            "AICopilot.HttpApi",
-            "Controllers",
-            "AiGatewayController.cs"));
+        var controllerSource = ReadAiGatewayControllerSources(solutionRoot);
         controllerSource.Should().Contain("[HttpGet(\"approval/pending\")]");
         controllerSource.Should().Contain("GetPendingApprovalsQuery");
     }
@@ -416,20 +553,21 @@ public sealed class SecurityHardeningTests
     public void AgentPlanRuntimeAndUpload_ShouldRecheckRagKnowledgeBasePermissions()
     {
         var solutionRoot = FindSolutionRoot();
-        var agentTaskCommandsSource = File.ReadAllText(Path.Combine(
+        var agentTaskPlanPreparationSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
             "services",
             "AICopilot.AiGatewayService",
             "AgentTasks",
-            "AgentTaskCommands.cs"));
-        var agentTaskRuntimeSource = File.ReadAllText(Path.Combine(
+            "AgentTaskPlanPreparationService.cs"));
+        var agentRuntimeRagToolServiceSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
             "services",
             "AICopilot.AiGatewayService",
             "AgentTasks",
-            "AgentTaskRuntime.cs"));
+            "Runtime",
+            "AgentRuntimeRagToolService.cs"));
         var uploadRecordsSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
@@ -438,15 +576,15 @@ public sealed class SecurityHardeningTests
             "Uploads",
             "UploadRecords.cs"));
 
-        agentTaskCommandsSource.Should().Contain("IKnowledgeBaseAccessChecker");
-        agentTaskCommandsSource.Should().Contain("CanReadAsync(");
-        agentTaskCommandsSource.Should().Contain("knowledgeBaseId");
-        agentTaskCommandsSource.Should().Contain("Result.NotFound");
-        agentTaskRuntimeSource.Should().Contain("IKnowledgeBaseAccessChecker");
-        agentTaskRuntimeSource.Should().Contain("CanReadAsync(");
-        agentTaskRuntimeSource.Should().Contain("knowledgeBaseId");
-        agentTaskRuntimeSource.Should().Contain("task.UserId");
-        agentTaskRuntimeSource.Should().Contain("UnauthorizedAccessException");
+        agentTaskPlanPreparationSource.Should().Contain("IKnowledgeBaseAccessChecker");
+        agentTaskPlanPreparationSource.Should().Contain("CanReadAsync(");
+        agentTaskPlanPreparationSource.Should().Contain("knowledgeBaseId");
+        agentTaskPlanPreparationSource.Should().Contain("Result.NotFound");
+        agentRuntimeRagToolServiceSource.Should().Contain("IKnowledgeBaseAccessChecker");
+        agentRuntimeRagToolServiceSource.Should().Contain("CanReadAsync(");
+        agentRuntimeRagToolServiceSource.Should().Contain("knowledgeBaseId");
+        agentRuntimeRagToolServiceSource.Should().Contain("task.UserId");
+        agentRuntimeRagToolServiceSource.Should().Contain("UnauthorizedAccessException");
         uploadRecordsSource.Should().Contain("IKnowledgeBaseAccessChecker");
         uploadRecordsSource.Should().Contain("CanWriteAsync(");
         uploadRecordsSource.Should().Contain("request.KnowledgeBaseId");
@@ -464,14 +602,13 @@ public sealed class SecurityHardeningTests
             "AICopilot.HttpApi",
             "infrastructure",
             "ApiControllerBase.cs"));
-        var controllerFiles = new[]
-        {
-            "AiGatewayController.cs",
-            "DataAnalysisController.cs",
-            "IdentityController.cs",
-            "McpController.cs",
-            "RagController.cs"
-        };
+        var controllerPath = Path.Combine(solutionRoot, "src", "hosts", "AICopilot.HttpApi", "Controllers");
+        var controllerFiles = Directory.GetFiles(controllerPath, "*Controller.cs")
+            .Select(Path.GetFileName)
+            .Where(file => file is not null)
+            .Cast<string>()
+            .OrderBy(file => file, StringComparer.Ordinal)
+            .ToArray();
 
         baseControllerSource.Should().Contain("ApiControllerBase(ISender sender)");
         baseControllerSource.Should().Contain("protected ISender Sender");
@@ -482,10 +619,7 @@ public sealed class SecurityHardeningTests
         {
             var source = File.ReadAllText(Path.Combine(
                 solutionRoot,
-                "src",
-                "hosts",
-                "AICopilot.HttpApi",
-                "Controllers",
+                controllerPath,
                 controllerFile));
 
             source.Should().Contain("ISender sender", controllerFile);
@@ -520,21 +654,27 @@ public sealed class SecurityHardeningTests
     public void LoginRateLimiter_ShouldPartitionByUsernameAndIp()
     {
         var solutionRoot = FindSolutionRoot();
-        var dependencyInjectionSource = File.ReadAllText(Path.Combine(
+        var httpApiRoot = Path.Combine(
             solutionRoot,
             "src",
             "hosts",
-            "AICopilot.HttpApi",
+            "AICopilot.HttpApi");
+        var dependencyInjectionSource = File.ReadAllText(Path.Combine(
+            httpApiRoot,
             "DependencyInjection.cs"));
+        var rateLimitingSource = File.ReadAllText(Path.Combine(
+            httpApiRoot,
+            "HttpApiRateLimitingConfiguration.cs"));
+        var source = string.Concat(dependencyInjectionSource, Environment.NewLine, rateLimitingSource);
 
-        dependencyInjectionSource.Should().Contain("options.AddPolicy(\"login\"");
-        dependencyInjectionSource.Should().NotContain("AddTokenBucketLimiter(\"login\"");
-        dependencyInjectionSource.Should().Contain("GetLoginPolicyPartitionKey");
-        dependencyInjectionSource.Should().Contain("TryReadLoginUsername");
-        dependencyInjectionSource.Should().Contain("RemoteIpAddress");
-        dependencyInjectionSource.Should().Contain("JsonDocument.Parse");
-        dependencyInjectionSource.Should().NotContain("X-Login-Username");
-        dependencyInjectionSource.Should().NotContain("Request.Query.TryGetValue(\"username\"");
+        source.Should().Contain("options.AddPolicy(\"login\"");
+        source.Should().NotContain("AddTokenBucketLimiter(\"login\"");
+        source.Should().Contain("GetLoginPolicyPartitionKey");
+        source.Should().Contain("TryReadLoginUsername");
+        source.Should().Contain("RemoteIpAddress");
+        source.Should().Contain("JsonDocument.Parse");
+        source.Should().NotContain("X-Login-Username");
+        source.Should().NotContain("Request.Query.TryGetValue(\"username\"");
     }
 
     [Fact]
@@ -1008,7 +1148,7 @@ public sealed class SecurityHardeningTests
             Path.Combine("src", "services", "AICopilot.AiGatewayService", "Commands", "LanguageModels", "UpdateLanguageModel.cs"),
             Path.Combine("src", "services", "AICopilot.AiGatewayService", "Commands", "LanguageModels", "DeleteLanguageModel.cs"),
             Path.Combine("src", "services", "AICopilot.AiGatewayService", "Commands", "Sessions", "UpdateSessionSafetyAttestation.cs"),
-            Path.Combine("src", "services", "AICopilot.DataAnalysisService", "BusinessDatabases", "BusinessDatabaseManagement.cs"),
+            Path.Combine("src", "services", "AICopilot.DataAnalysisService", "BusinessDatabases", "BusinessDatabaseCommandHandlers.cs"),
             Path.Combine("src", "services", "AICopilot.RagService", "Commands", "KnowledgeBases", "CreateKnowledgeBase.cs"),
             Path.Combine("src", "services", "AICopilot.RagService", "KnowledgeBases", "KnowledgeBaseManagement.cs"),
             Path.Combine("src", "services", "AICopilot.RagService", "EmbeddingModels", "EmbeddingModelManagement.cs"),
@@ -1034,15 +1174,24 @@ public sealed class SecurityHardeningTests
             "src/services/AICopilot.AiGatewayService/Workflows/Executors/DataAnalysisAuditRecorder.cs",
             "src/services/AICopilot.AiGatewayService/Workflows/Executors/FinalAgentRunExecutor.cs",
             "src/services/AICopilot.AiGatewayService/Workflows/Executors/ToolExecutionAuditRecorder.cs",
-            "src/services/AICopilot.AiGatewayService/CloudReadiness/CloudReadonlyPilotReadiness.cs",
-            "src/services/AICopilot.AiGatewayService/TrialOperations/TrialOperationsManagement.cs",
-            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactVersioningManagement.cs",
-            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceP9Management.cs",
-            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceManagement.cs",
+            "src/services/AICopilot.AiGatewayService/CloudReadiness/CloudReadonlyPilotReadinessHandlers.cs",
+            "src/services/AICopilot.AiGatewayService/CloudReadiness/CloudReadonlyProductionControlledPilotHandlers.cs",
+            "src/services/AICopilot.AiGatewayService/CloudReadiness/CloudReadonlyProductionOperationsHandlers.cs",
+            "src/services/AICopilot.AiGatewayService/CloudReadiness/CloudReadonlyProductionPilotHandlers.cs",
+            "src/services/AICopilot.AiGatewayService/PilotAuthorization/PilotAuthorizationDecisionCommandHandlers.cs",
+            "src/services/AICopilot.AiGatewayService/PilotAuthorization/PilotAuthorizationSubmissionCommandHandlers.cs",
+            "src/services/AICopilot.AiGatewayService/TrialOperations/TrialCampaignCommandHandlers.cs",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactVersioningCommandHandlers.cs",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactVersioningQueryHandlers.cs",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceCommandHandlers.cs",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceQueryHandlers.cs",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceP9CommandHandlers.cs",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceP9QueryHandlers.cs",
             "src/services/AICopilot.AiGatewayService/Uploads/UploadRecords.cs",
             "src/services/AICopilot.RagService/Commands/Documents/UploadDocument.cs",
+            "src/services/AICopilot.RagService/Queries/KnowledgeBases/SearchKnowledgeBase.cs",
             "src/services/AICopilot.DataAnalysisService/Plugins/DataAnalysisSqlQueryRunner.cs",
-            "src/services/AICopilot.DataAnalysisService/BusinessDatabases/BusinessDatabaseReadonlyQuery.cs",
+            "src/services/AICopilot.DataAnalysisService/BusinessDatabases/BusinessReadonlyQueryAuditRecorder.cs",
             "src/services/AICopilot.DataAnalysisService/BusinessDatabases/BusinessTextToSql.cs"
         };
 
@@ -1071,10 +1220,10 @@ public sealed class SecurityHardeningTests
     }
 
     [Fact]
-    public void ReviewBaseline_ShouldDocumentAuditAndOutboxBoundaries()
+    public void BusinessRules_ShouldDocumentAuditAndOutboxBoundaries()
     {
         var solutionRoot = FindSolutionRoot();
-        var source = File.ReadAllText(Path.Combine(solutionRoot, "REVIEW_BASELINE.md"));
+        var source = File.ReadAllText(Path.Combine(solutionRoot, "资料", "AICopilot业务规则.md"));
 
         source.Should().Contain("AiCopilotDbContext");
         source.Should().Contain("AuditDbContext");
@@ -1190,13 +1339,21 @@ public sealed class SecurityHardeningTests
     public void DataAnalysisAuditSummaries_ShouldStayReadable()
     {
         var solutionRoot = FindSolutionRoot();
-        var source = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "services",
-            "AICopilot.DataAnalysisService",
-            "BusinessDatabases",
-            "BusinessDatabaseManagement.cs"));
+        var source = string.Concat(
+            File.ReadAllText(Path.Combine(
+                solutionRoot,
+                "src",
+                "services",
+                "AICopilot.DataAnalysisService",
+                "BusinessDatabases",
+                "BusinessDatabaseCommandHandlers.cs")),
+            File.ReadAllText(Path.Combine(
+                solutionRoot,
+                "src",
+                "services",
+                "AICopilot.DataAnalysisService",
+                "BusinessDatabases",
+                "BusinessDatabaseDtoMapper.cs")));
         var queryRunnerSource = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
@@ -1261,16 +1418,20 @@ public sealed class SecurityHardeningTests
     public void McpRuntime_ShouldUseQuotedArgumentParserAndSseConnectionTimeout()
     {
         var solutionRoot = FindSolutionRoot();
-        var source = File.ReadAllText(Path.Combine(
+        var mcpRoot = Path.Combine(
             solutionRoot,
             "src",
             "infrastructure",
             "AICopilot.Infrastructure",
-            "Mcp",
-            "McpServerBootstrap.cs"));
+            "Mcp");
+        var source = string.Concat(
+            File.ReadAllText(Path.Combine(mcpRoot, "McpServerBootstrap.cs")),
+            File.ReadAllText(Path.Combine(mcpRoot, "McpRuntimeClientFactory.cs")));
 
         source.Should().Contain("ParseCommandArguments");
         source.Should().Contain("StringBuilder");
+        source.Should().Contain("McpRuntimeStdioCommandResolver.EnsureAvailable");
+        source.Should().Contain("McpRuntimeStdioCommandUnavailableException");
         source.Should().Contain("McpSseEndpointValidator.TryValidate");
         source.Should().Contain("ConnectionTimeout = SseConnectionTimeout");
         source.Should().Contain("TransportMode = HttpTransportMode.Sse");
@@ -1676,6 +1837,16 @@ public sealed class SecurityHardeningTests
         }
 
         throw new DirectoryNotFoundException("Could not locate AICopilot.slnx from the test output directory.");
+    }
+
+    private static string ReadAiGatewayControllerSources(string solutionRoot)
+    {
+        var controllerPath = Path.Combine(solutionRoot, "src", "hosts", "AICopilot.HttpApi", "Controllers");
+        return string.Join(
+            "\n",
+            Directory.GetFiles(controllerPath, "AiGateway*.cs")
+                .OrderBy(file => file, StringComparer.Ordinal)
+                .Select(File.ReadAllText));
     }
 
     private static void AssertIdentityManagementEndpoint(string actionName)

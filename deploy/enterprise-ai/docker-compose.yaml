@@ -1,0 +1,201 @@
+name: ${COMPOSE_PROJECT_NAME:-enterprise-ai}
+
+x-aicopilot-common-env: &aicopilot-common-env
+  TZ: Asia/Shanghai
+  ASPNETCORE_ENVIRONMENT: Production
+  ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
+  AICopilotSecurity__ApiKeyEncryptionKey: ${AICOPILOT_API_KEY_ENCRYPTION_KEY}
+  ConnectionStrings__ai-copilot: Host=postgres;Port=5432;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Database=${POSTGRES_DB}
+  ConnectionStrings__eventbus: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@eventbus:5672
+  ConnectionStrings__qdrant: Endpoint=http://qdrant:6334;Key=${QDRANT_KEY}
+  ConnectionStrings__qdrant_http: Endpoint=http://qdrant:6333;Key=${QDRANT_KEY}
+  EVENTBUS_HOST: eventbus
+  EVENTBUS_PORT: "5672"
+  EVENTBUS_USERNAME: ${RABBITMQ_USER}
+  EVENTBUS_PASSWORD: ${RABBITMQ_PASSWORD}
+  QDRANT_GRPCHOST: qdrant
+  QDRANT_GRPCPORT: "6334"
+  QDRANT_HTTPHOST: qdrant
+  QDRANT_HTTPPORT: "6333"
+  QDRANT_APIKEY: ${QDRANT_KEY}
+  AiGateway__Deployment__Mode: SingleInstance
+  AiGateway__FinalAgentContextStore__Provider: Memory
+  Mcp__Runtime__Enabled: "false"
+  Mcp__Runtime__MockOnly: "true"
+  CloudReadonly__Mode: ${CLOUD_READONLY_MODE:-Disabled}
+  CloudReadonly__Real__Enabled: ${CLOUD_READONLY_REAL_ENABLED:-false}
+  CloudReadonly__Real__AllowProductionRead: ${CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ:-false}
+  CloudAiRead__Enabled: ${CLOUD_AI_READ_ENABLED:-false}
+  CloudAiRead__BaseUrl: ${CLOUD_AI_READ_BASE_URL:-http://10.98.90.154:81}
+  CloudAiRead__ServiceAccountToken: ${CLOUD_AI_SERVICE_ACCOUNT_TOKEN:-}
+  CloudAiRead__TimeoutSeconds: ${CLOUD_AI_READ_TIMEOUT_SECONDS:-10}
+  CloudIdentityStatus__Enabled: ${CLOUD_IDENTITY_STATUS_ENABLED:-false}
+  CloudIdentityStatus__BaseUrl: ${CLOUD_IDENTITY_STATUS_BASE_URL:-http://10.98.90.154:81}
+  CloudIdentityStatus__ServiceAccountToken: ${CLOUD_AI_SERVICE_ACCOUNT_TOKEN:-}
+  CloudIdentityStatus__RefreshIntervalSeconds: ${CLOUD_IDENTITY_STATUS_REFRESH_INTERVAL_SECONDS:-60}
+  CloudIdentityStatus__TimeoutSeconds: ${CLOUD_IDENTITY_STATUS_TIMEOUT_SECONDS:-5}
+  CloudIdentityStatus__FailureMode: RejectWhenUnverified
+  CloudOidc__Enabled: ${CLOUD_OIDC_ENABLED:-false}
+  CloudOidc__Issuer: ${CLOUD_OIDC_ISSUER:-}
+  CloudOidc__AllowIntranetHttpOidc: ${ALLOW_INTRANET_HTTP_OIDC:-false}
+  CloudOidc__ClientId: ${CLOUD_OIDC_CLIENT_ID:-aicopilot}
+  CloudOidc__CallbackPath: /api/identity/cloud-oidc/callback
+  CloudOidc__FrontendCompletionPath: /cloud-login/complete
+  CloudOidc__RequireHttpsMetadata: ${CLOUD_OIDC_REQUIRE_HTTPS_METADATA:-true}
+  CloudOidc__BootstrapAdminAutoBindEnabled: ${CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED:-true}
+  CloudOidc__BootstrapAdminUserName: ${AICOPILOT_BOOTSTRAP_ADMIN_USERNAME}
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE}
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=scram-sha-256
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - enterprise-ai-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks:
+      - enterprise-ai-net
+
+  eventbus:
+    image: ${RABBITMQ_IMAGE}
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks:
+      - enterprise-ai-net
+
+  qdrant:
+    image: ${QDRANT_IMAGE}
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_KEY}
+      QDRANT__SERVICE__ENABLE_STATIC_CONTENT: "0"
+    volumes:
+      - enterprise-ai-qdrant-data:/qdrant/storage
+    networks:
+      - enterprise-ai-net
+
+  aicopilot-migration:
+    image: ${AICOPILOT_MIGRATION_IMAGE}
+    platform: linux/amd64
+    restart: "no"
+    environment:
+      <<: *aicopilot-common-env
+      BootstrapAdmin__UserName: ${AICOPILOT_BOOTSTRAP_ADMIN_USERNAME}
+      BootstrapAdmin__Password: ${AICOPILOT_BOOTSTRAP_ADMIN_PASSWORD}
+      OTEL_SERVICE_NAME: aicopilot-migration
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - enterprise-ai-net
+
+  aicopilot-httpapi:
+    image: ${AICOPILOT_HTTPAPI_IMAGE}
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      <<: *aicopilot-common-env
+      HTTP_PORTS: "8080"
+      JwtSettings__Issuer: ${AICOPILOT_PUBLIC_URL}
+      JwtSettings__Audience: ${AICOPILOT_PUBLIC_URL}
+      JwtSettings__AccessTokenExpirationMinutes: ${AICOPILOT_ACCESS_TOKEN_EXPIRATION_MINUTES:-30}
+      JwtSettings__SecretKey: ${AICOPILOT_JWT_SECRET_KEY}
+      OTEL_SERVICE_NAME: aicopilot-httpapi
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      postgres:
+        condition: service_healthy
+      eventbus:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      aicopilot-migration:
+        condition: service_completed_successfully
+    expose:
+      - "8080"
+    networks:
+      - enterprise-ai-net
+
+  aicopilot-dataworker:
+    image: ${AICOPILOT_DATAWORKER_IMAGE}
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      <<: *aicopilot-common-env
+      OTEL_SERVICE_NAME: aicopilot-dataworker
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      postgres:
+        condition: service_healthy
+      eventbus:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      aicopilot-migration:
+        condition: service_completed_successfully
+    networks:
+      - enterprise-ai-net
+
+  aicopilot-ragworker:
+    image: ${AICOPILOT_RAGWORKER_IMAGE}
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      <<: *aicopilot-common-env
+      OTEL_SERVICE_NAME: aicopilot-ragworker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      eventbus:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      aicopilot-migration:
+        condition: service_completed_successfully
+    networks:
+      - enterprise-ai-net
+
+  aicopilot-webui:
+    image: ${AICOPILOT_WEBUI_IMAGE}
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "8000"
+      AICOPILOT_HTTPAPI_HTTP: http://aicopilot-httpapi:8080
+    depends_on:
+      aicopilot-httpapi:
+        condition: service_started
+    ports:
+      - "${AICOPILOT_WEB_PORT:-82}:8000"
+    networks:
+      - enterprise-ai-net
+
+networks:
+  enterprise-ai-net:
+    driver: bridge
+
+volumes:
+  enterprise-ai-postgres-data:
+  enterprise-ai-qdrant-data:

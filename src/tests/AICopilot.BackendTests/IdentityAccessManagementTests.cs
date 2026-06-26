@@ -211,7 +211,9 @@ public sealed class IdentityAccessManagementTests
                 "AiGateway.DownloadArtifact",
                 "AiGateway.EditArtifact",
                 "AiGateway.SubmitFinalReview",
-                "AiGateway.Chat");
+                "AiGateway.Chat",
+                "PilotAuthorization.Submit",
+                "PilotAuthorization.View");
             profile.Permissions.Should().NotContain("AiGateway.ApproveAgentToolCall");
             profile.Permissions.Should().NotContain("AiGateway.ApproveFinalOutput");
             profile.Permissions.Should().NotContain("AiGateway.FinalizeWorkspace");

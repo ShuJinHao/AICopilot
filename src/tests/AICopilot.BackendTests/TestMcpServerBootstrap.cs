@@ -63,8 +63,8 @@ internal sealed class TestMcpServerBootstrap(
     private static async Task<(Stream serverInput, Stream clientOutput, Stream serverOutput, Stream clientInput)> CreateConnectedStreamsAsync(
         CancellationToken cancellationToken)
     {
-        var inboundPipeName = $"mcp-test-in-{Guid.NewGuid():N}";
-        var outboundPipeName = $"mcp-test-out-{Guid.NewGuid():N}";
+        var inboundPipeName = $"mi{Guid.NewGuid():N}"[..10];
+        var outboundPipeName = $"mo{Guid.NewGuid():N}"[..10];
 
         var serverInput = new NamedPipeServerStream(
             inboundPipeName,

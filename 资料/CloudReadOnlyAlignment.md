@@ -6,7 +6,7 @@ This document defines the current preparation boundary for aligning `AICopilot` 
 
 `AICopilot` may use Cloud business data only as read-only analysis input. It may explain, summarize, search, compare, diagnose, and generate suggestions. It must not create, update, delete, backfill, approve, dispatch, or trigger Cloud business records or workflows.
 
-This is a planning and integration-boundary document. It does not introduce Cloud APIs, AICopilot tools, database migrations, DTO changes, or frontend protocol changes.
+This is a planning and integration-boundary document. It does not introduce Cloud APIs, AICopilot tools, database migrations, DTO changes, or frontend protocol changes. Current execution entry points are `../AGENTS.md`, `AICopilot业务规则.md`, and `../AICopilot 项目部署与维护指南.md`.
 
 ## Non-goals
 
@@ -58,7 +58,22 @@ DataAnalysis may query Cloud data only through read-only sources:
 
 DataAnalysis output may be used for charts, summaries, diagnostics, and recommendations. It must not be used to mutate Cloud records.
 
-## Future Cloud AI-facing API Reservation
+## Current Cloud AI-facing Read API
+
+The current Cloud-facing read contract is explicit and narrow:
+
+| Scenario | Method and path | Required parameters |
+| --- | --- | --- |
+| Devices | `GET /api/v1/ai/read/devices` | `maxRows`, optional `keyword` |
+| Capacity summary | `GET /api/v1/ai/read/capacity/summary` | `deviceId`, `startDate`, `endDate`, `maxRows` |
+| Device logs | `GET /api/v1/ai/read/device-logs` | `deviceId`, `startTime`, `endTime`, `maxRows` |
+| Pass station records | `GET /api/v1/ai/read/pass-stations/{typeKey}` | route `{typeKey}`, `deviceId`, `startTime`, `endTime`, `maxRows` |
+
+`deviceCode` is a device query/display value only. It must not be sent to Cloud as `deviceId`. P12/P13 pilot metadata such as `scenarioId`, `from`, `to`, `boundary`, `intentId`, `goalHash`, `analysisType`, or `pilotWindowId` is internal AICopilot audit context and must not be forwarded as Cloud query parameters.
+
+Recipe master data and recipe version records are outside the AICopilot Cloud read-only API.
+
+## Future Cloud AI-facing Write API Reservation
 
 The current default is: no Cloud AI-facing write API exists.
 
@@ -117,10 +132,10 @@ Before any AICopilot-to-Cloud integration PR:
 
 ## Open Follow-up
 
-The Cloud side still needs a dedicated read-only AI integration design before implementation. Candidate work includes:
+Before production acceptance, keep the following explicit:
 
-- Decide which Cloud read APIs should be exposed specifically to AICopilot.
-- Define read-only permission names and audit categories.
-- Define read-only reporting views for DataAnalysis.
+- Confirm service-account permissions and audit categories for the current Cloud AiRead endpoints.
+- Define read-only reporting views for DataAnalysis if Text-to-SQL needs Cloud reporting data.
 - Decide which business documents should be indexed into RAG.
 - Define a Cloud-owned AI-facing API convention before any write-capable action is even considered.
+- Do not keep ordinary Real CloudReadonly, Simulation, Sandbox, and Pilot as parallel production read paths. Simulation is only for test/demo; production read must use the approved Cloud AiRead / P12 / P13 controlled path.

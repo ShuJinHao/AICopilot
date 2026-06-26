@@ -1,7 +1,9 @@
 # ===============================
 # Stage 1: 构建阶段 (Build Environment)
 # ===============================
-FROM node:20-alpine AS build
+ARG NODE_BASE_IMAGE=node:22-alpine
+ARG NGINX_BASE_IMAGE=nginx:1.27-alpine
+FROM ${NODE_BASE_IMAGE} AS build
 
 WORKDIR /app
 
@@ -16,6 +18,12 @@ RUN npm ci
 # 3. 复制项目源代码
 COPY . .
 
+# Vite reads public frontend configuration at build time.
+ARG VITE_API_BASE_URL=/api
+ARG VITE_CLOUD_PLATFORM_URL=
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+ENV VITE_CLOUD_PLATFORM_URL=$VITE_CLOUD_PLATFORM_URL
+
 # 4. 执行构建 (生成 dist 目录)
 # 注意：这里不会读取 aicopilot_httpapi_http 环境变量，因为代理是在运行时由 Nginx 处理的
 RUN npm run build
@@ -23,7 +31,7 @@ RUN npm run build
 # ===============================
 # Stage 2: 运行阶段 (Production Runtime)
 # ===============================
-FROM nginx:alpine
+FROM ${NGINX_BASE_IMAGE}
 
 # 1. 从构建阶段复制打包好的静态文件到 Nginx 默认目录
 COPY --from=build /app/dist /usr/share/nginx/html

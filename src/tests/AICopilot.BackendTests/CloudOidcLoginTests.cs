@@ -76,6 +76,139 @@ public sealed class CloudOidcLoginTests
     }
 
     [Fact]
+    public async Task FinalizeCloudOidcLogin_ShouldAdoptBootstrapAdmin_WhenConfiguredAdminUserHasNoCloudBinding()
+    {
+        var existingAdmin = new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            UserName = "101650",
+            SecurityStamp = Guid.NewGuid().ToString("N")
+        };
+        var userManager = new InMemoryUserManager(existingAdmin);
+        await userManager.AddToRoleAsync(existingAdmin, IdentityRoleNames.Admin);
+        var bindingStore = new InMemoryExternalIdentityBindingStore();
+        var auditWriter = new InMemoryIdentityAuditLogWriter();
+        var tokenGenerator = new RecordingJwtTokenGenerator();
+        var handler = CreateHandler(
+            userManager,
+            new InMemoryRoleManager(IdentityRoleNames.User, IdentityRoleNames.Admin),
+            bindingStore,
+            auditWriter,
+            tokenGenerator,
+            new CloudOidcBootstrapAdminBindingOptions
+            {
+                BootstrapAdminAutoBindEnabled = true,
+                BootstrapAdminUserName = "101650"
+            });
+
+        var result = await handler.Handle(
+            new FinalizeCloudOidcLoginCommand(CreateProfile(
+                subject: "cloud-admin-101650",
+                preferredUserName: "101650",
+                employeeNo: "101650",
+                employeeId: "employee-admin")),
+            CancellationToken.None);
+
+        result.Status.Should().Be(ResultStatus.Ok);
+        result.Value!.UserName.Should().Be("101650");
+        userManager.StoredUsers.Should().ContainSingle(user => user.Id == existingAdmin.Id);
+        bindingStore.Bindings.Should().ContainSingle(binding =>
+            binding.UserId == existingAdmin.Id &&
+            binding.Provider == ExternalIdentityProviders.Cloud &&
+            binding.TenantId == CloudOidcIdentityProfile.DefaultTenantId &&
+            binding.ExternalUserId == "cloud-admin-101650" &&
+            binding.EmployeeNo == "101650");
+        tokenGenerator.LastUser.Should().NotBeNull();
+        tokenGenerator.LastUser!.Roles.Should().BeEquivalentTo(IdentityRoleNames.Admin);
+        auditWriter.Requests.Should().ContainSingle(request =>
+            request.ActionCode == "Identity.CloudOidcBootstrapAdminAdopted" &&
+            request.Result == AuditResults.Succeeded &&
+            request.TargetId == existingAdmin.Id.ToString());
+    }
+
+    [Fact]
+    public async Task FinalizeCloudOidcLogin_ShouldRejectOrdinaryUserConflict_WhenBootstrapAdminAdoptionIsEnabled()
+    {
+        var existingUser = new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            UserName = "E0001",
+            SecurityStamp = Guid.NewGuid().ToString("N")
+        };
+        var userManager = new InMemoryUserManager(existingUser);
+        await userManager.AddToRoleAsync(existingUser, IdentityRoleNames.User);
+        var bindingStore = new InMemoryExternalIdentityBindingStore();
+        var handler = CreateHandler(
+            userManager,
+            new InMemoryRoleManager(IdentityRoleNames.User, IdentityRoleNames.Admin),
+            bindingStore,
+            new InMemoryIdentityAuditLogWriter(),
+            new RecordingJwtTokenGenerator(),
+            new CloudOidcBootstrapAdminBindingOptions
+            {
+                BootstrapAdminAutoBindEnabled = true,
+                BootstrapAdminUserName = "101650"
+            });
+
+        var result = await handler.Handle(new FinalizeCloudOidcLoginCommand(CreateProfile()), CancellationToken.None);
+
+        result.Status.Should().Be(ResultStatus.Unauthorized);
+        result.Errors!.OfType<ApiProblemDescriptor>().Single().Code.Should().Be(AuthProblemCodes.ExternalIdentityConflict);
+        bindingStore.Bindings.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task FinalizeCloudOidcLogin_ShouldRejectBootstrapAdminAdoption_WhenExistingAdminHasDifferentCloudBinding()
+    {
+        var existingAdmin = new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            UserName = "101650",
+            SecurityStamp = Guid.NewGuid().ToString("N")
+        };
+        var userManager = new InMemoryUserManager(existingAdmin);
+        await userManager.AddToRoleAsync(existingAdmin, IdentityRoleNames.Admin);
+        var bindingStore = new InMemoryExternalIdentityBindingStore();
+        await bindingStore.CreateAsync(new CreateExternalIdentityBindingRequest(
+            existingAdmin.Id,
+            ExternalIdentityProviders.Cloud,
+            CloudOidcIdentityProfile.DefaultTenantId,
+            "cloud-admin-old-sub",
+            "employee-admin",
+            "101650",
+            "管理员",
+            "D001",
+            "制造一部",
+            "v1",
+            AccountEnabledSnapshot: true,
+            EmployeeActiveSnapshot: true,
+            DateTime.UtcNow));
+        var handler = CreateHandler(
+            userManager,
+            new InMemoryRoleManager(IdentityRoleNames.User, IdentityRoleNames.Admin),
+            bindingStore,
+            new InMemoryIdentityAuditLogWriter(),
+            new RecordingJwtTokenGenerator(),
+            new CloudOidcBootstrapAdminBindingOptions
+            {
+                BootstrapAdminAutoBindEnabled = true,
+                BootstrapAdminUserName = "101650"
+            });
+
+        var result = await handler.Handle(
+            new FinalizeCloudOidcLoginCommand(CreateProfile(
+                subject: "cloud-admin-new-sub",
+                preferredUserName: "101650",
+                employeeNo: "101650",
+                employeeId: "employee-admin")),
+            CancellationToken.None);
+
+        result.Status.Should().Be(ResultStatus.Unauthorized);
+        result.Errors!.OfType<ApiProblemDescriptor>().Single().Code.Should().Be(AuthProblemCodes.ExternalIdentityConflict);
+        bindingStore.Bindings.Should().ContainSingle(binding => binding.ExternalUserId == "cloud-admin-old-sub");
+    }
+
+    [Fact]
     public async Task FinalizeCloudOidcLogin_ShouldReject_WhenCloudIdentityIsInactive()
     {
         var auditWriter = new InMemoryIdentityAuditLogWriter();
@@ -321,12 +454,28 @@ public sealed class CloudOidcLoginTests
             enabledWasExplicitlyConfigured: true);
     }
 
+    [Fact]
+    public void CloudOidcBootstrapAdminBindingOptions_ShouldRejectEnabledEmptyBootstrapAdminUserName()
+    {
+        var options = new CloudOidcBootstrapAdminBindingOptions
+        {
+            BootstrapAdminAutoBindEnabled = true,
+            BootstrapAdminUserName = ""
+        };
+
+        Action act = options.EnsureValid;
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*CloudOidc:BootstrapAdminUserName*");
+    }
+
     private static FinalizeCloudOidcLoginCommandHandler CreateHandler(
         InMemoryUserManager userManager,
         InMemoryRoleManager roleManager,
         InMemoryExternalIdentityBindingStore bindingStore,
         InMemoryIdentityAuditLogWriter auditWriter,
-        RecordingJwtTokenGenerator tokenGenerator)
+        RecordingJwtTokenGenerator tokenGenerator,
+        CloudOidcBootstrapAdminBindingOptions? bootstrapAdminBindingOptions = null)
     {
         return new FinalizeCloudOidcLoginCommandHandler(
             userManager,
@@ -334,6 +483,7 @@ public sealed class CloudOidcLoginTests
             bindingStore,
             auditWriter,
             tokenGenerator,
+            Options.Create(bootstrapAdminBindingOptions ?? new CloudOidcBootstrapAdminBindingOptions()),
             new InlineTransactionalExecutionService());
     }
 
@@ -361,16 +511,21 @@ public sealed class CloudOidcLoginTests
             cache ?? new InMemoryCloudIdentityStatusValidationCache());
     }
 
-    private static CloudOidcIdentityProfile CreateProfile(bool accountEnabled = true)
+    private static CloudOidcIdentityProfile CreateProfile(
+        bool accountEnabled = true,
+        string subject = "cloud-user-1",
+        string preferredUserName = "E0001",
+        string? employeeNo = "E0001",
+        string? employeeId = "employee-1")
     {
         return new CloudOidcIdentityProfile(
             "https://cloud.example.com",
-            "cloud-user-1",
+            subject,
             CloudOidcIdentityProfile.DefaultTenantId,
-            "E0001",
+            preferredUserName,
             "张三",
-            "employee-1",
-            "E0001",
+            employeeId,
+            employeeNo,
             "D001",
             "制造一部",
             "v1",

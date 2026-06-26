@@ -40,6 +40,8 @@ public sealed class EnterpriseProductionPilotHardeningP16Tests
             "intent-test-001",
             "sha256:intent-goal",
             ["devices"],
+            null,
+            null,
             new CloudProductionGoalTimeRangeDto(now.AddDays(-1), now),
             50,
             ["Markdown"],

@@ -216,6 +216,11 @@ public sealed class RagIndexingLifecycleTests
         document.Classification.Should().Be(DocumentClassification.Internal);
         document.SourceType.Should().Be(DocumentSourceType.UserUploaded);
         document.AllowedForFinalPrompt.Should().BeTrue();
+        document.StartParsing();
+        document.CompleteParsing();
+        document.AddChunk(0, "chunk");
+        document.StartEmbedding();
+        document.MarkAsIndexed();
         document.CanEnterFinalPrompt(now).Should().BeTrue();
 
         document.ConfigureGovernance(
@@ -377,7 +382,7 @@ public sealed class RagIndexingLifecycleTests
         var result = await handler.Handle(new DeleteDocumentCommand(document.Id), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
-        knowledgeBase.Documents.Should().BeEmpty();
+        knowledgeBase.Documents.Should().ContainSingle().Which.Status.Should().Be(DocumentStatus.SoftDeleted);
         var message = eventStager.StagedMessages.Should().ContainSingle().Subject
             .Should().BeOfType<DocumentFileDeletionRequestedEvent>().Subject;
         message.DocumentId.Should().Be(document.Id.Value);

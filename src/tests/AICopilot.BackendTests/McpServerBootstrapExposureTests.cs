@@ -2,9 +2,12 @@ using AICopilot.AgentPlugin;
 using AICopilot.AiGatewayService.Plugins;
 using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
 using AICopilot.Infrastructure.Mcp;
+using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
+using AICopilot.SharedKernel.Repository;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using ModelContextProtocol.Client;
 using System.Reflection;
 
 namespace AICopilot.BackendTests;
@@ -110,6 +113,79 @@ public sealed class McpServerBootstrapExposureTests
         }
     }
 
+    [Fact]
+    public async Task StartAsync_ShouldSkipEnabledStdioServer_WhenCommandIsMissing()
+    {
+        var missingCommand = $"aicopilot-missing-mcp-command-{Guid.NewGuid():N}";
+        var server = new McpServerInfo(
+            "missing-command-mcp",
+            "server with missing command",
+            McpTransportType.Stdio,
+            missingCommand,
+            string.Empty,
+            ChatExposureMode.Advisory,
+            [new McpAllowedTool("Echo")],
+            true);
+
+        var serverRepository = new InMemoryReadRepository<McpServerInfo>([server]);
+        var approvalRequirementReadService = new TestApprovalRequirementReadService();
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAgentPlugin(registrar => registrar.RegisterPluginFromAssembly(typeof(DiagnosticAdvisorPlugin).Assembly));
+        using var provider = services.BuildServiceProvider();
+
+        var loader = provider.GetRequiredService<AgentPluginLoader>();
+        var bootstrap = new McpServerBootstrap(
+            serverRepository,
+            approvalRequirementReadService,
+            loader,
+            NullLogger<McpServerBootstrap>.Instance);
+
+        var clients = new List<IAsyncDisposable>();
+        await foreach (var client in bootstrap.StartAsync(CancellationToken.None))
+        {
+            clients.Add(client);
+        }
+
+        clients.Should().BeEmpty();
+        loader.GetPlugin("missing-command-mcp").Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CreateRegistrationAsync_ShouldNotSwallowNonCommandMissingErrors()
+    {
+        var server = new McpServerInfo(
+            "throwing-mcp",
+            "server with runtime failure",
+            McpTransportType.Stdio,
+            "dotnet",
+            string.Empty,
+            ChatExposureMode.Advisory,
+            [new McpAllowedTool("Echo")],
+            true);
+
+        var serverRepository = new InMemoryReadRepository<McpServerInfo>([server]);
+        var approvalRequirementReadService = new TestApprovalRequirementReadService();
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAgentPlugin(registrar => registrar.RegisterPluginFromAssembly(typeof(DiagnosticAdvisorPlugin).Assembly));
+        using var provider = services.BuildServiceProvider();
+
+        var bootstrap = new ThrowingMcpServerBootstrap(
+            serverRepository,
+            approvalRequirementReadService,
+            provider.GetRequiredService<AgentPluginLoader>());
+
+        var action = () => bootstrap.CreateRegistrationAsync(
+            new McpRuntimeServerState(server.Id.Value, server.Name, server.RowVersion),
+            CancellationToken.None);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("synthetic MCP runtime failure");
+    }
+
     private static string[] ResolveCommandArguments(string rawArguments)
     {
         var method = typeof(McpServerBootstrap).GetMethod(
@@ -118,5 +194,21 @@ public sealed class McpServerBootstrapExposureTests
 
         method.Should().NotBeNull();
         return (string[])method!.Invoke(null, [rawArguments])!;
+    }
+
+    private sealed class ThrowingMcpServerBootstrap(
+        IReadRepository<McpServerInfo> mcpServerRepository,
+        IApprovalRequirementReadService approvalRequirementReadService,
+        IAgentPluginRegistry agentPluginRegistry)
+        : McpServerBootstrap(
+            mcpServerRepository,
+            approvalRequirementReadService,
+            agentPluginRegistry,
+            NullLogger<McpServerBootstrap>.Instance)
+    {
+        protected override Task<McpClient> CreateStdioClientAsync(McpServerInfo mcpServerInfo, CancellationToken ct)
+        {
+            throw new InvalidOperationException("synthetic MCP runtime failure");
+        }
     }
 }

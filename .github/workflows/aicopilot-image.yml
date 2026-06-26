@@ -1,0 +1,298 @@
+name: aicopilot-image
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "src/hosts/**"
+      - "src/core/**"
+      - "src/shared/**"
+      - "src/services/**"
+      - "src/infrastructure/**"
+      - "src/vues/AICopilot.Web/**"
+      - "AICopilot.slnx"
+      - "global.json"
+      - ".github/workflows/aicopilot-image.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-push:
+    runs-on: [self-hosted, iiot-linux-prod]
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@v4
+        continue-on-error: true
+
+      - name: Checkout via archive fallback
+        if: steps.checkout.outcome != 'success'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/source-${GITHUB_SHA}.zip"
+          extract_root="$(mktemp -d "$RUNNER_TEMP/source.XXXXXX")"
+          rm -f "$archive"
+          curl --fail --location --retry 5 --retry-delay 5 --connect-timeout 20 --max-time 300 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://codeload.github.com/${GITHUB_REPOSITORY}/zip/${GITHUB_SHA}" \
+            -o "$archive"
+          unzip -q "$archive" -d "$extract_root"
+          extracted="$(find "$extract_root" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+          find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          shopt -s dotglob
+          cp -a "$extracted"/* "$GITHUB_WORKSPACE"/
+
+      - name: Detect image relevance
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          httpapi=false
+          migration=false
+          dataworker=false
+          ragworker=false
+          web=false
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            httpapi=true
+            migration=true
+            dataworker=true
+            ragworker=true
+            web=true
+          else
+            before="${{ github.event.before }}"
+            if [ -z "$before" ] || printf '%s' "$before" | grep -Eq '^0+$'; then
+              httpapi=true
+              migration=true
+              dataworker=true
+              ragworker=true
+              web=true
+            else
+              changed_files="$(mktemp)"
+              if [ -d .git ]; then
+                git fetch --no-tags --prune --depth=50 origin "${GITHUB_REF_NAME:-main}" || true
+              fi
+
+              if [ -d .git ] \
+                && git cat-file -e "$before^{commit}" 2>/dev/null \
+                && git cat-file -e "$GITHUB_SHA^{commit}" 2>/dev/null; then
+                git diff --name-only "$before" "$GITHUB_SHA" > "$changed_files"
+              else
+                echo "Git history is unavailable for path filtering; building all AICopilot images." >> "$GITHUB_STEP_SUMMARY"
+                httpapi=true
+                migration=true
+                dataworker=true
+                ragworker=true
+                web=true
+              fi
+
+              if [ "$httpapi" != "true" ] && [ "$migration" != "true" ] && [ "$dataworker" != "true" ] && [ "$ragworker" != "true" ] && [ "$web" != "true" ]; then
+                if grep -Eq '^(AICopilot\.slnx|global\.json)$' "$changed_files" \
+                  || grep -Eq '^src/(core|shared|services|infrastructure)/' "$changed_files" \
+                  || grep -Eq '^src/hosts/AICopilot\.ServiceDefaults/' "$changed_files"; then
+                  httpapi=true
+                  migration=true
+                  dataworker=true
+                  ragworker=true
+                fi
+
+                grep -Eq '^src/hosts/AICopilot\.HttpApi/' "$changed_files" && httpapi=true
+                grep -Eq '^src/hosts/AICopilot\.MigrationWorkApp/' "$changed_files" && migration=true
+                grep -Eq '^src/hosts/AICopilot\.DataWorker/' "$changed_files" && dataworker=true
+                grep -Eq '^src/hosts/AICopilot\.RagWorker/' "$changed_files" && ragworker=true
+                grep -Eq '^src/vues/AICopilot\.Web/' "$changed_files" && web=true
+              fi
+            fi
+          fi
+
+          any_backend=false
+          if [ "$httpapi" = "true" ] || [ "$migration" = "true" ] || [ "$dataworker" = "true" ] || [ "$ragworker" = "true" ]; then
+            any_backend=true
+          fi
+
+          {
+            echo "httpapi=$httpapi"
+            echo "migration=$migration"
+            echo "dataworker=$dataworker"
+            echo "ragworker=$ragworker"
+            echo "web=$web"
+            echo "any_backend=$any_backend"
+          } >> "$GITHUB_OUTPUT"
+
+          if [ "$any_backend" != "true" ] && [ "$web" != "true" ]; then
+            echo "No relevant image changes detected; skipping AICopilot image build." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Setup .NET
+        if: steps.changes.outputs.any_backend == 'true'
+        uses: actions/setup-dotnet@v4
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet
+        with:
+          dotnet-version: 10.0.301
+
+      - name: Resolve Harbor target
+        if: steps.changes.outputs.any_backend == 'true' || steps.changes.outputs.web == 'true'
+        id: registry
+        shell: bash
+        env:
+          OCI_REGISTRY: ${{ secrets.OCI_REGISTRY }}
+          OCI_NAMESPACE: ${{ secrets.OCI_NAMESPACE }}
+          OCI_REGISTRY_USERNAME: ${{ secrets.OCI_REGISTRY_USERNAME }}
+          OCI_REGISTRY_PASSWORD: ${{ secrets.OCI_REGISTRY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          registry="${OCI_REGISTRY:-}"
+          namespace="${OCI_NAMESPACE:-enterprise-ai}"
+          if [ -z "$registry" ] || [ -z "$namespace" ]; then
+            echo "OCI_REGISTRY and OCI_NAMESPACE are required for the intranet self-hosted runner flow." >&2
+            exit 64
+          fi
+          if [ -z "${OCI_REGISTRY_USERNAME:-}" ] || [ -z "${OCI_REGISTRY_PASSWORD:-}" ]; then
+            echo "OCI_REGISTRY_USERNAME and OCI_REGISTRY_PASSWORD are required for Harbor push." >&2
+            exit 64
+          fi
+          echo "registry=$registry" >> "$GITHUB_OUTPUT"
+          echo "namespace=$namespace" >> "$GITHUB_OUTPUT"
+          echo "image_prefix=$registry/$namespace" >> "$GITHUB_OUTPUT"
+          echo "release_tag=sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Validate runner and Docker
+        if: steps.changes.outputs.any_backend == 'true' || steps.changes.outputs.web == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$(id -u)" -eq 0 ]; then
+            echo "Self-hosted runner must not run as root." >&2
+            exit 64
+          fi
+          docker version >/dev/null
+          docker buildx version >/dev/null
+
+      - name: Log in to Harbor
+        if: steps.changes.outputs.any_backend == 'true' || steps.changes.outputs.web == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "${{ secrets.OCI_REGISTRY_PASSWORD }}" |
+            docker login "${{ steps.registry.outputs.registry }}" \
+              --username "${{ secrets.OCI_REGISTRY_USERNAME }}" \
+              --password-stdin
+
+      - name: Publish backend images
+        if: steps.changes.outputs.any_backend == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_prefix="${{ steps.registry.outputs.image_prefix }}"
+          release_tag="${{ steps.registry.outputs.release_tag }}"
+
+          publish_dotnet_image() {
+            local project_path="$1"
+            local image_name="$2"
+
+            dotnet publish "$project_path" \
+              -c Release \
+              --os linux \
+              --arch x64 \
+              /t:PublishContainer \
+              -p:ContainerRegistry="${{ steps.registry.outputs.registry }}" \
+              -p:ContainerRepository="${{ steps.registry.outputs.namespace }}/$image_name" \
+              -p:ContainerImageTag="$release_tag"
+
+            echo "- \`$image_prefix/$image_name:$release_tag\`" >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          {
+            echo "### AICopilot backend images"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "${{ steps.changes.outputs.httpapi }}" = "true" ]; then
+            publish_dotnet_image "src/hosts/AICopilot.HttpApi/AICopilot.HttpApi.csproj" "aicopilot-httpapi"
+          fi
+          if [ "${{ steps.changes.outputs.migration }}" = "true" ]; then
+            publish_dotnet_image "src/hosts/AICopilot.MigrationWorkApp/AICopilot.MigrationWorkApp.csproj" "aicopilot-migration"
+          fi
+          if [ "${{ steps.changes.outputs.dataworker }}" = "true" ]; then
+            publish_dotnet_image "src/hosts/AICopilot.DataWorker/AICopilot.DataWorker.csproj" "aicopilot-dataworker"
+          fi
+          if [ "${{ steps.changes.outputs.ragworker }}" = "true" ]; then
+            publish_dotnet_image "src/hosts/AICopilot.RagWorker/AICopilot.RagWorker.csproj" "aicopilot-ragworker"
+          fi
+
+      - name: Build and push web image
+        if: steps.changes.outputs.web == 'true'
+        shell: bash
+        env:
+          VITE_CLOUD_PLATFORM_URL: ${{ vars.VITE_CLOUD_PLATFORM_URL }}
+        run: |
+          set -euo pipefail
+          image_prefix="${{ steps.registry.outputs.image_prefix }}"
+          release_tag="${{ steps.registry.outputs.release_tag }}"
+          cache_ref="$image_prefix/aicopilot-webui:buildcache"
+          cloud_platform_url="${VITE_CLOUD_PLATFORM_URL:-http://10.98.90.154:81}"
+
+          docker buildx build \
+            --platform linux/amd64 \
+            --push \
+            --build-arg "VITE_CLOUD_PLATFORM_URL=$cloud_platform_url" \
+            --build-arg "NODE_BASE_IMAGE=$image_prefix/base-node:22-alpine" \
+            --build-arg "NGINX_BASE_IMAGE=$image_prefix/base-nginx:1.27-alpine" \
+            --cache-from "type=registry,ref=$cache_ref" \
+            --cache-to "type=registry,ref=$cache_ref,mode=max" \
+            --tag "$image_prefix/aicopilot-webui:$release_tag" \
+            src/vues/AICopilot.Web
+
+          {
+            echo "### AICopilot web image"
+            echo "- \`$image_prefix/aicopilot-webui:$release_tag\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Emit built services hint
+        if: steps.changes.outputs.any_backend == 'true' || steps.changes.outputs.web == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          services=()
+          if [ "${{ steps.changes.outputs.httpapi }}" = "true" ]; then
+            services+=(httpapi)
+          fi
+          if [ "${{ steps.changes.outputs.migration }}" = "true" ]; then
+            services+=(migration)
+          fi
+          if [ "${{ steps.changes.outputs.dataworker }}" = "true" ]; then
+            services+=(dataworker)
+          fi
+          if [ "${{ steps.changes.outputs.ragworker }}" = "true" ]; then
+            services+=(ragworker)
+          fi
+          if [ "${{ steps.changes.outputs.web }}" = "true" ]; then
+            services+=(web)
+          fi
+
+          services_csv="$(IFS=,; printf '%s' "${services[*]}")"
+          mkdir -p "$RUNNER_TEMP/aicopilot-built-services"
+          printf '%s\n' "$services_csv" > "$RUNNER_TEMP/aicopilot-built-services/services.txt"
+
+          {
+            echo "### AICopilot built services"
+            echo "- Release tag: \`${{ steps.registry.outputs.release_tag }}\`"
+            echo "- Deploy services input: \`$services_csv\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload built services hint
+        if: steps.changes.outputs.any_backend == 'true' || steps.changes.outputs.web == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: aicopilot-built-services
+          path: ${{ runner.temp }}/aicopilot-built-services/services.txt
+          if-no-files-found: error
+          retention-days: 14

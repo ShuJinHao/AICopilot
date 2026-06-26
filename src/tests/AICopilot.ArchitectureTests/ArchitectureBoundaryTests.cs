@@ -845,26 +845,37 @@ public sealed class ArchitectureBoundaryTests
             "hosts",
             "AICopilot.MigrationWorkApp",
             "Worker.cs");
-        var source = File.ReadAllText(workerFile);
+        var migratorFile = Path.Combine(
+            SolutionRoot,
+            "src",
+            "hosts",
+            "AICopilot.MigrationWorkApp",
+            "MigrationWorkerDatabaseMigrator.cs");
+        var workerSource = File.ReadAllText(workerFile);
+        var migratorSource = File.ReadAllText(migratorFile);
 
-        source.Should().Contain("GetRequiredService<IdentityStoreDbContext>");
-        source.Should().NotContain("GetRequiredService<AuditDbContext>");
-        source.Should().NotContain("GetRequiredService<OutboxDbContext>");
-        source.Should().Contain("MigrationHistoryBootstrapper.BootstrapLegacyHistoryAsync");
+        workerSource.Should().Contain("GetRequiredService<IdentityStoreDbContext>");
+        workerSource.Should().NotContain("GetRequiredService<AuditDbContext>");
+        workerSource.Should().NotContain("GetRequiredService<OutboxDbContext>");
+        migratorSource.Should().Contain("MigrationHistoryBootstrapper.BootstrapLegacyHistoryAsync");
 
-        var mainMigration = source.IndexOf("MigrationHistoryTables.AiCopilot", StringComparison.Ordinal);
-        var identityMigration = source.IndexOf("MigrationHistoryTables.IdentityStore", StringComparison.Ordinal);
-        var firstModuleMigration = source.IndexOf("MigrationHistoryTables.AiGateway", StringComparison.Ordinal);
-        var bootstrap = source.IndexOf("await MigrationHistoryBootstrapper.BootstrapLegacyHistoryAsync", StringComparison.Ordinal);
-        var runMigrations = source.IndexOf("foreach (var migrationContext in migrationContexts)", StringComparison.Ordinal);
-        var identitySeed = source.IndexOf("await SeedIdentityAsync", StringComparison.Ordinal);
+        var mainMigration = migratorSource.IndexOf("MigrationHistoryTables.AiCopilot", StringComparison.Ordinal);
+        var identityMigration = migratorSource.IndexOf("MigrationHistoryTables.IdentityStore", StringComparison.Ordinal);
+        var firstModuleMigration = migratorSource.IndexOf("MigrationHistoryTables.AiGateway", StringComparison.Ordinal);
+        var bootstrap = migratorSource.IndexOf("await MigrationHistoryBootstrapper.BootstrapLegacyHistoryAsync", StringComparison.Ordinal);
+        var runMigrations = migratorSource.IndexOf("foreach (var migrationContext in migrationContexts)", StringComparison.Ordinal);
+        var createContexts = workerSource.IndexOf("MigrationWorkerDatabaseMigrator.CreateMigrationContexts", StringComparison.Ordinal);
+        var runMigrationCall = workerSource.IndexOf("await MigrationWorkerDatabaseMigrator.RunMigrationsAsync", StringComparison.Ordinal);
+        var identitySeed = workerSource.IndexOf("await MigrationWorkerIdentitySeeder.SeedAsync", StringComparison.Ordinal);
 
         mainMigration.Should().BeGreaterThanOrEqualTo(0);
         identityMigration.Should().BeGreaterThan(mainMigration);
         firstModuleMigration.Should().BeGreaterThan(identityMigration);
         bootstrap.Should().BeGreaterThan(firstModuleMigration);
         runMigrations.Should().BeGreaterThan(bootstrap);
-        identitySeed.Should().BeGreaterThan(runMigrations);
+        createContexts.Should().BeGreaterThanOrEqualTo(0);
+        runMigrationCall.Should().BeGreaterThan(createContexts);
+        identitySeed.Should().BeGreaterThan(runMigrationCall);
     }
 
     [Fact]

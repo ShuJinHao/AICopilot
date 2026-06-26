@@ -1018,6 +1018,10 @@ namespace AICopilot.EntityFrameworkCore.Migrations.AiGatewayDbContext
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<Guid?>("DeviceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("device_id");
+
                     b.PrimitiveCollection<string[]>("EndpointCodes")
                         .IsRequired()
                         .HasColumnType("text[]")
@@ -1038,6 +1042,11 @@ namespace AICopilot.EntityFrameworkCore.Migrations.AiGatewayDbContext
                     b.Property<int>("MaxRows")
                         .HasColumnType("integer")
                         .HasColumnName("max_rows");
+
+                    b.Property<string>("PassStationTypeKey")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("pass_station_type_key");
 
                     b.PrimitiveCollection<string[]>("RejectedReasons")
                         .IsRequired()
