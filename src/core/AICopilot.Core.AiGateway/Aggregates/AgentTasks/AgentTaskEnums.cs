@@ -1,5 +1,8 @@
+using System.Text.Json.Serialization;
+
 namespace AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum AgentTaskType
 {
     GeneralAgent = 0,

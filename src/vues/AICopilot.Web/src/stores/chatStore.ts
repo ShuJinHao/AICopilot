@@ -408,11 +408,9 @@ export const useChatStore = defineStore('chat', () => {
         return null
       }
 
-      await loadAgentApprovals(completedTask.id)
-      await loadAgentAuditSummary(completedTask.id)
-      await refreshWorkspace(completedTask)
+      await loadAgentTasks(sessionId)
       await loadTimeline(sessionId)
-      return completedTask
+      return agentTasks.value.find((task) => task.id === completedTask.id) ?? latestAgentTask.value ?? completedTask
     } catch (error) {
       const message = toFriendlyMessage(error)
       setCurrentSessionError(message)

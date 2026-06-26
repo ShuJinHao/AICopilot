@@ -12,7 +12,8 @@ import type {
   RoutingModelDetail,
   RoutingModelFormModel,
   RoutingModelSummary,
-  SkillDefinition
+  SkillDefinition,
+  ToolRegistryCatalog
 } from '@/types/app'
 
 export const configService = {
@@ -142,6 +143,12 @@ export const configService = {
   async getSkills() {
     return await apiClient.get<SkillDefinition[]>('/aigateway/skills', {
       enabledOnly: false
+    })
+  },
+
+  async getToolCatalog() {
+    return await apiClient.get<ToolRegistryCatalog>('/aigateway/tools/catalog', {
+      simulationOnly: false
     })
   },
 

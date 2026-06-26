@@ -10,6 +10,10 @@ const configServiceSource = readFileSync(
   fileURLToPath(new URL('../../src/services/configService.ts', import.meta.url)),
   'utf8'
 )
+const skillDisplaySource = readFileSync(
+  fileURLToPath(new URL('../../src/utils/skillDisplay.ts', import.meta.url)),
+  'utf8'
+)
 
 describe('ConfigView usability defaults', () => {
   it('shows a primary model card before advanced stage settings', () => {
@@ -31,6 +35,20 @@ describe('ConfigView usability defaults', () => {
     expect(configViewSource).toContain('回答稳定性 / 创造性')
     expect(configViewSource).toContain('回答长度')
     expect(configViewSource).toContain('上下文容量')
-    expect(configViewSource).toContain('查询和分析 Cloud 只读业务数据')
+    expect(configViewSource).toContain('value.toFixed(2)')
+    expect(configViewSource).toContain('temperatureLabel(slot.model?.temperature)')
+    expect(configViewSource).toContain('mappedListText(skill.allowedDataSourceModes, dataSourceModeLabels)')
+    expect(configViewSource).toContain('mappedListText(skill.allowedKnowledgeScopes, knowledgeScopeLabels)')
+    expect(configViewSource).toContain('approvalPolicyLabel(skill.approvalPolicy)')
+    expect(configServiceSource).toContain("'/aigateway/tools/catalog'")
+    expect(configViewSource).toContain('toolDisplayName(toolCode)')
+    expect(configViewSource).toContain('refreshToolCatalog()')
+    expect(configViewSource).toContain('AI 模拟业务库')
+    expect(configViewSource).toContain('工具执行需确认')
+    expect(skillDisplaySource).toContain('查询和分析 Cloud 只读业务数据')
+    expect(skillDisplaySource).toContain('knowledge_research')
+    expect(skillDisplaySource).not.toContain('knowledge_search')
+    expect(configViewSource).toContain('getSkillDisplayDescription(skill.skillCode)')
+    expect(configViewSource).not.toContain("return skill.description || '自动选择合适能力'")
   })
 })

@@ -16,12 +16,14 @@ import AppShell from '@/components/layout/AppShell.vue'
 import { showAiToast } from '@/composables/useAiFeedback'
 import { configService } from '@/services/configService'
 import { useConfigStore } from '@/stores/configStore'
+import { getSkillDisplayDescription } from '@/utils/skillDisplay'
 import type {
   CloudReadonlyStatus,
   ConversationTemplateSummary,
   LanguageModelSummary,
   LanguageModelTestResult,
   LanguageModelUsage,
+  AgentPlannerToolSummary,
   SkillDefinition
 } from '@/types/app'
 
@@ -104,6 +106,39 @@ const templateScopeLabels: Record<string, string> = {
   AgentExecutor: '最终执行'
 }
 
+const dataSourceModeLabels: Record<string, string> = {
+  CloudReadOnly: 'Cloud 只读',
+  CloudReadonly: 'Cloud 只读',
+  SimulationBusiness: 'AI 模拟业务库',
+  BusinessDatabase: '只读业务库',
+  Workspace: '工作区文件',
+  UploadedFile: '上传文件',
+  FreeGoal: '自由目标'
+}
+
+const knowledgeScopeLabels: Record<string, string> = {
+  SelectedKnowledgeBase: '已选知识库',
+  AllVisibleKnowledgeBases: '可见知识库',
+  None: '不使用知识库'
+}
+
+const approvalPolicyLabels: Record<string, string> = {
+  ToolApproval: '工具执行需确认',
+  FinalOutputApproval: '最终输出需确认',
+  PlanApproval: '计划需确认',
+  None: '无需审批'
+}
+
+const outputComponentLabels: Record<string, string> = {
+  chart: '图表',
+  html: 'HTML',
+  markdown: 'Markdown',
+  pdf: 'PDF',
+  pptx: 'PPTX',
+  xlsx: 'XLSX',
+  text: '文本'
+}
+
 const connectivityLabels: Record<string, string> = {
   Unknown: '未测试',
   Succeeded: '配置完成',
@@ -113,6 +148,7 @@ const connectivityLabels: Record<string, string> = {
 const testingModelIds = ref<Set<string>>(new Set())
 const drawerTesting = ref(false)
 const skillDefinitions = ref<SkillDefinition[]>([])
+const toolSummaries = ref<AgentPlannerToolSummary[]>([])
 const isLoadingSkills = ref(false)
 const cloudReadonlyStatus = ref<CloudReadonlyStatus | null>(null)
 const isLoadingCloudReadonlyStatus = ref(false)
@@ -248,13 +284,23 @@ function yesNo(value?: boolean | null) {
 
 function temperatureLabel(value?: number | null) {
   if (typeof value !== 'number') return '-'
-  if (value <= 0.2) return `稳定 (${value})`
-  if (value <= 0.7) return `均衡 (${value})`
-  return `创造 (${value})`
+  const formattedValue = Number(value.toFixed(2)).toString()
+  if (value <= 0.2) return `稳定 (${formattedValue})`
+  if (value <= 0.7) return `均衡 (${formattedValue})`
+  return `创造 (${formattedValue})`
 }
 
 function listText(values: string[], empty = '未限制') {
   return values.length ? values.join(' / ') : empty
+}
+
+function mappedListText(values: string[], labels: Record<string, string>, empty = '未限制') {
+  return values.length ? values.map((value) => labels[value] ?? value).join(' / ') : empty
+}
+
+function approvalPolicyLabel(value?: string | null) {
+  if (!value) return '-'
+  return approvalPolicyLabels[value] ?? value
 }
 
 function skillTone(skill: SkillDefinition) {
@@ -265,12 +311,11 @@ function skillTone(skill: SkillDefinition) {
 }
 
 function skillDisplayDescription(skill: SkillDefinition) {
-  const code = skill.skillCode.toLowerCase()
-  if (code === 'cloud_readonly') return '查询和分析 Cloud 只读业务数据'
-  if (code.includes('data')) return '查询和分析产线数据'
-  if (code.includes('knowledge') || code.includes('rag')) return '从知识库检索相关文档'
-  if (code.includes('chat')) return '普通对话，不调用工具'
-  return skill.description || '自动选择合适能力'
+  return getSkillDisplayDescription(skill.skillCode)
+}
+
+function toolDisplayName(toolCode: string) {
+  return toolSummaries.value.find((tool) => tool.toolCode === toolCode)?.displayName ?? toolCode
 }
 
 async function refreshSkillDefinitions() {
@@ -280,6 +325,11 @@ async function refreshSkillDefinitions() {
   } finally {
     isLoadingSkills.value = false
   }
+}
+
+async function refreshToolCatalog() {
+  const catalog = await configService.getToolCatalog()
+  toolSummaries.value = catalog.tools
 }
 
 async function refreshCloudReadonlyStatus() {
@@ -295,6 +345,7 @@ async function refreshAllAgentSettings() {
   await Promise.all([
     store.refreshAgentSlots(),
     refreshSkillDefinitions(),
+    refreshToolCatalog(),
     refreshCloudReadonlyStatus()
   ])
 }
@@ -671,7 +722,7 @@ onMounted(() => {
               </div>
               <div>
                 <span>温度</span>
-                <strong>{{ slot.model?.temperature ?? '-' }}</strong>
+                <strong>{{ temperatureLabel(slot.model?.temperature) }}</strong>
               </div>
               <div>
                 <span>连通性</span>
@@ -776,27 +827,32 @@ onMounted(() => {
             <div class="skill-meta-grid">
               <div>
                 <span>数据源</span>
-                <strong>{{ listText(skill.allowedDataSourceModes) }}</strong>
+                <strong>{{ mappedListText(skill.allowedDataSourceModes, dataSourceModeLabels) }}</strong>
               </div>
               <div>
                 <span>知识库</span>
-                <strong>{{ listText(skill.allowedKnowledgeScopes) }}</strong>
+                <strong>{{ mappedListText(skill.allowedKnowledgeScopes, knowledgeScopeLabels) }}</strong>
               </div>
               <div>
                 <span>审批</span>
-                <strong>{{ skill.approvalPolicy || '-' }}</strong>
+                <strong>{{ approvalPolicyLabel(skill.approvalPolicy) }}</strong>
               </div>
               <div>
                 <span>输出</span>
-                <strong>{{ listText(skill.outputComponentTypes, 'text') }}</strong>
+                <strong>{{ mappedListText(skill.outputComponentTypes, outputComponentLabels, '文本') }}</strong>
               </div>
             </div>
             <details class="skill-tool-fold">
               <summary>允许工具 · {{ skill.allowedToolCodes.length }}</summary>
               <div class="tool-chip-list">
-                <code v-for="toolCode in skill.allowedToolCodes" :key="`${skill.skillCode}:${toolCode}`">
-                  {{ toolCode }}
-                </code>
+                <span
+                  v-for="toolCode in skill.allowedToolCodes"
+                  :key="`${skill.skillCode}:${toolCode}`"
+                  class="tool-chip"
+                >
+                  <strong>{{ toolDisplayName(toolCode) }}</strong>
+                  <code>{{ toolCode }}</code>
+                </span>
               </div>
             </details>
           </AiCard>
@@ -1076,11 +1132,31 @@ onMounted(() => {
   gap: 6px;
 }
 
-.tool-chip-list code {
+.tool-chip {
+  display: inline-flex;
+  max-width: 100%;
+  min-height: 34px;
+  align-items: center;
+  gap: 6px;
   border: 1px solid rgba(63, 111, 115, 0.16);
   border-radius: 999px;
   padding: 5px 8px;
   background: rgba(248, 250, 252, 0.84);
+}
+
+.tool-chip strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ai-text);
+  font-size: 12px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-chip-list code {
+  color: var(--ai-text-muted);
+  font-size: 11px;
 }
 
 .slot-card {

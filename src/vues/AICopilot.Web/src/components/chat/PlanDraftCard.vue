@@ -5,12 +5,13 @@ import AiTag from '@/components/ai/AiTag.vue'
 import { useAgentWorkbench } from '@/composables/useAgentWorkbench'
 import { useAgentPlanPreview } from '@/composables/useAgentPlanPreview'
 
-const { latestTask, blockedStep } = useAgentWorkbench()
+const { latestTask, blockedStep, taskSteps } = useAgentWorkbench()
 const {
   latestPlan,
   latestPlanCapabilityGaps,
   isPlanDraftTask,
   previewPlanSteps,
+  totalPreviewPlanStepCount,
   hiddenPlanStepCount
 } = useAgentPlanPreview()
 
@@ -39,7 +40,7 @@ function planStepTag(step: { requiresApproval: boolean }) {
   <section v-if="latestTask" class="agent-plan" data-testid="inline-plan-card">
     <div class="section-title">
       <strong>{{ latestTask.title || '计划摘要' }}</strong>
-      <span>{{ previewPlanSteps.length }} / {{ latestTask.steps.length }} 个步骤</span>
+      <span>{{ previewPlanSteps.length }} / {{ totalPreviewPlanStepCount }} 个步骤</span>
     </div>
     <p class="agent-plan-goal">{{ latestTask.goal }}</p>
     <p v-if="latestPlan?.skillRoutingReason" class="agent-skill-reason">

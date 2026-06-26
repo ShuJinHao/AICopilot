@@ -1,4 +1,7 @@
+using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
+using AICopilot.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
 namespace AICopilot.MigrationWorkApp;
@@ -6,9 +9,13 @@ namespace AICopilot.MigrationWorkApp;
 internal static class MigrationWorkerCloudSimulationSeeder
 {
     private const string CloudSimConnectionName = "cloud-device-semantic-sim";
+    private const string SemanticDatabaseName = "DeviceSemanticReadonly";
+    private const string SemanticDatabaseDescription = "本机开发环境 Cloud 只读模拟数据源，包含设备状态、设备日志、产能和生产记录视图。";
 
     public static async Task EnsureSourceAsync(
         IConfiguration configuration,
+        string environmentName,
+        DataAnalysisDbContext dataAnalysisDbContext,
         CancellationToken cancellationToken)
     {
         var connectionString = configuration.GetConnectionString(CloudSimConnectionName);
@@ -17,6 +24,90 @@ internal static class MigrationWorkerCloudSimulationSeeder
             return;
         }
 
+        if (!IsSimulationSeedAllowed(configuration, environmentName))
+        {
+            return;
+        }
+
+        await EnsureBusinessDatabaseAsync(dataAnalysisDbContext, connectionString, cancellationToken);
+        await EnsureSimulationSchemaAsync(connectionString, cancellationToken);
+    }
+
+    private static bool IsSimulationSeedAllowed(IConfiguration configuration, string environmentName)
+    {
+        var mode = configuration["CloudReadonly:Mode"];
+        if (!string.Equals(mode, "Simulation", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!string.Equals(environmentName, "Development", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "CloudReadonly:Mode=Simulation is only allowed in Development. Production deployments must use Real Cloud AiRead and must not seed simulation data sources.");
+        }
+
+        var enabled = configuration["CloudReadonly:Simulation:Enabled"];
+        return bool.TryParse(enabled, out var parsed) && parsed;
+    }
+
+    private static async Task EnsureBusinessDatabaseAsync(
+        DataAnalysisDbContext dataAnalysisDbContext,
+        string connectionString,
+        CancellationToken cancellationToken)
+    {
+        var database = await dataAnalysisDbContext.BusinessDatabases
+            .SingleOrDefaultAsync(item => item.Name == SemanticDatabaseName, cancellationToken);
+
+        if (database is null)
+        {
+            dataAnalysisDbContext.BusinessDatabases.Add(new BusinessDatabase(
+                SemanticDatabaseName,
+                SemanticDatabaseDescription,
+                connectionString,
+                DbProviderType.PostgreSql,
+                isReadOnly: true,
+                externalSystemType: BusinessDataExternalSystemType.SimulationBusiness,
+                readOnlyCredentialVerified: true,
+                isEnabled: true,
+                category: "CloudReadonly",
+                tags: ["simulation", "cloud-readonly", "semantic"],
+                ownerDepartment: "AICopilot",
+                businessDomain: "Manufacturing",
+                sensitivityLevel: "Internal",
+                defaultQueryLimit: 200,
+                maxQueryLimit: 1000,
+                isSelectableInChat: true,
+                isSelectableInAgent: true));
+        }
+        else
+        {
+            database.UpdateInfo(SemanticDatabaseName, SemanticDatabaseDescription);
+            database.UpdateConnection(connectionString, DbProviderType.PostgreSql);
+            database.UpdateSettings(
+                isEnabled: true,
+                isReadOnly: true,
+                externalSystemType: BusinessDataExternalSystemType.SimulationBusiness,
+                readOnlyCredentialVerified: true);
+            database.UpdateGovernance(
+                category: "CloudReadonly",
+                tags: ["simulation", "cloud-readonly", "semantic"],
+                ownerDepartment: "AICopilot",
+                businessDomain: "Manufacturing",
+                sensitivityLevel: "Internal",
+                defaultQueryLimit: 200,
+                maxQueryLimit: 1000,
+                isSelectableInChat: true,
+                isSelectableInAgent: true);
+        }
+
+        await dataAnalysisDbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task EnsureSimulationSchemaAsync(
+        string connectionString,
+        CancellationToken cancellationToken)
+    {
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
 

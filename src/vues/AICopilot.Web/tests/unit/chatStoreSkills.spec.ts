@@ -216,6 +216,7 @@ function createTask(overrides: Partial<typeof plannedTask> = {}) {
 }
 
 function mockPlanAgentTaskStream(task = plannedTask) {
+  chatServiceMock.getAgentTasksBySession.mockResolvedValue([task])
   chatServiceMock.planAgentTaskStream.mockImplementation(async (_payload, callbacks) => {
     callbacks.onChunkReceived({
       source: 'PlanAgentTaskStreamHandler',

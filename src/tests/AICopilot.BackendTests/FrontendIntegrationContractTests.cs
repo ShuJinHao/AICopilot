@@ -3,6 +3,7 @@ using System.Text.Json;
 using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.AiGatewayService.Tools;
 using AICopilot.AiGatewayService.Workspaces;
+using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.RagService.EmbeddingModels;
 using AICopilot.Services.Contracts.AiGateway.Dtos;
 using AICopilot.SharedKernel.Result;
@@ -103,6 +104,30 @@ public sealed class OpenApiContractFixture : AICopilotAppFixture
 public sealed class FrontendContractSnapshotTests
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    [Theory]
+    [InlineData("ReportGeneration", AgentTaskType.ReportGeneration)]
+    [InlineData("CloudDataReport", AgentTaskType.CloudDataReport)]
+    [InlineData("DataAnalysis", AgentTaskType.DataAnalysis)]
+    public void PlanAgentTaskStreamRequest_ShouldAcceptFrontendStringTaskType(
+        string taskType,
+        AgentTaskType expected)
+    {
+        var sessionId = Guid.NewGuid();
+        var json = $$"""
+        {
+          "sessionId": "{{sessionId}}",
+          "goal": "生成可确认的计划",
+          "taskType": "{{taskType}}",
+          "modelId": null
+        }
+        """;
+
+        var request = JsonSerializer.Deserialize<PlanAgentTaskStreamRequest>(json, JsonOptions);
+
+        request.Should().NotBeNull();
+        request!.TaskType.Should().Be(expected);
+    }
 
     [Fact]
     public void AgentTaskDto_ShouldExposeFrontendComputedStateFieldsAndPlanMetadata()

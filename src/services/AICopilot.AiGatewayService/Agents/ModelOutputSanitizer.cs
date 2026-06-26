@@ -17,7 +17,7 @@ public static class ModelOutputSanitizer
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private static readonly Regex NakedThinkLinePattern = new(
-        @"^\s*(?:/?mm:think|/?think)\b.*(?:\r?\n|$)",
+        @"^\s*(?:(?:/?mm:think)|(?:/?think\b)).*(?:\r?\n|$)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Multiline);
 
     private static readonly Regex ResidualTagPattern = new(

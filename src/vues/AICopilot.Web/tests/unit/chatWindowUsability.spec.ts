@@ -14,6 +14,14 @@ const chatEmptyStateSource = readFileSync(
   fileURLToPath(new URL('../../src/components/chat/ChatEmptyState.vue', import.meta.url)),
   'utf8'
 )
+const planDraftCardSource = readFileSync(
+  fileURLToPath(new URL('../../src/components/chat/PlanDraftCard.vue', import.meta.url)),
+  'utf8'
+)
+const chatStoreSource = readFileSync(
+  fileURLToPath(new URL('../../src/stores/chatStore.ts', import.meta.url)),
+  'utf8'
+)
 
 describe('ChatWindow usability defaults', () => {
   it('starts in chat mode', () => {
@@ -51,11 +59,29 @@ describe('ChatWindow usability defaults', () => {
     expect(chatComposerSource).toContain("v-if=\"composerMode === 'plan' && planAdvancedOpen\"")
     expect(chatComposerSource).toContain('aria-label="选择计划类型"')
     expect(chatComposerSource).toContain('默认自动选择 Skill、工具和知识库')
+    expect(chatComposerSource).toContain('getSkillDisplayDescription(skill.skillCode)')
+    expect(chatComposerSource).not.toContain('knowledge_search')
   })
 
   it('keeps ChatWindow as an orchestration layer', () => {
     expect(chatWindowSource).toContain('<AgentRunThread v-if="hasInlineAgentRun" />')
     expect(chatWindowSource).toContain('<ChatComposer />')
     expect(chatWindowSource).not.toContain('function setComposerMode')
+  })
+
+  it('renders plan draft step count from the normalized plan preview', () => {
+    expect(planDraftCardSource).toContain('totalPreviewPlanStepCount')
+    expect(planDraftCardSource).toContain('{{ totalPreviewPlanStepCount }} 个步骤')
+    expect(planDraftCardSource).not.toContain('latestTask.steps.length')
+  })
+
+  it('refreshes the full agent task snapshot after a streamed plan draft', () => {
+    const start = chatStoreSource.indexOf('async function planAgentTask(goal: string)')
+    const end = chatStoreSource.indexOf('async function submitFinalReview', start)
+    const block = chatStoreSource.slice(start, end)
+
+    expect(block).toContain('await loadAgentTasks(sessionId)')
+    expect(block).toContain('await loadTimeline(sessionId)')
+    expect(block).toContain('agentTasks.value.find((task) => task.id === completedTask.id)')
   })
 })

@@ -41,6 +41,24 @@ public sealed class ToolRegistryGovernanceTests
     private static readonly Guid UserId = Guid.Parse("11111111-1111-4111-8111-111111111111");
 
     [Fact]
+    public void BuiltInToolCatalog_ShouldExposeChineseDisplayNames()
+    {
+        BuiltInToolRegistrations.CurrentCatalogVersion.Should().BeGreaterThanOrEqualTo(12);
+        var tools = BuiltInToolRegistrations.AgentRuntimeTools
+            .ToDictionary(tool => tool.ToolCode, StringComparer.Ordinal);
+
+        tools["read_uploaded_file"].DisplayName.Should().Be("读取上传文件");
+        tools["parse_csv_json"].DisplayName.Should().Be("解析 CSV/JSON");
+        tools["query_cloud_data_readonly"].DisplayName.Should().Be("查询 Cloud 只读数据");
+        tools["generate_business_chart"].DisplayName.Should().Be("生成业务图表");
+        tools["finalize_artifacts"].DisplayName.Should().Be("最终产物确认");
+        var displayNames = tools.Values.Select(tool => tool.DisplayName).ToArray();
+        displayNames.Should().NotContain("Finalize artifacts");
+        displayNames.Should().NotContain("Generate business chart");
+        displayNames.Should().NotContain("Parse CSV/JSON");
+    }
+
+    [Fact]
     public async Task ToolRegistryGuard_ShouldRejectMissingDisabledBlockedAndUnauthorizedTools()
     {
         var missing = await CreateGuard().ValidateAsync("missing_tool", UserId, CancellationToken.None);
@@ -219,6 +237,11 @@ public sealed class ToolRegistryGovernanceTests
         plan.RootElement.GetProperty("steps").EnumerateArray()
             .Select(step => step.GetProperty("toolCode").GetString())
             .Should().Contain("generate_markdown_report");
+        var stepTitles = plan.RootElement.GetProperty("steps").EnumerateArray()
+            .Select(step => step.GetProperty("title").GetString())
+            .ToArray();
+        stepTitles.Should().Contain("生成 Markdown 报告");
+        stepTitles.Should().NotContain("Generate Markdown report");
     }
 
     [Fact]

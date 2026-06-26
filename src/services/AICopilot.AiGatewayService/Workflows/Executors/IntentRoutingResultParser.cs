@@ -1,4 +1,5 @@
 using System.Text.Json;
+using AICopilot.AiGatewayService.Agents;
 using AICopilot.AiGatewayService.Models;
 
 namespace AICopilot.AiGatewayService.Workflows.Executors;
@@ -13,7 +14,8 @@ public static class IntentRoutingResultParser
             return false;
         }
 
-        var json = ExtractJson(text);
+        var cleanText = ModelOutputSanitizer.Strip(text).CleanText;
+        var json = ExtractJson(cleanText);
         if (string.IsNullOrWhiteSpace(json))
         {
             return false;

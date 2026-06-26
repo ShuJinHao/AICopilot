@@ -39,6 +39,7 @@ public sealed class FreeFormDbaAnalysisRunner(
 
             await using var scopedAgent = await agentBuilder.BuildAsync(db);
             var thread = await scopedAgent.Agent.CreateSessionAsync(cancellationToken);
+            var thinkTagFilter = new StreamingThinkTagFilter();
 
             await foreach (var update in scopedAgent.Agent.RunStreamingAsync(
                                intent.Query!,
@@ -56,10 +57,19 @@ public sealed class FreeFormDbaAnalysisRunner(
                                    session,
                                    assistantText: null,
                                    appendAssistantText: false,
-                                   cancellationToken))
+                                   cancellationToken,
+                                   thinkTagFilter))
                 {
                     await sink.WriteAsync(chunk, cancellationToken);
                 }
+            }
+
+            var cleanRemainder = thinkTagFilter.Flush();
+            if (!string.IsNullOrEmpty(cleanRemainder) && sink is not null)
+            {
+                await sink.WriteAsync(
+                    new ChatChunk(DataAnalysisExecutor.ExecutorId, ChunkType.Text, cleanRemainder),
+                    cancellationToken);
             }
 
             logger.LogInformation("数据库 {DbName} 查询完成。", dbName);

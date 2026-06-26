@@ -139,6 +139,40 @@ public sealed class PostFixClosureRegressionTests
     }
 
     [Fact]
+    public void AgentStreamRuntime_ShouldStripThinkTagsAcrossRuntimeUpdates()
+    {
+        var runtime = new AgentStreamRuntime(new ApprovalRequirementResolver(null!));
+        var assistantText = new System.Text.StringBuilder();
+        var thinkTagFilter = new StreamingThinkTagFilter();
+
+        var firstChunks = runtime.CreateUpdateChunksAsync(
+                new RuntimeAgentUpdate([new AiTextContent("<mm:think>内部")]),
+                "test",
+                session: null,
+                assistantText,
+                appendAssistantText: true,
+                CancellationToken.None,
+                thinkTagFilter)
+            .ToBlockingEnumerable()
+            .ToArray();
+        var secondChunks = runtime.CreateUpdateChunksAsync(
+                new RuntimeAgentUpdate([new AiTextContent("推理</mm:think>最终回答")]),
+                "test",
+                session: null,
+                assistantText,
+                appendAssistantText: true,
+                CancellationToken.None,
+                thinkTagFilter)
+            .ToBlockingEnumerable()
+            .ToArray();
+
+        firstChunks.Should().BeEmpty();
+        secondChunks.Should().ContainSingle();
+        secondChunks[0].Content.Should().Be("最终回答");
+        assistantText.ToString().Should().Be("最终回答");
+    }
+
+    [Fact]
     public void ProductionCompositionRoot_ShouldUsePostgreSqlSessionExecutionLock()
     {
         var solutionRoot = FindSolutionRoot();

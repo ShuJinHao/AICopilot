@@ -33,6 +33,7 @@ public class FinalAgentRunExecutor(
         AiUsageDetails? observedUsage = null;
         var grantedToolExecutions = new Dictionary<string, GrantedToolExecution>(StringComparer.Ordinal);
         var suspendForApproval = false;
+        var thinkTagFilter = new StreamingThinkTagFilter();
 
         var isApprovalResumption = agentContext.FunctionApprovalRequestContents.Count != 0
                                    && agentContext.ApprovalDecisions.Count != 0;
@@ -200,7 +201,8 @@ public class FinalAgentRunExecutor(
                                session,
                                assistantText,
                                appendAssistantText: true,
-                               cancellationToken))
+                               cancellationToken,
+                               thinkTagFilter))
             {
                 yield return chunk;
             }
@@ -210,6 +212,13 @@ public class FinalAgentRunExecutor(
                 suspendForApproval = true;
                 break;
             }
+        }
+
+        var cleanRemainder = thinkTagFilter.Flush();
+        if (!string.IsNullOrEmpty(cleanRemainder))
+        {
+            assistantText.Append(cleanRemainder);
+            yield return new ChatChunk(ExecutorId, ChunkType.Text, cleanRemainder);
         }
 
         if (suspendForApproval)

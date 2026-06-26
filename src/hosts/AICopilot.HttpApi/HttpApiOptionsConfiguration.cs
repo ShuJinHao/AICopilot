@@ -66,7 +66,7 @@ internal static class HttpApiOptionsConfiguration
         var cloudReadonlyOptions = builder.Configuration
             .GetSection(CloudReadonlyOptions.SectionName)
             .Get<CloudReadonlyOptions>() ?? new CloudReadonlyOptions();
-        cloudReadonlyOptions.EnsureValid(cloudAiReadOptions);
+        cloudReadonlyOptions.EnsureValid(cloudAiReadOptions, builder.Environment.EnvironmentName);
 
         return new HttpApiValidatedOptions(jwtSettings, cloudOidcOptions, cloudIdentityStatusOptions);
     }

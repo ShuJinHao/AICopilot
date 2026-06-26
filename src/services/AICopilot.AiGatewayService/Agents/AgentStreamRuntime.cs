@@ -28,7 +28,8 @@ public interface IAgentStreamRuntime
         SessionRuntimeSnapshot? session,
         StringBuilder? assistantText,
         bool appendAssistantText,
-        CancellationToken ct);
+        CancellationToken ct,
+        StreamingThinkTagFilter? thinkTagFilter = null);
 
     Task<SessionRuntimeSnapshot?> LoadSessionAsync(
         IReadRepository<Session> repository,
@@ -62,25 +63,28 @@ public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequi
         SessionRuntimeSnapshot? session,
         StringBuilder? assistantText,
         bool appendAssistantText,
-        [EnumeratorCancellation] CancellationToken ct)
+        [EnumeratorCancellation] CancellationToken ct,
+        StreamingThinkTagFilter? thinkTagFilter = null)
     {
         foreach (var evtContent in update.Contents)
         {
             switch (evtContent)
             {
                 case AiTextContent content:
-                    var sanitized = ModelOutputSanitizer.Strip(content.Text);
-                    if (string.IsNullOrEmpty(sanitized.CleanText))
+                    var cleanText = thinkTagFilter is null
+                        ? ModelOutputSanitizer.Strip(content.Text).CleanText
+                        : thinkTagFilter.Append(content.Text);
+                    if (string.IsNullOrEmpty(cleanText))
                     {
                         break;
                     }
 
                     if (appendAssistantText)
                     {
-                        assistantText?.Append(sanitized.CleanText);
+                        assistantText?.Append(cleanText);
                     }
 
-                    yield return new ChatChunk(source, ChunkType.Text, sanitized.CleanText);
+                    yield return new ChatChunk(source, ChunkType.Text, cleanText);
                     break;
 
                 case AiToolCallContent content:

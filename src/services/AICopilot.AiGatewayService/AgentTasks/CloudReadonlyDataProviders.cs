@@ -30,7 +30,7 @@ internal sealed class DisabledCloudReadonlyDataProvider : ICloudReadonlyDataProv
     {
         throw new CloudAiReadException(
             AppProblemCodes.CloudReadonlyToolDisabled,
-            "CloudReadonly is disabled. Set CloudReadonly:Mode to Simulation or Real explicitly before running the tool.");
+            "CloudReadonly is disabled. Production deployments must configure CloudReadonly:Mode=Real with Cloud AiRead.");
     }
 }
 

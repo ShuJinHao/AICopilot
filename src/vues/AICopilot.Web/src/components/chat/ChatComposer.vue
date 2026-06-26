@@ -13,6 +13,7 @@ import {
 import { useAgentWorkbench } from '@/composables/useAgentWorkbench'
 import { useChatStore } from '@/stores/chatStore'
 import type { AgentPlannerToolSummary } from '@/types/app'
+import { getSkillDisplayDescription } from '@/utils/skillDisplay'
 
 type ComposerMode = 'plan' | 'chat'
 
@@ -58,13 +59,6 @@ const isComposerSubmitDisabled = computed(() =>
     : isInputDisabled.value)
 )
 const visiblePluginTools = computed(() => store.availablePluginTools.slice(0, 12))
-
-const skillDisplayDescriptions: Record<string, string> = {
-  cloud_readonly: '查询和分析 Cloud 只读业务数据',
-  data_analysis: '查询和分析产线数据',
-  knowledge_search: '从知识库检索相关文档',
-  free_goal_chat: '普通对话，不调用工具'
-}
 
 async function sendDirectMessage() {
   const content = inputValue.value.trim()
@@ -140,23 +134,6 @@ function pluginToolMeta(tool: AgentPlannerToolSummary) {
   ]
 
   return parts.filter(Boolean).join(' · ')
-}
-
-function skillDisplayDescription(skillCode: string, fallback?: string) {
-  const normalizedCode = skillCode.toLowerCase()
-  if (skillDisplayDescriptions[normalizedCode]) {
-    return skillDisplayDescriptions[normalizedCode]
-  }
-
-  if (normalizedCode.includes('cloud') || normalizedCode.includes('data')) {
-    return '查询和分析业务数据'
-  }
-
-  if (normalizedCode.includes('knowledge') || normalizedCode.includes('rag')) {
-    return '从知识库检索相关资料'
-  }
-
-  return fallback || '系统根据目标自动选择执行路径'
 }
 
 onClickOutside(
@@ -263,11 +240,11 @@ watch(() => store.currentSessionId, () => {
               :key="skill.skillCode"
               :value="skill.skillCode"
             >
-              {{ skill.displayName }} · {{ skillDisplayDescription(skill.skillCode, skill.description) }}
+              {{ skill.displayName }} · {{ getSkillDisplayDescription(skill.skillCode) }}
             </option>
           </select>
         </label>
-        <p>{{ store.selectedSkill ? skillDisplayDescription(store.selectedSkill.skillCode, store.selectedSkill.description) : '保持自动识别，系统会根据目标选择合适路径。' }}</p>
+        <p>{{ store.selectedSkill ? getSkillDisplayDescription(store.selectedSkill.skillCode) : '保持自动识别，系统会根据目标选择合适路径。' }}</p>
       </section>
 
       <section

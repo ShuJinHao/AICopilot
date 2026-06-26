@@ -53,7 +53,7 @@ public class IntentRoutingExecutor(
         if (!IntentRoutingResultParser.TryParse(responseText, out var intentResults))
         {
             logger.LogWarning("Intent routing returned unparsable JSON. Falling back to General.Chat.");
-            intentResults = CreateFallbackIntents("routing JSON parse failed");
+            intentResults = CreateFallbackIntents(request.Message, "routing JSON parse failed");
         }
 
         var normalizedResponseText = JsonSerializer.Serialize(intentResults, JsonSerializerOptions.Web);
@@ -78,6 +78,7 @@ public class IntentRoutingExecutor(
             var timeoutToken = timeoutCts.Token;
             var session = await scopedAgent.Agent.CreateSessionAsync(timeoutToken);
             var builder = new StringBuilder();
+            var thinkTagFilter = new StreamingThinkTagFilter();
             await foreach (var update in scopedAgent.Agent.RunStreamingAsync(
                     history,
                     session,
@@ -91,10 +92,11 @@ public class IntentRoutingExecutor(
             {
                 foreach (var content in update.Contents.OfType<AiTextContent>())
                 {
-                    builder.Append(content.Text);
+                    builder.Append(thinkTagFilter.Append(content.Text));
                 }
             }
 
+            builder.Append(thinkTagFilter.Flush());
             return builder.ToString();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -112,12 +114,19 @@ public class IntentRoutingExecutor(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Intent routing model call failed. Falling back to General.Chat.");
-            return JsonSerializer.Serialize(CreateFallbackIntents("routing model call failed"), JsonSerializerOptions.Web);
+            return JsonSerializer.Serialize(
+                CreateFallbackIntents(history.LastOrDefault()?.Text, "routing model call failed"),
+                JsonSerializerOptions.Web);
         }
     }
 
-    private static List<IntentResult> CreateFallbackIntents(string reasoning)
+    private static List<IntentResult> CreateFallbackIntents(string? message, string reasoning)
     {
+        if (IntentRoutingFallbackClassifier.TryClassify(message, reasoning, out var semanticFallback))
+        {
+            return semanticFallback;
+        }
+
         return [new IntentResult { Intent = "General.Chat", Confidence = 1.0, Reasoning = reasoning }];
     }
 }

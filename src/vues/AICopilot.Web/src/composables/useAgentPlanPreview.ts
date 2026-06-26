@@ -1,5 +1,14 @@
 import { computed } from 'vue'
 import { useAgentWorkbench } from '@/composables/useAgentWorkbench'
+import type { AgentStep } from '@/types/protocols'
+
+type AgentPlanPreviewStep = Partial<AgentStep> & {
+  title?: string | null
+  description?: string | null
+  stepType?: string | null
+  toolCode?: string | null
+  inputJson?: unknown
+}
 
 export type AgentPlanPreview = {
   planKind?: string
@@ -32,6 +41,7 @@ export type AgentPlanPreview = {
     availableToolCount?: number
     toolRiskSummary?: Record<string, number>
   }
+  steps?: AgentPlanPreviewStep[]
 }
 
 export function parseAgentPlan(planJson?: string | null): AgentPlanPreview | null {
@@ -114,6 +124,22 @@ export function useAgentPlanPreview() {
     latestPlan.value?.planKind === 'PlanDraft' ||
     latestPlan.value?.isExecutable === false
   )
+  const draftPlanSteps = computed<AgentStep[]>(() =>
+    (latestPlan.value?.steps ?? []).map((step, index) => ({
+      id: step.id || `${latestTask.value?.id ?? 'plan'}:${index + 1}`,
+      stepIndex: step.stepIndex || index + 1,
+      title: step.title || step.description || `计划步骤 ${index + 1}`,
+      description: step.description || '',
+      stepType: step.stepType || 'PlanDraft',
+      status: step.status || 'Draft',
+      toolCode: step.toolCode ?? null,
+      requiresApproval: step.requiresApproval ?? false,
+      errorMessage: step.errorMessage ?? null
+    }))
+  )
+  const displayPlanSteps = computed(() =>
+    taskSteps.value.length > 0 ? taskSteps.value : draftPlanSteps.value
+  )
   const latestPlanSource = computed(() =>
     sourceModeLabel(
       latestPlan.value?.skillName ||
@@ -129,8 +155,9 @@ export function useAgentPlanPreview() {
     latestPlanDataSource.value?.sourceMode?.includes('CloudReadonly') ||
     false
   )
-  const previewPlanSteps = computed(() => taskSteps.value.slice(0, 4))
-  const hiddenPlanStepCount = computed(() => Math.max(0, taskSteps.value.length - previewPlanSteps.value.length))
+  const previewPlanSteps = computed(() => displayPlanSteps.value.slice(0, 4))
+  const totalPreviewPlanStepCount = computed(() => displayPlanSteps.value.length)
+  const hiddenPlanStepCount = computed(() => Math.max(0, totalPreviewPlanStepCount.value - previewPlanSteps.value.length))
 
   return {
     latestPlan,
@@ -144,6 +171,7 @@ export function useAgentPlanPreview() {
     latestPlanIsCloudReadonly,
     isPlanDraftTask,
     previewPlanSteps,
+    totalPreviewPlanStepCount,
     hiddenPlanStepCount
   }
 }
