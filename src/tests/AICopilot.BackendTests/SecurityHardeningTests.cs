@@ -98,9 +98,14 @@ public sealed class SecurityHardeningTests
         envTemplate.Should().Contain("POSTGRES_PASSWORD=CHANGE_ME_STRONG_POSTGRES_PASSWORD");
         envTemplate.Should().Contain("QDRANT_KEY=CHANGE_ME_STRONG_QDRANT_KEY");
         envTemplate.Should().Contain("AICOPILOT_API_KEY_ENCRYPTION_KEY=CHANGE_ME_32_BYTES_MINIMUM");
+        envTemplate.Should().Contain("AICOPILOT_FILE_STORAGE_ROOT_PATH=/var/lib/aicopilot/storage");
+        envTemplate.Should().Contain("AICOPILOT_ARTIFACT_WORKSPACE_ROOT_PATH=/var/lib/aicopilot/artifact-workspaces");
         compose.Should().Contain("AICopilotSecurity__ApiKeyEncryptionKey: ${AICOPILOT_API_KEY_ENCRYPTION_KEY}");
         compose.Should().Contain("CloudOidc__BootstrapAdminAutoBindEnabled: ${CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED:-true}");
         compose.Should().Contain("CloudOidc__BootstrapAdminUserName: ${AICOPILOT_BOOTSTRAP_ADMIN_USERNAME}");
+        compose.Should().Contain("FileStorage__RootPath: ${AICOPILOT_FILE_STORAGE_ROOT_PATH:-/var/lib/aicopilot/storage}");
+        compose.Should().Contain("ArtifactWorkspace__RootPath: ${AICOPILOT_ARTIFACT_WORKSPACE_ROOT_PATH:-/var/lib/aicopilot/artifact-workspaces}");
+        compose.Should().Contain("enterprise-ai-aicopilot-data:/var/lib/aicopilot");
     }
 
     [Fact]
@@ -123,7 +128,8 @@ public sealed class SecurityHardeningTests
         imageWorkflow.Should().Contain("OCI_REGISTRY");
         imageWorkflow.Should().Contain("OCI_NAMESPACE");
         imageWorkflow.Should().Contain("dotnet publish");
-        imageWorkflow.Should().Contain("/t:PublishContainer");
+        imageWorkflow.Should().Contain("docker buildx build");
+        imageWorkflow.Should().Contain("--file deploy/enterprise-ai/Dockerfile.backend-runtime");
         imageWorkflow.Should().Contain("Prune old Harbor image tags");
         imageWorkflow.Should().Contain("HARBOR_KEEP_SHA_TAGS: 3");
         imageWorkflow.Should().Contain("bash deploy/enterprise-ai/harbor-retention.sh");

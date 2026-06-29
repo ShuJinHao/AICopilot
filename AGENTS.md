@@ -91,6 +91,7 @@ Cloud-AICopilot OIDC 身份对齐的长期结论见 `../docs/历史核心记录.
 - Known-vulnerable dependencies are forbidden; NU190x and npm audit findings must be handled before acceptance.
 - 禁止硬编码 API key、token、secret、license、provider credential、数据库凭据、MCP 凭据。
 - 模型、prompt、plugin、MCP server、approval threshold 等运行行为优先用配置或明确存储数据，不藏在代码里。
+- 容器部署必须显式配置并挂载可写的 `FileStorage:RootPath` 和 `ArtifactWorkspace:RootPath`；不得依赖容器内 `LocalApplicationData` 默认路径或 `/app` 目录写入运行产物。
 
 ## Execution
 

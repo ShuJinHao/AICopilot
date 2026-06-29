@@ -18,6 +18,8 @@ x-aicopilot-common-env: &aicopilot-common-env
   QDRANT_HTTPHOST: qdrant
   QDRANT_HTTPPORT: "6333"
   QDRANT_APIKEY: ${QDRANT_KEY}
+  FileStorage__RootPath: ${AICOPILOT_FILE_STORAGE_ROOT_PATH:-/var/lib/aicopilot/storage}
+  ArtifactWorkspace__RootPath: ${AICOPILOT_ARTIFACT_WORKSPACE_ROOT_PATH:-/var/lib/aicopilot/artifact-workspaces}
   AiGateway__Deployment__Mode: SingleInstance
   AiGateway__FinalAgentContextStore__Provider: Memory
   Mcp__Runtime__Enabled: "false"
@@ -50,6 +52,9 @@ x-aicopilot-common-env: &aicopilot-common-env
   CloudOidc__RequireHttpsMetadata: ${CLOUD_OIDC_REQUIRE_HTTPS_METADATA:-true}
   CloudOidc__BootstrapAdminAutoBindEnabled: ${CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED:-true}
   CloudOidc__BootstrapAdminUserName: ${AICOPILOT_BOOTSTRAP_ADMIN_USERNAME}
+
+x-aicopilot-data-volumes: &aicopilot-data-volumes
+  - enterprise-ai-aicopilot-data:/var/lib/aicopilot
 
 services:
   postgres:
@@ -108,6 +113,7 @@ services:
       BootstrapAdmin__UserName: ${AICOPILOT_BOOTSTRAP_ADMIN_USERNAME}
       BootstrapAdmin__Password: ${AICOPILOT_BOOTSTRAP_ADMIN_PASSWORD}
       OTEL_SERVICE_NAME: aicopilot-migration
+    volumes: *aicopilot-data-volumes
     depends_on:
       postgres:
         condition: service_healthy
@@ -127,6 +133,7 @@ services:
       JwtSettings__AccessTokenExpirationMinutes: ${AICOPILOT_ACCESS_TOKEN_EXPIRATION_MINUTES:-30}
       JwtSettings__SecretKey: ${AICOPILOT_JWT_SECRET_KEY}
       OTEL_SERVICE_NAME: aicopilot-httpapi
+    volumes: *aicopilot-data-volumes
     extra_hosts:
       - host.docker.internal:host-gateway
     depends_on:
@@ -151,6 +158,7 @@ services:
     environment:
       <<: *aicopilot-common-env
       OTEL_SERVICE_NAME: aicopilot-dataworker
+    volumes: *aicopilot-data-volumes
     extra_hosts:
       - host.docker.internal:host-gateway
     depends_on:
@@ -173,6 +181,7 @@ services:
     environment:
       <<: *aicopilot-common-env
       OTEL_SERVICE_NAME: aicopilot-ragworker
+    volumes: *aicopilot-data-volumes
     depends_on:
       postgres:
         condition: service_healthy
@@ -209,5 +218,6 @@ networks:
     name: ${DATA_ANALYSIS_CLOUD_READONLY_DOCKER_NETWORK:-enterprise-ai-cloud-readonly}
 
 volumes:
+  enterprise-ai-aicopilot-data:
   enterprise-ai-postgres-data:
   enterprise-ai-qdrant-data:

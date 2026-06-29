@@ -19,6 +19,9 @@ RUN test -n "${APP_DLL}" \
     && test -f "${APP_DLL}" \
     && ln -sf "${APP_DLL}" AICopilot.App.dll
 
+RUN mkdir -p /var/lib/aicopilot/storage /var/lib/aicopilot/artifact-workspaces \
+    && chown -R app:app /var/lib/aicopilot
+
 ENV DOTNET_RUNNING_IN_CONTAINER=true \
     TZ=Asia/Shanghai
 

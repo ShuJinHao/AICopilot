@@ -181,6 +181,10 @@ jobs:
             fi
             printf "DataAnalysis__CloudReadOnly__ReadOnlyCredentialVerified=%s\n" "${DataAnalysis__CloudReadOnly__ReadOnlyCredentialVerified:-}"
             printf "CloudAiRead__Enabled=%s\n" "${CloudAiRead__Enabled:-}"
+            printf "FileStorage__RootPath=%s\n" "${FileStorage__RootPath:-}"
+            printf "ArtifactWorkspace__RootPath=%s\n" "${ArtifactWorkspace__RootPath:-}"
+            printf "FileStorage__RootPath_WRITABLE=%s\n" "$(test -n "${FileStorage__RootPath:-}" && test -w "${FileStorage__RootPath}" && echo yes || echo no)"
+            printf "ArtifactWorkspace__RootPath_WRITABLE=%s\n" "$(test -n "${ArtifactWorkspace__RootPath:-}" && test -w "${ArtifactWorkspace__RootPath}" && echo yes || echo no)"
           ' | tee -a "$GITHUB_STEP_SUMMARY"
 
           trap - EXIT

@@ -65,6 +65,11 @@ production environment secrets，并触发 `aicopilot-provision-cloud-readonly-d
 必须带确认词，只在 Cloud PostgreSQL 中创建/轮换只读角色，只授予
 `devices`、`device_logs`、`hourly_capacity`、`pass_station_records` 的 SELECT 权限。
 
+后端容器以非 root 用户运行，文件上传和 Agent artifact workspace 必须落在持久化可写卷。默认 compose 会把
+`enterprise-ai-aicopilot-data` 挂到 `/var/lib/aicopilot`，并通过
+`AICOPILOT_FILE_STORAGE_ROOT_PATH` / `AICOPILOT_ARTIFACT_WORKSPACE_ROOT_PATH`
+配置应用读取路径；不要让生产容器依赖 `/app` 或 `LocalApplicationData` 默认路径写运行产物。
+
 Cloud OIDC 首部署管理员收编由 `CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED` 控制，生产模板默认启用，并复用 `AICOPILOT_BOOTSTRAP_ADMIN_USERNAME` 作为唯一允许收编的本地 Admin 用户名；普通同名用户仍拒绝自动绑定。
 
 ## 基础镜像
