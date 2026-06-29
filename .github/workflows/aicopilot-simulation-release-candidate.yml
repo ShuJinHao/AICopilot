@@ -9,6 +9,22 @@ on:
   workflow_dispatch:
 
 jobs:
+  backend-full-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Backend full test suite
+        run: dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --logger "console;verbosity=minimal"
+
   simulation-rc:
     runs-on: windows-latest
     timeout-minutes: 45

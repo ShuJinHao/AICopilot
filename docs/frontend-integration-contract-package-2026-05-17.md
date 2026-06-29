@@ -26,6 +26,7 @@ For structured chat error chunks, frontend displays `userFacingMessage` first, t
 
 | Code | Meaning |
 | --- | --- |
+| `request_validation_failed` | Request validation failed before handler execution. |
 | `rate_limit_exceeded` | Rate limit was exceeded. |
 | `chat_context_expired` | Chat context expired. |
 | `chat_configuration_missing` | Chat runtime configuration is missing. |

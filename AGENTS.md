@@ -20,6 +20,8 @@
 - 每次代码改动完成前，必须更新项目滚动复盘文档 `docs/改动复盘与规则沉淀.md`，最新记录放在最前。
 - 每次复盘必须写明改动范围、改动原因、影响面、验证命令、验证结果和规则提炼结论。
 - 必须判断是否形成长期规则；有则写入本文档、`资料/AICopilot业务规则.md`、专题契约或工作区长期规则，无则在复盘中写明“无新增长期规则”及原因。
+- 新增、删除或重命名后端 `AuthProblemCodes`、`AppProblemCodes`、`CloudAiReadProblemCodes` 时，必须同批更新 `docs/frontend-integration-contract-package-2026-05-17.md`，并运行 `ErrorCodeCatalogTests`。
+- 大范围架构、管道、权限、工作流或契约改动不得只以 filtered tests 作为完成依据；全量 `AICopilot.BackendTests` 未跑、CI 全量未确认或环境依赖失败时，最终回复和复盘必须明确标注。
 - 最终回复必须列出复盘文档、规则沉淀位置和验证命令；缺任一项，不得称为完成。
 - 默认只更新项目滚动复盘文档，不为每个任务新增单独流水文档；只有形成可长期复用的业务或技术契约，才新增专题文档。
 
@@ -37,6 +39,10 @@
 - Cloud AiRead 正式设备参数是 `deviceId`；`deviceCode` 只能用于设备查询/解析，不得被当作 `deviceId` 发送给 Cloud。
 - Cloud 只读读取只能向 Cloud 发送真实端点参数；`scenarioId`、`from`、`to`、`pilotWindowId`、`boundary` 等试点元数据不得透传给 Cloud。
 - 内部开发允许通过 DataAnalysis `CloudReadOnly` 只读数据源直连真实 Cloud PostgreSQL 做 Text-to-SQL 验证；必须使用已验证只读数据库账号、白名单表字段和只读 SQL guard，不得写 Cloud 业务数据，也不得用 Simulation 冒充真实数据。
+- 内部真实 Cloud 语义查询优先走 DataAnalysis `CloudReadOnly` Direct DB 映射；Cloud AiRead 封存为未来外部系统只读 API 接入口，不能在内部映射存在时压过 Direct DB。
+- Direct DB 语义映射如需展示工序名，只能通过只读 join `mfg_processes.process_name`；新增 join 表必须同步更新 SQL guard 白名单、BusinessQuery safety schema、只读 role 授权 workflow、RealSource 模板和测试。
+- Direct DB 设备字段 `status` 当前表示最新一条 `device_logs.level`，展示口径必须写成“最新日志级别”，不得暗示为实时在线/运行状态。
+- Simulation 只允许作为显式离线演示/测试资产，默认关闭；Real Cloud 查询为空、失败或未配置时不得 fallback 到 Simulation 冒充真实数据。
 - AICopilot 自动化如需创建或轮换 Cloud PostgreSQL 只读账号，只能创建/更新专用 readonly role，只能授予已批准白名单表 SELECT，必须要求显式确认词；不得授予写权限、schema create 权限、superuser、createdb、createrole 或 replication。
 - 开发阶段已物理删除 Trial/Pilot/Production Readiness 运营线；不得把旧试点运营能力重新接回普通产品导航、Skill 或后台接口。
 
@@ -61,6 +67,15 @@ Cloud-AICopilot OIDC 身份对齐的长期结论见 `../docs/历史核心记录.
 - `src/vues` 放前端逻辑，不回填到 service 或 host。
 - 修改 AICopilot 前端前必须先读 `src/vues/AICopilot.Web/AGENTS.md`，遵守前端错误契约、会话状态和 UI 状态规则。
 - 不为旧 Cloud 读取路径、旧工具 schema、旧配置模式或旧文档入口保留兼容 adapter；需要跨仓库对齐时同步更新契约、服务注册和测试。
+- HTTP API Controller 必须默认要求授权，或对有意公开的端点显式标注匿名访问；不能依赖“忘记加 `[Authorize]`”形成公开接口。
+- MediatR `IStreamRequest` 与普通 `IRequest` 是两条管道；所有公开 stream 请求必须声明 `AuthorizeRequirement`，后续接入 `IStreamPipelineBehavior` 时不得把事务或审计边界套到 SSE/stream 长连接上。
+- MediatR 横切行为只能通过 `AddAICopilotMediatRPipeline` 统一注册；service 模块只注册本模块 handler 和业务服务，不能分散注册 authorization、validation、telemetry、transaction 或 audit behavior。
+- 使用 MediatR handler 的 host 组合根必须先调用统一管道入口，再注册 service 模块；worker host 不能因为挂统一管道而强依赖登录用户态。
+- Stream 细粒度权限必须由 `AuthorizationStreamBehavior` 在进入 stream handler 前校验；stream behavior 只能逐项透传 `IAsyncEnumerable`，不得预读、缓存或把 SSE/stream 转成一次性结果。
+- 新增或接线 `IStreamPipelineBehavior` 后，必须核对所有公开 `IStreamRequest` 的 `AuthorizeRequirement`，测试种子角色必须覆盖对应权限；无权限场景应返回干净 401/403，不能表现为 SSE 已写 200 后断流。
+- MediatR 管道顺序固定为 Telemetry -> Validation -> Authorization；新增 Validation behavior 时必须同步至少一个真实 validator 和测试，不能提交空壳管道。
+- MediatR telemetry 必须复用现有 OpenTelemetry / structured logging，只记录 request type、kind、耗时、结果和异常类型；不得记录 prompt 全文、SQL、token、连接串、API key 或业务数据明细。
+- 事务/审计拥有者必须显式且唯一：repository 保存的业务+审计原子性由 `AuditTransactionCoordinator` 拥有，Identity 用户/角色事务由 `ITransactionalExecutionService`/`EfTransactionalExecutionService` 拥有；MediatR behavior 不得开启事务、保存审计、调用 `SaveChangesAsync` 或包裹 stream/handler 形成隐式事务边界。
 
 ## Unified Agent Workflow
 
@@ -71,6 +86,7 @@ Cloud-AICopilot OIDC 身份对齐的长期结论见 `../docs/历史核心记录.
 - `PlanAgentTaskCommand` 只能负责计划草案/任务状态的持久化和编排入口，不得独立实现意图理解、工具发现、Skill 选择或 Tool catalog 强校验。
 - Skill、Tool、MCP 或 DataSource 未匹配时，不得阻断 `PlanDraft` 生成；只能在草案里说明能力缺口或要求用户补充目标。
 - 用户确认 `PlanDraft` 后，才允许转换为 `ExecutablePlan` / `AgentTask`，并进入 Skill、Tool、Schema、Guard、审批和 Worker 执行链路。
+- Agent workflow 的阶段和并行分支必须由 `AgentWorkflowTopology` 显式声明；`Tools`、`Knowledge`、`DataAnalysis`、`BusinessPolicy` 四个分支必须保持 `Task.WhenAll` + `AgentWorkflowSink` fan-out/fan-in 模式，不得为了“管道化”拍平成串行或为新能力另起一条孤立链路。
 
 ## Capability Boundaries
 
@@ -103,3 +119,10 @@ Cloud-AICopilot OIDC 身份对齐的长期结论见 `../docs/历史核心记录.
 - 是否涉及 Cloud 业务写入边界。
 
 业务不清楚时先问，不猜。
+
+## Code Quality
+
+- 简单数据转换、过滤、投影、分组默认优先使用 LINQ 表达业务意图，尤其 `IQueryable` 必须把过滤、投影、排序和分页下推到数据库。
+- 性能热路径、状态机、解析器、流式枚举、数组/`Span<T>` 紧循环允许使用 `for`/`foreach`；不能为了“看起来函数式”牺牲清晰复杂度或引入额外分配。
+- 禁止先 `ToList()` / `ToArray()` 再 `Where()` / `Select()` 做本可下推或延迟执行的过滤投影；确需多次遍历时必须显式物化一次并说明原因。
+- 真正要拦的是重复枚举、N+1 查询、O(n²) 嵌套、重复扫描和错误数据结构；CA1851 先保持 warning，修完基线后再考虑升为 error。

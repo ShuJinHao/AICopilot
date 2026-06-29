@@ -102,7 +102,7 @@ public sealed class BusinessSemanticsCatalog : IBusinessSemanticsCatalog
         "Choose Analysis.Recipe.* only to return the configured recipe data-read boundary message; AICopilot must not read Cloud recipe master data or recipe version records.",
         "Choose Analysis.Capacity.* only for capacity, output, yield, or qualified quantity questions.",
         "Choose Analysis.ProductionData.* only for production record, station record, or barcode trace questions.",
-        "Analysis intents are read-only. When Cloud AiRead is configured, devices/capacity/device logs/pass-station data use Cloud AiRead as the formal read path; recipe data remains blocked."
+        "Analysis intents are read-only. Internal real Cloud semantic queries prefer DataAnalysis CloudReadOnly Direct DB mappings; Cloud AiRead is reserved for future external readonly API integration; recipe data remains blocked."
     ],
     [
         "Concrete recipe list/detail/version-history data questions should choose Analysis.Recipe.* only for the boundary response; recipe lifecycle rule questions should choose Policy.RecipeVersioning.",

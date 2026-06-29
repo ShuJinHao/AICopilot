@@ -45,13 +45,13 @@ public sealed class SemanticAnalysisRunner(
             return RecipeDataReadBoundaryMessage;
         }
 
-        if (cloudAiReadClient.IsEnabled && CloudAiReadSemanticSupport.IsSupported(plan.Target))
-        {
-            return await RunCloudAiReadAsync(plan, targetLabel, cancellationToken);
-        }
-
         if (!semanticPhysicalMappingProvider.TryGetMapping(plan.Target, out var mapping))
         {
+            if (cloudAiReadClient.IsEnabled && CloudAiReadSemanticSupport.IsSupported(plan.Target))
+            {
+                return await RunCloudAiReadAsync(plan, targetLabel, cancellationToken);
+            }
+
             logger.LogInformation(
                 "{TargetLabel}语义查询已识别，但尚未绑定只读业务库映射。Intent: {Intent}, Target: {Target}, Kind: {Kind}",
                 targetLabel,

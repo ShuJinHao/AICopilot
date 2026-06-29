@@ -2,6 +2,8 @@
 
 日期：2026-05-18
 
+> 当前口径：Simulation 保留为显式离线演示/测试资产，默认关闭；不得作为 Real Cloud / Direct DB / AiRead 的 fallback，也不得在真实数据为空或配置失败时补位。
+
 ## 定义
 
 Simulation 模式用于在不接真实 Cloud 的情况下验证 Agent Runtime、CloudReadonly 工具、审批、队列、DataWorker、产物和审计闭环。

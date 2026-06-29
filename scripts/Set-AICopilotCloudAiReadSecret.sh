@@ -221,10 +221,11 @@ case "$cloud_ai_read_base_url" in
     ;;
 esac
 
+# gh secret set reads the secret body from stdin when --body is omitted.
 printf '%s' "$cloud_ai_read_base_url" |
-  gh secret set CLOUD_AI_READ_BASE_URL --env "$github_env" --repo "$repo" --body-file -
+  gh secret set CLOUD_AI_READ_BASE_URL --env "$github_env" --repo "$repo"
 printf '%s' "$cloud_ai_read_token" |
-  gh secret set CLOUD_AI_SERVICE_ACCOUNT_TOKEN --env "$github_env" --repo "$repo" --body-file -
+  gh secret set CLOUD_AI_SERVICE_ACCOUNT_TOKEN --env "$github_env" --repo "$repo"
 
 printf 'Updated GitHub environment secrets for %s (%s).\n' "$repo" "$github_env"
 printf 'CLOUD_AI_READ_BASE_URL=%s\n' "$cloud_ai_read_base_url"

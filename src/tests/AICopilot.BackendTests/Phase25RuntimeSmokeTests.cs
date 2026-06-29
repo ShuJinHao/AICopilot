@@ -23,7 +23,7 @@ using Npgsql;
 
 namespace AICopilot.BackendTests;
 
-[Collection(BackendTestCollection.Name)]
+[Collection(CloudSemanticSimulationBackendTestCollection.Name)]
 [Trait("Suite", "Phase38Acceptance")]
 [Trait("Runtime", "DockerRequired")]
 public sealed class Phase25RuntimeSmokeTests
@@ -38,7 +38,7 @@ public sealed class Phase25RuntimeSmokeTests
 
     private readonly AICopilotAppFixture _fixture;
 
-    public Phase25RuntimeSmokeTests(AICopilotAppFixture fixture)
+    public Phase25RuntimeSmokeTests(CloudSemanticSimulationAICopilotAppFixture fixture)
     {
         _fixture = fixture;
     }

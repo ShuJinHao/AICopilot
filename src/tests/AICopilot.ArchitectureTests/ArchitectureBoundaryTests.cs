@@ -222,6 +222,383 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
+    public void ServiceStreamRequests_ShouldDeclareAuthorizeRequirement()
+    {
+        var requestDeclaration = new Regex(
+            @"public\s+(?:sealed\s+)?record\s+(\w+)(?:(?!public\s+(?:sealed\s+)?record)[\s\S])*?:\s*IStreamRequest\b",
+            RegexOptions.Compiled);
+        var serviceRoot = Path.Combine(SolutionRoot, "src", "services");
+        var violations = Directory
+            .EnumerateFiles(serviceRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(file =>
+            {
+                var source = File.ReadAllText(file);
+                return requestDeclaration
+                    .Matches(source)
+                    .Select(match =>
+                    {
+                        var contextStart = match.Index;
+                        for (var i = 0; i < 5 && contextStart > 0; i++)
+                        {
+                            var previousLine = source.LastIndexOf('\n', Math.Max(0, contextStart - 2));
+                            contextStart = previousLine < 0 ? 0 : previousLine + 1;
+                        }
+
+                        return new
+                        {
+                            File = file,
+                            LineNumber = source[..match.Index].Count(character => character == '\n') + 1,
+                            RequestName = match.Groups[1].Value,
+                            Context = source[contextStart..match.Index]
+                        };
+                    });
+            })
+            .Where(item => !item.Context.Contains("[AuthorizeRequirement(", StringComparison.Ordinal))
+            .Select(item => $"{Path.GetRelativePath(SolutionRoot, item.File)}:{item.LineNumber}: {item.RequestName}")
+            .ToArray();
+
+        violations.Should().BeEmpty(
+            "streaming MediatR requests are separate from IRequest pipeline behaviors and must declare explicit permission requirements");
+    }
+
+    [Fact]
+    public void HttpApiControllers_ShouldRequireExplicitAuthorizeOrAllowAnonymous()
+    {
+        var controllerRoot = Path.Combine(SolutionRoot, "src", "hosts", "AICopilot.HttpApi", "Controllers");
+        var controllerDeclaration = new Regex(
+            @"public\s+class\s+(\w+Controller)\b",
+            RegexOptions.Compiled);
+        var actionDeclaration = new Regex(
+            @"public\s+(?:async\s+)?(?:Task<\s*IActionResult\s*>|IActionResult|IResult)\s+(\w+)\s*\(",
+            RegexOptions.Compiled);
+        var violations = new List<string>();
+
+        foreach (var file in Directory.EnumerateFiles(controllerRoot, "*.cs", SearchOption.TopDirectoryOnly))
+        {
+            var source = File.ReadAllText(file);
+            var controllerMatch = controllerDeclaration.Match(source);
+            if (!controllerMatch.Success)
+            {
+                continue;
+            }
+
+            var controllerContext = GetPrecedingLines(source, controllerMatch.Index, 8);
+            if (HasAuthorizationMetadata(controllerContext))
+            {
+                continue;
+            }
+
+            violations.AddRange(actionDeclaration
+                .Matches(source)
+                .Cast<Match>()
+                .Select(match => new
+                {
+                    ActionName = match.Groups[1].Value,
+                    LineNumber = source[..match.Index].Count(character => character == '\n') + 1,
+                    Context = GetPrecedingLines(source, match.Index, 8)
+                })
+                .Where(item => !HasAuthorizationMetadata(item.Context))
+                .Select(item => $"{Path.GetRelativePath(SolutionRoot, file)}:{item.LineNumber}: {controllerMatch.Groups[1].Value}.{item.ActionName}"));
+        }
+
+        violations.Should().BeEmpty(
+            "HTTP API controllers must require authorization by default or mark intentional anonymous endpoints explicitly");
+    }
+
+    [Fact]
+    public void StreamPipelineBehaviors_ShouldNotOwnTransactionOrAuditBoundaries()
+    {
+        var forbidden = new Regex(
+            @"IStreamPipelineBehavior[\s\S]{0,240}\b(Transaction|Transactional|Audit)\b|\b(Transaction|Transactional|Audit)\b[\s\S]{0,240}IStreamPipelineBehavior",
+            RegexOptions.Compiled);
+        var roots = new[]
+        {
+            Path.Combine("src", "hosts"),
+            Path.Combine("src", "services"),
+            Path.Combine("src", "infrastructure"),
+            Path.Combine("src", "shared")
+        };
+        var violations = roots
+            .SelectMany(root => ScanSource(root, forbidden))
+            .ToArray();
+
+        violations.Should().BeEmpty(
+            "SSE/streaming MediatR pipelines must not hold transaction or audit boundaries open across async enumeration");
+    }
+
+    [Fact]
+    public void MediatRBehaviors_ShouldBeRegisteredOnlyByUnifiedPipelineEntry()
+    {
+        var pipelineRegistrationFile = Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.Services.CrossCutting",
+            "DependencyInjection.cs");
+        var pipelineRegistration = File.ReadAllText(pipelineRegistrationFile);
+
+        pipelineRegistration.Should().Contain("AddAICopilotMediatRPipeline");
+        pipelineRegistration.Should().Contain("AuthorizationRequirementEvaluator");
+        pipelineRegistration.Should().Contain("TelemetryBehavior<,>");
+        pipelineRegistration.Should().Contain("ValidationBehavior<,>");
+        pipelineRegistration.Should().Contain("AuthorizationBehavior<,>");
+        pipelineRegistration.Should().Contain("IPipelineBehavior<,>");
+        pipelineRegistration.Should().Contain("TelemetryStreamBehavior<,>");
+        pipelineRegistration.Should().Contain("ValidationStreamBehavior<,>");
+        pipelineRegistration.Should().Contain("AuthorizationStreamBehavior<,>");
+        pipelineRegistration.Should().Contain("IStreamPipelineBehavior<,>");
+        AssertInOrder(
+            pipelineRegistration,
+            "TelemetryBehavior<,>",
+            "ValidationBehavior<,>",
+            "AuthorizationBehavior<,>");
+        AssertInOrder(
+            pipelineRegistration,
+            "TelemetryStreamBehavior<,>",
+            "ValidationStreamBehavior<,>",
+            "AuthorizationStreamBehavior<,>");
+
+        var forbiddenRegistration = new Regex(
+            @"AddBehavior\s*\(|TryAddEnumerable\s*\([\s\S]{0,160}I(?:Stream)?PipelineBehavior<,>|ServiceDescriptor\.\w+\s*\(\s*typeof\(I(?:Stream)?PipelineBehavior<,>\)",
+            RegexOptions.Compiled);
+        var violations = Directory
+            .EnumerateFiles(Path.Combine(SolutionRoot, "src"), "*.cs", SearchOption.AllDirectories)
+            .Where(file => !file.Equals(pipelineRegistrationFile, StringComparison.OrdinalIgnoreCase))
+            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+            .Where(file => forbiddenRegistration.IsMatch(File.ReadAllText(file)))
+            .Select(file => Path.GetRelativePath(SolutionRoot, file))
+            .ToArray();
+
+        violations.Should().BeEmpty(
+            "MediatR cross-cutting behaviors must be registered through AddAICopilotMediatRPipeline only");
+    }
+
+    [Fact]
+    public void MediatRTelemetry_ShouldUseServiceDefaultsOpenTelemetrySource()
+    {
+        var serviceDefaults = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "hosts",
+            "AICopilot.ServiceDefaults",
+            "Extensions.cs"));
+        var telemetry = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.Services.CrossCutting",
+            "Behaviors",
+            "PipelineTelemetry.cs"));
+
+        telemetry.Should().Contain("AICopilot.MediatR");
+        serviceDefaults.Should().Contain("AddSource(\"AICopilot.MediatR\")");
+    }
+
+    [Fact]
+    public void MediatRPipelineBehaviors_ShouldNotOwnTransactionOrAuditBoundaries()
+    {
+        var behaviorRoot = Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.Services.CrossCutting",
+            "Behaviors");
+        var forbidden = new Regex(
+            @"\b(BeginTransactionAsync|UseTransactionAsync|ITransactionalExecutionService|AuditTransactionCoordinator|IAuditLogWriter|AuditDbContext|SaveChangesAsync)\b",
+            RegexOptions.Compiled);
+        var violations = Directory
+            .EnumerateFiles(behaviorRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(file => forbidden.IsMatch(File.ReadAllText(file)))
+            .Select(file => Path.GetRelativePath(SolutionRoot, file))
+            .ToArray();
+
+        violations.Should().BeEmpty(
+            "MediatR behaviors may route and observe requests, but transaction and audit persistence boundaries stay with explicit infrastructure owners");
+    }
+
+    [Fact]
+    public void TransactionOwnership_ShouldStaySeparatedBetweenRepositoriesAndIdentity()
+    {
+        var auditCoordinator = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "infrastructure",
+            "AICopilot.EntityFrameworkCore",
+            "Transactions",
+            "AuditTransactionCoordinator.cs"));
+        var efRepositoryBase = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "infrastructure",
+            "AICopilot.EntityFrameworkCore",
+            "Repository",
+            "EfRepositoryBase.cs"));
+        var identityTransactionService = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "infrastructure",
+            "AICopilot.EntityFrameworkCore",
+            "Transactions",
+            "EfTransactionalExecutionService.cs"));
+        var pipelineRegistration = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.Services.CrossCutting",
+            "DependencyInjection.cs"));
+
+        efRepositoryBase.Should().Contain("transactionCoordinator.SaveChangesAsync");
+        auditCoordinator.Should().Contain("CreateExecutionStrategy");
+        auditCoordinator.Should().Contain("BeginTransactionAsync");
+        auditCoordinator.Should().Contain("UseTransactionAsync");
+        auditCoordinator.Should().Contain("transactionalAuditDbContext.SaveChangesAsync");
+        identityTransactionService.Should().Contain("IdentityStoreDbContext");
+        identityTransactionService.Should().Contain("BeginTransactionAsync");
+        identityTransactionService.Should().Contain("dbContext.SaveChangesAsync");
+        identityTransactionService.Should().NotContain("AuditTransactionCoordinator");
+        identityTransactionService.Should().NotContain("AuditDbContext");
+        pipelineRegistration.Should().NotContain("Transaction");
+        pipelineRegistration.Should().NotContain("Audit");
+    }
+
+    [Fact]
+    public void MediatRHosts_ShouldCallUnifiedPipelineRegistrationBeforeServiceModules()
+    {
+        var hostFiles = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["HttpApi"] = Path.Combine("src", "hosts", "AICopilot.HttpApi", "DependencyInjection.cs"),
+            ["DataWorker"] = Path.Combine("src", "hosts", "AICopilot.DataWorker", "Program.cs"),
+            ["RagWorker"] = Path.Combine("src", "hosts", "AICopilot.RagWorker", "Program.cs")
+        };
+        var violations = new List<string>();
+
+        foreach (var (host, relativeFile) in hostFiles)
+        {
+            var file = Path.Combine(SolutionRoot, relativeFile);
+            var source = File.ReadAllText(file);
+            var pipelineIndex = source.IndexOf("AddAICopilotMediatRPipeline", StringComparison.Ordinal);
+            if (pipelineIndex < 0)
+            {
+                violations.Add($"{relativeFile}: {host} does not call AddAICopilotMediatRPipeline");
+                continue;
+            }
+
+            var firstServiceIndex = FindFirstIndex(
+                source,
+                "AddIdentityService",
+                "AddAiGatewayService",
+                "AddRagService",
+                "AddDataAnalysisService",
+                "AddMcpService");
+
+            if (firstServiceIndex >= 0 && pipelineIndex > firstServiceIndex)
+            {
+                violations.Add($"{relativeFile}: {host} registers service modules before the MediatR pipeline");
+            }
+        }
+
+        violations.Should().BeEmpty(
+            "host composition roots that register MediatR handlers must register the shared pipeline first");
+    }
+
+    [Fact]
+    public void AuthorizationBehavior_ShouldResolveIdentityServicesOnlyForPermissionProtectedRequests()
+    {
+        var behaviorSource = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.Services.CrossCutting",
+            "Behaviors",
+            "AuthorizationRequirementEvaluator.cs"));
+        var noRequirementIndex = behaviorSource.IndexOf("requiredPermissions.Length == 0", StringComparison.Ordinal);
+        var userResolveIndex = behaviorSource.IndexOf("GetService(typeof(ICurrentUser))", StringComparison.Ordinal);
+        var identityResolveIndex = behaviorSource.IndexOf("GetService(typeof(IIdentityAccessService))", StringComparison.Ordinal);
+
+        noRequirementIndex.Should().BeGreaterThanOrEqualTo(0);
+        userResolveIndex.Should().BeGreaterThan(noRequirementIndex);
+        identityResolveIndex.Should().BeGreaterThan(userResolveIndex);
+    }
+
+    [Fact]
+    public void CloudReadOnlyDirectDb_ShouldKeepReadonlyGuardsAndRejectSimulationFallback()
+    {
+        var semanticGuard = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "Workflows",
+            "Executors",
+            "CloudReadOnlySemanticSqlGuard.cs"));
+        var businessQuery = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.DataAnalysisService",
+            "BusinessDatabases",
+            "BusinessDatabaseReadonlyQuery.cs"));
+        var seeder = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "hosts",
+            "AICopilot.MigrationWorkApp",
+            "MigrationWorkerCloudReadOnlySeeder.cs"));
+        var semanticRunner = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "Workflows",
+            "Executors",
+            "SemanticAnalysisRunner.cs"));
+
+        var approvedTables = new[] { "devices", "mfg_processes", "device_logs", "hourly_capacity", "pass_station_records" };
+        foreach (var table in approvedTables)
+        {
+            semanticGuard.Should().Contain($"\"{table}\"");
+            businessQuery.Should().Contain($"\"{table}\"");
+        }
+
+        semanticGuard.Should().Contain("ContainsWildcardProjection");
+        semanticGuard.Should().Contain("SensitiveIdentifierFragments");
+        businessQuery.Should().Contain("CloudReadOnlyBusinessQuerySchema");
+        businessQuery.Should().Contain("BlockedFieldFragments");
+        seeder.Should().Contain("IsSimulationSeedEnabled(configuration)");
+        seeder.Should().Contain("isReadOnly: true");
+        seeder.Should().Contain("ReadOnlyCredentialVerified");
+        seeder.Should().Contain("DataAnalysis CloudReadOnly direct database mode cannot be enabled while CloudReadonly Simulation seeding is enabled.");
+
+        semanticRunner.IndexOf("semanticPhysicalMappingProvider.TryGetMapping", StringComparison.Ordinal)
+            .Should()
+            .BeLessThan(semanticRunner.IndexOf("return await RunCloudAiReadAsync", StringComparison.Ordinal));
+
+        semanticGuard.Should().Contain("mfg_processes");
+        businessQuery.Should().Contain("mfg_processes");
+    }
+
+    [Fact]
+    public void CodeQualityGuidance_ShouldKeepLinqAndRepeatedEnumerationRules()
+    {
+        var editorConfig = File.ReadAllText(Path.Combine(SolutionRoot, ".editorconfig"));
+        var agents = File.ReadAllText(Path.Combine(SolutionRoot, "AGENTS.md"));
+        var businessRules = File.ReadAllText(Path.Combine(SolutionRoot, "资料", "AICopilot业务规则.md"));
+
+        editorConfig.Should().Contain("dotnet_diagnostic.CA1851.severity = warning");
+        agents.Should().Contain("简单数据转换、过滤、投影、分组默认优先使用 LINQ");
+        agents.Should().Contain("IQueryable");
+        agents.Should().Contain("热路径");
+        agents.Should().Contain("for`/`foreach");
+        agents.Should().Contain("重复枚举");
+        agents.Should().Contain("N+1");
+        businessRules.Should().Contain("先物化再过滤");
+        businessRules.Should().Contain("CA1851 先作为 warning");
+    }
+
+    [Fact]
     public void PreviewPackages_ShouldStayInExplicitDebtWhitelist()
     {
         var allowedPreviewPackages = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -1343,6 +1720,24 @@ public sealed class ArchitectureBoundaryTests
         return violations;
     }
 
+    private static string GetPrecedingLines(string source, int index, int lineCount)
+    {
+        var contextStart = index;
+        for (var i = 0; i < lineCount && contextStart > 0; i++)
+        {
+            var previousLine = source.LastIndexOf('\n', Math.Max(0, contextStart - 2));
+            contextStart = previousLine < 0 ? 0 : previousLine + 1;
+        }
+
+        return source[contextStart..index];
+    }
+
+    private static bool HasAuthorizationMetadata(string source)
+    {
+        return source.Contains("[Authorize", StringComparison.Ordinal)
+               || source.Contains("[AllowAnonymous", StringComparison.Ordinal);
+    }
+
     private static IReadOnlyList<string> ScanSource(
         string projectRoot,
         string serviceProject,
@@ -1422,6 +1817,26 @@ public sealed class ArchitectureBoundaryTests
     {
         var match = Regex.Match(value, @"AICopilot\.Core\.(AiGateway|DataAnalysis|McpServer|Rag)", RegexOptions.IgnoreCase);
         return match.Success ? match.Value : value;
+    }
+
+    private static int FindFirstIndex(string source, params string[] values)
+    {
+        return values
+            .Select(value => source.IndexOf(value, StringComparison.Ordinal))
+            .Where(index => index >= 0)
+            .DefaultIfEmpty(-1)
+            .Min();
+    }
+
+    private static void AssertInOrder(string source, params string[] values)
+    {
+        var previousIndex = -1;
+        foreach (var value in values)
+        {
+            var index = source.IndexOf(value, StringComparison.Ordinal);
+            index.Should().BeGreaterThan(previousIndex, $"{value} must be registered after the previous pipeline behavior");
+            previousIndex = index;
+        }
     }
 
     private static string FindSolutionRoot()

@@ -8,6 +8,7 @@ internal static partial class CloudReadOnlySemanticSqlGuard
         new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "devices",
+            "mfg_processes",
             "device_logs",
             "hourly_capacity",
             "pass_station_records"

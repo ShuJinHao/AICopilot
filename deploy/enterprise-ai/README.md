@@ -63,7 +63,7 @@ Cloud Postgres 不发布到宿主端口，AICopilot 部署脚本会创建外部 
 `scripts/Provision-AICopilotCloudReadOnlyDbRole.sh`。脚本会生成随机密码，写入 GitHub
 production environment secrets，并触发 `aicopilot-provision-cloud-readonly-db-role`；该 workflow
 必须带确认词，只在 Cloud PostgreSQL 中创建/轮换只读角色，只授予
-`devices`、`device_logs`、`hourly_capacity`、`pass_station_records` 的 SELECT 权限。
+`devices`、`mfg_processes`、`device_logs`、`hourly_capacity`、`pass_station_records` 的 SELECT 权限。
 
 后端容器以非 root 用户运行，文件上传和 Agent artifact workspace 必须落在持久化可写卷。默认 compose 会把
 `enterprise-ai-aicopilot-data` 挂到 `/var/lib/aicopilot`，并通过

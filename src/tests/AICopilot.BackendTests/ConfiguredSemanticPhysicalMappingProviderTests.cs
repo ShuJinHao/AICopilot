@@ -31,14 +31,14 @@ public sealed class ConfiguredSemanticPhysicalMappingProviderTests
         productionMapping.DatabaseName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.DefaultDatabaseName);
 
         deviceMapping.SourceName.Should().Be("devices");
-        deviceMapping.FromClause.Should().Contain("devices d LEFT JOIN LATERAL");
+        deviceMapping.FromClause.Should().Contain("devices d LEFT JOIN mfg_processes mp");
         deviceLogMapping.SourceName.Should().Be("device_logs");
-        deviceLogMapping.FromClause.Should().Be("device_logs l INNER JOIN devices d ON l.device_id = d.id");
+        deviceLogMapping.FromClause.Should().Be("device_logs l INNER JOIN devices d ON l.device_id = d.id LEFT JOIN mfg_processes mp ON d.process_id = mp.id");
         deviceLogMapping.FieldMappings["source"].Should().Be("'Cloud'");
         capacityMapping.SourceName.Should().Be("hourly_capacity");
-        capacityMapping.FromClause.Should().Be("hourly_capacity h INNER JOIN devices d ON h.device_id = d.id");
+        capacityMapping.FromClause.Should().Be("hourly_capacity h INNER JOIN devices d ON h.device_id = d.id LEFT JOIN mfg_processes mp ON d.process_id = mp.id");
         productionMapping.SourceName.Should().Be("pass_station_records");
-        productionMapping.FromClause.Should().Be("pass_station_records p INNER JOIN devices d ON p.device_id = d.id");
+        productionMapping.FromClause.Should().Be("pass_station_records p INNER JOIN devices d ON p.device_id = d.id LEFT JOIN mfg_processes mp ON d.process_id = mp.id");
 
         foreach (var target in Enum.GetValues<SemanticQueryTarget>().Where(target => target != SemanticQueryTarget.Recipe))
         {
@@ -101,12 +101,17 @@ public sealed class ConfiguredSemanticPhysicalMappingProviderTests
         deviceMapping.SourceName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.RealDeviceSourceName);
         deviceMapping.FromClause.Should().Contain("LEFT JOIN LATERAL");
         deviceMapping.FieldMappings["deviceCode"].Should().Be("d.client_code");
+        deviceMapping.FieldMappings["lineName"].Should().Be("mp.process_name");
         deviceLogMapping.SourceName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.RealDeviceLogSourceName);
         deviceLogMapping.FieldMappings["source"].Should().Be("'Cloud'");
         deviceLogMapping.IsFilterFieldAllowed("source").Should().BeFalse();
         capacityMapping.SourceName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.RealCapacitySourceName);
+        capacityMapping.FromClause.Should().Contain("LEFT JOIN mfg_processes mp");
+        capacityMapping.FieldMappings["processName"].Should().Be("mp.process_name");
         capacityMapping.FieldMappings["outputQty"].Should().Be("h.total_count");
         productionMapping.SourceName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.RealProductionDataSourceName);
+        productionMapping.FromClause.Should().Contain("LEFT JOIN mfg_processes mp");
+        productionMapping.FieldMappings["processName"].Should().Be("mp.process_name");
         productionMapping.FieldMappings["stationName"].Should().Be("p.type_key");
     }
 

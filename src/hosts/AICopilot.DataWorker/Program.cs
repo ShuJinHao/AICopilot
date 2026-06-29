@@ -7,6 +7,7 @@ using AICopilot.IdentityService;
 using AICopilot.Infrastructure;
 using AICopilot.RagService;
 using AICopilot.Services.Contracts;
+using AICopilot.Services.CrossCutting;
 using Microsoft.Extensions.DependencyInjection;
 
 Console.OutputEncoding = System.Text.Encoding.UTF8;
@@ -15,6 +16,7 @@ var builder = Host.CreateApplicationBuilder(args);
 
 builder.AddServiceDefaults();
 builder.AddInfrastructures();
+builder.Services.AddAICopilotMediatRPipeline();
 builder.AddDataAnalysisService();
 builder.AddIdentityService();
 builder.AddAiGatewayService();

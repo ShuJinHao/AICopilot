@@ -73,10 +73,14 @@ public sealed class DataAnalysisReadOnlyGuardrailTests
 
         var schema = BusinessDataSourceGovernancePolicy.ResolveSafetySchema(database);
         schema.Should().NotBeNull();
-        schema!.AllowedTables.Should().Contain(["devices", "device_logs", "hourly_capacity", "pass_station_records"]);
+        schema!.AllowedTables.Should().Contain(["devices", "mfg_processes", "device_logs", "hourly_capacity", "pass_station_records"]);
 
         BusinessReadonlyQuerySafetyPolicy.Validate(
                 "SELECT client_code FROM devices LIMIT 10",
+                schema)
+            .Should().BeNull();
+        BusinessReadonlyQuerySafetyPolicy.Validate(
+                "SELECT mp.process_name FROM devices d LEFT JOIN mfg_processes mp ON d.process_id = mp.id LIMIT 10",
                 schema)
             .Should().BeNull();
         BusinessReadonlyQuerySafetyPolicy.Validate(

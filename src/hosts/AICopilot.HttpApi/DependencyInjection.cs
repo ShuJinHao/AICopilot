@@ -6,6 +6,7 @@ using AICopilot.Infrastructure.Authentication;
 using AICopilot.McpService;
 using AICopilot.RagService;
 using AICopilot.Services.Contracts;
+using AICopilot.Services.CrossCutting;
 
 namespace AICopilot.HttpApi;
 
@@ -15,6 +16,7 @@ public static class DependencyInjection
     {
         public void AddApplicationService()
         {
+            builder.Services.AddAICopilotMediatRPipeline();
             builder.AddIdentityService();
             builder.AddAiGatewayService();
             builder.AddRagService();

@@ -71,6 +71,49 @@ public sealed class ClaudeFollowupClosureTests
     }
 
     [Fact]
+    public void AgentWorkflowTopology_ShouldDeclareParallelFanOutBranches()
+    {
+        AgentWorkflowTopology.Stages
+            .Where(stage => stage.Kind == AgentWorkflowStageKind.ParallelFanOut)
+            .Select(stage => stage.Id)
+            .Should()
+            .ContainSingle()
+            .Which
+            .Should()
+            .Be("ParallelFanOut");
+
+        AgentWorkflowTopology.ParallelBranches
+            .OrderBy(branch => branch.Order)
+            .Select(branch => branch.BranchType)
+            .Should()
+            .Equal(
+                BranchType.Tools,
+                BranchType.Knowledge,
+                BranchType.DataAnalysis,
+                BranchType.BusinessPolicy);
+    }
+
+    [Fact]
+    public void AgentWorkflowPipeline_ShouldUseTopologyWithoutFlatteningParallelBranches()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var source = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "Workflows",
+            "AgentWorkflowPipeline.cs"));
+        var method = ExtractMethodBody(source, "RunIntentWorkflowAsync");
+
+        method.Should().Contain("AgentWorkflowTopology.ParallelBranches");
+        method.Should().Contain("RunBranchSafelyAsync");
+        method.Should().Contain("Task.WhenAll(branchTasks)");
+        method.Should().Contain("AgentWorkflowSink");
+        method.Should().NotContain("await ExecuteBranchAsync");
+    }
+
+    [Fact]
     public void AgentWorkflowPipeline_PlanDraft_ShouldUseCapabilityDiscoveryOnly()
     {
         var solutionRoot = FindSolutionRoot();

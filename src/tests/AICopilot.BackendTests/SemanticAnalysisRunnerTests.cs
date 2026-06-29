@@ -121,6 +121,80 @@ public sealed class SemanticAnalysisRunnerTests
     }
 
     [Fact]
+    public async Task RunAsync_ShouldPreferCloudReadOnlyBusinessDatabase_WhenCloudAiReadIsEnabled()
+    {
+        var database = new BusinessDatabaseConnectionInfo(
+            Guid.NewGuid(),
+            "CloudPlatformReadonly",
+            "Cloud Platform readonly business data",
+            "Host=localhost;Database=cloud;Username=readonly;Password=secret",
+            DatabaseProviderType.PostgreSql,
+            IsEnabled: true,
+            IsReadOnly: true,
+            DataSourceExternalSystemType.CloudReadOnly,
+            ReadOnlyCredentialVerified: true);
+        var databaseReadService = new RecordingBusinessDatabaseReadService(database);
+        var databaseConnector = new RecordingDatabaseConnector(new DatabaseQueryResult(
+            [
+                new Dictionary<string, object?>
+                {
+                    ["deviceCode"] = "DEV-001"
+                }
+            ],
+            ReturnedRowCount: 1,
+            IsTruncated: false,
+            ElapsedMilliseconds: 4));
+        var plan = new SemanticQueryPlan(
+            "Analysis.Device.List",
+            SemanticQueryTarget.Device,
+            SemanticQueryKind.List,
+            "查询设备列表",
+            new SemanticProjection(["deviceCode"]),
+            [],
+            null,
+            new SemanticSort("deviceCode", SemanticSortDirection.Asc),
+            10);
+        var mapping = new SemanticPhysicalMapping(
+            SemanticQueryTarget.Device,
+            DatabaseProviderType.PostgreSql,
+            "devices",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["deviceCode"] = "client_code"
+            },
+            ["deviceCode"],
+            ["deviceCode"],
+            ["deviceCode"],
+            databaseName: "CloudPlatformReadonly",
+            defaultSort: new SemanticSort("deviceCode", SemanticSortDirection.Asc));
+        var runner = new SemanticAnalysisRunner(
+            new ThrowingCloudAiReadClient(isEnabled: true),
+            databaseReadService,
+            databaseConnector,
+            new StubSemanticQueryPlanner(plan),
+            new StubSemanticPhysicalMappingProvider(mapping),
+            new StubSemanticSqlGenerator(new GeneratedSemanticSql(
+                "SELECT t.client_code AS deviceCode FROM devices t LIMIT 10",
+                new Dictionary<string, object?>())),
+            new DataAnalysisAuditRecorder(new NoopAuditLogWriter()),
+            NullLogger<SemanticAnalysisRunner>.Instance);
+
+        var result = await runner.RunAsync(
+            new IntentResult
+            {
+                Intent = "Analysis.Device.List",
+                Query = "查询设备列表"
+            },
+            CancellationToken.None);
+
+        databaseReadService.WasCalled.Should().BeTrue();
+        databaseConnector.WasCalled.Should().BeTrue();
+        databaseConnector.LastSql.Should().Contain("FROM devices");
+        result.Should().NotContain("Cloud AiRead");
+        result.Should().NotContain("Simulation");
+    }
+
+    [Fact]
     public async Task RunAsync_ShouldRejectCloudReadOnlySemanticSql_WhenGeneratedSqlTouchesDisallowedTable()
     {
         var databaseConnector = new RecordingDatabaseConnector();

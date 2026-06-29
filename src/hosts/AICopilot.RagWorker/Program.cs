@@ -2,6 +2,7 @@ using AICopilot.Infrastructure;
 using AICopilot.RagWorker;
 using AICopilot.RagService;
 using AICopilot.Services.Contracts;
+using AICopilot.Services.CrossCutting;
 using Microsoft.Extensions.DependencyInjection;
 
 Console.OutputEncoding = System.Text.Encoding.UTF8;
@@ -10,6 +11,7 @@ var builder = Host.CreateApplicationBuilder(args);
 
 builder.AddServiceDefaults();
 builder.AddRagWorkerInfrastructure(typeof(Program).Assembly);
+builder.Services.AddAICopilotMediatRPipeline();
 builder.AddRagService();
 builder.AddRagIndexingService();
 builder.Services.AddScoped<ICurrentUser, WorkerCurrentUser>();

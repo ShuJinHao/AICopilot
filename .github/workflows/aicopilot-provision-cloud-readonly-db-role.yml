@@ -238,7 +238,7 @@ jobs:
           \gexec
 
           SELECT format(
-              'GRANT SELECT ON TABLE public.devices, public.device_logs, public.hourly_capacity, public.pass_station_records TO %I',
+              'GRANT SELECT ON TABLE public.devices, public.mfg_processes, public.device_logs, public.hourly_capacity, public.pass_station_records TO %I',
               :'readonly_user')
           \gexec
           SQL
@@ -255,24 +255,30 @@ jobs:
           SELECT
             current_setting('default_transaction_read_only') AS default_transaction_read_only,
             has_table_privilege(current_user, 'public.devices', 'select') AS devices_select,
+            has_table_privilege(current_user, 'public.mfg_processes', 'select') AS mfg_processes_select,
             has_table_privilege(current_user, 'public.device_logs', 'select') AS device_logs_select,
             has_table_privilege(current_user, 'public.hourly_capacity', 'select') AS hourly_capacity_select,
             has_table_privilege(current_user, 'public.pass_station_records', 'select') AS pass_station_records_select,
             has_table_privilege(current_user, 'public.devices', 'insert') AS devices_insert,
             has_table_privilege(current_user, 'public.device_logs', 'update') AS device_logs_update,
             has_table_privilege(current_user, 'public.hourly_capacity', 'delete') AS hourly_capacity_delete,
+            has_table_privilege(current_user, 'public.mfg_processes', 'update') AS mfg_processes_update,
             has_schema_privilege(current_user, 'public', 'create') AS public_schema_create;
-          SELECT count(*) >= 0 AS devices_probe FROM public.devices;
-          SELECT count(*) >= 0 AS device_logs_probe FROM public.device_logs;
-          SELECT count(*) >= 0 AS hourly_capacity_probe FROM public.hourly_capacity;
-          SELECT count(*) >= 0 AS pass_station_records_probe FROM public.pass_station_records;
+          SELECT 'devices_rows' AS probe, count(*)::bigint AS row_count FROM public.devices;
+          SELECT 'mfg_processes_rows' AS probe, count(*)::bigint AS row_count FROM public.mfg_processes;
+          SELECT 'device_logs_rows' AS probe, count(*)::bigint AS row_count FROM public.device_logs;
+          SELECT 'hourly_capacity_rows' AS probe, count(*)::bigint AS row_count FROM public.hourly_capacity;
+          SELECT 'pass_station_records_rows' AS probe, count(*)::bigint AS row_count FROM public.pass_station_records;
           SQL
 
-          if ! grep -Fx 'on|t|t|t|t|f|f|f|f' "$RUNNER_TEMP/aicopilot-cloud-readonly-privileges.txt" >/dev/null; then
+          if ! grep -Fx 'on|t|t|t|t|t|f|f|f|f|f' "$RUNNER_TEMP/aicopilot-cloud-readonly-privileges.txt" >/dev/null; then
             echo "Readonly privilege verification failed." >&2
             sed 's/[[:space:]]\+/ /g' "$RUNNER_TEMP/aicopilot-cloud-readonly-privileges.txt" >&2
             exit 65
           fi
+
+          emit_line "- Cloud readonly table row counts:"
+          awk -F'|' '/_rows/ { printf "  - %s=%s\n", $1, $2 }' "$RUNNER_TEMP/aicopilot-cloud-readonly-privileges.txt"
 
           emit_line "- Cloud readonly DB role provisioned and verified. Password was not printed."
 

@@ -8,16 +8,17 @@ using Npgsql;
 
 namespace AICopilot.BackendTests;
 
+[Collection(CloudSemanticSimulationBackendTestCollection.Name)]
 [Trait("Suite", "Phase38Acceptance")]
 [Trait("Runtime", "DockerRequired")]
-public sealed class AcceptanceBaselineTests(AICopilotAppFixture fixture) : IClassFixture<AICopilotAppFixture>
+public sealed class AcceptanceBaselineTests(CloudSemanticSimulationAICopilotAppFixture fixture)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true
     };
 
-    private readonly AICopilotAppFixture _fixture = fixture;
+    private readonly CloudSemanticSimulationAICopilotAppFixture _fixture = fixture;
 
     [Fact]
     public async Task ChineseStructuredAcceptanceChat_ShouldCoverAllBusinessDomains()

@@ -25,6 +25,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\infrastructure\AICopilot.Infrastructure\AICopilot.Infrastructure.csproj" />
     <ProjectReference Include="..\..\services\AICopilot.RagService\AICopilot.RagService.csproj" />
+    <ProjectReference Include="..\..\services\AICopilot.Services.CrossCutting\AICopilot.Services.CrossCutting.csproj" />
     <ProjectReference Include="..\AICopilot.ServiceDefaults\AICopilot.ServiceDefaults.csproj" />
   </ItemGroup>
 </Project>

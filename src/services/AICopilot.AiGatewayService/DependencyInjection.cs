@@ -15,6 +15,7 @@ using AICopilot.AiGatewayService.Workspaces;
 using AICopilot.AiGatewayService.Workflows;
 using AICopilot.AiGatewayService.Workflows.Executors;
 using AICopilot.Services.Contracts;
+using AICopilot.Services.CrossCutting.Behaviors;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -79,6 +80,9 @@ public static class DependencyInjection
         builder.Services.AddScoped<IAgentDynamicPlanner, DefaultAgentDynamicPlanner>();
         builder.Services.AddScoped<AgentAuditRecorder>();
         builder.Services.TryAddSingleton<ISessionExecutionLock, InMemorySessionExecutionLock>();
+        builder.Services.AddSingleton<IRequestValidator<ChatStreamRequest>, ChatStreamRequestValidator>();
+        builder.Services.AddSingleton<IRequestValidator<ApprovalDecisionStreamRequest>, ApprovalDecisionStreamRequestValidator>();
+        builder.Services.AddSingleton<IRequestValidator<PlanAgentTaskStreamRequest>, PlanAgentTaskStreamRequestValidator>();
         builder.Services.AddSingleton<IOperationalBoundaryPolicy, ManufacturingOperationalBoundaryPolicy>();
         builder.Services.AddSingleton<IManufacturingSceneClassifier, KeywordManufacturingSceneClassifier>();
         builder.Services.AddSingleton<ITokenBudgetPolicy, ChatTokenBudgetPolicy>();

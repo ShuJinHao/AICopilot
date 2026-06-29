@@ -17,6 +17,7 @@ public static class AuthProblemCodes
 
 public static class AppProblemCodes
 {
+    public const string RequestValidationFailed = "request_validation_failed";
     public const string RateLimitExceeded = "rate_limit_exceeded";
     public const string ChatContextExpired = "chat_context_expired";
     public const string ChatConfigurationMissing = "chat_configuration_missing";

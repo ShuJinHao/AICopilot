@@ -64,7 +64,7 @@ public sealed class AiEvalBehaviorGuardrailTests
             "Device",
             "命中 1 台设备。",
             [],
-            ["设备状态为 Running。"],
+            ["最新日志级别为 Running。"],
             "结果上限 20 条。");
         var analysis = InvokeBuildSemanticAnalysis(
             plan,
@@ -96,7 +96,7 @@ public sealed class AiEvalBehaviorGuardrailTests
 
         context.Should().Contain("business_data_preview");
         previewRow.GetProperty("设备编码").GetString().Should().Be("D01");
-        previewRow.GetProperty("设备状态").GetString().Should().Be("Running");
+        previewRow.GetProperty("最新日志级别").GetString().Should().Be("Running");
         previewRow.GetProperty("日志内容").GetString().Should().Be("[已移除疑似指令或内部细节]");
         context.Should().NotContain("\"data\"");
         context.Should().NotContain("databaseName");

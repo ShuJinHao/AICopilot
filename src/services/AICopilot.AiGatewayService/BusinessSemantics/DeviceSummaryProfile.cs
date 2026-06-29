@@ -11,7 +11,7 @@ internal sealed class DeviceSummaryProfile : SemanticSummaryProfileBase
         ["deviceId"] = "设备标识",
         ["deviceCode"] = "设备编码",
         ["deviceName"] = "设备名称",
-        ["status"] = "设备状态",
+        ["status"] = "最新日志级别",
         ["lineName"] = "产线",
         ["updatedAt"] = "时间"
     };
@@ -41,7 +41,7 @@ internal sealed class DeviceSummaryProfile : SemanticSummaryProfileBase
 
         if (!string.IsNullOrWhiteSpace(statusBreakdown))
         {
-            metrics.Add(Metric("statusBreakdown", "状态分布", statusBreakdown));
+            metrics.Add(Metric("statusBreakdown", "最新日志级别分布", statusBreakdown));
         }
 
         if (!string.IsNullOrWhiteSpace(lineBreakdown))
@@ -52,13 +52,13 @@ internal sealed class DeviceSummaryProfile : SemanticSummaryProfileBase
         var highlights = rows.Take(3).Select(Describe).ToArray();
         var conclusion = string.IsNullOrWhiteSpace(statusBreakdown)
             ? $"当前命中 {rows.Count} 台设备。"
-            : $"当前命中 {rows.Count} 台设备，状态分布已汇总。";
+            : $"当前命中 {rows.Count} 台设备，最新日志级别分布已汇总。";
 
         return new SemanticSummaryDto(plan.Target.ToString(), conclusion, metrics, highlights, scope);
     }
 
     private static string Describe(Dictionary<string, object?> row)
     {
-        return $"设备 {SemanticSummaryFormatting.GetString(row, "deviceCode")} / {SemanticSummaryFormatting.GetString(row, "deviceName")}，状态 {SemanticSummaryFormatting.GetString(row, "status")}，产线 {SemanticSummaryFormatting.GetString(row, "lineName")}，时间 {SemanticSummaryFormatting.FormatTimestamp(SemanticSummaryFormatting.GetString(row, "updatedAt"))}";
+        return $"设备 {SemanticSummaryFormatting.GetString(row, "deviceCode")} / {SemanticSummaryFormatting.GetString(row, "deviceName")}，最新日志级别 {SemanticSummaryFormatting.GetString(row, "status")}，产线 {SemanticSummaryFormatting.GetString(row, "lineName")}，时间 {SemanticSummaryFormatting.FormatTimestamp(SemanticSummaryFormatting.GetString(row, "updatedAt"))}";
     }
 }

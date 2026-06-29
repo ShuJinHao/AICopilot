@@ -142,7 +142,7 @@ internal static class SemanticAnalysisPresentation
             "deviceId" => "设备标识",
             "deviceCode" => "设备编码",
             "deviceName" => "设备名称",
-            "status" => "设备状态",
+            "status" => "最新日志级别",
             "lineName" => "产线",
             "updatedAt" => "时间",
             "logId" => "日志标识",

@@ -63,25 +63,13 @@ public class AgentWorkflowPipeline(
         }
 
         var sink = new AgentWorkflowSink();
-        var branchTasks = new[]
-        {
-            RunBranchSafelyAsync(
-                BranchType.Tools,
-                () => toolsPack.ExecuteAsync(routing.Intents, ct),
-                ct),
-            RunBranchSafelyAsync(
-                BranchType.Knowledge,
-                () => knowledgeRetrieval.ExecuteAsync(routing.Intents, ct),
-                ct),
-            RunBranchSafelyAsync(
-                BranchType.DataAnalysis,
-                () => dataAnalysis.ExecuteAsync(routing.Intents, sink, session, ct),
-                ct),
-            RunBranchSafelyAsync(
-                BranchType.BusinessPolicy,
-                () => businessPolicy.ExecuteAsync(routing.Intents, request.Message, ct),
-                ct)
-        };
+        var branchTasks = AgentWorkflowTopology.ParallelBranches
+            .OrderBy(branch => branch.Order)
+            .Select(branch => RunBranchSafelyAsync(
+                branch.BranchType,
+                () => ExecuteBranchAsync(branch.BranchType, routing.Intents, request.Message, sink, session, ct),
+                ct))
+            .ToArray();
 
         var allBranchesTask = Task.WhenAll(branchTasks);
         _ = CompleteSinkWhenBranchesFinishAsync(allBranchesTask, sink);
@@ -197,6 +185,24 @@ public class AgentWorkflowPipeline(
             BranchType.Knowledge => BranchResult.FromKnowledge(string.Empty),
             BranchType.DataAnalysis => BranchResult.FromDataAnalysis(string.Empty),
             BranchType.BusinessPolicy => BranchResult.FromBusinessPolicy(string.Empty),
+            _ => throw new ArgumentOutOfRangeException(nameof(branchType), branchType, "Unknown branch type.")
+        };
+    }
+
+    private Task<BranchResult> ExecuteBranchAsync(
+        BranchType branchType,
+        List<IntentResult> intents,
+        string message,
+        AgentWorkflowSink sink,
+        SessionRuntimeSnapshot? session,
+        CancellationToken ct)
+    {
+        return branchType switch
+        {
+            BranchType.Tools => toolsPack.ExecuteAsync(intents, ct),
+            BranchType.Knowledge => knowledgeRetrieval.ExecuteAsync(intents, ct),
+            BranchType.DataAnalysis => dataAnalysis.ExecuteAsync(intents, sink, session, ct),
+            BranchType.BusinessPolicy => businessPolicy.ExecuteAsync(intents, message, ct),
             _ => throw new ArgumentOutOfRangeException(nameof(branchType), branchType, "Unknown branch type.")
         };
     }

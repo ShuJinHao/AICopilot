@@ -18,6 +18,7 @@ public class IdentityController(
     IOptions<CloudOidcOptions> cloudOidcOptions) : ApiControllerBase(sender)
 {
     [HttpPost("login")]
+    [AllowAnonymous]
     [EnableRateLimiting("login")]
     public async Task<IActionResult> Login(UserLoginRequest request)
     {
@@ -26,12 +27,14 @@ public class IdentityController(
     }
 
     [HttpGet("cloud-oidc/status")]
+    [AllowAnonymous]
     public async Task<IActionResult> GetCloudOidcStatus()
     {
         return Ok(new CloudOidcStatusResponse(await IsCloudOidcEnabledAsync()));
     }
 
     [HttpGet("cloud-oidc/challenge")]
+    [AllowAnonymous]
     [EnableRateLimiting("login")]
     public async Task<IActionResult> CloudOidcChallenge()
     {
@@ -55,6 +58,7 @@ public class IdentityController(
     }
 
     [HttpPost("cloud-oidc/finalize")]
+    [AllowAnonymous]
     [EnableRateLimiting("login")]
     public async Task<IActionResult> FinalizeCloudOidcLogin()
     {
@@ -198,6 +202,7 @@ public class IdentityController(
     }
 
     [HttpGet("initialization-status")]
+    [AllowAnonymous]
     public async Task<IActionResult> GetInitializationStatus()
     {
         return ReturnResult(await Sender.Send(new GetInitializationStatusQuery()));

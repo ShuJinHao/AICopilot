@@ -17,3 +17,9 @@ public sealed class AgentSimulationBackendTestCollection : ICollectionFixture<Ag
 {
     public const string Name = "AICopilotAgentSimulationBackend";
 }
+
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class CloudSemanticSimulationBackendTestCollection : ICollectionFixture<CloudSemanticSimulationAICopilotAppFixture>
+{
+    public const string Name = "AICopilotCloudSemanticSimulationBackend";
+}

@@ -1,0 +1,5 @@
+root = true
+
+[*.cs]
+# Start as warning so the existing baseline stays green; promote to error after current warnings are audited.
+dotnet_diagnostic.CA1851.severity = warning

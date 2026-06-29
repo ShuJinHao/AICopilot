@@ -280,6 +280,103 @@ public sealed class IdentityAccessManagementTests
     }
 
     [Fact]
+    public async Task ChatStream_ShouldReturnForbiddenBeforeSse_WhenUserLacksChatPermission()
+    {
+        await AuthenticateAsAdminAsync();
+
+        var roleName = $"NoChat-{Guid.NewGuid():N}";
+        var userName = $"no-chat-user-{Guid.NewGuid():N}";
+        const string password = "Password123!";
+        string? roleId = null;
+        string? userId = null;
+        Guid languageModelId = Guid.Empty;
+        Guid templateId = Guid.Empty;
+        Guid sessionId = Guid.Empty;
+
+        try
+        {
+            var createdRole = await PostJsonAsync<CreatedRoleDto>("/api/identity/role", new
+            {
+                roleName,
+                permissions = new[]
+                {
+                    "AiGateway.GetSession"
+                }
+            });
+            roleId = createdRole.RoleId;
+
+            var createdUser = await PostJsonAsync<CreatedUserDto>("/api/identity/user", new
+            {
+                userName,
+                password,
+                roleName
+            });
+            userId = createdUser.UserId;
+
+            languageModelId = await CreateLanguageModelAsync($"no-chat-stream-lm-{Guid.NewGuid():N}");
+            templateId = await CreateConversationTemplateAsync(
+                $"no-chat-stream-template-{Guid.NewGuid():N}",
+                languageModelId,
+                "no chat stream template",
+                "You are a concise assistant.");
+
+            var createdSession = await PostJsonAsync<CreatedSessionDto>("/api/aigateway/session", new
+            {
+                templateId
+            });
+            sessionId = createdSession.Id;
+
+            await AuthenticateAsync(userName, password);
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, "/api/aigateway/chat")
+            {
+                Content = JsonContent.Create(new
+                {
+                    sessionId,
+                    message = "should be rejected before SSE starts"
+                })
+            };
+
+            using var response = await _fixture.HttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+            response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+            response.Content.Headers.ContentType?.MediaType.Should().NotBe("text/event-stream");
+
+            var problem = await ReadJsonAsync<ProblemDetailsDto>(response);
+            problem.Code.Should().Be("missing_permission");
+            problem.MissingPermissions.Should().Contain("AiGateway.Chat");
+        }
+        finally
+        {
+            await AuthenticateAsAdminAsync();
+
+            if (sessionId != Guid.Empty)
+            {
+                await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/session", new { id = sessionId }, HttpStatusCode.NoContent);
+            }
+
+            if (templateId != Guid.Empty)
+            {
+                await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/conversation-template", new { id = templateId }, HttpStatusCode.NoContent);
+            }
+
+            if (languageModelId != Guid.Empty)
+            {
+                await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/language-model", new { id = languageModelId }, HttpStatusCode.NoContent);
+            }
+
+            if (!string.IsNullOrWhiteSpace(userId))
+            {
+                await DeleteUserIfExistsAsync(userId);
+            }
+
+            if (!string.IsNullOrWhiteSpace(roleId))
+            {
+                await DeleteRoleIfExistsAsync(roleId);
+            }
+        }
+    }
+
+    [Fact]
     public async Task DisableEnableUser_ShouldRevokeExistingSession_AndAllowLoginAfterRecovery()
     {
         await AuthenticateAsAdminAsync();

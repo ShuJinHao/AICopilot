@@ -9,6 +9,8 @@
 - 每次代码改动完成前，必须更新项目滚动复盘文档 `../docs/改动复盘与规则沉淀.md`，最新记录放在最前。
 - 每次复盘必须写明改动范围、改动原因、影响面、验证命令、验证结果和规则提炼结论。
 - 必须判断是否形成长期规则；有则写入项目 `AGENTS.md`、本文档、专题契约或工作区长期规则，无则在复盘中写明“无新增长期规则”及原因。
+- 新增、删除或重命名后端错误码时，必须同批更新 `docs/frontend-integration-contract-package-2026-05-17.md`，并运行 `ErrorCodeCatalogTests`，确保前端错误契约不漂移。
+- 大范围架构、管道、权限、工作流或契约改动不得只以 filtered tests 作为完成依据；全量 `AICopilot.BackendTests` 未跑、CI 全量未确认或环境依赖失败时，最终回复和复盘必须明确标注。
 - 最终回复必须列出复盘文档、规则沉淀位置和验证命令；缺任一项，不得称为完成。
 - 默认只更新项目滚动复盘文档，不为每个任务新增单独流水文档；只有形成可长期复用的业务或技术契约，才新增专题文档。
 - `资料/` 保留为 AICopilot 业务规则入口；执行复盘和改动沉淀流水统一放在项目 `docs/`。
@@ -80,6 +82,9 @@ Cloud AiRead 设备契约：
 - 查询结果只用于分析展示，不产生业务写入。
 - 不能为了分析便利放宽 `MaxRows`、read-only session 或 SQL 安全检查。
 - 内部开发直连真实 Cloud PostgreSQL 时，只能注册为 DataAnalysis `CloudReadOnly` 只读业务数据源，必须使用已验证只读数据库账号，并绑定白名单表字段和只读 SQL guard。
+- 内部真实 Cloud 语义查询优先走 DataAnalysis `CloudReadOnly` Direct DB 映射；Cloud AiRead 只作为未来外部系统只读 API 接入口封存，不能在内部映射存在时压过 Direct DB。
+- Direct DB 语义映射中的工序名来自只读 `mfg_processes.process_name`；新增 join 表必须同步进入 SQL guard、BusinessQuery safety schema、只读 role 授权和模板测试。
+- Direct DB 设备 `status` 字段当前是最新 `device_logs.level`，对用户展示必须称为“最新日志级别”，不得包装为实时在线/运行状态。
 - 真实 Cloud Text-to-SQL 验证不得走 Simulation 数据源冒充真实结果；Simulation 只能用于明确标识的模拟链路。
 - 创建或轮换 Cloud PostgreSQL 只读账号只能通过显式确认的受控自动化执行；只能创建/更新专用 readonly role，只授予白名单表 SELECT，不得授予写权限、schema create 权限、superuser、createdb、createrole 或 replication。
 
@@ -137,3 +142,6 @@ Cloud AiRead 设备契约：
 - MCP runtime 配置变更必须进入 runtime registry refresh cycle，禁用、删除或配置变更后不能继续暴露未来工具解析。
 - 身份安全以 security stamp 驱动会话失效；Cloud role 不直接成为 AICopilot 本地 role。
 - 多 DbContext 迁移历史必须通过 `__EFMigrationsHistory` 的上下文隔离或迁移历史表拆分规则治理，不能让单一上下文回滚污染其他上下文状态。
+- 新增或接线 `IStreamPipelineBehavior` 后，必须核对所有公开 `IStreamRequest` 的 `AuthorizeRequirement`，测试种子角色必须覆盖对应权限；无权限场景应返回干净 401/403，不能表现为 SSE 已写 200 后断流。
+- 简单集合转换默认优先用 LINQ 表达意图，`IQueryable` 必须优先下推过滤、投影、排序和分页；热路径、状态机、流式枚举、数组/`Span<T>` 紧循环允许 `for`/`foreach`。
+- 工程质量门禁优先抓重复枚举、先物化再过滤、N+1 查询、O(n²) 嵌套、重复扫描和错误数据结构；CA1851 先作为 warning 运行，基线清理后再考虑升级为 error。

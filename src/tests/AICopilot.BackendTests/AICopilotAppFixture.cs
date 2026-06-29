@@ -169,6 +169,18 @@ public class AICopilotAppFixture : IAsyncLifetime, IAsyncDisposable
     {
     }
 
+    protected void ConfigureCloudReadonlySimulationEnvironment()
+    {
+        SetEnvironmentVariable("CloudReadonly__Mode", "Simulation");
+        SetEnvironmentVariable("CloudReadonly__Simulation__Enabled", "true");
+        SetEnvironmentVariable("CloudReadonly__Simulation__SeedData", "true");
+        SetEnvironmentVariable("CloudReadonly__Simulation__DataSet", "ManufacturingDemo");
+        SetEnvironmentVariable("CloudReadonly__Simulation__AlwaysMarkAsSimulation", "true");
+        SetEnvironmentVariable("CloudReadonly__Real__Enabled", "false");
+        SetEnvironmentVariable("CloudReadonly__Real__AllowProductionRead", "false");
+        SetEnvironmentVariable("CloudAiRead__Enabled", "false");
+    }
+
     private void ConfigureLocalProxyEnvironment()
     {
         foreach (var variable in ProxyEnvironmentVariables)
@@ -367,13 +379,14 @@ public sealed class AgentSimulationAICopilotAppFixture : AICopilotAppFixture
 
     protected override void ConfigureAdditionalEnvironment()
     {
-        SetEnvironmentVariable("CloudReadonly__Mode", "Simulation");
-        SetEnvironmentVariable("CloudReadonly__Simulation__Enabled", "true");
-        SetEnvironmentVariable("CloudReadonly__Simulation__SeedData", "true");
-        SetEnvironmentVariable("CloudReadonly__Simulation__DataSet", "ManufacturingDemo");
-        SetEnvironmentVariable("CloudReadonly__Simulation__AlwaysMarkAsSimulation", "true");
-        SetEnvironmentVariable("CloudReadonly__Real__Enabled", "false");
-        SetEnvironmentVariable("CloudReadonly__Real__AllowProductionRead", "false");
-        SetEnvironmentVariable("CloudAiRead__Enabled", "false");
+        ConfigureCloudReadonlySimulationEnvironment();
+    }
+}
+
+public sealed class CloudSemanticSimulationAICopilotAppFixture : AICopilotAppFixture
+{
+    protected override void ConfigureAdditionalEnvironment()
+    {
+        ConfigureCloudReadonlySimulationEnvironment();
     }
 }

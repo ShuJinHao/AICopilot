@@ -11,6 +11,7 @@ public sealed class ConfiguredSemanticPhysicalMappingProvider : ISemanticPhysica
     public const string DefaultCapacitySourceName = "capacity_cloud_sim_view";
     public const string DefaultProductionDataSourceName = "production_data_cloud_sim_view";
     public const string RealDeviceSourceName = "devices";
+    public const string RealProcessSourceName = "mfg_processes";
     public const string RealDeviceLogSourceName = "device_logs";
     public const string RealCapacitySourceName = "hourly_capacity";
     public const string RealProductionDataSourceName = "pass_station_records";
@@ -150,14 +151,14 @@ public sealed class ConfiguredSemanticPhysicalMappingProvider : ISemanticPhysica
                     ["deviceCode"] = "d.client_code",
                     ["deviceName"] = "d.device_name",
                     ["status"] = "latest_log.level",
-                    ["lineName"] = "d.process_id",
+                    ["lineName"] = "mp.process_name",
                     ["updatedAt"] = "latest_log.log_time"
                 },
                 ["deviceId", "deviceCode", "deviceName", "status", "lineName", "updatedAt"],
                 ["deviceId", "deviceCode", "deviceName", "status", "lineName"],
                 ["deviceCode", "deviceName", "updatedAt"],
                 new SemanticSort("deviceCode", SemanticSortDirection.Asc),
-                "devices d LEFT JOIN LATERAL (SELECT l.level, l.log_time FROM device_logs l WHERE l.device_id = d.id ORDER BY l.log_time DESC LIMIT 1) latest_log ON true"),
+                "devices d LEFT JOIN mfg_processes mp ON d.process_id = mp.id LEFT JOIN LATERAL (SELECT l.level, l.log_time FROM device_logs l WHERE l.device_id = d.id ORDER BY l.log_time DESC LIMIT 1) latest_log ON true"),
             new SemanticMappingDefaults(
                 SemanticQueryTarget.DeviceLog,
                 "DeviceLog",
@@ -176,7 +177,7 @@ public sealed class ConfiguredSemanticPhysicalMappingProvider : ISemanticPhysica
                 ["deviceId", "deviceCode", "level"],
                 ["occurredAt", "level"],
                 new SemanticSort("occurredAt", SemanticSortDirection.Desc),
-                "device_logs l INNER JOIN devices d ON l.device_id = d.id"),
+                "device_logs l INNER JOIN devices d ON l.device_id = d.id LEFT JOIN mfg_processes mp ON d.process_id = mp.id"),
             new SemanticMappingDefaults(
                 SemanticQueryTarget.Capacity,
                 "Capacity",
@@ -186,7 +187,7 @@ public sealed class ConfiguredSemanticPhysicalMappingProvider : ISemanticPhysica
                     ["recordId"] = "h.id",
                     ["deviceId"] = "h.device_id",
                     ["deviceCode"] = "d.client_code",
-                    ["processName"] = "d.process_id",
+                    ["processName"] = "mp.process_name",
                     ["shiftDate"] = "h.date",
                     ["outputQty"] = "h.total_count",
                     ["qualifiedQty"] = "h.ok_count",
@@ -196,7 +197,7 @@ public sealed class ConfiguredSemanticPhysicalMappingProvider : ISemanticPhysica
                 ["recordId", "deviceId", "deviceCode", "processName", "shiftDate"],
                 ["shiftDate", "occurredAt", "outputQty", "qualifiedQty", "deviceCode", "processName"],
                 new SemanticSort("occurredAt", SemanticSortDirection.Desc),
-                "hourly_capacity h INNER JOIN devices d ON h.device_id = d.id"),
+                "hourly_capacity h INNER JOIN devices d ON h.device_id = d.id LEFT JOIN mfg_processes mp ON d.process_id = mp.id"),
             new SemanticMappingDefaults(
                 SemanticQueryTarget.ProductionData,
                 "ProductionData",
@@ -206,7 +207,7 @@ public sealed class ConfiguredSemanticPhysicalMappingProvider : ISemanticPhysica
                     ["recordId"] = "p.id",
                     ["deviceId"] = "p.device_id",
                     ["deviceCode"] = "d.client_code",
-                    ["processName"] = "d.process_id",
+                    ["processName"] = "mp.process_name",
                     ["barcode"] = "p.barcode",
                     ["stationName"] = "p.type_key",
                     ["result"] = "p.cell_result",
@@ -216,7 +217,7 @@ public sealed class ConfiguredSemanticPhysicalMappingProvider : ISemanticPhysica
                 ["recordId", "deviceId", "deviceCode", "processName", "barcode", "stationName", "result"],
                 ["occurredAt", "deviceCode", "processName", "stationName", "result"],
                 new SemanticSort("occurredAt", SemanticSortDirection.Desc),
-                "pass_station_records p INNER JOIN devices d ON p.device_id = d.id")
+                "pass_station_records p INNER JOIN devices d ON p.device_id = d.id LEFT JOIN mfg_processes mp ON d.process_id = mp.id")
         ];
     }
 
