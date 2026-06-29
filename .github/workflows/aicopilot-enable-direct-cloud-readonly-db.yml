@@ -164,11 +164,12 @@ jobs:
           docker compose --env-file "$env_file" -f "$compose_file" up --no-deps --force-recreate aicopilot-migration
           docker compose --env-file "$env_file" -f "$compose_file" up -d --no-deps --force-recreate \
             aicopilot-httpapi \
-            aicopilot-dataworker
+            aicopilot-dataworker \
+            aicopilot-webui
 
           docker compose --env-file "$env_file" -f "$compose_file" ps
 
-          emit_line "- Recreated services: aicopilot-migration, aicopilot-httpapi, aicopilot-dataworker."
+          emit_line "- Recreated services: aicopilot-migration, aicopilot-httpapi, aicopilot-dataworker, aicopilot-webui."
 
           docker compose --env-file "$env_file" -f "$compose_file" exec -T aicopilot-httpapi sh -lc '
             printf "DataAnalysis__CloudReadOnly__Enabled=%s\n" "${DataAnalysis__CloudReadOnly__Enabled:-}"

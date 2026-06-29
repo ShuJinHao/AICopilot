@@ -468,6 +468,8 @@ SELECTED_SERVICE_NAMES="$(normalize_services "$REQUESTED_SERVICES")"
 SELECTED_IMAGE_KEYS=()
 RUNTIME_SELECTED_SERVICES=()
 RUN_MIGRATION=false
+HTTPAPI_SELECTED=false
+WEBUI_SELECTED=false
 for service in $SELECTED_SERVICE_NAMES
 do
   SELECTED_IMAGE_KEYS+=("$(image_key_for_service "$service")")
@@ -475,6 +477,12 @@ do
     RUN_MIGRATION=true
   else
     RUNTIME_SELECTED_SERVICES+=("$service")
+  fi
+
+  if [ "$service" = "aicopilot-httpapi" ]; then
+    HTTPAPI_SELECTED=true
+  elif [ "$service" = "aicopilot-webui" ]; then
+    WEBUI_SELECTED=true
   fi
 done
 
@@ -524,6 +532,10 @@ else
   fi
   if [ "${#RUNTIME_SELECTED_SERVICES[@]}" -gt 0 ]; then
     compose up -d "${RUNTIME_SELECTED_SERVICES[@]}"
+  fi
+  if [ "$HTTPAPI_SELECTED" = "true" ] && [ "$WEBUI_SELECTED" != "true" ]; then
+    printf 'Recreating aicopilot-webui to refresh nginx upstream after httpapi redeploy.\n'
+    compose up -d --no-deps --force-recreate aicopilot-webui
   fi
 fi
 compose ps
