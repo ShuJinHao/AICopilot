@@ -60,9 +60,12 @@ internal static class BusinessDataSourceGovernancePolicy
 
     public static BusinessQuerySafetySchema? ResolveSafetySchema(BusinessDatabase database)
     {
-        return database.ExternalSystemType == BusinessDataExternalSystemType.SimulationBusiness
-            ? SimulationBusinessQuerySchema.SafetySchema
-            : null;
+        return database.ExternalSystemType switch
+        {
+            BusinessDataExternalSystemType.SimulationBusiness => SimulationBusinessQuerySchema.SafetySchema,
+            BusinessDataExternalSystemType.CloudReadOnly => CloudReadOnlyBusinessQuerySchema.SafetySchema,
+            _ => null
+        };
     }
 
     public static string? ValidateReadOnlyCredential(BusinessDatabase database)

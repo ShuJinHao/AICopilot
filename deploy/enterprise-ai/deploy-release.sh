@@ -285,6 +285,57 @@ ensure_image_policy() {
   done
 }
 
+is_truthy() {
+  case "${1:-}" in
+    true|TRUE|True|1|yes|YES|Yes)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+ensure_cloud_readonly_network() {
+  local network="${DATA_ANALYSIS_CLOUD_READONLY_DOCKER_NETWORK:-enterprise-ai-cloud-readonly}"
+  local cloud_project="${DATA_ANALYSIS_CLOUD_READONLY_CLOUD_COMPOSE_PROJECT:-deploy}"
+  local cloud_service="${DATA_ANALYSIS_CLOUD_READONLY_CLOUD_POSTGRES_SERVICE:-postgres}"
+  local host_alias="${DATA_ANALYSIS_CLOUD_READONLY_DB_HOST_ALIAS:-cloud-postgres}"
+  local cloud_container
+
+  if ! docker network inspect "$network" >/dev/null 2>&1; then
+    docker network create --driver bridge "$network" >/dev/null
+    printf 'Created Cloud readonly Docker network: %s\n' "$network"
+  fi
+
+  if ! is_truthy "${DATA_ANALYSIS_CLOUD_READONLY_ENABLED:-false}"; then
+    return
+  fi
+
+  cloud_container="$(
+    docker ps \
+      --filter "label=com.docker.compose.project=$cloud_project" \
+      --filter "label=com.docker.compose.service=$cloud_service" \
+      --format '{{.ID}}' |
+      head -n 1
+  )"
+
+  if [ -z "$cloud_container" ]; then
+    printf 'Direct Cloud readonly DB is enabled, but Cloud PostgreSQL container was not found: project=%s service=%s\n' "$cloud_project" "$cloud_service" >&2
+    exit 66
+  fi
+
+  if docker inspect "$cloud_container" \
+    --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' |
+    grep -Fx "$network" >/dev/null; then
+    printf 'Cloud PostgreSQL container is already attached to network %s.\n' "$network"
+    return
+  fi
+
+  docker network connect --alias "$host_alias" "$network" "$cloud_container"
+  printf 'Attached Cloud PostgreSQL container to network %s as %s.\n' "$network" "$host_alias"
+}
+
 probe_web() {
   local web_port="${AICOPILOT_WEB_PORT:-82}"
   local url="http://127.0.0.1:${web_port}/"
@@ -448,6 +499,7 @@ else
 fi
 load_dotenv
 ensure_image_policy
+ensure_cloud_readonly_network
 DEPLOY_RELEASE_ID="$RELEASE_TAG"
 DEPLOY_GIT_SHA_VALUE="${DEPLOY_GIT_SHA:-unknown}"
 DEPLOY_TRIGGERED_BY_VALUE="${DEPLOY_TRIGGERED_BY:-manual}"

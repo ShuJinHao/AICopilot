@@ -166,6 +166,86 @@ public sealed class SemanticSqlGenerationTests
     }
 
     [Fact]
+    public void SqlGenerator_ShouldUseConfiguredAlias_ForTimeRangeOnRealMappings()
+    {
+        var plan = new SemanticQueryPlan(
+            "Analysis.DeviceLog.Range",
+            SemanticQueryTarget.DeviceLog,
+            SemanticQueryKind.Range,
+            QueryText: null,
+            new SemanticProjection(["deviceCode", "level", "message", "occurredAt"]),
+            [
+                new SemanticFilter("deviceCode", SemanticFilterOperator.Equal, "DEV-001")
+            ],
+            new SemanticTimeRange(
+                "occurredAt",
+                DateTimeOffset.Parse("2026-04-20T00:00:00Z"),
+                DateTimeOffset.Parse("2026-04-21T00:00:00Z")),
+            new SemanticSort("occurredAt", SemanticSortDirection.Desc),
+            20);
+
+        var mapping = new SemanticPhysicalMapping(
+            SemanticQueryTarget.DeviceLog,
+            DatabaseProviderType.PostgreSql,
+            "device_logs",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["deviceCode"] = "d.client_code",
+                ["level"] = "l.level",
+                ["message"] = "l.message",
+                ["occurredAt"] = "l.log_time"
+            },
+            allowedProjectionFields: ["deviceCode", "level", "message", "occurredAt"],
+            allowedFilterFields: ["deviceCode", "level"],
+            allowedSortFields: ["occurredAt"],
+            fromClause: "device_logs l INNER JOIN devices d ON d.id = l.device_id",
+            defaultSort: new SemanticSort("occurredAt", SemanticSortDirection.Desc));
+
+        var sql = _sqlGenerator.Generate(plan, mapping);
+
+        sql.SqlText.Should().Contain("d.client_code = @p0");
+        sql.SqlText.Should().Contain("l.log_time >= @p1");
+        sql.SqlText.Should().Contain("l.log_time <= @p2");
+        sql.SqlText.Should().NotContain("t.l.log_time");
+    }
+
+    [Fact]
+    public void SqlGenerator_ShouldSupportLiteralFieldMappings_ForRealMappings()
+    {
+        var plan = new SemanticQueryPlan(
+            "Analysis.DeviceLog.Latest",
+            SemanticQueryTarget.DeviceLog,
+            SemanticQueryKind.Latest,
+            QueryText: null,
+            new SemanticProjection(["deviceCode", "source", "occurredAt"]),
+            [],
+            TimeRange: null,
+            new SemanticSort("occurredAt", SemanticSortDirection.Desc),
+            10);
+        var mapping = new SemanticPhysicalMapping(
+            SemanticQueryTarget.DeviceLog,
+            DatabaseProviderType.PostgreSql,
+            "device_logs",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["deviceCode"] = "d.client_code",
+                ["source"] = "'Cloud'",
+                ["occurredAt"] = "l.log_time"
+            },
+            allowedProjectionFields: ["deviceCode", "source", "occurredAt"],
+            allowedFilterFields: ["deviceCode"],
+            allowedSortFields: ["occurredAt"],
+            fromClause: "device_logs l INNER JOIN devices d ON d.id = l.device_id",
+            defaultSort: new SemanticSort("occurredAt", SemanticSortDirection.Desc));
+
+        var sql = _sqlGenerator.Generate(plan, mapping);
+
+        sql.SqlText.Should().Contain("'Cloud' AS source");
+        sql.SqlText.Should().Contain("d.client_code AS deviceCode");
+        sql.SqlText.Should().Contain("ORDER BY l.log_time DESC");
+    }
+
+    [Fact]
     public void SqlGenerator_ShouldRejectUnsafeFromClause()
     {
         var mapping = new SemanticPhysicalMapping(

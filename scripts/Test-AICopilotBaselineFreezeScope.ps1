@@ -28,14 +28,25 @@ $requiredDocuments = @{
         "AICopilot 可以读取已批准范围内的 Cloud 业务数据",
         "AICopilot 不得注册、修改、删除、补录、审批、派发或触发 Cloud 业务数据",
         "Cloud-AICopilot OIDC 身份对齐的长期结论",
-        "AICopilot 保留本地 AI 用户、AI 角色、AI 权限"
-    )
+        "AICopilot 保留本地 AI 用户、AI 角色、AI 权限",
+        "docs/改动复盘与规则沉淀.md",
+        "最终回复必须列出复盘文档、规则沉淀位置和验证命令"
+    );
     "资料/AICopilot业务规则.md" = @(
         '只承担 AI 助手和受控编排能力',
         "Cloud 只读边界",
         "Human-in-the-loop 不能把禁止的 Cloud 业务写入变成允许动作",
-        "MCP 是受控工具入口，不是 Cloud 业务写入口"
-    )
+        "MCP 是受控工具入口，不是 Cloud 业务写入口",
+        "改动收口门禁",
+        "执行复盘和改动沉淀流水统一放在项目"
+    );
+    "docs/改动复盘与规则沉淀.md" = @(
+        "项目滚动复盘入口",
+        "改动范围",
+        "规则提炼",
+        "无新增长期规则",
+        "验证命令"
+    );
     "AICopilot 项目部署与维护指南.md" = @(
         "deploy/enterprise-ai",
         "iiot-linux-prod",

@@ -36,3 +36,33 @@ public sealed record BusinessQuerySafetySchema(
     IReadOnlySet<string> BlockedFieldFragments,
     IReadOnlySet<string>? AllowedColumnFragments = null,
     IReadOnlySet<string>? SensitiveColumnFragments = null);
+
+internal static class CloudReadOnlyBusinessQuerySchema
+{
+    public static readonly IReadOnlySet<string> AllowedTables =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "devices",
+            "device_logs",
+            "hourly_capacity",
+            "pass_station_records"
+        };
+
+    public static readonly IReadOnlyList<string> BlockedFieldFragments =
+    [
+        "api_key",
+        "apikey",
+        "bootstrap_secret",
+        "connection_string",
+        "credential",
+        "password",
+        "secret",
+        "security_stamp",
+        "token"
+    ];
+
+    public static readonly BusinessQuerySafetySchema SafetySchema =
+        new(
+            AllowedTables,
+            BlockedFieldFragments.ToHashSet(StringComparer.OrdinalIgnoreCase));
+}

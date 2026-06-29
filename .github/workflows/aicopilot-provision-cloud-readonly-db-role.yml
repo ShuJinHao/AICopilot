@@ -1,0 +1,333 @@
+name: aicopilot-provision-cloud-readonly-db-role
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type PROVISION_AICOPILOT_CLOUD_READONLY_DB_ROLE to create/rotate the readonly DB role."
+        required: true
+        type: string
+      enable_after_provision:
+        description: "Enable AICopilot direct Cloud readonly DB after the role is provisioned."
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  provision:
+    runs-on: [self-hosted, iiot-linux-prod]
+    environment: production
+    timeout-minutes: 20
+
+    steps:
+      - name: Provision Cloud readonly DB role
+        shell: bash
+        env:
+          DEPLOY_TARGET_DIR: ${{ secrets.DEPLOY_TARGET_DIR }}
+          DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING: ${{ secrets.DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING }}
+          DATA_ANALYSIS_CLOUD_READONLY_USERNAME: ${{ secrets.DATA_ANALYSIS_CLOUD_READONLY_USERNAME }}
+          DATA_ANALYSIS_CLOUD_READONLY_PASSWORD: ${{ secrets.DATA_ANALYSIS_CLOUD_READONLY_PASSWORD }}
+          ENABLE_AFTER_PROVISION: ${{ inputs.enable_after_provision }}
+        run: |
+          set -euo pipefail
+
+          if [ "${{ inputs.confirm }}" != "PROVISION_AICOPILOT_CLOUD_READONLY_DB_ROLE" ]; then
+            echo "Confirmation word mismatch; refusing to touch Cloud PostgreSQL roles." >&2
+            exit 64
+          fi
+
+          if [ "$(id -u)" -eq 0 ]; then
+            echo "Self-hosted runner must not run as root." >&2
+            exit 64
+          fi
+
+          command -v docker >/dev/null
+          docker compose version >/dev/null
+
+          deploy_dir="${DEPLOY_TARGET_DIR:-/srv/enterprise-ai/deploy}"
+          env_file="$deploy_dir/.env"
+          compose_file="$deploy_dir/docker-compose.yaml"
+
+          if [ ! -d "$deploy_dir" ]; then
+            echo "Missing deploy directory: $deploy_dir" >&2
+            exit 66
+          fi
+
+          if [ ! -f "$env_file" ]; then
+            echo "Missing deploy environment file: $env_file" >&2
+            exit 66
+          fi
+
+          if [ ! -f "$compose_file" ]; then
+            echo "Missing compose file: $compose_file" >&2
+            exit 66
+          fi
+
+          if [ -z "${DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING:-}" ]; then
+            echo "DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING GitHub environment secret is not configured." >&2
+            exit 64
+          fi
+
+          if [ -z "${DATA_ANALYSIS_CLOUD_READONLY_USERNAME:-}" ]; then
+            echo "DATA_ANALYSIS_CLOUD_READONLY_USERNAME GitHub environment secret is not configured." >&2
+            exit 64
+          fi
+
+          if [ -z "${DATA_ANALYSIS_CLOUD_READONLY_PASSWORD:-}" ]; then
+            echo "DATA_ANALYSIS_CLOUD_READONLY_PASSWORD GitHub environment secret is not configured." >&2
+            exit 64
+          fi
+
+          emit_line() {
+            printf '%s\n' "$1"
+            printf '%s\n' "$1" >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          read_env_value() {
+            local key="$1"
+            awk -v key="$key" '
+              BEGIN { prefix = key "=" }
+              index($0, prefix) == 1 {
+                value = substr($0, length(prefix) + 1)
+                sub(/\r$/, "", value)
+                print value
+                exit
+              }
+            ' "$env_file"
+          }
+
+          set_env_value() {
+            local key="$1"
+            local value="$2"
+            local tmp_file
+            tmp_file="$(mktemp "$deploy_dir/.env.XXXXXX")"
+            awk -v key="$key" -v value="$value" '
+              BEGIN { prefix = key "="; updated = 0 }
+              index($0, prefix) == 1 {
+                print key "=" value
+                updated = 1
+                next
+              }
+              { print }
+              END {
+                if (!updated) {
+                  print key "=" value
+                }
+              }
+            ' "$env_file" > "$tmp_file"
+            chmod 600 "$tmp_file"
+            mv "$tmp_file" "$env_file"
+          }
+
+          ensure_cloud_readonly_network() {
+            local network="${DATA_ANALYSIS_CLOUD_READONLY_DOCKER_NETWORK:-enterprise-ai-cloud-readonly}"
+            local cloud_project="${DATA_ANALYSIS_CLOUD_READONLY_CLOUD_COMPOSE_PROJECT:-deploy}"
+            local cloud_service="${DATA_ANALYSIS_CLOUD_READONLY_CLOUD_POSTGRES_SERVICE:-postgres}"
+            local host_alias="${DATA_ANALYSIS_CLOUD_READONLY_DB_HOST_ALIAS:-cloud-postgres}"
+            local cloud_container
+
+            if ! docker network inspect "$network" >/dev/null 2>&1; then
+              docker network create --driver bridge "$network" >/dev/null
+              echo "Created Cloud readonly Docker network: $network"
+            fi
+
+            cloud_container="$(
+              docker ps \
+                --filter "label=com.docker.compose.project=$cloud_project" \
+                --filter "label=com.docker.compose.service=$cloud_service" \
+                --format '{{.ID}}' |
+                head -n 1
+            )"
+
+            if [ -z "$cloud_container" ]; then
+              echo "Cloud PostgreSQL container was not found: project=$cloud_project service=$cloud_service" >&2
+              exit 66
+            fi
+
+            if ! docker inspect "$cloud_container" \
+              --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' |
+              grep -Fx "$network" >/dev/null; then
+              docker network connect --alias "$host_alias" "$network" "$cloud_container"
+              echo "Attached Cloud PostgreSQL container to network $network as $host_alias."
+            else
+              echo "Cloud PostgreSQL container is already attached to network $network."
+            fi
+
+            printf '%s\n' "$cloud_container"
+          }
+
+          validate_identifier() {
+            local value="$1"
+            case "$value" in
+              [A-Za-z_]*)
+                ;;
+              *)
+                echo "Invalid PostgreSQL identifier: $value" >&2
+                exit 64
+                ;;
+            esac
+
+            if ! printf '%s' "$value" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]{0,62}$'; then
+              echo "Invalid PostgreSQL identifier: $value" >&2
+              exit 64
+            fi
+          }
+
+          validate_identifier "$DATA_ANALYSIS_CLOUD_READONLY_USERNAME"
+
+          {
+            echo "# Provision AICopilot Cloud readonly DB role"
+            echo ""
+            echo "- Deploy directory: \`$deploy_dir\`"
+            echo "- Role: \`$DATA_ANALYSIS_CLOUD_READONLY_USERNAME\`"
+            echo "- DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING_CONFIGURED=yes"
+            echo "- DATA_ANALYSIS_CLOUD_READONLY_PASSWORD_CONFIGURED=yes"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          cd "$deploy_dir"
+          cloud_container="$(ensure_cloud_readonly_network | tail -n 1)"
+
+          docker exec -i "$cloud_container" psql \
+            -v ON_ERROR_STOP=1 \
+            -v readonly_user="$DATA_ANALYSIS_CLOUD_READONLY_USERNAME" \
+            -v readonly_password="$DATA_ANALYSIS_CLOUD_READONLY_PASSWORD" \
+            -U postgres \
+            -d iiot-db <<'SQL'
+          SELECT format(
+              'CREATE ROLE %I WITH LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD %L',
+              :'readonly_user',
+              :'readonly_password')
+          WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'readonly_user')
+          \gexec
+
+          SELECT format(
+              'ALTER ROLE %I WITH LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD %L',
+              :'readonly_user',
+              :'readonly_password')
+          \gexec
+
+          SELECT format('ALTER ROLE %I SET default_transaction_read_only = on', :'readonly_user')
+          \gexec
+
+          SELECT format('ALTER ROLE %I SET statement_timeout = %L', :'readonly_user', '30s')
+          \gexec
+
+          SELECT format('ALTER ROLE %I SET lock_timeout = %L', :'readonly_user', '3s')
+          \gexec
+
+          SELECT format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), :'readonly_user')
+          \gexec
+
+          SELECT format('GRANT USAGE ON SCHEMA public TO %I', :'readonly_user')
+          \gexec
+
+          SELECT format('REVOKE CREATE ON SCHEMA public FROM %I', :'readonly_user')
+          \gexec
+
+          SELECT format('REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM %I', :'readonly_user')
+          \gexec
+
+          SELECT format('REVOKE %I FROM %I', parent_role.rolname, :'readonly_user')
+          FROM pg_auth_members member
+          INNER JOIN pg_roles parent_role ON parent_role.oid = member.roleid
+          INNER JOIN pg_roles child_role ON child_role.oid = member.member
+          WHERE child_role.rolname = :'readonly_user'
+          \gexec
+
+          SELECT format(
+              'GRANT SELECT ON TABLE public.devices, public.device_logs, public.hourly_capacity, public.pass_station_records TO %I',
+              :'readonly_user')
+          \gexec
+          SQL
+
+          docker exec -i \
+            -e PGPASSWORD="$DATA_ANALYSIS_CLOUD_READONLY_PASSWORD" \
+            "$cloud_container" psql \
+            -v ON_ERROR_STOP=1 \
+            -At \
+            -F '|' \
+            -h 127.0.0.1 \
+            -U "$DATA_ANALYSIS_CLOUD_READONLY_USERNAME" \
+            -d iiot-db <<'SQL' > "$RUNNER_TEMP/aicopilot-cloud-readonly-privileges.txt"
+          SELECT
+            current_setting('default_transaction_read_only') AS default_transaction_read_only,
+            has_table_privilege(current_user, 'public.devices', 'select') AS devices_select,
+            has_table_privilege(current_user, 'public.device_logs', 'select') AS device_logs_select,
+            has_table_privilege(current_user, 'public.hourly_capacity', 'select') AS hourly_capacity_select,
+            has_table_privilege(current_user, 'public.pass_station_records', 'select') AS pass_station_records_select,
+            has_table_privilege(current_user, 'public.devices', 'insert') AS devices_insert,
+            has_table_privilege(current_user, 'public.device_logs', 'update') AS device_logs_update,
+            has_table_privilege(current_user, 'public.hourly_capacity', 'delete') AS hourly_capacity_delete,
+            has_schema_privilege(current_user, 'public', 'create') AS public_schema_create;
+          SELECT count(*) >= 0 AS devices_probe FROM public.devices;
+          SELECT count(*) >= 0 AS device_logs_probe FROM public.device_logs;
+          SELECT count(*) >= 0 AS hourly_capacity_probe FROM public.hourly_capacity;
+          SELECT count(*) >= 0 AS pass_station_records_probe FROM public.pass_station_records;
+          SQL
+
+          if ! grep -Fx 'on|t|t|t|t|f|f|f|f' "$RUNNER_TEMP/aicopilot-cloud-readonly-privileges.txt" >/dev/null; then
+            echo "Readonly privilege verification failed." >&2
+            sed 's/[[:space:]]\+/ /g' "$RUNNER_TEMP/aicopilot-cloud-readonly-privileges.txt" >&2
+            exit 65
+          fi
+
+          emit_line "- Cloud readonly DB role provisioned and verified. Password was not printed."
+
+          if [ "$ENABLE_AFTER_PROVISION" = "true" ]; then
+            backup_file="$deploy_dir/.env.bak.provision-cloud-db.$(date -u +%Y%m%d%H%M%S)"
+            cp "$env_file" "$backup_file"
+            chmod 600 "$backup_file"
+
+            restore_on_failure() {
+              local status="$?"
+              if [ "$status" -ne 0 ] && [ -f "$backup_file" ]; then
+                cp "$backup_file" "$env_file"
+                chmod 600 "$env_file"
+                echo "Restored .env from backup after failure: $backup_file" >&2
+              fi
+              exit "$status"
+            }
+            trap restore_on_failure EXIT
+
+            set_env_value CLOUD_READONLY_MODE Disabled
+            set_env_value CLOUD_READONLY_REAL_ENABLED false
+            set_env_value CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ false
+            set_env_value CLOUD_AI_READ_ENABLED false
+            set_env_value DATA_ANALYSIS_CLOUD_READONLY_ENABLED true
+            set_env_value DATA_ANALYSIS_CLOUD_READONLY_DATABASE_NAME DeviceSemanticReadonly
+            set_env_value DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING "$DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING"
+            set_env_value DATA_ANALYSIS_CLOUD_READONLY_CREDENTIAL_VERIFIED true
+            set_env_value DATA_ANALYSIS_CLOUD_READONLY_DEFAULT_QUERY_LIMIT 200
+            set_env_value DATA_ANALYSIS_CLOUD_READONLY_MAX_QUERY_LIMIT 1000
+            set_env_value DATA_ANALYSIS_CLOUD_READONLY_DOCKER_NETWORK "${DATA_ANALYSIS_CLOUD_READONLY_DOCKER_NETWORK:-enterprise-ai-cloud-readonly}"
+            set_env_value DATA_ANALYSIS_CLOUD_READONLY_DB_HOST_ALIAS "${DATA_ANALYSIS_CLOUD_READONLY_DB_HOST_ALIAS:-cloud-postgres}"
+            set_env_value DATA_ANALYSIS_CLOUD_READONLY_CLOUD_COMPOSE_PROJECT "${DATA_ANALYSIS_CLOUD_READONLY_CLOUD_COMPOSE_PROJECT:-deploy}"
+            set_env_value DATA_ANALYSIS_CLOUD_READONLY_CLOUD_POSTGRES_SERVICE "${DATA_ANALYSIS_CLOUD_READONLY_CLOUD_POSTGRES_SERVICE:-postgres}"
+
+            docker compose --env-file "$env_file" -f "$compose_file" config -q
+            docker compose --env-file "$env_file" -f "$compose_file" up --no-deps --force-recreate aicopilot-migration
+            docker compose --env-file "$env_file" -f "$compose_file" up -d --no-deps --force-recreate \
+              aicopilot-httpapi \
+              aicopilot-dataworker
+            docker compose --env-file "$env_file" -f "$compose_file" ps
+
+            docker compose --env-file "$env_file" -f "$compose_file" exec -T aicopilot-httpapi sh -lc '
+              printf "DataAnalysis__CloudReadOnly__Enabled=%s\n" "${DataAnalysis__CloudReadOnly__Enabled:-}"
+              printf "DataAnalysis__CloudReadOnly__DatabaseName=%s\n" "${DataAnalysis__CloudReadOnly__DatabaseName:-}"
+              if [ -n "${DataAnalysis__CloudReadOnly__ConnectionString:-}" ]; then
+                printf "DataAnalysis__CloudReadOnly__ConnectionString_CONFIGURED=yes\n"
+              else
+                printf "DataAnalysis__CloudReadOnly__ConnectionString_CONFIGURED=no\n"
+              fi
+              printf "DataAnalysis__CloudReadOnly__ReadOnlyCredentialVerified=%s\n" "${DataAnalysis__CloudReadOnly__ReadOnlyCredentialVerified:-}"
+              printf "CloudAiRead__Enabled=%s\n" "${CloudAiRead__Enabled:-}"
+            ' | tee -a "$GITHUB_STEP_SUMMARY"
+
+            trap - EXIT
+            emit_line "- AICopilot direct Cloud readonly DB enabled after role provisioning."
+          else
+            emit_line "- Skipped AICopilot enablement because enable_after_provision=false."
+          fi

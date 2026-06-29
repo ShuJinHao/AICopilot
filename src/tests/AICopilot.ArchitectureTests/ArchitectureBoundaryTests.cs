@@ -906,9 +906,12 @@ public sealed class ArchitectureBoundaryTests
     {
         var agentsFile = Path.Combine(SolutionRoot, "AGENTS.md");
         var businessRulesFile = Path.Combine(SolutionRoot, "资料", "AICopilot业务规则.md");
+        var retrospectiveFile = Path.Combine(SolutionRoot, "docs", "改动复盘与规则沉淀.md");
 
         var agents = File.ReadAllText(agentsFile);
         var businessRules = File.ReadAllText(businessRulesFile);
+        var retrospective = File.ReadAllText(retrospectiveFile);
+        var combinedRules = string.Join(Environment.NewLine, agents, businessRules, retrospective);
 
         agents.Should().Contain("Cloud Business Read-only Boundary");
         agents.Should().Contain("must not directly write to the Cloud database");
@@ -926,6 +929,20 @@ public sealed class ArchitectureBoundaryTests
         businessRules.Should().Contain("Human-in-the-loop 不能作为放开云端业务写入的理由");
         businessRules.Should().Contain("当前默认不存在专门给 AICopilot 使用的云端写 API");
         businessRules.Should().Contain("AI-facing API");
+        agents.Should().Contain("DataAnalysis `CloudReadOnly` 只读数据源直连真实 Cloud PostgreSQL");
+        agents.Should().Contain("只能创建/更新专用 readonly role");
+        businessRules.Should().Contain("真实 Cloud Text-to-SQL 验证不得走 Simulation 数据源冒充真实结果");
+        businessRules.Should().Contain("不得授予写权限、schema create 权限、superuser、createdb、createrole 或 replication");
+
+        agents.Should().Contain("docs/改动复盘与规则沉淀.md");
+        agents.Should().Contain("Change Closure");
+        businessRules.Should().Contain("改动收口门禁");
+        businessRules.Should().Contain("执行复盘和改动沉淀流水统一放在项目 `docs/`");
+        retrospective.Should().Contain("项目滚动复盘入口");
+        retrospective.Should().Contain("无新增长期规则");
+        combinedRules.Should().Contain("最终回复必须列出复盘文档、规则沉淀位置和验证命令");
+        combinedRules.Should().Contain("已验收功能默认冻结");
+        combinedRules.Should().Contain("规则沉淀");
     }
 
     [Fact]

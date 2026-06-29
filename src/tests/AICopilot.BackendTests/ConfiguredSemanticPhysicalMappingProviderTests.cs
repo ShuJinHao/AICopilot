@@ -30,10 +30,15 @@ public sealed class ConfiguredSemanticPhysicalMappingProviderTests
         capacityMapping.DatabaseName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.DefaultDatabaseName);
         productionMapping.DatabaseName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.DefaultDatabaseName);
 
-        deviceMapping.SourceName.Should().Be("vw_device_readonly");
-        deviceLogMapping.SourceName.Should().Be("vw_device_log_readonly");
-        capacityMapping.SourceName.Should().Be("vw_capacity_readonly");
-        productionMapping.SourceName.Should().Be("vw_production_data_readonly");
+        deviceMapping.SourceName.Should().Be("devices");
+        deviceMapping.FromClause.Should().Contain("devices d LEFT JOIN LATERAL");
+        deviceLogMapping.SourceName.Should().Be("device_logs");
+        deviceLogMapping.FromClause.Should().Be("device_logs l INNER JOIN devices d ON l.device_id = d.id");
+        deviceLogMapping.FieldMappings["source"].Should().Be("'Cloud'");
+        capacityMapping.SourceName.Should().Be("hourly_capacity");
+        capacityMapping.FromClause.Should().Be("hourly_capacity h INNER JOIN devices d ON h.device_id = d.id");
+        productionMapping.SourceName.Should().Be("pass_station_records");
+        productionMapping.FromClause.Should().Be("pass_station_records p INNER JOIN devices d ON p.device_id = d.id");
 
         foreach (var target in Enum.GetValues<SemanticQueryTarget>().Where(target => target != SemanticQueryTarget.Recipe))
         {
@@ -75,6 +80,34 @@ public sealed class ConfiguredSemanticPhysicalMappingProviderTests
         productionMapping.IsProjectionFieldAllowed("barcode").Should().BeTrue();
         productionMapping.IsFilterFieldAllowed("deviceCode").Should().BeTrue();
         productionMapping.IsSortFieldAllowed("occurredAt").Should().BeTrue();
+    }
+
+    [Fact]
+    public void Provider_ShouldExposeDirectCloudReadOnlyMappings_WhenEnabled()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["DataAnalysis:CloudReadOnly:Enabled"] = "true"
+            })
+            .Build();
+        var provider = new ConfiguredSemanticPhysicalMappingProvider(configuration);
+
+        provider.TryGetMapping(SemanticQueryTarget.Device, out var deviceMapping).Should().BeTrue();
+        provider.TryGetMapping(SemanticQueryTarget.DeviceLog, out var deviceLogMapping).Should().BeTrue();
+        provider.TryGetMapping(SemanticQueryTarget.Capacity, out var capacityMapping).Should().BeTrue();
+        provider.TryGetMapping(SemanticQueryTarget.ProductionData, out var productionMapping).Should().BeTrue();
+
+        deviceMapping.SourceName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.RealDeviceSourceName);
+        deviceMapping.FromClause.Should().Contain("LEFT JOIN LATERAL");
+        deviceMapping.FieldMappings["deviceCode"].Should().Be("d.client_code");
+        deviceLogMapping.SourceName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.RealDeviceLogSourceName);
+        deviceLogMapping.FieldMappings["source"].Should().Be("'Cloud'");
+        deviceLogMapping.IsFilterFieldAllowed("source").Should().BeFalse();
+        capacityMapping.SourceName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.RealCapacitySourceName);
+        capacityMapping.FieldMappings["outputQty"].Should().Be("h.total_count");
+        productionMapping.SourceName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.RealProductionDataSourceName);
+        productionMapping.FieldMappings["stationName"].Should().Be("p.type_key");
     }
 
     [Fact]

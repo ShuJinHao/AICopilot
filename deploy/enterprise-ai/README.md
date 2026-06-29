@@ -39,6 +39,9 @@ OCI_REGISTRY_USERNAME=<Harbor robot 或用户>
 OCI_REGISTRY_PASSWORD=<Harbor 密码或 token>
 DEPLOY_TARGET_DIR=/srv/enterprise-ai/deploy
 DEPLOY_ENV_FILE=<完整生产 .env 内容>
+DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING=<可选，Cloud PostgreSQL 只读账号连接串>
+DATA_ANALYSIS_CLOUD_READONLY_USERNAME=<可选，仅用于自动创建/轮换只读 DB 角色>
+DATA_ANALYSIS_CLOUD_READONLY_PASSWORD=<可选，仅用于自动创建/轮换只读 DB 角色>
 ```
 
 Variables:
@@ -48,6 +51,19 @@ VITE_CLOUD_PLATFORM_URL=http://10.98.90.154:81
 ```
 
 `DEPLOY_ENV_FILE` 内容从 `.env.example` 复制后替换强密码和 token。不得把真实 `.env`、JWT secret、数据库密码、Qdrant key 或 Cloud service token 写入仓库。
+
+内部开发需要让 AICopilot 直连真实 Cloud 只读数据库时，连接串只放在 GitHub production environment secret
+`DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING`，并通过 `aicopilot-enable-direct-cloud-readonly-db` 写入服务器 `.env`。
+该模式只注册 AICopilot 自身的 DataAnalysis `CloudReadOnly` 数据源，不写 Cloud 业务表；数据库账号必须先确认为只读账号。
+Cloud Postgres 不发布到宿主端口，AICopilot 部署脚本会创建外部 Docker 网络
+`enterprise-ai-cloud-readonly`，并把 Cloud compose 的 `deploy/postgres` 容器连接为别名
+`cloud-postgres`。只读连接串推荐使用：
+`Host=cloud-postgres;Port=5432;Database=iiot-db;Username=<readonly_user>;Password=<readonly_password>`。
+如果还没有只读账号，可在本机运行
+`scripts/Provision-AICopilotCloudReadOnlyDbRole.sh`。脚本会生成随机密码，写入 GitHub
+production environment secrets，并触发 `aicopilot-provision-cloud-readonly-db-role`；该 workflow
+必须带确认词，只在 Cloud PostgreSQL 中创建/轮换只读角色，只授予
+`devices`、`device_logs`、`hourly_capacity`、`pass_station_records` 的 SELECT 权限。
 
 Cloud OIDC 首部署管理员收编由 `CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED` 控制，生产模板默认启用，并复用 `AICOPILOT_BOOTSTRAP_ADMIN_USERNAME` 作为唯一允许收编的本地 Admin 用户名；普通同名用户仍拒绝自动绑定。
 

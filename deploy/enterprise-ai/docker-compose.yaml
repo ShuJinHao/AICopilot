@@ -35,6 +35,12 @@ x-aicopilot-common-env: &aicopilot-common-env
   CloudIdentityStatus__RefreshIntervalSeconds: ${CLOUD_IDENTITY_STATUS_REFRESH_INTERVAL_SECONDS:-60}
   CloudIdentityStatus__TimeoutSeconds: ${CLOUD_IDENTITY_STATUS_TIMEOUT_SECONDS:-5}
   CloudIdentityStatus__FailureMode: RejectWhenUnverified
+  DataAnalysis__CloudReadOnly__Enabled: ${DATA_ANALYSIS_CLOUD_READONLY_ENABLED:-false}
+  DataAnalysis__CloudReadOnly__DatabaseName: ${DATA_ANALYSIS_CLOUD_READONLY_DATABASE_NAME:-DeviceSemanticReadonly}
+  DataAnalysis__CloudReadOnly__ConnectionString: ${DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING:-}
+  DataAnalysis__CloudReadOnly__ReadOnlyCredentialVerified: ${DATA_ANALYSIS_CLOUD_READONLY_CREDENTIAL_VERIFIED:-false}
+  DataAnalysis__CloudReadOnly__DefaultQueryLimit: ${DATA_ANALYSIS_CLOUD_READONLY_DEFAULT_QUERY_LIMIT:-200}
+  DataAnalysis__CloudReadOnly__MaxQueryLimit: ${DATA_ANALYSIS_CLOUD_READONLY_MAX_QUERY_LIMIT:-1000}
   CloudOidc__Enabled: ${CLOUD_OIDC_ENABLED:-false}
   CloudOidc__Issuer: ${CLOUD_OIDC_ISSUER:-}
   CloudOidc__AllowIntranetHttpOidc: ${ALLOW_INTRANET_HTTP_OIDC:-false}
@@ -107,6 +113,7 @@ services:
         condition: service_healthy
     networks:
       - enterprise-ai-net
+      - cloud-readonly-net
 
   aicopilot-httpapi:
     image: ${AICOPILOT_HTTPAPI_IMAGE}
@@ -135,6 +142,7 @@ services:
       - "8080"
     networks:
       - enterprise-ai-net
+      - cloud-readonly-net
 
   aicopilot-dataworker:
     image: ${AICOPILOT_DATAWORKER_IMAGE}
@@ -156,6 +164,7 @@ services:
         condition: service_completed_successfully
     networks:
       - enterprise-ai-net
+      - cloud-readonly-net
 
   aicopilot-ragworker:
     image: ${AICOPILOT_RAGWORKER_IMAGE}
@@ -195,6 +204,9 @@ services:
 networks:
   enterprise-ai-net:
     driver: bridge
+  cloud-readonly-net:
+    external: true
+    name: ${DATA_ANALYSIS_CLOUD_READONLY_DOCKER_NETWORK:-enterprise-ai-cloud-readonly}
 
 volumes:
   enterprise-ai-postgres-data:

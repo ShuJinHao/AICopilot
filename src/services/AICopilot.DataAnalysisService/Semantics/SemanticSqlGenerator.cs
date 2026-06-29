@@ -8,6 +8,7 @@ public sealed class SemanticSqlGenerator(
     ISqlGuardrail sqlGuardrail) : ISemanticSqlGenerator
 {
     private static readonly Regex IdentifierRegex = new("^[A-Za-z_][A-Za-z0-9_\\.]*$", RegexOptions.Compiled);
+    private static readonly Regex StringLiteralRegex = new("^'[^'\\\\]{0,128}'$", RegexOptions.Compiled);
     private static readonly string[] UnsafeFromClauseTokens = [";", "--", "/*", "*/"];
 
     public GeneratedSemanticSql Generate(SemanticQueryPlan plan, SemanticPhysicalMapping mapping)
@@ -61,19 +62,19 @@ public sealed class SemanticSqlGenerator(
                 throw new InvalidOperationException($"Time range field '{plan.TimeRange.Field}' is not mapped.");
             }
 
-            ValidateIdentifier(timeColumn, "Time range field");
+            timeColumn = ResolveColumn(mapping, plan.TimeRange.Field);
             if (plan.TimeRange.Start.HasValue)
             {
                 var parameterName = $"@p{parameterIndex++}";
                 parameters[parameterName] = plan.TimeRange.Start.Value.UtcDateTime;
-                whereSegments.Add($"t.{timeColumn} >= {parameterName}");
+                whereSegments.Add($"{timeColumn} >= {parameterName}");
             }
 
             if (plan.TimeRange.End.HasValue)
             {
                 var parameterName = $"@p{parameterIndex++}";
                 parameters[parameterName] = plan.TimeRange.End.Value.UtcDateTime;
-                whereSegments.Add($"t.{timeColumn} <= {parameterName}");
+                whereSegments.Add($"{timeColumn} <= {parameterName}");
             }
         }
 
@@ -184,6 +185,11 @@ public sealed class SemanticSqlGenerator(
             throw new InvalidOperationException($"Field '{field}' does not have a physical mapping.");
         }
 
+        if (StringLiteralRegex.IsMatch(column))
+        {
+            return column;
+        }
+
         ValidateIdentifier(column, "Column");
         return string.IsNullOrWhiteSpace(mapping.FromClause)
             ? $"t.{column}"
@@ -225,5 +231,3 @@ public sealed class SemanticSqlGenerator(
         }
     }
 }
-
-

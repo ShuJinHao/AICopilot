@@ -1,0 +1,105 @@
+using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
+using AICopilot.MigrationWorkApp;
+using Microsoft.Extensions.Configuration;
+
+namespace AICopilot.BackendTests;
+
+public sealed class MigrationWorkerCloudReadOnlySeederTests
+{
+    [Fact]
+    public void ResolveOptions_ShouldStayDisabledByDefault()
+    {
+        var configuration = new ConfigurationBuilder().Build();
+
+        var options = MigrationWorkerCloudReadOnlySeeder.ResolveOptions(configuration);
+
+        options.Enabled.Should().BeFalse();
+        options.DatabaseName.Should().Be(MigrationWorkerCloudReadOnlySeeder.DefaultDatabaseName);
+        options.ConnectionString.Should().BeNull();
+    }
+
+    [Fact]
+    public void ValidateOptions_ShouldRequireConnectionString_WhenEnabled()
+    {
+        var configuration = CreateConfiguration(new Dictionary<string, string?>
+        {
+            ["DataAnalysis:CloudReadOnly:Enabled"] = "true",
+            ["DataAnalysis:CloudReadOnly:ReadOnlyCredentialVerified"] = "true"
+        });
+        var options = MigrationWorkerCloudReadOnlySeeder.ResolveOptions(configuration);
+
+        var act = () => MigrationWorkerCloudReadOnlySeeder.ValidateOptions(configuration, options);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*ConnectionString is required*");
+    }
+
+    [Fact]
+    public void ValidateOptions_ShouldRequireVerifiedReadOnlyCredential_WhenEnabled()
+    {
+        var configuration = CreateConfiguration(new Dictionary<string, string?>
+        {
+            ["DataAnalysis:CloudReadOnly:Enabled"] = "true",
+            ["DataAnalysis:CloudReadOnly:ConnectionString"] = "Host=10.98.90.154;Database=cloud;Username=readonly;Password=secret"
+        });
+        var options = MigrationWorkerCloudReadOnlySeeder.ResolveOptions(configuration);
+
+        var act = () => MigrationWorkerCloudReadOnlySeeder.ValidateOptions(configuration, options);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*ReadOnlyCredentialVerified must be true*");
+    }
+
+    [Fact]
+    public void ValidateOptions_ShouldRejectSimulationSeedConflict()
+    {
+        var configuration = CreateConfiguration(new Dictionary<string, string?>
+        {
+            ["DataAnalysis:CloudReadOnly:Enabled"] = "true",
+            ["DataAnalysis:CloudReadOnly:ConnectionString"] = "Host=10.98.90.154;Database=cloud;Username=readonly;Password=secret",
+            ["DataAnalysis:CloudReadOnly:ReadOnlyCredentialVerified"] = "true",
+            ["CloudReadonly:Mode"] = "Simulation",
+            ["CloudReadonly:Simulation:Enabled"] = "true"
+        });
+        var options = MigrationWorkerCloudReadOnlySeeder.ResolveOptions(configuration);
+
+        var act = () => MigrationWorkerCloudReadOnlySeeder.ValidateOptions(configuration, options);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*cannot be enabled while CloudReadonly Simulation seeding is enabled*");
+    }
+
+    [Fact]
+    public void CreateBusinessDatabase_ShouldCreateVerifiedCloudReadOnlySource()
+    {
+        var configuration = CreateConfiguration(new Dictionary<string, string?>
+        {
+            ["DataAnalysis:CloudReadOnly:Enabled"] = "true",
+            ["DataAnalysis:CloudReadOnly:ConnectionString"] = "Host=10.98.90.154;Database=cloud;Username=readonly;Password=secret",
+            ["DataAnalysis:CloudReadOnly:ReadOnlyCredentialVerified"] = "true",
+            ["DataAnalysis:CloudReadOnly:DefaultQueryLimit"] = "100",
+            ["DataAnalysis:CloudReadOnly:MaxQueryLimit"] = "500"
+        });
+        var options = MigrationWorkerCloudReadOnlySeeder.ResolveOptions(configuration);
+
+        MigrationWorkerCloudReadOnlySeeder.ValidateOptions(configuration, options);
+        var database = MigrationWorkerCloudReadOnlySeeder.CreateBusinessDatabase(options);
+
+        database.Name.Should().Be(MigrationWorkerCloudReadOnlySeeder.DefaultDatabaseName);
+        database.Provider.Should().Be(DbProviderType.PostgreSql);
+        database.IsEnabled.Should().BeTrue();
+        database.IsReadOnly.Should().BeTrue();
+        database.ExternalSystemType.Should().Be(BusinessDataExternalSystemType.CloudReadOnly);
+        database.ReadOnlyCredentialVerified.Should().BeTrue();
+        database.DefaultQueryLimit.Should().Be(100);
+        database.MaxQueryLimit.Should().Be(500);
+        database.Tags.Should().Contain("direct-db");
+    }
+
+    private static IConfiguration CreateConfiguration(Dictionary<string, string?> values)
+    {
+        return new ConfigurationBuilder()
+            .AddInMemoryCollection(values)
+            .Build();
+    }
+}

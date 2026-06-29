@@ -10,6 +10,10 @@ public sealed class ConfiguredSemanticPhysicalMappingProvider : ISemanticPhysica
     public const string DefaultDeviceLogSourceName = "device_log_cloud_sim_view";
     public const string DefaultCapacitySourceName = "capacity_cloud_sim_view";
     public const string DefaultProductionDataSourceName = "production_data_cloud_sim_view";
+    public const string RealDeviceSourceName = "devices";
+    public const string RealDeviceLogSourceName = "device_logs";
+    public const string RealCapacitySourceName = "hourly_capacity";
+    public const string RealProductionDataSourceName = "pass_station_records";
 
     private readonly IReadOnlyDictionary<SemanticQueryTarget, SemanticPhysicalMapping> _mappings;
 
@@ -25,14 +29,37 @@ public sealed class ConfiguredSemanticPhysicalMappingProvider : ISemanticPhysica
 
     private static IReadOnlyDictionary<SemanticQueryTarget, SemanticPhysicalMapping> BuildMappings(IConfiguration configuration)
     {
-        var sharedDatabaseName = GetValue(
+        var directCloudReadOnlyEnabled = GetBool(
             configuration,
-            "SemanticMappings:DatabaseName",
-            "AICopilot:SemanticMappings:DatabaseName",
-            DefaultDatabaseName);
+            "DataAnalysis:CloudReadOnly:Enabled",
+            "AICopilot:DataAnalysis:CloudReadOnly:Enabled",
+            fallback: false);
 
-        var defaults = new[]
-        {
+        var sharedDatabaseName = directCloudReadOnlyEnabled
+            ? GetValue(
+                configuration,
+                "DataAnalysis:CloudReadOnly:DatabaseName",
+                "AICopilot:DataAnalysis:CloudReadOnly:DatabaseName",
+                DefaultDatabaseName)
+            : GetValue(
+                configuration,
+                "SemanticMappings:DatabaseName",
+                "AICopilot:SemanticMappings:DatabaseName",
+                DefaultDatabaseName);
+
+        var defaults = directCloudReadOnlyEnabled
+            ? CreateRealCloudReadOnlyDefaults()
+            : CreateSimulationDefaults();
+
+        return defaults.ToDictionary(
+            item => item.Target,
+            item => BuildMapping(configuration, sharedDatabaseName, item));
+    }
+
+    private static SemanticMappingDefaults[] CreateSimulationDefaults()
+    {
+        return
+        [
             new SemanticMappingDefaults(
                 SemanticQueryTarget.Device,
                 "Device",
@@ -106,11 +133,91 @@ public sealed class ConfiguredSemanticPhysicalMappingProvider : ISemanticPhysica
                 ["recordId", "deviceId", "deviceCode", "processName", "barcode", "stationName", "result"],
                 ["occurredAt", "deviceCode", "processName", "stationName", "result"],
                 new SemanticSort("occurredAt", SemanticSortDirection.Desc))
-        };
+        ];
+    }
 
-        return defaults.ToDictionary(
-            item => item.Target,
-            item => BuildMapping(configuration, sharedDatabaseName, item));
+    private static SemanticMappingDefaults[] CreateRealCloudReadOnlyDefaults()
+    {
+        return
+        [
+            new SemanticMappingDefaults(
+                SemanticQueryTarget.Device,
+                "Device",
+                RealDeviceSourceName,
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["deviceId"] = "d.id",
+                    ["deviceCode"] = "d.client_code",
+                    ["deviceName"] = "d.device_name",
+                    ["status"] = "latest_log.level",
+                    ["lineName"] = "d.process_id",
+                    ["updatedAt"] = "latest_log.log_time"
+                },
+                ["deviceId", "deviceCode", "deviceName", "status", "lineName", "updatedAt"],
+                ["deviceId", "deviceCode", "deviceName", "status", "lineName"],
+                ["deviceCode", "deviceName", "updatedAt"],
+                new SemanticSort("deviceCode", SemanticSortDirection.Asc),
+                "devices d LEFT JOIN LATERAL (SELECT l.level, l.log_time FROM device_logs l WHERE l.device_id = d.id ORDER BY l.log_time DESC LIMIT 1) latest_log ON true"),
+            new SemanticMappingDefaults(
+                SemanticQueryTarget.DeviceLog,
+                "DeviceLog",
+                RealDeviceLogSourceName,
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["logId"] = "l.id",
+                    ["deviceId"] = "l.device_id",
+                    ["deviceCode"] = "d.client_code",
+                    ["level"] = "l.level",
+                    ["message"] = "l.message",
+                    ["source"] = "'Cloud'",
+                    ["occurredAt"] = "l.log_time"
+                },
+                ["logId", "deviceId", "deviceCode", "level", "message", "source", "occurredAt"],
+                ["deviceId", "deviceCode", "level"],
+                ["occurredAt", "level"],
+                new SemanticSort("occurredAt", SemanticSortDirection.Desc),
+                "device_logs l INNER JOIN devices d ON l.device_id = d.id"),
+            new SemanticMappingDefaults(
+                SemanticQueryTarget.Capacity,
+                "Capacity",
+                RealCapacitySourceName,
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["recordId"] = "h.id",
+                    ["deviceId"] = "h.device_id",
+                    ["deviceCode"] = "d.client_code",
+                    ["processName"] = "d.process_id",
+                    ["shiftDate"] = "h.date",
+                    ["outputQty"] = "h.total_count",
+                    ["qualifiedQty"] = "h.ok_count",
+                    ["occurredAt"] = "h.reported_at"
+                },
+                ["recordId", "deviceId", "deviceCode", "processName", "shiftDate", "outputQty", "qualifiedQty", "occurredAt"],
+                ["recordId", "deviceId", "deviceCode", "processName", "shiftDate"],
+                ["shiftDate", "occurredAt", "outputQty", "qualifiedQty", "deviceCode", "processName"],
+                new SemanticSort("occurredAt", SemanticSortDirection.Desc),
+                "hourly_capacity h INNER JOIN devices d ON h.device_id = d.id"),
+            new SemanticMappingDefaults(
+                SemanticQueryTarget.ProductionData,
+                "ProductionData",
+                RealProductionDataSourceName,
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["recordId"] = "p.id",
+                    ["deviceId"] = "p.device_id",
+                    ["deviceCode"] = "d.client_code",
+                    ["processName"] = "d.process_id",
+                    ["barcode"] = "p.barcode",
+                    ["stationName"] = "p.type_key",
+                    ["result"] = "p.cell_result",
+                    ["occurredAt"] = "p.completed_time"
+                },
+                ["recordId", "deviceId", "deviceCode", "processName", "barcode", "stationName", "result", "occurredAt"],
+                ["recordId", "deviceId", "deviceCode", "processName", "barcode", "stationName", "result"],
+                ["occurredAt", "deviceCode", "processName", "stationName", "result"],
+                new SemanticSort("occurredAt", SemanticSortDirection.Desc),
+                "pass_station_records p INNER JOIN devices d ON p.device_id = d.id")
+        ];
     }
 
     private static SemanticPhysicalMapping BuildMapping(
@@ -133,7 +240,8 @@ public sealed class ConfiguredSemanticPhysicalMappingProvider : ISemanticPhysica
         var fromClause = GetOptionalValue(
             configuration,
             $"SemanticMappings:{defaults.SectionName}:FromClause",
-            $"AICopilot:SemanticMappings:{defaults.SectionName}:FromClause");
+            $"AICopilot:SemanticMappings:{defaults.SectionName}:FromClause")
+            ?? defaults.FromClause;
 
         var provider = GetProvider(
             configuration,
@@ -216,6 +324,18 @@ public sealed class ConfiguredSemanticPhysicalMappingProvider : ISemanticPhysica
         var rawValue = GetOptionalValue(configuration, primaryKey, secondaryKey);
         return Enum.TryParse<DatabaseProviderType>(rawValue, true, out var provider)
             ? provider
+            : fallback;
+    }
+
+    private static bool GetBool(
+        IConfiguration configuration,
+        string primaryKey,
+        string secondaryKey,
+        bool fallback)
+    {
+        var rawValue = GetOptionalValue(configuration, primaryKey, secondaryKey);
+        return bool.TryParse(rawValue, out var parsed)
+            ? parsed
             : fallback;
     }
 
@@ -358,7 +478,6 @@ public sealed class ConfiguredSemanticPhysicalMappingProvider : ISemanticPhysica
         IReadOnlyList<string> AllowedProjectionFields,
         IReadOnlyList<string> AllowedFilterFields,
         IReadOnlyList<string> AllowedSortFields,
-        SemanticSort DefaultSort);
+        SemanticSort DefaultSort,
+        string? FromClause = null);
 }
-
-

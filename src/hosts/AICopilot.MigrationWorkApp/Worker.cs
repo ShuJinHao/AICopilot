@@ -50,6 +50,10 @@ public class Worker(
                 configuration,
                 cancellationToken);
             await MigrationWorkerAiGatewaySeeder.SeedDefaultsAsync(aiGatewayDbContext, cancellationToken);
+            await MigrationWorkerCloudReadOnlySeeder.EnsureSourceAsync(
+                configuration,
+                dataAnalysisDbContext,
+                cancellationToken);
             await MigrationWorkerCloudSimulationSeeder.EnsureSourceAsync(
                 configuration,
                 hostEnvironment.EnvironmentName,

@@ -127,6 +127,21 @@ public sealed class SemanticAnalysisRunner(
             return $"[系统提示]: 当前{targetLabel}查询请求未通过安全白名单校验，系统已拒绝执行。";
         }
 
+        if (businessDatabase.ExternalSystemType == DataSourceExternalSystemType.CloudReadOnly)
+        {
+            var cloudReadOnlySafetyError = CloudReadOnlySemanticSqlGuard.Validate(generatedSql.SqlText);
+            if (cloudReadOnlySafetyError is not null)
+            {
+                logger.LogWarning(
+                    "{TargetLabel}语义查询未通过 Cloud 只读安全白名单。Intent: {Intent}, DatabaseName: {DatabaseName}, Reason: {Reason}",
+                    targetLabel,
+                    plan.Intent,
+                    businessDatabase.Name,
+                    cloudReadOnlySafetyError);
+                return $"[系统提示]: 当前{targetLabel}查询请求未通过 Cloud 只读安全白名单校验，系统已拒绝执行。";
+            }
+        }
+
         try
         {
             var queryResult = await databaseConnector.ExecuteQueryWithMetadataAsync(

@@ -104,6 +104,7 @@ jobs:
           DEPLOY_ENV_FILE: ${{ secrets.DEPLOY_ENV_FILE }}
           CLOUD_AI_READ_BASE_URL: ${{ secrets.CLOUD_AI_READ_BASE_URL }}
           CLOUD_AI_SERVICE_ACCOUNT_TOKEN: ${{ secrets.CLOUD_AI_SERVICE_ACCOUNT_TOKEN }}
+          DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING: ${{ secrets.DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING }}
         run: |
           set -euo pipefail
           set_env_value() {
@@ -146,7 +147,23 @@ jobs:
           fi
           umask 077
           printf '%s\n' "$DEPLOY_ENV_FILE" > "$DEPLOY_TARGET_DIR/.env"
-          if [ -n "${CLOUD_AI_SERVICE_ACCOUNT_TOKEN:-}" ]; then
+          if [ -n "${DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING:-}" ]; then
+            set_env_value "$DEPLOY_TARGET_DIR/.env" CLOUD_READONLY_MODE Disabled
+            set_env_value "$DEPLOY_TARGET_DIR/.env" CLOUD_READONLY_REAL_ENABLED false
+            set_env_value "$DEPLOY_TARGET_DIR/.env" CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ false
+            set_env_value "$DEPLOY_TARGET_DIR/.env" CLOUD_AI_READ_ENABLED false
+            set_env_value "$DEPLOY_TARGET_DIR/.env" DATA_ANALYSIS_CLOUD_READONLY_ENABLED true
+            set_env_value "$DEPLOY_TARGET_DIR/.env" DATA_ANALYSIS_CLOUD_READONLY_DATABASE_NAME DeviceSemanticReadonly
+            set_env_value "$DEPLOY_TARGET_DIR/.env" DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING "$DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING"
+            set_env_value "$DEPLOY_TARGET_DIR/.env" DATA_ANALYSIS_CLOUD_READONLY_CREDENTIAL_VERIFIED true
+            set_env_value "$DEPLOY_TARGET_DIR/.env" DATA_ANALYSIS_CLOUD_READONLY_DEFAULT_QUERY_LIMIT 200
+            set_env_value "$DEPLOY_TARGET_DIR/.env" DATA_ANALYSIS_CLOUD_READONLY_MAX_QUERY_LIMIT 1000
+            set_env_value "$DEPLOY_TARGET_DIR/.env" DATA_ANALYSIS_CLOUD_READONLY_DOCKER_NETWORK enterprise-ai-cloud-readonly
+            set_env_value "$DEPLOY_TARGET_DIR/.env" DATA_ANALYSIS_CLOUD_READONLY_DB_HOST_ALIAS cloud-postgres
+            set_env_value "$DEPLOY_TARGET_DIR/.env" DATA_ANALYSIS_CLOUD_READONLY_CLOUD_COMPOSE_PROJECT deploy
+            set_env_value "$DEPLOY_TARGET_DIR/.env" DATA_ANALYSIS_CLOUD_READONLY_CLOUD_POSTGRES_SERVICE postgres
+            echo "Applied DataAnalysis direct Cloud readonly DB secret override. Connection string value was not printed."
+          elif [ -n "${CLOUD_AI_SERVICE_ACCOUNT_TOKEN:-}" ]; then
             cloud_ai_read_base_url="${CLOUD_AI_READ_BASE_URL:-http://10.98.90.154:81}"
             set_env_value "$DEPLOY_TARGET_DIR/.env" CLOUD_READONLY_MODE Real
             set_env_value "$DEPLOY_TARGET_DIR/.env" CLOUD_READONLY_REAL_ENABLED true

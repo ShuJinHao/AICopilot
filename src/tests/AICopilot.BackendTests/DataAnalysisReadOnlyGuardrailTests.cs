@@ -1,5 +1,7 @@
 using AICopilot.Dapper;
 using AICopilot.Dapper.Security;
+using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
+using AICopilot.DataAnalysisService.BusinessDatabases;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace AICopilot.BackendTests;
@@ -48,6 +50,51 @@ public sealed class DataAnalysisReadOnlyGuardrailTests
         await act.Should()
             .ThrowAsync<InvalidOperationException>()
             .WithMessage("*database account has not been verified as read-only*");
+    }
+
+    [Fact]
+    public void CloudReadOnlyGovernance_ShouldExposeSchemaOnlyForVerifiedReadOnlySource()
+    {
+        var database = new BusinessDatabase(
+            "CloudPlatformReadonly",
+            "Cloud Platform readonly business data",
+            "Host=localhost;Database=cloud;Username=readonly;Password=secret",
+            DbProviderType.PostgreSql,
+            isReadOnly: true,
+            BusinessDataExternalSystemType.CloudReadOnly,
+            readOnlyCredentialVerified: true);
+
+        BusinessDataSourceGovernancePolicy.ResolveGovernanceStatus(database)
+            .Should().Be("GovernedSchemaReady");
+        BusinessDataSourceGovernancePolicy.HasExecutableGovernedSchema(database)
+            .Should().BeTrue();
+        BusinessDataSourceGovernancePolicy.IsSelectableForMode(database, DataSourceSelectionMode.TextToSql)
+            .Should().BeFalse("the legacy P1 rule-based Text-to-SQL generator still emits SimulationBusiness SQL");
+
+        var schema = BusinessDataSourceGovernancePolicy.ResolveSafetySchema(database);
+        schema.Should().NotBeNull();
+        schema!.AllowedTables.Should().Contain(["devices", "device_logs", "hourly_capacity", "pass_station_records"]);
+
+        BusinessReadonlyQuerySafetyPolicy.Validate(
+                "SELECT client_code FROM devices LIMIT 10",
+                schema)
+            .Should().BeNull();
+        BusinessReadonlyQuerySafetyPolicy.Validate(
+                "SELECT * FROM devices",
+                schema)
+            .Should().Contain("Wildcard");
+        BusinessReadonlyQuerySafetyPolicy.Validate(
+                "SELECT recipe_name FROM recipes LIMIT 10",
+                schema)
+            .Should().Contain("not allowed");
+        BusinessReadonlyQuerySafetyPolicy.Validate(
+                "SELECT bootstrap_secret_hash FROM devices LIMIT 10",
+                schema)
+            .Should().Contain("Sensitive");
+        BusinessReadonlyQuerySafetyPolicy.Validate(
+                "UPDATE devices SET device_name = 'bad'",
+                schema)
+            .Should().Contain("Only SELECT");
     }
 
     private static DapperDatabaseConnector CreateConnector()

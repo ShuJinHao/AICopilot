@@ -4,6 +4,7 @@
 
 - 工作区总规则：`../docs/总规则.md`
 - AI 业务规则：`资料/AICopilot业务规则.md`
+- 改动复盘：`docs/改动复盘与规则沉淀.md`
 - 历史核心记录：`../docs/历史核心记录.md`
 
 ## Positioning
@@ -11,6 +12,16 @@
 `AICopilot` 是 AI 助手和受控编排系统，不是云端仓库，不是客户端仓库，也不是制造业务主数据来源。
 
 默认只修改 `AICopilot`。修改 Cloud 或 Edge 必须由用户在当前轮明确授权。
+
+## Change Closure
+
+- 修改 AICopilot 代码前，必须先读工作区总规则、本文档、`资料/AICopilot业务规则.md`、相关专题契约、相关源码、相关测试和近期 git/GitHub 历史。
+- 已验收功能默认冻结；不能因为局部重构、测试修复或文档整理顺手改变已有 AI 工作流、Cloud 只读边界、审批边界、工具边界或前端错误契约。
+- 每次代码改动完成前，必须更新项目滚动复盘文档 `docs/改动复盘与规则沉淀.md`，最新记录放在最前。
+- 每次复盘必须写明改动范围、改动原因、影响面、验证命令、验证结果和规则提炼结论。
+- 必须判断是否形成长期规则；有则写入本文档、`资料/AICopilot业务规则.md`、专题契约或工作区长期规则，无则在复盘中写明“无新增长期规则”及原因。
+- 最终回复必须列出复盘文档、规则沉淀位置和验证命令；缺任一项，不得称为完成。
+- 默认只更新项目滚动复盘文档，不为每个任务新增单独流水文档；只有形成可长期复用的业务或技术契约，才新增专题文档。
 
 ## Cloud Business Read-only Boundary
 
@@ -25,6 +36,8 @@
 - Cloud AI-facing APIs are read-only contract surfaces unless the user explicitly approves a new cross-repository write contract.
 - Cloud AiRead 正式设备参数是 `deviceId`；`deviceCode` 只能用于设备查询/解析，不得被当作 `deviceId` 发送给 Cloud。
 - Cloud 只读读取只能向 Cloud 发送真实端点参数；`scenarioId`、`from`、`to`、`pilotWindowId`、`boundary` 等试点元数据不得透传给 Cloud。
+- 内部开发允许通过 DataAnalysis `CloudReadOnly` 只读数据源直连真实 Cloud PostgreSQL 做 Text-to-SQL 验证；必须使用已验证只读数据库账号、白名单表字段和只读 SQL guard，不得写 Cloud 业务数据，也不得用 Simulation 冒充真实数据。
+- AICopilot 自动化如需创建或轮换 Cloud PostgreSQL 只读账号，只能创建/更新专用 readonly role，只能授予已批准白名单表 SELECT，必须要求显式确认词；不得授予写权限、schema create 权限、superuser、createdb、createrole 或 replication。
 - 开发阶段已物理删除 Trial/Pilot/Production Readiness 运营线；不得把旧试点运营能力重新接回普通产品导航、Skill 或后台接口。
 
 ## OIDC Boundary
