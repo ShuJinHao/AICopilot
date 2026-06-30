@@ -17,7 +17,9 @@ internal static class BusinessDataSourceGovernancePolicy
         return selectionMode switch
         {
             DataSourceSelectionMode.Agent => database.IsSelectableInAgent &&
-                                             database.ExternalSystemType == BusinessDataExternalSystemType.SimulationBusiness,
+                                             (database.ExternalSystemType == BusinessDataExternalSystemType.SimulationBusiness ||
+                                              database.ExternalSystemType == BusinessDataExternalSystemType.CloudReadOnly &&
+                                              HasExecutableGovernedSchema(database)),
             DataSourceSelectionMode.Chat => database.IsSelectableInChat,
             DataSourceSelectionMode.TextToSql => database.IsSelectableInChat &&
                                                  database.ExternalSystemType == BusinessDataExternalSystemType.SimulationBusiness,

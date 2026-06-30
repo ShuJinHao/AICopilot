@@ -38,6 +38,11 @@ internal static class DataAnalysisMetadataReader
             cancellationToken: cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
 
+        if (IsCloudReadOnly(db))
+        {
+            return FilterCloudReadOnlyTableRows(result).ToJson();
+        }
+
         return result.ToJson();
     }
 
@@ -48,8 +53,14 @@ internal static class DataAnalysisMetadataReader
         CancellationToken cancellationToken)
     {
         var ddlBuilder = new StringBuilder();
+        var requestedTables = ResolveRequestedTables(db, tableNames);
+        if (requestedTables.RejectedCount > 0)
+        {
+            ddlBuilder.AppendLine("-- 警告: 已拒绝返回 CloudReadOnly 白名单外表结构。");
+            ddlBuilder.AppendLine();
+        }
 
-        foreach (var tableName in tableNames)
+        foreach (var tableName in requestedTables.TableNames)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var columns = await GetColumnsAsync(dbConnector, db, tableName, cancellationToken);
@@ -127,14 +138,84 @@ internal static class DataAnalysisMetadataReader
         foreach (var row in result)
         {
             var dict = (IDictionary<string, object>)row;
-            columns.Add(new ColumnMetadata(
+            var column = new ColumnMetadata(
                 dict["ColumnName"] as string ?? string.Empty,
                 dict["DataType"] as string ?? string.Empty,
                 Convert.ToInt32(dict["IsPrimaryKey"]) == 1,
-                dict["Description"] as string ?? string.Empty));
+                dict["Description"] as string ?? string.Empty);
+            if (!IsCloudReadOnly(db) ||
+                (CloudReadOnlyGovernedSchema.IsAllowedColumn(tableName, column.ColumnName) &&
+                 !CloudReadOnlyGovernedSchema.IsSensitiveIdentifier(column.ColumnName)))
+            {
+                columns.Add(column);
+            }
         }
 
         return columns;
+    }
+
+    private static bool IsCloudReadOnly(BusinessDatabase db)
+    {
+        return db.ExternalSystemType == BusinessDataExternalSystemType.CloudReadOnly;
+    }
+
+    private static IReadOnlyList<dynamic> FilterCloudReadOnlyTableRows(IEnumerable<dynamic> rows)
+    {
+        return rows
+            .Where(row => CloudReadOnlyGovernedSchema.IsAllowedTable(ReadString(row, "TableName", "table_name")))
+            .ToArray();
+    }
+
+    private static RequestedTableNames ResolveRequestedTables(
+        BusinessDatabase db,
+        IReadOnlyCollection<string> tableNames)
+    {
+        if (!IsCloudReadOnly(db))
+        {
+            return new RequestedTableNames(
+                tableNames
+                    .Where(tableName => !string.IsNullOrWhiteSpace(tableName))
+                    .Select(tableName => tableName.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray(),
+                RejectedCount: 0);
+        }
+
+        var allowed = tableNames
+            .Where(tableName => !string.IsNullOrWhiteSpace(tableName))
+            .Select(tableName => tableName.Trim())
+            .Where(CloudReadOnlyGovernedSchema.IsAllowedTable)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var rejected = tableNames.Count(tableName => !CloudReadOnlyGovernedSchema.IsAllowedTable(tableName?.Trim()));
+        return new RequestedTableNames(allowed, rejected);
+    }
+
+    private static string? ReadString(dynamic row, params string[] propertyNames)
+    {
+        if (row is IDictionary<string, object> dictionary)
+        {
+            foreach (var propertyName in propertyNames)
+            {
+                if (dictionary.TryGetValue(propertyName, out var value))
+                {
+                    return value?.ToString();
+                }
+            }
+        }
+
+        var rowType = row.GetType();
+        foreach (var propertyName in propertyNames)
+        {
+            var property = rowType.GetProperty(propertyName);
+            var value = property?.GetValue(row);
+            if (value is not null)
+            {
+                return value.ToString();
+            }
+        }
+
+        return null;
     }
 }
 
@@ -143,3 +224,7 @@ internal sealed record ColumnMetadata(
     string DataType,
     bool IsPrimaryKey,
     string? Description);
+
+internal sealed record RequestedTableNames(
+    IReadOnlyCollection<string> TableNames,
+    int RejectedCount);

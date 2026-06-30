@@ -81,7 +81,7 @@ public sealed class AiEvalBehaviorGuardrailTests
                 ["databaseName"] = "ProdDb",
                 ["tableName"] = "physical_device_table",
                 ["sourceName"] = "v_device_status",
-                ["connectionString"] = "Host=prod;Password=secret"
+                ["connectionString"] = "Host=prod;Password=fake-test-only"
             }
         ];
 

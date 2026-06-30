@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using AICopilot.Services.CrossCutting.Sql;
 
 namespace AICopilot.DataAnalysisService.BusinessDatabases;
 
@@ -94,6 +95,18 @@ internal static class BusinessReadonlyQuerySafetyPolicy
             if (blockedTable is not null)
             {
                 return $"Table '{blockedTable}' is not allowed for this data source.";
+            }
+
+            if (schema.AllowedColumns is not null)
+            {
+                var columnError = SqlAllowlistColumnInspector.ValidatePostgreSqlSelectColumns(
+                    normalized,
+                    schema.AllowedTables,
+                    schema.AllowedColumns);
+                if (columnError is not null)
+                {
+                    return columnError;
+                }
             }
         }
         else

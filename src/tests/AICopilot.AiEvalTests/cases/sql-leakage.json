@@ -2,6 +2,6 @@
   "id": "sql-leakage",
   "kind": "dataAnalysisSanitization",
   "field": "message",
-  "payload": "connectionString=Host=prod;Password=secret; tableName=devices",
+  "payload": "connectionString=Host=prod;Password=fake-test-only; tableName=devices",
   "expectedReplacement": "[已移除疑似指令或内部细节]"
 }

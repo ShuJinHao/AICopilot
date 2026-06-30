@@ -69,4 +69,92 @@ public sealed class SemanticQueryPlannerTests
         result.IsSuccess.Should().BeFalse();
         result.ErrorMessage.Should().Contain(expectedErrorPart);
     }
+
+    public static IEnumerable<object[]> DeviceLogCompletionCases()
+    {
+        yield return [
+            "Analysis.DeviceLog.ByLevel",
+            "查看错误日志",
+            SemanticQueryKind.ByLevel,
+            "level",
+            "Error"
+        ];
+        yield return [
+            "Analysis.DeviceLog.ByLevel",
+            "{\"queryText\":\"查看所有错误日志\"}",
+            SemanticQueryKind.ByLevel,
+            "level",
+            "Error"
+        ];
+        yield return [
+            "Analysis.DeviceLog.ByLevel",
+            "{\"queryText\":\"查看设备 DEV-001 错误日志\",\"filters\":[{\"field\":\"deviceCode\",\"operator\":\"eq\",\"value\":\"DEV-001\"}]}",
+            SemanticQueryKind.ByLevel,
+            "level",
+            "Error"
+        ];
+        yield return [
+            "Analysis.DeviceLog.Latest",
+            "查看警告日志",
+            SemanticQueryKind.ByLevel,
+            "level",
+            "Warn"
+        ];
+        yield return [
+            "Analysis.DeviceLog.Latest",
+            "查看信息日志",
+            SemanticQueryKind.ByLevel,
+            "level",
+            "Info"
+        ];
+    }
+
+    [Theory]
+    [MemberData(nameof(DeviceLogCompletionCases))]
+    public void Planner_ShouldCompleteDeviceLogLevelSemantics(
+        string intent,
+        string query,
+        SemanticQueryKind expectedKind,
+        string expectedFilter,
+        string expectedValue)
+    {
+        var result = _planner.Plan(intent, query);
+
+        result.IsSuccess.Should().BeTrue(result.ErrorMessage);
+        result.Plan.Should().NotBeNull();
+        result.Plan!.Target.Should().Be(SemanticQueryTarget.DeviceLog);
+        result.Plan.Kind.Should().Be(expectedKind);
+        result.Plan.Filters.Should().ContainSingle(filter =>
+            filter.Field == expectedFilter &&
+            filter.Value == expectedValue &&
+            filter.Operator == SemanticFilterOperator.Equal);
+    }
+
+    [Theory]
+    [InlineData("Analysis.DeviceLog.Latest", "查看设备日志")]
+    [InlineData("Analysis.DeviceLog.Latest", "查看最近设备日志")]
+    [InlineData("Analysis.DeviceLog.ByLevel", "查看设备日志")]
+    public void Planner_ShouldUseLatestDeviceLog_WhenLevelIsMissingOrLatestIsRequested(
+        string intent,
+        string query)
+    {
+        var result = _planner.Plan(intent, query);
+
+        result.IsSuccess.Should().BeTrue(result.ErrorMessage);
+        result.Plan.Should().NotBeNull();
+        result.Plan!.Target.Should().Be(SemanticQueryTarget.DeviceLog);
+        result.Plan.Kind.Should().Be(SemanticQueryKind.Latest);
+        result.Plan.Filters.Should().NotContain(filter =>
+            filter.Field.Equals("level", StringComparison.OrdinalIgnoreCase));
+        result.Plan.Sort.Should().Be(new SemanticSort("occurredAt", SemanticSortDirection.Desc));
+    }
+
+    [Fact]
+    public void Planner_ShouldPreserveInvalidJsonFailures_WhenCompletionCannotSafelyParsePayload()
+    {
+        var result = _planner.Plan("Analysis.DeviceLog.ByLevel", "{\"queryText\":\"查看错误日志\"");
+
+        result.IsSuccess.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("not valid JSON");
+    }
 }

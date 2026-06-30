@@ -541,6 +541,13 @@ public sealed class ArchitectureBoundaryTests
             "AICopilot.DataAnalysisService",
             "BusinessDatabases",
             "BusinessDatabaseReadonlyQuery.cs"));
+        var governedSchema = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.Services.Contracts",
+            "Contracts",
+            "CloudReadOnlyGovernedSchema.cs"));
         var seeder = File.ReadAllText(Path.Combine(
             SolutionRoot,
             "src",
@@ -559,14 +566,17 @@ public sealed class ArchitectureBoundaryTests
         var approvedTables = new[] { "devices", "mfg_processes", "device_logs", "hourly_capacity", "pass_station_records" };
         foreach (var table in approvedTables)
         {
-            semanticGuard.Should().Contain($"\"{table}\"");
-            businessQuery.Should().Contain($"\"{table}\"");
+            governedSchema.Should().Contain($"\"{table}\"");
         }
 
         semanticGuard.Should().Contain("ContainsWildcardProjection");
-        semanticGuard.Should().Contain("SensitiveIdentifierFragments");
+        semanticGuard.Should().Contain("CloudReadOnlyGovernedSchema.AllowedTables");
+        semanticGuard.Should().Contain("CloudReadOnlyGovernedSchema.BlockedFieldFragments");
         businessQuery.Should().Contain("CloudReadOnlyBusinessQuerySchema");
+        businessQuery.Should().Contain("CloudReadOnlyGovernedSchema.AllowedTables");
         businessQuery.Should().Contain("BlockedFieldFragments");
+        governedSchema.Should().Contain("AllowedColumns");
+        governedSchema.Should().Contain("bootstrap_secret");
         seeder.Should().Contain("IsSimulationSeedEnabled(configuration)");
         seeder.Should().Contain("isReadOnly: true");
         seeder.Should().Contain("ReadOnlyCredentialVerified");
@@ -576,8 +586,131 @@ public sealed class ArchitectureBoundaryTests
             .Should()
             .BeLessThan(semanticRunner.IndexOf("return await RunCloudAiReadAsync", StringComparison.Ordinal));
 
-        semanticGuard.Should().Contain("mfg_processes");
-        businessQuery.Should().Contain("mfg_processes");
+        governedSchema.Should().Contain("mfg_processes");
+    }
+
+    [Fact]
+    public void CloudReadOnlyTextToSql_ShouldExposeOnlyGovernedSchemaAndKeepRepairSqlInMemory()
+    {
+        var agents = File.ReadAllText(Path.Combine(SolutionRoot, "AGENTS.md"));
+        var businessRules = File.ReadAllText(Path.Combine(SolutionRoot, "资料", "AICopilot业务规则.md"));
+        var generator = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "Workflows",
+            "Executors",
+            "CloudReadOnlyLlmTextToSqlGenerator.cs"));
+        var runner = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "Workflows",
+            "Executors",
+            "CloudReadOnlyTextToSqlFallbackRunner.cs"));
+        var generationContracts = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.Services.Contracts",
+            "Contracts",
+            "CloudReadOnlyTextToSqlGenerationContracts.cs"));
+        var repairContracts = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.Services.Contracts",
+            "Contracts",
+            "CloudReadOnlyTextToSqlRepairContracts.cs"));
+        var auditRecorder = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "Workflows",
+            "Executors",
+            "DataAnalysisAuditRecorder.cs"));
+
+        agents.Should().Contain("LLM prompt 可见的物理 schema 仅限 `CloudReadOnlyGovernedSchema`");
+        agents.Should().Contain("不得暴露连接串、凭据");
+        businessRules.Should().Contain("LLM prompt 可见的物理 schema 只能来自 `CloudReadOnlyGovernedSchema`");
+        businessRules.Should().Contain("不得把连接串、凭据");
+
+        generator.Should().Contain("governedSchema = request.AllowedTables");
+        generator.Should().Contain("columns = request.AllowedColumns.TryGetValue");
+        generator.Should().NotContain("ConnectionString");
+        generator.Should().NotContain("Password");
+        generator.Should().NotContain("Credential");
+
+        generationContracts.Should().Contain("public string? PreviousSqlForRepair { get; init; }");
+        runner.Should().Contain("string? previousSqlForRepair = null;");
+        runner.Should().Contain("PreviousSqlForRepair = previousSqlForRepair");
+        runner.Should().Contain("previousSqlForRepair = null;");
+        generator.Should().Contain("previousSqlForRepair = request.PreviousSqlForRepair");
+
+        ExtractBetween(
+                generationContracts,
+                "public sealed record CloudReadOnlyTextToSqlGenerationResult",
+                "public interface ICloudReadOnlyTextToSqlGenerator")
+            .Should()
+            .NotContain("PreviousSqlForRepair");
+        ExtractBetween(
+                runner,
+                "public sealed record CloudReadOnlyTextToSqlFallbackResult",
+                "public sealed class CloudReadOnlyTextToSqlFallbackRunner")
+            .Should()
+            .NotContain("PreviousSqlForRepair");
+        var repairAttemptRecord = ExtractBetween(
+            repairContracts,
+            "public sealed record CloudReadOnlyTextToSqlRepairAttemptRecord",
+            "public static class CloudReadOnlyTextToSqlRepairClassifier");
+        repairAttemptRecord.Should().Contain("string SqlHash");
+        repairAttemptRecord.Should().Contain("int SqlLength");
+        Regex
+            .IsMatch(repairAttemptRecord, @"\bstring\s+Sql\s*[,)]", RegexOptions.CultureInvariant)
+            .Should()
+            .BeFalse("repair attempts may persist only SQL hash/length metadata, not raw SQL");
+
+        auditRecorder.Should().Contain("[\"questionHash\"]");
+        auditRecorder.Should().Contain("[\"sqlHash\"]");
+        auditRecorder.Should().NotContain("PreviousSqlForRepair");
+        auditRecorder.Should().NotContain("previousSqlForRepair");
+
+        var allowedPreviousSqlFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "src/services/AICopilot.Services.Contracts/Contracts/CloudReadOnlyTextToSqlGenerationContracts.cs",
+            "src/services/AICopilot.AiGatewayService/Workflows/Executors/CloudReadOnlyTextToSqlFallbackRunner.cs",
+            "src/services/AICopilot.AiGatewayService/Workflows/Executors/CloudReadOnlyLlmTextToSqlGenerator.cs"
+        };
+        var previousSqlViolations = Directory
+            .EnumerateFiles(Path.Combine(SolutionRoot, "src"), "*.cs", SearchOption.AllDirectories)
+            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(file =>
+            {
+                var relativeFile = Path
+                    .GetRelativePath(SolutionRoot, file)
+                    .Replace(Path.DirectorySeparatorChar, '/');
+                return File
+                    .ReadLines(file)
+                    .Select((line, index) => new
+                    {
+                        RelativeFile = relativeFile,
+                        LineNumber = index + 1,
+                        Line = line.Trim()
+                    });
+            })
+            .Where(item => item.Line.Contains("PreviousSqlForRepair", StringComparison.Ordinal)
+                           || item.Line.Contains("previousSqlForRepair", StringComparison.Ordinal))
+            .Where(item => !item.RelativeFile.StartsWith("src/tests/", StringComparison.OrdinalIgnoreCase))
+            .Where(item => !allowedPreviousSqlFiles.Contains(item.RelativeFile))
+            .Select(item => $"{item.RelativeFile}:{item.LineNumber}: {item.Line}")
+            .ToArray();
+
+        previousSqlViolations.Should().BeEmpty(
+            "PreviousSqlForRepair is current-call repair context only and must not enter audit, logs, state, results, or persistence models");
     }
 
     [Fact]
@@ -1837,6 +1970,15 @@ public sealed class ArchitectureBoundaryTests
             index.Should().BeGreaterThan(previousIndex, $"{value} must be registered after the previous pipeline behavior");
             previousIndex = index;
         }
+    }
+
+    private static string ExtractBetween(string source, string startText, string endText)
+    {
+        var start = source.IndexOf(startText, StringComparison.Ordinal);
+        start.Should().BeGreaterThanOrEqualTo(0, $"{startText} must exist in the inspected source");
+        var end = source.IndexOf(endText, start, StringComparison.Ordinal);
+        end.Should().BeGreaterThan(start, $"{endText} must appear after {startText}");
+        return source[start..end];
     }
 
     private static string FindSolutionRoot()

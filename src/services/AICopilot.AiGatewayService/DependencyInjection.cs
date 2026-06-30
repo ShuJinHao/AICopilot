@@ -38,6 +38,8 @@ public static class DependencyInjection
             builder.Configuration.GetSection(MockMcpOptions.SectionName));
         builder.Services.Configure<AgentModelCallTimeoutOptions>(
             builder.Configuration.GetSection(AgentModelCallTimeoutOptions.SectionName));
+        builder.Services.Configure<CloudReadOnlyTextToSqlOptions>(
+            builder.Configuration.GetSection(CloudReadOnlyTextToSqlOptions.SectionName));
 
         builder.Services.AddMediatR(cfg =>
         {
@@ -107,11 +109,13 @@ public static class DependencyInjection
         builder.Services.AddScoped<IntentRoutingPromptComposer>();
         builder.Services.AddScoped<IntentRoutingAgentBuilder>();
         builder.Services.AddScoped<DataAnalysisAgentBuilder>();
+        builder.Services.AddScoped<ICloudReadOnlyTextToSqlGenerator, CloudReadOnlyLlmTextToSqlGenerator>();
 
         builder.Services.AddScoped<IntentRoutingExecutor>();
         builder.Services.AddScoped<ToolsPackExecutor>();
         builder.Services.AddScoped<KnowledgeRetrievalExecutor>();
         builder.Services.AddScoped<SemanticAnalysisRunner>();
+        builder.Services.AddScoped<CloudReadOnlyTextToSqlFallbackRunner>();
         builder.Services.AddScoped<FreeFormDbaAnalysisRunner>();
         builder.Services.AddScoped<DataAnalysisWidgetEmitter>();
         builder.Services.AddScoped<DataAnalysisAuditRecorder>();

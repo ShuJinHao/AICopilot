@@ -79,13 +79,13 @@ public sealed class GoldenCaseTests
                 new Dictionary<string, object?>
                 {
                     [field] = payload,
-                    ["connectionString"] = "Host=prod;Password=secret"
+                    ["connectionString"] = "Host=prod;Password=fake-test-only"
                 }
             ],
             [new(field, typeof(string)), new("connectionString", typeof(string))]);
 
         context.Should().NotContain("Host=prod");
-        context.Should().NotContain("Password=secret");
+        context.Should().NotContain("Password=fake-test-only");
         context.Should().NotContain("connectionString");
         context.Should().NotContain(payload);
     }

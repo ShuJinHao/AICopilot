@@ -9,6 +9,7 @@ using AICopilot.AiGatewayService.Sessions;
 using AICopilot.AiGatewayService.Skills;
 using AICopilot.AiGatewayService.Tools;
 using AICopilot.AiGatewayService.Workspaces;
+using AICopilot.AiGatewayService.Workflows.Executors;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
@@ -59,7 +60,8 @@ internal sealed class AgentTaskRuntime(
     IBusinessDatabaseReadService? businessDatabaseReadService = null,
     IBusinessTextToSqlRuntime? businessTextToSqlRuntime = null,
     MessageTimelineProjectionWriter? timelineProjectionWriter = null,
-    SkillDefinitionGuard? skillDefinitionGuard = null)
+    SkillDefinitionGuard? skillDefinitionGuard = null,
+    CloudReadOnlyTextToSqlFallbackRunner? cloudTextToSqlFallbackRunner = null)
     : IAgentTaskRuntime
 {
     private readonly AgentTaskRunAttemptCoordinator runAttemptCoordinator = new(
@@ -78,6 +80,7 @@ internal sealed class AgentTaskRuntime(
         identityAccessService,
         businessDatabaseReadService,
         businessTextToSqlRuntime,
+        cloudTextToSqlFallbackRunner,
         new AgentRuntimeArtifactBuilder(workspaceService, documentGenerator));
 
     public Task<Result<AgentTask>> RunAsync(AgentTask task, CancellationToken cancellationToken = default)

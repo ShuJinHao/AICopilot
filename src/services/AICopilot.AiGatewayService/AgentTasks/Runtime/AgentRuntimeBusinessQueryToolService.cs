@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using AICopilot.AiGatewayService.Workflows.Executors;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Result;
 
@@ -7,16 +8,17 @@ namespace AICopilot.AiGatewayService.AgentTasks;
 
 internal sealed class AgentRuntimeBusinessQueryToolService(
     IBusinessDatabaseReadService? businessDatabaseReadService,
-    IBusinessTextToSqlRuntime? businessTextToSqlRuntime)
+    IBusinessTextToSqlRuntime? businessTextToSqlRuntime,
+    CloudReadOnlyTextToSqlFallbackRunner? cloudTextToSqlFallbackRunner)
 {
     public async Task<object> QueryBusinessDatabaseReadonlyP1Async(
         AgentTaskPlanDocument plan,
         AgentTaskRunState state,
         CancellationToken cancellationToken)
     {
-        if (businessDatabaseReadService is null || businessTextToSqlRuntime is null)
+        if (businessDatabaseReadService is null)
         {
-            throw new InvalidOperationException("Business Text-to-SQL runtime is not configured.");
+            throw new InvalidOperationException("Business database read service is not configured.");
         }
 
         var enabledSources = await businessDatabaseReadService.ListSelectableAsync(
@@ -30,19 +32,39 @@ internal sealed class AgentRuntimeBusinessQueryToolService(
             .Select(domain => domain.Trim())
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        var source = enabledSources
+        var candidates = enabledSources
             .Where(item => item.IsSelectableInAgent)
-            .Where(item => item.ExternalSystemType == DataSourceExternalSystemType.SimulationBusiness)
             .Where(item => selectedIds.Count == 0 || selectedIds.Contains(item.Id))
             .Where(item => selectedDomains.Count == 0 ||
                            selectedDomains.Contains(item.BusinessDomain) ||
                            selectedDomains.Contains(item.Category))
+            .ToArray();
+
+        var cloudSource = candidates
+            .Where(item => item.ExternalSystemType == DataSourceExternalSystemType.CloudReadOnly)
             .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
             .FirstOrDefault();
+        var simulationSource = candidates
+            .Where(item => item.ExternalSystemType == DataSourceExternalSystemType.SimulationBusiness)
+            .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+        var source = cloudSource is not null && (simulationSource is null || selectedIds.Contains(cloudSource.Id))
+            ? cloudSource
+            : simulationSource;
 
         if (source is null)
         {
-            throw new InvalidOperationException("No authorized SimulationBusiness data source is available for this agent task.");
+            throw new InvalidOperationException("No authorized SimulationBusiness or CloudReadOnly data source is available for this agent task.");
+        }
+
+        if (source.ExternalSystemType == DataSourceExternalSystemType.CloudReadOnly)
+        {
+            return await QueryCloudReadOnlyBusinessDatabaseAsync(source, plan, state, cancellationToken);
+        }
+
+        if (businessTextToSqlRuntime is null)
+        {
+            throw new InvalidOperationException("Business Text-to-SQL runtime is not configured.");
         }
 
         var draftResult = await businessTextToSqlRuntime.GenerateDraftAsync(
@@ -106,6 +128,82 @@ internal sealed class AgentRuntimeBusinessQueryToolService(
             rowCount = result.RowCount,
             isTruncated = result.IsTruncated,
             columns = result.Columns,
+            rows
+        };
+    }
+
+    private async Task<object> QueryCloudReadOnlyBusinessDatabaseAsync(
+        BusinessDatabaseDescriptor source,
+        AgentTaskPlanDocument plan,
+        AgentTaskRunState state,
+        CancellationToken cancellationToken)
+    {
+        if (businessDatabaseReadService is null || cloudTextToSqlFallbackRunner is null)
+        {
+            throw new InvalidOperationException("CloudReadOnly Text-to-SQL runtime is not configured.");
+        }
+
+        var database = await businessDatabaseReadService.GetByNameAsync(source.Name, cancellationToken);
+        if (database is null)
+        {
+            throw new InvalidOperationException("Selected CloudReadOnly data source is not available for this agent task.");
+        }
+
+        var fallbackResult = await cloudTextToSqlFallbackRunner.RunAsync(
+            database,
+            plan.Goal,
+            source.DefaultQueryLimit,
+            cancellationToken);
+        if (!fallbackResult.Succeeded)
+        {
+            throw new InvalidOperationException($"CloudReadOnly Text-to-SQL fallback failed: {fallbackResult.SafeMessage}");
+        }
+
+        var rows = fallbackResult.Rows
+            .Select(row => row.ToDictionary(item => item.Key, item => item.Value))
+            .ToArray();
+        var sourceLabel = "Cloud 已有正式只读数据（DataAnalysis/Text-to-SQL 补充分析）";
+
+        state.CloudReadonlySummary =
+            $"BusinessDatabase CloudReadOnly Text-to-SQL executed. sourceType=BusinessDatabase; sourceMode=CloudReadOnly; isSimulation=false; sourceLabel={sourceLabel}; queryHash={fallbackResult.QueryHash}; rows={fallbackResult.RowCount}; truncated={fallbackResult.IsTruncated.ToString().ToLowerInvariant()}; repairAttempts={fallbackResult.RepairAttempts.Count}.";
+        state.CloudReadonlyRows = rows;
+        state.CloudReadonlySourceLabel = sourceLabel;
+        state.CloudReadonlySourcePath = "BusinessDataSourceCenter/CloudReadOnlyTextToSql";
+        state.CloudReadonlySourceMode = DataSourceExternalSystemType.CloudReadOnly.ToString();
+        state.CloudReadonlyIsSimulation = false;
+        state.CloudReadonlyRowCount = fallbackResult.RowCount;
+        state.CloudReadonlyIsTruncated = fallbackResult.IsTruncated;
+        state.BusinessQueryHash = fallbackResult.QueryHash;
+        state.BusinessQueryResults.Add(new AgentBusinessQuerySummary(
+            source.Id,
+            source.Name,
+            DataSourceExternalSystemType.CloudReadOnly.ToString(),
+            IsSimulation: false,
+            sourceLabel,
+            fallbackResult.QueryHash,
+            fallbackResult.RowCount,
+            fallbackResult.IsTruncated,
+            ArtifactId: null));
+
+        return new
+        {
+            status = "completed",
+            sourceType = "BusinessDatabase",
+            sourceMode = DataSourceExternalSystemType.CloudReadOnly.ToString(),
+            isSimulation = false,
+            sourceLabel,
+            queryHash = fallbackResult.QueryHash,
+            questionHash = CloudReadOnlyTextToSqlRepairClassifier.ComputeSqlHash(plan.Goal),
+            rowCount = fallbackResult.RowCount,
+            isTruncated = fallbackResult.IsTruncated,
+            repairAttempts = fallbackResult.RepairAttempts.Select(attempt => new
+            {
+                attempt.AttemptIndex,
+                stage = attempt.Stage.ToString(),
+                failureCode = attempt.FailureCode.ToString(),
+                attempt.CanRetry,
+                attempt.SafeErrorSummary
+            }).ToArray(),
             rows
         };
     }

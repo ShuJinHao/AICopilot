@@ -83,6 +83,12 @@ Cloud AiRead 设备契约：
 - 不能为了分析便利放宽 `MaxRows`、read-only session 或 SQL 安全检查。
 - 内部开发直连真实 Cloud PostgreSQL 时，只能注册为 DataAnalysis `CloudReadOnly` 只读业务数据源，必须使用已验证只读数据库账号，并绑定白名单表字段和只读 SQL guard。
 - 内部真实 Cloud 语义查询优先走 DataAnalysis `CloudReadOnly` Direct DB 映射；Cloud AiRead 只作为未来外部系统只读 API 接入口封存，不能在内部映射存在时压过 Direct DB。
+- CloudReadOnly 探索型 Text-to-SQL 只能作为强语义 intent / Direct DB SQL 失败后的受控 fallback；不得拆分或重命名既有 `Analysis.*` intent，不得用 fallback 压过已可执行的强语义路径。
+- CloudReadOnly Text-to-SQL fallback 必须使用共享白名单 schema、已验证只读凭据、LLM 结构化生成、SELECT-only SQL guard、BusinessQuery safety policy 双层表/列白名单、只读执行、最多受控修复重试和 hash-only 审计；生产 fallback 不得退化为规则 SQL 模板。
+- CloudReadOnly Text-to-SQL LLM prompt 可见的物理 schema 只能来自 `CloudReadOnlyGovernedSchema` 治理白名单，最多包含批准表名、列名和必要业务描述；不得把连接串、凭据、role/权限细节、样例数据、查询结果、参数值、非白名单表字段或系统/敏感字段发给模型。
+- CloudReadOnly Text-to-SQL 修复重试默认最多 3 次、硬上限 5 次；timeout、权限、凭据、非只读、系统表、敏感字段、多语句或写 SQL 默认不可修复、不重试。
+- CloudReadOnly Text-to-SQL 修复历史不得保存完整 SQL、用户 prompt、连接串、参数值或敏感字段；上一轮失败 SQL 只允许在当前调用内以内存参数临时回传给 LLM 生成下一版，不能写入审计、日志、state、结果或持久化对象。
+- Legacy `DataSourceSelectionMode.TextToSql` / Business Text-to-SQL draft runtime 仍只服务 SimulationBusiness；Agent 侧 CloudReadOnly 查询只能走 governed fallback runner，不能复用会生成 SimulationBusiness SQL 的旧 draft runtime。
 - Direct DB 语义映射中的工序名来自只读 `mfg_processes.process_name`；新增 join 表必须同步进入 SQL guard、BusinessQuery safety schema、只读 role 授权和模板测试。
 - Direct DB 设备 `status` 字段当前是最新 `device_logs.level`，对用户展示必须称为“最新日志级别”，不得包装为实时在线/运行状态。
 - 真实 Cloud Text-to-SQL 验证不得走 Simulation 数据源冒充真实结果；Simulation 只能用于明确标识的模拟链路。

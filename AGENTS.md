@@ -40,6 +40,12 @@
 - Cloud 只读读取只能向 Cloud 发送真实端点参数；`scenarioId`、`from`、`to`、`pilotWindowId`、`boundary` 等试点元数据不得透传给 Cloud。
 - 内部开发允许通过 DataAnalysis `CloudReadOnly` 只读数据源直连真实 Cloud PostgreSQL 做 Text-to-SQL 验证；必须使用已验证只读数据库账号、白名单表字段和只读 SQL guard，不得写 Cloud 业务数据，也不得用 Simulation 冒充真实数据。
 - 内部真实 Cloud 语义查询优先走 DataAnalysis `CloudReadOnly` Direct DB 映射；Cloud AiRead 封存为未来外部系统只读 API 接入口，不能在内部映射存在时压过 Direct DB。
+- CloudReadOnly 探索型 Text-to-SQL 只能作为强语义 intent / Direct DB SQL 失败后的受控 fallback，不能拆分或重命名既有 `Analysis.*` intent，也不能压过可用的强语义路径。
+- CloudReadOnly Text-to-SQL fallback 必须同时满足已验证只读凭据、共享白名单 schema、LLM 结构化生成、SELECT-only SQL guard、BusinessQuery safety policy 双层表/列白名单、只读执行和 hash-only 审计；生产 fallback 不得退化为规则 SQL 模板。
+- CloudReadOnly Text-to-SQL LLM prompt 可见的物理 schema 仅限 `CloudReadOnlyGovernedSchema` 批准的表名、列名和必要业务描述；不得暴露连接串、凭据、role/权限细节、样例数据、查询结果、参数值、非白名单表字段或系统/敏感字段。
+- CloudReadOnly Text-to-SQL 修复重试默认最多 3 次、硬上限 5 次；timeout、权限、凭据、非只读、系统表、敏感字段、多语句或写 SQL 默认不可修复、不重试。
+- CloudReadOnly Text-to-SQL 修复历史不得保存完整 SQL、用户 prompt、连接串、参数值或敏感字段；上一轮失败 SQL 只允许在当前调用内以内存参数临时回传给 LLM 生成下一版，不能写入审计、日志、state、结果或持久化对象。
+- Legacy `DataSourceSelectionMode.TextToSql` / Business Text-to-SQL draft runtime 仍只服务 SimulationBusiness；Agent 侧 CloudReadOnly 查询只能走 governed fallback runner，不能复用会生成 SimulationBusiness SQL 的旧 draft runtime。
 - Direct DB 语义映射如需展示工序名，只能通过只读 join `mfg_processes.process_name`；新增 join 表必须同步更新 SQL guard 白名单、BusinessQuery safety schema、只读 role 授权 workflow、RealSource 模板和测试。
 - Direct DB 设备字段 `status` 当前表示最新一条 `device_logs.level`，展示口径必须写成“最新日志级别”，不得暗示为实时在线/运行状态。
 - Simulation 只允许作为显式离线演示/测试资产，默认关闭；Real Cloud 查询为空、失败或未配置时不得 fallback 到 Simulation 冒充真实数据。

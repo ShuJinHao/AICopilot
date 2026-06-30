@@ -40,7 +40,7 @@ public sealed class MigrationWorkerCloudReadOnlySeederTests
         var configuration = CreateConfiguration(new Dictionary<string, string?>
         {
             ["DataAnalysis:CloudReadOnly:Enabled"] = "true",
-            ["DataAnalysis:CloudReadOnly:ConnectionString"] = "Host=10.98.90.154;Database=cloud;Username=readonly;Password=secret"
+            ["DataAnalysis:CloudReadOnly:ConnectionString"] = "Host=10.98.90.154;Database=cloud;Username=readonly;Password=fake-test-only"
         });
         var options = MigrationWorkerCloudReadOnlySeeder.ResolveOptions(configuration);
 
@@ -56,7 +56,7 @@ public sealed class MigrationWorkerCloudReadOnlySeederTests
         var configuration = CreateConfiguration(new Dictionary<string, string?>
         {
             ["DataAnalysis:CloudReadOnly:Enabled"] = "true",
-            ["DataAnalysis:CloudReadOnly:ConnectionString"] = "Host=10.98.90.154;Database=cloud;Username=readonly;Password=secret",
+            ["DataAnalysis:CloudReadOnly:ConnectionString"] = "Host=10.98.90.154;Database=cloud;Username=readonly;Password=fake-test-only",
             ["DataAnalysis:CloudReadOnly:ReadOnlyCredentialVerified"] = "true",
             ["CloudReadonly:Mode"] = "Simulation",
             ["CloudReadonly:Simulation:Enabled"] = "true"
@@ -75,7 +75,7 @@ public sealed class MigrationWorkerCloudReadOnlySeederTests
         var configuration = CreateConfiguration(new Dictionary<string, string?>
         {
             ["DataAnalysis:CloudReadOnly:Enabled"] = "true",
-            ["DataAnalysis:CloudReadOnly:ConnectionString"] = "Host=10.98.90.154;Database=cloud;Username=readonly;Password=secret",
+            ["DataAnalysis:CloudReadOnly:ConnectionString"] = "Host=10.98.90.154;Database=cloud;Username=readonly;Password=fake-test-only",
             ["DataAnalysis:CloudReadOnly:ReadOnlyCredentialVerified"] = "true",
             ["DataAnalysis:CloudReadOnly:DefaultQueryLimit"] = "100",
             ["DataAnalysis:CloudReadOnly:MaxQueryLimit"] = "500"

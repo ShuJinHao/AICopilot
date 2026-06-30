@@ -82,7 +82,7 @@ public sealed class DynamicPlannerContractTests
                     "Artifact",
                     "AgentRuntime",
                     "AgentTaskRuntime",
-                    """{"type":"object","description":"Password=secret; table device_master_cloud_sim_view"}""",
+                    """{"type":"object","description":"Password=fake-test-only; table device_master_cloud_sim_view"}""",
                     false,
                     "Low")
             ]);
@@ -94,7 +94,7 @@ public sealed class DynamicPlannerContractTests
         input.Should().NotContain("sk-goal");
         input.Should().NotContain("sk-tool");
         input.Should().NotContain("C:\\secrets");
-        input.Should().NotContain("Password=secret");
+        input.Should().NotContain("Password=fake-test-only");
         input.Should().NotContain("SELECT * FROM");
         input.Should().NotContain("device_master_cloud_sim_view");
         input.Should().NotContain("device_log_cloud_sim_view");

@@ -140,6 +140,42 @@ public sealed class TextToSqlReadOnlyTests
     }
 
     [Fact]
+    public async Task Plugin_ShouldFilterCloudReadOnlyMetadataDiscovery_ToGovernedSchema()
+    {
+        var connector = new RecordingDatabaseConnector();
+        var plugin = CreatePlugin(connector);
+        var cloudReadOnlyDatabase = new BusinessDatabase(
+            "CloudPlatformReadonly",
+            "Cloud Platform readonly business data",
+            "Host=localhost;Database=cloud;Username=readonly;Password=fake-test-only",
+            DbProviderType.PostgreSql,
+            isReadOnly: true,
+            BusinessDataExternalSystemType.CloudReadOnly,
+            readOnlyCredentialVerified: true);
+
+        var serviceProvider = BuildServiceProvider([cloudReadOnlyDatabase]);
+
+        var tableNames = await plugin.GetTableNamesAsync(serviceProvider, cloudReadOnlyDatabase.Name);
+        var schema = await plugin.GetTableSchemaAsync(
+            serviceProvider,
+            cloudReadOnlyDatabase.Name,
+            ["devices", "recipes", "pg_user"]);
+
+        tableNames.Should().Contain("devices");
+        tableNames.Should().Contain("device_logs");
+        tableNames.Should().NotContain("recipes");
+        tableNames.Should().NotContain("pg_user");
+        schema.Should().Contain("CREATE TABLE devices");
+        schema.Should().Contain("client_code");
+        schema.Should().NotContain("device_code");
+        schema.Should().NotContain("bootstrap_secret");
+        schema.Should().NotContain("password");
+        schema.Should().NotContain("CREATE TABLE recipes");
+        schema.Should().NotContain("pg_user");
+    }
+
+
+    [Fact]
     public async Task Plugin_ShouldSurfaceTruncationMetadata_WhenQueryResultIsTrimmed()
     {
         var auditLogWriter = new CapturingAuditLogWriter();
@@ -267,12 +303,42 @@ public sealed class TextToSqlReadOnlyTests
                     {
                         ["TableName"] = "devices",
                         ["Description"] = "device master"
+                    },
+                    new Dictionary<string, object>
+                    {
+                        ["TableName"] = "device_logs",
+                        ["Description"] = "device logs"
+                    },
+                    new Dictionary<string, object>
+                    {
+                        ["TableName"] = "recipes",
+                        ["Description"] = "recipe master"
+                    },
+                    new Dictionary<string, object>
+                    {
+                        ["TableName"] = "pg_user",
+                        ["Description"] = "system users"
                     }
                 ]);
             }
 
             if (sql.Contains("information_schema.columns", StringComparison.OrdinalIgnoreCase))
             {
+                var tableName = ReadTableName(parameters);
+                if (string.Equals(tableName, "recipes", StringComparison.OrdinalIgnoreCase))
+                {
+                    return Task.FromResult<IEnumerable<dynamic>>(
+                    [
+                        new Dictionary<string, object>
+                        {
+                            ["ColumnName"] = "recipe_name",
+                            ["DataType"] = "text",
+                            ["IsPrimaryKey"] = 0,
+                            ["Description"] = "recipe name"
+                        }
+                    ]);
+                }
+
                 return Task.FromResult<IEnumerable<dynamic>>(
                 [
                     new Dictionary<string, object>
@@ -281,6 +347,27 @@ public sealed class TextToSqlReadOnlyTests
                         ["DataType"] = "text",
                         ["IsPrimaryKey"] = 0,
                         ["Description"] = "device code"
+                    },
+                    new Dictionary<string, object>
+                    {
+                        ["ColumnName"] = "client_code",
+                        ["DataType"] = "text",
+                        ["IsPrimaryKey"] = 0,
+                        ["Description"] = "Cloud device client code"
+                    },
+                    new Dictionary<string, object>
+                    {
+                        ["ColumnName"] = "bootstrap_secret_hash",
+                        ["DataType"] = "text",
+                        ["IsPrimaryKey"] = 0,
+                        ["Description"] = "secret"
+                    },
+                    new Dictionary<string, object>
+                    {
+                        ["ColumnName"] = "password_hash",
+                        ["DataType"] = "text",
+                        ["IsPrimaryKey"] = 0,
+                        ["Description"] = "password"
                     }
                 ]);
             }
@@ -326,6 +413,11 @@ public sealed class TextToSqlReadOnlyTests
             CancellationToken cancellationToken = default)
         {
             return ExecuteQueryAsync(database, "SELECT table_name FROM information_schema.tables", cancellationToken: cancellationToken);
+        }
+
+        private static string? ReadTableName(object? parameters)
+        {
+            return parameters?.GetType().GetProperty("TableName")?.GetValue(parameters)?.ToString();
         }
     }
 

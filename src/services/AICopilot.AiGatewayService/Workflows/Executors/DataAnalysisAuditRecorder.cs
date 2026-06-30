@@ -23,4 +23,40 @@ public sealed class DataAnalysisAuditRecorder(IAuditLogWriter auditLogWriter)
             cancellationToken);
         await auditLogWriter.SaveChangesAsync(cancellationToken);
     }
+
+    public async Task RecordCloudReadOnlyTextToSqlFallbackAsync(
+        BusinessDatabaseConnectionInfo businessDatabase,
+        string result,
+        string summary,
+        string questionHash,
+        string sqlHash,
+        int rowCount,
+        bool isTruncated,
+        IReadOnlyList<CloudReadOnlyTextToSqlRepairAttemptRecord> repairAttempts,
+        CancellationToken cancellationToken)
+    {
+        var lastAttempt = repairAttempts.LastOrDefault();
+        await auditLogWriter.WriteAsync(
+            new AuditLogWriteRequest(
+                "DataAnalysis",
+                "DataAnalysis.CloudReadOnlyTextToSqlFallback",
+                "BusinessDatabase",
+                businessDatabase.Id.ToString(),
+                businessDatabase.Name,
+                result,
+                summary,
+                Metadata: new Dictionary<string, string>
+                {
+                    ["questionHash"] = questionHash,
+                    ["sqlHash"] = sqlHash,
+                    ["sourceMode"] = businessDatabase.ExternalSystemType.ToString(),
+                    ["rowCount"] = rowCount.ToString(),
+                    ["isTruncated"] = isTruncated.ToString(),
+                    ["repairAttemptCount"] = repairAttempts.Count.ToString(),
+                    ["lastFailureCode"] = lastAttempt?.FailureCode.ToString() ?? string.Empty,
+                    ["lastFailureStage"] = lastAttempt?.Stage.ToString() ?? string.Empty
+                }),
+            cancellationToken);
+        await auditLogWriter.SaveChangesAsync(cancellationToken);
+    }
 }

@@ -44,7 +44,7 @@ public sealed class SemanticAnalysisRunnerTests
             Guid.NewGuid(),
             "CloudPlatformReadonly",
             "Cloud Platform readonly business data",
-            "Host=localhost;Database=cloud;Username=readonly;Password=secret",
+            "Host=localhost;Database=cloud;Username=readonly;Password=fake-test-only",
             DatabaseProviderType.PostgreSql,
             IsEnabled: true,
             IsReadOnly: true,
@@ -127,7 +127,7 @@ public sealed class SemanticAnalysisRunnerTests
             Guid.NewGuid(),
             "CloudPlatformReadonly",
             "Cloud Platform readonly business data",
-            "Host=localhost;Database=cloud;Username=readonly;Password=secret",
+            "Host=localhost;Database=cloud;Username=readonly;Password=fake-test-only",
             DatabaseProviderType.PostgreSql,
             IsEnabled: true,
             IsReadOnly: true,
@@ -215,6 +215,47 @@ public sealed class SemanticAnalysisRunnerTests
     }
 
     [Fact]
+    public async Task RunAsync_ShouldFallbackToCloudReadOnlyTextToSql_WhenSemanticSqlGuardRejectsGeneratedSql()
+    {
+        var databaseConnector = new RecordingDatabaseConnector(new DatabaseQueryResult(
+            [
+                new Dictionary<string, object?>
+                {
+                    ["client_code"] = "DEV-001"
+                }
+            ],
+            ReturnedRowCount: 1,
+            IsTruncated: false,
+            ElapsedMilliseconds: 3));
+        var fallbackGenerator = new FixedCloudReadOnlyTextToSqlGenerator(
+            "SELECT d.client_code FROM devices d LIMIT 10");
+        var fallbackRunner = new CloudReadOnlyTextToSqlFallbackRunner(
+            fallbackGenerator,
+            databaseConnector,
+            new DataAnalysisAuditRecorder(new NoopAuditLogWriter()));
+        var runner = CreateCloudReadOnlySemanticRunner(
+            "SELECT t.recipe_name AS deviceName FROM recipes t LIMIT 10",
+            databaseConnector,
+            fallbackRunner);
+
+        var result = await runner.RunAsync(
+            new IntentResult
+            {
+                Intent = "Analysis.Device.List",
+                Query = "查询设备列表"
+            },
+            CancellationToken.None);
+
+        databaseConnector.WasCalled.Should().BeTrue();
+        databaseConnector.LastSql.Should().Contain("FROM devices");
+        databaseConnector.LastSql.Should().NotContain("recipes");
+        fallbackGenerator.Requests.Should().ContainSingle();
+        using var resultJson = JsonDocument.Parse(result);
+        resultJson.RootElement.GetProperty("source_mode").GetString()
+            .Should().Be("DataAnalysis/Text-to-SQL 补充分析");
+    }
+
+    [Fact]
     public async Task RunAsync_ShouldRejectCloudReadOnlySemanticSql_WhenGeneratedSqlTouchesSensitiveField()
     {
         var databaseConnector = new RecordingDatabaseConnector();
@@ -291,13 +332,14 @@ public sealed class SemanticAnalysisRunnerTests
 
     private static SemanticAnalysisRunner CreateCloudReadOnlySemanticRunner(
         string generatedSql,
-        RecordingDatabaseConnector databaseConnector)
+        RecordingDatabaseConnector databaseConnector,
+        CloudReadOnlyTextToSqlFallbackRunner? fallbackRunner = null)
     {
         var database = new BusinessDatabaseConnectionInfo(
             Guid.NewGuid(),
             "CloudPlatformReadonly",
             "Cloud Platform readonly business data",
-            "Host=localhost;Database=cloud;Username=readonly;Password=secret",
+            "Host=localhost;Database=cloud;Username=readonly;Password=fake-test-only",
             DatabaseProviderType.PostgreSql,
             IsEnabled: true,
             IsReadOnly: true,
@@ -337,7 +379,8 @@ public sealed class SemanticAnalysisRunnerTests
                 generatedSql,
                 new Dictionary<string, object?>())),
             new DataAnalysisAuditRecorder(new NoopAuditLogWriter()),
-            NullLogger<SemanticAnalysisRunner>.Instance);
+            NullLogger<SemanticAnalysisRunner>.Instance,
+            fallbackRunner);
     }
 
     private sealed class StubSemanticQueryPlanner(SemanticQueryPlan plan) : ISemanticQueryPlanner
@@ -506,6 +549,19 @@ public sealed class SemanticAnalysisRunnerTests
         public GeneratedSemanticSql Generate(SemanticQueryPlan plan, SemanticPhysicalMapping mapping)
         {
             throw new InvalidOperationException("Semantic SQL generator must not be called for recipe data.");
+        }
+    }
+
+    private sealed class FixedCloudReadOnlyTextToSqlGenerator(string sql) : ICloudReadOnlyTextToSqlGenerator
+    {
+        public List<CloudReadOnlyTextToSqlGenerationRequest> Requests { get; } = [];
+
+        public Task<CloudReadOnlyTextToSqlGenerationResult> GenerateAsync(
+            CloudReadOnlyTextToSqlGenerationRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request);
+            return Task.FromResult(CloudReadOnlyTextToSqlGenerationResult.Success(sql, "fixed fallback sql"));
         }
     }
 

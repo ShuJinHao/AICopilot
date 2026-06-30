@@ -96,7 +96,7 @@ public sealed class PromptGovernanceTests
     [Fact]
     public void BuiltInConversationTemplates_ShouldUseCurrentPromptVersion()
     {
-        BuiltInConversationTemplates.CurrentVersion.Should().Be(4);
+        BuiltInConversationTemplates.CurrentVersion.Should().Be(5);
         BuiltInConversationTemplates.All
             .Should()
             .OnlyContain(definition => definition.Version == BuiltInConversationTemplates.CurrentVersion);
@@ -136,6 +136,14 @@ public sealed class PromptGovernanceTests
             .Should().Contain("最终执行 Agent")
             .And.Contain("运行详情")
             .And.Contain("可以读取、查询和分析已授权只读数据");
+
+        BuiltInConversationTemplates.Find("cloud_readonly_text_to_sql")!.SystemPrompt
+            .Should().Contain("结构化 JSON 草案")
+            .And.Contain("不执行查询")
+            .And.Contain("governedSchema")
+            .And.Contain("@parameter_name")
+            .And.Contain("不调用工具")
+            .And.Contain("不写入 Cloud");
 
         BuiltInConversationTemplates.Find("chat_answer")!.SystemPrompt
             .Should().Contain("运行详情")

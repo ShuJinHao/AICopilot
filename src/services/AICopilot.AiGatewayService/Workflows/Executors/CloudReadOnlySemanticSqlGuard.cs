@@ -1,30 +1,26 @@
 using System.Text.RegularExpressions;
+using AICopilot.Services.Contracts;
+using AICopilot.Services.CrossCutting.Sql;
 
 namespace AICopilot.AiGatewayService.Workflows.Executors;
 
 internal static partial class CloudReadOnlySemanticSqlGuard
 {
-    private static readonly IReadOnlySet<string> AllowedTables =
-        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "devices",
-            "mfg_processes",
-            "device_logs",
-            "hourly_capacity",
-            "pass_station_records"
-        };
-
-    private static readonly string[] SensitiveIdentifierFragments =
+    private static readonly string[] DangerousSqlVerbs =
     [
-        "api_key",
-        "apikey",
-        "bootstrap_secret",
-        "connection_string",
-        "credential",
-        "password",
-        "secret",
-        "security_stamp",
-        "token"
+        "insert",
+        "update",
+        "delete",
+        "drop",
+        "alter",
+        "create",
+        "truncate",
+        "merge",
+        "grant",
+        "revoke",
+        "copy",
+        "execute",
+        "call"
     ];
 
     [GeneratedRegex(@"/\*.*?\*/", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
@@ -42,26 +38,40 @@ internal static partial class CloudReadOnlySemanticSqlGuard
 
         var normalized = StripComments(sql).Trim();
         var lower = normalized.ToLowerInvariant();
+        if (!Regex.IsMatch(lower, @"^\s*select\b", RegexOptions.CultureInvariant))
+        {
+            return "Only SELECT statements are allowed for Cloud readonly semantic queries.";
+        }
+
+        if (lower.Contains(';', StringComparison.Ordinal))
+        {
+            return "Multiple SQL statements are not allowed for Cloud readonly semantic queries.";
+        }
+
+        if (DangerousSqlVerbs.Any(verb => Regex.IsMatch(lower, $@"\b{Regex.Escape(verb)}\b", RegexOptions.CultureInvariant)))
+        {
+            return "DDL and DML statements are not allowed for Cloud readonly semantic queries.";
+        }
+
         if (ContainsWildcardProjection(lower))
         {
             return "Wildcard SELECT projections are not allowed for Cloud readonly semantic queries.";
         }
 
-        if (SensitiveIdentifierFragments.Any(fragment => lower.Contains(fragment, StringComparison.Ordinal)))
+        if (ContainsSystemCatalog(lower))
+        {
+            return "System catalog metadata is not allowed for Cloud readonly semantic queries.";
+        }
+
+        if (CloudReadOnlyGovernedSchema.BlockedFieldFragments.Any(fragment => lower.Contains(fragment, StringComparison.Ordinal)))
         {
             return "Sensitive Cloud fields are not allowed in semantic queries.";
         }
 
-        var tableNames = ExtractTableNames(lower).ToArray();
-        if (tableNames.Length == 0)
-        {
-            return "Cloud readonly semantic query must reference an allowed Cloud table.";
-        }
-
-        var blockedTable = tableNames.FirstOrDefault(table => !AllowedTables.Contains(table));
-        return blockedTable is null
-            ? null
-            : $"Cloud table '{blockedTable}' is not allowed for semantic readonly queries.";
+        return SqlAllowlistColumnInspector.ValidatePostgreSqlSelectColumns(
+            normalized,
+            CloudReadOnlyGovernedSchema.AllowedTables,
+            CloudReadOnlyGovernedSchema.AllowedColumns);
     }
 
     private static bool ContainsWildcardProjection(string normalizedSql)
@@ -82,22 +92,14 @@ internal static partial class CloudReadOnlySemanticSqlGuard
             RegexOptions.CultureInvariant);
     }
 
-    private static IEnumerable<string> ExtractTableNames(string normalizedSql)
+    private static bool ContainsSystemCatalog(string normalizedSql)
     {
-        foreach (Match match in Regex.Matches(
-                     normalizedSql,
-                     @"\b(?:from|join)\s+([a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)?)",
-                     RegexOptions.CultureInvariant))
-        {
-            var value = match.Groups[1].Value;
-            if (string.Equals(value, "lateral", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            var dot = value.LastIndexOf('.');
-            yield return dot >= 0 ? value[(dot + 1)..] : value;
-        }
+        return normalizedSql.Contains("information_schema.", StringComparison.Ordinal) ||
+               normalizedSql.Contains("pg_catalog.", StringComparison.Ordinal) ||
+               normalizedSql.Contains("pg_user", StringComparison.Ordinal) ||
+               normalizedSql.Contains("pg_shadow", StringComparison.Ordinal) ||
+               normalizedSql.Contains("sys.", StringComparison.Ordinal) ||
+               normalizedSql.Contains("mysql.", StringComparison.Ordinal);
     }
 
     private static string StripComments(string sql)

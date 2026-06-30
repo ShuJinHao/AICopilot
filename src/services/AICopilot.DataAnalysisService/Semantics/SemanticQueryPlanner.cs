@@ -15,13 +15,14 @@ public sealed class SemanticQueryPlanner(
 
     public SemanticPlanningResult Plan(string intent, string? query)
     {
-        if (!intentCatalog.TryGet(intent, out var descriptor))
+        var completion = SemanticIntentQueryCompleter.Complete(intent, query);
+        if (!intentCatalog.TryGet(completion.Intent, out var descriptor))
         {
-            return SemanticPlanningResult.Failure($"Unsupported semantic intent: {intent}");
+            return SemanticPlanningResult.Failure($"Unsupported semantic intent: {completion.Intent}");
         }
 
         var definition = definitionCatalog.Get(descriptor.Target);
-        var payloadResult = ParsePayload(query);
+        var payloadResult = ParsePayload(completion.Query);
         if (!payloadResult.IsSuccess)
         {
             return SemanticPlanningResult.Failure(payloadResult.ErrorMessage!);

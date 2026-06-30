@@ -1,4 +1,5 @@
 using AICopilot.AiGatewayService.Workspaces;
+using AICopilot.AiGatewayService.Workflows.Executors;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
@@ -19,6 +20,7 @@ internal sealed class AgentBuiltInToolDispatcher(
     IIdentityAccessService identityAccessService,
     IBusinessDatabaseReadService? businessDatabaseReadService,
     IBusinessTextToSqlRuntime? businessTextToSqlRuntime,
+    CloudReadOnlyTextToSqlFallbackRunner? cloudTextToSqlFallbackRunner,
     AgentRuntimeArtifactBuilder artifactBuilder)
 {
     private readonly AgentRuntimeFileInputToolService fileInputTools = new(
@@ -36,7 +38,8 @@ internal sealed class AgentBuiltInToolDispatcher(
 
     private readonly AgentRuntimeBusinessQueryToolService businessQueryTools = new(
         businessDatabaseReadService,
-        businessTextToSqlRuntime);
+        businessTextToSqlRuntime,
+        cloudTextToSqlFallbackRunner);
 
     public Task<object> ExecuteAsync(AgentToolExecutionContext context)
     {

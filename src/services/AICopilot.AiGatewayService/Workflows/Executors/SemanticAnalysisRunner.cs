@@ -13,7 +13,8 @@ public sealed class SemanticAnalysisRunner(
     ISemanticPhysicalMappingProvider semanticPhysicalMappingProvider,
     ISemanticSqlGenerator semanticSqlGenerator,
     DataAnalysisAuditRecorder auditRecorder,
-    ILogger<SemanticAnalysisRunner> logger)
+    ILogger<SemanticAnalysisRunner> logger,
+    CloudReadOnlyTextToSqlFallbackRunner? cloudTextToSqlFallbackRunner = null)
 {
     private static readonly DatabaseQueryOptions QueryOptions = new(MaxRows: 200, CommandTimeoutSeconds: 15);
     public const string RecipeDataReadBoundaryMarker = "当前 AI 不读取云端配方主数据或配方版本数据";
@@ -31,6 +32,17 @@ public sealed class SemanticAnalysisRunner(
                 failedTargetLabel,
                 intent.Intent,
                 planningResult.ErrorMessage);
+            var fallback = await TryRunCloudReadOnlyTextToSqlFallbackAsync(
+                database: null,
+                question: intent.Query,
+                requestedLimit: null,
+                targetLabel: failedTargetLabel,
+                cancellationToken);
+            if (fallback?.Succeeded == true)
+            {
+                return fallback.Context;
+            }
+
             return $"[系统提示]: {failedTargetLabel}语义查询规划失败 - {planningResult.ErrorMessage}";
         }
 
@@ -50,6 +62,17 @@ public sealed class SemanticAnalysisRunner(
             if (cloudAiReadClient.IsEnabled && CloudAiReadSemanticSupport.IsSupported(plan.Target))
             {
                 return await RunCloudAiReadAsync(plan, targetLabel, cancellationToken);
+            }
+
+            var fallback = await TryRunCloudReadOnlyTextToSqlFallbackAsync(
+                database: null,
+                question: plan.QueryText,
+                requestedLimit: plan.Limit,
+                targetLabel,
+                cancellationToken);
+            if (fallback?.Succeeded == true)
+            {
+                return fallback.Context;
             }
 
             logger.LogInformation(
@@ -124,6 +147,17 @@ public sealed class SemanticAnalysisRunner(
                 targetLabel,
                 plan.Intent,
                 businessDatabase.Name);
+            var fallback = await TryRunCloudReadOnlyTextToSqlFallbackAsync(
+                businessDatabase,
+                plan.QueryText,
+                plan.Limit,
+                targetLabel,
+                cancellationToken);
+            if (fallback?.Succeeded == true)
+            {
+                return fallback.Context;
+            }
+
             return $"[系统提示]: 当前{targetLabel}查询请求未通过安全白名单校验，系统已拒绝执行。";
         }
 
@@ -138,6 +172,17 @@ public sealed class SemanticAnalysisRunner(
                     plan.Intent,
                     businessDatabase.Name,
                     cloudReadOnlySafetyError);
+                var fallback = await TryRunCloudReadOnlyTextToSqlFallbackAsync(
+                    businessDatabase,
+                    plan.QueryText,
+                    plan.Limit,
+                    targetLabel,
+                    cancellationToken);
+                if (fallback?.Succeeded == true)
+                {
+                    return fallback.Context;
+                }
+
                 return $"[系统提示]: 当前{targetLabel}查询请求未通过 Cloud 只读安全白名单校验，系统已拒绝执行。";
             }
         }
@@ -192,6 +237,17 @@ public sealed class SemanticAnalysisRunner(
                 targetLabel,
                 plan.Intent,
                 businessDatabase.Name);
+            var fallback = await TryRunCloudReadOnlyTextToSqlFallbackAsync(
+                businessDatabase,
+                plan.QueryText,
+                plan.Limit,
+                targetLabel,
+                cancellationToken);
+            if (fallback?.Succeeded == true)
+            {
+                return fallback.Context;
+            }
+
             return $"[系统提示]: 当前{targetLabel}查询请求被系统安全策略拒绝。";
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -206,8 +262,78 @@ public sealed class SemanticAnalysisRunner(
                 targetLabel,
                 plan.Intent,
                 businessDatabase.Name);
+            var fallback = await TryRunCloudReadOnlyTextToSqlFallbackAsync(
+                businessDatabase,
+                plan.QueryText,
+                plan.Limit,
+                targetLabel,
+                cancellationToken);
+            if (fallback?.Succeeded == true)
+            {
+                return fallback.Context;
+            }
+
             return $"[系统提示]: 当前{targetLabel}数据源暂时不可用，请稍后重试或联系管理员检查连接。";
         }
+    }
+
+    private async Task<CloudReadOnlyTextToSqlFallbackResult?> TryRunCloudReadOnlyTextToSqlFallbackAsync(
+        BusinessDatabaseConnectionInfo? database,
+        string? question,
+        int? requestedLimit,
+        string targetLabel,
+        CancellationToken cancellationToken)
+    {
+        if (cloudTextToSqlFallbackRunner is null)
+        {
+            return null;
+        }
+
+        database ??= await ResolveDefaultCloudReadOnlyDatabaseAsync(cancellationToken);
+        if (database is null || database.ExternalSystemType != DataSourceExternalSystemType.CloudReadOnly)
+        {
+            return null;
+        }
+
+        var result = await cloudTextToSqlFallbackRunner.RunAsync(
+            database,
+            question,
+            requestedLimit,
+            cancellationToken);
+        if (result.Succeeded)
+        {
+            logger.LogInformation(
+                "{TargetLabel}语义查询已通过 CloudReadOnly Text-to-SQL fallback 完成。DatabaseName: {DatabaseName}, RowsObserved: {RowsObserved}, Truncated: {Truncated}, RepairAttempts: {RepairAttempts}",
+                targetLabel,
+                database.Name,
+                result.RowCount,
+                result.IsTruncated,
+                result.RepairAttempts.Count);
+        }
+        else
+        {
+            logger.LogWarning(
+                "{TargetLabel}语义查询 CloudReadOnly Text-to-SQL fallback 未完成。DatabaseName: {DatabaseName}, Reason: {Reason}",
+                targetLabel,
+                database.Name,
+                result.SafeMessage);
+        }
+
+        return result;
+    }
+
+    private async Task<BusinessDatabaseConnectionInfo?> ResolveDefaultCloudReadOnlyDatabaseAsync(
+        CancellationToken cancellationToken)
+    {
+        var candidates = await businessDatabaseReadService.ListEnabledAsync(cancellationToken);
+        var descriptor = candidates
+            .Where(item => item.ExternalSystemType == DataSourceExternalSystemType.CloudReadOnly)
+            .Where(item => item.IsEnabled && item.IsReadOnly && item.ReadOnlyCredentialVerified)
+            .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+        return descriptor is null
+            ? null
+            : await businessDatabaseReadService.GetByNameAsync(descriptor.Name, cancellationToken);
     }
 
     private async Task<string> RunCloudAiReadAsync(

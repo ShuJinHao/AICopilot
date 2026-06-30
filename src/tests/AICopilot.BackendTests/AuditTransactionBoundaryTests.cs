@@ -306,7 +306,7 @@ public sealed class AuditTransactionBoundaryTests(CoreAICopilotAppFixture fixtur
         return new BusinessDatabase(
             name,
             "transaction boundary test database",
-            "Host=localhost;Database=readonly;Username=reader;Password=secret",
+            "Host=localhost;Database=readonly;Username=reader;Password=fake-test-only",
             DbProviderType.PostgreSql,
             isReadOnly: true,
             externalSystemType: BusinessDataExternalSystemType.NonCloud,
