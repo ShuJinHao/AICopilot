@@ -8,7 +8,7 @@
 - 标准发布走 GitHub Actions：`aicopilot-image` 构建镜像，`aicopilot-deploy` 部署镜像。
 - 多 agent 并行部署只按 [上传部署总览](../../../docs/上传部署总览.md) 的“多 agent 并行部署”执行；本目录只描述 AICopilot 自身发布步骤。
 - 两个 workflow 都必须跑在内网 self-hosted runner `[self-hosted, iiot-linux-prod]`，runner 必须是非 root 专用用户。
-- 应用镜像和基础镜像全部来自 Harbor，不从 Docker Hub 作为生产依赖源直接拉取。
+- 应用镜像和基础镜像全部来自 Harbor，不从 Docker Hub/MCR 作为生产依赖源直接拉取。
 - AICopilot 应用镜像不保留历史版本；Harbor 和服务器本机只保留当前生产正在运行的 `sha-*` 应用镜像。
 - 真实 `.env` 只通过 GitHub secret `DEPLOY_ENV_FILE` 注入服务器，不提交到仓库。
 - AICopilot 对 Cloud 业务数据保持只读边界；不得通过 MCP、Tool、Agent workflow、后台任务或隐藏适配器写 Cloud。
@@ -88,6 +88,7 @@ REGISTRY=10.98.90.154:80 HARBOR_PROJECT=enterprise-ai ./deploy/enterprise-ai/mir
 10.98.90.154:80/enterprise-ai/base-postgres:17.6
 10.98.90.154:80/enterprise-ai/base-rabbitmq:4.2-management
 10.98.90.154:80/enterprise-ai/base-qdrant:v1.15.5
+10.98.90.154:80/enterprise-ai/base-dotnet-aspnet:10.0-noble
 10.98.90.154:80/enterprise-ai/base-node:22-alpine
 10.98.90.154:80/enterprise-ai/base-nginx:1.27-alpine
 ```

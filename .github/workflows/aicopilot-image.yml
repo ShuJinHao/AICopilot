@@ -248,7 +248,7 @@ jobs:
 
             docker buildx build \
               --platform linux/amd64 \
-              --build-arg RUNTIME_BASE_IMAGE="${DOTNET_RUNTIME_BASE_IMAGE:-mcr.microsoft.com/dotnet/aspnet:10.0-noble}" \
+              --build-arg RUNTIME_BASE_IMAGE="${DOTNET_RUNTIME_BASE_IMAGE:-$image_prefix/base-dotnet-aspnet:10.0-noble}" \
               --build-arg APP_DLL="$app_dll" \
               --tag "$image_prefix/$image_name:$release_tag" \
               --push \

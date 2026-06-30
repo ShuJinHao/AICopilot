@@ -29,5 +29,6 @@ docker buildx version >/dev/null
 mirror_base_image "postgres:17.6" "base-postgres:17.6"
 mirror_base_image "rabbitmq:4.2-management" "base-rabbitmq:4.2-management"
 mirror_base_image "qdrant/qdrant:v1.15.5" "base-qdrant:v1.15.5"
+mirror_base_image "mcr.microsoft.com/dotnet/aspnet:10.0-noble" "base-dotnet-aspnet:10.0-noble"
 mirror_base_image "node:22-alpine" "base-node:22-alpine"
 mirror_base_image "nginx:1.27-alpine" "base-nginx:1.27-alpine"

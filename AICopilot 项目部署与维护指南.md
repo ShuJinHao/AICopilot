@@ -14,7 +14,7 @@
 - AICopilot 应用镜像不保留历史版本；Harbor 和服务器本机只保留当前生产正在运行的 `sha-*` 应用镜像。
 - 当前内网环境 Git smart HTTP 可能超时，workflow 使用 GitHub archive/codeload 兜底拉取源码；不要改回只依赖 `actions/checkout`。
 - 真实 `.env` 通过 GitHub secret `DEPLOY_ENV_FILE` 注入服务器，不提交真实密钥。
-- Docker Hub 不作为生产依赖源；PostgreSQL、RabbitMQ、Qdrant、Node、Nginx 基础镜像必须先 mirror 到 Harbor。
+- Docker Hub 不作为生产依赖源，MCR 也不得作为生产构建的直接依赖源；PostgreSQL、RabbitMQ、Qdrant、.NET ASP.NET runtime、Node、Nginx 基础镜像必须先 mirror 到 Harbor。
 - AICopilot 默认保持 Cloud 只读边界，不能注册、修改、删除或触发 Cloud 业务数据。
 - Cloud OIDC 只用于身份对齐；AICopilot 保留本地 AI 用户、AI 角色、AI 权限、审计和 emergency admin。
 
@@ -189,6 +189,7 @@ REGISTRY=10.98.90.154:80 HARBOR_PROJECT=enterprise-ai ./deploy/enterprise-ai/mir
 10.98.90.154:80/enterprise-ai/base-postgres:17.6
 10.98.90.154:80/enterprise-ai/base-rabbitmq:4.2-management
 10.98.90.154:80/enterprise-ai/base-qdrant:v1.15.5
+10.98.90.154:80/enterprise-ai/base-dotnet-aspnet:10.0-noble
 10.98.90.154:80/enterprise-ai/base-node:22-alpine
 10.98.90.154:80/enterprise-ai/base-nginx:1.27-alpine
 ```

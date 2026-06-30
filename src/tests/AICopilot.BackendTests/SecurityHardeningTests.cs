@@ -130,6 +130,7 @@ public sealed class SecurityHardeningTests
         imageWorkflow.Should().Contain("dotnet publish");
         imageWorkflow.Should().Contain("docker buildx build");
         imageWorkflow.Should().Contain("--file deploy/enterprise-ai/Dockerfile.backend-runtime");
+        imageWorkflow.Should().Contain("RUNTIME_BASE_IMAGE=\"${DOTNET_RUNTIME_BASE_IMAGE:-$image_prefix/base-dotnet-aspnet:10.0-noble}\"");
         imageWorkflow.Should().Contain("Prune old Harbor image tags");
         imageWorkflow.Should().Contain("HARBOR_KEEP_SHA_TAGS: 3");
         imageWorkflow.Should().Contain("bash deploy/enterprise-ai/harbor-retention.sh");
@@ -148,6 +149,7 @@ public sealed class SecurityHardeningTests
         imageWorkflow.Should().NotContain("ghcr.io");
         imageWorkflow.Should().NotContain("docker/build-push-action");
         imageWorkflow.Should().NotContain("docker/setup-buildx-action");
+        imageWorkflow.Should().NotContain("mcr.microsoft.com/dotnet/aspnet");
 
         deployWorkflow.Should().Contain("runs-on: [self-hosted, iiot-linux-prod]");
         deployWorkflow.Should().Contain("Release tag from aicopilot-image (sha-*)");
@@ -179,11 +181,13 @@ public sealed class SecurityHardeningTests
         var harborRetention = File.ReadAllText(Path.Combine(deployRoot, "harbor-retention.sh"));
         var mirrorBaseImages = File.ReadAllText(Path.Combine(deployRoot, "mirror-base-images.sh"));
         var buildAndPush = File.ReadAllText(Path.Combine(deployRoot, "build-and-push.sh"));
+        var backendDockerfile = File.ReadAllText(Path.Combine(deployRoot, "Dockerfile.backend-runtime"));
         var webDockerfile = File.ReadAllText(Path.Combine(solutionRoot, "src", "vues", "AICopilot.Web", "Dockerfile"));
 
         deployGuide.Should().Contain("iiot-linux-prod");
         deployGuide.Should().Contain("DEPLOY_ENV_FILE");
         deployGuide.Should().Contain("Docker Hub 不作为生产依赖源");
+        deployGuide.Should().Contain("MCR 也不得作为生产构建的直接依赖源");
         deployGuide.Should().Contain("`aicopilot-deploy` 的 `services` 输入为空时按全量发布处理");
         deployGuide.Should().Contain("mirror-base-images.sh");
         deployGuide.Should().Contain("deploy-release.sh");
@@ -230,15 +234,23 @@ public sealed class SecurityHardeningTests
         mirrorBaseImages.Should().Contain("postgres:17.6");
         mirrorBaseImages.Should().Contain("rabbitmq:4.2-management");
         mirrorBaseImages.Should().Contain("qdrant/qdrant:v1.15.5");
+        mirrorBaseImages.Should().Contain("mcr.microsoft.com/dotnet/aspnet:10.0-noble");
+        mirrorBaseImages.Should().Contain("base-dotnet-aspnet:10.0-noble");
         mirrorBaseImages.Should().Contain("node:22-alpine");
         mirrorBaseImages.Should().Contain("nginx:1.27-alpine");
         mirrorBaseImages.Should().Contain("docker buildx build");
 
         buildAndPush.Should().Contain("MIRROR_BASE_IMAGES");
+        buildAndPush.Should().Contain("DOTNET_RUNTIME_BASE_IMAGE=\"${DOTNET_RUNTIME_BASE_IMAGE:-$BASE_IMAGE_PREFIX/base-dotnet-aspnet:10.0-noble}\"");
         buildAndPush.Should().Contain("NODE_BASE_IMAGE");
         buildAndPush.Should().Contain("NGINX_BASE_IMAGE");
+        buildAndPush.Should().NotContain("DOTNET_RUNTIME_BASE_IMAGE=\"${DOTNET_RUNTIME_BASE_IMAGE:-mcr.microsoft.com/dotnet/aspnet:10.0-noble}\"");
         buildAndPush.Should().Contain("mirror-base-images.sh");
         buildAndPush.Should().Contain("harbor-retention.sh");
+
+        backendDockerfile.Should().Contain("ARG RUNTIME_BASE_IMAGE=10.98.90.154:80/enterprise-ai/base-dotnet-aspnet:10.0-noble");
+        backendDockerfile.Should().Contain("FROM ${RUNTIME_BASE_IMAGE} AS runtime");
+        backendDockerfile.Should().NotContain("mcr.microsoft.com/dotnet/aspnet");
 
         webDockerfile.Should().Contain("ARG NODE_BASE_IMAGE=node:22-alpine");
         webDockerfile.Should().Contain("FROM ${NODE_BASE_IMAGE} AS build");

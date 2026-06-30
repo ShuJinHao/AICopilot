@@ -1,4 +1,4 @@
-ARG RUNTIME_BASE_IMAGE=mcr.microsoft.com/dotnet/aspnet:10.0-noble
+ARG RUNTIME_BASE_IMAGE=10.98.90.154:80/enterprise-ai/base-dotnet-aspnet:10.0-noble
 
 FROM ${RUNTIME_BASE_IMAGE} AS runtime
 
