@@ -148,7 +148,7 @@ sync_remote_deploy_files() {
     scripts/apply-cloud-readonly-grants.sh
     scripts/check-cloud-readonly-grants.sh
   )
-  local remote_command="mkdir -p '$REMOTE_DEPLOY_DIR' && cd '$REMOTE_DEPLOY_DIR' && tar -xf -"
+  local remote_command="mkdir -p '$REMOTE_DEPLOY_DIR' && cd '$REMOTE_DEPLOY_DIR' && tar --no-same-owner -xf - && chmod +x deploy-release.sh post-release-cleanup.sh harbor-retention.sh scripts/apply-cloud-readonly-grants.sh scripts/check-cloud-readonly-grants.sh"
 
   if [ "$DRY_RUN" = true ]; then
     printf '[dry-run] sync AICopilot deploy support files to %s:%s\n' "$SSH_TARGET" "$REMOTE_DEPLOY_DIR"
@@ -165,7 +165,7 @@ sync_remote_deploy_files() {
       ssh_target="$2"
       remote_command="$3"
       shift 3
-      tar -C "$script_dir" -cf - "$@" | ssh "$ssh_target" "$remote_command"
+      COPYFILE_DISABLE=1 tar -C "$script_dir" -cf - "$@" | ssh "$ssh_target" "$remote_command"
     ' bash "$SCRIPT_DIR" "$SSH_TARGET" "$remote_command" "${files[@]}"; then
     print_deploy_diagnostics
     exit 124
