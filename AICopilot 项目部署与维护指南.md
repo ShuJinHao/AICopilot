@@ -8,11 +8,13 @@
 - `deploy/enterprise-ai/README.md` 是部署目录内的自解释入口；新 AI 接手时先读该文件即可执行标准发布和应急发布。
 - 多 agent 并行部署只按 `../docs/上传部署总览.md` 的“多 agent 并行部署”执行；AICopilot agent 只负责 AI 镜像、AI deploy 和 Web/OIDC 验证。
 - 生产环境使用 Docker Compose 单机编排，镜像从 Harbor 拉取。
-- 标准发布走 GitHub Actions 内网 self-hosted runner，label 固定为 `iiot-linux-prod`。
-- runner 必须使用专用非 root 用户运行，例如 `github-runner`；不要把 runner 装成 root 服务。
+- 标准发布走操作者本机：先 push GitHub 留痕，再本机构建镜像、推 Harbor，最后通过 SSH 触发服务器 `deploy-release.sh`。
+- GitHub `aicopilot-image` / `aicopilot-deploy` 只保留带确认词的灾备入口；日常生产发布不得等待这些 workflow。
+- 单个镜像 build/push 默认 15 分钟超时，Harbor 登录/API 检查默认 2 分钟超时，SSH deploy 默认 30 分钟超时；超时必须停止并按脚本输出诊断 Docker buildx、Harbor tag、服务器 compose/logs 和 release 状态，不得继续 watch 或无限等待。
+- 灾备 runner 必须使用专用非 root 用户运行，例如 `github-runner`；不要把 runner 装成 root 服务。
 - 当前服务器 runner 工作目录固定为 `/data/github-runner/aicopilot`，Docker Root Dir 固定为 `/data/docker`，不要把构建缓存放回系统盘。
 - AICopilot 应用镜像不保留历史版本；Harbor 和服务器本机只保留当前生产正在运行的 `sha-*` 应用镜像。
-- 当前内网环境 Git smart HTTP 可能超时，workflow 使用 GitHub archive/codeload 兜底拉取源码；不要改回只依赖 `actions/checkout`。
+- 当前内网环境 Git smart HTTP 可能超时，旧 workflow 使用 GitHub archive/codeload 兜底拉取源码；这些 workflow 仅用于灾备，不作为日常发布入口。
 - 真实 `.env` 通过 GitHub secret `DEPLOY_ENV_FILE` 注入服务器，不提交真实密钥。
 - Docker Hub 不作为生产依赖源，MCR 也不得作为生产构建的直接依赖源；PostgreSQL、RabbitMQ、Qdrant、.NET ASP.NET runtime、Node、Nginx 基础镜像必须先 mirror 到 Harbor。
 - AICopilot 默认保持 Cloud 只读边界，不能注册、修改、删除或触发 Cloud 业务数据。
@@ -39,7 +41,7 @@ deploy/enterprise-ai/
 
 2026-06-18 现场校准：`10.98.90.154` 使用 `/srv/enterprise-ai/deploy` 作为 compose 工作目录，应用入口为 `http://10.98.90.154:82`，镜像项目为 Harbor `enterprise-ai`。
 
-真实 `.env` 从 `deploy/enterprise-ai/.env.example` 复制后替换密钥和镜像 tag，并保存到 GitHub secret `DEPLOY_ENV_FILE`。应急手工部署时，才直接放在 `/srv/enterprise-ai/deploy/.env`。
+真实 `.env` 从 `deploy/enterprise-ai/.env.example` 复制后替换密钥和镜像 tag，并直接保存到服务器 `/srv/enterprise-ai/deploy/.env`。GitHub secret `DEPLOY_ENV_FILE` 只服务灾备 workflow，不作为日常标准发布前置条件。
 
 ## 3. 关键环境变量
 
@@ -136,24 +138,22 @@ AiGateway 会话并发锁：
 
 ```text
 git push GitHub
--> aicopilot-image on [self-hosted, iiot-linux-prod]
--> build affected images; shared backend changes build backend images, web changes build webui, manual dispatch builds all
+-> 本机确认 HEAD 已推送且工作区干净
+-> 本机 deploy/enterprise-ai/build-and-push.sh --services <services> 或 --all
 -> push 10.98.90.154:80/enterprise-ai/*:sha-<git-sha>
--> manually trigger aicopilot-deploy with release_tag=sha-<git-sha>, optionally services=httpapi,web
--> sync deploy/enterprise-ai to /srv/enterprise-ai/deploy
--> write DEPLOY_ENV_FILE to .env
--> run deploy-release.sh
+-> 本机 deploy/enterprise-ai/local-release.sh 通过 SSH 调用 /srv/enterprise-ai/deploy/deploy-release.sh
+-> 服务器 pull/up/health/cleanup/history
 ```
 
-`aicopilot-image` 会按路径判断需要构建的镜像：只改 `src/hosts/AICopilot.HttpApi/` 时只构建 `aicopilot-httpapi`，只改 `src/vues/AICopilot.Web/` 时只构建 `aicopilot-webui`，改 `src/core/`、`src/shared/`、`src/services/`、`src/infrastructure/` 或手动触发时构建后端应用镜像。Web 镜像使用 Harbor registry cache，第二次构建会复用已有 Docker layer。
+`build-and-push.sh` 必须显式传 `--services httpapi,migration,dataworker,ragworker,web` 的子集，或显式 `--all`；无参数直接失败。脚本会输出 `Deploy services input` 和 `artifacts/deploy/aicopilot-built-services.txt`，`local-release.sh` 使用该服务清单触发服务器部署。
 
-应用镜像仓库只保留当前生产 `sha-*` tag。`aicopilot-image` 推送成功后必须删除同一应用仓库内其他旧 `sha-*` tag；`buildcache` 和基础镜像 tag 不计入应用版本保留。Harbor robot 或用户必须具备删除 tag 权限。删除 tag 后还需要 Harbor Garbage Collection 在删 tag 后运行，磁盘才会真正释放。
+应用镜像仓库只保留当前生产 `sha-*` tag。本机构建推送候选 tag 后，不立即删除当前生产 tag；必须等服务器部署健康检查通过后，由发布后清理删除旧 tag 并执行或确认 Harbor GC。`buildcache` 和基础镜像 tag 不计入应用版本保留。
 
 AICopilot 发布成功且服务器验证通过后，必须清理 Docker/BuildKit build cache、服务器本机未被当前容器引用的旧 AICopilot 应用镜像，并执行或确认 Harbor GC。服务器本机 Docker 管理镜像和 containerd 管理内容必须分开统计、分开清理；containerd 侧未确认 namespace、image ref、snapshot lease 和运行容器引用前不得强删。发布摘要必须输出清理前后 `df`、`docker system df`、containerd snapshots/content 占用和 Harbor registry 占用。基础镜像、数据库卷、Qdrant/RabbitMQ/PostgreSQL 数据、备份、配置和 secrets 不属于清理对象。回滚不依赖旧镜像保留；需要回滚时重新构建或重新拉取目标 git sha 后部署。
 
 `/data` 达到 80% 必须告警并输出占用摘要，达到 85% 必须先清理再继续普通部署，达到 90% 阻断非应急部署。发布后清理是主线，还必须配置周级兜底清理 cron，避免部署中断后 build cache、旧镜像和旧 Harbor blob 长期堆积。
 
-`aicopilot-deploy` 的 `services` 输入为空时按全量发布处理；传入 `httpapi`、`migration`、`dataworker`、`ragworker`、`web` 或逗号组合时，只重写对应镜像 tag、只拉取并重启指定应用服务。基础服务 `postgres`、`eventbus`、`qdrant` 会保持可用；只有选择 `migration` 时才运行迁移容器。
+`local-release.sh` 必须显式传 `--services` 或 `--all`。传入 `httpapi`、`migration`、`dataworker`、`ragworker`、`web` 或逗号组合时，只重写对应镜像 tag、只拉取并重启指定应用服务。基础服务 `postgres`、`eventbus`、`qdrant` 会保持可用；只有选择 `migration` 时才运行迁移容器。
 
 GitHub secrets：
 
@@ -194,16 +194,24 @@ REGISTRY=10.98.90.154:80 HARBOR_PROJECT=enterprise-ai ./deploy/enterprise-ai/mir
 10.98.90.154:80/enterprise-ai/base-nginx:1.27-alpine
 ```
 
-应急手工构建只在 GitHub Actions 不可用时使用：
+本机标准发布：
 
 ```bash
 cd AICopilot
-REGISTRY=10.98.90.154:80 HARBOR_PROJECT=enterprise-ai TAG=sha-<git-sha> ./deploy/enterprise-ai/build-and-push.sh
+git push
+DEPLOY_SSH_TARGET=root@10.98.90.154 \
+  ./deploy/enterprise-ai/local-release.sh --services httpapi,dataworker
 ```
 
-应急构建默认也执行 `harbor-retention.sh`，需要提供 `HARBOR_USERNAME` / `HARBOR_PASSWORD` 或 `OCI_REGISTRY_USERNAME` / `OCI_REGISTRY_PASSWORD`，用于删除当前生产 tag 之外的旧 `sha-*` tag。
+单独构建镜像时使用：
 
-应急手工部署只在 `aicopilot-deploy` 不可用时使用：
+```bash
+./deploy/enterprise-ai/build-and-push.sh --services httpapi,migration,dataworker,ragworker,web
+```
+
+单镜像 build/push 默认 15 分钟超时，Harbor 检查默认 2 分钟超时，SSH deploy 默认 30 分钟超时；超时必须停止并诊断 Docker buildx、Harbor tag、服务器 compose/logs 和 release 状态，不得继续等待灾备 GitHub workflow。
+
+服务器手工部署只在本机 SSH 触发器不可用时使用：
 
 ```bash
 cd /srv/enterprise-ai/deploy

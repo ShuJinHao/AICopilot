@@ -4,12 +4,16 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Release tag from aicopilot-image (sha-*)
+        description: Emergency release tag from local Harbor build or disaster-recovery aicopilot-image (sha-*)
         required: true
         type: string
       services:
-        description: "Copy Deploy services input from push-triggered aicopilot-image Step Summary; empty means full release only"
+        description: "Emergency only. Prefer deploy/enterprise-ai/local-release.sh; empty means full release only."
         required: false
+        type: string
+      emergency_confirm:
+        description: "Emergency only. Type EMERGENCY_AICOPILOT_DEPLOY to run GitHub deploy."
+        required: true
         type: string
 
 permissions:
@@ -52,6 +56,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [ '${{ inputs.emergency_confirm }}' != 'EMERGENCY_AICOPILOT_DEPLOY' ]; then
+            echo "aicopilot-deploy is no longer the routine production release path. Use deploy/enterprise-ai/local-release.sh." >&2
+            exit 64
+          fi
           release_tag='${{ inputs.release_tag }}'
           if [[ ! "$release_tag" =~ ^sha-[0-9a-f]+$ ]]; then
             echo "release_tag must match sha-<hex>: $release_tag" >&2
