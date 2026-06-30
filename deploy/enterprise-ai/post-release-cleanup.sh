@@ -18,7 +18,8 @@ DATA_PATH="${POST_RELEASE_DATA_PATH:-/data}"
 LOCK_FILE="${POST_RELEASE_CLEANUP_LOCK_FILE:-/data/iiot-platform/.locks/deploy-cleanup.lock}"
 CONTAINERD_ROOT="${POST_RELEASE_CONTAINERD_ROOT:-/data/iiot-platform/runtime/containerd}"
 HARBOR_GC_ENABLED="${POST_RELEASE_HARBOR_GC_ENABLED:-1}"
-HARBOR_GC_REQUIRED="${POST_RELEASE_HARBOR_GC_REQUIRED:-1}"
+HARBOR_GC_REQUIRED="${POST_RELEASE_HARBOR_GC_REQUIRED:-0}"
+HARBOR_RETENTION_REQUIRED="${POST_RELEASE_HARBOR_RETENTION_REQUIRED:-0}"
 DRY_RUN=false
 
 usage() {
@@ -190,10 +191,10 @@ collect_current_images() {
       harbor_repository="${path_without_registry#*/}"
     fi
 
-    append_unique "$repository:$tag" "${current_refs[@]}" && current_refs+=("$repository:$tag")
-    append_unique "$repository" "${app_repositories[@]}" && app_repositories+=("$repository")
+    append_unique "$repository:$tag" "${current_refs[@]+"${current_refs[@]}"}" && current_refs+=("$repository:$tag")
+    append_unique "$repository" "${app_repositories[@]+"${app_repositories[@]}"}" && app_repositories+=("$repository")
     entry="$registry|$project|$harbor_repository|$tag"
-    append_unique "$entry" "${harbor_entries[@]}" && harbor_entries+=("$entry")
+    append_unique "$entry" "${harbor_entries[@]+"${harbor_entries[@]}"}" && harbor_entries+=("$entry")
   done
 }
 
@@ -313,7 +314,7 @@ prune_build_cache() {
 is_current_ref() {
   local candidate="$1"
   local current
-  for current in "${current_refs[@]}"; do
+  for current in "${current_refs[@]+"${current_refs[@]}"}"; do
     if [ "$candidate" = "$current" ]; then
       return 0
     fi
@@ -324,7 +325,7 @@ is_current_ref() {
 is_app_repository() {
   local candidate="$1"
   local repository
-  for repository in "${app_repositories[@]}"; do
+  for repository in "${app_repositories[@]+"${app_repositories[@]}"}"; do
     if [ "$candidate" = "$repository" ]; then
       return 0
     fi
@@ -377,12 +378,14 @@ run_harbor_retention() {
   local keep_tag
 
   if [ -z "$username" ] || [ -z "$password" ]; then
+    printf -- '- Harbor credentials are not configured; Harbor tag retention skipped. Set `POST_RELEASE_HARBOR_RETENTION_REQUIRED=1` to make this a deploy blocker.\n'
+    [ "$HARBOR_RETENTION_REQUIRED" = "1" ] || [ "$HARBOR_RETENTION_REQUIRED" = "true" ] || return 0
     printf 'Harbor credentials are required for post-release tag retention.\n' >&2
     cleanup_failed=1
     return
   fi
 
-  for entry in "${harbor_entries[@]}"; do
+  for entry in "${harbor_entries[@]+"${harbor_entries[@]}"}"; do
     IFS='|' read -r registry project repository keep_tag <<< "$entry"
     printf -- '- Harbor `%s/%s/%s`: keep `%s`, delete other `sha-*` tags.\n' "$registry" "$project" "$repository" "$keep_tag"
     if [ "$DRY_RUN" = "true" ]; then
@@ -419,7 +422,7 @@ trigger_harbor_gc() {
   fi
 
   if [ -z "$registry" ] || [ -z "$username" ] || [ -z "$password" ]; then
-    printf 'Harbor GC requires registry and credentials.\n' >&2
+    printf -- '- Harbor GC skipped because registry or credentials are not configured. Set `POST_RELEASE_HARBOR_GC_REQUIRED=1` to make this a deploy blocker.\n'
     [ "$HARBOR_GC_REQUIRED" = "0" ] || cleanup_failed=1
     return
   fi
