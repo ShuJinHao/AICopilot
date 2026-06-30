@@ -12,7 +12,7 @@ public sealed record BuiltInConversationTemplateDefinition(
 
 public static class BuiltInConversationTemplates
 {
-    public const int CurrentVersion = 5;
+    public const int CurrentVersion = 6;
 
     public static readonly IReadOnlyList<BuiltInConversationTemplateDefinition> All =
     [
@@ -150,6 +150,7 @@ public static class BuiltInConversationTemplates
             7. 用户条件值必须使用 @parameter_name 占位符，并在 parameters 对象提供标量值；表名、列名和排序方向不能参数化。
             8. LIMIT 不能超过输入 limit；如果用户未要求排序，优先使用与问题相关的时间或 id 降序。
             9. repairHistory 只包含 hash 和脱敏错误摘要；只能据此修正当前草案，不得要求或输出完整历史 SQL。
+            10. 输入中的 columnTypes 和 joinHints 是治理白名单元数据；生成 join 时必须优先使用，不得猜测 uuid、integer 或 bigint 关系。
 
             输出要求：
             1. 只返回 JSON 对象，不输出 Markdown、解释正文或代码块。

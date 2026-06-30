@@ -231,6 +231,9 @@ public sealed class SemanticAnalysisRunner(
         }
         catch (InvalidOperationException ex)
         {
+            var executionFailure = CloudReadOnlyTextToSqlRepairClassifier.Classify(
+                CloudReadOnlyTextToSqlFailureStage.Runtime,
+                ex.Message);
             logger.LogWarning(
                 ex,
                 "{TargetLabel}语义查询在执行阶段被安全规则拒绝。Intent: {Intent}, DatabaseName: {DatabaseName}",
@@ -248,6 +251,12 @@ public sealed class SemanticAnalysisRunner(
                 return fallback.Context;
             }
 
+            if (businessDatabase.ExternalSystemType == DataSourceExternalSystemType.CloudReadOnly &&
+                executionFailure.Code == CloudReadOnlyTextToSqlFailureCode.Forbidden)
+            {
+                return $"[系统提示]: 当前{targetLabel}CloudReadOnly 只读权限不足 - {executionFailure.SafeSummary}";
+            }
+
             return $"[系统提示]: 当前{targetLabel}查询请求被系统安全策略拒绝。";
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -256,6 +265,9 @@ public sealed class SemanticAnalysisRunner(
         }
         catch (Exception ex)
         {
+            var executionFailure = CloudReadOnlyTextToSqlRepairClassifier.Classify(
+                CloudReadOnlyTextToSqlFailureStage.Runtime,
+                ex.Message);
             logger.LogError(
                 ex,
                 "{TargetLabel}语义查询执行失败。Intent: {Intent}, DatabaseName: {DatabaseName}",
@@ -271,6 +283,12 @@ public sealed class SemanticAnalysisRunner(
             if (fallback?.Succeeded == true)
             {
                 return fallback.Context;
+            }
+
+            if (businessDatabase.ExternalSystemType == DataSourceExternalSystemType.CloudReadOnly &&
+                executionFailure.Code == CloudReadOnlyTextToSqlFailureCode.Forbidden)
+            {
+                return $"[系统提示]: 当前{targetLabel}CloudReadOnly 只读权限不足 - {executionFailure.SafeSummary}";
             }
 
             return $"[系统提示]: 当前{targetLabel}数据源暂时不可用，请稍后重试或联系管理员检查连接。";

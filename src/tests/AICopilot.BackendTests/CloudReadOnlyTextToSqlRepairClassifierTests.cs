@@ -46,6 +46,26 @@ public sealed class CloudReadOnlyTextToSqlRepairClassifierTests
     }
 
     [Fact]
+    public void Classifier_ShouldExposeOnlyGovernedTable_ForCloudReadOnlyPermissionDenied()
+    {
+        var decision = CloudReadOnlyTextToSqlRepairClassifier.Classify(
+            CloudReadOnlyTextToSqlFailureStage.Runtime,
+            "42501: permission denied for table mfg_processes; Password=secret");
+
+        decision.Code.Should().Be(CloudReadOnlyTextToSqlFailureCode.Forbidden);
+        decision.CanRepairSql.Should().BeFalse();
+        decision.CanRetry.Should().BeFalse();
+        decision.SafeSummary.Should().Be("CloudReadOnly permission denied for table mfg_processes.");
+        decision.SafeSummary.Should().NotContain("secret");
+
+        var disallowed = CloudReadOnlyTextToSqlRepairClassifier.Classify(
+            CloudReadOnlyTextToSqlFailureStage.Runtime,
+            "42501: permission denied for table pg_user");
+        disallowed.SafeSummary.Should().Be("CloudReadOnly permission denied.");
+        disallowed.SafeSummary.Should().NotContain("pg_user");
+    }
+
+    [Fact]
     public void AttemptRecord_ShouldStoreOnlyHashesLengthsAndSafeSummary()
     {
         const string sql = "SELECT password_hash FROM devices WHERE message = 'secret customer'";

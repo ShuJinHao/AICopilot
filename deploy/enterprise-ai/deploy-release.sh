@@ -336,6 +336,23 @@ ensure_cloud_readonly_network() {
   printf 'Attached Cloud PostgreSQL container to network %s as %s.\n' "$network" "$host_alias"
 }
 
+check_cloud_readonly_preflight() {
+  local check_script="$DEPLOY_DIR/scripts/check-cloud-readonly-grants.sh"
+
+  if ! is_truthy "${DATA_ANALYSIS_CLOUD_READONLY_ENABLED:-false}"; then
+    printf 'CloudReadOnly direct DB is disabled; skipping readonly grant preflight.\n'
+    return
+  fi
+
+  if [ ! -x "$check_script" ]; then
+    printf 'CloudReadOnly direct DB is enabled, but preflight script is missing or not executable: %s\n' "$check_script" >&2
+    exit 66
+  fi
+
+  printf 'Running CloudReadOnly readonly grant preflight.\n'
+  "$check_script" --env-file "$ENV_FILE"
+}
+
 probe_web() {
   local web_port="${AICOPILOT_WEB_PORT:-82}"
   local url="http://127.0.0.1:${web_port}/"
@@ -508,6 +525,7 @@ fi
 load_dotenv
 ensure_image_policy
 ensure_cloud_readonly_network
+check_cloud_readonly_preflight
 DEPLOY_RELEASE_ID="$RELEASE_TAG"
 DEPLOY_GIT_SHA_VALUE="${DEPLOY_GIT_SHA:-unknown}"
 DEPLOY_TRIGGERED_BY_VALUE="${DEPLOY_TRIGGERED_BY:-manual}"

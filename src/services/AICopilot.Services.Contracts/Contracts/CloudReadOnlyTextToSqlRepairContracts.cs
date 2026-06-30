@@ -77,7 +77,9 @@ public static class CloudReadOnlyTextToSqlRepairClassifier
         CloudReadOnlyTextToSqlFailureStage stage,
         string? errorMessage)
     {
-        var safeSummary = SanitizeErrorSummary(errorMessage);
+        var safeSummary = TryBuildPermissionDeniedSummary(errorMessage, out var permissionDeniedSummary)
+            ? permissionDeniedSummary
+            : SanitizeErrorSummary(errorMessage);
         var lower = (errorMessage ?? string.Empty).ToLowerInvariant();
 
         if (string.IsNullOrWhiteSpace(lower))
@@ -251,5 +253,31 @@ public static class CloudReadOnlyTextToSqlRepairClassifier
     private static bool ContainsAny(string value, params string[] terms)
     {
         return terms.Any(term => value.Contains(term, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool TryBuildPermissionDeniedSummary(string? errorMessage, out string safeSummary)
+    {
+        safeSummary = string.Empty;
+        if (string.IsNullOrWhiteSpace(errorMessage) ||
+            !errorMessage.Contains("permission denied", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var match = Regex.Match(
+            errorMessage,
+            @"(?i)\bpermission denied for (?:table|relation)\s+""?(?<table>[a-z_][a-z0-9_]*)""?",
+            RegexOptions.CultureInvariant);
+        if (match.Success)
+        {
+            var tableName = match.Groups["table"].Value;
+            safeSummary = CloudReadOnlyGovernedSchema.IsAllowedTable(tableName)
+                ? $"CloudReadOnly permission denied for table {tableName}."
+                : "CloudReadOnly permission denied.";
+            return true;
+        }
+
+        safeSummary = "CloudReadOnly permission denied.";
+        return true;
     }
 }

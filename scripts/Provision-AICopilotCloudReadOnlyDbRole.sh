@@ -7,9 +7,14 @@ Usage:
   scripts/Provision-AICopilotCloudReadOnlyDbRole.sh [options]
 
 Generates a Cloud PostgreSQL readonly role password locally, writes the required
-GitHub production environment secrets, and optionally triggers the server-side
-workflow that creates/rotates the readonly DB role and enables AICopilot direct
-Cloud readonly Text-to-SQL.
+GitHub production environment secrets, and optionally triggers the confirmed
+manual workflow that creates/rotates the readonly DB role and enables AICopilot
+direct Cloud readonly Text-to-SQL.
+
+The authoritative grant and probe SQL lives under:
+  deploy/enterprise-ai/cloud-readonly/
+
+Do not add table grants here or inline them in the workflow.
 
 Options:
   --username <name>       PostgreSQL role name. Default: aicopilot_cloud_readonly.

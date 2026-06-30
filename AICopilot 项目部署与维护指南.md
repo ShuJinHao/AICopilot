@@ -11,7 +11,7 @@
 - 标准发布走操作者本机：先 push GitHub 留痕，再本机构建镜像、推 Harbor，最后通过 SSH 触发服务器 `deploy-release.sh`。
 - GitHub `aicopilot-image` / `aicopilot-deploy` 只保留带确认词的灾备入口；日常生产发布不得等待这些 workflow。
 - 单个镜像 build/push 默认 15 分钟超时，Harbor 登录/API 检查默认 2 分钟超时，SSH deploy 默认 30 分钟超时；超时必须停止并按脚本输出诊断 Docker buildx、Harbor tag、服务器 compose/logs 和 release 状态，不得继续 watch 或无限等待。
-- 灾备 runner 必须使用专用非 root 用户运行，例如 `github-runner`；不要把 runner 装成 root 服务。
+- 灾备 runner 必须使用专用非 root 用户运行，例如 `github-runner`，并带 `iiot-linux-prod` label；不要把 runner 装成 root 服务。
 - 当前服务器 runner 工作目录固定为 `/data/github-runner/aicopilot`，Docker Root Dir 固定为 `/data/docker`，不要把构建缓存放回系统盘。
 - AICopilot 应用镜像不保留历史版本；Harbor 和服务器本机只保留当前生产正在运行的 `sha-*` 应用镜像。
 - 当前内网环境 Git smart HTTP 可能超时，旧 workflow 使用 GitHub archive/codeload 兜底拉取源码；这些 workflow 仅用于灾备，不作为日常发布入口。
@@ -28,9 +28,13 @@
 deploy/enterprise-ai/
   .env.example
   build-and-push.sh
+  local-release.sh
   deploy-release.sh
   docker-compose.yaml
   mirror-base-images.sh
+  cloud-readonly/
+  scripts/apply-cloud-readonly-grants.sh
+  scripts/check-cloud-readonly-grants.sh
 ```
 
 服务器建议目录：
@@ -119,11 +123,22 @@ Cloud Postgres 不发布宿主 5432；AICopilot 部署会创建外部 Docker 网
 `enterprise-ai-cloud-readonly`，把 Cloud compose 的 `deploy/postgres` 容器接入并设置别名
 `cloud-postgres`。只读连接串推荐写：
 `Host=cloud-postgres;Port=5432;Database=iiot-db;Username=<readonly_user>;Password=<readonly_password>`。
-如果还没有只读账号，使用本机脚本
-`scripts/Provision-AICopilotCloudReadOnlyDbRole.sh`。它生成随机密码并写入 GitHub production
-environment secrets，然后触发 `aicopilot-provision-cloud-readonly-db-role`；该 workflow
-要求确认词，只在 Cloud PostgreSQL 中创建/轮换只读角色，只授权四张白名单表 SELECT，可随后启用
-AICopilot direct DB。
+Cloud PostgreSQL readonly role 的授权权威载体是
+`deploy/enterprise-ai/cloud-readonly/apply-readonly-grants.sql` 和
+`deploy/enterprise-ai/cloud-readonly/check-readonly-grants.sql`。它们只对
+`devices`、`mfg_processes`、`device_logs`、`hourly_capacity`、`pass_station_records`
+做显式表级 `GRANT SELECT`，并校验写权限、schema create 权限均不存在；不得改成
+`GRANT SELECT ON ALL TABLES`、默认权限、未来表自动授权或列级/表级混用口径。
+如果还没有只读账号，标准做法是在可访问服务器和 Cloud PostgreSQL 容器的机器上运行
+`deploy/enterprise-ai/scripts/apply-cloud-readonly-grants.sh`，随后用
+`deploy/enterprise-ai/scripts/check-cloud-readonly-grants.sh` 验证。历史
+`scripts/Provision-AICopilotCloudReadOnlyDbRole.sh` 和
+`aicopilot-provision-cloud-readonly-db-role` workflow 只保留为带确认词的手动兜底，
+且必须读取同一组 `cloud-readonly/*.sql`，不得再维护内联 GRANT 清单。
+
+启用 direct DB 后，服务器 `deploy-release.sh` 会在重启服务前自动执行
+`scripts/check-cloud-readonly-grants.sh`；preflight 失败必须停止部署并先修 readonly
+授权，不允许把权限缺口伪装成“数据源暂时不可用”继续发布。
 
 AiGateway 会话并发锁：
 

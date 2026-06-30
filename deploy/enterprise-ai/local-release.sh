@@ -10,6 +10,7 @@ DRY_RUN=false
 SSH_TARGET="${DEPLOY_SSH_TARGET:-}"
 REMOTE_DEPLOY_DIR="${REMOTE_DEPLOY_DIR:-/srv/enterprise-ai/deploy}"
 SSH_TIMEOUT_SECONDS="${SSH_TIMEOUT_SECONDS:-1800}"
+SYNC_TIMEOUT_SECONDS="${SYNC_TIMEOUT_SECONDS:-120}"
 
 usage() {
   cat <<'EOF'
@@ -138,6 +139,39 @@ Diagnostics to run before retrying:
 EOF
 }
 
+sync_remote_deploy_files() {
+  local files=(
+    deploy-release.sh
+    post-release-cleanup.sh
+    harbor-retention.sh
+    cloud-readonly
+    scripts/apply-cloud-readonly-grants.sh
+    scripts/check-cloud-readonly-grants.sh
+  )
+  local remote_command="mkdir -p '$REMOTE_DEPLOY_DIR' && cd '$REMOTE_DEPLOY_DIR' && tar -xf -"
+
+  if [ "$DRY_RUN" = true ]; then
+    printf '[dry-run] sync AICopilot deploy support files to %s:%s\n' "$SSH_TARGET" "$REMOTE_DEPLOY_DIR"
+    printf '[dry-run] tar -C %q -cf -' "$SCRIPT_DIR"
+    printf ' %q' "${files[@]}"
+    printf ' | ssh %q %q\n' "$SSH_TARGET" "$remote_command"
+    return
+  fi
+
+  if ! run_with_timeout "$SYNC_TIMEOUT_SECONDS" "sync AICopilot deploy support files" \
+    bash -c '
+      set -euo pipefail
+      script_dir="$1"
+      ssh_target="$2"
+      remote_command="$3"
+      shift 3
+      tar -C "$script_dir" -cf - "$@" | ssh "$ssh_target" "$remote_command"
+    ' bash "$SCRIPT_DIR" "$SSH_TARGET" "$remote_command" "${files[@]}"; then
+    print_deploy_diagnostics
+    exit 124
+  fi
+}
+
 require_pushed_clean_head() {
   if [ "$DRY_RUN" = true ]; then
     printf '[dry-run] skip clean/pushed HEAD enforcement.\n'
@@ -172,6 +206,7 @@ fi
 
 require_pushed_clean_head
 "$SCRIPT_DIR/build-and-push.sh" "${BUILD_ARGS[@]}"
+sync_remote_deploy_files
 
 SERVICES_FILE="$REPO_ROOT/artifacts/deploy/aicopilot-built-services.txt"
 if [ ! -f "$SERVICES_FILE" ]; then

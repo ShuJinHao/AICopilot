@@ -113,12 +113,41 @@ internal sealed partial class CloudReadOnlyLlmTextToSqlGenerator(
             previousSqlForRepair = request.PreviousSqlForRepair,
             governedSchema = request.AllowedTables
                 .OrderBy(table => table, StringComparer.OrdinalIgnoreCase)
-                .Select(table => new
+                .Select(table =>
                 {
-                    table,
-                    columns = request.AllowedColumns.TryGetValue(table, out var columns)
+                    var orderedColumns = request.AllowedColumns.TryGetValue(table, out var columns)
                         ? columns.OrderBy(column => column, StringComparer.OrdinalIgnoreCase).ToArray()
-                        : []
+                        : [];
+
+                    return new
+                    {
+                        table,
+                        columns = orderedColumns,
+                        columnTypes = orderedColumns
+                            .Select(column => new
+                            {
+                                column,
+                                type = CloudReadOnlyGovernedSchema.AllowedColumnTypes.TryGetValue(table, out var tableColumnTypes)
+                                       && tableColumnTypes.TryGetValue(column, out var columnType)
+                                    ? columnType
+                                    : null
+                            })
+                            .Where(entry => entry.type is not null)
+                            .ToArray()
+                    };
+                })
+                .ToArray(),
+            joinHints = CloudReadOnlyGovernedSchema.JoinHints
+                .Where(hint => request.AllowedTables.Contains(hint.LeftTable) &&
+                               request.AllowedTables.Contains(hint.RightTable) &&
+                               request.AllowedColumns.TryGetValue(hint.LeftTable, out var leftColumns) &&
+                               leftColumns.Contains(hint.LeftColumn) &&
+                               request.AllowedColumns.TryGetValue(hint.RightTable, out var rightColumns) &&
+                               rightColumns.Contains(hint.RightColumn))
+                .Select(hint => new
+                {
+                    left = $"{hint.LeftTable}.{hint.LeftColumn}",
+                    right = $"{hint.RightTable}.{hint.RightColumn}"
                 })
                 .ToArray(),
             repairHistory = request.RepairHistory.Select(attempt => new

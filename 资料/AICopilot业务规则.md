@@ -85,14 +85,16 @@ Cloud AiRead 设备契约：
 - 内部真实 Cloud 语义查询优先走 DataAnalysis `CloudReadOnly` Direct DB 映射；Cloud AiRead 只作为未来外部系统只读 API 接入口封存，不能在内部映射存在时压过 Direct DB。
 - CloudReadOnly 探索型 Text-to-SQL 只能作为强语义 intent / Direct DB SQL 失败后的受控 fallback；不得拆分或重命名既有 `Analysis.*` intent，不得用 fallback 压过已可执行的强语义路径。
 - CloudReadOnly Text-to-SQL fallback 必须使用共享白名单 schema、已验证只读凭据、LLM 结构化生成、SELECT-only SQL guard、BusinessQuery safety policy 双层表/列白名单、只读执行、最多受控修复重试和 hash-only 审计；生产 fallback 不得退化为规则 SQL 模板。
-- CloudReadOnly Text-to-SQL LLM prompt 可见的物理 schema 只能来自 `CloudReadOnlyGovernedSchema` 治理白名单，最多包含批准表名、列名和必要业务描述；不得把连接串、凭据、role/权限细节、样例数据、查询结果、参数值、非白名单表字段或系统/敏感字段发给模型。
+- CloudReadOnly Text-to-SQL LLM prompt 可见的物理 schema 只能来自 `CloudReadOnlyGovernedSchema` 治理白名单，最多包含批准表名、列名、列类型、join hints 和必要业务描述；不得把连接串、凭据、role/权限细节、样例数据、查询结果、参数值、非白名单表字段或系统/敏感字段发给模型。
 - CloudReadOnly Text-to-SQL 修复重试默认最多 3 次、硬上限 5 次；timeout、权限、凭据、非只读、系统表、敏感字段、多语句或写 SQL 默认不可修复、不重试。
 - CloudReadOnly Text-to-SQL 修复历史不得保存完整 SQL、用户 prompt、连接串、参数值或敏感字段；上一轮失败 SQL 只允许在当前调用内以内存参数临时回传给 LLM 生成下一版，不能写入审计、日志、state、结果或持久化对象。
 - Legacy `DataSourceSelectionMode.TextToSql` / Business Text-to-SQL draft runtime 仍只服务 SimulationBusiness；Agent 侧 CloudReadOnly 查询只能走 governed fallback runner，不能复用会生成 SimulationBusiness SQL 的旧 draft runtime。
-- Direct DB 语义映射中的工序名来自只读 `mfg_processes.process_name`；新增 join 表必须同步进入 SQL guard、BusinessQuery safety schema、只读 role 授权和模板测试。
+- Direct DB 语义映射中的工序名来自只读 `mfg_processes.process_name`；新增 join 表必须同步进入 `CloudReadOnlyGovernedSchema` 表/列/类型/join hint、SQL guard、BusinessQuery safety schema、只读 role 授权 SQL、授权探针、部署 preflight、RealSource 模板、架构测试和部署文档。
 - Direct DB 设备 `status` 字段当前是最新 `device_logs.level`，对用户展示必须称为“最新日志级别”，不得包装为实时在线/运行状态。
 - 真实 Cloud Text-to-SQL 验证不得走 Simulation 数据源冒充真实结果；Simulation 只能用于明确标识的模拟链路。
 - 创建或轮换 Cloud PostgreSQL 只读账号只能通过显式确认的受控自动化执行；只能创建/更新专用 readonly role，只授予白名单表 SELECT，不得授予写权限、schema create 权限、superuser、createdb、createrole 或 replication。
+- Cloud PostgreSQL readonly role 授权的权威载体是 `deploy/enterprise-ai/cloud-readonly/apply-readonly-grants.sql` 和 `check-readonly-grants.sql`；生产只允许对治理白名单表做显式表级 `GRANT SELECT`，不得使用 `GRANT SELECT ON ALL TABLES`、默认权限、未来表自动授权或列级/表级混用口径。
+- 启用 CloudReadOnly 直连数据库时，部署必须先执行 readonly 授权 preflight；权限错误只能向用户暴露治理白名单内的表名和只读权限不足结论，不得输出连接串、role、密码、SQL 原文或非白名单对象。
 
 ## 6. MCP 规则
 

@@ -1,5 +1,11 @@
 namespace AICopilot.Services.Contracts;
 
+public sealed record CloudReadOnlyJoinHint(
+    string LeftTable,
+    string LeftColumn,
+    string RightTable,
+    string RightColumn);
+
 public static class CloudReadOnlyGovernedSchema
 {
     public static readonly IReadOnlySet<string> AllowedTables =
@@ -21,6 +27,47 @@ public static class CloudReadOnlyGovernedSchema
             ["hourly_capacity"] = ColumnSet("id", "device_id", "date", "total_count", "ok_count", "reported_at"),
             ["pass_station_records"] = ColumnSet("id", "device_id", "barcode", "type_key", "cell_result", "completed_time")
         };
+
+    public static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> AllowedColumnTypes =
+        new Dictionary<string, IReadOnlyDictionary<string, string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["devices"] = ColumnTypes(
+                ("id", "uuid"),
+                ("client_code", "varchar"),
+                ("device_name", "varchar"),
+                ("process_id", "uuid")),
+            ["mfg_processes"] = ColumnTypes(
+                ("id", "uuid"),
+                ("process_name", "varchar")),
+            ["device_logs"] = ColumnTypes(
+                ("id", "uuid"),
+                ("device_id", "uuid"),
+                ("level", "varchar"),
+                ("message", "text"),
+                ("log_time", "timestamptz")),
+            ["hourly_capacity"] = ColumnTypes(
+                ("id", "uuid"),
+                ("device_id", "uuid"),
+                ("date", "date"),
+                ("total_count", "integer"),
+                ("ok_count", "integer"),
+                ("reported_at", "timestamptz")),
+            ["pass_station_records"] = ColumnTypes(
+                ("id", "uuid"),
+                ("device_id", "uuid"),
+                ("barcode", "varchar"),
+                ("type_key", "varchar"),
+                ("cell_result", "varchar"),
+                ("completed_time", "timestamp"))
+        };
+
+    public static readonly IReadOnlyList<CloudReadOnlyJoinHint> JoinHints =
+    [
+        new("device_logs", "device_id", "devices", "id"),
+        new("devices", "process_id", "mfg_processes", "id"),
+        new("hourly_capacity", "device_id", "devices", "id"),
+        new("pass_station_records", "device_id", "devices", "id")
+    ];
 
     public static readonly IReadOnlyList<string> BlockedFieldFragments =
     [
@@ -58,5 +105,13 @@ public static class CloudReadOnlyGovernedSchema
     private static IReadOnlySet<string> ColumnSet(params string[] columns)
     {
         return columns.ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyDictionary<string, string> ColumnTypes(params (string Column, string Type)[] columnTypes)
+    {
+        return columnTypes.ToDictionary(
+            item => item.Column,
+            item => item.Type,
+            StringComparer.OrdinalIgnoreCase);
     }
 }

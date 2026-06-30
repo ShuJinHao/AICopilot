@@ -25,6 +25,8 @@ deploy/enterprise-ai/
   deploy-release.sh       # 服务器发布脚本，支持全量和 --services 按需发布
   docker-compose.yaml     # 生产 compose 模板
   mirror-base-images.sh   # 基础镜像同步到 Harbor
+  cloud-readonly/         # Cloud PostgreSQL readonly role 授权和探针 SQL
+  scripts/                # CloudReadOnly 授权 apply/check 脚本
   post-release-cleanup.sh  # 发布成功后清理 build cache、旧应用镜像、旧 Harbor tag 并触发 GC
   cron/                   # 周级兜底清理 cron 模板
   README.md               # 本文件
@@ -62,11 +64,22 @@ Cloud Postgres 不发布到宿主端口，AICopilot 部署脚本会创建外部 
 `enterprise-ai-cloud-readonly`，并把 Cloud compose 的 `deploy/postgres` 容器连接为别名
 `cloud-postgres`。只读连接串推荐使用：
 `Host=cloud-postgres;Port=5432;Database=iiot-db;Username=<readonly_user>;Password=<readonly_password>`。
-如果还没有只读账号，可在本机运行
-`scripts/Provision-AICopilotCloudReadOnlyDbRole.sh`。脚本会生成随机密码，写入 GitHub
-production environment secrets，并触发 `aicopilot-provision-cloud-readonly-db-role`；该 workflow
-必须带确认词，只在 Cloud PostgreSQL 中创建/轮换只读角色，只授予
-`devices`、`mfg_processes`、`device_logs`、`hourly_capacity`、`pass_station_records` 的 SELECT 权限。
+Cloud PostgreSQL readonly role 的授权权威载体是
+`deploy/enterprise-ai/cloud-readonly/apply-readonly-grants.sql` 和
+`deploy/enterprise-ai/cloud-readonly/check-readonly-grants.sql`。它们只对
+`devices`、`mfg_processes`、`device_logs`、`hourly_capacity`、`pass_station_records`
+做显式表级 `GRANT SELECT`，并校验写权限、schema create 权限均不存在；不得改成
+`GRANT SELECT ON ALL TABLES`、默认权限、未来表自动授权或列级/表级混用口径。
+如果还没有只读账号，标准做法是在可访问服务器和 Cloud PostgreSQL 容器的机器上运行
+`deploy/enterprise-ai/scripts/apply-cloud-readonly-grants.sh`；随后用
+`deploy/enterprise-ai/scripts/check-cloud-readonly-grants.sh` 验证。历史
+`scripts/Provision-AICopilotCloudReadOnlyDbRole.sh` 和
+`aicopilot-provision-cloud-readonly-db-role` workflow 只保留为带确认词的手动兜底，
+且必须读取同一组 `cloud-readonly/*.sql`，不得再维护内联 GRANT 清单。
+
+启用 direct DB 后，服务器 `deploy-release.sh` 会在重启服务前自动执行
+`scripts/check-cloud-readonly-grants.sh`；preflight 失败必须停止部署并先修 readonly
+授权，不允许把权限缺口伪装成“数据源暂时不可用”继续发布。
 
 后端容器以非 root 用户运行，文件上传和 Agent artifact workspace 必须落在持久化可写卷。默认 compose 会把
 `enterprise-ai-aicopilot-data` 挂到 `/var/lib/aicopilot`，并通过

@@ -46,9 +46,15 @@ public sealed class CloudReadOnlyLlmTextToSqlGeneratorTests
         runtimeFactory.LastRun!.Options!.Options.Tools.Should().BeEmpty();
         runtimeFactory.LastRun.Options.Options.Temperature.Should().Be(0);
         runtimeFactory.LastRun.InputText.Should().Contain("governedSchema");
+        runtimeFactory.LastRun.InputText.Should().Contain("columnTypes");
+        runtimeFactory.LastRun.InputText.Should().Contain("joinHints");
         runtimeFactory.LastRun.InputText.Should().Contain("devices");
         runtimeFactory.LastRun.InputText.Should().Contain("client_code");
+        runtimeFactory.LastRun.InputText.Should().Contain("uuid");
+        runtimeFactory.LastRun.InputText.Should().Contain("device_logs.device_id");
+        runtimeFactory.LastRun.InputText.Should().Contain("devices.id");
         runtimeFactory.LastRun.InputText.Should().NotContain("Password=");
+        runtimeFactory.LastRun.InputText.Should().NotContain("bootstrap_secret_hash");
     }
 
     [Fact]

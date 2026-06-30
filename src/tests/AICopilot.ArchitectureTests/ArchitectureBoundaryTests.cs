@@ -590,6 +590,82 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
+    public void CloudReadOnlyReadonlyGrantSources_ShouldStayAlignedWithGovernedSchema()
+    {
+        var governedSchema = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.Services.Contracts",
+            "Contracts",
+            "CloudReadOnlyGovernedSchema.cs"));
+        var applyGrantSql = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "deploy",
+            "enterprise-ai",
+            "cloud-readonly",
+            "apply-readonly-grants.sql"));
+        var checkGrantSql = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "deploy",
+            "enterprise-ai",
+            "cloud-readonly",
+            "check-readonly-grants.sql"));
+        var applyGrantScript = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "deploy",
+            "enterprise-ai",
+            "scripts",
+            "apply-cloud-readonly-grants.sh"));
+        var checkGrantScript = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "deploy",
+            "enterprise-ai",
+            "scripts",
+            "check-cloud-readonly-grants.sh"));
+        var provisionWorkflow = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            ".github",
+            "workflows",
+            "aicopilot-provision-cloud-readonly-db-role.yml"));
+        var deployRelease = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "deploy",
+            "enterprise-ai",
+            "deploy-release.sh"));
+        var localRelease = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "deploy",
+            "enterprise-ai",
+            "local-release.sh"));
+
+        var governedTables = ExtractGovernedSchemaTables(governedSchema);
+        governedTables.Should().BeEquivalentTo(["devices", "mfg_processes", "device_logs", "hourly_capacity", "pass_station_records"]);
+
+        ExtractPublicTableNames(applyGrantSql)
+            .Should()
+            .BeEquivalentTo(governedTables, "the grant SQL is the authoritative role grant source");
+        ExtractPublicTableNames(checkGrantSql)
+            .Should()
+            .BeEquivalentTo(governedTables, "the probe SQL must verify every governed table");
+
+        applyGrantScript.Should().Contain("apply-readonly-grants.sql");
+        applyGrantScript.Should().Contain("check-cloud-readonly-grants.sh");
+        checkGrantScript.Should().Contain("check-readonly-grants.sql");
+        provisionWorkflow.Should().Contain("actions/checkout");
+        provisionWorkflow.Should().Contain("apply-readonly-grants.sql");
+        provisionWorkflow.Should().Contain("check-readonly-grants.sql");
+        provisionWorkflow.Should().NotContain("GRANT SELECT ON TABLE public.devices, public.mfg_processes");
+        deployRelease.Should().Contain("check_cloud_readonly_preflight");
+        deployRelease.Should().Contain("check-cloud-readonly-grants.sh");
+        localRelease.Should().Contain("sync_remote_deploy_files");
+        localRelease.Should().Contain("cloud-readonly");
+        localRelease.Should().Contain("scripts/check-cloud-readonly-grants.sh");
+        applyGrantSql.Should().NotContain("GRANT SELECT ON ALL TABLES");
+        applyGrantSql.Should().NotContain("ALTER DEFAULT PRIVILEGES");
+    }
+
+    [Fact]
     public void CloudReadOnlyTextToSql_ShouldExposeOnlyGovernedSchemaAndKeepRepairSqlInMemory()
     {
         var agents = File.ReadAllText(Path.Combine(SolutionRoot, "AGENTS.md"));
@@ -639,7 +715,9 @@ public sealed class ArchitectureBoundaryTests
         businessRules.Should().Contain("不得把连接串、凭据");
 
         generator.Should().Contain("governedSchema = request.AllowedTables");
-        generator.Should().Contain("columns = request.AllowedColumns.TryGetValue");
+        generator.Should().Contain("request.AllowedColumns.TryGetValue");
+        generator.Should().Contain("CloudReadOnlyGovernedSchema.AllowedColumnTypes");
+        generator.Should().Contain("CloudReadOnlyGovernedSchema.JoinHints");
         generator.Should().NotContain("ConnectionString");
         generator.Should().NotContain("Password");
         generator.Should().NotContain("Credential");
@@ -1979,6 +2057,31 @@ public sealed class ArchitectureBoundaryTests
         var end = source.IndexOf(endText, start, StringComparison.Ordinal);
         end.Should().BeGreaterThan(start, $"{endText} must appear after {startText}");
         return source[start..end];
+    }
+
+    private static IReadOnlyCollection<string> ExtractGovernedSchemaTables(string source)
+    {
+        var allowedTablesBlock = ExtractBetween(
+            source,
+            "public static readonly IReadOnlySet<string> AllowedTables",
+            "public static readonly IReadOnlyDictionary<string, IReadOnlySet<string>> AllowedColumns");
+
+        return Regex
+            .Matches(allowedTablesBlock, "\"(?<table>[a-z_]+)\"", RegexOptions.CultureInvariant)
+            .Select(match => match.Groups["table"].Value)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IReadOnlyCollection<string> ExtractPublicTableNames(string source)
+    {
+        return Regex
+            .Matches(source, @"public\.(?<table>[a-z_]+)", RegexOptions.CultureInvariant)
+            .Select(match => match.Groups["table"].Value)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static string FindSolutionRoot()

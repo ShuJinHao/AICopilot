@@ -316,6 +316,34 @@ public sealed class SemanticAnalysisRunnerTests
         result.Should().NotContain("Cloud 只读安全白名单");
     }
 
+    [Fact]
+    public async Task RunAsync_ShouldReturnCloudReadOnlyPermissionDiagnostic_WhenReadonlyRoleMissesTableGrant()
+    {
+        var databaseConnector = new RecordingDatabaseConnector(
+            exception: new InvalidOperationException("42501: permission denied for table mfg_processes"));
+        var runner = CreateCloudReadOnlySemanticRunner(
+            """
+            SELECT d.device_name AS deviceName
+            FROM devices d
+            LEFT JOIN mfg_processes mp ON d.process_id = mp.id
+            LIMIT 10
+            """,
+            databaseConnector);
+
+        var result = await runner.RunAsync(
+            new IntentResult
+            {
+                Intent = "Analysis.Device.List",
+                Query = "查询模切设备"
+            },
+            CancellationToken.None);
+
+        result.Should().Contain("CloudReadOnly 只读权限不足");
+        result.Should().Contain("mfg_processes");
+        result.Should().NotContain("SELECT");
+        result.Should().NotContain("Password");
+    }
+
     private static SemanticQueryPlan CreateRecipePlan()
     {
         return new SemanticQueryPlan(
@@ -490,7 +518,7 @@ public sealed class SemanticAnalysisRunnerTests
         }
     }
 
-    private sealed class RecordingDatabaseConnector(DatabaseQueryResult? result = null) : IDatabaseConnector
+    private sealed class RecordingDatabaseConnector(DatabaseQueryResult? result = null, Exception? exception = null) : IDatabaseConnector
     {
         public bool WasCalled { get; private set; }
         public BusinessDatabaseConnectionInfo? LastDatabase { get; private set; }
@@ -522,6 +550,11 @@ public sealed class SemanticAnalysisRunnerTests
             WasCalled = true;
             LastDatabase = database;
             LastSql = sql;
+            if (exception is not null)
+            {
+                throw exception;
+            }
+
             return result is not null
                 ? Task.FromResult(result)
                 : throw new InvalidOperationException("Database connector must not be called for recipe data.");

@@ -96,7 +96,7 @@ public sealed class PromptGovernanceTests
     [Fact]
     public void BuiltInConversationTemplates_ShouldUseCurrentPromptVersion()
     {
-        BuiltInConversationTemplates.CurrentVersion.Should().Be(5);
+        BuiltInConversationTemplates.CurrentVersion.Should().Be(6);
         BuiltInConversationTemplates.All
             .Should()
             .OnlyContain(definition => definition.Version == BuiltInConversationTemplates.CurrentVersion);
@@ -141,6 +141,8 @@ public sealed class PromptGovernanceTests
             .Should().Contain("结构化 JSON 草案")
             .And.Contain("不执行查询")
             .And.Contain("governedSchema")
+            .And.Contain("columnTypes")
+            .And.Contain("joinHints")
             .And.Contain("@parameter_name")
             .And.Contain("不调用工具")
             .And.Contain("不写入 Cloud");
