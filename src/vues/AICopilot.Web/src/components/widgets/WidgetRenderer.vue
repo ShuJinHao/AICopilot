@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent } from 'vue'
 import { BarChart3, Grid3X3, TriangleAlert } from 'lucide-vue-next'
-import type { ChartWidget as ChartWidgetModel, DataTableWidget as DataTableWidgetModel, StatsCardWidget, Widget } from '@/types/protocols'
+import type { ChartWidget as ChartWidgetModel, DataTableWidget as DataTableWidgetModel, StatsCardWidget } from '@/types/protocols'
+import { normalizeWidgetPayload, type NormalizedWidget } from '@/protocol/widgetNormalizer'
 
 const props = defineProps<{
   data: unknown
@@ -11,35 +12,7 @@ const ChartWidget = defineAsyncComponent(() => import('./ChartWidget.vue'))
 const DataTableWidget = defineAsyncComponent(() => import('./DataTableWidget.vue'))
 const StatsWidget = defineAsyncComponent(() => import('./StatsWidget.vue'))
 
-type NormalizedWidget = Widget | ChartWidgetModel | DataTableWidgetModel | StatsCardWidget
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
-
-function normalizeWidget(value: unknown): NormalizedWidget | null {
-  if (!isRecord(value)) {
-    return null
-  }
-
-  const directType = value.type ?? value.Type
-  if (typeof directType === 'string') {
-    return value as unknown as NormalizedWidget
-  }
-
-  const decision = value.visual_decision ?? value.VisualDecision
-  if (isRecord(decision)) {
-    return {
-      ...decision,
-      type: String(decision.type ?? decision.Type ?? 'Unknown'),
-      data: value.data ?? value.Data ?? decision.data ?? decision.Data ?? null
-    } as NormalizedWidget
-  }
-
-  return null
-}
-
-const widget = computed(() => normalizeWidget(props.data))
+const widget = computed<NormalizedWidget | null>(() => normalizeWidgetPayload(props.data))
 const widgetType = computed(() => widget.value?.type ?? 'Unknown')
 const chartWidget = computed(() => (widgetType.value === 'Chart' ? (widget.value as ChartWidgetModel) : null))
 const tableWidget = computed(() => (widgetType.value === 'DataTable' ? (widget.value as DataTableWidgetModel) : null))
@@ -72,7 +45,7 @@ const statsWidget = computed(() => (widgetType.value === 'StatsCard' ? (widget.v
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--ai-border);
-  border-radius: 20px;
+  border-radius: 10px;
   background: var(--ai-surface);
   box-shadow: var(--ai-shadow-xs);
 }

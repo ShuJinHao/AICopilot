@@ -28,6 +28,7 @@
 - `chartPreview`
 - `uploadedFiles`
 - `isAgentBusy`
+- `chatRunStatus`
 
 错误状态统一走 `chatErrorStore`。不得在 `chatStore` 里维护全局 `agentErrorMessage`、`lastAgentError` 或同类裸 `ref`。
 
@@ -39,6 +40,34 @@
 4. 补 `sessionScopedState.spec.ts` 断言 reset 会清掉该字段。
 
 `chatStore` 可以暴露同名 computed 给模板用，但底层数据必须来自 `SessionScopedState`。
+
+## 2.1 Chat Run Status
+
+任何可能超过 1 秒的 Chat / Plan 流式请求、工具调用、DataAnalysis 或 Cloud 只读查询，都必须有用户可见运行状态，不能让用户面对空白等待。
+
+运行状态必须按 `sessionId` 隔离，并尽量绑定当前 assistant message；切换会话不能显示其他会话的运行状态，回到原会话时状态仍应正确。
+
+运行阶段只能来自真实 stream/request/chunk/error/complete 事实。允许从 `Intent`、`FunctionCall`、`FunctionResult`、`Text`、`Error` 和 stream complete 推导阶段；不得伪造进度、查询次数、返回行数、设备在线、Cloud 查询成功或 DataAnalysis 结果。
+
+## 2.2 DataAnalysis Widget Rendering
+
+DataAnalysis Widget 是后端结构化展示契约，不是 Markdown 或任意 ECharts 配置。前端只能渲染受控的 `StatsCard`、`Chart`、`DataTable` schema。
+
+Widget payload 必须兼容后端 `type` / `Type` / `widget_type` 和 `data` / `Data` 字段形态；新增 Widget 协议兼容性时必须补 `widgetNormalizer` 或 `chunkReducer` 单元测试。
+
+前端不得为 DeviceLog 自行编造级别分布、时间分布、问题分类、指标、证据表或返回行数；只能展示后端本轮 stream/history 中提供的 Widget 数据。
+
+## 2.3 Runtime Details Folding
+
+运行详情只能作为 assistant 消息的默认折叠辅助信息，数据来源必须是本轮 stream/history chunks、消息 metadata 和 `chatRunStatus`。不得把运行详情作为审批、工具执行、AgentTask、Cloud 查询或 Widget 的权威状态源。
+
+工具参数和工具结果在运行详情中只能展示安全摘要，例如白名单业务过滤条件、查询次数、返回行数、截断状态和 Widget 类型；不得展开 SQL 原文、连接串、密码、token、sourceName、表/视图名、endpoint、内部字段、原始结果行或未脱敏错误原文。
+
+## 2.4 DeviceLog Answer Presentation
+
+DeviceLog 最终回答只有在识别到固定段落结构时，才允许渲染为结构化结果卡；普通聊天、规则问答、RAG 回答和段落不完整的文本必须回退到原 Markdown。
+
+结构化结果卡只能重排已有回答文本，突出结论、收窄指标/记录/原因/建议/边界/查询范围的视觉层级；不得新增指标、改写结论、补充未查询数据或把“不能直接执行的动作”隐藏成不可见信息。
 
 ## 3. ChatWindow Boundary
 

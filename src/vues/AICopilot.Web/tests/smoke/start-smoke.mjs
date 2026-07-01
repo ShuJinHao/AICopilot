@@ -452,7 +452,21 @@ function sendChatStream(response) {
   sendEvent(response, {
     source: 'FinalAgentRunExecutor',
     type: 'Text',
-    content: '已完成只读分析，未执行控制或写入动作。'
+    content: [
+      '结论：基于 DataAnalysis 只读查询，LINE-A 设备日志存在需要现场复核的 WARN 记录。',
+      '关键指标：',
+      '1. 返回记录：2 条',
+      '2. WARN：1 条',
+      '关键记录：',
+      '1. DEV-001 在 08:00 出现 WARN 日志。',
+      '可能原因：',
+      '1. AI 推断分析：同一时间窗口的日志可能与设备负载波动或传感器状态有关。',
+      '建议动作：',
+      '1. 由现场人员核对对应时间点的设备状态和维护记录。',
+      '不能直接执行的动作：',
+      '1. AICopilot 不能直接重启设备、修改参数、下发配方或写入 Cloud。',
+      '查询范围：LINE-A；最近状态记录；只读模拟 smoke 数据。'
+    ].join('\n')
   })
   sendEvent(response, {
     source: 'DataAnalysisExecutor',

@@ -133,14 +133,14 @@ watch(option, () => renderChart(), { deep: true })
 <style scoped>
 .chart-widget {
   display: grid;
-  gap: 10px;
-  padding: 16px;
+  gap: 12px;
+  padding: 14px;
 }
 
 .chart-widget header {
   display: grid;
-  gap: 2px;
-  padding-right: 92px;
+  max-width: calc(100% - 92px);
+  gap: 3px;
 }
 
 .chart-widget h3 {
@@ -154,12 +154,15 @@ watch(option, () => renderChart(), { deep: true })
   margin: 0;
   color: var(--ai-text-muted);
   font-size: 12px;
+  font-weight: 720;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .chart-surface {
   width: 100%;
-  height: 320px;
-  min-height: 280px;
+  height: 300px;
+  min-height: 260px;
 }
 
 .empty-widget {
@@ -169,5 +172,16 @@ watch(option, () => renderChart(), { deep: true })
   border: 1px dashed var(--ai-border);
   border-radius: 18px;
   color: var(--ai-text-muted);
+}
+
+@media (max-width: 640px) {
+  .chart-widget header {
+    max-width: 100%;
+    padding-right: 0;
+  }
+
+  .chart-surface {
+    height: 260px;
+  }
 }
 </style>

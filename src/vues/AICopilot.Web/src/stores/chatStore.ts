@@ -10,6 +10,7 @@ import { useAgentCatalogStore } from './agentCatalogStore'
 import { useAgentTaskStore } from './agentTaskStore'
 import { useArtifactWorkspaceStore } from './artifactWorkspaceStore'
 import { resolveChatErrorMessage, useChatErrorStore, toFriendlyMessage } from './chatErrorStore'
+import { getChatRunMessageKey, useChatRunStatusStore } from './chatRunStatusStore'
 import { useMessageStore } from './messageStore'
 import { useSessionStore } from './sessionStore'
 import { useStreamStore } from './streamStore'
@@ -35,6 +36,7 @@ export const useChatStore = defineStore('chat', () => {
   const agentTaskStore = useAgentTaskStore()
   const artifactWorkspaceStore = useArtifactWorkspaceStore()
   const errorStore = useChatErrorStore()
+  const runStatusStore = useChatRunStatusStore()
 
   const sessions = computed(() => sessionStore.sessions)
   const currentSessionId = computed(() => sessionStore.currentSessionId)
@@ -105,6 +107,7 @@ export const useChatStore = defineStore('chat', () => {
       agentTaskStore.isAgentBusy = value
     }
   })
+  const currentRunStatus = computed(() => runStatusStore.currentRunStatus)
   const historyCursors = ref<Record<string, HistoryCursorState>>({})
   const isLoadingOlderHistory = ref(false)
   const latestAgentTask = computed(() => agentTaskStore.latestAgentTask)
@@ -143,6 +146,10 @@ export const useChatStore = defineStore('chat', () => {
     agentTaskStore.reset()
     artifactWorkspaceStore.reset()
     catalogStore.resetSelections()
+  }
+
+  function getRunStatusForMessage(message: ChatMessage) {
+    return runStatusStore.getStatus(message.sessionId, getChatRunMessageKey(message))
   }
 
   async function loadSkills() {
@@ -351,8 +358,10 @@ export const useChatStore = defineStore('chat', () => {
 
     const sessionId = sessionStore.currentSessionId
     const assistantMessage = addPlanConversationMessages(sessionId, goal)
+    const runMessageKey = getChatRunMessageKey(assistantMessage)
     isAgentBusy.value = true
     clearCurrentSessionError()
+    runStatusStore.startRun(sessionId, runMessageKey)
     streamStore.start()
     let plannedTask: AgentTask | null = null
     let streamErrorMessage: string | null = null
@@ -368,6 +377,7 @@ export const useChatStore = defineStore('chat', () => {
         preferredToolCodes: selectedToolCodes.value
       }, {
         onChunkReceived(chunk) {
+          runStatusStore.advanceFromChunk(sessionId, runMessageKey, chunk)
           if (chunk.type === ChunkType.Error) {
             try {
               streamErrorMessage = resolveChatErrorMessage(JSON.parse(chunk.content))
@@ -388,12 +398,14 @@ export const useChatStore = defineStore('chat', () => {
         onComplete() {
           streamStore.stop()
           assistantMessage.isStreaming = false
+          runStatusStore.completeRun(sessionId, runMessageKey)
           approvalStore.sync(sessionId)
         },
         onError(error) {
           streamStore.stop()
           assistantMessage.isStreaming = false
           streamErrorMessage = toFriendlyMessage(error)
+          runStatusStore.failRun(sessionId, runMessageKey, streamErrorMessage)
           setCurrentSessionError(streamErrorMessage)
           appendPlanStreamError(assistantMessage, streamErrorMessage)
           approvalStore.sync(sessionId)
@@ -413,6 +425,7 @@ export const useChatStore = defineStore('chat', () => {
       return agentTasks.value.find((task) => task.id === completedTask.id) ?? latestAgentTask.value ?? completedTask
     } catch (error) {
       const message = toFriendlyMessage(error)
+      runStatusStore.failRun(sessionId, runMessageKey, message)
       setCurrentSessionError(message)
       appendPlanStreamError(assistantMessage, message)
       return null
@@ -645,6 +658,7 @@ export const useChatStore = defineStore('chat', () => {
     await sessionStore.deleteSession(id)
     delete messageStore.messagesMap[id]
     delete historyCursors.value[id]
+    runStatusStore.clearSession(id)
     if (wasCurrent) {
       resetCurrentSessionState()
       if (sessionStore.currentSessionId) {
@@ -721,13 +735,16 @@ export const useChatStore = defineStore('chat', () => {
       isStreaming: true,
       timestamp: Date.now()
     })
+    const runMessageKey = getChatRunMessageKey(assistantMessage)
 
+    runStatusStore.startRun(sessionId, runMessageKey)
     streamStore.start()
     let streamErrorCode: string | null = null
 
     try {
       await chatService.sendMessageStream(sessionId, input, {
         onChunkReceived(chunk) {
+          runStatusStore.advanceFromChunk(sessionId, runMessageKey, chunk)
           if (chunk.type === ChunkType.Error) {
             streamErrorCode = getErrorCode(chunk)
           }
@@ -741,8 +758,11 @@ export const useChatStore = defineStore('chat', () => {
           streamStore.stop()
           assistantMessage.isStreaming = false
           if (streamErrorCode === 'approval_pending') {
+            runStatusStore.clearRunStatus(sessionId, runMessageKey)
             messageStore.removeMessages(sessionId, userMessage, assistantMessage)
             void approvalStore.refreshPendingApprovals(sessionId)
+          } else {
+            runStatusStore.completeRun(sessionId, runMessageKey)
           }
 
           approvalStore.sync(sessionId)
@@ -750,12 +770,16 @@ export const useChatStore = defineStore('chat', () => {
         onError(error) {
           streamStore.stop()
           assistantMessage.isStreaming = false
-          errorStore.setSessionError(sessionId, toFriendlyMessage(error))
+          const message = toFriendlyMessage(error)
+          runStatusStore.failRun(sessionId, runMessageKey, message)
+          errorStore.setSessionError(sessionId, message)
           approvalStore.sync(sessionId)
         }
       })
     } catch (error) {
-      errorStore.setSessionError(sessionId, toFriendlyMessage(error))
+      const message = toFriendlyMessage(error)
+      runStatusStore.failRun(sessionId, runMessageKey, message)
+      errorStore.setSessionError(sessionId, message)
     } finally {
       streamStore.stop()
       assistantMessage.isStreaming = false
@@ -858,6 +882,7 @@ export const useChatStore = defineStore('chat', () => {
     streamStore.reset()
     approvalStore.reset()
     errorStore.reset()
+    runStatusStore.reset()
     catalogStore.reset()
     resetCurrentSessionState()
     historyCursors.value = {}
@@ -897,7 +922,9 @@ export const useChatStore = defineStore('chat', () => {
     currentArtifactPreview,
     chartPreview,
     isAgentBusy,
+    currentRunStatus,
     errorMessage,
+    getRunStatusForMessage,
     initialize,
     loadSkills,
     selectSkill,

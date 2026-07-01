@@ -14,6 +14,14 @@ describe('sessionScopedState', () => {
     state.currentArtifactPreview = { artifactId: 'artifact-1' } as never
     state.chartPreview = { labels: ['A'], values: [1] }
     state.isAgentBusy = true
+    state.chatRunStatus = {
+      sessionId: 'session-1',
+      messageKey: 'message-1',
+      phase: 'querying',
+      startedAt: '2026-07-01T00:00:00Z',
+      elapsedMs: 1200,
+      summary: '正在查询 Cloud 只读数据'
+    }
 
     resetSessionScopedState(state)
 

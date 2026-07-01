@@ -9,6 +9,8 @@ internal sealed class DeviceLogSummaryProfile : SemanticSummaryProfileBase
     private static readonly IReadOnlyDictionary<string, string> Labels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
         ["deviceCode"] = "设备编码",
+        ["deviceName"] = "设备名称",
+        ["processName"] = "工序名称",
         ["level"] = "日志级别",
         ["message"] = "日志内容",
         ["source"] = "日志来源",
@@ -64,6 +66,15 @@ internal sealed class DeviceLogSummaryProfile : SemanticSummaryProfileBase
 
     private static string Describe(Dictionary<string, object?> row)
     {
-        return $"设备 {SemanticSummaryFormatting.GetString(row, "deviceCode")}，日志级别 {SemanticSummaryFormatting.GetString(row, "level")}，日志内容 {SemanticSummaryFormatting.GetString(row, "message")}，时间 {SemanticSummaryFormatting.FormatTimestamp(SemanticSummaryFormatting.GetString(row, "occurredAt"))}";
+        var deviceName = SemanticSummaryFormatting.GetString(row, "deviceName");
+        var processName = SemanticSummaryFormatting.GetString(row, "processName");
+        var deviceSegment = string.IsNullOrWhiteSpace(deviceName)
+            ? $"设备 {SemanticSummaryFormatting.GetString(row, "deviceCode")}"
+            : $"设备 {SemanticSummaryFormatting.GetString(row, "deviceCode")}（{deviceName}）";
+        var processSegment = string.IsNullOrWhiteSpace(processName)
+            ? string.Empty
+            : $"，工序 {processName}";
+
+        return $"{deviceSegment}{processSegment}，日志级别 {SemanticSummaryFormatting.GetString(row, "level")}，日志内容 {SemanticSummaryFormatting.GetString(row, "message")}，时间 {SemanticSummaryFormatting.FormatTimestamp(SemanticSummaryFormatting.GetString(row, "occurredAt"))}";
     }
 }

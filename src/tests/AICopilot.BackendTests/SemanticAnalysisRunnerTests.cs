@@ -1,6 +1,7 @@
 using System.Data;
 using System.Text.Json;
 using AICopilot.AiGatewayService.Models;
+using AICopilot.AiGatewayService.Workflows;
 using AICopilot.AiGatewayService.Workflows.Executors;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -192,6 +193,144 @@ public sealed class SemanticAnalysisRunnerTests
         databaseConnector.LastSql.Should().Contain("FROM devices");
         result.Should().NotContain("Cloud AiRead");
         result.Should().NotContain("Simulation");
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldEmitDeviceLogWidgets_WhenSemanticQuerySucceeds()
+    {
+        var database = new BusinessDatabaseConnectionInfo(
+            Guid.NewGuid(),
+            "DeviceSemanticReadonly",
+            "Device log readonly business data",
+            "Host=localhost;Database=semantic;Username=readonly;Password=fake-test-only",
+            DatabaseProviderType.PostgreSql,
+            IsEnabled: true,
+            IsReadOnly: true,
+            DataSourceExternalSystemType.NonCloud,
+            ReadOnlyCredentialVerified: true);
+        var rows = new List<Dictionary<string, object?>>
+        {
+            new()
+            {
+                ["deviceCode"] = "DEV-001",
+                ["deviceName"] = "切叠一号线",
+                ["processName"] = "叠片",
+                ["level"] = "ERROR",
+                ["message"] = "Motor overload",
+                ["source"] = "Cloud",
+                ["occurredAt"] = "2026-04-20T11:00:00Z"
+            },
+            new()
+            {
+                ["deviceCode"] = "DEV-001",
+                ["deviceName"] = "切叠一号线",
+                ["processName"] = "叠片",
+                ["level"] = "WARN",
+                ["message"] = "Temperature high",
+                ["source"] = "Cloud",
+                ["occurredAt"] = "2026-04-20T10:00:00Z"
+            },
+            new()
+            {
+                ["deviceCode"] = "DEV-001",
+                ["deviceName"] = "切叠一号线",
+                ["processName"] = "叠片",
+                ["level"] = "ERROR",
+                ["message"] = "Communication timeout",
+                ["source"] = "Cloud",
+                ["occurredAt"] = "2026-04-20T10:30:00Z"
+            }
+        };
+        var databaseConnector = new RecordingDatabaseConnector(new DatabaseQueryResult(
+            rows,
+            ReturnedRowCount: rows.Count,
+            IsTruncated: false,
+            ElapsedMilliseconds: 4));
+        var plan = new SemanticQueryPlan(
+            "Analysis.DeviceLog.ByLevel",
+            SemanticQueryTarget.DeviceLog,
+            SemanticQueryKind.ByLevel,
+            "查看设备 DEV-001 错误和告警日志",
+            new SemanticProjection(["deviceCode", "deviceName", "processName", "level", "message", "source", "occurredAt"]),
+            [
+                new SemanticFilter("deviceCode", SemanticFilterOperator.Equal, "DEV-001"),
+                new SemanticFilter("level", SemanticFilterOperator.In, "ERROR,WARN")
+            ],
+            null,
+            new SemanticSort("occurredAt", SemanticSortDirection.Desc),
+            10);
+        var mapping = new SemanticPhysicalMapping(
+            SemanticQueryTarget.DeviceLog,
+            DatabaseProviderType.PostgreSql,
+            "device_log_cloud_sim_view",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["deviceCode"] = "device_code",
+                ["deviceName"] = "device_name",
+                ["processName"] = "process_name",
+                ["level"] = "log_level",
+                ["message"] = "log_message",
+                ["source"] = "log_source",
+                ["occurredAt"] = "occurred_at"
+            },
+            ["deviceCode", "deviceName", "processName", "level", "message", "source", "occurredAt"],
+            ["deviceCode", "deviceName", "processName", "level", "source"],
+            ["occurredAt", "level"],
+            databaseName: "DeviceSemanticReadonly",
+            defaultSort: new SemanticSort("occurredAt", SemanticSortDirection.Desc));
+        var runner = new SemanticAnalysisRunner(
+            new ThrowingCloudAiReadClient(isEnabled: false),
+            new RecordingBusinessDatabaseReadService(database),
+            databaseConnector,
+            new StubSemanticQueryPlanner(plan),
+            new StubSemanticPhysicalMappingProvider(mapping),
+            new StubSemanticSqlGenerator(new GeneratedSemanticSql(
+                "SELECT device_code AS deviceCode, log_level AS level, log_message AS message, occurred_at AS occurredAt FROM device_log_cloud_sim_view LIMIT 10",
+                new Dictionary<string, object?>())),
+            new DataAnalysisAuditRecorder(new NoopAuditLogWriter()),
+            NullLogger<SemanticAnalysisRunner>.Instance);
+        var sink = new AgentWorkflowSink();
+
+        var result = await runner.RunAsync(
+            new IntentResult
+            {
+                Intent = "Analysis.DeviceLog.ByLevel",
+                Query = "查看设备 DEV-001 错误和告警日志"
+            },
+            sink,
+            CancellationToken.None);
+        sink.Complete();
+        var chunks = new List<ChatChunk>();
+        await foreach (var chunk in sink.ReadAllAsync(CancellationToken.None))
+        {
+            chunks.Add(chunk);
+        }
+
+        chunks.Should().HaveCount(5);
+        chunks.Should().OnlyContain(chunk => chunk.Type == ChunkType.Widget);
+        using var statsDocument = JsonDocument.Parse(chunks[0].Content);
+        statsDocument.RootElement.GetProperty("type").GetString().Should().Be("StatsCard");
+        statsDocument.RootElement.GetProperty("data").GetProperty("value").GetInt32().Should().Be(3);
+
+        var levelChartChunk = chunks.Single(chunk =>
+        {
+            using var document = JsonDocument.Parse(chunk.Content);
+            return document.RootElement.GetProperty("title").GetString() == "日志级别分布";
+        });
+        using var levelChartDocument = JsonDocument.Parse(levelChartChunk.Content);
+        levelChartDocument.RootElement.GetProperty("data").GetProperty("dataset").GetProperty("source").EnumerateArray()
+            .Should().Contain(row => row.GetProperty("level").GetString() == "ERROR"
+                                     && row.GetProperty("count").GetInt32() == 2);
+
+        var tableChunk = chunks.Single(chunk =>
+        {
+            using var document = JsonDocument.Parse(chunk.Content);
+            return document.RootElement.GetProperty("type").GetString() == "DataTable";
+        });
+        using var tableDocument = JsonDocument.Parse(tableChunk.Content);
+        tableDocument.RootElement.GetProperty("data").GetProperty("rows").GetArrayLength().Should().Be(3);
+        using var resultDocument = JsonDocument.Parse(result);
+        resultDocument.RootElement.GetProperty("display_blocks").GetArrayLength().Should().Be(5);
     }
 
     [Fact]

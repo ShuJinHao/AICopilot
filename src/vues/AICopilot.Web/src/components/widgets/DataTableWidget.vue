@@ -47,9 +47,9 @@ function formatCell(value: unknown) {
 <style scoped>
 .table-widget {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
-  padding: 16px;
+  padding: 14px;
 }
 
 .table-widget header {
@@ -57,7 +57,7 @@ function formatCell(value: unknown) {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding-right: 92px;
+  max-width: calc(100% - 92px);
 }
 
 .table-widget h3 {
@@ -75,10 +75,10 @@ function formatCell(value: unknown) {
 }
 
 .table-scroll {
-  max-height: 360px;
+  max-height: 320px;
   overflow: auto;
   border: 1px solid var(--ai-border);
-  border-radius: 18px;
+  border-radius: 8px;
 }
 
 table {
@@ -90,10 +90,11 @@ table {
 th,
 td {
   border-bottom: 1px solid var(--ai-border);
-  padding: 12px 14px;
+  padding: 10px 12px;
   text-align: left;
-  white-space: nowrap;
   font-size: 13px;
+  line-height: 1.45;
+  vertical-align: top;
 }
 
 th {
@@ -106,8 +107,10 @@ th {
 }
 
 td {
+  max-width: 320px;
   color: var(--ai-text);
   font-weight: 650;
+  overflow-wrap: anywhere;
 }
 
 tbody tr:nth-child(even) td {
@@ -126,5 +129,13 @@ tbody tr:hover td {
   border-radius: 18px;
   color: var(--ai-text-muted);
   font-weight: 800;
+}
+
+@media (max-width: 640px) {
+  .table-widget header {
+    max-width: 100%;
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 </style>

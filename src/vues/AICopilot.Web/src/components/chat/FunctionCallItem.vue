@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { CheckCircle2, LoaderCircle, Wrench } from 'lucide-vue-next'
 import AiTag from '@/components/ai/AiTag.vue'
 import type { FunctionCall } from '@/types/models'
+import { summarizeFunctionArgs, summarizeFunctionResult } from '@/protocol/runtimeDetails'
 
 const props = defineProps<{
   call: FunctionCall
@@ -10,13 +11,8 @@ const props = defineProps<{
 }>()
 
 const isRunning = computed(() => props.call.status === 'calling')
-const argsText = computed(() => {
-  try {
-    return JSON.stringify(JSON.parse(props.call.args), null, 2)
-  } catch {
-    return props.call.args
-  }
-})
+const argsSummary = computed(() => summarizeFunctionArgs(props.call.args))
+const resultSummary = computed(() => summarizeFunctionResult(props.call.result, props.call.status))
 </script>
 
 <template>
@@ -33,10 +29,12 @@ const argsText = computed(() => {
     <details v-if="!mini">
       <summary>
         <Wrench class="h-4 w-4" />
-        参数与结果
+        执行摘要
       </summary>
-      <pre>{{ argsText }}</pre>
-      <pre v-if="call.result">{{ call.result }}</pre>
+      <div class="safe-summary">
+        <span>{{ argsSummary }}</span>
+        <span>{{ resultSummary }}</span>
+      </div>
     </details>
   </div>
 </template>
@@ -87,14 +85,21 @@ summary {
   font-weight: 800;
 }
 
-pre {
-  overflow: auto;
+.safe-summary {
+  display: grid;
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.safe-summary span {
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 14px;
-  margin: 9px 0 0;
+  border-radius: 8px;
   padding: 10px;
   background: var(--ai-graphite-soft);
   color: #f8fafc;
   font-size: 12px;
+  font-weight: 760;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 </style>

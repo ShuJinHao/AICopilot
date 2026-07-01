@@ -12,21 +12,25 @@ const unit = computed(() => props.widget.data?.unit ?? '')
 
 <template>
   <div class="stats-widget">
-    <span class="stats-label">{{ widget.data?.label || widget.title || '指标' }}</span>
+    <div>
+      <span class="stats-label">{{ widget.data?.label || widget.title || '指标' }}</span>
+      <p v-if="widget.description">{{ widget.description }}</p>
+    </div>
     <strong>{{ value }}<small v-if="unit">{{ unit }}</small></strong>
-    <p v-if="widget.description">{{ widget.description }}</p>
   </div>
 </template>
 
 <style scoped>
 .stats-widget {
-  display: grid;
-  gap: 6px;
-  min-width: 180px;
-  padding: 16px;
-  border: 1px solid rgba(216, 255, 120, 0.62);
-  border-radius: 20px;
-  background: linear-gradient(135deg, rgba(239, 255, 190, 0.92), rgba(255, 255, 255, 0.88));
+  display: flex;
+  min-height: 86px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid rgba(200, 255, 61, 0.42);
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(250, 255, 237, 0.96), rgba(255, 255, 255, 0.9));
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
@@ -37,13 +41,14 @@ const unit = computed(() => props.widget.data?.unit ?? '')
 .stats-label {
   color: var(--ai-text-muted);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 850;
 }
 
 .stats-widget strong {
+  flex: 0 0 auto;
   color: var(--ai-text);
-  font-size: 32px;
-  font-weight: 800;
+  font-size: 30px;
+  font-weight: 900;
   line-height: 1.1;
   letter-spacing: 0;
 }
@@ -56,8 +61,19 @@ const unit = computed(() => props.widget.data?.unit ?? '')
 }
 
 .stats-widget p {
-  margin: 0;
+  max-width: 520px;
+  margin: 4px 0 0;
   color: var(--ai-text-muted);
   font-size: 12px;
+  font-weight: 720;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .stats-widget {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 </style>

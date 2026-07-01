@@ -95,6 +95,8 @@ Cloud AiRead 设备契约：
 - DeviceLog 自然语言中的工序/设备范围必须落到只读 `devices` / `mfg_processes` join 暴露的业务字段过滤；不得让最终回答模型按文字自行猜测设备、工序或范围。
 - 用户追问其他日志级别、工序、设备或时间窗口时，意图路由/数据分析执行层必须重新生成并执行对应 `Analysis.DeviceLog.*` 查询；Final Agent 只能总结本轮查询结果，不能基于上一轮回答文本推断未查询级别“有/没有”。
 - DataAnalysis 最终上下文必须携带本轮查询执行事实，包括语义 target/kind、filters、timeRange、limit、returnedRowCount 和证据边界；最终回答必须先核对执行事实再输出结论。
+- DeviceLog 数据分析展示块和 Widget 只能从本轮只读查询返回行、`query_execution` 和 `semantic_summary` 派生；级别分布、时间分布、问题关键词分类、指标和证据表不得由模型编造、Markdown 解析、前端假数据或任意图表配置生成。
+- DeviceLog 最终回答使用 `display_blocks` 时必须按“结论、关键指标、关键记录、可能原因、建议动作、不能直接执行的动作、查询范围”组织；可能原因必须标注为 AI 推断分析，建议动作只能是人工排查建议，不能写成已执行的控制、下发、写入或修复动作。
 - Direct DB 设备 `status` 字段当前是最新 `device_logs.level`，对用户展示必须称为“最新日志级别”，不得包装为实时在线/运行状态。
 - 真实 Cloud Text-to-SQL 验证不得走 Simulation 数据源冒充真实结果；Simulation 只能用于明确标识的模拟链路。
 - 创建或轮换 Cloud PostgreSQL 只读账号只能通过显式确认的受控自动化执行；只能创建/更新专用 readonly role，只授予白名单表 SELECT，不得授予写权限、schema create 权限、superuser、createdb、createrole 或 replication。
@@ -119,6 +121,10 @@ Cloud AiRead 设备契约：
 - 主产品形态是 Codex-like 对话流，不是任务控制台、试点运营台或系统调试台。
 - 普通用户默认只看到用户问题、AI 最终回答、Plan/Goal 摘要、审批卡和结果卡。
 - 模型名、路由模型、意图置信度、工具调用、工具参数、运行事件、中间步骤和风险细节默认折叠到运行详情。
+- 运行详情只能基于本轮 stream/history chunks、消息 metadata 和按会话隔离的运行状态生成安全摘要；不得作为审批、工具执行、AgentTask、Cloud 查询或 Widget 的权威状态源。
+- 运行详情不得展开 SQL 原文、连接串、密码、token、sourceName、表/视图名、endpoint、内部字段、原始工具结果行或未脱敏错误原文；工具参数和结果只能展示白名单业务过滤条件、查询次数、返回行数、截断状态、Widget 类型等安全事实。
+- DeviceLog 固定段落最终回答可以在前端渲染为结构化结果卡，但只能重排已有回答文本；不得新增指标、补未查询数据、改写模型结论或把普通回答强行套成 DeviceLog 结果页。
+- AI 对话中任何可能超过 1 秒的工具调用、DataAnalysis 或 Cloud 只读查询，必须有用户可见、按会话隔离的运行状态；状态只能来自本轮 stream/request/chunk/error/complete 执行事实，不得用假进度、假查询次数或假返回行数填充。
 - 前端必须完整展示后端错误契约中的 `code`、`detail`、`userFacingMessage` 和失败类 `AgentEvent` 详情；不得用泛化文案覆盖真实诊断信息。
 - 前端会话级 Agent 运行状态必须按会话隔离；新建会话、切换会话和切换 Plan/Chat 模式时不得残留其他会话的任务、错误、工作区、产物或上传文件。
 - 模型推理标签例如 `<mm:think>`、`<think>` 或裸 `mm:think` 不得出现在用户可见正文；如保留，只能进入默认折叠的运行详情。

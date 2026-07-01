@@ -1,6 +1,5 @@
 using AICopilot.AiGatewayService.Models;
 using AICopilot.Services.Contracts;
-using AICopilot.Services.CrossCutting.Serialization;
 using AICopilot.Visualization;
 using AICopilot.Visualization.Widgets;
 using Microsoft.Extensions.Logging;
@@ -27,7 +26,12 @@ public sealed class DataAnalysisWidgetEmitter(ILogger<DataAnalysisWidgetEmitter>
             var widget = BuildWidget(output.Decision, rawData, schema);
             if (sink is not null)
             {
-                await sink.WriteAsync(new ChatChunk(DataAnalysisExecutor.ExecutorId, ChunkType.Widget, widget.ToJson()), cancellationToken);
+                await sink.WriteAsync(
+                    new ChatChunk(
+                        DataAnalysisExecutor.ExecutorId,
+                        ChunkType.Widget,
+                        DataAnalysisWidgetPayloadSerializer.Serialize(widget)),
+                    cancellationToken);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

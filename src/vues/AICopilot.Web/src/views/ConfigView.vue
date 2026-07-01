@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { Bot, ClipboardList, Network, RefreshCw, Sparkles } from 'lucide-vue-next'
 import AiButton from '@/components/ai/AiButton.vue'
 import AiCard from '@/components/ai/AiCard.vue'
@@ -150,6 +150,8 @@ const drawerTesting = ref(false)
 const skillDefinitions = ref<SkillDefinition[]>([])
 const toolSummaries = ref<AgentPlannerToolSummary[]>([])
 const isLoadingSkills = ref(false)
+const isLoadingToolCatalog = ref(false)
+const toolCatalogLoaded = ref(false)
 const cloudReadonlyStatus = ref<CloudReadonlyStatus | null>(null)
 const isLoadingCloudReadonlyStatus = ref(false)
 const advancedConfigOpen = ref(false)
@@ -315,7 +317,7 @@ function skillDisplayDescription(skill: SkillDefinition) {
 }
 
 function toolDisplayName(toolCode: string) {
-  return toolSummaries.value.find((tool) => tool.toolCode === toolCode)?.displayName ?? toolCode
+  return (toolSummaries.value ?? []).find((tool) => tool.toolCode === toolCode)?.displayName ?? toolCode
 }
 
 async function refreshSkillDefinitions() {
@@ -328,8 +330,26 @@ async function refreshSkillDefinitions() {
 }
 
 async function refreshToolCatalog() {
-  const catalog = await configService.getToolCatalog()
-  toolSummaries.value = catalog.tools
+  isLoadingToolCatalog.value = true
+  try {
+    const catalog = await configService.getToolCatalog()
+    toolSummaries.value = Array.isArray(catalog.tools) ? catalog.tools : []
+    toolCatalogLoaded.value = true
+  } finally {
+    isLoadingToolCatalog.value = false
+  }
+}
+
+async function ensureToolCatalogLoaded() {
+  if (toolCatalogLoaded.value || isLoadingToolCatalog.value) {
+    return
+  }
+
+  try {
+    await refreshToolCatalog()
+  } catch {
+    toolSummaries.value = []
+  }
 }
 
 async function refreshCloudReadonlyStatus() {
@@ -342,12 +362,17 @@ async function refreshCloudReadonlyStatus() {
 }
 
 async function refreshAllAgentSettings() {
-  await Promise.all([
+  const refreshers = [
     store.refreshAgentSlots(),
     refreshSkillDefinitions(),
-    refreshToolCatalog(),
     refreshCloudReadonlyStatus()
-  ])
+  ]
+
+  if (advancedConfigOpen.value) {
+    refreshers.push(refreshToolCatalog())
+  }
+
+  await Promise.all(refreshers)
 }
 
 function promptLength(template?: ConversationTemplateSummary | null) {
@@ -488,6 +513,12 @@ function openPrimaryModelDialog() {
 function onAdvancedConfigToggle(event: Event) {
   advancedConfigOpen.value = (event.currentTarget as HTMLDetailsElement).open
 }
+
+watch(advancedConfigOpen, (isOpen) => {
+  if (isOpen) {
+    void ensureToolCatalogLoaded()
+  }
+})
 
 function openModelDialog(slot: AgentSlotDefinition, model?: LanguageModelSummary | null) {
   if (model) {

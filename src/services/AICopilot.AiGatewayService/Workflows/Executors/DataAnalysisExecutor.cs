@@ -53,7 +53,7 @@ public class DataAnalysisExecutor(
         var output = new StringBuilder();
         foreach (var intent in semanticIntents)
         {
-            output.AppendLine(await semanticRunner.RunAsync(intent, ct));
+            output.AppendLine(await semanticRunner.RunAsync(intent, sink, ct));
         }
 
         foreach (var intent in databaseIntents)

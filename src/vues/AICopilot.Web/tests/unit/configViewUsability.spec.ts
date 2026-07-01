@@ -24,6 +24,19 @@ describe('ConfigView usability defaults', () => {
       .toBeLessThan(configViewSource.indexOf('<div class="slot-grid">'))
   })
 
+  it('keeps internal tool catalog loading behind advanced settings', () => {
+    const start = configViewSource.indexOf('async function refreshAllAgentSettings()')
+    const end = configViewSource.indexOf('function promptLength', start)
+    const block = configViewSource.slice(start, end)
+
+    expect(block).toContain('if (advancedConfigOpen.value)')
+    expect(block).toContain('refreshToolCatalog()')
+    expect(block).not.toContain('refreshToolCatalog(),')
+    expect(configViewSource).toContain('watch(advancedConfigOpen')
+    expect(configViewSource).toContain('Array.isArray(catalog.tools) ? catalog.tools : []')
+    expect(configViewSource).toContain('(toolSummaries.value ?? []).find')
+  })
+
   it('loads sanitized Cloud readonly status for operations', () => {
     expect(configViewSource).toContain('data-testid="cloud-readonly-status-card"')
     expect(configViewSource).toContain('cloudReadonlyStatusLabel')

@@ -82,14 +82,19 @@ public static class DataAnalysisFinalContextFormatter
         ArgumentNullException.ThrowIfNull(analysis);
         ArgumentNullException.ThrowIfNull(semanticSummary);
 
+        var materializedRows = MaterializeRows(rows);
         var context = new
         {
             analysis = BuildSafeAnalysis(analysis, trustSourceLabel: true),
             source_mode = BuildSourceMode(analysis.SourceLabel),
             answer_contract = BuildAnswerContract(),
-            query_execution = BuildQueryExecution(plan, rows, returnedRowCount),
+            query_execution = BuildQueryExecution(plan, materializedRows, returnedRowCount),
             semantic_summary = BuildSafeSemanticSummary(semanticSummary),
-            business_data_preview = BuildBusinessDataPreview(rows, analysis.Metadata),
+            display_blocks = DeviceLogSemanticDisplayBuilder.BuildContextBlocks(
+                plan,
+                semanticSummary,
+                materializedRows),
+            business_data_preview = BuildBusinessDataPreview(materializedRows, analysis.Metadata),
             query_scope = SanitizeTextValue(semanticSummary.Scope) ?? "结果上限以内的匹配记录",
             is_truncated = isTruncated
         };
@@ -146,7 +151,24 @@ public static class DataAnalysisFinalContextFormatter
             },
             cloud_write_boundary = "AICopilot 不直接修改、提交、下发、补录、删除或上传 Cloud 业务数据。",
             evidence_boundary = "只能回答本轮已查询范围；未覆盖范围不得推断。",
-            follow_up_rule = "追问新范围必须看本轮 query_execution。"
+            follow_up_rule = "追问新范围必须看本轮 query_execution。",
+            default_sections = new[]
+            {
+                "结论",
+                "关键指标",
+                "关键记录",
+                "查询范围"
+            },
+            device_log_display_sections = new[]
+            {
+                "结论",
+                "关键指标",
+                "关键记录",
+                "可能原因",
+                "建议动作",
+                "不能直接执行的动作",
+                "查询范围"
+            }
         };
     }
 
@@ -187,6 +209,16 @@ public static class DataAnalysisFinalContextFormatter
             IReadOnlyCollection<IReadOnlyDictionary<string, object?>> readOnlyCollection => readOnlyCollection.Count,
             ICollection<IReadOnlyDictionary<string, object?>> collection => collection.Count,
             _ => null
+        };
+    }
+
+    private static IReadOnlyList<Dictionary<string, object?>> MaterializeRows(
+        IEnumerable<IReadOnlyDictionary<string, object?>> rows)
+    {
+        return rows switch
+        {
+            IReadOnlyList<Dictionary<string, object?>> dictionaryList => dictionaryList,
+            _ => rows.Select(row => new Dictionary<string, object?>(row, StringComparer.OrdinalIgnoreCase)).ToList()
         };
     }
 

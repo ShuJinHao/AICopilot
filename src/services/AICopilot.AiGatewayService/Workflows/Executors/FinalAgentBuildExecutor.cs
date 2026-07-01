@@ -483,6 +483,8 @@ public class FinalAgentBuildExecutor(
         {
             requirements.Add("如果包含结构化业务数据，请严格按“结论、关键指标、关键记录、查询范围”的顺序作答。");
             requirements.Add("如果 source_mode 表示 Cloud 已有正式只读数据，请把它标注为 Cloud 已有数据；如果表示 DataAnalysis/Text-to-SQL 补充分析，请明确它不是 Cloud 写入接口。");
+            requirements.Add("如果 display_blocks 存在，请优先使用其中的指标、图表和证据表事实，不要把图表展示块描述成已经执行的控制动作。");
+            requirements.Add("如果 DeviceLog display_blocks 存在，最终回答必须按“结论、关键指标、关键记录、可能原因、建议动作、不能直接执行的动作、查询范围”的顺序组织；可能原因必须标注为 AI 推断分析，建议动作只能是人工排查建议。");
             requirements.Add("优先使用 query_execution、semantic_summary 中已经给出的执行条件、返回行数、结论、关键指标、摘要记录和查询范围，不要自行为原始数据重新发明统计结果。");
             requirements.Add("必须按 query_execution 的 filters/time_range/returned_row_count 作答；未覆盖的日志级别、设备、工序或时间范围只能说明未覆盖，不能猜有或没有。");
             requirements.Add("追问其他数据范围时，只有本轮 data_analysis_context 的 query_execution 覆盖该范围才可回答结果。");

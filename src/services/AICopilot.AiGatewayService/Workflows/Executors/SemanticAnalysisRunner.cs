@@ -1,6 +1,7 @@
 using AICopilot.AiGatewayService.Models;
 using AICopilot.AiGatewayService.Workflows;
 using AICopilot.Services.Contracts;
+using AICopilot.Services.Contracts.AiGateway.Dtos;
 using Microsoft.Extensions.Logging;
 
 namespace AICopilot.AiGatewayService.Workflows.Executors;
@@ -22,6 +23,14 @@ public sealed class SemanticAnalysisRunner(
         "[系统提示]: " + RecipeDataReadBoundaryMarker + "。可以回答配方版本规则问题，但不能查询具体配方、设备配方清单或版本记录。";
 
     public async Task<string> RunAsync(IntentResult intent, CancellationToken cancellationToken)
+    {
+        return await RunAsync(intent, sink: null, cancellationToken);
+    }
+
+    public async Task<string> RunAsync(
+        IntentResult intent,
+        AgentWorkflowSink? sink,
+        CancellationToken cancellationToken)
     {
         var planningResult = semanticQueryPlanner.Plan(intent.Intent, intent.Query);
         if (!planningResult.IsSuccess)
@@ -61,7 +70,7 @@ public sealed class SemanticAnalysisRunner(
         {
             if (cloudAiReadClient.IsEnabled && CloudAiReadSemanticSupport.IsSupported(plan.Target))
             {
-                return await RunCloudAiReadAsync(plan, targetLabel, cancellationToken);
+                return await RunCloudAiReadAsync(plan, targetLabel, sink, cancellationToken);
             }
 
             var fallback = await TryRunCloudReadOnlyTextToSqlFallbackAsync(
@@ -223,6 +232,7 @@ public sealed class SemanticAnalysisRunner(
                 sourceLabel,
                 semanticSummary,
                 queryResult.IsTruncated);
+            await TryEmitDeviceLogWidgetsAsync(plan, semanticSummary, normalizedRows, sink, cancellationToken);
             return DataAnalysisFinalContextFormatter.FormatSemantic(
                 analysis,
                 semanticSummary,
@@ -359,6 +369,7 @@ public sealed class SemanticAnalysisRunner(
     private async Task<string> RunCloudAiReadAsync(
         SemanticQueryPlan plan,
         string targetLabel,
+        AgentWorkflowSink? sink,
         CancellationToken cancellationToken)
     {
         try
@@ -380,6 +391,7 @@ public sealed class SemanticAnalysisRunner(
                 rows.Count,
                 queryResult.IsTruncated);
 
+            await TryEmitDeviceLogWidgetsAsync(plan, semanticSummary, rows, sink, cancellationToken);
             return DataAnalysisFinalContextFormatter.FormatSemantic(
                 analysis,
                 semanticSummary,
@@ -404,6 +416,46 @@ public sealed class SemanticAnalysisRunner(
                 CloudAiReadProblemCodes.RequestBlocked => $"[系统提示]: Cloud AiRead {targetLabel}查询未通过只读白名单校验，系统已拒绝执行。",
                 _ => $"[系统提示]: Cloud AiRead {targetLabel}只读接口暂不可用，请稍后重试或联系管理员检查配置。"
             };
+        }
+    }
+
+    private async Task TryEmitDeviceLogWidgetsAsync(
+        SemanticQueryPlan plan,
+        SemanticSummaryDto semanticSummary,
+        IReadOnlyList<Dictionary<string, object?>> rows,
+        AgentWorkflowSink? sink,
+        CancellationToken cancellationToken)
+    {
+        if (sink is null || plan.Target != SemanticQueryTarget.DeviceLog)
+        {
+            return;
+        }
+
+        try
+        {
+            foreach (var widget in DeviceLogSemanticDisplayBuilder.BuildWidgets(plan, semanticSummary, rows))
+            {
+                await sink.WriteAsync(
+                    new ChatChunk(
+                        DataAnalysisExecutor.ExecutorId,
+                        ChunkType.Widget,
+                        DataAnalysisWidgetPayloadSerializer.Serialize(widget)),
+                    cancellationToken);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "{TargetLabel}语义查询展示组件构建失败。Intent: {Intent}, Target: {Target}, Kind: {Kind}",
+                SemanticAnalysisPresentation.GetTargetLabel(plan.Target),
+                plan.Intent,
+                plan.Target,
+                plan.Kind);
         }
     }
 }

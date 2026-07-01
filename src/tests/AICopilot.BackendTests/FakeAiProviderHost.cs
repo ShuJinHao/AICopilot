@@ -1527,6 +1527,11 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
 
         using var document = JsonDocument.Parse(jsonText);
         var queryScope = GetSemanticScope(document.RootElement);
+        if (TryBuildDeviceLogDisplayAnswer(document.RootElement, queryScope, out semanticAnswer))
+        {
+            return true;
+        }
+
         if (document.RootElement.TryGetProperty("semantic_summary", out var summaryElement)
             && summaryElement.ValueKind == JsonValueKind.Object)
         {
@@ -1600,6 +1605,75 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
         return true;
     }
 
+    private static bool TryBuildDeviceLogDisplayAnswer(
+        JsonElement root,
+        string fallbackScope,
+        out string semanticAnswer)
+    {
+        semanticAnswer = string.Empty;
+        if (!TryGetPropertyCaseInsensitive(root, "display_blocks", out var blocksElement)
+            || blocksElement.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        var metricBlock = FindDisplayBlock(blocksElement, "device_log_metrics");
+        var evidenceBlock = FindDisplayBlock(blocksElement, "device_log_evidence_table");
+        if (metricBlock.ValueKind != JsonValueKind.Object || evidenceBlock.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        var sourceMode = GetSummaryString(root, "source_mode");
+        var conclusion = GetSemanticSummaryConclusion(root);
+        var rows = GetEvidenceRows(evidenceBlock).Take(3).ToArray();
+        var lines = new List<string>
+        {
+            $"结论：{BuildDeviceLogConclusionPrefix(sourceMode)}{conclusion}"
+        };
+
+        var metrics = GetDisplayMetrics(metricBlock);
+        if (metrics.Count > 0)
+        {
+            lines.Add("关键指标：");
+            for (var index = 0; index < metrics.Count; index++)
+            {
+                lines.Add($"{index + 1}. {metrics[index]}");
+            }
+        }
+
+        if (rows.Length > 0)
+        {
+            lines.Add("关键记录：");
+            for (var index = 0; index < rows.Length; index++)
+            {
+                lines.Add($"{index + 1}. {DescribeDeviceLogEvidenceRow(rows[index])}");
+            }
+        }
+
+        lines.Add("可能原因：");
+        lines.Add($"1. AI 推断分析：{BuildDeviceLogPossibleReason(blocksElement)}");
+        lines.Add("建议动作：");
+        lines.Add("1. 由现场人员按证据表时间点核对设备、工序、报警和传感器/驱动/通信状态。");
+        lines.Add("2. 优先复核同一时间窗口内重复出现的 ERROR/WARN 级别日志，再结合设备维护记录确认根因。");
+        lines.Add("不能直接执行的动作：");
+        lines.Add("1. AICopilot 不能直接重启设备、修改参数、下发配方、补录/删除日志或写入 Cloud 业务数据。");
+
+        var scope = GetSummaryString(root, "query_scope");
+        if (string.IsNullOrWhiteSpace(scope))
+        {
+            scope = fallbackScope;
+        }
+
+        if (!string.IsNullOrWhiteSpace(scope))
+        {
+            lines.Add($"查询范围：{scope}");
+        }
+
+        semanticAnswer = string.Join(Environment.NewLine, lines);
+        return true;
+    }
+
     private static string GetSemanticScope(JsonElement root)
     {
         if (TryGetPropertyCaseInsensitive(root, "query_scope", out var queryScopeElement))
@@ -1622,6 +1696,159 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
         }
 
         return description[(markerIndex + marker.Length)..].Trim().TrimEnd('。');
+    }
+
+    private static JsonElement FindDisplayBlock(JsonElement blocksElement, string blockId)
+    {
+        foreach (var block in blocksElement.EnumerateArray())
+        {
+            if (string.Equals(GetSummaryString(block, "id"), blockId, StringComparison.OrdinalIgnoreCase))
+            {
+                return block;
+            }
+        }
+
+        return default;
+    }
+
+    private static string GetSemanticSummaryConclusion(JsonElement root)
+    {
+        if (TryGetPropertyCaseInsensitive(root, "semantic_summary", out var summaryElement)
+            && summaryElement.ValueKind == JsonValueKind.Object)
+        {
+            var conclusion = GetSummaryString(summaryElement, "conclusion");
+            if (!string.IsNullOrWhiteSpace(conclusion))
+            {
+                return conclusion;
+            }
+        }
+
+        if (TryGetPropertyCaseInsensitive(root, "query_execution", out var queryExecution)
+            && queryExecution.ValueKind == JsonValueKind.Object
+            && TryGetPropertyCaseInsensitive(queryExecution, "returned_row_count", out var rowCountElement))
+        {
+            return $"本轮返回 {rowCountElement} 条设备日志。";
+        }
+
+        return "已基于本轮只读查询返回设备日志分析结果。";
+    }
+
+    private static string BuildDeviceLogConclusionPrefix(string sourceMode)
+    {
+        if (sourceMode.Contains("Cloud 已有", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Cloud 已有数据，";
+        }
+
+        if (sourceMode.Contains("DataAnalysis", StringComparison.OrdinalIgnoreCase))
+        {
+            return "基于 DataAnalysis 只读查询，";
+        }
+
+        return "基于本轮只读查询，";
+    }
+
+    private static List<string> GetDisplayMetrics(JsonElement metricBlock)
+    {
+        var metrics = new List<string>();
+        if (!TryGetPropertyCaseInsensitive(metricBlock, "metrics", out var metricsElement)
+            || metricsElement.ValueKind != JsonValueKind.Array)
+        {
+            return metrics;
+        }
+
+        foreach (var metric in metricsElement.EnumerateArray())
+        {
+            var label = GetSummaryString(metric, "label");
+            var value = GetSummaryString(metric, "value");
+            var unit = GetSummaryString(metric, "unit");
+            if (string.IsNullOrWhiteSpace(label) || string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            metrics.Add(string.IsNullOrWhiteSpace(unit)
+                ? $"{label}：{value}"
+                : $"{label}：{value} {unit}");
+        }
+
+        return metrics;
+    }
+
+    private static IEnumerable<JsonElement> GetEvidenceRows(JsonElement evidenceBlock)
+    {
+        if (!TryGetPropertyCaseInsensitive(evidenceBlock, "rows", out var rowsElement)
+            || rowsElement.ValueKind != JsonValueKind.Array)
+        {
+            yield break;
+        }
+
+        foreach (var row in rowsElement.EnumerateArray())
+        {
+            if (row.ValueKind == JsonValueKind.Object)
+            {
+                yield return row;
+            }
+        }
+    }
+
+    private static string DescribeDeviceLogEvidenceRow(JsonElement row)
+    {
+        return $"设备 {GetStringValue(row, "deviceCode")}（{GetStringValue(row, "deviceName")}），工序 {GetStringValue(row, "processName")}，级别 {GetStringValue(row, "level")}，内容 {GetStringValue(row, "message")}，时间 {GetStringValue(row, "occurredAt")}";
+    }
+
+    private static string BuildDeviceLogPossibleReason(JsonElement blocksElement)
+    {
+        var issueCategory = TryGetTopChartItem(blocksElement, "issue_category_ranking", "category", out var category, out var categoryCount)
+            ? $"{category}（{categoryCount} 条）"
+            : string.Empty;
+        var levelSummary = TryGetTopChartItem(blocksElement, "level_distribution", "level", out var level, out var levelCount)
+            ? $"{level} 级别占比最高（{levelCount} 条）"
+            : string.Empty;
+
+        if (!string.IsNullOrWhiteSpace(issueCategory) && !issueCategory.StartsWith("其他", StringComparison.Ordinal))
+        {
+            return $"日志关键词集中在 {issueCategory}，可优先排查该类别相关的设备部件、传感器、驱动或通信链路；{levelSummary}。";
+        }
+
+        if (!string.IsNullOrWhiteSpace(levelSummary))
+        {
+            return $"{levelSummary}，说明本轮范围内需要优先核对异常级别日志对应的设备状态和现场事件。";
+        }
+
+        return "当前展示块未形成明确分类集中趋势，需要结合证据表逐条核对现场状态。";
+    }
+
+    private static bool TryGetTopChartItem(
+        JsonElement blocksElement,
+        string blockId,
+        string labelField,
+        out string label,
+        out string count)
+    {
+        label = string.Empty;
+        count = string.Empty;
+        var block = FindDisplayBlock(blocksElement, blockId);
+        if (block.ValueKind != JsonValueKind.Object
+            || !TryGetPropertyCaseInsensitive(block, "chart", out var chartElement)
+            || chartElement.ValueKind != JsonValueKind.Object
+            || !TryGetPropertyCaseInsensitive(chartElement, "dataset", out var datasetElement)
+            || datasetElement.ValueKind != JsonValueKind.Object
+            || !TryGetPropertyCaseInsensitive(datasetElement, "source", out var sourceElement)
+            || sourceElement.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        var firstRow = sourceElement.EnumerateArray().FirstOrDefault(row => row.ValueKind == JsonValueKind.Object);
+        if (firstRow.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        label = GetStringValue(firstRow, labelField);
+        count = GetStringValue(firstRow, "count");
+        return !string.IsNullOrWhiteSpace(label) && label != "-";
     }
 
     private static string BuildSemanticAnswerFromSummary(JsonElement summaryElement, string fallbackScope)
