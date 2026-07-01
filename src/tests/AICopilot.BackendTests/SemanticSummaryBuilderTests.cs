@@ -64,16 +64,16 @@ public sealed class SemanticSummaryBuilderTests
     [Fact]
     public void Builder_ShouldSummarizeDeviceLogs()
     {
-        var plan = CreatePlan(SemanticQueryTarget.DeviceLog, SemanticQueryKind.ByLevel, ("deviceCode", "DEV-001"), ("level", "Error"));
+        var plan = CreatePlan(SemanticQueryTarget.DeviceLog, SemanticQueryKind.ByLevel, ("deviceCode", "DEV-001"), ("level", "ERROR"));
         var rows = new List<Dictionary<string, object?>>
         {
-            CreateRow(("deviceCode", "DEV-001"), ("level", "Warn"), ("message", "Temperature high"), ("occurredAt", "2026-04-20T10:00:00Z")),
-            CreateRow(("deviceCode", "DEV-001"), ("level", "Error"), ("message", "Motor overload"), ("occurredAt", "2026-04-20T11:00:00Z"))
+            CreateRow(("deviceCode", "DEV-001"), ("level", "WARN"), ("message", "Temperature high"), ("occurredAt", "2026-04-20T10:00:00Z")),
+            CreateRow(("deviceCode", "DEV-001"), ("level", "ERROR"), ("message", "Motor overload"), ("occurredAt", "2026-04-20T11:00:00Z"))
         };
 
         var summary = SemanticSummaryBuilder.Build(plan, rows);
 
-        summary.Metrics.Should().Contain(item => item.Name == "levelBreakdown" && item.Value.Contains("Error 1条"));
+        summary.Metrics.Should().Contain(item => item.Name == "levelBreakdown" && item.Value.Contains("ERROR 1条"));
         summary.Metrics.Should().Contain(item => item.Name == "latestOccurredAt" && item.Value.Contains("2026-04-20 11:00:00 UTC"));
     }
 

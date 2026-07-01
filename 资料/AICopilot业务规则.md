@@ -90,6 +90,11 @@ Cloud AiRead 设备契约：
 - CloudReadOnly Text-to-SQL 修复历史不得保存完整 SQL、用户 prompt、连接串、参数值或敏感字段；上一轮失败 SQL 只允许在当前调用内以内存参数临时回传给 LLM 生成下一版，不能写入审计、日志、state、结果或持久化对象。
 - Legacy `DataSourceSelectionMode.TextToSql` / Business Text-to-SQL draft runtime 仍只服务 SimulationBusiness；Agent 侧 CloudReadOnly 查询只能走 governed fallback runner，不能复用会生成 SimulationBusiness SQL 的旧 draft runtime。
 - Direct DB 语义映射中的工序名来自只读 `mfg_processes.process_name`；新增 join 表必须同步进入 `CloudReadOnlyGovernedSchema` 表/列/类型/join hint、SQL guard、BusinessQuery safety schema、只读 role 授权 SQL、授权探针、部署 preflight、RealSource 模板、架构测试和部署文档。
+- DeviceLog 语义查询必须使用真实 Cloud PostgreSQL 日志级别枚举值 `ERROR`、`WARN`、`INFO`，不能生成 `Error`/`Warn`/`Info` 这类大小写不匹配条件。
+- 用户要求“错误警告”“异常分析”“分析错误信息”等场景时，DeviceLog 必须支持 `ERROR + WARN` 多级别只读查询；不能只查 `ERROR` 后把 `WARN` 推断为没有。
+- DeviceLog 自然语言中的工序/设备范围必须落到只读 `devices` / `mfg_processes` join 暴露的业务字段过滤；不得让最终回答模型按文字自行猜测设备、工序或范围。
+- 用户追问其他日志级别、工序、设备或时间窗口时，意图路由/数据分析执行层必须重新生成并执行对应 `Analysis.DeviceLog.*` 查询；Final Agent 只能总结本轮查询结果，不能基于上一轮回答文本推断未查询级别“有/没有”。
+- DataAnalysis 最终上下文必须携带本轮查询执行事实，包括语义 target/kind、filters、timeRange、limit、returnedRowCount 和证据边界；最终回答必须先核对执行事实再输出结论。
 - Direct DB 设备 `status` 字段当前是最新 `device_logs.level`，对用户展示必须称为“最新日志级别”，不得包装为实时在线/运行状态。
 - 真实 Cloud Text-to-SQL 验证不得走 Simulation 数据源冒充真实结果；Simulation 只能用于明确标识的模拟链路。
 - 创建或轮换 Cloud PostgreSQL 只读账号只能通过显式确认的受控自动化执行；只能创建/更新专用 readonly role，只授予白名单表 SELECT，不得授予写权限、schema create 权限、superuser、createdb、createrole 或 replication。

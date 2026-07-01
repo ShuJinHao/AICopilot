@@ -61,6 +61,13 @@ public static class CloudReadOnlyGovernedSchema
                 ("completed_time", "timestamp"))
         };
 
+    public static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> AllowedColumnValueHints =
+        new Dictionary<string, IReadOnlyDictionary<string, string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["device_logs"] = ColumnTypes(
+                ("level", "Allowed values are ERROR, WARN, INFO. Use uppercase exact values in filters."))
+        };
+
     public static readonly IReadOnlyList<CloudReadOnlyJoinHint> JoinHints =
     [
         new("device_logs", "device_id", "devices", "id"),

@@ -135,7 +135,12 @@ public sealed class SemanticSqlGenerator(
         return filter.Operator switch
         {
             SemanticFilterOperator.Equal => CreateBinaryClause(column, "=", filter.Value, parameters, ref parameterIndex),
-            SemanticFilterOperator.Contains => CreateBinaryClause(column, "LIKE", $"%{filter.Value}%", parameters, ref parameterIndex),
+            SemanticFilterOperator.Contains => CreateBinaryClause(
+                column,
+                mapping.Provider == DatabaseProviderType.PostgreSql ? "ILIKE" : "LIKE",
+                $"%{filter.Value}%",
+                parameters,
+                ref parameterIndex),
             SemanticFilterOperator.GreaterOrEqual => CreateBinaryClause(column, ">=", filter.Value, parameters, ref parameterIndex),
             SemanticFilterOperator.LessOrEqual => CreateBinaryClause(column, "<=", filter.Value, parameters, ref parameterIndex),
             SemanticFilterOperator.In => CreateInClause(column, filter.Value, parameters, ref parameterIndex),

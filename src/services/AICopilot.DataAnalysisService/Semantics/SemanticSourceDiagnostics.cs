@@ -25,7 +25,7 @@ public static class SemanticSourceContractCatalog
             ],
             [SemanticQueryTarget.DeviceLog] =
             [
-                "logId", "deviceId", "deviceCode", "level", "message", "source", "occurredAt"
+                "logId", "deviceId", "deviceCode", "deviceName", "processName", "level", "message", "source", "occurredAt"
             ],
             [SemanticQueryTarget.Recipe] =
             [
@@ -222,5 +222,4 @@ public sealed class SemanticSourceInspector(IDatabaseConnector databaseConnector
         };
     }
 }
-
 

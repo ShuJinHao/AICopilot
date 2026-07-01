@@ -19,9 +19,9 @@ public sealed class SemanticDefinitionTests
 
         var deviceLog = catalog.Get(SemanticQueryTarget.DeviceLog);
         deviceLog.AllowedProjectionFields.Should().BeEquivalentTo(
-            ["logId", "deviceId", "deviceCode", "level", "message", "source", "occurredAt"]);
+            ["logId", "deviceId", "deviceCode", "deviceName", "processName", "level", "message", "source", "occurredAt"]);
         deviceLog.AllowedFilterFields.Should().BeEquivalentTo(
-            ["deviceId", "deviceCode", "level", "source"]);
+            ["deviceId", "deviceCode", "deviceName", "processName", "level", "source"]);
         deviceLog.AllowedSortFields.Should().BeEquivalentTo(
             ["occurredAt", "level"]);
 

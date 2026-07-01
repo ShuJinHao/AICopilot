@@ -1,6 +1,7 @@
 using AICopilot.Dapper.Security;
 using AICopilot.DataAnalysisService.Semantics;
 using AICopilot.Services.Contracts;
+using Microsoft.Extensions.Configuration;
 
 namespace AICopilot.BackendTests;
 
@@ -163,6 +164,38 @@ public sealed class SemanticSqlGenerationTests
         sql.SqlText.Should().NotContain("t.");
         sql.Parameters.Should().ContainKey("@p0");
         sql.Parameters.Should().ContainKey("@p1");
+    }
+
+    [Fact]
+    public void SqlGenerator_ShouldUseProcessNameJoinAndIlike_ForRealDeviceLogScopeFilter()
+    {
+        var planningResult = _planner.Plan(
+            "Analysis.DeviceLog.Latest",
+            "替我查询下模切设备最近1天的日志并帮我分析错误信息");
+
+        planningResult.IsSuccess.Should().BeTrue(planningResult.ErrorMessage);
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["DataAnalysis:CloudReadOnly:Enabled"] = "true"
+            })
+            .Build();
+        var mappingProvider = new ConfiguredSemanticPhysicalMappingProvider(configuration);
+        mappingProvider.TryGetMapping(SemanticQueryTarget.DeviceLog, out var mapping).Should().BeTrue();
+
+        var sql = _sqlGenerator.Generate(planningResult.Plan!, mapping);
+
+        sql.SqlText.Should().Contain("FROM device_logs l INNER JOIN devices d ON l.device_id = d.id LEFT JOIN mfg_processes mp ON d.process_id = mp.id");
+        sql.SqlText.Should().Contain("d.device_name AS deviceName");
+        sql.SqlText.Should().Contain("mp.process_name AS processName");
+        sql.SqlText.Should().Contain("mp.process_name ILIKE @p");
+        sql.SqlText.Should().Contain("l.level IN (");
+        sql.SqlText.Should().Contain("l.log_time >= @p");
+        sql.SqlText.Should().Contain("l.log_time <= @p");
+        sql.Parameters.Values.Should().Contain("%模切%");
+        sql.Parameters.Values.Should().Contain("ERROR");
+        sql.Parameters.Values.Should().Contain("WARN");
     }
 
     [Fact]

@@ -1366,7 +1366,7 @@ public sealed class Phase25RuntimeSmokeTests
                 "结论：",
                 "关键记录：",
                 "DEV-001",
-                "Error",
+                "ERROR",
                 "Motor overload");
 
             await AssertSemanticChatAsync(
@@ -1421,7 +1421,7 @@ public sealed class Phase25RuntimeSmokeTests
                 "结论：",
                 "关键记录：",
                 "DEV-001",
-                "Error",
+                "ERROR",
                 "Motor overload");
 
             await EventuallyAsync(async () =>

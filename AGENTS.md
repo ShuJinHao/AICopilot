@@ -47,6 +47,10 @@
 - CloudReadOnly Text-to-SQL 修复历史不得保存完整 SQL、用户 prompt、连接串、参数值或敏感字段；上一轮失败 SQL 只允许在当前调用内以内存参数临时回传给 LLM 生成下一版，不能写入审计、日志、state、结果或持久化对象。
 - Legacy `DataSourceSelectionMode.TextToSql` / Business Text-to-SQL draft runtime 仍只服务 SimulationBusiness；Agent 侧 CloudReadOnly 查询只能走 governed fallback runner，不能复用会生成 SimulationBusiness SQL 的旧 draft runtime。
 - Direct DB 语义映射如需展示工序名，只能通过只读 join `mfg_processes.process_name`；新增 join 表必须同步更新 `CloudReadOnlyGovernedSchema` 表/列/类型/join hint、SQL guard 白名单、BusinessQuery safety schema、只读 role 授权 SQL、授权探针、部署 preflight、RealSource 模板、架构测试和部署文档。
+- DeviceLog 语义查询的日志级别必须使用 Cloud PostgreSQL 真实枚举值 `ERROR`、`WARN`、`INFO`；“错误+警告/异常分析”必须生成多级别只读查询，不能只查单一 `ERROR` 后推断整体无异常。
+- DeviceLog 查询涉及工序或设备自然语言范围时，必须走只读 `devices` / `mfg_processes` join 暴露的业务字段过滤；不得只靠最终回答模型从文本中猜测范围。
+- DataAnalysis 追问其他日志级别、工序、设备或时间窗口时，必须在路由/执行层重新生成并执行 `Analysis.DeviceLog.*` 意图；Final Agent 只能总结本轮 `query_execution` 证据，不能基于上一轮回答文本推断未查询级别“有/没有”。
+- DataAnalysis 最终上下文必须携带本轮查询执行事实，包括语义 target/kind、filters、timeRange、limit、returnedRowCount 和 evidence boundary；最终回答必须先核对这些事实再下结论。
 - Cloud PostgreSQL readonly role 授权的权威载体是 `deploy/enterprise-ai/cloud-readonly/apply-readonly-grants.sql` 和 `check-readonly-grants.sql`；生产只允许对治理白名单表做显式表级 `GRANT SELECT`，不得使用 `GRANT SELECT ON ALL TABLES`、默认权限、未来表自动授权或列级/表级混用口径。
 - CloudReadOnly 直连数据库启用时，服务器 `deploy-release.sh` 必须先运行 `scripts/check-cloud-readonly-grants.sh` 做 fail-fast preflight；权限错误对用户可见诊断只能暴露治理白名单表名，不得输出连接串、role、密码、SQL 原文或非白名单对象。
 - Direct DB 设备字段 `status` 当前表示最新一条 `device_logs.level`，展示口径必须写成“最新日志级别”，不得暗示为实时在线/运行状态。

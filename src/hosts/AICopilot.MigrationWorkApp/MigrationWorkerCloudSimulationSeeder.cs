@@ -191,15 +191,15 @@ internal static class MigrationWorkerCloudSimulationSeeder
                 updated_at = EXCLUDED.updated_at;
 
             INSERT INTO device_logs (id, device_id, level, message, source, log_time, received_at) VALUES
-                (1, 'DEV-ID-001', 'Info', 'Start completed', 'Cloud', '2026-04-20T08:00:00Z', '2026-04-20T08:00:05Z'),
-                (2, 'DEV-ID-001', 'Error', 'Motor overload', 'Cloud', '2026-04-20T10:00:00Z', '2026-04-20T10:00:03Z'),
-                (3, 'DEV-ID-001', 'Warn', 'Temperature high', 'Cloud', '2026-04-21T09:15:00Z', '2026-04-21T09:15:02Z'),
-                (4, 'DEV-ID-002', 'Error', 'Emergency stop', 'Edge', '2026-04-20T11:00:00Z', '2026-04-20T11:00:04Z'),
-                (5, 'DEV-ID-003', 'Info', 'Idle heartbeat', 'Cloud', '2026-04-21T06:50:00Z', '2026-04-21T06:50:01Z'),
-                (6, 'DEV-ID-002', 'Warn', 'Shield gas pressure low', 'Cloud', '2026-04-21T08:20:00Z', '2026-04-21T08:20:02Z'),
-                (7, 'DEV-ID-004', 'Error', 'Spray nozzle blocked', 'Cloud', '2026-04-21T11:10:00Z', '2026-04-21T11:10:03Z'),
-                (8, 'DEV-ID-005', 'Warn', 'Sensor calibration due', 'Cloud', '2026-04-21T12:00:00Z', '2026-04-21T12:00:05Z'),
-                (9, 'DEV-ID-004', 'Info', 'Paint circulation stable', 'Edge', '2026-04-21T07:15:00Z', '2026-04-21T07:15:03Z')
+                (1, 'DEV-ID-001', 'INFO', 'Start completed', 'Cloud', '2026-04-20T08:00:00Z', '2026-04-20T08:00:05Z'),
+                (2, 'DEV-ID-001', 'ERROR', 'Motor overload', 'Cloud', '2026-04-20T10:00:00Z', '2026-04-20T10:00:03Z'),
+                (3, 'DEV-ID-001', 'WARN', 'Temperature high', 'Cloud', '2026-04-21T09:15:00Z', '2026-04-21T09:15:02Z'),
+                (4, 'DEV-ID-002', 'ERROR', 'Emergency stop', 'Edge', '2026-04-20T11:00:00Z', '2026-04-20T11:00:04Z'),
+                (5, 'DEV-ID-003', 'INFO', 'Idle heartbeat', 'Cloud', '2026-04-21T06:50:00Z', '2026-04-21T06:50:01Z'),
+                (6, 'DEV-ID-002', 'WARN', 'Shield gas pressure low', 'Cloud', '2026-04-21T08:20:00Z', '2026-04-21T08:20:02Z'),
+                (7, 'DEV-ID-004', 'ERROR', 'Spray nozzle blocked', 'Cloud', '2026-04-21T11:10:00Z', '2026-04-21T11:10:03Z'),
+                (8, 'DEV-ID-005', 'WARN', 'Sensor calibration due', 'Cloud', '2026-04-21T12:00:00Z', '2026-04-21T12:00:05Z'),
+                (9, 'DEV-ID-004', 'INFO', 'Paint circulation stable', 'Edge', '2026-04-21T07:15:00Z', '2026-04-21T07:15:03Z')
             ON CONFLICT (id) DO UPDATE
             SET device_id = EXCLUDED.device_id,
                 level = EXCLUDED.level,
@@ -273,6 +273,15 @@ internal static class MigrationWorkerCloudSimulationSeeder
                 l.id AS log_id,
                 d.id AS device_id,
                 d.client_code AS device_code,
+                d.device_name,
+                CASE d.process_code
+                    WHEN 'PROC-CUT' THEN 'Cutting'
+                    WHEN 'PROC-WELD' THEN 'Welding'
+                    WHEN 'PROC-ASM' THEN 'Assembly'
+                    WHEN 'PROC-PAINT' THEN 'Painting'
+                    WHEN 'PROC-QC' THEN 'Inspection'
+                    ELSE COALESCE(d.process_code, 'Unknown')
+                END AS process_name,
                 l.level AS log_level,
                 l.message AS log_message,
                 l.source AS log_source,

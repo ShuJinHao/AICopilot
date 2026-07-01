@@ -75,7 +75,9 @@ public static class DataAnalysisFinalContextFormatter
         AnalysisDto analysis,
         SemanticSummaryDto semanticSummary,
         IEnumerable<IReadOnlyDictionary<string, object?>> rows,
-        bool isTruncated)
+        bool isTruncated,
+        SemanticQueryPlan? plan = null,
+        int? returnedRowCount = null)
     {
         ArgumentNullException.ThrowIfNull(analysis);
         ArgumentNullException.ThrowIfNull(semanticSummary);
@@ -85,6 +87,7 @@ public static class DataAnalysisFinalContextFormatter
             analysis = BuildSafeAnalysis(analysis, trustSourceLabel: true),
             source_mode = BuildSourceMode(analysis.SourceLabel),
             answer_contract = BuildAnswerContract(),
+            query_execution = BuildQueryExecution(plan, rows, returnedRowCount),
             semantic_summary = BuildSafeSemanticSummary(semanticSummary),
             business_data_preview = BuildBusinessDataPreview(rows, analysis.Metadata),
             query_scope = SanitizeTextValue(semanticSummary.Scope) ?? "结果上限以内的匹配记录",
@@ -141,7 +144,49 @@ public static class DataAnalysisFinalContextFormatter
                 "建议动作",
                 "不能直接执行的动作"
             },
-            cloud_write_boundary = "AICopilot 不直接修改、提交、下发、补录、删除或上传 Cloud 业务数据。"
+            cloud_write_boundary = "AICopilot 不直接修改、提交、下发、补录、删除或上传 Cloud 业务数据。",
+            evidence_boundary = "只能回答本轮已查询范围；未覆盖范围不得推断。",
+            follow_up_rule = "追问新范围必须看本轮 query_execution。"
+        };
+    }
+
+    private static object BuildQueryExecution(
+        SemanticQueryPlan? plan,
+        IEnumerable<IReadOnlyDictionary<string, object?>> rows,
+        int? returnedRowCount)
+    {
+        var rowCount = returnedRowCount ?? TryCountRows(rows);
+        return new
+        {
+            executed = plan is not null,
+            target = plan?.Target.ToString(),
+            kind = plan?.Kind.ToString(),
+            filters = plan?.Filters.Select(filter => new
+            {
+                field = SanitizeTextValue(filter.Field),
+                @operator = filter.Operator.ToString(),
+                value = SanitizeTextValue(filter.Value)
+            }).ToList() ?? [],
+            time_range = plan?.TimeRange is null
+                ? null
+                : new
+                {
+                    field = SanitizeTextValue(plan.TimeRange.Field),
+                    start = plan.TimeRange.Start?.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
+                    end = plan.TimeRange.End?.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)
+                },
+            limit = plan?.Limit,
+            returned_row_count = rowCount
+        };
+    }
+
+    private static int? TryCountRows(IEnumerable<IReadOnlyDictionary<string, object?>> rows)
+    {
+        return rows switch
+        {
+            IReadOnlyCollection<IReadOnlyDictionary<string, object?>> readOnlyCollection => readOnlyCollection.Count,
+            ICollection<IReadOnlyDictionary<string, object?>> collection => collection.Count,
+            _ => null
         };
     }
 

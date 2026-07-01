@@ -56,6 +56,8 @@ public class IntentRoutingExecutor(
             intentResults = CreateFallbackIntents(request.Message, "routing JSON parse failed");
         }
 
+        DeviceLogFollowUpIntentRewriter.Rewrite(intentResults, history);
+
         var normalizedResponseText = JsonSerializer.Serialize(intentResults, JsonSerializerOptions.Web);
         return new IntentRoutingStepResult(
             intentResults,

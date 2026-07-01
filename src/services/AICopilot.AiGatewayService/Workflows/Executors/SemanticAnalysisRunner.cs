@@ -227,7 +227,9 @@ public sealed class SemanticAnalysisRunner(
                 analysis,
                 semanticSummary,
                 normalizedRows,
-                queryResult.IsTruncated);
+                queryResult.IsTruncated,
+                plan,
+                queryResult.ReturnedRowCount);
         }
         catch (InvalidOperationException ex)
         {
@@ -382,7 +384,9 @@ public sealed class SemanticAnalysisRunner(
                 analysis,
                 semanticSummary,
                 rows,
-                queryResult.IsTruncated);
+                queryResult.IsTruncated,
+                plan,
+                rows.Count);
         }
         catch (CloudAiReadException ex)
         {

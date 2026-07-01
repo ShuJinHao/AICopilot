@@ -130,9 +130,13 @@ internal sealed partial class CloudReadOnlyLlmTextToSqlGenerator(
                                 type = CloudReadOnlyGovernedSchema.AllowedColumnTypes.TryGetValue(table, out var tableColumnTypes)
                                        && tableColumnTypes.TryGetValue(column, out var columnType)
                                     ? columnType
+                                    : null,
+                                valueHint = CloudReadOnlyGovernedSchema.AllowedColumnValueHints.TryGetValue(table, out var tableValueHints)
+                                            && tableValueHints.TryGetValue(column, out var valueHint)
+                                    ? valueHint
                                     : null
                             })
-                            .Where(entry => entry.type is not null)
+                            .Where(entry => entry.type is not null || entry.valueHint is not null)
                             .ToArray()
                     };
                 })

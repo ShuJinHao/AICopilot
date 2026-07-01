@@ -70,6 +70,8 @@ public sealed class ConfiguredSemanticPhysicalMappingProviderTests
         deviceMapping.DatabaseName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.DefaultDatabaseName);
         deviceMapping.SourceName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.DefaultDeviceSourceName);
         deviceLogMapping.SourceName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.DefaultDeviceLogSourceName);
+        deviceLogMapping.IsProjectionFieldAllowed("deviceName").Should().BeTrue();
+        deviceLogMapping.IsFilterFieldAllowed("processName").Should().BeTrue();
         capacityMapping.SourceName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.DefaultCapacitySourceName);
         productionMapping.SourceName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.DefaultProductionDataSourceName);
 
@@ -104,6 +106,9 @@ public sealed class ConfiguredSemanticPhysicalMappingProviderTests
         deviceMapping.FieldMappings["lineName"].Should().Be("mp.process_name");
         deviceLogMapping.SourceName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.RealDeviceLogSourceName);
         deviceLogMapping.FieldMappings["source"].Should().Be("'Cloud'");
+        deviceLogMapping.FieldMappings["deviceName"].Should().Be("d.device_name");
+        deviceLogMapping.FieldMappings["processName"].Should().Be("mp.process_name");
+        deviceLogMapping.IsFilterFieldAllowed("processName").Should().BeTrue();
         deviceLogMapping.IsFilterFieldAllowed("source").Should().BeFalse();
         capacityMapping.SourceName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.RealCapacitySourceName);
         capacityMapping.FromClause.Should().Contain("LEFT JOIN mfg_processes mp");

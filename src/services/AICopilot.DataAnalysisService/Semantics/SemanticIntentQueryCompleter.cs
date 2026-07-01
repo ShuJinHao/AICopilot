@@ -13,6 +13,8 @@ internal static partial class SemanticIntentQueryCompleter
 {
     private const string DeviceLogLatestIntent = "Analysis.DeviceLog.Latest";
     private const string DeviceLogByLevelIntent = "Analysis.DeviceLog.ByLevel";
+    private const string EqualOperator = "eq";
+    private const string InOperator = "in";
 
     public static SemanticIntentQueryCompletion Complete(string intent, string? query)
     {
@@ -28,13 +30,20 @@ internal static partial class SemanticIntentQueryCompleter
         }
 
         var queryText = payload.QueryText;
-        var inferredLevel = payload.GetFilterValue("level") ?? InferLevel(queryText);
+        var existingLevel = payload.GetFilterValue("level");
+        var existingLevelOperator = payload.GetFilterOperator("level");
+        var normalizedExistingLevel = NormalizeLevelFilter(existingLevel);
+        var inferredLevel = normalizedExistingLevel ?? (existingLevel is null ? InferLevelFilter(queryText) : null);
+        var inferredTimeRange = payload.HasTimeRange ? null : InferRelativeTimeRange(queryText);
+        var inferredScopeFilter = payload.HasAnyFilter("deviceCode", "deviceName", "processName")
+            ? null
+            : InferDeviceLogScopeFilter(queryText);
         var asksLatest = ContainsAny(queryText, "最新", "最近") ||
                          ContainsEnglishTerm(queryText, "latest") ||
                          ContainsEnglishTerm(queryText, "recent");
 
         var completedIntent = intent;
-        if (!string.IsNullOrWhiteSpace(inferredLevel))
+        if (inferredLevel is not null)
         {
             completedIntent = DeviceLogByLevelIntent;
         }
@@ -46,9 +55,17 @@ internal static partial class SemanticIntentQueryCompleter
         var shouldRewrite =
             !completedIntent.Equals(intent, StringComparison.OrdinalIgnoreCase) ||
             !payload.IsJson ||
+            (normalizedExistingLevel is not null &&
+             (!string.Equals(existingLevel, normalizedExistingLevel.Value, StringComparison.Ordinal) ||
+             !string.Equals(
+                  string.IsNullOrWhiteSpace(existingLevelOperator) ? EqualOperator : existingLevelOperator,
+                  normalizedExistingLevel.Operator,
+                  StringComparison.OrdinalIgnoreCase))) ||
+            inferredTimeRange is not null ||
+            inferredScopeFilter is not null ||
             (completedIntent.Equals(DeviceLogByLevelIntent, StringComparison.OrdinalIgnoreCase) &&
              !payload.HasFilter("level") &&
-             !string.IsNullOrWhiteSpace(inferredLevel));
+             inferredLevel is not null);
 
         if (!shouldRewrite)
         {
@@ -56,9 +73,19 @@ internal static partial class SemanticIntentQueryCompleter
         }
 
         if (completedIntent.Equals(DeviceLogByLevelIntent, StringComparison.OrdinalIgnoreCase) &&
-            !string.IsNullOrWhiteSpace(inferredLevel))
+            inferredLevel is not null)
         {
-            payload.UpsertFilter("level", inferredLevel);
+            payload.UpsertFilter("level", inferredLevel.Value, inferredLevel.Operator);
+        }
+
+        if (inferredTimeRange is not null)
+        {
+            payload.SetTimeRange("occurredAt", inferredTimeRange.Start, inferredTimeRange.End);
+        }
+
+        if (inferredScopeFilter is not null)
+        {
+            payload.UpsertFilter(inferredScopeFilter.Field, inferredScopeFilter.Value, inferredScopeFilter.Operator);
         }
 
         return new SemanticIntentQueryCompletion(
@@ -67,28 +94,214 @@ internal static partial class SemanticIntentQueryCompleter
             WasCompleted: true);
     }
 
-    private static string? InferLevel(string? queryText)
+    private static LevelFilter? InferLevelFilter(string? queryText)
     {
         if (string.IsNullOrWhiteSpace(queryText))
         {
             return null;
         }
 
-        if (ContainsAny(queryText, "错误", "故障", "异常") || ContainsEnglishTerm(queryText, "error"))
+        var asksError = ContainsAny(queryText, "错误", "故障", "异常") || ContainsEnglishTerm(queryText, "error");
+        var asksWarning = ContainsAny(queryText, "警告", "报警", "告警") ||
+                          ContainsEnglishTerm(queryText, "warn") ||
+                          ContainsEnglishTerm(queryText, "warning");
+        var asksAnalysis = ContainsAny(queryText, "分析", "归因", "排查", "诊断");
+
+        if ((asksError && asksWarning) ||
+            (asksAnalysis && asksError) ||
+            ContainsAny(queryText, "错误警告", "异常日志", "异常告警", "异常报警"))
         {
-            return "Error";
+            return new LevelFilter(InOperator, "ERROR,WARN");
         }
 
-        if (ContainsAny(queryText, "警告", "报警", "告警") ||
-            ContainsEnglishTerm(queryText, "warn") ||
-            ContainsEnglishTerm(queryText, "warning"))
+        if (asksError)
         {
-            return "Warn";
+            return new LevelFilter(EqualOperator, "ERROR");
+        }
+
+        if (asksWarning)
+        {
+            return new LevelFilter(EqualOperator, "WARN");
         }
 
         if (ContainsAny(queryText, "信息") || ContainsEnglishTerm(queryText, "info"))
         {
-            return "Info";
+            return new LevelFilter(EqualOperator, "INFO");
+        }
+
+        return null;
+    }
+
+    private static QueryScopeFilter? InferDeviceLogScopeFilter(string? queryText)
+    {
+        if (string.IsNullOrWhiteSpace(queryText))
+        {
+            return null;
+        }
+
+        var match = DeviceLogScopeRegex().Match(queryText);
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        var scope = CleanScopeCandidate(match.Groups["name"].Value);
+        return string.IsNullOrWhiteSpace(scope)
+            ? null
+            : new QueryScopeFilter("processName", "contains", scope);
+    }
+
+    private static string? CleanScopeCandidate(string raw)
+    {
+        var value = raw.Trim();
+        string[] prefixes =
+        [
+            "替我",
+            "帮我",
+            "请",
+            "查询",
+            "查看",
+            "看",
+            "分析",
+            "排查",
+            "诊断",
+            "一下",
+            "下",
+            "的"
+        ];
+
+        var changed = true;
+        while (changed)
+        {
+            changed = false;
+            foreach (var prefix in prefixes)
+            {
+                if (value.StartsWith(prefix, StringComparison.Ordinal))
+                {
+                    value = value[prefix.Length..].Trim();
+                    changed = true;
+                }
+            }
+        }
+
+        return value.Length is >= 2 and <= 16
+            ? value
+            : null;
+    }
+
+    private static RelativeTimeRange? InferRelativeTimeRange(string? queryText)
+    {
+        if (string.IsNullOrWhiteSpace(queryText))
+        {
+            return null;
+        }
+
+        var duration = TryParseRelativeDuration(queryText);
+        if (duration is null)
+        {
+            return null;
+        }
+
+        var end = DateTimeOffset.UtcNow;
+        return new RelativeTimeRange(end.Subtract(duration.Value), end);
+    }
+
+    private static TimeSpan? TryParseRelativeDuration(string queryText)
+    {
+        var match = RelativeTimeRangeRegex().Match(queryText);
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        var amount = ParseRelativeAmount(match.Groups["amount"].Value);
+        if (amount <= 0)
+        {
+            return null;
+        }
+
+        var unit = match.Groups["unit"].Value;
+        return unit switch
+        {
+            "天" or "日" or "d" or "D" => TimeSpan.FromDays(amount),
+            "小时" or "时" or "h" or "H" => TimeSpan.FromHours(amount),
+            _ => null
+        };
+    }
+
+    private static int ParseRelativeAmount(string value)
+    {
+        if (int.TryParse(value, out var numeric))
+        {
+            return numeric;
+        }
+
+        return value switch
+        {
+            "一" => 1,
+            "二" or "两" => 2,
+            "三" => 3,
+            "四" => 4,
+            "五" => 5,
+            "六" => 6,
+            "七" => 7,
+            "八" => 8,
+            "九" => 9,
+            "十" => 10,
+            _ => 0
+        };
+    }
+
+    private static LevelFilter? NormalizeLevelFilter(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var normalizedLevels = value
+            .Split([',', '|', ';', '，', '；', '/', '、'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(NormalizeSingleLevelValue)
+            .Where(level => level is not null)
+            .Select(level => level!)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        return normalizedLevels.Length switch
+        {
+            0 => null,
+            1 => new LevelFilter(EqualOperator, normalizedLevels[0]),
+            _ => new LevelFilter(InOperator, string.Join(',', normalizedLevels))
+        };
+    }
+
+    private static string? NormalizeSingleLevelValue(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var normalized = value.Trim();
+        if (string.Equals(normalized, "ERROR", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(normalized, "ERR", StringComparison.OrdinalIgnoreCase) ||
+            normalized is "错误" or "故障" or "异常")
+        {
+            return "ERROR";
+        }
+
+        if (string.Equals(normalized, "WARN", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(normalized, "WARNING", StringComparison.OrdinalIgnoreCase) ||
+            normalized is "警告" or "报警" or "告警")
+        {
+            return "WARN";
+        }
+
+        if (string.Equals(normalized, "INFO", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(normalized, "INFORMATION", StringComparison.OrdinalIgnoreCase) ||
+            normalized is "信息" or "正常")
+        {
+            return "INFO";
         }
 
         return null;
@@ -137,6 +350,8 @@ internal static partial class SemanticIntentQueryCompleter
             ? value?.GetValue<string>()
             : null;
 
+        public bool HasTimeRange => root.TryGetPropertyValue("timeRange", out var value) && value is JsonObject;
+
         public static MutableSemanticPayload Parse(string? rawQuery)
         {
             if (string.IsNullOrWhiteSpace(rawQuery))
@@ -170,6 +385,11 @@ internal static partial class SemanticIntentQueryCompleter
             return GetFilterValue(field) is not null;
         }
 
+        public bool HasAnyFilter(params string[] fields)
+        {
+            return fields.Any(HasFilter);
+        }
+
         public string? GetFilterValue(string field)
         {
             var filters = GetFilters(createIfMissing: false);
@@ -190,7 +410,27 @@ internal static partial class SemanticIntentQueryCompleter
             return null;
         }
 
-        public void UpsertFilter(string field, string value)
+        public string? GetFilterOperator(string field)
+        {
+            var filters = GetFilters(createIfMissing: false);
+            if (filters is null)
+            {
+                return null;
+            }
+
+            foreach (var filter in filters.OfType<JsonObject>())
+            {
+                var filterField = GetString(filter, "field");
+                if (field.Equals(filterField, StringComparison.OrdinalIgnoreCase))
+                {
+                    return GetString(filter, "operator");
+                }
+            }
+
+            return null;
+        }
+
+        public void UpsertFilter(string field, string value, string filterOperator = EqualOperator)
         {
             var filters = GetFilters(createIfMissing: true)!;
             foreach (var filter in filters.OfType<JsonObject>())
@@ -199,10 +439,7 @@ internal static partial class SemanticIntentQueryCompleter
                 if (field.Equals(filterField, StringComparison.OrdinalIgnoreCase))
                 {
                     filter["value"] = value;
-                    if (string.IsNullOrWhiteSpace(GetString(filter, "operator")))
-                    {
-                        filter["operator"] = "eq";
-                    }
+                    filter["operator"] = filterOperator;
 
                     return;
                 }
@@ -211,9 +448,19 @@ internal static partial class SemanticIntentQueryCompleter
             filters.Add(new JsonObject
             {
                 ["field"] = field,
-                ["operator"] = "eq",
+                ["operator"] = filterOperator,
                 ["value"] = value
             });
+        }
+
+        public void SetTimeRange(string field, DateTimeOffset start, DateTimeOffset end)
+        {
+            root["timeRange"] = new JsonObject
+            {
+                ["field"] = field,
+                ["start"] = start.ToUniversalTime().ToString("O"),
+                ["end"] = end.ToUniversalTime().ToString("O")
+            };
         }
 
         public string ToJson()
@@ -245,4 +492,16 @@ internal static partial class SemanticIntentQueryCompleter
                 : null;
         }
     }
+
+    private sealed record LevelFilter(string Operator, string Value);
+
+    private sealed record RelativeTimeRange(DateTimeOffset Start, DateTimeOffset End);
+
+    private sealed record QueryScopeFilter(string Field, string Operator, string Value);
+
+    [GeneratedRegex(@"(?:最近|近|过去)\s*(?<amount>\d+|一|二|两|三|四|五|六|七|八|九|十)\s*(?<unit>天|日|小时|时|d|D|h|H)", RegexOptions.CultureInvariant)]
+    private static partial Regex RelativeTimeRangeRegex();
+
+    [GeneratedRegex(@"(?<name>[\p{L}\p{N}_\-]{1,24})(?:工序|设备|机台)", RegexOptions.CultureInvariant)]
+    private static partial Regex DeviceLogScopeRegex();
 }

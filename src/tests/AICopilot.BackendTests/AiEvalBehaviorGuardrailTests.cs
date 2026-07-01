@@ -89,12 +89,18 @@ public sealed class AiEvalBehaviorGuardrailTests
             analysis,
             summary,
             rows,
-            isTruncated: false);
+            isTruncated: false,
+            plan,
+            returnedRowCount: 1);
         using var document = JsonDocument.Parse(context);
+        var queryExecution = document.RootElement.GetProperty("query_execution");
         var previewRow = document.RootElement
             .GetProperty("business_data_preview")[0];
 
         context.Should().Contain("business_data_preview");
+        queryExecution.GetProperty("executed").GetBoolean().Should().BeTrue();
+        queryExecution.GetProperty("target").GetString().Should().Be("Device");
+        queryExecution.GetProperty("returned_row_count").GetInt32().Should().Be(1);
         previewRow.GetProperty("设备编码").GetString().Should().Be("D01");
         previewRow.GetProperty("最新日志级别").GetString().Should().Be("Running");
         previewRow.GetProperty("日志内容").GetString().Should().Be("[已移除疑似指令或内部细节]");

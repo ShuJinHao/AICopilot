@@ -29,14 +29,14 @@ public sealed class DeviceLogSemanticDefinition : SemanticEntityDefinition
         : base(
             SemanticQueryTarget.DeviceLog,
             ["设备日志", "报警日志", "运行日志", "故障日志", "device log", "alarm log"],
-            ["logId", "deviceId", "deviceCode", "level", "message", "source", "occurredAt"],
-            ["deviceId", "deviceCode", "level", "source"],
+            ["logId", "deviceId", "deviceCode", "deviceName", "processName", "level", "message", "source", "occurredAt"],
+            ["deviceId", "deviceCode", "deviceName", "processName", "level", "source"],
             ["occurredAt", "level"],
             new Dictionary<SemanticQueryKind, SemanticProjection>
             {
-                [SemanticQueryKind.Latest] = new(["deviceCode", "level", "message", "occurredAt"]),
-                [SemanticQueryKind.Range] = new(["deviceCode", "level", "message", "source", "occurredAt"]),
-                [SemanticQueryKind.ByLevel] = new(["deviceCode", "level", "message", "occurredAt"])
+                [SemanticQueryKind.Latest] = new(["deviceCode", "deviceName", "processName", "level", "message", "occurredAt"]),
+                [SemanticQueryKind.Range] = new(["deviceCode", "deviceName", "processName", "level", "message", "source", "occurredAt"]),
+                [SemanticQueryKind.ByLevel] = new(["deviceCode", "deviceName", "processName", "level", "message", "occurredAt"])
             },
             defaultLimit: 50,
             maxLimit: 200)
