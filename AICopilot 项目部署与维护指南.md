@@ -107,14 +107,15 @@ Cloud AiRead 契约：
 
 - 设备列表：`GET /api/v1/ai/read/devices`，参数为 `maxRows` 和可选 `keyword`。
 - 产能摘要：`GET /api/v1/ai/read/capacity/summary`，参数为 `deviceId`、`startDate`、`endDate`、`maxRows`。
-- 设备日志：`GET /api/v1/ai/read/device-logs`，参数为 `deviceId`、`startTime`、`endTime`、`maxRows`。
-- 过站记录：`GET /api/v1/ai/read/pass-stations/{typeKey}`，必须显式传入 `{typeKey}`，参数为 `deviceId`、`startTime`、`endTime`、`maxRows`。
+- 小时产能：`GET /api/v1/ai/read/capacity/hourly`，参数为 `deviceId`、`date` 或 `preset`、可选 `plcName`、`maxRows`。
+- 设备日志：`GET /api/v1/ai/read/device-logs`，参数为 `deviceId`、`startTime`/`endTime` 或 `preset`、可选 `level` 或 `minLevel`、可选 `keyword`、`maxRows`。
+- 生产记录：`GET /api/v1/ai/read/production-records`，参数为 `typeKey`/`processId`/`deviceId` 至少一个、`startTime`/`endTime` 或 `preset`、可选 `barcode`、`result`、`fieldMode`、`maxRows`；新工序字段通过返回的 `fieldSchema`/`fields` 通用加载。
 - `deviceCode` 只能用于设备查询/解析，无法唯一命中时不得继续读取业务数据。
 - P12/P13 的 `scenarioId`、`from`、`to`、`boundary`、`intentId`、`goalHash`、`analysisType`、`pilotWindowId` 等只允许留在 AICopilot 内部审计，不得作为 Cloud query 参数。
 - AICopilot 不读取未批准的配方主数据、配方详情或配方版本。
 - Simulation 只能用于联调和演示，不能作为生产验收结果。
 
-内部开发验证也允许走 DataAnalysis direct Cloud readonly DB：只读连接串放在 GitHub production environment
+内部开发低频探索验证也允许走 DataAnalysis direct Cloud readonly DB：只读连接串放在 GitHub production environment
 secret `DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING`，本地可用
 `scripts/Set-AICopilotCloudReadOnlyDbSecret.sh` 写入并触发
 `aicopilot-enable-direct-cloud-readonly-db`。该路径只注册 AICopilot DataAnalysis

@@ -66,8 +66,9 @@ The current Cloud-facing read contract is explicit and narrow:
 | --- | --- | --- |
 | Devices | `GET /api/v1/ai/read/devices` | `maxRows`, optional `keyword` |
 | Capacity summary | `GET /api/v1/ai/read/capacity/summary` | `deviceId`, `startDate`, `endDate`, `maxRows` |
-| Device logs | `GET /api/v1/ai/read/device-logs` | `deviceId`, `startTime`, `endTime`, `maxRows` |
-| Pass station records | `GET /api/v1/ai/read/pass-stations/{typeKey}` | route `{typeKey}`, `deviceId`, `startTime`, `endTime`, `maxRows` |
+| Device logs | `GET /api/v1/ai/read/device-logs` | `deviceId`, `startTime`/`endTime` or `preset`, optional `level` or `minLevel`, optional `keyword`, `maxRows` |
+| Capacity hourly | `GET /api/v1/ai/read/capacity/hourly` | `deviceId`, `date` or `preset`, optional `plcName`, `maxRows` |
+| Production records | `GET /api/v1/ai/read/production-records` | one of `typeKey`/`processId`/`deviceId`, `startTime`/`endTime` or `preset`, optional `barcode`, `result`, `fieldMode`, `maxRows` |
 
 `deviceCode` is a device query/display value only. It must not be sent to Cloud as `deviceId`. P12/P13 pilot metadata such as `scenarioId`, `from`, `to`, `boundary`, `intentId`, `goalHash`, `analysisType`, or `pilotWindowId` is internal AICopilot audit context and must not be forwarded as Cloud query parameters.
 
@@ -135,7 +136,7 @@ Before any AICopilot-to-Cloud integration PR:
 Before production acceptance, keep the following explicit:
 
 - Confirm service-account permissions and audit categories for the current Cloud AiRead endpoints.
-- Define read-only reporting views for DataAnalysis if Text-to-SQL needs Cloud reporting data.
+- Define read-only reporting views for DataAnalysis only for low-frequency governed exploration that is not covered by current Cloud AiRead endpoints.
 - Decide which business documents should be indexed into RAG.
 - Define a Cloud-owned AI-facing API convention before any write-capable action is even considered.
 - Do not keep ordinary Real CloudReadonly, Simulation, Sandbox, and Pilot as parallel production read paths. Simulation is only for test/demo; production read must use the approved Cloud AiRead / P12 / P13 controlled path.

@@ -582,9 +582,13 @@ public sealed class ArchitectureBoundaryTests
         seeder.Should().Contain("ReadOnlyCredentialVerified");
         seeder.Should().Contain("DataAnalysis CloudReadOnly direct database mode cannot be enabled while CloudReadonly Simulation seeding is enabled.");
 
+        semanticRunner.IndexOf("cloudAiReadClient.IsEnabled && IsHighFrequencyCloudAiReadTarget(plan.Target)", StringComparison.Ordinal)
+            .Should()
+            .BeLessThan(semanticRunner.IndexOf("semanticPhysicalMappingProvider.TryGetMapping", StringComparison.Ordinal));
         semanticRunner.IndexOf("semanticPhysicalMappingProvider.TryGetMapping", StringComparison.Ordinal)
             .Should()
-            .BeLessThan(semanticRunner.IndexOf("return await RunCloudAiReadAsync", StringComparison.Ordinal));
+            .BeLessThan(semanticRunner.IndexOf("cloudAiReadClient.IsEnabled && CloudAiReadSemanticSupport.IsSupported(plan.Target)", StringComparison.Ordinal));
+        semanticRunner.Should().Contain("IsHighFrequencyCloudAiReadTarget");
 
         governedSchema.Should().Contain("mfg_processes");
     }

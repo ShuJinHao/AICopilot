@@ -5,6 +5,21 @@ namespace AICopilot.Infrastructure.CloudRead;
 
 internal static class CloudAiReadQueryParameterBuilder
 {
+    private static readonly HashSet<string> TimePresetValues = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "last_24h",
+        "last_7d",
+        "today",
+        "yesterday"
+    };
+
+    private static readonly HashSet<string> CapacityHourlyPresetValues = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "last_24h",
+        "today",
+        "yesterday"
+    };
+
     public static Dictionary<string, string?> BuildDeviceQueryParameters(CloudAiReadQuery query)
     {
         var parameters = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
@@ -43,14 +58,27 @@ internal static class CloudAiReadQueryParameterBuilder
     public static Dictionary<string, string?> BuildDeviceLogQueryParameters(CloudAiReadQuery query)
     {
         var deviceId = RequireFilterValue(query, "deviceId", "请补充设备 ID。", "deviceId");
-        var (start, end) = RequireTimeRange(query, "请补充日志查询的开始时间和结束时间。");
+        var (start, end, preset) = ResolveTimeRangeOrPreset(
+            query,
+            "请补充日志查询的开始时间和结束时间，或使用 preset。",
+            TimePresetValues);
+        var level = GetFilterValue(query, "level");
+        var minLevel = GetFilterValue(query, "minLevel");
+        if (!string.IsNullOrWhiteSpace(level) && !string.IsNullOrWhiteSpace(minLevel))
+        {
+            throw new CloudAiReadException(
+                CloudAiReadProblemCodes.MissingRequiredParameter,
+                "Cloud AiRead 查询参数 level 和 minLevel 不能同时传，请只保留一种日志级别条件。");
+        }
 
         var parameters = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
             ["deviceId"] = deviceId,
-            ["startTime"] = FormatCloudTime(start),
-            ["endTime"] = FormatCloudTime(end),
-            ["level"] = GetFilterValue(query, "level"),
+            ["startTime"] = start.HasValue ? FormatCloudTime(start.Value) : null,
+            ["endTime"] = end.HasValue ? FormatCloudTime(end.Value) : null,
+            ["preset"] = preset,
+            ["level"] = level,
+            ["minLevel"] = minLevel,
             ["keyword"] = FirstNonBlank(GetFilterValue(query, "keyword", "message", "source"), query.QueryText),
             ["maxRows"] = FormatMaxRows(query.Limit)
         };
@@ -58,17 +86,79 @@ internal static class CloudAiReadQueryParameterBuilder
         return parameters;
     }
 
-    public static Dictionary<string, string?> BuildPassStationQueryParameters(CloudAiReadQuery query)
+    public static Dictionary<string, string?> BuildCapacityHourlyQueryParameters(CloudAiReadQuery query)
     {
-        var (start, end) = RequireTimeRange(query, "请补充过站/生产数据查询的开始时间和结束时间。");
         var deviceId = RequireFilterValue(query, "deviceId", "请补充设备 ID。", "deviceId");
+        var date = GetFilterValue(query, "date", "shiftDate");
+        var preset = GetFilterValue(query, "preset");
+        if (!string.IsNullOrWhiteSpace(date) && !string.IsNullOrWhiteSpace(preset))
+        {
+            throw new CloudAiReadException(
+                CloudAiReadProblemCodes.MissingRequiredParameter,
+                "Cloud AiRead 查询参数 date 和 preset 不能同时传，请只保留一种小时产能时间条件。");
+        }
+
+        if (string.IsNullOrWhiteSpace(date) && string.IsNullOrWhiteSpace(preset))
+        {
+            throw new CloudAiReadException(
+                CloudAiReadProblemCodes.MissingRequiredParameter,
+                "Cloud AiRead 查询缺少必需参数 date 或 preset，请补充小时产能查询日期。");
+        }
+
+        if (!string.IsNullOrWhiteSpace(preset) && !CapacityHourlyPresetValues.Contains(preset))
+        {
+            throw new CloudAiReadException(
+                CloudAiReadProblemCodes.MissingRequiredParameter,
+                "Cloud AiRead 查询参数 preset 只支持 last_24h、today、yesterday。");
+        }
+
+        return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["deviceId"] = deviceId,
+            ["date"] = string.IsNullOrWhiteSpace(preset) ? date : null,
+            ["preset"] = preset,
+            ["plcName"] = GetFilterValue(query, "plcName", "processName"),
+            ["maxRows"] = FormatMaxRows(query.Limit)
+        };
+    }
+
+    public static Dictionary<string, string?> BuildProductionRecordQueryParameters(CloudAiReadQuery query)
+    {
+        var (start, end, preset) = ResolveTimeRangeOrPreset(
+            query,
+            "请补充生产数据查询的开始时间和结束时间，或使用 preset。",
+            TimePresetValues);
+        var typeKey = GetFilterValue(query, "typeKey", "stationName");
+        var processId = GetFilterValue(query, "processId");
+        var deviceId = GetFilterValue(query, "deviceId");
+        if (string.IsNullOrWhiteSpace(typeKey) &&
+            string.IsNullOrWhiteSpace(processId) &&
+            string.IsNullOrWhiteSpace(deviceId))
+        {
+            throw new CloudAiReadException(
+                CloudAiReadProblemCodes.MissingRequiredParameter,
+                "Cloud AiRead 查询缺少必需参数 typeKey、processId 或 deviceId，请补充生产数据查询范围。");
+        }
+
+        var fieldMode = (GetFilterValue(query, "fieldMode") ?? "list").Trim().ToLowerInvariant();
+        if (fieldMode is not ("list" or "full"))
+        {
+            throw new CloudAiReadException(
+                CloudAiReadProblemCodes.MissingRequiredParameter,
+                "Cloud AiRead 查询参数 fieldMode 只支持 list 或 full。");
+        }
 
         var parameters = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
+            ["typeKey"] = typeKey,
+            ["processId"] = processId,
             ["deviceId"] = deviceId,
-            ["startTime"] = FormatCloudTime(start),
-            ["endTime"] = FormatCloudTime(end),
+            ["startTime"] = start.HasValue ? FormatCloudTime(start.Value) : null,
+            ["endTime"] = end.HasValue ? FormatCloudTime(end.Value) : null,
+            ["preset"] = preset,
             ["barcode"] = GetFilterValue(query, "barcode"),
+            ["result"] = GetFilterValue(query, "result"),
+            ["fieldMode"] = fieldMode,
             ["maxRows"] = FormatMaxRows(query.Limit)
         };
 
@@ -119,6 +209,37 @@ internal static class CloudAiReadQueryParameterBuilder
         throw new CloudAiReadException(
             CloudAiReadProblemCodes.MissingRequiredParameter,
             $"Cloud AiRead 查询缺少必需时间范围，{guidance}");
+    }
+
+    private static (DateTimeOffset? Start, DateTimeOffset? End, string? Preset) ResolveTimeRangeOrPreset(
+        CloudAiReadQuery query,
+        string guidance,
+        IReadOnlySet<string> allowedPresets)
+    {
+        var preset = GetFilterValue(query, "preset");
+        var hasPreset = !string.IsNullOrWhiteSpace(preset);
+        var hasStartOrEnd = query.TimeRange?.Start is not null || query.TimeRange?.End is not null;
+        if (hasPreset && hasStartOrEnd)
+        {
+            throw new CloudAiReadException(
+                CloudAiReadProblemCodes.MissingRequiredParameter,
+                "Cloud AiRead 查询参数 preset 和 startTime/endTime 不能同时传，请只保留一种时间条件。");
+        }
+
+        if (hasPreset)
+        {
+            if (!allowedPresets.Contains(preset!))
+            {
+                throw new CloudAiReadException(
+                    CloudAiReadProblemCodes.MissingRequiredParameter,
+                    $"Cloud AiRead 查询参数 preset 不支持 {preset}。");
+            }
+
+            return (null, null, preset);
+        }
+
+        var (start, end) = RequireTimeRange(query, guidance);
+        return (start, end, null);
     }
 
     private static string? GetFilterValue(CloudAiReadQuery query, params string[] fieldNames)

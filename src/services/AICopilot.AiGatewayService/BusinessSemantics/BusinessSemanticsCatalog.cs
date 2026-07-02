@@ -102,7 +102,7 @@ public sealed class BusinessSemanticsCatalog : IBusinessSemanticsCatalog
         "Choose Analysis.Recipe.* only to return the configured recipe data-read boundary message; AICopilot must not read Cloud recipe master data or recipe version records.",
         "Choose Analysis.Capacity.* only for capacity, output, yield, or qualified quantity questions.",
         "Choose Analysis.ProductionData.* only for production record, station record, or barcode trace questions.",
-        "Analysis intents are read-only. Internal real Cloud semantic queries prefer DataAnalysis CloudReadOnly Direct DB mappings; Cloud AiRead is reserved for future external readonly API integration; recipe data remains blocked."
+        "Analysis intents are read-only. High-frequency Cloud device logs, capacity, and production data prefer Cloud AiRead APIs; CloudReadOnly Direct DB/Text-to-SQL stays a low-frequency governed exploration fallback; recipe data remains blocked."
     ],
     [
         "Concrete recipe list/detail/version-history data questions should choose Analysis.Recipe.* only for the boundary response; recipe lifecycle rule questions should choose Policy.RecipeVersioning.",
@@ -173,7 +173,7 @@ public sealed class BusinessSemanticsCatalog : IBusinessSemanticsCatalog
             "Analysis.DeviceLog.ByLevel" => new(
                 intent,
                 ["查看设备 DEV-001 的错误日志"],
-                """{"queryText":"查看设备 DEV-001 的错误日志","filters":[{"field":"deviceCode","operator":"eq","value":"DEV-001"},{"field":"level","operator":"eq","value":"Error"}],"sort":{"field":"occurredAt","direction":"desc"},"limit":20}"""),
+                """{"queryText":"查看设备 DEV-001 的错误日志","filters":[{"field":"deviceCode","operator":"eq","value":"DEV-001"},{"field":"level","operator":"eq","value":"ERROR"}],"sort":{"field":"occurredAt","direction":"desc"},"limit":20}"""),
             "Analysis.Recipe.List" => new(
                 intent,
                 ["列出设备 DEV-001 的配方"],

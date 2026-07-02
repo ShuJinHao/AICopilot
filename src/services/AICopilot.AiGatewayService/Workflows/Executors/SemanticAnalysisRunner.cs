@@ -66,6 +66,11 @@ public sealed class SemanticAnalysisRunner(
             return RecipeDataReadBoundaryMessage;
         }
 
+        if (cloudAiReadClient.IsEnabled && IsHighFrequencyCloudAiReadTarget(plan.Target))
+        {
+            return await RunCloudAiReadAsync(plan, targetLabel, sink, cancellationToken);
+        }
+
         if (!semanticPhysicalMappingProvider.TryGetMapping(plan.Target, out var mapping))
         {
             if (cloudAiReadClient.IsEnabled && CloudAiReadSemanticSupport.IsSupported(plan.Target))
@@ -457,5 +462,12 @@ public sealed class SemanticAnalysisRunner(
                 plan.Target,
                 plan.Kind);
         }
+    }
+
+    private static bool IsHighFrequencyCloudAiReadTarget(SemanticQueryTarget target)
+    {
+        return target is SemanticQueryTarget.DeviceLog
+            or SemanticQueryTarget.Capacity
+            or SemanticQueryTarget.ProductionData;
     }
 }

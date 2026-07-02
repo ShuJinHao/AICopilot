@@ -39,8 +39,8 @@
 - Cloud AiRead 正式设备参数是 `deviceId`；`deviceCode` 只能用于设备查询/解析，不得被当作 `deviceId` 发送给 Cloud。
 - Cloud 只读读取只能向 Cloud 发送真实端点参数；`scenarioId`、`from`、`to`、`pilotWindowId`、`boundary` 等试点元数据不得透传给 Cloud。
 - 内部开发允许通过 DataAnalysis `CloudReadOnly` 只读数据源直连真实 Cloud PostgreSQL 做 Text-to-SQL 验证；必须使用已验证只读数据库账号、白名单表字段和只读 SQL guard，不得写 Cloud 业务数据，也不得用 Simulation 冒充真实数据。
-- 内部真实 Cloud 语义查询优先走 DataAnalysis `CloudReadOnly` Direct DB 映射；Cloud AiRead 封存为未来外部系统只读 API 接入口，不能在内部映射存在时压过 Direct DB。
-- CloudReadOnly 探索型 Text-to-SQL 只能作为强语义 intent / Direct DB SQL 失败后的受控 fallback，不能拆分或重命名既有 `Analysis.*` intent，也不能压过可用的强语义路径。
+- 高频设备日志、小时/汇总产能和生产数据查询优先走 Cloud AiRead 正式只读 API；DataAnalysis `CloudReadOnly` Direct DB / Text-to-SQL 只作为低频探索、治理白名单内补充分析或未覆盖只读链路兜底，不得压过已批准的高频 Cloud AiRead 端点。
+- CloudReadOnly 探索型 Text-to-SQL 只能作为强语义 intent 覆盖外、低频探索或 Direct DB SQL 失败后的受控 fallback，不能拆分或重命名既有 `Analysis.*` intent，也不能压过可用的高频 Cloud AiRead 路径。
 - CloudReadOnly Text-to-SQL fallback 必须同时满足已验证只读凭据、共享白名单 schema、LLM 结构化生成、SELECT-only SQL guard、BusinessQuery safety policy 双层表/列白名单、只读执行和 hash-only 审计；生产 fallback 不得退化为规则 SQL 模板。
 - CloudReadOnly Text-to-SQL LLM prompt 可见的物理 schema 仅限 `CloudReadOnlyGovernedSchema` 批准的表名、列名、列类型、join hints 和必要业务描述；不得暴露连接串、凭据、role/权限细节、样例数据、查询结果、参数值、非白名单表字段或系统/敏感字段。
 - CloudReadOnly Text-to-SQL 修复重试默认最多 3 次、硬上限 5 次；timeout、权限、凭据、非只读、系统表、敏感字段、多语句或写 SQL 默认不可修复、不重试。

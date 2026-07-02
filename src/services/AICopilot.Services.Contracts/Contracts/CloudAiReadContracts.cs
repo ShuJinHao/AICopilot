@@ -93,6 +93,8 @@ public static class CloudAiReadEndpointPolicy
     [
         "/api/v1/ai/read/devices",
         "/api/v1/ai/read/capacity/summary",
+        "/api/v1/ai/read/capacity/hourly",
+        "/api/v1/ai/read/production-records",
         "/api/v1/ai/read/device-logs"
     ];
 
@@ -194,24 +196,8 @@ public static class CloudAiReadEndpointPolicy
 
     private static bool IsAllowedGetPath(string normalizedPath)
     {
-        if (AllowedGetPaths.Contains(normalizedPath, StringComparer.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        if (normalizedPath.StartsWith("/api/v1/ai/identity/", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        const string passStationPrefix = "/api/v1/ai/read/pass-stations/";
-        if (!normalizedPath.StartsWith(passStationPrefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        var typeKey = normalizedPath[passStationPrefix.Length..];
-        return IsSafeRouteSegment(typeKey);
+        return AllowedGetPaths.Contains(normalizedPath, StringComparer.OrdinalIgnoreCase) ||
+               normalizedPath.StartsWith("/api/v1/ai/identity/", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool TryNormalizePath(
@@ -275,12 +261,9 @@ public sealed record CloudAiReadQuery(
     CloudAiReadTimeRange? TimeRange,
     string? SortField,
     bool SortDescending,
-    int Limit,
-    string? PassStationTypeKey = null)
+    int Limit)
 {
-    public static CloudAiReadQuery FromSemanticPlan(
-        SemanticQueryPlan plan,
-        string? passStationTypeKey = null)
+    public static CloudAiReadQuery FromSemanticPlan(SemanticQueryPlan plan)
     {
         return new CloudAiReadQuery(
             plan.QueryText,
@@ -302,8 +285,12 @@ public sealed record CloudAiReadQuery(
                 : new CloudAiReadTimeRange(plan.TimeRange.Field, plan.TimeRange.Start, plan.TimeRange.End),
             plan.Sort?.Field,
             plan.Sort?.Direction == SemanticSortDirection.Desc,
-            plan.Limit,
-            passStationTypeKey);
+            plan.Limit);
+    }
+
+    public CloudAiReadQuery WithFilters(IReadOnlyList<CloudAiReadFilter> filters)
+    {
+        return this with { Filters = filters };
     }
 }
 
@@ -326,35 +313,62 @@ public sealed record CloudAiReadDeviceDto(
     IReadOnlyDictionary<string, object?> AdditionalFields);
 
 public sealed record CloudAiReadCapacitySummaryDto(
-    string? RecordId,
-    string? DeviceId,
-    string? DeviceCode,
-    string? ProcessName,
-    string? ShiftDate,
-    decimal? OutputQty,
-    decimal? QualifiedQty,
-    DateTimeOffset? OccurredAt,
+    string? Date,
+    decimal? TotalCount,
+    decimal? OkCount,
+    decimal? NgCount,
+    decimal? DayShiftTotal,
+    decimal? NightShiftTotal,
+    IReadOnlyDictionary<string, object?> AdditionalFields);
+
+public sealed record CloudAiReadCapacityHourlyDto(
+    DateTimeOffset? Time,
+    string? Date,
+    int? Hour,
+    int? Minute,
+    string? TimeLabel,
+    string? ShiftCode,
+    decimal? TotalCount,
+    decimal? OkCount,
+    decimal? NgCount,
+    decimal? OkRate,
     IReadOnlyDictionary<string, object?> AdditionalFields);
 
 public sealed record CloudAiReadDeviceLogDto(
     string? LogId,
     string? DeviceId,
     string? DeviceCode,
+    string? DeviceName,
     string? Level,
     string? Message,
     string? Source,
     DateTimeOffset? OccurredAt,
     IReadOnlyDictionary<string, object?> AdditionalFields);
 
-public sealed record CloudAiReadPassStationRecordDto(
+public sealed record CloudAiReadProductionFieldSchemaDto(
+    string? Key,
+    string? Label,
+    string? Type,
+    string? Unit,
+    int? Precision,
+    bool? Required,
+    IReadOnlyDictionary<string, object?> AdditionalFields);
+
+public sealed record CloudAiReadProductionRecordDto(
     string? RecordId,
+    string? TypeKey,
+    string? TypeName,
     string? DeviceId,
     string? DeviceCode,
+    string? DeviceName,
     string? ProcessName,
     string? Barcode,
     string? StationName,
     string? Result,
     DateTimeOffset? OccurredAt,
+    DateTimeOffset? ReceivedAt,
+    IReadOnlyDictionary<string, object?> Fields,
+    IReadOnlyList<CloudAiReadProductionFieldSchemaDto> FieldSchema,
     IReadOnlyDictionary<string, object?> AdditionalFields);
 
 public interface ICloudAiReadClient
@@ -375,11 +389,15 @@ public interface ICloudAiReadClient
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default);
 
+    Task<CloudAiReadResult<CloudAiReadCapacityHourlyDto>> GetCapacityHourlyAsync(
+        CloudAiReadQuery query,
+        CancellationToken cancellationToken = default);
+
     Task<CloudAiReadResult<CloudAiReadDeviceLogDto>> GetDeviceLogsAsync(
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default);
 
-    Task<CloudAiReadResult<CloudAiReadPassStationRecordDto>> GetPassStationRecordsAsync(
+    Task<CloudAiReadResult<CloudAiReadProductionRecordDto>> GetProductionRecordsAsync(
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default);
 

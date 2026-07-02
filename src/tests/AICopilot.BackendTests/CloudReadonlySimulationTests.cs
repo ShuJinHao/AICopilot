@@ -253,6 +253,13 @@ public sealed class CloudReadonlySimulationTests
             throw new InvalidOperationException("Real Cloud client should not be called.");
         }
 
+        public Task<CloudAiReadResult<CloudAiReadCapacityHourlyDto>> GetCapacityHourlyAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("Real Cloud client should not be called.");
+        }
+
         public Task<CloudAiReadResult<CloudAiReadDeviceLogDto>> GetDeviceLogsAsync(
             CloudAiReadQuery query,
             CancellationToken cancellationToken = default)
@@ -260,7 +267,7 @@ public sealed class CloudReadonlySimulationTests
             throw new InvalidOperationException("Real Cloud client should not be called.");
         }
 
-        public Task<CloudAiReadResult<CloudAiReadPassStationRecordDto>> GetPassStationRecordsAsync(
+        public Task<CloudAiReadResult<CloudAiReadProductionRecordDto>> GetProductionRecordsAsync(
             CloudAiReadQuery query,
             CancellationToken cancellationToken = default)
         {

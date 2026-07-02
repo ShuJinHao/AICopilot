@@ -12,7 +12,9 @@ public sealed class CloudAiReadClient(
 {
     private const string DevicesPath = "/api/v1/ai/read/devices";
     private const string CapacitySummaryPath = "/api/v1/ai/read/capacity/summary";
+    private const string CapacityHourlyPath = "/api/v1/ai/read/capacity/hourly";
     private const string DeviceLogsPath = "/api/v1/ai/read/device-logs";
+    private const string ProductionRecordsPath = "/api/v1/ai/read/production-records";
 
     private readonly CloudAiReadHttpTransport httpTransport = new(httpClient, logger);
 
@@ -70,6 +72,19 @@ public sealed class CloudAiReadClient(
         return CloudAiReadDocumentAdapter.MapCapacitySummary(document.RootElement, CapacitySummaryPath, query.Limit);
     }
 
+    public async Task<CloudAiReadResult<CloudAiReadCapacityHourlyDto>> GetCapacityHourlyAsync(
+        CloudAiReadQuery query,
+        CancellationToken cancellationToken = default)
+    {
+        using var document = await SendJsonAsync(
+            HttpMethod.Get,
+            CapacityHourlyPath,
+            CloudAiReadQueryParameterBuilder.BuildCapacityHourlyQueryParameters(query),
+            cancellationToken);
+
+        return CloudAiReadDocumentAdapter.MapCapacityHourly(document.RootElement, CapacityHourlyPath, query.Limit);
+    }
+
     public async Task<CloudAiReadResult<CloudAiReadDeviceLogDto>> GetDeviceLogsAsync(
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default)
@@ -83,41 +98,181 @@ public sealed class CloudAiReadClient(
         return CloudAiReadDocumentAdapter.MapDeviceLogs(document.RootElement, DeviceLogsPath, query.Limit);
     }
 
-    public async Task<CloudAiReadResult<CloudAiReadPassStationRecordDto>> GetPassStationRecordsAsync(
+    public async Task<CloudAiReadResult<CloudAiReadProductionRecordDto>> GetProductionRecordsAsync(
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(query.PassStationTypeKey))
-        {
-            throw new CloudAiReadException(
-                CloudAiReadProblemCodes.MissingRequiredParameter,
-                "Cloud AiRead 查询缺少必需参数 passStationTypeKey，请补充过站类型。");
-        }
-
-        var typeKey = query.PassStationTypeKey.Trim();
-        var path = $"/api/v1/ai/read/pass-stations/{Uri.EscapeDataString(typeKey)}";
         using var document = await SendJsonAsync(
             HttpMethod.Get,
-            path,
-            CloudAiReadQueryParameterBuilder.BuildPassStationQueryParameters(query),
+            ProductionRecordsPath,
+            CloudAiReadQueryParameterBuilder.BuildProductionRecordQueryParameters(query),
             cancellationToken);
 
-        return CloudAiReadDocumentAdapter.MapPassStationRecords(document.RootElement, path, query.Limit);
+        return CloudAiReadDocumentAdapter.MapProductionRecords(document.RootElement, ProductionRecordsPath, query.Limit);
     }
 
     public async Task<CloudAiReadResult<object>> QuerySemanticAsync(
         SemanticQueryPlan plan,
         CancellationToken cancellationToken = default)
     {
-        var query = CloudAiReadQuery.FromSemanticPlan(plan);
+        var query = await PrepareSemanticQueryAsync(plan, cancellationToken);
         return plan.Target switch
         {
             SemanticQueryTarget.Device => ToUntyped(await GetDevicesAsync(query, cancellationToken)),
+            SemanticQueryTarget.Capacity when ShouldUseCapacityHourly(plan) => ToUntyped(await GetCapacityHourlyAsync(query, cancellationToken)),
             SemanticQueryTarget.Capacity => ToUntyped(await GetCapacitySummaryAsync(query, cancellationToken)),
             SemanticQueryTarget.DeviceLog => ToUntyped(await GetDeviceLogsAsync(query, cancellationToken)),
-            SemanticQueryTarget.ProductionData => ToUntyped(await GetPassStationRecordsAsync(query, cancellationToken)),
+            SemanticQueryTarget.ProductionData => ToUntyped(await GetProductionRecordsAsync(query, cancellationToken)),
             _ => throw new NotSupportedException($"Cloud AiRead does not support semantic target '{plan.Target}'.")
         };
+    }
+
+    private async Task<CloudAiReadQuery> PrepareSemanticQueryAsync(
+        SemanticQueryPlan plan,
+        CancellationToken cancellationToken)
+    {
+        var query = ApplySemanticDefaults(plan, CloudAiReadQuery.FromSemanticPlan(plan));
+        if (plan.Target is SemanticQueryTarget.Device or SemanticQueryTarget.Recipe)
+        {
+            return query;
+        }
+
+        if (HasFilter(query, "deviceId") || !HasFilter(query, "deviceCode"))
+        {
+            return query;
+        }
+
+        var deviceCode = GetFilterValue(query, "deviceCode");
+        var deviceResult = await GetDevicesAsync(
+            new CloudAiReadQuery(
+                deviceCode,
+                [new CloudAiReadFilter("deviceCode", "eq", deviceCode!)],
+                null,
+                "deviceCode",
+                false,
+                2),
+            cancellationToken);
+        var deviceIds = deviceResult.Items
+            .Select(item => item.DeviceId)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (deviceIds.Length != 1)
+        {
+            throw new CloudAiReadException(
+                CloudAiReadProblemCodes.MissingRequiredParameter,
+                $"Cloud AiRead 查询无法通过 deviceCode={deviceCode} 唯一解析 deviceId，请补充 Cloud 正式设备 ID。");
+        }
+
+        return query.WithFilters(
+            query.Filters
+                .Append(new CloudAiReadFilter("deviceId", "eq", deviceIds[0]!))
+                .ToArray());
+    }
+
+    private static CloudAiReadQuery ApplySemanticDefaults(SemanticQueryPlan plan, CloudAiReadQuery query)
+    {
+        if (plan.Target == SemanticQueryTarget.DeviceLog &&
+            plan.Kind == SemanticQueryKind.Latest &&
+            query.TimeRange is null &&
+            !HasFilter(query, "preset"))
+        {
+            return AddFilter(query, "preset", "last_24h");
+        }
+
+        if (plan.Target == SemanticQueryTarget.ProductionData &&
+            plan.Kind == SemanticQueryKind.Latest &&
+            query.TimeRange is null &&
+            !HasFilter(query, "preset"))
+        {
+            return AddFilter(query, "preset", "last_24h");
+        }
+
+        if (plan.Target == SemanticQueryTarget.Capacity && ShouldUseCapacityHourly(plan))
+        {
+            if (!HasFilter(query, "date") && query.TimeRange?.Start is { } start && query.TimeRange.End is { } end &&
+                start.UtcDateTime.Date == end.UtcDateTime.Date)
+            {
+                return AddFilter(query, "date", start.UtcDateTime.ToString("yyyy-MM-dd"));
+            }
+
+            var preset = InferCapacityHourlyPreset(plan.QueryText);
+            if (!string.IsNullOrWhiteSpace(preset) && !HasFilter(query, "preset"))
+            {
+                return AddFilter(query, "preset", preset);
+            }
+        }
+
+        return query;
+    }
+
+    private static bool ShouldUseCapacityHourly(SemanticQueryPlan plan)
+    {
+        return plan.Target == SemanticQueryTarget.Capacity &&
+               (ContainsTerm(plan.QueryText, "小时") ||
+                ContainsTerm(plan.QueryText, "每小时") ||
+                ContainsTerm(plan.QueryText, "按小时") ||
+                ContainsEnglishTerm(plan.QueryText, "hourly"));
+    }
+
+    private static string? InferCapacityHourlyPreset(string? queryText)
+    {
+        if (ContainsTerm(queryText, "最近24小时") || ContainsTerm(queryText, "近24小时") ||
+            ContainsTerm(queryText, "last 24h") || ContainsTerm(queryText, "last_24h"))
+        {
+            return "last_24h";
+        }
+
+        if (ContainsTerm(queryText, "今天") || ContainsEnglishTerm(queryText, "today"))
+        {
+            return "today";
+        }
+
+        if (ContainsTerm(queryText, "昨天") || ContainsEnglishTerm(queryText, "yesterday"))
+        {
+            return "yesterday";
+        }
+
+        return null;
+    }
+
+    private static CloudAiReadQuery AddFilter(CloudAiReadQuery query, string field, string value)
+    {
+        return query.WithFilters(
+            query.Filters
+                .Where(filter => !field.Equals(filter.Field, StringComparison.OrdinalIgnoreCase))
+                .Append(new CloudAiReadFilter(field, "eq", value))
+                .ToArray());
+    }
+
+    private static bool HasFilter(CloudAiReadQuery query, string field)
+    {
+        return query.Filters.Any(filter =>
+            field.Equals(filter.Field, StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(filter.Value));
+    }
+
+    private static string? GetFilterValue(CloudAiReadQuery query, string field)
+    {
+        return query.Filters.FirstOrDefault(filter =>
+            field.Equals(filter.Field, StringComparison.OrdinalIgnoreCase))?.Value;
+    }
+
+    private static bool ContainsTerm(string? text, string term)
+    {
+        return !string.IsNullOrWhiteSpace(text) &&
+               text.Contains(term, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool ContainsEnglishTerm(string? text, string term)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        return text.Split([' ', ',', '.', ';', ':', '，', '。', '；', '：', '/', '\\', '-', '_'], StringSplitOptions.RemoveEmptyEntries)
+            .Any(part => part.Equals(term, StringComparison.OrdinalIgnoreCase));
     }
 
     private static CloudAiReadResult<object> ToUntyped<T>(CloudAiReadResult<T> result)

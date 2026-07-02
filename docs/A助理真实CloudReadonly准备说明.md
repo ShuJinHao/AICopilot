@@ -2,7 +2,7 @@
 
 日期：2026-05-18
 
-> 历史记录：本文记录 2026-05 阶段的 CloudReadonly / Cloud AiRead 准备口径。当前内部真实 Cloud 查询优先路线是 DataAnalysis `CloudReadOnly` Direct DB；Cloud AiRead 仅封存为未来外部系统只读 API 接入口。当前执行入口以 `../AGENTS.md`、`资料/AICopilot业务规则.md` 和 `docs/改动复盘与规则沉淀.md` 为准。
+> 历史记录：本文记录 2026-05 阶段的 CloudReadonly / Cloud AiRead 准备口径。当前执行口径是高频设备日志、小时/汇总产能和生产数据优先走 Cloud AiRead 正式只读 API；DataAnalysis `CloudReadOnly` Direct DB / Text-to-SQL 只作为低频探索和治理白名单内补充分析兜底。当前执行入口以 `../AGENTS.md`、`资料/AICopilot业务规则.md` 和 `docs/改动复盘与规则沉淀.md` 为准。
 
 ## 启动条件
 
@@ -21,7 +21,7 @@ CloudReadonly.Mode=Disabled
 CloudAiRead.Enabled=false
 ```
 
-内部 Direct DB 验证启用时，`CloudAiRead.Enabled` 仍应保持 `false`，避免旧 AiRead 路线压过 Direct DB。即便未来外部系统启用 AiRead，内部语义映射存在时也必须优先使用 Direct DB。
+本段为历史准备口径。当前如果 CloudAiRead 已启用，高频设备日志、小时/汇总产能和生产数据必须走 Cloud AiRead；Direct DB / Text-to-SQL 只保留为低频探索、治理白名单内补充分析或未覆盖只读链路兜底。
 
 ## Readiness 内容
 
@@ -31,7 +31,7 @@ CloudAiRead.Enabled=false
 - Recipe 主数据和版本继续禁止。
 - 查询时间范围、返回行数、请求频率限制。
 - Cloud 查询审计和错误码映射。
-- Cloud AiRead 当前参数契约测试：`deviceId`、`startDate`/`endDate`、`startTime`/`endTime`、显式 `passStationTypeKey`。
+- Cloud AiRead 当前参数契约测试：`deviceId`、`startDate`/`endDate`、`startTime`/`endTime` 或 `preset`、小时产能 `date`/`preset`、生产记录 `typeKey`/`processId`/`deviceId`、日志 `minLevel`。
 - 数据脱敏策略。
 - 前端真实 Cloud 只读验收状态和 Simulation 历史材料区分。
 

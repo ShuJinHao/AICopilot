@@ -84,7 +84,7 @@ For structured chat error chunks, frontend displays `userFacingMessage` first, t
 | `cloud_ai_read_forbidden` | Cloud AI read request is forbidden. |
 | `cloud_ai_read_not_found` | Cloud AI read resource was not found. |
 | `cloud_ai_read_unavailable` | Cloud AI read service is unavailable. |
-| `cloud_ai_read_missing_required_parameter` | Cloud AI read request is missing a required parameter such as `deviceId`, `startDate`, `endDate`, `startTime`, `endTime`, or `passStationTypeKey`. |
+| `cloud_ai_read_missing_required_parameter` | Cloud AI read request is missing a required parameter such as `deviceId`, `startDate`, `endDate`, `startTime`, `endTime`, `preset`, `date`, `typeKey`, or `processId`. |
 
 ## Cloud Read-Only Query Contract
 
@@ -94,7 +94,8 @@ Cloud read-only requests must use the current Cloud API contract directly:
 | --- | --- | --- |
 | Devices | `/api/v1/ai/read/devices` | `maxRows`, optional `keyword` |
 | Capacity summary | `/api/v1/ai/read/capacity/summary` | `deviceId`, `startDate`, `endDate`, `maxRows` |
-| Device logs | `/api/v1/ai/read/device-logs` | `deviceId`, `startTime`, `endTime`, `maxRows` |
-| Pass station records | `/api/v1/ai/read/pass-stations/{typeKey}` | `deviceId`, `startTime`, `endTime`, `maxRows`; route `{typeKey}` must be explicit, for example `injection` |
+| Capacity hourly | `/api/v1/ai/read/capacity/hourly` | `deviceId`, `date` or `preset`, optional `plcName`, `maxRows` |
+| Device logs | `/api/v1/ai/read/device-logs` | `deviceId`, `startTime`/`endTime` or `preset`, optional `level` or `minLevel`, optional `keyword`, `maxRows` |
+| Production records | `/api/v1/ai/read/production-records` | one of `typeKey`/`processId`/`deviceId`, `startTime`/`endTime` or `preset`, optional `barcode`, `result`, `fieldMode`, `maxRows`; rows may include `fieldSchema` and `fields` for plugin/process-specific columns |
 
 `deviceCode` is a searchable/display field only. It must not be sent as `deviceId`. Recipe master data and recipe version data are outside the AICopilot Cloud read-only boundary.

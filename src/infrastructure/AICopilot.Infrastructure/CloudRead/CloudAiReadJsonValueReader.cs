@@ -71,6 +71,30 @@ internal static class CloudAiReadJsonValueReader
         return null;
     }
 
+    public static int? GetInt(JsonElement record, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (!record.TryGetProperty(name, out var property))
+            {
+                continue;
+            }
+
+            if (property.ValueKind == JsonValueKind.Number && property.TryGetInt32(out var intValue))
+            {
+                return intValue;
+            }
+
+            if (property.ValueKind == JsonValueKind.String &&
+                int.TryParse(property.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+            {
+                return parsed;
+            }
+        }
+
+        return null;
+    }
+
     public static DateTimeOffset? GetDate(JsonElement record, params string[] names)
     {
         foreach (var name in names)
@@ -102,6 +126,39 @@ internal static class CloudAiReadJsonValueReader
                 property => property.Name,
                 property => ToObject(property.Value),
                 StringComparer.OrdinalIgnoreCase);
+    }
+
+    public static IReadOnlyDictionary<string, object?> GetObject(JsonElement record, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (record.TryGetProperty(name, out var property) && property.ValueKind == JsonValueKind.Object)
+            {
+                return property.EnumerateObject()
+                    .ToDictionary(
+                        item => item.Name,
+                        item => ToObject(item.Value),
+                        StringComparer.Ordinal);
+            }
+        }
+
+        return new Dictionary<string, object?>();
+    }
+
+    public static IReadOnlyList<JsonElement> GetObjectArray(JsonElement record, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (record.TryGetProperty(name, out var property) && property.ValueKind == JsonValueKind.Array)
+            {
+                return property.EnumerateArray()
+                    .Where(item => item.ValueKind == JsonValueKind.Object)
+                    .Select(item => item.Clone())
+                    .ToArray();
+            }
+        }
+
+        return [];
     }
 
     private static IEnumerable<JsonElement> EnumerateRecords(JsonElement root)
@@ -163,6 +220,14 @@ internal static class CloudAiReadJsonValueReader
             JsonValueKind.True => true,
             JsonValueKind.False => false,
             JsonValueKind.Null => null,
+            JsonValueKind.Object => element.EnumerateObject()
+                .ToDictionary(
+                    property => property.Name,
+                    property => ToObject(property.Value),
+                    StringComparer.Ordinal),
+            JsonValueKind.Array => element.EnumerateArray()
+                .Select(ToObject)
+                .ToArray(),
             _ => element.GetRawText()
         };
     }

@@ -12,8 +12,9 @@ public sealed class CloudAiReadClientTests
     [Theory]
     [InlineData("/api/v1/ai/read/devices")]
     [InlineData("/api/v1/ai/read/capacity/summary")]
+    [InlineData("/api/v1/ai/read/capacity/hourly")]
     [InlineData("/api/v1/ai/read/device-logs")]
-    [InlineData("/api/v1/ai/read/pass-stations/stacking")]
+    [InlineData("/api/v1/ai/read/production-records")]
     [InlineData("/api/v1/ai/identity/users/cloud-user-1/status")]
     public void EndpointPolicy_ShouldAllowWhitelistedGetPaths(string path)
     {
@@ -27,6 +28,7 @@ public sealed class CloudAiReadClientTests
     [InlineData("PATCH", "/api/v1/ai/read/devices")]
     [InlineData("DELETE", "/api/v1/ai/read/device-logs")]
     [InlineData("GET", "/api/v1/devices")]
+    [InlineData("GET", "/api/v1/ai/read/pass-stations/stacking")]
     [InlineData("GET", "/api/v1/ai/read/pass-stations/a/b")]
     [InlineData("POST", "/api/v1/ai/read/devices")]
     public void EndpointPolicy_ShouldRejectWriteMethodsAndNonWhitelistedPaths(string method, string path)
@@ -89,7 +91,7 @@ public sealed class CloudAiReadClientTests
         var result = await client.GetDevicesAsync(new CloudAiReadQuery(
             "列出设备",
             [],
-            null,
+            CreateRange("2026-04-20T00:00:00Z", "2026-04-21T00:00:00Z"),
             "deviceCode",
             false,
             20));
@@ -173,10 +175,11 @@ public sealed class CloudAiReadClientTests
         var client = CreateClient(httpClient);
 
         await client.GetDeviceLogsAsync(new CloudAiReadQuery(
-            "overload",
+            null,
             [
                 new CloudAiReadFilter("deviceId", "eq", "device-1"),
-                new CloudAiReadFilter("level", "eq", "Error")
+                new CloudAiReadFilter("minLevel", "eq", "warn"),
+                new CloudAiReadFilter("keyword", "eq", "overload")
             ],
             CreateRange("2026-04-20T00:00:00Z", "2026-04-21T00:00:00Z"),
             "occurredAt",
@@ -189,14 +192,15 @@ public sealed class CloudAiReadClientTests
         query.Should().Contain("deviceId", "device-1");
         query.Should().Contain("startTime", "2026-04-20T00:00:00.0000000Z");
         query.Should().Contain("endTime", "2026-04-21T00:00:00.0000000Z");
-        query.Should().Contain("level", "Error");
+        query.Should().Contain("minLevel", "warn");
         query.Should().Contain("keyword", "overload");
+        query.Should().NotContainKey("level");
         query.Should().Contain("maxRows", "30");
         AssertNoLegacyParameters(query);
     }
 
     [Fact]
-    public async Task Client_ShouldSendPassStationQueryWithCloudAiReadParametersOnly()
+    public async Task Client_ShouldSendDeviceLogPresetWithCloudAiReadParametersOnly()
     {
         HttpRequestMessage? capturedRequest = null;
         using var httpClient = new HttpClient(new StubHandler(request =>
@@ -206,27 +210,201 @@ public sealed class CloudAiReadClientTests
         }));
         var client = CreateClient(httpClient);
 
-        await client.GetPassStationRecordsAsync(new CloudAiReadQuery(
+        await client.GetDeviceLogsAsync(new CloudAiReadQuery(
+            "查看最近日志",
+            [
+                new CloudAiReadFilter("deviceId", "eq", "device-1"),
+                new CloudAiReadFilter("preset", "eq", "last_24h")
+            ],
+            null,
+            "occurredAt",
+            true,
+            30));
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.RequestUri!.AbsolutePath.Should().Be("/api/v1/ai/read/device-logs");
+        var query = ParseQuery(capturedRequest.RequestUri);
+        query.Should().Contain("deviceId", "device-1");
+        query.Should().Contain("preset", "last_24h");
+        query.Should().NotContainKey("startTime");
+        query.Should().NotContainKey("endTime");
+        AssertNoLegacyParameters(query);
+    }
+
+    [Fact]
+    public async Task Client_ShouldResolveDeviceCodeBeforeSemanticDeviceLogQuery()
+    {
+        var requestUris = new List<Uri>();
+        using var httpClient = new HttpClient(new StubHandler(request =>
+        {
+            requestUris.Add(request.RequestUri!);
+            if (request.RequestUri!.AbsolutePath == "/api/v1/ai/read/devices")
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = JsonContent.Create(new
+                    {
+                        items = new[]
+                        {
+                            new
+                            {
+                                id = "device-1",
+                                deviceCode = "DEV-001",
+                                deviceName = "叠片一号"
+                            }
+                        },
+                        isTruncated = false
+                    })
+                };
+            }
+
+            return CreateOkItemsResponse();
+        }));
+        var client = CreateClient(httpClient);
+        var plan = new SemanticQueryPlan(
+            "Analysis.DeviceLog.Latest",
+            SemanticQueryTarget.DeviceLog,
+            SemanticQueryKind.Latest,
+            "查看 DEV-001 最近日志",
+            new SemanticProjection(["deviceId", "level", "message"]),
+            [new SemanticFilter("deviceCode", SemanticFilterOperator.Equal, "DEV-001")],
+            null,
+            new SemanticSort("occurredAt", SemanticSortDirection.Desc),
+            20);
+
+        await client.QuerySemanticAsync(plan);
+
+        requestUris.Should().HaveCount(2);
+        requestUris[0].AbsolutePath.Should().Be("/api/v1/ai/read/devices");
+        ParseQuery(requestUris[0]).Should().Contain("keyword", "DEV-001");
+        requestUris[1].AbsolutePath.Should().Be("/api/v1/ai/read/device-logs");
+        var query = ParseQuery(requestUris[1]);
+        query.Should().Contain("deviceId", "device-1");
+        query.Should().Contain("preset", "last_24h");
+        query.Should().NotContainKey("deviceCode");
+        AssertNoLegacyParameters(query);
+    }
+
+    [Fact]
+    public async Task Client_ShouldSendCapacityHourlyQueryWithCloudAiReadParametersOnly()
+    {
+        HttpRequestMessage? capturedRequest = null;
+        using var httpClient = new HttpClient(new StubHandler(request =>
+        {
+            capturedRequest = request;
+            return CreateOkItemsResponse();
+        }));
+        var client = CreateClient(httpClient);
+
+        await client.GetCapacityHourlyAsync(new CloudAiReadQuery(
             "不要作为 queryText 发送",
             [
                 new CloudAiReadFilter("deviceId", "eq", "device-1"),
-                new CloudAiReadFilter("barcode", "eq", "CELL-001")
+                new CloudAiReadFilter("date", "eq", "2026-04-20"),
+                new CloudAiReadFilter("processName", "eq", "PLC-A")
+            ],
+            null,
+            "occurredAt",
+            true,
+            40));
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.RequestUri!.AbsolutePath.Should().Be("/api/v1/ai/read/capacity/hourly");
+        var query = ParseQuery(capturedRequest.RequestUri);
+        query.Should().Contain("deviceId", "device-1");
+        query.Should().Contain("date", "2026-04-20");
+        query.Should().Contain("plcName", "PLC-A");
+        query.Should().Contain("maxRows", "40");
+        AssertNoLegacyParameters(query);
+    }
+
+    [Fact]
+    public async Task Client_ShouldSendProductionRecordQueryWithCloudAiReadParametersOnly()
+    {
+        HttpRequestMessage? capturedRequest = null;
+        using var httpClient = new HttpClient(new StubHandler(request =>
+        {
+            capturedRequest = request;
+            return CreateOkItemsResponse();
+        }));
+        var client = CreateClient(httpClient);
+
+        await client.GetProductionRecordsAsync(new CloudAiReadQuery(
+            "不要作为 queryText 发送",
+            [
+                new CloudAiReadFilter("deviceId", "eq", "device-1"),
+                new CloudAiReadFilter("typeKey", "eq", "stacking"),
+                new CloudAiReadFilter("barcode", "eq", "CELL-001"),
+                new CloudAiReadFilter("result", "eq", "Pass"),
+                new CloudAiReadFilter("fieldMode", "eq", "full")
             ],
             CreateRange("2026-04-20T00:00:00Z", "2026-04-21T00:00:00Z"),
             "occurredAt",
             true,
-            40,
-            PassStationTypeKey: "stacking"));
+            40));
 
         capturedRequest.Should().NotBeNull();
-        capturedRequest!.RequestUri!.AbsolutePath.Should().Be("/api/v1/ai/read/pass-stations/stacking");
+        capturedRequest!.RequestUri!.AbsolutePath.Should().Be("/api/v1/ai/read/production-records");
         var query = ParseQuery(capturedRequest.RequestUri);
+        query.Should().Contain("typeKey", "stacking");
         query.Should().Contain("deviceId", "device-1");
         query.Should().Contain("startTime", "2026-04-20T00:00:00.0000000Z");
         query.Should().Contain("endTime", "2026-04-21T00:00:00.0000000Z");
         query.Should().Contain("barcode", "CELL-001");
+        query.Should().Contain("result", "Pass");
+        query.Should().Contain("fieldMode", "full");
         query.Should().Contain("maxRows", "40");
         AssertNoLegacyParameters(query);
+    }
+
+    [Fact]
+    public async Task Client_ShouldMapProductionRecordPayloadIntoSchemaFields()
+    {
+        using var httpClient = new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = JsonContent.Create(new
+            {
+                items = new[]
+                {
+                    new
+                    {
+                        recordId = "record-1",
+                        typeKey = "stacking",
+                        typeName = "叠片",
+                        deviceId = "device-1",
+                        deviceName = "叠片一号",
+                        barcode = "CELL-001",
+                        result = "Pass",
+                        completedAt = "2026-04-20T01:02:03Z",
+                        fields = new { pressure = 12.5m },
+                        fieldSchema = new[]
+                        {
+                            new { key = "pressure", label = "压力", type = "number", unit = "N", precision = 1, required = true }
+                        }
+                    }
+                },
+                isTruncated = false
+            })
+        }));
+        var client = CreateClient(httpClient);
+
+        var result = await client.GetProductionRecordsAsync(new CloudAiReadQuery(
+            "生产记录",
+            [
+                new CloudAiReadFilter("deviceId", "eq", "device-1"),
+                new CloudAiReadFilter("preset", "eq", "last_24h")
+            ],
+            null,
+            "occurredAt",
+            true,
+            20));
+
+        result.Items.Should().ContainSingle();
+        result.Items[0].TypeKey.Should().Be("stacking");
+        result.Items[0].Fields.Should().ContainKey("pressure");
+        result.Items[0].FieldSchema.Should().ContainSingle().Which.Key.Should().Be("pressure");
+        result.Rows[0]["fields"].Should().BeAssignableTo<IReadOnlyDictionary<string, object?>>();
+        result.Rows[0]["fieldSchema"].Should().BeAssignableTo<IReadOnlyList<CloudAiReadProductionFieldSchemaDto>>();
     }
 
     [Fact]
@@ -305,7 +483,7 @@ public sealed class CloudAiReadClientTests
     }
 
     [Fact]
-    public async Task Client_ShouldNotSendHttpWhenPassStationTimeRangeIsMissing()
+    public async Task Client_ShouldNotSendHttpWhenProductionRecordTimeRangeIsMissing()
     {
         var sendCount = 0;
         using var httpClient = new HttpClient(new StubHandler(_ =>
@@ -315,14 +493,13 @@ public sealed class CloudAiReadClientTests
         }));
         var client = CreateClient(httpClient);
 
-        var act = () => client.GetPassStationRecordsAsync(new CloudAiReadQuery(
+        var act = () => client.GetProductionRecordsAsync(new CloudAiReadQuery(
             null,
             [new CloudAiReadFilter("deviceId", "eq", "device-1"), new CloudAiReadFilter("barcode", "eq", "CELL-001")],
             null,
             null,
             false,
-            20,
-            PassStationTypeKey: "stacking"));
+            20));
 
         var exception = await act.Should().ThrowAsync<CloudAiReadException>();
         exception.Which.Code.Should().Be(CloudAiReadProblemCodes.MissingRequiredParameter);
@@ -331,7 +508,7 @@ public sealed class CloudAiReadClientTests
     }
 
     [Fact]
-    public async Task Client_ShouldNotSendHttpWhenPassStationTypeKeyIsMissing()
+    public async Task Client_ShouldNotSendHttpWhenProductionRecordScopeIsMissing()
     {
         var sendCount = 0;
         using var httpClient = new HttpClient(new StubHandler(_ =>
@@ -341,9 +518,9 @@ public sealed class CloudAiReadClientTests
         }));
         var client = CreateClient(httpClient);
 
-        var act = () => client.GetPassStationRecordsAsync(new CloudAiReadQuery(
+        var act = () => client.GetProductionRecordsAsync(new CloudAiReadQuery(
             null,
-            [new CloudAiReadFilter("deviceId", "eq", "device-1")],
+            [new CloudAiReadFilter("barcode", "eq", "CELL-001")],
             CreateRange("2026-04-20T00:00:00Z", "2026-04-21T00:00:00Z"),
             null,
             false,
@@ -351,7 +528,7 @@ public sealed class CloudAiReadClientTests
 
         var exception = await act.Should().ThrowAsync<CloudAiReadException>();
         exception.Which.Code.Should().Be(CloudAiReadProblemCodes.MissingRequiredParameter);
-        exception.Which.Message.Should().Contain("passStationTypeKey");
+        exception.Which.Message.Should().Contain("typeKey");
         sendCount.Should().Be(0);
     }
 

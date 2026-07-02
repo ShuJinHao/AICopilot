@@ -3343,6 +3343,13 @@ public sealed class ToolRegistryGovernanceTests
             throw new NotSupportedException();
         }
 
+        public Task<CloudAiReadResult<CloudAiReadCapacityHourlyDto>> GetCapacityHourlyAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
         public Task<CloudAiReadResult<CloudAiReadDeviceLogDto>> GetDeviceLogsAsync(
             CloudAiReadQuery query,
             CancellationToken cancellationToken = default)
@@ -3350,7 +3357,7 @@ public sealed class ToolRegistryGovernanceTests
             throw new NotSupportedException();
         }
 
-        public Task<CloudAiReadResult<CloudAiReadPassStationRecordDto>> GetPassStationRecordsAsync(
+        public Task<CloudAiReadResult<CloudAiReadProductionRecordDto>> GetProductionRecordsAsync(
             CloudAiReadQuery query,
             CancellationToken cancellationToken = default)
         {
@@ -3394,6 +3401,13 @@ public sealed class ToolRegistryGovernanceTests
             throw new NotSupportedException();
         }
 
+        public Task<CloudAiReadResult<CloudAiReadCapacityHourlyDto>> GetCapacityHourlyAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
         public Task<CloudAiReadResult<CloudAiReadDeviceLogDto>> GetDeviceLogsAsync(
             CloudAiReadQuery query,
             CancellationToken cancellationToken = default)
@@ -3401,7 +3415,7 @@ public sealed class ToolRegistryGovernanceTests
             throw new NotSupportedException();
         }
 
-        public Task<CloudAiReadResult<CloudAiReadPassStationRecordDto>> GetPassStationRecordsAsync(
+        public Task<CloudAiReadResult<CloudAiReadProductionRecordDto>> GetProductionRecordsAsync(
             CloudAiReadQuery query,
             CancellationToken cancellationToken = default)
         {
@@ -3444,6 +3458,13 @@ public sealed class ToolRegistryGovernanceTests
             throw exception;
         }
 
+        public Task<CloudAiReadResult<CloudAiReadCapacityHourlyDto>> GetCapacityHourlyAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw exception;
+        }
+
         public Task<CloudAiReadResult<CloudAiReadDeviceLogDto>> GetDeviceLogsAsync(
             CloudAiReadQuery query,
             CancellationToken cancellationToken = default)
@@ -3451,7 +3472,7 @@ public sealed class ToolRegistryGovernanceTests
             throw exception;
         }
 
-        public Task<CloudAiReadResult<CloudAiReadPassStationRecordDto>> GetPassStationRecordsAsync(
+        public Task<CloudAiReadResult<CloudAiReadProductionRecordDto>> GetProductionRecordsAsync(
             CloudAiReadQuery query,
             CancellationToken cancellationToken = default)
         {

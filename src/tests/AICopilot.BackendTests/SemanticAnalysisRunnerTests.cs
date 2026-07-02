@@ -122,7 +122,7 @@ public sealed class SemanticAnalysisRunnerTests
     }
 
     [Fact]
-    public async Task RunAsync_ShouldPreferCloudReadOnlyBusinessDatabase_WhenCloudAiReadIsEnabled()
+    public async Task RunAsync_ShouldPreferCloudReadOnlyBusinessDatabaseForNonHighFrequencyTargets_WhenCloudAiReadIsEnabled()
     {
         var database = new BusinessDatabaseConnectionInfo(
             Guid.NewGuid(),
@@ -193,6 +193,98 @@ public sealed class SemanticAnalysisRunnerTests
         databaseConnector.LastSql.Should().Contain("FROM devices");
         result.Should().NotContain("Cloud AiRead");
         result.Should().NotContain("Simulation");
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldPreferCloudAiReadForHighFrequencyTargets_WhenMappingExists()
+    {
+        var database = new BusinessDatabaseConnectionInfo(
+            Guid.NewGuid(),
+            "CloudPlatformReadonly",
+            "Cloud Platform readonly business data",
+            "Host=localhost;Database=cloud;Username=readonly;Password=fake-test-only",
+            DatabaseProviderType.PostgreSql,
+            IsEnabled: true,
+            IsReadOnly: true,
+            DataSourceExternalSystemType.CloudReadOnly,
+            ReadOnlyCredentialVerified: true);
+        var databaseReadService = new RecordingBusinessDatabaseReadService(database);
+        var databaseConnector = new RecordingDatabaseConnector(new DatabaseQueryResult(
+            [
+                new Dictionary<string, object?>
+                {
+                    ["deviceId"] = "device-1"
+                }
+            ],
+            ReturnedRowCount: 1,
+            IsTruncated: false,
+            ElapsedMilliseconds: 4));
+        var plan = new SemanticQueryPlan(
+            "Analysis.DeviceLog.Latest",
+            SemanticQueryTarget.DeviceLog,
+            SemanticQueryKind.Latest,
+            "查看设备最近日志",
+            new SemanticProjection(["deviceId", "deviceName", "level", "message", "occurredAt"]),
+            [new SemanticFilter("deviceId", SemanticFilterOperator.Equal, "device-1")],
+            null,
+            new SemanticSort("occurredAt", SemanticSortDirection.Desc),
+            10);
+        var mapping = new SemanticPhysicalMapping(
+            SemanticQueryTarget.DeviceLog,
+            DatabaseProviderType.PostgreSql,
+            "device_logs",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["deviceId"] = "device_id",
+                ["level"] = "level"
+            },
+            ["deviceId", "level"],
+            ["deviceId", "level"],
+            ["occurredAt"],
+            databaseName: "CloudPlatformReadonly",
+            defaultSort: new SemanticSort("occurredAt", SemanticSortDirection.Desc));
+        var cloudAiReadClient = new RecordingCloudAiReadClient(new CloudAiReadResult<object>(
+            "/api/v1/ai/read/device-logs",
+            "Cloud AiRead API",
+            DateTimeOffset.UtcNow,
+            10,
+            IsTruncated: false,
+            [],
+            [
+                new Dictionary<string, object?>
+                {
+                    ["deviceId"] = "device-1",
+                    ["deviceName"] = "叠片一号",
+                    ["level"] = "WARN",
+                    ["message"] = "Temperature high",
+                    ["occurredAt"] = "2026-04-20T10:00:00Z"
+                }
+            ]));
+        var runner = new SemanticAnalysisRunner(
+            cloudAiReadClient,
+            databaseReadService,
+            databaseConnector,
+            new StubSemanticQueryPlanner(plan),
+            new StubSemanticPhysicalMappingProvider(mapping),
+            new StubSemanticSqlGenerator(new GeneratedSemanticSql(
+                "SELECT device_id AS deviceId, level FROM device_logs LIMIT 10",
+                new Dictionary<string, object?>())),
+            new DataAnalysisAuditRecorder(new NoopAuditLogWriter()),
+            NullLogger<SemanticAnalysisRunner>.Instance);
+
+        var result = await runner.RunAsync(
+            new IntentResult
+            {
+                Intent = "Analysis.DeviceLog.Latest",
+                Query = "查看设备最近日志"
+            },
+            CancellationToken.None);
+
+        cloudAiReadClient.RequestedPlans.Should().ContainSingle().Which.Target.Should().Be(SemanticQueryTarget.DeviceLog);
+        databaseReadService.WasCalled.Should().BeFalse();
+        databaseConnector.WasCalled.Should().BeFalse();
+        result.Should().Contain("Cloud AiRead API");
+        result.Should().NotContain("DataAnalysis/Text-to-SQL 补充分析");
     }
 
     [Fact]
@@ -603,6 +695,13 @@ public sealed class SemanticAnalysisRunnerTests
             throw new InvalidOperationException("Cloud AiRead must not be called for recipe data.");
         }
 
+        public Task<CloudAiReadResult<CloudAiReadCapacityHourlyDto>> GetCapacityHourlyAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("Cloud AiRead must not be called for recipe data.");
+        }
+
         public Task<CloudAiReadResult<CloudAiReadDeviceLogDto>> GetDeviceLogsAsync(
             CloudAiReadQuery query,
             CancellationToken cancellationToken = default)
@@ -610,7 +709,7 @@ public sealed class SemanticAnalysisRunnerTests
             throw new InvalidOperationException("Cloud AiRead must not be called for recipe data.");
         }
 
-        public Task<CloudAiReadResult<CloudAiReadPassStationRecordDto>> GetPassStationRecordsAsync(
+        public Task<CloudAiReadResult<CloudAiReadProductionRecordDto>> GetProductionRecordsAsync(
             CloudAiReadQuery query,
             CancellationToken cancellationToken = default)
         {
@@ -622,6 +721,65 @@ public sealed class SemanticAnalysisRunnerTests
             CancellationToken cancellationToken = default)
         {
             throw new InvalidOperationException("Cloud AiRead must not be called for recipe data.");
+        }
+    }
+
+    private sealed class RecordingCloudAiReadClient(CloudAiReadResult<object> result) : ICloudAiReadClient
+    {
+        public bool IsEnabled => true;
+
+        public List<SemanticQueryPlan> RequestedPlans { get; } = [];
+
+        public Task<JsonDocument> SendJsonAsync(
+            HttpMethod method,
+            string path,
+            IReadOnlyDictionary<string, string?>? query = null,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("Semantic runner test should use QuerySemanticAsync.");
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadDeviceDto>> GetDevicesAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("Semantic runner test should use QuerySemanticAsync.");
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadCapacitySummaryDto>> GetCapacitySummaryAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("Semantic runner test should use QuerySemanticAsync.");
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadCapacityHourlyDto>> GetCapacityHourlyAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("Semantic runner test should use QuerySemanticAsync.");
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadDeviceLogDto>> GetDeviceLogsAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("Semantic runner test should use QuerySemanticAsync.");
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadProductionRecordDto>> GetProductionRecordsAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("Semantic runner test should use QuerySemanticAsync.");
+        }
+
+        public Task<CloudAiReadResult<object>> QuerySemanticAsync(
+            SemanticQueryPlan plan,
+            CancellationToken cancellationToken = default)
+        {
+            RequestedPlans.Add(plan);
+            return Task.FromResult(result);
         }
     }
 

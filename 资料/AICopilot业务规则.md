@@ -56,7 +56,7 @@ Human-in-the-loop 不能作为放开云端业务写入的理由。
 
 Cloud AiRead 设备契约：
 
-- `deviceId` 是正式 Cloud 设备身份参数，用于产能、日志、过站记录等业务读取。
+- `deviceId` 是正式 Cloud 设备身份参数，用于产能、日志、生产记录等业务读取。
 - `deviceCode`/`ClientCode` 只用于设备查询、展示或 bootstrap 寻址，不得作为 `deviceId` 发送。
 - 需要从自然语言里的设备编码定位设备时，必须先走显式设备查询/解析；无法唯一命中时要求用户补充，不做隐式兼容。
 - AICopilot 的 Pilot 场景参数不得直接透传给 Cloud；只有 Cloud 端点真实声明的参数可以进入请求。
@@ -82,8 +82,8 @@ Cloud AiRead 设备契约：
 - 查询结果只用于分析展示，不产生业务写入。
 - 不能为了分析便利放宽 `MaxRows`、read-only session 或 SQL 安全检查。
 - 内部开发直连真实 Cloud PostgreSQL 时，只能注册为 DataAnalysis `CloudReadOnly` 只读业务数据源，必须使用已验证只读数据库账号，并绑定白名单表字段和只读 SQL guard。
-- 内部真实 Cloud 语义查询优先走 DataAnalysis `CloudReadOnly` Direct DB 映射；Cloud AiRead 只作为未来外部系统只读 API 接入口封存，不能在内部映射存在时压过 Direct DB。
-- CloudReadOnly 探索型 Text-to-SQL 只能作为强语义 intent / Direct DB SQL 失败后的受控 fallback；不得拆分或重命名既有 `Analysis.*` intent，不得用 fallback 压过已可执行的强语义路径。
+- 高频设备日志、小时/汇总产能和生产数据查询优先走 Cloud AiRead 正式只读 API；DataAnalysis `CloudReadOnly` Direct DB / Text-to-SQL 只作为低频探索、治理白名单内补充分析或未覆盖只读链路兜底，不得压过已批准的高频 Cloud AiRead 端点。
+- CloudReadOnly 探索型 Text-to-SQL 只能作为强语义 intent 覆盖外、低频探索或 Direct DB SQL 失败后的受控 fallback；不得拆分或重命名既有 `Analysis.*` intent，不得用 fallback 压过可用的高频 Cloud AiRead 路径。
 - CloudReadOnly Text-to-SQL fallback 必须使用共享白名单 schema、已验证只读凭据、LLM 结构化生成、SELECT-only SQL guard、BusinessQuery safety policy 双层表/列白名单、只读执行、最多受控修复重试和 hash-only 审计；生产 fallback 不得退化为规则 SQL 模板。
 - CloudReadOnly Text-to-SQL LLM prompt 可见的物理 schema 只能来自 `CloudReadOnlyGovernedSchema` 治理白名单，最多包含批准表名、列名、列类型、join hints 和必要业务描述；不得把连接串、凭据、role/权限细节、样例数据、查询结果、参数值、非白名单表字段或系统/敏感字段发给模型。
 - CloudReadOnly Text-to-SQL 修复重试默认最多 3 次、硬上限 5 次；timeout、权限、凭据、非只读、系统表、敏感字段、多语句或写 SQL 默认不可修复、不重试。
