@@ -44,6 +44,26 @@ public sealed class ChatErrorContractTests
     }
 
     [Fact]
+    public void WrappedProviderNetworkFailure_ShouldReturnProviderUnavailableWithoutInternalMessage()
+    {
+        var chunk = AgentStreamRuntime.CreateErrorChunk(
+            new InvalidOperationException(
+                "SDK wrapper leaked provider endpoint",
+                new HttpRequestException("api-key or private endpoint leaked here")),
+            "test",
+            AppProblemCodes.ChatStreamFailed,
+            "对话执行失败，请稍后重试。");
+
+        var payload = ReadPayload(chunk.Content);
+
+        payload.Code.Should().Be(AppProblemCodes.ModelProviderUnavailable);
+        payload.UserFacingMessage.Should().Be("模型服务暂时不可用，请稍后重试或联系管理员检查模型网络。");
+        chunk.Content.Should().NotContain("api-key");
+        chunk.Content.Should().NotContain("private endpoint");
+        chunk.Content.Should().NotContain("provider endpoint");
+    }
+
+    [Fact]
     public void ModelTimeout_ShouldReturnTimeoutCode()
     {
         var chunk = AgentStreamRuntime.CreateErrorChunk(

@@ -44,7 +44,7 @@ internal interface IAgentWorkerHeartbeatService
 }
 
 internal sealed class AgentWorkerHeartbeatService(
-    IRepository<AgentWorkerHeartbeat> heartbeatRepository,
+    IAgentWorkerHeartbeatStore heartbeatStore,
     IAgentWorkspaceFingerprintProvider workspaceFingerprintProvider)
     : IAgentWorkerHeartbeatService
 {
@@ -57,9 +57,7 @@ internal sealed class AgentWorkerHeartbeatService(
     {
         var now = DateTimeOffset.UtcNow;
         var workspaceRootHash = workspaceFingerprintProvider.GetWorkspaceRootHash();
-        var heartbeat = await heartbeatRepository.FirstOrDefaultAsync(
-            new AgentWorkerHeartbeatByWorkerIdSpec(workerId),
-            cancellationToken);
+        var heartbeat = await heartbeatStore.FirstByWorkerIdAsync(workerId, cancellationToken);
 
         if (heartbeat is null)
         {
@@ -71,7 +69,7 @@ internal sealed class AgentWorkerHeartbeatService(
                 version,
                 activeQueueItem?.Id,
                 activeQueueItem?.TaskId);
-            heartbeatRepository.Add(heartbeat);
+            heartbeatStore.Add(heartbeat);
         }
         else
         {
@@ -82,10 +80,10 @@ internal sealed class AgentWorkerHeartbeatService(
                 version,
                 activeQueueItem?.Id,
                 activeQueueItem?.TaskId);
-            heartbeatRepository.Update(heartbeat);
+            heartbeatStore.Update(heartbeat);
         }
 
-        await heartbeatRepository.SaveChangesAsync(cancellationToken);
+        await heartbeatStore.SaveChangesAsync(cancellationToken);
     }
 }
 
@@ -110,7 +108,7 @@ public sealed record GetAgentWorkerStatusQuery : IQuery<Result<AgentWorkerStatus
 public sealed record DeadLetterAgentRunQueueItemCommand(Guid Id, string? Reason = null) : ICommand<Result<AgentRunQueueItemDto>>;
 
 public sealed class GetAgentRunQueueQueryHandler(
-    IReadRepository<AgentTaskRunQueueItem> queueRepository)
+    IAgentTaskRunQueueStore queueStore)
     : IQueryHandler<GetAgentRunQueueQuery, Result<AgentRunQueuePageDto>>
 {
     public async Task<Result<AgentRunQueuePageDto>> Handle(
@@ -132,9 +130,7 @@ public sealed class GetAgentRunQueueQueryHandler(
             PageNumber = request.PageIndex,
             PageSize = request.PageSize
         };
-        var queueItems = await queueRepository.ListAsync(
-            new AgentTaskRunQueueAllItemsSpec(),
-            cancellationToken);
+        var queueItems = await queueStore.ListAllAsync(cancellationToken);
 
         var query = queueItems.AsEnumerable();
         if (status.HasValue)
@@ -214,8 +210,8 @@ public sealed class GetAgentRunQueueQueryHandler(
 }
 
 public sealed class GetAgentRunQueueSummaryQueryHandler(
-    IReadRepository<AgentTaskRunQueueItem> queueRepository,
-    IReadRepository<AgentWorkerHeartbeat> heartbeatRepository,
+    IAgentTaskRunQueueStore queueStore,
+    IAgentWorkerHeartbeatStore heartbeatStore,
     IAgentWorkspaceFingerprintProvider? workspaceFingerprintProvider = null,
     IOptions<AgentRunQueueOptions>? options = null)
     : IQueryHandler<GetAgentRunQueueSummaryQuery, Result<AgentRunQueueSummaryDto>>
@@ -225,12 +221,8 @@ public sealed class GetAgentRunQueueSummaryQueryHandler(
         CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
-        var queueItems = await queueRepository.ListAsync(
-            new AgentTaskRunQueueAllItemsSpec(),
-            cancellationToken);
-        var heartbeats = await heartbeatRepository.ListAsync(
-            new AgentWorkerHeartbeatAllSpec(),
-            cancellationToken);
+        var queueItems = await queueStore.ListAllAsync(cancellationToken);
+        var heartbeats = await heartbeatStore.ListAllAsync(cancellationToken);
 
         var httpApiWorkspaceHash = workspaceFingerprintProvider?.GetWorkspaceRootHash();
         return Result.Success(BuildSummary(
@@ -301,8 +293,8 @@ public sealed class GetAgentRunQueueSummaryQueryHandler(
 }
 
 public sealed class GetAgentWorkerStatusQueryHandler(
-    IReadRepository<AgentTaskRunQueueItem> queueRepository,
-    IReadRepository<AgentWorkerHeartbeat> heartbeatRepository,
+    IAgentTaskRunQueueStore queueStore,
+    IAgentWorkerHeartbeatStore heartbeatStore,
     IAgentWorkspaceFingerprintProvider workspaceFingerprintProvider,
     IOptions<AgentRunQueueOptions>? options = null)
     : IQueryHandler<GetAgentWorkerStatusQuery, Result<AgentWorkerStatusDto>>
@@ -312,12 +304,8 @@ public sealed class GetAgentWorkerStatusQueryHandler(
         CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
-        var queueItems = await queueRepository.ListAsync(
-            new AgentTaskRunQueueAllItemsSpec(),
-            cancellationToken);
-        var heartbeats = await heartbeatRepository.ListAsync(
-            new AgentWorkerHeartbeatAllSpec(),
-            cancellationToken);
+        var queueItems = await queueStore.ListAllAsync(cancellationToken);
+        var heartbeats = await heartbeatStore.ListAllAsync(cancellationToken);
         var httpApiWorkspaceHash = workspaceFingerprintProvider.GetWorkspaceRootHash();
         return Result.Success(AgentWorkerStatusCalculator.Build(
             queueItems,
@@ -329,7 +317,7 @@ public sealed class GetAgentWorkerStatusQueryHandler(
 }
 
 public sealed class DeadLetterAgentRunQueueItemCommandHandler(
-    IRepository<AgentTaskRunQueueItem> queueRepository,
+    IAgentTaskRunQueueStore queueStore,
     IAuditLogWriter auditLogWriter)
     : ICommandHandler<DeadLetterAgentRunQueueItemCommand, Result<AgentRunQueueItemDto>>
 {
@@ -337,9 +325,7 @@ public sealed class DeadLetterAgentRunQueueItemCommandHandler(
         DeadLetterAgentRunQueueItemCommand request,
         CancellationToken cancellationToken)
     {
-        var item = await queueRepository.FirstOrDefaultAsync(
-            new AgentTaskRunQueueItemByIdSpec(new AgentTaskRunQueueItemId(request.Id)),
-            cancellationToken);
+        var item = await queueStore.FirstByIdAsync(new AgentTaskRunQueueItemId(request.Id), cancellationToken);
         if (item is null)
         {
             return Result.NotFound(AppProblemCodes.AgentTaskRunQueueNotFound);
@@ -359,8 +345,8 @@ public sealed class DeadLetterAgentRunQueueItemCommandHandler(
                           ?? "Agent run queue item moved to dead letter by operator.";
         var failureCode = item.FailureCode ?? AppProblemCodes.AgentRunQueueOperationDenied;
         item.MarkDeadLetter(failureCode, safeMessage, now);
-        queueRepository.Update(item);
-        await queueRepository.SaveChangesAsync(cancellationToken);
+        queueStore.Update(item);
+        await queueStore.SaveChangesAsync(cancellationToken);
 
         await auditLogWriter.WriteAsync(
             new AuditLogWriteRequest(

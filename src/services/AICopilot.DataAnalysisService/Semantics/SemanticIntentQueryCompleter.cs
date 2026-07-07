@@ -124,7 +124,7 @@ internal static partial class SemanticIntentQueryCompleter
             return new LevelFilter(EqualOperator, "WARN");
         }
 
-        if (ContainsAny(queryText, "信息") || ContainsEnglishTerm(queryText, "info"))
+        if (AsksInfoLevel(queryText))
         {
             return new LevelFilter(EqualOperator, "INFO");
         }
@@ -315,6 +315,22 @@ internal static partial class SemanticIntentQueryCompleter
         }
 
         return terms.Any(term => value.Contains(term, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool AsksInfoLevel(string? value)
+    {
+        return ContainsEnglishTerm(value, "info") ||
+               ContainsAny(
+                   value,
+                   "INFO日志",
+                   "INFO级别",
+                   "级别INFO",
+                   "信息日志",
+                   "信息级别",
+                   "日志级别为信息",
+                   "日志级别是信息",
+                   "正常日志",
+                   "正常信息");
     }
 
     private static bool ContainsEnglishTerm(string? value, string term)

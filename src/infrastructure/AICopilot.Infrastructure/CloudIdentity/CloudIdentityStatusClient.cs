@@ -54,9 +54,9 @@ public sealed class CloudIdentityStatusClient(
         {
             return CloudIdentityStatusCheckResult.Unavailable("Cloud identity status endpoint timed out.");
         }
-        catch (HttpRequestException ex)
+        catch (HttpRequestException)
         {
-            return CloudIdentityStatusCheckResult.Unavailable(ex.Message);
+            return CloudIdentityStatusCheckResult.Unavailable("Cloud identity status endpoint is unavailable.");
         }
     }
 

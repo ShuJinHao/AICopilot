@@ -8,6 +8,13 @@ import type {
   ArtifactWorkspace,
   UploadRecord
 } from '@/types/protocols'
+import { toFriendlyMessage } from './chatErrorStore'
+
+type ErrorReporter = (message: string) => void
+
+function reportLoadError(reportError: ErrorReporter | undefined, action: string, error: unknown) {
+  reportError?.(`${action}失败：${toFriendlyMessage(error)}`)
+}
 
 export interface AgentChartPreview {
   labels: string[]
@@ -32,7 +39,7 @@ export const useArtifactWorkspaceStore = defineStore('artifactWorkspace', () => 
     chartPreview.value = null
   }
 
-  async function refreshWorkspace(task: AgentTask) {
+  async function refreshWorkspace(task: AgentTask, reportError?: ErrorReporter) {
     if (!task.workspaceCode) {
       currentWorkspace.value = null
       currentArtifactPreview.value = null
@@ -40,26 +47,37 @@ export const useArtifactWorkspaceStore = defineStore('artifactWorkspace', () => 
       return null
     }
 
-    currentWorkspace.value = await chatService.getWorkspace(task.workspaceCode)
-    const firstArtifact = currentWorkspace.value.artifacts[0]
-    currentArtifactPreview.value = firstArtifact
-      ? await loadArtifactPreview(firstArtifact.id)
-      : null
-    await refreshChartPreview()
-    return currentWorkspace.value
+    try {
+      currentWorkspace.value = await chatService.getWorkspace(task.workspaceCode)
+      const firstArtifact = currentWorkspace.value.artifacts[0]
+      currentArtifactPreview.value = firstArtifact
+        ? await loadArtifactPreview(firstArtifact.id, reportError)
+        : null
+      await refreshChartPreview(reportError)
+      return currentWorkspace.value
+    } catch (error) {
+      console.error('Failed to refresh artifact workspace.', error)
+      reportLoadError(reportError, '加载产物工作区', error)
+      currentWorkspace.value = null
+      currentArtifactPreview.value = null
+      chartPreview.value = null
+      return null
+    }
   }
 
-  async function loadArtifactPreview(artifactId: string) {
+  async function loadArtifactPreview(artifactId: string, reportError?: ErrorReporter) {
     try {
       currentArtifactPreview.value = await chatService.getArtifactPreview(artifactId)
       return currentArtifactPreview.value
-    } catch {
+    } catch (error) {
+      console.error('Failed to load artifact preview.', error)
+      reportLoadError(reportError, '加载产物预览', error)
       currentArtifactPreview.value = null
       return null
     }
   }
 
-  async function refreshChartPreview() {
+  async function refreshChartPreview(reportError?: ErrorReporter) {
     const chartArtifact = currentWorkspace.value?.artifacts.find((artifact) => artifact.previewKind === 'chart')
     if (!chartArtifact) {
       chartPreview.value = null
@@ -113,7 +131,9 @@ export const useArtifactWorkspaceStore = defineStore('artifactWorkspace', () => 
               ? sourceInfo.queryHash
               : undefined
       }
-    } catch {
+    } catch (error) {
+      console.error('Failed to load chart artifact preview.', error)
+      reportLoadError(reportError, '加载图表预览', error)
       chartPreview.value = null
     }
   }

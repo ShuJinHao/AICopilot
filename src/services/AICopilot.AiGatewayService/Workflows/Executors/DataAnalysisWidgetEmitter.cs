@@ -40,7 +40,10 @@ public sealed class DataAnalysisWidgetEmitter(ILogger<DataAnalysisWidgetEmitter>
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "构建可视化 Widget 失败。Database: {DbName}", databaseName);
+            logger.LogError(
+                "构建可视化 Widget 失败。Database: {DbName}; ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                databaseName,
+                ex.GetType().Name);
         }
     }
 

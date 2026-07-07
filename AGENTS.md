@@ -25,6 +25,15 @@
 - 最终回复必须列出复盘文档、规则沉淀位置和验证命令；缺任一项，不得称为完成。
 - 默认只更新项目滚动复盘文档，不为每个任务新增单独流水文档；只有形成可长期复用的业务或技术契约，才新增专题文档。
 
+## Topic Contracts
+
+- AI 修复总计划和逐项治理清单：`docs/AI架构治理清单.md`。
+- 部署安全、HTTP-only、secret、镜像、SSH 和 runner 边界：`docs/AICopilot安全部署契约.md`。
+- Cloud 只读、Cloud AiRead、CloudReadOnly Direct DB 和 Text-to-SQL 边界：`docs/Cloud只读数据分析契约.md`。
+- Agent workflow、Plan/Chat、MCP/Tool/Human-in-the-loop、异常和前端错误边界：`docs/Agent工作流与异常契约.md`。
+
+触碰对应能力时必须先读相应专题契约；专题契约与本文档冲突时，先停止并修正文档口径，不得按印象继续改代码。
+
 ## Cloud Business Read-only Boundary
 
 - AICopilot 可以读取已批准范围内的 Cloud 业务数据，用于分析、解释、汇总、检索和建议。
@@ -71,6 +80,9 @@ Cloud-AICopilot OIDC 身份对齐的长期结论见 `../docs/历史核心记录.
 ## Architecture
 
 - 遵守 DDD 分层和依赖倒置。
+- 聚合根边界以 `docs/DDD聚合根边界.md` 为长期技术契约；新增或调整 `IAggregateRoot<>`、`IRepository<T>` 注册、EF `DbSet`、Agent runtime timeline/queue/audit 记录前必须先核对该文档和架构测试。
+- `IAggregateRoot<>` 只用于能独立维护业务不变量和生命周期的领域根；队列项、timeline 投影、工具执行审计、worker 心跳、执行尝试记录不得作为新增聚合根方向，历史债务只能减少不能增加。
+- `DataSourcePermissionGrant` 当前保留为独立聚合根但标记待评估；后续如果能完全归入 `BusinessDatabase` 生命周期，应下沉为子实体或专用权限记录并移出白名单。
 - `src/core` 放领域核心。
 - `src/services` 放命令、查询、workflow、应用编排、MediatR handler。
 - `src/infrastructure` 放 EF Core、Dapper、embedding、event bus、provider、MCP 技术细节。
@@ -120,6 +132,12 @@ Cloud-AICopilot OIDC 身份对齐的长期结论见 `../docs/历史核心记录.
 - 禁止硬编码 API key、token、secret、license、provider credential、数据库凭据、MCP 凭据。
 - AICopilot 生产 Docker 构建必须使用 Harbor mirror 的基础镜像，包括 .NET ASP.NET runtime、Node、Nginx、PostgreSQL、RabbitMQ 和 Qdrant；workflow、Dockerfile 和应急构建脚本不得默认从 Docker Hub 或 MCR 拉生产基础镜像。
 - AICopilot 生产发布标准路径是本机构建镜像、推送 Harbor、再通过 SSH 触发服务器 `deploy-release.sh`；`aicopilot-image` / `aicopilot-deploy` 只允许作为带确认词的灾备入口。单镜像 build/push 默认 15 分钟超时，Harbor 检查默认 2 分钟超时，SSH deploy 默认 30 分钟超时；超时必须停止并诊断 Docker buildx、Harbor tag、服务器 compose/logs 和 release 状态，不得继续等待 GitHub Actions 或 shell 命令自然超时。
+- AICopilot 当前内网生产部署红线是 HTTP-only：不得把 HTTPS redirection、HSTS、nginx 443 listener、证书申请/续期或 OIDC HTTPS metadata 强制校验列为当前修复门槛；后续如需切换 HTTPS，必须由用户单独批准传输层方案和证书来源。HTTP 部署下只能使用兼容 HTTP 的安全加固：内网隔离、端口收敛、同源代理、CORS 白名单、短期 token、不在 URL/日志/审计中暴露 secret、非 root 容器、强 secret、API 只读边界和除 HSTS 外的安全响应头。Cloud OIDC 使用 HTTP issuer 时必须显式启用内网 HTTP OIDC，只允许 loopback、私网 IPv4 或保留内网 DNS 后缀（`.internal.example`、`.internal`、`.lan`、`.local`），公共 HTTP 域名仍必须拒绝。
+- AICopilot Web 到 HttpApi 的标准生产路径必须走 nginx 同源 `/api/` 反代；HttpApi CORS 默认不开放跨源。确需浏览器直连后端时，只能配置 `Cors:AllowedOrigins` 中的精确 http/https origin，禁止 `*`、通配子域、带 path/query/fragment 的 origin 或运行时任意放行。
+- AICopilot 部署模板、文档示例、滚动复盘、历史诊断记录、workflow 默认值、脚本默认值、migration seed 和 fresh DB seed 不得写入真实内网 IP、弱 secret、`CHANGE_ME`、`dummy-key` 或默认 `root@` 发布目标；真实地址、token 和密码只能来自服务器 `.env`、GitHub secrets、管理员录入或命令行环境变量。root SSH 只允许显式设置 `ALLOW_ROOT_SSH_DEPLOY=true` 的应急路径，不得作为标准发布口径。
+- 模型 smoke 的 `AICOPILOT_MODEL_SMOKE_API_KEY=dummy-key` 只允许作为真实模型网关的显式兼容例外，必须同时设置 `AICOPILOT_MODEL_SMOKE_ALLOW_DUMMY_KEY=true` 或手工 smoke 命令传 `--allow-dummy-key`；默认 preflight 必须拒绝该弱值。
+- AICopilot 模型、Embedding 和 endpoint pool 覆盖 API key 的受保护格式必须使用 `encv2:` AES-GCM；旧 `encv1:` 只能通过 migration worker 或一次性迁移命令重加密，不得在运行时 provider 中继续作为正常解密格式兼容。`AiRuntime:ProviderReliability` endpoint `ApiKey` 和 `ApiKeyEnvironmentVariable` 指向的环境变量值也必须存 `encv2:` 密文，不能放明文。
+- 私有模型生产播种只能从服务器真实 `.env` 或本机私密部署手册读取真实值；仓库默认只能使用 `model.internal.example` 占位 URL、空 API key 和禁用状态。新库 seed 的私有模型 context window 固定按 64k（`65536`）口径配置，真实 base URL、API key 和是否启用由 `AICOPILOT_PRIVATE_MODEL_*` 环境变量控制，API key 入库前必须加密为 `encv2:`。
 - 模型、prompt、plugin、MCP server、approval threshold 等运行行为优先用配置或明确存储数据，不藏在代码里。
 - 容器部署必须显式配置并挂载可写的 `FileStorage:RootPath` 和 `ArtifactWorkspace:RootPath`；不得依赖容器内 `LocalApplicationData` 默认路径或 `/app` 目录写入运行产物。
 

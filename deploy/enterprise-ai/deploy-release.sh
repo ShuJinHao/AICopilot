@@ -296,6 +296,225 @@ is_truthy() {
   esac
 }
 
+read_file_mode() {
+  stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null || printf ''
+}
+
+ensure_env_file_permissions() {
+  local mode
+  mode="$(read_file_mode "$ENV_FILE")"
+  if [ -z "$mode" ]; then
+    printf 'Unable to read deploy environment file mode: %s\n' "$ENV_FILE" >&2
+    exit 66
+  fi
+
+  case "$mode" in
+    400|600)
+      ;;
+    *)
+      printf 'Deploy environment file must be owner-only readable/writable (400 or 600): %s mode=%s\n' "$ENV_FILE" "$mode" >&2
+      exit 64
+      ;;
+  esac
+}
+
+is_template_placeholder_value() {
+  local key="$1"
+  local value="$2"
+  local lower
+  lower="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')"
+
+  if [ "$key" = "AICOPILOT_MODEL_SMOKE_API_KEY" ] &&
+     [ "$value" = "dummy-key" ] &&
+     is_truthy "${AICOPILOT_MODEL_SMOKE_ALLOW_DUMMY_KEY:-false}"; then
+    return 1
+  fi
+
+  case "$lower" in
+    *change_me*|*change-me*|*replace-with*|*internal.example*|*'<tag>'*|*'<git-sha>'*|*'<'*'>'*|dummy-key|123456|password)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+ensure_no_template_placeholders() {
+  local env_line
+  local key
+  local value
+
+  while IFS= read -r env_line || [ -n "$env_line" ]
+  do
+    env_line="${env_line//$'\r'/}"
+
+    case "$env_line" in
+      ''|'#'*)
+        continue
+        ;;
+      *=*)
+        key="${env_line%%=*}"
+        value="${env_line#*=}"
+        if is_template_placeholder_value "$key" "$value"; then
+          printf 'Deploy .env still contains template or weak placeholder value: %s\n' "$key" >&2
+          exit 64
+        fi
+        ;;
+    esac
+  done < "$ENV_FILE"
+}
+
+require_secret_value() {
+  local key="$1"
+  local min_length="$2"
+  local value="${!key:-}"
+
+  if [ -z "$value" ]; then
+    printf 'Missing required secret in .env: %s\n' "$key" >&2
+    exit 64
+  fi
+
+  if is_template_placeholder_value "$key" "$value"; then
+    printf 'Secret in .env uses a weak or template value: %s\n' "$key" >&2
+    exit 64
+  fi
+
+  if [ "${#value}" -lt "$min_length" ]; then
+    printf 'Secret in .env is too short: %s requires at least %s characters.\n' "$key" "$min_length" >&2
+    exit 64
+  fi
+}
+
+require_http_url_value() {
+  local key="$1"
+  local value="${!key:-}"
+
+  if [ -z "$value" ]; then
+    printf 'Missing required HTTP URL in .env: %s\n' "$key" >&2
+    exit 64
+  fi
+
+  case "$value" in
+    http://*)
+      ;;
+    https://*)
+      printf 'AICopilot current deployment is HTTP-only; %s must not use HTTPS until a certificate plan is approved.\n' "$key" >&2
+      exit 64
+      ;;
+    *)
+      printf 'AICopilot deployment URL must start with http:// for current HTTP-only mode: %s=%s\n' "$key" "$value" >&2
+      exit 64
+      ;;
+  esac
+}
+
+extract_http_url_host() {
+  local url="$1"
+  local without_scheme="${url#http://}"
+  local authority="${without_scheme%%/*}"
+  local host
+
+  case "$authority" in
+    \[*\]*)
+      host="${authority#\[}"
+      host="${host%%\]*}"
+      ;;
+    *)
+      host="${authority%%:*}"
+      ;;
+  esac
+
+  printf '%s\n' "$host" | tr '[:upper:]' '[:lower:]' | sed 's/\.$//'
+}
+
+is_allowed_intranet_http_oidc_host() {
+  local url="$1"
+  local host
+  host="$(extract_http_url_host "$url")"
+
+  case "$host" in
+    localhost|127.*|::1|*.internal.example|*.internal|*.lan|*.local)
+      return 0
+      ;;
+    10.*|192.168.*)
+      return 0
+      ;;
+  esac
+
+  if [[ "$host" =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
+require_intranet_http_oidc_issuer() {
+  require_http_url_value CLOUD_OIDC_ISSUER
+
+  if ! is_allowed_intranet_http_oidc_host "$CLOUD_OIDC_ISSUER"; then
+    printf 'HTTP-only Cloud OIDC issuer must be loopback, private IPv4, or a reserved intranet DNS suffix (.internal.example, .internal, .lan, .local): %s\n' "$CLOUD_OIDC_ISSUER" >&2
+    exit 64
+  fi
+}
+
+ensure_http_only_environment() {
+  require_http_url_value AICOPILOT_PUBLIC_URL
+  require_http_url_value CLOUD_PLATFORM_URL
+
+  if [ -n "${CLOUD_AI_READ_BASE_URL:-}" ]; then
+    require_http_url_value CLOUD_AI_READ_BASE_URL
+  fi
+
+  if [ -n "${CLOUD_IDENTITY_STATUS_BASE_URL:-}" ]; then
+    require_http_url_value CLOUD_IDENTITY_STATUS_BASE_URL
+  fi
+
+  if [ -n "${AICOPILOT_MODEL_SMOKE_BASE_URL:-}" ]; then
+    require_http_url_value AICOPILOT_MODEL_SMOKE_BASE_URL
+  fi
+
+  if is_truthy "${CLOUD_OIDC_ENABLED:-false}"; then
+    require_intranet_http_oidc_issuer
+    if ! is_truthy "${ALLOW_INTRANET_HTTP_OIDC:-false}"; then
+      printf 'HTTP-only Cloud OIDC requires ALLOW_INTRANET_HTTP_OIDC=true.\n' >&2
+      exit 64
+    fi
+    if [ "${CLOUD_OIDC_REQUIRE_HTTPS_METADATA:-true}" != "false" ]; then
+      printf 'HTTP-only Cloud OIDC requires CLOUD_OIDC_REQUIRE_HTTPS_METADATA=false.\n' >&2
+      exit 64
+    fi
+  fi
+}
+
+ensure_required_secrets() {
+  require_secret_value POSTGRES_PASSWORD 16
+  require_secret_value RABBITMQ_PASSWORD 16
+  require_secret_value QDRANT_KEY 16
+  require_secret_value AICOPILOT_BOOTSTRAP_ADMIN_PASSWORD 12
+  require_secret_value AICOPILOT_API_KEY_ENCRYPTION_KEY 32
+  require_secret_value AICOPILOT_JWT_SECRET_KEY 64
+
+  if is_truthy "${CLOUD_AI_READ_ENABLED:-false}" || is_truthy "${CLOUD_IDENTITY_STATUS_ENABLED:-false}"; then
+    require_secret_value CLOUD_AI_SERVICE_ACCOUNT_TOKEN 32
+  fi
+
+  if is_truthy "${DATA_ANALYSIS_CLOUD_READONLY_ENABLED:-false}"; then
+    require_secret_value DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING 32
+    if ! is_truthy "${DATA_ANALYSIS_CLOUD_READONLY_CREDENTIAL_VERIFIED:-false}"; then
+      printf 'DATA_ANALYSIS_CLOUD_READONLY_ENABLED=true requires DATA_ANALYSIS_CLOUD_READONLY_CREDENTIAL_VERIFIED=true.\n' >&2
+      exit 64
+    fi
+  fi
+}
+
+validate_deploy_environment() {
+  ensure_env_file_permissions
+  ensure_no_template_placeholders
+  ensure_http_only_environment
+  ensure_required_secrets
+}
+
 ensure_cloud_readonly_network() {
   local network="${DATA_ANALYSIS_CLOUD_READONLY_DOCKER_NETWORK:-enterprise-ai-cloud-readonly}"
   local cloud_project="${DATA_ANALYSIS_CLOUD_READONLY_CLOUD_COMPOSE_PROJECT:-deploy}"
@@ -353,6 +572,62 @@ check_cloud_readonly_preflight() {
   "$check_script" --env-file "$ENV_FILE"
 }
 
+check_model_provider_preflight() {
+  local check_script="$DEPLOY_DIR/scripts/check-model-provider-openai.sh"
+
+  if ! is_truthy "${AICOPILOT_MODEL_SMOKE_ENABLED:-false}"; then
+    printf 'Model provider smoke check is disabled; skipping model preflight.\n'
+    return
+  fi
+
+  if [ ! -x "$check_script" ]; then
+    printf 'Model provider smoke check is enabled, but preflight script is missing or not executable: %s\n' "$check_script" >&2
+    exit 66
+  fi
+
+  printf 'Running model provider smoke preflight.\n'
+  "$check_script" --env-file "$ENV_FILE"
+}
+
+check_model_secret_migration_preflight() {
+  local check_script="$DEPLOY_DIR/scripts/check-model-secret-migration.sh"
+  local status
+
+  if [ ! -x "$check_script" ]; then
+    printf 'Model secret migration check script is missing or not executable: %s\n' "$check_script" >&2
+    exit 66
+  fi
+
+  printf 'Running model secret migration preflight.\n'
+  set +e
+  "$check_script" --env-file "$ENV_FILE" --compose-file "$COMPOSE_FILE"
+  status=$?
+  set -e
+
+  if [ "$status" -ne 0 ]; then
+    printf 'AICopilot model secret migration preflight failed before starting runtime services.\n' >&2
+    printf 'Run ./deploy-release.sh %s --services migration, or ask an administrator to re-enter affected API keys.\n' "$DEPLOY_RELEASE_ID" >&2
+    exit "$status"
+  fi
+}
+
+run_release_security_attestation() {
+  local check_script="$DEPLOY_DIR/scripts/check-release-security-attestation.sh"
+  local web_port="${AICOPILOT_WEB_PORT:-82}"
+  local web_url="http://127.0.0.1:${web_port}/"
+
+  if [ ! -x "$check_script" ]; then
+    printf 'Release security attestation script is missing or not executable: %s\n' "$check_script" >&2
+    exit 66
+  fi
+
+  printf 'Running release security attestation.\n'
+  "$check_script" \
+    --env-file "$ENV_FILE" \
+    --compose-file "$COMPOSE_FILE" \
+    --web-url "$web_url"
+}
+
 probe_web() {
   local web_port="${AICOPILOT_WEB_PORT:-82}"
   local url="http://127.0.0.1:${web_port}/"
@@ -377,12 +652,57 @@ probe_web() {
   exit 1
 }
 
+require_response_header() {
+  local headers_file="$1"
+  local header_pattern="$2"
+  local header_description="$3"
+
+  if ! grep -Eiq "$header_pattern" "$headers_file"; then
+    printf 'AICopilot web security header missing or invalid: %s\n' "$header_description" >&2
+    cat "$headers_file" >&2
+    exit 1
+  fi
+}
+
+probe_web_security_headers() {
+  local web_port="${AICOPILOT_WEB_PORT:-82}"
+  local url="http://127.0.0.1:${web_port}/"
+  local headers_file
+
+  headers_file="$(mktemp "$DEPLOY_DIR/web-headers.XXXXXX")"
+  if ! curl --silent --show-error --fail --head --max-time 10 "$url" | tr -d '\r' > "$headers_file"; then
+    printf 'AICopilot web security header probe failed: %s\n' "$url" >&2
+    rm -f "$headers_file"
+    exit 1
+  fi
+
+  require_response_header "$headers_file" '^X-Content-Type-Options:[[:space:]]*nosniff[[:space:]]*$' 'X-Content-Type-Options: nosniff'
+  require_response_header "$headers_file" '^X-Frame-Options:[[:space:]]*DENY[[:space:]]*$' 'X-Frame-Options: DENY'
+  require_response_header "$headers_file" '^Referrer-Policy:[[:space:]]*no-referrer[[:space:]]*$' 'Referrer-Policy: no-referrer'
+  require_response_header "$headers_file" '^Permissions-Policy:[[:space:]].*camera=\(\)' 'Permissions-Policy'
+  require_response_header "$headers_file" "^Content-Security-Policy:[[:space:]].*default-src 'self'" 'Content-Security-Policy'
+
+  if grep -Eiq '^Strict-Transport-Security:' "$headers_file"; then
+    printf 'AICopilot HTTP-only deployment must not emit Strict-Transport-Security until HTTPS is explicitly approved.\n' >&2
+    cat "$headers_file" >&2
+    rm -f "$headers_file"
+    exit 1
+  fi
+
+  rm -f "$headers_file"
+  printf 'AICopilot web HTTP-only security header probe succeeded: %s\n' "$url"
+}
+
 RELEASE_TAG="${RELEASE_TAG:-}"
 REQUESTED_SERVICES="${DEPLOY_SERVICES:-}"
+VALIDATE_ONLY=false
 
 while [ "$#" -gt 0 ]
 do
   case "$1" in
+    --validate-only)
+      VALIDATE_ONLY=true
+      ;;
     --services)
       shift
       REQUESTED_SERVICES="${1:-}"
@@ -407,6 +727,14 @@ do
   esac
   shift
 done
+
+if [ "$VALIDATE_ONLY" = true ]; then
+  cd "$DEPLOY_DIR"
+  load_dotenv
+  validate_deploy_environment
+  printf 'AICopilot deploy environment validation passed: %s\n' "$ENV_FILE"
+  exit 0
+fi
 
 ensure_release_tag "$RELEASE_TAG"
 
@@ -485,6 +813,7 @@ SELECTED_SERVICE_NAMES="$(normalize_services "$REQUESTED_SERVICES")"
 SELECTED_IMAGE_KEYS=()
 RUNTIME_SELECTED_SERVICES=()
 RUN_MIGRATION=false
+BACKEND_RUNTIME_SELECTED=false
 HTTPAPI_SELECTED=false
 WEBUI_SELECTED=false
 for service in $SELECTED_SERVICE_NAMES
@@ -497,11 +826,22 @@ do
   fi
 
   if [ "$service" = "aicopilot-httpapi" ]; then
+    BACKEND_RUNTIME_SELECTED=true
     HTTPAPI_SELECTED=true
+  elif [ "$service" = "aicopilot-dataworker" ] || [ "$service" = "aicopilot-ragworker" ]; then
+    BACKEND_RUNTIME_SELECTED=true
   elif [ "$service" = "aicopilot-webui" ]; then
     WEBUI_SELECTED=true
   fi
 done
+
+if [ -n "$REQUESTED_SERVICES" ] &&
+   [ "$BACKEND_RUNTIME_SELECTED" = "true" ] &&
+   [ "$RUN_MIGRATION" != "true" ]; then
+  printf 'AICopilot backend runtime deploys must include migration so model and embedding secrets are revalidated with the current encryption key before runtime starts.\n' >&2
+  printf 'Use --services migration,httpapi,dataworker,ragworker as applicable. Web-only deploys may omit migration.\n' >&2
+  exit 64
+fi
 
 command -v docker >/dev/null
 command -v curl >/dev/null
@@ -523,9 +863,11 @@ else
   apply_release_tag_to_image_keys "$RELEASE_TAG" "${SELECTED_IMAGE_KEYS[@]}"
 fi
 load_dotenv
+validate_deploy_environment
 ensure_image_policy
 ensure_cloud_readonly_network
 check_cloud_readonly_preflight
+check_model_provider_preflight
 DEPLOY_RELEASE_ID="$RELEASE_TAG"
 DEPLOY_GIT_SHA_VALUE="${DEPLOY_GIT_SHA:-unknown}"
 DEPLOY_TRIGGERED_BY_VALUE="${DEPLOY_TRIGGERED_BY:-manual}"
@@ -541,12 +883,18 @@ write_release_manifest \
 compose config -q
 if [ -z "$REQUESTED_SERVICES" ]; then
   compose pull
-  compose up -d --remove-orphans
+  compose up -d --remove-orphans postgres eventbus qdrant
+  compose up --no-deps --abort-on-container-exit --exit-code-from aicopilot-migration aicopilot-migration
+  check_model_secret_migration_preflight
+  compose up -d aicopilot-httpapi aicopilot-dataworker aicopilot-ragworker aicopilot-webui
 else
   compose pull $SELECTED_SERVICE_NAMES
   compose up -d postgres eventbus qdrant
   if [ "$RUN_MIGRATION" = "true" ]; then
     compose up --no-deps --abort-on-container-exit --exit-code-from aicopilot-migration aicopilot-migration
+    check_model_secret_migration_preflight
+  elif [ "${#RUNTIME_SELECTED_SERVICES[@]}" -gt 0 ]; then
+    check_model_secret_migration_preflight
   fi
   if [ "${#RUNTIME_SELECTED_SERVICES[@]}" -gt 0 ]; then
     compose up -d "${RUNTIME_SELECTED_SERVICES[@]}"
@@ -558,6 +906,16 @@ else
 fi
 compose ps
 probe_web
+probe_web_security_headers
+attestation_log="$(mktemp "$DEPLOY_DIR/release-security-attestation.XXXXXX")"
+if run_release_security_attestation > "$attestation_log" 2>&1; then
+  cat "$attestation_log"
+else
+  attestation_status=$?
+  cat "$attestation_log" >&2
+  rm -f "$attestation_log"
+  exit "$attestation_status"
+fi
 
 if [ -f "$CURRENT_RELEASE_FILE" ]; then
   cp "$CURRENT_RELEASE_FILE" "$PREVIOUS_RELEASE_FILE"
@@ -573,6 +931,13 @@ write_release_summary \
   "$DEPLOYED_AT_UTC_VALUE" \
   "$SELECTED_SERVICE_NAMES" \
   "$DEPLOY_RELEASE_NOTES_VALUE"
+
+{
+  printf '\n'
+  printf '#### Release Security Attestation\n\n'
+  cat "$attestation_log"
+} >> "$CURRENT_RELEASE_SUMMARY_FILE"
+rm -f "$attestation_log"
 
 cleanup_log="$(mktemp "$DEPLOY_DIR/post-release-cleanup.XXXXXX")"
 cleanup_status=0

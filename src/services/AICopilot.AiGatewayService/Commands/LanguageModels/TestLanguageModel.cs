@@ -122,7 +122,8 @@ public class TestLanguageModelCommandHandler(
         }
         catch (Exception ex) when (ex is ArgumentException or ArgumentOutOfRangeException or InvalidOperationException)
         {
-            return BuildTestModelResult.Failed(ex.Message);
+            return BuildTestModelResult.Failed(
+                "Language model configuration is invalid. Please check provider, protocol, base URL, token budget, temperature, and usage settings.");
         }
     }
 

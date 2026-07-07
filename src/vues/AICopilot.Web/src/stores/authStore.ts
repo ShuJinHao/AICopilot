@@ -2,6 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { identityService } from '@/services/identityService'
 import {
+  getProblemDetails,
   getProblemCode,
   setAccessToken,
   type ApiError,
@@ -118,6 +119,19 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  function resolveCurrentUserErrorMessage(error: unknown) {
+    const apiError = error as ApiError | undefined
+    if (apiError?.status === 401 || apiError?.status === 403) {
+      return resolveUnauthorizedMessage(getProblemDetails(apiError.details))
+    }
+
+    return '无法获取当前用户信息，请重新登录。'
+  }
+
+  function resolveCloudOidcStatusErrorMessage() {
+    return '无法获取 Cloud 登录状态，请稍后重试或使用本地 AI 账号登录。'
+  }
+
   async function ensureInitialized(force = false) {
     if (isInitializationLoaded.value && !force) {
       return initializationStatus.value
@@ -150,7 +164,9 @@ export const useAuthStore = defineStore('auth', () => {
       const status = await identityService.getCloudOidcStatus()
       cloudOidcStatus.value = status
       return status
-    } catch {
+    } catch (error) {
+      console.error('Failed to load Cloud OIDC status.', error)
+      errorMessage.value = resolveCloudOidcStatusErrorMessage()
       cloudOidcStatus.value = { isEnabled: false }
       return cloudOidcStatus.value
     } finally {
@@ -177,7 +193,7 @@ export const useAuthStore = defineStore('auth', () => {
       isProfileLoaded.value = true
       return profile
     } catch (error) {
-      isProfileLoaded.value = false
+      clearAuth(resolveCurrentUserErrorMessage(error))
       throw error
     } finally {
       isProfileLoading.value = false
@@ -209,7 +225,9 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const status = await ensureCloudOidcStatus(true)
       if (!status.isEnabled) {
-        errorMessage.value = 'Cloud 登录尚未配置。'
+        if (!errorMessage.value) {
+          errorMessage.value = 'Cloud 登录尚未配置。'
+        }
         return
       }
 

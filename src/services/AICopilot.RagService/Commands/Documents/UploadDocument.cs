@@ -215,10 +215,10 @@ public class UploadDocumentCommandHandler(
         catch (Exception cleanupException)
         {
             logger.LogWarning(
-                cleanupException,
-                "Failed to clean up uploaded RAG file {FilePath} after document upload transaction failed. Original error: {OriginalError}",
+                "Failed to clean up uploaded RAG file {FilePath} after document upload transaction failed. CleanupErrorType={CleanupErrorType}; OriginalErrorType={OriginalErrorType}; OriginalMessage=hidden_by_security_policy",
                 savedPath,
-                originalException.Message);
+                cleanupException.GetType().Name,
+                originalException.GetType().Name);
         }
     }
 

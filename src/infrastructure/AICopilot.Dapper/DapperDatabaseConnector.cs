@@ -63,7 +63,14 @@ public class DapperDatabaseConnector(
         var guardResult = sqlGuardrail.Validate(sql, database.Provider);
         if (!guardResult.IsSafe)
         {
-            logger.LogWarning("SQL security guard rejected query against {DatabaseName}: {Reason}", database.Name, guardResult.ErrorMessage);
+            var sqlLogMetadata = BuildSqlLogMetadata(sql);
+            logger.LogWarning(
+                "SQL security guard rejected query against {DatabaseName}. Provider={Provider}; SqlLength={SqlLength}; SqlSha256={SqlSha256}; ReasonCode={ReasonCode}; OriginalMessage=hidden_by_security_policy",
+                database.Name,
+                database.Provider,
+                sqlLogMetadata.Length,
+                sqlLogMetadata.Sha256,
+                ClassifyGuardrailFailure(guardResult.ErrorMessage));
             throw new InvalidOperationException(guardResult.ErrorMessage);
         }
 
@@ -124,8 +131,7 @@ public class DapperDatabaseConnector(
             stopwatch.Stop();
             var sqlLogMetadata = BuildSqlLogMetadata(sql);
             logger.LogError(
-                ex,
-                "SQL execution failed on database {DatabaseName}. Provider={Provider}; SqlLength={SqlLength}; SqlSha256={SqlSha256}; ErrorType={ErrorType}",
+                "SQL execution failed on database {DatabaseName}. Provider={Provider}; SqlLength={SqlLength}; SqlSha256={SqlSha256}; ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
                 database.Name,
                 database.Provider,
                 sqlLogMetadata.Length,
@@ -178,6 +184,47 @@ public class DapperDatabaseConnector(
     }
 
     private sealed record SqlLogMetadata(int Length, string Sha256);
+
+    private static string ClassifyGuardrailFailure(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return "unknown";
+        }
+
+        if (message.Contains("不能为空", StringComparison.OrdinalIgnoreCase))
+        {
+            return "empty_sql";
+        }
+
+        if (message.Contains("语法解析", StringComparison.OrdinalIgnoreCase))
+        {
+            return "parse_error";
+        }
+
+        if (message.Contains("多条", StringComparison.OrdinalIgnoreCase))
+        {
+            return "multiple_statements";
+        }
+
+        if (message.Contains("SELECT", StringComparison.OrdinalIgnoreCase))
+        {
+            return "non_select";
+        }
+
+        if (message.Contains("FOR UPDATE", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("锁", StringComparison.OrdinalIgnoreCase))
+        {
+            return "locking_clause";
+        }
+
+        if (message.Contains("函数", StringComparison.OrdinalIgnoreCase))
+        {
+            return "forbidden_function";
+        }
+
+        return "guardrail_rejected";
+    }
 
     private static DynamicParameters ToDynamicParameters(IEnumerable<KeyValuePair<string, object?>> parameters)
     {

@@ -15,7 +15,7 @@ public enum MessageEventType
     FinalOutputReady = 7
 }
 
-public sealed class MessageEvent : BaseEntity<MessageEventId>, IAggregateRoot<MessageEventId>
+public sealed class MessageEvent : BaseEntity<MessageEventId>
 {
     public const int MaxPayloadJsonLength = 256 * 1024;
 

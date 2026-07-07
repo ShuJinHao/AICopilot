@@ -160,7 +160,7 @@ public sealed class EnterpriseDataGovernanceP0Tests
                                 EndpointId = "answer-a",
                                 Provider = "OpenAI",
                                 BaseUrl = "https://example.invalid/a",
-                                ApiKey = "protected",
+                                ApiKey = "encv2:protected-a",
                                 ConcurrencyLimit = 2,
                                 Weight = 2,
                                 Priority = 1
@@ -170,7 +170,7 @@ public sealed class EnterpriseDataGovernanceP0Tests
                                 EndpointId = "answer-b",
                                 Provider = "OpenAI",
                                 BaseUrl = "https://example.invalid/b",
-                                ApiKey = "protected",
+                                ApiKey = "encv2:protected-b",
                                 ConcurrencyLimit = 2,
                                 Weight = 1,
                                 Priority = 1
@@ -178,7 +178,8 @@ public sealed class EnterpriseDataGovernanceP0Tests
                         ]
                     }
                 }
-            }));
+            }),
+            new EndpointPoolSecretProtector());
 
         var first = scheduler.SelectEndpoint("AnswerPool");
         scheduler.RecordStarted(first.EndpointId);

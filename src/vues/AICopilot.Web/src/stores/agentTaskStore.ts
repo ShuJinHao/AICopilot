@@ -7,6 +7,13 @@ import type {
   AgentTaskAuditSummary
 } from '@/types/protocols'
 import type { SessionTimelineEvent } from '@/types/app'
+import { toFriendlyMessage } from './chatErrorStore'
+
+type ErrorReporter = (message: string) => void
+
+function reportLoadError(reportError: ErrorReporter | undefined, action: string, error: unknown) {
+  reportError?.(`${action}失败：${toFriendlyMessage(error)}`)
+}
 
 export const useAgentTaskStore = defineStore('agentTask', () => {
   const agentTasks = ref<AgentTask[]>([])
@@ -37,26 +44,30 @@ export const useAgentTaskStore = defineStore('agentTask', () => {
     }
   }
 
-  async function loadAgentTasks(sessionId: string) {
+  async function loadAgentTasks(sessionId: string, reportError?: ErrorReporter) {
     try {
       agentTasks.value = await chatService.getAgentTasksBySession(sessionId)
       return agentTasks.value[0] ?? null
-    } catch {
+    } catch (error) {
+      console.error('Failed to load agent tasks for session.', error)
+      reportLoadError(reportError, '加载任务状态', error)
       agentTasks.value = []
       return null
     }
   }
 
-  async function loadTimeline(sessionId: string) {
+  async function loadTimeline(sessionId: string, reportError?: ErrorReporter) {
     try {
       const timeline = await chatService.getTimeline(sessionId)
       timelineEvents.value = timeline.items
-    } catch {
+    } catch (error) {
+      console.error('Failed to load agent task timeline.', error)
+      reportLoadError(reportError, '加载任务时间线', error)
       timelineEvents.value = []
     }
   }
 
-  async function loadAgentApprovals(taskId: string | null = null) {
+  async function loadAgentApprovals(taskId: string | null = null, reportError?: ErrorReporter) {
     if (!taskId) {
       agentApprovals.value = []
       return
@@ -64,12 +75,14 @@ export const useAgentTaskStore = defineStore('agentTask', () => {
 
     try {
       agentApprovals.value = await chatService.getAgentTaskApprovals(taskId)
-    } catch {
+    } catch (error) {
+      console.error('Failed to load agent task approvals.', error)
+      reportLoadError(reportError, '加载审批记录', error)
       agentApprovals.value = []
     }
   }
 
-  async function loadAgentAuditSummary(taskId: string | null = null) {
+  async function loadAgentAuditSummary(taskId: string | null = null, reportError?: ErrorReporter) {
     if (!taskId) {
       agentAuditSummary.value = []
       return
@@ -77,7 +90,9 @@ export const useAgentTaskStore = defineStore('agentTask', () => {
 
     try {
       agentAuditSummary.value = await chatService.getAgentTaskAuditSummary(taskId)
-    } catch {
+    } catch (error) {
+      console.error('Failed to load agent task audit summary.', error)
+      reportLoadError(reportError, '加载审计摘要', error)
       agentAuditSummary.value = []
     }
   }

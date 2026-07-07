@@ -1,6 +1,5 @@
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
-using AICopilot.Core.AiGateway.Specifications.AgentTasks;
-using AICopilot.SharedKernel.Repository;
+using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Result;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
@@ -27,7 +26,7 @@ public interface IAgentTaskRunQueue
 }
 
 internal sealed class AgentTaskRunQueue(
-    IRepository<AgentTaskRunQueueItem> queueRepository)
+    IAgentTaskRunQueueStore queueStore)
     : IAgentTaskRunQueue
 {
     public async Task<Result<AgentTaskRunQueueItem>> EnqueueAsync(
@@ -44,9 +43,7 @@ internal sealed class AgentTaskRunQueue(
                 "Current user id is missing or invalid."));
         }
 
-        var active = await queueRepository.FirstOrDefaultAsync(
-            new ActiveAgentTaskRunQueueItemByTaskSpec(task.Id),
-            cancellationToken);
+        var active = await queueStore.FirstActiveByTaskAsync(task.Id, cancellationToken);
         if (active is not null)
         {
             return Result.Failure(new ApiProblemDescriptor(
@@ -61,8 +58,8 @@ internal sealed class AgentTaskRunQueue(
             requestedBy,
             now,
             availableAt);
-        queueRepository.Add(item);
-        await queueRepository.SaveChangesAsync(cancellationToken);
+        queueStore.Add(item);
+        await queueStore.SaveChangesAsync(cancellationToken);
         return Result.Success(item);
     }
 
@@ -72,18 +69,16 @@ internal sealed class AgentTaskRunQueue(
         string safeMessage,
         CancellationToken cancellationToken)
     {
-        var activeItems = await queueRepository.ListAsync(
-            new ActiveAgentTaskRunQueueItemByTaskSpec(task.Id),
-            cancellationToken);
+        var activeItems = await queueStore.ListActiveByTaskAsync(task.Id, cancellationToken);
         foreach (var item in activeItems)
         {
             item.Cancel(nowUtc, safeMessage);
-            queueRepository.Update(item);
+            queueStore.Update(item);
         }
 
         if (activeItems.Count > 0)
         {
-            await queueRepository.SaveChangesAsync(cancellationToken);
+            await queueStore.SaveChangesAsync(cancellationToken);
         }
 
         return activeItems;
@@ -95,9 +90,7 @@ internal sealed class AgentTaskRunQueue(
         CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
-        var activeItems = await queueRepository.ListAsync(
-            new AgentTaskRunQueueActiveItemsSpec(),
-            cancellationToken);
+        var activeItems = await queueStore.ListActiveAsync(cancellationToken);
         var item = activeItems
             .Where(candidate => candidate.CanBeLeased(now))
             .OrderBy(candidate => candidate.AvailableAt)
@@ -109,8 +102,8 @@ internal sealed class AgentTaskRunQueue(
         }
 
         item.AcquireLease(Guid.NewGuid(), leaseOwner, now, leaseDuration);
-        queueRepository.Update(item);
-        await queueRepository.SaveChangesAsync(cancellationToken);
+        queueStore.Update(item);
+        await queueStore.SaveChangesAsync(cancellationToken);
         return Result.Success<AgentTaskRunQueueItem?>(item);
     }
 }

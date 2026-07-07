@@ -7,6 +7,13 @@ public sealed class CloudOidcOptions
     public const string SectionName = "CloudOidc";
     public const string AllowIntranetHttpOidcEnvironmentVariable = "ALLOW_INTRANET_HTTP_OIDC";
     private const string HostCookiePrefix = "__Host-";
+    private static readonly string[] IntranetDnsSuffixes =
+    [
+        ".internal.example",
+        ".internal",
+        ".lan",
+        ".local"
+    ];
 
     public bool Enabled { get; init; }
 
@@ -144,7 +151,7 @@ public sealed class CloudOidcOptions
 
         if (!IPAddress.TryParse(uri.Host, out var address))
         {
-            return false;
+            return IsAllowedIntranetDnsHost(uri);
         }
 
         var bytes = address.GetAddressBytes();
@@ -152,5 +159,19 @@ public sealed class CloudOidcOptions
             (bytes[0] == 10 ||
              (bytes[0] == 192 && bytes[1] == 168) ||
              (bytes[0] == 172 && bytes[1] is >= 16 and <= 31));
+    }
+
+    private static bool IsAllowedIntranetDnsHost(Uri uri)
+    {
+        var host = uri.Host.TrimEnd('.').ToLowerInvariant();
+        foreach (var suffix in IntranetDnsSuffixes)
+        {
+            if (host.EndsWith(suffix, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

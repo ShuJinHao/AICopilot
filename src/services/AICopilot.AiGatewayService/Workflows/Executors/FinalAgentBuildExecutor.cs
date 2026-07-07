@@ -105,6 +105,7 @@ public class FinalAgentBuildExecutor(
             request.Message,
             out var hasContext,
             out var includeHistory);
+        var dataAnalysisContextForBudget = genContext.DataAnalysisContext;
         var effectiveAnswerHistory = includeHistory ? answerHistory : [];
         var inputMessages = BuildFinalInputMessages(effectiveAnswerHistory, finalUserPrompt);
         var tokenBudgetDecision = tokenBudgetPolicy.Evaluate(model, template, BuildTokenBudgetInput(inputMessages));
@@ -128,6 +129,58 @@ public class FinalAgentBuildExecutor(
                 inputMessages = candidateMessages;
                 tokenBudgetDecision = candidateDecision;
                 break;
+            }
+        }
+
+        if (!tokenBudgetDecision.IsAllowed && !string.IsNullOrWhiteSpace(genContext.DataAnalysisContext))
+        {
+            var compactDataAnalysisContext = DataAnalysisFinalContextFormatter.CompactForFinalPrompt(genContext.DataAnalysisContext);
+            if (!string.Equals(compactDataAnalysisContext, genContext.DataAnalysisContext, StringComparison.Ordinal))
+            {
+                var compactFinalUserPrompt = BuildFinalUserPromptCore(
+                    genContext,
+                    request.Message,
+                    compactDataAnalysisContext,
+                    out var compactHasContext,
+                    out var compactIncludeHistory);
+                var compactAnswerHistory = compactIncludeHistory ? answerHistory : [];
+                var compactInputMessages = BuildFinalInputMessages(compactAnswerHistory, compactFinalUserPrompt);
+                var compactTokenBudgetDecision = tokenBudgetPolicy.Evaluate(model, template, BuildTokenBudgetInput(compactInputMessages));
+                if (!compactTokenBudgetDecision.IsAllowed && compactAnswerHistory.Count > 0)
+                {
+                    foreach (var candidateHistory in BuildHistoryBudgetFallbacks(compactAnswerHistory))
+                    {
+                        var candidateMessages = BuildFinalInputMessages(candidateHistory, compactFinalUserPrompt);
+                        var candidateDecision = tokenBudgetPolicy.Evaluate(model, template, BuildTokenBudgetInput(candidateMessages));
+                        if (!candidateDecision.IsAllowed)
+                        {
+                            continue;
+                        }
+
+                        logger.LogInformation(
+                            "Reduced final answer history from {OriginalCount} to {ReducedCount} messages for session {SessionId} after compacting data analysis context due to token budget.",
+                            compactAnswerHistory.Count,
+                            candidateHistory.Count,
+                            request.SessionId);
+                        compactAnswerHistory = candidateHistory;
+                        compactInputMessages = candidateMessages;
+                        compactTokenBudgetDecision = candidateDecision;
+                        break;
+                    }
+                }
+
+                if (compactTokenBudgetDecision.IsAllowed)
+                {
+                    logger.LogInformation(
+                        "Compacted data analysis context for session {SessionId} due to token budget.",
+                        request.SessionId);
+                    finalUserPrompt = compactFinalUserPrompt;
+                    hasContext = compactHasContext;
+                    effectiveAnswerHistory = compactAnswerHistory;
+                    inputMessages = compactInputMessages;
+                    tokenBudgetDecision = compactTokenBudgetDecision;
+                    dataAnalysisContextForBudget = compactDataAnalysisContext;
+                }
             }
         }
 
@@ -155,6 +208,7 @@ public class FinalAgentBuildExecutor(
                 genContext,
                 request.Message,
                 effectiveAnswerHistory,
+                dataAnalysisContextForBudget,
                 tokenBudgetDecision));
             var executionMetadata = metadataAccessor.Snapshot();
 
@@ -203,8 +257,23 @@ public class FinalAgentBuildExecutor(
         out bool hasContext,
         out bool includeHistory)
     {
+        return BuildFinalUserPromptCore(
+            genContext,
+            originalMessage,
+            genContext.DataAnalysisContext,
+            out hasContext,
+            out includeHistory);
+    }
+
+    private string BuildFinalUserPromptCore(
+        GenerationContext genContext,
+        string originalMessage,
+        string dataAnalysisContext,
+        out bool hasContext,
+        out bool includeHistory)
+    {
         var hasKnowledge = !string.IsNullOrWhiteSpace(genContext.KnowledgeContext);
-        var hasDataAnalysis = !string.IsNullOrWhiteSpace(genContext.DataAnalysisContext);
+        var hasDataAnalysis = !string.IsNullOrWhiteSpace(dataAnalysisContext);
         var hasBusinessPolicy = !string.IsNullOrWhiteSpace(genContext.BusinessPolicyContext);
         hasContext = hasKnowledge || hasDataAnalysis || hasBusinessPolicy;
         includeHistory = true;
@@ -232,7 +301,7 @@ public class FinalAgentBuildExecutor(
         if (hasDataAnalysis)
         {
             contextBuilder.AppendLine("<data_analysis_context>");
-            contextBuilder.AppendLine(genContext.DataAnalysisContext);
+            contextBuilder.AppendLine(dataAnalysisContext);
             contextBuilder.AppendLine("</data_analysis_context>");
         }
 
@@ -251,7 +320,7 @@ public class FinalAgentBuildExecutor(
         }
 
         var requirements = BuildRequirements(genContext.Scene, hasDataAnalysis, hasBusinessPolicy, hasKnowledge);
-        var shouldRedactOriginalQuestion = ShouldRedactOriginalQuestion(genContext);
+        var shouldRedactOriginalQuestion = ShouldRedactOriginalQuestion(dataAnalysisContext);
         includeHistory = !shouldRedactOriginalQuestion;
         var finalQuestion = shouldRedactOriginalQuestion
             ? RedactedOriginalQuestionPlaceholder
@@ -278,6 +347,7 @@ public class FinalAgentBuildExecutor(
         GenerationContext genContext,
         string originalMessage,
         IReadOnlyCollection<Message> answerHistory,
+        string dataAnalysisContext,
         TokenBudgetDecision tokenBudgetDecision)
     {
         var segments = new List<ContextBudgetSegmentDto>();
@@ -297,12 +367,12 @@ public class FinalAgentBuildExecutor(
                 order++));
         }
 
-        if (!string.IsNullOrWhiteSpace(genContext.DataAnalysisContext))
+        if (!string.IsNullOrWhiteSpace(dataAnalysisContext))
         {
             segments.Add(new ContextBudgetSegmentDto(
                 "business_query_result",
-                CountTokens(genContext.DataAnalysisContext),
-                IsTruncated: genContext.DataAnalysisContext.Contains("truncated=true", StringComparison.OrdinalIgnoreCase),
+                CountTokens(dataAnalysisContext),
+                IsTruncated: dataAnalysisContext.Contains("truncated=true", StringComparison.OrdinalIgnoreCase),
                 order++));
         }
 
@@ -417,9 +487,9 @@ public class FinalAgentBuildExecutor(
         };
     }
 
-    private static bool ShouldRedactOriginalQuestion(GenerationContext genContext)
+    private static bool ShouldRedactOriginalQuestion(string dataAnalysisContext)
     {
-        return genContext.DataAnalysisContext.Contains(
+        return dataAnalysisContext.Contains(
             SemanticAnalysisRunner.RecipeDataReadBoundaryMarker,
             StringComparison.Ordinal);
     }

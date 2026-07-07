@@ -14,8 +14,8 @@ namespace AICopilot.BackendTests;
 public sealed class DynamicPlannerContractTests
 {
     [Theory]
-    [InlineData("", "Planner returned invalid JSON: Planner response was empty.")]
-    [InlineData("```json\n{\"steps\":[]}\n```", "Planner returned invalid JSON: Planner response must be raw JSON and must not be wrapped in Markdown.")]
+    [InlineData("", "Planner returned invalid JSON.")]
+    [InlineData("```json\n{\"steps\":[]}\n```", "Planner returned invalid JSON.")]
     [InlineData("{\"steps\":[],\"extra\":true}", "Planner output contains unknown root field 'extra'.")]
     [InlineData("{\"steps\":[{\"title\":\"x\",\"description\":\"x\",\"stepType\":\"Analysis\",\"toolCode\":\"generate_markdown_report\",\"unknown\":true}]}", "Planner step contains unknown field 'unknown'.")]
     [InlineData("{\"steps\":[{\"title\":\"x\",\"description\":\"x\",\"stepType\":\"Analysis\",\"toolCode\":\"generate_markdown_report\",\"inputJson\":[]}]}", "Planner step inputJson must be omitted, a JSON object, or a JSON object string.")]

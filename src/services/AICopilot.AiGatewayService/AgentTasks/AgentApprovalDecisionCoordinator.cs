@@ -11,21 +11,37 @@ using AICopilot.SharedKernel.Result;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
 
-internal static class AgentApprovalDecisionWorkflow
+public sealed class AgentApprovalDecisionCoordinator(
+    IRepository<ApprovalRequest> approvalRepository,
+    IRepository<AgentTask> taskRepository,
+    IRepository<ArtifactWorkspace> workspaceRepository,
+    AgentAuditRecorder auditRecorder,
+    IAgentTaskRunQueue runQueue,
+    ICurrentUser currentUser,
+    IIdentityAccessService identityAccessService,
+    AgentPlanDraftConfirmationService planDraftConfirmationService,
+    MessageTimelineProjectionWriter? timelineProjectionWriter = null)
 {
-    public static async Task<Result<AgentApprovalRequestDto>> DecideAsync(
+    public Task<Result<AgentApprovalRequestDto>> ApproveAsync(
+        Guid approvalId,
+        string? comment,
+        CancellationToken cancellationToken)
+    {
+        return DecideAsync(approvalId, comment, isApproved: true, cancellationToken);
+    }
+
+    public Task<Result<AgentApprovalRequestDto>> RejectAsync(
+        Guid approvalId,
+        string? comment,
+        CancellationToken cancellationToken)
+    {
+        return DecideAsync(approvalId, comment, isApproved: false, cancellationToken);
+    }
+
+    private async Task<Result<AgentApprovalRequestDto>> DecideAsync(
         Guid approvalId,
         string? comment,
         bool isApproved,
-        IRepository<ApprovalRequest> approvalRepository,
-        IRepository<AgentTask> taskRepository,
-        IRepository<ArtifactWorkspace> workspaceRepository,
-        AgentAuditRecorder auditRecorder,
-        IAgentTaskRunQueue? runQueue,
-        ICurrentUser currentUser,
-        IIdentityAccessService identityAccessService,
-        AgentPlanDraftConfirmationService planDraftConfirmationService,
-        MessageTimelineProjectionWriter? timelineProjectionWriter,
         CancellationToken cancellationToken)
     {
         if (currentUser.Id is not { } userId)
@@ -103,9 +119,7 @@ internal static class AgentApprovalDecisionWorkflow
 
         await approvalRepository.SaveChangesAsync(cancellationToken);
 
-        if (isApproved &&
-            approval.ApprovalType == AgentApprovalType.ToolCall &&
-            runQueue is not null)
+        if (isApproved && approval.ApprovalType == AgentApprovalType.ToolCall)
         {
             _ = await runQueue.EnqueueAsync(
                 task,

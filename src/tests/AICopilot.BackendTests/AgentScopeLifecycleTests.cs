@@ -14,8 +14,10 @@ public sealed class AgentScopeLifecycleTests
     public async Task CreateAgent_ShouldResolveProviderFromAgentScope_AndDisposeScopeWithAgent()
     {
         var builder = Host.CreateApplicationBuilder();
+        var secretProtector = new EndpointPoolSecretProtector();
         builder.Services.AddScoped<ScopedLifecycleProbe>();
         builder.Services.AddScoped<IChatClientProvider, ProbeChatClientProvider>();
+        builder.Services.AddSingleton<ISecretProtector>(secretProtector);
         builder.AddAiRuntime();
 
         await using var serviceProvider = builder.Services.BuildServiceProvider(validateScopes: true);
@@ -29,7 +31,7 @@ public sealed class AgentScopeLifecycleTests
             ProbeChatClientProvider.ProviderName,
             "fake-model",
             "http://localhost/v1",
-            "fake-key",
+            secretProtector.Protect("fake-key")!,
             new ModelParameters { MaxTokens = 4096, Temperature = 0.2f });
         var template = new ConversationTemplate(
             "test-template",

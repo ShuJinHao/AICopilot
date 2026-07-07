@@ -53,7 +53,9 @@ public class ToolsPackExecutor(
         }
         catch (Exception e)
         {
-            logger.LogError(e, "Failed to load tool pack.");
+            logger.LogError(
+                "Failed to load tool pack. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                e.GetType().Name);
             return BranchResult.FromTools([]);
         }
     }

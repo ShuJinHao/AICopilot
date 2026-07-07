@@ -48,6 +48,13 @@ jobs:
             exit 66
           fi
 
+          runner_attestation="$deploy_dir/scripts/check-runner-security-attestation.sh"
+          if [ ! -x "$runner_attestation" ]; then
+            echo "Missing runner security attestation script: $runner_attestation" >&2
+            exit 66
+          fi
+          "$runner_attestation" --deploy-dir "$deploy_dir"
+
           if [ -z "${DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING:-}" ]; then
             echo "DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING GitHub environment secret is not configured." >&2
             exit 64

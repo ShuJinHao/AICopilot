@@ -1,9 +1,4 @@
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
-using AICopilot.Core.AiGateway.Specifications.AgentTasks;
-using AICopilot.AiGatewayService.Tools;
-using AICopilot.Services.Contracts;
-using AICopilot.SharedKernel.Repository;
-using AICopilot.SharedKernel.Result;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -41,7 +36,9 @@ public sealed class AgentTaskRunQueueWorker(
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Agent task run queue worker iteration failed.");
+                logger.LogError(
+                    "Agent task run queue worker iteration failed. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                    ex.GetType().Name);
                 await Task.Delay(PollInterval, stoppingToken);
             }
         }
@@ -50,22 +47,12 @@ public sealed class AgentTaskRunQueueWorker(
     public async Task<bool> ProcessOnceAsync(CancellationToken cancellationToken)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
-        var queueRepository = scope.ServiceProvider.GetRequiredService<IRepository<AgentTaskRunQueueItem>>();
-        var taskRepository = scope.ServiceProvider.GetRequiredService<IRepository<AgentTask>>();
-        var attemptRepository = scope.ServiceProvider.GetRequiredService<IRepository<AgentTaskRunAttempt>>();
-        var runQueue = scope.ServiceProvider.GetRequiredService<IAgentTaskRunQueue>();
-        var auditRecorder = scope.ServiceProvider.GetService<AgentAuditRecorder>();
+        var workerCoordinator = scope.ServiceProvider.GetRequiredService<AgentTaskRunQueueWorkerCoordinator>();
 
         await MarkHeartbeatAsync(scope.ServiceProvider, null, cancellationToken);
-        await FailExpiredStartedLeasesAsync(
-            queueRepository,
-            taskRepository,
-            attemptRepository,
-            auditRecorder,
-            QueueOptions,
-            cancellationToken);
+        await workerCoordinator.RecoverExpiredStartedLeasesAsync(cancellationToken);
 
-        var leased = await runQueue.LeaseNextAsync(leaseOwner, QueueOptions.LeaseDuration, cancellationToken);
+        var leased = await workerCoordinator.LeaseNextAsync(leaseOwner, QueueOptions.LeaseDuration, cancellationToken);
         if (!leased.IsSuccess || leased.Value is null)
         {
             await MarkHeartbeatAsync(scope.ServiceProvider, null, cancellationToken);
@@ -75,25 +62,18 @@ public sealed class AgentTaskRunQueueWorker(
         await MarkHeartbeatAsync(scope.ServiceProvider, leased.Value, cancellationToken);
         try
         {
-            var runtime = scope.ServiceProvider.GetRequiredService<IAgentTaskRuntime>();
-            await ExecuteQueueItemAsync(
-                leased.Value,
-                queueRepository,
-                taskRepository,
-                attemptRepository,
-                runtime,
-                cancellationToken);
+            await workerCoordinator.ExecuteQueueItemAsync(leased.Value, cancellationToken);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Agent task run queue item {QueueItemId} failed before runtime completed.", leased.Value.Id.Value);
-            await FailQueueItemAsync(
+            logger.LogError(
+                "Agent task run queue item {QueueItemId} failed before runtime completed. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                leased.Value.Id.Value,
+                ex.GetType().Name);
+            await workerCoordinator.FailQueueItemAsync(
                 leased.Value,
-                queueRepository,
-                taskRepository,
-                attemptRepository,
                 "agent_task_run_worker_failed",
-                ex.Message,
+                "Agent task run worker failed before runtime completed.",
                 cancellationToken);
         }
         finally
@@ -126,205 +106,9 @@ public sealed class AgentTaskRunQueueWorker(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogWarning(ex, "Agent task run queue worker heartbeat update failed.");
+            logger.LogWarning(
+                "Agent task run queue worker heartbeat update failed. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                ex.GetType().Name);
         }
-    }
-
-    private static async Task FailExpiredStartedLeasesAsync(
-        IRepository<AgentTaskRunQueueItem> queueRepository,
-        IRepository<AgentTask> taskRepository,
-        IRepository<AgentTaskRunAttempt> attemptRepository,
-        AgentAuditRecorder? auditRecorder,
-        AgentRunQueueOptions options,
-        CancellationToken cancellationToken)
-    {
-        if (options.StaleLeaseAction != AgentRunQueueStaleLeaseAction.Fail)
-        {
-            return;
-        }
-
-        var now = DateTimeOffset.UtcNow;
-        var activeItems = await queueRepository.ListAsync(
-            new AgentTaskRunQueueActiveItemsSpec(),
-            cancellationToken);
-        foreach (var item in activeItems.Where(candidate => candidate.IsExpiredStartedLease(now)))
-        {
-            var oldStatus = item.Status.ToString();
-            var message = "Agent task run queue lease expired during execution. Retry the task before continuing.";
-            item.MarkFailed(AppProblemCodes.AgentTaskRunQueueLeaseExpired, message, now);
-            queueRepository.Update(item);
-
-            var task = await taskRepository.FirstOrDefaultAsync(
-                new AgentTaskByIdSpec(item.TaskId, includeSteps: true),
-                cancellationToken);
-            if (task is not null)
-            {
-                task.Fail(message, now);
-                task.ReleaseRunLease(now, clearActiveAttempt: true);
-                taskRepository.Update(task);
-            }
-
-            var attempt = await ResolveAttemptAsync(item, task, attemptRepository, cancellationToken);
-            if (attempt is not null && !attempt.IsTerminal)
-            {
-                attempt.MarkFailed(AppProblemCodes.AgentTaskRunLeaseExpired, message, now);
-                attemptRepository.Update(attempt);
-            }
-
-            if (auditRecorder is not null)
-            {
-                await auditRecorder.RecordRunQueueOperationAsync(
-                    "Agent.RunQueueStaleLeaseFailed",
-                    item,
-                    AuditResults.Succeeded,
-                    message,
-                    oldStatus,
-                    attempt,
-                    retryAttemptNo: null,
-                    cancellationToken);
-            }
-        }
-
-        await queueRepository.SaveChangesAsync(cancellationToken);
-    }
-
-    private static async Task ExecuteQueueItemAsync(
-        AgentTaskRunQueueItem item,
-        IRepository<AgentTaskRunQueueItem> queueRepository,
-        IRepository<AgentTask> taskRepository,
-        IRepository<AgentTaskRunAttempt> attemptRepository,
-        IAgentTaskRuntime runtime,
-        CancellationToken cancellationToken)
-    {
-        var now = DateTimeOffset.UtcNow;
-        var task = await taskRepository.FirstOrDefaultAsync(
-            new AgentTaskByIdSpec(item.TaskId, includeSteps: true),
-            cancellationToken);
-        if (task is null)
-        {
-            item.MarkFailed(
-                AppProblemCodes.AgentTaskRunQueueNotFound,
-                "Agent task was not found for queued run.",
-                now);
-            queueRepository.Update(item);
-            await queueRepository.SaveChangesAsync(cancellationToken);
-            return;
-        }
-
-        item.MarkStarted(task.ActiveRunAttemptId, now);
-        queueRepository.Update(item);
-        await queueRepository.SaveChangesAsync(cancellationToken);
-
-        var result = await runtime.RunAsync(task, item.TriggerType, cancellationToken);
-        now = DateTimeOffset.UtcNow;
-
-        var latestAttempt = await ResolveAttemptAsync(item, task, attemptRepository, cancellationToken);
-        if (latestAttempt is not null)
-        {
-            item.LinkRunAttempt(latestAttempt.Id, now);
-        }
-
-        if (!result.IsSuccess)
-        {
-            var problem = result.Errors?.OfType<ApiProblemDescriptor>().FirstOrDefault();
-            item.MarkFailed(
-                problem?.Code ?? "agent_task_run_failed",
-                problem?.Detail ?? "Agent task run failed before runtime execution completed.",
-                now);
-        }
-        else if (task.Status == AgentTaskStatus.Cancelled)
-        {
-            item.Cancel(now, "Agent task cancellation requested.");
-        }
-        else if (task.Status == AgentTaskStatus.Failed)
-        {
-            item.MarkFailed(
-                latestAttempt?.FailureCode ?? "agent_task_failed",
-                latestAttempt?.SafeMessage ?? task.FinalSummary ?? "Agent task failed.",
-                now);
-        }
-        else
-        {
-            item.MarkSucceeded(now, $"Agent task run reached {task.Status}.");
-        }
-
-        queueRepository.Update(item);
-        await queueRepository.SaveChangesAsync(cancellationToken);
-    }
-
-    private static async Task FailQueueItemAsync(
-        AgentTaskRunQueueItem item,
-        IRepository<AgentTaskRunQueueItem> queueRepository,
-        IRepository<AgentTask> taskRepository,
-        IRepository<AgentTaskRunAttempt> attemptRepository,
-        string failureCode,
-        string safeMessage,
-        CancellationToken cancellationToken)
-    {
-        var now = DateTimeOffset.UtcNow;
-        var sanitized = ToolExecutionRecordSanitizer.Sanitize(safeMessage, 2000) ?? "Agent task run worker failed.";
-        item.MarkFailed(failureCode, sanitized, now);
-        queueRepository.Update(item);
-
-        var task = await taskRepository.FirstOrDefaultAsync(
-            new AgentTaskByIdSpec(item.TaskId, includeSteps: true),
-            cancellationToken);
-        if (task is not null)
-        {
-            task.Fail(sanitized, now);
-            task.ReleaseRunLease(now, clearActiveAttempt: true);
-            taskRepository.Update(task);
-        }
-
-        var attempt = await ResolveAttemptAsync(item, task, attemptRepository, cancellationToken);
-        if (attempt is not null && !attempt.IsTerminal)
-        {
-            attempt.MarkFailed(failureCode, sanitized, now);
-            attemptRepository.Update(attempt);
-        }
-
-        await queueRepository.SaveChangesAsync(cancellationToken);
-    }
-
-    private static async Task<AgentTaskRunAttempt?> ResolveAttemptAsync(
-        AgentTaskRunQueueItem item,
-        AgentTask? task,
-        IRepository<AgentTaskRunAttempt> attemptRepository,
-        CancellationToken cancellationToken)
-    {
-        if (item.RunAttemptId is not null)
-        {
-            var attempt = await attemptRepository.FirstOrDefaultAsync(
-                new AgentTaskRunAttemptByIdSpec(item.RunAttemptId.Value),
-                cancellationToken);
-            if (attempt is not null)
-            {
-                return attempt;
-            }
-        }
-
-        if (task?.ActiveRunAttemptId is not null)
-        {
-            var attempt = await attemptRepository.FirstOrDefaultAsync(
-                new AgentTaskRunAttemptByIdSpec(task.ActiveRunAttemptId.Value),
-                cancellationToken);
-            if (attempt is not null)
-            {
-                return attempt;
-            }
-        }
-
-        if (task is null)
-        {
-            return null;
-        }
-
-        var attempts = await attemptRepository.ListAsync(
-            new AgentTaskRunAttemptsByTaskSpec(task.Id),
-            cancellationToken);
-        return attempts
-            .OrderByDescending(attempt => attempt.AttemptNo)
-            .ThenByDescending(attempt => attempt.StartedAt)
-            .FirstOrDefault();
     }
 }

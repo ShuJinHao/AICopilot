@@ -49,7 +49,7 @@ public record GetListChatMessageHistoryQuery(
 
 public class GetListChatMessageHistoryQueryHandler(
     IReadRepository<Session> repository,
-    IReadRepository<MessageEvent> messageEventRepository,
+    IMessageTimelineProjectionStore messageTimelineProjectionStore,
     ICurrentUser currentUser)
     : IQueryHandler<GetListChatMessageHistoryQuery, Result<ChatHistoryMessagePageDto>>
 {
@@ -76,8 +76,9 @@ public class GetListChatMessageHistoryQueryHandler(
             return Result.NotFound();
         }
 
-        var allEvents = await messageEventRepository.ListAsync(
-            new MessageEventsBySessionSpec(new SessionId(request.SessionId), includeMessage: true),
+        var allEvents = await messageTimelineProjectionStore.ListBySessionAsync(
+            new SessionId(request.SessionId),
+            includeMessage: true,
             cancellationToken);
         var messageEvents = allEvents
             .Where(item => item.EventType == MessageEventType.Message &&

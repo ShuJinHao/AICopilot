@@ -45,6 +45,12 @@ internal static class IntentRoutingFallbackClassifier
             return true;
         }
 
+        if (LooksLikeRecentDeviceInformationRequest(normalized))
+        {
+            intents = [CreateIntent("Analysis.DeviceLog.Latest", normalized, reason, lineName, deviceCode)];
+            return true;
+        }
+
         if (ContainsAny(normalized, "设备", "device") &&
             ContainsAny(normalized, "状态", "当前", "列出", "列表", "清单", "status", "list"))
         {
@@ -56,6 +62,13 @@ internal static class IntentRoutingFallbackClassifier
         }
 
         return false;
+    }
+
+    private static bool LooksLikeRecentDeviceInformationRequest(string message)
+    {
+        return ContainsAny(message, "设备", "机台", "device", "machine") &&
+               ContainsAny(message, "最近", "近", "过去", "latest", "recent") &&
+               ContainsAny(message, "信息", "情况", "数据", "整理", "分类", "表格", "图表", "摘要", "汇总", "分析", "chart", "table", "summary");
     }
 
     private static IntentResult CreateIntent(

@@ -1,6 +1,4 @@
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
-using AICopilot.Core.AiGateway.Aggregates.Approvals;
-using AICopilot.Core.AiGateway.Aggregates.Artifacts;
 using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.AiGateway.Specifications.AgentTasks;
 using AICopilot.Services.CrossCutting.Attributes;
@@ -19,9 +17,7 @@ public sealed record GetListAgentTasksBySessionQuery(Guid SessionId) : IQuery<Re
 
 public sealed class GetAgentTaskQueryHandler(
     IRepository<AgentTask> repository,
-    IReadRepository<ArtifactWorkspace> workspaceRepository,
-    IReadRepository<ApprovalRequest> approvalRepository,
-    IReadRepository<AgentTaskRunQueueItem> queueRepository,
+    AgentTaskDtoQueryService dtoQueryService,
     ICurrentUser currentUser,
     IIdentityAccessService identityAccessService)
     : IQueryHandler<GetAgentTaskQuery, Result<AgentTaskDto>>
@@ -43,11 +39,8 @@ public sealed class GetAgentTaskQueryHandler(
             return Result.From(currentAccessResult);
         }
 
-        return Result.Success(await AgentTaskDtoComposer.MapAsync(
+        return Result.Success(await dtoQueryService.MapAsync(
             taskResult.Value!,
-            workspaceRepository,
-            approvalRepository,
-            queueRepository,
             currentAccessResult.Value,
             cancellationToken));
     }
@@ -55,9 +48,7 @@ public sealed class GetAgentTaskQueryHandler(
 
 public sealed class GetListAgentTasksBySessionQueryHandler(
     IReadRepository<AgentTask> repository,
-    IReadRepository<ArtifactWorkspace> workspaceRepository,
-    IReadRepository<ApprovalRequest> approvalRepository,
-    IReadRepository<AgentTaskRunQueueItem> queueRepository,
+    AgentTaskDtoQueryService dtoQueryService,
     ICurrentUser currentUser,
     IIdentityAccessService identityAccessService)
     : IQueryHandler<GetListAgentTasksBySessionQuery, Result<IReadOnlyCollection<AgentTaskDto>>>
@@ -90,19 +81,10 @@ public sealed class GetListAgentTasksBySessionQueryHandler(
             return Result.From(currentAccessResult);
         }
 
-        var dtos = new List<AgentTaskDto>();
-        foreach (var task in tasks)
-        {
-            dtos.Add(await AgentTaskDtoComposer.MapAsync(
-                task,
-                workspaceRepository,
-                approvalRepository,
-                queueRepository,
+        return Result.Success<IReadOnlyCollection<AgentTaskDto>>(
+            await dtoQueryService.MapManyAsync(
+                tasks,
                 currentAccessResult.Value,
                 cancellationToken));
-        }
-
-        return Result.Success<IReadOnlyCollection<AgentTaskDto>>(
-            dtos.ToArray());
     }
 }

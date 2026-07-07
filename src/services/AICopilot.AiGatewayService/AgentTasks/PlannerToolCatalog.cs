@@ -152,11 +152,11 @@ internal static class PlannerToolCatalogBuilder
         {
             document = JsonDocument.Parse(schemaJson);
         }
-        catch (JsonException ex)
+        catch (JsonException)
         {
             return Result.Failure(new ApiProblemDescriptor(
                 AppProblemCodes.PlannerToolSchemaUnsupported,
-                $"Tool registry {label} schema is invalid JSON: {ex.Message}"));
+                $"Tool registry {label} schema is invalid JSON."));
         }
 
         using (document)

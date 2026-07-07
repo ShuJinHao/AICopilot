@@ -13,9 +13,11 @@ import AiSwitch from '@/components/ai/AiSwitch.vue'
 import AiTag from '@/components/ai/AiTag.vue'
 import AiTextarea from '@/components/ai/AiTextarea.vue'
 import AppShell from '@/components/layout/AppShell.vue'
+import { CONFIG_STORE_MESSAGES } from '@/constants/messages'
 import { showAiToast } from '@/composables/useAiFeedback'
 import { configService } from '@/services/configService'
 import { useConfigStore } from '@/stores/configStore'
+import { toStoreErrorMessage } from '@/stores/useDialogCrud'
 import { getSkillDisplayDescription } from '@/utils/skillDisplay'
 import type {
   CloudReadonlyStatus,
@@ -152,6 +154,14 @@ const toolSummaries = ref<AgentPlannerToolSummary[]>([])
 const isLoadingSkills = ref(false)
 const isLoadingToolCatalog = ref(false)
 const toolCatalogLoaded = ref(false)
+
+function setPageLoadError(error: unknown) {
+  store.errorMessage = toStoreErrorMessage(
+    error,
+    CONFIG_STORE_MESSAGES.pageLoadFailed,
+    CONFIG_STORE_MESSAGES.pageLoadForbidden
+  )
+}
 const cloudReadonlyStatus = ref<CloudReadonlyStatus | null>(null)
 const isLoadingCloudReadonlyStatus = ref(false)
 const advancedConfigOpen = ref(false)
@@ -324,6 +334,11 @@ async function refreshSkillDefinitions() {
   isLoadingSkills.value = true
   try {
     skillDefinitions.value = await configService.getSkills()
+  } catch (error) {
+    console.error('Failed to load skill definitions for config view.', error)
+    skillDefinitions.value = []
+    setPageLoadError(error)
+    throw error
   } finally {
     isLoadingSkills.value = false
   }
@@ -335,6 +350,11 @@ async function refreshToolCatalog() {
     const catalog = await configService.getToolCatalog()
     toolSummaries.value = Array.isArray(catalog.tools) ? catalog.tools : []
     toolCatalogLoaded.value = true
+  } catch (error) {
+    console.error('Failed to load tool catalog for config view.', error)
+    toolSummaries.value = []
+    setPageLoadError(error)
+    throw error
   } finally {
     isLoadingToolCatalog.value = false
   }
@@ -347,8 +367,9 @@ async function ensureToolCatalogLoaded() {
 
   try {
     await refreshToolCatalog()
-  } catch {
-    toolSummaries.value = []
+  } catch (error) {
+    console.error('Tool catalog load failure already reported for config view.', error)
+    // refreshToolCatalog already records the user-facing error.
   }
 }
 
@@ -356,12 +377,18 @@ async function refreshCloudReadonlyStatus() {
   isLoadingCloudReadonlyStatus.value = true
   try {
     cloudReadonlyStatus.value = await configService.getCloudReadonlyStatus()
+  } catch (error) {
+    console.error('Failed to load Cloud readonly status for config view.', error)
+    cloudReadonlyStatus.value = null
+    setPageLoadError(error)
+    throw error
   } finally {
     isLoadingCloudReadonlyStatus.value = false
   }
 }
 
 async function refreshAllAgentSettings() {
+  store.errorMessage = ''
   const refreshers = [
     store.refreshAgentSlots(),
     refreshSkillDefinitions(),
@@ -372,7 +399,14 @@ async function refreshAllAgentSettings() {
     refreshers.push(refreshToolCatalog())
   }
 
-  await Promise.all(refreshers)
+  try {
+    await Promise.all(refreshers)
+  } catch (error) {
+    console.error('Failed to refresh AI agent settings.', error)
+    if (!store.errorMessage) {
+      setPageLoadError(error)
+    }
+  }
 }
 
 function promptLength(template?: ConversationTemplateSummary | null) {

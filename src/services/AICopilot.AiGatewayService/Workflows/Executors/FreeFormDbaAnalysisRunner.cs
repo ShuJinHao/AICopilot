@@ -96,7 +96,10 @@ public sealed class FreeFormDbaAnalysisRunner(
         }
         catch (InvalidOperationException ex)
         {
-            logger.LogWarning(ex, "执行数据分析意图时命中安全限制。Database: {DbName}", dbName);
+            logger.LogWarning(
+                "执行数据分析意图时命中安全限制。Database: {DbName}; ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                dbName,
+                ex.GetType().Name);
             return $"[系统提示]: 查询数据库 {dbName} 的请求被系统安全策略拒绝。";
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -105,7 +108,10 @@ public sealed class FreeFormDbaAnalysisRunner(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "执行数据分析意图失败。Database: {DbName}", dbName);
+            logger.LogError(
+                "执行数据分析意图失败。Database: {DbName}; ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                dbName,
+                ex.GetType().Name);
             return $"[系统提示]: 查询数据库 {dbName} 时发生异常，请稍后重试或联系管理员检查只读数据源配置。";
         }
     }

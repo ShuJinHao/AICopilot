@@ -1,5 +1,6 @@
 using System.Linq.Expressions;
 using System.Net.Http;
+using System.Text;
 using System.Text.Json;
 using AICopilot.AgentPlugin;
 using AICopilot.AiGatewayService.AgentTasks;
@@ -9,6 +10,7 @@ using AICopilot.AiGatewayService.Queries.Sessions;
 using AICopilot.AiGatewayService.Runtime;
 using AICopilot.AiGatewayService.Skills;
 using AICopilot.AiGatewayService.Tools;
+using AICopilot.AiGatewayService.Uploads;
 using AICopilot.AiGatewayService.Workspaces;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
@@ -108,13 +110,14 @@ public sealed class ToolRegistryGovernanceTests
         var session = new Session(UserId, ConversationTemplateId.New());
         var taskRepository = new InMemoryRepository<AgentTask>();
         var handler = new PlanAgentTaskCommandHandler(
-            taskRepository,
-            new InMemoryRepository<ApprovalRequest>(),
-            new InMemoryRepository<Session>(session),
-            new InMemoryRepository<UploadRecord>(),
-            new AgentAuditRecorder(new CapturingAuditLogWriter()),
-            [],
-            new TestCurrentUser(UserId));
+            new PlanAgentTaskCoordinator(
+                taskRepository,
+                new InMemoryRepository<ApprovalRequest>(),
+                new InMemoryRepository<Session>(session),
+                new InMemoryRepository<UploadRecord>(),
+                new AgentAuditRecorder(new CapturingAuditLogWriter()),
+                [],
+                new TestCurrentUser(UserId)));
 
         var result = await handler.Handle(
             new PlanAgentTaskCommand(session.Id.Value, "生成 Cloud 生产数据报告", AgentTaskType.CloudDataReport, null),
@@ -155,13 +158,14 @@ public sealed class ToolRegistryGovernanceTests
             AppProblemCodes.CloudReadonlyIntentUnsupported,
             "Recipe data is outside the Cloud readonly agent boundary.")));
         var handler = new PlanAgentTaskCommandHandler(
-            taskRepository,
-            new InMemoryRepository<ApprovalRequest>(),
-            new InMemoryRepository<Session>(session),
-            new InMemoryRepository<UploadRecord>(),
-            new AgentAuditRecorder(new CapturingAuditLogWriter()),
-            [],
-            new TestCurrentUser(UserId));
+            new PlanAgentTaskCoordinator(
+                taskRepository,
+                new InMemoryRepository<ApprovalRequest>(),
+                new InMemoryRepository<Session>(session),
+                new InMemoryRepository<UploadRecord>(),
+                new AgentAuditRecorder(new CapturingAuditLogWriter()),
+                [],
+                new TestCurrentUser(UserId)));
 
         var result = await handler.Handle(
             new PlanAgentTaskCommand(session.Id.Value, "read recipe version details", AgentTaskType.CloudDataReport, null),
@@ -879,7 +883,7 @@ public sealed class ToolRegistryGovernanceTests
             attempt.LeaseOwner!,
             attempt.LeaseExpiresAt!.Value,
             now);
-        var executionRepository = new InMemoryRepository<ToolExecutionRecord>();
+        var executionRepository = new InMemoryToolExecutionAuditStore();
         var runtime = CreateRuntime(
             new InMemoryRepository<AgentTask>(task),
             new InMemoryRepository<ArtifactWorkspace>(workspace),
@@ -887,7 +891,7 @@ public sealed class ToolRegistryGovernanceTests
             executionRepository,
             CreateGuard(CreateTool("generate_chart_data")),
             toolExecutors: [new TestAgentToolExecutor(_ => true)],
-            runAttemptRepository: new InMemoryRepository<AgentTaskRunAttempt>(attempt));
+            runAttemptRepository: new InMemoryAgentTaskRunAttemptStore(attempt));
 
         var result = await runtime.RunAsync(task, CancellationToken.None);
 
@@ -901,8 +905,8 @@ public sealed class ToolRegistryGovernanceTests
     public async Task AgentTaskRuntime_ShouldCreateRunAttempt_AndLinkExecutionRecord()
     {
         var (task, workspace) = CreateApprovedTask("generate_chart_data");
-        var runAttemptRepository = new InMemoryRepository<AgentTaskRunAttempt>();
-        var executionRepository = new InMemoryRepository<ToolExecutionRecord>();
+        var runAttemptRepository = new InMemoryAgentTaskRunAttemptStore();
+        var executionRepository = new InMemoryToolExecutionAuditStore();
         var runtime = CreateRuntime(
             new InMemoryRepository<AgentTask>(task),
             new InMemoryRepository<ArtifactWorkspace>(workspace),
@@ -929,7 +933,7 @@ public sealed class ToolRegistryGovernanceTests
     public async Task AgentTaskRuntime_ShouldRejectToolOutsidePersistedSkill()
     {
         var (task, workspace) = CreateApprovedTask("generate_pdf", skillCode: "restricted_skill");
-        var executionRepository = new InMemoryRepository<ToolExecutionRecord>();
+        var executionRepository = new InMemoryToolExecutionAuditStore();
         var invoked = false;
         var runtime = CreateRuntime(
             new InMemoryRepository<AgentTask>(task),
@@ -970,14 +974,17 @@ public sealed class ToolRegistryGovernanceTests
         var workspaceRepository = new InMemoryRepository<ArtifactWorkspace>(workspace);
         var approvalRepository = new InMemoryRepository<ApprovalRequest>(
             new ApprovalRequest(task.Id, AgentApprovalType.ToolCall, step.Id.Value.ToString(), task.UserId, now));
-        var queueRepository = new InMemoryRepository<AgentTaskRunQueueItem>();
-        var executablePlanJson = task.PlanJson;
-        var handler = new RetryAgentTaskCommandHandler(
+        var queueRepository = new InMemoryAgentTaskRunQueueStore();
+        var lifecycleCoordinator = CreateLifecycleCoordinator(
             taskRepository,
             workspaceRepository,
             approvalRepository,
-            queueRepository,
-            new AgentTaskRunQueue(queueRepository),
+            queueRepository);
+        var executablePlanJson = task.PlanJson;
+        var handler = new RetryAgentTaskCommandHandler(
+            taskRepository,
+            CreateAgentTaskDtoQueryService(workspaceRepository, approvalRepository, queueRepository),
+            lifecycleCoordinator,
             new TestCurrentUser(UserId));
 
         var result = await handler.Handle(new RetryAgentTaskCommand(task.Id.Value), CancellationToken.None);
@@ -1006,13 +1013,16 @@ public sealed class ToolRegistryGovernanceTests
         var taskRepository = new InMemoryRepository<AgentTask>(task);
         var workspaceRepository = new InMemoryRepository<ArtifactWorkspace>(workspace);
         var approvalRepository = new InMemoryRepository<ApprovalRequest>();
-        var queueRepository = new InMemoryRepository<AgentTaskRunQueueItem>();
-        var handler = new RetryAgentTaskCommandHandler(
+        var queueRepository = new InMemoryAgentTaskRunQueueStore();
+        var lifecycleCoordinator = CreateLifecycleCoordinator(
             taskRepository,
             workspaceRepository,
             approvalRepository,
-            queueRepository,
-            new AgentTaskRunQueue(queueRepository),
+            queueRepository);
+        var handler = new RetryAgentTaskCommandHandler(
+            taskRepository,
+            CreateAgentTaskDtoQueryService(workspaceRepository, approvalRepository, queueRepository),
+            lifecycleCoordinator,
             new TestCurrentUser(UserId));
 
         var result = await handler.Handle(new RetryAgentTaskCommand(task.Id.Value), CancellationToken.None);
@@ -1041,16 +1051,21 @@ public sealed class ToolRegistryGovernanceTests
         task.ReleaseRunLease(now, clearActiveAttempt: false);
         var approval = new ApprovalRequest(task.Id, AgentApprovalType.ToolCall, task.Steps.Single().Id.Value.ToString(), task.UserId, now);
         var approvalRepository = new InMemoryRepository<ApprovalRequest>(approval);
-        var runAttemptRepository = new InMemoryRepository<AgentTaskRunAttempt>(attempt);
+        var runAttemptRepository = new InMemoryAgentTaskRunAttemptStore(attempt);
         var queueItem = new AgentTaskRunQueueItem(task.Id, AgentTaskRunTriggerType.Manual, task.UserId, now);
-        var queueRepository = new InMemoryRepository<AgentTaskRunQueueItem>(queueItem);
-        var handler = new CancelAgentTaskCommandHandler(
-            new InMemoryRepository<AgentTask>(task),
-            new InMemoryRepository<ArtifactWorkspace>(workspace),
+        var queueRepository = new InMemoryAgentTaskRunQueueStore(queueItem);
+        var taskRepository = new InMemoryRepository<AgentTask>(task);
+        var workspaceRepository = new InMemoryRepository<ArtifactWorkspace>(workspace);
+        var lifecycleCoordinator = CreateLifecycleCoordinator(
+            taskRepository,
+            workspaceRepository,
             approvalRepository,
-            runAttemptRepository,
             queueRepository,
-            new AgentTaskRunQueue(queueRepository),
+            runAttemptRepository);
+        var handler = new CancelAgentTaskCommandHandler(
+            taskRepository,
+            CreateAgentTaskDtoQueryService(workspaceRepository, approvalRepository, queueRepository),
+            lifecycleCoordinator,
             new TestCurrentUser(UserId));
 
         var result = await handler.Handle(new CancelAgentTaskCommand(task.Id.Value), CancellationToken.None);
@@ -1072,9 +1087,9 @@ public sealed class ToolRegistryGovernanceTests
         var second = new AgentTaskRunAttempt(task.Id, 2, AgentTaskRunTriggerType.Retry, "runner", DateTimeOffset.UtcNow.AddMinutes(-1), TimeSpan.FromMinutes(5));
         var foreign = new AgentTaskRunAttempt(foreignTask.Id, 1, AgentTaskRunTriggerType.Manual, "runner", DateTimeOffset.UtcNow, TimeSpan.FromMinutes(5));
         var handler = new GetAgentTaskRunAttemptsQueryHandler(
-            new InMemoryRepository<AgentTask>(task, foreignTask),
-            new InMemoryRepository<AgentTaskRunAttempt>(first, second, foreign),
-            new TestCurrentUser(UserId));
+            CreateAuditQueryCoordinator(
+                new InMemoryRepository<AgentTask>(task, foreignTask),
+                runAttemptRepository: new InMemoryAgentTaskRunAttemptStore(first, second, foreign)));
 
         var result = await handler.Handle(new GetAgentTaskRunAttemptsQuery(task.Id.Value, 1, 10), CancellationToken.None);
 
@@ -1084,25 +1099,231 @@ public sealed class ToolRegistryGovernanceTests
         result.Value.Items.First().AttemptNo.Should().Be(2);
 
         var unauthorized = await new GetAgentTaskRunAttemptsQueryHandler(
-                new InMemoryRepository<AgentTask>(task),
-                new InMemoryRepository<AgentTaskRunAttempt>(first, second),
-                new TestCurrentUser(Guid.Parse("22222222-2222-4222-8222-222222222222")))
+                CreateAuditQueryCoordinator(
+                    new InMemoryRepository<AgentTask>(task),
+                    runAttemptRepository: new InMemoryAgentTaskRunAttemptStore(first, second),
+                    currentUser: new TestCurrentUser(Guid.Parse("22222222-2222-4222-8222-222222222222"))))
             .Handle(new GetAgentTaskRunAttemptsQuery(task.Id.Value, 1, 10), CancellationToken.None);
         unauthorized.Status.Should().Be(ResultStatus.NotFound);
+    }
+
+    [Fact]
+    public async Task AgentTaskRunQueueQuery_ShouldPageAndIsolateByOwner()
+    {
+        var (task, _) = CreateApprovedTask("generate_chart_data");
+        var foreignTask = CreateApprovedTask("generate_chart_data").Task;
+        var now = DateTimeOffset.UtcNow;
+        var older = new AgentTaskRunQueueItem(task.Id, AgentTaskRunTriggerType.Manual, task.UserId, now.AddMinutes(-5));
+        older.MarkFailed("failed", "safe failure", now.AddMinutes(-4));
+        var latest = new AgentTaskRunQueueItem(task.Id, AgentTaskRunTriggerType.Retry, task.UserId, now.AddMinutes(-1));
+        var foreign = new AgentTaskRunQueueItem(foreignTask.Id, AgentTaskRunTriggerType.Manual, foreignTask.UserId, now);
+        var handler = new GetAgentTaskRunQueueQueryHandler(
+            CreateAuditQueryCoordinator(
+                new InMemoryRepository<AgentTask>(task, foreignTask),
+                queueRepository: new InMemoryAgentTaskRunQueueStore(older, latest, foreign)));
+
+        var result = await handler.Handle(new GetAgentTaskRunQueueQuery(task.Id.Value, 1, 10), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value!.Items.Should().HaveCount(2);
+        result.Value.Items.Should().NotContain(item => item.TaskId == foreignTask.Id.Value);
+        result.Value.Items.First().Id.Should().Be(latest.Id.Value);
+
+        var unauthorized = await new GetAgentTaskRunQueueQueryHandler(
+                CreateAuditQueryCoordinator(
+                    new InMemoryRepository<AgentTask>(task),
+                    queueRepository: new InMemoryAgentTaskRunQueueStore(older, latest),
+                    currentUser: new TestCurrentUser(Guid.Parse("22222222-2222-4222-8222-222222222222"))))
+            .Handle(new GetAgentTaskRunQueueQuery(task.Id.Value, 1, 10), CancellationToken.None);
+        unauthorized.Status.Should().Be(ResultStatus.NotFound);
+    }
+
+    [Fact]
+    public async Task AgentTaskQueries_ShouldMapWorkspaceApprovalAndQueueViaDtoService()
+    {
+        var (task, workspace) = CreateApprovedTask("generate_chart_data");
+        var approval = new ApprovalRequest(
+            task.Id,
+            AgentApprovalType.ToolCall,
+            task.Steps.Single().Id.Value.ToString(),
+            task.UserId,
+            DateTimeOffset.UtcNow);
+        var queueItem = new AgentTaskRunQueueItem(
+            task.Id,
+            AgentTaskRunTriggerType.Manual,
+            task.UserId,
+            DateTimeOffset.UtcNow);
+        var taskRepository = new InMemoryRepository<AgentTask>(task);
+        var workspaceRepository = new InMemoryRepository<ArtifactWorkspace>(workspace);
+        var approvalRepository = new InMemoryRepository<ApprovalRequest>(approval);
+        var queueRepository = new InMemoryAgentTaskRunQueueStore(queueItem);
+        var dtoQueryService = CreateAgentTaskDtoQueryService(
+            workspaceRepository,
+            approvalRepository,
+            queueRepository);
+        var getHandler = new GetAgentTaskQueryHandler(
+            taskRepository,
+            dtoQueryService,
+            new TestCurrentUser(UserId),
+            new StubIdentityAccessService([]));
+        var listHandler = new GetListAgentTasksBySessionQueryHandler(
+            taskRepository,
+            dtoQueryService,
+            new TestCurrentUser(UserId),
+            new StubIdentityAccessService([]));
+
+        var single = await getHandler.Handle(new GetAgentTaskQuery(task.Id.Value), CancellationToken.None);
+        var list = await listHandler.Handle(new GetListAgentTasksBySessionQuery(task.SessionId.Value), CancellationToken.None);
+
+        single.IsSuccess.Should().BeTrue();
+        single.Value!.WorkspaceCode.Should().Be(workspace.WorkspaceCode);
+        single.Value.PendingApprovalCount.Should().Be(1);
+        single.Value.QueuedRunId.Should().Be(queueItem.Id.Value);
+        single.Value.IsRunQueued.Should().BeTrue();
+        list.IsSuccess.Should().BeTrue();
+        list.Value.Should().ContainSingle()
+            .Which.Id.Should().Be(task.Id.Value);
+    }
+
+    [Fact]
+    public async Task AgentApprovalQueries_ShouldFilterAndMapViaCoordinator()
+    {
+        var (task, workspace) = CreateApprovedTask("generate_chart_data");
+        var approval = new ApprovalRequest(
+            task.Id,
+            AgentApprovalType.Plan,
+            task.Id.Value.ToString(),
+            task.UserId,
+            DateTimeOffset.UtcNow);
+        var taskRepository = new InMemoryRepository<AgentTask>(task);
+        var approvalRepository = new InMemoryRepository<ApprovalRequest>(approval);
+        var workspaceRepository = new InMemoryRepository<ArtifactWorkspace>(workspace);
+        var queryCoordinator = new AgentApprovalQueryCoordinator(
+            taskRepository,
+            approvalRepository,
+            workspaceRepository,
+            new TestCurrentUser(UserId),
+            new StubIdentityAccessService([AgentApprovalPermissions.ApproveAgentTaskPlan]));
+        var pendingHandler = new GetPendingAgentApprovalsQueryHandler(queryCoordinator);
+        var taskHandler = new GetAgentTaskApprovalsQueryHandler(queryCoordinator);
+
+        var pending = await pendingHandler.Handle(new GetPendingAgentApprovalsQuery(), CancellationToken.None);
+        var byTask = await taskHandler.Handle(new GetAgentTaskApprovalsQuery(task.Id.Value), CancellationToken.None);
+
+        pending.IsSuccess.Should().BeTrue();
+        pending.Value.Should().ContainSingle()
+            .Which.WorkspaceCode.Should().Be(workspace.WorkspaceCode);
+        byTask.IsSuccess.Should().BeTrue();
+        byTask.Value.Should().ContainSingle()
+            .Which.Id.Should().Be(approval.Id.Value);
+    }
+
+    [Fact]
+    public async Task UploadRecordCommand_ShouldPersistSessionUploadViaCoordinator()
+    {
+        var session = new Session(UserId, ConversationTemplateId.New());
+        var uploadRepository = new InMemoryRepository<UploadRecord>();
+        var sessionRepository = new InMemoryRepository<Session>(session);
+        var taskRepository = new InMemoryRepository<AgentTask>();
+        var audit = new CapturingAuditLogWriter();
+        var coordinator = new UploadRecordCoordinator(
+            uploadRepository,
+            sessionRepository,
+            taskRepository,
+            new NoopFileStorageService(),
+            [],
+            [],
+            audit,
+            new TestCurrentUser(UserId));
+        var handler = new UploadRecordCommandHandler(coordinator);
+        var bytes = "hello upload"u8.ToArray();
+        await using var stream = new MemoryStream(bytes);
+
+        var result = await handler.Handle(
+            new UploadRecordCommand(
+                nameof(UploadRecordScope.SessionTemp),
+                new AiGatewayUploadStream("report.txt", "text/plain", bytes.Length, stream),
+                SessionId: session.Id.Value),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value!.SessionId.Should().Be(session.Id.Value);
+        result.Value.FileName.Should().Be("report.txt");
+        result.Value.Status.Should().Be(UploadRecordStatus.Uploaded.ToString());
+        uploadRepository.Items.Should().ContainSingle()
+            .Which.StoragePath.Should().Be("report.txt");
+        audit.Requests.Should().ContainSingle()
+            .Which.Result.Should().Be(AuditResults.Succeeded);
+    }
+
+    [Fact]
+    public async Task ArtifactWorkspaceQueries_ShouldMapAndDownloadViaCoordinator()
+    {
+        var (task, workspace) = CreateApprovedTask("generate_chart_data");
+        var artifact = workspace.AddDraftArtifact(
+            ArtifactType.Markdown,
+            "report.md",
+            "draft/report.md",
+            12,
+            "text/markdown",
+            null,
+            DateTimeOffset.UtcNow);
+        var fileStore = new InMemoryArtifactWorkspaceFileStore();
+        fileStore.AddFile(workspace.WorkspaceCode, artifact.RelativePath, "hello report"u8.ToArray(), artifact.MimeType);
+        var audit = new CapturingAuditLogWriter();
+        var coordinator = new ArtifactWorkspaceQueryCoordinator(
+            new InMemoryRepository<ArtifactWorkspace>(workspace),
+            new InMemoryRepository<AgentTask>(task),
+            new InMemoryRepository<ApprovalRequest>(),
+            fileStore,
+            new AgentAuditRecorder(audit),
+            audit,
+            new TestCurrentUser(UserId),
+            new StubIdentityAccessService([
+                AgentApprovalPermissions.GetWorkspace,
+                AgentApprovalPermissions.DownloadArtifact
+            ]));
+        var getHandler = new GetArtifactWorkspaceQueryHandler(coordinator);
+        var downloadHandler = new DownloadArtifactQueryHandler(coordinator);
+
+        var workspaceResult = await getHandler.Handle(
+            new GetArtifactWorkspaceQuery(workspace.WorkspaceCode),
+            CancellationToken.None);
+        var downloadResult = await downloadHandler.Handle(
+            new DownloadArtifactQuery(artifact.Id.Value),
+            CancellationToken.None);
+
+        workspaceResult.IsSuccess.Should().BeTrue();
+        workspaceResult.Value!.Files.Should().ContainSingle()
+            .Which.RelativePath.Should().Be(artifact.RelativePath);
+        workspaceResult.Value.Artifacts.Should().ContainSingle()
+            .Which.Id.Should().Be(artifact.Id.Value);
+        downloadResult.IsSuccess.Should().BeTrue();
+        downloadResult.Value!.FileName.Should().Be("report.md");
+        downloadResult.Value.FileSize.Should().Be(12);
+        using var memory = new MemoryStream();
+        await downloadResult.Value.Stream.CopyToAsync(memory);
+        memory.ToArray().Should().Equal("hello report"u8.ToArray());
+        audit.Requests.Should().Contain(request => request.ActionCode == "Agent.ArtifactDownload");
     }
 
     [Fact]
     public async Task AgentRunQueueEnqueue_ShouldPreventDuplicateActiveItems()
     {
         var (task, workspace) = CreateApprovedTask("generate_chart_data");
-        var queueRepository = new InMemoryRepository<AgentTaskRunQueueItem>();
-        var queue = new AgentTaskRunQueue(queueRepository);
+        var queueRepository = new InMemoryAgentTaskRunQueueStore();
+        var taskRepository = new InMemoryRepository<AgentTask>(task);
+        var workspaceRepository = new InMemoryRepository<ArtifactWorkspace>(workspace);
+        var approvalRepository = new InMemoryRepository<ApprovalRequest>();
+        var lifecycleCoordinator = CreateLifecycleCoordinator(
+            taskRepository,
+            workspaceRepository,
+            approvalRepository,
+            queueRepository);
         var handler = new RunAgentTaskCommandHandler(
-            new InMemoryRepository<AgentTask>(task),
-            new InMemoryRepository<ArtifactWorkspace>(workspace),
-            new InMemoryRepository<ApprovalRequest>(),
-            queueRepository,
-            queue,
+            taskRepository,
+            CreateAgentTaskDtoQueryService(workspaceRepository, approvalRepository, queueRepository),
+            lifecycleCoordinator,
             new TestCurrentUser(UserId));
 
         var first = await handler.Handle(new RunAgentTaskCommand(task.Id.Value), CancellationToken.None);
@@ -1121,9 +1342,9 @@ public sealed class ToolRegistryGovernanceTests
     {
         var (task, _) = CreateApprovedTask("generate_chart_data");
         var taskRepository = new InMemoryRepository<AgentTask>(task);
-        var queueRepository = new InMemoryRepository<AgentTaskRunQueueItem>(
+        var queueRepository = new InMemoryAgentTaskRunQueueStore(
             new AgentTaskRunQueueItem(task.Id, AgentTaskRunTriggerType.Manual, task.UserId, DateTimeOffset.UtcNow));
-        var attemptRepository = new InMemoryRepository<AgentTaskRunAttempt>();
+        var attemptRepository = new InMemoryAgentTaskRunAttemptStore();
         using var provider = CreateQueueWorkerProvider(
             taskRepository,
             queueRepository,
@@ -1152,18 +1373,19 @@ public sealed class ToolRegistryGovernanceTests
         var step = task.Steps.Single();
         task.WaitForToolApproval(now);
         var approval = new ApprovalRequest(task.Id, AgentApprovalType.ToolCall, step.Id.Value.ToString(), task.UserId, now);
-        var queueRepository = new InMemoryRepository<AgentTaskRunQueueItem>();
+        var queueRepository = new InMemoryAgentTaskRunQueueStore();
         var handler = new ApproveAgentApprovalCommandHandler(
-            new InMemoryRepository<ApprovalRequest>(approval),
-            new InMemoryRepository<AgentTask>(task),
-            new InMemoryRepository<ArtifactWorkspace>(workspace),
-            new AgentAuditRecorder(new CapturingAuditLogWriter()),
-            new AgentTaskRunQueue(queueRepository),
-            new TestCurrentUser(UserId),
-            new StubIdentityAccessService([AgentApprovalPermissions.ApproveAgentToolCall]),
-            new AgentPlanDraftConfirmationService(
-                CreatePlanToolGuard(CreateAgentRuntimeGuardWithCloudEnabled()),
-                new FixedCloudReadonlyAgentPlanService()));
+            new AgentApprovalDecisionCoordinator(
+                new InMemoryRepository<ApprovalRequest>(approval),
+                new InMemoryRepository<AgentTask>(task),
+                new InMemoryRepository<ArtifactWorkspace>(workspace),
+                new AgentAuditRecorder(new CapturingAuditLogWriter()),
+                new AgentTaskRunQueue(queueRepository),
+                new TestCurrentUser(UserId),
+                new StubIdentityAccessService([AgentApprovalPermissions.ApproveAgentToolCall]),
+                new AgentPlanDraftConfirmationService(
+                    CreatePlanToolGuard(CreateAgentRuntimeGuardWithCloudEnabled()),
+                    new FixedCloudReadonlyAgentPlanService())));
 
         var result = await handler.Handle(new ApproveAgentApprovalCommand(approval.Id.Value, "approved"), CancellationToken.None);
 
@@ -1191,8 +1413,8 @@ public sealed class ToolRegistryGovernanceTests
         queueItem.AcquireLease(Guid.NewGuid(), "expired-worker", now, TimeSpan.FromSeconds(1));
         queueItem.MarkStarted(attempt.Id, now);
         var taskRepository = new InMemoryRepository<AgentTask>(task);
-        var queueRepository = new InMemoryRepository<AgentTaskRunQueueItem>(queueItem);
-        var attemptRepository = new InMemoryRepository<AgentTaskRunAttempt>(attempt);
+        var queueRepository = new InMemoryAgentTaskRunQueueStore(queueItem);
+        var attemptRepository = new InMemoryAgentTaskRunAttemptStore(attempt);
         using var provider = CreateQueueWorkerProvider(
             taskRepository,
             queueRepository,
@@ -1217,17 +1439,17 @@ public sealed class ToolRegistryGovernanceTests
     {
         var (task, _) = CreateApprovedTask("generate_chart_data");
         var queueItem = new AgentTaskRunQueueItem(task.Id, AgentTaskRunTriggerType.Manual, task.UserId, DateTimeOffset.UtcNow);
-        var heartbeatRepository = new InMemoryRepository<AgentWorkerHeartbeat>();
+        var heartbeatStore = new InMemoryAgentWorkerHeartbeatStore();
         var heartbeatService = new AgentWorkerHeartbeatService(
-            heartbeatRepository,
+            heartbeatStore,
             new FixedWorkspaceFingerprintProvider("hash-api"));
 
         await heartbeatService.MarkAsync("worker-1", "data-worker", "1.0.0", null, CancellationToken.None);
         await heartbeatService.MarkAsync("worker-1", "data-worker", "1.0.0", queueItem, CancellationToken.None);
         await heartbeatService.MarkAsync("worker-1", "data-worker", "1.0.0", null, CancellationToken.None);
 
-        heartbeatRepository.Items.Should().ContainSingle();
-        var heartbeat = heartbeatRepository.Items.Single();
+        heartbeatStore.Items.Should().ContainSingle();
+        var heartbeat = heartbeatStore.Items.Single();
         heartbeat.WorkerId.Should().Be("worker-1");
         heartbeat.WorkspaceRootHash.Should().Be("hash-api");
         heartbeat.ActiveQueueItemId.Should().BeNull();
@@ -1253,8 +1475,8 @@ public sealed class ToolRegistryGovernanceTests
         succeeded.MarkSucceeded(now);
         var heartbeat = new AgentWorkerHeartbeat("worker-1", "data-worker", now, "hash", "1.0.0");
         var handler = new GetAgentRunQueueSummaryQueryHandler(
-            new InMemoryRepository<AgentTaskRunQueueItem>(queued, leased, staleLeased, failed, deadLetter, succeeded),
-            new InMemoryRepository<AgentWorkerHeartbeat>(heartbeat));
+            new InMemoryAgentTaskRunQueueStore(queued, leased, staleLeased, failed, deadLetter, succeeded),
+            new InMemoryAgentWorkerHeartbeatStore(heartbeat));
 
         var result = await handler.Handle(new GetAgentRunQueueSummaryQuery(), CancellationToken.None);
 
@@ -1278,7 +1500,7 @@ public sealed class ToolRegistryGovernanceTests
         var first = new AgentTaskRunQueueItem(task.Id, AgentTaskRunTriggerType.Manual, task.UserId, now);
         first.MarkFailed("failed", "safe", now);
         var second = new AgentTaskRunQueueItem(otherTask.Id, AgentTaskRunTriggerType.Retry, otherTask.UserId, now);
-        var handler = new GetAgentRunQueueQueryHandler(new InMemoryRepository<AgentTaskRunQueueItem>(first, second));
+        var handler = new GetAgentRunQueueQueryHandler(new InMemoryAgentTaskRunQueueStore(first, second));
 
         var result = await handler.Handle(
             new GetAgentRunQueueQuery(
@@ -1306,7 +1528,7 @@ public sealed class ToolRegistryGovernanceTests
         activeLeased.AcquireLease(Guid.NewGuid(), "worker", now, TimeSpan.FromMinutes(5));
         var succeeded = new AgentTaskRunQueueItem(task.Id, AgentTaskRunTriggerType.Manual, task.UserId, now);
         succeeded.MarkSucceeded(now);
-        var repository = new InMemoryRepository<AgentTaskRunQueueItem>(failed, activeLeased, succeeded);
+        var repository = new InMemoryAgentTaskRunQueueStore(failed, activeLeased, succeeded);
         var audit = new CapturingAuditLogWriter();
         var handler = new DeadLetterAgentRunQueueItemCommandHandler(repository, audit);
 
@@ -1357,7 +1579,7 @@ public sealed class ToolRegistryGovernanceTests
         var (task, workspace) = CreateApprovedTask("generate_chart_data");
         var taskRepository = new InMemoryRepository<AgentTask>(task);
         var workspaceRepository = new InMemoryRepository<ArtifactWorkspace>(workspace);
-        var executionRepository = new InMemoryRepository<ToolExecutionRecord>();
+        var executionRepository = new InMemoryToolExecutionAuditStore();
         var runtime = CreateRuntime(
             taskRepository,
             workspaceRepository,
@@ -1381,7 +1603,7 @@ public sealed class ToolRegistryGovernanceTests
     {
         var (task, workspace) = CreateApprovedTask("generate_chart_data");
         var approvalRepository = new InMemoryRepository<ApprovalRequest>();
-        var executionRepository = new InMemoryRepository<ToolExecutionRecord>();
+        var executionRepository = new InMemoryToolExecutionAuditStore();
         var runtime = CreateRuntime(
             new InMemoryRepository<AgentTask>(task),
             new InMemoryRepository<ArtifactWorkspace>(workspace),
@@ -1404,7 +1626,7 @@ public sealed class ToolRegistryGovernanceTests
     public async Task AgentTaskRuntime_ShouldRedactFailedExecutionRecord()
     {
         var (task, workspace) = CreateApprovedTask("generate_chart_data");
-        var executionRepository = new InMemoryRepository<ToolExecutionRecord>();
+        var executionRepository = new InMemoryToolExecutionAuditStore();
         var runtime = CreateRuntime(
             new InMemoryRepository<AgentTask>(task),
             new InMemoryRepository<ArtifactWorkspace>(workspace),
@@ -1419,9 +1641,10 @@ public sealed class ToolRegistryGovernanceTests
         var record = executionRepository.Items.Should().ContainSingle().Which;
         record.Status.Should().Be(ToolExecutionStatus.Failed);
         record.ErrorCode.Should().Be(AppProblemCodes.ArtifactGenerationFailed);
-        record.ErrorMessage.Should().Contain("apiKey=******");
-        record.ErrorMessage.Should().Contain("[redacted-path]");
-        record.ErrorMessage.Should().Contain("Password=******");
+        record.ErrorMessage.Should().Contain("Tool execution failed.");
+        record.ErrorMessage.Should().Contain("ErrorType=InvalidOperationException");
+        record.ErrorMessage.Should().NotContain("apiKey");
+        record.ErrorMessage.Should().NotContain("Password");
         record.ErrorMessage.Should().NotContain("sk-test");
         record.ErrorMessage.Should().NotContain("C:\\");
         record.ErrorMessage.Should().NotContain("super-secret");
@@ -1461,10 +1684,10 @@ public sealed class ToolRegistryGovernanceTests
             "{}",
             DateTimeOffset.UtcNow);
 
-        var handler = new GetAgentTaskToolExecutionsQueryHandler(
+        var handler = new GetAgentTaskToolExecutionsQueryHandler(new AgentTaskToolExecutionQueryCoordinator(
             new InMemoryRepository<AgentTask>(task, foreignTask),
-            new InMemoryRepository<ToolExecutionRecord>(failedRecord, succeededRecord, foreignRecord),
-            new TestCurrentUser(UserId));
+            new InMemoryToolExecutionAuditStore(failedRecord, succeededRecord, foreignRecord),
+            new TestCurrentUser(UserId)));
 
         var result = await handler.Handle(
             new GetAgentTaskToolExecutionsQuery(task.Id.Value, 1, 10, "Failed", "generate_pdf"),
@@ -1492,10 +1715,10 @@ public sealed class ToolRegistryGovernanceTests
         allRecords.Value.Items.Single(item => item.ToolCode == "generate_chart_data")
             .OutputSummary!.ToLowerInvariant().Should().NotContain("select");
 
-        var unauthorizedHandler = new GetAgentTaskToolExecutionsQueryHandler(
+        var unauthorizedHandler = new GetAgentTaskToolExecutionsQueryHandler(new AgentTaskToolExecutionQueryCoordinator(
             new InMemoryRepository<AgentTask>(task),
-            new InMemoryRepository<ToolExecutionRecord>(failedRecord),
-            new TestCurrentUser(Guid.Parse("22222222-2222-4222-8222-222222222222")));
+            new InMemoryToolExecutionAuditStore(failedRecord),
+            new TestCurrentUser(Guid.Parse("22222222-2222-4222-8222-222222222222"))));
         var unauthorized = await unauthorizedHandler.Handle(
             new GetAgentTaskToolExecutionsQuery(task.Id.Value, 1, 10),
             CancellationToken.None);
@@ -1540,11 +1763,11 @@ public sealed class ToolRegistryGovernanceTests
             new Dictionary<string, string> { ["taskId"] = task.Id.Value.ToString() },
             now.UtcDateTime.AddMinutes(-5));
         var handler = new GetAgentTaskAuditSummaryQueryHandler(
-            new InMemoryRepository<AgentTask>(task),
-            new InMemoryRepository<ArtifactWorkspace>(workspace),
-            new InMemoryRepository<ToolExecutionRecord>(record),
-            new FixedAuditLogQueryService(auditLog),
-            new TestCurrentUser(UserId));
+            CreateAuditQueryCoordinator(
+                new InMemoryRepository<AgentTask>(task),
+                workspaceRepository: new InMemoryRepository<ArtifactWorkspace>(workspace),
+                executionRepository: new InMemoryToolExecutionAuditStore(record),
+                auditLogQueryService: new FixedAuditLogQueryService(auditLog)));
 
         var result = await handler.Handle(new GetAgentTaskAuditSummaryQuery(task.Id.Value), CancellationToken.None);
 
@@ -1565,7 +1788,7 @@ public sealed class ToolRegistryGovernanceTests
     public async Task ArtifactGenerationFailure_ShouldNotCreatePlaceholderArtifact()
     {
         var (task, workspace) = CreateApprovedTask("generate_pdf");
-        var executionRepository = new InMemoryRepository<ToolExecutionRecord>();
+        var executionRepository = new InMemoryToolExecutionAuditStore();
         var runtime = CreateRuntime(
             new InMemoryRepository<AgentTask>(task),
             new InMemoryRepository<ArtifactWorkspace>(workspace),
@@ -1598,7 +1821,7 @@ public sealed class ToolRegistryGovernanceTests
         approval.Approve(UserId, "approved", DateTimeOffset.UtcNow);
         approvalRepository.Add(approval);
 
-        var executionRepository = new InMemoryRepository<ToolExecutionRecord>();
+        var executionRepository = new InMemoryToolExecutionAuditStore();
         var workspaceService = new CapturingWorkspaceService(workspace);
         var semanticPlan = CreateDeviceSemanticPlan();
         var cloudClient = new RecordingCloudAiReadClient(new CloudAiReadResult<object>(
@@ -1660,7 +1883,7 @@ public sealed class ToolRegistryGovernanceTests
         approval.Approve(UserId, "approved", DateTimeOffset.UtcNow);
         approvalRepository.Add(approval);
 
-        var executionRepository = new InMemoryRepository<ToolExecutionRecord>();
+        var executionRepository = new InMemoryToolExecutionAuditStore();
         var workspaceService = new CapturingWorkspaceService(workspace);
         var runtime = CreateRuntime(
             new InMemoryRepository<AgentTask>(task),
@@ -1692,8 +1915,11 @@ public sealed class ToolRegistryGovernanceTests
         var record = executionRepository.Items.Should().ContainSingle().Which;
         record.Status.Should().Be(ToolExecutionStatus.Failed);
         record.ErrorCode.Should().Be(CloudAiReadProblemCodes.MissingRequiredParameter);
-        record.ErrorMessage.Should().Contain("apiKey=******");
-        record.ErrorMessage.Should().Contain("[redacted-path]");
+        record.ErrorMessage.Should().Contain("Cloud read-only tool failed.");
+        record.ErrorMessage.Should().Contain("ErrorCode=cloud_ai_read_missing_required_parameter");
+        record.ErrorMessage.Should().Contain("ErrorType=CloudAiReadException");
+        record.ErrorMessage.Should().NotContain("apiKey");
+        record.ErrorMessage.Should().NotContain("Password");
         record.ErrorMessage.Should().NotContain("sk-test");
         record.ErrorMessage.Should().NotContain("C:\\");
         record.ErrorMessage.Should().NotContain("super-secret");
@@ -1872,7 +2098,7 @@ public sealed class ToolRegistryGovernanceTests
         var (task, workspace) = CreateApprovedTask(toolCode);
         var approval = new ApprovalRequest(task.Id, AgentApprovalType.ToolCall, task.Steps.Single().Id.Value.ToString(), UserId, DateTimeOffset.UtcNow);
         approval.Approve(UserId, "approved", DateTimeOffset.UtcNow);
-        var executionRepository = new InMemoryRepository<ToolExecutionRecord>();
+        var executionRepository = new InMemoryToolExecutionAuditStore();
         var runtime = CreateRuntime(
             new InMemoryRepository<AgentTask>(task),
             new InMemoryRepository<ArtifactWorkspace>(workspace),
@@ -1940,7 +2166,7 @@ public sealed class ToolRegistryGovernanceTests
         var (task, workspace) = CreateApprovedTask(toolCode, requiresApproval: true);
         var approval = new ApprovalRequest(task.Id, AgentApprovalType.ToolCall, task.Steps.Single().Id.Value.ToString(), UserId, DateTimeOffset.UtcNow);
         approval.Approve(UserId, "approved", DateTimeOffset.UtcNow);
-        var executionRepository = new InMemoryRepository<ToolExecutionRecord>();
+        var executionRepository = new InMemoryToolExecutionAuditStore();
         var runtime = CreateRuntime(
             new InMemoryRepository<AgentTask>(task),
             new InMemoryRepository<ArtifactWorkspace>(workspace),
@@ -1970,7 +2196,7 @@ public sealed class ToolRegistryGovernanceTests
     {
         var knowledgeBaseId = Guid.NewGuid();
         var (task, workspace) = CreateRagApprovedTask(knowledgeBaseId);
-        var executionRepository = new InMemoryRepository<ToolExecutionRecord>();
+        var executionRepository = new InMemoryToolExecutionAuditStore();
         var accessChecker = new RecordingKnowledgeBaseAccessChecker();
         var runtime = CreateRuntime(
             new InMemoryRepository<AgentTask>(task),
@@ -2042,13 +2268,13 @@ public sealed class ToolRegistryGovernanceTests
             now.AddSeconds(2),
             agentTaskId: task.Id,
             agentStepId: step.Id);
-        var handler = new GetSessionTimelineQueryHandler(
+        var handler = new GetSessionTimelineQueryHandler(new SessionTimelineQueryCoordinator(
             new InMemoryRepository<Session>(session),
-            new InMemoryRepository<MessageEvent>(timelineEvent),
+            new InMemoryMessageTimelineProjectionStore(timelineEvent),
             new InMemoryRepository<AgentTask>(task),
             new InMemoryRepository<ApprovalRequest>(),
             new InMemoryRepository<ArtifactWorkspace>(),
-            new TestCurrentUser(UserId));
+            new TestCurrentUser(UserId)));
 
         var result = await handler.Handle(new GetSessionTimelineQuery(session.Id.Value), CancellationToken.None);
 
@@ -2098,13 +2324,13 @@ public sealed class ToolRegistryGovernanceTests
             agentTaskId: task.Id,
             approvalRequestId: approval.Id,
             payloadJson: """{"approvalStatus":"Pending"}""");
-        var handler = new GetSessionTimelineQueryHandler(
+        var handler = new GetSessionTimelineQueryHandler(new SessionTimelineQueryCoordinator(
             new InMemoryRepository<Session>(session),
-            new InMemoryRepository<MessageEvent>(timelineEvent),
+            new InMemoryMessageTimelineProjectionStore(timelineEvent),
             new InMemoryRepository<AgentTask>(task),
             new InMemoryRepository<ApprovalRequest>(approval),
             new InMemoryRepository<ArtifactWorkspace>(),
-            new TestCurrentUser(UserId));
+            new TestCurrentUser(UserId)));
 
         var result = await handler.Handle(new GetSessionTimelineQuery(session.Id.Value), CancellationToken.None);
 
@@ -2156,7 +2382,7 @@ public sealed class ToolRegistryGovernanceTests
         var (task, workspace) = CreateApprovedTask(toolCode);
         var approval = new ApprovalRequest(task.Id, AgentApprovalType.ToolCall, task.Steps.Single().Id.Value.ToString(), UserId, DateTimeOffset.UtcNow);
         approval.Approve(UserId, "approved", DateTimeOffset.UtcNow);
-        var executionRepository = new InMemoryRepository<ToolExecutionRecord>();
+        var executionRepository = new InMemoryToolExecutionAuditStore();
         var runtime = CreateRuntime(
             new InMemoryRepository<AgentTask>(task),
             new InMemoryRepository<ArtifactWorkspace>(workspace),
@@ -2334,12 +2560,12 @@ public sealed class ToolRegistryGovernanceTests
         IRepository<AgentTask> taskRepository,
         IRepository<ArtifactWorkspace> workspaceRepository,
         IRepository<ApprovalRequest> approvalRepository,
-        IRepository<ToolExecutionRecord> executionRepository,
+        IToolExecutionAuditStore executionRepository,
         ToolRegistryGuard guard,
         IAgentArtifactWorkspaceService? workspaceService = null,
         ICloudReadonlyAgentToolExecutor? cloudReadonlyToolExecutor = null,
         IEnumerable<IAgentToolExecutor>? toolExecutors = null,
-        IRepository<AgentTaskRunAttempt>? runAttemptRepository = null,
+        IAgentTaskRunAttemptStore? runAttemptRepository = null,
         IEnumerable<IKnowledgeBaseAccessChecker>? knowledgeBaseAccessCheckers = null,
         IKnowledgeRetrievalService? knowledgeRetrievalService = null,
         IIdentityAccessService? identityAccessService = null,
@@ -2347,10 +2573,9 @@ public sealed class ToolRegistryGovernanceTests
     {
         return new AgentTaskRuntime(
             taskRepository,
-            runAttemptRepository ?? new InMemoryRepository<AgentTaskRunAttempt>(),
+            runAttemptRepository ?? new InMemoryAgentTaskRunAttemptStore(),
             workspaceRepository,
             approvalRepository,
-            executionRepository,
             new InMemoryRepository<UploadRecord>(),
             workspaceService ?? new ThrowingWorkspaceService(),
             new NoopFileStorageService(),
@@ -2361,9 +2586,61 @@ public sealed class ToolRegistryGovernanceTests
             cloudReadonlyToolExecutor ?? new ThrowingCloudReadonlyAgentToolExecutor(),
             identityAccessService ?? new StubIdentityAccessService([]),
             guard,
-            new AgentAuditRecorder(new CapturingAuditLogWriter()),
+            new AgentRuntimeEventRecorder(
+                executionRepository,
+                new AgentAuditRecorder(new CapturingAuditLogWriter())),
             toolExecutors ?? [],
             skillDefinitionGuard: skillDefinitionGuard);
+    }
+
+    private static AgentTaskLifecycleCoordinator CreateLifecycleCoordinator(
+        IRepository<AgentTask> taskRepository,
+        IRepository<ArtifactWorkspace> workspaceRepository,
+        IRepository<ApprovalRequest> approvalRepository,
+        IAgentTaskRunQueueStore queueRepository,
+        IAgentTaskRunAttemptStore? runAttemptRepository = null,
+        IOptions<AgentRunQueueOptions>? options = null,
+        AgentAuditRecorder? auditRecorder = null)
+    {
+        return new AgentTaskLifecycleCoordinator(
+            taskRepository,
+            approvalRepository,
+            workspaceRepository,
+            queueRepository,
+            runAttemptRepository ?? new InMemoryAgentTaskRunAttemptStore(),
+            new AgentTaskRunQueue(queueRepository),
+            options,
+            auditRecorder);
+    }
+
+    private static AgentTaskDtoQueryService CreateAgentTaskDtoQueryService(
+        IReadRepository<ArtifactWorkspace> workspaceRepository,
+        IReadRepository<ApprovalRequest> approvalRepository,
+        IAgentTaskRunQueueStore queueRepository)
+    {
+        return new AgentTaskDtoQueryService(
+            workspaceRepository,
+            approvalRepository,
+            queueRepository);
+    }
+
+    private static AgentTaskAuditQueryCoordinator CreateAuditQueryCoordinator(
+        IRepository<AgentTask> taskRepository,
+        IReadRepository<ArtifactWorkspace>? workspaceRepository = null,
+        IToolExecutionAuditStore? executionRepository = null,
+        IAuditLogQueryService? auditLogQueryService = null,
+        IAgentTaskRunAttemptStore? runAttemptRepository = null,
+        IAgentTaskRunQueueStore? queueRepository = null,
+        ICurrentUser? currentUser = null)
+    {
+        return new AgentTaskAuditQueryCoordinator(
+            taskRepository,
+            workspaceRepository ?? new InMemoryRepository<ArtifactWorkspace>(),
+            executionRepository ?? new InMemoryToolExecutionAuditStore(),
+            auditLogQueryService ?? new FixedAuditLogQueryService(),
+            runAttemptRepository ?? new InMemoryAgentTaskRunAttemptStore(),
+            queueRepository ?? new InMemoryAgentTaskRunQueueStore(),
+            currentUser ?? new TestCurrentUser(UserId));
     }
 
     private static (AgentTask Task, ArtifactWorkspace Workspace) CreateApprovedTask(
@@ -2644,15 +2921,16 @@ public sealed class ToolRegistryGovernanceTests
         IAgentSkillAutoSelector? skillAutoSelector = null)
     {
         return new PlanAgentTaskCommandHandler(
-            taskRepository ?? new InMemoryRepository<AgentTask>(),
-            new InMemoryRepository<ApprovalRequest>(),
-            new InMemoryRepository<Session>(session),
-            new InMemoryRepository<UploadRecord>(),
-            new AgentAuditRecorder(new CapturingAuditLogWriter()),
-            [],
-            new TestCurrentUser(UserId),
-            skillDefinitionGuard: skillDefinitionGuard,
-            skillAutoSelector: skillAutoSelector);
+            new PlanAgentTaskCoordinator(
+                taskRepository ?? new InMemoryRepository<AgentTask>(),
+                new InMemoryRepository<ApprovalRequest>(),
+                new InMemoryRepository<Session>(session),
+                new InMemoryRepository<UploadRecord>(),
+                new AgentAuditRecorder(new CapturingAuditLogWriter()),
+                [],
+                new TestCurrentUser(UserId),
+                skillDefinitionGuard: skillDefinitionGuard,
+                skillAutoSelector: skillAutoSelector));
     }
 
     private static LanguageModel CreatePlannerModel()
@@ -2717,20 +2995,21 @@ public sealed class ToolRegistryGovernanceTests
 
     private static ServiceProvider CreateQueueWorkerProvider(
         InMemoryRepository<AgentTask> taskRepository,
-        InMemoryRepository<AgentTaskRunQueueItem> queueRepository,
-        InMemoryRepository<AgentTaskRunAttempt> attemptRepository,
+        InMemoryAgentTaskRunQueueStore queueRepository,
+        InMemoryAgentTaskRunAttemptStore attemptRepository,
         IAgentTaskRuntime runtime)
     {
         var services = new ServiceCollection();
         services.AddSingleton<IRepository<AgentTask>>(taskRepository);
-        services.AddSingleton<IRepository<AgentTaskRunQueueItem>>(queueRepository);
-        services.AddSingleton<IRepository<AgentTaskRunAttempt>>(attemptRepository);
+        services.AddSingleton<IAgentTaskRunQueueStore>(queueRepository);
+        services.AddSingleton<IAgentTaskRunAttemptStore>(attemptRepository);
         services.AddSingleton<IAgentTaskRunQueue>(new AgentTaskRunQueue(queueRepository));
         services.AddSingleton(runtime);
+        services.AddSingleton<AgentTaskRunQueueWorkerCoordinator>();
         return services.BuildServiceProvider();
     }
 
-    private sealed class RecordingAgentTaskRuntime(IRepository<AgentTaskRunAttempt> attemptRepository) : IAgentTaskRuntime
+    private sealed class RecordingAgentTaskRuntime(IAgentTaskRunAttemptStore attemptRepository) : IAgentTaskRuntime
     {
         public Task<Result<AgentTask>> RunAsync(AgentTask task, CancellationToken cancellationToken = default)
         {
@@ -2778,6 +3057,207 @@ public sealed class ToolRegistryGovernanceTests
             CancellationToken cancellationToken = default)
         {
             throw new InvalidOperationException("Runtime should not be called by this test.");
+        }
+    }
+
+    private sealed class InMemoryToolExecutionAuditStore(params ToolExecutionRecord[] initialItems)
+        : IToolExecutionAuditStore
+    {
+        public List<ToolExecutionRecord> Items { get; } = [..initialItems];
+
+        public ToolExecutionRecord Add(ToolExecutionRecord record)
+        {
+            Items.Add(record);
+            return record;
+        }
+
+        public Task<List<ToolExecutionRecord>> ListByTaskAsync(
+            AgentTaskId taskId,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items.Where(record => record.TaskId == taskId).ToList());
+        }
+    }
+
+    private sealed class InMemoryMessageTimelineProjectionStore(params MessageEvent[] initialItems)
+        : IMessageTimelineProjectionStore
+    {
+        public List<MessageEvent> Items { get; } = [..initialItems];
+
+        public Task<List<MessageEvent>> ListBySessionAsync(
+            SessionId sessionId,
+            bool includeMessage = false,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items
+                .Where(messageEvent => messageEvent.SessionId == sessionId)
+                .OrderBy(messageEvent => messageEvent.Sequence)
+                .ToList());
+        }
+
+        public MessageEvent Add(MessageEvent messageEvent)
+        {
+            Items.Add(messageEvent);
+            return messageEvent;
+        }
+    }
+
+    private sealed class InMemoryAgentWorkerHeartbeatStore(params AgentWorkerHeartbeat[] initialItems)
+        : IAgentWorkerHeartbeatStore
+    {
+        public List<AgentWorkerHeartbeat> Items { get; } = [..initialItems];
+
+        public Task<AgentWorkerHeartbeat?> FirstByWorkerIdAsync(
+            string workerId,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items.FirstOrDefault(heartbeat => heartbeat.WorkerId == workerId));
+        }
+
+        public Task<List<AgentWorkerHeartbeat>> ListAllAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items.OrderByDescending(heartbeat => heartbeat.LastSeenAt).ToList());
+        }
+
+        public AgentWorkerHeartbeat Add(AgentWorkerHeartbeat heartbeat)
+        {
+            Items.Add(heartbeat);
+            return heartbeat;
+        }
+
+        public void Update(AgentWorkerHeartbeat heartbeat)
+        {
+            if (!Items.Contains(heartbeat))
+            {
+                Items.Add(heartbeat);
+            }
+        }
+
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(1);
+        }
+    }
+
+    private sealed class InMemoryAgentTaskRunQueueStore(params AgentTaskRunQueueItem[] initialItems)
+        : IAgentTaskRunQueueStore
+    {
+        public List<AgentTaskRunQueueItem> Items { get; } = [..initialItems];
+
+        public Task<AgentTaskRunQueueItem?> FirstActiveByTaskAsync(
+            AgentTaskId taskId,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items
+                .Where(item => item.TaskId == taskId && IsActive(item))
+                .OrderByDescending(item => item.CreatedAt)
+                .FirstOrDefault());
+        }
+
+        public Task<AgentTaskRunQueueItem?> FirstByIdAsync(
+            AgentTaskRunQueueItemId id,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items.FirstOrDefault(item => item.Id == id));
+        }
+
+        public Task<List<AgentTaskRunQueueItem>> ListActiveByTaskAsync(
+            AgentTaskId taskId,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items
+                .Where(item => item.TaskId == taskId && IsActive(item))
+                .OrderByDescending(item => item.CreatedAt)
+                .ToList());
+        }
+
+        public Task<List<AgentTaskRunQueueItem>> ListActiveAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items
+                .Where(IsActive)
+                .OrderBy(item => item.AvailableAt)
+                .ToList());
+        }
+
+        public Task<List<AgentTaskRunQueueItem>> ListAllAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items.OrderByDescending(item => item.CreatedAt).ToList());
+        }
+
+        public Task<List<AgentTaskRunQueueItem>> ListByTaskAsync(
+            AgentTaskId taskId,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items
+                .Where(item => item.TaskId == taskId)
+                .OrderByDescending(item => item.CreatedAt)
+                .ToList());
+        }
+
+        public AgentTaskRunQueueItem Add(AgentTaskRunQueueItem item)
+        {
+            Items.Add(item);
+            return item;
+        }
+
+        public void Update(AgentTaskRunQueueItem item)
+        {
+            if (!Items.Contains(item))
+            {
+                Items.Add(item);
+            }
+        }
+
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(1);
+        }
+
+        private static bool IsActive(AgentTaskRunQueueItem item)
+        {
+            return item.Status is AgentTaskRunQueueStatus.Queued or AgentTaskRunQueueStatus.Leased;
+        }
+    }
+
+    private sealed class InMemoryAgentTaskRunAttemptStore(params AgentTaskRunAttempt[] initialItems)
+        : IAgentTaskRunAttemptStore
+    {
+        public List<AgentTaskRunAttempt> Items { get; } = [..initialItems];
+
+        public Task<AgentTaskRunAttempt?> FirstByIdAsync(
+            AgentTaskRunAttemptId id,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items.FirstOrDefault(attempt => attempt.Id == id));
+        }
+
+        public Task<List<AgentTaskRunAttempt>> ListByTaskAsync(
+            AgentTaskId taskId,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items
+                .Where(attempt => attempt.TaskId == taskId)
+                .OrderByDescending(attempt => attempt.StartedAt)
+                .ToList());
+        }
+
+        public AgentTaskRunAttempt Add(AgentTaskRunAttempt attempt)
+        {
+            Items.Add(attempt);
+            return attempt;
+        }
+
+        public void Update(AgentTaskRunAttempt attempt)
+        {
+            if (!Items.Contains(attempt))
+            {
+                Items.Add(attempt);
+            }
+        }
+
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(1);
         }
     }
 
@@ -3273,6 +3753,112 @@ public sealed class ToolRegistryGovernanceTests
         {
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class InMemoryArtifactWorkspaceFileStore : IArtifactWorkspaceFileStore
+    {
+        private readonly Dictionary<string, StoredFile> _files = new(StringComparer.OrdinalIgnoreCase);
+
+        public void AddFile(string workspaceCode, string relativePath, byte[] content, string mimeType)
+        {
+            _files[Key(workspaceCode, relativePath)] = new StoredFile(relativePath, content, mimeType, DateTimeOffset.UtcNow);
+        }
+
+        public ArtifactWorkspaceStorageSettings GetSettings()
+        {
+            return new ArtifactWorkspaceStorageSettings(
+                "/tmp/aicopilot-test",
+                ["draft", "final", "versions"],
+                ["Markdown", "Html", "Pdf", "Pptx", "Xlsx", "Chart"],
+                AllowsUserDefinedPath: false);
+        }
+
+        public Task<ArtifactWorkspaceStorageInfo> CreateWorkspaceAsync(
+            string workspaceCode,
+            Guid taskId,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(new ArtifactWorkspaceStorageInfo($"/tmp/{workspaceCode}", $"/workspaces/{workspaceCode}"));
+        }
+
+        public Task<ArtifactFileWriteResult> WriteTextAsync(
+            string workspaceCode,
+            string relativePath,
+            string content,
+            string mimeType,
+            CancellationToken cancellationToken = default)
+        {
+            return WriteBytesAsync(workspaceCode, relativePath, Encoding.UTF8.GetBytes(content), mimeType, cancellationToken);
+        }
+
+        public Task<ArtifactFileWriteResult> WriteBytesAsync(
+            string workspaceCode,
+            string relativePath,
+            byte[] content,
+            string mimeType,
+            CancellationToken cancellationToken = default)
+        {
+            AddFile(workspaceCode, relativePath, content, mimeType);
+            return Task.FromResult(new ArtifactFileWriteResult(relativePath, content.LongLength, mimeType));
+        }
+
+        public Task<ArtifactFileWriteResult> CopyAsync(
+            string workspaceCode,
+            string sourceRelativePath,
+            string targetRelativePath,
+            string mimeType,
+            CancellationToken cancellationToken = default)
+        {
+            var source = _files[Key(workspaceCode, sourceRelativePath)];
+            return WriteBytesAsync(workspaceCode, targetRelativePath, source.Content, mimeType, cancellationToken);
+        }
+
+        public Task<ArtifactFileReadResult?> OpenReadAsync(
+            string workspaceCode,
+            string relativePath,
+            string mimeType,
+            CancellationToken cancellationToken = default)
+        {
+            if (!_files.TryGetValue(Key(workspaceCode, relativePath), out var file))
+            {
+                return Task.FromResult<ArtifactFileReadResult?>(null);
+            }
+
+            return Task.FromResult<ArtifactFileReadResult?>(new ArtifactFileReadResult(
+                new MemoryStream(file.Content.ToArray()),
+                Path.GetFileName(file.RelativePath),
+                file.MimeType,
+                file.Content.LongLength));
+        }
+
+        public Task<IReadOnlyCollection<ArtifactWorkspaceFileItem>> ListAsync(
+            string workspaceCode,
+            CancellationToken cancellationToken = default)
+        {
+            var prefix = workspaceCode + "/";
+            IReadOnlyCollection<ArtifactWorkspaceFileItem> items = _files
+                .Where(item => item.Key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                .Select(item => new ArtifactWorkspaceFileItem(
+                    Path.GetFileName(item.Value.RelativePath),
+                    item.Value.RelativePath,
+                    IsDirectory: false,
+                    item.Value.Content.LongLength,
+                    item.Value.UpdatedAt))
+                .OrderBy(item => item.RelativePath, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            return Task.FromResult(items);
+        }
+
+        private static string Key(string workspaceCode, string relativePath)
+        {
+            return workspaceCode + "/" + relativePath.Replace('\\', '/');
+        }
+
+        private sealed record StoredFile(
+            string RelativePath,
+            byte[] Content,
+            string MimeType,
+            DateTimeOffset UpdatedAt);
     }
 
     private sealed class NoopTableFileParser : IAgentTableFileParser

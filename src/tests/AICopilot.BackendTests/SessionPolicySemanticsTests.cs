@@ -253,6 +253,55 @@ public sealed class SessionPolicySemanticsTests
     }
 
     [Fact]
+    public async Task FinalAgentBuildExecutor_ShouldCompactDataAnalysisContext_WhenFullContextExceedsBudget()
+    {
+        var runtimeFactory = new FakeRuntimeAgentFactory();
+        var model = FakeRuntimeAgentFactory.CreateModel();
+        model.UpdateParameters(new ModelParameters { MaxTokens = 4096, Temperature = 0.2f });
+        var template = new ConversationTemplate(
+            "current-template",
+            "current template",
+            "Current system prompt.",
+            model.Id,
+            new TemplateSpecification { MaxTokens = 384, Temperature = 0.4f });
+        var session = new Session(Guid.NewGuid(), template.Id);
+
+        var tokenBudgetPolicy = new RejectVerboseDataAnalysisContextTokenBudgetPolicy();
+        var executor = CreateFinalAgentBuildExecutor(
+            runtimeFactory,
+            tokenBudgetPolicy,
+            session,
+            [template],
+            [model]);
+        var generationContext = CreateGenerationContext(session.Id);
+        generationContext.DataAnalysisContext = """
+            {
+              "answer_contract": { "default_sections": ["结论", "关键指标", "关键记录", "查询范围"] },
+              "source_mode": "只读业务数据源",
+              "query_execution": { "target": "Device", "returned_row_count": 1 },
+              "semantic_summary": {
+                "target": "Device",
+                "conclusion": "当前命中 1 台设备。",
+                "metrics": [{ "name": "设备数量", "value": "1" }],
+                "highlights": ["DEV-001 Cutter A Running"],
+                "scope": "设备编码=DEV-001"
+              },
+              "business_data_preview": [{ "设备编码": "DEV-001", "设备名称": "Cutter A" }],
+              "query_scope": "设备编码=DEV-001",
+              "is_truncated": false
+            }
+            """;
+
+        await using var context = await executor.ExecuteAsync(generationContext);
+
+        tokenBudgetPolicy.EvaluateCalls.Should().BeGreaterThan(1);
+        context.InputText.Should().Contain("semantic_summary");
+        context.InputText.Should().Contain("DEV-001");
+        context.InputText.Should().NotContain("answer_contract");
+        context.InputText.Should().NotContain("business_data_preview");
+    }
+
+    [Fact]
     public async Task FinalAgentBuildExecutor_ShouldUseRequestedFinalModelAndRecordExecutionMetadata()
     {
         var runtimeFactory = new FakeRuntimeAgentFactory();
@@ -570,6 +619,41 @@ public sealed class SessionPolicySemanticsTests
                     model.Parameters.MaxTokens,
                     "full history rejected",
                     "full history rejected");
+            }
+
+            return new TokenBudgetDecision(
+                true,
+                CountSystemPromptTokens(template) + finalUserPrompt.Length,
+                template.Specification.MaxTokens ?? 512,
+                model.Parameters.MaxTokens);
+        }
+    }
+
+    private sealed class RejectVerboseDataAnalysisContextTokenBudgetPolicy : ITokenBudgetPolicy
+    {
+        public int EvaluateCalls { get; private set; }
+
+        public int CountSystemPromptTokens(ConversationTemplate template)
+        {
+            return template.SystemPrompt.Length;
+        }
+
+        public TokenBudgetDecision Evaluate(
+            LanguageModel model,
+            ConversationTemplate template,
+            string finalUserPrompt)
+        {
+            EvaluateCalls++;
+            if (finalUserPrompt.Contains("answer_contract", StringComparison.Ordinal)
+                || finalUserPrompt.Contains("business_data_preview", StringComparison.Ordinal))
+            {
+                return new TokenBudgetDecision(
+                    false,
+                    4096,
+                    template.Specification.MaxTokens ?? 512,
+                    model.Parameters.MaxTokens,
+                    "verbose data analysis context rejected",
+                    "verbose data analysis context rejected");
             }
 
             return new TokenBudgetDecision(

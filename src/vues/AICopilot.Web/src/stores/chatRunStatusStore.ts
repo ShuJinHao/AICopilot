@@ -24,7 +24,8 @@ function parseJson(value: unknown): unknown {
 
   try {
     return JSON.parse(value)
-  } catch {
+  } catch (error) {
+    console.error('Failed to parse chat run status payload.', error)
     return value
   }
 }

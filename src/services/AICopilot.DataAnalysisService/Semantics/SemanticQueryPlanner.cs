@@ -182,9 +182,9 @@ public sealed class SemanticQueryPlanner(
                 ? PayloadParseResult.Failure("Semantic query payload is empty.")
                 : PayloadParseResult.Success(payload);
         }
-        catch (JsonException ex)
+        catch (JsonException)
         {
-            return PayloadParseResult.Failure($"Semantic query payload is not valid JSON: {ex.Message}");
+            return PayloadParseResult.Failure("Semantic query payload is not valid JSON.");
         }
     }
 

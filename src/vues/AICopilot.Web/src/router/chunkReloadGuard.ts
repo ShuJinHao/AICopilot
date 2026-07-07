@@ -28,7 +28,8 @@ function getBrowserReloadRuntime(): ReloadRuntime | null {
 function safeRead(storage: ReloadRuntime['sessionStorage']) {
   try {
     return storage?.getItem(reloadAttemptedKey) ?? null
-  } catch {
+  } catch (error) {
+    console.error('Failed to read stale chunk reload marker.', error)
     return null
   }
 }
@@ -36,7 +37,8 @@ function safeRead(storage: ReloadRuntime['sessionStorage']) {
 function safeWrite(storage: ReloadRuntime['sessionStorage']) {
   try {
     storage?.setItem(reloadAttemptedKey, '1')
-  } catch {
+  } catch (error) {
+    console.error('Failed to write stale chunk reload marker.', error)
     // Reloading without the marker is still better than leaving the user stuck.
   }
 }
@@ -44,7 +46,8 @@ function safeWrite(storage: ReloadRuntime['sessionStorage']) {
 function safeRemove(storage: ReloadRuntime['sessionStorage']) {
   try {
     storage?.removeItem(reloadAttemptedKey)
-  } catch {
+  } catch (error) {
+    console.error('Failed to remove stale chunk reload marker.', error)
     // Ignore unavailable session storage.
   }
 }

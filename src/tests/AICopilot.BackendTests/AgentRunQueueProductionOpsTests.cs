@@ -98,17 +98,22 @@ public sealed class AgentRunQueueProductionOpsTests
         var task = CreateFailedTask();
         var previousRetry1 = FailedRetryItem(task, DateTimeOffset.UtcNow.AddMinutes(-6));
         var previousRetry2 = FailedRetryItem(task, DateTimeOffset.UtcNow.AddMinutes(-4));
-        var queueRepository = new InMemoryRepository<AgentTaskRunQueueItem>(previousRetry1, previousRetry2);
+        var queueRepository = new InMemoryAgentTaskRunQueueStore(previousRetry1, previousRetry2);
+        var taskRepository = new InMemoryRepository<AgentTask>(task);
+        var workspaceRepository = new InMemoryRepository<ArtifactWorkspace>();
+        var approvalRepository = new InMemoryRepository<ApprovalRequest>();
         var audit = new CapturingAuditLogWriter();
         var handler = new RetryAgentTaskCommandHandler(
-            new InMemoryRepository<AgentTask>(task),
-            new InMemoryRepository<ArtifactWorkspace>(),
-            new InMemoryRepository<ApprovalRequest>(),
-            queueRepository,
-            new AgentTaskRunQueue(queueRepository),
-            new TestCurrentUser(UserId),
-            Options.Create(new AgentRunQueueOptions()),
-            new AgentAuditRecorder(audit));
+            taskRepository,
+            CreateAgentTaskDtoQueryService(workspaceRepository, approvalRepository, queueRepository),
+            CreateLifecycleCoordinator(
+                taskRepository,
+                workspaceRepository,
+                approvalRepository,
+                queueRepository,
+                options: Options.Create(new AgentRunQueueOptions()),
+                auditRecorder: new AgentAuditRecorder(audit)),
+            new TestCurrentUser(UserId));
 
         var before = DateTimeOffset.UtcNow;
         var result = await handler.Handle(new RetryAgentTaskCommand(task.Id.Value), CancellationToken.None);
@@ -122,18 +127,23 @@ public sealed class AgentRunQueueProductionOpsTests
             .Which.Metadata!["retryAttemptNo"].Should().Be("3");
 
         var maxedTask = CreateFailedTask();
-        var maxedQueue = new InMemoryRepository<AgentTaskRunQueueItem>(
+        var maxedQueue = new InMemoryAgentTaskRunQueueStore(
             FailedRetryItem(maxedTask, DateTimeOffset.UtcNow.AddMinutes(-9)),
             FailedRetryItem(maxedTask, DateTimeOffset.UtcNow.AddMinutes(-6)),
             FailedRetryItem(maxedTask, DateTimeOffset.UtcNow.AddMinutes(-3)));
+        var maxedTaskRepository = new InMemoryRepository<AgentTask>(maxedTask);
+        var maxedWorkspaceRepository = new InMemoryRepository<ArtifactWorkspace>();
+        var maxedApprovalRepository = new InMemoryRepository<ApprovalRequest>();
         var maxedHandler = new RetryAgentTaskCommandHandler(
-            new InMemoryRepository<AgentTask>(maxedTask),
-            new InMemoryRepository<ArtifactWorkspace>(),
-            new InMemoryRepository<ApprovalRequest>(),
-            maxedQueue,
-            new AgentTaskRunQueue(maxedQueue),
-            new TestCurrentUser(UserId),
-            Options.Create(new AgentRunQueueOptions()));
+            maxedTaskRepository,
+            CreateAgentTaskDtoQueryService(maxedWorkspaceRepository, maxedApprovalRepository, maxedQueue),
+            CreateLifecycleCoordinator(
+                maxedTaskRepository,
+                maxedWorkspaceRepository,
+                maxedApprovalRepository,
+                maxedQueue,
+                options: Options.Create(new AgentRunQueueOptions())),
+            new TestCurrentUser(UserId));
 
         var maxed = await maxedHandler.Handle(new RetryAgentTaskCommand(maxedTask.Id.Value), CancellationToken.None);
 
@@ -150,14 +160,20 @@ public sealed class AgentRunQueueProductionOpsTests
         var task = CreateFailedTask();
         var queueItem = new AgentTaskRunQueueItem(task.Id, AgentTaskRunTriggerType.Manual, task.UserId, DateTimeOffset.UtcNow);
         queueItem.MarkFailed("failed", "failed", DateTimeOffset.UtcNow);
-        var queueRepository = new InMemoryRepository<AgentTaskRunQueueItem>(queueItem);
+        var queueRepository = new InMemoryAgentTaskRunQueueStore(queueItem);
+        var taskRepository = new InMemoryRepository<AgentTask>(task);
+        var workspaceRepository = new InMemoryRepository<ArtifactWorkspace>();
+        var approvalRepository = new InMemoryRepository<ApprovalRequest>();
+        var attemptRepository = new InMemoryAgentTaskRunAttemptStore();
         var handler = new CancelAgentTaskCommandHandler(
-            new InMemoryRepository<AgentTask>(task),
-            new InMemoryRepository<ArtifactWorkspace>(),
-            new InMemoryRepository<ApprovalRequest>(),
-            new InMemoryRepository<AgentTaskRunAttempt>(),
-            queueRepository,
-            new AgentTaskRunQueue(queueRepository),
+            taskRepository,
+            CreateAgentTaskDtoQueryService(workspaceRepository, approvalRepository, queueRepository),
+            CreateLifecycleCoordinator(
+                taskRepository,
+                workspaceRepository,
+                approvalRepository,
+                queueRepository,
+                attemptRepository),
             new TestCurrentUser(UserId));
 
         var result = await handler.Handle(new CancelAgentTaskCommand(task.Id.Value), CancellationToken.None);
@@ -203,12 +219,12 @@ public sealed class AgentRunQueueProductionOpsTests
         var queueItem = new AgentTaskRunQueueItem(task.Id, AgentTaskRunTriggerType.Manual, task.UserId, now);
         queueItem.AcquireLease(Guid.NewGuid(), "expired-worker", now, TimeSpan.FromSeconds(1));
         queueItem.MarkStarted(attempt.Id, now);
-        var queueRepository = new InMemoryRepository<AgentTaskRunQueueItem>(queueItem);
+        var queueRepository = new InMemoryAgentTaskRunQueueStore(queueItem);
         var audit = new CapturingAuditLogWriter();
         using var provider = CreateQueueWorkerProvider(
             new InMemoryRepository<AgentTask>(task),
             queueRepository,
-            new InMemoryRepository<AgentTaskRunAttempt>(attempt),
+            new InMemoryAgentTaskRunAttemptStore(attempt),
             new ThrowingRuntime(),
             audit);
         var worker = new AgentTaskRunQueueWorker(
@@ -263,20 +279,52 @@ public sealed class AgentRunQueueProductionOpsTests
 
     private static ServiceProvider CreateQueueWorkerProvider(
         InMemoryRepository<AgentTask> taskRepository,
-        InMemoryRepository<AgentTaskRunQueueItem> queueRepository,
-        InMemoryRepository<AgentTaskRunAttempt> attemptRepository,
+        InMemoryAgentTaskRunQueueStore queueRepository,
+        InMemoryAgentTaskRunAttemptStore attemptRepository,
         IAgentTaskRuntime runtime,
         IAuditLogWriter auditLogWriter)
     {
         var services = new ServiceCollection();
         services.AddSingleton<IRepository<AgentTask>>(taskRepository);
-        services.AddSingleton<IRepository<AgentTaskRunQueueItem>>(queueRepository);
-        services.AddSingleton<IRepository<AgentTaskRunAttempt>>(attemptRepository);
+        services.AddSingleton<IAgentTaskRunQueueStore>(queueRepository);
+        services.AddSingleton<IAgentTaskRunAttemptStore>(attemptRepository);
         services.AddSingleton<IAgentTaskRunQueue>(new AgentTaskRunQueue(queueRepository));
         services.AddSingleton(runtime);
         services.AddSingleton(auditLogWriter);
         services.AddSingleton<AgentAuditRecorder>();
+        services.AddSingleton<AgentTaskRunQueueWorkerCoordinator>();
         return services.BuildServiceProvider();
+    }
+
+    private static AgentTaskLifecycleCoordinator CreateLifecycleCoordinator(
+        InMemoryRepository<AgentTask> taskRepository,
+        InMemoryRepository<ArtifactWorkspace> workspaceRepository,
+        InMemoryRepository<ApprovalRequest> approvalRepository,
+        InMemoryAgentTaskRunQueueStore queueRepository,
+        InMemoryAgentTaskRunAttemptStore? attemptRepository = null,
+        IOptions<AgentRunQueueOptions>? options = null,
+        AgentAuditRecorder? auditRecorder = null)
+    {
+        return new AgentTaskLifecycleCoordinator(
+            taskRepository,
+            approvalRepository,
+            workspaceRepository,
+            queueRepository,
+            attemptRepository ?? new InMemoryAgentTaskRunAttemptStore(),
+            new AgentTaskRunQueue(queueRepository),
+            options,
+            auditRecorder);
+    }
+
+    private static AgentTaskDtoQueryService CreateAgentTaskDtoQueryService(
+        IReadRepository<ArtifactWorkspace> workspaceRepository,
+        IReadRepository<ApprovalRequest> approvalRepository,
+        IAgentTaskRunQueueStore queueRepository)
+    {
+        return new AgentTaskDtoQueryService(
+            workspaceRepository,
+            approvalRepository,
+            queueRepository);
     }
 
     private sealed class ThrowingRuntime : IAgentTaskRuntime
@@ -303,6 +351,128 @@ public sealed class AgentRunQueueProductionOpsTests
         {
             Requests.Add(request);
             return Task.CompletedTask;
+        }
+
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(1);
+        }
+    }
+
+    private sealed class InMemoryAgentTaskRunQueueStore(params AgentTaskRunQueueItem[] initialItems)
+        : IAgentTaskRunQueueStore
+    {
+        public List<AgentTaskRunQueueItem> Items { get; } = [..initialItems];
+
+        public Task<AgentTaskRunQueueItem?> FirstActiveByTaskAsync(
+            AgentTaskId taskId,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items
+                .Where(item => item.TaskId == taskId && IsActive(item))
+                .OrderByDescending(item => item.CreatedAt)
+                .FirstOrDefault());
+        }
+
+        public Task<AgentTaskRunQueueItem?> FirstByIdAsync(
+            AgentTaskRunQueueItemId id,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items.FirstOrDefault(item => item.Id == id));
+        }
+
+        public Task<List<AgentTaskRunQueueItem>> ListActiveByTaskAsync(
+            AgentTaskId taskId,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items
+                .Where(item => item.TaskId == taskId && IsActive(item))
+                .OrderByDescending(item => item.CreatedAt)
+                .ToList());
+        }
+
+        public Task<List<AgentTaskRunQueueItem>> ListActiveAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items
+                .Where(IsActive)
+                .OrderBy(item => item.AvailableAt)
+                .ToList());
+        }
+
+        public Task<List<AgentTaskRunQueueItem>> ListAllAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items.OrderByDescending(item => item.CreatedAt).ToList());
+        }
+
+        public Task<List<AgentTaskRunQueueItem>> ListByTaskAsync(
+            AgentTaskId taskId,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items
+                .Where(item => item.TaskId == taskId)
+                .OrderByDescending(item => item.CreatedAt)
+                .ToList());
+        }
+
+        public AgentTaskRunQueueItem Add(AgentTaskRunQueueItem item)
+        {
+            Items.Add(item);
+            return item;
+        }
+
+        public void Update(AgentTaskRunQueueItem item)
+        {
+            if (!Items.Contains(item))
+            {
+                Items.Add(item);
+            }
+        }
+
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(1);
+        }
+
+        private static bool IsActive(AgentTaskRunQueueItem item)
+        {
+            return item.Status is AgentTaskRunQueueStatus.Queued or AgentTaskRunQueueStatus.Leased;
+        }
+    }
+
+    private sealed class InMemoryAgentTaskRunAttemptStore(params AgentTaskRunAttempt[] initialItems)
+        : IAgentTaskRunAttemptStore
+    {
+        public List<AgentTaskRunAttempt> Items { get; } = [..initialItems];
+
+        public Task<AgentTaskRunAttempt?> FirstByIdAsync(
+            AgentTaskRunAttemptId id,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items.FirstOrDefault(attempt => attempt.Id == id));
+        }
+
+        public Task<List<AgentTaskRunAttempt>> ListByTaskAsync(
+            AgentTaskId taskId,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items
+                .Where(attempt => attempt.TaskId == taskId)
+                .OrderByDescending(attempt => attempt.StartedAt)
+                .ToList());
+        }
+
+        public AgentTaskRunAttempt Add(AgentTaskRunAttempt attempt)
+        {
+            Items.Add(attempt);
+            return attempt;
+        }
+
+        public void Update(AgentTaskRunAttempt attempt)
+        {
+            if (!Items.Contains(attempt))
+            {
+                Items.Add(attempt);
+            }
         }
 
         public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)

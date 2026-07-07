@@ -23,16 +23,15 @@ x-aicopilot-common-env: &aicopilot-common-env
   AiGateway__Deployment__Mode: SingleInstance
   AiGateway__FinalAgentContextStore__Provider: Memory
   Mcp__Runtime__Enabled: "false"
-  Mcp__Runtime__MockOnly: "true"
   CloudReadonly__Mode: ${CLOUD_READONLY_MODE:-Disabled}
   CloudReadonly__Real__Enabled: ${CLOUD_READONLY_REAL_ENABLED:-false}
   CloudReadonly__Real__AllowProductionRead: ${CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ:-false}
   CloudAiRead__Enabled: ${CLOUD_AI_READ_ENABLED:-false}
-  CloudAiRead__BaseUrl: ${CLOUD_AI_READ_BASE_URL:-http://10.98.90.154:81}
+  CloudAiRead__BaseUrl: ${CLOUD_AI_READ_BASE_URL:-}
   CloudAiRead__ServiceAccountToken: ${CLOUD_AI_SERVICE_ACCOUNT_TOKEN:-}
   CloudAiRead__TimeoutSeconds: ${CLOUD_AI_READ_TIMEOUT_SECONDS:-10}
   CloudIdentityStatus__Enabled: ${CLOUD_IDENTITY_STATUS_ENABLED:-false}
-  CloudIdentityStatus__BaseUrl: ${CLOUD_IDENTITY_STATUS_BASE_URL:-http://10.98.90.154:81}
+  CloudIdentityStatus__BaseUrl: ${CLOUD_IDENTITY_STATUS_BASE_URL:-}
   CloudIdentityStatus__ServiceAccountToken: ${CLOUD_AI_SERVICE_ACCOUNT_TOKEN:-}
   CloudIdentityStatus__RefreshIntervalSeconds: ${CLOUD_IDENTITY_STATUS_REFRESH_INTERVAL_SECONDS:-60}
   CloudIdentityStatus__TimeoutSeconds: ${CLOUD_IDENTITY_STATUS_TIMEOUT_SECONDS:-5}
@@ -112,6 +111,14 @@ services:
       <<: *aicopilot-common-env
       BootstrapAdmin__UserName: ${AICOPILOT_BOOTSTRAP_ADMIN_USERNAME}
       BootstrapAdmin__Password: ${AICOPILOT_BOOTSTRAP_ADMIN_PASSWORD}
+      AICopilot__PrivateModel__Enabled: ${AICOPILOT_PRIVATE_MODEL_ENABLED:-false}
+      AICopilot__PrivateModel__Provider: ${AICOPILOT_PRIVATE_MODEL_PROVIDER:-MiniMax Private}
+      AICopilot__PrivateModel__ModelName: ${AICOPILOT_PRIVATE_MODEL_NAME:-MiniMax-M3-AWQ-INT4}
+      AICopilot__PrivateModel__BaseUrl: ${AICOPILOT_PRIVATE_MODEL_BASE_URL:-http://model.internal.example:40034/v1}
+      AICopilot__PrivateModel__ApiKey: ${AICOPILOT_PRIVATE_MODEL_API_KEY:-}
+      AICopilot__PrivateModel__ContextWindowTokens: ${AICOPILOT_PRIVATE_MODEL_CONTEXT_TOKENS:-65536}
+      AICopilot__PrivateModel__MaxOutputTokens: ${AICOPILOT_PRIVATE_MODEL_MAX_OUTPUT_TOKENS:-4096}
+      AICopilot__PrivateModel__Temperature: ${AICOPILOT_PRIVATE_MODEL_TEMPERATURE:-0.2}
       OTEL_SERVICE_NAME: aicopilot-migration
     volumes: *aicopilot-data-volumes
     depends_on:

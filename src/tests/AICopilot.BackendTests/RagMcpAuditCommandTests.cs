@@ -130,19 +130,19 @@ public sealed class RagMcpAuditCommandTests
     {
         public string? Protect(string? plaintext)
         {
-            return string.IsNullOrEmpty(plaintext) ? plaintext : $"encv1:{plaintext}";
+            return string.IsNullOrEmpty(plaintext) ? plaintext : $"encv2:{plaintext}";
         }
 
         public string? Unprotect(string? storedValue)
         {
-            return storedValue?.StartsWith("encv1:", StringComparison.Ordinal) == true
-                ? storedValue["encv1:".Length..]
+            return storedValue?.StartsWith("encv2:", StringComparison.Ordinal) == true
+                ? storedValue["encv2:".Length..]
                 : storedValue;
         }
 
         public bool IsProtected(string? storedValue)
         {
-            return storedValue?.StartsWith("encv1:", StringComparison.Ordinal) == true;
+            return storedValue?.StartsWith("encv2:", StringComparison.Ordinal) == true;
         }
 
         public void EnsureConfigured()

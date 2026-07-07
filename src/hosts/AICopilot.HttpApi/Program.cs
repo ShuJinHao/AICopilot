@@ -51,6 +51,7 @@ if (app.Environment.IsDevelopment())
 }
 app.UseExceptionHandler();
 
+app.UseCors(HttpApiCorsConfiguration.PolicyName);
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();

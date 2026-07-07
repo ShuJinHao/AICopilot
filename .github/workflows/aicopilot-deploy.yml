@@ -101,6 +101,7 @@ jobs:
               exit 64
             fi
           done
+          deploy/enterprise-ai/scripts/check-runner-security-attestation.sh --deploy-dir "$DEPLOY_TARGET_DIR"
           command -v docker >/dev/null
           command -v curl >/dev/null
           docker compose version >/dev/null
@@ -172,7 +173,11 @@ jobs:
             set_env_value "$DEPLOY_TARGET_DIR/.env" DATA_ANALYSIS_CLOUD_READONLY_CLOUD_POSTGRES_SERVICE postgres
             echo "Applied DataAnalysis direct Cloud readonly DB secret override. Connection string value was not printed."
           elif [ -n "${CLOUD_AI_SERVICE_ACCOUNT_TOKEN:-}" ]; then
-            cloud_ai_read_base_url="${CLOUD_AI_READ_BASE_URL:-http://10.98.90.154:81}"
+            cloud_ai_read_base_url="${CLOUD_AI_READ_BASE_URL:-}"
+            if [ -z "$cloud_ai_read_base_url" ]; then
+              echo "CLOUD_AI_READ_BASE_URL is required when CLOUD_AI_SERVICE_ACCOUNT_TOKEN is configured." >&2
+              exit 64
+            fi
             set_env_value "$DEPLOY_TARGET_DIR/.env" CLOUD_READONLY_MODE Real
             set_env_value "$DEPLOY_TARGET_DIR/.env" CLOUD_READONLY_REAL_ENABLED true
             set_env_value "$DEPLOY_TARGET_DIR/.env" CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ true
@@ -184,6 +189,7 @@ jobs:
             echo "CLOUD_AI_SERVICE_ACCOUNT_TOKEN secret is not configured; keeping DEPLOY_ENV_FILE Cloud AiRead values."
           fi
           chmod +x "$DEPLOY_TARGET_DIR"/*.sh
+          find "$DEPLOY_TARGET_DIR/scripts" -maxdepth 1 -type f -name '*.sh' -exec chmod +x {} +
 
       - name: Log in to Harbor
         shell: bash

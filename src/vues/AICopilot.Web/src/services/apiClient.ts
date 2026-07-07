@@ -53,7 +53,8 @@ export function setAccessToken(token: string | null) {
 async function parseError(response: Response) {
   try {
     return await response.json()
-  } catch {
+  } catch (error) {
+    console.error('Failed to parse API error response.', error)
     return undefined
   }
 }

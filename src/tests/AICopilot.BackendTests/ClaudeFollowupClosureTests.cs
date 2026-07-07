@@ -184,7 +184,7 @@ public sealed class ClaudeFollowupClosureTests
             "services",
             "AICopilot.AiGatewayService",
             "AgentTasks",
-            "AgentTaskCommands.cs"));
+            "PlanAgentTaskCoordinator.cs"));
 
         source.Should().Contain("workflowPipeline.RunPlanDraftWorkflowAsync");
         source.Should().Contain("PlanKind: AgentTaskPlanKinds.PlanDraft");
@@ -207,7 +207,7 @@ public sealed class ClaudeFollowupClosureTests
             "services",
             "AICopilot.AiGatewayService",
             "AgentTasks",
-            "AgentTaskCommands.cs"));
+            "PlanAgentTaskCoordinator.cs"));
 
         source.Should().NotContain("IAgentArtifactWorkspaceService");
         source.Should().NotContain("CreateForTaskAsync(task");

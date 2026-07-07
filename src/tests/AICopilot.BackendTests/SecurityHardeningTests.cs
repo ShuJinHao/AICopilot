@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using System.Text.Json;
 using AICopilot.AiGatewayService.Queries.Runtime;
 using AICopilot.AiGatewayService.Queries.Sessions;
@@ -14,6 +16,7 @@ using AICopilot.Core.Rag.Ids;
 using AICopilot.Dapper;
 using AICopilot.Dapper.Security;
 using AICopilot.HttpApi.Controllers;
+using AICopilot.HttpApi.Infrastructure;
 using AICopilot.IdentityService.Authorization;
 using AICopilot.Infrastructure.Storage;
 using AICopilot.RagService.Queries.KnowledgeBases;
@@ -26,12 +29,17 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace AICopilot.BackendTests;
 
 public sealed class SecurityHardeningTests
 {
+    private static readonly Regex LoggerFirstArgumentVariablePattern = new(
+        @"Log(?:Critical|Error|Warning|Information|Debug|Trace)\([A-Za-z_][A-Za-z0-9_]*,",
+        RegexOptions.Compiled);
+
     [Fact]
     public void PermissionCatalog_ShouldNotExposeLegacyTrialPilotOrOperationsPermissions()
     {
@@ -75,6 +83,12 @@ public sealed class SecurityHardeningTests
     public void DeploymentConfig_ShouldNotCarryKnownWeakSecrets()
     {
         var solutionRoot = FindSolutionRoot();
+        var httpProductionSettings = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "hosts",
+            "AICopilot.HttpApi",
+            "appsettings.json"));
         var httpDevelopmentSettings = File.ReadAllText(Path.Combine(
             solutionRoot,
             "src",
@@ -89,23 +103,49 @@ public sealed class SecurityHardeningTests
             "appsettings.json"));
         var envTemplate = File.ReadAllText(Path.Combine(solutionRoot, "deploy", "enterprise-ai", ".env.example"));
         var compose = File.ReadAllText(Path.Combine(solutionRoot, "deploy", "enterprise-ai", "docker-compose.yaml"));
+        var migrationSeeder = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "hosts",
+            "AICopilot.MigrationWorkApp",
+            "MigrationWorkerAiGatewaySeeder.cs"));
 
         httpDevelopmentSettings.Should().NotContain("29ynIx63y0Uq5Yj6wZZYikBElPPW4rqpXKGq4voqmeMDefoJQEC8fQQzYPk95rNp");
         appHostSettings.Should().NotContain("\"pg-password\": \"123456\"");
         File.Exists(Path.Combine(solutionRoot, "artifacts", ".env")).Should().BeFalse();
         File.Exists(Path.Combine(solutionRoot, "artifacts", "docker-compose.yaml")).Should().BeFalse();
-        envTemplate.Should().Contain("RABBITMQ_PASSWORD=CHANGE_ME_STRONG_RABBITMQ_PASSWORD");
-        envTemplate.Should().Contain("POSTGRES_PASSWORD=CHANGE_ME_STRONG_POSTGRES_PASSWORD");
-        envTemplate.Should().Contain("QDRANT_KEY=CHANGE_ME_STRONG_QDRANT_KEY");
-        envTemplate.Should().Contain("AICOPILOT_API_KEY_ENCRYPTION_KEY=CHANGE_ME_32_BYTES_MINIMUM");
+        envTemplate.Should().Contain("POSTGRES_PASSWORD=");
+        envTemplate.Should().Contain("RABBITMQ_PASSWORD=");
+        envTemplate.Should().Contain("QDRANT_KEY=");
+        envTemplate.Should().Contain("AICOPILOT_API_KEY_ENCRYPTION_KEY=");
+        envTemplate.Should().Contain("AICOPILOT_JWT_SECRET_KEY=");
+        envTemplate.Should().NotContain("CHANGE_ME");
+        envTemplate.Should().NotContain("10.98.");
+        envTemplate.Should().NotContain("dummy-key");
+        migrationSeeder.Should().Contain("http://model.internal.example:40034/v1");
+        migrationSeeder.Should().Contain("PrivateMiniMaxContextWindowTokens = 65536");
+        migrationSeeder.Should().Contain("ProtectSeedApiKey(privateModelSeed.ApiKey)");
+        migrationSeeder.Should().Contain("isEnabled: privateModelSeed.Enabled");
+        migrationSeeder.Should().Contain("AICOPILOT_PRIVATE_MODEL_ENABLED");
+        migrationSeeder.Should().NotContain("10.98.");
+        migrationSeeder.Should().NotContain("dummy-key");
+        envTemplate.Should().Contain("AICOPILOT_PRIVATE_MODEL_ENABLED=false");
+        envTemplate.Should().Contain("AICOPILOT_PRIVATE_MODEL_BASE_URL=http://model.internal.example:40034/v1");
+        envTemplate.Should().Contain("AICOPILOT_PRIVATE_MODEL_CONTEXT_TOKENS=65536");
         envTemplate.Should().Contain("AICOPILOT_FILE_STORAGE_ROOT_PATH=/var/lib/aicopilot/storage");
         envTemplate.Should().Contain("AICOPILOT_ARTIFACT_WORKSPACE_ROOT_PATH=/var/lib/aicopilot/artifact-workspaces");
         compose.Should().Contain("AICopilotSecurity__ApiKeyEncryptionKey: ${AICOPILOT_API_KEY_ENCRYPTION_KEY}");
+        compose.Should().Contain("AICopilot__PrivateModel__BaseUrl: ${AICOPILOT_PRIVATE_MODEL_BASE_URL:-http://model.internal.example:40034/v1}");
+        compose.Should().Contain("AICopilot__PrivateModel__ContextWindowTokens: ${AICOPILOT_PRIVATE_MODEL_CONTEXT_TOKENS:-65536}");
         compose.Should().Contain("CloudOidc__BootstrapAdminAutoBindEnabled: ${CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED:-true}");
         compose.Should().Contain("CloudOidc__BootstrapAdminUserName: ${AICOPILOT_BOOTSTRAP_ADMIN_USERNAME}");
         compose.Should().Contain("FileStorage__RootPath: ${AICOPILOT_FILE_STORAGE_ROOT_PATH:-/var/lib/aicopilot/storage}");
         compose.Should().Contain("ArtifactWorkspace__RootPath: ${AICOPILOT_ARTIFACT_WORKSPACE_ROOT_PATH:-/var/lib/aicopilot/artifact-workspaces}");
         compose.Should().Contain("enterprise-ai-aicopilot-data:/var/lib/aicopilot");
+        compose.Should().NotContain("10.98.90.154");
+        compose.Should().NotContain("Mcp__Runtime__MockOnly");
+        httpProductionSettings.Should().NotContain("\"MockOnly\": true");
+        httpDevelopmentSettings.Should().Contain("\"MockOnly\": true");
     }
 
     [Fact]
@@ -157,6 +197,7 @@ public sealed class SecurityHardeningTests
         imageWorkflow.Should().NotContain("docker/build-push-action");
         imageWorkflow.Should().NotContain("docker/setup-buildx-action");
         imageWorkflow.Should().NotContain("mcr.microsoft.com/dotnet/aspnet");
+        imageWorkflow.Should().NotContain("10.98.90.154");
 
         deployWorkflow.Should().Contain("runs-on: [self-hosted, iiot-linux-prod]");
         deployWorkflow.Should().Contain("Emergency release tag from local Harbor build or disaster-recovery aicopilot-image (sha-*)");
@@ -169,6 +210,7 @@ public sealed class SecurityHardeningTests
         deployWorkflow.Should().Contain("Self-hosted runner must not run as root.");
         deployWorkflow.Should().Contain("rsync -a --delete");
         deployWorkflow.Should().Contain("printf '%s\\n' \"$DEPLOY_ENV_FILE\" > \"$DEPLOY_TARGET_DIR/.env\"");
+        deployWorkflow.Should().Contain("find \"$DEPLOY_TARGET_DIR/scripts\" -maxdepth 1 -type f -name '*.sh' -exec chmod +x {} +");
         deployWorkflow.Should().Contain("services:");
         deployWorkflow.Should().Contain("DEPLOY_SERVICES: ${{ inputs.services }}");
         deployWorkflow.Should().Contain("deploy_args=(\"$RELEASE_TAG\")");
@@ -178,18 +220,74 @@ public sealed class SecurityHardeningTests
         deployWorkflow.Should().NotContain("appleboy/ssh-action");
         deployWorkflow.Should().NotContain("appleboy/scp-action");
         deployWorkflow.Should().NotContain("ghcr.io");
+        deployWorkflow.Should().NotContain("10.98.90.154");
 
         buildAndPush.Should().Contain("AICopilot local image build requires explicit --services or --all.");
+        buildAndPush.Should().Contain("REGISTRY=\"${REGISTRY:-}\"");
+        buildAndPush.Should().Contain("REGISTRY is required");
+        buildAndPush.Should().Contain("CLOUD_PLATFORM_URL is required");
         buildAndPush.Should().Contain("BUILD_TIMEOUT_SECONDS=\"${BUILD_TIMEOUT_SECONDS:-900}\"");
         buildAndPush.Should().Contain("HARBOR_TIMEOUT_SECONDS=\"${HARBOR_TIMEOUT_SECONDS:-120}\"");
+        buildAndPush.Should().Contain("backend_runtime_selected=true");
+        buildAndPush.Should().Contain("normalized=\"$normalized migration\"");
         buildAndPush.Should().Contain("artifact_dir=\"$REPO_ROOT/artifacts/deploy\"");
         buildAndPush.Should().Contain("aicopilot-built-services.txt");
         buildAndPush.Should().Contain("AICOPILOT_HTTPAPI_IMAGE");
         buildAndPush.Should().NotContain("harbor-retention.sh");
         localRelease.Should().Contain("DEPLOY_SSH_TARGET");
+        localRelease.Should().Contain("REGISTRY is required");
+        localRelease.Should().Contain("CLOUD_PLATFORM_URL is required");
+        localRelease.Should().Contain("ALLOW_ROOT_SSH_DEPLOY");
+        localRelease.Should().Contain("Root SSH deploy is not the standard path");
+        localRelease.Should().Contain("deploy@aicopilot.internal.example");
         localRelease.Should().Contain("SSH_TIMEOUT_SECONDS=\"${SSH_TIMEOUT_SECONDS:-1800}\"");
         localRelease.Should().Contain("HEAD $sha is not present on remote $remote. Push to GitHub before production release.");
         localRelease.Should().Contain("DEPLOY_GIT_SHA='${TAG#sha-}' DEPLOY_TRIGGERED_BY=local ./deploy-release.sh");
+    }
+
+    [Fact]
+    public void ProductionWorkflows_ShouldKeepLeastPrivilegeSelfHostedRunnerBoundary()
+    {
+        var workflowRoot = Path.Combine(FindSolutionRoot(), ".github", "workflows");
+        var guardedWorkflows = Directory.GetFiles(workflowRoot, "aicopilot-*.yml")
+            .Select(path => new
+            {
+                Path = path,
+                FileName = Path.GetFileName(path),
+                Source = File.ReadAllText(path)
+            })
+            .Where(workflow => workflow.Source.Contains("environment: production", StringComparison.Ordinal)
+                || workflow.Source.Contains("secrets.", StringComparison.Ordinal))
+            .OrderBy(workflow => workflow.FileName, StringComparer.Ordinal)
+            .ToArray();
+
+        guardedWorkflows
+            .Select(workflow => workflow.FileName)
+            .Should()
+            .BeEquivalentTo(
+                "aicopilot-ai-read-diagnostics.yml",
+                "aicopilot-deploy.yml",
+                "aicopilot-enable-direct-cloud-readonly-db.yml",
+                "aicopilot-enable-real-cloud-ai-read.yml",
+                "aicopilot-image.yml",
+                "aicopilot-provision-cloud-readonly-db-role.yml");
+
+        foreach (var workflow in guardedWorkflows)
+        {
+            workflow.Source.Should().Contain("permissions:\n  contents: read", workflow.FileName);
+            workflow.Source.Should().Contain("runs-on: [self-hosted, iiot-linux-prod]", workflow.FileName);
+            workflow.Source.Should().Contain("if [ \"$(id -u)\" -eq 0 ]; then", workflow.FileName);
+            workflow.Source.Should().Contain("Self-hosted runner must not run as root.", workflow.FileName);
+            workflow.Source.Should().Contain("check-runner-security-attestation.sh", workflow.FileName);
+            workflow.Source.Should().NotContain("runs-on: ubuntu-latest", workflow.FileName);
+            workflow.Source.Should().NotContain("runs-on: windows-latest", workflow.FileName);
+            workflow.Source.Should().NotContain("id-token: write", workflow.FileName);
+            workflow.Source.Should().NotContain("contents: write", workflow.FileName);
+            workflow.Source.Should().NotContain("actions: write", workflow.FileName);
+            workflow.Source.Should().NotContain("pull-requests: write", workflow.FileName);
+            workflow.Source.Should().NotContain("permissions: write-all", workflow.FileName);
+            workflow.Source.Should().NotContain("10.98.", workflow.FileName);
+        }
     }
 
     [Fact]
@@ -204,8 +302,34 @@ public sealed class SecurityHardeningTests
         var harborRetention = File.ReadAllText(Path.Combine(deployRoot, "harbor-retention.sh"));
         var mirrorBaseImages = File.ReadAllText(Path.Combine(deployRoot, "mirror-base-images.sh"));
         var buildAndPush = File.ReadAllText(Path.Combine(deployRoot, "build-and-push.sh"));
+        var localRelease = File.ReadAllText(Path.Combine(deployRoot, "local-release.sh"));
+        var releaseSecurityAttestation = File.ReadAllText(Path.Combine(
+            deployRoot,
+            "scripts",
+            "check-release-security-attestation.sh"));
+        var modelSecretMigrationCheck = File.ReadAllText(Path.Combine(
+            deployRoot,
+            "scripts",
+            "check-model-secret-migration.sh"));
+        var runnerSecurityAttestation = File.ReadAllText(Path.Combine(
+            deployRoot,
+            "scripts",
+            "check-runner-security-attestation.sh"));
+        var platformAttestationTemplate = File.ReadAllText(Path.Combine(
+            deployRoot,
+            "runner-platform-attestation.template.md"));
+        var platformAttestationRecordCheck = File.ReadAllText(Path.Combine(
+            deployRoot,
+            "scripts",
+            "check-platform-attestation-record.sh"));
         var backendDockerfile = File.ReadAllText(Path.Combine(deployRoot, "Dockerfile.backend-runtime"));
         var webDockerfile = File.ReadAllText(Path.Combine(solutionRoot, "src", "vues", "AICopilot.Web", "Dockerfile"));
+        var webNginxTemplate = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "vues",
+            "AICopilot.Web",
+            "nginx.conf.template"));
 
         deployGuide.Should().Contain("标准发布走操作者本机");
         deployGuide.Should().Contain("deploy/enterprise-ai/local-release.sh");
@@ -220,24 +344,53 @@ public sealed class SecurityHardeningTests
         deployGuide.Should().NotContain("docs/企业AI首次部署记录");
         File.Exists(Path.Combine(solutionRoot, "docs", "企业AI首次部署记录-2026-06-08.md")).Should().BeFalse();
         File.Exists(Path.Combine(solutionRoot, "docs", "A助理部署配置说明.md")).Should().BeFalse();
+        File.Exists(Path.Combine(solutionRoot, "docs", "A助理已知问题清单.md")).Should().BeFalse();
+        File.Exists(Path.Combine(solutionRoot, "docs", "A助理Simulation模式说明.md")).Should().BeFalse();
+        File.Exists(Path.Combine(solutionRoot, "docs", "A助理前后端Integration分支说明.md")).Should().BeFalse();
+        File.Exists(Path.Combine(solutionRoot, "docs", "A助理真实CloudReadonly准备说明.md")).Should().BeFalse();
+        File.Exists(Path.Combine(solutionRoot, "docs", "A助理错误码与前端提示说明.md")).Should().BeFalse();
+        File.Exists(Path.Combine(solutionRoot, "docs", "A助理权限矩阵.md")).Should().BeFalse();
 
         deployReadme.Should().Contain("AICopilot enterprise-ai deploy");
         deployReadme.Should().Contain("aicopilot-image");
         deployReadme.Should().Contain("aicopilot-deploy");
         deployReadme.Should().Contain("build-and-push.sh       # 标准本机镜像构建和 Harbor push");
         deployReadme.Should().Contain("local-release.sh        # 标准本机发布入口");
-        deployReadme.Should().Contain("本机运行 `deploy/enterprise-ai/local-release.sh --services <services> --ssh-target <user@host>`");
+        deployReadme.Should().Contain("REGISTRY=<harbor-registry> CLOUD_PLATFORM_URL=http://<cloud-host>:<port> deploy/enterprise-ai/local-release.sh --services <services> --ssh-target <user@host>");
         deployReadme.Should().Contain("DEPLOY_ENV_FILE");
         deployReadme.Should().Contain("iiot-linux-prod");
         deployReadme.Should().Contain("非 root");
         deployReadme.Should().Contain("不通过 AICopilot 写 Cloud 业务数据");
         deployReadme.Should().Contain("应用镜像仓库只保留当前生产 `sha-*` tag");
-        deployReadme.Should().Contain("./deploy-release.sh sha-<git-sha> --services httpapi,web");
+        deployReadme.Should().Contain("./deploy-release.sh sha-<git-sha> --services migration,httpapi,web");
+        deployReadme.Should().Contain("./deploy-release.sh --validate-only");
+        deployReadme.Should().Contain("./scripts/check-release-security-attestation.sh");
+        deployReadme.Should().Contain("./scripts/check-model-secret-migration.sh");
+        deployReadme.Should().Contain("./scripts/check-runner-security-attestation.sh");
+        deployReadme.Should().Contain("runner-platform-attestation.template.md");
+        deployReadme.Should().Contain("scripts/check-platform-attestation-record.sh --record <filled-attestation.md>");
+        deployReadme.Should().Contain("已批准的基础设施例外");
+        deployReadme.Should().Contain("自动运行 `scripts/check-release-security-attestation.sh`");
+        deployReadme.Should().Contain("summary 会包含 release security attestation 输出");
+        deployGuide.Should().Contain("./scripts/check-release-security-attestation.sh");
+        deployGuide.Should().Contain("./scripts/check-model-secret-migration.sh");
+        deployGuide.Should().Contain("check-runner-security-attestation.sh");
+        deployGuide.Should().Contain("runner-platform-attestation.template.md");
+        deployGuide.Should().Contain("check-platform-attestation-record.sh --record <filled-attestation.md>");
+        deployGuide.Should().Contain("release-security-attestation");
+        deployGuide.Should().Contain("./deploy-release.sh --validate-only");
 
-        envTemplate.Should().Contain("POSTGRES_IMAGE=10.98.90.154:80/enterprise-ai/base-postgres:17.6");
-        envTemplate.Should().Contain("RABBITMQ_IMAGE=10.98.90.154:80/enterprise-ai/base-rabbitmq:4.2-management");
-        envTemplate.Should().Contain("QDRANT_IMAGE=10.98.90.154:80/enterprise-ai/base-qdrant:v1.15.5");
+        envTemplate.Should().Contain("AICOPILOT_PUBLIC_URL=http://aicopilot.internal.example:82");
+        envTemplate.Should().Contain("CLOUD_PLATFORM_URL=http://cloud.internal.example:81");
+        envTemplate.Should().Contain("POSTGRES_IMAGE=harbor.internal.example:80/enterprise-ai/base-postgres:17.6");
+        envTemplate.Should().Contain("RABBITMQ_IMAGE=harbor.internal.example:80/enterprise-ai/base-rabbitmq:4.2-management");
+        envTemplate.Should().Contain("QDRANT_IMAGE=harbor.internal.example:80/enterprise-ai/base-qdrant:v1.15.5");
+        envTemplate.Should().Contain("sha-replace-with-release-tag");
         envTemplate.Should().Contain("CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED=true");
+        envTemplate.Should().Contain("AICOPILOT_MODEL_SMOKE_ALLOW_DUMMY_KEY=false");
+        envTemplate.Should().NotContain("10.98.");
+        envTemplate.Should().NotContain("CHANGE_ME");
+        envTemplate.Should().NotContain("dummy-key");
         envTemplate.Should().NotContain("POSTGRES_IMAGE=postgres:");
         envTemplate.Should().NotContain("RABBITMQ_IMAGE=rabbitmq:");
         envTemplate.Should().NotContain("QDRANT_IMAGE=qdrant/");
@@ -251,6 +404,51 @@ public sealed class SecurityHardeningTests
         deployRelease.Should().Contain("compose up -d --remove-orphans");
         deployRelease.Should().Contain("compose up -d \"${RUNTIME_SELECTED_SERVICES[@]}\"");
         deployRelease.Should().Contain("probe_web");
+        deployRelease.Should().Contain("validate_deploy_environment");
+        deployRelease.Should().Contain("VALIDATE_ONLY=false");
+        deployRelease.Should().Contain("--validate-only");
+        deployRelease.Should().Contain("AICopilot deploy environment validation passed");
+        deployRelease.Should().Contain("ensure_no_template_placeholders");
+        deployRelease.Should().Contain("ensure_http_only_environment");
+        deployRelease.Should().Contain("require_intranet_http_oidc_issuer");
+        deployRelease.Should().Contain("is_allowed_intranet_http_oidc_host");
+        deployRelease.Should().Contain("*.internal.example|*.internal|*.lan|*.local");
+        deployRelease.Should().Contain("HTTP-only Cloud OIDC issuer must be loopback, private IPv4, or a reserved intranet DNS suffix");
+        deployRelease.Should().Contain("ensure_required_secrets");
+        deployRelease.Should().Contain("AICOPILOT_MODEL_SMOKE_ALLOW_DUMMY_KEY");
+        deployRelease.Should().Contain("Deploy environment file must be owner-only readable/writable");
+        deployRelease.Should().Contain("probe_web_security_headers");
+        deployRelease.Should().Contain("require_response_header");
+        deployRelease.Should().Contain("X-Content-Type-Options");
+        deployRelease.Should().Contain("Content-Security-Policy");
+        deployRelease.Should().Contain("Strict-Transport-Security until HTTPS is explicitly approved");
+        deployRelease.Should().Contain("run_release_security_attestation");
+        deployRelease.Should().Contain("scripts/check-release-security-attestation.sh");
+        deployRelease.Should().Contain("scripts/check-model-secret-migration.sh");
+        deployRelease.Should().Contain("BACKEND_RUNTIME_SELECTED");
+        deployRelease.Should().Contain("backend runtime deploys must include migration");
+        deployRelease.Should().Contain("Release Security Attestation");
+        deployRelease.Should().Contain("exit \"$attestation_status\"");
+        deployRelease.Should().Contain("check_model_secret_migration_preflight");
+        deployRelease.Should().Contain("Run ./deploy-release.sh %s --services migration");
+        var fullDeployMigrationThenPreflight = """
+          compose up --no-deps --abort-on-container-exit --exit-code-from aicopilot-migration aicopilot-migration
+          check_model_secret_migration_preflight
+          compose up -d aicopilot-httpapi aicopilot-dataworker aicopilot-ragworker aicopilot-webui
+        """;
+        var selectedDeployMigrationThenPreflight = """
+            compose up --no-deps --abort-on-container-exit --exit-code-from aicopilot-migration aicopilot-migration
+            check_model_secret_migration_preflight
+        """;
+        deployRelease.Should().Contain(fullDeployMigrationThenPreflight);
+        deployRelease.Should().Contain(selectedDeployMigrationThenPreflight);
+        deployRelease.LastIndexOf("check_model_secret_migration_preflight", StringComparison.Ordinal)
+            .Should()
+            .BeLessThan(deployRelease.IndexOf("compose up -d \"${RUNTIME_SELECTED_SERVICES[@]}\"", StringComparison.Ordinal));
+        var webProbeCurl = "status_code=\"$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 10 \"$url\" || true)\"";
+        deployRelease.Split(webProbeCurl, StringSplitOptions.None)
+            .Should()
+            .HaveCount(2, "the web probe should issue one HTTP request per retry attempt");
         deployRelease.Should().Contain("post-release-cleanup.sh");
 
         harborRetention.Should().Contain("HARBOR_KEEP_SHA_TAGS");
@@ -263,6 +461,9 @@ public sealed class SecurityHardeningTests
         mirrorBaseImages.Should().Contain("qdrant/qdrant:v1.15.5");
         mirrorBaseImages.Should().Contain("mcr.microsoft.com/dotnet/aspnet:10.0-noble");
         mirrorBaseImages.Should().Contain("base-dotnet-aspnet:10.0-noble");
+        mirrorBaseImages.Should().Contain("libgssapi-krb5-2");
+        mirrorBaseImages.Should().Contain("/var/lib/aicopilot/storage");
+        mirrorBaseImages.Should().Contain("USER app");
         mirrorBaseImages.Should().Contain("node:22-alpine");
         mirrorBaseImages.Should().Contain("nginx:1.27-alpine");
         mirrorBaseImages.Should().Contain("docker buildx build");
@@ -274,15 +475,343 @@ public sealed class SecurityHardeningTests
         buildAndPush.Should().NotContain("DOTNET_RUNTIME_BASE_IMAGE=\"${DOTNET_RUNTIME_BASE_IMAGE:-mcr.microsoft.com/dotnet/aspnet:10.0-noble}\"");
         buildAndPush.Should().Contain("mirror-base-images.sh");
         buildAndPush.Should().NotContain("harbor-retention.sh");
+        localRelease.Should().Contain("scripts/check-release-security-attestation.sh");
+        localRelease.Should().Contain("scripts/check-model-secret-migration.sh");
+        localRelease.Should().Contain("scripts/check-runner-security-attestation.sh");
+        localRelease.Should().Contain("runner-platform-attestation.template.md");
+        localRelease.Should().Contain("scripts/check-platform-attestation-record.sh");
 
-        backendDockerfile.Should().Contain("ARG RUNTIME_BASE_IMAGE=10.98.90.154:80/enterprise-ai/base-dotnet-aspnet:10.0-noble");
+        backendDockerfile.Should().Contain("ARG RUNTIME_BASE_IMAGE=harbor.internal.example:80/enterprise-ai/base-dotnet-aspnet:10.0-noble");
         backendDockerfile.Should().Contain("FROM ${RUNTIME_BASE_IMAGE} AS runtime");
+        backendDockerfile.Should().Contain("USER app");
+        backendDockerfile.Should().Contain("COPY --chown=app:app . .");
         backendDockerfile.Should().NotContain("mcr.microsoft.com/dotnet/aspnet");
+        backendDockerfile.Should().NotContain("USER root");
+        backendDockerfile.Should().NotContain("apt-get");
 
         webDockerfile.Should().Contain("ARG NODE_BASE_IMAGE=node:22-alpine");
         webDockerfile.Should().Contain("FROM ${NODE_BASE_IMAGE} AS build");
         webDockerfile.Should().Contain("ARG NGINX_BASE_IMAGE=nginx:1.27-alpine");
         webDockerfile.Should().Contain("FROM ${NGINX_BASE_IMAGE}");
+        webDockerfile.Should().Contain("COPY --from=build --chown=nginx:nginx");
+        webDockerfile.Should().Contain("chown -R nginx:nginx");
+        webDockerfile.Should().Contain("USER nginx");
+        webDockerfile.Should().NotContain("USER root");
+
+        webNginxTemplate.Should().Contain("server_tokens off;");
+        webNginxTemplate.Should().Contain("add_header X-Content-Type-Options \"nosniff\" always;");
+        webNginxTemplate.Should().Contain("add_header X-Frame-Options \"DENY\" always;");
+        webNginxTemplate.Should().Contain("add_header Referrer-Policy \"no-referrer\" always;");
+        webNginxTemplate.Should().Contain("add_header Permissions-Policy");
+        webNginxTemplate.Should().Contain("add_header Content-Security-Policy");
+        webNginxTemplate.Should().Contain("frame-ancestors 'none'");
+        webNginxTemplate.Should().NotContain("Strict-Transport-Security");
+        webNginxTemplate.Should().NotContain("listen 443");
+        webNginxTemplate.Should().NotContain("ssl_certificate");
+
+        releaseSecurityAttestation.Should().Contain("check-release-security-attestation.sh");
+        releaseSecurityAttestation.Should().Contain("HTTP-only");
+        releaseSecurityAttestation.Should().Contain("must not be HTTPS");
+        releaseSecurityAttestation.Should().Contain("Cloud OIDC status endpoint");
+        releaseSecurityAttestation.Should().Contain("/api/identity/cloud-oidc/status");
+        releaseSecurityAttestation.Should().Contain("check_cloud_oidc_status");
+        releaseSecurityAttestation.Should().Contain("Strict-Transport-Security");
+        releaseSecurityAttestation.Should().Contain("aicopilot-webui must not run as root.");
+        releaseSecurityAttestation.Should().Contain("test -w /var/cache/nginx");
+        releaseSecurityAttestation.Should().Contain("test -w /var/run");
+        releaseSecurityAttestation.Should().Contain("check-model-secret-migration.sh");
+        releaseSecurityAttestation.Should().NotContain("RETURN");
+        modelSecretMigrationCheck.Should().Contain("check-model-secret-migration.sh");
+        modelSecretMigrationCheck.Should().Contain("aigateway.language_models");
+        modelSecretMigrationCheck.Should().Contain("rag.embedding_models");
+        modelSecretMigrationCheck.Should().Contain("legacy_count=0 and unprotected_count=0");
+        modelSecretMigrationCheck.Should().Contain("api_key LIKE 'encv1:%'");
+        modelSecretMigrationCheck.Should().Contain("api_key NOT LIKE 'encv2:%'");
+        modelSecretMigrationCheck.Should().Contain("MigrationWorker__CheckSecretsOnly=true");
+        modelSecretMigrationCheck.Should().Contain("verify encv2 decryptability with the current key");
+        modelSecretMigrationCheck.Should().Contain("failed while verifying encv2 decryptability");
+        modelSecretMigrationCheck.Should().Contain("decryptability attestation passed with the current encryption key");
+        modelSecretMigrationCheck.Should().Contain("failed while querying PostgreSQL");
+        modelSecretMigrationCheck.Should().Contain("rerun a deploy including --services migration");
+        modelSecretMigrationCheck.Should().NotContain("RETURN");
+        runnerSecurityAttestation.Should().Contain("check-runner-security-attestation.sh");
+        runnerSecurityAttestation.Should().Contain("AICopilot self-hosted runner must not run as root.");
+        runnerSecurityAttestation.Should().Contain("/data/github-runner/aicopilot");
+        runnerSecurityAttestation.Should().Contain("/data/docker");
+        runnerSecurityAttestation.Should().Contain("/srv/enterprise-ai/deploy");
+        runnerSecurityAttestation.Should().Contain("OIDC/Vault or equivalent short-lived");
+        runnerSecurityAttestation.Should().Contain("runner-platform-attestation.template.md");
+        runnerSecurityAttestation.Should().Contain("scripts/check-platform-attestation-record.sh");
+        runnerSecurityAttestation.Should().Contain("Dry-run does not prove runner filesystem, Docker root, GitHub environment, or Vault/OIDC state.");
+
+        platformAttestationTemplate.Should().Contain("AI-SEC-010");
+        platformAttestationTemplate.Should().Contain("check-runner-security-attestation.sh");
+        platformAttestationTemplate.Should().Contain("GitHub production environment");
+        platformAttestationTemplate.Should().Contain("required reviewers");
+        platformAttestationTemplate.Should().Contain("contents: read");
+        platformAttestationTemplate.Should().Contain("self-hosted");
+        platformAttestationTemplate.Should().Contain("iiot-linux-prod");
+        platformAttestationTemplate.Should().Contain("OIDC/Vault or equivalent short-lived credentials");
+        platformAttestationTemplate.Should().Contain("approved infrastructure exception");
+        platformAttestationTemplate.Should().Contain("Ticket or change id:");
+        platformAttestationTemplate.Should().Contain("Exception owner:");
+        platformAttestationTemplate.Should().Contain("Due date:");
+        platformAttestationTemplate.Should().Contain("Current mitigation:");
+        platformAttestationTemplate.Should().Contain("Do not commit a filled production record");
+        platformAttestationTemplate.Should().Contain("Platform owner:");
+        platformAttestationTemplate.Should().Contain("Reviewer:");
+        platformAttestationTemplate.Should().Contain("Release owner:");
+        platformAttestationRecordCheck.Should().Contain("check-platform-attestation-record.sh");
+        platformAttestationRecordCheck.Should().Contain("does not verify GitHub, Vault, OIDC, or runner infrastructure");
+        platformAttestationRecordCheck.Should().Contain("Platform attestation record still contains template placeholders.");
+        platformAttestationRecordCheck.Should().Contain("Platform attestation record contains unchecked checklist items.");
+        platformAttestationRecordCheck.Should().Contain("Platform attestation record is missing required sign-off value");
+        platformAttestationRecordCheck.Should().Contain("Platform attestation record has an invalid sign-off value");
+        platformAttestationRecordCheck.Should().Contain("AI-SEC-010");
+        platformAttestationRecordCheck.Should().Contain("check-runner-security-attestation\\.sh");
+        platformAttestationRecordCheck.Should().Contain("production environment secret restriction evidence");
+        platformAttestationRecordCheck.Should().Contain("no hosted runner evidence for production or secret-touching workflows");
+        platformAttestationRecordCheck.Should().Contain("OIDC/Vault|short-lived credentials");
+        platformAttestationRecordCheck.Should().Contain("approved exception ticket or change id");
+        platformAttestationRecordCheck.Should().Contain("approved exception owner");
+        platformAttestationRecordCheck.Should().Contain("approved exception due date");
+        platformAttestationRecordCheck.Should().Contain("approved exception mitigation");
+    }
+
+    [Fact]
+    public void PlatformAttestationRecordCheck_ShouldRejectIncompleteSignOffsAndWeakEvidenceWords()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var scriptPath = Path.Combine(
+            solutionRoot,
+            "deploy",
+            "enterprise-ai",
+            "scripts",
+            "check-platform-attestation-record.sh");
+        var tempDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "aicopilot-platform-attestation-records",
+            Guid.NewGuid().ToString("N"));
+
+        Directory.CreateDirectory(tempDirectory);
+        try
+        {
+            var validRecord = Path.Combine(tempDirectory, "valid.md");
+            File.WriteAllText(
+                validRecord,
+                BuildPlatformAttestationRecord(
+                    "Credential strategy: OIDC/Vault implemented for AICopilot production workflows with short-lived credentials.",
+                    "Platform owner: Platform Owner / 2026-07-06"));
+
+            var validResult = RunCommand(
+                "bash",
+                [scriptPath, "--record", validRecord],
+                solutionRoot);
+
+            validResult.ExitCode.Should().Be(0, validResult.Output);
+            validResult.Output.Should().Contain("AICopilot platform attestation record lint passed");
+
+            var validExceptionRecord = Path.Combine(tempDirectory, "valid-exception.md");
+            File.WriteAllText(
+                validExceptionRecord,
+                BuildPlatformAttestationRecord(
+                    "Credential strategy: OIDC/Vault rollout is tracked as an approved infrastructure exception.",
+                    "Platform owner: Platform Owner / 2026-07-06",
+                    """
+Ticket or change id: INFRA-123
+Exception owner: Platform Owner
+Due date: 2026-08-01
+Current mitigation: GitHub production environment reviewers, restricted runner access, and scheduled secret rotation remain in effect.
+"""));
+
+            var validExceptionResult = RunCommand(
+                "bash",
+                [scriptPath, "--record", validExceptionRecord],
+                solutionRoot);
+
+            validExceptionResult.ExitCode.Should().Be(0, validExceptionResult.Output);
+            validExceptionResult.Output.Should().Contain("AICopilot platform attestation record lint passed");
+
+            var vagueExceptionRecord = Path.Combine(tempDirectory, "vague-exception.md");
+            File.WriteAllText(
+                vagueExceptionRecord,
+                BuildPlatformAttestationRecord(
+                    "Credential strategy: OIDC/Vault rollout is tracked as an approved infrastructure exception.",
+                    "Platform owner: Platform Owner / 2026-07-06"));
+
+            var vagueExceptionResult = RunCommand(
+                "bash",
+                [scriptPath, "--record", vagueExceptionRecord],
+                solutionRoot);
+
+            vagueExceptionResult.ExitCode.Should().NotBe(0, vagueExceptionResult.Output);
+            vagueExceptionResult.Output.Should().Contain("approved exception ticket or change id");
+
+            var emptySignOffRecord = Path.Combine(tempDirectory, "empty-sign-off.md");
+            File.WriteAllText(
+                emptySignOffRecord,
+                BuildPlatformAttestationRecord(
+                    "Credential strategy: OIDC/Vault implemented for AICopilot production workflows with short-lived credentials.",
+                    "Platform owner:"));
+
+            var emptySignOffResult = RunCommand(
+                "bash",
+                [scriptPath, "--record", emptySignOffRecord],
+                solutionRoot);
+
+            emptySignOffResult.ExitCode.Should().NotBe(0, emptySignOffResult.Output);
+            emptySignOffResult.Output.Should().Contain("missing required sign-off value: Platform owner");
+
+            var weakEvidenceRecord = Path.Combine(tempDirectory, "weak-evidence.md");
+            File.WriteAllText(
+                weakEvidenceRecord,
+                BuildPlatformAttestationRecord(
+                    "Credential strategy: pending platform task.",
+                    "Platform owner: Platform Owner / 2026-07-06"));
+
+            var weakEvidenceResult = RunCommand(
+                "bash",
+                [scriptPath, "--record", weakEvidenceRecord],
+                solutionRoot);
+
+            weakEvidenceResult.ExitCode.Should().NotBe(0, weakEvidenceResult.Output);
+            weakEvidenceResult.Output.Should().Contain("unresolved placeholder wording");
+
+            var missingSecretRestrictionRecord = Path.Combine(tempDirectory, "missing-secret-restriction.md");
+            File.WriteAllText(
+                missingSecretRestrictionRecord,
+                BuildPlatformAttestationRecord(
+                        "Credential strategy: OIDC/Vault implemented for AICopilot production workflows with short-lived credentials.",
+                        "Platform owner: Platform Owner / 2026-07-06")
+                    .Replace("Environment secrets are restricted to AICopilot production and disaster workflows.\n", string.Empty));
+
+            var missingSecretRestrictionResult = RunCommand(
+                "bash",
+                [scriptPath, "--record", missingSecretRestrictionRecord],
+                solutionRoot);
+
+            missingSecretRestrictionResult.ExitCode.Should().NotBe(0, missingSecretRestrictionResult.Output);
+            missingSecretRestrictionResult.Output.Should().Contain("production environment secret restriction evidence");
+
+            var missingHostedRunnerBoundaryRecord = Path.Combine(tempDirectory, "missing-hosted-runner-boundary.md");
+            File.WriteAllText(
+                missingHostedRunnerBoundaryRecord,
+                BuildPlatformAttestationRecord(
+                        "Credential strategy: OIDC/Vault implemented for AICopilot production workflows with short-lived credentials.",
+                        "Platform owner: Platform Owner / 2026-07-06")
+                    .Replace("No production or secret-touching workflow uses GitHub hosted runners.\n", string.Empty));
+
+            var missingHostedRunnerBoundaryResult = RunCommand(
+                "bash",
+                [scriptPath, "--record", missingHostedRunnerBoundaryRecord],
+                solutionRoot);
+
+            missingHostedRunnerBoundaryResult.ExitCode.Should().NotBe(0, missingHostedRunnerBoundaryResult.Output);
+            missingHostedRunnerBoundaryResult.Output.Should().Contain("no hosted runner evidence");
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void DeployReleaseValidateOnly_ShouldValidateHttpOnlyOidcWithoutReleaseTagOrDocker()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var scriptPath = Path.Combine(
+            solutionRoot,
+            "deploy",
+            "enterprise-ai",
+            "deploy-release.sh");
+        var tempDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "aicopilot-deploy-validate-only",
+            Guid.NewGuid().ToString("N"));
+
+        Directory.CreateDirectory(tempDirectory);
+        try
+        {
+            var validEnvPath = WriteDeployValidateEnv(
+                tempDirectory,
+                "valid.env",
+                "http://cloud.factory.internal:81");
+
+            var validResult = RunCommand(
+                "bash",
+                [scriptPath, "--validate-only"],
+                solutionRoot,
+                new Dictionary<string, string> { ["ENV_FILE"] = validEnvPath });
+
+            validResult.ExitCode.Should().Be(0, validResult.Output);
+            validResult.Output.Should().Contain("AICopilot deploy environment validation passed");
+
+            var publicHttpOidcEnvPath = WriteDeployValidateEnv(
+                tempDirectory,
+                "public-http-oidc.env",
+                "http://cloud.example.com:81");
+
+            var publicHttpOidcResult = RunCommand(
+                "bash",
+                [scriptPath, "--validate-only"],
+                solutionRoot,
+                new Dictionary<string, string> { ["ENV_FILE"] = publicHttpOidcEnvPath });
+
+            publicHttpOidcResult.ExitCode.Should().Be(64, publicHttpOidcResult.Output);
+            publicHttpOidcResult.Output.Should().Contain("HTTP-only Cloud OIDC issuer must be loopback");
+            publicHttpOidcResult.Output.Should().NotContain("docker compose");
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void HttpApiCorsAndWebProxy_ShouldStaySameOriginByDefault()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var httpApiRoot = Path.Combine(solutionRoot, "src", "hosts", "AICopilot.HttpApi");
+        var program = File.ReadAllText(Path.Combine(httpApiRoot, "Program.cs"));
+        var dependencyInjection = File.ReadAllText(Path.Combine(httpApiRoot, "DependencyInjection.cs"));
+        var corsConfiguration = File.ReadAllText(Path.Combine(httpApiRoot, "HttpApiCorsConfiguration.cs"));
+        var appSettings = File.ReadAllText(Path.Combine(httpApiRoot, "appsettings.json"));
+        var developmentSettings = File.ReadAllText(Path.Combine(httpApiRoot, "appsettings.Development.json"));
+        var webRoot = Path.Combine(solutionRoot, "src", "vues", "AICopilot.Web");
+        var webDockerfile = File.ReadAllText(Path.Combine(webRoot, "Dockerfile"));
+        var webNginxTemplate = File.ReadAllText(Path.Combine(webRoot, "nginx.conf.template"));
+        var appSettingSource = File.ReadAllText(Path.Combine(webRoot, "src", "appsetting.ts"));
+        var apiClientSource = File.ReadAllText(Path.Combine(webRoot, "src", "services", "apiClient.ts"));
+        var viteConfig = File.ReadAllText(Path.Combine(webRoot, "vite.config.ts"));
+
+        dependencyInjection.Should().Contain("HttpApiCorsConfiguration.AddHttpApiCors");
+        program.Should().Contain("app.UseCors(HttpApiCorsConfiguration.PolicyName);");
+        program.IndexOf("app.UseCors(HttpApiCorsConfiguration.PolicyName);", StringComparison.Ordinal)
+            .Should()
+            .BeLessThan(program.IndexOf("app.UseAuthentication();", StringComparison.Ordinal));
+
+        corsConfiguration.Should().Contain("public const string SectionName = \"Cors\"");
+        corsConfiguration.Should().Contain("public const string PolicyName = \"AICopilotExplicitOrigins\"");
+        corsConfiguration.Should().Contain("Cors:AllowedOrigins must use explicit origins; wildcard origins are forbidden.");
+        corsConfiguration.Should().Contain("Cors:AllowedOrigins values must be origins only, without path, query, or fragment.");
+        corsConfiguration.Should().Contain("policy.SetIsOriginAllowed(_ => false);");
+        corsConfiguration.Should().Contain("policy.WithOrigins(allowedOrigins);");
+        corsConfiguration.Should().NotContain("AllowAnyOrigin");
+        corsConfiguration.Should().NotContain("SetIsOriginAllowed(_ => true)");
+        appSettings.Should().Contain("\"Cors\"");
+        appSettings.Should().Contain("\"AllowedOrigins\": []");
+        developmentSettings.Should().Contain("\"Cors\"");
+        developmentSettings.Should().Contain("\"AllowedOrigins\": []");
+
+        webDockerfile.Should().Contain("ARG VITE_API_BASE_URL=/api");
+        webNginxTemplate.Should().Contain("location /api/");
+        webNginxTemplate.Should().Contain("proxy_pass ${AICOPILOT_HTTPAPI_HTTP}/api/;");
+        webNginxTemplate.Should().NotContain("Access-Control-Allow-Origin \"*\"");
+        appSettingSource.Should().Contain("|| '/api'");
+        viteConfig.Should().Contain("const apiBaseUrl = env.VITE_API_BASE_URL || '/api'");
+        apiClientSource.Should().Contain("if (trimmed === '/api' || trimmed.startsWith('/api/'))");
+        apiClientSource.Should().Contain("isTrustedEndpointOrigin");
+        apiClientSource.Should().Contain("API endpoint origin is not trusted.");
     }
 
     [Fact]
@@ -634,6 +1163,13 @@ public sealed class SecurityHardeningTests
             "AICopilot.AiGatewayService",
             "Uploads",
             "UploadRecords.cs"));
+        var uploadRecordCoordinatorSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "Uploads",
+            "UploadRecordCoordinator.cs"));
 
         agentTaskPlanPreparationSource.Should().Contain("IKnowledgeBaseAccessChecker");
         agentTaskPlanPreparationSource.Should().Contain("CanReadAsync(");
@@ -644,10 +1180,12 @@ public sealed class SecurityHardeningTests
         agentRuntimeRagToolServiceSource.Should().Contain("knowledgeBaseId");
         agentRuntimeRagToolServiceSource.Should().Contain("task.UserId");
         agentRuntimeRagToolServiceSource.Should().Contain("UnauthorizedAccessException");
-        uploadRecordsSource.Should().Contain("IKnowledgeBaseAccessChecker");
-        uploadRecordsSource.Should().Contain("CanWriteAsync(");
-        uploadRecordsSource.Should().Contain("request.KnowledgeBaseId");
-        uploadRecordsSource.Should().Contain("Result.NotFound");
+        uploadRecordsSource.Should().Contain("UploadRecordCoordinator");
+        uploadRecordsSource.Should().NotContain("CanWriteAsync(");
+        uploadRecordCoordinatorSource.Should().Contain("IKnowledgeBaseAccessChecker");
+        uploadRecordCoordinatorSource.Should().Contain("CanWriteAsync(");
+        uploadRecordCoordinatorSource.Should().Contain("request.KnowledgeBaseId");
+        uploadRecordCoordinatorSource.Should().Contain("Result.NotFound");
     }
 
     [Fact]
@@ -704,6 +1242,92 @@ public sealed class SecurityHardeningTests
         baseControllerSource.Should().Contain("CreateProblemDetails(StatusCodes.Status400BadRequest, result.Errors)");
         baseControllerSource.Should().Contain("CreateProblemDetails(StatusCodes.Status404NotFound, result.Errors)");
         baseControllerSource.Should().NotContain("new { errors = result.Errors }");
+    }
+
+    [Fact]
+    public void UseCaseExceptionHandler_ShouldReturnSanitizedProblemDetailsForCatchAll()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var exceptionHandlerSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "hosts",
+            "AICopilot.HttpApi",
+            "Infrastructure",
+            "UseCaseExceptionHandler.cs"));
+        var problemCodesSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "shared",
+            "AICopilot.SharedKernel",
+            "Result",
+            "ApiProblemDescriptor.cs"));
+
+        problemCodesSource.Should().Contain("InternalServerError = \"internal_server_error\"");
+        exceptionHandlerSource.Should().Contain("ILogger<UseCaseExceptionHandler>");
+        exceptionHandlerSource.Should().Contain("logger.LogError");
+        exceptionHandlerSource.Should().Contain("hidden_by_security_policy");
+        exceptionHandlerSource.Should().NotContain("logger.LogError(\n            exception");
+        exceptionHandlerSource.Should().Contain("AppProblemCodes.InternalServerError");
+        exceptionHandlerSource.Should().Contain("StatusCodes.Status500InternalServerError");
+        exceptionHandlerSource.Should().Contain("traceId");
+        exceptionHandlerSource.Should().Contain("Request failed unexpectedly. Contact support with the trace id.");
+        exceptionHandlerSource.Should().NotContain("return false;");
+    }
+
+    [Fact]
+    public async Task UseCaseExceptionHandler_ShouldNotLogRawExceptionMessageForCatchAll()
+    {
+        var logger = new CapturingUseCaseExceptionLogger();
+        var handler = new UseCaseExceptionHandler(logger);
+        var context = new DefaultHttpContext
+        {
+            TraceIdentifier = "trace-1"
+        };
+        context.Response.Body = new MemoryStream();
+        var exception = new InvalidOperationException(
+            "Provider endpoint http://model.internal.example failed with token=secret and SQL SELECT * FROM device_logs",
+            new HttpRequestException("ConnectionString=Host=prod;Password=secret"));
+
+        var handled = await handler.TryHandleAsync(context, exception, CancellationToken.None);
+
+        handled.Should().BeTrue();
+        var serializedLogs = string.Join('\n', logger.Messages);
+        serializedLogs.Should().Contain("trace-1");
+        serializedLogs.Should().Contain("InvalidOperationException");
+        serializedLogs.Should().Contain("HttpRequestException");
+        serializedLogs.Should().Contain("hidden_by_security_policy");
+        serializedLogs.Should().NotContain("model.internal.example");
+        serializedLogs.Should().NotContain("token=secret");
+        serializedLogs.Should().NotContain("SELECT");
+        serializedLogs.Should().NotContain("device_logs");
+        serializedLogs.Should().NotContain("ConnectionString");
+        serializedLogs.Should().NotContain("Password=secret");
+        logger.Exceptions.Should().OnlyContain(item => item == null);
+    }
+
+    [Fact]
+    public void FrontendSource_ShouldNotContainBareCatchBlocks()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var frontendRoot = Path.Combine(
+            solutionRoot,
+            "src",
+            "vues",
+            "AICopilot.Web",
+            "src");
+        var sourceFiles = Directory
+            .EnumerateFiles(frontendRoot, "*.*", SearchOption.AllDirectories)
+            .Where(file => file.EndsWith(".ts", StringComparison.Ordinal) ||
+                           file.EndsWith(".vue", StringComparison.Ordinal))
+            .ToArray();
+
+        sourceFiles.Should().NotBeEmpty();
+        foreach (var sourceFile in sourceFiles)
+        {
+            var source = File.ReadAllText(sourceFile);
+            source.Should().NotContain("catch {", sourceFile);
+        }
     }
 
     [Fact]
@@ -1190,7 +1814,8 @@ public sealed class SecurityHardeningTests
         dispatcherSource.Should().Contain("catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)");
         dispatcherSource.Should().Contain("without incrementing retry count");
         dispatcherSource.Should().Contain("catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)");
-        dispatcherSource.Should().Contain("message.MarkFailed(ex.Message");
+        dispatcherSource.Should().Contain("message.MarkFailed(\"Outbox message publishing failed.");
+        dispatcherSource.Should().NotContain("message.MarkFailed(ex.Message");
     }
 
     [Fact]
@@ -1253,13 +1878,12 @@ public sealed class SecurityHardeningTests
             "src/services/AICopilot.AiGatewayService/Workflows/Executors/DataAnalysisAuditRecorder.cs",
             "src/services/AICopilot.AiGatewayService/Workflows/Executors/FinalAgentRunExecutor.cs",
             "src/services/AICopilot.AiGatewayService/Workflows/Executors/ToolExecutionAuditRecorder.cs",
-            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactVersioningCommandHandlers.cs",
-            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactVersioningQueryHandlers.cs",
-            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceCommandHandlers.cs",
-            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceQueryHandlers.cs",
-            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceP9CommandHandlers.cs",
-            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceP9QueryHandlers.cs",
-            "src/services/AICopilot.AiGatewayService/Uploads/UploadRecords.cs",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactVersioningCommandCoordinator.cs",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactVersioningQueryCoordinator.cs",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceLifecycleCoordinator.cs",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceQueryCoordinator.cs",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceP9Coordinator.cs",
+            "src/services/AICopilot.AiGatewayService/Uploads/UploadRecordCoordinator.cs",
             "src/services/AICopilot.RagService/Commands/Documents/UploadDocument.cs",
             "src/services/AICopilot.RagService/Queries/KnowledgeBases/SearchKnowledgeBase.cs",
             "src/services/AICopilot.DataAnalysisService/Plugins/DataAnalysisSqlQueryRunner.cs",
@@ -1402,9 +2026,222 @@ public sealed class SecurityHardeningTests
         source.Should().Contain("BuildSqlLogMetadata");
         source.Should().Contain("SqlSha256");
         source.Should().Contain("SqlLength");
+        source.Should().Contain("OriginalMessage=hidden_by_security_policy");
+        source.Should().Contain("ClassifyGuardrailFailure");
         source.Should().NotContain("SQL: {Sql}");
+        source.Should().NotContain("logger.LogError(\n                ex,");
+        source.Should().NotContain("SQL security guard rejected query against {DatabaseName}: {Reason}");
         source.Should().NotContain("QueryAsync(command)).ToList");
         source.Should().NotContain("rawRows.Take");
+    }
+
+    [Fact]
+    public void DataAnalysisPlugin_ShouldNotLogOrReturnRawSqlExceptionMessage()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var pluginSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "services",
+            "AICopilot.DataAnalysisService",
+            "Plugins",
+            "DataAnalysisPlugin.cs"));
+        var formatterSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "services",
+            "AICopilot.DataAnalysisService",
+            "Plugins",
+            "DataAnalysisToolResultFormatter.cs"));
+
+        pluginSource.Should().Contain("OriginalMessage=hidden_by_security_policy");
+        pluginSource.Should().Contain("ClassifySqlRejection");
+        pluginSource.Should().Contain("BuildSafeSqlRejectedMessage");
+        pluginSource.Should().NotContain("SQL 执行被拦截: {Message}");
+        pluginSource.Should().NotContain("原因: {ex.Message}");
+        pluginSource.Should().NotContain("logger.LogError(ex, \"SQL 执行异常\")");
+        pluginSource.Should().NotContain("logger.LogError(ex, \"获取表名失败");
+        pluginSource.Should().NotContain("logger.LogError(ex, \"获取表结构失败");
+
+        formatterSource.Should().Contain("ResolveSafeSqlRejectedReason");
+        formatterSource.Should().Contain("ResolveSafeConfigurationMessage");
+        formatterSource.Should().NotContain("ArgumentException or InvalidOperationException => $\"{prefix}: {ex.Message}\"");
+    }
+
+    [Fact]
+    public void ProviderWorkflowAndWorkerLogs_ShouldNotAttachRawExceptions()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var sources = new Dictionary<string, string>
+        {
+            ["AgentRuntimeFactory"] = File.ReadAllText(Path.Combine(
+                solutionRoot,
+                "src",
+                "infrastructure",
+                "AICopilot.AiRuntime",
+                "AgentRuntimeFactory.cs")),
+            ["AgentTaskRunQueueWorker"] = File.ReadAllText(Path.Combine(
+                solutionRoot,
+                "src",
+                "services",
+                "AICopilot.AiGatewayService",
+                "AgentTasks",
+                "AgentTaskRunQueueWorker.cs")),
+            ["AgentWorkflowPipeline"] = File.ReadAllText(Path.Combine(
+                solutionRoot,
+                "src",
+                "services",
+                "AICopilot.AiGatewayService",
+                "Workflows",
+                "AgentWorkflowPipeline.cs")),
+            ["AgentSkillRouterAutoSelector"] = File.ReadAllText(Path.Combine(
+                solutionRoot,
+                "src",
+                "services",
+                "AICopilot.AiGatewayService",
+                "Skills",
+                "AgentSkillRouterAutoSelector.cs")),
+            ["IntentRoutingExecutor"] = File.ReadAllText(Path.Combine(
+                solutionRoot,
+                "src",
+                "services",
+                "AICopilot.AiGatewayService",
+                "Workflows",
+                "Executors",
+                "IntentRoutingExecutor.cs")),
+            ["KnowledgeRetrievalExecutor"] = File.ReadAllText(Path.Combine(
+                solutionRoot,
+                "src",
+                "services",
+                "AICopilot.AiGatewayService",
+                "Workflows",
+                "Executors",
+                "KnowledgeRetrievalExecutor.cs")),
+            ["ToolsPackExecutor"] = File.ReadAllText(Path.Combine(
+                solutionRoot,
+                "src",
+                "services",
+                "AICopilot.AiGatewayService",
+                "Workflows",
+                "Executors",
+                "ToolsPackExecutor.cs")),
+            ["DataAnalysisWidgetEmitter"] = File.ReadAllText(Path.Combine(
+                solutionRoot,
+                "src",
+                "services",
+                "AICopilot.AiGatewayService",
+                "Workflows",
+                "Executors",
+                "DataAnalysisWidgetEmitter.cs")),
+            ["FreeFormDbaAnalysisRunner"] = File.ReadAllText(Path.Combine(
+                solutionRoot,
+                "src",
+                "services",
+                "AICopilot.AiGatewayService",
+                "Workflows",
+                "Executors",
+                "FreeFormDbaAnalysisRunner.cs")),
+            ["SemanticAnalysisRunner"] = File.ReadAllText(Path.Combine(
+                solutionRoot,
+                "src",
+                "services",
+                "AICopilot.AiGatewayService",
+                "Workflows",
+                "Executors",
+                "SemanticAnalysisRunner.cs"))
+        };
+
+        foreach (var (name, source) in sources)
+        {
+            source.Should().Contain("OriginalMessage=hidden_by_security_policy", name);
+            LoggerFirstArgumentVariablePattern.IsMatch(RemoveWhitespace(source))
+                .Should()
+                .BeFalse($"{name} must log ErrorType and fixed diagnostic codes instead of passing exception variables to logger overloads");
+        }
+
+        sources["AgentTaskRunQueueWorker"].Should().NotContain("ex.Message,");
+        sources["SemanticAnalysisRunner"].Should().NotContain("缺少必要条件：{ex.Message}");
+        sources["SemanticAnalysisRunner"].Should().Contain("FailureCode={FailureCode}");
+    }
+
+    [Fact]
+    public void ProductionLogs_ShouldNotAttachRawExceptionObjects()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var productionRoots = new[]
+        {
+            Path.Combine(solutionRoot, "src", "hosts"),
+            Path.Combine(solutionRoot, "src", "infrastructure"),
+            Path.Combine(solutionRoot, "src", "services"),
+            Path.Combine(solutionRoot, "src", "core"),
+            Path.Combine(solutionRoot, "src", "shared")
+        };
+        var violations = productionRoots
+            .Where(Directory.Exists)
+            .SelectMany(root => Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories))
+            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal) &&
+                           !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .Select(file => new
+            {
+                File = Path.GetRelativePath(solutionRoot, file),
+                Source = RemoveWhitespace(File.ReadAllText(file))
+            })
+            .Where(item => LoggerFirstArgumentVariablePattern.IsMatch(item.Source))
+            .Select(item => item.File)
+            .ToArray();
+
+        violations.Should().BeEmpty("production logs must record ErrorType and fixed diagnostic codes instead of passing exception variables to logger overloads");
+    }
+
+    [Fact]
+    public void ErrorBoundaryMessages_ShouldNotReturnOrPersistRawExceptionMessages()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var rawMessageFreeFiles = new[]
+        {
+            Path.Combine("src", "services", "AICopilot.Services.CrossCutting", "Sql", "SqlAllowlistColumnInspector.cs"),
+            Path.Combine("src", "infrastructure", "AICopilot.Infrastructure", "Mcp", "McpServerBootstrap.cs"),
+            Path.Combine("src", "infrastructure", "AICopilot.Infrastructure", "CloudIdentity", "CloudIdentityStatusClient.cs"),
+            Path.Combine("src", "services", "AICopilot.DataAnalysisService", "Semantics", "SemanticQueryPlanner.cs"),
+            Path.Combine("src", "services", "AICopilot.AiGatewayService", "Commands", "LanguageModels", "TestLanguageModel.cs"),
+            Path.Combine("src", "services", "AICopilot.AiGatewayService", "Tools", "ToolInputSchemaValidator.cs"),
+            Path.Combine("src", "services", "AICopilot.AiGatewayService", "AgentTasks", "AgentDynamicPlanner.cs"),
+            Path.Combine("src", "services", "AICopilot.AiGatewayService", "AgentTasks", "PlannerToolCatalog.cs"),
+            Path.Combine("src", "services", "AICopilot.AiGatewayService", "AgentTasks", "AgentDynamicPlannerResponseParser.cs"),
+            Path.Combine("src", "infrastructure", "AICopilot.Dapper", "Security", "AstSqlGuardrail.cs"),
+            Path.Combine("src", "services", "AICopilot.AiGatewayService", "AgentTasks", "AgentTaskRuntime.cs"),
+            Path.Combine("src", "services", "AICopilot.RagService", "Documents", "DocumentIndexingService.cs"),
+            Path.Combine("src", "infrastructure", "AICopilot.EntityFrameworkCore", "Outbox", "OutboxDispatcher.cs"),
+            Path.Combine("src", "infrastructure", "AICopilot.Infrastructure", "CloudRead", "CloudAiReadHttpTransport.cs"),
+            Path.Combine("src", "infrastructure", "AICopilot.Infrastructure", "AiGateway", "LanguageModelConnectivityTester.cs"),
+            Path.Combine("src", "infrastructure", "AICopilot.Infrastructure", "AiGateway", "PostgreSqlSessionExecutionLock.cs"),
+            Path.Combine("src", "infrastructure", "AICopilot.Infrastructure", "Mcp", "McpRuntimeRegistrySynchronizer.cs"),
+            Path.Combine("src", "infrastructure", "AICopilot.Infrastructure", "Mcp", "McpServerManager.cs")
+        };
+
+        foreach (var relativePath in rawMessageFreeFiles)
+        {
+            var source = File.ReadAllText(Path.Combine(solutionRoot, relativePath));
+            source.Should().NotContain("ex.Message", relativePath);
+            source.Should().NotContain("{ex.Message}", relativePath);
+        }
+
+        File.ReadAllText(Path.Combine(
+                solutionRoot,
+                "src",
+                "services",
+                "AICopilot.AiGatewayService",
+                "AgentTasks",
+                "AgentTaskRuntime.cs"))
+            .Should().Contain("BuildSafeExceptionSummary(ex)");
+        File.ReadAllText(Path.Combine(
+                solutionRoot,
+                "src",
+                "infrastructure",
+                "AICopilot.Dapper",
+                "Security",
+                "AstSqlGuardrail.cs"))
+            .Should().Contain("安全拦截：SQL 语句未通过安全语法解析。");
     }
 
     [Fact]
@@ -1581,6 +2418,54 @@ public sealed class SecurityHardeningTests
 
         typeof(LanguageModel).GetProperty(nameof(LanguageModel.Id))!
             .SetMethod!.IsPrivate.Should().BeTrue();
+    }
+
+    [Fact]
+    public void MigrationWorker_ShouldMigrateAllModelSecretFormatsBeforeRuntimeStarts()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var workerSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "hosts",
+            "AICopilot.MigrationWorkApp",
+            "Worker.cs"));
+        var migratorSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "src",
+            "hosts",
+            "AICopilot.MigrationWorkApp",
+            "MigrationWorkerSecretMigrator.cs"));
+
+        workerSource.Should().Contain("MigrationWorkerSecretMigrator.MigrateAsync");
+        workerSource.Should().Contain("MigrationWorker:CheckSecretsOnly");
+        workerSource.Should().Contain("MigrationWorkerSecretMigrator.VerifyAsync");
+        workerSource.IndexOf("MigrationWorkerSecretMigrator.VerifyAsync", StringComparison.Ordinal)
+            .Should().BeLessThan(workerSource.IndexOf("MigrationWorkerSecretMigrator.MigrateAsync", StringComparison.Ordinal));
+        workerSource.IndexOf("MigrationWorkerSecretMigrator.MigrateAsync", StringComparison.Ordinal)
+            .Should().BeLessThan(workerSource.IndexOf("MigrationWorkerAiGatewaySeeder.SeedDefaultsAsync", StringComparison.Ordinal));
+        migratorSource.Should().Contain("public static async Task VerifyAsync");
+        migratorSource.Should().Contain("aiGatewayDbContext.LanguageModels");
+        migratorSource.Should().Contain("ragDbContext.EmbeddingModels");
+        migratorSource.Should().Contain("SecretStringEncryptor.ReEncryptLegacyCipher");
+        migratorSource.Should().Contain("SecretStringEncryptor.Encrypt(storedValue.Trim())");
+        migratorSource.Should().Contain("EnsureMigratedSecrets");
+        migratorSource.Should().Contain("SecretStringEncryptor.Decrypt(storedValue)");
+        migratorSource.Should().Contain("non-encv2 secret value");
+        migratorSource.Should().Contain("unreadable encv2 secret value");
+        migratorSource.Should().Contain("Database.BeginTransactionAsync");
+        migratorSource.Should().Contain("new DbContextOptionsBuilder<RagDbContext>()");
+        migratorSource.Should().Contain("UseNpgsql(aiGatewayDbContext.Database.GetDbConnection())");
+        migratorSource.Should().Contain("UseTransactionAsync");
+        migratorSource.Should().Contain("transaction.GetDbTransaction()");
+        migratorSource.Should().Contain("aiGatewayDbContext.SaveChangesAsync");
+        migratorSource.Should().Contain("ragDbContext.SaveChangesAsync");
+        migratorSource.IndexOf("Database.BeginTransactionAsync", StringComparison.Ordinal)
+            .Should().BeLessThan(migratorSource.IndexOf("UseTransactionAsync", StringComparison.Ordinal));
+        migratorSource.IndexOf("UseTransactionAsync", StringComparison.Ordinal)
+            .Should().BeLessThan(migratorSource.IndexOf("MigrateInCurrentTransactionAsync(", StringComparison.Ordinal));
+        migratorSource.IndexOf("MigrateInCurrentTransactionAsync(", StringComparison.Ordinal)
+            .Should().BeLessThan(migratorSource.IndexOf("transaction.CommitAsync", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -1921,6 +2806,132 @@ public sealed class SecurityHardeningTests
                 .Select(File.ReadAllText));
     }
 
+    private static string RemoveWhitespace(string source)
+    {
+        return new string(source.Where(character => !char.IsWhiteSpace(character)).ToArray());
+    }
+
+    private static string BuildPlatformAttestationRecord(
+        string credentialStrategyLine,
+        string platformOwnerLine,
+        string credentialEvidence = "")
+    {
+        return $"""
+# AI-SEC-010 runner platform attestation
+
+Environment: production
+Repository: iiot/aicopilot
+Release tag: sha-abcdef
+Runner host: asset-001
+Attestation date: 2026-07-06
+Related infrastructure ticket: INFRA-123
+
+Runner machine facts:
+Runner service runs as a dedicated non-root account.
+Runner labels include self-hosted and iiot-linux-prod.
+Runner work root is /data/github-runner/aicopilot.
+Docker Root Dir is under /data/docker.
+AICopilot deploy directory is /srv/enterprise-ai/deploy.
+check-runner-security-attestation.sh completed successfully.
+
+GitHub production environment:
+required reviewers are configured for production deployments.
+Environment secrets are restricted to AICopilot production and disaster workflows.
+Workflow permissions stay least-privilege: contents: read only.
+Production workflows use runs-on self-hosted iiot-linux-prod.
+No production or secret-touching workflow uses GitHub hosted runners.
+
+Credential strategy:
+{credentialStrategyLine}
+{credentialEvidence}
+
+Sign-off:
+{platformOwnerLine}
+Reviewer: Security Reviewer / 2026-07-06
+Release owner: Release Owner / 2026-07-06
+""";
+    }
+
+    private static string WriteDeployValidateEnv(
+        string directory,
+        string fileName,
+        string cloudOidcIssuer)
+    {
+        var envPath = Path.Combine(directory, fileName);
+        File.WriteAllText(
+            envPath,
+            $$"""
+COMPOSE_PROJECT_NAME=enterprise-ai-test
+AICOPILOT_PUBLIC_URL=http://aicopilot.factory.internal:82
+CLOUD_PLATFORM_URL=http://cloud.factory.internal:81
+POSTGRES_PASSWORD=PgStrongSecretValue1234
+RABBITMQ_PASSWORD=RbStrongSecretValue1234
+QDRANT_KEY=QdStrongSecretValue1234
+AICOPILOT_BOOTSTRAP_ADMIN_PASSWORD=AdminStrong1234
+AICOPILOT_API_KEY_ENCRYPTION_KEY=EncryptionKeyValue01234567890123456789
+AICOPILOT_JWT_SECRET_KEY=JwtSecretValue012345678901234567890123456789012345678901234567890123
+CLOUD_READONLY_MODE=Disabled
+CLOUD_READONLY_REAL_ENABLED=false
+CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ=false
+CLOUD_AI_READ_ENABLED=false
+CLOUD_AI_READ_BASE_URL=http://cloud.factory.internal:81
+CLOUD_IDENTITY_STATUS_ENABLED=false
+CLOUD_IDENTITY_STATUS_BASE_URL=http://cloud.factory.internal:81
+DATA_ANALYSIS_CLOUD_READONLY_ENABLED=false
+AICOPILOT_MODEL_SMOKE_ENABLED=false
+AICOPILOT_MODEL_SMOKE_BASE_URL=http://model.factory.internal:40034/v1
+CLOUD_OIDC_ENABLED=true
+CLOUD_OIDC_ISSUER={{cloudOidcIssuer}}
+ALLOW_INTRANET_HTTP_OIDC=true
+CLOUD_OIDC_REQUIRE_HTTPS_METADATA=false
+""");
+
+        RunCommand("chmod", ["600", envPath], directory);
+        return envPath;
+    }
+
+    private static CommandResult RunCommand(
+        string fileName,
+        IReadOnlyCollection<string> arguments,
+        string workingDirectory,
+        IReadOnlyDictionary<string, string>? environmentVariables = null)
+    {
+        var processStartInfo = new ProcessStartInfo
+        {
+            FileName = fileName,
+            WorkingDirectory = workingDirectory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+
+        foreach (var argument in arguments)
+        {
+            processStartInfo.ArgumentList.Add(argument);
+        }
+
+        if (environmentVariables is not null)
+        {
+            foreach (var (key, value) in environmentVariables)
+            {
+                processStartInfo.Environment[key] = value;
+            }
+        }
+
+        using var process = Process.Start(processStartInfo)
+            ?? throw new InvalidOperationException($"Failed to start process: {fileName}");
+        var stdout = process.StandardOutput.ReadToEnd();
+        var stderr = process.StandardError.ReadToEnd();
+
+        if (!process.WaitForExit(TimeSpan.FromSeconds(15)))
+        {
+            process.Kill(entireProcessTree: true);
+            throw new TimeoutException($"Command timed out: {fileName} {string.Join(' ', arguments)}");
+        }
+
+        return new CommandResult(process.ExitCode, stdout + stderr);
+    }
+
     private static void AssertIdentityManagementEndpoint(string actionName)
     {
         var method = typeof(IdentityController).GetMethod(actionName);
@@ -1930,6 +2941,8 @@ public sealed class SecurityHardeningTests
         method.GetCustomAttribute<EnableRateLimitingAttribute>()?.PolicyName
             .Should().Be("identity-management");
     }
+
+    private sealed record CommandResult(int ExitCode, string Output);
 
     private sealed class ThrowingSender : ISender
     {
@@ -1967,6 +2980,28 @@ public sealed class SecurityHardeningTests
             CancellationToken cancellationToken = default)
         {
             throw new InvalidOperationException("The sender should not be called by this test.");
+        }
+    }
+
+    private sealed class CapturingUseCaseExceptionLogger : ILogger<UseCaseExceptionHandler>
+    {
+        public List<string> Messages { get; } = [];
+
+        public List<Exception?> Exceptions { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Messages.Add(formatter(state, exception));
+            Exceptions.Add(exception);
         }
     }
 }

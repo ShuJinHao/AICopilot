@@ -156,11 +156,11 @@ public sealed class SemanticAnalysisRunner(
         catch (Exception ex)
         {
             logger.LogWarning(
-                ex,
-                "{TargetLabel}语义查询未通过白名单 SQL 生成。Intent: {Intent}, DatabaseName: {DatabaseName}",
+                "{TargetLabel}语义查询未通过白名单 SQL 生成。Intent: {Intent}, DatabaseName: {DatabaseName}, ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
                 targetLabel,
                 plan.Intent,
-                businessDatabase.Name);
+                businessDatabase.Name,
+                ex.GetType().Name);
             var fallback = await TryRunCloudReadOnlyTextToSqlFallbackAsync(
                 businessDatabase,
                 plan.QueryText,
@@ -252,11 +252,12 @@ public sealed class SemanticAnalysisRunner(
                 CloudReadOnlyTextToSqlFailureStage.Runtime,
                 ex.Message);
             logger.LogWarning(
-                ex,
-                "{TargetLabel}语义查询在执行阶段被安全规则拒绝。Intent: {Intent}, DatabaseName: {DatabaseName}",
+                "{TargetLabel}语义查询在执行阶段被安全规则拒绝。Intent: {Intent}, DatabaseName: {DatabaseName}, ErrorType={ErrorType}; FailureCode={FailureCode}; OriginalMessage=hidden_by_security_policy",
                 targetLabel,
                 plan.Intent,
-                businessDatabase.Name);
+                businessDatabase.Name,
+                ex.GetType().Name,
+                executionFailure.Code);
             var fallback = await TryRunCloudReadOnlyTextToSqlFallbackAsync(
                 businessDatabase,
                 plan.QueryText,
@@ -286,11 +287,12 @@ public sealed class SemanticAnalysisRunner(
                 CloudReadOnlyTextToSqlFailureStage.Runtime,
                 ex.Message);
             logger.LogError(
-                ex,
-                "{TargetLabel}语义查询执行失败。Intent: {Intent}, DatabaseName: {DatabaseName}",
+                "{TargetLabel}语义查询执行失败。Intent: {Intent}, DatabaseName: {DatabaseName}, ErrorType={ErrorType}; FailureCode={FailureCode}; OriginalMessage=hidden_by_security_policy",
                 targetLabel,
                 plan.Intent,
-                businessDatabase.Name);
+                businessDatabase.Name,
+                ex.GetType().Name,
+                executionFailure.Code);
             var fallback = await TryRunCloudReadOnlyTextToSqlFallbackAsync(
                 businessDatabase,
                 plan.QueryText,
@@ -408,14 +410,14 @@ public sealed class SemanticAnalysisRunner(
         catch (CloudAiReadException ex)
         {
             logger.LogWarning(
-                ex,
-                "{TargetLabel} Cloud AiRead 查询被拒绝或暂不可用。Intent: {Intent}, Code: {Code}",
+                "{TargetLabel} Cloud AiRead 查询被拒绝或暂不可用。Intent: {Intent}, Code: {Code}; ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
                 targetLabel,
                 plan.Intent,
-                ex.Code);
+                ex.Code,
+                ex.GetType().Name);
             return ex.Code switch
             {
-                CloudAiReadProblemCodes.MissingRequiredParameter => $"[系统提示]: Cloud AiRead {targetLabel}查询缺少必要条件：{ex.Message}请补充设备、时间范围或条码后重试。",
+                CloudAiReadProblemCodes.MissingRequiredParameter => $"[系统提示]: Cloud AiRead {targetLabel}查询缺少必要条件，请补充设备、时间范围或条码后重试。",
                 CloudAiReadProblemCodes.Unauthorized => $"[系统提示]: Cloud AiRead {targetLabel}查询未通过身份凭据校验，请联系管理员检查只读服务账号。",
                 CloudAiReadProblemCodes.Forbidden => $"[系统提示]: Cloud AiRead {targetLabel}查询权限或设备范围不足，系统已拒绝本次正式数据读取。",
                 CloudAiReadProblemCodes.RequestBlocked => $"[系统提示]: Cloud AiRead {targetLabel}查询未通过只读白名单校验，系统已拒绝执行。",
@@ -455,12 +457,12 @@ public sealed class SemanticAnalysisRunner(
         catch (Exception ex)
         {
             logger.LogWarning(
-                ex,
-                "{TargetLabel}语义查询展示组件构建失败。Intent: {Intent}, Target: {Target}, Kind: {Kind}",
+                "{TargetLabel}语义查询展示组件构建失败。Intent: {Intent}, Target: {Target}, Kind: {Kind}, ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
                 SemanticAnalysisPresentation.GetTargetLabel(plan.Target),
                 plan.Intent,
                 plan.Target,
-                plan.Kind);
+                plan.Kind,
+                ex.GetType().Name);
         }
     }
 

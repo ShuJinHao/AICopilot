@@ -116,7 +116,10 @@ public class KnowledgeRetrievalExecutor(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Knowledge retrieval failed for {KbName}.", kbName);
+            logger.LogError(
+                "Knowledge retrieval failed for {KbName}. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                kbName,
+                ex.GetType().Name);
             return string.Empty;
         }
     }

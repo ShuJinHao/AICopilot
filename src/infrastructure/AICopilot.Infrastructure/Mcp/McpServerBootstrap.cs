@@ -79,11 +79,10 @@ public class McpServerBootstrap(
         catch (McpRuntimeStdioCommandUnavailableException ex)
         {
             logger.LogWarning(
-                ex,
-                "MCP server {Name} was skipped because stdio command {Command} is unavailable: {Reason}",
+                "MCP server {Name} was skipped because stdio command {Command} is unavailable. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
                 mcpServerInfo.Name,
                 ex.Command,
-                ex.Message);
+                ex.GetType().Name);
             return null;
         }
 

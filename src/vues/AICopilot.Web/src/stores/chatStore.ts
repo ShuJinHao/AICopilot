@@ -142,6 +142,19 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  function createSessionErrorReporter(sessionId = sessionStore.currentSessionId) {
+    const targetSessionId = sessionId
+
+    return (message: string) => {
+      if (!targetSessionId) {
+        return
+      }
+
+      errorStore.setSessionError(targetSessionId, message)
+      errorStore.bindCurrentSession(sessionStore.currentSessionId)
+    }
+  }
+
   function resetCurrentSessionState() {
     agentTaskStore.reset()
     artifactWorkspaceStore.reset()
@@ -153,15 +166,15 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function loadSkills() {
-    await catalogStore.loadSkills()
+    await catalogStore.loadSkills(createSessionErrorReporter())
   }
 
   function selectSkill(skillCode: string | null) {
-    catalogStore.selectSkill(skillCode)
+    catalogStore.selectSkill(skillCode, createSessionErrorReporter())
   }
 
   async function loadPluginTools() {
-    await catalogStore.loadPluginTools()
+    await catalogStore.loadPluginTools(createSessionErrorReporter())
   }
 
   function togglePluginTool(toolCode: string) {
@@ -173,7 +186,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function loadKnowledgeBases() {
-    await catalogStore.loadKnowledgeBases()
+    await catalogStore.loadKnowledgeBases(createSessionErrorReporter())
   }
 
   function selectKnowledgeBase(knowledgeBaseId: string | null) {
@@ -285,26 +298,33 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function loadAgentTasks(sessionId: string) {
-    const latestTask = await agentTaskStore.loadAgentTasks(sessionId)
+    const reportError = createSessionErrorReporter(sessionId)
+    const latestTask = await agentTaskStore.loadAgentTasks(sessionId, reportError)
     if (latestTask?.workspaceCode) {
-      await refreshWorkspace(latestTask)
+      await refreshWorkspace(latestTask, sessionId)
     } else {
       artifactWorkspaceStore.reset()
     }
-    await loadAgentApprovals(latestTask?.id ?? null)
-    await loadAgentAuditSummary(latestTask?.id ?? null)
+    await loadAgentApprovals(latestTask?.id ?? null, sessionId)
+    await loadAgentAuditSummary(latestTask?.id ?? null, sessionId)
   }
 
   async function loadTimeline(sessionId: string) {
-    await agentTaskStore.loadTimeline(sessionId)
+    await agentTaskStore.loadTimeline(sessionId, createSessionErrorReporter(sessionId))
   }
 
-  async function loadAgentApprovals(taskId: string | null = null) {
-    await agentTaskStore.loadAgentApprovals(taskId)
+  async function loadAgentApprovals(
+    taskId: string | null = null,
+    sessionId = sessionStore.currentSessionId
+  ) {
+    await agentTaskStore.loadAgentApprovals(taskId, createSessionErrorReporter(sessionId))
   }
 
-  async function loadAgentAuditSummary(taskId: string | null = null) {
-    await agentTaskStore.loadAgentAuditSummary(taskId)
+  async function loadAgentAuditSummary(
+    taskId: string | null = null,
+    sessionId = sessionStore.currentSessionId
+  ) {
+    await agentTaskStore.loadAgentAuditSummary(taskId, createSessionErrorReporter(sessionId))
   }
 
   async function refreshAgentTaskSnapshot(taskId: string) {
@@ -321,16 +341,16 @@ export const useChatStore = defineStore('chat', () => {
     return agentTaskStore.findPendingPlanApproval(taskId)
   }
 
-  async function refreshWorkspace(task: AgentTask) {
-    await artifactWorkspaceStore.refreshWorkspace(task)
+  async function refreshWorkspace(task: AgentTask, sessionId = sessionStore.currentSessionId) {
+    await artifactWorkspaceStore.refreshWorkspace(task, createSessionErrorReporter(sessionId))
   }
 
   async function loadArtifactPreview(artifactId: string) {
-    return artifactWorkspaceStore.loadArtifactPreview(artifactId)
+    return artifactWorkspaceStore.loadArtifactPreview(artifactId, createSessionErrorReporter())
   }
 
   async function refreshChartPreview() {
-    await artifactWorkspaceStore.refreshChartPreview()
+    await artifactWorkspaceStore.refreshChartPreview(createSessionErrorReporter())
   }
 
   async function downloadArtifact(artifact: ArtifactRecord) {
@@ -339,7 +359,11 @@ export const useChatStore = defineStore('chat', () => {
       return
     }
 
-    await artifactWorkspaceStore.downloadArtifact(artifact)
+    try {
+      await artifactWorkspaceStore.downloadArtifact(artifact)
+    } catch (error) {
+      setCurrentSessionError(`下载产物失败：${toFriendlyMessage(error)}`)
+    }
   }
 
   async function uploadSessionFile(file: File) {
@@ -348,7 +372,12 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     clearCurrentSessionError()
-    return artifactWorkspaceStore.uploadSessionFile(sessionStore.currentSessionId, file)
+    try {
+      return await artifactWorkspaceStore.uploadSessionFile(sessionStore.currentSessionId, file)
+    } catch (error) {
+      setCurrentSessionError(`上传附件失败：${toFriendlyMessage(error)}`)
+      return null
+    }
   }
 
   async function planAgentTask(goal: string) {
@@ -381,7 +410,8 @@ export const useChatStore = defineStore('chat', () => {
           if (chunk.type === ChunkType.Error) {
             try {
               streamErrorMessage = resolveChatErrorMessage(JSON.parse(chunk.content))
-            } catch {
+            } catch (error) {
+              console.error('Failed to parse chat stream error chunk.', error)
               streamErrorMessage = '请求失败，请稍后重试。'
             }
           }

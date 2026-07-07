@@ -82,7 +82,10 @@ public sealed class AgentSkillRouterAutoSelector(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Agent skill router failed for session {SessionId}; returning no automatic skill selection.", sessionId);
+            logger.LogWarning(
+                "Agent skill router failed for session {SessionId}; returning no automatic skill selection. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                sessionId,
+                ex.GetType().Name);
             return new AgentSkillSelection(null, "Skill 自动识别失败，请检查路由模型配置后重试。");
         }
     }

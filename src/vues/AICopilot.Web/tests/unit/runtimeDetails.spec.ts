@@ -151,6 +151,45 @@ describe('runtimeDetails', () => {
     expect(serialized).not.toContain('Motor overload')
   })
 
+  it('redacts unsafe run status summary and error text', () => {
+    const message = createAssistantMessage()
+    const failedStatus: ChatRunStatus = {
+      sessionId: 'session-1',
+      messageKey: 'message-1',
+      phase: 'failed',
+      startedAt: '2026-07-01T00:00:00Z',
+      completedAt: '2026-07-01T00:00:12Z',
+      elapsedMs: 12000,
+      error: {
+        code: 'model_provider_unavailable',
+        message: 'Provider endpoint http://model.internal.example failed with token=secret and SQL SELECT * FROM device_logs'
+      }
+    }
+    const runningStatus: ChatRunStatus = {
+      sessionId: 'session-1',
+      messageKey: 'message-1',
+      phase: 'querying',
+      startedAt: '2026-07-01T00:00:00Z',
+      elapsedMs: 12000,
+      summary: 'sourceName=device_logs tableName=DeviceLogs endpoint=/internal/model'
+    }
+
+    const failedDetails = buildRuntimeDetails(message, failedStatus)
+    const runningDetails = buildRuntimeDetails(message, runningStatus)
+    const serialized = JSON.stringify([failedDetails, runningDetails])
+
+    expect(failedDetails.status?.summary).toBe('运行失败，原始错误未在详情中展开')
+    expect(runningDetails.status?.summary).toBe('运行状态已记录，原始详情未在详情中展开')
+    expect(failedDetails.status?.facts.map((fact) => fact.text)).toContain('model_provider_unavailable')
+    expect(serialized).not.toContain('model.internal.example')
+    expect(serialized).not.toContain('token=secret')
+    expect(serialized).not.toContain('SELECT')
+    expect(serialized).not.toContain('device_logs')
+    expect(serialized).not.toContain('sourceName')
+    expect(serialized).not.toContain('tableName')
+    expect(serialized).not.toContain('/internal/model')
+  })
+
   it('keeps unstructured parameters and results folded without raw text', () => {
     expect(summarizeFunctionArgs('SELECT * FROM DeviceLogs')).toBe('参数已记录，因无法结构化解析未展开')
     expect(summarizeFunctionResult('internal endpoint failed with password=secret', 'completed')).toBe(

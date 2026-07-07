@@ -102,7 +102,10 @@ internal sealed class AgentRuntimeFactory(
                         throw;
                     }
 
-                    logger.LogWarning(ex, "Model provider {ProviderName} failed; trying next allowed fallback provider.", providerName);
+                    logger.LogWarning(
+                        "Model provider {ProviderName} failed; trying next allowed fallback provider. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                        providerName,
+                        ex.GetType().Name);
                 }
             }
 
@@ -153,7 +156,10 @@ internal sealed class AgentRuntimeFactory(
         }
         catch (ModelEndpointPoolNotConfiguredException ex)
         {
-            logger.LogDebug(ex, "Model endpoint pool {PoolName} is not available; falling back to the language model configuration.", poolName);
+            logger.LogDebug(
+                "Model endpoint pool {PoolName} is not available; falling back to the language model configuration. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                poolName,
+                ex.GetType().Name);
             return null;
         }
     }

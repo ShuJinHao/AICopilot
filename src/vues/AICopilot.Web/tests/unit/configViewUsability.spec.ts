@@ -37,6 +37,22 @@ describe('ConfigView usability defaults', () => {
     expect(configViewSource).toContain('(toolSummaries.value ?? []).find')
   })
 
+  it('surfaces agent settings refresh failures through the config error banner', () => {
+    const start = configViewSource.indexOf('async function refreshAllAgentSettings()')
+    const end = configViewSource.indexOf('function promptLength', start)
+    const block = configViewSource.slice(start, end)
+
+    expect(configViewSource).toContain('function setPageLoadError(error: unknown)')
+    expect(configViewSource).toContain('store.errorMessage = toStoreErrorMessage')
+    expect(configViewSource).toContain('Failed to load skill definitions for config view.')
+    expect(configViewSource).toContain('Failed to load Cloud readonly status for config view.')
+    expect(configViewSource).toContain('Failed to load tool catalog for config view.')
+    expect(block).toContain('try {')
+    expect(block).toContain('Failed to refresh AI agent settings.')
+    expect(block).toContain('setPageLoadError(error)')
+    expect(configViewSource).toContain('<div v-if="store.errorMessage" class="error-banner">')
+  })
+
   it('loads sanitized Cloud readonly status for operations', () => {
     expect(configViewSource).toContain('data-testid="cloud-readonly-status-card"')
     expect(configViewSource).toContain('cloudReadonlyStatusLabel')

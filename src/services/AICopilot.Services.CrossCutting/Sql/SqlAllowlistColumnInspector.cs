@@ -25,9 +25,9 @@ public static partial class SqlAllowlistColumnInspector
                 ParameterPlaceholderRegex().Replace(sql, "NULL"),
                 new PostgreSqlDialect());
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return $"SQL statement did not parse for governed column validation. {ex.Message}";
+            return "SQL statement did not parse for governed column validation.";
         }
 
         if (statements.Count != 1)

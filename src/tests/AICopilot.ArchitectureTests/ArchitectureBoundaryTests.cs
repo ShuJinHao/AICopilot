@@ -670,6 +670,857 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
+    public void ModelProviderSmokeCheck_ShouldStayAvailableAsServerSideDiagnostic()
+    {
+        var smokeScript = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "deploy",
+            "enterprise-ai",
+            "scripts",
+            "check-model-provider-openai.sh"));
+        var deployRelease = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "deploy",
+            "enterprise-ai",
+            "deploy-release.sh"));
+        var localRelease = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "deploy",
+            "enterprise-ai",
+            "local-release.sh"));
+        var deployReadme = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "deploy",
+            "enterprise-ai",
+            "README.md"));
+        var deployGuide = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "AICopilot 项目部署与维护指南.md"));
+
+        smokeScript.Should().Contain("/chat/completions");
+        smokeScript.Should().Contain("AICOPILOT_MODEL_SMOKE_BASE_URL");
+        smokeScript.Should().Contain("AICOPILOT_MODEL_SMOKE_API_KEY or --api-key is required");
+        smokeScript.Should().Contain("AICOPILOT_MODEL_SMOKE_ALLOW_DUMMY_KEY");
+        smokeScript.Should().Contain("--allow-dummy-key");
+        smokeScript.Should().Contain("Model smoke API key uses dummy-key");
+        smokeScript.Should().Contain("validate_model_base_url");
+        smokeScript.Should().Contain("validate_header_value");
+        smokeScript.Should().Contain("Model base URL must not include userinfo credentials.");
+        smokeScript.Should().Contain("Model base URL must not include query string or fragment.");
+        smokeScript.Should().Contain("cannot contain whitespace or HTTP header control characters.");
+        smokeScript.Should().NotContain("10.98.200.20");
+        smokeScript.Should().NotContain("Authorization: Bearer dummy-key");
+        smokeScript.Should().NotContain("sk-");
+        deployRelease.Should().Contain("check_model_provider_preflight");
+        deployRelease.Should().Contain("check-model-provider-openai.sh");
+        localRelease.Should().Contain("scripts/check-model-provider-openai.sh");
+        deployReadme.Should().Contain("check-model-provider-openai.sh");
+        deployGuide.Should().Contain("check-model-provider-openai.sh");
+    }
+
+    [Fact]
+    public void AgentTaskLifecycleRunRetryCancel_ShouldStayBehindCoordinator()
+    {
+        var handlers = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "AgentTasks",
+            "AgentTaskLifecycleCommandHandlers.cs"));
+        var coordinator = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "AgentTasks",
+            "AgentTaskLifecycleCoordinator.cs"));
+        var serviceRegistration = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "DependencyInjection.cs"));
+
+        handlers.Should().Contain("AgentTaskLifecycleCoordinator");
+        handlers.Should().Contain("lifecycleCoordinator.QueueRunAsync");
+        handlers.Should().Contain("lifecycleCoordinator.RetryAsync");
+        handlers.Should().Contain("lifecycleCoordinator.CancelAsync");
+        handlers.Should().Contain("AgentTaskDtoQueryService");
+        handlers.Should().NotContain("IAgentTaskRunAttemptStore");
+        handlers.Should().NotContain("IAgentTaskRunQueue runQueue");
+        handlers.Should().NotContain("RecordRunQueueOperationAsync");
+        handlers.Should().NotContain("CancelPendingApprovalsAsync");
+        handlers.Should().NotMatchRegex(
+            @"RunAgentTaskCommandHandler[\s\S]{0,500}\b(IReadRepository<ArtifactWorkspace>|IReadRepository<ApprovalRequest>|IAgentTaskRunQueueStore|AgentTaskDtoComposer)\b");
+        handlers.Should().NotMatchRegex(
+            @"RetryAgentTaskCommandHandler[\s\S]{0,500}\b(IReadRepository<ArtifactWorkspace>|IReadRepository<ApprovalRequest>|IAgentTaskRunQueueStore|AgentTaskDtoComposer)\b");
+        handlers.Should().NotMatchRegex(
+            @"CancelAgentTaskCommandHandler[\s\S]{0,500}\b(IReadRepository<ArtifactWorkspace>|IReadRepository<ApprovalRequest>|IAgentTaskRunQueueStore|AgentTaskDtoComposer)\b");
+
+        coordinator.Should().Contain("IAgentTaskRunQueue runQueue");
+        coordinator.Should().Contain("IAgentTaskRunAttemptStore");
+        coordinator.Should().Contain("CancelPendingApprovalsAsync");
+        coordinator.Should().Contain("RecordRunQueueOperationAsync");
+        serviceRegistration.Should().Contain("AddScoped<AgentTaskDtoQueryService>");
+        serviceRegistration.Should().Contain("AddScoped<AgentTaskLifecycleCoordinator>");
+    }
+
+    [Fact]
+    public void PlanAgentTask_ShouldStayBehindCoordinator()
+    {
+        var handler = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "AgentTasks",
+            "AgentTaskCommands.cs"));
+        var coordinator = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "AgentTasks",
+            "PlanAgentTaskCoordinator.cs"));
+        var serviceRegistration = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "DependencyInjection.cs"));
+
+        handler.Should().Contain("PlanAgentTaskCoordinator");
+        handler.Should().Contain("planCoordinator.PlanAsync");
+        handler.Should().NotContain("IRepository<AgentTask>");
+        handler.Should().NotContain("IRepository<ApprovalRequest>");
+        handler.Should().NotContain("IReadRepository<Session>");
+        handler.Should().NotContain("IReadRepository<UploadRecord>");
+        handler.Should().NotContain("AgentTaskPlanPreparationService");
+        handler.Should().NotContain("AgentTaskPlanStepBuilder");
+        handler.Should().NotContain("AgentTaskPlanDocument");
+
+        coordinator.Should().Contain("IRepository<AgentTask>");
+        coordinator.Should().Contain("IRepository<ApprovalRequest>");
+        coordinator.Should().Contain("IReadRepository<Session>");
+        coordinator.Should().Contain("IReadRepository<UploadRecord>");
+        coordinator.Should().Contain("AgentTaskPlanPreparationService");
+        coordinator.Should().Contain("AgentTaskPlanStepBuilder");
+        coordinator.Should().Contain("AgentTaskPlanDocument");
+        serviceRegistration.Should().Contain("AddScoped<PlanAgentTaskCoordinator>");
+    }
+
+    [Fact]
+    public void UploadRecordCommand_ShouldStayBehindCoordinator()
+    {
+        var handler = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "Uploads",
+            "UploadRecords.cs"));
+        var coordinator = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "Uploads",
+            "UploadRecordCoordinator.cs"));
+        var serviceRegistration = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "DependencyInjection.cs"));
+
+        handler.Should().Contain("UploadRecordCoordinator");
+        handler.Should().Contain("uploadRecordCoordinator.UploadAsync");
+        handler.Should().NotContain("IRepository<UploadRecord>");
+        handler.Should().NotContain("IReadRepository<Session>");
+        handler.Should().NotContain("IReadRepository<AgentTask>");
+        handler.Should().NotContain("IFileStorageService");
+        handler.Should().NotContain("IRagDocumentUploadBridge");
+        handler.Should().NotContain("IKnowledgeBaseAccessChecker");
+        handler.Should().NotContain("IAuditLogWriter");
+        handler.Should().NotContain("CanWriteAsync(");
+
+        coordinator.Should().Contain("IRepository<UploadRecord>");
+        coordinator.Should().Contain("IReadRepository<Session>");
+        coordinator.Should().Contain("IReadRepository<AgentTask>");
+        coordinator.Should().Contain("IFileStorageService");
+        coordinator.Should().Contain("IRagDocumentUploadBridge");
+        coordinator.Should().Contain("IKnowledgeBaseAccessChecker");
+        coordinator.Should().Contain("IAuditLogWriter");
+        coordinator.Should().Contain("CanWriteAsync(");
+        coordinator.Should().Contain("AiGatewayUploadSecurityPolicy.ValidateAndNormalizeAsync");
+        serviceRegistration.Should().Contain("AddScoped<UploadRecordCoordinator>");
+    }
+
+    [Fact]
+    public void ArtifactWorkspaceQueries_ShouldStayBehindCoordinator()
+    {
+        var handlers = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "Workspaces",
+            "ArtifactWorkspaceQueryHandlers.cs"));
+        var coordinator = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "Workspaces",
+            "ArtifactWorkspaceQueryCoordinator.cs"));
+        var serviceRegistration = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "DependencyInjection.cs"));
+
+        handlers.Should().Contain("ArtifactWorkspaceQueryCoordinator");
+        handlers.Should().Contain("workspaceQueryCoordinator.GetAsync");
+        handlers.Should().Contain("workspaceQueryCoordinator.DownloadAsync");
+        handlers.Should().NotMatchRegex(
+            @"GetArtifactWorkspaceQueryHandler[\s\S]{0,500}\b(IReadRepository<ArtifactWorkspace>|IReadRepository<AgentTask>|IReadRepository<ApprovalRequest>|IArtifactWorkspaceFileStore|IIdentityAccessService|WorkspaceAccess|ArtifactWorkspaceMapper)\b");
+        handlers.Should().NotMatchRegex(
+            @"DownloadArtifactQueryHandler[\s\S]{0,500}\b(IReadRepository<ArtifactWorkspace>|IReadRepository<AgentTask>|IReadRepository<ApprovalRequest>|IArtifactWorkspaceFileStore|IAuditLogWriter|AgentAuditRecorder|IIdentityAccessService|AgentApprovalPermissions|WorkspaceAccess)\b");
+
+        coordinator.Should().Contain("IReadRepository<ArtifactWorkspace>");
+        coordinator.Should().Contain("IReadRepository<AgentTask>");
+        coordinator.Should().Contain("IReadRepository<ApprovalRequest>");
+        coordinator.Should().Contain("IArtifactWorkspaceFileStore");
+        coordinator.Should().Contain("AgentAuditRecorder");
+        coordinator.Should().Contain("IAuditLogWriter");
+        coordinator.Should().Contain("IIdentityAccessService");
+        coordinator.Should().Contain("WorkspaceAccess.LoadByCodeForOwnerOrPermissionAsync");
+        coordinator.Should().Contain("RecordArtifactDownloadAsync");
+        serviceRegistration.Should().Contain("AddScoped<ArtifactWorkspaceQueryCoordinator>");
+    }
+
+    [Fact]
+    public void ArtifactVersioningQueries_ShouldStayBehindCoordinator()
+    {
+        var handlers = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "Workspaces",
+            "ArtifactVersioningQueryHandlers.cs"));
+        var coordinator = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "Workspaces",
+            "ArtifactVersioningQueryCoordinator.cs"));
+        var serviceRegistration = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "DependencyInjection.cs"));
+
+        handlers.Should().Contain("ArtifactVersioningQueryCoordinator");
+        handlers.Should().Contain("versioningQueryCoordinator.GetContentAsync");
+        handlers.Should().Contain("versioningQueryCoordinator.GetVersionsAsync");
+        handlers.Should().Contain("versioningQueryCoordinator.DownloadVersionAsync");
+        handlers.Should().Contain("versioningQueryCoordinator.GetDiffAsync");
+        handlers.Should().NotContain("IReadRepository<ArtifactWorkspace>");
+        handlers.Should().NotContain("IReadRepository<AgentTask>");
+        handlers.Should().NotContain("IReadRepository<ApprovalRequest>");
+        handlers.Should().NotContain("IArtifactWorkspaceFileStore");
+        handlers.Should().NotContain("AgentAuditRecorder");
+        handlers.Should().NotContain("IAuditLogWriter");
+        handlers.Should().NotContain("IIdentityAccessService");
+        handlers.Should().NotContain("ArtifactVersioningAccess");
+        handlers.Should().NotContain("ArtifactVersioningFiles");
+
+        coordinator.Should().Contain("IReadRepository<ArtifactWorkspace>");
+        coordinator.Should().Contain("IReadRepository<AgentTask>");
+        coordinator.Should().Contain("IReadRepository<ApprovalRequest>");
+        coordinator.Should().Contain("IArtifactWorkspaceFileStore");
+        coordinator.Should().Contain("AgentAuditRecorder");
+        coordinator.Should().Contain("IAuditLogWriter");
+        coordinator.Should().Contain("ArtifactVersioningAccess.LoadArtifactForReadAsync");
+        coordinator.Should().Contain("ArtifactVersioningFiles");
+        serviceRegistration.Should().Contain("AddScoped<ArtifactVersioningQueryCoordinator>");
+    }
+
+    [Fact]
+    public void ArtifactVersioningCommands_ShouldStayBehindCoordinator()
+    {
+        var handlers = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "Workspaces",
+            "ArtifactVersioningCommandHandlers.cs"));
+        var coordinator = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "Workspaces",
+            "ArtifactVersioningCommandCoordinator.cs"));
+        var serviceRegistration = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "DependencyInjection.cs"));
+
+        handlers.Should().Contain("ArtifactVersioningCommandCoordinator");
+        handlers.Should().Contain("versioningCommandCoordinator.UpdateContentAsync");
+        handlers.Should().Contain("versioningCommandCoordinator.RestoreVersionAsync");
+        handlers.Should().NotContain("IRepository<ArtifactWorkspace>");
+        handlers.Should().NotContain("IReadRepository<AgentTask>");
+        handlers.Should().NotContain("IReadRepository<ApprovalRequest>");
+        handlers.Should().NotContain("IArtifactWorkspaceFileStore");
+        handlers.Should().NotContain("AgentAuditRecorder");
+        handlers.Should().NotContain("IAuditLogWriter");
+        handlers.Should().NotContain("IIdentityAccessService");
+        handlers.Should().NotContain("ArtifactVersioningAccess");
+        handlers.Should().NotContain("ArtifactVersioningFiles");
+
+        coordinator.Should().Contain("IRepository<ArtifactWorkspace>");
+        coordinator.Should().Contain("IReadRepository<AgentTask>");
+        coordinator.Should().Contain("IReadRepository<ApprovalRequest>");
+        coordinator.Should().Contain("IArtifactWorkspaceFileStore");
+        coordinator.Should().Contain("AgentAuditRecorder");
+        coordinator.Should().Contain("IAuditLogWriter");
+        coordinator.Should().Contain("ArtifactVersioningAccess.LoadArtifactForOwnerEditAsync");
+        coordinator.Should().Contain("ArchiveCurrentVersionAsync");
+        serviceRegistration.Should().Contain("AddScoped<ArtifactVersioningCommandCoordinator>");
+    }
+
+    [Fact]
+    public void ArtifactWorkspaceP9_ShouldStayBehindCoordinator()
+    {
+        var queryHandlers = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "Workspaces",
+            "ArtifactWorkspaceP9QueryHandlers.cs"));
+        var commandHandlers = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "Workspaces",
+            "ArtifactWorkspaceP9CommandHandlers.cs"));
+        var coordinator = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "Workspaces",
+            "ArtifactWorkspaceP9Coordinator.cs"));
+        var serviceRegistration = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "DependencyInjection.cs"));
+
+        queryHandlers.Should().Contain("ArtifactWorkspaceP9Coordinator");
+        queryHandlers.Should().Contain("artifactWorkspaceP9Coordinator.GetPreviewAsync");
+        commandHandlers.Should().Contain("ArtifactWorkspaceP9Coordinator");
+        commandHandlers.Should().Contain("artifactWorkspaceP9Coordinator.CreateRevisionCommentAsync");
+        commandHandlers.Should().Contain("artifactWorkspaceP9Coordinator.RegenerateDraftAsync");
+        commandHandlers.Should().Contain("artifactWorkspaceP9Coordinator.SubmitForFinalApprovalAsync");
+
+        var handlers = queryHandlers + commandHandlers;
+        handlers.Should().NotContain("IRepository<ArtifactWorkspace>");
+        handlers.Should().NotContain("IRepository<AgentTask>");
+        handlers.Should().NotContain("IRepository<ApprovalRequest>");
+        handlers.Should().NotContain("IReadRepository<ArtifactWorkspace>");
+        handlers.Should().NotContain("IReadRepository<AgentTask>");
+        handlers.Should().NotContain("IReadRepository<ApprovalRequest>");
+        handlers.Should().NotContain("IArtifactWorkspaceFileStore");
+        handlers.Should().NotContain("AgentAuditRecorder");
+        handlers.Should().NotContain("IAuditLogWriter");
+        handlers.Should().NotContain("IIdentityAccessService");
+        handlers.Should().NotContain("ArtifactVersioningAccess");
+        handlers.Should().NotContain("ArtifactWorkspaceP9Policy");
+
+        coordinator.Should().Contain("IRepository<ArtifactWorkspace>");
+        coordinator.Should().Contain("IRepository<AgentTask>");
+        coordinator.Should().Contain("IRepository<ApprovalRequest>");
+        coordinator.Should().Contain("IArtifactWorkspaceFileStore");
+        coordinator.Should().Contain("AgentAuditRecorder");
+        coordinator.Should().Contain("IAuditLogWriter");
+        coordinator.Should().Contain("ArtifactPreviewBuilder.BuildAsync");
+        coordinator.Should().Contain("ArtifactWorkspaceP9Policy.ValidateDraftMutationAsync");
+        coordinator.Should().Contain("RecordFinalReviewSubmittedAsync");
+        serviceRegistration.Should().Contain("AddScoped<ArtifactWorkspaceP9Coordinator>");
+    }
+
+    [Fact]
+    public void AgentApprovalDecision_ShouldStayBehindCoordinator()
+    {
+        var handlers = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "AgentTasks",
+            "AgentApprovalDecisionCommandHandlers.cs"));
+        var coordinator = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "AgentTasks",
+            "AgentApprovalDecisionCoordinator.cs"));
+        var serviceRegistration = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "DependencyInjection.cs"));
+
+        handlers.Should().Contain("AgentApprovalDecisionCoordinator");
+        handlers.Should().Contain("approvalDecisionCoordinator.ApproveAsync");
+        handlers.Should().Contain("approvalDecisionCoordinator.RejectAsync");
+        handlers.Should().NotContain("IRepository<");
+        handlers.Should().NotContain("IAgentTaskRunQueue");
+        handlers.Should().NotContain("AgentAuditRecorder");
+        handlers.Should().NotContain("IIdentityAccessService");
+        handlers.Should().NotContain("AgentPlanDraftConfirmationService");
+        handlers.Should().NotContain("MessageTimelineProjectionWriter");
+
+        coordinator.Should().Contain("IRepository<ApprovalRequest>");
+        coordinator.Should().Contain("IRepository<AgentTask>");
+        coordinator.Should().Contain("IRepository<ArtifactWorkspace>");
+        coordinator.Should().Contain("IAgentTaskRunQueue runQueue");
+        coordinator.Should().Contain("RecordApprovalDecisionAsync");
+        coordinator.Should().Contain("StageApprovalDecidedAsync");
+        coordinator.Should().Contain("runQueue.EnqueueAsync");
+        serviceRegistration.Should().Contain("AddScoped<AgentApprovalDecisionCoordinator>");
+    }
+
+    [Fact]
+    public void AgentApprovalQueries_ShouldStayBehindCoordinator()
+    {
+        var handlers = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "AgentTasks",
+            "AgentApprovalQueryHandlers.cs"));
+        var coordinator = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "AgentTasks",
+            "AgentApprovalQueryCoordinator.cs"));
+        var serviceRegistration = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "DependencyInjection.cs"));
+
+        handlers.Should().Contain("AgentApprovalQueryCoordinator");
+        handlers.Should().Contain("approvalQueryCoordinator.GetPendingAsync");
+        handlers.Should().Contain("approvalQueryCoordinator.GetByTaskAsync");
+        handlers.Should().NotContain("IRepository<AgentTask>");
+        handlers.Should().NotContain("IReadRepository<ApprovalRequest>");
+        handlers.Should().NotContain("IReadRepository<ArtifactWorkspace>");
+        handlers.Should().NotContain("PendingApprovalRequestsSpec");
+        handlers.Should().NotContain("ApprovalRequestsByTaskSpec");
+        handlers.Should().NotContain("AgentApprovalDtoMapper.Map");
+
+        coordinator.Should().Contain("IRepository<AgentTask>");
+        coordinator.Should().Contain("IReadRepository<ApprovalRequest>");
+        coordinator.Should().Contain("IReadRepository<ArtifactWorkspace>");
+        coordinator.Should().Contain("PendingApprovalRequestsSpec");
+        coordinator.Should().Contain("ApprovalRequestsByTaskSpec");
+        coordinator.Should().Contain("AgentApprovalDtoMapper.Map");
+        coordinator.Should().Contain("CanViewPendingApproval");
+        serviceRegistration.Should().Contain("AddScoped<AgentApprovalQueryCoordinator>");
+    }
+
+    [Fact]
+    public void ArtifactWorkspaceSubmitFinalize_ShouldStayBehindCoordinator()
+    {
+        var handlers = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "Workspaces",
+            "ArtifactWorkspaceCommandHandlers.cs"));
+        var coordinator = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "Workspaces",
+            "ArtifactWorkspaceLifecycleCoordinator.cs"));
+        var serviceRegistration = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "DependencyInjection.cs"));
+
+        handlers.Should().Contain("ArtifactWorkspaceLifecycleCoordinator");
+        handlers.Should().Contain("workspaceLifecycleCoordinator.SubmitFinalReviewAsync");
+        handlers.Should().Contain("workspaceLifecycleCoordinator.FinalizeAsync");
+        handlers.Should().NotContain("IRepository<");
+        handlers.Should().NotContain("IAgentTaskRunAttemptStore");
+        handlers.Should().NotContain("IArtifactWorkspaceFileStore");
+        handlers.Should().NotContain("AgentAuditRecorder");
+        handlers.Should().NotContain("IAuditLogWriter");
+        handlers.Should().NotContain("ICurrentUser");
+        handlers.Should().NotContain("IIdentityAccessService");
+        handlers.Should().NotContain("MessageTimelineProjectionWriter");
+        handlers.Should().NotContain("WorkspaceAccess.");
+
+        coordinator.Should().Contain("IRepository<ArtifactWorkspace>");
+        coordinator.Should().Contain("IRepository<AgentTask>");
+        coordinator.Should().Contain("IRepository<ApprovalRequest>");
+        coordinator.Should().Contain("IAgentTaskRunAttemptStore");
+        coordinator.Should().Contain("IArtifactWorkspaceFileStore fileStore");
+        coordinator.Should().Contain("RecordFinalReviewSubmittedAsync");
+        coordinator.Should().Contain("RecordWorkspaceFinalizedAsync");
+        coordinator.Should().Contain("StageApprovalRequestedAsync");
+        coordinator.Should().Contain("StageWorkspaceFinalizedAsync");
+        coordinator.Should().Contain("ReleaseRunLease");
+        serviceRegistration.Should().Contain("AddScoped<ArtifactWorkspaceLifecycleCoordinator>");
+    }
+
+    [Fact]
+    public void AgentTaskRuntimeEvents_ShouldStayBehindRecorder()
+    {
+        var runtime = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "AgentTasks",
+            "AgentTaskRuntime.cs"));
+        var eventRecorder = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "AgentTasks",
+            "Runtime",
+            "AgentRuntimeEventRecorder.cs"));
+        var serviceRegistration = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "DependencyInjection.cs"));
+
+        runtime.Should().Contain("AgentRuntimeEventRecorder");
+        runtime.Should().Contain("runtimeEventRecorder.BeginToolExecution");
+        runtime.Should().Contain("runtimeEventRecorder.MarkToolExecutionSucceeded");
+        runtime.Should().Contain("runtimeEventRecorder.RecordToolSucceededAsync");
+        runtime.Should().Contain("runtimeEventRecorder.RecordToolFailedAsync");
+        runtime.Should().Contain("runtimeEventRecorder.RecordToolRejectedAsync");
+        runtime.Should().Contain("runtimeEventRecorder.StageApprovalRequestedAsync");
+        runtime.Should().NotContain("IToolExecutionAuditStore");
+        runtime.Should().NotContain("new ToolExecutionRecord");
+        runtime.Should().NotContain("AgentAuditRecorder");
+        runtime.Should().NotContain("MessageTimelineProjectionWriter");
+        runtime.Should().NotContain("RecordToolAsync");
+        runtime.Should().NotContain("timelineProjectionWriter");
+
+        eventRecorder.Should().Contain("IToolExecutionAuditStore");
+        eventRecorder.Should().Contain("new ToolExecutionRecord");
+        eventRecorder.Should().Contain("AgentAuditRecorder");
+        eventRecorder.Should().Contain("MessageTimelineProjectionWriter");
+        eventRecorder.Should().Contain("RecordToolAsync");
+        eventRecorder.Should().Contain("StageApprovalRequestedAsync");
+        eventRecorder.Should().Contain("StageStepStartedAsync");
+        eventRecorder.Should().Contain("StageStepCompletedAsync");
+        serviceRegistration.Should().Contain("AddScoped<AgentRuntimeEventRecorder>");
+    }
+
+    [Fact]
+    public void AgentTaskRunQueueWorker_ShouldStayBehindCoordinator()
+    {
+        var worker = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "AgentTasks",
+            "AgentTaskRunQueueWorker.cs"));
+        var coordinator = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "AgentTasks",
+            "AgentTaskRunQueueWorkerCoordinator.cs"));
+        var serviceRegistration = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "DependencyInjection.cs"));
+
+        worker.Should().Contain("AgentTaskRunQueueWorkerCoordinator");
+        worker.Should().Contain("workerCoordinator.RecoverExpiredStartedLeasesAsync");
+        worker.Should().Contain("workerCoordinator.LeaseNextAsync");
+        worker.Should().Contain("workerCoordinator.ExecuteQueueItemAsync");
+        worker.Should().Contain("workerCoordinator.FailQueueItemAsync");
+        worker.Should().NotContain("IAgentTaskRunQueueStore");
+        worker.Should().NotContain("IRepository<AgentTask>");
+        worker.Should().NotContain("IAgentTaskRunAttemptStore");
+        worker.Should().NotContain("AgentAuditRecorder");
+        worker.Should().NotContain("ToolExecutionRecordSanitizer");
+        worker.Should().NotContain("new AgentTaskByIdSpec");
+        worker.Should().NotContain("ResolveAttemptAsync");
+
+        coordinator.Should().Contain("IAgentTaskRunQueueStore");
+        coordinator.Should().Contain("IRepository<AgentTask>");
+        coordinator.Should().Contain("IAgentTaskRunAttemptStore");
+        coordinator.Should().Contain("IAgentTaskRunQueue runQueue");
+        coordinator.Should().Contain("IAgentTaskRuntime runtime");
+        coordinator.Should().Contain("RecordRunQueueOperationAsync");
+        coordinator.Should().Contain("ToolExecutionRecordSanitizer");
+        coordinator.Should().Contain("ResolveAttemptAsync");
+        serviceRegistration.Should().Contain("AddScoped<AgentTaskRunQueueWorkerCoordinator>");
+    }
+
+    [Fact]
+    public void SessionTimelineQuery_ShouldStayBehindCoordinator()
+    {
+        var handler = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "Queries",
+            "Sessions",
+            "GetSessionTimeline.cs"));
+        var coordinator = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "Queries",
+            "Sessions",
+            "SessionTimelineQueryCoordinator.cs"));
+        var serviceRegistration = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "DependencyInjection.cs"));
+
+        handler.Should().Contain("SessionTimelineQueryCoordinator");
+        handler.Should().Contain("timelineQueryCoordinator.GetAsync");
+        handler.Should().NotContain("IReadRepository<");
+        handler.Should().NotContain("IMessageTimelineProjectionStore");
+        handler.Should().NotContain("ICurrentUser");
+        handler.Should().NotContain("JsonDocument");
+        handler.Should().NotContain("AgentTasksBySessionForUserSpec");
+        handler.Should().NotContain("ApprovalRequestsByTasksSpec");
+        handler.Should().NotContain("ArtifactWorkspaceByIdSpec");
+
+        coordinator.Should().Contain("IReadRepository<Session>");
+        coordinator.Should().Contain("IMessageTimelineProjectionStore");
+        coordinator.Should().Contain("IReadRepository<AgentTask>");
+        coordinator.Should().Contain("IReadRepository<ApprovalRequest>");
+        coordinator.Should().Contain("IReadRepository<ArtifactWorkspace>");
+        coordinator.Should().Contain("AgentTasksBySessionForUserSpec");
+        coordinator.Should().Contain("ApprovalRequestsByTasksSpec");
+        coordinator.Should().Contain("ArtifactWorkspaceByIdSpec");
+        coordinator.Should().Contain("ResolveStepOutput");
+        serviceRegistration.Should().Contain("AddScoped<SessionTimelineQueryCoordinator>");
+    }
+
+    [Fact]
+    public void AgentTaskToolExecutionQuery_ShouldStayBehindCoordinator()
+    {
+        var handlers = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "AgentTasks",
+            "AgentTaskAuditQueries.cs"));
+        var coordinator = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "AgentTasks",
+            "AgentTaskToolExecutionQueryCoordinator.cs"));
+        var serviceRegistration = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "DependencyInjection.cs"));
+
+        handlers.Should().Contain("AgentTaskToolExecutionQueryCoordinator");
+        handlers.Should().Contain("toolExecutionQueryCoordinator.GetAsync");
+        handlers.Should().NotMatchRegex(
+            @"GetAgentTaskToolExecutionsQueryHandler[\s\S]{0,500}\b(IToolExecutionAuditStore|IRepository<AgentTask>|ICurrentUser|ToolExecutionStatus|Pagination)\b");
+
+        coordinator.Should().Contain("IRepository<AgentTask>");
+        coordinator.Should().Contain("IToolExecutionAuditStore");
+        coordinator.Should().Contain("ICurrentUser");
+        coordinator.Should().Contain("ToolExecutionStatus");
+        coordinator.Should().Contain("Pagination");
+        coordinator.Should().Contain("ToolRegistrationMapper.Map");
+        serviceRegistration.Should().Contain("AddScoped<AgentTaskToolExecutionQueryCoordinator>");
+    }
+
+    [Fact]
+    public void AgentTaskAuditQueries_ShouldStayBehindCoordinator()
+    {
+        var handlers = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "AgentTasks",
+            "AgentTaskAuditQueries.cs"));
+        var coordinator = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "AgentTasks",
+            "AgentTaskAuditQueryCoordinator.cs"));
+        var serviceRegistration = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "DependencyInjection.cs"));
+
+        handlers.Should().Contain("AgentTaskAuditQueryCoordinator");
+        handlers.Should().Contain("auditQueryCoordinator.GetSummaryAsync");
+        handlers.Should().Contain("auditQueryCoordinator.GetRunAttemptsAsync");
+        handlers.Should().Contain("auditQueryCoordinator.GetRunQueueAsync");
+        handlers.Should().NotMatchRegex(
+            @"GetAgentTaskAuditSummaryQueryHandler[\s\S]{0,500}\b(IRepository<AgentTask>|IReadRepository<ArtifactWorkspace>|IToolExecutionAuditStore|IAuditLogQueryService|ICurrentUser|JsonDocument|ArtifactWorkspaceByIdSpec)\b");
+        handlers.Should().NotMatchRegex(
+            @"GetAgentTaskRunAttemptsQueryHandler[\s\S]{0,500}\b(IRepository<AgentTask>|IAgentTaskRunAttemptStore|ICurrentUser|Pagination|AgentTaskRunAttemptDtoMapper)\b");
+        handlers.Should().NotMatchRegex(
+            @"GetAgentTaskRunQueueQueryHandler[\s\S]{0,500}\b(IRepository<AgentTask>|IAgentTaskRunQueueStore|ICurrentUser|Pagination|AgentTaskRunQueueItemDtoMapper)\b");
+
+        coordinator.Should().Contain("IRepository<AgentTask>");
+        coordinator.Should().Contain("IReadRepository<ArtifactWorkspace>");
+        coordinator.Should().Contain("IToolExecutionAuditStore");
+        coordinator.Should().Contain("IAuditLogQueryService");
+        coordinator.Should().Contain("IAgentTaskRunAttemptStore");
+        coordinator.Should().Contain("IAgentTaskRunQueueStore");
+        coordinator.Should().Contain("ICurrentUser");
+        coordinator.Should().Contain("JsonDocument");
+        coordinator.Should().Contain("ArtifactWorkspaceByIdSpec");
+        coordinator.Should().Contain("AgentTaskRunAttemptDtoMapper.Map");
+        coordinator.Should().Contain("AgentTaskRunQueueItemDtoMapper.Map");
+        serviceRegistration.Should().Contain("AddScoped<AgentTaskAuditQueryCoordinator>");
+    }
+
+    [Fact]
+    public void AgentTaskQueries_ShouldKeepDtoCompositionBehindService()
+    {
+        var handlers = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "AgentTasks",
+            "AgentTaskQueries.cs"));
+        var dtoService = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "AgentTasks",
+            "AgentTaskDtoComposer.cs"));
+        var serviceRegistration = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "DependencyInjection.cs"));
+
+        handlers.Should().Contain("AgentTaskDtoQueryService");
+        handlers.Should().Contain("dtoQueryService.MapAsync");
+        handlers.Should().Contain("dtoQueryService.MapManyAsync");
+        handlers.Should().NotContain("IReadRepository<ArtifactWorkspace>");
+        handlers.Should().NotContain("IReadRepository<ApprovalRequest>");
+        handlers.Should().NotContain("IAgentTaskRunQueueStore");
+        handlers.Should().NotContain("AgentTaskDtoComposer");
+
+        dtoService.Should().Contain("IReadRepository<ArtifactWorkspace>");
+        dtoService.Should().Contain("IReadRepository<ApprovalRequest>");
+        dtoService.Should().Contain("IAgentTaskRunQueueStore");
+        dtoService.Should().Contain("AgentTaskDtoComposer.MapAsync");
+        serviceRegistration.Should().Contain("AddScoped<AgentTaskDtoQueryService>");
+    }
+
+    [Fact]
+    public void AiGatewayHandlers_ShouldNotAddMultiPersistenceDependencyDebt()
+    {
+        var knownDebt = new HashSet<string>(StringComparer.Ordinal);
+        var resolvedDebt = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "src/services/AICopilot.AiGatewayService/Uploads/UploadRecords.cs:UploadRecordCommandHandler",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactVersioningCommandHandlers.cs:RestoreArtifactVersionCommandHandler",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactVersioningCommandHandlers.cs:UpdateArtifactContentCommandHandler",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactVersioningQueryHandlers.cs:DownloadArtifactVersionQueryHandler",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactVersioningQueryHandlers.cs:GetArtifactContentQueryHandler",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactVersioningQueryHandlers.cs:GetArtifactVersionDiffQueryHandler",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactVersioningQueryHandlers.cs:GetArtifactVersionsQueryHandler",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceP9CommandHandlers.cs:CreateArtifactRevisionCommentCommandHandler",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceP9CommandHandlers.cs:RegenerateDraftArtifactCommandHandler",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceP9CommandHandlers.cs:SubmitArtifactForFinalApprovalCommandHandler",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceP9QueryHandlers.cs:GetAgentArtifactPreviewQueryHandler",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceQueryHandlers.cs:DownloadArtifactQueryHandler",
+            "src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceQueryHandlers.cs:GetArtifactWorkspaceQueryHandler",
+            "src/services/AICopilot.AiGatewayService/AgentTasks/AgentApprovalQueryHandlers.cs:GetAgentTaskApprovalsQueryHandler",
+            "src/services/AICopilot.AiGatewayService/AgentTasks/AgentApprovalQueryHandlers.cs:GetPendingAgentApprovalsQueryHandler",
+            "src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskAuditQueries.cs:GetAgentTaskAuditSummaryQueryHandler",
+            "src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskAuditQueries.cs:GetAgentTaskRunAttemptsQueryHandler",
+            "src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskAuditQueries.cs:GetAgentTaskRunQueueQueryHandler",
+            "src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskCommands.cs:PlanAgentTaskCommandHandler",
+            "src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskLifecycleCommandHandlers.cs:CancelAgentTaskCommandHandler",
+            "src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskLifecycleCommandHandlers.cs:RetryAgentTaskCommandHandler",
+            "src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskLifecycleCommandHandlers.cs:RunAgentTaskCommandHandler",
+            "src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskQueries.cs:GetAgentTaskQueryHandler",
+            "src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskQueries.cs:GetListAgentTasksBySessionQueryHandler",
+            "src/services/AICopilot.AiGatewayService/Queries/Sessions/GetSessionTimeline.cs:GetSessionTimelineQueryHandler"
+        };
+
+        var violations = FindMultiPersistenceHandlerDependencies();
+
+        violations
+            .Where(violation => !knownDebt.Contains(violation.Key))
+            .Select(violation => violation.Description)
+            .Should()
+            .BeEmpty("new AiGateway handlers must not directly inject three or more repository/store dependencies");
+        violations
+            .Where(violation => resolvedDebt.Contains(violation.Key))
+            .Select(violation => violation.Description)
+            .Should()
+            .BeEmpty("handler persistence dependency debt that has been moved behind coordinators must not regress");
+    }
+
+    [Fact]
     public void CloudReadOnlyTextToSql_ShouldExposeOnlyGovernedSchemaAndKeepRepairSqlInMemory()
     {
         var agents = File.ReadAllText(Path.Combine(SolutionRoot, "AGENTS.md"));
@@ -2027,6 +2878,58 @@ public sealed class ArchitectureBoundaryTests
 
         return violations;
     }
+
+    private static IReadOnlyCollection<HandlerPersistenceDependencyViolation> FindMultiPersistenceHandlerDependencies()
+    {
+        var serviceRoot = Path.Combine(SolutionRoot, "src", "services", "AICopilot.AiGatewayService");
+        var handlerPattern = new Regex(
+            @"public\s+(?:sealed\s+)?class\s+(?<name>\w+Handler)\s*\((?<parameters>[\s\S]*?)\)\s*:\s*I(?:Command|Query)Handler<",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant);
+        var persistenceDependencyPattern = new Regex(
+            @"\b(?:I(?:Read)?Repository<[^>]+>|I[A-Za-z0-9_]*(?:Store|ProjectionStore|AuditStore)\b|IAuditLogQueryService\b|IFinalAgentContextStore\b)",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant);
+        var violations = new List<HandlerPersistenceDependencyViolation>();
+
+        foreach (var file in Directory.EnumerateFiles(serviceRoot, "*.cs", SearchOption.AllDirectories))
+        {
+            if (file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)
+                || file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var source = File.ReadAllText(file);
+            foreach (Match handlerMatch in handlerPattern.Matches(source))
+            {
+                var handlerName = handlerMatch.Groups["name"].Value;
+                var parameters = handlerMatch.Groups["parameters"].Value;
+                var dependencies = persistenceDependencyPattern
+                    .Matches(parameters)
+                    .Select(match => match.Value)
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray();
+
+                if (dependencies.Length < 3)
+                {
+                    continue;
+                }
+
+                var relativePath = Path
+                    .GetRelativePath(SolutionRoot, file)
+                    .Replace(Path.DirectorySeparatorChar, '/');
+                var key = $"{relativePath}:{handlerName}";
+                violations.Add(new HandlerPersistenceDependencyViolation(
+                    key,
+                    $"{key} has {dependencies.Length} persistence dependencies: {string.Join(", ", dependencies)}"));
+            }
+        }
+
+        return violations
+            .OrderBy(violation => violation.Key, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private sealed record HandlerPersistenceDependencyViolation(string Key, string Description);
 
     private static string NormalizeCoreReference(string value)
     {

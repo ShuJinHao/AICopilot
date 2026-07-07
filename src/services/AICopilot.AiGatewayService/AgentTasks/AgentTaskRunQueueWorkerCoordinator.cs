@@ -1,0 +1,205 @@
+using AICopilot.AiGatewayService.Tools;
+using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
+using AICopilot.Core.AiGateway.Specifications.AgentTasks;
+using AICopilot.Services.Contracts;
+using AICopilot.SharedKernel.Repository;
+using AICopilot.SharedKernel.Result;
+using Microsoft.Extensions.Options;
+
+namespace AICopilot.AiGatewayService.AgentTasks;
+
+internal sealed class AgentTaskRunQueueWorkerCoordinator(
+    IAgentTaskRunQueueStore queueStore,
+    IRepository<AgentTask> taskRepository,
+    IAgentTaskRunAttemptStore attemptStore,
+    IAgentTaskRunQueue runQueue,
+    IAgentTaskRuntime runtime,
+    IOptions<AgentRunQueueOptions>? options = null,
+    AgentAuditRecorder? auditRecorder = null)
+{
+    private AgentRunQueueOptions QueueOptions => options?.Value ?? new AgentRunQueueOptions();
+
+    public Task<Result<AgentTaskRunQueueItem?>> LeaseNextAsync(
+        string leaseOwner,
+        TimeSpan leaseDuration,
+        CancellationToken cancellationToken)
+    {
+        return runQueue.LeaseNextAsync(leaseOwner, leaseDuration, cancellationToken);
+    }
+
+    public async Task RecoverExpiredStartedLeasesAsync(CancellationToken cancellationToken)
+    {
+        if (QueueOptions.StaleLeaseAction != AgentRunQueueStaleLeaseAction.Fail)
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var activeItems = await queueStore.ListActiveAsync(cancellationToken);
+        foreach (var item in activeItems.Where(candidate => candidate.IsExpiredStartedLease(now)))
+        {
+            var oldStatus = item.Status.ToString();
+            var message = "Agent task run queue lease expired during execution. Retry the task before continuing.";
+            item.MarkFailed(AppProblemCodes.AgentTaskRunQueueLeaseExpired, message, now);
+            queueStore.Update(item);
+
+            var task = await taskRepository.FirstOrDefaultAsync(
+                new AgentTaskByIdSpec(item.TaskId, includeSteps: true),
+                cancellationToken);
+            if (task is not null)
+            {
+                task.Fail(message, now);
+                task.ReleaseRunLease(now, clearActiveAttempt: true);
+                taskRepository.Update(task);
+            }
+
+            var attempt = await ResolveAttemptAsync(item, task, cancellationToken);
+            if (attempt is not null && !attempt.IsTerminal)
+            {
+                attempt.MarkFailed(AppProblemCodes.AgentTaskRunLeaseExpired, message, now);
+                attemptStore.Update(attempt);
+            }
+
+            if (auditRecorder is not null)
+            {
+                await auditRecorder.RecordRunQueueOperationAsync(
+                    "Agent.RunQueueStaleLeaseFailed",
+                    item,
+                    AuditResults.Succeeded,
+                    message,
+                    oldStatus,
+                    attempt,
+                    retryAttemptNo: null,
+                    cancellationToken);
+            }
+        }
+
+        await queueStore.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task ExecuteQueueItemAsync(
+        AgentTaskRunQueueItem item,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var task = await taskRepository.FirstOrDefaultAsync(
+            new AgentTaskByIdSpec(item.TaskId, includeSteps: true),
+            cancellationToken);
+        if (task is null)
+        {
+            item.MarkFailed(
+                AppProblemCodes.AgentTaskRunQueueNotFound,
+                "Agent task was not found for queued run.",
+                now);
+            queueStore.Update(item);
+            await queueStore.SaveChangesAsync(cancellationToken);
+            return;
+        }
+
+        item.MarkStarted(task.ActiveRunAttemptId, now);
+        queueStore.Update(item);
+        await queueStore.SaveChangesAsync(cancellationToken);
+
+        var result = await runtime.RunAsync(task, item.TriggerType, cancellationToken);
+        now = DateTimeOffset.UtcNow;
+
+        var latestAttempt = await ResolveAttemptAsync(item, task, cancellationToken);
+        if (latestAttempt is not null)
+        {
+            item.LinkRunAttempt(latestAttempt.Id, now);
+        }
+
+        if (!result.IsSuccess)
+        {
+            var problem = result.Errors?.OfType<ApiProblemDescriptor>().FirstOrDefault();
+            item.MarkFailed(
+                problem?.Code ?? "agent_task_run_failed",
+                problem?.Detail ?? "Agent task run failed before runtime execution completed.",
+                now);
+        }
+        else if (task.Status == AgentTaskStatus.Cancelled)
+        {
+            item.Cancel(now, "Agent task cancellation requested.");
+        }
+        else if (task.Status == AgentTaskStatus.Failed)
+        {
+            item.MarkFailed(
+                latestAttempt?.FailureCode ?? "agent_task_failed",
+                latestAttempt?.SafeMessage ?? task.FinalSummary ?? "Agent task failed.",
+                now);
+        }
+        else
+        {
+            item.MarkSucceeded(now, $"Agent task run reached {task.Status}.");
+        }
+
+        queueStore.Update(item);
+        await queueStore.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task FailQueueItemAsync(
+        AgentTaskRunQueueItem item,
+        string failureCode,
+        string safeMessage,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var sanitized = ToolExecutionRecordSanitizer.Sanitize(safeMessage, 2000) ?? "Agent task run worker failed.";
+        item.MarkFailed(failureCode, sanitized, now);
+        queueStore.Update(item);
+
+        var task = await taskRepository.FirstOrDefaultAsync(
+            new AgentTaskByIdSpec(item.TaskId, includeSteps: true),
+            cancellationToken);
+        if (task is not null)
+        {
+            task.Fail(sanitized, now);
+            task.ReleaseRunLease(now, clearActiveAttempt: true);
+            taskRepository.Update(task);
+        }
+
+        var attempt = await ResolveAttemptAsync(item, task, cancellationToken);
+        if (attempt is not null && !attempt.IsTerminal)
+        {
+            attempt.MarkFailed(failureCode, sanitized, now);
+            attemptStore.Update(attempt);
+        }
+
+        await queueStore.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task<AgentTaskRunAttempt?> ResolveAttemptAsync(
+        AgentTaskRunQueueItem item,
+        AgentTask? task,
+        CancellationToken cancellationToken)
+    {
+        if (item.RunAttemptId is not null)
+        {
+            var attempt = await attemptStore.FirstByIdAsync(item.RunAttemptId.Value, cancellationToken);
+            if (attempt is not null)
+            {
+                return attempt;
+            }
+        }
+
+        if (task?.ActiveRunAttemptId is not null)
+        {
+            var attempt = await attemptStore.FirstByIdAsync(task.ActiveRunAttemptId.Value, cancellationToken);
+            if (attempt is not null)
+            {
+                return attempt;
+            }
+        }
+
+        if (task is null)
+        {
+            return null;
+        }
+
+        var attempts = await attemptStore.ListByTaskAsync(task.Id, cancellationToken);
+        return attempts
+            .OrderByDescending(attempt => attempt.AttemptNo)
+            .ThenByDescending(attempt => attempt.StartedAt)
+            .FirstOrDefault();
+    }
+}

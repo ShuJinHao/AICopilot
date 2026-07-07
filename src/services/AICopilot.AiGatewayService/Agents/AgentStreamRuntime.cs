@@ -169,7 +169,9 @@ public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequi
                 workflowException.UserFacingMessage);
         }
 
-        if (exception is TimeoutException or TaskCanceledException or OperationCanceledException)
+        if (ContainsException<TimeoutException>(exception)
+            || ContainsException<TaskCanceledException>(exception)
+            || ContainsException<OperationCanceledException>(exception))
         {
             return CreateErrorChunk(
                 AppProblemCodes.ModelRequestTimeout,
@@ -178,7 +180,7 @@ public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequi
                 "模型响应超时，请稍后重试或缩小问题范围。");
         }
 
-        if (exception is HttpRequestException)
+        if (ContainsException<HttpRequestException>(exception))
         {
             return CreateErrorChunk(
                 AppProblemCodes.ModelProviderUnavailable,
@@ -192,6 +194,26 @@ public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequi
             fallbackUserFacingMessage,
             source,
             fallbackUserFacingMessage);
+    }
+
+    private static bool ContainsException<TException>(Exception exception)
+        where TException : Exception
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is TException)
+            {
+                return true;
+            }
+
+            if (current is AggregateException aggregateException &&
+                aggregateException.InnerExceptions.Any(ContainsException<TException>))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public static ChatChunk CreateErrorChunk(

@@ -8,7 +8,6 @@ using AICopilot.Core.AiGateway.Aggregates.RuntimeSettings;
 using AICopilot.Core.AiGateway.Aggregates.Skills;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.EntityFrameworkCore;
-using AICopilot.EntityFrameworkCore.Security;
 using AICopilot.SharedKernel.Ai;
 using Microsoft.EntityFrameworkCore;
 
@@ -26,8 +25,8 @@ public sealed class FreshDatabaseSeedTests
     private const string IdentityStoreBaselineMigrationId = "20260429021832_IdentityStoreMigrationBaseline";
     private const string PrivateMiniMaxProvider = "MiniMax Private";
     private const string PrivateMiniMaxModelName = "MiniMax-M3-AWQ-INT4";
-    private const string PrivateMiniMaxBaseUrl = "http://10.98.200.20:40034/v1";
-    private const string PrivateMiniMaxPlaceholderApiKey = "dummy-key";
+    private const string PrivateMiniMaxBaseUrl = "http://model.internal.example:40034/v1";
+    private const int PrivateMiniMaxContextWindowTokens = 65536;
     private const string PrivateMiniMaxRoutingConfigurationName = "MiniMax private routing model";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -71,12 +70,10 @@ public sealed class FreshDatabaseSeedTests
         seedModel.ProtocolType.Should().Be(LanguageModelProtocolTypes.OpenAICompatible);
         seedModel.Name.Should().Be(PrivateMiniMaxModelName);
         seedModel.BaseUrl.Should().Be(PrivateMiniMaxBaseUrl);
-        seedModel.ApiKey.Should().StartWith(SecretStringEncryptor.CipherPrefix);
-        SecretStringEncryptor.Decrypt(seedModel.ApiKey)
-            .Should().Be(PrivateMiniMaxPlaceholderApiKey);
-        seedModel.IsEnabled.Should().BeTrue();
+        seedModel.ApiKey.Should().BeNull("fresh databases must not seed a default model API key");
+        seedModel.IsEnabled.Should().BeFalse("fresh databases must not enable a placeholder model before an administrator configures a real endpoint and key");
         seedModel.Usage.Should().Be(LanguageModelUsage.Chat | LanguageModelUsage.Routing | LanguageModelUsage.Planner);
-        seedModel.Parameters.MaxTokens.Should().Be(32768);
+        seedModel.Parameters.MaxTokens.Should().Be(PrivateMiniMaxContextWindowTokens);
         seedModel.Parameters.MaxOutputTokens.Should().Be(4096);
         seedModel.Parameters.Temperature.Should().BeApproximately(0.2f, 0.0001f);
 

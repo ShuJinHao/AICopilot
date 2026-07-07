@@ -9,6 +9,7 @@ internal sealed class InMemoryModelEndpointPoolScheduler : IModelEndpointPoolSch
     private const string RedactedEndpointMarker = "[redacted-endpoint]";
     private readonly object gate = new();
     private readonly IOptions<ModelProviderReliabilityOptions> options;
+    private readonly ISecretProtector secretProtector;
     private readonly ConcurrentDictionary<string, EndpointRuntimeStats> stats = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, ModelRuntimeStats> modelStats = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, QuotaWindow> userWindows = new(StringComparer.OrdinalIgnoreCase);
@@ -17,16 +18,20 @@ internal sealed class InMemoryModelEndpointPoolScheduler : IModelEndpointPoolSch
     private readonly ConcurrentDictionary<string, long> roundRobinCounters = new(StringComparer.OrdinalIgnoreCase);
     private readonly Func<DateTimeOffset> utcNow;
 
-    public InMemoryModelEndpointPoolScheduler(IOptions<ModelProviderReliabilityOptions> options)
-        : this(options, () => DateTimeOffset.UtcNow)
+    public InMemoryModelEndpointPoolScheduler(
+        IOptions<ModelProviderReliabilityOptions> options,
+        ISecretProtector secretProtector)
+        : this(options, secretProtector, () => DateTimeOffset.UtcNow)
     {
     }
 
     internal InMemoryModelEndpointPoolScheduler(
         IOptions<ModelProviderReliabilityOptions> options,
+        ISecretProtector secretProtector,
         Func<DateTimeOffset> utcNow)
     {
         this.options = options;
+        this.secretProtector = secretProtector;
         this.utcNow = utcNow;
     }
 
@@ -471,18 +476,42 @@ internal sealed class InMemoryModelEndpointPoolScheduler : IModelEndpointPoolSch
             apiKey);
     }
 
-    private static string? ResolveApiKey(ModelEndpointOptions endpoint)
+    private string? ResolveApiKey(ModelEndpointOptions endpoint)
     {
         if (!string.IsNullOrWhiteSpace(endpoint.ApiKeyEnvironmentVariable))
         {
-            var environmentValue = Environment.GetEnvironmentVariable(endpoint.ApiKeyEnvironmentVariable.Trim());
+            var environmentVariable = endpoint.ApiKeyEnvironmentVariable.Trim();
+            var environmentValue = Environment.GetEnvironmentVariable(environmentVariable);
             if (!string.IsNullOrWhiteSpace(environmentValue))
             {
-                return environmentValue;
+                return RequireProtectedEndpointApiKey(
+                    endpoint.EndpointId,
+                    environmentValue,
+                    $"environment variable '{environmentVariable}'");
             }
         }
 
-        return string.IsNullOrWhiteSpace(endpoint.ApiKey) ? null : endpoint.ApiKey;
+        return string.IsNullOrWhiteSpace(endpoint.ApiKey)
+            ? null
+            : RequireProtectedEndpointApiKey(
+                endpoint.EndpointId,
+                endpoint.ApiKey,
+                "AiRuntime:ProviderReliability endpoint ApiKey");
+    }
+
+    private string RequireProtectedEndpointApiKey(
+        string endpointId,
+        string apiKey,
+        string source)
+    {
+        var trimmed = apiKey.Trim();
+        if (!secretProtector.IsProtected(trimmed))
+        {
+            throw new InvalidOperationException(
+                $"Model endpoint pool '{endpointId}' API key from {source} must be stored as an encrypted 'encv2:' secret before runtime use.");
+        }
+
+        return trimmed;
     }
 
     private static bool HasConfiguredCredential(ModelEndpointOptions endpoint)

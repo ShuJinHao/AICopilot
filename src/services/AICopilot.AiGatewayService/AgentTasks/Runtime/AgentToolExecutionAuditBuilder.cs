@@ -38,6 +38,29 @@ internal static class AgentToolExecutionAuditBuilder
             : ToolExecutionFailedCode;
     }
 
+    internal static string BuildSafeExceptionSummary(Exception ex)
+    {
+        if (ex is AgentToolExecutionException toolExecutionException)
+        {
+            return $"Tool execution failed. ErrorCode={toolExecutionException.Code}; ErrorType={ex.GetType().Name}.";
+        }
+
+        if (ex is CloudAiReadException cloudAiReadException)
+        {
+            var statusCode = cloudAiReadException.StatusCode.HasValue
+                ? ((int)cloudAiReadException.StatusCode.Value).ToString()
+                : "none";
+            return $"Cloud read-only tool failed. ErrorCode={cloudAiReadException.Code}; StatusCode={statusCode}; ErrorType={ex.GetType().Name}.";
+        }
+
+        if (ex.Message.StartsWith(AppProblemCodes.ArtifactFinalized, StringComparison.OrdinalIgnoreCase))
+        {
+            return $"{AppProblemCodes.ArtifactFinalized}: Artifact workspace is finalized.";
+        }
+
+        return $"Tool execution failed. ErrorType={ex.GetType().Name}.";
+    }
+
     internal static string BuildInputSummary(AgentStep step, ToolRegistration? tool)
     {
         var payload = new

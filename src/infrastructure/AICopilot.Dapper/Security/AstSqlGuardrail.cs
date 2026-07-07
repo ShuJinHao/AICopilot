@@ -50,11 +50,11 @@ public sealed partial class AstSqlGuardrail : ISqlGuardrail
         {
             statements = new SqlQueryParser().Parse(sql, CreateDialect(provider));
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             if (string.Equals(normalizedSql, sql, StringComparison.Ordinal))
             {
-                return (false, $"安全拦截：SQL 语句未通过语法解析。{ex.Message}");
+                return (false, "安全拦截：SQL 语句未通过安全语法解析。");
             }
 
             try
@@ -63,7 +63,7 @@ public sealed partial class AstSqlGuardrail : ISqlGuardrail
             }
             catch
             {
-                return (false, $"安全拦截：SQL 语句未通过语法解析。{ex.Message}");
+                return (false, "安全拦截：SQL 语句未通过安全语法解析。");
             }
         }
 
@@ -241,4 +241,3 @@ public sealed partial class AstSqlGuardrail : ISqlGuardrail
         };
     }
 }
-

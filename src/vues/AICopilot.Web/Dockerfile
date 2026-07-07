@@ -34,13 +34,28 @@ RUN npm run build
 FROM ${NGINX_BASE_IMAGE}
 
 # 1. 从构建阶段复制打包好的静态文件到 Nginx 默认目录
-COPY --from=build /app/dist /usr/share/nginx/html
+COPY --from=build --chown=nginx:nginx /app/dist /usr/share/nginx/html
 
 # 2. 复制 Nginx 配置模板
-COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY --chown=nginx:nginx nginx.conf.template /etc/nginx/templates/default.conf.template
+
+RUN mkdir -p \
+        /var/cache/nginx/client_temp \
+        /var/cache/nginx/proxy_temp \
+        /var/cache/nginx/fastcgi_temp \
+        /var/cache/nginx/uwsgi_temp \
+        /var/cache/nginx/scgi_temp \
+    && chown -R nginx:nginx \
+        /etc/nginx/conf.d \
+        /etc/nginx/templates \
+        /usr/share/nginx/html \
+        /var/cache/nginx \
+        /var/log/nginx \
+        /var/run
 
 # 3. 暴露端口（匹配docker-compose）
 EXPOSE 8000
 
 # 4. 启动 Nginx (默认 Entrypoint 会处理模板替换)
+USER nginx
 CMD ["nginx", "-g", "daemon off;"]

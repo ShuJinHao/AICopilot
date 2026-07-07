@@ -37,7 +37,10 @@ public class DataAnalysisPlugin(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "获取表名失败。Database: {DbName}", databaseName);
+            logger.LogError(
+                "获取表名失败。Database: {DbName}; ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                databaseName,
+                ex.GetType().Name);
             return DataAnalysisToolResultFormatter.Limit(
                 DataAnalysisToolResultFormatter.BuildSafeFailureMessage("获取表名时发生错误", ex));
         }
@@ -71,7 +74,10 @@ public class DataAnalysisPlugin(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "获取表结构失败。Database: {DbName}", databaseName);
+            logger.LogError(
+                "获取表结构失败。Database: {DbName}; ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                databaseName,
+                ex.GetType().Name);
             return DataAnalysisToolResultFormatter.Limit(
                 DataAnalysisToolResultFormatter.BuildSafeFailureMessage("获取表结构时发生错误", ex));
         }
@@ -108,12 +114,20 @@ public class DataAnalysisPlugin(
         }
         catch (InvalidOperationException ex)
         {
-            logger.LogWarning("SQL 执行被拦截: {Message}", ex.Message);
-            return DataAnalysisToolResultFormatter.Limit($"安全警告: 查询被系统拒绝。原因: {ex.Message}");
+            logger.LogWarning(
+                "SQL execution rejected by safety policy. Database: {DbName}; ErrorType={ErrorType}; ReasonCode={ReasonCode}; OriginalMessage=hidden_by_security_policy",
+                databaseName,
+                ex.GetType().Name,
+                DataAnalysisToolResultFormatter.ClassifySqlRejection(ex.Message));
+            return DataAnalysisToolResultFormatter.Limit(
+                DataAnalysisToolResultFormatter.BuildSafeSqlRejectedMessage(ex));
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "SQL 执行异常");
+            logger.LogError(
+                "SQL 执行异常。Database: {DbName}; ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                databaseName,
+                ex.GetType().Name);
             return DataAnalysisToolResultFormatter.Limit("SQL 执行错误: 查询执行失败，请检查 SQL 语法、表名或列名是否正确。");
         }
     }

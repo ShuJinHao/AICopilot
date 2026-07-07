@@ -37,9 +37,9 @@ internal static class ToolInputSchemaValidator
         {
             inputDocument = JsonDocument.Parse(string.IsNullOrWhiteSpace(inputJson) ? "{}" : inputJson);
         }
-        catch (JsonException ex)
+        catch (JsonException)
         {
-            return ToolInputValidationResult.Failure($"Tool input JSON is invalid: {ex.Message}");
+            return ToolInputValidationResult.Failure("Tool input JSON is invalid.");
         }
 
         using (inputDocument)
@@ -66,9 +66,9 @@ internal static class ToolInputSchemaValidator
             {
                 schemaDocument = JsonDocument.Parse(schemaJson);
             }
-            catch (JsonException ex)
+            catch (JsonException)
             {
-                return ToolInputValidationResult.Failure($"Tool registry input schema is invalid: {ex.Message}");
+                return ToolInputValidationResult.Failure("Tool registry input schema is invalid.");
             }
 
             using (schemaDocument)

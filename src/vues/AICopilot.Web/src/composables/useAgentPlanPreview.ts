@@ -49,7 +49,8 @@ export function parseAgentPlan(planJson?: string | null): AgentPlanPreview | nul
   try {
     const parsed = JSON.parse(planJson) as AgentPlanPreview
     return parsed && typeof parsed === 'object' ? parsed : null
-  } catch {
+  } catch (error) {
+    console.error('Failed to parse agent plan preview JSON.', error)
     return null
   }
 }

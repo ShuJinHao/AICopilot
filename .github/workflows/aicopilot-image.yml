@@ -209,6 +209,7 @@ jobs:
             echo "Self-hosted runner must not run as root." >&2
             exit 64
           fi
+          deploy/enterprise-ai/scripts/check-runner-security-attestation.sh
           docker version >/dev/null
           docker buildx version >/dev/null
 
@@ -285,7 +286,11 @@ jobs:
           image_prefix="${{ steps.registry.outputs.image_prefix }}"
           release_tag="${{ steps.registry.outputs.release_tag }}"
           cache_ref="$image_prefix/aicopilot-webui:buildcache"
-          cloud_platform_url="${VITE_CLOUD_PLATFORM_URL:-http://10.98.90.154:81}"
+          cloud_platform_url="${VITE_CLOUD_PLATFORM_URL:-}"
+          if [ -z "$cloud_platform_url" ]; then
+            echo "VITE_CLOUD_PLATFORM_URL is required for the AICopilot web image build." >&2
+            exit 64
+          fi
 
           docker buildx build \
             --platform linux/amd64 \

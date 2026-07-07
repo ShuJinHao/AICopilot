@@ -115,7 +115,9 @@ public class IntentRoutingExecutor(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Intent routing model call failed. Falling back to General.Chat.");
+            logger.LogWarning(
+                "Intent routing model call failed. Falling back to General.Chat. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                ex.GetType().Name);
             return JsonSerializer.Serialize(
                 CreateFallbackIntents(history.LastOrDefault()?.Text, "routing model call failed"),
                 JsonSerializerOptions.Web);

@@ -119,11 +119,11 @@ internal sealed class RequestTelemetryScope : IDisposable
         activity?.SetTag("aicopilot.mediatr.status", "error");
         activity?.SetTag("error.type", exception.GetType().Name);
         logger.LogWarning(
-            exception,
-            "MediatR {Kind} {RequestName} failed after {ElapsedMilliseconds} ms.",
+            "MediatR {Kind} {RequestName} failed after {ElapsedMilliseconds} ms. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
             kind,
             requestName,
-            stopwatch.Elapsed.TotalMilliseconds);
+            stopwatch.Elapsed.TotalMilliseconds,
+            exception.GetType().Name);
     }
 
     public void Dispose()

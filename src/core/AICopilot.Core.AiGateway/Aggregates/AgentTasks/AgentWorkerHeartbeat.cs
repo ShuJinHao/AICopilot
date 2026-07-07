@@ -3,7 +3,7 @@ using AICopilot.SharedKernel.Domain;
 
 namespace AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 
-public sealed class AgentWorkerHeartbeat : BaseEntity<AgentWorkerHeartbeatId>, IAggregateRoot<AgentWorkerHeartbeatId>
+public sealed class AgentWorkerHeartbeat : BaseEntity<AgentWorkerHeartbeatId>
 {
     private AgentWorkerHeartbeat()
     {

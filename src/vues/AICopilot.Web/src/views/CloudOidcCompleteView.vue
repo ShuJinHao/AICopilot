@@ -35,7 +35,8 @@ async function completeLogin() {
   try {
     await authStore.finalizeCloudOidcLogin()
     await router.replace(resolveAuthorizedPath())
-  } catch {
+  } catch (error) {
+    console.error('Failed to complete Cloud OIDC login.', error)
     hasFailed.value = true
   }
 }

@@ -3,7 +3,7 @@ using AICopilot.SharedKernel.Domain;
 
 namespace AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 
-public sealed class AgentTaskRunAttempt : BaseEntity<AgentTaskRunAttemptId>, IAggregateRoot<AgentTaskRunAttemptId>
+public sealed class AgentTaskRunAttempt : BaseEntity<AgentTaskRunAttemptId>
 {
     private AgentTaskRunAttempt()
     {

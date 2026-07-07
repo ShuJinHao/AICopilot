@@ -108,7 +108,50 @@ public sealed class TextToSqlReadOnlyTests
 
         rejectedResult.Should().Contain("安全警告");
         rejectedResult.Should().Contain("查询被系统拒绝");
-        rejectedResult.Should().Contain("Only SELECT");
+        rejectedResult.Should().Contain("仅允许 SELECT");
+        rejectedResult.Should().NotContain("Only SELECT");
+    }
+
+    [Fact]
+    public async Task Plugin_ShouldRedactRejectedSqlDetailsFromResultAndLogs()
+    {
+        var logger = new CapturingLogger<DataAnalysisPlugin>();
+        var rejectingConnector = new RecordingDatabaseConnector
+        {
+            MetadataExceptionOverride = new InvalidOperationException(
+                "Only SELECT queries are allowed. SQL=SELECT * FROM secrets WHERE token='abc'; Host=127.0.0.1;Password=test;")
+        };
+        var readonlyDatabase = new BusinessDatabase(
+            "readonly-db",
+            "test",
+            "Host=localhost;Database=readonly;Username=test;Password=test;",
+            DbProviderType.PostgreSql,
+            isReadOnly: true,
+            BusinessDataExternalSystemType.SimulationBusiness);
+
+        var result = await CreatePlugin(rejectingConnector, logger)
+            .ExecuteSqlQueryAsync(
+                BuildServiceProvider([readonlyDatabase]),
+                readonlyDatabase.Name,
+                "DROP TABLE secrets");
+
+        result.Should().Contain("安全警告");
+        result.Should().Contain("仅允许 SELECT");
+        result.Should().NotContain("Only SELECT queries are allowed");
+        result.Should().NotContain("SELECT * FROM secrets");
+        result.Should().NotContain("token='abc'");
+        result.Should().NotContain("Host=127.0.0.1");
+        result.Should().NotContain("Password=test");
+
+        var log = logger.Entries.Should().ContainSingle(entry => entry.Level == LogLevel.Warning).Subject;
+        log.Exception.Should().BeNull();
+        log.Message.Should().Contain("ReasonCode=non_select");
+        log.Message.Should().Contain("OriginalMessage=hidden_by_security_policy");
+        log.Message.Should().NotContain("Only SELECT queries are allowed");
+        log.Message.Should().NotContain("SELECT * FROM secrets");
+        log.Message.Should().NotContain("token='abc'");
+        log.Message.Should().NotContain("Host=127.0.0.1");
+        log.Message.Should().NotContain("Password=test");
     }
 
     [Fact]
@@ -241,16 +284,21 @@ public sealed class TextToSqlReadOnlyTests
         log.Message.Should().Contain("SqlSha256=");
         log.Message.Should().Contain("Provider=PostgreSql");
         log.Message.Should().Contain("ErrorType=");
+        log.Exception.Should().BeNull();
         log.Message.Should().NotContain(sensitiveSql);
         log.Message.Should().NotContain("secret customer");
+        log.Message.Should().NotContain("Host=127.0.0.1");
+        log.Message.Should().NotContain("Password=test");
         log.Message.Should().NotContain("SQL:");
     }
 
-    private static DataAnalysisPlugin CreatePlugin(IDatabaseConnector connector)
+    private static DataAnalysisPlugin CreatePlugin(
+        IDatabaseConnector connector,
+        ILogger<DataAnalysisPlugin>? logger = null)
     {
         return new DataAnalysisPlugin(
             connector,
-            NullLogger<DataAnalysisPlugin>.Instance);
+            logger ?? NullLogger<DataAnalysisPlugin>.Instance);
     }
 
     private static IServiceProvider BuildServiceProvider(
@@ -490,9 +538,9 @@ public sealed class TextToSqlReadOnlyTests
             Exception? exception,
             Func<TState, Exception?, string> formatter)
         {
-            Entries.Add(new LogEntry(logLevel, formatter(state, exception)));
+            Entries.Add(new LogEntry(logLevel, formatter(state, exception), exception));
         }
     }
 
-    private sealed record LogEntry(LogLevel Level, string Message);
+    private sealed record LogEntry(LogLevel Level, string Message, Exception? Exception);
 }

@@ -138,11 +138,15 @@ public sealed class CloudOidcLoginTestsControllerSecurity
     }
 
     [Theory]
-    [InlineData("http://10.98.90.154:81")]
+    [InlineData("http://10.0.0.10:81")]
     [InlineData("http://192.168.1.10:81")]
     [InlineData("http://172.16.0.10:81")]
     [InlineData("http://172.31.255.10:81")]
     [InlineData("http://localhost:81")]
+    [InlineData("http://cloud.internal.example:81")]
+    [InlineData("http://cloud.factory.internal:81")]
+    [InlineData("http://cloud.lan:81")]
+    [InlineData("http://cloud.local:81")]
     public void CloudOidcOptions_ShouldAllowExplicitIntranetHttpOidc(string issuer)
     {
         var options = CreateCloudOidcOptions(

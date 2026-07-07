@@ -45,14 +45,20 @@ internal sealed class CloudAiReadHttpTransport(HttpClient httpClient, ILogger lo
         }
         catch (HttpRequestException ex)
         {
-            logger.LogWarning(ex, "Cloud AiRead request failed before receiving a response. Path={Path}", path);
+            logger.LogWarning(
+                "Cloud AiRead request failed before receiving a response. Path={Path}; ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                path,
+                ex.GetType().Name);
             throw new CloudAiReadException(
                 CloudAiReadProblemCodes.Unavailable,
                 "Cloud AiRead endpoint is unavailable.");
         }
         catch (JsonException ex)
         {
-            logger.LogWarning(ex, "Cloud AiRead response was not valid JSON. Path={Path}", path);
+            logger.LogWarning(
+                "Cloud AiRead response was not valid JSON. Path={Path}; ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                path,
+                ex.GetType().Name);
             throw new CloudAiReadException(
                 CloudAiReadProblemCodes.Unavailable,
                 "Cloud AiRead endpoint returned an invalid JSON payload.");

@@ -145,9 +145,36 @@ Cloud AiRead 设备契约：
 - Skill、Tool、MCP、Knowledge 或 DataSource 未匹配时，不能阻断 `PlanDraft`；应在草案中说明能力缺口、降级为路线规划或要求用户补充业务对象。
 - 执行阶段失败后的重试应基于已确认的 `ExecutablePlan` / `AgentTask` 重新入队，不应重新生成 `PlanDraft` 或丢失用户确认。
 
+### 8.2 当前内网 HTTP 部署红线
+
+- AICopilot 当前生产形态是内网 HTTP 部署，入口、Cloud OIDC、Cloud AiRead、Harbor 和模型服务均按内网 HTTP 口径治理。
+- 当前修复计划不得把 HTTPS redirection、HSTS、nginx 443 listener、证书申请/续期或 `RequireHttpsMetadata=true` 作为硬门槛；这些项需要额外证书方案和用户单独批准，不能夹带进 AI 端安全整改。
+- HTTP 部署不等于放松其他安全边界。必须继续执行内网隔离、端口收敛、同源代理、CORS 白名单、短期 token、强 secret、非 root 容器、只读 Cloud 边界、敏感信息脱敏和除 HSTS 外的安全响应头。
+- Cloud OIDC 使用 HTTP issuer 时必须显式启用内网 HTTP OIDC，只允许 loopback、私网 IPv4 或保留内网 DNS 后缀（`.internal.example`、`.internal`、`.lan`、`.local`）；公共 HTTP 域名即使开启内网 HTTP 开关也必须拒绝。
+- 文档、测试和部署 preflight 出现 HTTPS/HSTS/443/certificate 强制项时，必须先改回 HTTP-only 口径，再继续执行其他安全修复。
+- Web 到 HttpApi 的标准生产路径必须是 nginx 同源 `/api/` 反代；HttpApi CORS 默认不开放跨源。确需浏览器直连后端时，只允许配置精确 http/https origin，禁止 `*`、通配子域、带 path/query/fragment 的 origin 或运行时任意放行。
+- 部署模板、文档示例、滚动复盘、历史诊断记录、workflow 默认值、脚本默认值、migration seed 和 fresh DB seed 不得携带真实内网 IP、弱 secret、`CHANGE_ME`、`dummy-key` 或默认 `root@` 发布目标；真实生产值只能放在服务器 `.env`、GitHub secrets、管理员录入或命令行环境变量中。root SSH 只允许显式设置 `ALLOW_ROOT_SSH_DEPLOY=true` 的应急路径，标准发布必须使用专用部署用户。
+- 模型 smoke 的 `AICOPILOT_MODEL_SMOKE_API_KEY=dummy-key` 只允许作为真实模型网关的显式兼容例外，必须同时设置 `AICOPILOT_MODEL_SMOKE_ALLOW_DUMMY_KEY=true` 或手工 smoke 命令传 `--allow-dummy-key`；默认 preflight 必须拒绝该弱值。
+
+### 8.3 模型密钥保护格式
+
+- 模型、Embedding 和 endpoint pool 覆盖 API key 的受保护存储格式必须是 `encv2:`，加密算法使用 AES-GCM 并校验 authentication tag。
+- `AiRuntime:ProviderReliability` endpoint `ApiKey` 和 `ApiKeyEnvironmentVariable` 指向的环境变量值也必须存 `encv2:` 密文；scheduler 只能做受保护格式校验并把密文交给 runtime provider，不能解密、记录或接受明文。
+- 旧 `encv1:` 只允许在 migration worker 或一次性迁移命令中读取并重加密为 `encv2:`；运行时 provider 不得把 `encv1:` 当正常密钥格式继续兼容。
+- 明文、旧格式密文、缺失主密钥或 authentication tag 校验失败，都必须进入配置修复或迁移流程，不得静默降级为可用密钥。
+
+### 8.4 私有模型生产 seed
+
+- fresh DB seed 默认创建禁用的私有 OpenAI-compatible 模型记录，只能使用 `model.internal.example` 占位 URL、空 API key 和 64k context window；仓库、示例 `.env`、测试和长期文档不得写真实模型网关内网地址或真实 key。
+- 生产服务器必须通过真实 `.env` 明确配置 `AICOPILOT_PRIVATE_MODEL_*`：provider、model、base URL、API key、context window、max output、temperature 和 enabled。真实值同步记录在工作区非 git 私密部署手册，不进入仓库。
+- 当前私有模型标准 context window 是 64k，即 `AICOPILOT_PRIVATE_MODEL_CONTEXT_TOKENS=65536`；模型名和 API key 不允许硬编码在运行时代码里。
+- migration worker 播种私有模型时，API key 入库前必须经过 `SecretStringEncryptor` 加密为 `encv2:`；已存在同 provider/model 的记录不强行覆盖现场 base URL、启用状态或运行参数，只做密钥格式修复。
+
 ## 9. 文档入口
 
 - 长期规则入口只保留 `AGENTS.md`、本文档、项目 `docs/改动复盘与规则沉淀.md` 和工作区 `docs/历史核心记录.md`。
+- 当前 AI 安全治理和修复执行入口是 `docs/AI架构治理清单.md`；它不是阶段流水，必须逐项记录编号、严重级、状态、验证命令和外部依赖。
+- 当前长期专题契约包括 `docs/AICopilot安全部署契约.md`、`docs/Cloud只读数据分析契约.md` 和 `docs/Agent工作流与异常契约.md`；触碰部署、Cloud 只读、Text-to-SQL、Agent workflow、MCP/Tool、异常或前端错误时必须先读对应契约。
 - 部署入口只保留 `AICopilot 项目部署与维护指南.md` 和 `deploy/enterprise-ai`。
 - 阶段计划、批次验收报告、PR 草案和一次性 acceptance 输出不得继续作为执行入口；有效结论必须沉淀到长期规则或部署指南后再清理。
 - 清理文档时必须先检查引用，避免留下指向已删除阶段文件的脚本、测试或说明。
@@ -155,6 +182,9 @@ Cloud AiRead 设备契约：
 
 ## 10. 工程边界
 
+- AICopilot DDD 聚合根、投影、队列、审计和运行时记录的长期技术契约见 `../docs/DDD聚合根边界.md`；新增或调整聚合根、仓储注册、EF `DbSet`、Agent runtime timeline/queue/audit 记录时必须同步更新架构测试。
+- `IAggregateRoot<>` 只用于独立维护业务不变量和生命周期的领域根；队列项、timeline 投影、工具执行审计、worker 心跳和执行尝试记录不得作为新增聚合根方向，历史债务只能减少不能增加。
+- `DataSourcePermissionGrant` 当前保留为独立聚合根但标记待评估；后续如果授权生命周期可归入 `BusinessDatabase`，应下沉为子实体或专用权限记录并移出聚合根白名单。
 - `AiCopilotDbContext` 是主基础设施迁移上下文，`AuditDbContext` 负责审计查询和运行时审计写入，`DataAnalysisDbContext` 只承载数据分析配置，`OutboxDbContext` 承载 outbox。
 - 审计写入必须遵守 Audit writer decision tree：有业务保存点的命令应把业务变更和审计行放在同一事务；`auditLogWriter.SaveChangesAsync` 只允许出现在没有业务保存点且已被白名单记录的执行路径。
 - Outbox 多实例调度必须使用 PostgreSQL `FOR UPDATE SKIP LOCKED` 或等价互斥策略，不能让多 worker 重复发布同一消息。

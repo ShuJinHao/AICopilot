@@ -100,7 +100,8 @@ router.beforeEach(async (to) => {
 
   try {
     await authStore.ensureInitialized()
-  } catch {
+  } catch (error) {
+    console.error('Failed to initialize auth state before route navigation.', error)
     return to.path === '/login' ? true : '/login'
   }
 
@@ -111,7 +112,8 @@ router.beforeEach(async (to) => {
   if (authStore.isAuthenticated) {
     try {
       await authStore.ensureCurrentUser()
-    } catch {
+    } catch (error) {
+      console.error('Failed to resolve current user before route navigation.', error)
       return '/login'
     }
   }

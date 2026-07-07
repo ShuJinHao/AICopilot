@@ -84,7 +84,13 @@ describe('chatErrorStore', () => {
       toFriendlyMessage(new ApiError('API Error: 400', 400, {
         detail: 'Planner model is not configured.'
       }))
-    ).toBe('请求失败，请稍后重试。')
+    ).toBe('Planner model is not configured.')
+
+    expect(
+      toFriendlyMessage(new ApiError('API Error: 500', 500, {
+        title: 'Model provider unavailable'
+      }))
+    ).toBe('Model provider unavailable')
   })
 
   it('does not expose raw ApiError messages', () => {

@@ -106,14 +106,20 @@ public sealed class DocumentIndexingService(
         }
         catch (RagIndexingTimeoutException ex)
         {
-            logger.LogError(ex, "文档 {DocumentId} 索引超时。", document.Id);
+            logger.LogError(
+                "文档 {DocumentId} 索引超时。ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                document.Id,
+                ex.GetType().Name);
             document.MarkAsFailed(ex.UserMessage);
             await repository.SaveChangesAsync(cancellationToken);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "文档 {DocumentId} 索引失败。", document.Id);
-            document.MarkAsFailed(ex.Message);
+            logger.LogError(
+                "文档 {DocumentId} 索引失败。ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                document.Id,
+                ex.GetType().Name);
+            document.MarkAsFailed("文档索引失败，请稍后重试或联系管理员检查索引服务。");
             await repository.SaveChangesAsync(cancellationToken);
         }
     }

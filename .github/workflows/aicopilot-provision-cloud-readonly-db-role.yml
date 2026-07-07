@@ -72,6 +72,8 @@ jobs:
             exit 66
           fi
 
+          "$GITHUB_WORKSPACE/deploy/enterprise-ai/scripts/check-runner-security-attestation.sh" --deploy-dir "$deploy_dir"
+
           if [ ! -f "$apply_sql" ]; then
             echo "Missing CloudReadOnly grant SQL: $apply_sql" >&2
             exit 66

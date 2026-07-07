@@ -4,12 +4,13 @@ using AICopilot.Core.AiGateway.Aggregates.Artifacts;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
 using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.AiGateway.Specifications.Sessions;
+using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Repository;
 
 namespace AICopilot.AiGatewayService.Sessions;
 
 public sealed class MessageTimelineProjectionWriter(
-    IRepository<MessageEvent> repository,
+    IMessageTimelineProjectionStore projectionStore,
     IReadRepository<Session> sessionRepository)
 {
     private readonly Dictionary<SessionId, int> nextSequences = [];
@@ -136,7 +137,7 @@ public sealed class MessageTimelineProjectionWriter(
             return;
         }
 
-        repository.Add(MessageEvent.FromProjection(
+        projectionStore.Add(MessageEvent.FromProjection(
             sessionId,
             await GetNextSequenceAsync(sessionId, cancellationToken),
             eventType,
@@ -163,9 +164,7 @@ public sealed class MessageTimelineProjectionWriter(
     {
         if (!nextSequences.TryGetValue(sessionId, out var current))
         {
-            var existingEvents = await repository.ListAsync(
-                new MessageEventsBySessionSpec(sessionId),
-                cancellationToken);
+            var existingEvents = await projectionStore.ListBySessionAsync(sessionId, cancellationToken: cancellationToken);
             current = existingEvents.Count == 0 ? 0 : existingEvents.Max(item => item.Sequence);
         }
 

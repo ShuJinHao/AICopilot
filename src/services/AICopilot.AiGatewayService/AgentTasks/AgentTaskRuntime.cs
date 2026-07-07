@@ -5,7 +5,6 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using System.Security.Cryptography;
 using System.Globalization;
-using AICopilot.AiGatewayService.Sessions;
 using AICopilot.AiGatewayService.Skills;
 using AICopilot.AiGatewayService.Tools;
 using AICopilot.AiGatewayService.Workspaces;
@@ -40,10 +39,9 @@ public interface IAgentTaskRuntime
 
 internal sealed class AgentTaskRuntime(
     IRepository<AgentTask> taskRepository,
-    IRepository<AgentTaskRunAttempt> runAttemptRepository,
+    IAgentTaskRunAttemptStore runAttemptStore,
     IRepository<ArtifactWorkspace> workspaceRepository,
     IRepository<ApprovalRequest> approvalRepository,
-    IRepository<ToolExecutionRecord> toolExecutionRepository,
     IReadRepository<UploadRecord> uploadRepository,
     IAgentArtifactWorkspaceService workspaceService,
     IFileStorageService fileStorage,
@@ -54,19 +52,18 @@ internal sealed class AgentTaskRuntime(
     ICloudReadonlyAgentToolExecutor cloudReadonlyToolExecutor,
     IIdentityAccessService identityAccessService,
     ToolRegistryGuard toolRegistryGuard,
-    AgentAuditRecorder auditRecorder,
+    AgentRuntimeEventRecorder runtimeEventRecorder,
     IEnumerable<IAgentToolExecutor> toolExecutors,
     IOptions<AgentRunQueueOptions>? runQueueOptions = null,
     IBusinessDatabaseReadService? businessDatabaseReadService = null,
     IBusinessTextToSqlRuntime? businessTextToSqlRuntime = null,
-    MessageTimelineProjectionWriter? timelineProjectionWriter = null,
     SkillDefinitionGuard? skillDefinitionGuard = null,
     CloudReadOnlyTextToSqlFallbackRunner? cloudTextToSqlFallbackRunner = null)
     : IAgentTaskRuntime
 {
     private readonly AgentTaskRunAttemptCoordinator runAttemptCoordinator = new(
         taskRepository,
-        runAttemptRepository,
+        runAttemptStore,
         runQueueOptions);
 
     private readonly AgentBuiltInToolDispatcher builtInToolDispatcher = new(
@@ -165,16 +162,13 @@ internal sealed class AgentTaskRuntime(
                         workspace.WorkspaceCode,
                         cancellationToken);
                     task.MarkWorkspaceReady(now);
-                        task.WaitForFinalApproval(now);
-                        attempt.WaitForApproval(now, "Waiting for final output approval.");
-                        task.ReleaseRunLease(now, clearActiveAttempt: false);
-                        if (timelineProjectionWriter is not null)
-                        {
-                            await timelineProjectionWriter.StageApprovalRequestedAsync(task, approval, cancellationToken);
-                        }
+                    task.WaitForFinalApproval(now);
+                    attempt.WaitForApproval(now, "Waiting for final output approval.");
+                    task.ReleaseRunLease(now, clearActiveAttempt: false);
+                    await runtimeEventRecorder.StageApprovalRequestedAsync(task, approval, cancellationToken);
 
-                        await SaveAsync(task, workspace, attempt, cancellationToken);
-                        return Result.Success(task);
+                    await SaveAsync(task, workspace, attempt, cancellationToken);
+                    return Result.Success(task);
                 }
                 else
                 {
@@ -193,10 +187,7 @@ internal sealed class AgentTaskRuntime(
                         task.WaitForToolApproval(now);
                         attempt.WaitForApproval(now, "Waiting for tool approval.");
                         task.ReleaseRunLease(now, clearActiveAttempt: false);
-                        if (timelineProjectionWriter is not null)
-                        {
-                            await timelineProjectionWriter.StageApprovalRequestedAsync(task, approval, cancellationToken);
-                        }
+                        await runtimeEventRecorder.StageApprovalRequestedAsync(task, approval, cancellationToken);
 
                         await SaveAsync(task, workspace, attempt, cancellationToken);
                         return Result.Success(task);
@@ -209,17 +200,15 @@ internal sealed class AgentTaskRuntime(
                 continue;
             }
 
-            ToolExecutionRecord? executionRecord = null;
+            AgentToolExecutionAuditScope? executionScope = null;
             try
             {
-                executionRecord = new ToolExecutionRecord(
-                    task.Id,
-                    step.Id,
-                    step.ToolCode ?? toolRegistration.ToolCode,
-                    AgentToolExecutionAuditBuilder.BuildInputSummary(step, toolRegistration),
-                    DateTimeOffset.UtcNow,
-                    attempt.Id);
-                toolExecutionRepository.Add(executionRecord);
+                executionScope = runtimeEventRecorder.BeginToolExecution(
+                    task,
+                    step,
+                    toolRegistration,
+                    attempt,
+                    DateTimeOffset.UtcNow);
 
                 var inputValidation = ToolInputSchemaValidator.ValidateAndParse(
                     step.InputJson,
@@ -232,10 +221,7 @@ internal sealed class AgentTaskRuntime(
                 }
 
                 step.Start(DateTimeOffset.UtcNow);
-                if (timelineProjectionWriter is not null)
-                {
-                    await timelineProjectionWriter.StageStepStartedAsync(task, step, cancellationToken);
-                }
+                await runtimeEventRecorder.StageStepStartedAsync(task, step, cancellationToken);
 
                 if (task.Status == AgentTaskStatus.Running &&
                     step.StepType is AgentStepType.ChartGeneration or AgentStepType.ArtifactGeneration)
@@ -253,60 +239,39 @@ internal sealed class AgentTaskRuntime(
                     toolRegistration,
                     cancellationToken);
                 var output = (await ExecuteWithTimeoutAsync(executor, executionContext)).Output;
-                var artifactId = AgentToolExecutionAuditBuilder.ExtractArtifactId(output);
-                executionRecord.MarkSucceeded(
-                    AgentToolExecutionAuditBuilder.BuildOutputSummary(output),
-                    artifactId,
-                    AgentToolExecutionAuditBuilder.BuildAuditMetadata(task, workspace, step, toolRegistration, output),
-                    DateTimeOffset.UtcNow);
-                step.Complete(JsonSerializer.Serialize(output, AgentRuntimeJson.Options), DateTimeOffset.UtcNow);
-                if (timelineProjectionWriter is not null)
-                {
-                    await timelineProjectionWriter.StageStepCompletedAsync(task, step, cancellationToken);
-                }
-
-                await auditRecorder.RecordToolAsync(
+                var artifactId = runtimeEventRecorder.MarkToolExecutionSucceeded(
+                    executionScope,
                     task,
                     workspace,
                     step,
-                    AuditResults.Succeeded,
-                    $"Agent step {step.StepIndex} executed.",
+                    toolRegistration,
+                    output,
+                    DateTimeOffset.UtcNow);
+                step.Complete(JsonSerializer.Serialize(output, AgentRuntimeJson.Options), DateTimeOffset.UtcNow);
+                await runtimeEventRecorder.StageStepCompletedAsync(task, step, cancellationToken);
+
+                await runtimeEventRecorder.RecordToolSucceededAsync(
+                    task,
+                    workspace,
+                    step,
                     artifactId,
                     cancellationToken);
             }
             catch (Exception ex)
             {
-                var safeMessage = AgentToolExecutionAuditBuilder.SanitizeSummary(ex.Message, 2000) ?? "Tool execution failed.";
-                if (executionRecord is null)
-                {
-                    executionRecord = new ToolExecutionRecord(
-                        task.Id,
-                        step.Id,
-                        step.ToolCode ?? "unknown",
-                        AgentToolExecutionAuditBuilder.BuildInputSummary(step, null),
-                        DateTimeOffset.UtcNow,
-                        attempt.Id);
-                    toolExecutionRepository.Add(executionRecord);
-                }
-
+                var safeMessage = AgentToolExecutionAuditBuilder.BuildSafeExceptionSummary(ex);
                 var errorCode = AgentToolExecutionAuditBuilder.ResolveExecutionErrorCode(ex, step, toolRegistration);
-                if (executionRecord.Status == ToolExecutionStatus.Running)
-                {
-                    executionRecord.MarkFailed(
-                        errorCode,
-                        safeMessage,
-                        AgentToolExecutionAuditBuilder.BuildAuditMetadata(task, workspace, step, toolRegistration),
-                        DateTimeOffset.UtcNow);
-                }
-
                 step.Fail(safeMessage, DateTimeOffset.UtcNow);
-                await auditRecorder.RecordToolAsync(
+                await runtimeEventRecorder.RecordToolFailedAsync(
+                    executionScope,
                     task,
                     workspace,
                     step,
-                    AuditResults.Rejected,
+                    toolRegistration,
+                    attempt,
+                    errorCode,
                     safeMessage,
-                    null,
+                    DateTimeOffset.UtcNow,
                     cancellationToken);
                 task.Fail($"步骤 {step.StepIndex} 执行失败：{safeMessage}", DateTimeOffset.UtcNow);
                 attempt.MarkFailed(errorCode, safeMessage, DateTimeOffset.UtcNow);
@@ -325,10 +290,7 @@ internal sealed class AgentTaskRuntime(
             AgentApprovalType.FinalOutput,
             workspace.WorkspaceCode,
             cancellationToken);
-        if (timelineProjectionWriter is not null)
-        {
-            await timelineProjectionWriter.StageApprovalRequestedAsync(task, finalApproval, cancellationToken);
-        }
+        await runtimeEventRecorder.StageApprovalRequestedAsync(task, finalApproval, cancellationToken);
 
         await SaveAsync(task, workspace, attempt, cancellationToken);
         return Result.Success(task);
@@ -428,29 +390,17 @@ internal sealed class AgentTaskRuntime(
     {
         var now = DateTimeOffset.UtcNow;
         var safeMessage = AgentToolExecutionAuditBuilder.SanitizeSummary(problem.Detail, 2000) ?? "Tool execution rejected.";
-        var executionRecord = new ToolExecutionRecord(
-            task.Id,
-            step.Id,
-            step.ToolCode ?? "unknown",
-            AgentToolExecutionAuditBuilder.BuildInputSummary(step, null),
-            now,
-            attempt.Id);
-        executionRecord.MarkRejected(
-            problem.Code,
-            safeMessage,
-            AgentToolExecutionAuditBuilder.BuildAuditMetadata(task, workspace, step, null),
-            now);
-        toolExecutionRepository.Add(executionRecord);
-
-        step.Fail(safeMessage, now);
-        await auditRecorder.RecordToolAsync(
+        await runtimeEventRecorder.RecordToolRejectedAsync(
             task,
             workspace,
             step,
-            AuditResults.Rejected,
+            attempt,
+            problem.Code,
             safeMessage,
-            null,
+            now,
             cancellationToken);
+
+        step.Fail(safeMessage, now);
         task.Fail($"步骤 {step.StepIndex} 执行失败：{safeMessage}", now);
         attempt.MarkFailed(problem.Code, safeMessage, now);
         task.ReleaseRunLease(now, clearActiveAttempt: true);
@@ -478,7 +428,7 @@ internal sealed class AgentTaskRuntime(
         workspaceRepository.Update(workspace);
         if (attempt is not null)
         {
-            runAttemptRepository.Update(attempt);
+            runAttemptStore.Update(attempt);
         }
 
         await taskRepository.SaveChangesAsync(cancellationToken);

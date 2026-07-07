@@ -195,6 +195,42 @@ public sealed class SemanticQueryPlannerTests
         result.Plan.TimeRange.Should().NotBeNull();
     }
 
+    [Fact]
+    public void Planner_ShouldNotTreatBroadDeviceInformationAsInfoLevelLog()
+    {
+        var result = _planner.Plan(
+            "Analysis.DeviceLog.Latest",
+            "替我查询下模切设备最近的一些信息并帮我整理分类成表格图表");
+
+        result.IsSuccess.Should().BeTrue(result.ErrorMessage);
+        result.Plan.Should().NotBeNull();
+        result.Plan!.Target.Should().Be(SemanticQueryTarget.DeviceLog);
+        result.Plan.Kind.Should().Be(SemanticQueryKind.Latest);
+        result.Plan.Filters.Should().Contain(filter =>
+            filter.Field == "processName" &&
+            filter.Operator == SemanticFilterOperator.Contains &&
+            filter.Value == "模切");
+        result.Plan.Filters.Should().NotContain(filter =>
+            filter.Field.Equals("level", StringComparison.OrdinalIgnoreCase));
+        result.Plan.Sort.Should().Be(new SemanticSort("occurredAt", SemanticSortDirection.Desc));
+    }
+
+    [Fact]
+    public void Planner_ShouldNotTreatEnglishInformationAsInfoLevelLog()
+    {
+        var result = _planner.Plan(
+            "Analysis.DeviceLog.Latest",
+            "show recent device information and summarize it as a table");
+
+        result.IsSuccess.Should().BeTrue(result.ErrorMessage);
+        result.Plan.Should().NotBeNull();
+        result.Plan!.Target.Should().Be(SemanticQueryTarget.DeviceLog);
+        result.Plan.Kind.Should().Be(SemanticQueryKind.Latest);
+        result.Plan.Filters.Should().NotContain(filter =>
+            filter.Field.Equals("level", StringComparison.OrdinalIgnoreCase));
+        result.Plan.Sort.Should().Be(new SemanticSort("occurredAt", SemanticSortDirection.Desc));
+    }
+
     [Theory]
     [InlineData("Analysis.DeviceLog.Latest", "查看设备日志")]
     [InlineData("Analysis.DeviceLog.Latest", "查看最近设备日志")]

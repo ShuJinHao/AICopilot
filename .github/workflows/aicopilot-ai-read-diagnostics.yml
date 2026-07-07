@@ -48,6 +48,13 @@ jobs:
             exit 66
           fi
 
+          runner_attestation="$deploy_dir/scripts/check-runner-security-attestation.sh"
+          if [ ! -x "$runner_attestation" ]; then
+            echo "Missing runner security attestation script: $runner_attestation" >&2
+            exit 66
+          fi
+          "$runner_attestation" --deploy-dir "$deploy_dir"
+
           read_env_value() {
             local key="$1"
             awk -v key="$key" '
@@ -126,14 +133,16 @@ jobs:
           ' | tee -a "$GITHUB_STEP_SUMMARY"
 
           emit_heading "Cloud AiRead endpoint probe"
-          if [ -z "$ai_read_base_url" ]; then
-            ai_read_base_url="http://10.98.90.154:81"
-          fi
-
           if [ -z "$ai_read_token" ]; then
             emit_line "- Probe skipped: CLOUD_AI_SERVICE_ACCOUNT_TOKEN is not configured."
             emit_line "- Diagnosis: token_missing"
             exit 0
+          fi
+
+          if [ -z "$ai_read_base_url" ]; then
+            emit_line "- Probe failed: CLOUD_AI_READ_BASE_URL is not configured."
+            emit_line "- Diagnosis: base_url_missing"
+            exit 64
           fi
 
           body_file="$(mktemp "${RUNNER_TEMP:-/tmp}/ai-read-devices.XXXXXX")"

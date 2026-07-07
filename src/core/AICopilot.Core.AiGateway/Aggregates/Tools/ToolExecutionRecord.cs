@@ -11,7 +11,7 @@ public enum ToolExecutionStatus
     Rejected = 3
 }
 
-public sealed class ToolExecutionRecord : BaseEntity<ToolExecutionRecordId>, IAggregateRoot<ToolExecutionRecordId>
+public sealed class ToolExecutionRecord : BaseEntity<ToolExecutionRecordId>
 {
     private ToolExecutionRecord()
     {

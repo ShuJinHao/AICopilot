@@ -66,7 +66,11 @@ public sealed class LanguageModelConnectivityTester(
         catch (Exception ex)
         {
             stopwatch.Stop();
-            logger.LogWarning(ex, "Language model connectivity test failed for {Provider}/{Model}.", model.Provider, model.Name);
+            logger.LogWarning(
+                "Language model connectivity test failed for {Provider}/{Model}. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                model.Provider,
+                model.Name,
+                ex.GetType().Name);
             return new LanguageModelConnectivityTestOutcome(
                 false,
                 SanitizeException(ex, model.ApiKey, TryUnprotect(model.ApiKey)),

@@ -49,7 +49,8 @@ async function sendEventStream(
           let details: unknown
           try {
             details = await response.json()
-          } catch {
+          } catch (error) {
+            console.error('Failed to parse stream open error response.', error)
             details = undefined
           }
 

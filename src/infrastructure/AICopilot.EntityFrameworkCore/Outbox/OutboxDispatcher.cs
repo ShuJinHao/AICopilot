@@ -70,7 +70,10 @@ public sealed class OutboxDispatcher(
                 }
                 catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
                 {
-                    logger.LogInformation(ex, "Publishing outbox message {OutboxMessageId} was cancelled; it will be retried without incrementing retry count.", message.Id);
+                    logger.LogInformation(
+                        "Publishing outbox message {OutboxMessageId} was cancelled; it will be retried without incrementing retry count. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                        message.Id,
+                        ex.GetType().Name);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -78,8 +81,11 @@ public sealed class OutboxDispatcher(
                 }
                 catch (Exception ex)
                 {
-                    logger.LogError(ex, "Failed to publish outbox message {OutboxMessageId}.", message.Id);
-                    message.MarkFailed(ex.Message, DateTime.UtcNow);
+                    logger.LogError(
+                        "Failed to publish outbox message {OutboxMessageId}. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                        message.Id,
+                        ex.GetType().Name);
+                    message.MarkFailed("Outbox message publishing failed. See sanitized server logs for the error type.", DateTime.UtcNow);
                 }
             }
 

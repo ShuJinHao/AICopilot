@@ -18,6 +18,8 @@ const chatServiceMock = vi.hoisted(() => ({
   getAgentTaskApprovals: vi.fn(),
   getAgentTaskAuditSummary: vi.fn(),
   getTimeline: vi.fn(),
+  getArtifactPreview: vi.fn(),
+  uploadFile: vi.fn(),
   downloadArtifact: vi.fn()
 }))
 
@@ -280,6 +282,8 @@ describe('chatStore skills', () => {
     chatServiceMock.getAgentTasksBySession.mockResolvedValue([plannedTask])
     chatServiceMock.getAgentTaskApprovals.mockResolvedValue([])
     chatServiceMock.getAgentTaskAuditSummary.mockResolvedValue([])
+    chatServiceMock.getArtifactPreview.mockResolvedValue(null)
+    chatServiceMock.uploadFile.mockResolvedValue({ id: 'upload-1', name: 'input.txt' })
     chatServiceMock.downloadArtifact.mockResolvedValue(new Blob(['report']))
     chatServiceMock.getTimeline.mockResolvedValue({
       items: [],
@@ -434,6 +438,23 @@ describe('chatStore skills', () => {
     }), expect.any(Object))
   })
 
+  it('treats a tool catalog response without tools as an empty catalog', async () => {
+    const store = useChatStore()
+
+    await store.loadPluginTools()
+    store.togglePluginTool('rag_search')
+    chatServiceMock.getToolCatalog.mockResolvedValueOnce({
+      version: 2,
+      availableToolCount: 0,
+      riskSummary: {}
+    })
+
+    await expect(store.loadPluginTools()).resolves.toBeUndefined()
+
+    expect(store.availablePluginTools).toEqual([])
+    expect(store.selectedToolCodes).toEqual([])
+  })
+
   it('approves a pending plan approval before running the task', async () => {
     const sessionStore = useSessionStore()
     sessionStore.persistCurrentSession('session-1')
@@ -543,5 +564,55 @@ describe('chatStore skills', () => {
 
     expect(chatServiceMock.downloadArtifact).not.toHaveBeenCalled()
     expect(store.errorMessage).toContain('后端未返回产物下载地址')
+  })
+
+  it('shows artifact preview load failures in the current session error', async () => {
+    chatServiceMock.getArtifactPreview.mockRejectedValue(new ApiError('API Error: 400', 400, {
+      code: 'workspace_manifest_invalid'
+    }))
+    const sessionStore = useSessionStore()
+    sessionStore.persistCurrentSession('session-1')
+    const store = useChatStore()
+
+    const preview = await store.loadArtifactPreview('artifact-1')
+
+    expect(preview).toBeNull()
+    expect(store.errorMessage).toBe('加载产物预览失败：工作区清单无效，请刷新后重试或联系管理员检查产物目录。')
+  })
+
+  it('shows artifact download failures in the current session error', async () => {
+    chatServiceMock.downloadArtifact.mockRejectedValue(new ApiError('API Error: 403', 403, null))
+    const sessionStore = useSessionStore()
+    sessionStore.persistCurrentSession('session-1')
+    const store = useChatStore()
+
+    await store.downloadArtifact({
+      id: 'artifact-1',
+      taskId: 'task-1',
+      name: 'report.pdf',
+      type: 'Report',
+      status: 'Draft',
+      relativePath: 'draft/report.pdf',
+      fileSize: 1024,
+      mimeType: 'application/pdf',
+      version: 1,
+      updatedAt: '2026-06-22T07:00:00Z',
+      previewKind: 'pdf',
+      downloadUrl: '/api/aigateway/artifact/artifact-1/download'
+    })
+
+    expect(store.errorMessage).toBe('下载产物失败：当前账号没有访问该功能的权限。')
+  })
+
+  it('shows attachment upload failures in the current session error', async () => {
+    chatServiceMock.uploadFile.mockRejectedValue(new ApiError('API Error: 403', 403, null))
+    const sessionStore = useSessionStore()
+    sessionStore.persistCurrentSession('session-1')
+    const store = useChatStore()
+
+    const uploaded = await store.uploadSessionFile(new Blob(['input']) as File)
+
+    expect(uploaded).toBeNull()
+    expect(store.errorMessage).toBe('上传附件失败：当前账号没有访问该功能的权限。')
   })
 })

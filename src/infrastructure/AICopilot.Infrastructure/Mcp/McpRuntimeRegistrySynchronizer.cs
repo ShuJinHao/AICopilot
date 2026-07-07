@@ -247,7 +247,10 @@ public sealed class McpRuntimeRegistrySynchronizer(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to dispose MCP runtime client for {Name}.", registration.ServerName);
+            logger.LogError(
+                "Failed to dispose MCP runtime client for {Name}. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                registration.ServerName,
+                ex.GetType().Name);
         }
     }
 }

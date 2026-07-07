@@ -35,7 +35,8 @@ export function parseWidgetFromTextChunk(
       widget: { ...payload, data: resolveWidgetData(message, payload, decision) },
       remainingText: content.replace(rawJson, '').trim()
     }
-  } catch {
+  } catch (error) {
+    console.error('Failed to parse visual decision widget payload.', error)
     return null
   }
 }
@@ -118,7 +119,8 @@ function resolveWidgetData(
       if (Array.isArray(parsed) && parsed.length > 0) {
         return parsed
       }
-    } catch {
+    } catch (error) {
+      console.error('Failed to parse function result as widget data.', error)
       continue
     }
   }

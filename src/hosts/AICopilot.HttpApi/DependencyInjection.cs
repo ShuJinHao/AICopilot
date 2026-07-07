@@ -34,6 +34,7 @@ public static class DependencyInjection
                 options.CloudOidcOptions,
                 options.CloudIdentityStatusOptions);
 
+            HttpApiCorsConfiguration.AddHttpApiCors(builder.Services, builder.Configuration);
             builder.Services.AddScoped<ICurrentUser, CurrentUser>();
             builder.Services.AddHttpContextAccessor();
             HttpApiRateLimitingConfiguration.AddHttpApiRateLimiting(builder.Services, builder.Configuration);

@@ -105,7 +105,8 @@ public sealed class EnterpriseDataGovernanceP1Tests
                         ]
                     }
                 }
-            }));
+            }),
+            new EndpointPoolSecretProtector());
 
         var selected = new List<ModelEndpointSelection>();
         for (var i = 0; i < 6; i++)
@@ -162,7 +163,8 @@ public sealed class EnterpriseDataGovernanceP1Tests
                         ]
                     }
                 }
-            }));
+            }),
+            new EndpointPoolSecretProtector());
 
         var selections = Enumerable.Range(0, 3)
             .Select(_ => scheduler.SelectEndpoint("AnswerPool").EndpointId)
@@ -185,7 +187,7 @@ public sealed class EnterpriseDataGovernanceP1Tests
             EndpointId = endpointId,
             Provider = "Mock",
             BaseUrl = $"https://mock.invalid/{endpointId}",
-            ApiKey = "protected-test-key",
+            ApiKey = "encv2:protected-test-key",
             ConcurrencyLimit = 2,
             QueueLimit = 6,
             TimeoutMs = 5000,

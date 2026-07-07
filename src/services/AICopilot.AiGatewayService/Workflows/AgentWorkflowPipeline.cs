@@ -172,7 +172,10 @@ public class AgentWorkflowPipeline(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Agent workflow branch {BranchType} failed; continuing with an empty branch result.", branchType);
+            logger.LogError(
+                "Agent workflow branch {BranchType} failed; continuing with an empty branch result. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                branchType,
+                ex.GetType().Name);
             return CreateEmptyBranchResult(branchType);
         }
     }

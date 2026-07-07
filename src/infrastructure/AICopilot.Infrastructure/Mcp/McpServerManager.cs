@@ -56,7 +56,9 @@ public sealed class McpServerManager(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "MCP runtime reconciliation failed; the previous runtime registry remains active.");
+            logger.LogError(
+                "MCP runtime reconciliation failed; the previous runtime registry remains active. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                ex.GetType().Name);
         }
     }
 }

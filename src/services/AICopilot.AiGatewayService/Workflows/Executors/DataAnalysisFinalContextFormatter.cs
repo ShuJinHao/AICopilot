@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Globalization;
+using System.Text.Json;
 using AICopilot.Services.Contracts;
 using AICopilot.Services.Contracts.AiGateway.Dtos;
 using AICopilot.Services.CrossCutting.Serialization;
@@ -100,6 +101,39 @@ public static class DataAnalysisFinalContextFormatter
         };
 
         return context.ToJson();
+    }
+
+    public static string CompactForFinalPrompt(string context)
+    {
+        if (string.IsNullOrWhiteSpace(context))
+        {
+            return context;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(context);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return TruncateContextForFinalPrompt(context);
+            }
+
+            var compact = new Dictionary<string, object?>(StringComparer.Ordinal);
+            AddJsonProperty(compact, document.RootElement, "analysis");
+            AddJsonProperty(compact, document.RootElement, "source_mode");
+            AddJsonProperty(compact, document.RootElement, "query_execution");
+            AddJsonProperty(compact, document.RootElement, "semantic_summary");
+            AddCompactDisplayBlocks(compact, document.RootElement);
+            AddJsonProperty(compact, document.RootElement, "query_scope");
+            AddJsonProperty(compact, document.RootElement, "is_truncated");
+            compact["compact_note"] = "上下文已为 token 预算压缩；重复协议与预览已省略，完整结构化组件已通过流式 Widget 输出。";
+
+            return compact.ToJson();
+        }
+        catch (JsonException)
+        {
+            return TruncateContextForFinalPrompt(context);
+        }
     }
 
     public static string FormatFreeForm(
@@ -210,6 +244,84 @@ public static class DataAnalysisFinalContextFormatter
             ICollection<IReadOnlyDictionary<string, object?>> collection => collection.Count,
             _ => null
         };
+    }
+
+    private static void AddJsonProperty(Dictionary<string, object?> target, JsonElement root, string propertyName)
+    {
+        if (root.TryGetProperty(propertyName, out var property))
+        {
+            target[propertyName] = property.Clone();
+        }
+    }
+
+    private static void AddCompactDisplayBlocks(Dictionary<string, object?> target, JsonElement root)
+    {
+        if (!root.TryGetProperty("display_blocks", out var blocksElement)
+            || blocksElement.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        var compactBlocks = new List<Dictionary<string, object?>>();
+        foreach (var block in blocksElement.EnumerateArray())
+        {
+            if (block.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var blockId = GetJsonStringProperty(block, "id");
+            if (string.Equals(blockId, "device_log_metrics", StringComparison.OrdinalIgnoreCase))
+            {
+                compactBlocks.Add(BuildJsonObject(block, "type", "id", "title", "metrics"));
+            }
+            else if (string.Equals(blockId, "device_log_evidence_table", StringComparison.OrdinalIgnoreCase))
+            {
+                compactBlocks.Add(BuildJsonObject(
+                    block,
+                    "type",
+                    "id",
+                    "title",
+                    "rows",
+                    "displayed_row_count",
+                    "source_row_count",
+                    "limit_note"));
+            }
+        }
+
+        if (compactBlocks.Count > 0)
+        {
+            target["display_blocks"] = compactBlocks;
+        }
+    }
+
+    private static Dictionary<string, object?> BuildJsonObject(JsonElement element, params string[] propertyNames)
+    {
+        var output = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var propertyName in propertyNames)
+        {
+            if (element.TryGetProperty(propertyName, out var property))
+            {
+                output[propertyName] = property.Clone();
+            }
+        }
+
+        return output;
+    }
+
+    private static string? GetJsonStringProperty(JsonElement element, string propertyName)
+    {
+        return element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
+            ? property.GetString()
+            : null;
+    }
+
+    private static string TruncateContextForFinalPrompt(string context)
+    {
+        const int maxContextLength = 2000;
+        return context.Length <= maxContextLength
+            ? context
+            : context[..maxContextLength] + "...";
     }
 
     private static IReadOnlyList<Dictionary<string, object?>> MaterializeRows(

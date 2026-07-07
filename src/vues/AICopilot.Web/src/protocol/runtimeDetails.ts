@@ -97,6 +97,8 @@ const sensitiveKeyPattern =
   /(sql|query|statement|connection|password|secret|token|credential|authorization|header|source|table|view|schema|endpoint|url|uri|where|filter|raw)/i
 const sensitiveValuePattern =
   /\b(select|insert|update|delete|merge|drop|from|where|join|connectionstring|password|authorization|bearer)\b/i
+const sensitiveTextPattern =
+  /\b(sql|select|insert|update|delete|merge|drop|from|where|join|connectionstring|password|secret|token|authorization|bearer|endpoint|sourceName|tableName|databaseName|schema|view)\b|https?:\/\/|\/internal\//i
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -109,7 +111,8 @@ function parseJson(value: unknown): unknown {
 
   try {
     return JSON.parse(value)
-  } catch {
+  } catch (error) {
+    console.error('Failed to parse runtime details JSON payload.', error)
     return value
   }
 }
@@ -125,6 +128,21 @@ function compactText(value: unknown, maxLength = 72) {
   }
 
   return text.length > maxLength ? `${text.slice(0, maxLength - 1)}...` : text
+}
+
+function summarizeRuntimeStatusText(value: unknown, phase: ChatRunStatus['phase']) {
+  const text = compactText(value, 120)
+  if (!text) {
+    return '运行状态已记录'
+  }
+
+  if (sensitiveTextPattern.test(text)) {
+    return phase === 'failed'
+      ? '运行失败，原始错误未在详情中展开'
+      : '运行状态已记录，原始详情未在详情中展开'
+  }
+
+  return text
 }
 
 function isSensitiveKey(key: string) {
@@ -335,7 +353,7 @@ function buildStatus(status: ChatRunStatus | null | undefined): RuntimeStatusDet
 
   return {
     phaseLabel: phaseLabel(status),
-    summary: status.error?.message || status.summary || '运行状态已记录',
+    summary: summarizeRuntimeStatusText(status.error?.message || status.summary, status.phase),
     elapsedText: elapsedText(status.elapsedMs),
     tone: phaseTone(status),
     facts

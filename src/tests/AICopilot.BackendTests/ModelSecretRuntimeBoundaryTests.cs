@@ -1,8 +1,10 @@
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
+using AICopilot.AiRuntime;
 using AICopilot.Embedding;
 using AICopilot.Infrastructure.AiGateway;
 using AICopilot.Services.Contracts;
+using Microsoft.Extensions.Options;
 
 namespace AICopilot.BackendTests;
 
@@ -14,12 +16,12 @@ public sealed class ModelSecretRuntimeBoundaryTests
     {
         var protector = new RecordingSecretProtector();
         var provider = new OpenAiChatClientProvider(new TestHttpClientFactory(), protector);
-        var model = CreateLanguageModel("encv1:sk-runtime-chat");
+        var model = CreateLanguageModel("encv2:sk-runtime-chat");
 
         var client = provider.CreateClient(model);
 
         client.Should().NotBeNull();
-        protector.UnprotectedValues.Should().ContainSingle().Which.Should().Be("encv1:sk-runtime-chat");
+        protector.UnprotectedValues.Should().ContainSingle().Which.Should().Be("encv2:sk-runtime-chat");
         (client as IDisposable)?.Dispose();
     }
 
@@ -33,7 +35,7 @@ public sealed class ModelSecretRuntimeBoundaryTests
         var action = () => provider.CreateClient(model);
 
         action.Should().Throw<InvalidOperationException>()
-            .WithMessage("*encv1:*");
+            .WithMessage("*encv2:*");
     }
 
     [Fact]
@@ -41,12 +43,12 @@ public sealed class ModelSecretRuntimeBoundaryTests
     {
         var protector = new RecordingSecretProtector();
         var factory = new EmbeddingGeneratorFactory(new TestHttpClientFactory(), protector);
-        var model = CreateEmbeddingModel("encv1:sk-runtime-embedding");
+        var model = CreateEmbeddingModel("encv2:sk-runtime-embedding");
 
         var generator = factory.CreateGenerator(model);
 
         generator.Should().NotBeNull();
-        protector.UnprotectedValues.Should().ContainSingle().Which.Should().Be("encv1:sk-runtime-embedding");
+        protector.UnprotectedValues.Should().ContainSingle().Which.Should().Be("encv2:sk-runtime-embedding");
     }
 
     [Fact]
@@ -59,7 +61,121 @@ public sealed class ModelSecretRuntimeBoundaryTests
         var action = () => factory.CreateGenerator(model);
 
         action.Should().Throw<InvalidOperationException>()
-            .WithMessage("*encv1:*");
+            .WithMessage("*encv2:*");
+    }
+
+    [Fact]
+    public void ModelEndpointPoolScheduler_ShouldRejectPlaintextOverrideApiKey()
+    {
+        var scheduler = new InMemoryModelEndpointPoolScheduler(
+            Options.Create(new ModelProviderReliabilityOptions
+            {
+                EndpointPools =
+                {
+                    ["AnswerPool"] = new ModelEndpointPoolOptions
+                    {
+                        Endpoints =
+                        [
+                            new ModelEndpointOptions
+                            {
+                                EndpointId = "answer-plain",
+                                Provider = "OpenAI",
+                                BaseUrl = "https://example.test/v1",
+                                ApiKey = "sk-plain"
+                            }
+                        ]
+                    }
+                }
+            }),
+            new RecordingSecretProtector());
+
+        var action = () => scheduler.SelectEndpoint("AnswerPool");
+
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("*encv2:*");
+    }
+
+    [Fact]
+    public void ModelEndpointPoolScheduler_ShouldPassProtectedEnvironmentApiKeyWithoutDecrypting()
+    {
+        const string variableName = "AICOPILOT_TEST_ENDPOINT_POOL_API_KEY";
+        var original = Environment.GetEnvironmentVariable(variableName);
+        Environment.SetEnvironmentVariable(variableName, "encv2:pool-secret");
+        var protector = new RecordingSecretProtector();
+        var scheduler = new InMemoryModelEndpointPoolScheduler(
+            Options.Create(new ModelProviderReliabilityOptions
+            {
+                EndpointPools =
+                {
+                    ["AnswerPool"] = new ModelEndpointPoolOptions
+                    {
+                        Endpoints =
+                        [
+                            new ModelEndpointOptions
+                            {
+                                EndpointId = "answer-env",
+                                Provider = "OpenAI",
+                                BaseUrl = "https://example.test/v1",
+                                ApiKeyEnvironmentVariable = variableName
+                            }
+                        ]
+                    }
+                }
+            }),
+            protector);
+
+        try
+        {
+            var selection = scheduler.SelectEndpoint("AnswerPool");
+
+            selection.ApiKey.Should().Be("encv2:pool-secret");
+            protector.UnprotectedValues.Should().BeEmpty();
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(variableName, original);
+        }
+    }
+
+    [Fact]
+    public void ModelEndpointPoolScheduler_ShouldRejectPlaintextEnvironmentApiKey()
+    {
+        const string variableName = "AICOPILOT_TEST_ENDPOINT_POOL_PLAINTEXT_API_KEY";
+        var original = Environment.GetEnvironmentVariable(variableName);
+        Environment.SetEnvironmentVariable(variableName, "sk-pool-plain");
+        var scheduler = new InMemoryModelEndpointPoolScheduler(
+            Options.Create(new ModelProviderReliabilityOptions
+            {
+                EndpointPools =
+                {
+                    ["AnswerPool"] = new ModelEndpointPoolOptions
+                    {
+                        Endpoints =
+                        [
+                            new ModelEndpointOptions
+                            {
+                                EndpointId = "answer-env-plain",
+                                Provider = "OpenAI",
+                                BaseUrl = "https://example.test/v1",
+                                ApiKeyEnvironmentVariable = variableName
+                            }
+                        ]
+                    }
+                }
+            }),
+            new RecordingSecretProtector());
+
+        try
+        {
+            var action = () => scheduler.SelectEndpoint("AnswerPool");
+
+            action.Should().Throw<InvalidOperationException>()
+                .WithMessage("*environment variable*encv2:*");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(variableName, original);
+        }
     }
 
     private static LanguageModel CreateLanguageModel(string apiKey)
@@ -106,7 +222,7 @@ public sealed class ModelSecretRuntimeBoundaryTests
 
         public string? Protect(string? plaintext)
         {
-            return string.IsNullOrEmpty(plaintext) ? plaintext : $"encv1:{plaintext}";
+            return string.IsNullOrEmpty(plaintext) ? plaintext : $"encv2:{plaintext}";
         }
 
         public string? Unprotect(string? storedValue)
@@ -117,17 +233,17 @@ public sealed class ModelSecretRuntimeBoundaryTests
             }
 
             UnprotectedValues.Add(storedValue);
-            if (!storedValue.StartsWith("encv1:", StringComparison.Ordinal))
+            if (!storedValue.StartsWith("encv2:", StringComparison.Ordinal))
             {
-                throw new InvalidOperationException("Stored secret must be encrypted with 'encv1:'.");
+                throw new InvalidOperationException("Stored secret must be encrypted with 'encv2:'.");
             }
 
-            return storedValue["encv1:".Length..];
+            return storedValue["encv2:".Length..];
         }
 
         public bool IsProtected(string? storedValue)
         {
-            return storedValue?.StartsWith("encv1:", StringComparison.Ordinal) == true;
+            return storedValue?.StartsWith("encv2:", StringComparison.Ordinal) == true;
         }
 
         public void EnsureConfigured()

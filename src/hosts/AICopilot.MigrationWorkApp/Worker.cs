@@ -33,6 +33,16 @@ public class Worker(
             var permissionCatalog = scope.ServiceProvider.GetRequiredService<IPermissionCatalog>();
             var identityAccessService = scope.ServiceProvider.GetRequiredService<IIdentityAccessService>();
 
+            if (configuration.GetValue<bool>("MigrationWorker:CheckSecretsOnly"))
+            {
+                await MigrationWorkerSecretMigrator.VerifyAsync(
+                    aiGatewayDbContext,
+                    ragDbContext,
+                    cancellationToken);
+                hostApplicationLifetime.StopApplication();
+                return;
+            }
+
             var migrationContexts = MigrationWorkerDatabaseMigrator.CreateMigrationContexts(
                 dbContext,
                 identityStoreDbContext,
@@ -42,6 +52,10 @@ public class Worker(
                 mcpServerDbContext);
 
             await MigrationWorkerDatabaseMigrator.RunMigrationsAsync(migrationContexts, cancellationToken);
+            await MigrationWorkerSecretMigrator.MigrateAsync(
+                aiGatewayDbContext,
+                ragDbContext,
+                cancellationToken);
             await MigrationWorkerIdentitySeeder.SeedAsync(
                 roleManager,
                 userManager,
@@ -49,7 +63,7 @@ public class Worker(
                 identityAccessService,
                 configuration,
                 cancellationToken);
-            await MigrationWorkerAiGatewaySeeder.SeedDefaultsAsync(aiGatewayDbContext, cancellationToken);
+            await MigrationWorkerAiGatewaySeeder.SeedDefaultsAsync(aiGatewayDbContext, configuration, cancellationToken);
             await MigrationWorkerCloudReadOnlySeeder.EnsureSourceAsync(
                 configuration,
                 dataAnalysisDbContext,

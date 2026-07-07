@@ -141,6 +141,23 @@ public sealed class CloudReadOnlyTextToSqlFallbackRunnerTests
         generator.Requests.Single().PreviousSqlForRepair.Should().BeNull();
     }
 
+    [Fact]
+    public void CloudReadOnlyTextToSqlOptions_ShouldClampRepairAttempts()
+    {
+        new CloudReadOnlyTextToSqlOptions()
+            .ResolveMaxRepairAttempts()
+            .Should()
+            .Be(CloudReadOnlyTextToSqlOptions.DefaultMaxRepairAttempts);
+        new CloudReadOnlyTextToSqlOptions { MaxRepairAttempts = 99 }
+            .ResolveMaxRepairAttempts()
+            .Should()
+            .Be(CloudReadOnlyTextToSqlOptions.AbsoluteMaxRepairAttempts);
+        new CloudReadOnlyTextToSqlOptions { MaxRepairAttempts = -1 }
+            .ResolveMaxRepairAttempts()
+            .Should()
+            .Be(0);
+    }
+
     private static BusinessDatabaseConnectionInfo CreateCloudReadOnlyDatabase()
     {
         return new BusinessDatabaseConnectionInfo(

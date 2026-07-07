@@ -4,11 +4,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-REGISTRY="${REGISTRY:-10.98.90.154:80}"
+REGISTRY="${REGISTRY:-}"
 HARBOR_PROJECT="${HARBOR_PROJECT:-enterprise-ai}"
 TAG="${TAG:-sha-$(git -C "$REPO_ROOT" rev-parse HEAD)}"
 PLATFORM="${PLATFORM:-linux/amd64}"
-CLOUD_PLATFORM_URL="${CLOUD_PLATFORM_URL:-http://10.98.90.154:81}"
+CLOUD_PLATFORM_URL="${CLOUD_PLATFORM_URL:-}"
 IMAGE_PREFIX="$REGISTRY/$HARBOR_PROJECT"
 BASE_IMAGE_PREFIX="${BASE_IMAGE_PREFIX:-$IMAGE_PREFIX}"
 NODE_BASE_IMAGE="${NODE_BASE_IMAGE:-$BASE_IMAGE_PREFIX/base-node:22-alpine}"
@@ -74,6 +74,7 @@ normalize_services() {
   local normalized=""
   local service
   local item
+  local backend_runtime_selected=false
 
   if [ "$REQUESTED_ALL" = true ]; then
     printf '%s\n' "httpapi migration dataworker ragworker web"
@@ -84,15 +85,18 @@ normalize_services() {
     case "$item" in
       httpapi|aicopilot-httpapi)
         service=httpapi
+        backend_runtime_selected=true
         ;;
       migration|aicopilot-migration)
         service=migration
         ;;
       dataworker|aicopilot-dataworker)
         service=dataworker
+        backend_runtime_selected=true
         ;;
       ragworker|aicopilot-ragworker)
         service=ragworker
+        backend_runtime_selected=true
         ;;
       web|webui|aicopilot-webui)
         service=web
@@ -113,6 +117,17 @@ normalize_services() {
 
   normalized="$(printf '%s' "$normalized" | awk '{$1=$1; print}')"
   [ -n "$normalized" ] || fail "No AICopilot image services were selected."
+
+  if [ "$backend_runtime_selected" = true ]; then
+    case " $normalized " in
+      *" migration "*)
+        ;;
+      *)
+        normalized="$normalized migration"
+        ;;
+    esac
+  fi
+
   printf '%s\n' "$normalized"
 }
 
@@ -194,6 +209,8 @@ require_command() {
 }
 
 validate_local_tools() {
+  [ -n "$REGISTRY" ] || fail "REGISTRY is required, for example harbor.internal.example:80."
+  [ -n "$CLOUD_PLATFORM_URL" ] || fail "CLOUD_PLATFORM_URL is required, for example http://cloud.internal.example:81."
   require_command git
   require_command docker
   docker buildx version >/dev/null 2>&1 || fail "docker buildx is not available."

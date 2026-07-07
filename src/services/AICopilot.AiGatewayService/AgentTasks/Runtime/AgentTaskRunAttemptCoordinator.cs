@@ -1,5 +1,4 @@
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
-using AICopilot.Core.AiGateway.Specifications.AgentTasks;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
@@ -9,7 +8,7 @@ namespace AICopilot.AiGatewayService.AgentTasks;
 
 internal sealed class AgentTaskRunAttemptCoordinator(
     IRepository<AgentTask> taskRepository,
-    IRepository<AgentTaskRunAttempt> runAttemptRepository,
+    IAgentTaskRunAttemptStore runAttemptStore,
     IOptions<AgentRunQueueOptions>? runQueueOptions = null)
 {
     private const string RunLeaseOwner = "agent-runtime-sync";
@@ -35,9 +34,7 @@ internal sealed class AgentTaskRunAttemptCoordinator(
 
         if (task.ActiveRunAttemptId is not null)
         {
-            var activeAttempt = await runAttemptRepository.FirstOrDefaultAsync(
-                new AgentTaskRunAttemptByIdSpec(task.ActiveRunAttemptId.Value),
-                cancellationToken);
+            var activeAttempt = await runAttemptStore.FirstByIdAsync(task.ActiveRunAttemptId.Value, cancellationToken);
             if (activeAttempt is not null && !activeAttempt.IsTerminal)
             {
                 if (task.Status == AgentTaskStatus.WaitingToolApproval ||
@@ -51,7 +48,7 @@ internal sealed class AgentTaskRunAttemptCoordinator(
                 activeAttempt.MarkFailed(AppProblemCodes.AgentTaskRunLeaseExpired, message, now);
                 task.Fail(message, now);
                 task.ReleaseRunLease(now, clearActiveAttempt: true);
-                runAttemptRepository.Update(activeAttempt);
+                runAttemptStore.Update(activeAttempt);
                 taskRepository.Update(task);
                 await taskRepository.SaveChangesAsync(cancellationToken);
                 return Result.Failure(new ApiProblemDescriptor(AppProblemCodes.AgentTaskRunLeaseExpired, message));
@@ -70,7 +67,7 @@ internal sealed class AgentTaskRunAttemptCoordinator(
             RunLeaseOwner,
             now,
             RunLeaseDuration);
-        runAttemptRepository.Add(attempt);
+        runAttemptStore.Add(attempt);
         task.BeginRunAttempt(
             attempt.Id,
             attempt.AttemptNo,
@@ -95,7 +92,7 @@ internal sealed class AgentTaskRunAttemptCoordinator(
             attempt.LeaseOwner ?? RunLeaseOwner,
             attempt.LeaseExpiresAt!.Value,
             now);
-        runAttemptRepository.Update(attempt);
+        runAttemptStore.Update(attempt);
         taskRepository.Update(task);
         await taskRepository.SaveChangesAsync(cancellationToken);
         return Result.Success(attempt);
@@ -113,7 +110,7 @@ internal sealed class AgentTaskRunAttemptCoordinator(
             attempt.LeaseOwner ?? RunLeaseOwner,
             attempt.LeaseExpiresAt!.Value,
             now);
-        runAttemptRepository.Update(attempt);
+        runAttemptStore.Update(attempt);
         taskRepository.Update(task);
         await taskRepository.SaveChangesAsync(cancellationToken);
     }

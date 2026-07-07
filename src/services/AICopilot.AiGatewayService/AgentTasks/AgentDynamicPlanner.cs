@@ -119,11 +119,11 @@ public sealed class DefaultAgentDynamicPlanner(
                     : AppProblemCodes.PlannerModelUnavailable,
                 ex.UserFacingMessage));
         }
-        catch (JsonException ex)
+        catch (JsonException)
         {
             return Result.Failure(new ApiProblemDescriptor(
                 AppProblemCodes.AgentPlanInvalid,
-                $"Planner returned invalid JSON: {ex.Message}"));
+                "Planner returned invalid JSON."));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

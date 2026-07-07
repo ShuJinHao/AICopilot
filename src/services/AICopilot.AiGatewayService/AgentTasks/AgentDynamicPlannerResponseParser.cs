@@ -224,9 +224,9 @@ internal static class AgentDynamicPlannerResponseParser
 
                 return Result.Success<string?>(document.RootElement.GetRawText());
             }
-            catch (JsonException ex)
+            catch (JsonException)
             {
-                return InvalidInput($"Planner step inputJson is invalid JSON: {ex.Message}");
+                return InvalidInput("Planner step inputJson is invalid JSON.");
             }
         }
 

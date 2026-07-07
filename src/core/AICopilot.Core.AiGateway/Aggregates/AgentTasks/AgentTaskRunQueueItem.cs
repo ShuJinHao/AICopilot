@@ -4,7 +4,7 @@ using AICopilot.SharedKernel.Result;
 
 namespace AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 
-public sealed class AgentTaskRunQueueItem : BaseEntity<AgentTaskRunQueueItemId>, IAggregateRoot<AgentTaskRunQueueItemId>
+public sealed class AgentTaskRunQueueItem : BaseEntity<AgentTaskRunQueueItemId>
 {
     private AgentTaskRunQueueItem()
     {

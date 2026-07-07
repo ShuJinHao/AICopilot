@@ -8,6 +8,8 @@ using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.EntityFrameworkCore;
 using AICopilot.EntityFrameworkCore.Security;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using System.Globalization;
 
 namespace AICopilot.MigrationWorkApp;
 
@@ -15,8 +17,8 @@ internal static class MigrationWorkerAiGatewaySeeder
 {
     public const string PrivateMiniMaxProvider = "MiniMax Private";
     public const string PrivateMiniMaxModelName = "MiniMax-M3-AWQ-INT4";
-    public const string PrivateMiniMaxBaseUrl = "http://10.98.200.20:40034/v1";
-    public const string PrivateMiniMaxPlaceholderApiKey = "dummy-key";
+    public const string PrivateMiniMaxDefaultBaseUrl = "http://model.internal.example:40034/v1";
+    public const int PrivateMiniMaxContextWindowTokens = 65536;
     public const string PrivateMiniMaxRoutingConfigurationName = "MiniMax private routing model";
 
     private static readonly LanguageModelUsage PrivateMiniMaxUsages =
@@ -31,9 +33,11 @@ internal static class MigrationWorkerAiGatewaySeeder
 
     public static async Task SeedDefaultsAsync(
         AiGatewayDbContext aiGatewayDbContext,
+        IConfiguration? configuration,
         CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
+        var privateModelSeed = PrivateModelSeedOptions.Load(configuration);
 
         if (!await aiGatewayDbContext.ChatRuntimeSettings.AnyAsync(
                 settings => settings.Id == ChatRuntimeSettings.GlobalId,
@@ -47,41 +51,29 @@ internal static class MigrationWorkerAiGatewaySeeder
             cancellationToken);
 
         var privateMiniMaxModel = await aiGatewayDbContext.LanguageModels.FirstOrDefaultAsync(
-            model => model.Provider == PrivateMiniMaxProvider && model.Name == PrivateMiniMaxModelName,
+            model => model.Provider == privateModelSeed.Provider && model.Name == privateModelSeed.ModelName,
             cancellationToken);
         if (privateMiniMaxModel is null)
         {
             privateMiniMaxModel = new LanguageModel(
-                PrivateMiniMaxProvider,
-                PrivateMiniMaxModelName,
-                PrivateMiniMaxBaseUrl,
-                ProtectSeedApiKey(PrivateMiniMaxPlaceholderApiKey),
+                privateModelSeed.Provider,
+                privateModelSeed.ModelName,
+                privateModelSeed.BaseUrl,
+                ProtectSeedApiKey(privateModelSeed.ApiKey),
                 new ModelParameters
                 {
-                    MaxTokens = 32768,
-                    MaxOutputTokens = 4096,
-                    Temperature = 0.2f
+                    MaxTokens = privateModelSeed.ContextWindowTokens,
+                    MaxOutputTokens = privateModelSeed.MaxOutputTokens,
+                    Temperature = privateModelSeed.Temperature
                 },
                 LanguageModelProtocolTypes.OpenAICompatible,
                 PrivateMiniMaxUsages,
-                isEnabled: true);
+                isEnabled: privateModelSeed.Enabled);
             aiGatewayDbContext.LanguageModels.Add(privateMiniMaxModel);
         }
         else
         {
-            privateMiniMaxModel.UpdateInfo(
-                PrivateMiniMaxProvider,
-                PrivateMiniMaxModelName,
-                PrivateMiniMaxBaseUrl,
-                LanguageModelProtocolTypes.OpenAICompatible);
             EnsureSeedApiKey(privateMiniMaxModel);
-            privateMiniMaxModel.UpdateParameters(new ModelParameters
-            {
-                MaxTokens = 32768,
-                MaxOutputTokens = 4096,
-                Temperature = 0.2f
-            });
-            privateMiniMaxModel.UpdateRuntimeFlags(PrivateMiniMaxUsages, isEnabled: true);
         }
 
         foreach (var definition in BuiltInConversationTemplates.All)
@@ -220,9 +212,9 @@ internal static class MigrationWorkerAiGatewaySeeder
         var privateMiniMaxRoutingConfiguration = routingConfigurations.FirstOrDefault(configuration =>
             configuration.ModelId == privateMiniMaxModel.Id ||
             string.Equals(configuration.Name, PrivateMiniMaxRoutingConfigurationName, StringComparison.Ordinal));
-        foreach (var configuration in routingConfigurations.Where(configuration => configuration.IsActive))
+        foreach (var routingConfiguration in routingConfigurations.Where(item => item.IsActive))
         {
-            configuration.Deactivate();
+            routingConfiguration.Deactivate();
         }
 
         if (privateMiniMaxRoutingConfiguration is null)
@@ -333,7 +325,12 @@ internal static class MigrationWorkerAiGatewaySeeder
     {
         if (string.IsNullOrWhiteSpace(model.ApiKey))
         {
-            model.UpdateApiKey(ProtectSeedApiKey(PrivateMiniMaxPlaceholderApiKey));
+            return;
+        }
+
+        if (SecretStringEncryptor.IsLegacyEncrypted(model.ApiKey))
+        {
+            model.UpdateApiKey(SecretStringEncryptor.ReEncryptLegacyCipher(model.ApiKey));
             model.ResetConnectivityStatus();
             return;
         }
@@ -361,5 +358,109 @@ internal static class MigrationWorkerAiGatewaySeeder
         }
 
         return currentPermission;
+    }
+
+    private sealed record PrivateModelSeedOptions(
+        string Provider,
+        string ModelName,
+        string BaseUrl,
+        string? ApiKey,
+        int ContextWindowTokens,
+        int MaxOutputTokens,
+        float Temperature,
+        bool Enabled)
+    {
+        public static PrivateModelSeedOptions Load(IConfiguration? configuration)
+        {
+            var provider = Read(configuration, "Provider", "AICOPILOT_PRIVATE_MODEL_PROVIDER")
+                ?? PrivateMiniMaxProvider;
+            var modelName = Read(configuration, "ModelName", "AICOPILOT_PRIVATE_MODEL_NAME")
+                ?? PrivateMiniMaxModelName;
+            var baseUrl = Read(configuration, "BaseUrl", "AICOPILOT_PRIVATE_MODEL_BASE_URL")
+                ?? PrivateMiniMaxDefaultBaseUrl;
+            var apiKey = Read(configuration, "ApiKey", "AICOPILOT_PRIVATE_MODEL_API_KEY");
+            var contextWindowTokens = ReadInt(
+                configuration,
+                "ContextWindowTokens",
+                "AICOPILOT_PRIVATE_MODEL_CONTEXT_TOKENS",
+                PrivateMiniMaxContextWindowTokens);
+            var maxOutputTokens = ReadInt(
+                configuration,
+                "MaxOutputTokens",
+                "AICOPILOT_PRIVATE_MODEL_MAX_OUTPUT_TOKENS",
+                4096);
+            var temperature = ReadFloat(
+                configuration,
+                "Temperature",
+                "AICOPILOT_PRIVATE_MODEL_TEMPERATURE",
+                0.2f);
+            var enabled = ReadBool(configuration, "Enabled", "AICOPILOT_PRIVATE_MODEL_ENABLED", false);
+
+            return new PrivateModelSeedOptions(
+                provider.Trim(),
+                modelName.Trim(),
+                baseUrl.Trim(),
+                apiKey?.Trim(),
+                contextWindowTokens,
+                maxOutputTokens,
+                temperature,
+                enabled);
+        }
+
+        private static string? Read(IConfiguration? configuration, string key, string environmentVariable)
+        {
+            var fromEnvironment = Environment.GetEnvironmentVariable(environmentVariable);
+            if (!string.IsNullOrWhiteSpace(fromEnvironment))
+            {
+                return fromEnvironment;
+            }
+
+            var fromConfiguration = configuration?[$"AICopilot:PrivateModel:{key}"];
+            return string.IsNullOrWhiteSpace(fromConfiguration) ? null : fromConfiguration;
+        }
+
+        private static int ReadInt(
+            IConfiguration? configuration,
+            string key,
+            string environmentVariable,
+            int fallback)
+        {
+            var value = Read(configuration, key, environmentVariable);
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return fallback;
+            }
+
+            return int.TryParse(value, out var parsed) && parsed > 0
+                ? parsed
+                : throw new InvalidOperationException($"AICopilot:PrivateModel:{key} must be a positive integer.");
+        }
+
+        private static float ReadFloat(
+            IConfiguration? configuration,
+            string key,
+            string environmentVariable,
+            float fallback)
+        {
+            var value = Read(configuration, key, environmentVariable);
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return fallback;
+            }
+
+            return float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
+                ? parsed
+                : throw new InvalidOperationException($"AICopilot:PrivateModel:{key} must be a number.");
+        }
+
+        private static bool ReadBool(
+            IConfiguration? configuration,
+            string key,
+            string environmentVariable,
+            bool fallback)
+        {
+            var value = Read(configuration, key, environmentVariable);
+            return string.IsNullOrWhiteSpace(value) ? fallback : bool.Parse(value);
+        }
     }
 }

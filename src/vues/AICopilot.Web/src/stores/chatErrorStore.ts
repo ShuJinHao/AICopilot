@@ -59,6 +59,16 @@ export function extractErrorDetail(details: unknown) {
     return validationErrors.join('；')
   }
 
+  const detail = toTrimmedString(problem.detail)
+  if (detail) {
+    return detail
+  }
+
+  const title = toTrimmedString(problem.title)
+  if (title) {
+    return title
+  }
+
   return null
 }
 

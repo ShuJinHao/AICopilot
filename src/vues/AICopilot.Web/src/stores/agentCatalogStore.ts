@@ -2,6 +2,13 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { chatService } from '@/services/chatService'
 import type { AgentPlannerToolSummary, KnowledgeBaseSummary, SkillDefinition } from '@/types/app'
+import { toFriendlyMessage } from './chatErrorStore'
+
+type ErrorReporter = (message: string) => void
+
+function reportLoadError(reportError: ErrorReporter | undefined, action: string, error: unknown) {
+  reportError?.(`${action}失败：${toFriendlyMessage(error)}`)
+}
 
 export const useAgentCatalogStore = defineStore('agentCatalog', () => {
   const availableSkills = ref<SkillDefinition[]>([])
@@ -33,39 +40,44 @@ export const useAgentCatalogStore = defineStore('agentCatalog', () => {
     selectedSkillSupportsKnowledge.value && selectedKnowledgeBaseId.value ? [selectedKnowledgeBaseId.value] : []
   )
 
-  async function loadSkills() {
+  async function loadSkills(reportError?: ErrorReporter) {
     try {
       availableSkills.value = await chatService.getSkills()
       if (selectedSkillCode.value && !availableSkills.value.some((skill) => skill.skillCode === selectedSkillCode.value)) {
         selectedSkillCode.value = null
       }
-    } catch {
+    } catch (error) {
+      console.error('Failed to load agent skills.', error)
+      reportLoadError(reportError, '加载 Skill 列表', error)
       availableSkills.value = []
       selectedSkillCode.value = null
     }
   }
 
-  function selectSkill(skillCode: string | null) {
+  function selectSkill(skillCode: string | null, reportError?: ErrorReporter) {
     if (!skillCode) {
       selectedSkillCode.value = null
-      void loadPluginTools()
+      void loadPluginTools(reportError)
       return
     }
 
     selectedSkillCode.value = availableSkills.value.some((skill) => skill.skillCode === skillCode)
       ? skillCode
       : null
-    void loadPluginTools()
+    void loadPluginTools(reportError)
   }
 
-  async function loadPluginTools() {
+  async function loadPluginTools(reportError?: ErrorReporter) {
     isLoadingPluginTools.value = true
     try {
       const catalog = await chatService.getToolCatalog(selectedSkillCode.value)
-      availablePluginTools.value = catalog.tools
-      const availableCodes = new Set(catalog.tools.map((tool) => tool.toolCode))
+      const tools = Array.isArray(catalog.tools) ? catalog.tools : []
+      availablePluginTools.value = tools
+      const availableCodes = new Set(tools.map((tool) => tool.toolCode))
       selectedToolCodes.value = selectedToolCodes.value.filter((code) => availableCodes.has(code))
-    } catch {
+    } catch (error) {
+      console.error('Failed to load agent plugin tools.', error)
+      reportLoadError(reportError, '加载插件能力', error)
       availablePluginTools.value = []
       selectedToolCodes.value = []
     } finally {
@@ -87,7 +99,7 @@ export const useAgentCatalogStore = defineStore('agentCatalog', () => {
     selectedToolCodes.value = []
   }
 
-  async function loadKnowledgeBases() {
+  async function loadKnowledgeBases(reportError?: ErrorReporter) {
     try {
       availableKnowledgeBases.value = await chatService.getKnowledgeBases()
       if (
@@ -96,7 +108,9 @@ export const useAgentCatalogStore = defineStore('agentCatalog', () => {
       ) {
         selectedKnowledgeBaseId.value = null
       }
-    } catch {
+    } catch (error) {
+      console.error('Failed to load available knowledge bases.', error)
+      reportLoadError(reportError, '加载知识库列表', error)
       availableKnowledgeBases.value = []
       selectedKnowledgeBaseId.value = null
     }

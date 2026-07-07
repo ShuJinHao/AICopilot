@@ -15,8 +15,8 @@ SYNC_TIMEOUT_SECONDS="${SYNC_TIMEOUT_SECONDS:-120}"
 usage() {
   cat <<'EOF'
 Usage:
-  deploy/enterprise-ai/local-release.sh --services httpapi,web --ssh-target root@10.98.90.154
-  deploy/enterprise-ai/local-release.sh --all --ssh-target root@10.98.90.154
+  deploy/enterprise-ai/local-release.sh --services httpapi,web --ssh-target deploy@aicopilot.internal.example
+  deploy/enterprise-ai/local-release.sh --all --ssh-target deploy@aicopilot.internal.example
 
 Builds selected AICopilot images locally, pushes Harbor tags, then SSH-triggers
 the server-side deploy-release.sh entrypoint.
@@ -77,6 +77,15 @@ fi
 if [ -z "$SSH_TARGET" ]; then
   fail "AICopilot local release requires DEPLOY_SSH_TARGET or --ssh-target."
 fi
+[ -n "${REGISTRY:-}" ] || fail "REGISTRY is required, for example harbor.internal.example:80."
+[ -n "${CLOUD_PLATFORM_URL:-}" ] || fail "CLOUD_PLATFORM_URL is required, for example http://cloud.internal.example:81."
+case "$SSH_TARGET" in
+  root@*)
+    if [ "${ALLOW_ROOT_SSH_DEPLOY:-false}" != "true" ]; then
+      fail "Root SSH deploy is not the standard path. Use a dedicated deploy user, or set ALLOW_ROOT_SSH_DEPLOY=true only for a documented emergency."
+    fi
+    ;;
+esac
 
 run_with_timeout() {
   local seconds="$1"
@@ -144,11 +153,17 @@ sync_remote_deploy_files() {
     deploy-release.sh
     post-release-cleanup.sh
     harbor-retention.sh
+    runner-platform-attestation.template.md
     cloud-readonly
     scripts/apply-cloud-readonly-grants.sh
     scripts/check-cloud-readonly-grants.sh
+    scripts/check-model-secret-migration.sh
+    scripts/check-model-provider-openai.sh
+    scripts/check-platform-attestation-record.sh
+    scripts/check-release-security-attestation.sh
+    scripts/check-runner-security-attestation.sh
   )
-  local remote_command="mkdir -p '$REMOTE_DEPLOY_DIR' && cd '$REMOTE_DEPLOY_DIR' && tar --no-same-owner -xf - && chmod +x deploy-release.sh post-release-cleanup.sh harbor-retention.sh scripts/apply-cloud-readonly-grants.sh scripts/check-cloud-readonly-grants.sh"
+  local remote_command="mkdir -p '$REMOTE_DEPLOY_DIR' && cd '$REMOTE_DEPLOY_DIR' && tar --no-same-owner -xf - && chmod +x deploy-release.sh post-release-cleanup.sh harbor-retention.sh scripts/apply-cloud-readonly-grants.sh scripts/check-cloud-readonly-grants.sh scripts/check-model-secret-migration.sh scripts/check-model-provider-openai.sh scripts/check-platform-attestation-record.sh scripts/check-release-security-attestation.sh scripts/check-runner-security-attestation.sh"
 
   if [ "$DRY_RUN" = true ]; then
     printf '[dry-run] sync AICopilot deploy support files to %s:%s\n' "$SSH_TARGET" "$REMOTE_DEPLOY_DIR"

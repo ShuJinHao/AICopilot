@@ -84,7 +84,9 @@ public sealed class PostgreSqlSessionExecutionLock(
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "Failed to release PostgreSQL advisory session execution lock.");
+                logger.LogWarning(
+                    "Failed to release PostgreSQL advisory session execution lock. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                    ex.GetType().Name);
             }
             finally
             {

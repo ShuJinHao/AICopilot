@@ -61,7 +61,8 @@ export function processChunk(
     case ChunkType.Widget:
       try {
         addWidgetChunk(message, chunk, JSON.parse(chunk.content))
-      } catch {
+      } catch (error) {
+        console.error('Failed to parse widget chunk payload.', error)
         addTextChunk(message, chunk)
       }
       break
@@ -109,7 +110,8 @@ function applyMetadataChunk(message: ChatMessage, chunk: ChatChunk) {
     if (metadata.maxOutputTokens !== undefined) {
       message.maxOutputTokens = metadata.maxOutputTokens
     }
-  } catch {
+  } catch (error) {
+    console.error('Failed to parse metadata chunk payload.', error)
     if (!message.finalModelName) {
       message.finalModelName = '未知'
     }
@@ -120,7 +122,8 @@ export function getErrorCode(chunk: ChatChunk) {
   try {
     const payload = JSON.parse(chunk.content) as ChatErrorPayload
     return payload.code ?? null
-  } catch {
+  } catch (error) {
+    console.error('Failed to parse chat error code payload.', error)
     return null
   }
 }
@@ -161,7 +164,8 @@ function addIntentChunk(message: ChatMessage, chunk: ChatChunk) {
   try {
     const intents = JSON.parse(chunk.content) as IntentResult[]
     message.chunks.push({ ...chunk, intents } as IntentChunk)
-  } catch {
+  } catch (error) {
+    console.error('Failed to parse intent chunk payload.', error)
     addTextChunk(message, chunk)
   }
 }
@@ -171,7 +175,8 @@ function addFunctionCallChunk(message: ChatMessage, chunk: ChatChunk) {
     const functionCall = JSON.parse(chunk.content) as FunctionCall
     functionCall.status = 'calling'
     message.chunks.push({ ...chunk, functionCall } as FunctionCallChunk)
-  } catch {
+  } catch (error) {
+    console.error('Failed to parse function call chunk payload.', error)
     addTextChunk(message, chunk)
   }
 }
@@ -188,7 +193,8 @@ function addFunctionResultChunk(message: ChatMessage, chunk: ChatChunk) {
       functionCallChunk.functionCall.result = functionResult.result
       functionCallChunk.functionCall.status = 'completed'
     }
-  } catch {
+  } catch (error) {
+    console.error('Failed to parse function result chunk payload.', error)
     return
   }
 }
@@ -206,7 +212,8 @@ function addApprovalRequestChunk(
       status: 'pending'
     } as ApprovalChunk)
     callbacks.onApprovalChunk(message.sessionId)
-  } catch {
+  } catch (error) {
+    console.error('Failed to parse approval request chunk payload.', error)
     callbacks.setSessionError(message.sessionId, '审批请求解析失败。')
   }
 }
@@ -226,7 +233,8 @@ function addAgentEventChunk(
     if (event.stage === 'plan_draft_failed') {
       callbacks.setSessionError(message.sessionId, formatPlanDraftFailure(event))
     }
-  } catch {
+  } catch (error) {
+    console.error('Failed to parse agent event chunk payload.', error)
     callbacks.setSessionError(message.sessionId, '运行状态事件解析失败。')
   }
 }
@@ -239,7 +247,8 @@ function addAgentTaskChunk(
   try {
     const task = JSON.parse(chunk.content) as AgentTask
     callbacks.onAgentTaskChunk?.(message.sessionId, task)
-  } catch {
+  } catch (error) {
+    console.error('Failed to parse agent task chunk payload.', error)
     callbacks.setSessionError(message.sessionId, '任务状态解析失败。')
   }
 }
@@ -262,7 +271,8 @@ function addErrorChunk(
     }
 
     callbacks.setSessionError(message.sessionId, resolveChatErrorMessage(payload))
-  } catch {
+  } catch (error) {
+    console.error('Failed to parse chat error chunk payload.', error)
     callbacks.setSessionError(message.sessionId, '请求失败，请稍后重试。')
   }
 }

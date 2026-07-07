@@ -25,6 +25,25 @@ public sealed class IntentRoutingFallbackClassifierTests
     }
 
     [Fact]
+    public void TryClassify_ShouldRouteRecentDeviceInformationToReadonlyDeviceLogAnalysis()
+    {
+        var classified = IntentRoutingFallbackClassifier.TryClassify(
+            "替我查询下模切设备最近的一些信息并帮我整理分类成表格图表",
+            "routing model call failed",
+            out var intents);
+
+        classified.Should().BeTrue();
+        intents.Should().ContainSingle();
+        intents[0].Intent.Should().Be("Analysis.DeviceLog.Latest");
+        intents[0].Confidence.Should().BeGreaterThan(0.6);
+
+        using var document = JsonDocument.Parse(intents[0].Query!);
+        document.RootElement.GetProperty("queryText").GetString()
+            .Should().Be("替我查询下模切设备最近的一些信息并帮我整理分类成表格图表");
+        document.RootElement.GetProperty("sort").GetProperty("field").GetString().Should().Be("occurredAt");
+    }
+
+    [Fact]
     public void TryClassify_ShouldNotRouteNormalChatToAnalysis()
     {
         var classified = IntentRoutingFallbackClassifier.TryClassify(

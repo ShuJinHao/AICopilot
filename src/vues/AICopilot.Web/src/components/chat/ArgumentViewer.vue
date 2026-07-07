@@ -11,7 +11,8 @@ function toRecord(value: string | Record<string, unknown>) {
   try {
     const parsed = JSON.parse(value) as unknown
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : { Raw: value }
-  } catch {
+  } catch (error) {
+    console.error('Failed to parse tool argument JSON.', error)
     return { Raw: value }
   }
 }

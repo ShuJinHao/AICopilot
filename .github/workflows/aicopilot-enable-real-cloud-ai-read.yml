@@ -6,7 +6,7 @@ on:
       cloud_ai_read_base_url:
         description: Cloud AiRead base URL
         required: false
-        default: http://10.98.90.154:81
+        default: ""
         type: string
 
 permissions:
@@ -41,7 +41,11 @@ jobs:
           deploy_dir="${DEPLOY_TARGET_DIR:-/srv/enterprise-ai/deploy}"
           env_file="$deploy_dir/.env"
           compose_file="$deploy_dir/docker-compose.yaml"
-          cloud_ai_read_base_url="${CLOUD_AI_READ_BASE_URL_SECRET:-${CLOUD_AI_READ_BASE_URL_INPUT:-http://10.98.90.154:81}}"
+          cloud_ai_read_base_url="${CLOUD_AI_READ_BASE_URL_SECRET:-${CLOUD_AI_READ_BASE_URL_INPUT:-}}"
+          if [ -z "$cloud_ai_read_base_url" ]; then
+            echo "CLOUD_AI_READ_BASE_URL is required through workflow input or production secret." >&2
+            exit 64
+          fi
 
           if [ ! -d "$deploy_dir" ]; then
             echo "Missing deploy directory: $deploy_dir" >&2
@@ -57,6 +61,13 @@ jobs:
             echo "Missing compose file: $compose_file" >&2
             exit 66
           fi
+
+          runner_attestation="$deploy_dir/scripts/check-runner-security-attestation.sh"
+          if [ ! -x "$runner_attestation" ]; then
+            echo "Missing runner security attestation script: $runner_attestation" >&2
+            exit 66
+          fi
+          "$runner_attestation" --deploy-dir "$deploy_dir"
 
           if [ -z "${CLOUD_AI_SERVICE_ACCOUNT_TOKEN:-}" ]; then
             echo "CLOUD_AI_SERVICE_ACCOUNT_TOKEN GitHub environment secret is not configured." >&2

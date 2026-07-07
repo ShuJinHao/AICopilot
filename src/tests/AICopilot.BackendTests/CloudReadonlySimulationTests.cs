@@ -126,6 +126,32 @@ public sealed class CloudReadonlySimulationTests
     }
 
     [Fact]
+    public async Task RealProvider_ShouldPropagateCloudAiReadFailureWithoutSimulationFallback()
+    {
+        var provider = new RealCloudReadonlyDataProvider(
+            new FixedSemanticQueryPlanner(),
+            new FailingCloudAiReadClient(),
+            Options.Create(new CloudReadonlyOptions
+            {
+                Mode = CloudReadonlyDataSourceMode.Real,
+                Real = new CloudReadonlyRealOptions
+                {
+                    Enabled = true,
+                    AllowProductionRead = true
+                }
+            }));
+
+        var action = () => provider.QueryAsync(new CloudReadonlyAgentToolRequest(
+            "Analysis.Device.List",
+            """{"lineName":"LINE-A"}""",
+            0.9));
+
+        var exception = await action.Should().ThrowAsync<CloudAiReadException>();
+        exception.Which.Code.Should().Be(CloudAiReadProblemCodes.Unavailable);
+        exception.Which.Message.Should().NotContain("Simulation");
+    }
+
+    [Fact]
     public void CloudReadonlyStatus_ShouldReturnSanitizedRealReady()
     {
         var status = CloudReadonlyStatusEvaluator.Evaluate(
@@ -279,6 +305,69 @@ public sealed class CloudReadonlySimulationTests
             CancellationToken cancellationToken = default)
         {
             throw new InvalidOperationException("Real Cloud client should not be called.");
+        }
+    }
+
+    private sealed class FailingCloudAiReadClient : ICloudAiReadClient
+    {
+        public bool IsEnabled => true;
+
+        public Task<JsonDocument> SendJsonAsync(
+            HttpMethod method,
+            string path,
+            IReadOnlyDictionary<string, string?>? query = null,
+            CancellationToken cancellationToken = default)
+        {
+            throw CreateUnavailableException();
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadDeviceDto>> GetDevicesAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw CreateUnavailableException();
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadCapacitySummaryDto>> GetCapacitySummaryAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw CreateUnavailableException();
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadCapacityHourlyDto>> GetCapacityHourlyAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw CreateUnavailableException();
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadDeviceLogDto>> GetDeviceLogsAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw CreateUnavailableException();
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadProductionRecordDto>> GetProductionRecordsAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw CreateUnavailableException();
+        }
+
+        public Task<CloudAiReadResult<object>> QuerySemanticAsync(
+            SemanticQueryPlan plan,
+            CancellationToken cancellationToken = default)
+        {
+            throw CreateUnavailableException();
+        }
+
+        private static CloudAiReadException CreateUnavailableException()
+        {
+            return new CloudAiReadException(
+                CloudAiReadProblemCodes.Unavailable,
+                "Cloud AiRead endpoint is unavailable.");
         }
     }
 }

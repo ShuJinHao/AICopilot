@@ -1,8 +1,7 @@
 using System.Text.Json;
 using AICopilot.AiGatewayService.Models;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
-using AICopilot.Core.AiGateway.Ids;
-using AICopilot.Core.AiGateway.Specifications.Sessions;
+using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Repository;
 
 namespace AICopilot.AiGatewayService.Sessions;
@@ -15,7 +14,7 @@ public sealed record SessionMessageAppend(
 
 public class SessionMessagePersistenceService(
     IRepository<Session> repository,
-    IRepository<MessageEvent> messageEventRepository)
+    IMessageTimelineProjectionStore messageTimelineProjectionStore)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -52,9 +51,7 @@ public class SessionMessagePersistenceService(
             return;
         }
 
-        var existingEvents = await messageEventRepository.ListAsync(
-            new MessageEventsBySessionSpec(new SessionId(sessionId)),
-            cancellationToken);
+        var existingEvents = await messageTimelineProjectionStore.ListBySessionAsync(session.Id, cancellationToken: cancellationToken);
         var nextEventSequence = Math.Max(
             existingEvents.Count == 0 ? 0 : existingEvents.Max(item => item.Sequence),
             session.Messages.Count == 0 ? 0 : session.Messages.Max(item => item.Sequence));
@@ -67,7 +64,7 @@ public class SessionMessagePersistenceService(
                 entry.Type,
                 entry.ModelSnapshot,
                 SerializeRenderChunks(entry));
-            messageEventRepository.Add(MessageEvent.ForMessage(
+            messageTimelineProjectionStore.Add(MessageEvent.ForMessage(
                 session.Id,
                 ++nextEventSequence,
                 message));
