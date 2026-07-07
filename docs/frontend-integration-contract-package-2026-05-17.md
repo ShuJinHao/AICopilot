@@ -94,6 +94,9 @@ Cloud read-only requests must use the current Cloud API contract directly:
 | Scenario | Path | Required query |
 | --- | --- | --- |
 | Devices | `/api/v1/ai/read/devices` | `maxRows`, optional `keyword` |
+| Processes | `/api/v1/ai/read/processes` | `maxRows`, optional `keyword` |
+| Client releases | `/api/v1/ai/read/client-releases` | `maxRows`, optional `channel`, `targetRuntime`, `status`, `includeArchived` |
+| Device client states | `/api/v1/ai/read/device-client-states` | `maxRows`, optional `deviceId`, optional `keyword` |
 | Capacity summary | `/api/v1/ai/read/capacity/summary` | `deviceId`, `startDate`, `endDate`, `maxRows` |
 | Capacity hourly | `/api/v1/ai/read/capacity/hourly` | `deviceId`, `date` or `preset`, optional `plcName`, `maxRows` |
 | Device logs | `/api/v1/ai/read/device-logs` | `deviceId`, `startTime`/`endTime` or `preset`, optional `level` or `minLevel`, optional `keyword`, `maxRows` |

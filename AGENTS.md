@@ -46,6 +46,7 @@
 - Human-in-the-loop approval is not permission to write Cloud business data.
 - Cloud AI-facing APIs are read-only contract surfaces unless the user explicitly approves a new cross-repository write contract.
 - Cloud AiRead 正式设备参数是 `deviceId`；`deviceCode` 只能用于设备查询/解析，不得被当作 `deviceId` 发送给 Cloud。
+- AICopilot `CloudAiReadEndpointPolicy` 和 `ICloudAiReadClient` 必须逐项覆盖 Cloud `AI只读接口契约.md` 已批准的正式 `GET /api/v1/ai/read/*` 表面；不能只接高频端点后宣称 Cloud-AI 接口已全部对齐。
 - Cloud 只读读取只能向 Cloud 发送真实端点参数；`scenarioId`、`from`、`to`、`pilotWindowId`、`boundary` 等试点元数据不得透传给 Cloud。
 - 内部开发允许通过 DataAnalysis `CloudReadOnly` 只读数据源直连真实 Cloud PostgreSQL 做 Text-to-SQL 验证；必须使用已验证只读数据库账号、白名单表字段和只读 SQL guard，不得写 Cloud 业务数据，也不得用 Simulation 冒充真实数据。
 - 高频设备日志、小时/汇总产能和生产数据查询优先走 Cloud AiRead 正式只读 API；DataAnalysis `CloudReadOnly` Direct DB / Text-to-SQL 只作为低频探索、治理白名单内补充分析或未覆盖只读链路兜底，不得压过已批准的高频 Cloud AiRead 端点。

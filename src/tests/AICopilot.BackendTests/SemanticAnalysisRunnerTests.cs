@@ -688,6 +688,27 @@ public sealed class SemanticAnalysisRunnerTests
             throw new InvalidOperationException("Cloud AiRead must not be called for recipe data.");
         }
 
+        public Task<CloudAiReadResult<CloudAiReadProcessDto>> GetProcessesAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("Cloud AiRead must not be called for recipe data.");
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadClientReleaseVersionDto>> GetClientReleasesAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("Cloud AiRead must not be called for recipe data.");
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadDeviceClientStateDto>> GetDeviceClientStatesAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("Cloud AiRead must not be called for recipe data.");
+        }
+
         public Task<CloudAiReadResult<CloudAiReadCapacitySummaryDto>> GetCapacitySummaryAsync(
             CloudAiReadQuery query,
             CancellationToken cancellationToken = default)
@@ -740,6 +761,27 @@ public sealed class SemanticAnalysisRunnerTests
         }
 
         public Task<CloudAiReadResult<CloudAiReadDeviceDto>> GetDevicesAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("Semantic runner test should use QuerySemanticAsync.");
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadProcessDto>> GetProcessesAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("Semantic runner test should use QuerySemanticAsync.");
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadClientReleaseVersionDto>> GetClientReleasesAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("Semantic runner test should use QuerySemanticAsync.");
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadDeviceClientStateDto>> GetDeviceClientStatesAsync(
             CloudAiReadQuery query,
             CancellationToken cancellationToken = default)
         {

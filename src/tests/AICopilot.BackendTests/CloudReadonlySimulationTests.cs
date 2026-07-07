@@ -272,6 +272,27 @@ public sealed class CloudReadonlySimulationTests
             throw new InvalidOperationException("Real Cloud client should not be called.");
         }
 
+        public Task<CloudAiReadResult<CloudAiReadProcessDto>> GetProcessesAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("Real Cloud client should not be called.");
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadClientReleaseVersionDto>> GetClientReleasesAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("Real Cloud client should not be called.");
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadDeviceClientStateDto>> GetDeviceClientStatesAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("Real Cloud client should not be called.");
+        }
+
         public Task<CloudAiReadResult<CloudAiReadCapacitySummaryDto>> GetCapacitySummaryAsync(
             CloudAiReadQuery query,
             CancellationToken cancellationToken = default)
@@ -322,6 +343,27 @@ public sealed class CloudReadonlySimulationTests
         }
 
         public Task<CloudAiReadResult<CloudAiReadDeviceDto>> GetDevicesAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw CreateUnavailableException();
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadProcessDto>> GetProcessesAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw CreateUnavailableException();
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadClientReleaseVersionDto>> GetClientReleasesAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw CreateUnavailableException();
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadDeviceClientStateDto>> GetDeviceClientStatesAsync(
             CloudAiReadQuery query,
             CancellationToken cancellationToken = default)
         {

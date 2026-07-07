@@ -234,7 +234,7 @@ git log --oneline -n 20 -- AICopilot.slnx deploy src docs AGENTS.md 资料
 
 实施要点：
 
-- `CloudAiReadEndpointPolicy` 只允许批准的 GET/只读 POST 路径。
+- `CloudAiReadEndpointPolicy` 只允许批准的 GET/只读 POST 路径；GET allowlist 必须逐项覆盖 Cloud `AI只读接口契约.md` 当前八个正式表面：`devices`、`processes`、`client-releases`、`device-client-states`、`capacity/summary`、`capacity/hourly`、`device-logs`、`production-records`。
 - `deviceCode` 只能用于设备解析，不能当 `deviceId` 发送给业务读取端点。
 - `scenarioId`、`from`、`to`、`pilotWindowId`、`boundary` 等 AI 内部参数不得透传 Cloud。
 - Cloud 只读 DB direct mode 必须继续使用只读账号、显式白名单表、preflight grant check。
@@ -246,7 +246,7 @@ git log --oneline -n 20 -- AICopilot.slnx deploy src docs AGENTS.md 资料
 - `ArchitectureBoundaryTests` 固化 AICopilot 不直接引用 Cloud 项目/命名空间、Cloud write tools 不纳入范围、CloudReadOnly direct DB 只读 guard、governed schema、只读账号 grant preflight 和高频 Cloud AiRead 优先级。
 - `CloudReadonlyChatBoundaryTests` 阻断 Cloud 业务修改、禁用设备、补录产能、删除日志和上传生产数据等写语义。
 - `CloudReadonlySimulationTests` 固化 Simulation 只能在 Development 使用，Real 模式必须双开 `CloudReadonly:Real` 和 `CloudAiRead`，Cloud AiRead 不可用时不得降级返回 Simulation。
-- `CloudAiReadClientTests` 固化 `/api/v1/ai/read/device-logs`、`capacity/summary`、`capacity/hourly`、`production-records` 端点和参数契约；`deviceCode` 必须先解析成唯一 `deviceId` 后才能用于高频业务读取。
+- `CloudAiReadClientTests` 固化 `/api/v1/ai/read/devices`、`processes`、`client-releases`、`device-client-states`、`device-logs`、`capacity/summary`、`capacity/hourly`、`production-records` 端点和参数契约；`deviceCode` 必须先解析成唯一 `deviceId` 后才能用于高频业务读取，设备客户端状态搜索也只能转换为 `keyword`，不得把 `deviceCode` 当正式业务参数透传。
 - `SemanticAnalysisRunnerTests` 固化高频 DeviceLog/Capacity/ProductionData 在 CloudAiRead 启用时优先走 Cloud AiRead；Direct DB / Text-to-SQL 只保留治理白名单内补充分析。
 - `DeviceLogFollowUpIntentRewriterTests` 固化追问日志级别、设备、工序、时间窗口时重新生成 `Analysis.DeviceLog.*` 查询。
 

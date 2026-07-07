@@ -708,7 +708,7 @@ public sealed class ArchitectureBoundaryTests
         smokeScript.Should().Contain("Model base URL must not include userinfo credentials.");
         smokeScript.Should().Contain("Model base URL must not include query string or fragment.");
         smokeScript.Should().Contain("cannot contain whitespace or HTTP header control characters.");
-        smokeScript.Should().NotContain("10.98.200.20");
+        smokeScript.Should().NotMatchRegex(@"10\.98\.\d{1,3}\.\d{1,3}");
         smokeScript.Should().NotContain("Authorization: Bearer dummy-key");
         smokeScript.Should().NotContain("sk-");
         deployRelease.Should().Contain("check_model_provider_preflight");

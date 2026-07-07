@@ -22,6 +22,17 @@
 
 ## 3. Cloud AiRead 优先路径
 
+Cloud 当前正式 AI Read 只读表面必须在 AICopilot 客户端 allowlist 中逐项对齐：
+
+- 设备：`/api/v1/ai/read/devices`
+- 工序：`/api/v1/ai/read/processes`
+- 客户端发布版本：`/api/v1/ai/read/client-releases`
+- 设备客户端状态：`/api/v1/ai/read/device-client-states`
+- 汇总产能：`/api/v1/ai/read/capacity/summary`
+- 小时产能：`/api/v1/ai/read/capacity/hourly`
+- 设备日志：`/api/v1/ai/read/device-logs`
+- 生产记录：`/api/v1/ai/read/production-records`
+
 高频业务读取必须优先走 Cloud AiRead 正式只读 API：
 
 - 设备日志：`/api/v1/ai/read/device-logs`

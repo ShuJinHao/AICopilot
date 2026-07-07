@@ -38,6 +38,48 @@ internal static class CloudAiReadQueryParameterBuilder
         return parameters;
     }
 
+    public static Dictionary<string, string?> BuildProcessQueryParameters(CloudAiReadQuery query)
+    {
+        var parameters = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["maxRows"] = FormatMaxRows(query.Limit)
+        };
+
+        var keyword = FirstNonBlank(
+            GetFilterValue(query, "keyword", "processId", "processCode", "processName"),
+            query.QueryText);
+        if (!string.IsNullOrWhiteSpace(keyword))
+        {
+            parameters["keyword"] = keyword;
+        }
+
+        return parameters;
+    }
+
+    public static Dictionary<string, string?> BuildClientReleaseQueryParameters(CloudAiReadQuery query)
+    {
+        return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["channel"] = GetFilterValue(query, "channel"),
+            ["targetRuntime"] = GetFilterValue(query, "targetRuntime", "runtime"),
+            ["status"] = GetFilterValue(query, "status"),
+            ["includeArchived"] = NormalizeBoolean(GetFilterValue(query, "includeArchived", "archived")),
+            ["maxRows"] = FormatMaxRows(query.Limit)
+        };
+    }
+
+    public static Dictionary<string, string?> BuildDeviceClientStateQueryParameters(CloudAiReadQuery query)
+    {
+        return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["deviceId"] = GetFilterValue(query, "deviceId"),
+            ["keyword"] = FirstNonBlank(
+                GetFilterValue(query, "keyword", "clientCode", "deviceCode", "deviceName", "primaryIp", "hostVersion", "runtimeStatus"),
+                query.QueryText),
+            ["maxRows"] = FormatMaxRows(query.Limit)
+        };
+    }
+
     public static Dictionary<string, string?> BuildCapacityQueryParameters(CloudAiReadQuery query)
     {
         var deviceId = RequireFilterValue(query, "deviceId", "请补充设备 ID。", "deviceId");
@@ -168,6 +210,26 @@ internal static class CloudAiReadQueryParameterBuilder
     private static string FormatMaxRows(int limit)
     {
         return Math.Max(1, limit).ToString(CultureInfo.InvariantCulture);
+    }
+
+    private static string? NormalizeBoolean(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        if (bool.TryParse(value, out var parsed))
+        {
+            return parsed ? "true" : "false";
+        }
+
+        return value.Trim() switch
+        {
+            "1" => "true",
+            "0" => "false",
+            _ => value.Trim()
+        };
     }
 
     private static string FormatCloudDate(DateTimeOffset value)

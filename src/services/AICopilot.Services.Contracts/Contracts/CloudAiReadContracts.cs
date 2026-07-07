@@ -92,6 +92,9 @@ public static class CloudAiReadEndpointPolicy
     private static readonly string[] AllowedGetPaths =
     [
         "/api/v1/ai/read/devices",
+        "/api/v1/ai/read/processes",
+        "/api/v1/ai/read/client-releases",
+        "/api/v1/ai/read/device-client-states",
         "/api/v1/ai/read/capacity/summary",
         "/api/v1/ai/read/capacity/hourly",
         "/api/v1/ai/read/production-records",
@@ -312,6 +315,43 @@ public sealed record CloudAiReadDeviceDto(
     DateTimeOffset? UpdatedAt,
     IReadOnlyDictionary<string, object?> AdditionalFields);
 
+public sealed record CloudAiReadProcessDto(
+    string? ProcessId,
+    string? ProcessCode,
+    string? ProcessName,
+    IReadOnlyDictionary<string, object?> AdditionalFields);
+
+public sealed record CloudAiReadClientReleaseVersionDto(
+    string? ReleaseId,
+    string? ComponentKind,
+    string? ComponentKey,
+    string? DisplayName,
+    string? Channel,
+    string? TargetRuntime,
+    string? Version,
+    string? Status,
+    string? ReleaseNotes,
+    DateTimeOffset? CreatedAtUtc,
+    DateTimeOffset? PublishedAtUtc,
+    DateTimeOffset? DeletedAtUtc,
+    IReadOnlyDictionary<string, object?> AdditionalFields);
+
+public sealed record CloudAiReadDeviceClientStateDto(
+    string? DeviceId,
+    string? DeviceName,
+    string? ClientCode,
+    string? PrimaryIp,
+    string? Channel,
+    string? HostVersion,
+    string? HostApiVersion,
+    DateTimeOffset? VersionReportedAtUtc,
+    DateTimeOffset? VersionReceivedAtUtc,
+    string? RuntimeStatus,
+    DateTimeOffset? RuntimeStartedAtUtc,
+    DateTimeOffset? LastRuntimeHeartbeatAtUtc,
+    DateTimeOffset? UpdatedAtUtc,
+    IReadOnlyDictionary<string, object?> AdditionalFields);
+
 public sealed record CloudAiReadCapacitySummaryDto(
     string? Date,
     decimal? TotalCount,
@@ -382,6 +422,18 @@ public interface ICloudAiReadClient
         CancellationToken cancellationToken = default);
 
     Task<CloudAiReadResult<CloudAiReadDeviceDto>> GetDevicesAsync(
+        CloudAiReadQuery query,
+        CancellationToken cancellationToken = default);
+
+    Task<CloudAiReadResult<CloudAiReadProcessDto>> GetProcessesAsync(
+        CloudAiReadQuery query,
+        CancellationToken cancellationToken = default);
+
+    Task<CloudAiReadResult<CloudAiReadClientReleaseVersionDto>> GetClientReleasesAsync(
+        CloudAiReadQuery query,
+        CancellationToken cancellationToken = default);
+
+    Task<CloudAiReadResult<CloudAiReadDeviceClientStateDto>> GetDeviceClientStatesAsync(
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default);
 

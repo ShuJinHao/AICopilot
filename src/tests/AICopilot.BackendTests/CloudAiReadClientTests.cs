@@ -11,6 +11,9 @@ public sealed class CloudAiReadClientTests
 {
     [Theory]
     [InlineData("/api/v1/ai/read/devices")]
+    [InlineData("/api/v1/ai/read/processes")]
+    [InlineData("/api/v1/ai/read/client-releases")]
+    [InlineData("/api/v1/ai/read/device-client-states")]
     [InlineData("/api/v1/ai/read/capacity/summary")]
     [InlineData("/api/v1/ai/read/capacity/hourly")]
     [InlineData("/api/v1/ai/read/device-logs")]
@@ -128,6 +131,164 @@ public sealed class CloudAiReadClientTests
         query.Should().Contain("keyword", "DEV-001");
         query.Should().Contain("maxRows", "20");
         AssertNoLegacyParameters(query);
+    }
+
+    [Fact]
+    public async Task Client_ShouldSendProcessQueryWithKeywordAndMaxRowsOnly()
+    {
+        HttpRequestMessage? capturedRequest = null;
+        using var httpClient = new HttpClient(new StubHandler(request =>
+        {
+            capturedRequest = request;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(new
+                {
+                    items = new[]
+                    {
+                        new
+                        {
+                            id = "process-1",
+                            processCode = "CUT",
+                            processName = "模切"
+                        }
+                    },
+                    isTruncated = false
+                })
+            };
+        }));
+        var client = CreateClient(httpClient);
+
+        var result = await client.GetProcessesAsync(new CloudAiReadQuery(
+            "不要作为 queryText 发送",
+            [new CloudAiReadFilter("processName", "contains", "模切")],
+            null,
+            "processName",
+            false,
+            15));
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.RequestUri!.AbsolutePath.Should().Be("/api/v1/ai/read/processes");
+        var query = ParseQuery(capturedRequest.RequestUri);
+        query.Should().Contain("keyword", "模切");
+        query.Should().Contain("maxRows", "15");
+        AssertNoLegacyParameters(query);
+        result.Items.Should().ContainSingle().Which.ProcessCode.Should().Be("CUT");
+        result.Rows[0]["processName"].Should().Be("模切");
+    }
+
+    [Fact]
+    public async Task Client_ShouldSendClientReleaseQueryWithCloudAiReadParametersOnly()
+    {
+        HttpRequestMessage? capturedRequest = null;
+        using var httpClient = new HttpClient(new StubHandler(request =>
+        {
+            capturedRequest = request;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(new
+                {
+                    items = new[]
+                    {
+                        new
+                        {
+                            id = "release-1",
+                            componentKind = "Host",
+                            componentKey = "edge-host",
+                            displayName = "Edge Host",
+                            channel = "stable",
+                            targetRuntime = "win-x64",
+                            version = "1.2.3",
+                            status = "Published",
+                            releaseNotes = "history",
+                            createdAtUtc = "2026-05-10T01:02:03Z",
+                            publishedAtUtc = "2026-05-11T01:02:03Z"
+                        }
+                    },
+                    isTruncated = false
+                })
+            };
+        }));
+        var client = CreateClient(httpClient);
+
+        var result = await client.GetClientReleasesAsync(new CloudAiReadQuery(
+            "不要作为 queryText 发送",
+            [
+                new CloudAiReadFilter("channel", "eq", "stable"),
+                new CloudAiReadFilter("targetRuntime", "eq", "win-x64"),
+                new CloudAiReadFilter("status", "eq", "Published"),
+                new CloudAiReadFilter("includeArchived", "eq", "1")
+            ],
+            null,
+            "publishedAtUtc",
+            true,
+            12));
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.RequestUri!.AbsolutePath.Should().Be("/api/v1/ai/read/client-releases");
+        var query = ParseQuery(capturedRequest.RequestUri);
+        query.Should().Contain("channel", "stable");
+        query.Should().Contain("targetRuntime", "win-x64");
+        query.Should().Contain("status", "Published");
+        query.Should().Contain("includeArchived", "true");
+        query.Should().Contain("maxRows", "12");
+        AssertNoLegacyParameters(query);
+        result.Items.Should().ContainSingle().Which.Version.Should().Be("1.2.3");
+        result.Rows[0]["componentKey"].Should().Be("edge-host");
+    }
+
+    [Fact]
+    public async Task Client_ShouldSendDeviceClientStateQueryWithOfficialParametersOnly()
+    {
+        HttpRequestMessage? capturedRequest = null;
+        using var httpClient = new HttpClient(new StubHandler(request =>
+        {
+            capturedRequest = request;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(new
+                {
+                    items = new[]
+                    {
+                        new
+                        {
+                            deviceId = "device-1",
+                            deviceName = "模切一号",
+                            clientCode = "EDGE-001",
+                            primaryIp = "10.0.0.11",
+                            channel = "stable",
+                            hostVersion = "1.2.3",
+                            hostApiVersion = "2026.07",
+                            runtimeStatus = "Running",
+                            updatedAtUtc = "2026-05-11T01:02:03Z"
+                        }
+                    },
+                    isTruncated = false
+                })
+            };
+        }));
+        var client = CreateClient(httpClient);
+
+        var result = await client.GetDeviceClientStatesAsync(new CloudAiReadQuery(
+            "不要作为 queryText 发送",
+            [
+                new CloudAiReadFilter("deviceId", "eq", "device-1"),
+                new CloudAiReadFilter("clientCode", "eq", "EDGE-001")
+            ],
+            null,
+            "updatedAtUtc",
+            true,
+            10));
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.RequestUri!.AbsolutePath.Should().Be("/api/v1/ai/read/device-client-states");
+        var query = ParseQuery(capturedRequest.RequestUri);
+        query.Should().Contain("deviceId", "device-1");
+        query.Should().Contain("keyword", "EDGE-001");
+        query.Should().Contain("maxRows", "10");
+        AssertNoLegacyParameters(query);
+        result.Items.Should().ContainSingle().Which.RuntimeStatus.Should().Be("Running");
+        result.Rows[0]["clientCode"].Should().Be("EDGE-001");
     }
 
     [Fact]

@@ -11,6 +11,9 @@ public sealed class CloudAiReadClient(
     ILogger<CloudAiReadClient> logger) : ICloudAiReadClient
 {
     private const string DevicesPath = "/api/v1/ai/read/devices";
+    private const string ProcessesPath = "/api/v1/ai/read/processes";
+    private const string ClientReleasesPath = "/api/v1/ai/read/client-releases";
+    private const string DeviceClientStatesPath = "/api/v1/ai/read/device-client-states";
     private const string CapacitySummaryPath = "/api/v1/ai/read/capacity/summary";
     private const string CapacityHourlyPath = "/api/v1/ai/read/capacity/hourly";
     private const string DeviceLogsPath = "/api/v1/ai/read/device-logs";
@@ -57,6 +60,45 @@ public sealed class CloudAiReadClient(
             cancellationToken);
 
         return CloudAiReadDocumentAdapter.MapDevices(document.RootElement, DevicesPath, query.Limit);
+    }
+
+    public async Task<CloudAiReadResult<CloudAiReadProcessDto>> GetProcessesAsync(
+        CloudAiReadQuery query,
+        CancellationToken cancellationToken = default)
+    {
+        using var document = await SendJsonAsync(
+            HttpMethod.Get,
+            ProcessesPath,
+            CloudAiReadQueryParameterBuilder.BuildProcessQueryParameters(query),
+            cancellationToken);
+
+        return CloudAiReadDocumentAdapter.MapProcesses(document.RootElement, ProcessesPath, query.Limit);
+    }
+
+    public async Task<CloudAiReadResult<CloudAiReadClientReleaseVersionDto>> GetClientReleasesAsync(
+        CloudAiReadQuery query,
+        CancellationToken cancellationToken = default)
+    {
+        using var document = await SendJsonAsync(
+            HttpMethod.Get,
+            ClientReleasesPath,
+            CloudAiReadQueryParameterBuilder.BuildClientReleaseQueryParameters(query),
+            cancellationToken);
+
+        return CloudAiReadDocumentAdapter.MapClientReleases(document.RootElement, ClientReleasesPath, query.Limit);
+    }
+
+    public async Task<CloudAiReadResult<CloudAiReadDeviceClientStateDto>> GetDeviceClientStatesAsync(
+        CloudAiReadQuery query,
+        CancellationToken cancellationToken = default)
+    {
+        using var document = await SendJsonAsync(
+            HttpMethod.Get,
+            DeviceClientStatesPath,
+            CloudAiReadQueryParameterBuilder.BuildDeviceClientStateQueryParameters(query),
+            cancellationToken);
+
+        return CloudAiReadDocumentAdapter.MapDeviceClientStates(document.RootElement, DeviceClientStatesPath, query.Limit);
     }
 
     public async Task<CloudAiReadResult<CloudAiReadCapacitySummaryDto>> GetCapacitySummaryAsync(

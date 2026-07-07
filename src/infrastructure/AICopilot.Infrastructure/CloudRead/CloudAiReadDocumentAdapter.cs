@@ -33,6 +33,110 @@ internal static class CloudAiReadDocumentAdapter
         return BuildResult(sourcePath, "Cloud AiRead API（设备正式只读数据）", limit, root, items, rows);
     }
 
+    public static CloudAiReadResult<CloudAiReadProcessDto> MapProcesses(
+        JsonElement root,
+        string sourcePath,
+        int limit)
+    {
+        var records = CloudAiReadJsonValueReader.ExtractRecords(root, limit);
+        var items = records.Select(record => new CloudAiReadProcessDto(
+            CloudAiReadJsonValueReader.GetString(record, "processId", "id"),
+            CloudAiReadJsonValueReader.GetString(record, "processCode", "code"),
+            CloudAiReadJsonValueReader.GetString(record, "processName", "name"),
+            CloudAiReadJsonValueReader.ExtractAdditionalFields(record))).ToArray();
+
+        var rows = items.Select(item => new Dictionary<string, object?>
+        {
+            ["processId"] = item.ProcessId,
+            ["processCode"] = item.ProcessCode,
+            ["processName"] = item.ProcessName
+        }).ToArray();
+
+        return BuildResult(sourcePath, "Cloud AiRead API（工序正式只读数据）", limit, root, items, rows);
+    }
+
+    public static CloudAiReadResult<CloudAiReadClientReleaseVersionDto> MapClientReleases(
+        JsonElement root,
+        string sourcePath,
+        int limit)
+    {
+        var records = CloudAiReadJsonValueReader.ExtractRecords(root, limit);
+        var items = records.Select(record => new CloudAiReadClientReleaseVersionDto(
+            CloudAiReadJsonValueReader.GetString(record, "releaseId", "id"),
+            CloudAiReadJsonValueReader.GetString(record, "componentKind"),
+            CloudAiReadJsonValueReader.GetString(record, "componentKey"),
+            CloudAiReadJsonValueReader.GetString(record, "displayName"),
+            CloudAiReadJsonValueReader.GetString(record, "channel"),
+            CloudAiReadJsonValueReader.GetString(record, "targetRuntime"),
+            CloudAiReadJsonValueReader.GetString(record, "version"),
+            CloudAiReadJsonValueReader.GetString(record, "status"),
+            CloudAiReadJsonValueReader.GetString(record, "releaseNotes"),
+            CloudAiReadJsonValueReader.GetDate(record, "createdAtUtc", "createdAt"),
+            CloudAiReadJsonValueReader.GetDate(record, "publishedAtUtc", "publishedAt"),
+            CloudAiReadJsonValueReader.GetDate(record, "deletedAtUtc", "deletedAt"),
+            CloudAiReadJsonValueReader.ExtractAdditionalFields(record))).ToArray();
+
+        var rows = items.Select(item => new Dictionary<string, object?>
+        {
+            ["releaseId"] = item.ReleaseId,
+            ["componentKind"] = item.ComponentKind,
+            ["componentKey"] = item.ComponentKey,
+            ["displayName"] = item.DisplayName,
+            ["channel"] = item.Channel,
+            ["targetRuntime"] = item.TargetRuntime,
+            ["version"] = item.Version,
+            ["status"] = item.Status,
+            ["releaseNotes"] = item.ReleaseNotes,
+            ["createdAtUtc"] = item.CreatedAtUtc,
+            ["publishedAtUtc"] = item.PublishedAtUtc,
+            ["deletedAtUtc"] = item.DeletedAtUtc
+        }).ToArray();
+
+        return BuildResult(sourcePath, "Cloud AiRead API（客户端发布版本正式只读数据）", limit, root, items, rows);
+    }
+
+    public static CloudAiReadResult<CloudAiReadDeviceClientStateDto> MapDeviceClientStates(
+        JsonElement root,
+        string sourcePath,
+        int limit)
+    {
+        var records = CloudAiReadJsonValueReader.ExtractRecords(root, limit);
+        var items = records.Select(record => new CloudAiReadDeviceClientStateDto(
+            CloudAiReadJsonValueReader.GetString(record, "deviceId", "id"),
+            CloudAiReadJsonValueReader.GetString(record, "deviceName"),
+            CloudAiReadJsonValueReader.GetString(record, "clientCode", "deviceCode"),
+            CloudAiReadJsonValueReader.GetString(record, "primaryIp"),
+            CloudAiReadJsonValueReader.GetString(record, "channel"),
+            CloudAiReadJsonValueReader.GetString(record, "hostVersion"),
+            CloudAiReadJsonValueReader.GetString(record, "hostApiVersion"),
+            CloudAiReadJsonValueReader.GetDate(record, "versionReportedAtUtc", "versionReportedAt"),
+            CloudAiReadJsonValueReader.GetDate(record, "versionReceivedAtUtc", "versionReceivedAt"),
+            CloudAiReadJsonValueReader.GetString(record, "runtimeStatus"),
+            CloudAiReadJsonValueReader.GetDate(record, "runtimeStartedAtUtc", "runtimeStartedAt"),
+            CloudAiReadJsonValueReader.GetDate(record, "lastRuntimeHeartbeatAtUtc", "lastRuntimeHeartbeatAt"),
+            CloudAiReadJsonValueReader.GetDate(record, "updatedAtUtc", "updatedAt"),
+            CloudAiReadJsonValueReader.ExtractAdditionalFields(record))).ToArray();
+
+        var rows = items.Select(item => new Dictionary<string, object?>
+        {
+            ["deviceId"] = item.DeviceId,
+            ["deviceName"] = item.DeviceName,
+            ["clientCode"] = item.ClientCode,
+            ["primaryIp"] = item.PrimaryIp,
+            ["channel"] = item.Channel,
+            ["hostVersion"] = item.HostVersion,
+            ["hostApiVersion"] = item.HostApiVersion,
+            ["versionReportedAtUtc"] = item.VersionReportedAtUtc,
+            ["versionReceivedAtUtc"] = item.VersionReceivedAtUtc,
+            ["runtimeStatus"] = item.RuntimeStatus,
+            ["runtimeStartedAtUtc"] = item.RuntimeStartedAtUtc,
+            ["lastRuntimeHeartbeatAtUtc"] = item.LastRuntimeHeartbeatAtUtc,
+            ["updatedAtUtc"] = item.UpdatedAtUtc
+        }).ToArray();
+
+        return BuildResult(sourcePath, "Cloud AiRead API（设备客户端状态正式只读数据）", limit, root, items, rows);
+    }
+
     public static CloudAiReadResult<CloudAiReadCapacitySummaryDto> MapCapacitySummary(
         JsonElement root,
         string sourcePath,
