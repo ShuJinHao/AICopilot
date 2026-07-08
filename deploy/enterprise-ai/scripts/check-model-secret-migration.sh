@@ -65,6 +65,7 @@ check_model_secret_decryptability() {
 
 check_model_secret_migration() {
   local postgres_user
+  local postgres_password
   local postgres_db
   local result_file
 
@@ -75,12 +76,14 @@ check_model_secret_migration() {
   fi
 
   postgres_user="$(read_env_value POSTGRES_USER)"
+  postgres_password="$(read_env_value POSTGRES_PASSWORD)"
   postgres_db="$(read_env_value POSTGRES_DB)"
   [ -n "$postgres_user" ] || fail "POSTGRES_USER is required in $ENV_FILE."
+  [ -n "$postgres_password" ] || fail "POSTGRES_PASSWORD is required in $ENV_FILE."
   [ -n "$postgres_db" ] || fail "POSTGRES_DB is required in $ENV_FILE."
 
   result_file="$(mktemp "${TMPDIR:-/tmp}/aicopilot-secret-migration.XXXXXX")"
-  if ! compose exec -T postgres psql \
+  if ! compose exec -T -e PGPASSWORD="$postgres_password" postgres psql \
     -v ON_ERROR_STOP=1 \
     -U "$postgres_user" \
     -d "$postgres_db" \

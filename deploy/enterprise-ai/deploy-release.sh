@@ -611,6 +611,38 @@ check_model_secret_migration_preflight() {
   fi
 }
 
+wait_for_compose_service_healthy() {
+  local service="$1"
+  local timeout_seconds="${2:-180}"
+  local elapsed_seconds=0
+  local container_id
+  local status
+
+  printf 'Waiting for %s to become healthy.\n' "$service"
+  while [ "$elapsed_seconds" -lt "$timeout_seconds" ]; do
+    container_id="$(compose ps -q "$service" 2>/dev/null | head -n 1 || true)"
+    if [ -n "$container_id" ]; then
+      status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container_id" 2>/dev/null || true)"
+      case "$status" in
+        healthy)
+          printf '%s is healthy.\n' "$service"
+          return
+          ;;
+        running)
+          printf '%s is running.\n' "$service"
+          return
+          ;;
+      esac
+    fi
+
+    sleep 2
+    elapsed_seconds=$((elapsed_seconds + 2))
+  done
+
+  printf 'Timed out waiting for %s to become healthy after %s seconds.\n' "$service" "$timeout_seconds" >&2
+  exit 65
+}
+
 run_release_security_attestation() {
   local check_script="$DEPLOY_DIR/scripts/check-release-security-attestation.sh"
   local web_port="${AICOPILOT_WEB_PORT:-82}"
@@ -884,12 +916,14 @@ compose config -q
 if [ -z "$REQUESTED_SERVICES" ]; then
   compose pull
   compose up -d --remove-orphans postgres eventbus qdrant
+  wait_for_compose_service_healthy postgres 180
   compose up --no-deps --abort-on-container-exit --exit-code-from aicopilot-migration aicopilot-migration
   check_model_secret_migration_preflight
   compose up -d aicopilot-httpapi aicopilot-dataworker aicopilot-ragworker aicopilot-webui
 else
   compose pull $SELECTED_SERVICE_NAMES
   compose up -d postgres eventbus qdrant
+  wait_for_compose_service_healthy postgres 180
   if [ "$RUN_MIGRATION" = "true" ]; then
     compose up --no-deps --abort-on-container-exit --exit-code-from aicopilot-migration aicopilot-migration
     check_model_secret_migration_preflight

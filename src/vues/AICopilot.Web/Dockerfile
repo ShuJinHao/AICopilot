@@ -51,7 +51,8 @@ RUN mkdir -p \
         /usr/share/nginx/html \
         /var/cache/nginx \
         /var/log/nginx \
-        /var/run
+        /var/run \
+    && sed -i 's#^pid[[:space:]][[:space:]]*/run/nginx.pid;#pid /tmp/nginx.pid;#' /etc/nginx/nginx.conf
 
 # 3. 暴露端口（匹配docker-compose）
 EXPOSE 8000
