@@ -128,19 +128,28 @@ check_cloud_oidc_status() {
   local web_url="$1"
   local status_url="${web_url%/}/api/identity/cloud-oidc/status"
   local status_code
+  local attempt
 
   if [ "$DRY_RUN" = true ]; then
     printf '[dry-run] curl %s and require HTTP 200.\n' "$status_url"
     return
   fi
 
-  status_code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 10 "$status_url" || true)"
-  if [ "$status_code" != "200" ]; then
-    printf 'AICopilot Cloud OIDC status probe failed: %s -> %s\n' "$status_url" "${status_code:-curl-error}" >&2
-    exit 65
-  fi
+  for attempt in $(seq 1 18); do
+    status_code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 10 "$status_url" || true)"
+    if [ "$status_code" = "200" ]; then
+      printf 'AICopilot Cloud OIDC status attestation passed: %s -> %s\n' "$status_url" "$status_code"
+      return
+    fi
 
-  printf 'AICopilot Cloud OIDC status attestation passed: %s -> %s\n' "$status_url" "$status_code"
+    printf 'AICopilot Cloud OIDC status probe attempt %s/18 failed: %s -> %s\n' \
+      "$attempt" "$status_url" "${status_code:-curl-error}" >&2
+    sleep 3
+  done
+
+  printf 'AICopilot Cloud OIDC status probe failed after 18 attempts: %s -> %s\n' \
+    "$status_url" "${status_code:-curl-error}" >&2
+  exit 65
 }
 
 check_web_container_user() {

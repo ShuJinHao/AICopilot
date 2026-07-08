@@ -927,11 +927,15 @@ else
   if [ "$RUN_MIGRATION" = "true" ]; then
     compose up --no-deps --abort-on-container-exit --exit-code-from aicopilot-migration aicopilot-migration
     check_model_secret_migration_preflight
-  elif [ "${#RUNTIME_SELECTED_SERVICES[@]}" -gt 0 ]; then
+  elif [ "$BACKEND_RUNTIME_SELECTED" = "true" ]; then
     check_model_secret_migration_preflight
   fi
   if [ "${#RUNTIME_SELECTED_SERVICES[@]}" -gt 0 ]; then
-    compose up -d "${RUNTIME_SELECTED_SERVICES[@]}"
+    if [ "$BACKEND_RUNTIME_SELECTED" = "true" ]; then
+      compose up -d "${RUNTIME_SELECTED_SERVICES[@]}"
+    else
+      compose up -d --no-deps "${RUNTIME_SELECTED_SERVICES[@]}"
+    fi
   fi
   if [ "$HTTPAPI_SELECTED" = "true" ] && [ "$WEBUI_SELECTED" != "true" ]; then
     printf 'Recreating aicopilot-webui to refresh nginx upstream after httpapi redeploy.\n'
