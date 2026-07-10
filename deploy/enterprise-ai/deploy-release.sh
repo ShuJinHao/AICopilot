@@ -27,6 +27,7 @@ WORKSPACE_PROFILE_DIGEST="${IIOT_WORKSPACE_DEPLOY_PROFILE_DIGEST:-}"
 SERVICES_MANIFEST_DIGEST="${DEPLOY_SERVICES_MANIFEST_DIGEST:-}"
 IMAGE_MANIFEST_DIGEST="${DEPLOY_IMAGE_MANIFEST_DIGEST:-}"
 CANDIDATE_DEPLOY_GIT_SHA="${DEPLOY_GIT_SHA:-}"
+SERVER_DEADLINE_EPOCH="${DEPLOY_SERVER_DEADLINE_EPOCH:-}"
 ACTIVE_SUPPORT_DIGEST=""
 RELEASE_LOCK_HELD=false
 RELEASE_COMMITTED=false
@@ -34,6 +35,7 @@ STATE_TRANSACTION_DIR=""
 CONTAINER_UPDATE_STARTED=false
 MIGRATION_EXECUTED=false
 RECOVERY_SUCCEEDED=false
+KEEP_FAILURE_LOCK=false
 FROZEN_AICOPILOT_HTTPAPI_IMAGE=""
 FROZEN_AICOPILOT_MIGRATION_IMAGE=""
 FROZEN_AICOPILOT_DATAWORKER_IMAGE=""
@@ -49,12 +51,27 @@ FROZEN_AICOPILOT_MIGRATION_IMAGE_DIGEST=""
 FROZEN_AICOPILOT_DATAWORKER_IMAGE_DIGEST=""
 FROZEN_AICOPILOT_RAGWORKER_IMAGE_DIGEST=""
 FROZEN_AICOPILOT_WEBUI_IMAGE_DIGEST=""
-CONFIG_SUMMARY_DIGEST=""
+CONFIG_FINGERPRINT=""
 RUNTIME_AICOPILOT_HTTPAPI_IMAGE_DIGEST=""
 RUNTIME_AICOPILOT_DATAWORKER_IMAGE_DIGEST=""
 RUNTIME_AICOPILOT_RAGWORKER_IMAGE_DIGEST=""
 RUNTIME_AICOPILOT_WEBUI_IMAGE_DIGEST=""
+PREVIOUS_POSTGRES_IMAGE_REF=""
+PREVIOUS_POSTGRES_RUNTIME_DIGEST=""
+PREVIOUS_RABBITMQ_IMAGE_REF=""
+PREVIOUS_RABBITMQ_RUNTIME_DIGEST=""
+PREVIOUS_QDRANT_IMAGE_REF=""
+PREVIOUS_QDRANT_RUNTIME_DIGEST=""
+RUNTIME_POSTGRES_IMAGE_REF=""
+RUNTIME_POSTGRES_IMAGE_DIGEST=""
+RUNTIME_RABBITMQ_IMAGE_REF=""
+RUNTIME_RABBITMQ_IMAGE_DIGEST=""
+RUNTIME_QDRANT_IMAGE_REF=""
+RUNTIME_QDRANT_IMAGE_DIGEST=""
 MIGRATION_COMPLETED=false
+UNSAFE_PARTIAL_EXIT=86
+INVOCATION_STATE_INITIALIZED=false
+INVOCATION_STATE_FILE=""
 
 APP_IMAGE_KEYS=(
   AICOPILOT_HTTPAPI_IMAGE
@@ -375,6 +392,63 @@ begin_state_transaction() {
   done
 }
 
+persist_previous_infra_transaction_identity() {
+  local identity_file="$STATE_TRANSACTION_DIR/previous-infra-runtime.env"
+  [ -n "$STATE_TRANSACTION_DIR" ] && [ -d "$STATE_TRANSACTION_DIR" ] || return 66
+  umask 077
+  {
+    printf 'PREVIOUS_POSTGRES_IMAGE_REF=%s\n' "$PREVIOUS_POSTGRES_IMAGE_REF"
+    printf 'PREVIOUS_POSTGRES_RUNTIME_DIGEST=%s\n' "$PREVIOUS_POSTGRES_RUNTIME_DIGEST"
+    printf 'PREVIOUS_RABBITMQ_IMAGE_REF=%s\n' "$PREVIOUS_RABBITMQ_IMAGE_REF"
+    printf 'PREVIOUS_RABBITMQ_RUNTIME_DIGEST=%s\n' "$PREVIOUS_RABBITMQ_RUNTIME_DIGEST"
+    printf 'PREVIOUS_QDRANT_IMAGE_REF=%s\n' "$PREVIOUS_QDRANT_IMAGE_REF"
+    printf 'PREVIOUS_QDRANT_RUNTIME_DIGEST=%s\n' "$PREVIOUS_QDRANT_RUNTIME_DIGEST"
+  } > "$identity_file"
+}
+
+support_backup_dir() {
+  printf '%s/.support-backups/%s\n' "$DEPLOY_DIR" "$DEPLOY_LOCK_TOKEN"
+}
+
+restore_support_transaction() {
+  local backup_dir
+  local paths_file
+  local relative_path
+  local restore_status=0
+  backup_dir="$(support_backup_dir)"
+  paths_file="$backup_dir/paths"
+  [ -d "$backup_dir" ] && [ -f "$paths_file" ] || return 66
+  while IFS= read -r relative_path; do
+    [ -n "$relative_path" ] || continue
+    release_validate_manifest_target "$DEPLOY_DIR" "$relative_path" || { restore_status=1; continue; }
+    rm -f "$DEPLOY_DIR/$relative_path" 2>/dev/null || restore_status=1
+  done < "$paths_file"
+  if [ -d "$backup_dir/tree" ]; then
+    while IFS= read -r relative_path; do
+      relative_path="${relative_path#./}"
+      [ -n "$relative_path" ] || continue
+      release_validate_manifest_target "$backup_dir/tree" "$relative_path" || { restore_status=1; continue; }
+      release_validate_manifest_target "$DEPLOY_DIR" "$relative_path" || { restore_status=1; continue; }
+      mkdir -p "$(dirname "$DEPLOY_DIR/$relative_path")" || { restore_status=1; continue; }
+      cp -p "$backup_dir/tree/$relative_path" "$DEPLOY_DIR/$relative_path" || restore_status=1
+    done < <(cd "$backup_dir/tree" && find . -type f -print | LC_ALL=C sort)
+  fi
+  if [ -f "$backup_dir/installed-manifest" ]; then
+    cp -p "$backup_dir/installed-manifest" "$SUPPORT_MANIFEST_FILE" || restore_status=1
+  else
+    rm -f "$SUPPORT_MANIFEST_FILE" || restore_status=1
+  fi
+  if [ -f "$backup_dir/installed-digest" ]; then
+    cp -p "$backup_dir/installed-digest" "$SUPPORT_DIGEST_FILE" || restore_status=1
+  else
+    rm -f "$SUPPORT_DIGEST_FILE" || restore_status=1
+  fi
+  if [ "$restore_status" -eq 0 ] && [ -f "$SUPPORT_MANIFEST_FILE" ]; then
+    release_verify_sha256_manifest "$DEPLOY_DIR" "$SUPPORT_MANIFEST_FILE" || restore_status=1
+  fi
+  [ "$restore_status" -eq 0 ]
+}
+
 restore_state_transaction() {
   local path
   local key
@@ -398,27 +472,38 @@ restore_state_transaction() {
 }
 
 restore_previous_runtime() {
-  local runtime_services=""
-  local service
+  local key
+  local expected_image
+  local expected_digest
   if [ "${AICOPILOT_NON_PRODUCTION_MECHANISM_TEST:-false}" = true ] &&
      [ "${AICOPILOT_TEST_FORCE_RECOVERY_FAILURE:-false}" = true ]; then
     printf 'NON_PRODUCTION_MECHANISM_TEST forced previous-runtime recovery failure.\n' >&2
     return 59
   fi
   load_dotenv || return $?
-  compose config -q || return $?
-  for service in "${RUNTIME_SELECTED_SERVICES[@]}"; do
-    if [ -z "$runtime_services" ]; then
-      runtime_services="$service"
-    else
-      runtime_services="$runtime_services $service"
-    fi
+  for key in POSTGRES_IMAGE RABBITMQ_IMAGE QDRANT_IMAGE; do
+    expected_image="$(previous_infra_ref "$key")"
+    expected_digest="$(previous_infra_digest "$key")"
+    [[ "$expected_image" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] || return 66
+    [[ "$expected_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || return 66
+    export "$key=$expected_image"
   done
-  if [ -n "$runtime_services" ]; then
-    compose pull $runtime_services || return $?
-    compose up -d --no-deps $runtime_services || return $?
-  fi
+  compose config -q || return $?
+  compose pull postgres eventbus qdrant aicopilot-httpapi aicopilot-dataworker aicopilot-ragworker aicopilot-webui || return $?
+  compose up -d postgres eventbus qdrant || return $?
+  wait_for_compose_service_healthy postgres 180 || return $?
+  compose up -d aicopilot-httpapi aicopilot-dataworker aicopilot-ragworker aicopilot-webui || return $?
   compose ps || return $?
+  for key in POSTGRES_IMAGE RABBITMQ_IMAGE QDRANT_IMAGE; do
+    expected_image="$(previous_infra_ref "$key")"
+    expected_digest="$(previous_infra_digest "$key")"
+    inspect_runtime_identity_against_ref "$key" "$expected_image" "$expected_digest" || return $?
+  done
+  for key in AICOPILOT_HTTPAPI_IMAGE AICOPILOT_DATAWORKER_IMAGE AICOPILOT_RAGWORKER_IMAGE AICOPILOT_WEBUI_IMAGE; do
+    expected_image="${!key:-}"
+    [ -n "$expected_image" ] || return 66
+    inspect_runtime_digest_against_ref "$key" "$expected_image" >/dev/null || return $?
+  done
   probe_web || return $?
   probe_web_security_headers || return $?
   run_release_security_attestation || return $?
@@ -428,6 +513,11 @@ persist_blocked_release() {
   local original_status="$1"
   local reason="$2"
   local temp_file
+  if [ "${AICOPILOT_NON_PRODUCTION_MECHANISM_TEST:-false}" = true ] &&
+     [ "${AICOPILOT_TEST_FORCE_BLOCKED_STATE_WRITE_FAILURE:-false}" = true ]; then
+    printf 'NON_PRODUCTION_MECHANISM_TEST forced blocked-state persistence failure.\n' >&2
+    return 73
+  fi
   mkdir -p "$RELEASES_DIR"
   temp_file="$(mktemp "$RELEASES_DIR/.blocked-release.XXXXXX")"
   umask 077
@@ -448,36 +538,70 @@ persist_blocked_release() {
 
 finish_deploy_release() {
   local status="$1"
+  local final_status="$status"
+  local terminal_status
   local state_restore_ok=true
   local blocked_reason=""
   trap - EXIT HUP INT TERM
-  if [ "$status" -ne 0 ] && [ "$RELEASE_COMMITTED" != true ]; then
+  if [ "$status" -ne 0 ] && [ "$RELEASE_COMMITTED" != true ] &&
+     [ "${VALIDATE_ONLY:-false}" != true ] &&
+     { [ "$RELEASE_LOCK_HELD" = true ] || [ -n "$STATE_TRANSACTION_DIR" ]; }; then
+    if ! restore_support_transaction; then
+      blocked_reason=support-restore-failed
+    fi
     if ! restore_state_transaction; then
       state_restore_ok=false
-      blocked_reason=state-restore-failed
+      [ -n "$blocked_reason" ] || blocked_reason=state-restore-failed
     fi
     if [ "$CONTAINER_UPDATE_STARTED" = true ]; then
       if [ "$MIGRATION_EXECUTED" = true ]; then
-        blocked_reason=migration-or-runtime-partial
+        [ -n "$blocked_reason" ] || blocked_reason=migration-or-runtime-partial
       elif [ "$state_restore_ok" = true ] && restore_previous_runtime; then
         RECOVERY_SUCCEEDED=true
         printf 'AICopilot failed candidate containers were restored to the previous manifest and revalidated.\n' >&2
       else
-        blocked_reason=container-recovery-failed
+        [ -n "$blocked_reason" ] || blocked_reason=container-recovery-failed
       fi
     fi
     if [ -n "$blocked_reason" ]; then
-      persist_blocked_release "$status" "$blocked_reason" || true
+      final_status="$UNSAFE_PARTIAL_EXIT"
+      KEEP_FAILURE_LOCK=true
+      if [ "$RELEASE_LOCK_HELD" = true ]; then
+        release_mark_lock_blocked "$RELEASE_LOCK_DIR" "$DEPLOY_LOCK_TOKEN" "$blocked_reason" || true
+      fi
+      if ! persist_blocked_release "$status" "$blocked_reason"; then
+        blocked_reason=blocked-state-persistence-failed
+        if [ "$RELEASE_LOCK_HELD" = true ]; then
+          release_mark_lock_blocked "$RELEASE_LOCK_DIR" "$DEPLOY_LOCK_TOKEN" "$blocked_reason" || true
+        fi
+        printf '%s\n' "$blocked_reason" > "$STATE_TRANSACTION_DIR/BLOCKED_PERSISTENCE_FAILED" 2>/dev/null || true
+        printf 'AICopilot blocked-state persistence failed; transaction and owned lock are retained for manual recovery.\n' >&2
+      fi
       printf 'AICopilot automatic retry is blocked; transaction backup retained: %s\n' "$STATE_TRANSACTION_DIR" >&2
     fi
   fi
-  if [ "$RELEASE_LOCK_HELD" = true ]; then
+  if [ "$RELEASE_LOCK_HELD" = true ] && [ "$KEEP_FAILURE_LOCK" != true ]; then
     release_unlock "$RELEASE_LOCK_DIR" "$DEPLOY_LOCK_TOKEN" || true
   fi
   if [ -n "$STATE_TRANSACTION_DIR" ] && { [ "$status" -eq 0 ] || [ -z "$blocked_reason" ]; }; then
     rm -rf "$STATE_TRANSACTION_DIR" 2>/dev/null || true
   fi
-  exit "$status"
+  if [ "$status" -eq 0 ] || [ -z "$blocked_reason" ]; then
+    rm -rf "$(support_backup_dir)" 2>/dev/null || true
+  fi
+  if [ "$final_status" -eq 0 ]; then
+    terminal_status=succeeded
+  elif [ "$RELEASE_COMMITTED" = true ]; then
+    terminal_status=committed-cleanup-failed
+  elif [ "$final_status" -eq "$UNSAFE_PARTIAL_EXIT" ]; then
+    terminal_status=unsafe-partial
+  else
+    terminal_status=failed-safe
+  fi
+  if ! write_invocation_state "$terminal_status" "$final_status"; then
+    printf 'AICopilot could not persist terminal invocation state; remote outcome must be reconciled manually: token=%s\n' "$DEPLOY_LOCK_TOKEN" >&2
+  fi
+  exit "$final_status"
 }
 
 verify_support_release() {
@@ -530,18 +654,73 @@ acquire_release_lock() {
   trap 'finish_deploy_release 129' HUP
   trap 'finish_deploy_release 130' INT
   trap 'finish_deploy_release 143' TERM
-  RELEASE_LOCK_HELD=true
-
-  if [ -d "$RELEASE_LOCK_DIR" ] &&
-     [ "$(release_lock_value "$RELEASE_LOCK_DIR" token)" = "$DEPLOY_LOCK_TOKEN" ]; then
-    release_adopt_reserved_lock "$RELEASE_LOCK_DIR" "$DEPLOY_LOCK_TOKEN" aicopilot-release preflight
+  if [ "${VALIDATE_ONLY:-false}" = true ]; then
+    release_acquire_lock "$RELEASE_LOCK_DIR" "$DEPLOY_LOCK_TOKEN" aicopilot-release active preflight 0 || return $?
+  elif [ -d "$RELEASE_LOCK_DIR" ] &&
+       [ "$(release_lock_value "$RELEASE_LOCK_DIR" token)" = "$DEPLOY_LOCK_TOKEN" ]; then
+    release_adopt_reserved_lock "$RELEASE_LOCK_DIR" "$DEPLOY_LOCK_TOKEN" aicopilot-release preflight || return $?
   else
-    release_acquire_lock "$RELEASE_LOCK_DIR" "$DEPLOY_LOCK_TOKEN" aicopilot-release active preflight 0
+    printf 'Formal AICopilot release reservation disappeared before atomic adoption.\n' >&2
+    return 75
   fi
+  RELEASE_LOCK_HELD=true
 }
 
 prepare_release_directories() {
-  mkdir -p "$RELEASE_HISTORY_DIR"
+  mkdir -p "$RELEASE_HISTORY_DIR" "$RELEASES_DIR/invocations"
+}
+
+write_invocation_state() {
+  local status="$1"
+  local exit_code="$2"
+  local temp_file
+  [ "$INVOCATION_STATE_INITIALIZED" = true ] || return 0
+  case "$status" in
+    active|succeeded|failed-safe|unsafe-partial|committed-cleanup-failed) ;;
+    *) return 64 ;;
+  esac
+  case "$exit_code" in
+    ''|*[!0-9]*) return 64 ;;
+  esac
+  temp_file="$(mktemp "$RELEASES_DIR/invocations/.${DEPLOY_LOCK_TOKEN}.XXXXXX")"
+  umask 077
+  {
+    printf 'DEPLOY_STATUS=%s\n' "$status"
+    printf 'DEPLOY_EXIT_CODE=%s\n' "$exit_code"
+    printf 'DEPLOY_LOCK_TOKEN=%s\n' "$DEPLOY_LOCK_TOKEN"
+    printf 'DEPLOY_INVOCATION_ID=%s\n' "$WORKSPACE_INVOCATION_ID"
+    printf 'DEPLOY_EXPECTED_SHA=%s\n' "$WORKSPACE_EXPECTED_SHA"
+    printf 'DEPLOY_SERVER_DEADLINE_EPOCH=%s\n' "$SERVER_DEADLINE_EPOCH"
+    printf 'DEPLOY_UPDATED_AT_UTC=%s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  } > "$temp_file"
+  mv "$temp_file" "$INVOCATION_STATE_FILE"
+}
+
+initialize_invocation_state() {
+  INVOCATION_STATE_FILE="$RELEASES_DIR/invocations/$DEPLOY_LOCK_TOKEN.env"
+  INVOCATION_STATE_INITIALIZED=true
+  write_invocation_state active 0
+}
+
+validate_server_deadline() {
+  local now_epoch
+  release_require_canonical_decimal "$SERVER_DEADLINE_EPOCH" "DEPLOY_SERVER_DEADLINE_EPOCH" 1 99999999999 || return $?
+  now_epoch="$(release_now_epoch)"
+  release_require_canonical_decimal "$now_epoch" "Current epoch" 1 99999999999 || return $?
+  if [ "$SERVER_DEADLINE_EPOCH" -le "$now_epoch" ] || [ "$SERVER_DEADLINE_EPOCH" -gt $((now_epoch + 86400)) ]; then
+    printf 'DEPLOY_SERVER_DEADLINE_EPOCH must be in the future and no more than 24 hours away.\n' >&2
+    return 64
+  fi
+}
+
+ensure_server_deadline() {
+  local now_epoch
+  now_epoch="$(release_now_epoch)"
+  release_require_canonical_decimal "$now_epoch" "Current epoch" 1 99999999999 || return $?
+  if [ "$now_epoch" -gt "$SERVER_DEADLINE_EPOCH" ]; then
+    printf 'AICopilot server deployment deadline expired before the next mutation phase.\n' >&2
+    return 124
+  fi
 }
 
 safe_release_file_name() {
@@ -554,31 +733,50 @@ read_manifest_value() {
   sed -n "s/^${key}=//p" "$manifest_path" | tail -n 1
 }
 
-compute_non_sensitive_config_summary_digest() {
-  local summary_temp
-  local key
-  summary_temp="$(mktemp "${TMPDIR:-/tmp}/aicopilot-config-summary.XXXXXX")"
-  : > "$summary_temp"
-  for key in \
-    COMPOSE_PROJECT_NAME \
-    AICOPILOT_PUBLIC_URL \
-    CLOUD_PLATFORM_URL \
-    CLOUD_READONLY_MODE \
-    CLOUD_READONLY_REAL_ENABLED \
-    CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ \
-    CLOUD_AI_READ_ENABLED \
-    CLOUD_AI_READ_BASE_URL \
-    CLOUD_IDENTITY_STATUS_ENABLED \
-    CLOUD_IDENTITY_STATUS_BASE_URL \
-    DATA_ANALYSIS_CLOUD_READONLY_ENABLED \
-    CLOUD_OIDC_ENABLED \
-    CLOUD_OIDC_ISSUER \
-    ALLOW_INTRANET_HTTP_OIDC \
-    CLOUD_OIDC_REQUIRE_HTTPS_METADATA; do
-    printf '%s=%s\n' "$key" "${!key:-}" >> "$summary_temp"
+compute_config_fingerprint() {
+  CONFIG_FINGERPRINT="$({
+    awk '
+      BEGIN { FS="=" }
+      /^[[:space:]]*($|#)/ { next }
+      index($0, "=") == 0 { next }
+      {
+        key=$1
+        sub(/\r$/, "", $0)
+        if (key ~ /^AICOPILOT_(HTTPAPI|MIGRATION|DATAWORKER|RAGWORKER|WEBUI)_IMAGE$/) next
+        if (key ~ /^(DEPLOY_|IIOT_WORKSPACE_DEPLOY_)/) next
+        effective[key]=$0
+      }
+      END { for (key in effective) print effective[key] }
+    ' "$ENV_FILE" | LC_ALL=C sort
+  } | release_sha256_stream)"
+  [[ "$CONFIG_FINGERPRINT" =~ ^[0-9a-f]{64}$ ]] || {
+    printf 'Could not compute the canonical deploy configuration fingerprint.\n' >&2
+    exit 65
+  }
+}
+
+selected_services_are_complete() {
+  local required
+  local count=0
+  for required in aicopilot-httpapi aicopilot-migration aicopilot-dataworker aicopilot-ragworker aicopilot-webui; do
+    case " $SELECTED_SERVICE_NAMES " in
+      *" $required "*) count=$((count + 1)) ;;
+      *) return 1 ;;
+    esac
   done
-  CONFIG_SUMMARY_DIGEST="$(release_sha256_file "$summary_temp")"
-  rm -f "$summary_temp"
+  [ "$count" -eq 5 ]
+}
+
+deny_partial_config_fingerprint_drift() {
+  local current_fingerprint
+  [ -f "$CURRENT_RELEASE_FILE" ] || return 0
+  current_fingerprint="$(read_manifest_value "$CURRENT_RELEASE_FILE" DEPLOY_CONFIG_FINGERPRINT)"
+  [ -n "$current_fingerprint" ] || return 0
+  [ "$current_fingerprint" = "$CONFIG_FINGERPRINT" ] && return 0
+  if ! selected_services_are_complete; then
+    printf 'AICopilot global deploy configuration fingerprint changed; partial-service publication is denied. Select all services so every runtime and dependency is revalidated atomically.\n' >&2
+    return 67
+  fi
 }
 
 runtime_digest_manifest_key() {
@@ -611,6 +809,9 @@ runtime_digest() {
 
 compose_service_for_image_key() {
   case "$1" in
+    POSTGRES_IMAGE) printf '%s\n' postgres ;;
+    RABBITMQ_IMAGE) printf '%s\n' eventbus ;;
+    QDRANT_IMAGE) printf '%s\n' qdrant ;;
     AICOPILOT_HTTPAPI_IMAGE) printf '%s\n' aicopilot-httpapi ;;
     AICOPILOT_DATAWORKER_IMAGE) printf '%s\n' aicopilot-dataworker ;;
     AICOPILOT_RAGWORKER_IMAGE) printf '%s\n' aicopilot-ragworker ;;
@@ -619,22 +820,186 @@ compose_service_for_image_key() {
   esac
 }
 
-inspect_selected_runtime_digest() {
+set_previous_infra_identity() {
   local key="$1"
+  local immutable_ref="$2"
+  local runtime_digest="$3"
+  case "$key" in
+    POSTGRES_IMAGE) PREVIOUS_POSTGRES_IMAGE_REF="$immutable_ref"; PREVIOUS_POSTGRES_RUNTIME_DIGEST="$runtime_digest" ;;
+    RABBITMQ_IMAGE) PREVIOUS_RABBITMQ_IMAGE_REF="$immutable_ref"; PREVIOUS_RABBITMQ_RUNTIME_DIGEST="$runtime_digest" ;;
+    QDRANT_IMAGE) PREVIOUS_QDRANT_IMAGE_REF="$immutable_ref"; PREVIOUS_QDRANT_RUNTIME_DIGEST="$runtime_digest" ;;
+    *) candidate_fail "unsupported previous infrastructure image key $key" ;;
+  esac
+}
+
+previous_infra_ref() {
+  case "$1" in
+    POSTGRES_IMAGE) printf '%s\n' "$PREVIOUS_POSTGRES_IMAGE_REF" ;;
+    RABBITMQ_IMAGE) printf '%s\n' "$PREVIOUS_RABBITMQ_IMAGE_REF" ;;
+    QDRANT_IMAGE) printf '%s\n' "$PREVIOUS_QDRANT_IMAGE_REF" ;;
+    *) return 64 ;;
+  esac
+}
+
+previous_infra_digest() {
+  case "$1" in
+    POSTGRES_IMAGE) printf '%s\n' "$PREVIOUS_POSTGRES_RUNTIME_DIGEST" ;;
+    RABBITMQ_IMAGE) printf '%s\n' "$PREVIOUS_RABBITMQ_RUNTIME_DIGEST" ;;
+    QDRANT_IMAGE) printf '%s\n' "$PREVIOUS_QDRANT_RUNTIME_DIGEST" ;;
+    *) return 64 ;;
+  esac
+}
+
+set_runtime_infra_identity() {
+  local key="$1"
+  local immutable_ref="$2"
+  local runtime_digest="$3"
+  case "$key" in
+    POSTGRES_IMAGE) RUNTIME_POSTGRES_IMAGE_REF="$immutable_ref"; RUNTIME_POSTGRES_IMAGE_DIGEST="$runtime_digest" ;;
+    RABBITMQ_IMAGE) RUNTIME_RABBITMQ_IMAGE_REF="$immutable_ref"; RUNTIME_RABBITMQ_IMAGE_DIGEST="$runtime_digest" ;;
+    QDRANT_IMAGE) RUNTIME_QDRANT_IMAGE_REF="$immutable_ref"; RUNTIME_QDRANT_IMAGE_DIGEST="$runtime_digest" ;;
+    *) candidate_fail "unsupported runtime infrastructure image key $key" ;;
+  esac
+}
+
+inspect_infra_identity() {
+  local key="$1"
+  local service
+  local container_id
+  local configured_ref
+  local immutable_ref
+  local runtime_digest
+  local configured_repository
+  local repo_digests
+  local candidate_ref
+  local candidate_repository
+
+  service="$(compose_service_for_image_key "$key")"
+  container_id="$(compose ps -q "$service" | tail -n 1)"
+  [ -n "$container_id" ] || return 66
+  configured_ref="$(docker inspect --format '{{.Config.Image}}' "$container_id" | tail -n 1 | tr -d '\r')"
+  runtime_digest="$(docker inspect --format '{{.Image}}' "$container_id" | tail -n 1 | tr -d '\r')"
+  [[ "$configured_ref" =~ ^[A-Za-z0-9._:/@-]+$ ]] || return 65
+  [[ "$runtime_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || return 65
+  configured_repository="$(image_repository_from_ref "$configured_ref")"
+  repo_digests="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$runtime_digest")" || return 65
+  immutable_ref=""
+  while IFS= read -r candidate_ref; do
+    candidate_ref="${candidate_ref//$'\r'/}"
+    [ -n "$candidate_ref" ] || continue
+    [[ "$candidate_ref" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] || return 65
+    candidate_repository="${candidate_ref%@*}"
+    [ "$candidate_repository" = "$configured_repository" ] || continue
+    if [ -n "$immutable_ref" ] && [ "$immutable_ref" != "$candidate_ref" ]; then
+      printf 'Infrastructure image has multiple RepoDigests for the configured repository: %s\n' "$configured_repository" >&2
+      return 65
+    fi
+    immutable_ref="$candidate_ref"
+  done <<< "$repo_digests"
+  [ -n "$immutable_ref" ] || return 65
+  if [[ "$configured_ref" == *@sha256:* ]] && [ "$configured_ref" != "$immutable_ref" ]; then
+    printf 'Configured immutable infrastructure image does not match its image RepoDigest: configured=%s actual=%s\n' \
+      "$configured_ref" "$immutable_ref" >&2
+    return 65
+  fi
+  printf '%s|%s\n' "$immutable_ref" "$runtime_digest"
+}
+
+freeze_previous_infra_identity() {
+  local key
+  local identity
+  local immutable_ref
+  local runtime_digest
+
+  PREVIOUS_POSTGRES_IMAGE_REF=""
+  PREVIOUS_POSTGRES_RUNTIME_DIGEST=""
+  PREVIOUS_RABBITMQ_IMAGE_REF=""
+  PREVIOUS_RABBITMQ_RUNTIME_DIGEST=""
+  PREVIOUS_QDRANT_IMAGE_REF=""
+  PREVIOUS_QDRANT_RUNTIME_DIGEST=""
+
+  for key in POSTGRES_IMAGE RABBITMQ_IMAGE QDRANT_IMAGE; do
+    if ! identity="$(inspect_infra_identity "$key")"; then
+      printf 'Could not freeze previous infrastructure runtime identity for %s before the release transaction.\n' "$key" >&2
+      return 65
+    fi
+    IFS='|' read -r immutable_ref runtime_digest <<< "$identity"
+    set_previous_infra_identity "$key" "$immutable_ref" "$runtime_digest"
+    set_runtime_infra_identity "$key" "$immutable_ref" "$runtime_digest"
+  done
+}
+
+collect_runtime_infra_identity() {
+  local key
+  local identity
+  local immutable_ref
+  local runtime_digest
+
+  for key in POSTGRES_IMAGE RABBITMQ_IMAGE QDRANT_IMAGE; do
+    identity="$(inspect_infra_identity "$key")" || return $?
+    IFS='|' read -r immutable_ref runtime_digest <<< "$identity"
+    set_runtime_infra_identity "$key" "$immutable_ref" "$runtime_digest"
+  done
+}
+
+inspect_runtime_identity_against_ref() {
+  local key="$1"
+  local expected_ref="$2"
+  local expected_digest="$3"
+  local actual_digest
+
+  actual_digest="$(inspect_runtime_digest_against_ref "$key" "$expected_ref")" || return $?
+  [ "$actual_digest" = "$expected_digest" ] || {
+    printf 'Runtime identity mismatch for %s: expected=%s actual=%s\n' "$key" "$expected_digest" "$actual_digest" >&2
+    return 65
+  }
+}
+
+inspect_runtime_digest_against_ref() {
+  local key="$1"
+  local expected_image="$2"
   local service
   local container_id
   local configured_image
   local actual_digest
-  local expected_image
+  local state_before
+  local state_after
+  local running
+  local restarting
+  local oom_killed
+  local restart_count
+  local health_status
+  local running_after
+  local restarting_after
+  local oom_killed_after
+  local restart_count_after
+  local health_status_after
+  local stability_seconds="${AICOPILOT_RUNTIME_STABILITY_SECONDS:-5}"
   service="$(compose_service_for_image_key "$key")"
   container_id="$(compose ps -q "$service" | tail -n 1)"
   [ -n "$container_id" ] || return 1
   configured_image="$(docker inspect --format '{{.Config.Image}}' "$container_id" | tail -n 1 | tr -d '\r')"
   actual_digest="$(docker inspect --format '{{.Image}}' "$container_id" | tail -n 1 | tr -d '\r')"
-  expected_image="$(frozen_candidate_image "$key")"
   [ "$configured_image" = "$expected_image" ] || return 1
   [[ "$actual_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+  release_require_canonical_decimal "$stability_seconds" "Runtime stability window" 0 60 || return $?
+  state_before="$(docker inspect --format '{{.State.Running}}|{{.State.Restarting}}|{{.State.OOMKilled}}|{{.RestartCount}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container_id" | tail -n 1 | tr -d '\r')"
+  IFS='|' read -r running restarting oom_killed restart_count health_status <<< "$state_before"
+  [ "$running" = true ] && [ "$restarting" = false ] && [ "$oom_killed" = false ] || return 1
+  release_require_canonical_decimal "$restart_count" "Container restart count" 0 999999 || return $?
+  [ "$health_status" = none ] || [ "$health_status" = healthy ] || return 1
+  [ "$stability_seconds" -eq 0 ] || sleep "$stability_seconds"
+  state_after="$(docker inspect --format '{{.State.Running}}|{{.State.Restarting}}|{{.State.OOMKilled}}|{{.RestartCount}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container_id" | tail -n 1 | tr -d '\r')"
+  IFS='|' read -r running_after restarting_after oom_killed_after restart_count_after health_status_after <<< "$state_after"
+  [ "$running_after" = true ] && [ "$restarting_after" = false ] && [ "$oom_killed_after" = false ] || return 1
+  [ "$restart_count_after" = "$restart_count" ] || return 1
+  [ "$health_status_after" = none ] || [ "$health_status_after" = healthy ] || return 1
   printf '%s\n' "$actual_digest"
+}
+
+inspect_selected_runtime_digest() {
+  local key="$1"
+  inspect_runtime_digest_against_ref "$key" "$(frozen_candidate_image "$key")"
 }
 
 load_runtime_facts_from_manifest() {
@@ -729,13 +1094,19 @@ write_release_manifest() {
     printf 'DEPLOY_PROFILE_DIGEST=%s\n' "$WORKSPACE_PROFILE_DIGEST"
     printf 'DEPLOY_SERVICES_MANIFEST_DIGEST=%s\n' "$SERVICES_MANIFEST_DIGEST"
     printf 'DEPLOY_IMAGE_MANIFEST_DIGEST=%s\n' "$IMAGE_MANIFEST_DIGEST"
-    printf 'DEPLOY_CONFIG_SUMMARY_DIGEST=%s\n' "$CONFIG_SUMMARY_DIGEST"
+    printf 'DEPLOY_CONFIG_FINGERPRINT=%s\n' "$CONFIG_FINGERPRINT"
     printf 'DEPLOY_SUPPORT_DIGEST=%s\n' "$support_digest"
     printf 'DEPLOY_MIGRATION_COMPLETED=%s\n' "$MIGRATION_COMPLETED"
     printf 'DEPLOY_RUNTIME_AICOPILOT_HTTPAPI_IMAGE_DIGEST=%s\n' "$RUNTIME_AICOPILOT_HTTPAPI_IMAGE_DIGEST"
     printf 'DEPLOY_RUNTIME_AICOPILOT_DATAWORKER_IMAGE_DIGEST=%s\n' "$RUNTIME_AICOPILOT_DATAWORKER_IMAGE_DIGEST"
     printf 'DEPLOY_RUNTIME_AICOPILOT_RAGWORKER_IMAGE_DIGEST=%s\n' "$RUNTIME_AICOPILOT_RAGWORKER_IMAGE_DIGEST"
     printf 'DEPLOY_RUNTIME_AICOPILOT_WEBUI_IMAGE_DIGEST=%s\n' "$RUNTIME_AICOPILOT_WEBUI_IMAGE_DIGEST"
+    printf 'DEPLOY_INFRA_POSTGRES_IMAGE_REF=%s\n' "$RUNTIME_POSTGRES_IMAGE_REF"
+    printf 'DEPLOY_INFRA_POSTGRES_RUNTIME_DIGEST=%s\n' "$RUNTIME_POSTGRES_IMAGE_DIGEST"
+    printf 'DEPLOY_INFRA_RABBITMQ_IMAGE_REF=%s\n' "$RUNTIME_RABBITMQ_IMAGE_REF"
+    printf 'DEPLOY_INFRA_RABBITMQ_RUNTIME_DIGEST=%s\n' "$RUNTIME_RABBITMQ_IMAGE_DIGEST"
+    printf 'DEPLOY_INFRA_QDRANT_IMAGE_REF=%s\n' "$RUNTIME_QDRANT_IMAGE_REF"
+    printf 'DEPLOY_INFRA_QDRANT_RUNTIME_DIGEST=%s\n' "$RUNTIME_QDRANT_IMAGE_DIGEST"
 
     for key in "${APP_IMAGE_KEYS[@]}"
     do
@@ -783,13 +1154,16 @@ write_release_summary() {
     printf -- '- Profile digest: `%s`\n' "$WORKSPACE_PROFILE_DIGEST"
     printf -- '- Services manifest digest: `%s`\n' "$SERVICES_MANIFEST_DIGEST"
     printf -- '- Image manifest digest: `%s`\n' "$IMAGE_MANIFEST_DIGEST"
-    printf -- '- Non-sensitive config summary digest: `%s`\n' "$CONFIG_SUMMARY_DIGEST"
+    printf -- '- Config fingerprint (values never recorded): `%s`\n' "$CONFIG_FINGERPRINT"
     printf -- '- Support digest: `%s`\n' "$support_digest"
     printf -- '- Migration completed for candidate: `%s`\n' "$MIGRATION_COMPLETED"
     printf -- '- Runtime HttpApi image id: `%s`\n' "$RUNTIME_AICOPILOT_HTTPAPI_IMAGE_DIGEST"
     printf -- '- Runtime DataWorker image id: `%s`\n' "$RUNTIME_AICOPILOT_DATAWORKER_IMAGE_DIGEST"
     printf -- '- Runtime RagWorker image id: `%s`\n' "$RUNTIME_AICOPILOT_RAGWORKER_IMAGE_DIGEST"
     printf -- '- Runtime Web image id: `%s`\n' "$RUNTIME_AICOPILOT_WEBUI_IMAGE_DIGEST"
+    printf -- '- Runtime PostgreSQL immutable image: `%s` (`%s`)\n' "$RUNTIME_POSTGRES_IMAGE_REF" "$RUNTIME_POSTGRES_IMAGE_DIGEST"
+    printf -- '- Runtime RabbitMQ immutable image: `%s` (`%s`)\n' "$RUNTIME_RABBITMQ_IMAGE_REF" "$RUNTIME_RABBITMQ_IMAGE_DIGEST"
+    printf -- '- Runtime Qdrant immutable image: `%s` (`%s`)\n' "$RUNTIME_QDRANT_IMAGE_REF" "$RUNTIME_QDRANT_IMAGE_DIGEST"
     printf '\n#### Changes\n'
 
     if [ -n "$release_notes" ]; then
@@ -814,6 +1188,9 @@ release_request_is_current() {
   local candidate_value
   local recorded_runtime_digest
   local actual_runtime_digest
+  local recorded_infra_ref
+  local recorded_infra_digest
+  local actual_infra_identity
 
   [ -f "$CURRENT_RELEASE_FILE" ] || return 1
   current_release_id="$(read_manifest_value "$CURRENT_RELEASE_FILE" DEPLOY_RELEASE_ID)"
@@ -823,7 +1200,7 @@ release_request_is_current() {
   current_profile_digest="$(read_manifest_value "$CURRENT_RELEASE_FILE" DEPLOY_PROFILE_DIGEST)"
   current_services_digest="$(read_manifest_value "$CURRENT_RELEASE_FILE" DEPLOY_SERVICES_MANIFEST_DIGEST)"
   current_image_digest="$(read_manifest_value "$CURRENT_RELEASE_FILE" DEPLOY_IMAGE_MANIFEST_DIGEST)"
-  current_config_digest="$(read_manifest_value "$CURRENT_RELEASE_FILE" DEPLOY_CONFIG_SUMMARY_DIGEST)"
+  current_config_digest="$(read_manifest_value "$CURRENT_RELEASE_FILE" DEPLOY_CONFIG_FINGERPRINT)"
   [ "$current_release_id" = "$RELEASE_TAG" ] || return 1
   [ "$current_support_digest" = "$ACTIVE_SUPPORT_DIGEST" ] || return 1
   [ "$current_expected_sha" = "$WORKSPACE_EXPECTED_SHA" ] || return 1
@@ -831,7 +1208,26 @@ release_request_is_current() {
   [ "$current_profile_digest" = "$WORKSPACE_PROFILE_DIGEST" ] || return 1
   [ "$current_services_digest" = "$SERVICES_MANIFEST_DIGEST" ] || return 1
   [ "$current_image_digest" = "$IMAGE_MANIFEST_DIGEST" ] || return 1
-  [ "$current_config_digest" = "$CONFIG_SUMMARY_DIGEST" ] || return 1
+  [ "$current_config_digest" = "$CONFIG_FINGERPRINT" ] || return 1
+
+  for key in POSTGRES_IMAGE RABBITMQ_IMAGE QDRANT_IMAGE; do
+    case "$key" in
+      POSTGRES_IMAGE)
+        recorded_infra_ref="$(read_manifest_value "$CURRENT_RELEASE_FILE" DEPLOY_INFRA_POSTGRES_IMAGE_REF)"
+        recorded_infra_digest="$(read_manifest_value "$CURRENT_RELEASE_FILE" DEPLOY_INFRA_POSTGRES_RUNTIME_DIGEST)"
+        ;;
+      RABBITMQ_IMAGE)
+        recorded_infra_ref="$(read_manifest_value "$CURRENT_RELEASE_FILE" DEPLOY_INFRA_RABBITMQ_IMAGE_REF)"
+        recorded_infra_digest="$(read_manifest_value "$CURRENT_RELEASE_FILE" DEPLOY_INFRA_RABBITMQ_RUNTIME_DIGEST)"
+        ;;
+      QDRANT_IMAGE)
+        recorded_infra_ref="$(read_manifest_value "$CURRENT_RELEASE_FILE" DEPLOY_INFRA_QDRANT_IMAGE_REF)"
+        recorded_infra_digest="$(read_manifest_value "$CURRENT_RELEASE_FILE" DEPLOY_INFRA_QDRANT_RUNTIME_DIGEST)"
+        ;;
+    esac
+    actual_infra_identity="$(inspect_infra_identity "$key")" || return 1
+    [ "$actual_infra_identity" = "$recorded_infra_ref|$recorded_infra_digest" ] || return 1
+  done
 
   for key in "${SELECTED_IMAGE_KEYS[@]}"; do
     image_ref="$(read_manifest_value "$CURRENT_RELEASE_FILE" "$key")"
@@ -1540,11 +1936,22 @@ fi
 # All candidate identity checks happen before lock adoption, release-state writes,
 # .env changes, image pulls, compose updates, or any other container mutation.
 verify_workspace_candidate_basics
+unsafe_support_marker="$(release_find_unsafe_partial_marker "$DEPLOY_DIR")"
+if [ -n "$unsafe_support_marker" ]; then
+  printf 'AICopilot deployment is blocked by unresolved unsafe support state: %s\n' "$unsafe_support_marker" >&2
+  exit "$UNSAFE_PARTIAL_EXIT"
+fi
 if [ "$CHECK_CURRENT_ONLY" != true ]; then
+  validate_server_deadline || exit $?
   verify_reserved_candidate_lock
   if [ -f "$BLOCKED_RELEASE_FILE" ]; then
     printf 'AICopilot automatic deployment is blocked by unresolved partial state: %s\n' "$BLOCKED_RELEASE_FILE" >&2
     exit 78
+  fi
+  orphan_transaction="$(find "$DEPLOY_DIR" -maxdepth 1 -type d -name '.release-transaction.*' -print -quit 2>/dev/null || true)"
+  if [ -n "$orphan_transaction" ]; then
+    printf 'AICopilot automatic deployment is blocked by an unresolved transaction backup: %s\n' "$orphan_transaction" >&2
+    exit 79
   fi
 fi
 
@@ -1557,12 +1964,18 @@ verify_support_release
 load_dotenv
 validate_deploy_environment_readonly
 ensure_image_policy
-compute_non_sensitive_config_summary_digest
+compute_config_fingerprint
+deny_partial_config_fingerprint_drift || exit $?
 
 if [ "$CHECK_CURRENT_ONLY" = true ]; then
   if [ -f "$BLOCKED_RELEASE_FILE" ]; then
     printf 'AICopilot read-only current check found unresolved partial state: %s\n' "$BLOCKED_RELEASE_FILE" >&2
     exit 78
+  fi
+  orphan_transaction="$(find "$DEPLOY_DIR" -maxdepth 1 -type d -name '.release-transaction.*' -print -quit 2>/dev/null || true)"
+  if [ -n "$orphan_transaction" ]; then
+    printf 'AICopilot read-only current check found an unresolved transaction backup: %s\n' "$orphan_transaction" >&2
+    exit 79
   fi
   if release_request_is_current; then
     compose config -q
@@ -1581,6 +1994,8 @@ fi
 
 acquire_release_lock
 prepare_release_directories
+initialize_invocation_state
+ensure_server_deadline
 validate_deploy_environment
 ensure_cloud_readonly_network
 check_cloud_readonly_preflight
@@ -1600,7 +2015,16 @@ if release_request_is_current; then
   fi
 fi
 
+if ! freeze_previous_infra_identity; then
+  if [ -f "$CURRENT_RELEASE_FILE" ]; then
+    printf 'AICopilot cannot start a release transaction without freezing all current infrastructure runtime identities.\n' >&2
+    exit 65
+  fi
+  printf 'No previous AICopilot infrastructure runtime identity exists; any post-container failure will be blocked for manual recovery.\n' >&2
+fi
 begin_state_transaction
+persist_previous_infra_transaction_identity
+ensure_server_deadline
 release_update_lock_phase "$RELEASE_LOCK_DIR" "$DEPLOY_LOCK_TOKEN" preparing-state
 if [ -f "$CURRENT_RELEASE_FILE" ]; then
   load_runtime_facts_from_manifest "$CURRENT_RELEASE_FILE"
@@ -1637,6 +2061,7 @@ write_release_manifest \
   "$SELECTED_SERVICE_NAMES" \
   "$ACTIVE_SUPPORT_DIGEST"
 release_update_lock_phase "$RELEASE_LOCK_DIR" "$DEPLOY_LOCK_TOKEN" container-update
+ensure_server_deadline
 compose config -q
 if [ -z "$REQUESTED_SERVICES" ]; then
   compose pull
@@ -1693,6 +2118,10 @@ else
 fi
 
 collect_selected_runtime_facts
+collect_runtime_infra_identity || {
+  printf 'Runtime infrastructure OCI identity attestation failed before release-state commit.\n' >&2
+  exit 65
+}
 write_release_manifest \
   "$STAGED_RELEASE_FILE" \
   "$DEPLOY_RELEASE_ID" \
@@ -1720,6 +2149,7 @@ write_release_summary \
 } >> "$pending_summary_file"
 rm -f "$attestation_log"
 
+ensure_server_deadline
 release_update_lock_phase "$RELEASE_LOCK_DIR" "$DEPLOY_LOCK_TOKEN" committing-release-state
 if [ -f "$CURRENT_RELEASE_FILE" ]; then
   atomic_copy_file "$CURRENT_RELEASE_FILE" "$PREVIOUS_RELEASE_FILE"
@@ -1729,6 +2159,7 @@ atomic_copy_file "$pending_summary_file" "$CURRENT_RELEASE_SUMMARY_FILE"
 RELEASE_COMMITTED=true
 history_file="$(record_release_history "$CURRENT_RELEASE_FILE" "$DEPLOY_RELEASE_ID")"
 
+ensure_server_deadline
 release_update_lock_phase "$RELEASE_LOCK_DIR" "$DEPLOY_LOCK_TOKEN" post-release-cleanup
 cleanup_log="$(mktemp "$DEPLOY_DIR/post-release-cleanup.XXXXXX")"
 set +e

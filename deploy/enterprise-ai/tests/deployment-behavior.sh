@@ -103,14 +103,95 @@ fi
 if [ -n "${FAKE_DOCKER_DELAY_MATCH:-}" ] && [[ "$full" == *"$FAKE_DOCKER_DELAY_MATCH"* ]]; then
   sleep "${FAKE_DOCKER_DELAY_SECONDS:-3}"
 fi
+if [ "${FAKE_INFRA_TAG_DRIFT:-false}" = true ] &&
+   [[ "$full" == compose*" up "* ]] && [[ "$full" == *postgres* ]] &&
+   [ ! -f "${FAKE_REMOTE_DIR:?}/.fake-infra-tag-drift-active" ]; then
+  : > "${FAKE_REMOTE_DIR:?}/.fake-infra-tag-drift-active"
+fi
 case "$full" in
   "buildx version"*) printf 'github.com/docker/buildx fake\n'; exit 0 ;;
   buildx\ build*) exit 0 ;;
   buildx\ imagetools\ inspect*) printf 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n'; exit 0 ;;
-  inspect*'.Config.Image'*) sed -n 's/^AICOPILOT_WEBUI_IMAGE=//p' "${FAKE_REMOTE_DIR:?}/.env" | tail -n 1; exit 0 ;;
-  inspect*'{{.Image}}'*) printf 'sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\n'; exit 0 ;;
+  inspect*'.Config.Image'*)
+    container_id="${full##* }"
+    case "$container_id" in
+      *fake-postgres) key=POSTGRES_IMAGE ;;
+      *fake-eventbus) key=RABBITMQ_IMAGE ;;
+      *fake-qdrant) key=QDRANT_IMAGE ;;
+      *aicopilot-httpapi) key=AICOPILOT_HTTPAPI_IMAGE ;;
+      *aicopilot-dataworker) key=AICOPILOT_DATAWORKER_IMAGE ;;
+      *aicopilot-ragworker) key=AICOPILOT_RAGWORKER_IMAGE ;;
+      *) key=AICOPILOT_WEBUI_IMAGE ;;
+    esac
+    value="${!key:-}"
+    [ -n "$value" ] || value="$(sed -n "s/^${key}=//p" "${FAKE_REMOTE_DIR:?}/.env" | tail -n 1)"
+    if [ "${FAKE_INFRA_TAG_DRIFT:-false}" = true ] &&
+       [ -f "${FAKE_REMOTE_DIR:?}/.fake-infra-tag-drift-active" ] &&
+       [[ "$key" == POSTGRES_IMAGE || "$key" == RABBITMQ_IMAGE || "$key" == QDRANT_IMAGE ]] &&
+       [[ "$value" == *@sha256:* ]]; then
+      printf 'frozen-infra-recovery %s=%s\n' "$key" "$value" >> "${FAKE_DOCKER_LOG:?}"
+    fi
+    printf '%s\n' "$value"
+    exit 0
+    ;;
+  inspect*'.RepoDigests'*)
+    printf 'container objects do not expose RepoDigests in this fake\n' >&2
+    exit 91
+    ;;
+  image\ inspect*'.RepoDigests'*)
+    image_id="${full##* }"
+    printf 'registry.other.invalid/mirror/not-the-configured-repository@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n'
+    case "$image_id" in
+      sha256:1111111111111111111111111111111111111111111111111111111111111111)
+        printf 'registry.factory.internal:5000/enterprise-ai/base-postgres@sha256:1111111111111111111111111111111111111111111111111111111111111111\n'
+        ;;
+      sha256:2222222222222222222222222222222222222222222222222222222222222222)
+        printf 'registry.factory.internal:5000/enterprise-ai/base-rabbitmq@sha256:2222222222222222222222222222222222222222222222222222222222222222\n'
+        ;;
+      sha256:3333333333333333333333333333333333333333333333333333333333333333)
+        printf 'registry.factory.internal:5000/enterprise-ai/base-qdrant@sha256:3333333333333333333333333333333333333333333333333333333333333333\n'
+        ;;
+      sha256:9999999999999999999999999999999999999999999999999999999999999999)
+        printf 'registry.factory.internal:5000/enterprise-ai/base-postgres@sha256:9999999999999999999999999999999999999999999999999999999999999999\n'
+        printf 'registry.factory.internal:5000/enterprise-ai/base-rabbitmq@sha256:9999999999999999999999999999999999999999999999999999999999999999\n'
+        printf 'registry.factory.internal:5000/enterprise-ai/base-qdrant@sha256:9999999999999999999999999999999999999999999999999999999999999999\n'
+        ;;
+      *) exit 1 ;;
+    esac
+    exit 0
+    ;;
+  inspect*'{{.Image}}'*)
+    container_id="${full##* }"
+    case "$container_id" in
+      *fake-postgres) key=POSTGRES_IMAGE; old_digest=1111111111111111111111111111111111111111111111111111111111111111 ;;
+      *fake-eventbus) key=RABBITMQ_IMAGE; old_digest=2222222222222222222222222222222222222222222222222222222222222222 ;;
+      *fake-qdrant) key=QDRANT_IMAGE; old_digest=3333333333333333333333333333333333333333333333333333333333333333 ;;
+      *) printf 'sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\n'; exit 0 ;;
+    esac
+    configured_ref="${!key:-}"
+    [ -n "$configured_ref" ] || configured_ref="$(sed -n "s/^${key}=//p" "${FAKE_REMOTE_DIR:?}/.env" | tail -n 1)"
+    if [ "${FAKE_INFRA_TAG_DRIFT:-false}" = true ] &&
+       [ -f "${FAKE_REMOTE_DIR:?}/.fake-infra-tag-drift-active" ] &&
+       [[ "$configured_ref" != *@sha256:* ]]; then
+      printf 'sha256:%s\n' 9999999999999999999999999999999999999999999999999999999999999999
+    else
+      printf 'sha256:%s\n' "$old_digest"
+    fi
+    exit 0
+    ;;
+  inspect*'.State.Running'*)
+    container_id="${full##* }"
+    if [ -n "${FAKE_UNHEALTHY_SERVICE:-}" ] && [[ "$container_id" == *"$FAKE_UNHEALTHY_SERVICE"* ]]; then
+      printf 'true|true|false|1|none\n'
+    elif [[ "$container_id" == *aicopilot-webui* ]]; then
+      printf 'true|false|false|0|healthy\n'
+    else
+      printf 'true|false|false|0|none\n'
+    fi
+    exit 0
+    ;;
   inspect*'-f '*|inspect*'--format '*) printf 'healthy\n'; exit 0 ;;
-  compose*' ps -q '*) printf 'fake-container-id\n'; exit 0 ;;
+  compose*' ps -q '*) service="${full##* }"; printf 'fake-%s\n' "$service"; exit 0 ;;
   compose*psql*)
     printf 'aigateway.language_models|0|0\nrag.embedding_models|0|0\n'
     exit 0
@@ -165,7 +246,24 @@ full="$*"
 if [ -n "${FAKE_MV_FAIL_MATCH:-}" ] && [[ "$full" == *"$FAKE_MV_FAIL_MATCH"* ]]; then
   exit "${FAKE_MV_FAIL_EXIT:-55}"
 fi
+if [ -n "${FAKE_MV_DELAY_MATCH:-}" ] && [[ "$full" == *"$FAKE_MV_DELAY_MATCH"* ]]; then
+  sleep "${FAKE_MV_DELAY_SECONDS:-3}"
+fi
 exec /bin/mv "$@"
+EOF
+
+cat > "$BIN_DIR/cp" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+full="$*"
+source_arg=""
+for arg in "$@"; do
+  case "$arg" in -*) ;; *) source_arg="$arg"; break ;; esac
+done
+if [ -n "${FAKE_CP_FAIL_MATCH:-}" ] && [[ "$source_arg" == *"$FAKE_CP_FAIL_MATCH"* ]]; then
+  exit "${FAKE_CP_FAIL_EXIT:-56}"
+fi
+exec /bin/cp "$@"
 EOF
 
 cat > "$BIN_DIR/ssh" <<'EOF'
@@ -191,9 +289,34 @@ export POST_RELEASE_DATA_PATH="${FAKE_DATA_DIR:?}"
 export POST_RELEASE_CLEANUP_LOCK_FILE="${FAKE_REMOTE_DIR:?}/.locks/shared-cleanup.lock"
 export POST_RELEASE_CONTAINERD_ROOT="${FAKE_REMOTE_DIR:?}/containerd"
 export POST_RELEASE_HARBOR_GC_ENABLED=0
+if [ -n "${FAKE_SSH_ACTIVE_UNKNOWN_MATCH:-}" ] &&
+   [[ "$remote_command" == *"$FAKE_SSH_ACTIVE_UNKNOWN_MATCH"* ]] &&
+   [ ! -f "${FAKE_REMOTE_DIR:?}/.fake-ssh-active-unknown" ]; then
+  token="$(printf '%s\n' "$remote_command" | sed -n "s/.*DEPLOY_LOCK_TOKEN='\([^']*\)'.*/\1/p")"
+  deadline="$(printf '%s\n' "$remote_command" | sed -n "s/.*DEPLOY_SERVER_DEADLINE_EPOCH='\([^']*\)'.*/\1/p")"
+  mkdir -p "${FAKE_REMOTE_DIR:?}/releases/invocations"
+  {
+    printf 'DEPLOY_STATUS=active\n'
+    printf 'DEPLOY_EXIT_CODE=0\n'
+    printf 'DEPLOY_LOCK_TOKEN=%s\n' "$token"
+    printf 'DEPLOY_INVOCATION_ID=fake-active-unknown\n'
+    printf 'DEPLOY_SERVER_DEADLINE_EPOCH=%s\n' "$deadline"
+  } > "${FAKE_REMOTE_DIR:?}/releases/invocations/$token.env"
+  : > "${FAKE_REMOTE_DIR:?}/.fake-ssh-active-unknown"
+  exit 255
+fi
+if [ -n "${FAKE_SSH_ACK_LOSS_MATCH:-}" ] &&
+   [[ "$remote_command" == *"$FAKE_SSH_ACK_LOSS_MATCH"* ]] &&
+   [ ! -f "${FAKE_REMOTE_DIR:?}/.fake-ssh-ack-lost" ]; then
+  bash -c "$remote_command"
+  command_status=$?
+  [ "$command_status" -eq 0 ] || exit "$command_status"
+  : > "${FAKE_REMOTE_DIR:?}/.fake-ssh-ack-lost"
+  exit 255
+fi
 bash -c "$remote_command"
 EOF
-chmod +x "$BIN_DIR/dotnet" "$BIN_DIR/docker" "$BIN_DIR/curl" "$BIN_DIR/mv" "$BIN_DIR/ssh"
+chmod +x "$BIN_DIR/dotnet" "$BIN_DIR/docker" "$BIN_DIR/curl" "$BIN_DIR/mv" "$BIN_DIR/cp" "$BIN_DIR/ssh"
 
 cat > "$REMOTE_DIR/.env" <<'EOF'
 COMPOSE_PROJECT_NAME=enterprise-ai-test
@@ -217,6 +340,7 @@ CLOUD_IDENTITY_STATUS_BASE_URL=http://cloud.factory.internal:81
 DATA_ANALYSIS_CLOUD_READONLY_ENABLED=false
 AICOPILOT_MODEL_SMOKE_ENABLED=false
 AICOPILOT_MODEL_SMOKE_BASE_URL=http://model.factory.internal:40034/v1
+AICOPILOT_RUNTIME_STABILITY_SECONDS=0
 CLOUD_OIDC_ENABLED=true
 CLOUD_OIDC_ISSUER=http://cloud.factory.internal:81
 ALLOW_INTRANET_HTTP_OIDC=true
@@ -247,6 +371,16 @@ cat > "$WORKSPACE_PLAN_FILE" <<EOF
 {"schemaVersion":1,"runId":"deployment-behavior-invocation","mode":"check-candidate","target":"AICopilot","fullSha":"$SOURCE_SHA","services":["web"],"all":false,"profileDigest":"$WORKSPACE_PROFILE_DIGEST","branch":"main","remote":"origin","remoteHeadSha":"$SOURCE_SHA","requireRemoteTip":true,"remoteVerified":true,"worktreeClean":true}
 EOF
 WORKSPACE_PLAN_DIGEST="$(sha256_file "$WORKSPACE_PLAN_FILE")"
+WORKER_PLAN_FILE="$TEST_ROOT/workspace-worker-plan.json"
+cat > "$WORKER_PLAN_FILE" <<EOF
+{"schemaVersion":1,"runId":"deployment-behavior-worker","mode":"check-candidate","target":"AICopilot","fullSha":"$SOURCE_SHA","services":["migration","dataworker"],"all":false,"profileDigest":"$WORKSPACE_PROFILE_DIGEST","branch":"main","remote":"origin","remoteHeadSha":"$SOURCE_SHA","requireRemoteTip":true,"remoteVerified":true,"worktreeClean":true}
+EOF
+WORKER_PLAN_DIGEST="$(sha256_file "$WORKER_PLAN_FILE")"
+ALL_PLAN_FILE="$TEST_ROOT/workspace-all-plan.json"
+cat > "$ALL_PLAN_FILE" <<EOF
+{"schemaVersion":1,"runId":"deployment-behavior-all","mode":"check-candidate","target":"AICopilot","fullSha":"$SOURCE_SHA","services":["httpapi","migration","dataworker","ragworker","web"],"all":true,"profileDigest":"$WORKSPACE_PROFILE_DIGEST","branch":"main","remote":"origin","remoteHeadSha":"$SOURCE_SHA","requireRemoteTip":true,"remoteVerified":true,"worktreeClean":true}
+EOF
+ALL_PLAN_DIGEST="$(sha256_file "$ALL_PLAN_FILE")"
 
 run_local_release() {
   IIOT_WORKSPACE_DEPLOY_ENTRYPOINT="${TEST_WORKSPACE_ENTRYPOINT-1}" \
@@ -260,14 +394,52 @@ run_local_release() {
   CLOUD_PLATFORM_URL=http://cloud.factory.internal:81 \
   GIT_TIMEOUT_SECONDS=211 \
   SYNC_TIMEOUT_SECONDS=212 \
-  SSH_TIMEOUT_SECONDS=213 \
+  SSH_TIMEOUT_SECONDS="${TEST_SSH_TIMEOUT_SECONDS-213}" \
+  LOCK_RESERVATION_TTL_SECONDS="${TEST_LOCK_RESERVATION_TTL_SECONDS-}" \
+  RECONCILE_TIMEOUT_SECONDS="${TEST_RECONCILE_TIMEOUT_SECONDS-4}" \
+  RECONCILE_INTERVAL_SECONDS=1 \
+  RECONCILE_QUERY_TIMEOUT_SECONDS=2 \
   BUILD_TIMEOUT_SECONDS=214 \
   HARBOR_TIMEOUT_SECONDS=215 \
     "$REPO_DIR/deploy/enterprise-ai/local-release.sh" \
-      --services web \
+      --services "${TEST_SERVICES-web}" \
       --ssh-target fake-host \
       --remote-dir "$REMOTE_DIR"
 }
+
+printf 'TEST malicious arithmetic payloads are rejected without command execution\n'
+ARITHMETIC_MARKER="$TEST_ROOT/arithmetic-payload-executed"
+malicious_payload='x[$(touch '"$ARITHMETIC_MARKER"')]'
+malicious_token='bad$(touch-arithmetic-marker)'
+set +e
+TEST_SSH_TIMEOUT_SECONDS="$malicious_payload" run_local_release > "$TEST_ROOT/local-arithmetic-payload.log" 2>&1
+local_arithmetic_status=$?
+bash -c '. "$1"; release_acquire_lock "$2" safe-token aicopilot-release reserved test "$3"' \
+  bash "$REPO_DIR/deploy/enterprise-ai/scripts/release-common.sh" "$TEST_ROOT/malicious-lock.d" "$malicious_payload" \
+  > "$TEST_ROOT/common-arithmetic-payload.log" 2>&1
+common_arithmetic_status=$?
+"$REPO_DIR/deploy/enterprise-ai/scripts/install-support-release.sh" \
+  "$TEST_ROOT/install-target" "$TEST_ROOT/install-staging" safe-token \
+  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+  "$malicious_payload" > "$TEST_ROOT/installer-arithmetic-payload.log" 2>&1
+installer_arithmetic_status=$?
+bash -c '. "$1"; release_acquire_lock "$2" "$3" aicopilot-release reserved test 900' \
+  bash "$REPO_DIR/deploy/enterprise-ai/scripts/release-common.sh" "$TEST_ROOT/malicious-token-lock.d" "$malicious_token" \
+  > "$TEST_ROOT/common-token-payload.log" 2>&1
+common_token_status=$?
+"$REPO_DIR/deploy/enterprise-ai/scripts/install-support-release.sh" \
+  "$TEST_ROOT/install-target" "$TEST_ROOT/install-staging" "$malicious_token" \
+  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+  900 > "$TEST_ROOT/installer-token-payload.log" 2>&1
+installer_token_status=$?
+set -e
+assert_eq 64 "$local_arithmetic_status" "local malicious arithmetic payload exit code"
+assert_eq 64 "$common_arithmetic_status" "release-common malicious TTL exit code"
+assert_eq 64 "$installer_arithmetic_status" "support installer malicious TTL exit code"
+assert_eq 64 "$common_token_status" "release-common malicious token exit code"
+assert_eq 64 "$installer_token_status" "support installer malicious token exit code"
+[ ! -e "$ARITHMETIC_MARKER" ] || fail "malicious arithmetic payload executed a command"
+[ ! -d "$TEST_ROOT/malicious-lock.d" ] || fail "malicious TTL created a release lock"
 
 printf 'TEST formal local release rejects a missing workspace marker\n'
 set +e
@@ -314,9 +486,13 @@ assert_file_contains "$REMOTE_DIR/releases/current-release.env" "DEPLOY_PLAN_DIG
 assert_file_contains "$REMOTE_DIR/releases/current-release.env" "DEPLOY_SERVICES_MANIFEST_DIGEST="
 assert_file_contains "$REMOTE_DIR/releases/current-release.env" "DEPLOY_IMAGE_MANIFEST_DIGEST="
 assert_file_contains "$REMOTE_DIR/releases/current-release.env" "DEPLOY_SUPPORT_DIGEST="
-assert_file_contains "$REMOTE_DIR/releases/current-release.env" "DEPLOY_CONFIG_SUMMARY_DIGEST="
+assert_file_contains "$REMOTE_DIR/releases/current-release.env" "DEPLOY_CONFIG_FINGERPRINT="
 assert_file_contains "$REMOTE_DIR/releases/current-release.env" "DEPLOY_PROFILE_DIGEST=$WORKSPACE_PROFILE_DIGEST"
 assert_file_contains "$REMOTE_DIR/releases/current-release.env" "DEPLOY_RUNTIME_AICOPILOT_WEBUI_IMAGE_DIGEST=sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+assert_file_contains "$REMOTE_DIR/releases/current-release.env" "DEPLOY_INFRA_POSTGRES_IMAGE_REF=registry.factory.internal:5000/enterprise-ai/base-postgres@sha256:1111111111111111111111111111111111111111111111111111111111111111"
+assert_file_contains "$REMOTE_DIR/releases/current-release.env" "DEPLOY_INFRA_POSTGRES_RUNTIME_DIGEST=sha256:1111111111111111111111111111111111111111111111111111111111111111"
+assert_file_contains "$REMOTE_DIR/releases/current-release.env" "DEPLOY_INFRA_RABBITMQ_RUNTIME_DIGEST=sha256:2222222222222222222222222222222222222222222222222222222222222222"
+assert_file_contains "$REMOTE_DIR/releases/current-release.env" "DEPLOY_INFRA_QDRANT_RUNTIME_DIGEST=sha256:3333333333333333333333333333333333333333333333333333333333333333"
 assert_file_contains "$REMOTE_DIR/releases/current-release.env" "DEPLOY_MIGRATION_COMPLETED=false"
 assert_file_contains "$REMOTE_DIR/releases/current-release.env" "AICOPILOT_WEBUI_IMAGE=registry.factory.internal:5000/enterprise-ai/aicopilot-webui@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 assert_file_contains "$REMOTE_DIR/releases/current-release.summary.md" 'Frozen candidate: `true`'
@@ -337,6 +513,32 @@ if grep -Fq 'network create' "$DOCKER_LOG"; then
 fi
 [ ! -d "$REMOTE_DIR/.locks/release.lock.d" ] || fail "read-only check-current created a release lock"
 
+printf 'TEST global secret/config fingerprint drift denies partial-service publication without recording secret values\n'
+sed -i.bak 's/^QDRANT_KEY=.*/QDRANT_KEY=QdRotatedStrongSecretValue5678/' "$REMOTE_DIR/.env"
+rm -f "$REMOTE_DIR/.env.bak"
+: > "$DOCKER_LOG"
+set +e
+run_local_release > "$TEST_ROOT/config-fingerprint-change.log" 2>&1
+config_drift_status=$?
+set -e
+assert_eq 67 "$config_drift_status" "partial-service config drift exit code"
+assert_file_contains "$TEST_ROOT/config-fingerprint-change.log" "partial-service publication is denied"
+if grep -Fq 'buildx build' "$DOCKER_LOG"; then
+  fail "partial-service config drift built or published an image"
+fi
+assert_file_contains "$REMOTE_DIR/releases/current-release.env" "DEPLOY_CONFIG_FINGERPRINT="
+if grep -Fq 'QdRotatedStrongSecretValue5678' "$REMOTE_DIR/releases/current-release.env" "$REMOTE_DIR/releases/current-release.summary.md"; then
+  fail "release state recorded a secret value instead of only its fingerprint"
+fi
+TEST_SERVICES='httpapi,migration,dataworker,ragworker,web' \
+TEST_WORKSPACE_PLAN_FILE="$ALL_PLAN_FILE" \
+TEST_WORKSPACE_PLAN_DIGEST="$ALL_PLAN_DIGEST" \
+TEST_WORKSPACE_INVOCATION_ID=deployment-behavior-all \
+  run_local_release > "$TEST_ROOT/config-fingerprint-full-release.log" 2>&1
+if grep -Fq 'QdRotatedStrongSecretValue5678' "$REMOTE_DIR/releases/current-release.env" "$REMOTE_DIR/releases/current-release.summary.md"; then
+  fail "full config deployment recorded a secret value instead of only its fingerprint"
+fi
+
 printf 'TEST support install failure restores the complete previous support tree\n'
 compose_hash_before="$(sha256_file "$REMOTE_DIR/docker-compose.yaml")"
 support_manifest_hash_before="$(sha256_file "$REMOTE_DIR/.aicopilot-support-manifest.sha256")"
@@ -352,19 +554,229 @@ assert_eq "$support_manifest_hash_before" "$(sha256_file "$REMOTE_DIR/.aicopilot
 assert_eq "$env_hash_before" "$(sha256_file "$REMOTE_DIR/.env")" "env after support install rollback"
 [ ! -d "$REMOTE_DIR/.locks/release.lock.d" ] || fail "support install failure left a reservation"
 
+printf 'TEST failed support restore durably blocks retries and returns unsafe-partial\n'
+set +e
+AICOPILOT_FORCE_BUILD=true \
+FAKE_MV_FAIL_MATCH='.aicopilot-stage.' FAKE_MV_FAIL_EXIT=55 \
+FAKE_CP_FAIL_MATCH='.support-backups/' FAKE_CP_FAIL_EXIT=56 \
+  run_local_release > "$TEST_ROOT/support-restore-unsafe.log" 2>&1
+support_restore_unsafe_status=$?
+set -e
+assert_eq 86 "$support_restore_unsafe_status" "support restore unsafe-partial exit code"
+unsafe_support_marker="$(find "$REMOTE_DIR/.support-backups" -mindepth 2 -maxdepth 2 -type f -name UNSAFE_PARTIAL -print -quit)"
+[ -f "$unsafe_support_marker" ] || fail "failed support restore did not persist an unsafe marker"
+assert_file_contains "$unsafe_support_marker" "DEPLOY_STATUS=unsafe-partial"
+set +e
+AICOPILOT_FORCE_BUILD=true run_local_release > "$TEST_ROOT/support-restore-blocked-retry.log" 2>&1
+support_blocked_retry_status=$?
+set -e
+assert_eq 86 "$support_blocked_retry_status" "support unsafe-partial retry gate exit code"
+unsafe_support_backup="$(dirname "$unsafe_support_marker")"
+unsafe_paths="$unsafe_support_backup/paths"
+while IFS= read -r unsafe_relative_path; do
+  [ -n "$unsafe_relative_path" ] || continue
+  rm -f "$REMOTE_DIR/$unsafe_relative_path"
+done < "$unsafe_paths"
+if [ -d "$unsafe_support_backup/tree" ]; then
+  while IFS= read -r unsafe_relative_path; do
+    unsafe_relative_path="${unsafe_relative_path#./}"
+    [ -n "$unsafe_relative_path" ] || continue
+    mkdir -p "$(dirname "$REMOTE_DIR/$unsafe_relative_path")"
+    /bin/cp -p "$unsafe_support_backup/tree/$unsafe_relative_path" "$REMOTE_DIR/$unsafe_relative_path"
+  done < <(cd "$unsafe_support_backup/tree" && find . -type f -print | LC_ALL=C sort)
+fi
+if [ -f "$unsafe_support_backup/installed-manifest" ]; then
+  /bin/cp -p "$unsafe_support_backup/installed-manifest" "$REMOTE_DIR/.aicopilot-support-manifest.sha256"
+fi
+if [ -f "$unsafe_support_backup/installed-digest" ]; then
+  /bin/cp -p "$unsafe_support_backup/installed-digest" "$REMOTE_DIR/.aicopilot-support-manifest.digest"
+fi
+rm -f "$REMOTE_DIR/releases/blocked-release.env"
+rm -rf "$REMOTE_DIR/.locks/release.lock.d" "$unsafe_support_backup"
+bash -c '. "$1"; release_verify_sha256_manifest "$2" "$2/.aicopilot-support-manifest.sha256"' \
+  bash "$REMOTE_DIR/scripts/release-common.sh" "$REMOTE_DIR"
+
+printf 'TEST residual support backup and blocked lock fail closed when restore and marker persistence both fail\n'
+set +e
+AICOPILOT_FORCE_BUILD=true \
+AICOPILOT_NON_PRODUCTION_MECHANISM_TEST=true \
+AICOPILOT_TEST_FORCE_UNSAFE_MARKER_WRITE_FAILURE=true \
+FAKE_MV_FAIL_MATCH='.aicopilot-stage.' FAKE_MV_FAIL_EXIT=55 \
+FAKE_CP_FAIL_MATCH='.support-backups/' FAKE_CP_FAIL_EXIT=56 \
+  run_local_release > "$TEST_ROOT/support-restore-marker-double-failure.log" 2>&1
+double_failure_status=$?
+set -e
+assert_eq 86 "$double_failure_status" "support restore and marker double failure exit code"
+[ ! -f "$REMOTE_DIR/releases/blocked-release.env" ] || fail "forced marker failure unexpectedly wrote blocked release state"
+if find "$REMOTE_DIR/.support-backups" -type f -name UNSAFE_PARTIAL -print -quit | grep -q .; then
+  fail "forced marker failure unexpectedly wrote an unsafe marker"
+fi
+double_failure_backup="$(find "$REMOTE_DIR/.support-backups" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+[ -d "$double_failure_backup" ] || fail "double failure did not retain its support backup"
+assert_file_contains "$REMOTE_DIR/.locks/release.lock.d/state" "blocked"
+double_failure_token="$(sed -n '1p' "$REMOTE_DIR/.locks/release.lock.d/token")"
+set +e
+AICOPILOT_FORCE_BUILD=true run_local_release > "$TEST_ROOT/support-residual-backup-retry.log" 2>&1
+double_failure_retry_status=$?
+set -e
+assert_eq 86 "$double_failure_retry_status" "residual support backup retry gate exit code"
+assert_file_contains "$TEST_ROOT/support-residual-backup-retry.log" "$double_failure_backup"
+assert_file_contains "$REMOTE_DIR/.locks/release.lock.d/state" "blocked"
+[ "$(sed -n '1p' "$REMOTE_DIR/.locks/release.lock.d/token")" = "$double_failure_token" ] || fail "blocked lock token changed during retry"
+double_failure_paths="$double_failure_backup/paths"
+while IFS= read -r double_relative_path; do
+  [ -n "$double_relative_path" ] || continue
+  rm -f "$REMOTE_DIR/$double_relative_path"
+done < "$double_failure_paths"
+if [ -d "$double_failure_backup/tree" ]; then
+  while IFS= read -r double_relative_path; do
+    double_relative_path="${double_relative_path#./}"
+    [ -n "$double_relative_path" ] || continue
+    mkdir -p "$(dirname "$REMOTE_DIR/$double_relative_path")"
+    /bin/cp -p "$double_failure_backup/tree/$double_relative_path" "$REMOTE_DIR/$double_relative_path"
+  done < <(cd "$double_failure_backup/tree" && find . -type f -print | LC_ALL=C sort)
+fi
+[ ! -f "$double_failure_backup/installed-manifest" ] || /bin/cp -p "$double_failure_backup/installed-manifest" "$REMOTE_DIR/.aicopilot-support-manifest.sha256"
+[ ! -f "$double_failure_backup/installed-digest" ] || /bin/cp -p "$double_failure_backup/installed-digest" "$REMOTE_DIR/.aicopilot-support-manifest.digest"
+rm -rf "$REMOTE_DIR/.locks/release.lock.d" "$double_failure_backup"
+bash -c '. "$1"; release_verify_sha256_manifest "$2" "$2/.aicopilot-support-manifest.sha256"' \
+  bash "$REMOTE_DIR/scripts/release-common.sh" "$REMOTE_DIR"
+
+printf 'TEST lost support-install ACK queries and atomically cancels only this reservation\n'
+rm -f "$REMOTE_DIR/.fake-ssh-ack-lost"
+compose_hash_before="$(sha256_file "$REMOTE_DIR/docker-compose.yaml")"
+set +e
+AICOPILOT_FORCE_BUILD=true FAKE_SSH_ACK_LOSS_MATCH='install-support-release.sh' \
+  run_local_release > "$TEST_ROOT/support-ack-loss.log" 2>&1
+support_ack_status=$?
+set -e
+assert_eq 255 "$support_ack_status" "support install ACK loss exit code"
+assert_eq "$compose_hash_before" "$(sha256_file "$REMOTE_DIR/docker-compose.yaml")" "compose after ACK-loss cancellation"
+[ ! -d "$REMOTE_DIR/.locks/release.lock.d" ] || fail "ACK-loss cancellation left a reservation"
+if find "$REMOTE_DIR/.support-backups" -mindepth 1 -maxdepth 1 -type d -print -quit 2>/dev/null | grep -q .; then
+  fail "ACK-loss cancellation left a support backup"
+fi
+
+printf 'TEST lost final deploy ACK is reconciled from terminal invocation state\n'
+rm -f "$REMOTE_DIR/.fake-ssh-ack-lost"
+set +e
+AICOPILOT_FORCE_BUILD=true FAKE_SSH_ACK_LOSS_MATCH='DEPLOY_TRIGGERED_BY=local' \
+  run_local_release > "$TEST_ROOT/final-deploy-ack-loss.log" 2>&1
+final_ack_status=$?
+set -e
+assert_eq 0 "$final_ack_status" "final deploy ACK-loss reconciliation exit code"
+assert_file_contains "$TEST_ROOT/final-deploy-ack-loss.log" "remote invocation reconciled as succeeded"
+[ ! -d "$REMOTE_DIR/.locks/release.lock.d" ] || fail "terminal ACK-loss reconciliation left a release lock"
+
+printf 'TEST active or unknown remote invocation forbids cancellation and ordinary retry\n'
+rm -f "$REMOTE_DIR/.fake-ssh-active-unknown"
+set +e
+AICOPILOT_FORCE_BUILD=true FAKE_SSH_ACTIVE_UNKNOWN_MATCH='DEPLOY_TRIGGERED_BY=local' \
+TEST_RECONCILE_TIMEOUT_SECONDS=2 \
+  run_local_release > "$TEST_ROOT/final-deploy-active-unknown.log" 2>&1
+active_unknown_status=$?
+set -e
+assert_eq 87 "$active_unknown_status" "active unknown reconciliation exit code"
+assert_file_contains "$TEST_ROOT/final-deploy-active-unknown.log" "automatic cancellation and retry are forbidden"
+[ -d "$REMOTE_DIR/.locks/release.lock.d" ] || fail "active unknown outcome was automatically cancelled"
+active_unknown_token="$(sed -n '1p' "$REMOTE_DIR/.locks/release.lock.d/token")"
+[ -n "$active_unknown_token" ] || fail "active unknown outcome lost its reservation token"
+rm -f "$REMOTE_DIR/releases/invocations/$active_unknown_token.env"
+"$REMOTE_DIR/scripts/cancel-support-reservation.sh" "$REMOTE_DIR" "$active_unknown_token" > "$TEST_ROOT/active-unknown-manual-cancel.log" 2>&1
+[ ! -d "$REMOTE_DIR/.locks/release.lock.d" ] || fail "manual cleanup after active unknown outcome left a reservation"
+
+printf 'TEST support installer and cancellation cannot mutate concurrently\n'
+AICOPILOT_FORCE_BUILD=true FAKE_MV_DELAY_MATCH='.aicopilot-stage.' FAKE_MV_DELAY_SECONDS=2 \
+  run_local_release > "$TEST_ROOT/support-install-cancel-race.log" 2>&1 &
+install_race_pid=$!
+for _ in $(seq 1 100); do
+  if [ "$(sed -n '1p' "$REMOTE_DIR/.locks/release.lock.d/phase" 2>/dev/null || true)" = support-installing ]; then
+    break
+  fi
+  sleep 0.1
+done
+install_race_token="$(sed -n '1p' "$REMOTE_DIR/.locks/release.lock.d/token" 2>/dev/null || true)"
+[ -n "$install_race_token" ] || fail "support install race did not expose its active token"
+set +e
+"$REMOTE_DIR/scripts/cancel-support-reservation.sh" "$REMOTE_DIR" "$install_race_token" > "$TEST_ROOT/support-install-cancel-attempt.log" 2>&1
+install_cancel_status=$?
+wait "$install_race_pid"
+install_race_status=$?
+set -e
+assert_eq 3 "$install_cancel_status" "cancel during support installation exit code"
+assert_eq 0 "$install_race_status" "support installation after rejected cancellation"
+
+printf 'TEST stale transition recovery and old-token cancellation preserve a new reservation\n'
+. "$REPO_DIR/deploy/enterprise-ai/scripts/release-common.sh"
+transition_lock="$TEST_ROOT/transition-lock.d"
+release_acquire_lock "$transition_lock" transition-token aicopilot-release reserved support-ready 900
+mkdir "$transition_lock/.transition.d"
+printf 'transition-token\n' > "$transition_lock/.transition.d/token"
+printf '99999999\n' > "$transition_lock/.transition.d/pid"
+printf 'dead-process\n' > "$transition_lock/.transition.d/process-start"
+printf 'test-owner\n' > "$transition_lock/.transition.d/owner"
+printf '1\n' > "$transition_lock/.transition.d/expires-at-epoch"
+release_begin_lock_transition "$transition_lock" transition-token reserved
+assert_file_contains "$transition_lock/.transition.d/owner" "@"
+release_end_lock_transition "$transition_lock" transition-token
+release_unlock "$transition_lock" transition-token
+live_expired_lock="$TEST_ROOT/live-expired-transition-lock.d"
+release_acquire_lock "$live_expired_lock" live-transition-token aicopilot-release reserved support-ready 900
+release_begin_lock_transition "$live_expired_lock" live-transition-token reserved
+printf '1\n' > "$live_expired_lock/expires-at-epoch"
+printf '1\n' > "$live_expired_lock/.transition.d/expires-at-epoch"
+set +e
+release_acquire_lock "$live_expired_lock" replacement-token aicopilot-release reserved support-ready 900 > "$TEST_ROOT/live-expired-transition.log" 2>&1
+live_expired_status=$?
+set -e
+assert_eq 75 "$live_expired_status" "live expired transition lock contention exit code"
+assert_file_contains "$live_expired_lock/token" "live-transition-token"
+assert_file_contains "$live_expired_lock/.transition.d/token" "live-transition-token"
+release_end_lock_transition "$live_expired_lock" live-transition-token
+release_unlock "$live_expired_lock" live-transition-token
+cancel_root="$TEST_ROOT/cancel-root"
+mkdir -p "$cancel_root/scripts" "$cancel_root/.locks"
+cp -p "$REPO_DIR/deploy/enterprise-ai/scripts/release-common.sh" "$cancel_root/scripts/release-common.sh"
+new_lock="$cancel_root/.locks/release.lock.d"
+release_acquire_lock "$new_lock" new-token aicopilot-release reserved support-ready 900
+set +e
+bash "$REPO_DIR/deploy/enterprise-ai/scripts/cancel-support-reservation.sh" "$cancel_root" old-token > "$TEST_ROOT/old-token-cancel.log" 2>&1
+old_cancel_status=$?
+set -e
+assert_eq 3 "$old_cancel_status" "old-token cancellation against new reservation"
+assert_file_contains "$new_lock/token" "new-token"
+release_unlock "$new_lock" new-token
+
 printf 'TEST unsafe path in installed old support manifest is rejected before deletion\n'
 cp -p "$REMOTE_DIR/.aicopilot-support-manifest.sha256" "$TEST_ROOT/good-support-manifest.sha256"
-printf '%s  ../../.env\n' "$(printf unsafe | shasum -a 256 | awk '{print $1}')" > "$REMOTE_DIR/.aicopilot-support-manifest.sha256"
 env_hash_before="$(sha256_file "$REMOTE_DIR/.env")"
-set +e
-AICOPILOT_FORCE_BUILD=true run_local_release > "$TEST_ROOT/unsafe-old-support-path.log" 2>&1
-unsafe_old_status=$?
-set -e
-assert_eq 65 "$unsafe_old_status" "unsafe old support path exit code"
-assert_file_contains "$TEST_ROOT/unsafe-old-support-path.log" "Unsafe or protected support manifest path"
-assert_eq "$env_hash_before" "$(sha256_file "$REMOTE_DIR/.env")" "env after unsafe old support manifest"
+unsafe_case=0
+for unsafe_path in '../../.env' './.env' './releases'; do
+  unsafe_case=$((unsafe_case + 1))
+  printf '%s  %s\n' "$(printf unsafe | shasum -a 256 | awk '{print $1}')" "$unsafe_path" > "$REMOTE_DIR/.aicopilot-support-manifest.sha256"
+  set +e
+  AICOPILOT_FORCE_BUILD=true run_local_release > "$TEST_ROOT/unsafe-old-support-path-$unsafe_case.log" 2>&1
+  unsafe_old_status=$?
+  set -e
+  assert_eq 65 "$unsafe_old_status" "unsafe old support path exit code"
+  assert_file_contains "$TEST_ROOT/unsafe-old-support-path-$unsafe_case.log" "Unsafe or protected support manifest path"
+  assert_eq "$env_hash_before" "$(sha256_file "$REMOTE_DIR/.env")" "env after unsafe old support manifest"
+done
 cp -p "$TEST_ROOT/good-support-manifest.sha256" "$REMOTE_DIR/.aicopilot-support-manifest.sha256"
 [ ! -d "$REMOTE_DIR/.locks/release.lock.d" ] || fail "unsafe old support path left a reservation"
+
+printf 'TEST support manifest target rejects symbolic-link parent escape\n'
+symlink_root="$TEST_ROOT/symlink-root"
+symlink_outside="$TEST_ROOT/symlink-outside"
+mkdir -p "$symlink_root" "$symlink_outside"
+ln -s "$symlink_outside" "$symlink_root/scripts"
+set +e
+bash -c '. "$1"; release_validate_manifest_target "$2" scripts/escape.sh' \
+  bash "$REPO_DIR/deploy/enterprise-ai/scripts/release-common.sh" "$symlink_root" > "$TEST_ROOT/symlink-manifest-path.log" 2>&1
+symlink_status=$?
+set -e
+assert_eq 65 "$symlink_status" "support symlink parent exit code"
+assert_file_contains "$TEST_ROOT/symlink-manifest-path.log" "symbolic link"
 
 printf 'TEST ordinary build failure preserves exact exit code\n'
 set +e
@@ -440,7 +852,8 @@ env_hash_before="$(sha256_file "$REMOTE_DIR/.env")"
 current_hash_before="$(sha256_file "$REMOTE_DIR/releases/current-release.env")"
 set +e
 AICOPILOT_FORCE_BUILD=true \
-FAKE_DOCKER_FAIL_MATCH='compose --env-file' \
+AICOPILOT_ALLOW_REDEPLOY_SAME_SHA=true \
+FAKE_DOCKER_FAIL_MATCH='pull aicopilot-webui' \
 FAKE_DOCKER_FAIL_EXIT=37 \
   run_local_release > "$TEST_ROOT/state-rollback.log" 2>&1
 rollback_status=$?
@@ -467,6 +880,43 @@ assert_eq "$env_hash_before" "$(sha256_file "$REMOTE_DIR/.env")" "env after reve
 assert_eq "$current_hash_before" "$(sha256_file "$REMOTE_DIR/releases/current-release.env")" "current release after reversible runtime recovery"
 [ ! -f "$REMOTE_DIR/releases/blocked-release.env" ] || fail "reversible failure incorrectly blocked automatic deployment"
 
+printf 'TEST infrastructure rollback uses frozen previous immutable identity after tag drift\n'
+rm -f "$REMOTE_DIR/.fake-infra-tag-drift-active"
+: > "$DOCKER_LOG"
+set +e
+AICOPILOT_FORCE_BUILD=true \
+AICOPILOT_ALLOW_REDEPLOY_SAME_SHA=true \
+AICOPILOT_NON_PRODUCTION_MECHANISM_TEST=true \
+AICOPILOT_TEST_FAIL_AFTER_CONTAINER_EXIT_CODE=58 \
+FAKE_INFRA_TAG_DRIFT=true \
+  run_local_release > "$TEST_ROOT/infra-tag-drift-recovery.log" 2>&1
+infra_tag_drift_status=$?
+set -e
+assert_eq 58 "$infra_tag_drift_status" "immutable infrastructure tag-drift recovery exit code"
+assert_file_contains "$TEST_ROOT/infra-tag-drift-recovery.log" "restored to the previous manifest and revalidated"
+assert_file_contains "$DOCKER_LOG" "frozen-infra-recovery POSTGRES_IMAGE=registry.factory.internal:5000/enterprise-ai/base-postgres@sha256:1111111111111111111111111111111111111111111111111111111111111111"
+assert_file_contains "$DOCKER_LOG" "frozen-infra-recovery RABBITMQ_IMAGE=registry.factory.internal:5000/enterprise-ai/base-rabbitmq@sha256:2222222222222222222222222222222222222222222222222222222222222222"
+assert_file_contains "$DOCKER_LOG" "frozen-infra-recovery QDRANT_IMAGE=registry.factory.internal:5000/enterprise-ai/base-qdrant@sha256:3333333333333333333333333333333333333333333333333333333333333333"
+[ ! -f "$REMOTE_DIR/releases/blocked-release.env" ] || fail "immutable infrastructure recovery incorrectly blocked deployment"
+rm -f "$REMOTE_DIR/.fake-infra-tag-drift-active"
+
+printf 'TEST recovery validates unselected runtimes before claiming restoration\n'
+set +e
+AICOPILOT_FORCE_BUILD=true \
+AICOPILOT_ALLOW_REDEPLOY_SAME_SHA=true \
+AICOPILOT_NON_PRODUCTION_MECHANISM_TEST=true \
+AICOPILOT_TEST_FAIL_AFTER_CONTAINER_EXIT_CODE=58 \
+FAKE_UNHEALTHY_SERVICE=aicopilot-dataworker \
+  run_local_release > "$TEST_ROOT/unselected-runtime-recovery-failure.log" 2>&1
+unselected_recovery_status=$?
+set -e
+assert_eq 86 "$unselected_recovery_status" "unselected runtime recovery unsafe-partial exit code"
+assert_file_contains "$REMOTE_DIR/releases/blocked-release.env" "DEPLOY_FAILURE_REASON=container-recovery-failed"
+unselected_transaction="$(sed -n 's/^DEPLOY_TRANSACTION_BACKUP=//p' "$REMOTE_DIR/releases/blocked-release.env")"
+[ -d "$unselected_transaction" ] || fail "unselected runtime recovery failure did not retain transaction backup"
+rm -f "$REMOTE_DIR/releases/blocked-release.env"
+rm -rf "$unselected_transaction" "$REMOTE_DIR/.locks/release.lock.d" "$REMOTE_DIR/.support-backups"
+
 printf 'TEST failed runtime recovery persists blocked partial state and blocks retry\n'
 set +e
 AICOPILOT_FORCE_BUILD=true \
@@ -477,11 +927,12 @@ AICOPILOT_TEST_FORCE_RECOVERY_FAILURE=true \
   run_local_release > "$TEST_ROOT/blocked-runtime-failure.log" 2>&1
 blocked_failure_status=$?
 set -e
-assert_eq 58 "$blocked_failure_status" "blocked runtime failure exit code"
+assert_eq 86 "$blocked_failure_status" "blocked runtime unsafe-partial exit code"
 assert_file_contains "$REMOTE_DIR/releases/blocked-release.env" "DEPLOY_STATUS=blocked-partial"
 assert_file_contains "$REMOTE_DIR/releases/blocked-release.env" "DEPLOY_FAILURE_REASON=container-recovery-failed"
 blocked_transaction="$(sed -n 's/^DEPLOY_TRANSACTION_BACKUP=//p' "$REMOTE_DIR/releases/blocked-release.env")"
 [ -d "$blocked_transaction" ] || fail "blocked partial state did not retain its transaction backup"
+assert_file_contains "$blocked_transaction/previous-infra-runtime.env" "PREVIOUS_POSTGRES_IMAGE_REF=registry.factory.internal:5000/enterprise-ai/base-postgres@sha256:1111111111111111111111111111111111111111111111111111111111111111"
 set +e
 run_local_release > "$TEST_ROOT/blocked-retry.log" 2>&1
 blocked_retry_status=$?
@@ -490,7 +941,55 @@ assert_eq 78 "$blocked_retry_status" "blocked automatic retry exit code"
 assert_file_contains "$TEST_ROOT/blocked-retry.log" "unresolved partial state"
 rm -f "$REMOTE_DIR/releases/blocked-release.env"
 rm -rf "$blocked_transaction"
-[ ! -d "$REMOTE_DIR/.locks/release.lock.d" ] || fail "blocked retry left this run reservation behind"
+assert_file_contains "$REMOTE_DIR/.locks/release.lock.d/state" "blocked"
+rm -rf "$REMOTE_DIR/.locks/release.lock.d" "$REMOTE_DIR/.support-backups"
+
+printf 'TEST blocked-state write failure retains transaction and detectable owned lock\n'
+set +e
+AICOPILOT_FORCE_BUILD=true \
+AICOPILOT_ALLOW_REDEPLOY_SAME_SHA=true \
+AICOPILOT_NON_PRODUCTION_MECHANISM_TEST=true \
+AICOPILOT_TEST_FAIL_AFTER_CONTAINER_EXIT_CODE=58 \
+AICOPILOT_TEST_FORCE_RECOVERY_FAILURE=true \
+AICOPILOT_TEST_FORCE_BLOCKED_STATE_WRITE_FAILURE=true \
+  run_local_release > "$TEST_ROOT/blocked-write-failure.log" 2>&1
+blocked_write_status=$?
+set -e
+assert_eq 86 "$blocked_write_status" "blocked-state persistence unsafe-partial exit code"
+[ ! -f "$REMOTE_DIR/releases/blocked-release.env" ] || fail "forced blocked-state write failure unexpectedly wrote blocked state"
+orphan_transaction="$(find "$REMOTE_DIR" -maxdepth 1 -type d -name '.release-transaction.*' -print -quit)"
+[ -d "$orphan_transaction" ] || fail "blocked-state write failure did not retain transaction backup"
+assert_file_contains "$orphan_transaction/BLOCKED_PERSISTENCE_FAILED" "blocked-state-persistence-failed"
+[ -d "$REMOTE_DIR/.locks/release.lock.d" ] || fail "blocked-state write failure did not retain its detectable lock"
+set +e
+run_local_release > "$TEST_ROOT/orphan-transaction-retry.log" 2>&1
+orphan_retry_status=$?
+set -e
+assert_eq 79 "$orphan_retry_status" "orphan transaction retry gate exit code"
+assert_file_contains "$TEST_ROOT/orphan-transaction-retry.log" "unresolved transaction backup"
+rm -rf "$orphan_transaction" "$REMOTE_DIR/.locks/release.lock.d" "$REMOTE_DIR/.support-backups"
+
+printf 'TEST abnormal worker process state blocks commit and records migration partial state\n'
+TEST_SERVICES='migration,dataworker' \
+TEST_WORKSPACE_PLAN_FILE="$WORKER_PLAN_FILE" \
+TEST_WORKSPACE_PLAN_DIGEST="$WORKER_PLAN_DIGEST" \
+TEST_WORKSPACE_INVOCATION_ID=deployment-behavior-worker \
+  run_local_release > "$TEST_ROOT/worker-baseline.log" 2>&1
+set +e
+TEST_SERVICES='migration,dataworker' \
+TEST_WORKSPACE_PLAN_FILE="$WORKER_PLAN_FILE" \
+TEST_WORKSPACE_PLAN_DIGEST="$WORKER_PLAN_DIGEST" \
+TEST_WORKSPACE_INVOCATION_ID=deployment-behavior-worker \
+FAKE_UNHEALTHY_SERVICE=aicopilot-dataworker \
+  run_local_release > "$TEST_ROOT/worker-abnormal.log" 2>&1
+worker_abnormal_status=$?
+set -e
+assert_eq 86 "$worker_abnormal_status" "abnormal worker unsafe-partial exit code"
+assert_file_contains "$REMOTE_DIR/releases/blocked-release.env" "DEPLOY_FAILURE_REASON=migration-or-runtime-partial"
+worker_transaction="$(sed -n 's/^DEPLOY_TRANSACTION_BACKUP=//p' "$REMOTE_DIR/releases/blocked-release.env")"
+[ -d "$worker_transaction" ] || fail "worker partial failure did not retain transaction backup"
+rm -f "$REMOTE_DIR/releases/blocked-release.env"
+rm -rf "$worker_transaction" "$REMOTE_DIR/.locks/release.lock.d" "$REMOTE_DIR/.support-backups"
 
 printf 'TEST active and stale release locks\n'
 . "$REPO_DIR/deploy/enterprise-ai/scripts/release-common.sh"

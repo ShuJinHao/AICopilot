@@ -18,6 +18,15 @@ WORKSPACE_PROFILE_DIGEST="${12:-}"
 [ -n "$STAGING_DIR" ] || { printf 'Support staging directory is required.\n' >&2; exit 64; }
 [ -n "$LOCK_TOKEN" ] || { printf 'Release lock token is required.\n' >&2; exit 64; }
 [ -n "$EXPECTED_DIGEST" ] || { printf 'Support digest is required.\n' >&2; exit 64; }
+[[ "$LOCK_TOKEN" =~ ^[A-Za-z0-9._:-]+$ ]] || { printf 'Release lock token contains unsupported characters.\n' >&2; exit 64; }
+case "$RESERVATION_TTL_SECONDS" in
+  ''|*[!0-9]*|0*) printf 'Support reservation TTL must be a canonical positive decimal integer.\n' >&2; exit 64 ;;
+  *) ;;
+esac
+if [ "$RESERVATION_TTL_SECONDS" -lt 60 ] || [ "$RESERVATION_TTL_SECONDS" -gt 86400 ]; then
+  printf 'Support reservation TTL must be between 60 and 86400 seconds.\n' >&2
+  exit 64
+fi
 [ "$WORKSPACE_ENTRYPOINT" = "1" ] || { printf 'Support install requires the workspace deployment entrypoint marker.\n' >&2; exit 64; }
 [[ "$WORKSPACE_INVOCATION_ID" =~ ^[A-Za-z0-9._:-]+$ ]] || { printf 'Support install requires a safe workspace invocation id.\n' >&2; exit 64; }
 [[ "$WORKSPACE_EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || { printf 'Support install requires a lowercase full expected Git SHA.\n' >&2; exit 64; }
@@ -47,19 +56,32 @@ SUPPORT_PATH_LIST="$STAGING_DIR/.support-install-paths"
 # shellcheck source=release-common.sh
 . "$COMMON_SCRIPT"
 
+unsafe_marker="$(release_find_unsafe_partial_marker "$DEPLOY_DIR")"
+orphan_transaction="$(find "$DEPLOY_DIR" -maxdepth 1 -type d -name '.release-transaction.*' -print -quit 2>/dev/null || true)"
+unowned_support_backup="$(release_find_unowned_support_backup "$DEPLOY_DIR")"
+if [ -f "$DEPLOY_DIR/releases/blocked-release.env" ] || [ -n "$unsafe_marker" ] ||
+   [ -n "$orphan_transaction" ] || [ -n "$unowned_support_backup" ]; then
+  printf 'AICopilot support install is blocked by unresolved unsafe-partial state: %s\n' \
+    "${unsafe_marker:-${orphan_transaction:-${unowned_support_backup:-$DEPLOY_DIR/releases/blocked-release.env}}}" >&2
+  rm -rf "$STAGING_DIR" 2>/dev/null || true
+  exit 86
+fi
+
 restore_support_backup() {
   local relative_path
   local restore_status=0
   [ "$SUPPORT_MUTATION_STARTED" = true ] || return 0
   while IFS= read -r relative_path; do
     [ -n "$relative_path" ] || continue
-    release_validate_manifest_path "$relative_path" || { restore_status=1; continue; }
+    release_validate_manifest_target "$DEPLOY_DIR" "$relative_path" || { restore_status=1; continue; }
     rm -f "$DEPLOY_DIR/$relative_path" "${DEPLOY_DIR}/${relative_path}.aicopilot-stage.$LOCK_TOKEN" 2>/dev/null || restore_status=1
   done < "$SUPPORT_PATH_LIST"
   if [ -d "$SUPPORT_BACKUP_DIR/tree" ]; then
     while IFS= read -r relative_path; do
       relative_path="${relative_path#./}"
       [ -n "$relative_path" ] || continue
+      release_validate_manifest_target "$SUPPORT_BACKUP_DIR/tree" "$relative_path" || { restore_status=1; continue; }
+      release_validate_manifest_target "$DEPLOY_DIR" "$relative_path" || { restore_status=1; continue; }
       mkdir -p "$(dirname "$DEPLOY_DIR/$relative_path")" || { restore_status=1; continue; }
       cp -p "$SUPPORT_BACKUP_DIR/tree/$relative_path" "$DEPLOY_DIR/$relative_path" || restore_status=1
     done < <(cd "$SUPPORT_BACKUP_DIR/tree" && find . -type f -print | LC_ALL=C sort)
@@ -79,9 +101,13 @@ restore_support_backup() {
 
 cleanup_failed_install() {
   local status="$1"
+  local final_status="$status"
   trap - EXIT HUP INT TERM
   if [ "$INSTALL_COMMITTED" != true ] && ! restore_support_backup; then
     SUPPORT_RESTORE_FAILED=true
+    final_status=86
+    release_mark_unsafe_partial "$DEPLOY_DIR" "$LOCK_TOKEN" support-install-restore-failed || true
+    release_mark_lock_blocked "$RELEASE_LOCK_DIR" "$LOCK_TOKEN" support-install-restore-failed || true
     printf 'AICopilot support install restore failed; backup retained: %s\n' "$SUPPORT_BACKUP_DIR" >&2
   fi
   if [ "$LOCK_ACQUIRED" = true ] && [ "$INSTALL_COMMITTED" != true ]; then
@@ -89,10 +115,11 @@ cleanup_failed_install() {
       printf 'Support reservation retained because restore failed: %s\n' "$RELEASE_LOCK_DIR" >&2
     else
       release_unlock "$RELEASE_LOCK_DIR" "$LOCK_TOKEN" || true
+      rm -rf "$SUPPORT_BACKUP_DIR" 2>/dev/null || true
     fi
   fi
   rm -rf "$STAGING_DIR" 2>/dev/null || true
-  exit "$status"
+  exit "$final_status"
 }
 
 trap 'cleanup_failed_install $?' EXIT
@@ -112,7 +139,8 @@ while read -r checksum relative_path; do
   [ -n "$checksum" ] || continue
   relative_path="${relative_path#\*}"
   relative_path="${relative_path# }"
-  release_validate_manifest_path "$relative_path"
+  release_validate_manifest_target "$STAGING_DIR" "$relative_path"
+  release_validate_manifest_target "$DEPLOY_DIR" "$relative_path"
   printf '%s\n' "$relative_path" >> "$SUPPORT_PATH_LIST"
   case "$relative_path" in
     *.sh) bash -n "$STAGING_DIR/$relative_path" ;;
@@ -124,8 +152,7 @@ if [ -f "$DEPLOY_DIR/.aicopilot-support-manifest.sha256" ]; then
     [ -n "$old_checksum" ] || continue
     old_relative_path="${old_relative_path#\*}"
     old_relative_path="${old_relative_path# }"
-    release_validate_manifest_path "$old_relative_path"
-    release_validate_manifest_path "$old_relative_path"
+    release_validate_manifest_target "$DEPLOY_DIR" "$old_relative_path"
     printf '%s\n' "$old_relative_path" >> "$SUPPORT_PATH_LIST"
   done < "$DEPLOY_DIR/.aicopilot-support-manifest.sha256"
 fi
@@ -135,9 +162,9 @@ release_acquire_lock \
   "$RELEASE_LOCK_DIR" \
   "$LOCK_TOKEN" \
   aicopilot-release \
-  reserved \
-  support-install \
-  "$RESERVATION_TTL_SECONDS"
+  active \
+  support-installing \
+  0
 LOCK_ACQUIRED=true
 printf '%s\n' "$WORKSPACE_ENTRYPOINT" > "$RELEASE_LOCK_DIR/workspace-entrypoint"
 printf '%s\n' "$WORKSPACE_INVOCATION_ID" > "$RELEASE_LOCK_DIR/invocation-id"
@@ -149,6 +176,7 @@ printf '%s\n' "$SERVICES_MANIFEST_DIGEST" > "$RELEASE_LOCK_DIR/services-manifest
 printf '%s\n' "$IMAGE_MANIFEST_DIGEST" > "$RELEASE_LOCK_DIR/image-manifest-digest"
 
 mkdir -p "$SUPPORT_BACKUP_DIR/tree"
+cp -p "$SUPPORT_PATH_LIST" "$SUPPORT_BACKUP_DIR/paths"
 if [ -f "$DEPLOY_DIR/.aicopilot-support-manifest.sha256" ]; then
   cp -p "$DEPLOY_DIR/.aicopilot-support-manifest.sha256" "$SUPPORT_BACKUP_DIR/installed-manifest"
 fi
@@ -157,6 +185,7 @@ if [ -f "$DEPLOY_DIR/.aicopilot-support-manifest.digest" ]; then
 fi
 while IFS= read -r relative_path; do
   [ -n "$relative_path" ] || continue
+  release_validate_manifest_target "$DEPLOY_DIR" "$relative_path"
   if [ -f "$DEPLOY_DIR/$relative_path" ]; then
     mkdir -p "$(dirname "$SUPPORT_BACKUP_DIR/tree/$relative_path")"
     cp -p "$DEPLOY_DIR/$relative_path" "$SUPPORT_BACKUP_DIR/tree/$relative_path"
@@ -168,7 +197,8 @@ while read -r checksum relative_path; do
   [ -n "$checksum" ] || continue
   relative_path="${relative_path#\*}"
   relative_path="${relative_path# }"
-  release_validate_manifest_path "$relative_path"
+  release_validate_manifest_target "$STAGING_DIR" "$relative_path"
+  release_validate_manifest_target "$DEPLOY_DIR" "$relative_path"
 
   destination="$DEPLOY_DIR/$relative_path"
   staged_destination="${destination}.aicopilot-stage.$LOCK_TOKEN"
@@ -180,12 +210,14 @@ while read -r checksum relative_path; do
   [ -n "$checksum" ] || continue
   relative_path="${relative_path#\*}"
   relative_path="${relative_path# }"
+  release_validate_manifest_target "$DEPLOY_DIR" "$relative_path"
   destination="$DEPLOY_DIR/$relative_path"
   staged_destination="${destination}.aicopilot-stage.$LOCK_TOKEN"
   mv "$staged_destination" "$destination"
 done < "$MANIFEST_FILE"
 
 chmod +x "$DEPLOY_DIR/deploy-release.sh" "$DEPLOY_DIR/post-release-cleanup.sh" "$DEPLOY_DIR/harbor-retention.sh"
+[ ! -L "$DEPLOY_DIR/scripts" ] || { printf 'Support scripts directory became a symbolic link during installation.\n' >&2; exit 65; }
 find "$DEPLOY_DIR/scripts" -maxdepth 1 -type f -name '*.sh' -exec chmod +x {} +
 
 if [ -f "$DEPLOY_DIR/.aicopilot-support-manifest.sha256" ]; then
@@ -196,6 +228,7 @@ if [ -f "$DEPLOY_DIR/.aicopilot-support-manifest.sha256" ]; then
     if ! awk -v target="$old_relative_path" '{ path=$2; sub(/^\*/, "", path); if (path == target) found=1 } END { exit(found ? 0 : 1) }' "$MANIFEST_FILE"; then
       case "$old_relative_path" in
         scripts/*|cloud-readonly/*)
+          release_validate_manifest_target "$DEPLOY_DIR" "$old_relative_path"
           rm -f "$DEPLOY_DIR/$old_relative_path"
           ;;
       esac
@@ -209,13 +242,11 @@ cp "$MANIFEST_FILE" "$manifest_temp"
 printf '%s\n' "$EXPECTED_DIGEST" > "$digest_temp"
 mv "$manifest_temp" "$DEPLOY_DIR/.aicopilot-support-manifest.sha256"
 mv "$digest_temp" "$DEPLOY_DIR/.aicopilot-support-manifest.digest"
-release_update_lock_phase "$RELEASE_LOCK_DIR" "$LOCK_TOKEN" support-ready
-
 DEPLOY_DIR="$DEPLOY_DIR" "$DEPLOY_DIR/scripts/check-release-state-access.sh"
 release_verify_sha256_manifest "$DEPLOY_DIR" "$DEPLOY_DIR/.aicopilot-support-manifest.sha256"
+release_reserve_owned_lock "$RELEASE_LOCK_DIR" "$LOCK_TOKEN" aicopilot-release support-ready "$RESERVATION_TTL_SECONDS"
 
 INSTALL_COMMITTED=true
-rm -rf "$SUPPORT_BACKUP_DIR"
 rm -rf "$STAGING_DIR"
 trap - EXIT HUP INT TERM
 printf 'AICopilot support release installed and reserved: digest=%s token=%s invocation=%s expectedSha=%s planDigest=%s\n' \

@@ -173,12 +173,14 @@ public sealed class SecurityHardeningTests
             "enterprise-ai",
             "local-release.sh"));
 
+        buildAndPush.Should().Contain("IIOT_ROUTINE_BUILD_PROTOCOL=1");
+
         imageWorkflow.Should().Contain("runs-on: [self-hosted, iiot-linux-prod]");
         imageWorkflow.Should().Contain("Self-hosted runner must not run as root.");
         imageWorkflow.Should().Contain("workflow_dispatch:");
         imageWorkflow.Should().Contain("emergency_confirm:");
         imageWorkflow.Should().Contain("EMERGENCY_AICOPILOT_IMAGE_BUILD");
-        imageWorkflow.Should().Contain("aicopilot-image is not the routine production release path. Use pwsh ./deploy/Invoke-WorkspaceDeploy.ps1 -Target AICopilot from the workspace root.");
+        imageWorkflow.Should().Contain("aicopilot-image is not the routine production release path. Use pwsh ./deploy/Deploy.ps1 -Target AICopilot -Deploy from the workspace root.");
         imageWorkflow.Should().Contain("OCI_REGISTRY");
         imageWorkflow.Should().Contain("OCI_NAMESPACE");
         imageWorkflow.Should().Contain("dotnet publish");
@@ -201,10 +203,10 @@ public sealed class SecurityHardeningTests
 
         deployWorkflow.Should().Contain("runs-on: [self-hosted, iiot-linux-prod]");
         deployWorkflow.Should().Contain("Emergency release tag from local Harbor build or disaster-recovery aicopilot-image (sha-*)");
-        deployWorkflow.Should().Contain("Emergency only. Routine releases use workspace Invoke-WorkspaceDeploy.ps1; empty means full release only.");
+        deployWorkflow.Should().Contain("Emergency only. Routine application releases use workspace Deploy.ps1; empty means full release only.");
         deployWorkflow.Should().Contain("emergency_confirm:");
         deployWorkflow.Should().Contain("EMERGENCY_AICOPILOT_DEPLOY");
-        deployWorkflow.Should().Contain("aicopilot-deploy is not the routine production release path. Use pwsh ./deploy/Invoke-WorkspaceDeploy.ps1 -Target AICopilot from the workspace root.");
+        deployWorkflow.Should().Contain("aicopilot-deploy is not the routine production release path. Use pwsh ./deploy/Deploy.ps1 -Target AICopilot -Deploy from the workspace root.");
         deployWorkflow.Should().Contain("DEPLOY_TARGET_DIR: ${{ secrets.DEPLOY_TARGET_DIR }}");
         deployWorkflow.Should().Contain("DEPLOY_ENV_FILE: ${{ secrets.DEPLOY_ENV_FILE }}");
         deployWorkflow.Should().Contain("Self-hosted runner must not run as root.");
@@ -243,7 +245,9 @@ public sealed class SecurityHardeningTests
         localRelease.Should().Contain("github-runner@<shared-host>");
         localRelease.Should().Contain("AICopilot remote preflight");
         localRelease.Should().Contain("SSH_TIMEOUT_SECONDS=\"${SSH_TIMEOUT_SECONDS:-1800}\"");
-        localRelease.Should().Contain("HEAD $SOURCE_GIT_SHA is not present on remote $remote. Push to GitHub before production release.");
+        localRelease.Should().Contain("git -C \"$REPO_ROOT\" fetch --quiet origin '+refs/heads/main:refs/remotes/origin/main'");
+        localRelease.Should().Contain("Approved origin/main tip moved after the workspace plan");
+        localRelease.Should().Contain("Formal AICopilot release requires HEAD to equal the fresh origin/main tip");
         localRelease.Should().Contain("DEPLOY_LOCK_TOKEN='$RUN_ID' EXPECTED_SUPPORT_DIGEST='$SUPPORT_DIGEST' ./deploy-release.sh");
     }
 
@@ -334,7 +338,7 @@ public sealed class SecurityHardeningTests
             "nginx.conf.template"));
 
         deployGuide.Should().Contain("工作区标准发布");
-        deployGuide.Should().Contain("pwsh ./deploy/Invoke-WorkspaceDeploy.ps1 -Target AICopilot");
+        deployGuide.Should().Contain("pwsh ./deploy/Deploy.ps1 -Target AICopilot");
         deployGuide.Should().Contain("Docker Hub 不作为生产依赖源");
         deployGuide.Should().Contain("MCR 也不得作为生产构建的直接依赖源");
         deployGuide.Should().Contain("`aicopilot-image` / `aicopilot-deploy` 只保留带确认词的灾备入口");
@@ -357,8 +361,8 @@ public sealed class SecurityHardeningTests
         deployReadme.Should().Contain("aicopilot-image");
         deployReadme.Should().Contain("aicopilot-deploy");
         deployReadme.Should().Contain("build-and-push.sh       # 统一入口内部调度的本机镜像构建实现");
-        deployReadme.Should().Contain("local-release.sh        # 统一入口内部调度的固定提交发布实现");
-        deployReadme.Should().Contain("工作区对外标准发布走 `pwsh ./deploy/Invoke-WorkspaceDeploy.ps1 -Target AICopilot ...`");
+        deployReadme.Should().Contain("local-release.sh        # 旧事务/基础设施维护的固定提交发布实现");
+        deployReadme.Should().Contain("工作区日常标准发布走 `pwsh ./deploy/Deploy.ps1 -Target AICopilot ...`");
         deployReadme.Should().Contain("独立 detached worktree");
         deployReadme.Should().Contain("DEPLOY_ENV_FILE");
         deployReadme.Should().Contain("iiot-linux-prod");

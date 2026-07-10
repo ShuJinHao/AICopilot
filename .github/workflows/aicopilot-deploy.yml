@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       services:
-        description: "Emergency only. Routine releases use workspace Invoke-WorkspaceDeploy.ps1; empty means full release only."
+        description: "Emergency only. Routine application releases use workspace Deploy.ps1; empty means full release only."
         required: false
         type: string
       emergency_confirm:
@@ -57,7 +57,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ '${{ inputs.emergency_confirm }}' != 'EMERGENCY_AICOPILOT_DEPLOY' ]; then
-            echo "aicopilot-deploy is not the routine production release path. Use pwsh ./deploy/Invoke-WorkspaceDeploy.ps1 -Target AICopilot from the workspace root." >&2
+            echo "aicopilot-deploy is not the routine production release path. Use pwsh ./deploy/Deploy.ps1 -Target AICopilot -Deploy from the workspace root." >&2
             exit 64
           fi
           release_tag='${{ inputs.release_tag }}'

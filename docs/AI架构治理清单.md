@@ -321,8 +321,8 @@ npm run build
 发版前必须过：
 
 ```powershell
-pwsh ../deploy/Invoke-WorkspaceDeploy.ps1 -Target AICopilot -Services <实际服务列表> -ValidateOnly
-pwsh ../deploy/Invoke-WorkspaceDeploy.ps1 -Target AICopilot -Services <实际服务列表> -DryRun
+pwsh ../deploy/Deploy.ps1 -Target AICopilot -Doctor
+pwsh ../deploy/Deploy.ps1 -Target AICopilot -Services <实际服务列表> -DryRun
 ```
 
 下面是 AICopilot 仓内只读配置/安全专项诊断，不替代工作区统一入口；从 AICopilot 仓库根执行：

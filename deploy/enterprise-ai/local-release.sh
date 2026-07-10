@@ -16,7 +16,10 @@ SSH_TIMEOUT_SECONDS="${SSH_TIMEOUT_SECONDS:-1800}"
 SYNC_TIMEOUT_SECONDS="${SYNC_TIMEOUT_SECONDS:-120}"
 GIT_TIMEOUT_SECONDS="${GIT_TIMEOUT_SECONDS:-120}"
 SSH_CONNECT_TIMEOUT_SECONDS="${SSH_CONNECT_TIMEOUT_SECONDS:-15}"
-LOCK_RESERVATION_TTL_SECONDS="${LOCK_RESERVATION_TTL_SECONDS:-$((SSH_TIMEOUT_SECONDS + 300))}"
+LOCK_RESERVATION_TTL_SECONDS="${LOCK_RESERVATION_TTL_SECONDS:-}"
+RECONCILE_TIMEOUT_SECONDS="${RECONCILE_TIMEOUT_SECONDS:-60}"
+RECONCILE_INTERVAL_SECONDS="${RECONCILE_INTERVAL_SECONDS:-2}"
+RECONCILE_QUERY_TIMEOUT_SECONDS="${RECONCILE_QUERY_TIMEOUT_SECONDS:-20}"
 SSH_OPTIONS=(
   -o BatchMode=yes
   -o "ConnectTimeout=$SSH_CONNECT_TIMEOUT_SECONDS"
@@ -41,6 +44,7 @@ WORKSPACE_EXPECTED_SHA="${IIOT_WORKSPACE_DEPLOY_EXPECTED_SHA:-}"
 WORKSPACE_PLAN_DIGEST="${IIOT_WORKSPACE_DEPLOY_PLAN_DIGEST:-}"
 WORKSPACE_PLAN_FILE="${IIOT_WORKSPACE_DEPLOY_PLAN_FILE:-}"
 WORKSPACE_PROFILE_DIGEST="${IIOT_WORKSPACE_DEPLOY_PROFILE_DIGEST:-}"
+SERVER_DEADLINE_EPOCH=""
 
 usage() {
   cat <<'EOF'
@@ -81,7 +85,8 @@ require_bounded_integer() {
   local minimum="$3"
   local maximum="$4"
   case "$value" in
-    ''|*[!0-9]*) fail "$label must be an integer between $minimum and $maximum." ;;
+    ''|*[!0-9]*|0[0-9]*) fail "$label must be a canonical decimal integer between $minimum and $maximum." ;;
+    *) ;;
   esac
   if [ "$value" -lt "$minimum" ] || [ "$value" -gt "$maximum" ]; then
     fail "$label must be between $minimum and $maximum."
@@ -100,6 +105,12 @@ validate_transport_inputs() {
   require_bounded_integer "$GIT_TIMEOUT_SECONDS" GIT_TIMEOUT_SECONDS 1 3600
   require_bounded_integer "$SYNC_TIMEOUT_SECONDS" SYNC_TIMEOUT_SECONDS 1 3600
   require_bounded_integer "$SSH_TIMEOUT_SECONDS" SSH_TIMEOUT_SECONDS 1 7200
+  require_bounded_integer "$RECONCILE_TIMEOUT_SECONDS" RECONCILE_TIMEOUT_SECONDS 1 600
+  require_bounded_integer "$RECONCILE_INTERVAL_SECONDS" RECONCILE_INTERVAL_SECONDS 1 30
+  require_bounded_integer "$RECONCILE_QUERY_TIMEOUT_SECONDS" RECONCILE_QUERY_TIMEOUT_SECONDS 1 60
+  if [ -z "$LOCK_RESERVATION_TTL_SECONDS" ]; then
+    LOCK_RESERVATION_TTL_SECONDS=$((SSH_TIMEOUT_SECONDS + 300))
+  fi
   require_bounded_integer "$LOCK_RESERVATION_TTL_SECONDS" LOCK_RESERVATION_TTL_SECONDS 60 86400
   if [ "$LOCK_RESERVATION_TTL_SECONDS" -lt $((SSH_TIMEOUT_SECONDS + 60)) ]; then
     fail "LOCK_RESERVATION_TTL_SECONDS must be at least SSH_TIMEOUT_SECONDS + 60."
@@ -281,32 +292,99 @@ cleanup_snapshot() {
 
 release_own_remote_reservation() {
   local remote_command
+  local cancel_status
+  local elapsed=0
   [ "$REMOTE_RESERVATION_CREATED" = true ] || return 0
-  remote_command="bash -s -- '$REMOTE_DEPLOY_DIR' '$RUN_ID'"
-  if printf '%s\n' \
-      'set -euo pipefail' \
-      'deploy_dir="$1"' \
-      'token="$2"' \
-      'lock_dir="$deploy_dir/.locks/release.lock.d"' \
-      '[ -d "$lock_dir" ] || exit 0' \
-      '[ "$(sed -n "1p" "$lock_dir/token" 2>/dev/null || true)" = "$token" ] || exit 0' \
-      '[ "$(sed -n "1p" "$lock_dir/state" 2>/dev/null || true)" = "reserved" ] || exit 0' \
-      'rm -rf "$lock_dir"' | \
-      ssh "${SSH_OPTIONS[@]}" "$SSH_TARGET" "$remote_command" >/dev/null 2>&1; then
-    REMOTE_RESERVATION_CREATED=false
-    return 0
-  fi
-  printf 'Could not release this run remote reservation safely: token=%s dir=%s\n' "$RUN_ID" "$REMOTE_DEPLOY_DIR" >&2
-  return 1
+  remote_command="bash '$REMOTE_DEPLOY_DIR/scripts/cancel-support-reservation.sh' '$REMOTE_DEPLOY_DIR' '$RUN_ID'"
+  while [ "$elapsed" -le "$RECONCILE_TIMEOUT_SECONDS" ]; do
+    set +e
+    run_with_timeout "$RECONCILE_QUERY_TIMEOUT_SECONDS" "cancel AICopilot support reservation" \
+      ssh "${SSH_OPTIONS[@]}" "$SSH_TARGET" "$remote_command" >/dev/null 2>&1
+    cancel_status=$?
+    set -e
+    if [ "$cancel_status" -eq 0 ]; then
+      REMOTE_RESERVATION_CREATED=false
+      return 0
+    fi
+    if [ "$elapsed" -ge "$RECONCILE_TIMEOUT_SECONDS" ]; then
+      break
+    fi
+    sleep "$RECONCILE_INTERVAL_SECONDS"
+    elapsed=$((elapsed + RECONCILE_INTERVAL_SECONDS))
+  done
+  printf 'Remote support reservation remains active, unknown, or unsafe and was not cancelled: token=%s dir=%s\n' "$RUN_ID" "$REMOTE_DEPLOY_DIR" >&2
+  return 87
+}
+
+reconcile_remote_invocation() {
+  local elapsed=0
+  local remote_command="bash '$REMOTE_DEPLOY_DIR/scripts/query-release-invocation.sh' '$REMOTE_DEPLOY_DIR' '$RUN_ID'"
+  local query_output
+  local query_status
+  local deploy_status
+  local deploy_exit
+  local reconciliation
+
+  printf 'AICopilot deploy transport outcome is ambiguous; polling the server-side invocation token before any cancellation: token=%s\n' "$RUN_ID" >&2
+  while [ "$elapsed" -le "$RECONCILE_TIMEOUT_SECONDS" ]; do
+    set +e
+    query_output="$(run_with_timeout "$RECONCILE_QUERY_TIMEOUT_SECONDS" "query AICopilot invocation" \
+      ssh "${SSH_OPTIONS[@]}" "$SSH_TARGET" "$remote_command" 2>/dev/null)"
+    query_status=$?
+    set -e
+    deploy_status="$(printf '%s\n' "$query_output" | sed -n 's/^DEPLOY_STATUS=//p' | tail -n 1)"
+    deploy_exit="$(printf '%s\n' "$query_output" | sed -n 's/^DEPLOY_EXIT_CODE=//p' | tail -n 1)"
+    reconciliation="$(printf '%s\n' "$query_output" | sed -n 's/^DEPLOY_RECONCILIATION=//p' | tail -n 1)"
+
+    case "$deploy_status" in
+      succeeded)
+        REMOTE_RESERVATION_CREATED=false
+        printf 'AICopilot remote invocation reconciled as succeeded after transport loss: token=%s\n' "$RUN_ID"
+        return 0
+        ;;
+      failed-safe|unsafe-partial|committed-cleanup-failed)
+        REMOTE_RESERVATION_CREATED=false
+        case "$deploy_exit" in
+          ''|*[!0-9]*) return 87 ;;
+        esac
+        if [ "$deploy_exit" -lt 1 ] || [ "$deploy_exit" -gt 255 ]; then
+          return 87
+        fi
+        printf 'AICopilot remote invocation reconciled as %s after transport loss: token=%s exit=%s\n' \
+          "$deploy_status" "$RUN_ID" "$deploy_exit" >&2
+        return "$deploy_exit"
+        ;;
+    esac
+
+    if [ "$reconciliation" = reserved ]; then
+      printf 'AICopilot remote invocation never adopted its reservation; this token may be atomically cancelled.\n' >&2
+      return 88
+    fi
+    if [ "$elapsed" -ge "$RECONCILE_TIMEOUT_SECONDS" ]; then
+      break
+    fi
+    sleep "$RECONCILE_INTERVAL_SECONDS"
+    elapsed=$((elapsed + RECONCILE_INTERVAL_SECONDS))
+    [ "$query_status" -eq 0 ] || true
+  done
+
+  REMOTE_RESERVATION_CREATED=false
+  printf 'AICopilot remote invocation remains active or unknown; automatic cancellation and retry are forbidden: token=%s\n' "$RUN_ID" >&2
+  return 87
 }
 
 finish_local_release() {
   local status="$1"
+  local cancel_status
   trap - EXIT HUP INT TERM
   release_cancel_active_timeout
   cleanup_snapshot
   if [ "$status" -ne 0 ] && [ "$REMOTE_RESERVATION_CREATED" = true ]; then
-    release_own_remote_reservation || true
+    set +e
+    release_own_remote_reservation
+    cancel_status=$?
+    set -e
+    [ "$cancel_status" -eq 0 ] || status=87
   fi
   if [ "$status" -ne 0 ] && [ "$REMOTE_RESERVATION_CREATED" = true ]; then
     printf 'Remote release reservation may still be active; inspect it before retrying: %s/.locks/release.lock.d\n' "$REMOTE_DEPLOY_DIR" >&2
@@ -642,6 +720,7 @@ sync_remote_support_release() {
     return
   fi
 
+  REMOTE_RESERVATION_CREATED=true
   if run_with_timeout "$SYNC_TIMEOUT_SECONDS" "sync AICopilot support release" \
     bash -c '
       set -euo pipefail
@@ -649,10 +728,12 @@ sync_remote_support_release() {
       shift
       COPYFILE_DISABLE=1 tar -C "$support_tree" -cf - . | ssh "$@"
     ' bash "$SUPPORT_TREE" "${SSH_OPTIONS[@]}" "$SSH_TARGET" "$remote_command"; then
-    REMOTE_RESERVATION_CREATED=true
     return
   else
     status=$?
+    if [ "$status" -eq 75 ] || [ "$status" -eq 86 ]; then
+      REMOTE_RESERVATION_CREATED=false
+    fi
     print_deploy_diagnostics
     exit "$status"
   fi
@@ -682,7 +763,10 @@ DEPLOY_SERVICES="$(tr -d '\r\n' < "$SERVICES_FILE")"
 
 TAG="sha-$SOURCE_GIT_SHA"
 CANDIDATE_REMOTE_ENV="$(candidate_remote_environment)"
-REMOTE_COMMAND="cd '$REMOTE_DEPLOY_DIR' && ${CANDIDATE_REMOTE_ENV}DEPLOY_GIT_SHA='$SOURCE_GIT_SHA' DEPLOY_TRIGGERED_BY=local DEPLOY_LOCK_TOKEN='$RUN_ID' EXPECTED_SUPPORT_DIGEST='$SUPPORT_DIGEST' ./deploy-release.sh '$TAG' --services '$DEPLOY_SERVICES'"
+deadline_now_epoch="$(release_now_epoch)"
+require_bounded_integer "$deadline_now_epoch" "Current epoch" 1 99999999999
+SERVER_DEADLINE_EPOCH=$((deadline_now_epoch + SSH_TIMEOUT_SECONDS + 120))
+REMOTE_COMMAND="cd '$REMOTE_DEPLOY_DIR' && ${CANDIDATE_REMOTE_ENV}DEPLOY_GIT_SHA='$SOURCE_GIT_SHA' DEPLOY_TRIGGERED_BY=local DEPLOY_SERVER_DEADLINE_EPOCH='$SERVER_DEADLINE_EPOCH' DEPLOY_LOCK_TOKEN='$RUN_ID' EXPECTED_SUPPORT_DIGEST='$SUPPORT_DIGEST' ./deploy-release.sh '$TAG' --services '$DEPLOY_SERVICES'"
 
 printf '\nAICopilot local deploy command:\n'
 printf 'ssh'
@@ -694,8 +778,25 @@ if run_with_timeout "$SSH_TIMEOUT_SECONDS" "ssh AICopilot deploy-release" \
   REMOTE_RESERVATION_CREATED=false
 else
   status=$?
-  print_deploy_diagnostics
-  exit "$status"
+  if [ "$status" -eq 86 ]; then
+    REMOTE_RESERVATION_CREATED=false
+  fi
+  if [ "$status" -eq 124 ] || [ "$status" -eq 255 ]; then
+    if reconcile_remote_invocation; then
+      status=0
+    else
+      reconcile_status=$?
+      if [ "$reconcile_status" -eq 88 ]; then
+        print_deploy_diagnostics
+        exit "$status"
+      fi
+      print_deploy_diagnostics
+      exit "$reconcile_status"
+    fi
+  else
+    print_deploy_diagnostics
+    exit "$status"
+  fi
 fi
 
 if [ "$DRY_RUN" = true ]; then

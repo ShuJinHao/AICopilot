@@ -1,29 +1,33 @@
 # AICopilot 部署与维护指南
 
-本文档是 AICopilot 当前项目级部署说明。长期业务边界见 `AGENTS.md` 和 `资料/AICopilot业务规则.md`；历史阶段计划和验收报告不再作为执行入口。工作区唯一对外标准执行入口是根目录 `deploy/Invoke-WorkspaceDeploy.ps1`；本文件保留 AICopilot 项目特有约束和实现脚本说明。
+本文档是 AICopilot 当前项目级部署说明。长期业务边界见 `AGENTS.md` 和 `资料/AICopilot业务规则.md`；历史阶段计划和验收报告不再作为执行入口。日常应用发布入口是工作区根 `deploy/Deploy.ps1`；`deploy/Invoke-WorkspaceDeploy.ps1` 只保留给 Edge、部署基础设施维护和旧事务诊断。
 
-> 当前状态（2026-07-10）：部署机制已通过固定提交 fake Docker/SSH/remote 隔离回归，但没有执行真实 Harbor/SSH/生产容器 E2E，且高危依赖门禁仍未清零；当前不得把本文目标链路解释为生产部署已验收。
+> 当前状态（2026-07-10）：可信工作站日常链路已通过固定远端 SHA、脏本地工作树、fake Docker/SSH、一次 SSH、migration 备份、失败回滚和无重建续传回归。尚未执行真实 Harbor/SSH/生产容器 E2E，因此当前不得把本文目标链路解释为生产部署已验收。
 
 工作区标准入口示例：
 
 ```powershell
-pwsh ./deploy/Invoke-WorkspaceDeploy.ps1 -Target AICopilot -Services httpapi,web -ValidateOnly
-pwsh ./deploy/Invoke-WorkspaceDeploy.ps1 -Target AICopilot -Services httpapi,web -DryRun
+pwsh ./deploy/Deploy.ps1 -Target AICopilot -InstallRunner # 仅首次或 Runner 升级
+pwsh ./deploy/Deploy.ps1 -Target AICopilot -Doctor
+pwsh ./deploy/Deploy.ps1 -Target AICopilot -Services httpapi,web -DryRun
+pwsh ./deploy/Deploy.ps1 -Target AICopilot -Services httpapi,web -Deploy
 ```
 
 本文档按双层口径维护：
 
 - 长期模板/规则：描述 Harbor/SSH/non-root/HTTP-only/Cloud 只读边界，不写真实 secret。
-- 当前生产现场口径：当前标准部署根目录是 `/srv/enterprise-ai/deploy`，runner work root 是 `/data/github-runner/aicopilot`，Docker Root Dir 是 `/data/docker`；support files sync 目标目录（至少 `scripts/`、`cloud-readonly/`）、`releases/*` owner/mode 和标准非 root 发布路径必须同时保持一致。
+- 当前生产现场口径：当前标准部署根目录是 `/srv/enterprise-ai/deploy`，稳定 Runner 是 `runner/iiot-release-runner.sh`，Docker Root Dir 是 `/data/docker`；`releases/routine-*`、备份和标准 non-root 发布路径必须保持一致。旧 support 目录只在基础设施维护时检查。
 - 当前与 Cloud 共用同一台生产宿主机，但部署根独立；共享宿主机事实、当前标准发布账号和 Cloud 根目录统一以工作区 `../docs/上传部署总览.md` 为准。AICopilot 当前未因同类权限问题失败，但必须和 Cloud 共享相同的 non-root release-state / support-files 门禁原则。
 
 ## 1. 部署口径
 
 - 当前部署目录固定为 `deploy/enterprise-ai`。
-- `deploy/enterprise-ai/README.md` 是部署目录内的自解释实现入口；新 AI 接手标准路径时先读工作区 `deploy/README.md` 和 `deploy/Invoke-WorkspaceDeploy.ps1`，再按需下钻到该文件。
+- `deploy/enterprise-ai/README.md` 是部署目录内的自解释实现入口；新 AI 接手标准路径时先读工作区 `deploy/README.md` 和 `deploy/Deploy.ps1`，再按需下钻到该文件。
 - 多 AI 可以并行准备候选，但每次运行必须使用固定 SHA 和私有 manifest；远端 support install、release、容器变更和 cleanup 由同一 token/digest 与全局锁串行化，active lock 必须立即失败。
 - 生产环境使用 Docker Compose 单机编排，镜像从 Harbor 拉取。
-- 标准发布走工作区顶层入口：先 push GitHub 留痕，再由 `deploy/Invoke-WorkspaceDeploy.ps1` 调度本机构建镜像、推 Harbor，最后通过 SSH 触发服务器 `deploy-release.sh`。
+- 标准日常发布走工作区 `deploy/Deploy.ps1`：先把目标修改 push 到 `origin/main`，入口取远端 tip 建隔离 worktree、构建不可变镜像，再以一次 SSH 请求稳定 non-root Runner。本地工作树是否干净不阻断，也不会被入口修改。
+- 后端应用服务自动包含 migration；Runner 先备份 PostgreSQL，再迁移并用 `--no-deps` 更新选中应用，失败恢复旧应用镜像。构建后远端失败使用 `-ResumeInvocation` 续传，不重新构建。
+- Compose、Runner、scripts/cloud-readonly、cleanup/GC 和深度 attestation 属于独立基础设施维护，不随日常应用发布同步。
 - GitHub `aicopilot-image` / `aicopilot-deploy` 只保留带确认词的灾备入口；日常生产发布不得等待这些 workflow。
 - 单个镜像 build/push 默认 15 分钟超时，Harbor 登录/API 检查默认 2 分钟超时，SSH deploy 默认 30 分钟超时；超时必须停止并按脚本输出诊断 Docker buildx、Harbor tag、服务器 compose/logs 和 release 状态，不得继续 watch 或无限等待。
 - 灾备 runner 必须使用专用非 root 用户运行，例如 `github-runner`，并带 `iiot-linux-prod` label；不要把 runner 装成 root 服务。production/secrets 相关灾备 workflow 和 runner 机器侧都必须执行 `deploy/enterprise-ai/scripts/check-runner-security-attestation.sh`，验收非 root、工作目录、Docker Root Dir 和部署目录。
@@ -34,7 +38,7 @@ pwsh ./deploy/Invoke-WorkspaceDeploy.ps1 -Target AICopilot -Services httpapi,web
 - 当前内网环境 Git smart HTTP 可能超时，旧 workflow 使用 GitHub archive/codeload 兜底拉取源码；这些 workflow 仅用于灾备，不作为日常发布入口。
 - 日常本地构建 + SSH 标准链使用服务器预置且 mode `0600` 的真实 `.env`；support sync 不上传或覆盖 `.env`。GitHub secret `DEPLOY_ENV_FILE` 只用于灾备 workflow，不提交真实密钥。
 - 当前内网生产部署红线是 HTTP-only。AICopilot 当前修复和发布不得强制引入 HTTPS redirection、HSTS、nginx 443 listener、证书申请/续期或 OIDC HTTPS metadata 校验；如果未来要切 HTTPS，必须由用户单独批准传输层方案和证书来源。HTTP 部署下仍必须执行内网隔离、端口收敛、同源代理、CORS 白名单、强 secret、短期 token、非 root 容器、只读边界和除 HSTS 外的安全响应头。
-- AICopilot 的“慢”不得被误写成 HTTP 上传限速问题。当前真实慢路径是本地多镜像 build、Harbor push、support files sync、SSH deploy、migration、health probe 和 release security attestation。
+- AICopilot 的“慢”不得被误写成 HTTP 上传限速问题。日常真实慢路径是选中镜像 build/Harbor push、migration 和 health；support sync、深度 attestation 和 cleanup 已拆出。
 - Docker Hub 不作为生产依赖源，MCR 也不得作为生产构建的直接依赖源；PostgreSQL、RabbitMQ、Qdrant、.NET ASP.NET runtime、Node、Nginx 基础镜像必须先 mirror 到 Harbor。
 - AICopilot 默认保持 Cloud 只读边界，不能注册、修改、删除或触发 Cloud 业务数据。
 - Cloud OIDC 只用于身份对齐；AICopilot 保留本地 AI 用户、AI 角色、AI 权限、审计和 emergency admin。
@@ -69,7 +73,7 @@ deploy/enterprise-ai/
 
 真实 `.env` 从 `deploy/enterprise-ai/.env.example` 复制后替换密钥和镜像 tag，并直接保存到服务器 `/srv/enterprise-ai/deploy/.env`。GitHub secret `DEPLOY_ENV_FILE` 只服务灾备 workflow，不作为日常标准发布前置条件。
 
-对外标准校验必须从工作区根运行 `pwsh ./deploy/Invoke-WorkspaceDeploy.ps1 -Target AICopilot -Services <实际服务列表> -ValidateOnly`。获批排障时才允许在服务器部署目录内部运行 `./deploy-release.sh --validate-only`；它校验 `.env` 权限、模板占位、弱 secret、HTTP-only URL、Cloud OIDC 内网 HTTP issuer、必填 secret、direct Cloud readonly 配置，以及 `releases/*` owner/mode 是否仍适合标准 non-root 发布，不需要 release tag、不拉镜像、不执行 Docker Compose。该内部命令不是第二套 AI 标准入口。
+对外标准环境校验必须从工作区根运行 `pwsh ./deploy/Deploy.ps1 -Target AICopilot -Doctor`。获批旧事务排障时才允许在服务器部署目录内部运行 `./deploy-release.sh --validate-only`；该内部命令不是第二套 AI 标准入口。
 
 ## 3. 关键环境变量
 
@@ -213,6 +217,14 @@ git push GitHub
 
 `build-and-push.sh` 必须显式接收 `--services httpapi,migration,dataworker,ragworker,web` 的子集或 `--all`，但只由统一入口内部调度；无参数直接失败。选择 `httpapi`、`dataworker` 或 `ragworker` 时会自动加入 `migration`。正式发布的 `Deploy services input`、image manifest 和 support manifest 只写本次 run 私有目录，`local-release.sh` 只读取同一次运行的清单；不得再用共享 `artifacts/deploy/aicopilot-built-services.txt` 控制发布。
 
+### 4.1 不可变候选、幂等与恢复
+
+- 正式发布必须先由工作区入口 `CheckCandidate` 生成只读 plan，再用同一个完整 SHA、plan digest、profile digest 和显式服务闭包执行 `Deploy`；项目脚本不得直接作为第二入口。
+- 应用镜像使用 immutable OCI ref。事务开始前同时冻结 PostgreSQL、RabbitMQ、Qdrant 的真实 RepoDigest/runtime image id；回滚按冻结身份恢复，不重新解析可变 tag。
+- 同 SHA 的 no-op 还必须满足 support/services/image digest、服务器配置 fingerprint、运行镜像身份和全部常驻容器稳定；配置 fingerprint 漂移只能全量发布。
+- support/compose/infra/runtime/state 任一恢复或证据落盘不确定时返回 `86` 并保留 blocked/backup；SSH 断联后按 invocation token 对账，active/unknown 返回 `87`，不得自动取消或盲目重试。
+- DataWorker/RagWorker 当前没有独立业务健康端点；发布只能证明容器进程、OOM、重启稳定性及已有 Docker Health，不能把它表述为完整业务健康。
+
 全量发布会先运行 `aicopilot-migration`，并在启动 HttpApi/DataWorker/RagWorker/Web 前执行模型和 Embedding API key 迁移 preflight。以下服务器命令只用于获批的维护诊断/break-glass，不是 AI 日常标准入口；按需处理 `httpapi`、`dataworker` 或 `ragworker` 时，`--services` 必须同时包含 `migration`，web-only 可以不带：
 
 ```bash
@@ -293,7 +305,7 @@ MCR 直转镜像。`mirror-base-images.sh` 生成该镜像时必须内置 `libgs
 工作区标准发布：
 
 ```powershell
-pwsh ./deploy/Invoke-WorkspaceDeploy.ps1 -Target AICopilot -Services httpapi,dataworker
+pwsh ./deploy/Deploy.ps1 -Target AICopilot -Services httpapi,dataworker -Deploy
 ```
 
 单独构建镜像时使用：

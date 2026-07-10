@@ -26,7 +26,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ '${{ inputs.emergency_confirm }}' != 'EMERGENCY_AICOPILOT_IMAGE_BUILD' ]; then
-            echo "aicopilot-image is not the routine production release path. Use pwsh ./deploy/Invoke-WorkspaceDeploy.ps1 -Target AICopilot from the workspace root." >&2
+            echo "aicopilot-image is not the routine production release path. Use pwsh ./deploy/Deploy.ps1 -Target AICopilot -Deploy from the workspace root." >&2
             exit 64
           fi
 

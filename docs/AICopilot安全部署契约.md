@@ -61,7 +61,7 @@ Cloud OIDC 使用 HTTP issuer 时必须满足全部条件：
 
 - `.env.example`、compose、workflow 默认值、脚本默认值、migration seed、fresh DB seed、滚动复盘和历史诊断记录不得携带真实内网 IP、弱 secret、`CHANGE_ME`、`dummy-key`、默认 `root@` 发布目标或可直接使用的模型 API key。
 - JWT 配置必须由 `JwtSettings.EnsureValid()` 在 HttpApi 启动时统一校验：Issuer、Audience 非空，SecretKey 至少 64 字符，AccessTokenExpirationMinutes 大于 0；绕过部署脚本直接启动也必须 fail-fast，错误不得回显 secret。默认 access token 有效期保持 30 分钟。
-- 发布前必须先执行 `.env` 权限、模板占位、弱 secret、HTTP-only URL、Cloud OIDC issuer、必填 secret、direct Cloud readonly 配置、support files sync 目标目录可写性和 `releases/*` owner/mode 校验。
+- 日常发布前 Doctor 必须校验 `.env` 私有权限、Compose 可解析、Docker/non-root、稳定 Runner 和 `releases/routine-*` / backup 目录可写性；模板占位、弱 secret、HTTP-only URL、Cloud OIDC、direct Cloud readonly 和 support 目标深度校验保留在 CI/独立基础设施维护门禁，不能每次重复同步 support。
 - `deploy-release.sh --validate-only` 是不发布的配置校验入口；该模式不得拉镜像、不得执行 Docker Compose、不得改写 release tag，但必须提前暴露 root-owned release state 这类标准 non-root 路径问题。
 - 模型、Embedding、endpoint pool API key 必须是 `encv2:` AES-GCM 受保护格式；旧 `encv1:` 只能由 migration worker 迁移重加密，runtime provider 不得长期兼容旧格式或明文。
 - 私有模型 seed 的真实 `AICOPILOT_PRIVATE_MODEL_BASE_URL`、`AICOPILOT_PRIVATE_MODEL_API_KEY` 和启用状态只能来自服务器真实 `.env` 或本机非 git 私密手册；仓库默认使用 `model.internal.example` 占位 URL、空 API key 和禁用状态。生产标准 context window 是 `65536`，API key 播种入库前必须加密为 `encv2:`。
@@ -70,8 +70,8 @@ Cloud OIDC 使用 HTTP issuer 时必须满足全部条件：
 
 - AICopilot 生产镜像必须使用 Harbor mirror 基础镜像，不能默认从 Docker Hub 或 MCR 拉生产基础镜像。
 - 应用和 Web 运行容器必须非 root。
-- 标准发布路径是本机构建镜像、推 Harbor、SSH 触发服务器 `deploy-release.sh`。
-- `local-release.sh` 默认使用专用部署用户；root SSH 只允许 `ALLOW_ROOT_SSH_DEPLOY=true` 的记录化应急路径。
+- 日常标准发布路径是工作区 `Deploy.ps1` 从 fresh 远端 tip 隔离构建、推 Harbor，再以一次 SSH 请求稳定服务器 Runner。`local-release.sh` / `deploy-release.sh` 只保留给基础设施维护和旧事务恢复。
+- 稳定 Runner 必须使用专用 non-root 部署用户；root 只允许一次性修复 owner/mode，不得进入日常应用发布。
 - 当前如果与 Cloud 共用同一台生产宿主机，必须在工作区总入口明确共享宿主机事实、共享标准发布人和两个独立部署根；不得把 Cloud 根的权限漂移和 AICopilot 根的权限状态混写成同一个“整机问题”。
 - root 应急路径如果写入了 `releases/*`、`current-release.summary.md` 或 deploy support files，关闭任务前必须恢复 owner/mode，并重新验证标准 non-root `./deploy-release.sh --validate-only`。
 - GitHub `aicopilot-image` / `aicopilot-deploy` 只保留灾备入口，不是日常生产发布入口。
@@ -80,15 +80,21 @@ Cloud OIDC 使用 HTTP issuer 时必须满足全部条件：
 
 ### 7.1 可重复和并发安全发布
 
-- clean/pushed 只是一道入口门禁，不是构建快照。正式发布必须从门禁解析出的固定 Git SHA 创建隔离 detached worktree，镜像和 support files 都只能读取该快照；原工作树后续发生并发修改不得改变本次发布内容。
-- 每次运行必须使用私有 services、image 和 support manifest；不得用 `artifacts/deploy/aicopilot-built-services.txt` 这类跨任务固定文件控制正式发布，dry-run 也不得覆盖另一个正式任务的控制面。
-- support release 必须包含 `docker-compose.yaml`、受控服务器脚本、`scripts/` 和 `cloud-readonly/`，先在独立 staging 目录执行逐文件 SHA256 校验，再在 release lock 内安装并最后提交 manifest/digest；`.env`、`releases/`、`.locks/`、备份和其它持久化状态禁止进入同步包。
+- 日常正式发布必须从 fresh 配置远端 tip 创建隔离 detached worktree；原工作树允许脏且后续并发修改不得改变本次发布，未推送内容不得发布。
+- 每次日常运行必须使用私有 services、image 和 digest-bound request；不得用 `artifacts/deploy/aicopilot-built-services.txt` 这类跨任务固定文件控制发布。每次远端阶段只能建立一次 SSH。
+- 日常应用发布不得同步 `docker-compose.yaml`、服务器脚本、`scripts/`、`cloud-readonly/` 或 Runner。support release 是独立基础设施维护任务，仍须用 staging/SHA256/旧事务锁，并禁止 `.env`、`releases/`、`.locks/`、备份进入同步包。
 - support install reservation 与 `deploy-release.sh` 必须使用同一 token 和 support digest。远端 release manifest、summary、已安装 support manifest 和 lock metadata 的 digest 必须一致；任何不一致都必须在 `.env` 或容器变更前 fail-closed。
 - AICopilot release lock 和共享 cleanup lock 必须记录 token、owner、PID、process-start、phase 和更新时间。active lock 立即返回 `75`；PID 已死亡、process-start 不匹配或 reservation 过期的 stale lock 允许安全回收。不得用静默轮询 15 分钟代替状态判断。
 - `.env` 和 current/previous/staged release state 必须在容器变更前进入事务备份；健康检查或 attestation 前失败必须恢复原文件状态。已经健康并提交 current release 后 cleanup 失败属于“部署成功、清理失败”，不得回滚健康 release，也不得被包装成 `124`。
 - timeout 必须终止命令的受监督本地进程树和 watchdog timer 树。只有计时器真实触发时返回 `124`；普通命令失败保留原始退出码。HUP/INT/TERM handler 必须显式退出并释放自己持有的锁，不得只删锁后继续执行；部署脚本不得主动创建新会话逃逸监督。
-- 同 Git SHA、同 support digest、同服务镜像已经运行且健康时必须幂等成功，不重复 migration、容器重建和 cleanup；标准本地入口应在 build/push 前完成该检查。
+- 同 request digest 已运行且目标服务健康时必须幂等成功，不重复 migration 或容器重建。cleanup、Harbor GC 和深度 attestation 不在同步应用热路径。
 - 部署行为测试入口必须根据脚本自身路径解析 AICopilot Git 根，不能依赖 AI 当前终端目录；从工作区根、AICopilot 仓库根或其它目录调用时必须测试同一固定提交/fake 外部依赖链，不能因工作区根不是 Git 仓库而误报 `128`。
+- 日常入口内部生成 invocation、远端 SHA、服务闭包、OCI digest 和 request digest，操作者不再手工复制 plan path/SHA/digest。选择 HttpApi/DataWorker/RagWorker 时必须自动包含 migration；请求 digest 是误操作和传输完整性门禁，不是抵御已控制部署账号攻击者的密码学边界。
+- 应用镜像必须使用 immutable `repository@sha256`；事务开始前还必须冻结 PostgreSQL、RabbitMQ、Qdrant 的真实 Config.Image、匹配仓库的 RepoDigest 和 runtime image id，并写入 transaction/release state。失败恢复只能使用冻结身份，不能重新解析可能移动的基础设施 tag。
+- no-op/commit 必须同时满足 SHA、plan/profile、support/services/image digest、全局 `.env` canonical fingerprint、应用/基础设施实际镜像身份和常驻容器稳定性。canonical fingerprint 只落 SHA-256，不得打印或落地 secret；fingerprint 漂移时禁止部分服务发布。
+- support installer、cancel、deploy 必须通过带 PID/process-start/owner/token 的原子 transition 串行化；live transition 不因 TTL 过期被回收，旧 token 不得删除新锁。恢复失败或 blocked evidence 写入失败时，残留 backup/永久 blocked lock 本身必须持续阻断并返回 `86`。
+- SSH timeout/断联不得只根据本机 ssh 退出码判断失败或重试；必须按 invocation token 查询远端 terminal state。明确成功可收口，明确失败保留真实失败码，active/unknown 返回 `87` 并禁止取消、重试或并发接管。
+- 回滚必须恢复并复验 support、compose、release state、PostgreSQL、RabbitMQ、Qdrant、HttpApi、DataWorker、RagWorker 和 Web；进程 Running、非 Restarting、非 OOM、RestartCount 稳定，且已有 Health 为 healthy 才能称恢复完成。数据库 migration 已执行后的失败保持 partial，禁止脚本猜测回滚数据库。
 
 ## 8. 发布验收命令
 
@@ -101,11 +107,12 @@ bash deploy/enterprise-ai/tests/deployment-behavior.sh
 dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "FullyQualifiedName~SecurityHardeningTests" --no-restore
 ```
 
-发布前的对外标准命令（项目脚本只由顶层入口调度）：
+发布前/发布的对外标准命令：
 
 ```powershell
-pwsh ./deploy/Invoke-WorkspaceDeploy.ps1 -Target AICopilot -Services httpapi,migration,dataworker,ragworker,web -ValidateOnly
-pwsh ./deploy/Invoke-WorkspaceDeploy.ps1 -Target AICopilot -Services httpapi,migration,dataworker,ragworker,web -DryRun
+pwsh ./deploy/Deploy.ps1 -Target AICopilot -Doctor
+pwsh ./deploy/Deploy.ps1 -Target AICopilot -Services httpapi,dataworker,ragworker,web -DryRun
+pwsh ./deploy/Deploy.ps1 -Target AICopilot -Services httpapi,dataworker,ragworker,web -Deploy
 ```
 
 仓库内安全检查仍可单独运行，但不触发生产发布：
