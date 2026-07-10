@@ -23,17 +23,13 @@ public sealed class CloudAiReadClient(
 
     public bool IsEnabled => options.Value.Enabled;
 
-    public async Task<JsonDocument> SendJsonAsync(
-        HttpMethod method,
+    private async Task<JsonDocument> GetJsonAsync(
         string path,
         IReadOnlyDictionary<string, string?>? query = null,
         CancellationToken cancellationToken = default)
     {
         var configuredOptions = EnsureConfigured();
-        var decision = CloudAiReadEndpointPolicy.Evaluate(
-            method,
-            path,
-            configuredOptions.ExplicitPostQueryPaths);
+        var decision = CloudAiReadEndpointPolicy.Evaluate(HttpMethod.Get, path);
         if (!decision.IsAllowed)
         {
             throw new CloudAiReadException(
@@ -41,8 +37,7 @@ public sealed class CloudAiReadClient(
                 decision.Reason ?? "Cloud AiRead request was blocked by the allowlist policy.");
         }
 
-        return await httpTransport.SendJsonAsync(
-            method,
+        return await httpTransport.GetJsonAsync(
             path,
             query,
             configuredOptions,
@@ -53,8 +48,7 @@ public sealed class CloudAiReadClient(
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default)
     {
-        using var document = await SendJsonAsync(
-            HttpMethod.Get,
+        using var document = await GetJsonAsync(
             DevicesPath,
             CloudAiReadQueryParameterBuilder.BuildDeviceQueryParameters(query),
             cancellationToken);
@@ -66,8 +60,7 @@ public sealed class CloudAiReadClient(
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default)
     {
-        using var document = await SendJsonAsync(
-            HttpMethod.Get,
+        using var document = await GetJsonAsync(
             ProcessesPath,
             CloudAiReadQueryParameterBuilder.BuildProcessQueryParameters(query),
             cancellationToken);
@@ -79,8 +72,7 @@ public sealed class CloudAiReadClient(
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default)
     {
-        using var document = await SendJsonAsync(
-            HttpMethod.Get,
+        using var document = await GetJsonAsync(
             ClientReleasesPath,
             CloudAiReadQueryParameterBuilder.BuildClientReleaseQueryParameters(query),
             cancellationToken);
@@ -92,8 +84,7 @@ public sealed class CloudAiReadClient(
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default)
     {
-        using var document = await SendJsonAsync(
-            HttpMethod.Get,
+        using var document = await GetJsonAsync(
             DeviceClientStatesPath,
             CloudAiReadQueryParameterBuilder.BuildDeviceClientStateQueryParameters(query),
             cancellationToken);
@@ -105,8 +96,7 @@ public sealed class CloudAiReadClient(
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default)
     {
-        using var document = await SendJsonAsync(
-            HttpMethod.Get,
+        using var document = await GetJsonAsync(
             CapacitySummaryPath,
             CloudAiReadQueryParameterBuilder.BuildCapacityQueryParameters(query),
             cancellationToken);
@@ -118,8 +108,7 @@ public sealed class CloudAiReadClient(
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default)
     {
-        using var document = await SendJsonAsync(
-            HttpMethod.Get,
+        using var document = await GetJsonAsync(
             CapacityHourlyPath,
             CloudAiReadQueryParameterBuilder.BuildCapacityHourlyQueryParameters(query),
             cancellationToken);
@@ -131,8 +120,7 @@ public sealed class CloudAiReadClient(
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default)
     {
-        using var document = await SendJsonAsync(
-            HttpMethod.Get,
+        using var document = await GetJsonAsync(
             DeviceLogsPath,
             CloudAiReadQueryParameterBuilder.BuildDeviceLogQueryParameters(query),
             cancellationToken);
@@ -144,8 +132,7 @@ public sealed class CloudAiReadClient(
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default)
     {
-        using var document = await SendJsonAsync(
-            HttpMethod.Get,
+        using var document = await GetJsonAsync(
             ProductionRecordsPath,
             CloudAiReadQueryParameterBuilder.BuildProductionRecordQueryParameters(query),
             cancellationToken);
@@ -160,7 +147,11 @@ public sealed class CloudAiReadClient(
         var query = await PrepareSemanticQueryAsync(plan, cancellationToken);
         return plan.Target switch
         {
+            SemanticQueryTarget.Device when plan.Kind == SemanticQueryKind.Status =>
+                ToUntyped(await GetDeviceClientStatesAsync(query, cancellationToken)),
             SemanticQueryTarget.Device => ToUntyped(await GetDevicesAsync(query, cancellationToken)),
+            SemanticQueryTarget.Process => await QueryProcessesAsync(plan, query, cancellationToken),
+            SemanticQueryTarget.ClientRelease => ToUntyped(await GetClientReleasesAsync(query, cancellationToken)),
             SemanticQueryTarget.Capacity when ShouldUseCapacityHourly(plan) => ToUntyped(await GetCapacityHourlyAsync(query, cancellationToken)),
             SemanticQueryTarget.Capacity => ToUntyped(await GetCapacitySummaryAsync(query, cancellationToken)),
             SemanticQueryTarget.DeviceLog => ToUntyped(await GetDeviceLogsAsync(query, cancellationToken)),
@@ -169,12 +160,75 @@ public sealed class CloudAiReadClient(
         };
     }
 
+    private async Task<CloudAiReadResult<object>> QueryProcessesAsync(
+        SemanticQueryPlan plan,
+        CloudAiReadQuery query,
+        CancellationToken cancellationToken)
+    {
+        if (plan.Kind != SemanticQueryKind.Detail || HasFilter(query, "processId"))
+        {
+            return ToUntyped(await GetProcessesAsync(query, cancellationToken));
+        }
+
+        var searchResult = await GetProcessesAsync(query with { Limit = 100 }, cancellationToken);
+        if (searchResult.IsTruncated)
+        {
+            throw new CloudAiReadException(
+                CloudAiReadProblemCodes.MissingRequiredParameter,
+                "Cloud AiRead 工序搜索结果已截断，不能据此解析唯一工序；请补充精确工序编码或名称。");
+        }
+
+        var exactFilters = plan.Filters
+            .Where(filter => filter.Field.Equals("processCode", StringComparison.OrdinalIgnoreCase) ||
+                             filter.Field.Equals("processName", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        var matches = searchResult.Items
+            .Where(item => exactFilters.All(filter =>
+                string.Equals(
+                    filter.Field.Equals("processCode", StringComparison.OrdinalIgnoreCase)
+                        ? item.ProcessCode?.Trim()
+                        : item.ProcessName?.Trim(),
+                    filter.Value.Trim(),
+                    StringComparison.OrdinalIgnoreCase)))
+            .GroupBy(
+                item => item.ProcessId ?? $"{item.ProcessCode}|{item.ProcessName}",
+                StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToArray();
+        if (matches.Length != 1)
+        {
+            throw new CloudAiReadException(
+                CloudAiReadProblemCodes.MissingRequiredParameter,
+                "Cloud AiRead 工序查询无法唯一命中正式工序，请补充精确工序编码或名称。");
+        }
+
+        var match = matches[0];
+        return new CloudAiReadResult<object>(
+            searchResult.SourcePath,
+            searchResult.SourceLabel,
+            searchResult.QueriedAtUtc,
+            plan.Limit,
+            IsTruncated: false,
+            [match],
+            [new Dictionary<string, object?>
+            {
+                ["processId"] = match.ProcessId,
+                ["processCode"] = match.ProcessCode,
+                ["processName"] = match.ProcessName
+            }],
+            searchResult.ProviderSource,
+            searchResult.QueryScope,
+            RowCount: 1,
+            NextCursor: searchResult.NextCursor);
+    }
+
     private async Task<CloudAiReadQuery> PrepareSemanticQueryAsync(
         SemanticQueryPlan plan,
         CancellationToken cancellationToken)
     {
         var query = ApplySemanticDefaults(plan, CloudAiReadQuery.FromSemanticPlan(plan));
-        if (plan.Target is SemanticQueryTarget.Device or SemanticQueryTarget.Recipe)
+        if (plan.Target == SemanticQueryTarget.Device ||
+            plan.Target is SemanticQueryTarget.Recipe or SemanticQueryTarget.Process or SemanticQueryTarget.ClientRelease)
         {
             return query;
         }
@@ -187,14 +241,25 @@ public sealed class CloudAiReadClient(
         var deviceCode = GetFilterValue(query, "deviceCode");
         var deviceResult = await GetDevicesAsync(
             new CloudAiReadQuery(
-                deviceCode,
+                null,
                 [new CloudAiReadFilter("deviceCode", "eq", deviceCode!)],
                 null,
                 "deviceCode",
                 false,
-                2),
+                100),
             cancellationToken);
+        if (deviceResult.IsTruncated)
+        {
+            throw new CloudAiReadException(
+                CloudAiReadProblemCodes.MissingRequiredParameter,
+                "Cloud AiRead 设备搜索结果已截断，不能据此解析唯一 deviceId；请补充 Cloud 正式设备 ID。");
+        }
+
         var deviceIds = deviceResult.Items
+            .Where(item => string.Equals(
+                item.DeviceCode?.Trim(),
+                deviceCode?.Trim(),
+                StringComparison.OrdinalIgnoreCase))
             .Select(item => item.DeviceId)
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -203,11 +268,12 @@ public sealed class CloudAiReadClient(
         {
             throw new CloudAiReadException(
                 CloudAiReadProblemCodes.MissingRequiredParameter,
-                $"Cloud AiRead 查询无法通过 deviceCode={deviceCode} 唯一解析 deviceId，请补充 Cloud 正式设备 ID。");
+                "Cloud AiRead 查询无法通过设备编码唯一解析 deviceId，请补充 Cloud 正式设备 ID。");
         }
 
         return query.WithFilters(
             query.Filters
+                .Where(filter => !filter.Field.Equals("deviceCode", StringComparison.OrdinalIgnoreCase))
                 .Append(new CloudAiReadFilter("deviceId", "eq", deviceIds[0]!))
                 .ToArray());
     }
@@ -326,7 +392,11 @@ public sealed class CloudAiReadClient(
             result.Limit,
             result.IsTruncated,
             result.Items.Cast<object>().ToArray(),
-            result.Rows);
+            result.Rows,
+            result.ProviderSource,
+            result.QueryScope,
+            result.RowCount,
+            result.NextCursor);
     }
 
     private CloudAiReadOptions EnsureConfigured()

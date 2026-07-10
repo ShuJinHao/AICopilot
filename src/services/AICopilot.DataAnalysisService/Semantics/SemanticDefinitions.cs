@@ -7,15 +7,15 @@ public sealed class DeviceSemanticDefinition : SemanticEntityDefinition
     public DeviceSemanticDefinition()
         : base(
             SemanticQueryTarget.Device,
-            ["设备", "机台", "设备主数据", "产线设备", "device", "machine"],
-            ["deviceId", "deviceCode", "deviceName", "status", "lineName", "updatedAt"],
-            ["deviceId", "deviceCode", "deviceName", "status", "lineName"],
-            ["deviceCode", "deviceName", "updatedAt"],
+            ["设备", "机台", "设备主数据", "设备运行状态", "device", "machine"],
+            ["deviceId", "deviceCode", "deviceName", "processId", "clientCode", "softwareStatus", "runtimeStatus", "runtimeStartedAtUtc", "lastRuntimeHeartbeatAtUtc"],
+            ["deviceId", "deviceCode", "deviceName", "processId", "clientCode"],
+            ["deviceCode", "deviceName"],
             new Dictionary<SemanticQueryKind, SemanticProjection>
             {
-                [SemanticQueryKind.List] = new(["deviceCode", "deviceName", "status", "lineName", "updatedAt"]),
-                [SemanticQueryKind.Detail] = new(["deviceId", "deviceCode", "deviceName", "status", "lineName", "updatedAt"]),
-                [SemanticQueryKind.Status] = new(["deviceCode", "deviceName", "status", "updatedAt"])
+                [SemanticQueryKind.List] = new(["deviceId", "deviceCode", "deviceName", "processId"]),
+                [SemanticQueryKind.Detail] = new(["deviceId", "deviceCode", "deviceName", "processId"]),
+                [SemanticQueryKind.Status] = new(["deviceId", "deviceName", "clientCode", "softwareStatus", "runtimeStatus", "runtimeStartedAtUtc", "lastRuntimeHeartbeatAtUtc"])
             },
             defaultLimit: 50,
             maxLimit: 100)
@@ -29,14 +29,14 @@ public sealed class DeviceLogSemanticDefinition : SemanticEntityDefinition
         : base(
             SemanticQueryTarget.DeviceLog,
             ["设备日志", "报警日志", "运行日志", "故障日志", "device log", "alarm log"],
-            ["logId", "deviceId", "deviceCode", "deviceName", "processName", "level", "message", "source", "occurredAt"],
-            ["deviceId", "deviceCode", "deviceName", "processName", "level", "source"],
+            ["logId", "deviceId", "deviceName", "level", "message", "occurredAt", "receivedAt"],
+            ["deviceId", "deviceCode", "deviceName", "level", "message"],
             ["occurredAt", "level"],
             new Dictionary<SemanticQueryKind, SemanticProjection>
             {
-                [SemanticQueryKind.Latest] = new(["deviceCode", "deviceName", "processName", "level", "message", "occurredAt"]),
-                [SemanticQueryKind.Range] = new(["deviceCode", "deviceName", "processName", "level", "message", "source", "occurredAt"]),
-                [SemanticQueryKind.ByLevel] = new(["deviceCode", "deviceName", "processName", "level", "message", "occurredAt"])
+                [SemanticQueryKind.Latest] = new(["deviceId", "deviceName", "level", "message", "occurredAt"]),
+                [SemanticQueryKind.Range] = new(["deviceId", "deviceName", "level", "message", "occurredAt", "receivedAt"]),
+                [SemanticQueryKind.ByLevel] = new(["deviceId", "deviceName", "level", "message", "occurredAt"])
             },
             defaultLimit: 50,
             maxLimit: 200)
@@ -71,14 +71,13 @@ public sealed class CapacitySemanticDefinition : SemanticEntityDefinition
         : base(
             SemanticQueryTarget.Capacity,
             ["产能", "产量", "良率", "capacity", "output"],
-            ["recordId", "deviceId", "deviceCode", "processName", "shiftDate", "outputQty", "qualifiedQty", "occurredAt"],
-            ["recordId", "deviceId", "deviceCode", "processName", "shiftDate"],
-            ["shiftDate", "occurredAt", "outputQty", "qualifiedQty", "deviceCode", "processName"],
+            ["shiftDate", "outputQty", "qualifiedQty", "totalCount", "okCount", "ngCount", "occurredAt"],
+            ["deviceId", "deviceCode", "plcName", "shiftDate"],
+            ["shiftDate", "occurredAt", "outputQty", "qualifiedQty"],
             new Dictionary<SemanticQueryKind, SemanticProjection>
             {
-                [SemanticQueryKind.Range] = new(["deviceCode", "processName", "shiftDate", "outputQty", "qualifiedQty", "occurredAt"]),
-                [SemanticQueryKind.ByDevice] = new(["deviceCode", "processName", "shiftDate", "outputQty", "qualifiedQty", "occurredAt"]),
-                [SemanticQueryKind.ByProcess] = new(["deviceCode", "processName", "shiftDate", "outputQty", "qualifiedQty", "occurredAt"])
+                [SemanticQueryKind.Range] = new(["shiftDate", "outputQty", "qualifiedQty", "occurredAt"]),
+                [SemanticQueryKind.ByDevice] = new(["shiftDate", "outputQty", "qualifiedQty", "occurredAt"])
             },
             defaultLimit: 100,
             maxLimit: 200)
@@ -92,17 +91,56 @@ public sealed class ProductionDataSemanticDefinition : SemanticEntityDefinition
         : base(
             SemanticQueryTarget.ProductionData,
             ["生产数据", "过站数据", "工序数据", "production data", "station data"],
-            ["recordId", "deviceId", "deviceCode", "processName", "barcode", "stationName", "result", "occurredAt"],
-            ["recordId", "deviceId", "deviceCode", "processName", "barcode", "stationName", "result"],
-            ["occurredAt", "deviceCode", "processName", "stationName", "result"],
+            ["recordId", "typeKey", "typeName", "deviceId", "deviceName", "barcode", "result", "completedAt", "receivedAt", "fields", "fieldSchema"],
+            ["typeKey", "processId", "deviceId", "deviceCode", "barcode", "result"],
+            ["completedAt", "typeKey", "result"],
             new Dictionary<SemanticQueryKind, SemanticProjection>
             {
-                [SemanticQueryKind.Latest] = new(["deviceCode", "processName", "barcode", "stationName", "result", "occurredAt"]),
-                [SemanticQueryKind.Range] = new(["deviceCode", "processName", "barcode", "stationName", "result", "occurredAt"]),
-                [SemanticQueryKind.ByDevice] = new(["deviceCode", "processName", "barcode", "stationName", "result", "occurredAt"])
+                [SemanticQueryKind.Latest] = new(["recordId", "typeKey", "typeName", "deviceId", "deviceName", "barcode", "result", "completedAt"]),
+                [SemanticQueryKind.Range] = new(["recordId", "typeKey", "typeName", "deviceId", "deviceName", "barcode", "result", "completedAt"]),
+                [SemanticQueryKind.ByDevice] = new(["recordId", "typeKey", "typeName", "deviceId", "deviceName", "barcode", "result", "completedAt"])
             },
             defaultLimit: 100,
             maxLimit: 200)
+    {
+    }
+}
+
+public sealed class ProcessSemanticDefinition : SemanticEntityDefinition
+{
+    public ProcessSemanticDefinition()
+        : base(
+            SemanticQueryTarget.Process,
+            ["工序", "工序主数据", "process", "process master data"],
+            ["processId", "processCode", "processName"],
+            ["processId", "processCode", "processName"],
+            [],
+            new Dictionary<SemanticQueryKind, SemanticProjection>
+            {
+                [SemanticQueryKind.List] = new(["processId", "processCode", "processName"]),
+                [SemanticQueryKind.Detail] = new(["processId", "processCode", "processName"])
+            },
+            defaultLimit: 50,
+            maxLimit: 100)
+    {
+    }
+}
+
+public sealed class ClientReleaseSemanticDefinition : SemanticEntityDefinition
+{
+    public ClientReleaseSemanticDefinition()
+        : base(
+            SemanticQueryTarget.ClientRelease,
+            ["客户端发布版本", "客户端版本", "发布版本", "client release", "client version"],
+            ["releaseId", "componentKind", "componentKey", "displayName", "channel", "targetRuntime", "version", "status", "releaseNotes", "createdAtUtc", "publishedAtUtc", "deletedAtUtc"],
+            ["channel", "targetRuntime", "status", "includeArchived"],
+            [],
+            new Dictionary<SemanticQueryKind, SemanticProjection>
+            {
+                [SemanticQueryKind.List] = new(["releaseId", "componentKind", "componentKey", "displayName", "channel", "targetRuntime", "version", "status", "createdAtUtc", "publishedAtUtc", "deletedAtUtc"])
+            },
+            defaultLimit: 50,
+            maxLimit: 100)
     {
     }
 }
@@ -116,7 +154,9 @@ public sealed class SemanticDefinitionCatalog : ISemanticDefinitionCatalog
             [SemanticQueryTarget.DeviceLog] = new DeviceLogSemanticDefinition(),
             [SemanticQueryTarget.Recipe] = new RecipeSemanticDefinition(),
             [SemanticQueryTarget.Capacity] = new CapacitySemanticDefinition(),
-            [SemanticQueryTarget.ProductionData] = new ProductionDataSemanticDefinition()
+            [SemanticQueryTarget.ProductionData] = new ProductionDataSemanticDefinition(),
+            [SemanticQueryTarget.Process] = new ProcessSemanticDefinition(),
+            [SemanticQueryTarget.ClientRelease] = new ClientReleaseSemanticDefinition()
         };
 
     public IReadOnlyCollection<SemanticEntityDefinition> GetAll()

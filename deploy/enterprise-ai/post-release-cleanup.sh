@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_DIR="${DEPLOY_DIR:-$SCRIPT_DIR}"
 ENV_FILE="${ENV_FILE:-$DEPLOY_DIR/.env}"
+# shellcheck source=scripts/release-common.sh
+. "$DEPLOY_DIR/scripts/release-common.sh"
 
 APP_IMAGE_KEYS=(
   AICOPILOT_HTTPAPI_IMAGE
@@ -116,6 +118,8 @@ image_repository_from_ref() {
 
 cleanup_failed=0
 lock_dir=""
+CLEANUP_LOCK_TOKEN="cleanup-$(date +%s)-$$"
+CLEANUP_LOCK_HELD=false
 declare -a current_refs=()
 declare -a app_repositories=()
 declare -a harbor_entries=()
@@ -176,7 +180,11 @@ collect_current_images() {
     fi
 
     repository="$(image_repository_from_ref "$image_ref")"
-    tag="$(image_tag_from_ref "$image_ref")"
+    if [[ "$image_ref" == *@sha256:* ]]; then
+      tag="$RELEASE_TAG"
+    else
+      tag="$(image_tag_from_ref "$image_ref")"
+    fi
     if [[ ! "$tag" =~ ^sha-[0-9a-f]+$ ]]; then
       printf 'Application image is not a production sha-* tag and will not be used for cleanup: %s=%s\n' "$key" "$image_ref" >&2
       continue
@@ -191,6 +199,7 @@ collect_current_images() {
       harbor_repository="${path_without_registry#*/}"
     fi
 
+    append_unique "$image_ref" "${current_refs[@]+"${current_refs[@]}"}" && current_refs+=("$image_ref")
     append_unique "$repository:$tag" "${current_refs[@]+"${current_refs[@]}"}" && current_refs+=("$repository:$tag")
     append_unique "$repository" "${app_repositories[@]+"${app_repositories[@]}"}" && app_repositories+=("$repository")
     entry="$registry|$project|$harbor_repository|$tag"
@@ -201,7 +210,7 @@ collect_current_images() {
 acquire_lock() {
   local lock_parent
   lock_parent="$(dirname "$LOCK_FILE")"
-  if ! mkdir -p "$lock_parent" 2>/dev/null; then
+  if ! mkdir -p "$lock_parent" 2>/dev/null || [ ! -w "$lock_parent" ] || [ ! -x "$lock_parent" ]; then
     LOCK_FILE="$DEPLOY_DIR/.post-release-cleanup.lock"
     lock_parent="$(dirname "$LOCK_FILE")"
     mkdir -p "$lock_parent"
@@ -209,24 +218,26 @@ acquire_lock() {
   fi
 
   lock_dir="${LOCK_FILE}.d"
-  local attempts=0
-  while ! mkdir "$lock_dir" 2>/dev/null; do
-    attempts=$((attempts + 1))
-    if [ "$attempts" -ge "${POST_RELEASE_CLEANUP_LOCK_ATTEMPTS:-180}" ]; then
-      printf 'Could not acquire cleanup lock: %s\n' "$lock_dir" >&2
-      exit 75
-    fi
-    sleep 5
-  done
-
-  printf '%s\n' "$$" > "$lock_dir/pid"
-  trap release_lock EXIT HUP INT TERM
+  trap 'finish_cleanup $?' EXIT
+  trap 'finish_cleanup 129' HUP
+  trap 'finish_cleanup 130' INT
+  trap 'finish_cleanup 143' TERM
+  release_acquire_lock "$lock_dir" "$CLEANUP_LOCK_TOKEN" shared-cleanup active cleanup 0
+  CLEANUP_LOCK_HELD=true
 }
 
 release_lock() {
-  if [ -n "$lock_dir" ] && [ -d "$lock_dir" ]; then
-    rm -rf "$lock_dir"
+  if [ -n "$lock_dir" ] && [ -d "$lock_dir" ] && [ "$(release_lock_value "$lock_dir" token)" = "$CLEANUP_LOCK_TOKEN" ]; then
+    release_unlock "$lock_dir" "$CLEANUP_LOCK_TOKEN" || true
+    CLEANUP_LOCK_HELD=false
   fi
+}
+
+finish_cleanup() {
+  local status="$1"
+  trap - EXIT HUP INT TERM
+  release_lock
+  exit "$status"
 }
 
 disk_percent() {

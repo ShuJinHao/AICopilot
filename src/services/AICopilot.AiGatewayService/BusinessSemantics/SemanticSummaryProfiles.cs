@@ -48,7 +48,9 @@ public sealed class SemanticSummaryProfileCatalog : ISemanticSummaryProfileCatal
             new DeviceSummaryProfile(),
             new DeviceLogSummaryProfile(),
             new CapacitySummaryProfile(),
-            new ProductionDataSummaryProfile()
+            new ProductionDataSummaryProfile(),
+            new ProcessSummaryProfile(),
+            new ClientReleaseSummaryProfile()
         }.ToDictionary(item => item.Target);
 
     public IReadOnlyCollection<ISemanticSummaryProfile> GetAll()

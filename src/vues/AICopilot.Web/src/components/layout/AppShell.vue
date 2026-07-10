@@ -74,7 +74,7 @@ async function logout() {
 
 <template>
   <div class="ai-app-shell">
-    <aside class="ai-icon-dock" aria-label="AICopilot primary navigation">
+    <aside class="ai-icon-dock" aria-label="AICopilot 主要导航">
       <div class="dock-brand" aria-label="AICopilot">
         <Sparkles :size="22" stroke-width="2.5" />
       </div>
@@ -143,13 +143,13 @@ async function logout() {
     <section class="ai-shell-surface">
       <header class="ai-topbar">
         <div class="topbar-copy">
-          <span class="topbar-kicker">AI COMMAND WORKBENCH</span>
+          <span class="topbar-kicker">工业智能工作台</span>
           <strong>{{ t('brand.subtitle') }}</strong>
         </div>
         <div class="topbar-status">
           <span class="status-pill">
-            <i />
-            Cloud 只读
+            <ShieldCheck :size="16" />
+            Cloud 写入禁用
           </span>
           <span class="status-pill dark">
             {{ authStore.loginSource }}
@@ -179,9 +179,7 @@ async function logout() {
   min-height: 100%;
   overflow: hidden;
   padding: 24px;
-  background:
-    radial-gradient(circle at 18% 10%, rgba(200, 255, 61, 0.13), transparent 26%),
-    linear-gradient(135deg, var(--ai-bg-warm), var(--ai-bg));
+  background: var(--ai-bg);
   color: var(--ai-text);
 }
 
@@ -219,9 +217,9 @@ async function logout() {
   gap: 10px;
   padding: 8px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.62);
-  box-shadow: 0 16px 34px rgba(70, 64, 55, 0.1);
-  backdrop-filter: blur(16px);
+  border: 1px solid var(--ai-border);
+  background: var(--ai-surface);
+  box-shadow: var(--ai-shadow-card);
 }
 
 .dock-button {
@@ -263,9 +261,9 @@ async function logout() {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--ai-border);
   border-radius: var(--ai-radius-xl);
-  background: color-mix(in srgb, var(--ai-shell) 92%, transparent);
+  background: var(--ai-shell);
   box-shadow: var(--ai-shadow-shell);
 }
 
@@ -315,12 +313,8 @@ async function logout() {
   box-shadow: var(--ai-shadow-xs);
 }
 
-.status-pill i {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--ai-teal);
-  box-shadow: 0 0 0 5px rgba(19, 164, 173, 0.1);
+.status-pill > svg {
+  color: var(--ai-graphite);
 }
 
 .status-pill.dark {
@@ -367,12 +361,6 @@ async function logout() {
   min-height: 0;
   overflow-y: auto;
   padding: 0 28px 28px;
-}
-
-html.dark .ai-app-shell {
-  background:
-    radial-gradient(circle at 18% 10%, rgba(200, 255, 61, 0.08), transparent 26%),
-    linear-gradient(135deg, var(--ai-bg-warm), var(--ai-bg));
 }
 
 html.dark .dock-nav,

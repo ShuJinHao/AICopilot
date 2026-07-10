@@ -47,10 +47,11 @@
 - Cloud AI-facing APIs are read-only contract surfaces unless the user explicitly approves a new cross-repository write contract.
 - Cloud AiRead 正式设备参数是 `deviceId`；`deviceCode` 只能用于设备查询/解析，不得被当作 `deviceId` 发送给 Cloud。
 - AICopilot `CloudAiReadEndpointPolicy` 和 `ICloudAiReadClient` 必须逐项覆盖 Cloud `AI只读接口契约.md` 已批准的正式 `GET /api/v1/ai/read/*` 表面；不能只接高频端点后宣称 Cloud-AI 接口已全部对齐。
+- Cloud AiRead 客户端只允许八个正式 typed GET，不得暴露任意 method/path 传输、可配置 POST allowlist、legacy adapter 或双轨接口；`production-records` 正式工序/工位字段缺失时必须保持空，不得用 `typeName` 或 `typeKey` 代填。
 - Cloud 只读读取只能向 Cloud 发送真实端点参数；`scenarioId`、`from`、`to`、`pilotWindowId`、`boundary` 等试点元数据不得透传给 Cloud。
 - 内部开发允许通过 DataAnalysis `CloudReadOnly` 只读数据源直连真实 Cloud PostgreSQL 做 Text-to-SQL 验证；必须使用已验证只读数据库账号、白名单表字段和只读 SQL guard，不得写 Cloud 业务数据，也不得用 Simulation 冒充真实数据。
-- 高频设备日志、小时/汇总产能和生产数据查询优先走 Cloud AiRead 正式只读 API；DataAnalysis `CloudReadOnly` Direct DB / Text-to-SQL 只作为低频探索、治理白名单内补充分析或未覆盖只读链路兜底，不得压过已批准的高频 Cloud AiRead 端点。
-- CloudReadOnly 探索型 Text-to-SQL 只能作为强语义 intent 覆盖外、低频探索或 Direct DB SQL 失败后的受控 fallback，不能拆分或重命名既有 `Analysis.*` intent，也不能压过可用的高频 Cloud AiRead 路径。
+- `Device`、`DeviceLog`、`Capacity`、`ProductionData`、`Process`、`ClientRelease` 六类已覆盖正式 `Analysis.*` 语义必须只走 Cloud AiRead 八个 typed GET；Cloud 关闭、空集、400/401/403/429/5xx、timeout 或非法 JSON 均不得回退 Direct DB、Text-to-SQL、Simulation、MCP 或隐藏适配器。
+- CloudReadOnly Direct DB / Text-to-SQL 只服务上述正式语义覆盖外的低频自由探索和治理白名单内补充分析；探索型 Text-to-SQL 只能在这类未覆盖问题或其 Direct DB SQL 失败后受控 fallback，不能执行、拆分、重命名或旁路任何已覆盖 `Analysis.*` intent。
 - CloudReadOnly Text-to-SQL fallback 必须同时满足已验证只读凭据、共享白名单 schema、LLM 结构化生成、SELECT-only SQL guard、BusinessQuery safety policy 双层表/列白名单、只读执行和 hash-only 审计；生产 fallback 不得退化为规则 SQL 模板。
 - CloudReadOnly Text-to-SQL LLM prompt 可见的物理 schema 仅限 `CloudReadOnlyGovernedSchema` 批准的表名、列名、列类型、join hints 和必要业务描述；不得暴露连接串、凭据、role/权限细节、样例数据、查询结果、参数值、非白名单表字段或系统/敏感字段。
 - CloudReadOnly Text-to-SQL 修复重试默认最多 3 次、硬上限 5 次；timeout、权限、凭据、非只读、系统表、敏感字段、多语句或写 SQL 默认不可修复、不重试。
@@ -63,7 +64,9 @@
 - DataAnalysis 最终上下文必须携带本轮查询执行事实，包括语义 target/kind、filters、timeRange、limit、returnedRowCount 和 evidence boundary；最终回答必须先核对这些事实再下结论。
 - Cloud PostgreSQL readonly role 授权的权威载体是 `deploy/enterprise-ai/cloud-readonly/apply-readonly-grants.sql` 和 `check-readonly-grants.sql`；生产只允许对治理白名单表做显式表级 `GRANT SELECT`，不得使用 `GRANT SELECT ON ALL TABLES`、默认权限、未来表自动授权或列级/表级混用口径。
 - CloudReadOnly 直连数据库启用时，服务器 `deploy-release.sh` 必须先运行 `scripts/check-cloud-readonly-grants.sh` 做 fail-fast preflight；权限错误对用户可见诊断只能暴露治理白名单表名，不得输出连接串、role、密码、SQL 原文或非白名单对象。
-- Direct DB 设备字段 `status` 当前表示最新一条 `device_logs.level`，展示口径必须写成“最新日志级别”，不得暗示为实时在线/运行状态。
+- `Analysis.Device.List/Detail` 只表达 `/devices` 的设备主数据；`Analysis.Device.Status` 只表达 `/device-client-states` 的 Cloud 权威 `softwareStatus`、运行心跳原值和唯一 freshness 时间。无心跳设备返回 `MissingRuntimeHeartbeat` 行；仅 `asOfUtc - lastRuntimeHeartbeatAtUtc > 24h` 为 `RuntimeHeartbeatStale`，恰好 24 小时不 stale；Stale 不得翻译为 Offline/Stopped。状态空集只表示授权范围内无匹配设备，最新日志级别只属于 `Analysis.DeviceLog.*`。
+- `Analysis.Process.List/Detail` 只能读取 Cloud `/processes`：支持 `processId` 精确过滤以及 `keyword/processCode/processName` 搜索；详情必须在未截断结果中唯一精确命中，`processId` 必须作为正式 GUID 参数发送、不得冒充 keyword，也不得回退其他数据源。
+- `Analysis.ClientRelease.List` 只能读取 Cloud `/client-releases`，只允许 `channel/targetRuntime/status/includeArchived` 正式过滤条件；版本、hash、下载地址、发布说明和发布状态只能来自 Cloud 返回，不得由模型补写，也不得回退 Direct DB、Text-to-SQL 或 Simulation。
 - Simulation 只允许作为显式离线演示/测试资产，默认关闭；Real Cloud 查询为空、失败或未配置时不得 fallback 到 Simulation 冒充真实数据。
 - AICopilot 自动化如需创建或轮换 Cloud PostgreSQL 只读账号，只能创建/更新专用 readonly role，只能授予已批准白名单表 SELECT，必须要求显式确认词；不得授予写权限、schema create 权限、superuser、createdb、createrole 或 replication。
 - 开发阶段已物理删除 Trial/Pilot/Production Readiness 运营线；不得把旧试点运营能力重新接回普通产品导航、Skill 或后台接口。
@@ -111,6 +114,7 @@ Cloud-AICopilot OIDC 身份对齐的长期结论见 `../docs/历史核心记录.
 - `PlanAgentTaskCommand` 只能负责计划草案/任务状态的持久化和编排入口，不得独立实现意图理解、工具发现、Skill 选择或 Tool catalog 强校验。
 - Skill、Tool、MCP 或 DataSource 未匹配时，不得阻断 `PlanDraft` 生成；只能在草案里说明能力缺口或要求用户补充目标。
 - 用户确认 `PlanDraft` 后，才允许转换为 `ExecutablePlan` / `AgentTask`，并进入 Skill、Tool、Schema、Guard、审批和 Worker 执行链路。
+- Cloud 只读 Agent 当前正式能力覆盖 `Analysis.Device.List/Detail/Status`、`Analysis.DeviceLog.Latest/Range/ByLevel`、`Analysis.Capacity.Range/ByDevice`、`Analysis.ProductionData.Latest/Range/ByDevice`、`Analysis.Process.List/Detail` 和 `Analysis.ClientRelease.List`；`Analysis.Capacity.ByProcess` 尚未形成正式聚合契约，不得宣称可用。全部已覆盖能力必须复用统一语义定义和唯一 Cloud AiRead 实现，不能另起隐藏查询链、伪造返回或降级到其他数据源。
 - Agent workflow 的阶段和并行分支必须由 `AgentWorkflowTopology` 显式声明；`Tools`、`Knowledge`、`DataAnalysis`、`BusinessPolicy` 四个分支必须保持 `Task.WhenAll` + `AgentWorkflowSink` fan-out/fan-in 模式，不得为了“管道化”拍平成串行或为新能力另起一条孤立链路。
 
 ## Capability Boundaries
@@ -131,11 +135,17 @@ Cloud-AICopilot OIDC 身份对齐的长期结论见 `../docs/历史核心记录.
 - 已知漏洞依赖默认阻断。
 - Known-vulnerable dependencies are forbidden; NU190x and npm audit findings must be handled before acceptance.
 - 禁止硬编码 API key、token、secret、license、provider credential、数据库凭据、MCP 凭据。
+- HttpApi JWT 配置必须通过唯一运行时校验入口 fail-fast：Issuer、Audience 非空，SecretKey 至少 64 字符，token lifetime 大于 0；部署脚本校验不能替代运行时校验，错误不得回显 secret。
 - AICopilot 生产 Docker 构建必须使用 Harbor mirror 的基础镜像，包括 .NET ASP.NET runtime、Node、Nginx、PostgreSQL、RabbitMQ 和 Qdrant；workflow、Dockerfile 和应急构建脚本不得默认从 Docker Hub 或 MCR 拉生产基础镜像。
 - AICopilot 生产发布标准路径是本机构建镜像、推送 Harbor、再通过 SSH 触发服务器 `deploy-release.sh`；`aicopilot-image` / `aicopilot-deploy` 只允许作为带确认词的灾备入口。单镜像 build/push 默认 15 分钟超时，Harbor 检查默认 2 分钟超时，SSH deploy 默认 30 分钟超时；超时必须停止并诊断 Docker buildx、Harbor tag、服务器 compose/logs 和 release 状态，不得继续等待 GitHub Actions 或 shell 命令自然超时。
+- 工作区根 `deploy/Invoke-WorkspaceDeploy.ps1 -Target AICopilot` 是唯一对外发布入口；正式发布必须从 clean、已推送 HEAD 创建 detached worktree，镜像和 support files 只读取该固定 SHA。每次 run 使用私有 services/image/support manifest；禁止共享 `aicopilot-built-services.txt` 控制正式发布。
+- AICopilot support sync 必须包含 compose 并使用 staging + SHA256 + reservation token；support install 与 release 必须绑定同一全局锁和 digest，禁止同步 `.env`、release state、锁和备份。持久状态变更前失败必须恢复 `.env` 与 release state；active/stale lock、普通退出码、真实 timeout `124`、信号退出和同 SHA 健康幂等必须通过行为测试。
 - AICopilot 当前内网生产部署红线是 HTTP-only：不得把 HTTPS redirection、HSTS、nginx 443 listener、证书申请/续期或 OIDC HTTPS metadata 强制校验列为当前修复门槛；后续如需切换 HTTPS，必须由用户单独批准传输层方案和证书来源。HTTP 部署下只能使用兼容 HTTP 的安全加固：内网隔离、端口收敛、同源代理、CORS 白名单、短期 token、不在 URL/日志/审计中暴露 secret、非 root 容器、强 secret、API 只读边界和除 HSTS 外的安全响应头。Cloud OIDC 使用 HTTP issuer 时必须显式启用内网 HTTP OIDC，只允许 loopback、私网 IPv4 或保留内网 DNS 后缀（`.internal.example`、`.internal`、`.lan`、`.local`），公共 HTTP 域名仍必须拒绝。
 - AICopilot Web 到 HttpApi 的标准生产路径必须走 nginx 同源 `/api/` 反代；HttpApi CORS 默认不开放跨源。确需浏览器直连后端时，只能配置 `Cors:AllowedOrigins` 中的精确 http/https origin，禁止 `*`、通配子域、带 path/query/fragment 的 origin 或运行时任意放行。
 - AICopilot 部署模板、文档示例、滚动复盘、历史诊断记录、workflow 默认值、脚本默认值、migration seed 和 fresh DB seed 不得写入真实内网 IP、弱 secret、`CHANGE_ME`、`dummy-key` 或默认 `root@` 发布目标；真实地址、token 和密码只能来自服务器 `.env`、GitHub secrets、管理员录入或命令行环境变量。root SSH 只允许显式设置 `ALLOW_ROOT_SSH_DEPLOY=true` 的应急路径，不得作为标准发布口径。
+- 如果当前真实部署根目录、runner work root、Docker Root Dir、support files sync 目标、工作区统一入口参数或标准部署用户与模板不同，必须先更新 `../deploy/Invoke-WorkspaceDeploy.ps1`、`../deploy/profiles/*.json`、`AICopilot 项目部署与维护指南.md`、`deploy/enterprise-ai/README.md` 和工作区 `../docs/上传部署总览.md` 的“当前生产现场口径”，再允许继续改脚本或发布。
+- 如果当前 `AICopilot` 与 `Cloud` 共用同一台生产宿主机，必须在工作区总入口明确写出共享宿主机事实、共享标准发布人和两个独立部署根；不得把同机双部署根问题写成两套互不相关的环境。
+- root 应急路径一旦写入 `releases/*`、`current-release.summary.md` 或 deploy support files，关闭任务前必须恢复 owner/mode，并重新验证标准 non-root `./deploy-release.sh --validate-only`；不得留下 root-owned 状态文件后直接收口。
 - 模型 smoke 的 `AICOPILOT_MODEL_SMOKE_API_KEY=dummy-key` 只允许作为真实模型网关的显式兼容例外，必须同时设置 `AICOPILOT_MODEL_SMOKE_ALLOW_DUMMY_KEY=true` 或手工 smoke 命令传 `--allow-dummy-key`；默认 preflight 必须拒绝该弱值。
 - AICopilot 模型、Embedding 和 endpoint pool 覆盖 API key 的受保护格式必须使用 `encv2:` AES-GCM；旧 `encv1:` 只能通过 migration worker 或一次性迁移命令重加密，不得在运行时 provider 中继续作为正常解密格式兼容。`AiRuntime:ProviderReliability` endpoint `ApiKey` 和 `ApiKeyEnvironmentVariable` 指向的环境变量值也必须存 `encv2:` 密文，不能放明文。
 - 私有模型生产播种只能从服务器真实 `.env` 或本机私密部署手册读取真实值；仓库默认只能使用 `model.internal.example` 占位 URL、空 API key 和禁用状态。新库 seed 的私有模型 context window 固定按 64k（`65536`）口径配置，真实 base URL、API key 和是否启用由 `AICOPILOT_PRIVATE_MODEL_*` 环境变量控制，API key 入库前必须加密为 `encv2:`。

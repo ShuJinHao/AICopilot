@@ -70,13 +70,11 @@ public sealed class ConfiguredSemanticPhysicalMappingProvider : ISemanticPhysica
                     ["deviceId"] = "device_id",
                     ["deviceCode"] = "device_code",
                     ["deviceName"] = "device_name",
-                    ["status"] = "status",
-                    ["lineName"] = "line_name",
-                    ["updatedAt"] = "updated_at"
+                    ["processId"] = "process_id"
                 },
-                ["deviceId", "deviceCode", "deviceName", "status", "lineName", "updatedAt"],
-                ["deviceId", "deviceCode", "deviceName", "status", "lineName"],
-                ["deviceCode", "deviceName", "updatedAt"],
+                ["deviceId", "deviceCode", "deviceName", "processId"],
+                ["deviceId", "deviceCode", "deviceName", "processId"],
+                ["deviceCode", "deviceName"],
                 new SemanticSort("deviceCode", SemanticSortDirection.Asc)),
             new SemanticMappingDefaults(
                 SemanticQueryTarget.DeviceLog,
@@ -152,15 +150,13 @@ public sealed class ConfiguredSemanticPhysicalMappingProvider : ISemanticPhysica
                     ["deviceId"] = "d.id",
                     ["deviceCode"] = "d.client_code",
                     ["deviceName"] = "d.device_name",
-                    ["status"] = "latest_log.level",
-                    ["lineName"] = "mp.process_name",
-                    ["updatedAt"] = "latest_log.log_time"
+                    ["processId"] = "d.process_id"
                 },
-                ["deviceId", "deviceCode", "deviceName", "status", "lineName", "updatedAt"],
-                ["deviceId", "deviceCode", "deviceName", "status", "lineName"],
-                ["deviceCode", "deviceName", "updatedAt"],
+                ["deviceId", "deviceCode", "deviceName", "processId"],
+                ["deviceId", "deviceCode", "deviceName", "processId"],
+                ["deviceCode", "deviceName"],
                 new SemanticSort("deviceCode", SemanticSortDirection.Asc),
-                "devices d LEFT JOIN mfg_processes mp ON d.process_id = mp.id LEFT JOIN LATERAL (SELECT l.level, l.log_time FROM device_logs l WHERE l.device_id = d.id ORDER BY l.log_time DESC LIMIT 1) latest_log ON true"),
+                "devices d"),
             new SemanticMappingDefaults(
                 SemanticQueryTarget.DeviceLog,
                 "DeviceLog",
@@ -213,13 +209,13 @@ public sealed class ConfiguredSemanticPhysicalMappingProvider : ISemanticPhysica
                     ["deviceCode"] = "d.client_code",
                     ["processName"] = "mp.process_name",
                     ["barcode"] = "p.barcode",
-                    ["stationName"] = "p.type_key",
+                    ["typeKey"] = "p.type_key",
                     ["result"] = "p.cell_result",
                     ["occurredAt"] = "p.completed_time"
                 },
-                ["recordId", "deviceId", "deviceCode", "processName", "barcode", "stationName", "result", "occurredAt"],
-                ["recordId", "deviceId", "deviceCode", "processName", "barcode", "stationName", "result"],
-                ["occurredAt", "deviceCode", "processName", "stationName", "result"],
+                ["recordId", "deviceId", "deviceCode", "processName", "barcode", "typeKey", "result", "occurredAt"],
+                ["recordId", "deviceId", "deviceCode", "processName", "barcode", "typeKey", "result"],
+                ["occurredAt", "deviceCode", "processName", "typeKey", "result"],
                 new SemanticSort("occurredAt", SemanticSortDirection.Desc),
                 "pass_station_records p INNER JOIN devices d ON p.device_id = d.id LEFT JOIN mfg_processes mp ON d.process_id = mp.id")
         ];

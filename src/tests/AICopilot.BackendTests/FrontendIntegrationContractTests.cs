@@ -4,9 +4,11 @@ using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.AiGatewayService.Tools;
 using AICopilot.AiGatewayService.Workspaces;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
+using AICopilot.HttpApi.Infrastructure;
 using AICopilot.RagService.EmbeddingModels;
 using AICopilot.Services.Contracts.AiGateway.Dtos;
 using AICopilot.SharedKernel.Result;
+using Microsoft.AspNetCore.Http;
 
 namespace AICopilot.BackendTests;
 
@@ -45,6 +47,17 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
         AssertPath(document, "/api/aigateway/artifact/{id}/revision-comment", "post");
         AssertPath(document, "/api/aigateway/artifact/{id}/regenerate-draft", "post");
         AssertPath(document, "/api/aigateway/artifact/{id}/submit-final-approval", "post");
+        AssertPath(document, "/api/aigateway/cloud-readonly/status", "get");
+        AssertPath(document, "/api/identity/login", "post");
+        AssertPath(document, "/api/identity/cloud-oidc/status", "get");
+        AssertPath(document, "/api/identity/cloud-oidc/finalize", "post");
+        AssertPath(document, "/api/identity/me", "get");
+        AssertPath(document, "/api/identity/role/list", "get");
+        AssertPath(document, "/api/identity/user/list", "get");
+        AssertPath(document, "/api/data-analysis/business-database/list", "get");
+        AssertPath(document, "/api/data-analysis/business-database/authorized", "get");
+        AssertPath(document, "/api/data-analysis/business-database/query-readonly", "post");
+        AssertPath(document, "/api/data-analysis/semantic-source/status", "get");
         AssertPath(document, "/api/rag/embedding-model/list", "get");
         AssertPath(document, "/api/rag/knowledge-base/list", "get");
         AssertPath(document, "/api/rag/document", "post");
@@ -64,6 +77,90 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
         AssertMissingPath(document, "/api/aigateway/cloud-readonly/readiness");
         AssertMissingPath(document, "/api/aigateway/trial-operations/campaigns");
         AssertMissingPath(document, "/api/aigateway/pilot-authorization/submissions");
+        AssertMissingPath(document, "/api/aigateway/agent/task/execute");
+        AssertMissingPath(document, "/api/aigateway/agent/task/plan-draft");
+        AssertMissingPath(document, "/api/data-analysis/business-database/query");
+        AssertMissingPath(document, "/api/rag/knowledge-base/search");
+    }
+
+    [Fact]
+    public async Task OpenApi_ShouldLockCriticalRequestSchemasAndProblemDetailsResponses()
+    {
+        using var response = await fixture.HttpClient.GetAsync("/openapi/v1.json");
+        response.EnsureSuccessStatusCode();
+
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        using var document = await JsonDocument.ParseAsync(stream);
+
+        AssertRequestSchemaProperties(
+            document,
+            "/api/identity/login",
+            "post",
+            "username",
+            "password");
+        AssertRequestSchemaProperties(
+            document,
+            "/api/aigateway/agent/task/plan-stream",
+            "post",
+            "sessionId",
+            "goal",
+            "taskType",
+            "modelId",
+            "uploadIds",
+            "knowledgeBaseIds",
+            "dataSourceIds",
+            "requiresDataApproval",
+            "artifactTypes");
+        AssertRequestSchemaProperties(
+            document,
+            "/api/aigateway/tools/{toolCode}",
+            "patch",
+            "displayName",
+            "description",
+            "riskLevel",
+            "requiresApproval",
+            "isEnabled",
+            "timeoutSeconds");
+        AssertRequestSchemaProperties(
+            document,
+            "/api/rag/search",
+            "post",
+            "knowledgeBaseId",
+            "queryText",
+            "topK",
+            "minScore");
+
+        foreach (var (path, method) in new[]
+                 {
+                     ("/api/identity/login", "post"),
+                     ("/api/aigateway/agent/task/run", "post"),
+                     ("/api/data-analysis/business-database/query-readonly", "post"),
+                     ("/api/rag/search", "post")
+                 })
+        {
+            AssertProblemDetailsResponses(document, path, method);
+        }
+    }
+
+    [Fact]
+    public void ProblemDetailsFactory_ShouldKeepStableFrontendErrorShape()
+    {
+        var details = ApiProblemDetailsFactory.Create(
+            StatusCodes.Status403Forbidden,
+            new ApiProblemDescriptor(
+                AuthProblemCodes.MissingPermission,
+                "当前账号缺少所需权限。",
+                new Dictionary<string, object?>
+                {
+                    ["correlationId"] = "corr-contract"
+                }));
+
+        details.Status.Should().Be(StatusCodes.Status403Forbidden);
+        details.Title.Should().Be("Forbidden");
+        details.Type.Should().EndWith("/403");
+        details.Detail.Should().Be("当前账号缺少所需权限。");
+        details.Extensions["code"].Should().Be(AuthProblemCodes.MissingPermission);
+        details.Extensions["correlationId"].Should().Be("corr-contract");
     }
 
     private static void AssertPath(JsonDocument document, string path, string method)
@@ -89,6 +186,77 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
         paths.TryGetProperty(path, out _)
             .Should()
             .BeFalse($"OpenAPI should not expose legacy product route {path}");
+    }
+
+    private static void AssertRequestSchemaProperties(
+        JsonDocument document,
+        string path,
+        string method,
+        params string[] expectedProperties)
+    {
+        var operation = GetOperation(document, path, method);
+        var requestBody = operation.GetProperty("requestBody");
+        var schema = ResolveSchema(
+            document,
+            requestBody.GetProperty("content").GetProperty("application/json").GetProperty("schema"));
+        var properties = schema.GetProperty("properties");
+        foreach (var expectedProperty in expectedProperties)
+        {
+            properties.TryGetProperty(expectedProperty, out _)
+                .Should()
+                .BeTrue($"OpenAPI request schema for {method.ToUpperInvariant()} {path} should expose {expectedProperty}");
+        }
+    }
+
+    private static void AssertProblemDetailsResponses(JsonDocument document, string path, string method)
+    {
+        var responses = GetOperation(document, path, method).GetProperty("responses");
+        foreach (var statusCode in new[] { "400", "401", "403", "404", "429", "500" })
+        {
+            responses.TryGetProperty(statusCode, out var response)
+                .Should()
+                .BeTrue($"OpenAPI should document {statusCode} ProblemDetails for {method.ToUpperInvariant()} {path}");
+            var content = response.GetProperty("content");
+            var hasProblemJson = content.TryGetProperty("application/problem+json", out var mediaType);
+            if (!hasProblemJson)
+            {
+                content.TryGetProperty("application/json", out mediaType)
+                    .Should()
+                    .BeTrue($"OpenAPI {statusCode} response should document a JSON ProblemDetails body");
+            }
+            var schema = ResolveSchema(document, mediaType.GetProperty("schema"));
+            var properties = schema.GetProperty("properties");
+            foreach (var property in new[] { "type", "title", "status", "detail", "instance" })
+            {
+                properties.TryGetProperty(property, out _)
+                    .Should()
+                    .BeTrue($"ProblemDetails schema should expose {property}");
+            }
+        }
+    }
+
+    private static JsonElement GetOperation(JsonDocument document, string path, string method)
+    {
+        return document.RootElement
+            .GetProperty("paths")
+            .GetProperty(path)
+            .GetProperty(method);
+    }
+
+    private static JsonElement ResolveSchema(JsonDocument document, JsonElement schema)
+    {
+        if (!schema.TryGetProperty("$ref", out var reference))
+        {
+            return schema;
+        }
+
+        const string prefix = "#/components/schemas/";
+        var referenceValue = reference.GetString();
+        referenceValue.Should().StartWith(prefix);
+        return document.RootElement
+            .GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty(referenceValue![prefix.Length..]);
     }
 
 }

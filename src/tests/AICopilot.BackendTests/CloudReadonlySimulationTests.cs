@@ -256,15 +256,6 @@ public sealed class CloudReadonlySimulationTests
     {
         public bool IsEnabled => false;
 
-        public Task<JsonDocument> SendJsonAsync(
-            HttpMethod method,
-            string path,
-            IReadOnlyDictionary<string, string?>? query = null,
-            CancellationToken cancellationToken = default)
-        {
-            throw new InvalidOperationException("Real Cloud client should not be called.");
-        }
-
         public Task<CloudAiReadResult<CloudAiReadDeviceDto>> GetDevicesAsync(
             CloudAiReadQuery query,
             CancellationToken cancellationToken = default)
@@ -332,15 +323,6 @@ public sealed class CloudReadonlySimulationTests
     private sealed class FailingCloudAiReadClient : ICloudAiReadClient
     {
         public bool IsEnabled => true;
-
-        public Task<JsonDocument> SendJsonAsync(
-            HttpMethod method,
-            string path,
-            IReadOnlyDictionary<string, string?>? query = null,
-            CancellationToken cancellationToken = default)
-        {
-            throw CreateUnavailableException();
-        }
 
         public Task<CloudAiReadResult<CloudAiReadDeviceDto>> GetDevicesAsync(
             CloudAiReadQuery query,

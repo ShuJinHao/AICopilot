@@ -24,6 +24,8 @@ public sealed class ConfiguredSemanticPhysicalMappingProviderTests
         provider.TryGetMapping(SemanticQueryTarget.Recipe, out _).Should().BeFalse();
         provider.TryGetMapping(SemanticQueryTarget.Capacity, out var capacityMapping).Should().BeTrue();
         provider.TryGetMapping(SemanticQueryTarget.ProductionData, out var productionMapping).Should().BeTrue();
+        provider.TryGetMapping(SemanticQueryTarget.Process, out _).Should().BeFalse();
+        provider.TryGetMapping(SemanticQueryTarget.ClientRelease, out _).Should().BeFalse();
 
         deviceMapping.DatabaseName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.DefaultDatabaseName);
         deviceLogMapping.DatabaseName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.DefaultDatabaseName);
@@ -31,7 +33,7 @@ public sealed class ConfiguredSemanticPhysicalMappingProviderTests
         productionMapping.DatabaseName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.DefaultDatabaseName);
 
         deviceMapping.SourceName.Should().Be("devices");
-        deviceMapping.FromClause.Should().Contain("devices d LEFT JOIN mfg_processes mp");
+        deviceMapping.FromClause.Should().Be("devices d");
         deviceLogMapping.SourceName.Should().Be("device_logs");
         deviceLogMapping.FromClause.Should().Be("device_logs l INNER JOIN devices d ON l.device_id = d.id LEFT JOIN mfg_processes mp ON d.process_id = mp.id");
         deviceLogMapping.FieldMappings["source"].Should().Be("'Cloud'");
@@ -40,7 +42,13 @@ public sealed class ConfiguredSemanticPhysicalMappingProviderTests
         productionMapping.SourceName.Should().Be("pass_station_records");
         productionMapping.FromClause.Should().Be("pass_station_records p INNER JOIN devices d ON p.device_id = d.id LEFT JOIN mfg_processes mp ON d.process_id = mp.id");
 
-        foreach (var target in Enum.GetValues<SemanticQueryTarget>().Where(target => target != SemanticQueryTarget.Recipe))
+        foreach (var target in new[]
+                 {
+                     SemanticQueryTarget.Device,
+                     SemanticQueryTarget.DeviceLog,
+                     SemanticQueryTarget.Capacity,
+                     SemanticQueryTarget.ProductionData
+                 })
         {
             provider.TryGetMapping(target, out var mapping).Should().BeTrue();
             mapping.DatabaseName.Should().NotBeNullOrWhiteSpace();
@@ -101,9 +109,12 @@ public sealed class ConfiguredSemanticPhysicalMappingProviderTests
         provider.TryGetMapping(SemanticQueryTarget.ProductionData, out var productionMapping).Should().BeTrue();
 
         deviceMapping.SourceName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.RealDeviceSourceName);
-        deviceMapping.FromClause.Should().Contain("LEFT JOIN LATERAL");
+        deviceMapping.FromClause.Should().Be("devices d");
         deviceMapping.FieldMappings["deviceCode"].Should().Be("d.client_code");
-        deviceMapping.FieldMappings["lineName"].Should().Be("mp.process_name");
+        deviceMapping.FieldMappings["processId"].Should().Be("d.process_id");
+        deviceMapping.FieldMappings.Should().NotContainKey("status");
+        deviceMapping.FieldMappings.Should().NotContainKey("lineName");
+        deviceMapping.FieldMappings.Should().NotContainKey("updatedAt");
         deviceLogMapping.SourceName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.RealDeviceLogSourceName);
         deviceLogMapping.FieldMappings["source"].Should().Be("'Cloud'");
         deviceLogMapping.FieldMappings["deviceName"].Should().Be("d.device_name");
@@ -117,7 +128,8 @@ public sealed class ConfiguredSemanticPhysicalMappingProviderTests
         productionMapping.SourceName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.RealProductionDataSourceName);
         productionMapping.FromClause.Should().Contain("LEFT JOIN mfg_processes mp");
         productionMapping.FieldMappings["processName"].Should().Be("mp.process_name");
-        productionMapping.FieldMappings["stationName"].Should().Be("p.type_key");
+        productionMapping.FieldMappings["typeKey"].Should().Be("p.type_key");
+        productionMapping.FieldMappings.Should().NotContainKey("stationName");
     }
 
     [Fact]

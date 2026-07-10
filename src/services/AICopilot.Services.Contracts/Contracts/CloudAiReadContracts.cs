@@ -1,8 +1,5 @@
 using System.Net;
 using System.Net.Http;
-using System.Text.Json;
-using System.Text.Json.Serialization;
-
 namespace AICopilot.Services.Contracts;
 
 public static class CloudAiReadProblemCodes
@@ -12,6 +9,8 @@ public static class CloudAiReadProblemCodes
     public const string Unauthorized = "cloud_ai_read_unauthorized";
     public const string Forbidden = "cloud_ai_read_forbidden";
     public const string NotFound = "cloud_ai_read_not_found";
+    public const string InvalidRequest = "cloud_ai_read_invalid_request";
+    public const string RateLimited = "cloud_ai_read_rate_limited";
     public const string Unavailable = "cloud_ai_read_unavailable";
     public const string MissingRequiredParameter = "cloud_ai_read_missing_required_parameter";
 }
@@ -42,8 +41,6 @@ public sealed class CloudAiReadOptions
 
     public int TimeoutSeconds { get; init; } = 10;
 
-    public string[] ExplicitPostQueryPaths { get; init; } = [];
-
     public bool IsConfigured() => Enabled;
 
     public void EnsureValid()
@@ -69,14 +66,6 @@ public sealed class CloudAiReadOptions
             throw new InvalidOperationException("CloudAiRead:TimeoutSeconds must be between 1 and 30.");
         }
 
-        foreach (var path in ExplicitPostQueryPaths)
-        {
-            var decision = CloudAiReadEndpointPolicy.Evaluate(HttpMethod.Post, path, ExplicitPostQueryPaths);
-            if (!decision.IsAllowed)
-            {
-                throw new InvalidOperationException($"CloudAiRead:ExplicitPostQueryPaths contains an unsafe path '{path}': {decision.Reason}");
-            }
-        }
     }
 }
 
@@ -101,34 +90,9 @@ public static class CloudAiReadEndpointPolicy
         "/api/v1/ai/read/device-logs"
     ];
 
-    private static readonly string[] ReadOnlyPostNameTokens =
-    [
-        "query",
-        "search",
-        "analyze"
-    ];
-
-    private static readonly string[] ForbiddenWriteTokens =
-    [
-        "create",
-        "update",
-        "delete",
-        "register",
-        "disable",
-        "approve",
-        "dispatch",
-        "trigger",
-        "backfill",
-        "correct",
-        "upload",
-        "submit",
-        "write"
-    ];
-
     public static CloudAiReadRequestDecision Evaluate(
         HttpMethod method,
-        string path,
-        IReadOnlyCollection<string>? explicitPostQueryPaths = null)
+        string path)
     {
         if (!TryNormalizePath(path, out var normalizedPath, out var error))
         {
@@ -142,49 +106,7 @@ public static class CloudAiReadEndpointPolicy
                 : CloudAiReadRequestDecision.Block("Cloud AiRead GET path is not in the fixed allowlist.");
         }
 
-        if (method == HttpMethod.Post)
-        {
-            if (!IsAiBoundaryPath(normalizedPath))
-            {
-                return CloudAiReadRequestDecision.Block("Cloud AiRead POST path must stay under /api/v1/ai/read/* or /api/v1/ai/identity/*.");
-            }
-
-            if (explicitPostQueryPaths is null || explicitPostQueryPaths.Count == 0)
-            {
-                return CloudAiReadRequestDecision.Block("Cloud AiRead POST is disabled unless explicitly allowlisted.");
-            }
-
-            var normalizedPostPaths = explicitPostQueryPaths
-                .Select(path => TryNormalizePath(path, out var normalized, out _) ? normalized : string.Empty)
-                .Where(path => !string.IsNullOrWhiteSpace(path))
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-            if (!normalizedPostPaths.Contains(normalizedPath))
-            {
-                return CloudAiReadRequestDecision.Block("Cloud AiRead POST path is not explicitly allowlisted.");
-            }
-
-            var lastSegment = normalizedPath.Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? string.Empty;
-            if (!ReadOnlyPostNameTokens.Any(token => lastSegment.Contains(token, StringComparison.OrdinalIgnoreCase)))
-            {
-                return CloudAiReadRequestDecision.Block("Cloud AiRead POST path must be named as query/search/analyze.");
-            }
-
-            if (ForbiddenWriteTokens.Any(token => normalizedPath.Contains(token, StringComparison.OrdinalIgnoreCase)))
-            {
-                return CloudAiReadRequestDecision.Block("Cloud AiRead POST path contains forbidden write semantics.");
-            }
-
-            return CloudAiReadRequestDecision.Allow;
-        }
-
-        return CloudAiReadRequestDecision.Block("Cloud AiRead only allows GET by default and explicitly allowlisted read-only POST.");
-    }
-
-    private static bool IsAiBoundaryPath(string normalizedPath)
-    {
-        return normalizedPath.StartsWith("/api/v1/ai/read/", StringComparison.OrdinalIgnoreCase) ||
-               normalizedPath.StartsWith("/api/v1/ai/identity/", StringComparison.OrdinalIgnoreCase);
+        return CloudAiReadRequestDecision.Block("Cloud AiRead only allows fixed GET endpoints.");
     }
 
     public static bool IsSafeRouteSegment(string value)
@@ -250,7 +172,9 @@ public static class CloudAiReadSemanticSupport
         return target is SemanticQueryTarget.Device
             or SemanticQueryTarget.DeviceLog
             or SemanticQueryTarget.Capacity
-            or SemanticQueryTarget.ProductionData;
+            or SemanticQueryTarget.ProductionData
+            or SemanticQueryTarget.Process
+            or SemanticQueryTarget.ClientRelease;
     }
 }
 
@@ -304,15 +228,20 @@ public sealed record CloudAiReadResult<T>(
     int Limit,
     bool IsTruncated,
     IReadOnlyList<T> Items,
-    IReadOnlyList<Dictionary<string, object?>> Rows);
+    IReadOnlyList<Dictionary<string, object?>> Rows,
+    string ProviderSource = "",
+    string QueryScope = "",
+    int RowCount = 0,
+    string? NextCursor = null)
+{
+    public DateTimeOffset AsOfUtc => QueriedAtUtc;
+}
 
 public sealed record CloudAiReadDeviceDto(
     string? DeviceId,
     string? DeviceCode,
     string? DeviceName,
-    string? Status,
-    string? LineName,
-    DateTimeOffset? UpdatedAt,
+    string? ProcessId,
     IReadOnlyDictionary<string, object?> AdditionalFields);
 
 public sealed record CloudAiReadProcessDto(
@@ -346,6 +275,7 @@ public sealed record CloudAiReadDeviceClientStateDto(
     string? HostApiVersion,
     DateTimeOffset? VersionReportedAtUtc,
     DateTimeOffset? VersionReceivedAtUtc,
+    string? SoftwareStatus,
     string? RuntimeStatus,
     DateTimeOffset? RuntimeStartedAtUtc,
     DateTimeOffset? LastRuntimeHeartbeatAtUtc,
@@ -377,12 +307,11 @@ public sealed record CloudAiReadCapacityHourlyDto(
 public sealed record CloudAiReadDeviceLogDto(
     string? LogId,
     string? DeviceId,
-    string? DeviceCode,
     string? DeviceName,
     string? Level,
     string? Message,
-    string? Source,
-    DateTimeOffset? OccurredAt,
+    DateTimeOffset? LogTime,
+    DateTimeOffset? ReceivedAt,
     IReadOnlyDictionary<string, object?> AdditionalFields);
 
 public sealed record CloudAiReadProductionFieldSchemaDto(
@@ -399,13 +328,10 @@ public sealed record CloudAiReadProductionRecordDto(
     string? TypeKey,
     string? TypeName,
     string? DeviceId,
-    string? DeviceCode,
     string? DeviceName,
-    string? ProcessName,
     string? Barcode,
-    string? StationName,
     string? Result,
-    DateTimeOffset? OccurredAt,
+    DateTimeOffset? CompletedAt,
     DateTimeOffset? ReceivedAt,
     IReadOnlyDictionary<string, object?> Fields,
     IReadOnlyList<CloudAiReadProductionFieldSchemaDto> FieldSchema,
@@ -414,12 +340,6 @@ public sealed record CloudAiReadProductionRecordDto(
 public interface ICloudAiReadClient
 {
     bool IsEnabled { get; }
-
-    Task<JsonDocument> SendJsonAsync(
-        HttpMethod method,
-        string path,
-        IReadOnlyDictionary<string, string?>? query = null,
-        CancellationToken cancellationToken = default);
 
     Task<CloudAiReadResult<CloudAiReadDeviceDto>> GetDevicesAsync(
         CloudAiReadQuery query,

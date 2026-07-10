@@ -48,6 +48,8 @@ internal static class SemanticAnalysisPresentation
             SemanticQueryTarget.Recipe => "配方",
             SemanticQueryTarget.Capacity => "产能",
             SemanticQueryTarget.ProductionData => "生产数据",
+            SemanticQueryTarget.Process => "工序主数据",
+            SemanticQueryTarget.ClientRelease => "客户端发布版本",
             _ => "业务"
         };
     }
@@ -79,6 +81,16 @@ internal static class SemanticAnalysisPresentation
             return "生产数据";
         }
 
+        if (intent.StartsWith("Analysis.Process.", StringComparison.OrdinalIgnoreCase))
+        {
+            return "工序主数据";
+        }
+
+        if (intent.StartsWith("Analysis.ClientRelease.", StringComparison.OrdinalIgnoreCase))
+        {
+            return "客户端发布版本";
+        }
+
         return "业务";
     }
 
@@ -93,7 +105,7 @@ internal static class SemanticAnalysisPresentation
             {
                 SemanticQueryKind.List => "设备列表查询",
                 SemanticQueryKind.Detail => "设备详情查询",
-                SemanticQueryKind.Status => "设备状态查询",
+                SemanticQueryKind.Status => "设备运行心跳与 Cloud 权威软件状态查询",
                 _ => "设备查询"
             },
             SemanticQueryTarget.DeviceLog => plan.Kind switch
@@ -124,6 +136,13 @@ internal static class SemanticAnalysisPresentation
                 SemanticQueryKind.ByDevice => "设备生产数据查询",
                 _ => "生产数据查询"
             },
+            SemanticQueryTarget.Process => plan.Kind switch
+            {
+                SemanticQueryKind.List => "工序主数据列表查询",
+                SemanticQueryKind.Detail => "工序主数据详情查询",
+                _ => "工序主数据查询"
+            },
+            SemanticQueryTarget.ClientRelease => "客户端发布版本列表查询",
             _ => "业务查询"
         };
 
@@ -142,17 +161,32 @@ internal static class SemanticAnalysisPresentation
             "deviceId" => "设备标识",
             "deviceCode" => "设备编码",
             "deviceName" => "设备名称",
-            "status" => "最新日志级别",
-            "lineName" => "产线",
-            "updatedAt" => "时间",
+            "processId" => "工序标识",
+            "clientCode" => "客户端编码",
+            "softwareStatus" => "Cloud 权威软件状态",
+            "runtimeStatus" => "最后上报运行状态",
+            "runtimeStartedAtUtc" => "本次运行开始时间",
+            "lastRuntimeHeartbeatAtUtc" => "最后运行心跳时间",
             "logId" => "日志标识",
             "level" => "日志级别",
             "message" => "日志内容",
             "source" => "日志来源",
             "occurredAt" => "时间",
+            "receivedAt" => "Cloud 接收时间",
             "recipeId" => "配方标识",
             "recipeName" => "配方名称",
             "processName" => "工序名称",
+            "processCode" => "工序编码",
+            "releaseId" => "发布版本标识",
+            "componentKind" => "组件类型",
+            "componentKey" => "组件编码",
+            "displayName" => "显示名称",
+            "channel" => "发布通道",
+            "targetRuntime" => "目标运行时",
+            "releaseNotes" => "Cloud 原始发布说明",
+            "createdAtUtc" => "创建时间",
+            "publishedAtUtc" => "发布时间",
+            "deletedAtUtc" => "归档时间",
             "version" => "版本号",
             "isActive" => "当前生效版本",
             "recordId" => "记录标识",
@@ -160,7 +194,9 @@ internal static class SemanticAnalysisPresentation
             "outputQty" => "总产出",
             "qualifiedQty" => "合格数",
             "barcode" => "条码",
-            "stationName" => "工位名称",
+            "typeKey" => "生产数据类型编码",
+            "typeName" => "生产数据类型名称",
+            "completedAt" => "完成时间",
             "result" => "生产结果",
             _ => field
         };

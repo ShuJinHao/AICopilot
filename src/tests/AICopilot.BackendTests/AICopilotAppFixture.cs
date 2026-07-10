@@ -137,10 +137,10 @@ public class AICopilotAppFixture : IAsyncLifetime, IAsyncDisposable
         SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Development");
         SetEnvironmentVariable("Parameters__pg-password", TestPostgresPassword);
         SetEnvironmentVariable("Parameters__aicopilot-api-key-encryption-key", "test-aicopilot-api-key-encryption-key");
-        SetEnvironmentVariable("Parameters__jwt-secret-key", "test-aicopilot-jwt-secret-key-at-least-32-bytes");
+        SetEnvironmentVariable("Parameters__jwt-secret-key", "test-aicopilot-jwt-secret-key-at-least-64-characters-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ");
         SetEnvironmentVariable("Parameters__bootstrap-admin-username", BootstrapUserName);
         SetEnvironmentVariable("Parameters__bootstrap-admin-password", BootstrapPassword);
-        SetEnvironmentVariable("JwtSettings__SecretKey", "test-aicopilot-jwt-secret-key-at-least-32-bytes");
+        SetEnvironmentVariable("JwtSettings__SecretKey", "test-aicopilot-jwt-secret-key-at-least-64-characters-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ");
         SetEnvironmentVariable("BootstrapAdmin__UserName", BootstrapUserName);
         SetEnvironmentVariable("BootstrapAdmin__Password", BootstrapPassword);
         SetEnvironmentVariable("AICopilotSecurity__ApiKeyEncryptionKey", "test-aicopilot-api-key-encryption-key");

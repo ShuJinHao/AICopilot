@@ -12,18 +12,52 @@ public sealed class SemanticSummaryBuilderTests
         var plan = CreatePlan(SemanticQueryTarget.Device, SemanticQueryKind.List);
         var rows = new List<Dictionary<string, object?>>
         {
-            CreateRow(("deviceCode", "DEV-001"), ("deviceName", "Cutter A"), ("status", "Running"), ("lineName", "LINE-A"), ("updatedAt", "2026-04-21T08:00:00Z")),
-            CreateRow(("deviceCode", "DEV-002"), ("deviceName", "Welder B"), ("status", "Idle"), ("lineName", "LINE-A"), ("updatedAt", "2026-04-21T09:00:00Z")),
-            CreateRow(("deviceCode", "DEV-003"), ("deviceName", "Cutter C"), ("status", "Running"), ("lineName", "LINE-B"), ("updatedAt", "2026-04-21T10:00:00Z"))
+            CreateRow(("deviceCode", "DEV-001"), ("deviceName", "Cutter A"), ("processId", "process-1")),
+            CreateRow(("deviceCode", "DEV-002"), ("deviceName", "Welder B"), ("processId", "process-2")),
+            CreateRow(("deviceCode", "DEV-003"), ("deviceName", "Cutter C"), ("processId", "process-1"))
         };
 
         var summary = SemanticSummaryBuilder.Build(plan, rows);
 
         summary.Conclusion.Should().Contain("3 台设备");
-        summary.Metrics.Should().Contain(item => item.Name == "statusBreakdown" && item.Value.Contains("Running 2台"));
-        summary.Metrics.Should().Contain(item => item.Name == "lineBreakdown" && item.Value.Contains("LINE-A 2台"));
+        summary.Conclusion.Should().Contain("主数据");
+        summary.Metrics.Should().NotContain(item => item.Name.Contains("status", StringComparison.OrdinalIgnoreCase));
+        summary.Metrics.Should().NotContain(item => item.Name.Contains("line", StringComparison.OrdinalIgnoreCase));
         summary.Highlights.Should().Contain(item => item.Contains("Cutter A"));
         summary.Scope.Should().Contain("结果上限 20 条");
+    }
+
+    [Fact]
+    public void Builder_ShouldDescribeLastReportedDeviceStatusWithoutOnlineInference()
+    {
+        var plan = CreatePlan(SemanticQueryTarget.Device, SemanticQueryKind.Status, ("deviceCode", "DEV-001"));
+        var rows = new List<Dictionary<string, object?>>
+        {
+            CreateRow(
+                ("deviceName", "Cutter A"),
+                ("clientCode", "DEV-001"),
+                ("softwareStatus", "Running"),
+                ("runtimeStatus", "Running"),
+                ("lastRuntimeHeartbeatAtUtc", "2026-07-10T01:02:00Z"))
+        };
+
+        var summary = SemanticSummaryBuilder.Build(plan, rows);
+
+        summary.Conclusion.Should().Contain("1 台具有有效运行心跳");
+        summary.Conclusion.Should().Contain("陈旧不等于离线或停止");
+        summary.Metrics.Should().Contain(item =>
+            item.Name == "runtimeStatusBreakdown" && item.Value.Contains("Running 1台"));
+        summary.Highlights.Should().ContainSingle().Which.Should().Contain("Cloud 软件状态 Running");
+    }
+
+    [Fact]
+    public void Builder_ShouldTreatMissingDeviceStatusAsNoReportInsteadOfOffline()
+    {
+        var plan = CreatePlan(SemanticQueryTarget.Device, SemanticQueryKind.Status, ("deviceCode", "DEV-001"));
+
+        var summary = SemanticSummaryBuilder.Build(plan, []);
+
+        summary.Conclusion.Should().Be("当前授权范围内没有匹配的设备。");
     }
 
     [Fact]
@@ -47,11 +81,11 @@ public sealed class SemanticSummaryBuilderTests
     [Fact]
     public void Builder_ShouldSummarizeCapacityRates()
     {
-        var plan = CreatePlan(SemanticQueryTarget.Capacity, SemanticQueryKind.ByDevice, ("deviceCode", "DEV-001"));
+        var plan = CreatePlan(SemanticQueryTarget.Capacity, SemanticQueryKind.ByDevice, ("deviceId", "11111111-1111-1111-1111-111111111111"));
         var rows = new List<Dictionary<string, object?>>
         {
-            CreateRow(("deviceCode", "DEV-001"), ("processName", "Cutting"), ("outputQty", 118), ("qualifiedQty", 116), ("occurredAt", "2026-04-20T08:00:00Z")),
-            CreateRow(("deviceCode", "DEV-001"), ("processName", "Cutting"), ("outputQty", 126), ("qualifiedQty", 123), ("occurredAt", "2026-04-21T08:00:00Z"))
+            CreateRow(("outputQty", 118), ("qualifiedQty", 116), ("occurredAt", "2026-04-20T08:00:00Z")),
+            CreateRow(("outputQty", 126), ("qualifiedQty", 123), ("occurredAt", "2026-04-21T08:00:00Z"))
         };
 
         var summary = SemanticSummaryBuilder.Build(plan, rows);
@@ -64,11 +98,11 @@ public sealed class SemanticSummaryBuilderTests
     [Fact]
     public void Builder_ShouldSummarizeDeviceLogs()
     {
-        var plan = CreatePlan(SemanticQueryTarget.DeviceLog, SemanticQueryKind.ByLevel, ("deviceCode", "DEV-001"), ("level", "ERROR"));
+        var plan = CreatePlan(SemanticQueryTarget.DeviceLog, SemanticQueryKind.ByLevel, ("deviceId", "11111111-1111-1111-1111-111111111111"), ("level", "ERROR"));
         var rows = new List<Dictionary<string, object?>>
         {
-            CreateRow(("deviceCode", "DEV-001"), ("level", "WARN"), ("message", "Temperature high"), ("occurredAt", "2026-04-20T10:00:00Z")),
-            CreateRow(("deviceCode", "DEV-001"), ("level", "ERROR"), ("message", "Motor overload"), ("occurredAt", "2026-04-20T11:00:00Z"))
+            CreateRow(("deviceId", "11111111-1111-1111-1111-111111111111"), ("deviceName", "Cutter A"), ("level", "WARN"), ("message", "Temperature high"), ("occurredAt", "2026-04-20T10:00:00Z")),
+            CreateRow(("deviceId", "11111111-1111-1111-1111-111111111111"), ("deviceName", "Cutter A"), ("level", "ERROR"), ("message", "Motor overload"), ("occurredAt", "2026-04-20T11:00:00Z"))
         };
 
         var summary = SemanticSummaryBuilder.Build(plan, rows);
@@ -80,11 +114,11 @@ public sealed class SemanticSummaryBuilderTests
     [Fact]
     public void Builder_ShouldSummarizeProductionPassFail()
     {
-        var plan = CreatePlan(SemanticQueryTarget.ProductionData, SemanticQueryKind.ByDevice, ("deviceCode", "DEV-001"));
+        var plan = CreatePlan(SemanticQueryTarget.ProductionData, SemanticQueryKind.ByDevice, ("deviceId", "11111111-1111-1111-1111-111111111111"));
         var rows = new List<Dictionary<string, object?>>
         {
-            CreateRow(("deviceCode", "DEV-001"), ("stationName", "Station-A"), ("barcode", "CELL-0001"), ("result", "Pass"), ("occurredAt", "2026-04-21T09:00:00Z")),
-            CreateRow(("deviceCode", "DEV-001"), ("stationName", "Station-B"), ("barcode", "CELL-0002"), ("result", "Fail"), ("occurredAt", "2026-04-21T09:30:00Z"))
+            CreateRow(("deviceId", "11111111-1111-1111-1111-111111111111"), ("deviceName", "Cutter A"), ("typeKey", "Type-A"), ("typeName", "类型 A"), ("barcode", "CELL-0001"), ("result", "Pass"), ("completedAt", "2026-04-21T09:00:00Z")),
+            CreateRow(("deviceId", "11111111-1111-1111-1111-111111111111"), ("deviceName", "Cutter A"), ("typeKey", "Type-B"), ("typeName", "类型 B"), ("barcode", "CELL-0002"), ("result", "Fail"), ("completedAt", "2026-04-21T09:30:00Z"))
         };
 
         var summary = SemanticSummaryBuilder.Build(plan, rows);
@@ -92,7 +126,7 @@ public sealed class SemanticSummaryBuilderTests
         summary.Metrics.Should().Contain(item => item.Name == "passCount" && item.Value == "1 条");
         summary.Metrics.Should().Contain(item => item.Name == "failCount" && item.Value == "1 条");
         summary.Metrics.Should().Contain(item => item.Name == "passRate" && item.Value == "50.00%");
-        summary.Metrics.Should().Contain(item => item.Name == "groupBreakdown" && item.Value.Contains("Station-A 1条"));
+        summary.Metrics.Should().Contain(item => item.Name == "groupBreakdown" && item.Value.Contains("类型 A 1条"));
     }
 
     [Fact]
@@ -105,6 +139,41 @@ public sealed class SemanticSummaryBuilderTests
         summary.Conclusion.Should().Be("当前范围内未命中记录。");
         summary.Metrics.Should().BeEmpty();
         summary.Highlights.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Builder_ShouldSummarizeOfficialProcessMasterData()
+    {
+        var plan = CreatePlan(SemanticQueryTarget.Process, SemanticQueryKind.List);
+        var rows = new List<Dictionary<string, object?>>
+        {
+            CreateRow(("processId", "process-1"), ("processCode", "CUT"), ("processName", "模切")),
+            CreateRow(("processId", "process-2"), ("processCode", "STACK"), ("processName", "叠片"))
+        };
+
+        var summary = SemanticSummaryBuilder.Build(plan, rows);
+
+        summary.Conclusion.Should().Contain("2 条 Cloud 工序主数据");
+        summary.Metrics.Should().ContainSingle(item => item.Name == "totalCount" && item.Value == "2 个");
+        summary.Highlights.Should().Contain(item => item.Contains("CUT") && item.Contains("模切"));
+    }
+
+    [Fact]
+    public void Builder_ShouldSummarizeClientReleasesWithoutInventingDistributionArtifacts()
+    {
+        var plan = CreatePlan(SemanticQueryTarget.ClientRelease, SemanticQueryKind.List, ("channel", "stable"));
+        var rows = new List<Dictionary<string, object?>>
+        {
+            CreateRow(("componentKey", "edge-host"), ("version", "1.2.3"), ("channel", "stable"), ("targetRuntime", "win-x64"), ("status", "Published"))
+        };
+
+        var summary = SemanticSummaryBuilder.Build(plan, rows);
+
+        summary.Conclusion.Should().Contain("正式 Cloud");
+        summary.Conclusion.Should().Contain("未生成哈希或下载地址");
+        summary.Highlights.Should().ContainSingle().Which.Should().Contain("1.2.3");
+        summary.Highlights.Should().NotContain(item => item.Contains("hash", StringComparison.OrdinalIgnoreCase));
+        summary.Highlights.Should().NotContain(item => item.Contains("http", StringComparison.OrdinalIgnoreCase));
     }
 
     private static SemanticQueryPlan CreatePlan(

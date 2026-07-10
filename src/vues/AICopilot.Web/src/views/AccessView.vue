@@ -56,7 +56,7 @@ function setPermission(code: string, checked: boolean) {
 
 <template>
   <AppShell>
-    <AiDataPage eyebrow="Access Governance" title="权限治理" description="管理用户、角色、权限矩阵和审计日志，确保工具链入口可追踪。">
+    <AiDataPage eyebrow="访问治理" title="权限治理" description="管理用户、角色、权限矩阵和审计日志，确保工具链入口可追踪。">
       <template #actions>
         <AiButton :disabled="store.isLoading" @click="store.refresh()">
           <RefreshCw class="h-4 w-4" :class="{ 'animate-spin': store.isLoading }" />

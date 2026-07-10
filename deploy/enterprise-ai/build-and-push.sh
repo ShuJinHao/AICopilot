@@ -3,10 +3,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# shellcheck source=scripts/release-common.sh
+. "$SCRIPT_DIR/scripts/release-common.sh"
 
 REGISTRY="${REGISTRY:-}"
 HARBOR_PROJECT="${HARBOR_PROJECT:-enterprise-ai}"
-TAG="${TAG:-sha-$(git -C "$REPO_ROOT" rev-parse HEAD)}"
+SOURCE_GIT_SHA="${AICOPILOT_RELEASE_SOURCE_SHA:-$(git -C "$REPO_ROOT" rev-parse HEAD)}"
+TAG="${TAG:-sha-$SOURCE_GIT_SHA}"
 PLATFORM="${PLATFORM:-linux/amd64}"
 CLOUD_PLATFORM_URL="${CLOUD_PLATFORM_URL:-}"
 IMAGE_PREFIX="$REGISTRY/$HARBOR_PROJECT"
@@ -19,12 +22,13 @@ HARBOR_TIMEOUT_SECONDS="${HARBOR_TIMEOUT_SECONDS:-120}"
 DRY_RUN=false
 REQUESTED_SERVICES=""
 REQUESTED_ALL=false
+OUTPUT_DIR="${AICOPILOT_RELEASE_OUTPUT_DIR:-}"
 
 usage() {
   cat <<'EOF'
 Usage:
-  deploy/enterprise-ai/build-and-push.sh --services httpapi,migration,dataworker,ragworker,web [--dry-run]
-  deploy/enterprise-ai/build-and-push.sh --all [--dry-run]
+  deploy/enterprise-ai/build-and-push.sh --services httpapi,migration,dataworker,ragworker,web [--output-dir PATH] [--dry-run]
+  deploy/enterprise-ai/build-and-push.sh --all [--output-dir PATH] [--dry-run]
 
 Builds selected AICopilot application images locally and pushes them to Harbor.
 Production use must pass either --services or --all explicitly.
@@ -50,6 +54,13 @@ while [ "$#" -gt 0 ]; do
       ;;
     --dry-run)
       DRY_RUN=true
+      ;;
+    --output-dir)
+      shift
+      OUTPUT_DIR="${1:-}"
+      ;;
+    --output-dir=*)
+      OUTPUT_DIR="${1#--output-dir=}"
       ;;
     --help|-h)
       usage
@@ -158,51 +169,20 @@ EOF
 }
 
 run_with_timeout() {
-  local seconds="$1"
-  local label="$2"
-  shift 2
-  local marker
-  local cmd_pid
-  local timer_pid
-  local exit_code
-  marker="$(mktemp)"
-  rm -f "$marker"
-
-  if [ "$DRY_RUN" = true ]; then
-    printf '[dry-run] %s:' "$label"
-    printf ' %q' "$@"
-    printf '\n'
-    return 0
-  fi
-
-  "$@" &
-  cmd_pid=$!
-  (
-    sleep "$seconds"
-    if kill -0 "$cmd_pid" 2>/dev/null; then
-      printf 'Timed out after %s seconds: %s\n' "$seconds" "$label" >&2
-      : > "$marker"
-      kill -TERM "$cmd_pid" 2>/dev/null || true
-      sleep 5
-      kill -KILL "$cmd_pid" 2>/dev/null || true
-    fi
-  ) &
-  timer_pid=$!
-
-  set +e
-  wait "$cmd_pid"
-  exit_code=$?
-  set -e
-  kill "$timer_pid" 2>/dev/null || true
-  wait "$timer_pid" 2>/dev/null || true
-
-  if [ -f "$marker" ]; then
-    rm -f "$marker"
-    return 124
-  fi
-  rm -f "$marker"
-  return "$exit_code"
+  release_run_with_timeout "$@"
 }
+
+finish_build_process() {
+  local status="$1"
+  trap - EXIT HUP INT TERM
+  release_cancel_active_timeout
+  exit "$status"
+}
+
+trap 'finish_build_process $?' EXIT
+trap 'finish_build_process 129' HUP
+trap 'finish_build_process 130' INT
+trap 'finish_build_process 143' TERM
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || fail "Required command not found: $1"
@@ -213,7 +193,13 @@ validate_local_tools() {
   [ -n "$CLOUD_PLATFORM_URL" ] || fail "CLOUD_PLATFORM_URL is required, for example http://cloud.internal.example:81."
   require_command git
   require_command docker
-  docker buildx version >/dev/null 2>&1 || fail "docker buildx is not available."
+  if run_with_timeout "$HARBOR_TIMEOUT_SECONDS" "docker buildx version" docker buildx version >/dev/null 2>&1; then
+    :
+  else
+    local status=$?
+    printf 'docker buildx is not available.\n' >&2
+    exit "$status"
+  fi
   if [ -n "${HARBOR_USERNAME:-${OCI_REGISTRY_USERNAME:-}}" ] && [ -n "${HARBOR_PASSWORD:-${OCI_REGISTRY_PASSWORD:-}}" ]; then
     local username="${HARBOR_USERNAME:-$OCI_REGISTRY_USERNAME}"
     local password="${HARBOR_PASSWORD:-$OCI_REGISTRY_PASSWORD}"
@@ -250,6 +236,31 @@ env_key_for_service() {
   esac
 }
 
+resolve_pushed_image_digest() {
+  local image_ref="$1"
+  local digest
+
+  if [ "$DRY_RUN" = true ]; then
+    printf '%s\n' 'sha256:0000000000000000000000000000000000000000000000000000000000000000'
+    return
+  fi
+
+  if digest="$(run_with_timeout "$HARBOR_TIMEOUT_SECONDS" "inspect pushed OCI digest $image_ref" \
+      docker buildx imagetools inspect "$image_ref" --format '{{.Manifest.Digest}}')"; then
+    :
+  else
+    local status=$?
+    printf 'Could not resolve immutable OCI digest for pushed image: %s\n' "$image_ref" >&2
+    exit "$status"
+  fi
+  digest="$(printf '%s\n' "$digest" | tail -n 1 | tr -d '\r[:space:]')"
+  if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    printf 'Harbor returned an invalid OCI digest for %s: %s\n' "$image_ref" "$digest" >&2
+    exit 65
+  fi
+  printf '%s\n' "$digest"
+}
+
 publish_dotnet_image() {
   local service="$1"
   local project_path="$2"
@@ -264,7 +275,7 @@ publish_dotnet_image() {
     mkdir -p "$publish_dir"
   fi
 
-  if ! run_with_timeout "$BUILD_TIMEOUT_SECONDS" "dotnet publish $service" \
+  if run_with_timeout "$BUILD_TIMEOUT_SECONDS" "dotnet publish $service" \
     dotnet publish "$REPO_ROOT/$project_path" \
       -c Release \
       --os linux \
@@ -272,11 +283,14 @@ publish_dotnet_image() {
       --self-contained false \
       -p:UseAppHost=false \
       -o "$publish_dir"; then
+    :
+  else
+    local status=$?
     print_diagnostics "$service" "$image_name"
-    exit 124
+    exit "$status"
   fi
 
-  if ! run_with_timeout "$BUILD_TIMEOUT_SECONDS" "build/push $service" \
+  if run_with_timeout "$BUILD_TIMEOUT_SECONDS" "build/push $service" \
     docker buildx build \
       --platform "$PLATFORM" \
       --build-arg RUNTIME_BASE_IMAGE="$DOTNET_RUNTIME_BASE_IMAGE" \
@@ -285,15 +299,18 @@ publish_dotnet_image() {
       --push \
       --file "$SCRIPT_DIR/Dockerfile.backend-runtime" \
       "$publish_dir"; then
+    :
+  else
+    local status=$?
     print_diagnostics "$service" "$image_name"
-    exit 124
+    exit "$status"
   fi
 }
 
 publish_web_image() {
   local image_name="aicopilot-webui"
   printf 'Building AICopilot web image: image=%s/%s:%s\n' "$IMAGE_PREFIX" "$image_name" "$TAG"
-  if ! run_with_timeout "$BUILD_TIMEOUT_SECONDS" "build/push web" \
+  if run_with_timeout "$BUILD_TIMEOUT_SECONDS" "build/push web" \
     docker buildx build \
       --platform "$PLATFORM" \
       --build-arg VITE_CLOUD_PLATFORM_URL="$CLOUD_PLATFORM_URL" \
@@ -302,8 +319,11 @@ publish_web_image() {
       --tag "$IMAGE_PREFIX/$image_name:$TAG" \
       --push \
       "$REPO_ROOT/src/vues/AICopilot.Web"; then
+    :
+  else
+    local status=$?
     print_diagnostics web "$image_name"
-    exit 124
+    exit "$status"
   fi
 }
 
@@ -333,7 +353,7 @@ build_and_push_service() {
 emit_outputs() {
   local services="$1"
   local services_csv="$2"
-  local artifact_dir="$REPO_ROOT/artifacts/deploy"
+  local artifact_dir="$OUTPUT_DIR"
   local services_file="$artifact_dir/aicopilot-built-services.txt"
   local images_file="$artifact_dir/aicopilot-images.env"
   mkdir -p "$artifact_dir"
@@ -341,13 +361,22 @@ emit_outputs() {
   : > "$images_file"
 
   printf '\nRelease tag: %s\n' "$TAG"
+  printf 'Source git SHA: %s\n' "$SOURCE_GIT_SHA"
   printf 'Deploy services input: %s\n' "$services_csv"
   for service in $services; do
     local key
     local image_name
+    local tagged_ref
+    local digest
+    local immutable_ref
     key="$(env_key_for_service "$service")"
     image_name="$(image_name_for_service "$service")"
-    printf '%s=%s/%s:%s\n' "$key" "$IMAGE_PREFIX" "$image_name" "$TAG" | tee -a "$images_file"
+    tagged_ref="$IMAGE_PREFIX/$image_name:$TAG"
+    digest="$(resolve_pushed_image_digest "$tagged_ref")"
+    immutable_ref="$IMAGE_PREFIX/$image_name@$digest"
+    printf '%s=%s\n' "$key" "$immutable_ref" | tee -a "$images_file"
+    printf '%s_TAG=%s\n' "$key" "$tagged_ref" | tee -a "$images_file"
+    printf '%s_DIGEST=%s\n' "$key" "$digest" | tee -a "$images_file"
   done
   printf 'Built services file: %s\n' "$services_file"
   printf 'Image manifest file: %s\n' "$images_file"
@@ -363,6 +392,19 @@ fi
 
 SELECTED_SERVICES="$(normalize_services "$REQUESTED_SERVICES")"
 SELECTED_SERVICES_CSV="$(service_csv "$SELECTED_SERVICES")"
+
+if [ -z "$OUTPUT_DIR" ]; then
+  OUTPUT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/aicopilot-build-output.XXXXXX")"
+fi
+
+actual_git_sha="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+if [ "$actual_git_sha" != "$SOURCE_GIT_SHA" ]; then
+  fail "AICopilot source snapshot drifted: expected $SOURCE_GIT_SHA, actual $actual_git_sha."
+fi
+if [ -n "$(git -C "$REPO_ROOT" status --porcelain)" ]; then
+  git -C "$REPO_ROOT" status --short >&2
+  fail "AICopilot build source snapshot must remain clean."
+fi
 
 validate_local_tools
 

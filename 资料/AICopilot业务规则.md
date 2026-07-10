@@ -58,7 +58,12 @@ Cloud AiRead 设备契约：
 
 - `deviceId` 是正式 Cloud 设备身份参数，用于产能、日志、生产记录等业务读取。
 - `deviceCode`/`ClientCode` 只用于设备查询、展示或 bootstrap 寻址，不得作为 `deviceId` 发送。
+- `Analysis.Device.List/Detail` 只表达 `/api/v1/ai/read/devices` 的设备主数据；`Analysis.Device.Status` 只读取 `/api/v1/ai/read/device-client-states` 的 Cloud 权威 `softwareStatus`、运行心跳原值和唯一 freshness 时间。无心跳设备返回 `MissingRuntimeHeartbeat` 行；只有超过 24 小时才是 `RuntimeHeartbeatStale`，恰好 24 小时不 stale，Stale 不得冒充 Offline/Stopped；空集只表示授权范围内无匹配设备。
+- `Analysis.Process.List/Detail` 只读取 `/api/v1/ai/read/processes`；支持 `processId` 精确过滤及 `keyword/processCode/processName` 搜索，详情必须唯一精确命中且搜索结果未截断，`processId` 必须作为正式 GUID 参数发送、不得塞入 keyword，不得回退其它数据源。
+- `Analysis.ClientRelease.List` 只读取 `/api/v1/ai/read/client-releases`，只允许 `channel/targetRuntime/status/includeArchived`；版本、hash、下载地址、发布说明和发布状态只能来自 Cloud 返回，不得生成或补齐，不得回退 Direct DB、Text-to-SQL 或 Simulation。
 - AICopilot 的 Cloud AiRead 客户端和 endpoint allowlist 必须逐项覆盖 Cloud `AI只读接口契约.md` 已批准的正式 `GET /api/v1/ai/read/*` 表面；高频 DeviceLog/Capacity/ProductionData 接通不等于全量接口对齐。
+- Cloud AiRead 客户端只保留八个正式 typed GET，不得暴露任意 method/path 传输、可配置 POST allowlist、legacy adapter 或双轨接口；非 GET 必须在发送 HTTP 请求前拒绝。
+- `production-records` 当前正式提供 `typeKey/typeName/deviceId/deviceName` 等字段，不提供 `processName/stationName/deviceCode`；缺失字段保持不存在或空，不得用 `typeName`、`typeKey` 或其他显示字段代填、推断工序、工位或设备编码。
 - 需要从自然语言里的设备编码定位设备时，必须先走显式设备查询/解析；无法唯一命中时要求用户补充，不做隐式兼容。
 - AICopilot 的 Pilot 场景参数不得直接透传给 Cloud；只有 Cloud 端点真实声明的参数可以进入请求。
 
@@ -83,8 +88,8 @@ Cloud AiRead 设备契约：
 - 查询结果只用于分析展示，不产生业务写入。
 - 不能为了分析便利放宽 `MaxRows`、read-only session 或 SQL 安全检查。
 - 内部开发直连真实 Cloud PostgreSQL 时，只能注册为 DataAnalysis `CloudReadOnly` 只读业务数据源，必须使用已验证只读数据库账号，并绑定白名单表字段和只读 SQL guard。
-- 高频设备日志、小时/汇总产能和生产数据查询优先走 Cloud AiRead 正式只读 API；DataAnalysis `CloudReadOnly` Direct DB / Text-to-SQL 只作为低频探索、治理白名单内补充分析或未覆盖只读链路兜底，不得压过已批准的高频 Cloud AiRead 端点。
-- CloudReadOnly 探索型 Text-to-SQL 只能作为强语义 intent 覆盖外、低频探索或 Direct DB SQL 失败后的受控 fallback；不得拆分或重命名既有 `Analysis.*` intent，不得用 fallback 压过可用的高频 Cloud AiRead 路径。
+- `Device`、`DeviceLog`、`Capacity`、`ProductionData`、`Process`、`ClientRelease` 六类已覆盖正式 `Analysis.*` 语义必须只走 Cloud AiRead 八个 typed GET；成功、空集和任何 provider 错误都不得回退 Direct DB、Text-to-SQL、Simulation、MCP 或隐藏适配器。
+- CloudReadOnly Direct DB / Text-to-SQL 只服务上述正式语义覆盖外的低频自由探索和治理白名单内补充分析；探索型 Text-to-SQL 只能在未覆盖问题或其 Direct DB SQL 失败后受控 fallback，不得执行、拆分、重命名或旁路已覆盖 `Analysis.*` intent。
 - CloudReadOnly Text-to-SQL fallback 必须使用共享白名单 schema、已验证只读凭据、LLM 结构化生成、SELECT-only SQL guard、BusinessQuery safety policy 双层表/列白名单、只读执行、最多受控修复重试和 hash-only 审计；生产 fallback 不得退化为规则 SQL 模板。
 - CloudReadOnly Text-to-SQL LLM prompt 可见的物理 schema 只能来自 `CloudReadOnlyGovernedSchema` 治理白名单，最多包含批准表名、列名、列类型、join hints 和必要业务描述；不得把连接串、凭据、role/权限细节、样例数据、查询结果、参数值、非白名单表字段或系统/敏感字段发给模型。
 - CloudReadOnly Text-to-SQL 修复重试默认最多 3 次、硬上限 5 次；timeout、权限、凭据、非只读、系统表、敏感字段、多语句或写 SQL 默认不可修复、不重试。
@@ -98,7 +103,7 @@ Cloud AiRead 设备契约：
 - DataAnalysis 最终上下文必须携带本轮查询执行事实，包括语义 target/kind、filters、timeRange、limit、returnedRowCount 和证据边界；最终回答必须先核对执行事实再输出结论。
 - DeviceLog 数据分析展示块和 Widget 只能从本轮只读查询返回行、`query_execution` 和 `semantic_summary` 派生；级别分布、时间分布、问题关键词分类、指标和证据表不得由模型编造、Markdown 解析、前端假数据或任意图表配置生成。
 - DeviceLog 最终回答使用 `display_blocks` 时必须按“结论、关键指标、关键记录、可能原因、建议动作、不能直接执行的动作、查询范围”组织；可能原因必须标注为 AI 推断分析，建议动作只能是人工排查建议，不能写成已执行的控制、下发、写入或修复动作。
-- Direct DB 设备 `status` 字段当前是最新 `device_logs.level`，对用户展示必须称为“最新日志级别”，不得包装为实时在线/运行状态。
+- Direct DB 设备主数据映射不得再连接最新日志或暴露 `status/lineName/updatedAt`；最新日志级别只通过 `Analysis.DeviceLog.*` 查询，不得包装为设备运行状态。
 - 真实 Cloud Text-to-SQL 验证不得走 Simulation 数据源冒充真实结果；Simulation 只能用于明确标识的模拟链路。
 - 创建或轮换 Cloud PostgreSQL 只读账号只能通过显式确认的受控自动化执行；只能创建/更新专用 readonly role，只授予白名单表 SELECT，不得授予写权限、schema create 权限、superuser、createdb、createrole 或 replication。
 - Cloud PostgreSQL readonly role 授权的权威载体是 `deploy/enterprise-ai/cloud-readonly/apply-readonly-grants.sql` 和 `check-readonly-grants.sql`；生产只允许对治理白名单表做显式表级 `GRANT SELECT`，不得使用 `GRANT SELECT ON ALL TABLES`、默认权限、未来表自动授权或列级/表级混用口径。
@@ -143,6 +148,7 @@ Cloud AiRead 设备契约：
 - `ExecutablePlan` 是用户确认 `PlanDraft` 后生成的可执行计划；此时才允许做 Skill、Tool、Schema、Guard 和审批校验。
 - `AgentTask` 是真正进入执行阶段的任务对象；它必须来自已确认的 `ExecutablePlan` 或等价确认状态。
 - 用户确认前，Plan 模式禁止 Cloud 业务查询、MCP 工具执行、Tool 执行、DataAnalysis 真实查询、Worker 入队和任何会产生业务副作用的动作。
+- Cloud 只读 Agent 当前正式能力覆盖 `Analysis.Device.List/Detail/Status`、`Analysis.DeviceLog.Latest/Range/ByLevel`、`Analysis.Capacity.Range/ByDevice`、`Analysis.ProductionData.Latest/Range/ByDevice`、`Analysis.Process.List/Detail` 和 `Analysis.ClientRelease.List`；`Analysis.Capacity.ByProcess` 尚无正式聚合契约。意图只能在用户确认后进入执行链，且必须复用唯一 Cloud AiRead 语义实现。
 - Skill、Tool、MCP、Knowledge 或 DataSource 未匹配时，不能阻断 `PlanDraft`；应在草案中说明能力缺口、降级为路线规划或要求用户补充业务对象。
 - 执行阶段失败后的重试应基于已确认的 `ExecutablePlan` / `AgentTask` 重新入队，不应重新生成 `PlanDraft` 或丢失用户确认。
 
@@ -155,7 +161,13 @@ Cloud AiRead 设备契约：
 - 文档、测试和部署 preflight 出现 HTTPS/HSTS/443/certificate 强制项时，必须先改回 HTTP-only 口径，再继续执行其他安全修复。
 - Web 到 HttpApi 的标准生产路径必须是 nginx 同源 `/api/` 反代；HttpApi CORS 默认不开放跨源。确需浏览器直连后端时，只允许配置精确 http/https origin，禁止 `*`、通配子域、带 path/query/fragment 的 origin 或运行时任意放行。
 - 部署模板、文档示例、滚动复盘、历史诊断记录、workflow 默认值、脚本默认值、migration seed 和 fresh DB seed 不得携带真实内网 IP、弱 secret、`CHANGE_ME`、`dummy-key` 或默认 `root@` 发布目标；真实生产值只能放在服务器 `.env`、GitHub secrets、管理员录入或命令行环境变量中。root SSH 只允许显式设置 `ALLOW_ROOT_SSH_DEPLOY=true` 的应急路径，标准发布必须使用专用部署用户。
+- 如果当前真实部署根目录、runner work root、Docker Root Dir、support files sync 目标、工作区统一入口参数或标准部署用户与模板不同，必须先更新 `../../deploy/Invoke-WorkspaceDeploy.ps1`、`../../deploy/profiles/*.json`、`AICopilot 项目部署与维护指南.md`、`deploy/enterprise-ai/README.md` 和工作区 `../docs/上传部署总览.md` 的“当前生产现场口径”，再允许继续改脚本或发布。
+- 如果当前 `AICopilot` 与 `Cloud` 共用同一台生产宿主机，必须在工作区总入口明确写出共享宿主机事实、共享标准发布人和两个独立部署根；不得把同机双部署根问题写成两套互不相关的环境。
+- root 应急路径一旦写入 `releases/*`、`current-release.summary.md` 或 deploy support files，关闭任务前必须恢复 owner/mode，并重新验证标准 non-root `./deploy-release.sh --validate-only`；不得留下 root-owned 状态文件后直接收口。
+- 工作区根 `deploy/Invoke-WorkspaceDeploy.ps1 -Target AICopilot` 是唯一对外入口；正式发布必须从 clean、已推送 HEAD 创建 detached worktree，镜像和 support files 只读取固定 SHA，并使用每次运行私有 services/image/support manifest，禁止共享 artifact 控制发布。
+- support release 必须包含 compose、执行 staging/SHA256 校验，并让 support reservation、全局 release lock 和 deploy 使用同一 token/digest；`.env`、release state、锁和备份不得进入同步包。健康前失败必须恢复持久状态；active/stale lock、真实退出码、timeout、信号释放锁和同 SHA 健康幂等必须有行为回归。
 - 模型 smoke 的 `AICOPILOT_MODEL_SMOKE_API_KEY=dummy-key` 只允许作为真实模型网关的显式兼容例外，必须同时设置 `AICOPILOT_MODEL_SMOKE_ALLOW_DUMMY_KEY=true` 或手工 smoke 命令传 `--allow-dummy-key`；默认 preflight 必须拒绝该弱值。
+- HttpApi JWT 配置必须由唯一运行时入口校验：Issuer、Audience 非空，SecretKey 至少 64 字符，AccessTokenExpirationMinutes 大于 0；绕过部署脚本直接启动也必须 fail-fast，错误不得回显 secret，默认有效期保持 30 分钟。
 
 ### 8.3 模型密钥保护格式
 

@@ -51,17 +51,17 @@ public sealed class SemanticSourceStatusDiagnosticsTests
     public async Task Inspector_ShouldReturnMissingFields_WhenReadonlyContractIsIncomplete()
     {
         var database = CreateReadonlyDatabase();
-        var mapping = CreateDeviceMapping(lineNameExpression: "missing_line_name");
+        var mapping = CreateDeviceMapping(processIdExpression: "missing_process_id");
         var connector = new SemanticInspectionDatabaseConnector
         {
-            MissingExpressions = ["missing_line_name"]
+            MissingExpressions = ["missing_process_id"]
         };
         var inspector = new SemanticSourceInspector(connector);
 
         var inspection = await inspector.InspectAsync(ToConnectionInfo(database), mapping);
 
         inspection.SourceExists.Should().BeTrue();
-        inspection.MissingRequiredFields.Should().Equal("lineName");
+        inspection.MissingRequiredFields.Should().Equal("processId");
     }
 
     [Fact]
@@ -130,7 +130,7 @@ public sealed class SemanticSourceStatusDiagnosticsTests
     public async Task QueryHandler_ShouldReturnFieldMismatch_WhenInspectorReportsMissingFields()
     {
         var database = CreateReadonlyDatabase(name: "SemanticDb");
-        var missingFields = new[] { "lineName" };
+        var missingFields = new[] { "processId" };
         var inspector = new StubSemanticSourceInspector(new SemanticSourceInspection(true, missingFields));
         var handler = new GetSemanticSourceStatusQueryHandler(
             new SampleSemanticPhysicalMappingProvider(),
@@ -159,7 +159,7 @@ public sealed class SemanticSourceStatusDiagnosticsTests
 
     private static SemanticPhysicalMapping CreateDeviceMapping(
         string sourceName = "vw_device_readonly",
-        string lineNameExpression = "line_name")
+        string processIdExpression = "process_id")
     {
         return new SemanticPhysicalMapping(
             SemanticQueryTarget.Device,
@@ -170,13 +170,11 @@ public sealed class SemanticSourceStatusDiagnosticsTests
                 ["deviceId"] = "device_id",
                 ["deviceCode"] = "device_code",
                 ["deviceName"] = "device_name",
-                ["status"] = "status",
-                ["lineName"] = lineNameExpression,
-                ["updatedAt"] = "updated_at"
+                ["processId"] = processIdExpression
             },
             allowedProjectionFields: SemanticSourceContractCatalog.GetRequiredFields(SemanticQueryTarget.Device),
-            allowedFilterFields: ["deviceCode", "deviceName", "status", "lineName"],
-            allowedSortFields: ["deviceCode", "updatedAt"],
+            allowedFilterFields: ["deviceId", "deviceCode", "deviceName", "processId"],
+            allowedSortFields: ["deviceCode", "deviceName"],
             databaseName: "DeviceSemanticReadonly");
     }
 

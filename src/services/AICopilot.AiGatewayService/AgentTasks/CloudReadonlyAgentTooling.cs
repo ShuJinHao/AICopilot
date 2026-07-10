@@ -77,7 +77,7 @@ public sealed class CloudReadonlyAgentPlanService(
             .FirstOrDefault();
         if (candidate is null)
         {
-            return Unsupported("Cloud readonly agent plans only support device, device log, capacity, and production data intents.");
+            return Unsupported("Cloud readonly agent plans only support device, device log, capacity, production data, process, and client release intents.");
         }
 
         if (candidate.Confidence < MinimumConfidence)
@@ -119,7 +119,9 @@ public sealed class CloudReadonlyAgentPlanService(
         return intent.Intent.StartsWith("Analysis.Device.", StringComparison.OrdinalIgnoreCase) ||
                intent.Intent.StartsWith("Analysis.DeviceLog.", StringComparison.OrdinalIgnoreCase) ||
                intent.Intent.StartsWith("Analysis.Capacity.", StringComparison.OrdinalIgnoreCase) ||
-               intent.Intent.StartsWith("Analysis.ProductionData.", StringComparison.OrdinalIgnoreCase);
+               intent.Intent.StartsWith("Analysis.ProductionData.", StringComparison.OrdinalIgnoreCase) ||
+               intent.Intent.StartsWith("Analysis.Process.", StringComparison.OrdinalIgnoreCase) ||
+               intent.Intent.StartsWith("Analysis.ClientRelease.", StringComparison.OrdinalIgnoreCase);
     }
 
     private static Result<CloudReadonlyAgentPlanIntent> Unsupported(string detail)

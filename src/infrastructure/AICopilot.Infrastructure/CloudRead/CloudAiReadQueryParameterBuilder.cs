@@ -22,67 +22,87 @@ internal static class CloudAiReadQueryParameterBuilder
 
     public static Dictionary<string, string?> BuildDeviceQueryParameters(CloudAiReadQuery query)
     {
-        var parameters = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        RejectUnsupportedFilters(
+            query,
+            "Cloud /devices 不支持运行状态、产线或投影时间过滤，这些条件不能降级为 keyword。",
+            "status",
+            "lineName",
+            "processName",
+            "runtimeStatus",
+            "softwareStatus",
+            "updatedAt",
+            "updatedAtUtc");
+        RejectUnknownFilters(query, "Cloud /devices 收到未批准的过滤字段。", "deviceId", "deviceCode", "processId", "keyword", "deviceName");
+        return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
+            ["deviceId"] = GetOptionalGuidFilterValue(query, "deviceId"),
+            ["deviceCode"] = GetFilterValue(query, "deviceCode"),
+            ["processId"] = GetOptionalGuidFilterValue(query, "processId"),
+            ["keyword"] = GetFilterValue(query, "keyword", "deviceName"),
             ["maxRows"] = FormatMaxRows(query.Limit)
         };
-
-        var keyword = FirstNonBlank(
-            GetFilterValue(query, "keyword", "deviceId", "deviceCode", "deviceName", "lineName", "status"),
-            query.QueryText);
-        if (!string.IsNullOrWhiteSpace(keyword))
-        {
-            parameters["keyword"] = keyword;
-        }
-
-        return parameters;
     }
 
     public static Dictionary<string, string?> BuildProcessQueryParameters(CloudAiReadQuery query)
     {
-        var parameters = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        RejectUnknownFilters(query, "Cloud /processes 收到未批准的过滤字段。", "processId", "keyword", "processCode", "processName");
+        return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
+            ["processId"] = GetOptionalGuidFilterValue(query, "processId"),
+            ["keyword"] = GetFilterValue(query, "keyword", "processCode", "processName"),
             ["maxRows"] = FormatMaxRows(query.Limit)
         };
-
-        var keyword = FirstNonBlank(
-            GetFilterValue(query, "keyword", "processId", "processCode", "processName"),
-            query.QueryText);
-        if (!string.IsNullOrWhiteSpace(keyword))
-        {
-            parameters["keyword"] = keyword;
-        }
-
-        return parameters;
     }
 
     public static Dictionary<string, string?> BuildClientReleaseQueryParameters(CloudAiReadQuery query)
     {
+        RejectUnknownFilters(query, "Cloud /client-releases 收到未批准的过滤字段。", "channel", "targetRuntime", "status", "includeArchived");
         return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
             ["channel"] = GetFilterValue(query, "channel"),
-            ["targetRuntime"] = GetFilterValue(query, "targetRuntime", "runtime"),
+            ["targetRuntime"] = GetFilterValue(query, "targetRuntime"),
             ["status"] = GetFilterValue(query, "status"),
-            ["includeArchived"] = NormalizeBoolean(GetFilterValue(query, "includeArchived", "archived")),
+            ["includeArchived"] = NormalizeBoolean(GetFilterValue(query, "includeArchived")),
             ["maxRows"] = FormatMaxRows(query.Limit)
         };
     }
 
     public static Dictionary<string, string?> BuildDeviceClientStateQueryParameters(CloudAiReadQuery query)
     {
+        RejectUnsupportedFilters(
+            query,
+            "Cloud /device-client-states 当前不支持按状态、IP、版本或时间过滤，这些条件不能降级为 keyword。",
+            "primaryIp",
+            "hostVersion",
+            "hostApiVersion",
+            "runtimeStatus",
+            "softwareStatus",
+            "status",
+            "updatedAt",
+            "updatedAtUtc",
+            "lastRuntimeHeartbeatAtUtc");
+        RejectUnknownFilters(query, "Cloud /device-client-states 收到未批准的过滤字段。", "deviceId", "deviceCode", "clientCode", "processId", "keyword", "deviceName");
         return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
-            ["deviceId"] = GetFilterValue(query, "deviceId"),
-            ["keyword"] = FirstNonBlank(
-                GetFilterValue(query, "keyword", "clientCode", "deviceCode", "deviceName", "primaryIp", "hostVersion", "runtimeStatus"),
-                query.QueryText),
+            ["deviceId"] = GetOptionalGuidFilterValue(query, "deviceId"),
+            ["deviceCode"] = GetFilterValue(query, "deviceCode", "clientCode"),
+            ["processId"] = GetOptionalGuidFilterValue(query, "processId"),
+            ["keyword"] = GetFilterValue(query, "keyword", "deviceName"),
             ["maxRows"] = FormatMaxRows(query.Limit)
         };
     }
 
     public static Dictionary<string, string?> BuildCapacityQueryParameters(CloudAiReadQuery query)
     {
-        var deviceId = RequireFilterValue(query, "deviceId", "请补充设备 ID。", "deviceId");
+        RejectUnsupportedFilters(
+            query,
+            "Cloud /capacity/summary 不支持设备编码、工序名称或工位名称过滤；设备编码必须先唯一解析为 deviceId。",
+            "deviceCode",
+            "clientCode",
+            "processName",
+            "stationName");
+        RejectUnknownFilters(query, "Cloud /capacity/summary 收到未批准的过滤字段。", "deviceId", "plcName", "shiftDate");
+        var deviceId = RequireGuidFilterValue(query, "deviceId", "请补充设备 ID。", "deviceId");
         var (start, end) = RequireTimeRange(query, "请补充产能查询的开始日期和结束日期。");
 
         var parameters = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
@@ -90,7 +110,7 @@ internal static class CloudAiReadQueryParameterBuilder
             ["deviceId"] = deviceId,
             ["startDate"] = FormatCloudDate(start),
             ["endDate"] = FormatCloudDate(end),
-            ["plcName"] = GetFilterValue(query, "plcName", "processName"),
+            ["plcName"] = GetFilterValue(query, "plcName"),
             ["maxRows"] = FormatMaxRows(query.Limit)
         };
 
@@ -99,7 +119,16 @@ internal static class CloudAiReadQueryParameterBuilder
 
     public static Dictionary<string, string?> BuildDeviceLogQueryParameters(CloudAiReadQuery query)
     {
-        var deviceId = RequireFilterValue(query, "deviceId", "请补充设备 ID。", "deviceId");
+        RejectUnsupportedFilters(
+            query,
+            "Cloud /device-logs 不支持设备编码、工序、日志来源或设备名称过滤；设备编码必须先唯一解析为 deviceId。",
+            "deviceCode",
+            "clientCode",
+            "deviceName",
+            "processName",
+            "source");
+        RejectUnknownFilters(query, "Cloud /device-logs 收到未批准的过滤字段。", "deviceId", "preset", "level", "minLevel", "keyword", "message");
+        var deviceId = RequireGuidFilterValue(query, "deviceId", "请补充设备 ID。", "deviceId");
         var (start, end, preset) = ResolveTimeRangeOrPreset(
             query,
             "请补充日志查询的开始时间和结束时间，或使用 preset。",
@@ -121,7 +150,7 @@ internal static class CloudAiReadQueryParameterBuilder
             ["preset"] = preset,
             ["level"] = level,
             ["minLevel"] = minLevel,
-            ["keyword"] = FirstNonBlank(GetFilterValue(query, "keyword", "message", "source"), query.QueryText),
+            ["keyword"] = GetFilterValue(query, "keyword", "message"),
             ["maxRows"] = FormatMaxRows(query.Limit)
         };
 
@@ -130,7 +159,15 @@ internal static class CloudAiReadQueryParameterBuilder
 
     public static Dictionary<string, string?> BuildCapacityHourlyQueryParameters(CloudAiReadQuery query)
     {
-        var deviceId = RequireFilterValue(query, "deviceId", "请补充设备 ID。", "deviceId");
+        RejectUnsupportedFilters(
+            query,
+            "Cloud /capacity/hourly 不支持设备编码、工序名称或工位名称过滤；设备编码必须先唯一解析为 deviceId。",
+            "deviceCode",
+            "clientCode",
+            "processName",
+            "stationName");
+        RejectUnknownFilters(query, "Cloud /capacity/hourly 收到未批准的过滤字段。", "deviceId", "date", "shiftDate", "preset", "plcName");
+        var deviceId = RequireGuidFilterValue(query, "deviceId", "请补充设备 ID。", "deviceId");
         var date = GetFilterValue(query, "date", "shiftDate");
         var preset = GetFilterValue(query, "preset");
         if (!string.IsNullOrWhiteSpace(date) && !string.IsNullOrWhiteSpace(preset))
@@ -159,20 +196,29 @@ internal static class CloudAiReadQueryParameterBuilder
             ["deviceId"] = deviceId,
             ["date"] = string.IsNullOrWhiteSpace(preset) ? date : null,
             ["preset"] = preset,
-            ["plcName"] = GetFilterValue(query, "plcName", "processName"),
+            ["plcName"] = GetFilterValue(query, "plcName"),
             ["maxRows"] = FormatMaxRows(query.Limit)
         };
     }
 
     public static Dictionary<string, string?> BuildProductionRecordQueryParameters(CloudAiReadQuery query)
     {
+        RejectUnsupportedFilters(
+            query,
+            "Cloud /production-records 不支持设备编码、工序名称、工位名称或类型名称过滤；只能使用正式 typeKey/processId/deviceId 范围。",
+            "deviceCode",
+            "clientCode",
+            "processName",
+            "stationName",
+            "typeName");
+        RejectUnknownFilters(query, "Cloud /production-records 收到未批准的过滤字段。", "typeKey", "processId", "deviceId", "preset", "barcode", "result", "fieldMode");
         var (start, end, preset) = ResolveTimeRangeOrPreset(
             query,
             "请补充生产数据查询的开始时间和结束时间，或使用 preset。",
             TimePresetValues);
-        var typeKey = GetFilterValue(query, "typeKey", "stationName");
-        var processId = GetFilterValue(query, "processId");
-        var deviceId = GetFilterValue(query, "deviceId");
+        var typeKey = GetFilterValue(query, "typeKey");
+        var processId = GetOptionalGuidFilterValue(query, "processId");
+        var deviceId = GetOptionalGuidFilterValue(query, "deviceId");
         if (string.IsNullOrWhiteSpace(typeKey) &&
             string.IsNullOrWhiteSpace(processId) &&
             string.IsNullOrWhiteSpace(deviceId))
@@ -259,6 +305,36 @@ internal static class CloudAiReadQueryParameterBuilder
             $"Cloud AiRead 查询缺少必需参数 {parameterName}，{guidance}");
     }
 
+    private static string RequireGuidFilterValue(
+        CloudAiReadQuery query,
+        string parameterName,
+        string guidance,
+        params string[] fieldNames)
+    {
+        var value = RequireFilterValue(query, parameterName, guidance, fieldNames);
+        return ValidateGuid(parameterName, value);
+    }
+
+    private static string? GetOptionalGuidFilterValue(CloudAiReadQuery query, params string[] fieldNames)
+    {
+        var value = GetFilterValue(query, fieldNames);
+        return string.IsNullOrWhiteSpace(value)
+            ? null
+            : ValidateGuid(fieldNames[0], value);
+    }
+
+    private static string ValidateGuid(string parameterName, string value)
+    {
+        if (Guid.TryParse(value, out var parsed) && parsed != Guid.Empty)
+        {
+            return parsed.ToString("D");
+        }
+
+        throw new CloudAiReadException(
+            CloudAiReadProblemCodes.MissingRequiredParameter,
+            $"Cloud AiRead 查询参数 {parameterName} 必须是非空 GUID。");
+    }
+
     private static (DateTimeOffset Start, DateTimeOffset End) RequireTimeRange(
         CloudAiReadQuery query,
         string guidance)
@@ -319,8 +395,31 @@ internal static class CloudAiReadQueryParameterBuilder
         return null;
     }
 
-    private static string? FirstNonBlank(params string?[] values)
+    private static void RejectUnsupportedFilters(
+        CloudAiReadQuery query,
+        string message,
+        params string[] fieldNames)
     {
-        return values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
+        if (fieldNames.Any(fieldName => !string.IsNullOrWhiteSpace(GetFilterValue(query, fieldName))))
+        {
+            throw new CloudAiReadException(
+                CloudAiReadProblemCodes.MissingRequiredParameter,
+                message);
+        }
     }
+
+    private static void RejectUnknownFilters(
+        CloudAiReadQuery query,
+        string message,
+        params string[] allowedFieldNames)
+    {
+        var allowed = new HashSet<string>(allowedFieldNames, StringComparer.OrdinalIgnoreCase);
+        if (query.Filters.Any(filter => !allowed.Contains(filter.Field)))
+        {
+            throw new CloudAiReadException(
+                CloudAiReadProblemCodes.MissingRequiredParameter,
+                message);
+        }
+    }
+
 }

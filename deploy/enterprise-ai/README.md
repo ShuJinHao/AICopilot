@@ -1,35 +1,55 @@
 # AICopilot enterprise-ai deploy
 
-本目录是 AICopilot 生产部署的可执行入口。新接手部署时，先读本文件，再按需查看仓库根目录的 `AICopilot 项目部署与维护指南.md`、`AGENTS.md` 和 `资料/AICopilot业务规则.md`。
+本目录是 AICopilot 生产部署的实现入口。新接手部署时，先读工作区根 `deploy/README.md` 和 `deploy/Invoke-WorkspaceDeploy.ps1`，再按需查看本文件、仓库根目录的 `AICopilot 项目部署与维护指南.md`、`AGENTS.md` 和 `资料/AICopilot业务规则.md`。
+
+> 当前状态（2026-07-10）：固定 SHA、per-run manifest、support digest/锁、状态回滚、超时和幂等已通过隔离行为回归；尚未完成真实 Harbor/SSH/生产容器 E2E，且既有高危依赖门禁仍未清零，因此不能称生产部署已验收。
+
+本目录按双层口径维护：
+
+- 长期模板/规则：描述 Harbor/SSH/non-root/HTTP-only 的标准链路，不写真实 secret。
+- 当前生产现场口径：当前标准部署根目录是 `/srv/enterprise-ai/deploy`，runner work root 是 `/data/github-runner/aicopilot`，Docker Root Dir 是 `/data/docker`；support files sync 目标目录（至少 `scripts/`、`cloud-readonly/`）与 `releases/*` 必须保持 non-root 可访问。
+- 当前与 Cloud 共用同一台生产宿主机，但部署根独立；共享宿主机事实、当前标准发布账号和 Cloud 根目录统一以工作区 [`docs/上传部署总览.md`](../../../docs/上传部署总览.md) 为准。AICopilot 当前未因同类权限问题失败，但必须和 Cloud 一样维持 release state / support files 的 non-root owner/mode 门禁。
 
 ## 部署口径
 
 - 生产环境使用 Docker Compose 单机编排，服务器目录为 `/srv/enterprise-ai/deploy`。
-- 标准发布走操作者本机：先 push GitHub 留痕，再本机构建镜像、推 Harbor，最后 SSH 触发服务器 `deploy-release.sh`。
-- 多 agent 并行部署只按 [上传部署总览](../../../docs/上传部署总览.md) 的“多 agent 并行部署”执行；本目录只描述 AICopilot 自身发布步骤。
+- 工作区对外标准发布走 `pwsh ./deploy/Invoke-WorkspaceDeploy.ps1 -Target AICopilot ...`；本目录的 `local-release.sh`、`build-and-push.sh` 和 `deploy-release.sh` 继续作为被调度实现脚本。
+- 多 agent 可以同时准备本地候选，但远端 support install、release state、容器变更和 cleanup 必须由托管锁串行化；第二个发布遇到 active lock 时立即返回 `75`，不得静默等待或绕锁重发。
 - `aicopilot-image` / `aicopilot-deploy` 只保留带确认词的灾备入口；日常生产发布不得等待这些 workflow。
 - 单个镜像 build/push 默认 15 分钟超时，Harbor 登录/API 检查默认 2 分钟超时，SSH deploy 默认 30 分钟超时；超时必须停止并按脚本输出诊断 Docker buildx、Harbor tag、服务器 compose/logs 和 release 状态，不得继续 watch 或无限等待。
 - 灾备 workflow 的 runner 必须使用专用非 root 用户，并带 `iiot-linux-prod` label；不得改回 GitHub hosted runner 执行镜像构建或部署。production/secrets 相关灾备 workflow 和 runner 机器侧都必须执行 `scripts/check-runner-security-attestation.sh`，验收非 root、工作目录、Docker Root Dir 和部署目录。
 - 灾备 workflow 当前仍依赖 GitHub production environment secrets；它只允许最小仓库权限和非 root runner。runner 机器权限收敛、短期凭据或 Vault/OIDC 接入必须单独作为基础设施项验收，不能用 workflow 代码改动替代；runner 脚本只证明本机事实，不证明 GitHub environment secrets 或 Vault/OIDC 已完成。
 - 应用镜像和基础镜像全部来自 Harbor，不从 Docker Hub/MCR 作为生产依赖源直接拉取。
 - AICopilot 应用镜像不保留历史版本；Harbor 和服务器本机只保留当前生产正在运行的 `sha-*` 应用镜像。
-- 真实 `.env` 只通过 GitHub secret `DEPLOY_ENV_FILE` 注入服务器，不提交到仓库。
+- 日常本地构建 + SSH 标准链使用服务器预置且 mode `0600` 的真实 `.env`，support sync 明确排除它；GitHub secret `DEPLOY_ENV_FILE` 只服务灾备 workflow。真实 `.env` 不提交到仓库。
 - 当前内网部署红线是 HTTP-only。部署脚本、compose、nginx 模板和验收命令不得把 HTTPS redirection、HSTS、443 listener、证书申请/续期或 OIDC HTTPS metadata 强制校验作为当前门槛；安全加固改走内网隔离、端口收敛、同源代理、CORS 白名单、强 secret、短期 token、非 root 容器、只读边界和除 HSTS 外的安全响应头。
 - AICopilot 对 Cloud 业务数据保持只读边界；不得通过 MCP、Tool、Agent workflow、后台任务或隐藏适配器写 Cloud。
+- 当前标准 non-root 发布还要求 `releases/current-release*`、`staged-release*`、`previous-release*`、`current-release.summary.md` 和 deploy support files 对标准部署用户可读可写；root 应急路径一旦写入这些状态，关闭任务前必须恢复 owner/mode。
+- AICopilot 当前真实慢路径主要在本地多镜像 build、Harbor push、support files sync、SSH deploy、migration 和 release security attestation，不存在等价的“HTTP 上传限速 1000M”概念。
+- 正式发布只构建门禁通过时解析出的固定 Git SHA，并使用独立 detached worktree；构建和 support sync 不得继续读取正在被其他 agent 修改的原工作树。
+- 每次发布使用独立 run id 和私有 services/image/support manifest；`dry-run`、另一个 agent 或另一次发布不能覆盖当前发布的控制文件。
+- `docker-compose.yaml`、服务器脚本、`cloud-readonly/` 和 `scripts/` 作为同一份 digest-bound support release staging 安装；`.env`、`releases/`、`.locks/` 和备份不进入同步包。
+- support install 取得的 reservation token 必须由同一次 `deploy-release.sh` 接管，并把 support digest 写入 release manifest/summary；digest 不一致必须在 `.env` 或容器变更前返回 `65`。
+- `.env`、current/previous/staged manifest 和 current summary 在发布事务内备份；健康/attestation 前失败必须恢复原状态。部署已经健康但 cleanup 失败时保留已提交 release，并原样返回 cleanup 退出码，不能伪装成超时。
+- 只有 watchdog 实际触发时返回 `124`；普通 git、dotnet、Docker、SSH、preflight、support、attestation 或 cleanup 失败必须保留真实退出码。TERM/INT 必须清理本地命令树和自己持有的远端锁。
 
 ## 目录文件
 
 ```text
 deploy/enterprise-ai/
   .env.example            # 生产 .env 模板，只保留占位密钥
-  build-and-push.sh       # 标准本机镜像构建和 Harbor push
-  local-release.sh        # 标准本机发布入口，构建后 SSH 触发服务器 deploy-release.sh
+  build-and-push.sh       # 统一入口内部调度的本机镜像构建实现
+  local-release.sh        # 统一入口内部调度的固定提交发布实现
   deploy-release.sh       # 服务器发布脚本，支持全量和 --services 按需发布
   docker-compose.yaml     # 生产 compose 模板
   mirror-base-images.sh   # 基础镜像同步到 Harbor
   runner-platform-attestation.template.md  # runner/GitHub/OIDC 平台侧验收记录模板
   cloud-readonly/         # Cloud PostgreSQL readonly role 授权和探针 SQL
   scripts/                # CloudReadOnly 授权、模型 provider smoke、runner、平台记录和发布后安全验收脚本
+  scripts/release-common.sh  # active/stale lock、SHA256 和 timeout 进程树公共原语
+  scripts/install-support-release.sh  # staging + manifest 校验 + 原子 support 安装
+  scripts/check-release-state-access.sh  # release state owner/mode 非 root 门禁
+  tests/deployment-behavior.sh  # fake Docker/SSH/remote 行为回归
   post-release-cleanup.sh  # 发布成功后清理 build cache、旧应用镜像、旧 Harbor tag 并触发 GC
   cron/                   # 周级兜底清理 cron 模板
   README.md               # 本文件
@@ -59,6 +79,7 @@ VITE_CLOUD_PLATFORM_URL=http://cloud.internal.example:81
 ```
 
 `DEPLOY_ENV_FILE` 内容从 `.env.example` 复制后替换强密码和 token。不得把真实 `.env`、JWT secret、数据库密码、Qdrant key 或 Cloud service token 写入仓库。
+标准 non-root 发布还要求 `releases/current-release*`、`staged-release*`、`previous-release*`、`current-release.summary.md` 和 deploy support files 对标准部署用户可读可写；root 应急路径一旦写入这些状态，关闭任务前必须恢复 owner/mode。
 
 Runner 机器侧验收：
 
@@ -132,7 +153,7 @@ AICOPILOT_PRIVATE_MODEL_TEMPERATURE=0.2
 和 `/var/lib/aicopilot/artifact-workspaces` 的 `app:app` 权限；应用 Dockerfile
 不得再用 `USER root` 或临时 `apt-get` 修运行环境。
 
-Cloud OIDC 首部署管理员收编由 `CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED` 控制，生产模板默认启用，并复用 `AICOPILOT_BOOTSTRAP_ADMIN_USERNAME` 作为唯一允许收编的本地 Admin 用户名；普通同名用户仍拒绝自动绑定。
+Cloud OIDC 首部署管理员收编由 `CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED` 控制，生产模板和 compose fallback 均默认关闭。只有在已核对目标本地 emergency Admin 与 Cloud `employee_no` 的短时首部署窗口中才能显式设为 `true`，绑定完成后必须立即恢复 `false`。它只允许复用 `AICOPILOT_BOOTSTRAP_ADMIN_USERNAME` 指定的本地 Admin；普通同名用户仍拒绝自动绑定，Cloud role 也不会映射为 AI role。
 
 ## 基础镜像
 
@@ -155,13 +176,37 @@ harbor.internal.example:80/enterprise-ai/base-node:22-alpine
 harbor.internal.example:80/enterprise-ai/base-nginx:1.27-alpine
 ```
 
-## 标准发布
+## 目标标准发布（当前仅隔离行为回归）
+
+正式 `local-release.sh`（非 `--dry-run`）只接受工作区统一入口调度，必须同时携带
+`IIOT_WORKSPACE_DEPLOY_ENTRYPOINT=1`、`IIOT_WORKSPACE_DEPLOY_INVOCATION_ID`、
+`IIOT_WORKSPACE_DEPLOY_EXPECTED_SHA`、`IIOT_WORKSPACE_DEPLOY_PLAN_DIGEST`、
+`IIOT_WORKSPACE_DEPLOY_PLAN_FILE` 和 `IIOT_WORKSPACE_DEPLOY_PROFILE_DIGEST`。项目脚本会重算 plan 文件字节 digest、
+核对 plan 内 `profileDigest`，并校验 expected SHA 等于固定源码 SHA 和 fresh `origin/main` tip。
+invocation、plan、profile、services/image/support manifest digest 会绑定到同一次远端 reservation。
+缺少或漂移时必须在 `.env`、release state 或容器变更前拒绝。
+`--dry-run` 和 `tests/deployment-behavior.sh` 均会显式输出
+`NON_PRODUCTION_MECHANISM_TEST productionEligible=false`，不得当作生产验收证据。
+
+固定 SHA 镜像 tag 必须经 OCI inspect 解析为 `repository@sha256:<digest>`。run-private image manifest
+同时保存 tag、OCI digest 和 immutable ref，远端只消费 immutable ref。`--check-current` 是纯只读：
+不创建 network、不连接容器、不创建 release lock，并必须同时匹配 plan/profile、
+services/image/support digest、非敏感配置摘要和选中运行容器的实际 image id。
+migration 作为 one-shot 单独记录完成事实。
+
+容器已部分更新后失败时，未执行 migration 的可逆场景会恢复 previous manifest 并重做健康验证。
+已执行 migration 或恢复失败时，会写入 `releases/blocked-release.env`、保留 transaction backup 并阻断自动重试。
+support 安装会先校验 staging、新旧 manifest 安全路径和 shell 语法，安装失败必须完整恢复旧 support tree。
+
+上述 marker/digest 是受控工作流内的 fail-closed 一致性边界，不是对同一用户 shell 中恶意进程的密码学信任边界。
+生产仍依赖 runner 权限隔离、Harbor/SSH 凭据管理和服务器文件权限。
 
 1. 推送代码到 GitHub，保证源码留痕。
-2. 本机运行 `REGISTRY=<harbor-registry> CLOUD_PLATFORM_URL=http://<cloud-host>:<port> deploy/enterprise-ai/local-release.sh --services <services> --ssh-target <user@host>`；脚本会校验工作区干净、HEAD 已推送、Docker/buildx 和 Harbor 可用。
-3. `build-and-push.sh` 按服务构建并推送 `sha-<git-sha>` 镜像到 Harbor，输出 `Deploy services input` 和 `artifacts/deploy/aicopilot-built-services.txt`。
-4. `local-release.sh` 通过 SSH 在服务器执行 `DEPLOY_GIT_SHA=<sha> DEPLOY_TRIGGERED_BY=local ./deploy-release.sh sha-<sha> --services <services>`。
+2. 在工作区根运行 `pwsh ./deploy/Invoke-WorkspaceDeploy.ps1 -Target AICopilot -Services <services>`；它会调度 `deploy/enterprise-ai/local-release.sh`，校验工作区干净、HEAD 已推送，并为该 SHA 创建隔离 worktree。
+3. `build-and-push.sh` 从隔离 worktree 按服务构建并推送 `sha-<git-sha>` 镜像，输出只属于本次 run id 的 services/image manifest；这些文件不得作为跨任务共享控制面。
+4. `local-release.sh` 生成包含 `docker-compose.yaml` 的 SHA256 support manifest，在远端 staging 校验后取得 release reservation，再通过同一 token 和 digest 执行 `deploy-release.sh`。
 5. `services` 必须显式传入，例如 `httpapi,migration,web`；不要人工猜测，不要为了省事留空。全量发布必须显式传 `--all`。
+6. 只有同 SHA、同 plan/profile、同 services/image/support digest、同非敏感配置摘要且选中容器实际 image id 一致并健康时才允许 no-op；本地可在构建前跳过 build/push/support sync。需要有记录地强制重发时才设置 `AICOPILOT_FORCE_BUILD=true`，远端强制重建需另设 `AICOPILOT_ALLOW_REDEPLOY_SAME_SHA=true`。
 
 应用镜像仓库只保留当前生产 `sha-*` tag。本机构建推送候选 tag 后，不立即删除当前生产 tag；必须等服务器部署健康检查通过后，由发布后清理删除旧 tag 并执行或确认 Harbor GC。`buildcache` 和基础镜像 tag 不计入应用版本保留。
 
@@ -170,7 +215,7 @@ Harbor tag retention 和 Harbor GC 需要服务器 `.env` 显式提供 `HARBOR_U
 
 `/data` 达到 80% 必须告警并输出占用摘要，达到 85% 必须先清理再继续普通部署，达到 90% 阻断非应急部署。发布后清理是主线，还必须配置周级兜底清理 cron，避免部署中断后 build cache、旧镜像和旧 Harbor blob 长期堆积。
 
-服务器 `deploy-release.sh` 会登录 Harbor、重写所选应用镜像 tag、执行 `docker compose pull`，全量发布时先启动基础服务、运行 `aicopilot-migration`，并在启动 HttpApi/DataWorker/RagWorker/Web 之前检查模型和 Embedding API key 已全部迁移到 `encv2:`。按需发布会先从当前 release 读取未选服务镜像，避免 `.env` 被旧 tag 覆盖；如果目标机已有旧部署但还没有 `releases/current-release.env`，脚本会用服务器 `.env` 作为初始镜像基线并写入 release manifest，不需要把 `services` 留空。按需发布包含 `httpapi`、`dataworker` 或 `ragworker` 时必须同时包含 `migration`，由 migration worker 在 runtime 启动前重新迁移并验证 `encv2:` 密文可用当前密钥解密；web-only 发布可以不带 `migration`。服务启动后会探测 Web 首页、HTTP-only 安全头，并自动运行 `scripts/check-release-security-attestation.sh` 验收 Cloud OIDC 状态接口、Web 非 root 和 API key 密文迁移。部署完成后会写入 `releases/current-release.env`、`previous-release.env`、`staged-release.env`、`current-release.summary.md` 和 `history/`，其中 summary 会包含 release security attestation 输出。
+服务器必须预先具备 Harbor pull 凭据；本机构建脚本按需执行 `docker login`，服务器 `deploy-release.sh` 本身只重写所选应用镜像 tag 并执行 `docker compose pull`，不伪装成会自动登录 Harbor。全量发布时先启动基础服务、运行 `aicopilot-migration`，并在启动 HttpApi/DataWorker/RagWorker/Web 之前检查模型和 Embedding API key 已全部迁移到 `encv2:`。按需发布会先从当前 release 读取未选服务镜像，避免 `.env` 被旧 tag 覆盖；如果目标机已有旧部署但还没有 `releases/current-release.env`，脚本会用服务器 `.env` 作为初始镜像基线并写入 release manifest，不需要把 `services` 留空。按需发布包含 `httpapi`、`dataworker` 或 `ragworker` 时必须同时包含 `migration`，由 migration worker 在 runtime 启动前重新迁移并验证 `encv2:` 密文可用当前密钥解密；web-only 发布可以不带 `migration`。服务启动后会探测 Web 首页、HTTP-only 安全头，并自动运行 `scripts/check-release-security-attestation.sh` 验收 Cloud OIDC 状态接口、Web 非 root 和 API key 密文迁移。部署完成后会写入 `releases/current-release.env`、`previous-release.env`、`staged-release.env`、`current-release.summary.md` 和 `history/`，其中 summary 会包含 release security attestation 输出。
 
 ## 单独本机构建
 
@@ -185,42 +230,44 @@ CLOUD_PLATFORM_URL=http://cloud.internal.example:81 \
 
 单镜像 build/push 默认 15 分钟超时，Harbor 检查默认 2 分钟超时；超时必须停止并诊断 `docker buildx ls`、`docker system df` 和 Harbor tag，不得等待灾备 GitHub workflow。
 
-## 服务器应急部署
-
-仅当本机 SSH 触发器不可用时，在服务器执行：
+行为回归脚本根据自身路径定位 AICopilot Git 仓库，不依赖调用者当前目录。从工作区根执行：
 
 ```bash
-cd /srv/enterprise-ai/deploy
-docker login harbor.internal.example:80 --username <Harbor 用户>
-./deploy-release.sh sha-<git-sha>
+bash AICopilot/deploy/enterprise-ai/tests/deployment-behavior.sh
 ```
 
-按需部署示例：
+从 AICopilot 仓库根执行时也可使用 `bash deploy/enterprise-ai/tests/deployment-behavior.sh`。
+
+该回归使用隔离 clone、fake Docker、fake SSH 和 fake remote，验证成功发布、普通失败真实退出码、真超时 `124`、无 watchdog orphan、并发锁、active/stale lock、support digest mismatch、失败状态回滚、signal cleanup 和同 SHA 幂等；不连接 Harbor 或生产服务器。
+
+## 服务器应急部署
+
+服务器 `deploy-release.sh` 不再接受无候选绑定的手工发布。本机 SSH 触发器不可用时，
+也必须由获批的统一入口产生完整 candidate/reservation 参数后再触发；下面旧的无绑定命令已禁用：
 
 ```bash
+# 禁止：缺少 workspace marker / invocation / expected SHA / plan digest / reservation
 ./deploy-release.sh sha-<git-sha> --services migration,httpapi,web
 ```
 
-手工按需部署仍应填写具体 `--services`；如果目标机没有 `current-release.env`，脚本会以 `.env` 为初始基线生成 release manifest。
+## 服务器内部环境诊断（非对外入口）
 
-## 发布前环境校验
-
-在真实发布前可先只校验服务器 `.env`，不需要 release tag，不拉镜像、不执行 Docker Compose：
+对外标准校验使用工作区 `Invoke-WorkspaceDeploy.ps1 -Target AICopilot ... -ValidateOnly`。只有获批排障时，才在服务器内部只校验 `.env`；该命令不需要 release tag、不拉镜像、不执行 Docker Compose，也不能作为 AI 绕过统一入口的发布前替代链：
 
 ```bash
 cd /srv/enterprise-ai/deploy
 ./deploy-release.sh --validate-only
 ```
 
-该命令会 fail-fast 校验 `.env` 权限、模板占位、弱 secret、HTTP-only URL、Cloud OIDC 内网 HTTP issuer、必填 secret 和 direct Cloud readonly 配置。公共 HTTP OIDC 域名、HTTPS URL、HSTS/证书强制项、弱密码或空 token 都必须先修正再发布。
+该命令会 fail-fast 校验 `.env` 权限、模板占位、弱 secret、HTTP-only URL、Cloud OIDC 内网 HTTP issuer、必填 secret、direct Cloud readonly 配置，以及 `releases/*` owner/mode 对标准 non-root 路径是否仍可读可写。公共 HTTP OIDC 域名、HTTPS URL、HSTS/证书强制项、弱密码、空 token 或 root-owned release state 都必须先修正再发布。
 
 ## API Key 密文迁移验收
 
 发布包含密钥迁移代码的版本时，必须显式运行 migration 服务，不能只重启 HttpApi：
 
 ```bash
-cd /srv/enterprise-ai/deploy
-./deploy-release.sh sha-<git-sha> --services migration
+cd <workspace-root>
+pwsh ./deploy/Invoke-WorkspaceDeploy.ps1 -Target AICopilot -Services migration
 ```
 
 迁移完成后，`deploy-release.sh` 会自动执行只读验收，确认语言模型和 Embedding 模型的非空 API key 都已经是 `encv2:`，并用当前 `AICOPILOT_API_KEY_ENCRYPTION_KEY` 验证这些 `encv2:` 密文可解密。需要手工复验时执行：

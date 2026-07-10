@@ -11,17 +11,17 @@ public sealed class SemanticDefinitionTests
 
         var device = catalog.Get(SemanticQueryTarget.Device);
         device.AllowedProjectionFields.Should().BeEquivalentTo(
-            ["deviceId", "deviceCode", "deviceName", "status", "lineName", "updatedAt"]);
+            ["deviceId", "deviceCode", "deviceName", "processId", "clientCode", "softwareStatus", "runtimeStatus", "runtimeStartedAtUtc", "lastRuntimeHeartbeatAtUtc"]);
         device.AllowedFilterFields.Should().BeEquivalentTo(
-            ["deviceId", "deviceCode", "deviceName", "status", "lineName"]);
+            ["deviceId", "deviceCode", "deviceName", "processId", "clientCode"]);
         device.AllowedSortFields.Should().BeEquivalentTo(
-            ["deviceCode", "deviceName", "updatedAt"]);
+            ["deviceCode", "deviceName"]);
 
         var deviceLog = catalog.Get(SemanticQueryTarget.DeviceLog);
         deviceLog.AllowedProjectionFields.Should().BeEquivalentTo(
-            ["logId", "deviceId", "deviceCode", "deviceName", "processName", "level", "message", "source", "occurredAt"]);
+            ["logId", "deviceId", "deviceName", "level", "message", "occurredAt", "receivedAt"]);
         deviceLog.AllowedFilterFields.Should().BeEquivalentTo(
-            ["deviceId", "deviceCode", "deviceName", "processName", "level", "source"]);
+            ["deviceId", "deviceCode", "deviceName", "level", "message"]);
         deviceLog.AllowedSortFields.Should().BeEquivalentTo(
             ["occurredAt", "level"]);
 
@@ -35,18 +35,32 @@ public sealed class SemanticDefinitionTests
 
         var capacity = catalog.Get(SemanticQueryTarget.Capacity);
         capacity.AllowedProjectionFields.Should().BeEquivalentTo(
-            ["recordId", "deviceId", "deviceCode", "processName", "shiftDate", "outputQty", "qualifiedQty", "occurredAt"]);
+            ["shiftDate", "outputQty", "qualifiedQty", "totalCount", "okCount", "ngCount", "occurredAt"]);
         capacity.AllowedFilterFields.Should().BeEquivalentTo(
-            ["recordId", "deviceId", "deviceCode", "processName", "shiftDate"]);
+            ["deviceId", "deviceCode", "plcName", "shiftDate"]);
         capacity.AllowedSortFields.Should().BeEquivalentTo(
-            ["shiftDate", "occurredAt", "outputQty", "qualifiedQty", "deviceCode", "processName"]);
+            ["shiftDate", "occurredAt", "outputQty", "qualifiedQty"]);
 
         var productionData = catalog.Get(SemanticQueryTarget.ProductionData);
         productionData.AllowedProjectionFields.Should().BeEquivalentTo(
-            ["recordId", "deviceId", "deviceCode", "processName", "barcode", "stationName", "result", "occurredAt"]);
+            ["recordId", "typeKey", "typeName", "deviceId", "deviceName", "barcode", "result", "completedAt", "receivedAt", "fields", "fieldSchema"]);
         productionData.AllowedFilterFields.Should().BeEquivalentTo(
-            ["recordId", "deviceId", "deviceCode", "processName", "barcode", "stationName", "result"]);
+            ["typeKey", "processId", "deviceId", "deviceCode", "barcode", "result"]);
         productionData.AllowedSortFields.Should().BeEquivalentTo(
-            ["occurredAt", "deviceCode", "processName", "stationName", "result"]);
+            ["completedAt", "typeKey", "result"]);
+
+        var process = catalog.Get(SemanticQueryTarget.Process);
+        process.AllowedProjectionFields.Should().BeEquivalentTo(
+            ["processId", "processCode", "processName"]);
+        process.AllowedFilterFields.Should().BeEquivalentTo(
+            ["processId", "processCode", "processName"]);
+        process.AllowedSortFields.Should().BeEmpty();
+
+        var clientRelease = catalog.Get(SemanticQueryTarget.ClientRelease);
+        clientRelease.AllowedProjectionFields.Should().BeEquivalentTo(
+            ["releaseId", "componentKind", "componentKey", "displayName", "channel", "targetRuntime", "version", "status", "releaseNotes", "createdAtUtc", "publishedAtUtc", "deletedAtUtc"]);
+        clientRelease.AllowedFilterFields.Should().BeEquivalentTo(
+            ["channel", "targetRuntime", "status", "includeArchived"]);
+        clientRelease.AllowedSortFields.Should().BeEmpty();
     }
 }

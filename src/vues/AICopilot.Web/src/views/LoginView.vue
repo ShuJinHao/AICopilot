@@ -2,7 +2,6 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  Activity,
   ArrowRight,
   Bot,
   BrainCircuit,
@@ -10,7 +9,6 @@ import {
   DatabaseZap,
   Eye,
   EyeOff,
-  KeyRound,
   Lock,
   ShieldCheck,
   User,
@@ -78,7 +76,7 @@ onMounted(() => {
         </div>
 
         <div class="login-title">
-          <span>SECURE COMMAND ACCESS</span>
+          <span>安全访问</span>
           <h1>登录 A 助理</h1>
           <p>进入只读分析、知识检索、Agent 审批和产物工作区。</p>
         </div>
@@ -157,81 +155,61 @@ onMounted(() => {
         </div>
       </section>
 
-      <section class="ai-preview-panel" aria-label="AICopilot workbench preview">
+      <section class="ai-preview-panel" aria-label="AICopilot 能力边界">
         <header class="preview-header">
           <div>
-            <span>AI OPERATIONS</span>
-            <h2>今日工作台</h2>
+            <span>工作范围</span>
+            <h2>工业生产助手</h2>
           </div>
-          <div class="live-chip">
-            <i />
-            在线
+          <div class="boundary-chip">
+            <ShieldCheck :size="18" />
+            Cloud 写入禁用
           </div>
         </header>
 
-        <div class="preview-kpis">
-          <article class="kpi-card lime">
+        <section class="boundary-summary">
+          <span>回答、计划与执行清晰分层</span>
+          <h3>只展示真实证据，不用演示数字代替运行状态。</h3>
+          <p>查询结果、状态、行数、截断和失败原因均以本次后端响应为准。</p>
+        </section>
+
+        <div class="capability-grid">
+          <article>
             <DatabaseZap :size="21" />
-            <span>只读数据源</span>
-            <strong>12</strong>
+            <div>
+              <strong>受控只读分析</strong>
+              <span>设备、工序、客户端版本、日志与生产证据可按正式契约发起读取；未配置时返回真实错误。</span>
+            </div>
           </article>
-          <article class="kpi-card blue">
+          <article>
             <BrainCircuit :size="21" />
-            <span>知识命中率</span>
-            <strong>86%</strong>
+            <div>
+              <strong>知识检索</strong>
+              <span>引用受权限约束的知识库内容，并保留来源边界。</span>
+            </div>
           </article>
-          <article class="kpi-card teal">
+          <article>
+            <Workflow :size="21" />
+            <div>
+              <strong>计划确认</strong>
+              <span>计划草案确认前不执行 Cloud 查询、工具调用或 Worker 任务。</span>
+            </div>
+          </article>
+          <article>
             <ShieldCheck :size="21" />
-            <span>审批守门</span>
-            <strong>ON</strong>
+            <div>
+              <strong>审批与产物留痕</strong>
+              <span>工具审批和正式产物确认独立记录；人工确认不授权 Cloud 写入。</span>
+            </div>
           </article>
         </div>
 
-        <div class="canvas-preview">
-          <div class="orb yellow">
-            <strong>RAG</strong>
-            <span>知识检索</span>
+        <div class="truth-note">
+          <ShieldCheck :size="20" />
+          <div>
+            <strong>状态来源原则</strong>
+            <span>页面只展示后端返回的真实状态；空结果不会被解释为离线或成功。</span>
           </div>
-          <div class="orb coral">
-            <strong>MCP</strong>
-            <span>工具受控</span>
-          </div>
-          <div class="orb dark">
-            <strong>Cloud</strong>
-            <span>只读</span>
-          </div>
-          <div class="legend-list">
-            <span><i class="yellow-dot" /> 可信上下文</span>
-            <span><i class="coral-dot" /> 待审批动作</span>
-            <span><i class="dark-dot" /> 产物工作区</span>
-          </div>
-        </div>
-
-        <div class="status-list">
-          <article>
-            <Workflow :size="20" />
-            <div>
-              <strong>Agent 计划待确认</strong>
-              <span>计划 / 步骤 / 产物 / 审计统一收纳</span>
-            </div>
-            <small>READY</small>
-          </article>
-          <article>
-            <Activity :size="20" />
-            <div>
-              <strong>流式会话稳定</strong>
-              <span>SSE、Markdown、Widget 保持原协议</span>
-            </div>
-            <small>OK</small>
-          </article>
-          <article>
-            <KeyRound :size="20" />
-            <div>
-              <strong>安全边界锁定</strong>
-              <span>不新增 Cloud 写入能力</span>
-            </div>
-            <small>LOCKED</small>
-          </article>
         </div>
       </section>
     </main>
@@ -244,9 +222,7 @@ onMounted(() => {
   min-height: 100vh;
   place-items: center;
   padding: 28px;
-  background:
-    radial-gradient(circle at 20% 12%, rgba(200, 255, 61, 0.12), transparent 24%),
-    linear-gradient(135deg, var(--ai-bg-warm), var(--ai-bg));
+  background: var(--ai-bg);
 }
 
 .login-shell {
@@ -275,8 +251,9 @@ onMounted(() => {
 .primary-action,
 .cloud-action,
 .preview-header,
-.live-chip,
-.status-list article {
+.boundary-chip,
+.capability-grid article,
+.truth-note {
   display: flex;
   align-items: center;
 }
@@ -309,10 +286,7 @@ onMounted(() => {
 .brand-row span,
 .login-title p,
 .login-footnote,
-.field span,
-.status-list span,
-.kpi-card span,
-.canvas-preview span {
+.field span {
   color: var(--ai-text-muted);
 }
 
@@ -493,7 +467,7 @@ onMounted(() => {
 .loading-card i {
   height: 14px;
   border-radius: 999px;
-  background: linear-gradient(90deg, #ece8df, #ffffff, #ece8df);
+  background: #ece8df;
 }
 
 .login-footnote {
@@ -506,7 +480,7 @@ onMounted(() => {
   gap: 22px;
   min-width: 0;
   padding: 52px;
-  background: #ecefeb;
+  background: var(--ai-surface-soft);
   border-left: 1px solid var(--ai-border);
 }
 
@@ -521,182 +495,106 @@ onMounted(() => {
   font-weight: 950;
 }
 
-.live-chip {
+.boundary-chip {
   gap: 8px;
   min-height: 46px;
   border-radius: 999px;
   padding: 0 18px;
-  background: #dff4ee;
-  color: #0f766e;
+  border: 1px solid rgba(63, 111, 115, 0.16);
+  background: var(--ai-surface);
+  color: var(--ai-graphite);
   font-weight: 900;
 }
 
-.live-chip i {
-  width: 9px;
-  height: 9px;
-  border-radius: 999px;
-  background: #10a37f;
-}
-
-.preview-kpis {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.kpi-card {
-  display: grid;
-  gap: 12px;
-  min-height: 172px;
-  border-radius: 24px;
-  padding: 22px;
-}
-
-.kpi-card strong {
-  align-self: end;
-  font-size: 42px;
-  font-weight: 950;
-  font-variant-numeric: tabular-nums;
-}
-
-.kpi-card.lime {
-  background: #e9ff9a;
-}
-
-.kpi-card.blue {
-  background: #cfe1ff;
-}
-
-.kpi-card.teal {
-  background: #9de5c1;
-}
-
-.canvas-preview {
-  position: relative;
-  min-height: 260px;
-  overflow: hidden;
-  border-radius: 28px;
-  padding: 28px;
-  background:
-    radial-gradient(circle at 72% 26%, rgba(255, 220, 88, 0.28), transparent 28%),
-    linear-gradient(135deg, #dfe7df, #ccd9d4);
-  color: var(--ai-text);
-  box-shadow: var(--ai-shadow-canvas);
-}
-
-.orb {
-  position: absolute;
-  display: grid;
-  place-items: center;
-  width: 142px;
-  height: 142px;
-  border-radius: 999px;
-  text-align: center;
-  box-shadow: inset 0 0 26px rgba(255, 255, 255, 0.25);
-}
-
-.orb strong {
-  font-size: 22px;
-  font-weight: 950;
-}
-
-.orb span {
-  color: rgba(23, 27, 36, 0.66);
-  font-size: 12px;
-}
-
-.orb.yellow {
-  top: 36px;
-  right: 66px;
-  width: 176px;
-  height: 176px;
-  background: radial-gradient(circle, #ffdc58, #f7c62f);
-  color: var(--ai-text);
-}
-
-.orb.coral {
-  right: 198px;
-  bottom: 38px;
-  background: radial-gradient(circle, #ff8a7f, #f55f55);
-  color: var(--ai-text);
-}
-
-.orb.dark {
-  top: 48px;
-  left: 54px;
-  width: 112px;
-  height: 112px;
-  background: radial-gradient(circle, #79aaa4, #3f6f73);
-  color: #ffffff;
-}
-
-.orb.dark span {
-  color: rgba(255, 255, 255, 0.78);
-}
-
-.legend-list {
-  position: absolute;
-  bottom: 26px;
-  left: 28px;
+.boundary-summary {
   display: grid;
   gap: 10px;
-}
-
-.legend-list span {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: rgba(23, 27, 36, 0.72);
-  font-weight: 700;
-}
-
-.legend-list i {
-  width: 18px;
-  height: 8px;
-  border-radius: 999px;
-}
-
-.yellow-dot {
-  background: #ffdc58;
-}
-
-.coral-dot {
-  background: #ff7b6f;
-}
-
-.dark-dot {
-  background: #5f8f8b;
-}
-
-.status-list {
-  display: grid;
-  gap: 12px;
-}
-
-.status-list article {
-  gap: 14px;
-  min-height: 74px;
-  border-radius: 22px;
-  padding: 16px 18px;
+  border: 1px solid var(--ai-border);
+  border-radius: 24px;
+  padding: 28px;
   background: var(--ai-surface);
   box-shadow: var(--ai-shadow-xs);
 }
 
-.status-list article > div {
+.boundary-summary span,
+.capability-grid span,
+.truth-note span {
+  color: var(--ai-text-muted);
+}
+
+.boundary-summary > span {
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.boundary-summary h3 {
+  margin: 0;
+  max-width: 680px;
+  color: var(--ai-text);
+  font-size: clamp(28px, 3vw, 44px);
+  font-weight: 950;
+  line-height: 1.08;
+}
+
+.boundary-summary p {
+  margin: 0;
+  max-width: 660px;
+  color: var(--ai-text-muted);
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.capability-grid {
   display: grid;
-  gap: 2px;
-  flex: 1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.capability-grid article {
+  align-items: flex-start;
+  gap: 14px;
+  min-height: 132px;
+  border: 1px solid var(--ai-border);
+  border-radius: 22px;
+  padding: 20px;
+  background: var(--ai-surface);
+  box-shadow: var(--ai-shadow-xs);
+}
+
+.capability-grid article > svg,
+.truth-note > svg {
+  flex: 0 0 auto;
+  color: var(--ai-graphite);
+}
+
+.capability-grid article > div,
+.truth-note > div {
+  display: grid;
+  gap: 6px;
   min-width: 0;
 }
 
-.status-list strong {
-  font-size: 16px;
+.capability-grid strong,
+.truth-note strong {
+  color: var(--ai-text);
+  font-size: 15px;
+  font-weight: 900;
 }
 
-.status-list small {
-  color: var(--ai-text-soft);
-  font-family: "Cascadia Mono", Consolas, monospace;
-  font-weight: 900;
+.capability-grid span,
+.truth-note span {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+.truth-note {
+  align-items: flex-start;
+  gap: 14px;
+  border-left: 3px solid var(--ai-graphite);
+  border-radius: 0 18px 18px 0;
+  padding: 16px 18px;
+  background: color-mix(in srgb, var(--ai-surface) 78%, var(--ai-graphite-muted));
 }
 
 html.dark .ai-preview-panel {
@@ -704,15 +602,97 @@ html.dark .ai-preview-panel {
 }
 
 html.dark .field-control,
-html.dark .cloud-action,
-html.dark .status-list article {
+html.dark .cloud-action {
   background: var(--ai-surface);
 }
 
-html.dark .canvas-preview {
-  background:
-    radial-gradient(circle at 72% 26%, rgba(255, 220, 88, 0.16), transparent 28%),
-    linear-gradient(135deg, #202a27, #17201f);
+@media (max-height: 850px) and (min-width: 1181px) {
+  .login-page {
+    padding: 18px;
+  }
+
+  .login-shell {
+    width: min(1500px, calc(100vw - 36px));
+    min-height: calc(100vh - 36px);
+  }
+
+  .login-form-panel {
+    gap: 20px;
+    padding: 32px 44px;
+  }
+
+  .brand-mark {
+    width: 50px;
+    height: 50px;
+    border-radius: 16px;
+  }
+
+  .login-title {
+    gap: 6px;
+  }
+
+  .login-title h1 {
+    font-size: 40px;
+  }
+
+  .login-title p {
+    font-size: 14px;
+  }
+
+  .login-form {
+    gap: 12px;
+  }
+
+  .field {
+    gap: 5px;
+  }
+
+  .field-control,
+  .primary-action,
+  .cloud-action {
+    min-height: 50px;
+  }
+
+  .ai-preview-panel {
+    gap: 14px;
+    padding: 28px 36px;
+  }
+
+  .preview-header h2 {
+    font-size: 30px;
+  }
+
+  .boundary-chip {
+    min-height: 40px;
+  }
+
+  .boundary-summary {
+    gap: 7px;
+    padding: 20px 24px;
+  }
+
+  .boundary-summary h3 {
+    font-size: 32px;
+  }
+
+  .boundary-summary p {
+    font-size: 13px;
+  }
+
+  .capability-grid article {
+    min-height: 104px;
+    padding: 15px 16px;
+  }
+
+  .capability-grid span,
+  .truth-note span {
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .truth-note {
+    padding: 12px 16px;
+  }
 }
 
 @media (max-width: 1180px) {
@@ -722,6 +702,50 @@ html.dark .canvas-preview {
 
   .ai-preview-panel {
     display: none;
+  }
+}
+
+@media (max-width: 1180px) and (min-width: 641px) and (max-height: 850px) {
+  .login-page {
+    padding: 18px;
+  }
+
+  .login-shell {
+    width: calc(100vw - 36px);
+    min-height: calc(100vh - 36px);
+  }
+
+  .login-form-panel {
+    gap: 20px;
+    padding: 32px 64px;
+  }
+
+  .brand-mark {
+    width: 50px;
+    height: 50px;
+    border-radius: 16px;
+  }
+
+  .login-title {
+    gap: 6px;
+  }
+
+  .login-title h1 {
+    font-size: 40px;
+  }
+
+  .login-form {
+    gap: 12px;
+  }
+
+  .field {
+    gap: 5px;
+  }
+
+  .field-control,
+  .primary-action,
+  .cloud-action {
+    min-height: 50px;
   }
 }
 

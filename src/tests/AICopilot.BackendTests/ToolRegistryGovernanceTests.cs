@@ -2844,7 +2844,7 @@ public sealed class ToolRegistryGovernanceTests
             SemanticQueryTarget.Device,
             SemanticQueryKind.List,
             null,
-            new SemanticProjection(["deviceCode", "deviceName", "status"]),
+            new SemanticProjection(["deviceId", "deviceCode", "deviceName", "processId"]),
             [new SemanticFilter("deviceCode", SemanticFilterOperator.Equal, "DEV-001")],
             null,
             new SemanticSort("deviceCode", SemanticSortDirection.Asc),
@@ -3906,15 +3906,6 @@ public sealed class ToolRegistryGovernanceTests
     {
         public bool IsEnabled => false;
 
-        public Task<JsonDocument> SendJsonAsync(
-            HttpMethod method,
-            string path,
-            IReadOnlyDictionary<string, string?>? query = null,
-            CancellationToken cancellationToken = default)
-        {
-            throw new NotSupportedException();
-        }
-
         public Task<CloudAiReadResult<CloudAiReadDeviceDto>> GetDevicesAsync(
             CloudAiReadQuery query,
             CancellationToken cancellationToken = default)
@@ -3985,15 +3976,6 @@ public sealed class ToolRegistryGovernanceTests
 
         public bool IsEnabled => true;
 
-        public Task<JsonDocument> SendJsonAsync(
-            HttpMethod method,
-            string path,
-            IReadOnlyDictionary<string, string?>? query = null,
-            CancellationToken cancellationToken = default)
-        {
-            throw new NotSupportedException();
-        }
-
         public Task<CloudAiReadResult<CloudAiReadDeviceDto>> GetDevicesAsync(
             CloudAiReadQuery query,
             CancellationToken cancellationToken = default)
@@ -4062,15 +4044,6 @@ public sealed class ToolRegistryGovernanceTests
     private sealed class FailingCloudAiReadClient(CloudAiReadException exception) : ICloudAiReadClient
     {
         public bool IsEnabled => true;
-
-        public Task<JsonDocument> SendJsonAsync(
-            HttpMethod method,
-            string path,
-            IReadOnlyDictionary<string, string?>? query = null,
-            CancellationToken cancellationToken = default)
-        {
-            throw exception;
-        }
 
         public Task<CloudAiReadResult<CloudAiReadDeviceDto>> GetDevicesAsync(
             CloudAiReadQuery query,

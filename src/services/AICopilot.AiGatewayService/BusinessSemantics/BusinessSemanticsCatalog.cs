@@ -97,22 +97,24 @@ public sealed class BusinessSemanticsCatalog : IBusinessSemanticsCatalog
 
     public RoutingGuidance StructuredRoutingGuidance { get; } = new(
     [
-        "Choose Analysis.Device.* only for device master data or device status questions.",
+        "Choose Analysis.Device.List/Detail only for device master data. Choose Analysis.Device.Status only for Cloud softwareStatus, the last reported runtimeStatus, and heartbeat timestamp; RuntimeHeartbeatStale does not mean offline or stopped.",
         "Choose Analysis.DeviceLog.* only for device log questions.",
         "Choose Analysis.Recipe.* only to return the configured recipe data-read boundary message; AICopilot must not read Cloud recipe master data or recipe version records.",
         "Choose Analysis.Capacity.* only for capacity, output, yield, or qualified quantity questions.",
         "Choose Analysis.ProductionData.* only for production record, station record, or barcode trace questions.",
-        "Analysis intents are read-only. High-frequency Cloud device logs, capacity, and production data prefer Cloud AiRead APIs; CloudReadOnly Direct DB/Text-to-SQL stays a low-frequency governed exploration fallback; recipe data remains blocked."
+        "Choose Analysis.Process.* only for Cloud process master-data questions.",
+        "Choose Analysis.ClientRelease.List only for Cloud client-release version questions; do not invent a version, hash, download URL, or release notes.",
+        "Analysis intents are read-only. Device master/status, device logs, capacity, production data, process master data, and client releases use their fixed Cloud AiRead GET APIs and never fall back to Direct DB, Text-to-SQL, Simulation, MCP, or another hidden HTTP path; recipe data remains blocked."
     ],
     [
         "Concrete recipe list/detail/version-history data questions should choose Analysis.Recipe.* only for the boundary response; recipe lifecycle rule questions should choose Policy.RecipeVersioning.",
-        "Capacity questions with an explicit time range should choose Analysis.Capacity.Range; without a time range, process-focused questions should choose Analysis.Capacity.ByProcess before Analysis.Capacity.ByDevice.",
+        "Capacity questions require one device. Choose Analysis.Capacity.Range when a device and explicit time range are present, or Analysis.Capacity.ByDevice for an explicitly identified device. Process-wide capacity is not a supported semantic intent.",
         "Production questions with explicit latest/最新 should choose Analysis.ProductionData.Latest; with an explicit time range choose Analysis.ProductionData.Range; otherwise choose Analysis.ProductionData.ByDevice."
     ],
     [
         "If the user question does not clearly match the structured semantic intents, fall back to General.Chat.",
         "Semantic query JSON should prefer structured filters, sort, timeRange, limit, and queryText.",
-        "Typical structured questions include: 列出 LINE-A 产线设备、查看设备 DEV-001 详情、设备 DEV-001 现在是什么状态、查看设备 DEV-001 最新日志、查看配方 Recipe-Cut-01、查看 Recipe-Cut-01 的版本历史、查看 DEV-001 某时间范围的产能、查看 DEV-001 的最新生产记录。",
+        "Typical structured questions include: 列出设备主数据、查看设备 DEV-001 详情、设备 DEV-001 最后上报的运行状态、查看设备 DEV-001 最新日志、查看配方 Recipe-Cut-01、查看 Recipe-Cut-01 的版本历史、查看 DEV-001 某时间范围的产能、查看 DEV-001 的最新生产记录、列出工序主数据、查看 CUT 工序详情、列出 stable 通道的客户端发布版本。",
         "Never route user requests for modifying recipes, disabling devices, backfilling capacity, deleting logs, or uploading production data as executable actions."
     ]);
 
@@ -152,8 +154,8 @@ public sealed class BusinessSemanticsCatalog : IBusinessSemanticsCatalog
         {
             "Analysis.Device.List" => new(
                 intent,
-                ["列出 LINE-A 产线的设备"],
-                """{"queryText":"列出 LINE-A 产线的设备","filters":[{"field":"lineName","operator":"eq","value":"LINE-A"}],"sort":{"field":"deviceCode","direction":"asc"},"limit":20}"""),
+                ["列出设备主数据"],
+                """{"queryText":"列出设备主数据","filters":[],"sort":{"field":"deviceCode","direction":"asc"},"limit":20}"""),
             "Analysis.Device.Detail" => new(
                 intent,
                 ["查看设备 DEV-001 的详情"],
@@ -161,7 +163,7 @@ public sealed class BusinessSemanticsCatalog : IBusinessSemanticsCatalog
             "Analysis.Device.Status" => new(
                 intent,
                 ["设备 DEV-001 现在是什么状态？"],
-                """{"queryText":"设备 DEV-001 现在是什么状态？","filters":[{"field":"deviceCode","operator":"eq","value":"DEV-001"}],"sort":{"field":"updatedAt","direction":"desc"},"limit":10}"""),
+                """{"queryText":"设备 DEV-001 现在是什么状态？","filters":[{"field":"deviceCode","operator":"eq","value":"DEV-001"}],"limit":10}"""),
             "Analysis.DeviceLog.Latest" => new(
                 intent,
                 ["查看设备 DEV-001 最新日志"],
@@ -194,22 +196,30 @@ public sealed class BusinessSemanticsCatalog : IBusinessSemanticsCatalog
                 intent,
                 ["查看设备 DEV-001 的产能"],
                 """{"queryText":"查看设备 DEV-001 的产能","filters":[{"field":"deviceCode","operator":"eq","value":"DEV-001"}],"sort":{"field":"occurredAt","direction":"desc"},"limit":50}"""),
-            "Analysis.Capacity.ByProcess" => new(
-                intent,
-                ["查看 Cutting 工序的产能"],
-                """{"queryText":"查看 Cutting 工序的产能","filters":[{"field":"processName","operator":"eq","value":"Cutting"}],"sort":{"field":"occurredAt","direction":"desc"},"limit":50}"""),
             "Analysis.ProductionData.Latest" => new(
                 intent,
                 ["查看设备 DEV-001 最新生产记录"],
-                """{"queryText":"查看设备 DEV-001 最新生产记录","filters":[{"field":"deviceCode","operator":"eq","value":"DEV-001"}],"sort":{"field":"occurredAt","direction":"desc"},"limit":20}"""),
+                """{"queryText":"查看设备 DEV-001 最新生产记录","filters":[{"field":"deviceCode","operator":"eq","value":"DEV-001"}],"sort":{"field":"completedAt","direction":"desc"},"limit":20}"""),
             "Analysis.ProductionData.Range" => new(
                 intent,
                 ["查看 DEV-001 在 2026-04-21T00:00:00Z 到 2026-04-21T23:59:59Z 的生产记录"],
-                """{"queryText":"查看 DEV-001 在 2026-04-20 到 2026-04-21 的生产记录","filters":[{"field":"deviceCode","operator":"eq","value":"DEV-001"}],"timeRange":{"field":"occurredAt","start":"2026-04-20T00:00:00Z","end":"2026-04-21T23:59:59Z"},"sort":{"field":"occurredAt","direction":"desc"},"limit":50}"""),
+                """{"queryText":"查看 DEV-001 在 2026-04-20 到 2026-04-21 的生产记录","filters":[{"field":"deviceCode","operator":"eq","value":"DEV-001"}],"timeRange":{"field":"completedAt","start":"2026-04-20T00:00:00Z","end":"2026-04-21T23:59:59Z"},"sort":{"field":"completedAt","direction":"desc"},"limit":50}"""),
             "Analysis.ProductionData.ByDevice" => new(
                 intent,
                 ["查看设备 DEV-001 的生产记录"],
-                """{"queryText":"查看设备 DEV-001 的生产记录","filters":[{"field":"deviceCode","operator":"eq","value":"DEV-001"}],"sort":{"field":"occurredAt","direction":"desc"},"limit":50}"""),
+                """{"queryText":"查看设备 DEV-001 的生产记录","filters":[{"field":"deviceCode","operator":"eq","value":"DEV-001"}],"sort":{"field":"completedAt","direction":"desc"},"limit":50}"""),
+            "Analysis.Process.List" => new(
+                intent,
+                ["列出工序主数据"],
+                """{"queryText":"列出工序主数据","filters":[],"limit":20}"""),
+            "Analysis.Process.Detail" => new(
+                intent,
+                ["查看 CUT 工序详情"],
+                """{"queryText":"查看 CUT 工序详情","filters":[{"field":"processCode","operator":"eq","value":"CUT"}],"limit":1}"""),
+            "Analysis.ClientRelease.List" => new(
+                intent,
+                ["列出 stable 通道、win-x64 运行时的已发布客户端版本"],
+                """{"queryText":"列出 stable 通道、win-x64 运行时的已发布客户端版本","filters":[{"field":"channel","operator":"eq","value":"stable"},{"field":"targetRuntime","operator":"eq","value":"win-x64"},{"field":"status","operator":"eq","value":"Published"}],"limit":20}"""),
             _ => new(
                 intent,
                 [],

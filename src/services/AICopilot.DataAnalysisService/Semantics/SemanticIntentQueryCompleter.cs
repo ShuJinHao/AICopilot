@@ -35,9 +35,6 @@ internal static partial class SemanticIntentQueryCompleter
         var normalizedExistingLevel = NormalizeLevelFilter(existingLevel);
         var inferredLevel = normalizedExistingLevel ?? (existingLevel is null ? InferLevelFilter(queryText) : null);
         var inferredTimeRange = payload.HasTimeRange ? null : InferRelativeTimeRange(queryText);
-        var inferredScopeFilter = payload.HasAnyFilter("deviceCode", "deviceName", "processName")
-            ? null
-            : InferDeviceLogScopeFilter(queryText);
         var asksLatest = ContainsAny(queryText, "最新", "最近") ||
                          ContainsEnglishTerm(queryText, "latest") ||
                          ContainsEnglishTerm(queryText, "recent");
@@ -62,7 +59,6 @@ internal static partial class SemanticIntentQueryCompleter
                   normalizedExistingLevel.Operator,
                   StringComparison.OrdinalIgnoreCase))) ||
             inferredTimeRange is not null ||
-            inferredScopeFilter is not null ||
             (completedIntent.Equals(DeviceLogByLevelIntent, StringComparison.OrdinalIgnoreCase) &&
              !payload.HasFilter("level") &&
              inferredLevel is not null);
@@ -81,11 +77,6 @@ internal static partial class SemanticIntentQueryCompleter
         if (inferredTimeRange is not null)
         {
             payload.SetTimeRange("occurredAt", inferredTimeRange.Start, inferredTimeRange.End);
-        }
-
-        if (inferredScopeFilter is not null)
-        {
-            payload.UpsertFilter(inferredScopeFilter.Field, inferredScopeFilter.Value, inferredScopeFilter.Operator);
         }
 
         return new SemanticIntentQueryCompletion(
@@ -130,63 +121,6 @@ internal static partial class SemanticIntentQueryCompleter
         }
 
         return null;
-    }
-
-    private static QueryScopeFilter? InferDeviceLogScopeFilter(string? queryText)
-    {
-        if (string.IsNullOrWhiteSpace(queryText))
-        {
-            return null;
-        }
-
-        var match = DeviceLogScopeRegex().Match(queryText);
-        if (!match.Success)
-        {
-            return null;
-        }
-
-        var scope = CleanScopeCandidate(match.Groups["name"].Value);
-        return string.IsNullOrWhiteSpace(scope)
-            ? null
-            : new QueryScopeFilter("processName", "contains", scope);
-    }
-
-    private static string? CleanScopeCandidate(string raw)
-    {
-        var value = raw.Trim();
-        string[] prefixes =
-        [
-            "替我",
-            "帮我",
-            "请",
-            "查询",
-            "查看",
-            "看",
-            "分析",
-            "排查",
-            "诊断",
-            "一下",
-            "下",
-            "的"
-        ];
-
-        var changed = true;
-        while (changed)
-        {
-            changed = false;
-            foreach (var prefix in prefixes)
-            {
-                if (value.StartsWith(prefix, StringComparison.Ordinal))
-                {
-                    value = value[prefix.Length..].Trim();
-                    changed = true;
-                }
-            }
-        }
-
-        return value.Length is >= 2 and <= 16
-            ? value
-            : null;
     }
 
     private static RelativeTimeRange? InferRelativeTimeRange(string? queryText)
@@ -513,11 +447,7 @@ internal static partial class SemanticIntentQueryCompleter
 
     private sealed record RelativeTimeRange(DateTimeOffset Start, DateTimeOffset End);
 
-    private sealed record QueryScopeFilter(string Field, string Operator, string Value);
-
     [GeneratedRegex(@"(?:最近|近|过去)\s*(?<amount>\d+|一|二|两|三|四|五|六|七|八|九|十)\s*(?<unit>天|日|小时|时|d|D|h|H)", RegexOptions.CultureInvariant)]
     private static partial Regex RelativeTimeRangeRegex();
 
-    [GeneratedRegex(@"(?<name>[\p{L}\p{N}_\-]{1,24})(?:工序|设备|机台)", RegexOptions.CultureInvariant)]
-    private static partial Regex DeviceLogScopeRegex();
 }

@@ -137,7 +137,7 @@ public sealed class SecurityHardeningTests
         compose.Should().Contain("AICopilotSecurity__ApiKeyEncryptionKey: ${AICOPILOT_API_KEY_ENCRYPTION_KEY}");
         compose.Should().Contain("AICopilot__PrivateModel__BaseUrl: ${AICOPILOT_PRIVATE_MODEL_BASE_URL:-http://model.internal.example:40034/v1}");
         compose.Should().Contain("AICopilot__PrivateModel__ContextWindowTokens: ${AICOPILOT_PRIVATE_MODEL_CONTEXT_TOKENS:-65536}");
-        compose.Should().Contain("CloudOidc__BootstrapAdminAutoBindEnabled: ${CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED:-true}");
+        compose.Should().Contain("CloudOidc__BootstrapAdminAutoBindEnabled: ${CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED:-false}");
         compose.Should().Contain("CloudOidc__BootstrapAdminUserName: ${AICOPILOT_BOOTSTRAP_ADMIN_USERNAME}");
         compose.Should().Contain("FileStorage__RootPath: ${AICOPILOT_FILE_STORAGE_ROOT_PATH:-/var/lib/aicopilot/storage}");
         compose.Should().Contain("ArtifactWorkspace__RootPath: ${AICOPILOT_ARTIFACT_WORKSPACE_ROOT_PATH:-/var/lib/aicopilot/artifact-workspaces}");
@@ -178,7 +178,7 @@ public sealed class SecurityHardeningTests
         imageWorkflow.Should().Contain("workflow_dispatch:");
         imageWorkflow.Should().Contain("emergency_confirm:");
         imageWorkflow.Should().Contain("EMERGENCY_AICOPILOT_IMAGE_BUILD");
-        imageWorkflow.Should().Contain("aicopilot-image is no longer a routine production release path. Use local build-and-push + SSH deploy.");
+        imageWorkflow.Should().Contain("aicopilot-image is not the routine production release path. Use pwsh ./deploy/Invoke-WorkspaceDeploy.ps1 -Target AICopilot from the workspace root.");
         imageWorkflow.Should().Contain("OCI_REGISTRY");
         imageWorkflow.Should().Contain("OCI_NAMESPACE");
         imageWorkflow.Should().Contain("dotnet publish");
@@ -201,10 +201,10 @@ public sealed class SecurityHardeningTests
 
         deployWorkflow.Should().Contain("runs-on: [self-hosted, iiot-linux-prod]");
         deployWorkflow.Should().Contain("Emergency release tag from local Harbor build or disaster-recovery aicopilot-image (sha-*)");
-        deployWorkflow.Should().Contain("Emergency only. Prefer deploy/enterprise-ai/local-release.sh; empty means full release only.");
+        deployWorkflow.Should().Contain("Emergency only. Routine releases use workspace Invoke-WorkspaceDeploy.ps1; empty means full release only.");
         deployWorkflow.Should().Contain("emergency_confirm:");
         deployWorkflow.Should().Contain("EMERGENCY_AICOPILOT_DEPLOY");
-        deployWorkflow.Should().Contain("aicopilot-deploy is no longer the routine production release path. Use deploy/enterprise-ai/local-release.sh.");
+        deployWorkflow.Should().Contain("aicopilot-deploy is not the routine production release path. Use pwsh ./deploy/Invoke-WorkspaceDeploy.ps1 -Target AICopilot from the workspace root.");
         deployWorkflow.Should().Contain("DEPLOY_TARGET_DIR: ${{ secrets.DEPLOY_TARGET_DIR }}");
         deployWorkflow.Should().Contain("DEPLOY_ENV_FILE: ${{ secrets.DEPLOY_ENV_FILE }}");
         deployWorkflow.Should().Contain("Self-hosted runner must not run as root.");
@@ -230,7 +230,8 @@ public sealed class SecurityHardeningTests
         buildAndPush.Should().Contain("HARBOR_TIMEOUT_SECONDS=\"${HARBOR_TIMEOUT_SECONDS:-120}\"");
         buildAndPush.Should().Contain("backend_runtime_selected=true");
         buildAndPush.Should().Contain("normalized=\"$normalized migration\"");
-        buildAndPush.Should().Contain("artifact_dir=\"$REPO_ROOT/artifacts/deploy\"");
+        buildAndPush.Should().Contain("local artifact_dir=\"$OUTPUT_DIR\"");
+        buildAndPush.Should().Contain("--output-dir PATH");
         buildAndPush.Should().Contain("aicopilot-built-services.txt");
         buildAndPush.Should().Contain("AICOPILOT_HTTPAPI_IMAGE");
         buildAndPush.Should().NotContain("harbor-retention.sh");
@@ -239,10 +240,11 @@ public sealed class SecurityHardeningTests
         localRelease.Should().Contain("CLOUD_PLATFORM_URL is required");
         localRelease.Should().Contain("ALLOW_ROOT_SSH_DEPLOY");
         localRelease.Should().Contain("Root SSH deploy is not the standard path");
-        localRelease.Should().Contain("deploy@aicopilot.internal.example");
+        localRelease.Should().Contain("github-runner@<shared-host>");
+        localRelease.Should().Contain("AICopilot remote preflight");
         localRelease.Should().Contain("SSH_TIMEOUT_SECONDS=\"${SSH_TIMEOUT_SECONDS:-1800}\"");
-        localRelease.Should().Contain("HEAD $sha is not present on remote $remote. Push to GitHub before production release.");
-        localRelease.Should().Contain("DEPLOY_GIT_SHA='${TAG#sha-}' DEPLOY_TRIGGERED_BY=local ./deploy-release.sh");
+        localRelease.Should().Contain("HEAD $SOURCE_GIT_SHA is not present on remote $remote. Push to GitHub before production release.");
+        localRelease.Should().Contain("DEPLOY_LOCK_TOKEN='$RUN_ID' EXPECTED_SUPPORT_DIGEST='$SUPPORT_DIGEST' ./deploy-release.sh");
     }
 
     [Fact]
@@ -331,8 +333,8 @@ public sealed class SecurityHardeningTests
             "AICopilot.Web",
             "nginx.conf.template"));
 
-        deployGuide.Should().Contain("标准发布走操作者本机");
-        deployGuide.Should().Contain("deploy/enterprise-ai/local-release.sh");
+        deployGuide.Should().Contain("工作区标准发布");
+        deployGuide.Should().Contain("pwsh ./deploy/Invoke-WorkspaceDeploy.ps1 -Target AICopilot");
         deployGuide.Should().Contain("Docker Hub 不作为生产依赖源");
         deployGuide.Should().Contain("MCR 也不得作为生产构建的直接依赖源");
         deployGuide.Should().Contain("`aicopilot-image` / `aicopilot-deploy` 只保留带确认词的灾备入口");
@@ -354,9 +356,10 @@ public sealed class SecurityHardeningTests
         deployReadme.Should().Contain("AICopilot enterprise-ai deploy");
         deployReadme.Should().Contain("aicopilot-image");
         deployReadme.Should().Contain("aicopilot-deploy");
-        deployReadme.Should().Contain("build-and-push.sh       # 标准本机镜像构建和 Harbor push");
-        deployReadme.Should().Contain("local-release.sh        # 标准本机发布入口");
-        deployReadme.Should().Contain("REGISTRY=<harbor-registry> CLOUD_PLATFORM_URL=http://<cloud-host>:<port> deploy/enterprise-ai/local-release.sh --services <services> --ssh-target <user@host>");
+        deployReadme.Should().Contain("build-and-push.sh       # 统一入口内部调度的本机镜像构建实现");
+        deployReadme.Should().Contain("local-release.sh        # 统一入口内部调度的固定提交发布实现");
+        deployReadme.Should().Contain("工作区对外标准发布走 `pwsh ./deploy/Invoke-WorkspaceDeploy.ps1 -Target AICopilot ...`");
+        deployReadme.Should().Contain("独立 detached worktree");
         deployReadme.Should().Contain("DEPLOY_ENV_FILE");
         deployReadme.Should().Contain("iiot-linux-prod");
         deployReadme.Should().Contain("非 root");
@@ -386,7 +389,11 @@ public sealed class SecurityHardeningTests
         envTemplate.Should().Contain("RABBITMQ_IMAGE=harbor.internal.example:80/enterprise-ai/base-rabbitmq:4.2-management");
         envTemplate.Should().Contain("QDRANT_IMAGE=harbor.internal.example:80/enterprise-ai/base-qdrant:v1.15.5");
         envTemplate.Should().Contain("sha-replace-with-release-tag");
-        envTemplate.Should().Contain("CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED=true");
+        envTemplate.Should().Contain("AICOPILOT_BOOTSTRAP_ADMIN_USERNAME=bootstrap-admin");
+        envTemplate.Should().NotContain("AICOPILOT_BOOTSTRAP_ADMIN_USERNAME=101650");
+        envTemplate.Should().Contain("CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED=false");
+        deployReadme.Should().Contain("生产模板和 compose fallback 均默认关闭");
+        deployGuide.Should().Contain("生产模板和 compose fallback 默认使用 `CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED=false`");
         envTemplate.Should().Contain("AICOPILOT_MODEL_SMOKE_ALLOW_DUMMY_KEY=false");
         envTemplate.Should().NotContain("10.98.");
         envTemplate.Should().NotContain("CHANGE_ME");
@@ -475,11 +482,12 @@ public sealed class SecurityHardeningTests
         buildAndPush.Should().NotContain("DOTNET_RUNTIME_BASE_IMAGE=\"${DOTNET_RUNTIME_BASE_IMAGE:-mcr.microsoft.com/dotnet/aspnet:10.0-noble}\"");
         buildAndPush.Should().Contain("mirror-base-images.sh");
         buildAndPush.Should().NotContain("harbor-retention.sh");
-        localRelease.Should().Contain("scripts/check-release-security-attestation.sh");
-        localRelease.Should().Contain("scripts/check-model-secret-migration.sh");
-        localRelease.Should().Contain("scripts/check-runner-security-attestation.sh");
+        deployRelease.Should().Contain("scripts/check-release-security-attestation.sh");
+        deployRelease.Should().Contain("scripts/check-model-secret-migration.sh");
+        localRelease.Should().Contain("find scripts cloud-readonly");
         localRelease.Should().Contain("runner-platform-attestation.template.md");
-        localRelease.Should().Contain("scripts/check-platform-attestation-record.sh");
+        deployReadme.Should().Contain("scripts/check-runner-security-attestation.sh");
+        deployReadme.Should().Contain("scripts/check-platform-attestation-record.sh");
 
         backendDockerfile.Should().Contain("ARG RUNTIME_BASE_IMAGE=harbor.internal.example:80/enterprise-ai/base-dotnet-aspnet:10.0-noble");
         backendDockerfile.Should().Contain("FROM ${RUNTIME_BASE_IMAGE} AS runtime");

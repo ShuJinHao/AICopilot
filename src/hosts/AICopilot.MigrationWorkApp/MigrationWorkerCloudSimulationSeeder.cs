@@ -118,8 +118,11 @@ internal static class MigrationWorkerCloudSimulationSeeder
                 id text PRIMARY KEY,
                 client_code text NOT NULL UNIQUE,
                 device_name text NOT NULL,
+                process_id text NULL,
                 process_code text NULL
             );
+
+            ALTER TABLE devices ADD COLUMN IF NOT EXISTS process_id text NULL;
 
             CREATE TABLE IF NOT EXISTS device_status_snapshots (
                 device_id text PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
@@ -168,15 +171,16 @@ internal static class MigrationWorkerCloudSimulationSeeder
                 occurred_at timestamptz NOT NULL
             );
 
-            INSERT INTO devices (id, client_code, device_name, process_code) VALUES
-                ('DEV-ID-001', 'DEV-001', 'Cutter A', 'PROC-CUT'),
-                ('DEV-ID-002', 'DEV-002', 'Welder B', 'PROC-WELD'),
-                ('DEV-ID-003', 'DEV-003', 'Assembler C', 'PROC-ASM'),
-                ('DEV-ID-004', 'DEV-004', 'Painter D', 'PROC-PAINT'),
-                ('DEV-ID-005', 'DEV-005', 'Inspector E', 'PROC-QC')
+            INSERT INTO devices (id, client_code, device_name, process_id, process_code) VALUES
+                ('DEV-ID-001', 'DEV-001', 'Cutter A', 'PROC-ID-CUT', 'PROC-CUT'),
+                ('DEV-ID-002', 'DEV-002', 'Welder B', 'PROC-ID-WELD', 'PROC-WELD'),
+                ('DEV-ID-003', 'DEV-003', 'Assembler C', 'PROC-ID-ASM', 'PROC-ASM'),
+                ('DEV-ID-004', 'DEV-004', 'Painter D', 'PROC-ID-PAINT', 'PROC-PAINT'),
+                ('DEV-ID-005', 'DEV-005', 'Inspector E', 'PROC-ID-QC', 'PROC-QC')
             ON CONFLICT (id) DO UPDATE
             SET client_code = EXCLUDED.client_code,
                 device_name = EXCLUDED.device_name,
+                process_id = EXCLUDED.process_id,
                 process_code = EXCLUDED.process_code;
 
             INSERT INTO device_status_snapshots (device_id, status, line_name, updated_at) VALUES
@@ -262,6 +266,7 @@ internal static class MigrationWorkerCloudSimulationSeeder
                 d.id AS device_id,
                 d.client_code AS device_code,
                 d.device_name,
+                d.process_id,
                 s.status,
                 s.line_name,
                 s.updated_at

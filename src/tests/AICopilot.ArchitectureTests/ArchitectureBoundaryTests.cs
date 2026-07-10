@@ -582,15 +582,40 @@ public sealed class ArchitectureBoundaryTests
         seeder.Should().Contain("ReadOnlyCredentialVerified");
         seeder.Should().Contain("DataAnalysis CloudReadOnly direct database mode cannot be enabled while CloudReadonly Simulation seeding is enabled.");
 
-        semanticRunner.IndexOf("cloudAiReadClient.IsEnabled && IsHighFrequencyCloudAiReadTarget(plan.Target)", StringComparison.Ordinal)
+        semanticRunner.IndexOf("if (IsCloudOnlySemanticTarget(plan.Target))", StringComparison.Ordinal)
             .Should()
             .BeLessThan(semanticRunner.IndexOf("semanticPhysicalMappingProvider.TryGetMapping", StringComparison.Ordinal));
         semanticRunner.IndexOf("semanticPhysicalMappingProvider.TryGetMapping", StringComparison.Ordinal)
             .Should()
             .BeLessThan(semanticRunner.IndexOf("cloudAiReadClient.IsEnabled && CloudAiReadSemanticSupport.IsSupported(plan.Target)", StringComparison.Ordinal));
-        semanticRunner.Should().Contain("IsHighFrequencyCloudAiReadTarget");
+        semanticRunner.Should().NotContain("IsHighFrequencyCloudAiReadTarget");
+        semanticRunner.Should().Contain("CloudOnlySemanticSourceUnavailableMarker");
 
         governedSchema.Should().Contain("mfg_processes");
+    }
+
+    [Fact]
+    public void CloudReadonlyAgentQuery_ShouldStayBehindPlanDraftConfirmation()
+    {
+        var agentTaskRoot = Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "AgentTasks");
+        var draftCoordinator = File.ReadAllText(Path.Combine(agentTaskRoot, "PlanAgentTaskCoordinator.cs"));
+        var confirmationService = File.ReadAllText(Path.Combine(agentTaskRoot, "AgentPlanDraftConfirmationService.cs"));
+        var runtimeTool = File.ReadAllText(Path.Combine(
+            agentTaskRoot,
+            "Runtime",
+            "AgentRuntimeCloudReadonlyBasicToolService.cs"));
+
+        draftCoordinator.Should().NotContain("ICloudAiReadClient");
+        draftCoordinator.Should().NotContain("ICloudReadonlyAgentPlanService");
+        draftCoordinator.Should().NotContain("QuerySemanticAsync");
+        confirmationService.Should().Contain("ResolveCloudReadonlyIntentAsync");
+        confirmationService.Should().Contain("cloudReadonlyPlanService.CreateIntentAsync");
+        runtimeTool.Should().Contain("cloudReadonlyToolExecutor.ExecuteAsync");
     }
 
     [Fact]
@@ -662,9 +687,8 @@ public sealed class ArchitectureBoundaryTests
         provisionWorkflow.Should().NotContain("GRANT SELECT ON TABLE public.devices, public.mfg_processes");
         deployRelease.Should().Contain("check_cloud_readonly_preflight");
         deployRelease.Should().Contain("check-cloud-readonly-grants.sh");
-        localRelease.Should().Contain("sync_remote_deploy_files");
-        localRelease.Should().Contain("cloud-readonly");
-        localRelease.Should().Contain("scripts/check-cloud-readonly-grants.sh");
+        localRelease.Should().Contain("find scripts cloud-readonly -type f");
+        localRelease.Should().Contain("prepare_support_release");
         applyGrantSql.Should().NotContain("GRANT SELECT ON ALL TABLES");
         applyGrantSql.Should().NotContain("ALTER DEFAULT PRIVILEGES");
     }
@@ -713,7 +737,7 @@ public sealed class ArchitectureBoundaryTests
         smokeScript.Should().NotContain("sk-");
         deployRelease.Should().Contain("check_model_provider_preflight");
         deployRelease.Should().Contain("check-model-provider-openai.sh");
-        localRelease.Should().Contain("scripts/check-model-provider-openai.sh");
+        localRelease.Should().Contain("find scripts cloud-readonly -type f");
         deployReadme.Should().Contain("check-model-provider-openai.sh");
         deployGuide.Should().Contain("check-model-provider-openai.sh");
     }

@@ -453,6 +453,10 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
         {
             _ when ShouldBlockControlRequest(latestUserText)
                 => BuildControlBoundaryResponse(),
+            _ when messageTexts.Any(text =>
+                text.Contains("正式 Cloud AiRead 数据源不可用", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("设备最后上报运行状态的正式 Cloud AiRead 数据源不可用", StringComparison.OrdinalIgnoreCase))
+                => "结论：正式 Cloud AiRead 数据源不可用；本次查询未回退 Direct DB、Text-to-SQL 或 Simulation。",
             _ when messageTexts.Any(text => text.Contains("未处于只读模式", StringComparison.OrdinalIgnoreCase))
                 => "结论：当前查询已被拒绝，因为目标数据源未处于只读模式。",
             _ when messageTexts.Any(text => text.Contains("只读数据源", StringComparison.OrdinalIgnoreCase))
@@ -470,17 +474,65 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
     {
         semanticIntent = null!;
 
-        if (TryMatchDeviceList(latestUserText, out var listLine))
+        if (TryMatchProcessDetail(latestUserText, out var processCode))
+        {
+            semanticIntent = CreateSemanticIntent(
+                "Analysis.Process.Detail",
+                "The user requested one process master-data record.",
+                filters: new[]
+                {
+                    new { field = "processCode", @operator = "eq", value = processCode }
+                },
+                limit: 1,
+                queryText: latestUserText);
+            return true;
+        }
+
+        if (TryMatchProcessList(latestUserText))
+        {
+            semanticIntent = CreateSemanticIntent(
+                "Analysis.Process.List",
+                "The user requested process master data.",
+                filters: Array.Empty<object>(),
+                limit: 20,
+                queryText: latestUserText);
+            return true;
+        }
+
+        if (TryMatchClientReleaseList(latestUserText))
+        {
+            var releaseFilters = new List<object>();
+            if (latestUserText.Contains("stable", StringComparison.OrdinalIgnoreCase))
+            {
+                releaseFilters.Add(new { field = "channel", @operator = "eq", value = "stable" });
+            }
+
+            if (latestUserText.Contains("win-x64", StringComparison.OrdinalIgnoreCase))
+            {
+                releaseFilters.Add(new { field = "targetRuntime", @operator = "eq", value = "win-x64" });
+            }
+
+            if (latestUserText.Contains("已发布", StringComparison.OrdinalIgnoreCase) ||
+                latestUserText.Contains("published", StringComparison.OrdinalIgnoreCase))
+            {
+                releaseFilters.Add(new { field = "status", @operator = "eq", value = "Published" });
+            }
+
+            semanticIntent = CreateSemanticIntent(
+                "Analysis.ClientRelease.List",
+                "The user requested Cloud client release versions.",
+                filters: releaseFilters,
+                limit: 20,
+                queryText: latestUserText);
+            return true;
+        }
+
+        if (TryMatchDeviceList(latestUserText, out _))
         {
             semanticIntent = CreateSemanticIntent(
                 "Analysis.Device.List",
                 "The user requested a device list.",
-                filters: string.IsNullOrWhiteSpace(listLine)
-                    ? null
-                    : new[]
-                    {
-                        new { field = "lineName", @operator = "eq", value = listLine }
-                    },
+                filters: null,
                 sort: new { field = "deviceCode", direction = "asc" },
                 limit: 20,
                 queryText: latestUserText);
@@ -510,7 +562,7 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
                 {
                     new { field = "deviceCode", @operator = "eq", value = statusCode }
                 },
-                sort: new { field = "updatedAt", direction = "desc" },
+                sort: new { field = "updatedAtUtc", direction = "desc" },
                 limit: 10,
                 queryText: latestUserText);
             return true;
@@ -726,25 +778,61 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
 
         var englishMatch = Regex.Match(
             text,
-            @"list\s+devices(?:\s+on\s+line\s+(?<line>[A-Za-z0-9\-_]+))?",
+            @"(?:list|show)\s+(?:device\s+master\s+data|devices)",
             RegexOptions.IgnoreCase);
         if (englishMatch.Success)
         {
-            lineName = englishMatch.Groups["line"].Value;
             return true;
         }
 
-        var chineseMatch = Regex.Match(
+        var chineseMatch = Regex.IsMatch(
             text,
-            @"(?:列出|查看|看看|查询)\s*(?<line>[A-Za-z0-9\-_]+)\s*(?:产线|线体).*(?:设备|机台)",
+            @"(?:列出|查看|看看|查询)\s*(?:设备|机台)主数据",
             RegexOptions.IgnoreCase);
-        if (chineseMatch.Success)
+        if (chineseMatch)
         {
-            lineName = chineseMatch.Groups["line"].Value;
             return true;
         }
 
         return false;
+    }
+
+    private static bool TryMatchProcessList(string text)
+    {
+        return Regex.IsMatch(
+            text,
+            @"(?:列出|查看|查询).*(?:工序主数据|工序列表)|(?:list|show)\s+process(?:es|\s+master\s+data)",
+            RegexOptions.IgnoreCase);
+    }
+
+    private static bool TryMatchProcessDetail(string text, out string processCode)
+    {
+        processCode = string.Empty;
+        var chineseMatch = Regex.Match(
+            text,
+            @"(?:查看|查询)\s*(?<code>[A-Za-z][A-Za-z0-9\-_]*)\s*工序详情",
+            RegexOptions.IgnoreCase);
+        var match = chineseMatch.Success
+            ? chineseMatch
+            : Regex.Match(
+                text,
+                @"(?:show|query)\s+(?:process\s+)?(?<code>[A-Za-z][A-Za-z0-9\-_]*)\s+(?:process\s+)?detail",
+                RegexOptions.IgnoreCase);
+        if (!match.Success)
+        {
+            return false;
+        }
+
+        processCode = match.Groups["code"].Value;
+        return !string.IsNullOrWhiteSpace(processCode);
+    }
+
+    private static bool TryMatchClientReleaseList(string text)
+    {
+        return Regex.IsMatch(
+            text,
+            @"(?:客户端发布版本|客户端版本|发布版本|client\s+(?:release|version))",
+            RegexOptions.IgnoreCase);
     }
 
     private static bool TryMatchDeviceDetail(string text, out string deviceCode)
@@ -2010,7 +2098,12 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
             return $"设备 {GetStringValue(row, "deviceCode")}，级别 {GetStringValue(row, "level")}，内容 {GetStringValue(row, "message")}，时间 {GetStringValue(row, "occurredAt")}";
         }
 
-        return $"设备 {GetStringValue(row, "deviceCode")} / {GetStringValue(row, "deviceName")}，状态 {GetStringValue(row, "status")}，产线 {GetStringValue(row, "lineName")}，更新时间 {GetStringValue(row, "updatedAt")}";
+        if (HasProperty(row, "runtimeStatus"))
+        {
+            return $"设备 {GetStringValue(row, "clientCode")} / {GetStringValue(row, "deviceName")}，最后上报运行状态 {GetStringValue(row, "runtimeStatus")}，最后心跳 {GetStringValue(row, "lastRuntimeHeartbeatAtUtc")}；不据此推断在线或离线";
+        }
+
+        return $"设备 {GetStringValue(row, "deviceCode")} / {GetStringValue(row, "deviceName")}，工序标识 {GetStringValue(row, "processId")}";
     }
 
     private static string DescribeSemanticRowForPhase3(JsonElement row)
@@ -2035,7 +2128,12 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
             return $"设备 {GetStringValue(row, "deviceCode")}，工序 {GetStringValue(row, "processName")}，条码 {GetStringValue(row, "barcode")}，工位 {GetStringValue(row, "stationName")}，结果 {GetStringValue(row, "result")}，时间 {GetStringValue(row, "occurredAt")}";
         }
 
-        return $"设备 {GetStringValue(row, "deviceCode")} / {GetStringValue(row, "deviceName")}，状态 {GetStringValue(row, "status")}，产线 {GetStringValue(row, "lineName")}，更新时间 {GetStringValue(row, "updatedAt")}";
+        if (HasProperty(row, "runtimeStatus"))
+        {
+            return $"设备 {GetStringValue(row, "clientCode")} / {GetStringValue(row, "deviceName")}，最后上报运行状态 {GetStringValue(row, "runtimeStatus")}，最后心跳 {GetStringValue(row, "lastRuntimeHeartbeatAtUtc")}；不据此推断在线或离线";
+        }
+
+        return $"设备 {GetStringValue(row, "deviceCode")} / {GetStringValue(row, "deviceName")}，工序标识 {GetStringValue(row, "processId")}";
     }
 
     private static bool HasProperty(JsonElement row, string propertyName)

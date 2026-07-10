@@ -31,7 +31,7 @@ public sealed class DeviceLogFollowUpIntentRewriterTests
         };
         var history = new List<AiChatMessage>
         {
-            new(AiChatRole.User, "替我查询下模切设备最近1天的日志并帮我分析错误信息"),
+            new(AiChatRole.User, "替我查询 DEV-001 最近1天的日志并帮我分析错误信息"),
             new(AiChatRole.Assistant, "当前未找到 Error 级别日志。"),
             new(AiChatRole.User, "警告信息呢 也是没有吗")
         };
@@ -51,9 +51,9 @@ public sealed class DeviceLogFollowUpIntentRewriterTests
             filter.Operator == SemanticFilterOperator.Equal &&
             filter.Value == "WARN");
         planning.Plan.Filters.Should().Contain(filter =>
-            filter.Field == "processName" &&
-            filter.Operator == SemanticFilterOperator.Contains &&
-            filter.Value == "模切");
+            filter.Field == "deviceCode" &&
+            filter.Operator == SemanticFilterOperator.Equal &&
+            filter.Value == "DEV-001");
         planning.Plan.TimeRange.Should().NotBeNull();
     }
 
@@ -70,7 +70,7 @@ public sealed class DeviceLogFollowUpIntentRewriterTests
         };
         var history = new List<AiChatMessage>
         {
-            new(AiChatRole.User, "查询涂布工序最近24小时日志"),
+            new(AiChatRole.User, "查询 DEV-001 最近24小时日志"),
             new(AiChatRole.Assistant, "已返回 Warning 记录。"),
             new(AiChatRole.User, "那正常信息呢")
         };
@@ -86,9 +86,9 @@ public sealed class DeviceLogFollowUpIntentRewriterTests
             filter.Operator == SemanticFilterOperator.Equal &&
             filter.Value == "INFO");
         planning.Plan.Filters.Should().Contain(filter =>
-            filter.Field == "processName" &&
-            filter.Operator == SemanticFilterOperator.Contains &&
-            filter.Value == "涂布");
+            filter.Field == "deviceCode" &&
+            filter.Operator == SemanticFilterOperator.Equal &&
+            filter.Value == "DEV-001");
         planning.Plan.TimeRange.Should().NotBeNull();
     }
 
@@ -101,14 +101,14 @@ public sealed class DeviceLogFollowUpIntentRewriterTests
             {
                 Intent = "General.Chat",
                 Confidence = 0.88,
-                Query = "那涂布设备的警告呢"
+                Query = "那 DEV-002 的警告呢"
             }
         };
         var history = new List<AiChatMessage>
         {
-            new(AiChatRole.User, "替我查询下模切设备最近1天的错误日志"),
+            new(AiChatRole.User, "替我查询 DEV-001 最近1天的错误日志"),
             new(AiChatRole.Assistant, "当前未找到 Error 级别日志。"),
-            new(AiChatRole.User, "那涂布设备的警告呢")
+            new(AiChatRole.User, "那 DEV-002 的警告呢")
         };
 
         DeviceLogFollowUpIntentRewriter.Rewrite(intents, history);
@@ -122,12 +122,12 @@ public sealed class DeviceLogFollowUpIntentRewriterTests
             filter.Operator == SemanticFilterOperator.Equal &&
             filter.Value == "WARN");
         planning.Plan.Filters.Should().Contain(filter =>
-            filter.Field == "processName" &&
-            filter.Operator == SemanticFilterOperator.Contains &&
-            filter.Value == "涂布");
+            filter.Field == "deviceCode" &&
+            filter.Operator == SemanticFilterOperator.Equal &&
+            filter.Value == "DEV-002");
         planning.Plan.Filters.Should().NotContain(filter =>
-            filter.Field == "processName" &&
-            string.Equals(filter.Value, "模切", StringComparison.Ordinal));
+            filter.Field == "deviceCode" &&
+            string.Equals(filter.Value, "DEV-001", StringComparison.Ordinal));
         planning.Plan.TimeRange.Should().NotBeNull();
     }
 
@@ -140,14 +140,14 @@ public sealed class DeviceLogFollowUpIntentRewriterTests
             {
                 Intent = "General.Chat",
                 Confidence = 0.86,
-                Query = "那涂布设备呢"
+                Query = "那 DEV-002 呢"
             }
         };
         var history = new List<AiChatMessage>
         {
-            new(AiChatRole.User, "替我查询下模切设备最近1天的错误日志"),
+            new(AiChatRole.User, "替我查询 DEV-001 最近1天的错误日志"),
             new(AiChatRole.Assistant, "当前未找到 Error 级别日志。"),
-            new(AiChatRole.User, "那涂布设备呢")
+            new(AiChatRole.User, "那 DEV-002 呢")
         };
 
         DeviceLogFollowUpIntentRewriter.Rewrite(intents, history);
@@ -161,12 +161,12 @@ public sealed class DeviceLogFollowUpIntentRewriterTests
             filter.Operator == SemanticFilterOperator.Equal &&
             filter.Value == "ERROR");
         planning.Plan.Filters.Should().Contain(filter =>
-            filter.Field == "processName" &&
-            filter.Operator == SemanticFilterOperator.Contains &&
-            filter.Value == "涂布");
+            filter.Field == "deviceCode" &&
+            filter.Operator == SemanticFilterOperator.Equal &&
+            filter.Value == "DEV-002");
         planning.Plan.Filters.Should().NotContain(filter =>
-            filter.Field == "processName" &&
-            string.Equals(filter.Value, "模切", StringComparison.Ordinal));
+            filter.Field == "deviceCode" &&
+            string.Equals(filter.Value, "DEV-001", StringComparison.Ordinal));
         planning.Plan.TimeRange.Should().NotBeNull();
     }
 

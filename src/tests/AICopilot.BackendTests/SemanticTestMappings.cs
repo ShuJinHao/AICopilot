@@ -17,13 +17,11 @@ internal sealed class SampleSemanticPhysicalMappingProvider : ISemanticPhysicalM
                     ["deviceId"] = "device_id",
                     ["deviceCode"] = "device_code",
                     ["deviceName"] = "device_name",
-                    ["status"] = "status",
-                    ["lineName"] = "line_name",
-                    ["updatedAt"] = "updated_at"
+                    ["processId"] = "process_id"
                 },
-                allowedProjectionFields: ["deviceId", "deviceCode", "deviceName", "status", "lineName", "updatedAt"],
-                allowedFilterFields: ["deviceId", "deviceCode", "deviceName", "status", "lineName"],
-                allowedSortFields: ["deviceCode", "deviceName", "updatedAt"],
+                allowedProjectionFields: ["deviceId", "deviceCode", "deviceName", "processId"],
+                allowedFilterFields: ["deviceId", "deviceCode", "deviceName", "processId"],
+                allowedSortFields: ["deviceCode", "deviceName"],
                 databaseName: "SemanticDb",
                 defaultSort: new SemanticSort("deviceCode", SemanticSortDirection.Asc)),
             [SemanticQueryTarget.DeviceLog] = new SemanticPhysicalMapping(

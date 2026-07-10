@@ -23,10 +23,7 @@ internal static class HttpApiOptionsConfiguration
             throw new NullReferenceException(nameof(jwtSettings));
         }
 
-        if (string.IsNullOrWhiteSpace(jwtSettings.SecretKey))
-        {
-            throw new InvalidOperationException("JwtSettings:SecretKey is required; configure it with user-secrets or the JwtSettings__SecretKey environment variable.");
-        }
+        jwtSettings.EnsureValid();
 
         builder.Services.Configure<JwtSettings>(configurationSection);
         builder.Services.Configure<CloudOidcOptions>(

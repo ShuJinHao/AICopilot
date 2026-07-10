@@ -81,9 +81,11 @@ For structured chat error chunks, frontend displays `userFacingMessage` first, t
 | --- | --- |
 | `cloud_ai_read_not_configured` | Cloud AI read is not configured. |
 | `cloud_ai_read_request_blocked` | Cloud AI read request was blocked by endpoint policy. |
+| `cloud_ai_read_invalid_request` | Cloud AI read rejected parameters that are outside the formal endpoint contract. |
 | `cloud_ai_read_unauthorized` | Cloud AI read request was not authenticated. |
 | `cloud_ai_read_forbidden` | Cloud AI read request is forbidden. |
 | `cloud_ai_read_not_found` | Cloud AI read resource was not found. |
+| `cloud_ai_read_rate_limited` | Cloud AI read rate limit was reached; retry later without changing data source. |
 | `cloud_ai_read_unavailable` | Cloud AI read service is unavailable. |
 | `cloud_ai_read_missing_required_parameter` | Cloud AI read request is missing a required parameter such as `deviceId`, `startDate`, `endDate`, `startTime`, `endTime`, `preset`, `date`, `typeKey`, or `processId`. |
 
@@ -93,13 +95,15 @@ Cloud read-only requests must use the current Cloud API contract directly:
 
 | Scenario | Path | Required query |
 | --- | --- | --- |
-| Devices | `/api/v1/ai/read/devices` | `maxRows`, optional `keyword` |
-| Processes | `/api/v1/ai/read/processes` | `maxRows`, optional `keyword` |
+| Devices | `/api/v1/ai/read/devices` | `maxRows`, optional `deviceId`, `deviceCode`, `processId`, `keyword`; supplied conditions are ANDed |
+| Processes | `/api/v1/ai/read/processes` | `maxRows`, optional `processId`, `keyword` |
 | Client releases | `/api/v1/ai/read/client-releases` | `maxRows`, optional `channel`, `targetRuntime`, `status`, `includeArchived` |
-| Device client states | `/api/v1/ai/read/device-client-states` | `maxRows`, optional `deviceId`, optional `keyword` |
+| Device client states | `/api/v1/ai/read/device-client-states` | `maxRows`, optional `deviceId`, `deviceCode`, `processId`, `keyword` |
 | Capacity summary | `/api/v1/ai/read/capacity/summary` | `deviceId`, `startDate`, `endDate`, `maxRows` |
 | Capacity hourly | `/api/v1/ai/read/capacity/hourly` | `deviceId`, `date` or `preset`, optional `plcName`, `maxRows` |
 | Device logs | `/api/v1/ai/read/device-logs` | `deviceId`, `startTime`/`endTime` or `preset`, optional `level` or `minLevel`, optional `keyword`, `maxRows` |
 | Production records | `/api/v1/ai/read/production-records` | one of `typeKey`/`processId`/`deviceId`, `startTime`/`endTime` or `preset`, optional `barcode`, `result`, `fieldMode`, `maxRows`; rows may include `fieldSchema` and `fields` for plugin/process-specific columns |
 
-`deviceCode` is a searchable/display field only. It must not be sent as `deviceId`. Recipe master data and recipe version data are outside the AICopilot Cloud read-only boundary.
+Provider success responses use the exact envelope `items/asOfUtc/source/queryScope/rowCount/truncated/nextCursor`. Missing or mistyped metadata is a provider-contract failure; clients must not manufacture timestamps or truncation metadata.
+
+`deviceCode` is never sent as `deviceId`. Device status sends it directly as the formal `deviceCode` state parameter; log/capacity/production semantic queries may first resolve it uniquely through `/devices`, then send the resulting GUID as `deviceId`. Recipe master data and recipe version data are outside the AICopilot Cloud read-only boundary. Every covered semantic domain is Cloud-only: a success, legitimate empty set, 400/401/403/429/5xx, timeout, or invalid JSON must not trigger Direct DB, Text-to-SQL, Simulation, MCP, or a hidden HTTP fallback.

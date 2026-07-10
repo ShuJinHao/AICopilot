@@ -1271,7 +1271,7 @@ public sealed class Phase25RuntimeSmokeTests
     }
 
     [Fact]
-    public async Task SemanticDeviceAndLogChat_ShouldQueryRealReadOnlyBusinessDatabase()
+    public async Task SemanticDeviceAndLogChat_ShouldNotFallbackWhenCloudAiReadIsDisabled()
     {
         await AuthenticateAsAdminAsync();
 
@@ -1316,7 +1316,7 @@ public sealed class Phase25RuntimeSmokeTests
 
             await AssertSemanticChatAsync(
                 sessionId,
-                "list devices on line LINE-A",
+                "list device master data",
                 "Analysis.Device.List",
                 "结论：",
                 "关键记录：",
@@ -1331,15 +1331,6 @@ public sealed class Phase25RuntimeSmokeTests
                 "关键记录：",
                 "DEV-001",
                 "Cutter A");
-
-            await AssertSemanticChatAsync(
-                sessionId,
-                "show status of device DEV-001",
-                "Analysis.Device.Status",
-                "结论：",
-                "关键记录：",
-                "DEV-001",
-                "Running");
 
             await AssertSemanticChatAsync(
                 sessionId,
@@ -1371,7 +1362,7 @@ public sealed class Phase25RuntimeSmokeTests
 
             await AssertSemanticChatAsync(
                 sessionId,
-                "列出 LINE-A 产线的设备",
+                "列出设备主数据",
                 "Analysis.Device.List",
                 "结论：",
                 "关键记录：",
@@ -1386,15 +1377,6 @@ public sealed class Phase25RuntimeSmokeTests
                 "关键记录：",
                 "DEV-001",
                 "Cutter A");
-
-            await AssertSemanticChatAsync(
-                sessionId,
-                "设备 DEV-001 现在是什么状态",
-                "Analysis.Device.Status",
-                "结论：",
-                "关键记录：",
-                "DEV-001",
-                "Running");
 
             await AssertSemanticChatAsync(
                 sessionId,
@@ -1432,11 +1414,11 @@ public sealed class Phase25RuntimeSmokeTests
                     .OrderBy(message => message.Id)
                     .ToListAsync();
             }, messages =>
-                messages.Count >= 24 &&
-                messages.Count(message => message.Type == MessageType.User) >= 12 &&
-                messages.Count(message => message.Type == MessageType.Assistant) >= 12 &&
-                messages.Any(message => message.Content.Contains("DEV-001", StringComparison.OrdinalIgnoreCase)) &&
-                messages.Any(message => message.Content.Contains("Motor overload", StringComparison.OrdinalIgnoreCase)));
+                messages.Count >= 20 &&
+                messages.Count(message => message.Type == MessageType.User) >= 10 &&
+                messages.Count(message => message.Type == MessageType.Assistant) >= 10 &&
+                messages.Any(message => message.Type == MessageType.Assistant && message.Content.Contains("正式 Cloud AiRead 数据源不可用", StringComparison.OrdinalIgnoreCase)) &&
+                messages.Where(message => message.Type == MessageType.Assistant).All(message => !message.Content.Contains("Motor overload", StringComparison.OrdinalIgnoreCase)));
         }
         finally
         {
@@ -1559,7 +1541,7 @@ public sealed class Phase25RuntimeSmokeTests
     }
 
     [Fact]
-    public async Task SemanticChat_ShouldBlockRecipeDataAndSupportCapacityProductionDataDomains()
+    public async Task SemanticChat_ShouldBlockRecipeDataAndKeepCoveredDomainsCloudOnly()
     {
         await AuthenticateAsAdminAsync();
 
@@ -1607,13 +1589,11 @@ public sealed class Phase25RuntimeSmokeTests
             {
                 ("show capacity for DEV-001 from 2026-04-20T00:00:00Z to 2026-04-21T23:59:59Z", "Analysis.Capacity.Range", ["DEV-001", "126", "123"]),
                 ("show capacity for device DEV-001", "Analysis.Capacity.ByDevice", ["DEV-001", "Cutting", "126"]),
-                ("show capacity of process Cutting", "Analysis.Capacity.ByProcess", ["Cutting", "DEV-001", "126"]),
                 ("show latest production records for device DEV-001", "Analysis.ProductionData.Latest", ["DEV-001", "CELL-0002", "Fail"]),
                 ("show production records for DEV-001 from 2026-04-21T00:00:00Z to 2026-04-21T23:59:59Z", "Analysis.ProductionData.Range", ["DEV-001", "CELL-0001", "CELL-0002"]),
                 ("show production records for device DEV-001", "Analysis.ProductionData.ByDevice", ["DEV-001", "CELL-0001", "Station-A"]),
                 ("查看 DEV-001 在 2026-04-20T00:00:00Z 到 2026-04-21T23:59:59Z 的产能", "Analysis.Capacity.Range", ["DEV-001", "126", "123"]),
                 ("查看设备 DEV-001 的产能", "Analysis.Capacity.ByDevice", ["DEV-001", "Cutting", "126"]),
-                ("查看 Cutting 工序的产能", "Analysis.Capacity.ByProcess", ["Cutting", "DEV-001", "126"]),
                 ("查看设备 DEV-001 最新生产记录", "Analysis.ProductionData.Latest", ["DEV-001", "CELL-0002", "Fail"]),
                 ("查看 DEV-001 在 2026-04-21T00:00:00Z 到 2026-04-21T23:59:59Z 的生产记录", "Analysis.ProductionData.Range", ["DEV-001", "CELL-0001", "CELL-0002"]),
                 ("查看设备 DEV-001 的生产记录", "Analysis.ProductionData.ByDevice", ["DEV-001", "CELL-0001", "Station-A"])
@@ -2117,14 +2097,10 @@ public sealed class Phase25RuntimeSmokeTests
         var text = string.Concat(events.Where(item => item.Type == "Text").Select(item => item.Content));
         text.Should().NotBeNullOrWhiteSpace();
         text.Should().Contain("结论：");
-        text.Should().Contain("关键指标：");
-        text.Should().Contain("关键记录：");
-        text.Should().Contain("查询范围：");
-
-        foreach (var expectedTextFragment in expectedTextFragments)
-        {
-            text.Should().Contain(expectedTextFragment);
-        }
+        text.Should().Contain("正式 Cloud AiRead 数据源不可用");
+        text.Should().Contain("未回退 Direct DB、Text-to-SQL 或 Simulation");
+        text.Should().NotContain("关键指标：");
+        text.Should().NotContain("关键记录：");
 
         text.Contains("SELECT", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
         text.Contains("device_master_view", StringComparison.OrdinalIgnoreCase).Should().BeFalse();

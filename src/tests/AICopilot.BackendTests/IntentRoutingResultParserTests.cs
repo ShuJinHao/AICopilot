@@ -50,7 +50,7 @@ public sealed class IntentRoutingResultParserTests
         var parsed = IntentRoutingResultParser.TryParse(
             """
             <think>[{"intent":"General.Chat","confidence":1,"reasoning":"wrong bracket in thinking"}]</think>
-            [{"intent":"Analysis.Device.List","confidence":0.92,"reasoning":"用户要求列出 LINE-A 设备","query":"{\"queryText\":\"列出 LINE-A 产线设备\",\"filters\":[{\"field\":\"lineName\",\"operator\":\"eq\",\"value\":\"LINE-A\"}]}"}]
+            [{"intent":"Analysis.Device.List","confidence":0.92,"reasoning":"用户要求列出设备主数据","query":"{\"queryText\":\"列出设备主数据\",\"filters\":[]}"}]
             """,
             out var intents);
 

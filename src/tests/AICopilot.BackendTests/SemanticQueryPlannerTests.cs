@@ -16,7 +16,7 @@ public sealed class SemanticQueryPlannerTests
 
     public static IEnumerable<object[]> SupportedIntentCases()
     {
-        yield return ["Analysis.Device.List", "{\"filters\":[{\"field\":\"status\",\"operator\":\"eq\",\"value\":\"Running\"}],\"limit\":20}", SemanticQueryTarget.Device, SemanticQueryKind.List];
+        yield return ["Analysis.Device.List", "{\"filters\":[],\"limit\":20}", SemanticQueryTarget.Device, SemanticQueryKind.List];
         yield return ["Analysis.Device.Detail", "{\"filters\":[{\"field\":\"deviceCode\",\"operator\":\"eq\",\"value\":\"DEV-01\"}]}", SemanticQueryTarget.Device, SemanticQueryKind.Detail];
         yield return ["Analysis.Device.Status", "{\"filters\":[{\"field\":\"deviceCode\",\"operator\":\"eq\",\"value\":\"DEV-01\"}]}", SemanticQueryTarget.Device, SemanticQueryKind.Status];
         yield return ["Analysis.DeviceLog.Latest", "{\"filters\":[{\"field\":\"deviceCode\",\"operator\":\"eq\",\"value\":\"DEV-01\"}],\"limit\":10}", SemanticQueryTarget.DeviceLog, SemanticQueryKind.Latest];
@@ -27,10 +27,12 @@ public sealed class SemanticQueryPlannerTests
         yield return ["Analysis.Recipe.VersionHistory", "{\"filters\":[{\"field\":\"recipeName\",\"operator\":\"eq\",\"value\":\"Recipe-Cut-01\"}],\"sort\":{\"field\":\"version\",\"direction\":\"desc\"}}", SemanticQueryTarget.Recipe, SemanticQueryKind.VersionHistory];
         yield return ["Analysis.Capacity.Range", "{\"filters\":[{\"field\":\"deviceCode\",\"operator\":\"eq\",\"value\":\"DEV-01\"}],\"timeRange\":{\"field\":\"occurredAt\",\"start\":\"2026-04-20T00:00:00Z\",\"end\":\"2026-04-21T00:00:00Z\"}}", SemanticQueryTarget.Capacity, SemanticQueryKind.Range];
         yield return ["Analysis.Capacity.ByDevice", "{\"filters\":[{\"field\":\"deviceCode\",\"operator\":\"eq\",\"value\":\"DEV-01\"}]}", SemanticQueryTarget.Capacity, SemanticQueryKind.ByDevice];
-        yield return ["Analysis.Capacity.ByProcess", "{\"filters\":[{\"field\":\"processName\",\"operator\":\"eq\",\"value\":\"Cutting\"}]}", SemanticQueryTarget.Capacity, SemanticQueryKind.ByProcess];
         yield return ["Analysis.ProductionData.Latest", "{\"filters\":[{\"field\":\"deviceCode\",\"operator\":\"eq\",\"value\":\"DEV-01\"}]}", SemanticQueryTarget.ProductionData, SemanticQueryKind.Latest];
-        yield return ["Analysis.ProductionData.Range", "{\"filters\":[{\"field\":\"deviceCode\",\"operator\":\"eq\",\"value\":\"DEV-01\"}],\"timeRange\":{\"field\":\"occurredAt\",\"start\":\"2026-04-20T00:00:00Z\",\"end\":\"2026-04-21T00:00:00Z\"}}", SemanticQueryTarget.ProductionData, SemanticQueryKind.Range];
+        yield return ["Analysis.ProductionData.Range", "{\"filters\":[{\"field\":\"deviceCode\",\"operator\":\"eq\",\"value\":\"DEV-01\"}],\"timeRange\":{\"field\":\"completedAt\",\"start\":\"2026-04-20T00:00:00Z\",\"end\":\"2026-04-21T00:00:00Z\"}}", SemanticQueryTarget.ProductionData, SemanticQueryKind.Range];
         yield return ["Analysis.ProductionData.ByDevice", "{\"filters\":[{\"field\":\"deviceCode\",\"operator\":\"eq\",\"value\":\"DEV-01\"}]}", SemanticQueryTarget.ProductionData, SemanticQueryKind.ByDevice];
+        yield return ["Analysis.Process.List", "{\"filters\":[],\"limit\":20}", SemanticQueryTarget.Process, SemanticQueryKind.List];
+        yield return ["Analysis.Process.Detail", "{\"filters\":[{\"field\":\"processCode\",\"operator\":\"eq\",\"value\":\"CUT\"}]}", SemanticQueryTarget.Process, SemanticQueryKind.Detail];
+        yield return ["Analysis.ClientRelease.List", "{\"filters\":[{\"field\":\"channel\",\"operator\":\"eq\",\"value\":\"stable\"},{\"field\":\"targetRuntime\",\"operator\":\"eq\",\"value\":\"win-x64\"}]}", SemanticQueryTarget.ClientRelease, SemanticQueryKind.List];
     }
 
     [Theory]
@@ -55,7 +57,7 @@ public sealed class SemanticQueryPlannerTests
     [InlineData("Analysis.Device.List", "{\"fields\":[\"password\"]}", "projection whitelist")]
     [InlineData("Analysis.DeviceLog.Range", "{\"filters\":[{\"field\":\"deviceCode\",\"operator\":\"eq\",\"value\":\"DEV-01\"}]}", "timeRange")]
     [InlineData("Analysis.Recipe.Detail", "{\"filters\":[{\"field\":\"processName\",\"operator\":\"eq\",\"value\":\"Cutting\"}]}", "recipeId")]
-    [InlineData("Analysis.Capacity.ByProcess", "{\"filters\":[{\"field\":\"deviceCode\",\"operator\":\"eq\",\"value\":\"DEV-01\"}]}", "processName")]
+    [InlineData("Analysis.Capacity.ByProcess", "{\"filters\":[{\"field\":\"processName\",\"operator\":\"eq\",\"value\":\"Cutting\"}]}", "Unsupported semantic intent")]
     [InlineData("Analysis.Capacity.Range", "{\"filters\":[{\"field\":\"deviceCode\",\"operator\":\"eq\",\"value\":\"DEV-01\"}]}", "timeRange")]
     [InlineData("Analysis.ProductionData.ByDevice", "{\"filters\":[{\"field\":\"deviceCode\",\"operator\":\"eq\",\"value\":\"DEV-01\"}],\"sort\":{\"field\":\"password\",\"direction\":\"asc\"}}", "Sort field")]
     [InlineData("Analysis.ProductionData.Range", "{\"filters\":[{\"field\":\"deviceCode\",\"operator\":\"eq\",\"value\":\"DEV-01\"}]}", "timeRange")]
@@ -139,7 +141,7 @@ public sealed class SemanticQueryPlannerTests
 
     [Theory]
     [InlineData("Analysis.DeviceLog.Latest", "查看错误警告日志")]
-    [InlineData("Analysis.DeviceLog.Latest", "替我查询模切设备日志并分析错误信息")]
+    [InlineData("Analysis.DeviceLog.Latest", "帮我分析错误告警日志")]
     [InlineData("Analysis.DeviceLog.ByLevel", "{\"queryText\":\"查看异常日志\",\"filters\":[{\"field\":\"level\",\"operator\":\"eq\",\"value\":\"Error,Warn\"}]}")]
     public void Planner_ShouldCompleteDeviceLogMultiLevelSemantics(
         string intent,
@@ -158,7 +160,7 @@ public sealed class SemanticQueryPlannerTests
     }
 
     [Theory]
-    [InlineData("替我查询模切设备最近1天的日志并帮我分析错误信息")]
+    [InlineData("替我查询最近1天的日志并帮我分析错误信息")]
     [InlineData("查看过去24小时错误警告日志")]
     [InlineData("查询近七天告警日志")]
     public void Planner_ShouldCompleteDeviceLogRelativeTimeRange(string query)
@@ -176,7 +178,7 @@ public sealed class SemanticQueryPlannerTests
     }
 
     [Fact]
-    public void Planner_ShouldCompleteDeviceLogProcessNameFilter_FromNaturalLanguageScope()
+    public void Planner_ShouldNotInventUnsupportedProcessNameFilter_FromNaturalLanguageScope()
     {
         var result = _planner.Plan(
             "Analysis.DeviceLog.Latest",
@@ -184,10 +186,7 @@ public sealed class SemanticQueryPlannerTests
 
         result.IsSuccess.Should().BeTrue(result.ErrorMessage);
         result.Plan.Should().NotBeNull();
-        result.Plan!.Filters.Should().Contain(filter =>
-            filter.Field == "processName" &&
-            filter.Operator == SemanticFilterOperator.Contains &&
-            filter.Value == "模切");
+        result.Plan!.Filters.Should().NotContain(filter => filter.Field == "processName");
         result.Plan.Filters.Should().Contain(filter =>
             filter.Field == "level" &&
             filter.Operator == SemanticFilterOperator.In &&
@@ -206,10 +205,7 @@ public sealed class SemanticQueryPlannerTests
         result.Plan.Should().NotBeNull();
         result.Plan!.Target.Should().Be(SemanticQueryTarget.DeviceLog);
         result.Plan.Kind.Should().Be(SemanticQueryKind.Latest);
-        result.Plan.Filters.Should().Contain(filter =>
-            filter.Field == "processName" &&
-            filter.Operator == SemanticFilterOperator.Contains &&
-            filter.Value == "模切");
+        result.Plan.Filters.Should().NotContain(filter => filter.Field == "processName");
         result.Plan.Filters.Should().NotContain(filter =>
             filter.Field.Equals("level", StringComparison.OrdinalIgnoreCase));
         result.Plan.Sort.Should().Be(new SemanticSort("occurredAt", SemanticSortDirection.Desc));

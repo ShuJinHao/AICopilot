@@ -19,6 +19,8 @@ public sealed class SemanticAnalysisRunner(
 {
     private static readonly DatabaseQueryOptions QueryOptions = new(MaxRows: 200, CommandTimeoutSeconds: 15);
     public const string RecipeDataReadBoundaryMarker = "当前 AI 不读取云端配方主数据或配方版本数据";
+    public const string DeviceStatusSourceUnavailableMarker = "当前设备最后上报运行状态的正式 Cloud AiRead 数据源不可用";
+    public const string CloudOnlySemanticSourceUnavailableMarker = "当前正式 Cloud AiRead 数据源不可用";
     private const string RecipeDataReadBoundaryMessage =
         "[系统提示]: " + RecipeDataReadBoundaryMarker + "。可以回答配方版本规则问题，但不能查询具体配方、设备配方清单或版本记录。";
 
@@ -41,6 +43,16 @@ public sealed class SemanticAnalysisRunner(
                 failedTargetLabel,
                 intent.Intent,
                 planningResult.ErrorMessage);
+            if (IsDeviceStatusIntent(intent.Intent))
+            {
+                return $"[系统提示]: {DeviceStatusSourceUnavailableMarker}，且该能力不会回退 Direct DB、Text-to-SQL 或 Simulation。{planningResult.ErrorMessage}";
+            }
+
+            if (IsCloudOnlySemanticIntent(intent.Intent))
+            {
+                return $"[系统提示]: {failedTargetLabel}{CloudOnlySemanticSourceUnavailableMarker}，且该能力不会回退 Direct DB、Text-to-SQL 或 Simulation。{planningResult.ErrorMessage}";
+            }
+
             var fallback = await TryRunCloudReadOnlyTextToSqlFallbackAsync(
                 database: null,
                 question: intent.Query,
@@ -66,8 +78,18 @@ public sealed class SemanticAnalysisRunner(
             return RecipeDataReadBoundaryMessage;
         }
 
-        if (cloudAiReadClient.IsEnabled && IsHighFrequencyCloudAiReadTarget(plan.Target))
+        if (IsCloudOnlySemanticTarget(plan.Target))
         {
+            if (!cloudAiReadClient.IsEnabled)
+            {
+                if (plan.Target == SemanticQueryTarget.Device && plan.Kind == SemanticQueryKind.Status)
+                {
+                    return $"[系统提示]: {DeviceStatusSourceUnavailableMarker}；该能力不会回退 Direct DB、Text-to-SQL 或 Simulation。";
+                }
+
+                return $"[系统提示]: {targetLabel}{CloudOnlySemanticSourceUnavailableMarker}；该能力不会回退 Direct DB、Text-to-SQL 或 Simulation。";
+            }
+
             return await RunCloudAiReadAsync(plan, targetLabel, sink, cancellationToken);
         }
 
@@ -383,7 +405,10 @@ public sealed class SemanticAnalysisRunner(
         {
             var queryResult = await cloudAiReadClient.QuerySemanticAsync(plan, cancellationToken);
             var rows = queryResult.Rows.ToList();
-            var semanticSummary = SemanticSummaryBuilder.Build(plan, rows);
+            var semanticSummary = SemanticSummaryBuilder.Build(plan, rows) with
+            {
+                Scope = queryResult.QueryScope
+            };
             var analysis = SemanticAnalysisPresentation.BuildAnalysis(
                 plan,
                 SemanticAnalysisPresentation.BuildCloudAiReadSourceLabel(targetLabel),
@@ -405,7 +430,7 @@ public sealed class SemanticAnalysisRunner(
                 rows,
                 queryResult.IsTruncated,
                 plan,
-                rows.Count);
+                queryResult.RowCount);
         }
         catch (CloudAiReadException ex)
         {
@@ -418,8 +443,10 @@ public sealed class SemanticAnalysisRunner(
             return ex.Code switch
             {
                 CloudAiReadProblemCodes.MissingRequiredParameter => $"[系统提示]: Cloud AiRead {targetLabel}查询缺少必要条件，请补充设备、时间范围或条码后重试。",
+                CloudAiReadProblemCodes.InvalidRequest => $"[系统提示]: Cloud AiRead {targetLabel}查询参数不符合正式接口契约，请调整查询条件后重试。",
                 CloudAiReadProblemCodes.Unauthorized => $"[系统提示]: Cloud AiRead {targetLabel}查询未通过身份凭据校验，请联系管理员检查只读服务账号。",
                 CloudAiReadProblemCodes.Forbidden => $"[系统提示]: Cloud AiRead {targetLabel}查询权限或设备范围不足，系统已拒绝本次正式数据读取。",
+                CloudAiReadProblemCodes.RateLimited => $"[系统提示]: Cloud AiRead {targetLabel}查询当前受到限流，请稍后重试。",
                 CloudAiReadProblemCodes.RequestBlocked => $"[系统提示]: Cloud AiRead {targetLabel}查询未通过只读白名单校验，系统已拒绝执行。",
                 _ => $"[系统提示]: Cloud AiRead {targetLabel}只读接口暂不可用，请稍后重试或联系管理员检查配置。"
             };
@@ -466,10 +493,23 @@ public sealed class SemanticAnalysisRunner(
         }
     }
 
-    private static bool IsHighFrequencyCloudAiReadTarget(SemanticQueryTarget target)
+    private static bool IsDeviceStatusIntent(string intent)
     {
-        return target is SemanticQueryTarget.DeviceLog
-            or SemanticQueryTarget.Capacity
-            or SemanticQueryTarget.ProductionData;
+        return intent.Equals("Analysis.Device.Status", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsCloudOnlySemanticIntent(string intent)
+    {
+        return intent.StartsWith("Analysis.Device.", StringComparison.OrdinalIgnoreCase) ||
+               intent.StartsWith("Analysis.DeviceLog.", StringComparison.OrdinalIgnoreCase) ||
+               intent.StartsWith("Analysis.Capacity.", StringComparison.OrdinalIgnoreCase) ||
+               intent.StartsWith("Analysis.ProductionData.", StringComparison.OrdinalIgnoreCase) ||
+               intent.StartsWith("Analysis.Process.", StringComparison.OrdinalIgnoreCase) ||
+               intent.StartsWith("Analysis.ClientRelease.", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsCloudOnlySemanticTarget(SemanticQueryTarget target)
+    {
+        return CloudAiReadSemanticSupport.IsSupported(target);
     }
 }

@@ -21,7 +21,7 @@ public static class SemanticSourceContractCatalog
         {
             [SemanticQueryTarget.Device] =
             [
-                "deviceId", "deviceCode", "deviceName", "status", "lineName", "updatedAt"
+                "deviceId", "deviceCode", "deviceName", "processId"
             ],
             [SemanticQueryTarget.DeviceLog] =
             [
@@ -37,7 +37,15 @@ public static class SemanticSourceContractCatalog
             ],
             [SemanticQueryTarget.ProductionData] =
             [
-                "recordId", "deviceId", "deviceCode", "processName", "barcode", "stationName", "result", "occurredAt"
+                "recordId", "deviceId", "deviceCode", "processName", "barcode", "result", "occurredAt"
+            ],
+            [SemanticQueryTarget.Process] =
+            [
+                "processId", "processCode", "processName"
+            ],
+            [SemanticQueryTarget.ClientRelease] =
+            [
+                "releaseId", "componentKind", "componentKey", "displayName", "channel", "targetRuntime", "version", "status", "createdAtUtc", "publishedAtUtc", "deletedAtUtc"
             ]
         };
 
@@ -222,4 +230,3 @@ public sealed class SemanticSourceInspector(IDatabaseConnector databaseConnector
         };
     }
 }
-

@@ -8,12 +8,13 @@ internal sealed class ProductionDataSummaryProfile : SemanticSummaryProfileBase
 {
     private static readonly IReadOnlyDictionary<string, string> Labels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
-        ["deviceCode"] = "设备编码",
-        ["processName"] = "工序名称",
+        ["deviceId"] = "设备标识",
+        ["deviceName"] = "设备名称",
+        ["typeKey"] = "生产数据类型编码",
+        ["typeName"] = "生产数据类型名称",
         ["barcode"] = "条码",
-        ["stationName"] = "工位名称",
         ["result"] = "生产结果",
-        ["occurredAt"] = "时间"
+        ["completedAt"] = "完成时间"
     };
 
     public override SemanticQueryTarget Target => SemanticQueryTarget.ProductionData;
@@ -60,16 +61,15 @@ internal sealed class ProductionDataSummaryProfile : SemanticSummaryProfileBase
     private static string BuildBreakdown(IReadOnlyList<Dictionary<string, object?>> rows)
     {
         var preferredField = rows.Any(row =>
-            !string.IsNullOrWhiteSpace(SemanticSummaryFormatting.GetString(row, "stationName")) &&
-            SemanticSummaryFormatting.GetString(row, "stationName") != "-")
-            ? "stationName"
-            : "deviceCode";
+            SemanticSummaryFormatting.GetString(row, "typeName") != "-")
+            ? "typeName"
+            : "typeKey";
 
         return SemanticSummaryFormatting.BuildBreakdown(rows, preferredField, "条");
     }
 
     private static string Describe(Dictionary<string, object?> row)
     {
-        return $"设备 {SemanticSummaryFormatting.GetString(row, "deviceCode")}，工位 {SemanticSummaryFormatting.GetString(row, "stationName")}，条码 {SemanticSummaryFormatting.GetString(row, "barcode")}，生产结果 {SemanticSummaryFormatting.GetString(row, "result")}，时间 {SemanticSummaryFormatting.FormatTimestamp(SemanticSummaryFormatting.GetString(row, "occurredAt"))}";
+        return $"设备 {SemanticSummaryFormatting.GetString(row, "deviceId")} / {SemanticSummaryFormatting.GetString(row, "deviceName")}，类型 {SemanticSummaryFormatting.GetString(row, "typeKey")} / {SemanticSummaryFormatting.GetString(row, "typeName")}，条码 {SemanticSummaryFormatting.GetString(row, "barcode")}，生产结果 {SemanticSummaryFormatting.GetString(row, "result")}，完成时间 {SemanticSummaryFormatting.FormatTimestamp(SemanticSummaryFormatting.GetString(row, "completedAt"))}";
     }
 }

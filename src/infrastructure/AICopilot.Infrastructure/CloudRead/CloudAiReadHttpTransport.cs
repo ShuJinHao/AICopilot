@@ -8,8 +8,7 @@ namespace AICopilot.Infrastructure.CloudRead;
 
 internal sealed class CloudAiReadHttpTransport(HttpClient httpClient, ILogger logger)
 {
-    public async Task<JsonDocument> SendJsonAsync(
-        HttpMethod method,
+    public async Task<JsonDocument> GetJsonAsync(
         string path,
         IReadOnlyDictionary<string, string?>? query,
         CloudAiReadOptions configuredOptions,
@@ -19,7 +18,7 @@ internal sealed class CloudAiReadHttpTransport(HttpClient httpClient, ILogger lo
         timeoutCts.CancelAfter(TimeSpan.FromSeconds(configuredOptions.TimeoutSeconds));
 
         using var request = new HttpRequestMessage(
-            method,
+            HttpMethod.Get,
             BuildUri(configuredOptions, path, query));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", configuredOptions.ServiceAccountToken);
 
@@ -92,6 +91,10 @@ internal sealed class CloudAiReadHttpTransport(HttpClient httpClient, ILogger lo
     {
         return statusCode switch
         {
+            HttpStatusCode.BadRequest => new CloudAiReadException(
+                CloudAiReadProblemCodes.InvalidRequest,
+                "Cloud AiRead rejected the query parameters.",
+                statusCode),
             HttpStatusCode.Unauthorized => new CloudAiReadException(
                 CloudAiReadProblemCodes.Unauthorized,
                 "Cloud AiRead credential is missing or invalid.",
@@ -104,9 +107,13 @@ internal sealed class CloudAiReadHttpTransport(HttpClient httpClient, ILogger lo
                 CloudAiReadProblemCodes.NotFound,
                 "Cloud AiRead resource was not found.",
                 statusCode),
+            HttpStatusCode.TooManyRequests => new CloudAiReadException(
+                CloudAiReadProblemCodes.RateLimited,
+                "Cloud AiRead rate limit was reached; retry later.",
+                statusCode),
             _ => new CloudAiReadException(
                 CloudAiReadProblemCodes.Unavailable,
-                $"Cloud AiRead endpoint returned {(int)statusCode}.",
+                "Cloud AiRead endpoint is unavailable.",
                 statusCode)
         };
     }

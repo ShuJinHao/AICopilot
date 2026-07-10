@@ -24,6 +24,17 @@
 
 不得为了实现方便把这些能力合成一个大 agent、大 service 或绕过审批/工具边界的隐藏 adapter。`AgentWorkflowTopology` 的 `Tools`、`Knowledge`、`DataAnalysis`、`BusinessPolicy` 分支必须保持显式 fan-out/fan-in，不得拍平成串行或为新能力另起孤立链路。
 
+Cloud 只读 Agent 当前正式能力限定为：
+
+- `Analysis.Device.List/Detail/Status`：设备主数据以及 Cloud 权威 `softwareStatus`/运行心跳。
+- `Analysis.DeviceLog.Latest/Range/ByLevel`：设备日志正式查询。
+- `Analysis.Capacity.Range/ByDevice`：产能汇总/小时事实；`Analysis.Capacity.ByProcess` 尚不支持。
+- `Analysis.ProductionData.Latest/Range/ByDevice`：正式生产记录。
+- `Analysis.Process.List/Detail`：工序主数据列表与唯一精确详情。
+- `Analysis.ClientRelease.List`：Cloud 返回的客户端发布版本列表。
+
+以上能力必须复用统一语义定义、`CloudReadonlyAgentPlanService` 和唯一 Cloud AiRead 客户端；成功、合法空集或 Cloud 数据源不可用时都必须返回真实边界，不得回退 Direct DB、Text-to-SQL、Simulation、MCP 或隐藏适配器。`PlanAgentTaskCoordinator` 只能创建和维护草案，不得持有查询客户端或执行查询；语义 intent 只能在用户确认草案后创建，运行时工具只能在确认后的执行链调用。
+
 ## 3. Cloud 写入禁止
 
 - Agent workflow、MCP、Tool、后台任务、直接 SQL 和隐藏 adapter 均不得创建、修改、删除、补录、审批、派发或触发 Cloud 业务数据。

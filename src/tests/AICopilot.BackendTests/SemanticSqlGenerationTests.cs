@@ -22,28 +22,17 @@ public sealed class SemanticSqlGenerationTests
     [Fact]
     public void SqlGenerator_ShouldGenerateParameterizedReadOnlySql_FromSemanticPlan()
     {
-        var planningResult = _planner.Plan(
-            "Analysis.DeviceLog.Range",
-            """
-            {
-              "fields":["deviceCode","level","message","occurredAt"],
-              "filters":[
-                {"field":"deviceCode","operator":"eq","value":"DEV-01"},
-                {"field":"level","operator":"eq","value":"Error"}
-              ],
-              "timeRange":{
-                "field":"occurredAt",
-                "start":"2026-04-20T00:00:00Z",
-                "end":"2026-04-21T00:00:00Z"
-              },
-              "limit":30
-            }
-            """);
-
-        planningResult.IsSuccess.Should().BeTrue(planningResult.ErrorMessage);
+        var plan = CreateDirectSqlPlan(
+            SemanticQueryTarget.DeviceLog,
+            SemanticQueryKind.Range,
+            ["deviceCode", "level", "message", "occurredAt"],
+            [
+                new SemanticFilter("deviceCode", SemanticFilterOperator.Equal, "DEV-01"),
+                new SemanticFilter("level", SemanticFilterOperator.Equal, "Error")
+            ]);
         _mappingProvider.TryGetMapping(SemanticQueryTarget.DeviceLog, out var mapping).Should().BeTrue();
 
-        var sql = _sqlGenerator.Generate(planningResult.Plan!, mapping);
+        var sql = _sqlGenerator.Generate(plan, mapping);
 
         sql.SqlText.Should().StartWith("SELECT");
         sql.SqlText.Should().Contain("FROM device_log_view t");
@@ -63,27 +52,14 @@ public sealed class SemanticSqlGenerationTests
     [Fact]
     public void SqlGenerator_ShouldGenerateProductionRangeSql()
     {
-        var planningResult = _planner.Plan(
-            "Analysis.ProductionData.Range",
-            """
-            {
-              "fields":["deviceCode","barcode","result","occurredAt"],
-              "filters":[
-                {"field":"deviceCode","operator":"eq","value":"DEV-01"}
-              ],
-              "timeRange":{
-                "field":"occurredAt",
-                "start":"2026-04-20T00:00:00Z",
-                "end":"2026-04-21T00:00:00Z"
-              },
-              "limit":30
-            }
-            """);
-
-        planningResult.IsSuccess.Should().BeTrue(planningResult.ErrorMessage);
+        var plan = CreateDirectSqlPlan(
+            SemanticQueryTarget.ProductionData,
+            SemanticQueryKind.Range,
+            ["deviceCode", "barcode", "result", "occurredAt"],
+            [new SemanticFilter("deviceCode", SemanticFilterOperator.Equal, "DEV-01")]);
         _mappingProvider.TryGetMapping(SemanticQueryTarget.ProductionData, out var mapping).Should().BeTrue();
 
-        var sql = _sqlGenerator.Generate(planningResult.Plan!, mapping);
+        var sql = _sqlGenerator.Generate(plan, mapping);
 
         sql.SqlText.Should().Contain("FROM production_data_view t");
         sql.SqlText.Should().Contain("t.device_code = @p0");
@@ -121,21 +97,19 @@ public sealed class SemanticSqlGenerationTests
     [Fact]
     public void SqlGenerator_ShouldSupportConfiguredJoinFromClause_ForRealMappings()
     {
-        var planningResult = _planner.Plan(
+        var plan = new SemanticQueryPlan(
             "Analysis.DeviceLog.ByLevel",
-            """
-            {
-              "queryText":"查看设备 DEV-001 的错误日志",
-              "fields":["deviceCode","level","message","occurredAt"],
-              "filters":[
-                {"field":"deviceCode","operator":"eq","value":"DEV-001"},
-                {"field":"level","operator":"eq","value":"Error"}
-              ],
-              "limit":20
-            }
-            """);
-
-        planningResult.IsSuccess.Should().BeTrue(planningResult.ErrorMessage);
+            SemanticQueryTarget.DeviceLog,
+            SemanticQueryKind.ByLevel,
+            "查看设备 DEV-001 的错误日志",
+            new SemanticProjection(["deviceCode", "level", "message", "occurredAt"]),
+            [
+                new SemanticFilter("deviceCode", SemanticFilterOperator.Equal, "DEV-001"),
+                new SemanticFilter("level", SemanticFilterOperator.Equal, "Error")
+            ],
+            null,
+            new SemanticSort("occurredAt", SemanticSortDirection.Desc),
+            20);
 
         var mapping = new SemanticPhysicalMapping(
             SemanticQueryTarget.DeviceLog,
@@ -154,7 +128,7 @@ public sealed class SemanticSqlGenerationTests
             fromClause: "device_logs l INNER JOIN devices d ON d.id = l.device_id",
             defaultSort: new SemanticSort("occurredAt", SemanticSortDirection.Desc));
 
-        var sql = _sqlGenerator.Generate(planningResult.Plan!, mapping);
+        var sql = _sqlGenerator.Generate(plan, mapping);
 
         sql.SqlText.Should().Contain("FROM device_logs l INNER JOIN devices d ON d.id = l.device_id");
         sql.SqlText.Should().Contain("d.client_code = @p0");
@@ -167,7 +141,7 @@ public sealed class SemanticSqlGenerationTests
     }
 
     [Fact]
-    public void SqlGenerator_ShouldUseProcessNameJoinAndIlike_ForRealDeviceLogScopeFilter()
+    public void SqlGenerator_ShouldNotInventProcessNameScope_ForRealDeviceLogQuery()
     {
         var planningResult = _planner.Plan(
             "Analysis.DeviceLog.Latest",
@@ -188,12 +162,12 @@ public sealed class SemanticSqlGenerationTests
 
         sql.SqlText.Should().Contain("FROM device_logs l INNER JOIN devices d ON l.device_id = d.id LEFT JOIN mfg_processes mp ON d.process_id = mp.id");
         sql.SqlText.Should().Contain("d.device_name AS deviceName");
-        sql.SqlText.Should().Contain("mp.process_name AS processName");
-        sql.SqlText.Should().Contain("mp.process_name ILIKE @p");
+        sql.SqlText.Should().NotContain("mp.process_name AS processName");
+        sql.SqlText.Should().NotContain("mp.process_name ILIKE @p");
         sql.SqlText.Should().Contain("l.level IN (");
         sql.SqlText.Should().Contain("l.log_time >= @p");
         sql.SqlText.Should().Contain("l.log_time <= @p");
-        sql.Parameters.Values.Should().Contain("%模切%");
+        sql.Parameters.Values.Should().NotContain("%模切%");
         sql.Parameters.Values.Should().Contain("ERROR");
         sql.Parameters.Values.Should().Contain("WARN");
     }
@@ -321,5 +295,26 @@ public sealed class SemanticSqlGenerationTests
 
         result.IsSafe.Should().BeFalse();
         result.ErrorMessage.Should().Contain("禁止");
+    }
+
+    private static SemanticQueryPlan CreateDirectSqlPlan(
+        SemanticQueryTarget target,
+        SemanticQueryKind kind,
+        IReadOnlyList<string> projectionFields,
+        IReadOnlyList<SemanticFilter> filters)
+    {
+        return new SemanticQueryPlan(
+            $"Analysis.{target}.{kind}",
+            target,
+            kind,
+            QueryText: null,
+            new SemanticProjection(projectionFields),
+            filters,
+            new SemanticTimeRange(
+                "occurredAt",
+                DateTimeOffset.Parse("2026-04-20T00:00:00Z"),
+                DateTimeOffset.Parse("2026-04-21T00:00:00Z")),
+            new SemanticSort("occurredAt", SemanticSortDirection.Desc),
+            30);
     }
 }

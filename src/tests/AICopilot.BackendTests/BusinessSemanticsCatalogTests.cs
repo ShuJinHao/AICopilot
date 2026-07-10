@@ -47,7 +47,9 @@ public sealed class BusinessSemanticsCatalogTests
             SemanticQueryTarget.Device,
             SemanticQueryTarget.DeviceLog,
             SemanticQueryTarget.Capacity,
-            SemanticQueryTarget.ProductionData
+            SemanticQueryTarget.ProductionData,
+            SemanticQueryTarget.Process,
+            SemanticQueryTarget.ClientRelease
         ]);
         profiles.Should().OnlyContain(item => item.ExampleQuestions.Count > 0);
         profiles.Should().OnlyContain(item =>

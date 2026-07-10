@@ -12,12 +12,10 @@ internal static class CloudAiReadDocumentAdapter
     {
         var records = CloudAiReadJsonValueReader.ExtractRecords(root, limit);
         var items = records.Select(record => new CloudAiReadDeviceDto(
-            CloudAiReadJsonValueReader.GetString(record, "deviceId", "id"),
-            CloudAiReadJsonValueReader.GetString(record, "deviceCode", "clientCode", "code"),
-            CloudAiReadJsonValueReader.GetString(record, "deviceName", "name"),
-            CloudAiReadJsonValueReader.GetString(record, "status", "state"),
-            CloudAiReadJsonValueReader.GetString(record, "lineName", "line"),
-            CloudAiReadJsonValueReader.GetDate(record, "updatedAt", "updatedAtUtc", "lastSeenAt"),
+            CloudAiReadJsonValueReader.GetString(record, "id"),
+            CloudAiReadJsonValueReader.GetString(record, "deviceCode"),
+            CloudAiReadJsonValueReader.GetString(record, "deviceName"),
+            CloudAiReadJsonValueReader.GetString(record, "processId"),
             CloudAiReadJsonValueReader.ExtractAdditionalFields(record))).ToArray();
 
         var rows = items.Select(item => new Dictionary<string, object?>
@@ -25,9 +23,7 @@ internal static class CloudAiReadDocumentAdapter
             ["deviceId"] = item.DeviceId,
             ["deviceCode"] = item.DeviceCode,
             ["deviceName"] = item.DeviceName,
-            ["status"] = item.Status,
-            ["lineName"] = item.LineName,
-            ["updatedAt"] = item.UpdatedAt
+            ["processId"] = item.ProcessId
         }).ToArray();
 
         return BuildResult(sourcePath, "Cloud AiRead API（设备正式只读数据）", limit, root, items, rows);
@@ -40,9 +36,9 @@ internal static class CloudAiReadDocumentAdapter
     {
         var records = CloudAiReadJsonValueReader.ExtractRecords(root, limit);
         var items = records.Select(record => new CloudAiReadProcessDto(
-            CloudAiReadJsonValueReader.GetString(record, "processId", "id"),
-            CloudAiReadJsonValueReader.GetString(record, "processCode", "code"),
-            CloudAiReadJsonValueReader.GetString(record, "processName", "name"),
+            CloudAiReadJsonValueReader.GetString(record, "id"),
+            CloudAiReadJsonValueReader.GetString(record, "processCode"),
+            CloudAiReadJsonValueReader.GetString(record, "processName"),
             CloudAiReadJsonValueReader.ExtractAdditionalFields(record))).ToArray();
 
         var rows = items.Select(item => new Dictionary<string, object?>
@@ -62,7 +58,7 @@ internal static class CloudAiReadDocumentAdapter
     {
         var records = CloudAiReadJsonValueReader.ExtractRecords(root, limit);
         var items = records.Select(record => new CloudAiReadClientReleaseVersionDto(
-            CloudAiReadJsonValueReader.GetString(record, "releaseId", "id"),
+            CloudAiReadJsonValueReader.GetString(record, "id"),
             CloudAiReadJsonValueReader.GetString(record, "componentKind"),
             CloudAiReadJsonValueReader.GetString(record, "componentKey"),
             CloudAiReadJsonValueReader.GetString(record, "displayName"),
@@ -71,9 +67,9 @@ internal static class CloudAiReadDocumentAdapter
             CloudAiReadJsonValueReader.GetString(record, "version"),
             CloudAiReadJsonValueReader.GetString(record, "status"),
             CloudAiReadJsonValueReader.GetString(record, "releaseNotes"),
-            CloudAiReadJsonValueReader.GetDate(record, "createdAtUtc", "createdAt"),
-            CloudAiReadJsonValueReader.GetDate(record, "publishedAtUtc", "publishedAt"),
-            CloudAiReadJsonValueReader.GetDate(record, "deletedAtUtc", "deletedAt"),
+            CloudAiReadJsonValueReader.GetDate(record, "createdAtUtc"),
+            CloudAiReadJsonValueReader.GetDate(record, "publishedAtUtc"),
+            CloudAiReadJsonValueReader.GetDate(record, "deletedAtUtc"),
             CloudAiReadJsonValueReader.ExtractAdditionalFields(record))).ToArray();
 
         var rows = items.Select(item => new Dictionary<string, object?>
@@ -102,19 +98,20 @@ internal static class CloudAiReadDocumentAdapter
     {
         var records = CloudAiReadJsonValueReader.ExtractRecords(root, limit);
         var items = records.Select(record => new CloudAiReadDeviceClientStateDto(
-            CloudAiReadJsonValueReader.GetString(record, "deviceId", "id"),
+            CloudAiReadJsonValueReader.GetString(record, "deviceId"),
             CloudAiReadJsonValueReader.GetString(record, "deviceName"),
-            CloudAiReadJsonValueReader.GetString(record, "clientCode", "deviceCode"),
+            CloudAiReadJsonValueReader.GetString(record, "clientCode"),
             CloudAiReadJsonValueReader.GetString(record, "primaryIp"),
             CloudAiReadJsonValueReader.GetString(record, "channel"),
             CloudAiReadJsonValueReader.GetString(record, "hostVersion"),
             CloudAiReadJsonValueReader.GetString(record, "hostApiVersion"),
-            CloudAiReadJsonValueReader.GetDate(record, "versionReportedAtUtc", "versionReportedAt"),
-            CloudAiReadJsonValueReader.GetDate(record, "versionReceivedAtUtc", "versionReceivedAt"),
+            CloudAiReadJsonValueReader.GetDate(record, "versionReportedAtUtc"),
+            CloudAiReadJsonValueReader.GetDate(record, "versionReceivedAtUtc"),
+            CloudAiReadJsonValueReader.GetString(record, "softwareStatus"),
             CloudAiReadJsonValueReader.GetString(record, "runtimeStatus"),
-            CloudAiReadJsonValueReader.GetDate(record, "runtimeStartedAtUtc", "runtimeStartedAt"),
-            CloudAiReadJsonValueReader.GetDate(record, "lastRuntimeHeartbeatAtUtc", "lastRuntimeHeartbeatAt"),
-            CloudAiReadJsonValueReader.GetDate(record, "updatedAtUtc", "updatedAt"),
+            CloudAiReadJsonValueReader.GetDate(record, "runtimeStartedAtUtc"),
+            CloudAiReadJsonValueReader.GetDate(record, "lastRuntimeHeartbeatAtUtc"),
+            CloudAiReadJsonValueReader.GetDate(record, "updatedAtUtc"),
             CloudAiReadJsonValueReader.ExtractAdditionalFields(record))).ToArray();
 
         var rows = items.Select(item => new Dictionary<string, object?>
@@ -128,6 +125,7 @@ internal static class CloudAiReadDocumentAdapter
             ["hostApiVersion"] = item.HostApiVersion,
             ["versionReportedAtUtc"] = item.VersionReportedAtUtc,
             ["versionReceivedAtUtc"] = item.VersionReceivedAtUtc,
+            ["softwareStatus"] = item.SoftwareStatus,
             ["runtimeStatus"] = item.RuntimeStatus,
             ["runtimeStartedAtUtc"] = item.RuntimeStartedAtUtc,
             ["lastRuntimeHeartbeatAtUtc"] = item.LastRuntimeHeartbeatAtUtc,
@@ -144,9 +142,9 @@ internal static class CloudAiReadDocumentAdapter
     {
         var records = CloudAiReadJsonValueReader.ExtractRecords(root, limit);
         var items = records.Select(record => new CloudAiReadCapacitySummaryDto(
-            CloudAiReadJsonValueReader.GetString(record, "date", "shiftDate"),
-            CloudAiReadJsonValueReader.GetDecimal(record, "totalCount", "outputQty", "output", "totalOutput"),
-            CloudAiReadJsonValueReader.GetDecimal(record, "okCount", "qualifiedQty", "qualified", "goodQty"),
+            CloudAiReadJsonValueReader.GetString(record, "date"),
+            CloudAiReadJsonValueReader.GetDecimal(record, "totalCount"),
+            CloudAiReadJsonValueReader.GetDecimal(record, "okCount"),
             CloudAiReadJsonValueReader.GetDecimal(record, "ngCount"),
             CloudAiReadJsonValueReader.GetDecimal(record, "dayShiftTotal"),
             CloudAiReadJsonValueReader.GetDecimal(record, "nightShiftTotal"),
@@ -176,14 +174,14 @@ internal static class CloudAiReadDocumentAdapter
     {
         var records = CloudAiReadJsonValueReader.ExtractRecords(root, limit);
         var items = records.Select(record => new CloudAiReadCapacityHourlyDto(
-            CloudAiReadJsonValueReader.GetDate(record, "time", "occurredAt"),
-            CloudAiReadJsonValueReader.GetString(record, "date", "shiftDate"),
+            CloudAiReadJsonValueReader.GetDate(record, "time"),
+            CloudAiReadJsonValueReader.GetString(record, "date"),
             CloudAiReadJsonValueReader.GetInt(record, "hour"),
             CloudAiReadJsonValueReader.GetInt(record, "minute"),
             CloudAiReadJsonValueReader.GetString(record, "timeLabel"),
             CloudAiReadJsonValueReader.GetString(record, "shiftCode"),
-            CloudAiReadJsonValueReader.GetDecimal(record, "totalCount", "outputQty"),
-            CloudAiReadJsonValueReader.GetDecimal(record, "okCount", "qualifiedQty"),
+            CloudAiReadJsonValueReader.GetDecimal(record, "totalCount"),
+            CloudAiReadJsonValueReader.GetDecimal(record, "okCount"),
             CloudAiReadJsonValueReader.GetDecimal(record, "ngCount"),
             CloudAiReadJsonValueReader.GetDecimal(record, "okRate"),
             CloudAiReadJsonValueReader.ExtractAdditionalFields(record))).ToArray();
@@ -215,26 +213,25 @@ internal static class CloudAiReadDocumentAdapter
     {
         var records = CloudAiReadJsonValueReader.ExtractRecords(root, limit);
         var items = records.Select(record => new CloudAiReadDeviceLogDto(
-            CloudAiReadJsonValueReader.GetString(record, "logId", "id"),
+            CloudAiReadJsonValueReader.GetString(record, "id"),
             CloudAiReadJsonValueReader.GetString(record, "deviceId"),
-            CloudAiReadJsonValueReader.GetString(record, "deviceCode", "clientCode"),
             CloudAiReadJsonValueReader.GetString(record, "deviceName"),
-            CloudAiReadJsonValueReader.GetString(record, "level", "severity"),
-            CloudAiReadJsonValueReader.GetString(record, "message", "content"),
-            CloudAiReadJsonValueReader.GetString(record, "source", "logger"),
-            CloudAiReadJsonValueReader.GetDate(record, "occurredAt", "logTime", "createdAt", "timestamp"),
+            CloudAiReadJsonValueReader.GetString(record, "level"),
+            CloudAiReadJsonValueReader.GetString(record, "message"),
+            CloudAiReadJsonValueReader.GetDate(record, "logTime"),
+            CloudAiReadJsonValueReader.GetDate(record, "receivedAt"),
             CloudAiReadJsonValueReader.ExtractAdditionalFields(record))).ToArray();
 
         var rows = items.Select(item => new Dictionary<string, object?>
         {
             ["logId"] = item.LogId,
             ["deviceId"] = item.DeviceId,
-            ["deviceCode"] = item.DeviceCode,
             ["deviceName"] = item.DeviceName,
             ["level"] = item.Level,
             ["message"] = item.Message,
-            ["source"] = item.Source,
-            ["occurredAt"] = item.OccurredAt
+            ["logTime"] = item.LogTime,
+            ["receivedAt"] = item.ReceivedAt,
+            ["occurredAt"] = item.LogTime
         }).ToArray();
 
         return BuildResult(sourcePath, "Cloud AiRead API（设备日志正式只读数据）", limit, root, items, rows);
@@ -247,17 +244,14 @@ internal static class CloudAiReadDocumentAdapter
     {
         var records = CloudAiReadJsonValueReader.ExtractRecords(root, limit);
         var items = records.Select(record => new CloudAiReadProductionRecordDto(
-            CloudAiReadJsonValueReader.GetString(record, "recordId", "id"),
+            CloudAiReadJsonValueReader.GetString(record, "recordId"),
             CloudAiReadJsonValueReader.GetString(record, "typeKey"),
-            CloudAiReadJsonValueReader.GetString(record, "typeName", "displayName"),
+            CloudAiReadJsonValueReader.GetString(record, "typeName"),
             CloudAiReadJsonValueReader.GetString(record, "deviceId"),
-            CloudAiReadJsonValueReader.GetString(record, "deviceCode", "clientCode"),
             CloudAiReadJsonValueReader.GetString(record, "deviceName"),
-            CloudAiReadJsonValueReader.GetString(record, "processName", "process", "typeName"),
-            CloudAiReadJsonValueReader.GetString(record, "barcode", "cellCode", "sn"),
-            CloudAiReadJsonValueReader.GetString(record, "stationName", "station", "typeName", "typeKey"),
-            CloudAiReadJsonValueReader.GetString(record, "result", "status"),
-            CloudAiReadJsonValueReader.GetDate(record, "occurredAt", "completedAt", "passedAt", "createdAt"),
+            CloudAiReadJsonValueReader.GetString(record, "barcode"),
+            CloudAiReadJsonValueReader.GetString(record, "result"),
+            CloudAiReadJsonValueReader.GetDate(record, "completedAt"),
             CloudAiReadJsonValueReader.GetDate(record, "receivedAt"),
             CloudAiReadJsonValueReader.GetObject(record, "fields"),
             CloudAiReadJsonValueReader.GetObjectArray(record, "fieldSchema")
@@ -271,14 +265,10 @@ internal static class CloudAiReadDocumentAdapter
             ["typeKey"] = item.TypeKey,
             ["typeName"] = item.TypeName,
             ["deviceId"] = item.DeviceId,
-            ["deviceCode"] = item.DeviceCode,
             ["deviceName"] = item.DeviceName,
-            ["processName"] = item.ProcessName,
             ["barcode"] = item.Barcode,
-            ["stationName"] = item.StationName,
             ["result"] = item.Result,
-            ["occurredAt"] = item.OccurredAt,
-            ["completedAt"] = item.OccurredAt,
+            ["completedAt"] = item.CompletedAt,
             ["receivedAt"] = item.ReceivedAt,
             ["fields"] = item.Fields,
             ["fieldSchema"] = item.FieldSchema
@@ -314,13 +304,18 @@ internal static class CloudAiReadDocumentAdapter
         IReadOnlyList<T> items,
         IReadOnlyList<Dictionary<string, object?>> rows)
     {
+        var metadata = CloudAiReadJsonValueReader.ReadEnvelopeMetadata(root);
         return new CloudAiReadResult<T>(
             sourcePath,
             sourceLabel,
-            DateTimeOffset.UtcNow,
+            metadata.AsOfUtc,
             limit,
-            CloudAiReadJsonValueReader.IsTruncated(root, items.Count, limit),
+            metadata.Truncated,
             items,
-            rows);
+            rows,
+            metadata.Source,
+            metadata.QueryScope,
+            metadata.RowCount,
+            metadata.NextCursor);
     }
 }

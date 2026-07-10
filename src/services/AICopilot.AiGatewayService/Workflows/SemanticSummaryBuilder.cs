@@ -38,7 +38,9 @@ public static class SemanticSummaryBuilder
         {
             return new SemanticSummaryDto(
                 plan.Target.ToString(),
-                "当前范围内未命中记录。",
+                plan.Target == SemanticQueryTarget.Device && plan.Kind == SemanticQueryKind.Status
+                    ? "当前授权范围内没有匹配的设备。"
+                    : "当前范围内未命中记录。",
                 [],
                 [],
                 scope);

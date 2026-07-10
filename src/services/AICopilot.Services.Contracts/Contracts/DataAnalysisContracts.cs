@@ -34,7 +34,9 @@ public enum SemanticQueryTarget
     DeviceLog = 2,
     Recipe = 3,
     Capacity = 4,
-    ProductionData = 5
+    ProductionData = 5,
+    Process = 6,
+    ClientRelease = 7
 }
 
 public enum SemanticQueryKind
@@ -361,4 +363,3 @@ public record ChartConfig
     [JsonPropertyName("series")]
     public string? Series { get; set; }
 }
-

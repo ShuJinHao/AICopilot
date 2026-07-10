@@ -35,7 +35,7 @@ internal static partial class DeviceLogFollowUpIntentRewriter
         }
 
         var levelFilter = InferCurrentLevelFilter(currentMessage);
-        var scopeFilter = InferCurrentScopeFilter(currentMessage);
+        var scopeFilter = InferDeviceCodeFilter(currentMessage) ?? InferDeviceCodeFilter(previousDeviceLogQuestion);
         var payload = BuildPayload(previousDeviceLogQuestion, currentMessage!, levelFilter, scopeFilter);
         var targetIntent = levelFilter is null && !ContainsLevelSignal(previousDeviceLogQuestion)
             ? DeviceLogLatestIntent
@@ -97,7 +97,7 @@ internal static partial class DeviceLogFollowUpIntentRewriter
                                   ContainsEnglishTerm(normalized, "warn") ||
                                   ContainsEnglishTerm(normalized, "warning") ||
                                   ContainsEnglishTerm(normalized, "info");
-        var hasScopeSignal = DeviceLogScopeRegex().IsMatch(normalized) ||
+        var hasScopeSignal = DeviceCodeRegex().IsMatch(normalized) ||
                              ContainsAny(normalized, "设备", "工序", "机台");
 
         return hasFollowUpMarker && (hasLogOrLevelSignal || hasScopeSignal);
@@ -160,69 +160,20 @@ internal static partial class DeviceLogFollowUpIntentRewriter
             : null;
     }
 
-    private static SemanticFallbackFilter? InferCurrentScopeFilter(string? message)
+    private static SemanticFallbackFilter? InferDeviceCodeFilter(string? message)
     {
         if (string.IsNullOrWhiteSpace(message))
         {
             return null;
         }
 
-        var match = DeviceLogScopeRegex().Match(message);
+        var match = DeviceCodeRegex().Match(message);
         if (!match.Success)
         {
             return null;
         }
 
-        var scope = CleanScopeCandidate(match.Groups["name"].Value);
-        return string.IsNullOrWhiteSpace(scope)
-            ? null
-            : new SemanticFallbackFilter("processName", "contains", scope);
-    }
-
-    private static string? CleanScopeCandidate(string raw)
-    {
-        var value = raw.Trim();
-        string[] prefixes =
-        [
-            "替我",
-            "帮我",
-            "请",
-            "查询",
-            "查看",
-            "看",
-            "分析",
-            "排查",
-            "诊断",
-            "一下",
-            "下",
-            "还有",
-            "那",
-            "换成",
-            "改成",
-            "切到",
-            "换",
-            "这个",
-            "该",
-            "的"
-        ];
-
-        var changed = true;
-        while (changed)
-        {
-            changed = false;
-            foreach (var prefix in prefixes)
-            {
-                if (value.StartsWith(prefix, StringComparison.Ordinal))
-                {
-                    value = value[prefix.Length..].Trim();
-                    changed = true;
-                }
-            }
-        }
-
-        return value.Length is >= 2 and <= 16
-            ? value
-            : null;
+        return new SemanticFallbackFilter("deviceCode", "eq", match.Groups["code"].Value);
     }
 
     private static string AppendReason(string? existing)
@@ -246,8 +197,8 @@ internal static partial class DeviceLogFollowUpIntentRewriter
             RegexOptions.CultureInvariant);
     }
 
-    [GeneratedRegex(@"(?<name>[\p{L}\p{N}_\-]{1,24})(?:工序|设备|机台)", RegexOptions.CultureInvariant)]
-    private static partial Regex DeviceLogScopeRegex();
+    [GeneratedRegex(@"(?<![A-Za-z0-9_-])(?<code>[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)+)(?![A-Za-z0-9_-])", RegexOptions.CultureInvariant)]
+    private static partial Regex DeviceCodeRegex();
 
     private sealed record SemanticFallbackPayload(
         string QueryText,

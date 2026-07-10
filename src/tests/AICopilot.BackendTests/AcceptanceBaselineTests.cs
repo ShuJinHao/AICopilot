@@ -21,7 +21,7 @@ public sealed class AcceptanceBaselineTests(CloudSemanticSimulationAICopilotAppF
     private readonly CloudSemanticSimulationAICopilotAppFixture _fixture = fixture;
 
     [Fact]
-    public async Task ChineseStructuredAcceptanceChat_ShouldCoverAllBusinessDomains()
+    public async Task ChineseStructuredAcceptanceChat_ShouldKeepCoveredDomainsCloudOnly()
     {
         await AuthenticateAsAdminAsync();
 
@@ -65,15 +65,13 @@ public sealed class AcceptanceBaselineTests(CloudSemanticSimulationAICopilotAppF
 
             var cases = new (string Message, string Intent, string[] ExpectedFragments)[]
             {
-                ("列出 LINE-A 产线的设备", "Analysis.Device.List", ["DEV-001", "Cutter A", "LINE-A"]),
-                ("查看设备 DEV-001 的详情", "Analysis.Device.Detail", ["DEV-001", "Cutter A", "Running"]),
-                ("设备 DEV-001 现在是什么状态？", "Analysis.Device.Status", ["DEV-001", "Running"]),
+                ("列出设备主数据", "Analysis.Device.List", ["DEV-001", "Cutter A"]),
+                ("查看设备 DEV-001 的详情", "Analysis.Device.Detail", ["DEV-001", "Cutter A"]),
                 ("查看设备 DEV-001 最新日志", "Analysis.DeviceLog.Latest", ["DEV-001", "Temperature high", "WARN"]),
                 ("查看设备 DEV-001 在 2026-04-20T00:00:00Z 到 2026-04-20T23:59:59Z 的日志", "Analysis.DeviceLog.Range", ["DEV-001", "Motor overload", "Start completed"]),
                 ("查看设备 DEV-001 的错误日志", "Analysis.DeviceLog.ByLevel", ["DEV-001", "ERROR", "Motor overload"]),
                 ("查看设备 DEV-001 在 2026-04-20T00:00:00Z 到 2026-04-21T23:59:59Z 的产能", "Analysis.Capacity.Range", ["DEV-001", "126", "123"]),
                 ("查看设备 DEV-001 的产能", "Analysis.Capacity.ByDevice", ["DEV-001", "Cutting", "126"]),
-                ("查看 Cutting 工序的产能", "Analysis.Capacity.ByProcess", ["Cutting", "DEV-001", "126"]),
                 ("查看设备 DEV-001 最新生产记录", "Analysis.ProductionData.Latest", ["DEV-001", "CELL-0002", "Fail"]),
                 ("查看 DEV-001 在 2026-04-21T00:00:00Z 到 2026-04-21T23:59:59Z 的生产记录", "Analysis.ProductionData.Range", ["DEV-001", "CELL-0001", "CELL-0002"]),
                 ("查看设备 DEV-001 的生产记录", "Analysis.ProductionData.ByDevice", ["DEV-001", "CELL-0001", "Station-A"])
@@ -81,7 +79,20 @@ public sealed class AcceptanceBaselineTests(CloudSemanticSimulationAICopilotAppF
 
             foreach (var testCase in cases)
             {
-                await AssertSemanticChatAsync(sessionId, testCase.Message, testCase.Intent, testCase.ExpectedFragments);
+                await AssertCloudOnlySourceUnavailableAsync(sessionId, testCase.Message, testCase.Intent);
+            }
+
+            var cloudOnlyBoundaryCases = new (string Message, string Intent)[]
+            {
+                ("设备 DEV-001 现在是什么状态？", "Analysis.Device.Status"),
+                ("列出工序主数据", "Analysis.Process.List"),
+                ("查看 CUT 工序详情", "Analysis.Process.Detail"),
+                ("列出 stable 通道、win-x64 运行时的已发布客户端版本", "Analysis.ClientRelease.List")
+            };
+
+            foreach (var testCase in cloudOnlyBoundaryCases)
+            {
+                await AssertCloudOnlySourceUnavailableAsync(sessionId, testCase.Message, testCase.Intent);
             }
 
             var recipeBoundaryCases = new (string Message, string Intent)[]
@@ -357,38 +368,6 @@ public sealed class AcceptanceBaselineTests(CloudSemanticSimulationAICopilotAppF
         }
     }
 
-    private async Task AssertSemanticChatAsync(Guid sessionId, string message, string expectedIntent, params string[] expectedTextFragments)
-    {
-        var events = await PostChatAsync(new
-        {
-            sessionId,
-            message
-        });
-
-        events.Should().NotContain(item => item.Type == "Error", "semantic chat should not be blocked for '{0}'", message);
-        events.Should().Contain(item => item.Type == "Intent" && item.Content.Contains(expectedIntent, StringComparison.OrdinalIgnoreCase));
-
-        var text = string.Concat(events.Where(item => item.Type == "Text").Select(item => item.Content));
-        text.Should().NotBeNullOrWhiteSpace();
-        text.Should().Contain("结论：");
-        text.Should().Contain("关键指标：");
-        text.Should().Contain("关键记录：");
-        text.Should().Contain("查询范围：");
-
-        foreach (var expectedTextFragment in expectedTextFragments)
-        {
-            text.Should().Contain(expectedTextFragment);
-        }
-
-        text.Contains("SELECT", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
-        text.Contains("device_master_cloud_sim_view", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
-        text.Contains("device_log_cloud_sim_view", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
-        text.Contains("recipe_cloud_sim_view", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
-        text.Contains("capacity_cloud_sim_view", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
-        text.Contains("production_data_cloud_sim_view", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
-        text.Contains("DeviceSemanticReadonly", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
-    }
-
     private async Task AssertRecipeDataReadBlockedAsync(Guid sessionId, string message, string expectedIntent)
     {
         var events = await PostChatAsync(new
@@ -412,6 +391,20 @@ public sealed class AcceptanceBaselineTests(CloudSemanticSimulationAICopilotAppF
         text.Contains("recipe_cloud_sim_view", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
         text.Contains("vw_recipe_readonly", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
         text.Contains("DeviceSemanticReadonly", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
+    }
+
+    private async Task AssertCloudOnlySourceUnavailableAsync(Guid sessionId, string message, string expectedIntent)
+    {
+        var events = await PostChatAsync(new { sessionId, message });
+
+        events.Should().NotContain(item => item.Type == "Error", "Cloud-only source boundary should be returned for '{0}'", message);
+        events.Should().Contain(item => item.Type == "Intent" && item.Content.Contains(expectedIntent, StringComparison.OrdinalIgnoreCase));
+
+        var text = string.Concat(events.Where(item => item.Type == "Text").Select(item => item.Content));
+        text.Should().Contain("正式 Cloud AiRead 数据源不可用");
+        text.Should().Contain("未回退 Direct DB、Text-to-SQL 或 Simulation");
+        text.Should().NotContain("Running");
+        text.Should().NotContain("SELECT");
     }
 
     private async Task AssertPolicyChatAsync(Guid sessionId, string message, string expectedIntent, params string[] expectedTextFragments)

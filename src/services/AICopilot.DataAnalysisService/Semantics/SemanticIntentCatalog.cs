@@ -26,6 +26,8 @@ public sealed class SemanticIntentCatalog(
         var recipeDefinition = definitionCatalog.Get(SemanticQueryTarget.Recipe);
         var capacityDefinition = definitionCatalog.Get(SemanticQueryTarget.Capacity);
         var productionDefinition = definitionCatalog.Get(SemanticQueryTarget.ProductionData);
+        var processDefinition = definitionCatalog.Get(SemanticQueryTarget.Process);
+        var clientReleaseDefinition = definitionCatalog.Get(SemanticQueryTarget.ClientRelease);
 
         return
         [
@@ -33,7 +35,7 @@ public sealed class SemanticIntentCatalog(
                 "Analysis.Device.List",
                 SemanticQueryTarget.Device,
                 SemanticQueryKind.List,
-                "设备列表只读语义查询，可按设备编码、设备名称、设备状态或产线筛选，适用于“列出 LINE-A 产线设备”。",
+                "设备主数据列表只读语义查询；Cloud 正式端点支持 deviceId、deviceCode、processId、keyword 的 AND 过滤，不提供运行状态或产线字段。",
                 deviceDefinition.GetDefaultProjection(SemanticQueryKind.List).Fields,
                 DefaultSortField: "deviceCode",
                 DefaultSortDirection: SemanticSortDirection.Asc,
@@ -52,9 +54,9 @@ public sealed class SemanticIntentCatalog(
                 "Analysis.Device.Status",
                 SemanticQueryTarget.Device,
                 SemanticQueryKind.Status,
-                "设备状态只读语义查询，用于查看单台或多台设备当前状态。",
+                "设备最后上报运行状态只读查询；状态来自 Cloud device-client-states，并同时展示心跳时间，不推断在线或离线。",
                 deviceDefinition.GetDefaultProjection(SemanticQueryKind.Status).Fields,
-                DefaultSortField: "updatedAt",
+                DefaultSortField: null,
                 DefaultSortDirection: SemanticSortDirection.Desc,
                 DefaultLimit: deviceDefinition.DefaultLimit),
             new(
@@ -124,6 +126,7 @@ public sealed class SemanticIntentCatalog(
                 DefaultSortField: "occurredAt",
                 DefaultSortDirection: SemanticSortDirection.Desc,
                 DefaultLimit: capacityDefinition.DefaultLimit,
+                RequiredAnyFilterFields: ["deviceId", "deviceCode"],
                 RequiresTimeRange: true),
             new(
                 "Analysis.Capacity.ByDevice",
@@ -136,22 +139,12 @@ public sealed class SemanticIntentCatalog(
                 DefaultLimit: capacityDefinition.DefaultLimit,
                 RequiredAnyFilterFields: ["deviceId", "deviceCode"]),
             new(
-                "Analysis.Capacity.ByProcess",
-                SemanticQueryTarget.Capacity,
-                SemanticQueryKind.ByProcess,
-                "按工序筛选的产能只读语义查询。",
-                capacityDefinition.GetDefaultProjection(SemanticQueryKind.ByProcess).Fields,
-                DefaultSortField: "occurredAt",
-                DefaultSortDirection: SemanticSortDirection.Desc,
-                DefaultLimit: capacityDefinition.DefaultLimit,
-                RequiredAllFilterFields: ["processName"]),
-            new(
                 "Analysis.ProductionData.Latest",
                 SemanticQueryTarget.ProductionData,
                 SemanticQueryKind.Latest,
                 "最新生产数据只读语义查询，默认按发生时间倒序返回。",
                 productionDefinition.GetDefaultProjection(SemanticQueryKind.Latest).Fields,
-                DefaultSortField: "occurredAt",
+                DefaultSortField: "completedAt",
                 DefaultSortDirection: SemanticSortDirection.Desc,
                 DefaultLimit: productionDefinition.DefaultLimit),
             new(
@@ -160,7 +153,7 @@ public sealed class SemanticIntentCatalog(
                 SemanticQueryKind.Range,
                 "生产数据时间范围只读语义查询，必须带发生时间范围。",
                 productionDefinition.GetDefaultProjection(SemanticQueryKind.Range).Fields,
-                DefaultSortField: "occurredAt",
+                DefaultSortField: "completedAt",
                 DefaultSortDirection: SemanticSortDirection.Desc,
                 DefaultLimit: productionDefinition.DefaultLimit,
                 RequiresTimeRange: true),
@@ -170,10 +163,38 @@ public sealed class SemanticIntentCatalog(
                 SemanticQueryKind.ByDevice,
                 "按设备筛选的生产数据只读语义查询。",
                 productionDefinition.GetDefaultProjection(SemanticQueryKind.ByDevice).Fields,
-                DefaultSortField: "occurredAt",
+                DefaultSortField: "completedAt",
                 DefaultSortDirection: SemanticSortDirection.Desc,
                 DefaultLimit: productionDefinition.DefaultLimit,
-                RequiredAnyFilterFields: ["deviceId", "deviceCode"])
+                RequiredAnyFilterFields: ["deviceId", "deviceCode"]),
+            new(
+                "Analysis.Process.List",
+                SemanticQueryTarget.Process,
+                SemanticQueryKind.List,
+                "Cloud 工序主数据列表只读查询；正式端点支持 processId 精确过滤和 processCode/processName keyword。",
+                processDefinition.GetDefaultProjection(SemanticQueryKind.List).Fields,
+                DefaultSortField: null,
+                DefaultSortDirection: SemanticSortDirection.Asc,
+                DefaultLimit: processDefinition.DefaultLimit),
+            new(
+                "Analysis.Process.Detail",
+                SemanticQueryTarget.Process,
+                SemanticQueryKind.Detail,
+                "Cloud 单工序主数据只读查询；processId 使用 GUID 精确过滤，工序编码或名称使用 keyword 后进行唯一精确匹配。",
+                processDefinition.GetDefaultProjection(SemanticQueryKind.Detail).Fields,
+                DefaultSortField: null,
+                DefaultSortDirection: SemanticSortDirection.Asc,
+                DefaultLimit: 1,
+                RequiredAnyFilterFields: ["processId", "processCode", "processName"]),
+            new(
+                "Analysis.ClientRelease.List",
+                SemanticQueryTarget.ClientRelease,
+                SemanticQueryKind.List,
+                "Cloud 客户端发布版本只读查询；只使用 channel、targetRuntime、status、includeArchived 正式过滤条件，不生成版本、哈希、下载地址或发布说明。",
+                clientReleaseDefinition.GetDefaultProjection(SemanticQueryKind.List).Fields,
+                DefaultSortField: null,
+                DefaultSortDirection: SemanticSortDirection.Desc,
+                DefaultLimit: clientReleaseDefinition.DefaultLimit)
         ];
     }
 }

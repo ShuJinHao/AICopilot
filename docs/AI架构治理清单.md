@@ -234,7 +234,7 @@ git log --oneline -n 20 -- AICopilot.slnx deploy src docs AGENTS.md 资料
 
 实施要点：
 
-- `CloudAiReadEndpointPolicy` 只允许批准的 GET/只读 POST 路径；GET allowlist 必须逐项覆盖 Cloud `AI只读接口契约.md` 当前八个正式表面：`devices`、`processes`、`client-releases`、`device-client-states`、`capacity/summary`、`capacity/hourly`、`device-logs`、`production-records`。
+- `CloudAiReadEndpointPolicy` 只允许 Cloud AiRead 当前八个正式 typed GET；不得保留任意 method/path 公共传输、可配置 POST allowlist、legacy adapter 或双轨接口。GET allowlist 必须逐项覆盖：`devices`、`processes`、`client-releases`、`device-client-states`、`capacity/summary`、`capacity/hourly`、`device-logs`、`production-records`。
 - `deviceCode` 只能用于设备解析，不能当 `deviceId` 发送给业务读取端点。
 - `scenarioId`、`from`、`to`、`pilotWindowId`、`boundary` 等 AI 内部参数不得透传 Cloud。
 - Cloud 只读 DB direct mode 必须继续使用只读账号、显式白名单表、preflight grant check。
@@ -246,9 +246,31 @@ git log --oneline -n 20 -- AICopilot.slnx deploy src docs AGENTS.md 资料
 - `ArchitectureBoundaryTests` 固化 AICopilot 不直接引用 Cloud 项目/命名空间、Cloud write tools 不纳入范围、CloudReadOnly direct DB 只读 guard、governed schema、只读账号 grant preflight 和高频 Cloud AiRead 优先级。
 - `CloudReadonlyChatBoundaryTests` 阻断 Cloud 业务修改、禁用设备、补录产能、删除日志和上传生产数据等写语义。
 - `CloudReadonlySimulationTests` 固化 Simulation 只能在 Development 使用，Real 模式必须双开 `CloudReadonly:Real` 和 `CloudAiRead`，Cloud AiRead 不可用时不得降级返回 Simulation。
-- `CloudAiReadClientTests` 固化 `/api/v1/ai/read/devices`、`processes`、`client-releases`、`device-client-states`、`device-logs`、`capacity/summary`、`capacity/hourly`、`production-records` 端点和参数契约；`deviceCode` 必须先解析成唯一 `deviceId` 后才能用于高频业务读取，设备客户端状态搜索也只能转换为 `keyword`，不得把 `deviceCode` 当正式业务参数透传。
+- `CloudAiReadClientTests` 固化 `/api/v1/ai/read/devices`、`processes`、`client-releases`、`device-client-states`、`device-logs`、`capacity/summary`、`capacity/hourly`、`production-records` 端点和参数契约；`deviceCode` 只有在未截断搜索结果中唯一精确匹配时才能解析成 `deviceId`，设备状态随后只向 `/device-client-states` 发送正式 `deviceId`，不得把 `deviceCode` 或整句自然语言降级为 keyword。
 - `SemanticAnalysisRunnerTests` 固化高频 DeviceLog/Capacity/ProductionData 在 CloudAiRead 启用时优先走 Cloud AiRead；Direct DB / Text-to-SQL 只保留治理白名单内补充分析。
 - `DeviceLogFollowUpIntentRewriterTests` 固化追问日志级别、设备、工序、时间窗口时重新生成 `Analysis.DeviceLog.*` 查询。
+
+### 7.1 2026-07-10 AI-only 契约、安全、Agent 与前端修复
+
+以下编号补充记录此前 `AI-SEC-021/022` 关单后发现的消费方假阳性和能力缺口；历史 `Done` 结论不重写，新项按当前源码事实独立关单：
+
+| 编号 | 严重级 | 状态 | 范围 | 修复要求 | 验收 |
+| --- | --- | --- | --- | --- | --- |
+| AI-SEC-029 | HIGH | Done | Device 语义/CloudRead/Direct DB | 设备主数据、最后上报运行状态和最新日志级别分离；`Analysis.Device.Status` 只消费 `/device-client-states`，不得回退 Direct DB/Text-to-SQL/Simulation | `CloudAiReadClientTests` + semantic/mapping/runtime/acceptance + 全量 BackendTests |
+| AI-SEC-030 | HIGH | Done | production records | `typeName/typeKey` 不得冒充 `processName/stationName`；正式字段缺失保持空 | `CloudAiReadClientTests` 负向 fixture + 全量 BackendTests |
+| AI-SEC-031 | HIGH | Done | Cloud AiRead transport | 删除可配置 POST、任意 method/path 公共传输和双轨接口；只保留八个正式 GET，且不破坏 Cloud identity status GET 校验 | `CloudAiReadClientTests` + `ToolRegistryGovernanceTests` + ArchitectureTests + 全量 BackendTests |
+| AI-SEC-032 | HIGH | Done | JWT runtime | HttpApi 启动统一校验 issuer、audience、至少 64 字符 secret 和正数 token lifetime | JWT options/startup tests + 安全定向测试 + 全量 BackendTests |
+| AI-SEC-033 | HIGH | Deferred | bootstrap admin 默认值 | 默认关闭 auto-bind、默认员工号为空；本项涉及工作区部署总览/profile，同步授权前不得在 AI-only 窗口半修 | 外部部署治理授权后执行 compose/config/security tests |
+| AI-SEC-034 | MEDIUM | Done | Process Agent | 在统一语义和 Agent workflow 内增加 `/processes` 只读能力 | semantic/planner/Agent/acceptance + 全量 BackendTests/AiEvalTests |
+| AI-SEC-035 | MEDIUM | Done | ClientRelease Agent | 在统一语义和 Agent workflow 内增加 `/client-releases` 只读能力，不生成 Cloud 未返回的发布事实 | semantic/planner/Agent/acceptance + 全量 BackendTests/AiEvalTests |
+| AI-SEC-036 | MEDIUM | Done | DeviceStatus Agent | 复用 AI-SEC-029 唯一状态实现，覆盖空态、心跳缺失、权限、截断和 Plan 确认门禁 | Agent workflow/acceptance + 全量 BackendTests/AiEvalTests |
+| AI-SEC-037 | MEDIUM | Done | REST/OpenAPI contract | 使用现有依赖增强 OpenAPI、前端快照和错误码目录测试；新增生成器依赖需另行批准 | `Suite=FrontendIntegrationContract` + `ErrorCodeCatalogTests` |
+| AI-SEC-038 | MEDIUM | Done | Web 产品化 | 保留会话隔离、真实运行状态、错误和 Widget 契约，完成真实视口与全状态验收 | type-check/unit/build/smoke + 1920×1080、1366×768、1024×768 浏览器验收 |
+| AI-SEC-039 | LOW | Done | dead code | 证据确认无绑定、反射、序列化或测试引用后删除 `CloudReadonlyPilotReadinessOptions` | 全仓 `rg` + solution build + ArchitectureTests + 全量 BackendTests |
+
+本批固定口径：`Analysis.Device.Status` 只能称为“最后上报运行状态”，同时给出心跳/更新时间；Cloud 没有正式 freshness 规则时不得推断在线、离线、当前或 stale。零条表示暂无状态上报，不表示离线。Cloud 提供方契约缺失、模糊或 fixture 不一致时，AI 消费方不得猜字段、扫描分页或自动选择第一条。
+
+本批关单证据：Cloud AiRead 公共传输已收敛为八个 typed GET；设备主数据、最后上报状态与最新日志级别已分离；生产记录缺失字段不再代填；JWT 统一运行时校验完成；Process、ClientRelease、DeviceStatus 已接入统一语义、Agent 确认门和 Cloud-only 执行；OpenAPI/ProblemDetails 快照、前端真实状态门禁和无用 readiness DTO 删除均有测试覆盖。AI-SEC-033 继续 Deferred，因为默认 bootstrap admin 还需要工作区部署总览/profile 的跨目录同步授权。真实 Cloud 提供方 HTTP E2E、部署和生产验证不属于本次 AI-only 关单证据，不得据此宣称 Cloud 已发布或生产已验收。
 
 ## 8. 第六批：Text-to-SQL 和提示词泄露门禁
 
@@ -298,10 +320,15 @@ npm run build
 
 发版前必须过：
 
+```powershell
+pwsh ../deploy/Invoke-WorkspaceDeploy.ps1 -Target AICopilot -Services <实际服务列表> -ValidateOnly
+pwsh ../deploy/Invoke-WorkspaceDeploy.ps1 -Target AICopilot -Services <实际服务列表> -DryRun
+```
+
+下面是 AICopilot 仓内只读配置/安全专项诊断，不替代工作区统一入口；从 AICopilot 仓库根执行：
+
 ```bash
 docker compose --env-file deploy/enterprise-ai/.env.example -f deploy/enterprise-ai/docker-compose.yaml config -q
-ENV_FILE=<server-.env> ./deploy/enterprise-ai/deploy-release.sh --validate-only
-REGISTRY=harbor.internal.example:80 CLOUD_PLATFORM_URL=http://cloud.internal.example:81 ./deploy/enterprise-ai/local-release.sh --services httpapi,migration,dataworker,ragworker,web --ssh-target deploy@aicopilot.internal.example --dry-run
 curl -I http://<intranet-host>:82
 curl -I http://<intranet-host>:82/api/identity/cloud-oidc/status
 ./deploy/enterprise-ai/scripts/check-release-security-attestation.sh --dry-run

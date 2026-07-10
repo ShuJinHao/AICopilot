@@ -6,6 +6,12 @@ using IResult = AICopilot.SharedKernel.Result.IResult;
 namespace AICopilot.HttpApi.Infrastructure;
 
 [ApiController]
+[ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+[ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+[ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+[ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+[ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
+[ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
 public abstract class ApiControllerBase(ISender sender) : ControllerBase
 {
     protected ISender Sender { get; } = sender;
