@@ -1,17 +1,17 @@
 # AICopilot 部署与维护指南
 
-本文档是 AICopilot 当前项目级部署说明。长期业务边界见 `AGENTS.md` 和 `资料/AICopilot业务规则.md`；历史阶段计划和验收报告不再作为执行入口。日常自动增量入口是工作区根 `deploy/Deploy-Changed.ps1`；`Deploy.ps1` 只作为显式服务执行器和恢复入口，`deploy/Invoke-WorkspaceDeploy.ps1` 只保留给部署基础设施维护和旧事务诊断。
+本文档是 AICopilot 当前项目级部署说明。长期业务边界见 `AGENTS.md` 和 `资料/AICopilot业务规则.md`；历史阶段计划和验收报告不再作为执行入口。日常自动增量入口是工作区根 `deploy/Deploy-Changed.ps1`；`Deploy.ps1` 只作为统一入口内部服务执行器、Doctor/DryRun 和显式恢复入口，`deploy/Invoke-WorkspaceDeploy.ps1` 只保留给部署基础设施维护和旧事务诊断。
 
 > 当前状态（2026-07-11）：AICopilot 全量应用已完成真实 Harbor、生产 Runner、PostgreSQL 备份、migration、rollout 与健康检查；自动增量入口的编译门禁、依赖影响测试和生产 SHA 只读 inspect 已通过，但尚未用新的单服务业务变更执行生产发布，因此不得把全量成功冒充增量生产 E2E。
 
 工作区标准入口示例：
 
 ```powershell
+pwsh ./deploy/Deploy-Changed.ps1 -Targets AICopilot # 日常唯一发布入口
 pwsh ./deploy/Deploy.ps1 -Target AICopilot -InstallRunner # 仅首次或 Runner 升级
 pwsh ./deploy/Deploy.ps1 -Target AICopilot -Doctor
 pwsh ./deploy/Deploy.ps1 -Target AICopilot -Services httpapi,web -DryRun
-pwsh ./deploy/Deploy.ps1 -Target AICopilot -Services httpapi,web -Deploy
-pwsh ./deploy/Deploy-Changed.ps1 -Targets AICopilot
+# Deploy.ps1 -Deploy 只供统一入口内部调用或显式恢复，不是第二个日常入口
 ```
 
 本文档按双层口径维护：
@@ -306,7 +306,7 @@ MCR 直转镜像。`mirror-base-images.sh` 生成该镜像时必须内置 `libgs
 工作区标准发布：
 
 ```powershell
-pwsh ./deploy/Deploy.ps1 -Target AICopilot -Services httpapi,dataworker -Deploy
+pwsh ./deploy/Deploy-Changed.ps1 -Targets AICopilot
 ```
 
 单独构建镜像时使用：

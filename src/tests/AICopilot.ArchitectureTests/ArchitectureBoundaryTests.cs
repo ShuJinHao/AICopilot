@@ -14,13 +14,53 @@ using AICopilot.Core.McpServer.Ids;
 using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.Core.Rag.Ids;
+using AICopilot.HttpApi.Infrastructure;
 using AICopilot.SharedKernel.Domain;
+using MediatR;
+using Microsoft.AspNetCore.Mvc;
 
 namespace AICopilot.ArchitectureTests;
 
 public sealed class ArchitectureBoundaryTests
 {
     private static readonly string SolutionRoot = FindSolutionRoot();
+
+    [Fact]
+    public void HttpApiControllers_ShouldUseBaseAndConstructorInjectedSender()
+    {
+        var baseControllerType = typeof(ApiControllerBase);
+        var senderProperty = baseControllerType.GetProperty(
+            "Sender",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        var baseConstructors = baseControllerType.GetConstructors(
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        var controllerTypes = baseControllerType.Assembly
+            .GetTypes()
+            .Where(type => type is { IsClass: true, IsAbstract: false })
+            .Where(type => type.Namespace == "AICopilot.HttpApi.Controllers")
+            .Where(type => typeof(ControllerBase).IsAssignableFrom(type))
+            .OrderBy(type => type.FullName, StringComparer.Ordinal)
+            .ToArray();
+
+        senderProperty.Should().NotBeNull();
+        senderProperty!.PropertyType.Should().Be<ISender>();
+        senderProperty.SetMethod.Should().BeNull();
+        baseConstructors.Should().ContainSingle();
+        baseConstructors[0].GetParameters()
+            .Should()
+            .ContainSingle(parameter => parameter.ParameterType == typeof(ISender));
+        controllerTypes.Should().NotBeEmpty();
+
+        foreach (var controllerType in controllerTypes)
+        {
+            controllerType.Should().BeAssignableTo<ApiControllerBase>();
+            controllerType.GetConstructors(BindingFlags.Instance | BindingFlags.Public)
+                .Should()
+                .NotBeEmpty()
+                .And.OnlyContain(constructor => constructor.GetParameters()
+                    .Any(parameter => parameter.ParameterType == typeof(ISender)));
+        }
+    }
 
     [Fact]
     public void CoreProjects_ShouldNotReferenceSiblingCoreProjects()

@@ -18,7 +18,7 @@
 - 发布脚本：`deploy/enterprise-ai/deploy-release.sh`、`deploy/enterprise-ai/local-release.sh`、`deploy/enterprise-ai/build-and-push.sh`、`deploy/enterprise-ai/mirror-base-images.sh`。
 - 发布验收脚本：`deploy/enterprise-ai/scripts/check-release-security-attestation.sh`、`deploy/enterprise-ai/scripts/check-model-secret-migration.sh`、`deploy/enterprise-ai/scripts/check-runner-security-attestation.sh`、`deploy/enterprise-ai/scripts/check-platform-attestation-record.sh`。
 - 灾备 workflow：`.github/workflows/aicopilot-*.yml`。
-- 部署门禁测试：`src/tests/AICopilot.BackendTests/SecurityHardeningTests.cs`。
+- 部署门禁按职责拆分：静态安全边界在 `SecurityHardeningTests`，无发布副作用的环境 preflight 与 Shell Git mode 在 `DeploymentPreflightBehaviorTests`，Controller 组合根等结构约束在 `ArchitectureBoundaryTests`。
 
 ## 3. HTTP-only 安全头
 
@@ -75,6 +75,9 @@ Cloud OIDC 使用 HTTP issuer 时必须满足全部条件：
 - 当前如果与 Cloud 共用同一台生产宿主机，必须在工作区总入口明确共享宿主机事实、共享标准发布人和两个独立部署根；不得把 Cloud 根的权限漂移和 AICopilot 根的权限状态混写成同一个“整机问题”。
 - root 应急路径如果写入了 `releases/*`、`current-release.summary.md` 或 deploy support files，关闭任务前必须恢复 owner/mode，并重新验证标准 non-root `./deploy-release.sh --validate-only`。
 - GitHub `aicopilot-image` / `aicopilot-deploy` 只保留灾备入口，不是日常生产发布入口。
+- workflow 使用的官方 JavaScript action 必须采用受支持的 Node 24 runtime 主版本，self-hosted runner 必须高于 action 声明的最低 runner 版本；升级前以官方 action metadata 和真实成功 job 的 runner 版本共同确认，不得仅消除 warning 后猜测兼容。
+- PR 比较必须使用事件提供的 base commit SHA；手动运行只能接收严格校验后的仓库分支名并先解析成 commit SHA。workflow expression 只能经环境变量传入脚本，scope 与 whitespace 检查统一基于不可变 `baseSha...HEAD`，禁止把未校验 ref 直接拼入 shell。
+- 被 workflow 或部署脚本直接执行的 `.sh` 必须在 Git 索引中是 `100755`；只由 `bash` 调用或被 source 的库/行为测试保持 `100644`。数据驱动部署行为测试必须覆盖 `deploy/enterprise-ai` 下全部 tracked `.sh`，新增脚本未分类即失败。
 - self-hosted runner 机器权限收敛、OIDC/Vault 或等价短期凭据属于外部基础设施任务；AICopilot 仓库只能提供 workflow 边界、runner 本机 attestation、平台验收模板和记录 linter，不能伪造成平台治理已完成。
 - 平台验收记录必须同时覆盖 GitHub production environment secret 限制、required reviewers、`contents: read`、`self-hosted + iiot-linux-prod`、生产/secret workflow 无 GitHub hosted runner、runner 本机脚本结果，以及 OIDC/Vault 已落地或已批准基础设施例外；记录 linter 只校验这些证据字段完整，不替代真实 GitHub、runner、Vault 或 OIDC 验收。
 
@@ -104,7 +107,8 @@ PR 前：
 rg -n "USER root|CipherMode.CBC|CHANGE_ME|dummy-key|Strict-Transport-Security|UseHttpsRedirection|listen 443|ssl_certificate" deploy src docs
 bash -n deploy/enterprise-ai/*.sh deploy/enterprise-ai/scripts/*.sh
 bash deploy/enterprise-ai/tests/deployment-behavior.sh
-dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "FullyQualifiedName~SecurityHardeningTests" --no-restore
+dotnet test src/tests/AICopilot.ArchitectureTests/AICopilot.ArchitectureTests.csproj --no-restore
+dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "FullyQualifiedName~SecurityHardeningTests|Suite=DeploymentBehavior" --no-restore
 ```
 
 发布前/发布的对外标准命令：
@@ -112,7 +116,7 @@ dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --fil
 ```powershell
 pwsh ./deploy/Deploy.ps1 -Target AICopilot -Doctor
 pwsh ./deploy/Deploy.ps1 -Target AICopilot -Services httpapi,dataworker,ragworker,web -DryRun
-pwsh ./deploy/Deploy.ps1 -Target AICopilot -Services httpapi,dataworker,ragworker,web -Deploy
+pwsh ./deploy/Deploy-Changed.ps1 -Targets AICopilot
 ```
 
 仓库内安全检查仍可单独运行，但不触发生产发布：

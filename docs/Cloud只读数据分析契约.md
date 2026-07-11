@@ -91,7 +91,8 @@ Text-to-SQL prompt 只能暴露 `CloudReadOnlyGovernedSchema` 批准的表名、
 ## 8. Simulation 边界
 
 - Simulation 只允许作为显式 Development、离线演示或测试资产。
-- 生产基础 `appsettings.json`、compose 和部署模板不得携带 `MockOnly=true` 或默认 Simulation 开关。
+- `appsettings.json` 与 `appsettings.Development.json` 叠加后的默认值都必须保持 `CloudReadonly.Mode=Disabled`、`Simulation.Enabled=false` 和 `CloudAiRead.Enabled=false`；Development 的 Simulation 只能由专用测试 fixture、显式环境变量或显式启动参数逐次开启，不能依赖开发配置文件自动开启。
+- 生产基础配置、compose 和部署模板不得携带 `MockOnly=true` 或默认 Simulation 开关。
 - Real Cloud 查询失败、为空或未配置时，必须返回 Cloud AiRead / CloudReadOnly 错误或空态，不能降级为 Simulation。
 - 任何产物、报告、artifact 或导出里出现 Simulation 数据时，必须带明确 `sourceMode=Simulation`、`isSimulation=true` 或等价来源标记。
 

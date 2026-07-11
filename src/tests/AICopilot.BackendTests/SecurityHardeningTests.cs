@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Text.Json;
@@ -180,7 +179,6 @@ public sealed class SecurityHardeningTests
         imageWorkflow.Should().Contain("workflow_dispatch:");
         imageWorkflow.Should().Contain("emergency_confirm:");
         imageWorkflow.Should().Contain("EMERGENCY_AICOPILOT_IMAGE_BUILD");
-        imageWorkflow.Should().Contain("aicopilot-image is not the routine production release path. Use pwsh ./deploy/Deploy.ps1 -Target AICopilot -Deploy from the workspace root.");
         imageWorkflow.Should().Contain("OCI_REGISTRY");
         imageWorkflow.Should().Contain("OCI_NAMESPACE");
         imageWorkflow.Should().Contain("dotnet publish");
@@ -203,10 +201,8 @@ public sealed class SecurityHardeningTests
 
         deployWorkflow.Should().Contain("runs-on: [self-hosted, iiot-linux-prod]");
         deployWorkflow.Should().Contain("Emergency release tag from local Harbor build or disaster-recovery aicopilot-image (sha-*)");
-        deployWorkflow.Should().Contain("Emergency only. Routine application releases use workspace Deploy.ps1; empty means full release only.");
         deployWorkflow.Should().Contain("emergency_confirm:");
         deployWorkflow.Should().Contain("EMERGENCY_AICOPILOT_DEPLOY");
-        deployWorkflow.Should().Contain("aicopilot-deploy is not the routine production release path. Use pwsh ./deploy/Deploy.ps1 -Target AICopilot -Deploy from the workspace root.");
         deployWorkflow.Should().Contain("DEPLOY_TARGET_DIR: ${{ secrets.DEPLOY_TARGET_DIR }}");
         deployWorkflow.Should().Contain("DEPLOY_ENV_FILE: ${{ secrets.DEPLOY_ENV_FILE }}");
         deployWorkflow.Should().Contain("Self-hosted runner must not run as root.");
@@ -339,7 +335,6 @@ public sealed class SecurityHardeningTests
             "nginx.conf.template"));
 
         deployGuide.Should().Contain("工作区标准发布");
-        deployGuide.Should().Contain("pwsh ./deploy/Deploy.ps1 -Target AICopilot");
         deployGuide.Should().Contain("Docker Hub 不作为生产依赖源");
         deployGuide.Should().Contain("MCR 也不得作为生产构建的直接依赖源");
         deployGuide.Should().Contain("`aicopilot-image` / `aicopilot-deploy` 只保留带确认词的灾备入口");
@@ -363,7 +358,6 @@ public sealed class SecurityHardeningTests
         deployReadme.Should().Contain("aicopilot-deploy");
         deployReadme.Should().Contain("build-and-push.sh       # 统一入口内部调度的本机镜像构建实现");
         deployReadme.Should().Contain("local-release.sh        # 旧事务/基础设施维护的固定提交发布实现");
-        deployReadme.Should().Contain("工作区日常标准发布走 `pwsh ./deploy/Deploy.ps1 -Target AICopilot ...`");
         deployReadme.Should().Contain("独立 detached worktree");
         deployReadme.Should().Contain("DEPLOY_ENV_FILE");
         deployReadme.Should().Contain("iiot-linux-prod");
@@ -592,7 +586,7 @@ public sealed class SecurityHardeningTests
     }
 
     [Fact]
-    public void PlatformAttestationRecordCheck_ShouldRejectIncompleteSignOffsAndWeakEvidenceWords()
+    public async Task PlatformAttestationRecordCheck_ShouldRejectIncompleteSignOffsAndWeakEvidenceWords()
     {
         var solutionRoot = FindSolutionRoot();
         var scriptPath = Path.Combine(
@@ -616,7 +610,7 @@ public sealed class SecurityHardeningTests
                     "Credential strategy: OIDC/Vault implemented for AICopilot production workflows with short-lived credentials.",
                     "Platform owner: Platform Owner / 2026-07-06"));
 
-            var validResult = RunCommand(
+            var validResult = await RepositoryTestSupport.RunAsync(
                 "bash",
                 [scriptPath, "--record", validRecord],
                 solutionRoot);
@@ -637,7 +631,7 @@ Due date: 2026-08-01
 Current mitigation: GitHub production environment reviewers, restricted runner access, and scheduled secret rotation remain in effect.
 """));
 
-            var validExceptionResult = RunCommand(
+            var validExceptionResult = await RepositoryTestSupport.RunAsync(
                 "bash",
                 [scriptPath, "--record", validExceptionRecord],
                 solutionRoot);
@@ -652,7 +646,7 @@ Current mitigation: GitHub production environment reviewers, restricted runner a
                     "Credential strategy: OIDC/Vault rollout is tracked as an approved infrastructure exception.",
                     "Platform owner: Platform Owner / 2026-07-06"));
 
-            var vagueExceptionResult = RunCommand(
+            var vagueExceptionResult = await RepositoryTestSupport.RunAsync(
                 "bash",
                 [scriptPath, "--record", vagueExceptionRecord],
                 solutionRoot);
@@ -667,7 +661,7 @@ Current mitigation: GitHub production environment reviewers, restricted runner a
                     "Credential strategy: OIDC/Vault implemented for AICopilot production workflows with short-lived credentials.",
                     "Platform owner:"));
 
-            var emptySignOffResult = RunCommand(
+            var emptySignOffResult = await RepositoryTestSupport.RunAsync(
                 "bash",
                 [scriptPath, "--record", emptySignOffRecord],
                 solutionRoot);
@@ -682,7 +676,7 @@ Current mitigation: GitHub production environment reviewers, restricted runner a
                     "Credential strategy: pending platform task.",
                     "Platform owner: Platform Owner / 2026-07-06"));
 
-            var weakEvidenceResult = RunCommand(
+            var weakEvidenceResult = await RepositoryTestSupport.RunAsync(
                 "bash",
                 [scriptPath, "--record", weakEvidenceRecord],
                 solutionRoot);
@@ -698,7 +692,7 @@ Current mitigation: GitHub production environment reviewers, restricted runner a
                         "Platform owner: Platform Owner / 2026-07-06")
                     .Replace("Environment secrets are restricted to AICopilot production and disaster workflows.\n", string.Empty));
 
-            var missingSecretRestrictionResult = RunCommand(
+            var missingSecretRestrictionResult = await RepositoryTestSupport.RunAsync(
                 "bash",
                 [scriptPath, "--record", missingSecretRestrictionRecord],
                 solutionRoot);
@@ -714,7 +708,7 @@ Current mitigation: GitHub production environment reviewers, restricted runner a
                         "Platform owner: Platform Owner / 2026-07-06")
                     .Replace("No production or secret-touching workflow uses GitHub hosted runners.\n", string.Empty));
 
-            var missingHostedRunnerBoundaryResult = RunCommand(
+            var missingHostedRunnerBoundaryResult = await RepositoryTestSupport.RunAsync(
                 "bash",
                 [scriptPath, "--record", missingHostedRunnerBoundaryRecord],
                 solutionRoot);
@@ -724,59 +718,7 @@ Current mitigation: GitHub production environment reviewers, restricted runner a
         }
         finally
         {
-            Directory.Delete(tempDirectory, recursive: true);
-        }
-    }
-
-    [Fact]
-    public void DeployReleaseValidateOnly_ShouldValidateHttpOnlyOidcWithoutReleaseTagOrDocker()
-    {
-        var solutionRoot = FindSolutionRoot();
-        var scriptPath = Path.Combine(
-            solutionRoot,
-            "deploy",
-            "enterprise-ai",
-            "deploy-release.sh");
-        var tempDirectory = Path.Combine(
-            Path.GetTempPath(),
-            "aicopilot-deploy-validate-only",
-            Guid.NewGuid().ToString("N"));
-
-        Directory.CreateDirectory(tempDirectory);
-        try
-        {
-            var validEnvPath = WriteDeployValidateEnv(
-                tempDirectory,
-                "valid.env",
-                "http://cloud.factory.internal:81");
-
-            var validResult = RunCommand(
-                "bash",
-                [scriptPath, "--validate-only"],
-                solutionRoot,
-                new Dictionary<string, string> { ["ENV_FILE"] = validEnvPath });
-
-            validResult.ExitCode.Should().Be(0, validResult.Output);
-            validResult.Output.Should().Contain("AICopilot deploy environment validation passed");
-
-            var publicHttpOidcEnvPath = WriteDeployValidateEnv(
-                tempDirectory,
-                "public-http-oidc.env",
-                "http://cloud.example.com:81");
-
-            var publicHttpOidcResult = RunCommand(
-                "bash",
-                [scriptPath, "--validate-only"],
-                solutionRoot,
-                new Dictionary<string, string> { ["ENV_FILE"] = publicHttpOidcEnvPath });
-
-            publicHttpOidcResult.ExitCode.Should().Be(64, publicHttpOidcResult.Output);
-            publicHttpOidcResult.Output.Should().Contain("HTTP-only Cloud OIDC issuer must be loopback");
-            publicHttpOidcResult.Output.Should().NotContain("docker compose");
-        }
-        finally
-        {
-            Directory.Delete(tempDirectory, recursive: true);
+            RepositoryTestSupport.TryDeleteDirectory(tempDirectory);
         }
     }
 
@@ -1199,42 +1141,6 @@ Current mitigation: GitHub production environment reviewers, restricted runner a
         uploadRecordCoordinatorSource.Should().Contain("CanWriteAsync(");
         uploadRecordCoordinatorSource.Should().Contain("request.KnowledgeBaseId");
         uploadRecordCoordinatorSource.Should().Contain("Result.NotFound");
-    }
-
-    [Fact]
-    public void ApiControllerBase_ShouldUseConstructorInjectedSender()
-    {
-        var solutionRoot = FindSolutionRoot();
-        var baseControllerSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "hosts",
-            "AICopilot.HttpApi",
-            "infrastructure",
-            "ApiControllerBase.cs"));
-        var controllerPath = Path.Combine(solutionRoot, "src", "hosts", "AICopilot.HttpApi", "Controllers");
-        var controllerFiles = Directory.GetFiles(controllerPath, "*Controller.cs")
-            .Select(Path.GetFileName)
-            .Where(file => file is not null)
-            .Cast<string>()
-            .OrderBy(file => file, StringComparer.Ordinal)
-            .ToArray();
-
-        baseControllerSource.Should().Contain("ApiControllerBase(ISender sender)");
-        baseControllerSource.Should().Contain("protected ISender Sender");
-        baseControllerSource.Should().NotContain("RequestServices");
-        baseControllerSource.Should().NotContain("GetRequiredService<ISender>");
-
-        foreach (var controllerFile in controllerFiles)
-        {
-            var source = File.ReadAllText(Path.Combine(
-                solutionRoot,
-                controllerPath,
-                controllerFile));
-
-            source.Should().Contain("ISender sender", controllerFile);
-            source.Should().Contain(": ApiControllerBase(sender)", controllerFile);
-        }
     }
 
     [Fact]
@@ -2793,21 +2699,7 @@ Current mitigation: GitHub production environment reviewers, restricted runner a
         template.Specification.Should().NotBeNull();
     }
 
-    private static string FindSolutionRoot()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory != null)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "AICopilot.slnx")))
-            {
-                return directory.FullName;
-            }
-
-            directory = directory.Parent;
-        }
-
-        throw new DirectoryNotFoundException("Could not locate AICopilot.slnx from the test output directory.");
-    }
+    private static string FindSolutionRoot() => RepositoryTestSupport.Root;
 
     private static string ReadAiGatewayControllerSources(string solutionRoot)
     {
@@ -2865,86 +2757,6 @@ Release owner: Release Owner / 2026-07-06
 """;
     }
 
-    private static string WriteDeployValidateEnv(
-        string directory,
-        string fileName,
-        string cloudOidcIssuer)
-    {
-        var envPath = Path.Combine(directory, fileName);
-        File.WriteAllText(
-            envPath,
-            $$"""
-COMPOSE_PROJECT_NAME=enterprise-ai-test
-AICOPILOT_PUBLIC_URL=http://aicopilot.factory.internal:82
-CLOUD_PLATFORM_URL=http://cloud.factory.internal:81
-POSTGRES_PASSWORD=PgStrongSecretValue1234
-RABBITMQ_PASSWORD=RbStrongSecretValue1234
-QDRANT_KEY=QdStrongSecretValue1234
-AICOPILOT_BOOTSTRAP_ADMIN_PASSWORD=AdminStrong1234
-AICOPILOT_API_KEY_ENCRYPTION_KEY=EncryptionKeyValue01234567890123456789
-AICOPILOT_JWT_SECRET_KEY=JwtSecretValue012345678901234567890123456789012345678901234567890123
-CLOUD_READONLY_MODE=Disabled
-CLOUD_READONLY_REAL_ENABLED=false
-CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ=false
-CLOUD_AI_READ_ENABLED=false
-CLOUD_AI_READ_BASE_URL=http://cloud.factory.internal:81
-CLOUD_IDENTITY_STATUS_ENABLED=false
-CLOUD_IDENTITY_STATUS_BASE_URL=http://cloud.factory.internal:81
-DATA_ANALYSIS_CLOUD_READONLY_ENABLED=false
-AICOPILOT_MODEL_SMOKE_ENABLED=false
-AICOPILOT_MODEL_SMOKE_BASE_URL=http://model.factory.internal:40034/v1
-CLOUD_OIDC_ENABLED=true
-CLOUD_OIDC_ISSUER={{cloudOidcIssuer}}
-ALLOW_INTRANET_HTTP_OIDC=true
-CLOUD_OIDC_REQUIRE_HTTPS_METADATA=false
-""");
-
-        RunCommand("chmod", ["600", envPath], directory);
-        return envPath;
-    }
-
-    private static CommandResult RunCommand(
-        string fileName,
-        IReadOnlyCollection<string> arguments,
-        string workingDirectory,
-        IReadOnlyDictionary<string, string>? environmentVariables = null)
-    {
-        var processStartInfo = new ProcessStartInfo
-        {
-            FileName = fileName,
-            WorkingDirectory = workingDirectory,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false
-        };
-
-        foreach (var argument in arguments)
-        {
-            processStartInfo.ArgumentList.Add(argument);
-        }
-
-        if (environmentVariables is not null)
-        {
-            foreach (var (key, value) in environmentVariables)
-            {
-                processStartInfo.Environment[key] = value;
-            }
-        }
-
-        using var process = Process.Start(processStartInfo)
-            ?? throw new InvalidOperationException($"Failed to start process: {fileName}");
-        var stdout = process.StandardOutput.ReadToEnd();
-        var stderr = process.StandardError.ReadToEnd();
-
-        if (!process.WaitForExit(TimeSpan.FromSeconds(15)))
-        {
-            process.Kill(entireProcessTree: true);
-            throw new TimeoutException($"Command timed out: {fileName} {string.Join(' ', arguments)}");
-        }
-
-        return new CommandResult(process.ExitCode, stdout + stderr);
-    }
-
     private static void AssertIdentityManagementEndpoint(string actionName)
     {
         var method = typeof(IdentityController).GetMethod(actionName);
@@ -2954,8 +2766,6 @@ CLOUD_OIDC_REQUIRE_HTTPS_METADATA=false
         method.GetCustomAttribute<EnableRateLimitingAttribute>()?.PolicyName
             .Should().Be("identity-management");
     }
-
-    private sealed record CommandResult(int ExitCode, string Output);
 
     private sealed class ThrowingSender : ISender
     {

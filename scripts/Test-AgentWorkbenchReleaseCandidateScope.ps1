@@ -53,26 +53,6 @@ foreach ($file in $ChangedFiles) {
     }
 }
 
-$appSettingsFiles = @(
-    "src/hosts/AICopilot.HttpApi/appsettings.json",
-    "src/hosts/AICopilot.HttpApi/appsettings.Development.json"
-)
-
-foreach ($path in $appSettingsFiles) {
-    if (-not (Test-Path $path)) {
-        Add-Error "Missing appsettings file: $path"
-        continue
-    }
-
-    $json = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
-    if ($json.CloudReadonly.Mode -ne "Disabled") {
-        Add-Error "$path must keep CloudReadonly.Mode=Disabled by default."
-    }
-    if ($json.CloudAiRead.Enabled -ne $false) {
-        Add-Error "$path must keep CloudAiRead.Enabled=false by default."
-    }
-}
-
 $packagePath = "src/vues/AICopilot.Web/package.json"
 if (Test-Path $packagePath) {
     $package = Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json

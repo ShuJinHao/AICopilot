@@ -1,6 +1,7 @@
 using System.Text.Json;
 using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.AiGatewayService.Runtime;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 
 namespace AICopilot.BackendTests;
@@ -8,6 +9,32 @@ namespace AICopilot.BackendTests;
 [Trait("Suite", "AgentSimulationAcceptance")]
 public sealed class CloudReadonlySimulationTests
 {
+    [Fact]
+    public void DevelopmentConfiguration_ShouldKeepCloudReadonlyDisabledByDefault()
+    {
+        var httpApiRoot = Path.Combine(
+            RepositoryTestSupport.Root,
+            "src",
+            "hosts",
+            "AICopilot.HttpApi");
+        var configuration = new ConfigurationBuilder()
+            .SetBasePath(httpApiRoot)
+            .AddJsonFile("appsettings.json", optional: false)
+            .AddJsonFile("appsettings.Development.json", optional: false)
+            .Build();
+        var cloudReadonly = configuration
+            .GetSection(CloudReadonlyOptions.SectionName)
+            .Get<CloudReadonlyOptions>()!;
+        var cloudAiRead = configuration
+            .GetSection(CloudAiReadOptions.SectionName)
+            .Get<CloudAiReadOptions>()!;
+
+        cloudReadonly.Mode.Should().Be(CloudReadonlyDataSourceMode.Disabled);
+        cloudReadonly.Simulation.Enabled.Should().BeFalse();
+        cloudAiRead.Enabled.Should().BeFalse();
+        cloudReadonly.EnsureValid(cloudAiRead, "Development");
+    }
+
     [Fact]
     public async Task SimulationProvider_ShouldReturnSixClassDataset_WithSimulationMarkers()
     {

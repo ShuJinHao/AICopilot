@@ -24,7 +24,7 @@ jobs:
 
     steps:
       - name: Checkout grant sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Provision Cloud readonly DB role
         shell: bash

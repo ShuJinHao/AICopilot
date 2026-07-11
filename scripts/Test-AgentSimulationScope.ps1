@@ -51,26 +51,6 @@ foreach ($file in $ChangedFiles) {
     }
 }
 
-$appSettingsFiles = @(
-    "src/hosts/AICopilot.HttpApi/appsettings.json",
-    "src/hosts/AICopilot.HttpApi/appsettings.Development.json"
-)
-
-foreach ($path in $appSettingsFiles) {
-    if (-not (Test-Path $path)) {
-        Add-Error "Missing appsettings file: $path"
-        continue
-    }
-
-    $json = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
-    if ($json.CloudReadonly.Mode -ne "Disabled") {
-        Add-Error "$path must keep CloudReadonly.Mode=Disabled by default."
-    }
-    if ($json.CloudAiRead.Enabled -ne $false) {
-        Add-Error "$path must keep CloudAiRead.Enabled=false by default."
-    }
-}
-
 $csharpFiles = $ChangedFiles |
     Where-Object { $_ -like "src/*.cs" -or $_ -like "src/**/*.cs" } |
     Where-Object { Test-Path $_ }
@@ -81,7 +61,7 @@ foreach ($file in $csharpFiles) {
         Add-Error "Shell capability pattern found in $file."
     }
     if ($content -match "\b(select|insert|update|delete|drop|alter|truncate|merge)\b.+\b(from|into|table|set)\b" -and
-        $file -notmatch "DataAnalysis|TextToSql|SqlGuardrail|CloudReadonlyAgentTooling|AgentTaskRuntime|BackendTests") {
+        $file -notmatch "DataAnalysis|TextToSql|SqlGuardrail|CloudReadonlyAgentTooling|AgentTaskRuntime|ArchitectureTests|BackendTests") {
         Add-Error "Unexpected SQL-like pattern found in $file."
     }
 }

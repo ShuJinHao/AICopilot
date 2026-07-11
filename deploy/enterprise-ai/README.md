@@ -219,12 +219,12 @@ Web/HttpApi 继续使用 HTTP 探针和 security attestation。DataWorker/RagWor
 上述 marker/digest 是受控工作流内的 fail-closed 一致性边界，不是对同一用户 shell 中恶意进程的密码学信任边界。
 生产仍依赖 runner 权限隔离、Harbor/SSH 凭据管理和服务器文件权限。
 
-1. 推送代码到 GitHub，保证目标改动已经进入 `origin/main`。
-2. 在工作区根运行 `pwsh ./deploy/Deploy.ps1 -Target AICopilot -Services <services> -Deploy`；入口 fetch 远端 tip 并创建隔离 worktree，不检查或修改本地业务工作树。
-3. `build-and-push.sh` 从隔离 worktree 按服务构建并推送不可变 OCI 镜像；HttpApi/DataWorker/RagWorker 自动加入 migration。
+1. 在本地 `main` 提交目标改动并保持工作树 clean，不手工选择服务或预先 push。
+2. 在工作区根运行 `pwsh ./deploy/Deploy-Changed.ps1 -Targets AICopilot`；入口自动 push 当前 HEAD、读取生产 SHA，并按 Git 改动和依赖闭包计算受影响服务。
+3. 内部执行器从远端 tip 创建隔离 worktree，`build-and-push.sh` 只构建并推送计算出的不可变 OCI 镜像；HttpApi/DataWorker/RagWorker 自动加入 migration。
 4. 入口通过一次 SSH 发送私有 digest-bound request；稳定 Runner 串行执行备份、migration、`--no-deps` rollout、健康检查、失败回滚和 history。
-5. `services` 必须显式传入，例如 `httpapi,web`；全量发布显式传 `-All`。不要直接调用项目脚本。
-6. 构建后远端失败时使用 `Deploy.ps1 -Deploy -ResumeInvocation <id>` 重发同一请求，不重新 build。Runner/Compose/support/cleanup/GC/深度 attestation 只在独立维护窗口执行。
+5. 影响无法安全归属时入口必须停止，禁止操作者用 `-All` 或手工 services 把未知影响退化成全量。不要直接调用项目脚本。
+6. 构建后远端失败时，只有显式恢复场景才使用内部 `Deploy.ps1 -Deploy -ResumeInvocation <id>` 重发同一请求，不重新 build。Runner/Compose/support/cleanup/GC/深度 attestation 只在独立维护窗口执行。
 
 应用镜像仓库只保留当前生产 `sha-*` tag。本机构建推送候选 tag 后，不立即删除当前生产 tag；稳定 Runner 健康提交后由独立定时维护清理旧 tag 并执行或确认 Harbor GC。清理失败不得改写健康应用发布结果。`buildcache` 和基础镜像 tag 不计入应用版本保留。
 
@@ -317,7 +317,8 @@ cd /srv/enterprise-ai/deploy
 ```bash
 dotnet build src/hosts/AICopilot.HttpApi/AICopilot.HttpApi.csproj
 dotnet build src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj
-dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter SecurityHardeningTests
+dotnet test src/tests/AICopilot.ArchitectureTests/AICopilot.ArchitectureTests.csproj
+dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "FullyQualifiedName~SecurityHardeningTests|Suite=DeploymentBehavior"
 ```
 
 服务器侧验证：

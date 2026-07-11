@@ -283,6 +283,15 @@ git log --oneline -n 20 -- AICopilot.slnx deploy src docs AGENTS.md 资料
 
 本批关单证据：新增行为测试覆盖四态区分、异常不再冒充 empty、合法 empty、required/optional gate、取消传播、只聚合 succeeded 以及真实 `ILogger` formatter 不含路由原文；既有 topology/Cloud-only/semantic 测试和 solution build 用于证明四分支并行、Cloud 只读与无 fallback 边界没有回退。未执行生产发布或线上日志验收，因此 `Done` 只代表仓库内实现与本地门禁完成。
 
+### 7.3 2026-07-11 Simulation 默认值与 CI 执行元数据
+
+| 编号 | 严重级 | 状态 | 范围 | 修复要求 | 验收 |
+| --- | --- | --- | --- | --- | --- |
+| AI-SEC-042 | HIGH | Done | Simulation 默认值 | 两层 HttpApi JSON 配置叠加后仍默认 Disabled；Simulation 只能由测试 fixture 或显式运行参数开启，Production 拒绝规则不放宽 | `CloudReadonlySimulationTests` 真实加载 `appsettings.json + appsettings.Development.json`，既有 Production 负向测试保留 |
+| AI-SEC-043 | HIGH | Done | CI / 部署元数据 | PR 与手动运行先把受信输入解析为不可变 base SHA；Node 24 action 与 runner 版本匹配；全部部署 Shell 按直执行或 bash/source-only 唯一分类并锁定 Git mode | Simulation workflow + `DeploymentPreflightBehaviorTests` + ArchitectureTests + 成功 runner job 版本证据 |
+
+本批固定口径：脚本不再重复解析 JSON 充当配置行为测试；部署 preflight 不再混入大型安全静态测试；Controller 注入约束用运行时类型反射验证。新增 tracked Shell 未进入唯一分类、直执行脚本不是 `100755`、手动 base ref 未严格校验或比较对象不是 commit SHA，都必须在业务测试或发布前失败。
+
 ## 8. 第六批：Text-to-SQL 和提示词泄露门禁
 
 | 编号 | 严重级 | 状态 | 范围 | 修复要求 | 验收 |

@@ -9,6 +9,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="FluentAssertions" Version="8.8.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
@@ -23,6 +27,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\hosts\AICopilot.HttpApi\AICopilot.HttpApi.csproj" />
     <ProjectReference Include="..\..\core\AICopilot.Core.AiGateway\AICopilot.Core.AiGateway.csproj" />
     <ProjectReference Include="..\..\core\AICopilot.Core.DataAnalysis\AICopilot.Core.DataAnalysis.csproj" />
     <ProjectReference Include="..\..\core\AICopilot.Core.McpServer\AICopilot.Core.McpServer.csproj" />

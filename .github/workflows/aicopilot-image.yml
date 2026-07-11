@@ -26,13 +26,13 @@ jobs:
         run: |
           set -euo pipefail
           if [ '${{ inputs.emergency_confirm }}' != 'EMERGENCY_AICOPILOT_IMAGE_BUILD' ]; then
-            echo "aicopilot-image is not the routine production release path. Use pwsh ./deploy/Deploy.ps1 -Target AICopilot -Deploy from the workspace root." >&2
+            echo "aicopilot-image is not the routine production release path. Use pwsh ./deploy/Deploy-Changed.ps1 from the workspace root." >&2
             exit 64
           fi
 
       - name: Checkout
         id: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         continue-on-error: true
 
       - name: Checkout via archive fallback
@@ -168,7 +168,7 @@ jobs:
 
       - name: Setup .NET
         if: steps.changes.outputs.any_backend == 'true'
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         env:
           DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet
         with:
