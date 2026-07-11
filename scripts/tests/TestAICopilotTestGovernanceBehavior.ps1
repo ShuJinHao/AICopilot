@@ -361,6 +361,14 @@ try {
     }
     Write-Host 'Accepted AICopilot static-governance fixture: current-repository-static-policy'
 
+    $normalizationOutput = & pwsh -NoLogo -NoProfile -File $policyPath `
+        -Mode ValidateRunnerCaseNormalization `
+        -RepositoryRoot $RepositoryRoot 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "Runner display-name normalization fixture should pass:`n$(($normalizationOutput | Out-String).Trim())"
+    }
+    Write-Host 'Accepted AICopilot runner display-name normalization fixture: cross-os-path-and-ordinal-order'
+
     $projectPath = 'src/tests/Fixture.Tests/Fixture.Tests.csproj'
     $projectName = 'Fixture.Tests'
     $emptyWaivers = New-WaiverManifest -Waivers @()

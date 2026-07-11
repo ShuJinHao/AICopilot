@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('ValidateProject', 'ValidateRepository', 'ValidateSnapshot', 'ValidateRepositorySnapshot', 'ValidateStatic', 'ValidateDiscovery', 'ValidateRunnerConfiguration', 'GenerateBaseline')]
+    [ValidateSet('ValidateProject', 'ValidateRepository', 'ValidateSnapshot', 'ValidateRepositorySnapshot', 'ValidateStatic', 'ValidateDiscovery', 'ValidateRunnerConfiguration', 'ValidateRunnerCaseNormalization', 'GenerateBaseline')]
     [string]$Mode = 'ValidateProject',
     [string]$RepositoryRoot,
     [string]$ProjectPath,
@@ -2173,12 +2173,35 @@ function Get-DotNetListedTests {
 }
 
 function Get-NormalizedRunnerCases {
-    param([Parameter(Mandatory)][string[]]$Cases)
+    param(
+        [Parameter(Mandatory)][string[]]$Cases,
+        [string]$WorkspaceRoot = $RepositoryRoot
+    )
 
-    $rootWithForwardSlashes = $RepositoryRoot.Replace('\', '/')
-    return [string[]]@($Cases | ForEach-Object {
-        $_.Replace('\', '/').Replace($rootWithForwardSlashes, '<REPO>')
-    } | Sort-Object)
+    if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
+        throw "$ruleId-DISCOVERY runner-case normalization requires an explicit workspace root."
+    }
+    $rootWithForwardSlashes = $WorkspaceRoot.Replace('\', '/').TrimEnd('/')
+    $quotedWorkspacePathPattern = '"' + [regex]::Escape($rootWithForwardSlashes) + '(?:/[^\"]*)?"'
+    $pathRegexOptions = [Text.RegularExpressions.RegexOptions]::CultureInvariant
+    if ($IsWindows) {
+        $pathRegexOptions = $pathRegexOptions -bor [Text.RegularExpressions.RegexOptions]::IgnoreCase
+    }
+    $normalized = [string[]]@($Cases | ForEach-Object {
+        $forwardSlashes = $_.Replace('\', '/')
+        # xUnit truncates long display-name arguments before this policy sees them.
+        # Only the current workspace root is unstable across runners. Root-relative
+        # URLs, JSON pointers, protocol-relative URLs, external absolute values and
+        # relative business data remain part of the case identity.
+        $withoutWorkspacePaths = [regex]::Replace(
+            $forwardSlashes,
+            $quotedWorkspacePathPattern,
+            '"<ABSOLUTE_PATH>"',
+            $pathRegexOptions)
+        $withoutWorkspacePaths.Normalize([Text.NormalizationForm]::FormC)
+    })
+    [Array]::Sort($normalized, [StringComparer]::Ordinal)
+    return $normalized
 }
 
 if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
@@ -2194,6 +2217,80 @@ if ([string]::IsNullOrWhiteSpace($WaiverPath)) {
 }
 $BaselinePath = Get-NormalizedPath $BaselinePath
 $WaiverPath = Get-NormalizedPath $WaiverPath
+
+if ($Mode -eq 'ValidateRunnerCaseNormalization') {
+    $macCases = [string[]]@(
+        'Fixture.Case(value: "z")',
+        'Fixture.Golden(path: "/Users/example/work/AICopilot/src/t"···)',
+        'Fixture.Case(relativePath: "../draft/report.md")',
+        'Fixture.Case(value: "A")',
+        'Fixture.Case(rootRelativeUrl: "/api/v1/devices")',
+        'Fixture.Case(jsonPointer: "/items/0")',
+        'Fixture.Case(protocolRelativeUrl: "//cdn.example/x")',
+        'Fixture.Case(url: "https://example.test/api")',
+        'Fixture.Case(externalPath: "/var/data/report.json")',
+        'Fixture.Case(value: "a")',
+        'Fixture.Case(value: "Ä")',
+        'Fixture.Case(value: "A")'
+    )
+    $linuxCases = [string[]]@(
+        'Fixture.Case(value: "Ä")',
+        'Fixture.Case(externalPath: "/var/data/report.json")',
+        'Fixture.Case(relativePath: "../draft/report.md")',
+        'Fixture.Golden(path: "/home/runner/work/AICopilot/AICopilot/src/tests/AI"···)',
+        'Fixture.Case(value: "A")',
+        'Fixture.Case(url: "https://example.test/api")',
+        'Fixture.Case(protocolRelativeUrl: "//cdn.example/x")',
+        'Fixture.Case(value: "a")',
+        'Fixture.Case(jsonPointer: "/items/0")',
+        'Fixture.Case(value: "z")',
+        'Fixture.Case(rootRelativeUrl: "/api/v1/devices")',
+        'Fixture.Case(value: "A")'
+    )
+    $windowsCases = [string[]]@(
+        'Fixture.Case(value: "A")',
+        'Fixture.Case(rootRelativeUrl: "/api/v1/devices")',
+        'Fixture.Case(value: "Ä")',
+        'Fixture.Case(url: "https://example.test/api")',
+        'Fixture.Golden(path: "C:\work\AICopilot\src\tests\AI"···)',
+        'Fixture.Case(jsonPointer: "/items/0")',
+        'Fixture.Case(value: "z")',
+        'Fixture.Case(relativePath: "../draft/report.md")',
+        'Fixture.Case(externalPath: "/var/data/report.json")',
+        'Fixture.Case(value: "A")',
+        'Fixture.Case(protocolRelativeUrl: "//cdn.example/x")',
+        'Fixture.Case(value: "a")'
+    )
+    $expectedCases = [string[]]@(
+        'Fixture.Case(externalPath: "/var/data/report.json")',
+        'Fixture.Case(jsonPointer: "/items/0")',
+        'Fixture.Case(protocolRelativeUrl: "//cdn.example/x")',
+        'Fixture.Case(relativePath: "../draft/report.md")',
+        'Fixture.Case(rootRelativeUrl: "/api/v1/devices")',
+        'Fixture.Case(url: "https://example.test/api")',
+        'Fixture.Case(value: "A")',
+        'Fixture.Case(value: "A")',
+        'Fixture.Case(value: "a")',
+        'Fixture.Case(value: "z")',
+        'Fixture.Case(value: "Ä")',
+        'Fixture.Golden(path: "<ABSOLUTE_PATH>"···)'
+    )
+    $normalizedMacCases = @(Get-NormalizedRunnerCases -Cases $macCases -WorkspaceRoot '/Users/example/work/AICopilot')
+    $normalizedLinuxCases = @(Get-NormalizedRunnerCases -Cases $linuxCases -WorkspaceRoot '/home/runner/work/AICopilot/AICopilot')
+    $normalizedWindowsCases = @(Get-NormalizedRunnerCases -Cases $windowsCases -WorkspaceRoot 'C:\work\AICopilot')
+    $expectedText = $expectedCases -join "`n"
+    foreach ($actual in @($normalizedMacCases, $normalizedLinuxCases, $normalizedWindowsCases)) {
+        if (($actual -join "`n") -cne $expectedText) {
+            throw "$ruleId-DISCOVERY workspace-path normalization, ordinal ordering and business-value preservation must match the reviewed cross-OS sequence."
+        }
+    }
+    if ($normalizedMacCases.Count -ne $macCases.Count -or
+        @($normalizedMacCases | Where-Object { $_ -ceq 'Fixture.Case(value: "A")' }).Count -ne 2) {
+        throw "$ruleId-DISCOVERY runner-case normalization must preserve exact duplicate multiplicity."
+    }
+    Write-Host 'AICopilot runner display-name normalization fixture passed.'
+    exit 0
+}
 
 if ($Mode -eq 'ValidateRunnerConfiguration') {
     if ([string]::IsNullOrWhiteSpace($RunnerConfigPath)) {
@@ -2250,7 +2347,6 @@ if ($Mode -eq 'GenerateBaseline') {
             forbiddenNewTestKinds = $policy.forbiddenNewTestKinds
             discoveryCeilings = $policy.discoveryCeilings
             protectBaselineRemovals = $policy.protectBaselineRemovals
-            sourceAssemblySha256 = $snapshot.assemblySha256
             baselineDeclarations = $snapshot.declarations
             baselineExecutionTemplates = $snapshot.executionTemplates
             baselineProjectedCases = $snapshot.projectedCases
@@ -2268,7 +2364,7 @@ if ($Mode -eq 'GenerateBaseline') {
         ruleId = $ruleId
         generatedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
         provenance = [pscustomobject][ordered]@{
-            sourceHead = (& git -C $RepositoryRoot rev-parse HEAD | Out-String).Trim()
+            sourceHead = $reviewedBaselineSourceHead
             baselineStatus = 'Reviewed'
             note = 'sourceHead identifies the independently reviewed source snapshot, not this governance commit. The baseline was generated after full local validation of commit 88a9687 and successful GitHub run 29170924668 with zero annotations.'
         }

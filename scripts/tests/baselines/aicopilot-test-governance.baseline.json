@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "ruleId": "AI-TEST-GOV-001",
-  "generatedAtUtc": "2026-07-11T22:51:15.0586520+00:00",
+  "generatedAtUtc": "2026-07-11T23:38:35.4789820+00:00",
   "provenance": {
     "sourceHead": "88a9687a40e7c78d671bdc634e90941b91f3bde1",
     "baselineStatus": "Reviewed",
@@ -135,12 +135,11 @@
       "forbiddenNewTestKinds": [],
       "discoveryCeilings": [],
       "protectBaselineRemovals": true,
-      "sourceAssemblySha256": "5f3a98d9b94e347b65fda649f2b4c52dc7f86d3975ba1eb18ab92a23de16547a",
       "baselineDeclarations": 1,
       "baselineExecutionTemplates": 1,
       "baselineProjectedCases": 1,
       "baselineRunnerCases": 6,
-      "runnerCaseDigest": "c1a6a9c1178796d3be92f5e7460f6c34e092c06f74f221b07b58affe4b6cc058",
+      "runnerCaseDigest": "624b3b4b12a8198fbd7c99a215f7c69ead8603dc6d44e2f8c38113abb4894913",
       "tests": [
         {
           "id": "aicopilot-test-physical-v1:0bb63019ac88f7aa0916fa0cd173db0a6f953a58d6de29daae4878a612ea4461",
@@ -207,12 +206,11 @@
       "forbiddenNewTestKinds": [],
       "discoveryCeilings": [],
       "protectBaselineRemovals": true,
-      "sourceAssemblySha256": "53f18a82779044d8812cbeab2b01a4c1e14102705c42c3c6f5c626450d871c01",
       "baselineDeclarations": 84,
       "baselineExecutionTemplates": 84,
       "baselineProjectedCases": 91,
       "baselineRunnerCases": 91,
-      "runnerCaseDigest": "f5598ad0fefc99a08d8c4ad63604bbf82e6721a3f1a44c4a651c12f3c2363f11",
+      "runnerCaseDigest": "3447a28d9e745c5ccc9293358c05f73d84c35e7c2ade2eadb5f32b89925cea5a",
       "tests": [
         {
           "id": "aicopilot-test-physical-v1:014791ae3092dc14ed6fe7102addd13edd2564451bb7891cdaab74d7f038b6df",
@@ -3217,12 +3215,11 @@
       "forbiddenNewTestKinds": [],
       "discoveryCeilings": [],
       "protectBaselineRemovals": true,
-      "sourceAssemblySha256": "ec6dbabdc7fb1a9969844253ddad3e64c8282ca72a92efac1b60dc2dfe42e8f0",
       "baselineDeclarations": 699,
       "baselineExecutionTemplates": 699,
       "baselineProjectedCases": 883,
       "baselineRunnerCases": 924,
-      "runnerCaseDigest": "9e4623319b65ec6e0fe5daf2015be6265d24cd2aa3e4f6cc5e23fad5aff1818a",
+      "runnerCaseDigest": "5200b8ca64a3bbd45057acfcaf63a4bd74c5947794a456337289cf88d1c8e9e3",
       "tests": [
         {
           "id": "aicopilot-test-physical-v1:004d97705af6bd8a17fa4edb15a1ce61b9262a6b4eff21be660ab2364931b035",
@@ -30941,7 +30938,6 @@
       "forbiddenNewTestKinds": [],
       "discoveryCeilings": [],
       "protectBaselineRemovals": true,
-      "sourceAssemblySha256": "642d54d14aedc7791e79d26701f5e812c024ddd316ea287106c64a97f0db8cf8",
       "baselineDeclarations": 1,
       "baselineExecutionTemplates": 1,
       "baselineProjectedCases": 1,
