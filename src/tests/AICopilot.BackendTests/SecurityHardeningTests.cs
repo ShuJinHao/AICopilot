@@ -2059,15 +2059,7 @@ Current mitigation: GitHub production environment reviewers, restricted runner a
                 "AICopilot.AiGatewayService",
                 "Workflows",
                 "Executors",
-                "FreeFormDbaAnalysisRunner.cs")),
-            ["SemanticAnalysisRunner"] = File.ReadAllText(Path.Combine(
-                solutionRoot,
-                "src",
-                "services",
-                "AICopilot.AiGatewayService",
-                "Workflows",
-                "Executors",
-                "SemanticAnalysisRunner.cs"))
+                "FreeFormDbaAnalysisRunner.cs"))
         };
 
         foreach (var (name, source) in sources)
@@ -2079,8 +2071,6 @@ Current mitigation: GitHub production environment reviewers, restricted runner a
         }
 
         sources["AgentTaskRunQueueWorker"].Should().NotContain("ex.Message,");
-        sources["SemanticAnalysisRunner"].Should().NotContain("缺少必要条件：{ex.Message}");
-        sources["SemanticAnalysisRunner"].Should().Contain("FailureCode={FailureCode}");
     }
 
     [Fact]

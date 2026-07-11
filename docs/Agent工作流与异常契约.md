@@ -41,7 +41,9 @@ Cloud 只读 Agent 当前正式能力限定为：
 - `Analysis.Process.List/Detail`：工序主数据列表与唯一精确详情。
 - `Analysis.ClientRelease.List`：Cloud 返回的客户端发布版本列表。
 
-以上能力必须复用统一语义定义、`CloudReadonlyAgentPlanService` 和唯一 Cloud AiRead 客户端；成功、合法空集或 Cloud 数据源不可用时都必须返回真实边界，不得回退 Direct DB、Text-to-SQL、Simulation、MCP 或隐藏适配器。`PlanAgentTaskCoordinator` 只能创建和维护草案，不得持有查询客户端或执行查询；语义 intent 只能在用户确认草案后创建，运行时工具只能在确认后的执行链调用。
+以上能力必须复用统一语义定义、`CloudReadonlyAgentPlanService` 和唯一 Cloud AiRead 客户端；成功、合法空集、语义规划失败或 Cloud 数据源不可用时都必须返回真实边界，不得回退 Direct DB、Text-to-SQL、Simulation、MCP 或隐藏适配器。`PlanAgentTaskCoordinator` 只能创建和维护草案，不得持有查询客户端或执行查询；语义 intent 只能在用户确认草案后创建，运行时工具只能在确认后的执行链调用。
+
+`Analysis.Recipe.*` 的具体配方数据请求必须在调用语义规划器前返回禁读边界，即使规划器本会失败也不能进入 provider、数据库或 fallback。Chat 语义执行器只持有 Cloud AiRead 客户端、语义规划器和日志器；Direct DB、physical mapping、SQL generator、数据库审计与 Text-to-SQL fallback 只能留在各自独立治理链，不能重新挂回正式语义执行器。
 
 ## 3. Cloud 写入禁止
 

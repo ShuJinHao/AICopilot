@@ -217,7 +217,7 @@ git log --oneline -n 20 -- AICopilot.slnx deploy src docs AGENTS.md 资料
 - 没有“只 catch 然后无状态变化”的用户操作路径。
 - 错误契约测试覆盖后端 ProblemDetails 和前端解析。
 - AI-SEC-016 阶段证据：`UseCaseExceptionHandler` catch-all 不再把原始 exception 交给 logger；`DapperDatabaseConnector` guard reject 和 execution failure 只记录 `SqlLength`、`SqlSha256`、`ReasonCode`、`ErrorType` 与 `OriginalMessage=hidden_by_security_policy`；`DataAnalysisPlugin` 表结构/表名/SQL 执行失败不再 `logger.LogError(ex, ...)` 或返回 raw `ex.Message`；`DataAnalysisToolResultFormatter` 仅透出已知安全配置错误，SQL 拒绝原因映射成固定安全文案；`TextToSqlReadOnlyTests` 验证工具结果和日志不含 raw SQL、token、Host、Password；`SecurityHardeningTests` 固化禁止回退到 raw reason/ex.Message 日志。
-- AI-SEC-016 provider/workflow/worker 阶段证据：`AgentRuntimeFactory` provider fallback 和 endpoint pool fallback 不再 `LogWarning/LogDebug(ex, ...)`；`AgentTaskRunQueueWorker` iteration、queue item failure 和 heartbeat failure 不再记录原始 exception，worker-level failure message 固定为安全文案；`AgentWorkflowPipeline` branch fallback、`AgentSkillRouterAutoSelector`、`IntentRoutingExecutor`、`KnowledgeRetrievalExecutor`、`ToolsPackExecutor`、`DataAnalysisWidgetEmitter`、`FreeFormDbaAnalysisRunner` 和 `SemanticAnalysisRunner` fallback/error 日志只记录 `ErrorType` / `FailureCode` 与 `OriginalMessage=hidden_by_security_policy`；Cloud AiRead `MissingRequiredParameter` 用户文案不再拼接 `ex.Message`；`SecurityHardeningTests.ProviderWorkflowAndWorkerLogs_ShouldNotAttachRawExceptions` 固化这些源码不回退到 raw exception logger overload。
+- AI-SEC-016 provider/workflow/worker 阶段证据：`AgentRuntimeFactory` provider fallback 和 endpoint pool fallback 不再 `LogWarning/LogDebug(ex, ...)`；`AgentTaskRunQueueWorker` iteration、queue item failure 和 heartbeat failure 不再记录原始 exception，worker-level failure message 固定为安全文案；`AgentWorkflowPipeline` branch fallback、`AgentSkillRouterAutoSelector`、`IntentRoutingExecutor`、`KnowledgeRetrievalExecutor`、`ToolsPackExecutor`、`DataAnalysisWidgetEmitter` 和 `FreeFormDbaAnalysisRunner` 的 fallback/error 日志只记录 `ErrorType` / `FailureCode` 与 `OriginalMessage=hidden_by_security_policy`；`SemanticAnalysisRunnerTests` 通过六类 Cloud 错误行为矩阵验证 provider detail 不进入结果，`ProductionLogs_ShouldNotAttachRawExceptionObjects` 继续覆盖其 logger 调用；Cloud AiRead `MissingRequiredParameter` 用户文案不再拼接 `ex.Message`。过期的 Runner `FailureCode` 源码字符串断言已随 Direct DB 分支删除，不以同义字符串门禁替代。
 - AI-SEC-016 关单证据：`CloudAiReadHttpTransport`、`DocumentIndexingService`、`UploadDocument`、`McpServerBootstrap`、`McpRuntimeRegistrySynchronizer`、`McpServerManager`、`OutboxDispatcher`、`LanguageModelConnectivityTester`、`PostgreSqlSessionExecutionLock`、`TelemetryBehaviors`、`SqlAllowlistColumnInspector`、`SemanticQueryPlanner`、`ToolInputSchemaValidator`、`AgentDynamicPlanner`、`PlannerToolCatalog`、`AgentDynamicPlannerResponseParser`、`AstSqlGuardrail` 和 `AgentTaskRuntime` 不再把 raw exception 对象或 exception message 直接写入日志、接口响应、任务失败摘要或持久化失败原因；`SecurityHardeningTests.ProductionLogs_ShouldNotAttachRawExceptionObjects` 全量扫描 `src/hosts`、`src/infrastructure`、`src/services`、`src/core`、`src/shared` 禁止 `LogCritical/LogError/LogWarning/LogInformation/LogDebug/LogTrace` 以变量作为首参，从而覆盖 `ex`、`exception`、`e`、`cleanupException` 等异常变量名；`ErrorBoundaryMessages_ShouldNotReturnOrPersistRawExceptionMessages` 点名锁定已修错误边界。剩余 `ex.Message` 仅作为 `DataAnalysisToolResultFormatter`、`CloudReadOnlyTextToSqlRepairClassifier` 和 artifact finalized 识别的内部分类输入，输出仍是固定安全文案或 hash/code。
 - AI-SEC-018 关单证据：`MessageRuntimeDetailsPanel` 使用无 `open` 的原生 `<details>`，smoke 验收断言“结构化展示”默认隐藏，点击 summary 后才可见；`runtimeDetails.ts` 对工具参数、工具结果、Widget 摘要、运行状态 summary/error 只输出安全摘要；`runtimeDetails.spec.ts` 覆盖 SQL、连接串、password、token、endpoint、sourceName、tableName、databaseName、内部路径和原始结果行不进入运行详情对象。
 - AI-SEC-017 关单证据：`chatErrorStore` 统一解析 ProblemDetails `userFacingMessage` / validation errors / `detail` / `title`、已知 code 和安全兜底，SSE open/error 与普通 API 不再丢后端安全诊断；未知 Chat Error code 仍不直接展示 raw `detail`；AgentEvent、ApprovalRequest、AgentTask 和 Chat Error chunk 失败进入会话错误栏；agent catalog、task timeline、artifact preview/download/upload 和 ConfigView agent settings 刷新失败进入当前会话或页面错误栏；auth current-user 和 Cloud OIDC status 失败进入登录错误栏；RAG、Config CRUD、Access action 失败进入页面 `errorMessage`、`actionErrors` 或对应 dialog error；纯解析 fallback（metadata/widget/runtime details/chat run status）只降级展示或记录安全摘要，不是用户操作失败路径；chunk reload guard 的 storage catch 只保护 stale bundle 自动刷新；`chatErrorStore.spec.ts` 覆盖 ProblemDetails `detail/title` 解析，`frontendErrorHandling.spec.ts` 和 `rg -n "catch\\s*\\{" src/vues/AICopilot.Web/src` 固化无裸 catch。
@@ -228,7 +228,7 @@ git log --oneline -n 20 -- AICopilot.slnx deploy src docs AGENTS.md 资料
 | --- | --- | --- | --- | --- | --- |
 | AI-SEC-019 | CRITICAL | Done | Cloud 只读 | AI 只能读 Cloud；禁止 MCP、Tool、Agent workflow、后台任务或隐藏 adapter 写 Cloud | `ArchitectureBoundaryTests` + `CloudReadonlyChatBoundaryTests` |
 | AI-SEC-020 | CRITICAL | Done | Simulation | 生产路径 Cloud 查询失败、为空或未配置时不得 fallback 到 Simulation；Real provider 失败必须返回 Cloud AiRead 错误；生产基础配置和 compose 不携带 `MockOnly=true` | `CloudReadonlySimulationTests` + `SecurityHardeningTests.DeploymentConfig_ShouldNotCarryKnownWeakSecrets` |
-| AI-SEC-021 | HIGH | Done | Cloud AiRead | 高频设备日志、小时/汇总产能、生产数据优先走 Cloud AiRead 正式只读 API | `CloudAiReadClientTests` + `SemanticAnalysisRunnerTests` |
+| AI-SEC-021 | HIGH | Done | Cloud AiRead | Device、DeviceLog、Capacity、ProductionData、Process、ClientRelease 六类正式语义只能走 Cloud AiRead 正式只读 API | `CloudAiReadClientTests` + `SemanticAnalysisRunnerTests` |
 | AI-SEC-022 | HIGH | Done | production records | 生产记录唯一高频路径是 `/api/v1/ai/read/production-records` | `CloudAiReadClientTests` endpoint policy |
 | AI-SEC-023 | HIGH | Done | DeviceLog 追问 | 追问其他日志级别、设备、工序、时间必须重新查询，不基于上一轮回答推断 | `DeviceLogFollowUpIntentRewriterTests` |
 
@@ -243,11 +243,11 @@ git log --oneline -n 20 -- AICopilot.slnx deploy src docs AGENTS.md 资料
 第五批关单证据：
 
 - `docs/Cloud只读数据分析契约.md` 与 Cloud AiRead、CloudReadOnly Direct DB、Text-to-SQL、DeviceLog 和 Simulation 测试口径一致。
-- `ArchitectureBoundaryTests` 固化 AICopilot 不直接引用 Cloud 项目/命名空间、Cloud write tools 不纳入范围、CloudReadOnly direct DB 只读 guard、governed schema、只读账号 grant preflight 和高频 Cloud AiRead 优先级。
+- `ArchitectureBoundaryTests` 固化 AICopilot 不直接引用 Cloud 项目/命名空间、Cloud write tools 不纳入范围、CloudReadOnly direct DB 只读 guard、governed schema、只读账号 grant preflight，并用构造反射锁定正式语义执行器只依赖 Cloud AiRead、planner 和 logger。
 - `CloudReadonlyChatBoundaryTests` 阻断 Cloud 业务修改、禁用设备、补录产能、删除日志和上传生产数据等写语义。
 - `CloudReadonlySimulationTests` 固化 Simulation 只能在 Development 使用，Real 模式必须双开 `CloudReadonly:Real` 和 `CloudAiRead`，Cloud AiRead 不可用时不得降级返回 Simulation。
 - `CloudAiReadClientTests` 固化 `/api/v1/ai/read/devices`、`processes`、`client-releases`、`device-client-states`、`device-logs`、`capacity/summary`、`capacity/hourly`、`production-records` 端点和参数契约；`deviceCode` 只有在未截断搜索结果中唯一精确匹配时才能解析成 `deviceId`，设备状态随后只向 `/device-client-states` 发送正式 `deviceId`，不得把 `deviceCode` 或整句自然语言降级为 keyword。
-- `SemanticAnalysisRunnerTests` 固化高频 DeviceLog/Capacity/ProductionData 在 CloudAiRead 启用时优先走 Cloud AiRead；Direct DB / Text-to-SQL 只保留治理白名单内补充分析。
+- `SemanticAnalysisRunnerTests` 以唯一六类目标数据源覆盖 Cloud 合法空集、规划失败、关闭和错误都不 fallback，并单独证明 Recipe 在 planner 前拒绝；Direct DB / Text-to-SQL 只保留在正式语义执行器之外的治理白名单补充分析。
 - `DeviceLogFollowUpIntentRewriterTests` 固化追问日志级别、设备、工序、时间窗口时重新生成 `Analysis.DeviceLog.*` 查询。
 
 ### 7.1 2026-07-10 AI-only 契约、安全、Agent 与前端修复
@@ -291,6 +291,14 @@ git log --oneline -n 20 -- AICopilot.slnx deploy src docs AGENTS.md 资料
 | AI-SEC-043 | HIGH | Done | CI / 部署元数据 | PR 与手动运行先把受信输入解析为不可变 base SHA；Node 24 action 与 runner 版本匹配；全部部署 Shell 按直执行或 bash/source-only 唯一分类并锁定 Git mode | Simulation workflow + `DeploymentPreflightBehaviorTests` + ArchitectureTests + 成功 runner job 版本证据 |
 
 本批固定口径：脚本不再重复解析 JSON 充当配置行为测试；部署 preflight 不再混入大型安全静态测试；Controller 注入约束用运行时类型反射验证。新增 tracked Shell 未进入唯一分类、直执行脚本不是 `100755`、手动 base ref 未严格校验或比较对象不是 commit SHA，都必须在业务测试或发布前失败。
+
+### 7.4 2026-07-11 正式语义执行器数据源边界收口
+
+| 编号 | 严重级 | 状态 | 范围 | 修复要求 | 验收 |
+| --- | --- | --- | --- | --- | --- |
+| AI-SEC-044 | HIGH | Done | SemanticAnalysisRunner | Recipe 必须在 planner 前拒绝；六类正式语义在成功、空集、规划失败、关闭和 Cloud 错误时只走 Cloud AiRead 且不 fallback；物理删除 Runner 内不可达 Direct DB/SQL/fallback 分支和专用测试桩 | `SemanticAnalysisRunnerTests` 七目标边界与六类矩阵 + ArchitectureTests 构造反射 + 全量 BackendTests/solution build |
+
+本批没有重命名或迁移既有 HTTP route、配置键、physical mapping / semantic source status 运维诊断及其消费者，也没有删除 `SemanticSqlGenerator` 独立实现和测试；这些表面不属于正式语义执行器，后续若治理必须重新做生产与测试消费者审计，不能借本批 no-fallback 收口扩大删除范围。
 
 ## 8. 第六批：Text-to-SQL 和提示词泄露门禁
 

@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using AICopilot.AiGatewayService.Workflows.Executors;
 using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
@@ -16,8 +17,10 @@ using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.Core.Rag.Ids;
 using AICopilot.HttpApi.Infrastructure;
 using AICopilot.SharedKernel.Domain;
+using AICopilot.Services.Contracts;
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace AICopilot.ArchitectureTests;
 
@@ -594,15 +597,6 @@ public sealed class ArchitectureBoundaryTests
             "hosts",
             "AICopilot.MigrationWorkApp",
             "MigrationWorkerCloudReadOnlySeeder.cs"));
-        var semanticRunner = File.ReadAllText(Path.Combine(
-            SolutionRoot,
-            "src",
-            "services",
-            "AICopilot.AiGatewayService",
-            "Workflows",
-            "Executors",
-            "SemanticAnalysisRunner.cs"));
-
         var approvedTables = new[] { "devices", "mfg_processes", "device_logs", "hourly_capacity", "pass_station_records" };
         foreach (var table in approvedTables)
         {
@@ -622,16 +616,28 @@ public sealed class ArchitectureBoundaryTests
         seeder.Should().Contain("ReadOnlyCredentialVerified");
         seeder.Should().Contain("DataAnalysis CloudReadOnly direct database mode cannot be enabled while CloudReadonly Simulation seeding is enabled.");
 
-        semanticRunner.IndexOf("if (IsCloudOnlySemanticTarget(plan.Target))", StringComparison.Ordinal)
-            .Should()
-            .BeLessThan(semanticRunner.IndexOf("semanticPhysicalMappingProvider.TryGetMapping", StringComparison.Ordinal));
-        semanticRunner.IndexOf("semanticPhysicalMappingProvider.TryGetMapping", StringComparison.Ordinal)
-            .Should()
-            .BeLessThan(semanticRunner.IndexOf("cloudAiReadClient.IsEnabled && CloudAiReadSemanticSupport.IsSupported(plan.Target)", StringComparison.Ordinal));
-        semanticRunner.Should().NotContain("IsHighFrequencyCloudAiReadTarget");
-        semanticRunner.Should().Contain("CloudOnlySemanticSourceUnavailableMarker");
-
         governedSchema.Should().Contain("mfg_processes");
+    }
+
+    [Fact]
+    public void SemanticAnalysisRunner_ShouldExposeOnlyCloudAiReadPlannerAndLoggerDependencies()
+    {
+        var constructor = typeof(SemanticAnalysisRunner)
+            .GetConstructors(BindingFlags.Instance | BindingFlags.Public)
+            .Should()
+            .ContainSingle()
+            .Subject;
+
+        var expectedDependencies = new[]
+        {
+            typeof(ICloudAiReadClient),
+            typeof(ISemanticQueryPlanner),
+            typeof(ILogger<SemanticAnalysisRunner>)
+        };
+        constructor.GetParameters()
+            .Select(parameter => parameter.ParameterType)
+            .Should()
+            .BeEquivalentTo(expectedDependencies);
     }
 
     [Fact]
