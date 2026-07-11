@@ -164,7 +164,7 @@ Cloud AiRead 设备契约：
 - 如果当前真实部署根目录、稳定 Runner、Docker Root Dir、基础设施维护目标、工作区入口参数或标准部署用户与模板不同，必须先更新工作区 `deploy/Deploy.ps1`、`deploy/Invoke-WorkspaceDeploy.ps1`、`deploy/profiles/*.json`、项目部署指南/README 和工作区部署总览，再允许继续改脚本或发布。
 - 如果当前 `AICopilot` 与 `Cloud` 共用同一台生产宿主机，必须在工作区总入口明确写出共享宿主机事实、共享标准发布人和两个独立部署根；不得把同机双部署根问题写成两套互不相关的环境。
 - root 应急路径一旦写入 `releases/*`、`current-release.summary.md` 或 deploy support files，关闭任务前必须恢复 owner/mode，并重新验证标准 non-root `./deploy-release.sh --validate-only`；不得留下 root-owned 状态文件后直接收口。
-- 工作区根 `deploy/Deploy.ps1 -Target AICopilot` 是日常应用唯一入口；正式发布从 fresh 远端 tip 建 detached worktree，不要求或修改本地脏工作树，并以一次 SSH 提交不可变镜像请求。后端服务自动包含 migration；Runner/Compose/support files/cleanup/GC/深度巡检独立维护。
+- 工作区根 `deploy/Deploy.ps1 -Target AICopilot` 是日常应用唯一入口；正式发布从 fresh 远端 tip 建 detached worktree，不要求或修改本地脏工作树，并只向稳定 Runner 提交一份不可变镜像请求。`Auto` 在 SSH TCP 不可达时使用 `aicopilot-routine-request.yml` self-hosted Runner；后端服务自动包含 migration；Runner/Compose/support files/cleanup/GC/深度巡检独立维护。
 - support release 必须包含 compose、执行 staging/SHA256 校验，并让 support reservation、全局 release lock 和 deploy 使用同一 token/digest；`.env`、release state、锁和备份不得进入同步包。健康前失败必须恢复持久状态；active/stale lock、真实退出码、timeout、信号释放锁和同 SHA 健康幂等必须有行为回归。
 - 正式发布和健康 no-op 必须绑定 workspace plan/profile、固定 Git SHA、显式服务闭包、immutable OCI、全局配置 fingerprint 与实际运行容器身份；配置 fingerprint 漂移只能走全量服务发布，后端服务必须显式包含 migration。Running/Restarting/OOM/RestartCount 和已有 Docker Health 任一不满足时不得提交或 no-op。
 - support、compose、release state、三项基础设施和全部常驻 runtime 必须一起恢复并验证；基础设施身份以事务前冻结的 RepoDigest/runtime image id 为准，不得用可变 tag 冒充旧运行态。恢复或阻断证据不确定统一返回 `86` 并永久 fail-closed；reservation 原子 transition 与断联对账失败/active/unknown 返回 `87`，禁止自动取消或重试。

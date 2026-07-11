@@ -101,7 +101,7 @@ jobs:
               exit 64
             fi
           done
-          deploy/enterprise-ai/scripts/check-runner-security-attestation.sh --deploy-dir "$DEPLOY_TARGET_DIR"
+          bash deploy/enterprise-ai/scripts/check-runner-security-attestation.sh --deploy-dir "$DEPLOY_TARGET_DIR"
           command -v docker >/dev/null
           command -v curl >/dev/null
           docker compose version >/dev/null

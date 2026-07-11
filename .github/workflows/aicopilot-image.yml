@@ -209,7 +209,7 @@ jobs:
             echo "Self-hosted runner must not run as root." >&2
             exit 64
           fi
-          deploy/enterprise-ai/scripts/check-runner-security-attestation.sh
+          bash deploy/enterprise-ai/scripts/check-runner-security-attestation.sh
           docker version >/dev/null
           docker buildx version >/dev/null
 

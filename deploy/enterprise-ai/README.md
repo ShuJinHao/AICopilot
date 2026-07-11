@@ -14,7 +14,7 @@
 
 - 生产环境使用 Docker Compose 单机编排，服务器目录为 `/srv/enterprise-ai/deploy`。
 - 工作区日常标准发布走 `pwsh ./deploy/Deploy.ps1 -Target AICopilot ...`；本目录 `build-and-push.sh` 只负责镜像，`local-release.sh` / `deploy-release.sh` 只保留给基础设施维护和旧链恢复。
-- 日常入口取 `origin/main` tip 建 detached worktree；本地业务工作树可以继续迭代且不会被修改，未推送改动不会发布。每次日常远端阶段只有一次 SSH。
+- 日常入口取 `origin/main` tip 建 detached worktree；本地业务工作树可以继续迭代且不会被修改，未推送改动不会发布。每次日常远端阶段只投递一份 digest-bound 请求；`Auto` 在 SSH TCP 不可达时经 `aicopilot-routine-request.yml` self-hosted Runner 交给同一稳定 Runner。
 - AICopilot 选择 HttpApi/DataWorker/RagWorker 时自动包含 migration。Runner 在 migration 前生成 PostgreSQL dump/checksum，随后只对选中应用服务执行 `--no-deps` 更新；PostgreSQL、RabbitMQ、Qdrant 不随应用发布重建。
 - Runner/Compose/scripts/cloud-readonly 支持文件升级、深度安全巡检、cleanup 和 Harbor GC 均是独立维护任务，不得塞回日常应用热路径。
 - 多 agent 可以同时准备本地候选，但远端 support install、release state、容器变更和 cleanup 必须由托管锁串行化；第二个发布遇到 active lock 时立即返回 `75`，不得静默等待或绕锁重发。
