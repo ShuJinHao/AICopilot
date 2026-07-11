@@ -272,6 +272,17 @@ git log --oneline -n 20 -- AICopilot.slnx deploy src docs AGENTS.md 资料
 
 本批关单证据：Cloud AiRead 公共传输已收敛为八个 typed GET；设备主数据、最后上报状态与最新日志级别已分离；生产记录缺失字段不再代填；JWT 统一运行时校验完成；Process、ClientRelease、DeviceStatus 已接入统一语义、Agent 确认门和 Cloud-only 执行；OpenAPI/ProblemDetails 快照、前端真实状态门禁和无用 readiness DTO 删除均有测试覆盖。AI-SEC-033 继续 Deferred，因为默认 bootstrap admin 还需要工作区部署总览/profile 的跨目录同步授权。真实 Cloud 提供方 HTTP E2E、部署和生产验证不属于本次 AI-only 关单证据，不得据此宣称 Cloud 已发布或生产已验收。
 
+### 7.2 2026-07-11 Agent 分支事实与路由日志补漏
+
+| 编号 | 严重级 | 状态 | 范围 | 修复要求 | 验收 |
+| --- | --- | --- | --- | --- | --- |
+| AI-SEC-040 | HIGH | Done | Agent workflow fan-in | `BranchResult` 必须区分 `Skipped/Empty/Succeeded/Failed`；必需性由当前 intents 与 executor 相关性判定产生；必需分支失败必须阻止最终合成，合法空结果可以继续，非成功载荷不得进入上下文 | `AgentWorkflowBranchSemanticsTests` + `ClaudeFollowupClosureTests` + ArchitectureTests + solution build |
+| AI-SEC-041 | HIGH | Done | intent routing 日志 | 不记录模型路由原始响应、reasoning、prompt 或查询原文；只记录 response length、SHA-256、response type 和 parse state | `AgentWorkflowBranchSemanticsTests.RoutingResponseLogMetadata_ShouldExposeOnlyLengthHashTypeAndParseState` + AI-SEC-016 日志门禁 |
+
+本批固定口径：四个分支继续通过 `Task.WhenAll` 和 `AgentWorkflowSink` 并行 fan-out/fan-in；没有相关 intent 才能标记 `Skipped`，相关能力执行后真实零结果才能标记 `Empty`，异常只能标记 `Failed`。`Required + Failed` 在 `ContextAggregatorExecutor` 和 final agent 之前返回稳定 Chat Error；可选失败、跳过和空结果不向最终模型注入伪上下文。调用方取消继续向上传播。PlanDraft 的能力发现边界、Cloud-only 八个 typed GET、成功/空集/失败均不得 fallback、Tool/MCP/HITL 审批边界均未改变。
+
+本批关单证据：新增行为测试覆盖四态区分、异常不再冒充 empty、合法 empty、required/optional gate、取消传播、只聚合 succeeded 以及真实 `ILogger` formatter 不含路由原文；既有 topology/Cloud-only/semantic 测试和 solution build 用于证明四分支并行、Cloud 只读与无 fallback 边界没有回退。未执行生产发布或线上日志验收，因此 `Done` 只代表仓库内实现与本地门禁完成。
+
 ## 8. 第六批：Text-to-SQL 和提示词泄露门禁
 
 | 编号 | 严重级 | 状态 | 范围 | 修复要求 | 验收 |

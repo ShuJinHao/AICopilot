@@ -24,6 +24,14 @@
 
 不得为了实现方便把这些能力合成一个大 agent、大 service 或绕过审批/工具边界的隐藏 adapter。`AgentWorkflowTopology` 的 `Tools`、`Knowledge`、`DataAnalysis`、`BusinessPolicy` 分支必须保持显式 fan-out/fan-in，不得拍平成串行或为新能力另起孤立链路。
 
+### 2.1 分支完成状态与合流门禁
+
+- 四个并行分支必须返回显式 `BranchResult` 完成状态：`Skipped` 表示当前路由没有该分支相关意图；`Empty` 表示相关分支已合法执行但没有真实结果或可用能力；`Succeeded` 表示有可进入最终上下文的真实载荷；`Failed` 表示分支没有完成并携带稳定错误码与安全摘要。禁止再用空字符串、空数组或空对象伪装异常。
+- 分支是否 `Required` 必须由本次 routing intents 与对应 executor 的同一套相关性判定得出，不能把某类分支全局硬编码成永远必需或永远可选。路由判定与实际执行过滤条件必须保持一致。
+- `Required + Failed` 必须在 fan-in 后、最终上下文聚合前停止最终回答，返回稳定且脱敏的 Chat Error chunk；`Required + Empty` 是合法完成，可以继续合流；可选分支失败不得伪造成成功载荷，也不得进入最终上下文。
+- `Skipped`、`Empty`、`Failed` 的载荷一律不得进入 `ContextAggregatorExecutor`；只有 `Succeeded` 可以参与最终回答。调用方取消必须继续向上传播，不能转换成业务空结果或普通失败。
+- 以上状态治理不得改成串行工作流。`Task.WhenAll`、`AgentWorkflowSink` 和四分支 fan-out/fan-in 仍是唯一主干；PlanDraft 的能力发现仍只生成草案，能力缺失或发现失败不得越权执行真实 Tool、MCP、Cloud 查询或 Worker。
+
 Cloud 只读 Agent 当前正式能力限定为：
 
 - `Analysis.Device.List/Detail/Status`：设备主数据以及 Cloud 权威 `softwareStatus`/运行心跳。
@@ -59,6 +67,7 @@ Cloud 只读 Agent 当前正式能力限定为：
 - failure code / reason code。
 - SQL length / SQL hash。
 - query hash / question hash。
+- intent routing response length / SHA-256 / response type / parse state。
 - 固定业务错误码和固定用户文案。
 
 不得记录：
@@ -69,6 +78,7 @@ Cloud 只读 Agent 当前正式能力限定为：
 - token、API key、密码、连接串。
 - endpoint、sourceName、表名、视图名、内部字段。
 - 原始工具参数、原始工具结果行或未脱敏 provider 返回。
+- intent routing 原始响应、intent reasoning、用户 prompt 或查询原文；路由诊断只能记录长度、SHA-256、类型和解析状态。
 
 少量 `ex.Message` 只能作为内部分类器输入；输出仍必须是固定安全文案、hash、code 或 failure classification。
 
@@ -101,7 +111,7 @@ Cloud 只读 Agent 当前正式能力限定为：
 ## 9. 验收命令
 
 ```bash
-dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "ClaudeFollowupClosureTests|ToolRegistryGovernanceTests|ChatErrorContractTests|SecurityHardeningTests|TextToSqlReadOnlyTests" --no-restore
+dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "AgentWorkflowBranchSemanticsTests|ClaudeFollowupClosureTests|ToolRegistryGovernanceTests|ChatErrorContractTests|SecurityHardeningTests|TextToSqlReadOnlyTests" --no-restore
 cd src/vues/AICopilot.Web && npm run test:unit -- chatErrorStore frontendErrorHandling runtimeDetails
 rg -n "Log(Critical|Error|Warning|Information|Debug|Trace)\\(\\s*[a-zA-Z_][a-zA-Z0-9_]*\\s*,|catch\\s*\\{\\s*\\}" src/hosts src/infrastructure src/services src/vues/AICopilot.Web/src
 ```

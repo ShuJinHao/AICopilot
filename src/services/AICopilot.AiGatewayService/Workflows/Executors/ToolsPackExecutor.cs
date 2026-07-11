@@ -1,5 +1,6 @@
 using AICopilot.AiGatewayService.Approvals;
 using AICopilot.AiGatewayService.Models;
+using AICopilot.SharedKernel.Result;
 using Microsoft.Extensions.Logging;
 
 namespace AICopilot.AiGatewayService.Workflows.Executors;
@@ -10,6 +11,11 @@ public class ToolsPackExecutor(
 {
     public const string ExecutorId = nameof(ToolsPackExecutor);
     private const string ActionIntentPrefix = "Action.";
+
+    public static bool IsRelevant(IEnumerable<IntentResult> intentResults)
+    {
+        return intentResults.Any(IsActionIntent);
+    }
 
     public Task<BranchResult> ExecuteAsync(
         List<IntentResult> intentResults,
@@ -25,13 +31,12 @@ public class ToolsPackExecutor(
         try
         {
             var actionIntents = intentResults
-                .Where(i => i.Intent.StartsWith(ActionIntentPrefix, StringComparison.OrdinalIgnoreCase)
-                            && i.Confidence > 0.8)
+                .Where(IsActionIntent)
                 .ToList();
 
             if (actionIntents.Count == 0)
             {
-                return BranchResult.FromTools([]);
+                return BranchResult.Skipped(BranchType.Tools);
             }
 
             logger.LogInformation("Matched tool intents: {Intents}", string.Join(", ", actionIntents.Select(i => i.Intent)));
@@ -56,7 +61,16 @@ public class ToolsPackExecutor(
             logger.LogError(
                 "Failed to load tool pack. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
                 e.GetType().Name);
-            return BranchResult.FromTools([]);
+            return BranchResult.Failed(
+                BranchType.Tools,
+                AppProblemCodes.ChatStreamFailed,
+                "Tool capability discovery failed.");
         }
+    }
+
+    private static bool IsActionIntent(IntentResult intent)
+    {
+        return intent.Intent.StartsWith(ActionIntentPrefix, StringComparison.OrdinalIgnoreCase)
+               && intent.Confidence > 0.8;
     }
 }

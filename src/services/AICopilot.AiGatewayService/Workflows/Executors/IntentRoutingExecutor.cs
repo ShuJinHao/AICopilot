@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using AICopilot.AiGatewayService.Agents;
@@ -19,6 +20,12 @@ public sealed record IntentRoutingStepResult(
     ManufacturingSceneType Scene,
     string? ResponseText,
     ChatExecutionMetadataSnapshot ExecutionMetadata);
+
+internal sealed record IntentRoutingResponseLogMetadata(
+    int ResponseLength,
+    string ResponseSha256,
+    string ResponseType,
+    bool Parsed);
 
 public class IntentRoutingExecutor(
     IMediator mediator,
@@ -47,10 +54,12 @@ public class IntentRoutingExecutor(
         history.Add(new AiChatMessage(AiChatRole.User, request.Message));
 
         var responseText = await RunRoutingAsPlainJsonTextAsync(history, cancellationToken);
-        logger.LogDebug("Intent routing raw response: {ResponseText}", responseText);
         logger.LogInformation("Manufacturing scene classified as {Scene} for session {SessionId}.", sceneDecision.Scene, request.SessionId);
 
-        if (!IntentRoutingResultParser.TryParse(responseText, out var intentResults))
+        var parsed = IntentRoutingResultParser.TryParse(responseText, out var intentResults);
+        LogResponseMetadata(logger, responseText, parsed);
+
+        if (!parsed)
         {
             logger.LogWarning("Intent routing returned unparsable JSON. Falling back to General.Chat.");
             intentResults = CreateFallbackIntents(request.Message, "routing JSON parse failed");
@@ -132,5 +141,37 @@ public class IntentRoutingExecutor(
         }
 
         return [new IntentResult { Intent = "General.Chat", Confidence = 1.0, Reasoning = reasoning }];
+    }
+
+    internal static IntentRoutingResponseLogMetadata CreateResponseLogMetadata(string? responseText, bool parsed)
+    {
+        var normalized = responseText ?? string.Empty;
+        var trimmed = normalized.TrimStart();
+        var responseType = trimmed.Length == 0
+            ? "Empty"
+            : trimmed[0] switch
+            {
+                '[' => "JsonArray",
+                '{' => "JsonObject",
+                _ => "Text"
+            };
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalized))).ToLowerInvariant();
+
+        return new IntentRoutingResponseLogMetadata(
+            normalized.Length,
+            hash,
+            responseType,
+            parsed);
+    }
+
+    internal static void LogResponseMetadata(ILogger logger, string? responseText, bool parsed)
+    {
+        var metadata = CreateResponseLogMetadata(responseText, parsed);
+        logger.LogDebug(
+            "Intent routing response processed. ResponseLength={ResponseLength}; ResponseSha256={ResponseSha256}; ResponseType={ResponseType}; Parsed={Parsed}",
+            metadata.ResponseLength,
+            metadata.ResponseSha256,
+            metadata.ResponseType,
+            metadata.Parsed);
     }
 }

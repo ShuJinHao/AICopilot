@@ -6,6 +6,7 @@ using AICopilot.AiGatewayService.Safety;
 using AICopilot.AiGatewayService.Workflows.Executors;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
+using AICopilot.SharedKernel.Result;
 using Microsoft.Extensions.Logging;
 
 namespace AICopilot.AiGatewayService.Workflows;
@@ -65,10 +66,16 @@ public class AgentWorkflowPipeline(
         var sink = new AgentWorkflowSink();
         var branchTasks = AgentWorkflowTopology.ParallelBranches
             .OrderBy(branch => branch.Order)
-            .Select(branch => RunBranchSafelyAsync(
-                branch.BranchType,
-                () => ExecuteBranchAsync(branch.BranchType, routing.Intents, request.Message, sink, session, ct),
-                ct))
+            .Select(branch =>
+            {
+                var isRequired = IsBranchRequired(branch.BranchType, routing.Intents);
+                return RunBranchSafelyAsync(
+                    branch.BranchType,
+                    isRequired,
+                    () => ExecuteBranchAsync(branch.BranchType, routing.Intents, request.Message, sink, session, ct),
+                    logger,
+                    ct);
+            })
             .ToArray();
 
         var allBranchesTask = Task.WhenAll(branchTasks);
@@ -80,6 +87,23 @@ public class AgentWorkflowPipeline(
         }
 
         var branchResults = await allBranchesTask;
+        var requiredFailureChunk = CreateRequiredBranchFailureChunk(branchResults);
+        if (requiredFailureChunk is not null)
+        {
+            logger.LogWarning(
+                "Agent workflow stopped before final synthesis because required branches failed. Branches={Branches}; FailureCodes={FailureCodes}",
+                string.Join(",", branchResults
+                    .Where(result => result.IsRequired && result.Status == BranchExecutionStatus.Failed)
+                    .Select(result => result.Type)),
+                string.Join(",", branchResults
+                    .Where(result => result.IsRequired && result.Status == BranchExecutionStatus.Failed)
+                    .Select(result => result.FailureCode)
+                    .Where(code => !string.IsNullOrWhiteSpace(code))
+                    .Distinct(StringComparer.Ordinal)));
+            yield return requiredFailureChunk;
+            yield break;
+        }
+
         var generationContext = contextAggregator.Execute(request, routing.Scene, branchResults);
 
         await using var finalAgentContext = await agentBuild.ExecuteAsync(generationContext, ct);
@@ -157,14 +181,35 @@ public class AgentWorkflowPipeline(
         }
     }
 
-    private async Task<BranchResult> RunBranchSafelyAsync(
+    internal static async Task<BranchResult> RunBranchSafelyAsync(
         BranchType branchType,
+        bool isRequired,
         Func<Task<BranchResult>> execute,
+        ILogger logger,
         CancellationToken ct)
     {
         try
         {
-            return await execute().ConfigureAwait(false);
+            var result = await execute().ConfigureAwait(false);
+            if (result.Type != branchType)
+            {
+                return BranchResult.Failed(
+                        branchType,
+                        AppProblemCodes.ChatStreamFailed,
+                        "Workflow branch returned a mismatched result type.")
+                    .WithRequirement(isRequired);
+            }
+
+            if (isRequired && result.Status == BranchExecutionStatus.Skipped)
+            {
+                return BranchResult.Failed(
+                        branchType,
+                        AppProblemCodes.ChatStreamFailed,
+                        "A required workflow branch was skipped unexpectedly.")
+                    .WithRequirement(isRequired);
+            }
+
+            return result.WithRequirement(isRequired);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -173,21 +218,41 @@ public class AgentWorkflowPipeline(
         catch (Exception ex)
         {
             logger.LogError(
-                "Agent workflow branch {BranchType} failed; continuing with an empty branch result. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                "Agent workflow branch {BranchType} failed and was marked failed. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
                 branchType,
                 ex.GetType().Name);
-            return CreateEmptyBranchResult(branchType);
+            return BranchResult.Failed(
+                    branchType,
+                    AppProblemCodes.ChatStreamFailed,
+                    "Workflow branch execution failed.")
+                .WithRequirement(isRequired);
         }
     }
 
-    private static BranchResult CreateEmptyBranchResult(BranchType branchType)
+    internal static ChatChunk? CreateRequiredBranchFailureChunk(IEnumerable<BranchResult> branchResults)
+    {
+        if (!branchResults.Any(result =>
+                result.IsRequired
+                && result.Status == BranchExecutionStatus.Failed))
+        {
+            return null;
+        }
+
+        return AgentStreamRuntime.CreateErrorChunk(
+            AppProblemCodes.ChatStreamFailed,
+            "One or more required workflow branches did not complete successfully; final synthesis was not started.",
+            nameof(AgentWorkflowPipeline),
+            "本次请求所需的只读分析、知识、策略或工具能力未能完成，系统已停止生成最终回答，请稍后重试。");
+    }
+
+    private bool IsBranchRequired(BranchType branchType, IReadOnlyCollection<IntentResult> intents)
     {
         return branchType switch
         {
-            BranchType.Tools => BranchResult.FromTools([]),
-            BranchType.Knowledge => BranchResult.FromKnowledge(string.Empty),
-            BranchType.DataAnalysis => BranchResult.FromDataAnalysis(string.Empty),
-            BranchType.BusinessPolicy => BranchResult.FromBusinessPolicy(string.Empty),
+            BranchType.Tools => ToolsPackExecutor.IsRelevant(intents),
+            BranchType.Knowledge => KnowledgeRetrievalExecutor.IsRelevant(intents),
+            BranchType.DataAnalysis => DataAnalysisExecutor.IsRelevant(intents),
+            BranchType.BusinessPolicy => businessPolicy.IsRelevant(intents),
             _ => throw new ArgumentOutOfRangeException(nameof(branchType), branchType, "Unknown branch type.")
         };
     }

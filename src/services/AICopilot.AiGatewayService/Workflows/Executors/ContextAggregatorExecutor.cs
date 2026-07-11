@@ -23,6 +23,11 @@ public class ContextAggregatorExecutor(ILogger<ContextAggregatorExecutor> logger
 
         foreach (var result in branchResults)
         {
+            if (result.Status != BranchExecutionStatus.Succeeded)
+            {
+                continue;
+            }
+
             switch (result.Type)
             {
                 case BranchType.Tools when result.Tools != null:

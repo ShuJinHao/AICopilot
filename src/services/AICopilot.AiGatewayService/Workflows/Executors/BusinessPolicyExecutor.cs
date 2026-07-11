@@ -12,6 +12,13 @@ public class BusinessPolicyExecutor(
 {
     public const string ExecutorId = nameof(BusinessPolicyExecutor);
 
+    public bool IsRelevant(IEnumerable<IntentResult> intentResults)
+    {
+        return intentResults.Any(item =>
+            item.Confidence > 0.6
+            && businessSemanticsCatalog.TryGetPolicyIntent(item.Intent, out _));
+    }
+
     public Task<BranchResult> ExecuteAsync(
         List<IntentResult> intentResults,
         string? userQuestion,
@@ -28,7 +35,7 @@ public class BusinessPolicyExecutor(
         if (policyIntents.Count == 0)
         {
             logger.LogDebug("No business policy intent detected, skipping policy branch.");
-            return Task.FromResult(BranchResult.FromBusinessPolicy(string.Empty));
+            return Task.FromResult(BranchResult.Skipped(BranchType.BusinessPolicy));
         }
 
         logger.LogInformation("Starting business policy branch. Policy intent count: {Count}", policyIntents.Count);

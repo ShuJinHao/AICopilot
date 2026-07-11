@@ -19,6 +19,11 @@ public class DataAnalysisExecutor(
     public const string ExecutorId = nameof(DataAnalysisExecutor);
     public const string AnalysisIntentPrefix = "Analysis.";
 
+    public static bool IsRelevant(IEnumerable<IntentResult> intentResults)
+    {
+        return intentResults.Any(IsAnalysisIntent);
+    }
+
     public async Task<BranchResult> ExecuteAsync(
         List<IntentResult> intentResults,
         AgentWorkflowSink? sink,
@@ -26,14 +31,13 @@ public class DataAnalysisExecutor(
         CancellationToken ct = default)
     {
         var analysisIntents = intentResults
-            .Where(i => i.Intent.StartsWith(AnalysisIntentPrefix, StringComparison.OrdinalIgnoreCase)
-                        && i.Confidence > 0.6)
+            .Where(IsAnalysisIntent)
             .ToList();
 
         if (analysisIntents.Count == 0)
         {
             logger.LogDebug("未检测到数据分析意图，跳过执行。");
-            return BranchResult.FromDataAnalysis(string.Empty);
+            return BranchResult.Skipped(BranchType.DataAnalysis);
         }
 
         logger.LogInformation("启动数据分析流程，命中 Analysis.* 意图数量: {Count}", analysisIntents.Count);
@@ -62,6 +66,12 @@ public class DataAnalysisExecutor(
         }
 
         return BranchResult.FromDataAnalysis(output.ToString());
+    }
+
+    private static bool IsAnalysisIntent(IntentResult intent)
+    {
+        return intent.Intent.StartsWith(AnalysisIntentPrefix, StringComparison.OrdinalIgnoreCase)
+               && intent.Confidence > 0.6;
     }
 
     private static AnalysisDto BuildSemanticAnalysis(

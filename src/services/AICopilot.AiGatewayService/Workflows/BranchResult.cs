@@ -10,9 +10,21 @@ public enum BranchType
     BusinessPolicy
 }
 
-public record BranchResult
+public enum BranchExecutionStatus
 {
-    public BranchType Type { get; init; }
+    Skipped,
+    Empty,
+    Succeeded,
+    Failed
+}
+
+public sealed record BranchResult
+{
+    public required BranchType Type { get; init; }
+
+    public required BranchExecutionStatus Status { get; init; }
+
+    public bool IsRequired { get; init; }
 
     public AiToolDefinition[]? Tools { get; init; }
 
@@ -22,15 +34,44 @@ public record BranchResult
 
     public string? BusinessPolicy { get; init; }
 
+    public string? FailureCode { get; init; }
+
+    public string? SafeMessage { get; init; }
+
+    public static BranchResult Skipped(BranchType type) =>
+        new() { Type = type, Status = BranchExecutionStatus.Skipped };
+
+    public static BranchResult Empty(BranchType type) =>
+        new() { Type = type, Status = BranchExecutionStatus.Empty };
+
+    public static BranchResult Failed(BranchType type, string failureCode, string safeMessage) =>
+        new()
+        {
+            Type = type,
+            Status = BranchExecutionStatus.Failed,
+            FailureCode = failureCode,
+            SafeMessage = safeMessage
+        };
+
     public static BranchResult FromTools(AiToolDefinition[] tools) =>
-        new() { Type = BranchType.Tools, Tools = tools };
+        tools.Length == 0
+            ? Empty(BranchType.Tools)
+            : new() { Type = BranchType.Tools, Status = BranchExecutionStatus.Succeeded, Tools = tools };
 
     public static BranchResult FromKnowledge(string knowledge) =>
-        new() { Type = BranchType.Knowledge, Knowledge = knowledge };
+        string.IsNullOrWhiteSpace(knowledge)
+            ? Empty(BranchType.Knowledge)
+            : new() { Type = BranchType.Knowledge, Status = BranchExecutionStatus.Succeeded, Knowledge = knowledge };
 
     public static BranchResult FromDataAnalysis(string result) =>
-        new() { Type = BranchType.DataAnalysis, DataAnalysis = result };
+        string.IsNullOrWhiteSpace(result)
+            ? Empty(BranchType.DataAnalysis)
+            : new() { Type = BranchType.DataAnalysis, Status = BranchExecutionStatus.Succeeded, DataAnalysis = result };
 
     public static BranchResult FromBusinessPolicy(string result) =>
-        new() { Type = BranchType.BusinessPolicy, BusinessPolicy = result };
+        string.IsNullOrWhiteSpace(result)
+            ? Empty(BranchType.BusinessPolicy)
+            : new() { Type = BranchType.BusinessPolicy, Status = BranchExecutionStatus.Succeeded, BusinessPolicy = result };
+
+    public BranchResult WithRequirement(bool isRequired) => this with { IsRequired = isRequired };
 }

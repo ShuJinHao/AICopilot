@@ -1,6 +1,7 @@
 using System.Text;
 using AICopilot.AiGatewayService.Models;
 using AICopilot.Services.Contracts;
+using AICopilot.SharedKernel.Result;
 using Microsoft.Extensions.Logging;
 
 namespace AICopilot.AiGatewayService.Workflows.Executors;
@@ -13,19 +14,23 @@ public class KnowledgeRetrievalExecutor(
     public const string ExecutorId = nameof(KnowledgeRetrievalExecutor);
     private const string KnowledgeIntentPrefix = "Knowledge.";
 
+    public static bool IsRelevant(IEnumerable<IntentResult> intentResults)
+    {
+        return intentResults.Any(IsKnowledgeIntent);
+    }
+
     public async Task<BranchResult> ExecuteAsync(
         List<IntentResult> intentResults,
         CancellationToken ct = default)
     {
         var knowledgeIntents = intentResults
-            .Where(i => i.Intent.StartsWith(KnowledgeIntentPrefix, StringComparison.OrdinalIgnoreCase)
-                        && i.Confidence > 0.6)
+            .Where(IsKnowledgeIntent)
             .ToList();
 
         if (knowledgeIntents.Count == 0)
         {
             logger.LogDebug("No knowledge intent detected, skipping retrieval.");
-            return BranchResult.FromKnowledge(string.Empty);
+            return BranchResult.Skipped(BranchType.Knowledge);
         }
 
         logger.LogInformation("Starting knowledge retrieval. Intent count: {Count}", knowledgeIntents.Count);
@@ -41,7 +46,10 @@ public class KnowledgeRetrievalExecutor(
         if (knowledgeBases.Count == 0)
         {
             logger.LogWarning("Knowledge intents matched {Names}, but no knowledge base configuration was found.", string.Join(", ", kbNames));
-            return BranchResult.FromKnowledge(string.Empty);
+            return BranchResult.Failed(
+                BranchType.Knowledge,
+                AppProblemCodes.ChatConfigurationMissing,
+                "Knowledge base configuration is unavailable for the routed intent.");
         }
 
         var searchTasks = new List<Task<string>>();
@@ -67,7 +75,10 @@ public class KnowledgeRetrievalExecutor(
 
         if (searchTasks.Count == 0)
         {
-            return BranchResult.FromKnowledge(string.Empty);
+            return BranchResult.Failed(
+                BranchType.Knowledge,
+                AppProblemCodes.ChatStreamFailed,
+                "Knowledge retrieval could not build a valid search request.");
         }
 
         var searchResults = await Task.WhenAll(searchTasks);
@@ -120,7 +131,13 @@ public class KnowledgeRetrievalExecutor(
                 "Knowledge retrieval failed for {KbName}. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
                 kbName,
                 ex.GetType().Name);
-            return string.Empty;
+            throw;
         }
+    }
+
+    private static bool IsKnowledgeIntent(IntentResult intent)
+    {
+        return intent.Intent.StartsWith(KnowledgeIntentPrefix, StringComparison.OrdinalIgnoreCase)
+               && intent.Confidence > 0.6;
     }
 }
