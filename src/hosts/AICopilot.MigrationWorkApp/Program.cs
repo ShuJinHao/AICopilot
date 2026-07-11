@@ -11,6 +11,7 @@ builder.Services.AddHostedService<Worker>();
 builder.AddEfCore();
 builder.Services.AddScoped<IPermissionCatalog, PermissionCatalog>();
 builder.Services.AddScoped<IIdentityAccessService, IdentityAccessService>();
+builder.Services.AddScoped<EnabledAdminInvariantPolicy>();
 
 builder.Services.AddOpenTelemetry()
     .WithTracing(tracing => tracing.AddSource(Worker.ActivitySourceName));

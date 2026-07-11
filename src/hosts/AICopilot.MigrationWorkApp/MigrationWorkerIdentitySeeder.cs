@@ -1,4 +1,5 @@
 using AICopilot.Services.Contracts;
+using AICopilot.IdentityService.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
 
@@ -11,12 +12,15 @@ internal static class MigrationWorkerIdentitySeeder
         UserManager<ApplicationUser> userManager,
         IPermissionCatalog permissionCatalog,
         IIdentityAccessService identityAccessService,
+        EnabledAdminInvariantPolicy enabledAdminInvariant,
         ITransactionalExecutionService transactionalExecutionService,
         IConfiguration configuration,
         CancellationToken cancellationToken)
     {
         await transactionalExecutionService.ExecuteAsync(async ct =>
         {
+            await enabledAdminInvariant.AcquireAsync(ct);
+
             foreach (var role in new[] { "Admin", "User" })
             {
                 if (!await roleManager.RoleExistsAsync(role))
@@ -41,42 +45,52 @@ internal static class MigrationWorkerIdentitySeeder
                 .GetSection(BootstrapAdminOptions.SectionName)
                 .Get<BootstrapAdminOptions>();
 
-            if (bootstrapAdmin == null ||
-                string.IsNullOrWhiteSpace(bootstrapAdmin.UserName) ||
-                string.IsNullOrWhiteSpace(bootstrapAdmin.Password))
+            if (bootstrapAdmin is not null &&
+                !string.IsNullOrWhiteSpace(bootstrapAdmin.UserName) &&
+                !string.IsNullOrWhiteSpace(bootstrapAdmin.Password))
             {
-                return true;
-            }
-
-            var adminUser = await userManager.FindByNameAsync(bootstrapAdmin.UserName);
-            if (adminUser == null)
-            {
-                adminUser = new ApplicationUser
+                var adminUser = await userManager.FindByNameAsync(bootstrapAdmin.UserName);
+                if (adminUser == null)
                 {
-                    UserName = bootstrapAdmin.UserName
-                };
+                    adminUser = new ApplicationUser
+                    {
+                        UserName = bootstrapAdmin.UserName
+                    };
 
-                EnsureSucceeded(
-                    await userManager.CreateAsync(adminUser, bootstrapAdmin.Password),
-                    "create BootstrapAdmin");
+                    EnsureSucceeded(
+                        await userManager.CreateAsync(adminUser, bootstrapAdmin.Password),
+                        "create BootstrapAdmin");
+                }
+
+                var existingRoles = await userManager.GetRolesAsync(adminUser);
+                var rolesToRemove = existingRoles
+                    .Where(role => !string.Equals(
+                        role,
+                        IdentityRoleNames.Admin,
+                        StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
+                if (rolesToRemove.Length > 0)
+                {
+                    EnsureSucceeded(
+                        await userManager.RemoveFromRolesAsync(adminUser, rolesToRemove),
+                        "remove non-admin roles from BootstrapAdmin");
+                }
+
+                if (!existingRoles.Contains(
+                        IdentityRoleNames.Admin,
+                        StringComparer.OrdinalIgnoreCase))
+                {
+                    EnsureSucceeded(
+                        await userManager.AddToRoleAsync(adminUser, IdentityRoleNames.Admin),
+                        "assign BootstrapAdmin to Admin role");
+                }
             }
 
-            var existingRoles = await userManager.GetRolesAsync(adminUser);
-            var rolesToRemove = existingRoles
-                .Where(role => !string.Equals(role, "Admin", StringComparison.Ordinal))
-                .ToArray();
-            if (rolesToRemove.Length > 0)
+            if (!await enabledAdminInvariant.HasEnabledAdminAsync())
             {
-                EnsureSucceeded(
-                    await userManager.RemoveFromRolesAsync(adminUser, rolesToRemove),
-                    "remove non-admin roles from BootstrapAdmin");
-            }
-
-            if (!existingRoles.Contains("Admin", StringComparer.Ordinal))
-            {
-                EnsureSucceeded(
-                    await userManager.AddToRoleAsync(adminUser, "Admin"),
-                    "assign BootstrapAdmin to Admin role");
+                throw new InvalidOperationException(
+                    "Identity initialization requires at least one enabled Admin. " +
+                    "Configure a new BootstrapAdmin or explicitly recover an existing Admin before retrying migration.");
             }
 
             return true;

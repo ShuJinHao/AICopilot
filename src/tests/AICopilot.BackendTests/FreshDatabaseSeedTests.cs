@@ -48,7 +48,7 @@ public sealed class FreshDatabaseSeedTests
         status.HasAdminRole.Should().BeTrue();
         status.HasUserRole.Should().BeTrue();
         status.BootstrapAdminConfigured.Should().BeTrue();
-        status.HasAdminUser.Should().BeTrue();
+        status.HasEnabledAdminUser.Should().BeTrue();
         status.IsInitialized.Should().BeTrue();
 
         await using var dbContext = await CreateDbContextAsync(fixture);
@@ -470,7 +470,7 @@ public sealed class FreshDatabaseSeedTests
     private sealed record InitializationStatusDto(
         bool HasAdminRole,
         bool HasUserRole,
-        bool HasAdminUser,
+        bool HasEnabledAdminUser,
         bool BootstrapAdminConfigured,
         bool IsInitialized);
 }

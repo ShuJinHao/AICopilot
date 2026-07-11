@@ -19,6 +19,7 @@ public static class DependencyInjection
 
         builder.Services.AddScoped<IPermissionCatalog, PermissionCatalog>();
         builder.Services.AddScoped<IIdentityAccessService, IdentityAccessService>();
+        builder.Services.AddScoped<EnabledAdminInvariantPolicy>();
         builder.Services.AddSingleton<ICloudIdentityStatusValidationCache, CloudIdentityStatusValidationCache>();
         builder.Services.AddScoped<ICloudIdentityStatusValidator, CloudIdentityStatusValidator>();
 

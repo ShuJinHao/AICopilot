@@ -1,4 +1,5 @@
 using AICopilot.Services.Contracts;
+using AICopilot.IdentityService.Authorization;
 using AICopilot.SharedKernel.Messaging;
 using AICopilot.SharedKernel.Result;
 using Microsoft.AspNetCore.Identity;
@@ -15,14 +16,14 @@ public record InitializationStatusDto(
     bool HasAdminRole,
     bool HasUserRole,
     bool BootstrapAdminConfigured,
-    bool HasAdminUser,
+    bool HasEnabledAdminUser,
     bool IsInitialized);
 
 public record GetInitializationStatusQuery : IQuery<Result<InitializationStatusDto>>;
 
 public class GetInitializationStatusQueryHandler(
     RoleManager<IdentityRole<Guid>> roleManager,
-    UserManager<ApplicationUser> userManager,
+    EnabledAdminInvariantPolicy enabledAdminInvariant,
     IConfiguration configuration)
     : IQueryHandler<GetInitializationStatusQuery, Result<InitializationStatusDto>>
 {
@@ -38,14 +39,15 @@ public class GetInitializationStatusQueryHandler(
             !string.IsNullOrWhiteSpace(bootstrapAdminSection["UserName"]) &&
             !string.IsNullOrWhiteSpace(bootstrapAdminSection["Password"]);
 
-        var hasAdminUser = (await userManager.GetUsersInRoleAsync("Admin")).Count > 0;
+        var hasEnabledAdminUser = hasAdminRole &&
+                                  await enabledAdminInvariant.HasEnabledAdminAsync();
 
         var result = new InitializationStatusDto(
             hasAdminRole,
             hasUserRole,
             bootstrapAdminConfigured,
-            hasAdminUser,
-            hasAdminRole && hasUserRole && (!bootstrapAdminConfigured || hasAdminUser));
+            hasEnabledAdminUser,
+            hasAdminRole && hasUserRole && hasEnabledAdminUser);
 
         return Result.Success(result);
     }

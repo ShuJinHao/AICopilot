@@ -17,6 +17,7 @@ using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.Core.Rag.Ids;
 using AICopilot.EntityFrameworkCore;
+using AICopilot.EntityFrameworkCore.Locking;
 using AICopilot.EntityFrameworkCore.Outbox;
 using AICopilot.EntityFrameworkCore.Persistence;
 using AICopilot.EntityFrameworkCore.Repository;
@@ -24,6 +25,7 @@ using AICopilot.EntityFrameworkCore.Transactions;
 using AICopilot.HttpApi.Infrastructure;
 using AICopilot.Infrastructure.Storage;
 using AICopilot.IdentityService.Commands;
+using AICopilot.IdentityService.Authorization;
 using AICopilot.RagService.Commands.Documents;
 using AICopilot.SharedKernel.Messaging;
 using AICopilot.SharedKernel.Domain;
@@ -492,6 +494,121 @@ public sealed class ArchitectureBoundaryTests
         identityConstructor.GetParameters().Select(parameter => parameter.ParameterType)
             .Should().BeEquivalentTo(
                 [typeof(IdentityStoreDbContext), typeof(PersistenceCommitEngine)]);
+    }
+
+    [Fact]
+    public void EnabledAdminInvariant_ShouldUseOneTransactionalLockAcrossAllDecreasePaths()
+    {
+        ConstructorParameterTypes(typeof(DisableUserCommandHandler))
+            .Should().Contain(typeof(EnabledAdminInvariantPolicy));
+        ConstructorParameterTypes(typeof(UpdateUserRoleCommandHandler))
+            .Should().Contain(typeof(EnabledAdminInvariantPolicy));
+        typeof(PostgresIdentityEnabledAdminInvariantGuard)
+            .Should().BeAssignableTo<IIdentityEnabledAdminInvariantGuard>();
+        ConstructorParameterTypes(typeof(PostgresIdentityEnabledAdminInvariantGuard))
+            .Should().BeEquivalentTo([typeof(IdentityStoreDbContext)]);
+        typeof(PostgreSqlAdvisoryLock).GetMethod(
+                nameof(PostgreSqlAdvisoryLock.AcquireTransactionAsync),
+                BindingFlags.Public | BindingFlags.Static)
+            .Should().NotBeNull();
+
+        var mutationFiles = Directory
+            .EnumerateFiles(Path.Combine(SolutionRoot, "src"), "*.cs", SearchOption.AllDirectories)
+            .Where(file => !file.Contains(
+                $"{Path.DirectorySeparatorChar}tests{Path.DirectorySeparatorChar}",
+                StringComparison.OrdinalIgnoreCase))
+            .Select(file => new
+            {
+                File = file,
+                RelativePath = Path.GetRelativePath(SolutionRoot, file),
+                Source = File.ReadAllText(file)
+            })
+            .Where(item =>
+                item.Source.Contains("IdentityGovernanceHelper.MarkUserDisabled(", StringComparison.Ordinal) ||
+                item.Source.Contains("userManager.RemoveFromRoleAsync(", StringComparison.Ordinal) ||
+                item.Source.Contains("userManager.RemoveFromRolesAsync(", StringComparison.Ordinal) ||
+                item.Source.Contains("userManager.DeleteAsync(", StringComparison.Ordinal))
+            .ToArray();
+
+        mutationFiles.Select(item => item.RelativePath).Should().BeEquivalentTo(
+            new[]
+            {
+                Path.Combine(
+                    "src", "hosts", "AICopilot.MigrationWorkApp",
+                    "MigrationWorkerIdentitySeeder.cs"),
+                Path.Combine(
+                    "src", "services", "AICopilot.IdentityService", "Commands",
+                    "DisableUser.cs"),
+                Path.Combine(
+                    "src", "services", "AICopilot.IdentityService", "Commands",
+                    "UpdateUserRole.cs")
+            },
+            "the current production surface has no user deletion path; every new identity decrease path requires explicit invariant review");
+        var violations = new List<string>();
+        foreach (var mutationFile in mutationFiles)
+        {
+            var acquireIndex = mutationFile.Source.IndexOf(
+                "enabledAdminInvariant.AcquireAsync(",
+                StringComparison.Ordinal);
+            var firstIdentityReadIndex = FindFirstIndex(
+                mutationFile.Source,
+                "userManager.FindByIdAsync(",
+                "userManager.FindByNameAsync(",
+                "roleManager.RoleExistsAsync(",
+                "userManager.GetRolesAsync(",
+                "userManager.GetUsersInRoleAsync(");
+            if (!mutationFile.Source.Contains("EnabledAdminInvariantPolicy", StringComparison.Ordinal) ||
+                acquireIndex < 0 ||
+                (firstIdentityReadIndex >= 0 && acquireIndex > firstIdentityReadIndex))
+            {
+                violations.Add(
+                    $"{mutationFile.RelativePath}: enabled Admin mutation must acquire the shared invariant before Identity reads");
+            }
+        }
+
+        violations.Should().BeEmpty();
+
+        mutationFiles.Single(item => item.RelativePath.EndsWith("DisableUser.cs", StringComparison.Ordinal))
+            .Source.Should().Contain("enabledAdminInvariant.IsLastEnabledAdminAsync(");
+        mutationFiles.Single(item => item.RelativePath.EndsWith("UpdateUserRole.cs", StringComparison.Ordinal))
+            .Source.Should().Contain("enabledAdminInvariant.IsLastEnabledAdminAsync(");
+        mutationFiles.Single(item => item.RelativePath.EndsWith(
+                "MigrationWorkerIdentitySeeder.cs",
+                StringComparison.Ordinal))
+            .Source.Should().Contain("enabledAdminInvariant.HasEnabledAdminAsync(");
+
+        var transactionLockOwners = Directory
+            .EnumerateFiles(Path.Combine(SolutionRoot, "src"), "*.cs", SearchOption.AllDirectories)
+            .Where(file => !file.Contains(
+                $"{Path.DirectorySeparatorChar}tests{Path.DirectorySeparatorChar}",
+                StringComparison.OrdinalIgnoreCase))
+            .Where(file => File.ReadAllText(file).Contains(
+                "pg_advisory_xact_lock",
+                StringComparison.Ordinal))
+            .Select(file => Path.GetRelativePath(SolutionRoot, file))
+            .ToArray();
+        transactionLockOwners.Should().Equal(
+            Path.Combine(
+                "src",
+                "infrastructure",
+                "AICopilot.EntityFrameworkCore",
+                "Locking",
+                "PostgreSqlAdvisoryLock.cs"));
+
+        var migrationProgram = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "hosts",
+            "AICopilot.MigrationWorkApp",
+            "Program.cs"));
+        var migrationWorker = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "hosts",
+            "AICopilot.MigrationWorkApp",
+            "Worker.cs"));
+        migrationProgram.Should().Contain("AddScoped<EnabledAdminInvariantPolicy>()");
+        migrationWorker.Should().Contain("GetRequiredService<EnabledAdminInvariantPolicy>()");
     }
 
     [Fact]

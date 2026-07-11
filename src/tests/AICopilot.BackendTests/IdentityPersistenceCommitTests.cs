@@ -7,12 +7,9 @@ using AICopilot.IdentityService.Commands;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Result;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
+using static AICopilot.BackendTests.IdentityPersistenceTestSupport;
 
 namespace AICopilot.BackendTests;
 
@@ -24,7 +21,7 @@ public sealed class IdentityPersistenceCommitTests(PostgresPersistenceFixture fi
     [Fact]
     public async Task IdentityTransaction_ShouldRollbackAuditRows_WhenOperationFails()
     {
-        await using var database = await CreateMigratedDatabaseAsync();
+        await using var database = await CreateMigratedDatabaseAsync(fixture);
         await using var dbContext = new IdentityStoreDbContext(
             CreateIdentityOptions(database.ConnectionString));
         var service = CreateService(database.ConnectionString, dbContext);
@@ -59,7 +56,7 @@ public sealed class IdentityPersistenceCommitTests(PostgresPersistenceFixture fi
     [Fact]
     public async Task IdentityTransaction_ShouldNotWriteMarker_WhenOperationHasNoChanges()
     {
-        await using var database = await CreateMigratedDatabaseAsync();
+        await using var database = await CreateMigratedDatabaseAsync(fixture);
         await using var dbContext = new IdentityStoreDbContext(
             CreateIdentityOptions(database.ConnectionString));
         var service = CreateService(database.ConnectionString, dbContext);
@@ -72,7 +69,7 @@ public sealed class IdentityPersistenceCommitTests(PostgresPersistenceFixture fi
     [Fact]
     public async Task IdentityTransaction_ShouldRejectResultThroughGenericExecutionEntry()
     {
-        await using var database = await CreateMigratedDatabaseAsync();
+        await using var database = await CreateMigratedDatabaseAsync(fixture);
         await using var dbContext = new IdentityStoreDbContext(
             CreateIdentityOptions(database.ConnectionString));
         var service = CreateService(database.ConnectionString, dbContext);
@@ -88,12 +85,12 @@ public sealed class IdentityPersistenceCommitTests(PostgresPersistenceFixture fi
     [Fact]
     public async Task IdentityTransaction_ShouldRollbackUserManagerAutoSave_WhenLaterResultIsNotSuccessful()
     {
-        await using var database = await CreateMigratedDatabaseAsync();
+        await using var database = await CreateMigratedDatabaseAsync(fixture);
         await using var dbContext = new IdentityStoreDbContext(
             CreateIdentityOptions(database.ConnectionString));
         var service = CreateService(database.ConnectionString, dbContext);
         var userName = $"identity-rejected-{Guid.NewGuid():N}";
-        using var managers = IdentityManagerScope.Create(dbContext);
+        using var managers = IdentityManagerTestScope.Create(dbContext);
         var user = new ApplicationUser { UserName = userName };
 
         var result = await service.ExecuteResultAsync<Guid>(async _ =>
@@ -113,10 +110,10 @@ public sealed class IdentityPersistenceCommitTests(PostgresPersistenceFixture fi
     [Fact]
     public async Task CreateUserHandler_ShouldCommitUserRoleAuditAndMarkerTogether()
     {
-        await using var database = await CreateMigratedDatabaseAsync();
+        await using var database = await CreateMigratedDatabaseAsync(fixture);
         await using var dbContext = new IdentityStoreDbContext(
             CreateIdentityOptions(database.ConnectionString));
-        using var managers = IdentityManagerScope.Create(dbContext);
+        using var managers = IdentityManagerTestScope.Create(dbContext);
         var roleName = $"identity-role-{Guid.NewGuid():N}";
         (await managers.RoleManager.CreateAsync(new IdentityRole<Guid>(roleName)))
             .Succeeded.Should().BeTrue();
@@ -147,7 +144,7 @@ public sealed class IdentityPersistenceCommitTests(PostgresPersistenceFixture fi
     [Fact]
     public async Task IdentityTransaction_ShouldVerifyMarkerWithoutReplaying_WhenCommitAcknowledgementIsLost()
     {
-        await using var database = await CreateMigratedDatabaseAsync();
+        await using var database = await CreateMigratedDatabaseAsync(fixture);
         var commitFault = new CommitAcknowledgementLostInterceptor();
         await using var dbContext = new IdentityStoreDbContext(
             CreateIdentityOptions(database.ConnectionString, commitFault));
@@ -176,7 +173,7 @@ public sealed class IdentityPersistenceCommitTests(PostgresPersistenceFixture fi
     [Fact]
     public async Task IdentityTransaction_ShouldClearFailedAttemptBeforePreCommitRetry()
     {
-        await using var database = await CreateMigratedDatabaseAsync();
+        await using var database = await CreateMigratedDatabaseAsync(fixture);
         var saveFault = new FailFirstBusinessSaveInterceptor();
         await using var dbContext = new IdentityStoreDbContext(
             CreateIdentityOptions(database.ConnectionString, saveFault));
@@ -201,61 +198,6 @@ public sealed class IdentityPersistenceCommitTests(PostgresPersistenceFixture fi
         await AssertMarkerCountAsync(database.ConnectionString, 1);
     }
 
-    private async Task<PostgresScratchDatabase> CreateMigratedDatabaseAsync()
-    {
-        var database = await PostgresScratchDatabase.CreateAsync(
-            fixture.ConnectionString,
-            "aicopilot_identity_commit");
-        try
-        {
-            await using var root = new AiCopilotDbContext(
-                PostgresPersistenceTestOptions.Create<AiCopilotDbContext>(
-                    database.ConnectionString,
-                    MigrationHistoryTables.AiCopilot));
-            await root.Database.MigrateAsync();
-            await using var identity = new IdentityStoreDbContext(
-                CreateIdentityOptions(database.ConnectionString));
-            await identity.Database.MigrateAsync();
-            return database;
-        }
-        catch
-        {
-            await database.DisposeAsync();
-            throw;
-        }
-    }
-
-    private static IdentityTransactionalExecutionService CreateService(
-        string connectionString,
-        IdentityStoreDbContext dbContext)
-    {
-        return new IdentityTransactionalExecutionService(
-            dbContext,
-            new PersistenceCommitEngine(
-                PostgresPersistenceTestOptions.CreateMarker(connectionString)));
-    }
-
-    private static DbContextOptions<IdentityStoreDbContext> CreateIdentityOptions(
-        string connectionString,
-        params IInterceptor[] interceptors)
-    {
-        var history = MigrationHistoryTables.IdentityStore;
-        var builder = new DbContextOptionsBuilder<IdentityStoreDbContext>()
-            .UseNpgsql(
-                connectionString,
-                npgsql =>
-                {
-                    npgsql.MigrationsHistoryTable(history.TableName, history.Schema);
-                    npgsql.EnableRetryOnFailure(2, TimeSpan.Zero, null);
-                });
-        if (interceptors.Length > 0)
-        {
-            builder.AddInterceptors(interceptors);
-        }
-
-        return builder.Options;
-    }
-
     private static ApplicationUser CreateUser(Guid id, string userName)
     {
         return new ApplicationUser
@@ -265,81 +207,6 @@ public sealed class IdentityPersistenceCommitTests(PostgresPersistenceFixture fi
             NormalizedUserName = userName.ToUpperInvariant(),
             SecurityStamp = Guid.NewGuid().ToString("N")
         };
-    }
-
-    private static async Task AssertMarkerCountAsync(string connectionString, int expected)
-    {
-        await using var markers = new PersistenceCommitMarkerDbContext(
-            PostgresPersistenceTestOptions.CreateMarker(connectionString));
-        (await markers.CommitMarkers.CountAsync()).Should().Be(expected);
-    }
-
-    private sealed class IdentityManagerScope : IDisposable
-    {
-        private readonly ServiceProvider serviceProvider;
-
-        private IdentityManagerScope(
-            ServiceProvider serviceProvider,
-            UserManager<ApplicationUser> userManager,
-            RoleManager<IdentityRole<Guid>> roleManager)
-        {
-            this.serviceProvider = serviceProvider;
-            UserManager = userManager;
-            RoleManager = roleManager;
-        }
-
-        public UserManager<ApplicationUser> UserManager { get; }
-
-        public RoleManager<IdentityRole<Guid>> RoleManager { get; }
-
-        public static IdentityManagerScope Create(IdentityStoreDbContext dbContext)
-        {
-            var options = Options.Create(new IdentityOptions
-            {
-                Password =
-                {
-                    RequireDigit = true,
-                    RequireLowercase = true,
-                    RequireUppercase = true,
-                    RequireNonAlphanumeric = false,
-                    RequiredLength = 8
-                }
-            });
-            var userStore = new UserStore<
-                ApplicationUser,
-                IdentityRole<Guid>,
-                IdentityStoreDbContext,
-                Guid>(dbContext);
-            var roleStore = new RoleStore<
-                IdentityRole<Guid>,
-                IdentityStoreDbContext,
-                Guid>(dbContext);
-            var serviceProvider = new ServiceCollection().BuildServiceProvider();
-            var userManager = new UserManager<ApplicationUser>(
-                userStore,
-                options,
-                new PasswordHasher<ApplicationUser>(),
-                [new UserValidator<ApplicationUser>()],
-                [new PasswordValidator<ApplicationUser>()],
-                new UpperInvariantLookupNormalizer(),
-                new IdentityErrorDescriber(),
-                serviceProvider,
-                NullLogger<UserManager<ApplicationUser>>.Instance);
-            var roleManager = new RoleManager<IdentityRole<Guid>>(
-                roleStore,
-                [new RoleValidator<IdentityRole<Guid>>()],
-                new UpperInvariantLookupNormalizer(),
-                new IdentityErrorDescriber(),
-                NullLogger<RoleManager<IdentityRole<Guid>>>.Instance);
-            return new IdentityManagerScope(serviceProvider, userManager, roleManager);
-        }
-
-        public void Dispose()
-        {
-            UserManager.Dispose();
-            RoleManager.Dispose();
-            serviceProvider.Dispose();
-        }
     }
 
 }

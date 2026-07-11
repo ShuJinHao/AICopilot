@@ -24,6 +24,15 @@ public static class PostgreSqlAdvisoryLock
         return NormalizeKey(BinaryPrimitives.ReadInt64LittleEndian(hash));
     }
 
+    public static long CreateKey(string keySpace)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(keySpace);
+        var payload = Encoding.UTF8.GetBytes(keySpace.Trim());
+        Span<byte> hash = stackalloc byte[32];
+        SHA256.HashData(payload, hash);
+        return NormalizeKey(BinaryPrimitives.ReadInt64LittleEndian(hash));
+    }
+
     public static async Task<bool> TryAcquireAsync(
         DbConnection connection,
         long key,
@@ -44,6 +53,27 @@ public static class PostgreSqlAdvisoryLock
         ArgumentNullException.ThrowIfNull(connection);
         await using var command = connection.CreateCommand();
         command.CommandText = "SELECT pg_advisory_unlock(@lock_key)";
+        AddKeyParameter(command, key);
+        await command.ExecuteScalarAsync(cancellationToken);
+    }
+
+    public static async Task AcquireTransactionAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        long key,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(transaction);
+        if (!ReferenceEquals(connection, transaction.Connection))
+        {
+            throw new InvalidOperationException(
+                "PostgreSQL advisory transaction lock must use the transaction's connection.");
+        }
+
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT pg_advisory_xact_lock(@lock_key)";
         AddKeyParameter(command, key);
         await command.ExecuteScalarAsync(cancellationToken);
     }

@@ -2324,7 +2324,7 @@ public sealed class Phase25RuntimeSmokeTests
         bool HasAdminRole,
         bool HasUserRole,
         bool BootstrapAdminConfigured,
-        bool HasAdminUser,
+        bool HasEnabledAdminUser,
         bool IsInitialized);
 
     private sealed record LoginUserDto(string UserName, string Token);

@@ -2,7 +2,7 @@ export interface InitializationStatus {
   hasAdminRole: boolean
   hasUserRole: boolean
   bootstrapAdminConfigured: boolean
-  hasAdminUser: boolean
+  hasEnabledAdminUser: boolean
   isInitialized: boolean
 }
 

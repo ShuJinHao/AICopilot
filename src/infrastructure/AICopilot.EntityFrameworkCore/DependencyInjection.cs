@@ -16,6 +16,7 @@ using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.EntityFrameworkCore.AuditLogs;
 using AICopilot.EntityFrameworkCore.ExternalIdentities;
+using AICopilot.EntityFrameworkCore.Locking;
 using AICopilot.EntityFrameworkCore.Outbox;
 using AICopilot.EntityFrameworkCore.Persistence;
 using AICopilot.EntityFrameworkCore.Repository;
@@ -122,6 +123,9 @@ public static class DependencyInjection
         builder.Services.AddScoped<IPersistenceOutboxSource>(provider =>
             provider.GetRequiredService<RagIntegrationEventBuffer>());
         builder.Services.AddScoped<ITransactionalExecutionService, IdentityTransactionalExecutionService>();
+        builder.Services.AddScoped<
+            IIdentityEnabledAdminInvariantGuard,
+            PostgresIdentityEnabledAdminInvariantGuard>();
         builder.Services.AddScoped<IIntegrationEventStager>(provider =>
             provider.GetRequiredService<RagIntegrationEventBuffer>());
         builder.Services.AddScoped<IDocumentIdAllocator, PostgresDocumentIdAllocator>();

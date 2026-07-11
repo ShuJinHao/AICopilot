@@ -33,7 +33,7 @@ const initChecks = computed(() => {
     { label: 'Admin 角色', ok: status.hasAdminRole },
     { label: 'User 角色', ok: status.hasUserRole },
     { label: '引导管理员', ok: status.bootstrapAdminConfigured },
-    { label: '管理员账号', ok: status.hasAdminUser }
+    { label: '启用中的管理员账号', ok: status.hasEnabledAdminUser }
   ]
 })
 

@@ -642,7 +642,7 @@ const api = createServer((request, response) => {
       hasAdminRole: true,
       hasUserRole: true,
       bootstrapAdminConfigured: true,
-      hasAdminUser: true,
+      hasEnabledAdminUser: true,
       isInitialized: true
     },
     '/api/identity/login': { userName: 'admin', token: 'smoke-token' },

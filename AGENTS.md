@@ -114,7 +114,8 @@ Cloud-AICopilot OIDC 身份对齐的长期结论见 `../docs/历史核心记录.
 - `ArtifactWorkspace` 仍是独立的多文件、覆盖和目录复制边界，不得伪装成已被单文件上传 stage 覆盖。`AI-PERSIST-01d / AI-SEC-047` 完成前，禁止宣称所有数据库绑定文件已原子化；治理时必须同时处理新文件、已有文件覆盖、版本归档、final 复制和 commit-unknown 恢复，不得硬套单文件 API。
 - 知识库文件唯一写入口是 RAG Document API；AiGateway 只允许 SessionTemp/AgentInput upload。禁止恢复 `UploadRecordScope.KnowledgeBase` 新写入、`IRagDocumentUploadBridge` 或 RAG→AiGateway 同步 shadow record。历史 KB shadow 行/列/枚举字符串由 `AI-PERSIST-01e / AI-SEC-048` 在只读盘点、证据导出和 drain 旧 HttpApi 后物理清理，禁止为冗余影子链新增 saga、幂等键或兼容 adapter。
 - RAG 的应用层 hash 预查不是并发幂等保证；`AI-SEC-050` 完成前不得宣称同 KB/同文件并发上传已去重。治理必须先盘点既有重复数据，再以数据库唯一约束、冲突后的既有 Document 语义和真实 PostgreSQL 并发测试闭环，失败竞争者仍须走 file journal 安全回滚。
-- “至少一个 enabled Admin”是跨 Identity 命令的不变量。降级角色、禁用、删除和 seed 不能各自只做 ReadCommitted count；`AI-SEC-051` 必须以同一数据库级串行化边界覆盖所有减少可用管理员数量的路径，并用真实 PostgreSQL 并发交错验收。
+- “至少一个 enabled Admin”是跨 Identity 命令的不变量。当前 `DisableUser`、`UpdateUserRole` 和 migration seed 必须在唯一 Identity transaction 内先取得固定全局 PostgreSQL transaction advisory lock，再读取用户、角色和 enabled Admin；execution-strategy 每次 retry 必须重新加锁并重读。当前生产树没有 DeleteUser 入口；未来新增删除、直接角色移除或其它减少可用管理员数量的路径，必须同时接入该边界、编译型架构 Analyzer 和真实 PostgreSQL 竞争测试，禁止只加应用层 count 或制造空壳兼容 API。
+- enabled Admin 的“数量存在”与“具备恢复治理能力”是两个不变量。Admin 角色的最小恢复权限基线由 `AI-SEC-052` 单独治理；不得用 AI-SEC-051 的人数绿测证明 Admin 权限集合仍可恢复。
 
 ## Unified Agent Workflow
 

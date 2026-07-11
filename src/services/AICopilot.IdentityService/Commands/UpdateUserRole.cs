@@ -15,6 +15,7 @@ public record UpdateUserRoleCommand(string UserId, string RoleName)
 public sealed class UpdateUserRoleCommandHandler(
     UserManager<ApplicationUser> userManager,
     RoleManager<IdentityRole<Guid>> roleManager,
+    EnabledAdminInvariantPolicy enabledAdminInvariant,
     IIdentityAuditLogWriter auditLogWriter,
     ITransactionalExecutionService transactionalExecutionService)
     : ICommandHandler<UpdateUserRoleCommand, Result<UserSummaryDto>>
@@ -23,8 +24,11 @@ public sealed class UpdateUserRoleCommandHandler(
         UpdateUserRoleCommand command,
         CancellationToken cancellationToken)
     {
-        return await transactionalExecutionService.ExecuteResultAsync(async _ =>
+        AuditLogWriteRequest? rejectionAudit = null;
+        var result = await transactionalExecutionService.ExecuteResultAsync(async _ =>
         {
+            await enabledAdminInvariant.AcquireAsync(cancellationToken);
+
             var user = await userManager.FindByIdAsync(command.UserId);
             if (user is null)
             {
@@ -51,6 +55,24 @@ public sealed class UpdateUserRoleCommandHandler(
                     targetRoleName,
                     StringComparison.OrdinalIgnoreCase))
                 .ToArray();
+
+            if (!string.Equals(
+                    targetRoleName,
+                    IdentityRoleNames.Admin,
+                    StringComparison.OrdinalIgnoreCase) &&
+                await enabledAdminInvariant.IsLastEnabledAdminAsync(user, existingRoles))
+            {
+                rejectionAudit = new AuditLogWriteRequest(
+                    AuditActionGroups.Identity,
+                    "Identity.UpdateUserRole",
+                    "User",
+                    user.Id.ToString(),
+                    user.UserName ?? string.Empty,
+                    AuditResults.Rejected,
+                    $"拒绝调整用户角色：{user.UserName}，原因是系统至少需要保留 1 个启用中的管理员。",
+                    ["roleName"]);
+                return Result.Invalid("至少保留 1 个启用状态的管理员，不能移除最后一个管理员账号的管理员角色。");
+            }
 
             if (rolesToRemove.Length > 0)
             {
@@ -103,5 +125,15 @@ public sealed class UpdateUserRoleCommandHandler(
                 !IdentityGovernanceHelper.IsUserDisabled(user),
                 IdentityGovernanceHelper.GetUserStatus(user)));
         }, cancellationToken);
+
+        if (rejectionAudit is not null)
+        {
+            await transactionalExecutionService.CommitRejectedAuditAsync(
+                auditLogWriter,
+                rejectionAudit,
+                cancellationToken);
+        }
+
+        return result;
     }
 }

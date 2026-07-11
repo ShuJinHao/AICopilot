@@ -1,4 +1,5 @@
 using AICopilot.EntityFrameworkCore;
+using AICopilot.IdentityService.Authorization;
 using AICopilot.Services.Contracts;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
@@ -32,6 +33,8 @@ public class Worker(
             var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
             var permissionCatalog = scope.ServiceProvider.GetRequiredService<IPermissionCatalog>();
             var identityAccessService = scope.ServiceProvider.GetRequiredService<IIdentityAccessService>();
+            var enabledAdminInvariant = scope.ServiceProvider
+                .GetRequiredService<EnabledAdminInvariantPolicy>();
             var transactionalExecutionService = scope.ServiceProvider
                 .GetRequiredService<ITransactionalExecutionService>();
 
@@ -63,6 +66,7 @@ public class Worker(
                 userManager,
                 permissionCatalog,
                 identityAccessService,
+                enabledAdminInvariant,
                 transactionalExecutionService,
                 configuration,
                 cancellationToken);
