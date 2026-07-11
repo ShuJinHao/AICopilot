@@ -141,16 +141,32 @@ public sealed class SecurityHardeningTests
         envTemplate.Should().Contain("AICOPILOT_PRIVATE_MODEL_ENABLED=false");
         envTemplate.Should().Contain("AICOPILOT_PRIVATE_MODEL_BASE_URL=http://model.internal.example:40034/v1");
         envTemplate.Should().Contain("AICOPILOT_PRIVATE_MODEL_CONTEXT_TOKENS=65536");
-        envTemplate.Should().Contain("AICOPILOT_FILE_STORAGE_ROOT_PATH=/var/lib/aicopilot/storage");
-        envTemplate.Should().Contain("AICOPILOT_ARTIFACT_WORKSPACE_ROOT_PATH=/var/lib/aicopilot/artifact-workspaces");
+        envTemplate.Should().NotContain("AICOPILOT_FILE_STORAGE_ROOT_PATH");
+        envTemplate.Should().NotContain("AICOPILOT_ARTIFACT_WORKSPACE_ROOT_PATH");
+        envTemplate.Should().Contain("AICOPILOT_PERSISTENCE_MAINTENANCE_INTERVAL_SECONDS=300");
+        envTemplate.Should().Contain("AICOPILOT_PERSISTENCE_RECONCILIATION_DELAY_MINUTES=10");
+        envTemplate.Should().Contain("AICOPILOT_PERSISTENCE_MARKER_RETENTION_DAYS=30");
+        envTemplate.Should().Contain("AICOPILOT_PERSISTENCE_MAINTENANCE_BATCH_SIZE=100");
         compose.Should().Contain("AICopilotSecurity__ApiKeyEncryptionKey: ${AICOPILOT_API_KEY_ENCRYPTION_KEY}");
         compose.Should().Contain("AICopilot__PrivateModel__BaseUrl: ${AICOPILOT_PRIVATE_MODEL_BASE_URL:-http://model.internal.example:40034/v1}");
         compose.Should().Contain("AICopilot__PrivateModel__ContextWindowTokens: ${AICOPILOT_PRIVATE_MODEL_CONTEXT_TOKENS:-65536}");
         compose.Should().Contain("CloudOidc__BootstrapAdminAutoBindEnabled: ${CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED:-false}");
         compose.Should().Contain("CloudOidc__BootstrapAdminUserName: ${AICOPILOT_BOOTSTRAP_ADMIN_USERNAME}");
-        compose.Should().Contain("FileStorage__RootPath: ${AICOPILOT_FILE_STORAGE_ROOT_PATH:-/var/lib/aicopilot/storage}");
-        compose.Should().Contain("ArtifactWorkspace__RootPath: ${AICOPILOT_ARTIFACT_WORKSPACE_ROOT_PATH:-/var/lib/aicopilot/artifact-workspaces}");
+        compose.Should().Contain("FileStorage__RootPath: /var/lib/aicopilot/storage");
+        compose.Should().Contain("ArtifactWorkspace__RootPath: /var/lib/aicopilot/artifact-workspaces");
+        compose.Should().NotContain("AICOPILOT_FILE_STORAGE_ROOT_PATH");
+        compose.Should().NotContain("AICOPILOT_ARTIFACT_WORKSPACE_ROOT_PATH");
         compose.Should().Contain("enterprise-ai-aicopilot-data:/var/lib/aicopilot");
+        compose.Should().Contain("PersistenceMaintenance__ReconciliationDelayMinutes: ${AICOPILOT_PERSISTENCE_RECONCILIATION_DELAY_MINUTES:-10}");
+        compose.Should().Contain("PersistenceMaintenance__MarkerRetentionDays: ${AICOPILOT_PERSISTENCE_MARKER_RETENTION_DAYS:-30}");
+        ExtractComposeService(compose, "aicopilot-httpapi")
+            .Should().Contain("volumes: *aicopilot-data-volumes");
+        ExtractComposeService(compose, "aicopilot-dataworker")
+            .Should().Contain("volumes: *aicopilot-data-volumes");
+        ExtractComposeService(compose, "aicopilot-ragworker")
+            .Should().Contain("volumes: *aicopilot-data-volumes");
+        ExtractComposeService(compose, "aicopilot-migration")
+            .Should().NotContain("volumes: *aicopilot-data-volumes");
         compose.Should().NotContain("10.98.90.154");
         compose.Should().NotContain("Mcp__Runtime__MockOnly");
         httpProductionSettings.Should().NotContain("\"MockOnly\": true");
@@ -1103,7 +1119,7 @@ Current mitigation: GitHub production environment reviewers, restricted runner a
     }
 
     [Fact]
-    public void AgentPlanRuntimeAndUpload_ShouldRecheckRagKnowledgeBasePermissions()
+    public void AgentPlanAndRuntime_ShouldRecheckRagKnowledgeBasePermissions()
     {
         var solutionRoot = FindSolutionRoot();
         var agentTaskPlanPreparationSource = File.ReadAllText(Path.Combine(
@@ -1121,21 +1137,6 @@ Current mitigation: GitHub production environment reviewers, restricted runner a
             "AgentTasks",
             "Runtime",
             "AgentRuntimeRagToolService.cs"));
-        var uploadRecordsSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "services",
-            "AICopilot.AiGatewayService",
-            "Uploads",
-            "UploadRecords.cs"));
-        var uploadRecordCoordinatorSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "services",
-            "AICopilot.AiGatewayService",
-            "Uploads",
-            "UploadRecordCoordinator.cs"));
-
         agentTaskPlanPreparationSource.Should().Contain("IKnowledgeBaseAccessChecker");
         agentTaskPlanPreparationSource.Should().Contain("CanReadAsync(");
         agentTaskPlanPreparationSource.Should().Contain("knowledgeBaseId");
@@ -1145,12 +1146,6 @@ Current mitigation: GitHub production environment reviewers, restricted runner a
         agentRuntimeRagToolServiceSource.Should().Contain("knowledgeBaseId");
         agentRuntimeRagToolServiceSource.Should().Contain("task.UserId");
         agentRuntimeRagToolServiceSource.Should().Contain("UnauthorizedAccessException");
-        uploadRecordsSource.Should().Contain("UploadRecordCoordinator");
-        uploadRecordsSource.Should().NotContain("CanWriteAsync(");
-        uploadRecordCoordinatorSource.Should().Contain("IKnowledgeBaseAccessChecker");
-        uploadRecordCoordinatorSource.Should().Contain("CanWriteAsync(");
-        uploadRecordCoordinatorSource.Should().Contain("request.KnowledgeBaseId");
-        uploadRecordCoordinatorSource.Should().Contain("Result.NotFound");
     }
 
     [Fact]
@@ -1356,9 +1351,17 @@ Current mitigation: GitHub production environment reviewers, restricted runner a
         try
         {
             var storage = new LocalFileStorageService(configuration);
+            var commitScope = new PersistenceCommitScope();
+            var persistentStorage = new LocalPersistenceFileStorageService(
+                storage,
+                storage,
+                new AlwaysAcquiredPersistenceFileLeaseManager(),
+                commitScope,
+                NullLogger<LocalPersistenceFileStorageService>.Instance);
             await using var payload = new MemoryStream([1, 2, 3]);
 
-            var relativePath = await storage.SaveAsync(payload, "../unsafe.txt");
+            var stage = await persistentStorage.StageAsync(payload, "../unsafe.txt");
+            var relativePath = stage.StoragePath;
 
             relativePath.Should().StartWith("uploads/");
             relativePath.Should().NotContain("..");
@@ -1373,6 +1376,8 @@ Current mitigation: GitHub production environment reviewers, restricted runner a
                 roundTrip.ToArray().Should().Equal(1, 2, 3);
             }
 
+            commitScope.ReleaseCommitId(stage.CommitId);
+            await persistentStorage.ConfirmBestEffortAsync(stage);
             await storage.DeleteAsync(relativePath);
             (await storage.GetAsync(relativePath)).Should().BeNull();
 
@@ -1481,71 +1486,6 @@ Current mitigation: GitHub production environment reviewers, restricted runner a
                 .UseNpgsql("Host=localhost;Database=security;Username=test;Password=test")
                 .Options);
         auditDbContext.Model.FindEntityType(typeof(AuditLogEntry)).Should().NotBeNull();
-    }
-
-    [Fact]
-    public void IdentityManagementCommands_ShouldUseTransactionalExecutionService()
-    {
-        var solutionRoot = FindSolutionRoot();
-        var commandFiles = new[]
-        {
-            "CreateRole.cs",
-            "UpdateRole.cs",
-            "DeleteRole.cs",
-            "CreatedUser.cs",
-            "UpdateUserRole.cs",
-            "DisableUser.cs",
-            "EnableUser.cs",
-            "ResetUserPassword.cs"
-        };
-
-        foreach (var commandFile in commandFiles)
-        {
-            var source = File.ReadAllText(Path.Combine(
-                solutionRoot,
-                "src",
-                "services",
-                "AICopilot.IdentityService",
-                "Commands",
-                commandFile));
-
-            source.Should().Contain("ITransactionalExecutionService", commandFile);
-            source.Should().Contain("IIdentityAuditLogWriter", commandFile);
-            source.Should().Contain("transactionalExecutionService.ExecuteAsync", commandFile);
-            source.Should().NotContain("IAuditLogWriter", commandFile);
-            source.Should().NotContain("auditLogWriter.SaveChangesAsync", commandFile);
-        }
-    }
-
-    [Fact]
-    public void EfCore_ShouldRegisterTransactionalExecutionService()
-    {
-        var solutionRoot = FindSolutionRoot();
-        var dependencyInjectionSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "DependencyInjection.cs"));
-        var implementationSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "Transactions",
-            "EfTransactionalExecutionService.cs"));
-
-        dependencyInjectionSource.Should().Contain("ITransactionalExecutionService");
-        dependencyInjectionSource.Should().Contain("EfTransactionalExecutionService");
-        dependencyInjectionSource.Should().Contain("AddNpgsqlDbContext<IdentityStoreDbContext>");
-        dependencyInjectionSource.Should().Contain("AddEntityFrameworkStores<IdentityStoreDbContext>");
-        dependencyInjectionSource.Should().Contain("IIdentityAuditLogWriter");
-        implementationSource.Should().Contain("CreateExecutionStrategy");
-        implementationSource.Should().Contain("BeginTransactionAsync");
-        implementationSource.Should().Contain("dbContext.SaveChangesAsync");
-        implementationSource.Should().Contain("IdentityStoreDbContext");
-        implementationSource.Should().NotContain("AiCopilotDbContext");
-        implementationSource.Should().NotContain("AuditDbContext");
     }
 
     [Fact]
@@ -2569,6 +2509,15 @@ Current mitigation: GitHub production environment reviewers, restricted runner a
     private static string RemoveWhitespace(string source)
     {
         return new string(source.Where(character => !char.IsWhiteSpace(character)).ToArray());
+    }
+
+    private static string ExtractComposeService(string compose, string serviceName)
+    {
+        var match = Regex.Match(
+            compose,
+            $@"(?ms)^  {Regex.Escape(serviceName)}:\r?\n(?<body>.*?)(?=^  [a-zA-Z0-9_-]+:|\z)");
+        match.Success.Should().BeTrue($"compose service '{serviceName}' must exist");
+        return match.Groups["body"].Value;
     }
 
     private static string BuildPlatformAttestationRecord(

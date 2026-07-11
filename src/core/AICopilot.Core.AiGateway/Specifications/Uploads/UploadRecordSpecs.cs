@@ -8,7 +8,12 @@ public sealed class UploadRecordByIdForUserSpec : Specification<UploadRecord>
 {
     public UploadRecordByIdForUserSpec(UploadRecordId id, Guid userId)
     {
-        FilterCondition = record => record.Id == id && record.UserId == userId;
+        FilterCondition = record =>
+            record.Id == id &&
+            record.UserId == userId &&
+            record.Status == UploadRecordStatus.Uploaded &&
+            (record.Scope == UploadRecordScope.SessionTemp ||
+             record.Scope == UploadRecordScope.AgentInput);
     }
 }
 
@@ -16,7 +21,12 @@ public sealed class UploadRecordsByIdsForUserSpec : Specification<UploadRecord>
 {
     public UploadRecordsByIdsForUserSpec(IReadOnlyCollection<UploadRecordId> ids, Guid userId)
     {
-        FilterCondition = record => ids.Contains(record.Id) && record.UserId == userId;
+        FilterCondition = record =>
+            ids.Contains(record.Id) &&
+            record.UserId == userId &&
+            record.Status == UploadRecordStatus.Uploaded &&
+            (record.Scope == UploadRecordScope.SessionTemp ||
+             record.Scope == UploadRecordScope.AgentInput);
     }
 }
 
@@ -24,7 +34,11 @@ public sealed class UploadRecordsBySessionForUserSpec : Specification<UploadReco
 {
     public UploadRecordsBySessionForUserSpec(SessionId sessionId, Guid userId)
     {
-        FilterCondition = record => record.SessionId == sessionId && record.UserId == userId;
+        FilterCondition = record =>
+            record.SessionId == sessionId &&
+            record.UserId == userId &&
+            record.Status == UploadRecordStatus.Uploaded &&
+            record.Scope == UploadRecordScope.SessionTemp;
         SetOrderByDescending(record => record.CreatedAt);
     }
 }
@@ -33,7 +47,11 @@ public sealed class UploadRecordsByAgentTaskForUserSpec : Specification<UploadRe
 {
     public UploadRecordsByAgentTaskForUserSpec(AgentTaskId taskId, Guid userId)
     {
-        FilterCondition = record => record.AgentTaskId == taskId && record.UserId == userId;
+        FilterCondition = record =>
+            record.AgentTaskId == taskId &&
+            record.UserId == userId &&
+            record.Status == UploadRecordStatus.Uploaded &&
+            record.Scope == UploadRecordScope.AgentInput;
         SetOrderBy(record => record.CreatedAt);
     }
 }

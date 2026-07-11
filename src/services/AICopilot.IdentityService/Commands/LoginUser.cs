@@ -12,7 +12,8 @@ public record LoginUserCommand(string UserName, string Password) : ICommand<Resu
 
 public class LoginUserCommandHandler(
     UserManager<ApplicationUser> userManager,
-    IJwtTokenGenerator jwtTokenGenerator)
+    IJwtTokenGenerator jwtTokenGenerator,
+    ITransactionalExecutionService transactionalExecutionService)
     : ICommandHandler<LoginUserCommand, Result<LoginUserDto>>
 {
     public async Task<Result<LoginUserDto>> Handle(LoginUserCommand command, CancellationToken cancellationToken)
@@ -42,9 +43,32 @@ public class LoginUserCommandHandler(
 
         if (string.IsNullOrWhiteSpace(user.SecurityStamp))
         {
-            await userManager.UpdateSecurityStampAsync(user);
-            user = await userManager.FindByIdAsync(user.Id.ToString())
-                ?? throw new InvalidOperationException($"User '{user.Id}' was not found after updating security stamp.");
+            var userId = user.Id;
+            await transactionalExecutionService.ExecuteAsync(async _ =>
+            {
+                var currentUser = await userManager.FindByIdAsync(userId.ToString())
+                    ?? throw new InvalidOperationException(
+                        $"User '{userId}' was not found while updating its security stamp.");
+
+                if (!string.IsNullOrWhiteSpace(currentUser.SecurityStamp))
+                {
+                    return true;
+                }
+
+                var updateResult = await userManager.UpdateSecurityStampAsync(currentUser);
+                if (!updateResult.Succeeded)
+                {
+                    throw new InvalidOperationException(
+                        "Unable to initialize the user's security stamp: " +
+                        string.Join(", ", updateResult.Errors.Select(error => error.Description)));
+                }
+
+                return true;
+            }, cancellationToken);
+
+            user = await userManager.FindByIdAsync(userId.ToString())
+                ?? throw new InvalidOperationException(
+                    $"User '{userId}' was not found after updating its security stamp.");
         }
 
         var userClaims = await userManager.GetClaimsAsync(user);

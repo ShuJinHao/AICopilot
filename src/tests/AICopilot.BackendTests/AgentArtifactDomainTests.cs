@@ -4,6 +4,7 @@ using AICopilot.Core.AiGateway.Aggregates.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.RuntimeSettings;
 using AICopilot.Core.AiGateway.Aggregates.Uploads;
 using AICopilot.Core.AiGateway.Ids;
+using AICopilot.Core.AiGateway.Specifications.Uploads;
 
 namespace AICopilot.BackendTests;
 
@@ -218,24 +219,126 @@ public sealed class AgentArtifactDomainTests
     }
 
     [Fact]
-    public void UploadRecord_ShouldRecordKnowledgeBaseBindingWithoutServerPath()
+    public void UploadRecord_ShouldRejectKnowledgeBaseShadowScope()
     {
-        var record = new UploadRecord(
+        var action = () => new UploadRecord(
             UploadRecordScope.KnowledgeBase,
             Guid.NewGuid(),
             null,
             null,
-            Guid.NewGuid(),
-            12,
             "rule.md",
             "text/markdown",
             128,
             new string('a', 64),
-            null,
+            "uploads/rule.md",
             DateTimeOffset.UtcNow);
 
-        record.Status.Should().Be(UploadRecordStatus.LinkedToKnowledgeBase);
-        record.RagDocumentId.Should().Be(12);
-        record.StoragePath.Should().BeNull();
+        action.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public void UploadRecord_ShouldRequireExactlyOneActiveScopeTarget()
+    {
+        var action = () => new UploadRecord(
+            UploadRecordScope.SessionTemp,
+            Guid.NewGuid(),
+            SessionId.New(),
+            AgentTaskId.New(),
+            "rule.md",
+            "text/markdown",
+            128,
+            new string('a', 64),
+            "uploads/rule.md",
+            DateTimeOffset.UtcNow);
+
+        action.Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
+    public void UploadRecordSpecifications_ShouldHideInactiveHistoricalRows()
+    {
+        var userId = Guid.NewGuid();
+        var sessionId = SessionId.New();
+        var taskId = AgentTaskId.New();
+        var activeSession = CreateUploadRecord(
+            UploadRecordScope.SessionTemp,
+            userId,
+            sessionId,
+            null);
+        var failedSession = CreateUploadRecord(
+            UploadRecordScope.SessionTemp,
+            userId,
+            sessionId,
+            null);
+        var deletedAgent = CreateUploadRecord(
+            UploadRecordScope.AgentInput,
+            userId,
+            null,
+            taskId);
+        var legacyKnowledgeBase = CreateUploadRecord(
+            UploadRecordScope.AgentInput,
+            userId,
+            null,
+            taskId);
+        SetUploadRecordProperty(failedSession, nameof(UploadRecord.Status), UploadRecordStatus.Failed);
+        SetUploadRecordProperty(deletedAgent, nameof(UploadRecord.Status), UploadRecordStatus.Deleted);
+        SetUploadRecordProperty(
+            legacyKnowledgeBase,
+            nameof(UploadRecord.Scope),
+            UploadRecordScope.KnowledgeBase);
+
+        var byId = new UploadRecordByIdForUserSpec(failedSession.Id, userId)
+            .FilterCondition!
+            .Compile();
+        var byIds = new UploadRecordsByIdsForUserSpec(
+                [activeSession.Id, failedSession.Id, deletedAgent.Id, legacyKnowledgeBase.Id],
+                userId)
+            .FilterCondition!
+            .Compile();
+        var bySession = new UploadRecordsBySessionForUserSpec(sessionId, userId)
+            .FilterCondition!
+            .Compile();
+        var byTask = new UploadRecordsByAgentTaskForUserSpec(taskId, userId)
+            .FilterCondition!
+            .Compile();
+
+        byId(failedSession).Should().BeFalse();
+        byIds(activeSession).Should().BeTrue();
+        byIds(failedSession).Should().BeFalse();
+        byIds(deletedAgent).Should().BeFalse();
+        byIds(legacyKnowledgeBase).Should().BeFalse();
+        bySession(activeSession).Should().BeTrue();
+        bySession(failedSession).Should().BeFalse();
+        byTask(deletedAgent).Should().BeFalse();
+        byTask(legacyKnowledgeBase).Should().BeFalse();
+    }
+
+    private static UploadRecord CreateUploadRecord(
+        UploadRecordScope scope,
+        Guid userId,
+        SessionId? sessionId,
+        AgentTaskId? taskId)
+    {
+        return new UploadRecord(
+            scope,
+            userId,
+            sessionId,
+            taskId,
+            "input.txt",
+            "text/plain",
+            5,
+            new string('a', 64),
+            $"uploads/{Guid.NewGuid():N}/input.txt",
+            DateTimeOffset.UtcNow);
+    }
+
+    private static void SetUploadRecordProperty<T>(
+        UploadRecord record,
+        string propertyName,
+        T value)
+    {
+        var property = typeof(UploadRecord).GetProperty(propertyName);
+        property.Should().NotBeNull();
+        property!.SetValue(record, value);
     }
 }

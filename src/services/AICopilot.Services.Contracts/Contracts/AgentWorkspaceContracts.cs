@@ -60,25 +60,6 @@ public interface IArtifactWorkspaceFileStore
         CancellationToken cancellationToken = default);
 }
 
-public sealed record RagDocumentUploadBridgeRequest(
-    Guid KnowledgeBaseId,
-    string FileName,
-    Stream Stream,
-    string? ContentType = null,
-    long? FileSize = null,
-    string? Classification = null,
-    string? SourceType = null,
-    bool IsSanitized = false);
-
-public sealed record RagDocumentUploadBridgeResult(int DocumentId, string Status);
-
-public interface IRagDocumentUploadBridge
-{
-    Task<RagDocumentUploadBridgeResult> UploadAsync(
-        RagDocumentUploadBridgeRequest request,
-        CancellationToken cancellationToken = default);
-}
-
 public sealed record AgentTableFileParseRequest(
     string FileName,
     string ContentType,

@@ -30,7 +30,7 @@ public sealed class CreateRoleCommandHandler(
         CreateRoleCommand command,
         CancellationToken cancellationToken)
     {
-        return await transactionalExecutionService.ExecuteAsync(async _ =>
+        return await transactionalExecutionService.ExecuteResultAsync(async _ =>
         {
             var normalizedRoleName = command.RoleName.Trim();
 

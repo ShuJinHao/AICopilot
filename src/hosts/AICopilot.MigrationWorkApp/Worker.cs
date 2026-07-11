@@ -32,6 +32,8 @@ public class Worker(
             var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
             var permissionCatalog = scope.ServiceProvider.GetRequiredService<IPermissionCatalog>();
             var identityAccessService = scope.ServiceProvider.GetRequiredService<IIdentityAccessService>();
+            var transactionalExecutionService = scope.ServiceProvider
+                .GetRequiredService<ITransactionalExecutionService>();
 
             if (configuration.GetValue<bool>("MigrationWorker:CheckSecretsOnly"))
             {
@@ -61,6 +63,7 @@ public class Worker(
                 userManager,
                 permissionCatalog,
                 identityAccessService,
+                transactionalExecutionService,
                 configuration,
                 cancellationToken);
             await MigrationWorkerAiGatewaySeeder.SeedDefaultsAsync(aiGatewayDbContext, configuration, cancellationToken);

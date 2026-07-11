@@ -29,13 +29,11 @@ public sealed class UploadRecord : BaseEntity<UploadRecordId>, IAggregateRoot<Up
         Guid userId,
         SessionId? sessionId,
         AgentTaskId? agentTaskId,
-        Guid? knowledgeBaseId,
-        int? ragDocumentId,
         string fileName,
         string contentType,
         long fileSize,
         string sha256,
-        string? storagePath,
+        string storagePath,
         DateTimeOffset nowUtc)
     {
         if (userId == Guid.Empty)
@@ -43,21 +41,41 @@ public sealed class UploadRecord : BaseEntity<UploadRecordId>, IAggregateRoot<Up
             throw new ArgumentException("Upload user id is required.", nameof(userId));
         }
 
+        if (scope is not UploadRecordScope.SessionTemp and not UploadRecordScope.AgentInput)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(scope),
+                scope,
+                "Only session and agent-input uploads are active AiGateway upload scopes.");
+        }
+
+        if (scope == UploadRecordScope.SessionTemp &&
+            (!sessionId.HasValue || agentTaskId.HasValue))
+        {
+            throw new ArgumentException(
+                "Session uploads require only a session id.",
+                nameof(sessionId));
+        }
+
+        if (scope == UploadRecordScope.AgentInput &&
+            (!agentTaskId.HasValue || sessionId.HasValue))
+        {
+            throw new ArgumentException(
+                "Agent-input uploads require only an agent task id.",
+                nameof(agentTaskId));
+        }
+
         Id = UploadRecordId.New();
         Scope = scope;
         UserId = userId;
         SessionId = sessionId;
         AgentTaskId = agentTaskId;
-        KnowledgeBaseId = knowledgeBaseId;
-        RagDocumentId = ragDocumentId;
         FileName = NormalizeRequired(fileName, nameof(fileName), 255);
         ContentType = NormalizeOptional(contentType, 200) ?? "application/octet-stream";
         FileSize = fileSize >= 0 ? fileSize : throw new ArgumentOutOfRangeException(nameof(fileSize));
         Sha256 = NormalizeRequired(sha256, nameof(sha256), 128).ToLowerInvariant();
-        StoragePath = NormalizeOptional(storagePath, 1000);
-        Status = scope == UploadRecordScope.KnowledgeBase
-            ? UploadRecordStatus.LinkedToKnowledgeBase
-            : UploadRecordStatus.Uploaded;
+        StoragePath = NormalizeRequired(storagePath, nameof(storagePath), 1000);
+        Status = UploadRecordStatus.Uploaded;
         CreatedAt = nowUtc;
     }
 
@@ -86,11 +104,6 @@ public sealed class UploadRecord : BaseEntity<UploadRecordId>, IAggregateRoot<Up
     public UploadRecordStatus Status { get; private set; }
 
     public DateTimeOffset CreatedAt { get; private set; }
-
-    public void MarkFailed()
-    {
-        Status = UploadRecordStatus.Failed;
-    }
 
     private static string NormalizeRequired(string value, string paramName, int maxLength)
     {

@@ -21,7 +21,8 @@ public sealed class DisableUserCommandHandler(
         DisableUserCommand command,
         CancellationToken cancellationToken)
     {
-        return await transactionalExecutionService.ExecuteAsync(async _ =>
+        AuditLogWriteRequest? rejectionAudit = null;
+        var result = await transactionalExecutionService.ExecuteResultAsync(async _ =>
         {
             var user = await userManager.FindByIdAsync(command.UserId);
             if (user is null)
@@ -40,17 +41,15 @@ public sealed class DisableUserCommandHandler(
                 var enabledAdminCount = await CountEnabledUsersInRoleAsync(IdentityRoleNames.Admin);
                 if (enabledAdminCount <= 1)
                 {
-                    await auditLogWriter.WriteAsync(
-                        new AuditLogWriteRequest(
-                            AuditActionGroups.Identity,
-                            "Identity.DisableUser",
-                            "User",
-                            user.Id.ToString(),
-                            user.UserName ?? string.Empty,
-                            AuditResults.Rejected,
-                            $"拒绝禁用用户：{user.UserName}，原因是系统至少需要保留 1 个启用中的管理员。",
-                            ["status"]),
-                        cancellationToken);
+                    rejectionAudit = new AuditLogWriteRequest(
+                        AuditActionGroups.Identity,
+                        "Identity.DisableUser",
+                        "User",
+                        user.Id.ToString(),
+                        user.UserName ?? string.Empty,
+                        AuditResults.Rejected,
+                        $"拒绝禁用用户：{user.UserName}，原因是系统至少需要保留 1 个启用中的管理员。",
+                        ["status"]);
                     return Result.Invalid("至少保留 1 个启用状态的管理员，不能禁用最后一个管理员账号。");
                 }
             }
@@ -77,6 +76,16 @@ public sealed class DisableUserCommandHandler(
                 cancellationToken);
             return Result.Success(BuildSummary(user, roleName));
         }, cancellationToken);
+
+        if (rejectionAudit is not null)
+        {
+            await transactionalExecutionService.CommitRejectedAuditAsync(
+                auditLogWriter,
+                rejectionAudit,
+                cancellationToken);
+        }
+
+        return result;
     }
 
     private async Task<int> CountEnabledUsersInRoleAsync(string roleName)

@@ -2,6 +2,7 @@
 using AICopilot.AiRuntime;
 using AICopilot.Embedding;
 using AICopilot.EntityFrameworkCore;
+using AICopilot.EntityFrameworkCore.Persistence;
 using AICopilot.EventBus;
 using AICopilot.Infrastructure.Artifacts;
 using AICopilot.Infrastructure.AiGateway;
@@ -34,7 +35,7 @@ public static class DependencyInjection
         builder.AddEventBus();
         builder.AddAiRuntime();
 
-        builder.Services.AddSingleton<IFileStorageService, LocalFileStorageService>();
+        AddLocalFileStorage(builder.Services);
         builder.Services.AddSingleton<IArtifactWorkspaceFileStore, LocalArtifactWorkspaceFileStore>();
         builder.Services.AddSingleton<IAgentTableFileParser, AgentTableFileParser>();
         builder.Services.AddSingleton<IAgentArtifactDocumentGenerator, AgentArtifactDocumentGenerator>();
@@ -101,7 +102,7 @@ public static class DependencyInjection
         builder.AddEventBus(consumerAssembly);
         builder.AddEmbedding();
 
-        builder.Services.AddSingleton<IFileStorageService, LocalFileStorageService>();
+        AddLocalFileStorage(builder.Services);
         builder.AddDocumentParsers();
         builder.Services.AddSingleton<ITokenCounter, SharpTokenCounter>();
         builder.Services.AddSingleton<IDocumentTextSplitter, TextSplitterService>();
@@ -112,6 +113,18 @@ public static class DependencyInjection
     private static void AddSecretProtection(this IHostApplicationBuilder builder)
     {
         builder.Services.AddSingleton<ISecretProtector, SecretProtector>();
+    }
+
+    private static void AddLocalFileStorage(IServiceCollection services)
+    {
+        services.AddSingleton<LocalFileStorageService>();
+        services.AddSingleton<IFileStorageService>(provider =>
+            provider.GetRequiredService<LocalFileStorageService>());
+        services.AddSingleton<IPersistenceFileReconciliationJournal>(provider =>
+            provider.GetRequiredService<LocalFileStorageService>());
+        services.AddScoped<IPersistenceFileReconciliationLeaseManager,
+            PostgresPersistenceFileReconciliationLeaseManager>();
+        services.AddScoped<IPersistenceFileStorageService, LocalPersistenceFileStorageService>();
     }
 
     private static void AddDocumentParsers(this IHostApplicationBuilder builder)

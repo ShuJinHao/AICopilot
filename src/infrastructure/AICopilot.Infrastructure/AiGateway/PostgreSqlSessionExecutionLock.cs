@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+using AICopilot.EntityFrameworkCore.Locking;
 using AICopilot.Services.Contracts;
 using Microsoft.Extensions.Logging;
 using Npgsql;
@@ -16,7 +16,7 @@ public sealed class PostgreSqlSessionExecutionLock(
         Guid sessionId,
         CancellationToken cancellationToken = default)
     {
-        var key = BuildLockKey(sessionId);
+        var key = PostgreSqlAdvisoryLock.CreateKey(sessionId);
         var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
 
@@ -27,7 +27,7 @@ public sealed class PostgreSqlSessionExecutionLock(
 
             while (true)
             {
-                if (await TryAcquireAsync(connection, key, timeoutCts.Token))
+                if (await PostgreSqlAdvisoryLock.TryAcquireAsync(connection, key, timeoutCts.Token))
                 {
                     return new Releaser(connection, key, logger);
                 }
@@ -40,25 +40,6 @@ public sealed class PostgreSqlSessionExecutionLock(
             await connection.DisposeAsync();
             throw;
         }
-    }
-
-    private static async Task<bool> TryAcquireAsync(
-        NpgsqlConnection connection,
-        long key,
-        CancellationToken cancellationToken)
-    {
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT pg_try_advisory_lock(@key);";
-        command.Parameters.AddWithValue("key", key);
-        return await command.ExecuteScalarAsync(cancellationToken) is true;
-    }
-
-    private static long BuildLockKey(Guid sessionId)
-    {
-        Span<byte> hash = stackalloc byte[32];
-        SHA256.HashData(sessionId.ToByteArray(), hash);
-        var key = BitConverter.ToInt64(hash[..8]);
-        return key == 0 ? 1 : key;
     }
 
     private sealed class Releaser(
@@ -77,10 +58,7 @@ public sealed class PostgreSqlSessionExecutionLock(
 
             try
             {
-                await using var command = connection.CreateCommand();
-                command.CommandText = "SELECT pg_advisory_unlock(@key);";
-                command.Parameters.AddWithValue("key", key);
-                await command.ExecuteNonQueryAsync();
+                await PostgreSqlAdvisoryLock.ReleaseAsync(connection, key);
             }
             catch (Exception ex)
             {

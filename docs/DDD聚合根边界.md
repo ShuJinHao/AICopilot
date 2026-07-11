@@ -61,7 +61,7 @@ MediatR handler 直接注入 3 个及以上 repository/store/file store/query se
 - 普通 repository 的业务行、Outbox、审计和 commit marker 只能由 `PersistenceCommitEngine` / `RepositoryPersistenceCommitter` 通过 EF 官方 `ExecuteInTransactionAsync(... verifySucceeded ...)` 原子提交；不得恢复已删除的 `AuditTransactionCoordinator`、业务 Context `SaveChangesAsync` override、手写业务重试或双轨事务实现。
 - 每个 attempt 对业务 Context 只执行一次 `SaveChangesAsync(false)`。commit 前 transient failure 可以由 execution strategy 重放；只有 durable marker 通过 fresh context 确认后才 `AcceptAllChanges`、清 AiGateway domain events 或清 RAG delayed factories。RAG `DocumentId` 由 PostgreSQL sequence 在进入可重放事务前分配，避免 retry 时依赖未确认的数据库生成主键。
 - COMMIT 成功但 ACK 丢失只能用同事务 marker 验证，不能依赖可选 Outbox/audit。marker 写入后 caller cancellation 不再中断 commit/verification；fresh verification 无法确认时抛出带非敏感 commit id 的 `PersistenceCommitOutcomeUnknownException`，禁止自动重放业务。RAG 上传必须保留可能已提交写入对应的文件，等待对账后再决定清理或重试。
-- `AI-PERSIST-01b` 不覆盖 Identity；`ITransactionalExecutionService` / `EfTransactionalExecutionService` 与 Identity stores 只能在 `AI-PERSIST-01c` 收口。01b 与 01c 未共同验收前禁止合并或部署；01c 同时负责 commit-unknown 文件对账/清理和 marker 生命周期，`AI-SEC-046` 保持 `Partial`。
+- Identity stores 通过 `ITransactionalExecutionService` / `IdentityTransactionalExecutionService` 复用唯一 `PersistenceCommitEngine`，`EfTransactionalExecutionService` 已物理删除。Identity 命令返回非成功 `Result` 时必须回滚 UserManager/RoleManager 的中间保存；拒绝审计只能在业务回滚后另行提交。RAG `UploadDocument` 与 AiGateway SessionTemp/AgentInput `UploadRecord` 必须先落 durable reconciliation journal、再写物理文件，并让 repository marker 复用同一 commit id；PostgreSQL advisory lease 保护活跃请求，DataWorker 在共享卷上按 marker 对账并按保留期清理。RAG 删除事件是同一文件生命周期边界：必须按 storage path 查询 pending journal、取得同 commit lease、锁内复查并先持久退休 journal 后再删文件；不可读或 active 状态只能重试。`ArtifactWorkspace` 的多文件归档、覆盖和 final 复制必须在 `AI-PERSIST-01d` 单独建立文件集事务/对账语义；历史 KnowledgeBase shadow `UploadRecord`、旧列与枚举字符串必须在 `AI-PERSIST-01e` 经数据盘点和维护窗口物理删除，不得恢复 RAG→AiGateway 同步双写或为垃圾影子链建设 saga。禁止恢复双轨事务、无日志上传写入或第二套上传清理链。
 
 ## 后续收口顺序
 
@@ -77,7 +77,7 @@ MediatR handler 直接注入 3 个及以上 repository/store/file store/query se
 10. `AgentTaskDtoQueryService` 已承接 AgentTask DTO 组装所需的 workspace、pending approval 和 active queue 查询；`Run` / `Retry` / `Cancel` / `GetAgentTask` / `GetListAgentTasksBySession` handler 不得重新直接注入 workspace/approval/queue store 或调用静态 DTO composer。
 11. `PlanAgentTaskCoordinator` 已承接 PlanAgentTask 草案生成、Session/Upload 校验、Skill 自动选择、plan document 构建、plan approval 创建、timeline staging 和 plan audit；`PlanAgentTaskCommandHandler` 只保留 MediatR 入口转发。
 12. `AgentApprovalQueryCoordinator` 已承接 pending approval 和按 task 查询中的权限校验、task/workspace 读取、approval 聚合读取和 DTO 组装；approval query handler 只保留 MediatR 入口转发。
-13. `UploadRecordCoordinator` 已承接 UploadRecord 命令中的用户校验、Session/AgentTask/RAG scope 绑定校验、知识库写权限复查、上传安全策略、file storage、RAG bridge、审计和保存；`UploadRecordCommandHandler` 只保留 MediatR 入口转发。
+13. `UploadRecordCoordinator` 只承接 SessionTemp/AgentInput 上传中的用户与目标校验、上传安全策略、durable file stage、审计和保存；知识库文件只能走 RAG Document API。`UploadRecordCommandHandler` 只保留 MediatR 入口转发，禁止恢复 KB scope、RAG bridge 或同步 shadow record。
 14. `ArtifactWorkspaceQueryCoordinator` 已承接 workspace DTO 查询和 artifact 下载中的 workspace/task/approval 读取、owner/privileged 权限校验、final output approval 检查、file store 读取和下载审计；对应 query handler 只保留 MediatR 入口转发。
 15. `ArtifactVersioningQueryCoordinator` 已承接 artifact 内容读取、版本列表、版本下载和文本 diff 中的 workspace/task/approval 读取、权限校验、text artifact policy、file store 读取和版本下载审计；对应 query handler 只保留 MediatR 入口转发。
 16. `ArtifactVersioningCommandCoordinator` 已承接 artifact 内容更新和版本恢复中的 owner/edit 权限、编辑窗口校验、版本归档、file store 写入、聚合版本变更、审计和保存；对应 command handler 只保留 MediatR 入口转发。

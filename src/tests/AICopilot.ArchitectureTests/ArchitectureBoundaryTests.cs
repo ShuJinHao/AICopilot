@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using AICopilot.AiGatewayService.Workflows.Executors;
+using AICopilot.AiGatewayService.Uploads;
 using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
@@ -21,6 +22,10 @@ using AICopilot.EntityFrameworkCore.Persistence;
 using AICopilot.EntityFrameworkCore.Repository;
 using AICopilot.EntityFrameworkCore.Transactions;
 using AICopilot.HttpApi.Infrastructure;
+using AICopilot.Infrastructure.Storage;
+using AICopilot.IdentityService.Commands;
+using AICopilot.RagService.Commands.Documents;
+using AICopilot.SharedKernel.Messaging;
 using AICopilot.SharedKernel.Domain;
 using AICopilot.Services.Contracts;
 using MediatR;
@@ -482,12 +487,11 @@ public sealed class ArchitectureBoundaryTests
             .GetType("AICopilot.EntityFrameworkCore.Transactions.AuditTransactionCoordinator")
             .Should().BeNull();
 
-        var identityConstructor = typeof(EfTransactionalExecutionService).GetConstructors()
+        var identityConstructor = typeof(IdentityTransactionalExecutionService).GetConstructors()
             .Should().ContainSingle().Subject;
-        identityConstructor.GetParameters().Should().ContainSingle()
-            .Which.ParameterType.Should().Be(typeof(IdentityStoreDbContext));
-        identityConstructor.GetParameters()
-            .Should().NotContain(parameter => parameter.ParameterType == typeof(PersistenceCommitEngine));
+        identityConstructor.GetParameters().Select(parameter => parameter.ParameterType)
+            .Should().BeEquivalentTo(
+                [typeof(IdentityStoreDbContext), typeof(PersistenceCommitEngine)]);
     }
 
     [Fact]
@@ -901,13 +905,122 @@ public sealed class ArchitectureBoundaryTests
         coordinator.Should().Contain("IRepository<UploadRecord>");
         coordinator.Should().Contain("IReadRepository<Session>");
         coordinator.Should().Contain("IReadRepository<AgentTask>");
-        coordinator.Should().Contain("IFileStorageService");
-        coordinator.Should().Contain("IRagDocumentUploadBridge");
-        coordinator.Should().Contain("IKnowledgeBaseAccessChecker");
+        coordinator.Should().Contain("IPersistenceFileStorageService");
         coordinator.Should().Contain("IAuditLogWriter");
-        coordinator.Should().Contain("CanWriteAsync(");
+        coordinator.Should().NotContain("IRagDocumentUploadBridge");
+        coordinator.Should().NotContain("IKnowledgeBaseAccessChecker");
+        coordinator.Should().NotContain("CanWriteAsync(");
         coordinator.Should().Contain("AiGatewayUploadSecurityPolicy.ValidateAndNormalizeAsync");
         serviceRegistration.Should().Contain("AddScoped<UploadRecordCoordinator>");
+
+        var obsoleteRagUploadBridgeReferences = Directory
+            .EnumerateFiles(Path.Combine(SolutionRoot, "src"), "*.cs", SearchOption.AllDirectories)
+            .Where(file => !file.Contains(
+                $"{Path.DirectorySeparatorChar}tests{Path.DirectorySeparatorChar}",
+                StringComparison.OrdinalIgnoreCase))
+            .Select(file => new
+            {
+                File = Path.GetRelativePath(SolutionRoot, file),
+                Source = File.ReadAllText(file)
+            })
+            .Where(item => item.Source.Contains(
+                "IRagDocumentUploadBridge",
+                StringComparison.Ordinal))
+            .Select(item => item.File)
+            .ToArray();
+        obsoleteRagUploadBridgeReferences.Should().BeEmpty(
+            "knowledge-base documents have one write owner: the RAG document API");
+    }
+
+    [Fact]
+    public void DatabaseBackedFileWrites_ShouldUseTheReconciliationBoundary()
+    {
+        typeof(IFileStorageService).GetMethod("SaveAsync").Should().BeNull();
+        ConstructorParameterTypes(typeof(UploadDocumentCommandHandler))
+            .Should().Contain(typeof(IPersistenceFileStorageService))
+            .And.NotContain(typeof(IFileStorageService));
+        ConstructorParameterTypes(typeof(UploadRecordCoordinator))
+            .Should().Contain(typeof(IPersistenceFileStorageService))
+            .And.NotContain(typeof(IFileStorageService));
+        ConstructorParameterTypes(typeof(LocalPersistenceFileStorageService))
+            .Should().Contain([
+                typeof(LocalFileStorageService),
+                typeof(IPersistenceFileReconciliationJournal),
+                typeof(IPersistenceFileReconciliationLeaseManager),
+                typeof(IPersistenceCommitScope)
+            ]);
+        ConstructorParameterTypes(typeof(PersistenceFileMaintenanceService))
+            .Should().Contain([
+                typeof(PersistenceCommitMarkerDbContext),
+                typeof(IPersistenceFileReconciliationJournal),
+                typeof(IPersistenceFileReconciliationLeaseManager),
+                typeof(IFileStorageService)
+            ]);
+
+        var directProtocolCalls = Directory
+            .EnumerateFiles(
+                Path.Combine(SolutionRoot, "src", "services"),
+                "*.cs",
+                SearchOption.AllDirectories)
+            .Where(file => !file.EndsWith(
+                "PersistenceFileContracts.cs",
+                StringComparison.OrdinalIgnoreCase))
+            .SelectMany(file => File
+                .ReadLines(file)
+                .Select((line, index) => new
+                {
+                    File = Path.GetRelativePath(SolutionRoot, file),
+                    Line = index + 1,
+                    Text = line.Trim()
+                }))
+            .Where(item => Regex.IsMatch(
+                item.Text,
+                @"\.(?:ConfirmBestEffortAsync|RollbackBestEffortAsync|LeavePendingAsync)\s*\("))
+            .Select(item => $"{item.File}:{item.Line}: {item.Text}")
+            .ToArray();
+        directProtocolCalls.Should().BeEmpty(
+            "database-backed upload callers must use the single PersistenceFileCommitProtocol");
+
+        var infrastructureRegistration = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "infrastructure",
+            "AICopilot.Infrastructure",
+            "DependencyInjection.cs"));
+        infrastructureRegistration.Should().Contain("AddSingleton<LocalFileStorageService>");
+        infrastructureRegistration.Should().Contain("AddSingleton<IFileStorageService>");
+        infrastructureRegistration.Should().Contain("AddSingleton<IPersistenceFileReconciliationJournal>");
+        infrastructureRegistration.Should().Contain("AddScoped<IPersistenceFileReconciliationLeaseManager");
+        infrastructureRegistration.Should().Contain("AddScoped<IPersistenceFileStorageService");
+
+        var workerProgram = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "hosts",
+            "AICopilot.DataWorker",
+            "Program.cs"));
+        workerProgram.Should().Contain("AddScoped<PersistenceFileMaintenanceService>");
+        workerProgram.Should().Contain("AddHostedService<PersistenceMaintenanceWorker>");
+        workerProgram.Should().Contain("ValidateOnStart");
+
+        var efRegistration = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "infrastructure",
+            "AICopilot.EntityFrameworkCore",
+            "DependencyInjection.cs"));
+        efRegistration.Should().NotContain("AddScoped<PersistenceFileMaintenanceService>");
+        efRegistration.Should().NotContain("AddScoped<IPersistenceFileReconciliationLeaseManager");
+
+        var localStorage = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "infrastructure",
+            "AICopilot.Infrastructure",
+            "Storage",
+            "LocalFileStorageService.cs"));
+        localStorage.Should().Contain("PlatformNotSupportedException");
+        localStorage.Should().NotContain("MoveFileEx");
     }
 
     [Fact]
@@ -2066,7 +2179,7 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void IdentityManagementCommands_ShouldUseIdentityAuditWriter()
+    public void IdentityResultCommands_ShouldUseTransactionalResultBoundary()
     {
         var commandRoot = Path.Combine(
             SolutionRoot,
@@ -2074,29 +2187,95 @@ public sealed class ArchitectureBoundaryTests
             "services",
             "AICopilot.IdentityService",
             "Commands");
-        var commandFiles = new[]
-        {
-            "FinalizeCloudOidcLogin.cs",
-            "CreateRole.cs",
-            "UpdateRole.cs",
-            "DeleteRole.cs",
-            "CreatedUser.cs",
-            "UpdateUserRole.cs",
-            "DisableUser.cs",
-            "EnableUser.cs",
-            "ResetUserPassword.cs"
-        };
+        var commandSources = Directory
+            .EnumerateFiles(commandRoot, "*.cs", SearchOption.AllDirectories)
+            .ToDictionary(file => file, File.ReadAllText, StringComparer.OrdinalIgnoreCase);
+        var commandHandlers = typeof(CreateRoleCommandHandler).Assembly
+            .GetTypes()
+            .Where(type => type is { IsClass: true, IsAbstract: false })
+            .Where(type => type.Namespace?.StartsWith(
+                "AICopilot.IdentityService.Commands",
+                StringComparison.Ordinal) == true)
+            .Select(type => new
+            {
+                HandlerType = type,
+                CommandInterface = type.GetInterfaces().SingleOrDefault(contract =>
+                    contract.IsGenericType &&
+                    contract.GetGenericTypeDefinition() == typeof(ICommandHandler<,>))
+            })
+            .Where(item => item.CommandInterface is not null)
+            .OrderBy(item => item.HandlerType.FullName, StringComparer.Ordinal)
+            .ToArray();
+        var nonResultHandlers = commandHandlers
+            .Where(item => !typeof(AICopilot.SharedKernel.Result.IResult).IsAssignableFrom(
+                item.CommandInterface!.GetGenericArguments()[1]))
+            .Select(item => item.HandlerType.FullName)
+            .ToArray();
+        nonResultHandlers.Should().BeEmpty(
+            "Identity commands must return Result so rejected writes can roll back atomically");
 
-        foreach (var commandFile in commandFiles)
-        {
-            var source = File.ReadAllText(Path.Combine(commandRoot, commandFile));
+        var resultCommandHandlers = commandHandlers
+            .Where(item => typeof(AICopilot.SharedKernel.Result.IResult).IsAssignableFrom(
+                item.CommandInterface!.GetGenericArguments()[1]))
+            .ToArray();
 
-            source.Should().Contain("ITransactionalExecutionService", commandFile);
-            source.Should().Contain("IIdentityAuditLogWriter", commandFile);
-            source.Should().Contain("transactionalExecutionService.ExecuteAsync", commandFile);
+        resultCommandHandlers.Should().HaveCount(10);
+
+        foreach (var handler in resultCommandHandlers)
+        {
+            var sourceEntries = commandSources
+                .Where(entry => Regex.IsMatch(
+                    entry.Value,
+                    $@"\bclass\s+{Regex.Escape(handler.HandlerType.Name)}\b"))
+                .ToArray();
+            sourceEntries.Should().ContainSingle(handler.HandlerType.FullName);
+            var sourceEntry = sourceEntries[0];
+            var source = sourceEntry.Value;
+            var commandFile = Path.GetFileName(sourceEntry.Key);
+            var constructorParameters = handler.HandlerType
+                .GetConstructors(BindingFlags.Instance | BindingFlags.Public)
+                .SelectMany(constructor => constructor.GetParameters())
+                .Select(parameter => parameter.ParameterType)
+                .ToArray();
+
+            constructorParameters.Should().Contain(typeof(ITransactionalExecutionService), commandFile);
             source.Should().NotContain("IAuditLogWriter", commandFile);
             source.Should().NotContain("auditLogWriter.SaveChangesAsync", commandFile);
             source.Should().NotContain("DbContext", commandFile);
+
+            if (handler.HandlerType == typeof(LoginUserCommandHandler))
+            {
+                source.Should().Contain("transactionalExecutionService.ExecuteAsync", commandFile);
+                source.Should().NotContain("ExecuteResultAsync", commandFile);
+                continue;
+            }
+
+            constructorParameters.Should().Contain(typeof(IIdentityAuditLogWriter), commandFile);
+            source.Should().Contain("transactionalExecutionService.ExecuteResultAsync", commandFile);
+        }
+    }
+
+    [Fact]
+    public void ApprovedIdentityNonCommandWriters_ShouldStayInsideExplicitTransactionBoundary()
+    {
+        var approvedFiles = new[]
+        {
+            Path.Combine(
+                SolutionRoot,
+                "src", "services", "AICopilot.IdentityService", "Services",
+                "CloudIdentityStatusValidator.cs"),
+            Path.Combine(
+                SolutionRoot,
+                "src", "hosts", "AICopilot.MigrationWorkApp",
+                "MigrationWorkerIdentitySeeder.cs")
+        };
+
+        foreach (var approvedFile in approvedFiles)
+        {
+            var source = File.ReadAllText(approvedFile);
+            source.Should().Contain("ITransactionalExecutionService", approvedFile);
+            source.Should().Contain("transactionalExecutionService.ExecuteAsync", approvedFile);
+            source.Should().NotContain("ExecuteResultAsync", approvedFile);
         }
     }
 
@@ -2253,18 +2432,9 @@ public sealed class ArchitectureBoundaryTests
             "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "DependencyInjection.cs");
-        var transactionalExecutionFile = Path.Combine(
-            SolutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "Transactions",
-            "EfTransactionalExecutionService.cs");
-
         var mainContext = File.ReadAllText(mainContextFile);
         var identityContext = File.ReadAllText(identityContextFile);
         var dependencyInjection = File.ReadAllText(dependencyInjectionFile);
-        var transactionalExecution = File.ReadAllText(transactionalExecutionFile);
 
         mainContext.Should().Contain(": DbContext");
         mainContext.Should().NotContain("IdentityDbContext");
@@ -2285,10 +2455,14 @@ public sealed class ArchitectureBoundaryTests
         dependencyInjection.Should().Contain("AddNpgsqlDbContext<IdentityStoreDbContext>");
         dependencyInjection.Should().Contain("AddEntityFrameworkStores<IdentityStoreDbContext>");
         dependencyInjection.Should().NotContain("AddEntityFrameworkStores<AiCopilotDbContext>");
+        dependencyInjection.Should().Contain("IdentityTransactionalExecutionService");
+        dependencyInjection.Should().NotContain("EfTransactionalExecutionService");
 
-        transactionalExecution.Should().Contain("IdentityStoreDbContext");
-        transactionalExecution.Should().NotContain("AiCopilotDbContext");
-        transactionalExecution.Should().NotContain("AuditDbContext");
+        typeof(IdentityTransactionalExecutionService).GetConstructors()
+            .Should().ContainSingle().Which.GetParameters()
+            .Select(parameter => parameter.ParameterType)
+            .Should().BeEquivalentTo(
+                [typeof(IdentityStoreDbContext), typeof(PersistenceCommitEngine)]);
     }
 
     [Fact]
@@ -2832,6 +3006,15 @@ public sealed class ArchitectureBoundaryTests
             .Where(index => index >= 0)
             .DefaultIfEmpty(-1)
             .Min();
+    }
+
+    private static IReadOnlyCollection<Type> ConstructorParameterTypes(Type type)
+    {
+        return type.GetConstructors()
+            .Single()
+            .GetParameters()
+            .Select(parameter => parameter.ParameterType)
+            .ToArray();
     }
 
     private static void AssertInOrder(string source, params string[] values)

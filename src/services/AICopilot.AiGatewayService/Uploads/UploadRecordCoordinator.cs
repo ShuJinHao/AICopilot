@@ -15,9 +15,7 @@ public sealed class UploadRecordCoordinator(
     IRepository<UploadRecord> uploadRepository,
     IReadRepository<Session> sessionRepository,
     IReadRepository<AgentTask> taskRepository,
-    IFileStorageService fileStorage,
-    IEnumerable<IRagDocumentUploadBridge> ragUploadBridges,
-    IEnumerable<IKnowledgeBaseAccessChecker> knowledgeBaseAccessCheckers,
+    IPersistenceFileStorageService persistenceFileStorage,
     IAuditLogWriter auditLogWriter,
     ICurrentUser currentUser)
 {
@@ -33,9 +31,11 @@ public sealed class UploadRecordCoordinator(
         }
 
         if (!Enum.TryParse<UploadRecordScope>(request.Scope, ignoreCase: true, out var scope) ||
-            !Enum.IsDefined(scope))
+            scope is not UploadRecordScope.SessionTemp and not UploadRecordScope.AgentInput)
         {
-            return Result.Invalid("Upload scope is invalid.");
+            return Result.Invalid(
+                "Upload scope must be SessionTemp or AgentInput. " +
+                "Knowledge-base documents must use the RAG document API.");
         }
 
         var validation = await ValidateScopeAsync(request, scope, userId, cancellationToken);
@@ -64,58 +64,39 @@ public sealed class UploadRecordCoordinator(
         var sha256 = await ComputeSha256Async(normalizedFile.Stream, cancellationToken);
         normalizedFile.Stream.Position = 0;
 
-        string? storagePath = null;
-        int? ragDocumentId = null;
+        var fileStage = await persistenceFileStorage.StageAsync(
+            normalizedFile.Stream,
+            normalizedFile.FileName,
+            cancellationToken);
 
-        if (scope == UploadRecordScope.KnowledgeBase)
-        {
-            var ragUploadBridge = ragUploadBridges.FirstOrDefault();
-            if (ragUploadBridge is null)
+        var record = await persistenceFileStorage.ExecuteAsync(
+            fileStage,
+            async commitCancellationToken =>
             {
-                return Result.Failure("RAG document upload bridge is not configured.");
-            }
-
-            var ragResult = await ragUploadBridge.UploadAsync(
-                new RagDocumentUploadBridgeRequest(
-                    request.KnowledgeBaseId!.Value,
+                var createdRecord = new UploadRecord(
+                    scope,
+                    userId,
+                    request.SessionId.HasValue ? new SessionId(request.SessionId.Value) : null,
+                    request.AgentTaskId.HasValue ? new AgentTaskId(request.AgentTaskId.Value) : null,
                     normalizedFile.FileName,
-                    normalizedFile.Stream,
                     normalizedFile.ContentType,
                     normalizedFile.FileSize,
-                    SourceType: "UserUploaded"),
-                cancellationToken);
-            ragDocumentId = ragResult.DocumentId;
-        }
-        else
-        {
-            storagePath = await fileStorage.SaveAsync(
-                normalizedFile.Stream,
-                normalizedFile.FileName,
-                cancellationToken);
-        }
+                    sha256,
+                    fileStage.StoragePath,
+                    DateTimeOffset.UtcNow);
 
-        var record = new UploadRecord(
-            scope,
-            userId,
-            request.SessionId.HasValue ? new SessionId(request.SessionId.Value) : null,
-            request.AgentTaskId.HasValue ? new AgentTaskId(request.AgentTaskId.Value) : null,
-            request.KnowledgeBaseId,
-            ragDocumentId,
-            normalizedFile.FileName,
-            normalizedFile.ContentType,
-            normalizedFile.FileSize,
-            sha256,
-            storagePath,
-            DateTimeOffset.UtcNow);
-
-        uploadRepository.Add(record);
-        await RecordUploadAuditAsync(
-            AuditResults.Succeeded,
-            "Uploaded file accepted by security policy.",
-            request,
-            record,
+                uploadRepository.Add(createdRecord);
+                await RecordUploadAuditAsync(
+                    AuditResults.Succeeded,
+                    "Uploaded file accepted by security policy.",
+                    request,
+                    createdRecord,
+                    commitCancellationToken);
+                await uploadRepository.SaveChangesAsync(commitCancellationToken);
+                return createdRecord;
+            },
             cancellationToken);
-        await uploadRepository.SaveChangesAsync(cancellationToken);
+
         return Result.Success(UploadRecordDtoMapper.Map(record));
     }
 
@@ -130,32 +111,12 @@ public sealed class UploadRecordCoordinator(
             return Result.Invalid("Uploaded file is empty.");
         }
 
-        if (scope == UploadRecordScope.KnowledgeBase)
-        {
-            if (!request.KnowledgeBaseId.HasValue || request.KnowledgeBaseId.Value == Guid.Empty)
-            {
-                return Result.Invalid("KnowledgeBaseId is required for knowledge-base uploads.");
-            }
-
-            var accessChecker = knowledgeBaseAccessCheckers.FirstOrDefault();
-            if (accessChecker is null)
-            {
-                return Result.Failure("RAG knowledge base access checker is not configured.");
-            }
-
-            var canWrite = await accessChecker.CanWriteAsync(
-                request.KnowledgeBaseId.Value,
-                userId,
-                IsAdmin(),
-                cancellationToken);
-            return canWrite ? Result.Success() : Result.NotFound();
-        }
-
         if (scope == UploadRecordScope.SessionTemp)
         {
-            if (!request.SessionId.HasValue || request.SessionId.Value == Guid.Empty)
+            if (!request.SessionId.HasValue || request.SessionId.Value == Guid.Empty ||
+                request.AgentTaskId.HasValue)
             {
-                return Result.Invalid("SessionId is required for session uploads.");
+                return Result.Invalid("Session uploads require only SessionId.");
             }
 
             var session = await sessionRepository.FirstOrDefaultAsync(
@@ -164,20 +125,16 @@ public sealed class UploadRecordCoordinator(
             return session is null ? Result.NotFound("Session not found.") : Result.Success();
         }
 
-        if (!request.AgentTaskId.HasValue || request.AgentTaskId.Value == Guid.Empty)
+        if (!request.AgentTaskId.HasValue || request.AgentTaskId.Value == Guid.Empty ||
+            request.SessionId.HasValue)
         {
-            return Result.Invalid("AgentTaskId is required for agent input uploads.");
+            return Result.Invalid("Agent-input uploads require only AgentTaskId.");
         }
 
         var task = await taskRepository.FirstOrDefaultAsync(
             new AgentTaskByIdForUserSpec(new AgentTaskId(request.AgentTaskId.Value), userId),
             cancellationToken);
         return task is null ? Result.NotFound("Agent task not found.") : Result.Success();
-    }
-
-    private bool IsAdmin()
-    {
-        return string.Equals(currentUser.Role, "Admin", StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task<AiGatewayUploadStream> NormalizeStreamAsync(
@@ -210,17 +167,17 @@ public sealed class UploadRecordCoordinator(
         UploadRecord? record,
         CancellationToken cancellationToken)
     {
+        var safeFileName = UploadFileNamePolicy.NormalizeForAudit(request.File.FileName);
         var metadata = new Dictionary<string, string>
         {
             ["scope"] = request.Scope,
-            ["fileName"] = Path.GetFileName(request.File.FileName),
+            ["fileName"] = safeFileName,
             ["contentType"] = request.File.ContentType,
             ["fileSize"] = request.File.FileSize.ToString()
         };
         if (record is not null)
         {
             metadata["uploadId"] = record.Id.Value.ToString();
-            metadata["status"] = record.Status.ToString();
         }
 
         return auditLogWriter.WriteAsync(
@@ -229,7 +186,7 @@ public sealed class UploadRecordCoordinator(
                 "AiGateway.Upload",
                 "UploadRecord",
                 record?.Id.Value.ToString(),
-                record?.FileName ?? Path.GetFileName(request.File.FileName),
+                record?.FileName ?? safeFileName,
                 result,
                 summary,
                 Metadata: metadata),

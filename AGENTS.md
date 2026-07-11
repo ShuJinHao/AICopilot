@@ -103,11 +103,18 @@ Cloud-AICopilot OIDC 身份对齐的长期结论见 `../docs/历史核心记录.
 - 新增或接线 `IStreamPipelineBehavior` 后，必须核对所有公开 `IStreamRequest` 的 `AuthorizeRequirement`，测试种子角色必须覆盖对应权限；无权限场景应返回干净 401/403，不能表现为 SSE 已写 200 后断流。
 - MediatR 管道顺序固定为 Telemetry -> Validation -> Authorization；新增 Validation behavior 时必须同步至少一个真实 validator 和测试，不能提交空壳管道。
 - MediatR telemetry 必须复用现有 OpenTelemetry / structured logging，只记录 request type、kind、耗时、结果和异常类型；不得记录 prompt 全文、SQL、token、连接串、API key 或业务数据明细。
-- 事务/审计拥有者必须显式且唯一：普通 repository 保存的业务、Outbox、审计和 commit marker 原子性由唯一 `PersistenceCommitEngine` / `RepositoryPersistenceCommitter` 链拥有；Identity 用户/角色事务在 `AI-PERSIST-01c` 前仍由 `ITransactionalExecutionService` / `EfTransactionalExecutionService` 独立拥有。MediatR behavior 不得开启事务、保存审计、调用 `SaveChangesAsync` 或包裹 stream/handler 形成隐式事务边界。
+- 事务/审计拥有者必须显式且唯一：普通 repository 保存的业务、Outbox、审计和 commit marker 原子性由唯一 `PersistenceCommitEngine` / `RepositoryPersistenceCommitter` 链拥有；Identity 用户/角色事务由 `ITransactionalExecutionService` / `IdentityTransactionalExecutionService` 复用同一 engine，禁止恢复已删除的 `EfTransactionalExecutionService` 或另起手写 transaction/retry。返回 `Result` 的 Identity 写命令必须走 `ExecuteResultAsync`，非成功结果先回滚全部 Identity 中间保存；确需保留的拒绝审计只能在业务事务回滚后另行原子提交。MediatR behavior 不得开启事务、保存审计、调用 `SaveChangesAsync` 或包裹 stream/handler 形成隐式事务边界。
 - 没有真实事件生产者的 DbContext 不得为“未来可能使用”复制 Outbox `DbSet`、映射或 `SaveChangesAsync` 领域事件扫描；AiGateway `Session` 领域事件和 RAG delayed integration-event factory 只能通过 repository commit participant 物化到短生命周期 `OutboxDbContext`，业务 Context 不再映射共享 Outbox；主 `AiCopilotDbContext` 是 Outbox 与 persistence marker 的唯一 migration owner。
 - EF execution-strategy 重试只能使用官方 `ExecuteInTransactionAsync(... verifySucceeded ...)` 或等价官方入口，不得手写业务重试循环。每次 repository attempt 对业务 Context 只执行一次 `SaveChangesAsync(false)`，只有事务确认成功后才 `AcceptAllChanges`、清领域事件或清 RAG factory buffer。
 - COMMIT 已成功但 ACK 丢失必须由同事务 durable commit marker 和独立 fresh context 验证，不能用 `SaveChanges(false)`、可选 Outbox 或可选 audit 推断成功；marker 写入后不得再由 caller cancellation 中断 commit/verification。fresh verification 无法确认时必须返回 `persistence_commit_outcome_unknown`，禁止自动重放业务或删除可能已提交写入对应的文件，必须先按 commit id 对账再决定重试。
-- `AI-PERSIST-01b` 只覆盖普通 repository、独立 audit writer 与 AiGateway/RAG Outbox 路径；Identity 事务、commit-unknown 文件对账/清理和 marker 生命周期由 `AI-PERSIST-01c` 收口。01b 与 01c 未共同验收前禁止合并或部署，不得把局部 PostgreSQL 绿测包装为整条持久化链已完成。
+- RAG `UploadDocument` 与 AiGateway SessionTemp/AgentInput `UploadRecord` 数据库绑定上传文件只能通过 `IPersistenceFileStorageService` 保存：先持久化 `.persistence/file-reconciliation` 对账日志，再写物理文件，并让后续 repository 保存复用同一 commit id；没有真实业务行变化时禁止确认文件。请求侧和 DataWorker 对账侧必须用同一 PostgreSQL advisory lease 防止活跃上传被清理；commit 结果未知时保留日志和文件，确认提交后只删日志，确认未提交后才删文件。HttpApi 与 DataWorker 必须共享 `/var/lib/aicopilot` 持久卷，日志损坏时 marker 清理必须 fail-closed，禁止 cron、手工 `rm` 或第二套清理器绕过该边界。
+- 数据库绑定上传调用方必须复用唯一 `PersistenceFileCommitProtocol`，禁止各自复制 unknown/rollback/confirm catch。repository 未消费预留 commit id（包括 callback 漏掉 `SaveChanges`）时，确认必须 fail-closed、删除未提交文件并保留失败信号，不得仅凭 callback 正常返回清 journal。
+- RAG 文档删除事件不得绕过待对账上传：删除物理文件前必须按 storage path 查询 journal；有记录时取得同一 commit lease、在锁内复查并持久退休 journal 后才能删文件，journal 不可读或 lease 活跃必须让消息重试。journal/file 删除即使目录项当前已不可见，也必须完成父目录 durability barrier 后才能继续；日志和审计不得记录原始客户端路径。
+- commit marker 必须按 `created_at_utc` 索引并由 DataWorker 分批清理；默认保留 30 天，保留期必须长于文件对账延迟，存在待处理日志的 marker 不得删除。`AI-PERSIST-01b/01c` 共同定义完整持久化边界，后续修改 Identity、文件上传、marker、共享卷或 DataWorker 清理时必须同时跑真实 PostgreSQL `Suite=PersistenceCommit`、migration 与全量门禁；局部绿测不得替代整体验收。
+- `ArtifactWorkspace` 仍是独立的多文件、覆盖和目录复制边界，不得伪装成已被单文件上传 stage 覆盖。`AI-PERSIST-01d / AI-SEC-047` 完成前，禁止宣称所有数据库绑定文件已原子化；治理时必须同时处理新文件、已有文件覆盖、版本归档、final 复制和 commit-unknown 恢复，不得硬套单文件 API。
+- 知识库文件唯一写入口是 RAG Document API；AiGateway 只允许 SessionTemp/AgentInput upload。禁止恢复 `UploadRecordScope.KnowledgeBase` 新写入、`IRagDocumentUploadBridge` 或 RAG→AiGateway 同步 shadow record。历史 KB shadow 行/列/枚举字符串由 `AI-PERSIST-01e / AI-SEC-048` 在只读盘点、证据导出和 drain 旧 HttpApi 后物理清理，禁止为冗余影子链新增 saga、幂等键或兼容 adapter。
+- RAG 的应用层 hash 预查不是并发幂等保证；`AI-SEC-050` 完成前不得宣称同 KB/同文件并发上传已去重。治理必须先盘点既有重复数据，再以数据库唯一约束、冲突后的既有 Document 语义和真实 PostgreSQL 并发测试闭环，失败竞争者仍须走 file journal 安全回滚。
+- “至少一个 enabled Admin”是跨 Identity 命令的不变量。降级角色、禁用、删除和 seed 不能各自只做 ReadCommitted count；`AI-SEC-051` 必须以同一数据库级串行化边界覆盖所有减少可用管理员数量的路径，并用真实 PostgreSQL 并发交错验收。
 
 ## Unified Agent Workflow
 
@@ -158,7 +165,9 @@ Cloud-AICopilot OIDC 身份对齐的长期结论见 `../docs/历史核心记录.
 - AICopilot 模型、Embedding 和 endpoint pool 覆盖 API key 的受保护格式必须使用 `encv2:` AES-GCM；旧 `encv1:` 只能通过 migration worker 或一次性迁移命令重加密，不得在运行时 provider 中继续作为正常解密格式兼容。`AiRuntime:ProviderReliability` endpoint `ApiKey` 和 `ApiKeyEnvironmentVariable` 指向的环境变量值也必须存 `encv2:` 密文，不能放明文。
 - 私有模型生产播种只能从服务器真实 `.env` 或本机私密部署手册读取真实值；仓库默认只能使用 `model.internal.example` 占位 URL、空 API key 和禁用状态。新库 seed 的私有模型 context window 固定按 64k（`65536`）口径配置，真实 base URL、API key 和是否启用由 `AICOPILOT_PRIVATE_MODEL_*` 环境变量控制，API key 入库前必须加密为 `encv2:`。
 - 模型、prompt、plugin、MCP server、approval threshold 等运行行为优先用配置或明确存储数据，不藏在代码里。
-- 容器部署必须显式配置并挂载可写的 `FileStorage:RootPath` 和 `ArtifactWorkspace:RootPath`；不得依赖容器内 `LocalApplicationData` 默认路径或 `/app` 目录写入运行产物。
+- 容器部署必须显式配置并挂载可写的 `FileStorage:RootPath` 和 `ArtifactWorkspace:RootPath`；标准 compose 将两者固定为共享卷下的 `/var/lib/aicopilot/storage` 与 `/var/lib/aicopilot/artifact-workspaces`，不得通过 `.env` 覆盖到共享卷外，也不得依赖容器内 `LocalApplicationData`、容器层或 `/app` 写入运行产物。
+- `/var/lib/aicopilot` 只允许受信任的 AICopilot 后端容器写入；上传路径会拒绝既有 symlink/reparse traversal，但逐段检查不是抵御同 UID 恶意进程竞态的 `openat/O_NOFOLLOW` 沙箱。若威胁模型包含共享卷内不受信任写入者，必须先做容器权限隔离或 dirfd 级原子路径操作，禁止宣称当前静态检查已消除 TOCTOU。
+- 当前本地 durable file/journal backend 只支持 Linux 与 macOS；标准生产部署固定使用 Linux 容器。Windows 不得以 `MoveFileEx` 或空操作冒充父目录 durability barrier，必须明确拒绝启动该 backend，或另行实现并验收受治理的 Windows/对象存储 backend。
 
 ## Execution
 

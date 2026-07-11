@@ -213,12 +213,14 @@ public sealed class CloudOidcLoginTests
     {
         var auditWriter = new InMemoryIdentityAuditLogWriter();
         var userManager = new InMemoryUserManager();
+        var transactionService = new InlineTransactionalExecutionService();
         var handler = CreateHandler(
             userManager,
             new InMemoryRoleManager(IdentityRoleNames.User),
             new InMemoryExternalIdentityBindingStore(),
             auditWriter,
-            new RecordingJwtTokenGenerator());
+            new RecordingJwtTokenGenerator(),
+            transactionService: transactionService);
 
         var result = await handler.Handle(
             new FinalizeCloudOidcLoginCommand(CreateProfile(accountEnabled: false)),
@@ -233,6 +235,8 @@ public sealed class CloudOidcLoginTests
         auditWriter.Requests.Single().Metadata.Should().Contain(new KeyValuePair<string, string>(
             "rejectionReason",
             "Identity.CloudOidcAccountDisabled"));
+        transactionService.ResultExecutionCount.Should().Be(1);
+        transactionService.GenericExecutionCount.Should().Be(1);
     }
 
     [Fact]
@@ -475,7 +479,8 @@ public sealed class CloudOidcLoginTests
         InMemoryExternalIdentityBindingStore bindingStore,
         InMemoryIdentityAuditLogWriter auditWriter,
         RecordingJwtTokenGenerator tokenGenerator,
-        CloudOidcBootstrapAdminBindingOptions? bootstrapAdminBindingOptions = null)
+        CloudOidcBootstrapAdminBindingOptions? bootstrapAdminBindingOptions = null,
+        InlineTransactionalExecutionService? transactionService = null)
     {
         return new FinalizeCloudOidcLoginCommandHandler(
             userManager,
@@ -484,7 +489,7 @@ public sealed class CloudOidcLoginTests
             auditWriter,
             tokenGenerator,
             Options.Create(bootstrapAdminBindingOptions ?? new CloudOidcBootstrapAdminBindingOptions()),
-            new InlineTransactionalExecutionService());
+            transactionService ?? new InlineTransactionalExecutionService());
     }
 
     private static CloudIdentityStatusValidator CreateStatusValidator(
@@ -600,10 +605,31 @@ public sealed class CloudOidcLoginTests
 
     private sealed class InlineTransactionalExecutionService : ITransactionalExecutionService
     {
+        public int GenericExecutionCount { get; private set; }
+
+        public int ResultExecutionCount { get; private set; }
+
         public Task<TResult> ExecuteAsync<TResult>(
             Func<CancellationToken, Task<TResult>> operation,
             CancellationToken cancellationToken = default)
         {
+            GenericExecutionCount++;
+            return operation(cancellationToken);
+        }
+
+        public Task<Result<TValue>> ExecuteResultAsync<TValue>(
+            Func<CancellationToken, Task<Result<TValue>>> operation,
+            CancellationToken cancellationToken = default)
+        {
+            ResultExecutionCount++;
+            return operation(cancellationToken);
+        }
+
+        public Task<Result> ExecuteResultAsync(
+            Func<CancellationToken, Task<Result>> operation,
+            CancellationToken cancellationToken = default)
+        {
+            ResultExecutionCount++;
             return operation(cancellationToken);
         }
     }
@@ -809,13 +835,6 @@ public sealed class CloudOidcLoginTests
 
             user.SecurityStamp ??= Guid.NewGuid().ToString("N");
             _users[user.Id] = user;
-            return Task.FromResult(IdentityResult.Success);
-        }
-
-        public override Task<IdentityResult> DeleteAsync(ApplicationUser user)
-        {
-            _users.Remove(user.Id);
-            _roles.Remove(user.Id);
             return Task.FromResult(IdentityResult.Success);
         }
 

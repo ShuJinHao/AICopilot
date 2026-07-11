@@ -180,6 +180,9 @@ namespace AICopilot.EntityFrameworkCore.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CreatedAtUtc")
+                        .HasDatabaseName("ix_commit_markers_created_at_utc");
+
                     b.ToTable("commit_markers", "persistence");
                 });
 #pragma warning restore 612, 618

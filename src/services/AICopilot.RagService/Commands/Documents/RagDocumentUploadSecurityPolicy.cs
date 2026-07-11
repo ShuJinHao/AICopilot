@@ -63,7 +63,7 @@ public static class RagDocumentUploadSecurityPolicy
         IDocumentFormatPolicy documentFormatPolicy,
         CancellationToken cancellationToken)
     {
-        var safeFileName = SanitizeFileName(file.FileName);
+        var safeFileName = UploadFileNamePolicy.Normalize(file.FileName);
         if (string.IsNullOrWhiteSpace(safeFileName))
         {
             return Invalid("RAG document file name is invalid.");
@@ -127,29 +127,6 @@ public static class RagDocumentUploadSecurityPolicy
     private static RagDocumentUploadValidationResult Invalid(string message)
     {
         return new RagDocumentUploadValidationResult(false, null, message);
-    }
-
-    private static string SanitizeFileName(string fileName)
-    {
-        var safeName = Path.GetFileName(fileName.Replace('\\', '/'));
-        if (string.IsNullOrWhiteSpace(safeName))
-        {
-            return string.Empty;
-        }
-
-        var invalidChars = Path.GetInvalidFileNameChars().ToHashSet();
-        var sanitized = new string(safeName
-            .Trim()
-            .Select(ch => invalidChars.Contains(ch) ? '_' : ch)
-            .ToArray());
-        if (sanitized.Length > 180)
-        {
-            var extension = Path.GetExtension(sanitized);
-            var stemLength = Math.Max(1, 180 - extension.Length);
-            sanitized = sanitized[..stemLength] + extension;
-        }
-
-        return sanitized;
     }
 
     private static string NormalizeContentType(string? contentType)

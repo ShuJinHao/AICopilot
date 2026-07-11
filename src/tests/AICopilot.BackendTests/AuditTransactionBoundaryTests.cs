@@ -448,7 +448,8 @@ public sealed class AuditTransactionBoundaryTests(PostgresPersistenceFixture fix
         var committer = new RepositoryPersistenceCommitter(
             auditDbContext,
             engine,
-            [new AiGatewayDomainEventOutboxSource(), new RagIntegrationEventBuffer()]);
+            [new AiGatewayDomainEventOutboxSource(), new RagIntegrationEventBuffer()],
+            new PersistenceCommitScope());
         return new PersistenceServices(engine, committer);
     }
 

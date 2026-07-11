@@ -775,13 +775,10 @@ public sealed class AcceptanceClosureVerificationTests
         string Scope,
         Guid? SessionId,
         Guid? AgentTaskId,
-        Guid? KnowledgeBaseId,
-        int? RagDocumentId,
         string FileName,
         string ContentType,
         long FileSize,
         string Sha256,
-        string Status,
         DateTimeOffset CreatedAt);
 
     private sealed record AgentTaskDto(

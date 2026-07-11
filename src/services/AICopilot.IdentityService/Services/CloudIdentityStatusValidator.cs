@@ -163,6 +163,10 @@ public sealed class CloudIdentityStatusValidator(
         await transactionalExecutionService.ExecuteAsync(
             async ct =>
             {
+                var currentUser = await userManager.FindByIdAsync(user.Id.ToString())
+                    ?? throw new InvalidOperationException(
+                        $"User '{user.Id}' was not found while revoking its Cloud session.");
+
                 if (status is not null)
                 {
                     var binding = await bindingStore.FindByExternalIdentityAsync(
@@ -189,14 +193,14 @@ public sealed class CloudIdentityStatusValidator(
                     }
                 }
 
-                IdentityGovernanceHelper.RefreshSecurityStamp(user);
-                var updateResult = await userManager.UpdateAsync(user);
+                IdentityGovernanceHelper.RefreshSecurityStamp(currentUser);
+                var updateResult = await userManager.UpdateAsync(currentUser);
                 if (!updateResult.Succeeded)
                 {
                     throw new InvalidOperationException("Failed to refresh AICopilot user security stamp.");
                 }
 
-                await StageRejectedAuditAsync(user, tokenContext, rejectionReason, summary, ct);
+                await StageRejectedAuditAsync(currentUser, tokenContext, rejectionReason, summary, ct);
                 return true;
             },
             cancellationToken);

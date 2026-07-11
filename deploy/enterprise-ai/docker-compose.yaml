@@ -18,8 +18,8 @@ x-aicopilot-common-env: &aicopilot-common-env
   QDRANT_HTTPHOST: qdrant
   QDRANT_HTTPPORT: "6333"
   QDRANT_APIKEY: ${QDRANT_KEY}
-  FileStorage__RootPath: ${AICOPILOT_FILE_STORAGE_ROOT_PATH:-/var/lib/aicopilot/storage}
-  ArtifactWorkspace__RootPath: ${AICOPILOT_ARTIFACT_WORKSPACE_ROOT_PATH:-/var/lib/aicopilot/artifact-workspaces}
+  FileStorage__RootPath: /var/lib/aicopilot/storage
+  ArtifactWorkspace__RootPath: /var/lib/aicopilot/artifact-workspaces
   AiGateway__Deployment__Mode: SingleInstance
   AiGateway__FinalAgentContextStore__Provider: Memory
   Mcp__Runtime__Enabled: "false"
@@ -120,7 +120,6 @@ services:
       AICopilot__PrivateModel__MaxOutputTokens: ${AICOPILOT_PRIVATE_MODEL_MAX_OUTPUT_TOKENS:-4096}
       AICopilot__PrivateModel__Temperature: ${AICOPILOT_PRIVATE_MODEL_TEMPERATURE:-0.2}
       OTEL_SERVICE_NAME: aicopilot-migration
-    volumes: *aicopilot-data-volumes
     depends_on:
       postgres:
         condition: service_healthy
@@ -164,6 +163,10 @@ services:
     restart: unless-stopped
     environment:
       <<: *aicopilot-common-env
+      PersistenceMaintenance__IntervalSeconds: ${AICOPILOT_PERSISTENCE_MAINTENANCE_INTERVAL_SECONDS:-300}
+      PersistenceMaintenance__ReconciliationDelayMinutes: ${AICOPILOT_PERSISTENCE_RECONCILIATION_DELAY_MINUTES:-10}
+      PersistenceMaintenance__MarkerRetentionDays: ${AICOPILOT_PERSISTENCE_MARKER_RETENTION_DAYS:-30}
+      PersistenceMaintenance__BatchSize: ${AICOPILOT_PERSISTENCE_MAINTENANCE_BATCH_SIZE:-100}
       OTEL_SERVICE_NAME: aicopilot-dataworker
     volumes: *aicopilot-data-volumes
     extra_hosts:

@@ -73,7 +73,10 @@ Cloud 只读 Agent 当前正式能力限定为：
 - repository 使用 durable commit marker 处理 COMMIT ACK 丢失；fresh verification 无法确认 marker 时，HttpApi 返回 HTTP 503、`code=persistence_commit_outcome_unknown`、安全 `detail/userFacingMessage`、trace id 和非敏感 commit id。
 - 该响应表示“写入可能已经提交”，不是确定失败。调用方不得自动重试同一业务动作；应先按 commit id 对账，再决定返回既有结果、补偿或人工重试。
 - 日志只记录 trace id、commit id、exception type 和 inner exception type，不记录 raw exception message、连接串、SQL、文件路径或业务载荷。
-- RAG 上传收到该异常时必须保留已保存文件，不能按普通回滚失败删除；文件对账/清理器完成前该批不得部署。
+- RAG `UploadDocument` 与 AiGateway SessionTemp/AgentInput 数据库绑定上传必须在物理文件前写 `.persistence/file-reconciliation` 日志，并让数据库事务复用同一 commit id；收到该异常时必须保留文件和日志，不能按普通回滚失败删除。知识库文件唯一写入口是 RAG Document API；已停止的 AiGateway KB shadow scope 不得恢复，历史行/列由 `AI-PERSIST-01e` 在维护窗口清理。
+- 请求侧持有以 commit id 派生的 PostgreSQL advisory lease，DataWorker 对账必须取得同一 lease 后才能处理；有 marker 时保留文件并删除日志，无 marker 时删除文件后再删日志。HttpApi 与 DataWorker 必须共享 `/var/lib/aicopilot`，对账日志损坏时 marker 过期清理 fail-closed，禁止手工或 cron 绕过。
+- RAG 文档删除事件必须加入同一对账边界：按 storage path 查找 journal，有 pending 记录时争用相同 commit lease、锁内复查并先持久退休 journal 后再删除文件；journal 不可读或 lease 活跃必须由消息系统重试。文件名、审计和结构化日志只能使用跨平台安全 basename，禁止保存原始客户端路径。
+- commit marker 默认保留 30 天并按 `created_at_utc` 索引；保留期必须长于对账延迟，仍有 journal 的 marker 不得删除。
 
 ## 5. 日志和持久化脱敏
 

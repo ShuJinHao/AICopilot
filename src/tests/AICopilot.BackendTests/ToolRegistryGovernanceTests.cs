@@ -1226,13 +1226,12 @@ public sealed class ToolRegistryGovernanceTests
         var sessionRepository = new InMemoryRepository<Session>(session);
         var taskRepository = new InMemoryRepository<AgentTask>();
         var audit = new CapturingAuditLogWriter();
+        var fileStorage = new CapturingFileStorage();
         var coordinator = new UploadRecordCoordinator(
             uploadRepository,
             sessionRepository,
             taskRepository,
-            new NoopFileStorageService(),
-            [],
-            [],
+            fileStorage,
             audit,
             new TestCurrentUser(UserId));
         var handler = new UploadRecordCommandHandler(coordinator);
@@ -1249,11 +1248,66 @@ public sealed class ToolRegistryGovernanceTests
         result.IsSuccess.Should().BeTrue();
         result.Value!.SessionId.Should().Be(session.Id.Value);
         result.Value.FileName.Should().Be("report.txt");
-        result.Value.Status.Should().Be(UploadRecordStatus.Uploaded.ToString());
         uploadRepository.Items.Should().ContainSingle()
             .Which.StoragePath.Should().Be("report.txt");
         audit.Requests.Should().ContainSingle()
             .Which.Result.Should().Be(AuditResults.Succeeded);
+        fileStorage.ConfirmCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task UploadRecordCommand_ShouldRejectKnowledgeBaseShadowScopeBeforeWriting()
+    {
+        var uploadRepository = new InMemoryRepository<UploadRecord>();
+        var audit = new CapturingAuditLogWriter();
+        var fileStorage = new CapturingFileStorage();
+        var coordinator = new UploadRecordCoordinator(
+            uploadRepository,
+            new InMemoryRepository<Session>(),
+            new InMemoryRepository<AgentTask>(),
+            fileStorage,
+            audit,
+            new TestCurrentUser(UserId));
+        await using var stream = new MemoryStream("knowledge"u8.ToArray());
+
+        var result = await coordinator.UploadAsync(
+            new UploadRecordCommand(
+                nameof(UploadRecordScope.KnowledgeBase),
+                new AiGatewayUploadStream("rule.md", "text/markdown", stream.Length, stream)),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeFalse();
+        uploadRepository.Items.Should().BeEmpty();
+        fileStorage.SaveCount.Should().Be(0);
+        audit.Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task UploadRecordCommand_ShouldRejectMissingAgentTaskBeforeWriting()
+    {
+        var uploadRepository = new InMemoryRepository<UploadRecord>();
+        var audit = new CapturingAuditLogWriter();
+        var fileStorage = new CapturingFileStorage();
+        var coordinator = new UploadRecordCoordinator(
+            uploadRepository,
+            new InMemoryRepository<Session>(),
+            new InMemoryRepository<AgentTask>(),
+            fileStorage,
+            audit,
+            new TestCurrentUser(UserId));
+        await using var stream = new MemoryStream("agent input"u8.ToArray());
+
+        var result = await coordinator.UploadAsync(
+            new UploadRecordCommand(
+                nameof(UploadRecordScope.AgentInput),
+                new AiGatewayUploadStream("input.txt", "text/plain", stream.Length, stream),
+                AgentTaskId: Guid.NewGuid()),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeFalse();
+        uploadRepository.Items.Should().BeEmpty();
+        fileStorage.SaveCount.Should().Be(0);
+        audit.Requests.Should().BeEmpty();
     }
 
     [Fact]
@@ -2578,7 +2632,7 @@ public sealed class ToolRegistryGovernanceTests
             approvalRepository,
             new InMemoryRepository<UploadRecord>(),
             workspaceService ?? new ThrowingWorkspaceService(),
-            new NoopFileStorageService(),
+            new CapturingFileStorage(),
             new NoopTableFileParser(),
             new NoopDocumentGenerator(),
             knowledgeRetrievalService ?? new NoopKnowledgeRetrievalService(),
@@ -3063,7 +3117,7 @@ public sealed class ToolRegistryGovernanceTests
     private sealed class InMemoryToolExecutionAuditStore(params ToolExecutionRecord[] initialItems)
         : IToolExecutionAuditStore
     {
-        public List<ToolExecutionRecord> Items { get; } = [..initialItems];
+        public List<ToolExecutionRecord> Items { get; } = [.. initialItems];
 
         public ToolExecutionRecord Add(ToolExecutionRecord record)
         {
@@ -3082,7 +3136,7 @@ public sealed class ToolRegistryGovernanceTests
     private sealed class InMemoryMessageTimelineProjectionStore(params MessageEvent[] initialItems)
         : IMessageTimelineProjectionStore
     {
-        public List<MessageEvent> Items { get; } = [..initialItems];
+        public List<MessageEvent> Items { get; } = [.. initialItems];
 
         public Task<List<MessageEvent>> ListBySessionAsync(
             SessionId sessionId,
@@ -3105,7 +3159,7 @@ public sealed class ToolRegistryGovernanceTests
     private sealed class InMemoryAgentWorkerHeartbeatStore(params AgentWorkerHeartbeat[] initialItems)
         : IAgentWorkerHeartbeatStore
     {
-        public List<AgentWorkerHeartbeat> Items { get; } = [..initialItems];
+        public List<AgentWorkerHeartbeat> Items { get; } = [.. initialItems];
 
         public Task<AgentWorkerHeartbeat?> FirstByWorkerIdAsync(
             string workerId,
@@ -3142,7 +3196,7 @@ public sealed class ToolRegistryGovernanceTests
     private sealed class InMemoryAgentTaskRunQueueStore(params AgentTaskRunQueueItem[] initialItems)
         : IAgentTaskRunQueueStore
     {
-        public List<AgentTaskRunQueueItem> Items { get; } = [..initialItems];
+        public List<AgentTaskRunQueueItem> Items { get; } = [.. initialItems];
 
         public Task<AgentTaskRunQueueItem?> FirstActiveByTaskAsync(
             AgentTaskId taskId,
@@ -3222,7 +3276,7 @@ public sealed class ToolRegistryGovernanceTests
     private sealed class InMemoryAgentTaskRunAttemptStore(params AgentTaskRunAttempt[] initialItems)
         : IAgentTaskRunAttemptStore
     {
-        public List<AgentTaskRunAttempt> Items { get; } = [..initialItems];
+        public List<AgentTaskRunAttempt> Items { get; } = [.. initialItems];
 
         public Task<AgentTaskRunAttempt?> FirstByIdAsync(
             AgentTaskRunAttemptId id,
@@ -3264,7 +3318,7 @@ public sealed class ToolRegistryGovernanceTests
     private sealed class InMemoryRepository<T>(params T[] initialItems) : IRepository<T>
         where T : class, IEntity, IAggregateRoot
     {
-        public List<T> Items { get; } = [..initialItems];
+        public List<T> Items { get; } = [.. initialItems];
 
         public T Add(T entity)
         {
@@ -3734,24 +3788,6 @@ public sealed class ToolRegistryGovernanceTests
                 DateTimeOffset.UtcNow);
             artifact.ApplySourceMetadata(sourceMetadata);
             return Task.FromResult(artifact);
-        }
-    }
-
-    private sealed class NoopFileStorageService : IFileStorageService
-    {
-        public Task<string> SaveAsync(Stream stream, string fileName, CancellationToken cancellationToken = default)
-        {
-            return Task.FromResult(fileName);
-        }
-
-        public Task<Stream?> GetAsync(string path, CancellationToken cancellationToken = default)
-        {
-            return Task.FromResult<Stream?>(null);
-        }
-
-        public Task DeleteAsync(string path, CancellationToken cancellationToken = default)
-        {
-            return Task.CompletedTask;
         }
     }
 

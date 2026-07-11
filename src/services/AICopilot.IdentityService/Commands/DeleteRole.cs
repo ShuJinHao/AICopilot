@@ -21,7 +21,8 @@ public sealed class DeleteRoleCommandHandler(
         DeleteRoleCommand command,
         CancellationToken cancellationToken)
     {
-        return await transactionalExecutionService.ExecuteAsync(async _ =>
+        AuditLogWriteRequest? rejectionAudit = null;
+        var result = await transactionalExecutionService.ExecuteResultAsync(async _ =>
         {
             var role = await roleManager.FindByIdAsync(command.RoleId);
             if (role is null)
@@ -32,32 +33,28 @@ public sealed class DeleteRoleCommandHandler(
             if (string.Equals(role.Name, IdentityRoleNames.Admin, StringComparison.Ordinal)
                 || string.Equals(role.Name, IdentityRoleNames.User, StringComparison.Ordinal))
             {
-                await auditLogWriter.WriteAsync(
-                    new AuditLogWriteRequest(
-                        AuditActionGroups.Identity,
-                        "Identity.DeleteRole",
-                        "Role",
-                        role.Id.ToString(),
-                        role.Name ?? string.Empty,
-                        AuditResults.Rejected,
-                        $"拒绝删除角色：{role.Name}，原因是系统基线角色不可删除。"),
-                    cancellationToken);
+                rejectionAudit = new AuditLogWriteRequest(
+                    AuditActionGroups.Identity,
+                    "Identity.DeleteRole",
+                    "Role",
+                    role.Id.ToString(),
+                    role.Name ?? string.Empty,
+                    AuditResults.Rejected,
+                    $"拒绝删除角色：{role.Name}，原因是系统基线角色不可删除。");
                 return Result.Invalid("系统基线角色不允许删除。");
             }
 
             var assignedUserCount = (await userManager.GetUsersInRoleAsync(role.Name!)).Count;
             if (assignedUserCount > 0)
             {
-                await auditLogWriter.WriteAsync(
-                    new AuditLogWriteRequest(
-                        AuditActionGroups.Identity,
-                        "Identity.DeleteRole",
-                        "Role",
-                        role.Id.ToString(),
-                        role.Name ?? string.Empty,
-                        AuditResults.Rejected,
-                        $"拒绝删除角色：{role.Name}，原因是仍有 {assignedUserCount} 个绑定用户。"),
-                    cancellationToken);
+                rejectionAudit = new AuditLogWriteRequest(
+                    AuditActionGroups.Identity,
+                    "Identity.DeleteRole",
+                    "Role",
+                    role.Id.ToString(),
+                    role.Name ?? string.Empty,
+                    AuditResults.Rejected,
+                    $"拒绝删除角色：{role.Name}，原因是仍有 {assignedUserCount} 个绑定用户。");
                 return Result.Invalid("角色仍有绑定用户，不能删除。");
             }
 
@@ -79,5 +76,15 @@ public sealed class DeleteRoleCommandHandler(
                 cancellationToken);
             return Result.Success();
         }, cancellationToken);
+
+        if (rejectionAudit is not null)
+        {
+            await transactionalExecutionService.CommitRejectedAuditAsync(
+                auditLogWriter,
+                rejectionAudit,
+                cancellationToken);
+        }
+
+        return result;
     }
 }

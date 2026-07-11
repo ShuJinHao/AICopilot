@@ -31,8 +31,7 @@ public sealed class RagIndexingLifecycleTests
             new FixedDocumentFormatPolicy([".txt", ".md", ".pdf"]),
             eventStager,
             new CapturingAuditLogWriter(),
-            new TestCurrentUser(role: "Admin"),
-            NullLogger<UploadDocumentCommandHandler>.Instance);
+            new TestCurrentUser(role: "Admin"));
 
         var result = await handler.Handle(
             new UploadDocumentCommand(
@@ -59,8 +58,7 @@ public sealed class RagIndexingLifecycleTests
             new FixedDocumentFormatPolicy([".txt"]),
             eventStager,
             new CapturingAuditLogWriter(),
-            new TestCurrentUser(role: "Admin"),
-            NullLogger<UploadDocumentCommandHandler>.Instance);
+            new TestCurrentUser(role: "Admin"));
 
         var result = await handler.Handle(
             new UploadDocumentCommand(
@@ -99,8 +97,7 @@ public sealed class RagIndexingLifecycleTests
             new FixedDocumentFormatPolicy([".txt"]),
             eventStager,
             new CapturingAuditLogWriter(),
-            new TestCurrentUser(role: "Admin"),
-            NullLogger<UploadDocumentCommandHandler>.Instance);
+            new TestCurrentUser(role: "Admin"));
 
         var result = await handler.Handle(
             new UploadDocumentCommand(
@@ -132,8 +129,7 @@ public sealed class RagIndexingLifecycleTests
             new FixedDocumentFormatPolicy([".txt"]),
             new ThrowingEventStager(new InvalidOperationException("stage failed")),
             new CapturingAuditLogWriter(),
-            new TestCurrentUser(role: "Admin"),
-            NullLogger<UploadDocumentCommandHandler>.Instance);
+            new TestCurrentUser(role: "Admin"));
 
         Func<Task> act = async () => await handler.Handle(
             new UploadDocumentCommand(
@@ -163,8 +159,7 @@ public sealed class RagIndexingLifecycleTests
             new FixedDocumentFormatPolicy([".txt"]),
             eventStager,
             new CapturingAuditLogWriter(),
-            new TestCurrentUser(role: "Admin"),
-            NullLogger<UploadDocumentCommandHandler>.Instance);
+            new TestCurrentUser(role: "Admin"));
 
         Func<Task> act = async () => await handler.Handle(
             new UploadDocumentCommand(
@@ -201,8 +196,7 @@ public sealed class RagIndexingLifecycleTests
             new FixedDocumentFormatPolicy([".txt"]),
             eventStager,
             new CapturingAuditLogWriter(),
-            new TestCurrentUser(role: "Admin"),
-            NullLogger<UploadDocumentCommandHandler>.Instance);
+            new TestCurrentUser(role: "Admin"));
 
         var result = await handler.Handle(
             new UploadDocumentCommand(
@@ -464,8 +458,11 @@ public sealed class RagIndexingLifecycleTests
     public async Task DocumentFileDeletionRequestedConsumer_ShouldDeleteStoredFile()
     {
         var fileStorage = new CapturingFileStorage();
+        var journal = new InMemoryPersistenceFileReconciliationJournal();
         var consumer = new DocumentFileDeletionRequestedConsumer(
             fileStorage,
+            journal,
+            new AlwaysAcquiredPersistenceFileLeaseManager(),
             NullLogger<DocumentFileDeletionRequestedConsumer>.Instance);
 
         await consumer.DeleteFileAsync(
@@ -488,6 +485,8 @@ public sealed class RagIndexingLifecycleTests
         var fileStorage = new CapturingFileStorage(new IOException("delete failed"));
         var consumer = new DocumentFileDeletionRequestedConsumer(
             fileStorage,
+            new InMemoryPersistenceFileReconciliationJournal(),
+            new AlwaysAcquiredPersistenceFileLeaseManager(),
             NullLogger<DocumentFileDeletionRequestedConsumer>.Instance);
 
         Func<Task> act = async () => await consumer.DeleteFileAsync(
@@ -502,6 +501,68 @@ public sealed class RagIndexingLifecycleTests
 
         await act.Should().ThrowAsync<IOException>().WithMessage("delete failed");
         fileStorage.DeleteCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task DocumentFileDeletionRequestedConsumer_ShouldRetirePendingUploadJournalUnderCommitLease()
+    {
+        var fileStorage = new CapturingFileStorage();
+        var journal = new InMemoryPersistenceFileReconciliationJournal();
+        var commitId = Guid.NewGuid();
+        const string storagePath = "documents/pending-runbook.txt";
+        await journal.StageAsync(new PersistenceFileReconciliationRecord(
+            commitId,
+            storagePath,
+            DateTime.UtcNow.AddMinutes(-1)));
+        var consumer = new DocumentFileDeletionRequestedConsumer(
+            fileStorage,
+            journal,
+            new AlwaysAcquiredPersistenceFileLeaseManager(),
+            NullLogger<DocumentFileDeletionRequestedConsumer>.Instance);
+
+        await consumer.DeleteFileAsync(
+            new DocumentFileDeletionRequestedEvent
+            {
+                DocumentId = 124,
+                KnowledgeBaseId = Guid.NewGuid(),
+                FilePath = storagePath,
+                FileName = "pending-runbook.txt"
+            });
+
+        fileStorage.DeletedPaths.Should().ContainSingle().Which.Should().Be(storagePath);
+        (await journal.ExistsAsync(commitId)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task DocumentFileDeletionRequestedConsumer_ShouldRetryWhenUploadCommitLeaseIsActive()
+    {
+        var fileStorage = new CapturingFileStorage();
+        var journal = new InMemoryPersistenceFileReconciliationJournal();
+        var commitId = Guid.NewGuid();
+        const string storagePath = "documents/active-runbook.txt";
+        await journal.StageAsync(new PersistenceFileReconciliationRecord(
+            commitId,
+            storagePath,
+            DateTime.UtcNow.AddMinutes(-1)));
+        var consumer = new DocumentFileDeletionRequestedConsumer(
+            fileStorage,
+            journal,
+            new NeverAcquiredPersistenceFileLeaseManager(),
+            NullLogger<DocumentFileDeletionRequestedConsumer>.Instance);
+
+        Func<Task> action = () => consumer.DeleteFileAsync(
+            new DocumentFileDeletionRequestedEvent
+            {
+                DocumentId = 125,
+                KnowledgeBaseId = Guid.NewGuid(),
+                FilePath = storagePath,
+                FileName = "active-runbook.txt"
+            });
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*active persistence commit*");
+        fileStorage.DeleteCount.Should().Be(0);
+        (await journal.ExistsAsync(commitId)).Should().BeTrue();
     }
 
     [Fact]
@@ -708,55 +769,6 @@ public sealed class RagIndexingLifecycleTests
         }
     }
 
-    private sealed class FixedDocumentFormatPolicy(IReadOnlyCollection<string> supportedExtensions) : IDocumentFormatPolicy
-    {
-        public IReadOnlyCollection<string> SupportedExtensions { get; } = supportedExtensions;
-
-        public bool IsSupported(string extension)
-        {
-            return SupportedExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase);
-        }
-    }
-
-    private sealed class CapturingFileStorage : IFileStorageService
-    {
-        private readonly Exception? deleteException;
-
-        public CapturingFileStorage(Exception? deleteException = null)
-        {
-            this.deleteException = deleteException;
-        }
-
-        public int SaveCount { get; private set; }
-
-        public int DeleteCount { get; private set; }
-
-        public List<string> DeletedPaths { get; } = [];
-
-        public Task<string> SaveAsync(Stream stream, string fileName, CancellationToken cancellationToken = default)
-        {
-            SaveCount++;
-            return Task.FromResult(fileName);
-        }
-
-        public Task<Stream?> GetAsync(string path, CancellationToken cancellationToken = default)
-        {
-            return Task.FromResult<Stream?>(null);
-        }
-
-        public Task DeleteAsync(string path, CancellationToken cancellationToken = default)
-        {
-            DeleteCount++;
-            DeletedPaths.Add(path);
-            if (deleteException is not null)
-            {
-                throw deleteException;
-            }
-
-            return Task.CompletedTask;
-        }
-    }
-
     private sealed class CapturingEventStager(Action<object>? onStage = null) : IIntegrationEventStager
     {
         public int StagedCount => StagedMessages.Count;
@@ -811,7 +823,7 @@ public sealed class RagIndexingLifecycleTests
             Func<CancellationToken, Task<int>> saveChanges,
             params KnowledgeBase[] knowledgeBases)
         {
-            this.knowledgeBases = [..knowledgeBases];
+            this.knowledgeBases = [.. knowledgeBases];
             this.saveChanges = saveChanges;
         }
 

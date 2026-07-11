@@ -2,8 +2,6 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using AICopilot.EntityFrameworkCore;
-using AICopilot.EntityFrameworkCore.AuditLogs;
-using AICopilot.EntityFrameworkCore.Transactions;
 using AICopilot.Services.Contracts;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -677,46 +675,6 @@ public sealed class IdentityAccessManagementTests
             item.ActionCode == "Identity.DisableUser" &&
             item.TargetName == adminProfile.UserName &&
             item.Result == "Rejected");
-    }
-
-    [Fact]
-    public async Task IdentityTransaction_ShouldRollbackAuditRows_WhenOperationFails()
-    {
-        var actionCode = $"Identity.RollbackProbe.{Guid.NewGuid():N}";
-        var targetName = $"rollback-probe-{Guid.NewGuid():N}";
-
-        await using (var dbContext = await CreateIdentityStoreDbContextAsync())
-        {
-            var transactionalExecutionService = new EfTransactionalExecutionService(dbContext);
-            var auditLogWriter = new IdentityAuditLogWriter(dbContext);
-
-            Func<Task> action = () => transactionalExecutionService.ExecuteAsync<int>(async cancellationToken =>
-            {
-                await auditLogWriter.WriteAsync(
-                    new AuditLogWriteRequest(
-                        AuditActionGroups.Identity,
-                        actionCode,
-                        "RollbackProbe",
-                        null,
-                        targetName,
-                        AuditResults.Succeeded,
-                        "rollback probe"),
-                    cancellationToken);
-
-                throw new InvalidOperationException("rollback probe failure");
-            });
-
-            await action.Should().ThrowAsync<InvalidOperationException>()
-                .WithMessage("rollback probe failure");
-        }
-
-        await using var verificationDbContext = await CreateIdentityStoreDbContextAsync();
-        var hasResidualAudit = await verificationDbContext.AuditLogs.AnyAsync(log =>
-            log.ActionCode == actionCode &&
-            log.TargetName == targetName);
-
-        hasResidualAudit.Should().BeFalse(
-            "identity audit rows must be enlisted in the same transaction as identity management operations");
     }
 
     private async Task AssertForbiddenAsync(string uri)

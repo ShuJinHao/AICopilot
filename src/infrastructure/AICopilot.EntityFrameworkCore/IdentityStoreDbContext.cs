@@ -13,9 +13,47 @@ namespace AICopilot.EntityFrameworkCore;
 public sealed class IdentityStoreDbContext(DbContextOptions<IdentityStoreDbContext> options)
     : IdentityDbContext<ApplicationUser, IdentityRole<Guid>, Guid>(options)
 {
+    private int persistedRowsInCurrentAttempt;
+
     public DbSet<AuditLogEntry> AuditLogs => Set<AuditLogEntry>();
 
     public DbSet<ExternalIdentityBinding> ExternalIdentityBindings => Set<ExternalIdentityBinding>();
+
+    internal bool HasPersistedChangesInCurrentAttempt => persistedRowsInCurrentAttempt > 0;
+
+    internal void BeginPersistenceAttempt(bool clearTrackedState)
+    {
+        if (clearTrackedState)
+        {
+            ChangeTracker.Clear();
+        }
+
+        persistedRowsInCurrentAttempt = 0;
+    }
+
+    public override int SaveChanges()
+        => SaveChanges(acceptAllChangesOnSuccess: true);
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        var affectedRows = base.SaveChanges(acceptAllChangesOnSuccess);
+        persistedRowsInCurrentAttempt += affectedRows;
+        return affectedRows;
+    }
+
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        => SaveChangesAsync(acceptAllChangesOnSuccess: true, cancellationToken);
+
+    public override async Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess,
+        CancellationToken cancellationToken = default)
+    {
+        var affectedRows = await base.SaveChangesAsync(
+            acceptAllChangesOnSuccess,
+            cancellationToken);
+        persistedRowsInCurrentAttempt += affectedRows;
+        return affectedRows;
+    }
 
     protected override void OnModelCreating(ModelBuilder builder)
     {

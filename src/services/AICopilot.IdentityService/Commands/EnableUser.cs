@@ -21,7 +21,7 @@ public sealed class EnableUserCommandHandler(
         EnableUserCommand command,
         CancellationToken cancellationToken)
     {
-        return await transactionalExecutionService.ExecuteAsync(async _ =>
+        return await transactionalExecutionService.ExecuteResultAsync(async _ =>
         {
             var user = await userManager.FindByIdAsync(command.UserId);
             if (user is null)

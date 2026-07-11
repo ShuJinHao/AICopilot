@@ -6,7 +6,6 @@ using AICopilot.Services.Contracts.Events;
 using AICopilot.SharedKernel.Messaging;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
-using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.Security.Cryptography;
@@ -39,12 +38,11 @@ public record UploadDocumentCommand(
 public class UploadDocumentCommandHandler(
     IRepository<KnowledgeBase> kbRepo,
     IDocumentIdAllocator documentIdAllocator,
-    IFileStorageService fileStorage,
+    IPersistenceFileStorageService persistenceFileStorage,
     IDocumentFormatPolicy documentFormatPolicy,
     IIntegrationEventStager eventStager,
     IAuditLogWriter auditLogWriter,
-    ICurrentUser currentUser,
-    ILogger<UploadDocumentCommandHandler> logger)
+    ICurrentUser currentUser)
     : ICommandHandler<UploadDocumentCommand, Result<UploadDocumentDto>>
 {
     public async Task<Result<UploadDocumentDto>> Handle(
@@ -133,57 +131,53 @@ public class UploadDocumentCommandHandler(
 
         var documentId = await documentIdAllocator.AllocateAsync(cancellationToken);
 
-        // 4. 保存物理文件 (只有当文件不存在时才执行 IO 操作)
-        var savedPath = await fileStorage.SaveAsync(normalizedFile.Stream, normalizedFile.FileName, cancellationToken);
-
-        // 5. 领域模型行为：添加文档
-        // 这一步是纯内存操作，修改了聚合根的状态
-        var document = kb.AddDocument(
-            documentId,
+        // 先持久化对账意图，再写物理文件；后续数据库提交复用同一 commit id。
+        var fileStage = await persistenceFileStorage.StageAsync(
+            normalizedFile.Stream,
             normalizedFile.FileName,
-            savedPath,
-            extension,
-            fileHash,
-            classification,
-            sourceType,
-            request.IsSanitized,
-            request.ReviewedBy,
-            request.ReviewedAt,
-            request.EffectiveFrom,
-            request.EffectiveTo,
-            request.AllowedForFinalPrompt,
-            request.BlockedReason);
-
-        try
-        {
-            // 6. 暂存集成事件，和文档聚合在同一个 RagDbContext SaveChanges 中提交。
-            eventStager.Stage(() => new DocumentUploadedEvent
+            cancellationToken);
+        var document = await persistenceFileStorage.ExecuteAsync(
+            fileStage,
+            async commitCancellationToken =>
             {
-                DocumentId = document.Id,
-                KnowledgeBaseId = kb.Id,
-                FilePath = savedPath,
-                FileName = normalizedFile.FileName
-            });
+                // 5. 领域模型行为：添加文档
+                var createdDocument = kb.AddDocument(
+                    documentId,
+                    normalizedFile.FileName,
+                    fileStage.StoragePath,
+                    extension,
+                    fileHash,
+                    classification,
+                    sourceType,
+                    request.IsSanitized,
+                    request.ReviewedBy,
+                    request.ReviewedAt,
+                    request.EffectiveFrom,
+                    request.EffectiveTo,
+                    request.AllowedForFinalPrompt,
+                    request.BlockedReason);
 
-            await RecordUploadAuditAsync(
-                AuditResults.Succeeded,
-                "RAG document upload accepted by security policy.",
-                request,
-                document,
-                cancellationToken);
+                // 6. 暂存集成事件，和文档聚合在同一个 RagDbContext SaveChanges 中提交。
+                eventStager.Stage(() => new DocumentUploadedEvent
+                {
+                    DocumentId = createdDocument.Id,
+                    KnowledgeBaseId = kb.Id,
+                    FilePath = fileStage.StoragePath,
+                    FileName = normalizedFile.FileName
+                });
 
-            // 7. 持久化到数据库，同时提交文档和 outbox 行。
-            await kbRepo.SaveChangesAsync(cancellationToken);
-        }
-        catch (PersistenceCommitOutcomeUnknownException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            await TryDeleteSavedFileAsync(savedPath, ex);
-            throw;
-        }
+                await RecordUploadAuditAsync(
+                    AuditResults.Succeeded,
+                    "RAG document upload accepted by security policy.",
+                    request,
+                    createdDocument,
+                    commitCancellationToken);
+
+                // 7. 持久化到数据库，同时提交文档和 outbox 行。
+                await kbRepo.SaveChangesAsync(commitCancellationToken);
+                return createdDocument;
+            },
+            cancellationToken);
 
         return Result.Success(new UploadDocumentDto(document.Id, document.Status.ToString()));
     }
@@ -195,39 +189,24 @@ public class UploadDocumentCommandHandler(
         Document? document,
         CancellationToken cancellationToken)
     {
+        var safeFileName = UploadFileNamePolicy.NormalizeForAudit(request.File.FileName);
         return auditLogWriter.WriteAsync(
             new AuditLogWriteRequest(
                 AuditActionGroups.Config,
                 "Rag.UploadDocument",
                 "KnowledgeDocument",
                 document?.Id.ToString(),
-                document?.Name ?? Path.GetFileName(request.File.FileName),
+                document?.Name ?? safeFileName,
                 result,
                 summary,
                 Metadata: new Dictionary<string, string>
                 {
                     ["knowledgeBaseId"] = request.KnowledgeBaseId.ToString(),
-                    ["fileName"] = Path.GetFileName(request.File.FileName),
+                    ["fileName"] = safeFileName,
                     ["contentType"] = request.File.ContentType ?? string.Empty,
                     ["fileSize"] = (request.File.FileSize ?? 0).ToString()
                 }),
             cancellationToken);
-    }
-
-    private async Task TryDeleteSavedFileAsync(string savedPath, Exception originalException)
-    {
-        try
-        {
-            await fileStorage.DeleteAsync(savedPath, CancellationToken.None);
-        }
-        catch (Exception cleanupException)
-        {
-            logger.LogWarning(
-                "Failed to clean up uploaded RAG file {FilePath} after document upload transaction failed. CleanupErrorType={CleanupErrorType}; OriginalErrorType={OriginalErrorType}; OriginalMessage=hidden_by_security_policy",
-                savedPath,
-                cleanupException.GetType().Name,
-                originalException.GetType().Name);
-        }
     }
 
     private static bool TryParseEnum<TEnum>(string? value, TEnum defaultValue, out TEnum parsed)

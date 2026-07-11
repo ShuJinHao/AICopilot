@@ -19,8 +19,7 @@ public class AiGatewayWorkspaceArtifactController(ISender sender) : ApiControlle
         [FromForm] string scope,
         IFormFile? file,
         [FromForm] Guid? sessionId = null,
-        [FromForm] Guid? agentTaskId = null,
-        [FromForm] Guid? knowledgeBaseId = null)
+        [FromForm] Guid? agentTaskId = null)
     {
         if (file is null || file.Length == 0)
         {
@@ -39,10 +38,9 @@ public class AiGatewayWorkspaceArtifactController(ISender sender) : ApiControlle
                 file.FileName,
                 string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType,
                 file.Length,
-                stream),
+            stream),
             sessionId,
-            agentTaskId,
-            knowledgeBaseId);
+            agentTaskId);
         return ReturnResult(await Sender.Send(command));
     }
 

@@ -71,17 +71,39 @@ public sealed class IdentityAccessService(
                 $"Unknown permissions: {string.Join(", ", invalidPermissions)}");
         }
 
+        var desiredPermissions = normalizedPermissions.ToHashSet(StringComparer.Ordinal);
+        var retainedPermissions = new HashSet<string>(StringComparer.Ordinal);
         var existingClaims = await roleManager.GetClaimsAsync(role);
         foreach (var permissionClaim in existingClaims.Where(IsPermissionClaim))
         {
-            await roleManager.RemoveClaimAsync(role, permissionClaim);
+            if (desiredPermissions.Contains(permissionClaim.Value) &&
+                retainedPermissions.Add(permissionClaim.Value))
+            {
+                continue;
+            }
+
+            EnsureSucceeded(
+                await roleManager.RemoveClaimAsync(role, permissionClaim),
+                $"remove permission '{permissionClaim.Value}' from role '{roleName}'");
         }
 
-        foreach (var permissionCode in normalizedPermissions)
+        foreach (var permissionCode in normalizedPermissions.Where(code => !retainedPermissions.Contains(code)))
         {
-            await roleManager.AddClaimAsync(
-                role,
-                new Claim(IdentityPermissionConstants.PermissionClaimType, permissionCode));
+            EnsureSucceeded(
+                await roleManager.AddClaimAsync(
+                    role,
+                    new Claim(IdentityPermissionConstants.PermissionClaimType, permissionCode)),
+                $"add permission '{permissionCode}' to role '{roleName}'");
+        }
+    }
+
+    private static void EnsureSucceeded(IdentityResult result, string operation)
+    {
+        if (!result.Succeeded)
+        {
+            throw new InvalidOperationException(
+                $"Unable to {operation}: " +
+                string.Join(", ", result.Errors.Select(error => error.Description)));
         }
     }
 

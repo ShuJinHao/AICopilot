@@ -23,7 +23,7 @@ public sealed class UpdateUserRoleCommandHandler(
         UpdateUserRoleCommand command,
         CancellationToken cancellationToken)
     {
-        return await transactionalExecutionService.ExecuteAsync(async _ =>
+        return await transactionalExecutionService.ExecuteResultAsync(async _ =>
         {
             var user = await userManager.FindByIdAsync(command.UserId);
             if (user is null)
@@ -32,7 +32,8 @@ public sealed class UpdateUserRoleCommandHandler(
             }
 
             var normalizedRoleName = command.RoleName.Trim();
-            if (!await roleManager.RoleExistsAsync(normalizedRoleName))
+            var targetRole = await roleManager.FindByNameAsync(normalizedRoleName);
+            if (targetRole?.Name is not { } targetRoleName)
             {
                 return Result.NotFound("指定角色不存在");
             }
@@ -41,28 +42,46 @@ public sealed class UpdateUserRoleCommandHandler(
             var previousRoleName = existingRoles
                 .OrderBy(role => role, StringComparer.Ordinal)
                 .FirstOrDefault();
+            var alreadyInTargetRole = existingRoles.Contains(
+                targetRoleName,
+                StringComparer.OrdinalIgnoreCase);
+            var rolesToRemove = existingRoles
+                .Where(role => !string.Equals(
+                    role,
+                    targetRoleName,
+                    StringComparison.OrdinalIgnoreCase))
+                .ToArray();
 
-            if (existingRoles.Count > 0)
+            if (rolesToRemove.Length > 0)
             {
-                await userManager.RemoveFromRolesAsync(user, existingRoles);
+                var removeResult = await userManager.RemoveFromRolesAsync(user, rolesToRemove);
+                if (!removeResult.Succeeded)
+                {
+                    return Result.Failure(removeResult.Errors);
+                }
             }
 
-            var addToRoleResult = await userManager.AddToRoleAsync(user, normalizedRoleName);
-            if (!addToRoleResult.Succeeded)
+            if (!alreadyInTargetRole)
             {
-                return Result.Failure(addToRoleResult.Errors);
+                var addToRoleResult = await userManager.AddToRoleAsync(user, targetRoleName);
+                if (!addToRoleResult.Succeeded)
+                {
+                    return Result.Failure(addToRoleResult.Errors);
+                }
             }
 
-            IdentityGovernanceHelper.RefreshSecurityStamp(user);
-            var updateSecurityStampResult = await userManager.UpdateAsync(user);
-            if (!updateSecurityStampResult.Succeeded)
+            var roleChanged = rolesToRemove.Length > 0 || !alreadyInTargetRole;
+            if (roleChanged)
             {
-                return Result.Failure(updateSecurityStampResult.Errors);
+                IdentityGovernanceHelper.RefreshSecurityStamp(user);
+                var updateSecurityStampResult = await userManager.UpdateAsync(user);
+                if (!updateSecurityStampResult.Succeeded)
+                {
+                    return Result.Failure(updateSecurityStampResult.Errors);
+                }
             }
 
-            var changedFields = previousRoleName == normalizedRoleName
-                ? Array.Empty<string>()
-                : ["roleName"];
+            var changedFields = roleChanged ? ["roleName"] : Array.Empty<string>();
 
             await auditLogWriter.WriteAsync(
                 new AuditLogWriteRequest(
@@ -73,14 +92,14 @@ public sealed class UpdateUserRoleCommandHandler(
                     user.UserName ?? string.Empty,
                     AuditResults.Succeeded,
                     previousRoleName == null
-                        ? $"调整用户角色：{user.UserName}，当前角色为 {normalizedRoleName}"
-                        : $"调整用户角色：{user.UserName}，由 {previousRoleName} 变更为 {normalizedRoleName}",
+                        ? $"调整用户角色：{user.UserName}，当前角色为 {targetRoleName}"
+                        : $"调整用户角色：{user.UserName}，由 {previousRoleName} 变更为 {targetRoleName}",
                     changedFields),
                 cancellationToken);
             return Result.Success(new UserSummaryDto(
                 user.Id.ToString(),
                 user.UserName ?? string.Empty,
-                normalizedRoleName,
+                targetRoleName,
                 !IdentityGovernanceHelper.IsUserDisabled(user),
                 IdentityGovernanceHelper.GetUserStatus(user)));
         }, cancellationToken);

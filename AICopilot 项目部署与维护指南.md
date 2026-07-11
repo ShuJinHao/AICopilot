@@ -107,6 +107,19 @@ AICOPILOT_JWT_SECRET_KEY
 CLOUD_AI_SERVICE_ACCOUNT_TOKEN
 ```
 
+持久化文件对账（默认值已在 compose 和 `.env.example` 对齐）：
+
+```text
+AICOPILOT_PERSISTENCE_MAINTENANCE_INTERVAL_SECONDS=300
+AICOPILOT_PERSISTENCE_RECONCILIATION_DELAY_MINUTES=10
+AICOPILOT_PERSISTENCE_MARKER_RETENTION_DAYS=30
+AICOPILOT_PERSISTENCE_MAINTENANCE_BATCH_SIZE=100
+```
+
+HttpApi 与 DataWorker 必须共享 `/var/lib/aicopilot` 持久卷；compose 中 `FileStorage__RootPath` 与 `ArtifactWorkspace__RootPath` 固定在该卷下，不允许用 `.env` 覆盖到容器层或其他未共享目录。上传流程先写 `.persistence/file-reconciliation`，再写物理文件和数据库；请求侧持有以 commit id 派生的 PostgreSQL advisory lease，DataWorker 只有取得同一 lease 且记录超过安全延迟后才能对账，活跃上传必须跳过。有提交标记时保留文件，无标记时删除未提交文件；日志无法读取时必须停止标记过期清理。不得把 DataWorker 从共享卷移除，不得用 cron 或手工 `rm` 另起一套清理链。
+RagWorker 必须挂载同一卷；文档删除事件会按 storage path 查 pending journal、争用同一 commit lease 并在锁内退休 journal 后删文件，journal 不可读或 lease 活跃时必须由消息重试。该共享卷是受信任后端内部状态，禁止挂给不受信任写入者；现有 symlink/reparse 检查不等同于抵御同 UID 恶意竞态的文件系统沙箱。
+当前 durable local file/journal backend 只支持 Linux 与 macOS；标准生产路径是本节 Linux 容器。Windows 进程会明确拒绝构造该 backend，不能把 `MoveFileEx` 或未刷父目录的删除包装成耐久提交；如需 Windows 原生运行，必须先实现独立受治理 storage backend 并补齐崩溃恢复测试。
+
 Cloud 只读和 OIDC 默认：
 
 ```text

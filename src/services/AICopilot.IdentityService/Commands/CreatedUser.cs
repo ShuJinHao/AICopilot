@@ -28,12 +28,12 @@ public sealed class CreateUserCommandHandler(
         CreateUserCommand command,
         CancellationToken cancellationToken)
     {
-        return await transactionalExecutionService.ExecuteAsync(async _ =>
+        return await transactionalExecutionService.ExecuteResultAsync(async _ =>
         {
             var normalizedUserName = command.UserName.Trim();
             var normalizedRoleName = command.RoleName.Trim();
-
-            if (!await roleManager.RoleExistsAsync(normalizedRoleName))
+            var role = await roleManager.FindByNameAsync(normalizedRoleName);
+            if (role?.Name is not { } canonicalRoleName)
             {
                 return Result.NotFound("指定角色不存在");
             }
@@ -54,7 +54,11 @@ public sealed class CreateUserCommandHandler(
                 return Result.Failure(result.Errors);
             }
 
-            await SetSingleRoleAsync(user, normalizedRoleName);
+            var roleResult = await userManager.AddToRoleAsync(user, canonicalRoleName);
+            if (!roleResult.Succeeded)
+            {
+                return Result.Failure(roleResult.Errors);
+            }
 
             await auditLogWriter.WriteAsync(
                 new AuditLogWriteRequest(
@@ -64,26 +68,16 @@ public sealed class CreateUserCommandHandler(
                     user.Id.ToString(),
                     user.UserName!,
                     AuditResults.Succeeded,
-                    $"创建用户：{user.UserName}，初始角色为 {normalizedRoleName}",
+                    $"创建用户：{user.UserName}，初始角色为 {canonicalRoleName}",
                     ["userName", "roleName"]),
                 cancellationToken);
             return Result.Success(new CreatedUserDto(
                 user.Id.ToString(),
                 user.UserName!,
-                normalizedRoleName,
+                canonicalRoleName,
                 true,
                 UserGovernanceStatuses.Enabled));
         }, cancellationToken);
     }
 
-    private async Task SetSingleRoleAsync(ApplicationUser user, string roleName)
-    {
-        var existingRoles = await userManager.GetRolesAsync(user);
-        if (existingRoles.Count > 0)
-        {
-            await userManager.RemoveFromRolesAsync(user, existingRoles);
-        }
-
-        await userManager.AddToRoleAsync(user, roleName);
-    }
 }

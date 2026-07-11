@@ -24,5 +24,8 @@ public sealed class PersistenceCommitMarkerConfiguration : IEntityTypeConfigurat
             .IsRequired()
             .HasColumnType("timestamp with time zone")
             .HasColumnName("created_at_utc");
+
+        builder.HasIndex(marker => marker.CreatedAtUtc)
+            .HasDatabaseName("ix_commit_markers_created_at_utc");
     }
 }

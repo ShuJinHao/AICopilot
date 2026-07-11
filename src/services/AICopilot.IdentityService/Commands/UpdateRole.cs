@@ -25,7 +25,7 @@ public sealed class UpdateRoleCommandHandler(
         UpdateRoleCommand command,
         CancellationToken cancellationToken)
     {
-        return await transactionalExecutionService.ExecuteAsync(async _ =>
+        return await transactionalExecutionService.ExecuteResultAsync(async _ =>
         {
             var role = await roleManager.FindByIdAsync(command.RoleId);
             if (role is null)

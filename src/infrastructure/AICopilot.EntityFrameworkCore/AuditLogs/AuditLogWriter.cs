@@ -57,13 +57,16 @@ public sealed class AuditLogWriter(
     {
         public DbContext TransactionOwner => dbContext;
 
-        public Task<int> PersistAttemptAsync(
+        public async Task<PersistenceAttemptResult<int>> PersistAttemptAsync(
             PersistenceAttemptContext context,
             CancellationToken cancellationToken)
         {
-            return dbContext.SaveChangesAsync(
+            var affectedRows = await dbContext.SaveChangesAsync(
                 acceptAllChangesOnSuccess: false,
                 cancellationToken);
+            return new PersistenceAttemptResult<int>(
+                affectedRows,
+                HasPersistentChanges: affectedRows > 0);
         }
 
         public void CommitConfirmed(int result)

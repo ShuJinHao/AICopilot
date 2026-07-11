@@ -37,10 +37,13 @@ public sealed class UploadValidationTests
         result.ErrorMessage.Should().Contain("does not match");
     }
 
-    [Fact]
-    public async Task UploadPolicy_ShouldSanitizeFileNameAndAllowCsv()
+    [Theory]
+    [InlineData("../line.csv")]
+    [InlineData(@"C:\Users\alice\line.csv")]
+    [InlineData(@"C:\fakepath\line.csv")]
+    public async Task UploadPolicy_ShouldSanitizeClientPathAndAllowCsv(string fileName)
     {
-        var file = BuildFile("../line.csv", "text/csv", Encoding.UTF8.GetBytes("station,count\nA,1\n"));
+        var file = BuildFile(fileName, "text/csv", Encoding.UTF8.GetBytes("station,count\nA,1\n"));
 
         var result = await AiGatewayUploadSecurityPolicy.ValidateAndNormalizeAsync(file, CancellationToken.None);
 
@@ -48,6 +51,18 @@ public sealed class UploadValidationTests
         result.File.Should().NotBeNull();
         result.File!.FileName.Should().Be("line.csv");
         result.File.ContentType.Should().Be("text/csv");
+    }
+
+    [Fact]
+    public void UploadFileNamePolicy_ShouldRejectControlOnlyNamesAndBoundUtf8Length()
+    {
+        UploadFileNamePolicy.Normalize("folder/bad\u0001.csv").Should().BeEmpty();
+
+        var normalized = UploadFileNamePolicy.Normalize($"folder/{new string('数', 100)}.csv");
+
+        Encoding.UTF8.GetByteCount(normalized).Should().BeLessThanOrEqualTo(
+            UploadFileNamePolicy.MaximumUtf8Bytes);
+        normalized.Should().EndWith(".csv");
     }
 
     [Theory]
@@ -116,13 +131,4 @@ public sealed class UploadValidationTests
             CancellationToken.None);
     }
 
-    private sealed class FixedDocumentFormatPolicy(IReadOnlyCollection<string> supportedExtensions) : IDocumentFormatPolicy
-    {
-        public IReadOnlyCollection<string> SupportedExtensions { get; } = supportedExtensions;
-
-        public bool IsSupported(string extension)
-        {
-            return SupportedExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase);
-        }
-    }
 }

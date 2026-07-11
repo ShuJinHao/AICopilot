@@ -1,5 +1,6 @@
 using AICopilot.EntityFrameworkCore.AuditLogs;
 using AICopilot.EntityFrameworkCore.Outbox;
+using AICopilot.Services.Contracts;
 using Microsoft.EntityFrameworkCore;
 
 namespace AICopilot.EntityFrameworkCore.Transactions;
@@ -7,12 +8,14 @@ namespace AICopilot.EntityFrameworkCore.Transactions;
 public sealed class RepositoryPersistenceCommitter(
     AuditDbContext auditDbContext,
     PersistenceCommitEngine commitEngine,
-    IEnumerable<IPersistenceOutboxSource> outboxSources)
+    IEnumerable<IPersistenceOutboxSource> outboxSources,
+    IPersistenceCommitScope commitScope)
 {
-    public Task<int> SaveChangesAsync(
+    public async Task<int> SaveChangesAsync(
         DbContext businessDbContext,
         CancellationToken cancellationToken = default)
     {
+        var reservedCommitId = commitScope.CurrentCommitId;
         var stagedAuditEntries = auditDbContext.ChangeTracker
             .Entries<AuditLogEntry>()
             .Where(entry => entry.State == EntityState.Added)
@@ -23,36 +26,63 @@ public sealed class RepositoryPersistenceCommitter(
             && stagedAuditEntries.Length == 0
             && outboxSource?.HasPending(businessDbContext) != true)
         {
-            return Task.FromResult(0);
+            if (reservedCommitId.HasValue)
+            {
+                commitScope.ReleaseCommitId(reservedCommitId.Value);
+                throw new InvalidOperationException(
+                    "A staged persistence file cannot be confirmed without a database change.");
+            }
+
+            return 0;
         }
 
         var participant = new RepositoryCommitParticipant(
             businessDbContext,
             auditDbContext,
             stagedAuditEntries,
-            outboxSource);
+            outboxSource,
+            requiresBusinessChange: reservedCommitId.HasValue);
 
-        return commitEngine.CommitAsync(
-            $"Repository:{businessDbContext.GetType().Name}",
-            participant,
-            cancellationToken);
+        try
+        {
+            return await commitEngine.CommitAsync(
+                $"Repository:{businessDbContext.GetType().Name}",
+                participant,
+                cancellationToken,
+                reservedCommitId);
+        }
+        finally
+        {
+            if (reservedCommitId.HasValue)
+            {
+                commitScope.ReleaseCommitId(reservedCommitId.Value);
+            }
+        }
     }
 
     private sealed class RepositoryCommitParticipant(
         DbContext businessDbContext,
         AuditDbContext stagedAuditDbContext,
         IReadOnlyCollection<AuditLogEntry> stagedAuditEntries,
-        IPersistenceOutboxSource? outboxSource) : IPersistenceCommitParticipant<int>
+        IPersistenceOutboxSource? outboxSource,
+        bool requiresBusinessChange) : IPersistenceCommitParticipant<int>
     {
         public DbContext TransactionOwner => businessDbContext;
 
-        public async Task<int> PersistAttemptAsync(
+        public async Task<PersistenceAttemptResult<int>> PersistAttemptAsync(
             PersistenceAttemptContext context,
             CancellationToken cancellationToken)
         {
-            var affectedRows = await businessDbContext.SaveChangesAsync(
+            var businessAffectedRows = await businessDbContext.SaveChangesAsync(
                 acceptAllChangesOnSuccess: false,
                 cancellationToken);
+            if (requiresBusinessChange && businessAffectedRows == 0)
+            {
+                throw new InvalidOperationException(
+                    "A staged persistence file requires a committed business row change.");
+            }
+
+            var affectedRows = businessAffectedRows;
 
             if (outboxSource is not null)
             {
@@ -72,7 +102,9 @@ public sealed class RepositoryPersistenceCommitter(
                 affectedRows += await auditDbContext.SaveChangesAsync(cancellationToken);
             }
 
-            return affectedRows;
+            return new PersistenceAttemptResult<int>(
+                affectedRows,
+                HasPersistentChanges: affectedRows > 0);
         }
 
         public void CommitConfirmed(int result)

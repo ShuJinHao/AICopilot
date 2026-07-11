@@ -11,12 +11,16 @@ public interface IPersistenceCommitParticipant<TResult>
 {
     DbContext TransactionOwner { get; }
 
-    Task<TResult> PersistAttemptAsync(
+    Task<PersistenceAttemptResult<TResult>> PersistAttemptAsync(
         PersistenceAttemptContext context,
         CancellationToken cancellationToken);
 
     void CommitConfirmed(TResult result);
 }
+
+public readonly record struct PersistenceAttemptResult<TResult>(
+    TResult Result,
+    bool HasPersistentChanges);
 
 public sealed class PersistenceAttemptContext
 {
@@ -71,22 +75,28 @@ public sealed class PersistenceCommitEngine(
     public async Task<TResult> CommitAsync<TResult>(
         string operationName,
         IPersistenceCommitParticipant<TResult> participant,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Guid? commitId = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(operationName);
         ArgumentNullException.ThrowIfNull(participant);
+        if (commitId == Guid.Empty)
+        {
+            throw new ArgumentException("Persistence commit id cannot be empty.", nameof(commitId));
+        }
 
         var state = new CommitExecutionState<TResult>(
-            Guid.NewGuid(),
+            commitId ?? Guid.NewGuid(),
             operationName,
             participant,
             cancellationToken);
         var strategy = participant.TransactionOwner.Database.CreateExecutionStrategy();
 
-        var result = await strategy.ExecuteInTransactionAsync(
+        var attemptResult = await strategy.ExecuteInTransactionAsync(
             state,
             static async (executionState, _) =>
             {
+                executionState.BeginAttempt();
                 var transaction = executionState.Participant.TransactionOwner.Database.CurrentTransaction
                                   ?? throw new InvalidOperationException(
                                       "Persistence execution strategy did not create the expected transaction.");
@@ -94,9 +104,15 @@ public sealed class PersistenceCommitEngine(
                     executionState.Participant.TransactionOwner,
                     transaction);
 
-                var attemptResult = await executionState.Participant.PersistAttemptAsync(
+                var currentAttempt = await executionState.Participant.PersistAttemptAsync(
                     attemptContext,
                     executionState.CallerCancellationToken);
+
+                executionState.SetMarkerExpectation(currentAttempt.HasPersistentChanges);
+                if (!currentAttempt.HasPersistentChanges)
+                {
+                    return currentAttempt;
+                }
 
                 await using var markerDbContext = await attemptContext.CreateMarkerDbContextAsync(
                     executionState.CallerCancellationToken);
@@ -107,13 +123,13 @@ public sealed class PersistenceCommitEngine(
                         DateTime.UtcNow));
                 await markerDbContext.SaveChangesAsync(executionState.CallerCancellationToken);
 
-                return attemptResult;
+                return currentAttempt;
             },
-            (executionState, _) => VerifyCommitAsync(executionState.CommitId, markerOptions),
+            (executionState, _) => executionState.VerifySucceededAsync(markerOptions),
             CancellationToken.None);
 
-        participant.CommitConfirmed(result);
-        return result;
+        participant.CommitConfirmed(attemptResult.Result);
+        return attemptResult.Result;
     }
 
     private static Task<bool> VerifyCommitAsync(
@@ -163,5 +179,37 @@ public sealed class PersistenceCommitEngine(
         public IPersistenceCommitParticipant<TResult> Participant { get; } = participant;
 
         public CancellationToken CallerCancellationToken { get; } = callerCancellationToken;
+
+        private MarkerExpectation markerExpectation;
+
+        public void BeginAttempt()
+        {
+            markerExpectation = MarkerExpectation.Undetermined;
+        }
+
+        public void SetMarkerExpectation(bool hasPersistentChanges)
+        {
+            markerExpectation = hasPersistentChanges
+                ? MarkerExpectation.Required
+                : MarkerExpectation.NotRequired;
+        }
+
+        public Task<bool> VerifySucceededAsync(
+            DbContextOptions<PersistenceCommitMarkerDbContext> options)
+        {
+            return markerExpectation switch
+            {
+                MarkerExpectation.NotRequired => Task.FromResult(true),
+                MarkerExpectation.Required => VerifyCommitAsync(CommitId, options),
+                _ => Task.FromResult(false)
+            };
+        }
+    }
+
+    private enum MarkerExpectation
+    {
+        Undetermined,
+        NotRequired,
+        Required
     }
 }

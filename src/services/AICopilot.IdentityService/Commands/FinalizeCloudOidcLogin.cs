@@ -26,17 +26,18 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
         CancellationToken cancellationToken)
     {
         var profile = NormalizeProfile(command.Profile);
+        var rejectionAudit = new RejectionAuditBuffer();
 
-        return await transactionalExecutionService.ExecuteAsync(
+        var result = await transactionalExecutionService.ExecuteResultAsync(
             async ct =>
             {
+                rejectionAudit.Clear();
                 if (!profile.AccountEnabled)
                 {
-                    await WriteRejectedAuditAsync(
+                    rejectionAudit.Set(CreateRejectedAudit(
                         "Identity.CloudOidcAccountDisabled",
                         profile,
-                        "Cloud 账号已禁用，拒绝换取 AI 登录态。",
-                        ct);
+                        "Cloud 账号已禁用，拒绝换取 AI 登录态。"));
 
                     return Result.Unauthorized(new ApiProblemDescriptor(
                         AuthProblemCodes.CloudIdentityInactive,
@@ -45,24 +46,34 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
 
                 if (!profile.EmployeeActive)
                 {
-                    await WriteRejectedAuditAsync(
+                    rejectionAudit.Set(CreateRejectedAudit(
                         "Identity.CloudOidcEmployeeInactive",
                         profile,
-                        "Cloud 员工已失效，拒绝换取 AI 登录态。",
-                        ct);
+                        "Cloud 员工已失效，拒绝换取 AI 登录态。"));
 
                     return Result.Unauthorized(new ApiProblemDescriptor(
                         AuthProblemCodes.CloudIdentityInactive,
                         "Cloud 员工状态无效，无法登录 AICopilot。"));
                 }
 
-                return await FinalizeLoginAsync(profile, ct);
+                return await FinalizeLoginAsync(profile, rejectionAudit, ct);
             },
             cancellationToken);
+
+        if (!result.IsSuccess && rejectionAudit.Request is not null)
+        {
+            await transactionalExecutionService.CommitRejectedAuditAsync(
+                auditLogWriter,
+                rejectionAudit.Request,
+                cancellationToken);
+        }
+
+        return result;
     }
 
     private async Task<Result<LoginUserDto>> FinalizeLoginAsync(
         CloudOidcIdentityProfile profile,
+        RejectionAuditBuffer rejectionAudit,
         CancellationToken cancellationToken)
     {
         var now = DateTime.UtcNow;
@@ -73,9 +84,9 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
             cancellationToken);
 
         var resolution = binding is null
-            ? await ResolveFirstBindingUserAsync(profile, now, cancellationToken)
+            ? await ResolveFirstBindingUserAsync(profile, now, rejectionAudit, cancellationToken)
             : new CloudOidcLoginResolution(
-                await LoadBoundUserAsync(profile, binding, now, cancellationToken),
+                await LoadBoundUserAsync(profile, binding, now, rejectionAudit, cancellationToken),
                 IsFirstBinding: false,
                 IsBootstrapAdminAdoption: false);
         var user = resolution.User;
@@ -89,13 +100,12 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
 
         if (IdentityGovernanceHelper.IsUserDisabled(user))
         {
-            await WriteRejectedAuditAsync(
+            rejectionAudit.Set(CreateRejectedAudit(
                 "Identity.CloudOidcLocalUserDisabled",
                 profile,
                 $"AI 本地用户 {user.UserName} 已禁用，拒绝 Cloud 登录。",
-                cancellationToken,
                 user.Id.ToString(),
-                user.UserName);
+                user.UserName));
 
             return Result.Unauthorized(new ApiProblemDescriptor(
                 AuthProblemCodes.AccountDisabled,
@@ -104,7 +114,13 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
 
         if (string.IsNullOrWhiteSpace(user.SecurityStamp))
         {
-            await userManager.UpdateSecurityStampAsync(user);
+            var stampResult = await userManager.UpdateSecurityStampAsync(user);
+            if (!stampResult.Succeeded)
+            {
+                throw new InvalidOperationException(
+                    "Unable to initialize the Cloud-bound user's security stamp.");
+            }
+
             user = await userManager.FindByIdAsync(user.Id.ToString())
                 ?? throw new InvalidOperationException($"User '{user.Id}' was not found after updating security stamp.");
         }
@@ -130,6 +146,7 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
     private async Task<CloudOidcLoginResolution> ResolveFirstBindingUserAsync(
         CloudOidcIdentityProfile profile,
         DateTime now,
+        RejectionAuditBuffer rejectionAudit,
         CancellationToken cancellationToken)
     {
         var localUserName = ResolveLocalUserName(profile);
@@ -149,23 +166,21 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
                     IsBootstrapAdminAdoption: true);
             }
 
-            await WriteRejectedAuditAsync(
+            rejectionAudit.Set(CreateRejectedAudit(
                 "Identity.CloudOidcBindingConflict",
                 profile,
                 $"Cloud 身份 {profile.Subject} 的本地用户名 {localUserName} 已存在，拒绝自动绑定。",
-                cancellationToken,
                 existingUser.Id.ToString(),
-                existingUser.UserName);
+                existingUser.UserName));
             return CloudOidcLoginResolution.RejectedFirstBinding;
         }
 
         if (!await roleManager.RoleExistsAsync(IdentityRoleNames.User))
         {
-            await WriteRejectedAuditAsync(
+            rejectionAudit.Set(CreateRejectedAudit(
                 "Identity.CloudOidcMissingDefaultRole",
                 profile,
-                "AI 默认 User 角色不存在，拒绝 Cloud 登录。",
-                cancellationToken);
+                "AI 默认 User 角色不存在，拒绝 Cloud 登录。"));
             return CloudOidcLoginResolution.RejectedFirstBinding;
         }
 
@@ -178,25 +193,22 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
         var createResult = await userManager.CreateAsync(user);
         if (!createResult.Succeeded)
         {
-            await WriteRejectedAuditAsync(
+            rejectionAudit.Set(CreateRejectedAudit(
                 "Identity.CloudOidcCreateUserFailed",
                 profile,
-                "Cloud 身份 JIT 创建 AI 用户失败。",
-                cancellationToken);
+                "Cloud 身份 JIT 创建 AI 用户失败。"));
             return CloudOidcLoginResolution.RejectedFirstBinding;
         }
 
         var roleResult = await userManager.AddToRoleAsync(user, IdentityRoleNames.User);
         if (!roleResult.Succeeded)
         {
-            await userManager.DeleteAsync(user);
-            await WriteRejectedAuditAsync(
+            rejectionAudit.Set(CreateRejectedAudit(
                 "Identity.CloudOidcAssignDefaultRoleFailed",
                 profile,
                 "Cloud 身份 JIT 创建后分配默认 User 角色失败。",
-                cancellationToken,
                 user.Id.ToString(),
-                user.UserName);
+                user.UserName));
             return CloudOidcLoginResolution.RejectedFirstBinding;
         }
 
@@ -277,6 +289,7 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
         CloudOidcIdentityProfile profile,
         ExternalIdentityBindingSnapshot binding,
         DateTime now,
+        RejectionAuditBuffer rejectionAudit,
         CancellationToken cancellationToken)
     {
         await bindingStore.UpdateSnapshotAsync(
@@ -299,13 +312,12 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
             return user;
         }
 
-        await WriteRejectedAuditAsync(
+        rejectionAudit.Set(CreateRejectedAudit(
             "Identity.CloudOidcBoundUserMissing",
             profile,
             $"Cloud 身份绑定的 AI 用户 {binding.UserId} 不存在，拒绝登录。",
-            cancellationToken,
             binding.UserId.ToString(),
-            profile.PreferredUserName);
+            profile.PreferredUserName));
         return null;
     }
 
@@ -353,26 +365,23 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
             : $"Cloud 身份复用已绑定 AI 用户：{profile.Subject} -> {user.UserName}";
     }
 
-    private async Task WriteRejectedAuditAsync(
+    private static AuditLogWriteRequest CreateRejectedAudit(
         string actionCode,
         CloudOidcIdentityProfile profile,
         string summary,
-        CancellationToken cancellationToken,
         string? targetId = null,
         string? targetName = null)
     {
-        await auditLogWriter.WriteAsync(
-            new AuditLogWriteRequest(
-                AuditActionGroups.Identity,
-                actionCode,
-                "ExternalIdentityBinding",
-                targetId ?? $"{profile.TenantId}:{profile.Subject}",
-                targetName ?? profile.PreferredUserName,
-                AuditResults.Rejected,
-                summary,
-                BuildChangedFields(profile, includeBindingFields: false),
-                BuildAuditMetadata(profile, actionCode)),
-            cancellationToken);
+        return new AuditLogWriteRequest(
+            AuditActionGroups.Identity,
+            actionCode,
+            "ExternalIdentityBinding",
+            targetId ?? $"{profile.TenantId}:{profile.Subject}",
+            targetName ?? profile.PreferredUserName,
+            AuditResults.Rejected,
+            summary,
+            BuildChangedFields(profile, includeBindingFields: false),
+            BuildAuditMetadata(profile, actionCode));
     }
 
     private static Claim[] BuildCloudJwtClaims(CloudOidcIdentityProfile profile)
@@ -520,5 +529,27 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
             User: null,
             IsFirstBinding: true,
             IsBootstrapAdminAdoption: false);
+    }
+
+    private sealed class RejectionAuditBuffer
+    {
+        public AuditLogWriteRequest? Request { get; private set; }
+
+        public void Clear()
+        {
+            Request = null;
+        }
+
+        public void Set(AuditLogWriteRequest request)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            if (Request is not null)
+            {
+                throw new InvalidOperationException(
+                    "Cloud OIDC login produced more than one rejection audit in a single attempt.");
+            }
+
+            Request = request;
+        }
     }
 }

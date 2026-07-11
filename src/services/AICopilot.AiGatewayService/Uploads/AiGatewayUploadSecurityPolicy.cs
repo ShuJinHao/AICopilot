@@ -1,3 +1,5 @@
+using AICopilot.Services.Contracts;
+
 namespace AICopilot.AiGatewayService.Uploads;
 
 public sealed record AiGatewayUploadValidationResult(
@@ -49,7 +51,7 @@ public static class AiGatewayUploadSecurityPolicy
         AiGatewayUploadStream file,
         CancellationToken cancellationToken)
     {
-        var safeFileName = SanitizeFileName(file.FileName);
+        var safeFileName = UploadFileNamePolicy.Normalize(file.FileName);
         if (string.IsNullOrWhiteSpace(safeFileName))
         {
             return Invalid("Uploaded file name is invalid.");
@@ -114,29 +116,6 @@ public static class AiGatewayUploadSecurityPolicy
     private static AiGatewayUploadValidationResult Invalid(string message)
     {
         return new AiGatewayUploadValidationResult(false, null, message);
-    }
-
-    private static string SanitizeFileName(string fileName)
-    {
-        var safeName = Path.GetFileName(fileName.Replace('\\', '/'));
-        if (string.IsNullOrWhiteSpace(safeName))
-        {
-            return string.Empty;
-        }
-
-        var invalidChars = Path.GetInvalidFileNameChars().ToHashSet();
-        var sanitized = new string(safeName
-            .Trim()
-            .Select(ch => invalidChars.Contains(ch) ? '_' : ch)
-            .ToArray());
-        if (sanitized.Length > 180)
-        {
-            var extension = Path.GetExtension(sanitized);
-            var stemLength = Math.Max(1, 180 - extension.Length);
-            sanitized = sanitized[..stemLength] + extension;
-        }
-
-        return sanitized;
     }
 
     private static string NormalizeContentType(string? contentType)

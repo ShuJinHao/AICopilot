@@ -1,4 +1,3 @@
-using System.Data.Common;
 using System.Text.Json;
 using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
@@ -9,14 +8,17 @@ using AICopilot.EntityFrameworkCore.Outbox;
 using AICopilot.EntityFrameworkCore.Persistence;
 using AICopilot.EntityFrameworkCore.Repository;
 using AICopilot.EntityFrameworkCore.Transactions;
+using AICopilot.Infrastructure.Storage;
 using AICopilot.RagService.Commands.Documents;
 using AICopilot.RagService.Documents;
+using AICopilot.RagWorker.Consumers;
 using AICopilot.Services.Contracts;
 using AICopilot.Services.Contracts.Events;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
-using Npgsql;
+using static AICopilot.BackendTests.PersistenceFileTestStorage;
 
 namespace AICopilot.BackendTests;
 
@@ -25,6 +27,35 @@ namespace AICopilot.BackendTests;
 [Trait("Runtime", "DockerRequired")]
 public sealed class RagUploadOutboxAtomicityTests(PostgresPersistenceFixture fixture)
 {
+    [Fact]
+    public async Task RepositoryCommit_ShouldRejectStagedFileWithoutBusinessRowChange()
+    {
+        await using var database = await CreateDatabaseAsync();
+        await MigrateRagStoreAsync(database.ConnectionString);
+        await using var persistence = RagPersistenceScope.Create(database.ConnectionString);
+        var fileStorage = new CapturingFileStorage();
+        fileStorage.AttachCommitScope(persistence.CommitScope);
+        var fileStage = await fileStorage.StageAsync(
+            new MemoryStream([1, 2, 3]),
+            "orphan.txt");
+        await persistence.AuditLogWriter.WriteAsync(
+            new AuditLogWriteRequest(
+                AuditActionGroups.Rag,
+                "Rag.OrphanFileGuard",
+                "KnowledgeDocument",
+                null,
+                "orphan.txt",
+                AuditResults.Rejected,
+                "Verify that an audit row cannot confirm a staged file without a business row."));
+
+        Func<Task> action = () => persistence.Repository.SaveChangesAsync();
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*committed business row change*");
+        await fileStorage.RollbackBestEffortAsync(fileStage);
+        await AssertCommitCountsAsync(database.ConnectionString, 0, 0, 0, 0);
+    }
+
     [Fact]
     public async Task UploadDocument_ShouldCommitDocumentAuditOutboxAndMarkerTogether()
     {
@@ -43,6 +74,7 @@ public sealed class RagUploadOutboxAtomicityTests(PostgresPersistenceFixture fix
         result.IsSuccess.Should().BeTrue();
         fileStorage.SaveCount.Should().Be(1);
         fileStorage.DeleteCount.Should().Be(0);
+        fileStorage.ConfirmCount.Should().Be(1);
 
         await using var verifyRag = new RagDbContext(CreateRagOptions(database.ConnectionString));
         var document = await verifyRag.Documents.SingleAsync();
@@ -85,6 +117,7 @@ public sealed class RagUploadOutboxAtomicityTests(PostgresPersistenceFixture fix
         saveFault.SaveAttemptCount.Should().Be(2);
         fileStorage.SaveCount.Should().Be(1);
         fileStorage.DeleteCount.Should().Be(0);
+        fileStorage.ConfirmCount.Should().Be(1);
         await using var verifyRag = new RagDbContext(CreateRagOptions(database.ConnectionString));
         (await verifyRag.Documents.SingleAsync()).Id.Value.Should().Be(result.Value!.Id);
         await AssertCommitCountsAsync(database.ConnectionString, 1, 1, 1, 1);
@@ -163,6 +196,7 @@ public sealed class RagUploadOutboxAtomicityTests(PostgresPersistenceFixture fix
         saveCounter.SaveAttemptCount.Should().Be(1);
         fileStorage.SaveCount.Should().Be(1);
         fileStorage.DeleteCount.Should().Be(0);
+        fileStorage.ConfirmCount.Should().Be(1);
         await AssertCommitCountsAsync(database.ConnectionString, 1, 1, 1, 1);
     }
 
@@ -220,7 +254,98 @@ public sealed class RagUploadOutboxAtomicityTests(PostgresPersistenceFixture fix
         saveCounter.SaveAttemptCount.Should().Be(1);
         fileStorage.SaveCount.Should().Be(1);
         fileStorage.DeleteCount.Should().Be(0);
+        fileStorage.PendingCount.Should().Be(1);
         await AssertCommitCountsAsync(database.ConnectionString, 1, 1, 1, 1);
+    }
+
+    [Fact]
+    public async Task UploadDocument_ShouldRetirePendingJournal_WhenDeleteEventFollowsUnknownCommit()
+    {
+        await using var database = await CreateDatabaseAsync();
+        await MigrateRagStoreAsync(database.ConnectionString);
+        var knowledgeBaseId = await SeedKnowledgeBaseAsync(database.ConnectionString);
+        var commitFault = new CommitAcknowledgementLostInterceptor();
+        var markerFault = new FailMarkerQueryInterceptor(remainingFailures: int.MaxValue);
+        var ragOptions = CreateRagOptions(database.ConnectionString, commitFault);
+        await using var persistence = RagPersistenceScope.Create(
+            database.ConnectionString,
+            ragOptions,
+            markerFault);
+        var storageRoot = Path.Combine(
+            Path.GetTempPath(),
+            "aicopilot-rag-reconciliation",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(storageRoot);
+        try
+        {
+            var configuration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["FileStorage:RootPath"] = storageRoot
+                })
+                .Build();
+            var storage = new LocalFileStorageService(configuration);
+            var leaseManager = new PostgresPersistenceFileReconciliationLeaseManager(
+                PostgresPersistenceTestOptions.CreateMarker(database.ConnectionString));
+            var persistentStorage = new LocalPersistenceFileStorageService(
+                storage,
+                storage,
+                leaseManager,
+                persistence.CommitScope,
+                NullLogger<LocalPersistenceFileStorageService>.Instance);
+
+            Func<Task> act = async () => await persistence.CreateUploadHandler(persistentStorage).Handle(
+                new UploadDocumentCommand(
+                    knowledgeBaseId,
+                    new FileUploadStream("reconcile-later.txt", new MemoryStream([1, 2, 3]))),
+                CancellationToken.None);
+
+            var thrown = await act.Should().ThrowAsync<PersistenceCommitOutcomeUnknownException>();
+            var pending = await storage.GetPendingAsync(
+                10,
+                DateTime.UtcNow.AddMinutes(1));
+            var record = pending.Records.Should().ContainSingle().Subject;
+            record.CommitId.Should().Be(thrown.Which.CommitId);
+            await using (var storedFile = await storage.GetAsync(record.StoragePath))
+            {
+                storedFile.Should().NotBeNull();
+            }
+
+            await using var verifyRag = new RagDbContext(
+                CreateRagOptions(database.ConnectionString));
+            var document = await verifyRag.Documents.SingleAsync();
+            await using var deletePersistence = RagPersistenceScope.Create(database.ConnectionString);
+            var deleteHandler = new DeleteDocumentCommandHandler(
+                deletePersistence.Repository,
+                deletePersistence.EventBuffer,
+                deletePersistence.AuditLogWriter,
+                new TestCurrentUser(role: "Admin"));
+            var deleteResult = await deleteHandler.Handle(
+                new DeleteDocumentCommand(document.Id.Value),
+                CancellationToken.None);
+            deleteResult.IsSuccess.Should().BeTrue();
+
+            var consumer = new DocumentFileDeletionRequestedConsumer(
+                storage,
+                storage,
+                leaseManager,
+                NullLogger<DocumentFileDeletionRequestedConsumer>.Instance);
+            await consumer.DeleteFileAsync(
+                new DocumentFileDeletionRequestedEvent
+                {
+                    DocumentId = document.Id.Value,
+                    KnowledgeBaseId = document.KnowledgeBaseId.Value,
+                    FilePath = document.FilePath,
+                    FileName = document.Name
+                });
+
+            (await storage.ExistsAsync(record.CommitId)).Should().BeFalse();
+            (await FileExistsAsync(storage, record.StoragePath)).Should().BeFalse();
+        }
+        finally
+        {
+            Directory.Delete(storageRoot, recursive: true);
+        }
     }
 
     [Fact]
@@ -485,7 +610,8 @@ public sealed class RagUploadOutboxAtomicityTests(PostgresPersistenceFixture fix
             RagRepository<KnowledgeBase> repository,
             RagIntegrationEventBuffer eventBuffer,
             AuditLogWriter auditLogWriter,
-            IDocumentIdAllocator documentIdAllocator)
+            IDocumentIdAllocator documentIdAllocator,
+            PersistenceCommitScope commitScope)
         {
             DbContext = dbContext;
             AuditDbContext = auditDbContext;
@@ -493,6 +619,7 @@ public sealed class RagUploadOutboxAtomicityTests(PostgresPersistenceFixture fix
             EventBuffer = eventBuffer;
             AuditLogWriter = auditLogWriter;
             DocumentIdAllocator = documentIdAllocator;
+            CommitScope = commitScope;
         }
 
         public RagRepository<KnowledgeBase> Repository { get; }
@@ -506,6 +633,8 @@ public sealed class RagUploadOutboxAtomicityTests(PostgresPersistenceFixture fix
         private AuditDbContext AuditDbContext { get; }
 
         private IDocumentIdAllocator DocumentIdAllocator { get; }
+
+        public PersistenceCommitScope CommitScope { get; }
 
         public static RagPersistenceScope Create(
             string connectionString,
@@ -546,10 +675,12 @@ public sealed class RagUploadOutboxAtomicityTests(PostgresPersistenceFixture fix
                 PostgresPersistenceTestOptions.CreateMarker(
                     connectionString,
                     markerInterceptors.ToArray()));
+            var commitScope = new PersistenceCommitScope();
             var committer = new RepositoryPersistenceCommitter(
                 auditDbContext,
                 engine,
-                [outboxSourceFactory(eventBuffer)]);
+                [outboxSourceFactory(eventBuffer)],
+                commitScope);
 
             return new RagPersistenceScope(
                 dbContext,
@@ -557,13 +688,19 @@ public sealed class RagUploadOutboxAtomicityTests(PostgresPersistenceFixture fix
                 new RagRepository<KnowledgeBase>(dbContext, committer),
                 eventBuffer,
                 new AuditLogWriter(auditDbContext, engine),
-                new PostgresDocumentIdAllocator(ragOptions));
+                new PostgresDocumentIdAllocator(ragOptions),
+                commitScope);
         }
 
         public UploadDocumentCommandHandler CreateUploadHandler(
-            CapturingFileStorage fileStorage,
+            IPersistenceFileStorageService fileStorage,
             IIntegrationEventStager? eventStager = null)
         {
+            if (fileStorage is CapturingFileStorage capturingFileStorage)
+            {
+                capturingFileStorage.AttachCommitScope(CommitScope);
+            }
+
             return new UploadDocumentCommandHandler(
                 Repository,
                 DocumentIdAllocator,
@@ -571,8 +708,7 @@ public sealed class RagUploadOutboxAtomicityTests(PostgresPersistenceFixture fix
                 new FixedDocumentFormatPolicy([".txt"]),
                 eventStager ?? EventBuffer,
                 AuditLogWriter,
-                new TestCurrentUser(role: "Admin"),
-                NullLogger<UploadDocumentCommandHandler>.Instance);
+                new TestCurrentUser(role: "Admin"));
         }
 
         public async ValueTask DisposeAsync()
@@ -582,144 +718,12 @@ public sealed class RagUploadOutboxAtomicityTests(PostgresPersistenceFixture fix
         }
     }
 
-    private sealed class FixedDocumentFormatPolicy(IReadOnlyCollection<string> supportedExtensions)
-        : IDocumentFormatPolicy
-    {
-        public IReadOnlyCollection<string> SupportedExtensions { get; } = supportedExtensions;
-
-        public bool IsSupported(string extension)
-        {
-            return SupportedExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase);
-        }
-    }
-
-    private sealed class CapturingFileStorage : IFileStorageService
-    {
-        public int SaveCount { get; private set; }
-
-        public int DeleteCount { get; private set; }
-
-        public List<string> DeletedPaths { get; } = [];
-
-        public Task<string> SaveAsync(
-            Stream stream,
-            string fileName,
-            CancellationToken cancellationToken = default)
-        {
-            SaveCount++;
-            return Task.FromResult(fileName);
-        }
-
-        public Task<Stream?> GetAsync(string path, CancellationToken cancellationToken = default)
-        {
-            return Task.FromResult<Stream?>(null);
-        }
-
-        public Task DeleteAsync(string path, CancellationToken cancellationToken = default)
-        {
-            DeleteCount++;
-            DeletedPaths.Add(path);
-            return Task.CompletedTask;
-        }
-    }
-
     private sealed class ThrowingEventStager(Exception exception) : IIntegrationEventStager
     {
         public void Stage<TEvent>(Func<TEvent> messageFactory)
             where TEvent : class
         {
             throw exception;
-        }
-    }
-
-    private class BusinessSaveCounterInterceptor : SaveChangesInterceptor
-    {
-        public int SaveAttemptCount { get; protected set; }
-
-        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
-            DbContextEventData eventData,
-            InterceptionResult<int> result,
-            CancellationToken cancellationToken = default)
-        {
-            SaveAttemptCount++;
-            return base.SavingChangesAsync(eventData, result, cancellationToken);
-        }
-    }
-
-    private sealed class FailFirstBusinessSaveInterceptor : BusinessSaveCounterInterceptor
-    {
-        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
-            DbContextEventData eventData,
-            InterceptionResult<int> result,
-            CancellationToken cancellationToken = default)
-        {
-            base.SavingChangesAsync(eventData, result, cancellationToken);
-            if (SaveAttemptCount == 1)
-            {
-                throw TransientFailure("Simulated pre-commit transient failure.");
-            }
-
-            return ValueTask.FromResult(result);
-        }
-    }
-
-    private sealed class CommitAcknowledgementLostInterceptor : DbTransactionInterceptor
-    {
-        private int remainingFaults = 1;
-
-        public int ThrowCount { get; private set; }
-
-        public override Task TransactionCommittedAsync(
-            DbTransaction transaction,
-            TransactionEndEventData eventData,
-            CancellationToken cancellationToken = default)
-        {
-            if (Interlocked.Exchange(ref remainingFaults, 0) == 1)
-            {
-                ThrowCount++;
-                throw TransientFailure("Simulated commit acknowledgement loss.");
-            }
-
-            return Task.CompletedTask;
-        }
-    }
-
-    private sealed class CancelCallerAtCommitInterceptor(CancellationTokenSource callerCancellation)
-        : DbTransactionInterceptor
-    {
-        public int CommitAttemptCount { get; private set; }
-
-        public override ValueTask<InterceptionResult> TransactionCommittingAsync(
-            DbTransaction transaction,
-            TransactionEventData eventData,
-            InterceptionResult result,
-            CancellationToken cancellationToken = default)
-        {
-            CommitAttemptCount++;
-            callerCancellation.Cancel();
-            return ValueTask.FromResult(result);
-        }
-    }
-
-    private sealed class FailMarkerQueryInterceptor(int remainingFailures) : DbConnectionInterceptor
-    {
-        private int remainingFailures = remainingFailures;
-
-        public int QueryAttemptCount { get; private set; }
-
-        public override ValueTask<InterceptionResult> ConnectionOpeningAsync(
-            DbConnection connection,
-            ConnectionEventData eventData,
-            InterceptionResult result,
-            CancellationToken cancellationToken = default)
-        {
-            QueryAttemptCount++;
-            if (InterlockedExtensions.DecrementIfPositive(ref remainingFailures))
-            {
-                throw TransientFailure("Simulated marker verification outage.");
-            }
-
-            return ValueTask.FromResult(result);
         }
     }
 
@@ -751,7 +755,8 @@ public sealed class RagUploadOutboxAtomicityTests(PostgresPersistenceFixture fix
                 owner.MaterializeAttemptCount++;
                 if (owner.MaterializeAttemptCount == 1)
                 {
-                    throw TransientFailure("Simulated transient failure after business SaveChanges(false).");
+                    throw PersistenceTestFailure.Transient(
+                        "Simulated transient failure after business SaveChanges(false).");
                 }
 
                 return eventBuffer.Materialize(dbContext);
@@ -764,28 +769,4 @@ public sealed class RagUploadOutboxAtomicityTests(PostgresPersistenceFixture fix
         }
     }
 
-    private static NpgsqlException TransientFailure(string message)
-    {
-        return new NpgsqlException(message, new TimeoutException(message));
-    }
-
-    private static class InterlockedExtensions
-    {
-        public static bool DecrementIfPositive(ref int value)
-        {
-            while (true)
-            {
-                var current = Volatile.Read(ref value);
-                if (current <= 0)
-                {
-                    return false;
-                }
-
-                if (Interlocked.CompareExchange(ref value, current - 1, current) == current)
-                {
-                    return true;
-                }
-            }
-        }
-    }
 }

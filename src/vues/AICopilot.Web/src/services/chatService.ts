@@ -202,12 +202,11 @@ export const chatService = {
   },
 
   async uploadFile(
-    scope: 'SessionTemp' | 'AgentInput' | 'KnowledgeBase',
+    scope: 'SessionTemp' | 'AgentInput',
     file: File,
     options: {
       sessionId?: string | null
       agentTaskId?: string | null
-      knowledgeBaseId?: string | null
     } = {}
   ) {
     const form = new FormData()
@@ -215,7 +214,6 @@ export const chatService = {
     form.set('file', file)
     if (options.sessionId) form.set('sessionId', options.sessionId)
     if (options.agentTaskId) form.set('agentTaskId', options.agentTaskId)
-    if (options.knowledgeBaseId) form.set('knowledgeBaseId', options.knowledgeBaseId)
     return await apiClient.postForm<UploadRecord>('/aigateway/upload', form)
   },
 

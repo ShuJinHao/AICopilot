@@ -16,13 +16,10 @@ public sealed record UploadRecordDto(
     string Scope,
     Guid? SessionId,
     Guid? AgentTaskId,
-    Guid? KnowledgeBaseId,
-    int? RagDocumentId,
     string FileName,
     string ContentType,
     long FileSize,
     string Sha256,
-    string Status,
     DateTimeOffset CreatedAt);
 
 [AuthorizeRequirement("AiGateway.Upload")]
@@ -30,8 +27,7 @@ public sealed record UploadRecordCommand(
     string Scope,
     AiGatewayUploadStream File,
     Guid? SessionId = null,
-    Guid? AgentTaskId = null,
-    Guid? KnowledgeBaseId = null) : ICommand<Result<UploadRecordDto>>;
+    Guid? AgentTaskId = null) : ICommand<Result<UploadRecordDto>>;
 
 [AuthorizeRequirement("AiGateway.GetUpload")]
 public sealed record GetListUploadRecordsQuery(Guid? SessionId = null, Guid? AgentTaskId = null)
@@ -56,13 +52,10 @@ public static class UploadRecordDtoMapper
             record.Scope.ToString(),
             record.SessionId?.Value,
             record.AgentTaskId?.Value,
-            record.KnowledgeBaseId,
-            record.RagDocumentId,
             record.FileName,
             record.ContentType,
             record.FileSize,
             record.Sha256,
-            record.Status.ToString(),
             record.CreatedAt);
     }
 }

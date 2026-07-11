@@ -83,16 +83,13 @@ export interface AgentEventPayload {
 
 export interface UploadRecord {
   id: string
-  scope: 'SessionTemp' | 'AgentInput' | 'KnowledgeBase' | string
+  scope: 'SessionTemp' | 'AgentInput'
   sessionId?: string | null
   agentTaskId?: string | null
-  knowledgeBaseId?: string | null
-  ragDocumentId?: number | null
   fileName: string
   contentType: string
   fileSize: number
   sha256: string
-  status: string
   createdAt: string
 }
 

@@ -1,8 +1,10 @@
 using AICopilot.AiGatewayService;
 using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.DataAnalysisService;
+using AICopilot.DataWorker;
 using AICopilot.EntityFrameworkCore;
 using AICopilot.EntityFrameworkCore.Outbox;
+using AICopilot.EntityFrameworkCore.Persistence;
 using AICopilot.IdentityService;
 using AICopilot.Infrastructure;
 using AICopilot.RagService;
@@ -24,6 +26,27 @@ builder.AddRagService();
 builder.Services.AddScoped<ICurrentUser, WorkerCurrentUser>();
 builder.Services.AddHostedService<OutboxDispatcher>();
 builder.Services.AddHostedService<AgentTaskRunQueueWorker>();
+builder.Services.AddScoped<PersistenceFileMaintenanceService>();
+builder.Services.AddOptions<PersistenceMaintenanceOptions>()
+    .BindConfiguration(PersistenceMaintenanceOptions.SectionName)
+    .Validate(
+        options => options.IntervalSeconds is >= 10 and <= 86400,
+        "PersistenceMaintenance:IntervalSeconds must be between 10 and 86400.")
+    .Validate(
+        options => options.ReconciliationDelayMinutes is >= 1 and <= 1440,
+        "PersistenceMaintenance:ReconciliationDelayMinutes must be between 1 and 1440.")
+    .Validate(
+        options => options.MarkerRetentionDays is >= 1 and <= 3650,
+        "PersistenceMaintenance:MarkerRetentionDays must be between 1 and 3650.")
+    .Validate(
+        options => TimeSpan.FromDays(options.MarkerRetentionDays) >
+                   TimeSpan.FromMinutes(options.ReconciliationDelayMinutes),
+        "PersistenceMaintenance marker retention must be longer than the reconciliation delay.")
+    .Validate(
+        options => options.BatchSize is >= 1 and <= 1000,
+        "PersistenceMaintenance:BatchSize must be between 1 and 1000.")
+    .ValidateOnStart();
+builder.Services.AddHostedService<PersistenceMaintenanceWorker>();
 
 var host = builder.Build();
 host.Run();

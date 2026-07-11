@@ -238,6 +238,17 @@ public sealed class MigrationSafetyTests(PostgresPersistenceFixture fixture)
             .Should().Be("1");
         (await ExecuteScalarAsync(
             database.ConnectionString,
+            """
+            SELECT COUNT(*)::text
+            FROM pg_indexes
+            WHERE schemaname = 'persistence'
+              AND tablename = 'commit_markers'
+              AND indexname = 'ix_commit_markers_created_at_utc'
+              AND indexdef LIKE '%(created_at_utc)%'
+            """))
+            .Should().Be("1");
+        (await ExecuteScalarAsync(
+            database.ConnectionString,
             "SELECT to_regclass('rag.documents_id_seq')::text"))
             .Should().Be("rag.documents_id_seq");
         (await ExecuteScalarAsync(

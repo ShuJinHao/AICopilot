@@ -111,6 +111,9 @@ public static class DependencyInjection
         builder.Services.AddScoped<IExternalIdentityBindingStore, ExternalIdentityBindingStore>();
         builder.Services.AddScoped<IAuditLogQueryService, AuditLogQueryService>();
         builder.Services.AddScoped<PersistenceCommitEngine>();
+        builder.Services.AddScoped<PersistenceCommitScope>();
+        builder.Services.AddScoped<IPersistenceCommitScope>(provider =>
+            provider.GetRequiredService<PersistenceCommitScope>());
         builder.Services.AddScoped<RepositoryPersistenceCommitter>();
         builder.Services.AddScoped<AiGatewayDomainEventOutboxSource>();
         builder.Services.AddScoped<IPersistenceOutboxSource>(provider =>
@@ -118,7 +121,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<RagIntegrationEventBuffer>();
         builder.Services.AddScoped<IPersistenceOutboxSource>(provider =>
             provider.GetRequiredService<RagIntegrationEventBuffer>());
-        builder.Services.AddScoped<ITransactionalExecutionService, EfTransactionalExecutionService>();
+        builder.Services.AddScoped<ITransactionalExecutionService, IdentityTransactionalExecutionService>();
         builder.Services.AddScoped<IIntegrationEventStager>(provider =>
             provider.GetRequiredService<RagIntegrationEventBuffer>());
         builder.Services.AddScoped<IDocumentIdAllocator, PostgresDocumentIdAllocator>();

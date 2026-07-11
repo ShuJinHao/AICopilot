@@ -11,7 +11,6 @@ using AICopilot.Services.Contracts.Events;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
 using AICopilot.SharedKernel.Specification;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace AICopilot.BackendTests;
 
@@ -156,8 +155,7 @@ public sealed class RagPermissionTests
             new FixedDocumentFormatPolicy([".txt"]),
             eventStager,
             auditLogWriter,
-            new TestCurrentUser(UserAId),
-            NullLogger<UploadDocumentCommandHandler>.Instance);
+            new TestCurrentUser(UserAId));
 
         var content = Encoding.UTF8.GetBytes("safe text");
         var result = await handler.Handle(
@@ -185,8 +183,7 @@ public sealed class RagPermissionTests
             new FixedDocumentFormatPolicy([".txt", ".pdf"]),
             new CapturingEventStager(),
             auditLogWriter,
-            new TestCurrentUser(UserAId),
-            NullLogger<UploadDocumentCommandHandler>.Instance);
+            new TestCurrentUser(UserAId));
 
         var content = Encoding.UTF8.GetBytes("MZ");
         var result = await handler.Handle(
@@ -224,7 +221,7 @@ public sealed class RagPermissionTests
 
         public TestRepository(params T[] entities)
         {
-            this.entities = [..entities];
+            this.entities = [.. entities];
         }
 
         public T Add(T entity)
@@ -357,37 +354,6 @@ public sealed class RagPermissionTests
                 new("secret fragment", 0.99, 1, "secret-doc.txt", 0)
             ];
             return Task.FromResult(results ?? defaultResults);
-        }
-    }
-
-    private sealed class FixedDocumentFormatPolicy(IReadOnlyCollection<string> supportedExtensions) : IDocumentFormatPolicy
-    {
-        public IReadOnlyCollection<string> SupportedExtensions { get; } = supportedExtensions;
-
-        public bool IsSupported(string extension)
-        {
-            return SupportedExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase);
-        }
-    }
-
-    private sealed class CapturingFileStorage : IFileStorageService
-    {
-        public int SaveCount { get; private set; }
-
-        public Task<string> SaveAsync(Stream stream, string fileName, CancellationToken cancellationToken = default)
-        {
-            SaveCount++;
-            return Task.FromResult(fileName);
-        }
-
-        public Task<Stream?> GetAsync(string path, CancellationToken cancellationToken = default)
-        {
-            return Task.FromResult<Stream?>(null);
-        }
-
-        public Task DeleteAsync(string path, CancellationToken cancellationToken = default)
-        {
-            return Task.CompletedTask;
         }
     }
 
