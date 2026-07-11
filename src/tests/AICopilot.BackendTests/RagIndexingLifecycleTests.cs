@@ -741,13 +741,6 @@ public sealed class RagIndexingLifecycleTests
 
         public List<object> StagedMessages { get; } = [];
 
-        public void Stage<TEvent>(TEvent message)
-            where TEvent : class
-        {
-            StagedMessages.Add(message);
-            onStage?.Invoke(message);
-        }
-
         public void Stage<TEvent>(Func<TEvent> messageFactory)
             where TEvent : class
         {
@@ -759,12 +752,6 @@ public sealed class RagIndexingLifecycleTests
 
     private sealed class ThrowingEventStager(Exception exception) : IIntegrationEventStager
     {
-        public void Stage<TEvent>(TEvent message)
-            where TEvent : class
-        {
-            throw exception;
-        }
-
         public void Stage<TEvent>(Func<TEvent> messageFactory)
             where TEvent : class
         {

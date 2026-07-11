@@ -2,7 +2,6 @@ using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.EntityFrameworkCore.Configuration.Rag;
 using AICopilot.EntityFrameworkCore.Outbox;
-using AICopilot.SharedKernel.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -51,29 +50,9 @@ public sealed class RagDbContext(DbContextOptions<RagDbContext> options) : DbCon
 
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
-        var domainEventEntities = ChangeTracker
-            .Entries()
-            .Select(entry => entry.Entity)
-            .OfType<IHasDomainEvents>()
-            .Where(entity => entity.DomainEvents.Count > 0)
-            .ToArray();
-
-        var domainEvents = domainEventEntities
-            .SelectMany(entity => entity.DomainEvents)
-            .ToArray();
-
-        OutboxMessages.AddRange(domainEvents.Select(OutboxMessage.FromIntegrationEvent));
-
         if (stagedIntegrationEventFactories.Count == 0)
         {
-            var result = await base.SaveChangesAsync(cancellationToken);
-
-            foreach (var entity in domainEventEntities)
-            {
-                entity.ClearDomainEvents();
-            }
-
-            return result;
+            return await base.SaveChangesAsync(cancellationToken);
         }
 
         var hasCurrentTransaction = Database.CurrentTransaction is not null;
@@ -84,12 +63,6 @@ public sealed class RagDbContext(DbContextOptions<RagDbContext> options) : DbCon
                 MaterializeStagedIntegrationEvents()
                     .Select(OutboxMessage.FromIntegrationEvent));
             result += await base.SaveChangesAsync(cancellationToken);
-
-            foreach (var entity in domainEventEntities)
-            {
-                entity.ClearDomainEvents();
-            }
-
             return result;
         }
 
@@ -117,12 +90,6 @@ public sealed class RagDbContext(DbContextOptions<RagDbContext> options) : DbCon
                     await transaction.CommitAsync(cancellationToken);
                     committed = true;
                     stagedIntegrationEventFactories.Clear();
-
-                    foreach (var entity in domainEventEntities)
-                    {
-                        entity.ClearDomainEvents();
-                    }
-
                     return result;
                 }
                 finally

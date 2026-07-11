@@ -387,12 +387,6 @@ public sealed class RagPermissionTests
     {
         public List<object> StagedMessages { get; } = [];
 
-        public void Stage<TEvent>(TEvent message)
-            where TEvent : class
-        {
-            StagedMessages.Add(message);
-        }
-
         public void Stage<TEvent>(Func<TEvent> messageFactory)
             where TEvent : class
         {

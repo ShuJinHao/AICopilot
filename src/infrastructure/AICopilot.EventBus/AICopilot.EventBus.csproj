@@ -10,8 +10,4 @@
     <PackageReference Include="MassTransit.RabbitMQ" Version="8.3.6" />
   </ItemGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\..\services\AICopilot.Services.Contracts\AICopilot.Services.Contracts.csproj" />
-  </ItemGroup>
-
 </Project>

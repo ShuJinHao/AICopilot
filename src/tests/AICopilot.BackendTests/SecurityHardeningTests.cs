@@ -14,6 +14,7 @@ using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.Core.Rag.Ids;
 using AICopilot.Dapper;
 using AICopilot.Dapper.Security;
+using AICopilot.EntityFrameworkCore.Outbox;
 using AICopilot.HttpApi.Controllers;
 using AICopilot.HttpApi.Infrastructure;
 using AICopilot.IdentityService.Authorization;
@@ -27,6 +28,9 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -1623,96 +1627,43 @@ Current mitigation: GitHub production environment reviewers, restricted runner a
     }
 
     [Fact]
-    public void OutboxRuntimeServices_ShouldUseDedicatedOutboxDbContext()
+    public void IntegrationEventStager_ShouldExposeOnlyFactoryPath()
     {
-        var solutionRoot = FindSolutionRoot();
-        var dispatcherSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "Outbox",
-            "OutboxDispatcher.cs"));
-        var publisherSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "Outbox",
-            "OutboxIntegrationEventPublisher.cs"));
-        var outboxContextSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "Outbox",
-            "OutboxDbContext.cs"));
-        var dependencyInjectionSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "DependencyInjection.cs"));
-        var uploadDocumentSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "services",
-            "AICopilot.RagService",
-            "Commands",
-            "Documents",
-            "UploadDocument.cs"));
-        var ragEventStagerSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "Outbox",
-            "RagIntegrationEventStager.cs"));
-        var ragContextSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "RagDbContext.cs"));
-        var documentManagementSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "services",
-            "AICopilot.RagService",
-            "Documents",
-            "DocumentManagement.cs"));
-        var fileDeletionConsumerSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "hosts",
-            "AICopilot.RagWorker",
-            "Consumers",
-            "DocumentFileDeletionRequestedConsumer.cs"));
+        var stageMethod = typeof(IIntegrationEventStager).GetMethods().Should().ContainSingle().Subject;
+        var stageParameter = stageMethod.GetParameters().Should().ContainSingle().Subject.ParameterType;
+        stageMethod.Name.Should().Be(nameof(IIntegrationEventStager.Stage));
+        stageMethod.IsGenericMethodDefinition.Should().BeTrue();
+        stageParameter.IsGenericType.Should().BeTrue();
+        stageParameter.GetGenericTypeDefinition().Should().Be(typeof(Func<>));
 
-        dispatcherSource.Should().Contain("GetRequiredService<OutboxDbContext>");
-        dispatcherSource.Should().NotContain("AiCopilotDbContext");
-        publisherSource.Should().Contain("OutboxDbContext");
-        publisherSource.Should().NotContain("AiCopilotDbContext");
-        outboxContextSource.Should().Contain("DbSet<OutboxMessage>");
-        outboxContextSource.Should().Contain("OutboxMessageConfiguration");
-        outboxContextSource.Should().NotContain("ExcludeFromMigrations");
-        dependencyInjectionSource.Should().Contain("AddNpgsqlDbContext<OutboxDbContext>");
-        dependencyInjectionSource.Should().Contain("IIntegrationEventStager, RagIntegrationEventStager");
-        uploadDocumentSource.Should().Contain("IIntegrationEventStager");
-        uploadDocumentSource.Should().Contain("eventStager.Stage(() => new DocumentUploadedEvent");
-        uploadDocumentSource.Should().NotContain("IIntegrationEventPublisher");
-        uploadDocumentSource.Should().NotContain("eventPublisher.PublishAsync");
-        ragEventStagerSource.Should().Contain("RagDbContext");
-        ragEventStagerSource.Should().Contain("StageIntegrationEvent");
-        ragEventStagerSource.Should().Contain("OutboxMessages.Add");
-        ragContextSource.Should().Contain("StageIntegrationEvent");
-        ragContextSource.Should().Contain("BeginTransactionAsync");
-        documentManagementSource.Should().Contain("IIntegrationEventStager");
-        documentManagementSource.Should().Contain("eventStager.Stage(() => new DocumentFileDeletionRequestedEvent");
-        documentManagementSource.Should().NotContain("IFileStorageService fileStorage");
-        documentManagementSource.Should().NotContain("fileStorage.DeleteAsync");
-        fileDeletionConsumerSource.Should().Contain("IConsumer<DocumentFileDeletionRequestedEvent>");
-        fileDeletionConsumerSource.Should().Contain("fileStorage.DeleteAsync");
+        typeof(RagIntegrationEventStager).GetMethods(
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly)
+            .Should().ContainSingle(method => method.Name == nameof(IIntegrationEventStager.Stage));
+        typeof(IIntegrationEventStager).Assembly
+            .GetType("AICopilot.Services.Contracts.IIntegrationEventPublisher")
+            .Should().BeNull();
+        typeof(OutboxDbContext).Assembly
+            .GetType("AICopilot.EntityFrameworkCore.Outbox.OutboxIntegrationEventPublisher")
+            .Should().BeNull();
+        typeof(AICopilot.EventBus.DependencyInjection).Assembly
+            .GetType("AICopilot.EventBus.MassTransitIntegrationEventPublisher")
+            .Should().BeNull();
+    }
+
+    [Fact]
+    public void OutboxRuntimeContext_ShouldOwnOutboxModel()
+    {
+        using var outboxContext = new OutboxDbContext(
+            new DbContextOptionsBuilder<OutboxDbContext>()
+                .UseNpgsql("Host=localhost;Database=aicopilot_security;Username=test;Password=test")
+                .Options);
+        var outboxEntity = outboxContext.GetService<IDesignTimeModel>()
+            .Model
+            .FindEntityType(typeof(OutboxMessage));
+        outboxEntity.Should().NotBeNull();
+        outboxEntity!.GetSchema().Should().Be("outbox");
+        outboxEntity.GetTableName().Should().Be("outbox_messages");
+        outboxEntity.IsTableExcludedFromMigrations().Should().BeFalse();
     }
 
     [Fact]
@@ -1735,26 +1686,6 @@ Current mitigation: GitHub production environment reviewers, restricted runner a
         dispatcherSource.Should().Contain("catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)");
         dispatcherSource.Should().Contain("message.MarkFailed(\"Outbox message publishing failed.");
         dispatcherSource.Should().NotContain("message.MarkFailed(ex.Message");
-    }
-
-    [Fact]
-    public void ModuleDbContexts_ShouldExcludeOutboxFromMigrations()
-    {
-        var solutionRoot = FindSolutionRoot();
-        var moduleContextFiles = new[]
-        {
-            Path.Combine("src", "infrastructure", "AICopilot.EntityFrameworkCore", "DataAnalysisDbContext.cs"),
-            Path.Combine("src", "infrastructure", "AICopilot.EntityFrameworkCore", "McpServerDbContext.cs"),
-            Path.Combine("src", "infrastructure", "AICopilot.EntityFrameworkCore", "RagDbContext.cs")
-        };
-
-        foreach (var moduleContextFile in moduleContextFiles)
-        {
-            var source = File.ReadAllText(Path.Combine(solutionRoot, moduleContextFile));
-
-            source.Should().Contain("DbSet<OutboxMessage>", moduleContextFile);
-            source.Should().Contain("ExcludeFromMigrations", moduleContextFile);
-        }
     }
 
     [Fact]

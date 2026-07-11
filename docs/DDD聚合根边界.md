@@ -52,6 +52,14 @@ MediatR handler 直接注入 3 个及以上 repository/store/file store/query se
 
 分类必须由架构测试锁住；未分类的 `DbSet<T>` 不能合入。
 
+## Outbox 所有权与重试边界
+
+- `AiCopilotDbContext` 是 `outbox.outbox_messages` 的唯一 migration owner，只保留 `DbSet` 和配置，不承载领域事件扫描或运行时 Outbox 发布。
+- DataAnalysis 与 MCP 当前没有领域事件生产者，不映射 Outbox，也不覆盖 `SaveChangesAsync`；不得以“未来可能使用”为由恢复通用扫描或兼容壳。
+- AiGateway 当前只有 `Session` 产生领域事件，继续由 `AiGatewayDbContext` 的现有保存路径写 Outbox。RAG 只保留 delayed integration-event factory、数据库生成 Document ID 后物化事件和现有两次保存路径；不得重新混入无生产者的通用 `IHasDomainEvents` 扫描。
+- 运行时直接写 Outbox 的零调用 publisher 抽象不保留；持久 Outbox 的发送统一由 `OutboxDispatcher` 领取和发布，调度仍必须保持 `FOR UPDATE SKIP LOCKED` 与 dead-letter 上限。
+- `AI-PERSIST-01a` 只删除死语义和重复，不改变 AiGateway/RAG retry、RAG existing-transaction 分支的 commit 前 factory 清理或 commit-unknown 行为。后续 `AI-PERSIST-01b` 若使用 execution strategy，必须区分 commit 前重放与 COMMIT 成功但 ACK 丢失：后者需要同事务 durable verification marker、fresh context `verifySucceeded` 查询和真实 PostgreSQL commit-ACK fault test，不能仅靠 `SaveChanges(false)`、可选 Outbox 或可选 audit entry 推断。
+
 ## 后续收口顺序
 
 1. 保持白名单和债务清单测试常绿，禁止新增伪聚合根。

@@ -2,7 +2,6 @@
 using AICopilot.AiRuntime;
 using AICopilot.Embedding;
 using AICopilot.EntityFrameworkCore;
-using AICopilot.EntityFrameworkCore.Outbox;
 using AICopilot.EventBus;
 using AICopilot.Infrastructure.Artifacts;
 using AICopilot.Infrastructure.AiGateway;
@@ -33,7 +32,6 @@ public static class DependencyInjection
         builder.AddDapper();
         builder.AddEmbedding();
         builder.AddEventBus();
-        builder.Services.AddScoped<IIntegrationEventPublisher, OutboxIntegrationEventPublisher>();
         builder.AddAiRuntime();
 
         builder.Services.AddSingleton<IFileStorageService, LocalFileStorageService>();
@@ -102,7 +100,6 @@ public static class DependencyInjection
         builder.AddEfCore();
         builder.AddEventBus(consumerAssembly);
         builder.AddEmbedding();
-        builder.Services.AddScoped<IIntegrationEventPublisher, OutboxIntegrationEventPublisher>();
 
         builder.Services.AddSingleton<IFileStorageService, LocalFileStorageService>();
         builder.AddDocumentParsers();

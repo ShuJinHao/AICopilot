@@ -281,12 +281,6 @@ public sealed class RagUploadOutboxAtomicityTests(CoreAICopilotAppFixture fixtur
 
     private sealed class ThrowingEventStager(Exception exception) : IIntegrationEventStager
     {
-        public void Stage<TEvent>(TEvent message)
-            where TEvent : class
-        {
-            throw exception;
-        }
-
         public void Stage<TEvent>(Func<TEvent> messageFactory)
             where TEvent : class
         {

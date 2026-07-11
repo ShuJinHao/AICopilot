@@ -37,6 +37,7 @@ public sealed class MigrationOwnershipTests
             "dataanalysis.business_databases",
             "mcp.mcp_server_info"
         });
+        MigratedTableIds(dbContext).Should().Contain("outbox.outbox_messages");
     }
 
     [Fact]
@@ -60,7 +61,7 @@ public sealed class MigrationOwnershipTests
     }
 
     [Fact]
-    public void SplitDomainDbContexts_ShouldExcludeSharedOutboxFromMigrations()
+    public void SplitDomainDbContexts_ShouldMapOutboxOnlyForCurrentEventProducers()
     {
         using var aiGateway = CreateAiGatewayDbContext();
         using var rag = CreateRagDbContext();
@@ -69,8 +70,8 @@ public sealed class MigrationOwnershipTests
 
         IsExcludedTable(aiGateway, "outbox", "outbox_messages").Should().BeTrue();
         IsExcludedTable(rag, "outbox", "outbox_messages").Should().BeTrue();
-        IsExcludedTable(dataAnalysis, "outbox", "outbox_messages").Should().BeTrue();
-        IsExcludedTable(mcpServer, "outbox", "outbox_messages").Should().BeTrue();
+        IsMappedTable(dataAnalysis, "outbox", "outbox_messages").Should().BeFalse();
+        IsMappedTable(mcpServer, "outbox", "outbox_messages").Should().BeFalse();
 
         MigratedTableIds(aiGateway).Should().Contain(new[]
         {
@@ -266,6 +267,16 @@ public sealed class MigrationOwnershipTests
             .Where(entityType => string.Equals(entityType.GetSchema(), schema, StringComparison.OrdinalIgnoreCase))
             .Where(entityType => string.Equals(entityType.GetTableName(), tableName, StringComparison.OrdinalIgnoreCase))
             .Any(entityType => entityType.IsTableExcludedFromMigrations());
+    }
+
+    private static bool IsMappedTable(DbContext dbContext, string? schema, string tableName)
+    {
+        return dbContext.GetService<IDesignTimeModel>()
+            .Model
+            .GetEntityTypes()
+            .Any(entityType =>
+                string.Equals(entityType.GetSchema(), schema, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(entityType.GetTableName(), tableName, StringComparison.OrdinalIgnoreCase));
     }
 
     private static string TableId(IReadOnlyEntityType entityType)

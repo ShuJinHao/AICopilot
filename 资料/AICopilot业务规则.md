@@ -201,8 +201,10 @@ Cloud AiRead 设备契约：
 - `IAggregateRoot<>` 只用于独立维护业务不变量和生命周期的领域根；队列项、timeline 投影、工具执行审计、worker 心跳和执行尝试记录不得作为新增聚合根方向，历史债务只能减少不能增加。
 - `DataSourcePermissionGrant` 当前保留为独立聚合根但标记待评估；后续如果授权生命周期可归入 `BusinessDatabase`，应下沉为子实体或专用权限记录并移出聚合根白名单。
 - `AiCopilotDbContext` 是主基础设施迁移上下文，`AuditDbContext` 负责审计查询和运行时审计写入，`DataAnalysisDbContext` 只承载数据分析配置，`OutboxDbContext` 承载 outbox。
+- 没有真实事件生产者的 DbContext 不得复制 Outbox `DbSet`、映射或 `SaveChangesAsync` 领域事件扫描；当前 DataAnalysis/MCP 不写 Outbox，AiGateway 只为 `Session` 领域事件保留现有路径，RAG 只为 delayed integration-event factory 保留现有路径，`AiCopilotDbContext` 只拥有 Outbox migration。
 - 审计写入必须遵守 Audit writer decision tree：有业务保存点的命令应把业务变更和审计行放在同一事务；`auditLogWriter.SaveChangesAsync` 只允许出现在没有业务保存点且已被白名单记录的执行路径。
 - Outbox 多实例调度必须使用 PostgreSQL `FOR UPDATE SKIP LOCKED` 或等价互斥策略，不能让多 worker 重复发布同一消息。
+- EF execution-strategy 的 commit-unknown 不能用 `SaveChanges(false)`、Outbox 或 audit 是否“通常存在”推断成功；必须有同事务 durable verification marker、fresh verification query 和真实 PostgreSQL commit-ACK fault test。`AI-SEC-046` 未关闭前，不得宣称 AiGateway/RAG retry、RAG existing-transaction commit 前清 buffer 或 commit-unknown 已修复。
 - MCP runtime 配置变更必须进入 runtime registry refresh cycle，禁用、删除或配置变更后不能继续暴露未来工具解析。
 - 身份安全以 security stamp 驱动会话失效；Cloud role 不直接成为 AICopilot 本地 role。
 - 多 DbContext 迁移历史必须通过 `__EFMigrationsHistory` 的上下文隔离或迁移历史表拆分规则治理，不能让单一上下文回滚污染其他上下文状态。

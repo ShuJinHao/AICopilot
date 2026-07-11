@@ -4,12 +4,6 @@ namespace AICopilot.EntityFrameworkCore.Outbox;
 
 public sealed class RagIntegrationEventStager(RagDbContext dbContext) : IIntegrationEventStager
 {
-    public void Stage<TEvent>(TEvent message)
-        where TEvent : class
-    {
-        dbContext.OutboxMessages.Add(OutboxMessage.FromIntegrationEvent(message));
-    }
-
     public void Stage<TEvent>(Func<TEvent> messageFactory)
         where TEvent : class
     {

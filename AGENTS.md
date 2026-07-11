@@ -104,6 +104,8 @@ Cloud-AICopilot OIDC 身份对齐的长期结论见 `../docs/历史核心记录.
 - MediatR 管道顺序固定为 Telemetry -> Validation -> Authorization；新增 Validation behavior 时必须同步至少一个真实 validator 和测试，不能提交空壳管道。
 - MediatR telemetry 必须复用现有 OpenTelemetry / structured logging，只记录 request type、kind、耗时、结果和异常类型；不得记录 prompt 全文、SQL、token、连接串、API key 或业务数据明细。
 - 事务/审计拥有者必须显式且唯一：repository 保存的业务+审计原子性由 `AuditTransactionCoordinator` 拥有，Identity 用户/角色事务由 `ITransactionalExecutionService`/`EfTransactionalExecutionService` 拥有；MediatR behavior 不得开启事务、保存审计、调用 `SaveChangesAsync` 或包裹 stream/handler 形成隐式事务边界。
+- 没有真实事件生产者的 DbContext 不得为“未来可能使用”复制 Outbox `DbSet`、映射或 `SaveChangesAsync` 领域事件扫描；当前只有 AiGateway `Session` 领域事件和 RAG delayed integration-event factory 保留业务 Context 内的 Outbox 写入，主 `AiCopilotDbContext` 只保留 Outbox migration ownership。
+- 不能仅凭 `SaveChanges(false)` 宣称 EF execution-strategy 事务安全；COMMIT 已成功但 ACK 丢失必须通过 fresh context 查询同一事务写入的 durable verification marker 或等价机制判断，并有真实 PostgreSQL commit-ACK fault test。AiGateway/RAG 当前 retry、RAG existing-transaction commit 前清 buffer 和 commit-unknown 债务登记在 `AI-SEC-046`，不得由无关去重批次冒充修复。
 
 ## Unified Agent Workflow
 

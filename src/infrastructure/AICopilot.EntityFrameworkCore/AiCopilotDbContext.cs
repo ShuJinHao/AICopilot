@@ -1,7 +1,6 @@
 using System.Reflection;
 using AICopilot.EntityFrameworkCore.AuditLogs;
 using AICopilot.EntityFrameworkCore.Outbox;
-using AICopilot.SharedKernel.Domain;
 using Microsoft.EntityFrameworkCore;
 
 namespace AICopilot.EntityFrameworkCore;
@@ -30,28 +29,4 @@ public class AiCopilotDbContext(DbContextOptions<AiCopilotDbContext> options) : 
                && !ns.StartsWith("AICopilot.EntityFrameworkCore.Configuration.Rag", StringComparison.Ordinal);
     }
 
-    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
-    {
-        var domainEventEntities = ChangeTracker
-            .Entries()
-            .Select(entry => entry.Entity)
-            .OfType<IHasDomainEvents>()
-            .Where(entity => entity.DomainEvents.Count > 0)
-            .ToArray();
-
-        var domainEvents = domainEventEntities
-            .SelectMany(entity => entity.DomainEvents)
-            .ToArray();
-
-        OutboxMessages.AddRange(domainEvents.Select(OutboxMessage.FromIntegrationEvent));
-
-        var result = await base.SaveChangesAsync(cancellationToken);
-
-        foreach (var entity in domainEventEntities)
-        {
-            entity.ClearDomainEvents();
-        }
-
-        return result;
-    }
 }

@@ -15,11 +15,13 @@ using AICopilot.Core.McpServer.Ids;
 using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.Core.Rag.Ids;
+using AICopilot.EntityFrameworkCore;
 using AICopilot.HttpApi.Infrastructure;
 using AICopilot.SharedKernel.Domain;
 using AICopilot.Services.Contracts;
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace AICopilot.ArchitectureTests;
@@ -1988,8 +1990,12 @@ public sealed class ArchitectureBoundaryTests
         baseEntityIdSetter!.IsPublic.Should().BeFalse("BaseEntity must not let external code rewrite identity");
     }
 
-    [Fact]
-    public void McpServerDbContextMigrations_ShouldNotCreateOutboxTable()
+    [Theory]
+    [InlineData("McpServerDbContext")]
+    [InlineData("DataAnalysisDbContext")]
+    [InlineData("RagDbContext")]
+    [InlineData("AiGatewayDbContext")]
+    public void SplitContextMigrations_ShouldNotCreateOutboxTable(string contextName)
     {
         var migrationRoot = Path.Combine(
             SolutionRoot,
@@ -1997,7 +2003,7 @@ public sealed class ArchitectureBoundaryTests
             "infrastructure",
             "AICopilot.EntityFrameworkCore",
             "Migrations",
-            "McpServerDbContext");
+            contextName);
 
         var createOutboxTable = new Regex(
             @"CreateTable\s*\([\s\S]*?name:\s*""outbox_messages""",
@@ -2013,106 +2019,39 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void DataAnalysisDbContextMigrations_ShouldNotCreateOutboxTable()
+    public void DeadOutboxDetachmentMigrations_ShouldBeSnapshotOnly()
     {
-        var migrationRoot = Path.Combine(
-            SolutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "Migrations",
-            "DataAnalysisDbContext");
+        Microsoft.EntityFrameworkCore.Migrations.Migration[] migrations =
+        [
+            new EntityFrameworkCore.Migrations.DataAnalysisDbContext.DetachDeadOutboxMapping(),
+            new EntityFrameworkCore.Migrations.McpServerDbContext.DetachDeadOutboxMapping()
+        ];
 
-        var createOutboxTable = new Regex(
-            @"CreateTable\s*\([\s\S]*?name:\s*""outbox_messages""",
-            RegexOptions.Compiled);
-
-        var violations = Directory
-            .EnumerateFiles(migrationRoot, "*.cs", SearchOption.AllDirectories)
-            .Where(file => createOutboxTable.IsMatch(File.ReadAllText(file)))
-            .Select(file => Path.GetRelativePath(SolutionRoot, file))
-            .ToArray();
-
-        violations.Should().BeEmpty("Outbox table migrations are owned by the main Outbox infrastructure");
-    }
-
-    [Fact]
-    public void RagDbContextMigrations_ShouldNotCreateOutboxTable()
-    {
-        var migrationRoot = Path.Combine(
-            SolutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "Migrations",
-            "RagDbContext");
-
-        var createOutboxTable = new Regex(
-            @"CreateTable\s*\([\s\S]*?name:\s*""outbox_messages""",
-            RegexOptions.Compiled);
-
-        var violations = Directory
-            .EnumerateFiles(migrationRoot, "*.cs", SearchOption.AllDirectories)
-            .Where(file => createOutboxTable.IsMatch(File.ReadAllText(file)))
-            .Select(file => Path.GetRelativePath(SolutionRoot, file))
-            .ToArray();
-
-        violations.Should().BeEmpty("Outbox table migrations are owned by the main Outbox infrastructure");
-    }
-
-    [Fact]
-    public void AiGatewayDbContextMigrations_ShouldNotCreateOutboxTable()
-    {
-        var migrationRoot = Path.Combine(
-            SolutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "Migrations",
-            "AiGatewayDbContext");
-
-        var createOutboxTable = new Regex(
-            @"CreateTable\s*\([\s\S]*?name:\s*""outbox_messages""",
-            RegexOptions.Compiled);
-
-        var violations = Directory
-            .EnumerateFiles(migrationRoot, "*.cs", SearchOption.AllDirectories)
-            .Where(file => createOutboxTable.IsMatch(File.ReadAllText(file)))
-            .Select(file => Path.GetRelativePath(SolutionRoot, file))
-            .ToArray();
-
-        violations.Should().BeEmpty("Outbox table migrations are owned by the main Outbox infrastructure");
-    }
-
-    [Fact]
-    public void OutboxRuntimeServices_ShouldNotDependOnAiCopilotDbContext()
-    {
-        var outboxRoot = Path.Combine(
-            SolutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "Outbox");
-
-        var runtimeFiles = new[]
+        foreach (var migration in migrations)
         {
-            "OutboxDispatcher.cs",
-            "OutboxIntegrationEventPublisher.cs"
-        };
-
-        foreach (var runtimeFile in runtimeFiles)
-        {
-            var source = File.ReadAllText(Path.Combine(outboxRoot, runtimeFile));
-
-            source.Should().Contain("OutboxDbContext", runtimeFile);
-            source.Should().NotContain("AiCopilotDbContext", runtimeFile);
+            migration.UpOperations.Should().BeEmpty(
+                $"{migration.GetType().FullName} only detaches dead model metadata and must not change the database");
+            migration.DownOperations.Should().BeEmpty(
+                $"{migration.GetType().FullName} only detaches dead model metadata and must not change the database");
         }
+    }
 
-        var outboxContext = File.ReadAllText(Path.Combine(outboxRoot, "OutboxDbContext.cs"));
+    [Theory]
+    [InlineData(typeof(AiCopilotDbContext), false)]
+    [InlineData(typeof(DataAnalysisDbContext), false)]
+    [InlineData(typeof(McpServerDbContext), false)]
+    [InlineData(typeof(AiGatewayDbContext), true)]
+    [InlineData(typeof(RagDbContext), true)]
+    public void DbContextSaveOverrides_ShouldRemainOnlyWhereEventsArePersisted(
+        Type contextType,
+        bool shouldDeclareOverride)
+    {
+        var saveOverride = contextType.GetMethod(
+                nameof(DbContext.SaveChangesAsync),
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly,
+                [typeof(CancellationToken)]);
 
-        outboxContext.Should().Contain("DbSet<OutboxMessage>");
-        outboxContext.Should().Contain("OutboxMessageConfiguration");
-        outboxContext.Should().NotContain("ExcludeFromMigrations");
+        (saveOverride is not null).Should().Be(shouldDeclareOverride, contextType.FullName);
     }
 
     [Fact]
@@ -2636,30 +2575,6 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void DataAnalysisDbContextSnapshot_ShouldMapBusinessDatabaseToDataAnalysisSchema()
-    {
-        var snapshotFile = Path.Combine(
-            SolutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "Migrations",
-            "DataAnalysisDbContext",
-            "DataAnalysisDbContextModelSnapshot.cs");
-        var snapshot = File.ReadAllText(snapshotFile);
-
-        snapshot.Should().Contain(
-            "AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase.BusinessDatabase",
-            "BusinessDatabase is owned by DataAnalysisDbContext");
-        snapshot.Should().Contain(
-            "b.ToTable(\"business_databases\", \"dataanalysis\");",
-            "BusinessDatabase must be mapped to the dataanalysis schema");
-        snapshot.Should().Contain(
-            "b.ToTable(\"outbox_messages\", \"outbox\", t => t.ExcludeFromMigrations());",
-            "module contexts may write Outbox rows but must not own the Outbox migration");
-    }
-
-    [Fact]
     public void RagDbContextSnapshot_ShouldMapRagTablesToRagSchema_AndExcludeOutboxFromMigrations()
     {
         var snapshotFile = Path.Combine(
@@ -2747,33 +2662,6 @@ public sealed class ArchitectureBoundaryTests
         snapshot.Should().Contain(
             "b.ToTable(\"messages\", \"aigateway\");",
             "Message must be mapped to the aigateway schema");
-        snapshot.Should().Contain(
-            "b.ToTable(\"outbox_messages\", \"outbox\",",
-            "module contexts may write Outbox rows but must not own the Outbox migration");
-        snapshot.Should().Contain(
-            "t.ExcludeFromMigrations();",
-            "module contexts may write Outbox rows but must not own the Outbox migration");
-    }
-
-    [Fact]
-    public void McpServerDbContextSnapshot_ShouldMapMcpTableToMcpSchema_AndExcludeOutboxFromMigrations()
-    {
-        var snapshotFile = Path.Combine(
-            SolutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "Migrations",
-            "McpServerDbContext",
-            "McpServerDbContextModelSnapshot.cs");
-        var snapshot = File.ReadAllText(snapshotFile);
-
-        snapshot.Should().Contain(
-            "AICopilot.Core.McpServer.Aggregates.McpServerInfo.McpServerInfo",
-            "McpServerInfo is owned by McpServerDbContext");
-        snapshot.Should().Contain(
-            "b.ToTable(\"mcp_server_info\", \"mcp\");",
-            "McpServerInfo must be mapped to the mcp schema");
         snapshot.Should().Contain(
             "b.ToTable(\"outbox_messages\", \"outbox\",",
             "module contexts may write Outbox rows but must not own the Outbox migration");

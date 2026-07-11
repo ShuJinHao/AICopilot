@@ -308,6 +308,14 @@ git log --oneline -n 20 -- AICopilot.slnx deploy src docs AGENTS.md 资料
 
 本批固定口径：formatter 不再分别解析 metadata 名、preview key 和逐行重名；它先单次收集最多 3 个可识别 dictionary row，再根据 metadata、schema 顺序和实际 row key 产生一份 `OrdinalIgnoreCase` 映射。字段敏感判定复用 `CloudReadOnlyGovernedSchema.BlockedFieldFragments`，值仍只走既有 `SanitizeValue/SanitizeTextValue` 链，没有第二份 blacklist 或递归 nested sanitizer。Semantic/FreeForm Widget 不消费 formatter label map，本批不修改 Widget、route、Cloud API、数据库或部署链。
 
+### 7.6 2026-07-11 Outbox 死语义删除与事务重试强制后续
+
+| 编号 | 严重级 | 状态 | 范围 | 修复要求 | 验收 |
+| --- | --- | --- | --- | --- | --- |
+| AI-SEC-046 | HIGH | Partial | DbContext / Outbox / retry | `AI-PERSIST-01a` 删除 AiCopilot/DataAnalysis/MCP 无生产者的领域事件扫描，DataAnalysis/MCP 通过空 `Up/Down` snapshot-only migration 脱离 Outbox model，RAG 只删除通用扫描并保留 delayed factory 原语义，零调用 publisher 和立即 Stage 重载物理删除；`AI-PERSIST-01b` 仍必须修 AiGateway/RAG commit 前重放、RAG existing-transaction commit 前清 buffer 与 commit-unknown，且 commit-unknown 必须使用 durable marker + fresh verification query | 01a：EF model metadata/反射 + 两份空 migration operations + MigrationSafety/FreshDatabase/Architecture/Backend/AiEval/solution；01b：真实 PostgreSQL 分阶段故障与 commit-ACK fault tests |
+
+本批不新增 `PersistenceCommitCoordinator`、buffer、receipt/marker 或生产 DDL，也不修改 `AiGatewayDbContext`、`Session` 领域事件和 RAG delayed factory 的两次保存/事务分支。`SaveChanges(false)` 只能支持 commit 前失败后的状态重放，不能证明 COMMIT 已成功但 ACK 丢失；Outbox 和 audit 都不是每次保存必有的 durable marker，因此 `AI-SEC-046` 必须保持 `Partial`，直到独立 `AI-PERSIST-01b` 通过真实 PostgreSQL commit-ACK 故障验收。
+
 ## 8. 第六批：Text-to-SQL 和提示词泄露门禁
 
 | 编号 | 严重级 | 状态 | 范围 | 修复要求 | 验收 |
