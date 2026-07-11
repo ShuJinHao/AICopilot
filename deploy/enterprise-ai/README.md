@@ -2,7 +2,7 @@
 
 本目录是 AICopilot 镜像构建和旧事务维护实现目录。新接手日常部署先读工作区根 `deploy/README.md` 和 `deploy/Deploy-Changed.ps1`，再按需查看本文件、仓库根目录的 `AICopilot 项目部署与维护指南.md`、`AGENTS.md` 和 `资料/AICopilot业务规则.md`。
 
-> 当前状态（2026-07-10）：新日常入口/Runner 已通过 fake 远端仓库、脏本地工作树、不可变 OCI、一次 SSH、migration 自动闭包、PostgreSQL 备份、失败回滚和不重建续传回归；旧原子事务回归仍保留。尚未完成真实 Harbor/SSH/生产容器 E2E，因此不能称生产部署已验收。
+> 当前状态（2026-07-11）：AICopilot 全量应用已完成真实 Harbor、生产 Runner、PostgreSQL 备份、migration、rollout 与健康检查；自动增量入口的编译门禁、依赖影响测试和生产 SHA 只读 inspect 已通过，但尚未用新的单服务业务变更执行生产发布，因此不得把全量成功冒充增量生产 E2E。
 
 本目录按双层口径维护：
 

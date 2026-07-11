@@ -2,7 +2,7 @@
 
 本文档是 AICopilot 当前项目级部署说明。长期业务边界见 `AGENTS.md` 和 `资料/AICopilot业务规则.md`；历史阶段计划和验收报告不再作为执行入口。日常自动增量入口是工作区根 `deploy/Deploy-Changed.ps1`；`Deploy.ps1` 只作为显式服务执行器和恢复入口，`deploy/Invoke-WorkspaceDeploy.ps1` 只保留给部署基础设施维护和旧事务诊断。
 
-> 当前状态（2026-07-10）：可信工作站日常链路已通过固定远端 SHA、脏本地工作树、fake Docker/SSH、一次 SSH、migration 备份、失败回滚和无重建续传回归。尚未执行真实 Harbor/SSH/生产容器 E2E，因此当前不得把本文目标链路解释为生产部署已验收。
+> 当前状态（2026-07-11）：AICopilot 全量应用已完成真实 Harbor、生产 Runner、PostgreSQL 备份、migration、rollout 与健康检查；自动增量入口的编译门禁、依赖影响测试和生产 SHA 只读 inspect 已通过，但尚未用新的单服务业务变更执行生产发布，因此不得把全量成功冒充增量生产 E2E。
 
 工作区标准入口示例：
 
