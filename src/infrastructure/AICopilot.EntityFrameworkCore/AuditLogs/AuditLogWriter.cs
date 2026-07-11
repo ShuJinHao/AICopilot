@@ -1,9 +1,12 @@
 ﻿using AICopilot.Services.Contracts;
+using AICopilot.EntityFrameworkCore.Transactions;
+using Microsoft.EntityFrameworkCore;
 
 namespace AICopilot.EntityFrameworkCore.AuditLogs;
 
 public sealed class AuditLogWriter(
     AuditDbContext auditDbContext,
+    PersistenceCommitEngine commitEngine,
     ICurrentUser? currentUser = null) : IAuditLogWriter
 {
     public Task WriteAsync(AuditLogWriteRequest request, CancellationToken cancellationToken = default)
@@ -35,6 +38,37 @@ public sealed class AuditLogWriter(
 
     public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
-        return auditDbContext.SaveChangesAsync(cancellationToken);
+        var hasStagedEntries = auditDbContext.ChangeTracker
+            .Entries<AuditLogEntry>()
+            .Any(entry => entry.State == EntityState.Added);
+        if (!hasStagedEntries)
+        {
+            return Task.FromResult(0);
+        }
+
+        return commitEngine.CommitAsync(
+            "Audit:Write",
+            new AuditCommitParticipant(auditDbContext),
+            cancellationToken);
+    }
+
+    private sealed class AuditCommitParticipant(AuditDbContext dbContext)
+        : IPersistenceCommitParticipant<int>
+    {
+        public DbContext TransactionOwner => dbContext;
+
+        public Task<int> PersistAttemptAsync(
+            PersistenceAttemptContext context,
+            CancellationToken cancellationToken)
+        {
+            return dbContext.SaveChangesAsync(
+                acceptAllChangesOnSuccess: false,
+                cancellationToken);
+        }
+
+        public void CommitConfirmed(int result)
+        {
+            dbContext.ChangeTracker.AcceptAllChanges();
+        }
     }
 }

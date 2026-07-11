@@ -14,15 +14,21 @@ using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.Core.Rag.Ids;
 using AICopilot.Dapper;
 using AICopilot.Dapper.Security;
+using AICopilot.EntityFrameworkCore;
+using AICopilot.EntityFrameworkCore.AuditLogs;
 using AICopilot.EntityFrameworkCore.Outbox;
+using AICopilot.EntityFrameworkCore.Persistence;
+using AICopilot.EntityFrameworkCore.Transactions;
 using AICopilot.HttpApi.Controllers;
 using AICopilot.HttpApi.Infrastructure;
 using AICopilot.IdentityService.Authorization;
 using AICopilot.Infrastructure.Storage;
 using AICopilot.RagService.Queries.KnowledgeBases;
+using AICopilot.Services.Contracts;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.Services.CrossCutting.Serialization;
 using AICopilot.SharedKernel.Ai;
+using AICopilot.SharedKernel.Result;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -1168,34 +1174,44 @@ Current mitigation: GitHub production environment reviewers, restricted runner a
     }
 
     [Fact]
-    public void UseCaseExceptionHandler_ShouldReturnSanitizedProblemDetailsForCatchAll()
+    public async Task UseCaseExceptionHandler_ShouldReturnSanitizedServiceUnavailable_WhenCommitOutcomeIsUnknown()
     {
-        var solutionRoot = FindSolutionRoot();
-        var exceptionHandlerSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "hosts",
-            "AICopilot.HttpApi",
-            "Infrastructure",
-            "UseCaseExceptionHandler.cs"));
-        var problemCodesSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "shared",
-            "AICopilot.SharedKernel",
-            "Result",
-            "ApiProblemDescriptor.cs"));
+        var logger = new CapturingUseCaseExceptionLogger();
+        var handler = new UseCaseExceptionHandler(logger);
+        var context = new DefaultHttpContext
+        {
+            TraceIdentifier = "trace-persistence-1"
+        };
+        context.Response.Body = new MemoryStream();
+        var exception = new PersistenceCommitOutcomeUnknownException(
+            Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            new HttpRequestException("Host=prod;Password=secret"));
 
-        problemCodesSource.Should().Contain("InternalServerError = \"internal_server_error\"");
-        exceptionHandlerSource.Should().Contain("ILogger<UseCaseExceptionHandler>");
-        exceptionHandlerSource.Should().Contain("logger.LogError");
-        exceptionHandlerSource.Should().Contain("hidden_by_security_policy");
-        exceptionHandlerSource.Should().NotContain("logger.LogError(\n            exception");
-        exceptionHandlerSource.Should().Contain("AppProblemCodes.InternalServerError");
-        exceptionHandlerSource.Should().Contain("StatusCodes.Status500InternalServerError");
-        exceptionHandlerSource.Should().Contain("traceId");
-        exceptionHandlerSource.Should().Contain("Request failed unexpectedly. Contact support with the trace id.");
-        exceptionHandlerSource.Should().NotContain("return false;");
+        var handled = await handler.TryHandleAsync(context, exception, CancellationToken.None);
+
+        handled.Should().BeTrue();
+        context.Response.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        context.Response.Body.Position = 0;
+        using var payload = await JsonDocument.ParseAsync(context.Response.Body);
+        payload.RootElement.GetProperty("status").GetInt32()
+            .Should().Be(StatusCodes.Status503ServiceUnavailable);
+        payload.RootElement.GetProperty("code").GetString()
+            .Should().Be(AppProblemCodes.PersistenceCommitOutcomeUnknown);
+        payload.RootElement.GetProperty("traceId").GetString()
+            .Should().Be("trace-persistence-1");
+        payload.RootElement.GetProperty("commitId").GetGuid()
+            .Should().Be(Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"));
+        payload.RootElement.GetProperty("detail").GetString()
+            .Should().Be("The write may have committed and must be reconciled before retrying.");
+
+        var serializedLogs = string.Join('\n', logger.Messages);
+        serializedLogs.Should().Contain("trace-persistence-1");
+        serializedLogs.Should().Contain("PersistenceCommitOutcomeUnknownException");
+        serializedLogs.Should().Contain("HttpRequestException");
+        serializedLogs.Should().Contain("hidden_by_security_policy");
+        serializedLogs.Should().NotContain("Host=prod");
+        serializedLogs.Should().NotContain("Password=secret");
+        logger.Exceptions.Should().OnlyContain(item => item == null);
     }
 
     [Fact]
@@ -1421,144 +1437,50 @@ Current mitigation: GitHub production environment reviewers, restricted runner a
     }
 
     [Fact]
-    public void AuditLogWriter_ShouldStageAuditBeforeExplicitSave()
+    public async Task AuditLogWriter_ShouldStageAuditBeforeExplicitSave()
     {
-        var solutionRoot = FindSolutionRoot();
-        var source = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "AuditLogs",
-            "AuditLogWriter.cs"));
+        var connectionString = "Host=localhost;Database=security;Username=test";
+        await using var auditDbContext = new AuditDbContext(
+            new DbContextOptionsBuilder<AuditDbContext>()
+                .UseNpgsql(connectionString)
+                .Options);
+        var writer = new AuditLogWriter(
+            auditDbContext,
+            new PersistenceCommitEngine(
+                new DbContextOptionsBuilder<PersistenceCommitMarkerDbContext>()
+                    .UseNpgsql(connectionString)
+                    .Options));
 
-        var writeStart = source.IndexOf("public Task WriteAsync", StringComparison.Ordinal);
-        var saveStart = source.IndexOf("public Task<int> SaveChangesAsync", StringComparison.Ordinal);
+        await writer.WriteAsync(new AuditLogWriteRequest(
+            AuditActionGroups.Config,
+            "SecurityHardening.StageAudit",
+            "SecurityHardening",
+            Guid.NewGuid().ToString(),
+            "staged-audit",
+            AuditResults.Succeeded,
+            "Audit must remain staged until the explicit save boundary."));
 
-        writeStart.Should().BeGreaterThanOrEqualTo(0);
-        saveStart.Should().BeGreaterThan(writeStart);
-        source[writeStart..saveStart].Should().NotContain("SaveChangesAsync(");
-        source.Should().Contain("AuditDbContext");
-        source.Should().NotContain("AiCopilotDbContext");
-        source[saveStart..].Should().Contain("auditDbContext.SaveChangesAsync");
+        auditDbContext.ChangeTracker.Entries<AuditLogEntry>()
+            .Should().ContainSingle()
+            .Which.State.Should().Be(EntityState.Added);
     }
 
     [Fact]
     public void AuditRuntimeServices_ShouldUseDedicatedAuditDbContext()
     {
-        var solutionRoot = FindSolutionRoot();
-        var writerSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "AuditLogs",
-            "AuditLogWriter.cs"));
-        var querySource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "AuditLogs",
-            "AuditLogQueryService.cs"));
-        var auditContextSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "AuditLogs",
-            "AuditDbContext.cs"));
-        var efRepositorySource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "Repository",
-            "EfRepository.cs"));
-        var efRepositoryBaseSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "Repository",
-            "EfRepositoryBase.cs"));
-        var efReadRepositoryBaseSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "Repository",
-            "EfReadRepositoryBase.cs"));
-        var aiGatewayRepositorySource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "Repository",
-            "AiGatewayRepository.cs"));
-        var businessDatabaseRepositorySource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "Repository",
-            "BusinessDatabaseRepository.cs"));
-        var ragRepositorySource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "Repository",
-            "RagRepository.cs"));
-        var mcpServerRepositorySource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "Repository",
-            "McpServerRepository.cs"));
-        var transactionCoordinatorSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "Transactions",
-            "AuditTransactionCoordinator.cs"));
-        var dependencyInjectionSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "DependencyInjection.cs"));
+        var writerParameters = typeof(AuditLogWriter).GetConstructors().Single().GetParameters();
+        writerParameters.Should().Contain(parameter => parameter.ParameterType == typeof(AuditDbContext));
+        writerParameters.Should().NotContain(parameter => parameter.ParameterType == typeof(AiCopilotDbContext));
 
-        writerSource.Should().Contain("AuditDbContext");
-        writerSource.Should().NotContain("AiCopilotDbContext");
-        querySource.Should().Contain("AuditDbContext");
-        querySource.Should().NotContain("AiCopilotDbContext");
-        auditContextSource.Should().Contain("DbSet<AuditLogEntry>");
-        auditContextSource.Should().Contain("AuditLogEntryConfiguration");
-        auditContextSource.Should().NotContain("ExcludeFromMigrations");
-        efRepositorySource.Should().Contain("EfRepositoryBase<AiCopilotDbContext, T>");
-        efRepositoryBaseSource.Should().Contain("AuditTransactionCoordinator");
-        efRepositoryBaseSource.Should().Contain("transactionCoordinator.SaveChangesAsync");
-        efReadRepositoryBaseSource.Should().Contain("SpecificationEvaluator.GetQuery");
-        efReadRepositoryBaseSource.Should().Contain("ApplyIncludes");
-        aiGatewayRepositorySource.Should().Contain("EfRepositoryBase<AiGatewayDbContext, T>");
-        businessDatabaseRepositorySource.Should().Contain("EfRepositoryBase<DataAnalysisDbContext, BusinessDatabase>");
-        ragRepositorySource.Should().Contain("EfRepositoryBase<RagDbContext, T>");
-        mcpServerRepositorySource.Should().Contain("EfRepositoryBase<McpServerDbContext, McpServerInfo>");
-        aiGatewayRepositorySource.Should().NotContain("ApplySpecification");
-        businessDatabaseRepositorySource.Should().NotContain("ApplySpecification");
-        ragRepositorySource.Should().NotContain("ApplySpecification");
-        mcpServerRepositorySource.Should().NotContain("ApplySpecification");
-        transactionCoordinatorSource.Should().Contain("CreateExecutionStrategy");
-        transactionCoordinatorSource.Should().Contain("BeginTransactionAsync");
-        transactionCoordinatorSource.Should().Contain("UseTransactionAsync");
-        transactionCoordinatorSource.Should().Contain("new AuditDbContext");
-        transactionCoordinatorSource.Should().Contain("transactionalAuditDbContext.SaveChangesAsync");
-        transactionCoordinatorSource.Should().NotContain("SetDbConnection");
-        dependencyInjectionSource.Should().Contain("AddNpgsqlDbContext<AuditDbContext>");
-        dependencyInjectionSource.Should().Contain("AuditTransactionCoordinator");
+        var queryParameters = typeof(AuditLogQueryService).GetConstructors().Single().GetParameters();
+        queryParameters.Should().ContainSingle()
+            .Which.ParameterType.Should().Be(typeof(AuditDbContext));
+
+        using var auditDbContext = new AuditDbContext(
+            new DbContextOptionsBuilder<AuditDbContext>()
+                .UseNpgsql("Host=localhost;Database=security;Username=test;Password=test")
+                .Options);
+        auditDbContext.Model.FindEntityType(typeof(AuditLogEntry)).Should().NotBeNull();
     }
 
     [Fact]
@@ -1636,9 +1558,11 @@ Current mitigation: GitHub production environment reviewers, restricted runner a
         stageParameter.IsGenericType.Should().BeTrue();
         stageParameter.GetGenericTypeDefinition().Should().Be(typeof(Func<>));
 
-        typeof(RagIntegrationEventStager).GetMethods(
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly)
-            .Should().ContainSingle(method => method.Name == nameof(IIntegrationEventStager.Stage));
+        typeof(RagIntegrationEventBuffer).Should().BeAssignableTo<IIntegrationEventStager>();
+        typeof(RagIntegrationEventBuffer).GetMethod(nameof(IIntegrationEventStager.Stage))
+            .Should().NotBeNull();
+        typeof(RagDbContext).GetMethod("StageIntegrationEvent")
+            .Should().BeNull();
         typeof(IIntegrationEventStager).Assembly
             .GetType("AICopilot.Services.Contracts.IIntegrationEventPublisher")
             .Should().BeNull();
@@ -2574,10 +2498,20 @@ Current mitigation: GitHub production environment reviewers, restricted runner a
         knowledgeBase.Name.Should().Be("kb");
         knowledgeBase.Description.Should().Be("description");
 
-        var emptyDocumentName = () => knowledgeBase.AddDocument(" ", "path.txt", ".txt", "hash");
+        var emptyDocumentName = () => knowledgeBase.AddDocument(
+            new DocumentId(1),
+            " ",
+            "path.txt",
+            ".txt",
+            "hash");
         emptyDocumentName.Should().Throw<ArgumentException>();
 
-        var document = knowledgeBase.AddDocument(" doc ", " path.txt ", " .txt ", " hash ");
+        var document = knowledgeBase.AddDocument(
+            new DocumentId(1),
+            " doc ",
+            " path.txt ",
+            " .txt ",
+            " hash ");
         document.Name.Should().Be("doc");
         document.FilePath.Should().Be("path.txt");
         document.Extension.Should().Be(".txt");

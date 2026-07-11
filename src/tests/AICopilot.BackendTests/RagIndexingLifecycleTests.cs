@@ -9,6 +9,7 @@ using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
 using AICopilot.SharedKernel.Specification;
 using AICopilot.Services.Contracts.Events;
+using AICopilot.Services.Contracts;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -25,6 +26,7 @@ public sealed class RagIndexingLifecycleTests
         var eventStager = new CapturingEventStager();
         var handler = new UploadDocumentCommandHandler(
             repository,
+            new SequentialDocumentIdAllocator(),
             fileStorage,
             new FixedDocumentFormatPolicy([".txt", ".md", ".pdf"]),
             eventStager,
@@ -52,6 +54,7 @@ public sealed class RagIndexingLifecycleTests
         var eventStager = new CapturingEventStager();
         var handler = new UploadDocumentCommandHandler(
             repository,
+            new SequentialDocumentIdAllocator(),
             new CapturingFileStorage(),
             new FixedDocumentFormatPolicy([".txt"]),
             eventStager,
@@ -91,6 +94,7 @@ public sealed class RagIndexingLifecycleTests
         var eventStager = new CapturingEventStager(_ => saveCountObservedAtStage = repository.SaveCount);
         var handler = new UploadDocumentCommandHandler(
             repository,
+            new SequentialDocumentIdAllocator(),
             new CapturingFileStorage(),
             new FixedDocumentFormatPolicy([".txt"]),
             eventStager,
@@ -123,6 +127,7 @@ public sealed class RagIndexingLifecycleTests
         var fileStorage = new CapturingFileStorage();
         var handler = new UploadDocumentCommandHandler(
             repository,
+            new SequentialDocumentIdAllocator(),
             fileStorage,
             new FixedDocumentFormatPolicy([".txt"]),
             new ThrowingEventStager(new InvalidOperationException("stage failed")),
@@ -153,6 +158,7 @@ public sealed class RagIndexingLifecycleTests
         var eventStager = new CapturingEventStager();
         var handler = new UploadDocumentCommandHandler(
             repository,
+            new SequentialDocumentIdAllocator(),
             fileStorage,
             new FixedDocumentFormatPolicy([".txt"]),
             eventStager,
@@ -179,12 +185,18 @@ public sealed class RagIndexingLifecycleTests
         var content = new byte[] { 1, 2, 3 };
         var fileHash = Sha256Hex(content);
         var knowledgeBase = new KnowledgeBase("kb", "description", EmbeddingModelId.New());
-        var existingDocument = knowledgeBase.AddDocument("existing.txt", "existing.txt", ".txt", fileHash);
+        var existingDocument = knowledgeBase.AddDocument(
+            new DocumentId(1),
+            "existing.txt",
+            "existing.txt",
+            ".txt",
+            fileHash);
         var repository = new MutableKnowledgeBaseRepository(knowledgeBase);
         var fileStorage = new CapturingFileStorage();
         var eventStager = new CapturingEventStager();
         var handler = new UploadDocumentCommandHandler(
             repository,
+            new SequentialDocumentIdAllocator(2),
             fileStorage,
             new FixedDocumentFormatPolicy([".txt"]),
             eventStager,
@@ -210,7 +222,12 @@ public sealed class RagIndexingLifecycleTests
     public void DocumentGovernance_ShouldDefaultToCurrentBehaviorAndFilterUnsafeDocuments()
     {
         var knowledgeBase = new KnowledgeBase("kb", "description", EmbeddingModelId.New());
-        var document = knowledgeBase.AddDocument("doc.txt", "doc.txt", ".txt", "hash");
+        var document = knowledgeBase.AddDocument(
+            new DocumentId(1),
+            "doc.txt",
+            "doc.txt",
+            ".txt",
+            "hash");
         var now = DateTime.UtcNow;
 
         document.Classification.Should().Be(DocumentClassification.Internal);
@@ -611,7 +628,12 @@ public sealed class RagIndexingLifecycleTests
     private static (KnowledgeBase KnowledgeBase, Document Document) CreateKnowledgeBaseWithDocument()
     {
         var knowledgeBase = new KnowledgeBase("kb", "description", EmbeddingModelId.New());
-        var document = knowledgeBase.AddDocument("doc.txt", "doc.txt", ".txt", "hash");
+        var document = knowledgeBase.AddDocument(
+            new DocumentId(1),
+            "doc.txt",
+            "doc.txt",
+            ".txt",
+            "hash");
 
         return (knowledgeBase, document);
     }

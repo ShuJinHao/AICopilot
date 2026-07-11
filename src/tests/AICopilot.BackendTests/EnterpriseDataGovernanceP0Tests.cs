@@ -111,7 +111,12 @@ public sealed class EnterpriseDataGovernanceP0Tests
     public void RagDocumentLifecycle_ShouldExcludeSupersededAndSoftDeletedDocuments()
     {
         var kb = new KnowledgeBase("制度库", "制度测试", EmbeddingModelId.New());
-        var document = kb.AddDocument("婚假制度.md", "/safe/marriage.md", ".md", new string('a', 64));
+        var document = kb.AddDocument(
+            new DocumentId(1),
+            "婚假制度.md",
+            "/safe/marriage.md",
+            ".md",
+            new string('a', 64));
 
         document.MarkAsIndexed();
         document.IsSearchable(DateTime.UtcNow).Should().BeTrue();

@@ -5,6 +5,6 @@ namespace AICopilot.EntityFrameworkCore.Repository;
 
 public sealed class AiGatewayRepository<T>(
     AiGatewayDbContext dbContext,
-    AuditTransactionCoordinator transactionCoordinator)
-    : EfRepositoryBase<AiGatewayDbContext, T>(dbContext, transactionCoordinator)
+    RepositoryPersistenceCommitter persistenceCommitter)
+    : EfRepositoryBase<AiGatewayDbContext, T>(dbContext, persistenceCommitter)
     where T : class, IEntity, IAggregateRoot;

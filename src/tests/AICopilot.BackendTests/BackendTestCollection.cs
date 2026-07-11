@@ -13,6 +13,12 @@ public sealed class CoreBackendTestCollection : ICollectionFixture<CoreAICopilot
 }
 
 [CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class PostgresPersistenceTestCollection : ICollectionFixture<PostgresPersistenceFixture>
+{
+    public const string Name = "AICopilotPostgresPersistence";
+}
+
+[CollectionDefinition(Name, DisableParallelization = true)]
 public sealed class AgentSimulationBackendTestCollection : ICollectionFixture<AgentSimulationAICopilotAppFixture>
 {
     public const string Name = "AICopilotAgentSimulationBackend";

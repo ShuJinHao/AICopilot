@@ -18,6 +18,7 @@ public static class AuthProblemCodes
 public static class AppProblemCodes
 {
     public const string InternalServerError = "internal_server_error";
+    public const string PersistenceCommitOutcomeUnknown = "persistence_commit_outcome_unknown";
     public const string RequestValidationFailed = "request_validation_failed";
     public const string RateLimitExceeded = "rate_limit_exceeded";
     public const string ChatContextExpired = "chat_context_expired";

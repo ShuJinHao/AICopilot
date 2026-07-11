@@ -68,6 +68,13 @@ Cloud 只读 Agent 当前正式能力限定为：
 - `UseCaseExceptionHandler` catch-all 不得把原始 exception 对象交给 logger 形成敏感日志。
 - 新增、删除或重命名错误码时，必须同步更新 `docs/frontend-integration-contract-package-2026-05-17.md` 并运行错误码目录测试。
 
+### 4.1 提交结果未知
+
+- repository 使用 durable commit marker 处理 COMMIT ACK 丢失；fresh verification 无法确认 marker 时，HttpApi 返回 HTTP 503、`code=persistence_commit_outcome_unknown`、安全 `detail/userFacingMessage`、trace id 和非敏感 commit id。
+- 该响应表示“写入可能已经提交”，不是确定失败。调用方不得自动重试同一业务动作；应先按 commit id 对账，再决定返回既有结果、补偿或人工重试。
+- 日志只记录 trace id、commit id、exception type 和 inner exception type，不记录 raw exception message、连接串、SQL、文件路径或业务载荷。
+- RAG 上传收到该异常时必须保留已保存文件，不能按普通回滚失败删除；文件对账/清理器完成前该批不得部署。
+
 ## 5. 日志和持久化脱敏
 
 生产路径日志、审计、任务失败摘要和持久化失败原因必须只记录安全字段：

@@ -12,6 +12,7 @@ public class Document : IEntity<DocumentId>
     }
 
     internal Document(
+        DocumentId id,
         KnowledgeBaseId knowledgeBaseId,
         string name,
         string filePath,
@@ -32,6 +33,11 @@ public class Document : IEntity<DocumentId>
         DateTime? expiredAt = null,
         KnowledgeCategoryId? categoryId = null)
     {
+        if (id.Value <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(id), "Document id must be positive.");
+        }
+
         if (string.IsNullOrWhiteSpace(name))
         {
             throw new ArgumentException("Document name is required.", nameof(name));
@@ -52,6 +58,7 @@ public class Document : IEntity<DocumentId>
             throw new ArgumentException("Document file hash is required.", nameof(fileHash));
         }
 
+        Id = id;
         KnowledgeBaseId = knowledgeBaseId;
         Name = name.Trim();
         FilePath = filePath.Trim();

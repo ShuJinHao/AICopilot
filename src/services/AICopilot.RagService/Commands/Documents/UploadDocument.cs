@@ -38,6 +38,7 @@ public record UploadDocumentCommand(
 
 public class UploadDocumentCommandHandler(
     IRepository<KnowledgeBase> kbRepo,
+    IDocumentIdAllocator documentIdAllocator,
     IFileStorageService fileStorage,
     IDocumentFormatPolicy documentFormatPolicy,
     IIntegrationEventStager eventStager,
@@ -130,12 +131,15 @@ public class UploadDocumentCommandHandler(
             return Result.Success(new UploadDocumentDto(existingDoc.Id, existingDoc.Status.ToString()));
         }
 
+        var documentId = await documentIdAllocator.AllocateAsync(cancellationToken);
+
         // 4. 保存物理文件 (只有当文件不存在时才执行 IO 操作)
         var savedPath = await fileStorage.SaveAsync(normalizedFile.Stream, normalizedFile.FileName, cancellationToken);
 
         // 5. 领域模型行为：添加文档
         // 这一步是纯内存操作，修改了聚合根的状态
         var document = kb.AddDocument(
+            documentId,
             normalizedFile.FileName,
             savedPath,
             extension,
@@ -170,6 +174,10 @@ public class UploadDocumentCommandHandler(
 
             // 7. 持久化到数据库，同时提交文档和 outbox 行。
             await kbRepo.SaveChangesAsync(cancellationToken);
+        }
+        catch (PersistenceCommitOutcomeUnknownException)
+        {
+            throw;
         }
         catch (Exception ex)
         {

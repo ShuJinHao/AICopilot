@@ -17,6 +17,7 @@ using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.EntityFrameworkCore.AuditLogs;
 using AICopilot.EntityFrameworkCore.ExternalIdentities;
 using AICopilot.EntityFrameworkCore.Outbox;
+using AICopilot.EntityFrameworkCore.Persistence;
 using AICopilot.EntityFrameworkCore.Repository;
 using AICopilot.EntityFrameworkCore.Security;
 using AICopilot.EntityFrameworkCore.Transactions;
@@ -50,6 +51,7 @@ public static class DependencyInjection
             "ai-copilot",
             configureDbContextOptions: AICopilotNpgsqlOptions.ConfigureMigrationHistory(MigrationHistoryTables.McpServer));
         builder.AddNpgsqlDbContext<OutboxDbContext>("ai-copilot");
+        builder.AddNpgsqlDbContext<PersistenceCommitMarkerDbContext>("ai-copilot");
         builder.AddNpgsqlDbContext<RagDbContext>(
             "ai-copilot",
             configureDbContextOptions: AICopilotNpgsqlOptions.ConfigureMigrationHistory(MigrationHistoryTables.Rag));
@@ -108,9 +110,18 @@ public static class DependencyInjection
         builder.Services.AddScoped<IIdentityAuditLogWriter, IdentityAuditLogWriter>();
         builder.Services.AddScoped<IExternalIdentityBindingStore, ExternalIdentityBindingStore>();
         builder.Services.AddScoped<IAuditLogQueryService, AuditLogQueryService>();
-        builder.Services.AddScoped<AuditTransactionCoordinator>();
+        builder.Services.AddScoped<PersistenceCommitEngine>();
+        builder.Services.AddScoped<RepositoryPersistenceCommitter>();
+        builder.Services.AddScoped<AiGatewayDomainEventOutboxSource>();
+        builder.Services.AddScoped<IPersistenceOutboxSource>(provider =>
+            provider.GetRequiredService<AiGatewayDomainEventOutboxSource>());
+        builder.Services.AddScoped<RagIntegrationEventBuffer>();
+        builder.Services.AddScoped<IPersistenceOutboxSource>(provider =>
+            provider.GetRequiredService<RagIntegrationEventBuffer>());
         builder.Services.AddScoped<ITransactionalExecutionService, EfTransactionalExecutionService>();
-        builder.Services.AddScoped<IIntegrationEventStager, RagIntegrationEventStager>();
+        builder.Services.AddScoped<IIntegrationEventStager>(provider =>
+            provider.GetRequiredService<RagIntegrationEventBuffer>());
+        builder.Services.AddScoped<IDocumentIdAllocator, PostgresDocumentIdAllocator>();
 
         builder.Services.AddIdentityCore<ApplicationUser>(options =>
         {

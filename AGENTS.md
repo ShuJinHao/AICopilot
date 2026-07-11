@@ -103,9 +103,11 @@ Cloud-AICopilot OIDC 身份对齐的长期结论见 `../docs/历史核心记录.
 - 新增或接线 `IStreamPipelineBehavior` 后，必须核对所有公开 `IStreamRequest` 的 `AuthorizeRequirement`，测试种子角色必须覆盖对应权限；无权限场景应返回干净 401/403，不能表现为 SSE 已写 200 后断流。
 - MediatR 管道顺序固定为 Telemetry -> Validation -> Authorization；新增 Validation behavior 时必须同步至少一个真实 validator 和测试，不能提交空壳管道。
 - MediatR telemetry 必须复用现有 OpenTelemetry / structured logging，只记录 request type、kind、耗时、结果和异常类型；不得记录 prompt 全文、SQL、token、连接串、API key 或业务数据明细。
-- 事务/审计拥有者必须显式且唯一：repository 保存的业务+审计原子性由 `AuditTransactionCoordinator` 拥有，Identity 用户/角色事务由 `ITransactionalExecutionService`/`EfTransactionalExecutionService` 拥有；MediatR behavior 不得开启事务、保存审计、调用 `SaveChangesAsync` 或包裹 stream/handler 形成隐式事务边界。
-- 没有真实事件生产者的 DbContext 不得为“未来可能使用”复制 Outbox `DbSet`、映射或 `SaveChangesAsync` 领域事件扫描；当前只有 AiGateway `Session` 领域事件和 RAG delayed integration-event factory 保留业务 Context 内的 Outbox 写入，主 `AiCopilotDbContext` 只保留 Outbox migration ownership。
-- 不能仅凭 `SaveChanges(false)` 宣称 EF execution-strategy 事务安全；COMMIT 已成功但 ACK 丢失必须通过 fresh context 查询同一事务写入的 durable verification marker 或等价机制判断，并有真实 PostgreSQL commit-ACK fault test。AiGateway/RAG 当前 retry、RAG existing-transaction commit 前清 buffer 和 commit-unknown 债务登记在 `AI-SEC-046`，不得由无关去重批次冒充修复。
+- 事务/审计拥有者必须显式且唯一：普通 repository 保存的业务、Outbox、审计和 commit marker 原子性由唯一 `PersistenceCommitEngine` / `RepositoryPersistenceCommitter` 链拥有；Identity 用户/角色事务在 `AI-PERSIST-01c` 前仍由 `ITransactionalExecutionService` / `EfTransactionalExecutionService` 独立拥有。MediatR behavior 不得开启事务、保存审计、调用 `SaveChangesAsync` 或包裹 stream/handler 形成隐式事务边界。
+- 没有真实事件生产者的 DbContext 不得为“未来可能使用”复制 Outbox `DbSet`、映射或 `SaveChangesAsync` 领域事件扫描；AiGateway `Session` 领域事件和 RAG delayed integration-event factory 只能通过 repository commit participant 物化到短生命周期 `OutboxDbContext`，业务 Context 不再映射共享 Outbox；主 `AiCopilotDbContext` 是 Outbox 与 persistence marker 的唯一 migration owner。
+- EF execution-strategy 重试只能使用官方 `ExecuteInTransactionAsync(... verifySucceeded ...)` 或等价官方入口，不得手写业务重试循环。每次 repository attempt 对业务 Context 只执行一次 `SaveChangesAsync(false)`，只有事务确认成功后才 `AcceptAllChanges`、清领域事件或清 RAG factory buffer。
+- COMMIT 已成功但 ACK 丢失必须由同事务 durable commit marker 和独立 fresh context 验证，不能用 `SaveChanges(false)`、可选 Outbox 或可选 audit 推断成功；marker 写入后不得再由 caller cancellation 中断 commit/verification。fresh verification 无法确认时必须返回 `persistence_commit_outcome_unknown`，禁止自动重放业务或删除可能已提交写入对应的文件，必须先按 commit id 对账再决定重试。
+- `AI-PERSIST-01b` 只覆盖普通 repository、独立 audit writer 与 AiGateway/RAG Outbox 路径；Identity 事务、commit-unknown 文件对账/清理和 marker 生命周期由 `AI-PERSIST-01c` 收口。01b 与 01c 未共同验收前禁止合并或部署，不得把局部 PostgreSQL 绿测包装为整条持久化链已完成。
 
 ## Unified Agent Workflow
 

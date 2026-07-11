@@ -17,7 +17,6 @@ public sealed class ArtifactWorkspaceLifecycleCoordinator(
     IAgentTaskRunAttemptStore runAttemptStore,
     IArtifactWorkspaceFileStore fileStore,
     AgentAuditRecorder auditRecorder,
-    IAuditLogWriter auditLogWriter,
     ICurrentUser currentUser,
     IIdentityAccessService identityAccessService,
     MessageTimelineProjectionWriter? timelineProjectionWriter = null)
@@ -97,7 +96,6 @@ public sealed class ArtifactWorkspaceLifecycleCoordinator(
         taskRepository.Update(task);
         workspaceRepository.Update(workspace);
         await workspaceRepository.SaveChangesAsync(cancellationToken);
-        await auditLogWriter.SaveChangesAsync(cancellationToken);
 
         var files = await fileStore.ListAsync(workspace.WorkspaceCode, cancellationToken);
         return Result.Success(ArtifactWorkspaceMapper.Map(workspace, task, files));
@@ -250,7 +248,6 @@ public sealed class ArtifactWorkspaceLifecycleCoordinator(
         }
 
         await workspaceRepository.SaveChangesAsync(cancellationToken);
-        await auditLogWriter.SaveChangesAsync(cancellationToken);
 
         var files = await fileStore.ListAsync(workspace.WorkspaceCode, cancellationToken);
         return Result.Success(ArtifactWorkspaceMapper.Map(workspace, task, files));

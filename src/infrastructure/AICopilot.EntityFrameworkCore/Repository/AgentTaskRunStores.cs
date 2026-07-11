@@ -8,7 +8,7 @@ namespace AICopilot.EntityFrameworkCore.Repository;
 
 public sealed class AgentTaskRunQueueStore(
     AiGatewayDbContext dbContext,
-    AuditTransactionCoordinator transactionCoordinator)
+    RepositoryPersistenceCommitter persistenceCommitter)
     : IAgentTaskRunQueueStore
 {
     public async Task<AgentTaskRunQueueItem?> FirstActiveByTaskAsync(
@@ -76,7 +76,7 @@ public sealed class AgentTaskRunQueueStore(
 
     public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
-        return transactionCoordinator.SaveChangesAsync(dbContext, cancellationToken);
+        return persistenceCommitter.SaveChangesAsync(dbContext, cancellationToken);
     }
 
     private IQueryable<AgentTaskRunQueueItem> ActiveByTask(AgentTaskId taskId)
@@ -90,7 +90,7 @@ public sealed class AgentTaskRunQueueStore(
 
 public sealed class AgentTaskRunAttemptStore(
     AiGatewayDbContext dbContext,
-    AuditTransactionCoordinator transactionCoordinator)
+    RepositoryPersistenceCommitter persistenceCommitter)
     : IAgentTaskRunAttemptStore
 {
     public async Task<AgentTaskRunAttempt?> FirstByIdAsync(
@@ -124,6 +124,6 @@ public sealed class AgentTaskRunAttemptStore(
 
     public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
-        return transactionCoordinator.SaveChangesAsync(dbContext, cancellationToken);
+        return persistenceCommitter.SaveChangesAsync(dbContext, cancellationToken);
     }
 }

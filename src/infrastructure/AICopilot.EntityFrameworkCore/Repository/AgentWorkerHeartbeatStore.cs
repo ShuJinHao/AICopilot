@@ -7,7 +7,7 @@ namespace AICopilot.EntityFrameworkCore.Repository;
 
 public sealed class AgentWorkerHeartbeatStore(
     AiGatewayDbContext dbContext,
-    AuditTransactionCoordinator transactionCoordinator)
+    RepositoryPersistenceCommitter persistenceCommitter)
     : IAgentWorkerHeartbeatStore
 {
     public async Task<AgentWorkerHeartbeat?> FirstByWorkerIdAsync(
@@ -38,6 +38,6 @@ public sealed class AgentWorkerHeartbeatStore(
 
     public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
-        return transactionCoordinator.SaveChangesAsync(dbContext, cancellationToken);
+        return persistenceCommitter.SaveChangesAsync(dbContext, cancellationToken);
     }
 }

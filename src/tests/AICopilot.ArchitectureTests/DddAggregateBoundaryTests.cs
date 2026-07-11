@@ -81,6 +81,7 @@ public sealed class DddAggregateBoundaryTests
             ["ToolExecutionRecord"] = "Audit",
             ["AuditLogEntry"] = "Audit",
             ["OutboxMessage"] = "Audit",
+            ["PersistenceCommitMarker"] = "RuntimeRecord",
             ["ExternalIdentityBinding"] = "IdentityRecord"
         };
 

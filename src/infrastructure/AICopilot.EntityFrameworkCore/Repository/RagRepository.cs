@@ -5,6 +5,6 @@ namespace AICopilot.EntityFrameworkCore.Repository;
 
 public sealed class RagRepository<T>(
     RagDbContext dbContext,
-    AuditTransactionCoordinator transactionCoordinator)
-    : EfRepositoryBase<RagDbContext, T>(dbContext, transactionCoordinator)
+    RepositoryPersistenceCommitter persistenceCommitter)
+    : EfRepositoryBase<RagDbContext, T>(dbContext, persistenceCommitter)
     where T : class, IEntity, IAggregateRoot;

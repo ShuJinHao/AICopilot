@@ -5,10 +5,10 @@ namespace AICopilot.EntityFrameworkCore.Repository;
 
 public sealed class BusinessDatabaseRepository(
     DataAnalysisDbContext dbContext,
-    AuditTransactionCoordinator transactionCoordinator)
-    : EfRepositoryBase<DataAnalysisDbContext, BusinessDatabase>(dbContext, transactionCoordinator);
+    RepositoryPersistenceCommitter persistenceCommitter)
+    : EfRepositoryBase<DataAnalysisDbContext, BusinessDatabase>(dbContext, persistenceCommitter);
 
 public sealed class DataSourcePermissionGrantRepository(
     DataAnalysisDbContext dbContext,
-    AuditTransactionCoordinator transactionCoordinator)
-    : EfRepositoryBase<DataAnalysisDbContext, DataSourcePermissionGrant>(dbContext, transactionCoordinator);
+    RepositoryPersistenceCommitter persistenceCommitter)
+    : EfRepositoryBase<DataAnalysisDbContext, DataSourcePermissionGrant>(dbContext, persistenceCommitter);

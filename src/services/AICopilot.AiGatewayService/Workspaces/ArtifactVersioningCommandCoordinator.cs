@@ -15,7 +15,6 @@ public sealed class ArtifactVersioningCommandCoordinator(
     IReadRepository<ApprovalRequest> approvalRepository,
     IArtifactWorkspaceFileStore fileStore,
     AgentAuditRecorder auditRecorder,
-    IAuditLogWriter auditLogWriter,
     ICurrentUser currentUser,
     IIdentityAccessService identityAccessService)
 {
@@ -73,7 +72,6 @@ public sealed class ArtifactVersioningCommandCoordinator(
             request.Comment,
             cancellationToken);
         await workspaceRepository.SaveChangesAsync(cancellationToken);
-        await auditLogWriter.SaveChangesAsync(cancellationToken);
 
         var files = await fileStore.ListAsync(context.Workspace.WorkspaceCode, cancellationToken);
         return Result.Success(ArtifactWorkspaceMapper.Map(context.Workspace, context.Task, files));
@@ -140,7 +138,6 @@ public sealed class ArtifactVersioningCommandCoordinator(
             request.Comment,
             cancellationToken);
         await workspaceRepository.SaveChangesAsync(cancellationToken);
-        await auditLogWriter.SaveChangesAsync(cancellationToken);
 
         var files = await fileStore.ListAsync(context.Workspace.WorkspaceCode, cancellationToken);
         return Result.Success(ArtifactWorkspaceMapper.Map(context.Workspace, context.Task, files));

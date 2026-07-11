@@ -11,8 +11,6 @@ using AICopilot.Core.AiGateway.Aggregates.Skills;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Core.AiGateway.Aggregates.Uploads;
 using AICopilot.EntityFrameworkCore.Configuration.AiGateway;
-using AICopilot.EntityFrameworkCore.Outbox;
-using AICopilot.SharedKernel.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 
@@ -56,8 +54,6 @@ public sealed class AiGatewayDbContext(DbContextOptions<AiGatewayDbContext> opti
 
     public DbSet<ToolExecutionRecord> ToolExecutionRecords => Set<ToolExecutionRecord>();
 
-    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
-
     protected override void OnModelCreating(ModelBuilder builder)
     {
         builder.HasDefaultSchema("aigateway");
@@ -81,36 +77,6 @@ public sealed class AiGatewayDbContext(DbContextOptions<AiGatewayDbContext> opti
         builder.ApplyConfiguration(new ToolRegistrationConfiguration());
         builder.ApplyConfiguration(new SkillDefinitionConfiguration());
         builder.ApplyConfiguration(new ToolExecutionRecordConfiguration());
-        builder.ApplyConfiguration(new OutboxMessageConfiguration());
-        builder.Entity<OutboxMessage>().ToTable(
-            "outbox_messages",
-            "outbox",
-            tableBuilder => tableBuilder.ExcludeFromMigrations());
-    }
-
-    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
-    {
-        var domainEventEntities = ChangeTracker
-            .Entries()
-            .Select(entry => entry.Entity)
-            .OfType<IHasDomainEvents>()
-            .Where(entity => entity.DomainEvents.Count > 0)
-            .ToArray();
-
-        var domainEvents = domainEventEntities
-            .SelectMany(entity => entity.DomainEvents)
-            .ToArray();
-
-        OutboxMessages.AddRange(domainEvents.Select(OutboxMessage.FromIntegrationEvent));
-
-        var result = await base.SaveChangesAsync(cancellationToken);
-
-        foreach (var entity in domainEventEntities)
-        {
-            entity.ClearDomainEvents();
-        }
-
-        return result;
     }
 }
 

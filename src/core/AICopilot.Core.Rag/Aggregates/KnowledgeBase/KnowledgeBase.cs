@@ -53,6 +53,7 @@ public class KnowledgeBase : IAggregateRoot<KnowledgeBaseId>
     /// 添加新文档到知识库
     /// </summary>
     public Document AddDocument(
+        DocumentId documentId,
         string name,
         string filePath,
         string extension,
@@ -73,6 +74,7 @@ public class KnowledgeBase : IAggregateRoot<KnowledgeBaseId>
         KnowledgeCategoryId? categoryId = null)
     {
         var document = new Document(
+            documentId,
             Id,
             name,
             filePath,

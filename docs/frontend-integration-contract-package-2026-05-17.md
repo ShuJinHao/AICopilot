@@ -28,6 +28,7 @@ For structured chat error chunks, frontend displays `userFacingMessage` first, t
 | --- | --- |
 | `request_validation_failed` | Request validation failed before handler execution. |
 | `internal_server_error` | Unexpected server failure was handled by the global exception boundary; frontend should show the safe detail and trace identifier. |
+| `persistence_commit_outcome_unknown` | A write may already have committed but its durable marker could not be verified. Frontend must show the safe detail plus trace/commit identifiers and must not automatically retry the write. |
 | `rate_limit_exceeded` | Rate limit was exceeded. |
 | `chat_context_expired` | Chat context expired. |
 | `chat_configuration_missing` | Chat runtime configuration is missing. |

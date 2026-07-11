@@ -184,7 +184,6 @@ public sealed class ArtifactWorkspaceP9Coordinator(
             request.Comment,
             cancellationToken);
         await workspaceRepository.SaveChangesAsync(cancellationToken);
-        await auditLogWriter.SaveChangesAsync(cancellationToken);
 
         var files = await fileStore.ListAsync(context.Workspace.WorkspaceCode, cancellationToken);
         return Result.Success(ArtifactWorkspaceMapper.Map(context.Workspace, context.Task, files));
@@ -269,7 +268,6 @@ public sealed class ArtifactWorkspaceP9Coordinator(
         taskRepository.Update(task);
         workspaceRepository.Update(workspace);
         await workspaceRepository.SaveChangesAsync(cancellationToken);
-        await auditLogWriter.SaveChangesAsync(cancellationToken);
 
         var files = await fileStore.ListAsync(workspace.WorkspaceCode, cancellationToken);
         return Result.Success(ArtifactWorkspaceMapper.Map(workspace, task, files));

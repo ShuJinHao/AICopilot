@@ -1,4 +1,6 @@
 using AICopilot.EntityFrameworkCore;
+using AICopilot.EntityFrameworkCore.Outbox;
+using AICopilot.EntityFrameworkCore.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
@@ -38,6 +40,7 @@ public sealed class MigrationOwnershipTests
             "mcp.mcp_server_info"
         });
         MigratedTableIds(dbContext).Should().Contain("outbox.outbox_messages");
+        MigratedTableIds(dbContext).Should().Contain("persistence.commit_markers");
     }
 
     [Fact]
@@ -61,17 +64,25 @@ public sealed class MigrationOwnershipTests
     }
 
     [Fact]
-    public void SplitDomainDbContexts_ShouldMapOutboxOnlyForCurrentEventProducers()
+    public void SharedPersistenceTables_ShouldHaveOneMigrationOwner_AndRuntimeOnlyContexts()
     {
         using var aiGateway = CreateAiGatewayDbContext();
         using var rag = CreateRagDbContext();
         using var dataAnalysis = CreateDataAnalysisDbContext();
         using var mcpServer = CreateMcpServerDbContext();
+        using var outbox = new OutboxDbContext(
+            new DbContextOptionsBuilder<OutboxDbContext>().UseNpgsql(ConnectionString).Options);
+        using var markers = new PersistenceCommitMarkerDbContext(
+            new DbContextOptionsBuilder<PersistenceCommitMarkerDbContext>()
+                .UseNpgsql(ConnectionString)
+                .Options);
 
-        IsExcludedTable(aiGateway, "outbox", "outbox_messages").Should().BeTrue();
-        IsExcludedTable(rag, "outbox", "outbox_messages").Should().BeTrue();
+        IsMappedTable(aiGateway, "outbox", "outbox_messages").Should().BeFalse();
+        IsMappedTable(rag, "outbox", "outbox_messages").Should().BeFalse();
         IsMappedTable(dataAnalysis, "outbox", "outbox_messages").Should().BeFalse();
         IsMappedTable(mcpServer, "outbox", "outbox_messages").Should().BeFalse();
+        IsMappedTable(outbox, "outbox", "outbox_messages").Should().BeTrue();
+        IsExcludedTable(markers, "persistence", "commit_markers").Should().BeTrue();
 
         MigratedTableIds(aiGateway).Should().Contain(new[]
         {

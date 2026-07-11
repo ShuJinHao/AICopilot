@@ -200,11 +200,14 @@ Cloud AiRead 设备契约：
 - AICopilot DDD 聚合根、投影、队列、审计和运行时记录的长期技术契约见 `../docs/DDD聚合根边界.md`；新增或调整聚合根、仓储注册、EF `DbSet`、Agent runtime timeline/queue/audit 记录时必须同步更新架构测试。
 - `IAggregateRoot<>` 只用于独立维护业务不变量和生命周期的领域根；队列项、timeline 投影、工具执行审计、worker 心跳和执行尝试记录不得作为新增聚合根方向，历史债务只能减少不能增加。
 - `DataSourcePermissionGrant` 当前保留为独立聚合根但标记待评估；后续如果授权生命周期可归入 `BusinessDatabase`，应下沉为子实体或专用权限记录并移出聚合根白名单。
-- `AiCopilotDbContext` 是主基础设施迁移上下文，`AuditDbContext` 负责审计查询和运行时审计写入，`DataAnalysisDbContext` 只承载数据分析配置，`OutboxDbContext` 承载 outbox。
-- 没有真实事件生产者的 DbContext 不得复制 Outbox `DbSet`、映射或 `SaveChangesAsync` 领域事件扫描；当前 DataAnalysis/MCP 不写 Outbox，AiGateway 只为 `Session` 领域事件保留现有路径，RAG 只为 delayed integration-event factory 保留现有路径，`AiCopilotDbContext` 只拥有 Outbox migration。
+- `AiCopilotDbContext` 是主基础设施迁移上下文，也是 Outbox 与 persistence commit marker 的唯一 migration owner；`AuditDbContext` 负责审计查询和运行时审计写入，`DataAnalysisDbContext` 只承载数据分析配置，`OutboxDbContext` 与 `PersistenceCommitMarkerDbContext` 只作为运行时短生命周期参与者，不拥有 migration。
+- 没有真实事件生产者的 DbContext 不得复制 Outbox `DbSet`、映射或 `SaveChangesAsync` 领域事件扫描；DataAnalysis/MCP 不写 Outbox，AiGateway `Session` 领域事件和 RAG delayed integration-event factory 只能在 repository commit participant 内物化到短生命周期 `OutboxDbContext`，业务 Context 不映射共享 Outbox。
 - 审计写入必须遵守 Audit writer decision tree：有业务保存点的命令应把业务变更和审计行放在同一事务；`auditLogWriter.SaveChangesAsync` 只允许出现在没有业务保存点且已被白名单记录的执行路径。
 - Outbox 多实例调度必须使用 PostgreSQL `FOR UPDATE SKIP LOCKED` 或等价互斥策略，不能让多 worker 重复发布同一消息。
-- EF execution-strategy 的 commit-unknown 不能用 `SaveChanges(false)`、Outbox 或 audit 是否“通常存在”推断成功；必须有同事务 durable verification marker、fresh verification query 和真实 PostgreSQL commit-ACK fault test。`AI-SEC-046` 未关闭前，不得宣称 AiGateway/RAG retry、RAG existing-transaction commit 前清 buffer 或 commit-unknown 已修复。
+- 普通 repository 的业务、Outbox、审计和 durable commit marker 必须由唯一 `PersistenceCommitEngine` / `RepositoryPersistenceCommitter` 在同一数据库事务中提交；每个 execution-strategy attempt 对业务 Context 只允许一次 `SaveChangesAsync(false)`，事务确认后才 `AcceptAllChanges`、清领域事件或清 RAG factory buffer。Identity 在 `AI-PERSIST-01c` 前仍保留独立 `ITransactionalExecutionService` 边界，不能混入普通 repository engine。
+- EF execution-strategy 必须使用官方 `ExecuteInTransactionAsync(... verifySucceeded ...)` 或等价官方入口，禁止手写业务重试循环。commit-unknown 不能用 `SaveChanges(false)`、Outbox 或 audit 是否存在推断成功；必须写入同事务 durable marker，并由 fresh context 在独立超时与 execution strategy 下验证，真实 PostgreSQL 必须覆盖 commit-ACK 丢失、verification transient/persistent failure、caller cancellation 和数据库生成 identity 重放。
+- marker 写入后不得再让 caller cancellation 中断 commit/verification；fresh verification 无法确认时返回稳定 503 `persistence_commit_outcome_unknown` 和非敏感 commit id，不自动重放业务。RAG 上传在该状态下必须保留文件并等待对账，不能把“未收到提交确认”当作确定回滚后删除。
+- `AI-PERSIST-01b` 与 `AI-PERSIST-01c` 未共同验收前禁止合并或部署；01c 必须继续收口 Identity 事务、commit-unknown 文件对账/清理和 marker 生命周期。`AI-SEC-046` 未关闭前不得宣称整条持久化链已完成。
 - MCP runtime 配置变更必须进入 runtime registry refresh cycle，禁用、删除或配置变更后不能继续暴露未来工具解析。
 - 身份安全以 security stamp 驱动会话失效；Cloud role 不直接成为 AICopilot 本地 role。
 - 多 DbContext 迁移历史必须通过 `__EFMigrationsHistory` 的上下文隔离或迁移历史表拆分规则治理，不能让单一上下文回滚污染其他上下文状态。

@@ -15,7 +15,7 @@ public class DocumentConfiguration : IEntityTypeConfiguration<Document>
         builder.Property(d => d.Id)
             .HasConversion(id => id.Value, value => new DocumentId(value))
             .HasColumnName("id")
-            .ValueGeneratedOnAdd();
+            .ValueGeneratedNever();
 
         builder.Property(d => d.KnowledgeBaseId)
             .HasConversion(id => id.Value, value => new KnowledgeBaseId(value))

@@ -1,6 +1,7 @@
 using System.Reflection;
 using AICopilot.EntityFrameworkCore.AuditLogs;
 using AICopilot.EntityFrameworkCore.Outbox;
+using AICopilot.EntityFrameworkCore.Persistence;
 using Microsoft.EntityFrameworkCore;
 
 namespace AICopilot.EntityFrameworkCore;
@@ -10,6 +11,8 @@ public class AiCopilotDbContext(DbContextOptions<AiCopilotDbContext> options) : 
     public DbSet<AuditLogEntry> AuditLogs => Set<AuditLogEntry>();
 
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+
+    public DbSet<PersistenceCommitMarker> PersistenceCommitMarkers => Set<PersistenceCommitMarker>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {

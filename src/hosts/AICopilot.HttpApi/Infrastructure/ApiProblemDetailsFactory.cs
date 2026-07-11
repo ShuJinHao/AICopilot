@@ -40,6 +40,7 @@ public static class ApiProblemDetailsFactory
             StatusCodes.Status404NotFound => "Not Found",
             StatusCodes.Status400BadRequest => "Bad Request",
             StatusCodes.Status429TooManyRequests => "Too Many Requests",
+            StatusCodes.Status503ServiceUnavailable => "Service Unavailable",
             _ => "Error"
         };
     }
@@ -53,6 +54,7 @@ public static class ApiProblemDetailsFactory
             StatusCodes.Status404NotFound => "https://developer.mozilla.org/zh-CN/docs/Web/HTTP/Status/404",
             StatusCodes.Status400BadRequest => "https://developer.mozilla.org/zh-CN/docs/Web/HTTP/Status/400",
             StatusCodes.Status429TooManyRequests => "https://developer.mozilla.org/zh-CN/docs/Web/HTTP/Status/429",
+            StatusCodes.Status503ServiceUnavailable => "https://developer.mozilla.org/zh-CN/docs/Web/HTTP/Status/503",
             _ => "https://developer.mozilla.org/zh-CN/docs/Web/HTTP/Status"
         };
     }

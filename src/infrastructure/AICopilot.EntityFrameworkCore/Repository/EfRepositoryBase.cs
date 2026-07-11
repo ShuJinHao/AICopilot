@@ -7,7 +7,7 @@ namespace AICopilot.EntityFrameworkCore.Repository;
 
 public abstract class EfRepositoryBase<TDbContext, TEntity>(
     TDbContext dbContext,
-    AuditTransactionCoordinator transactionCoordinator)
+    RepositoryPersistenceCommitter persistenceCommitter)
     : EfReadRepositoryBase<TDbContext, TEntity>(dbContext), IRepository<TEntity>
     where TDbContext : DbContext
     where TEntity : class, IEntity, IAggregateRoot
@@ -30,6 +30,6 @@ public abstract class EfRepositoryBase<TDbContext, TEntity>(
 
     public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
-        return transactionCoordinator.SaveChangesAsync(DbContext, cancellationToken);
+        return persistenceCommitter.SaveChangesAsync(DbContext, cancellationToken);
     }
 }

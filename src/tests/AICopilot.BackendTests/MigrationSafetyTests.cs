@@ -1,20 +1,25 @@
+using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
+using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
+using AICopilot.Core.Rag.Ids;
 using AICopilot.EntityFrameworkCore;
+using AICopilot.EntityFrameworkCore.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
 namespace AICopilot.BackendTests;
 
-[Collection(CoreBackendTestCollection.Name)]
+[Collection(PostgresPersistenceTestCollection.Name)]
 [Trait("Suite", "MigrationSafety")]
 [Trait("Runtime", "DockerRequired")]
-public sealed class MigrationSafetyTests(CoreAICopilotAppFixture fixture)
+public sealed class MigrationSafetyTests(PostgresPersistenceFixture fixture)
 {
     private const string PreIdentityGuidMigration = "20260428150008_DetachAiGatewayFromAiCopilotDbContext";
+    private const string PreDocumentSequenceCalibrationMigration = "20260519091000_AddKnowledgeGovernanceP0";
 
     [Fact]
     public async Task McpInitialMigration_ShouldMoveLegacyPublicTable_AndPreserveRows()
     {
-        await using var database = await ScratchDatabase.CreateAsync(await fixture.GetConnectionStringAsync());
+        await using var database = await PostgresScratchDatabase.CreateAsync(fixture.ConnectionString, "aicopilot_migration");
 
         await ExecuteNonQueryAsync(
             database.ConnectionString,
@@ -88,7 +93,7 @@ public sealed class MigrationSafetyTests(CoreAICopilotAppFixture fixture)
     [Fact]
     public async Task IdentityGuidMigration_ShouldFail_WhenIdentitySchemaAlreadyContainsRows()
     {
-        await using var database = await ScratchDatabase.CreateAsync(await fixture.GetConnectionStringAsync());
+        await using var database = await PostgresScratchDatabase.CreateAsync(fixture.ConnectionString, "aicopilot_migration");
 
         var options = new DbContextOptionsBuilder<AiCopilotDbContext>()
             .UseNpgsqlWithMigrationHistory(database.ConnectionString, MigrationHistoryTables.AiCopilot)
@@ -117,7 +122,7 @@ public sealed class MigrationSafetyTests(CoreAICopilotAppFixture fixture)
     [Fact]
     public async Task MigrationHistoryBootstrap_ShouldCopyLegacySharedHistory_ToSplitHistoryTables()
     {
-        await using var database = await ScratchDatabase.CreateAsync(await fixture.GetConnectionStringAsync());
+        await using var database = await PostgresScratchDatabase.CreateAsync(fixture.ConnectionString, "aicopilot_migration");
 
         await using var aiCopilotDbContext = new AiCopilotDbContext(
             CreateOptions<AiCopilotDbContext>(database.ConnectionString, MigrationHistoryTables.AiCopilot));
@@ -172,7 +177,7 @@ public sealed class MigrationSafetyTests(CoreAICopilotAppFixture fixture)
     [Fact]
     public async Task FreshDatabaseMigration_ShouldCreateEverySplitHistoryTable_WithRows()
     {
-        await using var database = await ScratchDatabase.CreateAsync(await fixture.GetConnectionStringAsync());
+        await using var database = await PostgresScratchDatabase.CreateAsync(fixture.ConnectionString, "aicopilot_migration");
 
         await using var aiCopilotDbContext = new AiCopilotDbContext(
             CreateOptions<AiCopilotDbContext>(database.ConnectionString, MigrationHistoryTables.AiCopilot));
@@ -213,12 +218,87 @@ public sealed class MigrationSafetyTests(CoreAICopilotAppFixture fixture)
             (await CountMigrationRowsAsync(database.ConnectionString, historyTable))
                 .Should().BeGreaterThan(0, $"{historyTable.ContextName} split history table must record applied migrations");
         }
+
+        (await ExecuteScalarAsync(
+            database.ConnectionString,
+            "SELECT to_regclass('persistence.commit_markers')::text"))
+            .Should().Be("persistence.commit_markers");
+        (await ExecuteScalarAsync(
+            database.ConnectionString,
+            """
+            SELECT COUNT(*)::text
+            FROM pg_index index_metadata
+            JOIN pg_class table_metadata ON table_metadata.oid = index_metadata.indrelid
+            JOIN pg_namespace schema_metadata ON schema_metadata.oid = table_metadata.relnamespace
+            WHERE schema_metadata.nspname = 'persistence'
+              AND table_metadata.relname = 'commit_markers'
+              AND index_metadata.indisprimary
+              AND index_metadata.indisunique
+            """))
+            .Should().Be("1");
+        (await ExecuteScalarAsync(
+            database.ConnectionString,
+            "SELECT to_regclass('rag.documents_id_seq')::text"))
+            .Should().Be("rag.documents_id_seq");
+        (await ExecuteScalarAsync(
+            database.ConnectionString,
+            """
+            SELECT (nextval('rag.documents_id_seq'::regclass) > COALESCE(MAX(id), 0))::text
+            FROM rag.documents
+            """))
+            .Should().Be("true");
+    }
+
+    [Fact]
+    public async Task RagDocumentSequenceMigration_ShouldAdvancePastExistingExplicitIds()
+    {
+        await using var database = await PostgresScratchDatabase.CreateAsync(
+            fixture.ConnectionString,
+            "aicopilot_migration");
+        var options = CreateOptions<RagDbContext>(database.ConnectionString, MigrationHistoryTables.Rag);
+
+        await using (var dbContext = new RagDbContext(options))
+        {
+            await dbContext.Database.MigrateAsync(PreDocumentSequenceCalibrationMigration);
+
+            var embeddingModel = new EmbeddingModel(
+                "sequence-upgrade-embedding",
+                "OpenAI",
+                "https://example.local",
+                "text-embedding-test",
+                1536,
+                8191);
+            var knowledgeBase = new KnowledgeBase(
+                "sequence-upgrade-kb",
+                "sequence upgrade test",
+                embeddingModel.Id);
+            knowledgeBase.AddDocument(
+                new DocumentId(5000),
+                "existing-document.txt",
+                "documents/existing-document.txt",
+                ".txt",
+                "sequence-upgrade-hash");
+
+            dbContext.EmbeddingModels.Add(embeddingModel);
+            dbContext.KnowledgeBases.Add(knowledgeBase);
+            await dbContext.SaveChangesAsync();
+
+            (await ExecuteScalarAsync(
+                database.ConnectionString,
+                "SELECT (last_value < 5000)::text FROM rag.documents_id_seq"))
+                .Should().Be("true");
+
+            await dbContext.Database.MigrateAsync();
+        }
+
+        var allocated = await new PostgresDocumentIdAllocator(options).AllocateAsync();
+        allocated.Value.Should().BeGreaterThan(5000);
     }
 
     [Fact]
     public async Task MigrationHistoryBootstrap_ShouldFail_WhenSplitHistoryIsPartial()
     {
-        await using var database = await ScratchDatabase.CreateAsync(await fixture.GetConnectionStringAsync());
+        await using var database = await PostgresScratchDatabase.CreateAsync(fixture.ConnectionString, "aicopilot_migration");
         await using var dbContext = new AiCopilotDbContext(
             CreateOptions<AiCopilotDbContext>(database.ConnectionString, MigrationHistoryTables.AiCopilot));
 
@@ -395,70 +475,4 @@ public sealed class MigrationSafetyTests(CoreAICopilotAppFixture fixture)
         return "\"" + value.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
     }
 
-    private sealed class ScratchDatabase : IAsyncDisposable
-    {
-        private ScratchDatabase(string adminConnectionString, string databaseName, string connectionString)
-        {
-            AdminConnectionString = adminConnectionString;
-            DatabaseName = databaseName;
-            ConnectionString = connectionString;
-        }
-
-        public string ConnectionString { get; }
-
-        private string AdminConnectionString { get; }
-
-        private string DatabaseName { get; }
-
-        public static async Task<ScratchDatabase> CreateAsync(string baseConnectionString)
-        {
-            var databaseName = $"aicopilot_migration_{Guid.NewGuid():N}";
-            var adminBuilder = new NpgsqlConnectionStringBuilder(baseConnectionString)
-            {
-                Database = "postgres"
-            };
-            var scratchBuilder = new NpgsqlConnectionStringBuilder(baseConnectionString)
-            {
-                Database = databaseName
-            };
-
-            await using var connection = new NpgsqlConnection(adminBuilder.ConnectionString);
-            await connection.OpenAsync();
-            await using var command = connection.CreateCommand();
-            command.CommandText = $"CREATE DATABASE {QuoteIdentifier(databaseName)}";
-            await command.ExecuteNonQueryAsync();
-
-            return new ScratchDatabase(adminBuilder.ConnectionString, databaseName, scratchBuilder.ConnectionString);
-        }
-
-        public async ValueTask DisposeAsync()
-        {
-            await using var connection = new NpgsqlConnection(AdminConnectionString);
-            await connection.OpenAsync();
-
-            await using (var terminate = connection.CreateCommand())
-            {
-                terminate.CommandText = """
-                    SELECT pg_terminate_backend(pid)
-                    FROM pg_stat_activity
-                    WHERE datname = @database_name
-                      AND pid <> pg_backend_pid()
-                    """;
-                var parameter = terminate.CreateParameter();
-                parameter.ParameterName = "database_name";
-                parameter.Value = DatabaseName;
-                terminate.Parameters.Add(parameter);
-                await terminate.ExecuteNonQueryAsync();
-            }
-
-            await using var drop = connection.CreateCommand();
-            drop.CommandText = $"DROP DATABASE IF EXISTS {QuoteIdentifier(DatabaseName)} WITH (FORCE)";
-            await drop.ExecuteNonQueryAsync();
-        }
-
-        private static string QuoteIdentifier(string value)
-        {
-            return "\"" + value.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
-        }
-    }
 }

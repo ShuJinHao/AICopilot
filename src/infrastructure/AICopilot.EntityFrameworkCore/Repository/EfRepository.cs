@@ -5,6 +5,6 @@ namespace AICopilot.EntityFrameworkCore.Repository;
 
 public class EfRepository<T>(
     AiCopilotDbContext dbContext,
-    AuditTransactionCoordinator transactionCoordinator)
-    : EfRepositoryBase<AiCopilotDbContext, T>(dbContext, transactionCoordinator)
+    RepositoryPersistenceCommitter persistenceCommitter)
+    : EfRepositoryBase<AiCopilotDbContext, T>(dbContext, persistenceCommitter)
     where T : class, IEntity, IAggregateRoot;

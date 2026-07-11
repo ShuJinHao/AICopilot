@@ -1,10 +1,14 @@
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
+using AICopilot.Core.AiGateway.Aggregates.Sessions;
+using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
 using AICopilot.Core.DataAnalysis.Ids;
 using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
 using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.EntityFrameworkCore;
 using AICopilot.EntityFrameworkCore.AuditLogs;
+using AICopilot.EntityFrameworkCore.Outbox;
+using AICopilot.EntityFrameworkCore.Persistence;
 using AICopilot.EntityFrameworkCore.Repository;
 using AICopilot.EntityFrameworkCore.Transactions;
 using AICopilot.SharedKernel.Ai;
@@ -13,23 +17,26 @@ using Npgsql;
 
 namespace AICopilot.BackendTests;
 
-[Collection(CoreBackendTestCollection.Name)]
-public sealed class AuditTransactionBoundaryTests(CoreAICopilotAppFixture fixture)
+[Collection(PostgresPersistenceTestCollection.Name)]
+[Trait("Suite", "PersistenceCommit")]
+[Trait("Runtime", "DockerRequired")]
+public sealed class AuditTransactionBoundaryTests(PostgresPersistenceFixture fixture)
 {
     [Fact]
     public async Task AiGatewayRepository_ShouldCommitBusinessAndAuditRowsTogether()
     {
-        await using var database = await ScratchDatabase.CreateAsync(await fixture.GetConnectionStringAsync());
+        await using var database = await PostgresScratchDatabase.CreateAsync(fixture.ConnectionString, "aicopilot_audit");
         await MigrateAiGatewayStoreAsync(database.ConnectionString);
 
         await using var dbContext = new AiGatewayDbContext(CreateOptions<AiGatewayDbContext>(
             database.ConnectionString,
             MigrationHistoryTables.AiGateway));
         await using var auditDbContext = new AuditDbContext(CreateAuditOptions(database.ConnectionString));
+        var persistence = CreatePersistence(database.ConnectionString, auditDbContext);
         var repository = new AiGatewayRepository<LanguageModel>(
             dbContext,
-            new AuditTransactionCoordinator(auditDbContext));
-        var auditLogWriter = new AuditLogWriter(auditDbContext);
+            persistence.Committer);
+        var auditLogWriter = new AuditLogWriter(auditDbContext, persistence.Engine);
         var model = new LanguageModel(
             "OpenAI",
             "audit-txn-model",
@@ -51,19 +58,83 @@ public sealed class AuditTransactionBoundaryTests(CoreAICopilotAppFixture fixtur
     }
 
     [Fact]
-    public async Task AiGatewayRepository_ShouldRollbackBusinessRows_WhenAuditSaveFails()
+    public async Task AiGatewayRepository_ShouldCommitDomainEventOutboxAuditAndMarkerTogether()
     {
-        await using var database = await ScratchDatabase.CreateAsync(await fixture.GetConnectionStringAsync());
+        await using var database = await PostgresScratchDatabase.CreateAsync(
+            fixture.ConnectionString,
+            "aicopilot_audit");
         await MigrateAiGatewayStoreAsync(database.ConnectionString);
 
         await using var dbContext = new AiGatewayDbContext(CreateOptions<AiGatewayDbContext>(
             database.ConnectionString,
             MigrationHistoryTables.AiGateway));
         await using var auditDbContext = new AuditDbContext(CreateAuditOptions(database.ConnectionString));
+        var persistence = CreatePersistence(database.ConnectionString, auditDbContext);
+        var repository = new AiGatewayRepository<Session>(dbContext, persistence.Committer);
+        var auditLogWriter = new AuditLogWriter(auditDbContext, persistence.Engine);
+        var session = new Session(Guid.NewGuid(), ConversationTemplateId.New());
+        session.AddMessage("atomic outbox test", MessageType.User);
+
+        repository.Add(session);
+        await auditLogWriter.WriteAsync(CreateAuditRequest(session.Id.ToString(), session.Title));
+        await repository.SaveChangesAsync();
+
+        await using var verifyGateway = new AiGatewayDbContext(CreateOptions<AiGatewayDbContext>(
+            database.ConnectionString,
+            MigrationHistoryTables.AiGateway));
+        await using var verifyAudit = new AuditDbContext(CreateAuditOptions(database.ConnectionString));
+        await using var verifyOutbox = new OutboxDbContext(
+            new DbContextOptionsBuilder<OutboxDbContext>()
+                .UseNpgsql(database.ConnectionString)
+                .Options);
+        await using var verifyMarkers = new PersistenceCommitMarkerDbContext(
+            PostgresPersistenceTestOptions.CreateMarker(database.ConnectionString));
+
+        (await verifyGateway.Sessions.AnyAsync(item => item.Id == session.Id)).Should().BeTrue();
+        (await verifyGateway.Messages.AnyAsync(item => item.SessionId == session.Id)).Should().BeTrue();
+        (await verifyAudit.AuditLogs.AnyAsync(item => item.TargetId == session.Id.ToString())).Should().BeTrue();
+        (await verifyOutbox.OutboxMessages.SingleAsync()).EventTypeName
+            .Should().Be(typeof(MessageAddedToSessionEvent).FullName);
+        (await verifyMarkers.CommitMarkers.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task RepositorySave_ShouldNotWriteMarker_WhenNothingIsPending()
+    {
+        await using var database = await PostgresScratchDatabase.CreateAsync(
+            fixture.ConnectionString,
+            "aicopilot_audit");
+        await MigrateAiGatewayStoreAsync(database.ConnectionString);
+
+        await using var dbContext = new AiGatewayDbContext(CreateOptions<AiGatewayDbContext>(
+            database.ConnectionString,
+            MigrationHistoryTables.AiGateway));
+        await using var auditDbContext = new AuditDbContext(CreateAuditOptions(database.ConnectionString));
+        var persistence = CreatePersistence(database.ConnectionString, auditDbContext);
+        var repository = new AiGatewayRepository<LanguageModel>(dbContext, persistence.Committer);
+
+        (await repository.SaveChangesAsync()).Should().Be(0);
+
+        await using var verifyMarkers = new PersistenceCommitMarkerDbContext(
+            PostgresPersistenceTestOptions.CreateMarker(database.ConnectionString));
+        (await verifyMarkers.CommitMarkers.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AiGatewayRepository_ShouldRollbackBusinessRows_WhenAuditSaveFails()
+    {
+        await using var database = await PostgresScratchDatabase.CreateAsync(fixture.ConnectionString, "aicopilot_audit");
+        await MigrateAiGatewayStoreAsync(database.ConnectionString);
+
+        await using var dbContext = new AiGatewayDbContext(CreateOptions<AiGatewayDbContext>(
+            database.ConnectionString,
+            MigrationHistoryTables.AiGateway));
+        await using var auditDbContext = new AuditDbContext(CreateAuditOptions(database.ConnectionString));
+        var persistence = CreatePersistence(database.ConnectionString, auditDbContext);
         var repository = new AiGatewayRepository<LanguageModel>(
             dbContext,
-            new AuditTransactionCoordinator(auditDbContext));
-        var auditLogWriter = new AuditLogWriter(auditDbContext);
+            persistence.Committer);
+        var auditLogWriter = new AuditLogWriter(auditDbContext, persistence.Engine);
         var model = new LanguageModel(
             "OpenAI",
             "audit-txn-rollback-model",
@@ -88,7 +159,7 @@ public sealed class AuditTransactionBoundaryTests(CoreAICopilotAppFixture fixtur
     [Fact]
     public async Task BusinessDatabaseRepository_ShouldRollbackCreateUpdateAndDelete_WhenAuditSaveFails()
     {
-        await using var database = await ScratchDatabase.CreateAsync(await fixture.GetConnectionStringAsync());
+        await using var database = await PostgresScratchDatabase.CreateAsync(fixture.ConnectionString, "aicopilot_audit");
         await MigrateDataAnalysisStoreAsync(database.ConnectionString);
 
         var createRollback = await SaveBusinessDatabaseWithInvalidAuditAsync(
@@ -134,17 +205,18 @@ public sealed class AuditTransactionBoundaryTests(CoreAICopilotAppFixture fixtur
     [Fact]
     public async Task RagRepository_ShouldCommitBusinessAndAuditRowsTogether()
     {
-        await using var database = await ScratchDatabase.CreateAsync(await fixture.GetConnectionStringAsync());
+        await using var database = await PostgresScratchDatabase.CreateAsync(fixture.ConnectionString, "aicopilot_audit");
         await MigrateRagStoreAsync(database.ConnectionString);
 
         await using var dbContext = new RagDbContext(CreateOptions<RagDbContext>(
             database.ConnectionString,
             MigrationHistoryTables.Rag));
         await using var auditDbContext = new AuditDbContext(CreateAuditOptions(database.ConnectionString));
+        var persistence = CreatePersistence(database.ConnectionString, auditDbContext);
         var repository = new RagRepository<EmbeddingModel>(
             dbContext,
-            new AuditTransactionCoordinator(auditDbContext));
-        var auditLogWriter = new AuditLogWriter(auditDbContext);
+            persistence.Committer);
+        var auditLogWriter = new AuditLogWriter(auditDbContext, persistence.Engine);
         var model = CreateEmbeddingModel("audit-txn-rag-model");
 
         repository.Add(model);
@@ -162,17 +234,18 @@ public sealed class AuditTransactionBoundaryTests(CoreAICopilotAppFixture fixtur
     [Fact]
     public async Task RagRepository_ShouldRollbackBusinessRows_WhenAuditSaveFails()
     {
-        await using var database = await ScratchDatabase.CreateAsync(await fixture.GetConnectionStringAsync());
+        await using var database = await PostgresScratchDatabase.CreateAsync(fixture.ConnectionString, "aicopilot_audit");
         await MigrateRagStoreAsync(database.ConnectionString);
 
         await using var dbContext = new RagDbContext(CreateOptions<RagDbContext>(
             database.ConnectionString,
             MigrationHistoryTables.Rag));
         await using var auditDbContext = new AuditDbContext(CreateAuditOptions(database.ConnectionString));
+        var persistence = CreatePersistence(database.ConnectionString, auditDbContext);
         var repository = new RagRepository<EmbeddingModel>(
             dbContext,
-            new AuditTransactionCoordinator(auditDbContext));
-        var auditLogWriter = new AuditLogWriter(auditDbContext);
+            persistence.Committer);
+        var auditLogWriter = new AuditLogWriter(auditDbContext, persistence.Engine);
         var model = CreateEmbeddingModel("audit-txn-rag-rollback");
 
         repository.Add(model);
@@ -191,17 +264,18 @@ public sealed class AuditTransactionBoundaryTests(CoreAICopilotAppFixture fixtur
     [Fact]
     public async Task McpServerRepository_ShouldRollbackBusinessRows_WhenAuditSaveFails()
     {
-        await using var database = await ScratchDatabase.CreateAsync(await fixture.GetConnectionStringAsync());
+        await using var database = await PostgresScratchDatabase.CreateAsync(fixture.ConnectionString, "aicopilot_audit");
         await MigrateMcpServerStoreAsync(database.ConnectionString);
 
         await using var dbContext = new McpServerDbContext(CreateOptions<McpServerDbContext>(
             database.ConnectionString,
             MigrationHistoryTables.McpServer));
         await using var auditDbContext = new AuditDbContext(CreateAuditOptions(database.ConnectionString));
+        var persistence = CreatePersistence(database.ConnectionString, auditDbContext);
         var repository = new McpServerRepository(
             dbContext,
-            new AuditTransactionCoordinator(auditDbContext));
-        var auditLogWriter = new AuditLogWriter(auditDbContext);
+            persistence.Committer);
+        var auditLogWriter = new AuditLogWriter(auditDbContext, persistence.Engine);
         var server = CreateMcpServer("audit-txn-mcp-rollback");
 
         repository.Add(server);
@@ -220,17 +294,18 @@ public sealed class AuditTransactionBoundaryTests(CoreAICopilotAppFixture fixtur
     [Fact]
     public async Task McpServerRepository_ShouldCommitBusinessAndAuditRowsTogether()
     {
-        await using var database = await ScratchDatabase.CreateAsync(await fixture.GetConnectionStringAsync());
+        await using var database = await PostgresScratchDatabase.CreateAsync(fixture.ConnectionString, "aicopilot_audit");
         await MigrateMcpServerStoreAsync(database.ConnectionString);
 
         await using var dbContext = new McpServerDbContext(CreateOptions<McpServerDbContext>(
             database.ConnectionString,
             MigrationHistoryTables.McpServer));
         await using var auditDbContext = new AuditDbContext(CreateAuditOptions(database.ConnectionString));
+        var persistence = CreatePersistence(database.ConnectionString, auditDbContext);
         var repository = new McpServerRepository(
             dbContext,
-            new AuditTransactionCoordinator(auditDbContext));
-        var auditLogWriter = new AuditLogWriter(auditDbContext);
+            persistence.Committer);
+        var auditLogWriter = new AuditLogWriter(auditDbContext, persistence.Engine);
         var server = CreateMcpServer("audit-txn-mcp-server");
 
         repository.Add(server);
@@ -262,10 +337,11 @@ public sealed class AuditTransactionBoundaryTests(CoreAICopilotAppFixture fixtur
             connectionString,
             MigrationHistoryTables.DataAnalysis));
         await using var auditDbContext = new AuditDbContext(CreateAuditOptions(connectionString));
+        var persistence = CreatePersistence(connectionString, auditDbContext);
         var repository = new BusinessDatabaseRepository(
             dbContext,
-            new AuditTransactionCoordinator(auditDbContext));
-        var auditLogWriter = new AuditLogWriter(auditDbContext);
+            persistence.Committer);
+        var auditLogWriter = new AuditLogWriter(auditDbContext, persistence.Engine);
         var entity = await arrange(repository);
 
         await auditLogWriter.WriteAsync(CreateInvalidAuditRequest(entity.Id.ToString(), entity.Name));
@@ -281,10 +357,11 @@ public sealed class AuditTransactionBoundaryTests(CoreAICopilotAppFixture fixtur
             connectionString,
             MigrationHistoryTables.DataAnalysis));
         await using var auditDbContext = new AuditDbContext(CreateAuditOptions(connectionString));
+        var persistence = CreatePersistence(connectionString, auditDbContext);
         var repository = new BusinessDatabaseRepository(
             dbContext,
-            new AuditTransactionCoordinator(auditDbContext));
-        var auditLogWriter = new AuditLogWriter(auditDbContext);
+            persistence.Committer);
+        var auditLogWriter = new AuditLogWriter(auditDbContext, persistence.Engine);
         var entity = CreateBusinessDatabase(name);
 
         repository.Add(entity);
@@ -362,6 +439,23 @@ public sealed class AuditTransactionBoundaryTests(CoreAICopilotAppFixture fixtur
             $"Rejected audit transaction test for {targetName}.");
     }
 
+    private static PersistenceServices CreatePersistence(
+        string connectionString,
+        AuditDbContext auditDbContext)
+    {
+        var engine = new PersistenceCommitEngine(
+            PostgresPersistenceTestOptions.CreateMarker(connectionString));
+        var committer = new RepositoryPersistenceCommitter(
+            auditDbContext,
+            engine,
+            [new AiGatewayDomainEventOutboxSource(), new RagIntegrationEventBuffer()]);
+        return new PersistenceServices(engine, committer);
+    }
+
+    private sealed record PersistenceServices(
+        PersistenceCommitEngine Engine,
+        RepositoryPersistenceCommitter Committer);
+
     private static async Task MigrateAiGatewayStoreAsync(string connectionString)
     {
         await using var aiCopilot = new AiCopilotDbContext(CreateOptions<AiCopilotDbContext>(
@@ -431,70 +525,4 @@ public sealed class AuditTransactionBoundaryTests(CoreAICopilotAppFixture fixtur
             .Options;
     }
 
-    private sealed class ScratchDatabase : IAsyncDisposable
-    {
-        private ScratchDatabase(string adminConnectionString, string databaseName, string connectionString)
-        {
-            AdminConnectionString = adminConnectionString;
-            DatabaseName = databaseName;
-            ConnectionString = connectionString;
-        }
-
-        public string ConnectionString { get; }
-
-        private string AdminConnectionString { get; }
-
-        private string DatabaseName { get; }
-
-        public static async Task<ScratchDatabase> CreateAsync(string baseConnectionString)
-        {
-            var databaseName = $"aicopilot_audit_tx_{Guid.NewGuid():N}";
-            var adminBuilder = new NpgsqlConnectionStringBuilder(baseConnectionString)
-            {
-                Database = "postgres"
-            };
-            var scratchBuilder = new NpgsqlConnectionStringBuilder(baseConnectionString)
-            {
-                Database = databaseName
-            };
-
-            await using var connection = new NpgsqlConnection(adminBuilder.ConnectionString);
-            await connection.OpenAsync();
-            await using var command = connection.CreateCommand();
-            command.CommandText = $"CREATE DATABASE {QuoteIdentifier(databaseName)}";
-            await command.ExecuteNonQueryAsync();
-
-            return new ScratchDatabase(adminBuilder.ConnectionString, databaseName, scratchBuilder.ConnectionString);
-        }
-
-        public async ValueTask DisposeAsync()
-        {
-            await using var connection = new NpgsqlConnection(AdminConnectionString);
-            await connection.OpenAsync();
-
-            await using (var terminate = connection.CreateCommand())
-            {
-                terminate.CommandText = """
-                    SELECT pg_terminate_backend(pid)
-                    FROM pg_stat_activity
-                    WHERE datname = @database_name
-                      AND pid <> pg_backend_pid()
-                    """;
-                var parameter = terminate.CreateParameter();
-                parameter.ParameterName = "database_name";
-                parameter.Value = DatabaseName;
-                terminate.Parameters.Add(parameter);
-                await terminate.ExecuteNonQueryAsync();
-            }
-
-            await using var drop = connection.CreateCommand();
-            drop.CommandText = $"DROP DATABASE IF EXISTS {QuoteIdentifier(DatabaseName)} WITH (FORCE)";
-            await drop.ExecuteNonQueryAsync();
-        }
-
-        private static string QuoteIdentifier(string value)
-        {
-            return "\"" + value.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
-        }
-    }
 }

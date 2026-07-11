@@ -16,6 +16,10 @@ using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.Core.Rag.Ids;
 using AICopilot.EntityFrameworkCore;
+using AICopilot.EntityFrameworkCore.Outbox;
+using AICopilot.EntityFrameworkCore.Persistence;
+using AICopilot.EntityFrameworkCore.Repository;
+using AICopilot.EntityFrameworkCore.Transactions;
 using AICopilot.HttpApi.Infrastructure;
 using AICopilot.SharedKernel.Domain;
 using AICopilot.Services.Contracts;
@@ -467,46 +471,23 @@ public sealed class ArchitectureBoundaryTests
     [Fact]
     public void TransactionOwnership_ShouldStaySeparatedBetweenRepositoriesAndIdentity()
     {
-        var auditCoordinator = File.ReadAllText(Path.Combine(
-            SolutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "Transactions",
-            "AuditTransactionCoordinator.cs"));
-        var efRepositoryBase = File.ReadAllText(Path.Combine(
-            SolutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "Repository",
-            "EfRepositoryBase.cs"));
-        var identityTransactionService = File.ReadAllText(Path.Combine(
-            SolutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "Transactions",
-            "EfTransactionalExecutionService.cs"));
-        var pipelineRegistration = File.ReadAllText(Path.Combine(
-            SolutionRoot,
-            "src",
-            "services",
-            "AICopilot.Services.CrossCutting",
-            "DependencyInjection.cs"));
+        typeof(EfRepositoryBase<,>).GetConstructors(
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            .SelectMany(constructor => constructor.GetParameters())
+            .Should().Contain(parameter => parameter.ParameterType == typeof(RepositoryPersistenceCommitter));
+        typeof(PersistenceCommitEngine).GetMethods(
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly)
+            .Should().ContainSingle(method => method.Name == nameof(PersistenceCommitEngine.CommitAsync));
+        typeof(PersistenceCommitEngine).Assembly
+            .GetType("AICopilot.EntityFrameworkCore.Transactions.AuditTransactionCoordinator")
+            .Should().BeNull();
 
-        efRepositoryBase.Should().Contain("transactionCoordinator.SaveChangesAsync");
-        auditCoordinator.Should().Contain("CreateExecutionStrategy");
-        auditCoordinator.Should().Contain("BeginTransactionAsync");
-        auditCoordinator.Should().Contain("UseTransactionAsync");
-        auditCoordinator.Should().Contain("transactionalAuditDbContext.SaveChangesAsync");
-        identityTransactionService.Should().Contain("IdentityStoreDbContext");
-        identityTransactionService.Should().Contain("BeginTransactionAsync");
-        identityTransactionService.Should().Contain("dbContext.SaveChangesAsync");
-        identityTransactionService.Should().NotContain("AuditTransactionCoordinator");
-        identityTransactionService.Should().NotContain("AuditDbContext");
-        pipelineRegistration.Should().NotContain("Transaction");
-        pipelineRegistration.Should().NotContain("Audit");
+        var identityConstructor = typeof(EfTransactionalExecutionService).GetConstructors()
+            .Should().ContainSingle().Subject;
+        identityConstructor.GetParameters().Should().ContainSingle()
+            .Which.ParameterType.Should().Be(typeof(IdentityStoreDbContext));
+        identityConstructor.GetParameters()
+            .Should().NotContain(parameter => parameter.ParameterType == typeof(PersistenceCommitEngine));
     }
 
     [Fact]
@@ -1065,7 +1046,7 @@ public sealed class ArchitectureBoundaryTests
         coordinator.Should().Contain("IReadRepository<ApprovalRequest>");
         coordinator.Should().Contain("IArtifactWorkspaceFileStore");
         coordinator.Should().Contain("AgentAuditRecorder");
-        coordinator.Should().Contain("IAuditLogWriter");
+        coordinator.Should().NotContain("IAuditLogWriter");
         coordinator.Should().Contain("ArtifactVersioningAccess.LoadArtifactForOwnerEditAsync");
         coordinator.Should().Contain("ArchiveCurrentVersionAsync");
         serviceRegistration.Should().Contain("AddScoped<ArtifactVersioningCommandCoordinator>");
@@ -1265,6 +1246,7 @@ public sealed class ArchitectureBoundaryTests
         coordinator.Should().Contain("IRepository<ApprovalRequest>");
         coordinator.Should().Contain("IAgentTaskRunAttemptStore");
         coordinator.Should().Contain("IArtifactWorkspaceFileStore fileStore");
+        coordinator.Should().NotContain("IAuditLogWriter");
         coordinator.Should().Contain("RecordFinalReviewSubmittedAsync");
         coordinator.Should().Contain("RecordWorkspaceFinalizedAsync");
         coordinator.Should().Contain("StageApprovalRequestedAsync");
@@ -2037,21 +2019,19 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Theory]
-    [InlineData(typeof(AiCopilotDbContext), false)]
-    [InlineData(typeof(DataAnalysisDbContext), false)]
-    [InlineData(typeof(McpServerDbContext), false)]
-    [InlineData(typeof(AiGatewayDbContext), true)]
-    [InlineData(typeof(RagDbContext), true)]
-    public void DbContextSaveOverrides_ShouldRemainOnlyWhereEventsArePersisted(
-        Type contextType,
-        bool shouldDeclareOverride)
+    [InlineData(typeof(AiCopilotDbContext))]
+    [InlineData(typeof(DataAnalysisDbContext))]
+    [InlineData(typeof(McpServerDbContext))]
+    [InlineData(typeof(AiGatewayDbContext))]
+    [InlineData(typeof(RagDbContext))]
+    public void NormalRepositoryDbContexts_ShouldNotOwnPersistenceAlgorithms(Type contextType)
     {
         var saveOverride = contextType.GetMethod(
                 nameof(DbContext.SaveChangesAsync),
                 BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly,
                 [typeof(CancellationToken)]);
 
-        (saveOverride is not null).Should().Be(shouldDeclareOverride, contextType.FullName);
+        saveOverride.Should().BeNull(contextType.FullName);
     }
 
     [Fact]
@@ -2575,99 +2555,49 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void RagDbContextSnapshot_ShouldMapRagTablesToRagSchema_AndExcludeOutboxFromMigrations()
+    public void RagDbContext_ShouldOwnRagTables_AndUseApplicationAssignedDocumentIds()
     {
-        var snapshotFile = Path.Combine(
-            SolutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "Migrations",
-            "RagDbContext",
-            "RagDbContextModelSnapshot.cs");
-        var snapshot = File.ReadAllText(snapshotFile);
+        using var dbContext = new RagDbContext(
+            new DbContextOptionsBuilder<RagDbContext>()
+                .UseNpgsql("Host=localhost;Database=architecture;Username=test;Password=test")
+                .Options);
+        var mappedTables = dbContext.Model.GetEntityTypes()
+            .Select(entity => $"{entity.GetSchema()}.{entity.GetTableName()}")
+            .ToArray();
 
-        snapshot.Should().Contain(
-            "AICopilot.Core.Rag.Aggregates.EmbeddingModel.EmbeddingModel",
-            "EmbeddingModel is owned by RagDbContext");
-        snapshot.Should().Contain(
-            "AICopilot.Core.Rag.Aggregates.KnowledgeBase.KnowledgeBase",
-            "KnowledgeBase is owned by RagDbContext");
-        snapshot.Should().Contain(
-            "AICopilot.Core.Rag.Aggregates.KnowledgeBase.Document",
-            "Document is owned by RagDbContext");
-        snapshot.Should().Contain(
-            "AICopilot.Core.Rag.Aggregates.KnowledgeBase.DocumentChunk",
-            "DocumentChunk is owned by RagDbContext");
-        snapshot.Should().Contain(
-            "b.ToTable(\"embedding_models\", \"rag\");",
-            "EmbeddingModel must be mapped to the rag schema");
-        snapshot.Should().Contain(
-            "b.ToTable(\"knowledge_bases\", \"rag\");",
-            "KnowledgeBase must be mapped to the rag schema");
-        snapshot.Should().Contain(
-            "b.ToTable(\"documents\", \"rag\");",
-            "Document must be mapped to the rag schema");
-        snapshot.Should().Contain(
-            "b.ToTable(\"document_chunks\", \"rag\");",
-            "DocumentChunk must be mapped to the rag schema");
-        snapshot.Should().Contain(
-            "b.ToTable(\"outbox_messages\", \"outbox\",",
-            "module contexts may write Outbox rows but must not own the Outbox migration");
-        snapshot.Should().Contain(
-            "t.ExcludeFromMigrations();",
-            "module contexts may write Outbox rows but must not own the Outbox migration");
+        mappedTables.Should().Contain(new[]
+        {
+            "rag.embedding_models",
+            "rag.knowledge_bases",
+            "rag.documents",
+            "rag.document_chunks"
+        });
+        mappedTables.Should().NotContain("outbox.outbox_messages");
+        dbContext.Model.FindEntityType(typeof(Document))!
+            .FindProperty(nameof(Document.Id))!
+            .ValueGenerated.Should().Be(Microsoft.EntityFrameworkCore.Metadata.ValueGenerated.Never);
     }
 
     [Fact]
-    public void AiGatewayDbContextSnapshot_ShouldMapAiGatewayTablesToAiGatewaySchema_AndExcludeOutboxFromMigrations()
+    public void AiGatewayDbContext_ShouldOwnAiGatewayTables_AndNotMapSharedOutbox()
     {
-        var snapshotFile = Path.Combine(
-            SolutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "Migrations",
-            "AiGatewayDbContext",
-            "AiGatewayDbContextModelSnapshot.cs");
-        var snapshot = File.ReadAllText(snapshotFile);
+        using var dbContext = new AiGatewayDbContext(
+            new DbContextOptionsBuilder<AiGatewayDbContext>()
+                .UseNpgsql("Host=localhost;Database=architecture;Username=test;Password=test")
+                .Options);
+        var mappedTables = dbContext.Model.GetEntityTypes()
+            .Select(entity => $"{entity.GetSchema()}.{entity.GetTableName()}")
+            .ToArray();
 
-        snapshot.Should().Contain(
-            "AICopilot.Core.AiGateway.Aggregates.LanguageModel.LanguageModel",
-            "LanguageModel is owned by AiGatewayDbContext");
-        snapshot.Should().Contain(
-            "AICopilot.Core.AiGateway.Aggregates.ConversationTemplate.ConversationTemplate",
-            "ConversationTemplate is owned by AiGatewayDbContext");
-        snapshot.Should().Contain(
-            "AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy.ApprovalPolicy",
-            "ApprovalPolicy is owned by AiGatewayDbContext");
-        snapshot.Should().Contain(
-            "AICopilot.Core.AiGateway.Aggregates.Sessions.Session",
-            "Session is owned by AiGatewayDbContext");
-        snapshot.Should().Contain(
-            "AICopilot.Core.AiGateway.Aggregates.Sessions.Message",
-            "Message is owned by AiGatewayDbContext");
-        snapshot.Should().Contain(
-            "b.ToTable(\"language_models\", \"aigateway\");",
-            "LanguageModel must be mapped to the aigateway schema");
-        snapshot.Should().Contain(
-            "b.ToTable(\"conversation_templates\", \"aigateway\");",
-            "ConversationTemplate must be mapped to the aigateway schema");
-        snapshot.Should().Contain(
-            "b.ToTable(\"approval_policies\", \"aigateway\");",
-            "ApprovalPolicy must be mapped to the aigateway schema");
-        snapshot.Should().Contain(
-            "b.ToTable(\"sessions\", \"aigateway\");",
-            "Session must be mapped to the aigateway schema");
-        snapshot.Should().Contain(
-            "b.ToTable(\"messages\", \"aigateway\");",
-            "Message must be mapped to the aigateway schema");
-        snapshot.Should().Contain(
-            "b.ToTable(\"outbox_messages\", \"outbox\",",
-            "module contexts may write Outbox rows but must not own the Outbox migration");
-        snapshot.Should().Contain(
-            "t.ExcludeFromMigrations();",
-            "module contexts may write Outbox rows but must not own the Outbox migration");
+        mappedTables.Should().Contain(new[]
+        {
+            "aigateway.language_models",
+            "aigateway.conversation_templates",
+            "aigateway.approval_policies",
+            "aigateway.sessions",
+            "aigateway.messages"
+        });
+        mappedTables.Should().NotContain("outbox.outbox_messages");
     }
 
     [Fact]

@@ -5,5 +5,5 @@ namespace AICopilot.EntityFrameworkCore.Repository;
 
 public sealed class McpServerRepository(
     McpServerDbContext dbContext,
-    AuditTransactionCoordinator transactionCoordinator)
-    : EfRepositoryBase<McpServerDbContext, McpServerInfo>(dbContext, transactionCoordinator);
+    RepositoryPersistenceCommitter persistenceCommitter)
+    : EfRepositoryBase<McpServerDbContext, McpServerInfo>(dbContext, persistenceCommitter);

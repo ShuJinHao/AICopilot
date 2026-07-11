@@ -60,7 +60,12 @@ public sealed class RagPermissionTests
             embedding.Id,
             UserBId,
             KnowledgeBaseAccessScope.OwnerOnly);
-        foreignPrivate.AddDocument("secret-doc.txt", "secret-doc.txt", ".txt", "hash");
+        foreignPrivate.AddDocument(
+            new DocumentId(1),
+            "secret-doc.txt",
+            "secret-doc.txt",
+            ".txt",
+            "hash");
         var vectorSearch = new CapturingVectorSearchService();
 
         var result = await new SearchKnowledgeBaseQueryHandler(
@@ -95,6 +100,7 @@ public sealed class RagPermissionTests
             UserAId,
             KnowledgeBaseAccessScope.AuthenticatedUsers);
         var document = knowledgeBase.AddDocument(
+            new DocumentId(1),
             "leave-policy.txt",
             "leave-policy.txt",
             ".txt",
@@ -145,6 +151,7 @@ public sealed class RagPermissionTests
         var auditLogWriter = new CapturingAuditLogWriter();
         var handler = new UploadDocumentCommandHandler(
             new TestRepository<KnowledgeBase>(foreignPrivate),
+            new SequentialDocumentIdAllocator(),
             fileStorage,
             new FixedDocumentFormatPolicy([".txt"]),
             eventStager,
@@ -173,6 +180,7 @@ public sealed class RagPermissionTests
         var auditLogWriter = new CapturingAuditLogWriter();
         var handler = new UploadDocumentCommandHandler(
             new TestRepository<KnowledgeBase>(knowledgeBase),
+            new SequentialDocumentIdAllocator(),
             fileStorage,
             new FixedDocumentFormatPolicy([".txt", ".pdf"]),
             new CapturingEventStager(),
