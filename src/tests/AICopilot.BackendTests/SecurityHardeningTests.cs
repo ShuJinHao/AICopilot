@@ -276,7 +276,8 @@ public sealed class SecurityHardeningTests
                 "aicopilot-enable-direct-cloud-readonly-db.yml",
                 "aicopilot-enable-real-cloud-ai-read.yml",
                 "aicopilot-image.yml",
-                "aicopilot-provision-cloud-readonly-db-role.yml");
+                "aicopilot-provision-cloud-readonly-db-role.yml",
+                "aicopilot-routine-request.yml");
 
         foreach (var workflow in guardedWorkflows)
         {

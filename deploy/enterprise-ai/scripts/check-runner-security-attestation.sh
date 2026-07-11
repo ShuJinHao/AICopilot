@@ -116,10 +116,11 @@ check_docker_root() {
   local docker_root
   local expected_root
   docker_root="$(docker info --format '{{.DockerRootDir}}')"
-  expected_root="$(canonical_existing_path "$EXPECTED_DOCKER_ROOT")"
+  expected_root="${EXPECTED_DOCKER_ROOT%/}"
+  docker_root="${docker_root%/}"
 
-  if ! path_is_under "$docker_root" "$expected_root"; then
-    fail "AICopilot runner Docker Root Dir must be under $expected_root; actual=$docker_root"
+  if [ "$docker_root" != "$expected_root" ]; then
+    fail "AICopilot runner Docker Root Dir must equal $expected_root; actual=$docker_root"
   fi
 
   printf 'Runner Docker root attestation passed: dockerRoot=%s\n' "$docker_root"
