@@ -1,0 +1,30 @@
+# AI-TEST-GOV-001 hard-gate ownership. This file does not configure remote
+# branch protection; the repository must separately require Code Owner approval.
+/.github/CODEOWNERS @ShuJinHao
+/.gitattributes @ShuJinHao
+/.github/workflows/** @ShuJinHao
+/.github/workflows/aicopilot-ci.yml @ShuJinHao
+/Directory.Build.targets @ShuJinHao
+/AICopilot.slnx @ShuJinHao
+/global.json @ShuJinHao
+/scripts/tests/TestAICopilotTestGovernancePolicy.ps1 @ShuJinHao
+/scripts/tests/TestAICopilotTestGovernanceBehavior.ps1 @ShuJinHao
+/scripts/tests/baselines/ @ShuJinHao
+/src/tests/Directory.Build.props @ShuJinHao
+/src/tests/xunit.runner.json @ShuJinHao
+/src/tests/**/*.cs @ShuJinHao
+/src/tests/**/*.csproj @ShuJinHao
+/src/tests/**/*.fsproj @ShuJinHao
+/src/tests/**/*.vbproj @ShuJinHao
+/src/tests/**/*.props @ShuJinHao
+/src/tests/**/*.targets @ShuJinHao
+/src/tests/**/*xunit.runner.json @ShuJinHao
+/src/tests/**/*.runsettings @ShuJinHao
+/src/tests/**/Directory.Build.targets @ShuJinHao
+/src/tests/AICopilot.AiEvalTests/cases/ @ShuJinHao
+/src/vues/AICopilot.Web/package.json @ShuJinHao
+/src/vues/AICopilot.Web/package-lock.json @ShuJinHao
+/src/vues/AICopilot.Web/vitest.config.ts @ShuJinHao
+/src/vues/AICopilot.Web/tests/ @ShuJinHao
+/deploy/enterprise-ai/tests/TestDeploymentPolicy.ps1 @ShuJinHao
+/deploy/enterprise-ai/tests/deployment-behavior.sh @ShuJinHao

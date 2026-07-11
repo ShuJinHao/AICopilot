@@ -1,0 +1,153 @@
+name: aicopilot-ci
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "deploy/**"
+      - "docs/**"
+      - "scripts/**"
+      - ".dockerignore"
+      - ".gitattributes"
+      - "AGENTS.md"
+      - "Directory.Build.props"
+      - "Directory.Build.targets"
+      - "global.json"
+      - "AICopilot.slnx"
+      - ".github/CODEOWNERS"
+      - ".github/workflows/**"
+  pull_request: {}
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Run AICopilot test governance self-tests
+        shell: pwsh
+        run: |
+          ./scripts/tests/TestAICopilotTestGovernanceBehavior.ps1
+          ./scripts/tests/TestAICopilotTestGovernancePolicy.ps1 -Mode ValidateStatic -Configuration Release
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: "10.0.301"
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: "src/vues/AICopilot.Web/package-lock.json"
+
+      - name: Verify .NET SDK
+        run: test "$(dotnet --version)" = "10.0.301"
+
+      - name: Restore AICopilot solution
+        run: dotnet restore AICopilot.slnx
+
+      - name: Restore web dependencies
+        working-directory: src/vues/AICopilot.Web
+        run: npm ci
+
+      - name: Enforce incremental deployment policy
+        shell: pwsh
+        run: ./deploy/enterprise-ai/tests/TestDeploymentPolicy.ps1
+
+      - name: Require Linux Docker runtime
+        run: docker info
+
+      - name: Build AICopilot solution
+        run: dotnet build AICopilot.slnx -c Release --no-restore
+
+      - name: Validate AICopilot test repository and discovery
+        shell: pwsh
+        run: |
+          ./scripts/tests/TestAICopilotTestGovernancePolicy.ps1 -Mode ValidateRepository -Configuration Release
+          ./scripts/tests/TestAICopilotTestGovernancePolicy.ps1 -Mode ValidateDiscovery -Configuration Release
+
+      - name: Run architecture tests
+        run: dotnet test src/tests/AICopilot.ArchitectureTests/AICopilot.ArchitectureTests.csproj -c Release --no-build --no-restore --logger "trx;LogFileName=architecture.trx" --results-directory artifacts/test-results
+
+      - name: Run deterministic AI eval tests
+        run: dotnet test src/tests/AICopilot.AiEvalTests/AICopilot.AiEvalTests.csproj -c Release --no-build --no-restore --logger "trx;LogFileName=ai-eval.trx" --results-directory artifacts/test-results
+
+      - name: Run backend tests
+        run: dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj -c Release --no-build --no-restore --logger "trx;LogFileName=backend.trx" --results-directory artifacts/test-results
+
+      - name: Run deployment behavior tests
+        run: bash deploy/enterprise-ai/tests/deployment-behavior.sh | tee artifacts/test-results/deployment-behavior.log
+
+      - name: Test and build web app
+        working-directory: src/vues/AICopilot.Web
+        run: |
+          npm run test:unit -- --reporter=json --outputFile=../../../artifacts/test-results/vitest.json
+          npm run build
+
+      - name: Reconcile required test results
+        shell: pwsh
+        run: |
+          $expected = @{
+            'architecture.trx' = 91
+            'ai-eval.trx' = 6
+            'backend.trx' = 924
+          }
+          foreach ($entry in $expected.GetEnumerator()) {
+            $path = Join-Path 'artifacts/test-results' $entry.Key
+            if (-not (Test-Path $path -PathType Leaf)) {
+              throw "Missing required TRX: $path"
+            }
+            [xml]$trx = Get-Content $path -Raw
+            $counters = $trx.TestRun.ResultSummary.Counters
+            $total = [int]$counters.total
+            $passed = [int]$counters.passed
+            $failed = [int]$counters.failed
+            $notExecuted = [int]$counters.notExecuted
+            if ($total -ne $entry.Value -or $passed -ne $entry.Value -or $failed -ne 0 -or $notExecuted -ne 0) {
+              throw "$($entry.Key) reconciliation failed: expected=$($entry.Value), total=$total, passed=$passed, failed=$failed, notExecuted=$notExecuted"
+            }
+          }
+
+          $vitestPath = 'artifacts/test-results/vitest.json'
+          if (-not (Test-Path $vitestPath -PathType Leaf)) {
+            throw "Missing required Vitest result: $vitestPath"
+          }
+          $vitest = Get-Content $vitestPath -Raw | ConvertFrom-Json
+          if (-not [bool]$vitest.success -or
+              [int]$vitest.numTotalTests -ne 132 -or
+              [int]$vitest.numPassedTests -ne 132 -or
+              [int]$vitest.numFailedTests -ne 0 -or
+              [int]$vitest.numPendingTests -ne 0 -or
+              @($vitest.testResults).Count -ne 29) {
+            throw "Vitest reconciliation failed: files=$(@($vitest.testResults).Count), total=$($vitest.numTotalTests), passed=$($vitest.numPassedTests), failed=$($vitest.numFailedTests), pending=$($vitest.numPendingTests)"
+          }
+
+          $deploymentPath = 'artifacts/test-results/deployment-behavior.log'
+          if (-not (Test-Path $deploymentPath -PathType Leaf)) {
+            throw "Missing required deployment behavior log: $deploymentPath"
+          }
+          $deploymentLines = @(Get-Content $deploymentPath)
+          $deploymentCases = @($deploymentLines | Where-Object { $_ -match '^TEST ' }).Count
+          if ($deploymentCases -ne 33 -or
+              @($deploymentLines | Where-Object { $_ -eq 'NON_PRODUCTION_MECHANISM_TEST productionEligible=false result=passed' }).Count -ne 1 -or
+              @($deploymentLines | Where-Object { $_ -eq 'All AICopilot deployment behavior tests passed.' }).Count -ne 1) {
+            throw "Deployment behavior reconciliation failed: cases=$deploymentCases"
+          }
+
+      - name: Upload required test evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: aicopilot-required-test-results
+          path: artifacts/test-results/**
+          if-no-files-found: warn

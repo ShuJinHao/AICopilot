@@ -117,6 +117,21 @@ Cloud-AICopilot OIDC 身份对齐的长期结论见 `../docs/历史核心记录.
 - “至少一个 enabled Admin”是跨 Identity 命令的不变量。当前 `DisableUser`、`UpdateUserRole` 和 migration seed 必须在唯一 Identity transaction 内先取得固定全局 PostgreSQL transaction advisory lock，再读取用户、角色和 enabled Admin；execution-strategy 每次 retry 必须重新加锁并重读。当前生产树没有 DeleteUser 入口；未来新增删除、直接角色移除或其它减少可用管理员数量的路径，必须同时接入该边界、编译型架构 Analyzer 和真实 PostgreSQL 竞争测试，禁止只加应用层 count 或制造空壳兼容 API。
 - enabled Admin 的“数量存在”与“具备恢复治理能力”是两个不变量。Admin 角色的最小恢复权限基线由 `AI-SEC-052` 单独治理；不得用 AI-SEC-051 的人数绿测证明 Admin 权限集合仍可恢复。
 
+## Test Architecture Governance
+
+- 三项目测试架构专题入口是 `../docs/三项目测试架构治理总计划.md`。AICopilot 的仓内硬门禁入口固定为 `scripts/tests/TestAICopilotTestGovernancePolicy.ps1`，行为负例为 `scripts/tests/TestAICopilotTestGovernanceBehavior.ps1`；不得新增第二套基线、runner、runsettings 或 required workflow 绕过该入口。
+- `AICopilot.BackendTests`、`AICopilot.ArchitectureTests`、`AICopilot.AiEvalTests`、`AICopilot.CloudAiReadLiveTests` 是 Phase 0 冻结旧桶。不得继续向其中新增测试声明、源文件或历史 `Phase/Batch/Suite` 主分类；迁移必须通过有期限 verified-migration 指向 `Unit/Aggregate/Application/Workflow/Contract/Conformance/Persistence/HttpIntegration/EndToEnd/Deployment/GoldenEval` 等目标项目。
+- `AICopilot.Testing.McpServer` 是 Integration support host，不是测试项目；不得添加 `IsTestProject`、测试框架包或 Fact/Theory。新增 support host 也必须进入显式 allowlist，不能藏在 `src/tests` 下逃避 discovery。
+- 每个测试项目必须直接、无条件声明 `IsTestProject=true`，进入 `AICopilot.slnx`、统一 `src/tests/xunit.runner.json` 和 Release discovery；新增隐藏 xUnit/NUnit/MSTest/TUnit/Microsoft Testing Platform 项目、未审 SDK/项目、间接 ProjectReference、局部 runner、`.runsettings`、`NuGet.config`/`.npmrc`、嵌套 `Directory.Build.props/targets` 或条件式测试身份必须让构建失败。MSBuild 标识符按大小写不敏感治理，不得用混合大小写或 dot-directory 规避门禁。
+- Phase 0 资产图固定为 32 个 csproj、32 个 solution project、2 个 `Directory.Build` 文件、9 个 workflow、4 个 xUnit 项目与唯一 support host；Vitest 29 文件/132 条、deployment behavior 33 场景、package lock、runner/config 和 Playwright legacy smoke 均受精确冻结。资产迁移必须显式更新 baseline/policy 并审阅，不得通过删测试、改 npm script、改 solution/workflow 或替换 runner 换绿。所有原始字节 SHA 资产必须由 `.gitattributes` 固定 LF。
+- Required lane 的 Skip 必须为 0。缺 Docker/Aspire/Browser 时应在调度或 preflight 阶段失败，不得在测试运行后 Skip；AICopilot PR required job 必须全量运行 Architecture、Backend、legacy deterministic Eval、前端 Unit/build 和 deployment behavior，并保持 25 分钟 hard timeout，不得用 Phase/Batch filter 或 `continue-on-error` 换绿灯。
+- 既有 `aicopilot-simulation-release-candidate.yml` 仍会在 PR 重复执行 Backend/Web，且保留 Phase/Batch filter；这是 `AI-TEST-003` 的 P0 迁移债务。在远端 required-context 盘点、Simulation 分类迁移和旧 job 退役前，不得宣称三项目测试治理或 25 分钟目标已整体完成。
+- `CloudAiReadLiveTests` 只允许显式 Manual/Release 的非生产真实契约执行，缺环境必须失败；不得纳入普通 PR，也不得以 Stub/Simulation 代替真实 Cloud provider。
+- 当前 `AiEvalTests` 的 6 个 JSON case 只构成 legacy eval continuity，其中自证输入的 approval/prompt-injection case 不能宣称为生产工作流 Golden。只有接入真实生产 formatter/policy/workflow、版本化期望输出并建立审阅更新流程后，才能升级为 `GoldenEval` hard gate。
+- Phase 0 的 ArchitectureTests 仍包含源码字符串和 Regex 断言，只能称为冻结的动态/词法门禁，不能冒充 Roslyn 编译语义。跨层引用、循环依赖、直接 DbContext/SQL、绕聚合根、插件 runtime 越界和 Cloud-readonly 写边界必须在 `AICopilot.Architecture.Analyzers` 中以 error diagnostic 实现，并由独立 AnalyzerTests 提供正反例。
+- test baseline 同时保护声明、Fact/Theory 类型、Attribute 参数、InlineData payload、MemberData 来源、继承展开、全部 traits、runner case count/digest 和冻结源文件清单。基线只能显式生成并人工审阅；删除、case 减少或迁移必须有 owner、原因、目标项目、RegressionId、批准人和最多 30 天到期日。
+- 重复代码检查是独立 CodeQuality gate：生产代码、测试 fixture、测试 case 分开建立 baseline/ratchet；PR 不得新增 exact clone 或扩大既有 clone。扫描结果不得自动强行合并语义不同的 Agent、RAG、DataAnalysis、MCP 或持久化实现。
+
 ## Unified Agent Workflow
 
 - `AgentWorkflowPipeline` 是 AICopilot 用户输入的统一工作流主干；当前旧名 `ChatWorkflowOrchestrator` 只可作为待消歧历史名，不代表“仅聊天可用”。
