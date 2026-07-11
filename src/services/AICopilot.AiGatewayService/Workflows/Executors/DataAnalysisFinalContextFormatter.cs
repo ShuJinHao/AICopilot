@@ -11,8 +11,10 @@ namespace AICopilot.AiGatewayService.Workflows.Executors;
 public static class DataAnalysisFinalContextFormatter
 {
     private const int PreviewRowLimit = 3;
+    private const int MaxBusinessFieldLabelLength = 80;
     private const int MaxStringValueLength = 240;
     private const string RedactedValue = "[已移除疑似指令或内部细节]";
+    private const string SafeBusinessFieldLabel = "业务字段";
 
     private static readonly string[] InternalFieldNames =
     [
@@ -20,17 +22,9 @@ public static class DataAnalysisFinalContextFormatter
         "sqlText",
         "query",
         "database",
-        "databaseName",
         "dbName",
-        "sourceName",
-        "effectiveSourceName",
-        "tableName",
-        "viewName",
-        "connectionString",
-        "connection",
         "host",
         "server",
-        "password",
         "pwd",
         "userId",
         "username"
@@ -39,12 +33,9 @@ public static class DataAnalysisFinalContextFormatter
     private static readonly string[] InternalFieldFragments =
     [
         "connection",
-        "connectionstring",
-        "password",
         "tablename",
         "viewname",
         "sourcename",
-        "effectivesourcename",
         "databasename"
     ];
 
@@ -84,9 +75,14 @@ public static class DataAnalysisFinalContextFormatter
         ArgumentNullException.ThrowIfNull(semanticSummary);
 
         var materializedRows = MaterializeRows(rows);
+        var previewRows = materializedRows
+            .Take(PreviewRowLimit)
+            .Select(row => (IReadOnlyDictionary<string, object?>)row)
+            .ToList();
+        var fieldLabels = BuildBusinessFieldLabelMap(analysis.Metadata, schema: null, previewRows);
         var context = new
         {
-            analysis = BuildSafeAnalysis(analysis, trustSourceLabel: true),
+            analysis = BuildSafeAnalysis(analysis, trustSourceLabel: true, fieldLabels),
             source_mode = BuildSourceMode(analysis.SourceLabel),
             answer_contract = BuildAnswerContract(),
             query_execution = BuildQueryExecution(plan, materializedRows, returnedRowCount),
@@ -95,7 +91,7 @@ public static class DataAnalysisFinalContextFormatter
                 plan,
                 semanticSummary,
                 materializedRows),
-            business_data_preview = BuildBusinessDataPreview(materializedRows, analysis.Metadata),
+            business_data_preview = BuildBusinessDataPreview(previewRows, fieldLabels),
             query_scope = SanitizeTextValue(semanticSummary.Scope) ?? "结果上限以内的匹配记录",
             is_truncated = isTruncated
         };
@@ -142,13 +138,15 @@ public static class DataAnalysisFinalContextFormatter
         IEnumerable<dynamic>? rows,
         IEnumerable<SchemaColumn>? schema)
     {
+        var previewRows = MaterializePreviewRows(rows);
+        var fieldLabels = BuildBusinessFieldLabelMap(analysis?.Metadata, schema, previewRows);
         var context = new
         {
-            analysis = BuildSafeAnalysis(analysis, trustSourceLabel: false),
+            analysis = BuildSafeAnalysis(analysis, trustSourceLabel: false, fieldLabels),
             source_mode = "DataAnalysis/Text-to-SQL 补充分析",
             answer_contract = BuildAnswerContract(),
             visual_decision = BuildSafeVisualDecision(decision),
-            business_data_preview = BuildBusinessDataPreview(rows, analysis?.Metadata, schema),
+            business_data_preview = BuildBusinessDataPreview(previewRows, fieldLabels),
             query_scope = "基于当前只读数据分析结果的业务预览。"
         };
 
@@ -334,7 +332,10 @@ public static class DataAnalysisFinalContextFormatter
         };
     }
 
-    private static object? BuildSafeAnalysis(AnalysisDto? analysis, bool trustSourceLabel)
+    private static object? BuildSafeAnalysis(
+        AnalysisDto? analysis,
+        bool trustSourceLabel,
+        IReadOnlyDictionary<string, string> fieldLabels)
     {
         if (analysis is null)
         {
@@ -349,16 +350,33 @@ public static class DataAnalysisFinalContextFormatter
         {
             source_label = string.IsNullOrWhiteSpace(sourceLabel) ? "只读业务数据源" : sourceLabel,
             description = SanitizeTextValue(analysis.Description),
-            metadata = analysis.Metadata
-                .Where(item => !IsInternalFieldName(item.Name))
-                .Select(item => new
-                {
-                    name = ResolveBusinessFieldName(item.Name, analysis.Metadata),
-                    description = SanitizeTextValue(item.Description)
-                })
-                .Where(item => !string.IsNullOrWhiteSpace(item.name))
-                .ToList()
+            metadata = BuildSafeMetadata(analysis.Metadata, fieldLabels)
         };
+    }
+
+    private static List<Dictionary<string, string>> BuildSafeMetadata(
+        IEnumerable<MetadataItemDto> metadata,
+        IReadOnlyDictionary<string, string> fieldLabels)
+    {
+        var safeMetadata = new List<Dictionary<string, string>>();
+        var emittedFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var item in metadata)
+        {
+            if (!emittedFields.Add(item.Name)
+                || !fieldLabels.TryGetValue(item.Name, out var label))
+            {
+                continue;
+            }
+
+            safeMetadata.Add(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["name"] = label,
+                ["description"] = label
+            });
+        }
+
+        return safeMetadata;
     }
 
     private static object BuildSafeSemanticSummary(SemanticSummaryDto semanticSummary)
@@ -402,21 +420,13 @@ public static class DataAnalysisFinalContextFormatter
         };
     }
 
-    private static List<Dictionary<string, object?>> BuildBusinessDataPreview(
-        IEnumerable? rows,
-        IReadOnlyCollection<MetadataItemDto>? metadata,
-        IEnumerable<SchemaColumn>? schema = null)
+    private static IReadOnlyList<IReadOnlyDictionary<string, object?>> MaterializePreviewRows(IEnumerable? rows)
     {
-        var preview = new List<Dictionary<string, object?>>();
+        var previewRows = new List<IReadOnlyDictionary<string, object?>>(PreviewRowLimit);
         if (rows is null)
         {
-            return preview;
+            return previewRows;
         }
-
-        var schemaDescriptions = schema?
-            .Where(column => !IsInternalFieldName(column.Name))
-            .ToDictionary(column => column.Name, column => column.Name, StringComparer.OrdinalIgnoreCase)
-            ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var row in rows.Cast<object?>())
         {
@@ -425,32 +435,156 @@ public static class DataAnalysisFinalContextFormatter
                 continue;
             }
 
-            var safeRow = new Dictionary<string, object?>();
+            var materializedRow = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
             foreach (var (fieldName, value) in values)
             {
-                if (IsInternalFieldName(fieldName))
+                materializedRow.TryAdd(fieldName, value);
+            }
+
+            previewRows.Add(materializedRow);
+
+            if (previewRows.Count >= PreviewRowLimit)
+            {
+                break;
+            }
+        }
+
+        return previewRows;
+    }
+
+    private static IReadOnlyDictionary<string, string> BuildBusinessFieldLabelMap(
+        IReadOnlyCollection<MetadataItemDto>? metadata,
+        IEnumerable<SchemaColumn>? schema,
+        IReadOnlyList<IReadOnlyDictionary<string, object?>> previewRows)
+    {
+        var orderedFieldNames = new List<string>();
+        var seenFieldNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var metadataDescriptions = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+
+        void AddFieldName(string? fieldName)
+        {
+            if (!IsInternalFieldName(fieldName) && seenFieldNames.Add(fieldName!))
+            {
+                orderedFieldNames.Add(fieldName!);
+            }
+        }
+
+        if (metadata is not null)
+        {
+            foreach (var item in metadata)
+            {
+                if (IsInternalFieldName(item.Name))
                 {
                     continue;
                 }
 
-                var label = ResolveBusinessFieldName(fieldName, metadata, schemaDescriptions);
-                if (string.IsNullOrWhiteSpace(label) || IsInternalFieldName(label))
+                AddFieldName(item.Name);
+                metadataDescriptions.TryAdd(item.Name, item.Description);
+            }
+        }
+
+        if (schema is not null)
+        {
+            foreach (var column in schema)
+            {
+                if (IsInternalFieldName(column.Name))
                 {
                     continue;
                 }
 
-                var outputLabel = DeduplicateLabel(safeRow, label);
-                safeRow[outputLabel] = SanitizeValue(value);
+                AddFieldName(column.Name);
+            }
+        }
+
+        foreach (var row in previewRows)
+        {
+            foreach (var fieldName in row.Keys)
+            {
+                AddFieldName(fieldName);
+            }
+        }
+
+        var labels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var usedLabels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var fieldName in orderedFieldNames)
+        {
+            metadataDescriptions.TryGetValue(fieldName, out var metadataDescription);
+            var baseLabel = NormalizeBusinessFieldLabelCandidate(metadataDescription)
+                            ?? NormalizeBusinessFieldLabelCandidate(fieldName)
+                            ?? SafeBusinessFieldLabel;
+            labels[fieldName] = AllocateUniqueBusinessFieldLabel(baseLabel, usedLabels);
+        }
+
+        return labels;
+    }
+
+    private static string? NormalizeBusinessFieldLabelCandidate(string? candidate)
+    {
+        if (string.IsNullOrWhiteSpace(candidate)
+            || ContainsDisallowedLabelCharacter(candidate))
+        {
+            return null;
+        }
+
+        var trimmed = candidate.Trim();
+        if (trimmed.Length > MaxBusinessFieldLabelLength
+            || IsInternalFieldName(trimmed))
+        {
+            return null;
+        }
+
+        var sanitized = SanitizeTextValue(trimmed);
+        return string.IsNullOrWhiteSpace(sanitized)
+               || string.Equals(sanitized, RedactedValue, StringComparison.Ordinal)
+            ? null
+            : sanitized;
+    }
+
+    private static bool ContainsDisallowedLabelCharacter(string value)
+    {
+        return value.Any(character => char.IsControl(character)
+                                      || char.GetUnicodeCategory(character) is UnicodeCategory.LineSeparator
+                                          or UnicodeCategory.ParagraphSeparator);
+    }
+
+    private static string AllocateUniqueBusinessFieldLabel(string baseLabel, HashSet<string> usedLabels)
+    {
+        if (usedLabels.Add(baseLabel))
+        {
+            return baseLabel;
+        }
+
+        for (var index = 2; ; index++)
+        {
+            var suffix = $"_{index}";
+            var prefixLength = Math.Min(baseLabel.Length, MaxBusinessFieldLabelLength - suffix.Length);
+            var candidate = baseLabel[..prefixLength] + suffix;
+            if (usedLabels.Add(candidate))
+            {
+                return candidate;
+            }
+        }
+    }
+
+    private static List<Dictionary<string, object?>> BuildBusinessDataPreview(
+        IReadOnlyList<IReadOnlyDictionary<string, object?>> rows,
+        IReadOnlyDictionary<string, string> fieldLabels)
+    {
+        var preview = new List<Dictionary<string, object?>>(rows.Count);
+        foreach (var row in rows)
+        {
+            var safeRow = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (fieldName, value) in row)
+            {
+                if (fieldLabels.TryGetValue(fieldName, out var label))
+                {
+                    safeRow[label] = SanitizeValue(value);
+                }
             }
 
             if (safeRow.Count > 0)
             {
                 preview.Add(safeRow);
-            }
-
-            if (preview.Count >= PreviewRowLimit)
-            {
-                break;
             }
         }
 
@@ -477,46 +611,6 @@ public static class DataAnalysisFinalContextFormatter
         }
     }
 
-    private static string ResolveBusinessFieldName(
-        string fieldName,
-        IReadOnlyCollection<MetadataItemDto>? metadata,
-        IReadOnlyDictionary<string, string>? schemaDescriptions = null)
-    {
-        var metadataDescription = metadata?
-            .FirstOrDefault(item => string.Equals(item.Name, fieldName, StringComparison.OrdinalIgnoreCase))
-            ?.Description;
-
-        if (!string.IsNullOrWhiteSpace(metadataDescription) && !IsInternalFieldName(metadataDescription))
-        {
-            return metadataDescription.Trim();
-        }
-
-        if (schemaDescriptions?.TryGetValue(fieldName, out var schemaDescription) == true
-            && !string.IsNullOrWhiteSpace(schemaDescription)
-            && !IsInternalFieldName(schemaDescription))
-        {
-            return schemaDescription.Trim();
-        }
-
-        return IsInternalFieldName(fieldName) ? string.Empty : fieldName;
-    }
-
-    private static string DeduplicateLabel(Dictionary<string, object?> row, string label)
-    {
-        if (!row.ContainsKey(label))
-        {
-            return label;
-        }
-
-        var index = 2;
-        while (row.ContainsKey($"{label}_{index}"))
-        {
-            index++;
-        }
-
-        return $"{label}_{index}";
-    }
-
     private static object? SanitizeValue(object? value)
     {
         if (value is null or DBNull)
@@ -524,12 +618,46 @@ public static class DataAnalysisFinalContextFormatter
             return null;
         }
 
+        if (value is JsonDocument document)
+        {
+            value = document.RootElement;
+        }
+
+        if (value is JsonElement element)
+        {
+            switch (element.ValueKind)
+            {
+                case JsonValueKind.Undefined:
+                case JsonValueKind.Null:
+                    return null;
+                case JsonValueKind.True:
+                case JsonValueKind.False:
+                    return element.GetBoolean();
+                case JsonValueKind.Number when element.TryGetInt64(out var integer):
+                    return integer;
+                case JsonValueKind.Number when element.TryGetDecimal(out var decimalValue):
+                    return decimalValue;
+                case JsonValueKind.Number when element.TryGetDouble(out var doubleValue):
+                    return doubleValue;
+                case JsonValueKind.String:
+                    return SanitizeTextValue(element.GetString());
+                case JsonValueKind.Object:
+                case JsonValueKind.Array:
+                default:
+                    return RedactedValue;
+            }
+        }
+
         return value switch
         {
             DateTime dateTime => dateTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
             DateTimeOffset dateTimeOffset => dateTimeOffset.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
             bool or byte or sbyte or short or ushort or int or uint or long or ulong or float or double or decimal => value,
-            _ => SanitizeTextValue(value.ToString())
+            string text => SanitizeTextValue(text),
+            char character => character.ToString(),
+            Guid guid => guid.ToString("D", CultureInfo.InvariantCulture),
+            Enum enumValue => SanitizeTextValue(enumValue.ToString()),
+            _ => RedactedValue
         };
     }
 
@@ -588,6 +716,15 @@ public static class DataAnalysisFinalContextFormatter
                 normalized,
                 field.Replace("_", string.Empty, StringComparison.Ordinal),
                 StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        if (CloudReadOnlyGovernedSchema.BlockedFieldFragments.Any(fragment =>
+                normalized.Contains(
+                    fragment.Replace("_", string.Empty, StringComparison.Ordinal)
+                        .Replace("-", string.Empty, StringComparison.Ordinal),
+                    StringComparison.OrdinalIgnoreCase)))
         {
             return true;
         }

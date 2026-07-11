@@ -18,7 +18,7 @@
 - governed schema 和 SQL guard：`src/infrastructure/AICopilot.Dapper`、`src/services/AICopilot.Services.CrossCutting/Sql`。
 - Cloud readonly 授权脚本：`deploy/enterprise-ai/cloud-readonly/apply-readonly-grants.sql`、`deploy/enterprise-ai/cloud-readonly/check-readonly-grants.sql`。
 - Cloud readonly 授权 preflight：`deploy/enterprise-ai/scripts/apply-cloud-readonly-grants.sh`、`deploy/enterprise-ai/scripts/check-cloud-readonly-grants.sh`。
-- 关键测试：`ArchitectureBoundaryTests`、`CloudAiReadClientTests`、`CloudReadonlySimulationTests`、`CloudReadOnlyTextToSqlFallbackRunnerTests`、`TextToSqlReadOnlyTests`、`AiEvalBehaviorGuardrailTests`、`PromptGovernanceTests`、`SemanticAnalysisRunnerTests`、`DeviceLogFollowUpIntentRewriterTests`。
+- 关键测试：`ArchitectureBoundaryTests`、`CloudAiReadClientTests`、`CloudReadonlySimulationTests`、`CloudReadOnlyTextToSqlFallbackRunnerTests`、`TextToSqlReadOnlyTests`、`DataAnalysisFinalContextFormatterTests`、`AiEvalBehaviorGuardrailTests`、`PromptGovernanceTests`、`SemanticAnalysisRunnerTests`、`DeviceLogFollowUpIntentRewriterTests`。
 
 ## 3. Cloud AiRead 正式唯一路径
 
@@ -91,6 +91,8 @@ Text-to-SQL prompt 只能暴露 `CloudReadOnlyGovernedSchema` 批准的表名、
 - 追问其他日志级别、设备、工序或时间窗口时，必须重新生成并执行本轮 `Analysis.DeviceLog.*` 查询。
 - 最终回答只能总结本轮 `query_execution`、`semantic_summary`、返回行数、过滤条件和证据边界；不能基于上一轮回答文本推断未查询数据。
 - Widget 和 display blocks 只能重排本轮只读查询事实，不能前端编造指标、Markdown 解析补数据或把建议写成已执行动作。
+- DataAnalysis 最终上下文是独立的不可信消费边界：表结构注释、Text-to-SQL alias 和返回行 key 均不能直接成为最终 JSON 属性名。formatter 必须使用唯一字段标签映射，过滤共享 governed-schema 敏感标识，并让 metadata name/description 与 preview key 保持一致。
+- `business_data_preview` 只是扁平业务标量预览；除 string、bool/数值、date、Guid、enum 与等价 JSON 标量外，其余 object/array/collection 不得递归输出、串行化或调用自定义 `ToString()` 透出 nested key/secret，统一用既有脱敏占位表达不可展开值。
 
 ## 8. Simulation 边界
 

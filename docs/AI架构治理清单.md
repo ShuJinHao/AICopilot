@@ -300,6 +300,14 @@ git log --oneline -n 20 -- AICopilot.slnx deploy src docs AGENTS.md 资料
 
 本批没有重命名或迁移既有 HTTP route、配置键、physical mapping / semantic source status 运维诊断及其消费者，也没有删除 `SemanticSqlGenerator` 独立实现和测试；这些表面不属于正式语义执行器，后续若治理必须重新做生产与测试消费者审计，不能借本批 no-fallback 收口扩大删除范围。
 
+### 7.5 2026-07-11 DataAnalysis 最终上下文字段边界
+
+| 编号 | 严重级 | 状态 | 范围 | 修复要求 | 验收 |
+| --- | --- | --- | --- | --- | --- |
+| AI-SEC-045 | HIGH | Done | DataAnalysis final context | metadata/preview 共用唯一字段标签映射；内部与 governed-schema 敏感 raw field 整项丢弃；标签指令、控制字符、超长和重名只在唯一入口收口；flat preview 只输出显式标量白名单，任意其他 object/collection 不展开也不调用自定义 `ToString()` | `DataAnalysisFinalContextFormatterTests` + `AiEvalBehaviorGuardrailTests` + `CloudReadOnlyTextToSqlFallbackRunnerTests` + Semantic/Widget/compact 定向回归 + ArchitectureTests/BackendTests/solution build |
+
+本批固定口径：formatter 不再分别解析 metadata 名、preview key 和逐行重名；它先单次收集最多 3 个可识别 dictionary row，再根据 metadata、schema 顺序和实际 row key 产生一份 `OrdinalIgnoreCase` 映射。字段敏感判定复用 `CloudReadOnlyGovernedSchema.BlockedFieldFragments`，值仍只走既有 `SanitizeValue/SanitizeTextValue` 链，没有第二份 blacklist 或递归 nested sanitizer。Semantic/FreeForm Widget 不消费 formatter label map，本批不修改 Widget、route、Cloud API、数据库或部署链。
+
 ## 8. 第六批：Text-to-SQL 和提示词泄露门禁
 
 | 编号 | 严重级 | 状态 | 范围 | 修复要求 | 验收 |

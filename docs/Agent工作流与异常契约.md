@@ -45,6 +45,14 @@ Cloud 只读 Agent 当前正式能力限定为：
 
 `Analysis.Recipe.*` 的具体配方数据请求必须在调用语义规划器前返回禁读边界，即使规划器本会失败也不能进入 provider、数据库或 fallback。Chat 语义执行器只持有 Cloud AiRead 客户端、语义规划器和日志器；Direct DB、physical mapping、SQL generator、数据库审计与 Text-to-SQL fallback 只能留在各自独立治理链，不能重新挂回正式语义执行器。
 
+### 2.2 DataAnalysis 最终上下文边界
+
+- `analysis.metadata` 与 `business_data_preview` 必须共用同一份大小写不敏感字段标签映射；同一 raw field 的 metadata name/description 和 preview property key 必须一致，重名标签只在该唯一入口稳定加后缀。
+- raw field 为 SQL、表/视图、数据源、数据库、host/user 等 formatter 内部显示字段，或命中 `CloudReadOnlyGovernedSchema.BlockedFieldFragments` 的 key/credential/secret/token/password 等共享敏感标识时，必须整项丢弃，不能换一个业务名后继续输出其值。
+- 标签候选只允许 metadata description 再回退 raw field；指令型/内部文本、控制字符、换行或超过 80 字符的候选不得成为 JSON key，两个候选都不安全时使用固定业务 fallback。
+- preview 只承载最多 3 个可识别 dictionary row 的扁平标量。值只走唯一 `SanitizeValue` 入口；JSON null/bool/number/string 可映射为同等标量，CLR 只显式允许 string、bool/数值、date、Guid 和 enum。JSON object/array 及其余任意 CLR object/collection 一律输出既有脱敏占位，不调用自定义 `ToString()` 透出内容，不递归展开第二层 key。
+- Semantic/FreeForm Widget 在 formatter 之前由各自真实 plan/summary/rows 生成，不消费最终 prompt label map；不得因最终上下文治理复制第二套 Widget 标签或值清洗器。
+
 ## 3. Cloud 写入禁止
 
 - Agent workflow、MCP、Tool、后台任务、直接 SQL 和隐藏 adapter 均不得创建、修改、删除、补录、审批、派发或触发 Cloud 业务数据。
