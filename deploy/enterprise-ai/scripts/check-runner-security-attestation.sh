@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-EXPECTED_WORK_ROOT="${AICOPILOT_RUNNER_WORK_ROOT:-/data/github-runner/aicopilot}"
-EXPECTED_DOCKER_ROOT="${AICOPILOT_DOCKER_ROOT:-/data/docker}"
+EXPECTED_WORK_ROOT="${AICOPILOT_RUNNER_WORK_ROOT:-/data/iiot-platform/runners/aicopilot}"
+EXPECTED_DOCKER_ROOT="${AICOPILOT_DOCKER_ROOT:-/data/iiot-platform/runtime/docker}"
 EXPECTED_DEPLOY_TARGET_DIR="${AICOPILOT_DEPLOY_TARGET_DIR:-/srv/enterprise-ai/deploy}"
 DRY_RUN=false
 
@@ -17,8 +17,8 @@ environment reviewers/secrets and OIDC/Vault or equivalent short-lived
 credential rollout must still be attested by the platform owner.
 
 Options:
-  --work-root <path>      Expected runner work root. Default: /data/github-runner/aicopilot.
-  --docker-root <path>    Expected Docker Root Dir. Default: /data/docker.
+  --work-root <path>      Expected runner work root. Default: /data/iiot-platform/runners/aicopilot.
+  --docker-root <path>    Expected Docker Root Dir. Default: /data/iiot-platform/runtime/docker.
   --deploy-dir <path>     Expected AICopilot deploy target. Default: /srv/enterprise-ai/deploy.
   --dry-run               Print checks without inspecting local Docker.
   --help                  Show this help.

@@ -7,7 +7,7 @@
 本目录按双层口径维护：
 
 - 长期模板/规则：描述 Harbor/SSH/non-root/HTTP-only 的标准链路，不写真实 secret。
-- 当前生产现场口径：当前标准部署根目录是 `/srv/enterprise-ai/deploy`，稳定日常 Runner 是 `runner/iiot-release-runner.sh`，Docker Root Dir 是 `/data/docker`；`releases/routine-*` 与备份目录必须保持 non-root 可访问。旧 support files 只在基础设施维护时同步。
+- 当前生产现场口径：当前标准部署根目录是 `/srv/enterprise-ai/deploy`，稳定日常 Runner 是 `runner/iiot-release-runner.sh`，Runner work root 是 `/data/iiot-platform/runners/aicopilot`，Docker Root Dir 是 `/data/iiot-platform/runtime/docker`；`releases/routine-*` 与备份目录必须保持 non-root 可访问。旧 support files 只在基础设施维护时同步。
 - 当前与 Cloud 共用同一台生产宿主机，但部署根独立；共享宿主机事实、当前标准发布账号和 Cloud 根目录统一以工作区 [`docs/上传部署总览.md`](../../../docs/上传部署总览.md) 为准。AICopilot 当前未因同类权限问题失败，但必须和 Cloud 一样维持 release state / support files 的 non-root owner/mode 门禁。
 
 ## 部署口径
@@ -94,8 +94,8 @@ Runner 机器侧验收：
 ```bash
 cd /srv/enterprise-ai/deploy
 ./scripts/check-runner-security-attestation.sh \
-  --work-root /data/github-runner/aicopilot \
-  --docker-root /data/docker \
+  --work-root /data/iiot-platform/runners/aicopilot \
+  --docker-root /data/iiot-platform/runtime/docker \
   --deploy-dir /srv/enterprise-ai/deploy
 ```
 

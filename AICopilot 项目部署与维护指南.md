@@ -17,7 +17,7 @@ pwsh ./deploy/Deploy-All.ps1 # Cloud + AICopilot 全量一键发布
 本文档按双层口径维护：
 
 - 长期模板/规则：描述 Harbor/SSH/non-root/HTTP-only/Cloud 只读边界，不写真实 secret。
-- 当前生产现场口径：当前标准部署根目录是 `/srv/enterprise-ai/deploy`，稳定 Runner 是 `runner/iiot-release-runner.sh`，Docker Root Dir 是 `/data/docker`；`releases/routine-*`、备份和标准 non-root 发布路径必须保持一致。旧 support 目录只在基础设施维护时检查。
+- 当前生产现场口径：当前标准部署根目录是 `/srv/enterprise-ai/deploy`，稳定 Runner 是 `runner/iiot-release-runner.sh`，Runner work root 是 `/data/iiot-platform/runners/aicopilot`，Docker Root Dir 是 `/data/iiot-platform/runtime/docker`（与 Cloud 共用同一 Docker daemon）；`releases/routine-*`、备份和标准 non-root 发布路径必须保持一致。旧 support 目录只在基础设施维护时检查。
 - 当前与 Cloud 共用同一台生产宿主机，但部署根独立；共享宿主机事实、当前标准发布账号和 Cloud 根目录统一以工作区 `../docs/上传部署总览.md` 为准。AICopilot 当前未因同类权限问题失败，但必须和 Cloud 共享相同的 non-root release-state / support-files 门禁原则。
 
 ## 1. 部署口径
@@ -33,7 +33,7 @@ pwsh ./deploy/Deploy-All.ps1 # Cloud + AICopilot 全量一键发布
 - 单个镜像 build/push 默认 15 分钟超时，Harbor 登录/API 检查默认 2 分钟超时，SSH deploy 默认 30 分钟超时；超时必须停止并按脚本输出诊断 Docker buildx、Harbor tag、服务器 compose/logs 和 release 状态，不得继续 watch 或无限等待。
 - 灾备 runner 必须使用专用非 root 用户运行，例如 `github-runner`，并带 `iiot-linux-prod` label；不要把 runner 装成 root 服务。production/secrets 相关灾备 workflow 和 runner 机器侧都必须执行 `deploy/enterprise-ai/scripts/check-runner-security-attestation.sh`，验收非 root、工作目录、Docker Root Dir 和部署目录。
 - 灾备 workflow 只能使用最小 GitHub 权限和生产环境 secrets；这不是 OIDC/Vault 已完成的证明。runner 机器权限收敛、短期凭据或 Vault/OIDC 接入必须作为独立基础设施任务验收；runner 脚本只证明本机事实，不证明 GitHub environment secrets 或 Vault/OIDC 已完成。平台侧验收使用 `deploy/enterprise-ai/runner-platform-attestation.template.md` 复制填写，再用 `deploy/enterprise-ai/scripts/check-platform-attestation-record.sh --record <filled-attestation.md>` 校验记录完整性；该记录校验不替代真实 GitHub/Vault/OIDC/runner 检查。
-- 当前服务器 runner 工作目录固定为 `/data/github-runner/aicopilot`，Docker Root Dir 固定为 `/data/docker`，不要把构建缓存放回系统盘。
+- 当前服务器 runner 工作目录固定为 `/data/iiot-platform/runners/aicopilot`，Docker Root Dir 固定为 `/data/iiot-platform/runtime/docker`，不要把构建缓存放回系统盘。
 - 当前标准 non-root 发布还要求 `releases/current-release*`、`staged-release*`、`previous-release*`、`current-release.summary.md` 和 deploy support files 对标准部署用户可读可写；root 应急路径一旦写入这些状态，关闭任务前必须恢复 owner/mode 并重新验证 `--validate-only`。
 - AICopilot 应用镜像不保留历史版本；Harbor 和服务器本机只保留当前生产正在运行的 `sha-*` 应用镜像。
 - 当前内网环境 Git smart HTTP 可能超时，旧 workflow 使用 GitHub archive/codeload 兜底拉取源码；这些 workflow 仅用于灾备，不作为日常发布入口。

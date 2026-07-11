@@ -549,8 +549,8 @@ public sealed class SecurityHardeningTests
         modelSecretMigrationCheck.Should().NotContain("RETURN");
         runnerSecurityAttestation.Should().Contain("check-runner-security-attestation.sh");
         runnerSecurityAttestation.Should().Contain("AICopilot self-hosted runner must not run as root.");
-        runnerSecurityAttestation.Should().Contain("/data/github-runner/aicopilot");
-        runnerSecurityAttestation.Should().Contain("/data/docker");
+        runnerSecurityAttestation.Should().Contain("/data/iiot-platform/runners/aicopilot");
+        runnerSecurityAttestation.Should().Contain("/data/iiot-platform/runtime/docker");
         runnerSecurityAttestation.Should().Contain("/srv/enterprise-ai/deploy");
         runnerSecurityAttestation.Should().Contain("OIDC/Vault or equivalent short-lived");
         runnerSecurityAttestation.Should().Contain("runner-platform-attestation.template.md");
@@ -2842,8 +2842,8 @@ Related infrastructure ticket: INFRA-123
 Runner machine facts:
 Runner service runs as a dedicated non-root account.
 Runner labels include self-hosted and iiot-linux-prod.
-Runner work root is /data/github-runner/aicopilot.
-Docker Root Dir is under /data/docker.
+Runner work root is /data/iiot-platform/runners/aicopilot.
+Docker Root Dir is /data/iiot-platform/runtime/docker.
 AICopilot deploy directory is /srv/enterprise-ai/deploy.
 check-runner-security-attestation.sh completed successfully.
 

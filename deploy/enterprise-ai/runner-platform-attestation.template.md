@@ -22,8 +22,8 @@ secret names, ticket links, screenshots, or other internal operational details.
 
 - [ ] Runner service runs as a dedicated non-root account.
 - [ ] Runner labels include `self-hosted` and `iiot-linux-prod`.
-- [ ] Runner work root is `/data/github-runner/aicopilot`.
-- [ ] Docker Root Dir is under `/data/docker`.
+- [ ] Runner work root is `/data/iiot-platform/runners/aicopilot`.
+- [ ] Docker Root Dir is `/data/iiot-platform/runtime/docker`.
 - [ ] AICopilot deploy directory is `/srv/enterprise-ai/deploy`.
 - [ ] Runner service account write access is limited to runner work root,
       Docker access needed for build/deploy, and AICopilot deploy support paths.
@@ -32,8 +32,8 @@ secret names, ticket links, screenshots, or other internal operational details.
 ```bash
 cd /srv/enterprise-ai/deploy
 ./scripts/check-runner-security-attestation.sh \
-  --work-root /data/github-runner/aicopilot \
-  --docker-root /data/docker \
+  --work-root /data/iiot-platform/runners/aicopilot \
+  --docker-root /data/iiot-platform/runtime/docker \
   --deploy-dir /srv/enterprise-ai/deploy
 ```
 
