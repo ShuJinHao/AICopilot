@@ -1,6 +1,6 @@
 # AICopilot 部署与维护指南
 
-本文档是 AICopilot 当前项目级部署说明。长期业务边界见 `AGENTS.md` 和 `资料/AICopilot业务规则.md`；历史阶段计划和验收报告不再作为执行入口。日常应用发布入口是工作区根 `deploy/Deploy.ps1`；`deploy/Invoke-WorkspaceDeploy.ps1` 只保留给 Edge、部署基础设施维护和旧事务诊断。
+本文档是 AICopilot 当前项目级部署说明。长期业务边界见 `AGENTS.md` 和 `资料/AICopilot业务规则.md`；历史阶段计划和验收报告不再作为执行入口。日常自动增量入口是工作区根 `deploy/Deploy-Changed.ps1`；`Deploy.ps1` 只作为显式服务执行器和恢复入口，`deploy/Invoke-WorkspaceDeploy.ps1` 只保留给部署基础设施维护和旧事务诊断。
 
 > 当前状态（2026-07-10）：可信工作站日常链路已通过固定远端 SHA、脏本地工作树、fake Docker/SSH、一次 SSH、migration 备份、失败回滚和无重建续传回归。尚未执行真实 Harbor/SSH/生产容器 E2E，因此当前不得把本文目标链路解释为生产部署已验收。
 
@@ -11,7 +11,7 @@ pwsh ./deploy/Deploy.ps1 -Target AICopilot -InstallRunner # 仅首次或 Runner 
 pwsh ./deploy/Deploy.ps1 -Target AICopilot -Doctor
 pwsh ./deploy/Deploy.ps1 -Target AICopilot -Services httpapi,web -DryRun
 pwsh ./deploy/Deploy.ps1 -Target AICopilot -Services httpapi,web -Deploy
-pwsh ./deploy/Deploy-All.ps1 # Cloud + AICopilot 全量一键发布
+pwsh ./deploy/Deploy-Changed.ps1 -Targets AICopilot
 ```
 
 本文档按双层口径维护：
@@ -26,7 +26,7 @@ pwsh ./deploy/Deploy-All.ps1 # Cloud + AICopilot 全量一键发布
 - `deploy/enterprise-ai/README.md` 是部署目录内的自解释实现入口；新 AI 接手标准路径时先读工作区 `deploy/README.md` 和 `deploy/Deploy.ps1`，再按需下钻到该文件。
 - 多 AI 可以并行准备候选，但每次运行必须使用固定 SHA 和私有 manifest；远端 support install、release、容器变更和 cleanup 由同一 token/digest 与全局锁串行化，active lock 必须立即失败。
 - 生产环境使用 Docker Compose 单机编排，镜像从 Harbor 拉取。
-- 标准日常发布走工作区 `deploy/Deploy.ps1`：先把目标修改 push 到 `origin/main`，入口取远端 tip 建隔离 worktree、构建不可变镜像，再向稳定 non-root Runner 投递同一份请求。`RemoteTransport=Auto` 优先 SSH，SSH TCP 不可达时自动使用 `aicopilot-routine-request.yml` self-hosted Runner。本地工作树是否干净不阻断，也不会被入口修改。
+- 标准日常发布走工作区 `deploy/Deploy-Changed.ps1`：要求 clean/main，自动把已提交 HEAD push 到 `origin/main`，读取生产 SHA，按 Git 改动和项目依赖闭包只选择受影响镜像，再调用 `Deploy.ps1 -Services ...` 构建不可变镜像并请求稳定 non-root Runner。影响无法安全归属禁止退化全量。`RemoteTransport=Auto` 优先 SSH，SSH TCP 不可达时自动使用 `aicopilot-routine-request.yml` self-hosted Runner。
 - 后端应用服务自动包含 migration；Runner 先备份 PostgreSQL，再迁移并用 `--no-deps` 更新选中应用，失败恢复旧应用镜像。构建后远端失败使用 `-ResumeInvocation` 续传，不重新构建。
 - Compose、Runner、scripts/cloud-readonly、cleanup/GC 和深度 attestation 属于独立基础设施维护，不随日常应用发布同步。
 - GitHub `aicopilot-image` / `aicopilot-deploy` 只保留带确认词的灾备入口；日常生产发布不得等待这些 workflow。

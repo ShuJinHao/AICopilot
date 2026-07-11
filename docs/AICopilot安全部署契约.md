@@ -70,7 +70,7 @@ Cloud OIDC 使用 HTTP issuer 时必须满足全部条件：
 
 - AICopilot 生产镜像必须使用 Harbor mirror 基础镜像，不能默认从 Docker Hub 或 MCR 拉生产基础镜像。
 - 应用和 Web 运行容器必须非 root。
-- 日常标准发布路径是工作区 `Deploy.ps1` 从 fresh 远端 tip 隔离构建、推 Harbor，再以一次 SSH 请求稳定服务器 Runner。`local-release.sh` / `deploy-release.sh` 只保留给基础设施维护和旧事务恢复。
+- 日常标准发布路径是工作区 `Deploy-Changed.ps1` 自动 push Git、读取生产 SHA，按改动和依赖闭包只选择受影响镜像，再由 `Deploy.ps1` 从 fresh 远端 tip 隔离构建、推 Harbor 并请求稳定服务器 Runner。影响无法归属禁止退化全量；`local-release.sh` / `deploy-release.sh` 只保留给基础设施维护和旧事务恢复。
 - 稳定 Runner 必须使用专用 non-root 部署用户；root 只允许一次性修复 owner/mode，不得进入日常应用发布。
 - 当前如果与 Cloud 共用同一台生产宿主机，必须在工作区总入口明确共享宿主机事实、共享标准发布人和两个独立部署根；不得把 Cloud 根的权限漂移和 AICopilot 根的权限状态混写成同一个“整机问题”。
 - root 应急路径如果写入了 `releases/*`、`current-release.summary.md` 或 deploy support files，关闭任务前必须恢复 owner/mode，并重新验证标准 non-root `./deploy-release.sh --validate-only`。

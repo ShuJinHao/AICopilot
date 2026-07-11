@@ -22,6 +22,10 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      - name: Enforce incremental deployment policy
+        shell: pwsh
+        run: ./deploy/enterprise-ai/tests/TestDeploymentPolicy.ps1
+
       - name: Backend full test suite
         run: dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --logger "console;verbosity=minimal"
 
@@ -37,6 +41,10 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
+
+      - name: Enforce incremental deployment policy
+        shell: pwsh
+        run: ./deploy/enterprise-ai/tests/TestDeploymentPolicy.ps1
 
       - name: Setup Node
         uses: actions/setup-node@v4

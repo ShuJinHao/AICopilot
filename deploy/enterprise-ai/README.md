@@ -1,6 +1,6 @@
 # AICopilot enterprise-ai deploy
 
-本目录是 AICopilot 镜像构建和旧事务维护实现目录。新接手日常部署先读工作区根 `deploy/README.md` 和 `deploy/Deploy.ps1`，再按需查看本文件、仓库根目录的 `AICopilot 项目部署与维护指南.md`、`AGENTS.md` 和 `资料/AICopilot业务规则.md`。
+本目录是 AICopilot 镜像构建和旧事务维护实现目录。新接手日常部署先读工作区根 `deploy/README.md` 和 `deploy/Deploy-Changed.ps1`，再按需查看本文件、仓库根目录的 `AICopilot 项目部署与维护指南.md`、`AGENTS.md` 和 `资料/AICopilot业务规则.md`。
 
 > 当前状态（2026-07-10）：新日常入口/Runner 已通过 fake 远端仓库、脏本地工作树、不可变 OCI、一次 SSH、migration 自动闭包、PostgreSQL 备份、失败回滚和不重建续传回归；旧原子事务回归仍保留。尚未完成真实 Harbor/SSH/生产容器 E2E，因此不能称生产部署已验收。
 
@@ -13,8 +13,8 @@
 ## 部署口径
 
 - 生产环境使用 Docker Compose 单机编排，服务器目录为 `/srv/enterprise-ai/deploy`。
-- 工作区日常标准发布走 `pwsh ./deploy/Deploy.ps1 -Target AICopilot ...`；本目录 `build-and-push.sh` 只负责镜像，`local-release.sh` / `deploy-release.sh` 只保留给基础设施维护和旧链恢复。
-- 日常入口取 `origin/main` tip 建 detached worktree；本地业务工作树可以继续迭代且不会被修改，未推送改动不会发布。每次日常远端阶段只投递一份 digest-bound 请求；`Auto` 在 SSH TCP 不可达时经 `aicopilot-routine-request.yml` self-hosted Runner 交给同一稳定 Runner。
+- 工作区日常标准发布走 `pwsh ./deploy/Deploy-Changed.ps1 -Targets AICopilot`；入口自动 push 已提交的 main、读取生产 SHA，并按依赖闭包只选择受影响镜像。本目录 `build-and-push.sh` 只负责显式服务镜像，`local-release.sh` / `deploy-release.sh` 只保留给基础设施维护和旧链恢复。
+- 日常入口只接受 clean/main，未提交内容直接阻断。每次远端阶段只投递一份 digest-bound 请求；`Auto` 在 SSH TCP 不可达时经 `aicopilot-routine-request.yml` self-hosted Runner 交给同一稳定 Runner。
 - AICopilot 选择 HttpApi/DataWorker/RagWorker 时自动包含 migration。Runner 在 migration 前生成 PostgreSQL dump/checksum，随后只对选中应用服务执行 `--no-deps` 更新；PostgreSQL、RabbitMQ、Qdrant 不随应用发布重建。
 - Runner/Compose/scripts/cloud-readonly 支持文件升级、深度安全巡检、cleanup 和 Harbor GC 均是独立维护任务，不得塞回日常应用热路径。
 - 多 agent 可以同时准备本地候选，但远端 support install、release state、容器变更和 cleanup 必须由托管锁串行化；第二个发布遇到 active lock 时立即返回 `75`，不得静默等待或绕锁重发。
