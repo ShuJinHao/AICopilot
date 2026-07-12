@@ -1,11 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { chatService } from '@/services/chatService'
-import type {
-  AgentApprovalRequest,
-  AgentTask,
-  AgentTaskAuditSummary
-} from '@/types/protocols'
+import type { AgentApprovalRequest, AgentTask, AgentTaskAuditSummary } from '@/types/protocols'
 import type { SessionTimelineEvent } from '@/types/app'
 import { toFriendlyMessage } from './chatErrorStore'
 
@@ -21,11 +17,33 @@ export const useAgentTaskStore = defineStore('agentTask', () => {
   const agentAuditSummary = ref<AgentTaskAuditSummary[]>([])
   const timelineEvents = ref<SessionTimelineEvent[]>([])
   const isAgentBusy = ref(false)
+  const approvalAuthorityUnknownTaskIds = ref<Set<string>>(new Set())
 
   const latestAgentTask = computed(() => agentTasks.value[0] ?? null)
   const pendingAgentApprovals = computed(() =>
-    agentApprovals.value.filter((approval) => approval.status === 'Pending')
+    agentApprovals.value.filter((approval) => approval.status === 'Pending'),
   )
+  const isAgentApprovalAuthorityUnknown = computed(() =>
+    Boolean(
+      latestAgentTask.value && approvalAuthorityUnknownTaskIds.value.has(latestAgentTask.value.id),
+    ),
+  )
+
+  function markApprovalAuthorityUnknown(taskId: string) {
+    approvalAuthorityUnknownTaskIds.value = new Set(approvalAuthorityUnknownTaskIds.value).add(
+      taskId,
+    )
+  }
+
+  function clearApprovalAuthorityUnknown(taskId: string) {
+    const remaining = new Set(approvalAuthorityUnknownTaskIds.value)
+    remaining.delete(taskId)
+    approvalAuthorityUnknownTaskIds.value = remaining
+  }
+
+  function isApprovalAuthorityUnknown(taskId: string) {
+    return approvalAuthorityUnknownTaskIds.value.has(taskId)
+  }
 
   function reset() {
     agentTasks.value = []
@@ -33,6 +51,7 @@ export const useAgentTaskStore = defineStore('agentTask', () => {
     agentAuditSummary.value = []
     timelineEvents.value = []
     isAgentBusy.value = false
+    approvalAuthorityUnknownTaskIds.value = new Set()
   }
 
   function upsertAgentTask(task: AgentTask) {
@@ -51,8 +70,7 @@ export const useAgentTaskStore = defineStore('agentTask', () => {
     } catch (error) {
       console.error('Failed to load agent tasks for session.', error)
       reportLoadError(reportError, '加载任务状态', error)
-      agentTasks.value = []
-      return null
+      throw error
     }
   }
 
@@ -70,15 +88,18 @@ export const useAgentTaskStore = defineStore('agentTask', () => {
   async function loadAgentApprovals(taskId: string | null = null, reportError?: ErrorReporter) {
     if (!taskId) {
       agentApprovals.value = []
+      approvalAuthorityUnknownTaskIds.value = new Set()
       return
     }
 
     try {
       agentApprovals.value = await chatService.getAgentTaskApprovals(taskId)
+      clearApprovalAuthorityUnknown(taskId)
     } catch (error) {
       console.error('Failed to load agent task approvals.', error)
       reportLoadError(reportError, '加载审批记录', error)
-      agentApprovals.value = []
+      markApprovalAuthorityUnknown(taskId)
+      throw error
     }
   }
 
@@ -98,11 +119,12 @@ export const useAgentTaskStore = defineStore('agentTask', () => {
   }
 
   function findPendingPlanApproval(taskId: string) {
-    return agentApprovals.value.find((approval) =>
-      approval.taskId === taskId &&
-      approval.type === 'Plan' &&
-      approval.status === 'Pending'
-    ) ?? null
+    return (
+      agentApprovals.value.find(
+        (approval) =>
+          approval.taskId === taskId && approval.type === 'Plan' && approval.status === 'Pending',
+      ) ?? null
+    )
   }
 
   return {
@@ -111,14 +133,19 @@ export const useAgentTaskStore = defineStore('agentTask', () => {
     agentAuditSummary,
     timelineEvents,
     isAgentBusy,
+    approvalAuthorityUnknownTaskIds,
     latestAgentTask,
     pendingAgentApprovals,
+    isAgentApprovalAuthorityUnknown,
     reset,
     upsertAgentTask,
     loadAgentTasks,
     loadTimeline,
     loadAgentApprovals,
     loadAgentAuditSummary,
-    findPendingPlanApproval
+    findPendingPlanApproval,
+    markApprovalAuthorityUnknown,
+    clearApprovalAuthorityUnknown,
+    isApprovalAuthorityUnknown,
   }
 })

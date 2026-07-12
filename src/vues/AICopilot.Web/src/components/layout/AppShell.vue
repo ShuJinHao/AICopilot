@@ -35,6 +35,9 @@ const { t } = useI18n()
 
 const cloudPlatformUrl = (import.meta.env.VITE_CLOUD_PLATFORM_URL as string | undefined) || ''
 const activePath = computed(() => route.path)
+const chatNavigationLocked = computed(() =>
+  activePath.value === '/chat' && chatStore.isSessionTransitionBlocked
+)
 const userInitial = computed(() => (authStore.userName || 'A').slice(0, 1).toUpperCase())
 
 const navigationItems = computed<NavigationItem[]>(() => {
@@ -54,18 +57,24 @@ const navigationItems = computed<NavigationItem[]>(() => {
 })
 
 async function navigate(path: string) {
+  if (chatNavigationLocked.value && route.path !== path) {
+    return
+  }
   if (route.path !== path) {
     await router.push(path)
   }
 }
 
 function openCloudPlatform() {
-  if (cloudPlatformUrl) {
+  if (cloudPlatformUrl && !chatNavigationLocked.value) {
     window.location.assign(cloudPlatformUrl)
   }
 }
 
 async function logout() {
+  if (chatNavigationLocked.value) {
+    return
+  }
   authStore.clearAuth()
   chatStore.reset()
   await router.replace('/login')
@@ -85,6 +94,7 @@ async function logout() {
             class="dock-button"
             :class="{ active: activePath === item.path }"
             type="button"
+            :disabled="chatNavigationLocked && activePath !== item.path"
             :aria-label="item.label"
             @click="navigate(item.path)"
           >
@@ -101,6 +111,7 @@ async function logout() {
             class="dock-button"
             :class="{ active: activePath === '/access' }"
             type="button"
+            :disabled="chatNavigationLocked"
             :aria-label="t('nav.access')"
             @click="navigate('/access')"
           >
@@ -112,7 +123,7 @@ async function logout() {
           <button
             class="dock-button"
             type="button"
-            :disabled="!cloudPlatformUrl"
+            :disabled="!cloudPlatformUrl || chatNavigationLocked"
             :aria-label="t('nav.cloud')"
             @click="openCloudPlatform"
           >
@@ -128,7 +139,7 @@ async function logout() {
         </AiTooltip>
 
         <AiTooltip :content="t('nav.logout')">
-          <button class="dock-button" type="button" :aria-label="t('nav.logout')" @click="logout">
+          <button class="dock-button" type="button" :disabled="chatNavigationLocked" :aria-label="t('nav.logout')" @click="logout">
             <LogOut :size="20" stroke-width="2.3" />
           </button>
         </AiTooltip>

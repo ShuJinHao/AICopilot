@@ -11,11 +11,11 @@ const chatServiceMock = vi.hoisted(() => ({
   getAgentTaskApprovals: vi.fn(),
   getAgentTasksBySession: vi.fn(),
   getWorkspace: vi.fn(),
-  getAgentTaskAuditSummary: vi.fn()
+  getAgentTaskAuditSummary: vi.fn(),
 }))
 
 vi.mock('@/services/chatService', () => ({
-  chatService: chatServiceMock
+  chatService: chatServiceMock,
 }))
 
 function createSessionStorageMock() {
@@ -33,8 +33,15 @@ function createSessionStorageMock() {
     },
     clear() {
       state.clear()
-    }
+    },
   }
+}
+
+function activateResolvedSession(sessionId = 'session-1') {
+  const sessionStore = useSessionStore()
+  sessionStore.upsertSession({ id: sessionId, title: '测试会话' })
+  sessionStore.persistCurrentSession(sessionId)
+  sessionStore.activateSession(sessionId)
 }
 
 describe('chatStore timeline', () => {
@@ -51,7 +58,7 @@ describe('chatStore timeline', () => {
       files: [],
       artifacts: [],
       draftArtifacts: [],
-      finalArtifacts: []
+      finalArtifacts: [],
     })
     chatServiceMock.getAgentTaskAuditSummary.mockResolvedValue([])
     chatServiceMock.getTimeline.mockResolvedValue({
@@ -60,25 +67,26 @@ describe('chatStore timeline', () => {
       afterSequence: null,
       hasMore: false,
       hasMoreBefore: false,
-      hasMoreAfter: false
+      hasMoreAfter: false,
     })
   })
 
   it('loads session timeline events through the chat service', async () => {
+    activateResolvedSession()
     chatServiceMock.getTimeline.mockResolvedValue({
       items: [
         {
           sequence: 3,
           eventType: 'ApprovalDecided',
           createdAt: '2026-06-22T07:00:00Z',
-          approvalStatus: 'Approved'
-        }
+          approvalStatus: 'Approved',
+        },
       ],
       beforeSequence: 3,
       afterSequence: 3,
       hasMore: false,
       hasMoreBefore: false,
-      hasMoreAfter: false
+      hasMoreAfter: false,
     })
 
     const store = useChatStore()
@@ -90,21 +98,20 @@ describe('chatStore timeline', () => {
   })
 
   it('reloads the authoritative session timeline after an agent approval decision', async () => {
-    const sessionStore = useSessionStore()
-    sessionStore.persistCurrentSession('session-1')
+    activateResolvedSession()
     chatServiceMock.decideAgentApproval.mockResolvedValue({
       id: 'approval-1',
       taskId: 'task-1',
       type: 'Plan',
-      status: 'Approved'
+      status: 'Approved',
     })
     chatServiceMock.getAgentTasksBySession.mockResolvedValue([
       {
         id: 'task-1',
         sessionId: 'session-1',
         status: 'Running',
-        workspaceCode: null
-      }
+        workspaceCode: null,
+      },
     ])
     chatServiceMock.getTimeline.mockResolvedValue({
       items: [
@@ -113,26 +120,40 @@ describe('chatStore timeline', () => {
           eventType: 'ApprovalDecided',
           createdAt: '2026-06-22T07:02:00Z',
           approvalRequestId: 'approval-1',
-          approvalStatus: 'Approved'
-        }
+          approvalStatus: 'Approved',
+        },
       ],
       beforeSequence: 7,
       afterSequence: 7,
       hasMore: false,
       hasMoreBefore: false,
-      hasMoreAfter: false
+      hasMoreAfter: false,
     })
 
     const store = useChatStore()
+    store.agentTasks = [
+      {
+        id: 'task-1',
+        sessionId: 'session-1',
+        workspaceCode: null,
+      } as never,
+    ]
+    store.agentApprovals = [
+      {
+        id: 'approval-1',
+        taskId: 'task-1',
+        status: 'Pending',
+      } as never,
+    ]
     await store.decideAgentApproval(
       {
         id: 'approval-1',
         taskId: 'task-1',
         type: 'Plan',
-        status: 'Pending'
+        status: 'Pending',
       } as never,
       'approve',
-      'ok'
+      'ok',
     )
 
     expect(chatServiceMock.decideAgentApproval).toHaveBeenCalledWith('approval-1', 'approve', 'ok')
@@ -141,9 +162,26 @@ describe('chatStore timeline', () => {
     expect(store.timelineEvents[0]?.approvalStatus).toBe('Approved')
   })
 
+  it('rejects audit projection requests for a task outside the current session', async () => {
+    activateResolvedSession()
+    const store = useChatStore()
+    store.agentTasks = [
+      {
+        id: 'task-1',
+        sessionId: 'session-1',
+        workspaceCode: null,
+      } as never,
+    ]
+
+    const loaded = await store.loadAgentAuditSummary('task-from-session-b')
+
+    expect(loaded).toBe(false)
+    expect(chatServiceMock.getAgentTaskAuditSummary).not.toHaveBeenCalled()
+    expect(store.errorMessage).toBe('操作目标不属于当前会话，已阻止请求。')
+  })
+
   it('requests older chat history with the previous sequence cursor and prepends it', async () => {
-    const sessionStore = useSessionStore()
-    sessionStore.persistCurrentSession('session-1')
+    activateResolvedSession()
     chatServiceMock.getHistory
       .mockResolvedValueOnce({
         items: [
@@ -153,14 +191,14 @@ describe('chatStore timeline', () => {
             sessionId: 'session-1',
             role: 'Assistant',
             content: 'newer',
-            createdAt: '2026-06-22T07:02:00Z'
-          }
+            createdAt: '2026-06-22T07:02:00Z',
+          },
         ],
         beforeSequence: 2,
         afterSequence: 2,
         hasMore: true,
         hasMoreBefore: true,
-        hasMoreAfter: false
+        hasMoreAfter: false,
       })
       .mockResolvedValueOnce({
         items: [
@@ -170,14 +208,14 @@ describe('chatStore timeline', () => {
             sessionId: 'session-1',
             role: 'User',
             content: 'older',
-            createdAt: '2026-06-22T07:01:00Z'
-          }
+            createdAt: '2026-06-22T07:01:00Z',
+          },
         ],
         beforeSequence: 1,
         afterSequence: 1,
         hasMore: false,
         hasMoreBefore: false,
-        hasMoreAfter: true
+        hasMoreAfter: true,
       })
 
     const store = useChatStore()
@@ -186,26 +224,27 @@ describe('chatStore timeline', () => {
 
     expect(changed).toBe(true)
     expect(chatServiceMock.getHistory).toHaveBeenNthCalledWith(2, 'session-1', {
-      beforeSequence: 2
+      beforeSequence: 2,
     })
     expect(store.currentMessages.map((message) => message.sequence)).toEqual([1, 2])
     expect(store.hasMoreHistoryBefore).toBe(false)
   })
 
   it('clears timeline events when the timeline endpoint fails', async () => {
+    activateResolvedSession()
     chatServiceMock.getTimeline.mockResolvedValueOnce({
       items: [
         {
           sequence: 1,
           eventType: 'AgentTaskPlanCreated',
-          createdAt: '2026-06-22T07:00:00Z'
-        }
+          createdAt: '2026-06-22T07:00:00Z',
+        },
       ],
       beforeSequence: 1,
       afterSequence: 1,
       hasMore: false,
       hasMoreBefore: false,
-      hasMoreAfter: false
+      hasMoreAfter: false,
     })
     const store = useChatStore()
     await store.loadTimeline('session-1')
@@ -217,16 +256,15 @@ describe('chatStore timeline', () => {
   })
 
   it('refreshes the current agent task snapshot and timeline for runtime polling', async () => {
-    const sessionStore = useSessionStore()
-    sessionStore.persistCurrentSession('session-1')
+    activateResolvedSession()
     chatServiceMock.getAgentTasksBySession.mockResolvedValue([
       {
         id: 'task-1',
         sessionId: 'session-1',
         title: '设备日志分析',
         status: 'Running',
-        workspaceCode: null
-      }
+        workspaceCode: null,
+      },
     ])
     chatServiceMock.getTimeline.mockResolvedValue({
       items: [
@@ -235,14 +273,14 @@ describe('chatStore timeline', () => {
           eventType: 'AgentStepStarted',
           createdAt: '2026-06-22T07:03:00Z',
           agentTaskId: 'task-1',
-          agentStepStatus: 'Running'
-        }
+          agentStepStatus: 'Running',
+        },
       ],
       beforeSequence: 11,
       afterSequence: 11,
       hasMore: false,
       hasMoreBefore: false,
-      hasMoreAfter: false
+      hasMoreAfter: false,
     })
 
     const store = useChatStore()
@@ -255,23 +293,22 @@ describe('chatStore timeline', () => {
   })
 
   it('does not show an older task workspace on the latest task run block', async () => {
-    const sessionStore = useSessionStore()
-    sessionStore.persistCurrentSession('session-1')
+    activateResolvedSession()
     chatServiceMock.getAgentTasksBySession.mockResolvedValue([
       {
         id: 'task-latest',
         sessionId: 'session-1',
         title: '新计划',
         status: 'WaitingPlanApproval',
-        workspaceCode: null
+        workspaceCode: null,
       },
       {
         id: 'task-old',
         sessionId: 'session-1',
         title: '旧报告',
         status: 'Completed',
-        workspaceCode: 'ws-old'
-      }
+        workspaceCode: 'ws-old',
+      },
     ])
 
     const store = useChatStore()

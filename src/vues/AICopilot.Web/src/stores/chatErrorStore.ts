@@ -9,9 +9,7 @@ type ProblemLike = ChatErrorPayload & {
 }
 
 function toTrimmedString(value: unknown) {
-  return typeof value === 'string' && value.trim().length > 0
-    ? value.trim()
-    : null
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
 }
 
 function collectValidationErrors(errors: unknown): string[] {
@@ -20,9 +18,7 @@ function collectValidationErrors(errors: unknown): string[] {
   }
 
   if (Array.isArray(errors)) {
-    return errors
-      .map(toTrimmedString)
-      .filter((item): item is string => Boolean(item))
+    return errors.map(toTrimmedString).filter((item): item is string => Boolean(item))
   }
 
   if (typeof errors !== 'object') {
@@ -113,7 +109,9 @@ export function resolveChatErrorMessage(payload: ChatErrorPayload) {
     case 'planner_tool_schema_unsupported':
       return userFacingMessage ?? 'Planner 收到不支持的工具 schema，请检查工具注册信息。'
     case 'agent_skill_selection_required':
-      return userFacingMessage ?? '无法自动识别合适的 Skill，请补充任务目标或手动选择 Skill 后重试。'
+      return (
+        userFacingMessage ?? '无法自动识别合适的 Skill，请补充任务目标或手动选择 Skill 后重试。'
+      )
     case 'agent_task_retry_not_allowed':
       return userFacingMessage ?? '当前任务状态不允许重试。'
     case 'approval_pending':
@@ -141,6 +139,8 @@ export function resolveChatErrorMessage(payload: ChatErrorPayload) {
       return userFacingMessage ?? '模型服务暂时不可用，请稍后重试或联系管理员检查模型网络。'
     case 'model_request_timeout':
       return userFacingMessage ?? '模型响应超时，请稍后重试或缩小问题范围。'
+    case 'client_stream_timeout':
+      return userFacingMessage ?? '对话连接长时间无响应，请重试。'
     default:
       return userFacingMessage ?? '请求失败，请稍后重试。'
   }
@@ -148,9 +148,10 @@ export function resolveChatErrorMessage(payload: ChatErrorPayload) {
 
 export function toFriendlyMessage(error: unknown) {
   if (error instanceof ApiError) {
-    const problem = error.details && typeof error.details === 'object'
-      ? error.details as ChatErrorPayload
-      : null
+    const problem =
+      error.details && typeof error.details === 'object'
+        ? (error.details as ChatErrorPayload)
+        : null
 
     if (problem?.code || problem?.userFacingMessage) {
       return resolveChatErrorMessage(problem)
@@ -219,6 +220,6 @@ export const useChatErrorStore = defineStore('chatError', () => {
     bindCurrentSession,
     setSessionError,
     clearSessionError,
-    reset
+    reset,
   }
 })

@@ -75,7 +75,7 @@ const {
             <strong>Cloud 只读边界</strong>
             <span>现场确认：{{ onsiteStatus.label }}</span>
           </div>
-          <button type="button" @click="store.confirmOnsitePresence(30)">确认在岗</button>
+          <button type="button" :disabled="!store.resolvedSessionId || store.isSessionTransitionBlocked" @click="store.confirmOnsitePresence(30)">确认在岗</button>
         </div>
       </section>
 

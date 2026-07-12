@@ -8,11 +8,12 @@ import {
   Plus,
   Send,
   Sparkles,
-  Wrench
+  Wrench,
 } from 'lucide-vue-next'
 import { useAgentWorkbench } from '@/composables/useAgentWorkbench'
 import { useChatStore } from '@/stores/chatStore'
 import type { AgentPlannerToolSummary } from '@/types/app'
+import { shouldResetComposerForSessionChange } from '@/utils/composerSession'
 import { getSkillDisplayDescription } from '@/utils/skillDisplay'
 
 type ComposerMode = 'plan' | 'chat'
@@ -27,42 +28,56 @@ const planAdvancedOpen = ref(false)
 const planAdvancedButton = ref<HTMLElement | null>(null)
 const planAdvancedPanel = ref<HTMLElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
+let lastCommittedComposerSessionId = store.composerSessionId
 
-const isInputDisabled = computed(() => store.isStreaming || store.isWaitingForApproval)
+const isComposerEditingDisabled = computed(
+  () => !store.canEditComposerContext || store.isStreaming || store.hasPendingApproval,
+)
+const isChatSubmissionBlocked = computed(
+  () => isComposerEditingDisabled.value || store.isApprovalAuthorityUnknown,
+)
+const isSessionReady = computed(() =>
+  Boolean(store.resolvedSessionId && !store.isSessionTransitionBlocked),
+)
 const planTypeValue = computed({
   get: () => store.selectedSkillCode || 'auto',
   set: (value: string) => {
-    store.selectSkill(value === 'auto' ? null : value)
-  }
+    void store.selectSkill(value === 'auto' ? null : value)
+  },
 })
 const attachmentSummary = computed(() =>
-  store.uploadedFiles.length ? `${store.uploadedFiles.length} 个附件` : '未添加附件'
+  store.uploadedFiles.length ? `${store.uploadedFiles.length} 个附件` : '未添加附件',
 )
 const planPathSummary = computed(() =>
-  store.selectedSkill ? `${store.selectedSkill.displayName} · 手动指定` : '自动选择执行路径'
+  store.selectedSkill ? `${store.selectedSkill.displayName} · 手动指定` : '自动选择执行路径',
 )
-const composerPrimaryLabel = computed(() => composerMode.value === 'plan' ? '生成计划' : '发送')
-const composerPrimaryIcon = computed(() => composerMode.value === 'plan' ? ListChecks : Send)
+const composerPrimaryLabel = computed(() => (composerMode.value === 'plan' ? '生成计划' : '发送'))
+const composerPrimaryIcon = computed(() => (composerMode.value === 'plan' ? ListChecks : Send))
 const composerPlaceholder = computed(() => {
-  if (store.isWaitingForApproval) {
+  if (store.hasPendingApproval) {
     return '请先处理待审批请求'
+  }
+  if (store.isApprovalAuthorityUnknown) {
+    return '正在确认待审批状态，可继续编辑'
   }
 
   return composerMode.value === 'plan'
     ? '输入目标，先生成可确认的计划'
     : '输入一个简单问题，直接回答'
 })
-const isComposerSubmitDisabled = computed(() =>
-  !inputValue.value.trim() ||
-  (composerMode.value === 'plan'
-    ? !canCreatePlan.value || store.isAgentBusy
-    : isInputDisabled.value)
+const isComposerSubmitDisabled = computed(
+  () =>
+    !isSessionReady.value ||
+    !inputValue.value.trim() ||
+    (composerMode.value === 'plan'
+      ? !canCreatePlan.value || store.isAgentBusy
+      : isChatSubmissionBlocked.value),
 )
 const visiblePluginTools = computed(() => store.availablePluginTools.slice(0, 12))
 
 async function sendDirectMessage() {
   const content = inputValue.value.trim()
-  if (!content || isInputDisabled.value) return
+  if (!content || !isSessionReady.value || isChatSubmissionBlocked.value) return
   inputValue.value = ''
   await store.sendMessage(content)
 }
@@ -75,6 +90,7 @@ function handleComposerKeydown(event: KeyboardEvent) {
 }
 
 function openFilePicker() {
+  if (!isSessionReady.value) return
   fileInput.value?.click()
 }
 
@@ -91,20 +107,25 @@ function handleKnowledgeBaseChange(event: Event) {
 async function handleFileChange(event: Event) {
   const target = event.target as HTMLInputElement
   const file = target.files?.[0]
-  if (!file) return
+  if (!file || !isSessionReady.value) {
+    target.value = ''
+    return
+  }
   await store.uploadSessionFile(file)
   target.value = ''
 }
 
 async function createAgentPlan() {
   const goal = inputValue.value.trim() || agentGoal.value.trim()
-  if (!goal || !canCreatePlan.value) return
+  if (!goal || !isSessionReady.value || !canCreatePlan.value) return
   agentGoal.value = goal
   inputValue.value = ''
   await store.planAgentTask(goal)
 }
 
 async function submitComposer() {
+  if (isComposerSubmitDisabled.value) return
+
   if (composerMode.value === 'chat') {
     await sendDirectMessage()
     return
@@ -114,6 +135,8 @@ async function submitComposer() {
 }
 
 function setComposerMode(mode: ComposerMode) {
+  if (!store.canEditComposerContext) return
+
   composerMode.value = mode
   planAdvancedOpen.value = false
   store.clearCurrentSessionError()
@@ -130,7 +153,7 @@ function pluginToolLabel(tool: AgentPlannerToolSummary) {
 function pluginToolMeta(tool: AgentPlannerToolSummary) {
   const parts = [
     tool.category || tool.providerKind || '能力',
-    tool.requiresApproval ? '需确认' : '只读'
+    tool.requiresApproval ? '需确认' : '只读',
   ]
 
   return parts.filter(Boolean).join(' · ')
@@ -141,7 +164,7 @@ onClickOutside(
   () => {
     planAdvancedOpen.value = false
   },
-  { ignore: [planAdvancedButton] }
+  { ignore: [planAdvancedButton] },
 )
 
 useEventListener('keydown', (event: KeyboardEvent) => {
@@ -150,12 +173,24 @@ useEventListener('keydown', (event: KeyboardEvent) => {
   }
 })
 
-watch(() => store.currentSessionId, () => {
-  inputValue.value = ''
-  agentGoal.value = ''
-  composerMode.value = 'chat'
-  planAdvancedOpen.value = false
-})
+watch(
+  () => store.composerSessionId,
+  (nextSessionId) => {
+    if (!nextSessionId) return
+
+    const shouldReset = shouldResetComposerForSessionChange(
+      lastCommittedComposerSessionId,
+      nextSessionId,
+    )
+    lastCommittedComposerSessionId = nextSessionId
+    if (!shouldReset) return
+
+    inputValue.value = ''
+    agentGoal.value = ''
+    composerMode.value = 'chat'
+    planAdvancedOpen.value = false
+  },
+)
 </script>
 
 <template>
@@ -165,6 +200,7 @@ watch(() => store.currentSessionId, () => {
         <button
           type="button"
           :class="{ active: composerMode === 'chat' }"
+          :disabled="!store.canEditComposerContext"
           @click="setComposerMode('chat')"
         >
           <MessageCircle :size="16" />
@@ -173,6 +209,7 @@ watch(() => store.currentSessionId, () => {
         <button
           type="button"
           :class="{ active: composerMode === 'plan' }"
+          :disabled="!store.canEditComposerContext"
           @click="setComposerMode('plan')"
         >
           <ListChecks :size="16" />
@@ -182,7 +219,7 @@ watch(() => store.currentSessionId, () => {
       <button
         class="composer-add-button"
         type="button"
-        :disabled="store.isAgentBusy"
+        :disabled="!isSessionReady || store.isAgentBusy"
         @click="openFilePicker"
       >
         <Plus :size="17" />
@@ -192,13 +229,11 @@ watch(() => store.currentSessionId, () => {
         <template v-if="composerMode === 'plan'">
           {{ planPathSummary }} · {{ attachmentSummary }}
         </template>
-        <template v-else>
-          普通聊天 · {{ attachmentSummary }}
-        </template>
+        <template v-else> 普通聊天 · {{ attachmentSummary }} </template>
       </span>
     </div>
 
-    <input ref="fileInput" class="hidden-file" type="file" @change="handleFileChange">
+    <input ref="fileInput" class="hidden-file" type="file" @change="handleFileChange" />
 
     <div v-if="composerMode === 'plan'" class="composer-plan-strip">
       <div>
@@ -209,6 +244,7 @@ watch(() => store.currentSessionId, () => {
         ref="planAdvancedButton"
         class="composer-advanced-toggle"
         type="button"
+        :disabled="!store.canEditComposerContext"
         :aria-expanded="planAdvancedOpen"
         @click="planAdvancedOpen = !planAdvancedOpen"
       >
@@ -230,7 +266,7 @@ watch(() => store.currentSessionId, () => {
         <label class="select-field">
           <select
             :value="planTypeValue"
-            :disabled="store.isAgentBusy"
+            :disabled="!store.canEditComposerContext"
             aria-label="选择计划类型"
             @change="handleSkillChange"
           >
@@ -244,7 +280,13 @@ watch(() => store.currentSessionId, () => {
             </option>
           </select>
         </label>
-        <p>{{ store.selectedSkill ? getSkillDisplayDescription(store.selectedSkill.skillCode) : '保持自动识别，系统会根据目标选择合适路径。' }}</p>
+        <p>
+          {{
+            store.selectedSkill
+              ? getSkillDisplayDescription(store.selectedSkill.skillCode)
+              : '保持自动识别，系统会根据目标选择合适路径。'
+          }}
+        </p>
       </section>
 
       <section
@@ -258,7 +300,7 @@ watch(() => store.currentSessionId, () => {
         <label class="select-field">
           <select
             :value="store.selectedKnowledgeBaseId || ''"
-            :disabled="store.isAgentBusy"
+            :disabled="!store.canEditComposerContext"
             aria-label="选择知识库"
             @change="handleKnowledgeBaseChange"
           >
@@ -288,6 +330,7 @@ watch(() => store.currentSessionId, () => {
             type="button"
             class="plugin-tool-chip"
             :class="{ active: store.selectedToolCodes.includes(tool.toolCode) }"
+            :disabled="!store.canEditComposerContext"
             :title="tool.description"
             @click="togglePluginTool(tool.toolCode)"
           >
@@ -300,6 +343,7 @@ watch(() => store.currentSessionId, () => {
           v-if="store.selectedToolCodes.length"
           class="quiet-link"
           type="button"
+          :disabled="!store.canEditComposerContext"
           @click="store.clearPluginTools()"
         >
           清空插件选择
@@ -310,7 +354,7 @@ watch(() => store.currentSessionId, () => {
     <div class="composer-input-row">
       <textarea
         v-model="inputValue"
-        :disabled="isInputDisabled"
+        :disabled="isComposerEditingDisabled"
         :placeholder="composerPlaceholder"
         rows="1"
         @keydown="handleComposerKeydown"

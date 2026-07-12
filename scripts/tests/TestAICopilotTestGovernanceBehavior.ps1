@@ -597,6 +597,13 @@ try {
         -Restore { Write-Utf8File -Path $vitestUnitPath -Value $vitestUnitOriginal } `
         -ExpectedCode "$ruleId-DISABLED"
 
+    $composerSessionUnitPath = Join-Path $staticRoot 'src/vues/AICopilot.Web/tests/unit/composerSession.spec.ts'
+    $composerSessionUnitOriginal = Get-Content $composerSessionUnitPath -Raw
+    Assert-StaticRejected -Name 'composer-session-regression-cannot-drift' -ValidationRoot $staticRoot `
+        -Mutate { Write-Utf8File -Path $composerSessionUnitPath -Value "$composerSessionUnitOriginal`n// removed reviewed transition evidence" } `
+        -Restore { Write-Utf8File -Path $composerSessionUnitPath -Value $composerSessionUnitOriginal } `
+        -ExpectedCode "$ruleId-UI-FROZEN"
+
     $webPackagePath = Join-Path $staticRoot 'src/vues/AICopilot.Web/package.json'
     $webPackageOriginal = Get-Content $webPackagePath -Raw
     Assert-StaticRejected -Name 'vitest-script-cannot-be-replaced-with-noop' -ValidationRoot $staticRoot `
@@ -724,6 +731,16 @@ jobs:
 
     $canonicalWorkflowPath = Join-Path $staticRoot '.github/workflows/aicopilot-ci.yml'
     $canonicalWorkflowOriginal = Get-Content $canonicalWorkflowPath -Raw
+    Assert-StaticRejected -Name 'canonical-workflow-cannot-reconcile-old-vitest-counts' -ValidationRoot $staticRoot `
+        -Mutate {
+            $mutatedWorkflow = $canonicalWorkflowOriginal.Replace('[int]$vitest.numTotalTests -ne 184', '[int]$vitest.numTotalTests -ne 132')
+            $mutatedWorkflow = $mutatedWorkflow.Replace('[int]$vitest.numPassedTests -ne 184', '[int]$vitest.numPassedTests -ne 132')
+            $mutatedWorkflow = $mutatedWorkflow.Replace('@($vitest.testResults).Count -ne 31', '@($vitest.testResults).Count -ne 29')
+            Write-Utf8File -Path $canonicalWorkflowPath -Value $mutatedWorkflow
+        } `
+        -Restore { Write-Utf8File -Path $canonicalWorkflowPath -Value $canonicalWorkflowOriginal } `
+        -ExpectedCode "$ruleId-CI"
+
     Assert-StaticRejected -Name 'canonical-workflow-cannot-add-duplicate-job' -ValidationRoot $staticRoot `
         -Mutate {
             Write-Utf8File -Path $canonicalWorkflowPath -Value "$($canonicalWorkflowOriginal.TrimEnd())`n  bypass-check:`n    name: build-test`n    runs-on: ubuntu-latest`n    steps:`n      - run: true`n"

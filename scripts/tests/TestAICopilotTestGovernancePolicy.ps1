@@ -39,7 +39,7 @@ $rootBuildTargetsSha256 = 'bda7249faa78b13157cfb2304ea4bb6e0a89f2b108bc7ceb94eae
 $codeOwnersSha256 = '0fb603aed9e7dd6f56e23418ed806d203522932f219feb07798332e5e86b5f75'
 $gitAttributesSha256 = '47d4d45b69fa1ca09520b982dd316c7d75cc536dd98a91e7fdd42e60ccd78baf'
 $aiEvalCaseManifestSha256 = '4055a65b1691623d6b86bf64125a1caf7ff8ae4001b494f02c1ed970e773c33b'
-$playwrightSkipManifestSha256 = '6472bf2190c2ed56437358aadecb25b04d54c1c0bc0cda564d3d8f6d817c7f86'
+$playwrightSkipManifestSha256 = '954c055754f4b1eb7b72b1eb509f0e5a3966e4fa0d977691039d145a8f1e37f0'
 $repositoryProjectRosterCount = 32
 $repositoryProjectRosterSha256 = '3004147906f03eb7fac04fa1f8d7496eb14cebb241e20b383b3352e040017de2'
 $solutionProjectRosterCount = 32
@@ -49,7 +49,7 @@ $globalJsonSha256 = '18303059fe920620f05e25d0157b7ed4a74934841e6a34b0b86d713fbf6
 $buildFileManifestCount = 2
 $buildFileManifestSha256 = '3730f5d3693e5aa74a0d3fe1d2d64c4203cab26da11ba2dc4337b3f7bc4de11c'
 $workflowManifestCount = 9
-$workflowManifestSha256 = 'a92f9a0b3bf3ea5e3fe532936358cd42342a915cb202b271932db0f9309066e6'
+$workflowManifestSha256 = 'd1bac30f1c530aece06266fae02b82b0894651729a4d02fb5d9817cc22e5caf7'
 $testProjectAssetSha256 = [ordered]@{
     'src/tests/AICopilot.AiEvalTests/AICopilot.AiEvalTests.csproj' = '9ff22152feced2004aeecbb1d643eaec01880bb42254b34ad858d24af109c6de'
     'src/tests/AICopilot.ArchitectureTests/AICopilot.ArchitectureTests.csproj' = '495adf4ae6a8c1a2985a26c6c55bd28bfa4c1578ea69120a0bd6ff6f4cec84f2'
@@ -69,22 +69,22 @@ $canonicalFrozenSourceHashPaths = @{
     'AICopilot.BackendTests' = @()
     'AICopilot.CloudAiReadLiveTests' = @('src/tests/AICopilot.CloudAiReadLiveTests/CloudAiReadLiveContractTests.cs')
 }
-$vitestUnitSourceCount = 29
-$vitestUnitSourceManifestSha256 = 'd09d87a3cdbfd6a3d31db66a33c6c0c0bb6e783fdecd7e160388330734c6bf21'
+$vitestUnitSourceCount = 31
+$vitestUnitSourceManifestSha256 = '055f451c079ddb33fb6892afbfc4b3b60e9fb807349a51fa404044f32421c0e8'
 $backendTestSourceCount = 120
 $backendTestSourceManifestSha256 = 'c27af7e760699458acd3afb43c191650181956d414f0c96241fd0ccfc2ec7435'
 $vitestPackageJsonSha256 = '6ca7e341d7a421d964af87e17e3358dec96cdf28852b3453fb317f98d6baf9a9'
 $vitestPackageLockSha256 = '8136844dc863225fa750c8dd3a10eeec087135c7434e3303f59bfe1e1dd252c4'
 $vitestConfigSha256 = 'e30c3cbfec8089345e5b4ea5950ce3edc975f033722c3532ee26b7e075e37571'
-$playwrightSmokeSourceSha256 = '9acde1a10bee6cca2d19c2276dcd81c08614cfe0ea3f90fec902bfcf37e23cb4'
+$playwrightSmokeSourceSha256 = 'f87a5e2bf68f302165b9be9f44487110fa9fdc2975b92bfb826d901fc0ae1a91'
 $playwrightSmokeConfigSha256 = '6abb22587cfbbcee798b6c85df2b858b1acf953b847c08f3625ff0cb32380838'
 $deploymentBehaviorSha256 = 'a157bad95903c01872e896961b8a69c127c9937a17e098a56c5eb09d4c2768f2'
 $deploymentPolicySha256 = '154cea463421562a35ba4f3f46984e14c7f56d9b59387a0884b0312e90f62d0b'
 $requiredWorkflowSha256 = @{
-    '.github/workflows/aicopilot-ci.yml' = '2cc6fd9aa11f215b7fba71ff0a635ace874f55456da9f1891e1f2b90b722ee90'
+    '.github/workflows/aicopilot-ci.yml' = 'd4bd74ec5c3be8b245cdb7381170b01aa27cd3474ff4c396fe1c26b309edc44d'
 }
 $requiredWorkflowJobSha256 = @{
-    '.github/workflows/aicopilot-ci.yml' = 'dfc5220bf5a6f34ed3ffde0114e8a24b861682ab3e61a4abebec604bea9d6ac6'
+    '.github/workflows/aicopilot-ci.yml' = 'c00214f864f42e74d0246e02e8b3adc952e36ae7303f59c180e43440f107201e'
 }
 $allowedTestProjectTargetHashes = @{}
 
@@ -1418,7 +1418,7 @@ function Test-StaticPolicy {
     }) -join "`n"
     if ($vitestSourceFiles.Count -ne $vitestUnitSourceCount -or
         (ConvertTo-Sha256 -Value $vitestSourceManifest) -ne $vitestUnitSourceManifestSha256) {
-        Add-PolicyError -Errors $Errors -Code "$ruleId-UI-FROZEN" -Message 'Vitest unit-test source roster/content differs from the reviewed 29-file Phase 0 baseline.'
+        Add-PolicyError -Errors $Errors -Code "$ruleId-UI-FROZEN" -Message 'Vitest unit-test source roster/content differs from the reviewed 31-file Phase 0 baseline.'
     }
     $vitestSourceText = @($vitestSourceFiles | ForEach-Object { Get-Content $_.FullName -Raw }) -join "`n"
     if ($vitestSourceText -match '(?i)\b(?:it|test|describe)\s*\.\s*(?:skip|todo|only|skipIf|runIf)\s*\(' -or

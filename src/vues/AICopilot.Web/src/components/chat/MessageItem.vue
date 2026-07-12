@@ -35,10 +35,12 @@ function asApproval(chunk: ChatChunk) {
 }
 
 async function approve(payload: { callId: string; onsiteConfirmed: boolean }, chunk: ApprovalChunk) {
+  if (!store.resolvedSessionId || store.isSessionTransitionBlocked) return
   await store.submitApproval(payload.callId, 'approved', payload.onsiteConfirmed, chunk)
 }
 
 async function reject(payload: { callId: string }, chunk: ApprovalChunk) {
+  if (!store.resolvedSessionId || store.isSessionTransitionBlocked) return
   await store.submitApproval(payload.callId, 'rejected', false, chunk)
 }
 </script>
@@ -67,7 +69,7 @@ async function reject(payload: { callId: string }, chunk: ApprovalChunk) {
           <ApprovalCard
             v-else-if="chunk.type === ChunkType.ApprovalRequest"
             :chunk="asApproval(chunk)"
-            :is-submitting="store.isStreaming"
+            :is-submitting="store.isSessionTransitionBlocked || !store.resolvedSessionId"
             @approve="(payload) => approve(payload, asApproval(chunk))"
             @reject="(payload) => reject(payload, asApproval(chunk))"
           />

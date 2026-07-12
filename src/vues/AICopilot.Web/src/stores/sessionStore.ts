@@ -8,6 +8,8 @@ const CURRENT_SESSION_KEY = 'aicopilot.chat.currentSessionId'
 export const useSessionStore = defineStore('chatSession', () => {
   const sessions = ref<Session[]>([])
   const currentSessionId = ref<string | null>(sessionStorage.getItem(CURRENT_SESSION_KEY))
+  const activeSessionId = ref<string | null>(null)
+  const isSessionActivating = ref(false)
   const isLoadingHistory = ref(false)
 
   const currentSession = computed(() => {
@@ -16,6 +18,14 @@ export const useSessionStore = defineStore('chatSession', () => {
     }
 
     return sessions.value.find((session) => session.id === currentSessionId.value) ?? null
+  })
+
+  const activeSession = computed(() => {
+    if (!activeSessionId.value) {
+      return null
+    }
+
+    return sessions.value.find((session) => session.id === activeSessionId.value) ?? null
   })
 
   function persistCurrentSession(sessionId: string | null) {
@@ -27,6 +37,29 @@ export const useSessionStore = defineStore('chatSession', () => {
     }
 
     sessionStorage.removeItem(CURRENT_SESSION_KEY)
+  }
+
+  function activateSession(sessionId: string | null) {
+    activeSessionId.value = sessionId && sessions.value.some((session) => session.id === sessionId)
+      ? sessionId
+      : null
+  }
+
+  function beginSessionActivation(nextSessionId?: string | null) {
+    isSessionActivating.value = true
+    if (nextSessionId !== undefined && activeSessionId.value !== nextSessionId) {
+      activeSessionId.value = null
+    }
+  }
+
+  function completeSessionActivation(sessionId: string | null) {
+    activateSession(sessionId)
+    isSessionActivating.value = false
+  }
+
+  function failSessionActivation(fallbackSessionId: string | null = null) {
+    activateSession(fallbackSessionId)
+    isSessionActivating.value = false
   }
 
   function upsertSession(session: Session) {
@@ -41,6 +74,9 @@ export const useSessionStore = defineStore('chatSession', () => {
 
   async function loadSessions() {
     sessions.value = await chatService.getSessions()
+    if (activeSessionId.value && !sessions.value.some((session) => session.id === activeSessionId.value)) {
+      activeSessionId.value = null
+    }
   }
 
   async function createSession() {
@@ -53,6 +89,9 @@ export const useSessionStore = defineStore('chatSession', () => {
   async function deleteSession(id: string) {
     await chatService.deleteSession(id)
     sessions.value = sessions.value.filter((session) => session.id !== id)
+    if (activeSessionId.value === id) {
+      activeSessionId.value = null
+    }
     if (currentSessionId.value === id) {
       persistCurrentSession(sessions.value[0]?.id ?? null)
     }
@@ -61,6 +100,8 @@ export const useSessionStore = defineStore('chatSession', () => {
   function reset() {
     sessions.value = []
     persistCurrentSession(null)
+    activeSessionId.value = null
+    isSessionActivating.value = false
     isLoadingHistory.value = false
   }
 
@@ -68,8 +109,15 @@ export const useSessionStore = defineStore('chatSession', () => {
     sessions,
     currentSessionId,
     currentSession,
+    activeSessionId,
+    activeSession,
+    isSessionActivating,
     isLoadingHistory,
     persistCurrentSession,
+    activateSession,
+    beginSessionActivation,
+    completeSessionActivation,
+    failSessionActivation,
     upsertSession,
     loadSessions,
     createSession,

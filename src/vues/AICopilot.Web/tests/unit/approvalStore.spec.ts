@@ -7,11 +7,11 @@ import { ChunkType, MessageRole, type FunctionApprovalRequest } from '@/types/pr
 import type { ApprovalChunk } from '@/types/models'
 
 const chatServiceMock = vi.hoisted(() => ({
-  getPendingApprovals: vi.fn()
+  getPendingApprovals: vi.fn(),
 }))
 
 vi.mock('@/services/chatService', () => ({
-  chatService: chatServiceMock
+  chatService: chatServiceMock,
 }))
 
 function createSessionStorageMock() {
@@ -29,7 +29,7 @@ function createSessionStorageMock() {
     },
     clear() {
       state.clear()
-    }
+    },
   }
 }
 
@@ -41,7 +41,7 @@ function createApproval(callId: string): FunctionApprovalRequest {
     targetName: 'cloud-read',
     toolName: 'queryDeviceLogs',
     args: {},
-    requiresOnsiteAttestation: false
+    requiresOnsiteAttestation: false,
   }
 }
 
@@ -68,11 +68,11 @@ describe('approvalStore', () => {
           type: ChunkType.ApprovalRequest,
           content: JSON.stringify(approval),
           request: approval,
-          status: 'pending'
-        } as ApprovalChunk
+          status: 'pending',
+        } as ApprovalChunk,
       ],
       isStreaming: false,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     })
 
     chatServiceMock.getPendingApprovals.mockResolvedValue([])
@@ -82,5 +82,36 @@ describe('approvalStore', () => {
     expect(chatServiceMock.getPendingApprovals).toHaveBeenCalledWith('session-1')
     expect(messageStore.getApprovalChunks('session-1')[0]?.status).toBe('expired')
     expect(approvalStore.isWaitingForApproval).toBe(false)
+  })
+
+  it('preserves pending approval authority when refresh fails', async () => {
+    const sessionStore = useSessionStore()
+    const messageStore = useMessageStore()
+    const approvalStore = useApprovalStore()
+    sessionStore.persistCurrentSession('session-1')
+    const approval = createApproval('call-pending')
+    messageStore.addMessage('session-1', {
+      sessionId: 'session-1',
+      role: MessageRole.Assistant,
+      chunks: [
+        {
+          source: 'FinalAgentRunExecutor',
+          type: ChunkType.ApprovalRequest,
+          content: JSON.stringify(approval),
+          request: approval,
+          status: 'pending',
+        } as ApprovalChunk,
+      ],
+      isStreaming: false,
+      timestamp: Date.now(),
+    })
+    chatServiceMock.getPendingApprovals.mockRejectedValue(new Error('approval unavailable'))
+
+    await expect(approvalStore.refreshPendingApprovals('session-1')).rejects.toThrow(
+      'approval unavailable',
+    )
+
+    expect(messageStore.getApprovalChunks('session-1')[0]?.status).toBe('pending')
+    expect(approvalStore.isWaitingForApproval).toBe(true)
   })
 })

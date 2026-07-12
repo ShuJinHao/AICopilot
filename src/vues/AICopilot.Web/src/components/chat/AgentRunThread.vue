@@ -9,7 +9,7 @@ import {
   ShieldCheck,
   Sparkles,
   TriangleAlert,
-  Wrench
+  Wrench,
 } from 'lucide-vue-next'
 import AiTag from '@/components/ai/AiTag.vue'
 import { useAgentWorkbench } from '@/composables/useAgentWorkbench'
@@ -43,34 +43,38 @@ const {
   canRunTask,
   canContinueTask,
   canSubmitFinalReview,
-  canFinalizeWorkspace
+  canFinalizeWorkspace,
 } = useAgentWorkbench()
 const {
   latestPlan,
   latestPlanKindLabel,
   latestPlanVisibleToolCount,
   latestPlanIsCloudReadonly,
-  isPlanDraftTask
+  isPlanDraftTask,
 } = useAgentPlanPreview()
-const {
-  latestTimelineSummary,
-  timelineEventCount,
-  timelineEventItems
-} = useAgentTimelineDisplay()
+const { latestTimelineSummary, timelineEventCount, timelineEventItems } = useAgentTimelineDisplay()
 
 const runtimePollingTimer = ref<number | null>(null)
 const runtimePollingTaskId = ref<string | null>(null)
 const compactOutputArtifacts = computed(() => taskArtifacts.value.slice(0, 3))
-const hiddenOutputArtifactCount = computed(() => Math.max(0, taskArtifacts.value.length - compactOutputArtifacts.value.length))
-const visibleOutputArtifacts = computed(() => isPlanDraftTask.value ? [] : compactOutputArtifacts.value)
+const hiddenOutputArtifactCount = computed(() =>
+  Math.max(0, taskArtifacts.value.length - compactOutputArtifacts.value.length),
+)
+const visibleOutputArtifacts = computed(() =>
+  isPlanDraftTask.value ? [] : compactOutputArtifacts.value,
+)
 const hiddenVisibleOutputArtifactCount = computed(() =>
-  isPlanDraftTask.value ? 0 : hiddenOutputArtifactCount.value
+  isPlanDraftTask.value ? 0 : hiddenOutputArtifactCount.value,
 )
-const selectedPlanTypeLabel = computed(() =>
-  store.selectedSkill?.displayName || '自动识别'
-)
+const selectedPlanTypeLabel = computed(() => store.selectedSkill?.displayName || '自动识别')
 const hasRuntimeDetails = computed(() =>
-  Boolean(latestTask.value || taskSteps.value.length || timelineEventItems.value.length || taskArtifacts.value.length || approvalGroups.value.length)
+  Boolean(
+    latestTask.value ||
+    taskSteps.value.length ||
+    timelineEventItems.value.length ||
+    taskArtifacts.value.length ||
+    approvalGroups.value.length,
+  ),
 )
 const inlineRunSubtitle = computed(() => {
   if (isPlanDraftTask.value) {
@@ -127,7 +131,7 @@ const shouldPollRuntimeSnapshot = computed(() => {
     task.isRunQueued ||
     task.isRunInProgress ||
     task.status === 'Running' ||
-    task.status === 'GeneratingArtifacts'
+    task.status === 'GeneratingArtifacts',
   )
 })
 const primaryTaskAction = computed(() => {
@@ -139,7 +143,7 @@ const primaryTaskAction = computed(() => {
       kind: 'queued' as PrimaryTaskActionKind,
       label: '已入队',
       icon: RefreshCw,
-      disabled: true
+      disabled: true,
     }
   }
 
@@ -148,7 +152,7 @@ const primaryTaskAction = computed(() => {
       kind: 'running' as PrimaryTaskActionKind,
       label: '执行中',
       icon: RefreshCw,
-      disabled: true
+      disabled: true,
     }
   }
 
@@ -159,42 +163,42 @@ const primaryTaskAction = computed(() => {
         kind: 'approve-and-run' as PrimaryTaskActionKind,
         label: '确认计划并执行',
         icon: Play,
-        disabled: store.isAgentBusy
+        disabled: store.isAgentBusy,
       }
     case 'PlanApproved':
       return {
         kind: 'run' as PrimaryTaskActionKind,
         label: '执行',
         icon: Play,
-        disabled: !canRunTask.value
+        disabled: !canRunTask.value,
       }
     case 'WaitingToolApproval':
       return {
         kind: 'run' as PrimaryTaskActionKind,
         label: '继续执行',
         icon: Play,
-        disabled: !canRunTask.value
+        disabled: !canRunTask.value,
       }
     case 'Failed':
       return {
         kind: 'retry' as PrimaryTaskActionKind,
         label: '重试',
         icon: RefreshCw,
-        disabled: !canContinueTask.value
+        disabled: !canContinueTask.value,
       }
     case 'WorkspaceReady':
       return {
         kind: 'submit-final-review' as PrimaryTaskActionKind,
         label: '提交最终审核',
         icon: FolderOpen,
-        disabled: !canSubmitFinalReview.value
+        disabled: !canSubmitFinalReview.value,
       }
     case 'WaitingFinalApproval':
       return {
         kind: 'finalize' as PrimaryTaskActionKind,
         label: '确认正式输出',
         icon: Check,
-        disabled: !canFinalizeWorkspace.value
+        disabled: !canFinalizeWorkspace.value,
       }
     default:
       return null
@@ -223,13 +227,13 @@ function startRuntimePolling(taskId: string) {
 }
 
 async function submitFinalReview() {
-  const code = store.currentWorkspace?.workspaceCode || latestTask.value?.workspaceCode
+  const code = store.currentWorkspace?.workspaceCode
   if (!code || !canSubmitFinalReview.value) return
   await store.submitFinalReview(code)
 }
 
 async function finalizeCurrentWorkspace() {
-  const code = store.currentWorkspace?.workspaceCode || latestTask.value?.workspaceCode
+  const code = store.currentWorkspace?.workspaceCode
   if (!code || !canFinalizeWorkspace.value) return
   if (!window.confirm('确认后会把当前草稿产物写入 final/，作为正式输出。')) return
   await store.finalizeWorkspace(code)
@@ -262,6 +266,7 @@ async function runPrimaryTaskAction() {
 }
 
 async function previewArtifact(artifactId: string) {
+  if (!store.resolvedSessionId || store.isSessionTransitionBlocked) return
   await store.loadArtifactPreview(artifactId)
 }
 
@@ -275,7 +280,7 @@ watch(
 
     stopRuntimePolling()
   },
-  { immediate: true }
+  { immediate: true },
 )
 
 watch(() => store.currentSessionId, stopRuntimePolling)
@@ -348,6 +353,7 @@ onBeforeUnmount(stopRuntimePolling)
           :key="artifact.id"
           type="button"
           class="agent-output-pill"
+          :disabled="!store.resolvedSessionId || store.isSessionTransitionBlocked"
           @click="previewArtifact(artifact.id)"
         >
           <FolderOpen :size="15" />

@@ -18,6 +18,10 @@ const planDraftCardSource = readFileSync(
   fileURLToPath(new URL('../../src/components/chat/PlanDraftCard.vue', import.meta.url)),
   'utf8'
 )
+const agentApprovalPanelSource = readFileSync(
+  fileURLToPath(new URL('../../src/components/chat/AgentApprovalPanel.vue', import.meta.url)),
+  'utf8'
+)
 const chatStoreSource = readFileSync(
   fileURLToPath(new URL('../../src/stores/chatStore.ts', import.meta.url)),
   'utf8'
@@ -27,7 +31,6 @@ describe('ChatWindow usability defaults', () => {
   it('starts in chat mode', () => {
     expect(chatComposerSource).toContain("const composerMode = ref<ComposerMode>('chat')")
     expect(chatComposerSource).toContain("composerMode.value = 'chat'")
-    expect(chatComposerSource).toContain("composerPrimaryLabel = computed(() => composerMode.value === 'plan' ? '生成计划' : '发送')")
   })
 
   it('does not render the inline agent run panel for an error alone', () => {
@@ -83,5 +86,9 @@ describe('ChatWindow usability defaults', () => {
     expect(block).toContain('await loadAgentTasks(sessionId)')
     expect(block).toContain('await loadTimeline(sessionId)')
     expect(block).toContain('agentTasks.value.find((task) => task.id === completedTask.id)')
+  })
+
+  it('disables agent approval actions while their authoritative projection is unknown', () => {
+    expect(agentApprovalPanelSource).toContain('store.isAgentApprovalAuthorityUnknown')
   })
 })

@@ -14,11 +14,11 @@ const chatServiceMock = vi.hoisted(() => ({
   getAgentTasksBySession: vi.fn(),
   getAgentTaskApprovals: vi.fn(),
   getAgentTaskAuditSummary: vi.fn(),
-  getTimeline: vi.fn()
+  getTimeline: vi.fn(),
 }))
 
 vi.mock('@/services/chatService', () => ({
-  chatService: chatServiceMock
+  chatService: chatServiceMock,
 }))
 
 function createSessionStorageMock() {
@@ -36,7 +36,7 @@ function createSessionStorageMock() {
     },
     clear() {
       state.clear()
-    }
+    },
   }
 }
 
@@ -44,7 +44,7 @@ describe('agent state stores', () => {
   beforeEach(() => {
     Object.defineProperty(globalThis, 'sessionStorage', {
       value: createSessionStorageMock(),
-      configurable: true
+      configurable: true,
     })
     vi.clearAllMocks()
     setActivePinia(createPinia())
@@ -84,7 +84,7 @@ describe('agent state stores', () => {
     expect(store.chartPreview).toBeNull()
   })
 
-  it('clears session plan selections without clearing cached catalog data', () => {
+  it('keeps global skill and knowledge catalogs while invalidating the skill-filtered tool catalog', () => {
     const store = useAgentCatalogStore()
 
     store.availableSkills = [{ skillCode: 'general_report' } as never]
@@ -97,7 +97,7 @@ describe('agent state stores', () => {
     store.resetSelections()
 
     expect(store.availableSkills).toHaveLength(1)
-    expect(store.availablePluginTools).toHaveLength(1)
+    expect(store.availablePluginTools).toEqual([])
     expect(store.availableKnowledgeBases).toHaveLength(1)
     expect(store.selectedSkillCode).toBeNull()
     expect(store.selectedToolCodes).toEqual([])
@@ -117,29 +117,41 @@ describe('agent state stores', () => {
   })
 
   it('routes task timeline load failures through the current chat session error', async () => {
-    chatServiceMock.getTimeline.mockRejectedValue(new ApiError('API Error: 500', 500, {
-      code: 'agent_worker_unavailable'
-    }))
+    chatServiceMock.getTimeline.mockRejectedValue(
+      new ApiError('API Error: 500', 500, {
+        code: 'agent_worker_unavailable',
+      }),
+    )
     const sessionStore = useSessionStore()
+    sessionStore.upsertSession({ id: 'session-1', title: '测试会话' })
     sessionStore.persistCurrentSession('session-1')
+    sessionStore.activateSession('session-1')
     const store = useChatStore()
 
     await store.loadTimeline('session-1')
 
     expect(store.timelineEvents).toEqual([])
-    expect(store.errorMessage).toBe('加载任务时间线失败：当前没有可用 DataWorker，请检查 Worker 状态。')
+    expect(store.errorMessage).toBe(
+      '加载任务时间线失败：当前没有可用 DataWorker，请检查 Worker 状态。',
+    )
   })
 
-  it('keeps stale session load failures hidden after switching sessions', async () => {
-    chatServiceMock.getTimeline.mockRejectedValue(new ApiError('API Error: 500', 500, {
-      code: 'agent_worker_unavailable'
-    }))
+  it('rejects stale timeline facade calls after switching sessions', async () => {
+    chatServiceMock.getTimeline.mockRejectedValue(
+      new ApiError('API Error: 500', 500, {
+        code: 'agent_worker_unavailable',
+      }),
+    )
     const sessionStore = useSessionStore()
+    sessionStore.upsertSession({ id: 'session-1', title: '旧会话' })
+    sessionStore.upsertSession({ id: 'session-2', title: '当前会话' })
     sessionStore.persistCurrentSession('session-2')
+    sessionStore.activateSession('session-2')
     const store = useChatStore()
 
     await store.loadTimeline('session-1')
 
-    expect(store.errorMessage).toBe('')
+    expect(chatServiceMock.getTimeline).not.toHaveBeenCalled()
+    expect(store.errorMessage).toBe('操作目标不属于当前会话，已阻止请求。')
   })
 })

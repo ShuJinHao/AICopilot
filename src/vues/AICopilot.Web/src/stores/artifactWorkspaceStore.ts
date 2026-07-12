@@ -6,7 +6,7 @@ import type {
   AgentTask,
   ArtifactRecord,
   ArtifactWorkspace,
-  UploadRecord
+  UploadRecord,
 } from '@/types/protocols'
 import { toFriendlyMessage } from './chatErrorStore'
 
@@ -47,6 +47,10 @@ export const useArtifactWorkspaceStore = defineStore('artifactWorkspace', () => 
       return null
     }
 
+    const previousWorkspace = currentWorkspace.value
+    const previousArtifactPreview = currentArtifactPreview.value
+    const previousChartPreview = chartPreview.value
+
     try {
       currentWorkspace.value = await chatService.getWorkspace(task.workspaceCode)
       const firstArtifact = currentWorkspace.value.artifacts[0]
@@ -58,10 +62,10 @@ export const useArtifactWorkspaceStore = defineStore('artifactWorkspace', () => 
     } catch (error) {
       console.error('Failed to refresh artifact workspace.', error)
       reportLoadError(reportError, '加载产物工作区', error)
-      currentWorkspace.value = null
-      currentArtifactPreview.value = null
-      chartPreview.value = null
-      return null
+      currentWorkspace.value = previousWorkspace
+      currentArtifactPreview.value = previousArtifactPreview
+      chartPreview.value = previousChartPreview
+      throw error
     }
   }
 
@@ -78,7 +82,9 @@ export const useArtifactWorkspaceStore = defineStore('artifactWorkspace', () => 
   }
 
   async function refreshChartPreview(reportError?: ErrorReporter) {
-    const chartArtifact = currentWorkspace.value?.artifacts.find((artifact) => artifact.previewKind === 'chart')
+    const chartArtifact = currentWorkspace.value?.artifacts.find(
+      (artifact) => artifact.previewKind === 'chart',
+    )
     if (!chartArtifact) {
       chartPreview.value = null
       return
@@ -104,7 +110,9 @@ export const useArtifactWorkspaceStore = defineStore('artifactWorkspace', () => 
       const sourceInfo = payload.sourceInfo
       chartPreview.value = {
         labels: Array.isArray(payload.labels) ? payload.labels.map(String) : [],
-        values: Array.isArray(payload.values) ? payload.values.map((value) => Number(value) || 0) : [],
+        values: Array.isArray(payload.values)
+          ? payload.values.map((value) => Number(value) || 0)
+          : [],
         source: typeof payload.source === 'string' ? payload.source : undefined,
         sourceMode:
           typeof payload.sourceMode === 'string'
@@ -129,7 +137,7 @@ export const useArtifactWorkspaceStore = defineStore('artifactWorkspace', () => 
             ? payload.queryHash
             : typeof sourceInfo?.queryHash === 'string'
               ? sourceInfo.queryHash
-              : undefined
+              : undefined,
       }
     } catch (error) {
       console.error('Failed to load chart artifact preview.', error)
@@ -164,6 +172,6 @@ export const useArtifactWorkspaceStore = defineStore('artifactWorkspace', () => 
     loadArtifactPreview,
     refreshChartPreview,
     downloadArtifact,
-    uploadSessionFile
+    uploadSessionFile,
   }
 })

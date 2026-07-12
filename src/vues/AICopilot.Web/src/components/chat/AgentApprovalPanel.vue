@@ -38,6 +38,7 @@ function approvalMetaLine(approval: AgentApprovalRequest) {
 }
 
 async function approveAgentApproval(approvalId: string) {
+  if (!store.resolvedSessionId || store.isSessionTransitionBlocked) return
   const approval = pendingAgentApprovals.value.find((item) => item.id === approvalId)
   if (!approval) return
   if (approval.type === 'Plan') {
@@ -49,6 +50,7 @@ async function approveAgentApproval(approvalId: string) {
 }
 
 async function rejectAgentApproval(approvalId: string) {
+  if (!store.resolvedSessionId || store.isSessionTransitionBlocked) return
   const approval = pendingAgentApprovals.value.find((item) => item.id === approvalId)
   if (!approval) return
   const reason = window.prompt('请输入驳回原因', '需要修改计划或产物')
@@ -58,7 +60,11 @@ async function rejectAgentApproval(approvalId: string) {
 </script>
 
 <template>
-  <section v-if="approvalGroups.length" class="runtime-section-block" data-testid="inline-approval-card">
+  <section
+    v-if="approvalGroups.length"
+    class="runtime-section-block"
+    data-testid="inline-approval-card"
+  >
     <div class="runtime-section-title">
       <strong>确认项</strong>
       <span>{{ pendingAgentApprovals.length }} 项待处理</span>
@@ -91,10 +97,28 @@ async function rejectAgentApproval(approvalId: string) {
           </details>
         </div>
         <div class="approval-actions">
-          <button type="button" aria-label="批准审批" :disabled="store.isAgentBusy" @click="approveAgentApproval(approval.id)">
+          <button
+            type="button"
+            aria-label="批准审批"
+            :disabled="
+              !store.resolvedSessionId ||
+              store.isSessionTransitionBlocked ||
+              store.isAgentApprovalAuthorityUnknown
+            "
+            @click="approveAgentApproval(approval.id)"
+          >
             <Check :size="16" />
           </button>
-          <button type="button" aria-label="驳回审批" :disabled="store.isAgentBusy" @click="rejectAgentApproval(approval.id)">
+          <button
+            type="button"
+            aria-label="驳回审批"
+            :disabled="
+              !store.resolvedSessionId ||
+              store.isSessionTransitionBlocked ||
+              store.isAgentApprovalAuthorityUnknown
+            "
+            @click="rejectAgentApproval(approval.id)"
+          >
             <X :size="16" />
           </button>
         </div>

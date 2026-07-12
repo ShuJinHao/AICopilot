@@ -127,11 +127,11 @@ jobs:
           }
           $vitest = Get-Content $vitestPath -Raw | ConvertFrom-Json
           if (-not [bool]$vitest.success -or
-              [int]$vitest.numTotalTests -ne 132 -or
-              [int]$vitest.numPassedTests -ne 132 -or
+              [int]$vitest.numTotalTests -ne 184 -or
+              [int]$vitest.numPassedTests -ne 184 -or
               [int]$vitest.numFailedTests -ne 0 -or
               [int]$vitest.numPendingTests -ne 0 -or
-              @($vitest.testResults).Count -ne 29) {
+              @($vitest.testResults).Count -ne 31) {
             throw "Vitest reconciliation failed: files=$(@($vitest.testResults).Count), total=$($vitest.numTotalTests), passed=$($vitest.numPassedTests), failed=$($vitest.numFailedTests), pending=$($vitest.numPendingTests)"
           }
 

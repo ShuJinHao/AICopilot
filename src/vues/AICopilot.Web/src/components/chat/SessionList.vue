@@ -8,14 +8,17 @@ const store = useChatStore()
 const sessions = computed(() => store.sessions)
 
 async function selectSession(id: string) {
+  if (store.isSessionTransitionBlocked) return
   await store.selectSession(id)
 }
 
 async function createSession() {
+  if (store.isSessionTransitionBlocked) return
   await store.createNewSession()
 }
 
 async function deleteSession(id: string, title?: string | null) {
+  if (store.isSessionTransitionBlocked) return
   if (!window.confirm(`确认删除会话「${title || '未命名会话'}」？`)) {
     return
   }
@@ -31,7 +34,7 @@ async function deleteSession(id: string, title?: string | null) {
         <h2>会话</h2>
         <span>{{ sessions.length }} 个上下文</span>
       </div>
-      <AiButton variant="lime" size="icon" aria-label="新建会话" @click="createSession">
+      <AiButton variant="lime" size="icon" aria-label="新建会话" :disabled="store.isSessionTransitionBlocked" @click="createSession">
         <Plus class="h-4 w-4" />
       </AiButton>
     </header>
@@ -43,7 +46,8 @@ async function deleteSession(id: string, title?: string | null) {
         class="session-item"
         :class="{ active: store.currentSessionId === session.id }"
         role="button"
-        tabindex="0"
+        :tabindex="store.isSessionTransitionBlocked ? -1 : 0"
+        :aria-disabled="store.isSessionTransitionBlocked"
         @click="selectSession(session.id)"
         @keydown.enter.prevent="selectSession(session.id)"
         @keydown.space.prevent="selectSession(session.id)"
@@ -54,6 +58,7 @@ async function deleteSession(id: string, title?: string | null) {
           class="delete-session"
           type="button"
           aria-label="删除会话"
+          :disabled="store.isSessionTransitionBlocked"
           @click.stop="deleteSession(session.id, session.title)"
         >
           <Trash2 class="h-4 w-4" />

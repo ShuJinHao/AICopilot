@@ -1,11 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import {
-  PanelLeftOpen,
-  RefreshCw,
-  TriangleAlert,
-  X
-} from 'lucide-vue-next'
+import { PanelLeftOpen, RefreshCw, TriangleAlert, X } from 'lucide-vue-next'
 import AiTag from '@/components/ai/AiTag.vue'
 import { useAgentPlanPreview } from '@/composables/useAgentPlanPreview'
 import { useAgentWorkbench } from '@/composables/useAgentWorkbench'
@@ -19,12 +14,7 @@ import SessionList from './SessionList.vue'
 
 const store = useChatStore()
 const uiLayoutStore = useUiLayoutStore()
-const {
-  latestTask,
-  taskSteps,
-  pendingAgentApprovals,
-  taskArtifacts
-} = useAgentWorkbench()
+const { latestTask, taskSteps, pendingAgentApprovals, taskArtifacts } = useAgentWorkbench()
 const { latestPlanIsCloudReadonly } = useAgentPlanPreview()
 
 const scrollContainer = ref<HTMLElement | null>(null)
@@ -33,18 +23,26 @@ const sessionDrawerVisible = ref(false)
 const preserveScrollAnchor = ref(false)
 
 const currentTitle = computed(() => store.currentSession?.title || '新会话')
+const workbenchStatusLabel = computed(() => {
+  if (store.isSessionActivating) return '初始化中'
+  if (!store.resolvedSessionId && store.errorMessage) return '不可用'
+  return store.isStreaming ? '生成中' : '就绪'
+})
+const workbenchStatusTone = computed(() =>
+  workbenchStatusLabel.value === '就绪' ? 'success' : 'warning',
+)
 const hasInlineAgentRun = computed(() =>
   Boolean(
     latestTask.value ||
     taskSteps.value.length ||
     pendingAgentApprovals.value.length ||
     taskArtifacts.value.length ||
-    store.currentWorkspace
-  )
+    store.currentWorkspace,
+  ),
 )
 
 async function createPlanFromSuggestion(text: string) {
-  if (!store.currentSessionId || store.isAgentBusy || store.isStreaming) {
+  if (!store.resolvedSessionId || store.isSessionTransitionBlocked) {
     return
   }
 
@@ -53,7 +51,7 @@ async function createPlanFromSuggestion(text: string) {
 }
 
 async function loadOlderMessages() {
-  if (!store.currentSessionId || !scrollContainer.value) {
+  if (!store.resolvedSessionId || !scrollContainer.value) {
     return
   }
 
@@ -62,10 +60,11 @@ async function loadOlderMessages() {
   const previousHeight = container.scrollHeight
   preserveScrollAnchor.value = true
   try {
-    const changed = await store.loadOlderHistory(store.currentSessionId)
+    const changed = await store.loadOlderHistory(store.resolvedSessionId)
     await nextTick()
     if (changed && scrollContainer.value) {
-      scrollContainer.value.scrollTop = previousTop + (scrollContainer.value.scrollHeight - previousHeight)
+      scrollContainer.value.scrollTop =
+        previousTop + (scrollContainer.value.scrollHeight - previousHeight)
     }
   } finally {
     preserveScrollAnchor.value = false
@@ -93,20 +92,23 @@ watch(
     () => latestTask.value?.id,
     () => taskSteps.value.map((step) => step.status).join(','),
     () => pendingAgentApprovals.value.length,
-    () => taskArtifacts.value.length
+    () => taskArtifacts.value.length,
   ],
   () => {
     if (!preserveScrollAnchor.value) {
       void scrollToBottom()
     }
   },
-  { deep: true }
+  { deep: true },
 )
 
-watch(() => store.currentSessionId, () => {
-  sessionDrawerVisible.value = false
-  void scrollToBottom()
-})
+watch(
+  () => store.currentSessionId,
+  () => {
+    sessionDrawerVisible.value = false
+    void scrollToBottom()
+  },
+)
 
 onMounted(() => {
   if (typeof window !== 'undefined') {
@@ -122,7 +124,11 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="command-workbench">
-    <aside v-if="!isMobile" class="session-rail" :class="{ collapsed: uiLayoutStore.isSessionRailCollapsed }">
+    <aside
+      v-if="!isMobile"
+      class="session-rail"
+      :class="{ collapsed: uiLayoutStore.isSessionRailCollapsed }"
+    >
       <div class="rail-head">
         <div>
           <span>会话列表</span>
@@ -138,7 +144,13 @@ onBeforeUnmount(() => {
     <section class="ai-canvas">
       <header class="canvas-header">
         <div class="title-zone">
-          <button v-if="isMobile" class="icon-button" type="button" aria-label="打开会话" @click="sessionDrawerVisible = true">
+          <button
+            v-if="isMobile"
+            class="icon-button"
+            type="button"
+            aria-label="打开会话"
+            @click="sessionDrawerVisible = true"
+          >
             <PanelLeftOpen :size="20" />
           </button>
           <div>
@@ -147,8 +159,8 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div class="canvas-toolbar">
-          <AiTag :tone="store.isStreaming ? 'warning' : 'success'">
-            {{ store.isStreaming ? '生成中' : '就绪' }}
+          <AiTag :tone="workbenchStatusTone">
+            {{ workbenchStatusLabel }}
           </AiTag>
           <AiTag :tone="latestPlanIsCloudReadonly ? 'warning' : 'success'">
             {{ latestPlanIsCloudReadonly ? 'Cloud 只读' : '只读分析' }}
@@ -156,8 +168,12 @@ onBeforeUnmount(() => {
           <button
             class="soft-action"
             type="button"
-            :disabled="!store.currentSessionId"
-            @click="store.currentSessionId && store.selectSession(store.currentSessionId, true)"
+            :disabled="!store.resolvedSessionId || store.isSessionTransitionBlocked"
+            @click="
+              store.resolvedSessionId &&
+              !store.isSessionTransitionBlocked &&
+              store.selectSession(store.resolvedSessionId, true)
+            "
           >
             <RefreshCw :size="17" />
             刷新
@@ -178,8 +194,15 @@ onBeforeUnmount(() => {
           <i />
         </div>
 
-        <div v-if="store.hasMoreHistoryBefore && store.currentMessages.length" class="history-loader">
-          <button type="button" :disabled="store.isLoadingOlderHistory" @click="loadOlderMessages">
+        <div
+          v-if="store.hasMoreHistoryBefore && store.currentMessages.length"
+          class="history-loader"
+        >
+          <button
+            type="button"
+            :disabled="store.isSessionTransitionBlocked"
+            @click="loadOlderMessages"
+          >
             <RefreshCw :size="16" />
             {{ store.isLoadingOlderHistory ? '加载中' : '加载更早消息' }}
           </button>
@@ -204,9 +227,18 @@ onBeforeUnmount(() => {
       <ChatComposer />
     </section>
 
-    <div v-if="sessionDrawerVisible" class="mobile-overlay" @click.self="sessionDrawerVisible = false">
+    <div
+      v-if="sessionDrawerVisible"
+      class="mobile-overlay"
+      @click.self="sessionDrawerVisible = false"
+    >
       <aside class="mobile-drawer left">
-        <button class="drawer-close" type="button" aria-label="关闭会话" @click="sessionDrawerVisible = false">
+        <button
+          class="drawer-close"
+          type="button"
+          aria-label="关闭会话"
+          @click="sessionDrawerVisible = false"
+        >
           <X :size="18" />
         </button>
         <SessionList />
