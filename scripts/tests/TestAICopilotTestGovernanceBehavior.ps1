@@ -954,6 +954,24 @@ jobs:
         -Restore { Write-Utf8File -Path $workflowPath -Value $workflowOriginal } `
         -ExpectedCode "$ruleId-CI"
 
+    Assert-StaticRejected -Name 'deployment-evidence-pipeline-cannot-drop-pipefail' -ValidationRoot $staticRoot `
+        -Mutate {
+            Write-Utf8File -Path $workflowPath -Value $workflowOriginal.Replace(
+                "          set -euo pipefail`n          bash deploy/enterprise-ai/tests/deployment-behavior.sh 2>&1 | tee artifacts/test-results/deployment-behavior.log",
+                "          set -eu`n          bash deploy/enterprise-ai/tests/deployment-behavior.sh 2>&1 | tee artifacts/test-results/deployment-behavior.log")
+        } `
+        -Restore { Write-Utf8File -Path $workflowPath -Value $workflowOriginal } `
+        -ExpectedCode "$ruleId-CI-PIPELINE"
+
+    Assert-StaticRejected -Name 'deployment-evidence-pipeline-cannot-drop-stderr' -ValidationRoot $staticRoot `
+        -Mutate {
+            Write-Utf8File -Path $workflowPath -Value $workflowOriginal.Replace(
+                'bash deploy/enterprise-ai/tests/deployment-behavior.sh 2>&1 | tee artifacts/test-results/deployment-behavior.log',
+                'bash deploy/enterprise-ai/tests/deployment-behavior.sh | tee artifacts/test-results/deployment-behavior.log')
+        } `
+        -Restore { Write-Utf8File -Path $workflowPath -Value $workflowOriginal } `
+        -ExpectedCode "$ruleId-CI-PIPELINE"
+
     $runnerFixtureRoot = Join-Path $tempRoot 'runner-output'
     $tamperedRunnerConfig = Join-Path $runnerFixtureRoot 'xunit.runner.json'
     Write-Utf8File -Path $tamperedRunnerConfig -Value "{`n  `"failSkips`": false`n}`n"

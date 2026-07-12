@@ -471,7 +471,7 @@ restore_state_transaction() {
   return "$restore_status"
 }
 
-restore_previous_runtime() {
+restore_previous_runtime() (
   local key
   local expected_image
   local expected_digest
@@ -507,7 +507,7 @@ restore_previous_runtime() {
   probe_web || return $?
   probe_web_security_headers || return $?
   run_release_security_attestation || return $?
-}
+)
 
 persist_blocked_release() {
   local original_status="$1"
@@ -1671,11 +1671,11 @@ wait_for_compose_service_healthy() {
       case "$status" in
         healthy)
           printf '%s is healthy.\n' "$service"
-          return
+          return 0
           ;;
         running)
           printf '%s is running.\n' "$service"
-          return
+          return 0
           ;;
       esac
     fi
@@ -1717,7 +1717,7 @@ probe_web() {
     status_code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 10 "$url" || true)"
     if [ "$status_code" = "200" ]; then
       printf 'AICopilot web probe succeeded: %s -> %s\n' "$url" "$status_code"
-      return
+      return 0
     fi
 
     printf 'AICopilot web probe attempt %s/%s failed: %s -> %s\n' "$attempt" "$max_attempts" "$url" "${status_code:-curl-error}" >&2

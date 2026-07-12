@@ -98,6 +98,8 @@ Cloud OIDC 使用 HTTP issuer 时必须满足全部条件：
 - support installer、cancel、deploy 必须通过带 PID/process-start/owner/token 的原子 transition 串行化；live transition 不因 TTL 过期被回收，旧 token 不得删除新锁。恢复失败或 blocked evidence 写入失败时，残留 backup/永久 blocked lock 本身必须持续阻断并返回 `86`。
 - SSH timeout/断联不得只根据本机 ssh 退出码判断失败或重试；必须按 invocation token 查询远端 terminal state。明确成功可收口，明确失败保留真实失败码，active/unknown 返回 `87` 并禁止取消、重试或并发接管。
 - 回滚必须恢复并复验 support、compose、release state、PostgreSQL、RabbitMQ、Qdrant、HttpApi、DataWorker、RagWorker 和 Web；进程 Running、非 Restarting、非 OOM、RestartCount 稳定，且已有 Health 为 healthy 才能称恢复完成。数据库 migration 已执行后的失败保持 partial，禁止脚本猜测回滚数据库。
+- `deploy-release.sh` 通过 `EXIT` trap 执行容器恢复；恢复链禁止 bare `return`，提前成功返回必须显式 `return 0`。恢复函数必须在可捕获的子 Shell 中运行，确保内部健康等待、Web 探针、安全头或 attestation 直接 `exit` 时，仍能在父 Shell 统一持久化 unsafe-partial `86`、blocked evidence 和 terminal invocation state。成功/内部失败两条语义都必须用 native Linux Bash 行为测试验收，macOS 旧 Bash 通过不能代替 Linux 证据。
+- CI 把 deployment behavior 输出保存为 artifact 时，必须使用 `set -euo pipefail` 和 `2>&1 | tee ...`，确保左侧脚本失败立即使 step 失败，同时保留 stderr 证据。末尾的 33 场景/完成 marker reconcile 是独立对账，不得用来合理化前置 pipeline 假绿。
 
 ## 8. 发布验收命令
 

@@ -398,7 +398,7 @@ run_local_release() {
   LOCK_RESERVATION_TTL_SECONDS="${TEST_LOCK_RESERVATION_TTL_SECONDS-}" \
   RECONCILE_TIMEOUT_SECONDS="${TEST_RECONCILE_TIMEOUT_SECONDS-4}" \
   RECONCILE_INTERVAL_SECONDS=1 \
-  RECONCILE_QUERY_TIMEOUT_SECONDS=2 \
+  RECONCILE_QUERY_TIMEOUT_SECONDS="${TEST_RECONCILE_QUERY_TIMEOUT_SECONDS-10}" \
   BUILD_TIMEOUT_SECONDS=214 \
   HARBOR_TIMEOUT_SECONDS=215 \
     "$REPO_DIR/deploy/enterprise-ai/local-release.sh" \
@@ -866,6 +866,7 @@ assert_eq "$current_hash_before" "$(sha256_file "$REMOTE_DIR/releases/current-re
 printf 'TEST reversible post-container failure restores previous runtime and health\n'
 env_hash_before="$(sha256_file "$REMOTE_DIR/.env")"
 current_hash_before="$(sha256_file "$REMOTE_DIR/releases/current-release.env")"
+: > "$DOCKER_LOG"
 set +e
 AICOPILOT_FORCE_BUILD=true \
 AICOPILOT_ALLOW_REDEPLOY_SAME_SHA=true \
@@ -876,9 +877,18 @@ reversible_status=$?
 set -e
 assert_eq 58 "$reversible_status" "reversible runtime failure exit code"
 assert_file_contains "$TEST_ROOT/reversible-runtime-failure.log" "restored to the previous manifest and revalidated"
+assert_file_contains "$TEST_ROOT/reversible-runtime-failure.log" "AICopilot web probe succeeded"
+assert_file_contains "$TEST_ROOT/reversible-runtime-failure.log" "AICopilot web HTTP-only security header probe succeeded"
+assert_file_contains "$TEST_ROOT/reversible-runtime-failure.log" "AICopilot release security attestation passed."
+assert_file_contains "$DOCKER_LOG" "up -d aicopilot-httpapi aicopilot-dataworker aicopilot-ragworker aicopilot-webui"
+assert_file_contains "$DOCKER_LOG" "ps -q aicopilot-dataworker"
 assert_eq "$env_hash_before" "$(sha256_file "$REMOTE_DIR/.env")" "env after reversible runtime recovery"
 assert_eq "$current_hash_before" "$(sha256_file "$REMOTE_DIR/releases/current-release.env")" "current release after reversible runtime recovery"
 [ ! -f "$REMOTE_DIR/releases/blocked-release.env" ] || fail "reversible failure incorrectly blocked automatic deployment"
+[ ! -d "$REMOTE_DIR/.locks/release.lock.d" ] || fail "reversible runtime recovery left the release lock"
+if find "$REMOTE_DIR" -maxdepth 1 -type d -name '.release-transaction.*' -print -quit | grep -q .; then
+  fail "reversible runtime recovery left a release transaction backup"
+fi
 
 printf 'TEST infrastructure rollback uses frozen previous immutable identity after tag drift\n'
 rm -f "$REMOTE_DIR/.fake-infra-tag-drift-active"
@@ -923,16 +933,22 @@ AICOPILOT_FORCE_BUILD=true \
 AICOPILOT_ALLOW_REDEPLOY_SAME_SHA=true \
 AICOPILOT_NON_PRODUCTION_MECHANISM_TEST=true \
 AICOPILOT_TEST_FAIL_AFTER_CONTAINER_EXIT_CODE=58 \
-AICOPILOT_TEST_FORCE_RECOVERY_FAILURE=true \
+FAKE_CURL_FAIL_COUNT=1 \
+FAKE_CURL_FAIL_MATCH='--head' \
   run_local_release > "$TEST_ROOT/blocked-runtime-failure.log" 2>&1
 blocked_failure_status=$?
 set -e
 assert_eq 86 "$blocked_failure_status" "blocked runtime unsafe-partial exit code"
+assert_file_contains "$TEST_ROOT/blocked-runtime-failure.log" "AICopilot web security header probe failed"
 assert_file_contains "$REMOTE_DIR/releases/blocked-release.env" "DEPLOY_STATUS=blocked-partial"
 assert_file_contains "$REMOTE_DIR/releases/blocked-release.env" "DEPLOY_FAILURE_REASON=container-recovery-failed"
 blocked_transaction="$(sed -n 's/^DEPLOY_TRANSACTION_BACKUP=//p' "$REMOTE_DIR/releases/blocked-release.env")"
 [ -d "$blocked_transaction" ] || fail "blocked partial state did not retain its transaction backup"
 assert_file_contains "$blocked_transaction/previous-infra-runtime.env" "PREVIOUS_POSTGRES_IMAGE_REF=registry.factory.internal:5000/enterprise-ai/base-postgres@sha256:1111111111111111111111111111111111111111111111111111111111111111"
+blocked_token="$(sed -n '1p' "$REMOTE_DIR/.locks/release.lock.d/token")"
+[ -n "$blocked_token" ] || fail "blocked partial state lost its release token"
+assert_file_contains "$REMOTE_DIR/releases/invocations/$blocked_token.env" "DEPLOY_STATUS=unsafe-partial"
+assert_file_contains "$REMOTE_DIR/releases/invocations/$blocked_token.env" "DEPLOY_EXIT_CODE=86"
 set +e
 run_local_release > "$TEST_ROOT/blocked-retry.log" 2>&1
 blocked_retry_status=$?

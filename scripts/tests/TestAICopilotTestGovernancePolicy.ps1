@@ -49,7 +49,7 @@ $globalJsonSha256 = '18303059fe920620f05e25d0157b7ed4a74934841e6a34b0b86d713fbf6
 $buildFileManifestCount = 2
 $buildFileManifestSha256 = '3730f5d3693e5aa74a0d3fe1d2d64c4203cab26da11ba2dc4337b3f7bc4de11c'
 $workflowManifestCount = 9
-$workflowManifestSha256 = 'bb57eea6213407f087b5e9e1f174b5079e3aca9e94554c62a126df424a8e6674'
+$workflowManifestSha256 = 'a92f9a0b3bf3ea5e3fe532936358cd42342a915cb202b271932db0f9309066e6'
 $testProjectAssetSha256 = [ordered]@{
     'src/tests/AICopilot.AiEvalTests/AICopilot.AiEvalTests.csproj' = '9ff22152feced2004aeecbb1d643eaec01880bb42254b34ad858d24af109c6de'
     'src/tests/AICopilot.ArchitectureTests/AICopilot.ArchitectureTests.csproj' = '495adf4ae6a8c1a2985a26c6c55bd28bfa4c1578ea69120a0bd6ff6f4cec84f2'
@@ -78,13 +78,13 @@ $vitestPackageLockSha256 = '8136844dc863225fa750c8dd3a10eeec087135c7434e3303f59b
 $vitestConfigSha256 = 'e30c3cbfec8089345e5b4ea5950ce3edc975f033722c3532ee26b7e075e37571'
 $playwrightSmokeSourceSha256 = '9acde1a10bee6cca2d19c2276dcd81c08614cfe0ea3f90fec902bfcf37e23cb4'
 $playwrightSmokeConfigSha256 = '6abb22587cfbbcee798b6c85df2b858b1acf953b847c08f3625ff0cb32380838'
-$deploymentBehaviorSha256 = 'b6e3bad737bf6b2ac53ea615917859f20708e859e630bf5f31926b541e42b79e'
+$deploymentBehaviorSha256 = 'a157bad95903c01872e896961b8a69c127c9937a17e098a56c5eb09d4c2768f2'
 $deploymentPolicySha256 = '154cea463421562a35ba4f3f46984e14c7f56d9b59387a0884b0312e90f62d0b'
 $requiredWorkflowSha256 = @{
-    '.github/workflows/aicopilot-ci.yml' = 'f02a45285eed942b55d7a4c0dd9b52ff222b2c46a4c250310ef7e91245293a09'
+    '.github/workflows/aicopilot-ci.yml' = '2cc6fd9aa11f215b7fba71ff0a635ace874f55456da9f1891e1f2b90b722ee90'
 }
 $requiredWorkflowJobSha256 = @{
-    '.github/workflows/aicopilot-ci.yml' = '28b8b288b3bbd71e256d80f588fabca10832227822107d0271f61cb082335a3b'
+    '.github/workflows/aicopilot-ci.yml' = 'dfc5220bf5a6f34ed3ffde0114e8a24b861682ab3e61a4abebec604bea9d6ac6'
 }
 $allowedTestProjectTargetHashes = @{}
 
@@ -1805,6 +1805,17 @@ function Test-StaticPolicy {
             $expectedStepNames = @(Get-CanonicalWorkflowStepNames -WorkflowPath ([string]$requirement.workflowPath))
             if (($actualStepNames -join '|') -cne ($expectedStepNames -join '|')) {
                 Add-PolicyError -Errors $Errors -Code "$ruleId-CI" -Message "$($requirement.workflowPath) required job step names/order differ from the exact reviewed sequence."
+            }
+            $runSteps = @(Get-WorkflowRunSteps -WorkflowContent ([string]$jobEnvelopes[0].Content))
+            $deploymentSteps = @($runSteps | Where-Object { [string]$_.Name -eq 'Run deployment behavior tests' })
+            $expectedDeploymentRun = "set -euo pipefail`nbash deploy/enterprise-ai/tests/deployment-behavior.sh 2>&1 | tee artifacts/test-results/deployment-behavior.log"
+            if ($deploymentSteps.Count -ne 1 -or
+                [string]$deploymentSteps[0].Shell -cne 'bash' -or
+                [string]$deploymentSteps[0].Run -cne $expectedDeploymentRun -or
+                [bool]$deploymentSteps[0].HasIf -or
+                [bool]$deploymentSteps[0].Ambiguous -or
+                @($deploymentSteps[0].UnexpectedKeys).Count -gt 0) {
+                Add-PolicyError -Errors $Errors -Code "$ruleId-CI-PIPELINE" -Message "$($requirement.workflowPath) deployment behavior evidence must use unconditional bash, set -euo pipefail, and capture stderr through tee without hiding the test exit code."
             }
         }
         if ($workflowContent -match '(?mi)^\s*continue-on-error:\s*true\s*$' -or $workflowContent -match '(?mi)^\s*if:\s*(?:false|\$\{\{\s*false\s*\}\})\s*$') {
