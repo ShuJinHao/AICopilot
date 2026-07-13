@@ -4,7 +4,6 @@
 
 - 工作区总规则：`../docs/总规则.md`
 - AI 业务规则：`资料/AICopilot业务规则.md`
-- 改动复盘：`docs/改动复盘与规则沉淀.md`
 - 历史核心记录：`../docs/历史核心记录.md`
 
 ## Positioning
@@ -24,6 +23,26 @@
 - 大范围架构、管道、权限、工作流或契约改动不得只以 filtered tests 作为完成依据；全量 `AICopilot.BackendTests` 未跑、CI 全量未确认或环境依赖失败时，最终回复和复盘必须明确标注。
 - 最终回复必须列出复盘文档、规则沉淀位置和验证命令；缺任一项，不得称为完成。
 - 默认只更新项目滚动复盘文档，不为每个任务新增单独流水文档；只有形成可长期复用的业务或技术契约，才新增专题文档。
+
+## Historical Decision Retrieval (AI-HISTORY-001)
+
+历史复盘不是默认必读材料。出现以下情况时，必须先按模块名、Rule ID、错误码或关键类型检索 `docs/改动复盘与规则沉淀.md`，只阅读相关命中及判断上下文所必需的相邻记录：
+
+- 修复历史回归；
+- 修改已冻结业务链路；
+- 当前实现与专题契约冲突；
+- 测试失败原因无法从源码和契约确定；
+- 同类问题曾经发生；
+- 用户明确要求追溯历史决策。
+
+若检索发现当前有效约束只存在于复盘，必须先按 `AI-RULE-GOV-001` 将它迁移到正式规则或专题契约，再继续实现；不得把复盘原文继续当作唯一规范。
+
+## Rule Source Governance (AI-RULE-GOV-001)
+
+- 所有当前有效约束必须存在于本文档、`资料/AICopilot业务规则.md`、专题契约、治理清单或部署指南等正式权威位置；滚动复盘只解释当时为什么决定，并保留改动、验证和故障经过，不得成为唯一规则来源。
+- 新的长期规则必须分配稳定、唯一的 Rule ID。复盘固定记录 Rule ID、权威文件及稳定标题锚点、自动门禁；没有自动门禁时必须明确写“无”，不得用行号充当稳定锚点。
+- Rule ID 一经使用不得改义、复用或静默删除。规则迁移、取代或废止时必须更新权威锚点，并在复盘保留原 ID 与新规则的关系。
+- 能检测的约束应进入 test、Analyzer 或 CI；尚未接入自动门禁的文档规则不得宣称已经自动阻断。
 
 ## Topic Contracts
 
@@ -128,6 +147,7 @@ Cloud-AICopilot OIDC 身份对齐的长期结论见 `../docs/历史核心记录.
 - 会话、任务、工作区、产物和审批均是带归属的权威投影：只允许已加载 roster/current task 中的 ID，下载必须从当前工作区解析 canonical metadata；task/workspace/approval 任一步读取失败必须原子恢复上一代可信投影。审批投影未知时允许编辑草稿但禁止 Chat/Plan/审批/任务/最终输出 mutation；只有同一会话/任务的权威刷新成功才能解除门禁。DELETE 超时或断链属于 ACK-unknown，必须先用 session list 对账，无法对账时保持 resolved authority 为空，禁止假定删除未发生并恢复旧会话。
 - Required lane 的 Skip 必须为 0。缺 Docker/Aspire/Browser 时应在调度或 preflight 阶段失败，不得在测试运行后 Skip；AICopilot PR required job 必须全量运行 Architecture、Backend、legacy deterministic Eval、前端 Unit/build 和 deployment behavior，并保持 25 分钟 hard timeout，不得用 Phase/Batch filter 或 `continue-on-error` 换绿灯。
 - Required workflow 中任何经 `tee` 保存证据的 Shell 测试必须显式使用 `set -euo pipefail` 并把 stderr 合并进证据流；不得让 `tee` 的成功码覆盖左侧测试失败。最终 reconcile 是第二道对账，不能替代测试 step 自身的正确失败传播。
+- `AI-TEST-001` no-claim：本地绿测、远端绿测、CODEOWNERS 文件和候选分支中的 workflow/policy 只能证明对应 SHA 的测试事实，不能自行证明防自改、hard gate 或 trust root 已生效。只有 required check 由可信 base 拥有并执行、checkout 明确使用 PR head SHA、该 check 已被 branch protection/ruleset 配为 required status context，且存在独立 reviewer/Code Owner 审批时，才允许评估信任根是否闭环；任一前置缺失都必须保持未完成口径。
 - 既有 `aicopilot-simulation-release-candidate.yml` 仍会在 PR 重复执行 Backend/Web，且保留 Phase/Batch filter；这是 `AI-TEST-003` 的 P0 迁移债务。在远端 required-context 盘点、Simulation 分类迁移和旧 job 退役前，不得宣称三项目测试治理或 25 分钟目标已整体完成。
 - `CloudAiReadLiveTests` 只允许显式 Manual/Release 的非生产真实契约执行，缺环境必须失败；不得纳入普通 PR，也不得以 Stub/Simulation 代替真实 Cloud provider。
 - 当前 `AiEvalTests` 的 6 个 JSON case 只构成 legacy eval continuity，其中自证输入的 approval/prompt-injection case 不能宣称为生产工作流 Golden。只有接入真实生产 formatter/policy/workflow、版本化期望输出并建立审阅更新流程后，才能升级为 `GoldenEval` hard gate。

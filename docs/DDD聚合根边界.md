@@ -63,6 +63,17 @@ MediatR handler 直接注入 3 个及以上 repository/store/file store/query se
 - COMMIT 成功但 ACK 丢失只能用同事务 marker 验证，不能依赖可选 Outbox/audit。marker 写入后 caller cancellation 不再中断 commit/verification；fresh verification 无法确认时抛出带非敏感 commit id 的 `PersistenceCommitOutcomeUnknownException`，禁止自动重放业务。RAG 上传必须保留可能已提交写入对应的文件，等待对账后再决定清理或重试。
 - Identity stores 通过 `ITransactionalExecutionService` / `IdentityTransactionalExecutionService` 复用唯一 `PersistenceCommitEngine`，`EfTransactionalExecutionService` 已物理删除。Identity 命令返回非成功 `Result` 时必须回滚 UserManager/RoleManager 的中间保存；拒绝审计只能在业务回滚后另行提交。RAG `UploadDocument` 与 AiGateway SessionTemp/AgentInput `UploadRecord` 必须先落 durable reconciliation journal、再写物理文件，并让 repository marker 复用同一 commit id；PostgreSQL advisory lease 保护活跃请求，DataWorker 在共享卷上按 marker 对账并按保留期清理。RAG 删除事件是同一文件生命周期边界：必须按 storage path 查询 pending journal、取得同 commit lease、锁内复查并先持久退休 journal 后再删文件；不可读或 active 状态只能重试。`ArtifactWorkspace` 的多文件归档、覆盖和 final 复制必须在 `AI-PERSIST-01d` 单独建立文件集事务/对账语义；历史 KnowledgeBase shadow `UploadRecord`、旧列与枚举字符串必须在 `AI-PERSIST-01e` 经数据盘点和维护窗口物理删除，不得恢复 RAG→AiGateway 同步双写或为垃圾影子链建设 saga。禁止恢复双轨事务、无日志上传写入或第二套上传清理链。
 
+## 上传安全策略与字节探测边界（AI-SEC-049）
+
+本节只固化 AiGateway 与 RAG 上传安全策略的共享技术边界，不表示重复实现已经删除。`AI-SEC-049` 在唯一 helper、等价行为测试和全量门禁落地前保持 `Partial`。
+
+- AiGateway 与 RAG 必须继续分别拥有文件扩展名 allowlist、大小限制、允许的 MIME 集合、canonical MIME 映射、scope/knowledge-base 规则、拒绝错误和结果语义。禁止合并两套业务政策、复制第三份规则表，或用万能 upload framework 隐藏差异。
+- 跨边界最多抽取一个窄职责技术 primitive：把输入归一化为可 seek 流，在受审阅的有界窗口内读取 header，规范化 MIME token，并报告 MZ、文本 NUL 和已知字节签名等技术观察。helper 只报告事实，不决定某个扩展名、MIME 或签名是否允许；接受、拒绝和 canonicalization 仍由各自业务 policy 决定。
+- 原始调用方 stream 是 borrowed resource，helper 和 policy 都不得 dispose。若归一化 non-seekable stream 时创建临时 `MemoryStream`，返回值必须显式携带“是否拥有临时流”的 lease/ownership 信息；调用方只对 owned temporary stream 释放一次，不得泄漏、重复释放或连带释放原始流。
+- 探测必须从 byte 0 开始，并在返回或抛出前把用于后续上传的归一化 stream 恢复到 byte 0。空流、短流和非 seekable 流不能依赖单次 `ReadAsync` 填满 buffer；调用方取消必须传播 `OperationCanceledException`，不得被改写成普通格式拒绝，也不得留下归属不明的临时流。
+- 等价矩阵至少覆盖 seekable/non-seekable、空流/短流、MZ、文本 NUL、空 MIME、带参数或大小写差异的 MIME、每种已支持签名、调用方取消、原始流仍可用且未被释放、临时流只释放一次。两套业务 policy 的既有 allowlist、限额、错误和 canonical MIME 行为必须保持不变。
+- 只有共享 primitive 已落地、重复技术实现归零、上述矩阵与 Architecture/Backend 全量通过时，才能把 `AI-SEC-049` 改为 `Done`；仅完成文档提取不得关单。
+
 ## 后续收口顺序
 
 1. 保持白名单和债务清单测试常绿，禁止新增伪聚合根。
