@@ -187,9 +187,10 @@ Cloud AiRead 设备契约：
 
 ## 9. 文档入口
 
-- 长期规则入口只保留 `AGENTS.md`、本文档、项目 `docs/改动复盘与规则沉淀.md` 和工作区 `docs/历史核心记录.md`。
+- 当前有效约束只以工作区总规则、项目 `AGENTS.md`、本文档和专题契约为权威来源；[`AI规则权威索引.md`](../docs/AI规则权威索引.md) 仍是 `TEST-GOV-RULE-EXTRACTION-001-AI` 候选，`E0=false` 时不得替代这些入口。
+- 项目 `docs/改动复盘与规则沉淀.md` 与工作区 `docs/历史核心记录.md` 不得成为有效规则的唯一来源；只有工作区总计划 §6.5 的输入冻结、逐命题裁决、零待决、唯一权威链接、冲突处置、gate/债务、主 agent 复核、三项目交叉终审、用户明确授权和独立提交全部关单后，才能另批改为按需检索。当前 `projectRuleExtractionClosure=false`，仍按项目 `AGENTS.md` 默认全文读取；base-owned required context、branch protection、独立平台 reviewer 和当前 run 属于 trust-root/E0 的另一组条件，不得混作本项关单前置。
 - 当前 AI 安全治理和修复执行入口是 `docs/AI架构治理清单.md`；它不是阶段流水，必须逐项记录编号、严重级、状态、验证命令和外部依赖。
-- 当前长期专题契约包括 `docs/AICopilot安全部署契约.md`、`docs/Cloud只读数据分析契约.md` 和 `docs/Agent工作流与异常契约.md`；触碰部署、Cloud 只读、Text-to-SQL、Agent workflow、MCP/Tool、异常或前端错误时必须先读对应契约。
+- 当前长期专题契约包括 [`AICopilot安全部署契约.md`](../docs/AICopilot安全部署契约.md)、[`Cloud只读数据分析契约.md`](../docs/Cloud只读数据分析契约.md)、[`Agent工作流与异常契约.md`](../docs/Agent工作流与异常契约.md) 和 [`DDD聚合根边界.md`](../docs/DDD聚合根边界.md)；触碰部署、Cloud 只读、Text-to-SQL、Agent workflow、MCP/Tool、异常、DDD、持久化或前端错误时必须先读对应契约。
 - 部署入口只保留 `AICopilot 项目部署与维护指南.md` 和 `deploy/enterprise-ai`。
 - 阶段计划、批次验收报告、PR 草案和一次性 acceptance 输出不得继续作为执行入口；有效结论必须沉淀到长期规则或部署指南后再清理。
 - 清理文档时必须先检查引用，避免留下指向已删除阶段文件的脚本、测试或说明。

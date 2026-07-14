@@ -83,7 +83,7 @@ Cloud OIDC 使用 HTTP issuer 时必须满足全部条件：
 
 ### 7.1 可重复和并发安全发布
 
-- 日常正式发布必须从 fresh 配置远端 tip 创建隔离 detached worktree；原工作树允许脏且后续并发修改不得改变本次发布，未推送内容不得发布。
+- 操作者或 AI 运行 `Deploy-Changed.ps1 -Targets AICopilot` 的发布候选工作区必须是 clean `main` 且目标改动均已提交；入口自动 push 后，内部 `Deploy.ps1` 只从 fresh 已推送远端 tip 创建隔离 detached worktree。其它 agent 的业务 worktree 可以脏，但绝不作为候选、不被内部执行器读取或修改；任何未提交或未推送内容都不得发布。
 - 每次日常运行必须使用私有 services、image 和 digest-bound request；不得用 `artifacts/deploy/aicopilot-built-services.txt` 这类跨任务固定文件控制发布。每次远端阶段只能建立一次 SSH。
 - 日常应用发布不得同步 `docker-compose.yaml`、服务器脚本、`scripts/`、`cloud-readonly/` 或 Runner。support release 是独立基础设施维护任务，仍须用 staging/SHA256/旧事务锁，并禁止 `.env`、`releases/`、`.locks/`、备份进入同步包。
 - support install reservation 与 `deploy-release.sh` 必须使用同一 token 和 support digest。远端 release manifest、summary、已安装 support manifest 和 lock metadata 的 digest 必须一致；任何不一致都必须在 `.env` 或容器变更前 fail-closed。
@@ -113,12 +113,17 @@ dotnet test src/tests/AICopilot.ArchitectureTests/AICopilot.ArchitectureTests.cs
 dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "FullyQualifiedName~SecurityHardeningTests|Suite=DeploymentBehavior" --no-restore
 ```
 
-发布前/发布的对外标准命令：
+日常发布唯一对外命令：
+
+```powershell
+pwsh ./deploy/Deploy-Changed.ps1 -Targets AICopilot
+```
+
+只读诊断与演练命令（不发布）：
 
 ```powershell
 pwsh ./deploy/Deploy.ps1 -Target AICopilot -Doctor
 pwsh ./deploy/Deploy.ps1 -Target AICopilot -Services httpapi,dataworker,ragworker,web -DryRun
-pwsh ./deploy/Deploy-Changed.ps1 -Targets AICopilot
 ```
 
 仓库内安全检查仍可单独运行，但不触发生产发布：

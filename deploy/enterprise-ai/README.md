@@ -14,7 +14,7 @@
 
 - 生产环境使用 Docker Compose 单机编排，服务器目录为 `/srv/enterprise-ai/deploy`。
 - 工作区日常标准发布走 `pwsh ./deploy/Deploy-Changed.ps1 -Targets AICopilot`；入口自动 push 已提交的 main、读取生产 SHA，并按依赖闭包只选择受影响镜像。本目录 `build-and-push.sh` 只负责显式服务镜像，`local-release.sh` / `deploy-release.sh` 只保留给基础设施维护和旧链恢复。
-- 日常入口只接受 clean/main，未提交内容直接阻断。每次远端阶段只投递一份 digest-bound 请求；`Auto` 在 SSH TCP 不可达时经 `aicopilot-routine-request.yml` self-hosted Runner 交给同一稳定 Runner。
+- 操作者或 AI 运行日常入口的发布候选工作区只接受 clean `main`，未提交内容直接阻断；入口自动 push 后才把已推送 SHA 交给内部执行器。其它 agent 正在编辑的业务 worktree 可以脏，但不属于本次候选，内部执行器不得读取、清理或修改它们，未推送内容绝不发布。每次远端阶段只投递一份 digest-bound 请求；`Auto` 在 SSH TCP 不可达时经 `aicopilot-routine-request.yml` self-hosted Runner 交给同一稳定 Runner。
 - AICopilot 选择 HttpApi/DataWorker/RagWorker 时自动包含 migration。Runner 在 migration 前生成 PostgreSQL dump/checksum，随后只对选中应用服务执行 `--no-deps` 更新；PostgreSQL、RabbitMQ、Qdrant 不随应用发布重建。
 - Runner/Compose/scripts/cloud-readonly 支持文件升级、深度安全巡检、cleanup 和 Harbor GC 均是独立维护任务，不得塞回日常应用热路径。
 - 多 agent 可以同时准备本地候选，但远端 support install、release state、容器变更和 cleanup 必须由托管锁串行化；第二个发布遇到 active lock 时立即返回 `75`，不得静默等待或绕锁重发。
@@ -29,7 +29,7 @@
 - AICopilot 对 Cloud 业务数据保持只读边界；不得通过 MCP、Tool、Agent workflow、后台任务或隐藏适配器写 Cloud。
 - 当前标准 non-root 发布还要求 `releases/current-release*`、`staged-release*`、`previous-release*`、`current-release.summary.md` 和 deploy support files 对标准部署用户可读可写；root 应急路径一旦写入这些状态，关闭任务前必须恢复 owner/mode。
 - AICopilot 日常真实慢路径只剩选中镜像 build/Harbor push、migration 和健康检查，不存在等价的“HTTP 上传限速 1000M”概念。support sync、深度 attestation 和 cleanup 已拆出。
-- 正式日常发布只构建 fresh remote tip 的固定 Git SHA，并使用独立 detached worktree；不得读取或要求清理正在被其他 agent 修改的原工作树。
+- 正式日常发布只构建由 clean 候选工作区经 `Deploy-Changed.ps1` 自动 push 后得到的 fresh remote tip 固定 Git SHA，并使用独立 detached worktree；其它正在被 agent 修改的 worktree 可以脏，但不得被读取、清理或作为候选。
 - 每次发布使用独立 run id 和私有 services/image/support manifest；`dry-run`、另一个 agent 或另一次发布不能覆盖当前发布的控制文件。
 - `docker-compose.yaml`、服务器脚本、`cloud-readonly/` 和 `scripts/` 作为同一份 digest-bound support release staging 安装；`.env`、`releases/`、`.locks/` 和备份不进入同步包。
 - support install 取得的 reservation token 必须由同一次 `deploy-release.sh` 接管，并把 support digest 写入 release manifest/summary；digest 不一致必须在 `.env` 或容器变更前返回 `65`。
@@ -288,8 +288,10 @@ cd /srv/enterprise-ai/deploy
 
 ```bash
 cd <workspace-root>
-pwsh ./deploy/Deploy.ps1 -Target AICopilot -Services migration -Deploy
+pwsh ./deploy/Deploy-Changed.ps1 -Targets AICopilot
 ```
+
+日常入口会在 HttpApi/DataWorker/RagWorker 受影响时自动闭包 migration。只有已存在同一候选和 invocation 的显式恢复，才允许内部 `Deploy.ps1 -Deploy -ResumeInvocation <id>` 续传；不得为手工选择 migration 绕过 `Deploy-Changed.ps1`。
 
 迁移完成后，`deploy-release.sh` 会自动执行只读验收，确认语言模型和 Embedding 模型的非空 API key 都已经是 `encv2:`，并用当前 `AICOPILOT_API_KEY_ENCRYPTION_KEY` 验证这些 `encv2:` 密文可解密。需要手工复验时执行：
 

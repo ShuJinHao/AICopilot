@@ -1,18 +1,24 @@
 # AICopilot 部署与维护指南
 
-本文档是 AICopilot 当前项目级部署说明。长期业务边界见 `AGENTS.md` 和 `资料/AICopilot业务规则.md`；历史阶段计划和验收报告不再作为执行入口。日常自动增量入口是工作区根 `deploy/Deploy-Changed.ps1`；`Deploy.ps1` 只作为统一入口内部服务执行器、Doctor/DryRun 和显式恢复入口，`deploy/Invoke-WorkspaceDeploy.ps1` 只保留给部署基础设施维护和旧事务诊断。
+本文档是 AICopilot 当前项目级部署说明。长期业务边界见 `AGENTS.md` 和 `资料/AICopilot业务规则.md`；历史阶段计划和验收报告不再作为执行入口。操作者或 AI 的日常自动增量入口唯一是工作区根 `deploy/Deploy-Changed.ps1 -Targets AICopilot`；`Deploy.ps1` 只作为该入口的内部服务执行器、Doctor/DryRun 和显式恢复入口，旧 `deploy/Invoke-WorkspaceDeploy.ps1` 只保留给部署基础设施维护和旧事务诊断，不得恢复为日常入口。
 
 > 当前状态（2026-07-11）：AICopilot 全量应用已完成真实 Harbor、生产 Runner、PostgreSQL 备份、migration、rollout 与健康检查；自动增量入口的编译门禁、依赖影响测试和生产 SHA 只读 inspect 已通过，但尚未用新的单服务业务变更执行生产发布，因此不得把全量成功冒充增量生产 E2E。
 
-工作区标准入口示例：
+日常发布唯一对外命令：
 
 ```powershell
-pwsh ./deploy/Deploy-Changed.ps1 -Targets AICopilot # 日常唯一发布入口
-pwsh ./deploy/Deploy.ps1 -Target AICopilot -InstallRunner # 仅首次或 Runner 升级
+pwsh ./deploy/Deploy-Changed.ps1 -Targets AICopilot
+```
+
+以下是只读诊断、演练或独立 Runner 维护命令，不是第二个日常发布入口：
+
+```powershell
 pwsh ./deploy/Deploy.ps1 -Target AICopilot -Doctor
 pwsh ./deploy/Deploy.ps1 -Target AICopilot -Services httpapi,web -DryRun
-# Deploy.ps1 -Deploy 只供统一入口内部调用或显式恢复，不是第二个日常入口
+pwsh ./deploy/Deploy.ps1 -Target AICopilot -InstallRunner # 仅首次安装或 Runner 升级
 ```
+
+`Deploy.ps1 -Deploy` 只供统一入口内部调用或显式同一事务恢复，不是第二个日常入口。
 
 本文档按双层口径维护：
 
@@ -23,10 +29,10 @@ pwsh ./deploy/Deploy.ps1 -Target AICopilot -Services httpapi,web -DryRun
 ## 1. 部署口径
 
 - 当前部署目录固定为 `deploy/enterprise-ai`。
-- `deploy/enterprise-ai/README.md` 是部署目录内的自解释实现入口；新 AI 接手标准路径时先读工作区 `deploy/README.md` 和 `deploy/Deploy.ps1`，再按需下钻到该文件。
+- `deploy/enterprise-ai/README.md` 是部署目录内的自解释实现入口；新 AI 接手标准路径时先读工作区 `deploy/README.md` 和 `deploy/Deploy-Changed.ps1`，再按需下钻到该文件。
 - 多 AI 可以并行准备候选，但每次运行必须使用固定 SHA 和私有 manifest；远端 support install、release、容器变更和 cleanup 由同一 token/digest 与全局锁串行化，active lock 必须立即失败。
 - 生产环境使用 Docker Compose 单机编排，镜像从 Harbor 拉取。
-- 标准日常发布走工作区 `deploy/Deploy-Changed.ps1`：要求 clean/main，自动把已提交 HEAD push 到 `origin/main`，读取生产 SHA，按 Git 改动和项目依赖闭包只选择受影响镜像，再调用 `Deploy.ps1 -Services ...` 构建不可变镜像并请求稳定 non-root Runner。影响无法安全归属禁止退化全量。`RemoteTransport=Auto` 优先 SSH，SSH TCP 不可达时自动使用 `aicopilot-routine-request.yml` self-hosted Runner。
+- 标准日常发布走工作区 `deploy/Deploy-Changed.ps1 -Targets AICopilot`：被选为发布候选的调用工作区必须位于 clean `main`，HEAD 已提交，入口再自动 push 到 `origin/main`、读取生产 SHA、按 Git 改动和项目依赖闭包只选择受影响镜像。随后内部 `Deploy.ps1` 从已推送远端 tip 创建 detached worktree 构建不可变镜像并请求稳定 non-root Runner。其它 agent 正在编辑的业务 worktree 可以脏，但绝不作为本次候选、不会被读取或修改，未提交/未推送内容绝不发布。影响无法安全归属禁止退化全量。`RemoteTransport=Auto` 优先 SSH，SSH TCP 不可达时自动使用 `aicopilot-routine-request.yml` self-hosted Runner。
 - 后端应用服务自动包含 migration；Runner 先备份 PostgreSQL，再迁移并用 `--no-deps` 更新选中应用，失败恢复旧应用镜像。构建后远端失败使用 `-ResumeInvocation` 续传，不重新构建。
 - Compose、Runner、scripts/cloud-readonly、cleanup/GC 和深度 attestation 属于独立基础设施维护，不随日常应用发布同步。
 - GitHub `aicopilot-image` / `aicopilot-deploy` 只保留带确认词的灾备入口；日常生产发布不得等待这些 workflow。
@@ -219,9 +225,9 @@ AiGateway 会话并发锁：
 目标标准流程（不代表当前生产验收）：
 
 ```text
-git push GitHub
--> 工作区根 Invoke-WorkspaceDeploy.ps1 确认 HEAD 已推送且工作区干净
--> local-release.sh 为该 SHA 创建 detached worktree 和本次 run 私有目录
+在选定候选工作区的 main 提交全部目标改动并保持 clean
+-> 工作区根 Deploy-Changed.ps1 -Targets AICopilot 自动 push HEAD、读取生产 SHA并计算影响闭包
+-> 内部 Deploy.ps1 从已推送远端 tip 为该 SHA 创建 detached worktree 和本次 run 私有目录
 -> 从固定快照构建镜像并生成私有 services/image/support manifest
 -> push <harbor-registry>/enterprise-ai/*:sha-<git-sha>
 -> support staging 的 SHA256、reservation token、全局锁和 deploy-release digest 绑定
@@ -322,7 +328,7 @@ MCR 直转镜像。`mirror-base-images.sh` 生成该镜像时必须内置 `libgs
 pwsh ./deploy/Deploy-Changed.ps1 -Targets AICopilot
 ```
 
-单独构建镜像时使用：
+只有获批的镜像构建排障或基础设施维护才可单独调用内部构建脚本；它不构成发布入口，也不得用于绕过候选检查：
 
 ```bash
 REGISTRY=harbor.internal.example:80 \
@@ -332,13 +338,11 @@ CLOUD_PLATFORM_URL=http://cloud.internal.example:81 \
 
 单镜像 build/push 默认 15 分钟超时，Harbor 检查默认 2 分钟超时，SSH deploy 默认 30 分钟超时；超时必须停止并诊断 Docker buildx、Harbor tag、服务器 compose/logs 和 release 状态，不得继续等待灾备 GitHub workflow。
 
-服务器手工部署只在本机 SSH 触发器不可用时使用：
+缺少统一入口生成的 candidate/reservation 参数时，禁止把服务器手工命令当作 SSH 不可用的 fallback。只有获批旧事务恢复且已绑定同一 invocation、完整 SHA、plan/profile/request digest 与 reservation 时，才允许内部执行器续传；下面无绑定命令仅作禁止示例：
 
 ```bash
 cd /srv/enterprise-ai/deploy
-docker login harbor.internal.example:80 --username <Harbor 用户>
-./deploy-release.sh sha-<git-sha>
-# 或按需发布：
+# 禁止：缺少 workspace marker / invocation / expected SHA / plan digest / reservation
 ./deploy-release.sh sha-<git-sha> --services migration,httpapi,web
 ```
 
