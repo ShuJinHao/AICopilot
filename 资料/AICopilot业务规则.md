@@ -187,8 +187,25 @@ Cloud AiRead 设备契约：
 
 ## 9. 文档入口
 
-- 当前有效约束只以工作区总规则、项目 `AGENTS.md`、本文档和专题契约为权威来源；[`AI规则权威索引.md`](../docs/AI规则权威索引.md) 仍是 `TEST-GOV-RULE-EXTRACTION-001-AI` 候选，`E0=false` 时不得替代这些入口。
-- 项目 `docs/改动复盘与规则沉淀.md` 与工作区 `docs/历史核心记录.md` 不得成为有效规则的唯一来源；只有工作区总计划 §6.5 的输入冻结、逐命题裁决、零待决、唯一权威链接、冲突处置、gate/债务、主 agent 复核、三项目交叉终审、用户明确授权和独立提交全部关单后，才能另批改为按需检索。当前 `projectRuleExtractionClosure=false`，仍按项目 `AGENTS.md` 默认全文读取；base-owned required context、branch protection、独立平台 reviewer 和当前 run 属于 trust-root/E0 的另一组条件，不得混作本项关单前置。
+- 当前有效约束只以工作区总规则、项目 `AGENTS.md`、本文档和专题契约为权威来源；[`AI规则权威索引.md`](../docs/AI规则权威索引.md) 是 AICopilot 当前 Rule ID 注册表。该索引与规则提取关单不等于 required CI trust root 已生效；`E0=false` 时仍不得宣称 base-owned required check、branch protection、独立平台 reviewer 或当前 required run 已完成。
+- 项目 `docs/改动复盘与规则沉淀.md` 与工作区 `docs/历史核心记录.md` 不得成为有效规则的唯一来源。`TEST-GOV-RULE-EXTRACTION-001-AI` 已以独立且已推送提交 `190c458db19a81c9e766117cd0d785836c76d99f` 完成输入冻结、逐命题裁决、零待决、唯一权威链接、冲突处置、gate/债务和交叉终审；本批只迁移项目滚动复盘入口，工作区 `docs/历史核心记录.md` 的既有入口地位不自动取消。
+
+### 9.1 历史复盘检索
+
+历史复盘不是默认必读材料。
+
+出现以下情况时，必须按模块名、Rule ID、错误码或关键类型检索相关复盘：
+
+- 修复历史回归；
+- 修改已冻结业务链路；
+- 当前实现与专题契约冲突；
+- 测试失败原因无法从源码和契约确定；
+- 同类问题曾经发生；
+- 用户明确要求追溯历史决策。
+
+检索词可按具体故障补充故障症状。读取历史复盘不能替代读取当前正式规则和专题契约，代码改动完成前仍必须新增本批复盘记录。
+
+本规则只取消项目滚动复盘 `../docs/改动复盘与规则沉淀.md` 的默认全文阅读；工作区 `../../docs/历史核心记录.md` 的既有入口地位本批不调整。Rule ID：[`AI-RULE-GOV-001`](../docs/AI规则权威索引.md#ai-rule-gov-001)。
 - 当前 AI 安全治理和修复执行入口是 `docs/AI架构治理清单.md`；它不是阶段流水，必须逐项记录编号、严重级、状态、验证命令和外部依赖。
 - 当前长期专题契约包括 [`AICopilot安全部署契约.md`](../docs/AICopilot安全部署契约.md)、[`Cloud只读数据分析契约.md`](../docs/Cloud只读数据分析契约.md)、[`Agent工作流与异常契约.md`](../docs/Agent工作流与异常契约.md) 和 [`DDD聚合根边界.md`](../docs/DDD聚合根边界.md)；触碰部署、Cloud 只读、Text-to-SQL、Agent workflow、MCP/Tool、异常、DDD、持久化或前端错误时必须先读对应契约。
 - 部署入口只保留 `AICopilot 项目部署与维护指南.md` 和 `deploy/enterprise-ai`。

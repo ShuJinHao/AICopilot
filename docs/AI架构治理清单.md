@@ -4,7 +4,7 @@
 
 专题契约入口：
 
-- `docs/AI规则权威索引.md`：`TEST-GOV-RULE-EXTRACTION-001-AI` 候选 Rule ID 注册表；候选覆盖虽已完成，但共享计划增量审计、独立提交、主 agent/非作者复核和三项目交叉终审未完成，当前 `projectRuleExtractionClosure=false`，不得取消默认全文阅读。base-owned required context、branch protection、独立平台 reviewer 与当前 run 另行决定 trust root，当前 `E0=false`，不得把候选索引称为正式入口。
+- `docs/AI规则权威索引.md`：AICopilot 当前 Rule ID 注册表。`TEST-GOV-RULE-EXTRACTION-001-AI` 已由独立且已推送提交 `190c458db19a81c9e766117cd0d785836c76d99f` 固定，并完成主 agent、非作者和三项目交叉终审，当前 `projectRuleExtractionClosure=true`；`TEST-GOV-RULE-EXTRACTION-001-AI-ENTRY` 只迁移项目滚动复盘的条件检索入口，代码改动完成前新增本批复盘和工作区 `docs/历史核心记录.md` 既有入口均不取消。base-owned required context、branch protection、独立平台 reviewer 与当前 run 仍另行决定 trust root，当前 `E0=false`，不得把规则提取关单写成 required CI 防自改已生效。
 - `docs/AICopilot安全部署契约.md`：部署安全、HTTP-only、secret、镜像、SSH、runner 和发布验收。
 - `docs/Cloud只读数据分析契约.md`：Cloud 只读、Cloud AiRead、CloudReadOnly Direct DB、Text-to-SQL、DeviceLog 和 Simulation 边界。
 - `docs/Agent工作流与异常契约.md`：Agent workflow、Plan/Chat、MCP/Tool/Human-in-the-loop、异常、前端错误和运行详情。

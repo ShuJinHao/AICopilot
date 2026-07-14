@@ -1,6 +1,6 @@
 # AICopilot 规则权威索引
 
-本文档目前是 `TEST-GOV-RULE-EXTRACTION-001-AI` 的候选 Rule ID 注册表，不是已生效 trust root。候选规则提取覆盖已完成 111/111 个历史 section，`Needs-Decision=0`；但共享总计划最终增量审计尚待主 agent 回填，本批也尚未形成独立提交、主 agent 与非作者 reviewer 复核以及三项目交叉终审，因此总计划 §6.5 的项目规则提取关单条件尚未满足。项目 `AGENTS.md` 仍要求默认读取滚动复盘，本索引不得替代现有正式规则。base-owned required context、branch protection、独立平台 reviewer 和当前 required run 属于 trust-root/E0 的另一组事实，当前同样均未证明，不能与 §6.5 的规则提取关单条件混写或互相替代。
+本文档是 AICopilot 当前 Rule ID 注册表，但不是已生效的 required CI trust root。`TEST-GOV-RULE-EXTRACTION-001-AI` 已覆盖 111/111 个历史 section、18 个细粒度命题和工作区历史 45/45 个候选源行，`Needs-Decision=0`；提取结果已由独立且已推送提交 `190c458db19a81c9e766117cd0d785836c76d99f` 固定，并完成主 agent、非作者与三项目交叉终审，因此 `projectRuleExtractionClosure=true`。`TEST-GOV-RULE-EXTRACTION-001-AI-ENTRY` 仅把项目滚动复盘迁移为条件检索，须以本批独立提交后生效。base-owned required context、branch protection、独立平台 reviewer 和当前 required run 仍未证明，`trustRoot.effective=false`、`E0=false`，不能与 §6.5 的项目规则提取关单混写或互相替代。
 
 - 安全部署：[`AICopilot安全部署契约.md`](AICopilot安全部署契约.md)
 - Cloud 只读：[`Cloud只读数据分析契约.md`](Cloud只读数据分析契约.md)
@@ -16,7 +16,7 @@
 <a id="ai-rule-gov-001"></a>
 ### AI-RULE-GOV-001 正式规则与历史材料边界
 
-当前约束只能来自工作区总规则、项目规则和专题契约，历史复盘不得成为有效规则的唯一来源。取消默认全文阅读只能按工作区总计划 §6.5 关单：冻结输入、候选逐条裁决、`Needs-Decision=0`、Active 命题唯一链接当前权威与 Rule ID、冲突显式处置、可检测约束进入 gate 或登记债务，并完成主 agent 复核、三个项目交叉终审、用户明确授权和独立提交。当前候选覆盖虽已完成，但共享总计划增量审计、独立提交、主 agent 与非作者 reviewer 复核及三项目交叉终审尚未完成，因此 `projectRuleExtractionClosure=false`，历史复盘仍默认全文读取。base-owned required context、branch protection、平台独立 reviewer 和当前 required run 只决定 trust-root/E0 是否生效，不是 §6.5 项目关单的附加条件。自动化治理债务：`AI-RULE-AUDIT-LINT-001`。
+当前约束只能来自工作区总规则、项目规则和专题契约，历史复盘不得成为有效规则的唯一来源。AICopilot 项目滚动复盘不是默认必读材料；修复历史回归、修改已冻结业务链路、当前实现与专题契约冲突、测试失败原因无法从源码和契约确定、同类问题曾经发生或用户明确要求追溯历史决策时，必须按模块名、Rule ID、错误码或关键类型精准检索，检索词可补充故障症状。读取复盘不能替代当前规则和专题契约，代码改动完成前仍必须新增本批复盘。工作区 `docs/历史核心记录.md` 的既有入口地位不因本项目迁移自动取消。`projectRuleExtractionClosure=true` 只证明 §6.5 项目审计关单；base-owned required context、branch protection、平台独立 reviewer 和当前 required run 仍决定 trust-root/E0，当前均未生效。自动化治理债务：`AI-RULE-AUDIT-LINT-001`。
 
 <a id="ai-rule-gov-002"></a>
 ### AI-RULE-GOV-002 改动收口与长期规则结论

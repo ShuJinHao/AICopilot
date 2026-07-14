@@ -1,10 +1,13 @@
 {
-  "schemaVersion": "3.0.0-candidate",
+  "schemaVersion": "3.1.0-entry-candidate",
   "auditId": "TEST-GOV-RULE-EXTRACTION-001-AI",
   "project": "AICopilot",
   "baseSha": "198cc59318f4a1748c719b9b8ecff1d969952ce8",
   "auditAtUtc": "2026-07-14T00:00:00Z",
   "scope": {
+    "batchId": "TEST-GOV-RULE-EXTRACTION-001-AI",
+    "snapshotRevision": "190c458db19a81c9e766117cd0d785836c76d99f",
+    "entryMigrationScopeRecordedSeparately": true,
     "docsOnly": true,
     "networkUsed": false,
     "companyServerUsed": false,
@@ -51,7 +54,7 @@
     "preAuditBytesAvailable": false,
     "auditMode": "full-current-snapshot-reaudit",
     "reason": "Only the pre-audit SHA-256 and line count were retained before concurrent main-owned plan edits; exact pre-audit bytes are unavailable, so no byte diff or auditedDiffSha256 is claimed.",
-    "finalSha256": "432026d7c3f02ac511ec761ac30d4946f68ddf55dc38be650b8126d2b606e5a2",
+    "finalSha256": "505dc9fc60963cbf1cd0c4cd65d76ad4fa85c3ce99c11b117bfd35fa7744ba3b",
     "finalLineCount": 1418,
     "auditedDiffSha256": null,
     "topLevelSectionInventory": {
@@ -77,17 +80,17 @@
         { "ordinal": 17, "startLine": 1290, "endLine": 1328, "sha256": "8b12fc9d3ed2236cdea8c323b8f021d4c4b4356aace1db9588039bfb2a9af22e" },
         { "ordinal": 18, "startLine": 1329, "endLine": 1348, "sha256": "a8002c6627e048f668c5555cb21abe00313ac94eb20640dfa0f72ac1c930186b" },
         { "ordinal": 19, "startLine": 1349, "endLine": 1390, "sha256": "a599314dd3007661cc3760d845556a14e90ca60a5e95a61b7d3580029baade87" },
-        { "ordinal": 20, "startLine": 1391, "endLine": 1418, "sha256": "3d4db1aaffa94f9ccb26286989a459acfe177dea9219c6f43fbf058be5f4b450" }
+        { "ordinal": 20, "startLine": 1391, "endLine": 1418, "sha256": "7e78dc6691be6bb0e4dc55a3c2c62796058be5ba99435a9202d1a4a20f8134c5" }
       ]
     },
     "decisionMappings": [
-      { "planSection": "6.5", "decision": "local-candidate-audited-formal-closure-still-false", "batchIds": ["TEST-GOV-RULE-EXTRACTION-001-AI"] },
+      { "planSection": "6.5", "decision": "project-extraction-closed-by-pushed-independent-commit-and-cross-review-entry-candidate-prepared", "batchIds": ["TEST-GOV-RULE-EXTRACTION-001-AI", "TEST-GOV-RULE-EXTRACTION-001-AI-ENTRY"] },
       { "planSection": "9", "decision": "ai-rule-extraction-target-and-read-only-boundaries-reconciled", "batchIds": ["TEST-GOV-RULE-EXTRACTION-001-AI"] },
       { "planSection": "16.2", "decision": "multi-agent-and-receipt-trust-boundaries-retained", "batchIds": ["TEST-GOV-RULE-EXTRACTION-001-AI"] },
       { "planSection": "20", "decision": "ai-counts-review-debts-and-no-e0-claim-reconciled", "batchIds": ["TEST-GOV-RULE-EXTRACTION-001-AI"] }
     ],
     "status": "complete-full-current-snapshot-reaudit",
-    "reviewer": "pending-final-nonauthor-review"
+    "reviewer": "local-main-agent-and-nonauthor-cross-review-pass-2026-07-14"
   },
   "decisionModel": {
     "canonicalRuleCount": 98,
@@ -120,17 +123,119 @@
   },
   "auditState": {
     "revisedCandidateCoverageComplete": true,
-    "semanticRuleExtractionAuditComplete": false,
-    "projectRuleExtractionClosure": false,
+    "semanticRuleExtractionAuditComplete": true,
+    "projectRuleExtractionClosure": true,
     "rollingReviewCoverage": "111/111",
     "workspaceHistoryCoreCandidateLineCoverage": "45/45",
     "nonConclusionHistoryPreserved": true,
     "defaultRollingReviewReadingStillRequired": true,
+    "defaultRollingReviewReadingStillRequiredAtParentCommit": true,
+    "defaultRollingReviewFullReadRemovedInCandidate": true,
     "conditionalHistoryEntryEnabled": false,
+    "conditionalHistoryEntryPrepared": true,
+    "conditionalHistoryEntryIsUncommittedCandidate": true,
+    "repositoryHistoryEffective": false,
     "e0Effective": false,
-    "closureBasis": "../docs/三项目测试架构治理总计划.md#65-规则提取审计完成后取消默认全文阅读的迁移门禁",
-    "reason": "Candidate coverage is complete with Needs-Decision=0, but section 6.5 closure remains false because the shared-plan final incremental audit, an independent commit, main-agent/non-author rereview and the three-project cross-final review are incomplete. Trust-root/E0 platform facts are tracked separately.",
-    "reviewer": "pending-main-and-nonauthor-rereview"
+    "closureBasis": "../docs/三项目测试架构治理总计划.md#65-规则权威与历史复盘提取审计",
+    "reason": "Section 6.5 project extraction closure is proven by complete zero-pending coverage, the pushed independent extraction commit 190c458db19a81c9e766117cd0d785836c76d99f, main-agent/non-author review and the three-project cross-final review. The current working tree is a separate uncommitted entry-migration candidate; trust-root/E0 platform facts remain false and are tracked separately.",
+    "reviewer": "local-main-agent-and-nonauthor-cross-review-pass-2026-07-14"
+  },
+  "independentCommitEvidence": {
+    "batchId": "TEST-GOV-RULE-EXTRACTION-001-AI",
+    "commitSha": "190c458db19a81c9e766117cd0d785836c76d99f",
+    "parentSha": "198cc59318f4a1748c719b9b8ecff1d969952ce8",
+    "treeSha": "8bacf0ec6e70fabdeaa20b0fe65ab57fee014090",
+    "commitMessage": "docs(governance): extract ai long-term rules",
+    "branch": "agent/ai-rule-extraction-20260714",
+    "remoteTrackingRef": "origin/agent/ai-rule-extraction-20260714",
+    "remoteTipObserved": "190c458db19a81c9e766117cd0d785836c76d99f",
+    "pushed": true,
+    "authorizedExtractionPathCount": 8,
+    "sourceCodeTestsWorkflowPolicyBaselineOrReceiptChanged": false,
+    "reviewEvidence": {
+      "mainAgentFinalReview": "pass",
+      "nonAuthorFinalReview": "pass",
+      "threeProjectCrossFinalReview": "pass",
+      "scope": "local documentation and ledger extraction content",
+      "doesNotImplyIndependentGitHubReviewer": true
+    }
+  },
+  "entryMigration": {
+    "batchId": "TEST-GOV-RULE-EXTRACTION-001-AI-ENTRY",
+    "parentSha": "190c458db19a81c9e766117cd0d785836c76d99f",
+    "parentRemoteTrackingRef": "origin/agent/ai-rule-extraction-20260714",
+    "parentRemoteTipVerified": true,
+    "status": "prepared-uncommitted-candidate",
+    "candidateCommitSha": null,
+    "candidateCommitted": false,
+    "candidatePushed": false,
+    "allowedWrittenPaths": [
+      "AGENTS.md",
+      "资料/AICopilot业务规则.md",
+      "docs/AI规则权威索引.md",
+      "docs/AI架构治理清单.md",
+      "docs/改动复盘与规则沉淀.md",
+      "docs/testing/rule-extraction-ledger.json"
+    ],
+    "forbiddenAssetClassesUnchanged": [
+      "production-code",
+      "tests",
+      "workflow",
+      "policy",
+      "baseline",
+      "receipt",
+      "inventory",
+      "production-data"
+    ],
+    "ruleId": "AI-RULE-GOV-001",
+    "newRuleIdAdded": false,
+    "canonicalRuleCountUnchanged": 98,
+    "fixedTextSource": "../docs/三项目测试架构治理总计划.md §6.5",
+    "fixedTextExactCopyVerified": true,
+    "fixedTextOccurrenceCount": 2,
+    "sixTriggerConditionsPresent": true,
+    "defaultRollingReviewFullReadRemoved": true,
+    "codeChangeReviewRecordStillRequired": true,
+    "workspaceHistoryCoreEntryUnchanged": true,
+    "trustRootUnaffected": true,
+    "e0Unaffected": true,
+    "automationAdded": false,
+    "manualGateDebtId": "AI-RULE-AUDIT-LINT-001",
+    "ruleRevision": {
+      "ruleId": "AI-RULE-GOV-001",
+      "extractionSnapshotRetainedInCanonicalRules": true,
+      "candidateAuthoritySummary": "AICopilot 项目滚动复盘不是默认必读材料；六类追溯场景按模块名、Rule ID、错误码或关键类型精准检索，代码改动完成前仍新增本批复盘，工作区历史核心记录入口保持不变。",
+      "authorityPaths": [
+        "AGENTS.md",
+        "资料/AICopilot业务规则.md",
+        "docs/AI规则权威索引.md#ai-rule-gov-001"
+      ],
+      "provenance": "workspace total plan section 6.5 fixed text plus the user's explicit three-project entry-migration authorization",
+      "candidatePrepared": true,
+      "repositoryHistoryEffective": false,
+      "debtId": "AI-RULE-AUDIT-LINT-001",
+      "debtStatus": "open"
+    },
+    "candidateFiles": [
+      { "path": "AGENTS.md", "sha256": "fb5d7d99f7bd9c769b628381efd1ea8b3bfd50d8a919adf9a499ec87a57d5893", "lineCount": 224 },
+      { "path": "资料/AICopilot业务规则.md", "sha256": "2ee37c3746f57f51fe97ea05c88119566b389d2b5145cbd246a3f23989fbd651", "lineCount": 235 },
+      { "path": "docs/AI规则权威索引.md", "sha256": "d943e1a21f77b7007462072ac6289d702255914cb652a28e74a27969d87a1fa4", "lineCount": 528 },
+      { "path": "docs/AI架构治理清单.md", "sha256": "d85078d6fb3fe40f4e891c0aa835e87bb197f9885a342d3074cb7c3cef738b1d", "lineCount": 462 },
+      { "path": "docs/改动复盘与规则沉淀.md", "sha256": "f3d91dd164a4efbd1324c23c433fa474b88398298746d64414b7d0f04e7fe35d", "lineCount": 1896 }
+    ],
+    "ledgerSelfDigestExcluded": true,
+    "reviewer": "pending-main-agent-final-review-of-entry-candidate"
+  },
+  "projectClosureEvidence": {
+    "appliesToCanonicalRuleCount": 98,
+    "currentCanonicalStatus": "Canonical-Extracted",
+    "perItemCandidateStatusAndReviewerFieldsRetainedAsExtractionCommitSnapshot": true,
+    "historicalPendingStatementsRetained": true,
+    "projectRuleExtractionClosure": true,
+    "conditionalHistoryEntryCandidatePrepared": true,
+    "entryCandidateRequiresIndependentCommitToBecomeRepositoryState": true,
+    "trustRootEffective": false,
+    "e0": false
   },
   "trustRoot": {
     "effective": false,
@@ -10094,6 +10199,9 @@
     "reviewer": "pending-main-and-nonauthor-rereview"
   },
   "postAuditMutation": {
+    "snapshotRevision": "190c458db19a81c9e766117cd0d785836c76d99f",
+    "candidateFilesAreExtractionCommitSnapshot": true,
+    "currentEntryCandidateRecordedSeparately": true,
     "productionCodeTestWorkflowPolicyOrBaselineMutated": false,
     "authorizedDocumentationAndLedgerPathsMutated": true,
     "mutationScopeNote": "This audit modifies only the eight authorized documentation/ledger paths; it does not modify production code, tests, workflow, policy or baseline files.",
@@ -10138,6 +10246,8 @@
     "reviewer": "pending-main-and-nonauthor-rereview"
   },
   "verification": {
+    "snapshotRevision": "190c458db19a81c9e766117cd0d785836c76d99f",
+    "entryCandidateVerificationRecordedInEntryMigration": true,
     "jsonStructureGeneratedFromRubyObjects": true,
     "inputFreezeProjectAuthorityCount": 11,
     "inputFreezeWorkspaceSourceCount": 4,
