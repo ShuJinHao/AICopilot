@@ -13,6 +13,7 @@ public static class AuthProblemCodes
     public const string CloudIdentityInactive = "cloud_identity_inactive";
     public const string CloudIdentityUnverified = "cloud_identity_unverified";
     public const string ExternalIdentityConflict = "external_identity_conflict";
+    public const string LastEnabledAdminRequired = "last_enabled_admin_required";
 }
 
 public static class AppProblemCodes
@@ -70,8 +71,11 @@ public static class AppProblemCodes
 
 public static class ApiProblemExtensionKeys
 {
+    public const string Code = "code";
     public const string MissingPermissions = "missingPermissions";
     public const string RetryAfterSeconds = "retryAfterSeconds";
+    public const string UserFacingMessage = "userFacingMessage";
+    public const string TraceId = "traceId";
 }
 
 public sealed record ApiProblemDescriptor(

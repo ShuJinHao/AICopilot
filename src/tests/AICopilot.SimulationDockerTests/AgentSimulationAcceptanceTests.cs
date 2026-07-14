@@ -1,12 +1,11 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using AICopilot.BackendTests;
 
-namespace AICopilot.BackendTests;
+namespace AICopilot.SimulationDockerTests;
 
-[Collection(AgentSimulationBackendTestCollection.Name)]
-[Trait("Suite", "AgentSimulationAcceptance")]
-[Trait("Runtime", "DockerRequired")]
+[Collection(AgentSimulationTestCollection.Name)]
 public sealed class AgentSimulationAcceptanceTests
 {
     private const string SimulationLabel = "\u6a21\u62df Cloud \u53ea\u8bfb\u6570\u636e";

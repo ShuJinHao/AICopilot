@@ -1,23 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
-    <AICopilotTestKind>Architecture</AICopilotTestKind>
+    <AICopilotTestKind>Unit</AICopilotTestKind>
     <AICopilotTestRuntime>Pure</AICopilotTestRuntime>
     <AICopilotTestCadence>PR</AICopilotTestCadence>
-    <AICopilotTestOwner>Architecture</AICopilotTestOwner>
+    <AICopilotTestOwner>IdentityPolicy</AICopilotTestOwner>
     <AICopilotRequired>true</AICopilotRequired>
   </PropertyGroup>
-
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
-  </ItemGroup>
-
-  <ItemGroup>
     <PackageReference Include="FluentAssertions" Version="8.8.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
@@ -25,24 +20,13 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="coverlet.collector" Version="6.0.4">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
   </ItemGroup>
-
   <ItemGroup>
-    <ProjectReference Include="..\..\hosts\AICopilot.HttpApi\AICopilot.HttpApi.csproj" />
-    <ProjectReference Include="..\..\core\AICopilot.Core.AiGateway\AICopilot.Core.AiGateway.csproj" />
-    <ProjectReference Include="..\..\core\AICopilot.Core.DataAnalysis\AICopilot.Core.DataAnalysis.csproj" />
-    <ProjectReference Include="..\..\core\AICopilot.Core.McpServer\AICopilot.Core.McpServer.csproj" />
-    <ProjectReference Include="..\..\core\AICopilot.Core.Rag\AICopilot.Core.Rag.csproj" />
-    <ProjectReference Include="..\..\shared\AICopilot.SharedKernel\AICopilot.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\services\AICopilot.IdentityService\AICopilot.IdentityService.csproj" />
+    <ProjectReference Include="..\..\services\AICopilot.Services.Contracts\AICopilot.Services.Contracts.csproj" />
   </ItemGroup>
-
   <ItemGroup>
     <Using Include="FluentAssertions" />
     <Using Include="Xunit" />
   </ItemGroup>
-
 </Project>

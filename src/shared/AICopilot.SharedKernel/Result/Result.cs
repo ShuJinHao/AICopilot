@@ -133,4 +133,12 @@ public class Result : Result<Result>
             Errors = errors
         };
     }
+
+    public static Result Invalid(ApiProblemDescriptor problem)
+    {
+        return new Result(ResultStatus.Invalid)
+        {
+            Errors = [problem]
+        };
+    }
 }

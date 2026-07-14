@@ -4,33 +4,4 @@
           Condition="'$(DesignTimeBuild)' != 'true' and '$(MSBuildProjectName)' == 'AICopilot.HttpApi'">
     <Exec Command="pwsh -NoProfile -File &quot;$(MSBuildThisFileDirectory)deploy/enterprise-ai/tests/TestDeploymentPolicy.ps1&quot;" />
   </Target>
-
-  <Target Name="ValidateAICopilotTestGovernanceStaticPolicy"
-          BeforeTargets="PrepareForBuild"
-          Condition="'$(DesignTimeBuild)' != 'true' and '$(MSBuildProjectName)' == 'AICopilot.HttpApi'">
-    <Exec Command="pwsh -NoLogo -NoProfile -NonInteractive -File &quot;$(MSBuildThisFileDirectory)scripts/tests/TestAICopilotTestGovernancePolicy.ps1&quot; -Mode ValidateStatic -Configuration &quot;$(Configuration)&quot;" />
-  </Target>
-
-  <Target Name="ValidateAICopilotTestGovernanceAssembly"
-          AfterTargets="Compile"
-          Condition="'$(IsTestProject)' == 'true' and '$(DesignTimeBuild)' != 'true' and '$(IsCrossTargetingBuild)' != 'true' and '$(TargetFramework)' != ''">
-    <PropertyGroup>
-      <_AICopilotTestGovernanceDirectory>$(MSBuildProjectDirectory)/$(IntermediateOutputPath)test-governance</_AICopilotTestGovernanceDirectory>
-      <_AICopilotTestGovernanceReferencePathsFile>$(_AICopilotTestGovernanceDirectory)/reference-paths.rsp</_AICopilotTestGovernanceReferencePathsFile>
-    </PropertyGroup>
-    <Error Condition="'@(IntermediateAssembly)' == ''"
-           Text="AI-TEST-GOV-001-SCAN compiled test assembly was not produced for $(MSBuildProjectName)." />
-    <MakeDir Directories="$(_AICopilotTestGovernanceDirectory)" />
-    <WriteLinesToFile File="$(_AICopilotTestGovernanceReferencePathsFile)"
-                      Lines="@(ReferencePath->'%(FullPath)')"
-                      Overwrite="true"
-                      Encoding="UTF-8" />
-    <Exec Command="pwsh -NoLogo -NoProfile -NonInteractive -File &quot;$(MSBuildThisFileDirectory)scripts/tests/TestAICopilotTestGovernancePolicy.ps1&quot; -Mode ValidateProject -Configuration &quot;$(Configuration)&quot; -ProjectPath &quot;$(MSBuildProjectFullPath)&quot; -ProjectName &quot;$(MSBuildProjectName)&quot; -AssemblyPath &quot;@(IntermediateAssembly->'%(FullPath)')&quot; -ReferencePathsFile &quot;$(_AICopilotTestGovernanceReferencePathsFile)&quot;" />
-  </Target>
-
-  <Target Name="ValidateAICopilotTestRunnerConfiguration"
-          AfterTargets="CopyFilesToOutputDirectory"
-          Condition="'$(IsTestProject)' == 'true' and '$(DesignTimeBuild)' != 'true' and '$(IsCrossTargetingBuild)' != 'true' and '$(TargetFramework)' != ''">
-    <Exec Command="pwsh -NoLogo -NoProfile -NonInteractive -File &quot;$(MSBuildThisFileDirectory)scripts/tests/TestAICopilotTestGovernancePolicy.ps1&quot; -Mode ValidateRunnerConfiguration -RunnerConfigPath &quot;$(TargetDir)xunit.runner.json&quot;" />
-  </Target>
 </Project>

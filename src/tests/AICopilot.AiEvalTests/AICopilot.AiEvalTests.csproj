@@ -6,6 +6,11 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <AICopilotTestKind>AiEval</AICopilotTestKind>
+    <AICopilotTestRuntime>Pure</AICopilotTestRuntime>
+    <AICopilotTestCadence>PR</AICopilotTestCadence>
+    <AICopilotTestOwner>AiEvaluation</AICopilotTestOwner>
+    <AICopilotRequired>true</AICopilotRequired>
   </PropertyGroup>
 
   <ItemGroup>

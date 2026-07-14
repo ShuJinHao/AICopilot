@@ -6,6 +6,8 @@ This document is the backend-owned frontend integration contract. Frontend code 
 
 For structured chat error chunks, frontend displays `userFacingMessage` first, then `detail`, and only then a code-specific fallback message.
 
+For HTTP `ProblemDetails`, `extensions.code` and `extensions.traceId` are reserved. The backend copies ordinary descriptor extensions first, then overwrites these reserved keys with `ApiProblemDescriptor.Code` and the current `HttpContext.TraceIdentifier`; descriptor extensions cannot spoof either value.
+
 ## Auth Problem Codes
 
 | Code | Meaning |
@@ -21,6 +23,7 @@ For structured chat error chunks, frontend displays `userFacingMessage` first, t
 | `cloud_identity_inactive` | Bound Cloud identity is inactive. |
 | `cloud_identity_unverified` | Cloud identity is not verified. |
 | `external_identity_conflict` | External identity conflicts with an existing binding. |
+| `last_enabled_admin_required` | The requested identity mutation would remove the last enabled administrator; show `userFacingMessage`, keep the authenticated session, and do not retry automatically. |
 
 ## App Problem Codes
 

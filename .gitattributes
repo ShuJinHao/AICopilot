@@ -1,12 +1,10 @@
 /.gitattributes text eol=lf
-/.github/CODEOWNERS text eol=lf
 /.github/workflows/*.yml text eol=lf
 /.github/workflows/*.yaml text eol=lf
 /Directory.Build.targets text eol=lf
 /AICopilot.slnx text eol=lf
 /global.json text eol=lf
 /scripts/tests/*.ps1 text eol=lf
-/scripts/tests/baselines/*.json text eol=lf
 /src/tests/**/*.cs text eol=lf
 /src/tests/**/*.csproj text eol=lf
 /src/tests/AICopilot.AiEvalTests/cases/*.json text eol=lf

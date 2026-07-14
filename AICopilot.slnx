@@ -42,6 +42,13 @@
     <Project Path="src/tests/AICopilot.AiEvalTests/AICopilot.AiEvalTests.csproj" />
     <Project Path="src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj" />
     <Project Path="src/tests/AICopilot.CloudAiReadLiveTests/AICopilot.CloudAiReadLiveTests.csproj" />
+    <Project Path="src/tests/AICopilot.ContractTests/AICopilot.ContractTests.csproj" />
+    <Project Path="src/tests/AICopilot.HttpIntegrationTests/AICopilot.HttpIntegrationTests.csproj" />
+    <Project Path="src/tests/AICopilot.PersistenceTests/AICopilot.PersistenceTests.csproj" />
+    <Project Path="src/tests/AICopilot.SimulationDockerTests/AICopilot.SimulationDockerTests.csproj" />
+    <Project Path="src/tests/AICopilot.SimulationTests/AICopilot.SimulationTests.csproj" />
     <Project Path="src/tests/AICopilot.Testing.McpServer/AICopilot.Testing.McpServer.csproj" />
+    <Project Path="src/tests/AICopilot.UnitTests/AICopilot.UnitTests.csproj" />
+    <Project Path="src/tests/AICopilot.WorkflowTests/AICopilot.WorkflowTests.csproj" />
   </Folder>
 </Solution>

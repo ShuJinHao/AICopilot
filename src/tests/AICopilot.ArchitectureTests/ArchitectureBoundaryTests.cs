@@ -612,6 +612,28 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
+    public void AgentWorkflowFinalContext_ShouldBindCancellationCleanupToIdempotentCompensation()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "Workflows",
+            "AgentWorkflowPipeline.cs"));
+
+        source.Should().Contain(
+            "await using var compensation = new FinalAgentContextCompensation(",
+            "the actual final-agent async-enumeration path must own the compensation scope");
+        source.Should().Contain("compensation.MarkCompleted();");
+        source.Should().Contain("await compensation.RemoveAndCompleteAsync();");
+        source.Should().Contain("Interlocked.CompareExchange(ref completionState, 1, 0)");
+        source.Should().Contain("store.RemoveAsync(sessionId, CancellationToken.None)");
+        source.Should().NotContain("finalAgentContextStore.RemoveAsync(agentContext.SessionId",
+            "final-context removal must not bypass the exactly-once compensation owner");
+    }
+
+    [Fact]
     public void MediatRHosts_ShouldCallUnifiedPipelineRegistrationBeforeServiceModules()
     {
         var hostFiles = new Dictionary<string, string>(StringComparer.Ordinal)

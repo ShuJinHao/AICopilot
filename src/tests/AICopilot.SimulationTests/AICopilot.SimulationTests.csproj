@@ -1,18 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
-    <AICopilotTestKind>CloudReadContract</AICopilotTestKind>
-    <AICopilotTestRuntime>LiveExternal</AICopilotTestRuntime>
+    <AICopilotTestKind>Application</AICopilotTestKind>
+    <AICopilotTestRuntime>Pure</AICopilotTestRuntime>
     <AICopilotTestCadence>Manual</AICopilotTestCadence>
-    <AICopilotTestOwner>CloudContract</AICopilotTestOwner>
+    <AICopilotTestProfile>Simulation</AICopilotTestProfile>
+    <AICopilotTestOwner>CloudReadonlySimulation</AICopilotTestOwner>
     <AICopilotRequired>false</AICopilotRequired>
   </PropertyGroup>
-
   <ItemGroup>
     <PackageReference Include="FluentAssertions" Version="8.8.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
@@ -22,10 +21,13 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
   </ItemGroup>
-
   <ItemGroup>
-    <ProjectReference Include="..\..\infrastructure\AICopilot.Infrastructure\AICopilot.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\services\AICopilot.AiGatewayService\AICopilot.AiGatewayService.csproj" />
     <ProjectReference Include="..\..\services\AICopilot.Services.Contracts\AICopilot.Services.Contracts.csproj" />
   </ItemGroup>
-
+  <ItemGroup>
+    <Using Include="AICopilot.Services.Contracts" />
+    <Using Include="FluentAssertions" />
+    <Using Include="Xunit" />
+  </ItemGroup>
 </Project>

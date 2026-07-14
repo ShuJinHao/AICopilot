@@ -6,6 +6,11 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <AICopilotTestKind>LegacyBackend</AICopilotTestKind>
+    <AICopilotTestRuntime>Aspire</AICopilotTestRuntime>
+    <AICopilotTestCadence>PR</AICopilotTestCadence>
+    <AICopilotTestOwner>BackendMigration</AICopilotTestOwner>
+    <AICopilotRequired>true</AICopilotRequired>
   </PropertyGroup>
 
   <ItemGroup>

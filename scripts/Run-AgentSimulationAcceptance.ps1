@@ -1,14 +1,9 @@
 param(
-    [switch]$SkipDockerAcceptance,
     [string]$Configuration = "Debug"
 )
 
 $ErrorActionPreference = "Stop"
-
-function New-UnicodeString {
-    param([int[]]$CodePoints)
-    return [string]::Concat(@($CodePoints | ForEach-Object { [char]$_ }))
-}
+Set-StrictMode -Version Latest
 
 function Invoke-Step {
     param(
@@ -42,80 +37,185 @@ function Invoke-Step {
     $script:Results.Add("- PASS: $Name") | Out-Null
 }
 
-$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+function Confirm-SimulationTrx {
+    param(
+        [Parameter(Mandatory)] [string]$ProjectName,
+        [Parameter(Mandatory)] [string]$Path,
+        [Parameter(Mandatory)] [int]$ExpectedCount
+    )
+
+    if (-not (Test-Path $Path -PathType Leaf)) {
+        throw "Simulation TRX is missing for ${ProjectName}: $Path"
+    }
+
+    [xml]$trx = Get-Content $Path -Raw
+    $counters = $trx.TestRun.ResultSummary.Counters
+    if ($null -eq $counters) {
+        throw "Simulation TRX counters are missing for ${ProjectName}: $Path"
+    }
+
+    $discovered = [int]$counters.total
+    $executed = [int]$counters.executed
+    $passed = [int]$counters.passed
+    $failed = [int]$counters.failed
+    $skipped = [int]$counters.notExecuted
+    if ($discovered -ne $ExpectedCount -or
+        $executed -ne $ExpectedCount -or
+        $passed -ne $ExpectedCount -or
+        $failed -ne 0 -or
+        $skipped -ne 0) {
+        throw "${ProjectName} reconciliation failed: expected=$ExpectedCount, discovered=$discovered, executed=$executed, passed=$passed, failed=$failed, skipped=$skipped"
+    }
+
+    return [pscustomobject]@{
+        projectName = $ProjectName
+        discovered = $discovered
+        executed = $executed
+        passed = $passed
+        failed = $failed
+        skipped = $skipped
+    }
+}
+
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$evidenceDirectory = Join-Path $repoRoot "artifacts/simulation"
+$resultsDirectory = Join-Path $evidenceDirectory "test-results"
+$reportPath = Join-Path $evidenceDirectory "agent-simulation-acceptance.md"
+$summaryPath = Join-Path $evidenceDirectory "simulation-test-summary.json"
+$Commands = [System.Collections.Generic.List[string]]::new()
+$Results = [System.Collections.Generic.List[string]]::new()
+$startedAt = Get-Date
+$outcome = "Failed"
+$failure = $null
+$pureResult = $null
+$dockerResult = $null
+
+New-Item -ItemType Directory -Force -Path $evidenceDirectory | Out-Null
+Remove-Item $resultsDirectory -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $reportPath, $summaryPath -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force -Path $resultsDirectory | Out-Null
+
 Push-Location $repoRoot
 
 try {
-    $startedAt = Get-Date
-    $reportDirName = New-UnicodeString @(0x8D44, 0x6599)
-    $reportFileName = "A" + (New-UnicodeString @(0x52A9, 0x7406)) + "AgentSimulation" + (New-UnicodeString @(0x79BB, 0x7EBF, 0x9A8C, 0x6536, 0x62A5, 0x544A)) + ".md"
-    $reportPath = Join-Path (Join-Path $repoRoot $reportDirName) $reportFileName
-    $simulationSourceLabel = New-UnicodeString @(0x6A21, 0x62DF, 0x0020, 0x0043, 0x006C, 0x006F, 0x0075, 0x0064, 0x0020, 0x53EA, 0x8BFB, 0x6570, 0x636E)
-    $Commands = [System.Collections.Generic.List[string]]::new()
-    $Results = [System.Collections.Generic.List[string]]::new()
-
-    $changedFiles = @(
-        "scripts/Test-AgentSimulationScope.ps1",
-        "scripts/Run-AgentSimulationAcceptance.ps1",
-        "src/core/AICopilot.Core.AiGateway/Aggregates/Tools/BuiltInToolRegistrations.cs",
-        "src/services/AICopilot.Services.Contracts/Contracts/CloudReadonlyContracts.cs",
-        "src/services/AICopilot.AiGatewayService/AgentTasks/CloudReadonlyAgentTooling.cs",
-        "src/services/AICopilot.AiGatewayService/AgentTasks/CloudReadonlyDataProviders.cs",
-        "src/services/AICopilot.AiGatewayService/AgentTasks/CloudReadonlySimulation.cs",
-        "src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskRuntime.cs",
-        "src/services/AICopilot.AiGatewayService/DependencyInjection.cs",
-        "src/hosts/AICopilot.HttpApi/DependencyInjection.cs",
-        "src/hosts/AICopilot.HttpApi/appsettings.json",
-        "src/hosts/AICopilot.HttpApi/appsettings.Development.json",
-        "src/tests/AICopilot.BackendTests/AICopilotAppFixture.cs",
-        "src/tests/AICopilot.BackendTests/BackendTestCollection.cs",
-        "src/tests/AICopilot.BackendTests/CloudReadonlySimulationTests.cs",
-        "src/tests/AICopilot.BackendTests/AgentSimulationAcceptanceTests.cs",
-        "src/tests/AICopilot.BackendTests/ToolRegistryGovernanceTests.cs"
-    )
-
-    $guardCommand = ".\scripts\Test-AgentSimulationScope.ps1 -ChangedFiles `$changedFiles"
-    $Commands.Add($guardCommand) | Out-Null
-    Invoke-Step "scope guard" {
-        .\scripts\Test-AgentSimulationScope.ps1 -ChangedFiles $changedFiles
-    }
-
-    $buildCommand = "dotnet build src\tests\AICopilot.BackendTests\AICopilot.BackendTests.csproj -c $Configuration"
-    $Commands.Add($buildCommand) | Out-Null
-    Invoke-Step "backend test project build" {
-        dotnet build src\tests\AICopilot.BackendTests\AICopilot.BackendTests.csproj -c $Configuration
-    }
-
-    $unitCommand = "dotnet test src\tests\AICopilot.BackendTests\AICopilot.BackendTests.csproj -c $Configuration --no-build --filter `"Suite=AgentSimulationAcceptance&Runtime!=DockerRequired`""
-    $Commands.Add($unitCommand) | Out-Null
-    Invoke-Step "agent simulation unit tests" {
-        dotnet test src\tests\AICopilot.BackendTests\AICopilot.BackendTests.csproj -c $Configuration --no-build --filter "Suite=AgentSimulationAcceptance&Runtime!=DockerRequired"
-    }
-
-    if (-not $SkipDockerAcceptance) {
-        $dockerCommand = "dotnet test src\tests\AICopilot.BackendTests\AICopilot.BackendTests.csproj -c $Configuration --no-build --filter `"FullyQualifiedName~AgentSimulationAcceptanceTests`""
-        $Commands.Add($dockerCommand) | Out-Null
-        Invoke-Step "agent simulation Docker acceptance" {
-            dotnet test src\tests\AICopilot.BackendTests\AICopilot.BackendTests.csproj -c $Configuration --no-build --filter "FullyQualifiedName~AgentSimulationAcceptanceTests"
+    try {
+        $dockerPreflightCommand = "docker info --format '{{.OSType}}'"
+        $Commands.Add($dockerPreflightCommand) | Out-Null
+        Invoke-Step "Linux Docker preflight" {
+            $dockerOperatingSystem = (& docker info --format '{{.OSType}}').Trim()
+            if ($dockerOperatingSystem -ne "linux") {
+                throw "Simulation Docker acceptance requires a Linux Docker daemon; detected '$dockerOperatingSystem'."
+            }
         }
-    }
-    else {
-        $Results.Add("- SKIP: agent simulation Docker acceptance (-SkipDockerAcceptance was set)") | Out-Null
-    }
 
-    $endedAt = Get-Date
-    $report = @"
+        $pureProject = "src/tests/AICopilot.SimulationTests/AICopilot.SimulationTests.csproj"
+        $dockerProject = "src/tests/AICopilot.SimulationDockerTests/AICopilot.SimulationDockerTests.csproj"
+
+        $pureBuildCommand = "dotnet build $pureProject -c $Configuration"
+        $Commands.Add($pureBuildCommand) | Out-Null
+        Invoke-Step "Simulation pure runner build" {
+            dotnet build $pureProject -c $Configuration
+        }
+
+        $dockerBuildCommand = "dotnet build $dockerProject -c $Configuration"
+        $Commands.Add($dockerBuildCommand) | Out-Null
+        Invoke-Step "Simulation Docker runner build" {
+            dotnet build $dockerProject -c $Configuration
+        }
+
+        $pureTrxPath = Join-Path $resultsDirectory "AICopilot.SimulationTests.trx"
+        $pureTestCommand = "dotnet test $pureProject -c $Configuration --no-build --no-restore --logger trx;LogFileName=AICopilot.SimulationTests.trx --results-directory artifacts/simulation/test-results"
+        $Commands.Add($pureTestCommand) | Out-Null
+        Invoke-Step "Simulation pure acceptance" {
+            dotnet test $pureProject `
+                -c $Configuration `
+                --no-build `
+                --no-restore `
+                --logger "trx;LogFileName=AICopilot.SimulationTests.trx" `
+                --results-directory $resultsDirectory
+        }
+        Invoke-Step "Simulation pure reconciliation (12/12)" {
+            $script:pureResult = Confirm-SimulationTrx `
+                -ProjectName "AICopilot.SimulationTests" `
+                -Path $pureTrxPath `
+                -ExpectedCount 12
+        }
+
+        $dockerTrxPath = Join-Path $resultsDirectory "AICopilot.SimulationDockerTests.trx"
+        $dockerTestCommand = "dotnet test $dockerProject -c $Configuration --no-build --no-restore --logger trx;LogFileName=AICopilot.SimulationDockerTests.trx --results-directory artifacts/simulation/test-results"
+        $Commands.Add($dockerTestCommand) | Out-Null
+        Invoke-Step "Simulation Docker acceptance" {
+            dotnet test $dockerProject `
+                -c $Configuration `
+                --no-build `
+                --no-restore `
+                --logger "trx;LogFileName=AICopilot.SimulationDockerTests.trx" `
+                --results-directory $resultsDirectory
+        }
+        Invoke-Step "Simulation Docker reconciliation (1/1)" {
+            $script:dockerResult = Confirm-SimulationTrx `
+                -ProjectName "AICopilot.SimulationDockerTests" `
+                -Path $dockerTrxPath `
+                -ExpectedCount 1
+        }
+
+        $outcome = "Passed"
+    }
+    catch {
+        $failure = $_
+        $Results.Add("- FAIL: $($_.Exception.Message)") | Out-Null
+    }
+    finally {
+        $endedAt = Get-Date
+        $failureSummary = if ($null -eq $failure) {
+            $null
+        }
+        else {
+            [pscustomobject]@{
+                exceptionType = $failure.Exception.GetType().FullName
+                message = $failure.Exception.Message
+            }
+        }
+        $summary = [pscustomobject]@{
+            generatedAtUtc = [DateTimeOffset]::UtcNow.ToString("O")
+            outcome = $outcome
+            expected = [pscustomobject]@{ pure = 12; docker = 1 }
+            pure = $pureResult
+            docker = $dockerResult
+            failure = $failureSummary
+        }
+        $summary | ConvertTo-Json -Depth 6 | Set-Content $summaryPath -Encoding UTF8
+
+        $pureDiscovered = if ($null -eq $pureResult) { "n/a" } else { $pureResult.discovered }
+        $pureExecuted = if ($null -eq $pureResult) { "n/a" } else { $pureResult.executed }
+        $dockerDiscovered = if ($null -eq $dockerResult) { "n/a" } else { $dockerResult.discovered }
+        $dockerExecuted = if ($null -eq $dockerResult) { "n/a" } else { $dockerResult.executed }
+        $totalFailed = if ($null -eq $pureResult -or $null -eq $dockerResult) {
+            "n/a"
+        }
+        else {
+            [int]$pureResult.failed + [int]$dockerResult.failed
+        }
+        $totalSkipped = if ($null -eq $pureResult -or $null -eq $dockerResult) {
+            "n/a"
+        }
+        else {
+            [int]$pureResult.skipped + [int]$dockerResult.skipped
+        }
+
+        $report = @"
 # A Assistant Agent Runtime Offline Simulation Acceptance Report
 
 - StartedAt: $($startedAt.ToString("O"))
 - EndedAt: $($endedAt.ToString("O"))
-- Scope: AICopilot backend Batch 0-4
+- Outcome: $outcome
+- Scope: AICopilot physical Simulation pure and Docker runners
 - Cloud/Edge touched: No
 - Frontend touched: No
 - Real Cloud access introduced: No
 - Shell capability introduced: No
 - Arbitrary server path write introduced: No
-- Simulation source marker: sourceMode=Simulation, isSimulation=true, sourceLabel=$simulationSourceLabel
+- Simulation source marker: sourceMode=Simulation, isSimulation=true, sourceLabel=Simulated Cloud read-only data
 
 ## Commands
 
@@ -125,6 +225,12 @@ $($Commands | ForEach-Object { "- ``$_``" } | Out-String)
 
 $($Results | Out-String)
 
+## Reconciliation
+
+- Pure runner expected/discovered/executed: 12/$pureDiscovered/$pureExecuted
+- Docker runner expected/discovered/executed: 1/$dockerDiscovered/$dockerExecuted
+- Failed/skipped: $totalFailed/$totalSkipped
+
 ## Notes
 
 - CloudReadonly defaults remain Disabled in appsettings.
@@ -132,9 +238,13 @@ $($Results | Out-String)
 - The Docker acceptance test enables only the AICopilot Tool Registry entry for ``query_cloud_data_readonly`` and runs with ``CloudReadonly__Mode=Simulation``.
 "@
 
-    New-Item -ItemType Directory -Force -Path (Split-Path $reportPath) | Out-Null
-    Set-Content -LiteralPath $reportPath -Value $report -Encoding UTF8
-    Write-Host "Acceptance report written to $reportPath" -ForegroundColor Green
+        Set-Content -LiteralPath $reportPath -Value $report -Encoding UTF8
+        Write-Host "Acceptance evidence written to $evidenceDirectory" -ForegroundColor Green
+    }
+
+    if ($null -ne $failure) {
+        throw $failure
+    }
 }
 finally {
     Pop-Location

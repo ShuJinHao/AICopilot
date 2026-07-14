@@ -5,7 +5,11 @@ namespace AICopilot.HttpApi.Infrastructure;
 
 public static class ApiProblemDetailsFactory
 {
-    public static ProblemDetails Create(int statusCode, ApiProblemDescriptor? problem = null, string? fallbackDetail = null)
+    public static ProblemDetails Create(
+        int statusCode,
+        ApiProblemDescriptor? problem = null,
+        string? fallbackDetail = null,
+        string? traceIdentifier = null)
     {
         var details = new ProblemDetails
         {
@@ -15,20 +19,42 @@ public static class ApiProblemDetailsFactory
             Detail = problem?.Detail ?? fallbackDetail
         };
 
-        if (!string.IsNullOrWhiteSpace(problem?.Code))
-        {
-            details.Extensions["code"] = problem.Code;
-        }
-
         if (problem?.Extensions is not null)
         {
             foreach (var (key, value) in problem.Extensions)
             {
+                if (IsReservedExtensionKey(key))
+                {
+                    continue;
+                }
+
                 details.Extensions[key] = value;
             }
         }
 
+        if (!string.IsNullOrWhiteSpace(problem?.Code))
+        {
+            details.Extensions[ApiProblemExtensionKeys.Code] = problem.Code;
+        }
+
+        if (!string.IsNullOrWhiteSpace(traceIdentifier))
+        {
+            details.Extensions[ApiProblemExtensionKeys.TraceId] = traceIdentifier;
+        }
+
         return details;
+    }
+
+    private static bool IsReservedExtensionKey(string key)
+    {
+        return string.Equals(
+                key,
+                ApiProblemExtensionKeys.Code,
+                StringComparison.OrdinalIgnoreCase)
+            || string.Equals(
+                key,
+                ApiProblemExtensionKeys.TraceId,
+                StringComparison.OrdinalIgnoreCase);
     }
 
     private static string GetTitle(int statusCode)

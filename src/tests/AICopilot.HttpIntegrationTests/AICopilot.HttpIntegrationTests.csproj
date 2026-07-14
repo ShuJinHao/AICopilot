@@ -1,23 +1,20 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
-    <AICopilotTestKind>Architecture</AICopilotTestKind>
-    <AICopilotTestRuntime>Pure</AICopilotTestRuntime>
+    <AICopilotTestKind>HttpIntegration</AICopilotTestKind>
+    <AICopilotTestRuntime>Aspire</AICopilotTestRuntime>
     <AICopilotTestCadence>PR</AICopilotTestCadence>
-    <AICopilotTestOwner>Architecture</AICopilotTestOwner>
+    <AICopilotTestOwner>IdentityHttp</AICopilotTestOwner>
     <AICopilotRequired>true</AICopilotRequired>
   </PropertyGroup>
-
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
-  </ItemGroup>
-
-  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting" Version="13.2.2" />
+    <PackageReference Include="Aspire.Hosting.Testing" Version="13.2.2" />
     <PackageReference Include="FluentAssertions" Version="8.8.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
@@ -25,24 +22,21 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="coverlet.collector" Version="6.0.4">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
   </ItemGroup>
-
   <ItemGroup>
+    <ProjectReference Include="..\..\hosts\AICopilot.AppHost\AICopilot.AppHost.csproj" />
     <ProjectReference Include="..\..\hosts\AICopilot.HttpApi\AICopilot.HttpApi.csproj" />
-    <ProjectReference Include="..\..\core\AICopilot.Core.AiGateway\AICopilot.Core.AiGateway.csproj" />
-    <ProjectReference Include="..\..\core\AICopilot.Core.DataAnalysis\AICopilot.Core.DataAnalysis.csproj" />
-    <ProjectReference Include="..\..\core\AICopilot.Core.McpServer\AICopilot.Core.McpServer.csproj" />
-    <ProjectReference Include="..\..\core\AICopilot.Core.Rag\AICopilot.Core.Rag.csproj" />
+    <ProjectReference Include="..\..\services\AICopilot.Services.Contracts\AICopilot.Services.Contracts.csproj" />
     <ProjectReference Include="..\..\shared\AICopilot.SharedKernel\AICopilot.SharedKernel.csproj" />
   </ItemGroup>
-
   <ItemGroup>
+    <Compile Include="..\AICopilot.BackendTests\AICopilotAppFixture.cs" Link="TestKit\AICopilotAppFixture.cs" />
+    <Compile Include="..\AICopilot.BackendTests\FakeAiProviderHost.cs" Link="TestKit\FakeAiProviderHost.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Aspire.Hosting.ApplicationModel" />
     <Using Include="FluentAssertions" />
+    <Using Include="Microsoft.Extensions.DependencyInjection" />
     <Using Include="Xunit" />
   </ItemGroup>
-
 </Project>

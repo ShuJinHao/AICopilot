@@ -2,6 +2,7 @@ using AICopilot.EntityFrameworkCore;
 using AICopilot.EntityFrameworkCore.AuditLogs;
 using AICopilot.EntityFrameworkCore.Locking;
 using AICopilot.EntityFrameworkCore.Transactions;
+using AICopilot.BackendTests;
 using AICopilot.IdentityService.Authorization;
 using AICopilot.IdentityService.Commands;
 using AICopilot.IdentityService.Queries;
@@ -14,11 +15,9 @@ using Microsoft.Extensions.Configuration;
 using Npgsql;
 using static AICopilot.BackendTests.IdentityPersistenceTestSupport;
 
-namespace AICopilot.BackendTests;
+namespace AICopilot.PersistenceTests;
 
-[Collection(PostgresPersistenceTestCollection.Name)]
-[Trait("Suite", "PersistenceCommit")]
-[Trait("Runtime", "DockerRequired")]
+[Collection(IdentityPersistenceTestCollection.Name)]
 public sealed class IdentityEnabledAdminInvariantTests(PostgresPersistenceFixture fixture)
 {
     [Theory]

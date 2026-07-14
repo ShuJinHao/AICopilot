@@ -65,22 +65,6 @@ public sealed class AgentWorkflowBranchSemanticsTests
     }
 
     [Fact]
-    public async Task RunBranchSafelyAsync_ShouldPropagateCallerCancellation()
-    {
-        using var cancellation = new CancellationTokenSource();
-        cancellation.Cancel();
-
-        var act = () => AgentWorkflowPipeline.RunBranchSafelyAsync(
-            BranchType.Tools,
-            isRequired: true,
-            () => Task.FromCanceled<BranchResult>(cancellation.Token),
-            NullLogger.Instance,
-            cancellation.Token);
-
-        await act.Should().ThrowAsync<OperationCanceledException>();
-    }
-
-    [Fact]
     public void RequiredBranchFailure_ShouldCreateStableSanitizedErrorChunk()
     {
         var failureChunk = AgentWorkflowPipeline.CreateRequiredBranchFailureChunk(

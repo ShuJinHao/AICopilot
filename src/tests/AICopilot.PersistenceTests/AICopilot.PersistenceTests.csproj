@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <AICopilotTestKind>Persistence</AICopilotTestKind>
+    <AICopilotTestRuntime>Postgres</AICopilotTestRuntime>
+    <AICopilotTestCadence>PR</AICopilotTestCadence>
+    <AICopilotTestOwner>IdentityPersistence</AICopilotTestOwner>
+    <AICopilotRequired>true</AICopilotRequired>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="FluentAssertions" Version="8.8.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\hosts\AICopilot.MigrationWorkApp\AICopilot.MigrationWorkApp.csproj" />
+    <ProjectReference Include="..\..\infrastructure\AICopilot.EntityFrameworkCore\AICopilot.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="..\..\services\AICopilot.IdentityService\AICopilot.IdentityService.csproj" />
+    <ProjectReference Include="..\..\services\AICopilot.Services.Contracts\AICopilot.Services.Contracts.csproj" />
+    <ProjectReference Include="..\..\shared\AICopilot.SharedKernel\AICopilot.SharedKernel.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\AICopilot.BackendTests\PostgresPersistenceFixture.cs" Link="TestKit\PostgresPersistenceFixture.cs" />
+    <Compile Include="..\AICopilot.BackendTests\PostgresScratchDatabase.cs" Link="TestKit\PostgresScratchDatabase.cs" />
+    <Compile Include="..\AICopilot.BackendTests\IdentityManagerTestScope.cs" Link="TestKit\IdentityManagerTestScope.cs" />
+    <Compile Include="..\AICopilot.BackendTests\IdentityPersistenceTestSupport.cs" Link="TestKit\IdentityPersistenceTestSupport.cs" />
+    <Compile Include="..\AICopilot.BackendTests\PersistenceCommitFaultInterceptors.cs" Link="TestKit\PersistenceCommitFaultInterceptors.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="AICopilot.Services.Contracts" />
+    <Using Include="FluentAssertions" />
+    <Using Include="Microsoft.Extensions.DependencyInjection" />
+    <Using Include="Xunit" />
+  </ItemGroup>
+</Project>

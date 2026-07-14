@@ -99,7 +99,8 @@ internal static class HttpApiRateLimitingConfiguration
                         new ApiProblemDescriptor(
                             AppProblemCodes.RateLimitExceeded,
                             "请求过于频繁，请稍后再试。",
-                            extensions)),
+                            extensions),
+                        traceIdentifier: context.HttpContext.TraceIdentifier),
                     cancellationToken);
             };
         });

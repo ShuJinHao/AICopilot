@@ -654,54 +654,6 @@ public sealed class IdentityAccessManagementTests
         }
     }
 
-    [Fact]
-    public async Task LastEnabledAdmin_ShouldNotBeDisabled()
-    {
-        await AuthenticateAsAdminAsync();
-
-        var adminProfile = await GetJsonAsync<CurrentUserProfileDto>("/api/identity/me");
-
-        using var disableResponse = await SendJsonRawAsync(HttpMethod.Put, "/api/identity/user/disable", new
-        {
-            userId = adminProfile.UserId
-        });
-
-        disableResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        (await disableResponse.Content.ReadAsStringAsync()).Should().Contain("至少保留 1 个启用状态的管理员");
-
-        var rejectedAuditLogs = await GetJsonAsync<AuditLogListDto>(
-            $"/api/identity/audit-log/list?page=1&pageSize=20&actionGroup=Identity&actionCode=Identity.DisableUser&targetName={Uri.EscapeDataString(adminProfile.UserName)}&result=Rejected");
-        rejectedAuditLogs.Items.Should().Contain(item =>
-            item.ActionCode == "Identity.DisableUser" &&
-            item.TargetName == adminProfile.UserName &&
-            item.Result == "Rejected");
-    }
-
-    [Fact]
-    public async Task LastEnabledAdmin_ShouldNotBeDemoted()
-    {
-        await AuthenticateAsAdminAsync();
-
-        var adminProfile = await GetJsonAsync<CurrentUserProfileDto>("/api/identity/me");
-
-        using var roleResponse = await SendJsonRawAsync(HttpMethod.Put, "/api/identity/user/role", new
-        {
-            userId = adminProfile.UserId,
-            roleName = "User"
-        });
-
-        roleResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        (await roleResponse.Content.ReadAsStringAsync()).Should()
-            .Contain("至少保留 1 个启用状态的管理员");
-
-        var rejectedAuditLogs = await GetJsonAsync<AuditLogListDto>(
-            $"/api/identity/audit-log/list?page=1&pageSize=20&actionGroup=Identity&actionCode=Identity.UpdateUserRole&targetName={Uri.EscapeDataString(adminProfile.UserName)}&result=Rejected");
-        rejectedAuditLogs.Items.Should().Contain(item =>
-            item.ActionCode == "Identity.UpdateUserRole" &&
-            item.TargetName == adminProfile.UserName &&
-            item.Result == "Rejected");
-    }
-
     private async Task AssertForbiddenAsync(string uri)
     {
         using var response = await _fixture.HttpClient.GetAsync(uri);

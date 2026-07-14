@@ -15,7 +15,10 @@ public sealed class UseCaseExceptionHandler(ILogger<UseCaseExceptionHandler> log
             httpContext.Response.ContentType = "application/problem+json";
 
             await httpContext.Response.WriteAsJsonAsync(
-                ApiProblemDetailsFactory.Create(apiProblemException.StatusCode, apiProblemException.Problem),
+                ApiProblemDetailsFactory.Create(
+                    apiProblemException.StatusCode,
+                    apiProblemException.Problem,
+                    traceIdentifier: httpContext.TraceIdentifier),
                 cancellationToken);
 
             return true;
@@ -36,14 +39,16 @@ public sealed class UseCaseExceptionHandler(ILogger<UseCaseExceptionHandler> log
                 "The write may have committed and must be reconciled before retrying.",
                 new Dictionary<string, object?>
                 {
-                    ["traceId"] = httpContext.TraceIdentifier,
                     ["commitId"] = commitOutcomeUnknown.CommitId
                 });
 
             httpContext.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
             httpContext.Response.ContentType = "application/problem+json";
             await httpContext.Response.WriteAsJsonAsync(
-                ApiProblemDetailsFactory.Create(StatusCodes.Status503ServiceUnavailable, persistenceProblem),
+                ApiProblemDetailsFactory.Create(
+                    StatusCodes.Status503ServiceUnavailable,
+                    persistenceProblem,
+                    traceIdentifier: httpContext.TraceIdentifier),
                 cancellationToken);
 
             return true;
@@ -58,17 +63,16 @@ public sealed class UseCaseExceptionHandler(ILogger<UseCaseExceptionHandler> log
 
         var problem = new ApiProblemDescriptor(
             AppProblemCodes.InternalServerError,
-            "Request failed unexpectedly. Contact support with the trace id.",
-            new Dictionary<string, object?>
-            {
-                ["traceId"] = httpContext.TraceIdentifier
-            });
+            "Request failed unexpectedly. Contact support with the trace id.");
 
         httpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
         httpContext.Response.ContentType = "application/problem+json";
 
         await httpContext.Response.WriteAsJsonAsync(
-            ApiProblemDetailsFactory.Create(StatusCodes.Status500InternalServerError, problem),
+            ApiProblemDetailsFactory.Create(
+                StatusCodes.Status500InternalServerError,
+                problem,
+                traceIdentifier: httpContext.TraceIdentifier),
             cancellationToken);
 
         return true;

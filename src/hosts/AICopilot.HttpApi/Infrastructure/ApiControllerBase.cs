@@ -59,13 +59,14 @@ public abstract class ApiControllerBase(ISender sender) : ControllerBase
         }
     }
 
-    private static ProblemDetails CreateProblemDetails(int statusCode, IEnumerable<object>? errors)
+    private ProblemDetails CreateProblemDetails(int statusCode, IEnumerable<object>? errors)
     {
         var problem = errors?.OfType<ApiProblemDescriptor>().FirstOrDefault();
         return ApiProblemDetailsFactory.Create(
             statusCode,
             problem,
             errors?.Select(error => error?.ToString())
-                .FirstOrDefault(message => !string.IsNullOrWhiteSpace(message)));
+                .FirstOrDefault(message => !string.IsNullOrWhiteSpace(message)),
+            HttpContext.TraceIdentifier);
     }
 }

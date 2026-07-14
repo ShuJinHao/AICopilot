@@ -4,8 +4,9 @@
 
 - 工作区总规则：`../docs/总规则.md`
 - AI 业务规则：`资料/AICopilot业务规则.md`
-- 改动复盘：`docs/改动复盘与规则沉淀.md`
-- 历史核心记录：`../docs/历史核心记录.md`
+- 当前任务相关的专题契约、源码和测试。
+
+`docs/改动复盘与规则沉淀.md`、`../docs/历史核心记录.md`和旧计划默认不全文读取。只在修复历史回归、修改已冻结链路、当前实现与契约冲突、测试失败无法从源码/契约定位、同类问题曾发生或用户明确要求追溯时，按模块名、Rule ID、错误码或关键类型定向检索；历史记录不得代替当前正式规则。
 
 ## Positioning
 
@@ -116,24 +117,21 @@ Cloud-AICopilot OIDC 身份对齐的长期结论见 `../docs/历史核心记录.
 - RAG 的应用层 hash 预查不是并发幂等保证；`AI-SEC-050` 完成前不得宣称同 KB/同文件并发上传已去重。治理必须先盘点既有重复数据，再以数据库唯一约束、冲突后的既有 Document 语义和真实 PostgreSQL 并发测试闭环，失败竞争者仍须走 file journal 安全回滚。
 - “至少一个 enabled Admin”是跨 Identity 命令的不变量。当前 `DisableUser`、`UpdateUserRole` 和 migration seed 必须在唯一 Identity transaction 内先取得固定全局 PostgreSQL transaction advisory lock，再读取用户、角色和 enabled Admin；execution-strategy 每次 retry 必须重新加锁并重读。当前生产树没有 DeleteUser 入口；未来新增删除、直接角色移除或其它减少可用管理员数量的路径，必须同时接入该边界、编译型架构 Analyzer 和真实 PostgreSQL 竞争测试，禁止只加应用层 count 或制造空壳兼容 API。
 - enabled Admin 的“数量存在”与“具备恢复治理能力”是两个不变量。Admin 角色的最小恢复权限基线由 `AI-SEC-052` 单独治理；不得用 AI-SEC-051 的人数绿测证明 Admin 权限集合仍可恢复。
+- HTTP `ProblemDetails.extensions` 中的 `code` 与 `traceId` 是大小写不敏感的保留键：descriptor extensions 中所有大小写变体必须在复制时丢弃，再由 `ApiProblemDescriptor.Code` 和当前 `HttpContext.TraceIdentifier` 以唯一 canonical `code`/`traceId` 写入；descriptor、异常或其它调用方不得覆盖、伪造或注入歧义键。
 
 ## Test Architecture Governance
 
-- 三项目测试架构专题入口是 `../docs/三项目测试架构治理总计划.md`。AICopilot 的仓内硬门禁入口固定为 `scripts/tests/TestAICopilotTestGovernancePolicy.ps1`，行为负例为 `scripts/tests/TestAICopilotTestGovernanceBehavior.ps1`；不得新增第二套基线、runner、runsettings 或 required workflow 绕过该入口。
-- `AICopilot.BackendTests`、`AICopilot.ArchitectureTests`、`AICopilot.AiEvalTests`、`AICopilot.CloudAiReadLiveTests` 是 Phase 0 冻结旧桶。不得继续向其中新增测试声明、源文件或历史 `Phase/Batch/Suite` 主分类；迁移必须通过有期限 verified-migration 指向 `Unit/Aggregate/Application/Workflow/Contract/Conformance/Persistence/HttpIntegration/EndToEnd/Deployment/GoldenEval` 等目标项目。
-- `AICopilot.Testing.McpServer` 是 Integration support host，不是测试项目；不得添加 `IsTestProject`、测试框架包或 Fact/Theory。新增 support host 也必须进入显式 allowlist，不能藏在 `src/tests` 下逃避 discovery。
-- 每个测试项目必须直接、无条件声明 `IsTestProject=true`，进入 `AICopilot.slnx`、统一 `src/tests/xunit.runner.json` 和 Release discovery；新增隐藏 xUnit/NUnit/MSTest/TUnit/Microsoft Testing Platform 项目、未审 SDK/项目、间接 ProjectReference、局部 runner、`.runsettings`、`NuGet.config`/`.npmrc`、嵌套 `Directory.Build.props/targets` 或条件式测试身份必须让构建失败。MSBuild 标识符按大小写不敏感治理，不得用混合大小写或 dot-directory 规避门禁。
-- Phase 0 资产图固定为 32 个 csproj、32 个 solution project、2 个 `Directory.Build` 文件、9 个 workflow、4 个 xUnit 项目与唯一 support host；Vitest 31 文件/184 条、deployment behavior 33 场景、package lock、runner/config 和 Playwright 46 个 runner case 均受精确冻结。资产迁移必须显式更新 baseline/policy 并审阅，不得通过删测试、改 npm script、改 solution/workflow 或替换 runner 换绿。所有原始字节 SHA 资产必须由 `.gitattributes` 固定 LF。
+- 三项目测试架构专题入口是 `../docs/三项目测试架构治理总计划.md`。AICopilot 测试资产身份只来自项目元数据，测试清单只负责真实发现 runner，CI 只依赖实际执行结果对账。
+- 新增测试必须进入 `Unit/Aggregate/Application/Workflow/Contract/Conformance/Persistence/HttpIntegration/EndToEnd/Deployment/GoldenEval` 等物理项目，直接声明 `IsTestProject` 与 kind/runtime/cadence/owner/required 元数据并进入 `AICopilot.slnx`。`BackendTests` 是待迁空的混合旧桶，不得再承接新责任；不得使用 `Phase/Batch/Suite` filter 充当物理分层。
+- `AICopilot.Testing.McpServer` 是唯一固定 allowlist 中的 Integration support host，不是测试项目；必须直接声明 `IsTestProject=false`，不得引用 test SDK/framework package 或声明 Fact/Theory。其它路径不能靠自声明 Support 藏在 `src/tests` 下逃避 discovery；新增 support host 必须先修改固定 allowlist 和行为负例。
+- Required lane 必须动态发现所有 required runner，逐项产生 TRX，并要求每个 runner `discovered>0`，再对账 `discovered=executed`、`failed=0`、`skipped=0`；缺 Docker/Aspire/Browser 要在 preflight 失败，禁止 Skip、`continue-on-error`、硬编码 case 数或仅跑 filtered subset 换绿。
 - `currentSessionId` 可能只来自 `sessionStorage`，只能表示待解析的持久化候选，不能作为 Chat、Plan、Upload 或其它服务端动作的授权目标；动作必须使用已存在于当前 session list 且已完成历史/审批/任务激活的 resolved session，并在 UI 和 store action 两层复核。进入或重新进入 ChatView 时必须在子组件渲染前同步撤销旧动作权限。初始 `null -> A` 水合与 `A -> A` 刷新不得清空用户已输入的草稿、模式或高级选择；刷新失败必须恢复原 active/raw 会话并保留 composer，只有已解析会话 `A -> B` / `A -> null` 才执行 reset。会话激活、流、任务、上传、预览、下载、在岗声明、轮询、历史分页或删除在途时，选择/新建/删除及 SPA 离开 Chat 必须由同一 store+router 临界区 fail-closed；DELETE ACK-unknown 只能在 session list 确认目标仍存在后恢复，禁止旧 A 响应污染 B。
 - 会话、任务、工作区、产物和审批均是带归属的权威投影：只允许已加载 roster/current task 中的 ID，下载必须从当前工作区解析 canonical metadata；task/workspace/approval 任一步读取失败必须原子恢复上一代可信投影。审批投影未知时允许编辑草稿但禁止 Chat/Plan/审批/任务/最终输出 mutation；只有同一会话/任务的权威刷新成功才能解除门禁。DELETE 超时或断链属于 ACK-unknown，必须先用 session list 对账，无法对账时保持 resolved authority 为空，禁止假定删除未发生并恢复旧会话。
-- Required lane 的 Skip 必须为 0。缺 Docker/Aspire/Browser 时应在调度或 preflight 阶段失败，不得在测试运行后 Skip；AICopilot PR required job 必须全量运行 Architecture、Backend、legacy deterministic Eval、前端 Unit/build 和 deployment behavior，并保持 25 分钟 hard timeout，不得用 Phase/Batch filter 或 `continue-on-error` 换绿灯。
 - Required workflow 中任何经 `tee` 保存证据的 Shell 测试必须显式使用 `set -euo pipefail` 并把 stderr 合并进证据流；不得让 `tee` 的成功码覆盖左侧测试失败。最终 reconcile 是第二道对账，不能替代测试 step 自身的正确失败传播。
-- 既有 `aicopilot-simulation-release-candidate.yml` 仍会在 PR 重复执行 Backend/Web，且保留 Phase/Batch filter；这是 `AI-TEST-003` 的 P0 迁移债务。在远端 required-context 盘点、Simulation 分类迁移和旧 job 退役前，不得宣称三项目测试治理或 25 分钟目标已整体完成。
+- `aicopilot-simulation-release-candidate.yml` 只能作为 Manual-only 完整非生产 Simulation acceptance：使用固定 Linux runner，先以 `docker info` fail-fast，再整项目执行 `AICopilot.SimulationTests` pure runner 与 `AICopilot.SimulationDockerTests` 真实 Docker runner，二者均不得 Skip；不得在 PR 重复 Backend/Web/required suite，不得用 `--filter`/Phase/Batch/Suite/类名或静态 changed-files 清单选测。两个 runner 必须分别产生 TRX 并对账 12/1，报告、JSON 摘要和 TRX 只能写入已 ignore 的 `artifacts/simulation/`，workflow 必须以 `always()` 上传 evidence，不得生成独立文档流水。
 - `CloudAiReadLiveTests` 只允许显式 Manual/Release 的非生产真实契约执行，缺环境必须失败；不得纳入普通 PR，也不得以 Stub/Simulation 代替真实 Cloud provider。
 - 当前 `AiEvalTests` 的 6 个 JSON case 只构成 legacy eval continuity，其中自证输入的 approval/prompt-injection case 不能宣称为生产工作流 Golden。只有接入真实生产 formatter/policy/workflow、版本化期望输出并建立审阅更新流程后，才能升级为 `GoldenEval` hard gate。
-- Phase 0 的 ArchitectureTests 仍包含源码字符串和 Regex 断言，只能称为冻结的动态/词法门禁，不能冒充 Roslyn 编译语义。跨层引用、循环依赖、直接 DbContext/SQL、绕聚合根、插件 runtime 越界和 Cloud-readonly 写边界必须在 `AICopilot.Architecture.Analyzers` 中以 error diagnostic 实现，并由独立 AnalyzerTests 提供正反例。
-- test baseline 同时保护声明、Fact/Theory 类型、Attribute 参数、InlineData payload、MemberData 来源、继承展开、全部 traits、runner case count/digest 和冻结源文件清单。基线只能显式生成并人工审阅；删除、case 减少或迁移必须有 owner、原因、目标项目、RegressionId、批准人和最多 30 天到期日。
-- 重复代码检查是独立 CodeQuality gate：生产代码、测试 fixture、测试 case 分开建立 baseline/ratchet；PR 不得新增 exact clone 或扩大既有 clone。扫描结果不得自动强行合并语义不同的 Agent、RAG、DataAnalysis、MCP 或持久化实现。
+- 当前 ArchitectureTests 仍含动态/词法检查，只能作为过渡 owner，不能冒充 Roslyn 编译语义。后续 Analyzer 波次必须使用 `Microsoft.CodeAnalysis.CSharp 5.6.0`落地真实 diagnostic + AnalyzerTests；本波不得创建空 Analyzer 项目。
 
 ## Unified Agent Workflow
 

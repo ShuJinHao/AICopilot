@@ -250,7 +250,13 @@ internal static class HttpApiAuthenticationConfiguration
                     context.HttpContext.Items[AuthFailureExtensionsKey] as IReadOnlyDictionary<string, object?>);
 
                 await context.Response.WriteAsJsonAsync(
-                    ApiProblemDetailsFactory.Create(StatusCodes.Status401Unauthorized, problem));
+                    ApiProblemDetailsFactory.Create(
+                        StatusCodes.Status401Unauthorized,
+                        problem,
+                        traceIdentifier: context.HttpContext.TraceIdentifier),
+                    options: null,
+                    contentType: "application/problem+json",
+                    cancellationToken: context.HttpContext.RequestAborted);
             }
         };
     }

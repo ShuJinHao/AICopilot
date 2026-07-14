@@ -1,11 +1,6 @@
-name: AICopilot Simulation Release Candidate
+name: AICopilot Manual Simulation Release Candidate
 
 on:
-  pull_request:
-    branches:
-      - main
-      - 'codex/**'
-      - 'integration/**'
   workflow_dispatch:
     inputs:
       base_ref:
@@ -14,42 +9,22 @@ on:
         default: ''
         type: string
 
+permissions:
+  contents: read
+
 jobs:
-  backend-full-tests:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: 10.0.x
-
-      - name: Enforce incremental deployment policy
-        shell: pwsh
-        run: ./deploy/enterprise-ai/tests/TestDeploymentPolicy.ps1
-
-      - name: Architecture boundary test suite
-        run: dotnet test src/tests/AICopilot.ArchitectureTests/AICopilot.ArchitectureTests.csproj --logger "console;verbosity=minimal"
-
-      - name: Backend full test suite
-        run: dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --logger "console;verbosity=minimal"
-
-  simulation-rc:
-    runs-on: windows-latest
+  simulation-manual:
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 0
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: 10.0.x
 
@@ -58,7 +33,7 @@ jobs:
         run: ./deploy/enterprise-ai/tests/TestDeploymentPolicy.ps1
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 22
           cache: npm
@@ -68,14 +43,6 @@ jobs:
         working-directory: src/vues/AICopilot.Web
         run: npm ci
 
-      - name: Frontend build
-        working-directory: src/vues/AICopilot.Web
-        run: npm run build
-
-      - name: Frontend unit tests
-        working-directory: src/vues/AICopilot.Web
-        run: npm run test:unit
-
       - name: Frontend smoke tests
         working-directory: src/vues/AICopilot.Web
         run: npm run test:smoke
@@ -84,143 +51,68 @@ jobs:
         working-directory: src/vues/AICopilot.Web
         run: npm audit --audit-level=high
 
-      - name: Backend build
-        run: dotnet build src/hosts/AICopilot.HttpApi/AICopilot.HttpApi.csproj
+      - name: Require Linux Docker runtime
+        run: docker info
 
-      - name: Backend test project build
-        run: dotnet build src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj
-
-      - name: Detect Docker
-        id: docker
+      - name: Full deterministic Simulation acceptance
         shell: pwsh
-        run: |
-          $dockerAvailable = $false
-          $dockerServerOs = ""
-          if (Get-Command docker -ErrorAction SilentlyContinue) {
-            $dockerInfoJob = Start-Job -ScriptBlock {
-              docker info --format '{{.OSType}}' 2>$null
-              if ($LASTEXITCODE -ne 0) {
-                exit $LASTEXITCODE
-              }
-            }
-            if (Wait-Job $dockerInfoJob -Timeout 20) {
-              $dockerServerOs = ((Receive-Job $dockerInfoJob | Select-Object -Last 1) ?? "").Trim().ToLowerInvariant()
-              $dockerAvailable = $dockerServerOs -eq "linux"
-            }
-            else {
-              Stop-Job $dockerInfoJob -ErrorAction SilentlyContinue
-              Write-Host "docker info did not finish within 20 seconds."
-            }
-            Remove-Job $dockerInfoJob -Force -ErrorAction SilentlyContinue
-          }
+        run: ./scripts/Run-AgentSimulationAcceptance.ps1 -Configuration Release
 
-          "available=$($dockerAvailable.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          if ($dockerAvailable) {
-            Write-Host "Linux Docker is available; Docker/Postgres-backed backend suites will run."
-          }
-          else {
-            Write-Host "Linux Docker is unavailable; Docker/Postgres-backed backend suites will be skipped. Detected OSType='$dockerServerOs'."
-          }
-
-      - name: Backend Simulation suites
-        if: steps.docker.outputs.available == 'true'
-        shell: pwsh
-        run: |
-          dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "Suite=AgentSimulationAcceptance"
-          dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "Suite=Batch5ApprovalHardening"
-          dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "Suite=Batch6SecretProtection"
-          dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "Suite=Batch7ReportArtifacts"
-          dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "Suite=Batch8ArtifactVersioning"
-          dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "Suite=Batch9McpToolGovernance"
-          dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "Suite=Batch10RunQueueOps"
-
-      - name: Backend Simulation suites skipped
-        if: steps.docker.outputs.available != 'true'
-        run: Write-Host "Linux Docker is unavailable; skipped Docker/Postgres-backed backend simulation suites."
-
-      - name: Acceptance with Docker-aware skip
-        shell: pwsh
-        env:
-          DOCKER_AVAILABLE: ${{ steps.docker.outputs.available }}
-        run: |
-          if ($env:DOCKER_AVAILABLE -eq 'true') {
-            .\scripts\Run-AgentSimulationAcceptance.ps1
-          }
-          else {
-            Write-Host "Linux Docker is unavailable; skipping Docker-required acceptance path."
-            .\scripts\Run-AgentSimulationAcceptance.ps1 -SkipDockerAcceptance
-          }
+      - name: Upload Simulation acceptance evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: aicopilot-simulation-acceptance-${{ github.run_id }}
+          path: |
+            artifacts/simulation/agent-simulation-acceptance.md
+            artifacts/simulation/simulation-test-summary.json
+            artifacts/simulation/test-results/*.trx
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Resolve comparison base
         id: comparison
         shell: pwsh
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           DISPATCH_BASE_REF: ${{ inputs.base_ref }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           $ErrorActionPreference = 'Stop'
 
-          if ($env:EVENT_NAME -eq 'pull_request') {
-            if ($env:PR_BASE_SHA -notmatch '^[0-9a-fA-F]{40}$') {
-              throw 'Pull-request base SHA is missing or invalid.'
-            }
-
-            $baseSha = $env:PR_BASE_SHA.ToLowerInvariant()
-            git cat-file -e "$baseSha^{commit}" 2>$null
-            if ($LASTEXITCODE -ne 0) {
-              git fetch --no-tags --depth=1 origin $baseSha
-              if ($LASTEXITCODE -ne 0) {
-                throw "Unable to fetch pull-request base SHA $baseSha."
-              }
-            }
-          }
-          elseif ($env:EVENT_NAME -eq 'workflow_dispatch') {
-            $baseRef = if ([string]::IsNullOrWhiteSpace($env:DISPATCH_BASE_REF)) {
-              $env:DEFAULT_BRANCH
-            }
-            else {
-              $env:DISPATCH_BASE_REF.Trim()
-            }
-
-            if ([string]::IsNullOrWhiteSpace($baseRef) -or
-                $baseRef.Length -gt 255 -or
-                $baseRef -notmatch '^[A-Za-z0-9][A-Za-z0-9._/-]*$' -or
-                $baseRef.Contains('..') -or
-                $baseRef.Contains('//') -or
-                $baseRef.Contains('@{') -or
-                $baseRef.EndsWith('/') -or
-                $baseRef.EndsWith('.') -or
-                $baseRef.EndsWith('.lock', [StringComparison]::OrdinalIgnoreCase)) {
-              throw 'Manual base_ref must be a valid repository branch name.'
-            }
-
-            git check-ref-format --branch $baseRef *> $null
-            if ($LASTEXITCODE -ne 0) {
-              throw 'Manual base_ref failed Git branch validation.'
-            }
-
-            $remoteRef = "refs/remotes/origin/$baseRef"
-            $refspec = "+refs/heads/${baseRef}:$remoteRef"
-            git fetch --no-tags --depth=1 origin $refspec
-            if ($LASTEXITCODE -ne 0) {
-              throw "Unable to fetch the validated comparison branch '$baseRef'."
-            }
-
-            $baseSha = (git rev-parse --verify "$remoteRef^{commit}").Trim().ToLowerInvariant()
+          $baseRef = if ([string]::IsNullOrWhiteSpace($env:DISPATCH_BASE_REF)) {
+            $env:DEFAULT_BRANCH
           }
           else {
-            throw "Unsupported workflow event '$($env:EVENT_NAME)'."
+            $env:DISPATCH_BASE_REF.Trim()
           }
 
+          if ([string]::IsNullOrWhiteSpace($baseRef) -or
+              $baseRef.Length -gt 255 -or
+              $baseRef -notmatch '^[A-Za-z0-9][A-Za-z0-9._/-]*$' -or
+              $baseRef.Contains('..') -or
+              $baseRef.Contains('//') -or
+              $baseRef.Contains('@{') -or
+              $baseRef.EndsWith('/') -or
+              $baseRef.EndsWith('.') -or
+              $baseRef.EndsWith('.lock', [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Manual base_ref must be a valid repository branch name.'
+          }
+
+          git check-ref-format --branch $baseRef *> $null
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Manual base_ref failed Git branch validation.'
+          }
+
+          $remoteRef = "refs/remotes/origin/$baseRef"
+          $refspec = "+refs/heads/${baseRef}:$remoteRef"
+          git fetch --no-tags --depth=1 origin $refspec
+          if ($LASTEXITCODE -ne 0) {
+            throw "Unable to fetch the validated comparison branch '$baseRef'."
+          }
+
+          $baseSha = (git rev-parse --verify "$remoteRef^{commit}").Trim().ToLowerInvariant()
           if ($baseSha -notmatch '^[0-9a-f]{40}$') {
             throw 'Resolved comparison base is not a commit SHA.'
-          }
-
-          git cat-file -e "$baseSha^{commit}"
-          if ($LASTEXITCODE -ne 0) {
-            throw 'Resolved comparison base commit is unavailable.'
           }
 
           "base_sha=$baseSha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
@@ -229,11 +121,11 @@ jobs:
         shell: pwsh
         env:
           BASE_SHA: ${{ steps.comparison.outputs.base_sha }}
-        run: .\scripts\Test-AgentWorkbenchReleaseCandidateScope.ps1 -BaseRef $env:BASE_SHA
+        run: ./scripts/Test-AgentWorkbenchReleaseCandidateScope.ps1 -BaseRef $env:BASE_SHA
 
       - name: Encoding check
         shell: pwsh
-        run: .\scripts\Test-TextEncoding.ps1
+        run: ./scripts/Test-TextEncoding.ps1
 
       - name: Diff whitespace check
         shell: pwsh

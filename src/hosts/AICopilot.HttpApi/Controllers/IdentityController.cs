@@ -46,7 +46,8 @@ public class IdentityController(
                     StatusCodes.Status503ServiceUnavailable,
                     new ApiProblemDescriptor(
                         AuthProblemCodes.CloudOidcNotConfigured,
-                        "Cloud OIDC 登录尚未配置。")));
+                        "Cloud OIDC 登录尚未配置。"),
+                    traceIdentifier: HttpContext.TraceIdentifier));
         }
 
         var properties = new AuthenticationProperties
@@ -74,7 +75,8 @@ public class IdentityController(
                     StatusCodes.Status401Unauthorized,
                     new ApiProblemDescriptor(
                         AuthProblemCodes.CloudOidcInvalidPrincipal,
-                        "Cloud 登录态无效或已过期，请重新从 Cloud 登录。")));
+                        "Cloud 登录态无效或已过期，请重新从 Cloud 登录。"),
+                    traceIdentifier: HttpContext.TraceIdentifier));
         }
 
         if (!CloudOidcPrincipalMapper.TryMap(
@@ -86,7 +88,10 @@ public class IdentityController(
             await HttpContext.SignOutAsync(CloudOidcAuthenticationDefaults.ExternalCookieScheme);
             return StatusCode(
                 StatusCodes.Status401Unauthorized,
-                ApiProblemDetailsFactory.Create(StatusCodes.Status401Unauthorized, problem));
+                ApiProblemDetailsFactory.Create(
+                    StatusCodes.Status401Unauthorized,
+                    problem,
+                    traceIdentifier: HttpContext.TraceIdentifier));
         }
 
         try

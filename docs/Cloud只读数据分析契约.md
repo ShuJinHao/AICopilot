@@ -101,12 +101,17 @@ Text-to-SQL prompt 只能暴露 `CloudReadOnlyGovernedSchema` 批准的表名、
 - 生产基础配置、compose 和部署模板不得携带 `MockOnly=true` 或默认 Simulation 开关。
 - Real Cloud 查询失败、为空或未配置时，必须返回 Cloud AiRead / CloudReadOnly 错误或空态，不能降级为 Simulation。
 - 任何产物、报告、artifact 或导出里出现 Simulation 数据时，必须带明确 `sourceMode=Simulation`、`isSimulation=true` 或等价来源标记。
+- Simulation acceptance 只使用 Manual-only 固定 Linux runner：先以 `docker info` 验证 Linux Docker daemon，再分别整项目执行 `AICopilot.SimulationTests` 和 `AICopilot.SimulationDockerTests`。缺 Docker 必须失败，不得 Skip，不得用 `--filter`、Suite/Phase/Batch/类名或静态 changed-files 清单缩小 acceptance。
+- Simulation pure/Docker runner 必须分别产生 TRX 并对账 12/1；报告、JSON 摘要和 TRX 只能写入已 ignore 的 `artifacts/simulation/`，Manual workflow 必须以 `always()` 上传该 evidence，不得写入 `docs/`、`资料/` 或新增单任务验收文档。
 
 ## 9. 验收命令
 
 ```bash
 dotnet test src/tests/AICopilot.ArchitectureTests/AICopilot.ArchitectureTests.csproj --filter "CloudReadOnly|TextToSql|CloudWrite" --no-restore
-dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "CloudAiReadClientTests|CloudReadonlySimulationTests|CloudReadOnlyTextToSqlFallbackRunnerTests|TextToSqlReadOnlyTests|AiEvalBehaviorGuardrailTests|PromptGovernanceTests|SemanticAnalysisRunnerTests|DeviceLogFollowUpIntentRewriterTests" --no-restore
+dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "CloudAiReadClientTests|CloudReadOnlyTextToSqlFallbackRunnerTests|TextToSqlReadOnlyTests|AiEvalBehaviorGuardrailTests|PromptGovernanceTests|SemanticAnalysisRunnerTests|DeviceLogFollowUpIntentRewriterTests" --no-restore
+dotnet test src/tests/AICopilot.SimulationTests/AICopilot.SimulationTests.csproj -c Release --no-build --no-restore
+docker info --format '{{.OSType}}'
+dotnet test src/tests/AICopilot.SimulationDockerTests/AICopilot.SimulationDockerTests.csproj -c Release --no-build --no-restore
 dotnet test src/tests/AICopilot.CloudAiReadLiveTests/AICopilot.CloudAiReadLiveTests.csproj -c Release --no-build --no-restore
 rg -n "CloudAiRead|CloudReadOnly|production-records|PreviousSqlForRepair|CloudReadOnlyGovernedSchema|Simulation|MockOnly" src deploy docs
 ```

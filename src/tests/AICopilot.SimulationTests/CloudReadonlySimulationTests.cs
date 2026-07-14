@@ -4,16 +4,15 @@ using AICopilot.AiGatewayService.Runtime;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 
-namespace AICopilot.BackendTests;
+namespace AICopilot.SimulationTests;
 
-[Trait("Suite", "AgentSimulationAcceptance")]
 public sealed class CloudReadonlySimulationTests
 {
     [Fact]
     public void DevelopmentConfiguration_ShouldKeepCloudReadonlyDisabledByDefault()
     {
         var httpApiRoot = Path.Combine(
-            RepositoryTestSupport.Root,
+            FindRepositoryRoot(),
             "src",
             "hosts",
             "AICopilot.HttpApi");
@@ -245,6 +244,23 @@ public sealed class CloudReadonlySimulationTests
         return new SimulationCloudReadonlyDataProvider(
             new CloudReadonlySimulationDataSet(),
             Options.Create(CreateSimulationOptions()));
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "AICopilot.slnx")))
+            {
+                return directory.FullName;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new DirectoryNotFoundException(
+            "Could not locate AICopilot.slnx from the Simulation test output directory.");
     }
 
     private static CloudReadonlyOptions CreateSimulationOptions()

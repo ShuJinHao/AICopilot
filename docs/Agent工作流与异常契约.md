@@ -30,6 +30,8 @@
 - 分支是否 `Required` 必须由本次 routing intents 与对应 executor 的同一套相关性判定得出，不能把某类分支全局硬编码成永远必需或永远可选。路由判定与实际执行过滤条件必须保持一致。
 - `Required + Failed` 必须在 fan-in 后、最终上下文聚合前停止最终回答，返回稳定且脱敏的 Chat Error chunk；`Required + Empty` 是合法完成，可以继续合流；可选分支失败不得伪造成成功载荷，也不得进入最终上下文。
 - `Skipped`、`Empty`、`Failed` 的载荷一律不得进入 `ContextAggregatorExecutor`；只有 `Succeeded` 可以参与最终回答。调用方取消必须继续向上传播，不能转换成业务空结果或普通失败。
+- Final Agent 的持久上下文必须由运行路径内唯一幂等 compensation owner 管理：正常完成只 Set/删除一次，caller cancellation 或业务异常退出时使用不受 caller token 取消的 cleanup token 最多删除一次，不得重放 Agent/Tool 副作用。
+- 主异常优先级高于 cleanup 失败：caller cancellation 必须仍向上传播为 `OperationCanceledException`，业务异常也不得被 cleanup 异常覆盖；cleanup 失败只记录 session id 和 exception type，禁止写 raw exception/message。
 - 以上状态治理不得改成串行工作流。`Task.WhenAll`、`AgentWorkflowSink` 和四分支 fan-out/fan-in 仍是唯一主干；PlanDraft 的能力发现仍只生成草案，能力缺失或发现失败不得越权执行真实 Tool、MCP、Cloud 查询或 Worker。
 
 Cloud 只读 Agent 当前正式能力限定为：
@@ -63,7 +65,8 @@ Cloud 只读 Agent 当前正式能力限定为：
 
 后端未知异常必须走稳定 ProblemDetails：
 
-- 必须返回稳定 `code`、`detail`、`userFacingMessage` 和 `correlationId`。
+- 必须返回稳定 `code`、`detail`、`userFacingMessage` 和 `traceId`。
+- `code` 与 `traceId` 是大小写不敏感的保留 extension key；descriptor extensions 中的 `Code`/`TRACEID` 等任意大小写变体必须在复制时丢弃，再分别由 `ApiProblemDescriptor.Code` 与当前 `HttpContext.TraceIdentifier` 以唯一 canonical `code`/`traceId` 写入，调用方不能通过 extensions 注入伪值或歧义键。
 - 用户可见文案必须是安全摘要，不能包含 raw exception message、SQL、prompt、token、endpoint、连接串、密码、API key 或内部 provider 细节。
 - `UseCaseExceptionHandler` catch-all 不得把原始 exception 对象交给 logger 形成敏感日志。
 - 新增、删除或重命名错误码时，必须同步更新 `docs/frontend-integration-contract-package-2026-05-17.md` 并运行错误码目录测试。

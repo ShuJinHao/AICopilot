@@ -71,7 +71,7 @@ public sealed class UpdateUserRoleCommandHandler(
                     AuditResults.Rejected,
                     $"拒绝调整用户角色：{user.UserName}，原因是系统至少需要保留 1 个启用中的管理员。",
                     ["roleName"]);
-                return Result.Invalid("至少保留 1 个启用状态的管理员，不能移除最后一个管理员账号的管理员角色。");
+                return Result.Invalid(IdentityProblemDescriptors.LastEnabledAdminRequired());
             }
 
             if (rolesToRemove.Length > 0)

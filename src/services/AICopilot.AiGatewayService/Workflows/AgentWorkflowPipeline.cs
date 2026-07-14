@@ -131,40 +131,32 @@ public class AgentWorkflowPipeline(
         StringBuilder assistantText,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        var completed = false;
-        try
+        await using var compensation = new FinalAgentContextCompensation(
+            finalAgentContextStore,
+            agentContext.SessionId,
+            logger);
+        var finalMetadataChunk = AgentStreamRuntime.CreateMetadataChunk(
+            agentContext.ExecutionMetadata,
+            FinalAgentBuildExecutor.ExecutorId);
+        if (finalMetadataChunk is not null)
         {
-            var finalMetadataChunk = AgentStreamRuntime.CreateMetadataChunk(
-                agentContext.ExecutionMetadata,
-                FinalAgentBuildExecutor.ExecutorId);
-            if (finalMetadataChunk is not null)
-            {
-                yield return finalMetadataChunk;
-            }
-
-            await foreach (var chunk in agentRun.ExecuteAsync(agentContext, session, assistantText, ct))
-            {
-                yield return chunk;
-            }
-
-            if (agentContext.FunctionApprovalRequestContents.Count != 0)
-            {
-                var storedContext = await finalAgentContextSerializer.CreateSnapshotAsync(agentContext, ct);
-                await finalAgentContextStore.SetAsync(agentContext.SessionId, storedContext, ct);
-            }
-            else
-            {
-                await finalAgentContextStore.RemoveAsync(agentContext.SessionId, ct);
-            }
-
-            completed = true;
+            yield return finalMetadataChunk;
         }
-        finally
+
+        await foreach (var chunk in agentRun.ExecuteAsync(agentContext, session, assistantText, ct))
         {
-            if (!completed)
-            {
-                await finalAgentContextStore.RemoveAsync(agentContext.SessionId, CancellationToken.None);
-            }
+            yield return chunk;
+        }
+
+        if (agentContext.FunctionApprovalRequestContents.Count != 0)
+        {
+            var storedContext = await finalAgentContextSerializer.CreateSnapshotAsync(agentContext, ct);
+            await finalAgentContextStore.SetAsync(agentContext.SessionId, storedContext, ct);
+            compensation.MarkCompleted();
+        }
+        else
+        {
+            await compensation.RemoveAndCompleteAsync();
         }
     }
 
@@ -273,5 +265,44 @@ public class AgentWorkflowPipeline(
             BranchType.BusinessPolicy => businessPolicy.ExecuteAsync(intents, message, ct),
             _ => throw new ArgumentOutOfRangeException(nameof(branchType), branchType, "Unknown branch type.")
         };
+    }
+}
+
+internal sealed class FinalAgentContextCompensation(
+    IFinalAgentContextStore store,
+    Guid sessionId,
+    ILogger logger) : IAsyncDisposable
+{
+    private int completionState;
+
+    public void MarkCompleted()
+    {
+        Interlocked.CompareExchange(ref completionState, 1, 0);
+    }
+
+    public async Task RemoveAndCompleteAsync()
+    {
+        if (Interlocked.CompareExchange(ref completionState, 1, 0) == 0)
+        {
+            await store.RemoveAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.CompareExchange(ref completionState, 1, 0) == 0)
+        {
+            try
+            {
+                await store.RemoveAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                logger.LogError(
+                    "Final-agent context compensation failed after the primary workflow exit. SessionId={SessionId}; CleanupErrorType={CleanupErrorType}; PrimaryOutcome=preserved",
+                    sessionId,
+                    exception.GetType().Name);
+            }
+        }
     }
 }
