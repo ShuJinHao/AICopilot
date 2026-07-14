@@ -187,9 +187,9 @@ Cloud AiRead 设备契约：
 
 ## 9. 文档入口
 
-- 长期规则入口只保留 `AGENTS.md`、本文档、项目 `docs/改动复盘与规则沉淀.md` 和工作区 `docs/历史核心记录.md`。
+- 当前长期规则权威只来自 `AGENTS.md`、本文档和下列专题契约；项目 `docs/改动复盘与规则沉淀.md` 与工作区 `docs/历史核心记录.md` 保留历史原因和证据，不得成为当前有效规则的唯一来源。
 - 当前 AI 安全治理和修复执行入口是 `docs/AI架构治理清单.md`；它不是阶段流水，必须逐项记录编号、严重级、状态、验证命令和外部依赖。
-- 当前长期专题契约包括 `docs/AICopilot安全部署契约.md`、`docs/Cloud只读数据分析契约.md` 和 `docs/Agent工作流与异常契约.md`；触碰部署、Cloud 只读、Text-to-SQL、Agent workflow、MCP/Tool、异常或前端错误时必须先读对应契约。
+- 当前长期专题契约包括 `docs/AICopilot安全部署契约.md`、`docs/Cloud只读数据分析契约.md` 和 `docs/Agent工作流与异常契约.md`；触碰部署、GitHub workflow/test trust root、receipt migration、Cloud 只读、Text-to-SQL、Agent workflow、MCP/Tool、异常或前端错误时必须先读对应契约。
 - 部署入口只保留 `AICopilot 项目部署与维护指南.md` 和 `deploy/enterprise-ai`。
 - 阶段计划、批次验收报告、PR 草案和一次性 acceptance 输出不得继续作为执行入口；有效结论必须沉淀到长期规则或部署指南后再清理。
 - 清理文档时必须先检查引用，避免留下指向已删除阶段文件的脚本、测试或说明。

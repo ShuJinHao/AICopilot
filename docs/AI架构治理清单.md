@@ -1,10 +1,10 @@
 # AI 完整修复计划（HTTP-only 修正版）
 
-本文档是 AICopilot 当前安全和架构修复的完整执行计划，也是 AI 端治理清单。长期规则仍以 `AGENTS.md`、`资料/AICopilot业务规则.md`、`AICopilot 项目部署与维护指南.md` 和 `deploy/enterprise-ai/README.md` 为准。
+本文档是 AICopilot 当前安全和架构修复的完整执行计划，也是 AI 端治理清单。长期规则以 `AGENTS.md`、`资料/AICopilot业务规则.md` 和对应专题契约为准；`AICopilot 项目部署与维护指南.md` 与 `deploy/enterprise-ai/README.md` 是部署执行入口，不另立长期规则权威。
 
 专题契约入口：
 
-- `docs/AICopilot安全部署契约.md`：部署安全、HTTP-only、secret、镜像、SSH、runner 和发布验收。
+- `docs/AICopilot安全部署契约.md`：部署安全、GitHub workflow/test trust root、receipt 冷启动、HTTP-only、secret、镜像、SSH、runner 和发布验收。
 - `docs/Cloud只读数据分析契约.md`：Cloud 只读、Cloud AiRead、CloudReadOnly Direct DB、Text-to-SQL、DeviceLog 和 Simulation 边界。
 - `docs/Agent工作流与异常契约.md`：Agent workflow、Plan/Chat、MCP/Tool/Human-in-the-loop、异常、前端错误和运行详情。
 
@@ -56,6 +56,7 @@
 
 当前仓库内修复剩余未完全关单项：
 
+- `AI-TEST-GOV-001` / `AI-RULE-TEST-012`：AICopilot 测试治理必须先从可信锚点完成 `H0 -> A0 -> C0 -> non-merging probe -> E0` 冷启动。当前仅完成只读审计和 readiness 契约，`E0=false`；仓库 ruleset 为空、`main` 未保护、只有 `ShuJinHao` 一个 collaborator，且没有来源绑定的三个 required context 或独立 reviewer，因此状态为 `Blocked`。旧 `198cc593` 的 13 个提交和 baseline provenance 不得直接复用。
 - `AI-SEC-010`：仓库内已固化灾备 workflow 的 least-privilege、self-hosted runner label、非 root runner、hosted-runner 禁用门禁，并让 production/secrets 相关 workflow 执行 `check-runner-security-attestation.sh`；平台侧验收模板和记录 linter 已提供，且 linter 会拒绝模板占位、未勾选项、空签署人和 `pending` / `not implemented` / `N/A` 等弱证明词，并要求记录包含 production environment secret 限制和生产/secret workflow 无 GitHub hosted runner 的证据。GitHub self-hosted runner 机器权限收敛、OIDC/Vault 或等价短期凭据落地仍属于基础设施任务；如果暂未落地，只能在平台记录中写成已批准的基础设施例外，并按结构化字段包含 `Ticket or change id`、`Exception owner`、`Due date` 和 `Current mitigation`，不能伪造成已完成。
 - `AI-SEC-012`：旧 `encv1:` 密文迁移代码路径已规划/测试，migration worker 在批量改写前会先预检同一集合中已有 `encv2:` 密文能用当前密钥解密，避免同一集合内混合旧密文和不可读 `encv2:` 时产生内存级部分改写；数据库写入使用 AiGateway 事务，并让临时 `RagDbContext` 通过 `UseTransactionAsync(transaction.GetDbTransaction())` 复用同一事务，避免 `LanguageModel.ApiKey` 与 `EmbeddingModel.ApiKey` 数据库级部分迁移；保存后会自检没有非 `encv2:` 的非空密钥残留，并再次验证 `encv2:` 可解密；发布脚本测试已锁定全量和按需发布中的 `aicopilot-migration -> check_model_secret_migration_preflight -> runtime` 顺序；但真实生产库迁移或管理员重录入仍需要发布窗口验收。
 
@@ -99,6 +100,89 @@ git log --oneline -n 20 -- AICopilot.slnx deploy src docs AGENTS.md 资料
 - 架构和回归测试：`src/tests/AICopilot.ArchitectureTests`、`src/tests/AICopilot.BackendTests`、`src/vues/AICopilot.Web/tests`。
 
 每个批次必须先定位到以上目录和对应测试，再改代码或文档。找不到源码证据的项只能标为外部依赖、待审计或不纳入，不能写成 Done。
+
+## 2.2 Phase 0：测试治理 trust root 冷启动（AI-TEST-GOV-001）
+
+长期规则见 `docs/AICopilot安全部署契约.md` 的 `AI-RULE-TEST-012`；跨项目通用 receipt 协议仍以工作区根 `docs/三项目测试架构治理总计划.md` 第 16.2 节和第 20 节为唯一权威。本节只记录 AICopilot 当前执行输入、批次和外部依赖。
+
+| 执行 ID | 严重级 | 状态 | 当前结论 | 完成条件 |
+| --- | --- | --- | --- | --- |
+| AI-TEST-GOV-001 | CRITICAL | Blocked (`E0=false`) | 冷启动设计与旧链净差分已审计；尚未实施 `H0/A0/C0`，未生成真实 receipt，未改 GitHub settings；精确 landing protocol 与所需额外授权未决 | 第二真实 principal/team、full clone、独立 reviewer、source-bound base-owned required workflow/attestor、已授权且保留 head SHA 的 landing protocol、Active protection/ruleset 和 non-merging probe 全部取证 |
+
+### 2.2.1 冻结输入与旧链裁决
+
+- 冷启动锚点：`M0=156fbd31713fe4b26f7e2e8b4009a6f61ccb30d2`，也是 2026-07-14 审计时的 `origin/main`。
+- 历史候选 tip：`198cc59318f4a1748c719b9b8ecff1d969952ce8`。`M0..tip` 是 13 个直接单父、0 merge 的线性提交，但全部 author/committer 属于同一主体；最终净差分为 237 文件（A61/M169/D7，`+49,988/-5,169`），按互斥路径口径为 workflow 6、deploy 17、tests/quality 61、docs/rules 10、production source 140、governance roots 3。
+- 第 9 个提交 `2d06efd6590a06dad45e0609fbb3bc2cb64e3814` 才在同一提交自引入 `.gitattributes`、仅含 `@ShuJinHao` 的 CODEOWNERS、canonical workflow、policy、behavior、baseline、waiver 和测试配置；授权与消费没有分离，不能倒推前 8 个生产/测试/部署提交已受信。
+- 后续 `e69f5d0` 同批修改 policy、behavior 和 baseline，`351334e` 同批修改 workflow、policy 和生产 deploy，`f345f94` 同批修改 workflow、policy、前端和测试；旧 baseline 的 `Reviewed`/run 字段不能替代真实独立 reviewer 或 base-owned provenance。
+- 在 `M0` 与旧 commit 1 之间插入 `H0` 会改变后续全部 parent/tree/commit identity；旧 13 个 SHA 不可能原样保留。39 个路径又跨多个语义组共享，重建时必须按最终 hunk/语义拆分，不能整提交或整文件 cherry-pick。
+- 当前 readiness worktree 是 shallow clone；它只能生成和审核文档候选。真实 `H0`、祖先证明和 receipt 必须改用 fresh/full clone 或完整 fetch。
+- 本 readiness 文档分支不得先于 `H0` 合入 `main`。如果它或任何其它提交先落入 `main`，必须把新 tip 重新定义为可信锚点并重算 `H0`、receipt 和 provenance，禁止继续引用 `M0` 假装直接父关系未变。
+
+旧链顺序仅作为审计索引：
+
+```text
+41edebdadb14e5f020b9aeaf28cfb8e6efc15799  preserve agent workflow branch failures
+7764147590d0d1a85a9347d0a78b7ecc17d78f1d  harden release-candidate checks
+ae445fe6b11a1d2618b0862440a89b6ecfc54e94  enforce cloud-only semantic runner
+2e5eed04553dec6ff81c2f5444611935e66f3069  harden final data-analysis context
+499829820a2edf33fc208d6af1867d3fa5c31c62  remove dead outbox persistence paths
+7137e81cb50ed58a82e7592d297eac696413ff55  verify repository commit outcomes
+f444faa98f67a5455b48a92b7fb40139fc7c6ed1  identity and file persistence reconciliation
+88a9687a40e7c78d671bdc634e90941b91f3bde1  serialize enabled-admin mutations
+2d06efd6590a06dad45e0609fbb3bc2cb64e3814  self-introduce legacy governance bundle
+e69f5d032001632da3ad07e54e7369f5753339b8  normalize test discovery across OS
+351334e3e16d84be243b39d24dff0086d9fff113  preserve deployment recovery evidence
+f345f9424ad40a495efdefe8cf387851e589e175  session authority hydration fail-closed
+198cc59318f4a1748c719b9b8ecff1d969952ce8  record session authority validation
+```
+
+### 2.2.2 冷启动阶段与 probe 矩阵
+
+| 阶段 | 唯一允许内容 | 必须证据 | 禁止项 |
+| --- | --- | --- | --- |
+| `H0` | `M0` 的直接单父；仅 `.gitattributes`、含第二真实主体/team 的 CODEOWNERS、wrapper、validator、92 条 self-test、schema 六个路径 | parent/tree、逐路径 mode/blob/SHA-256、92/92、外部审核和最终 push 后非作者批准 | workflow、policy、baseline、waiver、receipt、readiness 文档、生产/测试/部署差异；`H0` 自证 |
+| `A0` | `H0` 的直接单父；只新增一个 `pending/<MigrationId>.json`，mode `100644` | wrapper/validator/schema 从 `H0` blob 提取；receipt 精确冻结 C0 workflow 路径、字节、mode、blob、digest 和时限 | 同批改 workflow/policy/baseline；本地旧 receipt；作者自批 |
+| `C0` | `A0` 的直接单父；pending 原字节/mode 移到 consumed，并新增 receipt 授权的唯一 preactivation workflow | diff/hash/count 与 receipt 完全一致；checkout 和 validator 参数均为原始 `pull_request.head.sha`；`migration-validator-selftest` 用 base harness 隔离验证 candidate validator 92/92，`build-test` 先执行 base authoritative gate 再跑 canonical build/test，`required-final` 只做 `needs + always()` fail-closed 汇总 | merge SHA、synthetic merge、candidate wrapper 进入 authoritative gate、额外路径、final policy/baseline 同批接入 |
+| probe preflight | `C0` 后创建、永不合入，保持 `E0=false` | 三个 check-run 绑定同一原始 PR head，并预检组织/企业 required workflow 的 source repo/ref/path 或专用 attestor App、job 隔离和 reviewer 身份 | 用 probe 自身 workflow 或通用 GitHub Actions App 冒充来源绑定；合入 probe；复用 probe receipt |
+| E0-candidate | probe 保持打开时启用候选保护配置，仍写 `E0=false` | 在 Active 配置下真实验证无批准、stale approval、追加提交、无 receipt 改 protected path、同名伪 check、candidate wrapper、synthetic merge、force 和 bypass 均不能放行；force/bypass 只能使用非破坏性 evaluation/mergeability 证据、与 main 同规则的牺牲 probe ref，或另获授权且预期失败的受控尝试 | 只看配置 JSON 或绿色 happy path 就宣称 active；用可能成功的 `main` 写入试探保护 |
+| `E0` | 同一 probe 的 provenance 预检和 active-block 矩阵全部通过后才记录 | PR-only、strict up-to-date、linear history、禁 deletion/force/merge commit、至少 1 个独立批准、Code Owner、dismiss stale、most-recent-push 由他人批准、空 bypass；三个 context 均来源绑定 | 只锁 `required-final`、`any source`、普通同名 status、管理员 bypass、普通 merge queue |
+
+receipt 字段、空值、mode/blob/hash、时限和状态转换不得由本清单另行定义；`H0` schema 必须逐项实现工作区总计划与 `AI-RULE-TEST-012`，并在 `H0` 外部审核包中输出完整字段矩阵。当前实现审查至少要确认 cold-start 缺失值有唯一表示、每个路径同时绑定 Git blob 与 SHA-256。`receipt.approvedBy` 必须唯一指向 `A0` AuthorizationOnly PR 在其最终原始 head 上仍有效的非作者人类 reviewer；`C0` Consume PR 还必须在自身最终原始 head 上取得单独的非作者有效 review，不能用 A0 字段或旧 approval 代替。最终以已审核 schema/validator 字节和两阶段 GitHub review 事实为准。
+
+三个 required 角色的执行隔离、base/candidate 工具边界和 fail-closed 汇总只认 `AI-RULE-TEST-012`；本清单表格仅记录当前 AICopilot context 名与实施阶段，不构成第二套 workflow 规范。
+
+`H0/A0/C0` 的 v1 最终落点必须保留已审核 PR-head SHA；merge commit、squash、rebase 和普通 merge queue 均会生成或验证不同 revision，不得沿用旧绿灯。GitHub 平台若无法在 PR-only、空 bypass 下完成 fast-forward 或等价精确落点，必须停止并另立可在最终 landing SHA 重跑同一 base-owned checks 的未来协议，不能用管理员 push 或改写 SHA 收口。
+
+耐久 `E0` 需要组织/企业级、精确绑定 source repository/ref/path 的 required workflow，或候选无法调用且 required check 明确绑定的专用 attestor GitHub App。普通 required status 即使绑定通用 GitHub Actions App，也只绑定 App、不绑定具体 workflow；这种配置只能保留为受控外部证据，不能写成 durable trust root active。
+
+2026-07-14 GitHub 只读审计事实：
+
+- repository rulesets 为 `[]`，`main` 返回 `Branch not protected`；direct collaborator 只有 `ShuJinHao`，teams 为空，不存在第二 reviewer。
+- Actions `allowed_actions=all`、`sha_pinning_required=false`；默认 `GITHUB_TOKEN` 为 `contents:read` 且不能批准 PR，这一项为正向证据，但不足以建立 provenance。
+- `production` environment 无 protection rules；它与 `AI-SEC-010` 的部署平台验收也不能替代代码 receipt reviewer。
+- Draft PR `#59` 的 head 是 `198cc593`，仅有候选仓内产生的 `backend-full-tests`、`build-test`、`simulation-rc` 成功状态，无 review、无 `migration-validator-selftest`/`required-final`；这些绿灯不是 E0。
+
+任一条件出现即停止，不实施或继续消费：第二主体缺失；PR/settings/landing 权限未另行授权；C0 最终字节未冻结；提交不是直接单父；A0 或 C0 缺少自身最终 head 上的非作者有效 review；receipt 过期、漂移或存在第二份 active pending；任一 check 不在原始 head；存在 force/bypass；同名伪 check 可放行；平台无法保留精确 landing SHA；base、head、landing、lease、workflow source 或 review identity 变化。
+
+### 2.2.3 E0 后的最终语义重建批次
+
+以下批次只表达旧 13 提交的最终净语义，不保留旧 SHA，也不允许在 `E0=false` 时实施：
+
+| 批次 | 历史语义来源 | 最终范围/路径证据 | 依赖与顺序 |
+| --- | --- | --- | --- |
+| B1 | 旧 1、3、4 | Agent workflow/DataAnalysis fail-closed；23 个 unique paths（src 10/test 9/doc 4） | E0 后可最早准备 |
+| B2 | 旧 2、11 | release-candidate/deploy recovery；38 个 unique paths（workflow 6/deploy 15/test 11/doc 5/src 1） | 与 B1 业务独立，但共享 CI/policy/docs，集成串行 |
+| B3 | 旧 5 | dead outbox cleanup；28 个 unique paths（src 17/test 6/doc 5） | 先于 B4，或与 B4 按最终态合并，禁止重放短命 stager |
+| B4 | 旧 6 | repository commit outcome/persistence engine；63 个 unique paths（src 42/test 14/doc 7） | 依赖 B3 |
+| B5 | 旧 7 | identity + file persistence reconciliation；82 个 unique paths（src 54/test 18/deploy 4/doc 6） | 依赖 B4 的 commit engine/marker/allocator |
+| B6 | 旧 8 | enabled-admin invariant serialization；26 个 unique paths（src 14/test 9/doc 3） | 依赖 B5 identity transaction/advisory lock |
+| G0 | 旧 9、10，仅作参考 | 13 个 unique paths（governance root 3/workflow 1/test 6/doc 3） | 不得原样重放；E0 后重新生成 policy/baseline/waiver/workflow，并分别走 receipt |
+| B8 | 旧 12、13 | frontend session-authority hydration；37 个 unique paths（src 20/test 12/workflow 1/doc 4） | B5/B6 的身份/API 事实稳定后实施 |
+
+各行 unique path 不能相加当作 237，因为 39 个共享路径跨多个批次。共享治理文档、`AGENTS.md`、`ArchitectureBoundaryTests` 和 CI/policy 文件必须按 hunk/语义拆分；每个最终 SHA 都要重新运行责任测试、全量 required、baseline provenance 和 digest 对账。只有 G0 与后续 workflow/policy/baseline/waiver receipt 全部激活后，才能进入 `AI-SEC-051`、`AI-ARCH-001` 和测试物理迁移。
+
+已推送但尚未进入 `main` 的规则提取分支已有 `AI-RULE-TEST-001` 至 `011`；Scheme C 后续重建该索引时必须注册 `AI-RULE-TEST-012` 并指向本安全部署契约，不能在 readiness 分支另建第二份索引或遗漏编号迁移。
 
 ## 3. 第一批：HTTP-only 部署安全红线
 

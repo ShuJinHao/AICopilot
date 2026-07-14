@@ -28,7 +28,7 @@
 ## Topic Contracts
 
 - AI 修复总计划和逐项治理清单：`docs/AI架构治理清单.md`。
-- 部署安全、HTTP-only、secret、镜像、SSH 和 runner 边界：`docs/AICopilot安全部署契约.md`。
+- 部署安全、GitHub workflow/test trust root、receipt 冷启动、HTTP-only、secret、镜像、SSH 和 runner 边界：`docs/AICopilot安全部署契约.md`。
 - Cloud 只读、Cloud AiRead、CloudReadOnly Direct DB 和 Text-to-SQL 边界：`docs/Cloud只读数据分析契约.md`。
 - Agent workflow、Plan/Chat、MCP/Tool/Human-in-the-loop、异常和前端错误边界：`docs/Agent工作流与异常契约.md`。
 

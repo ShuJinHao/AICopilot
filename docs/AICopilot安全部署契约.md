@@ -20,6 +20,28 @@
 - 灾备 workflow：`.github/workflows/aicopilot-*.yml`。
 - 部署门禁测试：`src/tests/AICopilot.BackendTests/SecurityHardeningTests.cs`。
 
+### 2.1 AICopilot 测试治理 trust root 冷启动（AI-RULE-TEST-012）
+
+AICopilot 首次启用测试治理 trust root 时，必须遵守工作区根 `docs/三项目测试架构治理总计划.md` 第 16.2 节和第 20 节的通用 receipt 协议。本节只固定 AICopilot 项目参数，不另建第二套 receipt 状态机或 schema 权威。
+
+- 当前冷启动审计锚点为 `M0=156fbd31713fe4b26f7e2e8b4009a6f61ccb30d2`。历史候选 `198cc59318f4a1748c719b9b8ecff1d969952ce8` 及其中 13 个提交只可作为最终语义和测试证据参考，不是可直接 cherry-pick、fast-forward 或复用 baseline provenance 的预批准链。
+- `H0` 必须是 `M0` 的直接单父最小 root，且只允许新增或修改以下六个路径；任何路径或字节变化都必须重新审核整个 `H0`：
+  - `.gitattributes`
+  - `.github/CODEOWNERS`
+  - `scripts/tests/baselines/migrations/InvokeAICopilotGovernanceMigrationFromTrustedBase.v1.ps1`
+  - `scripts/tests/baselines/migrations/ValidateAICopilotGovernanceMigration.v1.ps1`
+  - `scripts/tests/baselines/migrations/TestAICopilotGovernanceMigrationValidator.v1.ps1`
+  - `scripts/tests/baselines/migrations/aicopilot-governance-migration-receipt.schema.json`
+- `H0` 不得夹带 baseline、waiver、Phase 0 policy、任何 workflow、生产/测试/部署差异、readiness 文档或实际 receipt。`CODEOWNERS` 中作者之外的第二个真实 GitHub principal/team 必须已存在、具备 GitHub 认可的必要仓库写权限，并按最终 last-match pattern 实际拥有全部 trust paths；只出现在注释、被后续 pattern 覆盖或指向无效 team 均不合格。本地 Agent 交叉审查、同一账号或作者自批均不构成独立 reviewer。
+- `H0` 必须在 full clone 或已完整 fetch 的对象图上审核和实施。shallow clone 只能用于只读准备，不得用于证明完整祖先、生成最终 receipt 或实施真实冷启动链。
+- `H0` 经独立 reviewer 审核并以精确 tree/parent 落到可信 base 后，首次 workflow migration 固定为 `H0 -> A0 -> C0`：`A0` 只能新增一份精确 pending receipt；`C0` 必须是 `A0` 的直接单父，只能把同一 blob 从 pending 移到 consumed，并安装 receipt 已逐路径、mode、blob 和 SHA-256 授权的唯一 preactivation workflow。授权与消费不得同提交，不得使用 synthetic merge、candidate wrapper、自批、同批 baseline/policy 或候选分支生成的证明工具。
+- authoritative job 只能从当时 trusted base 提取并核对 wrapper、validator、self-test harness 和 schema 的 mode/blob/digest，再执行 base wrapper/validator；它不得加载 candidate validator。隔离的 self-test job 只用 base-owned harness/schema 验证 candidate validator，固定执行 `92` 条；该 job 不接触生产 secret，不与 authoritative/build job 共享 workspace、cache、artifact、后台进程或可写 Git 状态。任一测试失败、缺失或 Skip 均不得绿色。
+- checkout 必须显式绑定原始 PR head 的 40 位 SHA，并设置 `persist-credentials: false`；required 证据必须绑定同一原始 PR head 和同一受信 workflow provenance。`H0/A0/C0` 的 v1 落点只能使用保留已审核 head SHA 的 fast-forward 或等价精确落点；merge commit、squash、rebase 和 merge queue 均不合格。平台无法在不 bypass 的情况下保留精确落点时必须停止并另立未来 landing 协议。当前尚无已授权、可执行的精确 landing 路径；本规则只定义 fail-closed 边界，不授权直推 `main`、管理员 bypass 或修改远端设置，实施前必须另获明确授权并审核 landing protocol。PR head、base、landing SHA、parent、tree、receipt、lease 或 required source 任一变化，原授权和绿灯立即失效，必须从新可信 base 重算。
+- AICopilot 三个 required 逻辑角色固定为 `migration-validator-selftest`、`build-test`、`required-final`。仅有同名 status、候选仓内自定义 workflow、普通 branch protection 的 `any source` 或旧 `aicopilot-simulation-release-candidate.yml` 绿灯均不构成 base-owned 证明。
+- `C0` 后必须创建不合入的 probe PR：先在 `E0=false` 时预检三个 context、原始 PR-head SHA、job 隔离和 workflow provenance；再启用候选保护配置，并在同一仍不合入的 probe 上真实验证无批准、stale approval、追加提交、protected-path 无 receipt、同名伪 check、candidate wrapper、synthetic merge、force 和 bypass 均不能放行。启用配置本身不等于 E0；全部主动阻断验证通过前始终写 `E0=false`。
+- 耐久 source binding 只接受组织/企业 required workflow 对 source repository/ref/path 的精确绑定，或候选无法调用的专用 attestor GitHub App；绑定通用 GitHub Actions App 或普通同名 required status 不合格。只有上述来源绑定、独立 reviewer 和 branch protection/ruleset 均已实际启用，且同一 probe 的 active-block 证据完整时，才能写 `E0=true` 或宣称 trust root active。`AI-SEC-010` 的 production environment reviewer/runner 验收不能替代代码 receipt reviewer 和 base-owned required check。
+- 如果本 readiness 文档或任何其它提交先进入 `main`，`M0` 立即失效；必须把新的 `main` 重新命名为可信锚点、重新审核 `H0` 的直接父关系，并重算全部 receipt/provenance。禁止为了保留旧 SHA 而绕过该重算。
+
 ## 3. HTTP-only 安全头
 
 Web 入口必须提供 HTTP 兼容安全头：
