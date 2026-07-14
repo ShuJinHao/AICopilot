@@ -131,7 +131,9 @@ Cloud-AICopilot OIDC 身份对齐的长期结论见 `../docs/历史核心记录.
 - `aicopilot-simulation-release-candidate.yml` 只能作为 Manual-only 完整非生产 Simulation acceptance：使用固定 Linux runner，先以 `docker info` fail-fast，再整项目执行 `AICopilot.SimulationTests` pure runner 与 `AICopilot.SimulationDockerTests` 真实 Docker runner，二者均不得 Skip；不得在 PR 重复 Backend/Web/required suite，不得用 `--filter`/Phase/Batch/Suite/类名或静态 changed-files 清单选测。两个 runner 必须分别产生 TRX 并对账 12/1，报告、JSON 摘要和 TRX 只能写入已 ignore 的 `artifacts/simulation/`，workflow 必须以 `always()` 上传 evidence，不得生成独立文档流水。
 - `CloudAiReadLiveTests` 只允许显式 Manual/Release 的非生产真实契约执行，缺环境必须失败；不得纳入普通 PR，也不得以 Stub/Simulation 代替真实 Cloud provider。
 - 当前 `AiEvalTests` 的 6 个 JSON case 只构成 legacy eval continuity，其中自证输入的 approval/prompt-injection case 不能宣称为生产工作流 Golden。只有接入真实生产 formatter/policy/workflow、版本化期望输出并建立审阅更新流程后，才能升级为 `GoldenEval` hard gate。
-- 当前 ArchitectureTests 仍含动态/词法检查，只能作为过渡 owner，不能冒充 Roslyn 编译语义。后续 Analyzer 波次必须使用 `Microsoft.CodeAnalysis.CSharp 5.6.0`落地真实 diagnostic + AnalyzerTests；本波不得创建空 Analyzer 项目。
+- `AICopilot.Architecture.Analyzers` 是生产项目的编译型架构 owner：根 `Directory.Build.targets` 必须把它以 Analyzer 引用接入每个非测试生产项目，并保持 `Microsoft.CodeAnalysis.CSharp 5.6.0` 精确版本。`AIARCH001`–`AIARCH007` 全部是稳定 compiler error，禁止用 `NoWarn`、降级 warning、可选开关或第二套同义门禁规避。
+- `AICopilot.Architecture.AnalyzerTests` 必须同时保有语义正/反例和每条 Rule ID 的真实临时 csproj 编译失败夹具；例外必须使用完全限定类型/项目名、同步写入对应专题契约并有反例夹具。`ArchitectureTests` 只保留需要运行时、反射、数据库或动态组装才能证明的事实，禁止恢复已被 Analyzer 覆盖的源码字符串/Regex 重复门禁。
+- `AgentRuntimeSettingsProvider.GetAsync` 是纯读路径：缺少 `ChatRuntimeSettings` 记录时只返回映射后的默认值，不得 `Add` / `Update` / `SaveChangesAsync`；首次持久化仍由 `MigrationWorkerAiGatewaySeeder.SeedDefaultsAsync` 在 fresh database seed 中负责。
 
 ## Unified Agent Workflow
 

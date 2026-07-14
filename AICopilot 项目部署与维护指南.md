@@ -349,7 +349,6 @@ docker login harbor.internal.example:80 --username <Harbor 用户>
 本地仓库验证：
 
 ```powershell
-pwsh ./scripts/Test-AICopilotBaselineFreezeScope.ps1
 pwsh ./scripts/Test-ArchitectureBoundaries.ps1
 pwsh ./scripts/Test-TextEncoding.ps1
 dotnet build src/hosts/AICopilot.HttpApi/AICopilot.HttpApi.csproj

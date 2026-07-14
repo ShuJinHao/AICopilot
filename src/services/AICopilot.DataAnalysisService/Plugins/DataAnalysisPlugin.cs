@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using AICopilot.AgentPlugin;
 using AICopilot.Services.Contracts;
+using AICopilot.SharedKernel.Ai;
 using Microsoft.Extensions.Logging;
 
 namespace AICopilot.DataAnalysisService.Plugins;
@@ -13,6 +14,8 @@ public class DataAnalysisPlugin(
     ILogger<DataAnalysisPlugin> logger) : AgentPluginBase
 {
     public override string Description => "提供数据库结构查询和SQL执行能力，用于回答涉及业务数据的统计分析问题。";
+
+    public override ChatExposureMode ChatExposureMode => ChatExposureMode.Advisory;
 
     [Description("获取指定数据库中所有表的名称和描述。这是探索数据库结构的第一步。")]
     public async Task<string> GetTableNamesAsync(

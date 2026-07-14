@@ -85,8 +85,6 @@ public sealed class DddAggregateBoundaryTests
             ["ExternalIdentityBinding"] = "IdentityRecord"
         };
 
-    private static readonly string[] KnownDebtRepositoryUsage = [];
-
     [Fact]
     public void AggregateRoots_ShouldStayExplicitlyWhitelistedOrKnownDebt()
     {
@@ -143,33 +141,6 @@ public sealed class DddAggregateBoundaryTests
     }
 
     [Fact]
-    public void RepositoryRegistrations_ShouldOnlyTargetWhitelistedAggregateRootsOrKnownDebt()
-    {
-        var allowedNames = AllowedAggregateRoots
-            .Concat(KnownArchitectureDebt)
-            .Select(type => type.Name)
-            .ToHashSet(StringComparer.Ordinal);
-        var dependencyInjection = File.ReadAllText(Path.Combine(
-            SolutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.EntityFrameworkCore",
-            "DependencyInjection.cs"));
-        var registrations = Regex
-            .Matches(dependencyInjection, @"\bI(?:Read)?Repository<\s*(?<type>[A-Za-z0-9_]+)\s*>")
-            .Select(match => match.Groups["type"].Value)
-            .Distinct(StringComparer.Ordinal)
-            .Order(StringComparer.Ordinal)
-            .ToArray();
-        var unknownRegistrations = registrations
-            .Where(type => !allowedNames.Contains(type))
-            .ToArray();
-
-        unknownRegistrations.Should().BeEmpty(
-            "generic repository registration is reserved for approved aggregate roots; current known debt must remain explicit");
-    }
-
-    [Fact]
     public void DbSets_ShouldBeClassifiedAndDebtTypesShouldNotBeAggregate()
     {
         var dbSetTypes = Directory
@@ -199,34 +170,6 @@ public sealed class DddAggregateBoundaryTests
             "known debt types are tables, but they are no longer accepted as aggregate-root direction");
     }
 
-    [Fact]
-    public void DebtRepositoryUsage_ShouldNotExpandBeyondCurrentDebtInventory()
-    {
-        var debtNames = KnownArchitectureDebt
-            .Select(type => type.Name)
-            .ToArray();
-        var actual = debtNames.Length == 0
-            ? []
-            : EnumerateProductionSourceFiles()
-                .SelectMany(file =>
-                {
-                    var relativePath = NormalizePath(Path.GetRelativePath(SolutionRoot, file));
-                    var debtRepositoryPattern = new Regex(
-                        $@"\bI(?:Read)?Repository<\s*(?<type>{string.Join("|", debtNames)})\s*>",
-                        RegexOptions.Compiled);
-                    return debtRepositoryPattern
-                        .Matches(File.ReadAllText(file))
-                        .Select(match => $"{relativePath}:{match.Groups["type"].Value}");
-                })
-                .Distinct(StringComparer.Ordinal)
-                .Order(StringComparer.Ordinal)
-                .ToArray();
-
-        actual.Should().BeEquivalentTo(
-            KnownDebtRepositoryUsage.Order(StringComparer.Ordinal),
-            "known debt repository usage is allowed only as a shrinking inventory while dedicated stores are introduced");
-    }
-
     private static IReadOnlyCollection<Type> GetConcreteAggregateRoots()
     {
         return new[]
@@ -250,30 +193,11 @@ public sealed class DddAggregateBoundaryTests
                || typeName.EndsWith("Event", StringComparison.Ordinal);
     }
 
-    private static IEnumerable<string> EnumerateProductionSourceFiles()
-    {
-        var roots = new[]
-        {
-            Path.Combine(SolutionRoot, "src", "infrastructure"),
-            Path.Combine(SolutionRoot, "src", "services")
-        };
-
-        return roots
-            .Where(Directory.Exists)
-            .SelectMany(root => Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories))
-            .Where(file => !IsGeneratedOrBuildOutput(file));
-    }
-
     private static bool IsGeneratedOrBuildOutput(string file)
     {
         return file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)
                || file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)
                || file.Contains($"{Path.DirectorySeparatorChar}Migrations{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string NormalizePath(string path)
-    {
-        return path.Replace(Path.DirectorySeparatorChar, '/');
     }
 
     private static string FindSolutionRoot()

@@ -20,6 +20,13 @@
 - Cloud readonly 授权 preflight：`deploy/enterprise-ai/scripts/apply-cloud-readonly-grants.sh`、`deploy/enterprise-ai/scripts/check-cloud-readonly-grants.sh`。
 - 关键测试：`ArchitectureBoundaryTests`、`CloudAiReadClientTests`、`CloudReadonlySimulationTests`、`CloudReadOnlyTextToSqlFallbackRunnerTests`、`TextToSqlReadOnlyTests`、`DataAnalysisFinalContextFormatterTests`、`AiEvalBehaviorGuardrailTests`、`PromptGovernanceTests`、`SemanticAnalysisRunnerTests`、`DeviceLogFollowUpIntentRewriterTests`。
 
+### 编译型只读门禁
+
+- `AIARCH006` 以 Roslyn symbol/operation 和跨方法 call graph 从 Cloud AiRead / CloudReadOnly 入口追踪具体实现、interface dispatch、泛型 helper 与 lambda；任何可达 repository mutation、`SaveChanges*`、直接 SQL/DB write、`ICommand` dispatch 或 MCP create/update/delete/write 都是 compiler error。
+- 唯一允许的只读路径持久化例外是完全限定接口 `AICopilot.Services.Contracts.IAuditLogWriter`，且只能记录 AICopilot 自身的只读查询审计。它不是 Cloud 业务写权限；同名接口、adapter/wrapper、直接 `AuditDbContext` 或借审计执行 Cloud mutation 均不在例外内。
+- `AIARCH007` 要求 CloudReadOnly tool safety descriptor 同时声明 `readOnlyDeclared=true`、`ReadOnlyQuery` 与 `CloudReadOnly`；任一值声明为 side-effecting/可写或缺失安全元数据都以 compiler error 阻断。
+- 读取路径不承担默认数据初始化。`AgentRuntimeSettingsProvider.GetAsync` 查不到全局 `ChatRuntimeSettings` 时只返回 `CreateDefault` 的 DTO 映射，`Add` / `Update` / `SaveChangesAsync` 必须为 0；持久化默认记录由 `MigrationWorkerAiGatewaySeeder.SeedDefaultsAsync` 在 fresh database 初始化阶段唯一负责。
+
 ## 3. Cloud AiRead 正式唯一路径
 
 Cloud 当前正式 AI Read 只读表面必须在 AICopilot 客户端 allowlist 中逐项对齐：

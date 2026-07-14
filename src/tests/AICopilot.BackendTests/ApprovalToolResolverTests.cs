@@ -10,7 +10,7 @@ namespace AICopilot.BackendTests;
 public sealed class ApprovalToolResolverTests
 {
     [Fact]
-    public async Task GetToolsForPluginsAsync_ShouldSkipControlPlugins_AndKeepAdvisoryTools()
+    public async Task GetToolsForPluginsAsync_ShouldKeepAdvisoryTools()
     {
         var services = new ServiceCollection();
         services.AddAgentPlugin(registrar => registrar.RegisterPluginFromAssembly(typeof(DiagnosticAdvisorPlugin).Assembly));
@@ -32,7 +32,7 @@ public sealed class ApprovalToolResolverTests
         var resolver = new ApprovalToolResolver(pluginLoader, requirementResolver);
 
         var tools = await resolver.GetToolsForPluginsAsync(
-            [new DiagnosticAdvisorPlugin().Name, new SystemOpsPlugin().Name]);
+            [new DiagnosticAdvisorPlugin().Name]);
 
         tools.Should().NotBeEmpty();
         tools.Length.Should().Be(new DiagnosticAdvisorPlugin().GetTools()!.Count());

@@ -9,3 +9,9 @@ public class AuthorizeRequirementAttribute(string permission) : Attribute
 {
     public string Permission { get; } = permission;
 }
+
+[AttributeUsage(AttributeTargets.Class, AllowMultiple = false)]
+public sealed class ResourceAuthorizationOwnerAttribute(Type ownerType) : Attribute
+{
+    public Type OwnerType { get; } = ownerType;
+}

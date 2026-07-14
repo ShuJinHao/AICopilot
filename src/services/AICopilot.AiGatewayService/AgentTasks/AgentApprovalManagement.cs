@@ -26,6 +26,8 @@ public sealed record GetPendingAgentApprovalsQuery : IQuery<Result<IReadOnlyColl
 [AuthorizeRequirement("AiGateway.GetAgentTask")]
 public sealed record GetAgentTaskApprovalsQuery(Guid TaskId) : IQuery<Result<IReadOnlyCollection<AgentApprovalRequestDto>>>;
 
+[ResourceAuthorizationOwner(typeof(AgentApprovalDecisionCoordinator))]
 public sealed record ApproveAgentApprovalCommand(Guid Id, string? Comment = null) : ICommand<Result<AgentApprovalRequestDto>>;
 
+[ResourceAuthorizationOwner(typeof(AgentApprovalDecisionCoordinator))]
 public sealed record RejectAgentApprovalCommand(Guid Id, string? Comment = null) : ICommand<Result<AgentApprovalRequestDto>>;

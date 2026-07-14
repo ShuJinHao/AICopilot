@@ -189,7 +189,7 @@ Cloud AiRead 设备契约：
 
 - 长期规则入口只保留 `AGENTS.md`、本文档、项目 `docs/改动复盘与规则沉淀.md` 和工作区 `docs/历史核心记录.md`。
 - 当前 AI 安全治理和修复执行入口是 `docs/AI架构治理清单.md`；它不是阶段流水，必须逐项记录编号、严重级、状态、验证命令和外部依赖。
-- 当前长期专题契约包括 `docs/AICopilot安全部署契约.md`、`docs/Cloud只读数据分析契约.md` 和 `docs/Agent工作流与异常契约.md`；触碰部署、Cloud 只读、Text-to-SQL、Agent workflow、MCP/Tool、异常或前端错误时必须先读对应契约。
+- 当前长期专题契约包括 `docs/AICopilot安全部署契约.md`、`docs/Cloud只读数据分析契约.md`、`docs/Agent工作流与异常契约.md` 和 `docs/DDD聚合根边界.md`；触碰部署、Cloud 只读、Text-to-SQL、Agent workflow、MCP/Tool、异常、前端错误、聚合/repository 或 DB owner 时必须先读对应契约。
 - 部署入口只保留 `AICopilot 项目部署与维护指南.md` 和 `deploy/enterprise-ai`。
 - 阶段计划、批次验收报告、PR 草案和一次性 acceptance 输出不得继续作为执行入口；有效结论必须沉淀到长期规则或部署指南后再清理。
 - 清理文档时必须先检查引用，避免留下指向已删除阶段文件的脚本、测试或说明。
@@ -198,6 +198,7 @@ Cloud AiRead 设备契约：
 ## 10. 工程边界
 
 - AICopilot DDD 聚合根、投影、队列、审计和运行时记录的长期技术契约见 `../docs/DDD聚合根边界.md`；新增或调整聚合根、仓储注册、EF `DbSet`、Agent runtime timeline/queue/audit 记录时必须同步更新架构测试。
+- `AICopilot.Architecture.Analyzers` 是生产编译的架构 owner；`AIARCH001`–`AIARCH007` 必须保持 Error，由独立 required `AICopilot.Architecture.AnalyzerTests` 同时保有语义夹具和真实临时 csproj 正/反编译夹具。规则例外只能是专题契约中记录的完全限定类型/项目，禁止 `NoWarn`、降级 warning、optional gate 或恢复同义字符串/Regex 影子路径。
 - `IAggregateRoot<>` 只用于独立维护业务不变量和生命周期的领域根；队列项、timeline 投影、工具执行审计、worker 心跳和执行尝试记录不得作为新增聚合根方向，历史债务只能减少不能增加。
 - `DataSourcePermissionGrant` 当前保留为独立聚合根但标记待评估；后续如果授权生命周期可归入 `BusinessDatabase`，应下沉为子实体或专用权限记录并移出聚合根白名单。
 - `AiCopilotDbContext` 是主基础设施迁移上下文，也是 Outbox 与 persistence commit marker 的唯一 migration owner；`AuditDbContext` 负责审计查询和运行时审计写入，`DataAnalysisDbContext` 只承载数据分析配置，`OutboxDbContext` 与 `PersistenceCommitMarkerDbContext` 只作为运行时短生命周期参与者，不拥有 migration。

@@ -131,6 +131,14 @@ Cloud 只读 Agent 当前正式能力限定为：
 - 前端错误：`src/vues/AICopilot.Web/src/services`、`src/vues/AICopilot.Web/src/stores`、`src/vues/AICopilot.Web/src/protocol`、`src/vues/AICopilot.Web/src/views`。
 - 运行详情：`src/vues/AICopilot.Web/src/protocol/runtimeDetails.ts`、`src/vues/AICopilot.Web/src/components/chat/MessageRuntimeDetailsPanel.vue`。
 
+### 8.1 编译型 Agent / 权限门禁
+
+- `AIARCH004` 使用跨方法 call graph 追踪任何可能减少 enabled Admin 的路径，包括 interface dispatch、泛型 helper 和 lambda。路径必须同时可达唯一 `ITransactionalExecutionService` 和 enabled-admin invariant guard，否则为 compiler error；运行时真实 PostgreSQL 锁/竞态测试仍负责证明事务与 retry 语义。
+- `AIARCH005` 要求具体 Agent plugin 显式 override `Description` 和 `ChatExposureMode`，并至少暴露一个带 `DescriptionAttribute` 的实例 tool。组件扫描、DI activation 和加载只属于 `AICopilot.AgentPlugin.Runtime`；零调用插件、静态假 tool、宿主内伪业务成功路径和生产 Fake/Stub/Test executor 必须物理删除。
+- 生产树中唯一 test-double 例外是完全限定类型 `AICopilot.AiGatewayService.AgentTasks.MockMcpAgentToolExecutor`：它必须保持 `internal`，只能在 `Environment.IsDevelopment()` 且 `AiGateway:MockMcp:Enabled=true` 时注册，输出必须带 mock/simulation 事实且不能执行外部副作用。同名类型、换 namespace、wrapper/adapter 或第二个 mock executor 均不在例外内。
+- `AIARCH007` 要求 service 的公开 command/query/stream request 显式声明 `AuthorizeRequirement`，stream 没有例外；只有 `FinalizeCloudOidcLoginCommand`、`LoginUserCommand`、`GetCurrentUserProfileQuery`、`GetInitializationStatusQuery` 四个完全限定 Identity 公开请求例外。资源所有权/动态权限不得用不真实的单一静态权限换绿；只有 `GetArtifactWorkspaceQuery` / `DownloadArtifactQuery -> ArtifactWorkspaceQueryCoordinator` 和 `ApproveAgentApprovalCommand` / `RejectAgentApprovalCommand -> AgentApprovalDecisionCoordinator` 四个完全限定 `ResourceAuthorizationOwner` 对，并由 coordinator 执行真实 owner/approval-type/privileged permission 校验。HttpApi Controller action 必须在类或方法上显式 `[Authorize]` / `[AllowAnonymous]`，同名类型或 attribute alias 不能扩大例外。
+- 上述边界由 `AICopilot.Architecture.Analyzers` 在所有生产编译中以 Error 执行，`AICopilot.Architecture.AnalyzerTests` 保持正/反语义 fixture 和真实临时 csproj 编译 fixture；不得恢复同义 Regex/字符串影子检查。
+
 ## 9. 验收命令
 
 ```bash

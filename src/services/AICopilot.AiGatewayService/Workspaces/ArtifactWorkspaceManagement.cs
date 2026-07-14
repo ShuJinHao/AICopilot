@@ -81,8 +81,10 @@ public sealed record ArtifactWorkspaceSettingsDto(
     IReadOnlyCollection<string> AllowedArtifactTypes,
     bool AllowsUserDefinedPath);
 
+[ResourceAuthorizationOwner(typeof(ArtifactWorkspaceQueryCoordinator))]
 public sealed record GetArtifactWorkspaceQuery(string Code) : IQuery<Result<ArtifactWorkspaceDto>>;
 
+[ResourceAuthorizationOwner(typeof(ArtifactWorkspaceQueryCoordinator))]
 public sealed record DownloadArtifactQuery(Guid Id) : IQuery<Result<ArtifactDownloadDto>>;
 
 [AuthorizeRequirement("AiGateway.SubmitFinalReview")]

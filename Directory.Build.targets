@@ -1,4 +1,13 @@
 <Project>
+  <ItemGroup Condition="'$(MSBuildProjectName)' != 'AICopilot.Architecture.Analyzers' and '$(IsTestProject)' != 'true' and '$(AICopilotTestRole)' != 'Support'">
+    <ProjectReference Include="$(MSBuildThisFileDirectory)src/analyzers/AICopilot.Architecture.Analyzers/AICopilot.Architecture.Analyzers.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false"
+                      IsAspireProjectResource="false"
+                      PrivateAssets="all" />
+    <AdditionalFiles Include="@(ProjectReference)" />
+  </ItemGroup>
+
   <Target Name="ValidateAICopilotDeploymentPolicy"
           BeforeTargets="PrepareForBuild"
           Condition="'$(DesignTimeBuild)' != 'true' and '$(MSBuildProjectName)' == 'AICopilot.HttpApi'">

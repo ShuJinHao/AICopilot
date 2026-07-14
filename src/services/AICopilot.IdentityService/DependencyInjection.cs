@@ -1,4 +1,3 @@
-using AICopilot.AgentPlugin;
 using AICopilot.IdentityService.Authorization;
 using AICopilot.IdentityService.Services;
 using AICopilot.Services.Contracts;
@@ -22,10 +21,5 @@ public static class DependencyInjection
         builder.Services.AddScoped<EnabledAdminInvariantPolicy>();
         builder.Services.AddSingleton<ICloudIdentityStatusValidationCache, CloudIdentityStatusValidationCache>();
         builder.Services.AddScoped<ICloudIdentityStatusValidator, CloudIdentityStatusValidator>();
-
-        builder.Services.AddAgentPlugin(registrar =>
-        {
-            registrar.RegisterPluginFromAssembly(Assembly.GetExecutingAssembly());
-        });
     }
 }

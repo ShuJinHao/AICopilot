@@ -1,5 +1,8 @@
 <Solution>
   <Folder Name="/src/" />
+  <Folder Name="/src/analyzers/">
+    <Project Path="src/analyzers/AICopilot.Architecture.Analyzers/AICopilot.Architecture.Analyzers.csproj" />
+  </Folder>
   <Folder Name="/src/core/">
     <Project Path="src/core/AICopilot.Core.AiGateway/AICopilot.Core.AiGateway.csproj" Id="8f337f21-7397-4254-afdc-cc1e04cca148" />
     <Project Path="src/core/AICopilot.Core.DataAnalysis/AICopilot.Core.DataAnalysis.csproj" Id="0e6fb958-0b77-418e-b309-be283c8a4119" />
@@ -38,6 +41,7 @@
     <Project Path="src/shared/AICopilot.Visualization/AICopilot.Visualization.csproj" Id="1ca00ef7-e8d3-41ae-bb71-4915e45478ce" />
   </Folder>
   <Folder Name="/src/tests/">
+    <Project Path="src/tests/AICopilot.Architecture.AnalyzerTests/AICopilot.Architecture.AnalyzerTests.csproj" />
     <Project Path="src/tests/AICopilot.ArchitectureTests/AICopilot.ArchitectureTests.csproj" />
     <Project Path="src/tests/AICopilot.AiEvalTests/AICopilot.AiEvalTests.csproj" />
     <Project Path="src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj" />

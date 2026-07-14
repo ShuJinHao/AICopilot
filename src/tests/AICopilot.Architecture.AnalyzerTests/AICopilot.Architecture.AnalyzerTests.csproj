@@ -1,33 +1,40 @@
 <Project Sdk="Microsoft.NET.Sdk">
+
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
-    <AICopilotTestKind>Unit</AICopilotTestKind>
+    <AICopilotTestKind>ArchitectureAnalyzer</AICopilotTestKind>
     <AICopilotTestRuntime>Pure</AICopilotTestRuntime>
     <AICopilotTestCadence>PR</AICopilotTestCadence>
-    <AICopilotTestOwner>IdentityPolicy</AICopilotTestOwner>
+    <AICopilotTestOwner>Architecture</AICopilotTestOwner>
     <AICopilotRequired>true</AICopilotRequired>
   </PropertyGroup>
+
   <ItemGroup>
-    <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="FluentAssertions" Version="8.8.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.6.0" PrivateAssets="all" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+    <PackageReference Include="coverlet.collector" Version="6.0.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
   </ItemGroup>
+
   <ItemGroup>
-    <ProjectReference Include="..\..\services\AICopilot.AiGatewayService\AICopilot.AiGatewayService.csproj" />
-    <ProjectReference Include="..\..\services\AICopilot.IdentityService\AICopilot.IdentityService.csproj" />
-    <ProjectReference Include="..\..\services\AICopilot.Services.Contracts\AICopilot.Services.Contracts.csproj" />
+    <ProjectReference Include="..\..\analyzers\AICopilot.Architecture.Analyzers\AICopilot.Architecture.Analyzers.csproj" />
   </ItemGroup>
+
   <ItemGroup>
     <Using Include="FluentAssertions" />
     <Using Include="Xunit" />
   </ItemGroup>
+
 </Project>

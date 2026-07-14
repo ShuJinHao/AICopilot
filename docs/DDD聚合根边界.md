@@ -21,6 +21,12 @@
 
 `DataSourcePermissionGrant` 当前保留在白名单内，但标记为待评估对象。后续如果权限授权生命周期能完全归入 `BusinessDatabase`，应下沉为 `BusinessDatabase` 子实体或专用权限记录，并从白名单移除。
 
+## 编译型边界
+
+- `AIARCH002` 使用 Roslyn symbol 语义检查 `IAggregateRoot` 和 `IRepository<T>` / `IReadRepository<T>`。它只接受上述白名单的完全限定类型名；别名、全局 using、泛型 helper 或换同名 namespace 都不能绕过。修改白名单必须先修改本契约，再同步 Analyzer 与正/反例 fixture。
+- `AIARCH003` 使用 Roslyn operation 语义阻断未授权项目的 `DbContext`、EF write API、Dapper/Npgsql 与直接 SQL 调用。批准 owner 只有项目 `AICopilot.EntityFrameworkCore`、`AICopilot.Dapper`、仅负责 migration/seed 的 `AICopilot.MigrationWorkApp`，以及精确类型 `AICopilot.Infrastructure.AiGateway.PostgreSqlSessionExecutionLock` 及其嵌套实现。同名类型、adapter、wrapper 或其它 Infrastructure 类型不在例外内。
+- 不允许用 `NoWarn`、降级 diagnostic、添加别名 owner 或保留词法影子门禁来扩大例外。真实 `DbSet<T>` 分类、数据库迁移布局和运行时存储行为仍由下文契约与动态架构/持久化测试验证，不与 Analyzer 重复做字符串扫描。
+
 ## 当前架构债
 
 当前聚合根债务清单为空。队列、投影、审计、worker 状态和执行过程记录均不得重新进入 `IAggregateRoot<>` 或泛型 repository 白名单。
