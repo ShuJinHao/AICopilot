@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "3.1.0-entry-candidate",
+  "schemaVersion": "3.2.0-entry-post-commit-evidence-sync",
   "auditId": "TEST-GOV-RULE-EXTRACTION-001-AI",
   "project": "AICopilot",
   "baseSha": "198cc59318f4a1748c719b9b8ecff1d969952ce8",
@@ -54,7 +54,7 @@
     "preAuditBytesAvailable": false,
     "auditMode": "full-current-snapshot-reaudit",
     "reason": "Only the pre-audit SHA-256 and line count were retained before concurrent main-owned plan edits; exact pre-audit bytes are unavailable, so no byte diff or auditedDiffSha256 is claimed.",
-    "finalSha256": "505dc9fc60963cbf1cd0c4cd65d76ad4fa85c3ce99c11b117bfd35fa7744ba3b",
+    "finalSha256": "e03b382bf63c7a5b9561c7225858d36c95d2e5cdfb44fdf5f3b347193dafe027",
     "finalLineCount": 1418,
     "auditedDiffSha256": null,
     "topLevelSectionInventory": {
@@ -80,17 +80,18 @@
         { "ordinal": 17, "startLine": 1290, "endLine": 1328, "sha256": "8b12fc9d3ed2236cdea8c323b8f021d4c4b4356aace1db9588039bfb2a9af22e" },
         { "ordinal": 18, "startLine": 1329, "endLine": 1348, "sha256": "a8002c6627e048f668c5555cb21abe00313ac94eb20640dfa0f72ac1c930186b" },
         { "ordinal": 19, "startLine": 1349, "endLine": 1390, "sha256": "a599314dd3007661cc3760d845556a14e90ca60a5e95a61b7d3580029baade87" },
-        { "ordinal": 20, "startLine": 1391, "endLine": 1418, "sha256": "7e78dc6691be6bb0e4dc55a3c2c62796058be5ba99435a9202d1a4a20f8134c5" }
+        { "ordinal": 20, "startLine": 1391, "endLine": 1418, "sha256": "dbdcfe6fe27d8189650fde75473b221b17df511c81458221669beee78e7c0dab" }
       ]
     },
     "decisionMappings": [
-      { "planSection": "6.5", "decision": "project-extraction-closed-by-pushed-independent-commit-and-cross-review-entry-candidate-prepared", "batchIds": ["TEST-GOV-RULE-EXTRACTION-001-AI", "TEST-GOV-RULE-EXTRACTION-001-AI-ENTRY"] },
+      { "planSection": "6.5", "decision": "project-extraction-and-entry-commit-pushed-feature-branch-effective-default-main-false", "batchIds": ["TEST-GOV-RULE-EXTRACTION-001-AI", "TEST-GOV-RULE-EXTRACTION-001-AI-ENTRY"] },
       { "planSection": "9", "decision": "ai-rule-extraction-target-and-read-only-boundaries-reconciled", "batchIds": ["TEST-GOV-RULE-EXTRACTION-001-AI"] },
       { "planSection": "16.2", "decision": "multi-agent-and-receipt-trust-boundaries-retained", "batchIds": ["TEST-GOV-RULE-EXTRACTION-001-AI"] },
       { "planSection": "20", "decision": "ai-counts-review-debts-and-no-e0-claim-reconciled", "batchIds": ["TEST-GOV-RULE-EXTRACTION-001-AI"] }
     ],
-    "status": "complete-full-current-snapshot-reaudit",
-    "reviewer": "local-main-agent-and-nonauthor-cross-review-pass-2026-07-14"
+    "status": "complete-full-current-snapshot-reaudit-after-entry-push",
+    "entryPushEvidenceIncluded": true,
+    "reviewer": "main-agent-post-commit-evidence-sync-review-pass-2026-07-14"
   },
   "decisionModel": {
     "canonicalRuleCount": 98,
@@ -128,17 +129,25 @@
     "rollingReviewCoverage": "111/111",
     "workspaceHistoryCoreCandidateLineCoverage": "45/45",
     "nonConclusionHistoryPreserved": true,
-    "defaultRollingReviewReadingStillRequired": true,
+    "defaultRollingReviewReadingStillRequired": false,
     "defaultRollingReviewReadingStillRequiredAtParentCommit": true,
+    "defaultRollingReviewReadingStillRequiredOnFeatureBranch": false,
+    "defaultRollingReviewReadingStillRequiredOnDefaultMain": true,
     "defaultRollingReviewFullReadRemovedInCandidate": true,
-    "conditionalHistoryEntryEnabled": false,
+    "defaultRollingReviewFullReadRemovedInEntryCommit": true,
+    "conditionalHistoryEntryEnabled": true,
+    "conditionalHistoryEntryEnabledOnFeatureBranch": true,
+    "conditionalHistoryEntryEnabledOnDefaultMain": false,
     "conditionalHistoryEntryPrepared": true,
-    "conditionalHistoryEntryIsUncommittedCandidate": true,
-    "repositoryHistoryEffective": false,
+    "conditionalHistoryEntryIsUncommittedCandidate": false,
+    "repositoryHistoryEffective": true,
+    "repositoryHistoryEffectiveScope": "origin/agent/ai-rule-extraction-20260714 at 24cdfe611f1ce0e2ca19b6673cb24ad8a7781e3a",
+    "defaultMainEffective": false,
     "e0Effective": false,
     "closureBasis": "../docs/三项目测试架构治理总计划.md#65-规则权威与历史复盘提取审计",
-    "reason": "Section 6.5 project extraction closure is proven by complete zero-pending coverage, the pushed independent extraction commit 190c458db19a81c9e766117cd0d785836c76d99f, main-agent/non-author review and the three-project cross-final review. The current working tree is a separate uncommitted entry-migration candidate; trust-root/E0 platform facts remain false and are tracked separately.",
-    "reviewer": "local-main-agent-and-nonauthor-cross-review-pass-2026-07-14"
+    "reason": "Section 6.5 project extraction closure is proven by complete zero-pending coverage, the pushed independent extraction commit 190c458db19a81c9e766117cd0d785836c76d99f, main-agent/non-author review and the three-project cross-final review. The separately reviewed ENTRY commit 24cdfe611f1ce0e2ca19b6673cb24ad8a7781e3a is pushed and makes the conditional-history entry effective only on its feature branch; default main, trust-root and E0 facts remain false. The later evidence-sync working tree is not part of that ENTRY commit.",
+    "entryContentReview": "main-agent-and-nonauthor-review-pass-before-entry-commit",
+    "reviewer": "main-agent-post-commit-evidence-sync-review-pass-2026-07-14"
   },
   "independentCommitEvidence": {
     "batchId": "TEST-GOV-RULE-EXTRACTION-001-AI",
@@ -164,11 +173,23 @@
     "batchId": "TEST-GOV-RULE-EXTRACTION-001-AI-ENTRY",
     "parentSha": "190c458db19a81c9e766117cd0d785836c76d99f",
     "parentRemoteTrackingRef": "origin/agent/ai-rule-extraction-20260714",
-    "parentRemoteTipVerified": true,
-    "status": "prepared-uncommitted-candidate",
-    "candidateCommitSha": null,
-    "candidateCommitted": false,
-    "candidatePushed": false,
+    "parentWasRemoteTipAtCandidatePreparation": true,
+    "status": "committed-and-pushed-feature-branch",
+    "candidateCommitSha": "24cdfe611f1ce0e2ca19b6673cb24ad8a7781e3a",
+    "candidateCommitted": true,
+    "candidatePushed": true,
+    "commitEvidence": {
+      "commitSha": "24cdfe611f1ce0e2ca19b6673cb24ad8a7781e3a",
+      "parentSha": "190c458db19a81c9e766117cd0d785836c76d99f",
+      "treeSha": "a91c0092b90a54b5e5d1176b4ae4c2c22c2b8b1e",
+      "commitMessage": "docs(governance): migrate ai history review entry",
+      "branch": "agent/ai-rule-extraction-20260714",
+      "remoteTrackingRef": "origin/agent/ai-rule-extraction-20260714",
+      "remoteTipObserved": "24cdfe611f1ce0e2ca19b6673cb24ad8a7781e3a",
+      "remoteTipMatchesEntryCommit": true
+    },
+    "featureBranchEffective": true,
+    "defaultMainEffective": false,
     "allowedWrittenPaths": [
       "AGENTS.md",
       "资料/AICopilot业务规则.md",
@@ -212,10 +233,13 @@
       ],
       "provenance": "workspace total plan section 6.5 fixed text plus the user's explicit three-project entry-migration authorization",
       "candidatePrepared": true,
-      "repositoryHistoryEffective": false,
+      "repositoryHistoryEffective": true,
+      "repositoryHistoryEffectiveScope": "origin/agent/ai-rule-extraction-20260714 at 24cdfe611f1ce0e2ca19b6673cb24ad8a7781e3a",
+      "defaultMainEffective": false,
       "debtId": "AI-RULE-AUDIT-LINT-001",
       "debtStatus": "open"
     },
+    "candidateFilesDigestBasis": "SHA-256 and line count of the exact blobs committed in entryMigration.commitEvidence.commitSha 24cdfe611f1ce0e2ca19b6673cb24ad8a7781e3a. These values are immutable ENTRY-commit evidence and are not asserted to equal the later post-commit evidence-sync working tree.",
     "candidateFiles": [
       { "path": "AGENTS.md", "sha256": "fb5d7d99f7bd9c769b628381efd1ea8b3bfd50d8a919adf9a499ec87a57d5893", "lineCount": 224 },
       { "path": "资料/AICopilot业务规则.md", "sha256": "2ee37c3746f57f51fe97ea05c88119566b389d2b5145cbd246a3f23989fbd651", "lineCount": 235 },
@@ -224,7 +248,9 @@
       { "path": "docs/改动复盘与规则沉淀.md", "sha256": "f3d91dd164a4efbd1324c23c433fa474b88398298746d64414b7d0f04e7fe35d", "lineCount": 1896 }
     ],
     "ledgerSelfDigestExcluded": true,
-    "reviewer": "pending-main-agent-final-review-of-entry-candidate"
+    "postCommitEvidenceSyncWorkingTreeDigestsClaimed": false,
+    "entryContentReviewer": "main-agent-and-nonauthor-review-pass-before-entry-commit",
+    "reviewer": "main-agent-post-commit-evidence-sync-review-pass-2026-07-14"
   },
   "projectClosureEvidence": {
     "appliesToCanonicalRuleCount": 98,
@@ -232,8 +258,12 @@
     "perItemCandidateStatusAndReviewerFieldsRetainedAsExtractionCommitSnapshot": true,
     "historicalPendingStatementsRetained": true,
     "projectRuleExtractionClosure": true,
-    "conditionalHistoryEntryCandidatePrepared": true,
-    "entryCandidateRequiresIndependentCommitToBecomeRepositoryState": true,
+    "conditionalHistoryEntryCandidatePreparedAtParentCommit": true,
+    "entryIndependentCommitRequirementSatisfied": true,
+    "entryMigrationCommitted": true,
+    "entryMigrationPushed": true,
+    "featureBranchEffective": true,
+    "defaultMainEffective": false,
     "trustRootEffective": false,
     "e0": false
   },

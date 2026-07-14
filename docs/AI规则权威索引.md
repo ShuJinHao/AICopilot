@@ -1,6 +1,6 @@
 # AICopilot 规则权威索引
 
-本文档是 AICopilot 当前 Rule ID 注册表，但不是已生效的 required CI trust root。`TEST-GOV-RULE-EXTRACTION-001-AI` 已覆盖 111/111 个历史 section、18 个细粒度命题和工作区历史 45/45 个候选源行，`Needs-Decision=0`；提取结果已由独立且已推送提交 `190c458db19a81c9e766117cd0d785836c76d99f` 固定，并完成主 agent、非作者与三项目交叉终审，因此 `projectRuleExtractionClosure=true`。`TEST-GOV-RULE-EXTRACTION-001-AI-ENTRY` 仅把项目滚动复盘迁移为条件检索，须以本批独立提交后生效。base-owned required context、branch protection、独立平台 reviewer 和当前 required run 仍未证明，`trustRoot.effective=false`、`E0=false`，不能与 §6.5 的项目规则提取关单混写或互相替代。
+本文档是 AICopilot 当前 Rule ID 注册表，但不是已生效的 required CI trust root。`TEST-GOV-RULE-EXTRACTION-001-AI` 已覆盖 111/111 个历史 section、18 个细粒度命题和工作区历史 45/45 个候选源行，`Needs-Decision=0`；提取结果已由独立且已推送提交 `190c458db19a81c9e766117cd0d785836c76d99f` 固定，并完成主 agent、非作者与三项目交叉终审，因此 `projectRuleExtractionClosure=true`。`TEST-GOV-RULE-EXTRACTION-001-AI-ENTRY` 已由独立提交 `24cdfe611f1ce0e2ca19b6673cb24ad8a7781e3a` 固定并推送到 `origin/agent/ai-rule-extraction-20260714`，因此项目滚动复盘的条件检索入口在该 feature branch 生效；默认 `main` 尚未包含该提交。base-owned required context、branch protection、独立平台 reviewer 和当前 required run 仍未证明，`trustRoot.effective=false`、`E0=false`，不能与 §6.5 的项目规则提取关单或 ENTRY 分支状态混写、互相替代。
 
 - 安全部署：[`AICopilot安全部署契约.md`](AICopilot安全部署契约.md)
 - Cloud 只读：[`Cloud只读数据分析契约.md`](Cloud只读数据分析契约.md)
