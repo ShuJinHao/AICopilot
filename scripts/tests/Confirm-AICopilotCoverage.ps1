@@ -261,6 +261,45 @@ function Assert-CoverageThreshold {
     }
 }
 
+function Resolve-LogicalCoverageCopies {
+    param(
+        [Parameter(Mandatory)][string]$ProjectName,
+        [Parameter(Mandatory)][object[]]$Copies
+    )
+
+    if ($Copies.Count -eq 0) {
+        throw "$ProjectName coverage binding requires at least one physical report."
+    }
+    foreach ($copy in $Copies) {
+        if ([string]::IsNullOrWhiteSpace([string]$copy.path) -or
+            [string]::IsNullOrWhiteSpace([string]$copy.sha256)) {
+            throw "$ProjectName coverage binding contains a physical copy without path/SHA256 identity."
+        }
+    }
+    $digests = @($Copies.sha256 | Sort-Object -Unique)
+    if ($digests.Count -ne 1) {
+        throw "$ProjectName coverage physical copies differ by SHA256 and cannot be treated as one logical report: $($digests -join ',')."
+    }
+    return [pscustomobject][ordered]@{
+        sha256 = [string]$digests[0]
+        physicalCopies = $Copies.Count
+        paths = @($Copies.path | Sort-Object)
+    }
+}
+
+function Assert-CoverageDigestOwner {
+    param(
+        [Parameter(Mandatory)][Collections.IDictionary]$OwnerByDigest,
+        [Parameter(Mandatory)][string]$ProjectName,
+        [Parameter(Mandatory)][string]$Digest
+    )
+
+    if ($OwnerByDigest.Contains($Digest)) {
+        throw "Coverage logical report digest is bound across runners: digest=$Digest, first=$($OwnerByDigest[$Digest]), second=$ProjectName."
+    }
+    $OwnerByDigest[$Digest] = $ProjectName
+}
+
 function Invoke-GuardSelfTest {
     $assemblyFailure = $null
     try {
@@ -373,6 +412,42 @@ function Invoke-GuardSelfTest {
         throw "Orphan coverage report fixture did not fail closed: $orphanFailure"
     }
 
+    $sameDigestCopies = Resolve-LogicalCoverageCopies 'RunnerA' @(
+        [pscustomobject]@{ path = '/results/a/first.xml'; sha256 = 'abc' },
+        [pscustomobject]@{ path = '/results/a/second.xml'; sha256 = 'abc' }
+    )
+    if ($sameDigestCopies.physicalCopies -ne 2 -or
+        [string]$sameDigestCopies.sha256 -cne 'abc') {
+        throw 'Byte-identical VSTest coverage copies were not reconciled as one logical report.'
+    }
+
+    $conflictingCopyFailure = $null
+    try {
+        Resolve-LogicalCoverageCopies 'RunnerA' @(
+            [pscustomobject]@{ path = '/results/a/first.xml'; sha256 = 'abc' },
+            [pscustomobject]@{ path = '/results/a/second.xml'; sha256 = 'def' }
+        ) *> $null
+    }
+    catch {
+        $conflictingCopyFailure = $_.Exception.Message
+    }
+    if ($conflictingCopyFailure -notmatch 'physical copies differ by SHA256') {
+        throw "Conflicting physical coverage copy fixture did not fail closed: $conflictingCopyFailure"
+    }
+
+    $digestOwners = @{}
+    Assert-CoverageDigestOwner $digestOwners 'RunnerA' 'abc'
+    $crossRunnerFailure = $null
+    try {
+        Assert-CoverageDigestOwner $digestOwners 'RunnerB' 'abc'
+    }
+    catch {
+        $crossRunnerFailure = $_.Exception.Message
+    }
+    if ($crossRunnerFailure -notmatch 'bound across runners') {
+        throw "Cross-runner coverage reuse fixture did not fail closed: $crossRunnerFailure"
+    }
+
     $dirtyHeadFailure = $null
     try {
         Assert-CleanHeadBinding 'abc' 'abc' $false 1 0
@@ -384,7 +459,7 @@ function Invoke-GuardSelfTest {
         throw "Dirty-HEAD coverage fixture did not fail closed: $dirtyHeadFailure"
     }
 
-    Write-Host 'AICopilot coverage omission guards passed. cases=9.'
+    Write-Host 'AICopilot coverage omission guards passed. cases=11.'
 }
 
 function Get-PortablePdbUniverse {
@@ -722,6 +797,7 @@ $reportBindings = [Collections.Generic.List[object]]::new()
 $observedMap = @{}
 $observedSourceIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
 $observedAssemblyIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+$coverageOwnerByDigest = @{}
 $assemblyEvidenceByName = @{}
 foreach ($assemblyEvidence in @($inventory.productionAssemblies)) {
     $assemblyName = [string]$assemblyEvidence.assembly
@@ -737,8 +813,8 @@ foreach ($project in $requiredProjects) {
     }
     $trxFiles = @(Get-ChildItem $runnerDirectory -Filter "$($project.projectName).trx" -File -Recurse)
     $coverageFilesForRunner = @(Get-ChildItem $runnerDirectory -Filter 'coverage.cobertura.xml' -File -Recurse)
-    if ($trxFiles.Count -ne 1 -or $coverageFilesForRunner.Count -ne 1) {
-        throw "$($project.projectName) coverage binding requires exactly one TRX and one report; trx=$($trxFiles.Count), reports=$($coverageFilesForRunner.Count)."
+    if ($trxFiles.Count -ne 1 -or $coverageFilesForRunner.Count -eq 0) {
+        throw "$($project.projectName) coverage binding requires exactly one TRX and at least one physical report; trx=$($trxFiles.Count), physicalReports=$($coverageFilesForRunner.Count)."
     }
     [xml]$trx = Get-Content $trxFiles[0].FullName -Raw
     $attachments = @($trx.TestRun.ResultSummary.CollectorDataEntries.Collector.UriAttachments.UriAttachment.A)
@@ -754,6 +830,37 @@ foreach ($project in $requiredProjects) {
                 '/coverage.cobertura.xml', [StringComparison]::Ordinal))) {
         throw "$($project.projectName) TRX must contain exactly one XPlat coverage attachment."
     }
+    $runnerDirectoryFullPath = [IO.Path]::GetFullPath($runnerDirectory)
+    $coverageCopies = @($coverageFilesForRunner | ForEach-Object {
+        $coverageFullPath = [IO.Path]::GetFullPath($_.FullName)
+        $coverageRelativePath = [IO.Path]::GetRelativePath(
+            $runnerDirectoryFullPath,
+            $coverageFullPath).Replace('\', '/')
+        if ($coverageRelativePath -eq '..' -or
+            $coverageRelativePath.StartsWith('../', [StringComparison]::Ordinal)) {
+            throw "$($project.projectName) coverage copy escapes its runner binding: $coverageFullPath."
+        }
+        [pscustomobject][ordered]@{
+            path = $coverageFullPath
+            relativePath = $coverageRelativePath
+            sha256 = (Get-FileHash $coverageFullPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    })
+    $logicalCoverage = Resolve-LogicalCoverageCopies ([string]$project.projectName) $coverageCopies
+    Assert-CoverageDigestOwner `
+        $coverageOwnerByDigest `
+        ([string]$project.projectName) `
+        ([string]$logicalCoverage.sha256)
+    $attachmentMatches = @($coverageCopies | Where-Object {
+        [string]$_.relativePath -ceq $attachmentHref -or
+        ([string]$_.relativePath).EndsWith(
+            "/$attachmentHref",
+            [StringComparison]::Ordinal)
+    })
+    if ($attachmentMatches.Count -ne 1) {
+        throw "$($project.projectName) TRX attachment must bind exactly one physical coverage copy; href=$attachmentHref, matches=$($attachmentMatches.Count)."
+    }
+    $boundCoveragePath = [string]$attachmentMatches[0].path
     $storages = @($trx.TestRun.TestDefinitions.UnitTest | ForEach-Object {
         [string]$_.storage
     } | Sort-Object -Unique)
@@ -763,7 +870,7 @@ foreach ($project in $requiredProjects) {
     }
 
     $runnerCoverage = Get-ObservedCoverageMap `
-        $coverageFilesForRunner[0].FullName `
+        $boundCoveragePath `
         $pdbUniverse.map `
         $sourceByPath
     $runnerBinDirectory = Split-Path ([IO.Path]::GetFullPath($storages[0])) -Parent
@@ -804,17 +911,36 @@ foreach ($project in $requiredProjects) {
         repositoryHead = $currentHead
         trxPath = $trxFiles[0].FullName
         trxSha256 = (Get-FileHash $trxFiles[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-        coveragePath = $coverageFilesForRunner[0].FullName
-        coverageSha256 = (Get-FileHash $coverageFilesForRunner[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        coveragePath = $boundCoveragePath
+        coverageSha256 = [string]$logicalCoverage.sha256
+        physicalCopies = [int]$logicalCoverage.physicalCopies
+        physicalCoveragePaths = @($logicalCoverage.paths)
         observedProductionAssemblies = @($runnerCoverage.assemblyIds | Sort-Object)
         observedProductionSources = @($runnerCoverage.sourceIds | Sort-Object)
     })
 }
 
 $allCoverageFiles = @(Get-ChildItem $resolvedResultsDirectory -Filter 'coverage.cobertura.xml' -File -Recurse)
-$boundCoveragePaths = @($reportBindings.coveragePath | ForEach-Object { [IO.Path]::GetFullPath($_) })
-$actualCoveragePaths = @($allCoverageFiles.FullName | ForEach-Object { [IO.Path]::GetFullPath($_) })
-Assert-ExactIdentitySet $boundCoveragePaths $actualCoveragePaths 'Required coverage report tree'
+$boundLogicalReports = @($reportBindings | ForEach-Object {
+    "$($_.projectName)|$($_.coverageSha256)"
+})
+$actualLogicalReports = @(
+    $allCoverageFiles |
+        ForEach-Object {
+            $relativePath = [IO.Path]::GetRelativePath(
+                $resolvedResultsDirectory,
+                [IO.Path]::GetFullPath($_.FullName)).Replace('\', '/')
+            if ($relativePath -eq '..' -or
+                $relativePath.StartsWith('../', [StringComparison]::Ordinal) -or
+                -not $relativePath.Contains('/')) {
+                throw "Coverage report tree contains a copy outside a runner directory: $($_.FullName)."
+            }
+            $runnerName = $relativePath.Substring(0, $relativePath.IndexOf('/'))
+            "$runnerName|$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())"
+        } |
+        Sort-Object -Unique
+)
+Assert-ExactIdentitySet $boundLogicalReports $actualLogicalReports 'Required logical coverage report tree'
 
 Assert-ObservedProductionCoverage `
     @($pdbUniverse.assemblyIds) `
@@ -909,6 +1035,8 @@ $output = [ordered]@{
     metrics = [ordered]@{
         reportCount = $reportBindings.Count
         attachmentCount = $allCoverageFiles.Count
+        logicalReports = $reportBindings.Count
+        physicalCopies = $allCoverageFiles.Count
         requiredProjects = @($requiredProjects.projectName | Sort-Object)
         observedProductionAssemblies = $observedAssemblyIds.Count
         observedProductionSources = $observedSourceIds.Count
@@ -927,6 +1055,10 @@ $output = [ordered]@{
             trxSha256 = $_.trxSha256
             coveragePath = [IO.Path]::GetRelativePath($RepositoryRoot, $_.coveragePath).Replace('\', '/')
             coverageSha256 = $_.coverageSha256
+            physicalCopies = $_.physicalCopies
+            physicalCoveragePaths = @($_.physicalCoveragePaths | ForEach-Object {
+                [IO.Path]::GetRelativePath($RepositoryRoot, $_).Replace('\', '/')
+            })
             observedProductionAssemblies = $_.observedProductionAssemblies
             observedProductionSources = $_.observedProductionSources
         }
@@ -967,4 +1099,4 @@ if ($UpdateBaseline) {
     $updatedBaseline | ConvertTo-Json -Depth 8 | Set-Content $resolvedBaselinePath -Encoding utf8NoBOM
 }
 
-Write-Host "AICopilot coverage passed. reports=$($reportBindings.Count), assemblies=$($pdbUniverse.assemblyCount), sources=$($pdbUniverse.sourceIds.Count), lines=$($metrics.coveredLines)/$($metrics.totalLines) ($($metrics.lineRate)), branches=$($metrics.coveredBranches)/$($metrics.totalBranches) ($($metrics.branchRate))."
+Write-Host "AICopilot coverage passed. logicalReports=$($reportBindings.Count), physicalCopies=$($allCoverageFiles.Count), assemblies=$($pdbUniverse.assemblyCount), sources=$($pdbUniverse.sourceIds.Count), lines=$($metrics.coveredLines)/$($metrics.totalLines) ($($metrics.lineRate)), branches=$($metrics.coveredBranches)/$($metrics.totalBranches) ($($metrics.branchRate))."
