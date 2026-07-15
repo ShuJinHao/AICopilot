@@ -6121,6 +6121,28 @@
     },
     {
       "assembly": "AICopilot.ArchitectureTests",
+      "class": "AICopilot.ArchitectureTests.DataWorkerCompositionArchitectureTests",
+      "method": "AddDataWorkerRuntime_ShouldRegisterWorkerIdentityMaintenanceAndDispatchers",
+      "case": "AICopilot.ArchitectureTests.DataWorkerCompositionArchitectureTests.AddDataWorkerRuntime_ShouldRegisterWorkerIdentityMaintenanceAndDispatchers",
+      "kind": "Architecture",
+      "runtime": "Filesystem",
+      "capability": "Platform",
+      "concern": "Compatibility",
+      "profile": "Default",
+      "risk": "P1",
+      "ruleId": "AI-ARCH-001",
+      "regressionId": "AI-REG-ARCHITECTURE-RUNTIME",
+      "runtimeDependencies": [
+        "Filesystem"
+      ],
+      "cadence": "PR",
+      "owner": "Architecture",
+      "required": true,
+      "skipExpected": false,
+      "status": "Expected"
+    },
+    {
+      "assembly": "AICopilot.ArchitectureTests",
       "class": "AICopilot.ArchitectureTests.DddAggregateBoundaryTests",
       "method": "AggregateRootNames_ShouldNotUseProcessRecordShapesExceptKnownDebt",
       "case": "AICopilot.ArchitectureTests.DddAggregateBoundaryTests.AggregateRootNames_ShouldNotUseProcessRecordShapesExceptKnownDebt",

@@ -32,6 +32,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\hosts\AICopilot.DataWorker\AICopilot.DataWorker.csproj" />
     <ProjectReference Include="..\..\hosts\AICopilot.HttpApi\AICopilot.HttpApi.csproj" />
     <ProjectReference Include="..\..\infrastructure\AICopilot.Dapper\AICopilot.Dapper.csproj" />
     <ProjectReference Include="..\..\infrastructure\AICopilot.EntityFrameworkCore\AICopilot.EntityFrameworkCore.csproj" />

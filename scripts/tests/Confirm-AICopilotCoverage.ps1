@@ -78,6 +78,71 @@ function ConvertTo-ProductionSourcePath {
     return $normalized
 }
 
+function Resolve-CoberturaProductionSourcePath {
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$FileName,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$SourceRoots
+    )
+
+    $normalizedFileName = $FileName.Replace('\', '/')
+    if ([string]::IsNullOrWhiteSpace($normalizedFileName)) {
+        return $null
+    }
+
+    $repositoryFullPath = [IO.Path]::GetFullPath($RepositoryRoot)
+    $candidatePaths = [Collections.Generic.List[string]]::new()
+    if ([IO.Path]::IsPathRooted($FileName)) {
+        $candidatePaths.Add([IO.Path]::GetFullPath($FileName))
+    }
+    elseif ($SourceRoots.Count -ne 0) {
+        foreach ($sourceRoot in $SourceRoots) {
+            if ([string]::IsNullOrWhiteSpace($sourceRoot)) {
+                continue
+            }
+            $rootPath = if ([IO.Path]::IsPathRooted($sourceRoot)) {
+                [IO.Path]::GetFullPath($sourceRoot)
+            }
+            else {
+                [IO.Path]::GetFullPath((Join-Path $RepositoryRoot $sourceRoot))
+            }
+            $candidatePaths.Add([IO.Path]::GetFullPath((Join-Path $rootPath $FileName)))
+        }
+    }
+    else {
+        $repositoryRelative = ConvertTo-ProductionSourcePath $FileName
+        if ($null -ne $repositoryRelative) {
+            $candidatePaths.Add([IO.Path]::GetFullPath((Join-Path $RepositoryRoot $repositoryRelative)))
+        }
+    }
+
+    $resolved = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($candidatePath in @($candidatePaths | Sort-Object -Unique)) {
+        $normalizedCandidate = [IO.Path]::GetFullPath($candidatePath)
+        $relativePath = [IO.Path]::GetRelativePath(
+            $repositoryFullPath,
+            $normalizedCandidate).Replace('\', '/')
+        if ($relativePath -eq '..' -or
+            $relativePath.StartsWith('../', [StringComparison]::Ordinal)) {
+            if ($normalizedCandidate.Replace('\', '/') -match
+                '/src/(analyzers|core|hosts|infrastructure|services|shared)/.+\.cs$') {
+                throw "Coverage production-looking source escapes RepositoryRoot: $normalizedCandidate."
+            }
+            continue
+        }
+        if ($relativePath -match $productionSourcePattern -and
+            $relativePath -notmatch '(?i)/(?:bin|obj)/') {
+            $null = $resolved.Add($relativePath)
+        }
+    }
+    if ($resolved.Count -gt 1) {
+        throw "Cobertura source roots resolve one filename to multiple production sources: filename=$FileName, candidates=[$(@($resolved | Sort-Object) -join ',')]."
+    }
+    if ($resolved.Count -eq 1) {
+        return @($resolved)[0]
+    }
+    return $null
+}
+
 function Get-CoverageMetrics {
     param([Parameter(Mandatory)][Collections.IDictionary]$Map)
 
@@ -525,6 +590,46 @@ function Invoke-GuardSelfTest {
         Remove-Item $emptyCoveragePath -Force -ErrorAction SilentlyContinue
     }
 
+    $rootStrippedAnalyzerPath = [IO.Path]::GetFullPath(
+        (Join-Path $RepositoryRoot 'src/analyzers/AICopilot.Architecture.Analyzers/AICopilotArchitectureAnalyzer.cs')).TrimStart(
+            [IO.Path]::DirectorySeparatorChar)
+    $resolvedAnalyzerPath = Resolve-CoberturaProductionSourcePath `
+        $rootStrippedAnalyzerPath `
+        @([IO.Path]::DirectorySeparatorChar.ToString())
+    if ([string]$resolvedAnalyzerPath -cne
+        'src/analyzers/AICopilot.Architecture.Analyzers/AICopilotArchitectureAnalyzer.cs') {
+        throw "Root-stripped absolute Cobertura source did not resolve to the exact repository path: $resolvedAnalyzerPath"
+    }
+
+    $externalSourceFailure = $null
+    try {
+        Resolve-CoberturaProductionSourcePath `
+            'outside/src/core/A.cs' `
+            @([IO.Path]::GetTempPath()) *> $null
+    }
+    catch {
+        $externalSourceFailure = $_.Exception.Message
+    }
+    if ($externalSourceFailure -notmatch 'escapes RepositoryRoot') {
+        throw "External production-looking Cobertura source fixture did not fail closed: $externalSourceFailure"
+    }
+
+    $ambiguousSourceFailure = $null
+    try {
+        Resolve-CoberturaProductionSourcePath `
+            'Fixture.cs' `
+            @(
+                (Join-Path $RepositoryRoot 'src/core'),
+                (Join-Path $RepositoryRoot 'src/shared')
+            ) *> $null
+    }
+    catch {
+        $ambiguousSourceFailure = $_.Exception.Message
+    }
+    if ($ambiguousSourceFailure -notmatch 'multiple production sources') {
+        throw "Ambiguous Cobertura source-root fixture did not fail closed: $ambiguousSourceFailure"
+    }
+
     $dirtyHeadFailure = $null
     try {
         Assert-CleanHeadBinding 'abc' 'abc' $false 1 0
@@ -536,7 +641,7 @@ function Invoke-GuardSelfTest {
         throw "Dirty-HEAD coverage fixture did not fail closed: $dirtyHeadFailure"
     }
 
-    Write-Host 'AICopilot coverage omission guards passed. cases=13.'
+    Write-Host 'AICopilot coverage omission guards passed. cases=15.'
 }
 
 function Get-PortablePdbUniverse {
@@ -719,13 +824,19 @@ function Get-ObservedCoverageMap {
     )
 
     [xml]$coverage = Get-Content $ReportPath -Raw
+    $coverageSourceRoots = @(
+        $coverage.SelectNodes('/coverage/sources/source') |
+            ForEach-Object { [string]$_.InnerText }
+    )
     $map = @{}
     $sourceIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     $assemblyIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     foreach ($package in @($coverage.SelectNodes('/coverage/packages/package'))) {
         $packageName = [string]$package.GetAttribute('name')
         foreach ($class in @($package.SelectNodes('classes/class'))) {
-            $sourcePath = ConvertTo-ProductionSourcePath ([string]$class.GetAttribute('filename'))
+            $sourcePath = Resolve-CoberturaProductionSourcePath `
+                ([string]$class.GetAttribute('filename')) `
+                $coverageSourceRoots
             if ($null -eq $sourcePath) {
                 continue
             }
