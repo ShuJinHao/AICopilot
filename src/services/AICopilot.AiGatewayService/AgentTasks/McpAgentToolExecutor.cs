@@ -83,18 +83,7 @@ internal sealed class McpAgentToolExecutor(
 
     private static void EnsureMcpToolSafety(ToolRegistration registration, AiToolDefinition tool)
     {
-        var decision = AiToolSafetyPolicy.EvaluateConfiguredMcp(
-            tool.ReadOnlyDeclared,
-            tool.McpReadOnlyHint,
-            tool.McpDestructiveHint,
-            tool.McpIdempotentHint,
-            tool.CapabilityKind,
-            tool.ExternalSystemType,
-            tool.RiskLevel,
-            tool.ToolName ?? tool.Name,
-            tool.Description,
-            tool.JsonSchema,
-            tool.ReturnJsonSchema);
+        var decision = AiToolSafetyPolicy.EvaluateConfiguredMcp(tool);
         if (!decision.IsAllowed)
         {
             throw new AgentToolExecutionException(

@@ -256,6 +256,20 @@ public sealed class SecurityPolicyUnitTests
         policy.ToolNames.Should().Equal("Echo");
     }
     [Fact]
+    public void McpServerInfo_SecurityMetadata_ShouldBeRequiredBeforeOptionalParameters()
+    {
+        var constructorParameters = typeof(McpServerInfo)
+            .GetConstructors(BindingFlags.Public | BindingFlags.Instance)
+            .Single()
+            .GetParameters();
+        var updateParameters = typeof(McpServerInfo)
+            .GetMethod(nameof(McpServerInfo.Update), BindingFlags.Public | BindingFlags.Instance)!
+            .GetParameters();
+
+        AssertRequiredSecurityMetadata(constructorParameters);
+        AssertRequiredSecurityMetadata(updateParameters);
+    }
+    [Fact]
     public void McpServerInfo_ShouldRejectInvalidInput()
     {
         var emptyName = () => new McpServerInfo(
@@ -263,7 +277,9 @@ public sealed class SecurityPolicyUnitTests
             "description",
             McpTransportType.Stdio,
             "dotnet",
-            "server.dll");
+            "server.dll",
+            externalSystemType: AiToolExternalSystemType.CloudReadOnly,
+            capabilityKind: AiToolCapabilityKind.ReadOnlyQuery);
         emptyName.Should().Throw<ArgumentException>();
 
         var invalidTransport = () => new McpServerInfo(
@@ -271,7 +287,9 @@ public sealed class SecurityPolicyUnitTests
             "description",
             (McpTransportType)999,
             "dotnet",
-            "server.dll");
+            "server.dll",
+            externalSystemType: AiToolExternalSystemType.CloudReadOnly,
+            capabilityKind: AiToolCapabilityKind.ReadOnlyQuery);
         invalidTransport.Should().Throw<ArgumentOutOfRangeException>();
 
         var invalidSseUrl = () => new McpServerInfo(
@@ -279,7 +297,9 @@ public sealed class SecurityPolicyUnitTests
             "description",
             McpTransportType.Sse,
             null,
-            "not-a-url");
+            "not-a-url",
+            externalSystemType: AiToolExternalSystemType.CloudReadOnly,
+            capabilityKind: AiToolCapabilityKind.ReadOnlyQuery);
         invalidSseUrl.Should().Throw<ArgumentException>();
 
         var unsafeSseUrl = () => new McpServerInfo(
@@ -287,7 +307,9 @@ public sealed class SecurityPolicyUnitTests
             "description",
             McpTransportType.Sse,
             null,
-            "http://127.0.0.1/sse");
+            "http://127.0.0.1/sse",
+            externalSystemType: AiToolExternalSystemType.CloudReadOnly,
+            capabilityKind: AiToolCapabilityKind.ReadOnlyQuery);
         unsafeSseUrl.Should().Throw<ArgumentException>();
 
         var cloudServerWithoutReadOnlyCapability = () => new McpServerInfo(
@@ -326,16 +348,17 @@ public sealed class SecurityPolicyUnitTests
             McpTransportType.Sse,
             null,
             "https://relay.example.test/mcp",
-            ChatExposureMode.Advisory,
+            externalSystemType: AiToolExternalSystemType.NonCloud,
+            capabilityKind: AiToolCapabilityKind.SideEffecting,
+            chatExposureMode: ChatExposureMode.Advisory,
+            allowedTools:
             [
                 new McpAllowedTool(
                     "deleteDevice",
                     AiToolExternalSystemType.NonCloud,
                     AiToolCapabilityKind.SideEffecting)
             ],
-            true,
-            AiToolExternalSystemType.NonCloud,
-            AiToolCapabilityKind.SideEffecting);
+            isEnabled: true);
         opaqueDynamicWriteTarget.Should().Throw<ArgumentException>()
             .WithMessage("*cannot establish a verified non-Cloud identity*");
 
@@ -374,6 +397,8 @@ public sealed class SecurityPolicyUnitTests
             McpTransportType.Stdio,
             " dotnet ",
             " server.dll ",
+            AiToolExternalSystemType.CloudReadOnly,
+            AiToolCapabilityKind.ReadOnlyQuery,
             ChatExposureMode.Advisory,
             [
                 new McpAllowedTool(" QueryStatus ", ReadOnlyDeclared: true),
@@ -387,6 +412,21 @@ public sealed class SecurityPolicyUnitTests
         server.Arguments.Should().Be("server.dll");
         server.AllowedTools.Select(tool => tool.ToolName).Should().Equal("QueryStatus");
     }
+
+    private static void AssertRequiredSecurityMetadata(IReadOnlyList<ParameterInfo> parameters)
+    {
+        var externalSystemType = parameters.Single(parameter => parameter.Name == "externalSystemType");
+        var capabilityKind = parameters.Single(parameter => parameter.Name == "capabilityKind");
+        var firstOptionalPosition = parameters.First(parameter => parameter.HasDefaultValue).Position;
+
+        externalSystemType.ParameterType.Should().Be<AiToolExternalSystemType>();
+        externalSystemType.HasDefaultValue.Should().BeFalse();
+        externalSystemType.Position.Should().BeLessThan(firstOptionalPosition);
+        capabilityKind.ParameterType.Should().Be<AiToolCapabilityKind>();
+        capabilityKind.HasDefaultValue.Should().BeFalse();
+        capabilityKind.Position.Should().BeLessThan(firstOptionalPosition);
+    }
+
     [Fact]
     public void KnowledgeBaseDocumentAndChunks_ShouldRejectInvalidInput()
     {

@@ -1,4 +1,5 @@
 using System.Linq.Expressions;
+using System.Text.Json;
 using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
 using AICopilot.McpService.McpServers;
 using AICopilot.Services.Contracts;
@@ -19,20 +20,25 @@ public sealed class McpServerManagementTests
         const string rawArguments = "server.dll --token secret-token";
 
         var result = await handler.Handle(
-            new CreateMcpServerCommand(
-                "stdio-mcp",
-                "stdio server",
-                McpTransportType.Stdio,
-                "dotnet",
-                rawArguments,
-                ChatExposureMode.Advisory,
+            new CreateMcpServerCommand
+            {
+                Name = "stdio-mcp",
+                Description = "stdio server",
+                TransportType = McpTransportType.Stdio,
+                Command = "dotnet",
+                Arguments = rawArguments,
+                ExternalSystemType = AiToolExternalSystemType.CloudReadOnly,
+                CapabilityKind = AiToolCapabilityKind.ReadOnlyQuery,
+                ChatExposureMode = ChatExposureMode.Advisory,
+                AllowedTools =
                 [
                     new McpAllowedToolDto { ToolName = " QueryEcho ", ReadOnlyDeclared = true },
                     new McpAllowedToolDto { ToolName = "queryEcho", ReadOnlyDeclared = true },
                     new McpAllowedToolDto { ToolName = "QueryInspect", ReadOnlyDeclared = true },
                     new McpAllowedToolDto { ToolName = " " }
                 ],
-                true),
+                IsEnabled = true
+            },
             CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
@@ -60,21 +66,51 @@ public sealed class McpServerManagementTests
         var auditLogWriter = new CapturingAuditLogWriter();
         var handler = new CreateMcpServerCommandHandler(repository, auditLogWriter);
 
-        var act = async () => await handler.Handle(
-            new CreateMcpServerCommand(
-                "unsafe-sse",
-                "unsafe server",
-                McpTransportType.Sse,
-                null,
-                "http://169.254.169.254/latest/meta-data",
-                ChatExposureMode.Advisory,
-                [new McpAllowedToolDto { ToolName = "QueryEcho", ReadOnlyDeclared = true }],
-                true),
-            CancellationToken.None);
+        Func<Task> act = async () =>
+        {
+            await handler.Handle(
+                new CreateMcpServerCommand
+                {
+                    Name = "unsafe-sse",
+                    Description = "unsafe server",
+                    TransportType = McpTransportType.Sse,
+                    Arguments = "http://169.254.169.254/latest/meta-data",
+                    ExternalSystemType = AiToolExternalSystemType.CloudReadOnly,
+                    CapabilityKind = AiToolCapabilityKind.ReadOnlyQuery,
+                    ChatExposureMode = ChatExposureMode.Advisory,
+                    AllowedTools = [new McpAllowedToolDto { ToolName = "QueryEcho", ReadOnlyDeclared = true }],
+                    IsEnabled = true
+                },
+                CancellationToken.None);
+        };
 
-        await act.Should().ThrowAsync<ArgumentException>();
-        repository.Items.Should().BeEmpty();
-        auditLogWriter.Requests.Should().BeEmpty();
+        await AssertCreateRejectedAsync(act, repository, auditLogWriter);
+    }
+
+    [Theory]
+    [InlineData("MissingExternalSystemType")]
+    [InlineData("MissingCapabilityKind")]
+    [InlineData("NonCloud")]
+    public async Task CreateServerCommand_ShouldRejectMissingOrUnverifiableDynamicTargetMetadata(
+        string metadataCase)
+    {
+        var repository = new MutableMcpServerRepository();
+        var auditLogWriter = new CapturingAuditLogWriter();
+        var handler = new CreateMcpServerCommandHandler(repository, auditLogWriter);
+        var payload = CreateMutationPayload(metadataCase);
+        if (metadataCase.StartsWith("Missing", StringComparison.Ordinal))
+        {
+            var deserialize = () => DeserializeMutationCommand<CreateMcpServerCommand>(payload);
+
+            deserialize.Should().Throw<JsonException>();
+            repository.Items.Should().BeEmpty();
+            auditLogWriter.Requests.Should().BeEmpty();
+            return;
+        }
+
+        var command = DeserializeMutationCommand<CreateMcpServerCommand>(payload);
+        Func<Task> act = async () => { await handler.Handle(command, CancellationToken.None); };
+        await AssertCreateRejectedAsync(act, repository, auditLogWriter);
     }
 
     [Fact]
@@ -86,6 +122,8 @@ public sealed class McpServerManagementTests
             McpTransportType.Stdio,
             "dotnet",
             "original-server.dll",
+            AiToolExternalSystemType.CloudReadOnly,
+            AiToolCapabilityKind.ReadOnlyQuery,
             ChatExposureMode.Disabled,
             [new McpAllowedTool("QueryEcho", ReadOnlyDeclared: true)],
             true);
@@ -94,16 +132,20 @@ public sealed class McpServerManagementTests
         var handler = new UpdateMcpServerCommandHandler(repository, auditLogWriter);
 
         var result = await handler.Handle(
-            new UpdateMcpServerCommand(
-                server.Id,
-                "preserve-mcp-updated",
-                "updated",
-                McpTransportType.Stdio,
-                "dotnet",
-                "",
-                ChatExposureMode.Advisory,
-                [new McpAllowedToolDto { ToolName = "QueryInspect", ReadOnlyDeclared = true }],
-                false),
+            new UpdateMcpServerCommand
+            {
+                Id = server.Id,
+                Name = "preserve-mcp-updated",
+                Description = "updated",
+                TransportType = McpTransportType.Stdio,
+                Command = "dotnet",
+                Arguments = "",
+                ExternalSystemType = AiToolExternalSystemType.CloudReadOnly,
+                CapabilityKind = AiToolCapabilityKind.ReadOnlyQuery,
+                ChatExposureMode = ChatExposureMode.Advisory,
+                AllowedTools = [new McpAllowedToolDto { ToolName = "QueryInspect", ReadOnlyDeclared = true }],
+                IsEnabled = false
+            },
             CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
@@ -128,6 +170,8 @@ public sealed class McpServerManagementTests
             McpTransportType.Stdio,
             "dotnet",
             "server.dll",
+            AiToolExternalSystemType.CloudReadOnly,
+            AiToolCapabilityKind.ReadOnlyQuery,
             ChatExposureMode.Disabled,
             [new McpAllowedTool("QueryEcho", ReadOnlyDeclared: true)],
             true);
@@ -135,25 +179,64 @@ public sealed class McpServerManagementTests
         var auditLogWriter = new CapturingAuditLogWriter();
         var handler = new UpdateMcpServerCommandHandler(repository, auditLogWriter);
 
-        var act = async () => await handler.Handle(
-            new UpdateMcpServerCommand(
-                server.Id,
-                "updated-mcp",
-                "updated server",
-                McpTransportType.Sse,
-                null,
-                "http://10.0.0.1/sse",
-                ChatExposureMode.Advisory,
-                [new McpAllowedToolDto { ToolName = "QueryInspect", ReadOnlyDeclared = true }],
-                true),
-            CancellationToken.None);
+        Func<Task> act = async () =>
+        {
+            await handler.Handle(
+                new UpdateMcpServerCommand
+                {
+                    Id = server.Id,
+                    Name = "updated-mcp",
+                    Description = "updated server",
+                    TransportType = McpTransportType.Sse,
+                    Arguments = "http://10.0.0.1/sse",
+                    ExternalSystemType = AiToolExternalSystemType.CloudReadOnly,
+                    CapabilityKind = AiToolCapabilityKind.ReadOnlyQuery,
+                    ChatExposureMode = ChatExposureMode.Advisory,
+                    AllowedTools = [new McpAllowedToolDto { ToolName = "QueryInspect", ReadOnlyDeclared = true }],
+                    IsEnabled = true
+                },
+                CancellationToken.None);
+        };
 
-        await act.Should().ThrowAsync<ArgumentException>();
-        server.Name.Should().Be("existing-mcp");
-        server.TransportType.Should().Be(McpTransportType.Stdio);
-        server.Arguments.Should().Be("server.dll");
-        server.AllowedTools.Select(tool => tool.ToolName).Should().Equal("QueryEcho");
-        auditLogWriter.Requests.Should().BeEmpty();
+        await AssertUpdateRejectedAsync(act, server, "QueryEcho", auditLogWriter);
+    }
+
+    [Theory]
+    [InlineData("MissingExternalSystemType")]
+    [InlineData("MissingCapabilityKind")]
+    [InlineData("NonCloud")]
+    public async Task UpdateServerCommand_ShouldRejectMissingOrUnverifiableDynamicTargetMetadata(
+        string metadataCase)
+    {
+        var server = new McpServerInfo(
+            "existing-mcp",
+            "existing server",
+            McpTransportType.Stdio,
+            "dotnet",
+            "server.dll",
+            AiToolExternalSystemType.CloudReadOnly,
+            AiToolCapabilityKind.ReadOnlyQuery,
+            ChatExposureMode.Advisory,
+            [new McpAllowedTool("QueryStatus", ReadOnlyDeclared: true)],
+            true);
+        var repository = new MutableMcpServerRepository(server);
+        var auditLogWriter = new CapturingAuditLogWriter();
+        var handler = new UpdateMcpServerCommandHandler(repository, auditLogWriter);
+        var payload = CreateMutationPayload(metadataCase);
+        payload["id"] = (Guid)server.Id;
+        if (metadataCase.StartsWith("Missing", StringComparison.Ordinal))
+        {
+            var deserialize = () => DeserializeMutationCommand<UpdateMcpServerCommand>(payload);
+
+            deserialize.Should().Throw<JsonException>();
+            server.Name.Should().Be("existing-mcp");
+            auditLogWriter.Requests.Should().BeEmpty();
+            return;
+        }
+
+        var command = DeserializeMutationCommand<UpdateMcpServerCommand>(payload);
+        Func<Task> act = async () => { await handler.Handle(command, CancellationToken.None); };
+        await AssertUpdateRejectedAsync(act, server, "QueryStatus", auditLogWriter);
     }
 
     [Fact]
@@ -165,6 +248,8 @@ public sealed class McpServerManagementTests
             McpTransportType.Stdio,
             "dotnet",
             "server.dll",
+            AiToolExternalSystemType.CloudReadOnly,
+            AiToolCapabilityKind.ReadOnlyQuery,
             ChatExposureMode.Advisory,
             [
                 new McpAllowedTool("QueryEcho", ReadOnlyDeclared: true),
@@ -215,6 +300,8 @@ public sealed class McpServerManagementTests
             McpTransportType.Stdio,
             "dotnet",
             "alpha.dll",
+            AiToolExternalSystemType.CloudReadOnly,
+            AiToolCapabilityKind.ReadOnlyQuery,
             ChatExposureMode.ObserveOnly,
             [new McpAllowedTool("QueryEcho", ReadOnlyDeclared: true)],
             true);
@@ -225,6 +312,8 @@ public sealed class McpServerManagementTests
             McpTransportType.Stdio,
             "dotnet",
             "beta.dll",
+            AiToolExternalSystemType.CloudReadOnly,
+            AiToolCapabilityKind.ReadOnlyQuery,
             ChatExposureMode.Advisory,
             [new McpAllowedTool("QueryInspect", ReadOnlyDeclared: true)],
             true);
@@ -354,6 +443,72 @@ public sealed class McpServerManagementTests
                 ? query
                 : query.Where(specification.FilterCondition);
         }
+    }
+
+    private static Dictionary<string, object?> CreateMutationPayload(string metadataCase)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["name"] = "candidate-mcp",
+            ["description"] = "candidate server",
+            ["transportType"] = (int)McpTransportType.Stdio,
+            ["command"] = "dotnet",
+            ["arguments"] = "server.dll",
+            ["chatExposureMode"] = (int)ChatExposureMode.Advisory,
+            ["isEnabled"] = true,
+            ["externalSystemType"] = (int)AiToolExternalSystemType.CloudReadOnly,
+            ["capabilityKind"] = (int)AiToolCapabilityKind.ReadOnlyQuery
+        };
+
+        switch (metadataCase)
+        {
+            case "MissingExternalSystemType":
+                payload.Remove("externalSystemType");
+                break;
+            case "MissingCapabilityKind":
+                payload.Remove("capabilityKind");
+                break;
+            case "NonCloud":
+                payload["externalSystemType"] = (int)AiToolExternalSystemType.NonCloud;
+                payload["capabilityKind"] = (int)AiToolCapabilityKind.SideEffecting;
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(metadataCase), metadataCase, "Unknown metadata case");
+        }
+
+        return payload;
+    }
+
+    private static TCommand DeserializeMutationCommand<TCommand>(Dictionary<string, object?> payload)
+        where TCommand : McpServerMutationCommand
+    {
+        var json = JsonSerializer.Serialize(payload, JsonSerializerOptions.Web);
+        return JsonSerializer.Deserialize<TCommand>(json, JsonSerializerOptions.Web)
+            ?? throw new InvalidOperationException($"Could not deserialize {typeof(TCommand).Name} fixture.");
+    }
+
+    private static async Task AssertCreateRejectedAsync(
+        Func<Task> action,
+        MutableMcpServerRepository repository,
+        CapturingAuditLogWriter auditLogWriter)
+    {
+        await action.Should().ThrowAsync<ArgumentException>();
+        repository.Items.Should().BeEmpty();
+        auditLogWriter.Requests.Should().BeEmpty();
+    }
+
+    private static async Task AssertUpdateRejectedAsync(
+        Func<Task> action,
+        McpServerInfo server,
+        string expectedToolName,
+        CapturingAuditLogWriter auditLogWriter)
+    {
+        await action.Should().ThrowAsync<ArgumentException>();
+        server.Name.Should().Be("existing-mcp");
+        server.TransportType.Should().Be(McpTransportType.Stdio);
+        server.Arguments.Should().Be("server.dll");
+        server.AllowedTools.Should().ContainSingle(tool => tool.ToolName == expectedToolName);
+        auditLogWriter.Requests.Should().BeEmpty();
     }
 
     private sealed class CapturingAuditLogWriter : IAuditLogWriter

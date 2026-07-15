@@ -49,19 +49,23 @@ public record McpServerDto
 
 public record CreatedMcpServerDto(Guid Id, string Name);
 
+public abstract record McpServerMutationCommand
+{
+    public required string Name { get; init; }
+    public required string Description { get; init; }
+    public McpTransportType TransportType { get; init; }
+    public string? Command { get; init; }
+    public string Arguments { get; init; } = string.Empty;
+    public required AiToolExternalSystemType ExternalSystemType { get; init; }
+    public required AiToolCapabilityKind CapabilityKind { get; init; }
+    public ChatExposureMode ChatExposureMode { get; init; } = ChatExposureMode.Disabled;
+    public IReadOnlyCollection<McpAllowedToolDto>? AllowedTools { get; init; }
+    public bool IsEnabled { get; init; } = true;
+    public AiToolRiskLevel RiskLevel { get; init; } = AiToolRiskLevel.RequiresApproval;
+}
+
 [AuthorizeRequirement("Mcp.CreateServer")]
-public record CreateMcpServerCommand(
-    string Name,
-    string Description,
-    McpTransportType TransportType,
-    string? Command,
-    string Arguments,
-    ChatExposureMode ChatExposureMode = ChatExposureMode.Disabled,
-    IReadOnlyCollection<McpAllowedToolDto>? AllowedTools = null,
-    bool IsEnabled = true,
-    AiToolExternalSystemType ExternalSystemType = AiToolExternalSystemType.CloudReadOnly,
-    AiToolCapabilityKind CapabilityKind = AiToolCapabilityKind.ReadOnlyQuery,
-    AiToolRiskLevel RiskLevel = AiToolRiskLevel.RequiresApproval) : ICommand<Result<CreatedMcpServerDto>>;
+public sealed record CreateMcpServerCommand : McpServerMutationCommand, ICommand<Result<CreatedMcpServerDto>>;
 
 public class CreateMcpServerCommandHandler(
     IRepository<McpServerInfo> repository,
@@ -79,11 +83,11 @@ public class CreateMcpServerCommandHandler(
             request.TransportType,
             request.Command,
             request.Arguments,
+            request.ExternalSystemType,
+            request.CapabilityKind,
             request.ChatExposureMode,
             allowedTools,
             request.IsEnabled,
-            request.ExternalSystemType,
-            request.CapabilityKind,
             request.RiskLevel);
 
         repository.Add(entity);
@@ -105,19 +109,10 @@ public class CreateMcpServerCommandHandler(
 }
 
 [AuthorizeRequirement("Mcp.UpdateServer")]
-public record UpdateMcpServerCommand(
-    Guid Id,
-    string Name,
-    string Description,
-    McpTransportType TransportType,
-    string? Command,
-    string Arguments,
-    ChatExposureMode ChatExposureMode = ChatExposureMode.Disabled,
-    IReadOnlyCollection<McpAllowedToolDto>? AllowedTools = null,
-    bool IsEnabled = true,
-    AiToolExternalSystemType ExternalSystemType = AiToolExternalSystemType.CloudReadOnly,
-    AiToolCapabilityKind CapabilityKind = AiToolCapabilityKind.ReadOnlyQuery,
-    AiToolRiskLevel RiskLevel = AiToolRiskLevel.RequiresApproval) : ICommand<Result>;
+public sealed record UpdateMcpServerCommand : McpServerMutationCommand, ICommand<Result>
+{
+    public Guid Id { get; init; }
+}
 
 public class UpdateMcpServerCommandHandler(
     IRepository<McpServerInfo> repository,
@@ -144,11 +139,11 @@ public class UpdateMcpServerCommandHandler(
             request.TransportType,
             request.Command,
             arguments,
+            request.ExternalSystemType,
+            request.CapabilityKind,
             request.ChatExposureMode,
             allowedTools,
             request.IsEnabled,
-            request.ExternalSystemType,
-            request.CapabilityKind,
             request.RiskLevel);
 
         repository.Update(entity);

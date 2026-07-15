@@ -40,7 +40,17 @@ public sealed record AiToolSafetyDescriptor(
             declaredEffects ?? [],
             blockReasons ?? []);
     }
+
 }
+
+public sealed record AiToolConfiguredMcpMetadata(
+    bool ReadOnlyDeclared,
+    bool? McpReadOnlyHint,
+    bool? McpDestructiveHint,
+    bool? McpIdempotentHint,
+    AiToolCapabilityKind CapabilityKind,
+    AiToolExternalSystemType ExternalSystemType,
+    AiToolRiskLevel RiskLevel);
 
 public static class AiToolSafetyPolicy
 {
@@ -169,22 +179,28 @@ public static class AiToolSafetyPolicy
     }
 
     public static AiToolSafetyDecision EvaluateConfiguredMcp(
-        bool readOnlyDeclared,
-        bool? mcpReadOnlyHint,
-        bool? mcpDestructiveHint,
-        bool? mcpIdempotentHint,
-        AiToolCapabilityKind capabilityKind,
-        AiToolExternalSystemType externalSystemType,
-        AiToolRiskLevel riskLevel,
+        AiToolConfiguredMcpMetadata metadata,
         string toolName,
         string? description,
         JsonElement? inputSchema = null,
         JsonElement? returnSchema = null)
     {
-        var targetDecision = EvaluateConfiguredMcpTarget(externalSystemType, capabilityKind);
-        var blockReasons = new List<string>(targetDecision.BlockReasons ?? []);
+        ArgumentNullException.ThrowIfNull(metadata);
+        var descriptor = AiToolSafetyDescriptor.Create(
+            metadata.ReadOnlyDeclared,
+            metadata.McpReadOnlyHint,
+            metadata.McpDestructiveHint,
+            metadata.McpIdempotentHint,
+            metadata.CapabilityKind,
+            metadata.ExternalSystemType,
+            metadata.RiskLevel);
+        var targetDecision = EvaluateConfiguredMcpTarget(
+            descriptor.ExternalSystemType,
+            descriptor.CapabilityKind);
+        var blockReasons = new List<string>(descriptor.BlockReasons);
+        blockReasons.AddRange(targetDecision.BlockReasons ?? []);
 
-        if (!readOnlyDeclared)
+        if (!descriptor.ReadOnlyDeclared)
         {
             blockReasons.Add("Dynamically configured MCP tools must explicitly declare read-only behavior.");
         }
@@ -194,18 +210,26 @@ public static class AiToolSafetyPolicy
             return Block(blockReasons);
         }
 
-        return EvaluateConfigured(
-            readOnlyDeclared,
-            mcpReadOnlyHint,
-            mcpDestructiveHint,
-            mcpIdempotentHint,
-            capabilityKind,
-            externalSystemType,
-            riskLevel,
-            toolName,
-            description,
-            inputSchema,
-            returnSchema);
+        return Evaluate(descriptor, toolName, description, inputSchema, returnSchema);
+    }
+
+    public static AiToolSafetyDecision EvaluateConfiguredMcp(AiToolDefinition tool)
+    {
+        ArgumentNullException.ThrowIfNull(tool);
+        var metadata = new AiToolConfiguredMcpMetadata(
+            tool.ReadOnlyDeclared,
+            tool.McpReadOnlyHint,
+            tool.McpDestructiveHint,
+            tool.McpIdempotentHint,
+            tool.CapabilityKind,
+            tool.ExternalSystemType,
+            tool.RiskLevel);
+        return EvaluateConfiguredMcp(
+            metadata,
+            tool.ToolName ?? tool.Name,
+            tool.Description,
+            tool.JsonSchema,
+            tool.ReturnJsonSchema);
     }
 
     public static AiToolSafetyDecision EvaluateConfiguredMcpTarget(

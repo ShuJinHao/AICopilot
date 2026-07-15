@@ -408,6 +408,8 @@ public sealed class AuditTransactionBoundaryTests(PostgresPersistenceFixture fix
             McpTransportType.Stdio,
             "dotnet",
             "server.dll --token redacted",
+            AiToolExternalSystemType.CloudReadOnly,
+            AiToolCapabilityKind.ReadOnlyQuery,
             ChatExposureMode.Advisory,
             [new McpAllowedTool("QueryStatus", ReadOnlyDeclared: true)],
             true);

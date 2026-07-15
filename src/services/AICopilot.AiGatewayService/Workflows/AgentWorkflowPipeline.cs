@@ -305,18 +305,7 @@ public class AgentWorkflowPipeline(
         var safeTools = discovered.Tools.Where(tool =>
         {
             var decision = tool.Kind == AiToolCallKind.Mcp || tool.TargetType == AiToolTargetType.McpServer
-                ? AiToolSafetyPolicy.EvaluateConfiguredMcp(
-                    tool.ReadOnlyDeclared,
-                    tool.McpReadOnlyHint,
-                    tool.McpDestructiveHint,
-                    tool.McpIdempotentHint,
-                    tool.CapabilityKind,
-                    tool.ExternalSystemType,
-                    tool.RiskLevel,
-                    tool.ToolName ?? tool.Name,
-                    tool.Description,
-                    tool.JsonSchema,
-                    tool.ReturnJsonSchema)
+                ? AiToolSafetyPolicy.EvaluateConfiguredMcp(tool)
                 : AiToolSafetyPolicy.EvaluateConfigured(
                 tool.ReadOnlyDeclared,
                 tool.McpReadOnlyHint,

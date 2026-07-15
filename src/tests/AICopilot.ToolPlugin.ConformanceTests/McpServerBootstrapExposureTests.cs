@@ -52,11 +52,11 @@ public sealed class McpServerBootstrapExposureTests
             McpTransportType.Sse,
             string.Empty,
             "https://mcp.example.test/events",
-            ChatExposureMode.Advisory,
-            [new McpAllowedTool("QueryDeviceLogs", ReadOnlyDeclared: true, McpReadOnlyHint: true, McpDestructiveHint: false)],
-            true,
             externalSystemType: AiToolExternalSystemType.CloudReadOnly,
-            capabilityKind: AiToolCapabilityKind.ReadOnlyQuery);
+            capabilityKind: AiToolCapabilityKind.ReadOnlyQuery,
+            chatExposureMode: ChatExposureMode.Advisory,
+            allowedTools: [new McpAllowedTool("QueryDeviceLogs", ReadOnlyDeclared: true, McpReadOnlyHint: true, McpDestructiveHint: false)],
+            isEnabled: true);
         var factoryType = typeof(McpServerBootstrap).Assembly.GetType(
             "AICopilot.Infrastructure.Mcp.McpRuntimeClientFactory",
             throwOnError: true)!;
@@ -81,11 +81,11 @@ public sealed class McpServerBootstrapExposureTests
             McpTransportType.Stdio,
             "dotnet",
             string.Empty,
-            ChatExposureMode.Advisory,
-            [new McpAllowedTool("QueryDeviceLogs", ReadOnlyDeclared: true, McpReadOnlyHint: true, McpDestructiveHint: false)],
-            true,
             externalSystemType: AiToolExternalSystemType.CloudReadOnly,
-            capabilityKind: AiToolCapabilityKind.ReadOnlyQuery);
+            capabilityKind: AiToolCapabilityKind.ReadOnlyQuery,
+            chatExposureMode: ChatExposureMode.Advisory,
+            allowedTools: [new McpAllowedTool("QueryDeviceLogs", ReadOnlyDeclared: true, McpReadOnlyHint: true, McpDestructiveHint: false)],
+            isEnabled: true);
 
         var controlServer = new McpServerInfo(
             "control-mcp",
@@ -93,11 +93,11 @@ public sealed class McpServerBootstrapExposureTests
             McpTransportType.Stdio,
             "dotnet",
             string.Empty,
-            ChatExposureMode.Control,
-            [new McpAllowedTool("QueryDeviceLogs", ReadOnlyDeclared: true, McpReadOnlyHint: true, McpDestructiveHint: false)],
-            true,
             externalSystemType: AiToolExternalSystemType.CloudReadOnly,
-            capabilityKind: AiToolCapabilityKind.ReadOnlyQuery);
+            capabilityKind: AiToolCapabilityKind.ReadOnlyQuery,
+            chatExposureMode: ChatExposureMode.Control,
+            allowedTools: [new McpAllowedTool("QueryDeviceLogs", ReadOnlyDeclared: true, McpReadOnlyHint: true, McpDestructiveHint: false)],
+            isEnabled: true);
 
         var closedServer = new McpServerInfo(
             "closed-mcp",
@@ -105,11 +105,11 @@ public sealed class McpServerBootstrapExposureTests
             McpTransportType.Stdio,
             "dotnet",
             string.Empty,
-            ChatExposureMode.Advisory,
-            [],
-            true,
             externalSystemType: AiToolExternalSystemType.CloudReadOnly,
-            capabilityKind: AiToolCapabilityKind.ReadOnlyQuery);
+            capabilityKind: AiToolCapabilityKind.ReadOnlyQuery,
+            chatExposureMode: ChatExposureMode.Advisory,
+            allowedTools: [],
+            isEnabled: true);
 
         var destructiveCloudServer = new McpServerInfo(
             "destructive-cloud",
@@ -117,6 +117,8 @@ public sealed class McpServerBootstrapExposureTests
             McpTransportType.Stdio,
             "dotnet",
             string.Empty,
+            AiToolExternalSystemType.CloudReadOnly,
+            AiToolCapabilityKind.ReadOnlyQuery,
             ChatExposureMode.Advisory,
             [
                 new McpAllowedTool(
@@ -126,8 +128,6 @@ public sealed class McpServerBootstrapExposureTests
                     McpDestructiveHint: false)
             ],
             true,
-            AiToolExternalSystemType.CloudReadOnly,
-            AiToolCapabilityKind.ReadOnlyQuery,
             AiToolRiskLevel.Low);
         ReplaceAllowedTools(
             destructiveCloudServer,
@@ -145,11 +145,11 @@ public sealed class McpServerBootstrapExposureTests
             McpTransportType.Stdio,
             "dotnet",
             "https://relay.example.test/mcp",
+            AiToolExternalSystemType.CloudReadOnly,
+            AiToolCapabilityKind.ReadOnlyQuery,
             ChatExposureMode.Advisory,
             [new McpAllowedTool("QueryDeviceLogs", ReadOnlyDeclared: true, McpReadOnlyHint: true)],
             true,
-            AiToolExternalSystemType.CloudReadOnly,
-            AiToolCapabilityKind.ReadOnlyQuery,
             AiToolRiskLevel.Low);
         typeof(McpServerInfo)
             .GetField("<ExternalSystemType>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic)!
@@ -167,11 +167,11 @@ public sealed class McpServerBootstrapExposureTests
             McpTransportType.Stdio,
             "dotnet",
             string.Empty,
+            AiToolExternalSystemType.CloudReadOnly,
+            AiToolCapabilityKind.ReadOnlyQuery,
             ChatExposureMode.Advisory,
             [new McpAllowedTool("QueryDeviceLogs", ReadOnlyDeclared: true, McpReadOnlyHint: true)],
             true,
-            AiToolExternalSystemType.CloudReadOnly,
-            AiToolCapabilityKind.ReadOnlyQuery,
             AiToolRiskLevel.Low);
         typeof(McpServerInfo)
             .GetField("<ExternalSystemType>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic)!
@@ -252,11 +252,11 @@ public sealed class McpServerBootstrapExposureTests
             McpTransportType.Stdio,
             missingCommand,
             string.Empty,
+            AiToolExternalSystemType.CloudReadOnly,
+            AiToolCapabilityKind.ReadOnlyQuery,
             ChatExposureMode.Advisory,
             [new McpAllowedTool("QueryDeviceLogs", ReadOnlyDeclared: true, McpReadOnlyHint: true, McpDestructiveHint: false)],
-            true,
-            AiToolExternalSystemType.CloudReadOnly,
-            AiToolCapabilityKind.ReadOnlyQuery);
+            true);
 
         var serverRepository = new InMemoryReadRepository<McpServerInfo>([server]);
         var approvalRequirementReadService = new TestApprovalRequirementReadService();
@@ -292,11 +292,11 @@ public sealed class McpServerBootstrapExposureTests
             McpTransportType.Stdio,
             "dotnet",
             string.Empty,
+            AiToolExternalSystemType.CloudReadOnly,
+            AiToolCapabilityKind.ReadOnlyQuery,
             ChatExposureMode.Advisory,
             [new McpAllowedTool("QueryDeviceLogs", ReadOnlyDeclared: true, McpReadOnlyHint: true, McpDestructiveHint: false)],
-            true,
-            AiToolExternalSystemType.CloudReadOnly,
-            AiToolCapabilityKind.ReadOnlyQuery);
+            true);
 
         var serverRepository = new InMemoryReadRepository<McpServerInfo>([server]);
         var approvalRequirementReadService = new TestApprovalRequirementReadService();

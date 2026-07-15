@@ -125,14 +125,16 @@ internal sealed class McpRuntimeToolPluginBuilder(ILogger logger)
         var mcpReadOnlyHint = exposure.McpReadOnlyHint ?? ReadMcpAnnotationHint(tool, "ReadOnlyHint", "readOnlyHint");
         var mcpDestructiveHint = exposure.McpDestructiveHint ?? ReadMcpAnnotationHint(tool, "DestructiveHint", "destructiveHint");
         var mcpIdempotentHint = exposure.McpIdempotentHint ?? ReadMcpAnnotationHint(tool, "IdempotentHint", "idempotentHint");
-        var decision = AiToolSafetyPolicy.EvaluateConfiguredMcp(
+        var safetyMetadata = new AiToolConfiguredMcpMetadata(
             readOnlyDeclared,
             mcpReadOnlyHint,
             mcpDestructiveHint,
             mcpIdempotentHint,
             capabilityKind,
             externalSystemType,
-            riskLevel,
+            riskLevel);
+        var decision = AiToolSafetyPolicy.EvaluateConfiguredMcp(
+            safetyMetadata,
             tool.Name,
             tool.Description,
             tool.JsonSchema,

@@ -24,6 +24,8 @@ public sealed class McpToolGovernanceTests
             McpTransportType.Stdio,
             "dotnet",
             "server.dll",
+            AiToolExternalSystemType.CloudReadOnly,
+            AiToolCapabilityKind.ReadOnlyQuery,
             ChatExposureMode.Advisory,
             [
                 new McpAllowedTool("query_allow_only", ReadOnlyDeclared: true, McpReadOnlyHint: true),
@@ -81,6 +83,8 @@ public sealed class McpToolGovernanceTests
             McpTransportType.Stdio,
             "dotnet",
             "server.dll",
+            AiToolExternalSystemType.CloudReadOnly,
+            AiToolCapabilityKind.ReadOnlyQuery,
             ChatExposureMode.Advisory,
             [new McpAllowedTool("query_ready", ReadOnlyDeclared: true)],
             true);

@@ -21,11 +21,11 @@ public class McpServerInfo : IAggregateRoot<McpServerId>
         McpTransportType transportType,
         string? command,
         string arguments,
+        AiToolExternalSystemType externalSystemType,
+        AiToolCapabilityKind capabilityKind,
         ChatExposureMode chatExposureMode = ChatExposureMode.Disabled,
         IEnumerable<McpAllowedTool>? allowedTools = null,
         bool isEnabled = true,
-        AiToolExternalSystemType externalSystemType = AiToolExternalSystemType.CloudReadOnly,
-        AiToolCapabilityKind capabilityKind = AiToolCapabilityKind.ReadOnlyQuery,
         AiToolRiskLevel riskLevel = AiToolRiskLevel.RequiresApproval)
     {
         Id = McpServerId.New();
@@ -35,11 +35,11 @@ public class McpServerInfo : IAggregateRoot<McpServerId>
             transportType,
             command,
             arguments,
+            externalSystemType,
+            capabilityKind,
             chatExposureMode,
             allowedTools,
             isEnabled,
-            externalSystemType,
-            capabilityKind,
             riskLevel);
     }
 
@@ -75,11 +75,11 @@ public class McpServerInfo : IAggregateRoot<McpServerId>
         McpTransportType transportType,
         string? command,
         string arguments,
+        AiToolExternalSystemType externalSystemType,
+        AiToolCapabilityKind capabilityKind,
         ChatExposureMode chatExposureMode,
         IEnumerable<McpAllowedTool>? allowedTools,
         bool isEnabled,
-        AiToolExternalSystemType externalSystemType = AiToolExternalSystemType.CloudReadOnly,
-        AiToolCapabilityKind capabilityKind = AiToolCapabilityKind.ReadOnlyQuery,
         AiToolRiskLevel riskLevel = AiToolRiskLevel.RequiresApproval)
     {
         Validate(name, description, transportType, command, arguments, chatExposureMode, externalSystemType, capabilityKind, riskLevel);
@@ -220,14 +220,16 @@ public sealed record McpAllowedTool(
 
         var effectiveExternalSystemType = ExternalSystemType ?? serverExternalSystemType;
         var effectiveCapabilityKind = CapabilityKind ?? serverCapabilityKind;
-        var safety = AiToolSafetyPolicy.EvaluateConfiguredMcp(
+        var safetyMetadata = new AiToolConfiguredMcpMetadata(
             ReadOnlyDeclared,
             McpReadOnlyHint,
             McpDestructiveHint,
             McpIdempotentHint,
             effectiveCapabilityKind,
             effectiveExternalSystemType,
-            EffectiveRiskLevel(serverRiskLevel),
+            EffectiveRiskLevel(serverRiskLevel));
+        var safety = AiToolSafetyPolicy.EvaluateConfiguredMcp(
+            safetyMetadata,
             ToolName,
             description: null);
         if (!safety.IsAllowed)

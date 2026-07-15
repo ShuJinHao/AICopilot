@@ -21,43 +21,14 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
     public const string CloudReadOnlyBoundaryId = "AIARCH006";
     public const string SecurityMetadataId = "AIARCH007";
 
-    private static readonly DiagnosticDescriptor ProjectBoundaryRule = CreateRule(
-        ProjectBoundaryId,
-        "Project dependency violates the AICopilot layer graph",
-        "Project '{0}' must not reference '{1}': {2}",
-        compilationEnd: true);
-
-    private static readonly DiagnosticDescriptor AggregateBoundaryRule = CreateRule(
-        AggregateBoundaryId,
-        "Aggregate and repository ownership must be explicit",
-        "Symbol '{0}' violates the approved aggregate/repository boundary: {1}");
-
-    private static readonly DiagnosticDescriptor PersistenceOwnerRule = CreateRule(
-        PersistenceOwnerId,
-        "Database technology must stay with its approved owner",
-        "'{0}' uses '{1}', which is owned by AICopilot.EntityFrameworkCore, AICopilot.Dapper, or the explicit migration/lock composition boundary");
-
-    private static readonly DiagnosticDescriptor EnabledAdminInvariantRule = CreateRule(
-        EnabledAdminInvariantId,
-        "Enabled Admin reduction requires the shared invariant transaction",
-        "'{0}' can reduce enabled Admin membership without the required transaction/guard ordering: {1}",
-        compilationEnd: true);
-
-    private static readonly DiagnosticDescriptor AgentPluginBoundaryRule = CreateRule(
-        AgentPluginBoundaryId,
-        "Agent plugin capability and host boundaries must be explicit",
-        "Plugin symbol '{0}' violates the plugin boundary: {1}");
-
-    private static readonly DiagnosticDescriptor CloudReadOnlyBoundaryRule = CreateRule(
-        CloudReadOnlyBoundaryId,
-        "Cloud read-only call graphs must not reach side effects",
-        "Cloud read-only entry '{0}' can reach forbidden side effect '{1}'",
-        compilationEnd: true);
-
-    private static readonly DiagnosticDescriptor SecurityMetadataRule = CreateRule(
-        SecurityMetadataId,
-        "Authorization and read-only metadata must not be bypassed",
-        "'{0}' must declare valid authorization/read-only metadata: {1}");
+    private static readonly ImmutableHashSet<string> CompilationEndRuleIds = ImmutableHashSet.Create(StringComparer.Ordinal, ProjectBoundaryId, EnabledAdminInvariantId, CloudReadOnlyBoundaryId);
+    private static readonly DiagnosticDescriptor ProjectBoundaryRule = CreateRule(ProjectBoundaryId, "Project dependency violates the AICopilot layer graph", "Project '{0}' must not reference '{1}': {2}");
+    private static readonly DiagnosticDescriptor AggregateBoundaryRule = CreateRule(AggregateBoundaryId, "Aggregate and repository ownership must be explicit", "Symbol '{0}' violates the approved aggregate/repository boundary: {1}");
+    private static readonly DiagnosticDescriptor PersistenceOwnerRule = CreateRule(PersistenceOwnerId, "Database technology must stay with its approved owner", "'{0}' uses '{1}', which is owned by AICopilot.EntityFrameworkCore, AICopilot.Dapper, or the explicit migration/lock composition boundary");
+    private static readonly DiagnosticDescriptor EnabledAdminInvariantRule = CreateRule(EnabledAdminInvariantId, "Enabled Admin reduction requires the shared invariant transaction", "'{0}' can reduce enabled Admin membership without the required transaction/guard ordering: {1}");
+    private static readonly DiagnosticDescriptor AgentPluginBoundaryRule = CreateRule(AgentPluginBoundaryId, "Agent plugin capability and host boundaries must be explicit", "Plugin symbol '{0}' violates the plugin boundary: {1}");
+    private static readonly DiagnosticDescriptor CloudReadOnlyBoundaryRule = CreateRule(CloudReadOnlyBoundaryId, "Cloud read-only call graphs must not reach side effects", "Cloud read-only entry '{0}' can reach forbidden side effect '{1}'");
+    private static readonly DiagnosticDescriptor SecurityMetadataRule = CreateRule(SecurityMetadataId, "Authorization and read-only metadata must not be bypassed", "'{0}' must declare valid authorization/read-only metadata: {1}");
 
     private static readonly ImmutableHashSet<string> ApprovedAggregateNames =
         ImmutableHashSet.Create(
@@ -216,8 +187,7 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
     private static DiagnosticDescriptor CreateRule(
         string id,
         string title,
-        string message,
-        bool compilationEnd = false) =>
+        string message) =>
         new(
             id,
             title,
@@ -226,7 +196,7 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
             DiagnosticSeverity.Error,
             isEnabledByDefault: true,
             description: "AICopilot architecture diagnostics are stable build errors and may only be changed with the corresponding formal contract and executable fixtures.",
-            customTags: compilationEnd
+            customTags: CompilationEndRuleIds.Contains(id)
                 ? [WellKnownDiagnosticTags.CompilationEnd, WellKnownDiagnosticTags.NotConfigurable]
                 : [WellKnownDiagnosticTags.NotConfigurable]);
 
