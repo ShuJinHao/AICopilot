@@ -1,5 +1,7 @@
 using System.Reflection;
-using System.Text.RegularExpressions;
+using AICopilot.EntityFrameworkCore;
+using AICopilot.EntityFrameworkCore.Outbox;
+using AICopilot.EntityFrameworkCore.Persistence;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
 using AICopilot.Core.AiGateway.Aggregates.Approvals;
@@ -17,11 +19,16 @@ using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
 using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.SharedKernel.Domain;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Metadata;
 
 namespace AICopilot.ArchitectureTests;
 
 public sealed class DddAggregateBoundaryTests
 {
+    private const string ModelConnectionString =
+        "Host=localhost;Database=aicopilot_ddd_model;Username=test;Password=test";
     private static readonly string SolutionRoot = FindSolutionRoot();
 
     private static readonly Type[] AllowedAggregateRoots =
@@ -71,9 +78,13 @@ public sealed class DddAggregateBoundaryTests
             ["SkillDefinition"] = "Aggregate",
             ["ToolRegistration"] = "Aggregate",
             ["UploadRecord"] = "Aggregate",
+            ["AgentStep"] = "AggregateChild",
+            ["Artifact"] = "AggregateChild",
             ["Document"] = "AggregateChild",
             ["DocumentChunk"] = "AggregateChild",
             ["Message"] = "AggregateChild",
+            ["ModelParameters"] = "OwnedValueObject",
+            ["TemplateSpecification"] = "OwnedValueObject",
             ["MessageEvent"] = "Projection",
             ["AgentTaskRunQueueItem"] = "Queue",
             ["AgentTaskRunAttempt"] = "RuntimeRecord",
@@ -82,7 +93,14 @@ public sealed class DddAggregateBoundaryTests
             ["AuditLogEntry"] = "Audit",
             ["OutboxMessage"] = "Audit",
             ["PersistenceCommitMarker"] = "RuntimeRecord",
-            ["ExternalIdentityBinding"] = "IdentityRecord"
+            ["ApplicationUser"] = "IdentityRecord",
+            ["ExternalIdentityBinding"] = "IdentityRecord",
+            ["IdentityRoleClaim`1"] = "IdentityRecord",
+            ["IdentityRole`1"] = "IdentityRecord",
+            ["IdentityUserClaim`1"] = "IdentityRecord",
+            ["IdentityUserLogin`1"] = "IdentityRecord",
+            ["IdentityUserRole`1"] = "IdentityRecord",
+            ["IdentityUserToken`1"] = "IdentityRecord"
         };
 
     [Fact]
@@ -143,19 +161,29 @@ public sealed class DddAggregateBoundaryTests
     [Fact]
     public void DbSets_ShouldBeClassifiedAndDebtTypesShouldNotBeAggregate()
     {
-        var dbSetTypes = Directory
-            .EnumerateFiles(Path.Combine(SolutionRoot, "src", "infrastructure", "AICopilot.EntityFrameworkCore"), "*.cs", SearchOption.AllDirectories)
-            .Where(file => !IsGeneratedOrBuildOutput(file))
-            .SelectMany(file => Regex
-                .Matches(File.ReadAllText(file), @"\bDbSet<\s*(?<type>[A-Za-z0-9_]+)\s*>")
-                .Select(match => match.Groups["type"].Value))
+        var dbSetTypes = CreatePersistenceContexts()
+            .SelectMany(context => context.GetService<IDesignTimeModel>().Model.GetEntityTypes())
+            .Where(entityType => entityType.GetTableName() is not null)
+            .Select(entityType => entityType.ClrType.Name)
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
             .ToArray();
 
-        dbSetTypes.Should().BeEquivalentTo(
-            DbSetTypeClassifications.Keys.Order(StringComparer.Ordinal),
-            "every persisted entity must be classified as aggregate, child, projection, queue, audit, runtime record, worker state or identity record");
+        var classifiedNames = DbSetTypeClassifications.Keys.ToHashSet(StringComparer.Ordinal);
+        var unclassifiedTypes = dbSetTypes
+            .Where(typeName => !classifiedNames.Contains(typeName))
+            .ToArray();
+        var staleClassifications = classifiedNames
+            .Where(typeName => !dbSetTypes.Contains(typeName, StringComparer.Ordinal))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        unclassifiedTypes.Should().BeEmpty(
+            "every persisted entity must be classified as aggregate, child, projection, queue, audit, runtime record, worker state or identity record; unclassified: {0}",
+            string.Join(", ", unclassifiedTypes));
+        staleClassifications.Should().BeEmpty(
+            "classifications must be deleted when their persisted entity disappears; stale: {0}",
+            string.Join(", ", staleClassifications));
 
         var debtNames = KnownArchitectureDebt
             .Select(type => type.Name)
@@ -193,11 +221,27 @@ public sealed class DddAggregateBoundaryTests
                || typeName.EndsWith("Event", StringComparison.Ordinal);
     }
 
-    private static bool IsGeneratedOrBuildOutput(string file)
+    private static IReadOnlyCollection<DbContext> CreatePersistenceContexts()
     {
-        return file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)
-               || file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)
-               || file.Contains($"{Path.DirectorySeparatorChar}Migrations{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase);
+        return
+        [
+            new AiCopilotDbContext(Options<AiCopilotDbContext>()),
+            new IdentityStoreDbContext(Options<IdentityStoreDbContext>()),
+            new AiGatewayDbContext(Options<AiGatewayDbContext>()),
+            new RagDbContext(Options<RagDbContext>()),
+            new DataAnalysisDbContext(Options<DataAnalysisDbContext>()),
+            new McpServerDbContext(Options<McpServerDbContext>()),
+            new OutboxDbContext(Options<OutboxDbContext>()),
+            new PersistenceCommitMarkerDbContext(Options<PersistenceCommitMarkerDbContext>())
+        ];
+    }
+
+    private static DbContextOptions<TContext> Options<TContext>()
+        where TContext : DbContext
+    {
+        return new DbContextOptionsBuilder<TContext>()
+            .UseNpgsql(ModelConnectionString)
+            .Options;
     }
 
     private static string FindSolutionRoot()

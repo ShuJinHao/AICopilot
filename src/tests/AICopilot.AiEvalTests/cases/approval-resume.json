@@ -1,8 +1,0 @@
-{
-  "id": "approval-resume",
-  "kind": "approvalIdentity",
-  "targetType": "McpServer",
-  "targetName": "cloud-readonly",
-  "toolName": "queryDeviceStatus",
-  "expectedStrictIdentity": true
-}

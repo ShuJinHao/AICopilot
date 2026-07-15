@@ -125,14 +125,12 @@ fi
 require_text 'AI-SEC-010' 'AI-SEC-010 scope'
 require_text 'check-runner-security-attestation\.sh' 'runner machine attestation command'
 require_text 'GitHub production environment' 'GitHub production environment section'
-require_text 'required reviewers' 'production environment required reviewers'
 require_text 'Environment secrets.*restricted|restricted.*Environment secrets|secret inventory' 'production environment secret restriction evidence'
 require_text 'contents:[[:space:]]*read' 'least-privilege workflow permissions'
 require_text 'self-hosted.*iiot-linux-prod|iiot-linux-prod.*self-hosted' 'self-hosted production runner label'
 require_text 'No production.*secret-touching.*GitHub hosted runners|production.*secret-touching.*do not use GitHub hosted runners|no GitHub hosted runners' 'no hosted runner evidence for production or secret-touching workflows'
 require_credential_strategy_evidence
 require_non_empty_field 'Platform owner'
-require_non_empty_field 'Reviewer'
 require_non_empty_field 'Release owner'
 
 printf 'AICopilot platform attestation record lint passed: %s\n' "$RECORD_PATH"

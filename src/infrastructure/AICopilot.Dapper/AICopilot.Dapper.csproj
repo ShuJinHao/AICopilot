@@ -13,10 +13,10 @@
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.9" />
     <PackageReference Include="MySql.Data" Version="9.6.0" />
     <PackageReference Include="Npgsql" Version="10.0.3" />
-    <PackageReference Include="SqlParserCS" Version="0.6.5" />
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\AICopilot.SqlSafety\AICopilot.SqlSafety.csproj" />
     <ProjectReference Include="..\..\services\AICopilot.Services.Contracts\AICopilot.Services.Contracts.csproj" />
   </ItemGroup>
 

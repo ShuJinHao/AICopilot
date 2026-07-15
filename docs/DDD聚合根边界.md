@@ -23,8 +23,10 @@
 
 ## 编译型边界
 
-- `AIARCH002` 使用 Roslyn symbol 语义检查 `IAggregateRoot` 和 `IRepository<T>` / `IReadRepository<T>`。它只接受上述白名单的完全限定类型名；别名、全局 using、泛型 helper 或换同名 namespace 都不能绕过。修改白名单必须先修改本契约，再同步 Analyzer 与正/反例 fixture。
+- `AIARCH001` 使用项目名的显式分类图验证生产引用方向。`AICopilot.ArtifactGeneration`、`AICopilot.CloudReadClient`、`AICopilot.McpRuntime`、`AICopilot.SecretProtection`、`AICopilot.SqlSafety` 属于 Infrastructure；任何未分类的 `AICopilot.*` 生产源项目或目标项目都必须以 compiler error fail-closed，不得把 Unknown 当作隐式例外。新增或拆分生产项目时必须在同一改动中更新分类和语义/真实 csproj 正反例。
+- `AIARCH002` 使用 Roslyn symbol 语义检查 `IAggregateRoot` 和完全限定 `AICopilot.SharedKernel.Repository.IRepository<T>` / `IReadRepository<T>`。Repository identity 必须匹配 original definition 或其真实 interface implementation；`Fixture.IRepository` 等同名类型不属于 repository 边界，也不能制造误报。聚合白名单只接受上述完全限定类型名；别名、全局 using、泛型 helper 或换同名 namespace 都不能绕过。修改白名单必须先修改本契约，再同步 Analyzer 与同名 fake 正例、真实违规反例 fixture。
 - `AIARCH003` 使用 Roslyn operation 语义阻断未授权项目的 `DbContext`、EF write API、Dapper/Npgsql 与直接 SQL 调用。批准 owner 只有项目 `AICopilot.EntityFrameworkCore`、`AICopilot.Dapper`、仅负责 migration/seed 的 `AICopilot.MigrationWorkApp`，以及精确类型 `AICopilot.Infrastructure.AiGateway.PostgreSqlSessionExecutionLock` 及其嵌套实现。同名类型、adapter、wrapper 或其它 Infrastructure 类型不在例外内。
+- `AIARCH004` 对所有减少 enabled Admin 的 mutation 做跨方法语义追踪。Inline/stored 和 field/property 中的 lambda/method-group 都必须解析为 edge-aware caller→delegate 边；field/property initializer、constructor assignment 与 property getter return 在 CompilationEnd 统一解析，不能依赖并发 callback 顺序。Synthetic transaction-delegate edge 与真实 invocation/delegate `Invoke` edge必须分开，同一 target 经事务执行后又被同一或其他 handler 直接调用不能获得 method-global 豁免。分析根包含外部可达方法以及源码图中没有 incoming edge 的 ordinary method，因此 protected `BackgroundService.ExecuteAsync`、internal seeder 和 internal type 的 public entry 不能靠可见性逃逸；只有作为 transaction target 的 private helper 才由 synthetic incoming 归属到真实 caller。Mutation 必须实际位于完全限定 `ITransactionalExecutionService` 的 transaction delegate 内，并由同一执行块/路径上先于 mutation 的 enabled-admin invariant guard 支配；事务、guard、mutation 互不相交、调用顺序反转或 stored/member delegate 直接双用都是 compiler error。同名 transaction/guard 类型和词法影子调用不得成为例外。
 - 不允许用 `NoWarn`、降级 diagnostic、添加别名 owner 或保留词法影子门禁来扩大例外。真实 `DbSet<T>` 分类、数据库迁移布局和运行时存储行为仍由下文契约与动态架构/持久化测试验证，不与 Analyzer 重复做字符串扫描。
 
 ## 当前架构债

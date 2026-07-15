@@ -20,6 +20,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<IKnowledgeRetrievalService, KnowledgeRetrievalService>();
         builder.Services.AddScoped<IKnowledgeBaseReadService, KnowledgeBaseReadService>();
         builder.Services.AddScoped<IKnowledgeBaseAccessChecker, KnowledgeBaseAccessChecker>();
+        builder.Services.AddScoped<DocumentFileDeletionWorkflow>();
     }
 
     public static void AddRagIndexingService(this IHostApplicationBuilder builder)

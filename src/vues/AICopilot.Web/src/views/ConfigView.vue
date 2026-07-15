@@ -40,7 +40,6 @@ type AgentSlotDefinition = {
   tone: 'blue' | 'teal' | 'violet'
   templateCode: string
   templateScope: string
-  legacyTemplateNames: string[]
   defaultModelName: string
 }
 
@@ -56,7 +55,6 @@ const slotDefinitions: AgentSlotDefinition[] = [
     tone: 'blue',
     templateCode: 'IntentRoutingAgent',
     templateScope: 'IntentRouting',
-    legacyTemplateNames: ['IntentRoutingAgent'],
     defaultModelName: 'Intent Routing Model'
   },
   {
@@ -68,7 +66,6 @@ const slotDefinitions: AgentSlotDefinition[] = [
     tone: 'teal',
     templateCode: 'agent_planner',
     templateScope: 'AgentPlanner',
-    legacyTemplateNames: ['agent_planner', 'A助理任务规划'],
     defaultModelName: 'Plan Generator Model'
   },
   {
@@ -80,7 +77,6 @@ const slotDefinitions: AgentSlotDefinition[] = [
     tone: 'violet',
     templateCode: 'agent_executor',
     templateScope: 'AgentExecutor',
-    legacyTemplateNames: ['agent_executor', 'A助理任务执行'],
     defaultModelName: 'Executor Model'
   }
 ]
@@ -235,8 +231,7 @@ function findTemplate(slot: AgentSlotDefinition) {
   const code = slot.templateCode.toLowerCase()
   return store.conversationTemplates.find((template) =>
     template.code?.toLowerCase() === code ||
-    template.scope === slot.templateScope ||
-    slot.legacyTemplateNames.some((name) => template.name === name)
+    template.scope === slot.templateScope
   ) ?? null
 }
 

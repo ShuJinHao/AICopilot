@@ -2,6 +2,8 @@ using AICopilot.HttpApi.Infrastructure;
 using AICopilot.HttpApi.Models;
 using AICopilot.IdentityService.Commands;
 using AICopilot.IdentityService.Queries;
+using AICopilot.Services.Contracts.Http;
+using AICopilot.Services.Contracts.Authentication;
 using AICopilot.SharedKernel.Result;
 using MediatR;
 using Microsoft.AspNetCore.Authentication;
@@ -63,46 +65,21 @@ public class IdentityController(
     [EnableRateLimiting("login")]
     public async Task<IActionResult> FinalizeCloudOidcLogin()
     {
-        var authenticateResult = await HttpContext.AuthenticateAsync(
-            CloudOidcAuthenticationDefaults.ExternalCookieScheme);
+        var result = await CloudOidcFinalizationWorkflow.ExecuteAsync(
+            async _ =>
+            {
+                var authentication = await HttpContext.AuthenticateAsync(
+                    CloudOidcAuthenticationDefaults.ExternalCookieScheme);
+                return authentication.Succeeded ? authentication.Principal : null;
+            },
+            cloudOidcOptions.Value.Issuer,
+            (profile, cancellationToken) => Sender.Send(
+                new FinalizeCloudOidcLoginCommand(profile),
+                cancellationToken),
+            _ => HttpContext.SignOutAsync(CloudOidcAuthenticationDefaults.ExternalCookieScheme),
+            HttpContext.RequestAborted);
 
-        if (!authenticateResult.Succeeded || authenticateResult.Principal is null)
-        {
-            await HttpContext.SignOutAsync(CloudOidcAuthenticationDefaults.ExternalCookieScheme);
-            return StatusCode(
-                StatusCodes.Status401Unauthorized,
-                ApiProblemDetailsFactory.Create(
-                    StatusCodes.Status401Unauthorized,
-                    new ApiProblemDescriptor(
-                        AuthProblemCodes.CloudOidcInvalidPrincipal,
-                        "Cloud 登录态无效或已过期，请重新从 Cloud 登录。"),
-                    traceIdentifier: HttpContext.TraceIdentifier));
-        }
-
-        if (!CloudOidcPrincipalMapper.TryMap(
-                authenticateResult.Principal,
-                cloudOidcOptions.Value.Issuer,
-                out var profile,
-                out var problem))
-        {
-            await HttpContext.SignOutAsync(CloudOidcAuthenticationDefaults.ExternalCookieScheme);
-            return StatusCode(
-                StatusCodes.Status401Unauthorized,
-                ApiProblemDetailsFactory.Create(
-                    StatusCodes.Status401Unauthorized,
-                    problem,
-                    traceIdentifier: HttpContext.TraceIdentifier));
-        }
-
-        try
-        {
-            var result = await Sender.Send(new FinalizeCloudOidcLoginCommand(profile));
-            return ReturnResult(result);
-        }
-        finally
-        {
-            await HttpContext.SignOutAsync(CloudOidcAuthenticationDefaults.ExternalCookieScheme);
-        }
+        return ReturnResult(result);
     }
 
     [Authorize]

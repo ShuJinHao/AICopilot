@@ -22,12 +22,23 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\infrastructure\AICopilot.AiRuntime\AICopilot.AiRuntime.csproj" />
+    <ProjectReference Include="..\..\infrastructure\AICopilot.SqlSafety\AICopilot.SqlSafety.csproj" />
+    <ProjectReference Include="..\..\infrastructure\AICopilot.SecretProtection\AICopilot.SecretProtection.csproj" />
+    <ProjectReference Include="..\..\infrastructure\AICopilot.EmbeddingClient\AICopilot.EmbeddingClient.csproj" />
     <ProjectReference Include="..\..\services\AICopilot.AiGatewayService\AICopilot.AiGatewayService.csproj" />
+    <ProjectReference Include="..\..\services\AICopilot.DataAnalysisService\AICopilot.DataAnalysisService.csproj" />
     <ProjectReference Include="..\..\services\AICopilot.IdentityService\AICopilot.IdentityService.csproj" />
+    <ProjectReference Include="..\..\services\AICopilot.RagService\AICopilot.RagService.csproj" />
     <ProjectReference Include="..\..\services\AICopilot.Services.Contracts\AICopilot.Services.Contracts.csproj" />
+    <ProjectReference Include="..\..\shared\AICopilot.AgentPlugin\AICopilot.AgentPlugin.csproj" />
+    <ProjectReference Include="..\..\shared\AICopilot.Visualization\AICopilot.Visualization.csproj" />
+    <ProjectReference Include="..\..\testing\AICopilot.AgentWorkflowTestKit\AICopilot.AgentWorkflowTestKit.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="FluentAssertions" />
+    <Using Include="AICopilot.AgentWorkflowTestKit" />
     <Using Include="Xunit" />
   </ItemGroup>
+  <Import Project="..\AICopilot.TestRunner.Shared.props" />
 </Project>

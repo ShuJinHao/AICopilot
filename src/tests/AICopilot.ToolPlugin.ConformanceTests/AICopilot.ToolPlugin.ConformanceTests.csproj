@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <AICopilotTestKind>Conformance</AICopilotTestKind>
+    <AICopilotTestRuntime>Filesystem</AICopilotTestRuntime>
+    <AICopilotTestCadence>PR</AICopilotTestCadence>
+    <AICopilotTestOwner>ToolPlugin</AICopilotTestOwner>
+    <AICopilotRequired>true</AICopilotRequired>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="FluentAssertions" Version="8.8.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\core\AICopilot.Core.McpServer\AICopilot.Core.McpServer.csproj" />
+    <ProjectReference Include="..\..\infrastructure\AICopilot.Infrastructure\AICopilot.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\services\AICopilot.AiGatewayService\AICopilot.AiGatewayService.csproj" />
+    <ProjectReference Include="..\..\services\AICopilot.Services.Contracts\AICopilot.Services.Contracts.csproj" />
+    <ProjectReference Include="..\..\shared\AICopilot.AgentPlugin\AICopilot.AgentPlugin.csproj" />
+    <ProjectReference Include="..\..\shared\AICopilot.AgentPlugin.Runtime\AICopilot.AgentPlugin.Runtime.csproj" />
+    <ProjectReference Include="..\..\shared\AICopilot.SharedKernel\AICopilot.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\testing\AICopilot.AgentWorkflowTestKit\AICopilot.AgentWorkflowTestKit.csproj" />
+    <ProjectReference Include="..\..\testing\AICopilot.ToolPluginTestKit\AICopilot.ToolPluginTestKit.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="AICopilot.AgentWorkflowTestKit" />
+    <Using Include="AICopilot.ToolPluginTestKit" />
+  </ItemGroup>
+  <Import Project="..\AICopilot.TestRunner.Shared.props" />
+</Project>

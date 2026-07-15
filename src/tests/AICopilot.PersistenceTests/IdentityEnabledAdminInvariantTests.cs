@@ -2,7 +2,7 @@ using AICopilot.EntityFrameworkCore;
 using AICopilot.EntityFrameworkCore.AuditLogs;
 using AICopilot.EntityFrameworkCore.Locking;
 using AICopilot.EntityFrameworkCore.Transactions;
-using AICopilot.BackendTests;
+using AICopilot.PersistenceTestKit;
 using AICopilot.IdentityService.Authorization;
 using AICopilot.IdentityService.Commands;
 using AICopilot.IdentityService.Queries;
@@ -13,7 +13,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Npgsql;
-using static AICopilot.BackendTests.IdentityPersistenceTestSupport;
+using static AICopilot.PersistenceTests.IdentityPersistenceTestSupport;
+using System.Threading.Channels;
 
 namespace AICopilot.PersistenceTests;
 
@@ -55,7 +56,9 @@ public sealed class IdentityEnabledAdminInvariantTests(PostgresPersistenceFixtur
 
         try
         {
-            await WaitForAdvisoryWaiterCountAsync(database.ConnectionString, expected: 2);
+            await Task.WhenAll(
+                firstScope.WaitForAcquireAttemptAsync(),
+                secondScope.WaitForAcquireAttemptAsync());
             await controlTransaction.CommitAsync();
         }
         catch
@@ -126,12 +129,12 @@ public sealed class IdentityEnabledAdminInvariantTests(PostgresPersistenceFixtur
         var retriedTask = retriedScope.ExecuteAsync(
             AdminDecreaseAction.Disable,
             retriedUserId);
-        await WaitForAdvisoryWaiterCountAsync(database.ConnectionString, expected: 1);
+        await retriedScope.WaitForAcquireAttemptAsync();
 
         var competingTask = competingScope.ExecuteAsync(
             AdminDecreaseAction.Disable,
             competingUserId);
-        await WaitForAdvisoryWaiterCountAsync(database.ConnectionString, expected: 2);
+        await competingScope.WaitForAcquireAttemptAsync();
 
         try
         {
@@ -236,13 +239,20 @@ public sealed class IdentityEnabledAdminInvariantTests(PostgresPersistenceFixtur
             controlTransaction,
             PostgresIdentityEnabledAdminInvariantGuard.ResourceKey);
 
-        var seedTask = RunIdentitySeedAsync(database.ConnectionString, configuration);
+        var seedAcquireStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var seedTask = RunIdentitySeedAsync(
+            database.ConnectionString,
+            configuration,
+            seedAcquireStarted);
         await using var mutationScope = IdentityMutationTestScope.Create(database.ConnectionString);
         var mutationTask = mutationScope.ExecuteAsync(action, bootstrapUserId);
 
         try
         {
-            await WaitForAdvisoryWaiterCountAsync(database.ConnectionString, expected: 2);
+            await Task.WhenAll(
+                seedAcquireStarted.Task.WaitAsync(TimeSpan.FromSeconds(10)),
+                mutationScope.WaitForAcquireAttemptAsync());
             await controlTransaction.CommitAsync();
         }
         catch
@@ -380,15 +390,24 @@ public sealed class IdentityEnabledAdminInvariantTests(PostgresPersistenceFixtur
 
     private static async Task RunIdentitySeedAsync(
         string connectionString,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        TaskCompletionSource? acquireStarted = null)
     {
         await using var dbContext = new IdentityStoreDbContext(
             CreateIdentityOptions(connectionString));
         using var managers = IdentityManagerTestScope.Create(dbContext);
         var permissionCatalog = new PermissionCatalog();
+        IIdentityEnabledAdminInvariantGuard invariantGuard =
+            new PostgresIdentityEnabledAdminInvariantGuard(dbContext);
+        if (acquireStarted is not null)
+        {
+            invariantGuard = new SignalingIdentityEnabledAdminInvariantGuard(
+                invariantGuard,
+                acquireStarted);
+        }
         var invariant = new EnabledAdminInvariantPolicy(
             managers.UserManager,
-            new PostgresIdentityEnabledAdminInvariantGuard(dbContext));
+            invariantGuard);
         await MigrationWorkerIdentitySeeder.SeedAsync(
             managers.RoleManager,
             managers.UserManager,
@@ -449,43 +468,6 @@ public sealed class IdentityEnabledAdminInvariantTests(PostgresPersistenceFixtur
             {
                 (await managers.UserManager.AddToRoleAsync(user, role)).Succeeded.Should().BeTrue();
             }
-        }
-    }
-
-    private static async Task WaitForAdvisoryWaiterCountAsync(
-        string connectionString,
-        int expected)
-    {
-        var unsignedResourceKey = unchecked(
-            (ulong)PostgresIdentityEnabledAdminInvariantGuard.ResourceKey);
-        var classId = (long)(uint)(unsignedResourceKey >> 32);
-        var objectId = (long)(uint)unsignedResourceKey;
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await using var connection = new NpgsqlConnection(connectionString);
-        await connection.OpenAsync(timeout.Token);
-        while (true)
-        {
-            await using var command = connection.CreateCommand();
-            command.CommandText =
-                """
-                SELECT COUNT(*)::int
-                FROM pg_locks
-                WHERE locktype = 'advisory'
-                  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
-                  AND classid = CAST(@class_id AS oid)
-                  AND objid = CAST(@object_id AS oid)
-                  AND objsubid = 1
-                  AND NOT granted
-                """;
-            command.Parameters.AddWithValue("class_id", classId);
-            command.Parameters.AddWithValue("object_id", objectId);
-            var waiterCount = Convert.ToInt32(await command.ExecuteScalarAsync(timeout.Token));
-            if (waiterCount >= expected)
-            {
-                return;
-            }
-
-            await Task.Delay(TimeSpan.FromMilliseconds(20), timeout.Token);
         }
     }
 
@@ -562,6 +544,11 @@ public sealed class IdentityEnabledAdminInvariantTests(PostgresPersistenceFixtur
 
         public int InvariantAcquireCount => invariantGuard.AcquireCount;
 
+        public Task WaitForAcquireAttemptAsync()
+        {
+            return invariantGuard.WaitForAcquireAttemptAsync();
+        }
+
         public static IdentityMutationTestScope Create(
             string connectionString,
             params IInterceptor[] interceptors)
@@ -610,13 +597,34 @@ public sealed class IdentityEnabledAdminInvariantTests(PostgresPersistenceFixtur
         IIdentityEnabledAdminInvariantGuard inner) : IIdentityEnabledAdminInvariantGuard
     {
         private int acquireCount;
+        private readonly Channel<int> acquireAttempts = Channel.CreateUnbounded<int>();
 
         public int AcquireCount => Volatile.Read(ref acquireCount);
 
         public async Task AcquireAsync(CancellationToken cancellationToken = default)
         {
-            Interlocked.Increment(ref acquireCount);
-            await inner.AcquireAsync(cancellationToken);
+            var attempt = Interlocked.Increment(ref acquireCount);
+            var acquireTask = inner.AcquireAsync(cancellationToken);
+            acquireAttempts.Writer.TryWrite(attempt).Should().BeTrue();
+            await acquireTask;
+        }
+
+        public async Task WaitForAcquireAttemptAsync()
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            _ = await acquireAttempts.Reader.ReadAsync(timeout.Token);
+        }
+    }
+
+    private sealed class SignalingIdentityEnabledAdminInvariantGuard(
+        IIdentityEnabledAdminInvariantGuard inner,
+        TaskCompletionSource acquireStarted) : IIdentityEnabledAdminInvariantGuard
+    {
+        public async Task AcquireAsync(CancellationToken cancellationToken = default)
+        {
+            var acquireTask = inner.AcquireAsync(cancellationToken);
+            acquireStarted.TrySetResult();
+            await acquireTask;
         }
     }
 

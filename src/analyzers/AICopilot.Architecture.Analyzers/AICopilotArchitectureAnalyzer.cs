@@ -4,6 +4,7 @@ using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.CodeAnalysis.Operations;
 
@@ -38,7 +39,7 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor EnabledAdminInvariantRule = CreateRule(
         EnabledAdminInvariantId,
         "Enabled Admin reduction requires the shared invariant transaction",
-        "'{0}' can reduce enabled Admin membership but does not reach both ITransactionalExecutionService and the enabled-admin invariant guard");
+        "'{0}' can reduce enabled Admin membership without the required transaction/guard ordering: {1}");
 
     private static readonly DiagnosticDescriptor AgentPluginBoundaryRule = CreateRule(
         AgentPluginBoundaryId,
@@ -111,7 +112,37 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
             "RemoveFromRoleAsync",
             "RemoveFromRolesAsync",
             "DeleteAsync",
+            "UpdateAsync",
+            "SetLockoutEndDateAsync",
+            "SetLockoutEnabledAsync",
             "MarkUserDisabled");
+
+    private const string AuthorizeRequirementAttributeName =
+        "AICopilot.Services.CrossCutting.Attributes.AuthorizeRequirementAttribute";
+    private const string AuthorizeAttributeName =
+        "Microsoft.AspNetCore.Authorization.AuthorizeAttribute";
+    private const string AllowAnonymousAttributeName =
+        "Microsoft.AspNetCore.Authorization.AllowAnonymousAttribute";
+    private const string DescriptionAttributeName =
+        "System.ComponentModel.DescriptionAttribute";
+    private const string ToolSafetyDescriptorName =
+        "AICopilot.SharedKernel.Ai.AiToolSafetyDescriptor";
+    private const string ToolSafetyPolicyName =
+        "AICopilot.SharedKernel.Ai.AiToolSafetyPolicy";
+    private static readonly ImmutableHashSet<string> TrustedCloudReadTypeNames =
+        ImmutableHashSet.Create(
+            StringComparer.Ordinal,
+            "AICopilot.Services.Contracts.ICloudAiReadClient",
+            "AICopilot.Services.Contracts.ICloudReadOnlyTextToSqlGenerator",
+            "AICopilot.CloudReadClient.CloudAiReadClient",
+            "AICopilot.AiGatewayService.AgentTasks.ICloudReadonlyAgentToolExecutor",
+            "AICopilot.AiGatewayService.AgentTasks.ICloudReadonlyDataProvider");
+    private static readonly ImmutableHashSet<string> FormalCloudReadOnlyWorkflowTypeNames =
+        ImmutableHashSet.Create(
+            StringComparer.Ordinal,
+            "AICopilot.AiGatewayService.Workflows.Executors.CloudReadOnlyTextToSqlFallbackRunner",
+            "AICopilot.AiGatewayService.AgentTasks.CloudReadonlyAgentToolExecutor",
+            "AICopilot.AiGatewayService.AgentTasks.RealCloudReadonlyDataProvider");
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics =>
         ImmutableArray.Create(
@@ -125,7 +156,8 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
 
     public override void Initialize(AnalysisContext context)
     {
-        context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
+        context.ConfigureGeneratedCodeAnalysis(
+            GeneratedCodeAnalysisFlags.Analyze | GeneratedCodeAnalysisFlags.ReportDiagnostics);
         context.EnableConcurrentExecution();
 
         context.RegisterCompilationStartAction(startContext =>
@@ -136,14 +168,44 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
                 symbolContext => AnalyzeNamedType((INamedTypeSymbol)symbolContext.Symbol, symbolContext, state),
                 SymbolKind.NamedType);
             startContext.RegisterSymbolAction(
-                symbolContext => state.AddMethod(Normalize((IMethodSymbol)symbolContext.Symbol)),
+                symbolContext =>
+                {
+                    var method = Normalize((IMethodSymbol)symbolContext.Symbol);
+                    state.AddMethod(method);
+                    AnalyzeRoleAuthorizationSymbol(method, symbolContext, state);
+                },
                 SymbolKind.Method);
             startContext.RegisterOperationAction(
                 operationContext => AnalyzeInvocation((IInvocationOperation)operationContext.Operation, operationContext, state),
                 OperationKind.Invocation);
             startContext.RegisterOperationAction(
+                operationContext => AnalyzeDynamicInvocation(operationContext, state),
+                OperationKind.DynamicInvocation,
+                OperationKind.DynamicObjectCreation,
+                OperationKind.DynamicIndexerAccess);
+            startContext.RegisterOperationAction(
+                operationContext => AnalyzeRoleClaimReference(
+                    (IFieldReferenceOperation)operationContext.Operation,
+                    operationContext,
+                    state),
+                OperationKind.FieldReference);
+            startContext.RegisterOperationAction(
+                operationContext =>
+                {
+                    var objectCreation = (IObjectCreationOperation)operationContext.Operation;
+                    AnalyzeRoleAuthorizationObjectCreation(objectCreation, operationContext, state);
+                    AnalyzeCloudReadObjectCreation(objectCreation, operationContext, state);
+                },
+                OperationKind.ObjectCreation);
+            startContext.RegisterOperationAction(
                 operationContext => AnalyzeAnonymousFunction((IAnonymousFunctionOperation)operationContext.Operation, operationContext, state),
                 OperationKind.AnonymousFunction);
+            startContext.RegisterOperationAction(
+                operationContext => AnalyzeDelegateMemberDefinition(operationContext, state),
+                OperationKind.FieldInitializer,
+                OperationKind.PropertyInitializer,
+                OperationKind.SimpleAssignment,
+                OperationKind.Return);
             startContext.RegisterCompilationEndAction(endContext => AnalyzeCompilation(endContext, state));
         });
     }
@@ -184,6 +246,8 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
         AnalyzePersistenceOwner(type, context, state);
         AnalyzePluginType(type, context, state);
         AnalyzeAuthorizationType(type, context, state);
+        AnalyzeRoleAuthorizationSymbol(type, context, state);
+        AnalyzeInvariantImplementation(type, context, state);
     }
 
     private static void AnalyzeRepositoryTypes(INamedTypeSymbol type, SymbolAnalysisContext context)
@@ -300,7 +364,7 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
         var toolMethods = type.GetMembers()
             .OfType<IMethodSymbol>()
             .Where(method => !method.IsStatic && method.DeclaredAccessibility == Accessibility.Public)
-            .Where(method => HasAttribute(method, "DescriptionAttribute"))
+            .Where(method => HasAttribute(method, DescriptionAttributeName))
             .ToArray();
         if (toolMethods.Length == 0)
         {
@@ -319,7 +383,7 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
             type.DeclaredAccessibility == Accessibility.Public &&
             IsServiceRequest(type))
         {
-            var isStream = Implements(type, "IStreamRequest");
+            var isStream = ImplementsDefinition(type, "MediatR", "IStreamRequest");
             var isPublicException = !isStream && ExplicitPublicRequestNames.Contains(type.ToDisplayString());
             var hasResourceAuthorization = TryGetResourceAuthorizationOwner(type, out var resourceOwner);
             var hasValidResourceAuthorization =
@@ -338,7 +402,7 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
             }
             else if (!isPublicException &&
                      !hasValidResourceAuthorization &&
-                     !HasAttribute(type, "AuthorizeRequirementAttribute"))
+                     !HasAttribute(type, AuthorizeRequirementAttributeName))
             {
                 context.ReportDiagnostic(Diagnostic.Create(
                     SecurityMetadataRule,
@@ -352,7 +416,7 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
 
         if (!IsHttpApiAssembly(state.AssemblyName) ||
             type.TypeKind != TypeKind.Class ||
-            !DerivesFrom(type, "ControllerBase") ||
+            !DerivesFromFullyQualified(type, "Microsoft.AspNetCore.Mvc.ControllerBase") ||
             !type.Name.EndsWith("Controller", StringComparison.Ordinal))
         {
             return;
@@ -381,33 +445,61 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
         OperationAnalysisContext context,
         CompilationState state)
     {
-        if (context.ContainingSymbol is not IMethodSymbol containingMethod)
+        var anonymousOwner = FindAnonymousOwner(invocation);
+        var containingMethod = anonymousOwner?.Symbol ?? context.ContainingSymbol as IMethodSymbol;
+        if (containingMethod is null)
         {
             return;
         }
 
         var caller = Normalize(containingMethod);
-        var target = Normalize(invocation.TargetMethod.ReducedFrom ?? invocation.TargetMethod);
+        var invokedTarget = invocation.TargetMethod.ReducedFrom ?? invocation.TargetMethod;
+        var target = Normalize(invokedTarget);
         state.AddMethod(caller);
-        state.GetFacts(caller).AddCall(target);
+        state.GetFacts(caller).AddInvocation(
+            target,
+            invocation.Syntax,
+            IsIdentityDecreaseInvocation(invocation),
+            IsCompletionObserved(invocation));
 
-        if (IsIdentityDecreaseCall(target))
+        if (InvocationUsesTrustedCloudReadType(invocation))
         {
-            state.GetFacts(caller).IdentityDecreaseTarget = target.ToDisplayString();
+            state.GetFacts(caller).UsesTrustedCloudReadType = true;
+        }
+
+        if (target.MethodKind == MethodKind.DelegateInvoke && invocation.Instance is not null)
+        {
+            state.AddDeferredDelegateCall(caller, invocation.Instance, invocation, isTransactionScope: false);
         }
 
         if (IsTransactionalBoundary(target))
         {
-            state.GetFacts(caller).HasTransactionBoundary = true;
-        }
+            foreach (var argument in invocation.Arguments)
+            {
+                if (IsDelegateType(argument.Parameter?.Type ?? argument.Value.Type))
+                {
+                    state.AddDeferredDelegateCall(caller, argument.Value, invocation, isTransactionScope: true);
+                }
+            }
 
-        if (IsEnabledAdminInvariantAcquire(target))
+            if (!IsCompletionObserved(invocation))
+            {
+                state.GetFacts(caller).HasUnobservedTransactionBoundary = true;
+            }
+        }
+        else
         {
-            state.GetFacts(caller).HasInvariantAcquire = true;
+            // Task.Run, custom callback APIs and stored delegates are ordinary call-graph edges.
+            // Treating only direct delegate.Invoke as an edge leaves the most common hidden roots.
+            foreach (var argument in invocation.Arguments.Where(argument =>
+                         IsDelegateType(argument.Parameter?.Type ?? argument.Value.Type)))
+            {
+                state.AddDeferredDelegateCall(caller, argument.Value, invocation, isTransactionScope: false);
+            }
         }
 
-        var sideEffect = GetForbiddenSideEffect(target) ?? GetInvocationSideEffect(invocation);
-        if (sideEffect is not null && !IsAuditWrite(target))
+        var sideEffect = GetForbiddenSideEffect(invokedTarget) ?? GetInvocationSideEffect(invocation, caller);
+        if (sideEffect is not null && !IsAuditWrite(invokedTarget))
         {
             state.GetFacts(caller).ForbiddenSideEffect = sideEffect;
         }
@@ -416,6 +508,246 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
         AnalyzePluginRuntimeInvocation(invocation, context, state);
         AnalyzeToolSafetyMetadata(invocation, context);
         AnalyzeRepositoryInvocation(invocation, context);
+        AnalyzeRoleAuthorizationInvocation(invocation, context, state);
+        AnalyzeInvariantServiceRegistration(invocation, context);
+    }
+
+    private static void AnalyzeDynamicInvocation(OperationAnalysisContext context, CompilationState state)
+    {
+        var operation = context.Operation;
+        var anonymousOwner = FindAnonymousOwner(operation);
+        var containingMethod = anonymousOwner?.Symbol ?? context.ContainingSymbol as IMethodSymbol;
+        if (containingMethod is null)
+        {
+            return;
+        }
+
+        var caller = Normalize(containingMethod);
+        state.AddMethod(caller);
+        var facts = state.GetFacts(caller);
+        facts.HasDynamicInvocation = true;
+        facts.ForbiddenSideEffect ??= "dynamic invocation cannot be proven read-only";
+    }
+
+    private static void AnalyzeInvariantImplementation(
+        INamedTypeSymbol type,
+        SymbolAnalysisContext context,
+        CompilationState state)
+    {
+        if (!IsProductionAssembly(state.AssemblyName) || type.TypeKind != TypeKind.Class || type.IsAbstract)
+        {
+            return;
+        }
+
+        var typeName = type.ToDisplayString();
+        if (ImplementsFullyQualified(type, "AICopilot.Services.Contracts.ITransactionalExecutionService")
+            && typeName != "AICopilot.EntityFrameworkCore.Transactions.IdentityTransactionalExecutionService")
+        {
+            context.ReportDiagnostic(Diagnostic.Create(
+                EnabledAdminInvariantRule,
+                FirstSourceLocation(type),
+                typeName,
+                "ITransactionalExecutionService has exactly one approved production implementation"));
+        }
+
+        if (ImplementsFullyQualified(type, "AICopilot.Services.Contracts.IIdentityEnabledAdminInvariantGuard")
+            && typeName != "AICopilot.EntityFrameworkCore.Locking.PostgresIdentityEnabledAdminInvariantGuard")
+        {
+            context.ReportDiagnostic(Diagnostic.Create(
+                EnabledAdminInvariantRule,
+                FirstSourceLocation(type),
+                typeName,
+                "IIdentityEnabledAdminInvariantGuard has exactly one approved production implementation"));
+        }
+    }
+
+    private static void AnalyzeInvariantServiceRegistration(
+        IInvocationOperation invocation,
+        OperationAnalysisContext context)
+    {
+        var target = invocation.TargetMethod.ReducedFrom ?? invocation.TargetMethod;
+        if (target.TypeArguments.Length < 2 ||
+            target.Name is not ("AddScoped" or "AddSingleton" or "AddTransient"))
+        {
+            return;
+        }
+
+        var serviceName = target.TypeArguments[0].ToDisplayString();
+        var implementationName = target.TypeArguments[1].ToDisplayString();
+        var expected = serviceName switch
+        {
+            "AICopilot.Services.Contracts.ITransactionalExecutionService" =>
+                "AICopilot.EntityFrameworkCore.Transactions.IdentityTransactionalExecutionService",
+            "AICopilot.Services.Contracts.IIdentityEnabledAdminInvariantGuard" =>
+                "AICopilot.EntityFrameworkCore.Locking.PostgresIdentityEnabledAdminInvariantGuard",
+            _ => null
+        };
+        if (expected is null ||
+            (target.Name == "AddScoped" && string.Equals(implementationName, expected, StringComparison.Ordinal)))
+        {
+            return;
+        }
+
+        context.ReportDiagnostic(Diagnostic.Create(
+            EnabledAdminInvariantRule,
+            invocation.Syntax.GetLocation(),
+            context.ContainingSymbol?.ToDisplayString() ?? "dependency injection",
+            $"{serviceName} must have the exact final scoped binding '{expected}'"));
+    }
+
+    private static void AnalyzeIdentityPropertyAssignment(
+        ISimpleAssignmentOperation assignment,
+        OperationAnalysisContext context,
+        CompilationState state)
+    {
+        if (assignment.Target is not IPropertyReferenceOperation property ||
+            property.Property.Name is not ("LockoutEnabled" or "LockoutEnd") ||
+            !DerivesFromDefinition(
+                property.Property.ContainingType,
+                "Microsoft.AspNetCore.Identity",
+                "IdentityUser"))
+        {
+            return;
+        }
+
+        var isReduction = property.Property.Name switch
+        {
+            "LockoutEnabled" => assignment.Value.ConstantValue is not { HasValue: true, Value: false },
+            "LockoutEnd" => assignment.Value.ConstantValue is not { HasValue: true, Value: null },
+            _ => false
+        };
+        if (!isReduction || context.ContainingSymbol is not IMethodSymbol containingMethod)
+        {
+            return;
+        }
+
+        if (containingMethod.Name == "MarkUserDisabled" &&
+            containingMethod.ContainingType.ToDisplayString() ==
+            "AICopilot.IdentityService.Authorization.IdentityGovernanceHelper")
+        {
+            // The formal helper is represented as an exact identity mutation at each call site.
+            return;
+        }
+
+        var anonymousOwner = FindAnonymousOwner(assignment);
+        var owner = Normalize(anonymousOwner?.Symbol ?? containingMethod);
+        state.AddMethod(owner);
+        state.GetFacts(owner).AddIdentityMutation(assignment.Syntax, completionObserved: true);
+    }
+
+    private static void AnalyzeRoleAuthorizationSymbol(
+        ISymbol symbol,
+        SymbolAnalysisContext context,
+        CompilationState state)
+    {
+        if (!IsProductionAssembly(state.AssemblyName))
+        {
+            return;
+        }
+
+        var roleAttribute = symbol.GetAttributes().FirstOrDefault(attribute =>
+            attribute.AttributeClass?.ToDisplayString() ==
+            "Microsoft.AspNetCore.Authorization.AuthorizeAttribute" &&
+            attribute.NamedArguments.Any(argument =>
+                argument.Key == "Roles" &&
+                argument.Value.Value is string roles &&
+                !string.IsNullOrWhiteSpace(roles)));
+        if (roleAttribute is null)
+        {
+            return;
+        }
+
+        context.ReportDiagnostic(Diagnostic.Create(
+            SecurityMetadataRule,
+            roleAttribute.ApplicationSyntaxReference?.GetSyntax(context.CancellationToken).GetLocation()
+            ?? FirstSourceLocation(symbol),
+            symbol.ToDisplayString(),
+            "JWT role claims are not an authorization authority; use permission metadata"));
+    }
+
+    private static void AnalyzeRoleAuthorizationInvocation(
+        IInvocationOperation invocation,
+        OperationAnalysisContext context,
+        CompilationState state)
+    {
+        var target = invocation.TargetMethod.ReducedFrom ?? invocation.TargetMethod;
+        if (!IsProductionAssembly(state.AssemblyName) ||
+            target.Name != "RequireRole" ||
+            target.ContainingNamespace?.ToDisplayString() != "Microsoft.AspNetCore.Authorization")
+        {
+            return;
+        }
+
+        context.ReportDiagnostic(Diagnostic.Create(
+            SecurityMetadataRule,
+            invocation.Syntax.GetLocation(),
+            context.ContainingSymbol?.ToDisplayString() ?? state.AssemblyName,
+            "RequireRole is forbidden; authorization must use permission metadata"));
+    }
+
+    private static void AnalyzeRoleAuthorizationObjectCreation(
+        IObjectCreationOperation objectCreation,
+        OperationAnalysisContext context,
+        CompilationState state)
+    {
+        if (!IsProductionAssembly(state.AssemblyName) ||
+            objectCreation.Syntax is AttributeSyntax ||
+            objectCreation.Type?.ToDisplayString() !=
+            "Microsoft.AspNetCore.Authorization.AuthorizeAttribute" ||
+            objectCreation.Initializer?.Initializers.OfType<ISimpleAssignmentOperation>()
+                .Any(assignment => assignment.Target is IPropertyReferenceOperation property &&
+                    property.Property.Name == "Roles") != true)
+        {
+            return;
+        }
+
+        context.ReportDiagnostic(Diagnostic.Create(
+            SecurityMetadataRule,
+            objectCreation.Syntax.GetLocation(),
+            context.ContainingSymbol?.ToDisplayString() ?? state.AssemblyName,
+            "AuthorizeAttribute.Roles is forbidden; authorization must use permission metadata"));
+    }
+
+    private static void AnalyzeCloudReadObjectCreation(
+        IObjectCreationOperation objectCreation,
+        OperationAnalysisContext context,
+        CompilationState state)
+    {
+        if (!IsTrustedCloudReadType(objectCreation.Type) ||
+            context.ContainingSymbol is not IMethodSymbol containingMethod)
+        {
+            return;
+        }
+
+        var anonymousOwner = FindAnonymousOwner(objectCreation);
+        var owner = Normalize(anonymousOwner?.Symbol ?? containingMethod);
+        state.AddMethod(owner);
+        state.GetFacts(owner).UsesTrustedCloudReadType = true;
+    }
+
+    private static void AnalyzeRoleClaimReference(
+        IFieldReferenceOperation reference,
+        OperationAnalysisContext context,
+        CompilationState state)
+    {
+        if (!IsProductionAssembly(state.AssemblyName) ||
+            reference.Field.ToDisplayString() != "System.Security.Claims.ClaimTypes.Role")
+        {
+            return;
+        }
+
+        var owner = context.ContainingSymbol?.ContainingType?.ToDisplayString();
+        if (owner is "AICopilot.HttpApi.Infrastructure.CurrentUser" or
+            "AICopilot.Infrastructure.Authentication.JwtTokenGenerator")
+        {
+            return;
+        }
+
+        context.ReportDiagnostic(Diagnostic.Create(
+            SecurityMetadataRule,
+            reference.Syntax.GetLocation(),
+            context.ContainingSymbol?.ToDisplayString() ?? state.AssemblyName,
+            "ClaimTypes.Role is limited to token issuance and audit display"));
     }
 
     private static void AnalyzeAnonymousFunction(
@@ -423,16 +755,59 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
         OperationAnalysisContext context,
         CompilationState state)
     {
+        var target = Normalize(anonymousFunction.Symbol);
+        state.AddMethod(target);
+
         if (context.ContainingSymbol is not IMethodSymbol containingMethod)
         {
             return;
         }
 
         var caller = Normalize(containingMethod);
-        var target = Normalize(anonymousFunction.Symbol);
         state.AddMethod(caller);
-        state.AddMethod(target);
-        state.GetFacts(caller).AddCall(target);
+    }
+
+    private static void AnalyzeDelegateMemberDefinition(
+        OperationAnalysisContext context,
+        CompilationState state)
+    {
+        switch (context.Operation)
+        {
+            case IFieldInitializerOperation fieldInitializer:
+                foreach (var field in fieldInitializer.InitializedFields)
+                {
+                    state.AddDelegateMemberDefinition(field, fieldInitializer.Value);
+                }
+
+                break;
+            case IPropertyInitializerOperation propertyInitializer:
+                foreach (var property in propertyInitializer.InitializedProperties)
+                {
+                    state.AddDelegateMemberDefinition(property, propertyInitializer.Value);
+                }
+
+                break;
+            case ISimpleAssignmentOperation assignment:
+                AnalyzeIdentityPropertyAssignment(assignment, context, state);
+                switch (assignment.Target)
+                {
+                    case IFieldReferenceOperation field:
+                        state.AddDelegateMemberDefinition(field.Field, assignment.Value);
+                        break;
+                    case IPropertyReferenceOperation property:
+                        state.AddDelegateMemberDefinition(property.Property, assignment.Value);
+                        break;
+                }
+
+                break;
+            case IReturnOperation { ReturnedValue: not null } @return
+                when context.ContainingSymbol is IMethodSymbol
+                {
+                    AssociatedSymbol: IPropertySymbol property
+                }:
+                state.AddDelegateMemberDefinition(property, @return.ReturnedValue);
+                break;
+        }
     }
 
     private static void AnalyzeDatabaseInvocation(
@@ -483,20 +858,28 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
         OperationAnalysisContext context)
     {
         var target = invocation.TargetMethod.ReducedFrom ?? invocation.TargetMethod;
-        if (target.Name != "Create" || target.ContainingType.Name != "AiToolSafetyDescriptor")
+        if (target.Name != "Create" || target.ContainingType.ToDisplayString() != ToolSafetyDescriptorName)
+        {
+            return;
+        }
+
+        if (context.ContainingSymbol?.ContainingType?.ToDisplayString() == ToolSafetyPolicyName)
         {
             return;
         }
 
         var externalSystem = GetEnumArgumentName(invocation, "externalSystemType");
-        if (!string.Equals(externalSystem, "CloudReadOnly", StringComparison.Ordinal))
+        if (externalSystem is not null &&
+            !string.Equals(externalSystem, "CloudReadOnly", StringComparison.Ordinal))
         {
             return;
         }
 
         var readOnly = GetBooleanArgument(invocation, "readOnlyDeclared");
         var capability = GetEnumArgumentName(invocation, "capabilityKind");
-        if (readOnly == true && !string.Equals(capability, "SideEffecting", StringComparison.Ordinal))
+        if (string.Equals(externalSystem, "CloudReadOnly", StringComparison.Ordinal) &&
+            readOnly == true &&
+            string.Equals(capability, "ReadOnlyQuery", StringComparison.Ordinal))
         {
             return;
         }
@@ -505,7 +888,9 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
             SecurityMetadataRule,
             invocation.Syntax.GetLocation(),
             context.ContainingSymbol?.ToDisplayString() ?? target.ToDisplayString(),
-            "CloudReadOnly tools must set readOnlyDeclared=true and must not declare SideEffecting capability"));
+            externalSystem is null
+                ? "dynamic tool metadata must use AiToolSafetyPolicy runtime evaluation because CloudReadOnly cannot be excluded statically"
+                : "CloudReadOnly tools require the exact CloudReadOnly + ReadOnlyQuery + readOnlyDeclared=true tuple"));
     }
 
     private static void AnalyzeRepositoryInvocation(
@@ -537,12 +922,51 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
 
     private static void AnalyzeCompilation(CompilationAnalysisContext context, CompilationState state)
     {
+        ResolveDeferredDelegateCalls(state);
         AnalyzeProjectReferences(context, state);
         AnalyzeCallGraphs(context, state);
     }
 
+    private static void ResolveDeferredDelegateCalls(CompilationState state)
+    {
+        foreach (var call in state.GetDeferredDelegateCallsSnapshot())
+        {
+            foreach (var target in GetDelegateTargets(call.DelegateOperation, call.Invocation, state))
+            {
+                state.AddMethod(target);
+                var callerFacts = state.GetFacts(call.Caller);
+                var sideEffect = GetForbiddenSideEffect(target);
+                if (sideEffect is not null && !IsAuditWrite(target))
+                {
+                    callerFacts.ForbiddenSideEffect = sideEffect;
+                }
+
+                if (call.IsTransactionScope)
+                {
+                    callerFacts.AddTransactionDelegateCall(target);
+                    state.GetFacts(target).IsTransactionScope = true;
+                }
+                else
+                {
+                    callerFacts.AddCall(target);
+                }
+            }
+        }
+    }
+
     private static void AnalyzeProjectReferences(CompilationAnalysisContext context, CompilationState state)
     {
+        if (IsProductionAssembly(state.AssemblyName) && GetLayer(state.AssemblyName) == Layer.Unknown)
+        {
+            context.ReportDiagnostic(Diagnostic.Create(
+                ProjectBoundaryRule,
+                FirstCompilationLocation(state.Compilation),
+                state.AssemblyName,
+                "<unclassified>",
+                "AICopilot production projects must have an explicit AIARCH001 layer classification"));
+            return;
+        }
+
         var projectReferences = context.Options.AdditionalFiles
             .Select(file => Path.GetFileNameWithoutExtension(file.Path))
             .Where(name => !string.IsNullOrWhiteSpace(name))
@@ -581,31 +1005,65 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
         var sourceMethods = state.GetMethodsSnapshot()
             .Where(method => method.Locations.Any(location => location.IsInSource))
             .ToArray();
+        var methodsWithIncomingEdges = GetMethodsWithIncomingEdges(sourceMethods, state);
 
-        foreach (var method in sourceMethods.Where(IsExternallyReachable))
+        foreach (var method in sourceMethods.Where(method =>
+                     IsIdentityAnalysisRoot(method, methodsWithIncomingEdges)))
         {
             var reachable = Traverse(method, state, sourceMethods);
-            var identityDecrease = reachable
-                .Select(candidate => state.GetFacts(candidate).IdentityDecreaseTarget)
-                .FirstOrDefault(value => value is not null);
-            if (identityDecrease is not null)
+            var hasDynamicIdentityPath = reachable.Any(candidate =>
+                state.GetFacts(candidate).HasDynamicInvocation && IsIdentityContextMethod(candidate));
+            var hasIdentityDecrease = hasDynamicIdentityPath || reachable.Any(candidate =>
+                state.GetFacts(candidate).GetIdentityMutationsSnapshot().Count != 0);
+            if (hasIdentityDecrease)
             {
-                var hasTransaction = reachable.Any(candidate => state.GetFacts(candidate).HasTransactionBoundary);
-                var hasInvariant = reachable.Any(candidate => state.GetFacts(candidate).HasInvariantAcquire);
-                if (!hasTransaction || !hasInvariant)
+                var transactionScopes = reachable
+                    .Where(candidate => state.GetFacts(candidate).IsTransactionScope)
+                    .Where(candidate => HasReachableIdentityDecrease(candidate, state, sourceMethods))
+                    .ToArray();
+                var hasMutationOutsideTransaction = HasIdentityDecreaseOutsideTransaction(
+                    method,
+                    state,
+                    sourceMethods,
+                    new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default));
+                var hasInvalidTransactionScope = transactionScopes.Any(scope =>
+                    !HasOnlyGuardedIdentityDecrease(
+                        scope,
+                        inheritedGuard: false,
+                        state,
+                        sourceMethods,
+                        new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default)));
+                var hasUnobservedTransactionBoundary = reachable.Any(candidate =>
+                    state.GetFacts(candidate).HasUnobservedTransactionBoundary);
+                if (hasMutationOutsideTransaction ||
+                    transactionScopes.Length == 0 ||
+                    hasInvalidTransactionScope ||
+                    hasUnobservedTransactionBoundary ||
+                    hasDynamicIdentityPath)
                 {
+                    var reason = hasDynamicIdentityPath
+                        ? "dynamic invocation cannot prove the identity invariant"
+                        : hasUnobservedTransactionBoundary
+                            ? "the transaction task is not awaited or returned"
+                        : hasMutationOutsideTransaction
+                        ? "a reduction is reachable outside the transaction delegate"
+                        : transactionScopes.Length == 0
+                            ? "no transaction delegate owns the reduction"
+                            : "the invariant guard does not dominate every reduction inside the transaction delegate";
                     context.ReportDiagnostic(Diagnostic.Create(
                         EnabledAdminInvariantRule,
                         FirstSourceLocation(method),
-                        method.ToDisplayString()));
+                        method.ToDisplayString(),
+                        reason));
                 }
             }
 
-            if (!IsCloudReadOnlyEntry(method))
-            {
-                continue;
-            }
+        }
 
+        foreach (var method in sourceMethods.Where(candidate =>
+                     IsCloudReadOnlyOperation(candidate, state.GetFacts(candidate))))
+        {
+            var reachable = Traverse(method, state, sourceMethods);
             var sideEffect = reachable
                 .Select(candidate => state.GetFacts(candidate).ForbiddenSideEffect)
                 .FirstOrDefault(value => value is not null);
@@ -619,6 +1077,32 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
             }
         }
     }
+
+    private static ISet<IMethodSymbol> GetMethodsWithIncomingEdges(
+        IReadOnlyCollection<IMethodSymbol> sourceMethods,
+        CompilationState state)
+    {
+        var incoming = new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default);
+        foreach (var method in sourceMethods)
+        {
+            foreach (var call in state.GetFacts(method).GetAllCallsSnapshot())
+            {
+                foreach (var target in ResolveDispatchTargets(call, sourceMethods).Where(candidate =>
+                             candidate.Locations.Any(location => location.IsInSource)))
+                {
+                    incoming.Add(Normalize(target));
+                }
+            }
+        }
+
+        return incoming;
+    }
+
+    private static bool IsIdentityAnalysisRoot(
+        IMethodSymbol method,
+        ISet<IMethodSymbol> methodsWithIncomingEdges) =>
+        method.MethodKind == MethodKind.Ordinary &&
+        (IsExternallyReachable(method) || !methodsWithIncomingEdges.Contains(Normalize(method)));
 
     private static IReadOnlyCollection<IMethodSymbol> Traverse(
         IMethodSymbol root,
@@ -637,7 +1121,7 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
                 continue;
             }
 
-            foreach (var call in state.GetFacts(current).GetCallsSnapshot())
+            foreach (var call in state.GetFacts(current).GetAllCallsSnapshot())
             {
                 foreach (var target in ResolveDispatchTargets(call, sourceMethods))
                 {
@@ -650,6 +1134,300 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
         }
 
         return visited;
+    }
+
+    private static bool HasReachableIdentityDecrease(
+        IMethodSymbol root,
+        CompilationState state,
+        IReadOnlyCollection<IMethodSymbol> sourceMethods) =>
+        Traverse(root, state, sourceMethods).Any(method =>
+            state.GetFacts(method).GetIdentityMutationsSnapshot().Count != 0 ||
+            state.GetFacts(method).HasDynamicInvocation);
+
+    private static bool HasIdentityDecreaseOutsideTransaction(
+        IMethodSymbol method,
+        CompilationState state,
+        IReadOnlyCollection<IMethodSymbol> sourceMethods,
+        ISet<IMethodSymbol> visiting)
+    {
+        method = Normalize(method);
+        if (!visiting.Add(method))
+        {
+            return false;
+        }
+
+        try
+        {
+            if (state.GetFacts(method).GetIdentityMutationsSnapshot().Count != 0 ||
+                state.GetFacts(method).HasDynamicInvocation)
+            {
+                return true;
+            }
+
+            return state.GetFacts(method).GetCallsSnapshot()
+                .SelectMany(call => ResolveDispatchTargets(call, sourceMethods))
+                .Where(target => target.Locations.Any(location => location.IsInSource))
+                .Any(target => HasIdentityDecreaseOutsideTransaction(
+                    target,
+                    state,
+                    sourceMethods,
+                    visiting));
+        }
+        finally
+        {
+            visiting.Remove(method);
+        }
+    }
+
+    private static bool HasOnlyGuardedIdentityDecrease(
+        IMethodSymbol method,
+        bool inheritedGuard,
+        CompilationState state,
+        IReadOnlyCollection<IMethodSymbol> sourceMethods,
+        ISet<IMethodSymbol> visiting)
+    {
+        method = Normalize(method);
+        if (!visiting.Add(method))
+        {
+            return false;
+        }
+
+        try
+        {
+            var facts = state.GetFacts(method);
+            var invocations = facts.GetInvocationsSnapshot()
+                .OrderBy(invocation => invocation.Syntax.SpanStart)
+                .ToArray();
+
+            foreach (var mutation in facts.GetIdentityMutationsSnapshot())
+            {
+                var guarded = inheritedGuard || invocations.Any(candidate =>
+                    IsEnabledAdminInvariantAcquire(candidate.Target) &&
+                    candidate.CompletionObserved &&
+                    Dominates(candidate.Syntax, mutation.Syntax));
+                if (!guarded || !mutation.CompletionObserved)
+                {
+                    return false;
+                }
+            }
+
+            foreach (var invocation in invocations)
+            {
+                var guarded = inheritedGuard || invocations.Any(candidate =>
+                    IsEnabledAdminInvariantAcquire(candidate.Target) &&
+                    candidate.CompletionObserved &&
+                    Dominates(candidate.Syntax, invocation.Syntax));
+
+                foreach (var target in ResolveDispatchTargets(invocation.Target, sourceMethods)
+                             .Where(target => target.Locations.Any(location => location.IsInSource))
+                             .Where(target => HasReachableIdentityDecrease(target, state, sourceMethods)))
+                {
+                    if (!HasOnlyGuardedIdentityDecrease(
+                            target,
+                            guarded,
+                            state,
+                            sourceMethods,
+                            visiting))
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            return true;
+        }
+        finally
+        {
+            visiting.Remove(method);
+        }
+    }
+
+    private static bool Dominates(SyntaxNode guardSyntax, SyntaxNode guardedSyntax)
+    {
+        var guardStatement = guardSyntax.AncestorsAndSelf().OfType<StatementSyntax>().FirstOrDefault();
+        if (guardStatement?.Parent is null)
+        {
+            return false;
+        }
+
+        return guardedSyntax.AncestorsAndSelf()
+            .OfType<StatementSyntax>()
+            .Any(statement =>
+                ReferenceEquals(statement.Parent, guardStatement.Parent) &&
+                guardStatement.Span.End <= statement.SpanStart);
+    }
+
+    private static IEnumerable<IMethodSymbol> GetDelegateTargets(
+        IOperation delegateOperation,
+        IInvocationOperation invocation,
+        CompilationState state)
+    {
+        var targets = new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default);
+        CollectDelegateTargets(
+            delegateOperation,
+            invocation,
+            state,
+            new HashSet<ILocalSymbol>(SymbolEqualityComparer.Default),
+            new HashSet<ISymbol>(SymbolEqualityComparer.Default),
+            targets);
+        return targets;
+    }
+
+    private static void CollectDelegateTargets(
+        IOperation operation,
+        IInvocationOperation transactionInvocation,
+        CompilationState state,
+        ISet<ILocalSymbol> resolvingLocals,
+        ISet<ISymbol> resolvingMembers,
+        ISet<IMethodSymbol> targets)
+    {
+        switch (operation)
+        {
+            case IAnonymousFunctionOperation anonymousFunction:
+                targets.Add(Normalize(anonymousFunction.Symbol));
+                return;
+            case IMethodReferenceOperation methodReference:
+                targets.Add(Normalize(methodReference.Method));
+                return;
+            case ILocalReferenceOperation localReference:
+                CollectLocalDelegateTargets(
+                    localReference.Local,
+                    transactionInvocation,
+                    state,
+                    resolvingLocals,
+                    resolvingMembers,
+                    targets);
+                return;
+            case IFieldReferenceOperation fieldReference:
+                CollectMemberDelegateTargets(
+                    fieldReference.Field,
+                    transactionInvocation,
+                    state,
+                    resolvingLocals,
+                    resolvingMembers,
+                    targets);
+                return;
+            case IPropertyReferenceOperation propertyReference:
+                CollectMemberDelegateTargets(
+                    propertyReference.Property,
+                    transactionInvocation,
+                    state,
+                    resolvingLocals,
+                    resolvingMembers,
+                    targets);
+                return;
+        }
+
+        foreach (var child in operation.ChildOperations)
+        {
+            CollectDelegateTargets(
+                child,
+                transactionInvocation,
+                state,
+                resolvingLocals,
+                resolvingMembers,
+                targets);
+        }
+    }
+
+    private static void CollectLocalDelegateTargets(
+        ILocalSymbol local,
+        IInvocationOperation transactionInvocation,
+        CompilationState state,
+        ISet<ILocalSymbol> resolvingLocals,
+        ISet<ISymbol> resolvingMembers,
+        ISet<IMethodSymbol> targets)
+    {
+        if (!resolvingLocals.Add(local))
+        {
+            return;
+        }
+
+        try
+        {
+            var root = (IOperation)transactionInvocation;
+            while (root.Parent is not null)
+            {
+                root = root.Parent;
+            }
+
+            var definitions = root.DescendantsAndSelf()
+                .Where(candidate => candidate.Syntax.SpanStart < transactionInvocation.Syntax.SpanStart)
+                .Select(candidate => candidate switch
+                {
+                    IVariableDeclaratorOperation declarator
+                        when SymbolEqualityComparer.Default.Equals(declarator.Symbol, local) =>
+                        declarator.Initializer?.Value,
+                    ISimpleAssignmentOperation assignment
+                        when assignment.Target is ILocalReferenceOperation target &&
+                             SymbolEqualityComparer.Default.Equals(target.Local, local) =>
+                        assignment.Value,
+                    _ => null
+                })
+                .Where(value => value is not null)
+                .Cast<IOperation>()
+                .ToArray();
+
+            foreach (var definition in definitions)
+            {
+                CollectDelegateTargets(
+                    definition,
+                    transactionInvocation,
+                    state,
+                    resolvingLocals,
+                    resolvingMembers,
+                    targets);
+            }
+        }
+        finally
+        {
+            resolvingLocals.Remove(local);
+        }
+    }
+
+    private static void CollectMemberDelegateTargets(
+        ISymbol member,
+        IInvocationOperation invocation,
+        CompilationState state,
+        ISet<ILocalSymbol> resolvingLocals,
+        ISet<ISymbol> resolvingMembers,
+        ISet<IMethodSymbol> targets)
+    {
+        if (!resolvingMembers.Add(member))
+        {
+            return;
+        }
+
+        try
+        {
+            foreach (var operation in state.GetDelegateMemberDefinitionsSnapshot(member))
+            {
+                CollectDelegateTargets(
+                    operation,
+                    invocation,
+                    state,
+                    resolvingLocals,
+                    resolvingMembers,
+                    targets);
+            }
+        }
+        finally
+        {
+            resolvingMembers.Remove(member);
+        }
+    }
+
+    private static IAnonymousFunctionOperation? FindAnonymousOwner(IOperation operation)
+    {
+        for (var parent = operation.Parent; parent is not null; parent = parent.Parent)
+        {
+            if (parent is IAnonymousFunctionOperation anonymousFunction)
+            {
+                return anonymousFunction;
+            }
+        }
+
+        return null;
     }
 
     private static IEnumerable<IMethodSymbol> ResolveDispatchTargets(
@@ -698,6 +1476,11 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
         if (source == "AICopilot.AgentPlugin" && target == "AICopilot.AgentPlugin.Runtime")
         {
             return "plugin abstractions may not depend on the runtime loader";
+        }
+
+        if (targetLayer == Layer.Unknown && IsProductionAssembly(target))
+        {
+            return "references to unclassified AICopilot production projects are forbidden until AIARCH001 assigns an explicit layer";
         }
 
         if (sourceLayer == Layer.Unknown || targetLayer == Layer.Unknown || sourceLayer == Layer.Host)
@@ -766,8 +1549,11 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
             return Layer.Service;
         }
 
-        if (assemblyName is "AICopilot.AiRuntime" or "AICopilot.Dapper" or "AICopilot.Embedding" or
-            "AICopilot.EntityFrameworkCore" or "AICopilot.EventBus" or "AICopilot.Infrastructure")
+        if (assemblyName is "AICopilot.AiRuntime" or "AICopilot.ArtifactGeneration" or
+            "AICopilot.CloudReadClient" or "AICopilot.Dapper" or "AICopilot.Embedding" or
+            "AICopilot.EmbeddingClient" or "AICopilot.EntityFrameworkCore" or
+            "AICopilot.EventBus" or "AICopilot.Infrastructure" or "AICopilot.McpRuntime" or
+            "AICopilot.SecretProtection" or "AICopilot.SqlSafety")
         {
             return Layer.Infrastructure;
         }
@@ -833,28 +1619,135 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
             return false;
         }
 
-        return method.Name == "MarkUserDisabled"
-            ? method.ContainingType.Name == "IdentityGovernanceHelper"
-            : DerivesFrom(method.ContainingType, "UserManager") ||
-              method.ContainingType.Name == "UserManager";
+        if (method.Name == "MarkUserDisabled")
+        {
+            return method.ContainingType.ToDisplayString() ==
+                   "AICopilot.IdentityService.Authorization.IdentityGovernanceHelper";
+        }
+
+        return DerivesFromDefinition(
+                   method.ContainingType,
+                   "Microsoft.AspNetCore.Identity",
+                   "UserManager") ||
+               (method.Name == "DeleteAsync" && DerivesFromDefinition(
+                   method.ContainingType,
+                   "Microsoft.AspNetCore.Identity",
+                   "RoleManager"));
+    }
+
+    private static bool IsIdentityDecreaseInvocation(IInvocationOperation invocation)
+    {
+        var method = invocation.TargetMethod.ReducedFrom ?? invocation.TargetMethod;
+        if (method.Name == "SetLockoutEnabledAsync" && IsIdentityDecreaseCall(method))
+        {
+            var enabled = invocation.Arguments.FirstOrDefault(argument => argument.Parameter?.Name is "enabled" or "lockoutEnabled");
+            return enabled?.Value.ConstantValue is not { HasValue: true, Value: false };
+        }
+
+        if (method.Name == "SetLockoutEndDateAsync" && IsIdentityDecreaseCall(method))
+        {
+            var end = invocation.Arguments.FirstOrDefault(argument => argument.Parameter?.Name is "lockoutEnd" or "lockoutEndDate");
+            return end?.Value.ConstantValue is not { HasValue: true, Value: null };
+        }
+
+        if (IsIdentityDecreaseCall(method))
+        {
+            return true;
+        }
+
+        if (method.Name is not ("Remove" or "RemoveAsync" or "Delete" or "DeleteAsync" or "ExecuteDelete" or "ExecuteDeleteAsync"))
+        {
+            return false;
+        }
+
+        return IsIdentityRoleRelationType(method.ContainingType) ||
+               invocation.Arguments.Any(argument => IsIdentityRoleRelationType(argument.Value.Type));
+    }
+
+    private static bool IsIdentityRoleRelationType(ITypeSymbol? type)
+    {
+        if (type is not INamedTypeSymbol named)
+        {
+            return false;
+        }
+
+        return named.OriginalDefinition.ToDisplayString().StartsWith(
+                   "Microsoft.AspNetCore.Identity.IdentityUserRole<",
+                   StringComparison.Ordinal) ||
+               named.TypeArguments.Any(IsIdentityRoleRelationType);
+    }
+
+    private static bool IsIdentityContextMethod(IMethodSymbol method)
+    {
+        static bool IsIdentityType(ITypeSymbol? type) =>
+            DerivesFromDefinition(type, "Microsoft.AspNetCore.Identity", "UserManager") ||
+            DerivesFromDefinition(type, "Microsoft.AspNetCore.Identity", "RoleManager") ||
+            ImplementsFullyQualified(type, "AICopilot.Services.Contracts.ITransactionalExecutionService") ||
+            ImplementsFullyQualified(type, "AICopilot.Services.Contracts.IIdentityEnabledAdminInvariantGuard") ||
+            type?.ToDisplayString() ==
+            "AICopilot.IdentityService.Authorization.EnabledAdminInvariantPolicy";
+
+        if (method.Parameters.Any(parameter => IsIdentityType(parameter.Type)) ||
+            IsIdentityType(method.ReturnType))
+        {
+            return true;
+        }
+
+        var type = method.ContainingType;
+        return type is not null &&
+               (type.InstanceConstructors.Any(constructor =>
+                    constructor.Parameters.Any(parameter => IsIdentityType(parameter.Type))) ||
+                type.GetMembers().Any(member => member switch
+                {
+                    IFieldSymbol field => IsIdentityType(field.Type),
+                    IPropertySymbol property => IsIdentityType(property.Type),
+                    _ => false
+                }));
+    }
+
+    private static bool IsDelegateType(ITypeSymbol? type) =>
+        type?.TypeKind == TypeKind.Delegate;
+
+    private static bool IsCompletionObserved(IOperation operation)
+    {
+        IOperation current = operation;
+        while (current.Parent is IConversionOperation or IParenthesizedOperation)
+        {
+            current = current.Parent;
+        }
+
+        if (current.Parent is IAwaitOperation or IReturnOperation)
+        {
+            return true;
+        }
+
+        return current.Syntax.AncestorsAndSelf().Any(node =>
+            node is AwaitExpressionSyntax or ReturnStatementSyntax or ArrowExpressionClauseSyntax);
     }
 
     private static bool IsTransactionalBoundary(IMethodSymbol method) =>
         (method.Name == "ExecuteAsync" || method.Name == "ExecuteResultAsync") &&
-        (method.ContainingType.Name == "ITransactionalExecutionService" ||
-         Implements(method.ContainingType, "ITransactionalExecutionService"));
+        ImplementsFullyQualified(
+            method.ContainingType,
+            "AICopilot.Services.Contracts.ITransactionalExecutionService");
 
     private static bool IsEnabledAdminInvariantAcquire(IMethodSymbol method) =>
         method.Name == "AcquireAsync" &&
-        (method.ContainingType.Name is "EnabledAdminInvariantPolicy" or "IIdentityEnabledAdminInvariantGuard" ||
-         Implements(method.ContainingType, "IIdentityEnabledAdminInvariantGuard"));
+        (method.ContainingType.ToDisplayString() ==
+             "AICopilot.IdentityService.Authorization.EnabledAdminInvariantPolicy" ||
+         ImplementsFullyQualified(
+             method.ContainingType,
+             "AICopilot.Services.Contracts.IIdentityEnabledAdminInvariantGuard"));
 
     private static string? GetForbiddenSideEffect(IMethodSymbol method)
     {
         if (method.Name.StartsWith("SaveChanges", StringComparison.Ordinal) ||
             method.Name.StartsWith("ExecuteNonQuery", StringComparison.Ordinal) ||
             method.Name.StartsWith("ExecuteSqlRaw", StringComparison.Ordinal) ||
-            method.Name.StartsWith("ExecuteSqlInterpolated", StringComparison.Ordinal))
+            method.Name.StartsWith("ExecuteSqlInterpolated", StringComparison.Ordinal) ||
+            IsDapperWriteExecution(method) ||
+            IsEntityFrameworkBulkWrite(method) ||
+            IsFormalMcpToolExecution(method))
         {
             return method.ToDisplayString();
         }
@@ -866,7 +1759,10 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
         }
 
         if (method.Name == "Send" && method.Parameters.Length > 0 &&
-            Implements(method.Parameters[0].Type, "ICommand"))
+            ImplementsDefinition(
+                method.Parameters[0].Type,
+                "AICopilot.SharedKernel.Messaging",
+                "ICommand"))
         {
             return method.ToDisplayString();
         }
@@ -874,42 +1770,146 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
         return null;
     }
 
-    private static string? GetInvocationSideEffect(IInvocationOperation invocation)
+    private static string? GetInvocationSideEffect(
+        IInvocationOperation invocation,
+        IMethodSymbol caller)
     {
         var method = invocation.TargetMethod.ReducedFrom ?? invocation.TargetMethod;
         if (method.Name == "Send" && invocation.Arguments.Length > 0 &&
-            Implements(invocation.Arguments[0].Value.Type, "ICommand"))
+            ImplementsDefinition(
+                invocation.Arguments[0].Value.Type,
+                "AICopilot.SharedKernel.Messaging",
+                "ICommand"))
         {
             return method.ToDisplayString();
         }
 
-        var containingName = method.ContainingType?.Name ?? string.Empty;
-        if (containingName.IndexOf("Mcp", StringComparison.OrdinalIgnoreCase) >= 0 &&
-            (method.Name.IndexOf("Write", StringComparison.OrdinalIgnoreCase) >= 0 ||
-             method.Name.IndexOf("Create", StringComparison.OrdinalIgnoreCase) >= 0 ||
-             method.Name.IndexOf("Update", StringComparison.OrdinalIgnoreCase) >= 0 ||
-             method.Name.IndexOf("Delete", StringComparison.OrdinalIgnoreCase) >= 0 ||
-             method.Name.IndexOf("Remove", StringComparison.OrdinalIgnoreCase) >= 0))
+        if (DerivesFromFullyQualified(method.ContainingType, "System.Net.Http.HttpClient"))
         {
-            return method.ToDisplayString();
+            var isWriteVerb = method.Name is "PostAsync" or "PutAsync" or "PatchAsync" or "DeleteAsync";
+            var isSend = method.Name == "SendAsync";
+            if (isWriteVerb || isSend)
+            {
+                var isFormalGetTransport = caller.ContainingType?.ToDisplayString() ==
+                                           "AICopilot.Infrastructure.CloudRead.CloudAiReadHttpTransport" &&
+                                           isSend &&
+                                           IsProvablyGetRequest(invocation);
+                if (!isFormalGetTransport)
+                {
+                    return method.ToDisplayString();
+                }
+            }
         }
 
         return null;
+    }
+
+    private static bool IsProvablyGetRequest(IInvocationOperation invocation)
+    {
+        var request = invocation.Arguments.FirstOrDefault(argument =>
+            argument.Parameter?.Type.ToDisplayString() == "System.Net.Http.HttpRequestMessage")?.Value;
+        return request is not null && IsProvablyGetRequestValue(
+            request,
+            invocation,
+            new HashSet<ILocalSymbol>(SymbolEqualityComparer.Default));
+    }
+
+    private static bool IsProvablyGetRequestValue(
+        IOperation operation,
+        IInvocationOperation invocation,
+        ISet<ILocalSymbol> resolvingLocals)
+    {
+        operation = UnwrapConversion(operation) ?? operation;
+        if (operation is IObjectCreationOperation creation &&
+            creation.Type?.ToDisplayString() == "System.Net.Http.HttpRequestMessage")
+        {
+            var methodArgument = creation.Arguments.FirstOrDefault(argument =>
+                argument.Parameter?.Type.ToDisplayString() == "System.Net.Http.HttpMethod")?.Value;
+            return IsHttpGetValue(methodArgument) ||
+                   creation.Initializer?.Initializers.OfType<ISimpleAssignmentOperation>().Any(assignment =>
+                       assignment.Target is IPropertyReferenceOperation property &&
+                       property.Property.Name == "Method" &&
+                       IsHttpGetValue(assignment.Value)) == true;
+        }
+
+        if (operation is not ILocalReferenceOperation localReference ||
+            !resolvingLocals.Add(localReference.Local))
+        {
+            return false;
+        }
+
+        try
+        {
+            var root = (IOperation)invocation;
+            while (root.Parent is not null)
+            {
+                root = root.Parent;
+            }
+
+            return root.DescendantsAndSelf()
+                .Where(candidate => candidate.Syntax.SpanStart < invocation.Syntax.SpanStart)
+                .Select(candidate => candidate switch
+                {
+                    IVariableDeclaratorOperation declarator
+                        when SymbolEqualityComparer.Default.Equals(declarator.Symbol, localReference.Local) =>
+                        declarator.Initializer?.Value,
+                    ISimpleAssignmentOperation assignment
+                        when assignment.Target is ILocalReferenceOperation target &&
+                             SymbolEqualityComparer.Default.Equals(target.Local, localReference.Local) =>
+                        assignment.Value,
+                    _ => null
+                })
+                .Where(value => value is not null)
+                .Cast<IOperation>()
+                .Any(value => IsProvablyGetRequestValue(value, invocation, resolvingLocals));
+        }
+        finally
+        {
+            resolvingLocals.Remove(localReference.Local);
+        }
+    }
+
+    private static bool IsHttpGetValue(IOperation? operation)
+    {
+        operation = UnwrapConversion(operation);
+        return operation is IPropertyReferenceOperation property &&
+               property.Property.Name == "Get" &&
+               property.Property.ContainingType.ToDisplayString() == "System.Net.Http.HttpMethod";
+    }
+
+    private static bool IsDapperWriteExecution(IMethodSymbol method) =>
+        method.ContainingType.OriginalDefinition.ToDisplayString() == "Dapper.SqlMapper" &&
+        method.Name is "Execute" or "ExecuteAsync";
+
+    private static bool IsEntityFrameworkBulkWrite(IMethodSymbol method) =>
+        method.ContainingType.OriginalDefinition.ToDisplayString() ==
+            "Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions" &&
+        method.Name is "ExecuteDelete" or "ExecuteDeleteAsync" or "ExecuteUpdate" or "ExecuteUpdateAsync";
+
+    private static bool IsFormalMcpToolExecution(IMethodSymbol method)
+    {
+        if (method.Name != "ExecuteAsync")
+        {
+            return false;
+        }
+
+        var containingType = method.ContainingType.OriginalDefinition.ToDisplayString();
+        return containingType is
+            "AICopilot.AiGatewayService.AgentTasks.IAgentToolExecutor" or
+            "AICopilot.AiGatewayService.AgentTasks.McpAgentToolExecutor";
     }
 
     private static bool IsAuditWrite(IMethodSymbol method) =>
         method.ContainingType.ToDisplayString() == "AICopilot.Services.Contracts.IAuditLogWriter" ||
         ImplementsFullyQualified(method.ContainingType, "AICopilot.Services.Contracts.IAuditLogWriter");
 
-    private static bool IsCloudReadOnlyEntry(IMethodSymbol method)
+    private static bool IsCloudReadOnlyOperation(IMethodSymbol method, MethodFacts facts)
     {
-        if (ContainsCloudReadName(method.Name) || ContainsCloudReadName(method.ContainingType?.Name))
-        {
-            return true;
-        }
-
-        if (method.Parameters.Any(parameter => ContainsCloudReadType(parameter.Type)) ||
-            ContainsCloudReadType(method.ReturnType))
+        if (facts.UsesTrustedCloudReadType ||
+            IsTrustedCloudReadType(method.ContainingType) ||
+            method.Parameters.Any(parameter => IsCloudReadClientType(parameter.Type)) ||
+            IsCloudReadClientType(method.ReturnType) ||
+            method.TypeArguments.Any(IsCloudReadClientType))
         {
             return true;
         }
@@ -920,30 +1920,105 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
             return false;
         }
 
-        if (containingType.AllInterfaces.Any(ContainsCloudReadType))
+        if (containingType.AllInterfaces.Any(IsTrustedCloudReadType) ||
+            containingType.InstanceConstructors.Any(constructor =>
+                constructor.Parameters.Any(parameter => IsCloudReadClientType(parameter.Type))) ||
+            containingType.GetMembers().Any(member => member switch
+            {
+                IFieldSymbol field => IsCloudReadClientType(field.Type),
+                IPropertySymbol property => IsCloudReadClientType(property.Type),
+                _ => false
+            }))
         {
             return true;
         }
 
-        return containingType.GetMembers()
-            .Any(member => member switch
-            {
-                IFieldSymbol field => ContainsCloudReadType(field.Type),
-                IPropertySymbol property => ContainsCloudReadType(property.Type),
-                _ => false
-            });
+        return IsFormalCloudReadOnlyWorkflowSymbol(method) ||
+               IsFormalCloudReadOnlyWorkflowSymbol(containingType);
     }
 
-    private static bool ContainsCloudReadType(ITypeSymbol? type) =>
-        type is not null &&
-        (ContainsCloudReadName(type.Name) ||
-         ContainsCloudReadName(type.ContainingNamespace?.ToDisplayString()));
+    private static bool InvocationUsesTrustedCloudReadType(IInvocationOperation invocation)
+    {
+        var target = invocation.TargetMethod.ReducedFrom ?? invocation.TargetMethod;
+        return IsTrustedCloudReadType(invocation.Type) ||
+               IsTrustedCloudReadType(invocation.Instance?.Type) ||
+               IsTrustedCloudReadType(target.ContainingType) ||
+               IsTrustedCloudReadType(target.ReturnType) ||
+               target.TypeArguments.Any(IsTrustedCloudReadType) ||
+               target.Parameters.Any(parameter => IsTrustedCloudReadType(parameter.Type)) ||
+               invocation.Arguments.Any(argument => IsTrustedCloudReadType(argument.Value.Type));
+    }
 
-    private static bool ContainsCloudReadName(string? value) =>
-        value is not null &&
-        (value.IndexOf("CloudAiRead", StringComparison.OrdinalIgnoreCase) >= 0 ||
-         value.IndexOf("CloudReadonly", StringComparison.OrdinalIgnoreCase) >= 0 ||
-         value.IndexOf("CloudReadOnly", StringComparison.OrdinalIgnoreCase) >= 0);
+    private static bool IsTrustedCloudReadType(ITypeSymbol? type)
+    {
+        if (type is null)
+        {
+            return false;
+        }
+
+        if (type is IArrayTypeSymbol array)
+        {
+            return IsTrustedCloudReadType(array.ElementType);
+        }
+
+        if (type is ITypeParameterSymbol typeParameter)
+        {
+            return typeParameter.ConstraintTypes.Any(IsTrustedCloudReadType);
+        }
+
+        if (type is not INamedTypeSymbol named)
+        {
+            return false;
+        }
+
+        if (TrustedCloudReadTypeNames.Contains(named.OriginalDefinition.ToDisplayString()) ||
+            FormalCloudReadOnlyWorkflowTypeNames.Contains(named.OriginalDefinition.ToDisplayString()))
+        {
+            return true;
+        }
+
+        return named.TypeArguments.Any(IsTrustedCloudReadType);
+    }
+
+    private static bool IsCloudReadClientType(ITypeSymbol? type)
+    {
+        if (type is null)
+        {
+            return false;
+        }
+
+        if (type is IArrayTypeSymbol array)
+        {
+            return IsCloudReadClientType(array.ElementType);
+        }
+
+        if (type is ITypeParameterSymbol typeParameter)
+        {
+            return typeParameter.ConstraintTypes.Any(IsCloudReadClientType);
+        }
+
+        if (type is not INamedTypeSymbol named)
+        {
+            return false;
+        }
+
+        var definition = named.OriginalDefinition.ToDisplayString();
+        if (definition is "AICopilot.Services.Contracts.ICloudAiReadClient" or
+            "AICopilot.Services.Contracts.ICloudReadOnlyTextToSqlGenerator" or
+            "AICopilot.CloudReadClient.CloudAiReadClient")
+        {
+            return true;
+        }
+
+        return named.TypeArguments.Any(IsCloudReadClientType);
+    }
+
+    private static bool IsFormalCloudReadOnlyWorkflowSymbol(ISymbol symbol)
+    {
+        var type = symbol as INamedTypeSymbol ?? symbol.ContainingType;
+        return type is not null &&
+               FormalCloudReadOnlyWorkflowTypeNames.Contains(type.OriginalDefinition.ToDisplayString());
+    }
 
     private static bool IsExternallyReachable(IMethodSymbol method) =>
         method.MethodKind == MethodKind.Ordinary &&
@@ -964,18 +2039,21 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
     }
 
     private static bool IsServiceRequest(INamedTypeSymbol type) =>
-        Implements(type, "ICommand") || Implements(type, "IQuery") || Implements(type, "IStreamRequest");
+        ImplementsDefinition(type, "AICopilot.SharedKernel.Messaging", "ICommand") ||
+        ImplementsDefinition(type, "AICopilot.SharedKernel.Messaging", "IQuery") ||
+        ImplementsDefinition(type, "MediatR", "IStreamRequest");
 
     private static bool IsControllerAction(IMethodSymbol method) =>
         method.MethodKind == MethodKind.Ordinary &&
         !method.IsStatic &&
         method.DeclaredAccessibility == Accessibility.Public &&
         method.GetAttributes().Any(attribute =>
-            attribute.AttributeClass?.Name.StartsWith("Http", StringComparison.Ordinal) == true &&
-            attribute.AttributeClass.Name.EndsWith("Attribute", StringComparison.Ordinal));
+            DerivesFromFullyQualified(
+                attribute.AttributeClass,
+                "Microsoft.AspNetCore.Mvc.Routing.HttpMethodAttribute"));
 
     private static bool HasAuthorizationMetadata(ISymbol symbol) =>
-        HasAttribute(symbol, "AuthorizeAttribute") || HasAttribute(symbol, "AllowAnonymousAttribute");
+        HasAttribute(symbol, AuthorizeAttributeName) || HasAttribute(symbol, AllowAnonymousAttributeName);
 
     private static bool TryGetResourceAuthorizationOwner(INamedTypeSymbol type, out string? ownerTypeName)
     {
@@ -995,12 +2073,16 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
         return true;
     }
 
-    private static bool HasAttribute(ISymbol symbol, string attributeName) =>
+    private static bool HasAttribute(ISymbol symbol, string fullyQualifiedAttributeName) =>
         symbol.GetAttributes().Any(attribute =>
-            string.Equals(attribute.AttributeClass?.Name, attributeName, StringComparison.Ordinal) ||
-            string.Equals(attribute.AttributeClass?.Name, attributeName.Replace("Attribute", string.Empty), StringComparison.Ordinal));
+            attribute.AttributeClass?.ToDisplayString() == fullyQualifiedAttributeName);
 
     private static bool IsRepositoryType(INamedTypeSymbol type) =>
+        IsRepositoryDefinition(type.OriginalDefinition) ||
+        type.AllInterfaces.Any(@interface => IsRepositoryDefinition(@interface.OriginalDefinition));
+
+    private static bool IsRepositoryDefinition(INamedTypeSymbol type) =>
+        type.ContainingNamespace?.ToDisplayString() == "AICopilot.SharedKernel.Repository" &&
         type.Name is "IRepository" or "IReadRepository";
 
     private static bool Implements(ITypeSymbol? type, string interfaceName)
@@ -1029,11 +2111,62 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
                named.AllInterfaces.Any(@interface => @interface.ToDisplayString() == fullyQualifiedInterfaceName);
     }
 
+    private static bool ImplementsDefinition(
+        ITypeSymbol? type,
+        string fullyQualifiedNamespace,
+        string typeName)
+    {
+        if (type is not INamedTypeSymbol named)
+        {
+            return false;
+        }
+
+        return IsDefinition(named, fullyQualifiedNamespace, typeName) ||
+               named.AllInterfaces.Any(@interface =>
+                   IsDefinition(@interface, fullyQualifiedNamespace, typeName));
+    }
+
+    private static bool IsDefinition(
+        INamedTypeSymbol type,
+        string fullyQualifiedNamespace,
+        string typeName) =>
+        type.Name == typeName &&
+        type.ContainingNamespace?.ToDisplayString() == fullyQualifiedNamespace;
+
     private static bool DerivesFrom(ITypeSymbol? type, string baseTypeName)
     {
         for (var current = type as INamedTypeSymbol; current is not null; current = current.BaseType)
         {
             if (current.Name == baseTypeName)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool DerivesFromFullyQualified(ITypeSymbol? type, string fullyQualifiedBaseTypeName)
+    {
+        for (var current = type as INamedTypeSymbol; current is not null; current = current.BaseType)
+        {
+            if (current.ToDisplayString() == fullyQualifiedBaseTypeName)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool DerivesFromDefinition(
+        ITypeSymbol? type,
+        string fullyQualifiedNamespace,
+        string typeName)
+    {
+        for (var current = type as INamedTypeSymbol; current is not null; current = current.BaseType)
+        {
+            if (IsDefinition(current, fullyQualifiedNamespace, typeName))
             {
                 return true;
             }
@@ -1059,6 +2192,10 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
             FirstSourceLocation(type),
             type.ToDisplayString(),
             reason));
+
+    private static bool IsProductionAssembly(string assemblyName) =>
+        assemblyName.StartsWith("AICopilot.", StringComparison.Ordinal) &&
+        !ContainsTestAssemblyMarker(assemblyName);
 
     private static bool ContainsTestAssemblyMarker(string name)
     {
@@ -1128,6 +2265,9 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
         private readonly Dictionary<IMethodSymbol, MethodFacts> facts =
             new(SymbolEqualityComparer.Default);
         private readonly HashSet<IMethodSymbol> methods = new(SymbolEqualityComparer.Default);
+        private readonly Dictionary<ISymbol, List<IOperation>> delegateMemberDefinitions =
+            new(SymbolEqualityComparer.Default);
+        private readonly List<DeferredDelegateCall> deferredDelegateCalls = [];
 
         public CompilationState(Compilation compilation)
         {
@@ -1169,18 +2309,119 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
                 return value;
             }
         }
+
+        public void AddDelegateMemberDefinition(ISymbol member, IOperation definition)
+        {
+            lock (sync)
+            {
+                if (!delegateMemberDefinitions.TryGetValue(member, out var definitions))
+                {
+                    definitions = [];
+                    delegateMemberDefinitions.Add(member, definitions);
+                }
+
+                definitions.Add(definition);
+            }
+        }
+
+        public IReadOnlyCollection<IOperation> GetDelegateMemberDefinitionsSnapshot(ISymbol member)
+        {
+            lock (sync)
+            {
+                return delegateMemberDefinitions.TryGetValue(member, out var definitions)
+                    ? definitions.ToArray()
+                    : [];
+            }
+        }
+
+        public void AddDeferredDelegateCall(
+            IMethodSymbol caller,
+            IOperation delegateOperation,
+            IInvocationOperation invocation,
+            bool isTransactionScope)
+        {
+            lock (sync)
+            {
+                deferredDelegateCalls.Add(new DeferredDelegateCall(
+                    Normalize(caller),
+                    delegateOperation,
+                    invocation,
+                    isTransactionScope));
+            }
+        }
+
+        public IReadOnlyCollection<DeferredDelegateCall> GetDeferredDelegateCallsSnapshot()
+        {
+            lock (sync)
+            {
+                return deferredDelegateCalls.ToArray();
+            }
+        }
+    }
+
+    private sealed class DeferredDelegateCall(
+        IMethodSymbol caller,
+        IOperation delegateOperation,
+        IInvocationOperation invocation,
+        bool isTransactionScope)
+    {
+        public IMethodSymbol Caller { get; } = caller;
+
+        public IOperation DelegateOperation { get; } = delegateOperation;
+
+        public IInvocationOperation Invocation { get; } = invocation;
+
+        public bool IsTransactionScope { get; } = isTransactionScope;
     }
 
     private sealed class MethodFacts
     {
         private readonly object sync = new();
         private readonly HashSet<IMethodSymbol> calls = new(SymbolEqualityComparer.Default);
+        private readonly HashSet<IMethodSymbol> transactionDelegateCalls =
+            new(SymbolEqualityComparer.Default);
+        private readonly List<InvocationFact> invocations = [];
+        private readonly List<IdentityMutationFact> identityMutations = [];
 
         public void AddCall(IMethodSymbol method)
         {
             lock (sync)
             {
                 calls.Add(Normalize(method));
+            }
+        }
+
+        public void AddTransactionDelegateCall(IMethodSymbol method)
+        {
+            lock (sync)
+            {
+                transactionDelegateCalls.Add(Normalize(method));
+            }
+        }
+
+        public void AddInvocation(
+            IMethodSymbol method,
+            SyntaxNode syntax,
+            bool isIdentityDecrease,
+            bool completionObserved)
+        {
+            method = Normalize(method);
+            lock (sync)
+            {
+                calls.Add(method);
+                invocations.Add(new InvocationFact(method, syntax, completionObserved));
+                if (isIdentityDecrease)
+                {
+                    identityMutations.Add(new IdentityMutationFact(syntax, completionObserved));
+                }
+            }
+        }
+
+        public void AddIdentityMutation(SyntaxNode syntax, bool completionObserved)
+        {
+            lock (sync)
+            {
+                identityMutations.Add(new IdentityMutationFact(syntax, completionObserved));
             }
         }
 
@@ -1192,13 +2433,70 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
             }
         }
 
-        public string? IdentityDecreaseTarget { get; set; }
+        public IReadOnlyCollection<IMethodSymbol> GetAllCallsSnapshot()
+        {
+            lock (sync)
+            {
+                var result = new HashSet<IMethodSymbol>(calls, SymbolEqualityComparer.Default);
+                result.UnionWith(transactionDelegateCalls);
+                return result.ToArray();
+            }
+        }
 
-        public bool HasTransactionBoundary { get; set; }
+        public IReadOnlyCollection<InvocationFact> GetInvocationsSnapshot()
+        {
+            lock (sync)
+            {
+                return invocations.ToArray();
+            }
+        }
 
-        public bool HasInvariantAcquire { get; set; }
+        public IReadOnlyCollection<IdentityMutationFact> GetIdentityMutationsSnapshot()
+        {
+            lock (sync)
+            {
+                return identityMutations.ToArray();
+            }
+        }
+
+        public bool IsTransactionScope { get; set; }
+
+        public bool UsesTrustedCloudReadType { get; set; }
+
+        public bool HasDynamicInvocation { get; set; }
+
+        public bool HasUnobservedTransactionBoundary { get; set; }
 
         public string? ForbiddenSideEffect { get; set; }
+    }
+
+    private sealed class InvocationFact
+    {
+        public InvocationFact(IMethodSymbol target, SyntaxNode syntax, bool completionObserved)
+        {
+            Target = target;
+            Syntax = syntax;
+            CompletionObserved = completionObserved;
+        }
+
+        public IMethodSymbol Target { get; }
+
+        public SyntaxNode Syntax { get; }
+
+        public bool CompletionObserved { get; }
+    }
+
+    private sealed class IdentityMutationFact
+    {
+        public IdentityMutationFact(SyntaxNode syntax, bool completionObserved)
+        {
+            Syntax = syntax;
+            CompletionObserved = completionObserved;
+        }
+
+        public SyntaxNode Syntax { get; }
+
+        public bool CompletionObserved { get; }
     }
 
     private enum Layer

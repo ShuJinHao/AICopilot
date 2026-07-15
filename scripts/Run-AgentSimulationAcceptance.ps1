@@ -1,5 +1,6 @@
 param(
-    [string]$Configuration = "Debug"
+    [string]$Configuration = "Debug",
+    [string]$EvidenceRoot = "artifacts/simulation"
 )
 
 $ErrorActionPreference = "Stop"
@@ -78,7 +79,12 @@ function Confirm-SimulationTrx {
 }
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$evidenceDirectory = Join-Path $repoRoot "artifacts/simulation"
+$evidenceDirectory = if ([System.IO.Path]::IsPathRooted($EvidenceRoot)) {
+    [System.IO.Path]::GetFullPath($EvidenceRoot)
+}
+else {
+    [System.IO.Path]::GetFullPath((Join-Path $repoRoot $EvidenceRoot))
+}
 $resultsDirectory = Join-Path $evidenceDirectory "test-results"
 $reportPath = Join-Path $evidenceDirectory "agent-simulation-acceptance.md"
 $summaryPath = Join-Path $evidenceDirectory "simulation-test-summary.json"
@@ -102,9 +108,20 @@ try {
         $dockerPreflightCommand = "docker info --format '{{.OSType}}'"
         $Commands.Add($dockerPreflightCommand) | Out-Null
         Invoke-Step "Linux Docker preflight" {
-            $dockerOperatingSystem = (& docker info --format '{{.OSType}}').Trim()
-            if ($dockerOperatingSystem -ne "linux") {
-                throw "Simulation Docker acceptance requires a Linux Docker daemon; detected '$dockerOperatingSystem'."
+            $dockerOutputLines = @(& docker info --format '{{.OSType}}' 2>&1)
+            $dockerExitCode = $LASTEXITCODE
+            $dockerRawOutput = ($dockerOutputLines | ForEach-Object { [string]$_ }) -join "`n"
+            Write-Host "Docker preflight raw stdout (exit=$dockerExitCode): $dockerRawOutput"
+            if ($dockerExitCode -ne 0) {
+                throw "Simulation Docker preflight command failed with exit code $dockerExitCode. RawOutput=$dockerRawOutput"
+            }
+
+            $dockerOperatingSystem = $dockerRawOutput.Trim()
+            if (-not [string]::Equals(
+                $dockerOperatingSystem,
+                "linux",
+                [StringComparison]::OrdinalIgnoreCase)) {
+                throw "Simulation Docker acceptance requires a Linux Docker daemon; detected '$dockerOperatingSystem'. RawOutput=$dockerRawOutput"
             }
         }
 
@@ -124,7 +141,7 @@ try {
         }
 
         $pureTrxPath = Join-Path $resultsDirectory "AICopilot.SimulationTests.trx"
-        $pureTestCommand = "dotnet test $pureProject -c $Configuration --no-build --no-restore --logger trx;LogFileName=AICopilot.SimulationTests.trx --results-directory artifacts/simulation/test-results"
+        $pureTestCommand = "dotnet test $pureProject -c $Configuration --no-build --no-restore --logger trx;LogFileName=AICopilot.SimulationTests.trx --results-directory $resultsDirectory"
         $Commands.Add($pureTestCommand) | Out-Null
         Invoke-Step "Simulation pure acceptance" {
             dotnet test $pureProject `
@@ -142,7 +159,7 @@ try {
         }
 
         $dockerTrxPath = Join-Path $resultsDirectory "AICopilot.SimulationDockerTests.trx"
-        $dockerTestCommand = "dotnet test $dockerProject -c $Configuration --no-build --no-restore --logger trx;LogFileName=AICopilot.SimulationDockerTests.trx --results-directory artifacts/simulation/test-results"
+        $dockerTestCommand = "dotnet test $dockerProject -c $Configuration --no-build --no-restore --logger trx;LogFileName=AICopilot.SimulationDockerTests.trx --results-directory $resultsDirectory"
         $Commands.Add($dockerTestCommand) | Out-Null
         Invoke-Step "Simulation Docker acceptance" {
             dotnet test $dockerProject `

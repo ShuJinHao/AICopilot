@@ -7,7 +7,6 @@
 /scripts/tests/*.ps1 text eol=lf
 /src/tests/**/*.cs text eol=lf
 /src/tests/**/*.csproj text eol=lf
-/src/tests/AICopilot.AiEvalTests/cases/*.json text eol=lf
 /src/tests/Directory.Build.props text eol=lf
 /src/tests/xunit.runner.json text eol=lf
 /src/vues/AICopilot.Web/package.json text eol=lf

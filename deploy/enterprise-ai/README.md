@@ -99,9 +99,9 @@ cd /srv/enterprise-ai/deploy
   --deploy-dir /srv/enterprise-ai/deploy
 ```
 
-该脚本只能证明 runner 机器本地事实。GitHub production environment secrets 权限、required reviewers、OIDC/Vault 或等价短期凭据必须由平台侧单独留痕。
+该脚本只能证明 runner 机器本地事实。GitHub production environment secrets 权限、OIDC/Vault 或等价短期凭据必须由平台侧单独留痕。
 平台侧留痕使用 `runner-platform-attestation.template.md` 复制一份填写，填好的记录不要提交真实 secret 或敏感截图；完成后用
-`scripts/check-platform-attestation-record.sh --record <filled-attestation.md>` 做静态完整性校验。该 linter 会拒绝模板占位符、未勾选项、空签署人和 `pending` / `not implemented` / `N/A` 等弱证明词，并要求记录包含 GitHub production environment secret 限制、required reviewers、`contents: read`、`self-hosted + iiot-linux-prod`、生产/secret workflow 无 GitHub hosted runner 的证据；如果 OIDC/Vault 或等价短期凭据尚未落地，记录里只能写成已批准的基础设施例外，并按结构化字段给出 `Ticket or change id`、`Exception owner`、`Due date` 和 `Current mitigation`。该 linter 只检查记录是否完整，不能替代 GitHub、Vault、OIDC 或 runner 真实验收。
+`scripts/check-platform-attestation-record.sh --record <filled-attestation.md>` 做静态完整性校验。该 linter 会拒绝模板占位符、未勾选项、空签署人和 `pending` / `not implemented` / `N/A` 等弱证明词，并要求记录包含 GitHub production environment secret 限制、`contents: read`、`self-hosted + iiot-linux-prod`、生产/secret workflow 无 GitHub hosted runner 的证据；如果 OIDC/Vault 或等价短期凭据尚未落地，记录里只能写成已批准的基础设施例外，并按结构化字段给出 `Ticket or change id`、`Exception owner`、`Due date` 和 `Current mitigation`。该 linter 只检查事实记录是否完整，不能替代 GitHub、Vault、OIDC 或 runner 真实验收。
 
 内部开发需要让 AICopilot 直连真实 Cloud 只读数据库时，连接串只放在 GitHub production environment secret
 `DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING`，并通过 `aicopilot-enable-direct-cloud-readonly-db` 写入服务器 `.env`。
@@ -319,9 +319,10 @@ cd /srv/enterprise-ai/deploy
 
 ```bash
 dotnet build src/hosts/AICopilot.HttpApi/AICopilot.HttpApi.csproj
-dotnet build src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj
+dotnet build AICopilot.slnx --no-restore
 dotnet test src/tests/AICopilot.ArchitectureTests/AICopilot.ArchitectureTests.csproj
-dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "FullyQualifiedName~SecurityHardeningTests|Suite=DeploymentBehavior"
+dotnet test src/tests/AICopilot.DeploymentTests/AICopilot.DeploymentTests.csproj
+pwsh -NoProfile -File scripts/tests/Test-AICopilotTestInfrastructureBehavior.ps1
 ```
 
 服务器侧验证：

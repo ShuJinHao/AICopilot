@@ -1,7 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using AICopilot.BackendTests;
+using AICopilot.AspireIntegrationTestKit;
 
 namespace AICopilot.SimulationDockerTests;
 

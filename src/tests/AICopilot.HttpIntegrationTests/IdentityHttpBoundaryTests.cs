@@ -1,9 +1,11 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Diagnostics;
 using System.Text.Json;
-using AICopilot.BackendTests;
+using AICopilot.AspireIntegrationTestKit;
 using AICopilot.IdentityService.Authorization;
+using AICopilot.Services.Contracts.Authentication;
 using AICopilot.SharedKernel.Result;
 
 namespace AICopilot.HttpIntegrationTests;
@@ -20,14 +22,73 @@ public sealed class IdentityHttpBoundaryTests(CoreAICopilotAppFixture fixture)
     public async Task ProtectedEndpoint_ShouldUseRealAuthenticationMiddlewareAndTraceProblem()
     {
         fixture.ClearAuthToken();
+        var firstTraceId = ActivityTraceId.CreateRandom().ToString();
+        var secondTraceId = ActivityTraceId.CreateRandom().ToString();
+        firstTraceId.Should().NotBe(secondTraceId);
+        var successTraceId = ActivityTraceId.CreateRandom().ToString();
 
-        using var response = await fixture.HttpClient.GetAsync("/api/identity/me");
+        var logs = await fixture.ExecuteWithHttpTraceLogEvidenceAsync(
+            "aicopilot-httpapi",
+            [firstTraceId, secondTraceId, successTraceId],
+            async () =>
+            {
+                using var firstResponse = await SendWithTraceAsync(HttpMethod.Get, "/api/identity/me", firstTraceId);
+                using var secondResponse = await SendWithTraceAsync(HttpMethod.Get, "/api/identity/me", secondTraceId);
+                var firstProblem = await firstResponse.Content.ReadFromJsonAsync<ProblemDetailsDto>(JsonOptions);
+                var secondProblem = await secondResponse.Content.ReadFromJsonAsync<ProblemDetailsDto>(JsonOptions);
+
+                foreach (var (response, problem, traceId) in new[]
+                         {
+                             (firstResponse, firstProblem, firstTraceId),
+                             (secondResponse, secondProblem, secondTraceId)
+                         })
+                {
+                    response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+                    response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
+                    response.Headers.GetValues("X-AICopilot-Trace-Id").Should().ContainSingle().Which.Should().Be(traceId);
+                    problem!.Code.Should().Be(AuthProblemCodes.Unauthorized);
+                    problem.TraceId.Should().Be(traceId);
+                }
+
+                var login = await LoginAsync();
+                fixture.HttpClient.DefaultRequestHeaders.Authorization =
+                    new AuthenticationHeaderValue("Bearer", login.Token);
+                using var successResponse = await SendWithTraceAsync(HttpMethod.Get, "/api/identity/me", successTraceId);
+                successResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+                successResponse.Headers.GetValues("X-AICopilot-Trace-Id")
+                    .Should().ContainSingle().Which.Should().Be(successTraceId);
+            });
+
+        foreach (var traceId in new[] { firstTraceId, secondTraceId, successTraceId })
+        {
+            logs.Count(line => line.Contains("HTTP request started", StringComparison.Ordinal) &&
+                               line.Contains(traceId, StringComparison.Ordinal)).Should().Be(1);
+            logs.Count(line => line.Contains("HTTP request completed", StringComparison.Ordinal) &&
+                               line.Contains(traceId, StringComparison.Ordinal)).Should().Be(1);
+        }
+    }
+
+    [Fact]
+    public async Task CloudOidcFinalize_WithoutExternalCookie_ShouldAuthenticateTrackAndSignOutExactlyOnce()
+    {
+        fixture.ClearAuthToken();
+
+        using var response = await fixture.HttpClient.PostAsync(
+            "/api/identity/cloud-oidc/finalize",
+            content: null);
         var problem = await response.Content.ReadFromJsonAsync<ProblemDetailsDto>(JsonOptions);
+        var externalCookieDeletes = response.Headers.TryGetValues("Set-Cookie", out var setCookies)
+            ? setCookies.Where(cookie => cookie.Contains(
+                    "__Host-AICopilot-CloudOidc-External=",
+                    StringComparison.Ordinal))
+                .ToArray()
+            : [];
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
-        response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
-        problem!.Code.Should().Be(AuthProblemCodes.Unauthorized);
+        problem!.Code.Should().Be(AuthProblemCodes.CloudOidcInvalidPrincipal);
         problem.TraceId.Should().NotBeNullOrWhiteSpace();
+        externalCookieDeletes.Should().ContainSingle();
+        externalCookieDeletes[0].Should().Contain("expires=", Exactly.Once());
     }
 
     [Theory]
@@ -78,6 +139,18 @@ public sealed class IdentityHttpBoundaryTests(CoreAICopilotAppFixture fixture)
             JsonOptions);
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         return (await response.Content.ReadFromJsonAsync<LoginDto>(JsonOptions))!;
+    }
+
+    private async Task<HttpResponseMessage> SendWithTraceAsync(
+        HttpMethod method,
+        string path,
+        string traceId)
+    {
+        using var request = new HttpRequestMessage(method, path);
+        request.Headers.TryAddWithoutValidation(
+            "traceparent",
+            $"00-{traceId}-0123456789abcdef-01").Should().BeTrue();
+        return await fixture.HttpClient.SendAsync(request);
     }
 
     private sealed record LoginDto(string Token);

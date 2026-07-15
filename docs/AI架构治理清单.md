@@ -65,14 +65,14 @@
 
 | 编号 | 严重级 | 状态 | 当前结论 | 下一关闭条件 |
 | --- | --- | --- | --- | --- |
-| `AI-TEST-001` | P0 | Partial | 旧测试治理文件及其构建/CI 入口已物理删除；现由项目直接元数据生成中性 inventory，Support 只允许固定 MCP host 路径且必须显式非测试/无 test SDK/无 Fact/Theory，required CI 动态运行每个 runner 并要求 `discovered>0`、`discovered=executed`、`failed=0`、`skipped=0`，不维护硬编码 case 数；上述失败边界有独立脚本行为负例。 | 将 inventory 从项目级继续下沉到真实 case/asset 责任并完成远端 required lane 验收；保持项目元数据与实际执行结果为唯一口径。 |
-| `AI-TEST-002` | P0 | Partial | AI-SEC-051 首个样板已落入物理 `UnitTests`；`BackendTests` 仍混装大量 Unit/Aggregate/Application，且全程序集禁止并行。 | 继续按业务责任无损迁移，恢复纯测试并行；旧桶对应声明归零后删除。 |
-| `AI-TEST-003` | P0 | Partial | `WorkflowTests` 已以真实 `RunBranchSafelyAsync` 与 `ResumeFinalAgentAsync -> RunFinalAgentAsync` 链覆盖 caller cancellation、cleanup 失败不覆盖主异常、compensation exactly-once 和完成 approval context 不清理；Simulation 已从 Backend 迁入物理 `AICopilot.SimulationTests` pure runner 与 `AICopilot.SimulationDockerTests` Aspire runner，Manual-only workflow 固定 Ubuntu，以 Docker preflight fail-fast，整项目执行两个 runner，无 Skip、`--filter`、Suite/Phase/Batch/类名或静态 changed-files 选测；两个 TRX 对账 12/1，ignored evidence 由 workflow `always()` 上传。 | 继续迁移 Backend 内其他 approval/timeout/failure/audit 责任，清空并删除旧混合项目。 |
-| `AI-TEST-004` | P0 | Partial | 已建立 `ContractTests`、真实 PostgreSQL `PersistenceTests`、真实 Aspire `HttpIntegrationTests` 与 Manual `SimulationDockerTests` 首个分层样板；AI-SEC-051 的旧 Backend 重复断言已删除。其他 Contract/Persistence/HTTP/E2E 仍混在 Backend，Persistence/HTTP/Simulation Docker runner 仍暂时 Link 编译 Backend fixture 源文件，不冒充已完成中性 TestKit。 | 提取中性 Testing.Core/Integration testkit，迁移剩余责任并按 Runtime 分 runner；真实依赖缺失时 preflight 失败，禁止运行后 Skip。 |
-| `AI-ARCH-001` | P0 | Done | 已建立 `netstandard2.0` 的 `AICopilot.Architecture.Analyzers` 和独立 required `AICopilot.Architecture.AnalyzerTests`，精确依赖 `Microsoft.CodeAnalysis.CSharp 5.6.0`；根 `Directory.Build.targets` 把 Analyzer 接入全部非测试生产项目。`AIARCH001`–`AIARCH007` 以 Error 阻断项目/分层依赖、聚合/repository、DB/SQL owner、enabled Admin 事务不变量、plugin/test-double/runtime 边界、Cloud-readonly call graph 副作用与权限/只读元数据；语义 fixture 覆盖 alias、泛型、lambda、interface dispatch 和精确例外，每条 Rule ID 另有真实临时 csproj 正/反编译夹具。已物理删除 ArchitectureTests 中被覆盖的词法重复，只保留动态/运行时事实。 | 持续保持生产 build 0 Analyzer error，AnalyzerTests 与 required TRX 必须 `discovered=executed`、`failed=0`、`skipped=0`；任何规则/例外变更必须先改正式契约并同步真实正/反编译 fixture，禁止 `NoWarn`、warning 降级或恢复 Regex 影子门禁。 |
-| `AI-EVAL-001` | P0 | Planned | 现有 6 个 JSON case 已冻结并进入 PR，但 approval/prompt-injection 两类仍是输入自证，只能称 legacy eval continuity。 | 接入真实生产 policy/formatter/workflow，建立版本化期望输出、审阅更新流程和 deterministic GoldenEval；真实 provider 另走受控 Release/Manual。 |
-| `AI-TEST-DUP-001` | P1 | Planned | 当前只阻止测试声明跨项目精确重复，尚无生产/test fixture/case 的全量 clone ratchet。 | 分生产与测试建立 exact/near clone baseline；PR 阻止新增/扩大，Nightly 输出趋势；例外有 Owner、理由和到期日。 |
-| `AI-TEST-UI-001` | P1 | Partial | Vitest 31 文件/184 条已进入 required 候选；Playwright 为 46 runner case、43 passed/3 个既有 viewport 条件 Skip。新增 12 个逻辑场景/24 个 desktop+mobile case，覆盖 clean/stale/有效缓存水合、A→A 成功/失败刷新、A→B 切换、B→C 串行化、SPA 回返、冷启动失败、新建失败和投影失败恢复；Unit 进一步固定 loaded-roster/canonical artifact ownership、任务-工作区-审批原子投影、function/agent approval authority-unknown、DELETE ACK 对账、同会话附件保留、catalog source error 隔离及 SSE 不自动重连。Playwright 仍只在旧 Simulation workflow 执行，不属于 canonical required reconcile。 | 把三个 viewport Skip 改为 desktop/mobile project-specific case，并将 smoke 迁入唯一 required reconcile；完成后 Required Skip=0，再关闭本项。 |
+| `AI-TEST-001` | P0 | Done | 已由项目元数据、分类表和真实声明生成 case 级 inventory：24 个项目包含 19 个 runner（16 required / 3 Manual）和 5 个中性 TestKit support，当前 967 case（required 953 / Manual 14）。Runner/TestKit 引用只来自 Release MSBuild evaluated `ProjectReference` / `PackageReference` 图，覆盖隐式 `Directory.Build.*`、递归 import、生效复合条件、逐 TFM item 和 TestKit 传递闭包；评估失败或 identity 缺失 fail-closed。Required .NET 对账固定 `discovered>0`、`discovered=executed`、`failed=0`、`skipped=0`；Web/Shell/Deployment 额外精确对账 Vitest 185、Playwright 43、deployment behavior 33，任一数量不等即失败。62 个脚本行为用例覆盖 Aggregate/Application 依赖、implicit/recursive import、active condition、TestKit transitive escape、过期 friend assembly、TestKit package、同文件重复实例、完整 PDB coverage、缺数及 inventory/reconcile/Simulation/CI/mutation/compatibility/declaration-transition 失败边界。 | 持续保持 evaluated 项目图、项目元数据、case 基线和实际执行结果一致；新增或迁移测试必须同步分类与对账。 |
+| `AI-TEST-002` | P0 | Partial | 当前物理图已收口为 16 个 required runner、3 个 Manual runner 和 5 个 TestKit；Release evaluated inventory 为 required 953 / Manual 14。785 条旧声明账本锚定真实 Git `src/tests` 冻结树和有序符号摘要，结果为 635 retained / 148 replaced / 2 retired-source-guard / 0 unknown。本批修正后已用全新 TRX 完成本地对账：16 required .NET discovered=executed=passed=953、Vitest 185/185、Playwright 43/43、deployment behavior 33/33，全部 0 failed / 0 skipped，Playwright 0 flaky；mutation、declaration transition、compatibility、duplication、Simulation 12/1 与静态门禁均已通过。旧 949 / Persistence 60 / 7-report coverage 已失效；全生产 PDB coverage 必须等候选 commit 后从 clean HEAD 重新生成，完成前不宣称 coverage 关单。本机缓存 Chromium 不完整，最终 Playwright 证据使用项目支持的已安装 Chrome，未改测试或配置换绿。 | 本地 clean-HEAD coverage 通过且提交 PR 后，由远端 required lane 使用新鲜 Chromium 环境重新对账同一精确基线；远端 .NET 953、Vitest 185、Playwright 43 和 deployment 33 全部 0 failed / 0 skipped 后才可改为 `Done`。调查和清理不单独计入完成度。 |
+| `AI-TEST-003` | P0 | Done | `WorkflowTests` 以真实 `RunBranchSafelyAsync` 与 `ResumeFinalAgentAsync -> RunFinalAgentAsync` 链覆盖 caller cancellation、cleanup 失败不覆盖主异常、compensation exactly-once 和完成 approval context 不清理。Simulation 已物理分为 Pure 12 case 与 Linux Docker/Aspire 1 case，Manual-only workflow 整 runner 执行，Docker preflight fail-fast，无 Skip、`--filter` 或 changed-files 选测；旧混合 runner 及源文件已物理删除。本地完整 acceptance 已精确通过 Pure 12/12、Docker 1/1，均 0 failed / 0 skipped。 | 持续用真实 workflow 和独立 Simulation 验收保持取消、补偿、审批与异常语义。 |
+| `AI-TEST-004` | P0 | Done | Contract、Filesystem Contract、真实 PostgreSQL Persistence、Filesystem Persistence、真实 Aspire HTTP、Aspire E2E、Deployment 和 Tool/Plugin Conformance 已物理分层；AI-SEC-051 同时由 Analyzer/Architecture、Unit/Application、Contract、PostgreSQL 和真实 HTTP/auth/tracking 边界覆盖。Aggregate 只保留纯领域语义，application catalog/policy 已迁入 Application，Outbox EF mapping 已迁入 Persistence，本地文件存储已迁入 PersistenceFilesystem，并物理删除 `ApplicationFilesystemTests`。Runner 只引用 5 个中性 TestKit，不再 Link 旧混合 fixture 或源文件；Aspire/Persistence TestKit 不含 xUnit 或 FluentAssertions，生命周期和断言 helper 已下沉到实际 runner。 | 新责任按 concern/runtime 进入对应物理 runner；真实依赖缺失必须 preflight 失败，禁止运行后 Skip，禁止恢复 TestKit 测试框架/断言 package 例外。 |
+| `AI-ARCH-001` | P0 | Done | 已建立 `netstandard2.0` 的 `AICopilot.Architecture.Analyzers` 和独立 required `AICopilot.Architecture.AnalyzerTests`，精确依赖 `Microsoft.CodeAnalysis.CSharp 5.6.0`；根 `Directory.Build.targets` 把 Analyzer 接入全部非测试生产项目。`AIARCH001`–`AIARCH007` 以 Error 阻断项目/分层依赖、聚合/repository、DB/SQL owner、enabled Admin 事务不变量、plugin/test-double/runtime 边界、Cloud-readonly call graph 副作用与权限/只读元数据；AnalyzerTests 精确 15 条、真实临时 csproj AnalyzerFixtureTests 7 条。`AIARCH004` 在 CompilationEnd 解析 inline/stored/field/property method-group/lambda，分离 transaction synthetic 与真实 call edge，并以 externally reachable 或 source-no-incoming ordinary method 覆盖 protected HostedService、internal seeder 和 internal type public entry；valid/reversed/dual-use member delegate 与 hidden-root 均有精确正反例。`AIARCH002/006` 的 repository、command、Dapper、MCP write identity 只认正式完全限定 symbol，同名 fake 不触发；`AIARCH006` 仍按每个方法自身的真实 Cloud evidence 判 root 后遍历 reachable graph，覆盖 factory/helper/object creation/member delegate/interface dispatch，又不误标 generic orchestrator。CloudReadOnly 只接受 `CloudReadOnly + ReadOnlyQuery + readOnlyDeclared=true`，动态配置在注册/执行时继续 fail-closed；未分类 `AICopilot.*` 生产源/目标项目继续 fail-closed。 | 持续保持生产 build 0 Analyzer error，AnalyzerTests 与 required TRX 必须 `discovered=executed`、`failed=0`、`skipped=0`；任何规则/例外变更必须先改正式契约并同步真实正/反编译 fixture，禁止 `NoWarn`、warning 降级或恢复 Regex 影子门禁。 |
+| `AI-EVAL-001` | P0 | Done | `GoldenEvalTests` 的 4 个确定性版本化 case 全部穿过真实 `AgentWorkflowPipeline.RunPlanDraftWorkflowAsync` 和生产 tool 安全发现门禁，分别证明 Cloud 写边界、`SideEffecting`、`Diagnostics` 被隐藏，只有 `CloudReadOnly + ReadOnlyQuery + readOnlyDeclared=true` 暴露。数据集版本为 `agent-workflow-safety-v2`，每条 case 都记录非空变更理由；当前运行 4/4、0 failed、0 skipped。 | 期望数据更新必须经语义审阅；不得退回直接调用 leaf policy/formatter、fixture 文本自证或不经生产编排路径的 case。 |
+| `AI-TEST-DUP-001` | P1 | Done | 已对生产 exact/near/structural clone、TestKit helper 和 test assertion flow 建立 schema v4 ratchet；实例身份为 `path+line`，同一文件的重复出现也逐实例计数。productionExact 由 `436 groups / 931 instances / 7448 lines / 17797 tokens` 降为 `429 / 915 / 7320 / 17472`，productionNear 由 `604 / 1560 / 12480 / 29706` 降为 `597 / 1544 / 12352 / 29381`，productionStructural 当前为 `1131 / 3720 / 29760 / 94856`，testSupportHelpers 为 `109 / 310 / 1860 / 4417`；测试断言辅助循环物理收口后，testAssertionFlows 从 `236 / 913 / 2739 / 3935` 降为 `226 / 879 / 2637 / 3689`。门禁同时锁定汇总与每个 signature；同文件增长负例已进入 62/62 infrastructure behavior。 | 后续只能收紧基线；更新 schema/baseline 前必须先有真实重复实现减少和指标下降，不得用汇总持平、signature swap/expand 或单纯重生基线换绿。 |
+| `AI-TEST-UI-001` | P1 | Done | Vitest 31 文件/185 case 与 Playwright desktop/mobile 43 case 已进入唯一 required reconcile；本地证据为 185/185 与 43/43，全部 0 failed / 0 skipped / 0 flaky。Viewport 差异由 project-specific tag 物理发现，不再用运行后 Skip；固定 Agent 槽位、会话水合/切换/恢复、审批、产物和错误语义均由真实前端行为覆盖。 | 持续将 Web JSON 证据与 .NET/deployment 证据一起对账；任何新 smoke 不得引入 Skip 或另建影子 workflow。 |
 
 当前发版/外部环境待验收项：
 
@@ -107,11 +107,11 @@ git log --oneline -n 20 -- AICopilot.slnx deploy src docs AGENTS.md 资料
 - 部署和镜像：`deploy/enterprise-ai`、`.github/workflows`、`src/vues/AICopilot.Web/Dockerfile`、`src/vues/AICopilot.Web/nginx.conf.template`。
 - HttpApi 和错误契约：`src/hosts/AICopilot.HttpApi`、`src/shared/AICopilot.SharedKernel/Result`、`docs/frontend-integration-contract-package-2026-05-17.md`。
 - 模型密钥和运行时：`src/infrastructure/AICopilot.EntityFrameworkCore/Security`、`src/infrastructure/AICopilot.AiRuntime`、`src/infrastructure/AICopilot.Embedding`。
-- Cloud 只读和 AiRead：`src/infrastructure/AICopilot.Infrastructure/CloudRead`、`src/services/AICopilot.AiGatewayService/BusinessSemantics`、`src/services/AICopilot.AiGatewayService/Workflows`。
+- Cloud 只读和 AiRead：`src/infrastructure/AICopilot.CloudReadClient`、`src/services/AICopilot.AiGatewayService/BusinessSemantics`、`src/services/AICopilot.AiGatewayService/Workflows`。
 - DataAnalysis / Text-to-SQL：`src/services/AICopilot.DataAnalysisService`、`src/infrastructure/AICopilot.Dapper`、`src/services/AICopilot.Services.CrossCutting/Sql`。
 - Agent workflow / MCP / Tool / Approval：`src/services/AICopilot.AiGatewayService/AgentTasks`、`src/services/AICopilot.AiGatewayService/Tools`、`src/services/AICopilot.McpService`。
 - 前端错误和运行详情：`src/vues/AICopilot.Web/src/services`、`src/vues/AICopilot.Web/src/stores`、`src/vues/AICopilot.Web/src/protocol`、`src/vues/AICopilot.Web/src/views`。
-- 架构和回归测试：`src/tests/AICopilot.ArchitectureTests`、`src/tests/AICopilot.BackendTests`、`src/vues/AICopilot.Web/tests`。
+- 架构和回归测试：`src/tests` 下由 `Get-AICopilotTestInventory.ps1` 发现的 required 物理 runner、`src/testing` 固定 TestKit support 项目、Analyzer/AnalyzerTests，以及 `src/vues/AICopilot.Web/tests`。
 
 每个批次必须先定位到以上目录和对应测试，再改代码或文档。找不到源码证据的项只能标为外部依赖、待审计或不纳入，不能写成 Done。
 
@@ -171,7 +171,7 @@ git log --oneline -n 20 -- AICopilot.slnx deploy src docs AGENTS.md 资料
   - 文档和示例先改为 `<deploy-user>@<host>`。
   - 后续服务器侧建立 sudo 白名单，只允许进入部署目录执行固定脚本。
 - runner/Vault/OIDC 属于平台治理；AI 端只记录约束、灾备 workflow 短期校验和文档边界，不能自己伪造已完成。
-- production/secrets 相关灾备 workflow 必须执行 `scripts/check-runner-security-attestation.sh`；该脚本只能证明 runner 机器本地事实，GitHub production environment secret 权限、required reviewers、OIDC/Vault 或等价短期凭据必须由平台侧单独填写 `runner-platform-attestation.template.md` 并留痕。`check-platform-attestation-record.sh` 会拒绝模板占位、未勾选项、空签署人和弱证明词，并要求记录包含 production environment secret 限制、`contents: read`、`self-hosted + iiot-linux-prod`、生产/secret workflow 无 GitHub hosted runner 的证据；OIDC/Vault 尚未落地时，只允许填写已批准的基础设施例外，并按 `Ticket or change id`、`Exception owner`、`Due date`、`Current mitigation` 四个字段写清例外证据。该脚本只校验记录完整性，不能替代真实平台验收。
+- production/secrets 相关灾备 workflow 必须执行 `scripts/check-runner-security-attestation.sh`；该脚本只能证明 runner 机器本地事实，GitHub production environment secret 权限、OIDC/Vault 或等价短期凭据必须由平台侧单独填写 `runner-platform-attestation.template.md` 并留痕。`check-platform-attestation-record.sh` 会拒绝模板占位、未勾选项、空签署人和弱证明词，并要求记录包含 production environment secret 限制、`contents: read`、`self-hosted + iiot-linux-prod`、生产/secret workflow 无 GitHub hosted runner 的证据；OIDC/Vault 尚未落地时，只允许填写已批准的基础设施例外，并按 `Ticket or change id`、`Exception owner`、`Due date`、`Current mitigation` 四个字段写清例外证据。该脚本只校验事实记录完整性，不能替代真实平台验收。
 
 第二批完成定义：
 
@@ -271,17 +271,17 @@ git log --oneline -n 20 -- AICopilot.slnx deploy src docs AGENTS.md 资料
 
 | 编号 | 严重级 | 状态 | 范围 | 修复要求 | 验收 |
 | --- | --- | --- | --- | --- | --- |
-| AI-SEC-029 | HIGH | Done | Device 语义/CloudRead/Direct DB | 设备主数据、最后上报运行状态和最新日志级别分离；`Analysis.Device.Status` 只消费 `/device-client-states`，不得回退 Direct DB/Text-to-SQL/Simulation | `CloudAiReadClientTests` + semantic/mapping/runtime/acceptance + 全量 BackendTests |
-| AI-SEC-030 | HIGH | Done | production records | `typeName/typeKey` 不得冒充 `processName/stationName`；正式字段缺失保持空 | `CloudAiReadClientTests` 负向 fixture + 全量 BackendTests |
-| AI-SEC-031 | HIGH | Done | Cloud AiRead transport | 删除可配置 POST、任意 method/path 公共传输和双轨接口；只保留八个正式 GET，且不破坏 Cloud identity status GET 校验 | `CloudAiReadClientTests` + `ToolRegistryGovernanceTests` + ArchitectureTests + 全量 BackendTests |
-| AI-SEC-032 | HIGH | Done | JWT runtime | HttpApi 启动统一校验 issuer、audience、至少 64 字符 secret 和正数 token lifetime | JWT options/startup tests + 安全定向测试 + 全量 BackendTests |
+| AI-SEC-029 | HIGH | Done | Device 语义/CloudRead/Direct DB | 设备主数据、最后上报运行状态和最新日志级别分离；`Analysis.Device.Status` 只消费 `/device-client-states`，不得回退 Direct DB/Text-to-SQL/Simulation | Contract/Unit/Application/Workflow/EndToEnd 对应语义 + required runner 全量对账 |
+| AI-SEC-030 | HIGH | Done | production records | `typeName/typeKey` 不得冒充 `processName/stationName`；正式字段缺失保持空 | `CloudAiReadClientContractTests` 负向 fixture + required runner 全量对账 |
+| AI-SEC-031 | HIGH | Done | Cloud AiRead transport | 删除可配置 POST、任意 method/path 公共传输和双轨接口；只保留八个正式 GET，且不破坏 Cloud identity status GET 校验 | `CloudAiReadClientContractTests` + `ToolRegistryApplicationTests` + ArchitectureTests + required runner 全量对账 |
+| AI-SEC-032 | HIGH | Done | JWT runtime | HttpApi 启动统一校验 issuer、audience、至少 64 字符 secret 和正数 token lifetime | Unit/Architecture/HttpIntegration 安全测试 + required runner 全量对账 |
 | AI-SEC-033 | HIGH | Deferred | bootstrap admin 默认值 | 默认关闭 auto-bind、默认员工号为空；本项涉及工作区部署总览/profile，同步授权前不得在 AI-only 窗口半修 | 外部部署治理授权后执行 compose/config/security tests |
-| AI-SEC-034 | MEDIUM | Done | Process Agent | 在统一语义和 Agent workflow 内增加 `/processes` 只读能力 | semantic/planner/Agent/acceptance + 全量 BackendTests/AiEvalTests |
-| AI-SEC-035 | MEDIUM | Done | ClientRelease Agent | 在统一语义和 Agent workflow 内增加 `/client-releases` 只读能力，不生成 Cloud 未返回的发布事实 | semantic/planner/Agent/acceptance + 全量 BackendTests/AiEvalTests |
-| AI-SEC-036 | MEDIUM | Done | DeviceStatus Agent | 复用 AI-SEC-029 唯一状态实现，覆盖空态、心跳缺失、权限、截断和 Plan 确认门禁 | Agent workflow/acceptance + 全量 BackendTests/AiEvalTests |
+| AI-SEC-034 | MEDIUM | Done | Process Agent | 在统一语义和 Agent workflow 内增加 `/processes` 只读能力 | semantic/planner/Workflow/EndToEnd/GoldenEval + required runner 全量对账 |
+| AI-SEC-035 | MEDIUM | Done | ClientRelease Agent | 在统一语义和 Agent workflow 内增加 `/client-releases` 只读能力，不生成 Cloud 未返回的发布事实 | semantic/planner/Workflow/EndToEnd/GoldenEval + required runner 全量对账 |
+| AI-SEC-036 | MEDIUM | Done | DeviceStatus Agent | 复用 AI-SEC-029 唯一状态实现，覆盖空态、心跳缺失、权限、截断和 Plan 确认门禁 | Workflow/EndToEnd/GoldenEval + required runner 全量对账 |
 | AI-SEC-037 | MEDIUM | Done | REST/OpenAPI contract | 使用现有依赖增强 OpenAPI、前端快照和错误码目录测试；新增生成器依赖需另行批准 | `Suite=FrontendIntegrationContract` + `ErrorCodeCatalogTests` |
 | AI-SEC-038 | MEDIUM | Done | Web 产品化 | 保留会话隔离、真实运行状态、错误和 Widget 契约，完成真实视口与全状态验收 | type-check/unit/build/smoke + 1920×1080、1366×768、1024×768 浏览器验收 |
-| AI-SEC-039 | LOW | Done | dead code | 证据确认无绑定、反射、序列化或测试引用后删除 `CloudReadonlyPilotReadinessOptions` | 全仓 `rg` + solution build + ArchitectureTests + 全量 BackendTests |
+| AI-SEC-039 | LOW | Done | dead code | 证据确认无绑定、反射、序列化或测试引用后删除 `CloudReadonlyPilotReadinessOptions` | 全仓 `rg` + solution build + ArchitectureTests + required runner 全量对账 |
 
 本批固定口径：`Analysis.Device.Status` 只能称为“最后上报运行状态”，同时给出心跳/更新时间；Cloud 没有正式 freshness 规则时不得推断在线、离线、当前或 stale。零条表示暂无状态上报，不表示离线。Cloud 提供方契约缺失、模糊或 fixture 不一致时，AI 消费方不得猜字段、扫描分页或自动选择第一条。
 
@@ -311,7 +311,7 @@ git log --oneline -n 20 -- AICopilot.slnx deploy src docs AGENTS.md 资料
 
 | 编号 | 严重级 | 状态 | 范围 | 修复要求 | 验收 |
 | --- | --- | --- | --- | --- | --- |
-| AI-SEC-044 | HIGH | Done | SemanticAnalysisRunner | Recipe 必须在 planner 前拒绝；六类正式语义在成功、空集、规划失败、关闭和 Cloud 错误时只走 Cloud AiRead 且不 fallback；物理删除 Runner 内不可达 Direct DB/SQL/fallback 分支和专用测试桩 | `SemanticAnalysisRunnerTests` 七目标边界与六类矩阵 + ArchitectureTests 构造反射 + 全量 BackendTests/solution build |
+| AI-SEC-044 | HIGH | Done | SemanticAnalysisRunner | Recipe 必须在 planner 前拒绝；六类正式语义在成功、空集、规划失败、关闭和 Cloud 错误时只走 Cloud AiRead 且不 fallback；物理删除 Runner 内不可达 Direct DB/SQL/fallback 分支和专用测试桩 | `SemanticAnalysisRunnerTests` 七目标边界与六类矩阵 + ArchitectureTests + required runner 全量对账 + solution build |
 
 本批没有重命名或迁移既有 HTTP route、配置键、physical mapping / semantic source status 运维诊断及其消费者，也没有删除 `SemanticSqlGenerator` 独立实现和测试；这些表面不属于正式语义执行器，后续若治理必须重新做生产与测试消费者审计，不能借本批 no-fallback 收口扩大删除范围。
 
@@ -319,7 +319,7 @@ git log --oneline -n 20 -- AICopilot.slnx deploy src docs AGENTS.md 资料
 
 | 编号 | 严重级 | 状态 | 范围 | 修复要求 | 验收 |
 | --- | --- | --- | --- | --- | --- |
-| AI-SEC-045 | HIGH | Done | DataAnalysis final context | metadata/preview 共用唯一字段标签映射；内部与 governed-schema 敏感 raw field 整项丢弃；标签指令、控制字符、超长和重名只在唯一入口收口；flat preview 只输出显式标量白名单，任意其他 object/collection 不展开也不调用自定义 `ToString()` | `DataAnalysisFinalContextFormatterTests` + `AiEvalBehaviorGuardrailTests` + `CloudReadOnlyTextToSqlFallbackRunnerTests` + Semantic/Widget/compact 定向回归 + ArchitectureTests/BackendTests/solution build |
+| AI-SEC-045 | HIGH | Done | DataAnalysis final context | metadata/preview 共用唯一字段标签映射；内部与 governed-schema 敏感 raw field 整项丢弃；标签指令、控制字符、超长和重名只在唯一入口收口；flat preview 只输出显式标量白名单，任意其他 object/collection 不展开也不调用自定义 `ToString()` | Application/GoldenEval 对应 formatter/guardrail/fallback + Semantic/Widget/compact 定向回归 + ArchitectureTests + required runner 对账 + solution build |
 
 本批固定口径：formatter 不再分别解析 metadata 名、preview key 和逐行重名；它先单次收集最多 3 个可识别 dictionary row，再根据 metadata、schema 顺序和实际 row key 产生一份 `OrdinalIgnoreCase` 映射。字段敏感判定复用 `CloudReadOnlyGovernedSchema.BlockedFieldFragments`，值仍只走既有 `SanitizeValue/SanitizeTextValue` 链，没有第二份 blacklist 或递归 nested sanitizer。Semantic/FreeForm Widget 不消费 formatter label map，本批不修改 Widget、route、Cloud API、数据库或部署链。
 
@@ -334,7 +334,7 @@ git log --oneline -n 20 -- AICopilot.slnx deploy src docs AGENTS.md 资料
 | AI-SEC-050 | HIGH | Partial | RAG 同文件并发幂等 | `UploadDocument` 当前 hash 预查只覆盖顺序请求，数据库没有 `(knowledge_base_id, file_hash)` 唯一约束，两个并发请求可各自读到不存在并提交两条 Document/两份文件。治理前先盘点既有重复 hash、chunk/审计/事件引用并确定 canonical document，再增加数据库唯一约束；唯一冲突必须安全返回既有 Document 或稳定冲突，并让失败请求通过既有 file journal 回滚自己的文件。禁止把应用层 `Any`/集合查重称为并发幂等 | 真实 PostgreSQL barrier 并发上传同 KB/同 hash，最终一条 Document/一份有效文件；不同 KB 可各自保存；唯一冲突、ACK unknown、既有重复数据 migration、Outbox/chunk/audit 保留均有行为测试 |
 | AI-SEC-051 | HIGH | Done | 至少一个可用管理员 | `DisableUser`、`UpdateUserRole` 和 migration seed 已在唯一 Identity transaction 内先取得固定全局 `pg_advisory_xact_lock`，再读取用户、角色和 enabled Admin；多角色 Admin 按真实 membership 判断，拒绝业务事务先回滚，再独立提交 Rejected audit；disabled bootstrap 不会被 seed 偷偷启用，最终零 enabled Admin 会明确失败。execution-strategy transient retry 已用竞争事务证明第二 attempt 会重新加锁并重读新状态。当前生产树没有 DeleteUser API，未来新增减员入口必须同时进入 `AI-ARCH-001` Analyzer 和真实并发测试，不能制造空壳 API | 分层样板已由 Unit policy、Contract ProblemDetails、真实 PostgreSQL lock/retry/rejected audit、真实 Aspire HTTP auth/middleware/trace 和 Architecture owner 分别持有；旧 Backend 同义断言已删除，各 required runner 必须 0 failed/0 skipped |
 | AI-SEC-052 | HIGH | Partial | Admin 恢复权限基线 | `UpdateRole` 当前可把 Admin 角色的关键身份恢复/权限治理能力全部移除；enabled Admin 数量虽然仍大于零，但可能形成“仍叫 Admin、却无法恢复治理能力”的伪可用管理员。该问题与 AI-SEC-051 的数量不变量分开治理 | 先定义不可移除的 Admin 最小恢复权限集合；更新 Admin 时缺少任一基线权限必须稳定拒绝并写审计；普通角色仍允许差量权限；API、真实数据库行为和 Analyzer/Contract 正反例均通过 |
-| AI-SEC-053 | MEDIUM | Partial | ECharts 依赖 XSS 公告 | PR run `29170924668` 的前端 audit 报告 `echarts 6.0.0` 命中 `GHSA-fgmj-fm8m-jvvx`；当前门禁只拒绝 high/critical，因此 job 成功不代表该中危漏洞不存在。GitHub advisory 指向 `<6.1.0` 受影响、`6.1.0` 首次修复 | 独立前端依赖批次升级到 `>=6.1.0`，运行 type-check、184 条 Vitest、build、图表组件/数据编码回归与 `npm audit`；确认 lockfile 只包含已修版本后关单，不在测试治理批次顺手升级 |
+| AI-SEC-053 | MEDIUM | Partial | ECharts 依赖 XSS 公告 | PR run `29170924668` 的前端 audit 报告 `echarts 6.0.0` 命中 `GHSA-fgmj-fm8m-jvvx`；当前门禁只拒绝 high/critical，因此 job 成功不代表该中危漏洞不存在。GitHub advisory 指向 `<6.1.0` 受影响、`6.1.0` 首次修复 | 独立前端依赖批次升级到 `>=6.1.0`，运行 type-check、185 条 Vitest、build、图表组件/数据编码回归与 `npm audit`；确认 lockfile 只包含已修版本后关单，不在测试治理批次顺手升级 |
 | AI-SEC-054 | MEDIUM | Partial | Web mutation ACK-unknown / 幂等回放 | 本批已为普通请求设置显式 timeout、禁止非幂等 SSE 自动 reconnect，并对 DELETE session 用权威列表对账；但 create session、upload、Chat/Plan/approval SSE 在服务端已提交而响应/首个权威 chunk 丢失时，仍缺 client operation id、数据库唯一 receipt 和结果回放。超时只能标记 outcome unknown，不能推断“未创建/未执行”或自动重放 | 为每类 mutation 定义稳定 `clientOperationId`，服务端以用户+操作类型+key 唯一保存 receipt/result，重试返回同一结果；覆盖 commit 后断链、chunk 前断链、重复点击、进程重启、跨实例和 receipt retention 的 Contract/Workflow/Persistence 测试，再允许安全重试 |
 
 `AI-PERSIST-01b/01c` 固定口径：业务代码不写 retry loop；每个 attempt 对业务 Context 只调用一次 `SaveChangesAsync(false)`，Outbox/audit/marker 使用同一 PostgreSQL transaction，commit 确认后才 accept/clear。Identity Result 写命令也复用该 engine，失败 Result 不能提交 UserManager/RoleManager 中间保存。COMMIT ACK 丢失由 fresh context 验证 marker；无法确认时返回 `persistence_commit_outcome_unknown` 且不自动重放。RAG `UploadDocument` 与 active SessionTemp/AgentInput `UploadRecord` 单文件上传必须先写 journal、再写文件并复用 commit id，DataWorker 取得同一 advisory lease 后按 marker 对账；损坏 journal、已提交但缺失文件都保留证据并停止危险清理。`AuditTransactionCoordinator`、`RagIntegrationEventStager`、`EfTransactionalExecutionService`、原始上传写 API、KB RAG bridge、AiGateway/RAG Outbox mapping 和重复 PostgreSQL/文件测试资产均已物理删除。`AI-SEC-046` 只对事务 engine、Identity 和上述 active 单 Context 上传边界关单；`ArtifactWorkspace` 为 `AI-SEC-047 Partial`，历史 KB shadow 清库为 `AI-SEC-048 Partial`，本状态不代表已合并或生产部署。
@@ -370,19 +370,31 @@ PR 前必须过：
 ```bash
 rg -n "USER root|CipherMode.CBC|CHANGE_ME|dummy-key|(10\\.[0-9]{1,3}\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.)|Strict-Transport-Security|UseHttpsRedirection|listen 443|ssl_certificate" deploy src docs
 bash -n deploy/enterprise-ai/*.sh deploy/enterprise-ai/scripts/*.sh
-dotnet test src/tests/AICopilot.ArchitectureTests/AICopilot.ArchitectureTests.csproj --no-restore
-dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "SecurityHardeningTests|SecretStringEncryptorTests|ChatErrorContractTests|CloudAiReadClientTests|AiEvalBehaviorGuardrailTests" --no-restore
+dotnet build AICopilot.slnx -c Release --no-restore
+pwsh -NoProfile -File scripts/tests/Test-AICopilotTestInfrastructureBehavior.ps1
+pwsh -NoProfile -File scripts/tests/Test-AICopilotTestDeclarationTransition.ps1
+pwsh -NoProfile -File scripts/tests/Test-AICopilotCompatibilityInventory.ps1
+pwsh -NoProfile -File scripts/tests/Measure-AICopilotDuplication.ps1
+pwsh -NoProfile -File scripts/tests/Get-AICopilotTestInventory.ps1 -OutputPath artifacts/test-inventory.json
+# 按 .github/workflows/aicopilot-ci.yml 执行 inventory 中全部 16 个 required runner：Pure 收集 coverage，资源 runner 串行，全部输出 TRX。
+bash deploy/enterprise-ai/tests/deployment-behavior.sh 2>&1 | tee artifacts/test-results/deployment-behavior.log
+cd src/vues/AICopilot.Web
+npm run test:unit -- --reporter=json --outputFile=../../../artifacts/test-results/vitest.json
+PLAYWRIGHT_JSON_OUTPUT_NAME=../../../artifacts/test-results/playwright.json npm run test:smoke -- --reporter=json
+npm run build
+cd ../../..
+pwsh -NoProfile -File scripts/tests/Confirm-AICopilotCoverage.ps1
+pwsh -NoProfile -File scripts/tests/Confirm-AICopilotRequiredTestResults.ps1 -InventoryPath artifacts/test-inventory.json -ResultsDirectory artifacts/test-results -VitestPath artifacts/test-results/vitest.json -PlaywrightPath artifacts/test-results/playwright.json -DeploymentPath artifacts/test-results/deployment-behavior.log
 ```
 
-合 main 前必须过：
+定向 `dotnet test --filter ...` 只能用于失败后的窄范围诊断，不能作为 PR 或合 main 的完成证据。合 main 前必须重复上述完整 required runner/Web/deployment 对账，不得用单项目或 filter 结果代替。
+
+AI-SEC-011/012 secret-protection mutation 是独立 report-only 质量证据，不与 required 执行数混算：
 
 ```bash
-dotnet build AICopilot.slnx --no-restore
-dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --no-restore
-cd src/vues/AICopilot.Web
-npm run type-check
-npm run test:unit
-npm run build
+pwsh -NoProfile -File scripts/tests/Invoke-AICopilotMutation.ps1
+# 已有真实 Stryker JSON 时可单独重验：
+pwsh -NoProfile -File scripts/tests/Confirm-AICopilotMutation.ps1 -ReportPath artifacts/mutation/reports/aicopilot-secret-protection-mutation.json
 ```
 
 发版前必须过：

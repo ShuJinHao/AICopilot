@@ -6,6 +6,7 @@ using AICopilot.Infrastructure.Authentication;
 using AICopilot.McpService;
 using AICopilot.RagService;
 using AICopilot.Services.Contracts;
+using AICopilot.Services.Contracts.Authentication;
 using AICopilot.Services.CrossCutting;
 
 namespace AICopilot.HttpApi;

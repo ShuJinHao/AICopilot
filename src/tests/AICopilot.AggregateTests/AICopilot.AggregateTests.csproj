@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <AICopilotTestKind>Aggregate</AICopilotTestKind>
+    <AICopilotTestRuntime>Pure</AICopilotTestRuntime>
+    <AICopilotTestCadence>PR</AICopilotTestCadence>
+    <AICopilotTestOwner>DomainModel</AICopilotTestOwner>
+    <AICopilotRequired>true</AICopilotRequired>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\core\AICopilot.Core.AiGateway\AICopilot.Core.AiGateway.csproj" />
+    <PackageReference Include="FluentAssertions" Version="8.8.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" PrivateAssets="all" />
+  </ItemGroup>
+  <Import Project="..\AICopilot.TestRunner.Shared.props" />
+  <ItemGroup>
+    <Using Remove="AICopilot.Services.Contracts" />
+    <Using Remove="Microsoft.Extensions.DependencyInjection" />
+  </ItemGroup>
+</Project>

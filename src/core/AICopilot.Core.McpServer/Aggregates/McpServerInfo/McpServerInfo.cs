@@ -145,6 +145,22 @@ public class McpServerInfo : IAggregateRoot<McpServerId>
             throw new ArgumentOutOfRangeException(nameof(riskLevel), riskLevel, "MCP server risk level is invalid.");
         }
 
+        if (McpTargetTrustPolicy.RequiresCloudReadOnly(name, description, command, arguments)
+            && externalSystemType != AiToolExternalSystemType.CloudReadOnly)
+        {
+            throw new ArgumentException(
+                "MCP targets identified as Cloud must use the CloudReadOnly classification.",
+                nameof(externalSystemType));
+        }
+
+        if (externalSystemType == AiToolExternalSystemType.CloudReadOnly &&
+            capabilityKind != AiToolCapabilityKind.ReadOnlyQuery)
+        {
+            throw new ArgumentException(
+                "CloudReadOnly MCP servers must default to the ReadOnlyQuery capability.",
+                nameof(capabilityKind));
+        }
+
         if (transportType == McpTransportType.Stdio && string.IsNullOrWhiteSpace(command))
         {
             throw new ArgumentException("MCP stdio server command is required.", nameof(command));
@@ -204,6 +220,24 @@ public sealed record McpAllowedTool(
         if (!Enum.IsDefined(typeof(AiToolRiskLevel), RiskLevel ?? serverRiskLevel))
         {
             throw new ArgumentOutOfRangeException(nameof(RiskLevel), RiskLevel, "MCP tool risk level is invalid.");
+        }
+
+        var effectiveExternalSystemType = ExternalSystemType ?? serverExternalSystemType;
+        var effectiveCapabilityKind = CapabilityKind ?? serverCapabilityKind;
+        if (serverExternalSystemType == AiToolExternalSystemType.CloudReadOnly
+            && effectiveExternalSystemType != AiToolExternalSystemType.CloudReadOnly)
+        {
+            throw new ArgumentException(
+                "A CloudReadOnly MCP server tool cannot override its external-system classification.",
+                nameof(ExternalSystemType));
+        }
+
+        if (effectiveExternalSystemType == AiToolExternalSystemType.CloudReadOnly &&
+            (effectiveCapabilityKind != AiToolCapabilityKind.ReadOnlyQuery || !ReadOnlyDeclared))
+        {
+            throw new ArgumentException(
+                "CloudReadOnly MCP tools must declare the exact CloudReadOnly + ReadOnlyQuery + readOnlyDeclared=true tuple.",
+                nameof(ReadOnlyDeclared));
         }
 
         return this with { ToolName = ToolName.Trim() };

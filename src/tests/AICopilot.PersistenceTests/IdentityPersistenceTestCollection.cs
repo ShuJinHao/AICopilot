@@ -1,4 +1,4 @@
-using AICopilot.BackendTests;
+using AICopilot.PersistenceTestKit;
 
 namespace AICopilot.PersistenceTests;
 

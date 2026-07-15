@@ -1,0 +1,1576 @@
+using System.Linq.Expressions;
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
+using AICopilot.AgentPlugin;
+using AICopilot.AiGatewayService.AgentTasks;
+using AICopilot.AiGatewayService.Approvals;
+using AICopilot.AiGatewayService.Models;
+using AICopilot.AiGatewayService.Queries.Sessions;
+using AICopilot.AiGatewayService.Runtime;
+using AICopilot.AiGatewayService.Skills;
+using AICopilot.AiGatewayService.Tools;
+using AICopilot.AiGatewayService.Uploads;
+using AICopilot.AiGatewayService.Workspaces;
+using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
+using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
+using AICopilot.Core.AiGateway.Aggregates.Approvals;
+using AICopilot.Core.AiGateway.Aggregates.Artifacts;
+using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
+using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
+using AICopilot.Core.AiGateway.Aggregates.Sessions;
+using AICopilot.Core.AiGateway.Aggregates.Skills;
+using AICopilot.Core.AiGateway.Aggregates.Tools;
+using AICopilot.Core.AiGateway.Aggregates.Uploads;
+using AICopilot.Core.AiGateway.Ids;
+using AICopilot.Services.Contracts;
+using AICopilot.SharedKernel.Ai;
+using AICopilot.SharedKernel.Domain;
+using AICopilot.SharedKernel.Repository;
+using AICopilot.SharedKernel.Result;
+using AICopilot.SharedKernel.Specification;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+
+namespace AICopilot.AgentWorkflowTestKit;
+
+public abstract class ToolRegistryGovernanceTestBase
+{
+    internal static readonly Guid UserId = Guid.Parse("11111111-1111-4111-8111-111111111111");
+
+    internal static AgentTaskRuntime CreateRuntime(
+        IRepository<AgentTask> taskRepository,
+        IRepository<ArtifactWorkspace> workspaceRepository,
+        IRepository<ApprovalRequest> approvalRepository,
+        IToolExecutionAuditStore executionRepository,
+        ToolRegistryGuard guard,
+        IAgentArtifactWorkspaceService? workspaceService = null,
+        ICloudReadonlyAgentToolExecutor? cloudReadonlyToolExecutor = null,
+        IEnumerable<IAgentToolExecutor>? toolExecutors = null,
+        IAgentTaskRunAttemptStore? runAttemptRepository = null,
+        IEnumerable<IKnowledgeBaseAccessChecker>? knowledgeBaseAccessCheckers = null,
+        IKnowledgeRetrievalService? knowledgeRetrievalService = null,
+        IIdentityAccessService? identityAccessService = null,
+        SkillDefinitionGuard? skillDefinitionGuard = null)
+    {
+        return new AgentTaskRuntime(
+            taskRepository,
+            runAttemptRepository ?? new InMemoryAgentTaskRunAttemptStore(),
+            workspaceRepository,
+            approvalRepository,
+            new InMemoryRepository<UploadRecord>(),
+            workspaceService ?? new ThrowingWorkspaceService(),
+            new CapturingFileStorage(),
+            new NoopTableFileParser(),
+            new NoopDocumentGenerator(),
+            knowledgeRetrievalService ?? new NoopKnowledgeRetrievalService(),
+            knowledgeBaseAccessCheckers ?? [],
+            cloudReadonlyToolExecutor ?? new ThrowingCloudReadonlyAgentToolExecutor(),
+            identityAccessService ?? new StubIdentityAccessService([]),
+            guard,
+            new AgentRuntimeEventRecorder(
+                executionRepository,
+                new AgentAuditRecorder(new CapturingAuditLogWriter())),
+            toolExecutors ?? [],
+            skillDefinitionGuard: skillDefinitionGuard);
+    }
+
+    internal static AgentTaskLifecycleCoordinator CreateLifecycleCoordinator(
+        IRepository<AgentTask> taskRepository,
+        IRepository<ArtifactWorkspace> workspaceRepository,
+        IRepository<ApprovalRequest> approvalRepository,
+        IAgentTaskRunQueueStore queueRepository,
+        IAgentTaskRunAttemptStore? runAttemptRepository = null,
+        IOptions<AgentRunQueueOptions>? options = null,
+        AgentAuditRecorder? auditRecorder = null)
+    {
+        return new AgentTaskLifecycleCoordinator(
+            taskRepository,
+            approvalRepository,
+            workspaceRepository,
+            queueRepository,
+            runAttemptRepository ?? new InMemoryAgentTaskRunAttemptStore(),
+            new AgentTaskRunQueue(queueRepository),
+            options,
+            auditRecorder);
+    }
+
+    internal static AgentTaskDtoQueryService CreateAgentTaskDtoQueryService(
+        IReadRepository<ArtifactWorkspace> workspaceRepository,
+        IReadRepository<ApprovalRequest> approvalRepository,
+        IAgentTaskRunQueueStore queueRepository)
+    {
+        return new AgentTaskDtoQueryService(
+            workspaceRepository,
+            approvalRepository,
+            queueRepository);
+    }
+
+    internal static AgentTaskAuditQueryCoordinator CreateAuditQueryCoordinator(
+        IRepository<AgentTask> taskRepository,
+        IReadRepository<ArtifactWorkspace>? workspaceRepository = null,
+        IToolExecutionAuditStore? executionRepository = null,
+        IAuditLogQueryService? auditLogQueryService = null,
+        IAgentTaskRunAttemptStore? runAttemptRepository = null,
+        IAgentTaskRunQueueStore? queueRepository = null,
+        ICurrentUser? currentUser = null)
+    {
+        return new AgentTaskAuditQueryCoordinator(
+            taskRepository,
+            workspaceRepository ?? new InMemoryRepository<ArtifactWorkspace>(),
+            executionRepository ?? new InMemoryToolExecutionAuditStore(),
+            auditLogQueryService ?? new FixedAuditLogQueryService(),
+            runAttemptRepository ?? new InMemoryAgentTaskRunAttemptStore(),
+            queueRepository ?? new InMemoryAgentTaskRunQueueStore(),
+            currentUser ?? new TestCurrentUser(UserId));
+    }
+
+    internal static (AgentTask Task, ArtifactWorkspace Workspace) CreateApprovedTask(
+        string toolCode,
+        bool requiresApproval = false,
+        string? skillCode = null)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var task = new AgentTask(
+            SessionId.New(),
+            UserId,
+            "生成报告",
+            "生成报告",
+            AgentTaskType.ReportGeneration,
+            AgentTaskRiskLevel.Low,
+            null,
+            CreatePlanJson(toolCode, skillCode),
+            now);
+        task.AddStep("生成图表数据", "生成图表数据。", AgentStepType.ChartGeneration, toolCode, requiresApproval, now);
+        var workspace = new ArtifactWorkspace(
+            task.Id,
+            $"ws_{Guid.NewGuid():N}",
+            @"C:\aicopilot-workspaces\test",
+            "/api/aigateway/workspaces/test",
+            now);
+        task.AttachWorkspace(workspace.Id, now);
+        task.ConfirmExecutablePlan(task.PlanJson, Array.Empty<int>(), now);
+        task.ApprovePlan(now);
+        return (task, workspace);
+    }
+
+    internal static (AgentTask Task, ArtifactWorkspace Workspace) CreateRagApprovedTask(Guid knowledgeBaseId)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var task = new AgentTask(
+            SessionId.New(),
+            UserId,
+            "RAG admin-only search",
+            "RAG admin-only search",
+            AgentTaskType.DataAnalysis,
+            AgentTaskRiskLevel.Low,
+            null,
+            CreateRagPlanJson(knowledgeBaseId),
+            now);
+        task.AddStep("Search RAG", "Search admin-visible knowledge base.", AgentStepType.DataQuery, "rag_search", false, now);
+        var workspace = new ArtifactWorkspace(
+            task.Id,
+            $"ws_{Guid.NewGuid():N}",
+            @"C:\aicopilot-workspaces\test",
+            "/api/aigateway/workspaces/test",
+            now);
+        task.AttachWorkspace(workspace.Id, now);
+        task.ConfirmExecutablePlan(task.PlanJson, Array.Empty<int>(), now);
+        task.ApprovePlan(now);
+        return (task, workspace);
+    }
+
+    internal static (AgentTask Task, ArtifactWorkspace Workspace) CreateCloudApprovedTask()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var task = new AgentTask(
+            SessionId.New(),
+            UserId,
+            "Cloud readonly report",
+            "Cloud readonly report",
+            AgentTaskType.CloudDataReport,
+            AgentTaskRiskLevel.Medium,
+            null,
+            CreateCloudPlanJson(),
+            now);
+        task.AddStep("Read Cloud", "Read Cloud readonly data.", AgentStepType.DataQuery, "query_cloud_data_readonly", requiresApproval: true, now);
+        task.AddStep("Generate Markdown", "Generate markdown report.", AgentStepType.ArtifactGeneration, "generate_markdown_report", requiresApproval: false, now);
+        var workspace = new ArtifactWorkspace(
+            task.Id,
+            $"ws_{Guid.NewGuid():N}",
+            @"C:\aicopilot-workspaces\test",
+            "/api/aigateway/workspaces/test",
+            now);
+        task.AttachWorkspace(workspace.Id, now);
+        task.ConfirmExecutablePlan(task.PlanJson, Array.Empty<int>(), now);
+        task.ApprovePlan(now);
+        return (task, workspace);
+    }
+
+    internal static string CreatePlanJson(string toolCode, string? skillCode = null, string? inputJson = null)
+    {
+        var plan = new
+        {
+            version = 1,
+            plannerTemplateCode = "agent_planner",
+            goal = "生成报告",
+            taskType = "ReportGeneration",
+            riskLevel = "Low",
+            uploadIds = Array.Empty<Guid>(),
+            knowledgeBaseIds = Array.Empty<Guid>(),
+            steps = new[]
+            {
+                new
+                {
+                    title = "生成图表数据",
+                    description = "生成图表数据。",
+                    stepType = "ChartGeneration",
+                    toolCode,
+                    requiresApproval = false,
+                    inputJson
+                }
+            },
+            runtimeSettings = new
+            {
+                agentPlanningHistoryCount = 30,
+                contextTokenLimit = 12000
+            },
+            skillCode
+        };
+        return JsonSerializer.Serialize(plan, JsonSerializerOptions.Web);
+    }
+
+    internal static string CreateRagPlanJson(Guid knowledgeBaseId)
+    {
+        var plan = new
+        {
+            version = 1,
+            plannerTemplateCode = "agent_planner",
+            goal = "RAG admin-only search",
+            taskType = "DataAnalysis",
+            riskLevel = "Low",
+            uploadIds = Array.Empty<Guid>(),
+            knowledgeBaseIds = new[] { knowledgeBaseId },
+            steps = new[]
+            {
+                new
+                {
+                    title = "Search RAG",
+                    description = "Search admin-visible knowledge base.",
+                    stepType = "DataQuery",
+                    toolCode = "rag_search",
+                    requiresApproval = false
+                }
+            },
+            runtimeSettings = new
+            {
+                agentPlanningHistoryCount = 30,
+                contextTokenLimit = 12000
+            }
+        };
+        return JsonSerializer.Serialize(plan, JsonSerializerOptions.Web);
+    }
+
+    internal static string CreateCloudPlanJson()
+    {
+        var plan = new
+        {
+            version = 1,
+            plannerTemplateCode = "agent_planner",
+            goal = "Cloud readonly report",
+            taskType = "CloudDataReport",
+            riskLevel = "Medium",
+            uploadIds = Array.Empty<Guid>(),
+            knowledgeBaseIds = Array.Empty<Guid>(),
+            cloudReadonlyIntent = new
+            {
+                intent = "Analysis.Device.List",
+                query = """{"filters":[{"field":"deviceCode","operator":"eq","value":"DEV-001"}],"limit":20}""",
+                confidence = 0.95,
+                target = "Device",
+                kind = "List",
+                summary = "target=Device; kind=List; filters=1; hasTimeRange=False; limit=20"
+            },
+            steps = new[]
+            {
+                new
+                {
+                    title = "Read Cloud",
+                    description = "Read Cloud readonly data.",
+                    stepType = "DataQuery",
+                    toolCode = "query_cloud_data_readonly",
+                    requiresApproval = true
+                },
+                new
+                {
+                    title = "Generate Markdown",
+                    description = "Generate markdown report.",
+                    stepType = "ArtifactGeneration",
+                    toolCode = "generate_markdown_report",
+                    requiresApproval = false
+                }
+            },
+            runtimeSettings = new
+            {
+                agentPlanningHistoryCount = 30,
+                contextTokenLimit = 12000
+            }
+        };
+        return JsonSerializer.Serialize(plan, JsonSerializerOptions.Web);
+    }
+
+    internal static SemanticQueryPlan CreateDeviceSemanticPlan()
+    {
+        return new SemanticQueryPlan(
+            "Analysis.Device.List",
+            SemanticQueryTarget.Device,
+            SemanticQueryKind.List,
+            null,
+            new SemanticProjection(["deviceId", "deviceCode", "deviceName", "processId"]),
+            [new SemanticFilter("deviceCode", SemanticFilterOperator.Equal, "DEV-001")],
+            null,
+            new SemanticSort("deviceCode", SemanticSortDirection.Asc),
+            20);
+    }
+
+    internal static ToolRegistryGuard CreateAgentRuntimeGuardWithCloudEnabled()
+    {
+        return CreateGuard(
+            CreateTool(
+                "query_cloud_data_readonly",
+                ToolProviderType.CloudReadonly,
+                isEnabled: true,
+                requiresApproval: true,
+                riskLevel: AiToolRiskLevel.RequiresApproval),
+            CreateTool("generate_chart_data", ToolProviderType.Artifact),
+            CreateTool("generate_markdown_report", ToolProviderType.Artifact),
+            CreateTool("generate_html_report", ToolProviderType.Artifact),
+            CreateTool("generate_pdf", ToolProviderType.Artifact, requiresApproval: true, riskLevel: AiToolRiskLevel.RequiresApproval),
+            CreateTool("generate_pptx", ToolProviderType.Artifact, requiresApproval: true, riskLevel: AiToolRiskLevel.RequiresApproval),
+            CreateTool("generate_xlsx", ToolProviderType.Artifact, requiresApproval: true, riskLevel: AiToolRiskLevel.RequiresApproval),
+            CreateTool("finalize_artifacts", ToolProviderType.Artifact, requiresApproval: true, riskLevel: AiToolRiskLevel.RequiresApproval));
+    }
+
+    internal static AgentPlanToolGuard CreatePlanToolGuard(ToolRegistryGuard guard, params AiToolDefinition[] runtimeTools)
+    {
+        return new AgentPlanToolGuard(guard, new StubAgentPluginCatalog(runtimeTools));
+    }
+
+    internal static SkillDefinitionGuard CreateSkillGuard(params SkillDefinition[] skills)
+    {
+        return new SkillDefinitionGuard(new InMemoryRepository<SkillDefinition>(skills));
+    }
+
+    internal static SkillDefinition CreateSkill(string skillCode, IReadOnlyCollection<string> allowedToolCodes)
+    {
+        return new SkillDefinition(
+            skillCode,
+            skillCode,
+            "test skill",
+            allowedToolCodes,
+            AiToolRiskLevel.Low,
+            "None",
+            [],
+            [],
+            ["markdown"],
+            isEnabled: true,
+            isBuiltIn: false,
+            version: 1,
+            DateTimeOffset.UtcNow);
+    }
+
+    internal static Task<Result<IReadOnlyCollection<AgentStepPlanDto>>> ValidateSingleAsync(
+        AgentPlanToolGuard guard,
+        string toolCode,
+        string? inputJson = null)
+    {
+        return guard.ValidateStepsAsync(
+            [new AgentStepPlanDto("Step", "Step", AgentStepType.Analysis, toolCode, false, inputJson)],
+            AgentTaskType.ReportGeneration,
+            UserId,
+            CancellationToken.None);
+    }
+
+    internal static PlanAgentTaskCommandHandler CreatePlanHandler(
+        Session session,
+        ToolRegistryGuard guard,
+        IAgentDynamicPlanner? dynamicPlanner = null,
+        IReadOnlyCollection<LanguageModel>? models = null,
+        ICloudReadonlyAgentPlanService? cloudReadonlyPlanService = null,
+        IReadOnlyCollection<AiToolDefinition>? runtimeTools = null,
+        InMemoryRepository<AgentTask>? taskRepository = null,
+        SkillDefinitionGuard? skillDefinitionGuard = null,
+        IAgentSkillAutoSelector? skillAutoSelector = null)
+    {
+        return new PlanAgentTaskCommandHandler(
+            new PlanAgentTaskCoordinator(
+                taskRepository ?? new InMemoryRepository<AgentTask>(),
+                new InMemoryRepository<ApprovalRequest>(),
+                new InMemoryRepository<Session>(session),
+                new InMemoryRepository<UploadRecord>(),
+                new AgentAuditRecorder(new CapturingAuditLogWriter()),
+                [],
+                new TestCurrentUser(UserId),
+                skillDefinitionGuard: skillDefinitionGuard,
+                skillAutoSelector: skillAutoSelector));
+    }
+
+    internal static LanguageModel CreatePlannerModel()
+    {
+        return new LanguageModel(
+            "FakeEval",
+            "planner",
+            "http://localhost/fake",
+            "fake-key",
+            new ModelParameters { MaxTokens = 4096, MaxOutputTokens = 1024, Temperature = 0.2f },
+            "FakeEval",
+            LanguageModelUsage.Chat | LanguageModelUsage.Planner,
+            true);
+    }
+
+    internal static ToolRegistryGuard CreateGuard(params ToolRegistration[] tools)
+    {
+        return CreateGuard((IReadOnlyCollection<ToolRegistration>)tools, []);
+    }
+
+    internal static ToolRegistryGuard CreateGuard(ToolRegistration tool, params string[] permissions)
+    {
+        return CreateGuard([tool], permissions);
+    }
+
+    internal static ToolRegistryGuard CreateGuard(IReadOnlyCollection<ToolRegistration> tools, IReadOnlyCollection<string> permissions)
+    {
+        return new ToolRegistryGuard(
+            new InMemoryRepository<ToolRegistration>(tools.ToArray()),
+            new StubIdentityAccessService(permissions));
+    }
+
+    internal static ToolRegistration CreateTool(
+        string toolCode,
+        ToolProviderType providerType = ToolProviderType.BuiltIn,
+        ToolRegistrationTargetType targetType = ToolRegistrationTargetType.AgentRuntime,
+        string targetName = "AgentTaskRuntime",
+        bool isEnabled = true,
+        bool requiresApproval = false,
+        AiToolRiskLevel riskLevel = AiToolRiskLevel.Low,
+        string? requiredPermission = null,
+        string inputSchemaJson = """{"type":"object"}""",
+        string outputSchemaJson = """{"type":"object"}""")
+    {
+        return new ToolRegistration(
+            toolCode,
+            toolCode,
+            "test tool",
+            providerType,
+            targetType,
+            targetName,
+            inputSchemaJson,
+            outputSchemaJson,
+            riskLevel,
+            requiredPermission,
+            requiresApproval,
+            isEnabled,
+            120,
+            ToolAuditLevel.Standard,
+            DateTimeOffset.UtcNow);
+    }
+
+    internal static ServiceProvider CreateQueueWorkerProvider(
+        InMemoryRepository<AgentTask> taskRepository,
+        InMemoryAgentTaskRunQueueStore queueRepository,
+        InMemoryAgentTaskRunAttemptStore attemptRepository,
+        IAgentTaskRuntime runtime)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IRepository<AgentTask>>(taskRepository);
+        services.AddSingleton<IAgentTaskRunQueueStore>(queueRepository);
+        services.AddSingleton<IAgentTaskRunAttemptStore>(attemptRepository);
+        services.AddSingleton<IAgentTaskRunQueue>(new AgentTaskRunQueue(queueRepository));
+        services.AddSingleton(runtime);
+        services.AddSingleton<AgentTaskRunQueueWorkerCoordinator>();
+        return services.BuildServiceProvider();
+    }
+
+    internal sealed class RecordingAgentTaskRuntime(IAgentTaskRunAttemptStore attemptRepository) : IAgentTaskRuntime
+    {
+        public Task<Result<AgentTask>> RunAsync(AgentTask task, CancellationToken cancellationToken = default)
+        {
+            return RunAsync(task, AgentTaskRunTriggerType.Manual, cancellationToken);
+        }
+
+        public async Task<Result<AgentTask>> RunAsync(
+            AgentTask task,
+            AgentTaskRunTriggerType triggerType = AgentTaskRunTriggerType.Manual,
+            CancellationToken cancellationToken = default)
+        {
+            var now = DateTimeOffset.UtcNow;
+            var attempt = new AgentTaskRunAttempt(
+                task.Id,
+                task.RunAttemptCount + 1,
+                triggerType,
+                "test-data-worker",
+                now,
+                TimeSpan.FromMinutes(5));
+            attemptRepository.Add(attempt);
+            task.BeginRunAttempt(
+                attempt.Id,
+                attempt.AttemptNo,
+                attempt.LeaseId!.Value,
+                attempt.LeaseOwner!,
+                attempt.LeaseExpiresAt!.Value,
+                now);
+            attempt.WaitForApproval(now, "Waiting for final output approval.");
+            task.ReleaseRunLease(now, clearActiveAttempt: false);
+            await attemptRepository.SaveChangesAsync(cancellationToken);
+            return Result.Success(task);
+        }
+    }
+
+    internal sealed class ThrowingRuntime : IAgentTaskRuntime
+    {
+        public Task<Result<AgentTask>> RunAsync(AgentTask task, CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("Runtime should not be called by this test.");
+        }
+
+        public Task<Result<AgentTask>> RunAsync(
+            AgentTask task,
+            AgentTaskRunTriggerType triggerType = AgentTaskRunTriggerType.Manual,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("Runtime should not be called by this test.");
+        }
+    }
+
+    internal sealed class InMemoryToolExecutionAuditStore(params ToolExecutionRecord[] initialItems)
+        : IToolExecutionAuditStore
+    {
+        public List<ToolExecutionRecord> Items { get; } = [.. initialItems];
+
+        public ToolExecutionRecord Add(ToolExecutionRecord record)
+        {
+            Items.Add(record);
+            return record;
+        }
+
+        public Task<List<ToolExecutionRecord>> ListByTaskAsync(
+            AgentTaskId taskId,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items.Where(record => record.TaskId == taskId).ToList());
+        }
+    }
+
+    internal sealed class InMemoryMessageTimelineProjectionStore(params MessageEvent[] initialItems)
+        : IMessageTimelineProjectionStore
+    {
+        public List<MessageEvent> Items { get; } = [.. initialItems];
+
+        public Task<List<MessageEvent>> ListBySessionAsync(
+            SessionId sessionId,
+            bool includeMessage = false,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items
+                .Where(messageEvent => messageEvent.SessionId == sessionId)
+                .OrderBy(messageEvent => messageEvent.Sequence)
+                .ToList());
+        }
+
+        public MessageEvent Add(MessageEvent messageEvent)
+        {
+            Items.Add(messageEvent);
+            return messageEvent;
+        }
+    }
+
+    internal sealed class InMemoryAgentWorkerHeartbeatStore(params AgentWorkerHeartbeat[] initialItems)
+        : IAgentWorkerHeartbeatStore
+    {
+        public List<AgentWorkerHeartbeat> Items { get; } = [.. initialItems];
+
+        public Task<AgentWorkerHeartbeat?> FirstByWorkerIdAsync(
+            string workerId,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items.FirstOrDefault(heartbeat => heartbeat.WorkerId == workerId));
+        }
+
+        public Task<List<AgentWorkerHeartbeat>> ListAllAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items.OrderByDescending(heartbeat => heartbeat.LastSeenAt).ToList());
+        }
+
+        public AgentWorkerHeartbeat Add(AgentWorkerHeartbeat heartbeat)
+        {
+            Items.Add(heartbeat);
+            return heartbeat;
+        }
+
+        public void Update(AgentWorkerHeartbeat heartbeat)
+        {
+            if (!Items.Contains(heartbeat))
+            {
+                Items.Add(heartbeat);
+            }
+        }
+
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(1);
+        }
+    }
+
+    internal sealed class InMemoryAgentTaskRunQueueStore(params AgentTaskRunQueueItem[] initialItems)
+        : IAgentTaskRunQueueStore
+    {
+        public List<AgentTaskRunQueueItem> Items { get; } = [.. initialItems];
+
+        public Task<AgentTaskRunQueueItem?> FirstActiveByTaskAsync(
+            AgentTaskId taskId,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items
+                .Where(item => item.TaskId == taskId && IsActive(item))
+                .OrderByDescending(item => item.CreatedAt)
+                .FirstOrDefault());
+        }
+
+        public Task<AgentTaskRunQueueItem?> FirstByIdAsync(
+            AgentTaskRunQueueItemId id,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items.FirstOrDefault(item => item.Id == id));
+        }
+
+        public Task<List<AgentTaskRunQueueItem>> ListActiveByTaskAsync(
+            AgentTaskId taskId,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items
+                .Where(item => item.TaskId == taskId && IsActive(item))
+                .OrderByDescending(item => item.CreatedAt)
+                .ToList());
+        }
+
+        public Task<List<AgentTaskRunQueueItem>> ListActiveAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items
+                .Where(IsActive)
+                .OrderBy(item => item.AvailableAt)
+                .ToList());
+        }
+
+        public Task<List<AgentTaskRunQueueItem>> ListAllAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items.OrderByDescending(item => item.CreatedAt).ToList());
+        }
+
+        public Task<List<AgentTaskRunQueueItem>> ListByTaskAsync(
+            AgentTaskId taskId,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items
+                .Where(item => item.TaskId == taskId)
+                .OrderByDescending(item => item.CreatedAt)
+                .ToList());
+        }
+
+        public AgentTaskRunQueueItem Add(AgentTaskRunQueueItem item)
+        {
+            Items.Add(item);
+            return item;
+        }
+
+        public void Update(AgentTaskRunQueueItem item)
+        {
+            if (!Items.Contains(item))
+            {
+                Items.Add(item);
+            }
+        }
+
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(1);
+        }
+
+        private static bool IsActive(AgentTaskRunQueueItem item)
+        {
+            return item.Status is AgentTaskRunQueueStatus.Queued or AgentTaskRunQueueStatus.Leased;
+        }
+    }
+
+    internal sealed class InMemoryAgentTaskRunAttemptStore(params AgentTaskRunAttempt[] initialItems)
+        : IAgentTaskRunAttemptStore
+    {
+        public List<AgentTaskRunAttempt> Items { get; } = [.. initialItems];
+
+        public Task<AgentTaskRunAttempt?> FirstByIdAsync(
+            AgentTaskRunAttemptId id,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items.FirstOrDefault(attempt => attempt.Id == id));
+        }
+
+        public Task<List<AgentTaskRunAttempt>> ListByTaskAsync(
+            AgentTaskId taskId,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items
+                .Where(attempt => attempt.TaskId == taskId)
+                .OrderByDescending(attempt => attempt.StartedAt)
+                .ToList());
+        }
+
+        public AgentTaskRunAttempt Add(AgentTaskRunAttempt attempt)
+        {
+            Items.Add(attempt);
+            return attempt;
+        }
+
+        public void Update(AgentTaskRunAttempt attempt)
+        {
+            if (!Items.Contains(attempt))
+            {
+                Items.Add(attempt);
+            }
+        }
+
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(1);
+        }
+    }
+
+    internal sealed class InMemoryRepository<T>(params T[] initialItems) : IRepository<T>
+        where T : class, IEntity, IAggregateRoot
+    {
+        public List<T> Items { get; } = [.. initialItems];
+
+        public T Add(T entity)
+        {
+            Items.Add(entity);
+            return entity;
+        }
+
+        public void Update(T entity)
+        {
+        }
+
+        public void Delete(T entity)
+        {
+            Items.Remove(entity);
+        }
+
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(1);
+        }
+
+        public Task<List<T>> ListAsync(ISpecification<T>? specification = null, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Apply(specification).ToList());
+        }
+
+        public Task<T?> FirstOrDefaultAsync(ISpecification<T>? specification = null, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Apply(specification).FirstOrDefault());
+        }
+
+        public Task<int> CountAsync(ISpecification<T>? specification = null, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Apply(specification).Count());
+        }
+
+        public Task<bool> AnyAsync(ISpecification<T>? specification = null, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Apply(specification).Any());
+        }
+
+        public Task<T?> GetByIdAsync<TKey>(TKey id, CancellationToken cancellationToken = default)
+            where TKey : notnull
+        {
+            return Task.FromResult(Items.FirstOrDefault(item => Equals(GetId(item), id)));
+        }
+
+        public Task<List<T>> GetListAsync(Expression<Func<T, bool>> expression, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items.AsQueryable().Where(expression).ToList());
+        }
+
+        public Task<int> GetCountAsync(Expression<Func<T, bool>> expression, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items.AsQueryable().Count(expression));
+        }
+
+        public Task<T?> GetAsync(
+            Expression<Func<T, bool>> expression,
+            Expression<Func<T, object>>[]? includes = null,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items.AsQueryable().FirstOrDefault(expression));
+        }
+
+        public Task<List<T>> GetListAsync(
+            Expression<Func<T, bool>> expression,
+            Expression<Func<T, object>>[]? includes = null,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Items.AsQueryable().Where(expression).ToList());
+        }
+
+        private IQueryable<T> Apply(ISpecification<T>? specification)
+        {
+            var query = Items.AsQueryable();
+            return specification?.FilterCondition is null
+                ? query
+                : query.Where(specification.FilterCondition);
+        }
+
+        private static object? GetId(T item)
+        {
+            return typeof(T).GetProperty("Id")?.GetValue(item);
+        }
+    }
+
+    internal sealed class FixedCloudReadonlyAgentPlanService : ICloudReadonlyAgentPlanService
+    {
+        private readonly Result<CloudReadonlyAgentPlanIntent> result;
+
+        public FixedCloudReadonlyAgentPlanService(Result<CloudReadonlyAgentPlanIntent>? result = null)
+        {
+            this.result = result ?? Result.Success(new CloudReadonlyAgentPlanIntent(
+                "Analysis.Device.List",
+                """{"filters":[{"field":"deviceCode","operator":"eq","value":"DEV-001"}],"limit":20}""",
+                0.95,
+                "Device",
+                "List",
+                "target=Device; kind=List; filters=1; hasTimeRange=False; limit=20"));
+        }
+
+        public Task<Result<CloudReadonlyAgentPlanIntent>> CreateIntentAsync(
+            Guid sessionId,
+            string goal,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(result);
+        }
+    }
+
+    internal sealed class FixedSkillAutoSelector(string? skillCode, string? reason = "test selector") : IAgentSkillAutoSelector
+    {
+        public Task<AgentSkillSelection?> SelectSkillAsync(
+            Guid sessionId,
+            string goal,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult<AgentSkillSelection?>(new AgentSkillSelection(skillCode, reason));
+        }
+    }
+
+    internal sealed class ThrowingDynamicPlanner : IAgentDynamicPlanner
+    {
+        public Task<Result<IReadOnlyCollection<AgentStepPlanDto>>> CreatePlanAsync(
+            AgentDynamicPlannerRequest request,
+            CancellationToken cancellationToken)
+        {
+            throw new InvalidOperationException("Dynamic planner should not be called by this test.");
+        }
+    }
+
+    internal sealed class FixedDynamicPlanner(params AgentStepPlanDto[] steps) : IAgentDynamicPlanner
+    {
+        public AgentDynamicPlannerRequest? LastRequest { get; private set; }
+
+        public Task<Result<IReadOnlyCollection<AgentStepPlanDto>>> CreatePlanAsync(
+            AgentDynamicPlannerRequest request,
+            CancellationToken cancellationToken)
+        {
+            LastRequest = request;
+            return Task.FromResult(Result.Success<IReadOnlyCollection<AgentStepPlanDto>>(steps));
+        }
+    }
+
+    internal sealed class FailingDynamicPlanner(string code, string detail) : IAgentDynamicPlanner
+    {
+        public Task<Result<IReadOnlyCollection<AgentStepPlanDto>>> CreatePlanAsync(
+            AgentDynamicPlannerRequest request,
+            CancellationToken cancellationToken)
+        {
+            Result<IReadOnlyCollection<AgentStepPlanDto>> result = Result.Failure(new ApiProblemDescriptor(code, detail));
+            return Task.FromResult(result);
+        }
+    }
+
+    internal sealed class StubAgentPluginCatalog(params AiToolDefinition[] tools) : IAgentPluginCatalog
+    {
+        public AiToolDefinition[] GetTools(params string[] names)
+        {
+            return tools
+                .Where(tool => names.Contains(tool.Name, StringComparer.OrdinalIgnoreCase))
+                .ToArray();
+        }
+
+        public AiToolDefinition[] GetPluginTools(string name)
+        {
+            return [];
+        }
+
+        public AiToolDefinition[] GetAllTools()
+        {
+            return tools;
+        }
+
+        public IAgentPlugin? GetPlugin(string name)
+        {
+            return null;
+        }
+
+        public IAgentPlugin[] GetAllPlugin()
+        {
+            return [];
+        }
+    }
+
+    internal sealed class ThrowingCloudReadonlyAgentToolExecutor : ICloudReadonlyAgentToolExecutor
+    {
+        public Task<CloudReadonlyAgentToolResult> ExecuteAsync(
+            CloudReadonlyAgentToolRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("Cloud readonly tool executor should not be called by this test.");
+        }
+    }
+
+    internal sealed class FixedSemanticQueryPlanner(SemanticQueryPlan plan) : ISemanticQueryPlanner
+    {
+        public SemanticPlanningResult Plan(string intent, string? query)
+        {
+            return SemanticPlanningResult.Success(plan);
+        }
+    }
+
+    internal static CloudReadonlyAgentToolExecutor CreateRealCloudReadonlyExecutor(
+        ISemanticQueryPlanner planner,
+        ICloudAiReadClient cloudClient)
+    {
+        var options = Options.Create(new CloudReadonlyOptions
+        {
+            Mode = CloudReadonlyDataSourceMode.Real,
+            Real = new CloudReadonlyRealOptions
+            {
+                Enabled = true,
+                AllowProductionRead = true
+            }
+        });
+        return new CloudReadonlyAgentToolExecutor(new FixedCloudReadonlyDataProviderResolver(
+            new RealCloudReadonlyDataProvider(planner, cloudClient, options)));
+    }
+
+    internal sealed class FixedCloudReadonlyDataProviderResolver(ICloudReadonlyDataProvider provider)
+        : ICloudReadonlyDataProviderResolver
+    {
+        public ICloudReadonlyDataProvider Resolve()
+        {
+            return provider;
+        }
+    }
+
+    internal sealed class FixedRuntimeSettingsProvider : IAgentRuntimeSettingsProvider
+    {
+        public Task<ChatRuntimeSettingsDto> GetAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(new ChatRuntimeSettingsDto(6, 12, 4, 30, 12000));
+        }
+    }
+
+    internal sealed class StubIdentityAccessService(
+        IReadOnlyCollection<string> permissions,
+        string? roleName = "User") : IIdentityAccessService
+    {
+        public Task<CurrentUserAccess?> GetCurrentUserAccessAsync(Guid userId, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<CurrentUserAccess?>(new CurrentUserAccess(userId, "test-user", roleName, permissions));
+        }
+
+        public Task<IReadOnlyCollection<string>> GetPermissionsAsync(string roleName, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(permissions);
+        }
+
+        public Task SyncRolePermissionsAsync(
+            string roleName,
+            IEnumerable<string> permissionCodes,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
+    }
+
+    internal sealed class RecordingKnowledgeBaseAccessChecker : IKnowledgeBaseAccessChecker
+    {
+        public Guid? ObservedUserId { get; private set; }
+
+        public bool? ObservedIsAdmin { get; private set; }
+
+        public Task<bool> CanReadAsync(
+            Guid knowledgeBaseId,
+            Guid userId,
+            bool isAdmin,
+            CancellationToken cancellationToken = default)
+        {
+            ObservedUserId = userId;
+            ObservedIsAdmin = isAdmin;
+            return Task.FromResult(isAdmin);
+        }
+
+        public Task<bool> CanWriteAsync(
+            Guid knowledgeBaseId,
+            Guid userId,
+            bool isAdmin,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(isAdmin);
+        }
+    }
+
+    internal sealed class TestAgentToolExecutor(Func<ToolRegistration, bool> canExecute) : IAgentToolExecutor
+    {
+        public bool CanExecute(ToolRegistration tool, AgentStep step)
+        {
+            return canExecute(tool);
+        }
+
+        public Task<AgentToolExecutionResult> ExecuteAsync(AgentToolExecutionContext context)
+        {
+            return Task.FromResult(AgentToolExecutionResult.From(new { ok = true }));
+        }
+    }
+
+    internal sealed class CapturingAuditLogWriter : IAuditLogWriter
+    {
+        public List<AuditLogWriteRequest> Requests { get; } = [];
+
+        public Task WriteAsync(AuditLogWriteRequest request, CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request);
+            return Task.CompletedTask;
+        }
+
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Requests.Count);
+        }
+    }
+
+    internal sealed class FixedAuditLogQueryService(params AuditLogSummaryDto[] logs) : IAuditLogQueryService
+    {
+        public Task<AuditLogListDto> GetListAsync(
+            int page,
+            int pageSize,
+            string? actionGroup,
+            string? actionCode,
+            string? targetType,
+            string? targetId,
+            string? targetName,
+            string? operatorUserName,
+            string? result,
+            DateTime? from,
+            DateTime? to,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(new AuditLogListDto(page, pageSize, logs.Length, logs));
+        }
+    }
+
+    internal sealed class FixedWorkspaceFingerprintProvider(string hash) : IAgentWorkspaceFingerprintProvider
+    {
+        public string GetWorkspaceRootHash()
+        {
+            return hash;
+        }
+    }
+
+    internal sealed class ThrowingWorkspaceService(bool throwOnWrite = false) : IAgentArtifactWorkspaceService
+    {
+        public Task<ArtifactWorkspace> CreateForTaskAsync(
+            AgentTask task,
+            DateTimeOffset nowUtc,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new ArtifactWorkspace(
+                task.Id,
+                $"ws_{Guid.NewGuid():N}",
+                @"C:\aicopilot-workspaces\test",
+                "/api/aigateway/workspaces/test",
+                nowUtc));
+        }
+
+        public Task<Artifact> WriteDraftTextArtifactAsync(
+            ArtifactWorkspace workspace,
+            ArtifactType artifactType,
+            string name,
+            string relativePath,
+            string content,
+            string mimeType,
+            AgentStepId? stepId,
+            ArtifactSourceMetadata? sourceMetadata,
+            CancellationToken cancellationToken)
+        {
+            if (throwOnWrite)
+            {
+                throw new InvalidOperationException(@"apiKey: sk-test C:\secrets\report.txt Host=db;Password=super-secret;");
+            }
+
+            var artifact = workspace.AddDraftArtifact(
+                artifactType,
+                name,
+                relativePath,
+                content.Length,
+                mimeType,
+                stepId,
+                DateTimeOffset.UtcNow);
+            artifact.ApplySourceMetadata(sourceMetadata);
+            return Task.FromResult(artifact);
+        }
+
+        public Task<Artifact> WriteDraftBinaryArtifactAsync(
+            ArtifactWorkspace workspace,
+            ArtifactType artifactType,
+            string name,
+            string relativePath,
+            byte[] content,
+            string mimeType,
+            AgentStepId? stepId,
+            ArtifactSourceMetadata? sourceMetadata,
+            CancellationToken cancellationToken)
+        {
+            var artifact = workspace.AddDraftArtifact(
+                artifactType,
+                name,
+                relativePath,
+                content.Length,
+                mimeType,
+                stepId,
+                DateTimeOffset.UtcNow);
+            artifact.ApplySourceMetadata(sourceMetadata);
+            return Task.FromResult(artifact);
+        }
+    }
+
+    internal sealed class CapturingWorkspaceService(ArtifactWorkspace workspace) : IAgentArtifactWorkspaceService
+    {
+        public Dictionary<string, string> TextArtifacts { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public Task<ArtifactWorkspace> CreateForTaskAsync(
+            AgentTask task,
+            DateTimeOffset nowUtc,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(workspace);
+        }
+
+        public Task<Artifact> WriteDraftTextArtifactAsync(
+            ArtifactWorkspace artifactWorkspace,
+            ArtifactType artifactType,
+            string name,
+            string relativePath,
+            string content,
+            string mimeType,
+            AgentStepId? stepId,
+            ArtifactSourceMetadata? sourceMetadata,
+            CancellationToken cancellationToken)
+        {
+            TextArtifacts[relativePath] = content;
+            var artifact = artifactWorkspace.AddDraftArtifact(
+                artifactType,
+                name,
+                relativePath,
+                content.Length,
+                mimeType,
+                stepId,
+                DateTimeOffset.UtcNow);
+            artifact.ApplySourceMetadata(sourceMetadata);
+            return Task.FromResult(artifact);
+        }
+
+        public Task<Artifact> WriteDraftBinaryArtifactAsync(
+            ArtifactWorkspace artifactWorkspace,
+            ArtifactType artifactType,
+            string name,
+            string relativePath,
+            byte[] content,
+            string mimeType,
+            AgentStepId? stepId,
+            ArtifactSourceMetadata? sourceMetadata,
+            CancellationToken cancellationToken)
+        {
+            var artifact = artifactWorkspace.AddDraftArtifact(
+                artifactType,
+                name,
+                relativePath,
+                content.Length,
+                mimeType,
+                stepId,
+                DateTimeOffset.UtcNow);
+            artifact.ApplySourceMetadata(sourceMetadata);
+            return Task.FromResult(artifact);
+        }
+    }
+
+    internal sealed class InMemoryArtifactWorkspaceFileStore : IArtifactWorkspaceFileStore
+    {
+        private readonly Dictionary<string, StoredFile> _files = new(StringComparer.OrdinalIgnoreCase);
+
+        public void AddFile(string workspaceCode, string relativePath, byte[] content, string mimeType)
+        {
+            _files[Key(workspaceCode, relativePath)] = new StoredFile(relativePath, content, mimeType, DateTimeOffset.UtcNow);
+        }
+
+        public ArtifactWorkspaceStorageSettings GetSettings()
+        {
+            return new ArtifactWorkspaceStorageSettings(
+                "/tmp/aicopilot-test",
+                ["draft", "final", "versions"],
+                ["Markdown", "Html", "Pdf", "Pptx", "Xlsx", "Chart"],
+                AllowsUserDefinedPath: false);
+        }
+
+        public Task<ArtifactWorkspaceStorageInfo> CreateWorkspaceAsync(
+            string workspaceCode,
+            Guid taskId,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(new ArtifactWorkspaceStorageInfo($"/tmp/{workspaceCode}", $"/workspaces/{workspaceCode}"));
+        }
+
+        public Task<ArtifactFileWriteResult> WriteTextAsync(
+            string workspaceCode,
+            string relativePath,
+            string content,
+            string mimeType,
+            CancellationToken cancellationToken = default)
+        {
+            return WriteBytesAsync(workspaceCode, relativePath, Encoding.UTF8.GetBytes(content), mimeType, cancellationToken);
+        }
+
+        public Task<ArtifactFileWriteResult> WriteBytesAsync(
+            string workspaceCode,
+            string relativePath,
+            byte[] content,
+            string mimeType,
+            CancellationToken cancellationToken = default)
+        {
+            AddFile(workspaceCode, relativePath, content, mimeType);
+            return Task.FromResult(new ArtifactFileWriteResult(relativePath, content.LongLength, mimeType));
+        }
+
+        public Task<ArtifactFileWriteResult> CopyAsync(
+            string workspaceCode,
+            string sourceRelativePath,
+            string targetRelativePath,
+            string mimeType,
+            CancellationToken cancellationToken = default)
+        {
+            var source = _files[Key(workspaceCode, sourceRelativePath)];
+            return WriteBytesAsync(workspaceCode, targetRelativePath, source.Content, mimeType, cancellationToken);
+        }
+
+        public Task<ArtifactFileReadResult?> OpenReadAsync(
+            string workspaceCode,
+            string relativePath,
+            string mimeType,
+            CancellationToken cancellationToken = default)
+        {
+            if (!_files.TryGetValue(Key(workspaceCode, relativePath), out var file))
+            {
+                return Task.FromResult<ArtifactFileReadResult?>(null);
+            }
+
+            return Task.FromResult<ArtifactFileReadResult?>(new ArtifactFileReadResult(
+                new MemoryStream(file.Content.ToArray()),
+                Path.GetFileName(file.RelativePath),
+                file.MimeType,
+                file.Content.LongLength));
+        }
+
+        public Task<IReadOnlyCollection<ArtifactWorkspaceFileItem>> ListAsync(
+            string workspaceCode,
+            CancellationToken cancellationToken = default)
+        {
+            var prefix = workspaceCode + "/";
+            IReadOnlyCollection<ArtifactWorkspaceFileItem> items = _files
+                .Where(item => item.Key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                .Select(item => new ArtifactWorkspaceFileItem(
+                    Path.GetFileName(item.Value.RelativePath),
+                    item.Value.RelativePath,
+                    IsDirectory: false,
+                    item.Value.Content.LongLength,
+                    item.Value.UpdatedAt))
+                .OrderBy(item => item.RelativePath, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            return Task.FromResult(items);
+        }
+
+        private static string Key(string workspaceCode, string relativePath)
+        {
+            return workspaceCode + "/" + relativePath.Replace('\\', '/');
+        }
+
+        private sealed record StoredFile(
+            string RelativePath,
+            byte[] Content,
+            string MimeType,
+            DateTimeOffset UpdatedAt);
+    }
+
+    internal sealed class NoopTableFileParser : IAgentTableFileParser
+    {
+        public Task<AgentReportTable?> ParseAsync(
+            AgentTableFileParseRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<AgentReportTable?>(null);
+        }
+    }
+
+    internal sealed class NoopDocumentGenerator : IAgentArtifactDocumentGenerator
+    {
+        public Task<byte[]> GeneratePdfAsync(AgentReportDocument document, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Array.Empty<byte>());
+        }
+
+        public Task<byte[]> GeneratePptxAsync(AgentReportDocument document, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Array.Empty<byte>());
+        }
+
+        public Task<byte[]> GenerateXlsxAsync(AgentReportDocument document, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Array.Empty<byte>());
+        }
+    }
+
+    internal sealed class NoopKnowledgeRetrievalService : IKnowledgeRetrievalService
+    {
+        public Task<IReadOnlyList<KnowledgeRetrievalResult>> SearchAsync(
+            Guid knowledgeBaseId,
+            string queryText,
+            int topK,
+            double minScore,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<IReadOnlyList<KnowledgeRetrievalResult>>([]);
+        }
+    }
+
+    internal sealed class DisabledCloudAiReadClient : ICloudAiReadClient
+    {
+        public bool IsEnabled => false;
+
+        public Task<CloudAiReadResult<CloudAiReadDeviceDto>> GetDevicesAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadProcessDto>> GetProcessesAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadClientReleaseVersionDto>> GetClientReleasesAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadDeviceClientStateDto>> GetDeviceClientStatesAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadCapacitySummaryDto>> GetCapacitySummaryAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadCapacityHourlyDto>> GetCapacityHourlyAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadDeviceLogDto>> GetDeviceLogsAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadProductionRecordDto>> GetProductionRecordsAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<CloudAiReadResult<object>> QuerySemanticAsync(
+            SemanticQueryPlan plan,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+    }
+
+    internal sealed class RecordingCloudAiReadClient(CloudAiReadResult<object> result) : ICloudAiReadClient
+    {
+        public List<SemanticQueryPlan> RequestedPlans { get; } = [];
+
+        public bool IsEnabled => true;
+
+        public Task<CloudAiReadResult<CloudAiReadDeviceDto>> GetDevicesAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadProcessDto>> GetProcessesAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadClientReleaseVersionDto>> GetClientReleasesAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadDeviceClientStateDto>> GetDeviceClientStatesAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadCapacitySummaryDto>> GetCapacitySummaryAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadCapacityHourlyDto>> GetCapacityHourlyAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadDeviceLogDto>> GetDeviceLogsAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadProductionRecordDto>> GetProductionRecordsAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<CloudAiReadResult<object>> QuerySemanticAsync(
+            SemanticQueryPlan plan,
+            CancellationToken cancellationToken = default)
+        {
+            RequestedPlans.Add(plan);
+            return Task.FromResult(result);
+        }
+    }
+
+    internal sealed class FailingCloudAiReadClient(CloudAiReadException exception) : ICloudAiReadClient
+    {
+        public bool IsEnabled => true;
+
+        public Task<CloudAiReadResult<CloudAiReadDeviceDto>> GetDevicesAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw exception;
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadProcessDto>> GetProcessesAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw exception;
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadClientReleaseVersionDto>> GetClientReleasesAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw exception;
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadDeviceClientStateDto>> GetDeviceClientStatesAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw exception;
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadCapacitySummaryDto>> GetCapacitySummaryAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw exception;
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadCapacityHourlyDto>> GetCapacityHourlyAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw exception;
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadDeviceLogDto>> GetDeviceLogsAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw exception;
+        }
+
+        public Task<CloudAiReadResult<CloudAiReadProductionRecordDto>> GetProductionRecordsAsync(
+            CloudAiReadQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            throw exception;
+        }
+
+        public Task<CloudAiReadResult<object>> QuerySemanticAsync(
+            SemanticQueryPlan plan,
+            CancellationToken cancellationToken = default)
+        {
+            throw exception;
+        }
+    }
+}

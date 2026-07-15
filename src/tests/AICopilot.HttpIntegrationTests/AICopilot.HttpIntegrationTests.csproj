@@ -5,7 +5,7 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
-    <AICopilotTestKind>HttpIntegration</AICopilotTestKind>
+    <AICopilotTestKind>Integration</AICopilotTestKind>
     <AICopilotTestRuntime>Aspire</AICopilotTestRuntime>
     <AICopilotTestCadence>PR</AICopilotTestCadence>
     <AICopilotTestOwner>IdentityHttp</AICopilotTestOwner>
@@ -28,15 +28,14 @@
     <ProjectReference Include="..\..\hosts\AICopilot.HttpApi\AICopilot.HttpApi.csproj" />
     <ProjectReference Include="..\..\services\AICopilot.Services.Contracts\AICopilot.Services.Contracts.csproj" />
     <ProjectReference Include="..\..\shared\AICopilot.SharedKernel\AICopilot.SharedKernel.csproj" />
-  </ItemGroup>
-  <ItemGroup>
-    <Compile Include="..\AICopilot.BackendTests\AICopilotAppFixture.cs" Link="TestKit\AICopilotAppFixture.cs" />
-    <Compile Include="..\AICopilot.BackendTests\FakeAiProviderHost.cs" Link="TestKit\FakeAiProviderHost.cs" />
+    <ProjectReference Include="..\..\testing\AICopilot.AspireIntegrationTestKit\AICopilot.AspireIntegrationTestKit.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Aspire.Hosting.ApplicationModel" />
+    <Using Include="AICopilot.AspireIntegrationTestKit" />
     <Using Include="FluentAssertions" />
     <Using Include="Microsoft.Extensions.DependencyInjection" />
     <Using Include="Xunit" />
   </ItemGroup>
+  <Import Project="..\AICopilot.TestRunner.Shared.props" />
 </Project>

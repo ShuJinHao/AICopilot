@@ -24,6 +24,14 @@ describe('ConfigView usability defaults', () => {
       .toBeLessThan(configViewSource.indexOf('<div class="slot-grid">'))
   })
 
+  it('resolves built-in templates only by canonical code or scope', () => {
+    expect(configViewSource).toContain("template.code?.toLowerCase() === code")
+    expect(configViewSource).toContain('template.scope === slot.templateScope')
+    expect(configViewSource).not.toContain('legacyTemplateNames')
+    expect(configViewSource).not.toContain('A助理任务规划')
+    expect(configViewSource).not.toContain('A助理任务执行')
+  })
+
   it('keeps internal tool catalog loading behind advanced settings', () => {
     const start = configViewSource.indexOf('async function refreshAllAgentSettings()')
     const end = configViewSource.indexOf('function promptLength', start)

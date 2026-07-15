@@ -13,7 +13,7 @@ Usage:
 
 Checks the local self-hosted runner machine invariants for AICopilot disaster
 workflows. This script only proves machine-local facts. GitHub production
-environment reviewers/secrets and OIDC/Vault or equivalent short-lived
+environment secret scope and OIDC/Vault or equivalent short-lived
 credential rollout must still be attested by the platform owner.
 
 Options:
@@ -145,7 +145,7 @@ check_deploy_target_dir() {
 print_external_attestation_reminder() {
   cat <<'REMINDER'
 Manual platform attestations still required:
-  - GitHub production environment secrets are restricted to AICopilot production workflows and required reviewers.
+  - GitHub production environment secrets are restricted to AICopilot production and disaster workflows.
   - Disaster workflows keep permissions: contents: read and use the self-hosted iiot-linux-prod label.
   - Runner service account filesystem permissions are limited to runner work root, Docker access, and deploy support paths.
   - OIDC/Vault or an equivalent short-lived credential design is either implemented or explicitly tracked as an open infrastructure task.

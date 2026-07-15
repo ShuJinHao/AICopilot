@@ -6,6 +6,7 @@ using AICopilot.RagService.EmbeddingModels;
 using AICopilot.RagService.Governance;
 using AICopilot.RagService.KnowledgeBases;
 using AICopilot.RagService.Queries.KnowledgeBases;
+using AICopilot.Services.Contracts.Uploads;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 
@@ -15,8 +16,6 @@ namespace AICopilot.HttpApi.Controllers;
 [Authorize]
 public class RagController(ISender sender) : ApiControllerBase(sender)
 {
-    public const long MaxDocumentUploadBytes = 50_000_000;
-
     [HttpPost("embedding-model")]
     public async Task<IActionResult> CreateEmbeddingModel(CreateEmbeddingModelCommand command)
     {
@@ -126,8 +125,8 @@ public class RagController(ISender sender) : ApiControllerBase(sender)
     }
 
     [HttpPost("document")]
-    [RequestSizeLimit(MaxDocumentUploadBytes)]
-    [RequestFormLimits(MultipartBodyLengthLimit = MaxDocumentUploadBytes)]
+    [RequestSizeLimit(DocumentUploadRequestPolicy.MaxUploadBytes)]
+    [RequestFormLimits(MultipartBodyLengthLimit = DocumentUploadRequestPolicy.MaxUploadBytes)]
     public async Task<IActionResult> UploadDocument(
         [FromForm] Guid knowledgeBaseId,
         IFormFile? file,
@@ -136,16 +135,13 @@ public class RagController(ISender sender) : ApiControllerBase(sender)
         [FromForm] bool? isSanitized = null,
         [FromForm] bool? allowedForFinalPrompt = null)
     {
-        if (file is null || file.Length == 0)
+        var validationError = DocumentUploadRequestPolicy.Validate(file?.Length);
+        if (validationError is not null)
         {
-            return BadRequest(new { error = "File is required." });
+            return BadRequest(new { error = validationError });
         }
 
-        if (file.Length > MaxDocumentUploadBytes)
-        {
-            return BadRequest(new { error = "File exceeds the 50 MB upload limit." });
-        }
-
+        ArgumentNullException.ThrowIfNull(file);
         await using var stream = file.OpenReadStream();
         var command = new UploadDocumentCommand(
             knowledgeBaseId,

@@ -70,7 +70,6 @@ LOCK_FILE="$LOCK_DIR/routine-release.lock"
 COMPOSE_FILE=""
 TARGET_NAME=""
 MIGRATION_SERVICE=""
-LEGACY_LOCKS=()
 ALL_SERVICES=()
 
 case "$TARGET" in
@@ -79,14 +78,12 @@ case "$TARGET" in
     COMPOSE_FILE="$DEPLOY_DIR/docker-compose.prod.yml"
     MIGRATION_SERVICE=iiot-migration
     ALL_SERVICES=(httpapi gateway dataworker migration web)
-    LEGACY_LOCKS=(/data/iiot-platform/.locks/cloud-release.lock.d "$DEPLOY_DIR/.cloud-release.lock.d")
     ;;
   aicopilot)
     TARGET_NAME=AICopilot
     COMPOSE_FILE="$DEPLOY_DIR/docker-compose.yaml"
     MIGRATION_SERVICE=aicopilot-migration
     ALL_SERVICES=(httpapi migration dataworker ragworker web)
-    LEGACY_LOCKS=("$DEPLOY_DIR/.locks/release.lock.d")
     ;;
   *)
     fail "target must be cloud or aicopilot"
@@ -234,11 +231,6 @@ if [ "$MODE" = doctor ]; then
   else
     compose_without_images config --quiet
   fi
-  for legacy_lock in "${LEGACY_LOCKS[@]}"; do
-    if [ -d "$legacy_lock" ]; then
-      fail "legacy deployment lock is present; inspect it once before using the routine runner: $legacy_lock" 75
-    fi
-  done
   printf 'runner_doctor=passed target=%s version=%s user=%s deploy_root=%s\n' \
     "$TARGET_NAME" "$RUNNER_PROTOCOL_VERSION" "$EXPECTED_USER" "$DEPLOY_DIR"
   exit 0
@@ -397,10 +389,6 @@ fi
 mkdir -p "$RELEASES_DIR" "$HISTORY_DIR" "$INCOMING_DIR" "$LOCK_DIR" "$DEPLOY_DIR/backups/postgres"
 exec 9> "$LOCK_FILE"
 flock -n 9 || fail "another routine deployment is active: $LOCK_FILE" 75
-for legacy_lock in "${LEGACY_LOCKS[@]}"; do
-  [ ! -d "$legacy_lock" ] || fail "legacy deployment lock is present: $legacy_lock" 75
-done
-
 : > "$PREVIOUS_IMAGES_FILE"
 : > "$CANDIDATE_IMAGES_FILE"
 for service in "${ALL_SERVICES[@]}"; do

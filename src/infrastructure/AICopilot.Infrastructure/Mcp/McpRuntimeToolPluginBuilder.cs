@@ -108,16 +108,28 @@ internal sealed class McpRuntimeToolPluginBuilder(ILogger logger)
         var externalSystemType = exposure.EffectiveExternalSystemType(server.ExternalSystemType);
         var capabilityKind = exposure.EffectiveCapabilityKind(server.CapabilityKind);
         var riskLevel = exposure.EffectiveRiskLevel(server.RiskLevel);
-        var descriptor = AiToolSafetyDescriptor.Create(
-            exposure.ReadOnlyDeclared,
-            exposure.McpReadOnlyHint ?? ReadMcpAnnotationHint(tool, "ReadOnlyHint", "readOnlyHint"),
-            exposure.McpDestructiveHint ?? ReadMcpAnnotationHint(tool, "DestructiveHint", "destructiveHint"),
-            exposure.McpIdempotentHint ?? ReadMcpAnnotationHint(tool, "IdempotentHint", "idempotentHint"),
+        var readOnlyDeclared = exposure.ReadOnlyDeclared;
+        var mcpReadOnlyHint = exposure.McpReadOnlyHint ?? ReadMcpAnnotationHint(tool, "ReadOnlyHint", "readOnlyHint");
+        var mcpDestructiveHint = exposure.McpDestructiveHint ?? ReadMcpAnnotationHint(tool, "DestructiveHint", "destructiveHint");
+        var mcpIdempotentHint = exposure.McpIdempotentHint ?? ReadMcpAnnotationHint(tool, "IdempotentHint", "idempotentHint");
+        if (McpTargetTrustPolicy.RequiresCloudReadOnly(server.Name, server.Description, server.Command, server.Arguments)
+            && externalSystemType != AiToolExternalSystemType.CloudReadOnly)
+        {
+            logger.LogWarning(
+                "MCP server {ServerName} tool {ToolName} was blocked because target trust requires CloudReadOnly.",
+                server.Name,
+                tool.Name);
+            return false;
+        }
+
+        var decision = AiToolSafetyPolicy.EvaluateConfigured(
+            readOnlyDeclared,
+            mcpReadOnlyHint,
+            mcpDestructiveHint,
+            mcpIdempotentHint,
             capabilityKind,
             externalSystemType,
-            riskLevel);
-        var decision = AiToolSafetyPolicy.Evaluate(
-            descriptor,
+            riskLevel,
             tool.Name,
             tool.Description,
             tool.JsonSchema,
@@ -130,9 +142,9 @@ internal sealed class McpRuntimeToolPluginBuilder(ILogger logger)
                 server.Name,
                 tool.Name,
                 AiToolIdentity.CreateRuntimeName(AiToolTargetType.McpServer, server.Name, tool.Name),
-                descriptor.ReadOnlyDeclared,
-                descriptor.McpReadOnlyHint,
-                descriptor.McpDestructiveHint);
+                readOnlyDeclared,
+                mcpReadOnlyHint,
+                mcpDestructiveHint);
             return true;
         }
 

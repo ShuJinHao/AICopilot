@@ -1,5 +1,6 @@
 using AICopilot.EntityFrameworkCore;
 using AICopilot.HttpApi;
+using AICopilot.HttpApi.Infrastructure;
 using AICopilot.Infrastructure;
 using OpenTelemetry;
 using OpenTelemetry.Resources;
@@ -49,6 +50,7 @@ if (app.Environment.IsDevelopment())
         options.SwaggerEndpoint("/openapi/v1.json", "v1");
     });
 }
+app.UseMiddleware<HttpTraceCorrelationMiddleware>();
 app.UseExceptionHandler();
 
 app.UseCors(HttpApiCorsConfiguration.PolicyName);

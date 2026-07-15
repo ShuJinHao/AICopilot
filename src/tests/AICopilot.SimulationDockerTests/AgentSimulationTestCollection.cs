@@ -1,4 +1,4 @@
-using AICopilot.BackendTests;
+using AICopilot.AspireIntegrationTestKit;
 
 namespace AICopilot.SimulationDockerTests;
 

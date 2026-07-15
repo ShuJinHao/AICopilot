@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
-    <AICopilotTestKind>CloudReadContract</AICopilotTestKind>
+    <AICopilotTestKind>Contract</AICopilotTestKind>
     <AICopilotTestRuntime>LiveExternal</AICopilotTestRuntime>
     <AICopilotTestCadence>Manual</AICopilotTestCadence>
     <AICopilotTestOwner>CloudContract</AICopilotTestOwner>

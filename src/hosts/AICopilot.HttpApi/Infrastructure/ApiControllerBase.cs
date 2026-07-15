@@ -1,4 +1,5 @@
-﻿using AICopilot.SharedKernel.Result;
+﻿using AICopilot.Services.Contracts.Http;
+using AICopilot.SharedKernel.Result;
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
 using IResult = AICopilot.SharedKernel.Result.IResult;

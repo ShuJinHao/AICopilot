@@ -35,7 +35,7 @@ public class AgentWorkflowPipeline(
         CancellationToken ct = default)
     {
         var routing = await intentRouting.ExecuteAsync(request, ct);
-        var tools = await toolsPack.DiscoverAsync(routing.Intents, ct);
+        var tools = await DiscoverSafeToolsAsync(routing.Intents, ct);
         return new AgentPlanDraftWorkflowResult(
             routing.Scene.ToString(),
             routing.Intents,
@@ -64,6 +64,8 @@ public class AgentWorkflowPipeline(
         }
 
         var sink = new AgentWorkflowSink();
+        using var branchCancellation = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var branchToken = branchCancellation.Token;
         var branchTasks = AgentWorkflowTopology.ParallelBranches
             .OrderBy(branch => branch.Order)
             .Select(branch =>
@@ -72,44 +74,54 @@ public class AgentWorkflowPipeline(
                 return RunBranchSafelyAsync(
                     branch.BranchType,
                     isRequired,
-                    () => ExecuteBranchAsync(branch.BranchType, routing.Intents, request.Message, sink, session, ct),
+                    () => ExecuteBranchAsync(branch.BranchType, routing.Intents, request.Message, sink, session, branchToken),
                     logger,
-                    ct);
+                    branchToken);
             })
             .ToArray();
 
         var allBranchesTask = Task.WhenAll(branchTasks);
         _ = CompleteSinkWhenBranchesFinishAsync(allBranchesTask, sink);
-
-        await foreach (var chunk in sink.ReadAllAsync(ct))
+        try
         {
-            yield return chunk;
+            await foreach (var chunk in sink.ReadAllAsync(ct))
+            {
+                yield return chunk;
+            }
+
+            var branchResults = await allBranchesTask;
+            var requiredFailureChunk = CreateRequiredBranchFailureChunk(branchResults);
+            if (requiredFailureChunk is not null)
+            {
+                logger.LogWarning(
+                    "Agent workflow stopped before final synthesis because required branches failed. Branches={Branches}; FailureCodes={FailureCodes}",
+                    string.Join(",", branchResults
+                        .Where(result => result.IsRequired && result.Status == BranchExecutionStatus.Failed)
+                        .Select(result => result.Type)),
+                    string.Join(",", branchResults
+                        .Where(result => result.IsRequired && result.Status == BranchExecutionStatus.Failed)
+                        .Select(result => result.FailureCode)
+                        .Where(code => !string.IsNullOrWhiteSpace(code))
+                        .Distinct(StringComparer.Ordinal)));
+                yield return requiredFailureChunk;
+                yield break;
+            }
+
+            var generationContext = contextAggregator.Execute(request, routing.Scene, branchResults);
+
+            await using var finalAgentContext = await agentBuild.ExecuteAsync(generationContext, ct);
+            await foreach (var chunk in RunFinalAgentAsync(finalAgentContext, session, assistantText, ct))
+            {
+                yield return chunk;
+            }
         }
-
-        var branchResults = await allBranchesTask;
-        var requiredFailureChunk = CreateRequiredBranchFailureChunk(branchResults);
-        if (requiredFailureChunk is not null)
+        finally
         {
-            logger.LogWarning(
-                "Agent workflow stopped before final synthesis because required branches failed. Branches={Branches}; FailureCodes={FailureCodes}",
-                string.Join(",", branchResults
-                    .Where(result => result.IsRequired && result.Status == BranchExecutionStatus.Failed)
-                    .Select(result => result.Type)),
-                string.Join(",", branchResults
-                    .Where(result => result.IsRequired && result.Status == BranchExecutionStatus.Failed)
-                    .Select(result => result.FailureCode)
-                    .Where(code => !string.IsNullOrWhiteSpace(code))
-                    .Distinct(StringComparer.Ordinal)));
-            yield return requiredFailureChunk;
-            yield break;
-        }
-
-        var generationContext = contextAggregator.Execute(request, routing.Scene, branchResults);
-
-        await using var finalAgentContext = await agentBuild.ExecuteAsync(generationContext, ct);
-        await foreach (var chunk in RunFinalAgentAsync(finalAgentContext, session, assistantText, ct))
-        {
-            yield return chunk;
+            // Async-iterator cancellation and early consumer disposal both pass through here.  The
+            // linked token stops cooperative branches, and awaiting Task.WhenAll is the quiescence
+            // barrier that prevents a late branch from performing side effects after this method exits.
+            branchCancellation.Cancel();
+            await ObserveBranchQuiescenceAsync(allBranchesTask).ConfigureAwait(false);
         }
     }
 
@@ -170,6 +182,19 @@ public class AgentWorkflowPipeline(
         catch (Exception ex)
         {
             sink.Complete(ex);
+        }
+    }
+
+    private static async Task ObserveBranchQuiescenceAsync(Task branchTask)
+    {
+        try
+        {
+            await branchTask.ConfigureAwait(false);
+        }
+        catch
+        {
+            // The primary exception/cancellation is already flowing from the iterator body.  This
+            // await exists to observe every branch and must never replace that primary outcome.
         }
     }
 
@@ -237,7 +262,7 @@ public class AgentWorkflowPipeline(
             "本次请求所需的只读分析、知识、策略或工具能力未能完成，系统已停止生成最终回答，请稍后重试。");
     }
 
-    private bool IsBranchRequired(BranchType branchType, IReadOnlyCollection<IntentResult> intents)
+    protected virtual bool IsBranchRequired(BranchType branchType, IReadOnlyCollection<IntentResult> intents)
     {
         return branchType switch
         {
@@ -249,7 +274,7 @@ public class AgentWorkflowPipeline(
         };
     }
 
-    private Task<BranchResult> ExecuteBranchAsync(
+    protected virtual Task<BranchResult> ExecuteBranchAsync(
         BranchType branchType,
         List<IntentResult> intents,
         string message,
@@ -259,12 +284,50 @@ public class AgentWorkflowPipeline(
     {
         return branchType switch
         {
-            BranchType.Tools => toolsPack.ExecuteAsync(intents, ct),
+            BranchType.Tools => DiscoverSafeToolsAsync(intents, ct),
             BranchType.Knowledge => knowledgeRetrieval.ExecuteAsync(intents, ct),
             BranchType.DataAnalysis => dataAnalysis.ExecuteAsync(intents, sink, session, ct),
             BranchType.BusinessPolicy => businessPolicy.ExecuteAsync(intents, message, ct),
             _ => throw new ArgumentOutOfRangeException(nameof(branchType), branchType, "Unknown branch type.")
         };
+    }
+
+    private async Task<BranchResult> DiscoverSafeToolsAsync(
+        List<IntentResult> intents,
+        CancellationToken ct)
+    {
+        var discovered = await toolsPack.DiscoverAsync(intents, ct);
+        if (discovered.Tools is null)
+        {
+            return discovered;
+        }
+
+        var safeTools = discovered.Tools.Where(tool =>
+        {
+            var decision = AiToolSafetyPolicy.EvaluateConfigured(
+                tool.ReadOnlyDeclared,
+                tool.McpReadOnlyHint,
+                tool.McpDestructiveHint,
+                tool.McpIdempotentHint,
+                tool.CapabilityKind,
+                tool.ExternalSystemType,
+                tool.RiskLevel,
+                tool.ToolName ?? tool.Name,
+                tool.Description,
+                tool.JsonSchema,
+                tool.ReturnJsonSchema);
+            if (!decision.IsAllowed)
+            {
+                logger.LogWarning(
+                    "Agent workflow excluded unsafe tool {ToolName}. Reasons={Reasons}",
+                    tool.Name,
+                    string.Join("; ", decision.BlockReasons ?? [decision.Reason ?? "Unknown"]));
+            }
+
+            return decision.IsAllowed;
+        }).ToArray();
+
+        return BranchResult.FromTools(safeTools);
     }
 }
 

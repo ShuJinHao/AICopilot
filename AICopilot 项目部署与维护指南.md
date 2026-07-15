@@ -352,7 +352,8 @@ docker login harbor.internal.example:80 --username <Harbor 用户>
 pwsh ./scripts/Test-ArchitectureBoundaries.ps1
 pwsh ./scripts/Test-TextEncoding.ps1
 dotnet build src/hosts/AICopilot.HttpApi/AICopilot.HttpApi.csproj
-dotnet build src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj
+dotnet build AICopilot.slnx --no-restore
+pwsh -NoProfile -File scripts/tests/Get-AICopilotTestInventory.ps1 -OutputPath artifacts/test-inventory.json
 ```
 
 服务器验证：

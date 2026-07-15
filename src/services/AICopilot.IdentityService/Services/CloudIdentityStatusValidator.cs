@@ -13,6 +13,7 @@ public sealed class CloudIdentityStatusValidator(
     IExternalIdentityBindingStore bindingStore,
     UserManager<ApplicationUser> userManager,
     IIdentityAuditLogWriter auditLogWriter,
+    EnabledAdminInvariantPolicy enabledAdminInvariant,
     ITransactionalExecutionService transactionalExecutionService,
     ICloudIdentityStatusValidationCache validationCache) : ICloudIdentityStatusValidator
 {
@@ -163,6 +164,8 @@ public sealed class CloudIdentityStatusValidator(
         await transactionalExecutionService.ExecuteAsync(
             async ct =>
             {
+                await enabledAdminInvariant.AcquireAsync(ct);
+
                 var currentUser = await userManager.FindByIdAsync(user.Id.ToString())
                     ?? throw new InvalidOperationException(
                         $"User '{user.Id}' was not found while revoking its Cloud session.");

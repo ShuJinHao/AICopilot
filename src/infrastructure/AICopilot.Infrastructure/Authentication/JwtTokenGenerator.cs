@@ -2,6 +2,7 @@
 using System.Security.Claims;
 using System.Text;
 using AICopilot.Services.Contracts;
+using AICopilot.Services.Contracts.Authentication;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 

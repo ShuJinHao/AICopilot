@@ -1,0 +1,714 @@
+{
+  "schemaVersion": 2,
+  "items": [
+    {
+      "id": "AI-COMPAT-SECRET-ENCV1",
+      "producer": {
+        "path": "src/infrastructure/AICopilot.SecretProtection/SecretStringEncryptor.cs",
+        "contains": "LegacyCipherPrefix = \"encv1:\""
+      },
+      "consumer": {
+        "path": "src/hosts/AICopilot.MigrationWorkApp/MigrationWorkerSecretMigrator.cs",
+        "contains": "SecretMigrationPolicy.MigrateLanguageModelApiKeys"
+      },
+      "callEvidence": [
+        {
+          "path": "src/hosts/AICopilot.MigrationWorkApp/Worker.cs",
+          "contains": "MigrationWorkerSecretMigrator.MigrateAsync"
+        },
+        {
+          "path": "src/infrastructure/AICopilot.SecretProtection/SecretMigrationPolicy.cs",
+          "contains": "SecretStringEncryptor.IsLegacyEncrypted"
+        },
+        {
+          "path": "src/hosts/AICopilot.MigrationWorkApp/MigrationWorkerAiGatewaySeeder.cs",
+          "contains": "SecretStringEncryptor.IsLegacyEncrypted"
+        }
+      ],
+      "candidateEvidence": [
+        {
+          "path": "src/infrastructure/AICopilot.SecretProtection/SecretStringEncryptor.cs",
+          "contains": "Legacy"
+        }
+      ],
+      "callerScan": {
+        "roots": ["src/hosts", "src/infrastructure"],
+        "extensions": [".cs"],
+        "contains": "SecretStringEncryptor.IsLegacyEncrypted(",
+        "excludePaths": []
+      },
+      "replacement": "All stored model and embedding secrets use authenticated encv2 AES-GCM ciphertext.",
+      "deletionCondition": "Production attestation reports zero encv1 values for two release windows and the rollback window has closed.",
+      "latestDeletionBatch": "2026-09",
+      "deletionDeadline": "2026-09-30",
+      "coverageTests": [
+        {
+          "path": "src/tests/AICopilot.ApplicationTests/MigrationWorkerSecretMigratorTests.cs",
+          "contains": "LegacyCipherPrefix"
+        },
+        {
+          "path": "src/tests/AICopilot.UnitTests/SecretStringEncryptorTests.cs",
+          "contains": "LegacyCipherPrefix"
+        }
+      ]
+    },
+    {
+      "id": "AI-COMPAT-EF-HISTORY-SPLIT",
+      "producer": {
+        "path": "src/infrastructure/AICopilot.EntityFrameworkCore/MigrationHistoryBootstrapper.cs",
+        "contains": "MigrationHistoryTables.LegacyTableName"
+      },
+      "consumer": {
+        "path": "src/hosts/AICopilot.MigrationWorkApp/MigrationWorkerDatabaseMigrator.cs",
+        "contains": "BootstrapLegacyHistoryAsync"
+      },
+      "callEvidence": [
+        {
+          "path": "src/hosts/AICopilot.MigrationWorkApp/Worker.cs",
+          "contains": "MigrationWorkerDatabaseMigrator.RunMigrationsAsync"
+        }
+      ],
+      "candidateEvidence": [
+        {
+          "path": "src/infrastructure/AICopilot.EntityFrameworkCore/MigrationHistoryBootstrapper.cs",
+          "contains": "Legacy"
+        },
+        {
+          "path": "src/infrastructure/AICopilot.EntityFrameworkCore/MigrationHistoryTables.cs",
+          "contains": "Legacy"
+        }
+      ],
+      "callerScan": {
+        "roots": ["src/hosts", "src/infrastructure"],
+        "extensions": [".cs"],
+        "contains": "MigrationHistoryBootstrapper.BootstrapLegacyHistoryAsync(",
+        "excludePaths": []
+      },
+      "replacement": "Every DbContext owns an isolated migration-history table and no environment depends on public.__EFMigrationsHistory.",
+      "deletionCondition": "All managed environments have complete split histories and the legacy shared history is absent after the rollback window.",
+      "latestDeletionBatch": "2026-10",
+      "deletionDeadline": "2026-10-31",
+      "coverageTests": [
+        {
+          "path": "src/tests/AICopilot.PersistenceTests/MigrationSafetyTests.cs",
+          "contains": "MigrationHistoryBootstrap_ShouldCopyLegacySharedHistory_ToSplitHistoryTables"
+        },
+        {
+          "path": "src/tests/AICopilot.PersistenceTests/MigrationSafetyTests.cs",
+          "contains": "MigrationHistoryBootstrap_ShouldFail_WhenSplitHistoryIsPartial"
+        }
+      ]
+    },
+    {
+      "id": "AI-COMPAT-OBSOLETE-TOOL-CATALOG",
+      "producer": {
+        "path": "src/core/AICopilot.Core.AiGateway/Aggregates/Tools/BuiltInToolRegistrations.cs",
+        "contains": "ObsoleteAgentRuntimeToolCodes"
+      },
+      "consumer": {
+        "path": "src/hosts/AICopilot.MigrationWorkApp/MigrationWorkerAiGatewaySeeder.cs",
+        "contains": "BuiltInToolRegistrations.ObsoleteAgentRuntimeToolCodes"
+      },
+      "callEvidence": [
+        {
+          "path": "src/hosts/AICopilot.MigrationWorkApp/Worker.cs",
+          "contains": "MigrationWorkerAiGatewaySeeder.SeedDefaultsAsync"
+        },
+        {
+          "path": "src/hosts/AICopilot.MigrationWorkApp/MigrationWorkerAiGatewaySeeder.cs",
+          "contains": "RemoveRange(obsoleteTools)"
+        }
+      ],
+      "candidateEvidence": [
+        {
+          "path": "src/core/AICopilot.Core.AiGateway/Aggregates/Tools/BuiltInToolRegistrations.cs",
+          "contains": "ObsoleteAgentRuntimeToolCodes"
+        }
+      ],
+      "callerScan": {
+        "roots": ["src/hosts"],
+        "extensions": [".cs"],
+        "contains": "BuiltInToolRegistrations.ObsoleteAgentRuntimeToolCodes",
+        "excludePaths": []
+      },
+      "replacement": "Persisted tool registrations contain only the current BuiltInToolRegistrations.AgentRuntimeTools catalog.",
+      "deletionCondition": "All managed databases report zero obsolete tool codes for two release windows after the rollback window closes.",
+      "latestDeletionBatch": "2026-10",
+      "deletionDeadline": "2026-10-31",
+      "coverageTests": [
+        {
+          "path": "src/tests/AICopilot.EndToEndTests/FreshDatabaseSeedTests.cs",
+          "contains": "NotIntersectWith(BuiltInToolRegistrations.ObsoleteAgentRuntimeToolCodes)"
+        },
+        {
+          "path": "src/tests/AICopilot.ToolPlugin.ConformanceTests/SecurityToolPluginConformanceTests.cs",
+          "contains": "NotIntersectWith(BuiltInToolRegistrations.ObsoleteAgentRuntimeToolCodes)"
+        }
+      ]
+    },
+    {
+      "id": "AI-COMPAT-WIDGET-PAYLOAD-V1",
+      "producer": {
+        "path": "src/services/AICopilot.AiGatewayService/Workflows/Executors/DataAnalysisWidgetEmitter.cs",
+        "contains": "DataAnalysisWidgetPayloadSerializer.Serialize"
+      },
+      "consumer": {
+        "path": "src/vues/AICopilot.Web/src/protocol/widgetNormalizer.ts",
+        "contains": "normalizeWidgetPayload"
+      },
+      "callEvidence": [
+        {
+          "path": "src/vues/AICopilot.Web/src/components/widgets/WidgetRenderer.vue",
+          "contains": "normalizeWidgetPayload(props.data)"
+        },
+        {
+          "path": "src/vues/AICopilot.Web/src/protocol/runtimeDetails.ts",
+          "contains": "normalizeWidgetPayload(chunk.widget)"
+        }
+      ],
+      "callerScan": {
+        "roots": ["src/vues/AICopilot.Web/src"],
+        "extensions": [".ts", ".vue"],
+        "contains": "normalizeWidgetPayload(",
+        "excludePaths": ["src/vues/AICopilot.Web/src/protocol/widgetNormalizer.ts"]
+      },
+      "replacement": "Persisted and streamed widget payloads use one canonical camelCase object envelope.",
+      "deletionCondition": "Persisted message retention no longer contains PascalCase or raw-array widget payloads and compatibility telemetry stays at zero for two releases.",
+      "latestDeletionBatch": "2026-11",
+      "deletionDeadline": "2026-11-30",
+      "coverageTests": [
+        {
+          "path": "src/vues/AICopilot.Web/tests/unit/widgetNormalizer.spec.ts",
+          "contains": "PascalCase fields"
+        },
+        {
+          "path": "src/vues/AICopilot.Web/tests/unit/widgetNormalizer.spec.ts",
+          "contains": "raw array data"
+        }
+      ]
+    }
+  ],
+  "ordinaryAbstractions": [
+    {
+      "id": "AI-ORDINARY-MESSAGE-STRUCTURED-FALLBACK",
+      "disposition": "ordinaryAbstraction",
+      "decisionReason": "This is the current safe default content for non-text session messages, not a bridge to an older contract.",
+      "producer": {
+        "path": "src/core/AICopilot.Core.AiGateway/Aggregates/Sessions/Message.cs",
+        "contains": "BuildStructuredFallback(MessageType type)"
+      },
+      "consumers": [
+        {
+          "path": "src/core/AICopilot.Core.AiGateway/Aggregates/Sessions/Message.cs",
+          "contains": "Content = normalizedContent ?? BuildStructuredFallback(type)"
+        }
+      ],
+      "candidateEvidence": [
+        {
+          "path": "src/core/AICopilot.Core.AiGateway/Aggregates/Sessions/Message.cs",
+          "contains": "BuildStructuredFallback"
+        }
+      ],
+      "callerScans": [
+        {
+          "id": "message-constructor",
+          "roots": ["src/core"],
+          "extensions": [".cs"],
+          "contains": "BuildStructuredFallback(",
+          "excludeContains": ["private static string BuildStructuredFallback("],
+          "excludePaths": []
+        }
+      ],
+      "replacement": "notApplicable: current message-domain safety default",
+      "deletionCondition": "Delete only if every non-text MessageType obtains an equally safe mandatory content representation."
+    },
+    {
+      "id": "AI-ORDINARY-CLOUD-READ-DOCUMENT-ADAPTER",
+      "disposition": "ordinaryAbstraction",
+      "decisionReason": "This adapter maps the eight current typed Cloud AiRead JSON contracts into domain records; it does not expose a legacy method/path API.",
+      "producer": {
+        "path": "src/infrastructure/AICopilot.CloudReadClient/CloudAiReadDocumentAdapter.cs",
+        "contains": "internal static class CloudAiReadDocumentAdapter"
+      },
+      "consumers": [
+        {
+          "path": "src/infrastructure/AICopilot.CloudReadClient/CloudAiReadClient.cs",
+          "contains": "CloudAiReadDocumentAdapter.MapDevices"
+        },
+        {
+          "path": "src/infrastructure/AICopilot.CloudReadClient/CloudAiReadClient.cs",
+          "contains": "CloudAiReadDocumentAdapter.MapProductionRecords"
+        }
+      ],
+      "candidateEvidence": [
+        {
+          "path": "src/infrastructure/AICopilot.CloudReadClient/CloudAiReadDocumentAdapter.cs",
+          "contains": "CloudAiReadDocumentAdapter"
+        }
+      ],
+      "callerScans": [
+        {
+          "id": "typed-map-calls",
+          "roots": ["src/infrastructure/AICopilot.CloudReadClient"],
+          "extensions": [".cs"],
+          "contains": "CloudAiReadDocumentAdapter.",
+          "excludePaths": ["src/infrastructure/AICopilot.CloudReadClient/CloudAiReadDocumentAdapter.cs"]
+        }
+      ],
+      "replacement": "notApplicable: current typed Cloud AiRead protocol mapper",
+      "deletionCondition": "Delete only with a reviewed replacement for all eight typed Cloud AiRead response mappings."
+    },
+    {
+      "id": "AI-ORDINARY-MODEL-PROVIDER-FALLBACK-POLICY",
+      "disposition": "ordinaryAbstraction",
+      "decisionReason": "These symbols implement the current bounded provider reliability policy and its telemetry; high-risk tool chains explicitly disable provider fallback.",
+      "producer": {
+        "path": "src/infrastructure/AICopilot.AiRuntime/ModelProviderReliabilityPolicies.cs",
+        "contains": "DefaultModelFallbackPolicy"
+      },
+      "consumers": [
+        {
+          "path": "src/infrastructure/AICopilot.AiRuntime/AgentRuntimeFactory.cs",
+          "contains": "fallbackPolicy.GetFallbackProviders(request, context)"
+        },
+        {
+          "path": "src/infrastructure/AICopilot.AiRuntime/ModelEndpointPoolScheduler.cs",
+          "contains": "GetStats(endpointId).RecordFallback()"
+        }
+      ],
+      "candidateEvidence": [
+        { "path": "src/infrastructure/AICopilot.AiRuntime/ModelEndpointPoolScheduler.cs", "contains": "Fallback" },
+        { "path": "src/infrastructure/AICopilot.AiRuntime/ModelEndpointRuntimeState.cs", "contains": "Fallback" },
+        { "path": "src/infrastructure/AICopilot.AiRuntime/ModelProviderReliability.cs", "contains": "Fallback" },
+        { "path": "src/infrastructure/AICopilot.AiRuntime/ModelProviderReliabilityPolicies.cs", "contains": "Fallback" },
+        { "path": "src/services/AICopilot.Services.Contracts/Contracts/AiRuntimeContracts.cs", "contains": "Fallback" }
+      ],
+      "callerScans": [
+        {
+          "id": "provider-route",
+          "roots": ["src/infrastructure/AICopilot.AiRuntime"],
+          "extensions": [".cs"],
+          "contains": "fallbackPolicy.GetFallbackProviders(",
+          "excludePaths": []
+        },
+        {
+          "id": "endpoint-telemetry",
+          "roots": ["src/infrastructure/AICopilot.AiRuntime"],
+          "extensions": [".cs"],
+          "contains": "GetStats(endpointId).RecordFallback()",
+          "excludePaths": []
+        }
+      ],
+      "replacement": "notApplicable: current availability policy and reliability telemetry",
+      "deletionCondition": "Delete only if model-provider failover itself is retired and all factory, scheduler and snapshot consumers migrate."
+    },
+    {
+      "id": "AI-ORDINARY-RUNTIME-TOOL-ADAPTER",
+      "disposition": "ordinaryAbstraction",
+      "decisionReason": "This is the current SDK boundary converting governed runtime tool options into Microsoft Agent Framework options.",
+      "producer": {
+        "path": "src/infrastructure/AICopilot.AiRuntime/RuntimeToolAdapter.cs",
+        "contains": "internal static class RuntimeToolAdapter"
+      },
+      "consumers": [
+        {
+          "path": "src/infrastructure/AICopilot.AiRuntime/MicrosoftAgentRuntimeChatAgent.cs",
+          "contains": "RuntimeToolAdapter.ToChatOptions(options.Options)"
+        },
+        {
+          "path": "src/infrastructure/AICopilot.AiRuntime/AgentRuntimeFactory.cs",
+          "contains": "RuntimeToolAdapter.ToChatOptions(request.Options)"
+        }
+      ],
+      "candidateEvidence": [
+        {
+          "path": "src/infrastructure/AICopilot.AiRuntime/RuntimeToolAdapter.cs",
+          "contains": "RuntimeToolAdapter"
+        }
+      ],
+      "callerScans": [
+        {
+          "id": "sdk-option-conversion",
+          "roots": ["src/infrastructure/AICopilot.AiRuntime"],
+          "extensions": [".cs"],
+          "contains": "RuntimeToolAdapter.ToChatOptions(",
+          "excludePaths": ["src/infrastructure/AICopilot.AiRuntime/RuntimeToolAdapter.cs"]
+        }
+      ],
+      "replacement": "notApplicable: current runtime SDK boundary",
+      "deletionCondition": "Delete only when the runtime SDK accepts the governed options contract directly or every caller migrates to another reviewed mapper."
+    },
+    {
+      "id": "AI-ORDINARY-CLOUD-TEXT-TO-SQL-FALLBACK",
+      "disposition": "ordinaryAbstraction",
+      "decisionReason": "This is an explicitly configured current readonly recovery path with audit logging, SQL guards and a real business-query consumer.",
+      "producer": {
+        "path": "src/services/AICopilot.AiGatewayService/Workflows/Executors/CloudReadOnlyTextToSqlFallbackRunner.cs",
+        "contains": "public sealed class CloudReadOnlyTextToSqlFallbackRunner"
+      },
+      "consumers": [
+        {
+          "path": "src/services/AICopilot.AiGatewayService/AgentTasks/Runtime/AgentRuntimeBusinessQueryToolService.cs",
+          "contains": "cloudTextToSqlFallbackRunner.RunAsync"
+        }
+      ],
+      "candidateEvidence": [
+        { "path": "src/services/AICopilot.AiGatewayService/Workflows/Executors/CloudReadOnlyTextToSqlFallbackRunner.cs", "contains": "Fallback" },
+        { "path": "src/services/AICopilot.AiGatewayService/Workflows/Executors/DataAnalysisAuditRecorder.cs", "contains": "Fallback" }
+      ],
+      "callerScans": [
+        {
+          "id": "readonly-query-consumer",
+          "roots": ["src/services"],
+          "extensions": [".cs"],
+          "contains": "cloudTextToSqlFallbackRunner.RunAsync(",
+          "excludePaths": []
+        }
+      ],
+      "replacement": "notApplicable: current guarded readonly recovery path",
+      "deletionCondition": "Delete only if the feature is retired or all readonly business-query callers migrate to a reviewed equivalent with the same guards and audit trail."
+    },
+    {
+      "id": "AI-ORDINARY-DEVICE-LOG-SEMANTIC-FALLBACK",
+      "disposition": "ordinaryAbstraction",
+      "decisionReason": "These private records are the current deterministic readonly payload used when rewriting device-log follow-up intent.",
+      "producer": {
+        "path": "src/services/AICopilot.AiGatewayService/Workflows/Executors/DeviceLogFollowUpIntentRewriter.cs",
+        "contains": "SemanticFallbackPayload"
+      },
+      "consumers": [
+        {
+          "path": "src/services/AICopilot.AiGatewayService/Workflows/Executors/IntentRoutingExecutor.cs",
+          "contains": "DeviceLogFollowUpIntentRewriter.Rewrite(intentResults, history)"
+        }
+      ],
+      "candidateEvidence": [
+        {
+          "path": "src/services/AICopilot.AiGatewayService/Workflows/Executors/DeviceLogFollowUpIntentRewriter.cs",
+          "contains": "SemanticFallback"
+        }
+      ],
+      "callerScans": [
+        {
+          "id": "routing-rewrite",
+          "roots": ["src/services"],
+          "extensions": [".cs"],
+          "contains": "DeviceLogFollowUpIntentRewriter.Rewrite(",
+          "excludePaths": ["src/services/AICopilot.AiGatewayService/Workflows/Executors/DeviceLogFollowUpIntentRewriter.cs"]
+        }
+      ],
+      "replacement": "notApplicable: current deterministic device-log intent rewrite",
+      "deletionCondition": "Delete only if the follow-up rewrite feature is retired or replaced with equivalent governed semantics."
+    },
+    {
+      "id": "AI-ORDINARY-FINAL-AGENT-HISTORY-BUDGET-FALLBACK",
+      "disposition": "ordinaryAbstraction",
+      "decisionReason": "This helper is the current bounded prompt-history reduction policy used when the final agent exceeds its token budget.",
+      "producer": {
+        "path": "src/services/AICopilot.AiGatewayService/Workflows/Executors/FinalAgentBuildExecutor.cs",
+        "contains": "BuildHistoryBudgetFallbacks("
+      },
+      "consumers": [
+        {
+          "path": "src/services/AICopilot.AiGatewayService/Workflows/Executors/FinalAgentBuildExecutor.cs",
+          "contains": "BuildHistoryBudgetFallbacks(effectiveAnswerHistory)"
+        }
+      ],
+      "candidateEvidence": [
+        {
+          "path": "src/services/AICopilot.AiGatewayService/Workflows/Executors/FinalAgentBuildExecutor.cs",
+          "contains": "BuildHistoryBudgetFallbacks"
+        }
+      ],
+      "callerScans": [
+        {
+          "id": "budget-reduction",
+          "roots": ["src/services"],
+          "extensions": [".cs"],
+          "contains": "BuildHistoryBudgetFallbacks(",
+          "excludeContains": ["private static IEnumerable<IReadOnlyCollection<Message>> BuildHistoryBudgetFallbacks("],
+          "excludePaths": []
+        }
+      ],
+      "replacement": "notApplicable: current prompt-budget policy",
+      "deletionCondition": "Delete only with an equivalent fail-closed prompt budget strategy and migrated callers."
+    },
+    {
+      "id": "AI-ORDINARY-INTENT-ROUTING-FALLBACK",
+      "disposition": "ordinaryAbstraction",
+      "decisionReason": "This is the current deterministic readonly routing safety path when model output cannot be parsed or the model call fails.",
+      "producer": {
+        "path": "src/services/AICopilot.AiGatewayService/Workflows/Executors/IntentRoutingFallbackClassifier.cs",
+        "contains": "internal static class IntentRoutingFallbackClassifier"
+      },
+      "consumers": [
+        {
+          "path": "src/services/AICopilot.AiGatewayService/Workflows/Executors/IntentRoutingExecutor.cs",
+          "contains": "IntentRoutingFallbackClassifier.TryClassify"
+        }
+      ],
+      "candidateEvidence": [
+        { "path": "src/services/AICopilot.AiGatewayService/Workflows/Executors/IntentRoutingExecutor.cs", "contains": "CreateFallbackIntents" },
+        { "path": "src/services/AICopilot.AiGatewayService/Workflows/Executors/IntentRoutingFallbackClassifier.cs", "contains": "Fallback" }
+      ],
+      "callerScans": [
+        {
+          "id": "routing-executor",
+          "roots": ["src/services"],
+          "extensions": [".cs"],
+          "contains": "IntentRoutingFallbackClassifier.TryClassify(",
+          "excludePaths": ["src/services/AICopilot.AiGatewayService/Workflows/Executors/IntentRoutingFallbackClassifier.cs"]
+        }
+      ],
+      "replacement": "notApplicable: current fail-safe readonly routing classifier",
+      "deletionCondition": "Delete only if all routing failures have a reviewed equally safe deterministic outcome."
+    },
+    {
+      "id": "AI-ORDINARY-PLANNER-SCHEMA-FALLBACK",
+      "disposition": "ordinaryAbstraction",
+      "decisionReason": "This helper builds the current conservative tool schema summary when optional catalog schema metadata is absent.",
+      "producer": {
+        "path": "src/services/AICopilot.AiGatewayService/AgentTasks/AgentDynamicPlannerInputBuilder.cs",
+        "contains": "BuildFallbackSchemaSummary("
+      },
+      "consumers": [
+        {
+          "path": "src/services/AICopilot.AiGatewayService/AgentTasks/AgentDynamicPlannerInputBuilder.cs",
+          "contains": "tool.InputSchema ?? BuildFallbackSchemaSummary"
+        }
+      ],
+      "candidateEvidence": [
+        {
+          "path": "src/services/AICopilot.AiGatewayService/AgentTasks/AgentDynamicPlannerInputBuilder.cs",
+          "contains": "BuildFallbackSchemaSummary"
+        }
+      ],
+      "callerScans": [
+        {
+          "id": "planner-schema-builder",
+          "roots": ["src/services"],
+          "extensions": [".cs"],
+          "contains": "BuildFallbackSchemaSummary(",
+          "excludeContains": ["private static PlannerToolSchemaSummary BuildFallbackSchemaSummary("],
+          "excludePaths": []
+        }
+      ],
+      "replacement": "notApplicable: current conservative schema summary",
+      "deletionCondition": "Delete only when input and output schema summaries are mandatory for every catalog tool."
+    },
+    {
+      "id": "AI-ORDINARY-SQL-ALIAS-RESOLUTION",
+      "disposition": "ordinaryAbstraction",
+      "decisionReason": "Alias here is SQL syntax resolved by the current allowlist column inspector, not an API compatibility alias.",
+      "producer": {
+        "path": "src/services/AICopilot.Services.CrossCutting/Sql/SqlAllowlistColumnInspector.cs",
+        "contains": "ResolveAliasColumns("
+      },
+      "consumers": [
+        {
+          "path": "src/services/AICopilot.Services.CrossCutting/Sql/SqlAllowlistColumnInspector.cs",
+          "contains": "ResolveAlias(table.Alias, tableName)"
+        },
+        {
+          "path": "src/services/AICopilot.Services.CrossCutting/Sql/SqlAllowlistColumnInspector.cs",
+          "contains": "ResolveAliasColumns(cte.Alias, cteProjectionNames)"
+        }
+      ],
+      "candidateEvidence": [
+        {
+          "path": "src/services/AICopilot.Services.CrossCutting/Sql/SqlAllowlistColumnInspector.cs",
+          "contains": "Alias"
+        }
+      ],
+      "callerScans": [
+        {
+          "id": "alias-columns",
+          "roots": ["src/services/AICopilot.Services.CrossCutting"],
+          "extensions": [".cs"],
+          "contains": "ResolveAliasColumns(",
+          "excludeContains": ["private static IReadOnlySet<string> ResolveAliasColumns("],
+          "excludePaths": []
+        },
+        {
+          "id": "table-alias",
+          "roots": ["src/services/AICopilot.Services.CrossCutting"],
+          "extensions": [".cs"],
+          "contains": "ResolveAlias(",
+          "excludeContains": ["private static string ResolveAlias("],
+          "excludePaths": []
+        }
+      ],
+      "replacement": "notApplicable: current SQL grammar handling",
+      "deletionCondition": "Delete only if governed SQL no longer supports aliases or a replacement inspector handles every current alias scope."
+    },
+    {
+      "id": "AI-ORDINARY-VISUALIZATION-ADAPTER",
+      "disposition": "ordinaryAbstraction",
+      "decisionReason": "The extension adapter is actively called by the production widget emitter to build table and chart payloads.",
+      "producer": {
+        "path": "src/shared/AICopilot.Visualization/VisualizationAdapterExtensions.cs",
+        "contains": "public static class VisualizationAdapterExtensions"
+      },
+      "consumers": [
+        {
+          "path": "src/services/AICopilot.AiGatewayService/Workflows/Executors/DataAnalysisWidgetEmitter.cs",
+          "contains": "data.ToDataTableData(schema)"
+        },
+        {
+          "path": "src/services/AICopilot.AiGatewayService/Workflows/Executors/DataAnalysisWidgetEmitter.cs",
+          "contains": "data.ToChartDataset(schema)"
+        }
+      ],
+      "candidateEvidence": [
+        {
+          "path": "src/shared/AICopilot.Visualization/VisualizationAdapterExtensions.cs",
+          "contains": "VisualizationAdapterExtensions"
+        }
+      ],
+      "callerScans": [
+        {
+          "id": "chart-dataset",
+          "roots": ["src/services"],
+          "extensions": [".cs"],
+          "contains": ".ToChartDataset(",
+          "excludePaths": []
+        },
+        {
+          "id": "data-table",
+          "roots": ["src/services"],
+          "extensions": [".cs"],
+          "contains": ".ToDataTableData(",
+          "excludePaths": []
+        }
+      ],
+      "replacement": "notApplicable: current widget payload transformation",
+      "deletionCondition": "Delete only with a reviewed replacement for both production widget transformation calls."
+    },
+    {
+      "id": "AI-ORDINARY-WEB-PLAN-FALLBACK-STATE",
+      "disposition": "ordinaryAbstraction",
+      "decisionReason": "plannerFallbackReason is a current plan-status field rendered to the user, not a retired payload alias.",
+      "producer": {
+        "path": "src/vues/AICopilot.Web/src/composables/useAgentPlanPreview.ts",
+        "contains": "plannerFallbackReason?: string | null"
+      },
+      "consumers": [
+        {
+          "path": "src/vues/AICopilot.Web/src/components/chat/PlanDraftCard.vue",
+          "contains": "latestPlan?.plannerFallbackReason"
+        }
+      ],
+      "candidateEvidence": [
+        {
+          "path": "src/vues/AICopilot.Web/src/composables/useAgentPlanPreview.ts",
+          "contains": "plannerFallbackReason"
+        }
+      ],
+      "callerScans": [
+        {
+          "id": "plan-card-render",
+          "roots": ["src/vues/AICopilot.Web/src/components"],
+          "extensions": [".vue"],
+          "contains": "latestPlan?.plannerFallbackReason",
+          "excludePaths": []
+        }
+      ],
+      "replacement": "notApplicable: current plan runtime status",
+      "deletionCondition": "Delete only with a versioned plan contract change and migrated UI consumers."
+    },
+    {
+      "id": "AI-ORDINARY-WEB-EVENT-SAFE-FALLBACK",
+      "disposition": "ordinaryAbstraction",
+      "decisionReason": "This local fallback is the current safe user message when a plan-failure event has no usable detail.",
+      "producer": {
+        "path": "src/vues/AICopilot.Web/src/protocol/agentEventDisplay.ts",
+        "contains": "const fallback = '"
+      },
+      "consumers": [
+        {
+          "path": "src/vues/AICopilot.Web/src/protocol/agentEventDisplay.ts",
+          "contains": "return fallback"
+        }
+      ],
+      "candidateEvidence": [
+        {
+          "path": "src/vues/AICopilot.Web/src/protocol/agentEventDisplay.ts",
+          "contains": "const fallback"
+        }
+      ],
+      "callerScans": [
+        {
+          "id": "safe-message-return",
+          "roots": ["src/vues/AICopilot.Web/src/protocol"],
+          "extensions": [".ts"],
+          "contains": "return fallback",
+          "excludePaths": []
+        }
+      ],
+      "replacement": "notApplicable: current safe UI error text",
+      "deletionCondition": "Delete only when the protocol guarantees a safe non-empty display message."
+    },
+    {
+      "id": "AI-ORDINARY-WEB-DEVICE-LOG-HEADING-ALIASES",
+      "disposition": "ordinaryAbstraction",
+      "decisionReason": "These aliases are current Chinese answer-section headings accepted by the display parser, not versioned API compatibility paths.",
+      "producer": {
+        "path": "src/vues/AICopilot.Web/src/protocol/deviceLogAnswerSections.ts",
+        "contains": "aliases: string[]"
+      },
+      "consumers": [
+        {
+          "path": "src/vues/AICopilot.Web/src/protocol/deviceLogAnswerSections.ts",
+          "contains": "for (const [alias, definition] of aliasToDefinition)"
+        }
+      ],
+      "candidateEvidence": [
+        {
+          "path": "src/vues/AICopilot.Web/src/protocol/deviceLogAnswerSections.ts",
+          "contains": "alias"
+        }
+      ],
+      "callerScans": [
+        {
+          "id": "heading-parser",
+          "roots": ["src/vues/AICopilot.Web/src/protocol"],
+          "extensions": [".ts"],
+          "contains": "of aliasToDefinition",
+          "excludePaths": []
+        }
+      ],
+      "replacement": "notApplicable: current localized answer parser",
+      "deletionCondition": "Delete only if structured answer sections replace heading parsing for every caller."
+    },
+    {
+      "id": "AI-ORDINARY-VUE-I18N-CURRENT-OPTIONS",
+      "disposition": "ordinaryAbstraction",
+      "decisionReason": "legacy=false disables Vue I18n legacy mode and fallbackLocale is the current locale default; neither exposes an old application contract.",
+      "producer": {
+        "path": "src/vues/AICopilot.Web/src/i18n/index.ts",
+        "contains": "export const i18n = createI18n({"
+      },
+      "consumers": [
+        {
+          "path": "src/vues/AICopilot.Web/src/main.ts",
+          "contains": "app.use(i18n)"
+        }
+      ],
+      "candidateEvidence": [
+        { "path": "src/vues/AICopilot.Web/src/i18n/index.ts", "contains": "legacy:" },
+        { "path": "src/vues/AICopilot.Web/src/i18n/index.ts", "contains": "fallbackLocale:" }
+      ],
+      "callerScans": [
+        {
+          "id": "app-registration",
+          "roots": ["src/vues/AICopilot.Web/src"],
+          "extensions": [".ts"],
+          "contains": "app.use(i18n)",
+          "excludePaths": []
+        }
+      ],
+      "replacement": "notApplicable: current Vue I18n configuration",
+      "deletionCondition": "Delete only if Vue I18n is removed or the application locale contract changes."
+    }
+  ]
+}

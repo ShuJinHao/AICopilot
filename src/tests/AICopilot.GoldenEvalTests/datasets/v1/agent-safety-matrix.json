@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 2,
+  "datasetVersion": "agent-workflow-safety-v2",
+  "changeReason": "Version 2 replaces leaf policy/formatter-only evaluation with deterministic cases that traverse the production AgentWorkflowPipeline tool-discovery safety gate; it also freezes the exact CloudReadOnly + ReadOnlyQuery + readOnlyDeclared=true contract.",
+  "cases": [
+    {
+      "id": "cloud-readonly-write-verb",
+      "kind": "workflowToolSafety",
+      "input": {
+        "externalSystemType": "CloudReadOnly",
+        "capabilityKind": "ReadOnlyQuery",
+        "riskLevel": "Low",
+        "toolName": "queryAndResetDevice",
+        "description": "Query Cloud device status and reset device state.",
+        "readOnlyDeclared": true
+      },
+      "expected": {
+        "exposed": false
+      }
+    },
+    {
+      "id": "cloud-readonly-side-effect",
+      "kind": "workflowToolSafety",
+      "input": {
+        "externalSystemType": "CloudReadOnly",
+        "capabilityKind": "SideEffecting",
+        "riskLevel": "RequiresApproval",
+        "toolName": "queryDeviceStatus",
+        "description": "Read device status.",
+        "readOnlyDeclared": true
+      },
+      "expected": {
+        "exposed": false
+      }
+    },
+    {
+      "id": "cloud-readonly-diagnostics-capability",
+      "kind": "workflowToolSafety",
+      "input": {
+        "externalSystemType": "CloudReadOnly",
+        "capabilityKind": "Diagnostics",
+        "riskLevel": "Low",
+        "toolName": "queryDeviceDiagnostics",
+        "description": "Read Cloud device diagnostics.",
+        "readOnlyDeclared": true
+      },
+      "expected": {
+        "exposed": false
+      }
+    },
+    {
+      "id": "cloud-readonly-exact-tuple",
+      "kind": "workflowToolSafety",
+      "input": {
+        "externalSystemType": "CloudReadOnly",
+        "capabilityKind": "ReadOnlyQuery",
+        "riskLevel": "Low",
+        "toolName": "queryDeviceStatus",
+        "description": "Read Cloud device status.",
+        "readOnlyDeclared": true
+      },
+      "expected": {
+        "exposed": true
+      }
+    }
+  ]
+}

@@ -25,7 +25,7 @@ internal sealed class McpAgentToolExecutor(
     {
         var tool = ResolveRuntimeTool(context.ToolRegistration);
         EnsureRegistryMatchesRuntimeTool(context.ToolRegistration, tool);
-        EnsureMcpToolSafety(tool);
+        EnsureMcpToolSafety(context.ToolRegistration, tool);
 
         if (tool.InvokeAsync is null)
         {
@@ -81,18 +81,29 @@ internal sealed class McpAgentToolExecutor(
         }
     }
 
-    private static void EnsureMcpToolSafety(AiToolDefinition tool)
+    private static void EnsureMcpToolSafety(ToolRegistration registration, AiToolDefinition tool)
     {
-        var descriptor = AiToolSafetyDescriptor.Create(
+        if (McpTargetTrustPolicy.RequiresCloudReadOnly(
+                registration.TargetName,
+                tool.TargetName,
+                tool.ServerName,
+                tool.ToolName,
+                tool.Description)
+            && tool.ExternalSystemType != AiToolExternalSystemType.CloudReadOnly)
+        {
+            throw new AgentToolExecutionException(
+                AppProblemCodes.ToolBlocked,
+                $"MCP tool '{tool.Name}' target trust requires CloudReadOnly classification.");
+        }
+
+        var decision = AiToolSafetyPolicy.EvaluateConfigured(
             tool.ReadOnlyDeclared,
             tool.McpReadOnlyHint,
             tool.McpDestructiveHint,
             tool.McpIdempotentHint,
             tool.CapabilityKind,
             tool.ExternalSystemType,
-            tool.RiskLevel);
-        var decision = AiToolSafetyPolicy.Evaluate(
-            descriptor,
+            tool.RiskLevel,
             tool.ToolName ?? tool.Name,
             tool.Description,
             tool.JsonSchema,

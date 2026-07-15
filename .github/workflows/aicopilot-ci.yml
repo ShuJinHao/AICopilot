@@ -4,19 +4,6 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths:
-      - "src/**"
-      - "deploy/**"
-      - "docs/**"
-      - "scripts/**"
-      - ".dockerignore"
-      - ".gitattributes"
-      - "AGENTS.md"
-      - "Directory.Build.props"
-      - "Directory.Build.targets"
-      - "global.json"
-      - "AICopilot.slnx"
-      - ".github/workflows/**"
   pull_request: {}
 
 permissions:
@@ -67,20 +54,43 @@ jobs:
         shell: pwsh
         run: ./scripts/tests/Test-AICopilotTestInfrastructureBehavior.ps1
 
+      - name: Enforce compatibility and duplication ratchets
+        shell: pwsh
+        run: |
+          ./scripts/tests/Test-AICopilotTestDeclarationTransition.ps1
+          ./scripts/tests/Test-AICopilotCompatibilityInventory.ps1
+          ./scripts/tests/Measure-AICopilotDuplication.ps1
+
       - name: Discover required AICopilot test runners
         shell: pwsh
         run: ./scripts/tests/Get-AICopilotTestInventory.ps1 -OutputPath artifacts/test-inventory.json
 
-      - name: Run dynamically discovered required .NET tests
+      - name: Run required pure .NET tests in parallel and resource tests serially
         shell: pwsh
         run: |
           $inventory = Get-Content artifacts/test-inventory.json -Raw | ConvertFrom-Json
-          foreach ($project in @($inventory.projects | Where-Object { $_.role -eq 'Runner' -and [bool]$_.required })) {
-            & dotnet test $project.path -c Release --no-build --no-restore --logger "trx;LogFileName=$($project.projectName).trx" --results-directory artifacts/test-results
+          $required = @($inventory.projects | Where-Object { $_.role -eq 'Runner' -and [bool]$_.required })
+          $pure = @($required | Where-Object { $_.runtime -eq 'Pure' })
+          $resource = @($required | Where-Object { $_.runtime -ne 'Pure' })
+          $pure | ForEach-Object -Parallel {
+            $project = $_
+            $runnerResults = "artifacts/test-results/$($project.projectName)"
+            & dotnet test $project.path -c Release --no-build --no-restore --collect "XPlat Code Coverage" --logger "trx;LogFileName=$($project.projectName).trx" --results-directory $runnerResults
             if ($LASTEXITCODE -ne 0) {
-              throw "Required test runner failed: $($project.path)"
+              throw "Required pure test runner failed: $($project.path)"
+            }
+          } -ThrottleLimit 4
+          foreach ($project in $resource) {
+            $runnerResults = "artifacts/test-results/$($project.projectName)"
+            & dotnet test $project.path -c Release --no-build --no-restore --collect "XPlat Code Coverage" --logger "trx;LogFileName=$($project.projectName).trx" --results-directory $runnerResults
+            if ($LASTEXITCODE -ne 0) {
+              throw "Required resource test runner failed: $($project.path)"
             }
           }
+
+      - name: Reconcile all required production coverage
+        shell: pwsh
+        run: ./scripts/tests/Confirm-AICopilotCoverage.ps1
 
       - name: Run deployment behavior tests
         shell: bash
@@ -88,15 +98,23 @@ jobs:
           set -euo pipefail
           bash deploy/enterprise-ai/tests/deployment-behavior.sh 2>&1 | tee artifacts/test-results/deployment-behavior.log
 
+      - name: Install Playwright Chromium
+        working-directory: src/vues/AICopilot.Web
+        run: npx playwright install --with-deps chromium
+
       - name: Test and build web app
         working-directory: src/vues/AICopilot.Web
+        env:
+          PLAYWRIGHT_CHANNEL: chromium
+          PLAYWRIGHT_JSON_OUTPUT_NAME: ../../../artifacts/test-results/playwright.json
         run: |
           npm run test:unit -- --reporter=json --outputFile=../../../artifacts/test-results/vitest.json
+          npm run test:smoke -- --reporter=json
           npm run build
 
       - name: Reconcile required test results
         shell: pwsh
-        run: ./scripts/tests/Confirm-AICopilotRequiredTestResults.ps1 -InventoryPath artifacts/test-inventory.json -ResultsDirectory artifacts/test-results -VitestPath artifacts/test-results/vitest.json -DeploymentPath artifacts/test-results/deployment-behavior.log
+        run: ./scripts/tests/Confirm-AICopilotRequiredTestResults.ps1 -InventoryPath artifacts/test-inventory.json -ResultsDirectory artifacts/test-results -VitestPath artifacts/test-results/vitest.json -PlaywrightPath artifacts/test-results/playwright.json -DeploymentPath artifacts/test-results/deployment-behavior.log -ExpectedVitestCount 185 -ExpectedPlaywrightCount 43 -ExpectedDeploymentCount 33
 
       - name: Upload required test evidence
         if: always()
@@ -105,5 +123,35 @@ jobs:
           name: aicopilot-required-test-results
           path: |
             artifacts/test-inventory.json
+            artifacts/quality/**
             artifacts/test-results/**
           if-no-files-found: warn
+
+  mutation-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: "10.0.301"
+
+      - name: Verify .NET SDK
+        run: test "$(dotnet --version)" = "10.0.301"
+
+      - name: Enforce fixed AI-SEC-011/012 secret-protection mutation baseline
+        shell: pwsh
+        run: ./scripts/tests/Invoke-AICopilotMutation.ps1
+
+      - name: Upload mutation evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: aicopilot-mutation-report
+          path: |
+            artifacts/mutation/**
+            artifacts/quality/aicopilot-mutation.json
+          if-no-files-found: error

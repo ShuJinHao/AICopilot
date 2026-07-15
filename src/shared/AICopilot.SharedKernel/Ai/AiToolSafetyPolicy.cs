@@ -143,6 +143,31 @@ public static class AiToolSafetyPolicy
         return Evaluate(descriptor, toolName, description, inputSchema, returnSchema);
     }
 
+    public static AiToolSafetyDecision EvaluateConfigured(
+        bool readOnlyDeclared,
+        bool? mcpReadOnlyHint,
+        bool? mcpDestructiveHint,
+        bool? mcpIdempotentHint,
+        AiToolCapabilityKind capabilityKind,
+        AiToolExternalSystemType externalSystemType,
+        AiToolRiskLevel riskLevel,
+        string toolName,
+        string? description,
+        JsonElement? inputSchema = null,
+        JsonElement? returnSchema = null)
+    {
+        var descriptor = AiToolSafetyDescriptor.Create(
+            readOnlyDeclared,
+            mcpReadOnlyHint,
+            mcpDestructiveHint,
+            mcpIdempotentHint,
+            capabilityKind,
+            externalSystemType,
+            riskLevel);
+
+        return Evaluate(descriptor, toolName, description, inputSchema, returnSchema);
+    }
+
     public static AiToolSafetyDecision Evaluate(
         AiToolSafetyDescriptor descriptor,
         string toolName,
@@ -155,6 +180,12 @@ public static class AiToolSafetyPolicy
         if (descriptor.RiskLevel == AiToolRiskLevel.Blocked)
         {
             blockReasons.Add("Tool risk level is blocked.");
+            return Block(blockReasons);
+        }
+
+        if (descriptor.ExternalSystemType == AiToolExternalSystemType.Unknown)
+        {
+            blockReasons.Add("Tools with an unknown external-system classification are never executable.");
             return Block(blockReasons);
         }
 
@@ -180,7 +211,11 @@ public static class AiToolSafetyPolicy
 
         if (descriptor.CapabilityKind == AiToolCapabilityKind.SideEffecting)
         {
-            blockReasons.Add("Cloud-related tools must not be side-effecting.");
+            blockReasons.Add("Cloud-related tools must not declare side-effecting capability.");
+        }
+        else if (descriptor.CapabilityKind != AiToolCapabilityKind.ReadOnlyQuery)
+        {
+            blockReasons.Add("Cloud-related tools must declare the ReadOnlyQuery capability.");
         }
 
         if (!CloudAllowedVerbs.Any(verb => StartsWithToken(toolName, verb)))

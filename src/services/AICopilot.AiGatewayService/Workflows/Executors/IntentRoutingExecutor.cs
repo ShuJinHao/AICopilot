@@ -38,7 +38,7 @@ public class IntentRoutingExecutor(
 {
     public const string ExecutorId = nameof(IntentRoutingExecutor);
 
-    public async Task<IntentRoutingStepResult> ExecuteAsync(
+    public virtual async Task<IntentRoutingStepResult> ExecuteAsync(
         ChatStreamRequest request,
         CancellationToken cancellationToken = default)
     {

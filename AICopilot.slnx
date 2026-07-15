@@ -18,12 +18,18 @@
     <Project Path="src/hosts/AICopilot.ServiceDefaults/AICopilot.ServiceDefaults.csproj" />
   </Folder>
   <Folder Name="/src/infrastructure/">
+    <Project Path="src/infrastructure/AICopilot.ArtifactGeneration/AICopilot.ArtifactGeneration.csproj" />
     <Project Path="src/infrastructure/AICopilot.AiRuntime/AICopilot.AiRuntime.csproj" />
+    <Project Path="src/infrastructure/AICopilot.CloudReadClient/AICopilot.CloudReadClient.csproj" />
     <Project Path="src/infrastructure/AICopilot.Dapper/AICopilot.Dapper.csproj" Id="7d0469b8-798c-4508-bd9d-7b80085d5e17" />
     <Project Path="src/infrastructure/AICopilot.Embedding/AICopilot.Embedding.csproj" Id="6803c21b-818b-4429-adf1-e4c4edda19f7" />
+    <Project Path="src/infrastructure/AICopilot.EmbeddingClient/AICopilot.EmbeddingClient.csproj" />
     <Project Path="src/infrastructure/AICopilot.EntityFrameworkCore/AICopilot.EntityFrameworkCore.csproj" Id="fc5ebf86-137f-4da9-8e82-8567e320240f" />
     <Project Path="src/infrastructure/AICopilot.EventBus/AICopilot.EventBus.csproj" Id="c2f152c6-04c5-45d2-89b2-6230785f6085" />
     <Project Path="src/infrastructure/AICopilot.Infrastructure/AICopilot.Infrastructure.csproj" Id="4f9e108f-c28d-4cd4-bd36-7d1bbb40e912" />
+    <Project Path="src/infrastructure/AICopilot.McpRuntime/AICopilot.McpRuntime.csproj" />
+    <Project Path="src/infrastructure/AICopilot.SqlSafety/AICopilot.SqlSafety.csproj" />
+    <Project Path="src/infrastructure/AICopilot.SecretProtection/AICopilot.SecretProtection.csproj" />
   </Folder>
   <Folder Name="/src/services/">
     <Project Path="src/services/AICopilot.AiGatewayService/AICopilot.AiGatewayService.csproj" Id="0a09b3ee-2f25-43e2-aedb-79b0f7639e11" />
@@ -40,18 +46,31 @@
     <Project Path="src/shared/AICopilot.SharedKernel/AICopilot.SharedKernel.csproj" Id="9d341780-8e35-4092-92b5-1e3356ae8efa" />
     <Project Path="src/shared/AICopilot.Visualization/AICopilot.Visualization.csproj" Id="1ca00ef7-e8d3-41ae-bb71-4915e45478ce" />
   </Folder>
+  <Folder Name="/src/testing/">
+    <Project Path="src/testing/AICopilot.AgentWorkflowTestKit/AICopilot.AgentWorkflowTestKit.csproj" />
+    <Project Path="src/testing/AICopilot.FilesystemTestKit/AICopilot.FilesystemTestKit.csproj" />
+    <Project Path="src/testing/AICopilot.AspireIntegrationTestKit/AICopilot.AspireIntegrationTestKit.csproj" />
+    <Project Path="src/testing/AICopilot.PersistenceTestKit/AICopilot.PersistenceTestKit.csproj" />
+    <Project Path="src/testing/AICopilot.ToolPluginTestKit/AICopilot.ToolPluginTestKit.csproj" />
+  </Folder>
   <Folder Name="/src/tests/">
+    <Project Path="src/tests/AICopilot.AggregateTests/AICopilot.AggregateTests.csproj" />
+    <Project Path="src/tests/AICopilot.AnalyzerFixtureTests/AICopilot.AnalyzerFixtureTests.csproj" />
+    <Project Path="src/tests/AICopilot.ApplicationTests/AICopilot.ApplicationTests.csproj" />
     <Project Path="src/tests/AICopilot.Architecture.AnalyzerTests/AICopilot.Architecture.AnalyzerTests.csproj" />
     <Project Path="src/tests/AICopilot.ArchitectureTests/AICopilot.ArchitectureTests.csproj" />
-    <Project Path="src/tests/AICopilot.AiEvalTests/AICopilot.AiEvalTests.csproj" />
-    <Project Path="src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj" />
     <Project Path="src/tests/AICopilot.CloudAiReadLiveTests/AICopilot.CloudAiReadLiveTests.csproj" />
+    <Project Path="src/tests/AICopilot.ContractFilesystemTests/AICopilot.ContractFilesystemTests.csproj" />
     <Project Path="src/tests/AICopilot.ContractTests/AICopilot.ContractTests.csproj" />
+    <Project Path="src/tests/AICopilot.DeploymentTests/AICopilot.DeploymentTests.csproj" />
+    <Project Path="src/tests/AICopilot.EndToEndTests/AICopilot.EndToEndTests.csproj" />
+    <Project Path="src/tests/AICopilot.GoldenEvalTests/AICopilot.GoldenEvalTests.csproj" />
     <Project Path="src/tests/AICopilot.HttpIntegrationTests/AICopilot.HttpIntegrationTests.csproj" />
     <Project Path="src/tests/AICopilot.PersistenceTests/AICopilot.PersistenceTests.csproj" />
+    <Project Path="src/tests/AICopilot.PersistenceFilesystemTests/AICopilot.PersistenceFilesystemTests.csproj" />
     <Project Path="src/tests/AICopilot.SimulationDockerTests/AICopilot.SimulationDockerTests.csproj" />
     <Project Path="src/tests/AICopilot.SimulationTests/AICopilot.SimulationTests.csproj" />
-    <Project Path="src/tests/AICopilot.Testing.McpServer/AICopilot.Testing.McpServer.csproj" />
+    <Project Path="src/tests/AICopilot.ToolPlugin.ConformanceTests/AICopilot.ToolPlugin.ConformanceTests.csproj" />
     <Project Path="src/tests/AICopilot.UnitTests/AICopilot.UnitTests.csproj" />
     <Project Path="src/tests/AICopilot.WorkflowTests/AICopilot.WorkflowTests.csproj" />
   </Folder>

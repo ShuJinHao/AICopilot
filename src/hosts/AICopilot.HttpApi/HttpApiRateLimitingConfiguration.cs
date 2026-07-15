@@ -1,4 +1,5 @@
 using AICopilot.HttpApi.Infrastructure;
+using AICopilot.Services.Contracts.Http;
 using AICopilot.SharedKernel.Result;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.RateLimiting;

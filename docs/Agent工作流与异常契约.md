@@ -10,6 +10,7 @@
 - Plan 出口只能生成 `PlanDraft` 草案；用户确认前不得执行 Cloud 查询、MCP 工具、Tool 调用、Worker 入队或其他真实业务动作。
 - 用户确认 `PlanDraft` 后才允许转换为 `ExecutablePlan` / `AgentTask`，进入 Skill、Tool、Schema、Guard、审批和 Worker 执行链路。
 - Skill、Tool、MCP、Knowledge 或 DataSource 未匹配时，不能阻断 `PlanDraft`；只能在草案中说明能力缺口、降级为路线规划或要求用户补充目标。
+- Plan 能力发现和真实 Tool 分支必须共用同一生产安全门禁；只有通过 `AiToolSafetyPolicy` 的 tool 才能进入草案或执行上下文。`GoldenEvalTests` 必须穿过真实 `AgentWorkflowPipeline` 或其正式生产组件，数据集必须版本化并记录变更理由；不得直接调用 leaf policy 自证。
 
 ## 2. 能力边界
 
@@ -133,16 +134,22 @@ Cloud 只读 Agent 当前正式能力限定为：
 
 ### 8.1 编译型 Agent / 权限门禁
 
-- `AIARCH004` 使用跨方法 call graph 追踪任何可能减少 enabled Admin 的路径，包括 interface dispatch、泛型 helper 和 lambda。路径必须同时可达唯一 `ITransactionalExecutionService` 和 enabled-admin invariant guard，否则为 compiler error；运行时真实 PostgreSQL 锁/竞态测试仍负责证明事务与 retry 语义。
+- `AIARCH004` 使用跨方法 call graph 追踪任何可能减少 enabled Admin 的路径，包括 interface dispatch、泛型 helper、inline/stored 与 field/property 中的 lambda/method-group。Field/property initializer、constructor assignment 和 property getter return 必须在 CompilationEnd 统一解析为 edge-aware caller→delegate 边，把 synthetic transaction-delegate edge 与真实 invocation/delegate `Invoke` edge分开；同一 target 即使曾被事务调用，只要又从同一 handler 或另一个 handler 直接调用，仍必须判定 mutation 可在事务外到达。Root 既包含外部可达入口，也包含源码图中无 incoming edge 的 protected `BackgroundService.ExecuteAsync`、internal seeder 与 internal type public entry；不能把生产入口改 internal/private 换绿，transaction private helper 则必须由 synthetic incoming 归属到 caller，避免 method-global 假豁免或重复误报。真实 mutation 必须位于完全限定 `ITransactionalExecutionService` 的 transaction delegate 内，且完全限定 enabled-admin invariant guard 在同一执行块/路径上词法支配并先于 mutation。事务、guard 和 mutation 互不相交，guard 位于 mutation 之后，或 stored/member delegate 事务执行后再次直接 `Invoke`，都必须 compiler-error fail-closed；运行时真实 PostgreSQL 锁/竞态测试仍负责证明事务与 retry 语义。
 - `AIARCH005` 要求具体 Agent plugin 显式 override `Description` 和 `ChatExposureMode`，并至少暴露一个带 `DescriptionAttribute` 的实例 tool。组件扫描、DI activation 和加载只属于 `AICopilot.AgentPlugin.Runtime`；零调用插件、静态假 tool、宿主内伪业务成功路径和生产 Fake/Stub/Test executor 必须物理删除。
 - 生产树中唯一 test-double 例外是完全限定类型 `AICopilot.AiGatewayService.AgentTasks.MockMcpAgentToolExecutor`：它必须保持 `internal`，只能在 `Environment.IsDevelopment()` 且 `AiGateway:MockMcp:Enabled=true` 时注册，输出必须带 mock/simulation 事实且不能执行外部副作用。同名类型、换 namespace、wrapper/adapter 或第二个 mock executor 均不在例外内。
-- `AIARCH007` 要求 service 的公开 command/query/stream request 显式声明 `AuthorizeRequirement`，stream 没有例外；只有 `FinalizeCloudOidcLoginCommand`、`LoginUserCommand`、`GetCurrentUserProfileQuery`、`GetInitializationStatusQuery` 四个完全限定 Identity 公开请求例外。资源所有权/动态权限不得用不真实的单一静态权限换绿；只有 `GetArtifactWorkspaceQuery` / `DownloadArtifactQuery -> ArtifactWorkspaceQueryCoordinator` 和 `ApproveAgentApprovalCommand` / `RejectAgentApprovalCommand -> AgentApprovalDecisionCoordinator` 四个完全限定 `ResourceAuthorizationOwner` 对，并由 coordinator 执行真实 owner/approval-type/privileged permission 校验。HttpApi Controller action 必须在类或方法上显式 `[Authorize]` / `[AllowAnonymous]`，同名类型或 attribute alias 不能扩大例外。
+- `AIARCH007` 只按完全限定 symbol identity 识别 request interface、`AuthorizeRequirementAttribute`、MVC `ControllerBase` / HTTP action attribute / `[Authorize]` / `[AllowAnonymous]`、tool descriptor 和契约例外；同名类型、伪属性、attribute alias 或换 namespace 都不得扩大识别面。Service 的公开 command/query/stream request 必须显式声明 `AuthorizeRequirement`，stream 没有例外；只有 `FinalizeCloudOidcLoginCommand`、`LoginUserCommand`、`GetCurrentUserProfileQuery`、`GetInitializationStatusQuery` 四个完全限定 Identity 公开请求例外。资源所有权/动态权限不得用不真实的单一静态权限换绿；只有 `GetArtifactWorkspaceQuery` / `DownloadArtifactQuery -> ArtifactWorkspaceQueryCoordinator` 和 `ApproveAgentApprovalCommand` / `RejectAgentApprovalCommand -> AgentApprovalDecisionCoordinator` 四个完全限定 `ResourceAuthorizationOwner` 对，并由 coordinator 执行真实 owner/approval-type/privileged permission 校验。HttpApi Controller action 必须在类或方法上显式 `[Authorize]` / `[AllowAnonymous]`。
 - 上述边界由 `AICopilot.Architecture.Analyzers` 在所有生产编译中以 Error 执行，`AICopilot.Architecture.AnalyzerTests` 保持正/反语义 fixture 和真实临时 csproj 编译 fixture；不得恢复同义 Regex/字符串影子检查。
 
 ## 9. 验收命令
 
+以下命令用于 Agent/异常专题定向诊断；任务完成仍必须对账 inventory 中全部 required runner、Web 和 deployment behavior，不得用 filter 结果代替。
+
 ```bash
-dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "AgentWorkflowBranchSemanticsTests|ClaudeFollowupClosureTests|ToolRegistryGovernanceTests|ChatErrorContractTests|SecurityHardeningTests|TextToSqlReadOnlyTests" --no-restore
+dotnet test src/tests/AICopilot.WorkflowTests/AICopilot.WorkflowTests.csproj --no-restore
+dotnet test src/tests/AICopilot.ApplicationTests/AICopilot.ApplicationTests.csproj --filter "ToolRegistryApplicationTests|TextToSqlReadOnlyTests|AuthorizationPipelineBehaviorTests" --no-restore
+dotnet test src/tests/AICopilot.ContractTests/AICopilot.ContractTests.csproj --filter "ChatErrorContractTests|UnhandledApiExceptionPolicyTests" --no-restore
+dotnet test src/tests/AICopilot.ToolPlugin.ConformanceTests/AICopilot.ToolPlugin.ConformanceTests.csproj --no-restore
+dotnet test src/tests/AICopilot.Architecture.AnalyzerTests/AICopilot.Architecture.AnalyzerTests.csproj --no-restore
 cd src/vues/AICopilot.Web && npm run test:unit -- chatErrorStore frontendErrorHandling runtimeDetails
 rg -n "Log(Critical|Error|Warning|Information|Debug|Trace)\\(\\s*[a-zA-Z_][a-zA-Z0-9_]*\\s*,|catch\\s*\\{\\s*\\}" src/hosts src/infrastructure src/services src/vues/AICopilot.Web/src
 ```

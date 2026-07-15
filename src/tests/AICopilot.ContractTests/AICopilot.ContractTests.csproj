@@ -12,6 +12,7 @@
     <AICopilotRequired>true</AICopilotRequired>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\infrastructure\AICopilot.CloudReadClient\AICopilot.CloudReadClient.csproj" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="FluentAssertions" Version="8.8.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
@@ -22,12 +23,15 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\hosts\AICopilot.HttpApi\AICopilot.HttpApi.csproj" />
+    <ProjectReference Include="..\..\services\AICopilot.AiGatewayService\AICopilot.AiGatewayService.csproj" />
     <ProjectReference Include="..\..\services\AICopilot.IdentityService\AICopilot.IdentityService.csproj" />
+    <ProjectReference Include="..\..\services\AICopilot.RagService\AICopilot.RagService.csproj" />
+    <ProjectReference Include="..\..\services\AICopilot.Services.Contracts\AICopilot.Services.Contracts.csproj" />
     <ProjectReference Include="..\..\shared\AICopilot.SharedKernel\AICopilot.SharedKernel.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="FluentAssertions" />
     <Using Include="Xunit" />
   </ItemGroup>
+  <Import Project="..\AICopilot.TestRunner.Shared.props" />
 </Project>

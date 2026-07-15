@@ -4,7 +4,11 @@ param(
     [string]$InventoryPath = 'artifacts/test-inventory.json',
     [string]$ResultsDirectory = 'artifacts/test-results',
     [string]$VitestPath,
+    [string]$PlaywrightPath,
     [string]$DeploymentPath,
+    [ValidateRange(1, [int]::MaxValue)] [int]$ExpectedVitestCount = 185,
+    [ValidateRange(1, [int]::MaxValue)] [int]$ExpectedPlaywrightCount = 43,
+    [ValidateRange(1, [int]::MaxValue)] [int]$ExpectedDeploymentCount = 33,
     [string]$OutputPath = 'artifacts/test-results/required-test-summary.json'
 )
 
@@ -42,10 +46,13 @@ $failedTotal = 0
 $skippedTotal = 0
 
 foreach ($project in $requiredProjects) {
-    $trxPath = Join-Path $resolvedResultsDirectory "$($project.projectName).trx"
-    if (-not (Test-Path $trxPath -PathType Leaf)) {
-        throw "Missing required TRX for $($project.projectName): $trxPath"
+    $trxCandidates = @(
+        Get-ChildItem $resolvedResultsDirectory -Filter "$($project.projectName).trx" -File -Recurse
+    )
+    if ($trxCandidates.Count -ne 1) {
+        throw "Required runner $($project.projectName) must have exactly one TRX; found $($trxCandidates.Count)."
     }
+    $trxPath = $trxCandidates[0].FullName
 
     [xml]$trx = Get-Content $trxPath -Raw
     $counters = $trx.TestRun.ResultSummary.Counters
@@ -58,13 +65,14 @@ foreach ($project in $requiredProjects) {
     $passed = [int]$counters.passed
     $failed = [int]$counters.failed
     $skipped = [int]$counters.notExecuted
+    $expected = [int]$project.caseCount
 
-    if ($discovered -le 0) {
+    if ($expected -le 0 -or $discovered -le 0) {
         throw "$($project.projectName) reconciliation failed: required runner discovered no tests."
     }
 
-    if ($discovered -ne $executed -or $failed -ne 0 -or $skipped -ne 0 -or $passed -ne $discovered) {
-        throw "$($project.projectName) reconciliation failed: discovered=$discovered, executed=$executed, passed=$passed, failed=$failed, skipped=$skipped"
+    if ($expected -ne $discovered -or $discovered -ne $executed -or $failed -ne 0 -or $skipped -ne 0 -or $passed -ne $discovered) {
+        throw "$($project.projectName) reconciliation failed: expected=$expected, discovered=$discovered, executed=$executed, passed=$passed, failed=$failed, skipped=$skipped"
     }
 
     $discoveredTotal += $discovered
@@ -74,12 +82,44 @@ foreach ($project in $requiredProjects) {
     $skippedTotal += $skipped
     $projectResults.Add([pscustomobject]@{
         projectName = $project.projectName
+        expected = $expected
         discovered = $discovered
         executed = $executed
         passed = $passed
         failed = $failed
         skipped = $skipped
     })
+}
+
+$playwrightSummary = $null
+if (-not [string]::IsNullOrWhiteSpace($PlaywrightPath)) {
+    $resolvedPlaywrightPath = Resolve-RepositoryPath $PlaywrightPath
+    if (-not (Test-Path $resolvedPlaywrightPath -PathType Leaf)) {
+        throw "Missing required Playwright result: $resolvedPlaywrightPath"
+    }
+
+    $playwright = Get-Content $resolvedPlaywrightPath -Raw | ConvertFrom-Json
+    $playwrightPassed = [int]$playwright.stats.expected
+    $playwrightFailed = [int]$playwright.stats.unexpected
+    $playwrightFlaky = [int]$playwright.stats.flaky
+    $playwrightSkipped = [int]$playwright.stats.skipped
+    $playwrightExecuted = $playwrightPassed + $playwrightFailed + $playwrightFlaky
+    $playwrightDiscovered = $playwrightExecuted + $playwrightSkipped
+    if ($playwrightDiscovered -ne $ExpectedPlaywrightCount -or $playwrightFailed -ne 0 -or
+        $playwrightFlaky -ne 0 -or $playwrightSkipped -ne 0 -or
+        $playwrightExecuted -ne $playwrightDiscovered) {
+        throw "Playwright reconciliation failed: expected=$ExpectedPlaywrightCount, discovered=$playwrightDiscovered, executed=$playwrightExecuted, failed=$playwrightFailed, flaky=$playwrightFlaky, skipped=$playwrightSkipped"
+    }
+
+    $playwrightSummary = [pscustomobject]@{
+        expected = $ExpectedPlaywrightCount
+        discovered = $playwrightDiscovered
+        executed = $playwrightExecuted
+        passed = $playwrightPassed
+        failed = $playwrightFailed
+        flaky = $playwrightFlaky
+        skipped = $playwrightSkipped
+    }
 }
 
 $vitestSummary = $null
@@ -96,11 +136,13 @@ if (-not [string]::IsNullOrWhiteSpace($VitestPath)) {
     $vitestPending = [int]$vitest.numPendingTests
     $vitestTodo = [int]$vitest.numTodoTests
     $vitestSkipped = $vitestPending + $vitestTodo
-    if (-not [bool]$vitest.success -or $vitestTotal -ne $vitestPassed -or $vitestFailed -ne 0 -or $vitestSkipped -ne 0) {
-        throw "Vitest reconciliation failed: discovered=$vitestTotal, executed=$vitestPassed, failed=$vitestFailed, skipped=$vitestSkipped"
+    if (-not [bool]$vitest.success -or $vitestTotal -ne $ExpectedVitestCount -or
+        $vitestTotal -ne $vitestPassed -or $vitestFailed -ne 0 -or $vitestSkipped -ne 0) {
+        throw "Vitest reconciliation failed: expected=$ExpectedVitestCount, discovered=$vitestTotal, executed=$vitestPassed, failed=$vitestFailed, skipped=$vitestSkipped"
     }
 
     $vitestSummary = [pscustomobject]@{
+        expected = $ExpectedVitestCount
         files = @($vitest.testResults).Count
         discovered = $vitestTotal
         executed = $vitestPassed
@@ -120,11 +162,17 @@ if (-not [string]::IsNullOrWhiteSpace($DeploymentPath)) {
     $deploymentCases = @($deploymentLines | Where-Object { $_ -match '^TEST ' }).Count
     $nonProductionMarker = @($deploymentLines | Where-Object { $_ -eq 'NON_PRODUCTION_MECHANISM_TEST productionEligible=false result=passed' }).Count
     $completionMarker = @($deploymentLines | Where-Object { $_ -eq 'All AICopilot deployment behavior tests passed.' }).Count
-    if ($deploymentCases -le 0 -or $nonProductionMarker -ne 1 -or $completionMarker -ne 1) {
-        throw "Deployment behavior reconciliation failed: cases=$deploymentCases, nonProductionMarker=$nonProductionMarker, completionMarker=$completionMarker"
+    if ($deploymentCases -ne $ExpectedDeploymentCount -or $nonProductionMarker -ne 1 -or $completionMarker -ne 1) {
+        throw "Deployment behavior reconciliation failed: expected=$ExpectedDeploymentCount, cases=$deploymentCases, nonProductionMarker=$nonProductionMarker, completionMarker=$completionMarker"
     }
 
-    $deploymentSummary = [pscustomobject]@{ executed = $deploymentCases; failed = 0; skipped = 0 }
+    $deploymentSummary = [pscustomobject]@{
+        expected = $ExpectedDeploymentCount
+        discovered = $deploymentCases
+        executed = $deploymentCases
+        failed = 0
+        skipped = 0
+    }
 }
 
 $summary = [pscustomobject]@{
@@ -138,6 +186,7 @@ $summary = [pscustomobject]@{
         skipped = $skippedTotal
     }
     vitest = $vitestSummary
+    playwright = $playwrightSummary
     deployment = $deploymentSummary
 }
 

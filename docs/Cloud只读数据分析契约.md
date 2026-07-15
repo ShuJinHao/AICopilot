@@ -12,7 +12,7 @@
 
 ## 2. 源码归属
 
-- Cloud AiRead transport 和 endpoint policy：`src/infrastructure/AICopilot.Infrastructure/CloudRead`。
+- Cloud AiRead transport 和 endpoint policy：`src/infrastructure/AICopilot.CloudReadClient`。
 - 语义分析执行：`src/services/AICopilot.AiGatewayService/Workflows/Executors/SemanticAnalysisRunner.cs`。
 - CloudReadOnly Text-to-SQL：`src/services/AICopilot.AiGatewayService/Workflows/Executors/CloudReadOnly*`、`src/services/AICopilot.Services.Contracts/Contracts/CloudReadOnlyTextToSql*`。
 - governed schema 和 SQL guard：`src/infrastructure/AICopilot.Dapper`、`src/services/AICopilot.Services.CrossCutting/Sql`。
@@ -22,9 +22,10 @@
 
 ### 编译型只读门禁
 
-- `AIARCH006` 以 Roslyn symbol/operation 和跨方法 call graph 从 Cloud AiRead / CloudReadOnly 入口追踪具体实现、interface dispatch、泛型 helper 与 lambda；任何可达 repository mutation、`SaveChanges*`、直接 SQL/DB write、`ICommand` dispatch 或 MCP create/update/delete/write 都是 compiler error。
+- `AIARCH006` 以 Roslyn symbol/operation 对所有源码方法（包括 internal/private/protected HostedService 路径）逐个判断 Cloud root：该方法自身直接调用、构造或泛型解析完全限定真实 Cloud AiRead / CloudReadOnly operation，签名/字段/ctor 持有正式 client，或自身属于正式 fallback/provider/tool workflow 时才命中；随后从该 root 追踪完整 call graph、具体实现、interface dispatch、泛型 helper、lambda 以及 field/property delegate。Delegate member initializer、constructor assignment 和 property getter return 必须在 CompilationEnd 统一解析，不能受并发 Analyzer callback 顺序影响。中性命名方法通过本地 DI factory、private helper 返回或 object creation 取得真实 Cloud read 类型时同样命中。Generic Agent/worker orchestrator 不能仅因深层 interface dispatch 某个实现可能读 Cloud 就被整体误标；可信 operation 只来自契约记录的完全限定 client、read-only interface/provider/tool executor 和正式 fallback workflow，同名伪 Cloud 类型、仅计划/DTO 类型或方法名不能扩大入口。
+- Cloud root 可达图中的写边矩阵固定为：完全限定 `AICopilot.SharedKernel.Repository.IRepository/IReadRepository` mutation；`SaveChanges*`、`ExecuteNonQuery*`、EF raw/bulk write；完全限定 `Dapper.SqlMapper.Execute/ExecuteAsync`；参数实现完全限定 `AICopilot.SharedKernel.Messaging.ICommand` 的 dispatch；以及完全限定 `AICopilot.AiGatewayService.AgentTasks.IAgentToolExecutor/McpAgentToolExecutor.ExecuteAsync`。这些边全部是 compiler error，只有完全限定 `AICopilot.Services.Contracts.IAuditLogWriter` audit write 例外。同名 `Fixture.IRepository`、`Fixture.ICommand`、`Fixture.SqlMapper`、含 `Mcp`/`Write` 字样的方法或 executor 均不得触发或扩大规则；不得以 SQL 字符串关键词代替 symbol identity。
 - 唯一允许的只读路径持久化例外是完全限定接口 `AICopilot.Services.Contracts.IAuditLogWriter`，且只能记录 AICopilot 自身的只读查询审计。它不是 Cloud 业务写权限；同名接口、adapter/wrapper、直接 `AuditDbContext` 或借审计执行 Cloud mutation 均不在例外内。
-- `AIARCH007` 要求 CloudReadOnly tool safety descriptor 同时声明 `readOnlyDeclared=true`、`ReadOnlyQuery` 与 `CloudReadOnly`；任一值声明为 side-effecting/可写或缺失安全元数据都以 compiler error 阻断。
+- `AIARCH007` 只接受完全限定符号上的 CloudReadOnly tool safety descriptor，且安全元数据必须同时为 `boundary=CloudReadOnly`、`capability=ReadOnlyQuery`、`readOnlyDeclared=true`；`Diagnostics`、`LocalSuggestion`、`SideEffecting`、缺失值、同名伪类型或其他无法静态证明的动态声明都必须 compiler-error fail-closed。动态 MCP 配置不能因 Analyzer 无法展开就绕过安全契约；注册和每次执行都必须通过同一 `AiToolSafetyPolicy.EvaluateConfigured` 运行时门禁。
 - 读取路径不承担默认数据初始化。`AgentRuntimeSettingsProvider.GetAsync` 查不到全局 `ChatRuntimeSettings` 时只返回 `CreateDefault` 的 DTO 映射，`Add` / `Update` / `SaveChangesAsync` 必须为 0；持久化默认记录由 `MigrationWorkerAiGatewaySeeder.SeedDefaultsAsync` 在 fresh database 初始化阶段唯一负责。
 
 ## 3. Cloud AiRead 正式唯一路径
@@ -113,9 +114,14 @@ Text-to-SQL prompt 只能暴露 `CloudReadOnlyGovernedSchema` 批准的表名、
 
 ## 9. 验收命令
 
+以下命令用于 Cloud 只读专题定向诊断；任务完成仍必须对账 inventory 中全部 required runner、Web 和 deployment behavior，不得用 filter 结果代替。
+
 ```bash
 dotnet test src/tests/AICopilot.ArchitectureTests/AICopilot.ArchitectureTests.csproj --filter "CloudReadOnly|TextToSql|CloudWrite" --no-restore
-dotnet test src/tests/AICopilot.BackendTests/AICopilot.BackendTests.csproj --filter "CloudAiReadClientTests|CloudReadOnlyTextToSqlFallbackRunnerTests|TextToSqlReadOnlyTests|AiEvalBehaviorGuardrailTests|PromptGovernanceTests|SemanticAnalysisRunnerTests|DeviceLogFollowUpIntentRewriterTests" --no-restore
+dotnet test src/tests/AICopilot.ContractTests/AICopilot.ContractTests.csproj --filter "CloudAiReadClientContractTests|CloudReadonlyChatBoundaryTests" --no-restore
+dotnet test src/tests/AICopilot.UnitTests/AICopilot.UnitTests.csproj --filter "CloudReadOnly|PromptGovernanceTests|DeviceLogFollowUpIntentRewriterTests" --no-restore
+dotnet test src/tests/AICopilot.ApplicationTests/AICopilot.ApplicationTests.csproj --filter "TextToSqlReadOnlyTests|SemanticAnalysisRunnerTests|AgentSafetyApplicationTests" --no-restore
+dotnet test src/tests/AICopilot.GoldenEvalTests/AICopilot.GoldenEvalTests.csproj --no-restore
 dotnet test src/tests/AICopilot.SimulationTests/AICopilot.SimulationTests.csproj -c Release --no-build --no-restore
 docker info --format '{{.OSType}}'
 dotnet test src/tests/AICopilot.SimulationDockerTests/AICopilot.SimulationDockerTests.csproj -c Release --no-build --no-restore

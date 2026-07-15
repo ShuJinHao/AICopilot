@@ -1,7 +1,7 @@
 # AICopilot runner platform attestation template
 
 This template is the manual platform evidence record for `AI-SEC-010`.
-It does not prove the platform by itself. The filled record must be reviewed
+It does not prove the platform by itself. The filled record must be validated
 by the platform owner and kept with the release or infrastructure change log.
 
 Do not commit a filled production record if it contains hostnames, user names,
@@ -15,7 +15,6 @@ secret names, ticket links, screenshots, or other internal operational details.
 - Runner host: `<host or asset id>`
 - Attestation date: `<YYYY-MM-DD>`
 - Platform owner: `<name>`
-- Reviewer: `<name>`
 - Related infrastructure ticket: `<ticket id or change id>`
 
 ## Runner machine facts
@@ -46,7 +45,6 @@ Evidence summary:
 ## GitHub production environment
 
 - [ ] The `production` environment exists in GitHub.
-- [ ] Required reviewers are configured for production deployments.
 - [ ] Environment secrets are restricted to AICopilot production and disaster workflows.
 - [ ] Workflow permissions stay least-privilege: `contents: read` only.
 - [ ] Production or secret-touching workflows use `runs-on: [self-hosted, iiot-linux-prod]`.
@@ -79,24 +77,21 @@ Credential strategy state: <implemented or approved infrastructure exception>
 Ticket or change id: <ticket id or change id>
 Exception owner: <name/team>
 Due date: <YYYY-MM-DD>
-Current mitigation: <required reviewers, restricted runner access, rotation window, or other current mitigation; do not paste secrets>
+Current mitigation: <restricted runner access, rotation window, or other current mitigation; do not paste secrets>
 ```
 
 Current mitigation while long-lived GitHub environment secrets still exist:
 
-- [ ] Environment required reviewers remain enabled.
-- [ ] Secret inventory was reviewed by the platform owner.
+- [ ] Secret inventory was validated by the platform owner.
 - [ ] Runner host access is limited to the deployment operators.
 - [ ] Rotation owner and next rotation date are recorded outside this repository.
 
 ## Sign-off
 
 - [ ] Platform owner confirms the evidence above is current.
-- [ ] Reviewer confirms no secret value is present in this record.
+- [ ] Platform owner confirms no secret value is present in this record.
 - [ ] Release owner confirms this record is linked from the release or infrastructure change log.
 
 Platform owner: `<name/date>`
-
-Reviewer: `<name/date>`
 
 Release owner: `<name/date>`

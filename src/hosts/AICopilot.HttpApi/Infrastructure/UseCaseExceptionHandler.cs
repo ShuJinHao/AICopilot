@@ -1,5 +1,6 @@
 ﻿using AICopilot.Services.CrossCutting.Exceptions;
 using AICopilot.Services.Contracts;
+using AICopilot.Services.Contracts.Http;
 using AICopilot.SharedKernel.Result;
 using Microsoft.AspNetCore.Diagnostics;
 namespace AICopilot.HttpApi.Infrastructure;
@@ -9,71 +10,59 @@ public sealed class UseCaseExceptionHandler(ILogger<UseCaseExceptionHandler> log
     public async ValueTask<bool> TryHandleAsync(HttpContext httpContext, Exception exception,
         CancellationToken cancellationToken)
     {
+        if (exception is OperationCanceledException && httpContext.RequestAborted.IsCancellationRequested)
+        {
+            logger.LogDebug(
+                "AICopilot API cancellation propagated without ProblemDetails. TraceIdentifier: {TraceIdentifier}; RequestAborted: {RequestAborted}; ResponseStarted: {ResponseStarted}",
+                httpContext.TraceIdentifier,
+                httpContext.RequestAborted.IsCancellationRequested,
+                httpContext.Response.HasStarted);
+            return false;
+        }
+
         if (exception is ApiProblemException apiProblemException)
         {
             httpContext.Response.StatusCode = apiProblemException.StatusCode;
-            httpContext.Response.ContentType = "application/problem+json";
-
             await httpContext.Response.WriteAsJsonAsync(
                 ApiProblemDetailsFactory.Create(
                     apiProblemException.StatusCode,
                     apiProblemException.Problem,
                     traceIdentifier: httpContext.TraceIdentifier),
-                cancellationToken);
+                options: null,
+                contentType: "application/problem+json",
+                cancellationToken: cancellationToken);
 
             return true;
         }
 
-        if (exception is PersistenceCommitOutcomeUnknownException commitOutcomeUnknown)
+        if (!UnhandledApiExceptionPolicy.TryCreate(exception, out var decision))
         {
-            logger.LogError(
-                "AICopilot persistence commit outcome is unknown. TraceIdentifier: {TraceIdentifier}; CommitId: {CommitId}; ExceptionType: {ExceptionType}; InnerExceptionType: {InnerExceptionType}; OriginalMessage: {OriginalMessage}",
-                httpContext.TraceIdentifier,
-                commitOutcomeUnknown.CommitId,
-                commitOutcomeUnknown.GetType().Name,
-                commitOutcomeUnknown.InnerException?.GetType().Name ?? string.Empty,
-                "hidden_by_security_policy");
-
-            var persistenceProblem = new ApiProblemDescriptor(
-                AppProblemCodes.PersistenceCommitOutcomeUnknown,
-                "The write may have committed and must be reconciled before retrying.",
-                new Dictionary<string, object?>
-                {
-                    ["commitId"] = commitOutcomeUnknown.CommitId
-                });
-
-            httpContext.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
-            httpContext.Response.ContentType = "application/problem+json";
-            await httpContext.Response.WriteAsJsonAsync(
-                ApiProblemDetailsFactory.Create(
-                    StatusCodes.Status503ServiceUnavailable,
-                    persistenceProblem,
-                    traceIdentifier: httpContext.TraceIdentifier),
-                cancellationToken);
-
-            return true;
+            return false;
         }
 
         logger.LogError(
             "Unhandled AICopilot API exception. TraceIdentifier: {TraceIdentifier}; ExceptionType: {ExceptionType}; InnerExceptionType: {InnerExceptionType}; OriginalMessage: {OriginalMessage}",
             httpContext.TraceIdentifier,
-            exception.GetType().Name,
-            exception.InnerException?.GetType().Name ?? string.Empty,
+            decision.ExceptionType,
+            decision.InnerExceptionType,
             "hidden_by_security_policy");
 
-        var problem = new ApiProblemDescriptor(
-            AppProblemCodes.InternalServerError,
-            "Request failed unexpectedly. Contact support with the trace id.");
+        if (httpContext.Response.HasStarted)
+        {
+            // The failure is still tracked, but an already-started response cannot be safely
+            // rewritten as ProblemDetails. Returning false lets the server terminate the stream.
+            return false;
+        }
 
-        httpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
-        httpContext.Response.ContentType = "application/problem+json";
-
+        httpContext.Response.StatusCode = decision.StatusCode;
         await httpContext.Response.WriteAsJsonAsync(
             ApiProblemDetailsFactory.Create(
-                StatusCodes.Status500InternalServerError,
-                problem,
+                decision.StatusCode,
+                decision.Problem,
                 traceIdentifier: httpContext.TraceIdentifier),
-            cancellationToken);
+            options: null,
+            contentType: "application/problem+json",
+            cancellationToken: cancellationToken);
 
         return true;
     }

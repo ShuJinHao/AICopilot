@@ -850,7 +850,10 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function runAgentTask(taskId: string) {
+  async function executeAgentTaskAction(
+    taskId: string,
+    execute: (id: string) => ReturnType<typeof chatService.runAgentTask>,
+  ) {
     const sessionId = resolvedSessionId.value
     if (!sessionId || isSessionTransitionBlocked.value) {
       return null
@@ -863,7 +866,7 @@ export const useChatStore = defineStore('chat', () => {
     isAgentBusy.value = true
     clearCurrentSessionError()
     try {
-      const updated = await chatService.runAgentTask(taskId)
+      const updated = await execute(taskId)
       upsertAgentTask(updated)
       await loadAgentApprovals(taskId)
       await loadAgentAuditSummary(taskId)
@@ -880,34 +883,12 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function retryAgentTask(taskId: string) {
-    const sessionId = resolvedSessionId.value
-    if (!sessionId || isSessionTransitionBlocked.value) {
-      return null
-    }
-    if (!ownsCurrentTask(taskId, sessionId) || agentTaskStore.isApprovalAuthorityUnknown(taskId)) {
-      rejectForeignSessionTarget()
-      return null
-    }
+  async function runAgentTask(taskId: string) {
+    return executeAgentTaskAction(taskId, chatService.runAgentTask)
+  }
 
-    isAgentBusy.value = true
-    clearCurrentSessionError()
-    try {
-      const updated = await chatService.retryAgentTask(taskId)
-      upsertAgentTask(updated)
-      await loadAgentApprovals(taskId)
-      await loadAgentAuditSummary(taskId)
-      await refreshWorkspace(updated)
-      await loadTimeline(sessionId)
-      return updated
-    } catch (error) {
-      const failureMessage = toFriendlyMessage(error)
-      await tryRefreshAgentTaskSnapshotForSession(sessionId)
-      setCurrentSessionError(failureMessage)
-      return null
-    } finally {
-      isAgentBusy.value = false
-    }
+  async function retryAgentTask(taskId: string) {
+    return executeAgentTaskAction(taskId, chatService.retryAgentTask)
   }
 
   async function approveAndRunAgentTask(taskId: string) {

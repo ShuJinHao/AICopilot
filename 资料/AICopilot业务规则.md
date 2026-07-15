@@ -10,7 +10,7 @@
 - 每次复盘必须写明改动范围、改动原因、影响面、验证命令、验证结果和规则提炼结论。
 - 必须判断是否形成长期规则；有则写入项目 `AGENTS.md`、本文档、专题契约或工作区长期规则，无则在复盘中写明“无新增长期规则”及原因。
 - 新增、删除或重命名后端错误码时，必须同批更新 `docs/frontend-integration-contract-package-2026-05-17.md`，并运行 `ErrorCodeCatalogTests`，确保前端错误契约不漂移。
-- 大范围架构、管道、权限、工作流或契约改动不得只以 filtered tests 作为完成依据；全量 `AICopilot.BackendTests` 未跑、CI 全量未确认或环境依赖失败时，最终回复和复盘必须明确标注。
+- 大范围架构、管道、权限、工作流或契约改动不得只以 filtered tests 作为完成依据；`Get-AICopilotTestInventory.ps1` 发现的全部 required 物理 runner 未执行/未完成发现数与执行数对账、CI 全量未确认或环境依赖失败时，最终回复和复盘必须明确标注。
 - 最终回复必须列出复盘文档、规则沉淀位置和验证命令；缺任一项，不得称为完成。
 - 默认只更新项目滚动复盘文档，不为每个任务新增单独流水文档；只有形成可长期复用的业务或技术契约，才新增专题文档。
 - `资料/` 保留为 AICopilot 业务规则入口；执行复盘和改动沉淀流水统一放在项目 `docs/`。
@@ -49,6 +49,8 @@
 - 直接写云端数据库。
 - 通过 MCP、Tool、Agent workflow、后台任务或隐藏适配器间接调用 Cloud 写接口。
 - 通过 MCP、Tool、Agent workflow、后台任务或隐藏适配器间接调用云端写接口。
+
+Cloud tool 安全元数据只有 `CloudReadOnly + ReadOnlyQuery + readOnlyDeclared=true` 这一精确组合有效。`Diagnostics`、`LocalSuggestion`、`SideEffecting`、缺失/动态无法静态证明的声明都必须 fail-closed；动态 MCP 配置仍必须在注册和每次执行时经过同一 `AiToolSafetyPolicy` 评估。
 
 Human-in-the-loop 不能把禁止的 Cloud 业务写入变成允许动作。
 Human-in-the-loop 不能作为放开云端业务写入的理由。
@@ -198,7 +200,12 @@ Cloud AiRead 设备契约：
 ## 10. 工程边界
 
 - AICopilot DDD 聚合根、投影、队列、审计和运行时记录的长期技术契约见 `../docs/DDD聚合根边界.md`；新增或调整聚合根、仓储注册、EF `DbSet`、Agent runtime timeline/queue/audit 记录时必须同步更新架构测试。
-- `AICopilot.Architecture.Analyzers` 是生产编译的架构 owner；`AIARCH001`–`AIARCH007` 必须保持 Error，由独立 required `AICopilot.Architecture.AnalyzerTests` 同时保有语义夹具和真实临时 csproj 正/反编译夹具。规则例外只能是专题契约中记录的完全限定类型/项目，禁止 `NoWarn`、降级 warning、optional gate 或恢复同义字符串/Regex 影子路径。
+- `AICopilot.Architecture.Analyzers` 是生产编译的架构 owner；`AIARCH001`–`AIARCH007` 必须保持 Error，由独立 required `AICopilot.Architecture.AnalyzerTests` 同时保有语义夹具和真实临时 csproj 正/反编译夹具。Analyzer 属性和例外必须按完全限定 symbol identity 识别；`AIARCH004` 必须证明减员在 transaction delegate 内且 invariant guard 先于变更，inline/stored 与 field/property 中的 lambda/method-group 都必须在 CompilationEnd 形成 edge-aware caller→delegate 语义边，synthetic transaction edge 不能掩护同一 target 的真实直接调用；public/internal/private/protected 中没有源码 incoming edge 的真实宿主入口均须检查，不能靠可见性降级绕过。`AIARCH006` 必须对所有源码方法先按该方法自身的直接调用/构造/泛型解析、签名/字段/ctor 正式 client 或正式 workflow symbol 判定 Cloud root，命中后才检查完整 reachable graph；本地 DI factory、private helper 返回、object creation、field/property delegate 和 Cloud root 内的 interface dispatch 都不能绕过。Repository、command、Dapper 和 MCP 写边只接受专题契约列出的完全限定 symbol；同名伪 repository/command/`SqlMapper`/MCP executor、Generic orchestrator、仅计划/DTO 类型或方法名均不得扩大入口或写边。规则例外只能是专题契约中记录的完全限定类型/项目，禁止 `NoWarn`、降级 warning、optional gate 或恢复同义字符串/Regex 影子路径。
+- `AIARCH001` 对 `AICopilot.ArtifactGeneration`、`AICopilot.CloudReadClient`、`AICopilot.McpRuntime`、`AICopilot.SecretProtection`、`AICopilot.SqlSafety` 使用 Infrastructure 分类；任何未分类 `AICopilot.*` 生产项目无论出现在引用源或目标都必须 fail-closed。
+- Aggregate runner 只能是 Pure 且只直接依赖 core/shared；Application runner 只能是 Pure 且不得直接依赖 host、EF/Dapper、Aspire/Persistence fixture；文件持久化测试必须进入 `PersistenceFilesystemTests`。五个 TestKit 不得依赖 test SDK、xUnit/NUnit/MSTest 或断言 package，生命周期适配和断言 helper 留在 runner。
+- Runner/TestKit 依赖边界只认指定 Configuration 下 MSBuild evaluated `ProjectReference` / `PackageReference` 图，必须包含隐式 `Directory.Build.*`、递归 import、生效复合条件、逐 TargetFramework item 和 TestKit 传递闭包；raw XML 扫描不能作为证据，评估异常或缺失规范化 identity 必须 fail-closed。Direct kind boundary、Pure closure、TestKit consumers 和 production→TestKit 禁令必须复用同一图。
+- Required coverage 必须绑定 clean committed HEAD 的完整生产源码、程序集和 portable PDB universe；每个 required runner 恰好一份 TRX 和一份由其引用的 XPlat report，合并后必须观察全部生产程序集和全部含 sequence point 的生产源码。dirty tree、HEAD/hash 不一致、报告缺失/重复或新增源码未被任何 required runner 加载必须 fail-closed；baseline 只能在完整 universe 已观察且指标不回退后更新。
+- 重复度门禁必须以 `path+line` 计数每个出现实例，同文件重复不得被去重；同时锁定汇总指标和每个 signature 的实例数/重复行/重复 token。只能在真实源码重复先减少后更新 schema/baseline，不得用总量持平、signature swap 或重生成 baseline 换绿。
 - `IAggregateRoot<>` 只用于独立维护业务不变量和生命周期的领域根；队列项、timeline 投影、工具执行审计、worker 心跳和执行尝试记录不得作为新增聚合根方向，历史债务只能减少不能增加。
 - `DataSourcePermissionGrant` 当前保留为独立聚合根但标记待评估；后续如果授权生命周期可归入 `BusinessDatabase`，应下沉为子实体或专用权限记录并移出聚合根白名单。
 - `AiCopilotDbContext` 是主基础设施迁移上下文，也是 Outbox 与 persistence commit marker 的唯一 migration owner；`AuditDbContext` 负责审计查询和运行时审计写入，`DataAnalysisDbContext` 只承载数据分析配置，`OutboxDbContext` 与 `PersistenceCommitMarkerDbContext` 只作为运行时短生命周期参与者，不拥有 migration。

@@ -378,6 +378,8 @@ const samples = {
     {
       id: 'tpl-intent',
       name: 'IntentRoutingAgent',
+      code: 'IntentRoutingAgent',
+      scope: 'IntentRouting',
       description: '意图识别和 Skill 路由约束',
       systemPrompt: '你是 A助理的意图识别 Agent。可选意图列表：{{$IntentList}}',
       modelId: 'lm1',
@@ -388,6 +390,8 @@ const samples = {
     {
       id: 'tpl-planner',
       name: 'agent_planner',
+      code: 'agent_planner',
+      scope: 'AgentPlanner',
       description: '受控 Agent 计划生成约束',
       systemPrompt: '你是 A助理的计划生成 Agent。只能输出计划，不能调用工具。',
       modelId: 'lm1',
@@ -398,6 +402,8 @@ const samples = {
     {
       id: 'tpl-executor',
       name: 'agent_executor',
+      code: 'agent_executor',
+      scope: 'AgentExecutor',
       description: '受控 Agent 步骤执行约束',
       systemPrompt: '你是 A助理的最终执行 Agent。只能执行已经确认或审批的计划步骤。',
       modelId: 'lm1',

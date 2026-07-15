@@ -22,7 +22,7 @@
 - 每次复盘必须写明改动范围、改动原因、影响面、验证命令、验证结果和规则提炼结论。
 - 必须判断是否形成长期规则；有则写入本文档、`资料/AICopilot业务规则.md`、专题契约或工作区长期规则，无则在复盘中写明“无新增长期规则”及原因。
 - 新增、删除或重命名后端 `AuthProblemCodes`、`AppProblemCodes`、`CloudAiReadProblemCodes` 时，必须同批更新 `docs/frontend-integration-contract-package-2026-05-17.md`，并运行 `ErrorCodeCatalogTests`。
-- 大范围架构、管道、权限、工作流或契约改动不得只以 filtered tests 作为完成依据；全量 `AICopilot.BackendTests` 未跑、CI 全量未确认或环境依赖失败时，最终回复和复盘必须明确标注。
+- 大范围架构、管道、权限、工作流或契约改动不得只以 filtered tests 作为完成依据；`Get-AICopilotTestInventory.ps1` 发现的全部 required 物理 runner 未执行/未完成发现数与执行数对账、CI 全量未确认或环境依赖失败时，最终回复和复盘必须明确标注。
 - 最终回复必须列出复盘文档、规则沉淀位置和验证命令；缺任一项，不得称为完成。
 - 默认只更新项目滚动复盘文档，不为每个任务新增单独流水文档；只有形成可长期复用的业务或技术契约，才新增专题文档。
 
@@ -52,6 +52,7 @@
 - Cloud 只读读取只能向 Cloud 发送真实端点参数；`scenarioId`、`from`、`to`、`pilotWindowId`、`boundary` 等试点元数据不得透传给 Cloud。
 - 内部开发允许通过 DataAnalysis `CloudReadOnly` 只读数据源直连真实 Cloud PostgreSQL 做 Text-to-SQL 验证；必须使用已验证只读数据库账号、白名单表字段和只读 SQL guard，不得写 Cloud 业务数据，也不得用 Simulation 冒充真实数据。
 - `Device`、`DeviceLog`、`Capacity`、`ProductionData`、`Process`、`ClientRelease` 六类已覆盖正式 `Analysis.*` 语义必须只走 Cloud AiRead 八个 typed GET；Cloud 关闭、空集、400/401/403/429/5xx、timeout 或非法 JSON 均不得回退 Direct DB、Text-to-SQL、Simulation、MCP 或隐藏适配器。
+- Cloud tool 安全元数据只有 `boundary=CloudReadOnly + capability=ReadOnlyQuery + readOnlyDeclared=true` 这一精确组合有效；`Diagnostics`、`LocalSuggestion`、`SideEffecting`、缺失值、同名伪符号或无法静态证明的声明都必须 fail-closed。动态 MCP 配置在注册和每次执行时仍必须经过同一 `AiToolSafetyPolicy`，不得因 Analyzer 无法展开动态值而默认放行。
 - CloudReadOnly Direct DB / Text-to-SQL 只服务上述正式语义覆盖外的低频自由探索和治理白名单内补充分析；探索型 Text-to-SQL 只能在这类未覆盖问题或其 Direct DB SQL 失败后受控 fallback，不能执行、拆分、重命名或旁路任何已覆盖 `Analysis.*` intent。
 - CloudReadOnly Text-to-SQL fallback 必须同时满足已验证只读凭据、共享白名单 schema、LLM 结构化生成、SELECT-only SQL guard、BusinessQuery safety policy 双层表/列白名单、只读执行和 hash-only 审计；生产 fallback 不得退化为规则 SQL 模板。
 - CloudReadOnly Text-to-SQL LLM prompt 可见的物理 schema 仅限 `CloudReadOnlyGovernedSchema` 批准的表名、列名、列类型、join hints 和必要业务描述；不得暴露连接串、凭据、role/权限细节、样例数据、查询结果、参数值、非白名单表字段或系统/敏感字段。
@@ -122,17 +123,24 @@ Cloud-AICopilot OIDC 身份对齐的长期结论见 `../docs/历史核心记录.
 ## Test Architecture Governance
 
 - 三项目测试架构专题入口是 `../docs/三项目测试架构治理总计划.md`。AICopilot 测试资产身份只来自项目元数据，测试清单只负责真实发现 runner，CI 只依赖实际执行结果对账。
-- 新增测试必须进入 `Unit/Aggregate/Application/Workflow/Contract/Conformance/Persistence/HttpIntegration/EndToEnd/Deployment/GoldenEval` 等物理项目，直接声明 `IsTestProject` 与 kind/runtime/cadence/owner/required 元数据并进入 `AICopilot.slnx`。`BackendTests` 是待迁空的混合旧桶，不得再承接新责任；不得使用 `Phase/Batch/Suite` filter 充当物理分层。
-- `AICopilot.Testing.McpServer` 是唯一固定 allowlist 中的 Integration support host，不是测试项目；必须直接声明 `IsTestProject=false`，不得引用 test SDK/framework package 或声明 Fact/Theory。其它路径不能靠自声明 Support 藏在 `src/tests` 下逃避 discovery；新增 support host 必须先修改固定 allowlist 和行为负例。
-- Required lane 必须动态发现所有 required runner，逐项产生 TRX，并要求每个 runner `discovered>0`，再对账 `discovered=executed`、`failed=0`、`skipped=0`；缺 Docker/Aspire/Browser 要在 preflight 失败，禁止 Skip、`continue-on-error`、硬编码 case 数或仅跑 filtered subset 换绿。
+- 新增测试必须进入 `Unit/Aggregate/Application/Workflow/Contract/Conformance/Persistence/HttpIntegration/EndToEnd/Deployment/GoldenEval/Architecture` 等物理项目，直接声明 `IsTestProject` 与 kind/runtime/cadence/owner/required 元数据并进入 `AICopilot.slnx`。不得恢复混合测试桶，不得使用 `Phase/Batch/Suite` filter 充当物理分层。
+- support code 只能位于 `src/testing` 的五个固定 TestKit 项目，必须直接声明 `IsTestProject=false`、owner 和完整 consumers，不得引用 test SDK、xUnit/NUnit/MSTest、FluentAssertions/Shouldly 等测试框架或断言 package，也不得声明 Fact/Theory。xUnit 生命周期适配和断言 helper 必须位于实际 runner，不得为 support 恢复 package 例外 allowlist。其它路径不能靠自声明 Support 逃避 discovery；新增 support 项目必须先修改固定项目清单和行为负例。
+- `AICopilotTestKind=Aggregate` 的 runner 必须是 `Runtime=Pure`，且只能直接引用 core/shared 领域项目；业务语义 catalog、application policy 和 service 编排必须进入 `ApplicationTests`。`AICopilotTestKind=Application` 也必须是 `Runtime=Pure`，不得直接引用 host、EF/Dapper、Aspire 或 Persistence TestKit；文件系统持久化语义只能进入 `PersistenceFilesystemTests`，不得恢复 `ApplicationFilesystemTests`。
+- Runner/TestKit 的依赖身份必须来自指定 Configuration 下 MSBuild evaluated `ProjectReference` / `PackageReference` 图；必须覆盖隐式 `Directory.Build.*`、递归 import、生效条件、逐 TargetFramework item 和 TestKit 传递闭包。Raw csproj/字符串扫描不得作为依赖边界证据；评估失败、缺失绝对 `FullPath` 或 package identity 必须 fail-closed。Aggregate/Application direct boundary、Pure transitive boundary、TestKit consumer 双向对账和 production→TestKit 禁令都必须使用同一 evaluated 图。
+- Required lane 必须动态发现所有 required .NET runner，逐项产生 TRX，并要求每个 runner `discovered>0`，再对账 inventory `caseCount=discovered=executed`、`failed=0`、`skipped=0`；不得在 workflow 另写一份 .NET case 总数。缺 Docker/Aspire/Browser 要在 preflight 失败，禁止 Skip、`continue-on-error` 或仅跑 filtered subset 换绿。
+- Canonical 完成证据必须同时对账 inventory 中全部 required .NET runner、Vitest、Playwright 和 deployment behavior。当前 Web/Shell 基线精确冻结为 Vitest 185、Playwright 43、deployment behavior 33，任一实际数量与基线不等即失败；有意增删 case 必须同批更新测试、对账基线、CI 和文档，不得用 `>0` 换绿。定向 `--filter` 只能用于失败诊断。
+- Required coverage 只有绑定 clean committed HEAD 的 schema v3 inventory 才是权威证据：inventory 必须记录完整生产源码、程序集和 portable PDB 哈希；每个 required runner 必须恰好生成一份 TRX 和一份由该 TRX 引用的 XPlat coverage，合并后必须观察全部生产程序集和全部含 sequence point 的生产源码。工作树不干净、HEAD 不一致、程序集/PDB 哈希不一致、报告缺失/重复或新增生产源码未被任何 required runner 加载都必须 fail-closed；coverage baseline 只能在完整 universe 已实际观察且指标不回退后更新。
+- 旧测试声明迁移账本只能锚定不可变 Git commit 中的真实 `src/tests` tree、声明数和有序符号摘要；不得引用已删除的 governance baseline、generator 或其它影子入口。
 - `currentSessionId` 可能只来自 `sessionStorage`，只能表示待解析的持久化候选，不能作为 Chat、Plan、Upload 或其它服务端动作的授权目标；动作必须使用已存在于当前 session list 且已完成历史/审批/任务激活的 resolved session，并在 UI 和 store action 两层复核。进入或重新进入 ChatView 时必须在子组件渲染前同步撤销旧动作权限。初始 `null -> A` 水合与 `A -> A` 刷新不得清空用户已输入的草稿、模式或高级选择；刷新失败必须恢复原 active/raw 会话并保留 composer，只有已解析会话 `A -> B` / `A -> null` 才执行 reset。会话激活、流、任务、上传、预览、下载、在岗声明、轮询、历史分页或删除在途时，选择/新建/删除及 SPA 离开 Chat 必须由同一 store+router 临界区 fail-closed；DELETE ACK-unknown 只能在 session list 确认目标仍存在后恢复，禁止旧 A 响应污染 B。
 - 会话、任务、工作区、产物和审批均是带归属的权威投影：只允许已加载 roster/current task 中的 ID，下载必须从当前工作区解析 canonical metadata；task/workspace/approval 任一步读取失败必须原子恢复上一代可信投影。审批投影未知时允许编辑草稿但禁止 Chat/Plan/审批/任务/最终输出 mutation；只有同一会话/任务的权威刷新成功才能解除门禁。DELETE 超时或断链属于 ACK-unknown，必须先用 session list 对账，无法对账时保持 resolved authority 为空，禁止假定删除未发生并恢复旧会话。
 - Required workflow 中任何经 `tee` 保存证据的 Shell 测试必须显式使用 `set -euo pipefail` 并把 stderr 合并进证据流；不得让 `tee` 的成功码覆盖左侧测试失败。最终 reconcile 是第二道对账，不能替代测试 step 自身的正确失败传播。
 - `aicopilot-simulation-release-candidate.yml` 只能作为 Manual-only 完整非生产 Simulation acceptance：使用固定 Linux runner，先以 `docker info` fail-fast，再整项目执行 `AICopilot.SimulationTests` pure runner 与 `AICopilot.SimulationDockerTests` 真实 Docker runner，二者均不得 Skip；不得在 PR 重复 Backend/Web/required suite，不得用 `--filter`/Phase/Batch/Suite/类名或静态 changed-files 清单选测。两个 runner 必须分别产生 TRX 并对账 12/1，报告、JSON 摘要和 TRX 只能写入已 ignore 的 `artifacts/simulation/`，workflow 必须以 `always()` 上传 evidence，不得生成独立文档流水。
 - `CloudAiReadLiveTests` 只允许显式 Manual/Release 的非生产真实契约执行，缺环境必须失败；不得纳入普通 PR，也不得以 Stub/Simulation 代替真实 Cloud provider。
-- 当前 `AiEvalTests` 的 6 个 JSON case 只构成 legacy eval continuity，其中自证输入的 approval/prompt-injection case 不能宣称为生产工作流 Golden。只有接入真实生产 formatter/policy/workflow、版本化期望输出并建立审阅更新流程后，才能升级为 `GoldenEval` hard gate。
+- `GoldenEvalTests` 必须穿过真实 `AgentWorkflowPipeline` 或其生产正式执行组件，使用版本化期望输出并在数据集内记录变更理由；直接调用 leaf policy/formatter、自证输入、仅匹配 fixture 文本或不经生产编排路径的 case 不得作为 Golden hard gate。
 - `AICopilot.Architecture.Analyzers` 是生产项目的编译型架构 owner：根 `Directory.Build.targets` 必须把它以 Analyzer 引用接入每个非测试生产项目，并保持 `Microsoft.CodeAnalysis.CSharp 5.6.0` 精确版本。`AIARCH001`–`AIARCH007` 全部是稳定 compiler error，禁止用 `NoWarn`、降级 warning、可选开关或第二套同义门禁规避。
-- `AICopilot.Architecture.AnalyzerTests` 必须同时保有语义正/反例和每条 Rule ID 的真实临时 csproj 编译失败夹具；例外必须使用完全限定类型/项目名、同步写入对应专题契约并有反例夹具。`ArchitectureTests` 只保留需要运行时、反射、数据库或动态组装才能证明的事实，禁止恢复已被 Analyzer 覆盖的源码字符串/Regex 重复门禁。
+- `AIARCH001` 必须显式把 `AICopilot.ArtifactGeneration`、`AICopilot.CloudReadClient`、`AICopilot.McpRuntime`、`AICopilot.SecretProtection`、`AICopilot.SqlSafety` 归类为 Infrastructure；任何未分类的 `AICopilot.*` 生产源项目或目标项目必须 fail-closed，不得以 Unknown 继续编译。
+- `AICopilot.Architecture.AnalyzerTests` 必须同时保有语义正/反例和每条 Rule ID 的真实临时 csproj 编译失败夹具；属性、Controller/action、descriptor 和例外只能按完全限定 symbol identity 识别，同名类型/伪属性不得被当作正式元数据。`AIARCH004` 还必须证明减员实际位于唯一 transaction delegate 内且 invariant guard 在同一执行路径上先于变更；inline/stored lambda、inline/stored method-group 和局部 delegate 别名都必须建立 edge-aware caller→delegate 边，synthetic transaction edge 与真实 invocation edge 必须分开，同一 target 经事务调用后又被直接调用仍必须失败。`AIARCH006` 必须对每个源码方法（含 internal/private/protected HostedService 路径）先判断该方法自身是否直接调用、构造、泛型解析完全限定真实 Cloud operation，签名/字段/ctor 是否持有正式 client，或自身是否为正式 Cloud workflow；只有自身命中后才遍历其完整 reachable graph 查副作用。不得因 generic orchestrator 的深层 interface dispatch 某一实现可能读 Cloud 就把整个编排器误标为 Cloud root；同名 Cloud 类型、仅计划/DTO 类型或方法名也不得扩大可信入口。`ArchitectureTests` 只保留需要运行时、反射、数据库或动态组装才能证明的事实。
+- 重复度 ratchet 以 `path+line` 作为实例身份，同一文件内多次出现的同 signature 必须逐实例计数；同时锁定分类汇总和每个 signature 的 instance count / duplicated lines / duplicated tokens。新签名或任一签名指标增长都必须失败；baseline/schema 只能在先完成真实重复实现收敛并记录指标减少后更新，禁止仅重新生成 baseline 换绿。
 - `AgentRuntimeSettingsProvider.GetAsync` 是纯读路径：缺少 `ChatRuntimeSettings` 记录时只返回映射后的默认值，不得 `Add` / `Update` / `SaveChangesAsync`；首次持久化仍由 `MigrationWorkerAiGatewaySeeder.SeedDefaultsAsync` 在 fresh database seed 中负责。
 
 ## Unified Agent Workflow

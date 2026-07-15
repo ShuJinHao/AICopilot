@@ -56,12 +56,7 @@ for (const route of [
   })
 }
 
-test('inline agent run restores task, workspace, approvals, and artifacts', async ({
-  page,
-  isMobile,
-}) => {
-  test.skip(isMobile, 'desktop inline execution card covers the restored task data')
-
+test('inline agent run restores task, workspace, approvals, and artifacts', { tag: '@desktop' }, async ({ page }) => {
   await expectProtectedShell(page, '/chat')
 
   await expect(page.getByText('对话工作区')).toBeVisible()
@@ -242,7 +237,12 @@ test('config renders fixed agent slots without internal operations preload', asy
   await expect(page.getByText('agent_executor', { exact: true }).first()).toBeHidden()
   await expect(page.getByText('受控 Agent 计划生成约束').first()).toBeHidden()
   await plannerSlot.getByText('配置详情').click()
-  await expect(plannerSlot.getByText('agent_planner', { exact: true })).toBeVisible()
+  const plannerTemplateIdentifiers = plannerSlot.getByText('agent_planner', { exact: true })
+  await expect(plannerTemplateIdentifiers).toHaveCount(2)
+  await expect(plannerTemplateIdentifiers.first()).toBeVisible()
+  await expect(
+    plannerSlot.locator('.slot-technical-fold').getByText('计划生成', { exact: true }),
+  ).toBeVisible()
   await expect(plannerSlot.getByText('受控 Agent 计划生成约束')).toBeVisible()
   await expect(
     page.getByText('你是 A助理的计划生成 Agent。只能输出计划，不能调用工具。'),
@@ -291,12 +291,7 @@ test('knowledge page keeps retrieval and embedding controls collapsed by default
   await expectNoHorizontalOverflow(page)
 })
 
-test('chat stream renders widgets and approval card', async ({ page, isMobile }) => {
-  test.skip(
-    isMobile,
-    'desktop stream rendering covers widgets and approval card; mobile layout is covered separately',
-  )
-
+test('chat stream renders widgets and approval card', { tag: '@desktop' }, async ({ page }) => {
   await expectProtectedShell(page, '/chat')
 
   await page.getByRole('button', { name: /聊天模式/ }).click()
@@ -334,12 +329,7 @@ test('chat stream renders widgets and approval card', async ({ page, isMobile })
   await expectNoHorizontalOverflow(page)
 })
 
-test('mobile chat workspace keeps navigation and primary work area within viewport', async ({
-  page,
-  isMobile,
-}) => {
-  test.skip(!isMobile, 'mobile viewport only')
-
+test('mobile chat workspace keeps navigation and primary work area within viewport', { tag: '@mobile' }, async ({ page }) => {
   await expectProtectedShell(page, '/chat')
 
   await expect(page.getByText('对话工作区')).toBeVisible()
