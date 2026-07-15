@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Security;
+using System.Security.Cryptography;
 using AICopilot.Architecture.Analyzers;
 
 namespace AICopilot.AnalyzerFixtureTests;
@@ -37,12 +38,8 @@ public sealed class TemporaryProjectFixtureTests
     public async Task EachRule_ShouldBuildARealValidProject_AndFailARealInvalidProject(string ruleId)
     {
         var solutionRoot = FindSolutionRoot();
-        var analyzerProject = Path.Combine(
-            solutionRoot,
-            "src",
-            "analyzers",
-            "AICopilot.Architecture.Analyzers",
-            "AICopilot.Architecture.Analyzers.csproj");
+        var analyzerAssembly = GetReleaseAnalyzerAssemblyPath(solutionRoot);
+        var analyzerOutputFingerprint = GetReleaseAnalyzerOutputFingerprint(solutionRoot);
         var fixtureRoot = Path.Combine(
             Path.GetTempPath(),
             "aicopilot-analyzer-fixtures",
@@ -51,12 +48,15 @@ public sealed class TemporaryProjectFixtureTests
 
         try
         {
-            var validProject = WriteFixture(fixtureRoot, "Valid", ruleId, valid: true, analyzerProject);
-            var invalidProject = WriteFixture(fixtureRoot, "Invalid", ruleId, valid: false, analyzerProject);
+            var validProject = WriteFixture(fixtureRoot, "Valid", ruleId, valid: true, analyzerAssembly);
+            var invalidProject = WriteFixture(fixtureRoot, "Invalid", ruleId, valid: false, analyzerAssembly);
 
             var valid = await BuildAsync(validProject);
             var invalid = await BuildAsync(invalidProject);
 
+            GetReleaseAnalyzerOutputFingerprint(solutionRoot).Should().Be(
+                analyzerOutputFingerprint,
+                "temporary analyzer fixtures must not rebuild or mutate inventory-bound production outputs");
             valid.ExitCode.Should().Be(
                 0,
                 $"the valid {ruleId} temporary csproj must build. Output:{Environment.NewLine}{valid.Output}");
@@ -81,12 +81,8 @@ public sealed class TemporaryProjectFixtureTests
     public async Task AIARCH007_ShouldRemainABuildError_WhenARealProjectAttemptsSuppression(string suppressionMode)
     {
         var solutionRoot = FindSolutionRoot();
-        var analyzerProject = Path.Combine(
-            solutionRoot,
-            "src",
-            "analyzers",
-            "AICopilot.Architecture.Analyzers",
-            "AICopilot.Architecture.Analyzers.csproj");
+        var analyzerAssembly = GetReleaseAnalyzerAssemblyPath(solutionRoot);
+        var analyzerOutputFingerprint = GetReleaseAnalyzerOutputFingerprint(solutionRoot);
         var fixtureRoot = Path.Combine(
             Path.GetTempPath(),
             "aicopilot-analyzer-suppression-fixtures",
@@ -100,11 +96,14 @@ public sealed class TemporaryProjectFixtureTests
                 "Invalid",
                 AICopilotArchitectureAnalyzer.SecurityMetadataId,
                 valid: false,
-                analyzerProject);
+                analyzerAssembly);
             ApplySuppressionAttempt(projectPath, suppressionMode);
 
             var result = await BuildAsync(projectPath);
 
+            GetReleaseAnalyzerOutputFingerprint(solutionRoot).Should().Be(
+                analyzerOutputFingerprint,
+                "suppression fixtures must not rebuild or mutate inventory-bound production outputs");
             result.ExitCode.Should().NotBe(
                 0,
                 $"{suppressionMode} must not downgrade a NotConfigurable architecture diagnostic");
@@ -160,7 +159,7 @@ public sealed class TemporaryProjectFixtureTests
         string variant,
         string ruleId,
         bool valid,
-        string analyzerProject)
+        string analyzerAssembly)
     {
         var specification = GetSpecification(ruleId, valid);
         var projectRoot = Path.Combine(fixtureRoot, variant);
@@ -199,10 +198,7 @@ public sealed class TemporaryProjectFixtureTests
                 <AssemblyName>{Escape(specification.AssemblyName)}</AssemblyName>
               </PropertyGroup>
               <ItemGroup>
-                <ProjectReference Include="{Escape(analyzerProject)}"
-                                  OutputItemType="Analyzer"
-                                  ReferenceOutputAssembly="false"
-                                  PrivateAssets="all" />
+                <Analyzer Include="{Escape(analyzerAssembly)}" />
             {projectReferenceXml}
               </ItemGroup>
             </Project>
@@ -511,6 +507,26 @@ public sealed class TemporaryProjectFixtureTests
         return new BuildResult(
             process.ExitCode,
             string.Concat(await stdout, Environment.NewLine, await stderr));
+    }
+
+    private static string GetReleaseAnalyzerAssemblyPath(string solutionRoot) => Path.Combine(
+        solutionRoot,
+        "src",
+        "analyzers",
+        "AICopilot.Architecture.Analyzers",
+        "bin",
+        "Release",
+        "netstandard2.0",
+        "AICopilot.Architecture.Analyzers.dll");
+
+    private static string GetReleaseAnalyzerOutputFingerprint(string solutionRoot)
+    {
+        var analyzerAssembly = GetReleaseAnalyzerAssemblyPath(solutionRoot);
+        var analyzerSymbols = Path.ChangeExtension(analyzerAssembly, ".pdb");
+        return string.Concat(
+            Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(analyzerAssembly))),
+            ":",
+            Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(analyzerSymbols))));
     }
 
     private static string FindSolutionRoot()
