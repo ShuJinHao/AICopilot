@@ -1,13 +1,13 @@
 {
   "schemaVersion": 2,
   "requiredReportCount": 16,
-  "minimumLineRate": 0.8073104,
-  "minimumBranchRate": 0.50600978,
+  "minimumLineRate": 0.8074643,
+  "minimumBranchRate": 0.50616506,
   "productionAssemblyCount": 34,
-  "productionSourceCount": 763,
-  "productionUniverseIdentitySha256": "f9cbc7eac4ecaec4adc4454705438c20566b01fe5a1e1ddda4c3cdef902b76ef",
+  "productionSourceCount": 762,
+  "productionUniverseIdentitySha256": "eb6e2b9b5d3cbcb43c11358422bd410c307079aac8f7dbebb29948eb1a93d943",
   "productionPdbAssemblyCount": 34,
-  "productionPdbAssemblySha256": "7fe334533b3f394d8f5043e77d0447f093cec15de7539d0bc6e50056d4c30e0f",
+  "productionPdbAssemblySha256": "af603b573e8badd90e1359ed7e70f07915d8f827ef61d1e4d29b24a89966be76",
   "productionAssemblyIds": [
     "src/analyzers/AICopilot.Architecture.Analyzers/AICopilot.Architecture.Analyzers.csproj|AICopilot.Architecture.Analyzers",
     "src/core/AICopilot.Core.AiGateway/AICopilot.Core.AiGateway.csproj|AICopilot.Core.AiGateway",
@@ -780,7 +780,6 @@
     "AICopilot.SharedKernel|src/shared/AICopilot.SharedKernel/Ai/AiToolSafetyPolicy.cs",
     "AICopilot.SharedKernel|src/shared/AICopilot.SharedKernel/Ai/ChatExposureMode.cs",
     "AICopilot.SharedKernel|src/shared/AICopilot.SharedKernel/Ai/McpSseEndpointValidator.cs",
-    "AICopilot.SharedKernel|src/shared/AICopilot.SharedKernel/Ai/McpTargetTrustPolicy.cs",
     "AICopilot.SharedKernel|src/shared/AICopilot.SharedKernel/Domain/BaseEntity.cs",
     "AICopilot.SharedKernel|src/shared/AICopilot.SharedKernel/Domain/IAggregateRoot.cs",
     "AICopilot.SharedKernel|src/shared/AICopilot.SharedKernel/Domain/IEntity.cs",
@@ -809,7 +808,7 @@
     "AICopilot.Visualization|src/shared/AICopilot.Visualization/Widgets/IWidget.cs",
     "AICopilot.Visualization|src/shared/AICopilot.Visualization/Widgets/StatsCardWidget.cs"
   ],
-  "executableSourceCount": 706,
+  "executableSourceCount": 705,
   "executableSourceIds": [
     "AICopilot.AgentPlugin.Runtime|src/shared/AICopilot.AgentPlugin.Runtime/AgentPluginExtensions.cs",
     "AICopilot.AgentPlugin.Runtime|src/shared/AICopilot.AgentPlugin.Runtime/AgentPluginLoader.cs",
@@ -1501,7 +1500,6 @@
     "AICopilot.SharedKernel|src/shared/AICopilot.SharedKernel/Ai/AiToolSafetyPolicy.cs",
     "AICopilot.SharedKernel|src/shared/AICopilot.SharedKernel/Ai/ChatExposureMode.cs",
     "AICopilot.SharedKernel|src/shared/AICopilot.SharedKernel/Ai/McpSseEndpointValidator.cs",
-    "AICopilot.SharedKernel|src/shared/AICopilot.SharedKernel/Ai/McpTargetTrustPolicy.cs",
     "AICopilot.SharedKernel|src/shared/AICopilot.SharedKernel/Domain/BaseEntity.cs",
     "AICopilot.SharedKernel|src/shared/AICopilot.SharedKernel/Paging/PagedList.cs",
     "AICopilot.SharedKernel|src/shared/AICopilot.SharedKernel/Paging/PagedMetaData.cs",
@@ -1519,9 +1517,9 @@
     "AICopilot.Visualization|src/shared/AICopilot.Visualization/Widgets/StatsCardWidget.cs"
   ],
   "sourceUniverse": {
-    "fileCount": 706,
-    "linesValid": 86206,
-    "branchesValid": 14310,
-    "fileMetricsSha256": "a5b1204b5f6c61f737a384523929b4462c6bb561503cb293d278532377eae2f6"
+    "fileCount": 705,
+    "linesValid": 86197,
+    "branchesValid": 14274,
+    "fileMetricsSha256": "afc0b32b83123271c7d7db98b71a1f2613aaac2199283dc9a6adf7ac2b1e99f4"
   }
 }
