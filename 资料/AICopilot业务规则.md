@@ -50,7 +50,7 @@
 - 通过 MCP、Tool、Agent workflow、后台任务或隐藏适配器间接调用 Cloud 写接口。
 - 通过 MCP、Tool、Agent workflow、后台任务或隐藏适配器间接调用云端写接口。
 
-Cloud tool 安全元数据只有 `CloudReadOnly + ReadOnlyQuery + readOnlyDeclared=true` 这一精确组合有效。`Diagnostics`、`LocalSuggestion`、`SideEffecting`、缺失/动态无法静态证明的声明都必须 fail-closed；动态 MCP 配置仍必须在注册和每次执行时经过同一 `AiToolSafetyPolicy` 评估。
+Cloud tool 安全元数据只有 `CloudReadOnly + ReadOnlyQuery + readOnlyDeclared=true` 这一精确组合有效。`Diagnostics`、`LocalSuggestion`、`SideEffecting`、缺失/动态无法静态证明的声明都必须 fail-closed；动态 MCP 的 enum、alias、描述或 endpoint 不能证明可信 NonCloud，server/tool 必须统一使用精确只读组合，并在聚合注册、runtime builder、Plan 能力发现和每次 MCP 执行时经过同一 `AiToolSafetyPolicy` 评估。
 
 Human-in-the-loop 不能把禁止的 Cloud 业务写入变成允许动作。
 Human-in-the-loop 不能作为放开云端业务写入的理由。
@@ -117,6 +117,9 @@ Cloud AiRead 设备契约：
 - 工具描述必须说明是否只读。
 - 涉及文件、外部系统、命令执行或其他副作用的工具必须保持审批约束。
 - 不允许配置直接或间接调用 Cloud 写接口的 MCP 工具。
+- 动态配置 MCP 目标默认无法证明为可信 NonCloud；调用方传入 `NonCloud`、opaque URL/alias 或不含 `cloud` 的名称都不得放宽边界。只有 server/tool 同时为 `CloudReadOnly + ReadOnlyQuery + readOnlyDeclared=true` 并通过动词、hint、schema 和 risk 检查才能注册或暴露。
+- 聚合注册、runtime builder 对旧持久化记录的复验、Plan 能力发现和 `McpAgentToolExecutor` 每次调用必须复用同一条 MCP 安全策略；禁止恢复 hostname/token heuristic、伪 allowlist、fallback 或仅启动时检查。
+- 本地非 MCP 工具仍按其正式 capability/risk/审批策略处理；MCP fail-closed 不等于删除必要的本地副作用工具。
 
 ## 7. Human-in-the-loop 规则
 
@@ -200,7 +203,7 @@ Cloud AiRead 设备契约：
 ## 10. 工程边界
 
 - AICopilot DDD 聚合根、投影、队列、审计和运行时记录的长期技术契约见 `../docs/DDD聚合根边界.md`；新增或调整聚合根、仓储注册、EF `DbSet`、Agent runtime timeline/queue/audit 记录时必须同步更新架构测试。
-- `AICopilot.Architecture.Analyzers` 是生产编译的架构 owner；`AIARCH001`–`AIARCH007` 必须保持 Error，由独立 required `AICopilot.Architecture.AnalyzerTests` 同时保有语义夹具和真实临时 csproj 正/反编译夹具。Analyzer 属性和例外必须按完全限定 symbol identity 识别；`AIARCH004` 必须证明减员在 transaction delegate 内且 invariant guard 先于变更，inline/stored 与 field/property 中的 lambda/method-group 都必须在 CompilationEnd 形成 edge-aware caller→delegate 语义边，synthetic transaction edge 不能掩护同一 target 的真实直接调用；public/internal/private/protected 中没有源码 incoming edge 的真实宿主入口均须检查，不能靠可见性降级绕过。`AIARCH006` 必须对所有源码方法先按该方法自身的直接调用/构造/泛型解析、签名/字段/ctor 正式 client 或正式 workflow symbol 判定 Cloud root，命中后才检查完整 reachable graph；本地 DI factory、private helper 返回、object creation、field/property delegate 和 Cloud root 内的 interface dispatch 都不能绕过。Repository、command、Dapper 和 MCP 写边只接受专题契约列出的完全限定 symbol；同名伪 repository/command/`SqlMapper`/MCP executor、Generic orchestrator、仅计划/DTO 类型或方法名均不得扩大入口或写边。规则例外只能是专题契约中记录的完全限定类型/项目，禁止 `NoWarn`、降级 warning、optional gate 或恢复同义字符串/Regex 影子路径。
+- `AICopilot.Architecture.Analyzers` 是生产编译的架构 owner；`AIARCH001`–`AIARCH007` 必须保持 `Error + IsEnabledByDefault + NotConfigurable`，CompilationEnd 规则同时保留 `CompilationEnd` tag，由独立 required `AICopilot.Architecture.AnalyzerTests` 同时保有语义夹具和真实临时 csproj 正/反编译及 suppression 夹具。inventory 必须拒绝 `NoWarn`、`.editorconfig/.globalconfig` severity、`#pragma warning disable`、`SuppressMessage/UnconditionalSuppressMessage`和 Analyzer 关闭。Analyzer 属性和例外必须按完全限定 symbol identity 识别；`AIARCH004` 必须证明减员在 transaction delegate 内且 invariant guard 先于变更，inline/stored 与 field/property 中的 lambda/method-group 都必须在 CompilationEnd 形成 edge-aware caller→delegate 语义边，synthetic transaction edge 不能掩护同一 target 的真实直接调用；public/internal/private/protected 中没有源码 incoming edge 的真实宿主入口均须检查，不能靠可见性降级绕过。`AIARCH006` 必须对所有源码方法先按该方法自身的直接调用/构造/泛型解析、签名/字段/ctor 正式 client 或正式 workflow symbol 判定 Cloud root，命中后才检查完整 reachable graph；本地 DI factory、private helper 返回、object creation、field/property delegate 和 Cloud root 内的 interface dispatch 都不能绕过。Repository、command、Dapper 和 MCP 写边只接受专题契约列出的完全限定 symbol；同名伪 repository/command/`SqlMapper`/MCP executor、Generic orchestrator、仅计划/DTO 类型或方法名均不得扩大入口或写边。规则例外只能是专题契约中记录的完全限定类型/项目，禁止 `NoWarn`、降级 warning、optional gate 或恢复同义字符串/Regex 影子路径。
 - `AIARCH001` 对 `AICopilot.ArtifactGeneration`、`AICopilot.CloudReadClient`、`AICopilot.McpRuntime`、`AICopilot.SecretProtection`、`AICopilot.SqlSafety` 使用 Infrastructure 分类；任何未分类 `AICopilot.*` 生产项目无论出现在引用源或目标都必须 fail-closed。
 - Aggregate runner 只能是 Pure 且只直接依赖 core/shared；Application runner 只能是 Pure 且不得直接依赖 host、EF/Dapper、Aspire/Persistence fixture；文件持久化测试必须进入 `PersistenceFilesystemTests`。五个 TestKit 不得依赖 test SDK、xUnit/NUnit/MSTest 或断言 package，生命周期适配和断言 helper 留在 runner。
 - Runner/TestKit 依赖边界只认指定 Configuration 下 MSBuild evaluated `ProjectReference` / `PackageReference` 图，必须包含隐式 `Directory.Build.*`、递归 import、生效复合条件、逐 TargetFramework item 和 TestKit 传递闭包；raw XML 扫描不能作为证据，评估异常或缺失规范化 identity 必须 fail-closed。Direct kind boundary、Pure closure、TestKit consumers 和 production→TestKit 禁令必须复用同一图。

@@ -563,6 +563,40 @@ try {
         & $inventoryScript -RepositoryRoot $analyzerSuppressedRoot -OutputPath 'artifacts/test-inventory.json'
     } 'disables or suppresses required AIARCH analyzers'
 
+    $pragmaSuppressedRoot = New-InventoryFixture -ReferencedProjectPath $productionFixturePath
+    Write-FixtureFile `
+        (Join-Path $pragmaSuppressedRoot 'src/services/FixtureService/FixtureSource.cs') `
+        "#pragma warning disable AIARCH006`nnamespace FixtureService; internal sealed class FixtureSource { }"
+    Assert-Fails {
+        & $inventoryScript -RepositoryRoot $pragmaSuppressedRoot -OutputPath 'artifacts/test-inventory.json'
+    } 'suppresses a required AIARCH diagnostic in production source'
+
+    foreach ($attributeName in @('SuppressMessage', 'UnconditionalSuppressMessage')) {
+        $attributeSuppressedRoot = New-InventoryFixture -ReferencedProjectPath $productionFixturePath
+        Write-FixtureFile `
+            (Join-Path $attributeSuppressedRoot 'src/services/FixtureService/FixtureSource.cs') `
+            "using System.Diagnostics.CodeAnalysis; [assembly: $attributeName(`"Architecture`", `"AIARCH007`")] namespace FixtureService; internal sealed class FixtureSource { }"
+        Assert-Fails {
+            & $inventoryScript -RepositoryRoot $attributeSuppressedRoot -OutputPath 'artifacts/test-inventory.json'
+        } 'suppresses a required AIARCH diagnostic in production source'
+    }
+
+    $editorConfigSuppressedRoot = New-InventoryFixture -ReferencedProjectPath $productionFixturePath
+    Write-FixtureFile `
+        (Join-Path $editorConfigSuppressedRoot '.editorconfig') `
+        "root = true`n[*.cs]`ndotnet_diagnostic.AIARCH001.severity = none"
+    Assert-Fails {
+        & $inventoryScript -RepositoryRoot $editorConfigSuppressedRoot -OutputPath 'artifacts/test-inventory.json'
+    } 'configures required AIARCH analyzer severity'
+
+    $globalConfigSuppressedRoot = New-InventoryFixture -ReferencedProjectPath $productionFixturePath
+    Write-FixtureFile `
+        (Join-Path $globalConfigSuppressedRoot 'build/Architecture.globalconfig') `
+        "is_global = true`ndotnet_diagnostic.AIARCH004.severity = warning"
+    Assert-Fails {
+        & $inventoryScript -RepositoryRoot $globalConfigSuppressedRoot -OutputPath 'artifacts/test-inventory.json'
+    } 'configures required AIARCH analyzer severity'
+
     $analyzerReferenceRemovedRoot = New-InventoryFixture -ReferencedProjectPath $productionFixturePath
     $analyzerReferenceProjectPath = Join-Path $analyzerReferenceRemovedRoot $productionFixturePath
     $analyzerReferenceProjectText = Get-Content $analyzerReferenceProjectPath -Raw
@@ -1238,7 +1272,7 @@ internal sealed class ConsumerMarker { }
             -LedgerPath $generatedTransitionPath
     } 'Declaration transition disposition/replacement/reason content differs from the frozen controlled review'
 
-    Write-Host 'AICopilot inventory/reconciliation/Simulation/CI/coverage/duplication/mutation/compatibility/declaration-transition behavior tests passed. cases=62; coverageOmissionGuards=15.'
+    Write-Host 'AICopilot inventory/reconciliation/Simulation/CI/coverage/duplication/mutation/compatibility/declaration-transition behavior tests passed. cases=67; coverageOmissionGuards=15.'
 }
 finally {
     Remove-Item $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

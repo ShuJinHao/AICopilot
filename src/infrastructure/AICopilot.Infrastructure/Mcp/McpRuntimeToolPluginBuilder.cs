@@ -105,6 +105,19 @@ internal sealed class McpRuntimeToolPluginBuilder(ILogger logger)
 
     private bool CanExposeTool(McpServerInfo server, McpAllowedTool exposure, McpClientTool tool)
     {
+        var targetDecision = AiToolSafetyPolicy.EvaluateConfiguredMcpTarget(
+            server.ExternalSystemType,
+            server.CapabilityKind);
+        if (!targetDecision.IsAllowed)
+        {
+            logger.LogWarning(
+                "MCP server {ServerName} tool {ToolName} was blocked because its configured target metadata is unverifiable. Reasons={Reasons}",
+                server.Name,
+                tool.Name,
+                string.Join("; ", targetDecision.BlockReasons ?? [targetDecision.Reason ?? "Unknown"]));
+            return false;
+        }
+
         var externalSystemType = exposure.EffectiveExternalSystemType(server.ExternalSystemType);
         var capabilityKind = exposure.EffectiveCapabilityKind(server.CapabilityKind);
         var riskLevel = exposure.EffectiveRiskLevel(server.RiskLevel);
@@ -112,17 +125,7 @@ internal sealed class McpRuntimeToolPluginBuilder(ILogger logger)
         var mcpReadOnlyHint = exposure.McpReadOnlyHint ?? ReadMcpAnnotationHint(tool, "ReadOnlyHint", "readOnlyHint");
         var mcpDestructiveHint = exposure.McpDestructiveHint ?? ReadMcpAnnotationHint(tool, "DestructiveHint", "destructiveHint");
         var mcpIdempotentHint = exposure.McpIdempotentHint ?? ReadMcpAnnotationHint(tool, "IdempotentHint", "idempotentHint");
-        if (McpTargetTrustPolicy.RequiresCloudReadOnly(server.Name, server.Description, server.Command, server.Arguments)
-            && externalSystemType != AiToolExternalSystemType.CloudReadOnly)
-        {
-            logger.LogWarning(
-                "MCP server {ServerName} tool {ToolName} was blocked because target trust requires CloudReadOnly.",
-                server.Name,
-                tool.Name);
-            return false;
-        }
-
-        var decision = AiToolSafetyPolicy.EvaluateConfigured(
+        var decision = AiToolSafetyPolicy.EvaluateConfiguredMcp(
             readOnlyDeclared,
             mcpReadOnlyHint,
             mcpDestructiveHint,

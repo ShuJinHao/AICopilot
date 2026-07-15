@@ -1075,7 +1075,7 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
     {
         using var provider = new ServiceCollection().BuildServiceProvider();
         var loader = new AgentPluginLoader([], provider);
-        var toolCode = AiToolIdentity.CreateRuntimeName(AiToolTargetType.McpServer, "runtime-mcp", "read_status");
+        var toolCode = AiToolIdentity.CreateRuntimeName(AiToolTargetType.McpServer, "runtime-mcp", "query_status");
         loader.RegisterAgentPlugin(new GenericBridgePlugin
         {
             Name = "runtime-mcp",
@@ -1086,14 +1086,15 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
                 new AiToolDefinition
                 {
                     Name = toolCode,
-                    ToolName = "read_status",
+                    ToolName = "query_status",
                     Kind = AiToolCallKind.Mcp,
                     TargetType = AiToolTargetType.McpServer,
                     TargetName = "runtime-mcp",
                     ServerName = "runtime-mcp",
-                    ExternalSystemType = AiToolExternalSystemType.NonCloud,
+                    ExternalSystemType = AiToolExternalSystemType.CloudReadOnly,
                     CapabilityKind = AiToolCapabilityKind.ReadOnlyQuery,
                     RiskLevel = AiToolRiskLevel.RequiresApproval,
+                    ReadOnlyDeclared = true,
                     RequiresApproval = true,
                     JsonSchema = JsonDocument.Parse("""{"type":"object"}""").RootElement.Clone(),
                     ReturnJsonSchema = JsonDocument.Parse("""{"type":"object"}""").RootElement.Clone(),
@@ -1144,7 +1145,8 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
             AiToolExternalSystemType externalSystemType,
             bool readOnlyDeclared,
             bool? mcpReadOnlyHint,
-            bool? mcpDestructiveHint)
+            bool? mcpDestructiveHint,
+            AiToolCapabilityKind capabilityKind = AiToolCapabilityKind.ReadOnlyQuery)
         {
             using var provider = new ServiceCollection().BuildServiceProvider();
             var loader = new AgentPluginLoader([], provider);
@@ -1167,7 +1169,7 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
                         TargetName = serverName,
                         ServerName = serverName,
                         ExternalSystemType = externalSystemType,
-                        CapabilityKind = AiToolCapabilityKind.ReadOnlyQuery,
+                        CapabilityKind = capabilityKind,
                         RiskLevel = AiToolRiskLevel.Low,
                         ReadOnlyDeclared = readOnlyDeclared,
                         McpReadOnlyHint = mcpReadOnlyHint,
@@ -1223,12 +1225,13 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
             mcpReadOnlyHint: true,
             mcpDestructiveHint: false);
         await AssertBlockedAsync(
-            "production-cloud",
-            "query_device_logs",
+            "gateway-a17",
+            "deleteDevice",
             AiToolExternalSystemType.NonCloud,
             readOnlyDeclared: true,
             mcpReadOnlyHint: true,
-            mcpDestructiveHint: false);
+            mcpDestructiveHint: false,
+            capabilityKind: AiToolCapabilityKind.SideEffecting);
         await AssertBlockedAsync(
             "production-cloud",
             "query_device_logs",
@@ -1249,7 +1252,7 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
     {
         using var provider = new ServiceCollection().BuildServiceProvider();
         var loader = new AgentPluginLoader([], provider);
-        var toolCode = AiToolIdentity.CreateRuntimeName(AiToolTargetType.McpServer, "runtime-mcp", "read_status");
+        var toolCode = AiToolIdentity.CreateRuntimeName(AiToolTargetType.McpServer, "runtime-mcp", "query_status");
         var invoked = false;
         loader.RegisterAgentPlugin(new GenericBridgePlugin
         {
@@ -1261,14 +1264,15 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
                 new AiToolDefinition
                 {
                     Name = toolCode,
-                    ToolName = "read_status",
+                    ToolName = "query_status",
                     Kind = AiToolCallKind.Mcp,
                     TargetType = AiToolTargetType.McpServer,
                     TargetName = "runtime-mcp",
                     ServerName = "runtime-mcp",
-                    ExternalSystemType = AiToolExternalSystemType.NonCloud,
+                    ExternalSystemType = AiToolExternalSystemType.CloudReadOnly,
                     CapabilityKind = AiToolCapabilityKind.ReadOnlyQuery,
                     RiskLevel = AiToolRiskLevel.RequiresApproval,
+                    ReadOnlyDeclared = true,
                     RequiresApproval = true,
                     JsonSchema = JsonDocument.Parse("""{"type":"object"}""").RootElement.Clone(),
                     ReturnJsonSchema = JsonDocument.Parse("""{"type":"object"}""").RootElement.Clone(),

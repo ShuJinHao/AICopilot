@@ -320,6 +320,25 @@ public sealed class SecurityPolicyUnitTests
             capabilityKind: AiToolCapabilityKind.ReadOnlyQuery);
         cloudEndpointWithWrongLabel.Should().Throw<ArgumentException>();
 
+        var opaqueDynamicWriteTarget = () => new McpServerInfo(
+            "gateway-a17",
+            "Opaque remote runtime",
+            McpTransportType.Sse,
+            null,
+            "https://relay.example.test/mcp",
+            ChatExposureMode.Advisory,
+            [
+                new McpAllowedTool(
+                    "deleteDevice",
+                    AiToolExternalSystemType.NonCloud,
+                    AiToolCapabilityKind.SideEffecting)
+            ],
+            true,
+            AiToolExternalSystemType.NonCloud,
+            AiToolCapabilityKind.SideEffecting);
+        opaqueDynamicWriteTarget.Should().Throw<ArgumentException>()
+            .WithMessage("*cannot establish a verified non-Cloud identity*");
+
         var cloudToolWithoutDeclaration = () => new McpServerInfo(
             "cloud-server",
             "description",
@@ -344,7 +363,9 @@ public sealed class SecurityPolicyUnitTests
                     AiToolExternalSystemType.CloudReadOnly,
                     AiToolCapabilityKind.Diagnostics,
                     ReadOnlyDeclared: true)
-            ]);
+            ],
+            externalSystemType: AiToolExternalSystemType.CloudReadOnly,
+            capabilityKind: AiToolCapabilityKind.ReadOnlyQuery);
         cloudToolWithWrongOverride.Should().Throw<ArgumentException>();
 
         var server = new McpServerInfo(
@@ -354,13 +375,17 @@ public sealed class SecurityPolicyUnitTests
             " dotnet ",
             " server.dll ",
             ChatExposureMode.Advisory,
-            [new McpAllowedTool(" Echo "), new McpAllowedTool("echo"), new McpAllowedTool(" ")]);
+            [
+                new McpAllowedTool(" QueryStatus ", ReadOnlyDeclared: true),
+                new McpAllowedTool("queryStatus", ReadOnlyDeclared: true),
+                new McpAllowedTool(" ")
+            ]);
 
         server.Name.Should().Be("server");
         server.Description.Should().Be("description");
         server.Command.Should().Be("dotnet");
         server.Arguments.Should().Be("server.dll");
-        server.AllowedTools.Select(tool => tool.ToolName).Should().Equal("Echo");
+        server.AllowedTools.Select(tool => tool.ToolName).Should().Equal("QueryStatus");
     }
     [Fact]
     public void KnowledgeBaseDocumentAndChunks_ShouldRejectInvalidInput()

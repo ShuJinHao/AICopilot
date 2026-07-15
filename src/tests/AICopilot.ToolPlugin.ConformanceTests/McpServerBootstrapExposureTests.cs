@@ -7,6 +7,7 @@ using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Repository;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol.Client;
 using System.Reflection;
@@ -52,9 +53,10 @@ public sealed class McpServerBootstrapExposureTests
             string.Empty,
             "https://mcp.example.test/events",
             ChatExposureMode.Advisory,
-            [new McpAllowedTool("Echo")],
+            [new McpAllowedTool("QueryDeviceLogs", ReadOnlyDeclared: true, McpReadOnlyHint: true, McpDestructiveHint: false)],
             true,
-            externalSystemType: AiToolExternalSystemType.NonCloud);
+            externalSystemType: AiToolExternalSystemType.CloudReadOnly,
+            capabilityKind: AiToolCapabilityKind.ReadOnlyQuery);
         var factoryType = typeof(McpServerBootstrap).Assembly.GetType(
             "AICopilot.Infrastructure.Mcp.McpRuntimeClientFactory",
             throwOnError: true)!;
@@ -80,9 +82,10 @@ public sealed class McpServerBootstrapExposureTests
             "dotnet",
             string.Empty,
             ChatExposureMode.Advisory,
-            [new McpAllowedTool("Echo")],
+            [new McpAllowedTool("QueryDeviceLogs", ReadOnlyDeclared: true, McpReadOnlyHint: true, McpDestructiveHint: false)],
             true,
-            externalSystemType: AiToolExternalSystemType.NonCloud);
+            externalSystemType: AiToolExternalSystemType.CloudReadOnly,
+            capabilityKind: AiToolCapabilityKind.ReadOnlyQuery);
 
         var controlServer = new McpServerInfo(
             "control-mcp",
@@ -91,9 +94,10 @@ public sealed class McpServerBootstrapExposureTests
             "dotnet",
             string.Empty,
             ChatExposureMode.Control,
-            [new McpAllowedTool("Echo")],
+            [new McpAllowedTool("QueryDeviceLogs", ReadOnlyDeclared: true, McpReadOnlyHint: true, McpDestructiveHint: false)],
             true,
-            externalSystemType: AiToolExternalSystemType.NonCloud);
+            externalSystemType: AiToolExternalSystemType.CloudReadOnly,
+            capabilityKind: AiToolCapabilityKind.ReadOnlyQuery);
 
         var closedServer = new McpServerInfo(
             "closed-mcp",
@@ -104,7 +108,8 @@ public sealed class McpServerBootstrapExposureTests
             ChatExposureMode.Advisory,
             [],
             true,
-            externalSystemType: AiToolExternalSystemType.NonCloud);
+            externalSystemType: AiToolExternalSystemType.CloudReadOnly,
+            capabilityKind: AiToolCapabilityKind.ReadOnlyQuery);
 
         var destructiveCloudServer = new McpServerInfo(
             "destructive-cloud",
@@ -118,16 +123,47 @@ public sealed class McpServerBootstrapExposureTests
                     "QueryDeviceLogs",
                     ReadOnlyDeclared: true,
                     McpReadOnlyHint: true,
-                    McpDestructiveHint: true)
+                    McpDestructiveHint: false)
             ],
             true,
             AiToolExternalSystemType.CloudReadOnly,
             AiToolCapabilityKind.ReadOnlyQuery,
             AiToolRiskLevel.Low);
+        ReplaceAllowedTools(
+            destructiveCloudServer,
+            [
+                new McpAllowedTool(
+                    "QueryDeviceLogs",
+                    ReadOnlyDeclared: true,
+                    McpReadOnlyHint: true,
+                    McpDestructiveHint: true)
+            ]);
 
-        var relabeledCloudServer = new McpServerInfo(
-            "production-cloud",
-            "Cloud server with persisted legacy metadata",
+        var opaqueRelabeledWriteServer = new McpServerInfo(
+            "gateway-a17",
+            "Opaque remote runtime at https://relay.example.test/mcp",
+            McpTransportType.Stdio,
+            "dotnet",
+            "https://relay.example.test/mcp",
+            ChatExposureMode.Advisory,
+            [new McpAllowedTool("QueryDeviceLogs", ReadOnlyDeclared: true, McpReadOnlyHint: true)],
+            true,
+            AiToolExternalSystemType.CloudReadOnly,
+            AiToolCapabilityKind.ReadOnlyQuery,
+            AiToolRiskLevel.Low);
+        typeof(McpServerInfo)
+            .GetField("<ExternalSystemType>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(opaqueRelabeledWriteServer, AiToolExternalSystemType.NonCloud);
+        typeof(McpServerInfo)
+            .GetField("<CapabilityKind>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(opaqueRelabeledWriteServer, AiToolCapabilityKind.SideEffecting);
+        ReplaceAllowedTools(
+            opaqueRelabeledWriteServer,
+            [new McpAllowedTool("deleteDevice", ReadOnlyDeclared: true, McpReadOnlyHint: true)]);
+
+        var unknownServer = new McpServerInfo(
+            "unknown-runtime",
+            "Unknown target metadata must fail closed",
             McpTransportType.Stdio,
             "dotnet",
             string.Empty,
@@ -139,17 +175,7 @@ public sealed class McpServerBootstrapExposureTests
             AiToolRiskLevel.Low);
         typeof(McpServerInfo)
             .GetField("<ExternalSystemType>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .SetValue(relabeledCloudServer, AiToolExternalSystemType.NonCloud);
-
-        var unknownServer = new McpServerInfo(
-            "unknown-runtime",
-            "Unknown target metadata must fail closed",
-            McpTransportType.Stdio,
-            "dotnet",
-            string.Empty,
-            ChatExposureMode.Advisory,
-            [new McpAllowedTool("QueryDeviceLogs", ReadOnlyDeclared: true, McpReadOnlyHint: true)],
-            true);
+            .SetValue(unknownServer, AiToolExternalSystemType.Unknown);
 
         var serverRepository = new InMemoryReadRepository<McpServerInfo>(
             [
@@ -157,7 +183,7 @@ public sealed class McpServerBootstrapExposureTests
                 controlServer,
                 closedServer,
                 destructiveCloudServer,
-                relabeledCloudServer,
+                opaqueRelabeledWriteServer,
                 unknownServer
             ]);
         var approvalRequirementReadService = new TestApprovalRequirementReadService();
@@ -170,11 +196,12 @@ public sealed class McpServerBootstrapExposureTests
         using var provider = services.BuildServiceProvider();
 
         var loader = provider.GetRequiredService<AgentPluginLoader>();
+        var bootstrapLogger = new RecordingBootstrapLogger();
         await using var bootstrap = new TestMcpServerBootstrap(
             serverRepository,
             approvalRequirementReadService,
             loader,
-            NullLogger<McpServerBootstrap>.Instance,
+            bootstrapLogger,
             registrySynchronizer);
 
         var clients = new List<IAsyncDisposable>();
@@ -185,14 +212,14 @@ public sealed class McpServerBootstrapExposureTests
 
         try
         {
-            clients.Should().HaveCount(1);
+            clients.Should().HaveCount(1, string.Join(Environment.NewLine, bootstrapLogger.Messages));
             loader.GetPlugin("advisory-mcp").Should().NotBeNull();
             foreach (var excludedPlugin in new[]
                      {
                          "control-mcp",
                          "closed-mcp",
                          "destructive-cloud",
-                         "production-cloud",
+                         "gateway-a17",
                          "unknown-runtime"
                      })
             {
@@ -204,7 +231,7 @@ public sealed class McpServerBootstrapExposureTests
                 registration.ToolCode == AiToolIdentity.CreateRuntimeName(
                     AiToolTargetType.McpServer,
                     "advisory-mcp",
-                    "Echo"));
+                    "QueryDeviceLogs"));
         }
         finally
         {
@@ -226,8 +253,10 @@ public sealed class McpServerBootstrapExposureTests
             missingCommand,
             string.Empty,
             ChatExposureMode.Advisory,
-            [new McpAllowedTool("Echo")],
-            true);
+            [new McpAllowedTool("QueryDeviceLogs", ReadOnlyDeclared: true, McpReadOnlyHint: true, McpDestructiveHint: false)],
+            true,
+            AiToolExternalSystemType.CloudReadOnly,
+            AiToolCapabilityKind.ReadOnlyQuery);
 
         var serverRepository = new InMemoryReadRepository<McpServerInfo>([server]);
         var approvalRequirementReadService = new TestApprovalRequirementReadService();
@@ -264,8 +293,10 @@ public sealed class McpServerBootstrapExposureTests
             "dotnet",
             string.Empty,
             ChatExposureMode.Advisory,
-            [new McpAllowedTool("Echo")],
-            true);
+            [new McpAllowedTool("QueryDeviceLogs", ReadOnlyDeclared: true, McpReadOnlyHint: true, McpDestructiveHint: false)],
+            true,
+            AiToolExternalSystemType.CloudReadOnly,
+            AiToolCapabilityKind.ReadOnlyQuery);
 
         var serverRepository = new InMemoryReadRepository<McpServerInfo>([server]);
         var approvalRequirementReadService = new TestApprovalRequirementReadService();
@@ -298,6 +329,15 @@ public sealed class McpServerBootstrapExposureTests
         return (string[])method!.Invoke(null, [rawArguments])!;
     }
 
+    private static void ReplaceAllowedTools(McpServerInfo server, IEnumerable<McpAllowedTool> tools)
+    {
+        var allowedTools = (List<McpAllowedTool>)typeof(McpServerInfo)
+            .GetField("_allowedTools", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(server)!;
+        allowedTools.Clear();
+        allowedTools.AddRange(tools);
+    }
+
     private sealed class ThrowingMcpServerBootstrap(
         IReadRepository<McpServerInfo> mcpServerRepository,
         IApprovalRequirementReadService approvalRequirementReadService,
@@ -311,6 +351,25 @@ public sealed class McpServerBootstrapExposureTests
         protected override Task<McpClient> CreateStdioClientAsync(McpServerInfo mcpServerInfo, CancellationToken ct)
         {
             throw new InvalidOperationException("synthetic MCP runtime failure");
+        }
+    }
+
+    private sealed class RecordingBootstrapLogger : ILogger<McpServerBootstrap>
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Messages.Add(formatter(state, exception));
         }
     }
 }

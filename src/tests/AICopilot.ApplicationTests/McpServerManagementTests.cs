@@ -27,9 +27,9 @@ public sealed class McpServerManagementTests
                 rawArguments,
                 ChatExposureMode.Advisory,
                 [
-                    new McpAllowedToolDto { ToolName = " Echo " },
-                    new McpAllowedToolDto { ToolName = "echo" },
-                    new McpAllowedToolDto { ToolName = "Inspect" },
+                    new McpAllowedToolDto { ToolName = " QueryEcho ", ReadOnlyDeclared = true },
+                    new McpAllowedToolDto { ToolName = "queryEcho", ReadOnlyDeclared = true },
+                    new McpAllowedToolDto { ToolName = "QueryInspect", ReadOnlyDeclared = true },
                     new McpAllowedToolDto { ToolName = " " }
                 ],
                 true),
@@ -37,7 +37,7 @@ public sealed class McpServerManagementTests
 
         result.IsSuccess.Should().BeTrue();
         var server = repository.Items.Should().ContainSingle().Subject;
-        server.AllowedTools.Select(tool => tool.ToolName).Should().Equal("Echo", "Inspect");
+        server.AllowedTools.Select(tool => tool.ToolName).Should().Equal("QueryEcho", "QueryInspect");
 
         var queryHandler = new GetMcpServerQueryHandler(
             repository,
@@ -68,7 +68,7 @@ public sealed class McpServerManagementTests
                 null,
                 "http://169.254.169.254/latest/meta-data",
                 ChatExposureMode.Advisory,
-                [new McpAllowedToolDto { ToolName = "Echo" }],
+                [new McpAllowedToolDto { ToolName = "QueryEcho", ReadOnlyDeclared = true }],
                 true),
             CancellationToken.None);
 
@@ -87,7 +87,7 @@ public sealed class McpServerManagementTests
             "dotnet",
             "original-server.dll",
             ChatExposureMode.Disabled,
-            [new McpAllowedTool("Echo")],
+            [new McpAllowedTool("QueryEcho", ReadOnlyDeclared: true)],
             true);
         var repository = new MutableMcpServerRepository(server);
         var auditLogWriter = new CapturingAuditLogWriter();
@@ -102,7 +102,7 @@ public sealed class McpServerManagementTests
                 "dotnet",
                 "",
                 ChatExposureMode.Advisory,
-                [new McpAllowedToolDto { ToolName = "Inspect" }],
+                [new McpAllowedToolDto { ToolName = "QueryInspect", ReadOnlyDeclared = true }],
                 false),
             CancellationToken.None);
 
@@ -111,7 +111,7 @@ public sealed class McpServerManagementTests
         server.Name.Should().Be("preserve-mcp-updated");
         server.IsEnabled.Should().BeFalse();
         server.ChatExposureMode.Should().Be(ChatExposureMode.Advisory);
-        server.AllowedTools.Select(tool => tool.ToolName).Should().Equal("Inspect");
+        server.AllowedTools.Select(tool => tool.ToolName).Should().Equal("QueryInspect");
         var audit = auditLogWriter.Requests.Should().ContainSingle().Subject;
         audit.ActionCode.Should().Be("Mcp.UpdateServer");
         audit.ChangedFields.Should().Contain(["name", "description", "chatExposureMode", "allowedTools", "isEnabled"]);
@@ -129,7 +129,7 @@ public sealed class McpServerManagementTests
             "dotnet",
             "server.dll",
             ChatExposureMode.Disabled,
-            [new McpAllowedTool("Echo")],
+            [new McpAllowedTool("QueryEcho", ReadOnlyDeclared: true)],
             true);
         var repository = new MutableMcpServerRepository(server);
         var auditLogWriter = new CapturingAuditLogWriter();
@@ -144,7 +144,7 @@ public sealed class McpServerManagementTests
                 null,
                 "http://10.0.0.1/sse",
                 ChatExposureMode.Advisory,
-                [new McpAllowedToolDto { ToolName = "Inspect" }],
+                [new McpAllowedToolDto { ToolName = "QueryInspect", ReadOnlyDeclared = true }],
                 true),
             CancellationToken.None);
 
@@ -152,7 +152,7 @@ public sealed class McpServerManagementTests
         server.Name.Should().Be("existing-mcp");
         server.TransportType.Should().Be(McpTransportType.Stdio);
         server.Arguments.Should().Be("server.dll");
-        server.AllowedTools.Select(tool => tool.ToolName).Should().Equal("Echo");
+        server.AllowedTools.Select(tool => tool.ToolName).Should().Equal("QueryEcho");
         auditLogWriter.Requests.Should().BeEmpty();
     }
 
@@ -166,7 +166,10 @@ public sealed class McpServerManagementTests
             "dotnet",
             "server.dll",
             ChatExposureMode.Advisory,
-            [new McpAllowedTool("Echo"), new McpAllowedTool("Inspect")],
+            [
+                new McpAllowedTool("QueryEcho", ReadOnlyDeclared: true),
+                new McpAllowedTool("QueryInspect", ReadOnlyDeclared: true)
+            ],
             true);
 
         var serverRepository = new InMemoryReadRepository<McpServerInfo>([server]);
@@ -175,13 +178,13 @@ public sealed class McpServerManagementTests
             new ApprovalToolRequirementDto(
                 AiToolTargetType.McpServer,
                 "advisory-mcp",
-                "Echo",
+                "QueryEcho",
                 RequiresApproval: true,
                 RequiresOnsiteAttestation: true),
             new ApprovalToolRequirementDto(
                 AiToolTargetType.McpServer,
                 "another-mcp",
-                "Inspect",
+                "QueryInspect",
                 RequiresApproval: true,
                 RequiresOnsiteAttestation: true)
         ]);
@@ -194,11 +197,11 @@ public sealed class McpServerManagementTests
         result.Value.Should().NotBeNull();
         result.Value!.ToolPolicySummaries.Should().HaveCount(2);
         result.Value.ToolPolicySummaries.Should().Contain(item =>
-            item.ToolName == "Echo"
+            item.ToolName == "QueryEcho"
             && item.RequiresApproval
             && item.RequiresOnsiteAttestation);
         result.Value.ToolPolicySummaries.Should().Contain(item =>
-            item.ToolName == "Inspect"
+            item.ToolName == "QueryInspect"
             && !item.RequiresApproval
             && !item.RequiresOnsiteAttestation);
     }
@@ -213,7 +216,7 @@ public sealed class McpServerManagementTests
             "dotnet",
             "alpha.dll",
             ChatExposureMode.ObserveOnly,
-            [new McpAllowedTool("Echo")],
+            [new McpAllowedTool("QueryEcho", ReadOnlyDeclared: true)],
             true);
 
         var betaServer = new McpServerInfo(
@@ -223,7 +226,7 @@ public sealed class McpServerManagementTests
             "dotnet",
             "beta.dll",
             ChatExposureMode.Advisory,
-            [new McpAllowedTool("Inspect")],
+            [new McpAllowedTool("QueryInspect", ReadOnlyDeclared: true)],
             true);
 
         var serverRepository = new InMemoryReadRepository<McpServerInfo>([betaServer, alphaServer]);
@@ -232,7 +235,7 @@ public sealed class McpServerManagementTests
             new ApprovalToolRequirementDto(
                 AiToolTargetType.McpServer,
                 "beta-mcp",
-                "Inspect",
+                "QueryInspect",
                 RequiresApproval: true,
                 RequiresOnsiteAttestation: false)
         ]);
@@ -245,18 +248,18 @@ public sealed class McpServerManagementTests
         result.Value.Should().NotBeNull();
         result.Value!.Select(item => item.Name).Should().Equal("alpha-mcp", "beta-mcp");
         result.Value.Single(item => item.Name == "alpha-mcp").ToolPolicySummaries.Should().ContainSingle(item =>
-            item.ToolName == "Echo"
+            item.ToolName == "QueryEcho"
             && !item.RequiresApproval
             && !item.RequiresOnsiteAttestation);
         result.Value.Single(item => item.Name == "beta-mcp").ToolPolicySummaries.Should().ContainSingle(item =>
-            item.ToolName == "Inspect"
+            item.ToolName == "QueryInspect"
             && item.RequiresApproval
             && !item.RequiresOnsiteAttestation);
     }
 
     private sealed class MutableMcpServerRepository(params McpServerInfo[] servers) : IRepository<McpServerInfo>
     {
-        private readonly List<McpServerInfo> servers = [..servers];
+        private readonly List<McpServerInfo> servers = [.. servers];
 
         public IReadOnlyList<McpServerInfo> Items => servers;
 

@@ -939,6 +939,29 @@ $productionProjects = @(
 )
 $analyzerProjectPath = [System.IO.Path]::GetFullPath((Join-Path $root `
     'src/analyzers/AICopilot.Architecture.Analyzers/AICopilot.Architecture.Analyzers.csproj'))
+$sourceAnalyzerSuppressionPatterns = @(
+    '(?im)^\s*#pragma\s+warning\s+disable[^\r\n]*\bAIARCH00[1-7]\b',
+    '(?is)\[\s*(?:assembly\s*:\s*)?(?:global::)?(?:System\.Diagnostics\.CodeAnalysis\.)?(?:Unconditional)?SuppressMessage(?:Attribute)?\s*\([^\)]*\bAIARCH00[1-7]\b'
+)
+$configAnalyzerSuppressionPattern = '(?im)^\s*dotnet_diagnostic\.AIARCH00[1-7]\.severity\s*='
+$analyzerConfigurationFiles = @(
+    Get-ChildItem $root -File -Recurse -Force |
+        Where-Object {
+            ($_.Name -eq '.editorconfig' -or
+                $_.Name -eq '.globalconfig' -or
+                $_.Name -like '*.editorconfig' -or
+                $_.Name -like '*.globalconfig') -and
+            $_.FullName -notmatch '[\\/](\.git|artifacts|bin|obj|node_modules)[\\/]'
+        }
+)
+foreach ($configurationFile in $analyzerConfigurationFiles) {
+    if ((Get-Content $configurationFile.FullName -Raw) -match $configAnalyzerSuppressionPattern) {
+        $relativeConfigurationFile = [System.IO.Path]::GetRelativePath(
+            $root,
+            $configurationFile.FullName).Replace('\', '/')
+        throw "$relativeConfigurationFile configures required AIARCH analyzer severity; AIARCH diagnostics are NotConfigurable."
+    }
+}
 
 # Validate source/project policy for the complete production set before requiring build
 # evidence. Controlled negative fixtures intentionally have no bin/obj output; a PDB
@@ -993,6 +1016,11 @@ foreach ($productionProject in $productionProjects) {
         if (-not $compiledSources.Contains($source.FullName)) {
             $sourceRelativePath = [System.IO.Path]::GetRelativePath($root, $source.FullName).Replace('\', '/')
             throw "$productionRelativePath contains unreferenced production source '$sourceRelativePath'."
+        }
+        $sourceText = Get-Content $source.FullName -Raw
+        if (@($sourceAnalyzerSuppressionPatterns | Where-Object { $sourceText -match $_ }).Count -ne 0) {
+            $sourceRelativePath = [System.IO.Path]::GetRelativePath($root, $source.FullName).Replace('\', '/')
+            throw "$sourceRelativePath suppresses a required AIARCH diagnostic in production source; AIARCH diagnostics are NotConfigurable."
         }
     }
 }

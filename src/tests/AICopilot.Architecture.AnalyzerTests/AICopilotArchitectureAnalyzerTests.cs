@@ -5,6 +5,28 @@ namespace AICopilot.Architecture.AnalyzerTests;
 public sealed class AICopilotArchitectureAnalyzerTests
 {
     [Fact]
+    public void SupportedDiagnostics_ShouldBeErrorEnabledAndNotConfigurable_AndPreserveCompilationEndTags()
+    {
+        var analyzer = new AICopilotArchitectureAnalyzer();
+        var compilationEndIds = new HashSet<string>(StringComparer.Ordinal)
+        {
+            AICopilotArchitectureAnalyzer.ProjectBoundaryId,
+            AICopilotArchitectureAnalyzer.EnabledAdminInvariantId,
+            AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId
+        };
+
+        analyzer.SupportedDiagnostics.Should().HaveCount(7);
+        foreach (var descriptor in analyzer.SupportedDiagnostics)
+        {
+            descriptor.DefaultSeverity.Should().Be(Microsoft.CodeAnalysis.DiagnosticSeverity.Error);
+            descriptor.IsEnabledByDefault.Should().BeTrue();
+            descriptor.CustomTags.Should().Contain(Microsoft.CodeAnalysis.WellKnownDiagnosticTags.NotConfigurable);
+            descriptor.CustomTags.Contains(Microsoft.CodeAnalysis.WellKnownDiagnosticTags.CompilationEnd)
+                .Should().Be(compilationEndIds.Contains(descriptor.Id));
+        }
+    }
+
+    [Fact]
     public async Task AIARCH001_ShouldClassifyEveryProductionProject_AndRejectUnknownTestOrReverseLayerEdges()
     {
         const string source = "namespace Fixture; public sealed class Marker { }";

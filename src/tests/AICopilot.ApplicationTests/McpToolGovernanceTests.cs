@@ -26,18 +26,18 @@ public sealed class McpToolGovernanceTests
             "server.dll",
             ChatExposureMode.Advisory,
             [
-                new McpAllowedTool("allow_only", ReadOnlyDeclared: true, McpReadOnlyHint: true),
-                new McpAllowedTool("disabled"),
-                new McpAllowedTool("ready"),
-                new McpAllowedTool("unavailable"),
-                new McpAllowedTool("blocked", RiskLevel: AiToolRiskLevel.Blocked)
+                new McpAllowedTool("query_allow_only", ReadOnlyDeclared: true, McpReadOnlyHint: true),
+                new McpAllowedTool("query_disabled", ReadOnlyDeclared: true),
+                new McpAllowedTool("query_ready", ReadOnlyDeclared: true),
+                new McpAllowedTool("query_unavailable", ReadOnlyDeclared: true),
+                new McpAllowedTool("query_blocked", ReadOnlyDeclared: true)
             ],
             true);
         var registry = new FakeMcpToolRegistryReadService(
-            Registration("runtime-mcp", "disabled", runtimeAvailable: true, isEnabled: false),
-            Registration("runtime-mcp", "ready", runtimeAvailable: true, isEnabled: true),
-            Registration("runtime-mcp", "unavailable", runtimeAvailable: false, isEnabled: true),
-            Registration("runtime-mcp", "blocked", runtimeAvailable: true, isEnabled: false, riskLevel: "Blocked"),
+            Registration("runtime-mcp", "query_disabled", runtimeAvailable: true, isEnabled: false),
+            Registration("runtime-mcp", "query_ready", runtimeAvailable: true, isEnabled: true),
+            Registration("runtime-mcp", "query_unavailable", runtimeAvailable: false, isEnabled: true),
+            Registration("runtime-mcp", "query_blocked", runtimeAvailable: true, isEnabled: false, riskLevel: "Blocked"),
             Registration("runtime-mcp", "old", runtimeAvailable: false, isEnabled: false),
             Registration("deleted-mcp", "ghost", runtimeAvailable: false, isEnabled: true));
         var handler = new GetMcpToolGovernanceQueryHandler(
@@ -55,16 +55,16 @@ public sealed class McpToolGovernanceTests
         result.Value.Summary.Blocked.Should().Be(1);
         result.Value.Summary.OrphanedRegistration.Should().Be(2);
         result.Value.Items.Should().Contain(item =>
-            item.ToolName == "allow_only" &&
+            item.ToolName == "query_allow_only" &&
             item.Status == "AllowlistedOnly" &&
             item.Allowlisted &&
             !item.Registered &&
             item.ReadOnlyDeclared &&
             item.McpReadOnlyHint == true);
-        result.Value.Items.Should().Contain(item => item.ToolName == "disabled" && item.Status == "RegisteredDisabled");
-        result.Value.Items.Should().Contain(item => item.ToolName == "ready" && item.Status == "Ready");
-        result.Value.Items.Should().Contain(item => item.ToolName == "unavailable" && item.Status == "RuntimeUnavailable");
-        result.Value.Items.Should().Contain(item => item.ToolName == "blocked" && item.Status == "Blocked");
+        result.Value.Items.Should().Contain(item => item.ToolName == "query_disabled" && item.Status == "RegisteredDisabled");
+        result.Value.Items.Should().Contain(item => item.ToolName == "query_ready" && item.Status == "Ready");
+        result.Value.Items.Should().Contain(item => item.ToolName == "query_unavailable" && item.Status == "RuntimeUnavailable");
+        result.Value.Items.Should().Contain(item => item.ToolName == "query_blocked" && item.Status == "Blocked");
         result.Value.Items.Should().Contain(item => item.ToolName == "old" && item.Status == "OrphanedRegistration");
         result.Value.Items.Should().Contain(item =>
             item.ServerName == "deleted-mcp" &&
@@ -82,10 +82,10 @@ public sealed class McpToolGovernanceTests
             "dotnet",
             "server.dll",
             ChatExposureMode.Advisory,
-            [new McpAllowedTool("ready")],
+            [new McpAllowedTool("query_ready", ReadOnlyDeclared: true)],
             true);
         var registry = new FakeMcpToolRegistryReadService(
-            Registration("runtime-mcp", "ready", runtimeAvailable: true, isEnabled: true),
+            Registration("runtime-mcp", "query_ready", runtimeAvailable: true, isEnabled: true),
             Registration("runtime-mcp", "old", runtimeAvailable: false, isEnabled: false));
         var handler = new GetMcpToolGovernanceQueryHandler(
             new InMemoryReadRepository<McpServerInfo>([server]),
@@ -104,7 +104,7 @@ public sealed class McpToolGovernanceTests
         ready.IsSuccess.Should().BeTrue();
         ready.Value!.Items.Should().ContainSingle(item => item.Status == "Ready");
         noOrphans.IsSuccess.Should().BeTrue();
-        noOrphans.Value!.Items.Should().ContainSingle(item => item.ToolName == "ready");
+        noOrphans.Value!.Items.Should().ContainSingle(item => item.ToolName == "query_ready");
         invalidStatus.Status.Should().Be(AICopilot.SharedKernel.Result.ResultStatus.Invalid);
     }
 

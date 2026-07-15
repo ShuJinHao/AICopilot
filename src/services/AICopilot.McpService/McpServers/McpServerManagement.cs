@@ -59,8 +59,8 @@ public record CreateMcpServerCommand(
     ChatExposureMode ChatExposureMode = ChatExposureMode.Disabled,
     IReadOnlyCollection<McpAllowedToolDto>? AllowedTools = null,
     bool IsEnabled = true,
-    AiToolExternalSystemType ExternalSystemType = AiToolExternalSystemType.Unknown,
-    AiToolCapabilityKind CapabilityKind = AiToolCapabilityKind.Diagnostics,
+    AiToolExternalSystemType ExternalSystemType = AiToolExternalSystemType.CloudReadOnly,
+    AiToolCapabilityKind CapabilityKind = AiToolCapabilityKind.ReadOnlyQuery,
     AiToolRiskLevel RiskLevel = AiToolRiskLevel.RequiresApproval) : ICommand<Result<CreatedMcpServerDto>>;
 
 public class CreateMcpServerCommandHandler(
@@ -115,8 +115,8 @@ public record UpdateMcpServerCommand(
     ChatExposureMode ChatExposureMode = ChatExposureMode.Disabled,
     IReadOnlyCollection<McpAllowedToolDto>? AllowedTools = null,
     bool IsEnabled = true,
-    AiToolExternalSystemType ExternalSystemType = AiToolExternalSystemType.Unknown,
-    AiToolCapabilityKind CapabilityKind = AiToolCapabilityKind.Diagnostics,
+    AiToolExternalSystemType ExternalSystemType = AiToolExternalSystemType.CloudReadOnly,
+    AiToolCapabilityKind CapabilityKind = AiToolCapabilityKind.ReadOnlyQuery,
     AiToolRiskLevel RiskLevel = AiToolRiskLevel.RequiresApproval) : ICommand<Result>;
 
 public class UpdateMcpServerCommandHandler(

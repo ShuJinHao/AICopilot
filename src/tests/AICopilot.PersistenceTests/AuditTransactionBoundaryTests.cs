@@ -409,7 +409,7 @@ public sealed class AuditTransactionBoundaryTests(PostgresPersistenceFixture fix
             "dotnet",
             "server.dll --token redacted",
             ChatExposureMode.Advisory,
-            [new McpAllowedTool("Echo")],
+            [new McpAllowedTool("QueryStatus", ReadOnlyDeclared: true)],
             true);
     }
 

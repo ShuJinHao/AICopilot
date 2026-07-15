@@ -168,6 +168,64 @@ public static class AiToolSafetyPolicy
         return Evaluate(descriptor, toolName, description, inputSchema, returnSchema);
     }
 
+    public static AiToolSafetyDecision EvaluateConfiguredMcp(
+        bool readOnlyDeclared,
+        bool? mcpReadOnlyHint,
+        bool? mcpDestructiveHint,
+        bool? mcpIdempotentHint,
+        AiToolCapabilityKind capabilityKind,
+        AiToolExternalSystemType externalSystemType,
+        AiToolRiskLevel riskLevel,
+        string toolName,
+        string? description,
+        JsonElement? inputSchema = null,
+        JsonElement? returnSchema = null)
+    {
+        var targetDecision = EvaluateConfiguredMcpTarget(externalSystemType, capabilityKind);
+        var blockReasons = new List<string>(targetDecision.BlockReasons ?? []);
+
+        if (!readOnlyDeclared)
+        {
+            blockReasons.Add("Dynamically configured MCP tools must explicitly declare read-only behavior.");
+        }
+
+        if (blockReasons.Count != 0)
+        {
+            return Block(blockReasons);
+        }
+
+        return EvaluateConfigured(
+            readOnlyDeclared,
+            mcpReadOnlyHint,
+            mcpDestructiveHint,
+            mcpIdempotentHint,
+            capabilityKind,
+            externalSystemType,
+            riskLevel,
+            toolName,
+            description,
+            inputSchema,
+            returnSchema);
+    }
+
+    public static AiToolSafetyDecision EvaluateConfiguredMcpTarget(
+        AiToolExternalSystemType externalSystemType,
+        AiToolCapabilityKind capabilityKind)
+    {
+        var blockReasons = new List<string>();
+        if (externalSystemType != AiToolExternalSystemType.CloudReadOnly)
+        {
+            blockReasons.Add("Dynamically configured MCP targets cannot establish a verified non-Cloud identity and must use CloudReadOnly.");
+        }
+
+        if (capabilityKind != AiToolCapabilityKind.ReadOnlyQuery)
+        {
+            blockReasons.Add("Dynamically configured MCP tools must use the ReadOnlyQuery capability.");
+        }
+
+        return blockReasons.Count == 0 ? AiToolSafetyDecision.Allow : Block(blockReasons);
+    }
+
     public static AiToolSafetyDecision Evaluate(
         AiToolSafetyDescriptor descriptor,
         string toolName,

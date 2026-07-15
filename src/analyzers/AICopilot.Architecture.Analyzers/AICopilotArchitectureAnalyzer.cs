@@ -24,7 +24,8 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor ProjectBoundaryRule = CreateRule(
         ProjectBoundaryId,
         "Project dependency violates the AICopilot layer graph",
-        "Project '{0}' must not reference '{1}': {2}");
+        "Project '{0}' must not reference '{1}': {2}",
+        compilationEnd: true);
 
     private static readonly DiagnosticDescriptor AggregateBoundaryRule = CreateRule(
         AggregateBoundaryId,
@@ -39,7 +40,8 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor EnabledAdminInvariantRule = CreateRule(
         EnabledAdminInvariantId,
         "Enabled Admin reduction requires the shared invariant transaction",
-        "'{0}' can reduce enabled Admin membership without the required transaction/guard ordering: {1}");
+        "'{0}' can reduce enabled Admin membership without the required transaction/guard ordering: {1}",
+        compilationEnd: true);
 
     private static readonly DiagnosticDescriptor AgentPluginBoundaryRule = CreateRule(
         AgentPluginBoundaryId,
@@ -49,7 +51,8 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor CloudReadOnlyBoundaryRule = CreateRule(
         CloudReadOnlyBoundaryId,
         "Cloud read-only call graphs must not reach side effects",
-        "Cloud read-only entry '{0}' can reach forbidden side effect '{1}'");
+        "Cloud read-only entry '{0}' can reach forbidden side effect '{1}'",
+        compilationEnd: true);
 
     private static readonly DiagnosticDescriptor SecurityMetadataRule = CreateRule(
         SecurityMetadataId,
@@ -210,7 +213,11 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
         });
     }
 
-    private static DiagnosticDescriptor CreateRule(string id, string title, string message) =>
+    private static DiagnosticDescriptor CreateRule(
+        string id,
+        string title,
+        string message,
+        bool compilationEnd = false) =>
         new(
             id,
             title,
@@ -218,7 +225,10 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
             "Architecture",
             DiagnosticSeverity.Error,
             isEnabledByDefault: true,
-            description: "AICopilot architecture diagnostics are stable build errors and may only be changed with the corresponding formal contract and executable fixtures.");
+            description: "AICopilot architecture diagnostics are stable build errors and may only be changed with the corresponding formal contract and executable fixtures.",
+            customTags: compilationEnd
+                ? [WellKnownDiagnosticTags.CompilationEnd, WellKnownDiagnosticTags.NotConfigurable]
+                : [WellKnownDiagnosticTags.NotConfigurable]);
 
     private static void AnalyzeNamedType(
         INamedTypeSymbol type,

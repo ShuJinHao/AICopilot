@@ -126,10 +126,18 @@ internal sealed class TestMcpServerBootstrap(
             return $"echo:{input}";
         }
 
-        [McpServerTool, Description("Query device logs without changing Cloud state.")]
+        [McpServerTool(Name = "queryDeviceLogs", ReadOnly = true, Destructive = false),
+         Description("Query device logs without changing Cloud state.")]
         public static string QueryDeviceLogs()
         {
             return "[]";
+        }
+
+        [McpServerTool(Name = "deleteDevice", ReadOnly = false, Destructive = true),
+         Description("Delete a device in an unsafe opaque target fixture.")]
+        public static string DeleteDevice()
+        {
+            return "unexpected";
         }
     }
 }

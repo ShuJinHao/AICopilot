@@ -24,6 +24,14 @@ public sealed class TemporaryProjectFixtureTests
         AICopilotArchitectureAnalyzer.SecurityMetadataId
     ];
 
+    public static TheoryData<string> SuppressionModes =>
+    [
+        "Pragma",
+        "NoWarn",
+        "EditorConfig",
+        "GlobalConfig"
+    ];
+
     [Theory]
     [MemberData(nameof(RuleIds))]
     public async Task EachRule_ShouldBuildARealValidProject_AndFailARealInvalidProject(string ruleId)
@@ -65,6 +73,85 @@ public sealed class TemporaryProjectFixtureTests
             {
                 Directory.Delete(fixtureRoot, recursive: true);
             }
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(SuppressionModes))]
+    public async Task AIARCH007_ShouldRemainABuildError_WhenARealProjectAttemptsSuppression(string suppressionMode)
+    {
+        var solutionRoot = FindSolutionRoot();
+        var analyzerProject = Path.Combine(
+            solutionRoot,
+            "src",
+            "analyzers",
+            "AICopilot.Architecture.Analyzers",
+            "AICopilot.Architecture.Analyzers.csproj");
+        var fixtureRoot = Path.Combine(
+            Path.GetTempPath(),
+            "aicopilot-analyzer-suppression-fixtures",
+            suppressionMode,
+            Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            var projectPath = WriteFixture(
+                fixtureRoot,
+                "Invalid",
+                AICopilotArchitectureAnalyzer.SecurityMetadataId,
+                valid: false,
+                analyzerProject);
+            ApplySuppressionAttempt(projectPath, suppressionMode);
+
+            var result = await BuildAsync(projectPath);
+
+            result.ExitCode.Should().NotBe(
+                0,
+                $"{suppressionMode} must not downgrade a NotConfigurable architecture diagnostic");
+            result.Output.Should().Contain(
+                AICopilotArchitectureAnalyzer.SecurityMetadataId,
+                $"the real build must still report AIARCH007. Output:{Environment.NewLine}{result.Output}");
+        }
+        finally
+        {
+            if (Directory.Exists(fixtureRoot))
+            {
+                Directory.Delete(fixtureRoot, recursive: true);
+            }
+        }
+    }
+
+    private static void ApplySuppressionAttempt(string projectPath, string suppressionMode)
+    {
+        var projectRoot = Path.GetDirectoryName(projectPath)!;
+        var sourcePath = Path.Combine(projectRoot, "Fixture.cs");
+        switch (suppressionMode)
+        {
+            case "Pragma":
+                File.WriteAllText(
+                    sourcePath,
+                    $"#pragma warning disable {AICopilotArchitectureAnalyzer.SecurityMetadataId}{Environment.NewLine}{File.ReadAllText(sourcePath)}");
+                break;
+            case "NoWarn":
+                File.WriteAllText(
+                    projectPath,
+                    File.ReadAllText(projectPath).Replace(
+                        "</PropertyGroup>",
+                        $"  <NoWarn>{AICopilotArchitectureAnalyzer.SecurityMetadataId}</NoWarn>{Environment.NewLine}  </PropertyGroup>",
+                        StringComparison.Ordinal));
+                break;
+            case "EditorConfig":
+                File.WriteAllText(
+                    Path.Combine(projectRoot, ".editorconfig"),
+                    $"root = true{Environment.NewLine}[*.cs]{Environment.NewLine}dotnet_diagnostic.{AICopilotArchitectureAnalyzer.SecurityMetadataId}.severity = none{Environment.NewLine}");
+                break;
+            case "GlobalConfig":
+                File.WriteAllText(
+                    Path.Combine(projectRoot, "Architecture.globalconfig"),
+                    $"is_global = true{Environment.NewLine}dotnet_diagnostic.{AICopilotArchitectureAnalyzer.SecurityMetadataId}.severity = none{Environment.NewLine}");
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(suppressionMode), suppressionMode, "Unknown suppression mode");
         }
     }
 

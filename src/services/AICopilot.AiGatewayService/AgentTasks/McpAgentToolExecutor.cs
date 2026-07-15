@@ -83,20 +83,7 @@ internal sealed class McpAgentToolExecutor(
 
     private static void EnsureMcpToolSafety(ToolRegistration registration, AiToolDefinition tool)
     {
-        if (McpTargetTrustPolicy.RequiresCloudReadOnly(
-                registration.TargetName,
-                tool.TargetName,
-                tool.ServerName,
-                tool.ToolName,
-                tool.Description)
-            && tool.ExternalSystemType != AiToolExternalSystemType.CloudReadOnly)
-        {
-            throw new AgentToolExecutionException(
-                AppProblemCodes.ToolBlocked,
-                $"MCP tool '{tool.Name}' target trust requires CloudReadOnly classification.");
-        }
-
-        var decision = AiToolSafetyPolicy.EvaluateConfigured(
+        var decision = AiToolSafetyPolicy.EvaluateConfiguredMcp(
             tool.ReadOnlyDeclared,
             tool.McpReadOnlyHint,
             tool.McpDestructiveHint,

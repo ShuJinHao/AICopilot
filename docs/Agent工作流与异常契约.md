@@ -25,6 +25,8 @@
 
 不得为了实现方便把这些能力合成一个大 agent、大 service 或绕过审批/工具边界的隐藏 adapter。`AgentWorkflowTopology` 的 `Tools`、`Knowledge`、`DataAnalysis`、`BusinessPolicy` 分支必须保持显式 fan-out/fan-in，不得拍平成串行或为新能力另起孤立链路。
 
+动态配置的 MCP 目标没有可由调用方 enum、alias、描述或 endpoint 证明的 NonCloud 信任身份。因此 server 与每个 tool 只有 `CloudReadOnly + ReadOnlyQuery + readOnlyDeclared=true` 的精确组合可进入后续动词、MCP hint、schema 和 risk 检查。该判定必须由聚合注册、runtime builder（含绕过新聚合校验的旧持久化记录）、`AgentWorkflowPipeline` Plan/实时能力发现和 `McpAgentToolExecutor` 每次执行复用同一 `AiToolSafetyPolicy`；禁止 hostname/token heuristic、调用方自报 NonCloud、伪 allowlist、fallback 或影子判定。这一 MCP 信任边界不改变本地非 MCP tool 的正式 capability/risk/审批策略。
+
 ### 2.1 分支完成状态与合流门禁
 
 - 四个并行分支必须返回显式 `BranchResult` 完成状态：`Skipped` 表示当前路由没有该分支相关意图；`Empty` 表示相关分支已合法执行但没有真实结果或可用能力；`Succeeded` 表示有可进入最终上下文的真实载荷；`Failed` 表示分支没有完成并携带稳定错误码与安全摘要。禁止再用空字符串、空数组或空对象伪装异常。
@@ -138,7 +140,7 @@ Cloud 只读 Agent 当前正式能力限定为：
 - `AIARCH005` 要求具体 Agent plugin 显式 override `Description` 和 `ChatExposureMode`，并至少暴露一个带 `DescriptionAttribute` 的实例 tool。组件扫描、DI activation 和加载只属于 `AICopilot.AgentPlugin.Runtime`；零调用插件、静态假 tool、宿主内伪业务成功路径和生产 Fake/Stub/Test executor 必须物理删除。
 - 生产树中唯一 test-double 例外是完全限定类型 `AICopilot.AiGatewayService.AgentTasks.MockMcpAgentToolExecutor`：它必须保持 `internal`，只能在 `Environment.IsDevelopment()` 且 `AiGateway:MockMcp:Enabled=true` 时注册，输出必须带 mock/simulation 事实且不能执行外部副作用。同名类型、换 namespace、wrapper/adapter 或第二个 mock executor 均不在例外内。
 - `AIARCH007` 只按完全限定 symbol identity 识别 request interface、`AuthorizeRequirementAttribute`、MVC `ControllerBase` / HTTP action attribute / `[Authorize]` / `[AllowAnonymous]`、tool descriptor 和契约例外；同名类型、伪属性、attribute alias 或换 namespace 都不得扩大识别面。Service 的公开 command/query/stream request 必须显式声明 `AuthorizeRequirement`，stream 没有例外；只有 `FinalizeCloudOidcLoginCommand`、`LoginUserCommand`、`GetCurrentUserProfileQuery`、`GetInitializationStatusQuery` 四个完全限定 Identity 公开请求例外。资源所有权/动态权限不得用不真实的单一静态权限换绿；只有 `GetArtifactWorkspaceQuery` / `DownloadArtifactQuery -> ArtifactWorkspaceQueryCoordinator` 和 `ApproveAgentApprovalCommand` / `RejectAgentApprovalCommand -> AgentApprovalDecisionCoordinator` 四个完全限定 `ResourceAuthorizationOwner` 对，并由 coordinator 执行真实 owner/approval-type/privileged permission 校验。HttpApi Controller action 必须在类或方法上显式 `[Authorize]` / `[AllowAnonymous]`。
-- 上述边界由 `AICopilot.Architecture.Analyzers` 在所有生产编译中以 Error 执行，`AICopilot.Architecture.AnalyzerTests` 保持正/反语义 fixture 和真实临时 csproj 编译 fixture；不得恢复同义 Regex/字符串影子检查。
+- 上述边界由 `AICopilot.Architecture.Analyzers` 在所有生产编译中以 `Error + IsEnabledByDefault + NotConfigurable` 执行，CompilationEnd 规则保留 `CompilationEnd` tag；`AICopilot.Architecture.AnalyzerTests` 保持正/反语义 fixture 和真实临时 csproj 编译/suppression fixture，inventory 同时扫描 `NoWarn`、Analyzer 关闭、`.editorconfig/.globalconfig` severity、`#pragma warning disable`、`SuppressMessage/UnconditionalSuppressMessage`；不得恢复可降级 descriptor 或同义 Regex/字符串影子门禁。
 
 ## 9. 验收命令
 
