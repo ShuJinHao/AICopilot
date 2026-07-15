@@ -2159,10 +2159,10 @@
     },
     "productionNear": {
       "maximum": {
-        "groupCount": 597,
-        "instanceCount": 1544,
-        "duplicatedLines": 12352,
-        "duplicatedTokens": 29381
+        "groupCount": 595,
+        "instanceCount": 1540,
+        "duplicatedLines": 12320,
+        "duplicatedTokens": 29235
       },
       "signatures": {
         "CBAB669D3612CC7FD7513AEA2306511D6DC49D50155F0908C849A4404F3F5963": {
@@ -2340,11 +2340,6 @@
           "maximumDuplicatedLines": 16,
           "maximumDuplicatedTokens": 80
         },
-        "E6FC7FC96DA5B171D385F5D585B44CC824E6E04F3D907B249C591C36011B1206": {
-          "maximumInstanceCount": 2,
-          "maximumDuplicatedLines": 16,
-          "maximumDuplicatedTokens": 74
-        },
         "04D6B49D67D660DEC67372D002D9FF173931487137F61DEA118A6ED6C4F3ED25": {
           "maximumInstanceCount": 3,
           "maximumDuplicatedLines": 24,
@@ -2368,11 +2363,6 @@
         "3CAAE85F88991CD3AFDD81B0C22D819750485F3AAFBB52E1DA5E4BA49084C0DA": {
           "maximumInstanceCount": 3,
           "maximumDuplicatedLines": 24,
-          "maximumDuplicatedTokens": 72
-        },
-        "3DE758E116398668B2280245AABBBBD22C3FFA3BA785473FCDB2BFC0A9384562": {
-          "maximumInstanceCount": 2,
-          "maximumDuplicatedLines": 16,
           "maximumDuplicatedTokens": 72
         },
         "55AA0C298B6F9A78B45E7CD75C458A78E98F7A4B000F7E34CD48E310B0311929": {
@@ -5154,10 +5144,10 @@
     },
     "productionStructural": {
       "maximum": {
-        "groupCount": 1131,
-        "instanceCount": 3720,
-        "duplicatedLines": 29760,
-        "duplicatedTokens": 94856
+        "groupCount": 1128,
+        "instanceCount": 3714,
+        "duplicatedLines": 29712,
+        "duplicatedTokens": 94646
       },
       "signatures": {
         "9AAB13D8645EE93EF8E8C6A7F2E29C5FDBB5D3203D0BDDD8FE76CD3A4836C8A5": {
@@ -6540,11 +6530,6 @@
           "maximumDuplicatedLines": 16,
           "maximumDuplicatedTokens": 74
         },
-        "C9C631F8AB773D0DEA6DC72E2AF8DE85836E9E0E7FD404A363962D027F1531BF": {
-          "maximumInstanceCount": 2,
-          "maximumDuplicatedLines": 16,
-          "maximumDuplicatedTokens": 74
-        },
         "03EBBDD25104263067868CD98832230092F1F65CBC6BBCF7E2F8FFF963B65F10": {
           "maximumInstanceCount": 3,
           "maximumDuplicatedLines": 24,
@@ -6688,11 +6673,6 @@
         "CDC489D900E4E84BC12857DCB00C73BFE791F892B3039144DC25F8D1A6282EF2": {
           "maximumInstanceCount": 3,
           "maximumDuplicatedLines": 24,
-          "maximumDuplicatedTokens": 72
-        },
-        "D7825892198ADFFBD32644B3897A666AFA766B309A6DD3A3FA9936738F5E2812": {
-          "maximumInstanceCount": 2,
-          "maximumDuplicatedLines": 16,
           "maximumDuplicatedTokens": 72
         },
         "DA7619432A3FDEC840DB349643F9AA874007A4E9DD78A28B569C150AAE3630DE": {
@@ -7146,11 +7126,6 @@
           "maximumDuplicatedTokens": 64
         },
         "268500EFCE30BB9D92436FB4FB594895825F150D3BF3D17CAFD3F22FD15DABA1": {
-          "maximumInstanceCount": 2,
-          "maximumDuplicatedLines": 16,
-          "maximumDuplicatedTokens": 64
-        },
-        "2C6C7E5E530D5BADFDC562035286AE9428B92552237B6BFE7A5C392C2239BB4B": {
           "maximumInstanceCount": 2,
           "maximumDuplicatedLines": 16,
           "maximumDuplicatedTokens": 64
