@@ -25,7 +25,7 @@
 
 不得为了实现方便把这些能力合成一个大 agent、大 service 或绕过审批/工具边界的隐藏 adapter。`AgentWorkflowTopology` 的 `Tools`、`Knowledge`、`DataAnalysis`、`BusinessPolicy` 分支必须保持显式 fan-out/fan-in，不得拍平成串行或为新能力另起孤立链路。
 
-动态配置的 MCP 目标没有可由调用方 enum、alias、描述或 endpoint 证明的 NonCloud 信任身份。因此 server 与每个 tool 只有 `CloudReadOnly + ReadOnlyQuery + readOnlyDeclared=true` 的精确组合可进入后续动词、MCP hint、schema 和 risk 检查。该判定必须由聚合注册、runtime builder（含绕过新聚合校验的旧持久化记录）、`AgentWorkflowPipeline` Plan/实时能力发现和 `McpAgentToolExecutor` 每次执行复用同一 `AiToolSafetyPolicy`；禁止 hostname/token heuristic、调用方自报 NonCloud、伪 allowlist、fallback 或影子判定。这一 MCP 信任边界不改变本地非 MCP tool 的正式 capability/risk/审批策略。
+动态配置的 MCP 目标没有可由调用方 enum、alias、描述或 endpoint 证明的 NonCloud 信任身份。因此 server 与每个 tool 只有 `CloudReadOnly + ReadOnlyQuery + readOnlyDeclared=true` 的精确组合可进入后续动词、MCP hint、schema 和 risk 检查。runtime MCP tool 还必须显式携带独立 canonical `ToolName`，缺失时直接阻断，不得回退到 runtime `Name` 或其它 alias。上述判定必须由聚合注册、runtime builder（含绕过新聚合校验的旧持久化记录）、`AgentWorkflowPipeline` Plan/实时能力发现和 `McpAgentToolExecutor` 每次执行复用同一 `AiToolSafetyPolicy`；禁止 hostname/token heuristic、调用方自报 NonCloud、伪 allowlist、fallback 或影子判定。这一 MCP 信任边界不改变本地非 MCP tool 的正式 capability/risk/审批策略。
 
 ### 2.1 分支完成状态与合流门禁
 

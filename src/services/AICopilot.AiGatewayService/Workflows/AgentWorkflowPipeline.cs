@@ -323,7 +323,7 @@ public class AgentWorkflowPipeline(
                 logger.LogWarning(
                     "Agent workflow excluded unsafe tool {ToolName}. Reasons={Reasons}",
                     tool.Name,
-                    string.Join("; ", decision.BlockReasons ?? [decision.Reason ?? "Unknown"]));
+                    string.Join("; ", decision.BlockReasons));
             }
 
             return decision.IsAllowed;

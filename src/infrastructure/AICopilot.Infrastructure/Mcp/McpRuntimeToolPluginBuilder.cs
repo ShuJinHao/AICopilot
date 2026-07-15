@@ -114,7 +114,7 @@ internal sealed class McpRuntimeToolPluginBuilder(ILogger logger)
                 "MCP server {ServerName} tool {ToolName} was blocked because its configured target metadata is unverifiable. Reasons={Reasons}",
                 server.Name,
                 tool.Name,
-                string.Join("; ", targetDecision.BlockReasons ?? [targetDecision.Reason ?? "Unknown"]));
+                string.Join("; ", targetDecision.BlockReasons));
             return false;
         }
 
@@ -158,7 +158,7 @@ internal sealed class McpRuntimeToolPluginBuilder(ILogger logger)
             server.Name,
             tool.Name,
             AiToolIdentity.CreateRuntimeName(AiToolTargetType.McpServer, server.Name, tool.Name),
-            string.Join("; ", decision.BlockReasons ?? [decision.Reason ?? "Unknown"]));
+            string.Join("; ", decision.BlockReasons));
         return false;
     }
 

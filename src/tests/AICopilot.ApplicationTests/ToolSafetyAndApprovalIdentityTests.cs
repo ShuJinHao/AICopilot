@@ -143,6 +143,31 @@ public sealed class ToolSafetyAndApprovalIdentityTests
     }
 
     [Fact]
+    public void ConfiguredMcpSafety_ShouldRejectMissingCanonicalToolName()
+    {
+        var tool = new AiToolDefinition
+        {
+            Name = AiToolIdentity.CreateRuntimeName(
+                AiToolTargetType.McpServer,
+                "runtime-mcp",
+                "queryDeviceLogs"),
+            Kind = AiToolCallKind.Mcp,
+            TargetType = AiToolTargetType.McpServer,
+            TargetName = "runtime-mcp",
+            ExternalSystemType = AiToolExternalSystemType.CloudReadOnly,
+            CapabilityKind = AiToolCapabilityKind.ReadOnlyQuery,
+            RiskLevel = AiToolRiskLevel.Low,
+            ReadOnlyDeclared = true
+        };
+
+        var decision = AiToolSafetyPolicy.EvaluateConfiguredMcp(tool);
+
+        decision.IsAllowed.Should().BeFalse();
+        decision.BlockReasons.Should().ContainSingle(reason =>
+            reason.Contains("explicit canonical tool name", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void CloudReadOnlyToolSafety_ShouldRejectChineseWriteSemantics()
     {
         var decision = AiToolSafetyPolicy.Evaluate(

@@ -5544,6 +5544,26 @@
       "status": "Expected"
     },
     {
+      "assembly": "AICopilot.ApplicationTests",
+      "class": "AICopilot.ApplicationTests.ToolSafetyAndApprovalIdentityTests",
+      "method": "ConfiguredMcpSafety_ShouldRejectMissingCanonicalToolName",
+      "case": "AICopilot.ApplicationTests.ToolSafetyAndApprovalIdentityTests.ConfiguredMcpSafety_ShouldRejectMissingCanonicalToolName",
+      "kind": "Application",
+      "runtime": "Pure",
+      "capability": "AgentWorkflow",
+      "concern": "Functional",
+      "profile": "Default",
+      "risk": "P1",
+      "ruleId": "AI-APPLICATION-001",
+      "regressionId": "AI-REG-APPLICATION-CORE",
+      "runtimeDependencies": [],
+      "cadence": "PR",
+      "owner": "ApplicationServices",
+      "required": true,
+      "skipExpected": false,
+      "status": "Expected"
+    },
+    {
       "assembly": "AICopilot.Architecture.AnalyzerTests",
       "class": "AICopilot.Architecture.AnalyzerTests.AICopilotArchitectureAnalyzerTests",
       "method": "AIARCH001_ShouldClassifyEveryProductionProject_AndRejectUnknownTestOrReverseLayerEdges",

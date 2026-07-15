@@ -25,7 +25,7 @@ internal sealed class McpAgentToolExecutor(
     {
         var tool = ResolveRuntimeTool(context.ToolRegistration);
         EnsureRegistryMatchesRuntimeTool(context.ToolRegistration, tool);
-        EnsureMcpToolSafety(context.ToolRegistration, tool);
+        EnsureMcpToolSafety(tool);
 
         if (tool.InvokeAsync is null)
         {
@@ -81,14 +81,14 @@ internal sealed class McpAgentToolExecutor(
         }
     }
 
-    private static void EnsureMcpToolSafety(ToolRegistration registration, AiToolDefinition tool)
+    private static void EnsureMcpToolSafety(AiToolDefinition tool)
     {
         var decision = AiToolSafetyPolicy.EvaluateConfiguredMcp(tool);
         if (!decision.IsAllowed)
         {
             throw new AgentToolExecutionException(
                 AppProblemCodes.ToolBlocked,
-            decision.Reason ?? $"MCP tool '{tool.Name}' violates runtime safety policy.");
+                decision.Reason!);
         }
     }
 
@@ -100,8 +100,8 @@ internal sealed class McpAgentToolExecutor(
         {
             providerType = registration.ProviderType.ToString(),
             toolCode = registration.ToolCode,
-            serverName = tool.ServerName ?? tool.TargetName ?? registration.TargetName,
-            toolName = tool.ToolName ?? tool.Name,
+            serverName = tool.TargetName!,
+            toolName = tool.ToolName!,
             resultJson = sanitized,
             isTruncated = serialized.Length > MaxOutputSummaryLength
         };

@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace AICopilot.SharedKernel.Ai;
 
-public sealed record AiToolSafetyDecision(bool IsAllowed, string? Reason, IReadOnlyList<string>? BlockReasons = null)
+public sealed record AiToolSafetyDecision(bool IsAllowed, string? Reason, IReadOnlyList<string> BlockReasons)
 {
     public static AiToolSafetyDecision Allow { get; } = new(true, null, []);
 }
@@ -198,7 +198,7 @@ public static class AiToolSafetyPolicy
             descriptor.ExternalSystemType,
             descriptor.CapabilityKind);
         var blockReasons = new List<string>(descriptor.BlockReasons);
-        blockReasons.AddRange(targetDecision.BlockReasons ?? []);
+        blockReasons.AddRange(targetDecision.BlockReasons);
 
         if (!descriptor.ReadOnlyDeclared)
         {
@@ -216,6 +216,11 @@ public static class AiToolSafetyPolicy
     public static AiToolSafetyDecision EvaluateConfiguredMcp(AiToolDefinition tool)
     {
         ArgumentNullException.ThrowIfNull(tool);
+        if (string.IsNullOrWhiteSpace(tool.ToolName))
+        {
+            return Block(["Dynamically configured MCP tools must declare an explicit canonical tool name."]);
+        }
+
         var metadata = new AiToolConfiguredMcpMetadata(
             tool.ReadOnlyDeclared,
             tool.McpReadOnlyHint,
@@ -226,7 +231,7 @@ public static class AiToolSafetyPolicy
             tool.RiskLevel);
         return EvaluateConfiguredMcp(
             metadata,
-            tool.ToolName ?? tool.Name,
+            tool.ToolName,
             tool.Description,
             tool.JsonSchema,
             tool.ReturnJsonSchema);
