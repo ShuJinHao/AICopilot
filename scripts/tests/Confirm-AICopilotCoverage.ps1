@@ -321,6 +321,12 @@ function Assert-TrxStorageMatchesRunner {
     }
 }
 
+function Get-CoberturaLineNodes {
+    param([Parameter(Mandatory)][Xml.XmlElement]$ClassNode)
+
+    return @($ClassNode.SelectNodes('lines/line'))
+}
+
 function Invoke-GuardSelfTest {
     $assemblyFailure = $null
     try {
@@ -485,6 +491,40 @@ function Invoke-GuardSelfTest {
         throw "Same-prefix TRX storage fixture did not fail closed: $storagePrefixFailure"
     }
 
+    $emptyCoveragePath = [IO.Path]::GetTempFileName()
+    try {
+        [IO.File]::WriteAllText(
+            $emptyCoveragePath,
+            '<coverage><packages><package name="A"><classes><class filename="core/A.cs"><lines /></class></classes></package></packages></coverage>',
+            [Text.UTF8Encoding]::new($false))
+        $emptyCoverage = Get-ObservedCoverageMap `
+            $emptyCoveragePath `
+            @{
+                'core/A.cs:1' = [ordered]@{
+                    filename = 'core/A.cs'
+                    number = 1
+                    hits = 0
+                    branchValid = 0
+                    branchCovered = 0
+                }
+            } `
+            @{
+                'src/core/A.cs' = [pscustomobject]@{
+                    assembly = 'A'
+                    project = 'src/core/A/A.csproj'
+                    source = 'src/core/A.cs'
+                }
+            }
+        if ($emptyCoverage.map.Count -ne 0 -or
+            @($emptyCoverage.sourceIds).Count -ne 0 -or
+            @($emptyCoverage.assemblyIds).Count -ne 0) {
+            throw 'Cobertura <lines/> must contribute zero sequence points and zero observed source/assembly identities.'
+        }
+    }
+    finally {
+        Remove-Item $emptyCoveragePath -Force -ErrorAction SilentlyContinue
+    }
+
     $dirtyHeadFailure = $null
     try {
         Assert-CleanHeadBinding 'abc' 'abc' $false 1 0
@@ -496,7 +536,7 @@ function Invoke-GuardSelfTest {
         throw "Dirty-HEAD coverage fixture did not fail closed: $dirtyHeadFailure"
     }
 
-    Write-Host 'AICopilot coverage omission guards passed. cases=12.'
+    Write-Host 'AICopilot coverage omission guards passed. cases=13.'
 }
 
 function Get-PortablePdbUniverse {
@@ -682,10 +722,10 @@ function Get-ObservedCoverageMap {
     $map = @{}
     $sourceIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     $assemblyIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-    foreach ($package in @($coverage.coverage.packages.package)) {
-        $packageName = [string]$package.name
-        foreach ($class in @($package.classes.class)) {
-            $sourcePath = ConvertTo-ProductionSourcePath ([string]$class.filename)
+    foreach ($package in @($coverage.SelectNodes('/coverage/packages/package'))) {
+        $packageName = [string]$package.GetAttribute('name')
+        foreach ($class in @($package.SelectNodes('classes/class'))) {
+            $sourcePath = ConvertTo-ProductionSourcePath ([string]$class.GetAttribute('filename'))
             if ($null -eq $sourcePath) {
                 continue
             }
@@ -696,20 +736,22 @@ function Get-ObservedCoverageMap {
             if ($packageName -cne [string]$source.assembly) {
                 throw "Coverage package/source ownership differs from the evaluated production assembly: package=$packageName source=$sourcePath expected=$($source.assembly)."
             }
-            $null = $sourceIds.Add("$([string]$source.assembly)|$sourcePath")
-            $null = $assemblyIds.Add("$([string]$source.project)|$([string]$source.assembly)")
-            foreach ($line in @($class.lines.line)) {
-                $lineNumber = [int]$line.number
+            $lineNodes = @(Get-CoberturaLineNodes $class)
+            if ($lineNodes.Count -eq 0) {
+                continue
+            }
+            foreach ($line in $lineNodes) {
+                $lineNumber = [int]$line.GetAttribute('number')
                 $coveragePath = $sourcePath.Substring(4)
                 $key = "${coveragePath}:$lineNumber"
                 if ($lineNumber -le 0 -or -not $PdbMap.ContainsKey($key)) {
                     throw "Coverage report contains a line outside the authoritative portable-PDB universe: $key."
                 }
-                $hits = [int]$line.hits
+                $hits = [int]$line.GetAttribute('hits')
                 $branchValid = 0
                 $branchCovered = 0
-                if ([string]$line.branch -ieq 'true' -and
-                    [string]$line.'condition-coverage' -match '\((?<covered>\d+)\s*/\s*(?<total>\d+)\)') {
+                if ([string]$line.GetAttribute('branch') -ieq 'true' -and
+                    [string]$line.GetAttribute('condition-coverage') -match '\((?<covered>\d+)\s*/\s*(?<total>\d+)\)') {
                     $branchCovered = [int]$Matches.covered
                     $branchValid = [int]$Matches.total
                 }
@@ -733,6 +775,8 @@ function Get-ObservedCoverageMap {
                     $existing['branchCovered'] = [Math]::Max([int]$existing['branchCovered'], $branchCovered)
                 }
             }
+            $null = $sourceIds.Add("$([string]$source.assembly)|$sourcePath")
+            $null = $assemblyIds.Add("$([string]$source.project)|$([string]$source.assembly)")
         }
     }
     return [ordered]@{
