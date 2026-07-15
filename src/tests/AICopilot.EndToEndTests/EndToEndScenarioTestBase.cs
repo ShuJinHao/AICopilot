@@ -220,9 +220,11 @@ public abstract class EndToEndScenarioTestBase
             transportType = 1,
             command,
             arguments,
+            externalSystemType = AiToolExternalSystemType.CloudReadOnly,
+            capabilityKind = AiToolCapabilityKind.ReadOnlyQuery,
             chatExposureMode,
             allowedTools = (allowedToolNames ?? Array.Empty<string>())
-                .Select(toolName => new { toolName, readOnlyDeclared = false })
+                .Select(toolName => new { toolName, readOnlyDeclared = true })
                 .ToArray(),
             isEnabled
         });

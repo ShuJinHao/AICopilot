@@ -81,14 +81,14 @@ public sealed class RagMcpEndToEndTests : EndToEndScenarioTestBase
             mcpServerCommand,
             string.Empty,
             ChatExposureMode.Advisory,
-            ["Echo"]);
+            ["queryEcho"]);
         await CreateMcpServerAsync(
             disabledServerName,
             false,
             mcpServerCommand,
             string.Empty,
             ChatExposureMode.Advisory,
-            ["Echo"]);
+            ["queryEcho"]);
 
         var connectionString = await _fixture.GetConnectionStringAsync();
         using var verificationHost = BuildMcpVerificationHost(connectionString);

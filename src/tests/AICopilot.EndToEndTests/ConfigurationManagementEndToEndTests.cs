@@ -261,6 +261,8 @@ public sealed class ConfigurationManagementEndToEndTests : EndToEndScenarioTestB
             transportType = 1,
             command = "dotnet",
             arguments = typeof(TestingMcpServerMarker).Assembly.Location,
+            externalSystemType = AiToolExternalSystemType.CloudReadOnly,
+            capabilityKind = AiToolCapabilityKind.ReadOnlyQuery,
             chatExposureMode = ChatExposureMode.Disabled,
             allowedTools = Array.Empty<object>(),
             isEnabled = false
