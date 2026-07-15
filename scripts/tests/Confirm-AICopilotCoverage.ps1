@@ -300,6 +300,27 @@ function Assert-CoverageDigestOwner {
     $OwnerByDigest[$Digest] = $ProjectName
 }
 
+function Assert-TrxStorageMatchesRunner {
+    param(
+        [Parameter(Mandatory)][string[]]$Storages,
+        [Parameter(Mandatory)][string]$ProjectName
+    )
+
+    $storageAssembly = if ($Storages.Count -eq 1) {
+        [IO.Path]::GetFileNameWithoutExtension($Storages[0])
+    }
+    else {
+        ''
+    }
+    if ($Storages.Count -ne 1 -or
+        -not [string]::Equals(
+            $storageAssembly,
+            $ProjectName,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw "$ProjectName TRX test-definition storage does not match the inventory runner assembly."
+    }
+}
+
 function Invoke-GuardSelfTest {
     $assemblyFailure = $null
     try {
@@ -448,6 +469,22 @@ function Invoke-GuardSelfTest {
         throw "Cross-runner coverage reuse fixture did not fail closed: $crossRunnerFailure"
     }
 
+    Assert-TrxStorageMatchesRunner `
+        @('/results/aicopilot.aggregatetests.dll') `
+        'AICopilot.AggregateTests'
+    $storagePrefixFailure = $null
+    try {
+        Assert-TrxStorageMatchesRunner `
+            @('/results/aicopilot.aggregatetests.shadow.dll') `
+            'AICopilot.AggregateTests'
+    }
+    catch {
+        $storagePrefixFailure = $_.Exception.Message
+    }
+    if ($storagePrefixFailure -notmatch 'does not match the inventory runner assembly') {
+        throw "Same-prefix TRX storage fixture did not fail closed: $storagePrefixFailure"
+    }
+
     $dirtyHeadFailure = $null
     try {
         Assert-CleanHeadBinding 'abc' 'abc' $false 1 0
@@ -459,7 +496,7 @@ function Invoke-GuardSelfTest {
         throw "Dirty-HEAD coverage fixture did not fail closed: $dirtyHeadFailure"
     }
 
-    Write-Host 'AICopilot coverage omission guards passed. cases=11.'
+    Write-Host 'AICopilot coverage omission guards passed. cases=12.'
 }
 
 function Get-PortablePdbUniverse {
@@ -864,10 +901,7 @@ foreach ($project in $requiredProjects) {
     $storages = @($trx.TestRun.TestDefinitions.UnitTest | ForEach-Object {
         [string]$_.storage
     } | Sort-Object -Unique)
-    if ($storages.Count -ne 1 -or
-        [IO.Path]::GetFileNameWithoutExtension($storages[0]) -cne [string]$project.projectName) {
-        throw "$($project.projectName) TRX test-definition storage does not match the inventory runner assembly."
-    }
+    Assert-TrxStorageMatchesRunner $storages ([string]$project.projectName)
 
     $runnerCoverage = Get-ObservedCoverageMap `
         $boundCoveragePath `

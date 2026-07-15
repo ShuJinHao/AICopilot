@@ -798,6 +798,7 @@ try {
         'Assert-ReviewedUniverseUpdate',
         'Resolve-LogicalCoverageCopies',
         'Assert-CoverageDigestOwner',
+        'Assert-TrxStorageMatchesRunner',
         'executableSourceIds',
         'Authoritative coverage requires one clean committed HEAD',
         'cannot be accepted by UpdateBaseline'
@@ -1235,7 +1236,7 @@ internal sealed class ConsumerMarker { }
             -LedgerPath $generatedTransitionPath
     } 'Declaration transition disposition/replacement/reason content differs from the frozen controlled review'
 
-    Write-Host 'AICopilot inventory/reconciliation/Simulation/CI/coverage/duplication/mutation/compatibility/declaration-transition behavior tests passed. cases=62; coverageOmissionGuards=11.'
+    Write-Host 'AICopilot inventory/reconciliation/Simulation/CI/coverage/duplication/mutation/compatibility/declaration-transition behavior tests passed. cases=62; coverageOmissionGuards=12.'
 }
 finally {
     Remove-Item $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
