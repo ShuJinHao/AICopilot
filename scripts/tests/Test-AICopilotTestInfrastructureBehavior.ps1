@@ -7,6 +7,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $inventoryScript = Join-Path $RepositoryRoot 'scripts/tests/Get-AICopilotTestInventory.ps1'
+$runnerBindingScript = Join-Path $RepositoryRoot 'scripts/tests/Bind-AICopilotRunnerBuildIdentity.ps1'
 $reconciliationScript = Join-Path $RepositoryRoot 'scripts/tests/Confirm-AICopilotRequiredTestResults.ps1'
 $coverageScript = Join-Path $RepositoryRoot 'scripts/tests/Confirm-AICopilotCoverage.ps1'
 $mutationScript = Join-Path $RepositoryRoot 'scripts/tests/Confirm-AICopilotMutation.ps1'
@@ -351,12 +352,203 @@ function Write-WebAndDeploymentReconciliationFixture {
         ($deploymentLines -join [Environment]::NewLine)
 }
 
+function Get-FixtureTextSha256 {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Value)
+
+    return [Convert]::ToHexString(
+        [Security.Cryptography.SHA256]::HashData(
+            [Text.Encoding]::UTF8.GetBytes($Value))).ToLowerInvariant()
+}
+
+function New-RunnerBindingFixture {
+    $root = Join-Path $tempRoot ([Guid]::NewGuid().ToString('N'))
+    $runnerTargetRelativePath = 'src/tests/RunnerA/bin/Release/net10.0/RunnerA.dll'
+    $runnerOutputDirectory = Split-Path (Join-Path $root $runnerTargetRelativePath) -Parent
+    $canonicalDirectory = Join-Path $root 'src/core/AssemblyA/bin/Release/net10.0'
+    $extraCanonicalDirectory = Join-Path $root 'src/core/AssemblyExtra/bin/Release/net10.0'
+    New-Item -ItemType Directory -Path $runnerOutputDirectory, $canonicalDirectory, $extraCanonicalDirectory -Force | Out-Null
+    Write-FixtureFile `
+        (Join-Path $root 'src/tests/RunnerA/RunnerA.csproj') `
+        '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
+    [IO.File]::WriteAllBytes((Join-Path $runnerOutputDirectory 'RunnerA.dll'), [byte[]](1, 2, 3))
+    [IO.File]::WriteAllBytes((Join-Path $canonicalDirectory 'AssemblyA.dll'), [byte[]](4, 5, 6))
+    [IO.File]::WriteAllBytes((Join-Path $canonicalDirectory 'AssemblyA.pdb'), [byte[]](7, 8, 9))
+    Copy-Item (Join-Path $canonicalDirectory 'AssemblyA.dll') (Join-Path $runnerOutputDirectory 'AssemblyA.dll')
+    Copy-Item (Join-Path $canonicalDirectory 'AssemblyA.pdb') (Join-Path $runnerOutputDirectory 'AssemblyA.pdb')
+    [IO.File]::WriteAllBytes((Join-Path $extraCanonicalDirectory 'AssemblyExtra.dll'), [byte[]](10, 11, 12))
+    [IO.File]::WriteAllBytes((Join-Path $extraCanonicalDirectory 'AssemblyExtra.pdb'), [byte[]](13, 14, 15))
+
+    & git -C $root init --quiet
+    & git -C $root add -A
+    & git -C $root -c user.name='AICopilot Fixture' -c user.email='fixture@invalid' commit --quiet -m 'runner binding fixture'
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Failed to create runner binding fixture Git baseline.'
+    }
+    $repositoryHead = ((& git -C $root rev-parse HEAD) -join "`n").Trim()
+    $assemblySha256 = (Get-FileHash (Join-Path $canonicalDirectory 'AssemblyA.dll') -Algorithm SHA256).Hash.ToLowerInvariant()
+    $pdbSha256 = (Get-FileHash (Join-Path $canonicalDirectory 'AssemblyA.pdb') -Algorithm SHA256).Hash.ToLowerInvariant()
+    $extraAssemblySha256 = (Get-FileHash (Join-Path $extraCanonicalDirectory 'AssemblyExtra.dll') -Algorithm SHA256).Hash.ToLowerInvariant()
+    $extraPdbSha256 = (Get-FileHash (Join-Path $extraCanonicalDirectory 'AssemblyExtra.pdb') -Algorithm SHA256).Hash.ToLowerInvariant()
+    $runnerCanonical = @(
+        "RunnerA`0$runnerTargetRelativePath`01`00"
+        "RunnerA`0AssemblyA`0False`0$assemblySha256`0$pdbSha256`0$assemblySha256`0$pdbSha256"
+    ) -join "`n"
+    $inventory = [pscustomobject][ordered]@{
+        schemaVersion = 3
+        repositoryHead = $repositoryHead
+        repositoryClean = $true
+        productionAssemblies = @(
+            [pscustomobject][ordered]@{
+                project = 'src/core/AssemblyA/AssemblyA.csproj'
+                assembly = 'AssemblyA'
+                targetFramework = 'net10.0'
+                assemblyPath = 'src/core/AssemblyA/bin/Release/net10.0/AssemblyA.dll'
+                pdbPath = 'src/core/AssemblyA/bin/Release/net10.0/AssemblyA.pdb'
+                assemblySha256 = $assemblySha256
+                pdbSha256 = $pdbSha256
+            },
+            [pscustomobject][ordered]@{
+                project = 'src/core/AssemblyExtra/AssemblyExtra.csproj'
+                assembly = 'AssemblyExtra'
+                targetFramework = 'net10.0'
+                assemblyPath = 'src/core/AssemblyExtra/bin/Release/net10.0/AssemblyExtra.dll'
+                pdbPath = 'src/core/AssemblyExtra/bin/Release/net10.0/AssemblyExtra.pdb'
+                assemblySha256 = $extraAssemblySha256
+                pdbSha256 = $extraPdbSha256
+            }
+        )
+        projects = @(
+            [pscustomobject][ordered]@{
+                projectName = 'RunnerA'
+                path = 'src/tests/RunnerA/RunnerA.csproj'
+                role = 'Runner'
+                required = $true
+            }
+        )
+        runnerBuildIdentity = [pscustomobject][ordered]@{
+            runnerCount = 1
+            synchronizedAssemblyCount = 0
+            sha256 = Get-FixtureTextSha256 $runnerCanonical
+            runners = @(
+                [pscustomobject][ordered]@{
+                    projectName = 'RunnerA'
+                    targetPath = $runnerTargetRelativePath
+                    productionAssemblyCount = 1
+                    synchronizedAssemblyCount = 0
+                    productionAssemblies = @(
+                        [pscustomobject][ordered]@{
+                            assembly = 'AssemblyA'
+                            synchronized = $false
+                            preSynchronizationAssemblySha256 = $assemblySha256
+                            preSynchronizationPdbSha256 = $pdbSha256
+                            assemblySha256 = $assemblySha256
+                            pdbSha256 = $pdbSha256
+                        }
+                    )
+                }
+            )
+        }
+    }
+    $inventoryPath = Join-Path $root 'artifacts/test-inventory.json'
+    Write-FixtureFile $inventoryPath ($inventory | ConvertTo-Json -Depth 12)
+    return [pscustomobject]@{
+        root = $root
+        inventoryPath = $inventoryPath
+        outputPath = Join-Path $root 'artifacts/runner-inputs/RunnerA.json'
+        runnerOutputDirectory = $runnerOutputDirectory
+        canonicalDirectory = $canonicalDirectory
+        extraCanonicalDirectory = $extraCanonicalDirectory
+    }
+}
+
 New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
 
 try {
     & $inventoryScript `
         -RepositoryRoot $RepositoryRoot `
         -RunClassificationBehaviorFixture *> $null
+
+    $runnerBindingFixture = New-RunnerBindingFixture
+    & $runnerBindingScript `
+        -RepositoryRoot $runnerBindingFixture.root `
+        -InventoryPath $runnerBindingFixture.inventoryPath `
+        -ProjectName 'RunnerA' `
+        -OutputPath $runnerBindingFixture.outputPath *> $null
+    $initialBinding = Get-Content $runnerBindingFixture.outputPath -Raw | ConvertFrom-Json
+    if ([int]$initialBinding.productionAssemblyCount -ne 1 -or
+        [int]$initialBinding.synchronizedAssemblyCount -ne 0 -or
+        @($initialBinding.productionAssemblies).Count -ne 1) {
+        throw 'Per-runner launch binding did not preserve the exact one-assembly closure.'
+    }
+
+    $bindingOutputShaBeforeFailure = (
+        Get-FileHash $runnerBindingFixture.outputPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    [IO.File]::WriteAllBytes(
+        (Join-Path $runnerBindingFixture.runnerOutputDirectory 'AssemblyA.dll'),
+        [byte[]](99, 98, 97))
+    Assert-Fails {
+        & $runnerBindingScript `
+            -RepositoryRoot $runnerBindingFixture.root `
+            -InventoryPath $runnerBindingFixture.inventoryPath `
+            -ProjectName 'RunnerA' `
+            -OutputPath $runnerBindingFixture.outputPath
+    } 'synchronization was not explicitly enabled'
+    if ((Get-FileHash $runnerBindingFixture.outputPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+        $bindingOutputShaBeforeFailure) {
+        throw 'Failed per-runner launch binding overwrote prior evidence.'
+    }
+
+    & $runnerBindingScript `
+        -RepositoryRoot $runnerBindingFixture.root `
+        -InventoryPath $runnerBindingFixture.inventoryPath `
+        -ProjectName 'RunnerA' `
+        -OutputPath $runnerBindingFixture.outputPath `
+        -SynchronizeRunnerBuildIdentity *> $null
+    $synchronizedBinding = Get-Content $runnerBindingFixture.outputPath -Raw | ConvertFrom-Json
+    if ([int]$synchronizedBinding.synchronizedAssemblyCount -ne 1 -or
+        -not [bool]$synchronizedBinding.productionAssemblies[0].synchronized) {
+        throw 'Explicit per-runner launch binding did not record the synchronized production pair.'
+    }
+
+    Copy-Item `
+        (Join-Path $runnerBindingFixture.extraCanonicalDirectory 'AssemblyExtra.dll') `
+        (Join-Path $runnerBindingFixture.runnerOutputDirectory 'AssemblyExtra.dll')
+    Copy-Item `
+        (Join-Path $runnerBindingFixture.extraCanonicalDirectory 'AssemblyExtra.pdb') `
+        (Join-Path $runnerBindingFixture.runnerOutputDirectory 'AssemblyExtra.pdb')
+    $bindingOutputShaBeforeExtraFailure = (
+        Get-FileHash $runnerBindingFixture.outputPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    Assert-Fails {
+        & $runnerBindingScript `
+            -RepositoryRoot $runnerBindingFixture.root `
+            -InventoryPath $runnerBindingFixture.inventoryPath `
+            -ProjectName 'RunnerA' `
+            -OutputPath $runnerBindingFixture.outputPath `
+            -SynchronizeRunnerBuildIdentity
+    } 'outside its exact inventory closure'
+    if ((Get-FileHash $runnerBindingFixture.outputPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+        $bindingOutputShaBeforeExtraFailure) {
+        throw 'Closure-extra per-runner launch failure overwrote prior evidence.'
+    }
+    Remove-Item `
+        (Join-Path $runnerBindingFixture.runnerOutputDirectory 'AssemblyExtra.dll'), `
+        (Join-Path $runnerBindingFixture.runnerOutputDirectory 'AssemblyExtra.pdb') `
+        -Force
+
+    & git -C $runnerBindingFixture.root `
+        -c user.name='AICopilot Fixture' `
+        -c user.email='fixture@invalid' `
+        commit --quiet --allow-empty -m 'runner binding head drift'
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Failed to create runner binding HEAD drift fixture.'
+    }
+    Assert-Fails {
+        & $runnerBindingScript `
+            -RepositoryRoot $runnerBindingFixture.root `
+            -InventoryPath $runnerBindingFixture.inventoryPath `
+            -ProjectName 'RunnerA' `
+            -OutputPath $runnerBindingFixture.outputPath
+    } 'Current repository HEAD differs from the inventory-bound HEAD'
 
     $qualityBaseFixture = New-InventoryFixture
     $candidateHead = [string](& git -C $qualityBaseFixture rev-parse HEAD)
@@ -1148,6 +1340,11 @@ public sealed class FixtureBoundaryTests
         'fetch-depth: 0',
         "github.event_name == 'pull_request' && github.event.pull_request.base.sha",
         '|| github.event.before',
+        'git rev-parse HEAD',
+        '-p:SourceRevisionId=$head',
+        '-SynchronizeRunnerBuildIdentity',
+        'Bind-AICopilotRunnerBuildIdentity.ps1',
+        'artifacts/runner-inputs/',
         '--collect "XPlat Code Coverage"',
         'Confirm-AICopilotCoverage.ps1',
         'mutation-gate:',
@@ -1157,6 +1354,41 @@ public sealed class FixtureBoundaryTests
     )) {
         if (-not $requiredWorkflow.Contains($requiredCiFragment, [StringComparison]::Ordinal)) {
             throw "Required CI is missing pure-parallel/resource-serial evidence '$requiredCiFragment'."
+        }
+    }
+    if ($requiredWorkflow -notmatch
+            '(?m)^\s*& \$using:bindingScript[^\r\n]*\r?\n\s*& dotnet test \$project\.path' -or
+        $requiredWorkflow -notmatch
+            '(?m)^\s*& \$bindingScript[^\r\n]*\r?\n\s*& dotnet test \$project\.path') {
+        throw 'Each parallel/resource required runner must bind its exact input immediately before dotnet test.'
+    }
+    $inventorySource = Get-Content $inventoryScript -Raw
+    foreach ($runnerIdentityFragment in @(
+        '[switch]$SynchronizeRunnerBuildIdentity',
+        'Get-RunnerProductionAssemblyClosure',
+        'evaluated runtime ProjectReference closure',
+        'outside its evaluated runtime ProjectReference closure',
+        'runner build identity differs from the inventory-bound production output',
+        'preSynchronizationAssemblySha256',
+        'runnerBuildIdentitySha256',
+        'Copy-Item $canonicalAssemblyPath $runnerAssemblyPath -Force',
+        'Copy-Item $canonicalPdbPath $runnerPdbPath -Force'
+    )) {
+        if (-not $inventorySource.Contains($runnerIdentityFragment, [StringComparison]::Ordinal)) {
+            throw "Inventory is missing canonical runner build identity evidence '$runnerIdentityFragment'."
+        }
+    }
+    $runnerBindingSource = Get-Content $runnerBindingScript -Raw
+    foreach ($runnerBindingFragment in @(
+        'inventorySha256',
+        '$currentHead -cne $inventoryHead',
+        'outside its exact inventory closure',
+        'synchronization was not explicitly enabled',
+        'preSynchronizationAssemblySha256',
+        '[System.IO.File]::Move'
+    )) {
+        if (-not $runnerBindingSource.Contains($runnerBindingFragment, [StringComparison]::Ordinal)) {
+            throw "Per-runner launch binding is missing fail-closed evidence '$runnerBindingFragment'."
         }
     }
     $qualityBaseSource = Get-Content (
@@ -1187,6 +1419,17 @@ public sealed class FixtureBoundaryTests
         'Resolve-LogicalCoverageCopies',
         'Assert-CoverageDigestOwner',
         'Assert-TrxStorageMatchesRunner',
+        'runnerBuildIdentity',
+        'inventory-bound pre-test runner input',
+        'Resolve-RunnerBuildIdentityManifest',
+        'Resolve-RunnerLaunchInputDocument',
+        'Assert-RunnerBuildIdentityPostTest',
+        'Assert-RunnerTargetStoragePath',
+        'Per-runner launch input evidence',
+        'TRX $EvidenceLabel differs from its inventory-bound pre-test runner target',
+        'case-preserving runner TestMethod.codeBase',
+        'post-test runner input differs from its inventory-bound pre-test manifest',
+        'post-test runner output contains production DLL/PDB outside its launch closure',
         'Get-CoberturaLineNodes',
         'Resolve-CoberturaProductionSourcePath',
         'executableSourceIds',
@@ -2676,7 +2919,7 @@ internal sealed class MigrationCoverageMarker { }
             -LedgerPath $generatedTransitionPath
     } 'Declaration transition disposition/replacement/reason content differs from the frozen controlled review'
 
-    Write-Host 'AICopilot inventory/reconciliation/Simulation/CI/coverage/duplication/mutation/compatibility/declaration-transition behavior tests passed. cases=93; coverageOmissionGuards=16.'
+    Write-Host 'AICopilot inventory/reconciliation/Simulation/CI/coverage/duplication/mutation/compatibility/declaration-transition behavior tests passed. cases=98; coverageOmissionGuards=29.'
 }
 finally {
     Remove-Item $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

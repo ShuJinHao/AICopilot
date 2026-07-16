@@ -111,6 +111,25 @@ public sealed class SecurityDeploymentTests
             "  build-test:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 60");
         ciWorkflow.Should().NotContain(
             "  build-test:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 25");
+        foreach (var canonicalCiFragment in new[]
+                 {
+                     "git rev-parse HEAD",
+                     "-p:SourceRevisionId=$head",
+                     "-SynchronizeRunnerBuildIdentity",
+                     "Bind-AICopilotRunnerBuildIdentity.ps1",
+                     "artifacts/runner-inputs/"
+                 })
+        {
+            ciWorkflow.Should().Contain(canonicalCiFragment);
+        }
+        Regex.IsMatch(
+                ciWorkflow,
+                @"(?m)^\s*& \$using:bindingScript[^\r\n]*\r?\n\s*& dotnet test \$project\.path")
+            .Should().BeTrue();
+        Regex.IsMatch(
+                ciWorkflow,
+                @"(?m)^\s*& \$bindingScript[^\r\n]*\r?\n\s*& dotnet test \$project\.path")
+            .Should().BeTrue();
 
         imageWorkflow.Should().Contain("runs-on: [self-hosted, iiot-linux-prod]");
         imageWorkflow.Should().Contain("Self-hosted runner must not run as root.");

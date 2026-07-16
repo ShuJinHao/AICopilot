@@ -3,6 +3,7 @@ param(
     [string]$RepositoryRoot = (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent),
     [string]$InventoryPath = 'artifacts/test-inventory.json',
     [string]$ResultsDirectory = 'artifacts/test-results',
+    [string]$RunnerInputDirectory = 'artifacts/runner-inputs',
     [string]$BaselinePath = 'scripts/tests/baselines/aicopilot-coverage.json',
     [string]$OutputPath = 'artifacts/quality/aicopilot-coverage.json',
     [string]$BaseRef = 'origin/main',
@@ -400,6 +401,285 @@ function Assert-TrxStorageMatchesRunner {
     }
 }
 
+function Resolve-RunnerBuildIdentityManifest {
+    param(
+        [Parameter(Mandatory)][object]$Manifest,
+        [Parameter(Mandatory)][string[]]$RequiredProjectNames,
+        [Parameter(Mandatory)][Collections.IDictionary]$AssemblyEvidenceByName
+    )
+
+    foreach ($property in @('runnerCount', 'synchronizedAssemblyCount', 'sha256', 'runners')) {
+        if ($null -eq $Manifest.PSObject.Properties[$property]) {
+            throw "Pre-test runner build identity is missing '$property'."
+        }
+    }
+    $records = @($Manifest.runners)
+    if ([int]$Manifest.runnerCount -ne $RequiredProjectNames.Count -or
+        $records.Count -ne $RequiredProjectNames.Count) {
+        throw "Pre-test runner build identity count differs from required inventory: declared=$([int]$Manifest.runnerCount) records=$($records.Count) required=$($RequiredProjectNames.Count)."
+    }
+    Assert-ExactIdentitySet `
+        -Expected $RequiredProjectNames `
+        -Actual @($records | ForEach-Object { [string]$_.projectName }) `
+        -Label 'Pre-test runner build identity projects'
+
+    $byProject = @{}
+    $calculatedSynchronizedAssemblyCount = 0
+    $canonical = ($records | Sort-Object projectName | ForEach-Object {
+        $runnerIdentity = $_
+        $projectName = [string]$runnerIdentity.projectName
+        if ($byProject.ContainsKey($projectName)) {
+            throw "Pre-test runner build identity contains duplicate project '$projectName'."
+        }
+        $targetPath = [string]$runnerIdentity.targetPath
+        if ([string]::IsNullOrWhiteSpace($targetPath) -or [IO.Path]::IsPathRooted($targetPath)) {
+            throw "$projectName pre-test runner build identity has an invalid repository-relative targetPath '$targetPath'."
+        }
+        $targetFullPath = Resolve-RepositoryPath $targetPath
+        $targetRelativePath = [IO.Path]::GetRelativePath(
+            [IO.Path]::GetFullPath($RepositoryRoot),
+            $targetFullPath).Replace('\', '/')
+        if ($targetRelativePath -eq '..' -or
+            $targetRelativePath.StartsWith('../', [StringComparison]::Ordinal) -or
+            $targetRelativePath -cne $targetPath.Replace('\', '/') -or
+            [IO.Path]::GetFileNameWithoutExtension($targetFullPath) -cne $projectName) {
+            throw "$projectName pre-test runner build identity targetPath escapes or differs from its runner identity: $targetPath."
+        }
+
+        $assemblyRecords = @($runnerIdentity.productionAssemblies)
+        if ([int]$runnerIdentity.productionAssemblyCount -ne $assemblyRecords.Count -or
+            [int]$runnerIdentity.synchronizedAssemblyCount -ne
+                @($assemblyRecords | Where-Object {
+                    $_.PSObject.Properties['synchronized'] -and
+                    $_.synchronized -is [bool] -and
+                    [bool]$_.synchronized
+                }).Count) {
+            throw "$projectName pre-test runner build identity count is inconsistent."
+        }
+        $calculatedSynchronizedAssemblyCount += [int]$runnerIdentity.synchronizedAssemblyCount
+        $assemblyByName = @{}
+        foreach ($runnerAssembly in $assemblyRecords) {
+            $assemblyName = [string]$runnerAssembly.assembly
+            if ([string]::IsNullOrWhiteSpace($assemblyName) -or
+                $assemblyByName.ContainsKey($assemblyName) -or
+                -not $AssemblyEvidenceByName.ContainsKey($assemblyName)) {
+                throw "$projectName pre-test runner build identity contains an invalid, duplicate, or unknown assembly '$assemblyName'."
+            }
+            if ($null -eq $runnerAssembly.PSObject.Properties['synchronized'] -or
+                $runnerAssembly.synchronized -isnot [bool]) {
+                throw "$projectName pre-test runner build identity has an invalid synchronized flag for $assemblyName."
+            }
+            $expectedAssembly = $AssemblyEvidenceByName[$assemblyName]
+            if ([string]$runnerAssembly.assemblySha256 -cne [string]$expectedAssembly.assemblySha256 -or
+                [string]$runnerAssembly.pdbSha256 -cne [string]$expectedAssembly.pdbSha256) {
+                throw "$projectName pre-test runner build identity is not bound to the canonical inventory assembly/PDB: $assemblyName."
+            }
+            foreach ($hashProperty in @(
+                'preSynchronizationAssemblySha256',
+                'preSynchronizationPdbSha256',
+                'assemblySha256',
+                'pdbSha256')) {
+                if ([string]$runnerAssembly.$hashProperty -notmatch '^[0-9a-f]{64}$') {
+                    throw "$projectName pre-test runner build identity has an invalid $hashProperty for $assemblyName."
+                }
+            }
+            $identityChanged = (
+                [string]$runnerAssembly.preSynchronizationAssemblySha256 -cne
+                    [string]$runnerAssembly.assemblySha256 -or
+                [string]$runnerAssembly.preSynchronizationPdbSha256 -cne
+                    [string]$runnerAssembly.pdbSha256)
+            if ([bool]$runnerAssembly.synchronized -ne $identityChanged) {
+                throw "$projectName pre-test runner build identity synchronized flag differs from its pre/post hashes for $assemblyName."
+            }
+            $assemblyByName[$assemblyName] = $runnerAssembly
+        }
+        $byProject[$projectName] = [pscustomobject]@{
+            record = $runnerIdentity
+            assemblies = $assemblyByName
+        }
+        @(
+            "$projectName`0$targetPath`0$([int]$runnerIdentity.productionAssemblyCount)`0$([int]$runnerIdentity.synchronizedAssemblyCount)"
+            @($assemblyRecords | Sort-Object assembly | ForEach-Object {
+                "$projectName`0$([string]$_.assembly)`0$([bool]$_.synchronized)`0$([string]$_.preSynchronizationAssemblySha256)`0$([string]$_.preSynchronizationPdbSha256)`0$([string]$_.assemblySha256)`0$([string]$_.pdbSha256)"
+            })
+        ) -join "`n"
+    }) -join "`n"
+    if ([int]$Manifest.synchronizedAssemblyCount -ne $calculatedSynchronizedAssemblyCount) {
+        throw "Pre-test runner build identity synchronized count differs from its records: declared=$([int]$Manifest.synchronizedAssemblyCount) actual=$calculatedSynchronizedAssemblyCount."
+    }
+    if ([string]$Manifest.sha256 -notmatch '^[0-9a-f]{64}$' -or
+        (Get-TextSha256 $canonical) -cne [string]$Manifest.sha256) {
+        throw 'Pre-test runner build identity digest differs from the inventory-bound manifest.'
+    }
+    return [pscustomobject]@{
+        byProject = $byProject
+        canonical = $canonical
+        synchronizedAssemblyCount = $calculatedSynchronizedAssemblyCount
+    }
+}
+
+function Resolve-RunnerLaunchInputDocument {
+    param(
+        [Parameter(Mandatory)][object]$Document,
+        [Parameter(Mandatory)][string]$ProjectName,
+        [Parameter(Mandatory)][string]$RepositoryHead,
+        [Parameter(Mandatory)][string]$InventorySha256,
+        [Parameter(Mandatory)][Collections.IDictionary]$AssemblyEvidenceByName,
+        [Parameter(Mandatory)][object]$InventoryRunnerIdentity
+    )
+
+    foreach ($property in @(
+        'schemaVersion',
+        'generatedAtUtc',
+        'repositoryHead',
+        'inventorySha256',
+        'projectName',
+        'targetPath',
+        'productionAssemblyCount',
+        'synchronizedAssemblyCount',
+        'sha256',
+        'productionAssemblies')) {
+        if ($null -eq $Document.PSObject.Properties[$property]) {
+            throw "$ProjectName per-runner launch input is missing '$property'."
+        }
+    }
+    if ([int]$Document.schemaVersion -ne 1 -or
+        [string]::IsNullOrWhiteSpace([string]$Document.generatedAtUtc) -or
+        [string]$Document.repositoryHead -cne $RepositoryHead -or
+        [string]$Document.inventorySha256 -cne $InventorySha256 -or
+        [string]$Document.projectName -cne $ProjectName) {
+        throw "$ProjectName per-runner launch input is not bound to the current inventory/HEAD/project."
+    }
+    $manifest = [pscustomobject]@{
+        runnerCount = 1
+        synchronizedAssemblyCount = [int]$Document.synchronizedAssemblyCount
+        sha256 = [string]$Document.sha256
+        runners = @(
+            [pscustomobject]@{
+                projectName = [string]$Document.projectName
+                targetPath = [string]$Document.targetPath
+                productionAssemblyCount = [int]$Document.productionAssemblyCount
+                synchronizedAssemblyCount = [int]$Document.synchronizedAssemblyCount
+                productionAssemblies = @($Document.productionAssemblies)
+            }
+        )
+    }
+    $resolved = Resolve-RunnerBuildIdentityManifest `
+        $manifest `
+        @($ProjectName) `
+        $AssemblyEvidenceByName
+    $launchIdentity = $resolved.byProject[$ProjectName]
+    if ([string]$launchIdentity.record.targetPath -cne
+        [string]$InventoryRunnerIdentity.record.targetPath) {
+        throw "$ProjectName per-runner launch target differs from the evaluated inventory closure."
+    }
+    Assert-ExactIdentitySet `
+        -Expected @($InventoryRunnerIdentity.assemblies.Keys) `
+        -Actual @($launchIdentity.assemblies.Keys) `
+        -Label "$ProjectName per-runner launch production closure"
+    foreach ($assemblyName in @($InventoryRunnerIdentity.assemblies.Keys | Sort-Object)) {
+        $inventoryAssembly = $InventoryRunnerIdentity.assemblies[$assemblyName]
+        $launchAssembly = $launchIdentity.assemblies[$assemblyName]
+        if ([string]$launchAssembly.assemblySha256 -cne
+                [string]$inventoryAssembly.assemblySha256 -or
+            [string]$launchAssembly.pdbSha256 -cne
+                [string]$inventoryAssembly.pdbSha256) {
+            throw "$ProjectName per-runner launch bytes differ from the evaluated inventory closure: $assemblyName."
+        }
+    }
+    return $launchIdentity
+}
+
+function Assert-RunnerTargetStoragePath {
+    param(
+        [Parameter(Mandatory)][string]$ProjectName,
+        [Parameter(Mandatory)][string]$TargetFullPath,
+        [Parameter(Mandatory)][string]$EvidenceFullPath,
+        [Parameter(Mandatory)][string]$EvidenceLabel,
+        [Parameter(Mandatory)][StringComparison]$PathComparison
+    )
+
+    if (-not [string]::Equals($EvidenceFullPath, $TargetFullPath, $PathComparison)) {
+        throw "$ProjectName TRX $EvidenceLabel differs from its inventory-bound pre-test runner target: manifest=$TargetFullPath trx=$EvidenceFullPath."
+    }
+}
+
+function Assert-RunnerBuildIdentityPostTest {
+    param(
+        [Parameter(Mandatory)][string]$ProjectName,
+        [Parameter(Mandatory)][string]$TargetPath,
+        [Parameter(Mandatory)][string[]]$Storages,
+        [Parameter(Mandatory)][string[]]$CodeBases,
+        [Parameter(Mandatory)][Collections.IDictionary]$AssemblyRecords,
+        [Parameter(Mandatory)][string[]]$AllProductionAssemblyNames
+    )
+
+    Assert-TrxStorageMatchesRunner $Storages $ProjectName
+    if ($CodeBases.Count -ne 1 -or
+        -not [string]::Equals(
+            [IO.Path]::GetFileNameWithoutExtension($CodeBases[0]),
+            $ProjectName,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw "$ProjectName TRX must contain exactly one case-preserving runner TestMethod.codeBase."
+    }
+    $targetFullPath = Resolve-RepositoryPath $TargetPath
+    $storageFullPath = if ([IO.Path]::IsPathRooted($Storages[0])) {
+        [IO.Path]::GetFullPath($Storages[0])
+    }
+    else {
+        Resolve-RepositoryPath $Storages[0]
+    }
+    $codeBaseFullPath = if ([IO.Path]::IsPathRooted($CodeBases[0])) {
+        [IO.Path]::GetFullPath($CodeBases[0])
+    }
+    else {
+        Resolve-RepositoryPath $CodeBases[0]
+    }
+    $codeBasePathComparison = if ($IsWindows) {
+        [StringComparison]::OrdinalIgnoreCase
+    }
+    else {
+        [StringComparison]::Ordinal
+    }
+    Assert-RunnerTargetStoragePath `
+        $ProjectName `
+        $targetFullPath `
+        $codeBaseFullPath `
+        'codeBase' `
+        $codeBasePathComparison
+    Assert-RunnerTargetStoragePath `
+        $ProjectName `
+        $targetFullPath `
+        $storageFullPath `
+        'storage' `
+        ([StringComparison]::OrdinalIgnoreCase)
+
+    $runnerBinDirectory = Split-Path $targetFullPath -Parent
+    $expectedAssemblyNames = @($AssemblyRecords.Keys | Sort-Object)
+    foreach ($assemblyName in @($AllProductionAssemblyNames | Sort-Object -Unique)) {
+        $runnerAssemblyPath = Join-Path $runnerBinDirectory "$assemblyName.dll"
+        $runnerPdbPath = Join-Path $runnerBinDirectory "$assemblyName.pdb"
+        $assemblyExists = Test-Path $runnerAssemblyPath -PathType Leaf
+        $pdbExists = Test-Path $runnerPdbPath -PathType Leaf
+        if ($assemblyName -notin $expectedAssemblyNames) {
+            if ($assemblyExists -or $pdbExists) {
+                throw "$ProjectName post-test runner output contains production DLL/PDB outside its launch closure: assembly=$assemblyName dll=$assemblyExists pdb=$pdbExists."
+            }
+            continue
+        }
+        $record = $AssemblyRecords[$assemblyName]
+        if (-not $assemblyExists -or
+            -not $pdbExists -or
+            (Get-FileHash $runnerAssemblyPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+                [string]$record.assemblySha256 -or
+            (Get-FileHash $runnerPdbPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+                [string]$record.pdbSha256) {
+            throw "$ProjectName post-test runner input differs from its inventory-bound pre-test manifest: $assemblyName."
+        }
+    }
+    return $runnerBinDirectory
+}
+
 function Get-CoberturaLineNodes {
     param([Parameter(Mandatory)][Xml.XmlElement]$ClassNode)
 
@@ -667,7 +947,267 @@ function Invoke-GuardSelfTest {
         throw "Coverage report-count transition fixture did not fail closed: $reportCountFailure"
     }
 
-    Write-Host 'AICopilot coverage omission guards passed. cases=16.'
+    $hashA = ('a' * 64) -join ''
+    $hashB = ('b' * 64) -join ''
+    $manifestTargetPath = 'artifacts/coverage-runner-identity-fixture/RunnerA.dll'
+    $newManifest = {
+        param(
+            [object]$Synchronized = $false,
+            [string]$PreAssemblyHash = $hashA,
+            [string]$AssemblyName = 'AssemblyA',
+            [int]$RunnerCount = 1,
+            [string]$DigestOverride = ''
+        )
+
+        $synchronizedCount = if ($Synchronized -is [bool] -and [bool]$Synchronized) { 1 } else { 0 }
+        $record = [pscustomobject]@{
+            assembly = $AssemblyName
+            synchronized = $Synchronized
+            preSynchronizationAssemblySha256 = $PreAssemblyHash
+            preSynchronizationPdbSha256 = $hashB
+            assemblySha256 = $hashA
+            pdbSha256 = $hashB
+        }
+        $canonical = @(
+            "RunnerA`0$manifestTargetPath`01`0$([int]([bool]$Synchronized))"
+            "RunnerA`0$AssemblyName`0$([bool]$Synchronized)`0$PreAssemblyHash`0$hashB`0$hashA`0$hashB"
+        ) -join "`n"
+        return [pscustomobject]@{
+            runnerCount = $RunnerCount
+            synchronizedAssemblyCount = $synchronizedCount
+            sha256 = if ([string]::IsNullOrWhiteSpace($DigestOverride)) {
+                Get-TextSha256 $canonical
+            }
+            else {
+                $DigestOverride
+            }
+            runners = @(
+                [pscustomobject]@{
+                    projectName = 'RunnerA'
+                    targetPath = $manifestTargetPath
+                    productionAssemblyCount = 1
+                    synchronizedAssemblyCount = $synchronizedCount
+                    productionAssemblies = @($record)
+                }
+            )
+        }
+    }
+    $assemblyEvidence = @{
+        AssemblyA = [pscustomobject]@{
+            assemblySha256 = $hashA
+            pdbSha256 = $hashB
+        }
+    }
+    $validManifest = & $newManifest
+    $resolvedManifest = Resolve-RunnerBuildIdentityManifest `
+        $validManifest `
+        @('RunnerA') `
+        $assemblyEvidence
+    if ($resolvedManifest.byProject.Count -ne 1) {
+        throw 'Valid pre-test runner build identity manifest did not resolve one runner.'
+    }
+    $launchDocument = [pscustomobject]@{
+        schemaVersion = 1
+        generatedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
+        repositoryHead = ('c' * 40) -join ''
+        inventorySha256 = $hashB
+        projectName = 'RunnerA'
+        targetPath = $manifestTargetPath
+        productionAssemblyCount = 1
+        synchronizedAssemblyCount = 0
+        sha256 = [string]$validManifest.sha256
+        productionAssemblies = @($validManifest.runners[0].productionAssemblies)
+    }
+    $resolvedLaunch = Resolve-RunnerLaunchInputDocument `
+        $launchDocument `
+        'RunnerA' `
+        $launchDocument.repositoryHead `
+        $hashB `
+        $assemblyEvidence `
+        $resolvedManifest.byProject['RunnerA']
+    if ($resolvedLaunch.assemblies.Count -ne 1) {
+        throw 'Valid per-runner launch input did not resolve one production assembly.'
+    }
+    $launchDocument.inventorySha256 = $hashA
+    $launchBindingFailure = $null
+    try {
+        Resolve-RunnerLaunchInputDocument `
+            $launchDocument `
+            'RunnerA' `
+            $launchDocument.repositoryHead `
+            $hashB `
+            $assemblyEvidence `
+            $resolvedManifest.byProject['RunnerA'] *> $null
+    }
+    catch {
+        $launchBindingFailure = $_.Exception.Message
+    }
+    if ($launchBindingFailure -notmatch 'not bound to the current inventory/HEAD/project') {
+        throw "Per-runner launch inventory binding fixture did not fail closed: $launchBindingFailure"
+    }
+
+    foreach ($manifestFailureFixture in @(
+        [pscustomobject]@{
+            manifest = (& $newManifest -RunnerCount 2)
+            expected = 'count differs from required inventory'
+            label = 'count'
+        },
+        [pscustomobject]@{
+            manifest = (& $newManifest -DigestOverride $hashB)
+            expected = 'digest differs'
+            label = 'digest'
+        },
+        [pscustomobject]@{
+            manifest = (& $newManifest -Synchronized 'false')
+            expected = 'invalid synchronized flag'
+            label = 'flag'
+        },
+        [pscustomobject]@{
+            manifest = (& $newManifest -PreAssemblyHash 'x')
+            expected = 'invalid preSynchronizationAssemblySha256'
+            label = 'pre-hash'
+        },
+        [pscustomobject]@{
+            manifest = (& $newManifest -AssemblyName 'UnknownAssembly')
+            expected = 'invalid, duplicate, or unknown assembly'
+            label = 'membership'
+        }
+    )) {
+        $manifestFailure = $null
+        try {
+            Resolve-RunnerBuildIdentityManifest `
+                $manifestFailureFixture.manifest `
+                @('RunnerA') `
+                $assemblyEvidence *> $null
+        }
+        catch {
+            $manifestFailure = $_.Exception.Message
+        }
+        if ($manifestFailure -notmatch [string]$manifestFailureFixture.expected) {
+            throw "Pre-test runner build identity $($manifestFailureFixture.label) fixture did not fail closed: $manifestFailure"
+        }
+    }
+
+    $postTestRoot = Join-Path $RepositoryRoot "artifacts/coverage-runner-post-test-$([Guid]::NewGuid().ToString('N'))"
+    try {
+        New-Item -ItemType Directory -Path $postTestRoot -Force | Out-Null
+        $targetFullPath = Join-Path $postTestRoot 'RunnerA.dll'
+        $assemblyPath = Join-Path $postTestRoot 'AssemblyA.dll'
+        $pdbPath = Join-Path $postTestRoot 'AssemblyA.pdb'
+        [IO.File]::WriteAllBytes($targetFullPath, [byte[]](1, 2, 3))
+        [IO.File]::WriteAllBytes($assemblyPath, [byte[]](4, 5, 6))
+        [IO.File]::WriteAllBytes($pdbPath, [byte[]](7, 8, 9))
+        $postTestRecord = [pscustomobject]@{
+            assemblySha256 = (Get-FileHash $assemblyPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            pdbSha256 = (Get-FileHash $pdbPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+        $postTestTargetPath = [IO.Path]::GetRelativePath(
+            [IO.Path]::GetFullPath($RepositoryRoot),
+            $targetFullPath).Replace('\', '/')
+        Assert-RunnerBuildIdentityPostTest `
+            'RunnerA' `
+            $postTestTargetPath `
+            @($targetFullPath.ToLowerInvariant()) `
+            @($targetFullPath) `
+            @{ AssemblyA = $postTestRecord } `
+            @('AssemblyA', 'AssemblyExtra') *> $null
+        Assert-RunnerTargetStoragePath `
+            'RunnerA' `
+            $targetFullPath `
+            $targetFullPath.ToLowerInvariant() `
+            'storage' `
+            ([StringComparison]::OrdinalIgnoreCase)
+        Assert-RunnerTargetStoragePath `
+            'RunnerA' `
+            $targetFullPath `
+            $targetFullPath.ToLowerInvariant() `
+            'codeBase' `
+            ([StringComparison]::OrdinalIgnoreCase)
+
+        $storageFailure = $null
+        try {
+            Assert-RunnerBuildIdentityPostTest `
+                'RunnerA' `
+                $postTestTargetPath `
+                @((Join-Path $postTestRoot 'other/RunnerA.dll')) `
+                @($targetFullPath) `
+                @{ AssemblyA = $postTestRecord } `
+                @('AssemblyA', 'AssemblyExtra') *> $null
+        }
+        catch {
+            $storageFailure = $_.Exception.Message
+        }
+        if ($storageFailure -notmatch 'TRX storage differs') {
+            throw "Runner target/TRX storage binding fixture did not fail closed: $storageFailure"
+        }
+
+        $codeBaseFailure = $null
+        try {
+            Assert-RunnerBuildIdentityPostTest `
+                'RunnerA' `
+                $postTestTargetPath `
+                @($targetFullPath.ToLowerInvariant()) `
+                @((Join-Path $postTestRoot 'other/RunnerA.dll')) `
+                @{ AssemblyA = $postTestRecord } `
+                @('AssemblyA', 'AssemblyExtra') *> $null
+        }
+        catch {
+            $codeBaseFailure = $_.Exception.Message
+        }
+        if ($codeBaseFailure -notmatch 'TRX codeBase differs') {
+            throw "Runner target/TRX codeBase binding fixture did not fail closed: $codeBaseFailure"
+        }
+
+        [IO.File]::WriteAllBytes(
+            (Join-Path $postTestRoot 'AssemblyExtra.dll'),
+            [byte[]](16, 17, 18))
+        [IO.File]::WriteAllBytes(
+            (Join-Path $postTestRoot 'AssemblyExtra.pdb'),
+            [byte[]](19, 20, 21))
+        $postTestExtraFailure = $null
+        try {
+            Assert-RunnerBuildIdentityPostTest `
+                'RunnerA' `
+                $postTestTargetPath `
+                @($targetFullPath.ToLowerInvariant()) `
+                @($targetFullPath) `
+                @{ AssemblyA = $postTestRecord } `
+                @('AssemblyA', 'AssemblyExtra') *> $null
+        }
+        catch {
+            $postTestExtraFailure = $_.Exception.Message
+        }
+        if ($postTestExtraFailure -notmatch 'outside its launch closure') {
+            throw "Post-test runner closure-extra fixture did not fail closed: $postTestExtraFailure"
+        }
+        Remove-Item `
+            (Join-Path $postTestRoot 'AssemblyExtra.dll'), `
+            (Join-Path $postTestRoot 'AssemblyExtra.pdb') `
+            -Force
+
+        [IO.File]::WriteAllBytes($assemblyPath, [byte[]](9, 9, 9))
+        $postTestHashFailure = $null
+        try {
+            Assert-RunnerBuildIdentityPostTest `
+                'RunnerA' `
+                $postTestTargetPath `
+                @($targetFullPath.ToLowerInvariant()) `
+                @($targetFullPath) `
+                @{ AssemblyA = $postTestRecord } `
+                @('AssemblyA', 'AssemblyExtra') *> $null
+        }
+        catch {
+            $postTestHashFailure = $_.Exception.Message
+        }
+        if ($postTestHashFailure -notmatch 'post-test runner input differs') {
+            throw "Post-test runner manifest hash fixture did not fail closed: $postTestHashFailure"
+        }
+    }
+    finally {
+        Remove-Item $postTestRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    Write-Host 'AICopilot coverage omission guards passed. cases=29.'
 }
 
 function Get-PortablePdbUniverse {
@@ -930,6 +1470,7 @@ if ($RunGuardSelfTest) {
 
 $resolvedInventoryPath = Resolve-RepositoryPath $InventoryPath
 $resolvedResultsDirectory = Resolve-RepositoryPath $ResultsDirectory
+$resolvedRunnerInputDirectory = Resolve-RepositoryPath $RunnerInputDirectory
 $resolvedBaselinePath = Resolve-RepositoryPath $BaselinePath
 $resolvedOutputPath = Resolve-RepositoryPath $OutputPath
 
@@ -938,6 +1479,9 @@ if (-not (Test-Path $resolvedInventoryPath -PathType Leaf)) {
 }
 if (-not (Test-Path $resolvedResultsDirectory -PathType Container)) {
     throw "Test results directory does not exist: $resolvedResultsDirectory"
+}
+if (-not (Test-Path $resolvedRunnerInputDirectory -PathType Container)) {
+    throw "Per-runner launch input directory does not exist: $resolvedRunnerInputDirectory"
 }
 if (-not (Test-Path $resolvedBaselinePath -PathType Leaf)) {
     throw "Coverage baseline does not exist: $resolvedBaselinePath"
@@ -948,16 +1492,19 @@ $baselineContext = Get-AICopilotBaselineContext `
     -BaselineKind Coverage `
     -BaselinePath $resolvedBaselinePath
 
+$inventorySha256 = (Get-FileHash $resolvedInventoryPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $inventory = Get-Content $resolvedInventoryPath -Raw | ConvertFrom-Json -Depth 64
 $repositoryCleanProperty = $inventory.PSObject.Properties['repositoryClean']
 $productionAssembliesProperty = $inventory.PSObject.Properties['productionAssemblies']
+$runnerBuildIdentityProperty = $inventory.PSObject.Properties['runnerBuildIdentity']
 if ([int]$inventory.schemaVersion -lt 3 -or
     [string]::IsNullOrWhiteSpace([string]$inventory.repositoryHead) -or
     $null -eq $inventory.productionUniverse -or
     $null -eq $repositoryCleanProperty -or
     $null -eq $productionAssembliesProperty -or
-    @($productionAssembliesProperty.Value).Count -eq 0) {
-    throw 'Coverage requires schemaVersion>=3 inventory with repository/SHA, production source universe, and evaluated assembly/PDB evidence.'
+    @($productionAssembliesProperty.Value).Count -eq 0 -or
+    $null -eq $runnerBuildIdentityProperty) {
+    throw 'Coverage requires schemaVersion>=3 inventory with repository/SHA, production source universe, evaluated assembly/PDB evidence, and pre-test runner build identity.'
 }
 $currentHead = ((& git -C $RepositoryRoot rev-parse HEAD 2>$null) -join "`n").Trim()
 $currentStatus = @(& git -C $RepositoryRoot status --porcelain=v1 --untracked-files=all 2>$null)
@@ -1029,7 +1576,51 @@ foreach ($assemblyEvidence in @($inventory.productionAssemblies)) {
     }
     $assemblyEvidenceByName[$assemblyName] = $assemblyEvidence
 }
+$runnerBuildIdentity = $runnerBuildIdentityProperty.Value
+$resolvedRunnerBuildIdentity = Resolve-RunnerBuildIdentityManifest `
+    $runnerBuildIdentity `
+    @($requiredProjects | ForEach-Object { [string]$_.projectName }) `
+    $assemblyEvidenceByName
+$runnerBuildIdentityByProject = $resolvedRunnerBuildIdentity.byProject
+$expectedRunnerInputFiles = @($requiredProjects | ForEach-Object {
+    "$([string]$_.projectName).json"
+})
+$actualRunnerInputFiles = @(
+    Get-ChildItem $resolvedRunnerInputDirectory -Filter '*.json' -File |
+        ForEach-Object { $_.Name }
+)
+Assert-ExactIdentitySet `
+    -Expected $expectedRunnerInputFiles `
+    -Actual $actualRunnerInputFiles `
+    -Label 'Per-runner launch input evidence'
+$runnerLaunchInputByProject = @{}
 foreach ($project in $requiredProjects) {
+    $projectName = [string]$project.projectName
+    $runnerInputPath = Join-Path $resolvedRunnerInputDirectory "$projectName.json"
+    $runnerInputDocument = Get-Content $runnerInputPath -Raw | ConvertFrom-Json -Depth 32
+    $launchIdentity = Resolve-RunnerLaunchInputDocument `
+        $runnerInputDocument `
+        $projectName `
+        $currentHead `
+        $inventorySha256 `
+        $assemblyEvidenceByName `
+        $runnerBuildIdentityByProject[$projectName]
+    $runnerLaunchInputByProject[$projectName] = [pscustomobject]@{
+        path = $runnerInputPath
+        sha256 = (Get-FileHash $runnerInputPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        identity = $launchIdentity
+    }
+}
+foreach ($project in $requiredProjects) {
+    $projectName = [string]$project.projectName
+    if (-not $runnerBuildIdentityByProject.ContainsKey($projectName)) {
+        throw "Pre-test runner build identity is missing required project '$projectName'."
+    }
+    if (-not $runnerLaunchInputByProject.ContainsKey($projectName)) {
+        throw "Per-runner launch input is missing required project '$projectName'."
+    }
+    $runnerLaunchInput = $runnerLaunchInputByProject[$projectName]
+    $preTestAssemblyByName = $runnerLaunchInput.identity.assemblies
     $runnerDirectory = Join-Path $resolvedResultsDirectory ([string]$project.projectName)
     if (-not (Test-Path $runnerDirectory -PathType Container)) {
         throw "Coverage runner directory is missing for $($project.projectName): $runnerDirectory"
@@ -1087,29 +1678,29 @@ foreach ($project in $requiredProjects) {
     $storages = @($trx.TestRun.TestDefinitions.UnitTest | ForEach-Object {
         [string]$_.storage
     } | Sort-Object -Unique)
-    Assert-TrxStorageMatchesRunner $storages ([string]$project.projectName)
+    $codeBases = @($trx.TestRun.TestDefinitions.UnitTest.TestMethod | ForEach-Object {
+        [string]$_.codeBase
+    } | Sort-Object -Unique)
+    $null = Assert-RunnerBuildIdentityPostTest `
+        $projectName `
+        ([string]$runnerLaunchInput.identity.record.targetPath) `
+        $storages `
+        $codeBases `
+        $preTestAssemblyByName `
+        @($assemblyEvidenceByName.Keys)
 
     $runnerCoverage = Get-ObservedCoverageMap `
         $boundCoveragePath `
         $pdbUniverse.map `
         $sourceByPath
-    $runnerBinDirectory = Split-Path ([IO.Path]::GetFullPath($storages[0])) -Parent
     foreach ($observedAssemblyId in $runnerCoverage.assemblyIds) {
         $observedAssemblyName = ([string]$observedAssemblyId).Substring(
             ([string]$observedAssemblyId).LastIndexOf('|') + 1)
         if (-not $assemblyEvidenceByName.ContainsKey($observedAssemblyName)) {
             throw "$($project.projectName) report contains unknown production assembly '$observedAssemblyName'."
         }
-        $expectedAssembly = $assemblyEvidenceByName[$observedAssemblyName]
-        $runnerAssemblyPath = Join-Path $runnerBinDirectory "$observedAssemblyName.dll"
-        $runnerPdbPath = Join-Path $runnerBinDirectory "$observedAssemblyName.pdb"
-        if (-not (Test-Path $runnerAssemblyPath -PathType Leaf) -or
-            -not (Test-Path $runnerPdbPath -PathType Leaf) -or
-            (Get-FileHash $runnerAssemblyPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne
-                [string]$expectedAssembly.assemblySha256 -or
-            (Get-FileHash $runnerPdbPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne
-                [string]$expectedAssembly.pdbSha256) {
-            throw "$($project.projectName) loaded production assembly/PDB differs from the inventory-bound build: $observedAssemblyName."
+        if (-not $preTestAssemblyByName.ContainsKey($observedAssemblyName)) {
+            throw "$($project.projectName) report observed production assembly '$observedAssemblyName' that was absent from its inventory-bound pre-test runner input."
         }
     }
     foreach ($key in $runnerCoverage.map.Keys) {
@@ -1135,6 +1726,8 @@ foreach ($project in $requiredProjects) {
         coverageSha256 = [string]$logicalCoverage.sha256
         physicalCopies = [int]$logicalCoverage.physicalCopies
         physicalCoveragePaths = @($logicalCoverage.paths)
+        runnerInputPath = [string]$runnerLaunchInput.path
+        runnerInputSha256 = [string]$runnerLaunchInput.sha256
         observedProductionAssemblies = @($runnerCoverage.assemblyIds | Sort-Object)
         observedProductionSources = @($runnerCoverage.sourceIds | Sort-Object)
     })
@@ -1303,6 +1896,10 @@ $output = [ordered]@{
             physicalCoveragePaths = @($_.physicalCoveragePaths | ForEach-Object {
                 [IO.Path]::GetRelativePath($RepositoryRoot, $_).Replace('\', '/')
             })
+            runnerInputPath = [IO.Path]::GetRelativePath(
+                $RepositoryRoot,
+                $_.runnerInputPath).Replace('\', '/')
+            runnerInputSha256 = $_.runnerInputSha256
             observedProductionAssemblies = $_.observedProductionAssemblies
             observedProductionSources = $_.observedProductionSources
         }

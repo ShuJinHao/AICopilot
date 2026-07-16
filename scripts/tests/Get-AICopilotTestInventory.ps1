@@ -7,6 +7,7 @@ param(
     [ValidateSet('Debug', 'Release')] [string]$Configuration = 'Release',
     [string]$BaseRef = 'origin/main',
     [switch]$UpdateBaseline,
+    [switch]$SynchronizeRunnerBuildIdentity,
     [switch]$RunClassificationBehaviorFixture
 )
 
@@ -1602,6 +1603,155 @@ if ($unusedDelayAllowlistEntries.Count -ne 0) {
     throw "Fixed-delay allowlist contains stale entries: $($unusedDelayAllowlistEntries -join ', ')."
 }
 
+$productionAssemblyByName = @{}
+$productionAssemblyByProjectPath = @{}
+foreach ($assemblyEvidence in $productionAssemblyEntries) {
+    $assemblyName = [string]$assemblyEvidence.assembly
+    if ($productionAssemblyByName.ContainsKey($assemblyName)) {
+        throw "Production assembly evidence contains duplicate assembly '$assemblyName'."
+    }
+    $productionAssemblyByName[$assemblyName] = $assemblyEvidence
+    $productionProjectPath = [System.IO.Path]::GetFullPath(
+        (Join-Path $root ([string]$assemblyEvidence.project)))
+    if ($productionAssemblyByProjectPath.ContainsKey($productionProjectPath)) {
+        throw "Production assembly evidence contains duplicate project '$productionProjectPath'."
+    }
+    $productionAssemblyByProjectPath[$productionProjectPath] = $assemblyEvidence
+}
+
+function Get-RunnerProductionAssemblyClosure {
+    param([Parameter(Mandatory)][string]$RunnerProjectPath)
+
+    $visited = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase)
+    $pending = [System.Collections.Generic.Queue[string]]::new()
+    $assemblyNames = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::Ordinal)
+    $pending.Enqueue([System.IO.Path]::GetFullPath($RunnerProjectPath))
+    while ($pending.Count -gt 0) {
+        $currentProjectPath = $pending.Dequeue()
+        if (-not $visited.Add($currentProjectPath)) {
+            continue
+        }
+        $currentDefinition = Get-EvaluatedProjectDefinition $currentProjectPath
+        foreach ($reference in @($currentDefinition.ProjectReferenceDefinitions)) {
+            if ([string]$reference.outputItemType -ieq 'Analyzer' -or
+                [string]$reference.referenceOutputAssembly -ieq 'false') {
+                continue
+            }
+            $referencePath = [System.IO.Path]::GetFullPath([string]$reference.path)
+            if ($productionAssemblyByProjectPath.ContainsKey($referencePath)) {
+                $expectedAssembly = $productionAssemblyByProjectPath[$referencePath]
+                [void]$assemblyNames.Add([string]$expectedAssembly.assembly)
+                $pending.Enqueue($referencePath)
+                continue
+            }
+            if ($nonProductionProjectPaths.Contains($referencePath)) {
+                $pending.Enqueue($referencePath)
+                continue
+            }
+            throw "Runner production closure reached an unclassified project reference: runner=$RunnerProjectPath reference=$referencePath."
+        }
+    }
+    return @($assemblyNames | Sort-Object)
+}
+
+$runnerBuildIdentityRecords = [System.Collections.Generic.List[object]]::new()
+foreach ($runner in @($inventory | Where-Object { $_.role -eq 'Runner' -and [bool]$_.required })) {
+    $runnerProjectPath = [System.IO.Path]::GetFullPath((Join-Path $root $runner.path))
+    $runnerDefinition = Get-EvaluatedProjectDefinition $runnerProjectPath
+    $runnerTargetPath = [System.IO.Path]::GetFullPath([string]$runnerDefinition.Properties.TargetPath)
+    if (-not (Test-PathInsideRepository $runnerTargetPath) -or
+        -not (Test-Path $runnerTargetPath -PathType Leaf) -or
+        [System.IO.Path]::GetFileNameWithoutExtension($runnerTargetPath) -cne [string]$runner.projectName) {
+        throw "Required runner build identity needs its current in-repository target: project=$($runner.path) target=$runnerTargetPath."
+    }
+    $runnerOutputDirectory = Split-Path $runnerTargetPath -Parent
+    $expectedAssemblyNames = @(Get-RunnerProductionAssemblyClosure $runnerProjectPath)
+    $expectedAssemblyNameSet = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::Ordinal)
+    foreach ($expectedAssemblyName in $expectedAssemblyNames) {
+        [void]$expectedAssemblyNameSet.Add($expectedAssemblyName)
+    }
+    $loadedProductionAssemblies = [System.Collections.Generic.List[object]]::new()
+    foreach ($assemblyName in @($productionAssemblyByName.Keys | Sort-Object)) {
+        $expectedAssembly = $productionAssemblyByName[$assemblyName]
+        $runnerAssemblyPath = Join-Path $runnerOutputDirectory "$assemblyName.dll"
+        $runnerPdbPath = Join-Path $runnerOutputDirectory "$assemblyName.pdb"
+        $runnerAssemblyExists = Test-Path $runnerAssemblyPath -PathType Leaf
+        $runnerPdbExists = Test-Path $runnerPdbPath -PathType Leaf
+        $assemblyExpected = $expectedAssemblyNameSet.Contains($assemblyName)
+        if (-not $assemblyExpected -and -not $runnerAssemblyExists -and -not $runnerPdbExists) {
+            continue
+        }
+        if (-not $assemblyExpected) {
+            throw "$($runner.projectName) runner output contains production assembly/PDB outside its evaluated runtime ProjectReference closure: assembly=$assemblyName dll=$runnerAssemblyExists pdb=$runnerPdbExists."
+        }
+        if (-not $runnerAssemblyExists -or -not $runnerPdbExists) {
+            throw "$($runner.projectName) runner output is missing a complete evaluated-closure production DLL/PDB pair: assembly=$assemblyName dll=$runnerAssemblyExists pdb=$runnerPdbExists."
+        }
+
+        $preSynchronizationAssemblySha256 = (Get-FileHash $runnerAssemblyPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        $preSynchronizationPdbSha256 = (Get-FileHash $runnerPdbPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        $synchronized = $false
+        if ($preSynchronizationAssemblySha256 -cne [string]$expectedAssembly.assemblySha256 -or
+            $preSynchronizationPdbSha256 -cne [string]$expectedAssembly.pdbSha256) {
+            if (-not $SynchronizeRunnerBuildIdentity) {
+                throw "$($runner.projectName) runner build identity differs from the inventory-bound production output: assembly=$assemblyName expectedDll=$([string]$expectedAssembly.assemblySha256) actualDll=$preSynchronizationAssemblySha256 expectedPdb=$([string]$expectedAssembly.pdbSha256) actualPdb=$preSynchronizationPdbSha256. The canonical build must pass one explicit SourceRevisionId derived from git rev-parse HEAD, then intentionally synchronize existing runner copies before inventory binding."
+            }
+            $canonicalAssemblyPath = [System.IO.Path]::GetFullPath(
+                (Join-Path $root ([string]$expectedAssembly.assemblyPath)))
+            $canonicalPdbPath = [System.IO.Path]::GetFullPath(
+                (Join-Path $root ([string]$expectedAssembly.pdbPath)))
+            Copy-Item $canonicalAssemblyPath $runnerAssemblyPath -Force
+            Copy-Item $canonicalPdbPath $runnerPdbPath -Force
+            $synchronized = $true
+        }
+
+        $actualAssemblySha256 = (Get-FileHash $runnerAssemblyPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        $actualPdbSha256 = (Get-FileHash $runnerPdbPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actualAssemblySha256 -cne [string]$expectedAssembly.assemblySha256 -or
+            $actualPdbSha256 -cne [string]$expectedAssembly.pdbSha256) {
+            throw "$($runner.projectName) runner build identity synchronization did not produce the inventory-bound bytes: assembly=$assemblyName expectedDll=$([string]$expectedAssembly.assemblySha256) actualDll=$actualAssemblySha256 expectedPdb=$([string]$expectedAssembly.pdbSha256) actualPdb=$actualPdbSha256."
+        }
+
+        $loadedProductionAssemblies.Add([pscustomobject]@{
+            assembly = $assemblyName
+            synchronized = $synchronized
+            preSynchronizationAssemblySha256 = $preSynchronizationAssemblySha256
+            preSynchronizationPdbSha256 = $preSynchronizationPdbSha256
+            assemblySha256 = $actualAssemblySha256
+            pdbSha256 = $actualPdbSha256
+        })
+    }
+
+    $runnerBuildIdentityRecords.Add([pscustomobject]@{
+        projectName = [string]$runner.projectName
+        targetPath = [System.IO.Path]::GetRelativePath($root, $runnerTargetPath).Replace('\', '/')
+        productionAssemblyCount = $loadedProductionAssemblies.Count
+        synchronizedAssemblyCount = @($loadedProductionAssemblies | Where-Object synchronized).Count
+        productionAssemblies = @($loadedProductionAssemblies)
+    })
+}
+
+$runnerBuildIdentityEntries = @($runnerBuildIdentityRecords | Sort-Object projectName)
+$runnerBuildIdentityCanonical = ($runnerBuildIdentityEntries | ForEach-Object {
+    $runnerIdentity = $_
+    @(
+        "$([string]$runnerIdentity.projectName)`0$([string]$runnerIdentity.targetPath)`0$([int]$runnerIdentity.productionAssemblyCount)`0$([int]$runnerIdentity.synchronizedAssemblyCount)"
+        @($runnerIdentity.productionAssemblies | Sort-Object assembly | ForEach-Object {
+            "$([string]$runnerIdentity.projectName)`0$([string]$_.assembly)`0$([bool]$_.synchronized)`0$([string]$_.preSynchronizationAssemblySha256)`0$([string]$_.preSynchronizationPdbSha256)`0$([string]$_.assemblySha256)`0$([string]$_.pdbSha256)"
+        })
+    ) -join "`n"
+}) -join "`n"
+$runnerBuildIdentitySha256 = [Convert]::ToHexString(
+    [Security.Cryptography.SHA256]::HashData(
+        [Text.Encoding]::UTF8.GetBytes($runnerBuildIdentityCanonical))).ToLowerInvariant()
+$runnerBuildIdentitySynchronizedAssemblyCount = [int]((
+    $runnerBuildIdentityEntries |
+        ForEach-Object { [int]$_.synchronizedAssemblyCount } |
+        Measure-Object -Sum).Sum)
+
 function Get-CaseDimensions {
     param(
         [Parameter(Mandatory)] [string]$CaseId,
@@ -1847,6 +1997,12 @@ $document = [pscustomobject]@{
         sources = @($productionUniverseEntries)
     }
     productionAssemblies = @($productionAssemblyEntries)
+    runnerBuildIdentity = [pscustomobject]@{
+        runnerCount = $runnerBuildIdentityEntries.Count
+        synchronizedAssemblyCount = $runnerBuildIdentitySynchronizedAssemblyCount
+        sha256 = $runnerBuildIdentitySha256
+        runners = @($runnerBuildIdentityEntries)
+    }
     projects = @($inventory)
     cases = @($cases | Sort-Object assembly, case)
 }

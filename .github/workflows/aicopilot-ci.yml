@@ -52,7 +52,16 @@ jobs:
         run: docker info
 
       - name: Build AICopilot solution
-        run: dotnet build AICopilot.slnx -c Release --no-restore
+        shell: pwsh
+        run: |
+          $head = ((& git rev-parse HEAD) -join "`n").Trim().ToLowerInvariant()
+          if ($LASTEXITCODE -ne 0 -or $head -notmatch '^[0-9a-f]{40}$') {
+            throw "Canonical build HEAD is not a full Git commit: $head"
+          }
+          & dotnet build AICopilot.slnx -c Release --no-restore "-p:SourceRevisionId=$head"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Canonical AICopilot solution build failed with exit code $LASTEXITCODE."
+          }
 
       - name: Test inventory and reconciliation behavior
         shell: pwsh
@@ -67,7 +76,7 @@ jobs:
 
       - name: Discover required AICopilot test runners
         shell: pwsh
-        run: ./scripts/tests/Get-AICopilotTestInventory.ps1 -BaseRef "$env:QUALITY_BASE_SHA" -OutputPath artifacts/test-inventory.json
+        run: ./scripts/tests/Get-AICopilotTestInventory.ps1 -BaseRef "$env:QUALITY_BASE_SHA" -OutputPath artifacts/test-inventory.json -SynchronizeRunnerBuildIdentity
 
       - name: Run required no-external .NET tests in parallel and resource tests serially
         shell: pwsh
@@ -76,9 +85,13 @@ jobs:
           $required = @($inventory.projects | Where-Object { $_.role -eq 'Runner' -and [bool]$_.required })
           $noExternal = @($required | Where-Object { $_.runtime -in @('Pure', 'InProcess') })
           $resource = @($required | Where-Object { $_.runtime -notin @('Pure', 'InProcess') })
+          $repositoryRoot = (Get-Location).Path
+          $bindingScript = Join-Path $repositoryRoot 'scripts/tests/Bind-AICopilotRunnerBuildIdentity.ps1'
           $noExternal | ForEach-Object -Parallel {
             $project = $_
             $runnerResults = "artifacts/test-results/$($project.projectName)"
+            $runnerInput = "artifacts/runner-inputs/$($project.projectName).json"
+            & $using:bindingScript -RepositoryRoot $using:repositoryRoot -InventoryPath artifacts/test-inventory.json -ProjectName $project.projectName -OutputPath $runnerInput -SynchronizeRunnerBuildIdentity
             & dotnet test $project.path -c Release --no-build --no-restore --collect "XPlat Code Coverage" --logger "trx;LogFileName=$($project.projectName).trx" --results-directory $runnerResults
             if ($LASTEXITCODE -ne 0) {
               throw "Required no-external test runner failed: $($project.path)"
@@ -86,6 +99,8 @@ jobs:
           } -ThrottleLimit 4
           foreach ($project in $resource) {
             $runnerResults = "artifacts/test-results/$($project.projectName)"
+            $runnerInput = "artifacts/runner-inputs/$($project.projectName).json"
+            & $bindingScript -RepositoryRoot $repositoryRoot -InventoryPath artifacts/test-inventory.json -ProjectName $project.projectName -OutputPath $runnerInput -SynchronizeRunnerBuildIdentity
             & dotnet test $project.path -c Release --no-build --no-restore --collect "XPlat Code Coverage" --logger "trx;LogFileName=$($project.projectName).trx" --results-directory $runnerResults
             if ($LASTEXITCODE -ne 0) {
               throw "Required resource test runner failed: $($project.path)"
@@ -129,6 +144,7 @@ jobs:
           path: |
             artifacts/test-inventory.json
             artifacts/quality/**
+            artifacts/runner-inputs/**
             artifacts/test-results/**
           if-no-files-found: warn
 
