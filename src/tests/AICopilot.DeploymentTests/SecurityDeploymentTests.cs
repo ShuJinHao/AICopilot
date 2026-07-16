@@ -134,7 +134,7 @@ public sealed class SecurityDeploymentTests
                      "artifacts/runner-inputs/",
                      "Restore governance TypeScript dependencies",
                      "Required CI lane failure:",
-                     "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
+                     "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
                      "merge-multiple: true",
                      "Confirm-AICopilotRequiredTestResults.ps1"
                  })
