@@ -1221,21 +1221,24 @@ if ([int]$baseline.schemaVersion -eq 1) {
     }
 }
 else {
-    if (-not ($baselineContext.Mode -eq 'Bootstrap' -and $UpdateBaseline)) {
+    $isBootstrapUpdate = $baselineContext.Mode -eq 'Bootstrap' -and $UpdateBaseline
+    if (-not $isBootstrapUpdate) {
         Assert-CoverageThreshold $metrics `
             ([double]$baseline.minimumLineRate) `
             ([double]$baseline.minimumBranchRate)
     }
-    if ($UpdateBaseline -and $baselineContext.Mode -ne 'Bootstrap') {
-        Assert-ReviewedUniverseUpdate `
-            @($baseline.productionAssemblyIds) `
-            @($pdbUniverse.assemblyIds) `
-            @($baseline.productionSourceIds) `
-            @($pdbUniverse.sourceIds) `
-            @($baseline.executableSourceIds) `
-            @($pdbUniverse.executableSourceIds) `
-            @($observedAssemblyIds) `
-            @($observedSourceIds)
+    if ($UpdateBaseline) {
+        if ($baselineContext.Mode -ne 'Bootstrap') {
+            Assert-ReviewedUniverseUpdate `
+                @($baseline.productionAssemblyIds) `
+                @($pdbUniverse.assemblyIds) `
+                @($baseline.productionSourceIds) `
+                @($pdbUniverse.sourceIds) `
+                @($baseline.executableSourceIds) `
+                @($pdbUniverse.executableSourceIds) `
+                @($observedAssemblyIds) `
+                @($observedSourceIds)
+        }
     }
     else {
         if ([int]$inventory.productionUniverse.assemblyCount -ne [int]$baseline.productionAssemblyCount -or
