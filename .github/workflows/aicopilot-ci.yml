@@ -28,8 +28,19 @@ jobs:
         with:
           dotnet-version: "10.0.301"
 
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: "src/vues/AICopilot.Web/package-lock.json"
+
       - name: Verify .NET SDK
         run: test "$(dotnet --version)" = "10.0.301"
+
+      - name: Restore governance TypeScript dependencies
+        working-directory: src/vues/AICopilot.Web
+        run: npm ci
 
       - name: Test inventory and reconciliation behavior
         shell: pwsh

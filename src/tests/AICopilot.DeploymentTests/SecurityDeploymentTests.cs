@@ -108,7 +108,19 @@ public sealed class SecurityDeploymentTests
 
         buildAndPush.Should().Contain("IIOT_ROUTINE_BUILD_PROTOCOL=1");
         ciWorkflow.Should().Contain(
-            "  build-test:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 60");
+            "  governance_gates:\n    name: governance-gates\n    runs-on: ubuntu-24.04\n    timeout-minutes: 15");
+        ciWorkflow.Should().Contain(
+            "  dotnet_tests:\n    name: dotnet-tests\n    runs-on: ubuntu-24.04\n    timeout-minutes: 60");
+        ciWorkflow.Should().Contain(
+            "  web_deployment_tests:\n    name: web-deployment-tests\n    runs-on: ubuntu-24.04\n    timeout-minutes: 15");
+        ciWorkflow.Should().Contain(
+            "  mutation_gate:\n    name: mutation-gate\n    runs-on: ubuntu-24.04\n    timeout-minutes: 15");
+        ciWorkflow.Should().Contain(
+            "  build-test:\n"
+            + "    needs: [governance_gates, dotnet_tests, web_deployment_tests, mutation_gate]\n"
+            + "    if: ${{ always() }}\n"
+            + "    runs-on: ubuntu-24.04\n"
+            + "    timeout-minutes: 10");
         ciWorkflow.Should().NotContain(
             "  build-test:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 25");
         foreach (var canonicalCiFragment in new[]
@@ -117,19 +129,32 @@ public sealed class SecurityDeploymentTests
                      "-p:SourceRevisionId=$head",
                      "-SynchronizeRunnerBuildIdentity",
                      "Bind-AICopilotRunnerBuildIdentity.ps1",
-                     "artifacts/runner-inputs/"
+                     "pwsh -NoProfile -File $using:bindingScript",
+                     "pwsh -NoProfile -File $bindingScript",
+                     "artifacts/runner-inputs/",
+                     "Restore governance TypeScript dependencies",
+                     "Required CI lane failure:",
+                     "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
+                     "merge-multiple: true",
+                     "Confirm-AICopilotRequiredTestResults.ps1"
                  })
         {
             ciWorkflow.Should().Contain(canonicalCiFragment);
         }
         Regex.IsMatch(
                 ciWorkflow,
-                @"(?m)^\s*& \$using:bindingScript[^\r\n]*\r?\n\s*& dotnet test \$project\.path")
+                @"(?ms)^\s*& pwsh -NoProfile -File \$using:bindingScript[^\r\n]*"
+                + @"\r?\n\s*if \(\$LASTEXITCODE -ne 0\) \{.*?"
+                + @"\r?\n\s*& dotnet test \$project\.path")
             .Should().BeTrue();
         Regex.IsMatch(
                 ciWorkflow,
-                @"(?m)^\s*& \$bindingScript[^\r\n]*\r?\n\s*& dotnet test \$project\.path")
+                @"(?ms)^\s*& pwsh -NoProfile -File \$bindingScript[^\r\n]*"
+                + @"\r?\n\s*if \(\$LASTEXITCODE -ne 0\) \{.*?"
+                + @"\r?\n\s*& dotnet test \$project\.path")
             .Should().BeTrue();
+        Regex.IsMatch(ciWorkflow, @"(?m)^\s*& \$using:bindingScript[^\r\n]*$")
+            .Should().BeFalse();
 
         imageWorkflow.Should().Contain("runs-on: [self-hosted, iiot-linux-prod]");
         imageWorkflow.Should().Contain("Self-hosted runner must not run as root.");

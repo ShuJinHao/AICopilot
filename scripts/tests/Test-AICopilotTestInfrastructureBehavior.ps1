@@ -1351,6 +1351,7 @@ public sealed class FixtureBoundaryTests
         'Confirm-AICopilotCoverage.ps1',
         'governance_gates:',
         'name: governance-gates',
+        'Restore governance TypeScript dependencies',
         'dotnet_tests:',
         'name: dotnet-tests',
         'web_deployment_tests:',
@@ -1377,6 +1378,10 @@ public sealed class FixtureBoundaryTests
     if ($requiredWorkflow -notmatch
             '(?ms)^\s{2}build-test:\s*.*?needs:\s*\[governance_gates,\s*dotnet_tests,\s*web_deployment_tests,\s*mutation_gate\]\s*.*?if:\s*\$\{\{\s*always\(\)\s*\}\}\s*.*?Verify required lane conclusions.*?Required CI lane failure:.*?Download required lane evidence.*?Download mutation evidence.*?Confirm-AICopilotRequiredTestResults\.ps1') {
         throw 'Required CI must fan governance/.NET/Web-deployment/mutation into one always-run fail-closed build-test reconciliation job.'
+    }
+    if ($requiredWorkflow -notmatch
+            '(?ms)^\s{2}governance_gates:\s*.*?Setup Node.*?Restore governance TypeScript dependencies.*?run:\s*npm ci\s*.*?Test inventory and reconciliation behavior') {
+        throw 'The isolated governance lane must restore the pinned Node/TypeScript dependency graph before infrastructure behavior probes.'
     }
     if ($requiredWorkflow -notmatch
             '(?ms)^\s*& pwsh -NoProfile -File \$using:bindingScript[^\r\n]*\r?\n\s*if \(\$LASTEXITCODE -ne 0\) \{\r?\n\s*throw "Required no-external runner input binding failed:[^"]*"\r?\n\s*\}\r?\n\s*& dotnet test \$project\.path' -or
