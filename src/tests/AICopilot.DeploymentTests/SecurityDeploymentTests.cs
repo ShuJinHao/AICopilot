@@ -90,6 +90,11 @@ public sealed class SecurityDeploymentTests
             ".github",
             "workflows",
             "aicopilot-deploy.yml"));
+        var ciWorkflow = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            ".github",
+            "workflows",
+            "aicopilot-ci.yml"));
         var buildAndPush = File.ReadAllText(Path.Combine(
             solutionRoot,
             "deploy",
@@ -102,6 +107,10 @@ public sealed class SecurityDeploymentTests
             "local-release.sh"));
 
         buildAndPush.Should().Contain("IIOT_ROUTINE_BUILD_PROTOCOL=1");
+        ciWorkflow.Should().Contain(
+            "  build-test:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 60");
+        ciWorkflow.Should().NotContain(
+            "  build-test:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 25");
 
         imageWorkflow.Should().Contain("runs-on: [self-hosted, iiot-linux-prod]");
         imageWorkflow.Should().Contain("Self-hosted runner must not run as root.");
