@@ -1344,10 +1344,28 @@ public sealed class FixtureBoundaryTests
         '-p:SourceRevisionId=$head',
         '-SynchronizeRunnerBuildIdentity',
         'Bind-AICopilotRunnerBuildIdentity.ps1',
+        'pwsh -NoProfile -File $using:bindingScript',
+        'pwsh -NoProfile -File $bindingScript',
         'artifacts/runner-inputs/',
         '--collect "XPlat Code Coverage"',
         'Confirm-AICopilotCoverage.ps1',
-        'mutation-gate:',
+        'governance_gates:',
+        'name: governance-gates',
+        'dotnet_tests:',
+        'name: dotnet-tests',
+        'web_deployment_tests:',
+        'name: web-deployment-tests',
+        'mutation_gate:',
+        'name: mutation-gate',
+        'needs: [governance_gates, dotnet_tests, web_deployment_tests, mutation_gate]',
+        'if: ${{ always() }}',
+        'Required CI lane failure:',
+        'actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093',
+        'merge-multiple: true',
+        'aicopilot-required-governance',
+        'aicopilot-required-dotnet',
+        'aicopilot-required-web-deployment',
+        'aicopilot-required-test-results',
         'Invoke-AICopilotMutation.ps1',
         'artifacts/mutation/**',
         'artifacts/quality/aicopilot-mutation.json'
@@ -1357,10 +1375,17 @@ public sealed class FixtureBoundaryTests
         }
     }
     if ($requiredWorkflow -notmatch
-            '(?m)^\s*& \$using:bindingScript[^\r\n]*\r?\n\s*& dotnet test \$project\.path' -or
+            '(?ms)^\s{2}build-test:\s*.*?needs:\s*\[governance_gates,\s*dotnet_tests,\s*web_deployment_tests,\s*mutation_gate\]\s*.*?if:\s*\$\{\{\s*always\(\)\s*\}\}\s*.*?Verify required lane conclusions.*?Required CI lane failure:.*?Download required lane evidence.*?Download mutation evidence.*?Confirm-AICopilotRequiredTestResults\.ps1') {
+        throw 'Required CI must fan governance/.NET/Web-deployment/mutation into one always-run fail-closed build-test reconciliation job.'
+    }
+    if ($requiredWorkflow -notmatch
+            '(?ms)^\s*& pwsh -NoProfile -File \$using:bindingScript[^\r\n]*\r?\n\s*if \(\$LASTEXITCODE -ne 0\) \{\r?\n\s*throw "Required no-external runner input binding failed:[^"]*"\r?\n\s*\}\r?\n\s*& dotnet test \$project\.path' -or
         $requiredWorkflow -notmatch
-            '(?m)^\s*& \$bindingScript[^\r\n]*\r?\n\s*& dotnet test \$project\.path') {
-        throw 'Each parallel/resource required runner must bind its exact input immediately before dotnet test.'
+            '(?ms)^\s*& pwsh -NoProfile -File \$bindingScript[^\r\n]*\r?\n\s*if \(\$LASTEXITCODE -ne 0\) \{\r?\n\s*throw "Required resource runner input binding failed:[^"]*"\r?\n\s*\}\r?\n\s*& dotnet test \$project\.path') {
+        throw 'Each parallel/resource required runner must bind its exact input in an isolated PowerShell process immediately before dotnet test.'
+    }
+    if ($requiredWorkflow -match '(?m)^\s*& \$using:bindingScript[^\r\n]*$') {
+        throw 'Parallel required runners must not invoke the binding script inside the shared ForEach-Object runspace host.'
     }
     $inventorySource = Get-Content $inventoryScript -Raw
     foreach ($runnerIdentityFragment in @(
