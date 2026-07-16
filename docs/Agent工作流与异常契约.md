@@ -150,7 +150,7 @@ Cloud 只读 Agent 当前正式能力限定为：
 dotnet test src/tests/AICopilot.WorkflowTests/AICopilot.WorkflowTests.csproj --no-restore
 dotnet test src/tests/AICopilot.ApplicationTests/AICopilot.ApplicationTests.csproj --filter "ToolRegistryApplicationTests|TextToSqlReadOnlyTests|AuthorizationPipelineBehaviorTests" --no-restore
 dotnet test src/tests/AICopilot.ContractTests/AICopilot.ContractTests.csproj --filter "ChatErrorContractTests" --no-restore
-dotnet test src/tests/AICopilot.HttpIntegrationTests/AICopilot.HttpIntegrationTests.csproj --filter "UnhandledApiExceptionPolicyTests" --no-restore
+dotnet test src/tests/AICopilot.InProcessTests/AICopilot.InProcessTests.csproj --filter "UnhandledApiExceptionPolicyTests" --no-restore
 dotnet test src/tests/AICopilot.ToolPlugin.ConformanceTests/AICopilot.ToolPlugin.ConformanceTests.csproj --no-restore
 dotnet test src/tests/AICopilot.Architecture.AnalyzerTests/AICopilot.Architecture.AnalyzerTests.csproj --no-restore
 cd src/vues/AICopilot.Web && npm run test:unit -- chatErrorStore runtimeDetails

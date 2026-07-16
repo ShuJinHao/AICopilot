@@ -226,6 +226,15 @@ public sealed class SecurityDeploymentTests
         var solutionRoot = FindSolutionRoot();
         var deployRoot = Path.Combine(solutionRoot, "deploy", "enterprise-ai");
         var deployGuide = File.ReadAllText(Path.Combine(solutionRoot, "AICopilot 项目部署与维护指南.md"));
+        var cloudReadonlyContract = File.ReadAllText(
+            Path.Combine(solutionRoot, "docs", "Cloud只读数据分析契约.md"));
+        var agentWorkflowContract = File.ReadAllText(
+            Path.Combine(solutionRoot, "docs", "Agent工作流与异常契约.md"));
+        var securityDeploymentContract = File.ReadAllText(
+            Path.Combine(solutionRoot, "docs", "AICopilot安全部署契约.md"));
+        var architectureChecklist = File.ReadAllText(
+            Path.Combine(solutionRoot, "docs", "AI架构治理清单.md"));
+        var agentInstructions = File.ReadAllText(Path.Combine(solutionRoot, "AGENTS.md"));
         var deployReadme = File.ReadAllText(Path.Combine(deployRoot, "README.md"));
         var envTemplate = File.ReadAllText(Path.Combine(deployRoot, ".env.example"));
         var deployRelease = File.ReadAllText(Path.Combine(deployRoot, "deploy-release.sh"));
@@ -271,6 +280,38 @@ public sealed class SecurityDeploymentTests
         deployGuide.Should().Contain("日常生产发布不得等待这些 workflow");
         deployGuide.Should().Contain("deploy/enterprise-ai/README.md");
         deployGuide.Should().NotContain("docs/企业AI首次部署记录");
+        cloudReadonlyContract.Should().Contain(
+            "dotnet test src/tests/AICopilot.Architecture.AnalyzerTests/AICopilot.Architecture.AnalyzerTests.csproj --filter \"AIARCH006|AIARCH007_ShouldRequireControllerMetadataAndCloudReadOnlySafetyMetadata\" --no-restore");
+        cloudReadonlyContract.Should().Contain(
+            "dotnet test src/tests/AICopilot.DeploymentTests/AICopilot.DeploymentTests.csproj --filter \"CloudReadonlyGrantSql_ShouldMatchGovernedRuntimeTables\" --no-restore");
+        cloudReadonlyContract.Should().Contain(
+            "dotnet test src/tests/AICopilot.InProcessTests/AICopilot.InProcessTests.csproj --filter \"CloudAiReadClientContractTests\" --no-restore");
+        cloudReadonlyContract.Should().Contain(
+            "dotnet test src/tests/AICopilot.ContractTests/AICopilot.ContractTests.csproj --filter \"CloudReadonlyChatBoundaryTests\" --no-restore");
+        cloudReadonlyContract.Should().NotContain(
+            "AICopilot.ArchitectureTests/AICopilot.ArchitectureTests.csproj --filter \"CloudReadOnly|TextToSql|CloudWrite\"");
+        cloudReadonlyContract.Should().NotContain(
+            "AICopilot.ContractTests/AICopilot.ContractTests.csproj --filter \"CloudAiReadClientContractTests|CloudReadonlyChatBoundaryTests\"");
+        cloudReadonlyContract.Should().NotContain("CloudAiReadClientTests");
+        cloudReadonlyContract.Should().NotContain("AiEvalBehaviorGuardrailTests");
+        cloudReadonlyContract.Should().Contain(
+            "ToolSafetyAndApprovalIdentityTests.CloudReadOnlyToolSafety_ShouldRejectForbiddenWriteVerbs");
+        agentWorkflowContract.Should().Contain(
+            "AICopilot.InProcessTests/AICopilot.InProcessTests.csproj --filter \"UnhandledApiExceptionPolicyTests\"");
+        agentWorkflowContract.Should().NotContain(
+            "AICopilot.HttpIntegrationTests/AICopilot.HttpIntegrationTests.csproj --filter \"UnhandledApiExceptionPolicyTests\"");
+        securityDeploymentContract.Should().Contain(
+            "AICopilot.InProcessTests/AICopilot.InProcessTests.csproj --filter \"CloudOidcOptionsTests|CloudOidcFinalizationWorkflowTests|IdentityProblemContractTests|UnhandledApiExceptionPolicyTests\"");
+        securityDeploymentContract.Should().NotContain(
+            "AICopilot.HttpIntegrationTests/AICopilot.HttpIntegrationTests.csproj --filter \"CloudOidcOptionsTests|CloudOidcFinalizationWorkflowTests|IdentityProblemContractTests|UnhandledApiExceptionPolicyTests\"");
+        architectureChecklist.Should().Contain("CloudAiReadClientContractTests");
+        architectureChecklist.Should().Contain("AgentSafetyApplicationTests");
+        architectureChecklist.Should().NotContain("CloudAiReadClientTests");
+        architectureChecklist.Should().NotContain("AiEvalBehaviorGuardrailTests");
+        agentInstructions.Should().Contain(
+            "必须用同一项目和 filter 的 `--list-tests` 证明至少命中 1 项");
+        agentInstructions.Should().Contain(
+            "0-hit 即使命令退出 0 也不是有效诊断证据");
         File.Exists(Path.Combine(solutionRoot, "docs", "企业AI首次部署记录-2026-06-08.md")).Should().BeFalse();
         File.Exists(Path.Combine(solutionRoot, "docs", "A助理部署配置说明.md")).Should().BeFalse();
         File.Exists(Path.Combine(solutionRoot, "docs", "A助理已知问题清单.md")).Should().BeFalse();

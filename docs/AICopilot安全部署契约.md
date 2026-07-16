@@ -112,7 +112,7 @@ bash deploy/enterprise-ai/tests/deployment-behavior.sh
 dotnet test src/tests/AICopilot.ArchitectureTests/AICopilot.ArchitectureTests.csproj --no-restore
 dotnet test src/tests/AICopilot.DeploymentTests/AICopilot.DeploymentTests.csproj --no-restore
 dotnet test src/tests/AICopilot.ContractTests/AICopilot.ContractTests.csproj --filter "ChatErrorContractTests|ModelSecretContractTests" --no-restore
-dotnet test src/tests/AICopilot.HttpIntegrationTests/AICopilot.HttpIntegrationTests.csproj --filter "CloudOidcOptionsTests|CloudOidcFinalizationWorkflowTests|IdentityProblemContractTests|UnhandledApiExceptionPolicyTests" --no-restore
+dotnet test src/tests/AICopilot.InProcessTests/AICopilot.InProcessTests.csproj --filter "CloudOidcOptionsTests|CloudOidcFinalizationWorkflowTests|IdentityProblemContractTests|UnhandledApiExceptionPolicyTests" --no-restore
 dotnet test src/tests/AICopilot.InProcessTests/AICopilot.InProcessTests.csproj --filter "SecretStringEncryptorTests" --no-restore
 dotnet test src/tests/AICopilot.UnitTests/AICopilot.UnitTests.csproj --filter "SecurityPolicyUnitTests" --no-restore
 ```

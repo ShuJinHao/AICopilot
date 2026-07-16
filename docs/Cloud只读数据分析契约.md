@@ -18,7 +18,7 @@
 - governed schema 和 SQL guard：`src/infrastructure/AICopilot.Dapper`、`src/services/AICopilot.Services.CrossCutting/Sql`。
 - Cloud readonly 授权脚本：`deploy/enterprise-ai/cloud-readonly/apply-readonly-grants.sql`、`deploy/enterprise-ai/cloud-readonly/check-readonly-grants.sql`。
 - Cloud readonly 授权 preflight：`deploy/enterprise-ai/scripts/apply-cloud-readonly-grants.sh`、`deploy/enterprise-ai/scripts/check-cloud-readonly-grants.sh`。
-- 关键测试：`ArchitectureBoundaryTests`、`CloudAiReadClientTests`、`CloudReadonlySimulationTests`、`CloudReadOnlyTextToSqlFallbackRunnerTests`、`TextToSqlReadOnlyTests`、`DataAnalysisFinalContextFormatterTests`、`AiEvalBehaviorGuardrailTests`、`PromptGovernanceTests`、`SemanticAnalysisRunnerTests`、`DeviceLogFollowUpIntentRewriterTests`。
+- 关键测试：`AICopilotArchitectureAnalyzerTests` 的 `AIARCH006/AIARCH007`、`ArchitectureBoundaryTests`、`CloudReadonlyGrantSql_ShouldMatchGovernedRuntimeTables`、`CloudAiReadClientContractTests`、`CloudReadonlySimulationTests`、`CloudReadOnlyTextToSqlFallbackRunnerTests`、`ToolSafetyAndApprovalIdentityTests`、`TextToSqlReadOnlyTests`、`DataAnalysisFinalContextFormatterTests`、`AgentSafetyApplicationTests`、`PromptGovernanceTests`、`SemanticAnalysisRunnerTests`、`DeviceLogFollowUpIntentRewriterTests`。
 
 ### 编译型只读门禁
 
@@ -116,10 +116,12 @@ Text-to-SQL prompt 只能暴露 `CloudReadOnlyGovernedSchema` 批准的表名、
 以下命令用于 Cloud 只读专题定向诊断；任务完成仍必须对账 inventory 中全部 required runner、Web 和 deployment behavior，不得用 filter 结果代替。
 
 ```bash
-dotnet test src/tests/AICopilot.ArchitectureTests/AICopilot.ArchitectureTests.csproj --filter "CloudReadOnly|TextToSql|CloudWrite" --no-restore
-dotnet test src/tests/AICopilot.ContractTests/AICopilot.ContractTests.csproj --filter "CloudAiReadClientContractTests|CloudReadonlyChatBoundaryTests" --no-restore
+dotnet test src/tests/AICopilot.Architecture.AnalyzerTests/AICopilot.Architecture.AnalyzerTests.csproj --filter "AIARCH006|AIARCH007_ShouldRequireControllerMetadataAndCloudReadOnlySafetyMetadata" --no-restore
+dotnet test src/tests/AICopilot.DeploymentTests/AICopilot.DeploymentTests.csproj --filter "CloudReadonlyGrantSql_ShouldMatchGovernedRuntimeTables" --no-restore
+dotnet test src/tests/AICopilot.InProcessTests/AICopilot.InProcessTests.csproj --filter "CloudAiReadClientContractTests" --no-restore
+dotnet test src/tests/AICopilot.ContractTests/AICopilot.ContractTests.csproj --filter "CloudReadonlyChatBoundaryTests" --no-restore
 dotnet test src/tests/AICopilot.UnitTests/AICopilot.UnitTests.csproj --filter "CloudReadOnly|PromptGovernanceTests|DeviceLogFollowUpIntentRewriterTests" --no-restore
-dotnet test src/tests/AICopilot.ApplicationTests/AICopilot.ApplicationTests.csproj --filter "TextToSqlReadOnlyTests|SemanticAnalysisRunnerTests|AgentSafetyApplicationTests" --no-restore
+dotnet test src/tests/AICopilot.ApplicationTests/AICopilot.ApplicationTests.csproj --filter "TextToSqlReadOnlyTests|SemanticAnalysisRunnerTests|AgentSafetyApplicationTests|ToolSafetyAndApprovalIdentityTests.CloudReadOnlyToolSafety_ShouldRejectForbiddenWriteVerbs" --no-restore
 dotnet test src/tests/AICopilot.GoldenEvalTests/AICopilot.GoldenEvalTests.csproj --no-restore
 dotnet test src/tests/AICopilot.SimulationTests/AICopilot.SimulationTests.csproj -c Release --no-build --no-restore
 docker info --format '{{.OSType}}'

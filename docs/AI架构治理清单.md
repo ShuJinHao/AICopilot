@@ -243,8 +243,8 @@ git log --oneline -n 20 -- AICopilot.slnx deploy src docs AGENTS.md 资料
 | --- | --- | --- | --- | --- | --- |
 | AI-SEC-019 | CRITICAL | Done | Cloud 只读 | AI 只能读 Cloud；禁止 MCP、Tool、Agent workflow、后台任务或隐藏 adapter 写 Cloud | `ArchitectureBoundaryTests` + `CloudReadonlyChatBoundaryTests` |
 | AI-SEC-020 | CRITICAL | Done | Simulation | 生产路径 Cloud 查询失败、为空或未配置时不得 fallback 到 Simulation；Real provider 失败必须返回 Cloud AiRead 错误；生产基础配置和 compose 不携带 `MockOnly=true` | `CloudReadonlySimulationTests` + `SecurityHardeningTests.DeploymentConfig_ShouldNotCarryKnownWeakSecrets` |
-| AI-SEC-021 | HIGH | Done | Cloud AiRead | Device、DeviceLog、Capacity、ProductionData、Process、ClientRelease 六类正式语义只能走 Cloud AiRead 正式只读 API | `CloudAiReadClientTests` + `SemanticAnalysisRunnerTests` |
-| AI-SEC-022 | HIGH | Done | production records | 生产记录唯一高频路径是 `/api/v1/ai/read/production-records` | `CloudAiReadClientTests` endpoint policy |
+| AI-SEC-021 | HIGH | Done | Cloud AiRead | Device、DeviceLog、Capacity、ProductionData、Process、ClientRelease 六类正式语义只能走 Cloud AiRead 正式只读 API | `CloudAiReadClientContractTests` + `SemanticAnalysisRunnerTests` |
+| AI-SEC-022 | HIGH | Done | production records | 生产记录唯一高频路径是 `/api/v1/ai/read/production-records` | `CloudAiReadClientContractTests` endpoint policy |
 | AI-SEC-023 | HIGH | Done | DeviceLog 追问 | 追问其他日志级别、设备、工序、时间必须重新查询，不基于上一轮回答推断 | `DeviceLogFollowUpIntentRewriterTests` |
 
 实施要点：
@@ -261,7 +261,7 @@ git log --oneline -n 20 -- AICopilot.slnx deploy src docs AGENTS.md 资料
 - `ArchitectureBoundaryTests` 固化 AICopilot 不直接引用 Cloud 项目/命名空间、Cloud write tools 不纳入范围、CloudReadOnly direct DB 只读 guard、governed schema、只读账号 grant preflight，并用构造反射锁定正式语义执行器只依赖 Cloud AiRead、planner 和 logger。
 - `CloudReadonlyChatBoundaryTests` 阻断 Cloud 业务修改、禁用设备、补录产能、删除日志和上传生产数据等写语义。
 - `CloudReadonlySimulationTests` 固化 Simulation 只能在 Development 使用，Real 模式必须双开 `CloudReadonly:Real` 和 `CloudAiRead`，Cloud AiRead 不可用时不得降级返回 Simulation。
-- `CloudAiReadClientTests` 固化 `/api/v1/ai/read/devices`、`processes`、`client-releases`、`device-client-states`、`device-logs`、`capacity/summary`、`capacity/hourly`、`production-records` 端点和参数契约；`deviceCode` 只有在未截断搜索结果中唯一精确匹配时才能解析成 `deviceId`，设备状态随后只向 `/device-client-states` 发送正式 `deviceId`，不得把 `deviceCode` 或整句自然语言降级为 keyword。
+- `CloudAiReadClientContractTests` 固化 `/api/v1/ai/read/devices`、`processes`、`client-releases`、`device-client-states`、`device-logs`、`capacity/summary`、`capacity/hourly`、`production-records` 端点和参数契约；`deviceCode` 只有在未截断搜索结果中唯一精确匹配时才能解析成 `deviceId`，设备状态随后只向 `/device-client-states` 发送正式 `deviceId`，不得把 `deviceCode` 或整句自然语言降级为 keyword。
 - `SemanticAnalysisRunnerTests` 以唯一六类目标数据源覆盖 Cloud 合法空集、规划失败、关闭和错误都不 fallback，并单独证明 Recipe 在 planner 前拒绝；Direct DB / Text-to-SQL 只保留在正式语义执行器之外的治理白名单补充分析。
 - `DeviceLogFollowUpIntentRewriterTests` 固化追问日志级别、设备、工序、时间窗口时重新生成 `Analysis.DeviceLog.*` 查询。
 
@@ -346,7 +346,7 @@ git log --oneline -n 20 -- AICopilot.slnx deploy src docs AGENTS.md 资料
 | AI-SEC-024 | HIGH | Done | LLM Text-to-SQL | prompt 只暴露 governed schema，不暴露连接串、role、样例数据、非白名单字段 | `ArchitectureBoundaryTests` + `PromptGovernanceTests` |
 | AI-SEC-025 | HIGH | Done | repair retry | 修复重试默认最多 3 次、硬上限 5 次；不可修复错误不重试 | `CloudReadOnlyTextToSqlFallbackRunnerTests` |
 | AI-SEC-026 | HIGH | Done | 审计/日志/state | SQL 原文、用户 prompt、参数值、连接串、敏感字段不得落库或展示；只保存 hash 和安全分类 | `ArchitectureBoundaryTests` + `CloudReadOnlyTextToSqlFallbackRunnerTests` |
-| AI-SEC-027 | HIGH | Done | Final answer | 最终回答不得暴露 SQL、表名、视图名、sourceName、endpoint、内部字段 | `AiEvalBehaviorGuardrailTests` + `PromptGovernanceTests` |
+| AI-SEC-027 | HIGH | Done | Final answer | 最终回答不得暴露 SQL、表名、视图名、sourceName、endpoint、内部字段 | `AgentSafetyApplicationTests` + `PromptGovernanceTests` |
 
 实施要点：
 
@@ -360,7 +360,7 @@ git log --oneline -n 20 -- AICopilot.slnx deploy src docs AGENTS.md 资料
 - `CloudReadOnlyTextToSqlFallbackRunner` 只在当前调用内传递 `PreviousSqlForRepair`；成功/失败结果和审计只包含 `QueryHash`、`questionHash`、`sqlHash`、行数、截断状态和 repair 分类。
 - `CloudReadOnlyTextToSqlOptions` 默认 repair 3 次、硬上限 5 次，timeout/write SQL 等不可修复错误不重试。
 - `ArchitectureBoundaryTests` 禁止 `PreviousSqlForRepair` 进入审计、日志、state、结果或持久化模型，并校验 repair attempt 只保留 SQL hash/length。
-- `AiEvalBehaviorGuardrailTests` 构造 SQL、连接串、sourceName、tableName、prompt injection、DeviceLog 内部字段，最终上下文和展示块必须脱敏或移除。
+- `AgentSafetyApplicationTests` 构造 SQL、连接串、sourceName、tableName、prompt injection、DeviceLog 内部字段，最终上下文和展示块必须脱敏或移除。
 - `PromptGovernanceTests` 固化 chat answer 和 cloud readonly text-to-sql prompt 的只读、governed schema、不得暴露 SQL/数据库名/物理表名约束。
 
 ## 9. 第七批：测试、部署 preflight 和发布验收
