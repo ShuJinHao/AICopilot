@@ -406,6 +406,15 @@ try {
             -BaselinePath (Join-Path $tempRoot 'external-duplication-baseline.json')
     } 'baseline path escapes the repository root'
 
+    $bootstrapContext = Get-AICopilotBaselineContext `
+        -RepositoryRoot $qualityBaseFixture `
+        -BaseRef origin/main `
+        -BaselineKind Mutation `
+        -BaselinePath 'scripts/tests/baselines/aicopilot-mutation.json'
+    if ([string]$bootstrapContext.Mode -cne 'Bootstrap' -or $LASTEXITCODE -ne 0) {
+        throw "Missing base baseline must return Bootstrap without leaking a native exit code: mode=$($bootstrapContext.Mode), lastExit=$LASTEXITCODE."
+    }
+
     $unapprovedSupportRoot = New-InventoryFixture `
         -SupportPath 'src/tests/AICopilot.UnapprovedSupport/AICopilot.UnapprovedSupport.csproj'
     Assert-Fails {
@@ -2667,7 +2676,7 @@ internal sealed class MigrationCoverageMarker { }
             -LedgerPath $generatedTransitionPath
     } 'Declaration transition disposition/replacement/reason content differs from the frozen controlled review'
 
-    Write-Host 'AICopilot inventory/reconciliation/Simulation/CI/coverage/duplication/mutation/compatibility/declaration-transition behavior tests passed. cases=92; coverageOmissionGuards=16.'
+    Write-Host 'AICopilot inventory/reconciliation/Simulation/CI/coverage/duplication/mutation/compatibility/declaration-transition behavior tests passed. cases=93; coverageOmissionGuards=16.'
 }
 finally {
     Remove-Item $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

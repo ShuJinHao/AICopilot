@@ -99,20 +99,34 @@ function Get-AICopilotBaselineContext {
         -BaselinePath $BaselinePath
     $relativePath = [string]$identity.RelativePath
 
-    $baseBaselineJson = @(& git -C $root show "$baseCommit`:$relativePath" 2>$null) -join "`n"
-    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($baseBaselineJson)) {
+    $baseBaselinePaths = @(
+        & git -C $root ls-tree --name-only $baseCommit -- $relativePath 2>$null |
+            ForEach-Object { [string]$_ }
+    )
+    if ($LASTEXITCODE -ne 0) {
+        throw "Cannot inspect $BaselineKind baseline '$relativePath' at base commit '$baseCommit'."
+    }
+    if ($baseBaselinePaths.Count -eq 0) {
         return [pscustomobject]@{
             BaseCommit = $baseCommit
-            Mode = 'Ratchet'
+            Mode = 'Bootstrap'
             RelativePath = $relativePath
-            BaseBaselineJson = $baseBaselineJson
+            BaseBaselineJson = $null
         }
+    }
+    if ($baseBaselinePaths.Count -ne 1 -or $baseBaselinePaths[0] -cne $relativePath) {
+        throw "$BaselineKind baseline '$relativePath' has ambiguous base-tree identity."
+    }
+
+    $baseBaselineJson = @(& git -C $root show "$baseCommit`:$relativePath" 2>$null) -join "`n"
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($baseBaselineJson)) {
+        throw "Cannot read non-empty $BaselineKind baseline '$relativePath' from base commit '$baseCommit'."
     }
 
     return [pscustomobject]@{
         BaseCommit = $baseCommit
-        Mode = 'Bootstrap'
+        Mode = 'Ratchet'
         RelativePath = $relativePath
-        BaseBaselineJson = $null
+        BaseBaselineJson = $baseBaselineJson
     }
 }
