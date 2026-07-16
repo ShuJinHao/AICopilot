@@ -289,14 +289,16 @@ public sealed class SecurityDeploymentTests
         deployGuide.Should().Contain("日常生产发布不得等待这些 workflow");
         deployGuide.Should().Contain("deploy/enterprise-ai/README.md");
         deployGuide.Should().NotContain("docs/企业AI首次部署记录");
-        cloudReadonlyContract.Should().Contain(
-            "dotnet test src/tests/AICopilot.Architecture.AnalyzerTests/AICopilot.Architecture.AnalyzerTests.csproj --filter \"AIARCH006|AIARCH007_ShouldRequireControllerMetadataAndCloudReadOnlySafetyMetadata\" --no-restore");
-        cloudReadonlyContract.Should().Contain(
-            "dotnet test src/tests/AICopilot.DeploymentTests/AICopilot.DeploymentTests.csproj --filter \"CloudReadonlyGrantSql_ShouldMatchGovernedRuntimeTables\" --no-restore");
-        cloudReadonlyContract.Should().Contain(
-            "dotnet test src/tests/AICopilot.InProcessTests/AICopilot.InProcessTests.csproj --filter \"CloudAiReadClientContractTests\" --no-restore");
-        cloudReadonlyContract.Should().Contain(
-            "dotnet test src/tests/AICopilot.ContractTests/AICopilot.ContractTests.csproj --filter \"CloudReadonlyChatBoundaryTests\" --no-restore");
+        foreach (var expectedDiagnosticCommand in new[]
+                 {
+                     "dotnet test src/tests/AICopilot.Architecture.AnalyzerTests/AICopilot.Architecture.AnalyzerTests.csproj --filter \"AIARCH006|AIARCH007_ShouldRequireControllerMetadataAndCloudReadOnlySafetyMetadata\" --no-restore",
+                     "dotnet test src/tests/AICopilot.DeploymentTests/AICopilot.DeploymentTests.csproj --filter \"CloudReadonlyGrantSql_ShouldMatchGovernedRuntimeTables\" --no-restore",
+                     "dotnet test src/tests/AICopilot.InProcessTests/AICopilot.InProcessTests.csproj --filter \"CloudAiReadClientContractTests\" --no-restore",
+                     "dotnet test src/tests/AICopilot.ContractTests/AICopilot.ContractTests.csproj --filter \"CloudReadonlyChatBoundaryTests\" --no-restore"
+                 })
+        {
+            cloudReadonlyContract.Should().Contain(expectedDiagnosticCommand);
+        }
         cloudReadonlyContract.Should().NotContain(
             "AICopilot.ArchitectureTests/AICopilot.ArchitectureTests.csproj --filter \"CloudReadOnly|TextToSql|CloudWrite\"");
         cloudReadonlyContract.Should().NotContain(
