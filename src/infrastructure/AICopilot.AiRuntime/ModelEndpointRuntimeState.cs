@@ -23,8 +23,6 @@ internal sealed class EndpointRuntimeStats
 
     public long CircuitBreakerOpenCount { get; private set; }
 
-    public long FallbackCount { get; private set; }
-
     public int StickyStreamingCount { get; private set; }
 
     public string? LastFailureReason { get; private set; }
@@ -75,11 +73,6 @@ internal sealed class EndpointRuntimeStats
         RateLimitCount++;
     }
 
-    public void RecordFallback()
-    {
-        FallbackCount++;
-    }
-
     public void RecordStickyStreaming()
     {
         StickyStreamingCount++;
@@ -122,7 +115,6 @@ internal sealed class EndpointRuntimeStats
             p95,
             RateLimitCount,
             CircuitBreakerOpenCount,
-            FallbackCount,
             StickyStreamingCount,
             IsCircuitOpen(now) ? "Open" : "Closed",
             LastFailureReason);

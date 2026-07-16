@@ -969,36 +969,78 @@ describe('chatStore skills', () => {
   it('adds plan mode goal and PlanDraft reply to the conversation flow', async () => {
     activateResolvedSession()
     const store = useChatStore()
-    mockPlanAgentTaskStream(
-      createTask({
-        title: '设备日志分析',
-        goal: '查看 DEV-001 最近 24 小时日志',
-        status: 'WaitingPlanApproval',
-        planJson: JSON.stringify({
-          planKind: 'PlanDraft',
-          isExecutable: false,
-          skillName: '设备日志分析',
-          capabilityGaps: [
-            'No enabled and authorized tools are currently available for this PlanDraft.',
-          ],
-        }),
-        steps: [
-          {
-            id: 'step-1',
-            stepIndex: 1,
-            title: '读取设备日志',
-            description: '只读查询最近 24 小时日志',
-            stepType: 'Tool',
-            status: 'Pending',
-            toolCode: 'query_device_logs',
-            requiresApproval: false,
-            errorMessage: null,
-          },
+    const streamedTask = createTask({
+      title: '流式临时设备日志计划',
+      goal: '查看 DEV-001 最近 24 小时日志',
+      status: 'Planning',
+      planJson: JSON.stringify({
+        planKind: 'PlanDraft',
+        isExecutable: false,
+        skillName: '流式临时计划',
+        capabilityGaps: [],
+      }),
+      steps: [],
+    })
+    const canonicalTask = createTask({
+      title: '设备日志分析',
+      goal: '查看 DEV-001 最近 24 小时日志',
+      status: 'WaitingPlanApproval',
+      planJson: JSON.stringify({
+        planKind: 'PlanDraft',
+        isExecutable: false,
+        skillName: '设备日志分析',
+        capabilityGaps: [
+          'No enabled and authorized tools are currently available for this PlanDraft.',
         ],
       }),
-    )
+      steps: [
+        {
+          id: 'step-1',
+          stepIndex: 1,
+          title: '读取设备日志',
+          description: '只读查询最近 24 小时日志',
+          stepType: 'Tool',
+          status: 'Pending',
+          toolCode: 'query_device_logs',
+          requiresApproval: false,
+          errorMessage: null,
+        },
+      ],
+    })
+    const approval = createPlanApproval()
+    const audit = {
+      id: 'audit-1',
+      taskId: 'task-1',
+      actionCode: 'PlanCreated',
+      targetType: 'AgentTask',
+      targetName: '设备日志分析',
+      result: 'Succeeded',
+      summary: '计划已生成',
+      createdAt: '2026-06-22T07:01:00Z',
+      metadata: {},
+    }
+    const timelineEvent = {
+      sequence: 11,
+      eventType: 'AgentTaskPlanCreated',
+      createdAt: '2026-06-22T07:01:00Z',
+      agentTaskId: 'task-1',
+      agentTaskTitle: '设备日志分析',
+      agentTaskStatus: 'WaitingPlanApproval',
+    }
+    mockPlanAgentTaskStream(streamedTask)
+    chatServiceMock.getAgentTasksBySession.mockResolvedValue([canonicalTask])
+    chatServiceMock.getAgentTaskApprovals.mockResolvedValue([approval])
+    chatServiceMock.getAgentTaskAuditSummary.mockResolvedValue([audit])
+    chatServiceMock.getTimeline.mockResolvedValue({
+      items: [timelineEvent],
+      beforeSequence: 11,
+      afterSequence: 11,
+      hasMore: false,
+      hasMoreBefore: false,
+      hasMoreAfter: false,
+    })
 
-    await store.planAgentTask('查看 DEV-001 最近 24 小时日志')
+    const plannedTask = await store.planAgentTask('查看 DEV-001 最近 24 小时日志')
 
     expect(store.currentMessages).toHaveLength(2)
     expect(store.currentMessages[0]?.role).toBe(MessageRole.User)
@@ -1006,7 +1048,21 @@ describe('chatStore skills', () => {
     expect(store.currentMessages[1]?.role).toBe(MessageRole.Assistant)
     expect(store.currentMessages[1]?.isStreaming).toBe(false)
     expect(store.currentMessages[1]?.chunks[0]?.content).toContain('我已生成计划草案')
+    const projectionCallOrder = [
+      chatServiceMock.planAgentTaskStream.mock.invocationCallOrder[0],
+      chatServiceMock.getAgentTasksBySession.mock.invocationCallOrder[0],
+      chatServiceMock.getAgentTaskApprovals.mock.invocationCallOrder[0],
+      chatServiceMock.getAgentTaskAuditSummary.mock.invocationCallOrder[0],
+      chatServiceMock.getTimeline.mock.invocationCallOrder[0],
+    ]
+    expect(projectionCallOrder).toEqual([...projectionCallOrder].sort((left, right) => left - right))
+    expect(plannedTask?.title).toBe('设备日志分析')
     expect(store.latestAgentTask?.title).toBe('设备日志分析')
+    expect(store.latestAgentTask?.planJson).toBe(canonicalTask.planJson)
+    expect(store.latestAgentTask?.steps).toEqual(canonicalTask.steps)
+    expect(store.agentApprovals).toEqual([approval])
+    expect(store.agentAuditSummary).toEqual([audit])
+    expect(store.timelineEvents).toEqual([timelineEvent])
   })
 
   it('sends the selected knowledge base only for skills that allow knowledge retrieval', async () => {

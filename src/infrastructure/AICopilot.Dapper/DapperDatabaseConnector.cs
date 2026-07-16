@@ -8,6 +8,8 @@ using Npgsql;
 using System.Data;
 using System.Data.Common;
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace AICopilot.Dapper;
 
@@ -17,7 +19,13 @@ public class DapperDatabaseConnector(
 {
     public IDbConnection GetConnection(BusinessDatabaseConnectionInfo database)
     {
-        var connectionString = BusinessDatabaseConnectionPolicy.RequireConnectionString(database);
+        var connectionString = database.ConnectionString;
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            throw new ArgumentException(
+                $"Connection string is required for data source '{database.Name}'.",
+                nameof(database));
+        }
 
         return database.Provider switch
         {
@@ -50,19 +58,19 @@ public class DapperDatabaseConnector(
         DatabaseQueryOptions? options = null,
         CancellationToken cancellationToken = default)
     {
-        BusinessDatabaseConnectionPolicy.EnsureQueryable(database);
+        EnsureQueryableDataSource(database);
 
         var guardResult = sqlGuardrail.Validate(sql, database.Provider);
         if (!guardResult.IsSafe)
         {
-            var sqlLogMetadata = SqlExecutionLogPolicy.CreateMetadata(sql);
+            var sqlLogMetadata = BuildSqlLogMetadata(sql);
             logger.LogWarning(
                 "SQL security guard rejected query against {DatabaseName}. Provider={Provider}; SqlLength={SqlLength}; SqlSha256={SqlSha256}; ReasonCode={ReasonCode}; OriginalMessage=hidden_by_security_policy",
                 database.Name,
                 database.Provider,
                 sqlLogMetadata.Length,
                 sqlLogMetadata.Sha256,
-                SqlExecutionLogPolicy.ClassifyGuardrailFailure(guardResult.ErrorMessage));
+                ClassifyGuardrailFailure(guardResult.ErrorMessage));
             throw new InvalidOperationException(guardResult.ErrorMessage);
         }
 
@@ -121,7 +129,7 @@ public class DapperDatabaseConnector(
         catch (Exception ex)
         {
             stopwatch.Stop();
-            var sqlLogMetadata = SqlExecutionLogPolicy.CreateMetadata(sql);
+            var sqlLogMetadata = BuildSqlLogMetadata(sql);
             logger.LogError(
                 "SQL execution failed on database {DatabaseName}. Provider={Provider}; SqlLength={SqlLength}; SqlSha256={SqlSha256}; ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
                 database.Name,
@@ -144,7 +152,7 @@ public class DapperDatabaseConnector(
         BusinessDatabaseConnectionInfo database,
         CancellationToken cancellationToken = default)
     {
-        BusinessDatabaseConnectionPolicy.EnsureQueryable(database);
+        EnsureQueryableDataSource(database);
 
         var sql = database.Provider switch
         {
@@ -166,6 +174,56 @@ public class DapperDatabaseConnector(
             IDictionary<string, object?> dictionary => ToDynamicParameters(dictionary),
             _ => parameters
         };
+    }
+
+    private static SqlLogMetadata BuildSqlLogMetadata(string sql)
+    {
+        var normalizedSql = sql ?? string.Empty;
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalizedSql))).ToLowerInvariant();
+        return new SqlLogMetadata(normalizedSql.Length, hash);
+    }
+
+    private sealed record SqlLogMetadata(int Length, string Sha256);
+
+    private static string ClassifyGuardrailFailure(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return "unknown";
+        }
+
+        if (message.Contains("不能为空", StringComparison.OrdinalIgnoreCase))
+        {
+            return "empty_sql";
+        }
+
+        if (message.Contains("语法解析", StringComparison.OrdinalIgnoreCase))
+        {
+            return "parse_error";
+        }
+
+        if (message.Contains("多条", StringComparison.OrdinalIgnoreCase))
+        {
+            return "multiple_statements";
+        }
+
+        if (message.Contains("SELECT", StringComparison.OrdinalIgnoreCase))
+        {
+            return "non_select";
+        }
+
+        if (message.Contains("FOR UPDATE", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("锁", StringComparison.OrdinalIgnoreCase))
+        {
+            return "locking_clause";
+        }
+
+        if (message.Contains("函数", StringComparison.OrdinalIgnoreCase))
+        {
+            return "forbidden_function";
+        }
+
+        return "guardrail_rejected";
     }
 
     private static DynamicParameters ToDynamicParameters(IEnumerable<KeyValuePair<string, object?>> parameters)
@@ -303,4 +361,30 @@ public class DapperDatabaseConnector(
         return reader.Read();
     }
 
+    private static void EnsureQueryableDataSource(BusinessDatabaseConnectionInfo database)
+    {
+        if (!database.IsEnabled)
+        {
+            throw new InvalidOperationException($"Data source '{database.Name}' is disabled (已被禁用).");
+        }
+
+        if (!database.IsReadOnly)
+        {
+            throw new InvalidOperationException($"Data source '{database.Name}' is not configured as read-only (只读模式).");
+        }
+
+        if (database.ExternalSystemType == DataSourceExternalSystemType.CloudReadOnly &&
+            !database.ReadOnlyCredentialVerified)
+        {
+            throw new InvalidOperationException(
+                $"Data source '{database.Name}' targets Cloud read-only data but its database account has not been verified as read-only.");
+        }
+
+        if (database.Provider != DatabaseProviderType.PostgreSql &&
+            !database.ReadOnlyCredentialVerified)
+        {
+            throw new InvalidOperationException(
+                $"Data source '{database.Name}' uses {database.Provider}; provider-specific read-only session enforcement is not available, so a verified read-only database account is required.");
+        }
+    }
 }

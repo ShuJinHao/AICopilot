@@ -5,7 +5,6 @@ using System.Diagnostics;
 using System.Text.Json;
 using AICopilot.AspireIntegrationTestKit;
 using AICopilot.IdentityService.Authorization;
-using AICopilot.Services.Contracts.Authentication;
 using AICopilot.SharedKernel.Result;
 
 namespace AICopilot.HttpIntegrationTests;

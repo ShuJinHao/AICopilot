@@ -5,7 +5,7 @@ import AiTag from '@/components/ai/AiTag.vue'
 import { useAgentWorkbench } from '@/composables/useAgentWorkbench'
 import { useAgentPlanPreview } from '@/composables/useAgentPlanPreview'
 
-const { latestTask, blockedStep, taskSteps } = useAgentWorkbench()
+const { latestTask, blockedStep } = useAgentWorkbench()
 const {
   latestPlan,
   latestPlanCapabilityGaps,

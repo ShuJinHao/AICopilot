@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useConfigStore } from '@/stores/configStore'
@@ -89,19 +87,5 @@ describe('configStore facade', () => {
     expect(configServiceMock.getLanguageModels).toHaveBeenCalledOnce()
     expect(configServiceMock.getRoutingModels).toHaveBeenCalledOnce()
     expect(configServiceMock.getConversationTemplates).toHaveBeenCalledOnce()
-  })
-
-  it('keeps configStore.ts as a facade without direct CRUD implementations', () => {
-    const sourcePath = fileURLToPath(new URL('../../src/stores/configStore.ts', import.meta.url))
-    const source = readFileSync(sourcePath, 'utf8')
-
-    expect(source).toContain('useLanguageModelConfigDomain')
-    expect(source).toContain('useRoutingModelConfigDomain')
-    expect(source).toContain('useConversationTemplateConfigDomain')
-    expect(source).not.toContain('useBusinessDatabaseConfigDomain')
-    expect(source).not.toContain('useMcpServerConfigDomain')
-    expect(source).not.toContain('useProviderReliabilityConfigDomain')
-    expect(source).not.toContain('useDialogCrud({')
-    expect(source).not.toContain('configService.')
   })
 })

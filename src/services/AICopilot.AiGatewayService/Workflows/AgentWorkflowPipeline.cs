@@ -262,7 +262,7 @@ public class AgentWorkflowPipeline(
             "本次请求所需的只读分析、知识、策略或工具能力未能完成，系统已停止生成最终回答，请稍后重试。");
     }
 
-    protected virtual bool IsBranchRequired(BranchType branchType, IReadOnlyCollection<IntentResult> intents)
+    private bool IsBranchRequired(BranchType branchType, IReadOnlyCollection<IntentResult> intents)
     {
         return branchType switch
         {
@@ -274,7 +274,7 @@ public class AgentWorkflowPipeline(
         };
     }
 
-    protected virtual Task<BranchResult> ExecuteBranchAsync(
+    private Task<BranchResult> ExecuteBranchAsync(
         BranchType branchType,
         List<IntentResult> intents,
         string message,

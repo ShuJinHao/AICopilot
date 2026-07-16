@@ -18,6 +18,7 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" PrivateAssets="all" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\hosts\AICopilot.RagWorker\AICopilot.RagWorker.csproj" />
     <ProjectReference Include="..\..\infrastructure\AICopilot.EntityFrameworkCore\AICopilot.EntityFrameworkCore.csproj" />
     <ProjectReference Include="..\..\infrastructure\AICopilot.Infrastructure\AICopilot.Infrastructure.csproj" />
     <ProjectReference Include="..\..\services\AICopilot.Services.Contracts\AICopilot.Services.Contracts.csproj" />

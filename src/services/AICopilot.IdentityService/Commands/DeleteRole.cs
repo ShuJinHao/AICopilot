@@ -13,7 +13,6 @@ public record DeleteRoleCommand(string RoleId) : ICommand<Result>;
 public sealed class DeleteRoleCommandHandler(
     RoleManager<IdentityRole<Guid>> roleManager,
     UserManager<ApplicationUser> userManager,
-    EnabledAdminInvariantPolicy enabledAdminInvariant,
     IIdentityAuditLogWriter auditLogWriter,
     ITransactionalExecutionService transactionalExecutionService)
     : ICommandHandler<DeleteRoleCommand, Result>
@@ -25,8 +24,6 @@ public sealed class DeleteRoleCommandHandler(
         AuditLogWriteRequest? rejectionAudit = null;
         var result = await transactionalExecutionService.ExecuteResultAsync(async _ =>
         {
-            await enabledAdminInvariant.AcquireAsync(cancellationToken);
-
             var role = await roleManager.FindByIdAsync(command.RoleId);
             if (role is null)
             {

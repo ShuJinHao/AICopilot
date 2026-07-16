@@ -19,7 +19,6 @@
   
   
   <ItemGroup>
-    <ProjectReference Include="..\..\infrastructure\AICopilot.SecretProtection\AICopilot.SecretProtection.csproj" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.9" />
     <PackageReference Include="Npgsql" Version="10.0.3" />
   </ItemGroup>

@@ -92,8 +92,6 @@ public interface IModelEndpointPoolScheduler : IModelPoolSnapshotReader
 
     void RecordRateLimited(string endpointId);
 
-    void RecordFallback(string endpointId);
-
     void RecordStickyStreaming(string endpointId);
 }
 

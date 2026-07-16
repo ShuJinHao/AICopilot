@@ -16,7 +16,6 @@
   <ItemGroup>
     <ProjectReference Include="..\..\core\AICopilot.Core.Rag\AICopilot.Core.Rag.csproj" />
     <ProjectReference Include="..\..\services\AICopilot.Services.Contracts\AICopilot.Services.Contracts.csproj" />
-    <ProjectReference Include="..\AICopilot.EmbeddingClient\AICopilot.EmbeddingClient.csproj" />
   </ItemGroup>
 
 </Project>

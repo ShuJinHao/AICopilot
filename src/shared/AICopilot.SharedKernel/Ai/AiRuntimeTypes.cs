@@ -274,10 +274,23 @@ public sealed class AiToolDefinition
     public IReadOnlyDictionary<string, object?> AdditionalProperties { get; init; } =
         new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
 
-    public AiToolIdentity? Identity =>
-        TargetType.HasValue && !string.IsNullOrWhiteSpace(TargetName)
-            ? new AiToolIdentity(Kind, TargetType.Value, TargetName!, ToolName ?? Name)
-            : null;
+    public AiToolIdentity? Identity
+    {
+        get
+        {
+            if (!TargetType.HasValue || string.IsNullOrWhiteSpace(TargetName))
+            {
+                return null;
+            }
+
+            var identityToolName = TargetType == AiToolTargetType.McpServer
+                ? ToolName
+                : ToolName ?? Name;
+            return string.IsNullOrWhiteSpace(identityToolName)
+                ? null
+                : new AiToolIdentity(Kind, TargetType.Value, TargetName!, identityToolName);
+        }
+    }
 
     public static AiToolDefinition FromMethod(MethodInfo method, object target)
     {

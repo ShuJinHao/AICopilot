@@ -12,7 +12,7 @@ using AICopilot.Services.CrossCutting;
 
 namespace AICopilot.DataWorker;
 
-public static class DataWorkerComposition
+internal static class DataWorkerComposition
 {
     public static HostApplicationBuilder AddDataWorkerRuntime(
         this HostApplicationBuilder builder)

@@ -23,9 +23,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\infrastructure\AICopilot.AiRuntime\AICopilot.AiRuntime.csproj" />
-    <ProjectReference Include="..\..\infrastructure\AICopilot.SqlSafety\AICopilot.SqlSafety.csproj" />
-    <ProjectReference Include="..\..\infrastructure\AICopilot.SecretProtection\AICopilot.SecretProtection.csproj" />
-    <ProjectReference Include="..\..\infrastructure\AICopilot.EmbeddingClient\AICopilot.EmbeddingClient.csproj" />
     <ProjectReference Include="..\..\services\AICopilot.AiGatewayService\AICopilot.AiGatewayService.csproj" />
     <ProjectReference Include="..\..\services\AICopilot.DataAnalysisService\AICopilot.DataAnalysisService.csproj" />
     <ProjectReference Include="..\..\services\AICopilot.IdentityService\AICopilot.IdentityService.csproj" />

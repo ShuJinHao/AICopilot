@@ -1,9 +1,4 @@
 using System.Runtime.CompilerServices;
 
-[assembly: InternalsVisibleTo("AICopilot.UnitTests")]
-[assembly: InternalsVisibleTo("AICopilot.ApplicationTests")]
-[assembly: InternalsVisibleTo("AICopilot.WorkflowTests")]
-[assembly: InternalsVisibleTo("AICopilot.ContractTests")]
-[assembly: InternalsVisibleTo("AICopilot.HttpIntegrationTests")]
-[assembly: InternalsVisibleTo("AICopilot.EndToEndTests")]
 [assembly: InternalsVisibleTo("AICopilot.ArchitectureTests")]
+[assembly: InternalsVisibleTo("AICopilot.InProcessTests")]

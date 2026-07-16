@@ -7,7 +7,7 @@
     <IsTestProject>false</IsTestProject>
     <AICopilotTestRole>Support</AICopilotTestRole>
     <AICopilotTestOwner>AI Agent Workflow</AICopilotTestOwner>
-    <AICopilotTestConsumers>AICopilot.UnitTests;AICopilot.ApplicationTests;AICopilot.WorkflowTests;AICopilot.ToolPlugin.ConformanceTests;AICopilot.PersistenceTests;AICopilot.EndToEndTests</AICopilotTestConsumers>
+    <AICopilotTestConsumers>AICopilot.UnitTests;AICopilot.ApplicationTests;AICopilot.WorkflowTests;AICopilot.GoldenEvalTests;AICopilot.ToolPlugin.ConformanceTests;AICopilot.PersistenceTests;AICopilot.InProcessTests;AICopilot.EndToEndTests</AICopilotTestConsumers>
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />

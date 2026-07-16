@@ -229,10 +229,14 @@ const usagePlanner = computed({
 
 function findTemplate(slot: AgentSlotDefinition) {
   const code = slot.templateCode.toLowerCase()
-  return store.conversationTemplates.find((template) =>
-    template.code?.toLowerCase() === code ||
-    template.scope === slot.templateScope
-  ) ?? null
+  const exactCodeMatch = store.conversationTemplates.find(
+    (template) => template.code?.toLowerCase() === code,
+  )
+  if (exactCodeMatch) return exactCodeMatch
+
+  return (
+    store.conversationTemplates.find((template) => template.scope === slot.templateScope) ?? null
+  )
 }
 
 function findSlotModel(slot: AgentSlotDefinition, template?: ConversationTemplateSummary | null) {
@@ -295,10 +299,6 @@ function temperatureLabel(value?: number | null) {
   if (value <= 0.2) return `稳定 (${formattedValue})`
   if (value <= 0.7) return `均衡 (${formattedValue})`
   return `创造 (${formattedValue})`
-}
-
-function listText(values: string[], empty = '未限制') {
-  return values.length ? values.join(' / ') : empty
 }
 
 function mappedListText(values: string[], labels: Record<string, string>, empty = '未限制') {

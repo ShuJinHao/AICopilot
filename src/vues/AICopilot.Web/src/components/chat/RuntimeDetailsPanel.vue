@@ -12,11 +12,9 @@ const {
   latestTask,
   taskSteps,
   completedStepCount,
-  workspaceFileCount,
   draftArtifactCount,
   finalArtifactCount,
   taskArtifacts,
-  approvalGroups,
   agentStageCards,
   onsiteStatus
 } = useAgentWorkbench()

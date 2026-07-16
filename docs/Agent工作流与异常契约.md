@@ -149,11 +149,12 @@ Cloud 只读 Agent 当前正式能力限定为：
 ```bash
 dotnet test src/tests/AICopilot.WorkflowTests/AICopilot.WorkflowTests.csproj --no-restore
 dotnet test src/tests/AICopilot.ApplicationTests/AICopilot.ApplicationTests.csproj --filter "ToolRegistryApplicationTests|TextToSqlReadOnlyTests|AuthorizationPipelineBehaviorTests" --no-restore
-dotnet test src/tests/AICopilot.ContractTests/AICopilot.ContractTests.csproj --filter "ChatErrorContractTests|UnhandledApiExceptionPolicyTests" --no-restore
+dotnet test src/tests/AICopilot.ContractTests/AICopilot.ContractTests.csproj --filter "ChatErrorContractTests" --no-restore
+dotnet test src/tests/AICopilot.HttpIntegrationTests/AICopilot.HttpIntegrationTests.csproj --filter "UnhandledApiExceptionPolicyTests" --no-restore
 dotnet test src/tests/AICopilot.ToolPlugin.ConformanceTests/AICopilot.ToolPlugin.ConformanceTests.csproj --no-restore
 dotnet test src/tests/AICopilot.Architecture.AnalyzerTests/AICopilot.Architecture.AnalyzerTests.csproj --no-restore
-cd src/vues/AICopilot.Web && npm run test:unit -- chatErrorStore frontendErrorHandling runtimeDetails
-rg -n "Log(Critical|Error|Warning|Information|Debug|Trace)\\(\\s*[a-zA-Z_][a-zA-Z0-9_]*\\s*,|catch\\s*\\{\\s*\\}" src/hosts src/infrastructure src/services src/vues/AICopilot.Web/src
+cd src/vues/AICopilot.Web && npm run test:unit -- chatErrorStore runtimeDetails
+rg -n "Log(Critical|Error|Warning|Information|Debug|Trace)\\(\\s*[a-zA-Z_][a-zA-Z0-9_]*\\s*," src/hosts src/infrastructure src/services src/vues/AICopilot.Web/src
 ```
 
 ## 10. 外部依赖

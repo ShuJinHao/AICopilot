@@ -3,10 +3,12 @@ param(
     [string]$RepositoryRoot = (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent),
     [string]$BaselinePath = (Join-Path $PSScriptRoot 'baselines/aicopilot-duplication.json'),
     [string]$OutputPath = (Join-Path $RepositoryRoot 'artifacts/quality/aicopilot-duplication.json'),
+    [string]$BaseRef = 'origin/main',
     [switch]$UpdateBaseline
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'Resolve-AICopilotQualityBase.ps1')
 $script:structuralKeywords = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
 foreach ($keyword in @(
     'abstract','as','async','await','base','bool','break','by','case','catch','char','class','const','constructor',
@@ -240,28 +242,8 @@ function Assert-NoDuplicationGrowth {
     }
 }
 
-$outputDirectory = Split-Path $OutputPath -Parent
-New-Item $outputDirectory -ItemType Directory -Force | Out-Null
-$report | ConvertTo-Json -Depth 12 | Set-Content $OutputPath -Encoding utf8NoBOM
-
-if ($UpdateBaseline) {
-    if (-not (Test-Path $BaselinePath -PathType Leaf)) {
-        throw 'Duplication baseline bootstrap is forbidden; a reviewed baseline must already exist.'
-    }
-    $existingBaselineHash = (Get-FileHash $BaselinePath -Algorithm SHA256).Hash.ToLowerInvariant()
-    $existing = Get-Content $BaselinePath -Raw | ConvertFrom-Json -Depth 16
-    if ([int]$existing.schemaVersion -eq 3) {
-        if ($existingBaselineHash -cne '17b6ea6ff9ecb102f2ec9b6b0e377af7293881d83d24e09abc3ae69088f067ae') {
-            throw 'Only the frozen schema-3 baseline may perform the one-time structural-clone migration.'
-        }
-        Assert-NoDuplicationGrowth $existing @('productionExact', 'productionNear', 'testSupportHelpers', 'testAssertionFlows')
-    } elseif ([int]$existing.schemaVersion -eq 4) {
-        Assert-NoDuplicationGrowth $existing @($measurements.Keys)
-    } else {
-        throw "Unsupported duplication baseline schemaVersion '$($existing.schemaVersion)'."
-    }
-
-    $baseline = [ordered]@{
+function New-DuplicationBaseline {
+    $value = [ordered]@{
         schemaVersion = 4
         instanceIdentity = 'path+line'
         categories = [ordered]@{}
@@ -275,22 +257,81 @@ if ($UpdateBaseline) {
                 maximumDuplicatedTokens = [int]$group.duplicatedTokens
             }
         }
-        $baseline.categories[$category] = [ordered]@{
+        $value.categories[$category] = [ordered]@{
             maximum = $measurements[$category].metrics
             signatures = $signatureMaximum
         }
     }
-    $baselineDirectory = Split-Path $BaselinePath -Parent
-    New-Item $baselineDirectory -ItemType Directory -Force | Out-Null
-    $baseline | ConvertTo-Json -Depth 8 | Set-Content $BaselinePath -Encoding utf8NoBOM
+    return $value
 }
+
+function Assert-DuplicationBaselineDoesNotWeaken {
+    param(
+        [Parameter(Mandatory)] [object]$Base,
+        [Parameter(Mandatory)] [object]$Candidate
+    )
+
+    foreach ($category in $measurements.Keys) {
+        $baseCategory = $Base.categories.$category
+        $candidateCategory = $Candidate.categories.$category
+        if ($null -eq $baseCategory -or $null -eq $candidateCategory) {
+            throw "Duplication baseline ratchet is missing category '$category'."
+        }
+        foreach ($metric in @('groupCount', 'instanceCount', 'duplicatedLines', 'duplicatedTokens')) {
+            if ([int]$candidateCategory.maximum.$metric -gt [int]$baseCategory.maximum.$metric) {
+                throw "Candidate duplication baseline weakens base maximum '$category.$metric'."
+            }
+        }
+        foreach ($signatureProperty in @($candidateCategory.signatures.PSObject.Properties)) {
+            $baseSignature = $baseCategory.signatures.PSObject.Properties[[string]$signatureProperty.Name]
+            if ($null -eq $baseSignature) {
+                throw "Candidate duplication baseline adds unratcheted signature '$category/$($signatureProperty.Name)'."
+            }
+            foreach ($metric in @('maximumInstanceCount', 'maximumDuplicatedLines', 'maximumDuplicatedTokens')) {
+                if ([int]$signatureProperty.Value.$metric -gt [int]$baseSignature.Value.$metric) {
+                    throw "Candidate duplication baseline weakens base signature maximum '$category/$($signatureProperty.Name)/$metric'."
+                }
+            }
+        }
+    }
+}
+
+$outputDirectory = Split-Path $OutputPath -Parent
+New-Item $outputDirectory -ItemType Directory -Force | Out-Null
+$report | ConvertTo-Json -Depth 12 | Set-Content $OutputPath -Encoding utf8NoBOM
 
 if (-not (Test-Path $BaselinePath -PathType Leaf)) {
     throw "Duplication baseline does not exist: $BaselinePath"
 }
+$baselineContext = Get-AICopilotBaselineContext `
+    -RepositoryRoot $RepositoryRoot `
+    -BaseRef $BaseRef `
+    -BaselineKind Duplication `
+    -BaselinePath $BaselinePath
 $expected = Get-Content $BaselinePath -Raw | ConvertFrom-Json -Depth 16
 if ([int]$expected.schemaVersion -ne 4 -or [string]$expected.instanceIdentity -ne 'path+line') {
     throw "Unsupported duplication baseline schemaVersion '$($expected.schemaVersion)'."
+}
+
+if ($baselineContext.Mode -eq 'Ratchet') {
+    $baseExpected = $baselineContext.BaseBaselineJson | ConvertFrom-Json -Depth 16
+    Assert-NoDuplicationGrowth $baseExpected @($measurements.Keys)
+    Assert-DuplicationBaselineDoesNotWeaken $baseExpected $expected
+}
+elseif ($baselineContext.Mode -eq 'Bootstrap' -and -not $UpdateBaseline) {
+    $actualBaselineJson = (New-DuplicationBaseline) | ConvertTo-Json -Depth 8 -Compress
+    $candidateBaselineJson = $expected | ConvertTo-Json -Depth 8 -Compress
+    if ($candidateBaselineJson -cne $actualBaselineJson) {
+        throw 'Initial duplication baseline must exactly reconcile the candidate measurements.'
+    }
+}
+
+if ($UpdateBaseline) {
+    $baseline = New-DuplicationBaseline
+    $baselineDirectory = Split-Path $BaselinePath -Parent
+    New-Item $baselineDirectory -ItemType Directory -Force | Out-Null
+    $baseline | ConvertTo-Json -Depth 8 | Set-Content $BaselinePath -Encoding utf8NoBOM
+    $expected = Get-Content $BaselinePath -Raw | ConvertFrom-Json -Depth 16
 }
 
 Assert-NoDuplicationGrowth $expected @($measurements.Keys)

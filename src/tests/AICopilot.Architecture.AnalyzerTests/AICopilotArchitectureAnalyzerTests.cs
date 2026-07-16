@@ -4,6 +4,291 @@ namespace AICopilot.Architecture.AnalyzerTests;
 
 public sealed class AICopilotArchitectureAnalyzerTests
 {
+    private static readonly FixtureAssemblyReference SharedKernelReference = new(
+        "AICopilot.SharedKernel",
+        """
+        using System;
+        using System.Threading.Tasks;
+        namespace AICopilot.SharedKernel.Domain
+        {
+            public interface IAggregateRoot { }
+        }
+        namespace AICopilot.SharedKernel.Repository
+        {
+            public interface IRepository<T> where T : class
+            {
+                Task AddAsync(T entity);
+                Task UpdateAsync(T entity);
+            }
+            public interface IReadRepository<T> where T : class { }
+        }
+        namespace AICopilot.SharedKernel.Messaging
+        {
+            public interface ICommand { }
+            public interface ICommand<T> : ICommand { }
+            public interface IQuery<T> { }
+        }
+        namespace AICopilot.SharedKernel.Ai
+        {
+            public enum AiToolExternalSystemType { Unknown, CloudReadOnly }
+            public enum AiToolCapabilityKind { ReadOnlyQuery, Diagnostics, SideEffecting }
+            public sealed record AiToolSafetyDescriptor(
+                bool ReadOnlyDeclared,
+                AiToolCapabilityKind CapabilityKind,
+                AiToolExternalSystemType ExternalSystemType)
+            {
+                public static AiToolSafetyDescriptor Create(
+                    bool readOnlyDeclared,
+                    AiToolCapabilityKind capabilityKind,
+                    AiToolExternalSystemType externalSystemType) =>
+                    new(readOnlyDeclared, capabilityKind, externalSystemType);
+            }
+            public static class AiToolSafetyPolicy { }
+        }
+        """);
+
+    private static readonly FixtureAssemblyReference ServicesContractsReference = new(
+        "AICopilot.Services.Contracts",
+        """
+        using System;
+        using System.Threading;
+        using System.Threading.Tasks;
+        namespace AICopilot.Services.Contracts
+        {
+            public interface ITransactionalExecutionService { Task ExecuteAsync(Func<Task> action); }
+            public interface IIdentityEnabledAdminInvariantGuard { Task AcquireAsync(); }
+            public interface ICloudAiReadClient { int Read(); }
+            public interface ICloudReadOnlyTextToSqlGenerator { }
+            public sealed record AuditLogWriteRequest;
+            public interface IAuditLogWriter
+            {
+                Task WriteAsync(AuditLogWriteRequest request, CancellationToken cancellationToken = default);
+                Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
+            }
+        }
+        """);
+
+    private static readonly FixtureAssemblyReference InvariantInfrastructureReference = new(
+        "AICopilot.EntityFrameworkCore",
+        """
+        using System;
+        using System.Threading.Tasks;
+        using AICopilot.Services.Contracts;
+        namespace AICopilot.EntityFrameworkCore.Transactions
+        {
+            public sealed class IdentityTransactionalExecutionService : ITransactionalExecutionService
+            {
+                public Task ExecuteAsync(Func<Task> action) => action();
+            }
+        }
+        namespace AICopilot.EntityFrameworkCore.Locking
+        {
+            public sealed class PostgresIdentityEnabledAdminInvariantGuard : IIdentityEnabledAdminInvariantGuard
+            {
+                public Task AcquireAsync() => Task.CompletedTask;
+            }
+        }
+        """);
+
+    private static readonly FixtureAssemblyReference CrossCuttingReference = new(
+        "AICopilot.Services.CrossCutting",
+        """
+        using System;
+        namespace AICopilot.Services.CrossCutting.Attributes
+        {
+            [AttributeUsage(AttributeTargets.Class)]
+            public sealed class AuthorizeRequirementAttribute(string permission) : Attribute { }
+            [AttributeUsage(AttributeTargets.Class)]
+            public sealed class ResourceAuthorizationOwnerAttribute(Type ownerType) : Attribute { }
+        }
+        """);
+
+    private static readonly FixtureAssemblyReference IdentityServiceReference = new(
+        "AICopilot.IdentityService",
+        """
+        using System.Threading.Tasks;
+        namespace AICopilot.IdentityService.Authorization
+        {
+            public sealed class EnabledAdminInvariantPolicy
+            {
+                public Task AcquireAsync() => Task.CompletedTask;
+            }
+        }
+        """);
+
+    private static readonly FixtureAssemblyReference AgentPluginReference = new(
+        "AICopilot.AgentPlugin",
+        """
+        namespace AICopilot.AgentPlugin
+        {
+            public enum ChatExposureMode { Disabled, Advisory, Control }
+            public interface IAgentPlugin
+            {
+                string Description { get; }
+                ChatExposureMode ChatExposureMode { get; }
+            }
+            public abstract class AgentPluginBase : IAgentPlugin
+            {
+                public virtual string Description => string.Empty;
+                public virtual ChatExposureMode ChatExposureMode => ChatExposureMode.Disabled;
+            }
+        }
+        """);
+
+    private static readonly FixtureAssemblyReference CloudReadClientReference = new(
+        "AICopilot.Infrastructure",
+        """
+        namespace AICopilot.Infrastructure.CloudRead
+        {
+            public sealed class CloudAiReadClient : AICopilot.Services.Contracts.ICloudAiReadClient
+            {
+                public int Read() => 42;
+            }
+        }
+        """);
+
+    private static readonly FixtureAssemblyReference EntityFrameworkReference = new(
+        "Microsoft.EntityFrameworkCore",
+        """
+        namespace Microsoft.EntityFrameworkCore
+        {
+            public enum EntityState { Detached, Unchanged, Deleted, Modified, Added }
+            public class DbContext
+            {
+                public virtual int SaveChanges() => 0;
+                public ChangeTracking.EntityEntry<TEntity> Entry<TEntity>(TEntity entity) where TEntity : class => new();
+            }
+            public static class EntityFrameworkQueryableExtensions
+            {
+                public static int ExecuteDelete<T>(this System.Collections.Generic.IEnumerable<T> source) => 0;
+            }
+        }
+        namespace Microsoft.EntityFrameworkCore.ChangeTracking
+        {
+            public class EntityEntry<TEntity> where TEntity : class
+            {
+                public Microsoft.EntityFrameworkCore.EntityState State { get; set; }
+            }
+        }
+        """);
+
+    private static readonly FixtureAssemblyReference DependencyInjectionAbstractionsReference = new(
+        "Microsoft.Extensions.DependencyInjection.Abstractions",
+        """
+        namespace Microsoft.Extensions.DependencyInjection
+        {
+            public static class ActivatorUtilities
+            {
+                public static T CreateInstance<T>(System.IServiceProvider provider, params object[] parameters) => default!;
+                public static T GetServiceOrCreateInstance<T>(System.IServiceProvider provider) => default!;
+            }
+        }
+        """);
+
+    private static readonly FixtureAssemblyReference DapperReference = new(
+        "Dapper",
+        """
+        namespace Dapper
+        {
+            public static class SqlMapper
+            {
+                public static System.Threading.Tasks.Task<int> ExecuteAsync(
+                    object connection,
+                    string sql,
+                    object? param = null) => System.Threading.Tasks.Task.FromResult(1);
+            }
+        }
+        """);
+
+    private static readonly FixtureAssemblyReference NpgsqlReference = new(
+        "Npgsql",
+        """
+        namespace Npgsql
+        {
+            public sealed class NpgsqlConnection
+            {
+                public void Open() { }
+            }
+        }
+        """);
+
+    private static readonly FixtureAssemblyReference IdentityStoresReference = new(
+        "Microsoft.Extensions.Identity.Stores",
+        """
+        namespace Microsoft.AspNetCore.Identity
+        {
+            public class IdentityUser<TKey>
+            {
+                public bool LockoutEnabled { get; set; }
+                public System.DateTimeOffset? LockoutEnd { get; set; }
+            }
+            public class IdentityUserRole<TKey> { }
+        }
+        """);
+
+    private static readonly FixtureAssemblyReference IdentityCoreReference = new(
+        "Microsoft.Extensions.Identity.Core",
+        """
+        using System.Threading.Tasks;
+        namespace Microsoft.AspNetCore.Identity
+        {
+            public class UserManager<T>
+            {
+                public Task RemoveFromRoleAsync(T user, string role) => Task.CompletedTask;
+                public Task RemoveFromRolesAsync(T user, System.Collections.Generic.IEnumerable<string> roles) => Task.CompletedTask;
+                public Task UpdateAsync(T user) => Task.CompletedTask;
+                public Task DeleteAsync(T user) => Task.CompletedTask;
+                public Task SetLockoutEnabledAsync(T user, bool enabled) => Task.CompletedTask;
+                public Task SetLockoutEndDateAsync(T user, System.DateTimeOffset? lockoutEnd) => Task.CompletedTask;
+            }
+            public class RoleManager<T>
+            {
+                public Task DeleteAsync(T role) => Task.CompletedTask;
+            }
+        }
+        """);
+
+    private static readonly FixtureAssemblyReference AuthorizationReference = new(
+        "Microsoft.AspNetCore.Authorization",
+        """
+        using System;
+        namespace Microsoft.AspNetCore.Authorization
+        {
+            [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
+            public sealed class AuthorizeAttribute : Attribute
+            {
+                public string? Roles { get; set; }
+            }
+            [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
+            public sealed class AllowAnonymousAttribute : Attribute { }
+            public sealed class AuthorizationPolicyBuilder
+            {
+                public AuthorizationPolicyBuilder RequireRole(params string[] roles) => this;
+            }
+        }
+        """);
+
+    private static readonly FixtureAssemblyReference MvcCoreReference = new(
+        "Microsoft.AspNetCore.Mvc.Core",
+        """
+        using System;
+        namespace Microsoft.AspNetCore.Mvc
+        {
+            public abstract class ControllerBase { }
+            [AttributeUsage(AttributeTargets.Method)]
+            public sealed class HttpGetAttribute : Routing.HttpMethodAttribute { }
+            [AttributeUsage(AttributeTargets.Method)]
+            public sealed class RouteAttribute(string template) : Attribute { }
+            [AttributeUsage(AttributeTargets.Method)]
+            public sealed class NonActionAttribute : Attribute { }
+        }
+        namespace Microsoft.AspNetCore.Mvc.Routing
+        {
+            [AttributeUsage(AttributeTargets.Method)]
+            public abstract class HttpMethodAttribute : Attribute { }
+        }
+        """);
+
     [Fact]
     public void SupportedDiagnostics_ShouldBeErrorEnabledAndNotConfigurable_AndPreserveCompilationEndTags()
     {
@@ -47,6 +332,9 @@ public sealed class AICopilotArchitectureAnalyzerTests
         var unknownSource = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.UnclassifiedBridge",
             [source]);
+        var serviceNamedUnknownSource = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.UnclassifiedService",
+            [source]);
         var unknownTarget = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.AiGatewayService",
             [source],
@@ -54,11 +342,10 @@ public sealed class AICopilotArchitectureAnalyzerTests
 
         foreach (var (assemblyName, references) in new[]
                  {
-                     ("AICopilot.ArtifactGeneration", new[] { "AICopilot.Services.Contracts" }),
-                     ("AICopilot.CloudReadClient", new[] { "AICopilot.Services.Contracts" }),
-                     ("AICopilot.McpRuntime", new[] { "AICopilot.Core.AiGateway", "AICopilot.AgentPlugin" }),
-                     ("AICopilot.SecretProtection", new[] { "AICopilot.Core.AiGateway", "AICopilot.Core.Rag" }),
-                     ("AICopilot.SqlSafety", new[] { "AICopilot.Services.Contracts" })
+                     ("AICopilot.Infrastructure", Array.Empty<string>()),
+                     ("AICopilot.Embedding", Array.Empty<string>()),
+                     ("AICopilot.EntityFrameworkCore", Array.Empty<string>()),
+                     ("AICopilot.Dapper", Array.Empty<string>())
                  })
         {
             var diagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
@@ -70,10 +357,31 @@ public sealed class AICopilotArchitectureAnalyzerTests
                 $"{assemblyName} must remain an explicitly classified infrastructure project");
         }
 
+        foreach (var assemblyName in new[]
+                 {
+                     "AICopilot.AiGatewayService",
+                     "AICopilot.DataAnalysisService",
+                     "AICopilot.IdentityService",
+                     "AICopilot.McpService",
+                     "AICopilot.RagService",
+                     "AICopilot.Services.Contracts",
+                     "AICopilot.Services.CrossCutting"
+                 })
+        {
+            var diagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+                assemblyName,
+                [source]);
+            diagnostics.Should().NotContain(
+                diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.ProjectBoundaryId,
+                $"{assemblyName} must remain the exact explicitly classified service identity");
+        }
+
         valid.Should().NotContain(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.ProjectBoundaryId);
         wrongCore.Should().ContainSingle(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.ProjectBoundaryId);
         testDependency.Should().ContainSingle(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.ProjectBoundaryId);
         unknownSource.Should().ContainSingle(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.ProjectBoundaryId);
+        serviceNamedUnknownSource.Should().ContainSingle(
+            diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.ProjectBoundaryId);
         unknownTarget.Should().ContainSingle(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.ProjectBoundaryId);
     }
 
@@ -82,14 +390,6 @@ public sealed class AICopilotArchitectureAnalyzerTests
     {
         const string validSource = """
             global using Repo = AICopilot.SharedKernel.Repository.IRepository<AICopilot.Core.AiGateway.Aggregates.Sessions.Session>;
-            namespace AICopilot.SharedKernel.Domain
-            {
-                public interface IAggregateRoot { }
-            }
-            namespace AICopilot.SharedKernel.Repository
-            {
-                public interface IRepository<T> where T : class { }
-            }
             namespace AICopilot.Core.AiGateway.Aggregates.Sessions
             {
                 public sealed class Session : AICopilot.SharedKernel.Domain.IAggregateRoot { }
@@ -101,14 +401,6 @@ public sealed class AICopilotArchitectureAnalyzerTests
             """;
         const string invalidSource = """
             global using Repo = AICopilot.SharedKernel.Repository.IRepository<Fixture.LeafEntity>;
-            namespace AICopilot.SharedKernel.Domain
-            {
-                public interface IAggregateRoot { }
-            }
-            namespace AICopilot.SharedKernel.Repository
-            {
-                public interface IRepository<T> where T : class { }
-            }
             namespace Fixture
             {
                 public sealed class LeafEntity { }
@@ -117,10 +409,6 @@ public sealed class AICopilotArchitectureAnalyzerTests
             }
             """;
         const string sameNameFakeRepository = """
-            namespace AICopilot.SharedKernel.Domain
-            {
-                public interface IAggregateRoot { }
-            }
             namespace Fixture
             {
                 public interface IRepository<T> where T : class { }
@@ -131,13 +419,16 @@ public sealed class AICopilotArchitectureAnalyzerTests
 
         var valid = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.Core.AiGateway",
-            [validSource]);
+            [validSource],
+            [SharedKernelReference]);
         var invalid = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.Core.AiGateway",
-            [invalidSource]);
+            [invalidSource],
+            [SharedKernelReference]);
         var sameNameFake = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.Core.AiGateway",
-            [sameNameFakeRepository]);
+            [sameNameFakeRepository],
+            [SharedKernelReference]);
 
         valid.Should().NotContain(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.AggregateBoundaryId);
         invalid.Should().Contain(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.AggregateBoundaryId);
@@ -149,10 +440,6 @@ public sealed class AICopilotArchitectureAnalyzerTests
     {
         const string source = """
             global using Ef = Microsoft.EntityFrameworkCore;
-            namespace Microsoft.EntityFrameworkCore
-            {
-                public class DbContext { public virtual int SaveChanges() => 0; }
-            }
             namespace Fixture
             {
                 public sealed class ServiceDb : Ef.DbContext
@@ -161,30 +448,33 @@ public sealed class AICopilotArchitectureAnalyzerTests
                 }
             }
             """;
-
+        const string sameNameFake = """
+            namespace Fixture
+            {
+                public abstract class DbContext { }
+                public sealed class HarmlessStore : DbContext { }
+            }
+            """;
         var valid = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.EntityFrameworkCore",
-            [source]);
+            [source],
+            [EntityFrameworkReference]);
         var invalid = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.AiGatewayService",
-            [source]);
+            [source],
+            [EntityFrameworkReference]);
+        var fake = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.AiGatewayService",
+            [sameNameFake]);
 
         valid.Should().NotContain(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.PersistenceOwnerId);
         invalid.Should().Contain(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.PersistenceOwnerId);
+        fake.Should().NotContain(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.PersistenceOwnerId);
     }
 
     [Fact]
     public async Task AIARCH003_ShouldLimitTheInfrastructureDatabaseExceptionToTheExactSessionLock()
     {
-        const string contracts = """
-            namespace Npgsql
-            {
-                public sealed class NpgsqlConnection
-                {
-                    public void Open() { }
-                }
-            }
-            """;
         const string valid = """
             namespace AICopilot.Infrastructure.AiGateway
             {
@@ -209,10 +499,12 @@ public sealed class AICopilotArchitectureAnalyzerTests
 
         var validDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.Infrastructure",
-            [contracts, valid]);
+            [valid],
+            [NpgsqlReference]);
         var invalidDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.Infrastructure",
-            [contracts, invalid]);
+            [invalid],
+            [NpgsqlReference]);
 
         validDiagnostics.Should().NotContain(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.PersistenceOwnerId);
         invalidDiagnostics.Should().ContainSingle(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.PersistenceOwnerId);
@@ -224,46 +516,6 @@ public sealed class AICopilotArchitectureAnalyzerTests
         const string contracts = """
             using System;
             using System.Threading.Tasks;
-            namespace Microsoft.AspNetCore.Identity
-            {
-                public class IdentityUser<TKey>
-                {
-                    public bool LockoutEnabled { get; set; }
-                    public System.DateTimeOffset? LockoutEnd { get; set; }
-                }
-                public class IdentityUserRole<TKey> { }
-                public class UserManager<T>
-                {
-                    public Task RemoveFromRoleAsync(T user, string role) => Task.CompletedTask;
-                    public Task RemoveFromRolesAsync(T user, System.Collections.Generic.IEnumerable<string> roles) => Task.CompletedTask;
-                    public Task UpdateAsync(T user) => Task.CompletedTask;
-                    public Task DeleteAsync(T user) => Task.CompletedTask;
-                    public Task SetLockoutEnabledAsync(T user, bool enabled) => Task.CompletedTask;
-                    public Task SetLockoutEndDateAsync(T user, System.DateTimeOffset? lockoutEnd) => Task.CompletedTask;
-                }
-                public class RoleManager<T>
-                {
-                    public Task DeleteAsync(T role) => Task.CompletedTask;
-                }
-            }
-            namespace AICopilot.Services.Contracts
-            {
-                public interface ITransactionalExecutionService
-                {
-                    Task ExecuteAsync(Func<Task> action);
-                }
-                public interface IIdentityEnabledAdminInvariantGuard
-                {
-                    Task AcquireAsync();
-                }
-            }
-            namespace AICopilot.IdentityService.Authorization
-            {
-                public sealed class EnabledAdminInvariantPolicy
-                {
-                    public Task AcquireAsync() => Task.CompletedTask;
-                }
-            }
             namespace Microsoft.Extensions.Hosting
             {
                 public abstract class BackgroundService
@@ -633,7 +885,7 @@ public sealed class AICopilotArchitectureAnalyzerTests
                     public Task HandleAsync() => transaction.ExecuteAsync(async () =>
                     {
                         _ = invariant.AcquireAsync();
-                        await users.UpdateAsync(new User());
+                        await users.RemoveFromRoleAsync(new User(), "Admin");
                     });
                 }
 
@@ -666,8 +918,7 @@ public sealed class AICopilotArchitectureAnalyzerTests
                 }
 
                 public sealed class ExpandedIdentityMutationHandler(
-                    Microsoft.AspNetCore.Identity.UserManager<User> users,
-                    Microsoft.AspNetCore.Identity.RoleManager<object> roles)
+                    Microsoft.AspNetCore.Identity.UserManager<User> users)
                 {
                     public async Task MutateAsync(User user)
                     {
@@ -675,7 +926,6 @@ public sealed class AICopilotArchitectureAnalyzerTests
                         await users.SetLockoutEndDateAsync(user, DateTimeOffset.MaxValue);
                         user.LockoutEnabled = true;
                         user.LockoutEnd = DateTimeOffset.MaxValue;
-                        await roles.DeleteAsync(new object());
                     }
                 }
 
@@ -683,13 +933,87 @@ public sealed class AICopilotArchitectureAnalyzerTests
                 {
                     public void Remove(List<Microsoft.AspNetCore.Identity.IdentityUserRole<string>> relations) =>
                         relations.Remove(new Microsoft.AspNetCore.Identity.IdentityUserRole<string>());
+
+                    public void RemoveRange(List<Microsoft.AspNetCore.Identity.IdentityUserRole<string>> relations) =>
+                        relations.RemoveRange(0, 1);
+
+                    public void RemoveAll(List<Microsoft.AspNetCore.Identity.IdentityUserRole<string>> relations) =>
+                        relations.RemoveAll(_ => true);
+
+                    public void RemoveAt(List<Microsoft.AspNetCore.Identity.IdentityUserRole<string>> relations) =>
+                        relations.RemoveAt(0);
+
+                    public void Clear(List<Microsoft.AspNetCore.Identity.IdentityUserRole<string>> relations) =>
+                        relations.Clear();
+                }
+
+                public sealed class IdentityRelationStateHandler(Microsoft.EntityFrameworkCore.DbContext db)
+                {
+                    public void Delete(Microsoft.AspNetCore.Identity.IdentityUserRole<string> relation) =>
+                        db.Entry(relation).State = Microsoft.EntityFrameworkCore.EntityState.Deleted;
+                }
+
+                public sealed class HelperReducer(Microsoft.AspNetCore.Identity.UserManager<User> users) : IAdminReducer
+                {
+                    public Task ReduceAsync() => users.DeleteAsync(new User());
+                }
+
+                public sealed class UnobservedHelperHandler(
+                    Microsoft.AspNetCore.Identity.UserManager<User> users,
+                    ITransactionalExecutionService transaction,
+                    AICopilot.IdentityService.Authorization.EnabledAdminInvariantPolicy invariant)
+                {
+                    public Task HandleAsync() => transaction.ExecuteAsync(async () =>
+                    {
+                        await invariant.AcquireAsync();
+                        _ = ReduceAsync();
+                    });
+
+                    private Task ReduceAsync() => users.DeleteAsync(new User());
+                }
+
+                public sealed class UnobservedInterfaceHelperHandler(
+                    IAdminReducer reducer,
+                    ITransactionalExecutionService transaction,
+                    AICopilot.IdentityService.Authorization.EnabledAdminInvariantPolicy invariant)
+                {
+                    public Task HandleAsync() => transaction.ExecuteAsync(async () =>
+                    {
+                        await invariant.AcquireAsync();
+                        _ = reducer.ReduceAsync();
+                    });
+                }
+
+                public sealed class UnobservedDelegateHelperHandler(
+                    HelperReducer reducer,
+                    ITransactionalExecutionService transaction,
+                    AICopilot.IdentityService.Authorization.EnabledAdminInvariantPolicy invariant)
+                {
+                    public Task HandleAsync() => transaction.ExecuteAsync(async () =>
+                    {
+                        await invariant.AcquireAsync();
+                        Func<Task> reduction = reducer.ReduceAsync;
+                        _ = reduction();
+                    });
+                }
+
+                public sealed class ObservedHelperHandler(
+                    HelperReducer reducer,
+                    ITransactionalExecutionService transaction,
+                    AICopilot.IdentityService.Authorization.EnabledAdminInvariantPolicy invariant)
+                {
+                    public Task HandleAsync() => transaction.ExecuteAsync(async () =>
+                    {
+                        await invariant.AcquireAsync();
+                        await reducer.ReduceAsync();
+                    });
                 }
 
                 public sealed class DynamicIdentityHandler(Microsoft.AspNetCore.Identity.UserManager<User> users)
                 {
                     public Task MutateAsync(dynamic unknown)
                     {
-                        unknown.UpdateAsync(new User());
+                        unknown.RemoveFromRoleAsync(new User(), "Admin");
                         return Task.CompletedTask;
                     }
                 }
@@ -739,24 +1063,8 @@ public sealed class AICopilotArchitectureAnalyzerTests
             }
             """;
         const string exactInvariantImplementations = """
-            using System;
-            using System.Threading.Tasks;
             using AICopilot.Services.Contracts;
             using Microsoft.Extensions.DependencyInjection;
-            namespace AICopilot.EntityFrameworkCore.Transactions
-            {
-                public sealed class IdentityTransactionalExecutionService : ITransactionalExecutionService
-                {
-                    public Task ExecuteAsync(Func<Task> action) => action();
-                }
-            }
-            namespace AICopilot.EntityFrameworkCore.Locking
-            {
-                public sealed class PostgresIdentityEnabledAdminInvariantGuard : IIdentityEnabledAdminInvariantGuard
-                {
-                    public Task AcquireAsync() => Task.CompletedTask;
-                }
-            }
             namespace Fixture.ValidRegistration
             {
                 public static class Registration
@@ -938,76 +1246,107 @@ public sealed class AICopilotArchitectureAnalyzerTests
         var memberDelegateDualUse = MemberDelegateSource(reversed: false, dualUse: true);
         var hiddenRootValid = HiddenRootSource(valid: true);
         var hiddenRootInvalid = HiddenRootSource(valid: false);
+        var formalReferences = new[]
+        {
+            IdentityStoresReference,
+            IdentityCoreReference,
+            ServicesContractsReference,
+            IdentityServiceReference,
+            EntityFrameworkReference
+        };
 
         var invalidDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.IdentityService",
-            [contracts, invalid]);
+            [contracts, invalid],
+            formalReferences);
         var validDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.IdentityService",
-            [contracts, valid]);
+            [contracts, valid],
+            formalReferences);
         var disjointDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.IdentityService",
-            [contracts, disjoint]);
+            [contracts, disjoint],
+            formalReferences);
         var reversedDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.IdentityService",
-            [contracts, reversed]);
+            [contracts, reversed],
+            formalReferences);
         var methodGroupValidDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.IdentityService",
-            [contracts, methodGroupValid]);
+            [contracts, methodGroupValid],
+            formalReferences);
         var methodGroupReversedDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.IdentityService",
-            [contracts, methodGroupReversed]);
+            [contracts, methodGroupReversed],
+            formalReferences);
         var methodGroupDualUseDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.IdentityService",
-            [contracts, methodGroupDualUse]);
+            [contracts, methodGroupDualUse],
+            formalReferences);
         var storedMethodGroupValidDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.IdentityService",
-            [contracts, storedMethodGroupValid]);
+            [contracts, storedMethodGroupValid],
+            formalReferences);
         var storedMethodGroupReversedDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.IdentityService",
-            [contracts, storedMethodGroupReversed]);
+            [contracts, storedMethodGroupReversed],
+            formalReferences);
         var storedMethodGroupDualUseDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.IdentityService",
-            [contracts, storedMethodGroupDualUse]);
+            [contracts, storedMethodGroupDualUse],
+            formalReferences);
         var storedLambdaValidDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.IdentityService",
-            [contracts, storedLambdaValid]);
+            [contracts, storedLambdaValid],
+            formalReferences);
         var storedLambdaReversedDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.IdentityService",
-            [contracts, storedLambdaReversed]);
+            [contracts, storedLambdaReversed],
+            formalReferences);
         var storedLambdaDualUseDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.IdentityService",
-            [contracts, storedLambdaDualUse]);
+            [contracts, storedLambdaDualUse],
+            formalReferences);
         var crossHandlerDualUseDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.IdentityService",
-            [contracts, crossHandlerDualUse]);
+            [contracts, crossHandlerDualUse],
+            formalReferences);
         var memberDelegateValidDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.IdentityService",
-            [contracts, memberDelegateValid]);
+            [contracts, memberDelegateValid],
+            formalReferences);
         var memberDelegateReversedDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.IdentityService",
-            [contracts, memberDelegateReversed]);
+            [contracts, memberDelegateReversed],
+            formalReferences);
         var memberDelegateDualUseDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.IdentityService",
-            [contracts, memberDelegateDualUse]);
+            [contracts, memberDelegateDualUse],
+            formalReferences);
         var hiddenRootValidDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.IdentityService",
-            [contracts, hiddenRootValid]);
+            [contracts, hiddenRootValid],
+            formalReferences);
         var hiddenRootInvalidDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.IdentityService",
-            [contracts, hiddenRootInvalid]);
+            [contracts, hiddenRootInvalid],
+            formalReferences);
         var expandedMutationDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.IdentityService",
-            [contracts, expandedMutationSurface]);
+            [contracts, expandedMutationSurface],
+            formalReferences);
         var sameNameFakeIdentityDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.IdentityService",
-            [contracts, sameNameFakeIdentitySurface]);
+            [contracts, sameNameFakeIdentitySurface],
+            formalReferences);
         var exactInvariantImplementationDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.IdentityService",
-            [contracts, exactInvariantImplementations]);
+            [contracts, exactInvariantImplementations],
+            [.. formalReferences, InvariantInfrastructureReference]);
         var invalidInvariantImplementationDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.IdentityService",
-            [contracts, invalidInvariantImplementations]);
+            [contracts, invalidInvariantImplementations],
+            formalReferences);
 
         invalidDiagnostics.Should().Contain(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.EnabledAdminInvariantId);
         disjointDiagnostics.Should().Contain(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.EnabledAdminInvariantId);
@@ -1040,8 +1379,11 @@ public sealed class AICopilotArchitectureAnalyzerTests
                      "FireAndForgetTransactionHandler",
                      "ExpandedIdentityMutationHandler",
                      "IdentityRelationHandler",
-                     "DynamicIdentityHandler",
-                     "FakeGuardHandler"
+                     "IdentityRelationStateHandler",
+                     "UnobservedHelperHandler",
+                     "UnobservedInterfaceHelperHandler",
+                     "UnobservedDelegateHelperHandler",
+                     "DynamicIdentityHandler"
                  })
         {
             expandedMutationDiagnostics.Should().Contain(diagnostic =>
@@ -1050,6 +1392,12 @@ public sealed class AICopilotArchitectureAnalyzerTests
         }
         sameNameFakeIdentityDiagnostics.Should().NotContain(
             diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.EnabledAdminInvariantId);
+        expandedMutationDiagnostics.Should().NotContain(diagnostic =>
+            diagnostic.Id == AICopilotArchitectureAnalyzer.EnabledAdminInvariantId &&
+            diagnostic.GetMessage().Contains("Fixture.ObservedHelperHandler.", StringComparison.Ordinal));
+        expandedMutationDiagnostics.Should().NotContain(diagnostic =>
+            diagnostic.Id == AICopilotArchitectureAnalyzer.EnabledAdminInvariantId &&
+            diagnostic.GetMessage().Contains("Fixture.FakeGuardHandler.", StringComparison.Ordinal));
         exactInvariantImplementationDiagnostics.Should().NotContain(
             diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.EnabledAdminInvariantId);
         invalidInvariantImplementationDiagnostics.Count(
@@ -1057,24 +1405,139 @@ public sealed class AICopilotArchitectureAnalyzerTests
     }
 
     [Fact]
+    public async Task AIARCH004_ShouldIgnoreOrdinaryUserUpdatesAndRoleDeletes()
+    {
+        const string source = """
+            using System.Threading.Tasks;
+            namespace Fixture
+            {
+                public sealed class User : Microsoft.AspNetCore.Identity.IdentityUser<string> { }
+
+                public sealed class Handler(
+                    Microsoft.AspNetCore.Identity.UserManager<User> users,
+                    Microsoft.AspNetCore.Identity.RoleManager<object> roles)
+                {
+                    public async Task HandleAsync(
+                        User user,
+                        object role)
+                    {
+                        await users.UpdateAsync(user);
+                        await roles.DeleteAsync(role);
+                    }
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.IdentityService",
+            [source],
+            [IdentityStoresReference, IdentityCoreReference, ServicesContractsReference, IdentityServiceReference]);
+
+        diagnostics.Should().NotContain(
+            diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.EnabledAdminInvariantId);
+    }
+
+    [Fact]
+    public async Task AIARCH004_ShouldTreatFormalSynchronousIdentityDecreaseAsObservedAtTheCallSite()
+    {
+        const string valid = """
+            using System.Threading.Tasks;
+            using AICopilot.IdentityService.Authorization;
+            using AICopilot.Services.Contracts;
+            namespace AICopilot.IdentityService.Authorization
+            {
+                public static class IdentityGovernanceHelper
+                {
+                    public static void MarkUserDisabled(object user) { }
+                }
+            }
+            namespace Fixture
+            {
+                public sealed class Handler(
+                    ITransactionalExecutionService transaction,
+                    EnabledAdminInvariantPolicy invariant)
+                {
+                    public Task HandleAsync() => transaction.ExecuteAsync(async () =>
+                    {
+                        await invariant.AcquireAsync();
+                        IdentityGovernanceHelper.MarkUserDisabled(new object());
+                    });
+                }
+            }
+            """;
+        const string beforeGuard = """
+            using System.Threading.Tasks;
+            using AICopilot.IdentityService.Authorization;
+            using AICopilot.Services.Contracts;
+            namespace AICopilot.IdentityService.Authorization
+            {
+                public static class IdentityGovernanceHelper
+                {
+                    public static void MarkUserDisabled(object user) { }
+                }
+            }
+            namespace Fixture
+            {
+                public sealed class Handler(
+                    ITransactionalExecutionService transaction,
+                    EnabledAdminInvariantPolicy invariant)
+                {
+                    public Task HandleAsync() => transaction.ExecuteAsync(async () =>
+                    {
+                        IdentityGovernanceHelper.MarkUserDisabled(new object());
+                        await invariant.AcquireAsync();
+                    });
+                }
+            }
+            """;
+        const string sameNameFake = """
+            namespace Fixture
+            {
+                public static class IdentityGovernanceHelper
+                {
+                    public static void MarkUserDisabled(object user) { }
+                }
+
+                public sealed class Handler
+                {
+                    public void Handle() => IdentityGovernanceHelper.MarkUserDisabled(new object());
+                }
+            }
+            """;
+        var formalReferences = new[]
+        {
+            IdentityStoresReference,
+            IdentityCoreReference,
+            ServicesContractsReference,
+            IdentityServiceReference,
+            EntityFrameworkReference
+        };
+
+        var validDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.IdentityService",
+            [valid],
+            formalReferences);
+        var beforeGuardDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.IdentityService",
+            [beforeGuard],
+            formalReferences);
+        var sameNameFakeDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.IdentityService",
+            [sameNameFake],
+            formalReferences);
+
+        validDiagnostics.Should().NotContain(
+            diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.EnabledAdminInvariantId);
+        beforeGuardDiagnostics.Should().Contain(
+            diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.EnabledAdminInvariantId);
+        sameNameFakeDiagnostics.Should().NotContain(
+            diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.EnabledAdminInvariantId);
+    }
+
+    [Fact]
     public async Task AIARCH005_ShouldRequireInheritedPluginManifestAndRejectProductionTestDoubles()
     {
         const string contracts = """
-            using System.Collections.Generic;
-            namespace AICopilot.AgentPlugin
-            {
-                public enum ChatExposureMode { Disabled, Advisory, Control }
-                public interface IAgentPlugin
-                {
-                    string Description { get; }
-                    ChatExposureMode ChatExposureMode { get; }
-                }
-                public abstract class AgentPluginBase : IAgentPlugin
-                {
-                    public virtual string Description => string.Empty;
-                    public virtual ChatExposureMode ChatExposureMode => ChatExposureMode.Disabled;
-                }
-            }
             namespace Fixture
             {
                 public interface IAgentToolExecutor { }
@@ -1105,13 +1568,80 @@ public sealed class AICopilotArchitectureAnalyzerTests
 
         var invalidDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.AiGatewayService",
-            [contracts, invalid]);
+            [contracts, invalid],
+            [AgentPluginReference]);
         var validDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.AiGatewayService",
-            [contracts, valid]);
+            [contracts, valid],
+            [AgentPluginReference]);
 
         invalidDiagnostics.Should().Contain(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.AgentPluginBoundaryId);
         validDiagnostics.Should().NotContain(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.AgentPluginBoundaryId);
+    }
+
+    [Fact]
+    public async Task AIARCH005_ShouldOwnExactAssemblyDiscoveryAndActivatorUtilitiesSurfaces()
+    {
+        const string exactSurfaces = """
+            using System;
+            namespace Fixture
+            {
+                public sealed class RuntimeSurface
+                {
+                    public Type[] GetTypes() => typeof(RuntimeSurface).Assembly.GetTypes();
+                    public Type[] GetExportedTypes() => typeof(RuntimeSurface).Assembly.GetExportedTypes();
+                    public object DefinedTypes() => typeof(RuntimeSurface).Assembly.DefinedTypes;
+                    public object Create(IServiceProvider provider) =>
+                        Microsoft.Extensions.DependencyInjection.ActivatorUtilities.CreateInstance<object>(provider);
+                    public object GetOrCreate(IServiceProvider provider) =>
+                        Microsoft.Extensions.DependencyInjection.ActivatorUtilities.GetServiceOrCreateInstance<object>(provider);
+                }
+            }
+            """;
+        const string sameNameFakes = """
+            namespace Fixture
+            {
+                public sealed class Assembly
+                {
+                    public object GetTypes() => new object();
+                    public object GetExportedTypes() => new object();
+                    public object DefinedTypes => new object();
+                }
+                public static class ActivatorUtilities
+                {
+                    public static object CreateInstance(object provider) => new object();
+                    public static object GetServiceOrCreateInstance(object provider) => new object();
+                }
+                public sealed class Harmless
+                {
+                    public object Run(Assembly assembly, object provider)
+                    {
+                        _ = assembly.GetTypes();
+                        _ = assembly.GetExportedTypes();
+                        _ = assembly.DefinedTypes;
+                        _ = ActivatorUtilities.CreateInstance(provider);
+                        return ActivatorUtilities.GetServiceOrCreateInstance(provider);
+                    }
+                }
+            }
+            """;
+
+        var forbidden = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.AiGatewayService",
+            [exactSurfaces],
+            [DependencyInjectionAbstractionsReference]);
+        var runtime = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.AgentPlugin.Runtime",
+            [exactSurfaces],
+            [DependencyInjectionAbstractionsReference]);
+        var fakes = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.AiGatewayService",
+            [sameNameFakes]);
+
+        forbidden.Count(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.AgentPluginBoundaryId)
+            .Should().Be(5);
+        runtime.Should().NotContain(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.AgentPluginBoundaryId);
+        fakes.Should().NotContain(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.AgentPluginBoundaryId);
     }
 
     [Fact]
@@ -1151,14 +1681,6 @@ public sealed class AICopilotArchitectureAnalyzerTests
     public async Task AIARCH006_ShouldFollowInterfaceDispatchFromCloudAiReadEntryToDatabaseWrite()
     {
         const string contracts = """
-            namespace Microsoft.EntityFrameworkCore
-            {
-                public class DbContext { public virtual int SaveChanges() => 0; }
-            }
-            namespace AICopilot.Services.Contracts
-            {
-                public interface ICloudAiReadClient { int Read(); }
-            }
             namespace Microsoft.Extensions.DependencyInjection
             {
                 public static class ServiceProviderServiceExtensions
@@ -1172,13 +1694,6 @@ public sealed class AICopilotArchitectureAnalyzerTests
                 {
                     protected abstract System.Threading.Tasks.Task ExecuteAsync(
                         System.Threading.CancellationToken stoppingToken);
-                }
-            }
-            namespace AICopilot.CloudReadClient
-            {
-                public sealed class CloudAiReadClient : AICopilot.Services.Contracts.ICloudAiReadClient
-                {
-                    public int Read() => 42;
                 }
             }
             namespace Fixture
@@ -1236,7 +1751,7 @@ public sealed class AICopilotArchitectureAnalyzerTests
                 {
                     public int Run()
                     {
-                        var local = new AICopilot.CloudReadClient.CloudAiReadClient();
+                        var local = new AICopilot.Infrastructure.CloudRead.CloudAiReadClient();
                         _ = local.Read();
                         return db.SaveChanges();
                     }
@@ -1292,6 +1807,20 @@ public sealed class AICopilotArchitectureAnalyzerTests
                     public int Run()
                     {
                         _ = client.Read();
+                        return db.SaveChanges();
+                    }
+                }
+            }
+            """;
+        const string exactNameWrongAssembly = """
+            namespace Fixture
+            {
+                public sealed class NeutralRunner(Microsoft.EntityFrameworkCore.DbContext db)
+                {
+                    public int Run()
+                    {
+                        var local = new AICopilot.Infrastructure.CloudRead.CloudAiReadClient();
+                        _ = local.Read();
                         return db.SaveChanges();
                     }
                 }
@@ -1361,17 +1890,6 @@ public sealed class AICopilotArchitectureAnalyzerTests
             """;
         const string exactRepositoryWrite = """
             using System.Threading.Tasks;
-            namespace AICopilot.SharedKernel.Domain
-            {
-                public interface IAggregateRoot { }
-            }
-            namespace AICopilot.SharedKernel.Repository
-            {
-                public interface IRepository<T> where T : class
-                {
-                    Task UpdateAsync(T entity);
-                }
-            }
             namespace Fixture
             {
                 public sealed class Session : AICopilot.SharedKernel.Domain.IAggregateRoot { }
@@ -1410,13 +1928,6 @@ public sealed class AICopilotArchitectureAnalyzerTests
             """;
         const string exactDapperWrite = """
             using System.Threading.Tasks;
-            namespace Dapper
-            {
-                public static class SqlMapper
-                {
-                    public static Task<int> ExecuteAsync(object connection, string sql) => Task.FromResult(1);
-                }
-            }
             namespace Fixture
             {
                 public sealed class CloudDapperRunner
@@ -1428,6 +1939,27 @@ public sealed class AICopilotArchitectureAnalyzerTests
                         _ = client.Read();
                         return Dapper.SqlMapper.ExecuteAsync(connection, "delete from sessions");
                     }
+                }
+            }
+            """;
+        const string dapperWriteWithBenignNonSqlArgument = """
+            using System.Threading.Tasks;
+            namespace Fixture
+            {
+                public sealed class CloudDapperRunner
+                {
+                    public Task<int> RunAsync(
+                        AICopilot.Services.Contracts.ICloudAiReadClient client,
+                        object connection)
+                    {
+                        _ = client.Read();
+                        return Dapper.SqlMapper.ExecuteAsync(
+                            connection,
+                            BuildWriteSql(),
+                            "SET TRANSACTION READ ONLY");
+                    }
+
+                    private static string BuildWriteSql() => "delete from sessions";
                 }
             }
             """;
@@ -1454,12 +1986,14 @@ public sealed class AICopilotArchitectureAnalyzerTests
         const string httpAndIndirectWrites = """
             using System;
             using System.Net.Http;
+            using System.Net.Http.Json;
             using System.Threading.Tasks;
             namespace Fixture
             {
                 public sealed class HttpWriteRunner(
                     AICopilot.Services.Contracts.ICloudAiReadClient cloud,
-                    HttpClient http)
+                    HttpClient http,
+                    HttpMessageInvoker invoker)
                 {
                     public Task<HttpResponseMessage> PostAsync()
                     {
@@ -1490,6 +2024,43 @@ public sealed class AICopilotArchitectureAnalyzerTests
                     {
                         _ = cloud.Read();
                         return http.GetAsync("https://cloud.invalid/read");
+                    }
+                    public HttpResponseMessage SendSync()
+                    {
+                        _ = cloud.Read();
+                        return http.Send(new HttpRequestMessage(HttpMethod.Post, "https://cloud.invalid/write"));
+                    }
+                    public Task<HttpResponseMessage> InvokerSendAsync()
+                    {
+                        _ = cloud.Read();
+                        return invoker.SendAsync(
+                            new HttpRequestMessage(HttpMethod.Post, "https://cloud.invalid/write"),
+                            default);
+                    }
+                    public Task<HttpResponseMessage> PostJsonAsync()
+                    {
+                        _ = cloud.Read();
+                        return http.PostAsJsonAsync("https://cloud.invalid/write", new { Value = 1 });
+                    }
+                    public Task<HttpResponseMessage> PutJsonAsync()
+                    {
+                        _ = cloud.Read();
+                        return http.PutAsJsonAsync("https://cloud.invalid/write", new { Value = 1 });
+                    }
+                    public Task<HttpResponseMessage> PatchJsonAsync()
+                    {
+                        _ = cloud.Read();
+                        return http.PatchAsJsonAsync("https://cloud.invalid/write", new { Value = 1 });
+                    }
+                    public Task<object?> DeleteJsonAsync()
+                    {
+                        _ = cloud.Read();
+                        return http.DeleteFromJsonAsync<object>("https://cloud.invalid/write");
+                    }
+                    public Task<object?> GetJsonAsync()
+                    {
+                        _ = cloud.Read();
+                        return http.GetFromJsonAsync<object>("https://cloud.invalid/read");
                     }
                 }
 
@@ -1549,6 +2120,36 @@ public sealed class AICopilotArchitectureAnalyzerTests
                         var request = new HttpRequestMessage(HttpMethod.Get, "https://cloud.invalid/read");
                         return http.SendAsync(request);
                     }
+                    public Task<HttpResponseMessage> ReassignedPostAsync()
+                    {
+                        _ = cloud.Read();
+                        var request = new HttpRequestMessage(HttpMethod.Get, "https://cloud.invalid/read");
+                        request = new HttpRequestMessage(HttpMethod.Post, "https://cloud.invalid/write");
+                        return http.SendAsync(request);
+                    }
+                    public Task<HttpResponseMessage> MutatedPostAsync()
+                    {
+                        _ = cloud.Read();
+                        var request = new HttpRequestMessage(HttpMethod.Get, "https://cloud.invalid/read");
+                        request.Method = HttpMethod.Post;
+                        return http.SendAsync(request);
+                    }
+                    public Task<HttpResponseMessage> RequestToAliasPostAsync()
+                    {
+                        _ = cloud.Read();
+                        var request = new HttpRequestMessage(HttpMethod.Get, "https://cloud.invalid/read");
+                        var alias = request;
+                        alias.Method = HttpMethod.Post;
+                        return http.SendAsync(request);
+                    }
+                    public Task<HttpResponseMessage> AliasToRequestPostAsync()
+                    {
+                        _ = cloud.Read();
+                        var alias = new HttpRequestMessage(HttpMethod.Get, "https://cloud.invalid/read");
+                        var request = alias;
+                        alias.Method = HttpMethod.Post;
+                        return http.SendAsync(request);
+                    }
                 }
             }
             """;
@@ -1589,45 +2190,100 @@ public sealed class AICopilotArchitectureAnalyzerTests
             }
             """;
 
+        var formalReferences = new[]
+        {
+            EntityFrameworkReference,
+            DapperReference,
+            ServicesContractsReference,
+            CloudReadClientReference,
+            SharedKernelReference
+        };
         var invalidDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.AiGatewayService",
-            [contracts, invalid]);
+            [contracts, invalid],
+            formalReferences);
         var validDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.AiGatewayService",
-            [contracts, valid]);
+            [contracts, valid],
+            formalReferences);
         var neutralRootDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.AiGatewayService",
-            [contracts, neutralRoots]);
+            [contracts, neutralRoots],
+            formalReferences);
         var sameNameFakeDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.AiGatewayService",
-            [contracts, sameNameFake]);
+            [contracts, sameNameFake],
+            formalReferences);
+        var exactNameWrongAssemblyDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.AiGatewayService",
+            [contracts, exactNameWrongAssembly],
+            [
+                EntityFrameworkReference,
+                DapperReference,
+                ServicesContractsReference,
+                SharedKernelReference,
+                new FixtureAssemblyReference(
+                    "AICopilot.FakeCloudRead",
+                    """
+                    namespace AICopilot.Infrastructure.CloudRead
+                    {
+                        public sealed class CloudAiReadClient
+                        {
+                            public int Read() => 42;
+                        }
+                    }
+                    """)
+            ]);
         var delegateMemberWriteDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.AiGatewayService",
-            [contracts, delegateMemberWrites]);
+            [contracts, delegateMemberWrites],
+            formalReferences);
         var exactRepositoryWriteDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.AiGatewayService",
-            [contracts, exactRepositoryWrite]);
+            [contracts, exactRepositoryWrite],
+            formalReferences);
         var sameNameFakeRepositoryWriteDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.AiGatewayService",
-            [contracts, sameNameFakeRepositoryWrite]);
+            [contracts, sameNameFakeRepositoryWrite],
+            formalReferences);
         var exactDapperWriteDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.Dapper",
-            [contracts, exactDapperWrite]);
+            [contracts, exactDapperWrite],
+            formalReferences);
+        var dapperWriteWithBenignNonSqlArgumentDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.Dapper",
+            [contracts, dapperWriteWithBenignNonSqlArgument],
+            formalReferences);
         var sameNameFakeDapperWriteDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.Dapper",
-            [contracts, sameNameFakeDapperWrite]);
+            [contracts, sameNameFakeDapperWrite],
+            formalReferences);
         var httpAndIndirectWriteDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.Infrastructure",
-            [contracts, httpAndIndirectWrites]);
+            [contracts, httpAndIndirectWrites],
+            formalReferences);
         var formalHttpGetDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.Infrastructure",
-            [contracts, formalHttpGetTransport]);
+            [contracts, formalHttpGetTransport],
+            formalReferences);
         var sameNameFakeHttpDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.Infrastructure",
-            [contracts, sameNameFakeHttpClient]);
+            [contracts, sameNameFakeHttpClient],
+            formalReferences);
         var generatedCloudWriteDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.Infrastructure",
-            [contracts, generatedCloudWrite]);
+            [
+                new AnalyzerFixtureSource("Contracts.cs", contracts),
+                new AnalyzerFixtureSource("ActualCloudWriter.g.cs", generatedCloudWrite)
+            ],
+            formalReferences);
+        var generatedSuffixCloudWriteDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.Infrastructure",
+            [
+                new AnalyzerFixtureSource("Contracts.cs", contracts),
+                new AnalyzerFixtureSource("ActualCloudWriter.generated.cs", generatedCloudWrite)
+            ],
+            formalReferences);
 
         invalidDiagnostics.Should().Contain(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId);
         validDiagnostics.Should().NotContain(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId);
@@ -1637,6 +2293,8 @@ public sealed class AICopilotArchitectureAnalyzerTests
             .Should().NotContain(diagnostic => diagnostic.GetMessage().Contains("GenericAgentOrchestrator", StringComparison.Ordinal));
         sameNameFakeDiagnostics.Should().NotContain(
             diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId);
+        exactNameWrongAssemblyDiagnostics.Should().NotContain(
+            diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId);
         delegateMemberWriteDiagnostics.Count(
             diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId).Should().Be(2);
         exactRepositoryWriteDiagnostics.Should().ContainSingle(
@@ -1644,6 +2302,8 @@ public sealed class AICopilotArchitectureAnalyzerTests
         sameNameFakeRepositoryWriteDiagnostics.Should().NotContain(
             diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId);
         exactDapperWriteDiagnostics.Should().ContainSingle(
+            diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId);
+        dapperWriteWithBenignNonSqlArgumentDiagnostics.Should().ContainSingle(
             diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId);
         sameNameFakeDapperWriteDiagnostics.Should().NotContain(
             diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId);
@@ -1654,6 +2314,12 @@ public sealed class AICopilotArchitectureAnalyzerTests
                      "PatchAsync",
                      "DeleteAsync",
                      "SendAsync",
+                     "SendSync",
+                     "InvokerSendAsync",
+                     "PostJsonAsync",
+                     "PutJsonAsync",
+                     "PatchJsonAsync",
+                     "DeleteJsonAsync",
                      "GenericCloudRunner<T>.Run",
                      "TaskRunAsync",
                      "CustomCallback",
@@ -1666,31 +2332,63 @@ public sealed class AICopilotArchitectureAnalyzerTests
         }
         httpAndIndirectWriteDiagnostics.Should().NotContain(diagnostic =>
             diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId &&
-            diagnostic.GetMessage().Contains("OrdinaryGetAsync", StringComparison.Ordinal));
-        formalHttpGetDiagnostics.Should().NotContain(
-            diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId);
+            (diagnostic.GetMessage().Contains("OrdinaryGetAsync", StringComparison.Ordinal) ||
+             diagnostic.GetMessage().Contains("GetJsonAsync", StringComparison.Ordinal)));
+        formalHttpGetDiagnostics.Count(
+            diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId).Should().Be(4);
+        foreach (var expectedMethod in new[]
+                 {
+                     "ReassignedPostAsync",
+                     "MutatedPostAsync",
+                     "RequestToAliasPostAsync",
+                     "AliasToRequestPostAsync"
+                 })
+        {
+            formalHttpGetDiagnostics.Should().Contain(diagnostic =>
+                diagnostic.GetMessage().Contains(expectedMethod, StringComparison.Ordinal));
+        }
+        formalHttpGetDiagnostics.Should().NotContain(diagnostic =>
+            diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId &&
+            diagnostic.GetMessage().Contains("CloudAiReadHttpTransport.GetAsync", StringComparison.Ordinal));
         sameNameFakeHttpDiagnostics.Should().NotContain(
             diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId);
         generatedCloudWriteDiagnostics.Should().ContainSingle(
+            diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId);
+        generatedSuffixCloudWriteDiagnostics.Should().ContainSingle(
             diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId);
     }
 
     [Fact]
     public async Task AIARCH006_ShouldAllowOnlyTheExactAICopilotAuditWriterSideEffect()
     {
-        const string valid = """
+        var auditImplementationReference = new FixtureAssemblyReference(
+            "AICopilot.EntityFrameworkCore",
+            """
+            using System.Threading;
             using System.Threading.Tasks;
-            namespace AICopilot.Services.Contracts
+            namespace AICopilot.EntityFrameworkCore.AuditLogs
             {
-                public interface IAuditLogWriter
+                public sealed class AuditDbContext : Microsoft.EntityFrameworkCore.DbContext
                 {
-                    Task<int> SaveChangesAsync();
+                    public Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess) => Task.FromResult(1);
+                }
+
+                public sealed class AuditLogWriter(AuditDbContext db)
+                    : AICopilot.Services.Contracts.IAuditLogWriter
+                {
+                    public Task WriteAsync(
+                        AICopilot.Services.Contracts.AuditLogWriteRequest request,
+                        CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+                    public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) =>
+                        db.SaveChangesAsync(true);
+
+                    public Task<int> WriteBusinessAsync() => db.SaveChangesAsync(true);
                 }
             }
-            namespace AICopilot.Services.Contracts
-            {
-                public interface ICloudAiReadClient { }
-            }
+            """);
+        const string valid = """
+            using System.Threading.Tasks;
             namespace Fixture
             {
                 public sealed class CloudReadonlyRunner(
@@ -1701,17 +2399,74 @@ public sealed class AICopilotArchitectureAnalyzerTests
                 }
             }
             """;
+        const string invalidImplementationMethod = """
+            using System.Threading.Tasks;
+            namespace Fixture
+            {
+                public sealed class CloudReadonlyRunner(
+                    AICopilot.Services.Contracts.ICloudAiReadClient client,
+                    AICopilot.EntityFrameworkCore.AuditLogs.AuditLogWriter audit)
+                {
+                    public Task<int> RunAsync()
+                    {
+                        _ = client.Read();
+                        return audit.WriteBusinessAsync();
+                    }
+                }
+            }
+            """;
+        const string rogueImplementation = """
+            using System.Threading;
+            using System.Threading.Tasks;
+            namespace AICopilot.EntityFrameworkCore
+            {
+                public sealed class BusinessDbContext : Microsoft.EntityFrameworkCore.DbContext
+                {
+                    public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) => Task.FromResult(1);
+                }
+                public sealed class RogueAuditWriter(BusinessDbContext db)
+                    : AICopilot.Services.Contracts.IAuditLogWriter
+                {
+                    public Task WriteAsync(
+                        AICopilot.Services.Contracts.AuditLogWriteRequest request,
+                        CancellationToken cancellationToken = default) => Task.CompletedTask;
+                    public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) =>
+                        db.SaveChangesAsync(cancellationToken);
+                }
+            }
+            """;
+        const string wrongContextForFormalWriter = """
+            using System.Threading;
+            using System.Threading.Tasks;
+            namespace AICopilot.EntityFrameworkCore.AuditLogs
+            {
+                public sealed class BusinessDbContext : Microsoft.EntityFrameworkCore.DbContext { }
+                public sealed class AuditLogWriter(BusinessDbContext db)
+                    : AICopilot.Services.Contracts.IAuditLogWriter
+                {
+                    public Task WriteAsync(
+                        AICopilot.Services.Contracts.AuditLogWriteRequest request,
+                        CancellationToken cancellationToken = default) => Task.CompletedTask;
+                    public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) =>
+                        Task.FromResult(db.SaveChanges());
+                }
+            }
+            """;
         const string invalid = """
             using System.Threading.Tasks;
-            namespace AICopilot.Services.Contracts
-            {
-                public interface ICloudAiReadClient { }
-            }
             namespace Fixture
             {
                 public interface IAuditLogWriter
                 {
                     Task<int> SaveChangesAsync();
+                }
+                public sealed class FakeAuditLogWriter(Microsoft.EntityFrameworkCore.DbContext db) : IAuditLogWriter
+                {
+                    public Task<int> SaveChangesAsync()
+                    {
+                        _ = db.SaveChanges();
+                        return Task.FromResult(1);
+                    }
                 }
                 public sealed class CloudReadonlyRunner(AICopilot.Services.Contracts.ICloudAiReadClient client, IAuditLogWriter audit)
                 {
@@ -1722,13 +2477,40 @@ public sealed class AICopilotArchitectureAnalyzerTests
 
         var validDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.AiGatewayService",
-            [valid]);
+            [valid],
+            [ServicesContractsReference]);
+        var crossProjectValidDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.HttpApi",
+            [valid],
+            [EntityFrameworkReference, ServicesContractsReference, auditImplementationReference]);
+        var invalidImplementationMethodDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.HttpApi",
+            [invalidImplementationMethod],
+            [EntityFrameworkReference, ServicesContractsReference, auditImplementationReference]);
         var invalidDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.AiGatewayService",
-            [invalid]);
+            [invalid],
+            [EntityFrameworkReference, ServicesContractsReference]);
+        var rogueImplementationDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.EntityFrameworkCore",
+            [rogueImplementation],
+            [EntityFrameworkReference, ServicesContractsReference]);
+        var wrongContextDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.EntityFrameworkCore",
+            [wrongContextForFormalWriter],
+            [EntityFrameworkReference, ServicesContractsReference]);
 
         validDiagnostics.Should().NotContain(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId);
+        crossProjectValidDiagnostics.Should().NotContain(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId);
+        invalidImplementationMethodDiagnostics.Should().ContainSingle(
+            diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId);
         invalidDiagnostics.Should().ContainSingle(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId);
+        rogueImplementationDiagnostics.Should().ContainSingle(diagnostic =>
+            diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId &&
+            diagnostic.GetMessage().Contains("RogueAuditWriter", StringComparison.Ordinal));
+        wrongContextDiagnostics.Should().ContainSingle(diagnostic =>
+            diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId &&
+            diagnostic.GetMessage().Contains("AuditLogWriter", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -1736,10 +2518,6 @@ public sealed class AICopilotArchitectureAnalyzerTests
     {
         const string source = """
             using System.Threading.Tasks;
-            namespace AICopilot.SharedKernel.Messaging
-            {
-                public interface ICommand<T> { }
-            }
             namespace Fixture
             {
                 public sealed record UpdateCloudCommand : AICopilot.SharedKernel.Messaging.ICommand<int>;
@@ -1783,10 +2561,12 @@ public sealed class AICopilotArchitectureAnalyzerTests
 
         var diagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.AiGatewayService",
-            [source]);
+            [source],
+            [SharedKernelReference]);
         var sameNameFakeDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.AiGatewayService",
-            [sameNameFakes]);
+            [sameNameFakes],
+            [SharedKernelReference]);
 
         diagnostics.Count(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId)
             .Should().Be(2);
@@ -1798,13 +2578,7 @@ public sealed class AICopilotArchitectureAnalyzerTests
     public async Task AIARCH007_ShouldResolveAuthorizationAliasesAndExactPublicExceptions()
     {
         const string contracts = """
-            using System;
-            namespace AICopilot.SharedKernel.Messaging { public interface IQuery<T> { } }
-            namespace AICopilot.Services.CrossCutting.Attributes
-            {
-                [AttributeUsage(AttributeTargets.Class)]
-                public sealed class AuthorizeRequirementAttribute(string permission) : Attribute { }
-            }
+            namespace Fixture.Contracts { public sealed class Marker { } }
             """;
         const string source = """
             global using Auth = AICopilot.Services.CrossCutting.Attributes.AuthorizeRequirementAttribute;
@@ -1832,8 +2606,9 @@ public sealed class AICopilotArchitectureAnalyzerTests
             """;
 
         var diagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
-            "AICopilot.SampleService",
-            [contracts, source]);
+            "AICopilot.IdentityService",
+            [contracts, source],
+            [SharedKernelReference, CrossCuttingReference]);
 
         diagnostics.Where(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.SecurityMetadataId)
             .Should().HaveCount(2)
@@ -1846,16 +2621,6 @@ public sealed class AICopilotArchitectureAnalyzerTests
     public async Task AIARCH007_ShouldAllowOnlyExactResourceAuthorizationRequestAndOwnerPairs()
     {
         const string source = """
-            using System;
-            namespace AICopilot.SharedKernel.Messaging
-            {
-                public interface IQuery<T> { }
-            }
-            namespace AICopilot.Services.CrossCutting.Attributes
-            {
-                [AttributeUsage(AttributeTargets.Class)]
-                public sealed class ResourceAuthorizationOwnerAttribute(Type ownerType) : Attribute { }
-            }
             namespace AICopilot.AiGatewayService.Workspaces
             {
                 using AICopilot.Services.CrossCutting.Attributes;
@@ -1874,7 +2639,8 @@ public sealed class AICopilotArchitectureAnalyzerTests
 
         var diagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.AiGatewayService",
-            [source]);
+            [source],
+            [SharedKernelReference, CrossCuttingReference]);
 
         diagnostics.Where(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.SecurityMetadataId)
             .Should().ContainSingle()
@@ -1886,36 +2652,6 @@ public sealed class AICopilotArchitectureAnalyzerTests
     {
         const string source = """
             using System;
-            namespace Microsoft.AspNetCore.Mvc
-            {
-                public abstract class ControllerBase { }
-                [AttributeUsage(AttributeTargets.Method)]
-                public sealed class HttpGetAttribute : Routing.HttpMethodAttribute { }
-            }
-            namespace Microsoft.AspNetCore.Mvc.Routing
-            {
-                [AttributeUsage(AttributeTargets.Method)]
-                public abstract class HttpMethodAttribute : Attribute { }
-            }
-            namespace Microsoft.AspNetCore.Authorization
-            {
-                [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
-                public sealed class AuthorizeAttribute : Attribute { }
-                [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
-                public sealed class AllowAnonymousAttribute : Attribute { }
-            }
-            namespace AICopilot.SharedKernel.Ai
-            {
-                public enum AiToolExternalSystemType { Unknown, CloudReadOnly }
-                public enum AiToolCapabilityKind { ReadOnlyQuery, Diagnostics, SideEffecting }
-                public static class AiToolSafetyDescriptor
-                {
-                    public static object Create(
-                        bool readOnlyDeclared,
-                        AiToolCapabilityKind capabilityKind,
-                        AiToolExternalSystemType externalSystemType) => new();
-                }
-            }
             namespace Fixture
             {
                 using Microsoft.AspNetCore.Mvc;
@@ -1961,7 +2697,8 @@ public sealed class AICopilotArchitectureAnalyzerTests
 
         var diagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.HttpApi",
-            [source]);
+            [source],
+            [AuthorizationReference, MvcCoreReference, SharedKernelReference]);
 
         diagnostics.Count(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.SecurityMetadataId)
             .Should().Be(3);
@@ -1971,23 +2708,60 @@ public sealed class AICopilotArchitectureAnalyzerTests
     }
 
     [Fact]
-    public async Task AIARCH007_ShouldRejectRoleAuthorizationAndLimitRoleClaimConsumers()
+    public async Task AIARCH007_ShouldTreatRouteOnlyAndConventionalPublicMethodsAsControllerActions()
     {
-        const string authorizationContracts = """
+        const string source = """
             using System;
-            namespace Microsoft.AspNetCore.Authorization
+            using Microsoft.AspNetCore.Mvc;
+            namespace Fixture
             {
-                [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
-                public sealed class AuthorizeAttribute : Attribute
+                [AttributeUsage(AttributeTargets.Method)]
+                public sealed class NonActionAttribute : Attribute { }
+
+                public sealed class MissingController : ControllerBase
                 {
-                    public string? Roles { get; set; }
+                    public object Index() => new object();
+                    [Route("details")]
+                    public object Details() => new object();
                 }
-                public sealed class AuthorizationPolicyBuilder
+
+                public sealed class SafeController : ControllerBase
                 {
-                    public AuthorizationPolicyBuilder RequireRole(params string[] roles) => this;
+                    [Microsoft.AspNetCore.Mvc.NonAction]
+                    public object Helper() => new object();
+                    private object PrivateHelper() => new object();
+                    public static object StaticHelper() => new object();
+                    public override string ToString() => nameof(SafeController);
+                    [Microsoft.AspNetCore.Authorization.Authorize]
+                    public object AuthorizedAction() => new object();
+                    [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+                    public object AnonymousAction() => new object();
+                }
+
+                public sealed class ForgedNonActionController : ControllerBase
+                {
+                    [NonAction]
+                    public object StillAnAction() => new object();
                 }
             }
             """;
+
+        var diagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.HttpApi",
+            [source],
+            [AuthorizationReference, MvcCoreReference]);
+
+        diagnostics.Where(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.SecurityMetadataId)
+            .Should().HaveCount(3)
+            .And.OnlyContain(diagnostic =>
+                diagnostic.GetMessage().Contains("MissingController.Index", StringComparison.Ordinal) ||
+                diagnostic.GetMessage().Contains("MissingController.Details", StringComparison.Ordinal) ||
+                diagnostic.GetMessage().Contains("ForgedNonActionController.StillAnAction", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AIARCH007_ShouldRejectRoleAuthorizationAndLimitRoleClaimConsumers()
+    {
         const string approvedRoleClaimConsumers = """
             using System.Security.Claims;
             namespace AICopilot.Infrastructure.Authentication
@@ -2046,13 +2820,615 @@ public sealed class AICopilotArchitectureAnalyzerTests
 
         var diagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
             "AICopilot.HttpApi",
-            [authorizationContracts, approvedRoleClaimConsumers, invalid, namesakes]);
+            [approvedRoleClaimConsumers, invalid, namesakes],
+            [AuthorizationReference]);
 
         diagnostics.Where(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.SecurityMetadataId)
             .Should().HaveCount(4)
             .And.OnlyContain(diagnostic =>
                 diagnostic.GetMessage().Contains("role", StringComparison.OrdinalIgnoreCase) ||
                 diagnostic.GetMessage().Contains("ClaimTypes.Role", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task CallGraphRules_ShouldFollowConstructorsAccessorsAndUserDefinedConversions()
+    {
+        const string cloudSource = """
+            namespace Fixture
+            {
+                internal sealed class Writer
+                {
+                    private readonly Microsoft.EntityFrameworkCore.DbContext db;
+                    internal Writer(Microsoft.EntityFrameworkCore.DbContext db)
+                    {
+                        this.db = db;
+                        _ = db.SaveChanges();
+                    }
+                    internal int Value => db.SaveChanges();
+                    public static implicit operator int(Writer value) => value.db.SaveChanges();
+                }
+                internal sealed class CloudRunner(
+                    AICopilot.Services.Contracts.ICloudAiReadClient cloud,
+                    Microsoft.EntityFrameworkCore.DbContext db)
+                {
+                    internal int Construct() { _ = cloud.Read(); _ = new Writer(db); return 0; }
+                    internal int Read(Writer writer) { _ = cloud.Read(); return writer.Value; }
+                    internal int Convert(Writer writer) { _ = cloud.Read(); return writer; }
+                }
+            }
+            """;
+        const string identitySource = """
+            using System.Threading.Tasks;
+            namespace Fixture
+            {
+                internal sealed class Reducer
+                {
+                    private readonly Microsoft.AspNetCore.Identity.UserManager<object> users;
+                    internal Reducer(Microsoft.AspNetCore.Identity.UserManager<object> users)
+                    {
+                        this.users = users;
+                        _ = users.RemoveFromRoleAsync(new object(), "Admin");
+                    }
+                    internal Task Reduction => users.RemoveFromRoleAsync(new object(), "Admin");
+                    public static implicit operator Task(Reducer value) =>
+                        value.users.RemoveFromRoleAsync(new object(), "Admin");
+                }
+                internal sealed class IdentityRunner(Microsoft.AspNetCore.Identity.UserManager<object> users)
+                {
+                    internal Task Construct() { _ = new Reducer(users); return Task.CompletedTask; }
+                    internal Task Read(Reducer reducer) => reducer.Reduction;
+                    internal Task Convert(Reducer reducer) => reducer;
+                }
+            }
+            """;
+
+        var cloudDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.AiGatewayService",
+            [cloudSource],
+            [EntityFrameworkReference, ServicesContractsReference]);
+        var identityDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.IdentityService",
+            [identitySource],
+            [IdentityCoreReference]);
+
+        cloudDiagnostics.Count(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId)
+            .Should().Be(3);
+        identityDiagnostics.Count(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.EnabledAdminInvariantId)
+            .Should().Be(3);
+    }
+
+    [Fact]
+    public async Task CallGraphRules_ShouldResolveDelegateFactoriesAndFailClosedForUnknownDelegates()
+    {
+        const string invalid = """
+            using System;
+            namespace Fixture
+            {
+                public sealed class CloudRunner(
+                    AICopilot.Services.Contracts.ICloudAiReadClient cloud,
+                    Microsoft.EntityFrameworkCore.DbContext db)
+                {
+                    private Func<int> Build() => Write;
+                    private int Write() => db.SaveChanges();
+                    public int Query() { _ = cloud.Read(); return Build()(); }
+                }
+            }
+            """;
+        const string unresolved = """
+            using System;
+            namespace Fixture
+            {
+                public sealed class CloudRunner(AICopilot.Services.Contracts.ICloudAiReadClient cloud)
+                {
+                    private static Func<int> Build(Func<int> callback) => callback;
+                    public int Query(Func<int> callback) { _ = cloud.Read(); return Build(callback)(); }
+                }
+            }
+            """;
+        const string valid = """
+            using System;
+            namespace Fixture
+            {
+                public sealed class CloudRunner(AICopilot.Services.Contracts.ICloudAiReadClient cloud)
+                {
+                    private Func<int> Build() => Read;
+                    private int Read() => 42;
+                    public int Query() { _ = cloud.Read(); return Build()(); }
+                }
+            }
+            """;
+        var references = new[] { EntityFrameworkReference, ServicesContractsReference };
+        var invalidDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.AiGatewayService", [invalid], references);
+        var unresolvedDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.AiGatewayService", [unresolved], references);
+        var validDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.AiGatewayService", [valid], references);
+
+        invalidDiagnostics.Should().Contain(diagnostic =>
+            diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId);
+        unresolvedDiagnostics.Should().Contain(diagnostic =>
+            diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId &&
+            diagnostic.GetMessage().Contains("delegate invocation target", StringComparison.Ordinal));
+        validDiagnostics.Should().NotContain(diagnostic =>
+            diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId);
+    }
+
+    [Fact]
+    public async Task AIARCH006_ShouldTrackDelegateCompoundAssignmentsAcrossAllEffectGraphs()
+    {
+        const string sameProjectSource = """
+            using System;
+            namespace Fixture
+            {
+                public sealed class LocalRunner(
+                    AICopilot.Services.Contracts.ICloudAiReadClient cloud,
+                    Microsoft.EntityFrameworkCore.DbContext db)
+                {
+                    public void Query()
+                    {
+                        _ = cloud.Read();
+                        Action callback = static () => { };
+                        callback += () => { _ = db.SaveChanges(); };
+                        callback();
+                    }
+                }
+
+                public sealed class AdditionHolder
+                {
+                    private Action callback = static () => { };
+
+                    public AdditionHolder(Microsoft.EntityFrameworkCore.DbContext db) =>
+                        callback += () => { _ = db.SaveChanges(); };
+
+                    public void Invoke() => callback();
+                }
+
+                public sealed class RemovalHolder
+                {
+                    private Action callback = static () => { };
+
+                    public RemovalHolder(Microsoft.EntityFrameworkCore.DbContext db) =>
+                        callback -= () => { _ = db.SaveChanges(); };
+
+                    public void Invoke() => callback();
+                }
+
+                public sealed class MemberRunner(
+                    AICopilot.Services.Contracts.ICloudAiReadClient cloud,
+                    AdditionHolder addition,
+                    RemovalHolder removal)
+                {
+                    public void QueryAddition()
+                    {
+                        _ = cloud.Read();
+                        addition.Invoke();
+                    }
+
+                    public void QueryRemoval()
+                    {
+                        _ = cloud.Read();
+                        removal.Invoke();
+                    }
+                }
+            }
+            """;
+        var compoundDelegateReference = new FixtureAssemblyReference(
+            "AICopilot.DelegateEffects",
+            """
+            using System;
+            namespace AICopilot.DelegateEffects
+            {
+                public sealed class CompoundDelegateHolder
+                {
+                    private Action callback = static () => { };
+
+                    public CompoundDelegateHolder(Microsoft.EntityFrameworkCore.DbContext db) =>
+                        callback += () => { _ = db.SaveChanges(); };
+
+                    public void Invoke() => callback();
+                }
+
+                public sealed class RemovedDelegateHolder
+                {
+                    private Action callback = static () => { };
+
+                    public RemovedDelegateHolder(Microsoft.EntityFrameworkCore.DbContext db) =>
+                        callback -= () => { _ = db.SaveChanges(); };
+
+                    public void Invoke() => callback();
+                }
+            }
+            """);
+        const string crossProjectSource = """
+            namespace Fixture
+            {
+                public sealed class CloudRunner(
+                    AICopilot.Services.Contracts.ICloudAiReadClient cloud,
+                    AICopilot.DelegateEffects.CompoundDelegateHolder added,
+                    AICopilot.DelegateEffects.RemovedDelegateHolder removed)
+                {
+                    public void QueryAddition()
+                    {
+                        _ = cloud.Read();
+                        added.Invoke();
+                    }
+
+                    public void QueryRemoval()
+                    {
+                        _ = cloud.Read();
+                        removed.Invoke();
+                    }
+                }
+            }
+            """;
+
+        var sameProjectDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.AiGatewayService",
+            [sameProjectSource],
+            [EntityFrameworkReference, ServicesContractsReference]);
+        var crossProjectDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.AiGatewayService",
+            [crossProjectSource],
+            [EntityFrameworkReference, ServicesContractsReference, compoundDelegateReference]);
+
+        sameProjectDiagnostics.Count(diagnostic =>
+                diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId)
+            .Should().Be(2);
+        sameProjectDiagnostics.Should().NotContain(diagnostic =>
+            diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId &&
+            diagnostic.GetMessage().Contains("QueryRemoval", StringComparison.Ordinal));
+        crossProjectDiagnostics.Should().ContainSingle(diagnostic =>
+            diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId);
+        crossProjectDiagnostics.Should().NotContain(diagnostic =>
+            diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId &&
+            diagnostic.GetMessage().Contains("QueryRemoval", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task CallGraphRules_ShouldPropagateKnownDelegateArgumentsThroughConditionalInvocation()
+    {
+        const string source = """
+            using System;
+            namespace Fixture
+            {
+                public sealed class CloudRunner(AICopilot.Services.Contracts.ICloudAiReadClient cloud)
+                {
+                    private static int Apply(Func<int>? callback) => callback?.Invoke() ?? 0;
+                    public int Known() { _ = cloud.Read(); return Apply(() => 42); }
+                    public int Unknown(Func<int>? callback) { _ = cloud.Read(); return Apply(callback); }
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.AiGatewayService",
+            [source],
+            [ServicesContractsReference]);
+        var cloudDiagnostics = diagnostics
+            .Where(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId)
+            .ToArray();
+
+        cloudDiagnostics.Should().ContainSingle();
+        cloudDiagnostics[0].GetMessage().Should().Contain("Unknown");
+        cloudDiagnostics[0].GetMessage().Should().Contain("delegate invocation target");
+    }
+
+    [Fact]
+    public async Task CallGraphRules_ShouldHandleRecursiveGenericsAndNeutralDependencyInjectionWithoutFalseRoots()
+    {
+        const string source = """
+            using System;
+            using Microsoft.Extensions.DependencyInjection;
+            namespace Microsoft.Extensions.DependencyInjection
+            {
+                public interface IServiceCollection { }
+                public static class ServiceCollectionExtensions
+                {
+                    public static IServiceCollection AddScoped<TService>(this IServiceCollection services) => services;
+                }
+            }
+            namespace Fixture
+            {
+                public class Recursive<T> { }
+                public sealed class GenericConsumer<T> where T : Recursive<T>
+                {
+                    public T Echo(T value) => value;
+                    public object Invoke(Func<object> callback) => callback();
+                }
+                public sealed class Registration
+                {
+                    public void Configure(Microsoft.Extensions.DependencyInjection.IServiceCollection services) =>
+                        services.AddScoped<AICopilot.Services.Contracts.ICloudAiReadClient>();
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.AiGatewayService",
+            [source],
+            [ServicesContractsReference]);
+
+        diagnostics.Should().NotContain(diagnostic =>
+            diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId ||
+            diagnostic.Id == AICopilotArchitectureAnalyzer.EnabledAdminInvariantId);
+    }
+
+    [Fact]
+    public async Task CallGraphRules_ShouldMapInitializersAndCallbacksToExecutableOwners()
+    {
+        const string source = """
+            using System.Threading.Tasks;
+            namespace Fixture
+            {
+                internal static class Database
+                {
+                    internal static readonly Microsoft.EntityFrameworkCore.DbContext Instance = new();
+                }
+                internal sealed class InstanceWriter
+                {
+                    private readonly int fieldWrite = Database.Instance.SaveChanges();
+                    private int PropertyWrite { get; } = Database.Instance.SaveChanges();
+                }
+                internal static class StaticWriter
+                {
+                    private static readonly int write = Database.Instance.SaveChanges();
+                    internal static int Read() => write;
+                }
+                internal sealed class CloudRunner(AICopilot.Services.Contracts.ICloudAiReadClient cloud)
+                {
+                    internal object Construct() { _ = cloud.Read(); return new InstanceWriter(); }
+                    internal int StaticRead() { _ = cloud.Read(); return StaticWriter.Read(); }
+                    internal Task<int> Callback()
+                    {
+                        _ = cloud.Read();
+                        return Task.Run(() => Database.Instance.SaveChanges());
+                    }
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.AiGatewayService",
+            [source],
+            [EntityFrameworkReference, ServicesContractsReference]);
+
+        diagnostics.Count(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId)
+            .Should().Be(3);
+    }
+
+    [Fact]
+    public async Task AIARCH003_ShouldRejectDynamicDelegateAndAdoDatabaseOwnershipBypasses()
+    {
+        const string source = """
+            using System;
+            using System.Data;
+            using System.Threading.Tasks;
+            namespace Fixture
+            {
+                public sealed class DatabaseBypass
+                {
+                    public int Dynamic(Microsoft.EntityFrameworkCore.DbContext db) =>
+                        (int)((dynamic)db).SaveChanges();
+                    public int MethodGroup(Microsoft.EntityFrameworkCore.DbContext db)
+                    {
+                        Func<int> write = db.SaveChanges;
+                        return write();
+                    }
+                    public Task<int> TaskRun(Microsoft.EntityFrameworkCore.DbContext db) =>
+                        Task.Run(db.SaveChanges);
+                    public object Ado(IDbConnection connection, IDbCommand command)
+                    {
+                        _ = connection.CreateCommand();
+                        _ = command.ExecuteNonQuery();
+                        _ = command.ExecuteReader();
+                        return command.ExecuteScalar();
+                    }
+                    public object DynamicAdo(IDbCommand command) =>
+                        ((dynamic)command).ExecuteScalar();
+                }
+                public sealed class Namesake
+                {
+                    public int SaveChanges() => 0;
+                    public int Opaque(dynamic value) => (int)value.SaveChanges();
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.AiGatewayService",
+            [source],
+            [EntityFrameworkReference]);
+
+        diagnostics.Count(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.PersistenceOwnerId)
+            .Should().Be(8);
+        diagnostics.Where(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.PersistenceOwnerId)
+            .Should().NotContain(diagnostic =>
+                diagnostic.GetMessage().Contains("Namesake", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AIARCH007_ShouldRejectWrongAssemblyExactFqnAuthorizationAndRequirementShadows()
+    {
+        const string controllerShadow = """
+            using System;
+            namespace Microsoft.AspNetCore.Authorization
+            {
+                [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
+                public sealed class AuthorizeAttribute : Attribute { }
+            }
+            namespace Fixture
+            {
+                [Microsoft.AspNetCore.Authorization.Authorize]
+                public sealed class ShadowedController : Microsoft.AspNetCore.Mvc.ControllerBase
+                {
+                    [Microsoft.AspNetCore.Mvc.HttpGet]
+                    public string Get() => "ok";
+                }
+            }
+            """;
+        const string requirementShadow = """
+            using System;
+            namespace AICopilot.Services.CrossCutting.Attributes
+            {
+                [AttributeUsage(AttributeTargets.Class)]
+                public sealed class AuthorizeRequirementAttribute(string permission) : Attribute { }
+            }
+            namespace Fixture
+            {
+                [AICopilot.Services.CrossCutting.Attributes.AuthorizeRequirement("forged")]
+                public sealed class ForgedCommand : AICopilot.SharedKernel.Messaging.ICommand { }
+            }
+            """;
+
+        var controllerDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.HttpApi",
+            [controllerShadow],
+            [AuthorizationReference, MvcCoreReference]);
+        var requirementDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.IdentityService",
+            [requirementShadow],
+            [SharedKernelReference, CrossCuttingReference]);
+
+        controllerDiagnostics.Should().ContainSingle(diagnostic =>
+            diagnostic.Id == AICopilotArchitectureAnalyzer.SecurityMetadataId);
+        requirementDiagnostics.Should().ContainSingle(diagnostic =>
+            diagnostic.Id == AICopilotArchitectureAnalyzer.SecurityMetadataId);
+    }
+
+    [Fact]
+    public async Task AIARCH006_ShouldRejectParameterizedDapperHelperUsedThroughDelegate()
+    {
+        const string sameProjectSource = """
+            using System;
+            using System.Threading.Tasks;
+            namespace Fixture
+            {
+                internal sealed class CloudRunner(AICopilot.Services.Contracts.ICloudAiReadClient cloud)
+                {
+                    internal Task<int> QueryAsync(object connection)
+                    {
+                        _ = cloud.Read();
+                        _ = ExecuteSessionCommandAsync(connection, "SET TRANSACTION READ ONLY");
+                        Func<object, string, Task<int>> execute = ExecuteSessionCommandAsync;
+                        return execute(connection, "delete from sessions");
+                    }
+
+                    private static Task<int> ExecuteSessionCommandAsync(
+                        object connection,
+                        string commandText) =>
+                        Dapper.SqlMapper.ExecuteAsync(connection, commandText);
+                }
+            }
+            """;
+        var dapperDelegateReference = new FixtureAssemblyReference(
+            "AICopilot.DapperBridge",
+            """
+            using System;
+            using System.Threading.Tasks;
+            namespace AICopilot.DapperBridge
+            {
+                public sealed class DelegateCommandBridge
+                {
+                    public Task<int> RunAsync(object connection)
+                    {
+                        _ = ExecuteSessionCommandAsync(connection, "SET TRANSACTION READ ONLY");
+                        Func<object, string, Task<int>> execute = ExecuteSessionCommandAsync;
+                        return execute(connection, "delete from sessions");
+                    }
+
+                    private static Task<int> ExecuteSessionCommandAsync(
+                        object connection,
+                        string commandText) =>
+                        Dapper.SqlMapper.ExecuteAsync(connection, commandText);
+                }
+            }
+            """);
+        const string crossProjectSource = """
+            using System.Threading.Tasks;
+            namespace Fixture
+            {
+                public sealed class CloudRunner(
+                    AICopilot.Services.Contracts.ICloudAiReadClient cloud,
+                    AICopilot.DapperBridge.DelegateCommandBridge bridge)
+                {
+                    public Task<int> QueryAsync(object connection)
+                    {
+                        _ = cloud.Read();
+                        return bridge.RunAsync(connection);
+                    }
+                }
+            }
+            """;
+
+        var sameProjectDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.Dapper",
+            [sameProjectSource],
+            [DapperReference, ServicesContractsReference]);
+        var crossProjectDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.AiGatewayService",
+            [crossProjectSource],
+            [DapperReference, ServicesContractsReference, dapperDelegateReference]);
+
+        sameProjectDiagnostics.Should().ContainSingle(diagnostic =>
+            diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId);
+        crossProjectDiagnostics.Should().ContainSingle(diagnostic =>
+            diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId);
+    }
+
+    [Fact]
+    public async Task AIARCH006_ShouldUseRealDatabaseSinksAndExplicitDelegateBindings()
+    {
+        const string source = """
+            using System;
+            using System.Threading.Tasks;
+            namespace Fixture
+            {
+                internal sealed class CloudRunner(AICopilot.Services.Contracts.ICloudAiReadClient cloud)
+                {
+                    internal Task<int> ReadAsync(object connection)
+                    {
+                        _ = cloud.Read();
+                        Configure(static () => { });
+                        Configure();
+                        var lease = new CallbackLease(static () => { });
+                        lease.Complete();
+                        return ExecuteSessionCommandAsync(
+                            connection,
+                            "SET TRANSACTION READ ONLY");
+                    }
+
+                    private static void Configure(Action? configure = null) => configure?.Invoke();
+
+                    private static Task<int> ExecuteSessionCommandAsync(
+                        object connection,
+                        string commandText) =>
+                        Dapper.SqlMapper.ExecuteAsync(connection, commandText);
+
+                    private static Task ExecuteNonQueryAsync() => Task.CompletedTask;
+                }
+
+                internal sealed class CallbackLease
+                {
+                    private readonly Action release;
+
+                    internal CallbackLease(Action release)
+                    {
+                        this.release = release;
+                    }
+
+                    internal void Complete() => release();
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.Dapper",
+            [source],
+            [DapperReference, ServicesContractsReference]);
+
+        diagnostics.Should().NotContain(diagnostic =>
+            diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId);
     }
 
     [Fact]

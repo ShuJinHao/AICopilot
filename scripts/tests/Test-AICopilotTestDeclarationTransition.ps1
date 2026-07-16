@@ -31,7 +31,7 @@ if ([int]$ledger.schemaVersion -ne 2) {
 $expectedSourceCommit = '198cc59318f4a1748c719b9b8ecff1d969952ce8'
 $expectedSourcePath = 'src/tests'
 $expectedSourceTree = '88aee67db521a1a33ff6de524c0163d513396123'
-$expectedTransitionContentSha256 = 'c27d5ddecedbb853c04a6c46936d2b2f425efdaad7c75e3abda7f033325e1159'
+$expectedTransitionContentSha256 = 'a4b736c63a19f31ffafc5e7f0a70e46636d1c5f17365654195bb7a63c3eff65a'
 if ([string]$ledger.source.commit -cne $expectedSourceCommit -or
     [string]$ledger.source.sourcePath -cne $expectedSourcePath -or
     [string]$ledger.source.gitTree -cne $expectedSourceTree -or
@@ -93,9 +93,9 @@ $analyzerSources = @(
         ForEach-Object { Get-Content $_.FullName -Raw }
 ) -join "`n"
 $webBehaviorSources = @{
-    'WEB:AICopilot.Web.unit.frontend-error-handling.no-bare-catch-blocks' = @{
-        Path = 'src/vues/AICopilot.Web/tests/unit/frontendErrorHandling.spec.ts'
-        Needle = "it('does not contain bare catch blocks in source files'"
+    'WEB:AICopilot.Web.unit.frontend-lint-contract.rejects-bare-catch-clauses' = @{
+        Path = 'src/vues/AICopilot.Web/tests/unit/frontendLintContract.spec.ts'
+        Needle = "it('rejects bare catch clauses in TypeScript and Vue while accepting named catches'"
     }
     'WEB:AICopilot.Web.unit.chat-errors.scope-current-session' = @{
         Path = 'src/vues/AICopilot.Web/tests/unit/chatErrorStore.spec.ts'

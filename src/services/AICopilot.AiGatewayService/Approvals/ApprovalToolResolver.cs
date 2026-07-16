@@ -113,6 +113,11 @@ public class ApprovalToolResolver(
                 continue;
             }
 
+            if (string.IsNullOrWhiteSpace(tool.ToolName) || tool.Identity is null)
+            {
+                continue;
+            }
+
             if (toolRegistryGuard is null || userId is null)
             {
                 continue;
@@ -132,7 +137,17 @@ public class ApprovalToolResolver(
         AiToolDefinition tool,
         IReadOnlyDictionary<string, ApprovalRequirement> requirementMap)
     {
-        var policyKey = tool.ToolName ?? tool.Name;
+        var policyKey = tool.ToolName;
+        if (string.IsNullOrWhiteSpace(policyKey))
+        {
+            if (tool.TargetType == AiToolTargetType.McpServer)
+            {
+                return tool;
+            }
+
+            policyKey = tool.Name;
+        }
+
         return requirementMap.TryGetValue(policyKey, out var requirement) && requirement.RequiresApproval
             ? tool.WithRequiresApproval(true)
             : tool;

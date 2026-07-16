@@ -1,6 +1,7 @@
 using AICopilot.HttpApi;
+using AICopilot.HttpApi.Infrastructure;
 using AICopilot.Services.Contracts;
-using AICopilot.Services.Contracts.Authentication;
+using AICopilot.Infrastructure.Authentication;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;

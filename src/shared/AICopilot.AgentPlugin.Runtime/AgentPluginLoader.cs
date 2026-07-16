@@ -125,7 +125,7 @@ public sealed class AgentPluginLoader : IAgentPluginCatalog, IAgentPluginRegistr
 
     private static AiToolDefinition EnsureToolIdentity(IAgentPlugin plugin, AiToolDefinition tool)
     {
-        if (tool.Identity is not null)
+        if (tool.Identity is not null || tool.TargetType == AiToolTargetType.McpServer)
         {
             return tool;
         }

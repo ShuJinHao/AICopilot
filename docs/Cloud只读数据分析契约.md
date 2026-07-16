@@ -12,7 +12,7 @@
 
 ## 2. 源码归属
 
-- Cloud AiRead transport 和 endpoint policy：`src/infrastructure/AICopilot.CloudReadClient`。
+- Cloud AiRead transport 和 endpoint policy：`src/infrastructure/AICopilot.Infrastructure/CloudRead`。
 - 语义分析执行：`src/services/AICopilot.AiGatewayService/Workflows/Executors/SemanticAnalysisRunner.cs`。
 - CloudReadOnly Text-to-SQL：`src/services/AICopilot.AiGatewayService/Workflows/Executors/CloudReadOnly*`、`src/services/AICopilot.Services.Contracts/Contracts/CloudReadOnlyTextToSql*`。
 - governed schema 和 SQL guard：`src/infrastructure/AICopilot.Dapper`、`src/services/AICopilot.Services.CrossCutting/Sql`。
@@ -26,7 +26,6 @@
 - Cloud root 可达图中的写边矩阵固定为：完全限定 `AICopilot.SharedKernel.Repository.IRepository/IReadRepository` mutation；`SaveChanges*`、`ExecuteNonQuery*`、EF raw/bulk write；完全限定 `Dapper.SqlMapper.Execute/ExecuteAsync`；参数实现完全限定 `AICopilot.SharedKernel.Messaging.ICommand` 的 dispatch；以及完全限定 `AICopilot.AiGatewayService.AgentTasks.IAgentToolExecutor/McpAgentToolExecutor.ExecuteAsync`。这些边全部是 compiler error，只有完全限定 `AICopilot.Services.Contracts.IAuditLogWriter` audit write 例外。同名 `Fixture.IRepository`、`Fixture.ICommand`、`Fixture.SqlMapper`、含 `Mcp`/`Write` 字样的方法或 executor 均不得触发或扩大规则；不得以 SQL 字符串关键词代替 symbol identity。
 - 唯一允许的只读路径持久化例外是完全限定接口 `AICopilot.Services.Contracts.IAuditLogWriter`，且只能记录 AICopilot 自身的只读查询审计。它不是 Cloud 业务写权限；同名接口、adapter/wrapper、直接 `AuditDbContext` 或借审计执行 Cloud mutation 均不在例外内。
 - `AIARCH007` 只接受完全限定符号上的 CloudReadOnly tool safety descriptor，且安全元数据必须同时为 `boundary=CloudReadOnly`、`capability=ReadOnlyQuery`、`readOnlyDeclared=true`；`Diagnostics`、`LocalSuggestion`、`SideEffecting`、缺失值、同名伪类型或其他无法静态证明的动态声明都必须 compiler-error fail-closed。动态 MCP 配置不能因 Analyzer 无法展开就绕过安全契约；注册和每次执行都必须通过同一 `AiToolSafetyPolicy.EvaluateConfigured` 运行时门禁。
-- 读取路径不承担默认数据初始化。`AgentRuntimeSettingsProvider.GetAsync` 查不到全局 `ChatRuntimeSettings` 时只返回 `CreateDefault` 的 DTO 映射，`Add` / `Update` / `SaveChangesAsync` 必须为 0；持久化默认记录由 `MigrationWorkerAiGatewaySeeder.SeedDefaultsAsync` 在 fresh database 初始化阶段唯一负责。
 
 ## 3. Cloud AiRead 正式唯一路径
 

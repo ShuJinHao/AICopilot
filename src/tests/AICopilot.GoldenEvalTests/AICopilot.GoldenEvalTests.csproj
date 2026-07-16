@@ -22,6 +22,7 @@
     <ProjectReference Include="..\..\services\AICopilot.AiGatewayService\AICopilot.AiGatewayService.csproj" />
     <ProjectReference Include="..\..\services\AICopilot.Services.Contracts\AICopilot.Services.Contracts.csproj" />
     <ProjectReference Include="..\..\shared\AICopilot.SharedKernel\AICopilot.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\testing\AICopilot.AgentWorkflowTestKit\AICopilot.AgentWorkflowTestKit.csproj" />
     <EmbeddedResource Include="datasets\v1\*.json" />
   </ItemGroup>
   <Import Project="..\AICopilot.TestRunner.Shared.props" />

@@ -46,7 +46,8 @@ describe('apiClient endpoint trust', () => {
     await apiClient.get('https://app.example.test/api/aigateway/session/list')
 
     const [, init] = fetchMock.mock.calls[0]
-    expect((init?.headers as Headers).get('Authorization')).toBe('Bearer same-origin-token')
+    expect(init).toBeDefined()
+    expect((init!.headers as Headers).get('Authorization')).toBe('Bearer same-origin-token')
   })
 
   it('sends authorization to the configured API origin', async () => {
@@ -60,7 +61,8 @@ describe('apiClient endpoint trust', () => {
 
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe('https://api.example.test/api/aigateway/session/list')
-    expect((init?.headers as Headers).get('Authorization')).toBe('Bearer configured-origin-token')
+    expect(init).toBeDefined()
+    expect((init!.headers as Headers).get('Authorization')).toBe('Bearer configured-origin-token')
   })
 
   it('rejects external absolute downloads before sending authorization', async () => {

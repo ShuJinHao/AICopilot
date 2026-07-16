@@ -23,6 +23,8 @@ async function expectProtectedShell(page: Page, path: string) {
   await expect(page.locator('main')).toBeVisible()
   await expect(page.locator('.ai-topbar')).toBeVisible()
   await expect(page.locator('.topbar-status')).toBeVisible()
+  await expect(page.getByText('工业智能工作台')).toBeVisible()
+  await expect(page.getByText('Cloud 写入禁用')).toBeVisible()
   expect((await page.locator('main').innerText()).trim().length).toBeGreaterThan(0)
   await expectNoHorizontalOverflow(page)
 }
@@ -36,9 +38,12 @@ test('login page renders operational shell without overflow', async ({ page, isM
   await expect(page.locator('.login-form')).toBeVisible()
   if (!isMobile) {
     await expect(page.locator('.ai-preview-panel')).toBeVisible()
+    await expect(page.getByText('状态来源原则')).toBeVisible()
+    await expect(page.getByText(/未配置时返回真实错误/)).toBeVisible()
   }
   await expect(page.getByText('制造 AI 运维工作台')).toBeVisible()
   await expect(page.getByText('登录 A 助理')).toBeVisible()
+  await expect(page.getByText('知识命中率')).toHaveCount(0)
   await expect(page.getByPlaceholder('输入用户名')).toBeVisible()
   await expect(page.getByPlaceholder('输入密码')).toBeVisible()
   await expectNoHorizontalOverflow(page)
@@ -57,6 +62,8 @@ for (const route of [
 }
 
 test('inline agent run restores task, workspace, approvals, and artifacts', { tag: '@desktop' }, async ({ page }) => {
+  const pageErrors: Error[] = []
+  page.on('pageerror', (error) => pageErrors.push(error))
   await expectProtectedShell(page, '/chat')
 
   await expect(page.getByText('对话工作区')).toBeVisible()
@@ -134,6 +141,130 @@ test('inline agent run restores task, workspace, approvals, and artifacts', { ta
   ).toBeVisible()
   await expect(page.getByText('AI 独立模拟业务库').first()).toBeVisible()
 
+  let approvalProjectionUnavailable = true
+  await page.route('**/api/aigateway/agent/approval/approval-agt-1/approve', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: 'approval-agt-1',
+        taskId: 'task-1',
+        workspaceCode: 'WS-SMOKE-001',
+        type: 'Tool',
+        targetId: 'step-2',
+        targetName: 'generate_pdf',
+        riskLevel: 'High',
+        status: 'Approved',
+        reason: '生成高风险正式格式草稿',
+        requestedAt: new Date().toISOString(),
+        decidedAt: new Date().toISOString(),
+        decidedBy: 'admin',
+      }),
+    })
+  })
+  await page.route('**/api/aigateway/agent/task/*/approvals', async (route) => {
+    const requestPath = new URL(route.request().url()).pathname
+    if (requestPath.endsWith('/task-1/approvals') && approvalProjectionUnavailable) {
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/problem+json',
+        body: JSON.stringify({ title: '审批投影暂时不可用' }),
+      })
+      return
+    }
+
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
+  })
+  await page.route('**/api/aigateway/agent/task/*/audit-summary', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
+  })
+  const approvalPost = page.waitForResponse(
+    (response) =>
+      response.url().includes('/api/aigateway/agent/approval/approval-agt-1/approve') &&
+      response.request().method() === 'POST',
+  )
+  const approvalProjectionFailure = page.waitForResponse(
+    (response) =>
+      response.url().includes('/api/aigateway/agent/task/task-1/approvals') &&
+      response.request().method() === 'GET' &&
+      response.status() === 503,
+  )
+  await page.getByRole('button', { name: '批准审批' }).click()
+  await approvalPost
+  await approvalProjectionFailure
+  await expect(page.locator('.message-viewport > .canvas-error')).toContainText(
+    '审批投影暂时不可用',
+  )
+  await expect(page.getByRole('button', { name: '批准审批' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: '驳回审批' })).toBeDisabled()
+
+  approvalProjectionUnavailable = false
+  const draftPlanSteps = Array.from({ length: 5 }, (_, index) => ({
+    id: `draft-step-${index + 1}`,
+    stepIndex: index + 1,
+    title: `计划草案步骤 ${index + 1}`,
+    description: `计划草案说明 ${index + 1}`,
+    stepType: 'PlanDraft',
+    status: 'Draft',
+    toolCode: null,
+    requiresApproval: false,
+    errorMessage: null,
+  }))
+  await page.route('**/api/aigateway/agent/task/by-session**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: 'task-plan-draft',
+          taskCode: 'AGT-DRAFT-1',
+          sessionId: 'smoke-session',
+          title: '五步计划草案',
+          goal: '验证计划 JSON 是草案步骤的权威来源',
+          taskType: 'PlanDraft',
+          status: 'Draft',
+          riskLevel: 'Low',
+          modelId: 'lm1',
+          workspaceId: null,
+          workspaceCode: null,
+          planJson: JSON.stringify({
+            planKind: 'PlanDraft',
+            isExecutable: false,
+            skillName: '设备日志分析',
+            capabilityGaps: [],
+            steps: draftPlanSteps,
+          }),
+          finalSummary: null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          completedAt: null,
+          pendingApprovalCount: 0,
+          canRun: false,
+          canRetry: false,
+          canSubmitFinalReview: false,
+          canApproveFinal: false,
+          failureSummary: null,
+          activeRunAttemptId: null,
+          runAttemptCount: 0,
+          isRunInProgress: false,
+          queuedRunId: null,
+          runQueueStatus: null,
+          isRunQueued: false,
+          steps: [],
+        },
+      ]),
+    })
+  })
+  await page.getByRole('button', { name: '刷新', exact: true }).click()
+  const planDraftCard = page.getByTestId('inline-plan-card')
+  await expect(planDraftCard).toBeVisible()
+  await expect(planDraftCard).toContainText('4 / 5 个步骤')
+  await expect(planDraftCard.getByText('计划草案步骤 1')).toBeVisible()
+  await expect(planDraftCard.getByText('计划草案步骤 4')).toBeVisible()
+  await expect(planDraftCard.getByText('计划草案步骤 5')).toHaveCount(0)
+  await expect(planDraftCard.getByText('还有 1 个步骤在思考与执行记录中')).toBeVisible()
+
+  expect(pageErrors).toEqual([])
   await expectNoHorizontalOverflow(page)
 })
 
@@ -194,9 +325,81 @@ test('chat shell does not preload internal operations or expose model selection'
 
 test('config renders fixed agent slots without internal operations preload', async ({ page }) => {
   const requestedPaths: string[] = []
+  const cloudBaseUrlSentinel = 'https://cloud-secret.invalid/internal-ai-read'
+  const cloudTokenSentinel = 'cloud-token-must-never-render'
   page.on('request', (request) => {
     const url = new URL(request.url())
     requestedPaths.push(url.pathname)
+  })
+  await page.route('**/api/aigateway/cloud-readonly/status', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        mode: 'Real',
+        status: 'RealReady',
+        baseUrlConfigured: true,
+        tokenConfigured: true,
+        productionReadAllowed: true,
+        message: 'Cloud 只读链路已就绪。',
+        baseUrl: cloudBaseUrlSentinel,
+        token: cloudTokenSentinel,
+      }),
+    })
+  })
+  await page.route('**/api/aigateway/conversation-template/list**', async (route) => {
+    const template = (
+      id: string,
+      code: string,
+      scope: string,
+      description: string,
+      systemPrompt: string,
+    ) => ({
+      id,
+      name: code,
+      code,
+      scope,
+      description,
+      systemPrompt,
+      modelId: 'lm1',
+      maxTokens: 4096,
+      temperature: 0,
+      isEnabled: true,
+    })
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        template(
+          'tpl-planner-decoy',
+          'scope-only-decoy',
+          'AgentPlanner',
+          'scope-only decoy must not win',
+          'scope-only-decoy-prompt',
+        ),
+        template(
+          'tpl-intent',
+          'IntentRoutingAgent',
+          'IntentRouting',
+          '意图识别和 Skill 路由约束',
+          '你是 A助理的意图识别 Agent。',
+        ),
+        template(
+          'tpl-planner',
+          'agent_planner',
+          'AgentPlanner',
+          '受控 Agent 计划生成约束',
+          '你是 A助理的计划生成 Agent。只能输出计划，不能调用工具。',
+        ),
+        template(
+          'tpl-executor',
+          'agent_executor',
+          'AgentExecutor',
+          '受控 Agent 步骤执行约束',
+          '你是 A助理的最终执行 Agent。',
+        ),
+      ]),
+    })
   })
 
   await expectProtectedShell(page, '/config')
@@ -207,9 +410,25 @@ test('config renders fixed agent slots without internal operations preload', asy
   await expect(page.getByTestId('agent-slot-intent')).toBeHidden()
   await expect(plannerSlot).toBeHidden()
   await expect(page.getByTestId('agent-slot-executor')).toBeHidden()
+  const cloudReadonlyStatusCard = page.getByTestId('cloud-readonly-status-card')
+  await expect(cloudReadonlyStatusCard).toBeVisible()
+  await expect(cloudReadonlyStatusCard).toContainText('Cloud 只读链路已就绪。')
+  await expect(cloudReadonlyStatusCard.locator('.model-grid')).toContainText('模式Real')
+  await expect(cloudReadonlyStatusCard.locator('.model-grid')).toContainText('状态正式只读可用')
+  await expect(
+    cloudReadonlyStatusCard.locator('.model-grid > div').filter({ hasText: 'BaseUrl 已配置' }),
+  ).toContainText('是')
+  await expect(
+    cloudReadonlyStatusCard.locator('.model-grid > div').filter({ hasText: '凭据已配置' }),
+  ).toContainText('是')
+  await expect(
+    cloudReadonlyStatusCard.locator('.model-grid > div').filter({ hasText: '正式只读放行' }),
+  ).toContainText('是')
   await expect(page.getByText('模型池')).toHaveCount(0)
   await expect(page.getByText('工具目录')).toHaveCount(0)
   await expect(page.getByText('运行队列')).toHaveCount(0)
+  await expect(page.locator('body')).not.toContainText(cloudBaseUrlSentinel)
+  await expect(page.locator('body')).not.toContainText(cloudTokenSentinel)
 
   const forbiddenInitialLoads = [
     '/api/aigateway/provider-reliability',
@@ -228,7 +447,18 @@ test('config renders fixed agent slots without internal operations preload', asy
     expect(requestedPaths).not.toContain(path)
   }
 
+  await page.route('**/api/aigateway/tools/catalog**', async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/problem+json',
+      body: JSON.stringify({ title: '工具目录暂时不可用' }),
+    })
+  })
   await page.getByRole('button', { name: '高级设置' }).click()
+  await expect.poll(
+    () => requestedPaths.filter((path) => path === '/api/aigateway/tools/catalog').length,
+  ).toBe(1)
+  await expect(page.locator('.error-banner')).toContainText('工具目录暂时不可用')
   await expect(page.getByTestId('agent-slot-intent')).toBeVisible()
   await expect(plannerSlot).toBeVisible()
   await expect(page.getByTestId('agent-slot-executor')).toBeVisible()
@@ -244,6 +474,8 @@ test('config renders fixed agent slots without internal operations preload', asy
     plannerSlot.locator('.slot-technical-fold').getByText('计划生成', { exact: true }),
   ).toBeVisible()
   await expect(plannerSlot.getByText('受控 Agent 计划生成约束')).toBeVisible()
+  await expect(plannerSlot).not.toContainText('scope-only decoy must not win')
+  await expect(plannerSlot).not.toContainText('scope-only-decoy-prompt')
   await expect(
     page.getByText('你是 A助理的计划生成 Agent。只能输出计划，不能调用工具。'),
   ).toBeHidden()
@@ -252,7 +484,7 @@ test('config renders fixed agent slots without internal operations preload', asy
     page.getByText('你是 A助理的计划生成 Agent。只能输出计划，不能调用工具。'),
   ).toBeVisible()
   await expect(page.getByText('模型池')).toHaveCount(0)
-  await expect(page.getByText('工具目录')).toHaveCount(0)
+  await expect(page.getByText('工具目录', { exact: true })).toHaveCount(0)
   await expect(page.getByText('运行队列')).toHaveCount(0)
   await expectNoHorizontalOverflow(page)
 })
@@ -484,6 +716,7 @@ test('cold initialization failure stays visible and never grants session authori
   await expect(page.locator('.message-viewport > .canvas-error')).toContainText(
     '会话服务暂时不可用',
   )
+  await expect(page.getByTestId('inline-agent-run')).toHaveCount(0)
   await expect(page.locator('.canvas-toolbar')).toContainText('不可用')
   await expect(page.locator('.send-button')).toBeDisabled()
   if (isMobile) {
@@ -493,6 +726,11 @@ test('cold initialization failure stays visible and never grants session authori
   await page.locator('button[aria-label="新建会话"]').click()
 
   await expect(page.locator('.canvas-header h1')).toHaveText('产线异常分析')
+  await expect(page.getByText('查看 DEV-001 最后上报运行状态和心跳时间')).toBeVisible()
+  await expect(page.getByText('列出工序主数据，并说明正式字段边界')).toBeVisible()
+  await expect(page.getByText(/已发布客户端版本/)).toBeVisible()
+  await expect(page.getByText('LINE-A 当前设备状态')).toHaveCount(0)
+  await expect(page.getByText('配方版本历史')).toHaveCount(0)
   await expect(page.locator('.message-viewport > .canvas-error')).toHaveCount(0)
   await expect(page.locator('.canvas-toolbar')).toContainText('就绪')
   const composerInput = page.locator('.command-composer textarea')
@@ -549,6 +787,35 @@ test('refreshing the active session preserves composer-local state', async ({ pa
   await page.getByRole('button', { name: /高级选项/ }).click()
   await expect(page.getByLabel('选择计划类型')).toHaveValue('general_report')
   await expect(page.getByLabel('选择知识库')).toHaveValue('kb1')
+
+  await page.route(
+    '**/api/aigateway/agent/task/plan-stream',
+    async (route) => {
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/problem+json',
+        body: JSON.stringify({ title: '计划服务暂时不可用' }),
+      })
+    },
+    { times: 1 },
+  )
+  await composerInput.fill('验证计划失败后的模式清理')
+  const failedPlanResponse = page.waitForResponse(
+    (response) =>
+      response.url().includes('/api/aigateway/agent/task/plan-stream') &&
+      response.status() === 503,
+  )
+  await page.locator('.send-button').click()
+  await failedPlanResponse
+  await expect(page.locator('.message-viewport > .canvas-error')).toContainText(
+    '计划服务暂时不可用',
+  )
+  await page.getByRole('button', { name: /高级选项/ }).click()
+  await expect(page.locator('.composer-options-panel')).toBeVisible()
+
+  await page.getByRole('button', { name: /聊天模式/ }).click()
+  await expect(page.locator('.message-viewport > .canvas-error')).toHaveCount(0)
+  await expect(page.locator('.composer-options-panel')).toHaveCount(0)
 })
 
 test('switching resolved sessions resets composer-local state', async ({ page, isMobile }) => {

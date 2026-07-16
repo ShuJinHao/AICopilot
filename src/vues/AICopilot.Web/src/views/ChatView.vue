@@ -13,8 +13,9 @@ onBeforeRouteLeave(() => !chatStore.isSessionTransitionBlocked)
 onMounted(async () => {
   try {
     await chatStore.initialize()
-  } catch (_error) {
+  } catch (error) {
     // initialize() already restored the prior session boundary and published the user-facing error.
+    console.error('Failed to initialize the chat view.', error)
   }
 })
 </script>

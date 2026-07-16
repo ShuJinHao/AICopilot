@@ -125,18 +125,8 @@ public sealed class AgentWorkflowBehaviorTests
             CapabilityKind = AiToolCapabilityKind.SideEffecting,
             RiskLevel = AiToolRiskLevel.RequiresApproval
         };
-        var pipeline = new AgentWorkflowPipeline(
-            new FixedIntentRoutingExecutor(),
-            new FixedToolsPackExecutor([opaqueWritableMcp, strictReadOnlyMcp, localSideEffect]),
-            null!,
-            null!,
-            null!,
-            null!,
-            null!,
-            null!,
-            null!,
-            null!,
-            NullLogger<AgentWorkflowPipeline>.Instance);
+        var pipeline = AgentWorkflowPipelineFixture.CreatePlanDraftPipeline(
+            [opaqueWritableMcp, strictReadOnlyMcp, localSideEffect]);
 
         var result = await pipeline.RunPlanDraftWorkflowAsync(
             new ChatStreamRequest(Guid.NewGuid(), "discover tools"));
@@ -157,30 +147,4 @@ public sealed class AgentWorkflowBehaviorTests
         return chunks;
     }
 
-    private sealed class FixedIntentRoutingExecutor : IntentRoutingExecutor
-    {
-        public FixedIntentRoutingExecutor()
-            : base(null!, null!, null!, null!, null!, NullLogger<IntentRoutingExecutor>.Instance)
-        {
-        }
-
-        public override Task<IntentRoutingStepResult> ExecuteAsync(
-            ChatStreamRequest request,
-            CancellationToken cancellationToken = default)
-        {
-            return Task.FromResult(new IntentRoutingStepResult(
-                [new IntentResult { Intent = "Action.SafetyFixture", Confidence = 1.0 }],
-                ManufacturingSceneType.FallbackToExistingRouting,
-                null,
-                new ChatExecutionMetadataSnapshot()));
-        }
-    }
-
-    private sealed class FixedToolsPackExecutor(AiToolDefinition[] tools)
-        : ToolsPackExecutor(null!, NullLogger<ToolsPackExecutor>.Instance)
-    {
-        public override Task<BranchResult> DiscoverAsync(
-            List<IntentResult> intentResults,
-            CancellationToken ct = default) => Task.FromResult(BranchResult.FromTools(tools));
-    }
 }

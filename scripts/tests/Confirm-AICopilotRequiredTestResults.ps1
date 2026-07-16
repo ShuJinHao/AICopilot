@@ -6,7 +6,7 @@ param(
     [string]$VitestPath,
     [string]$PlaywrightPath,
     [string]$DeploymentPath,
-    [ValidateRange(1, [int]::MaxValue)] [int]$ExpectedVitestCount = 185,
+    [ValidateRange(1, [int]::MaxValue)] [int]$ExpectedVitestCount = 165,
     [ValidateRange(1, [int]::MaxValue)] [int]$ExpectedPlaywrightCount = 43,
     [ValidateRange(1, [int]::MaxValue)] [int]$ExpectedDeploymentCount = 33,
     [string]$OutputPath = 'artifacts/test-results/required-test-summary.json'

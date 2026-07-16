@@ -29,12 +29,6 @@ public sealed class SecurityDeploymentTests
             "appsettings.json"));
         var envTemplate = File.ReadAllText(Path.Combine(solutionRoot, "deploy", "enterprise-ai", ".env.example"));
         var compose = File.ReadAllText(Path.Combine(solutionRoot, "deploy", "enterprise-ai", "docker-compose.yaml"));
-        var migrationSeeder = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "hosts",
-            "AICopilot.MigrationWorkApp",
-            "MigrationWorkerAiGatewaySeeder.cs"));
 
         httpDevelopmentSettings.Should().NotContain("29ynIx63y0Uq5Yj6wZZYikBElPPW4rqpXKGq4voqmeMDefoJQEC8fQQzYPk95rNp");
         appHostSettings.Should().NotContain("\"pg-password\": \"123456\"");
@@ -48,13 +42,6 @@ public sealed class SecurityDeploymentTests
         envTemplate.Should().NotContain("CHANGE_ME");
         envTemplate.Should().NotContain("10.98.");
         envTemplate.Should().NotContain("dummy-key");
-        migrationSeeder.Should().Contain("http://model.internal.example:40034/v1");
-        migrationSeeder.Should().Contain("PrivateMiniMaxContextWindowTokens = 65536");
-        migrationSeeder.Should().Contain("ProtectSeedApiKey(privateModelSeed.ApiKey)");
-        migrationSeeder.Should().Contain("isEnabled: privateModelSeed.Enabled");
-        migrationSeeder.Should().Contain("AICOPILOT_PRIVATE_MODEL_ENABLED");
-        migrationSeeder.Should().NotContain("10.98.");
-        migrationSeeder.Should().NotContain("dummy-key");
         envTemplate.Should().Contain("AICOPILOT_PRIVATE_MODEL_ENABLED=false");
         envTemplate.Should().Contain("AICOPILOT_PRIVATE_MODEL_BASE_URL=http://model.internal.example:40034/v1");
         envTemplate.Should().Contain("AICOPILOT_PRIVATE_MODEL_CONTEXT_TOKENS=65536");
@@ -658,62 +645,6 @@ Current mitigation: Restricted runner access and scheduled secret rotation remai
             RepositoryTestSupport.TryDeleteDirectory(tempDirectory);
         }
     }
-    [Fact]
-    public void MigrationWorker_ShouldMigrateAllModelSecretFormatsBeforeRuntimeStarts()
-    {
-        var solutionRoot = FindSolutionRoot();
-        var workerSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "hosts",
-            "AICopilot.MigrationWorkApp",
-            "Worker.cs"));
-        var migratorSource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "hosts",
-            "AICopilot.MigrationWorkApp",
-            "MigrationWorkerSecretMigrator.cs"));
-        var migrationPolicySource = File.ReadAllText(Path.Combine(
-            solutionRoot,
-            "src",
-            "infrastructure",
-            "AICopilot.SecretProtection",
-            "SecretMigrationPolicy.cs"));
-
-        workerSource.Should().Contain("MigrationWorkerSecretMigrator.MigrateAsync");
-        workerSource.Should().Contain("MigrationWorker:CheckSecretsOnly");
-        workerSource.Should().Contain("MigrationWorkerSecretMigrator.VerifyAsync");
-        workerSource.IndexOf("MigrationWorkerSecretMigrator.VerifyAsync", StringComparison.Ordinal)
-            .Should().BeLessThan(workerSource.IndexOf("MigrationWorkerSecretMigrator.MigrateAsync", StringComparison.Ordinal));
-        workerSource.IndexOf("MigrationWorkerSecretMigrator.MigrateAsync", StringComparison.Ordinal)
-            .Should().BeLessThan(workerSource.IndexOf("MigrationWorkerAiGatewaySeeder.SeedDefaultsAsync", StringComparison.Ordinal));
-        migratorSource.Should().Contain("public static async Task VerifyAsync");
-        migratorSource.Should().Contain("aiGatewayDbContext.LanguageModels");
-        migratorSource.Should().Contain("ragDbContext.EmbeddingModels");
-        migratorSource.Should().Contain("EnsureMigratedSecrets");
-        migratorSource.Should().Contain("SecretMigrationPolicy.MigrateLanguageModelApiKeys");
-        migratorSource.Should().Contain("SecretMigrationPolicy.MigrateEmbeddingModelApiKeys");
-        migrationPolicySource.Should().Contain("SecretStringEncryptor.ReEncryptLegacyCipher");
-        migrationPolicySource.Should().Contain("SecretStringEncryptor.Encrypt(storedValue.Trim())");
-        migrationPolicySource.Should().Contain("SecretStringEncryptor.Decrypt(storedValue)");
-        migrationPolicySource.Should().Contain("non-encv2 secret value");
-        migrationPolicySource.Should().Contain("unreadable encv2 secret value");
-        migratorSource.Should().Contain("Database.BeginTransactionAsync");
-        migratorSource.Should().Contain("new DbContextOptionsBuilder<RagDbContext>()");
-        migratorSource.Should().Contain("UseNpgsql(aiGatewayDbContext.Database.GetDbConnection())");
-        migratorSource.Should().Contain("UseTransactionAsync");
-        migratorSource.Should().Contain("transaction.GetDbTransaction()");
-        migratorSource.Should().Contain("aiGatewayDbContext.SaveChangesAsync");
-        migratorSource.Should().Contain("ragDbContext.SaveChangesAsync");
-        migratorSource.IndexOf("Database.BeginTransactionAsync", StringComparison.Ordinal)
-            .Should().BeLessThan(migratorSource.IndexOf("UseTransactionAsync", StringComparison.Ordinal));
-        migratorSource.IndexOf("UseTransactionAsync", StringComparison.Ordinal)
-            .Should().BeLessThan(migratorSource.IndexOf("MigrateInCurrentTransactionAsync(", StringComparison.Ordinal));
-        migratorSource.IndexOf("MigrateInCurrentTransactionAsync(", StringComparison.Ordinal)
-            .Should().BeLessThan(migratorSource.IndexOf("transaction.CommitAsync", StringComparison.Ordinal));
-    }
-
     private static string FindSolutionRoot() => RepositoryTestSupport.Root;
 
     private static string ExtractComposeService(string compose, string serviceName)

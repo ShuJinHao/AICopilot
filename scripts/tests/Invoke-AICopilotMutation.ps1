@@ -4,6 +4,7 @@ param(
     [string]$OutputDirectory = 'artifacts/mutation',
     [string]$BaselinePath = 'scripts/tests/baselines/aicopilot-mutation.json',
     [string]$SummaryPath = 'artifacts/quality/aicopilot-mutation.json',
+    [string]$BaseRef = 'origin/main',
     [switch]$UpdateBaseline,
     [switch]$SkipToolRestore
 )
@@ -22,7 +23,7 @@ function Resolve-RepositoryPath {
 }
 
 $resolvedOutputDirectory = Resolve-RepositoryPath $OutputDirectory
-$unitTestDirectory = Join-Path $RepositoryRoot 'src/tests/AICopilot.UnitTests'
+$mutationTestDirectory = Join-Path $RepositoryRoot 'src/tests/AICopilot.InProcessTests'
 $confirmScript = Join-Path $RepositoryRoot 'scripts/tests/Confirm-AICopilotMutation.ps1'
 
 if (-not $SkipToolRestore) {
@@ -38,7 +39,7 @@ if (Test-Path $resolvedOutputDirectory) {
 New-Item $resolvedOutputDirectory -ItemType Directory -Force | Out-Null
 $logPath = Join-Path $resolvedOutputDirectory 'dotnet-stryker.log'
 
-Push-Location $unitTestDirectory
+Push-Location $mutationTestDirectory
 try {
     & dotnet stryker --output $resolvedOutputDirectory --skip-version-check 2>&1 |
         Tee-Object -FilePath $logPath
@@ -51,8 +52,8 @@ if ($strykerExitCode -ne 0) {
     throw "dotnet-stryker failed with exit code $strykerExitCode. See '$logPath'."
 }
 
-$jsonReports = @(Get-ChildItem $resolvedOutputDirectory -File -Recurse -Filter 'aicopilot-secret-protection-mutation.json')
-$markdownReports = @(Get-ChildItem $resolvedOutputDirectory -File -Recurse -Filter 'aicopilot-secret-protection-mutation.md')
+$jsonReports = @(Get-ChildItem $resolvedOutputDirectory -File -Recurse -Filter 'aicopilot-secret-encryption-mutation.json')
+$markdownReports = @(Get-ChildItem $resolvedOutputDirectory -File -Recurse -Filter 'aicopilot-secret-encryption-mutation.md')
 if ($jsonReports.Count -ne 1 -or $markdownReports.Count -ne 1) {
     throw "Mutation reporters did not produce exactly one JSON and one Markdown artifact: json=$($jsonReports.Count), markdown=$($markdownReports.Count)."
 }
@@ -62,6 +63,7 @@ $confirmArguments = @{
     ReportPath = $jsonReports[0].FullName
     BaselinePath = $BaselinePath
     OutputPath = $SummaryPath
+    BaseRef = $BaseRef
 }
 if ($UpdateBaseline) {
     $confirmArguments.UpdateBaseline = $true

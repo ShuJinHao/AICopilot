@@ -2,8 +2,6 @@ using AICopilot.HttpApi.Infrastructure;
 using AICopilot.IdentityService.Authorization;
 using AICopilot.Infrastructure.Authentication;
 using AICopilot.Services.Contracts;
-using AICopilot.Services.Contracts.Authentication;
-using AICopilot.Services.Contracts.Http;
 using AICopilot.SharedKernel.Result;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;

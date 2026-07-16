@@ -1,6 +1,7 @@
 using AICopilot.Dapper;
 using AICopilot.Dapper.Security;
 using AICopilot.Services.Contracts;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 
@@ -49,5 +50,53 @@ public sealed class DapperDatabaseConnectorPersistenceTests(PostgresPersistenceF
         bounded.Rows.Select(row => Convert.ToInt32(row["id"])).Should().Equal(1, 2);
         bounded.IsTruncated.Should().BeTrue();
         bounded.ReturnedRowCount.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task QueryExecutionFailure_ShouldUseRealPostgresAndRedactSqlAndConnectionDetails()
+    {
+        await using var database = await PostgresScratchDatabase.CreateAsync(
+            fixture.ConnectionString,
+            "aicopilot_dapper_error");
+        var logger = new CapturingLogger<DapperDatabaseConnector>();
+        var connector = new DapperDatabaseConnector(new AstSqlGuardrail(), logger);
+        const string sensitiveSql =
+            "SELECT * FROM missing_orders WHERE customer_name = 'secret customer'";
+        var source = new BusinessDatabaseConnectionInfo(
+            Guid.NewGuid(),
+            "readonly-postgres-error",
+            "real PostgreSQL execution-failure redaction test",
+            database.ConnectionString,
+            DatabaseProviderType.PostgreSql,
+            IsEnabled: true,
+            IsReadOnly: true);
+
+        var action = async () => await connector.ExecuteQueryWithMetadataAsync(source, sensitiveSql);
+
+        await action.Should().ThrowAsync<PostgresException>();
+        var log = logger.Entries.Should().ContainSingle(entry => entry.Level == LogLevel.Error).Subject;
+        foreach (var expectedFragment in new[]
+                 {
+                     $"SqlLength={sensitiveSql.Length}",
+                     "SqlSha256=",
+                     "Provider=PostgreSql",
+                     "ErrorType=PostgresException",
+                     "OriginalMessage=hidden_by_security_policy"
+                 })
+        {
+            log.Message.Should().Contain(expectedFragment);
+        }
+        log.Exception.Should().BeNull();
+        foreach (var forbidden in new[]
+                 {
+                     sensitiveSql,
+                     "secret customer",
+                     "missing_orders",
+                     database.ConnectionString,
+                     "Password="
+                 })
+        {
+            log.Message.Should().NotContain(forbidden);
+        }
     }
 }

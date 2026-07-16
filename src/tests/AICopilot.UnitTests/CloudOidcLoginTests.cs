@@ -511,7 +511,6 @@ public sealed class CloudOidcLoginTests
             bindingStore,
             userManager,
             auditWriter,
-            new EnabledAdminInvariantPolicy(userManager, new InlineIdentityEnabledAdminInvariantGuard()),
             new InlineTransactionalExecutionService(),
             cache ?? new InMemoryCloudIdentityStatusValidationCache());
     }
@@ -694,11 +693,6 @@ public sealed class CloudOidcLoginTests
         {
             return $"{tenantId}:{cloudUserId}:{statusVersion}";
         }
-    }
-
-    private sealed class InlineIdentityEnabledAdminInvariantGuard : IIdentityEnabledAdminInvariantGuard
-    {
-        public Task AcquireAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     private sealed class InMemoryIdentityAuditLogWriter : IIdentityAuditLogWriter

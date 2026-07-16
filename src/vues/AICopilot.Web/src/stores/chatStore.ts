@@ -1136,7 +1136,8 @@ export const useChatStore = defineStore('chat', () => {
     }
     try {
       return await createSession()
-    } catch (_error) {
+    } catch (error) {
+      console.error('Failed to create a new session.', error)
       return null
     }
   }
@@ -1189,7 +1190,8 @@ export const useChatStore = defineStore('chat', () => {
     try {
       await activateSession(id, { forceReload })
       return true
-    } catch (_error) {
+    } catch (error) {
+      console.error('Failed to select the requested session.', error)
       return false
     }
   }
@@ -1278,7 +1280,8 @@ export const useChatStore = defineStore('chat', () => {
         } else {
           await createSession()
         }
-      } catch (_error) {
+      } catch (error) {
+        console.error('Failed to reactivate a session after deletion.', error)
         return false
       }
       return true

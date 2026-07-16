@@ -11,6 +11,7 @@ using AICopilot.EntityFrameworkCore.Transactions;
 using AICopilot.Infrastructure.Storage;
 using AICopilot.RagService.Commands.Documents;
 using AICopilot.RagService.Documents;
+using AICopilot.RagWorker.Consumers;
 using AICopilot.Services.Contracts;
 using AICopilot.Services.Contracts.Events;
 using Microsoft.EntityFrameworkCore;
@@ -322,12 +323,12 @@ public sealed class RagUploadOutboxAtomicityTests(PostgresPersistenceFixture fix
                 CancellationToken.None);
             deleteResult.IsSuccess.Should().BeTrue();
 
-            var workflow = new DocumentFileDeletionWorkflow(
+            var consumer = new DocumentFileDeletionRequestedConsumer(
                 storage,
                 storage,
                 leaseManager,
-                NullLogger<DocumentFileDeletionWorkflow>.Instance);
-            await workflow.ExecuteAsync(
+                NullLogger<DocumentFileDeletionRequestedConsumer>.Instance);
+            await consumer.DeleteFileAsync(
                 new DocumentFileDeletionRequestedEvent
                 {
                     DocumentId = document.Id.Value,

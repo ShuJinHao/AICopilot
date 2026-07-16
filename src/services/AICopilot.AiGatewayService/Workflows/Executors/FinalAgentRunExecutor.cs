@@ -102,7 +102,11 @@ public class FinalAgentRunExecutor(
             agentContext.RunOptions,
             modelResponseTimeoutCts.Token).GetAsyncEnumerator(modelResponseTimeoutCts.Token);
 
-        while (await MoveNextModelUpdateAsync(updateEnumerator, modelResponseTimeoutCts, cancellationToken))
+        while (await MoveNextModelUpdateAsync(
+                   updateEnumerator,
+                   modelResponseTimeoutCts,
+                   cancellationToken,
+                   ModelResponseTimeout))
         {
             var update = updateEnumerator.Current;
             var safeContents = new List<AiRuntimeContent>();
@@ -345,12 +349,13 @@ public class FinalAgentRunExecutor(
                    || usage.TotalTokenCount > 0);
     }
 
-    private static async Task<bool> MoveNextModelUpdateAsync(
+    internal static async Task<bool> MoveNextModelUpdateAsync(
         IAsyncEnumerator<RuntimeAgentUpdate> updateEnumerator,
         CancellationTokenSource modelResponseTimeoutCts,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TimeSpan modelResponseTimeout)
     {
-        modelResponseTimeoutCts.CancelAfter(ModelResponseTimeout);
+        modelResponseTimeoutCts.CancelAfter(modelResponseTimeout);
         try
         {
             return await updateEnumerator
@@ -363,7 +368,7 @@ public class FinalAgentRunExecutor(
         {
             throw new AgentWorkflowException(
                 AppProblemCodes.ModelRequestTimeout,
-                $"Model provider did not produce the next response chunk within {ModelResponseTimeout.TotalSeconds:N0} seconds.",
+                $"Model provider did not produce the next response chunk within {modelResponseTimeout.TotalSeconds:N0} seconds.",
                 "模型响应超时，请稍后重试或缩小问题范围。");
         }
         finally

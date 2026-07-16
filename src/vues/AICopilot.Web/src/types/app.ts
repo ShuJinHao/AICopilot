@@ -289,7 +289,7 @@ export interface LanguageModelSummary {
   connectivityError?: string | null
 }
 
-export interface LanguageModelDetail extends LanguageModelSummary {}
+export type LanguageModelDetail = LanguageModelSummary
 
 export type LanguageModelApiKeyAction = 'keep' | 'replace' | 'clear'
 export type LanguageModelUsage = 'Chat' | 'Routing' | 'Planner' | 'Embedding'
@@ -347,7 +347,7 @@ export interface RoutingModelSummary {
   isActive: boolean
 }
 
-export interface RoutingModelDetail extends RoutingModelSummary {}
+export type RoutingModelDetail = RoutingModelSummary
 
 export interface RoutingModelFormModel {
   id?: string
@@ -371,7 +371,7 @@ export interface ConversationTemplateSummary {
   isEnabled: boolean
 }
 
-export interface ConversationTemplateDetail extends ConversationTemplateSummary {}
+export type ConversationTemplateDetail = ConversationTemplateSummary
 
 export interface ConversationTemplateFormModel {
   id?: string
@@ -399,7 +399,7 @@ export interface EmbeddingModelSummary {
   apiKeyMasked?: string | null
 }
 
-export interface EmbeddingModelDetail extends EmbeddingModelSummary {}
+export type EmbeddingModelDetail = EmbeddingModelSummary
 
 export interface EmbeddingModelFormModel {
   id?: string
@@ -424,7 +424,7 @@ export interface KnowledgeBaseSummary {
   documentCount: number
 }
 
-export interface KnowledgeBaseDetail extends KnowledgeBaseSummary {}
+export type KnowledgeBaseDetail = KnowledgeBaseSummary
 
 export interface KnowledgeBaseFormModel {
   id?: string

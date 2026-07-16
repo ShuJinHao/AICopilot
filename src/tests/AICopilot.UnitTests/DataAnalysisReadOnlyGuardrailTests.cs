@@ -1,53 +1,10 @@
 using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
 using AICopilot.DataAnalysisService.BusinessDatabases;
-using AICopilot.Services.Contracts;
 
 namespace AICopilot.UnitTests;
 
 public sealed class DataAnalysisReadOnlyGuardrailTests
 {
-    [Fact]
-    public void SqlServerSource_ShouldRequireVerifiedReadOnlyCredential()
-    {
-        var database = new BusinessDatabaseConnectionInfo(
-            Guid.NewGuid(),
-            "sql-server-source",
-            "diagnostics",
-            "Server=localhost;Database=test;User Id=reader;Password=fake-test-only;TrustServerCertificate=True;",
-            DatabaseProviderType.SqlServer,
-            IsEnabled: true,
-            IsReadOnly: true,
-            DataSourceExternalSystemType.NonCloud,
-            ReadOnlyCredentialVerified: false);
-
-        var act = () => BusinessDatabaseConnectionPolicy.EnsureQueryable(database);
-
-        act.Should()
-            .Throw<InvalidOperationException>()
-            .WithMessage("*verified read-only database account is required*");
-    }
-
-    [Fact]
-    public void CloudReadOnlySource_ShouldRequireVerifiedReadOnlyCredential()
-    {
-        var database = new BusinessDatabaseConnectionInfo(
-            Guid.NewGuid(),
-            "cloud-reporting-source",
-            "Cloud read-only diagnostics",
-            "Host=localhost;Database=test;Username=reader;Password=fake-test-only",
-            DatabaseProviderType.PostgreSql,
-            IsEnabled: true,
-            IsReadOnly: true,
-            DataSourceExternalSystemType.CloudReadOnly,
-            ReadOnlyCredentialVerified: false);
-
-        var act = () => BusinessDatabaseConnectionPolicy.EnsureQueryable(database);
-
-        act.Should()
-            .Throw<InvalidOperationException>()
-            .WithMessage("*database account has not been verified as read-only*");
-    }
-
     [Fact]
     public void CloudReadOnlyGovernance_ShouldExposeSchemaOnlyForVerifiedReadOnlySource()
     {

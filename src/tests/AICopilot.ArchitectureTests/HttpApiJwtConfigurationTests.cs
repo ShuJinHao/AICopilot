@@ -1,5 +1,5 @@
 using AICopilot.HttpApi;
-using AICopilot.Services.Contracts.Authentication;
+using AICopilot.Infrastructure.Authentication;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 

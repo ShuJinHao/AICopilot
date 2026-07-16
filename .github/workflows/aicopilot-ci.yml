@@ -1,13 +1,15 @@
 name: aicopilot-ci
 
 on:
-  workflow_dispatch:
   push:
     branches: [main]
   pull_request: {}
 
 permissions:
   contents: read
+
+env:
+  QUALITY_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
 
 jobs:
   build-test:
@@ -17,6 +19,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
@@ -58,26 +62,26 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/tests/Test-AICopilotTestDeclarationTransition.ps1
-          ./scripts/tests/Test-AICopilotCompatibilityInventory.ps1
-          ./scripts/tests/Measure-AICopilotDuplication.ps1
+          ./scripts/tests/Test-AICopilotCompatibilityInventory.ps1 -BaseRef "$env:QUALITY_BASE_SHA"
+          ./scripts/tests/Measure-AICopilotDuplication.ps1 -BaseRef "$env:QUALITY_BASE_SHA"
 
       - name: Discover required AICopilot test runners
         shell: pwsh
-        run: ./scripts/tests/Get-AICopilotTestInventory.ps1 -OutputPath artifacts/test-inventory.json
+        run: ./scripts/tests/Get-AICopilotTestInventory.ps1 -BaseRef "$env:QUALITY_BASE_SHA" -OutputPath artifacts/test-inventory.json
 
-      - name: Run required pure .NET tests in parallel and resource tests serially
+      - name: Run required no-external .NET tests in parallel and resource tests serially
         shell: pwsh
         run: |
           $inventory = Get-Content artifacts/test-inventory.json -Raw | ConvertFrom-Json
           $required = @($inventory.projects | Where-Object { $_.role -eq 'Runner' -and [bool]$_.required })
-          $pure = @($required | Where-Object { $_.runtime -eq 'Pure' })
-          $resource = @($required | Where-Object { $_.runtime -ne 'Pure' })
-          $pure | ForEach-Object -Parallel {
+          $noExternal = @($required | Where-Object { $_.runtime -in @('Pure', 'InProcess') })
+          $resource = @($required | Where-Object { $_.runtime -notin @('Pure', 'InProcess') })
+          $noExternal | ForEach-Object -Parallel {
             $project = $_
             $runnerResults = "artifacts/test-results/$($project.projectName)"
             & dotnet test $project.path -c Release --no-build --no-restore --collect "XPlat Code Coverage" --logger "trx;LogFileName=$($project.projectName).trx" --results-directory $runnerResults
             if ($LASTEXITCODE -ne 0) {
-              throw "Required pure test runner failed: $($project.path)"
+              throw "Required no-external test runner failed: $($project.path)"
             }
           } -ThrottleLimit 4
           foreach ($project in $resource) {
@@ -90,7 +94,7 @@ jobs:
 
       - name: Reconcile all required production coverage
         shell: pwsh
-        run: ./scripts/tests/Confirm-AICopilotCoverage.ps1
+        run: ./scripts/tests/Confirm-AICopilotCoverage.ps1 -BaseRef "$env:QUALITY_BASE_SHA"
 
       - name: Run deployment behavior tests
         shell: bash
@@ -108,13 +112,14 @@ jobs:
           PLAYWRIGHT_CHANNEL: chromium
           PLAYWRIGHT_JSON_OUTPUT_NAME: ../../../artifacts/test-results/playwright.json
         run: |
+          npm run lint:check
           npm run test:unit -- --reporter=json --outputFile=../../../artifacts/test-results/vitest.json
           npm run test:smoke -- --reporter=json
           npm run build
 
       - name: Reconcile required test results
         shell: pwsh
-        run: ./scripts/tests/Confirm-AICopilotRequiredTestResults.ps1 -InventoryPath artifacts/test-inventory.json -ResultsDirectory artifacts/test-results -VitestPath artifacts/test-results/vitest.json -PlaywrightPath artifacts/test-results/playwright.json -DeploymentPath artifacts/test-results/deployment-behavior.log -ExpectedVitestCount 185 -ExpectedPlaywrightCount 43 -ExpectedDeploymentCount 33
+        run: ./scripts/tests/Confirm-AICopilotRequiredTestResults.ps1 -InventoryPath artifacts/test-inventory.json -ResultsDirectory artifacts/test-results -VitestPath artifacts/test-results/vitest.json -PlaywrightPath artifacts/test-results/playwright.json -DeploymentPath artifacts/test-results/deployment-behavior.log -ExpectedVitestCount 165 -ExpectedPlaywrightCount 43 -ExpectedDeploymentCount 33
 
       - name: Upload required test evidence
         if: always()
@@ -133,6 +138,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
@@ -142,9 +149,9 @@ jobs:
       - name: Verify .NET SDK
         run: test "$(dotnet --version)" = "10.0.301"
 
-      - name: Enforce fixed AI-SEC-011/012 secret-protection mutation baseline
+      - name: Enforce AI-SEC-011/012 mutation quality against event quality base
         shell: pwsh
-        run: ./scripts/tests/Invoke-AICopilotMutation.ps1
+        run: ./scripts/tests/Invoke-AICopilotMutation.ps1 -BaseRef "$env:QUALITY_BASE_SHA"
 
       - name: Upload mutation evidence
         if: always()

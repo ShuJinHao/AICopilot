@@ -13,7 +13,6 @@ public record EnableUserCommand(string UserId) : ICommand<Result<UserSummaryDto>
 
 public sealed class EnableUserCommandHandler(
     UserManager<ApplicationUser> userManager,
-    EnabledAdminInvariantPolicy enabledAdminInvariant,
     IIdentityAuditLogWriter auditLogWriter,
     ITransactionalExecutionService transactionalExecutionService)
     : ICommandHandler<EnableUserCommand, Result<UserSummaryDto>>
@@ -24,8 +23,6 @@ public sealed class EnableUserCommandHandler(
     {
         return await transactionalExecutionService.ExecuteResultAsync(async _ =>
         {
-            await enabledAdminInvariant.AcquireAsync(cancellationToken);
-
             var user = await userManager.FindByIdAsync(command.UserId);
             if (user is null)
             {

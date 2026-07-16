@@ -108,6 +108,10 @@ public sealed class AgentRuntimeSecurityWorkflowTests
                     identity.TargetType,
                     identity.TargetName,
                     identity.ToolName)))
+        ]),
+        new RuntimeAgentUpdate(
+        [
+            new AiTextContent("审批挂起后不应消费此更新。")
         ]));
 
         await using var context = await BuildFinalContextAsync(
@@ -120,6 +124,9 @@ public sealed class AgentRuntimeSecurityWorkflowTests
 
         chunks.Should().ContainSingle(chunk => chunk.Type == ChunkType.ApprovalRequest);
         chunks.Should().NotContain(chunk => chunk.Type == ChunkType.Error);
+        chunks.Should().NotContain(chunk => chunk.Content.Contains("审批挂起后不应消费此更新。", StringComparison.Ordinal));
+        runtimeFactory.LastAgent.Should().NotBeNull();
+        runtimeFactory.LastAgent!.StreamedUpdateCount.Should().Be(1);
         context.FunctionApprovalRequestContents.Should().ContainSingle(request =>
             request.ToolCall.Name == grantedTool.Name &&
             request.ToolCall.TargetType == AiToolTargetType.Plugin &&

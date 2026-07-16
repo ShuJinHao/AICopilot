@@ -4,6 +4,7 @@ param(
     [string]$InventoryPath = (Join-Path $PSScriptRoot 'aicopilot-compatibility-inventory.json'),
     [string]$BaselinePath = (Join-Path $PSScriptRoot 'baselines/aicopilot-compatibility.json'),
     [string]$OutputPath = 'artifacts/quality/aicopilot-compatibility.json',
+    [string]$BaseRef = 'origin/main',
     [switch]$UpdateBaseline
 )
 
@@ -11,26 +12,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $script:sourceLineCache = @{}
 $script:sourceTextCache = @{}
-$script:roslynLoaded = $false
-
-function Import-RoslynParser {
-    if ($script:roslynLoaded) {
-        return
-    }
-    if ($null -ne ('Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree' -as [type])) {
-        $script:roslynLoaded = $true
-        return
-    }
-    $sdkLine = (& dotnet --list-sdks | Select-Object -Last 1)
-    if ([string]$sdkLine -notmatch '^\s*[^\s]+\s+\[(?<root>[^\]]+)\]') {
-        throw 'Unable to locate the .NET SDK Roslyn parser.'
-    }
-    $sdkVersion = ([string]$sdkLine).Trim().Split(' ')[0]
-    $roslynRoot = Join-Path ([string]$Matches.root) "$sdkVersion/Roslyn/bincore"
-    Add-Type -Path (Join-Path $roslynRoot 'Microsoft.CodeAnalysis.dll')
-    Add-Type -Path (Join-Path $roslynRoot 'Microsoft.CodeAnalysis.CSharp.dll')
-    $script:roslynLoaded = $true
-}
+. (Join-Path $PSScriptRoot 'Resolve-AICopilotQualityBase.ps1')
 
 function Remove-CodeComments {
     param(
@@ -81,37 +63,6 @@ function Remove-CodeComments {
         [void]$builder.Append($current)
     }
     $builder.ToString()
-}
-
-function Get-CSharpCallerCount {
-    param(
-        [Parameter(Mandatory)] [string]$Path,
-        [Parameter(Mandatory)] [string]$Token,
-        [string[]]$ExcludeContains = @()
-    )
-
-    Import-RoslynParser
-    $rootNode = [Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText(
-        (Get-SourceText $Path)).GetRoot()
-    $normalizedToken = ($Token -replace '\s+', '')
-    if ($normalizedToken.EndsWith('(', [StringComparison]::Ordinal)) {
-        $target = $normalizedToken.Substring(0, $normalizedToken.Length - 1).TrimStart('.')
-        return @(
-            $rootNode.DescendantNodes() |
-                Where-Object { $_ -is [Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax] } |
-                Where-Object {
-                    $nodeText = $_.ToString()
-                    $expression = ($_.Expression.ToString() -replace '\s+', '')
-                    ($expression -ceq $target -or $expression.EndsWith(".$target", [StringComparison]::Ordinal)) -and
-                    @($ExcludeContains | Where-Object { $nodeText.Contains([string]$_, [StringComparison]::Ordinal) }).Count -eq 0
-                }
-        ).Count
-    }
-
-    $syntaxText = ($rootNode.DescendantTokens() | ForEach-Object { $_.Text }) -join ' '
-    return [regex]::Matches(
-        ($syntaxText -replace '\s+', ''),
-        [regex]::Escape($normalizedToken)).Count
 }
 
 function Get-ScriptCallerCount {
@@ -176,6 +127,283 @@ function Read-JsonFile {
     Get-Content $Path -Raw | ConvertFrom-Json -Depth 32
 }
 
+function Invoke-CSharpSemanticProbe {
+    $project = Join-Path $PSScriptRoot 'tools/AICopilot.CompatibilitySymbolProbe/AICopilot.CompatibilitySymbolProbe.csproj'
+    if (-not (Test-Path $project -PathType Leaf)) {
+        throw "C# compatibility symbol probe project does not exist: $project"
+    }
+    $output = Join-Path ([IO.Path]::GetTempPath()) "aicopilot-compatibility-symbols-$([Guid]::NewGuid().ToString('N')).json"
+    try {
+        $log = @(& dotnet run `
+                --project $project `
+                --configuration Release `
+                --no-launch-profile `
+                -- `
+                $RepositoryRoot `
+                $InventoryPath `
+                $output 2>&1)
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $output -PathType Leaf)) {
+            throw "C# compatibility symbol probe failed: $($log -join [Environment]::NewLine)"
+        }
+        return Get-Content $output -Raw | ConvertFrom-Json -Depth 64
+    }
+    finally {
+        Remove-Item $output -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Invoke-TypeScriptSemanticProbe {
+    $probe = Join-Path $PSScriptRoot 'tools/AICopilot.TypeScriptCompatibilityProbe.mjs'
+    if (-not (Test-Path $probe -PathType Leaf)) {
+        throw "TypeScript compatibility symbol probe does not exist: $probe"
+    }
+    $output = Join-Path ([IO.Path]::GetTempPath()) "aicopilot-typescript-compatibility-$([Guid]::NewGuid().ToString('N')).json"
+    try {
+        $log = @(& node $probe $RepositoryRoot $output 2>&1)
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $output -PathType Leaf)) {
+            throw "TypeScript compatibility symbol probe failed: $($log -join [Environment]::NewLine)"
+        }
+        return Get-Content $output -Raw | ConvertFrom-Json -Depth 64
+    }
+    finally {
+        Remove-Item $output -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Get-PowerShellSemanticSignals {
+    param(
+        [Parameter(Mandatory)] [string]$Path,
+        [Parameter(Mandatory)] [string]$RelativePath,
+        [Parameter(Mandatory)] [regex]$SignalPattern
+    )
+
+    $tokens = $null
+    $parseErrors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+        $Path,
+        [ref]$tokens,
+        [ref]$parseErrors)
+    if (@($parseErrors).Count -ne 0) {
+        throw "PowerShell compatibility AST parse failed for '$RelativePath': $(@($parseErrors).Message -join '; ')"
+    }
+
+    $signals = [Collections.Generic.List[object]]::new()
+    $functions = @($ast.FindAll({
+                param($node)
+                $node -is [System.Management.Automation.Language.FunctionDefinitionAst]
+            }, $true))
+    $commands = @($ast.FindAll({
+                param($node)
+                $node -is [System.Management.Automation.Language.CommandAst]
+            }, $true))
+    foreach ($function in $functions) {
+        $name = [string]$function.Name
+        if (-not $SignalPattern.IsMatch($name)) {
+            continue
+        }
+        $referenceCount = @($commands | Where-Object {
+                [string]$_.GetCommandName() -ieq $name -and
+                -not ($_.Extent.StartOffset -ge $function.Extent.StartOffset -and
+                    $_.Extent.EndOffset -le $function.Extent.EndOffset)
+            }).Count
+        $signals.Add([pscustomobject]@{
+                path = $RelativePath
+                line = [int]$function.Extent.StartLineNumber
+                text = [string](($function.Extent.Text -split '\r?\n', 2)[0]).Trim()
+                name = $name
+                symbolId = $null
+                semanticDisposition = $null
+                referenceCount = $referenceCount
+                language = 'PowerShell'
+            })
+    }
+
+    $assignments = @($ast.FindAll({
+                param($node)
+                $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+                $node.Left -is [System.Management.Automation.Language.VariableExpressionAst]
+            }, $true))
+    $variables = @($ast.FindAll({
+                param($node)
+                $node -is [System.Management.Automation.Language.VariableExpressionAst]
+            }, $true))
+    foreach ($group in @($assignments | Group-Object {
+                ([System.Management.Automation.Language.AssignmentStatementAst]$_).Left.VariablePath.UserPath.ToLowerInvariant()
+            })) {
+        $declarations = @($group.Group)
+        $declaration = $declarations[0]
+        $name = [string]$declaration.Left.VariablePath.UserPath
+        if (-not $SignalPattern.IsMatch($name)) {
+            continue
+        }
+        $referenceCount = 0
+        foreach ($variable in $variables) {
+            if ($variable.VariablePath.UserPath -ine $name) {
+                continue
+            }
+            $insideDeclaration = $false
+            foreach ($assignment in $declarations) {
+                if ($assignment.Extent.StartOffset -le $variable.Extent.StartOffset -and
+                    $assignment.Extent.EndOffset -ge $variable.Extent.EndOffset) {
+                    $insideDeclaration = $true
+                    break
+                }
+            }
+            if (-not $insideDeclaration) {
+                $referenceCount++
+            }
+        }
+        $signals.Add([pscustomobject]@{
+                path = $RelativePath
+                line = [int]$declaration.Extent.StartLineNumber
+                text = [string]$declaration.Extent.Text.Trim()
+                name = $name
+                symbolId = $null
+                semanticDisposition = $null
+                referenceCount = $referenceCount
+                language = 'PowerShell'
+            })
+    }
+
+    return @($signals)
+}
+
+function Remove-ShellCommentsAndStrings {
+    param([Parameter(Mandatory)] [string]$Line)
+
+    $builder = [Text.StringBuilder]::new($Line.Length)
+    $quote = [char]0
+    for ($index = 0; $index -lt $Line.Length; $index++) {
+        $current = $Line[$index]
+        if ($quote -ne [char]0) {
+            if ($current -eq '\' -and $quote -eq '"' -and $index + 1 -lt $Line.Length) {
+                [void]$builder.Append(' ')
+                $index++
+                [void]$builder.Append(' ')
+            }
+            elseif ($current -eq $quote) {
+                $quote = [char]0
+                [void]$builder.Append(' ')
+            }
+            else {
+                [void]$builder.Append(' ')
+            }
+            continue
+        }
+        if ($current -in @('"', "'")) {
+            $quote = $current
+            [void]$builder.Append(' ')
+            continue
+        }
+        if ($current -eq '#') {
+            [void]$builder.Append(' ', $Line.Length - $index)
+            break
+        }
+        [void]$builder.Append($current)
+    }
+    $builder.ToString()
+}
+
+function Get-ShellSemanticSignals {
+    param(
+        [Parameter(Mandatory)] [string]$Path,
+        [Parameter(Mandatory)] [string]$RelativePath,
+        [Parameter(Mandatory)] [regex]$SignalPattern
+    )
+
+    $rawLines = @(Get-SourceLines $Path)
+    $lines = @($rawLines | ForEach-Object { Remove-ShellCommentsAndStrings ([string]$_) })
+    $functionDeclarations = [Collections.Generic.List[object]]::new()
+    $variableDeclarations = [Collections.Generic.List[object]]::new()
+    for ($index = 0; $index -lt $lines.Count; $index++) {
+        $line = [string]$lines[$index]
+        if ($line -match '^\s*(?:function\s+)?(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*(?:\(\s*\))?\s*\{') {
+            $depth = 0
+            $end = $index
+            for ($cursor = $index; $cursor -lt $lines.Count; $cursor++) {
+                $depth += [regex]::Matches([string]$lines[$cursor], '\{').Count
+                $depth -= [regex]::Matches([string]$lines[$cursor], '\}').Count
+                $end = $cursor
+                if ($depth -le 0) {
+                    break
+                }
+            }
+            $functionDeclarations.Add([pscustomobject]@{
+                    name = [string]$Matches.name
+                    start = $index
+                    end = $end
+                })
+        }
+        if ($line -match '^\s*(?:(?:export|readonly|local)\s+)*(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=') {
+            $variableDeclarations.Add([pscustomobject]@{
+                    name = [string]$Matches.name
+                    line = $index
+                })
+        }
+    }
+
+    $signals = [Collections.Generic.List[object]]::new()
+    foreach ($declaration in $functionDeclarations) {
+        if (-not $SignalPattern.IsMatch([string]$declaration.name)) {
+            continue
+        }
+        $namePattern = '(?<![A-Za-z0-9_])' + [regex]::Escape([string]$declaration.name) + '(?=\s|$|[;&|])'
+        $referenceCount = 0
+        for ($index = 0; $index -lt $lines.Count; $index++) {
+            if ($index -ge [int]$declaration.start -and $index -le [int]$declaration.end) {
+                continue
+            }
+            $executableLine = [regex]::Replace(
+                [string]$lines[$index],
+                '^\s*(?:function\s+)?[A-Za-z_][A-Za-z0-9_]*\s*(?:\(\s*\))?\s*\{',
+                '')
+            if ($executableLine -notmatch '\bcommand\s+-v\b') {
+                $referenceCount += [regex]::Matches($executableLine, $namePattern).Count
+            }
+        }
+        $signals.Add([pscustomobject]@{
+                path = $RelativePath
+                line = [int]$declaration.start + 1
+                text = ([string]$rawLines[[int]$declaration.start]).Trim()
+                name = [string]$declaration.name
+                symbolId = $null
+                semanticDisposition = $null
+                referenceCount = $referenceCount
+                language = 'Shell'
+            })
+    }
+
+    foreach ($group in @($variableDeclarations | Group-Object { ([string]$_.name).ToLowerInvariant() })) {
+        $declarations = @($group.Group)
+        $declaration = $declarations[0]
+        if (-not $SignalPattern.IsMatch([string]$declaration.name)) {
+            continue
+        }
+        $variablePattern = '\$(?:\{' + [regex]::Escape([string]$declaration.name) + '\}|' +
+            [regex]::Escape([string]$declaration.name) + '(?![A-Za-z0-9_]))'
+        $declarationLines = @($declarations | ForEach-Object { [int]$_.line })
+        $referenceCount = 0
+        for ($index = 0; $index -lt $lines.Count; $index++) {
+            if ($index -in $declarationLines) {
+                continue
+            }
+            $referenceCount += [regex]::Matches([string]$lines[$index], $variablePattern).Count
+        }
+        $signals.Add([pscustomobject]@{
+                path = $RelativePath
+                line = [int]$declaration.line + 1
+                text = ([string]$rawLines[[int]$declaration.line]).Trim()
+                name = [string]$declaration.name
+                symbolId = $null
+                semanticDisposition = $null
+                referenceCount = $referenceCount
+                language = 'Shell'
+            })
+    }
+
+    return @($signals)
+}
+
 function Assert-TextEvidence {
     param(
         [Parameter(Mandatory)]$Evidence,
@@ -204,10 +432,37 @@ function Assert-TextEvidence {
     }
 }
 
+function Assert-UniqueTextEvidence {
+    param(
+        [Parameter(Mandatory)]$Evidence,
+        [Parameter(Mandatory)][string]$Context
+    )
+
+    Assert-TextEvidence $Evidence $Context
+    $evidencePath = [IO.Path]::GetFullPath((Join-Path $RepositoryRoot ([string]$Evidence.path)))
+    $source = Remove-CodeComments (Get-SourceText $evidencePath)
+    $token = [string]$Evidence.contains
+    $count = 0
+    $offset = 0
+    while ($offset -lt $source.Length) {
+        $match = $source.IndexOf($token, $offset, [StringComparison]::Ordinal)
+        if ($match -lt 0) {
+            break
+        }
+        $count++
+        $offset = $match + $token.Length
+    }
+    if ($count -ne 1) {
+        throw "$Context must identify exactly one active declaration; found $count occurrences of '$token' in $($Evidence.path)."
+    }
+}
+
 function Get-CallerCount {
     param(
         [Parameter(Mandatory)]$Scan,
-        [Parameter(Mandatory)][string]$Context
+        [Parameter(Mandatory)][string]$Context,
+        [Parameter(Mandatory)][string]$SemanticKey,
+        [Parameter(Mandatory)][Collections.Generic.Dictionary[string, int]]$SemanticCallerCounts
     )
 
     $roots = @($Scan.roots)
@@ -218,6 +473,15 @@ function Get-CallerCount {
     }
     if (@($extensions | Where-Object { [string]$_ -notmatch '^\.[a-z0-9]+$' }).Count -ne 0) {
         throw "$Context contains invalid extensions."
+    }
+    if ($extensions -contains '.cs') {
+        if ($extensions.Count -ne 1) {
+            throw "$Context cannot mix C# semantic scans with lexical script extensions."
+        }
+        if (-not $SemanticCallerCounts.ContainsKey($SemanticKey)) {
+            throw "$Context is missing exact C# semantic result '$SemanticKey'."
+        }
+        return [int]$SemanticCallerCounts[$SemanticKey]
     }
 
     $repositoryFullPath = [IO.Path]::GetFullPath($RepositoryRoot) + [IO.Path]::DirectorySeparatorChar
@@ -254,20 +518,66 @@ function Get-CallerCount {
     if ($null -ne $Scan.PSObject.Properties['excludeContains']) {
         $excludeContains = @($Scan.excludeContains)
     }
+    if ($extensions.Count -eq 1 -and $extensions[0] -in @('.ps1', '.sh')) {
+        if ($excludeContains.Count -ne 0) {
+            throw "$Context cannot use lexical excludeContains with an exact script AST scan."
+        }
+        $signalRegex = [regex]::new(
+            '(?:Alias|Adapter|Wrapper|Fallback|Compatibility|Legacy|Shadow|DualWrite|Obsolete)',
+            [Text.RegularExpressions.RegexOptions]::IgnoreCase -bor
+                [Text.RegularExpressions.RegexOptions]::CultureInvariant)
+        $candidateNames = @([regex]::Matches(
+                $token,
+                '[A-Za-z_][A-Za-z0-9_-]*') | ForEach-Object Value | Where-Object {
+                $signalRegex.IsMatch([string]$_)
+            } | Select-Object -Unique)
+        if ($candidateNames.Count -ne 1) {
+            throw "$Context must identify exactly one compatibility signal name for the script AST scan."
+        }
+        $count = 0
+        foreach ($file in @($files | Sort-Object FullName -Unique)) {
+            $relativePath = [IO.Path]::GetRelativePath($RepositoryRoot, $file.FullName).Replace('\', '/')
+            $scriptSignals = if ($extensions[0] -eq '.ps1') {
+                @(Get-PowerShellSemanticSignals $file.FullName $relativePath $signalRegex)
+            }
+            else {
+                @(Get-ShellSemanticSignals $file.FullName $relativePath $signalRegex)
+            }
+            $count += @($scriptSignals | Where-Object {
+                    [string]$_.name -ieq [string]$candidateNames[0]
+                } | Measure-Object -Property referenceCount -Sum).Sum
+        }
+        return [int]$count
+    }
     $count = 0
     foreach ($file in @($files | Sort-Object FullName -Unique)) {
-        $count += if ($file.Extension -eq '.cs') {
-            Get-CSharpCallerCount $file.FullName $token $excludeContains
-        } else {
-            Get-ScriptCallerCount $file.FullName $token $excludeContains
-        }
+        $count += Get-ScriptCallerCount $file.FullName $token $excludeContains
     }
     $count
 }
 
 $inventory = Read-JsonFile $InventoryPath
-if ([int]$inventory.schemaVersion -ne 2) {
+if ([int]$inventory.schemaVersion -ne 3) {
     throw "Unsupported compatibility inventory schemaVersion '$($inventory.schemaVersion)'."
+}
+$semanticProbe = Invoke-CSharpSemanticProbe
+$typeScriptProbe = Invoke-TypeScriptSemanticProbe
+$semanticCallerCounts = [Collections.Generic.Dictionary[string, int]]::new([StringComparer]::Ordinal)
+foreach ($producerCheck in @($semanticProbe.ProducerChecks)) {
+    if ([int]$producerCheck.DeclarationCount -ne 1) {
+        throw "C# producer '$($producerCheck.ItemId)' must resolve to exactly one declaration of '$($producerCheck.SymbolId)' in '$($producerCheck.Path)'; found $($producerCheck.DeclarationCount)."
+    }
+}
+foreach ($callerCount in @($semanticProbe.CallerCounts)) {
+    $key = "$([string]$callerCount.ItemId)/$([string]$callerCount.ScanId)"
+    if ($semanticCallerCounts.ContainsKey($key)) {
+        throw "C# semantic probe returned duplicate caller result '$key'."
+    }
+    $semanticCallerCounts.Add($key, [int]$callerCount.Count)
+}
+$csharpDispositions = @{}
+foreach ($property in @($inventory.csharpSymbols.candidateDispositions.PSObject.Properties)) {
+    $csharpDispositions[[string]$property.Name] = [string]$property.Value
 }
 
 $items = @($inventory.items)
@@ -325,7 +635,11 @@ foreach ($item in $items) {
         }
     }
 
-    $callerCount = Get-CallerCount $item.callerScan "$context callerScan"
+    $callerCount = Get-CallerCount `
+        $item.callerScan `
+        "$context callerScan" `
+        "$([string]$item.id)/primary" `
+        $semanticCallerCounts
     if ($callerCount -le 0) {
         throw "$context has no production call sites; physically delete the compatibility path and its ledger item."
     }
@@ -342,8 +656,24 @@ foreach ($item in $ordinaryAbstractions) {
     if ([string]$item.disposition -ne 'ordinaryAbstraction') {
         throw "$context must use disposition=ordinaryAbstraction."
     }
+    if ([string]$item.id -notmatch '^AI-ORDINARY-[A-Z0-9-]+$') {
+        throw "$context must use an AI-ORDINARY-* ID."
+    }
+    if ([string]$item.replacement -notmatch '^notApplicable:\s+\S') {
+        throw "$context must declare replacement='notApplicable: ...'; compatibility or migration paths require a versioned compatibility item instead."
+    }
+    foreach ($compatibilityOnlyProperty in @('latestDeletionBatch', 'deletionDeadline', 'callEvidence', 'coverageTests')) {
+        if ($null -ne $item.PSObject.Properties[$compatibilityOnlyProperty]) {
+            throw "$context cannot declare compatibility lifecycle property '$compatibilityOnlyProperty'."
+        }
+    }
 
-    Assert-TextEvidence $item.producer "$context producer"
+    if ([IO.Path]::GetExtension([string]$item.producer.path) -eq '.cs') {
+        Assert-TextEvidence $item.producer "$context producer"
+    }
+    else {
+        Assert-UniqueTextEvidence $item.producer "$context producer"
+    }
     $consumers = @($item.consumers)
     $candidateEvidence = @($item.candidateEvidence)
     $callerScans = @($item.callerScans)
@@ -365,7 +695,11 @@ foreach ($item in $ordinaryAbstractions) {
         if ([string]::IsNullOrWhiteSpace([string]$scan.id)) {
             throw "$context callerScan requires a non-empty id."
         }
-        $callerCount = Get-CallerCount $scan "$context callerScan '$($scan.id)'"
+        $callerCount = Get-CallerCount `
+            $scan `
+            "$context callerScan '$($scan.id)'" `
+            "$([string]$item.id)/$([string]$scan.id)" `
+            $semanticCallerCounts
         if ($callerCount -le 0) {
             throw "$context callerScan '$($scan.id)' has no production call sites; physically delete the abstraction."
         }
@@ -374,58 +708,99 @@ foreach ($item in $ordinaryAbstractions) {
 }
 
 $signalNamePattern = '(?:Alias|Adapter|Wrapper|Fallback|Compatibility|Legacy|Shadow|DualWrite|Obsolete)'
-$csharpCandidatePattern = "(?i)^\s*(?:(?:public|private|protected|internal|static|async|sealed|virtual|override|partial|readonly|abstract|extern|new)\s+)*(?:class|interface|record|struct)\s+\w*$signalNamePattern\w*|^\s*(?:(?:public|private|protected|internal)\s+)(?:(?:static|async|sealed|virtual|override|partial|readonly|abstract|extern|new)\s+)*[\w.<>,?\[\]]+\s+\w*$signalNamePattern\w*\s*\(|^\s*[\w.<>,?\[\]]+\s+\w*$signalNamePattern\w*\s*\([^;]*\);\s*$|^\s*(?:(?:public|private|protected|internal)\s+)(?:(?:static|readonly|const|virtual|override|abstract|new)\s+)*[\w.<>,?\[\]]+\s+\w*$signalNamePattern\w*\s*(?:=|\{|;)|\[Obsolete\b"
-$typeScriptCandidatePattern = "(?i)^\s*(?:export\s+)?(?:const|let|var|function|type|interface|class)\s+\w*$signalNamePattern\w*|^\s*\w*$signalNamePattern\w*\??\s*:"
+$signalNameRegex = [regex]::new(
+    $signalNamePattern,
+    [Text.RegularExpressions.RegexOptions]::IgnoreCase -bor
+        [Text.RegularExpressions.RegexOptions]::CultureInvariant)
+# This inventory owns application and test-quality-tool source only. Production CD
+# under .github/deploy is outside this test-architecture batch and is audited separately.
 $scanRoots = @(
     'src/core',
     'src/hosts',
     'src/infrastructure',
     'src/services',
     'src/shared',
+    'src/testing',
     'src/vues/AICopilot.Web/src',
-    '.github',
-    'deploy',
-    'scripts'
+    'scripts/tests'
 )
 $signals = [Collections.Generic.List[object]]::new()
+foreach ($semanticSignal in @($semanticProbe.CandidateSignals)) {
+    $symbolId = [string]$semanticSignal.SymbolId
+    if (-not $csharpDispositions.ContainsKey($symbolId)) {
+        throw "C# compatibility signal has no exact symbol disposition: $symbolId"
+    }
+    $signals.Add([pscustomobject]@{
+            path = [string]$semanticSignal.Path
+            line = [int]$semanticSignal.Line
+            text = [string]$semanticSignal.Text
+            name = [string]$semanticSignal.SymbolId
+            symbolId = $symbolId
+            semanticDisposition = [string]$csharpDispositions[$symbolId]
+            referenceCount = [int]$semanticSignal.ReferenceCount
+            language = 'CSharp'
+        })
+}
+foreach ($typeScriptSignal in @($typeScriptProbe.signals)) {
+    $signals.Add([pscustomobject]@{
+            path = [string]$typeScriptSignal.path
+            line = [int]$typeScriptSignal.line
+            text = [string]$typeScriptSignal.text
+            name = [string]$typeScriptSignal.name
+            symbolId = $null
+            semanticDisposition = $null
+            referenceCount = [int]$typeScriptSignal.referenceCount
+            language = 'TypeScript'
+        })
+}
 foreach ($relativeRoot in $scanRoots) {
     $root = Join-Path $RepositoryRoot $relativeRoot
     if (-not (Test-Path $root -PathType Container)) {
         throw "Compatibility candidate scan root does not exist: $relativeRoot"
     }
     foreach ($file in Get-ChildItem $root -Recurse -File) {
-        if ($file.Extension -notin @('.cs', '.ts', '.vue', '.ps1', '.sh', '.yml', '.yaml', '.props', '.targets', '.csproj') -or
+        $relativePath = [IO.Path]::GetRelativePath($RepositoryRoot, $file.FullName).Replace('\', '/')
+        $isFixtureOrGeneratedQualityData = $relativePath -match '(?i)^scripts/tests/(?:.*Behavior\.ps1|(?:baselines|fixtures|generated|artifacts)/)'
+        if ($file.Extension -notin @('.cs', '.ps1', '.sh', '.yml', '.yaml', '.props', '.targets', '.csproj') -or
             $file.FullName -match '[\/](bin|obj|Migrations|node_modules|dist)[\/]' -or
-            $file.FullName -match '[\/]scripts[\/]tests[\/]') {
+            $isFixtureOrGeneratedQualityData) {
+            continue
+        }
+        if ($file.Extension -eq '.cs') {
+            continue
+        }
+
+        if ($file.Extension -eq '.ps1') {
+            foreach ($signal in @(Get-PowerShellSemanticSignals $file.FullName $relativePath $signalNameRegex)) {
+                $signals.Add($signal)
+            }
+            continue
+        }
+        if ($file.Extension -eq '.sh') {
+            foreach ($signal in @(Get-ShellSemanticSignals $file.FullName $relativePath $signalNameRegex)) {
+                $signals.Add($signal)
+            }
             continue
         }
 
         $lines = @(Get-SourceLines $file.FullName)
-        if ($file.Extension -eq '.vue') {
-            $scriptEnd = [Array]::IndexOf($lines, '</script>')
-            if ($scriptEnd -lt 0) {
-                continue
-            }
-            $lines = @($lines[0..$scriptEnd])
-        }
         for ($index = 0; $index -lt $lines.Count; $index++) {
             $line = [string]$lines[$index]
-            $isCandidate = if ($file.Extension -eq '.cs') {
-                $line -match $csharpCandidatePattern
-            } elseif ($file.Extension -in @('.ts', '.vue')) {
-                $line -match $typeScriptCandidatePattern
-            } elseif ($file.Extension -in @('.yml', '.yaml')) {
+            $isCandidate = if ($file.Extension -in @('.yml', '.yaml')) {
                 $line -match '(?i)^\s*(?:name|id|[A-Za-z0-9_-]+)\s*:\s*[^#]*(?:archive\s+fallback|legacy|compatibility|dual[-_ ]?write|shadow\s+path)'
-            } elseif ($file.Extension -in @('.ps1', '.sh')) {
-                $line -match '(?i)^\s*(?:function\s+)?(?:\$?LEGACY[_A-Z0-9]*|\$?COMPAT(?:IBILITY)?[_A-Z0-9]*|\$?DUAL_?WRITE[_A-Z0-9]*|\$?SHADOW_?PATH[_A-Z0-9]*)\s*(?:=|\(|\{)'
             } else {
                 $line -match '(?i)<(?:[A-Za-z0-9_.-]*(?:Legacy|Compatibility|Fallback|DualWrite|ShadowPath)[A-Za-z0-9_.-]*)\b'
             }
             if ($isCandidate) {
                 $signals.Add([pscustomobject]@{
-                        path = [IO.Path]::GetRelativePath($RepositoryRoot, $file.FullName).Replace('\', '/')
+                        path = $relativePath
                         line = $index + 1
                         text = $line.Trim()
+                        name = $line.Trim()
+                        symbolId = $null
+                        semanticDisposition = $null
+                        referenceCount = 1
+                        language = 'Configuration'
                     })
             }
         }
@@ -441,6 +816,9 @@ $dispositions = @(
             @($item.candidateEvidence)
         }
         foreach ($evidence in $candidateEvidence) {
+            if ([IO.Path]::GetExtension([string]$evidence.path) -eq '.cs') {
+                continue
+            }
             [pscustomobject]@{
                 id = [string]$item.id
                 disposition = if ($items -contains $item) { 'compatibility' } else { 'ordinaryAbstraction' }
@@ -456,16 +834,40 @@ foreach ($disposition in $dispositions) {
     $dispositionHitCounts[$key] = 0
 }
 foreach ($signal in $signals) {
-    $matches = @($dispositions | Where-Object {
-            $_.path -ceq $signal.path -and
-            $signal.text.Contains($_.contains, [StringComparison]::Ordinal)
-        })
+    if ([int]$signal.referenceCount -le 0) {
+        throw "$($signal.language) compatibility signal '$($signal.name)' at $($signal.path):$($signal.line) has no exact executable references; physically delete it."
+    }
+    $matches = @(if (-not [string]::IsNullOrWhiteSpace([string]$signal.semanticDisposition)) {
+        [pscustomobject]@{
+                id = [string]$signal.semanticDisposition
+                disposition = if (@($items | Where-Object id -CEQ ([string]$signal.semanticDisposition)).Count -eq 1) {
+                    'compatibility'
+                }
+                else {
+                    'ordinaryAbstraction'
+                }
+                path = [string]$signal.path
+                contains = [string]$signal.symbolId
+            }
+    }
+    else {
+        $dispositions | Where-Object {
+                $_.path -ceq $signal.path -and
+                $signal.text.Contains($_.contains, [StringComparison]::Ordinal)
+            }
+    })
     if ($matches.Count -ne 1) {
         throw "Compatibility signal must have exactly one disposition: $($signal.path):$($signal.line):$($signal.text)"
     }
     $match = $matches[0]
-    $key = "$($match.id)|$($match.path)|$($match.contains)"
-    $dispositionHitCounts[$key]++
+    if ([string]$signal.name -match '(?i)(?:Legacy|Compatibility|Obsolete|Shadow|DualWrite)' -and
+        -not ([string]$match.id).StartsWith('AI-COMPAT-', [StringComparison]::Ordinal)) {
+        throw "$($signal.language) migration signal '$($signal.name)' must use an AI-COMPAT disposition, not '$($match.id)'."
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$signal.semanticDisposition)) {
+        $key = "$($match.id)|$($match.path)|$($match.contains)"
+        $dispositionHitCounts[$key]++
+    }
 }
 foreach ($disposition in $dispositions) {
     $key = "$($disposition.id)|$($disposition.path)|$($disposition.contains)"
@@ -474,10 +876,52 @@ foreach ($disposition in $dispositions) {
     }
 }
 
+$baseline = Read-JsonFile $BaselinePath
+if ([int]$baseline.schemaVersion -ne 3) {
+    throw "Unsupported compatibility baseline schemaVersion '$($baseline.schemaVersion)'."
+}
+$baselineContext = Get-AICopilotBaselineContext `
+    -RepositoryRoot $RepositoryRoot `
+    -BaseRef $BaseRef `
+    -BaselineKind Compatibility `
+    -BaselinePath $BaselinePath
+$baseLedgerItems = if ($baselineContext.Mode -eq 'Ratchet') {
+    $baseBaseline = $baselineContext.BaseBaselineJson | ConvertFrom-Json -Depth 32
+    if ([int]$baseBaseline.schemaVersion -notin @(2, 3)) {
+        throw "Unsupported base compatibility baseline schemaVersion '$($baseBaseline.schemaVersion)'."
+    }
+    @($baseBaseline.compatibilityItems)
+} else {
+    @($baseline.compatibilityItems)
+}
+
 if ($UpdateBaseline) {
+    $baselineItems = @($baseLedgerItems)
+    $baselineItemIds = @($baselineItems | ForEach-Object { [string]$_.id })
+    $newLedgerIds = @(
+        $items |
+            ForEach-Object { [string]$_.id } |
+            Where-Object { $_ -notin $baselineItemIds }
+    )
+    if ($newLedgerIds.Count -ne 0) {
+        throw "Compatibility or migration baseline updates may only delete or tighten comparison-baseline entries; new IDs are forbidden: [$($newLedgerIds -join ', ')]."
+    }
+    foreach ($item in $items) {
+        $previous = @($baselineItems | Where-Object { [string]$_.id -ceq [string]$item.id })
+        if ($previous.Count -ne 1) {
+            throw "Compatibility baseline update cannot resolve comparison-baseline entry '$($item.id)'."
+        }
+        if ([DateTimeOffset]::Parse([string]$item.deletionDeadline) -gt
+            [DateTimeOffset]::Parse([string]$previous[0].deletionDeadline)) {
+            throw "Compatibility deletion deadline relaxation is forbidden for '$($item.id)'."
+        }
+        if ([int]$callSiteCounts["$([string]$item.id)/primary"] -gt
+            [int]$previous[0].maximumCallSites) {
+            throw "Compatibility call-site growth cannot be accepted by UpdateBaseline for '$($item.id)'."
+        }
+    }
     $baseline = [ordered]@{
-        schemaVersion = 2
-        candidateSignalCount = $signals.Count
+        schemaVersion = 3
         unclassifiedCompatibilitySignals = 0
         compatibilityItems = @(
             $items | Sort-Object id | ForEach-Object {
@@ -488,35 +932,17 @@ if ($UpdateBaseline) {
                 }
             }
         )
-        ordinaryAbstractions = @(
-            $ordinaryAbstractions | Sort-Object id | ForEach-Object {
-                $ordinaryId = [string]$_.id
-                [ordered]@{
-                    id = $ordinaryId
-                    callerScans = @($_.callerScans | Sort-Object id | ForEach-Object {
-                            [ordered]@{
-                                id = [string]$_.id
-                                maximumCallSites = [int]$callSiteCounts["$ordinaryId/$([string]$_.id)"]
-                            }
-                        })
-                }
-            }
-        )
     }
     $baselineDirectory = Split-Path $BaselinePath -Parent
     New-Item $baselineDirectory -ItemType Directory -Force | Out-Null
     $baseline | ConvertTo-Json -Depth 8 | Set-Content $BaselinePath -Encoding utf8NoBOM
-}
-
-$baseline = Read-JsonFile $BaselinePath
-if ([int]$baseline.schemaVersion -ne 2) {
-    throw "Unsupported compatibility baseline schemaVersion '$($baseline.schemaVersion)'."
+    $baseline = Read-JsonFile $BaselinePath
 }
 $baselineItems = @($baseline.compatibilityItems)
-$inventoryIds = @($items.id | Sort-Object)
-$baselineIds = @($baselineItems.id | Sort-Object)
+$inventoryIds = @($items | ForEach-Object { [string]$_.id } | Sort-Object)
+$baselineIds = @($baselineItems | ForEach-Object { [string]$_.id } | Sort-Object)
 if (($inventoryIds -join "`n") -cne ($baselineIds -join "`n")) {
-    throw "Compatibility IDs differ from the reviewed baseline: inventory=[$($inventoryIds -join ', ')], baseline=[$($baselineIds -join ', ')]."
+    throw "Compatibility IDs differ from the comparison baseline: inventory=[$($inventoryIds -join ', ')], baseline=[$($baselineIds -join ', ')]."
 }
 
 foreach ($item in $items) {
@@ -525,42 +951,31 @@ foreach ($item in $items) {
         throw "Compatibility baseline must contain exactly one entry for '$($item.id)'."
     }
     if ([string]$baselineItem[0].deletionDeadline -cne [string]$item.deletionDeadline) {
-        throw "Compatibility deadline changed without baseline review for '$($item.id)'."
+        throw "Compatibility deadline differs from the comparison baseline for '$($item.id)'."
     }
     $actualCallSites = [int]$callSiteCounts["$([string]$item.id)/primary"]
     $maximumCallSites = [int]$baselineItem[0].maximumCallSites
     if ($actualCallSites -gt $maximumCallSites) {
         throw "Compatibility call sites grew for '$($item.id)': actual=$actualCallSites maximum=$maximumCallSites."
     }
-}
-
-$ordinaryIds = @($ordinaryAbstractions.id | Sort-Object)
-$baselineOrdinary = @($baseline.ordinaryAbstractions)
-$baselineOrdinaryIds = @($baselineOrdinary.id | Sort-Object)
-if (($ordinaryIds -join "`n") -cne ($baselineOrdinaryIds -join "`n")) {
-    throw "Ordinary abstraction IDs differ from the reviewed baseline: inventory=[$($ordinaryIds -join ', ')], baseline=[$($baselineOrdinaryIds -join ', ')]."
-}
-foreach ($item in $ordinaryAbstractions) {
-    $baselineItem = @($baselineOrdinary | Where-Object { [string]$_.id -ceq [string]$item.id })
-    if ($baselineItem.Count -ne 1) {
-        throw "Compatibility baseline must contain exactly one ordinary abstraction '$($item.id)'."
+    if ($baselineContext.Mode -eq 'Bootstrap' -and $actualCallSites -ne $maximumCallSites) {
+        throw "Initial compatibility baseline must exactly reconcile call sites for '$($item.id)': actual=$actualCallSites baseline=$maximumCallSites."
     }
-    $scanIds = @($item.callerScans.id | Sort-Object)
-    $baselineScanIds = @($baselineItem[0].callerScans.id | Sort-Object)
-    if (($scanIds -join "`n") -cne ($baselineScanIds -join "`n")) {
-        throw "Caller-scan IDs changed for ordinary abstraction '$($item.id)'."
-    }
-    foreach ($scan in $item.callerScans) {
-        $baselineScan = @($baselineItem[0].callerScans | Where-Object { [string]$_.id -ceq [string]$scan.id })
-        $actualCallSites = [int]$callSiteCounts["$([string]$item.id)/$([string]$scan.id)"]
-        if ($actualCallSites -gt [int]$baselineScan[0].maximumCallSites) {
-            throw "Ordinary abstraction call sites grew for '$($item.id)/$($scan.id)': actual=$actualCallSites maximum=$($baselineScan[0].maximumCallSites)."
+    if ($baselineContext.Mode -eq 'Ratchet') {
+        $baseItem = @($baseLedgerItems | Where-Object { [string]$_.id -ceq [string]$item.id })
+        if ($baseItem.Count -ne 1) {
+            throw "New compatibility or migration item '$($item.id)' is forbidden after baseline bootstrap."
+        }
+        if ([DateTimeOffset]::Parse([string]$baselineItem[0].deletionDeadline) -gt
+            [DateTimeOffset]::Parse([string]$baseItem[0].deletionDeadline) -or
+            $maximumCallSites -gt [int]$baseItem[0].maximumCallSites) {
+            throw "Candidate compatibility baseline weakens base deadline/call-site limits for '$($item.id)'."
         }
     }
 }
-if ([int]$baseline.unclassifiedCompatibilitySignals -ne 0 -or
-    $signals.Count -ne [int]$baseline.candidateSignalCount) {
-    throw "Compatibility candidate signal set changed: actual=$($signals.Count), baseline=$($baseline.candidateSignalCount), unclassifiedBaseline=$($baseline.unclassifiedCompatibilitySignals)."
+
+if ([int]$baseline.unclassifiedCompatibilitySignals -ne 0) {
+    throw "Compatibility baseline must keep unclassifiedCompatibilitySignals at zero."
 }
 
 $callSummary = $items | Sort-Object id | ForEach-Object {

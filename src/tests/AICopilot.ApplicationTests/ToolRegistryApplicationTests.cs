@@ -1040,13 +1040,31 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
             TargetName = pluginName,
             RequiresApproval = false
         };
+        var malformedMcpTool = new AiToolDefinition
+        {
+            Name = "mcp_runtime_missing_canonical_name",
+            TargetType = AiToolTargetType.McpServer,
+            TargetName = pluginName,
+            RequiresApproval = false
+        };
+        var localPluginTool = new AiToolDefinition
+        {
+            Name = "local_diagnostic"
+        };
         loader.RegisterAgentPlugin(new GenericBridgePlugin
         {
             Name = pluginName,
             Description = "MCP test bridge",
             ChatExposureMode = ChatExposureMode.Advisory,
-            Tools = [mcpTool]
+            Tools = [mcpTool, malformedMcpTool, localPluginTool]
         });
+
+        var registeredTools = loader.GetPluginTools(pluginName);
+        registeredTools.Single(tool => tool.Name == malformedMcpTool.Name).Identity.Should().BeNull();
+        var registeredLocalTool = registeredTools.Single(tool => tool.Name != mcpTool.Name && tool.Name != malformedMcpTool.Name);
+        registeredLocalTool.ToolName.Should().Be(localPluginTool.Name);
+        registeredLocalTool.Identity.Should().NotBeNull();
+        registeredLocalTool.Identity!.TargetType.Should().Be(AiToolTargetType.Plugin);
 
         var approvalRequirementResolver = new ApprovalRequirementResolver(new InMemoryRepository<ApprovalPolicy>());
         var hiddenResolver = new ApprovalToolResolver(
@@ -1056,7 +1074,8 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
             new TestCurrentUser(UserId));
         var hiddenTools = await hiddenResolver.GetToolsForPluginsAsync([pluginName], CancellationToken.None);
 
-        hiddenTools.Should().BeEmpty();
+        hiddenTools.Should().ContainSingle()
+            .Which.Name.Should().Be(registeredLocalTool.Name);
 
         var allowedResolver = new ApprovalToolResolver(
             loader,
@@ -1070,7 +1089,9 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
             new TestCurrentUser(UserId));
         var allowedTools = await allowedResolver.GetToolsForPluginsAsync([pluginName], CancellationToken.None);
 
-        var exposed = allowedTools.Should().ContainSingle().Which;
+        allowedTools.Should().NotContain(tool => tool.Name == malformedMcpTool.Name);
+        allowedTools.Should().Contain(tool => tool.Name == registeredLocalTool.Name);
+        var exposed = allowedTools.Should().ContainSingle(tool => tool.Name == mcpTool.Name).Which;
         exposed.Name.Should().Be(mcpTool.Name);
         exposed.RequiresApproval.Should().BeTrue();
     }

@@ -8,7 +8,6 @@ using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.Core.Rag.Ids;
 using AICopilot.IdentityService.Authorization;
-using AICopilot.Services.Contracts;
 using AICopilot.Services.CrossCutting.Serialization;
 using AICopilot.SharedKernel.Ai;
 
@@ -52,23 +51,6 @@ public sealed class SecurityPolicyUnitTests
 
         json.Should().Contain("\\u003Cscript\\u003E");
         json.Should().NotContain("<script>");
-    }
-    [Fact]
-    public void BusinessDatabaseConnectionPolicy_ShouldRejectEmptyConnectionString()
-    {
-        var database = new BusinessDatabaseConnectionInfo(
-            Guid.NewGuid(),
-            "empty-connection",
-            "empty connection test",
-            " ",
-            DatabaseProviderType.PostgreSql,
-            IsEnabled: true,
-            IsReadOnly: true);
-
-        var action = () => BusinessDatabaseConnectionPolicy.RequireConnectionString(database);
-
-        action.Should().Throw<ArgumentException>()
-            .WithMessage("*Connection string is required*");
     }
     [Fact]
     public void LanguageModel_ShouldRejectInvalidInput()

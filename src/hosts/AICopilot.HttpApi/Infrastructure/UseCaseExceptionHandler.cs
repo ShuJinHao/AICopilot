@@ -1,6 +1,5 @@
 ﻿using AICopilot.Services.CrossCutting.Exceptions;
 using AICopilot.Services.Contracts;
-using AICopilot.Services.Contracts.Http;
 using AICopilot.SharedKernel.Result;
 using Microsoft.AspNetCore.Diagnostics;
 namespace AICopilot.HttpApi.Infrastructure;

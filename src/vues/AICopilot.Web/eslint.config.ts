@@ -20,6 +20,20 @@ export default defineConfigWithVueTs(
   ...pluginVue.configs['flat/essential'],
   vueTsConfigs.recommended,
 
+  {
+    name: 'app/require-named-catch-clauses',
+    files: ['src/**/*.{vue,ts,mts,tsx}'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'CatchClause[param=null]',
+          message: 'Catch clauses must bind the error so failures cannot be silently discarded.',
+        },
+      ],
+    },
+  },
+
   ...pluginOxlint.buildFromOxlintConfigFile('.oxlintrc.json'),
 
   skipFormatting,

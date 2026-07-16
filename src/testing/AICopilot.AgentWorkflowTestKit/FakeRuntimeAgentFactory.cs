@@ -102,7 +102,11 @@ internal sealed class FakeRuntimeChatAgent(
     IReadOnlyList<RuntimeAgentUpdate> script,
     Queue<FakeStructuredAgentResponse>? structuredResponses = null) : IRuntimeChatAgent
 {
+    private int streamedUpdateCount;
+
     public FakeRuntimeAgentRun? LastRun { get; private set; }
+
+    public int StreamedUpdateCount => Volatile.Read(ref streamedUpdateCount);
 
     public Task<IRuntimeAgentSession> CreateSessionAsync(CancellationToken cancellationToken = default)
     {
@@ -159,6 +163,7 @@ internal sealed class FakeRuntimeChatAgent(
         {
             cancellationToken.ThrowIfCancellationRequested();
             await Task.Yield();
+            Interlocked.Increment(ref streamedUpdateCount);
             yield return update;
         }
     }
@@ -174,6 +179,7 @@ internal sealed class FakeRuntimeChatAgent(
         {
             cancellationToken.ThrowIfCancellationRequested();
             await Task.Yield();
+            Interlocked.Increment(ref streamedUpdateCount);
             yield return update;
         }
     }

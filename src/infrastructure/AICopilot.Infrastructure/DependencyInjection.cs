@@ -16,7 +16,6 @@ using AICopilot.Infrastructure.Rag.TokenCounter;
 using AICopilot.Infrastructure.Security;
 using AICopilot.Infrastructure.Storage;
 using AICopilot.Services.Contracts;
-using AICopilot.Services.Contracts.Authentication;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;

@@ -5,12 +5,14 @@ param(
     [string]$ResultsDirectory = 'artifacts/test-results',
     [string]$BaselinePath = 'scripts/tests/baselines/aicopilot-coverage.json',
     [string]$OutputPath = 'artifacts/quality/aicopilot-coverage.json',
+    [string]$BaseRef = 'origin/main',
     [switch]$UpdateBaseline,
     [switch]$RunGuardSelfTest
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'Resolve-AICopilotQualityBase.ps1')
 
 $productionSourcePattern = '^src/(analyzers|core|hosts|infrastructure|services|shared)/.+\.cs$'
 $portablePdbSha256Algorithm = [Guid]'8829d00f-11b8-4213-878b-770e8597ac16'
@@ -310,6 +312,18 @@ function Assert-CleanHeadBinding {
         -not $InventoryClean -or
         $CurrentChangeCount -ne 0) {
         throw "Authoritative coverage requires one clean committed HEAD; inventoryHead=$InventoryHead, currentHead=$CurrentHead, inventoryClean=$InventoryClean, currentChanges=$CurrentChangeCount."
+    }
+}
+
+function Assert-CoverageReportCount {
+    param(
+        [Parameter(Mandatory)][int]$BaselineCount,
+        [Parameter(Mandatory)][int]$ActualCount,
+        [Parameter(Mandatory)][bool]$AllowBaselineUpdate
+    )
+
+    if ($BaselineCount -ne $ActualCount -and -not $AllowBaselineUpdate) {
+        throw "Coverage report count changed: actual=$ActualCount, baseline=$BaselineCount."
     }
 }
 
@@ -641,7 +655,19 @@ function Invoke-GuardSelfTest {
         throw "Dirty-HEAD coverage fixture did not fail closed: $dirtyHeadFailure"
     }
 
-    Write-Host 'AICopilot coverage omission guards passed. cases=15.'
+    Assert-CoverageReportCount 16 17 $true
+    $reportCountFailure = $null
+    try {
+        Assert-CoverageReportCount 16 17 $false
+    }
+    catch {
+        $reportCountFailure = $_.Exception.Message
+    }
+    if ($reportCountFailure -notmatch 'Coverage report count changed') {
+        throw "Coverage report-count transition fixture did not fail closed: $reportCountFailure"
+    }
+
+    Write-Host 'AICopilot coverage omission guards passed. cases=16.'
 }
 
 function Get-PortablePdbUniverse {
@@ -914,8 +940,13 @@ if (-not (Test-Path $resolvedResultsDirectory -PathType Container)) {
     throw "Test results directory does not exist: $resolvedResultsDirectory"
 }
 if (-not (Test-Path $resolvedBaselinePath -PathType Leaf)) {
-    throw "Coverage baseline bootstrap is forbidden; reviewed baseline does not exist: $resolvedBaselinePath"
+    throw "Coverage baseline does not exist: $resolvedBaselinePath"
 }
+$baselineContext = Get-AICopilotBaselineContext `
+    -RepositoryRoot $RepositoryRoot `
+    -BaseRef $BaseRef `
+    -BaselineKind Coverage `
+    -BaselinePath $resolvedBaselinePath
 
 $inventory = Get-Content $resolvedInventoryPath -Raw | ConvertFrom-Json -Depth 64
 $repositoryCleanProperty = $inventory.PSObject.Properties['repositoryClean']
@@ -1160,9 +1191,28 @@ if ([int]$baseline.schemaVersion -eq 2) {
         }
     }
 }
-if ([int]$baseline.schemaVersion -eq 2 -and
-    [int]$baseline.requiredReportCount -ne $requiredProjects.Count) {
-    throw "Coverage report count changed: actual=$($requiredProjects.Count), baseline=$($baseline.requiredReportCount)."
+if ([int]$baseline.schemaVersion -eq 2) {
+    Assert-CoverageReportCount `
+        ([int]$baseline.requiredReportCount) `
+        $requiredProjects.Count `
+        ([bool]$UpdateBaseline)
+}
+
+if ($baselineContext.Mode -eq 'Ratchet') {
+    $baseBaseline = $baselineContext.BaseBaselineJson | ConvertFrom-Json -Depth 64
+    if ([int]$baseBaseline.schemaVersion -notin @(1, 2)) {
+        throw "Unsupported base coverage baseline schemaVersion '$($baseBaseline.schemaVersion)'."
+    }
+    if ([double]$baseline.minimumLineRate + 0.00000001 -lt [double]$baseBaseline.minimumLineRate -or
+        [double]$baseline.minimumBranchRate + 0.00000001 -lt [double]$baseBaseline.minimumBranchRate) {
+        throw 'Candidate coverage baseline weakens base line/branch thresholds.'
+    }
+}
+
+if ($baselineContext.Mode -eq 'Bootstrap' -and -not $UpdateBaseline -and
+    ([Math]::Abs([double]$baseline.minimumLineRate - [double]$metrics.lineRate) -gt 0.00000001 -or
+     [Math]::Abs([double]$baseline.minimumBranchRate - [double]$metrics.branchRate) -gt 0.00000001)) {
+    throw "Initial coverage baseline must exactly reconcile candidate quality: line=$($metrics.lineRate)/$($baseline.minimumLineRate), branch=$($metrics.branchRate)/$($baseline.minimumBranchRate)."
 }
 
 if ([int]$baseline.schemaVersion -eq 1) {
@@ -1171,10 +1221,12 @@ if ([int]$baseline.schemaVersion -eq 1) {
     }
 }
 else {
-    Assert-CoverageThreshold $metrics `
-        ([double]$baseline.minimumLineRate) `
-        ([double]$baseline.minimumBranchRate)
-    if ($UpdateBaseline) {
+    if (-not ($baselineContext.Mode -eq 'Bootstrap' -and $UpdateBaseline)) {
+        Assert-CoverageThreshold $metrics `
+            ([double]$baseline.minimumLineRate) `
+            ([double]$baseline.minimumBranchRate)
+    }
+    if ($UpdateBaseline -and $baselineContext.Mode -ne 'Bootstrap') {
         Assert-ReviewedUniverseUpdate `
             @($baseline.productionAssemblyIds) `
             @($pdbUniverse.assemblyIds) `
@@ -1257,13 +1309,19 @@ New-Item (Split-Path $resolvedOutputPath -Parent) -ItemType Directory -Force | O
 $output | ConvertTo-Json -Depth 12 | Set-Content $resolvedOutputPath -Encoding utf8NoBOM
 
 if ($UpdateBaseline) {
-    $minimumLineRate = if ([int]$baseline.schemaVersion -eq 2) {
+    $minimumLineRate = if ($baselineContext.Mode -eq 'Bootstrap') {
+        [double]$metrics.lineRate
+    }
+    elseif ([int]$baseline.schemaVersion -eq 2) {
         [Math]::Max([double]$baseline.minimumLineRate, [double]$metrics.lineRate)
     }
     else {
         [double]$metrics.lineRate
     }
-    $minimumBranchRate = if ([int]$baseline.schemaVersion -eq 2) {
+    $minimumBranchRate = if ($baselineContext.Mode -eq 'Bootstrap') {
+        [double]$metrics.branchRate
+    }
+    elseif ([int]$baseline.schemaVersion -eq 2) {
         [Math]::Max([double]$baseline.minimumBranchRate, [double]$metrics.branchRate)
     }
     else {

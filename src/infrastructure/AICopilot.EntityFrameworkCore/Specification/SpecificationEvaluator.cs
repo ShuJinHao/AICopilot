@@ -15,8 +15,34 @@ public static class SpecificationEvaluator
         }
 
         var query = inputQuery;
+
+        if (specification.FilterCondition is not null)
+        {
+            query = query.Where(specification.FilterCondition);
+        }
+
         query = specification.Includes.Aggregate(query, (current, include) => current.Include(include));
         query = specification.IncludeStrings.Aggregate(query, (current, include) => current.Include(include));
-        return SpecificationQueryEvaluator.GetQuery(query, specification);
+
+        if (specification.OrderBy is not null)
+        {
+            query = query.OrderBy(specification.OrderBy);
+        }
+        else if (specification.OrderByDescending is not null)
+        {
+            query = query.OrderByDescending(specification.OrderByDescending);
+        }
+
+        if (specification.GroupBy is not null)
+        {
+            query = query.GroupBy(specification.GroupBy).SelectMany(group => group);
+        }
+
+        if (specification.IsPagingEnabled)
+        {
+            query = query.Skip(specification.Skip).Take(specification.Take);
+        }
+
+        return query;
     }
 }

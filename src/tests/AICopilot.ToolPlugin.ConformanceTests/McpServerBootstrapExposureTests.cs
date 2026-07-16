@@ -44,7 +44,7 @@ public sealed class McpServerBootstrapExposureTests
     }
 
     [Fact]
-    public void SseTransportOptions_ShouldUseValidatedEndpointAndFifteenSecondConnectionTimeout()
+    public async Task CreateRegistrationAsync_ShouldRejectUnsafePersistedSseEndpointThroughTheRealFactoryPath()
     {
         var server = new McpServerInfo(
             "sse-mcp",
@@ -57,19 +57,27 @@ public sealed class McpServerBootstrapExposureTests
             chatExposureMode: ChatExposureMode.Advisory,
             allowedTools: [new McpAllowedTool("QueryDeviceLogs", ReadOnlyDeclared: true, McpReadOnlyHint: true, McpDestructiveHint: false)],
             isEnabled: true);
-        var factoryType = typeof(McpServerBootstrap).Assembly.GetType(
-            "AICopilot.Infrastructure.Mcp.McpRuntimeClientFactory",
-            throwOnError: true)!;
-        var method = factoryType.GetMethod(
-            "CreateSseTransportOptions",
-            BindingFlags.NonPublic | BindingFlags.Static)
-            ?? throw new InvalidOperationException("MCP SSE transport options factory was not found.");
+        typeof(McpServerInfo)
+            .GetField("<Arguments>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(server, "http://127.0.0.1/events");
 
-        var options = (HttpClientTransportOptions)method.Invoke(null, [server])!;
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAgentPlugin(registrar => registrar.RegisterPluginFromAssembly(typeof(DiagnosticAdvisorPlugin).Assembly));
+        using var provider = services.BuildServiceProvider();
 
-        options.Endpoint.Should().Be(new Uri("https://mcp.example.test/events"));
-        options.TransportMode.Should().Be(HttpTransportMode.Sse);
-        options.ConnectionTimeout.Should().Be(TimeSpan.FromSeconds(15));
+        var bootstrap = new McpServerBootstrap(
+            new InMemoryReadRepository<McpServerInfo>([server]),
+            new TestApprovalRequirementReadService(),
+            provider.GetRequiredService<AgentPluginLoader>(),
+            NullLogger<McpServerBootstrap>.Instance);
+
+        var action = () => bootstrap.CreateRegistrationAsync(
+            new McpRuntimeServerState(server.Id.Value, server.Name, server.RowVersion),
+            CancellationToken.None);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("MCP SSE server sse-mcp endpoint is invalid: *loopback*");
     }
 
     [Fact]

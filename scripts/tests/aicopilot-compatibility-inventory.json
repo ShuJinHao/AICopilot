@@ -1,15 +1,133 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
+  "csharpSymbols": {
+    "producers": {
+      "AI-COMPAT-SECRET-ENCV1": "F:AICopilot.EntityFrameworkCore.Security.SecretStringEncryptor.LegacyCipherPrefix",
+      "AI-COMPAT-EF-HISTORY-SPLIT": "F:AICopilot.EntityFrameworkCore.MigrationHistoryTables.LegacyTableName",
+      "AI-COMPAT-OBSOLETE-TOOL-CATALOG": "P:AICopilot.Core.AiGateway.Aggregates.Tools.BuiltInToolRegistrations.ObsoleteAgentRuntimeToolCodes",
+      "AI-COMPAT-WIDGET-PAYLOAD-V1": "M:AICopilot.AiGatewayService.Workflows.Executors.DataAnalysisWidgetPayloadSerializer.Serialize(AICopilot.Visualization.Widgets.IWidget)",
+      "AI-ORDINARY-MESSAGE-STRUCTURED-FALLBACK": "M:AICopilot.Core.AiGateway.Aggregates.Sessions.Message.BuildStructuredFallback(AICopilot.Core.AiGateway.Aggregates.Sessions.MessageType)",
+      "AI-ORDINARY-CLOUD-READ-DOCUMENT-ADAPTER": "T:AICopilot.Infrastructure.CloudRead.CloudAiReadDocumentAdapter",
+      "AI-ORDINARY-MODEL-PROVIDER-FALLBACK-POLICY": "T:AICopilot.AiRuntime.DefaultModelFallbackPolicy",
+      "AI-ORDINARY-RUNTIME-TOOL-ADAPTER": "T:AICopilot.AiRuntime.RuntimeToolAdapter",
+      "AI-ORDINARY-CLOUD-TEXT-TO-SQL-FALLBACK": "T:AICopilot.AiGatewayService.Workflows.Executors.CloudReadOnlyTextToSqlFallbackRunner",
+      "AI-ORDINARY-DEVICE-LOG-SEMANTIC-FALLBACK": "T:AICopilot.AiGatewayService.Workflows.Executors.DeviceLogFollowUpIntentRewriter.SemanticFallbackPayload",
+      "AI-ORDINARY-FINAL-AGENT-HISTORY-BUDGET-FALLBACK": "M:AICopilot.AiGatewayService.Workflows.Executors.FinalAgentBuildExecutor.BuildHistoryBudgetFallbacks(System.Collections.Generic.IReadOnlyCollection{AICopilot.Core.AiGateway.Aggregates.Sessions.Message})",
+      "AI-ORDINARY-INTENT-ROUTING-FALLBACK": "T:AICopilot.AiGatewayService.Workflows.Executors.IntentRoutingFallbackClassifier",
+      "AI-ORDINARY-PLANNER-SCHEMA-FALLBACK": "M:AICopilot.AiGatewayService.AgentTasks.AgentDynamicPlannerInputBuilder.BuildFallbackSchemaSummary(System.String)",
+      "AI-ORDINARY-SQL-ALIAS-RESOLUTION": "M:AICopilot.Services.CrossCutting.Sql.SqlAllowlistColumnInspector.ResolveAliasColumns(TableAlias,System.Collections.Generic.IReadOnlySet{System.String})",
+      "AI-ORDINARY-VISUALIZATION-ADAPTER": "T:AICopilot.Visualization.VisualizationAdapterExtensions"
+    },
+    "callerScans": {
+      "AI-COMPAT-SECRET-ENCV1/primary": [
+        "M:AICopilot.EntityFrameworkCore.Security.SecretStringEncryptor.IsLegacyEncrypted(System.String)"
+      ],
+      "AI-COMPAT-EF-HISTORY-SPLIT/primary": [
+        "M:AICopilot.EntityFrameworkCore.MigrationHistoryBootstrapper.BootstrapLegacyHistoryAsync(System.Collections.Generic.IReadOnlyCollection{AICopilot.EntityFrameworkCore.MigrationHistoryBootstrapper.MigrationContext},System.Threading.CancellationToken)"
+      ],
+      "AI-COMPAT-OBSOLETE-TOOL-CATALOG/primary": [
+        "P:AICopilot.Core.AiGateway.Aggregates.Tools.BuiltInToolRegistrations.ObsoleteAgentRuntimeToolCodes"
+      ],
+      "AI-ORDINARY-MESSAGE-STRUCTURED-FALLBACK/message-constructor": [
+        "M:AICopilot.Core.AiGateway.Aggregates.Sessions.Message.BuildStructuredFallback(AICopilot.Core.AiGateway.Aggregates.Sessions.MessageType)"
+      ],
+      "AI-ORDINARY-CLOUD-READ-DOCUMENT-ADAPTER/typed-map-calls": [
+        "M:AICopilot.Infrastructure.CloudRead.CloudAiReadDocumentAdapter.MapCapacityHourly(System.Text.Json.JsonElement,System.String,System.Int32)",
+        "M:AICopilot.Infrastructure.CloudRead.CloudAiReadDocumentAdapter.MapCapacitySummary(System.Text.Json.JsonElement,System.String,System.Int32)",
+        "M:AICopilot.Infrastructure.CloudRead.CloudAiReadDocumentAdapter.MapClientReleases(System.Text.Json.JsonElement,System.String,System.Int32)",
+        "M:AICopilot.Infrastructure.CloudRead.CloudAiReadDocumentAdapter.MapDeviceClientStates(System.Text.Json.JsonElement,System.String,System.Int32)",
+        "M:AICopilot.Infrastructure.CloudRead.CloudAiReadDocumentAdapter.MapDeviceLogs(System.Text.Json.JsonElement,System.String,System.Int32)",
+        "M:AICopilot.Infrastructure.CloudRead.CloudAiReadDocumentAdapter.MapDevices(System.Text.Json.JsonElement,System.String,System.Int32)",
+        "M:AICopilot.Infrastructure.CloudRead.CloudAiReadDocumentAdapter.MapProcesses(System.Text.Json.JsonElement,System.String,System.Int32)",
+        "M:AICopilot.Infrastructure.CloudRead.CloudAiReadDocumentAdapter.MapProductionRecords(System.Text.Json.JsonElement,System.String,System.Int32)"
+      ],
+      "AI-ORDINARY-MODEL-PROVIDER-FALLBACK-POLICY/provider-route": [
+        "M:AICopilot.AiRuntime.IModelFallbackPolicy.GetFallbackProviders(AICopilot.Services.Contracts.AgentRuntimeCreateRequest,AICopilot.AiRuntime.ModelProviderExecutionContext)"
+      ],
+      "AI-ORDINARY-RUNTIME-TOOL-ADAPTER/sdk-option-conversion": [
+        "M:AICopilot.AiRuntime.RuntimeToolAdapter.ToChatOptions(AICopilot.SharedKernel.Ai.AiChatOptions)"
+      ],
+      "AI-ORDINARY-CLOUD-TEXT-TO-SQL-FALLBACK/readonly-query-consumer": [
+        "M:AICopilot.AiGatewayService.Workflows.Executors.CloudReadOnlyTextToSqlFallbackRunner.RunAsync(AICopilot.Services.Contracts.BusinessDatabaseConnectionInfo,System.String,System.Nullable{System.Int32},System.Threading.CancellationToken)"
+      ],
+      "AI-ORDINARY-DEVICE-LOG-SEMANTIC-FALLBACK/routing-rewrite": [
+        "M:AICopilot.AiGatewayService.Workflows.Executors.DeviceLogFollowUpIntentRewriter.Rewrite(System.Collections.Generic.List{AICopilot.AiGatewayService.Models.IntentResult},System.Collections.Generic.IReadOnlyList{AICopilot.SharedKernel.Ai.AiChatMessage})"
+      ],
+      "AI-ORDINARY-FINAL-AGENT-HISTORY-BUDGET-FALLBACK/budget-reduction": [
+        "M:AICopilot.AiGatewayService.Workflows.Executors.FinalAgentBuildExecutor.BuildHistoryBudgetFallbacks(System.Collections.Generic.IReadOnlyCollection{AICopilot.Core.AiGateway.Aggregates.Sessions.Message})"
+      ],
+      "AI-ORDINARY-INTENT-ROUTING-FALLBACK/routing-executor": [
+        "M:AICopilot.AiGatewayService.Workflows.Executors.IntentRoutingFallbackClassifier.TryClassify(System.String,System.String,System.Collections.Generic.List{AICopilot.AiGatewayService.Models.IntentResult}@)"
+      ],
+      "AI-ORDINARY-PLANNER-SCHEMA-FALLBACK/planner-schema-builder": [
+        "M:AICopilot.AiGatewayService.AgentTasks.AgentDynamicPlannerInputBuilder.BuildFallbackSchemaSummary(System.String)"
+      ],
+      "AI-ORDINARY-SQL-ALIAS-RESOLUTION/alias-columns": [
+        "M:AICopilot.Services.CrossCutting.Sql.SqlAllowlistColumnInspector.ResolveAliasColumns(TableAlias,System.Collections.Generic.IReadOnlySet{System.String})"
+      ],
+      "AI-ORDINARY-SQL-ALIAS-RESOLUTION/table-alias": [
+        "M:AICopilot.Services.CrossCutting.Sql.SqlAllowlistColumnInspector.ResolveAlias(System.Nullable{TableAlias},System.String)"
+      ],
+      "AI-ORDINARY-VISUALIZATION-ADAPTER/chart-dataset": [
+        "M:AICopilot.Visualization.VisualizationAdapterExtensions.<G>$977919F21861BE18BA139544085CA0BD.ToChartDataset(System.Collections.Generic.IEnumerable{AICopilot.Visualization.SchemaColumn})"
+      ],
+      "AI-ORDINARY-VISUALIZATION-ADAPTER/data-table": [
+        "M:AICopilot.Visualization.VisualizationAdapterExtensions.<G>$977919F21861BE18BA139544085CA0BD.ToDataTableData(System.Collections.Generic.IEnumerable{AICopilot.Visualization.SchemaColumn})"
+      ]
+    },
+    "candidateDispositions": {
+      "M:AICopilot.Core.AiGateway.Aggregates.Sessions.Message.BuildStructuredFallback(AICopilot.Core.AiGateway.Aggregates.Sessions.MessageType)": "AI-ORDINARY-MESSAGE-STRUCTURED-FALLBACK",
+      "P:AICopilot.Core.AiGateway.Aggregates.Tools.BuiltInToolRegistrations.ObsoleteAgentRuntimeToolCodes": "AI-COMPAT-OBSOLETE-TOOL-CATALOG",
+      "P:AICopilot.AiRuntime.ModelProviderReliabilityOptions.EnableFallback": "AI-ORDINARY-MODEL-PROVIDER-FALLBACK-POLICY",
+      "P:AICopilot.AiRuntime.ModelProviderReliabilityOptions.FallbackProviders": "AI-ORDINARY-MODEL-PROVIDER-FALLBACK-POLICY",
+      "T:AICopilot.AiRuntime.IModelFallbackPolicy": "AI-ORDINARY-MODEL-PROVIDER-FALLBACK-POLICY",
+      "M:AICopilot.AiRuntime.IModelFallbackPolicy.GetFallbackProviders(AICopilot.Services.Contracts.AgentRuntimeCreateRequest,AICopilot.AiRuntime.ModelProviderExecutionContext)": "AI-ORDINARY-MODEL-PROVIDER-FALLBACK-POLICY",
+      "T:AICopilot.AiRuntime.DefaultModelFallbackPolicy": "AI-ORDINARY-MODEL-PROVIDER-FALLBACK-POLICY",
+      "M:AICopilot.AiRuntime.DefaultModelFallbackPolicy.GetFallbackProviders(AICopilot.Services.Contracts.AgentRuntimeCreateRequest,AICopilot.AiRuntime.ModelProviderExecutionContext)": "AI-ORDINARY-MODEL-PROVIDER-FALLBACK-POLICY",
+      "M:AICopilot.AiRuntime.DefaultModelFallbackPolicy.TryGetFallbackProviders(AICopilot.AiRuntime.ModelProviderReliabilityOptions,System.String,System.String[]@)": "AI-ORDINARY-MODEL-PROVIDER-FALLBACK-POLICY",
+      "T:AICopilot.AiRuntime.AiFallbackScope": "AI-ORDINARY-MODEL-PROVIDER-FALLBACK-POLICY",
+      "T:AICopilot.AiRuntime.RuntimeToolAdapter": "AI-ORDINARY-RUNTIME-TOOL-ADAPTER",
+      "T:AICopilot.Infrastructure.CloudRead.CloudAiReadDocumentAdapter": "AI-ORDINARY-CLOUD-READ-DOCUMENT-ADAPTER",
+      "M:AICopilot.EntityFrameworkCore.MigrationHistoryBootstrapper.BootstrapLegacyHistoryAsync(System.Collections.Generic.IReadOnlyCollection{AICopilot.EntityFrameworkCore.MigrationHistoryBootstrapper.MigrationContext},System.Threading.CancellationToken)": "AI-COMPAT-EF-HISTORY-SPLIT",
+      "M:AICopilot.EntityFrameworkCore.MigrationHistoryBootstrapper.CopyLegacyRowsAsync(NpgsqlConnection,NpgsqlTransaction,AICopilot.EntityFrameworkCore.MigrationHistoryTable,System.Collections.Generic.IReadOnlyCollection{AICopilot.EntityFrameworkCore.MigrationHistoryBootstrapper.HistoryRow},System.Threading.CancellationToken)": "AI-COMPAT-EF-HISTORY-SPLIT",
+      "F:AICopilot.EntityFrameworkCore.MigrationHistoryTables.LegacySchema": "AI-COMPAT-EF-HISTORY-SPLIT",
+      "F:AICopilot.EntityFrameworkCore.MigrationHistoryTables.LegacyTableName": "AI-COMPAT-EF-HISTORY-SPLIT",
+      "F:AICopilot.EntityFrameworkCore.Security.SecretStringEncryptor.LegacyCipherPrefix": "AI-COMPAT-SECRET-ENCV1",
+      "F:AICopilot.EntityFrameworkCore.Security.SecretStringEncryptor.LegacyIvSize": "AI-COMPAT-SECRET-ENCV1",
+      "M:AICopilot.EntityFrameworkCore.Security.SecretStringEncryptor.IsLegacyEncrypted(System.String)": "AI-COMPAT-SECRET-ENCV1",
+      "M:AICopilot.EntityFrameworkCore.Security.SecretStringEncryptor.ReEncryptLegacyCipher(System.String)": "AI-COMPAT-SECRET-ENCV1",
+      "M:AICopilot.EntityFrameworkCore.Security.SecretStringEncryptor.DecryptLegacyCipher(System.String)": "AI-COMPAT-SECRET-ENCV1",
+      "M:AICopilot.AiGatewayService.AgentTasks.AgentDynamicPlannerInputBuilder.BuildFallbackSchemaSummary(System.String)": "AI-ORDINARY-PLANNER-SCHEMA-FALLBACK",
+      "T:AICopilot.AiGatewayService.Workflows.Executors.CloudReadOnlyTextToSqlFallbackResult": "AI-ORDINARY-CLOUD-TEXT-TO-SQL-FALLBACK",
+      "T:AICopilot.AiGatewayService.Workflows.Executors.CloudReadOnlyTextToSqlFallbackRunner": "AI-ORDINARY-CLOUD-TEXT-TO-SQL-FALLBACK",
+      "M:AICopilot.AiGatewayService.Workflows.Executors.DataAnalysisAuditRecorder.RecordCloudReadOnlyTextToSqlFallbackAsync(AICopilot.Services.Contracts.BusinessDatabaseConnectionInfo,System.String,System.String,System.String,System.String,System.Int32,System.Boolean,System.Collections.Generic.IReadOnlyList{AICopilot.Services.Contracts.CloudReadOnlyTextToSqlRepairAttemptRecord},System.Threading.CancellationToken)": "AI-ORDINARY-CLOUD-TEXT-TO-SQL-FALLBACK",
+      "T:AICopilot.AiGatewayService.Workflows.Executors.DeviceLogFollowUpIntentRewriter.SemanticFallbackPayload": "AI-ORDINARY-DEVICE-LOG-SEMANTIC-FALLBACK",
+      "T:AICopilot.AiGatewayService.Workflows.Executors.DeviceLogFollowUpIntentRewriter.SemanticFallbackFilter": "AI-ORDINARY-DEVICE-LOG-SEMANTIC-FALLBACK",
+      "T:AICopilot.AiGatewayService.Workflows.Executors.DeviceLogFollowUpIntentRewriter.SemanticFallbackSort": "AI-ORDINARY-DEVICE-LOG-SEMANTIC-FALLBACK",
+      "M:AICopilot.AiGatewayService.Workflows.Executors.FinalAgentBuildExecutor.BuildHistoryBudgetFallbacks(System.Collections.Generic.IReadOnlyCollection{AICopilot.Core.AiGateway.Aggregates.Sessions.Message})": "AI-ORDINARY-FINAL-AGENT-HISTORY-BUDGET-FALLBACK",
+      "M:AICopilot.AiGatewayService.Workflows.Executors.IntentRoutingExecutor.CreateFallbackIntents(System.String,System.String)": "AI-ORDINARY-INTENT-ROUTING-FALLBACK",
+      "T:AICopilot.AiGatewayService.Workflows.Executors.IntentRoutingFallbackClassifier": "AI-ORDINARY-INTENT-ROUTING-FALLBACK",
+      "T:AICopilot.AiGatewayService.Workflows.Executors.IntentRoutingFallbackClassifier.SemanticFallbackPayload": "AI-ORDINARY-INTENT-ROUTING-FALLBACK",
+      "T:AICopilot.AiGatewayService.Workflows.Executors.IntentRoutingFallbackClassifier.SemanticFallbackFilter": "AI-ORDINARY-INTENT-ROUTING-FALLBACK",
+      "T:AICopilot.AiGatewayService.Workflows.Executors.IntentRoutingFallbackClassifier.SemanticFallbackSort": "AI-ORDINARY-INTENT-ROUTING-FALLBACK",
+      "T:AICopilot.Services.Contracts.ModelProviderFallbackRouteDto": "AI-ORDINARY-MODEL-PROVIDER-FALLBACK-POLICY",
+      "F:AICopilot.Services.CrossCutting.Sql.SqlAllowlistColumnInspector.EmptyAliases": "AI-ORDINARY-SQL-ALIAS-RESOLUTION",
+      "M:AICopilot.Services.CrossCutting.Sql.SqlAllowlistColumnInspector.ResolveAliasColumns(TableAlias,System.Collections.Generic.IReadOnlySet{System.String})": "AI-ORDINARY-SQL-ALIAS-RESOLUTION",
+      "M:AICopilot.Services.CrossCutting.Sql.SqlAllowlistColumnInspector.ResolveAlias(System.Nullable{TableAlias},System.String)": "AI-ORDINARY-SQL-ALIAS-RESOLUTION",
+      "P:AICopilot.Services.CrossCutting.Sql.SqlAllowlistColumnInspector.ColumnScope.OutputAliases": "AI-ORDINARY-SQL-ALIAS-RESOLUTION",
+      "T:AICopilot.Visualization.VisualizationAdapterExtensions": "AI-ORDINARY-VISUALIZATION-ADAPTER"
+    }
+  },
   "items": [
     {
       "id": "AI-COMPAT-SECRET-ENCV1",
       "producer": {
-        "path": "src/infrastructure/AICopilot.SecretProtection/SecretStringEncryptor.cs",
+        "path": "src/infrastructure/AICopilot.EntityFrameworkCore/Security/SecretStringEncryptor.cs",
         "contains": "LegacyCipherPrefix = \"encv1:\""
       },
       "consumer": {
         "path": "src/hosts/AICopilot.MigrationWorkApp/MigrationWorkerSecretMigrator.cs",
-        "contains": "SecretMigrationPolicy.MigrateLanguageModelApiKeys"
+        "contains": "MigrateLanguageModelApiKeys(languageModels)"
       },
       "callEvidence": [
         {
@@ -17,7 +135,7 @@
           "contains": "MigrationWorkerSecretMigrator.MigrateAsync"
         },
         {
-          "path": "src/infrastructure/AICopilot.SecretProtection/SecretMigrationPolicy.cs",
+          "path": "src/hosts/AICopilot.MigrationWorkApp/MigrationWorkerSecretMigrator.cs",
           "contains": "SecretStringEncryptor.IsLegacyEncrypted"
         },
         {
@@ -27,7 +145,7 @@
       ],
       "candidateEvidence": [
         {
-          "path": "src/infrastructure/AICopilot.SecretProtection/SecretStringEncryptor.cs",
+          "path": "src/infrastructure/AICopilot.EntityFrameworkCore/Security/SecretStringEncryptor.cs",
           "contains": "Legacy"
         }
       ],
@@ -35,7 +153,9 @@
         "roots": ["src/hosts", "src/infrastructure"],
         "extensions": [".cs"],
         "contains": "SecretStringEncryptor.IsLegacyEncrypted(",
-        "excludePaths": []
+        "excludePaths": [
+          "src/infrastructure/AICopilot.EntityFrameworkCore/Security/SecretStringEncryptor.cs"
+        ]
       },
       "replacement": "All stored model and embedding secrets use authenticated encv2 AES-GCM ciphertext.",
       "deletionCondition": "Production attestation reports zero encv1 values for two release windows and the rollback window has closed.",
@@ -43,20 +163,32 @@
       "deletionDeadline": "2026-09-30",
       "coverageTests": [
         {
-          "path": "src/tests/AICopilot.ApplicationTests/MigrationWorkerSecretMigratorTests.cs",
-          "contains": "LegacyCipherPrefix"
+          "path": "src/tests/AICopilot.InProcessTests/MigrationWorkerSecretMigratorTests.cs",
+          "contains": "MigrateLanguageModelApiKeys_ShouldProtectLegacyCipherAndPlaintextSecrets"
         },
         {
-          "path": "src/tests/AICopilot.UnitTests/SecretStringEncryptorTests.cs",
-          "contains": "LegacyCipherPrefix"
+          "path": "src/tests/AICopilot.InProcessTests/MigrationWorkerSecretMigratorTests.cs",
+          "contains": "MigrateEmbeddingModelApiKeys_ShouldProtectLegacyCipherAndPlaintextSecrets"
+        },
+        {
+          "path": "src/tests/AICopilot.InProcessTests/MigrationWorkerSecretMigratorTests.cs",
+          "contains": "EnsureMigratedSecrets_ShouldRejectLegacyCipherAndPlaintextValues"
+        },
+        {
+          "path": "src/tests/AICopilot.InProcessTests/SecretStringEncryptorTests.cs",
+          "contains": "Decrypt_ShouldRejectLegacyCipherAtRuntime"
+        },
+        {
+          "path": "src/tests/AICopilot.InProcessTests/SecretStringEncryptorTests.cs",
+          "contains": "ReEncryptLegacyCipher_ShouldMigrateToAuthenticatedCipher"
         }
       ]
     },
     {
       "id": "AI-COMPAT-EF-HISTORY-SPLIT",
       "producer": {
-        "path": "src/infrastructure/AICopilot.EntityFrameworkCore/MigrationHistoryBootstrapper.cs",
-        "contains": "MigrationHistoryTables.LegacyTableName"
+        "path": "src/infrastructure/AICopilot.EntityFrameworkCore/MigrationHistoryTables.cs",
+        "contains": "LegacyTableName = \"__EFMigrationsHistory\""
       },
       "consumer": {
         "path": "src/hosts/AICopilot.MigrationWorkApp/MigrationWorkerDatabaseMigrator.cs",
@@ -149,8 +281,8 @@
     {
       "id": "AI-COMPAT-WIDGET-PAYLOAD-V1",
       "producer": {
-        "path": "src/services/AICopilot.AiGatewayService/Workflows/Executors/DataAnalysisWidgetEmitter.cs",
-        "contains": "DataAnalysisWidgetPayloadSerializer.Serialize"
+        "path": "src/services/AICopilot.AiGatewayService/Workflows/Executors/DataAnalysisWidgetPayloadSerializer.cs",
+        "contains": "public static string Serialize(IWidget widget)"
       },
       "consumer": {
         "path": "src/vues/AICopilot.Web/src/protocol/widgetNormalizer.ts",
@@ -227,32 +359,32 @@
       "disposition": "ordinaryAbstraction",
       "decisionReason": "This adapter maps the eight current typed Cloud AiRead JSON contracts into domain records; it does not expose a legacy method/path API.",
       "producer": {
-        "path": "src/infrastructure/AICopilot.CloudReadClient/CloudAiReadDocumentAdapter.cs",
+        "path": "src/infrastructure/AICopilot.Infrastructure/CloudRead/CloudAiReadDocumentAdapter.cs",
         "contains": "internal static class CloudAiReadDocumentAdapter"
       },
       "consumers": [
         {
-          "path": "src/infrastructure/AICopilot.CloudReadClient/CloudAiReadClient.cs",
+          "path": "src/infrastructure/AICopilot.Infrastructure/CloudRead/CloudAiReadClient.cs",
           "contains": "CloudAiReadDocumentAdapter.MapDevices"
         },
         {
-          "path": "src/infrastructure/AICopilot.CloudReadClient/CloudAiReadClient.cs",
+          "path": "src/infrastructure/AICopilot.Infrastructure/CloudRead/CloudAiReadClient.cs",
           "contains": "CloudAiReadDocumentAdapter.MapProductionRecords"
         }
       ],
       "candidateEvidence": [
         {
-          "path": "src/infrastructure/AICopilot.CloudReadClient/CloudAiReadDocumentAdapter.cs",
+          "path": "src/infrastructure/AICopilot.Infrastructure/CloudRead/CloudAiReadDocumentAdapter.cs",
           "contains": "CloudAiReadDocumentAdapter"
         }
       ],
       "callerScans": [
         {
           "id": "typed-map-calls",
-          "roots": ["src/infrastructure/AICopilot.CloudReadClient"],
+          "roots": ["src/infrastructure/AICopilot.Infrastructure/CloudRead"],
           "extensions": [".cs"],
           "contains": "CloudAiReadDocumentAdapter.",
-          "excludePaths": ["src/infrastructure/AICopilot.CloudReadClient/CloudAiReadDocumentAdapter.cs"]
+          "excludePaths": ["src/infrastructure/AICopilot.Infrastructure/CloudRead/CloudAiReadDocumentAdapter.cs"]
         }
       ],
       "replacement": "notApplicable: current typed Cloud AiRead protocol mapper",
@@ -261,7 +393,7 @@
     {
       "id": "AI-ORDINARY-MODEL-PROVIDER-FALLBACK-POLICY",
       "disposition": "ordinaryAbstraction",
-      "decisionReason": "These symbols implement the current bounded provider reliability policy and its telemetry; high-risk tool chains explicitly disable provider fallback.",
+      "decisionReason": "These symbols implement the current bounded provider reliability policy; high-risk tool chains explicitly disable provider fallback.",
       "producer": {
         "path": "src/infrastructure/AICopilot.AiRuntime/ModelProviderReliabilityPolicies.cs",
         "contains": "DefaultModelFallbackPolicy"
@@ -270,15 +402,9 @@
         {
           "path": "src/infrastructure/AICopilot.AiRuntime/AgentRuntimeFactory.cs",
           "contains": "fallbackPolicy.GetFallbackProviders(request, context)"
-        },
-        {
-          "path": "src/infrastructure/AICopilot.AiRuntime/ModelEndpointPoolScheduler.cs",
-          "contains": "GetStats(endpointId).RecordFallback()"
         }
       ],
       "candidateEvidence": [
-        { "path": "src/infrastructure/AICopilot.AiRuntime/ModelEndpointPoolScheduler.cs", "contains": "Fallback" },
-        { "path": "src/infrastructure/AICopilot.AiRuntime/ModelEndpointRuntimeState.cs", "contains": "Fallback" },
         { "path": "src/infrastructure/AICopilot.AiRuntime/ModelProviderReliability.cs", "contains": "Fallback" },
         { "path": "src/infrastructure/AICopilot.AiRuntime/ModelProviderReliabilityPolicies.cs", "contains": "Fallback" },
         { "path": "src/services/AICopilot.Services.Contracts/Contracts/AiRuntimeContracts.cs", "contains": "Fallback" }
@@ -290,17 +416,10 @@
           "extensions": [".cs"],
           "contains": "fallbackPolicy.GetFallbackProviders(",
           "excludePaths": []
-        },
-        {
-          "id": "endpoint-telemetry",
-          "roots": ["src/infrastructure/AICopilot.AiRuntime"],
-          "extensions": [".cs"],
-          "contains": "GetStats(endpointId).RecordFallback()",
-          "excludePaths": []
         }
       ],
-      "replacement": "notApplicable: current availability policy and reliability telemetry",
-      "deletionCondition": "Delete only if model-provider failover itself is retired and all factory, scheduler and snapshot consumers migrate."
+      "replacement": "notApplicable: current availability policy",
+      "deletionCondition": "Delete only if model-provider failover itself is retired and all factory consumers migrate."
     },
     {
       "id": "AI-ORDINARY-RUNTIME-TOOL-ADAPTER",
@@ -374,7 +493,7 @@
       "decisionReason": "These private records are the current deterministic readonly payload used when rewriting device-log follow-up intent.",
       "producer": {
         "path": "src/services/AICopilot.AiGatewayService/Workflows/Executors/DeviceLogFollowUpIntentRewriter.cs",
-        "contains": "SemanticFallbackPayload"
+        "contains": "private sealed record SemanticFallbackPayload("
       },
       "consumers": [
         {
@@ -406,7 +525,7 @@
       "decisionReason": "This helper is the current bounded prompt-history reduction policy used when the final agent exceeds its token budget.",
       "producer": {
         "path": "src/services/AICopilot.AiGatewayService/Workflows/Executors/FinalAgentBuildExecutor.cs",
-        "contains": "BuildHistoryBudgetFallbacks("
+        "contains": "private static IEnumerable<IReadOnlyCollection<Message>> BuildHistoryBudgetFallbacks("
       },
       "consumers": [
         {
@@ -469,7 +588,7 @@
       "decisionReason": "This helper builds the current conservative tool schema summary when optional catalog schema metadata is absent.",
       "producer": {
         "path": "src/services/AICopilot.AiGatewayService/AgentTasks/AgentDynamicPlannerInputBuilder.cs",
-        "contains": "BuildFallbackSchemaSummary("
+        "contains": "private static PlannerToolSchemaSummary BuildFallbackSchemaSummary("
       },
       "consumers": [
         {
@@ -502,7 +621,7 @@
       "decisionReason": "Alias here is SQL syntax resolved by the current allowlist column inspector, not an API compatibility alias.",
       "producer": {
         "path": "src/services/AICopilot.Services.CrossCutting/Sql/SqlAllowlistColumnInspector.cs",
-        "contains": "ResolveAliasColumns("
+        "contains": "private static IReadOnlySet<string> ResolveAliasColumns("
       },
       "consumers": [
         {
@@ -633,7 +752,7 @@
       "candidateEvidence": [
         {
           "path": "src/vues/AICopilot.Web/src/protocol/agentEventDisplay.ts",
-          "contains": "const fallback"
+          "contains": "fallback ="
         }
       ],
       "callerScans": [
@@ -681,12 +800,12 @@
       "deletionCondition": "Delete only if structured answer sections replace heading parsing for every caller."
     },
     {
-      "id": "AI-ORDINARY-VUE-I18N-CURRENT-OPTIONS",
+      "id": "AI-ORDINARY-VUE-I18N-FALLBACK-LOCALE",
       "disposition": "ordinaryAbstraction",
-      "decisionReason": "legacy=false disables Vue I18n legacy mode and fallbackLocale is the current locale default; neither exposes an old application contract.",
+      "decisionReason": "fallbackLocale is the current supported locale default in the Vue I18n configuration.",
       "producer": {
         "path": "src/vues/AICopilot.Web/src/i18n/index.ts",
-        "contains": "export const i18n = createI18n({"
+        "contains": "fallbackLocale: 'zh-CN'"
       },
       "consumers": [
         {
@@ -695,7 +814,6 @@
         }
       ],
       "candidateEvidence": [
-        { "path": "src/vues/AICopilot.Web/src/i18n/index.ts", "contains": "legacy:" },
         { "path": "src/vues/AICopilot.Web/src/i18n/index.ts", "contains": "fallbackLocale:" }
       ],
       "callerScans": [

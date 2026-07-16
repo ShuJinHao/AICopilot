@@ -24,7 +24,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\infrastructure\AICopilot.AiRuntime\AICopilot.AiRuntime.csproj" />
-    <ProjectReference Include="..\..\infrastructure\AICopilot.McpRuntime\AICopilot.McpRuntime.csproj" />
     <ProjectReference Include="..\..\shared\AICopilot.AgentPlugin\AICopilot.AgentPlugin.csproj" />
     <ProjectReference Include="..\..\services\AICopilot.AiGatewayService\AICopilot.AiGatewayService.csproj" />
     <ProjectReference Include="..\..\services\AICopilot.RagService\AICopilot.RagService.csproj" />

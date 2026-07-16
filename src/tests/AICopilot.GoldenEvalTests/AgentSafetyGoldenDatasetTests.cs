@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text.Json;
+using AICopilot.AgentWorkflowTestKit;
 using AICopilot.AiGatewayService.Agents;
 using AICopilot.AiGatewayService.Models;
 using AICopilot.AiGatewayService.Safety;
@@ -59,18 +60,7 @@ public sealed class AgentSafetyGoldenDatasetTests
 
     private static AgentWorkflowPipeline CreatePipeline(AiToolDefinition tool)
     {
-        return new AgentWorkflowPipeline(
-            new GoldenIntentRoutingExecutor(),
-            new GoldenToolsPackExecutor(tool),
-            null!,
-            null!,
-            null!,
-            null!,
-            null!,
-            null!,
-            null!,
-            null!,
-            NullLogger<AgentWorkflowPipeline>.Instance);
+        return AgentWorkflowPipelineFixture.CreatePlanDraftPipeline([tool]);
     }
 
     private static JsonDocument LoadDataset()
@@ -81,31 +71,4 @@ public sealed class AgentSafetyGoldenDatasetTests
         return JsonDocument.Parse(stream);
     }
 
-    private sealed class GoldenIntentRoutingExecutor : IntentRoutingExecutor
-    {
-        public GoldenIntentRoutingExecutor()
-            : base(null!, null!, null!, null!, null!, NullLogger<IntentRoutingExecutor>.Instance)
-        {
-        }
-
-        public override Task<IntentRoutingStepResult> ExecuteAsync(
-            ChatStreamRequest request,
-            CancellationToken cancellationToken = default)
-        {
-            return Task.FromResult(new IntentRoutingStepResult(
-                [new IntentResult { Intent = "Action.GoldenSafety", Confidence = 1.0 }],
-                ManufacturingSceneType.FallbackToExistingRouting,
-                null,
-                new ChatExecutionMetadataSnapshot()));
-        }
-    }
-
-    private sealed class GoldenToolsPackExecutor(AiToolDefinition tool)
-        : ToolsPackExecutor(null!, NullLogger<ToolsPackExecutor>.Instance)
-    {
-        public override Task<BranchResult> DiscoverAsync(
-            List<IntentResult> intentResults,
-            CancellationToken ct = default) =>
-            Task.FromResult(BranchResult.FromTools([tool]));
-    }
 }

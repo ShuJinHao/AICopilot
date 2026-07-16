@@ -111,8 +111,10 @@ bash -n deploy/enterprise-ai/*.sh deploy/enterprise-ai/scripts/*.sh
 bash deploy/enterprise-ai/tests/deployment-behavior.sh
 dotnet test src/tests/AICopilot.ArchitectureTests/AICopilot.ArchitectureTests.csproj --no-restore
 dotnet test src/tests/AICopilot.DeploymentTests/AICopilot.DeploymentTests.csproj --no-restore
-dotnet test src/tests/AICopilot.ContractTests/AICopilot.ContractTests.csproj --filter "ChatErrorContractTests|UnhandledApiExceptionPolicyTests|ModelSecretContractTests" --no-restore
-dotnet test src/tests/AICopilot.UnitTests/AICopilot.UnitTests.csproj --filter "SecurityPolicyUnitTests|SecretStringEncryptorTests|CloudOidcOptionsTests" --no-restore
+dotnet test src/tests/AICopilot.ContractTests/AICopilot.ContractTests.csproj --filter "ChatErrorContractTests|ModelSecretContractTests" --no-restore
+dotnet test src/tests/AICopilot.HttpIntegrationTests/AICopilot.HttpIntegrationTests.csproj --filter "CloudOidcOptionsTests|CloudOidcFinalizationWorkflowTests|IdentityProblemContractTests|UnhandledApiExceptionPolicyTests" --no-restore
+dotnet test src/tests/AICopilot.InProcessTests/AICopilot.InProcessTests.csproj --filter "SecretStringEncryptorTests" --no-restore
+dotnet test src/tests/AICopilot.UnitTests/AICopilot.UnitTests.csproj --filter "SecurityPolicyUnitTests" --no-restore
 ```
 
 上述 .NET 命令是部署安全的定向诊断集，不是任务完成口径；PR/合 main 仍必须按 `docs/AI架构治理清单.md` 和 `.github/workflows/aicopilot-ci.yml` 对账全部 required runner、Web 和 deployment behavior。

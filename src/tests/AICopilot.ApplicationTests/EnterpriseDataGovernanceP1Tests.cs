@@ -130,7 +130,6 @@ public sealed class EnterpriseDataGovernanceP1Tests
         scheduler.RecordFailed("mock-a", TimeSpan.FromMilliseconds(130), new TimeoutException());
         scheduler.RecordStickyStreaming("mock-b");
         scheduler.RecordSucceeded("mock-b", TimeSpan.FromMilliseconds(80));
-        scheduler.RecordFallback("mock-c");
 
         var snapshot = scheduler.GetSnapshot();
         var pool = snapshot.Pools.Should().ContainSingle(item => item.PoolName == "TextToSqlPool").Subject;
@@ -140,7 +139,6 @@ public sealed class EnterpriseDataGovernanceP1Tests
         pool.Endpoints.Single(endpoint => endpoint.EndpointId == "mock-a").Stats.CircuitState.Should().Be("Open");
         pool.Endpoints.Single(endpoint => endpoint.EndpointId == "mock-a").Stats.LastFailureReason.Should().Be(nameof(TimeoutException));
         pool.Endpoints.Single(endpoint => endpoint.EndpointId == "mock-b").Stats.StickyStreamingCount.Should().Be(1);
-        pool.Endpoints.Single(endpoint => endpoint.EndpointId == "mock-c").Stats.FallbackCount.Should().Be(1);
     }
 
     [Fact]

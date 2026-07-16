@@ -66,11 +66,11 @@ export const useRagStore = defineStore('rag', () => {
     actionErrors
   }
 
-  let knowledgeBaseDomain: ReturnType<typeof useKnowledgeBaseDomain>
+  const refreshKnowledgeBases = async () => {
+    await knowledgeBaseDomain.refreshKnowledgeBases()
+  }
   const embeddingModelDomain = useEmbeddingModelDomain(domainStates, {
-    refreshKnowledgeBases: async () => {
-      await knowledgeBaseDomain.refreshKnowledgeBases()
-    }
+    refreshKnowledgeBases
   })
   const searchDomain = useKnowledgeSearchDomain(domainStates, {
     selectedKnowledgeBaseId,
@@ -79,11 +79,9 @@ export const useRagStore = defineStore('rag', () => {
   const documentDomain = useDocumentDomain(domainStates, {
     selectedKnowledgeBaseId,
     documents,
-    refreshKnowledgeBases: async () => {
-      await knowledgeBaseDomain.refreshKnowledgeBases()
-    }
+    refreshKnowledgeBases
   })
-  knowledgeBaseDomain = useKnowledgeBaseDomain(domainStates, {
+  const knowledgeBaseDomain = useKnowledgeBaseDomain(domainStates, {
     embeddingModels: embeddingModelDomain.embeddingModels,
     selectedKnowledgeBaseId,
     documents,

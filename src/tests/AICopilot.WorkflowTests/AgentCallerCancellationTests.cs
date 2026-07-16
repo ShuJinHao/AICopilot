@@ -32,25 +32,25 @@ public sealed class AgentCallerCancellationTests
         assertion.Which.CancellationToken.Should().Be(cancellation.Token);
 
         using var workflowCancellation = new CancellationTokenSource();
-        var controlledPipeline = new CancellationBarrierPipeline();
+        var branchProbe = new BlockingKnowledgeBaseReadService();
+        var controlledPipeline = AgentWorkflowPipelineFixture.CreateKnowledgeBranchPipeline(branchProbe);
         var drainTask = DrainAsync(controlledPipeline.RunIntentWorkflowAsync(
             new ChatStreamRequest(Guid.NewGuid(), "test cancellation barrier"),
             session: null,
             new StringBuilder(),
             workflowCancellation.Token));
 
-        await controlledPipeline.AllBranchesStarted.WaitAsync(TimeSpan.FromSeconds(5));
+        await branchProbe.Started.WaitAsync(TimeSpan.FromSeconds(5));
         workflowCancellation.Cancel();
-        await controlledPipeline.AllBranchesObservedCancellation.WaitAsync(TimeSpan.FromSeconds(5));
+        await branchProbe.ObservedCancellation.WaitAsync(TimeSpan.FromSeconds(5));
         drainTask.IsCompleted.Should().BeFalse(
             "the workflow must not return before every parallel branch has reached quiescence");
-        controlledPipeline.ReleaseBranches();
+        branchProbe.Release();
 
         var drainAction = async () => await drainTask;
         await drainAction.Should().ThrowAsync<OperationCanceledException>();
-        controlledPipeline.LateSideEffectCount.Should().Be(
-            AgentWorkflowTopology.ParallelBranches.Count,
-            "all late branch work must be observed before cancellation returns to the caller");
+        branchProbe.LateSideEffectCount.Should().Be(1,
+            "the outstanding production knowledge branch must quiesce before cancellation returns");
     }
 
     [Fact]
@@ -351,89 +351,36 @@ public sealed class AgentCallerCancellationTests
         }
     }
 
-    private sealed class CancellationBarrierPipeline : AgentWorkflowPipeline
+    private sealed class BlockingKnowledgeBaseReadService : IKnowledgeBaseReadService
     {
-        private readonly TaskCompletionSource allBranchesStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private readonly TaskCompletionSource allBranchesObservedCancellation = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private readonly TaskCompletionSource releaseBranches = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private int startedBranchCount;
-        private int cancelledBranchCount;
+        private readonly TaskCompletionSource started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource observedCancellation = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int lateSideEffectCount;
 
-        public CancellationBarrierPipeline()
-            : base(
-                new FixedIntentRoutingExecutor(),
-                null!,
-                null!,
-                null!,
-                null!,
-                null!,
-                null!,
-                null!,
-                new RecordingFinalAgentContextStore(),
-                new RecordingFinalAgentContextSerializer(),
-                NullLogger<AgentWorkflowPipeline>.Instance)
-        {
-        }
+        public Task Started => started.Task;
 
-        public Task AllBranchesStarted => allBranchesStarted.Task;
-
-        public Task AllBranchesObservedCancellation => allBranchesObservedCancellation.Task;
+        public Task ObservedCancellation => observedCancellation.Task;
 
         public int LateSideEffectCount => Volatile.Read(ref lateSideEffectCount);
 
-        public void ReleaseBranches() => releaseBranches.TrySetResult();
+        public void Release() => release.TrySetResult();
 
-        protected override bool IsBranchRequired(
-            BranchType branchType,
-            IReadOnlyCollection<IntentResult> intents) => false;
+        public Task<IReadOnlyList<KnowledgeBaseDescriptor>> ListAsync(
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<KnowledgeBaseDescriptor>>([]);
 
-        protected override async Task<BranchResult> ExecuteBranchAsync(
-            BranchType branchType,
-            List<IntentResult> intents,
-            string message,
-            AgentWorkflowSink sink,
-            SessionRuntimeSnapshot? session,
-            CancellationToken ct)
+        public async Task<IReadOnlyList<KnowledgeBaseDescriptor>> GetByNamesAsync(
+            IReadOnlyCollection<string> names,
+            CancellationToken cancellationToken = default)
         {
-            if (Interlocked.Increment(ref startedBranchCount) == AgentWorkflowTopology.ParallelBranches.Count)
-            {
-                allBranchesStarted.TrySetResult();
-            }
-
-            // Deliberately ignore ct to prove the pipeline itself provides a quiescence barrier.
-            using var cancellationRegistration = ct.Register(() =>
-            {
-                if (Interlocked.Increment(ref cancelledBranchCount) == AgentWorkflowTopology.ParallelBranches.Count)
-                {
-                    allBranchesObservedCancellation.TrySetResult();
-                }
-            });
-            await releaseBranches.Task.ConfigureAwait(false);
+            started.TrySetResult();
+            using var cancellationRegistration = cancellationToken.Register(
+                () => observedCancellation.TrySetResult());
+            await release.Task.ConfigureAwait(false);
             Interlocked.Increment(ref lateSideEffectCount);
-            if (branchType == BranchType.BusinessPolicy)
-            {
-                throw new InvalidOperationException("simulated late branch failure");
-            }
-
-            return BranchResult.Empty(branchType);
+            return [];
         }
-    }
-
-    private sealed class FixedIntentRoutingExecutor : IntentRoutingExecutor
-    {
-        public FixedIntentRoutingExecutor()
-            : base(null!, null!, null!, null!, null!, NullLogger<IntentRoutingExecutor>.Instance)
-        {
-        }
-
-        public override Task<IntentRoutingStepResult> ExecuteAsync(
-            ChatStreamRequest request,
-            CancellationToken cancellationToken = default) => Task.FromResult(new IntentRoutingStepResult(
-                [],
-                ManufacturingSceneType.FallbackToExistingRouting,
-                null,
-                new ChatExecutionMetadataSnapshot()));
     }
 
     private sealed class RuntimeAgentSession : IRuntimeAgentSession;

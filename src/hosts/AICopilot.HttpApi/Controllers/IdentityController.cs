@@ -2,8 +2,6 @@ using AICopilot.HttpApi.Infrastructure;
 using AICopilot.HttpApi.Models;
 using AICopilot.IdentityService.Commands;
 using AICopilot.IdentityService.Queries;
-using AICopilot.Services.Contracts.Http;
-using AICopilot.Services.Contracts.Authentication;
 using AICopilot.SharedKernel.Result;
 using MediatR;
 using Microsoft.AspNetCore.Authentication;

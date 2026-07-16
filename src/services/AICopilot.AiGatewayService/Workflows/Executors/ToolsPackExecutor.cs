@@ -17,14 +17,7 @@ public class ToolsPackExecutor(
         return intentResults.Any(IsActionIntent);
     }
 
-    public Task<BranchResult> ExecuteAsync(
-        List<IntentResult> intentResults,
-        CancellationToken ct = default)
-    {
-        return DiscoverAsync(intentResults, ct);
-    }
-
-    public virtual async Task<BranchResult> DiscoverAsync(
+    public async Task<BranchResult> DiscoverAsync(
         List<IntentResult> intentResults,
         CancellationToken ct = default)
     {

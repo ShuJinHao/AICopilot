@@ -6,17 +6,17 @@
     "gitTree": "88aee67db521a1a33ff6de524c0163d513396123",
     "declarationCount": 785,
     "orderedSymbolSha256": "62a8fa4fe89e98b8b7be0a74f020db16c5bbdac3714b1838e194b2bef189e312",
-    "transitionContentSha256": "c27d5ddecedbb853c04a6c46936d2b2f425efdaad7c75e3abda7f033325e1159"
+    "transitionContentSha256": "a4b736c63a19f31ffafc5e7f0a70e46636d1c5f17365654195bb7a63c3eff65a"
   },
   "current": {
     "baselinePath": "scripts/tests/baselines/aicopilot-test-cases.json",
-    "availableDeclarationCount": 723
+    "availableDeclarationCount": 768
   },
   "summary": {
-    "retainedSelf": 635,
+    "retainedSelf": 632,
     "retiredDuplicate": 0,
     "retiredSourceGuard": 2,
-    "replaced": 148
+    "replaced": 151
   },
   "transitions": [
     {
@@ -780,7 +780,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudAiReadClientTests.Client_ShouldNotSendHttpWhenProductionRecordScopeIsMissing()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ContractTests.CloudAiReadClientContractTests.Client_ShouldNotSendHttpWhenProductionRecordScopeIsMissing"
+        "AICopilot.InProcessTests.CloudAiReadClientContractTests.Client_ShouldNotSendHttpWhenProductionRecordScopeIsMissing"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -981,10 +981,10 @@
       "oldSymbol": "AICopilot.BackendTests.TextToSqlReadOnlyTests.Connector_ShouldRejectWritableOrDisabledBusinessDatabases()",
       "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.UnitTests.SqlAdapterPolicyTests.BusinessDatabaseConnectionPolicy_ShouldRejectWritableOrDisabledSources",
+        "AICopilot.InProcessTests.DapperDatabaseConnectorSecurityTests.Connector_ShouldRejectWritableOrDisabledSourcesBeforeOpeningConnection",
         "AICopilot.ApplicationTests.TextToSqlReadOnlyTests.Plugin_ShouldRejectWritableBusinessDatabaseBeforeExecution"
       ],
-      "reason": "可写或禁用业务库由连接策略和插件执行前门禁共同拒绝。"
+      "reason": "可写或禁用业务库由真实 Dapper connector 和插件执行前门禁共同拒绝。"
     },
     {
       "oldSymbol": "AICopilot.BackendTests.SecurityHardeningTests.FrontendKnowledgeManagement_ShouldExposeRagRouteAndUseMultipartUpload()",
@@ -1096,7 +1096,7 @@
       "oldSymbol": "AICopilot.BackendTests.SemanticSqlGenerationTests.SqlGenerator_ShouldRejectAccessToUnmappedFields()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ApplicationTests.SemanticSqlGenerationTests.SqlGenerator_ShouldRejectAccessToUnmappedFields"
+        "AICopilot.InProcessTests.SemanticSqlGenerationTests.SqlGenerator_ShouldRejectAccessToUnmappedFields"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -1138,7 +1138,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudAiReadClientTests.CloudIdentityStatusOptions_ShouldRejectNonIdentityStatusPath()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ContractTests.CloudAiReadClientContractTests.CloudIdentityStatusOptions_ShouldRejectNonIdentityStatusPath"
+        "AICopilot.InProcessTests.CloudAiReadClientContractTests.CloudIdentityStatusOptions_ShouldRejectNonIdentityStatusPath"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -1178,7 +1178,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudAiReadClientTests.Client_ShouldRejectUnsupportedOrLegacyFiltersBeforeHttp(System.String,System.String)",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ContractTests.CloudAiReadClientContractTests.Client_ShouldRejectUnsupportedOrLegacyFiltersBeforeHttp"
+        "AICopilot.InProcessTests.CloudAiReadClientContractTests.Client_ShouldRejectUnsupportedOrLegacyFiltersBeforeHttp"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -1194,7 +1194,7 @@
       "oldSymbol": "AICopilot.BackendTests.JwtSettingsTests.Defaults_ShouldKeepThirtyMinuteAccessTokenLifetime()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.UnitTests.JwtSettingsTests.Defaults_ShouldKeepThirtyMinuteAccessTokenLifetime"
+        "AICopilot.InProcessTests.JwtSettingsTests.Defaults_ShouldKeepThirtyMinuteAccessTokenLifetime"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -1242,11 +1242,15 @@
     },
     {
       "oldSymbol": "AICopilot.BackendTests.SecurityHardeningTests.MigrationWorker_ShouldMigrateAllModelSecretFormatsBeforeRuntimeStarts()",
-      "disposition": "retained-self",
+      "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.DeploymentTests.SecurityDeploymentTests.MigrationWorker_ShouldMigrateAllModelSecretFormatsBeforeRuntimeStarts"
+        "AICopilot.InProcessTests.MigrationWorkerSecretMigratorTests.ExecutionPlan_CheckSecretsOnly_ShouldVerifyBeforeStopping",
+        "AICopilot.InProcessTests.MigrationWorkerSecretMigratorTests.ExecutionPlan_FullMigration_ShouldRunStagesInRequiredOrder",
+        "AICopilot.InProcessTests.MigrationWorkerSecretMigratorTests.ExecutionPlan_SecretStageFailure_ShouldShortCircuitWithoutStoppingApplication",
+        "AICopilot.PersistenceTests.MigrationWorkerSecretTransactionTests.MigrateAndVerifyAsync_ShouldProtectBothRealTablesAndRejectEachRawSecretField",
+        "AICopilot.PersistenceTests.MigrationWorkerSecretTransactionTests.MigrateAsync_ShouldRollbackLanguageAndEmbeddingChanges_WhenEmbeddingUpdateFails"
       ],
-      "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
+      "reason": "旧源码 IndexOf 顺序 guard 已物理删除；真实执行计划分别验证 check-only、完整迁移和 secret 阶段失败短路，PostgreSQL 行为同时验证两表 secret 成功迁移、逐字段污染拒绝与失败回滚。"
     },
     {
       "oldSymbol": "AICopilot.BackendTests.AiEvalBehaviorGuardrailTests.ToolCallEval_ShouldRejectCloudWriteLikeToolEvenWithReadVerbPrefix()",
@@ -1300,7 +1304,7 @@
       "oldSymbol": "AICopilot.BackendTests.McpRuntimeRegistrySynchronizerTests.McpRuntimeOptions_ShouldClampRefreshInterval(System.Int32,System.Int32)",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.WorkflowTests.McpRuntimeRegistrySynchronizerTests.McpRuntimeOptions_ShouldClampRefreshInterval"
+        "AICopilot.InProcessTests.McpRuntimeRegistrySynchronizerTests.McpRuntimeOptions_ShouldClampRefreshInterval"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -1316,7 +1320,7 @@
       "oldSymbol": "AICopilot.BackendTests.ToolRegistryGovernanceTests.McpToolRegistrySynchronizer_ShouldUpsertDisabledTools_AndPreserveAdminSettings()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.WorkflowTests.ToolRegistryWorkflowTests.McpToolRegistrySynchronizer_ShouldUpsertDisabledTools_AndPreserveAdminSettings"
+        "AICopilot.InProcessTests.McpToolRegistrySynchronizerTests.McpToolRegistrySynchronizer_ShouldUpsertDisabledTools_AndPreserveAdminSettings"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -1340,7 +1344,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudAiReadClientTests.Client_ShouldSendProcessQueryWithKeywordAndMaxRowsOnly()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ContractTests.CloudAiReadClientContractTests.Client_ShouldSendProcessQueryWithKeywordAndMaxRowsOnly"
+        "AICopilot.InProcessTests.CloudAiReadClientContractTests.Client_ShouldSendProcessQueryWithKeywordAndMaxRowsOnly"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -1348,7 +1352,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudAiReadClientTests.Client_ShouldNotSendHttpWhenCapacityRequiredParametersAreMissing()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ContractTests.CloudAiReadClientContractTests.Client_ShouldNotSendHttpWhenCapacityRequiredParametersAreMissing"
+        "AICopilot.InProcessTests.CloudAiReadClientContractTests.Client_ShouldNotSendHttpWhenCapacityRequiredParametersAreMissing"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -1372,7 +1376,7 @@
       "oldSymbol": "AICopilot.BackendTests.DataAnalysisReadOnlyGuardrailTests.SqlServerSource_ShouldRequireVerifiedReadOnlyCredential()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.UnitTests.DataAnalysisReadOnlyGuardrailTests.SqlServerSource_ShouldRequireVerifiedReadOnlyCredential"
+        "AICopilot.InProcessTests.DapperDatabaseConnectorSecurityTests.SqlServerSource_ShouldRequireVerifiedReadOnlyCredential"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -1429,7 +1433,7 @@
       "oldSymbol": "AICopilot.BackendTests.SessionDomainEventOutboxTests.OutboxMessage_FromSessionEvents_ShouldPreserveEventTypeAndPayload()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.PersistenceTests.SessionOutboxMappingTests.OutboxMessage_FromSessionEvents_ShouldPreserveEventTypeAndPayload"
+        "AICopilot.InProcessTests.SessionOutboxMappingTests.OutboxMessage_FromSessionEvents_ShouldPreserveEventTypeAndPayload"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -1453,7 +1457,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudAiReadClientTests.Client_ShouldSendClientReleaseQueryWithCloudAiReadParametersOnly()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ContractTests.CloudAiReadClientContractTests.Client_ShouldSendClientReleaseQueryWithCloudAiReadParametersOnly"
+        "AICopilot.InProcessTests.CloudAiReadClientContractTests.Client_ShouldSendClientReleaseQueryWithCloudAiReadParametersOnly"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -1461,7 +1465,7 @@
       "oldSymbol": "AICopilot.BackendTests.MigrationWorkerSecretMigratorTests.MigrateEmbeddingModelApiKeys_ShouldProtectLegacyCipherAndPlaintextSecrets()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ApplicationTests.MigrationWorkerSecretMigratorTests.MigrateEmbeddingModelApiKeys_ShouldProtectLegacyCipherAndPlaintextSecrets"
+        "AICopilot.InProcessTests.MigrationWorkerSecretMigratorTests.MigrateEmbeddingModelApiKeys_ShouldProtectLegacyCipherAndPlaintextSecrets"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -1541,7 +1545,7 @@
       "oldSymbol": "AICopilot.BackendTests.SemanticSqlGenerationTests.SqlGenerator_ShouldGenerateParameterizedReadOnlySql_FromSemanticPlan()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ApplicationTests.SemanticSqlGenerationTests.SqlGenerator_ShouldGenerateParameterizedReadOnlySql_FromSemanticPlan"
+        "AICopilot.InProcessTests.SemanticSqlGenerationTests.SqlGenerator_ShouldGenerateParameterizedReadOnlySql_FromSemanticPlan"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -1566,7 +1570,7 @@
       "oldSymbol": "AICopilot.BackendTests.AgentArtifactGenerationTests.AgentArtifactDocumentGenerator_ShouldCarrySimulationSourceAcrossPortableFormats()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ApplicationTests.AgentArtifactGenerationTests.AgentArtifactDocumentGenerator_ShouldCarrySimulationSourceAcrossPortableFormats"
+        "AICopilot.PersistenceFilesystemTests.AgentArtifactGenerationTests.AgentArtifactDocumentGenerator_ShouldCarrySimulationSourceAcrossPortableFormats"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -1580,11 +1584,12 @@
     },
     {
       "oldSymbol": "AICopilot.BackendTests.ChatErrorContractTests.FinalAgentRunExecutor_ShouldTimeoutOnlyModelChunkWaitAndSuspendOnApproval()",
-      "disposition": "retained-self",
+      "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.ContractFilesystemTests.ChatRuntimeSourceContractTests.FinalAgentRunExecutor_ShouldTimeoutOnlyModelChunkWaitAndSuspendOnApproval"
+        "AICopilot.WorkflowTests.FinalAgentRunExecutorWorkflowTests.ModelChunkTimeout_ShouldCancelOnlyModelWaitAndReturnStableWorkflowError",
+        "AICopilot.WorkflowTests.AgentRuntimeSecurityWorkflowTests.FakeRuntime_ShouldAllowGrantedToolApprovalRequest"
       ],
-      "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
+      "reason": "旧源码字符串组合 guard 已物理删除；模型 chunk 超时与审批挂起分别由可控 timeout CTS Workflow 行为和真实 runtime approval 流程验证。"
     },
     {
       "oldSymbol": "AICopilot.BackendTests.AuditTransactionBoundaryTests.AiGatewayRepository_ShouldCommitBusinessAndAuditRowsTogether()",
@@ -1638,7 +1643,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudOidcLoginTestsControllerSecurity.FinalizeCloudOidcLogin_ShouldClearExternalCookie_WhenPrincipalIsInvalid()",
       "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.ApplicationTests.CloudOidcFinalizationWorkflowTests.ExecuteAsync_ShouldRejectInvalidPrincipalAndClearExternalSession"
+        "AICopilot.InProcessTests.CloudOidcFinalizationWorkflowTests.ExecuteAsync_ShouldRejectInvalidPrincipalAndClearExternalSession"
       ],
       "reason": "无效 principal 拒绝和外部会话清理由应用 workflow 测试覆盖。"
     },
@@ -1670,7 +1675,7 @@
       "oldSymbol": "AICopilot.BackendTests.MigrationWorkerCloudReadOnlySeederTests.ValidateOptions_ShouldRequireVerifiedReadOnlyCredential_WhenEnabled()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ApplicationTests.CloudReadOnlyBusinessDatabaseSeedPolicyTests.ValidateOptions_ShouldRequireVerifiedReadOnlyCredential_WhenEnabled"
+        "AICopilot.InProcessTests.MigrationWorkerCloudReadOnlySeederTests.ValidateOptions_ShouldRequireVerifiedReadOnlyCredential_WhenEnabled"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -1686,7 +1691,7 @@
       "oldSymbol": "AICopilot.BackendTests.SemanticSqlGenerationTests.SqlGenerator_ShouldRejectUnsafeFromClause()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ApplicationTests.SemanticSqlGenerationTests.SqlGenerator_ShouldRejectUnsafeFromClause"
+        "AICopilot.InProcessTests.SemanticSqlGenerationTests.SqlGenerator_ShouldRejectUnsafeFromClause"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -1742,7 +1747,7 @@
       "oldSymbol": "AICopilot.BackendTests.McpRuntimeRegistrySynchronizerTests.ClientHandle_ShouldWaitForActiveInvocationBeforeDisposing()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.WorkflowTests.McpRuntimeRegistrySynchronizerTests.ClientHandle_ShouldWaitForActiveInvocationBeforeDisposing"
+        "AICopilot.InProcessTests.McpRuntimeRegistrySynchronizerTests.ClientHandle_ShouldWaitForActiveInvocationBeforeDisposing"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -1766,7 +1771,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudOidcLoginTestsControllerSecurity.CloudOidcOptions_ShouldKeepHostCookiePrefixWhenHttpsMode()",
       "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.UnitTests.CloudOidcOptionsTests.HttpsMode_ShouldKeepHostCookiePrefix"
+        "AICopilot.InProcessTests.CloudOidcOptionsTests.HttpsMode_ShouldKeepHostCookiePrefix"
       ],
       "reason": "HTTPS 模式 cookie 前缀由当前 options 行为测试覆盖。"
     },
@@ -1872,7 +1877,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudAiReadClientTests.Client_ShouldMapDevicePayloadIntoInternalReadonlyDto()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ContractTests.CloudAiReadClientContractTests.Client_ShouldMapDevicePayloadIntoInternalReadonlyDto"
+        "AICopilot.InProcessTests.CloudAiReadClientContractTests.Client_ShouldMapDevicePayloadIntoInternalReadonlyDto"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -1880,7 +1885,7 @@
       "oldSymbol": "AICopilot.BackendTests.SecretStringEncryptorTests.Decrypt_ShouldRejectLegacyCipherAtRuntime()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.UnitTests.SecretStringEncryptorTests.Decrypt_ShouldRejectLegacyCipherAtRuntime"
+        "AICopilot.InProcessTests.SecretStringEncryptorTests.Decrypt_ShouldRejectLegacyCipherAtRuntime"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -1944,7 +1949,7 @@
       "oldSymbol": "AICopilot.BackendTests.ModelSecretRuntimeBoundaryTests.EmbeddingGeneratorFactory_ShouldDecryptProtectedApiKeyBeforeCreatingGenerator()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.UnitTests.ModelSecretRuntimeBoundaryTests.EmbeddingGeneratorFactory_ShouldDecryptProtectedApiKeyBeforeCreatingGenerator"
+        "AICopilot.InProcessTests.ModelSecretRuntimeBoundaryTests.EmbeddingGeneratorFactory_ShouldDecryptProtectedApiKeyBeforeCreatingGenerator"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -1976,7 +1981,7 @@
       "oldSymbol": "AICopilot.BackendTests.MigrationWorkerSecretMigratorTests.EnsureMigratedSecrets_ShouldRejectMalformedAuthenticatedCipherValues()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ApplicationTests.MigrationWorkerSecretMigratorTests.EnsureMigratedSecrets_ShouldRejectMalformedAuthenticatedCipherValues"
+        "AICopilot.InProcessTests.MigrationWorkerSecretMigratorTests.EnsureMigratedSecrets_ShouldRejectMalformedAuthenticatedCipherValues"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -1984,7 +1989,7 @@
       "oldSymbol": "AICopilot.BackendTests.SecretStringEncryptorTests.ReEncryptLegacyCipher_ShouldMigrateToAuthenticatedCipher()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.UnitTests.SecretStringEncryptorTests.ReEncryptLegacyCipher_ShouldMigrateToAuthenticatedCipher"
+        "AICopilot.InProcessTests.SecretStringEncryptorTests.ReEncryptLegacyCipher_ShouldMigrateToAuthenticatedCipher"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -2104,7 +2109,7 @@
       "oldSymbol": "AICopilot.BackendTests.ModelSecretRuntimeBoundaryTests.OpenAiChatClientProvider_ShouldRejectLegacyPlaintextApiKey()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.UnitTests.ModelSecretRuntimeBoundaryTests.OpenAiChatClientProvider_ShouldRejectLegacyPlaintextApiKey"
+        "AICopilot.InProcessTests.ModelSecretRuntimeBoundaryTests.OpenAiChatClientProvider_ShouldRejectLegacyPlaintextApiKey"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -2144,7 +2149,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudAiReadClientTests.Client_ShouldRejectInvalidStateDeviceIdBeforeHttp(System.String)",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ContractTests.CloudAiReadClientContractTests.Client_ShouldRejectInvalidStateDeviceIdBeforeHttp"
+        "AICopilot.InProcessTests.CloudAiReadClientContractTests.Client_ShouldRejectInvalidStateDeviceIdBeforeHttp"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -2297,7 +2302,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudOidcLoginTestsControllerSecurity.FinalizeCloudOidcLogin_ShouldReturnAiJwtInBodyAndClearExternalCookie()",
       "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.ApplicationTests.CloudOidcFinalizationWorkflowTests.ExecuteAsync_ShouldReturnAiJwtAndClearExternalSession"
+        "AICopilot.InProcessTests.CloudOidcFinalizationWorkflowTests.ExecuteAsync_ShouldReturnAiJwtAndClearExternalSession"
       ],
       "reason": "成功 finalize 的 AI JWT 返回与外部会话清理由应用 workflow 测试覆盖。"
     },
@@ -2313,9 +2318,9 @@
       "oldSymbol": "AICopilot.BackendTests.SecurityHardeningTests.FrontendSource_ShouldNotContainBareCatchBlocks()",
       "disposition": "replaced",
       "replacementIds": [
-        "WEB:AICopilot.Web.unit.frontend-error-handling.no-bare-catch-blocks"
+        "WEB:AICopilot.Web.unit.frontend-lint-contract.rejects-bare-catch-clauses"
       ],
-      "reason": "前端无 bare catch 契约已物理迁入 Vitest runner，并扫描真实 .ts/.vue 源文件集合。"
+      "reason": "ESLint lint:check 通过 AST 规则扫描真实 src .ts/.vue 源文件；Vitest frontendLintContract 只用 lintText 验证规则片段的正反例，不读取生产源码。"
     },
     {
       "oldSymbol": "AICopilot.BackendTests.SecurityHardeningTests.DataAnalysisPlugin_ShouldNotLogOrReturnRawSqlExceptionMessage()",
@@ -2369,7 +2374,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudAiReadClientTests.Client_ShouldMapProductionRecordPayloadIntoSchemaFields()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ContractTests.CloudAiReadClientContractTests.Client_ShouldMapProductionRecordPayloadIntoSchemaFields"
+        "AICopilot.InProcessTests.CloudAiReadClientContractTests.Client_ShouldMapProductionRecordPayloadIntoSchemaFields"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -2377,7 +2382,7 @@
       "oldSymbol": "AICopilot.BackendTests.JwtSettingsTests.EnsureValid_ShouldRejectBlankIssuerAndAudience(System.String)",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.UnitTests.JwtSettingsTests.EnsureValid_ShouldRejectBlankIssuerAndAudience"
+        "AICopilot.InProcessTests.JwtSettingsTests.EnsureValid_ShouldRejectBlankIssuerAndAudience"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -2441,7 +2446,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudOidcLoginTestsControllerSecurity.CloudOidcOptions_ShouldAllowExplicitIntranetHttpOidc(System.String)",
       "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.UnitTests.CloudOidcOptionsTests.EnsureValid_ShouldAllowExplicitIntranetHttpOidc"
+        "AICopilot.InProcessTests.CloudOidcOptionsTests.EnsureValid_ShouldAllowExplicitIntranetHttpOidc"
       ],
       "reason": "显式内网 HTTP OIDC 例外由当前 options 行为测试覆盖。"
     },
@@ -2449,7 +2454,7 @@
       "oldSymbol": "AICopilot.BackendTests.MigrationWorkerSecretMigratorTests.EnsureMigratedSecrets_ShouldAcceptOnlyBlankOrAuthenticatedCipherValues()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ApplicationTests.MigrationWorkerSecretMigratorTests.EnsureMigratedSecrets_ShouldAcceptOnlyBlankOrAuthenticatedCipherValues"
+        "AICopilot.InProcessTests.MigrationWorkerSecretMigratorTests.EnsureMigratedSecrets_ShouldAcceptOnlyBlankOrAuthenticatedCipherValues"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -2497,7 +2502,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudAiReadClientTests.QuerySemantic_ShouldReturnMultipleDeviceStatusRowsWithoutInventingMissingHeartbeat()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ContractTests.CloudAiReadClientContractTests.QuerySemantic_ShouldReturnMultipleDeviceStatusRowsWithoutInventingMissingHeartbeat"
+        "AICopilot.InProcessTests.CloudAiReadClientContractTests.QuerySemantic_ShouldReturnMultipleDeviceStatusRowsWithoutInventingMissingHeartbeat"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -2513,7 +2518,7 @@
       "oldSymbol": "AICopilot.BackendTests.SecretStringEncryptorTests.EncryptAndDecrypt_ShouldRoundTripWithoutLeavingPlaintext()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.UnitTests.SecretStringEncryptorTests.EncryptAndDecrypt_ShouldRoundTripWithoutLeavingPlaintext"
+        "AICopilot.InProcessTests.SecretStringEncryptorTests.EncryptAndDecrypt_ShouldRoundTripWithoutLeavingPlaintext"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -2529,7 +2534,7 @@
       "oldSymbol": "AICopilot.BackendTests.MigrationWorkerSecretMigratorTests.MigrateLanguageModelApiKeys_ShouldRejectUnreadableProtectedSecretsBeforeChangingLaterModels()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ApplicationTests.MigrationWorkerSecretMigratorTests.MigrateLanguageModelApiKeys_ShouldRejectUnreadableProtectedSecretsBeforeChangingLaterModels"
+        "AICopilot.InProcessTests.MigrationWorkerSecretMigratorTests.MigrateLanguageModelApiKeys_ShouldRejectUnreadableProtectedSecretsBeforeChangingLaterModels"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -2545,7 +2550,7 @@
       "oldSymbol": "AICopilot.BackendTests.SemanticSqlGenerationTests.SqlGenerator_ShouldUseConfiguredAlias_ForTimeRangeOnRealMappings()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ApplicationTests.SemanticSqlGenerationTests.SqlGenerator_ShouldUseConfiguredAlias_ForTimeRangeOnRealMappings"
+        "AICopilot.InProcessTests.SemanticSqlGenerationTests.SqlGenerator_ShouldUseConfiguredAlias_ForTimeRangeOnRealMappings"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -2633,7 +2638,7 @@
       "oldSymbol": "AICopilot.BackendTests.SecurityHardeningTests.UseCaseExceptionHandler_ShouldReturnSanitizedServiceUnavailable_WhenCommitOutcomeIsUnknown()",
       "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.ContractTests.UnhandledApiExceptionPolicyTests.TryCreate_ShouldReturnSanitizedServiceUnavailable_WhenCommitOutcomeIsUnknown"
+        "AICopilot.InProcessTests.UnhandledApiExceptionPolicyTests.TryCreate_ShouldReturnSanitizedServiceUnavailable_WhenCommitOutcomeIsUnknown"
       ],
       "reason": "commit outcome unknown 的 503 净化契约由独立 Contract runner 覆盖。"
     },
@@ -2641,7 +2646,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudAiReadClientTests.QuerySemantic_ShouldRouteClientReleaseListThroughOfficialGetEndpoint()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ContractTests.CloudAiReadClientContractTests.QuerySemantic_ShouldRouteClientReleaseListThroughOfficialGetEndpoint"
+        "AICopilot.InProcessTests.CloudAiReadClientContractTests.QuerySemantic_ShouldRouteClientReleaseListThroughOfficialGetEndpoint"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -2689,7 +2694,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudAiReadClientTests.Client_ShouldRejectLegacyOrMalformedProviderEnvelope(System.String)",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ContractTests.CloudAiReadClientContractTests.Client_ShouldRejectLegacyOrMalformedProviderEnvelope"
+        "AICopilot.InProcessTests.CloudAiReadClientContractTests.Client_ShouldRejectLegacyOrMalformedProviderEnvelope"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -2827,7 +2832,7 @@
       "oldSymbol": "AICopilot.BackendTests.JwtSettingsTests.EnsureValid_ShouldAcceptSixtyFourCharacterSecret()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.UnitTests.JwtSettingsTests.EnsureValid_ShouldAcceptSixtyFourCharacterSecret"
+        "AICopilot.InProcessTests.JwtSettingsTests.EnsureValid_ShouldAcceptSixtyFourCharacterSecret"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -2843,7 +2848,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudAiReadClientTests.Client_ShouldReturnClearErrorsForTokenPermissionAndScopeProblems(System.Net.HttpStatusCode,System.String)",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ContractTests.CloudAiReadClientContractTests.Client_ShouldReturnClearErrorsForTokenPermissionAndScopeProblems"
+        "AICopilot.InProcessTests.CloudAiReadClientContractTests.Client_ShouldReturnClearErrorsForTokenPermissionAndScopeProblems"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -2851,7 +2856,7 @@
       "oldSymbol": "AICopilot.BackendTests.McpRuntimeRegistrySynchronizerTests.ReconcileAsync_ShouldSkipUnchangedCandidate_AndReplaceChangedRowVersion()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.WorkflowTests.McpRuntimeRegistrySynchronizerTests.ReconcileAsync_ShouldSkipUnchangedCandidate_AndReplaceChangedRowVersion"
+        "AICopilot.InProcessTests.McpRuntimeRegistrySynchronizerTests.ReconcileAsync_ShouldSkipUnchangedCandidate_AndReplaceChangedRowVersion"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -2907,7 +2912,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudOidcLoginTestsControllerSecurity.CloudOidcOptions_ShouldRejectInsecureClientMetadataConfiguration(System.String,System.String,System.Boolean)",
       "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.UnitTests.CloudOidcOptionsTests.EnsureValid_ShouldRejectInsecureClientMetadataConfiguration"
+        "AICopilot.InProcessTests.CloudOidcOptionsTests.EnsureValid_ShouldRejectInsecureClientMetadataConfiguration"
       ],
       "reason": "不安全 client metadata 组合由当前 options 行为测试拒绝。"
     },
@@ -2939,7 +2944,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudOidcLoginTestsControllerSecurity.CloudOidcOptions_ShouldAllowDevelopmentLoopbackHttpIssuer(System.String)",
       "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.UnitTests.CloudOidcOptionsTests.EnsureValid_ShouldAllowDevelopmentLoopbackHttpIssuer"
+        "AICopilot.InProcessTests.CloudOidcOptionsTests.EnsureValid_ShouldAllowDevelopmentLoopbackHttpIssuer"
       ],
       "reason": "开发 loopback HTTP issuer 例外由当前 options 行为测试覆盖。"
     },
@@ -2971,7 +2976,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudAiReadClientTests.ClientContract_ShouldExposeTypedReadsOnly()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ContractTests.CloudAiReadClientContractTests.ClientContract_ShouldExposeTypedReadsOnly"
+        "AICopilot.InProcessTests.CloudAiReadClientContractTests.ClientContract_ShouldExposeTypedReadsOnly"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -3083,7 +3088,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudAiReadClientTests.Client_ShouldResolveDeviceCodeBeforeSemanticDeviceLogQuery()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ContractTests.CloudAiReadClientContractTests.Client_ShouldResolveDeviceCodeBeforeSemanticDeviceLogQuery"
+        "AICopilot.InProcessTests.CloudAiReadClientContractTests.Client_ShouldResolveDeviceCodeBeforeSemanticDeviceLogQuery"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -3198,7 +3203,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudAiReadClientTests.Client_ShouldNotSendNaturalLanguageAsDeviceKeyword()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ContractTests.CloudAiReadClientContractTests.Client_ShouldNotSendNaturalLanguageAsDeviceKeyword"
+        "AICopilot.InProcessTests.CloudAiReadClientContractTests.Client_ShouldNotSendNaturalLanguageAsDeviceKeyword"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -3280,7 +3285,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudAiReadClientTests.Client_ShouldSendDeviceLogQueryWithCloudAiReadParametersOnly()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ContractTests.CloudAiReadClientContractTests.Client_ShouldSendDeviceLogQueryWithCloudAiReadParametersOnly"
+        "AICopilot.InProcessTests.CloudAiReadClientContractTests.Client_ShouldSendDeviceLogQueryWithCloudAiReadParametersOnly"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -3288,7 +3293,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudAiReadClientTests.Client_ShouldNotSendHttpWhenProductionRecordTimeRangeIsMissing()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ContractTests.CloudAiReadClientContractTests.Client_ShouldNotSendHttpWhenProductionRecordTimeRangeIsMissing"
+        "AICopilot.InProcessTests.CloudAiReadClientContractTests.Client_ShouldNotSendHttpWhenProductionRecordTimeRangeIsMissing"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -3328,7 +3333,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudOidcLoginTestsControllerSecurity.CloudOidcOptions_ShouldAllowProductionHttpsIssuerWithHttpsMetadata()",
       "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.UnitTests.CloudOidcOptionsTests.EnsureValid_ShouldAllowProductionHttpsIssuerWithHttpsMetadata"
+        "AICopilot.InProcessTests.CloudOidcOptionsTests.EnsureValid_ShouldAllowProductionHttpsIssuerWithHttpsMetadata"
       ],
       "reason": "生产 HTTPS issuer 和 metadata 约束由当前 options 行为测试覆盖。"
     },
@@ -3352,7 +3357,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudAiReadClientTests.Client_ShouldSendDeviceQueryWithExactAndKeywordParametersAsAndFilters()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ContractTests.CloudAiReadClientContractTests.Client_ShouldSendDeviceQueryWithExactAndKeywordParametersAsAndFilters"
+        "AICopilot.InProcessTests.CloudAiReadClientContractTests.Client_ShouldSendDeviceQueryWithExactAndKeywordParametersAsAndFilters"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -3416,7 +3421,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudAiReadClientTests.Client_ShouldNotSendHttpWhenDeviceCodeIsProvidedWithoutDeviceId()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ContractTests.CloudAiReadClientContractTests.Client_ShouldNotSendHttpWhenDeviceCodeIsProvidedWithoutDeviceId"
+        "AICopilot.InProcessTests.CloudAiReadClientContractTests.Client_ShouldNotSendHttpWhenDeviceCodeIsProvidedWithoutDeviceId"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -3480,7 +3485,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudAiReadClientTests.Client_ShouldNotSendHttpWhenDeviceLogTimeRangeIsMissing()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ContractTests.CloudAiReadClientContractTests.Client_ShouldNotSendHttpWhenDeviceLogTimeRangeIsMissing"
+        "AICopilot.InProcessTests.CloudAiReadClientContractTests.Client_ShouldNotSendHttpWhenDeviceLogTimeRangeIsMissing"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -3552,7 +3557,7 @@
       "oldSymbol": "AICopilot.BackendTests.RagIndexingLifecycleTests.DocumentFileDeletionRequestedConsumer_ShouldRetryWhenUploadCommitLeaseIsActive()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.WorkflowTests.RagFileDeletionWorkflowTests.DocumentFileDeletionRequestedConsumer_ShouldRetryWhenUploadCommitLeaseIsActive"
+        "AICopilot.PersistenceFilesystemTests.RagFileDeletionWorkflowTests.DocumentFileDeletionRequestedConsumer_ShouldRetryWhenUploadCommitLeaseIsActive"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -3602,7 +3607,7 @@
       "oldSymbol": "AICopilot.BackendTests.SemanticSqlGenerationTests.SqlGenerator_ShouldSupportLiteralFieldMappings_ForRealMappings()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ApplicationTests.SemanticSqlGenerationTests.SqlGenerator_ShouldSupportLiteralFieldMappings_ForRealMappings"
+        "AICopilot.InProcessTests.SemanticSqlGenerationTests.SqlGenerator_ShouldSupportLiteralFieldMappings_ForRealMappings"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -3682,7 +3687,7 @@
       "oldSymbol": "AICopilot.BackendTests.SemanticSqlGenerationTests.SqlGenerator_ShouldSupportConfiguredJoinFromClause_ForRealMappings()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ApplicationTests.SemanticSqlGenerationTests.SqlGenerator_ShouldSupportConfiguredJoinFromClause_ForRealMappings"
+        "AICopilot.InProcessTests.SemanticSqlGenerationTests.SqlGenerator_ShouldSupportConfiguredJoinFromClause_ForRealMappings"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -3702,7 +3707,7 @@
       "oldSymbol": "AICopilot.BackendTests.ModelSecretRuntimeBoundaryTests.ModelEndpointPoolScheduler_ShouldPassProtectedEnvironmentApiKeyWithoutDecrypting()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.UnitTests.ModelSecretRuntimeBoundaryTests.ModelEndpointPoolScheduler_ShouldPassProtectedEnvironmentApiKeyWithoutDecrypting"
+        "AICopilot.UnitTests.ModelEndpointPoolSecretBoundaryTests.ModelEndpointPoolScheduler_ShouldPassProtectedEnvironmentApiKeyWithoutDecrypting"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -3782,7 +3787,7 @@
       "oldSymbol": "AICopilot.BackendTests.ModelSecretRuntimeBoundaryTests.ModelEndpointPoolScheduler_ShouldRejectPlaintextOverrideApiKey()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.UnitTests.ModelSecretRuntimeBoundaryTests.ModelEndpointPoolScheduler_ShouldRejectPlaintextOverrideApiKey"
+        "AICopilot.UnitTests.ModelEndpointPoolSecretBoundaryTests.ModelEndpointPoolScheduler_ShouldRejectPlaintextOverrideApiKey"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -3854,7 +3859,7 @@
       "oldSymbol": "AICopilot.BackendTests.AgentArtifactGenerationTests.AgentTableFileParser_ShouldParseCsvIntoNormalizedRows()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ApplicationTests.AgentArtifactGenerationTests.AgentTableFileParser_ShouldParseCsvIntoNormalizedRows"
+        "AICopilot.PersistenceFilesystemTests.AgentArtifactGenerationTests.AgentTableFileParser_ShouldParseCsvIntoNormalizedRows"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -3870,7 +3875,7 @@
       "oldSymbol": "AICopilot.BackendTests.MigrationWorkerSecretMigratorTests.MigrateEmbeddingModelApiKeys_ShouldPreflightUnreadableProtectedSecretsBeforeChangingEarlierModels()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ApplicationTests.MigrationWorkerSecretMigratorTests.MigrateEmbeddingModelApiKeys_ShouldPreflightUnreadableProtectedSecretsBeforeChangingEarlierModels"
+        "AICopilot.InProcessTests.MigrationWorkerSecretMigratorTests.MigrateEmbeddingModelApiKeys_ShouldPreflightUnreadableProtectedSecretsBeforeChangingEarlierModels"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -3902,7 +3907,7 @@
       "oldSymbol": "AICopilot.BackendTests.SemanticSqlGenerationTests.SqlGenerator_ShouldGenerateProductionRangeSql()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ApplicationTests.SemanticSqlGenerationTests.SqlGenerator_ShouldGenerateProductionRangeSql"
+        "AICopilot.InProcessTests.SemanticSqlGenerationTests.SqlGenerator_ShouldGenerateProductionRangeSql"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -3972,7 +3977,7 @@
       "oldSymbol": "AICopilot.BackendTests.MigrationWorkerSecretMigratorTests.MigrateLanguageModelApiKeys_ShouldPreflightUnreadableProtectedSecretsBeforeChangingEarlierModels()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ApplicationTests.MigrationWorkerSecretMigratorTests.MigrateLanguageModelApiKeys_ShouldPreflightUnreadableProtectedSecretsBeforeChangingEarlierModels"
+        "AICopilot.InProcessTests.MigrationWorkerSecretMigratorTests.MigrateLanguageModelApiKeys_ShouldPreflightUnreadableProtectedSecretsBeforeChangingEarlierModels"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -3988,7 +3993,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudAiReadClientTests.QuerySemantic_ShouldRouteProcessDetailThroughProcessesAndRequireUniqueExactMatch()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ContractTests.CloudAiReadClientContractTests.QuerySemantic_ShouldRouteProcessDetailThroughProcessesAndRequireUniqueExactMatch"
+        "AICopilot.InProcessTests.CloudAiReadClientContractTests.QuerySemantic_ShouldRouteProcessDetailThroughProcessesAndRequireUniqueExactMatch"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -4108,7 +4113,7 @@
       "oldSymbol": "AICopilot.BackendTests.MigrationWorkerSecretMigratorTests.EnsureMigratedSecrets_ShouldRejectCipherValuesProtectedWithDifferentKey()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ApplicationTests.MigrationWorkerSecretMigratorTests.EnsureMigratedSecrets_ShouldRejectCipherValuesProtectedWithDifferentKey"
+        "AICopilot.InProcessTests.MigrationWorkerSecretMigratorTests.EnsureMigratedSecrets_ShouldRejectCipherValuesProtectedWithDifferentKey"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -4124,7 +4129,7 @@
       "oldSymbol": "AICopilot.BackendTests.SecretStringEncryptorTests.Decrypt_ShouldRejectUnprotectedStoredSecret()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.UnitTests.SecretStringEncryptorTests.Decrypt_ShouldRejectUnprotectedStoredSecret"
+        "AICopilot.InProcessTests.SecretStringEncryptorTests.Decrypt_ShouldRejectUnprotectedStoredSecret"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -4182,7 +4187,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudAiReadClientTests.Client_ShouldSendDeviceLogPresetWithCloudAiReadParametersOnly()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ContractTests.CloudAiReadClientContractTests.Client_ShouldSendDeviceLogPresetWithCloudAiReadParametersOnly"
+        "AICopilot.InProcessTests.CloudAiReadClientContractTests.Client_ShouldSendDeviceLogPresetWithCloudAiReadParametersOnly"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -4190,7 +4195,7 @@
       "oldSymbol": "AICopilot.BackendTests.ModelSecretRuntimeBoundaryTests.EmbeddingGeneratorFactory_ShouldRejectLegacyPlaintextApiKey()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.UnitTests.ModelSecretRuntimeBoundaryTests.EmbeddingGeneratorFactory_ShouldRejectLegacyPlaintextApiKey"
+        "AICopilot.InProcessTests.ModelSecretRuntimeBoundaryTests.EmbeddingGeneratorFactory_ShouldRejectLegacyPlaintextApiKey"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -4198,7 +4203,7 @@
       "oldSymbol": "AICopilot.BackendTests.SpecificationEvaluatorTests.GetQuery_applies_filter_order_and_paging()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.UnitTests.SpecificationEvaluatorTests.GetQuery_applies_filter_order_and_paging"
+        "AICopilot.InProcessTests.SpecificationEvaluatorTests.GetQuery_applies_filter_order_and_paging"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -4238,10 +4243,11 @@
       "oldSymbol": "AICopilot.BackendTests.TextToSqlReadOnlyTests.Connector_ShouldRedactSqlWhenExecutionFails()",
       "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.UnitTests.SqlAdapterPolicyTests.SqlExecutionLogPolicy_ShouldHashSqlWithoutRetainingPlaintext",
+        "AICopilot.PersistenceTests.DapperDatabaseConnectorPersistenceTests.QueryExecutionFailure_ShouldUseRealPostgresAndRedactSqlAndConnectionDetails",
+        "AICopilot.InProcessTests.DapperDatabaseConnectorSecurityTests.Connector_ShouldRedactRejectedSqlAndLogOnlyDerivedMetadata",
         "AICopilot.WorkflowTests.ToolRegistryWorkflowTests.AgentTaskRuntime_ShouldRedactFailedExecutionRecord"
       ],
-      "reason": "SQL 执行失败的明文隔离由日志 hash 策略和 workflow 失败记录净化共同覆盖。"
+      "reason": "SQL 执行失败由真实 PostgreSQL Dapper 路径验证 SQL 和连接信息净化；拒绝路径和 workflow 失败记录分别保留独立行为覆盖。"
     },
     {
       "oldSymbol": "AICopilot.BackendTests.CloudOidcLoginTests.CloudOidcBootstrapAdminBindingOptions_ShouldRejectEnabledEmptyBootstrapAdminUserName()",
@@ -4279,7 +4285,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudOidcLoginTestsControllerSecurity.FinalizeCloudOidcLogin_ShouldClearExternalCookie_WhenFinalizeFails()",
       "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.ApplicationTests.CloudOidcFinalizationWorkflowTests.ExecuteAsync_ShouldPreserveFinalizeFailureAndClearExternalSession"
+        "AICopilot.InProcessTests.CloudOidcFinalizationWorkflowTests.ExecuteAsync_ShouldPreserveFinalizeFailureAndClearExternalSession"
       ],
       "reason": "finalize 失败优先级和外部会话清理由应用 workflow 测试共同断言。"
     },
@@ -4319,7 +4325,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudOidcLoginTestsControllerSecurity.FinalizeCloudOidcLogin_ShouldClearExternalCookie_WhenSenderThrows()",
       "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.ApplicationTests.CloudOidcFinalizationWorkflowTests.ExecuteAsync_ShouldClearExternalSession_WhenFinalizeThrows"
+        "AICopilot.InProcessTests.CloudOidcFinalizationWorkflowTests.ExecuteAsync_ShouldClearExternalSession_WhenFinalizeThrows"
       ],
       "reason": "sender 异常路径的外部会话清理由应用 workflow 测试覆盖。"
     },
@@ -4399,7 +4405,7 @@
       "oldSymbol": "AICopilot.BackendTests.McpRuntimeRegistrySynchronizerTests.ReconcileAsync_ShouldUnregisterAndDispose_WhenCandidateDisappears()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.WorkflowTests.McpRuntimeRegistrySynchronizerTests.ReconcileAsync_ShouldUnregisterAndDispose_WhenCandidateDisappears"
+        "AICopilot.InProcessTests.McpRuntimeRegistrySynchronizerTests.ReconcileAsync_ShouldUnregisterAndDispose_WhenCandidateDisappears"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -4407,7 +4413,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudAiReadClientTests.Client_ShouldSendCapacityQueryWithCloudAiReadParametersOnly()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ContractTests.CloudAiReadClientContractTests.Client_ShouldSendCapacityQueryWithCloudAiReadParametersOnly"
+        "AICopilot.InProcessTests.CloudAiReadClientContractTests.Client_ShouldSendCapacityQueryWithCloudAiReadParametersOnly"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -4496,7 +4502,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudAiReadClientTests.Client_ShouldSendCapacityHourlyQueryWithCloudAiReadParametersOnly()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ContractTests.CloudAiReadClientContractTests.Client_ShouldSendCapacityHourlyQueryWithCloudAiReadParametersOnly"
+        "AICopilot.InProcessTests.CloudAiReadClientContractTests.Client_ShouldSendCapacityHourlyQueryWithCloudAiReadParametersOnly"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -4512,7 +4518,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudOidcLoginTestsControllerSecurity.CloudOidcOptions_ShouldRejectPublicHttpEvenWhenIntranetHttpOidcIsEnabled()",
       "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.UnitTests.CloudOidcOptionsTests.EnsureValid_ShouldRejectPublicHttpEvenWhenIntranetHttpOidcIsEnabled"
+        "AICopilot.InProcessTests.CloudOidcOptionsTests.EnsureValid_ShouldRejectPublicHttpEvenWhenIntranetHttpOidcIsEnabled"
       ],
       "reason": "公网 HTTP issuer 即使开启内网例外仍由当前 options 行为测试拒绝。"
     },
@@ -4520,7 +4526,7 @@
       "oldSymbol": "AICopilot.BackendTests.RagIndexingLifecycleTests.DocumentFileDeletionRequestedConsumer_ShouldRetirePendingUploadJournalUnderCommitLease()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.WorkflowTests.RagFileDeletionWorkflowTests.DocumentFileDeletionRequestedConsumer_ShouldRetirePendingUploadJournalUnderCommitLease"
+        "AICopilot.PersistenceFilesystemTests.RagFileDeletionWorkflowTests.DocumentFileDeletionRequestedConsumer_ShouldRetirePendingUploadJournalUnderCommitLease"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -4542,11 +4548,16 @@
     },
     {
       "oldSymbol": "AICopilot.BackendTests.ChatErrorContractTests.ProviderRetryHandler_ShouldRetryOnlyTransientProviderFailures()",
-      "disposition": "retained-self",
+      "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.ContractFilesystemTests.ChatRuntimeSourceContractTests.ProviderRetryHandler_ShouldRetryOnlyTransientProviderFailures"
+        "AICopilot.InProcessTests.AiProviderRetryHandlerTests.SendAsync_ShouldNotRetryInvalidOperationException",
+        "AICopilot.InProcessTests.AiProviderRetryHandlerTests.SendAsync_ShouldNotRetryNonTransientStatusCode",
+        "AICopilot.InProcessTests.AiProviderRetryHandlerTests.SendAsync_ShouldPropagateCallerCancellationWithoutRetry",
+        "AICopilot.InProcessTests.AiProviderRetryHandlerTests.SendAsync_ShouldRetryHttpRequestExceptionUpToThreeTotalAttempts",
+        "AICopilot.InProcessTests.AiProviderRetryHandlerTests.SendAsync_ShouldRetryProviderTaskCancellationUpToThreeTotalAttempts",
+        "AICopilot.InProcessTests.AiProviderRetryHandlerTests.SendAsync_ShouldRetryTransientStatusCodesUpToThreeTotalAttempts"
       ],
-      "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
+      "reason": "旧源码字符串 guard 已物理删除；真实 HttpMessageHandler 行为矩阵分别验证瞬时状态、网络异常、provider 超时、非瞬时状态、非瞬时异常和 caller cancellation 的重试边界。"
     },
     {
       "oldSymbol": "AICopilot.BackendTests.SecurityHardeningTests.ApprovalPolicy_ShouldRejectInvalidInput()",
@@ -4754,7 +4765,7 @@
       "oldSymbol": "AICopilot.BackendTests.MigrationWorkerCloudReadOnlySeederTests.CreateBusinessDatabase_ShouldCreateVerifiedCloudReadOnlySource()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ApplicationTests.CloudReadOnlyBusinessDatabaseSeedPolicyTests.CreateBusinessDatabase_ShouldCreateVerifiedCloudReadOnlySource"
+        "AICopilot.InProcessTests.MigrationWorkerCloudReadOnlySeederTests.CreateBusinessDatabase_ShouldCreateVerifiedCloudReadOnlySource"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -4762,7 +4773,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudAiReadClientTests.Client_ShouldRouteDeviceCodeStatusDirectlyToDeviceClientStates()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ContractTests.CloudAiReadClientContractTests.Client_ShouldRouteDeviceCodeStatusDirectlyToDeviceClientStates"
+        "AICopilot.InProcessTests.CloudAiReadClientContractTests.Client_ShouldRouteDeviceCodeStatusDirectlyToDeviceClientStates"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -4778,7 +4789,7 @@
       "oldSymbol": "AICopilot.BackendTests.ModelSecretRuntimeBoundaryTests.OpenAiChatClientProvider_ShouldDecryptProtectedApiKeyBeforeCreatingClient()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.UnitTests.ModelSecretRuntimeBoundaryTests.OpenAiChatClientProvider_ShouldDecryptProtectedApiKeyBeforeCreatingClient"
+        "AICopilot.InProcessTests.ModelSecretRuntimeBoundaryTests.OpenAiChatClientProvider_ShouldDecryptProtectedApiKeyBeforeCreatingClient"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -4819,9 +4830,9 @@
       "disposition": "replaced",
       "replacementIds": [
         "AICopilot.ToolPlugin.ConformanceTests.McpServerBootstrapExposureTests.ResolveCommandArguments_ShouldHonorQuotesEscapesAndSingleFilePaths",
-        "AICopilot.ToolPlugin.ConformanceTests.McpServerBootstrapExposureTests.SseTransportOptions_ShouldUseValidatedEndpointAndFifteenSecondConnectionTimeout"
+        "AICopilot.ToolPlugin.ConformanceTests.McpServerBootstrapExposureTests.CreateRegistrationAsync_ShouldRejectUnsafePersistedSseEndpointThroughTheRealFactoryPath"
       ],
-      "reason": "MCP quoted argument 解析和真实 SSE transport 的校验后 endpoint/15 秒 connection timeout 由插件 conformance 行为测试覆盖。"
+      "reason": "MCP quoted argument 解析保留直接行为覆盖；SSE 通过公开注册链与真实 client factory 证明不安全持久化 endpoint 在构造 transport/联网前被拒绝，不暴露选项 seam 或锁定超时实现细节。"
     },
     {
       "oldSymbol": "AICopilot.BackendTests.AuthorizationPipelineBehaviorTests.ValidationStream_ShouldRejectBeforeCallingNext()",
@@ -4892,7 +4903,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudAiReadClientTests.DeviceStatus_ShouldSurfaceCloudPermissionFailure()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ContractTests.CloudAiReadClientContractTests.DeviceStatus_ShouldSurfaceCloudPermissionFailure"
+        "AICopilot.InProcessTests.CloudAiReadClientContractTests.DeviceStatus_ShouldSurfaceCloudPermissionFailure"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -4940,7 +4951,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudAiReadClientTests.Client_ShouldRejectUnsupportedStateFiltersBeforeHttp()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ContractTests.CloudAiReadClientContractTests.Client_ShouldRejectUnsupportedStateFiltersBeforeHttp"
+        "AICopilot.InProcessTests.CloudAiReadClientContractTests.Client_ShouldRejectUnsupportedStateFiltersBeforeHttp"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -4948,9 +4959,9 @@
       "oldSymbol": "AICopilot.BackendTests.SecurityHardeningTests.UploadDocument_ShouldRejectEmptyOrTooLargeFilesBeforeDispatch()",
       "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.UnitTests.DocumentUploadRequestPolicyTests.Validate_ShouldRejectMissingEmptyOrOversizedContent"
+        "AICopilot.InProcessTests.RagControllerUploadValidationTests.UploadDocument_ShouldRejectMissingEmptyOrTooLargeFilesBeforeDispatch"
       ],
-      "reason": "文档上传缺失、空内容和超限拒绝由提取后的请求策略测试覆盖。"
+      "reason": "文档上传缺失、空内容和超限拒绝由真实 RagController 入口行为覆盖，并断言拒绝前不会 dispatch。"
     },
     {
       "oldSymbol": "AICopilot.BackendTests.ToolRegistryGovernanceTests.AgentPlanToolGuard_ShouldNotExposeMockMcpTools_WhenMockRuntimeIsDisabled()",
@@ -5053,7 +5064,7 @@
       "oldSymbol": "AICopilot.BackendTests.MigrationWorkerCloudReadOnlySeederTests.ValidateOptions_ShouldRejectSimulationSeedConflict()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ApplicationTests.CloudReadOnlyBusinessDatabaseSeedPolicyTests.ValidateOptions_ShouldRejectSimulationSeedConflict"
+        "AICopilot.InProcessTests.MigrationWorkerCloudReadOnlySeederTests.ValidateOptions_ShouldRejectSimulationSeedConflict"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -5085,7 +5096,7 @@
       "oldSymbol": "AICopilot.BackendTests.MigrationWorkerSecretMigratorTests.MigrateLanguageModelApiKeys_ShouldProtectLegacyCipherAndPlaintextSecrets()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ApplicationTests.MigrationWorkerSecretMigratorTests.MigrateLanguageModelApiKeys_ShouldProtectLegacyCipherAndPlaintextSecrets"
+        "AICopilot.InProcessTests.MigrationWorkerSecretMigratorTests.MigrateLanguageModelApiKeys_ShouldProtectLegacyCipherAndPlaintextSecrets"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -5093,7 +5104,7 @@
       "oldSymbol": "AICopilot.BackendTests.SemanticSqlGenerationTests.SqlGenerator_ShouldNotInventProcessNameScope_ForRealDeviceLogQuery()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ApplicationTests.SemanticSqlGenerationTests.SqlGenerator_ShouldNotInventProcessNameScope_ForRealDeviceLogQuery"
+        "AICopilot.InProcessTests.SemanticSqlGenerationTests.SqlGenerator_ShouldNotInventProcessNameScope_ForRealDeviceLogQuery"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -5101,7 +5112,7 @@
       "oldSymbol": "AICopilot.BackendTests.SqlGuardrailTests.Validate_ShouldRejectUnsafeOrNonQuerySql(System.String,System.String)",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.UnitTests.SqlGuardrailTests.Validate_ShouldRejectUnsafeOrNonQuerySql"
+        "AICopilot.InProcessTests.SqlGuardrailTests.Validate_ShouldRejectUnsafeOrNonQuerySql"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -5229,7 +5240,7 @@
       "oldSymbol": "AICopilot.BackendTests.JwtSettingsTests.EnsureValid_ShouldRejectSixtyThreeCharacterSecretWithoutLeakingIt()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.UnitTests.JwtSettingsTests.EnsureValid_ShouldRejectSixtyThreeCharacterSecretWithoutLeakingIt"
+        "AICopilot.InProcessTests.JwtSettingsTests.EnsureValid_ShouldRejectSixtyThreeCharacterSecretWithoutLeakingIt"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -5245,7 +5256,7 @@
       "oldSymbol": "AICopilot.BackendTests.MigrationWorkerCloudReadOnlySeederTests.ValidateOptions_ShouldRequireConnectionString_WhenEnabled()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ApplicationTests.CloudReadOnlyBusinessDatabaseSeedPolicyTests.ValidateOptions_ShouldRequireConnectionString_WhenEnabled"
+        "AICopilot.InProcessTests.MigrationWorkerCloudReadOnlySeederTests.ValidateOptions_ShouldRequireConnectionString_WhenEnabled"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -5264,7 +5275,7 @@
       "oldSymbol": "AICopilot.BackendTests.SecretStringEncryptorTests.EnsureConfigured_ShouldThrowWhenMasterKeyMissing()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.UnitTests.SecretStringEncryptorTests.EnsureConfigured_ShouldThrowWhenMasterKeyMissing"
+        "AICopilot.InProcessTests.SecretStringEncryptorTests.EnsureConfigured_ShouldThrowWhenMasterKeyMissing"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -5272,7 +5283,7 @@
       "oldSymbol": "AICopilot.BackendTests.AgentArtifactGenerationTests.AgentArtifactDocumentGenerator_ShouldCreatePortableDraftFormats()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ApplicationTests.AgentArtifactGenerationTests.AgentArtifactDocumentGenerator_ShouldCreatePortableDraftFormats"
+        "AICopilot.PersistenceFilesystemTests.AgentArtifactGenerationTests.AgentArtifactDocumentGenerator_ShouldCreatePortableDraftFormats"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -5304,7 +5315,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudAiReadClientTests.Client_ShouldSendDeviceClientStateQueryWithOfficialParametersOnly()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ContractTests.CloudAiReadClientContractTests.Client_ShouldSendDeviceClientStateQueryWithOfficialParametersOnly"
+        "AICopilot.InProcessTests.CloudAiReadClientContractTests.Client_ShouldSendDeviceClientStateQueryWithOfficialParametersOnly"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -5424,7 +5435,7 @@
       "oldSymbol": "AICopilot.BackendTests.RagIndexingLifecycleTests.DocumentFileDeletionRequestedConsumer_ShouldDeleteStoredFile()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.WorkflowTests.RagFileDeletionWorkflowTests.DocumentFileDeletionRequestedConsumer_ShouldDeleteStoredFile"
+        "AICopilot.PersistenceFilesystemTests.RagFileDeletionWorkflowTests.DocumentFileDeletionRequestedConsumer_ShouldDeleteStoredFile"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -5457,7 +5468,7 @@
       "oldSymbol": "AICopilot.BackendTests.ModelSecretRuntimeBoundaryTests.ModelEndpointPoolScheduler_ShouldRejectPlaintextEnvironmentApiKey()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.UnitTests.ModelSecretRuntimeBoundaryTests.ModelEndpointPoolScheduler_ShouldRejectPlaintextEnvironmentApiKey"
+        "AICopilot.UnitTests.ModelEndpointPoolSecretBoundaryTests.ModelEndpointPoolScheduler_ShouldRejectPlaintextEnvironmentApiKey"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -5465,7 +5476,7 @@
       "oldSymbol": "AICopilot.BackendTests.McpRuntimeRegistrySynchronizerTests.ReconcileAsync_ShouldUnregister_WhenCandidateCannotProduceRegistration()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.WorkflowTests.McpRuntimeRegistrySynchronizerTests.ReconcileAsync_ShouldUnregister_WhenCandidateCannotProduceRegistration"
+        "AICopilot.InProcessTests.McpRuntimeRegistrySynchronizerTests.ReconcileAsync_ShouldUnregister_WhenCandidateCannotProduceRegistration"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -5530,7 +5541,7 @@
       "oldSymbol": "AICopilot.BackendTests.MigrationWorkerSecretMigratorTests.EnsureMigratedSecrets_ShouldRejectLegacyCipherAndPlaintextValues()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ApplicationTests.MigrationWorkerSecretMigratorTests.EnsureMigratedSecrets_ShouldRejectLegacyCipherAndPlaintextValues"
+        "AICopilot.InProcessTests.MigrationWorkerSecretMigratorTests.EnsureMigratedSecrets_ShouldRejectLegacyCipherAndPlaintextValues"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -5730,7 +5741,7 @@
       "oldSymbol": "AICopilot.BackendTests.JwtSettingsTests.EnsureValid_ShouldRejectNonPositiveAccessTokenLifetime(System.Int32)",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.UnitTests.JwtSettingsTests.EnsureValid_ShouldRejectNonPositiveAccessTokenLifetime"
+        "AICopilot.InProcessTests.JwtSettingsTests.EnsureValid_ShouldRejectNonPositiveAccessTokenLifetime"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -5738,7 +5749,7 @@
       "oldSymbol": "AICopilot.BackendTests.SqlGuardrailTests.Validate_ShouldAllowSingleReadOnlyQueries(System.String)",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.UnitTests.SqlGuardrailTests.Validate_ShouldAllowSingleReadOnlyQueries"
+        "AICopilot.InProcessTests.SqlGuardrailTests.Validate_ShouldAllowSingleReadOnlyQueries"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -5956,7 +5967,7 @@
       "oldSymbol": "AICopilot.BackendTests.SecurityHardeningTests.UseCaseExceptionHandler_ShouldNotLogRawExceptionMessageForCatchAll()",
       "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.ContractTests.UnhandledApiExceptionPolicyTests.TryCreate_ShouldReturnSanitizedCatchAllWithoutRawExceptionMessage"
+        "AICopilot.InProcessTests.UnhandledApiExceptionPolicyTests.TryCreate_ShouldReturnSanitizedCatchAllWithoutRawExceptionMessage"
       ],
       "reason": "catch-all 异常的稳定净化契约由独立 Contract runner 覆盖。"
     },
@@ -6004,7 +6015,7 @@
       "oldSymbol": "AICopilot.BackendTests.SemanticSqlGenerationTests.KeywordGuardrail_ShouldStillBlockUnsafeFallbackSql()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ApplicationTests.SemanticSqlGenerationTests.KeywordGuardrail_ShouldStillBlockUnsafeFallbackSql"
+        "AICopilot.InProcessTests.SemanticSqlGenerationTests.KeywordGuardrail_ShouldStillBlockUnsafeFallbackSql"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -6028,7 +6039,7 @@
       "oldSymbol": "AICopilot.BackendTests.DataAnalysisReadOnlyGuardrailTests.CloudReadOnlySource_ShouldRequireVerifiedReadOnlyCredential()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.UnitTests.DataAnalysisReadOnlyGuardrailTests.CloudReadOnlySource_ShouldRequireVerifiedReadOnlyCredential"
+        "AICopilot.InProcessTests.DapperDatabaseConnectorSecurityTests.CloudReadOnlySource_ShouldRequireVerifiedReadOnlyCredential"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -6068,7 +6079,7 @@
       "oldSymbol": "AICopilot.BackendTests.MigrationWorkerCloudReadOnlySeederTests.ResolveOptions_ShouldStayDisabledByDefault()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ApplicationTests.CloudReadOnlyBusinessDatabaseSeedPolicyTests.ResolveOptions_ShouldStayDisabledByDefault"
+        "AICopilot.InProcessTests.MigrationWorkerCloudReadOnlySeederTests.ResolveOptions_ShouldStayDisabledByDefault"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -6092,7 +6103,7 @@
       "oldSymbol": "AICopilot.BackendTests.RagIndexingLifecycleTests.DocumentFileDeletionRequestedConsumer_ShouldPropagateDeleteFailures()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.WorkflowTests.RagFileDeletionWorkflowTests.DocumentFileDeletionRequestedConsumer_ShouldPropagateDeleteFailures"
+        "AICopilot.PersistenceFilesystemTests.RagFileDeletionWorkflowTests.DocumentFileDeletionRequestedConsumer_ShouldPropagateDeleteFailures"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -6132,7 +6143,7 @@
       "oldSymbol": "AICopilot.BackendTests.CloudAiReadClientTests.Client_ShouldSendProductionRecordQueryWithCloudAiReadParametersOnly()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ContractTests.CloudAiReadClientContractTests.Client_ShouldSendProductionRecordQueryWithCloudAiReadParametersOnly"
+        "AICopilot.InProcessTests.CloudAiReadClientContractTests.Client_ShouldSendProductionRecordQueryWithCloudAiReadParametersOnly"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },
@@ -6156,9 +6167,9 @@
       "oldSymbol": "AICopilot.BackendTests.SecurityHardeningTests.DapperConnector_ShouldRejectEmptyConnectionString()",
       "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.UnitTests.SecurityPolicyUnitTests.BusinessDatabaseConnectionPolicy_ShouldRejectEmptyConnectionString"
+        "AICopilot.InProcessTests.DapperDatabaseConnectorSecurityTests.DapperConnector_ShouldRejectEmptyConnectionString"
       ],
-      "reason": "空业务数据库连接串由提取后的连接策略单元测试覆盖。"
+      "reason": "空业务数据库连接串由真实 Dapper connector 的 GetConnection 边界测试覆盖。"
     },
     {
       "oldSymbol": "AICopilot.BackendTests.ChatErrorContractTests.AgentWorkflowException_ShouldKeepWorkflowCodeAndUserMessage()",
@@ -6188,7 +6199,7 @@
       "oldSymbol": "AICopilot.BackendTests.SecurityHardeningTests.ErrorBoundaryMessages_ShouldNotReturnOrPersistRawExceptionMessages()",
       "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.ContractTests.UnhandledApiExceptionPolicyTests.TryCreate_ShouldReturnSanitizedCatchAllWithoutRawExceptionMessage",
+        "AICopilot.InProcessTests.UnhandledApiExceptionPolicyTests.TryCreate_ShouldReturnSanitizedCatchAllWithoutRawExceptionMessage",
         "AICopilot.ContractTests.ChatErrorContractTests.WorkflowExceptionDetail_ShouldUseWhitelistedSafeDetail"
       ],
       "reason": "HTTP 与 workflow 错误边界分别由净化 catch-all 契约和白名单 detail 契约覆盖。"
@@ -6325,7 +6336,7 @@
       "oldSymbol": "AICopilot.BackendTests.MigrationWorkerSecretMigratorTests.MigrateEmbeddingModelApiKeys_ShouldRejectUnreadableProtectedSecretsBeforeChangingLaterModels()",
       "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.ApplicationTests.MigrationWorkerSecretMigratorTests.MigrateEmbeddingModelApiKeys_ShouldRejectUnreadableProtectedSecretsBeforeChangingLaterModels"
+        "AICopilot.InProcessTests.MigrationWorkerSecretMigratorTests.MigrateEmbeddingModelApiKeys_ShouldRejectUnreadableProtectedSecretsBeforeChangingLaterModels"
       ],
       "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
     },

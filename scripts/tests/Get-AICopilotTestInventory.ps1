@@ -5,12 +5,20 @@ param(
     [string]$BaselinePath = 'scripts/tests/baselines/aicopilot-test-cases.json',
     [string]$ClassificationPath = 'scripts/tests/aicopilot-test-classification.json',
     [ValidateSet('Debug', 'Release')] [string]$Configuration = 'Release',
-    [switch]$UpdateBaseline
+    [string]$BaseRef = 'origin/main',
+    [switch]$UpdateBaseline,
+    [switch]$RunClassificationBehaviorFixture
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $global:LASTEXITCODE = 0
+. (Join-Path $PSScriptRoot 'Resolve-AICopilotQualityBase.ps1')
+$mergeBase = Resolve-AICopilotQualityBase -RepositoryRoot $RepositoryRoot -BaseRef $BaseRef
+$BaselinePath = (Resolve-AICopilotCanonicalBaselinePath `
+    -RepositoryRoot $RepositoryRoot `
+    -BaselineKind TestCases `
+    -BaselinePath $BaselinePath).FullPath
 
 function Get-DirectProperty {
     param(
@@ -69,7 +77,7 @@ if (($solutionProjects | Sort-Object) -join "`n" -cne ($allSourceProjects -join 
 $criticalTargetNames = @(
     'Compile', 'ProjectReference', 'PackageReference', 'Analyzer', 'AssemblyName',
     'IsTestProject', 'AICopilotTestRole', 'AICopilotRequired', 'AICopilotTestKind',
-    'AICopilotTestRuntime', 'AICopilotTestCadence', 'RunAnalyzers',
+    'AICopilotTestRuntime', 'AICopilotTestCadence', 'AICopilotTestOwner', 'RunAnalyzers',
     'RunAnalyzersDuringBuild', 'NoWarn')
 $buildDefinitionFiles = @(
     Get-ChildItem $root -File -Recurse -Include '*.csproj', '*.props', '*.targets' |
@@ -105,7 +113,7 @@ $allowedKinds = @(
     'GoldenEval',
     'Architecture'
 )
-$allowedRuntimes = @('Pure', 'Filesystem', 'Postgres', 'Aspire', 'LiveExternal')
+$allowedRuntimes = @('Pure', 'InProcess', 'Filesystem', 'Postgres', 'Aspire', 'LiveExternal')
 $allowedCadences = @('PR', 'Manual')
 $allowedCapabilities = @(
     'Platform', 'AgentWorkflow', 'RAG', 'Tooling', 'IdentitySecurity',
@@ -128,6 +136,9 @@ $nonRequiredRunnerAllowlist = @{
     'AICopilot.SimulationTests' = 'Application|Pure|Manual|Simulation'
     'AICopilot.SimulationDockerTests' = 'EndToEnd|Aspire|Manual|Simulation'
 }
+$inProcessRunnerAllowlist = @{
+    'AICopilot.InProcessTests' = 'Integration|InProcessBoundary'
+}
 
 $resolvedClassificationPath = if ([System.IO.Path]::IsPathRooted($ClassificationPath)) {
     $ClassificationPath
@@ -138,11 +149,13 @@ if (-not (Test-Path $resolvedClassificationPath -PathType Leaf)) {
     throw "Test classification ledger is missing: $resolvedClassificationPath"
 }
 $classificationDocument = Get-Content $resolvedClassificationPath -Raw | ConvertFrom-Json
-if ([int]$classificationDocument.schemaVersion -ne 1) {
+if ([int]$classificationDocument.schemaVersion -ne 2) {
     throw "Unsupported test classification schemaVersion='$($classificationDocument.schemaVersion)'."
 }
 $classificationByProject = @{}
 $classificationOverrideIds = [System.Collections.Generic.HashSet[string]]::new(
+    [System.StringComparer]::Ordinal)
+$classificationOverrideSelectors = [System.Collections.Generic.HashSet[string]]::new(
     [System.StringComparer]::Ordinal)
 foreach ($classificationProject in @($classificationDocument.projects)) {
     $classificationProjectName = [string]$classificationProject.projectName
@@ -166,6 +179,19 @@ foreach ($classificationProject in @($classificationDocument.projects)) {
         if ([string]::IsNullOrWhiteSpace([string]$override.class)) {
             throw "$overrideId must declare an exact test class."
         }
+        $methodProperty = $override.PSObject.Properties['method']
+        $caseProperty = $override.PSObject.Properties['case']
+        $method = if ($null -eq $methodProperty) { '' } else { [string]$methodProperty.Value }
+        $case = if ($null -eq $caseProperty) { '' } else { [string]$caseProperty.Value }
+        $selector = "$classificationProjectName::$([string]$override.class)::$method::$case"
+        if (-not $classificationOverrideSelectors.Add($selector)) {
+            throw "$overrideId duplicates an exact classification selector '$selector'."
+        }
+        if ((-not [string]::IsNullOrWhiteSpace($method) -or
+            -not [string]::IsNullOrWhiteSpace($case)) -and
+            $null -ne $override.PSObject.Properties['testKind']) {
+            throw "$overrideId is an exact method/case override and must inherit class-level testKind."
+        }
     }
 }
 
@@ -177,11 +203,14 @@ function Assert-ClassificationDimensions {
         [switch]$RequireRuntimeDependencies
     )
 
-    foreach ($name in @('capability', 'concern', 'profile', 'risk', 'ruleId', 'regressionId')) {
+    foreach ($name in @('testKind', 'capability', 'concern', 'profile', 'risk', 'ruleId', 'regressionId')) {
         $property = $Dimensions.PSObject.Properties[$name]
         if ($null -eq $property -or [string]::IsNullOrWhiteSpace([string]$property.Value)) {
             throw "$Context is missing explicit classification '$name'."
         }
+    }
+    if ([string]$Dimensions.testKind -notin $allowedKinds) {
+        throw "$Context has invalid testKind='$($Dimensions.testKind)'."
     }
     if ([string]$Dimensions.capability -notin $allowedCapabilities) {
         throw "$Context has invalid capability='$($Dimensions.capability)'."
@@ -201,6 +230,11 @@ function Assert-ClassificationDimensions {
         if ($null -eq $runtimeDependenciesProperty) {
             throw "$Context is missing explicit runtimeDependencies."
         }
+        if ($null -eq $runtimeDependenciesProperty.Value -or
+            $runtimeDependenciesProperty.Value -is [string] -or
+            $runtimeDependenciesProperty.Value -isnot [System.Collections.IEnumerable]) {
+            throw "$Context runtimeDependencies must be an explicit JSON array."
+        }
         $runtimeDependencies = @($runtimeDependenciesProperty.Value)
         $invalidRuntimeDependencies = @(
             $runtimeDependencies | Where-Object { [string]$_ -notin $allowedRuntimeDependencies }
@@ -210,6 +244,267 @@ function Assert-ClassificationDimensions {
             throw "$Context has invalid or duplicate runtimeDependencies."
         }
     }
+}
+
+function Resolve-CaseRuntimeDependencies {
+    param(
+        [Parameter(Mandatory)] [object]$SelectedDimensions,
+        [Parameter(Mandatory)] [object]$DefaultDimensions,
+        [Parameter(Mandatory)] [string]$Context
+    )
+
+    $selectedProperty = $SelectedDimensions.PSObject.Properties['runtimeDependencies']
+    $resolved = @(
+        if ($null -ne $selectedProperty) {
+            @($selectedProperty.Value)
+        }
+        else {
+            @($DefaultDimensions.runtimeDependencies)
+        }
+    )
+    $invalid = @($resolved | Where-Object { [string]$_ -notin $allowedRuntimeDependencies })
+    if ($invalid.Count -ne 0 -or
+        @($resolved | Group-Object | Where-Object Count -gt 1).Count -ne 0) {
+        throw "$Context has invalid or duplicate runtimeDependencies."
+    }
+
+    return $resolved
+}
+
+function Merge-ClassificationDimensions {
+    param(
+        [Parameter(Mandatory)] [object]$Defaults,
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Overrides
+    )
+
+    $merged = [ordered]@{}
+    foreach ($property in $Defaults.PSObject.Properties) {
+        $merged[$property.Name] = $property.Value
+    }
+    foreach ($override in $Overrides) {
+        foreach ($property in $override.PSObject.Properties) {
+            if ($property.Name -notin @('matchId', 'class', 'method', 'case')) {
+                $merged[$property.Name] = $property.Value
+            }
+        }
+    }
+
+    return [pscustomobject]$merged
+}
+
+function Assert-InProcessClassificationCoverage {
+    param(
+        [Parameter(Mandatory)] [object]$ClassificationProject,
+        [Parameter(Mandatory)] [string[]]$DiscoveredClasses,
+        [Parameter(Mandatory)] [string]$Context
+    )
+
+    $overridesProperty = $ClassificationProject.PSObject.Properties['overrides']
+    $classOverrides = @(
+        foreach ($override in @(
+            if ($null -ne $overridesProperty) { $overridesProperty.Value }
+        )) {
+            $methodProperty = $override.PSObject.Properties['method']
+            $caseProperty = $override.PSObject.Properties['case']
+            if (($null -eq $methodProperty -or
+                 [string]::IsNullOrWhiteSpace([string]$methodProperty.Value)) -and
+                ($null -eq $caseProperty -or
+                 [string]::IsNullOrWhiteSpace([string]$caseProperty.Value))) {
+                $override
+            }
+        }
+    )
+    foreach ($className in @($DiscoveredClasses | Sort-Object -Unique)) {
+        $matching = @($classOverrides | Where-Object { [string]$_.class -ceq $className })
+        if ($matching.Count -ne 1) {
+            throw "$Context discovered class '$className' requires exactly one class-level classification override."
+        }
+        if ($null -eq $matching[0].PSObject.Properties['testKind'] -or
+            [string]::IsNullOrWhiteSpace([string]$matching[0].testKind)) {
+            throw "$Context class '$className' override must declare testKind."
+        }
+    }
+    $stale = @(
+        $classOverrides | Where-Object { [string]$_.class -notin $DiscoveredClasses }
+    )
+    if ($stale.Count -ne 0) {
+        throw "$Context contains stale class-level classification overrides: $(@($stale | ForEach-Object class) -join ', ')."
+    }
+}
+
+function Assert-ClassificationFixtureFails {
+    param(
+        [Parameter(Mandatory)] [scriptblock]$Action,
+        [Parameter(Mandatory)] [string]$ExpectedPattern
+    )
+
+    try {
+        & $Action
+    }
+    catch {
+        if ($_.Exception.Message -notmatch $ExpectedPattern) {
+            throw "Classification behavior fixture expected '$ExpectedPattern' but got: $($_.Exception.Message)"
+        }
+        return
+    }
+    throw "Classification behavior fixture expected failure '$ExpectedPattern' but succeeded."
+}
+
+if ($RunClassificationBehaviorFixture) {
+    $resourceDefaults = [pscustomobject]@{
+        runtimeDependencies = @('Docker', 'Aspire', 'Postgres')
+    }
+    $explicitInProcessOverride = [pscustomobject]@{
+        runtimeDependencies = @()
+    }
+    $inheritedOverride = [pscustomobject]@{}
+    if (@(Resolve-CaseRuntimeDependencies `
+            -SelectedDimensions $explicitInProcessOverride `
+            -DefaultDimensions $resourceDefaults `
+            -Context 'explicit empty override').Count -ne 0) {
+        throw 'An explicit empty case override inherited external runtime dependencies.'
+    }
+    $inherited = @(Resolve-CaseRuntimeDependencies `
+        -SelectedDimensions $inheritedOverride `
+        -DefaultDimensions $resourceDefaults `
+        -Context 'fallback override')
+    if (($inherited -join ',') -cne 'Docker,Aspire,Postgres') {
+        throw 'A case override without runtimeDependencies did not inherit runner defaults.'
+    }
+
+    $mixedDefaults = [pscustomobject]@{
+        testKind = 'Integration'
+        capability = 'Platform'
+        runtimeDependencies = @('Docker', 'Aspire', 'Postgres')
+    }
+    $mergedDefaultsOnly = Merge-ClassificationDimensions `
+        -Defaults $mixedDefaults `
+        -Overrides @()
+    if ([string]$mergedDefaultsOnly.testKind -cne 'Integration' -or
+        [string]$mergedDefaultsOnly.capability -cne 'Platform' -or
+        ($mergedDefaultsOnly.runtimeDependencies -join ',') -cne 'Docker,Aspire,Postgres') {
+        throw 'A runner without classification overrides did not preserve its defaults.'
+    }
+    $unitClass = [pscustomobject]@{
+        matchId = 'unit-class'
+        class = 'Fixture.InProcessUnitTests'
+        testKind = 'Unit'
+        capability = 'Persistence'
+        runtimeDependencies = @()
+    }
+    $exactMethod = [pscustomobject]@{
+        matchId = 'exact-method'
+        class = 'Fixture.InProcessUnitTests'
+        method = 'ExactCase'
+        capability = 'IdentitySecurity'
+    }
+    $mergedClass = Merge-ClassificationDimensions -Defaults $mixedDefaults -Overrides @($unitClass)
+    if ([string]$mergedClass.testKind -cne 'Unit' -or
+        @($mergedClass.runtimeDependencies).Count -ne 0) {
+        throw 'An InProcess class override did not replace runner testKind/runtimeDependencies.'
+    }
+    $mergedMethod = Merge-ClassificationDimensions `
+        -Defaults $mixedDefaults `
+        -Overrides @($unitClass, $exactMethod)
+    if ([string]$mergedMethod.testKind -cne 'Unit' -or
+        [string]$mergedMethod.capability -cne 'IdentitySecurity' -or
+        @($mergedMethod.runtimeDependencies).Count -ne 0) {
+        throw 'An exact method override did not inherit class testKind/runtimeDependencies while replacing its exact dimension.'
+    }
+
+    $resourceClass = [pscustomobject]@{
+        matchId = 'resource-class'
+        class = 'Fixture.ResourceBoundaryTests'
+        testKind = 'Integration'
+        runtimeDependencies = @('Docker', 'Aspire', 'Postgres')
+    }
+    $exactEmptyDependencies = [pscustomobject]@{
+        matchId = 'exact-empty'
+        class = 'Fixture.ResourceBoundaryTests'
+        method = 'NoResourceCase'
+        runtimeDependencies = @()
+    }
+    $exactInheritDependencies = [pscustomobject]@{
+        matchId = 'exact-inherit'
+        class = 'Fixture.ResourceBoundaryTests'
+        method = 'InheritedResourceCase'
+    }
+    $exactEmptyMerged = Merge-ClassificationDimensions `
+        -Defaults $mixedDefaults `
+        -Overrides @($resourceClass, $exactEmptyDependencies)
+    if (@($exactEmptyMerged.runtimeDependencies).Count -ne 0) {
+        throw 'An exact method runtimeDependencies=[] override did not replace class/default external dependencies.'
+    }
+    $exactInheritedMerged = Merge-ClassificationDimensions `
+        -Defaults $mixedDefaults `
+        -Overrides @($resourceClass, $exactInheritDependencies)
+    if (($exactInheritedMerged.runtimeDependencies -join ',') -cne 'Docker,Aspire,Postgres') {
+        throw 'An exact method override without runtimeDependencies did not inherit its class dependencies.'
+    }
+
+    $validMixedClassification = [pscustomobject]@{
+        overrides = @(
+            [pscustomobject]@{
+                matchId = 'valid-unit'
+                class = 'Fixture.ValidUnitTests'
+                testKind = 'Unit'
+                runtimeDependencies = @()
+            },
+            [pscustomobject]@{
+                matchId = 'valid-contract'
+                class = 'Fixture.ValidContractTests'
+                testKind = 'Contract'
+                runtimeDependencies = @()
+            }
+        )
+    }
+    Assert-InProcessClassificationCoverage `
+        -ClassificationProject $validMixedClassification `
+        -DiscoveredClasses @('Fixture.ValidUnitTests', 'Fixture.ValidContractTests') `
+        -Context 'valid mixed-kind InProcess fixture'
+
+    $missingKindClassification = [pscustomobject]@{
+        overrides = @([pscustomobject]@{
+            matchId = 'missing-kind'
+            class = 'Fixture.MissingKindTests'
+            runtimeDependencies = @()
+        })
+    }
+    Assert-ClassificationFixtureFails {
+        Assert-InProcessClassificationCoverage `
+            -ClassificationProject $missingKindClassification `
+            -DiscoveredClasses @('Fixture.MissingKindTests') `
+            -Context 'missing-kind fixture'
+    } 'must declare testKind'
+
+    $duplicateClassClassification = [pscustomobject]@{
+        overrides = @(
+            [pscustomobject]@{ matchId = 'duplicate-a'; class = 'Fixture.DuplicateTests'; testKind = 'Unit' },
+            [pscustomobject]@{ matchId = 'duplicate-b'; class = 'Fixture.DuplicateTests'; testKind = 'Contract' }
+        )
+    }
+    Assert-ClassificationFixtureFails {
+        Assert-InProcessClassificationCoverage `
+            -ClassificationProject $duplicateClassClassification `
+            -DiscoveredClasses @('Fixture.DuplicateTests') `
+            -Context 'duplicate-class fixture'
+    } 'requires exactly one class-level classification override'
+
+    $staleClassClassification = [pscustomobject]@{
+        overrides = @(
+            [pscustomobject]@{ matchId = 'valid'; class = 'Fixture.CurrentTests'; testKind = 'Unit' },
+            [pscustomobject]@{ matchId = 'stale'; class = 'Fixture.RemovedTests'; testKind = 'Unit' }
+        )
+    }
+    Assert-ClassificationFixtureFails {
+        Assert-InProcessClassificationCoverage `
+            -ClassificationProject $staleClassClassification `
+            -DiscoveredClasses @('Fixture.CurrentTests') `
+            -Context 'stale-class fixture'
+    } 'contains stale class-level classification overrides'
+
+    Write-Host 'AICopilot classification behavior fixture passed: mixed InProcess testKind merge and runtime dependency precedence are deterministic.'
+    return
 }
 
 $projectEvaluationCache = @{}
@@ -238,6 +533,7 @@ function Invoke-MSBuildProjectEvaluation {
         '-getProperty:AICopilotTestKind',
         '-getProperty:AICopilotTestRuntime',
         '-getProperty:AICopilotTestCadence',
+        '-getProperty:AICopilotTestOwner',
         '-getProperty:RunAnalyzers',
         '-getProperty:RunAnalyzersDuringBuild',
         '-getProperty:NoWarn',
@@ -356,7 +652,7 @@ function ConvertTo-EvaluationSecuritySnapshot {
         'TargetFramework', 'TargetFrameworks', 'AssemblyName', 'IsTestProject',
         'TargetPath', 'DebugType',
         'AICopilotTestRole', 'AICopilotRequired', 'AICopilotTestKind',
-        'AICopilotTestRuntime', 'AICopilotTestCadence', 'RunAnalyzers',
+        'AICopilotTestRuntime', 'AICopilotTestCadence', 'AICopilotTestOwner', 'RunAnalyzers',
         'RunAnalyzersDuringBuild', 'NoWarn')
     $properties = [ordered]@{}
     foreach ($name in $propertyNames) {
@@ -473,6 +769,7 @@ function Get-EvaluatedProjectDefinition {
     $securityPropertyNames = @(
         'AssemblyName', 'IsTestProject', 'AICopilotTestRole', 'AICopilotRequired',
         'AICopilotTestKind', 'AICopilotTestRuntime', 'AICopilotTestCadence',
+        'AICopilotTestOwner',
         'RunAnalyzers', 'RunAnalyzersDuringBuild', 'NoWarn')
     foreach ($name in $securityPropertyNames) {
         $values = @($realSnapshots | ForEach-Object { [string]$_.Properties.$name } | Sort-Object -Unique)
@@ -602,6 +899,7 @@ foreach ($projectFile in $projectFiles) {
         AICopilotTestKind = $kind
         AICopilotTestRuntime = $runtime
         AICopilotTestCadence = $cadence
+        AICopilotTestOwner = $owner
     }.GetEnumerator()) {
         if ([string]$evaluatedDefinition.Properties.($criticalMetadata.Key) -cne [string]$criticalMetadata.Value) {
             throw "$relativePath direct and evaluated $($criticalMetadata.Key) differ."
@@ -640,6 +938,26 @@ foreach ($projectFile in $projectFiles) {
     }
     if ($kind -in @('Aggregate', 'Application') -and $runtime -ne 'Pure') {
         throw "$relativePath is TestKind=$kind and must use Runtime=Pure; filesystem or persistence behavior belongs in its physical runner."
+    }
+    if ($runtime -eq 'InProcess') {
+        if (-not $inProcessRunnerAllowlist.ContainsKey($projectName)) {
+            throw "$relativePath uses Runtime=InProcess but is not the locked in-process runner."
+        }
+        $inProcessTuple = "$kind|$owner"
+        if ($inProcessTuple -cne [string]$inProcessRunnerAllowlist[$projectName]) {
+            throw "$relativePath changed its locked InProcess kind/owner tuple."
+        }
+    }
+    if ($projectName -ceq 'AICopilot.InProcessTests') {
+        $lockedInProcessPath = 'src/tests/AICopilot.InProcessTests/AICopilot.InProcessTests.csproj'
+        if ($relativePath -cne $lockedInProcessPath -or
+            $kind -cne 'Integration' -or
+            $runtime -cne 'InProcess' -or
+            $owner -cne 'InProcessBoundary' -or
+            $requiredText -cne 'true' -or
+            $cadence -cne 'PR') {
+            throw "$relativePath changed the locked AICopilot.InProcessTests path/kind/runtime/owner/required/cadence tuple."
+        }
     }
     if ($role -eq 'Analyzer' -and $runtime -eq 'Pure') {
         $analyzerSources = @(
@@ -734,6 +1052,13 @@ foreach ($projectFile in $projectFiles) {
         -Context "$projectName defaults" `
         -ExpectedProfile $expectedProfile `
         -RequireRuntimeDependencies
+    if ([string]$projectClassification.defaults.testKind -cne $kind) {
+        throw "$relativePath classification default testKind='$($projectClassification.defaults.testKind)' must equal project kind '$kind'."
+    }
+    if ($runtime -eq 'InProcess' -and
+        @($projectClassification.defaults.runtimeDependencies).Count -ne 0) {
+        throw "$relativePath is InProcess and must declare no external runtimeDependencies."
+    }
 
     if (-not $required) {
         if (-not $nonRequiredRunnerAllowlist.ContainsKey($projectName)) {
@@ -766,13 +1091,6 @@ foreach ($projectFile in $projectFiles) {
     })
 }
 
-$mergeBase = (& git -C $root merge-base HEAD origin/main 2>$null | Select-Object -First 1)
-if ([string]::IsNullOrWhiteSpace([string]$mergeBase)) {
-    $mergeBase = (& git -C $root rev-parse HEAD 2>$null | Select-Object -First 1)
-}
-if ([string]::IsNullOrWhiteSpace([string]$mergeBase)) {
-    throw 'Cannot resolve a controlled Git baseline for required-runner downgrade checks.'
-}
 foreach ($project in @($inventory | Where-Object role -eq 'Runner')) {
     $baselineText = (& git -C $root show "$mergeBase`:$($project.path)" 2>$null) -join "`n"
     if ([string]::IsNullOrWhiteSpace($baselineText)) {
@@ -809,6 +1127,7 @@ foreach ($project in @($inventory | Where-Object role -eq 'Runner')) {
     $projectPath = [System.IO.Path]::GetFullPath((Join-Path $root $project.path))
     $directReferences = @(Get-EvaluatedProjectReferences $projectPath)
     $directReferenceNames = @($directReferences | ForEach-Object { [System.IO.Path]::GetFileName($_) })
+    $directPackageNames = @(Get-EvaluatedPackageReferences $projectPath)
     foreach ($reference in $directReferences) {
         if ($runnerByFullPath.ContainsKey($reference)) {
             throw "$($project.path) must not reference runner project $($runnerByFullPath[$reference].path)."
@@ -848,10 +1167,50 @@ foreach ($project in @($inventory | Where-Object role -eq 'Runner')) {
         }
     }
 
-    if ($project.kind -eq 'Integration' -and
-        ($project.runtime -ne 'Aspire' -or
-         'AICopilot.AspireIntegrationTestKit.csproj' -notin $directReferenceNames)) {
-        throw "$($project.path) is Integration and must prove a direct Aspire runtime fixture reference."
+    if ($project.kind -eq 'Integration') {
+        if ($project.runtime -eq 'Aspire' -and
+            'AICopilot.AspireIntegrationTestKit.csproj' -notin $directReferenceNames) {
+            throw "$($project.path) is Aspire Integration and must prove a direct Aspire runtime fixture reference."
+        }
+        if ($project.runtime -notin @('Aspire', 'InProcess')) {
+            throw "$($project.path) is Integration and must use Runtime=Aspire or locked Runtime=InProcess."
+        }
+    }
+    if ($project.runtime -eq 'InProcess') {
+        $inProcessVisited = [System.Collections.Generic.HashSet[string]]::new(
+            [System.StringComparer]::OrdinalIgnoreCase)
+        $inProcessPending = [System.Collections.Generic.Queue[string]]::new()
+        $inProcessPending.Enqueue($projectPath)
+        $forbiddenInProcessReferences = [System.Collections.Generic.List[string]]::new()
+        while ($inProcessPending.Count -gt 0) {
+            $currentInProcessProject = $inProcessPending.Dequeue()
+            if (-not $inProcessVisited.Add($currentInProcessProject)) {
+                continue
+            }
+            foreach ($inProcessReference in @(Get-EvaluatedProjectReferences $currentInProcessProject)) {
+                if ([System.IO.Path]::GetFileName($inProcessReference) -in @(
+                        'AICopilot.AppHost.csproj',
+                        'AICopilot.RagWorker.csproj',
+                        'AICopilot.AspireIntegrationTestKit.csproj',
+                        'AICopilot.PersistenceTestKit.csproj')) {
+                    $forbiddenInProcessReferences.Add(
+                        [System.IO.Path]::GetRelativePath($root, $inProcessReference).Replace('\', '/'))
+                }
+                $inProcessPending.Enqueue($inProcessReference)
+            }
+        }
+        if ($forbiddenInProcessReferences.Count -ne 0) {
+            throw "$($project.path) is InProcess and its evaluated project graph must not reach AppHost, RagWorker, AspireIntegrationTestKit, or PersistenceTestKit; invalid=$(@($forbiddenInProcessReferences | Sort-Object -Unique) -join ',')."
+        }
+        $forbiddenInProcessPackages = @(
+            $directPackageNames | Where-Object {
+                $_ -match '(?i)^(?:Aspire\.Hosting|Npgsql|Testcontainers|Docker|RabbitMQ|Qdrant)(?:\.|$)' -or
+                $_ -match '(?i)(?:^|\.)Redis(?:\.|$)'
+            }
+        )
+        if ($forbiddenInProcessPackages.Count -ne 0) {
+            throw "$($project.path) is InProcess and must not directly reference external-resource packages; invalid=$($forbiddenInProcessPackages -join ',')."
+        }
     }
     if ($project.kind -eq 'EndToEnd' -and
         ($project.runtime -ne 'Aspire' -or
@@ -1253,52 +1612,96 @@ function Get-CaseDimensions {
 
     $classificationProject = $classificationByProject[$Project.projectName]
     $overridesProperty = $classificationProject.PSObject.Properties['overrides']
-    $matchingOverrides = @(
-        foreach ($override in @(
-            if ($null -ne $overridesProperty) { $overridesProperty.Value }
-        )) {
-            $methodProperty = $override.PSObject.Properties['method']
-            $caseProperty = $override.PSObject.Properties['case']
-            if ([string]$override.class -cne $ClassName) {
-                continue
-            }
-            if ($null -ne $methodProperty -and
-                -not [string]::IsNullOrWhiteSpace([string]$methodProperty.Value) -and
-                [string]$methodProperty.Value -cne $MethodName) {
-                continue
-            }
-            if ($null -ne $caseProperty -and
-                -not [string]::IsNullOrWhiteSpace([string]$caseProperty.Value) -and
-                [string]$caseProperty.Value -cne $CaseId) {
-                continue
-            }
-            $override
+    $classOverrides = [System.Collections.Generic.List[object]]::new()
+    $exactCandidates = [System.Collections.Generic.List[object]]::new()
+    foreach ($override in @(
+        if ($null -ne $overridesProperty) { $overridesProperty.Value }
+    )) {
+        if ([string]$override.class -cne $ClassName) {
+            continue
         }
-    )
-    if ($matchingOverrides.Count -gt 1) {
-        throw "$CaseId matches more than one explicit classification override."
+        $methodProperty = $override.PSObject.Properties['method']
+        $caseProperty = $override.PSObject.Properties['case']
+        $methodSelector = if ($null -eq $methodProperty) { '' } else { [string]$methodProperty.Value }
+        $caseSelector = if ($null -eq $caseProperty) { '' } else { [string]$caseProperty.Value }
+        if ([string]::IsNullOrWhiteSpace($methodSelector) -and
+            [string]::IsNullOrWhiteSpace($caseSelector)) {
+            $classOverrides.Add($override)
+            continue
+        }
+        if (-not [string]::IsNullOrWhiteSpace($methodSelector) -and
+            $methodSelector -cne $MethodName) {
+            continue
+        }
+        if (-not [string]::IsNullOrWhiteSpace($caseSelector) -and
+            $caseSelector -cne $CaseId) {
+            continue
+        }
+        $exactCandidates.Add($override)
     }
-    $dimensions = if ($matchingOverrides.Count -eq 1) {
-        $selected = $matchingOverrides[0]
+
+    if ($classOverrides.Count -gt 1) {
+        throw "$CaseId matches more than one class-level classification override."
+    }
+    if ([string]$Project.runtime -ceq 'InProcess' -and $classOverrides.Count -ne 1) {
+        throw "$CaseId belongs to the InProcess runner and requires exactly one class-level classification override."
+    }
+    if ($classOverrides.Count -eq 1) {
+        $classOverride = $classOverrides[0]
+        if ([string]$Project.runtime -ceq 'InProcess' -and
+            ($null -eq $classOverride.PSObject.Properties['testKind'] -or
+             [string]::IsNullOrWhiteSpace([string]$classOverride.testKind))) {
+            throw "$CaseId belongs to the InProcess runner and its class override must declare testKind."
+        }
         [void]$usedClassificationOverrideIds.Add(
-            "$($Project.projectName)::$([string]$selected.matchId)")
-        $selected
-    } else {
-        $classificationProject.defaults
+            "$($Project.projectName)::$([string]$classOverride.matchId)")
     }
+
+    $matchingExactOverrides = @($exactCandidates)
+    if ($matchingExactOverrides.Count -gt 1) {
+        throw "$CaseId matches more than one exact method/case classification override."
+    }
+    if ($matchingExactOverrides.Count -eq 1) {
+        [void]$usedClassificationOverrideIds.Add(
+            "$($Project.projectName)::$([string]$matchingExactOverrides[0].matchId)")
+    }
+
+    $mergeOverrides = @()
+    if ($classOverrides.Count -eq 1) {
+        $mergeOverrides += $classOverrides[0]
+    }
+    if ($matchingExactOverrides.Count -eq 1) {
+        $mergeOverrides += $matchingExactOverrides[0]
+    }
+    $dimensions = Merge-ClassificationDimensions `
+        -Defaults $classificationProject.defaults `
+        -Overrides $mergeOverrides
     Assert-ClassificationDimensions `
         -Dimensions $dimensions `
         -Context "case '$CaseId'" `
-        -ExpectedProfile ([string]$Project.profile)
+        -ExpectedProfile ([string]$Project.profile) `
+        -RequireRuntimeDependencies
+    if ([string]$Project.runtime -cne 'InProcess' -and
+        [string]$dimensions.testKind -cne [string]$Project.kind) {
+        throw "case '$CaseId' testKind='$($dimensions.testKind)' must equal its non-InProcess project kind '$($Project.kind)'."
+    }
+    $runtimeDependencies = @(Resolve-CaseRuntimeDependencies `
+        -SelectedDimensions $dimensions `
+        -DefaultDimensions $classificationProject.defaults `
+        -Context "case '$CaseId'")
+    if ([string]$Project.runtime -ceq 'InProcess' -and $runtimeDependencies.Count -ne 0) {
+        throw "case '$CaseId' belongs to an InProcess runner and must not declare external runtimeDependencies."
+    }
 
     return [pscustomobject]@{
+        testKind = [string]$dimensions.testKind
         capability = [string]$dimensions.capability
         concern = [string]$dimensions.concern
         profile = [string]$dimensions.profile
         risk = [string]$dimensions.risk
         ruleId = [string]$dimensions.ruleId
         regressionId = [string]$dimensions.regressionId
-        runtimeDependencies = @($classificationProject.defaults.runtimeDependencies)
+        runtimeDependencies = @($runtimeDependencies)
     }
 }
 
@@ -1321,11 +1724,29 @@ foreach ($project in @($inventory | Where-Object role -eq 'Runner')) {
             ForEach-Object { $_.Trim() }
     )
     if ($caseIds.Count -eq 0) {
-        throw "Runner $($project.path) discovered no cases."
+        throw "Runner $($project.path) discovered no cases. Raw discovery output:`n$($discoveryOutput -join [Environment]::NewLine)"
     }
     $duplicateProjectCases = @($caseIds | Group-Object | Where-Object Count -gt 1)
     if ($duplicateProjectCases.Count -ne 0) {
         throw "Runner $($project.path) discovered duplicate case identities: $($duplicateProjectCases.Name -join ', ')"
+    }
+
+    if ([string]$project.runtime -ceq 'InProcess') {
+        $discoveredClasses = @(
+            foreach ($caseId in $caseIds) {
+                $signature = if ($caseId.Contains('(')) {
+                    $caseId.Substring(0, $caseId.IndexOf('('))
+                } else {
+                    $caseId
+                }
+                $methodSeparator = $signature.LastIndexOf('.')
+                $signature.Substring(0, $methodSeparator)
+            }
+        )
+        Assert-InProcessClassificationCoverage `
+            -ClassificationProject $classificationByProject[$project.projectName] `
+            -DiscoveredClasses $discoveredClasses `
+            -Context $project.projectName
     }
 
     $project | Add-Member -NotePropertyName caseCount -NotePropertyValue $caseIds.Count
@@ -1345,7 +1766,7 @@ foreach ($project in @($inventory | Where-Object role -eq 'Runner')) {
             class = $className
             method = $methodName
             case = $caseId
-            kind = $project.kind
+            kind = $dimensions.testKind
             runtime = $project.runtime
             capability = $dimensions.capability
             concern = $dimensions.concern

@@ -14,7 +14,6 @@ public sealed class ResetUserPasswordCommandHandler(
     UserManager<ApplicationUser> userManager,
     IEnumerable<IPasswordValidator<ApplicationUser>> passwordValidators,
     IPasswordHasher<ApplicationUser> passwordHasher,
-    EnabledAdminInvariantPolicy enabledAdminInvariant,
     IIdentityAuditLogWriter auditLogWriter,
     ITransactionalExecutionService transactionalExecutionService)
     : ICommandHandler<ResetUserPasswordCommand, Result>
@@ -25,8 +24,6 @@ public sealed class ResetUserPasswordCommandHandler(
     {
         return await transactionalExecutionService.ExecuteResultAsync(async _ =>
         {
-            await enabledAdminInvariant.AcquireAsync(cancellationToken);
-
             var user = await userManager.FindByIdAsync(command.UserId);
             if (user is null)
             {

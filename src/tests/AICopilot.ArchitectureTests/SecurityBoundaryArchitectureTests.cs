@@ -7,7 +7,6 @@ using AICopilot.EntityFrameworkCore.Outbox;
 using AICopilot.HttpApi.Controllers;
 using AICopilot.RagService.Queries.KnowledgeBases;
 using AICopilot.Services.Contracts;
-using AICopilot.Services.Contracts.Uploads;
 using AICopilot.Services.CrossCutting.Attributes;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -83,9 +82,12 @@ public sealed class SecurityBoundaryArchitectureTests
         var method = typeof(RagController).GetMethod(nameof(RagController.UploadDocument));
 
         method.Should().NotBeNull();
-        method!.GetCustomAttribute<RequestSizeLimitAttribute>().Should().NotBeNull();
+        var requestSizeLimit = method!.GetCustomAttributesData().Single(attribute =>
+            attribute.AttributeType == typeof(RequestSizeLimitAttribute));
+        requestSizeLimit.ConstructorArguments.Should().ContainSingle()
+            .Which.Value.Should().Be(RagController.MaxDocumentUploadBytes);
         method.GetCustomAttribute<RequestFormLimitsAttribute>()?.MultipartBodyLengthLimit
-            .Should().Be(DocumentUploadRequestPolicy.MaxUploadBytes);
+            .Should().Be(RagController.MaxDocumentUploadBytes);
     }
 
     [Fact]

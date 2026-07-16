@@ -4,7 +4,7 @@ using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.AiGatewayService.Tools;
 using AICopilot.AiGatewayService.Workspaces;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
-using AICopilot.Services.Contracts.Http;
+using AICopilot.HttpApi.Infrastructure;
 using AICopilot.RagService.EmbeddingModels;
 using AICopilot.Services.Contracts.AiGateway.Dtos;
 using AICopilot.SharedKernel.Result;
@@ -57,6 +57,8 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
         AssertPath(document, "/api/data-analysis/business-database/authorized", "get");
         AssertPath(document, "/api/data-analysis/business-database/query-readonly", "post");
         AssertPath(document, "/api/data-analysis/semantic-source/status", "get");
+        AssertPath(document, "/api/mcp/server", "post");
+        AssertPath(document, "/api/mcp/server", "put");
         AssertPath(document, "/api/rag/embedding-model/list", "get");
         AssertPath(document, "/api/rag/knowledge-base/list", "get");
         AssertPath(document, "/api/rag/document", "post");
@@ -120,6 +122,21 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
             "requiresApproval",
             "isEnabled",
             "timeoutSeconds");
+        foreach (var method in new[] { "post", "put" })
+        {
+            AssertRequestSchemaProperties(
+                document,
+                "/api/mcp/server",
+                method,
+                "externalSystemType",
+                "capabilityKind");
+            AssertRequestSchemaRequiredProperties(
+                document,
+                "/api/mcp/server",
+                method,
+                "externalSystemType",
+                "capabilityKind");
+        }
         AssertRequestSchemaProperties(
             document,
             "/api/rag/search",
@@ -134,6 +151,8 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
                      ("/api/identity/login", "post"),
                      ("/api/aigateway/agent/task/run", "post"),
                      ("/api/data-analysis/business-database/query-readonly", "post"),
+                     ("/api/mcp/server", "post"),
+                     ("/api/mcp/server", "put"),
                      ("/api/rag/search", "post")
                  })
         {
@@ -230,6 +249,55 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
                 properties.TryGetProperty(property, out _)
                     .Should()
                     .BeTrue($"ProblemDetails schema should expose {property}");
+            }
+        }
+    }
+
+    private static void AssertRequestSchemaRequiredProperties(
+        JsonDocument document,
+        string path,
+        string method,
+        params string[] expectedRequiredProperties)
+    {
+        var operation = GetOperation(document, path, method);
+        var requestBody = operation.GetProperty("requestBody");
+        var schema = requestBody.GetProperty("content").GetProperty("application/json").GetProperty("schema");
+        var requiredProperties = EnumerateRequiredProperties(document, schema)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var expectedProperty in expectedRequiredProperties)
+        {
+            requiredProperties.Should().Contain(
+                expectedProperty,
+                $"OpenAPI request schema for {method.ToUpperInvariant()} {path} should require {expectedProperty}");
+        }
+    }
+
+    private static IEnumerable<string> EnumerateRequiredProperties(
+        JsonDocument document,
+        JsonElement schema)
+    {
+        var resolvedSchema = ResolveSchema(document, schema);
+        if (resolvedSchema.TryGetProperty("required", out var required))
+        {
+            foreach (var property in required.EnumerateArray())
+            {
+                if (property.GetString() is { } propertyName)
+                {
+                    yield return propertyName;
+                }
+            }
+        }
+
+        if (!resolvedSchema.TryGetProperty("allOf", out var allOf))
+        {
+            yield break;
+        }
+
+        foreach (var component in allOf.EnumerateArray())
+        {
+            foreach (var propertyName in EnumerateRequiredProperties(document, component))
+            {
+                yield return propertyName;
             }
         }
     }

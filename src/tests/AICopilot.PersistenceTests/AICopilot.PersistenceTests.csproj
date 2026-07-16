@@ -23,10 +23,14 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\hosts\AICopilot.MigrationWorkApp\AICopilot.MigrationWorkApp.csproj" />
+    <ProjectReference Include="..\..\hosts\AICopilot.RagWorker\AICopilot.RagWorker.csproj" />
     <ProjectReference Include="..\..\infrastructure\AICopilot.Dapper\AICopilot.Dapper.csproj" />
     <ProjectReference Include="..\..\infrastructure\AICopilot.EntityFrameworkCore\AICopilot.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="..\..\infrastructure\AICopilot.Embedding\AICopilot.Embedding.csproj" />
+    <ProjectReference Include="..\..\infrastructure\AICopilot.Infrastructure\AICopilot.Infrastructure.csproj" />
     <ProjectReference Include="..\..\services\AICopilot.IdentityService\AICopilot.IdentityService.csproj" />
     <ProjectReference Include="..\..\services\AICopilot.AiGatewayService\AICopilot.AiGatewayService.csproj" />
+    <ProjectReference Include="..\..\services\AICopilot.DataAnalysisService\AICopilot.DataAnalysisService.csproj" />
     <ProjectReference Include="..\..\services\AICopilot.RagService\AICopilot.RagService.csproj" />
     <ProjectReference Include="..\..\services\AICopilot.Services.Contracts\AICopilot.Services.Contracts.csproj" />
     <ProjectReference Include="..\..\shared\AICopilot.SharedKernel\AICopilot.SharedKernel.csproj" />

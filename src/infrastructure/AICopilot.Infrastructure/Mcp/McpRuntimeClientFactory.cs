@@ -34,24 +34,20 @@ internal static class McpRuntimeClientFactory
         McpServerInfo mcpServerInfo,
         CancellationToken cancellationToken)
     {
-        var transportOptions = CreateSseTransportOptions(mcpServerInfo);
-        var transport = new HttpClientTransport(transportOptions);
-        return await McpClient.CreateAsync(transport, cancellationToken: cancellationToken);
-    }
-
-    internal static HttpClientTransportOptions CreateSseTransportOptions(McpServerInfo mcpServerInfo)
-    {
         if (!McpSseEndpointValidator.TryValidate(mcpServerInfo.Arguments, out var endpoint, out var endpointError))
         {
             throw new InvalidOperationException($"MCP SSE server {mcpServerInfo.Name} endpoint is invalid: {endpointError}");
         }
 
-        return new HttpClientTransportOptions
+        var transportOptions = new HttpClientTransportOptions
         {
             Endpoint = endpoint!,
             TransportMode = HttpTransportMode.Sse,
             ConnectionTimeout = SseConnectionTimeout
         };
+
+        var transport = new HttpClientTransport(transportOptions);
+        return await McpClient.CreateAsync(transport, cancellationToken: cancellationToken);
     }
 
     internal static string[] ResolveCommandArguments(string rawArguments)

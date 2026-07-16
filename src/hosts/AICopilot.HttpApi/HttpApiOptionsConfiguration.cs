@@ -2,7 +2,6 @@ using AICopilot.HttpApi.Infrastructure;
 using AICopilot.IdentityService.Authorization;
 using AICopilot.Infrastructure.Authentication;
 using AICopilot.Services.Contracts;
-using AICopilot.Services.Contracts.Authentication;
 
 namespace AICopilot.HttpApi;
 

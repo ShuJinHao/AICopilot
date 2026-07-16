@@ -38,47 +38,85 @@ public class Worker(
             var transactionalExecutionService = scope.ServiceProvider
                 .GetRequiredService<ITransactionalExecutionService>();
 
-            if (configuration.GetValue<bool>("MigrationWorker:CheckSecretsOnly"))
+            async Task ExecuteStageAsync(
+                MigrationWorkerStage stage,
+                CancellationToken stageCancellationToken)
             {
-                await MigrationWorkerSecretMigrator.VerifyAsync(
-                    aiGatewayDbContext,
-                    ragDbContext,
-                    cancellationToken);
-                hostApplicationLifetime.StopApplication();
-                return;
+                switch (stage)
+                {
+                    case MigrationWorkerStage.VerifySecrets:
+                        await MigrationWorkerSecretMigrator.VerifyAsync(
+                            aiGatewayDbContext,
+                            ragDbContext,
+                            stageCancellationToken);
+                        break;
+
+                    case MigrationWorkerStage.MigrateDatabases:
+                        var migrationContexts = MigrationWorkerDatabaseMigrator.CreateMigrationContexts(
+                            dbContext,
+                            identityStoreDbContext,
+                            aiGatewayDbContext,
+                            ragDbContext,
+                            dataAnalysisDbContext,
+                            mcpServerDbContext);
+                        await MigrationWorkerDatabaseMigrator.RunMigrationsAsync(
+                            migrationContexts,
+                            stageCancellationToken);
+                        break;
+
+                    case MigrationWorkerStage.MigrateSecrets:
+                        await MigrationWorkerSecretMigrator.MigrateAsync(
+                            aiGatewayDbContext,
+                            ragDbContext,
+                            stageCancellationToken);
+                        break;
+
+                    case MigrationWorkerStage.SeedIdentity:
+                        await MigrationWorkerIdentitySeeder.SeedAsync(
+                            roleManager,
+                            userManager,
+                            permissionCatalog,
+                            identityAccessService,
+                            enabledAdminInvariant,
+                            transactionalExecutionService,
+                            configuration,
+                            stageCancellationToken);
+                        break;
+
+                    case MigrationWorkerStage.SeedAiGateway:
+                        await MigrationWorkerAiGatewaySeeder.SeedDefaultsAsync(
+                            aiGatewayDbContext,
+                            configuration,
+                            stageCancellationToken);
+                        break;
+
+                    case MigrationWorkerStage.SeedCloudReadOnly:
+                        await MigrationWorkerCloudReadOnlySeeder.EnsureSourceAsync(
+                            configuration,
+                            dataAnalysisDbContext,
+                            stageCancellationToken);
+                        break;
+
+                    case MigrationWorkerStage.SeedSimulation:
+                        await MigrationWorkerCloudSimulationSeeder.EnsureSourceAsync(
+                            configuration,
+                            hostEnvironment.EnvironmentName,
+                            dataAnalysisDbContext,
+                            stageCancellationToken);
+                        break;
+
+                    case MigrationWorkerStage.StopApplication:
+                        hostApplicationLifetime.StopApplication();
+                        break;
+
+                    default:
+                        throw new ArgumentOutOfRangeException(nameof(stage), stage, "Unknown migration worker stage.");
+                }
             }
 
-            var migrationContexts = MigrationWorkerDatabaseMigrator.CreateMigrationContexts(
-                dbContext,
-                identityStoreDbContext,
-                aiGatewayDbContext,
-                ragDbContext,
-                dataAnalysisDbContext,
-                mcpServerDbContext);
-
-            await MigrationWorkerDatabaseMigrator.RunMigrationsAsync(migrationContexts, cancellationToken);
-            await MigrationWorkerSecretMigrator.MigrateAsync(
-                aiGatewayDbContext,
-                ragDbContext,
-                cancellationToken);
-            await MigrationWorkerIdentitySeeder.SeedAsync(
-                roleManager,
-                userManager,
-                permissionCatalog,
-                identityAccessService,
-                enabledAdminInvariant,
-                transactionalExecutionService,
-                configuration,
-                cancellationToken);
-            await MigrationWorkerAiGatewaySeeder.SeedDefaultsAsync(aiGatewayDbContext, configuration, cancellationToken);
-            await MigrationWorkerCloudReadOnlySeeder.EnsureSourceAsync(
-                configuration,
-                dataAnalysisDbContext,
-                cancellationToken);
-            await MigrationWorkerCloudSimulationSeeder.EnsureSourceAsync(
-                configuration,
-                hostEnvironment.EnvironmentName,
-                dataAnalysisDbContext,
+            await MigrationWorkerExecutionPlan.RunAsync(
+                configuration.GetValue<bool>("MigrationWorker:CheckSecretsOnly"),
+                ExecuteStageAsync,
                 cancellationToken);
         }
         catch (Exception ex)
@@ -87,6 +125,51 @@ public class Worker(
             throw;
         }
 
-        hostApplicationLifetime.StopApplication();
+    }
+}
+
+internal enum MigrationWorkerStage
+{
+    VerifySecrets,
+    MigrateDatabases,
+    MigrateSecrets,
+    SeedIdentity,
+    SeedAiGateway,
+    SeedCloudReadOnly,
+    SeedSimulation,
+    StopApplication
+}
+
+internal static class MigrationWorkerExecutionPlan
+{
+    private static readonly MigrationWorkerStage[] CheckSecretsOnlyStages =
+    [
+        MigrationWorkerStage.VerifySecrets,
+        MigrationWorkerStage.StopApplication
+    ];
+
+    private static readonly MigrationWorkerStage[] FullMigrationStages =
+    [
+        MigrationWorkerStage.MigrateDatabases,
+        MigrationWorkerStage.MigrateSecrets,
+        MigrationWorkerStage.SeedIdentity,
+        MigrationWorkerStage.SeedAiGateway,
+        MigrationWorkerStage.SeedCloudReadOnly,
+        MigrationWorkerStage.SeedSimulation,
+        MigrationWorkerStage.StopApplication
+    ];
+
+    internal static async Task RunAsync(
+        bool checkSecretsOnly,
+        Func<MigrationWorkerStage, CancellationToken, Task> executeStageAsync,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(executeStageAsync);
+
+        var stages = checkSecretsOnly ? CheckSecretsOnlyStages : FullMigrationStages;
+        foreach (var stage in stages)
+        {
+            await executeStageAsync(stage, cancellationToken);
+        }
     }
 }

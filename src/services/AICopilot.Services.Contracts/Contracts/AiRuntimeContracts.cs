@@ -113,7 +113,6 @@ public sealed record ModelEndpointStatsDto(
     double P95DurationMs,
     long RateLimitCount,
     long CircuitBreakerOpenCount,
-    long FallbackCount,
     int StickyStreamingCount = 0,
     string CircuitState = "Closed",
     string? LastFailureReason = null);

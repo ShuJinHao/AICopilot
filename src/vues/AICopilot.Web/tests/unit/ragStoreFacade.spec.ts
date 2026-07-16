@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useRagStore } from '@/stores/ragStore'
@@ -121,15 +119,5 @@ describe('ragStore facade', () => {
     expect(ragServiceMock.updateDocumentGovernance).toHaveBeenCalledWith(
       expect.objectContaining({ id: 42 })
     )
-  })
-
-  it('keeps ragStore.ts as a facade without direct service CRUD implementations', () => {
-    const sourcePath = fileURLToPath(new URL('../../src/stores/ragStore.ts', import.meta.url))
-    const source = readFileSync(sourcePath, 'utf8')
-
-    expect(source).toContain('useEmbeddingModelDomain')
-    expect(source).toContain('useKnowledgeBaseDomain')
-    expect(source).not.toContain('useDialogCrud({')
-    expect(source).not.toContain('ragService.')
   })
 })

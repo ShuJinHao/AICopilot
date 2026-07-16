@@ -193,14 +193,6 @@ internal sealed class InMemoryModelEndpointPoolScheduler : IModelEndpointPoolSch
         }
     }
 
-    public void RecordFallback(string endpointId)
-    {
-        lock (gate)
-        {
-            GetStats(endpointId).RecordFallback();
-        }
-    }
-
     public void RecordStickyStreaming(string endpointId)
     {
         lock (gate)

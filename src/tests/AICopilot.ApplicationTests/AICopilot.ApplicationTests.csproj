@@ -23,9 +23,6 @@
     <ProjectReference Include="..\..\core\AICopilot.Core.McpServer\AICopilot.Core.McpServer.csproj" />
     <ProjectReference Include="..\..\core\AICopilot.Core.Rag\AICopilot.Core.Rag.csproj" />
     <ProjectReference Include="..\..\infrastructure\AICopilot.AiRuntime\AICopilot.AiRuntime.csproj" />
-    <ProjectReference Include="..\..\infrastructure\AICopilot.ArtifactGeneration\AICopilot.ArtifactGeneration.csproj" />
-    <ProjectReference Include="..\..\infrastructure\AICopilot.SqlSafety\AICopilot.SqlSafety.csproj" />
-    <ProjectReference Include="..\..\infrastructure\AICopilot.SecretProtection\AICopilot.SecretProtection.csproj" />
     <ProjectReference Include="..\..\services\AICopilot.AiGatewayService\AICopilot.AiGatewayService.csproj" />
     <ProjectReference Include="..\..\services\AICopilot.DataAnalysisService\AICopilot.DataAnalysisService.csproj" />
     <ProjectReference Include="..\..\services\AICopilot.McpService\AICopilot.McpService.csproj" />

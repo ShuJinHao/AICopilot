@@ -26,6 +26,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\hosts\AICopilot.AppHost\AICopilot.AppHost.csproj" />
     <ProjectReference Include="..\..\hosts\AICopilot.HttpApi\AICopilot.HttpApi.csproj" />
+    <ProjectReference Include="..\..\infrastructure\AICopilot.Infrastructure\AICopilot.Infrastructure.csproj" />
     <ProjectReference Include="..\..\services\AICopilot.Services.Contracts\AICopilot.Services.Contracts.csproj" />
     <ProjectReference Include="..\..\shared\AICopilot.SharedKernel\AICopilot.SharedKernel.csproj" />
     <ProjectReference Include="..\..\testing\AICopilot.AspireIntegrationTestKit\AICopilot.AspireIntegrationTestKit.csproj" />

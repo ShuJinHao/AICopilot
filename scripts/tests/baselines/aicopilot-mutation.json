@@ -1,15 +1,14 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "toolPackage": "dotnet-stryker",
   "toolVersion": "4.16.0",
-  "project": "AICopilot.SecretProtection.csproj",
-  "targetFile": "src/infrastructure/AICopilot.SecretProtection/SecretStringEncryptor.cs",
+  "project": "AICopilot.EntityFrameworkCore.csproj",
+  "targetFile": "src/infrastructure/AICopilot.EntityFrameworkCore/Security/SecretStringEncryptor.cs",
   "mutationLevel": "Standard",
-  "expectedGeneratedMutants": 73,
-  "expectedEvaluatedMutants": 58,
-  "minimumMutationScore": 77.586207,
-  "maximumSurvived": 4,
-  "maximumNoCoverage": 9,
-  "maximumTimeout": 0,
-  "maximumRuntimeError": 0
+  "minimumMutationScore": 100.0,
+  "minimumEvaluatedRate": 79.452055,
+  "maximumSurvivedRate": 0.0,
+  "maximumNoCoverageRate": 0.0,
+  "maximumTimeoutRate": 0.0,
+  "maximumRuntimeErrorRate": 0.0
 }

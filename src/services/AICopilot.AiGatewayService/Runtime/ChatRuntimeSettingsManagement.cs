@@ -41,7 +41,10 @@ public sealed class AgentRuntimeSettingsProvider(IRepository<ChatRuntimeSettings
             return Map(settings);
         }
 
-        return Map(ChatRuntimeSettings.CreateDefault(DateTimeOffset.UtcNow));
+        settings = ChatRuntimeSettings.CreateDefault(DateTimeOffset.UtcNow);
+        repository.Add(settings);
+        await repository.SaveChangesAsync(cancellationToken);
+        return Map(settings);
     }
 
     public static ChatRuntimeSettingsDto Map(ChatRuntimeSettings settings)

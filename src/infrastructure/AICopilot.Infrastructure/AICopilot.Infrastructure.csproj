@@ -7,9 +7,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\AICopilot.McpRuntime\AICopilot.McpRuntime.csproj" />
-    <ProjectReference Include="..\AICopilot.CloudReadClient\AICopilot.CloudReadClient.csproj" />
-    <ProjectReference Include="..\AICopilot.ArtifactGeneration\AICopilot.ArtifactGeneration.csproj" />
     <PackageReference Include="Anthropic" Version="12.20.1" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.9" />
     <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="10.0.9" />
@@ -19,6 +16,8 @@
     <PackageReference Include="ModelContextProtocol" Version="1.2.0" />
     <PackageReference Include="Npgsql" Version="10.0.3" />
     <PackageReference Include="OpenTelemetry.Api" Version="1.15.3" />
+    <PackageReference Include="DocumentFormat.OpenXml" Version="3.5.1" />
+    <PackageReference Include="PDFsharp-MigraDoc" Version="6.2.4" />
     <PackageReference Include="PdfPig" Version="0.1.14" />
     <PackageReference Include="SharpToken" Version="2.0.6" />
   </ItemGroup>
