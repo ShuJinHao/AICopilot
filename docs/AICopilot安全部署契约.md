@@ -85,6 +85,8 @@ Cloud OIDC 使用 HTTP issuer 时必须满足全部条件：
 
 - 日常正式发布必须从 fresh 配置远端 tip 创建隔离 detached worktree；原工作树允许脏且后续并发修改不得改变本次发布，未推送内容不得发布。
 - 每次日常运行必须使用私有 services、image 和 digest-bound request；不得用 `artifacts/deploy/aicopilot-built-services.txt` 这类跨任务固定文件控制发布。每次远端阶段只能建立一次 SSH。
+- 内网 HTTP Harbor 的 immutable digest 解析必须 fail-closed：标准 HTTPS OCI inspection 失败时只允许调用 `docker manifest inspect --insecure --verbose`，从 manifest list 中选择唯一 `linux/amd64` descriptor digest；零个、多个、格式无效或只有 attestation descriptor 都必须停止，禁止改用可变 tag。
+- 本地多服务镜像构建的源码 detached worktree 与每个 .NET 入口点的服务私有 `--artifacts-path` 必须位于工作区统一 deployment artifacts 根，不得落入 macOS `TMPDIR=/private/var/folders/...`；同一 SHA 只共享源码快照，不共享 `bin/obj`，也不得混用 `/private/var` 与 `/var` 路径别名。构建顺序不得影响 ProjectReference 闭包、PackageReference 版本解析或编译输入。
 - 日常应用发布不得同步 `docker-compose.yaml`、服务器脚本、`scripts/`、`cloud-readonly/` 或 Runner。support release 是独立基础设施维护任务，仍须用 staging/SHA256/旧事务锁，并禁止 `.env`、`releases/`、`.locks/`、备份进入同步包。
 - support install reservation 与 `deploy-release.sh` 必须使用同一 token 和 support digest。远端 release manifest、summary、已安装 support manifest 和 lock metadata 的 digest 必须一致；任何不一致都必须在 `.env` 或容器变更前 fail-closed。
 - AICopilot release lock 和共享 cleanup lock 必须记录 token、owner、PID、process-start、phase 和更新时间。active lock 立即返回 `75`；PID 已死亡、process-start 不匹配或 reservation 过期的 stale lock 允许安全回收。不得用静默轮询 15 分钟代替状态判断。

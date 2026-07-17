@@ -196,6 +196,7 @@ validate_local_tools() {
   [ -n "$CLOUD_PLATFORM_URL" ] || fail "CLOUD_PLATFORM_URL is required, for example http://cloud.internal.example:81."
   require_command git
   require_command docker
+  require_command jq
   if run_with_timeout "$HARBOR_TIMEOUT_SECONDS" "docker buildx version" docker buildx version >/dev/null 2>&1; then
     :
   else
@@ -242,6 +243,7 @@ env_key_for_service() {
 resolve_pushed_image_digest() {
   local image_ref="$1"
   local digest
+  local manifest_json
 
   if [ "$DRY_RUN" = true ]; then
     printf '%s\n' 'sha256:0000000000000000000000000000000000000000000000000000000000000000'
@@ -252,9 +254,24 @@ resolve_pushed_image_digest() {
       docker buildx imagetools inspect "$image_ref" --format '{{.Manifest.Digest}}')"; then
     :
   else
-    local status=$?
-    printf 'Could not resolve immutable OCI digest for pushed image: %s\n' "$image_ref" >&2
-    exit "$status"
+    printf 'OCI digest inspection over HTTPS failed; retrying the configured registry as insecure HTTP: %s\n' "$image_ref" >&2
+    if manifest_json="$(run_with_timeout "$HARBOR_TIMEOUT_SECONDS" "inspect pushed OCI manifest $image_ref over insecure HTTP" \
+        docker manifest inspect --insecure --verbose "$image_ref")"; then
+      digest="$(printf '%s\n' "$manifest_json" | jq -er '
+        if type == "array" then
+          [ .[]
+            | select(.Descriptor.platform.os == "linux" and .Descriptor.platform.architecture == "amd64")
+            | .Descriptor.digest ]
+          | unique
+          | if length == 1 then .[0] else error("expected exactly one linux/amd64 manifest") end
+        else
+          .Descriptor.digest
+        end')"
+    else
+      local status=$?
+      printf 'Could not resolve immutable OCI digest for pushed image: %s\n' "$image_ref" >&2
+      exit "$status"
+    fi
   fi
   digest="$(printf '%s\n' "$digest" | tail -n 1 | tr -d '\r[:space:]')"
   if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
@@ -270,11 +287,13 @@ publish_dotnet_image() {
   local image_name="$3"
   local app_dll="$4"
   local publish_dir="$REPO_ROOT/artifacts/container-publish/$image_name"
+  local build_artifacts_root="$OUTPUT_DIR/service-build/$service"
 
   printf 'Building AICopilot backend image: service=%s image=%s/%s:%s\n' "$service" "$IMAGE_PREFIX" "$image_name" "$TAG"
 
   if [ "$DRY_RUN" != true ]; then
     rm -rf "$publish_dir"
+    rm -rf "$build_artifacts_root"
     mkdir -p "$publish_dir"
   fi
 
@@ -284,6 +303,7 @@ publish_dotnet_image() {
       --os linux \
       --arch x64 \
       --self-contained false \
+      --artifacts-path "$build_artifacts_root" \
       -p:UseAppHost=false \
       -o "$publish_dir"; then
     :

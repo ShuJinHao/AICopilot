@@ -231,11 +231,14 @@ git push GitHub
 
 `build-and-push.sh` 必须显式接收 `--services httpapi,migration,dataworker,ragworker,web` 的子集或 `--all`，但只由统一入口内部调度；无参数直接失败。选择 `httpapi`、`dataworker` 或 `ragworker` 时会自动加入 `migration`。正式发布的 `Deploy services input`、image manifest 和 support manifest 只写本次 run 私有目录，`local-release.sh` 只读取同一次运行的清单；不得再用共享 `artifacts/deploy/aicopilot-built-services.txt` 控制发布。
 
+后端服务使用同一份源码快照但不共享 SDK 中间产物：统一入口把源码 detached worktree 放在工作区 `artifacts/deploy/routine/<invocation>/snapshot-worktree`，`build-and-push.sh` 再为每个 service 传入同一 invocation 输出目录下独立的 `--artifacts-path <output-dir>/service-build/<service>`。源码和 SDK artifacts 都不得落入 macOS `TMPDIR=/private/var/folders/...`，避免 `/private/var` 与 `/var` 路径别名让 MSBuild 把同一项目识别为不同输入。禁止去掉该隔离、改回共享 `bin/obj` 或用“先构建 HttpApi”之类顺序假设止损；连续构建 DataWorker 后再构建 HttpApi 也必须使用各自依赖图。
+
 ### 4.1 不可变候选、幂等与恢复
 
 - 正式发布必须先由工作区入口 `CheckCandidate` 生成只读 plan，再用同一个完整 SHA、plan digest、profile digest 和显式服务闭包执行 `Deploy`；项目脚本不得直接作为第二入口。
 - 应用镜像使用 immutable OCI ref。事务开始前同时冻结 PostgreSQL、RabbitMQ、Qdrant 的真实 RepoDigest/runtime image id；回滚按冻结身份恢复，不重新解析可变 tag。
 - 同 SHA 的 no-op 还必须满足 support/services/image digest、服务器配置 fingerprint、运行镜像身份和全部常驻容器稳定；配置 fingerprint 漂移只能全量发布。
+- 当前生产 Harbor 是内网 HTTP。镜像推送成功后先尝试标准 OCI inspection；若 `buildx imagetools inspect` 因 HTTPS 假设失败，构建器使用 `docker manifest inspect --insecure --verbose` 并只提取唯一 `linux/amd64` descriptor digest。仍必须以 `image@sha256:...` 请求服务器，禁止把 HTTP fallback 变成 tag 部署。
 - support/compose/infra/runtime/state 任一恢复或证据落盘不确定时返回 `86` 并保留 blocked/backup；SSH 断联后按 invocation token 对账，active/unknown 返回 `87`，不得自动取消或盲目重试。
 - DataWorker/RagWorker 当前没有独立业务健康端点；发布只能证明容器进程、OOM、重启稳定性及已有 Docker Health，不能把它表述为完整业务健康。
 
