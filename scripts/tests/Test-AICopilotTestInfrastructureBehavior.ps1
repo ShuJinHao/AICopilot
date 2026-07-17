@@ -1,6 +1,11 @@
 [CmdletBinding()]
 param(
-    [string]$RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+    [string]$RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path,
+    [string]$BaseRef = $(if ([string]::IsNullOrWhiteSpace($env:QUALITY_BASE_SHA)) {
+            'origin/main'
+        } else {
+            $env:QUALITY_BASE_SHA
+        })
 )
 
 $ErrorActionPreference = 'Stop'
@@ -40,6 +45,160 @@ function Initialize-LedgerScanRoots {
             'src/vues/AICopilot.Web/src',
             'scripts/tests')) {
         New-Item -ItemType Directory -Path (Join-Path $Root $scanRoot) -Force | Out-Null
+    }
+}
+
+function New-DistinctCallerMemberCompatibilityFixture {
+    param(
+        [Parameter(Mandatory)] [string]$Root,
+        [Parameter(Mandatory)] [ValidateRange(1, 2)] [int]$MaximumCallSites,
+        [switch]$IncludeSecondCaller
+    )
+
+    Initialize-LedgerScanRoots $Root
+    $producerRelativePath = 'src/infrastructure/Fixture/SecretStringEncryptor.cs'
+    $callerRelativePath = 'src/hosts/Fixture/MigrationWorkers.cs'
+    $inventoryPath = Join-Path $Root 'inventory.json'
+    $baselinePath = Join-Path $Root 'scripts/tests/baselines/aicopilot-compatibility.json'
+    $outputPath = Join-Path $Root 'output.json'
+
+    Write-FixtureFile (Join-Path $Root $producerRelativePath) @'
+namespace Fixture;
+internal static class SecretStringEncryptor
+{
+    internal const string LegacyCipherPrefix = "encv1:";
+
+    internal static bool IsLegacyEncrypted(string value) =>
+        value.StartsWith(LegacyCipherPrefix, StringComparison.Ordinal);
+
+    internal static string ReEncryptLegacyCipher(string value) =>
+        IsLegacyEncrypted(value) ? $"encv2:{value[LegacyCipherPrefix.Length..]}" : value;
+}
+internal sealed class DistinctCallerMemberCoverageMarker { }
+'@
+
+    $secondCallerSource = if ($IncludeSecondCaller) {
+        @'
+internal sealed class SecondMigrationWorker
+{
+    internal string Migrate(string value)
+    {
+        if (!SecretStringEncryptor.IsLegacyEncrypted(value))
+        {
+            return value;
+        }
+
+        return SecretStringEncryptor.ReEncryptLegacyCipher(value);
+    }
+}
+'@
+    }
+    else {
+        ''
+    }
+    Write-FixtureFile (Join-Path $Root $callerRelativePath) @"
+namespace Fixture;
+internal sealed class FirstMigrationWorker
+{
+    internal string Migrate(string value)
+    {
+        if (!SecretStringEncryptor.IsLegacyEncrypted(value))
+        {
+            return value;
+        }
+
+        return SecretStringEncryptor.ReEncryptLegacyCipher(value);
+    }
+}
+$secondCallerSource
+"@
+
+    $secondCallEvidence = if ($IncludeSecondCaller) {
+        @'
+,
+        { "path": "src/hosts/Fixture/MigrationWorkers.cs", "contains": "internal sealed class SecondMigrationWorker" }
+'@
+    }
+    else {
+        ''
+    }
+    Write-FixtureFile $inventoryPath @"
+{
+  "schemaVersion": 3,
+  "csharpSymbols": {
+    "producers": {
+      "AI-COMPAT-DISTINCT-CALLER-MEMBER": "F:Fixture.SecretStringEncryptor.LegacyCipherPrefix"
+    },
+    "callerScans": {
+      "AI-COMPAT-DISTINCT-CALLER-MEMBER/primary": [
+        "M:Fixture.SecretStringEncryptor.IsLegacyEncrypted(System.String)",
+        "M:Fixture.SecretStringEncryptor.ReEncryptLegacyCipher(System.String)"
+      ]
+    },
+    "candidateDispositions": {
+      "F:Fixture.SecretStringEncryptor.LegacyCipherPrefix": "AI-COMPAT-DISTINCT-CALLER-MEMBER",
+      "M:Fixture.SecretStringEncryptor.IsLegacyEncrypted(System.String)": "AI-COMPAT-DISTINCT-CALLER-MEMBER",
+      "M:Fixture.SecretStringEncryptor.ReEncryptLegacyCipher(System.String)": "AI-COMPAT-DISTINCT-CALLER-MEMBER"
+    }
+  },
+  "items": [
+    {
+      "id": "AI-COMPAT-DISTINCT-CALLER-MEMBER",
+      "producer": { "path": "$producerRelativePath", "contains": "LegacyCipherPrefix = \"encv1:\"" },
+      "consumer": { "path": "$callerRelativePath", "contains": "internal sealed class FirstMigrationWorker" },
+      "callEvidence": [
+        { "path": "$callerRelativePath", "contains": "SecretStringEncryptor.IsLegacyEncrypted(value)" },
+        { "path": "$callerRelativePath", "contains": "SecretStringEncryptor.ReEncryptLegacyCipher(value)" }$secondCallEvidence
+      ],
+      "candidateEvidence": [
+        { "path": "$producerRelativePath", "contains": "Legacy" }
+      ],
+      "callerScan": {
+        "roots": ["src/hosts"],
+        "extensions": [".cs"],
+        "contains": "SecretStringEncryptor.IsLegacyEncrypted(",
+        "countMode": "distinct-caller-member",
+        "excludePaths": ["$producerRelativePath"]
+      },
+      "replacement": "Authenticated fixture cipher without legacy surfaces.",
+      "deletionCondition": "Behavior fixture migration has completed.",
+      "latestDeletionBatch": "2099-12",
+      "deletionDeadline": "2099-12-31",
+      "coverageTests": [
+        { "path": "$producerRelativePath", "contains": "DistinctCallerMemberCoverageMarker" }
+      ]
+    }
+  ],
+  "ordinaryAbstractions": []
+}
+"@
+    Write-FixtureFile $baselinePath @"
+{
+  "schemaVersion": 3,
+  "unclassifiedCompatibilitySignals": 0,
+  "compatibilityItems": [
+    {
+      "id": "AI-COMPAT-DISTINCT-CALLER-MEMBER",
+      "deletionDeadline": "2099-12-31",
+      "maximumCallSites": $MaximumCallSites
+    }
+  ]
+}
+"@
+
+    & git -C $Root init --quiet
+    & git -C $Root add -A
+    & git -C $Root -c user.name='AICopilot Fixture' -c user.email='fixture@invalid' `
+        commit --quiet -m 'distinct caller member base'
+    & git -C $Root update-ref refs/remotes/origin/main HEAD
+    & git -C $Root -c user.name='AICopilot Fixture' -c user.email='fixture@invalid' `
+        commit --quiet --allow-empty -m 'distinct caller member candidate'
+
+    [pscustomobject]@{
+        Root = $Root
+        InventoryPath = $inventoryPath
+        BaselinePath = $baselinePath
+        OutputPath = $outputPath
     }
 }
 
@@ -466,6 +625,7 @@ New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
 try {
     & $inventoryScript `
         -RepositoryRoot $RepositoryRoot `
+        -BaseRef $BaseRef `
         -RunClassificationBehaviorFixture *> $null
 
     $runnerBindingFixture = New-RunnerBindingFixture
@@ -2087,6 +2247,76 @@ Invoke-QualityEntry
     } "PowerShell migration signal 'Invoke-LegacyQualityAdapter' must use an AI-COMPAT disposition"
     Remove-Item $powerShellLegacyPath -Force
 
+    $sameCallerFixture = New-DistinctCallerMemberCompatibilityFixture `
+        -Root (Join-Path $tempRoot 'compatibility-distinct-caller-member-same-caller') `
+        -MaximumCallSites 1
+    & $compatibilityScript `
+        -RepositoryRoot $sameCallerFixture.Root `
+        -InventoryPath $sameCallerFixture.InventoryPath `
+        -BaselinePath $sameCallerFixture.BaselinePath `
+        -OutputPath $sameCallerFixture.OutputPath *> $null
+    $sameCallerSummary = Get-Content $sameCallerFixture.OutputPath -Raw | ConvertFrom-Json
+    if ('AI-COMPAT-DISTINCT-CALLER-MEMBER=1' -notin @($sameCallerSummary.compatibilityCallSites)) {
+        throw 'Distinct caller-member mode must count two legacy surfaces in one caller member as one call site.'
+    }
+
+    $isLegacyGrowthFixture = New-DistinctCallerMemberCompatibilityFixture `
+        -Root (Join-Path $tempRoot 'compatibility-distinct-caller-member-islegacy-growth') `
+        -MaximumCallSites 2 `
+        -IncludeSecondCaller
+    Write-FixtureFile (Join-Path $isLegacyGrowthFixture.Root 'src/hosts/Fixture/ThirdMigrationWorker.cs') @'
+namespace Fixture;
+internal sealed class ThirdMigrationWorker
+{
+    internal bool RequiresMigration(string value) =>
+        SecretStringEncryptor.IsLegacyEncrypted(value);
+}
+'@
+    Assert-Fails {
+        & $compatibilityScript `
+            -RepositoryRoot $isLegacyGrowthFixture.Root `
+            -InventoryPath $isLegacyGrowthFixture.InventoryPath `
+            -BaselinePath $isLegacyGrowthFixture.BaselinePath `
+            -OutputPath $isLegacyGrowthFixture.OutputPath
+    } "Compatibility call sites grew.*actual=3 maximum=2"
+
+    $reEncryptGrowthFixture = New-DistinctCallerMemberCompatibilityFixture `
+        -Root (Join-Path $tempRoot 'compatibility-distinct-caller-member-reencrypt-growth') `
+        -MaximumCallSites 2 `
+        -IncludeSecondCaller
+    Write-FixtureFile (Join-Path $reEncryptGrowthFixture.Root 'src/hosts/Fixture/ThirdMigrationWorker.cs') @'
+namespace Fixture;
+internal sealed class ThirdMigrationWorker
+{
+    internal string Migrate(string value) =>
+        SecretStringEncryptor.ReEncryptLegacyCipher(value);
+}
+'@
+    Assert-Fails {
+        & $compatibilityScript `
+            -RepositoryRoot $reEncryptGrowthFixture.Root `
+            -InventoryPath $reEncryptGrowthFixture.InventoryPath `
+            -BaselinePath $reEncryptGrowthFixture.BaselinePath `
+            -OutputPath $reEncryptGrowthFixture.OutputPath
+    } "Compatibility call sites grew.*actual=3 maximum=2"
+
+    $unknownCountModeFixture = New-DistinctCallerMemberCompatibilityFixture `
+        -Root (Join-Path $tempRoot 'compatibility-distinct-caller-member-unknown-mode') `
+        -MaximumCallSites 1
+    $unknownCountModeInventory = Get-Content $unknownCountModeFixture.InventoryPath -Raw |
+        ConvertFrom-Json -Depth 64
+    $unknownCountModeInventory.items[0].callerScan.countMode = 'unsupported-fixture-mode'
+    Write-FixtureFile `
+        $unknownCountModeFixture.InventoryPath `
+        ($unknownCountModeInventory | ConvertTo-Json -Depth 64)
+    Assert-Fails {
+        & $compatibilityScript `
+            -RepositoryRoot $unknownCountModeFixture.Root `
+            -InventoryPath $unknownCountModeFixture.InventoryPath `
+            -BaselinePath $unknownCountModeFixture.BaselinePath `
+            -OutputPath $unknownCountModeFixture.OutputPath
+    } "unsupported countMode 'unsupported-fixture-mode'"
+
     $fakeCallerVariants = [ordered]@{
         comment = @'
 namespace Fixture;
@@ -2949,7 +3179,7 @@ internal sealed class MigrationCoverageMarker { }
             -LedgerPath $generatedTransitionPath
     } 'Declaration transition disposition/replacement/reason content differs from the frozen controlled review'
 
-    Write-Host 'AICopilot inventory/reconciliation/Simulation/CI/coverage/duplication/mutation/compatibility/declaration-transition behavior tests passed. cases=98; coverageOmissionGuards=29.'
+    Write-Host 'AICopilot inventory/reconciliation/Simulation/CI/coverage/duplication/mutation/compatibility/declaration-transition behavior tests passed. cases=102; coverageOmissionGuards=29.'
 }
 finally {
     Remove-Item $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

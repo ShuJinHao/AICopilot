@@ -120,8 +120,9 @@ internal sealed class TestMcpServerBootstrap(
 
     private sealed class InProcessTestingMcpTools
     {
-        [McpServerTool, Description("Echo the provided input for integration testing.")]
-        public static string Echo(string input)
+        [McpServerTool(Name = "queryEcho", ReadOnly = true, Destructive = false),
+         Description("Return the provided integration-test input without changing external state.")]
+        public static string QueryEcho(string input)
         {
             return $"echo:{input}";
         }

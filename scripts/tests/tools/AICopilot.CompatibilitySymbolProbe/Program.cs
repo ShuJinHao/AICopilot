@@ -111,6 +111,13 @@ foreach (var item in inventoryItems)
 
     foreach (var scan in item.CallerScans.Where(scan => scan.Extensions.Contains(".cs", StringComparer.OrdinalIgnoreCase)))
     {
+        if (scan.CountMode.Length > 0 &&
+            !string.Equals(scan.CountMode, "distinct-caller-member", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"{item.Id}/{scan.Id} caller scan has unsupported countMode '{scan.CountMode}'.");
+        }
+
         if (discover)
         {
             var matches = DiscoverCallerSymbols(references, scan)
@@ -130,15 +137,38 @@ foreach (var item in inventoryItems)
         }
 
         var targetSymbols = symbolIds.ToHashSet(StringComparer.Ordinal);
-        var count = references
+        var matchingReferences = references
             .Where(reference =>
                 reference.IsCallerEvidence &&
                 targetSymbols.Contains(reference.SymbolId) &&
                 IsInRoots(reference.Path, scan.Roots) &&
                 !scan.ExcludePaths.Contains(reference.Path, StringComparer.Ordinal))
+            .ToArray();
+        var count = matchingReferences
             .Select(reference => (reference.Path, reference.Position, reference.SymbolId))
             .Distinct()
             .Count();
+        if (string.Equals(scan.CountMode, "distinct-caller-member", StringComparison.Ordinal))
+        {
+            var unresolvedCallerMembers = matchingReferences
+                .Where(reference => string.IsNullOrWhiteSpace(reference.EnclosingMemberSymbolId))
+                .OrderBy(reference => reference.Path, StringComparer.Ordinal)
+                .ThenBy(reference => reference.Line)
+                .ToArray();
+            if (unresolvedCallerMembers.Length > 0)
+            {
+                var unresolvedEvidence = string.Join(
+                    ", ",
+                    unresolvedCallerMembers.Select(reference => $"{reference.Path}:{reference.Line}"));
+                throw new InvalidOperationException(
+                    $"{callerKey} caller scan countMode 'distinct-caller-member' requires every matched reference to resolve an enclosing member; unresolved=[{unresolvedEvidence}].");
+            }
+
+            count = matchingReferences
+                .Select(reference => reference.EnclosingMemberSymbolId)
+                .Distinct(StringComparer.Ordinal)
+                .Count();
+        }
         callerCounts.Add(new CallerCount(item.Id, scan.Id, count));
     }
 }
@@ -311,6 +341,9 @@ static IEnumerable<InventoryItem> ReadInventoryItems(JsonElement root)
                 scan.GetProperty("contains").GetString() ?? string.Empty,
                 scan.GetProperty("roots").EnumerateArray().Select(value => value.GetString() ?? string.Empty).ToArray(),
                 scan.GetProperty("extensions").EnumerateArray().Select(value => value.GetString() ?? string.Empty).ToArray(),
+                scan.TryGetProperty("countMode", out var countMode)
+                    ? countMode.GetString() ?? string.Empty
+                    : string.Empty,
                 scan.TryGetProperty("excludePaths", out var excluded)
                     ? excluded.EnumerateArray().Select(value => value.GetString() ?? string.Empty).ToArray()
                     : []))
@@ -791,6 +824,7 @@ internal sealed record CallerScan(
     string Contains,
     string[] Roots,
     string[] Extensions,
+    string CountMode,
     string[] ExcludePaths);
 internal sealed record InventoryItem(
     string Id,

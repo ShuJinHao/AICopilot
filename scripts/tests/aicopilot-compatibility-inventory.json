@@ -20,7 +20,8 @@
     },
     "callerScans": {
       "AI-COMPAT-SECRET-ENCV1/primary": [
-        "M:AICopilot.EntityFrameworkCore.Security.SecretStringEncryptor.IsLegacyEncrypted(System.String)"
+        "M:AICopilot.EntityFrameworkCore.Security.SecretStringEncryptor.IsLegacyEncrypted(System.String)",
+        "M:AICopilot.EntityFrameworkCore.Security.SecretStringEncryptor.ReEncryptLegacyCipher(System.String)"
       ],
       "AI-COMPAT-EF-HISTORY-SPLIT/primary": [
         "M:AICopilot.EntityFrameworkCore.MigrationHistoryBootstrapper.BootstrapLegacyHistoryAsync(System.Collections.Generic.IReadOnlyCollection{AICopilot.EntityFrameworkCore.MigrationHistoryBootstrapper.MigrationContext},System.Threading.CancellationToken)"
@@ -139,8 +140,16 @@
           "contains": "SecretStringEncryptor.IsLegacyEncrypted"
         },
         {
+          "path": "src/hosts/AICopilot.MigrationWorkApp/MigrationWorkerSecretMigrator.cs",
+          "contains": "SecretStringEncryptor.ReEncryptLegacyCipher"
+        },
+        {
           "path": "src/hosts/AICopilot.MigrationWorkApp/MigrationWorkerAiGatewaySeeder.cs",
           "contains": "SecretStringEncryptor.IsLegacyEncrypted"
+        },
+        {
+          "path": "src/hosts/AICopilot.MigrationWorkApp/MigrationWorkerAiGatewaySeeder.cs",
+          "contains": "SecretStringEncryptor.ReEncryptLegacyCipher"
         }
       ],
       "candidateEvidence": [
@@ -153,6 +162,7 @@
         "roots": ["src/hosts", "src/infrastructure"],
         "extensions": [".cs"],
         "contains": "SecretStringEncryptor.IsLegacyEncrypted(",
+        "countMode": "distinct-caller-member",
         "excludePaths": [
           "src/infrastructure/AICopilot.EntityFrameworkCore/Security/SecretStringEncryptor.cs"
         ]

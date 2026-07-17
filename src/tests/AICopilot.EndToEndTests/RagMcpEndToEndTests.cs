@@ -32,6 +32,7 @@ public sealed class RagMcpEndToEndTests : EndToEndScenarioTestBase
     {
     }
 
+    [Fact]
     public async Task RagAndMcpSmoke_ShouldIndexDocument_SearchContent_AndLoadOnlyEnabledMcp()
     {
         await AuthenticateAsAdminAsync();

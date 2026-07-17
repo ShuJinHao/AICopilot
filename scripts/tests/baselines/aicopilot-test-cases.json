@@ -8253,6 +8253,33 @@
     },
     {
       "assembly": "AICopilot.EndToEndTests",
+      "class": "AICopilot.EndToEndTests.RagMcpEndToEndTests",
+      "method": "RagAndMcpSmoke_ShouldIndexDocument_SearchContent_AndLoadOnlyEnabledMcp",
+      "case": "AICopilot.EndToEndTests.RagMcpEndToEndTests.RagAndMcpSmoke_ShouldIndexDocument_SearchContent_AndLoadOnlyEnabledMcp",
+      "kind": "EndToEnd",
+      "runtime": "Aspire",
+      "capability": "Platform",
+      "concern": "Reliability",
+      "profile": "Default",
+      "risk": "P0",
+      "ruleId": "AI-E2E-001",
+      "regressionId": "AI-REG-CROSS-SERVICE-E2E",
+      "runtimeDependencies": [
+        "Docker",
+        "Aspire",
+        "Postgres",
+        "RabbitMQ",
+        "Redis",
+        "Qdrant"
+      ],
+      "cadence": "PR",
+      "owner": "CrossServiceAcceptance",
+      "required": true,
+      "skipExpected": false,
+      "status": "Expected"
+    },
+    {
+      "assembly": "AICopilot.EndToEndTests",
       "class": "AICopilot.EndToEndTests.RagWorkerStartupTests",
       "method": "RagWorker_ShouldStart_WithRequiredDependencies",
       "case": "AICopilot.EndToEndTests.RagWorkerStartupTests.RagWorker_ShouldStart_WithRequiredDependencies",

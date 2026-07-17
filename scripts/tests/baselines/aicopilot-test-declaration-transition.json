@@ -6,17 +6,17 @@
     "gitTree": "88aee67db521a1a33ff6de524c0163d513396123",
     "declarationCount": 785,
     "orderedSymbolSha256": "62a8fa4fe89e98b8b7be0a74f020db16c5bbdac3714b1838e194b2bef189e312",
-    "transitionContentSha256": "a4b736c63a19f31ffafc5e7f0a70e46636d1c5f17365654195bb7a63c3eff65a"
+    "transitionContentSha256": "87e34e9a75977f9f678e7b41298f7246f7e783d1b3d27d60d805c07dbc36c36a"
   },
   "current": {
     "baselinePath": "scripts/tests/baselines/aicopilot-test-cases.json",
-    "availableDeclarationCount": 768
+    "availableDeclarationCount": 769
   },
   "summary": {
-    "retainedSelf": 632,
+    "retainedSelf": 633,
     "retiredDuplicate": 0,
     "retiredSourceGuard": 2,
-    "replaced": 151
+    "replaced": 150
   },
   "transitions": [
     {
@@ -3159,13 +3159,11 @@
     },
     {
       "oldSymbol": "AICopilot.BackendTests.Phase25RuntimeSmokeTests.RagAndMcpSmoke_ShouldIndexDocument_SearchContent_AndLoadOnlyEnabledMcp()",
-      "disposition": "replaced",
+      "disposition": "retained-self",
       "replacementIds": [
-        "AICopilot.WorkflowTests.RagDocumentIndexingWorkflowTests.ParsingDocument_ShouldRecoverAndFinishIndexing",
-        "AICopilot.WorkflowTests.RagDocumentIndexingWorkflowTests.EmbeddingDocument_ShouldRecoverAndPassPreviousChunkCountForCleanup",
-        "AICopilot.ToolPlugin.ConformanceTests.McpServerBootstrapExposureTests.StartAsync_ShouldOnlyRegisterEnabledAllowlistedAdvisoryServers"
+        "AICopilot.EndToEndTests.RagMcpEndToEndTests.RagAndMcpSmoke_ShouldIndexDocument_SearchContent_AndLoadOnlyEnabledMcp"
       ],
-      "reason": "旧混合 smoke 被拆为 RAG 状态机恢复、向量清理和 MCP 启用/白名单契约三项真实语义。"
+      "reason": "恢复原 RAG 上传、索引、检索与仅启用 MCP 装载的可执行端到端测试身份；方法名与闭环语义保持不变，仅迁入 EndToEnd runner。"
     },
     {
       "oldSymbol": "AICopilot.BackendTests.SecurityHardeningTests.DapperConnector_ShouldUseReadOnlyTransactionAndBoundedReader()",
