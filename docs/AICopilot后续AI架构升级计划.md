@@ -73,17 +73,21 @@
 
 ### 1.4 实施基线门（B0）
 
-本计划冻结前读取到的 AICopilot `main` 为 `70de5d2d5727423545955bb6663e4189d03f189b`；工作区测试治理总计划登记的 AICopilot 完成基线为 `87b2336630125d6168b0b7efb5d4b4e8a97a2c60`。后者当前不在前者祖先链上，且当前 `main` 仍保留 `AICopilot.BackendTests` 等旧测试桶，因此不得把测试治理文档中的 25 项目、1011 required cases 和旧桶已删除直接当作本计划的现行源码事实。
+`AI-W0 / B0` 已于 2026-07-17 形成唯一实施基线，旧的 `70de5d2...` / `87b233...` 分叉假设和 1011 required 计数不再是当前执行事实：
 
-B0 是 P0 之前的强制入口门：
+| 证据项 | 当前基线 |
+|---|---|
+| `baseSha` | `b40ee21b9bc248176e6d7e0c278e4c50101b1d59` |
+| Git tree | `6331fc362da7d30d05b81e733fc2a9c020f5d0a4` |
+| 合并来源 | 最终测试治理候选 `59b93f7145fbe2dc908aa35970566d25875b473c` + 当时 `main` `29f92786254fa84d5143d6c56bafc903bdf17d3a` |
+| 项目清单 | schema v3 inventory 共 25 项：20 个 runner（17 required / 3 Manual）+ 5 个 TestKit support；1026 case（required 1012 / Manual 14） |
+| required workflow | `.github/workflows/aicopilot-ci.yml`；治理候选 PR #60 run `29562903935` attempt 1 的 `governance-gates`、`dotnet-tests`、`web-deployment-tests`、`mutation-gate`、`build-test` 全部成功 |
+| clean-HEAD 本地执行 | required .NET `1012/1012`、Vitest `165/165`、Playwright `43/43`、deployment behavior `33/33`，全部 0 failed / 0 skipped，Playwright 0 flaky |
+| coverage / mutation | 17 logical reports / 34 physical copies；line `71460/87937 = 81.262722%`、branch `8401/15581 = 53.918234%`；mutation `58/58 killed = 100%`，0 survived / 0 no-coverage |
+| Analyzer | `AIARCH001`–`AIARCH007` 继续由生产编译 owner 以 Error + enabled-by-default + `NotConfigurable` 执行；AnalyzerTests `30/30`、真实临时 csproj AnalyzerFixtureTests `28/28` |
+| 未完成治理债务 | `AI-SEC-010` 平台 runner/短期凭据、`AI-SEC-012` 生产密钥迁移窗口、`AI-SEC-053` ECharts 中危升级仍按原 owner 管理；均未被 B0 伪装为完成，也不授权在 P0 中夹带处理 |
 
-1. 实施分支必须基于一个 clean HEAD，且该 HEAD 已包含 `87b233...` 的治理结果或在当前 `main` 上重新执行并形成等价的新基线。
-2. 若选择合并或 rebase 测试治理分支，必须先解决与当前 `main` 的真实冲突，再重新生成 inventory、discovery、execution、Skip、Analyzer 和 workflow 证据；不得沿用旧计数猜测已完成。
-3. 若不合入 `87b233...`，必须先把工作区测试治理总计划和 AICopilot 当前源码状态重新对账，形成唯一新基线；不得让两份互相冲突的“当前状态”并行存在。
-4. B0 输出必须至少包含 `baseSha`、tree digest、项目清单、测试发现/执行/Skip 数、required workflow、Analyzer 状态、未完成治理债务和验证命令。
-5. B0 只解决实施基线，不授权 merge、push、部署或跨项目写入。
-
-B0 未通过时，只允许继续做只读核验和计划拆解，不得开始 P0 源码或数据库改造。
+B0 的退出结论为 `Passed`：P0 可以在上述 `baseSha` 的后代上开始。B0 只解决实施起点，不授权部署、生产迁移、Cloud/Edge 写入、P1–P7 实现、merge 或 force push；当前任务已单独授权的普通 push 和 Draft PR 仍必须在各阶段验证、复盘和提交完成后执行。若后续重写该 ancestry 或改变项目图、required workflow、Analyzer owner 或质量 baseline，必须先重新通过 B0，不能沿用本表证据。
 
 ---
 
@@ -2571,7 +2575,7 @@ PredictionResult
 
 | 阶段 | 前置 | 主要交付 | 退出门 |
 |---|---|---|---|
-| B0 基线对账 | 当前源码与测试治理文档存在分叉 | 唯一 clean baseSha/tree、项目/测试/CI/Analyzer inventory | 当前源码与测试治理状态一致，不沿用失真计数 |
+| B0 基线对账 | 已完成；原源码与测试治理分叉仅保留为 provenance | clean `b40ee21...` / tree `6331fc...`、25 项 / 1012 required 与 CI/Analyzer inventory | `AI-W0` 已 Passed；后续若改 ancestry、项目图、workflow、Analyzer owner 或 baseline 则重新开门 |
 | P0 契约冻结 | B0 | typed IntentCandidate、LinearV1 Plan v2、Node Contract、Evidence v1、ExecutionSnapshot、选择模式、两级 claim/状态协议、PlanJson 完整性、Skill inventory | Schema/digest 稳定，超限不截断，预测节点稳定拒绝，影子 Planner 退出 DI |
 | P1 运行时地基 | P0 | R1–R7、两级 claim/fencing、OutcomeUnknown、分布式模型预约、AI-PERSIST-01d | 多 Worker、kill/recovery、状态迁移、Quota、Artifact 对账通过 |
 | P2 共享执行与最小编译 | P1 | Node Executor、Evidence Normalizer、CloudRead/GovernedDataRead 双执行器、双编排接入、唯一最小 LinearV1 PlanCompiler | Chat/Durable 语义一致，无 Compiler 空窗、上下文污染和跨路径 fallback |
@@ -2584,7 +2588,7 @@ PredictionResult
 
 ### 20.1 顺序为什么不能交换
 
-- B0 不能省略：测试治理目标分支未进入当前 `main` 时，任何新测试拆分、Analyzer 或基线计数都没有可信起点。
+- B0 不能省略：`AI-W0` 已通过真实合并与 clean-HEAD 重跑解决本轮分叉；未来若实施基线再次不含目标治理结果，任何新测试拆分、Analyzer 或基线计数仍没有可信起点。
 - P1 不能晚于 P3：否则删除 Skill 后仍在不可靠 Runtime 上切换权限语义。
 - P2 的最小 Compiler 不能晚于 P3：否则 Skill/DynamicPlanner 删除后没有合法 Plan v2 生产者。
 - P2 不能晚于 P4：否则 Chat 与 Durable 各自建设一套 DAG/Evidence。
@@ -2769,7 +2773,7 @@ RAG/SOP 知识检索 ─────────┼─> Evidence 校验
 
 ### 22.9 测试原则
 
-- B0 必须先证明实施 HEAD 与 `../../docs/三项目测试架构治理总计划.md` 的 AICopilot 基线一致；当前 `main` 未包含登记完成 SHA 时不得直接沿用 25 项目/1011 required 数字。
+- B0 已证明实施锚点 `b40ee21...` 与 `../../docs/三项目测试架构治理总计划.md` 的 AICopilot 目标基线一致，当前事实为 25 项 / 1012 required；后续若实施 HEAD 不再继承该锚点，必须重新证明，不能回退沿用 1011 required 旧数字。
 - B0 通过后，本计划新增测试必须进入治理后的目标分层项目、唯一 solution/runner/required workflow 和发现/执行对账，不得继续把新测试塞回冻结旧桶。
 - Required lane Skip 必须为 0。
 - 不用固定 sleep 证明并发。
@@ -2987,7 +2991,7 @@ v2.2 对两轮独立评审的全部硬缺口作出明确裁决：
 3. QueueItem/RunAttempt 的任务领取与 NodeRun 的节点领取拆成两级原子协议，分别使用 fencing；checkpoint 同时验证两级 token。
 4. `AI-PERSIST-01d / AI-SEC-047` 定为 P1 硬门，关单前只允许小型 inline Evidence，禁止 ArtifactReference。
 5. 多实例模型配额选定 PostgreSQL 权威预约；当前内存 Scheduler 仅保留本地选择与健康提示。
-6. 测试治理完成 SHA 未进入当前 `main` 的事实由 B0 先对账，禁止沿用失真基线。
+6. 测试治理候选未进入原 `main` 的分叉已由 B0 通过真实合并和 clean-HEAD 重跑闭合；当前只认 `b40ee21...` / tree `6331fc...` 及 1012 required，不再沿用失真基线。
 7. PlanJson 和结构化 Evidence 禁止静默截断，改为 canonical byte limit、显式错误和 round-trip/digest 校验。
 8. IntentCandidate 补齐 typed resource/filter/time range、stable provider、required provenance、KnownButUnavailable 和原始 reasoning/query 丢弃规则。
 9. NodeRun 状态迁移、非法迁移、双 fencing、OutcomeUnknown 对账和人工决议已形成完整协议。

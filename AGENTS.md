@@ -122,6 +122,9 @@ Cloud-AICopilot OIDC 身份对齐的长期结论见 `../docs/历史核心记录.
 
 ## Test Architecture Governance
 
+- 后续 AI 架构升级的 `AI-W0` 实施锚点固定为 clean merge commit `b40ee21b9bc248176e6d7e0c278e4c50101b1d59`、tree `6331fc362da7d30d05b81e733fc2a9c020f5d0a4`；它同时包含最终测试治理候选 `59b93f7145fbe2dc908aa35970566d25875b473c` 与当时 `main` `29f92786254fa84d5143d6c56bafc903bdf17d3a`。P0 只能在该锚点的后代上实施，不得再沿用旧 `70de5d2...` / `87b233...` 分叉假设或 1011 required 旧计数。
+- `AI-W0` 只证明 P0 的实施起点，不是发布、部署、merge 或跨项目授权。后续提交可以推进 HEAD，但若重写或替换该 ancestry、改变测试项目图、required workflow、Analyzer owner 或 baseline，必须在继续 P0 前重新生成 clean-HEAD inventory、完整 required 执行、coverage、mutation、Web/deployment 和最终对账证据。
+
 - 三项目测试架构专题入口是 `../docs/三项目测试架构治理总计划.md`。AICopilot 测试资产身份只来自项目元数据，测试清单只负责真实发现 runner，CI 只依赖实际执行结果对账。
 - 新增测试必须进入 `Unit/Aggregate/Application/Workflow/Contract/Conformance/Persistence/HttpIntegration/EndToEnd/Deployment/GoldenEval/Architecture` 等物理项目，直接声明 `IsTestProject` 与 kind/runtime/cadence/owner/required 元数据并进入 `AICopilot.slnx`。不得恢复混合测试桶，不得使用 `Phase/Batch/Suite` filter 充当物理分层。
 - support code 只能位于 `src/testing` 的五个固定 TestKit 项目，必须直接声明 `IsTestProject=false`、owner 和完整 consumers，不得引用 test SDK、xUnit/NUnit/MSTest、FluentAssertions/Shouldly 等测试框架或断言 package，也不得声明 Fact/Theory。xUnit 生命周期适配和断言 helper 必须位于实际 runner，不得为 support 恢复 package 例外 allowlist。其它路径不能靠自声明 Support 逃避 discovery；新增 support 项目必须先修改固定项目清单和行为负例。
