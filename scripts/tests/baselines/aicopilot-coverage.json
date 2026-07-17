@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "requiredReportCount": 17,
   "minimumLineRate": 0.81255899,
-  "minimumBranchRate": 0.53905398,
+  "minimumBranchRate": 0.53911816,
   "productionAssemblyCount": 28,
   "productionSourceCount": 757,
   "productionUniverseIdentitySha256": "4831f3647457a0a9cc525e0bf3d9953145ca45677bfed5701b5a3639729ef868",
