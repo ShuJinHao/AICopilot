@@ -270,7 +270,7 @@ publish_dotnet_image() {
   local image_name="$3"
   local app_dll="$4"
   local publish_dir="$REPO_ROOT/artifacts/container-publish/$image_name"
-  local build_artifacts_root="$REPO_ROOT/artifacts/service-build/$service"
+  local build_artifacts_root="$OUTPUT_DIR/service-build/$service"
 
   printf 'Building AICopilot backend image: service=%s image=%s/%s:%s\n' "$service" "$IMAGE_PREFIX" "$image_name" "$TAG"
 
