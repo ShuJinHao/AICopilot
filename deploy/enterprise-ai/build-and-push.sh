@@ -196,6 +196,7 @@ validate_local_tools() {
   [ -n "$CLOUD_PLATFORM_URL" ] || fail "CLOUD_PLATFORM_URL is required, for example http://cloud.internal.example:81."
   require_command git
   require_command docker
+  require_command jq
   if run_with_timeout "$HARBOR_TIMEOUT_SECONDS" "docker buildx version" docker buildx version >/dev/null 2>&1; then
     :
   else
@@ -242,6 +243,7 @@ env_key_for_service() {
 resolve_pushed_image_digest() {
   local image_ref="$1"
   local digest
+  local manifest_json
 
   if [ "$DRY_RUN" = true ]; then
     printf '%s\n' 'sha256:0000000000000000000000000000000000000000000000000000000000000000'
@@ -252,9 +254,24 @@ resolve_pushed_image_digest() {
       docker buildx imagetools inspect "$image_ref" --format '{{.Manifest.Digest}}')"; then
     :
   else
-    local status=$?
-    printf 'Could not resolve immutable OCI digest for pushed image: %s\n' "$image_ref" >&2
-    exit "$status"
+    printf 'OCI digest inspection over HTTPS failed; retrying the configured registry as insecure HTTP: %s\n' "$image_ref" >&2
+    if manifest_json="$(run_with_timeout "$HARBOR_TIMEOUT_SECONDS" "inspect pushed OCI manifest $image_ref over insecure HTTP" \
+        docker manifest inspect --insecure --verbose "$image_ref")"; then
+      digest="$(printf '%s\n' "$manifest_json" | jq -er '
+        if type == "array" then
+          [ .[]
+            | select(.Descriptor.platform.os == "linux" and .Descriptor.platform.architecture == "amd64")
+            | .Descriptor.digest ]
+          | unique
+          | if length == 1 then .[0] else error("expected exactly one linux/amd64 manifest") end
+        else
+          .Descriptor.digest
+        end')"
+    else
+      local status=$?
+      printf 'Could not resolve immutable OCI digest for pushed image: %s\n' "$image_ref" >&2
+      exit "$status"
+    fi
   fi
   digest="$(printf '%s\n' "$digest" | tail -n 1 | tr -d '\r[:space:]')"
   if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then

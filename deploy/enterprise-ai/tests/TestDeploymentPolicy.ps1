@@ -10,6 +10,7 @@ function Require-Text([string]$Path, [string]$Pattern, [string]$Message) {
 Require-Text 'deploy/enterprise-ai/build-and-push.sh' 'normalize_services' 'AICopilot image builder must normalize an explicit service set.'
 Require-Text 'deploy/enterprise-ai/build-and-push.sh' 'build_artifacts_root="\$OUTPUT_DIR/service-build/\$service"' 'AICopilot backend builds must isolate SDK artifacts by service outside the detached source worktree.'
 Require-Text 'deploy/enterprise-ai/build-and-push.sh' '--artifacts-path "\$build_artifacts_root"' 'AICopilot dotnet publish must use the service-private artifacts root.'
+Require-Text 'deploy/enterprise-ai/build-and-push.sh' 'docker manifest inspect --insecure --verbose "\$image_ref"' 'AICopilot image digest resolution must support the configured HTTP Harbor without weakening immutable digest deployment.'
 Require-Text 'deploy/enterprise-ai/local-release.sh' 'normalized="\$normalized,migration"' 'AICopilot backend deployment must preserve the migration safety closure.'
 Require-Text '.github/workflows/aicopilot-routine-request.yml' 'operation:\s*[\s\S]*?- deploy\s*[\s\S]*?- inspect' 'AICopilot routine workflow must expose read-only production-state inspection.'
 Require-Text '.github/workflows/aicopilot-routine-request.yml' "if: inputs\.operation == 'deploy'" 'AICopilot deployment request must be gated by operation=deploy.'

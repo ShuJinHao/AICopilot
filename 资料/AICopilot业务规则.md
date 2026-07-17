@@ -165,6 +165,7 @@ Cloud AiRead 设备契约：
 - 如果当前 `AICopilot` 与 `Cloud` 共用同一台生产宿主机，必须在工作区总入口明确写出共享宿主机事实、共享标准发布人和两个独立部署根；不得把同机双部署根问题写成两套互不相关的环境。
 - root 应急路径一旦写入 `releases/*`、`current-release.summary.md` 或 deploy support files，关闭任务前必须恢复 owner/mode，并重新验证标准 non-root `./deploy-release.sh --validate-only`；不得留下 root-owned 状态文件后直接收口。
 - 工作区根 `deploy/Deploy-Changed.ps1` 是日常应用唯一入口；正式发布先自动 push 已提交的本地 `main`，再读取生产 SHA，并按 Git 改动和项目依赖闭包只构建、推送 Harbor、部署受影响镜像。影响无法归属禁止退化成全量；后端 HttpApi/DataWorker/RagWorker 自动闭包 migration。`Deploy.ps1` 只作为统一入口内部执行器和显式恢复入口，Runner/Compose/support files/cleanup/GC/深度巡检独立维护。
+- 内网 HTTP Harbor 推送后的不可变镜像解析必须选择唯一 `linux/amd64` manifest digest；`buildx` HTTPS inspection 失败时可使用 `docker manifest inspect --insecure --verbose`，但不得退化为 tag、attestation digest 或跳过 digest-bound request。
 - AICopilot 后端多服务在同一候选内顺序 publish 时，源码 detached worktree 与按 service 隔离的 .NET SDK artifacts 根都必须放在工作区统一 deployment artifacts 根；不得落入 macOS `TMPDIR=/private/var/folders/...`、共享 `bin/obj`、混用 `/private/var` 与 `/var` 路径别名或靠调整服务顺序规避依赖图污染。
 - support release 必须包含 compose、执行 staging/SHA256 校验，并让 support reservation、全局 release lock 和 deploy 使用同一 token/digest；`.env`、release state、锁和备份不得进入同步包。健康前失败必须恢复持久状态；active/stale lock、真实退出码、timeout、信号释放锁和同 SHA 健康幂等必须有行为回归。
 - 正式发布和健康 no-op 必须绑定 workspace plan/profile、固定 Git SHA、显式服务闭包、immutable OCI、全局配置 fingerprint 与实际运行容器身份；配置 fingerprint 漂移只能走全量服务发布，后端服务必须显式包含 migration。Running/Restarting/OOM/RestartCount 和已有 Docker Health 任一不满足时不得提交或 no-op。

@@ -79,7 +79,7 @@ $vitestConfigSha256 = 'e30c3cbfec8089345e5b4ea5950ce3edc975f033722c3532ee26b7e07
 $playwrightSmokeSourceSha256 = 'f87a5e2bf68f302165b9be9f44487110fa9fdc2975b92bfb826d901fc0ae1a91'
 $playwrightSmokeConfigSha256 = '6abb22587cfbbcee798b6c85df2b858b1acf953b847c08f3625ff0cb32380838'
 $deploymentBehaviorSha256 = 'a157bad95903c01872e896961b8a69c127c9937a17e098a56c5eb09d4c2768f2'
-$deploymentPolicySha256 = 'b086151ec2304f4d3fbf87c1a80f31555b7bb0f5b6e62fc3fe88ea3a05c8d1f6'
+$deploymentPolicySha256 = 'f873e20a8378ced4d0a19c3e9685078783eecfbeb3bba6042063051c575719fc'
 $requiredWorkflowSha256 = @{
     '.github/workflows/aicopilot-ci.yml' = 'd4bd74ec5c3be8b245cdb7381170b01aa27cd3474ff4c396fe1c26b309edc44d'
 }
