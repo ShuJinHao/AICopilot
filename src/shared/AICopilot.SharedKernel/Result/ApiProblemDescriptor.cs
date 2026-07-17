@@ -50,6 +50,7 @@ public static class AppProblemCodes
     public const string PlannerToolSchemaUnsupported = "planner_tool_schema_unsupported";
     public const string AgentSkillSelectionRequired = "agent_skill_selection_required";
     public const string AgentPlanInvalid = "agent_plan_invalid";
+    public const string PlanPayloadTooLarge = "plan_payload_too_large";
     public const string AgentPlanToolDenied = "agent_plan_tool_denied";
     public const string AgentPlanSchemaInvalid = "agent_plan_schema_invalid";
     public const string ToolExecutionNotFound = "tool_execution_not_found";

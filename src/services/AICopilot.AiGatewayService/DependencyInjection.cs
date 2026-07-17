@@ -97,7 +97,10 @@ public static class DependencyInjection
         builder.Services.AddScoped<SkillDefinitionGuard>();
         builder.Services.AddScoped<AgentPlanToolGuard>();
         builder.Services.AddScoped<AgentPlanDraftConfirmationService>();
-        builder.Services.AddScoped<IAgentDynamicPlanner, DefaultAgentDynamicPlanner>();
+        builder.Services.AddSingleton<AgentPlanCanonicalizer>();
+        builder.Services.AddSingleton<IAgentPlanIntegrityValidator>(provider =>
+            provider.GetRequiredService<AgentPlanCanonicalizer>());
+        builder.Services.AddSingleton<IntentResultToCandidateAdapter>();
         builder.Services.AddScoped<AgentAuditRecorder>();
         builder.Services.TryAddSingleton<ISessionExecutionLock, InMemorySessionExecutionLock>();
         builder.Services.AddSingleton<IRequestValidator<ChatStreamRequest>, ChatStreamRequestValidator>();

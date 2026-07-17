@@ -39,7 +39,24 @@ internal sealed record AgentTaskPlanDocument(
     [property: JsonPropertyName("skillRoutingReason")] string? SkillRoutingReason = null,
     [property: JsonPropertyName("planKind")] string PlanKind = AgentTaskPlanKinds.ExecutablePlan,
     [property: JsonPropertyName("isExecutable")] bool IsExecutable = true,
-    [property: JsonPropertyName("capabilityGaps")] IReadOnlyCollection<string>? CapabilityGaps = null);
+    [property: JsonPropertyName("capabilityGaps")] IReadOnlyCollection<string>? CapabilityGaps = null,
+    [property: JsonPropertyName("schemaVersion")] string SchemaVersion = AgentPlanContractVersions.LegacyV1,
+    [property: JsonPropertyName("planId")] Guid? PlanId = null,
+    [property: JsonPropertyName("planVersion")] int PlanVersion = 1,
+    [property: JsonPropertyName("planDigest")] string? PlanDigest = null,
+    [property: JsonPropertyName("topologyProfile")] string? TopologyProfile = null,
+    [property: JsonPropertyName("intentCandidates")] IReadOnlyCollection<AgentIntentCandidateDocument>? IntentCandidates = null,
+    [property: JsonPropertyName("capabilitySelectionMode")] AgentCapabilitySelectionMode? CapabilitySelectionMode = null,
+    [property: JsonPropertyName("requestedCapabilityCodes")] IReadOnlyCollection<string>? RequestedCapabilityCodes = null,
+    [property: JsonPropertyName("pluginSelectionMode")] AgentPluginSelectionMode? PluginSelectionMode = null,
+    [property: JsonPropertyName("selectedPluginIds")] IReadOnlyCollection<Guid>? SelectedPluginIds = null,
+    [property: JsonPropertyName("artifactTargets")] IReadOnlyCollection<string>? ArtifactTargets = null,
+    [property: JsonPropertyName("nodes")] IReadOnlyCollection<AgentPlanNodeDocument>? Nodes = null,
+    [property: JsonPropertyName("joinPolicies")] IReadOnlyCollection<string>? JoinPolicies = null,
+    [property: JsonPropertyName("budgets")] AgentPlanBudgetDocument? Budgets = null,
+    [property: JsonPropertyName("approvalSummary")] AgentPlanApprovalSummaryDocument? ApprovalSummary = null,
+    [property: JsonPropertyName("executionSnapshot")] AgentExecutionSnapshotDocument? ExecutionSnapshot = null,
+    [property: JsonPropertyName("securitySummary")] AgentPlanSecuritySummaryDocument? SecuritySummary = null);
 
 internal static class AgentTaskPlanKinds
 {

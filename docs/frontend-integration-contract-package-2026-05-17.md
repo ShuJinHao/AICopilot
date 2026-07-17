@@ -61,6 +61,7 @@ For HTTP `ProblemDetails`, `extensions.code` and `extensions.traceId` are reserv
 | `planner_tool_schema_unsupported` | Planner tool schema is unsupported. |
 | `agent_skill_selection_required` | Agent plan requires a selected or auto-routed Skill. |
 | `agent_plan_invalid` | Agent plan is invalid. |
+| `plan_payload_too_large` | Canonical Plan v2 payload exceeds the fixed 262,144-byte UTF-8 limit and was not persisted. |
 | `agent_plan_tool_denied` | Agent plan requested a denied tool. |
 | `agent_plan_schema_invalid` | Agent plan schema is invalid. |
 | `tool_execution_not_found` | Tool execution record was not found. |

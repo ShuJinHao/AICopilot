@@ -1,5 +1,6 @@
 using AICopilot.AiGatewayService;
 using AICopilot.AiGatewayService.Agents;
+using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.AiGatewayService.Runtime;
 using AICopilot.Core.AiGateway.Aggregates.RuntimeSettings;
 using AICopilot.EntityFrameworkCore;
@@ -85,6 +86,20 @@ public sealed class PostFixClosureArchitectureTests
         using var provider = builder.Services.BuildServiceProvider();
         productionDescriptor.ImplementationFactory!(provider)
             .Should().BeOfType<PostgreSqlSessionExecutionLock>();
+    }
+
+    [Fact]
+    public void ProductionCompositionRoot_ShouldExposeOnlyCanonicalPlanIntegrityBoundary()
+    {
+        var builder = Host.CreateApplicationBuilder();
+
+        builder.AddAiGatewayService();
+
+        builder.Services.Should().NotContain(descriptor =>
+            descriptor.ServiceType == typeof(IAgentDynamicPlanner));
+        builder.Services.Should().ContainSingle(descriptor =>
+            descriptor.ServiceType == typeof(IAgentPlanIntegrityValidator) &&
+            descriptor.Lifetime == ServiceLifetime.Singleton);
     }
 }
 

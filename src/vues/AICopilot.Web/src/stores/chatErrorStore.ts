@@ -100,6 +100,8 @@ export function resolveChatErrorMessage(payload: ChatErrorPayload) {
       return userFacingMessage ?? '当前账号没有调用该工具的权限。'
     case 'agent_plan_invalid':
       return userFacingMessage ?? 'Agent 计划未通过后端校验，请调整任务目标后重新生成。'
+    case 'plan_payload_too_large':
+      return userFacingMessage ?? '计划内容超过固定大小上限，请缩小目标范围或减少产物后重新生成。'
     case 'agent_plan_tool_denied':
       return userFacingMessage ?? '计划包含当前 Skill 不允许的工具，请调整 Skill 或重新生成计划。'
     case 'agent_plan_schema_invalid':
