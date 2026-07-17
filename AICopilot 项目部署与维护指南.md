@@ -231,6 +231,8 @@ git push GitHub
 
 `build-and-push.sh` 必须显式接收 `--services httpapi,migration,dataworker,ragworker,web` 的子集或 `--all`，但只由统一入口内部调度；无参数直接失败。选择 `httpapi`、`dataworker` 或 `ragworker` 时会自动加入 `migration`。正式发布的 `Deploy services input`、image manifest 和 support manifest 只写本次 run 私有目录，`local-release.sh` 只读取同一次运行的清单；不得再用共享 `artifacts/deploy/aicopilot-built-services.txt` 控制发布。
 
+后端服务使用同一份源码快照但不共享 SDK 中间产物：`build-and-push.sh` 为每个 service 传入独立 `--artifacts-path artifacts/service-build/<service>`，再输出各自的 container publish 目录。禁止去掉该隔离、改回共享 `bin/obj` 或用“先构建 HttpApi”之类顺序假设止损；连续构建 DataWorker 后再构建 HttpApi 也必须使用各自依赖图。
+
 ### 4.1 不可变候选、幂等与恢复
 
 - 正式发布必须先由工作区入口 `CheckCandidate` 生成只读 plan，再用同一个完整 SHA、plan digest、profile digest 和显式服务闭包执行 `Deploy`；项目脚本不得直接作为第二入口。

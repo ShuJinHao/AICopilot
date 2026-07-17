@@ -270,11 +270,13 @@ publish_dotnet_image() {
   local image_name="$3"
   local app_dll="$4"
   local publish_dir="$REPO_ROOT/artifacts/container-publish/$image_name"
+  local build_artifacts_root="$REPO_ROOT/artifacts/service-build/$service"
 
   printf 'Building AICopilot backend image: service=%s image=%s/%s:%s\n' "$service" "$IMAGE_PREFIX" "$image_name" "$TAG"
 
   if [ "$DRY_RUN" != true ]; then
     rm -rf "$publish_dir"
+    rm -rf "$build_artifacts_root"
     mkdir -p "$publish_dir"
   fi
 
@@ -284,6 +286,7 @@ publish_dotnet_image() {
       --os linux \
       --arch x64 \
       --self-contained false \
+      --artifacts-path "$build_artifacts_root" \
       -p:UseAppHost=false \
       -o "$publish_dir"; then
     :
