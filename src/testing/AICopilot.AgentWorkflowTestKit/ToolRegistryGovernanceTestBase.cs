@@ -140,7 +140,7 @@ public abstract class ToolRegistryGovernanceTestBase
             AgentTaskType.ReportGeneration,
             AgentTaskRiskLevel.Low,
             null,
-            CreatePlanJson(toolCode, skillCode),
+            CreatePlanJson(toolCode, skillCode, inputJson: null, executable: true),
             now);
         task.AddStep("生成图表数据", "生成图表数据。", AgentStepType.ChartGeneration, toolCode, requiresApproval, now);
         var workspace = new ArtifactWorkspace(
@@ -210,114 +210,30 @@ public abstract class ToolRegistryGovernanceTestBase
 
     internal static string CreatePlanJson(string toolCode, string? skillCode = null, string? inputJson = null)
     {
-        var plan = new
-        {
-            version = 1,
-            plannerTemplateCode = "agent_planner",
-            goal = "生成报告",
-            taskType = "ReportGeneration",
-            riskLevel = "Low",
-            uploadIds = Array.Empty<Guid>(),
-            knowledgeBaseIds = Array.Empty<Guid>(),
-            steps = new[]
-            {
-                new
-                {
-                    title = "生成图表数据",
-                    description = "生成图表数据。",
-                    stepType = "ChartGeneration",
-                    toolCode,
-                    requiresApproval = false,
-                    inputJson
-                }
-            },
-            runtimeSettings = new
-            {
-                agentPlanningHistoryCount = 30,
-                contextTokenLimit = 12000
-            },
-            skillCode
-        };
-        return JsonSerializer.Serialize(plan, JsonSerializerOptions.Web);
+        return CreatePlanJson(toolCode, skillCode, inputJson, executable: false);
+    }
+
+    private static string CreatePlanJson(
+        string toolCode,
+        string? skillCode,
+        string? inputJson,
+        bool executable)
+    {
+        return AgentPlanV2TestData.CreateSingleStep(
+            toolCode,
+            executable,
+            skillCode,
+            inputJson);
     }
 
     internal static string CreateRagPlanJson(Guid knowledgeBaseId)
     {
-        var plan = new
-        {
-            version = 1,
-            plannerTemplateCode = "agent_planner",
-            goal = "RAG admin-only search",
-            taskType = "DataAnalysis",
-            riskLevel = "Low",
-            uploadIds = Array.Empty<Guid>(),
-            knowledgeBaseIds = new[] { knowledgeBaseId },
-            steps = new[]
-            {
-                new
-                {
-                    title = "Search RAG",
-                    description = "Search admin-visible knowledge base.",
-                    stepType = "DataQuery",
-                    toolCode = "rag_search",
-                    requiresApproval = false
-                }
-            },
-            runtimeSettings = new
-            {
-                agentPlanningHistoryCount = 30,
-                contextTokenLimit = 12000
-            }
-        };
-        return JsonSerializer.Serialize(plan, JsonSerializerOptions.Web);
+        return AgentPlanV2TestData.CreateRag(knowledgeBaseId);
     }
 
     internal static string CreateCloudPlanJson()
     {
-        var plan = new
-        {
-            version = 1,
-            plannerTemplateCode = "agent_planner",
-            goal = "Cloud readonly report",
-            taskType = "CloudDataReport",
-            riskLevel = "Medium",
-            uploadIds = Array.Empty<Guid>(),
-            knowledgeBaseIds = Array.Empty<Guid>(),
-            cloudReadonlyIntent = new
-            {
-                intent = "Analysis.Device.List",
-                query = """{"filters":[{"field":"deviceCode","operator":"eq","value":"DEV-001"}],"limit":20}""",
-                confidence = 0.95,
-                target = "Device",
-                kind = "List",
-                summary = "target=Device; kind=List; filters=1; hasTimeRange=False; limit=20"
-            },
-            steps = new[]
-            {
-                new
-                {
-                    title = "Read Cloud",
-                    description = "Read Cloud readonly data.",
-                    stepType = "DataQuery",
-                    toolCode = "query_cloud_data_readonly",
-                    requiresApproval = true
-                },
-                new
-                {
-                    title = "Generate Markdown",
-                    description = "Generate markdown report.",
-                    stepType = "ArtifactGeneration",
-                    toolCode = "generate_markdown_report",
-                    requiresApproval = false
-                }
-            },
-            runtimeSettings = new
-            {
-                agentPlanningHistoryCount = 30,
-                contextTokenLimit = 12000
-            }
-        };
-        return JsonSerializer.Serialize(plan, JsonSerializerOptions.Web);
+        return AgentPlanV2TestData.CreateCloud();
     }
 
     internal static SemanticQueryPlan CreateDeviceSemanticPlan()
@@ -413,7 +329,9 @@ public abstract class ToolRegistryGovernanceTestBase
                 [],
                 new TestCurrentUser(UserId),
                 skillDefinitionGuard: skillDefinitionGuard,
-                skillAutoSelector: skillAutoSelector));
+                skillAutoSelector: skillAutoSelector,
+                planToolGuard: CreatePlanToolGuard(guard, (runtimeTools ?? []).ToArray()),
+                cloudReadonlyPlanService: cloudReadonlyPlanService ?? new FixedCloudReadonlyAgentPlanService()));
     }
 
     internal static LanguageModel CreatePlannerModel()
@@ -843,11 +761,11 @@ public abstract class ToolRegistryGovernanceTestBase
         {
             this.result = result ?? Result.Success(new CloudReadonlyAgentPlanIntent(
                 "Analysis.Device.List",
-                """{"filters":[{"field":"deviceCode","operator":"eq","value":"DEV-001"}],"limit":20}""",
+                """{"filters":[],"limit":20}""",
                 0.95,
                 "Device",
                 "List",
-                "target=Device; kind=List; filters=1; hasTimeRange=False; limit=20"));
+                "target=Device; kind=List; filters=0; hasTimeRange=False; limit=20"));
         }
 
         public Task<Result<CloudReadonlyAgentPlanIntent>> CreateIntentAsync(

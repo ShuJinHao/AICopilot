@@ -2,6 +2,7 @@ using System.Linq.Expressions;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using AICopilot.AgentWorkflowTestKit;
 using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Approvals;
@@ -250,7 +251,7 @@ public sealed class AgentRunQueueProductionOpsTests
             AgentTaskType.ReportGeneration,
             AgentTaskRiskLevel.Low,
             null,
-            """{"steps":[]}""",
+            AgentPlanV2TestData.CreateSingleStep("generate_chart_data"),
             now);
         var step = task.AddStep(
             "Generate",

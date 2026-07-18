@@ -36,7 +36,7 @@ public sealed class AgentTask : BaseEntity<AgentTaskId>, IAggregateRoot<AgentTas
         TaskType = taskType;
         RiskLevel = riskLevel;
         ModelId = modelId;
-        PlanJson = NormalizeRequired(planJson, nameof(planJson), 32000);
+        PlanJson = NormalizeRequired(planJson, nameof(planJson));
         Status = AgentTaskStatus.Draft;
         CreatedAt = nowUtc;
         UpdatedAt = nowUtc;
@@ -185,7 +185,7 @@ public sealed class AgentTask : BaseEntity<AgentTaskId>, IAggregateRoot<AgentTas
             throw new InvalidOperationException("Only draft or plan-approval-waiting tasks can be confirmed.");
         }
 
-        PlanJson = NormalizeRequired(planJson, nameof(planJson), 32000);
+        PlanJson = NormalizeRequired(planJson, nameof(planJson));
         Status = AgentTaskStatus.WaitingPlanApproval;
         var approvalIndexes = approvalRequiredStepIndexes
             .ToHashSet();
@@ -364,5 +364,16 @@ public sealed class AgentTask : BaseEntity<AgentTaskId>, IAggregateRoot<AgentTas
         }
 
         return normalized.Length <= maxLength ? normalized : normalized[..maxLength];
+    }
+
+    private static string NormalizeRequired(string value, string paramName)
+    {
+        var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            throw new ArgumentException($"{paramName} is required.", paramName);
+        }
+
+        return normalized;
     }
 }

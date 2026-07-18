@@ -1,3 +1,5 @@
+using System.Text;
+using System.Text.Json;
 using AICopilot.Core.AiGateway.Ids;
 using AICopilot.SharedKernel.Domain;
 
@@ -32,7 +34,7 @@ public sealed class AgentStep : IEntity<AgentStepId>
         StepType = stepType;
         ToolCode = NormalizeOptional(toolCode, 100);
         RequiresApproval = requiresApproval;
-        InputJson = NormalizeOptional(inputJson, 16000);
+        InputJson = NormalizeStructuredJson(inputJson, 8_000, nameof(inputJson));
         Status = requiresApproval ? AgentStepStatus.WaitingApproval : AgentStepStatus.Pending;
     }
 
@@ -82,7 +84,7 @@ public sealed class AgentStep : IEntity<AgentStepId>
             throw new InvalidOperationException("Only running or approved agent steps can complete.");
         }
 
-        OutputJson = NormalizeOptional(outputJson, 16000);
+        OutputJson = NormalizeStructuredJson(outputJson, maxUtf8Bytes: null, nameof(outputJson));
         Status = AgentStepStatus.Completed;
         FinishedAt = nowUtc;
     }
@@ -157,5 +159,36 @@ public sealed class AgentStep : IEntity<AgentStepId>
         return normalized is { Length: > 0 } && normalized.Length > maxLength
             ? normalized[..maxLength]
             : normalized;
+    }
+
+    private static string? NormalizeStructuredJson(
+        string? value,
+        int? maxUtf8Bytes,
+        string paramName)
+    {
+        var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        if (normalized is null)
+        {
+            return null;
+        }
+
+        var byteCount = Encoding.UTF8.GetByteCount(normalized);
+        if (maxUtf8Bytes.HasValue && byteCount > maxUtf8Bytes.Value)
+        {
+            throw new ArgumentException(
+                $"{paramName} is {byteCount} UTF-8 bytes; maximum is {maxUtf8Bytes.Value}.",
+                paramName);
+        }
+
+        try
+        {
+            using var _ = JsonDocument.Parse(normalized);
+        }
+        catch (JsonException exception)
+        {
+            throw new ArgumentException($"{paramName} must be valid JSON.", paramName, exception);
+        }
+
+        return normalized;
     }
 }

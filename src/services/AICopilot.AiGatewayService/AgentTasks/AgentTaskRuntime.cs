@@ -58,7 +58,8 @@ internal sealed class AgentTaskRuntime(
     IBusinessDatabaseReadService? businessDatabaseReadService = null,
     IBusinessTextToSqlRuntime? businessTextToSqlRuntime = null,
     SkillDefinitionGuard? skillDefinitionGuard = null,
-    CloudReadOnlyTextToSqlFallbackRunner? cloudTextToSqlFallbackRunner = null)
+    CloudReadOnlyTextToSqlFallbackRunner? cloudTextToSqlFallbackRunner = null,
+    IAgentPlanIntegrityValidator? planIntegrityValidator = null)
     : IAgentTaskRuntime
 {
     private readonly AgentTaskRunAttemptCoordinator runAttemptCoordinator = new(
@@ -90,6 +91,14 @@ internal sealed class AgentTaskRuntime(
         AgentTaskRunTriggerType triggerType = AgentTaskRunTriggerType.Manual,
         CancellationToken cancellationToken = default)
     {
+        var integrity = (planIntegrityValidator ?? new AgentPlanCanonicalizer())
+            .ValidatePersisted(task.PlanJson, requireExecutable: true);
+        if (!integrity.IsSuccess)
+        {
+            return Result.From(integrity);
+        }
+
+        var plan = DeserializePlan(task.PlanJson);
         var attemptResult = await runAttemptCoordinator.BeginOrResumeAttemptAsync(task, triggerType, cancellationToken);
         if (!attemptResult.IsSuccess)
         {
@@ -108,7 +117,6 @@ internal sealed class AgentTaskRuntime(
             return Result.Invalid("Only approved or running agent tasks can be executed.");
         }
 
-        var plan = DeserializePlan(task.PlanJson);
         var workspace = await LoadWorkspaceAsync(task, cancellationToken);
         var state = new AgentTaskRunState();
         var executorResolver = CreateExecutorResolver();

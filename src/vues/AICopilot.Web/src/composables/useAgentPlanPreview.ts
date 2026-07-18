@@ -11,8 +11,25 @@ type AgentPlanPreviewStep = Partial<AgentStep> & {
 }
 
 export type AgentPlanPreview = {
+  schemaVersion?: string
+  planId?: string
+  planVersion?: number
+  planDigest?: string
+  topologyProfile?: string
   planKind?: string
   isExecutable?: boolean
+  capabilitySelectionMode?: 'InferredFromGoal' | 'ExplicitAllowlist'
+  requestedCapabilityCodes?: string[]
+  pluginSelectionMode?: 'BuiltInOnly' | 'ExplicitAllowlist'
+  selectedPluginIds?: string[]
+  artifactTargets?: string[]
+  nodes?: Array<{
+    nodeId?: string
+    nodeKind?: string
+    dependsOn?: string[]
+    requestedToolCodes?: string[]
+    requestedCapabilityCodes?: string[]
+  }>
   capabilityGaps?: string[]
   plannerMode?: string
   plannerFallbackReason?: string | null
@@ -120,6 +137,27 @@ export function useAgentPlanPreview() {
 
     return '计划草案'
   })
+  const latestPlanSchemaVersion = computed(() =>
+    latestTask.value?.planSchemaVersion || latestPlan.value?.schemaVersion || null
+  )
+  const latestPlanDigest = computed(() =>
+    latestTask.value?.planDigest || latestPlan.value?.planDigest || null
+  )
+  const latestPlanDigestShort = computed(() =>
+    latestPlanDigest.value ? latestPlanDigest.value.slice(0, 12) : '-'
+  )
+  const latestPlanTopologyProfile = computed(() =>
+    latestTask.value?.topologyProfile || latestPlan.value?.topologyProfile || null
+  )
+  const latestPlanIntegrityStatus = computed(() =>
+    latestTask.value?.planIntegrityStatus || 'Invalid'
+  )
+  const isPlanConfirmable = computed(() =>
+    latestPlanIntegrityStatus.value === 'ValidV2' &&
+    Boolean(latestPlanDigest.value) &&
+    (latestPlan.value?.nodes?.length ?? 0) > 0 &&
+    latestPlanCapabilityGaps.value.length === 0
+  )
   const isPlanDraftTask = computed(() =>
     latestTask.value?.status === 'Draft' ||
     latestPlan.value?.planKind === 'PlanDraft' ||
@@ -168,6 +206,12 @@ export function useAgentPlanPreview() {
     latestPlanRiskLine,
     latestPlanCapabilityGaps,
     latestPlanKindLabel,
+    latestPlanSchemaVersion,
+    latestPlanDigest,
+    latestPlanDigestShort,
+    latestPlanTopologyProfile,
+    latestPlanIntegrityStatus,
+    isPlanConfirmable,
     latestPlanSource,
     latestPlanIsCloudReadonly,
     isPlanDraftTask,

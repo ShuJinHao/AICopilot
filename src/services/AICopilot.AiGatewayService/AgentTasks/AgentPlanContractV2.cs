@@ -45,13 +45,13 @@ internal enum AgentIntentRequiredSource
     DerivedDependency = 3
 }
 
-internal enum AgentPluginSelectionMode
+public enum AgentPluginSelectionMode
 {
     BuiltInOnly = 1,
     ExplicitAllowlist = 2
 }
 
-internal enum AgentCapabilitySelectionMode
+public enum AgentCapabilitySelectionMode
 {
     InferredFromGoal = 1,
     ExplicitAllowlist = 2

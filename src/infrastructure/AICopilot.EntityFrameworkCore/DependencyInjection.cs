@@ -75,6 +75,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<IRepository<AgentTask>>(provider => provider.GetRequiredService<AiGatewayRepository<AgentTask>>());
         builder.Services.AddScoped<IAgentTaskRunAttemptStore, AgentTaskRunAttemptStore>();
         builder.Services.AddScoped<IAgentTaskRunQueueStore, AgentTaskRunQueueStore>();
+        builder.Services.AddScoped<IAgentTaskPlanPersistenceVerifier, AgentTaskPlanPersistenceVerifier>();
         builder.Services.AddScoped<IAgentWorkerHeartbeatStore, AgentWorkerHeartbeatStore>();
         builder.Services.AddScoped<IReadRepository<ArtifactWorkspace>>(provider => provider.GetRequiredService<AiGatewayRepository<ArtifactWorkspace>>());
         builder.Services.AddScoped<IRepository<ArtifactWorkspace>>(provider => provider.GetRequiredService<AiGatewayRepository<ArtifactWorkspace>>());

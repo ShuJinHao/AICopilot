@@ -18,7 +18,8 @@ public sealed class AgentTaskLifecycleCoordinator(
     IAgentTaskRunAttemptStore runAttemptStore,
     IAgentTaskRunQueue runQueue,
     IOptions<AgentRunQueueOptions>? options = null,
-    AgentAuditRecorder? auditRecorder = null)
+    AgentAuditRecorder? auditRecorder = null,
+    IAgentPlanIntegrityValidator? planIntegrityValidator = null)
 {
     public async Task<Result<AgentTaskRunQueueItem>> QueueRunAsync(
         AgentTask task,
@@ -28,6 +29,13 @@ public sealed class AgentTaskLifecycleCoordinator(
         if (task.Status is not AgentTaskStatus.PlanApproved and not AgentTaskStatus.WaitingToolApproval)
         {
             return Result.Invalid("Only approved or waiting-approval agent tasks can be queued for execution.");
+        }
+
+        var integrity = (planIntegrityValidator ?? new AgentPlanCanonicalizer())
+            .ValidatePersisted(task.PlanJson, requireExecutable: true);
+        if (!integrity.IsSuccess)
+        {
+            return Result.From(integrity);
         }
 
         return await runQueue.EnqueueAsync(
@@ -55,6 +63,13 @@ public sealed class AgentTaskLifecycleCoordinator(
             return Result.Failure(new ApiProblemDescriptor(
                 AppProblemCodes.AgentTaskRetryNotAllowed,
                 "Only failed agent tasks can be retried. Completed, finalized, rejected, and cancelled tasks require a new task."));
+        }
+
+        var integrity = (planIntegrityValidator ?? new AgentPlanCanonicalizer())
+            .ValidatePersisted(task.PlanJson, requireExecutable: true);
+        if (!integrity.IsSuccess)
+        {
+            return Result.From(integrity);
         }
 
         var queueItems = await queueStore.ListByTaskAsync(task.Id, cancellationToken);

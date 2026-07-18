@@ -23,7 +23,11 @@ const {
   latestPlanToolCatalogVersion,
   latestPlanVisibleToolCount,
   latestPlanRiskLine,
-  latestPlanSource
+  latestPlanSource,
+  latestPlanSchemaVersion,
+  latestPlanDigestShort,
+  latestPlanTopologyProfile,
+  latestPlanIntegrityStatus
 } = useAgentPlanPreview()
 const {
   timelineEventItems,
@@ -98,6 +102,18 @@ const {
           <div>
             <span>风险</span>
             <strong>{{ latestPlanRiskLine }}</strong>
+          </div>
+          <div>
+            <span>Plan 契约</span>
+            <strong>v{{ latestPlanSchemaVersion ?? '-' }} · {{ latestPlanTopologyProfile ?? '-' }}</strong>
+          </div>
+          <div>
+            <span>Digest</span>
+            <strong class="ai-number">{{ latestPlanDigestShort }}</strong>
+          </div>
+          <div>
+            <span>完整性</span>
+            <strong>{{ latestPlanIntegrityStatus }}</strong>
           </div>
         </div>
         <div v-if="latestPlan?.forcedStepCodes?.length" class="chip-row">

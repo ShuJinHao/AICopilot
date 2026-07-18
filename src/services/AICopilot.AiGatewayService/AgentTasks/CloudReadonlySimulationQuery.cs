@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
@@ -19,7 +20,8 @@ internal sealed record CloudReadonlySimulationQuery(
 {
     public static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
-        WriteIndented = false
+        WriteIndented = false,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
     public static CloudReadonlySimulationQuery Parse(string? query)
