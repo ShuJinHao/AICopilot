@@ -18,7 +18,9 @@ public sealed class ApproveAgentTaskPlanCommandHandler(
     AgentAuditRecorder auditRecorder,
     ICurrentUser currentUser,
     AgentPlanDraftConfirmationService planDraftConfirmationService,
-    MessageTimelineProjectionWriter? timelineProjectionWriter = null)
+    MessageTimelineProjectionWriter? timelineProjectionWriter = null,
+    IAgentTaskPlanPersistenceVerifier? planPersistenceVerifier = null,
+    IAgentPlanIntegrityValidator? planIntegrityValidator = null)
     : ICommandHandler<ApproveAgentTaskPlanCommand, Result<AgentTaskDto>>
 {
     public async Task<Result<AgentTaskDto>> Handle(ApproveAgentTaskPlanCommand request, CancellationToken cancellationToken)
@@ -82,6 +84,20 @@ public sealed class ApproveAgentTaskPlanCommandHandler(
         }
 
         await repository.SaveChangesAsync(cancellationToken);
+        if (task.Status == AgentTaskStatus.PlanApproved)
+        {
+            var persistedIntegrity = await AgentPlanPersistenceGuard.VerifyAsync(
+                task,
+                planPersistenceVerifier,
+                planIntegrityValidator,
+                requireExecutable: true,
+                cancellationToken);
+            if (!persistedIntegrity.IsSuccess)
+            {
+                return Result.From(persistedIntegrity);
+            }
+        }
+
         return Result.Success(await dtoQueryService.MapAsync(task, cancellationToken));
     }
 }

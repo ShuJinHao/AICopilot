@@ -81,105 +81,64 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         result.Problem!.Code.Should().Be(AppProblemCodes.CloudReadonlyToolDisabled);
     }
     [Fact]
-    public async Task PlanAgentTask_ShouldCreateDraft_WhenCloudReadonlyToolIsDisabled_AndRejectOnConfirm()
+    public async Task PlanAgentTask_ShouldRejectBeforeSealing_WhenCloudReadonlyToolIsDisabled()
     {
         var session = new Session(UserId, ConversationTemplateId.New());
         var taskRepository = new InMemoryRepository<AgentTask>();
         var approvalRepository = new InMemoryRepository<ApprovalRequest>();
-        var handler = new PlanAgentTaskCommandHandler(
-            new PlanAgentTaskCoordinator(
-                taskRepository,
-                approvalRepository,
-                new InMemoryRepository<Session>(session),
-                new InMemoryRepository<UploadRecord>(),
-                new AgentAuditRecorder(new CapturingAuditLogWriter()),
-                [],
-                new TestCurrentUser(UserId)));
+        var disabledGuard = CreateGuard(CreateTool(
+            "query_cloud_data_readonly",
+            ToolProviderType.CloudReadonly,
+            isEnabled: false,
+            requiresApproval: true,
+            riskLevel: AiToolRiskLevel.RequiresApproval));
+        var handler = new PlanAgentTaskCommandHandler(new PlanAgentTaskCoordinator(
+            taskRepository,
+            approvalRepository,
+            new InMemoryRepository<Session>(session),
+            new InMemoryRepository<UploadRecord>(),
+            new AgentAuditRecorder(new CapturingAuditLogWriter()),
+            [],
+            new TestCurrentUser(UserId),
+            planToolGuard: CreatePlanToolGuard(disabledGuard),
+            cloudReadonlyPlanService: new FixedCloudReadonlyAgentPlanService()));
 
         var result = await handler.Handle(
             new PlanAgentTaskCommand(session.Id.Value, "生成 Cloud 生产数据报告", AgentTaskType.CloudDataReport, null),
             CancellationToken.None);
 
-        result.IsSuccess.Should().BeTrue();
-        result.Value!.WorkspaceId.Should().BeNull();
-        result.Value.WorkspaceCode.Should().BeNull();
-        var task = taskRepository.Items.Should().ContainSingle().Which;
-        task.Status.Should().Be(AgentTaskStatus.Draft);
-        task.WorkspaceId.Should().BeNull();
-        using var plan = JsonDocument.Parse(task.PlanJson);
-        plan.RootElement.GetProperty("planKind").GetString().Should().Be("PlanDraft");
-        plan.RootElement.GetProperty("isExecutable").GetBoolean().Should().BeFalse();
-
-        var approvalAudit = new CapturingAuditLogWriter();
-        var approveHandler = new ApproveAgentTaskPlanCommandHandler(
-            taskRepository,
-            approvalRepository,
-            CreateAgentTaskDtoQueryService(
-                new InMemoryRepository<ArtifactWorkspace>(),
-                approvalRepository,
-                new InMemoryAgentTaskRunQueueStore()),
-            new AgentAuditRecorder(approvalAudit),
-            new TestCurrentUser(UserId),
-            new AgentPlanDraftConfirmationService(CreatePlanToolGuard(CreateGuard(CreateTool(
-                "query_cloud_data_readonly",
-                ToolProviderType.CloudReadonly,
-                isEnabled: false,
-                requiresApproval: true,
-                riskLevel: AiToolRiskLevel.RequiresApproval))),
-                new FixedCloudReadonlyAgentPlanService()));
-
-        var confirmation = await approveHandler.Handle(
-            new ApproveAgentTaskPlanCommand(task.Id.Value),
-            CancellationToken.None);
-
-        confirmation.IsSuccess.Should().BeFalse();
-        confirmation.Errors.Should().ContainSingle()
+        result.IsSuccess.Should().BeFalse();
+        result.Errors.Should().ContainSingle()
             .Which.Should().BeEquivalentTo(new ApiProblemDescriptor(
             AppProblemCodes.CloudReadonlyToolDisabled,
             "Tool 'query_cloud_data_readonly' is disabled."));
-        task.Status.Should().Be(AgentTaskStatus.Draft);
-        approvalRepository.Items.Should().ContainSingle()
-            .Which.Status.Should().Be(AgentApprovalStatus.Pending);
-        approvalAudit.Requests.Should().BeEmpty();
+        taskRepository.Items.Should().BeEmpty();
+        approvalRepository.Items.Should().BeEmpty();
     }
     [Fact]
-    public async Task ConfirmPlanDraft_ShouldRejectCloudDataReport_WhenCloudReadonlyIntentIsUnsupported()
+    public async Task PlanAgentTask_ShouldRejectCloudDataReport_WhenCloudReadonlyIntentIsUnsupported()
     {
         var session = new Session(UserId, ConversationTemplateId.New());
         var taskRepository = new InMemoryRepository<AgentTask>();
         var cloudReadonlyPlanService = new FixedCloudReadonlyAgentPlanService(Result.Failure(new ApiProblemDescriptor(
             AppProblemCodes.CloudReadonlyIntentUnsupported,
             "Recipe data is outside the Cloud readonly agent boundary.")));
-        var handler = new PlanAgentTaskCommandHandler(
-            new PlanAgentTaskCoordinator(
-                taskRepository,
-                new InMemoryRepository<ApprovalRequest>(),
-                new InMemoryRepository<Session>(session),
-                new InMemoryRepository<UploadRecord>(),
-                new AgentAuditRecorder(new CapturingAuditLogWriter()),
-                [],
-                new TestCurrentUser(UserId)));
+        var handler = CreatePlanHandler(
+            session,
+            CreateAgentRuntimeGuardWithCloudEnabled(),
+            cloudReadonlyPlanService: cloudReadonlyPlanService,
+            taskRepository: taskRepository);
 
         var result = await handler.Handle(
             new PlanAgentTaskCommand(session.Id.Value, "read recipe version details", AgentTaskType.CloudDataReport, null),
             CancellationToken.None);
 
-        result.IsSuccess.Should().BeTrue();
-        using var plan = JsonDocument.Parse(result.Value!.PlanJson);
-        plan.RootElement.GetProperty("planKind").GetString().Should().Be("PlanDraft");
-        plan.RootElement.GetProperty("cloudReadonlyIntent").ValueKind.Should().Be(JsonValueKind.Null);
-
-        var task = taskRepository.Items.Should().ContainSingle().Which;
-        var confirmation = await new AgentPlanDraftConfirmationService(
-                CreatePlanToolGuard(CreateAgentRuntimeGuardWithCloudEnabled()),
-                cloudReadonlyPlanService)
-            .ConfirmAsync(task, DateTimeOffset.UtcNow, CancellationToken.None);
-
-        confirmation.IsSuccess.Should().BeFalse();
-        confirmation.Errors.Should().ContainSingle()
+        result.IsSuccess.Should().BeFalse();
+        result.Errors.Should().ContainSingle()
             .Which.Should().BeEquivalentTo(new ApiProblemDescriptor(
                 AppProblemCodes.CloudReadonlyIntentUnsupported,
                 "Recipe data is outside the Cloud readonly agent boundary."));
+        taskRepository.Items.Should().BeEmpty();
     }
     [Fact]
     public async Task ConfirmPlanDraft_ShouldReturnProblem_WhenPlanJsonIsInvalid()
@@ -521,7 +480,9 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         task.Steps.Should().Contain(step => step.ToolCode == "query_cloud_data_readonly");
         using var plan = JsonDocument.Parse(task.PlanJson);
         plan.RootElement.GetProperty("skillCode").GetString().Should().Be("cloud_readonly");
-        plan.RootElement.GetProperty("skillRoutingReason").GetString().Should().Be("test selector");
+        plan.RootElement.GetProperty("skillRoutingReason").ValueKind.Should().Be(JsonValueKind.Null);
+        plan.RootElement.GetProperty("securitySummary").GetProperty("rawRouterReasoningPersisted").GetBoolean()
+            .Should().BeFalse();
         plan.RootElement.GetProperty("taskType").GetString().Should().Be("CloudDataReport");
         plan.RootElement.GetProperty("plannerSafetySummary").GetProperty("planSource").GetString()
             .Should().Be("Skill.cloud_readonly");
@@ -549,7 +510,8 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         plan.RootElement.GetProperty("skillCode").ValueKind.Should().Be(JsonValueKind.Null);
         plan.RootElement.GetProperty("capabilityGaps").EnumerateArray()
             .Select(item => item.GetString())
-            .Should().Contain("Skill 自动识别未命中：目标不明确，需要用户补充。");
+            .Should().NotContain(item => item?.Contains("目标不明确", StringComparison.Ordinal) == true);
+        task.PlanJson.Should().NotContain("目标不明确，需要用户补充");
     }
     [Fact]
     public async Task PlanDraft_ShouldNotCreateToolCatalogGap_WhenCatalogWouldBeEmpty()

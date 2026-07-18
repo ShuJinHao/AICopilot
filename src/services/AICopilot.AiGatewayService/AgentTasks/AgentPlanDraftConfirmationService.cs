@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.SharedKernel.Result;
 
@@ -7,25 +6,45 @@ namespace AICopilot.AiGatewayService.AgentTasks;
 
 public sealed class AgentPlanDraftConfirmationService(
     AgentPlanToolGuard planToolGuard,
-    ICloudReadonlyAgentPlanService cloudReadonlyPlanService)
+    ICloudReadonlyAgentPlanService? legacyCloudReadonlyPlanService = null,
+    IAgentPlanIntegrityValidator? planIntegrityValidator = null)
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        Converters = { new JsonStringEnumConverter() }
-    };
-
     public async Task<Result> ConfirmAsync(
         AgentTask task,
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
+        _ = legacyCloudReadonlyPlanService;
         var planResult = DeserializePlan(task.PlanJson);
         if (!planResult.IsSuccess)
         {
             return Result.From(planResult);
         }
 
+        var integrityValidator = planIntegrityValidator ?? new AgentPlanCanonicalizer();
+        var integrity = integrityValidator.ValidatePersisted(task.PlanJson);
+        if (!integrity.IsSuccess)
+        {
+            return Result.From(integrity);
+        }
+
         var plan = planResult.Value!;
+        if (!string.Equals(plan.PlanKind, AgentTaskPlanKinds.PlanDraft, StringComparison.Ordinal) ||
+            plan.IsExecutable)
+        {
+            return InvalidPlan("Only a sealed non-executable PlanDraft v2 can be confirmed.");
+        }
+
+        if (plan.Nodes is null || plan.Nodes.Count == 0 || plan.Steps.Count == 0)
+        {
+            return InvalidPlan("A capability-gap PlanDraft has no executable nodes and cannot be confirmed.");
+        }
+
+        if (task.TaskType == AgentTaskType.CloudDataReport && plan.CloudReadonlyIntent is null)
+        {
+            return InvalidPlan("CloudDataReport PlanDraft requires a typed Cloud readonly intent before confirmation.");
+        }
+
         var steps = plan.Steps
             .Select(step => new AgentStepPlanDto(
                 step.Title,
@@ -51,38 +70,42 @@ public sealed class AgentPlanDraftConfirmationService(
         }
 
         var guardedSteps = guardedStepsResult.Value!.ToArray();
-        var cloudReadonlyIntentResult = await ResolveCloudReadonlyIntentAsync(task, plan, cancellationToken);
-        if (!cloudReadonlyIntentResult.IsSuccess)
+        if (!StepsMatch(plan.Steps, guardedSteps))
         {
-            return Result.From(cloudReadonlyIntentResult);
+            return ReconfirmationRequired(
+                "Tool approval or input policy changed after PlanDraft sealing; generate and confirm a new PlanDraft.");
         }
 
-        var cloudReadonlyIntent = cloudReadonlyIntentResult.Value;
+        var catalogResult = await planToolGuard.GetAvailableToolCatalogAsync(
+            task.UserId,
+            plan.PlannerSafetySummary?.IsSimulationOnly ?? false,
+            plan.BusinessDomains,
+            cancellationToken,
+            plan.SkillCode);
+        if (!catalogResult.IsSuccess)
+        {
+            return Result.From(catalogResult);
+        }
+
+        if (!SnapshotMatches(plan.ExecutionSnapshot!, catalogResult.Value!))
+        {
+            return ReconfirmationRequired(
+                "Tool/provider catalog changed after PlanDraft sealing; generate and confirm a new PlanDraft.");
+        }
+
         var executablePlan = plan with
         {
             PlanKind = AgentTaskPlanKinds.ExecutablePlan,
-            IsExecutable = true,
-            CloudReadonlyIntent = cloudReadonlyIntent,
-            Steps = guardedSteps
-                .Select(step => new AgentTaskPlanStepDocument(
-                    step.Title,
-                    step.Description,
-                    step.StepType,
-                    step.ToolCode,
-                    step.RequiresApproval,
-                    step.InputJson))
-                .ToArray(),
-            ApprovalCheckpoints = guardedSteps
-                .Where(step => step.RequiresApproval)
-                .Select(step => string.IsNullOrWhiteSpace(step.ToolCode) ? step.Title : step.ToolCode!)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToArray(),
-            ToolApprovalCheckpoints = guardedSteps
-                .Where(step => step.RequiresApproval && !string.IsNullOrWhiteSpace(step.ToolCode))
-                .Select(step => step.ToolCode!)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToArray()
+            IsExecutable = true
         };
+        var executableJson = CanonicalJson.Serialize(executablePlan);
+        var executableIntegrity = integrityValidator.ValidatePersisted(
+            executableJson,
+            requireExecutable: true);
+        if (!executableIntegrity.IsSuccess)
+        {
+            return Result.From(executableIntegrity);
+        }
 
         var approvalRequiredStepIndexes = guardedSteps
             .Select((step, index) => (step, index))
@@ -91,37 +114,47 @@ public sealed class AgentPlanDraftConfirmationService(
             .ToArray();
 
         task.ConfirmExecutablePlan(
-            JsonSerializer.Serialize(executablePlan, JsonOptions),
+            executableJson,
             approvalRequiredStepIndexes,
             now);
         return Result.Success();
     }
 
-    private async Task<Result<AgentTaskPlanCloudReadonlyIntentDocument?>> ResolveCloudReadonlyIntentAsync(
-        AgentTask task,
-        AgentTaskPlanDocument plan,
-        CancellationToken cancellationToken)
+    private static bool StepsMatch(
+        IReadOnlyCollection<AgentTaskPlanStepDocument> persisted,
+        IReadOnlyCollection<AgentStepPlanDto> guarded)
     {
-        if (task.TaskType != AgentTaskType.CloudDataReport || plan.CloudReadonlyIntent is not null)
-        {
-            return Result.Success(plan.CloudReadonlyIntent);
-        }
+        var guardedDocuments = guarded
+            .Select(step => new AgentTaskPlanStepDocument(
+                step.Title,
+                step.Description,
+                step.StepType,
+                step.ToolCode,
+                step.RequiresApproval,
+                step.InputJson))
+            .ToArray();
+        return string.Equals(
+            CanonicalJson.Serialize(persisted),
+            CanonicalJson.Serialize(guardedDocuments),
+            StringComparison.Ordinal);
+    }
 
-        var intentResult = await cloudReadonlyPlanService.CreateIntentAsync(
-            task.SessionId.Value,
-            task.Goal,
-            cancellationToken);
-        return intentResult.IsSuccess
-            ? Result.Success<AgentTaskPlanCloudReadonlyIntentDocument?>(
-                AgentTaskPlanCloudReadonlyIntentDocument.From(intentResult.Value!))
-            : Result.From(intentResult);
+    private static bool SnapshotMatches(
+        AgentExecutionSnapshotDocument snapshot,
+        PlannerToolCatalog catalog)
+    {
+        return snapshot.ToolCatalogVersion == catalog.Version &&
+               string.Equals(snapshot.ToolCatalogDigest, AgentPlanV2Compiler.HashToolCatalog(catalog.Tools), StringComparison.Ordinal) &&
+               string.Equals(snapshot.ProviderCatalogDigest, AgentPlanV2Compiler.HashProviderCatalog(catalog.Tools), StringComparison.Ordinal) &&
+               string.Equals(snapshot.PluginCatalogDigest, AgentPlanV2Compiler.HashToolSubset(catalog.Tools, "Plugin"), StringComparison.Ordinal) &&
+               string.Equals(snapshot.McpCatalogDigest, AgentPlanV2Compiler.HashToolSubset(catalog.Tools, "Mcp"), StringComparison.Ordinal);
     }
 
     private static Result<AgentTaskPlanDocument> DeserializePlan(string planJson)
     {
         try
         {
-            var plan = JsonSerializer.Deserialize<AgentTaskPlanDocument>(planJson, JsonOptions);
+            var plan = JsonSerializer.Deserialize<AgentTaskPlanDocument>(planJson, CanonicalJson.SerializerOptions);
             return plan is null
                 ? InvalidPlan()
                 : Result.Success(plan);
@@ -137,5 +170,19 @@ public sealed class AgentPlanDraftConfirmationService(
         return Result.Failure(new ApiProblemDescriptor(
             AppProblemCodes.AgentPlanInvalid,
             "Agent task plan JSON is invalid and cannot be confirmed."));
+    }
+
+    private static Result InvalidPlan(string detail)
+    {
+        return Result.Failure(new ApiProblemDescriptor(
+            AppProblemCodes.AgentPlanInvalid,
+            detail));
+    }
+
+    private static Result ReconfirmationRequired(string detail)
+    {
+        return Result.Failure(new ApiProblemDescriptor(
+            AppProblemCodes.ApprovalReconfirmationRequired,
+            detail));
     }
 }

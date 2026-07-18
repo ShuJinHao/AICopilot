@@ -27,7 +27,11 @@ public sealed class FrontendContractSnapshotTests
           "sessionId": "{{sessionId}}",
           "goal": "生成可确认的计划",
           "taskType": "{{taskType}}",
-          "modelId": null
+          "modelId": null,
+          "pluginSelectionMode": "BuiltInOnly",
+          "selectedPluginIds": [],
+          "capabilitySelectionMode": "InferredFromGoal",
+          "requestedCapabilityCodes": []
         }
         """;
 
@@ -35,6 +39,10 @@ public sealed class FrontendContractSnapshotTests
 
         request.Should().NotBeNull();
         request!.TaskType.Should().Be(expected);
+        request.PluginSelectionMode.Should().Be(AgentPluginSelectionMode.BuiltInOnly);
+        request.SelectedPluginIds.Should().BeEmpty();
+        request.CapabilitySelectionMode.Should().Be(AgentCapabilitySelectionMode.InferredFromGoal);
+        request.RequestedCapabilityCodes.Should().BeEmpty();
     }
 
     [Fact]
@@ -106,7 +114,12 @@ public sealed class FrontendContractSnapshotTests
             IsRunInProgress: true,
             QueuedRunId: Guid.NewGuid(),
             RunQueueStatus: "Leased",
-            IsRunQueued: true);
+            IsRunQueued: true,
+            PlanSchemaVersion: "2.0",
+            PlanDigest: new string('a', 64),
+            TopologyProfile: "LinearV1",
+            IsPlanExecutable: true,
+            PlanIntegrityStatus: "ValidV2");
 
         var json = JsonSerializer.Serialize(dto, JsonOptions);
         using var document = JsonDocument.Parse(json);
@@ -135,6 +148,11 @@ public sealed class FrontendContractSnapshotTests
             "queuedRunId",
             "runQueueStatus",
             "isRunQueued",
+            "planSchemaVersion",
+            "planDigest",
+            "topologyProfile",
+            "isPlanExecutable",
+            "planIntegrityStatus",
             "steps");
         var serializedPlan = root.GetProperty("planJson").GetString();
         serializedPlan.Should().Contain("\"plannerMode\"");

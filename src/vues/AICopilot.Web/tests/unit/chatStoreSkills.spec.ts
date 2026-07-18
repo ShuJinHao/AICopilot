@@ -1112,6 +1112,10 @@ describe('chatStore skills', () => {
       expect.objectContaining({
         skillCode: null,
         preferredToolCodes: ['rag_search'],
+        pluginSelectionMode: 'BuiltInOnly',
+        selectedPluginIds: [],
+        capabilitySelectionMode: 'InferredFromGoal',
+        requestedCapabilityCodes: [],
       }),
       expect.any(Object),
     )

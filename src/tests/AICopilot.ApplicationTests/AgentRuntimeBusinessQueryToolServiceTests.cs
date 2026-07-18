@@ -35,6 +35,7 @@ public sealed class AgentRuntimeBusinessQueryToolServiceTests
         var state = new AgentTaskRunState();
 
         var output = await service.QueryBusinessDatabaseReadonlyP1Async(
+            "查看设备列表",
             CreatePlan(database.Id),
             state,
             CancellationToken.None);

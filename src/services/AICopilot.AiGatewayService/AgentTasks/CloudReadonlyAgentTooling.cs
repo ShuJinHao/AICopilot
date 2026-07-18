@@ -107,11 +107,52 @@ public sealed class CloudReadonlyAgentPlanService(
         var summary = $"target={semanticPlan.Target}; kind={semanticPlan.Kind}; filters={semanticPlan.Filters.Count}; hasTimeRange={semanticPlan.TimeRange is not null}; limit={semanticPlan.Limit}";
         return Result.Success(new CloudReadonlyAgentPlanIntent(
             semanticPlan.Intent,
-            CloudReadonlyAgentTextGuard.SanitizeForPlan(candidate.Query, 2000),
+            BuildTypedQuery(semanticPlan),
             candidate.Confidence,
             semanticPlan.Target.ToString(),
             semanticPlan.Kind.ToString(),
             summary));
+    }
+
+    private static string BuildTypedQuery(SemanticQueryPlan plan)
+    {
+        var payload = new
+        {
+            fields = plan.Projection.Fields
+                .Where(field => !string.IsNullOrWhiteSpace(field))
+                .Select(field => field.Trim())
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(field => field, StringComparer.Ordinal)
+                .ToArray(),
+            filters = plan.Filters
+                .Select(filter => new
+                {
+                    field = filter.Field,
+                    @operator = filter.Operator.ToString(),
+                    value = filter.Value
+                })
+                .OrderBy(filter => filter.field, StringComparer.Ordinal)
+                .ThenBy(filter => filter.@operator, StringComparer.Ordinal)
+                .ThenBy(filter => filter.value, StringComparer.Ordinal)
+                .ToArray(),
+            timeRange = plan.TimeRange is null
+                ? null
+                : new
+                {
+                    field = plan.TimeRange.Field,
+                    start = plan.TimeRange.Start,
+                    end = plan.TimeRange.End
+                },
+            sort = plan.Sort is null
+                ? null
+                : new
+                {
+                    field = plan.Sort.Field,
+                    direction = plan.Sort.Direction.ToString()
+                },
+            limit = plan.Limit
+        };
+        return CanonicalJson.Serialize(payload);
     }
 
     private static bool IsSupportedIntentFamily(IntentResult intent)

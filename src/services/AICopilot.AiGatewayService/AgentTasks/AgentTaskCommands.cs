@@ -21,7 +21,11 @@ public sealed record PlanAgentTaskCommand(
     string? PlannerMode = null,
     bool ForceStaticPlanner = false,
     string? SkillCode = null,
-    IReadOnlyCollection<string>? PreferredToolCodes = null) : ICommand<Result<AgentTaskDto>>;
+    IReadOnlyCollection<string>? PreferredToolCodes = null,
+    AgentPluginSelectionMode? PluginSelectionMode = null,
+    IReadOnlyCollection<Guid>? SelectedPluginIds = null,
+    AgentCapabilitySelectionMode? CapabilitySelectionMode = null,
+    IReadOnlyCollection<string>? RequestedCapabilityCodes = null) : ICommand<Result<AgentTaskDto>>;
 
 [AuthorizeRequirement("AiGateway.ApproveAgentTaskPlan")]
 public sealed record ApproveAgentTaskPlanCommand(Guid Id) : ICommand<Result<AgentTaskDto>>;

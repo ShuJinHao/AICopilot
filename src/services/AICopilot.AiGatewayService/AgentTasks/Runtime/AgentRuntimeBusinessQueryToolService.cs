@@ -12,6 +12,7 @@ internal sealed class AgentRuntimeBusinessQueryToolService(
     CloudReadOnlyTextToSqlFallbackRunner? cloudTextToSqlFallbackRunner)
 {
     public async Task<object> QueryBusinessDatabaseReadonlyP1Async(
+        string taskGoal,
         AgentTaskPlanDocument plan,
         AgentTaskRunState state,
         CancellationToken cancellationToken)
@@ -59,7 +60,7 @@ internal sealed class AgentRuntimeBusinessQueryToolService(
 
         if (source.ExternalSystemType == DataSourceExternalSystemType.CloudReadOnly)
         {
-            return await QueryCloudReadOnlyBusinessDatabaseAsync(source, plan, state, cancellationToken);
+            return await QueryCloudReadOnlyBusinessDatabaseAsync(source, taskGoal, plan, state, cancellationToken);
         }
 
         if (businessTextToSqlRuntime is null)
@@ -70,7 +71,7 @@ internal sealed class AgentRuntimeBusinessQueryToolService(
         var draftResult = await businessTextToSqlRuntime.GenerateDraftAsync(
             new BusinessTextToSqlDraftRequest(
                 source.Id,
-                plan.Goal,
+                taskGoal,
                 plan.BusinessDomains,
                 source.DefaultQueryLimit,
                 PreviewOnly: false),
@@ -134,6 +135,7 @@ internal sealed class AgentRuntimeBusinessQueryToolService(
 
     private async Task<object> QueryCloudReadOnlyBusinessDatabaseAsync(
         BusinessDatabaseDescriptor source,
+        string taskGoal,
         AgentTaskPlanDocument plan,
         AgentTaskRunState state,
         CancellationToken cancellationToken)
@@ -151,7 +153,7 @@ internal sealed class AgentRuntimeBusinessQueryToolService(
 
         var fallbackResult = await cloudTextToSqlFallbackRunner.RunAsync(
             database,
-            plan.Goal,
+            taskGoal,
             source.DefaultQueryLimit,
             cancellationToken);
         if (!fallbackResult.Succeeded)
@@ -193,7 +195,7 @@ internal sealed class AgentRuntimeBusinessQueryToolService(
             isSimulation = false,
             sourceLabel,
             queryHash = fallbackResult.QueryHash,
-            questionHash = CloudReadOnlyTextToSqlRepairClassifier.ComputeSqlHash(plan.Goal),
+            questionHash = CloudReadOnlyTextToSqlRepairClassifier.ComputeSqlHash(taskGoal),
             rowCount = fallbackResult.RowCount,
             isTruncated = fallbackResult.IsTruncated,
             repairAttempts = fallbackResult.RepairAttempts.Select(attempt => new
@@ -209,6 +211,7 @@ internal sealed class AgentRuntimeBusinessQueryToolService(
     }
 
     public async Task<object> QueryBusinessDatabaseReadonlyAsync(
+        string taskGoal,
         AgentTaskPlanDocument plan,
         AgentTaskRunState state,
         CancellationToken cancellationToken)
@@ -258,7 +261,7 @@ internal sealed class AgentRuntimeBusinessQueryToolService(
         }).ToArray();
 
         var hasSimulation = candidates.Any(source => source.ExternalSystemType == DataSourceExternalSystemType.SimulationBusiness);
-        var queryHash = ComputeHash($"{plan.Goal}|{string.Join(',', candidates.Select(source => source.Id))}|{plan.QueryMode ?? "TextToSql"}");
+        var queryHash = ComputeHash($"{taskGoal}|{string.Join(',', candidates.Select(source => source.Id))}|{plan.QueryMode ?? "TextToSql"}");
 
         state.CloudReadonlySummary =
             $"BusinessDatabase readonly query prepared. sourceType=BusinessDatabase; sourceMode={(hasSimulation ? "SimulationBusiness" : "NonCloud")}; isSimulation={hasSimulation.ToString().ToLowerInvariant()}; sourceLabel={(hasSimulation ? "AI 独立模拟业务库" : string.Join(", ", candidates.Select(source => source.Name)))}; queryHash={queryHash}.";

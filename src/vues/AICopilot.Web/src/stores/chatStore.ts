@@ -752,6 +752,10 @@ export const useChatStore = defineStore('chat', () => {
           plannerMode: 'Auto',
           skillCode: selectedSkillCode.value || null,
           preferredToolCodes: selectedToolCodes.value,
+          pluginSelectionMode: 'BuiltInOnly',
+          selectedPluginIds: [],
+          capabilitySelectionMode: 'InferredFromGoal',
+          requestedCapabilityCodes: [],
         },
         {
           onChunkReceived(chunk) {

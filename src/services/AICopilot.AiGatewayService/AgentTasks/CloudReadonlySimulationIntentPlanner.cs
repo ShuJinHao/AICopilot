@@ -11,7 +11,9 @@ internal sealed class CloudReadonlySimulationIntentPlanner : ICloudReadonlySimul
         var query = CloudReadonlySimulationQuery.FromText(goal);
         var intent = ResolveIntent(goal);
         var (target, kind) = ResolveTargetKind(intent);
-        var queryJson = JsonSerializer.Serialize(query with { RawText = goal }, CloudReadonlySimulationQuery.JsonOptions);
+        var queryJson = CanonicalJson.Canonicalize(JsonSerializer.Serialize(
+            query with { RawText = null },
+            CloudReadonlySimulationQuery.JsonOptions));
         return Result.Success(new CloudReadonlyAgentPlanIntent(
             intent,
             queryJson,

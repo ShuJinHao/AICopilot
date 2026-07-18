@@ -20,7 +20,9 @@ public sealed class AgentApprovalDecisionCoordinator(
     ICurrentUser currentUser,
     IIdentityAccessService identityAccessService,
     AgentPlanDraftConfirmationService planDraftConfirmationService,
-    MessageTimelineProjectionWriter? timelineProjectionWriter = null)
+    MessageTimelineProjectionWriter? timelineProjectionWriter = null,
+    IAgentTaskPlanPersistenceVerifier? planPersistenceVerifier = null,
+    IAgentPlanIntegrityValidator? planIntegrityValidator = null)
 {
     public Task<Result<AgentApprovalRequestDto>> ApproveAsync(
         Guid approvalId,
@@ -118,6 +120,20 @@ public sealed class AgentApprovalDecisionCoordinator(
         }
 
         await approvalRepository.SaveChangesAsync(cancellationToken);
+
+        if (isApproved && approval.ApprovalType == AgentApprovalType.Plan)
+        {
+            var persistedIntegrity = await AgentPlanPersistenceGuard.VerifyAsync(
+                task,
+                planPersistenceVerifier,
+                planIntegrityValidator,
+                requireExecutable: true,
+                cancellationToken);
+            if (!persistedIntegrity.IsSuccess)
+            {
+                return Result.From(persistedIntegrity);
+            }
+        }
 
         if (isApproved && approval.ApprovalType == AgentApprovalType.ToolCall)
         {

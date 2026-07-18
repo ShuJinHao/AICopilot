@@ -145,6 +145,11 @@ export interface AgentTask {
   queuedRunId?: string | null
   runQueueStatus?: string | null
   isRunQueued: boolean
+  planSchemaVersion?: string | null
+  planDigest?: string | null
+  topologyProfile?: string | null
+  isPlanExecutable?: boolean
+  planIntegrityStatus?: 'ValidV2' | 'LegacyCompletedReadOnly' | 'Invalid' | string
 }
 
 export interface AgentApprovalRequest {

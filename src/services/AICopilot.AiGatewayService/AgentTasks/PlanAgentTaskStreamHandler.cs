@@ -31,7 +31,11 @@ public sealed record PlanAgentTaskStreamRequest(
     string? PlannerMode = null,
     bool ForceStaticPlanner = false,
     string? SkillCode = null,
-    IReadOnlyCollection<string>? PreferredToolCodes = null) : IStreamRequest<ChatChunk>;
+    IReadOnlyCollection<string>? PreferredToolCodes = null,
+    AgentPluginSelectionMode? PluginSelectionMode = null,
+    IReadOnlyCollection<Guid>? SelectedPluginIds = null,
+    AgentCapabilitySelectionMode? CapabilitySelectionMode = null,
+    IReadOnlyCollection<string>? RequestedCapabilityCodes = null) : IStreamRequest<ChatChunk>;
 
 public sealed class PlanAgentTaskStreamHandler(
     IReadRepository<Session> sessionRepository,
@@ -280,7 +284,11 @@ public sealed class PlanAgentTaskStreamHandler(
             {
                 ["taskId"] = result.Value.Id.ToString(),
                 ["status"] = result.Value.Status,
-                ["planKind"] = "PlanDraft"
+                ["planKind"] = "PlanDraft",
+                ["schemaVersion"] = result.Value.PlanSchemaVersion ?? string.Empty,
+                ["planDigest"] = result.Value.PlanDigest ?? string.Empty,
+                ["topologyProfile"] = result.Value.TopologyProfile ?? string.Empty,
+                ["isExecutable"] = result.Value.IsPlanExecutable.ToString().ToLowerInvariant()
             });
         yield return CreateTextChunk(assistantText, summary);
         yield return new ChatChunk(Source, ChunkType.AgentTask, result.Value.ToJson());
@@ -303,7 +311,11 @@ public sealed class PlanAgentTaskStreamHandler(
             request.PlannerMode,
             request.ForceStaticPlanner,
             request.SkillCode,
-            request.PreferredToolCodes);
+            request.PreferredToolCodes,
+            request.PluginSelectionMode,
+            request.SelectedPluginIds,
+            request.CapabilitySelectionMode,
+            request.RequestedCapabilityCodes);
     }
 
     private static ChatChunk CreateTextChunk(StringBuilder assistantText, string content)
