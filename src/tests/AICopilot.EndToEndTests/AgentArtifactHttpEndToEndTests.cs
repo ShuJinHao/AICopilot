@@ -1,5 +1,11 @@
 using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
+using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
+using AICopilot.Core.AiGateway.Ids;
+using AICopilot.SharedKernel.Result;
+using Microsoft.EntityFrameworkCore;
 
 namespace AICopilot.EndToEndTests;
 
@@ -8,7 +14,7 @@ public sealed class AgentArtifactHttpEndToEndTests(CoreAICopilotAppFixture fixtu
     : AgentTaskHttpScenarioTestBase(fixture)
 {
     [Fact]
-    public async Task FinalizeAndDownload_ShouldExposeArtifactAndAuditTimeline()
+    public async Task PlanCompilerUnavailable_ShouldFailClosedWithoutWorkspaceArtifactOrApproval()
     {
         await AuthenticateAsAdminAsync();
 
@@ -16,201 +22,123 @@ public sealed class AgentArtifactHttpEndToEndTests(CoreAICopilotAppFixture fixtu
         var session = await PostJsonAsync<CreatedSessionDto>(
             "/api/aigateway/session",
             new { templateId });
-        var upload = await UploadAiGatewayFileAsync(
-            session.Id,
-            $"agent-report-{Guid.NewGuid():N}.csv",
-            "station,count\nA,2\nB,3\nC,5\n");
-
         var task = await PostPlanStreamAsync(new
         {
             sessionId = session.Id,
-            goal = "Generate a controlled report from the uploaded CSV.",
-            skillCode = "artifact_report",
-            taskType = 2,
+            goal = "Generate a controlled Markdown report without bypassing the P0 compiler boundary.",
+            taskType = AgentTaskType.ReportGeneration,
             modelId = (Guid?)null,
-            uploadIds = new[] { upload.Id },
-            knowledgeBaseIds = Array.Empty<Guid>()
+            uploadIds = Array.Empty<Guid>(),
+            knowledgeBaseIds = Array.Empty<Guid>(),
+            dataSourceIds = Array.Empty<Guid>(),
+            businessDomains = Array.Empty<string>(),
+            requiresDataApproval = false,
+            artifactTypes = new[] { "markdown" },
+            plannerMode = "PlanDraft",
+            forceStaticPlanner = true,
+            pluginSelectionMode = "BuiltInOnly",
+            selectedPluginIds = Array.Empty<Guid>(),
+            capabilitySelectionMode = "InferredFromGoal",
+            requestedCapabilityCodes = Array.Empty<string>()
         });
 
-        task.Status.Should().Be("Draft");
+        task.Status.Should().Be(nameof(AgentTaskStatus.Draft));
+        task.WorkspaceId.Should().BeNull();
         task.WorkspaceCode.Should().BeNull();
+        task.IsPlanExecutable.Should().BeFalse();
+        task.PlanIntegrityStatus.Should().Be("ValidV2");
 
-        var planApproval = (await GetPendingApprovalsAsync(task.Id))
-            .Should()
-            .ContainSingle(item => item.Type == "Plan")
-            .Subject;
-        await ApproveAgentApprovalAsync(planApproval.Id, "Plan approved.");
-
-        task = await PostJsonAsync<AgentTaskDto>(
-            "/api/aigateway/agent/task/run",
-            new { id = task.Id });
-        task.IsRunQueued.Should().BeTrue();
-        task.RunQueueStatus.Should().Be("Queued");
-        task = await WaitForTaskStatusAsync(task.Id, "WaitingToolApproval");
-        task.Status.Should().Be("WaitingToolApproval");
-        task.WorkspaceCode.Should().NotBeNullOrWhiteSpace();
-
-        var draftWorkspace = await GetJsonAsync<ArtifactWorkspaceDto>(
-            $"/api/aigateway/workspace/{task.WorkspaceCode}");
-        AssertArtifactPrefixesExist(draftWorkspace, "source/", "data/");
-        AssertArtifactsExist(
-            draftWorkspace,
-            "charts/chart-data.json",
-            "draft/report.md",
-            "draft/report.html");
-        draftWorkspace.Artifacts.Should().OnlyContain(item => item.Status != "Final");
-        draftWorkspace.Artifacts.Should().OnlyContain(item =>
-            !item.RelativePath.StartsWith("final/", StringComparison.OrdinalIgnoreCase));
-        draftWorkspace.Manifest.Select(item => item.ArtifactId)
-            .Should()
-            .BeEquivalentTo(draftWorkspace.Artifacts.Select(item => item.Id));
-        draftWorkspace.Manifest.Should().OnlyContain(item =>
-            item.DownloadUrl == $"/api/aigateway/artifact/{item.ArtifactId}/download");
-
-        for (var attempt = 0; attempt < 8; attempt++)
+        using (var plan = JsonDocument.Parse(task.PlanJson))
         {
-            var pendingApprovals = await GetPendingApprovalsAsync(task.Id);
-            if (pendingApprovals.Any(item => item.Type == "FinalOutput"))
-            {
-                break;
-            }
-
-            pendingApprovals.Should().NotBeEmpty(
-                "the runtime should pause before each high-risk tool");
-            foreach (var approval in pendingApprovals.Where(item => item.Type != "FinalOutput"))
-            {
-                await ApproveAgentApprovalAsync(approval.Id, $"Approve {approval.TargetName}.");
-            }
-
-            task = await WaitForTaskToPauseAsync(task.Id);
+            var root = plan.RootElement;
+            root.GetProperty("planKind").GetString().Should().Be("PlanDraft");
+            root.GetProperty("isExecutable").GetBoolean().Should().BeFalse();
+            root.GetProperty("nodes").GetArrayLength().Should().Be(0);
+            root.GetProperty("capabilityGaps")
+                .EnumerateArray()
+                .Select(item => item.GetString())
+                .Should()
+                .Contain("plan_compiler_unavailable");
+            root.GetProperty("artifactTargets")
+                .EnumerateArray()
+                .Select(item => item.GetString())
+                .Should()
+                .Equal("markdown");
         }
 
-        var finalApproval = (await GetPendingApprovalsAsync(task.Id))
-            .Should()
-            .ContainSingle(item => item.Type == "FinalOutput")
-            .Subject;
-        finalApproval.WorkspaceCode.Should().Be(task.WorkspaceCode);
+        (await GetPendingApprovalsAsync(task.Id)).Should().BeEmpty();
 
-        draftWorkspace = await GetJsonAsync<ArtifactWorkspaceDto>(
-            $"/api/aigateway/workspace/{task.WorkspaceCode}");
-        AssertArtifactsExist(
-            draftWorkspace,
-            "draft/report.pdf",
-            "draft/report.pptx",
-            "draft/report.xlsx");
-        draftWorkspace.Artifacts.Should().OnlyContain(item => item.Status != "Final");
-        draftWorkspace.Artifacts.Should().OnlyContain(item =>
-            !item.RelativePath.StartsWith("final/", StringComparison.OrdinalIgnoreCase));
+        using (var approveResponse = await _fixture.HttpClient.PostAsJsonAsync(
+                   "/api/aigateway/agent/task/approve-plan",
+                   new { id = task.Id },
+                   JsonOptions))
+        {
+            approveResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            (await ReadProblemCodeAsync(approveResponse)).Should().Be(AppProblemCodes.AgentPlanInvalid);
+        }
 
-        await PostJsonExpectingStatusAsync(
-            $"/api/aigateway/workspace/{task.WorkspaceCode}/finalize",
-            new { },
-            HttpStatusCode.BadRequest);
+        using (var runResponse = await _fixture.HttpClient.PostAsJsonAsync(
+                   "/api/aigateway/agent/task/run",
+                   new { id = task.Id },
+                   JsonOptions))
+        {
+            runResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        }
 
-        await ApproveAgentApprovalAsync(finalApproval.Id, "Final output approved.");
+        await using (var dbContext = await CreateAiGatewayDbContextAsync())
+        {
+            var taskId = new AgentTaskId(task.Id);
+            var persisted = await dbContext.AgentTasks
+                .Include(item => item.Steps)
+                .AsNoTracking()
+                .SingleAsync(item => item.Id == taskId);
+            persisted.Status.Should().Be(AgentTaskStatus.Draft);
+            persisted.WorkspaceId.Should().BeNull();
+            persisted.ActiveRunAttemptId.Should().BeNull();
+            persisted.Steps.Should().OnlyContain(step =>
+                step.Status == AgentStepStatus.Pending ||
+                step.Status == AgentStepStatus.WaitingApproval);
+            persisted.Steps.Should().OnlyContain(step =>
+                !step.StartedAt.HasValue &&
+                !step.FinishedAt.HasValue &&
+                step.OutputJson == null &&
+                step.ErrorMessage == null);
 
-        var finalizedWorkspace = await PostJsonAsync<ArtifactWorkspaceDto>(
-            $"/api/aigateway/workspace/{task.WorkspaceCode}/finalize",
-            new { });
-        finalizedWorkspace.Status.Should().Be("Finalized");
-        finalizedWorkspace.Artifacts.Should().NotBeEmpty();
-        finalizedWorkspace.Artifacts.Should().OnlyContain(item => item.Status == "Final");
-        finalizedWorkspace.Artifacts.Should().OnlyContain(item =>
-            item.RelativePath.StartsWith("final/", StringComparison.OrdinalIgnoreCase));
-        finalizedWorkspace.Manifest.Should().OnlyContain(item =>
-            item.Status == "Final" &&
-            item.RelativePath.StartsWith("final/", StringComparison.OrdinalIgnoreCase));
-
-        (await DownloadArtifactAsync(finalizedWorkspace.Artifacts.First().Id))
-            .Should()
-            .NotBeEmpty();
+            (await dbContext.ApprovalRequests.AnyAsync(item => item.TaskId == taskId)).Should().BeFalse();
+            (await dbContext.ArtifactWorkspaces.AnyAsync(item => item.TaskId == taskId)).Should().BeFalse();
+            (await dbContext.AgentTaskRunAttempts.AnyAsync(item => item.TaskId == taskId)).Should().BeFalse();
+            (await dbContext.AgentTaskRunQueueItems.AnyAsync(item => item.TaskId == taskId)).Should().BeFalse();
+            (await dbContext.ToolExecutionRecords.AnyAsync(item => item.TaskId == taskId)).Should().BeFalse();
+        }
 
         var auditSummary = await GetJsonAsync<List<AgentTaskAuditSummaryDto>>(
             $"/api/aigateway/agent/task/{task.Id}/audit-summary");
-        auditSummary.Should().Contain(item => item.ActionCode == "Agent.Plan");
-        auditSummary.Should().Contain(item => item.ActionCode == "Agent.ApprovalDecision");
-        auditSummary.Should().Contain(item =>
-            item.ActionCode == "Agent.ToolExecution" &&
-            item.Metadata.ContainsKey("toolName") &&
-            item.Metadata["toolName"] == "generate_markdown_report");
-        auditSummary.Should().Contain(item => item.ActionCode == "Agent.ArtifactDownload");
-        auditSummary.Should().Contain(item =>
-            item.ActionCode == "Agent.WorkspaceFinalize" &&
-            item.WorkspaceCode == task.WorkspaceCode);
-        auditSummary.Should().OnlyContain(item => item.TaskId == task.Id);
-
-        var timelineEvents = await QueryMessageTimelineEventsAsync(session.Id);
-        timelineEvents.Select(item => item.Sequence).Should().BeInAscendingOrder();
-        timelineEvents.Select(item => item.Sequence).Should().OnlyHaveUniqueItems();
-
-        var taskEvents = timelineEvents
-            .Where(item => item.AgentTaskId == task.Id)
-            .ToList();
-        taskEvents.Should().OnlyContain(item => item.MessageId == null);
-        taskEvents.Should().OnlyContain(item => item.PayloadJson == null);
-        taskEvents.Should().Contain(item =>
-            item.EventType == nameof(MessageEventType.AgentTaskPlanCreated) &&
-            item.ApprovalRequestId.HasValue &&
-            item.ArtifactWorkspaceId == null);
-        taskEvents.Should().Contain(item =>
-            item.EventType == nameof(MessageEventType.ApprovalRequested) &&
-            item.ApprovalRequestId.HasValue);
-        taskEvents.Should().Contain(item =>
-            item.EventType == nameof(MessageEventType.ApprovalDecided) &&
-            item.ApprovalRequestId.HasValue);
-        taskEvents.Should().Contain(item =>
-            item.EventType == nameof(MessageEventType.AgentTaskStepStarted) &&
-            item.AgentStepId.HasValue);
-        taskEvents.Should().Contain(item =>
-            item.EventType == nameof(MessageEventType.AgentTaskStepCompleted) &&
-            item.AgentStepId.HasValue);
-        taskEvents.Should().Contain(item =>
-            item.EventType == nameof(MessageEventType.ArtifactReady) &&
-            item.ArtifactWorkspaceId == finalizedWorkspace.Id &&
-            item.ArtifactId.HasValue);
-        taskEvents.Should().ContainSingle(item =>
-            item.EventType == nameof(MessageEventType.FinalOutputReady) &&
-            item.ArtifactWorkspaceId == finalizedWorkspace.Id);
+        auditSummary.Should().Contain(item => item.ActionCode == "Agent.Plan" && item.Result == "Succeeded");
+        auditSummary.Should().NotContain(item =>
+            item.ActionCode == "Agent.ToolExecution" ||
+            item.ActionCode == "Agent.WorkspaceFinalize" ||
+            item.ActionCode == "Agent.ArtifactDownload");
 
         var timeline = await GetJsonAsync<SessionTimelinePageDto>(
             $"/api/aigateway/session/timeline?sessionId={session.Id}&count=200");
-        timeline.Items.Select(item => item.Sequence).Should().BeInAscendingOrder();
-        timeline.Items.Should().Contain(item =>
+        timeline.Items.Should().ContainSingle(item =>
             item.EventType == nameof(MessageEventType.AgentTaskPlanCreated) &&
             item.AgentTaskId == task.Id &&
-            item.AgentTaskStatus == "Completed");
-        timeline.Items.Should().Contain(item =>
-            item.EventType == nameof(MessageEventType.ApprovalDecided) &&
-            item.ApprovalRequestId.HasValue &&
-            item.ApprovalStatus == "Approved");
-        timeline.Items.Should().Contain(item =>
-            item.EventType == nameof(MessageEventType.FinalOutputReady) &&
-            item.WorkspaceCode == finalizedWorkspace.WorkspaceCode &&
-            item.WorkspaceStatus == "Finalized");
-        timeline.Items.Should().Contain(item =>
-            item.EventType == nameof(MessageEventType.ArtifactReady) &&
-            item.ArtifactStatus == "Final" &&
-            item.ArtifactDownloadUrl != null);
+            item.AgentTaskStatus == nameof(AgentTaskStatus.Draft));
+        timeline.Items.Should().NotContain(item =>
+            item.EventType == nameof(MessageEventType.ApprovalRequested) ||
+            item.EventType == nameof(MessageEventType.AgentTaskStepStarted) ||
+            item.EventType == nameof(MessageEventType.AgentTaskStepCompleted) ||
+            item.EventType == nameof(MessageEventType.ArtifactReady) ||
+            item.EventType == nameof(MessageEventType.FinalOutputReady));
     }
 
-    private static void AssertArtifactPrefixesExist(
-        ArtifactWorkspaceDto workspace,
-        params string[] prefixes)
+    private static async Task<string?> ReadProblemCodeAsync(HttpResponseMessage response)
     {
-        foreach (var prefix in prefixes)
-        {
-            workspace.Artifacts.Should().Contain(item =>
-                item.RelativePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
-        }
-    }
-
-    private static void AssertArtifactsExist(
-        ArtifactWorkspaceDto workspace,
-        params string[] relativePaths)
-    {
-        foreach (var relativePath in relativePaths)
-        {
-            workspace.Artifacts.Should().Contain(item => item.RelativePath == relativePath);
-        }
+        var body = await response.Content.ReadAsStringAsync();
+        using var problem = JsonDocument.Parse(body);
+        return problem.RootElement.TryGetProperty("code", out var code)
+            ? code.GetString()
+            : null;
     }
 }

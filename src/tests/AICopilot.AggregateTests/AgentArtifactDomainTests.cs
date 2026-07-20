@@ -189,6 +189,66 @@ public sealed class AgentArtifactDomainTests
     }
 
     [Fact]
+    public void AgentStep_ShouldPreserveLargeStructuredOutputWithoutSilentTruncation()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var task = new AgentTask(
+            SessionId.New(),
+            Guid.NewGuid(),
+            "Large output",
+            "Preserve complete structured output",
+            AgentTaskType.ReportGeneration,
+            AgentTaskRiskLevel.Low,
+            null,
+            "{}",
+            now);
+        var step = task.AddStep(
+            "Generate",
+            "Generate structured output",
+            AgentStepType.ArtifactGeneration,
+            "generate_chart_data",
+            false,
+            now);
+        var output = $"{{\"value\":\"{new string('x', 32_000)}\"}}";
+
+        step.Start(now);
+        step.Complete(output, now.AddSeconds(1));
+
+        step.OutputJson.Should().Be(output);
+        step.OutputJson!.Length.Should().BeGreaterThan(16_000);
+    }
+
+    [Fact]
+    public void AgentStep_ShouldRejectOversizeUtf8InputWithoutTruncatingMultibytePayload()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var task = new AgentTask(
+            SessionId.New(),
+            Guid.NewGuid(),
+            "Input limit",
+            "Reject oversize input",
+            AgentTaskType.ReportGeneration,
+            AgentTaskRiskLevel.Low,
+            null,
+            "{}",
+            now);
+        var overLimit = $"{{\"value\":\"{new string('界', 2_667)}\"}}";
+
+        var action = () => task.AddStep(
+            "Analyze",
+            "Analyze input",
+            AgentStepType.Analysis,
+            "analyze",
+            false,
+            now,
+            overLimit);
+
+        action.Should().Throw<ArgumentException>()
+            .WithMessage("*UTF-8 bytes*8000*node-tool-input-policy:v1*");
+        task.Steps.Should().BeEmpty();
+    }
+
+    [Fact]
     public void ChatRuntimeSettings_ShouldClampUnsafeRuntimeValues()
     {
         var settings = new ChatRuntimeSettings(

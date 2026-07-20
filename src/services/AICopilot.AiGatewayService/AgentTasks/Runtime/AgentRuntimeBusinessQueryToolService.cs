@@ -118,17 +118,12 @@ internal sealed class AgentRuntimeBusinessQueryToolService(
         return new
         {
             status = "completed",
-            sourceType = result.SourceType,
+            resultType = "business-query-summary",
             sourceMode = result.SourceMode.ToString(),
             isSimulation = result.IsSimulation,
-            sourceLabel = result.SourceLabel,
-            queryHash = result.QueryHash,
-            questionHash = draft.QuestionHash,
-            sqlHash = draft.SqlHash,
             rowCount = result.RowCount,
             isTruncated = result.IsTruncated,
-            columns = result.Columns,
-            rows
+            resultHash = result.QueryHash
         };
     }
 
@@ -188,23 +183,12 @@ internal sealed class AgentRuntimeBusinessQueryToolService(
         return new
         {
             status = "completed",
-            sourceType = "BusinessDatabase",
+            resultType = "business-query-summary",
             sourceMode = DataSourceExternalSystemType.CloudReadOnly.ToString(),
             isSimulation = false,
-            sourceLabel,
-            queryHash = fallbackResult.QueryHash,
-            questionHash = CloudReadOnlyTextToSqlRepairClassifier.ComputeSqlHash(plan.Goal),
             rowCount = fallbackResult.RowCount,
             isTruncated = fallbackResult.IsTruncated,
-            repairAttempts = fallbackResult.RepairAttempts.Select(attempt => new
-            {
-                attempt.AttemptIndex,
-                stage = attempt.Stage.ToString(),
-                failureCode = attempt.FailureCode.ToString(),
-                attempt.CanRetry,
-                attempt.SafeErrorSummary
-            }).ToArray(),
-            rows
+            resultHash = fallbackResult.QueryHash
         };
     }
 
@@ -274,28 +258,32 @@ internal sealed class AgentRuntimeBusinessQueryToolService(
         return new
         {
             status = "completed",
-            sourceType = "BusinessDatabase",
-            sourceMode = state.CloudReadonlySourceMode,
+            resultType = "business-query-summary",
+            sourceMode = state.CloudReadonlySourceMode ?? "Unavailable",
             isSimulation = state.CloudReadonlyIsSimulation,
-            sourceLabel = state.CloudReadonlySourceLabel,
-            queryHash,
             rowCount = rows.Length,
-            rows
+            isTruncated = false,
+            resultHash = queryHash
         };
     }
 
     public object SummarizeBusinessQueryResult(AgentTaskRunState state)
     {
+        if (string.IsNullOrWhiteSpace(state.CloudReadonlySourceMode) ||
+            string.IsNullOrWhiteSpace(state.BusinessQueryHash))
+        {
+            throw new InvalidOperationException("BusinessDatabase readonly query result is not available.");
+        }
+
         return new
         {
             status = "completed",
-            sourceType = "BusinessDatabase",
+            resultType = "business-query-summary",
             sourceMode = state.CloudReadonlySourceMode,
             isSimulation = state.CloudReadonlyIsSimulation,
-            sourceLabel = state.CloudReadonlySourceLabel,
-            queryHash = state.BusinessQueryHash,
             rowCount = state.CloudReadonlyRowCount,
-            summary = state.CloudReadonlySummary ?? "BusinessDatabase readonly query result is not available."
+            isTruncated = state.CloudReadonlyIsTruncated,
+            resultHash = state.BusinessQueryHash
         };
     }
 

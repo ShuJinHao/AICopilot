@@ -102,10 +102,14 @@ export function resolveChatErrorMessage(payload: ChatErrorPayload) {
       return userFacingMessage ?? 'Agent 计划未通过后端校验，请调整任务目标后重新生成。'
     case 'plan_payload_too_large':
       return userFacingMessage ?? '计划内容超过固定大小上限，请缩小目标范围或减少产物后重新生成。'
+    case 'evidence_payload_too_large':
+      return userFacingMessage ?? '证据载荷超过固定大小上限，请缩小查询或分批生成。'
     case 'agent_plan_tool_denied':
       return userFacingMessage ?? '计划包含当前 Skill 不允许的工具，请调整 Skill 或重新生成计划。'
     case 'agent_plan_schema_invalid':
       return userFacingMessage ?? '计划步骤输入不符合工具 schema，请重新生成计划。'
+    case 'tool_output_schema_invalid':
+      return userFacingMessage ?? '工具输出与注册契约不一致，本次执行未记为成功，结果不可用于后续审批或完成，请联系管理员检查工具配置。'
     case 'planner_tool_catalog_empty':
       return userFacingMessage ?? '当前 Skill 没有可用工具，请检查 Skill 与 Tool Registry 配置。'
     case 'planner_tool_schema_unsupported':

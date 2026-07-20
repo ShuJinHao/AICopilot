@@ -160,6 +160,16 @@ public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequi
         string fallbackCode,
         string fallbackUserFacingMessage)
     {
+        var planFailure = ResolvePlanPersistenceDisclosure(exception);
+        if (planFailure is not null)
+        {
+            return CreateErrorChunk(
+                planFailure.Code,
+                planFailure.Detail,
+                source,
+                planFailure.UserFacingMessage);
+        }
+
         if (exception is AgentWorkflowException workflowException)
         {
             return CreateErrorChunk(
@@ -216,6 +226,12 @@ public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequi
         return false;
     }
 
+    internal static AgentPlanPersistenceFailureDisclosure? ResolvePlanPersistenceDisclosure(
+        Exception exception)
+    {
+        return AgentPlanPublicFailureDisclosurePolicy.Resolve(exception);
+    }
+
     public static ChatChunk CreateErrorChunk(
         StringBuilder assistantText,
         Exception exception,
@@ -246,6 +262,14 @@ public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequi
         string source = "Chat",
         string? userFacingMessage = null)
     {
+        var planFailure = AgentPlanPublicFailureDisclosurePolicy.Resolve(code);
+        if (planFailure is not null)
+        {
+            code = planFailure.Code;
+            detail = planFailure.Detail;
+            userFacingMessage = planFailure.UserFacingMessage;
+        }
+
         return new ChatChunk(
             source,
             ChunkType.Error,
@@ -364,6 +388,12 @@ public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequi
 
     private static string BuildSafeWorkflowDetail(string code)
     {
+        var planFailure = AgentPlanPublicFailureDisclosurePolicy.Resolve(code);
+        if (planFailure is not null)
+        {
+            return planFailure.Detail;
+        }
+
         return code switch
         {
             AppProblemCodes.ChatConfigurationMissing =>
@@ -384,12 +414,10 @@ public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequi
                 "错误码 control_action_blocked：该动作被 AICopilot 只读安全边界拦截。",
             AppProblemCodes.CapabilityNotAllowed =>
                 "错误码 capability_not_allowed：当前能力不允许执行该操作。",
-            AppProblemCodes.AgentPlanInvalid =>
-                "错误码 agent_plan_invalid：计划内容未通过校验。",
             AppProblemCodes.AgentPlanToolDenied =>
                 "错误码 agent_plan_tool_denied：计划引用了当前 Skill 或安全策略不允许的工具。",
-            AppProblemCodes.AgentPlanSchemaInvalid =>
-                "错误码 agent_plan_schema_invalid：工具输入未通过 schema 校验。",
+            AppProblemCodes.ToolOutputSchemaInvalid =>
+                "错误码 tool_output_schema_invalid：工具输出未通过 schema 或持久化绑定校验，请管理员检查工具运行时与注册契约。",
             AppProblemCodes.ToolBlocked =>
                 "错误码 tool_blocked：该工具被安全策略阻止执行。",
             AppProblemCodes.ToolExecutionNotFound =>

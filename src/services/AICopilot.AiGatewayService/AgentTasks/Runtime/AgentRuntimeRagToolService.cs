@@ -53,8 +53,9 @@ internal sealed class AgentRuntimeRagToolService(
         return new
         {
             status = "completed",
-            lowConfidence = state.RagResults.Count == 0 || state.RagResults.All(item => item.Score < 0.65),
-            sources = state.RagResults
+            resultType = "rag-summary",
+            itemCount = state.RagResults.Count,
+            lowConfidence = state.RagResults.Count == 0 || state.RagResults.All(item => item.Score < 0.65)
         };
     }
 

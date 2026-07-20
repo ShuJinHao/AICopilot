@@ -31,7 +31,8 @@ public sealed record ChatExecutionMetadataSnapshot(
     string? RoutingModelName = null,
     int? ContextWindowTokens = null,
     int? MaxOutputTokens = null,
-    ContextBudgetReportDto? ContextBudgetReport = null);
+    ContextBudgetReportDto? ContextBudgetReport = null,
+    RuntimeAgentConfigurationSnapshot? RoutingConfiguration = null);
 
 public sealed record StoredToolApprovalRequest(
     string RequestId,

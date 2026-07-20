@@ -4,6 +4,7 @@ using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.AiGatewayService.Runtime;
 using AICopilot.Core.AiGateway.Aggregates.RuntimeSettings;
 using AICopilot.EntityFrameworkCore;
+using AICopilot.EntityFrameworkCore.Transactions;
 using AICopilot.Infrastructure;
 using AICopilot.Infrastructure.AiGateway;
 using AICopilot.Services.Contracts;
@@ -84,6 +85,12 @@ public sealed class PostFixClosureArchitectureTests
         productionDescriptor.ImplementationFactory.Should().NotBeNull();
 
         using var provider = builder.Services.BuildServiceProvider();
+        builder.Services.Should().ContainSingle(descriptor =>
+            descriptor.ServiceType == typeof(IRepositoryPersistenceAttemptValidator));
+        builder.Services.Should().ContainSingle(descriptor =>
+            descriptor.ServiceType == typeof(IAgentTaskPlanFreshReadVerifier) &&
+            descriptor.ImplementationType == typeof(AICopilot.EntityFrameworkCore.Repository.AgentTaskPlanFreshReadVerifier) &&
+            descriptor.Lifetime == ServiceLifetime.Scoped);
         productionDescriptor.ImplementationFactory!(provider)
             .Should().BeOfType<PostgreSqlSessionExecutionLock>();
     }
@@ -100,7 +107,38 @@ public sealed class PostFixClosureArchitectureTests
         builder.Services.Should().ContainSingle(descriptor =>
             descriptor.ServiceType == typeof(IAgentPlanIntegrityValidator) &&
             descriptor.Lifetime == ServiceLifetime.Singleton);
+        builder.Services.Should().ContainSingle(descriptor =>
+            descriptor.ServiceType == typeof(IAgentTaskPlanPersistencePolicy) &&
+            descriptor.Lifetime == ServiceLifetime.Singleton);
+        builder.Services.Should().ContainSingle(descriptor =>
+            descriptor.ServiceType == typeof(AgentPlanDraftContractAuthority) &&
+            descriptor.Lifetime == ServiceLifetime.Singleton);
+        builder.Services.Should().ContainSingle(descriptor =>
+            descriptor.ServiceType == typeof(AgentTaskPlanFreshReadGate) &&
+            descriptor.Lifetime == ServiceLifetime.Scoped);
+        builder.Services.Should().NotContain(descriptor =>
+            descriptor.ServiceType.Name.Contains("PlanCompiler", StringComparison.Ordinal) ||
+            descriptor.ImplementationType != null &&
+            descriptor.ImplementationType.Name.Contains("PlanCompiler", StringComparison.Ordinal));
+
+        using var provider = builder.Services.BuildServiceProvider();
+        var productionValidator = provider.GetRequiredService<IAgentPlanIntegrityValidator>();
+        productionValidator.GetType().FullName.Should().Be(
+            "AICopilot.AiGatewayService.AgentTasks.AgentPlanCanonicalizer");
+        ReferenceEquals(
+                productionValidator.GetType().Assembly,
+                typeof(AgentPlanDraftContractAuthority).Assembly)
+            .Should().BeTrue();
+
+        var productionReferences = typeof(AICopilot.HttpApi.HttpApiCorsConfiguration)
+            .Assembly
+            .GetReferencedAssemblies()
+            .Select(reference => reference.Name)
+            .ToArray();
+        productionReferences.Should().NotContain("Microsoft.AspNetCore.Mvc.Testing");
+        productionReferences.Should().NotContain("AICopilot.AgentWorkflowTestKit");
     }
+
 }
 
 [CollectionDefinition("ProcessEnvironment", DisableParallelization = true)]

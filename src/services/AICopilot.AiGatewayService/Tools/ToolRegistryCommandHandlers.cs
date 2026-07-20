@@ -2,6 +2,7 @@ using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.AgentPlugin;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Services.Contracts;
+using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Messaging;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
@@ -49,6 +50,28 @@ public sealed class UpdateToolRegistrationCommandHandler(
             return Result.Invalid(safetyError);
         }
 
+        var effectiveInputSchema = request.InputSchemaJson ?? tool.InputSchemaJson;
+        var inputSchemaContract = ToolRegistrationInputContractPolicy.Validate(
+            tool.ToolCode,
+            effectiveInputSchema,
+            request.SchemaVersion ?? tool.SchemaVersion,
+            request.CatalogVersion ?? tool.CatalogVersion);
+        if (!inputSchemaContract.IsValid)
+        {
+            return Result.Invalid(inputSchemaContract.Error ?? "InputSchemaJson is outside the supported strict subset.");
+        }
+
+        var effectiveOutputSchema = request.OutputSchemaJson ?? tool.OutputSchemaJson;
+        var outputSchemaContract = ToolRegistrationOutputContractPolicy.Validate(
+            tool.ToolCode,
+            effectiveOutputSchema,
+            request.SchemaVersion ?? tool.SchemaVersion,
+            request.CatalogVersion ?? tool.CatalogVersion);
+        if (!outputSchemaContract.IsValid)
+        {
+            return Result.Invalid(outputSchemaContract.Error ?? "OutputSchemaJson is outside the supported strict subset.");
+        }
+
         var changedFields = ToolRegistryUpdatePolicy.BuildChangedFields(tool, request, auditLevel, dataBoundary);
         tool.Update(
             request.DisplayName ?? tool.DisplayName,
@@ -56,8 +79,8 @@ public sealed class UpdateToolRegistrationCommandHandler(
             tool.ProviderType,
             tool.TargetType,
             tool.TargetName,
-            request.InputSchemaJson ?? tool.InputSchemaJson,
-            request.OutputSchemaJson ?? tool.OutputSchemaJson,
+            inputSchemaContract.CanonicalJson!,
+            outputSchemaContract.CanonicalJson!,
             request.RiskLevel ?? tool.RiskLevel,
             request.RequiredPermission ?? tool.RequiredPermission,
             request.RequiresApproval ?? tool.RequiresApproval,
@@ -127,6 +150,26 @@ public sealed class UpsertToolDefinitionCommandHandler(
             return Result.Invalid(safetyError);
         }
 
+        var inputSchemaContract = ToolRegistrationInputContractPolicy.Validate(
+            request.ToolCode,
+            request.InputSchemaJson,
+            request.SchemaVersion,
+            request.CatalogVersion);
+        if (!inputSchemaContract.IsValid)
+        {
+            return Result.Invalid(inputSchemaContract.Error ?? "InputSchemaJson is outside the supported strict subset.");
+        }
+
+        var outputSchemaContract = ToolRegistrationOutputContractPolicy.Validate(
+            request.ToolCode,
+            request.OutputSchemaJson,
+            request.SchemaVersion,
+            request.CatalogVersion);
+        if (!outputSchemaContract.IsValid)
+        {
+            return Result.Invalid(outputSchemaContract.Error ?? "OutputSchemaJson is outside the supported strict subset.");
+        }
+
         var now = DateTimeOffset.UtcNow;
         var tool = await repository.GetAsync(
             item => item.ToolCode == request.ToolCode,
@@ -141,8 +184,8 @@ public sealed class UpsertToolDefinitionCommandHandler(
                 request.ProviderType,
                 request.TargetType,
                 request.TargetName,
-                request.InputSchemaJson,
-                request.OutputSchemaJson,
+                inputSchemaContract.CanonicalJson!,
+                outputSchemaContract.CanonicalJson!,
                 request.RiskLevel,
                 request.RequiredPermission,
                 request.RequiresApproval,
@@ -172,8 +215,8 @@ public sealed class UpsertToolDefinitionCommandHandler(
                 request.ProviderType,
                 request.TargetType,
                 request.TargetName,
-                request.InputSchemaJson,
-                request.OutputSchemaJson,
+                inputSchemaContract.CanonicalJson!,
+                outputSchemaContract.CanonicalJson!,
                 request.RiskLevel,
                 request.RequiredPermission,
                 request.RequiresApproval,
@@ -229,14 +272,35 @@ public sealed class ActivateToolDefinitionVersionCommandHandler(
             return Result.NotFound();
         }
 
+
+        var inputSchemaContract = ToolRegistrationInputContractPolicy.Validate(
+            tool.ToolCode,
+            tool.InputSchemaJson,
+            request.SchemaVersion ?? tool.SchemaVersion,
+            request.CatalogVersion ?? tool.CatalogVersion);
+        if (!inputSchemaContract.IsValid)
+        {
+            return Result.Invalid(inputSchemaContract.Error ?? "InputSchemaJson is outside the supported strict subset.");
+        }
+
+        var outputSchemaContract = ToolRegistrationOutputContractPolicy.Validate(
+            tool.ToolCode,
+            tool.OutputSchemaJson,
+            request.SchemaVersion ?? tool.SchemaVersion,
+            request.CatalogVersion ?? tool.CatalogVersion);
+        if (!outputSchemaContract.IsValid)
+        {
+            return Result.Invalid(outputSchemaContract.Error ?? "OutputSchemaJson is outside the supported strict subset.");
+        }
+
         tool.Update(
             tool.DisplayName,
             tool.Description,
             tool.ProviderType,
             tool.TargetType,
             tool.TargetName,
-            tool.InputSchemaJson,
-            tool.OutputSchemaJson,
+            inputSchemaContract.CanonicalJson!,
+            outputSchemaContract.CanonicalJson!,
             tool.RiskLevel,
             tool.RequiredPermission,
             tool.RequiresApproval,
@@ -266,6 +330,68 @@ public sealed class ActivateToolDefinitionVersionCommandHandler(
             cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
         return Result.Success(ToolRegistrationMapper.Map(tool, pluginCatalog));
+    }
+}
+
+internal static class ToolRegistrationInputContractPolicy
+{
+    public static ToolInputSchemaContractResult Validate(
+        string toolCode,
+        string? inputSchemaJson,
+        int schemaVersion,
+        int catalogVersion)
+    {
+        var contract = ToolInputSchemaContractV1.Validate(inputSchemaJson);
+        if (!contract.IsValid)
+        {
+            return contract;
+        }
+
+        var builtIn = BuiltInToolRegistrations.FindAgentRuntimeTool(toolCode);
+        if (builtIn is null)
+        {
+            return contract;
+        }
+
+        var frozen = ToolInputSchemaContractV1.Validate(builtIn.InputSchemaJson);
+        return frozen.IsValid &&
+               string.Equals(contract.CanonicalJson, frozen.CanonicalJson, StringComparison.Ordinal) &&
+               schemaVersion == builtIn.SchemaVersion &&
+               catalogVersion == builtIn.CatalogVersion
+            ? contract
+            : ToolInputSchemaContractResult.Failure(
+                $"Built-in tool '{toolCode}' must use its frozen catalog input schema/version.");
+    }
+}
+
+internal static class ToolRegistrationOutputContractPolicy
+{
+    public static ToolOutputSchemaContractResult Validate(
+        string toolCode,
+        string? outputSchemaJson,
+        int schemaVersion,
+        int catalogVersion)
+    {
+        var contract = ToolOutputSchemaContractV1.Validate(outputSchemaJson);
+        if (!contract.IsValid)
+        {
+            return contract;
+        }
+
+        var builtIn = BuiltInToolRegistrations.FindAgentRuntimeTool(toolCode);
+        if (builtIn is null)
+        {
+            return contract;
+        }
+
+        var frozen = ToolOutputSchemaContractV1.Validate(builtIn.OutputSchemaJson);
+        return frozen.IsValid &&
+               string.Equals(contract.CanonicalJson, frozen.CanonicalJson, StringComparison.Ordinal) &&
+               schemaVersion == builtIn.SchemaVersion &&
+               catalogVersion == builtIn.CatalogVersion
+            ? contract
+            : ToolOutputSchemaContractResult.Failure(
+                $"Built-in tool '{toolCode}' must use its frozen catalog output schema/version.");
     }
 }
 

@@ -1,6 +1,6 @@
 import { computed } from 'vue'
 import { useAgentWorkbench } from '@/composables/useAgentWorkbench'
-import type { AgentStep } from '@/types/protocols'
+import type { AgentStep, AgentTask } from '@/types/protocols'
 
 type AgentPlanPreviewStep = Partial<AgentStep> & {
   title?: string | null
@@ -11,9 +11,13 @@ type AgentPlanPreviewStep = Partial<AgentStep> & {
 }
 
 export type AgentPlanPreview = {
+  schemaVersion?: string
+  planDigest?: string
+  topologyProfile?: string
   planKind?: string
   isExecutable?: boolean
   capabilityGaps?: string[]
+  requestedCapabilityCodes?: string[]
   plannerMode?: string
   plannerFallbackReason?: string | null
   plannerToolCatalogVersion?: number
@@ -24,9 +28,9 @@ export type AgentPlanPreview = {
   approvalCheckpoints?: string[]
   forcedStepCodes?: string[]
   queryMode?: string | null
+  taskType?: string | null
   skillCode?: string | null
   skillName?: string | null
-  taskType?: string | null
   skillRoutingReason?: string | null
   dataSourceSummaries?: Array<{
     name?: string
@@ -48,7 +52,7 @@ export function parseAgentPlan(planJson?: string | null): AgentPlanPreview | nul
   if (!planJson) return null
   try {
     const parsed = JSON.parse(planJson) as AgentPlanPreview
-    return parsed && typeof parsed === 'object' ? parsed : null
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null
   } catch (error) {
     console.error('Failed to parse agent plan preview JSON.', error)
     return null
@@ -90,6 +94,45 @@ export function statusTone(type?: string) {
   return 'neutral'
 }
 
+export function isAgentPlanConfirmable(
+  task: Pick<AgentTask, 'planSchemaVersion' | 'planDigest' | 'topologyProfile' | 'planIntegrityStatus' | 'isPlanExecutable'> | null | undefined,
+  plan: AgentPlanPreview | null | undefined,
+  capabilityGaps: string[],
+) {
+  const hasCanonicalStringArray = (value: unknown, requireNonEmpty: boolean) => {
+    if (!Array.isArray(value) || value.some(item => typeof item !== 'string' || item.length === 0 || item.trim() !== item)) {
+      return false
+    }
+    const canonical = [...new Set(value)].sort((left, right) => left < right ? -1 : left > right ? 1 : 0)
+    return (!requireNonEmpty || value.length > 0) &&
+      canonical.length === value.length &&
+      canonical.every((item, index) => item === value[index])
+  }
+  const hasExecutableStepShape = Array.isArray(plan?.steps) &&
+    plan.steps.length > 0 &&
+    plan.steps.every(step => step !== null &&
+      typeof step === 'object' &&
+      typeof step.title === 'string' && step.title.trim().length > 0 &&
+      typeof step.description === 'string' && step.description.trim().length > 0 &&
+      typeof step.stepType === 'string' && step.stepType.trim().length > 0 &&
+      typeof step.toolCode === 'string' && step.toolCode.trim().length > 0)
+  return task?.planIntegrityStatus === 'ValidV2' &&
+    task.isPlanExecutable === false &&
+    task.planSchemaVersion === '2.0' &&
+    plan?.schemaVersion === '2.0' &&
+    task.topologyProfile === 'LinearV1' &&
+    plan?.topologyProfile === 'LinearV1' &&
+    /^[0-9a-f]{64}$/.test(task.planDigest ?? '') &&
+    task.planDigest === plan?.planDigest &&
+    plan?.planKind === 'PlanDraft' &&
+    plan?.isExecutable === false &&
+    hasCanonicalStringArray(plan?.capabilityGaps, false) &&
+    plan?.capabilityGaps?.length === 0 &&
+    hasCanonicalStringArray(plan?.requestedCapabilityCodes, true) &&
+    hasExecutableStepShape &&
+    capabilityGaps.length === 0
+}
+
 export function useAgentPlanPreview() {
   const { latestTask, taskSteps } = useAgentWorkbench()
 
@@ -109,9 +152,28 @@ export function useAgentPlanPreview() {
     return entries.length ? entries.map(([risk, count]) => `${risk}:${count}`).join(' / ') : '无风险摘要'
   })
   const latestPlanCapabilityGaps = computed(() =>
-    (latestPlan.value?.capabilityGaps ?? [])
-      .filter((item) => item && item.trim().length > 0)
+    !Array.isArray(latestPlan.value?.capabilityGaps) ||
+    latestPlan.value.capabilityGaps.some(item => typeof item !== 'string' || item.trim().length === 0)
+      ? ['plan_contract_incomplete']
+      : latestPlan.value.capabilityGaps
   )
+  const latestPlanSchemaVersion = computed(() =>
+    latestTask.value?.planSchemaVersion ?? latestPlan.value?.schemaVersion ?? null
+  )
+  const latestPlanDigest = computed(() =>
+    latestTask.value?.planDigest ?? latestPlan.value?.planDigest ?? null
+  )
+  const latestPlanTopologyProfile = computed(() =>
+    latestTask.value?.topologyProfile ?? latestPlan.value?.topologyProfile ?? null
+  )
+  const latestPlanIntegrityStatus = computed(() =>
+    latestTask.value?.planIntegrityStatus ?? 'Invalid'
+  )
+  const isPlanConfirmable = computed(() => isAgentPlanConfirmable(
+    latestTask.value,
+    latestPlan.value,
+    latestPlanCapabilityGaps.value,
+  ))
   const latestPlanKindLabel = computed(() => {
     if (!latestPlan.value) return '计划草案'
     if (latestPlan.value.planKind === 'ExecutablePlan' || latestPlan.value.isExecutable) {
@@ -143,8 +205,6 @@ export function useAgentPlanPreview() {
   )
   const latestPlanSource = computed(() =>
     sourceModeLabel(
-      latestPlan.value?.skillName ||
-      latestPlan.value?.skillCode ||
       latestPlanDataSource.value?.sourceLabel ||
       latestPlan.value?.plannerSafetySummary?.planSource ||
       latestPlanDataSource.value?.sourceMode ||
@@ -167,6 +227,11 @@ export function useAgentPlanPreview() {
     latestPlanVisibleToolCount,
     latestPlanRiskLine,
     latestPlanCapabilityGaps,
+    latestPlanSchemaVersion,
+    latestPlanDigest,
+    latestPlanTopologyProfile,
+    latestPlanIntegrityStatus,
+    isPlanConfirmable,
     latestPlanKindLabel,
     latestPlanSource,
     latestPlanIsCloudReadonly,

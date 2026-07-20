@@ -100,9 +100,12 @@ internal sealed class AgentTaskPlanPreparationService(
                 return Result.NotFound();
             }
 
-            if (selectedDataSources.Any(source => source.ExternalSystemType != DataSourceExternalSystemType.SimulationBusiness))
+            if (selectedDataSources.Any(source => source.ExternalSystemType is not (
+                    DataSourceExternalSystemType.SimulationBusiness or
+                    DataSourceExternalSystemType.CloudReadOnly)))
             {
-                return Result.Invalid("P3 dynamic planner data tasks can only use SimulationBusiness data sources.");
+                return Result.Invalid(
+                    "Governed agent data tasks require an explicitly authorized SimulationBusiness or CloudReadOnly data source.");
             }
         }
 

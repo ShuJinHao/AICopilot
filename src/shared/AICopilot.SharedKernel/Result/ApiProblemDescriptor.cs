@@ -42,6 +42,7 @@ public static class AppProblemCodes
     public const string ToolPermissionDenied = "tool_permission_denied";
     public const string ToolRequiresApproval = "tool_requires_approval";
     public const string ToolInputInvalid = "tool_input_invalid";
+    public const string ToolOutputSchemaInvalid = "tool_output_schema_invalid";
     public const string ToolExecutionTimeout = "tool_execution_timeout";
     public const string CloudReadonlyToolDisabled = "cloud_readonly_tool_disabled";
     public const string CloudReadonlyIntentUnsupported = "cloud_readonly_intent_unsupported";
@@ -51,6 +52,7 @@ public static class AppProblemCodes
     public const string AgentSkillSelectionRequired = "agent_skill_selection_required";
     public const string AgentPlanInvalid = "agent_plan_invalid";
     public const string PlanPayloadTooLarge = "plan_payload_too_large";
+    public const string EvidencePayloadTooLarge = "evidence_payload_too_large";
     public const string AgentPlanToolDenied = "agent_plan_tool_denied";
     public const string AgentPlanSchemaInvalid = "agent_plan_schema_invalid";
     public const string ToolExecutionNotFound = "tool_execution_not_found";

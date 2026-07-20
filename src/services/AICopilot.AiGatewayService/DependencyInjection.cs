@@ -54,6 +54,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<IAgentRuntimeSettingsProvider, AgentRuntimeSettingsProvider>();
         builder.Services.AddScoped<IAgentArtifactWorkspaceService, AgentArtifactWorkspaceService>();
         builder.Services.AddScoped<IAgentTaskRuntime, AgentTaskRuntime>();
+        builder.Services.AddScoped<IAgentPlanAuthorizationFreshVerifier, AgentPlanAuthorizationFreshVerifier>();
         builder.Services.AddScoped<IAgentTaskRunQueue, AgentTaskRunQueue>();
         builder.Services.AddScoped<AgentTaskDtoQueryService>();
         builder.Services.AddScoped<PlanAgentTaskCoordinator>();
@@ -97,10 +98,15 @@ public static class DependencyInjection
         builder.Services.AddScoped<SkillDefinitionGuard>();
         builder.Services.AddScoped<AgentPlanToolGuard>();
         builder.Services.AddScoped<AgentPlanDraftConfirmationService>();
+        builder.Services.AddScoped<AgentTaskPlanFreshReadGate>();
         builder.Services.AddSingleton<AgentPlanCanonicalizer>();
         builder.Services.AddSingleton<IAgentPlanIntegrityValidator>(provider =>
             provider.GetRequiredService<AgentPlanCanonicalizer>());
+        builder.Services.AddSingleton<IAgentTaskPlanPersistencePolicy, AgentTaskPlanPersistencePolicy>();
         builder.Services.AddSingleton<IntentResultToCandidateAdapter>();
+        builder.Services.AddSingleton(provider => new AgentPlanDraftContractAuthority(
+            provider.GetRequiredService<IntentResultToCandidateAdapter>(),
+            provider.GetRequiredService<AgentPlanCanonicalizer>()));
         builder.Services.AddScoped<AgentAuditRecorder>();
         builder.Services.TryAddSingleton<ISessionExecutionLock, InMemorySessionExecutionLock>();
         builder.Services.AddSingleton<IRequestValidator<ChatStreamRequest>, ChatStreamRequestValidator>();
@@ -129,6 +135,8 @@ public static class DependencyInjection
 
         builder.Services.AddScoped<IntentRoutingPromptComposer>();
         builder.Services.AddScoped<IntentRoutingAgentBuilder>();
+        builder.Services.AddScoped<IAgentRoutingConfigurationSnapshotReader>(services =>
+            services.GetRequiredService<IntentRoutingAgentBuilder>());
         builder.Services.AddScoped<DataAnalysisAgentBuilder>();
         builder.Services.AddScoped<ICloudReadOnlyTextToSqlGenerator, CloudReadOnlyLlmTextToSqlGenerator>();
 

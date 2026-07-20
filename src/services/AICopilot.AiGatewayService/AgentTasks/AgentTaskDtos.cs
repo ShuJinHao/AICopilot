@@ -1,6 +1,7 @@
 using AICopilot.AiGatewayService.Tools;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
+using System.Text.Json;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
 
@@ -61,7 +62,12 @@ public sealed record AgentTaskDto(
     bool IsRunInProgress = false,
     Guid? QueuedRunId = null,
     string? RunQueueStatus = null,
-    bool IsRunQueued = false);
+    bool IsRunQueued = false,
+    string? PlanSchemaVersion = null,
+    string? PlanDigest = null,
+    string? TopologyProfile = null,
+    bool IsPlanExecutable = false,
+    string PlanIntegrityStatus = "Invalid");
 
 public sealed record AgentTaskRunAttemptDto(
     Guid Id,
@@ -192,6 +198,10 @@ internal static class AgentTaskDtoMapper
         bool canApproveFinal = false,
         bool? canSubmitFinalReview = null)
     {
+        var planMetadata = AgentTaskPlanMetadataResolver.Resolve(task);
+        var hasExecutablePlan =
+            planMetadata.IntegrityStatus == AgentTaskPlanMetadataResolver.ValidV2 &&
+            planMetadata.IsExecutable;
         return new AgentTaskDto(
             task.Id,
             task.TaskCode,
@@ -215,20 +225,27 @@ internal static class AgentTaskDtoMapper
             workspaceCode,
             pendingApprovalCount,
             ResolveLastFailureReason(task),
-            task.Status is AgentTaskStatus.PlanApproved
+            hasExecutablePlan &&
+            task.Status is (AgentTaskStatus.PlanApproved
                 or AgentTaskStatus.Running
                 or AgentTaskStatus.GeneratingArtifacts
-                or AgentTaskStatus.WaitingToolApproval,
-            task.Status is AgentTaskStatus.Failed,
+                or AgentTaskStatus.WaitingToolApproval),
+            hasExecutablePlan && task.Status is AgentTaskStatus.Failed,
+            hasExecutablePlan &&
             task.Status is AgentTaskStatus.WorkspaceReady && (canSubmitFinalReview ?? true),
-            task.Status is AgentTaskStatus.WaitingFinalApproval && canApproveFinal,
+            hasExecutablePlan && task.Status is AgentTaskStatus.WaitingFinalApproval && canApproveFinal,
             AgentTaskFailureSummaryResolver.Resolve(task),
             task.ActiveRunAttemptId?.Value,
             task.RunAttemptCount,
             task.IsRunInProgress(DateTimeOffset.UtcNow),
             activeQueueItem?.Id.Value,
             activeQueueItem?.Status.ToString(),
-            activeQueueItem?.IsActive ?? false);
+            activeQueueItem?.IsActive ?? false,
+            planMetadata.SchemaVersion,
+            planMetadata.PlanDigest,
+            planMetadata.TopologyProfile,
+            planMetadata.IsExecutable,
+            planMetadata.IntegrityStatus);
     }
 
     private static AgentStepDto MapStep(AgentStep step)
@@ -256,6 +273,80 @@ internal static class AgentTaskDtoMapper
             .OrderByDescending(step => step.FinishedAt)
             .FirstOrDefault(step => step.Status == AgentStepStatus.Failed)
             ?.ErrorMessage;
+    }
+}
+
+internal sealed record AgentTaskPlanDtoMetadata(
+    string? SchemaVersion,
+    string? PlanDigest,
+    string? TopologyProfile,
+    bool IsExecutable,
+    string IntegrityStatus);
+
+internal static class AgentTaskPlanMetadataResolver
+{
+    public const string ValidV2 = "ValidV2";
+    public const string LegacyCompletedReadOnly = "LegacyCompletedReadOnly";
+    public const string Invalid = "Invalid";
+
+    public static AgentTaskPlanDtoMetadata Resolve(AgentTask task)
+    {
+        var validation = new AgentPlanCanonicalizer().ValidatePersisted(task.PlanJson);
+        if (validation.IsSuccess)
+        {
+            var metadata = validation.Value!;
+            return new AgentTaskPlanDtoMetadata(
+                metadata.SchemaVersion,
+                metadata.PlanDigest,
+                metadata.TopologyProfile,
+                metadata.IsExecutable,
+                ValidV2);
+        }
+
+        if (task.Status == AgentTaskStatus.Completed &&
+            task.CompletedAt is not null &&
+            IsLegacyV1(task.PlanJson))
+        {
+            return new AgentTaskPlanDtoMetadata(
+                AgentPlanContractVersions.LegacyV1,
+                null,
+                null,
+                false,
+                LegacyCompletedReadOnly);
+        }
+
+        return new AgentTaskPlanDtoMetadata(null, null, null, false, Invalid);
+    }
+
+    internal static bool IsLegacyV1(string planJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(planJson);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            if (root.TryGetProperty("schemaVersion", out var schemaVersion) &&
+                schemaVersion.ValueKind == JsonValueKind.String)
+            {
+                return string.Equals(
+                    schemaVersion.GetString(),
+                    AgentPlanContractVersions.LegacyV1,
+                    StringComparison.Ordinal);
+            }
+
+            return root.TryGetProperty("version", out var version) &&
+                   version.ValueKind == JsonValueKind.Number &&
+                   version.TryGetInt32(out var value) &&
+                   value == 1;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 }
 
@@ -358,13 +449,17 @@ internal static class AgentTaskFailureSummaryResolver
                           (task.Status == AgentTaskStatus.Rejected
                               ? "Agent task was rejected."
                               : "Agent task failed.");
+        var planMetadata = AgentTaskPlanMetadataResolver.Resolve(task);
+        var canRetry = task.Status == AgentTaskStatus.Failed &&
+                       planMetadata.IntegrityStatus == AgentTaskPlanMetadataResolver.ValidV2 &&
+                       planMetadata.IsExecutable;
 
         return new AgentTaskFailureSummaryDto(
             failedStep?.StepIndex,
             failedStep?.ToolCode ?? failedRecord?.ToolCode,
             errorCode,
             safeMessage,
-            task.Status == AgentTaskStatus.Failed,
-            task.Status == AgentTaskStatus.Failed ? "retry_after_fix" : "submit_new_plan");
+            canRetry,
+            canRetry ? "retry_after_fix" : "submit_new_plan");
     }
 }

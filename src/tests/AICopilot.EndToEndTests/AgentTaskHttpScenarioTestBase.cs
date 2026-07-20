@@ -114,6 +114,20 @@ public abstract class AgentTaskHttpScenarioTestBase : EndToEndScenarioTestBase
 
     protected async Task<AgentTaskDto> PostPlanStreamAsync(object payload)
     {
+        var chunks = await PostPlanStreamEventsAsync(payload);
+        var taskChunk = chunks.SingleOrDefault(chunk => chunk.Type == "AgentTask");
+        if (taskChunk is not null)
+        {
+            return JsonSerializer.Deserialize<AgentTaskDto>(taskChunk.Content, JsonOptions)!;
+        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"Plan stream completed without an AgentTask chunk. " +
+            $"Chunks={string.Join(" | ", chunks.Select(chunk => chunk.Type))}.");
+    }
+
+    protected async Task<List<ChatChunkDto>> PostPlanStreamEventsAsync(object payload)
+    {
         using var request = new HttpRequestMessage(HttpMethod.Post, "/api/aigateway/agent/task/plan-stream")
         {
             Content = JsonContent.Create(payload, options: JsonOptions)
@@ -127,6 +141,7 @@ public abstract class AgentTaskHttpScenarioTestBase : EndToEndScenarioTestBase
 
         await using var stream = await response.Content.ReadAsStreamAsync();
         using var reader = new StreamReader(stream);
+        var chunks = new List<ChatChunkDto>();
         var buffer = new StringBuilder();
 
         while (true)
@@ -152,11 +167,7 @@ public abstract class AgentTaskHttpScenarioTestBase : EndToEndScenarioTestBase
                 }
 
                 var chunk = JsonSerializer.Deserialize<ChatChunkDto>(data, JsonOptions)!;
-                if (chunk.Type == "AgentTask")
-                {
-                    return JsonSerializer.Deserialize<AgentTaskDto>(chunk.Content, JsonOptions)!;
-                }
-
+                chunks.Add(chunk);
                 continue;
             }
 
@@ -166,8 +177,7 @@ public abstract class AgentTaskHttpScenarioTestBase : EndToEndScenarioTestBase
             }
         }
 
-        throw new Xunit.Sdk.XunitException(
-            "Plan stream completed without an AgentTask chunk.");
+        return chunks;
     }
 
     protected async Task PostJsonExpectingStatusAsync(
@@ -260,7 +270,12 @@ public abstract class AgentTaskHttpScenarioTestBase : EndToEndScenarioTestBase
         bool IsRunInProgress = false,
         Guid? QueuedRunId = null,
         string? RunQueueStatus = null,
-        bool IsRunQueued = false);
+        bool IsRunQueued = false,
+        string? PlanSchemaVersion = null,
+        string? PlanDigest = null,
+        string? TopologyProfile = null,
+        bool IsPlanExecutable = false,
+        string PlanIntegrityStatus = "Invalid");
 
     protected sealed record AgentStepDto(
         Guid Id,

@@ -1,9 +1,39 @@
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
+using AICopilot.SharedKernel.Result;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
 
 internal static class AgentTaskPlanStepBuilder
 {
+    private static readonly string[] DefaultArtifactTypes =
+        ["chart", "html", "markdown", "pdf", "pptx", "xlsx"];
+
+    public static Result<IReadOnlySet<string>> ResolveArtifactTypes(
+        IReadOnlyCollection<string>? artifactTypes)
+    {
+        if (artifactTypes is null)
+        {
+            return Result.Success<IReadOnlySet<string>>(
+                new HashSet<string>(DefaultArtifactTypes, StringComparer.Ordinal));
+        }
+
+        var normalized = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var artifactType in artifactTypes)
+        {
+            var value = NormalizeArtifactType(artifactType);
+            if (value is null)
+            {
+                return Result.Failure(new ApiProblemDescriptor(
+                    AppProblemCodes.AgentPlanSchemaInvalid,
+                    "artifactTypes contains an unknown Plan v2 artifact target."));
+            }
+
+            normalized.Add(value);
+        }
+
+        return Result.Success<IReadOnlySet<string>>(normalized);
+    }
+
     public static IReadOnlyCollection<AgentStepPlanDto> EnsureMandatorySteps(
         IReadOnlyCollection<AgentStepPlanDto> steps,
         bool hasUploads,
@@ -87,7 +117,7 @@ internal static class AgentTaskPlanStepBuilder
 
         EnsureArtifactSteps(result, hasBusinessDataSources, normalizedArtifactTypes);
 
-        if (!ContainsTool(result, "finalize_artifacts"))
+        if (normalizedArtifactTypes is { Count: > 0 } && !ContainsTool(result, "finalize_artifacts"))
         {
             result.Add(new AgentStepPlanDto(
                 "确认最终产物",
@@ -148,17 +178,8 @@ internal static class AgentTaskPlanStepBuilder
 
     public static IReadOnlySet<string>? NormalizeArtifactTypes(IReadOnlyCollection<string>? artifactTypes)
     {
-        if (artifactTypes is null || artifactTypes.Count == 0)
-        {
-            return null;
-        }
-
-        var normalized = artifactTypes
-            .Select(NormalizeArtifactType)
-            .Where(item => item is not null)
-            .Select(item => item!)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return normalized.Count == 0 ? null : normalized;
+        var result = ResolveArtifactTypes(artifactTypes);
+        return result.IsSuccess ? result.Value : null;
     }
 
     private static void InsertBeforeOutputs(
@@ -200,6 +221,7 @@ internal static class AgentTaskPlanStepBuilder
             "generate_pdf" => artifactTypes.Contains("pdf"),
             "generate_pptx" => artifactTypes.Contains("pptx"),
             "generate_xlsx" => artifactTypes.Contains("xlsx"),
+            "finalize_artifacts" => artifactTypes.Count > 0,
             _ => true
         };
     }
@@ -209,20 +231,7 @@ internal static class AgentTaskPlanStepBuilder
         bool hasBusinessDataSources,
         IReadOnlySet<string>? artifactTypes)
     {
-        var hasPlannedOutputs = steps.Any(step =>
-            step.StepType is AgentStepType.ChartGeneration or AgentStepType.ArtifactGeneration);
-        if (artifactTypes is null && hasPlannedOutputs)
-        {
-            artifactTypes = hasBusinessDataSources
-                ? new HashSet<string>(["chart"], StringComparer.OrdinalIgnoreCase)
-                : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        }
-        else if (artifactTypes is null)
-        {
-            artifactTypes = hasBusinessDataSources
-                ? new HashSet<string>(["chart", "markdown"], StringComparer.OrdinalIgnoreCase)
-                : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        }
+        artifactTypes ??= new HashSet<string>(DefaultArtifactTypes, StringComparer.Ordinal);
 
         if (hasBusinessDataSources)
         {

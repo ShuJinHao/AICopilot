@@ -1,7 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
-using System.Text.Json;
+using System.Reflection;
+using System.Text;
+using System.Text.Json.Nodes;
 using AICopilot.Infrastructure.CloudRead;
+using AICopilot.SharedKernel.Result;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -33,6 +36,169 @@ public sealed class CloudAiReadClientContractTests
             method.Name == nameof(ICloudAiReadClient.GetDeviceLogsAsync) ||
             method.Name == nameof(ICloudAiReadClient.GetProductionRecordsAsync) ||
             method.Name == nameof(ICloudAiReadClient.QuerySemanticAsync));
+
+        AssertRequiredReferenceProperties<CloudAiReadDeviceDto>(
+            nameof(CloudAiReadDeviceDto.DeviceCode),
+            nameof(CloudAiReadDeviceDto.DeviceName),
+            nameof(CloudAiReadDeviceDto.AdditionalFields));
+        AssertRequiredValueProperties<CloudAiReadDeviceDto>(
+            nameof(CloudAiReadDeviceDto.DeviceId),
+            nameof(CloudAiReadDeviceDto.ProcessId));
+
+        AssertRequiredReferenceProperties<CloudAiReadProcessDto>(
+            nameof(CloudAiReadProcessDto.ProcessCode),
+            nameof(CloudAiReadProcessDto.ProcessName),
+            nameof(CloudAiReadProcessDto.AdditionalFields));
+        AssertRequiredValueProperties<CloudAiReadProcessDto>(nameof(CloudAiReadProcessDto.ProcessId));
+
+        AssertRequiredReferenceProperties<CloudAiReadClientReleaseVersionDto>(
+            nameof(CloudAiReadClientReleaseVersionDto.ComponentKind),
+            nameof(CloudAiReadClientReleaseVersionDto.ComponentKey),
+            nameof(CloudAiReadClientReleaseVersionDto.DisplayName),
+            nameof(CloudAiReadClientReleaseVersionDto.Channel),
+            nameof(CloudAiReadClientReleaseVersionDto.TargetRuntime),
+            nameof(CloudAiReadClientReleaseVersionDto.Version),
+            nameof(CloudAiReadClientReleaseVersionDto.Status),
+            nameof(CloudAiReadClientReleaseVersionDto.AdditionalFields));
+        AssertOptionalReferenceProperties<CloudAiReadClientReleaseVersionDto>(
+            nameof(CloudAiReadClientReleaseVersionDto.ReleaseNotes));
+        AssertRequiredValueProperties<CloudAiReadClientReleaseVersionDto>(
+            nameof(CloudAiReadClientReleaseVersionDto.ReleaseId),
+            nameof(CloudAiReadClientReleaseVersionDto.CreatedAtUtc));
+        AssertOptionalValueProperties<CloudAiReadClientReleaseVersionDto>(
+            nameof(CloudAiReadClientReleaseVersionDto.PublishedAtUtc),
+            nameof(CloudAiReadClientReleaseVersionDto.DeletedAtUtc));
+
+        AssertRequiredReferenceProperties<CloudAiReadDeviceClientStateDto>(
+            nameof(CloudAiReadDeviceClientStateDto.DeviceName),
+            nameof(CloudAiReadDeviceClientStateDto.ClientCode),
+            nameof(CloudAiReadDeviceClientStateDto.SoftwareStatus),
+            nameof(CloudAiReadDeviceClientStateDto.AdditionalFields));
+        AssertOptionalReferenceProperties<CloudAiReadDeviceClientStateDto>(
+            nameof(CloudAiReadDeviceClientStateDto.PrimaryIp),
+            nameof(CloudAiReadDeviceClientStateDto.Channel),
+            nameof(CloudAiReadDeviceClientStateDto.HostVersion),
+            nameof(CloudAiReadDeviceClientStateDto.HostApiVersion),
+            nameof(CloudAiReadDeviceClientStateDto.RuntimeStatus));
+        AssertRequiredValueProperties<CloudAiReadDeviceClientStateDto>(
+            nameof(CloudAiReadDeviceClientStateDto.DeviceId));
+        AssertOptionalValueProperties<CloudAiReadDeviceClientStateDto>(
+            nameof(CloudAiReadDeviceClientStateDto.VersionReportedAtUtc),
+            nameof(CloudAiReadDeviceClientStateDto.VersionReceivedAtUtc),
+            nameof(CloudAiReadDeviceClientStateDto.RuntimeStartedAtUtc),
+            nameof(CloudAiReadDeviceClientStateDto.LastRuntimeHeartbeatAtUtc),
+            nameof(CloudAiReadDeviceClientStateDto.UpdatedAtUtc));
+
+        AssertRequiredReferenceProperties<CloudAiReadCapacitySummaryDto>(
+            nameof(CloudAiReadCapacitySummaryDto.AdditionalFields));
+        AssertRequiredValueProperties<CloudAiReadCapacitySummaryDto>(
+            nameof(CloudAiReadCapacitySummaryDto.Date),
+            nameof(CloudAiReadCapacitySummaryDto.TotalCount),
+            nameof(CloudAiReadCapacitySummaryDto.OkCount),
+            nameof(CloudAiReadCapacitySummaryDto.NgCount),
+            nameof(CloudAiReadCapacitySummaryDto.DayShiftTotal),
+            nameof(CloudAiReadCapacitySummaryDto.NightShiftTotal));
+
+        AssertRequiredReferenceProperties<CloudAiReadCapacityHourlyDto>(
+            nameof(CloudAiReadCapacityHourlyDto.TimeLabel),
+            nameof(CloudAiReadCapacityHourlyDto.ShiftCode),
+            nameof(CloudAiReadCapacityHourlyDto.AdditionalFields));
+        AssertRequiredValueProperties<CloudAiReadCapacityHourlyDto>(
+            nameof(CloudAiReadCapacityHourlyDto.Time),
+            nameof(CloudAiReadCapacityHourlyDto.Date),
+            nameof(CloudAiReadCapacityHourlyDto.Hour),
+            nameof(CloudAiReadCapacityHourlyDto.Minute),
+            nameof(CloudAiReadCapacityHourlyDto.TotalCount),
+            nameof(CloudAiReadCapacityHourlyDto.OkCount),
+            nameof(CloudAiReadCapacityHourlyDto.NgCount),
+            nameof(CloudAiReadCapacityHourlyDto.OkRate));
+
+        AssertRequiredReferenceProperties<CloudAiReadDeviceLogDto>(
+            nameof(CloudAiReadDeviceLogDto.DeviceName),
+            nameof(CloudAiReadDeviceLogDto.Level),
+            nameof(CloudAiReadDeviceLogDto.Message),
+            nameof(CloudAiReadDeviceLogDto.AdditionalFields));
+        AssertRequiredValueProperties<CloudAiReadDeviceLogDto>(
+            nameof(CloudAiReadDeviceLogDto.LogId),
+            nameof(CloudAiReadDeviceLogDto.DeviceId),
+            nameof(CloudAiReadDeviceLogDto.LogTime),
+            nameof(CloudAiReadDeviceLogDto.ReceivedAt));
+
+        AssertRequiredReferenceProperties<CloudAiReadProductionFieldSchemaDto>(
+            nameof(CloudAiReadProductionFieldSchemaDto.Key),
+            nameof(CloudAiReadProductionFieldSchemaDto.Label),
+            nameof(CloudAiReadProductionFieldSchemaDto.Type),
+            nameof(CloudAiReadProductionFieldSchemaDto.AdditionalFields));
+        AssertOptionalReferenceProperties<CloudAiReadProductionFieldSchemaDto>(
+            nameof(CloudAiReadProductionFieldSchemaDto.Unit));
+        AssertRequiredValueProperties<CloudAiReadProductionFieldSchemaDto>(
+            nameof(CloudAiReadProductionFieldSchemaDto.Required));
+        AssertOptionalValueProperties<CloudAiReadProductionFieldSchemaDto>(
+            nameof(CloudAiReadProductionFieldSchemaDto.Precision));
+
+        AssertRequiredReferenceProperties<CloudAiReadProductionRecordDto>(
+            nameof(CloudAiReadProductionRecordDto.TypeKey),
+            nameof(CloudAiReadProductionRecordDto.TypeName),
+            nameof(CloudAiReadProductionRecordDto.DeviceName),
+            nameof(CloudAiReadProductionRecordDto.Fields),
+            nameof(CloudAiReadProductionRecordDto.FieldSchema),
+            nameof(CloudAiReadProductionRecordDto.AdditionalFields));
+        AssertOptionalReferenceProperties<CloudAiReadProductionRecordDto>(
+            nameof(CloudAiReadProductionRecordDto.Barcode),
+            nameof(CloudAiReadProductionRecordDto.Result));
+        AssertRequiredValueProperties<CloudAiReadProductionRecordDto>(
+            nameof(CloudAiReadProductionRecordDto.RecordId),
+            nameof(CloudAiReadProductionRecordDto.DeviceId));
+        AssertOptionalValueProperties<CloudAiReadProductionRecordDto>(
+            nameof(CloudAiReadProductionRecordDto.CompletedAt),
+            nameof(CloudAiReadProductionRecordDto.ReceivedAt));
+
+        AssertPropertyTypes<CloudAiReadDeviceDto>(
+            (nameof(CloudAiReadDeviceDto.DeviceId), typeof(Guid)),
+            (nameof(CloudAiReadDeviceDto.ProcessId), typeof(Guid)));
+        AssertPropertyTypes<CloudAiReadProcessDto>(
+            (nameof(CloudAiReadProcessDto.ProcessId), typeof(Guid)));
+        AssertPropertyTypes<CloudAiReadClientReleaseVersionDto>(
+            (nameof(CloudAiReadClientReleaseVersionDto.ReleaseId), typeof(Guid)),
+            (nameof(CloudAiReadClientReleaseVersionDto.CreatedAtUtc), typeof(DateTime)),
+            (nameof(CloudAiReadClientReleaseVersionDto.PublishedAtUtc), typeof(DateTime?)),
+            (nameof(CloudAiReadClientReleaseVersionDto.DeletedAtUtc), typeof(DateTime?)));
+        AssertPropertyTypes<CloudAiReadDeviceClientStateDto>(
+            (nameof(CloudAiReadDeviceClientStateDto.DeviceId), typeof(Guid)),
+            (nameof(CloudAiReadDeviceClientStateDto.VersionReportedAtUtc), typeof(DateTime?)),
+            (nameof(CloudAiReadDeviceClientStateDto.VersionReceivedAtUtc), typeof(DateTime?)),
+            (nameof(CloudAiReadDeviceClientStateDto.RuntimeStartedAtUtc), typeof(DateTime?)),
+            (nameof(CloudAiReadDeviceClientStateDto.LastRuntimeHeartbeatAtUtc), typeof(DateTime?)),
+            (nameof(CloudAiReadDeviceClientStateDto.UpdatedAtUtc), typeof(DateTime?)));
+        AssertPropertyTypes<CloudAiReadCapacitySummaryDto>(
+            (nameof(CloudAiReadCapacitySummaryDto.Date), typeof(DateOnly)),
+            (nameof(CloudAiReadCapacitySummaryDto.TotalCount), typeof(int)),
+            (nameof(CloudAiReadCapacitySummaryDto.OkCount), typeof(int)),
+            (nameof(CloudAiReadCapacitySummaryDto.NgCount), typeof(int)),
+            (nameof(CloudAiReadCapacitySummaryDto.DayShiftTotal), typeof(int)),
+            (nameof(CloudAiReadCapacitySummaryDto.NightShiftTotal), typeof(int)));
+        AssertPropertyTypes<CloudAiReadCapacityHourlyDto>(
+            (nameof(CloudAiReadCapacityHourlyDto.Time), typeof(DateTime)),
+            (nameof(CloudAiReadCapacityHourlyDto.Date), typeof(DateOnly)),
+            (nameof(CloudAiReadCapacityHourlyDto.Hour), typeof(int)),
+            (nameof(CloudAiReadCapacityHourlyDto.Minute), typeof(int)),
+            (nameof(CloudAiReadCapacityHourlyDto.TotalCount), typeof(int)),
+            (nameof(CloudAiReadCapacityHourlyDto.OkCount), typeof(int)),
+            (nameof(CloudAiReadCapacityHourlyDto.NgCount), typeof(int)),
+            (nameof(CloudAiReadCapacityHourlyDto.OkRate), typeof(decimal)));
+        AssertPropertyTypes<CloudAiReadDeviceLogDto>(
+            (nameof(CloudAiReadDeviceLogDto.LogId), typeof(Guid)),
+            (nameof(CloudAiReadDeviceLogDto.DeviceId), typeof(Guid)),
+            (nameof(CloudAiReadDeviceLogDto.LogTime), typeof(DateTime)),
+            (nameof(CloudAiReadDeviceLogDto.ReceivedAt), typeof(DateTime)));
+        AssertPropertyTypes<CloudAiReadProductionFieldSchemaDto>(
+            (nameof(CloudAiReadProductionFieldSchemaDto.Precision), typeof(int?)),
+            (nameof(CloudAiReadProductionFieldSchemaDto.Required), typeof(bool)));
+        AssertPropertyTypes<CloudAiReadProductionRecordDto>(
+            (nameof(CloudAiReadProductionRecordDto.RecordId), typeof(Guid)),
+            (nameof(CloudAiReadProductionRecordDto.DeviceId), typeof(Guid)),
+            (nameof(CloudAiReadProductionRecordDto.CompletedAt), typeof(DateTime?)),
+            (nameof(CloudAiReadProductionRecordDto.ReceivedAt), typeof(DateTime?)));
     }
 
     [Fact]
@@ -59,7 +225,7 @@ public sealed class CloudAiReadClientContractTests
         var result = await client.GetDevicesAsync(new CloudAiReadQuery(
             "列出设备",
             [],
-            CreateRange("2026-04-20T00:00:00Z", "2026-04-21T00:00:00Z"),
+            null,
             "deviceCode",
             false,
             20));
@@ -68,7 +234,7 @@ public sealed class CloudAiReadClientContractTests
         result.IsTruncated.Should().BeFalse();
         result.Items.Should().ContainSingle();
         result.Items[0].DeviceCode.Should().Be("DEV-001");
-        result.Items[0].ProcessId.Should().Be(ProcessId);
+        result.Items[0].ProcessId.Should().Be(Guid.Parse(ProcessId));
         result.AsOfUtc.Should().Be(DateTimeOffset.Parse(ProviderAsOfUtc));
         result.ProviderSource.Should().Be("devices");
         result.QueryScope.Should().Be("test=present");
@@ -207,7 +373,8 @@ public sealed class CloudAiReadClientContractTests
                             status = "Published",
                             releaseNotes = "history",
                             createdAtUtc = "2026-05-10T01:02:03Z",
-                            publishedAtUtc = "2026-05-11T01:02:03Z"
+                            publishedAtUtc = "2026-05-11T01:02:03Z",
+                            deletedAtUtc = (string?)null
                         }
                     },
                     rowCount: 1,
@@ -246,18 +413,36 @@ public sealed class CloudAiReadClientContractTests
     public async Task QuerySemantic_ShouldRouteProcessDetailThroughProcessesAndRequireUniqueExactMatch()
     {
         HttpRequestMessage? capturedRequest = null;
+        var sendCount = 0;
         using var httpClient = new HttpClient(new StubHandler(request =>
         {
+            sendCount++;
             capturedRequest = request;
+            object[] items = sendCount switch
+            {
+                1 => new object[]
+                {
+                    new { id = SecondProcessId, processCode = "CUT-OLD", processName = "旧模切" }
+                },
+                2 =>
+                [
+                    new { id = SecondProcessId, processCode = "CUT-OLD", processName = "旧模切" },
+                    new { id = ProcessId, processCode = "CUT", processName = "模切" }
+                ],
+                3 =>
+                [
+                    new { id = SecondProcessId, processCode = "CUT", processName = "模切" }
+                ],
+                _ =>
+                [
+                    new { id = ProcessId, processCode = "CUT", processName = "模切" }
+                ]
+            };
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = JsonContent.Create(CreateEnvelope(
-                    new object[]
-                    {
-                        new { id = SecondProcessId, processCode = "CUT-OLD", processName = "旧模切" },
-                        new { id = ProcessId, processCode = "CUT", processName = "模切" }
-                    },
-                    rowCount: 2,
+                    items,
+                    rowCount: items.Length,
                     source: "processes"))
             };
         }));
@@ -273,12 +458,59 @@ public sealed class CloudAiReadClientContractTests
             null,
             1);
 
+        var overLimitAction = () => client.QuerySemanticAsync(plan with { Limit = 101 });
+
+        var overLimitException = await overLimitAction.Should().ThrowAsync<CloudAiReadException>();
+        overLimitException.Which.Code.Should().Be(AppProblemCodes.CloudReadonlyIntentUnsupported);
+        overLimitException.Which.Message.Should().Be(
+            "Cloud readonly intent violates the frozen typed semantic plan contract.");
+        sendCount.Should().Be(0);
+
+        var keywordOnlyAction = () => client.QuerySemanticAsync(plan with
+        {
+            Filters = [new SemanticFilter("keyword", SemanticFilterOperator.Contains, "CUT")]
+        });
+        var keywordOnlyException = await keywordOnlyAction.Should().ThrowAsync<CloudAiReadException>();
+        keywordOnlyException.Which.Code.Should().Be(AppProblemCodes.CloudReadonlyIntentUnsupported);
+        keywordOnlyException.Which.Message.Should().Be(
+            "Cloud readonly intent violates the frozen typed semantic plan contract.");
+        sendCount.Should().Be(0);
+
+        var fuzzyOnlyAction = () => client.QuerySemanticAsync(plan);
+        var fuzzyOnlyException = await fuzzyOnlyAction.Should().ThrowAsync<CloudAiReadException>();
+        fuzzyOnlyException.Which.Code.Should().Be(CloudAiReadProblemCodes.MissingRequiredParameter);
+        sendCount.Should().Be(1);
+
         var result = await client.QuerySemanticAsync(plan);
 
         capturedRequest!.RequestUri!.AbsolutePath.Should().Be("/api/v1/ai/read/processes");
         ParseQuery(capturedRequest.RequestUri).Should().Contain("maxRows", "100");
+        sendCount.Should().Be(2);
         result.Rows.Should().ContainSingle().Which["processCode"].Should().Be("CUT");
         result.Limit.Should().Be(1);
+
+        var processIdPlan = plan with
+        {
+            Filters =
+            [
+                new SemanticFilter(
+                    "processId",
+                    SemanticFilterOperator.Equal,
+                    ProcessId)
+            ]
+        };
+        var mismatchedDirectAction = () => client.QuerySemanticAsync(processIdPlan);
+        var mismatchedDirectException = await mismatchedDirectAction.Should().ThrowAsync<CloudAiReadException>();
+        mismatchedDirectException.Which.Code.Should().Be(CloudAiReadProblemCodes.MissingRequiredParameter);
+        sendCount.Should().Be(3);
+
+        var directResult = await client.QuerySemanticAsync(processIdPlan);
+
+        var directQuery = ParseQuery(capturedRequest!.RequestUri!);
+        directQuery.Should().Contain("processId", ProcessId);
+        directQuery.Should().Contain("maxRows", "1");
+        sendCount.Should().Be(4);
+        directResult.Rows.Should().ContainSingle().Which["processId"].Should().Be(Guid.Parse(ProcessId));
     }
 
     [Fact]
@@ -337,8 +569,11 @@ public sealed class CloudAiReadClientContractTests
                             channel = "stable",
                             hostVersion = "1.2.3",
                             hostApiVersion = "2026.07",
+                            versionReportedAtUtc = (string?)null,
+                            versionReceivedAtUtc = (string?)null,
                             softwareStatus = "Running",
                             runtimeStatus = "Running",
+                            runtimeStartedAtUtc = (string?)null,
                             lastRuntimeHeartbeatAtUtc = "2026-05-11T01:02:03Z",
                             updatedAtUtc = "2026-05-11T01:02:03Z"
                         }
@@ -374,7 +609,8 @@ public sealed class CloudAiReadClientContractTests
         result.Items.Should().ContainSingle().Which.RuntimeStatus.Should().Be("Running");
         result.Items[0].SoftwareStatus.Should().Be("Running");
         result.Rows[0]["clientCode"].Should().Be("EDGE-001");
-        result.Items[0].LastRuntimeHeartbeatAtUtc.Should().Be(DateTimeOffset.Parse("2026-05-11T01:02:03Z"));
+        result.Items[0].LastRuntimeHeartbeatAtUtc.Should().Be(
+            new DateTime(2026, 5, 11, 1, 2, 3, DateTimeKind.Utc));
     }
 
     [Fact]
@@ -388,7 +624,7 @@ public sealed class CloudAiReadClientContractTests
         }));
         var client = CreateClient(httpClient);
 
-        await client.GetCapacitySummaryAsync(new CloudAiReadQuery(
+        var result = await client.GetCapacitySummaryAsync(new CloudAiReadQuery(
             "不要作为 queryText 发送",
             [
                 new CloudAiReadFilter("deviceId", "eq", DeviceId),
@@ -397,7 +633,7 @@ public sealed class CloudAiReadClientContractTests
             CreateRange("2026-04-20T01:02:03Z", "2026-04-21T04:05:06Z"),
             "occurredAt",
             true,
-            50));
+            200));
 
         capturedRequest.Should().NotBeNull();
         capturedRequest!.RequestUri!.AbsolutePath.Should().Be("/api/v1/ai/read/capacity/summary");
@@ -406,7 +642,8 @@ public sealed class CloudAiReadClientContractTests
         query.Should().Contain("startDate", "2026-04-20");
         query.Should().Contain("endDate", "2026-04-21");
         query.Should().Contain("plcName", "PLC-A");
-        query.Should().Contain("maxRows", "50");
+        query.Should().Contain("maxRows", "100");
+        result.Limit.Should().Be(100);
         AssertNoLegacyParameters(query);
     }
 
@@ -439,7 +676,7 @@ public sealed class CloudAiReadClientContractTests
         query.Should().Contain("deviceId", DeviceId);
         query.Should().Contain("startTime", "2026-04-20T00:00:00.0000000Z");
         query.Should().Contain("endTime", "2026-04-21T00:00:00.0000000Z");
-        query.Should().Contain("minLevel", "warn");
+        query.Should().Contain("minLevel", "WARN");
         query.Should().Contain("keyword", "overload");
         query.Should().NotContainKey("level");
         query.Should().Contain("maxRows", "30");
@@ -550,6 +787,12 @@ public sealed class CloudAiReadClientContractTests
                             deviceId = DeviceId,
                             deviceName = "叠片一号",
                             clientCode = "DEV-001",
+                            primaryIp = (string?)null,
+                            channel = (string?)null,
+                            hostVersion = (string?)null,
+                            hostApiVersion = (string?)null,
+                            versionReportedAtUtc = (string?)null,
+                            versionReceivedAtUtc = (string?)null,
                             softwareStatus = "Running",
                             runtimeStatus = "Running",
                             runtimeStartedAtUtc = "2026-07-10T01:00:00Z",
@@ -581,7 +824,8 @@ public sealed class CloudAiReadClientContractTests
         ParseQuery(requestUris[0]).Should().NotContainKey("deviceId");
         result.Rows.Should().ContainSingle().Which["runtimeStatus"].Should().Be("Running");
         result.Rows[0]["softwareStatus"].Should().Be("Running");
-        result.Rows[0]["lastRuntimeHeartbeatAtUtc"].Should().Be(DateTimeOffset.Parse("2026-07-10T01:02:00Z"));
+        result.Rows[0]["lastRuntimeHeartbeatAtUtc"].Should().Be(
+            new DateTime(2026, 7, 10, 1, 2, 0, DateTimeKind.Utc));
     }
 
     [Fact]
@@ -691,8 +935,40 @@ public sealed class CloudAiReadClientContractTests
                 Content = JsonContent.Create(CreateEnvelope(
                     new object[]
                     {
-                        new { deviceId = DeviceId, deviceName = "设备一", clientCode = "EDGE-001", softwareStatus = "Running", runtimeStatus = "Running", lastRuntimeHeartbeatAtUtc = "2026-07-10T01:02:00Z" },
-                        new { deviceId = SecondDeviceId, deviceName = "设备二", clientCode = "EDGE-002", softwareStatus = "MissingRuntimeHeartbeat", runtimeStatus = (string?)null, lastRuntimeHeartbeatAtUtc = (string?)null }
+                        new
+                        {
+                            deviceId = DeviceId,
+                            deviceName = "设备一",
+                            clientCode = "EDGE-001",
+                            primaryIp = (string?)null,
+                            channel = (string?)null,
+                            hostVersion = (string?)null,
+                            hostApiVersion = (string?)null,
+                            versionReportedAtUtc = (string?)null,
+                            versionReceivedAtUtc = (string?)null,
+                            softwareStatus = "Running",
+                            runtimeStatus = "Running",
+                            runtimeStartedAtUtc = (string?)null,
+                            lastRuntimeHeartbeatAtUtc = "2026-07-10T01:02:00Z",
+                            updatedAtUtc = (string?)null
+                        },
+                        new
+                        {
+                            deviceId = SecondDeviceId,
+                            deviceName = "设备二",
+                            clientCode = "EDGE-002",
+                            primaryIp = (string?)null,
+                            channel = (string?)null,
+                            hostVersion = (string?)null,
+                            hostApiVersion = (string?)null,
+                            versionReportedAtUtc = (string?)null,
+                            versionReceivedAtUtc = (string?)null,
+                            softwareStatus = "MissingRuntimeHeartbeat",
+                            runtimeStatus = (string?)null,
+                            runtimeStartedAtUtc = (string?)null,
+                            lastRuntimeHeartbeatAtUtc = (string?)null,
+                            updatedAtUtc = (string?)null
+                        }
                     },
                     rowCount: 2,
                     source: "device_client_states"))
@@ -829,10 +1105,29 @@ public sealed class CloudAiReadClientContractTests
                         barcode = "CELL-001",
                         result = "Pass",
                         completedAt = "2026-04-20T01:02:03Z",
-                        fields = new { pressure = 12.5m },
+                        receivedAt = (string?)null,
+                        fields = new
+                        {
+                            pressure = 12.5m,
+                            sequenceNo = 7,
+                            largeSequence = 9223372036854775808m,
+                            enabled = true,
+                            capturedAt = "2026-04-20T01:02:03Z",
+                            mode = "Auto",
+                            trayCode = "TRAY-001",
+                            optionalNote = (string?)null
+                        },
                         fieldSchema = new[]
                         {
-                            new { key = "pressure", label = "压力", type = "number", unit = "N", precision = 1, required = true }
+                            new { key = "pressure", label = "压力", type = "number", unit = (string?)"N", precision = (int?)1, required = true },
+                            new { key = "sequenceNo", label = "序号", type = "integer", unit = (string?)null, precision = (int?)null, required = true },
+                            new { key = "largeSequence", label = "大整数", type = "integer", unit = (string?)null, precision = (int?)null, required = true },
+                            new { key = "enabled", label = "启用", type = "boolean", unit = (string?)null, precision = (int?)null, required = true },
+                            new { key = "capturedAt", label = "采集时间", type = "datetime", unit = (string?)null, precision = (int?)null, required = true },
+                            new { key = "mode", label = "模式", type = "enum", unit = (string?)null, precision = (int?)null, required = true },
+                            new { key = "trayCode", label = "托盘码", type = "string", unit = (string?)null, precision = (int?)null, required = true },
+                            new { key = "optionalNote", label = "备注", type = "string", unit = (string?)null, precision = (int?)null, required = false },
+                            new { key = "omittedCount", label = "可省略必填字段", type = "integer", unit = (string?)null, precision = (int?)null, required = true }
                         }
                     }
                 },
@@ -855,7 +1150,11 @@ public sealed class CloudAiReadClientContractTests
         result.Items.Should().ContainSingle();
         result.Items[0].TypeKey.Should().Be("stacking");
         result.Items[0].Fields.Should().ContainKey("pressure");
-        result.Items[0].FieldSchema.Should().ContainSingle().Which.Key.Should().Be("pressure");
+        result.Items[0].Fields.Should().ContainKey("optionalNote");
+        result.Items[0].Fields["optionalNote"].Should().BeNull();
+        result.Items[0].Fields.Should().NotContainKey("omittedCount");
+        result.Items[0].FieldSchema.Should().HaveCount(9);
+        result.Items[0].FieldSchema[0].Key.Should().Be("pressure");
         result.Rows[0].Should().NotContainKey("processName");
         result.Rows[0].Should().NotContainKey("stationName");
         result.Rows[0]["fields"].Should().BeAssignableTo<IReadOnlyDictionary<string, object?>>();
@@ -908,7 +1207,8 @@ public sealed class CloudAiReadClientContractTests
 
         var exception = await act.Should().ThrowAsync<CloudAiReadException>();
         exception.Which.Code.Should().Be(CloudAiReadProblemCodes.MissingRequiredParameter);
-        exception.Which.Message.Should().Contain("deviceId");
+        exception.Which.Message.Should().Be("Cloud AiRead operation 'CapacitySummary' received a duplicate or unsupported typed filter.");
+        exception.Which.Message.Should().NotContain("DEV-001");
         sendCount.Should().Be(0);
     }
 
@@ -1046,6 +1346,12 @@ public sealed class CloudAiReadClientContractTests
         var exception = await act.Should().ThrowAsync<CloudAiReadException>();
         exception.Which.Code.Should().Be(CloudAiReadProblemCodes.Unavailable);
         exception.Which.Message.Should().Contain("invalid provider contract");
+
+        if (caseId == "legacy-data")
+        {
+            await AssertMalformedProviderEnvelopeMetadataAsync();
+            await AssertMalformedProviderItemMatrixAsync();
+        }
     }
 
     [Fact]
@@ -1114,6 +1420,504 @@ public sealed class CloudAiReadClientContractTests
         };
     }
 
+    private static async Task AssertMalformedProviderItemMatrixAsync()
+    {
+        var cases = new[]
+        {
+            new MalformedEndpointCase(
+                "devices",
+                $$"""{"id":"{{DeviceId}}","deviceCode":"DEV-001","deviceName":"Device 1","processId":"{{ProcessId}}"}""",
+                "deviceCode",
+                "id",
+                "42",
+                static async client =>
+                {
+                    _ = await client.GetDevicesAsync(CreateUnscopedQuery());
+                }),
+            new MalformedEndpointCase(
+                "processes",
+                $$"""{"id":"{{ProcessId}}","processCode":"PROC-001","processName":"Process 1"}""",
+                "processName",
+                "processCode",
+                "false",
+                static async client =>
+                {
+                    _ = await client.GetProcessesAsync(CreateUnscopedQuery());
+                }),
+            new MalformedEndpointCase(
+                "client-releases",
+                $$"""{"id":"{{ReleaseId}}","componentKind":"EdgeHost","componentKey":"edge-host","displayName":"Edge Host","channel":"stable","targetRuntime":"win-x64","version":"1.0.0","status":"Published","releaseNotes":null,"createdAtUtc":"2026-07-10T01:02:03Z","publishedAtUtc":null,"deletedAtUtc":null}""",
+                "status",
+                "createdAtUtc",
+                "123",
+                static async client =>
+                {
+                    _ = await client.GetClientReleasesAsync(CreateUnscopedQuery());
+                }),
+            new MalformedEndpointCase(
+                "device-client-states",
+                $$"""{"deviceId":"{{DeviceId}}","deviceName":"Device 1","clientCode":"EDGE-001","primaryIp":null,"channel":null,"hostVersion":null,"hostApiVersion":null,"versionReportedAtUtc":null,"versionReceivedAtUtc":null,"softwareStatus":"Running","runtimeStatus":null,"runtimeStartedAtUtc":null,"lastRuntimeHeartbeatAtUtc":null,"updatedAtUtc":null}""",
+                "softwareStatus",
+                "softwareStatus",
+                "[]",
+                static async client =>
+                {
+                    _ = await client.GetDeviceClientStatesAsync(CreateUnscopedQuery());
+                }),
+            new MalformedEndpointCase(
+                "capacity-summary",
+                """{"date":"2026-07-10","totalCount":10,"okCount":9,"ngCount":1,"dayShiftTotal":6,"nightShiftTotal":4}""",
+                "ngCount",
+                "totalCount",
+                "\"opaque-provider-item-secret-number\"",
+                static async client =>
+                {
+                    _ = await client.GetCapacitySummaryAsync(CreateCapacitySummaryQuery());
+                }),
+            new MalformedEndpointCase(
+                "capacity-hourly",
+                """{"time":"2026-07-10T01:00:00Z","date":"2026-07-10","hour":1,"minute":0,"timeLabel":"01:00","shiftCode":"DAY","totalCount":10,"okCount":9,"ngCount":1,"okRate":0.9}""",
+                "shiftCode",
+                "hour",
+                "\"opaque-provider-item-secret-integer\"",
+                static async client =>
+                {
+                    _ = await client.GetCapacityHourlyAsync(CreateCapacityHourlyQuery());
+                }),
+            new MalformedEndpointCase(
+                "device-logs",
+                $$"""{"id":"dddddddd-dddd-dddd-dddd-dddddddddddd","deviceId":"{{DeviceId}}","deviceName":"Device 1","level":"WARN","message":"warning","logTime":"2026-07-10T01:00:00Z","receivedAt":"2026-07-10T01:00:01Z"}""",
+                "message",
+                "logTime",
+                "{}",
+                static async client =>
+                {
+                    _ = await client.GetDeviceLogsAsync(CreateDeviceLogQuery());
+                }),
+            new MalformedEndpointCase(
+                "production-records",
+                $$"""{"recordId":"eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee","typeKey":"stacking","typeName":"Stacking","deviceId":"{{DeviceId}}","deviceName":"Device 1","barcode":null,"result":null,"completedAt":null,"receivedAt":null,"fields":{},"fieldSchema":[{"key":"pressure","label":"Pressure","type":"number","unit":null,"precision":1,"required":true}]}""",
+                "typeName",
+                "fields",
+                "[]",
+                static async client =>
+                {
+                    _ = await client.GetProductionRecordsAsync(CreateProductionRecordQuery());
+                })
+        };
+
+        foreach (var endpoint in cases)
+        {
+            await AssertInvalidProviderItemAsync(
+                endpoint.Invoke,
+                "\"opaque-provider-item-secret-non-object\"");
+            await AssertInvalidProviderItemAsync(
+                endpoint.Invoke,
+                RemoveProperty(endpoint.ValidItemJson, endpoint.RequiredProperty));
+            await AssertInvalidProviderItemAsync(
+                endpoint.Invoke,
+                ReplaceProperty(endpoint.ValidItemJson, endpoint.RequiredProperty, "null"));
+            await AssertInvalidProviderItemAsync(
+                endpoint.Invoke,
+                ReplaceProperty(
+                    endpoint.ValidItemJson,
+                    endpoint.WrongTypeProperty,
+                    endpoint.WrongTypeJson));
+        }
+
+        var devices = cases.Single(endpoint => endpoint.Name == "devices");
+        await AssertInvalidProviderItemAsync(
+            devices.Invoke,
+            ReplaceProperty(devices.ValidItemJson, "id", "\"not-a-guid\""));
+        await AssertInvalidProviderItemAsync(
+            devices.Invoke,
+            AddProperty(
+                devices.ValidItemJson,
+                "unknownProviderField",
+                "\"opaque-provider-item-secret-unknown\""));
+        await AssertInvalidProviderItemAsync(
+            devices.Invoke,
+            AppendRawProperty(devices.ValidItemJson, "deviceCode", "\"duplicate\""));
+        await AssertInvalidProviderItemAsync(
+            devices.Invoke,
+            AppendRawProperty(devices.ValidItemJson, "DeviceCode", "\"case-collision\""));
+
+        var releases = cases.Single(endpoint => endpoint.Name == "client-releases");
+        await AssertInvalidProviderItemAsync(
+            releases.Invoke,
+            RemoveProperty(releases.ValidItemJson, "releaseNotes"));
+        await AssertInvalidProviderItemAsync(
+            releases.Invoke,
+            ReplaceProperty(releases.ValidItemJson, "createdAtUtc", "\"2026-99-99T25:61:61Z\""));
+
+        var capacitySummary = cases.Single(endpoint => endpoint.Name == "capacity-summary");
+        await AssertInvalidProviderItemAsync(
+            capacitySummary.Invoke,
+            ReplaceProperty(capacitySummary.ValidItemJson, "date", "\"2026-02-30\""));
+        await AssertInvalidProviderItemAsync(
+            capacitySummary.Invoke,
+            ReplaceProperty(capacitySummary.ValidItemJson, "totalCount", "1.5"));
+        await AssertInvalidProviderItemAsync(
+            capacitySummary.Invoke,
+            ReplaceProperty(capacitySummary.ValidItemJson, "totalCount", "2147483648"));
+
+        var capacityHourly = cases.Single(endpoint => endpoint.Name == "capacity-hourly");
+        await AssertInvalidProviderItemAsync(
+            capacityHourly.Invoke,
+            ReplaceProperty(capacityHourly.ValidItemJson, "okRate", "1e1000"));
+
+        var production = cases.Single(endpoint => endpoint.Name == "production-records");
+        var deviceClientStates = cases.Single(endpoint => endpoint.Name == "device-client-states");
+        await AssertInvalidProviderItemAsync(
+            deviceClientStates.Invoke,
+            RemoveProperty(deviceClientStates.ValidItemJson, "primaryIp"));
+        await AssertInvalidProviderItemAsync(
+            production.Invoke,
+            RemoveProperty(production.ValidItemJson, "barcode"));
+        await AssertInvalidProviderItemAsync(
+            production.Invoke,
+            ReplaceProperty(production.ValidItemJson, "fields", "{\"pressure\":{\"nested\":1}}"));
+        await AssertInvalidProviderItemAsync(
+            production.Invoke,
+            production.ValidItemJson.Replace(
+                "\"fields\":{}",
+                "\"fields\":{\"pressure\":1,\"pressure\":2}",
+                StringComparison.Ordinal));
+        await AssertInvalidProviderItemAsync(
+            production.Invoke,
+            production.ValidItemJson.Replace(
+                "\"fields\":{}",
+                "\"fields\":{\"pressure\":1,\"Pressure\":2}",
+                StringComparison.Ordinal));
+        await AssertInvalidProviderItemAsync(
+            production.Invoke,
+            ReplaceProperty(production.ValidItemJson, "fieldSchema", "[42]"));
+        await AssertInvalidProviderItemAsync(
+            production.Invoke,
+            ReplaceProperty(production.ValidItemJson, "fields", "{\"unknownField\":1}"));
+        await AssertInvalidProviderItemAsync(
+            production.Invoke,
+            ReplaceProperty(production.ValidItemJson, "fields", "{\"pressure\":null}"));
+
+        var duplicateSchemaKey = """
+            [
+              {"key":"pressure","label":"Pressure","type":"number","unit":null,"precision":1,"required":true},
+              {"key":"pressure","label":"Pressure Copy","type":"number","unit":null,"precision":1,"required":false}
+            ]
+            """;
+        await AssertInvalidProviderItemAsync(
+            production.Invoke,
+            ReplaceProperty(production.ValidItemJson, "fieldSchema", duplicateSchemaKey));
+        await AssertInvalidProviderItemAsync(
+            production.Invoke,
+            ReplaceProperty(
+                production.ValidItemJson,
+                "fieldSchema",
+                duplicateSchemaKey.Replace("\"key\":\"pressure\",\"label\":\"Pressure Copy\"", "\"key\":\"Pressure\",\"label\":\"Pressure Copy\"", StringComparison.Ordinal)));
+
+        foreach (var invalidTypedRecord in new[]
+                 {
+                     WithProductionFieldContract(production.ValidItemJson, "integer", "1.5"),
+                     WithProductionFieldContract(production.ValidItemJson, "integer", "1e1000"),
+                     WithProductionFieldContract(production.ValidItemJson, "number", "1e1000"),
+                     WithProductionFieldContract(production.ValidItemJson, "boolean", "\"true\""),
+                     WithProductionFieldContract(production.ValidItemJson, "string", "true"),
+                     WithProductionFieldContract(production.ValidItemJson, "datetime", "\"not-a-date\""),
+                     WithProductionFieldContract(production.ValidItemJson, "enum", "42"),
+                     WithProductionFieldContract(production.ValidItemJson, "date", "\"2026-07-10\"")
+                 })
+        {
+            await AssertInvalidProviderItemAsync(production.Invoke, invalidTypedRecord);
+        }
+
+        foreach (var invalidFieldKey in new[] { "pressure.value", "pressure_value", "Pressure" })
+        {
+            await AssertInvalidProviderItemAsync(
+                production.Invoke,
+                WithProductionFieldKey(production.ValidItemJson, invalidFieldKey));
+        }
+
+        var productionNestedMissing = JsonNode.Parse(production.ValidItemJson)!.AsObject();
+        productionNestedMissing["fieldSchema"]!.AsArray()[0]!.AsObject()
+            .Remove("required")
+            .Should().BeTrue();
+        await AssertInvalidProviderItemAsync(
+            production.Invoke,
+            productionNestedMissing.ToJsonString());
+
+        var productionNestedNullableMissing = JsonNode.Parse(production.ValidItemJson)!.AsObject();
+        productionNestedNullableMissing["fieldSchema"]!.AsArray()[0]!.AsObject()
+            .Remove("unit")
+            .Should().BeTrue();
+        await AssertInvalidProviderItemAsync(
+            production.Invoke,
+            productionNestedNullableMissing.ToJsonString());
+
+        var productionNestedWrongType = JsonNode.Parse(production.ValidItemJson)!.AsObject();
+        productionNestedWrongType["fieldSchema"]!.AsArray()[0]!.AsObject()["required"] =
+            "opaque-provider-item-secret-required";
+        await AssertInvalidProviderItemAsync(
+            production.Invoke,
+            productionNestedWrongType.ToJsonString());
+
+        var productionNestedNull = JsonNode.Parse(production.ValidItemJson)!.AsObject();
+        productionNestedNull["fieldSchema"]!.AsArray()[0]!.AsObject()["required"] = null;
+        await AssertInvalidProviderItemAsync(
+            production.Invoke,
+            productionNestedNull.ToJsonString());
+
+        await AssertInvalidProviderItemAsync(
+            production.Invoke,
+            production.ValidItemJson.Replace(
+                "\"required\":true",
+                "\"required\":true,\"required\":false",
+                StringComparison.Ordinal));
+        await AssertInvalidProviderItemAsync(
+            production.Invoke,
+            production.ValidItemJson.Replace(
+                "\"required\":true",
+                "\"required\":true,\"Required\":false",
+                StringComparison.Ordinal));
+
+        await AssertInvalidProviderItemAsync(
+            static async client =>
+            {
+                _ = await client.GetDevicesAsync(
+                    new CloudAiReadQuery(null, [], null, null, false, 1));
+            },
+            devices.ValidItemJson,
+            "\"opaque-provider-item-secret-after-limit\"");
+    }
+
+    private static async Task AssertMalformedProviderEnvelopeMetadataAsync()
+    {
+        var payloads = new[]
+        {
+            $$"""{"items":[],"asOfUtc":"{{ProviderAsOfUtc}}","source":"devices","queryScope":"","rowCount":0,"truncated":false}""",
+            $$"""{"items":[],"asOfUtc":"{{ProviderAsOfUtc}}","source":"devices","queryScope":"","rowCount":1,"truncated":false,"nextCursor":null}""",
+            $$"""{"items":[],"asOfUtc":"{{ProviderAsOfUtc}}","source":"devices","queryScope":"","rowCount":0,"truncated":false,"nextCursor":false}"""
+        };
+
+        foreach (var payload in payloads)
+        {
+            using var httpClient = new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(payload, Encoding.UTF8, "application/json")
+            }));
+            var client = CreateClient(httpClient);
+
+            var action = () => client.GetDevicesAsync(CreateUnscopedQuery());
+
+            var exception = await action.Should().ThrowAsync<CloudAiReadException>();
+            exception.Which.Code.Should().Be(CloudAiReadProblemCodes.Unavailable);
+            exception.Which.Message.Should().Be(
+                "Cloud AiRead endpoint returned an invalid provider contract.");
+        }
+    }
+
+    private static async Task AssertInvalidProviderItemAsync(
+        Func<CloudAiReadClient, Task> invoke,
+        params string[] itemJsons)
+    {
+        var payload = $$"""
+            {"items":[{{string.Join(',', itemJsons)}}],"asOfUtc":"{{ProviderAsOfUtc}}","source":"test_source","queryScope":"test=present","rowCount":{{itemJsons.Length}},"truncated":false,"nextCursor":null}
+            """;
+        using var httpClient = new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(payload, Encoding.UTF8, "application/json")
+        }));
+        var client = CreateClient(httpClient);
+
+        var action = () => invoke(client);
+
+        var exception = await action.Should().ThrowAsync<CloudAiReadException>();
+        exception.Which.Code.Should().Be(CloudAiReadProblemCodes.Unavailable);
+        exception.Which.Message.Should().Be(
+            "Cloud AiRead endpoint returned an invalid provider contract.");
+        exception.Which.Message.Should().NotContain("opaque-provider-item-secret");
+    }
+
+    private static string RemoveProperty(string itemJson, string propertyName)
+    {
+        var item = JsonNode.Parse(itemJson)!.AsObject();
+        item.Remove(propertyName).Should().BeTrue();
+        return item.ToJsonString();
+    }
+
+    private static string ReplaceProperty(
+        string itemJson,
+        string propertyName,
+        string replacementJson)
+    {
+        var item = JsonNode.Parse(itemJson)!.AsObject();
+        item.ContainsKey(propertyName).Should().BeTrue();
+        item[propertyName] = JsonNode.Parse(replacementJson);
+        return item.ToJsonString();
+    }
+
+    private static string AddProperty(
+        string itemJson,
+        string propertyName,
+        string propertyJson)
+    {
+        var item = JsonNode.Parse(itemJson)!.AsObject();
+        item.ContainsKey(propertyName).Should().BeFalse();
+        item[propertyName] = JsonNode.Parse(propertyJson);
+        return item.ToJsonString();
+    }
+
+    private static string AppendRawProperty(
+        string itemJson,
+        string propertyName,
+        string propertyJson)
+    {
+        itemJson.Should().EndWith("}");
+        return $"{itemJson[..^1]},\"{propertyName}\":{propertyJson}}}";
+    }
+
+    private static string WithProductionFieldContract(
+        string itemJson,
+        string fieldType,
+        string fieldValueJson)
+    {
+        var withType = itemJson.Replace(
+            "\"type\":\"number\"",
+            $"\"type\":\"{fieldType}\"",
+            StringComparison.Ordinal);
+        return withType.Replace(
+            "\"fields\":{}",
+            $"\"fields\":{{\"pressure\":{fieldValueJson}}}",
+            StringComparison.Ordinal);
+    }
+
+    private static string WithProductionFieldKey(string itemJson, string fieldKey)
+    {
+        var withSchemaKey = itemJson.Replace(
+            "\"key\":\"pressure\"",
+            $"\"key\":\"{fieldKey}\"",
+            StringComparison.Ordinal);
+        return withSchemaKey.Replace(
+            "\"fields\":{}",
+            $"\"fields\":{{\"{fieldKey}\":1}}",
+            StringComparison.Ordinal);
+    }
+
+    private static CloudAiReadQuery CreateUnscopedQuery()
+    {
+        return new CloudAiReadQuery(null, [], null, null, false, 10);
+    }
+
+    private static CloudAiReadQuery CreateCapacitySummaryQuery()
+    {
+        return new CloudAiReadQuery(
+            null,
+            [new CloudAiReadFilter("deviceId", "eq", DeviceId)],
+            CreateRange("2026-07-10T00:00:00Z", "2026-07-10T23:59:59Z"),
+            null,
+            false,
+            10);
+    }
+
+    private static CloudAiReadQuery CreateCapacityHourlyQuery()
+    {
+        return new CloudAiReadQuery(
+            null,
+            [
+                new CloudAiReadFilter("deviceId", "eq", DeviceId),
+                new CloudAiReadFilter("date", "eq", "2026-07-10")
+            ],
+            null,
+            null,
+            false,
+            10);
+    }
+
+    private static CloudAiReadQuery CreateDeviceLogQuery()
+    {
+        return new CloudAiReadQuery(
+            null,
+            [
+                new CloudAiReadFilter("deviceId", "eq", DeviceId),
+                new CloudAiReadFilter("preset", "eq", "last_24h")
+            ],
+            null,
+            null,
+            false,
+            10);
+    }
+
+    private static CloudAiReadQuery CreateProductionRecordQuery()
+    {
+        return new CloudAiReadQuery(
+            null,
+            [
+                new CloudAiReadFilter("deviceId", "eq", DeviceId),
+                new CloudAiReadFilter("preset", "eq", "last_24h")
+            ],
+            null,
+            null,
+            false,
+            10);
+    }
+
+    private static void AssertRequiredReferenceProperties<T>(params string[] propertyNames)
+    {
+        var nullability = new NullabilityInfoContext();
+        foreach (var propertyName in propertyNames)
+        {
+            var property = GetProperty<T>(propertyName);
+            property.PropertyType.IsValueType.Should().BeFalse();
+            nullability.Create(property).ReadState.Should().Be(NullabilityState.NotNull);
+        }
+    }
+
+    private static void AssertOptionalReferenceProperties<T>(params string[] propertyNames)
+    {
+        var nullability = new NullabilityInfoContext();
+        foreach (var propertyName in propertyNames)
+        {
+            var property = GetProperty<T>(propertyName);
+            property.PropertyType.IsValueType.Should().BeFalse();
+            nullability.Create(property).ReadState.Should().Be(NullabilityState.Nullable);
+        }
+    }
+
+    private static void AssertRequiredValueProperties<T>(params string[] propertyNames)
+    {
+        foreach (var propertyName in propertyNames)
+        {
+            var property = GetProperty<T>(propertyName);
+            property.PropertyType.IsValueType.Should().BeTrue();
+            Nullable.GetUnderlyingType(property.PropertyType).Should().BeNull();
+        }
+    }
+
+    private static void AssertOptionalValueProperties<T>(params string[] propertyNames)
+    {
+        foreach (var propertyName in propertyNames)
+        {
+            var property = GetProperty<T>(propertyName);
+            property.PropertyType.IsValueType.Should().BeTrue();
+            Nullable.GetUnderlyingType(property.PropertyType).Should().NotBeNull();
+        }
+    }
+
+    private static void AssertPropertyTypes<T>(
+        params (string PropertyName, Type ExpectedType)[] properties)
+    {
+        foreach (var property in properties)
+        {
+            GetProperty<T>(property.PropertyName).PropertyType.Should().Be(property.ExpectedType);
+        }
+    }
+
+    private static PropertyInfo GetProperty<T>(string propertyName)
+    {
+        return typeof(T).GetProperty(propertyName)
+               ?? throw new InvalidOperationException(
+                   $"{typeof(T).Name} is missing property '{propertyName}'.");
+    }
+
     private static Dictionary<string, string> ParseQuery(Uri uri)
     {
         return uri.Query
@@ -1152,4 +1956,12 @@ public sealed class CloudAiReadClientContractTests
             return Task.FromResult(handler(request));
         }
     }
+
+    private sealed record MalformedEndpointCase(
+        string Name,
+        string ValidItemJson,
+        string RequiredProperty,
+        string WrongTypeProperty,
+        string WrongTypeJson,
+        Func<CloudAiReadClient, Task> Invoke);
 }

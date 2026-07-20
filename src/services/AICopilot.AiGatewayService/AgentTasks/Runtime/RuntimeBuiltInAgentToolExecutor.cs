@@ -11,6 +11,7 @@ internal sealed class RuntimeBuiltInAgentToolExecutor(
     {
         return tool.ProviderType is ToolProviderType.BuiltIn or ToolProviderType.Artifact or ToolProviderType.CloudReadonly &&
                tool.TargetType == ToolRegistrationTargetType.AgentRuntime &&
+               !BuiltInToolRegistrations.IsLifecycleCheckpoint(tool.ToolCode) &&
                string.Equals(tool.TargetName, "AgentTaskRuntime", StringComparison.OrdinalIgnoreCase);
     }
 

@@ -471,7 +471,7 @@ function Write-ReconciliationFixture {
 function Write-WebAndDeploymentReconciliationFixture {
     param(
         [Parameter(Mandatory)] [string]$Root,
-        [int]$VitestCount = 165,
+        [int]$VitestCount = 168,
         [int]$PlaywrightCount = 43,
         [int]$DeploymentCount = 33
     )
@@ -1369,7 +1369,7 @@ public sealed class FixtureBoundaryTests
     } 'expected=2, discovered=1'
 
     Write-ReconciliationFixture -Root $reconciliationRoot -Total 1 -Executed 1 -Passed 1
-    Write-WebAndDeploymentReconciliationFixture -Root $reconciliationRoot -VitestCount 164
+    Write-WebAndDeploymentReconciliationFixture -Root $reconciliationRoot -VitestCount 167
     Assert-Fails {
         & $reconciliationScript `
             -RepositoryRoot $reconciliationRoot `
@@ -1378,7 +1378,7 @@ public sealed class FixtureBoundaryTests
             -VitestPath 'artifacts/test-results/vitest.json' `
             -PlaywrightPath 'artifacts/test-results/playwright.json' `
             -DeploymentPath 'artifacts/test-results/deployment-behavior.log'
-    } 'Vitest reconciliation failed: expected=165, discovered=164'
+    } 'Vitest reconciliation failed: expected=168, discovered=167'
 
     Write-WebAndDeploymentReconciliationFixture -Root $reconciliationRoot -PlaywrightCount 42
     Assert-Fails {

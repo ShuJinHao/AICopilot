@@ -40,6 +40,27 @@ describe('chatErrorStore', () => {
         code: 'agent_skill_selection_required',
       }),
     ).toBe('无法自动识别合适的 Skill，请补充任务目标或手动选择 Skill 后重试。')
+
+    expect(
+      resolveChatErrorMessage({
+        code: 'plan_payload_too_large',
+        detail: 'raw plan must never be rendered',
+      }),
+    ).toBe('计划内容超过固定大小上限，请缩小目标范围或减少产物后重新生成。')
+
+    expect(
+      resolveChatErrorMessage({
+        code: 'evidence_payload_too_large',
+      }),
+    ).toBe('证据载荷超过固定大小上限，请缩小查询或分批生成。')
+
+    expect(
+      resolveChatErrorMessage({
+        code: 'tool_output_schema_invalid',
+        detail: 'provider raw output must never be rendered',
+      }),
+    ).toBe('工具输出与注册契约不一致，本次执行未记为成功，结果不可用于后续审批或完成，请联系管理员检查工具配置。')
+
   })
 
   it('scopes active errors to the current session', () => {

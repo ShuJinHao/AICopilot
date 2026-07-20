@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.Json.Serialization;
 using AICopilot.AiGatewayService.Agents;
 using AICopilot.AiGatewayService.Models;
 using AICopilot.AiGatewayService.Safety;
@@ -31,7 +32,11 @@ public sealed record PlanAgentTaskStreamRequest(
     string? PlannerMode = null,
     bool ForceStaticPlanner = false,
     string? SkillCode = null,
-    IReadOnlyCollection<string>? PreferredToolCodes = null) : IStreamRequest<ChatChunk>;
+    IReadOnlyCollection<string>? PreferredToolCodes = null,
+    AgentPluginSelectionMode? PluginSelectionMode = null,
+    IReadOnlyCollection<Guid>? SelectedPluginIds = null,
+    AgentCapabilitySelectionMode? CapabilitySelectionMode = null,
+    IReadOnlyCollection<string>? RequestedCapabilityCodes = null) : IStreamRequest<ChatChunk>;
 
 public sealed class PlanAgentTaskStreamHandler(
     IReadRepository<Session> sessionRepository,
@@ -52,6 +57,19 @@ public sealed class PlanAgentTaskStreamHandler(
         PlanAgentTaskStreamRequest request,
         [EnumeratorCancellation] CancellationToken ct)
     {
+        var retiredSelection = AgentPlanRetiredSelectionContract.Validate(
+            request.SkillCode,
+            request.PreferredToolCodes);
+        if (retiredSelection is not null)
+        {
+            yield return AgentStreamRuntime.CreateErrorChunk(
+                retiredSelection.Code,
+                retiredSelection.Detail,
+                Source,
+                AgentPlanRetiredSelectionContract.UserFacingMessage);
+            yield break;
+        }
+
         var assistantText = new StringBuilder();
         var assistantRenderChunks = new List<ChatChunk>();
         var pendingMessages = new List<SessionMessageAppend>();
@@ -163,12 +181,7 @@ public sealed class PlanAgentTaskStreamHandler(
 
         if (failure != null)
         {
-            var failureEventChunk = CreateAgentEventChunk(
-                "plan_draft_failed",
-                "PlanDraft generation failed before a valid draft could be produced.",
-                recoverable: true,
-                code: AppProblemCodes.ChatStreamFailed,
-                suggestedAction: "Retry plan draft generation after checking model and session state.");
+            var failureEventChunk = CreateFailureEventChunk(failure);
             assistantRenderChunks.Add(failureEventChunk);
             yield return failureEventChunk;
 
@@ -193,7 +206,28 @@ public sealed class PlanAgentTaskStreamHandler(
 
         if (pendingMessages.Count > 0)
         {
-            await messagePersistenceService.AppendBatchAsync(request.SessionId, pendingMessages, ct);
+            Exception? appendFailure = null;
+            try
+            {
+                await messagePersistenceService.AppendBatchAsync(request.SessionId, pendingMessages, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                yield break;
+            }
+            catch (Exception exception)
+            {
+                appendFailure = exception;
+            }
+
+            if (appendFailure is not null)
+            {
+                yield return AgentStreamRuntime.CreateErrorChunk(
+                    appendFailure,
+                    Source,
+                    AppProblemCodes.ChatStreamFailed,
+                    "计划消息保存失败，请刷新后重试。");
+            }
         }
     }
 
@@ -258,16 +292,7 @@ public sealed class PlanAgentTaskStreamHandler(
         var result = await sender.Send(ToCommand(request), ct);
         if (!result.IsSuccess || result.Value is null)
         {
-            var problem = result.Errors?.OfType<ApiProblemDescriptor>().FirstOrDefault();
-            yield return CreateAgentEventChunk(
-                "plan_draft_failed",
-                problem?.Detail
-                    ?? result.Errors?.Select(error => error?.ToString())
-                        .FirstOrDefault(message => !string.IsNullOrWhiteSpace(message))
-                    ?? "PlanDraft generation failed.",
-                recoverable: true,
-                code: problem?.Code ?? AppProblemCodes.AgentPlanInvalid,
-                suggestedAction: "Adjust the goal or model configuration, then retry PlanDraft generation.");
+            yield return CreateFailureEventChunk(result);
             yield return CreateProblemChunk(assistantText, result);
             yield break;
         }
@@ -280,7 +305,11 @@ public sealed class PlanAgentTaskStreamHandler(
             {
                 ["taskId"] = result.Value.Id.ToString(),
                 ["status"] = result.Value.Status,
-                ["planKind"] = "PlanDraft"
+                ["planKind"] = "PlanDraft",
+                ["schemaVersion"] = result.Value.PlanSchemaVersion ?? string.Empty,
+                ["planDigest"] = result.Value.PlanDigest ?? string.Empty,
+                ["topologyProfile"] = result.Value.TopologyProfile ?? string.Empty,
+                ["isExecutable"] = result.Value.IsPlanExecutable.ToString().ToLowerInvariant()
             });
         yield return CreateTextChunk(assistantText, summary);
         yield return new ChatChunk(Source, ChunkType.AgentTask, result.Value.ToJson());
@@ -303,7 +332,11 @@ public sealed class PlanAgentTaskStreamHandler(
             request.PlannerMode,
             request.ForceStaticPlanner,
             request.SkillCode,
-            request.PreferredToolCodes);
+            request.PreferredToolCodes,
+            request.PluginSelectionMode,
+            request.SelectedPluginIds,
+            request.CapabilitySelectionMode,
+            request.RequestedCapabilityCodes);
     }
 
     private static ChatChunk CreateTextChunk(StringBuilder assistantText, string content)
@@ -332,19 +365,64 @@ public sealed class PlanAgentTaskStreamHandler(
                 metadata ?? new Dictionary<string, string>()).ToJson());
     }
 
-    private static ChatChunk CreateProblemChunk(StringBuilder assistantText, Result<AgentTaskDto> result)
+    internal static ChatChunk CreateProblemChunk(StringBuilder assistantText, Result<AgentTaskDto> result)
     {
-        var problem = result.Errors?.OfType<ApiProblemDescriptor>().FirstOrDefault();
-        var detail = problem?.Detail
-            ?? result.Errors?.Select(error => error?.ToString())
-                .FirstOrDefault(message => !string.IsNullOrWhiteSpace(message))
-            ?? "计划草案生成失败。";
+        var failure = ResolvePlanDraftFailure(result);
         return AgentStreamRuntime.CreateErrorChunk(
             assistantText,
-            problem?.Code ?? AppProblemCodes.AgentPlanInvalid,
-            detail,
+            failure.Code,
+            failure.Detail,
             Source,
-            detail);
+            failure.UserFacingMessage);
+    }
+
+    internal static ChatChunk CreateFailureEventChunk(Result<AgentTaskDto> result)
+    {
+        var failure = ResolvePlanDraftFailure(result);
+        return CreateAgentEventChunk(
+            "plan_draft_failed",
+            failure.Detail,
+            recoverable: true,
+            code: failure.Code,
+            suggestedAction: "Adjust the goal or model configuration, then retry PlanDraft generation.");
+    }
+
+    internal static ChatChunk CreateFailureEventChunk(Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+        var planFailure = AgentStreamRuntime.ResolvePlanPersistenceDisclosure(exception);
+        return CreateAgentEventChunk(
+            "plan_draft_failed",
+            planFailure?.Detail ?? "PlanDraft generation failed before a valid draft could be produced.",
+            recoverable: true,
+            code: planFailure?.Code ?? AppProblemCodes.ChatStreamFailed,
+            suggestedAction: "Retry plan draft generation after checking model and session state.");
+    }
+
+    private static PlanDraftFailureProjection ResolvePlanDraftFailure(Result<AgentTaskDto> result)
+    {
+        var errors = result.Errors?.ToArray();
+        var publicPlanFailure = AgentPlanPublicFailureDisclosurePolicy.ResolveResultErrors(errors);
+        if (publicPlanFailure is not null)
+        {
+            return new PlanDraftFailureProjection(
+                publicPlanFailure.Disclosure.Code,
+                publicPlanFailure.Disclosure.Detail,
+                publicPlanFailure.Disclosure.UserFacingMessage);
+        }
+
+        var problem = errors?.OfType<ApiProblemDescriptor>().FirstOrDefault();
+        if (problem is null)
+        {
+            var defaultFailure = AgentPlanPublicFailureDisclosurePolicy.Resolve(
+                AppProblemCodes.AgentPlanInvalid)!;
+            return new PlanDraftFailureProjection(
+                defaultFailure.Code,
+                defaultFailure.Detail,
+                defaultFailure.UserFacingMessage);
+        }
+
+        return new PlanDraftFailureProjection(problem.Code, problem.Detail, problem.Detail);
     }
 
     private static string BuildPlanSummary(AgentTaskDto task)
@@ -356,10 +434,15 @@ public sealed class PlanAgentTaskStreamHandler(
     }
 
     private sealed record PlanAgentTaskStreamEvent(
-        string Stage,
-        string? Code,
+        [property: JsonPropertyName("stage")] string Stage,
+        [property: JsonPropertyName("code")] string? Code,
+        [property: JsonPropertyName("detail")] string Detail,
+        [property: JsonPropertyName("recoverable")] bool Recoverable,
+        [property: JsonPropertyName("suggestedAction")] string? SuggestedAction,
+        [property: JsonPropertyName("metadata")] IReadOnlyDictionary<string, string> Metadata);
+
+    private sealed record PlanDraftFailureProjection(
+        string Code,
         string Detail,
-        bool Recoverable,
-        string? SuggestedAction,
-        IReadOnlyDictionary<string, string> Metadata);
+        string UserFacingMessage);
 }

@@ -10,9 +10,17 @@ using AICopilot.SharedKernel.Repository;
 
 namespace AICopilot.AiGatewayService.Agents;
 
-public class IntentRoutingAgentBuilder
+public interface IAgentRoutingConfigurationSnapshotReader
+{
+    Task<RuntimeAgentConfigurationSnapshot> ReadCurrentAsync(
+        CancellationToken cancellationToken = default);
+}
+
+public class IntentRoutingAgentBuilder : IAgentRoutingConfigurationSnapshotReader
 {
     private const string AgentName = "IntentRoutingAgent";
+    internal const int RoutingMaxOutputTokens = 512;
+    internal const float RoutingTemperature = 0;
 
     private readonly ConfiguredAgentRuntimeFactory _agentFactory;
     private readonly IKnowledgeBaseReadService _knowledgeBaseReadService;
@@ -125,28 +133,57 @@ public class IntentRoutingAgentBuilder
 
     public async Task<ScopedRuntimeAgent> BuildAsync()
     {
+        var intentInventory = await BuildIntentInventoryAsync();
+        string ComposeInstructions(string systemPrompt) => ComposeRoutingInstructions(systemPrompt, intentInventory);
+        var activeRoutingModel = await _routingModelResolver.ResolveActiveModelAsync();
+        var agent = activeRoutingModel is null
+            ? await _agentFactory.CreateAgentAsync(AgentName, ComposeInstructions, ConfigureRoutingOptions)
+            : await _agentFactory.CreateAgentAsync(AgentName, activeRoutingModel, ComposeInstructions, ConfigureRoutingOptions);
+
+        if (agent.ConfigurationSnapshot is not { } snapshot)
+        {
+            await agent.DisposeAsync();
+            throw new InvalidOperationException("Intent routing runtime did not expose its authoritative configuration snapshot.");
+        }
+
+        _executionMetadataAccessor.SetRoutingConfiguration(snapshot);
+        return agent;
+    }
+
+    public async Task<RuntimeAgentConfigurationSnapshot> ReadCurrentAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var intentInventory = await BuildIntentInventoryAsync();
+        string ComposeInstructions(string systemPrompt) => ComposeRoutingInstructions(systemPrompt, intentInventory);
+        var activeRoutingModel = await _routingModelResolver.ResolveActiveModelAsync();
+        return await _agentFactory.ReadConfigurationSnapshotAsync(
+            AgentName,
+            activeRoutingModel,
+            ComposeInstructions,
+            ConfigureRoutingOptions,
+            cancellationToken);
+    }
+
+    private async Task<string> BuildIntentInventoryAsync()
+    {
         var intents = new StringBuilder();
         intents.Append(await GetSkillIntentListAsync());
         intents.Append(GetToolIntentList());
         intents.Append(await GetKnowledgeIntentListAsync());
         intents.Append(GetBusinessPolicyIntentList());
         intents.Append(await GetDataAnalysisIntentListAsync());
+        return intents.ToString();
+    }
 
-        string ComposeInstructions(string systemPrompt)
-        {
-            return systemPrompt.Replace("{{$IntentList}}", intents.ToString());
-        }
+    private static string ComposeRoutingInstructions(string systemPrompt, string intentInventory)
+    {
+        return systemPrompt.Replace("{{$IntentList}}", intentInventory, StringComparison.Ordinal);
+    }
 
-        var activeRoutingModel = await _routingModelResolver.ResolveActiveModelAsync();
-        var agent = activeRoutingModel is null
-            ? await _agentFactory.CreateAgentAsync(AgentName, ComposeInstructions)
-            : await _agentFactory.CreateAgentAsync(AgentName, activeRoutingModel, ComposeInstructions);
-
-        if (activeRoutingModel is not null)
-        {
-            _executionMetadataAccessor.SetRoutingModel(activeRoutingModel);
-        }
-
-        return agent;
+    private static void ConfigureRoutingOptions(AiChatOptions options)
+    {
+        options.MaxOutputTokens = RoutingMaxOutputTokens;
+        options.Temperature = RoutingTemperature;
+        options.Tools = [];
     }
 }

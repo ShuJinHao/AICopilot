@@ -6,9 +6,11 @@ namespace AICopilot.Infrastructure.CloudRead;
 
 internal static class CloudAiReadJsonValueReader
 {
-    public static IReadOnlyList<JsonElement> ExtractRecords(JsonElement root, int limit)
+    public static IReadOnlyList<JsonElement> ExtractRecords(
+        JsonElement root,
+        int limit,
+        CloudAiReadOperation operation)
     {
-        var effectiveLimit = Math.Max(1, limit);
         if (root.ValueKind != JsonValueKind.Object
             || !root.TryGetProperty("items", out var items)
             || items.ValueKind != JsonValueKind.Array)
@@ -16,7 +18,11 @@ internal static class CloudAiReadJsonValueReader
             throw InvalidProviderContract();
         }
 
-        return items.EnumerateArray().Take(effectiveLimit).Select(item => item.Clone()).ToArray();
+        var records = items.EnumerateArray().Select(item => item.Clone()).ToArray();
+        CloudAiReadProviderItemContractValidator.Validate(operation, records);
+        return records
+            .Take(CloudAiReadRowLimitPolicy.Normalize(limit))
+            .ToArray();
     }
 
     public static CloudAiReadEnvelopeMetadata ReadEnvelopeMetadata(JsonElement root)
@@ -26,11 +32,7 @@ internal static class CloudAiReadJsonValueReader
             || items.ValueKind != JsonValueKind.Array
             || !root.TryGetProperty("asOfUtc", out var asOfUtcElement)
             || asOfUtcElement.ValueKind != JsonValueKind.String
-            || !DateTimeOffset.TryParse(
-                asOfUtcElement.GetString(),
-                CultureInfo.InvariantCulture,
-                DateTimeStyles.AssumeUniversal,
-                out var asOfUtc)
+            || !asOfUtcElement.TryGetDateTimeOffset(out var asOfUtc)
             || !root.TryGetProperty("source", out var sourceElement)
             || sourceElement.ValueKind != JsonValueKind.String
             || string.IsNullOrWhiteSpace(sourceElement.GetString())
@@ -40,24 +42,18 @@ internal static class CloudAiReadJsonValueReader
             || rowCountElement.ValueKind != JsonValueKind.Number
             || !rowCountElement.TryGetInt32(out var rowCount)
             || rowCount < 0
+            || items.GetArrayLength() != rowCount
             || !root.TryGetProperty("truncated", out var truncatedElement)
-            || truncatedElement.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            || truncatedElement.ValueKind is not (JsonValueKind.True or JsonValueKind.False)
+            || !root.TryGetProperty("nextCursor", out var nextCursorElement)
+            || nextCursorElement.ValueKind is not (JsonValueKind.String or JsonValueKind.Null))
         {
             throw InvalidProviderContract();
         }
 
-        string? nextCursor = null;
-        if (root.TryGetProperty("nextCursor", out var nextCursorElement))
-        {
-            if (nextCursorElement.ValueKind == JsonValueKind.String)
-            {
-                nextCursor = nextCursorElement.GetString();
-            }
-            else if (nextCursorElement.ValueKind != JsonValueKind.Null)
-            {
-                throw InvalidProviderContract();
-            }
-        }
+        var nextCursor = nextCursorElement.ValueKind == JsonValueKind.String
+            ? nextCursorElement.GetString()
+            : null;
 
         return new CloudAiReadEnvelopeMetadata(
             asOfUtc.ToUniversalTime(),
@@ -89,6 +85,45 @@ internal static class CloudAiReadJsonValueReader
         }
 
         return null;
+    }
+
+    public static string GetRequiredString(JsonElement record, string name)
+    {
+        return record.GetProperty(name).GetString()!;
+    }
+
+    public static Guid GetRequiredGuid(JsonElement record, string name)
+    {
+        return Guid.Parse(record.GetProperty(name).GetString()!);
+    }
+
+    public static DateOnly GetRequiredDateOnly(JsonElement record, string name)
+    {
+        return DateOnly.ParseExact(
+            record.GetProperty(name).GetString()!,
+            "yyyy-MM-dd",
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.None);
+    }
+
+    public static DateTime GetRequiredDate(JsonElement record, string name)
+    {
+        return record.GetProperty(name).GetDateTime();
+    }
+
+    public static int GetRequiredInt(JsonElement record, string name)
+    {
+        return record.GetProperty(name).GetInt32();
+    }
+
+    public static decimal GetRequiredDecimal(JsonElement record, string name)
+    {
+        return record.GetProperty(name).GetDecimal();
+    }
+
+    public static bool GetRequiredBoolean(JsonElement record, string name)
+    {
+        return record.GetProperty(name).GetBoolean();
     }
 
     public static decimal? GetDecimal(JsonElement record, params string[] names)
@@ -139,7 +174,7 @@ internal static class CloudAiReadJsonValueReader
         return null;
     }
 
-    public static DateTimeOffset? GetDate(JsonElement record, params string[] names)
+    public static DateTime? GetDate(JsonElement record, params string[] names)
     {
         foreach (var name in names)
         {
@@ -148,8 +183,7 @@ internal static class CloudAiReadJsonValueReader
                 continue;
             }
 
-            if (property.ValueKind == JsonValueKind.String &&
-                DateTimeOffset.TryParse(property.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed))
+            if (property.ValueKind == JsonValueKind.String && property.TryGetDateTime(out var parsed))
             {
                 return parsed;
             }
@@ -205,7 +239,7 @@ internal static class CloudAiReadJsonValueReader
         return [];
     }
 
-    private static CloudAiReadException InvalidProviderContract()
+    internal static CloudAiReadException InvalidProviderContract()
         => new(
             CloudAiReadProblemCodes.Unavailable,
             "Cloud AiRead endpoint returned an invalid provider contract.");

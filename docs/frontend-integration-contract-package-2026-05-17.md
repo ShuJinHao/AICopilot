@@ -8,6 +8,8 @@ For structured chat error chunks, frontend displays `userFacingMessage` first, t
 
 For HTTP `ProblemDetails`, `extensions.code` and `extensions.traceId` are reserved. The backend copies ordinary descriptor extensions first, then overwrites these reserved keys with `ApiProblemDescriptor.Code` and the current `HttpContext.TraceIdentifier`; descriptor extensions cannot spoof either value.
 
+For `agent_plan_invalid`, `agent_plan_schema_invalid`, and `plan_payload_too_large`, the backend owns fixed `detail` and `userFacingMessage` values across REST, SSE, AgentEvent, and queued-run projections. These plan failures drop every incoming extension except an exact non-empty GUID `taskId`; a multi-error result selects the first publicly disclosable plan descriptor rather than leaking an earlier internal error. `AgentEvent` JSON uses the exact camelCase fields `stage`, `code`, `detail`, `recoverable`, `suggestedAction`, and `metadata`.
+
 ## Auth Problem Codes
 
 | Code | Meaning |
@@ -62,8 +64,10 @@ For HTTP `ProblemDetails`, `extensions.code` and `extensions.traceId` are reserv
 | `agent_skill_selection_required` | Agent plan requires a selected or auto-routed Skill. |
 | `agent_plan_invalid` | Agent plan is invalid. |
 | `plan_payload_too_large` | Canonical Plan v2 payload exceeds the fixed 262,144-byte UTF-8 limit and was not persisted. |
+| `evidence_payload_too_large` | Inline canonical Evidence payload exceeds the fixed 65,536-byte UTF-8 limit and was not accepted. |
 | `agent_plan_tool_denied` | Agent plan requested a denied tool. |
 | `agent_plan_schema_invalid` | Agent plan schema is invalid. |
+| `tool_output_schema_invalid` | Tool output failed its closed schema or durable-output contract; the execution was not recorded as successful and provider raw output was not persisted. |
 | `tool_execution_not_found` | Tool execution record was not found. |
 | `artifact_finalized` | Artifact is finalized and cannot be modified. |
 | `artifact_generation_failed` | Artifact generation failed. |

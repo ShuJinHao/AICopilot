@@ -1,4 +1,8 @@
+using System.Net;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Reflection;
+using System.Text;
 using System.Text.Json;
 using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.AiGatewayService.Tools;
@@ -158,6 +162,95 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
         {
             AssertProblemDetailsResponses(document, path, method);
         }
+
+        fixture.HttpClient.DefaultRequestHeaders.Authorization = null;
+        using var loginResponse = await fixture.HttpClient.PostAsJsonAsync(
+            "/api/identity/login",
+            new
+            {
+                username = fixture.BootstrapAdminUserName,
+                password = fixture.BootstrapAdminPassword
+            });
+        loginResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var loginDocument = JsonDocument.Parse(await loginResponse.Content.ReadAsStringAsync());
+        fixture.HttpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            loginDocument.RootElement.GetProperty("token").GetString());
+
+        try
+        {
+            var sessionId = Guid.NewGuid();
+            var validPayload = $$"""
+            {
+              "sessionId": "{{sessionId:D}}",
+              "goal": "生成只读计划草案",
+              "taskType": "ReportGeneration",
+              "pluginSelectionMode": "BuiltInOnly",
+              "selectedPluginIds": [],
+              "capabilitySelectionMode": "InferredFromGoal",
+              "requestedCapabilityCodes": []
+            }
+            """;
+            var invalidSelectionPayloads = new[]
+            {
+                validPayload.Replace(
+                    "\"pluginSelectionMode\": \"BuiltInOnly\"",
+                    "\"pluginSelectionMode\": 1",
+                    StringComparison.Ordinal),
+                validPayload.Replace(
+                    "\"pluginSelectionMode\": \"BuiltInOnly\"",
+                    "\"pluginSelectionMode\": \"Unknown\"",
+                    StringComparison.Ordinal),
+                validPayload.Replace(
+                    "\"capabilitySelectionMode\": \"InferredFromGoal\"",
+                    "\"capabilitySelectionMode\": 1",
+                    StringComparison.Ordinal),
+                validPayload.Replace(
+                    "\"capabilitySelectionMode\": \"InferredFromGoal\"",
+                    "\"capabilitySelectionMode\": \"Unknown\"",
+                    StringComparison.Ordinal)
+            };
+
+            foreach (var invalidPayload in invalidSelectionPayloads)
+            {
+                using var invalidResponse = await SendPlanStreamAsync(invalidPayload);
+                var invalidBody = await invalidResponse.Content.ReadAsStringAsync();
+                invalidResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+                invalidResponse.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
+                invalidBody.Should().NotContain("session_not_found");
+                invalidBody.Should().NotContain("plan_draft_started");
+            }
+
+            foreach (var (legacyProperty, legacyValue) in new[]
+                     {
+                         (
+                             "skillCode",
+                             "\"knowledge_research\""),
+                         (
+                             "preferredToolCodes",
+                             "[\"rag_search\"]")
+                     })
+            {
+                var legacyPayload = validPayload.Replace(
+                    "\"requestedCapabilityCodes\": []",
+                    $"\"requestedCapabilityCodes\": [], \"{legacyProperty}\": {legacyValue}",
+                    StringComparison.Ordinal);
+                using var legacyResponse = await SendPlanStreamAsync(legacyPayload);
+                var legacyBody = await legacyResponse.Content.ReadAsStringAsync();
+
+                legacyResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+                legacyResponse.Content.Headers.ContentType?.MediaType.Should().Be("text/event-stream");
+                legacyBody.Should().Contain(AppProblemCodes.AgentPlanSchemaInvalid);
+                legacyBody.Should().Contain("Agent task plan does not match the required schema.");
+                legacyBody.Should().NotContain("retired for Plan v2");
+                legacyBody.Should().NotContain("session_not_found");
+                legacyBody.Should().NotContain("plan_draft_started");
+            }
+        }
+        finally
+        {
+            fixture.HttpClient.DefaultRequestHeaders.Authorization = null;
+        }
     }
 
     [Fact]
@@ -196,6 +289,17 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
         pathElement.TryGetProperty(method, out _)
             .Should()
             .BeTrue($"OpenAPI should expose {method.ToUpperInvariant()} {path}");
+    }
+
+    private async Task<HttpResponseMessage> SendPlanStreamAsync(string payload)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            "/api/aigateway/agent/task/plan-stream")
+        {
+            Content = new StringContent(payload, Encoding.UTF8, "application/json")
+        };
+        return await fixture.HttpClient.SendAsync(request);
     }
 
     private static void AssertMissingPath(JsonDocument document, string path)

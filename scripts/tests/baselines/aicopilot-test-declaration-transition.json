@@ -6,17 +6,17 @@
     "gitTree": "88aee67db521a1a33ff6de524c0163d513396123",
     "declarationCount": 785,
     "orderedSymbolSha256": "62a8fa4fe89e98b8b7be0a74f020db16c5bbdac3714b1838e194b2bef189e312",
-    "transitionContentSha256": "87e34e9a75977f9f678e7b41298f7246f7e783d1b3d27d60d805c07dbc36c36a"
+    "transitionContentSha256": "21c311961acafbba600a2d5b7f5f43b472858317cdd550d1bba4b4f9be2589b8"
   },
   "current": {
     "baselinePath": "scripts/tests/baselines/aicopilot-test-cases.json",
-    "availableDeclarationCount": 769
+    "availableDeclarationCount": 845
   },
   "summary": {
-    "retainedSelf": 633,
+    "retainedSelf": 628,
     "retiredDuplicate": 0,
     "retiredSourceGuard": 2,
-    "replaced": 150
+    "replaced": 155
   },
   "transitions": [
     {
@@ -650,9 +650,9 @@
       "oldSymbol": "AICopilot.ArchitectureTests.ArchitectureBoundaryTests.ArtifactWorkspaceSubmitFinalize_ShouldStayBehindCoordinator()",
       "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.EndToEndTests.AgentArtifactHttpEndToEndTests.FinalizeAndDownload_ShouldExposeArtifactAndAuditTimeline"
+        "AICopilot.EndToEndTests.AgentArtifactHttpEndToEndTests.PlanCompilerUnavailable_ShouldFailClosedWithoutWorkspaceArtifactOrApproval"
       ],
-      "reason": "workspace submit/finalize/download 与审计摘要的全链路由真实 Aspire 端到端验收覆盖。"
+      "reason": "P0 生产没有可信 compiler，旧正向 submit/finalize 闭环由真实 Aspire HTTP fail-closed 证据替代：确认与运行均拒绝，且不创建 approval、workspace、artifact、tool execution 或 final output。"
     },
     {
       "oldSymbol": "AICopilot.ArchitectureTests.ArchitectureBoundaryTests.ArtifactWorkspaceP9_ShouldStayBehindCoordinator()",
@@ -998,11 +998,11 @@
     },
     {
       "oldSymbol": "AICopilot.BackendTests.ToolRegistryGovernanceTests.PreferredToolCodes_ShouldNotNarrowPlannerCatalog_BeforePlanDraftConfirmation()",
-      "disposition": "retained-self",
+      "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.ApplicationTests.ToolRegistryApplicationTests.PreferredToolCodes_ShouldNotNarrowPlannerCatalog_BeforePlanDraftConfirmation"
+        "AICopilot.ApplicationTests.ToolRegistryApplicationTests.PreferredToolCodes_ShouldFailClosedBeforePlanDraftPersistence"
       ],
-      "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
+      "reason": "Plan v2 已退役 preferredToolCodes；旧偏好目录语义由任何计划持久化前固定拒绝的反例覆盖。"
     },
     {
       "oldSymbol": "AICopilot.BackendTests.McpServerBootstrapExposureTests.CreateRegistrationAsync_ShouldNotSwallowNonCommandMissingErrors()",
@@ -1318,11 +1318,12 @@
     },
     {
       "oldSymbol": "AICopilot.BackendTests.ToolRegistryGovernanceTests.McpToolRegistrySynchronizer_ShouldUpsertDisabledTools_AndPreserveAdminSettings()",
-      "disposition": "retained-self",
+      "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.InProcessTests.McpToolRegistrySynchronizerTests.McpToolRegistrySynchronizer_ShouldUpsertDisabledTools_AndPreserveAdminSettings"
+        "AICopilot.InProcessTests.McpToolRegistrySynchronizerTests.McpToolRegistrySynchronizer_ShouldRejectInvalidSchemaBeforeRegistration_AndDisablePriorVersion",
+        "AICopilot.InProcessTests.McpToolRegistrySynchronizerTests.McpToolRegistrySynchronizer_ShouldQuarantineGovernedDrift_AndPreserveAdminMetadata"
       ],
-      "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
+      "reason": "旧 combined upsert 用例拆为 invalid-schema 禁用旧版本与 governed-drift quarantine 两个精确边界，分别证明注册前拒绝和管理 metadata 保留。"
     },
     {
       "oldSymbol": "AICopilot.BackendTests.SecurityHardeningTests.PlatformAttestationRecordCheck_ShouldRejectIncompleteSignOffsAndWeakEvidenceWords()",
@@ -2676,11 +2677,11 @@
     },
     {
       "oldSymbol": "AICopilot.BackendTests.ToolRegistryGovernanceTests.PreferredToolCodes_ShouldNotBlockPlanDraft_WhenToolIsOutsideCurrentCatalog()",
-      "disposition": "retained-self",
+      "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.ApplicationTests.ToolRegistryApplicationTests.PreferredToolCodes_ShouldNotBlockPlanDraft_WhenToolIsOutsideCurrentCatalog"
+        "AICopilot.ApplicationTests.ToolRegistryApplicationTests.SkillCode_ShouldFailClosedBeforePlanDraftPersistence_WhileNoSelectionRemainsValid"
       ],
-      "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
+      "reason": "Plan v2 不再消费旧 Skill/Tool 选择；旧目录外偏好行为由 skillCode 早退反例及无选择正例共同覆盖。"
     },
     {
       "oldSymbol": "AICopilot.BackendTests.ModelApiKeyProtectionTests.EmbeddingModelApiKey_ShouldBeProtectedAtRest_AndNullUpdateShouldPreserveCipher()",
@@ -3587,11 +3588,12 @@
     },
     {
       "oldSymbol": "AICopilot.BackendTests.ToolRegistryGovernanceTests.AgentTaskRuntime_ShouldRejectToolOutsidePersistedSkill()",
-      "disposition": "retained-self",
+      "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.WorkflowTests.ToolRegistryWorkflowTests.AgentTaskRuntime_ShouldRejectToolOutsidePersistedSkill"
+        "AICopilot.WorkflowTests.ToolRegistryWorkflowTests.AgentPlanV2Fixture_ShouldRejectRetiredPersistedSkillField",
+        "AICopilot.ApplicationTests.ToolRegistryApplicationTests.SkillDefinition_ShouldRejectPlannerStepOutsideSelectedSkill"
       ],
-      "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
+      "reason": "Plan v2 已禁止持久化 legacy Skill 字段；fixture 精确拒绝旧字段，现行 SkillDefinition 应用门继续拒绝 selected Skill 外的 planner step。"
     },
     {
       "oldSymbol": "AICopilot.BackendTests.ToolRegistryGovernanceTests.UploadRecordCommand_ShouldRejectKnowledgeBaseShadowScopeBeforeWriting()",
@@ -3801,9 +3803,9 @@
       "oldSymbol": "AICopilot.BackendTests.AcceptanceClosureVerificationTests.AgentArtifactClosure_ShouldFinalizeDownloadAndExposeTaskAuditSummary()",
       "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.EndToEndTests.AgentArtifactHttpEndToEndTests.FinalizeAndDownload_ShouldExposeArtifactAndAuditTimeline"
+        "AICopilot.EndToEndTests.AgentArtifactHttpEndToEndTests.PlanCompilerUnavailable_ShouldFailClosedWithoutWorkspaceArtifactOrApproval"
       ],
-      "reason": "旧混合闭环桶中的 artifact 分支独立为真实 HTTP 规划、审批、生成、finalize、download 与审计时间线链路。"
+      "reason": "旧正向 artifact finalize/download 混合闭环不适用于 P0 fail-closed runtime；真实 Aspire HTTP 证明 compiler-unavailable 时不产生 workspace、artifact、approval、download 或 final-output 证据。"
     },
     {
       "oldSymbol": "AICopilot.BackendTests.ToolRegistryGovernanceTests.ArtifactGenerationFailure_ShouldNotCreatePlaceholderArtifact()",
@@ -3949,11 +3951,15 @@
     },
     {
       "oldSymbol": "AICopilot.BackendTests.ToolRegistryGovernanceTests.AgentTaskRuntime_ShouldExecuteApprovedMcpTool_AndWriteRedactedExecutionRecord()",
-      "disposition": "retained-self",
+      "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.WorkflowTests.ToolRegistryWorkflowTests.AgentTaskRuntime_ShouldExecuteApprovedMcpTool_AndWriteRedactedExecutionRecord"
+        "AICopilot.WorkflowTests.ToolRegistryWorkflowTests.AgentTaskRuntime_P0ProductionGate_ShouldRejectDraftPlanBeforeAttemptOrToolExecution",
+        "AICopilot.WorkflowTests.ToolRegistryWorkflowTests.AgentTaskRuntime_ShouldRejectBuiltInContractDurableSplitBeforeAnySuccessSideEffect",
+        "AICopilot.WorkflowTests.ToolRegistryWorkflowTests.AgentTaskRuntime_ShouldBlockMcpTool_WhenRuntimeSafetyPolicyRejectsIt",
+        "AICopilot.UnitTests.ToolRegistryUnitTests.McpAgentToolExecutor_ShouldFailClosedOnOutputIdentityOrValueDrift_AndWithholdRawOutput",
+        "AICopilot.UnitTests.ToolRegistryUnitTests.ProviderDurableOutput_ShouldBeVersionedAndNeverPersistProviderRawPayload"
       ],
-      "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
+      "reason": "P0 没有可信 compiler 时不得保留 approved MCP positive runtime；当前矩阵分别锁定 Draft 执行前拒绝、BuiltInOnly durable split、AgentTaskRuntime_ShouldBlockMcpTool_WhenRuntimeSafetyPolicyRejectsIt 同一 Fact 内对 BuiltIn Plan 的 Mcp/MockMcp 两类 provider drift 逐项拒绝、executor output identity/value drift fail-closed 并 withholding raw，以及 versioned durable output 永不持久化 provider raw payload。"
     },
     {
       "oldSymbol": "AICopilot.BackendTests.RagIndexingLifecycleTests.RetryDocumentIndexing_ShouldStageIndexingEventForFailedDocument()",
@@ -4153,7 +4159,11 @@
       "replacementIds": [
         "AICopilot.UnitTests.IntentRoutingFallbackClassifierTests.TryClassify_ShouldRouteNewCloudOnlyAgentCapabilities",
         "AICopilot.UnitTests.IntentRoutingFallbackClassifierTests.TryClassify_ShouldRouteRecentDeviceInformationToReadonlyDeviceLogAnalysis",
-        "AICopilot.EndToEndTests.PolicyChatEndToEndTests.EmployeeAuthorizationPolicy_ShouldRequireAssignmentAndFunctionalPermission", "AICopilot.EndToEndTests.PolicyChatEndToEndTests.DeviceRegistrationPolicy_ShouldRequireAdministratorRole", "AICopilot.EndToEndTests.PolicyChatEndToEndTests.DeviceLifecyclePolicy_ShouldPreserveHistoryAndImmutableCode", "AICopilot.EndToEndTests.PolicyChatEndToEndTests.BootstrapIdentityPolicy_ShouldRequireClientCodeToDeviceIdChain", "AICopilot.EndToEndTests.PolicyChatEndToEndTests.RecipeVersioningPolicy_ShouldCreateNewArchivedVersion"
+        "AICopilot.EndToEndTests.PolicyChatEndToEndTests.EmployeeAuthorizationPolicy_ShouldRequireAssignmentAndFunctionalPermission",
+        "AICopilot.EndToEndTests.PolicyChatEndToEndTests.DeviceRegistrationPolicy_ShouldRequireAdministratorRole",
+        "AICopilot.EndToEndTests.PolicyChatEndToEndTests.DeviceLifecyclePolicy_ShouldPreserveHistoryAndImmutableCode",
+        "AICopilot.EndToEndTests.PolicyChatEndToEndTests.BootstrapIdentityPolicy_ShouldRequireClientCodeToDeviceIdChain",
+        "AICopilot.EndToEndTests.PolicyChatEndToEndTests.RecipeVersioningPolicy_ShouldCreateNewArchivedVersion"
       ],
       "reason": "旧 fake-host 路由断言由生产分类器语义和真实端到端策略路由共同覆盖。"
     },
@@ -4715,7 +4725,11 @@
       "oldSymbol": "AICopilot.BackendTests.AcceptanceBaselineTests.ChinesePolicyAcceptanceChat_ShouldCoverAllPolicyTopics()",
       "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.EndToEndTests.PolicyChatEndToEndTests.EmployeeAuthorizationPolicy_ShouldRequireAssignmentAndFunctionalPermission", "AICopilot.EndToEndTests.PolicyChatEndToEndTests.DeviceRegistrationPolicy_ShouldRequireAdministratorRole", "AICopilot.EndToEndTests.PolicyChatEndToEndTests.DeviceLifecyclePolicy_ShouldPreserveHistoryAndImmutableCode", "AICopilot.EndToEndTests.PolicyChatEndToEndTests.BootstrapIdentityPolicy_ShouldRequireClientCodeToDeviceIdChain", "AICopilot.EndToEndTests.PolicyChatEndToEndTests.RecipeVersioningPolicy_ShouldCreateNewArchivedVersion"
+        "AICopilot.EndToEndTests.PolicyChatEndToEndTests.EmployeeAuthorizationPolicy_ShouldRequireAssignmentAndFunctionalPermission",
+        "AICopilot.EndToEndTests.PolicyChatEndToEndTests.DeviceRegistrationPolicy_ShouldRequireAdministratorRole",
+        "AICopilot.EndToEndTests.PolicyChatEndToEndTests.DeviceLifecyclePolicy_ShouldPreserveHistoryAndImmutableCode",
+        "AICopilot.EndToEndTests.PolicyChatEndToEndTests.BootstrapIdentityPolicy_ShouldRequireClientCodeToDeviceIdChain",
+        "AICopilot.EndToEndTests.PolicyChatEndToEndTests.RecipeVersioningPolicy_ShouldCreateNewArchivedVersion"
       ],
       "reason": "旧单例宽循环按员工授权、设备注册、设备生命周期、bootstrap 身份链和配方版本化拆成五个可独立发现的业务合同。"
     },
@@ -5731,9 +5745,9 @@
       "oldSymbol": "AICopilot.BackendTests.ClaudeFollowupClosureTests.PlanAgentTaskStreamHandler_ShouldOnlyCreatePlanDraftAndEmitAgentTaskChunk()",
       "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.EndToEndTests.AgentArtifactHttpEndToEndTests.FinalizeAndDownload_ShouldExposeArtifactAndAuditTimeline"
+        "AICopilot.EndToEndTests.AgentPlanRejectionEndToEndTests.ExactCanonicalBoundary_ShouldRoundTripAndRejectPlusOneWithoutPersistence"
       ],
-      "reason": "真实 plan-stream 读取 AgentTask chunk，并断言返回任务为 Draft 且无 workspace，覆盖 handler 的可观测语义。"
+      "reason": "真实 production Host plan-stream 在 262144-byte canonical 边界返回完整 AgentTask chunk，并经 REST 与 fresh PostgreSQL 重读校验 Draft/digest，直接覆盖 handler 可观测语义。"
     },
     {
       "oldSymbol": "AICopilot.BackendTests.JwtSettingsTests.EnsureValid_ShouldRejectNonPositiveAccessTokenLifetime(System.Int32)",
@@ -5811,9 +5825,9 @@
       "oldSymbol": "AICopilot.BackendTests.ClaudeFollowupClosureTests.PlanAgentTaskStreamEndpoint_ShouldUseServerSentEvents()",
       "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.EndToEndTests.AgentPlanRejectionEndToEndTests.RejectedPlan_ShouldNotRunToolsOrCreateFinalWorkspace"
+        "AICopilot.EndToEndTests.AgentPlanRejectionEndToEndTests.ExactCanonicalBoundary_ShouldRoundTripAndRejectPlusOneWithoutPersistence"
       ],
-      "reason": "真实 Aspire HTTP 计划流程要求 plan-stream 返回 text/event-stream，由端到端测试覆盖。"
+      "reason": "真实 Aspire HTTP 计划流在 exact boundary 和 +1 反例中均要求 text/event-stream，并解析 AgentTask/AgentEvent/Error 的生产 wire 契约。"
     },
     {
       "oldSymbol": "AICopilot.BackendTests.IntentRoutingResultParserTests.TryParse_ShouldFailForUnparseableText()",
@@ -6270,9 +6284,9 @@
       "oldSymbol": "AICopilot.BackendTests.AcceptanceClosureVerificationTests.AgentPlanRejection_ShouldNotExecuteOrCreateFinalArtifacts()",
       "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.EndToEndTests.AgentPlanRejectionEndToEndTests.RejectedPlan_ShouldNotRunToolsOrCreateFinalWorkspace"
+        "AICopilot.EndToEndTests.AgentArtifactHttpEndToEndTests.PlanCompilerUnavailable_ShouldFailClosedWithoutWorkspaceArtifactOrApproval"
       ],
-      "reason": "旧混合闭环桶中的 plan rejection 分支独立为真实 HTTP fail-closed 链路，验证不执行 tool 且不创建 final workspace。"
+      "reason": "旧混合闭环桶的非执行语义收口为 P0 真实 HTTP PlanDraft；plan_compiler_unavailable 时确认和 run 固定 fail-closed，且 PostgreSQL 无 approval/workspace/artifact/tool execution。"
     },
     {
       "oldSymbol": "AICopilot.BackendTests.CloudOidcLoginTests.FinalizeCloudOidcLogin_ShouldAdoptBootstrapAdmin_WhenConfiguredAdminUserHasNoCloudBinding()",

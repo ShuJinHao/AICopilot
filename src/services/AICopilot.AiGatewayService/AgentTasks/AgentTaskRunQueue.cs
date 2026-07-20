@@ -26,7 +26,8 @@ public interface IAgentTaskRunQueue
 }
 
 internal sealed class AgentTaskRunQueue(
-    IAgentTaskRunQueueStore queueStore)
+    IAgentTaskRunQueueStore queueStore,
+    AgentTaskPlanFreshReadGate freshReadGate)
     : IAgentTaskRunQueue
 {
     public async Task<Result<AgentTaskRunQueueItem>> EnqueueAsync(
@@ -36,6 +37,15 @@ internal sealed class AgentTaskRunQueue(
         CancellationToken cancellationToken,
         DateTimeOffset? availableAt = null)
     {
+        var integrity = await freshReadGate.VerifyAsync(
+            task,
+            requireExecutable: true,
+            cancellationToken);
+        if (!integrity.IsSuccess)
+        {
+            return Result.From(integrity);
+        }
+
         if (requestedBy == Guid.Empty)
         {
             return Result.Unauthorized(new ApiProblemDescriptor(

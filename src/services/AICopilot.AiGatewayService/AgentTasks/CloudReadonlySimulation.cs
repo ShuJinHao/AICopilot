@@ -26,7 +26,22 @@ internal sealed class SimulationCloudReadonlyDataProvider(
                 "CloudReadonly Simulation mode requires CloudReadonly:Simulation:Enabled=true.");
         }
 
-        var query = CloudReadonlySimulationQuery.Parse(request.Query);
+        var filters = request.SemanticPlan.Filters
+            .GroupBy(filter => filter.Field, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First().Value, StringComparer.OrdinalIgnoreCase);
+        var query = new CloudReadonlySimulationQuery(
+            filters.GetValueOrDefault("lineName"),
+            filters.GetValueOrDefault("deviceCode"),
+            filters.GetValueOrDefault("level"),
+            filters.GetValueOrDefault("shift"),
+            filters.GetValueOrDefault("productCode"),
+            filters.GetValueOrDefault("defectType"),
+            filters.GetValueOrDefault("status"),
+            int.TryParse(filters.GetValueOrDefault("days"), out var days) ? days : null,
+            request.SemanticPlan.TimeRange?.Start,
+            request.SemanticPlan.TimeRange?.End,
+            request.SemanticPlan.Limit,
+            RawText: null);
         var result = executor.Execute(request.Intent, query);
         if (result.SourceMode != SimulationSourceMode ||
             result.SourceLabel != SimulationSourceLabel ||

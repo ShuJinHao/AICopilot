@@ -1,4 +1,6 @@
+using System.Text.Json;
 using AICopilot.Core.AiGateway.Ids;
+using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Domain;
 
 namespace AICopilot.Core.AiGateway.Aggregates.AgentTasks;
@@ -32,7 +34,10 @@ public sealed class AgentStep : IEntity<AgentStepId>
         StepType = stepType;
         ToolCode = NormalizeOptional(toolCode, 100);
         RequiresApproval = requiresApproval;
-        InputJson = NormalizeOptional(inputJson, 16000);
+        InputJson = NormalizeStructuredJson(
+            inputJson,
+            enforceNodeToolInputPolicy: true,
+            nameof(inputJson));
         Status = requiresApproval ? AgentStepStatus.WaitingApproval : AgentStepStatus.Pending;
     }
 
@@ -77,12 +82,15 @@ public sealed class AgentStep : IEntity<AgentStepId>
 
     public void Complete(string? outputJson, DateTimeOffset nowUtc)
     {
-        if (Status is not AgentStepStatus.Running and not AgentStepStatus.WaitingApproval and not AgentStepStatus.Approved)
+        if (Status is not AgentStepStatus.Running and not AgentStepStatus.Approved)
         {
             throw new InvalidOperationException("Only running or approved agent steps can complete.");
         }
 
-        OutputJson = NormalizeOptional(outputJson, 16000);
+        OutputJson = NormalizeStructuredJson(
+            outputJson,
+            enforceNodeToolInputPolicy: false,
+            nameof(outputJson));
         Status = AgentStepStatus.Completed;
         FinishedAt = nowUtc;
     }
@@ -157,5 +165,39 @@ public sealed class AgentStep : IEntity<AgentStepId>
         return normalized is { Length: > 0 } && normalized.Length > maxLength
             ? normalized[..maxLength]
             : normalized;
+    }
+
+    private static string? NormalizeStructuredJson(
+        string? value,
+        bool enforceNodeToolInputPolicy,
+        string paramName)
+    {
+        var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        if (normalized is null)
+        {
+            return null;
+        }
+
+        if (enforceNodeToolInputPolicy)
+        {
+            var input = AgentStructuredPayloadPolicyV1.NormalizeNodeToolInput(normalized);
+            if (!input.IsValid)
+            {
+                throw new ArgumentException(
+                    input.Error ?? $"{paramName} violates {AgentStructuredPayloadPolicyV1.PolicyVersion}.",
+                    paramName);
+            }
+
+            return input.CanonicalJson;
+        }
+        var output = AgentStructuredPayloadPolicyV1.NormalizeInlineOutput(normalized);
+        if (!output.IsValid)
+        {
+            throw new ArgumentException(
+                output.Error ?? $"{paramName} violates {AgentStructuredPayloadPolicyV1.InlineOutputPolicyVersion}.",
+                paramName);
+        }
+
+        return output.CanonicalJson;
     }
 }

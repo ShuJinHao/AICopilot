@@ -733,6 +733,12 @@ export const useChatStore = defineStore('chat', () => {
       return null
     }
 
+    if (selectedSkillCode.value || selectedToolCodes.value.length > 0) {
+      clearCurrentSessionError()
+      setCurrentSessionError('当前计划入口不再接受 Skill 或工具选择，请清除旧选择后重试。')
+      return null
+    }
+
     const assistantMessage = addPlanConversationMessages(sessionId, goal)
     const runMessageKey = getChatRunMessageKey(assistantMessage)
     isAgentBusy.value = true
@@ -750,8 +756,10 @@ export const useChatStore = defineStore('chat', () => {
           uploadIds: uploadedFiles.value.map((item) => item.id),
           knowledgeBaseIds: selectedKnowledgeBaseIdsForPlan.value,
           plannerMode: 'Auto',
-          skillCode: selectedSkillCode.value || null,
-          preferredToolCodes: selectedToolCodes.value,
+          pluginSelectionMode: 'BuiltInOnly',
+          selectedPluginIds: [],
+          capabilitySelectionMode: 'InferredFromGoal',
+          requestedCapabilityCodes: [],
         },
         {
           onChunkReceived(chunk) {

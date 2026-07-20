@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using AICopilot.AiGatewayService.Safety;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
@@ -80,15 +83,13 @@ public class ConfiguredAgentRuntimeFactory(
                 "The configured model provider is unavailable. Please ask an administrator to review the AI settings.");
         }
 
-        var chatOptions = new AiChatOptions
-        {
-            Instructions = instructionsOverride ?? template.SystemPrompt,
-            Temperature = template.Specification.Temperature ?? model.Parameters.Temperature
-        };
-
-        configureOptions?.Invoke(chatOptions);
-
-        return runtimeFactory.Create(new AgentRuntimeCreateRequest(model, template, chatOptions, CreateCallerContext()));
+        var chatOptions = BuildChatOptions(model, template, configureOptions, instructionsOverride);
+        var runtime = runtimeFactory.Create(
+            new AgentRuntimeCreateRequest(model, template, chatOptions, CreateCallerContext()));
+        return new ScopedRuntimeAgent(
+            runtime.Agent,
+            runtime,
+            CreateConfigurationSnapshot(model, template, chatOptions));
     }
 
     private AgentRuntimeCallerContext? CreateCallerContext()
@@ -151,6 +152,35 @@ public class ConfiguredAgentRuntimeFactory(
         return CreateAgent(model, template, configureOptions, instructions);
     }
 
+    public async Task<RuntimeAgentConfigurationSnapshot> ReadConfigurationSnapshotAsync(
+        string templateName,
+        LanguageModel? modelOverride,
+        Func<string, string>? configureInstructions = null,
+        Action<AiChatOptions>? configureOptions = null,
+        CancellationToken cancellationToken = default)
+    {
+        var template = await templateRepository.FirstOrDefaultAsync(
+            new ConversationTemplateByNameSpec(templateName),
+            cancellationToken);
+        if (template is null)
+        {
+            throw CreateConfigurationMissingException();
+        }
+
+        var model = modelOverride ?? await modelRepository.FirstOrDefaultAsync(
+            new LanguageModelByIdSpec(template.ModelId),
+            cancellationToken);
+        if (model is null)
+        {
+            throw CreateConfigurationMissingException();
+        }
+
+        ValidateConfiguration(model, template);
+        var instructions = configureInstructions?.Invoke(template.SystemPrompt);
+        var options = BuildChatOptions(model, template, configureOptions, instructions);
+        return CreateConfigurationSnapshot(model, template, options);
+    }
+
     public async Task<ScopedRuntimeAgent> CreateAgentAsync(
         ConversationTemplateId templateId,
         Action<AiChatOptions>? configureOptions = null)
@@ -183,5 +213,69 @@ public class ConfiguredAgentRuntimeFactory(
             AppProblemCodes.ChatConfigurationMissing,
             "The conversation template is disabled.",
             "当前会话绑定的模板已停用，请切换模板或联系管理员检查 AI 配置。");
+    }
+
+    private static AiChatOptions BuildChatOptions(
+        LanguageModel model,
+        ConversationTemplate template,
+        Action<AiChatOptions>? configureOptions,
+        string? instructionsOverride)
+    {
+        var options = new AiChatOptions
+        {
+            Instructions = instructionsOverride ?? template.SystemPrompt,
+            Temperature = template.Specification.Temperature ?? model.Parameters.Temperature,
+            MaxOutputTokens = model.Parameters.MaxOutputTokens
+        };
+        configureOptions?.Invoke(options);
+        return options;
+    }
+
+    private static RuntimeAgentConfigurationSnapshot CreateConfigurationSnapshot(
+        LanguageModel model,
+        ConversationTemplate template,
+        AiChatOptions options)
+    {
+        var parameterJson = JsonSerializer.Serialize(new
+        {
+            contextWindowTokens = model.Parameters.MaxTokens,
+            maxOutputTokens = options.MaxOutputTokens ?? model.Parameters.MaxOutputTokens,
+            temperature = options.Temperature ?? model.Parameters.Temperature
+        });
+        var canonicalParameters = AgentCanonicalJsonV1.Canonicalize(parameterJson);
+        return new RuntimeAgentConfigurationSnapshot(
+            template.Id.Value,
+            template.Code ?? template.Id.Value.ToString("D"),
+            template.IsBuiltIn
+                ? $"builtin:{template.BuiltInVersion}"
+                : $"rowversion:{template.RowVersion}",
+            ComputeSha256(options.Instructions ?? string.Empty),
+            model.Id.Value,
+            model.Name,
+            model.Provider,
+            model.ProtocolType,
+            ComputeSha256(canonicalParameters),
+            model.Parameters.MaxTokens,
+            options.MaxOutputTokens ?? model.Parameters.MaxOutputTokens,
+            options.Temperature ?? model.Parameters.Temperature);
+    }
+
+    private static void ValidateConfiguration(LanguageModel model, ConversationTemplate template)
+    {
+        if (!template.IsEnabled)
+        {
+            throw CreateTemplateDisabledException();
+        }
+
+        if (!model.IsEnabled || string.IsNullOrWhiteSpace(model.ApiKey))
+        {
+            throw CreateConfigurationMissingException();
+        }
+    }
+
+    private static string ComputeSha256(string value)
+    {
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)))
+            .ToLowerInvariant();
     }
 }

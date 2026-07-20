@@ -28,11 +28,48 @@ public sealed record ToolRegistrationSeed(
 
 public static class BuiltInToolRegistrations
 {
-    public const int CurrentCatalogVersion = 12;
+    public const int CurrentCatalogVersion = 14;
+    public const int CurrentSchemaVersion = 3;
+    public const string FinalizationCheckpointToolCode = "finalize_artifacts";
 
     private const string AgentRuntimeTarget = "AgentTaskRuntime";
+    private const string ArtifactWorkspaceLifecycleTarget = "ArtifactWorkspaceLifecycleCoordinator";
     private const string MockMcpTarget = "MockMcpProvider";
-    private const string ObjectSchema = """{"type":"object"}""";
+    // Built-in runtime arguments are frozen in the Plan and execution snapshot. The
+    // dispatcher does not consume arbitrary per-step arguments, so their exact input
+    // contract is the empty object instead of an open JSON object.
+    private const string EmptyObjectInputSchema =
+        """{"type":"object","properties":{},"additionalProperties":false}""";
+    private const string UploadSummaryOutputSchema =
+        """{"type":"object","properties":{"status":{"type":"string","enum":["completed"]},"resultType":{"type":"string","enum":["upload-summary"]},"itemCount":{"type":"integer"}},"required":["status","resultType","itemCount"],"additionalProperties":false}""";
+    private const string TableSummaryOutputSchema =
+        """{"type":"object","properties":{"status":{"type":"string","enum":["completed"]},"resultType":{"type":"string","enum":["table-summary"]},"itemCount":{"type":"integer"},"rowCount":{"type":"integer"}},"required":["status","resultType","itemCount","rowCount"],"additionalProperties":false}""";
+    private const string RagSummaryOutputSchema =
+        """{"type":"object","properties":{"status":{"type":"string","enum":["completed"]},"resultType":{"type":"string","enum":["rag-summary"]},"itemCount":{"type":"integer"},"lowConfidence":{"type":"boolean"}},"required":["status","resultType","itemCount","lowConfidence"],"additionalProperties":false}""";
+    private const string CloudQuerySummaryOutputSchema =
+        """{"type":"object","properties":{"status":{"type":"string","enum":["completed"]},"resultType":{"type":"string","enum":["cloud-query-summary"]},"sourceMode":{"type":"string"},"isSimulation":{"type":"boolean"},"rowCount":{"type":"integer"},"isTruncated":{"type":"boolean"},"resultHash":{"type":"string"}},"required":["status","resultType","sourceMode","isSimulation","rowCount","isTruncated","resultHash"],"additionalProperties":false}""";
+    private const string BusinessQuerySummaryOutputSchema =
+        """{"type":"object","properties":{"status":{"type":"string","enum":["completed"]},"resultType":{"type":"string","enum":["business-query-summary"]},"sourceMode":{"type":"string"},"isSimulation":{"type":"boolean"},"rowCount":{"type":"integer"},"isTruncated":{"type":"boolean"},"resultHash":{"type":"string"}},"required":["status","resultType","sourceMode","isSimulation","rowCount","isTruncated","resultHash"],"additionalProperties":false}""";
+    private const string ArtifactOutputSchema =
+        """{"type":"object","properties":{"status":{"type":"string","enum":["completed"]},"resultType":{"type":"string","enum":["artifact"]},"artifactType":{"type":"string","enum":["chart","markdown","html","pdf","pptx","xlsx"]},"artifactId":{"type":"string"}},"required":["status","resultType","artifactType","artifactId"],"additionalProperties":false}""";
+    private const string FinalizationCheckpointOutputSchema =
+        """{"type":"object","properties":{"status":{"type":"string","enum":["finalized"]},"resultType":{"type":"string","enum":["finalization-checkpoint"]}},"required":["status","resultType"],"additionalProperties":false}""";
+    private const string MockHealthOutputSchema =
+        """{"type":"object","properties":{"isMock":{"type":"boolean"},"providerKind":{"type":"string","enum":["MockMcp"]},"toolCode":{"type":"string","enum":["mock_mcp_health_check"]},"toolRunId":{"type":"string"},"toolCatalogVersion":{"type":"integer"},"schemaVersion":{"type":"integer"},"status":{"type":"string","enum":["Succeeded"]},"durationMs":{"type":"integer"},"resultHash":{"type":"string"},"payload":{"type":"object","properties":{"health":{"type":"string","enum":["Healthy"]},"mockOnly":{"type":"boolean"},"externalEndpointEnabled":{"type":"boolean"},"checkedAt":{"type":"string"}},"required":["health","mockOnly","externalEndpointEnabled","checkedAt"],"additionalProperties":false}},"required":["isMock","providerKind","toolCode","toolRunId","toolCatalogVersion","schemaVersion","status","durationMs","resultHash","payload"],"additionalProperties":false}""";
+    private const string MockKpiOutputSchema =
+        """{"type":"object","properties":{"isMock":{"type":"boolean"},"providerKind":{"type":"string","enum":["MockMcp"]},"toolCode":{"type":"string","enum":["mock_mcp_kpi_formula_lookup"]},"toolRunId":{"type":"string"},"toolCatalogVersion":{"type":"integer"},"schemaVersion":{"type":"integer"},"status":{"type":"string","enum":["Succeeded"]},"durationMs":{"type":"integer"},"resultHash":{"type":"string"},"payload":{"type":"object","properties":{"domain":{"type":"string"},"formula":{"type":"string"},"source":{"type":"string","enum":["Mock MCP KPI formula catalog"]},"isSimulationSupport":{"type":"boolean"}},"required":["domain","formula","source","isSimulationSupport"],"additionalProperties":false}},"required":["isMock","providerKind","toolCode","toolRunId","toolCatalogVersion","schemaVersion","status","durationMs","resultHash","payload"],"additionalProperties":false}""";
+    private const string MockArtifactOutputSchema =
+        """{"type":"object","properties":{"isMock":{"type":"boolean"},"providerKind":{"type":"string","enum":["MockMcp"]},"toolCode":{"type":"string","enum":["mock_mcp_artifact_quality_check"]},"toolRunId":{"type":"string"},"toolCatalogVersion":{"type":"integer"},"schemaVersion":{"type":"integer"},"status":{"type":"string","enum":["Succeeded"]},"durationMs":{"type":"integer"},"resultHash":{"type":"string"},"payload":{"type":"object","properties":{"artifactType":{"type":"string"},"passed":{"type":"boolean"},"checks":{"type":"object","properties":{"simulationMarker":{"type":"boolean"},"queryHash":{"type":"boolean"},"noRealExternalSideEffect":{"type":"boolean"}},"required":["simulationMarker","queryHash","noRealExternalSideEffect"],"additionalProperties":false}},"required":["artifactType","passed","checks"],"additionalProperties":false}},"required":["isMock","providerKind","toolCode","toolRunId","toolCatalogVersion","schemaVersion","status","durationMs","resultHash","payload"],"additionalProperties":false}""";
+    private const string MockTicketOutputSchema =
+        """{"type":"object","properties":{"isMock":{"type":"boolean"},"providerKind":{"type":"string","enum":["MockMcp"]},"toolCode":{"type":"string","enum":["mock_mcp_external_ticket_preview"]},"toolRunId":{"type":"string"},"toolCatalogVersion":{"type":"integer"},"schemaVersion":{"type":"integer"},"status":{"type":"string","enum":["Succeeded"]},"durationMs":{"type":"integer"},"resultHash":{"type":"string"},"payload":{"type":"object","properties":{"title":{"type":"string"},"summary":{"type":"string"},"sideEffectExecuted":{"type":"boolean"},"previewOnly":{"type":"boolean"},"externalSystem":{"type":"string","enum":["mock-ticket-system"]}},"required":["title","summary","sideEffectExecuted","previewOnly","externalSystem"],"additionalProperties":false}},"required":["isMock","providerKind","toolCode","toolRunId","toolCatalogVersion","schemaVersion","status","durationMs","resultHash","payload"],"additionalProperties":false}""";
+    private const string MockHealthInputSchema =
+        """{"type":"object","properties":{"mockBehavior":{"type":"string","enum":["slow","timeout","500","schema-invalid"]}},"additionalProperties":false}""";
+    private const string MockKpiInputSchema =
+        """{"type":"object","properties":{"domain":{"type":"string","enum":["Production","Quality","Inventory","Sales","Employee"]},"mockBehavior":{"type":"string","enum":["slow","timeout","500","schema-invalid"]}},"additionalProperties":false}""";
+    private const string MockArtifactInputSchema =
+        """{"type":"object","properties":{"artifactType":{"type":"string"},"contentPreview":{"type":"string"},"mockBehavior":{"type":"string","enum":["slow","timeout","500","schema-invalid"]}},"additionalProperties":false}""";
+    private const string MockTicketInputSchema =
+        """{"type":"object","properties":{"title":{"type":"string"},"summary":{"type":"string"},"mockBehavior":{"type":"string","enum":["slow","timeout","500","schema-invalid"]}},"required":["title"],"additionalProperties":false}""";
 
     public static IReadOnlyCollection<ToolRegistrationSeed> AgentRuntimeTools { get; } =
     [
@@ -50,11 +87,11 @@ public static class BuiltInToolRegistrations
         Approval("generate_pdf", "生成 PDF 草稿", "Generate a PDF draft inside the controlled artifact workspace."),
         Approval("generate_pptx", "生成 PPTX 草稿", "Generate a PPTX draft inside the controlled artifact workspace."),
         Approval("generate_xlsx", "生成 XLSX 草稿", "Generate an XLSX draft inside the controlled artifact workspace."),
-        Approval("finalize_artifacts", "最终产物确认", "Create the final-output approval checkpoint before publication.", approvalPolicy: "FinalOutputApproval"),
-        MockMcp("mock_mcp_health_check", "Mock MCP 健康检查", "Validate the in-process Mock MCP provider is available.", ToolDataBoundary.NoData, AiToolRiskLevel.Low, requiresApproval: false, inputSchema: ObjectSchema),
-        MockMcp("mock_mcp_kpi_formula_lookup", "Mock MCP KPI 公式查询", "Return deterministic KPI formula notes for capacity, quality, and inventory analysis.", ToolDataBoundary.RagContextOnly, AiToolRiskLevel.Low, requiresApproval: false, inputSchema: """{"type":"object","properties":{"domain":{"type":"string","enum":["Production","Quality","Inventory","Sales","Employee"]}}}"""),
-        MockMcp("mock_mcp_artifact_quality_check", "Mock MCP 产物质量检查", "Check that draft artifacts keep SimulationBusiness source markers.", ToolDataBoundary.ArtifactDraftOnly, AiToolRiskLevel.Medium, requiresApproval: false, inputSchema: """{"type":"object","properties":{"artifactType":{"type":"string"},"contentPreview":{"type":"string"}}}"""),
-        MockMcp("mock_mcp_external_ticket_preview", "Mock MCP 外部工单预览", "Create an external ticket preview without sending it to any real external system.", ToolDataBoundary.ArtifactDraftOnly, AiToolRiskLevel.High, requiresApproval: true, inputSchema: """{"type":"object","properties":{"title":{"type":"string"},"summary":{"type":"string"}},"required":["title"]}""")
+        FinalizationCheckpoint(),
+        MockMcp("mock_mcp_health_check", "Mock MCP 健康检查", "Validate the in-process Mock MCP provider is available.", ToolDataBoundary.NoData, AiToolRiskLevel.Low, requiresApproval: false, inputSchema: MockHealthInputSchema),
+        MockMcp("mock_mcp_kpi_formula_lookup", "Mock MCP KPI 公式查询", "Return deterministic KPI formula notes for capacity, quality, and inventory analysis.", ToolDataBoundary.RagContextOnly, AiToolRiskLevel.Low, requiresApproval: false, inputSchema: MockKpiInputSchema),
+        MockMcp("mock_mcp_artifact_quality_check", "Mock MCP 产物质量检查", "Check that draft artifacts keep SimulationBusiness source markers.", ToolDataBoundary.ArtifactDraftOnly, AiToolRiskLevel.Medium, requiresApproval: false, inputSchema: MockArtifactInputSchema),
+        MockMcp("mock_mcp_external_ticket_preview", "Mock MCP 外部工单预览", "Create an external ticket preview without sending it to any real external system.", ToolDataBoundary.ArtifactDraftOnly, AiToolRiskLevel.High, requiresApproval: true, inputSchema: MockTicketInputSchema)
     ];
 
     public static IReadOnlyCollection<string> ObsoleteAgentRuntimeToolCodes { get; } =
@@ -64,6 +101,17 @@ public static class BuiltInToolRegistrations
         "query_cloud_production_pilot_readonly",
         "query_cloud_production_controlled_readonly"
     ];
+
+    public static ToolRegistrationSeed? FindAgentRuntimeTool(string? toolCode)
+    {
+        return string.IsNullOrWhiteSpace(toolCode)
+            ? null
+            : AgentRuntimeTools.FirstOrDefault(tool =>
+                string.Equals(tool.ToolCode, toolCode, StringComparison.Ordinal));
+    }
+
+    public static bool IsLifecycleCheckpoint(string? toolCode) =>
+        string.Equals(toolCode, FinalizationCheckpointToolCode, StringComparison.OrdinalIgnoreCase);
 
     private static ToolRegistrationSeed Low(
         string code,
@@ -80,8 +128,8 @@ public static class BuiltInToolRegistrations
             providerType,
             ToolRegistrationTargetType.AgentRuntime,
             AgentRuntimeTarget,
-            ObjectSchema,
-            ObjectSchema,
+            EmptyObjectInputSchema,
+            ResolveOutputSchema(code),
             AiToolRiskLevel.Low,
             null,
             RequiresApproval: false,
@@ -93,7 +141,7 @@ public static class BuiltInToolRegistrations
             dataBoundary,
             IsVisibleToPlanner: true,
             IsExecutableByAgent: true,
-            SchemaVersion: 1,
+            SchemaVersion: CurrentSchemaVersion,
             CatalogVersion: CurrentCatalogVersion,
             ApprovalPolicy: "None");
     }
@@ -111,8 +159,8 @@ public static class BuiltInToolRegistrations
             ToolProviderType.Artifact,
             ToolRegistrationTargetType.AgentRuntime,
             AgentRuntimeTarget,
-            ObjectSchema,
-            ObjectSchema,
+            EmptyObjectInputSchema,
+            ResolveOutputSchema(code),
             AiToolRiskLevel.High,
             null,
             RequiresApproval: true,
@@ -124,9 +172,38 @@ public static class BuiltInToolRegistrations
             ToolDataBoundary.ArtifactDraftOnly,
             IsVisibleToPlanner: true,
             IsExecutableByAgent: true,
-            SchemaVersion: 1,
+            SchemaVersion: CurrentSchemaVersion,
             CatalogVersion: CurrentCatalogVersion,
             approvalPolicy);
+    }
+
+    private static ToolRegistrationSeed FinalizationCheckpoint()
+    {
+        return new ToolRegistrationSeed(
+            FinalizationCheckpointToolCode,
+            "最终产物确认",
+            "Plan/lifecycle checkpoint: requests explicit final-output approval; ArtifactWorkspaceLifecycleCoordinator.FinalizeAsync alone produces the output, and no dispatcher or provider executes this entry.",
+            ToolProviderType.Artifact,
+            ToolRegistrationTargetType.AgentRuntime,
+            ArtifactWorkspaceLifecycleTarget,
+            EmptyObjectInputSchema,
+            ResolveOutputSchema(FinalizationCheckpointToolCode),
+            AiToolRiskLevel.High,
+            null,
+            RequiresApproval: true,
+            IsEnabled: true,
+            TimeoutSeconds: 180,
+            ToolAuditLevel.Standard,
+            "Artifacts",
+            BusinessDomains: [],
+            ToolDataBoundary.ArtifactDraftOnly,
+            IsVisibleToPlanner: true,
+            // This legacy flag means the checkpoint may participate in an Agent
+            // plan. It does not authorize provider/dispatcher invocation.
+            IsExecutableByAgent: true,
+            SchemaVersion: CurrentSchemaVersion,
+            CatalogVersion: CurrentCatalogVersion,
+            ApprovalPolicy: "FinalOutputApproval");
     }
 
     private static ToolRegistrationSeed CloudReadonly(string code, string displayName, string description)
@@ -138,8 +215,8 @@ public static class BuiltInToolRegistrations
             ToolProviderType.CloudReadonly,
             ToolRegistrationTargetType.AgentRuntime,
             AgentRuntimeTarget,
-            ObjectSchema,
-            ObjectSchema,
+            EmptyObjectInputSchema,
+            ResolveOutputSchema(code),
             AiToolRiskLevel.High,
             null,
             RequiresApproval: true,
@@ -151,7 +228,7 @@ public static class BuiltInToolRegistrations
             ToolDataBoundary.NoData,
             IsVisibleToPlanner: false,
             IsExecutableByAgent: false,
-            SchemaVersion: 1,
+            SchemaVersion: CurrentSchemaVersion,
             CatalogVersion: CurrentCatalogVersion,
             ApprovalPolicy: "DisabledRealCloudReadonly");
     }
@@ -165,8 +242,8 @@ public static class BuiltInToolRegistrations
             ToolProviderType.BuiltIn,
             ToolRegistrationTargetType.AgentRuntime,
             AgentRuntimeTarget,
-            ObjectSchema,
-            ObjectSchema,
+            EmptyObjectInputSchema,
+            ResolveOutputSchema(code),
             AiToolRiskLevel.High,
             "DataSource.TextToSql",
             RequiresApproval: true,
@@ -178,7 +255,7 @@ public static class BuiltInToolRegistrations
             ToolDataBoundary.SimulationBusinessOnly,
             IsVisibleToPlanner: true,
             IsExecutableByAgent: true,
-            SchemaVersion: 1,
+            SchemaVersion: CurrentSchemaVersion,
             CatalogVersion: CurrentCatalogVersion,
             ApprovalPolicy: "ToolApproval");
     }
@@ -200,7 +277,7 @@ public static class BuiltInToolRegistrations
             ToolRegistrationTargetType.AgentRuntime,
             MockMcpTarget,
             inputSchema,
-            ObjectSchema,
+            ResolveOutputSchema(code),
             riskLevel,
             null,
             requiresApproval,
@@ -212,8 +289,29 @@ public static class BuiltInToolRegistrations
             dataBoundary,
             IsVisibleToPlanner: false,
             IsExecutableByAgent: false,
-            SchemaVersion: 1,
+            SchemaVersion: CurrentSchemaVersion,
             CatalogVersion: CurrentCatalogVersion,
             ApprovalPolicy: requiresApproval ? "ToolApproval" : "None");
+    }
+
+    private static string ResolveOutputSchema(string code)
+    {
+        return code switch
+        {
+            "read_uploaded_file" => UploadSummaryOutputSchema,
+            "parse_csv_json" or "parse_table_file" => TableSummaryOutputSchema,
+            "rag_search" => RagSummaryOutputSchema,
+            "query_cloud_data_readonly" => CloudQuerySummaryOutputSchema,
+            "query_business_database_readonly" or "summarize_business_query_result" => BusinessQuerySummaryOutputSchema,
+            "generate_business_chart" or "generate_chart_data" or
+            "generate_markdown_report" or "generate_html_report" or
+            "generate_pdf" or "generate_pptx" or "generate_xlsx" => ArtifactOutputSchema,
+            "finalize_artifacts" => FinalizationCheckpointOutputSchema,
+            "mock_mcp_health_check" => MockHealthOutputSchema,
+            "mock_mcp_kpi_formula_lookup" => MockKpiOutputSchema,
+            "mock_mcp_artifact_quality_check" => MockArtifactOutputSchema,
+            "mock_mcp_external_ticket_preview" => MockTicketOutputSchema,
+            _ => throw new InvalidOperationException($"Built-in tool '{code}' has no frozen output contract.")
+        };
     }
 }

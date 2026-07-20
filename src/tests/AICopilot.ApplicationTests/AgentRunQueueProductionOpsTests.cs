@@ -237,6 +237,50 @@ public sealed class AgentRunQueueProductionOpsTests
         queueItem.FailureCode.Should().Be(AppProblemCodes.AgentTaskRunQueueLeaseExpired);
         audit.Requests.Should().ContainSingle(request => request.ActionCode == "Agent.RunQueueStaleLeaseFailed")
             .Which.Metadata!["oldStatus"].Should().Be(AgentTaskRunQueueStatus.Leased.ToString());
+
+        var planFailureTask = CreateFailedTask();
+        planFailureTask.PrepareRetry(DateTimeOffset.UtcNow);
+        var planFailureItem = new AgentTaskRunQueueItem(
+            planFailureTask.Id,
+            AgentTaskRunTriggerType.Retry,
+            planFailureTask.UserId,
+            DateTimeOffset.UtcNow);
+        planFailureItem.AcquireLease(
+            Guid.NewGuid(),
+            "plan-failure-worker",
+            DateTimeOffset.UtcNow,
+            TimeSpan.FromMinutes(1));
+        var planFailureQueue = new InMemoryAgentTaskRunQueueStore(planFailureItem);
+        using var planFailureProvider = CreateQueueWorkerProvider(
+            new InMemoryRepository<AgentTask>(planFailureTask),
+            planFailureQueue,
+            new InMemoryAgentTaskRunAttemptStore(),
+            new ThrowingRuntime(
+                new ApiProblemDescriptor(
+                    "agent_plan_internal_roundtrip_failed",
+                    "first-queue-result-secret-1357 raw owner=internal-queue-controlled"),
+                new ApiProblemDescriptor(
+                    AppProblemCodes.AgentPlanInvalid,
+                    "opaque-queue-plan-secret-2468 raw owner=queue-controlled SELECT payroll")),
+            new CapturingAuditLogWriter());
+        var planFailureCoordinator = planFailureProvider
+            .GetRequiredService<AgentTaskRunQueueWorkerCoordinator>();
+
+        await planFailureCoordinator.ExecuteQueueItemAsync(
+            planFailureItem,
+            CancellationToken.None);
+
+        planFailureItem.Status.Should().Be(AgentTaskRunQueueStatus.Failed);
+        var queueDto = AgentTaskRunQueueItemDtoMapper.Map(planFailureItem);
+        (planFailureItem.SafeMessage + queueDto.SafeMessage).Should()
+            .NotContain("first-queue-result-secret-1357")
+            .And.NotContain("internal-queue-controlled")
+            .And.NotContain("opaque-queue-plan-secret-2468")
+            .And.NotContain("queue-controlled")
+            .And.NotContain("payroll");
+        planFailureItem.FailureCode.Should().Be(AppProblemCodes.AgentPlanInvalid);
+        planFailureItem.SafeMessage.Should().Be("Agent task plan failed integrity validation.");
+        queueDto.SafeMessage.Should().Be("Agent task plan failed integrity validation.");
     }
 
     private static AgentTask CreateFailedTask()
@@ -250,7 +294,7 @@ public sealed class AgentRunQueueProductionOpsTests
             AgentTaskType.ReportGeneration,
             AgentTaskRiskLevel.Low,
             null,
-            """{"steps":[]}""",
+            AgentPlanV2TestData.CreateSingleStep("generate_chart_data", executable: false),
             now);
         var step = task.AddStep(
             "Generate",
@@ -259,7 +303,14 @@ public sealed class AgentRunQueueProductionOpsTests
             "generate_chart_data",
             requiresApproval: false,
             now);
-        task.ConfirmExecutablePlan(task.PlanJson, Array.Empty<int>(), now);
+        task.AddStep(
+            "Finalize artifacts",
+            "Wait for final output approval before publishing workspace artifacts.",
+            AgentStepType.Finalize,
+            "finalize_artifacts",
+            requiresApproval: true,
+            now);
+        task.ConfirmExecutablePlan(task.PlanJson, [2], now);
         task.ApprovePlan(now);
         task.Start(now);
         step.Start(now);
@@ -286,7 +337,9 @@ public sealed class AgentRunQueueProductionOpsTests
         services.AddSingleton<IRepository<AgentTask>>(taskRepository);
         services.AddSingleton<IAgentTaskRunQueueStore>(queueRepository);
         services.AddSingleton<IAgentTaskRunAttemptStore>(attemptRepository);
-        services.AddSingleton<IAgentTaskRunQueue>(new AgentTaskRunQueue(queueRepository));
+        services.AddSingleton<IAgentTaskRunQueue>(new AgentTaskRunQueue(
+            queueRepository,
+            AgentPlanV2TestData.CreateMatchingFreshReadGate()));
         services.AddSingleton(runtime);
         services.AddSingleton(auditLogWriter);
         services.AddSingleton<AgentAuditRecorder>();
@@ -309,7 +362,10 @@ public sealed class AgentRunQueueProductionOpsTests
             workspaceRepository,
             queueRepository,
             attemptRepository ?? new InMemoryAgentTaskRunAttemptStore(),
-            new AgentTaskRunQueue(queueRepository),
+            new AgentTaskRunQueue(
+                queueRepository,
+                AgentPlanV2TestData.CreateMatchingFreshReadGate()),
+            AgentPlanV2TestData.CreateMatchingFreshReadGate(),
             options,
             auditRecorder);
     }
@@ -325,11 +381,11 @@ public sealed class AgentRunQueueProductionOpsTests
             queueRepository);
     }
 
-    private sealed class ThrowingRuntime : IAgentTaskRuntime
+    private sealed class ThrowingRuntime(params object[] failures) : IAgentTaskRuntime
     {
         public Task<Result<AgentTask>> RunAsync(AgentTask task, CancellationToken cancellationToken = default)
         {
-            throw new InvalidOperationException("Runtime should not be called by this test.");
+            return RunAsync(task, AgentTaskRunTriggerType.Manual, cancellationToken);
         }
 
         public Task<Result<AgentTask>> RunAsync(
@@ -337,7 +393,13 @@ public sealed class AgentRunQueueProductionOpsTests
             AgentTaskRunTriggerType triggerType = AgentTaskRunTriggerType.Manual,
             CancellationToken cancellationToken = default)
         {
-            throw new InvalidOperationException("Runtime should not be called by this test.");
+            if (failures.Length == 0)
+            {
+                throw new InvalidOperationException("Runtime should not be called by this test.");
+            }
+
+            Result<AgentTask> result = Result.Failure(failures);
+            return Task.FromResult(result);
         }
     }
 

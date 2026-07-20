@@ -74,11 +74,14 @@ public interface IRuntimeChatAgent
 
 public sealed class ScopedRuntimeAgent(
     IRuntimeChatAgent agent,
-    IAsyncDisposable runtimeScope) : IAsyncDisposable
+    IAsyncDisposable runtimeScope,
+    RuntimeAgentConfigurationSnapshot? configurationSnapshot = null) : IAsyncDisposable
 {
     private int disposed;
 
     public IRuntimeChatAgent Agent { get; } = agent;
+
+    public RuntimeAgentConfigurationSnapshot? ConfigurationSnapshot { get; } = configurationSnapshot;
 
     public async ValueTask DisposeAsync()
     {
@@ -90,6 +93,20 @@ public sealed class ScopedRuntimeAgent(
         await runtimeScope.DisposeAsync();
     }
 }
+
+public sealed record RuntimeAgentConfigurationSnapshot(
+    Guid TemplateId,
+    string TemplateCode,
+    string TemplateVersion,
+    string PromptHash,
+    Guid ModelId,
+    string ModelName,
+    string ModelProvider,
+    string ModelProtocol,
+    string ModelParametersHash,
+    int ContextWindowTokens,
+    int MaxOutputTokens,
+    float Temperature);
 
 public interface IAgentRuntimeFactory
 {

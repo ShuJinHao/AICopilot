@@ -8,6 +8,8 @@ public interface IAgentExecutionMetadataAccessor
 {
     void SetRoutingModel(LanguageModel model);
 
+    void SetRoutingConfiguration(RuntimeAgentConfigurationSnapshot snapshot);
+
     void SetFinalModel(LanguageModel model, int reservedOutputTokens);
 
     void SetContextBudget(ContextBudgetReportDto report);
@@ -29,6 +31,17 @@ public sealed class AgentExecutionMetadataAccessor : IAgentExecutionMetadataAcce
         {
             RoutingModelId = model.Id,
             RoutingModelName = model.Name
+        };
+    }
+
+    public void SetRoutingConfiguration(RuntimeAgentConfigurationSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        current = current with
+        {
+            RoutingModelId = snapshot.ModelId,
+            RoutingModelName = snapshot.ModelName,
+            RoutingConfiguration = snapshot
         };
     }
 

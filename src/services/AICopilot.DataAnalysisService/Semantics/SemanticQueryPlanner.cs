@@ -105,7 +105,18 @@ public sealed class SemanticQueryPlanner(
                     $"Time range field '{field}' is not in the allowed whitelist for {descriptor.Target}.");
             }
 
-            timeRange = new SemanticTimeRange(field, payload.TimeRange.Start, payload.TimeRange.End);
+            if (!SemanticTimeZonePolicyV1.TryNormalizeLocalRange(
+                    payload.TimeRange.Start,
+                    payload.TimeRange.End,
+                    payload.TimeRange.TimeZone,
+                    out var fromUtc,
+                    out var toUtc,
+                    out var timeZone))
+            {
+                return SemanticPlanningResult.Failure("timeRange has an invalid or ambiguous time zone/offset contract.");
+            }
+
+            timeRange = new SemanticTimeRange(field, fromUtc, toUtc, timeZone);
         }
 
         if (descriptor.RequiresTimeRange && timeRange == null)
@@ -262,5 +273,6 @@ public sealed class SemanticQueryPlanner(
     private sealed record SemanticIntentTimeRangePayload(
         [property: JsonPropertyName("field")] string? Field,
         [property: JsonPropertyName("start")] DateTimeOffset? Start,
-        [property: JsonPropertyName("end")] DateTimeOffset? End);
+        [property: JsonPropertyName("end")] DateTimeOffset? End,
+        [property: JsonPropertyName("timeZone")] string? TimeZone);
 }

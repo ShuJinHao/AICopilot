@@ -1,5 +1,6 @@
 using System.Text.Json;
 using AICopilot.Services.Contracts;
+using AICopilot.SharedKernel.Result;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -48,6 +49,7 @@ public sealed class CloudAiReadClient(
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default)
     {
+        query = NormalizeQueryLimit(query);
         using var document = await GetJsonAsync(
             DevicesPath,
             CloudAiReadQueryParameterBuilder.BuildDeviceQueryParameters(query),
@@ -60,6 +62,7 @@ public sealed class CloudAiReadClient(
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default)
     {
+        query = NormalizeQueryLimit(query);
         using var document = await GetJsonAsync(
             ProcessesPath,
             CloudAiReadQueryParameterBuilder.BuildProcessQueryParameters(query),
@@ -72,6 +75,7 @@ public sealed class CloudAiReadClient(
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default)
     {
+        query = NormalizeQueryLimit(query);
         using var document = await GetJsonAsync(
             ClientReleasesPath,
             CloudAiReadQueryParameterBuilder.BuildClientReleaseQueryParameters(query),
@@ -84,6 +88,7 @@ public sealed class CloudAiReadClient(
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default)
     {
+        query = NormalizeQueryLimit(query);
         using var document = await GetJsonAsync(
             DeviceClientStatesPath,
             CloudAiReadQueryParameterBuilder.BuildDeviceClientStateQueryParameters(query),
@@ -96,6 +101,7 @@ public sealed class CloudAiReadClient(
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default)
     {
+        query = NormalizeQueryLimit(query);
         using var document = await GetJsonAsync(
             CapacitySummaryPath,
             CloudAiReadQueryParameterBuilder.BuildCapacityQueryParameters(query),
@@ -108,6 +114,7 @@ public sealed class CloudAiReadClient(
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default)
     {
+        query = NormalizeQueryLimit(query);
         using var document = await GetJsonAsync(
             CapacityHourlyPath,
             CloudAiReadQueryParameterBuilder.BuildCapacityHourlyQueryParameters(query),
@@ -120,6 +127,7 @@ public sealed class CloudAiReadClient(
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default)
     {
+        query = NormalizeQueryLimit(query);
         using var document = await GetJsonAsync(
             DeviceLogsPath,
             CloudAiReadQueryParameterBuilder.BuildDeviceLogQueryParameters(query),
@@ -132,6 +140,7 @@ public sealed class CloudAiReadClient(
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default)
     {
+        query = NormalizeQueryLimit(query);
         using var document = await GetJsonAsync(
             ProductionRecordsPath,
             CloudAiReadQueryParameterBuilder.BuildProductionRecordQueryParameters(query),
@@ -165,12 +174,47 @@ public sealed class CloudAiReadClient(
         CloudAiReadQuery query,
         CancellationToken cancellationToken)
     {
-        if (plan.Kind != SemanticQueryKind.Detail || HasFilter(query, "processId"))
+        if (plan.Kind != SemanticQueryKind.Detail)
         {
             return ToUntyped(await GetProcessesAsync(query, cancellationToken));
         }
 
-        var searchResult = await GetProcessesAsync(query with { Limit = 100 }, cancellationToken);
+        if (HasFilter(query, "processId"))
+        {
+            if (!Guid.TryParse(GetFilterValue(query, "processId"), out var expectedProcessId))
+            {
+                throw new CloudAiReadException(
+                    AppProblemCodes.CloudReadonlyIntentUnsupported,
+                    "Cloud readonly intent violates the frozen typed semantic plan contract.");
+            }
+
+            var directResult = await GetProcessesAsync(query, cancellationToken);
+            if (directResult.IsTruncated ||
+                directResult.Items.Count != 1 ||
+                directResult.Items[0].ProcessId != expectedProcessId)
+            {
+                throw new CloudAiReadException(
+                    CloudAiReadProblemCodes.MissingRequiredParameter,
+                    "Cloud AiRead 工序 ID 直查未返回唯一且身份一致的正式工序。");
+            }
+
+            return ToUntyped(directResult);
+        }
+
+        var exactFilters = plan.Filters
+            .Where(filter => filter.Field.Equals("processCode", StringComparison.OrdinalIgnoreCase) ||
+                             filter.Field.Equals("processName", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (exactFilters.Length == 0)
+        {
+            throw new CloudAiReadException(
+                AppProblemCodes.CloudReadonlyIntentUnsupported,
+                "Cloud readonly intent violates the frozen typed semantic plan contract.");
+        }
+
+        var searchResult = await GetProcessesAsync(
+            query with { Limit = CloudAiReadRowLimitPolicy.MaxRows },
+            cancellationToken);
         if (searchResult.IsTruncated)
         {
             throw new CloudAiReadException(
@@ -178,21 +222,15 @@ public sealed class CloudAiReadClient(
                 "Cloud AiRead 工序搜索结果已截断，不能据此解析唯一工序；请补充精确工序编码或名称。");
         }
 
-        var exactFilters = plan.Filters
-            .Where(filter => filter.Field.Equals("processCode", StringComparison.OrdinalIgnoreCase) ||
-                             filter.Field.Equals("processName", StringComparison.OrdinalIgnoreCase))
-            .ToArray();
         var matches = searchResult.Items
             .Where(item => exactFilters.All(filter =>
                 string.Equals(
                     filter.Field.Equals("processCode", StringComparison.OrdinalIgnoreCase)
-                        ? item.ProcessCode?.Trim()
-                        : item.ProcessName?.Trim(),
+                        ? item.ProcessCode.Trim()
+                        : item.ProcessName.Trim(),
                     filter.Value.Trim(),
                     StringComparison.OrdinalIgnoreCase)))
-            .GroupBy(
-                item => item.ProcessId ?? $"{item.ProcessCode}|{item.ProcessName}",
-                StringComparer.OrdinalIgnoreCase)
+            .GroupBy(item => item.ProcessId)
             .Select(group => group.First())
             .ToArray();
         if (matches.Length != 1)
@@ -207,7 +245,7 @@ public sealed class CloudAiReadClient(
             searchResult.SourcePath,
             searchResult.SourceLabel,
             searchResult.QueriedAtUtc,
-            plan.Limit,
+            query.Limit,
             IsTruncated: false,
             [match],
             [new Dictionary<string, object?>
@@ -246,7 +284,7 @@ public sealed class CloudAiReadClient(
                 null,
                 "deviceCode",
                 false,
-                100),
+                CloudAiReadRowLimitPolicy.MaxRows),
             cancellationToken);
         if (deviceResult.IsTruncated)
         {
@@ -257,12 +295,11 @@ public sealed class CloudAiReadClient(
 
         var deviceIds = deviceResult.Items
             .Where(item => string.Equals(
-                item.DeviceCode?.Trim(),
+                item.DeviceCode.Trim(),
                 deviceCode?.Trim(),
                 StringComparison.OrdinalIgnoreCase))
             .Select(item => item.DeviceId)
-            .Where(id => !string.IsNullOrWhiteSpace(id))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Distinct()
             .ToArray();
         if (deviceIds.Length != 1)
         {
@@ -274,7 +311,7 @@ public sealed class CloudAiReadClient(
         return query.WithFilters(
             query.Filters
                 .Where(filter => !filter.Field.Equals("deviceCode", StringComparison.OrdinalIgnoreCase))
-                .Append(new CloudAiReadFilter("deviceId", "eq", deviceIds[0]!))
+                .Append(new CloudAiReadFilter("deviceId", "eq", deviceIds[0].ToString("D")))
                 .ToArray());
     }
 
@@ -397,6 +434,12 @@ public sealed class CloudAiReadClient(
             result.QueryScope,
             result.RowCount,
             result.NextCursor);
+    }
+
+    private static CloudAiReadQuery NormalizeQueryLimit(CloudAiReadQuery query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        return query with { Limit = CloudAiReadRowLimitPolicy.Normalize(query.Limit) };
     }
 
     private CloudAiReadOptions EnsureConfigured()

@@ -166,6 +166,63 @@ describe('chunkReducer', () => {
     )
   })
 
+  it('preserves a boundary-size Plan v2 payload through the SSE AgentTask reducer', () => {
+    const message = createMessage()
+    const callbacks = {
+      setSessionError: vi.fn(),
+      onApprovalChunk: vi.fn(),
+      onAgentTaskChunk: vi.fn()
+    }
+    const digest = 'b'.repeat(64)
+    const prefix = `{"schemaVersion":"2.0","planDigest":"${digest}","topologyProfile":"LinearV1","planKind":"PlanDraft","isExecutable":false,"padding":"`
+    const suffix = '"}'
+    const planJson = `${prefix}${'x'.repeat(262_144 - prefix.length - suffix.length)}${suffix}`
+
+    processChunk(
+      message,
+      {
+        source: 'PlanAgentTaskStreamHandler',
+        type: ChunkType.AgentTask,
+        content: JSON.stringify({
+          id: 'task-boundary',
+          taskCode: 'AGT-BOUNDARY',
+          sessionId: 'session-1',
+          title: 'Boundary plan',
+          goal: 'Boundary plan',
+          taskType: 'ReportGeneration',
+          status: 'Draft',
+          riskLevel: 'Low',
+          planJson,
+          createdAt: '2026-07-18T00:00:00Z',
+          updatedAt: '2026-07-18T00:00:00Z',
+          steps: [],
+          canRun: false,
+          canSubmitFinalReview: false,
+          canApproveFinal: false,
+          isRunInProgress: false,
+          isRunQueued: false,
+          planSchemaVersion: '2.0',
+          planDigest: digest,
+          topologyProfile: 'LinearV1',
+          isPlanExecutable: false,
+          planIntegrityStatus: 'ValidV2'
+        })
+      },
+      callbacks
+    )
+
+    expect(new TextEncoder().encode(planJson)).toHaveLength(262_144)
+    expect(callbacks.onAgentTaskChunk).toHaveBeenCalledWith(
+      'session-1',
+      expect.objectContaining({
+        id: 'task-boundary',
+        planJson,
+        planDigest: digest,
+        planIntegrityStatus: 'ValidV2'
+      })
+    )
+  })
+
   it('stores agent event chunks as structured runtime details', () => {
     const message = createMessage()
     const callbacks = {

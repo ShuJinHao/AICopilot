@@ -44,7 +44,7 @@ public sealed class CloudAiReadLiveContractTests
             [Filter("deviceId", environment.DeviceId)],
             limit: 20));
         AssertNonEmpty(devices, "devices");
-        devices.Items.Should().ContainSingle(item => item.DeviceId == environment.DeviceId);
+        devices.Items.Should().ContainSingle(item => item.DeviceId == Guid.Parse(environment.DeviceId));
         devices.Rows[0].Keys.Should().NotContain(["status", "lineName", "processName", "updatedAt", "updatedAtUtc"]);
         await AssertEmptyAsync(client.GetDevicesAsync(Query([Filter("deviceId", Guid.NewGuid().ToString())])));
         AssertTruncated(await client.GetDevicesAsync(Query([], limit: 1)), "devices");
@@ -53,7 +53,7 @@ public sealed class CloudAiReadLiveContractTests
             [Filter("processId", environment.ProcessId)],
             limit: 20));
         AssertNonEmpty(processes, "processes");
-        processes.Items.Should().ContainSingle(item => item.ProcessId == environment.ProcessId);
+        processes.Items.Should().ContainSingle(item => item.ProcessId == Guid.Parse(environment.ProcessId));
         await AssertEmptyAsync(client.GetProcessesAsync(Query([Filter("processId", Guid.NewGuid().ToString())])));
         AssertTruncated(await client.GetProcessesAsync(Query([], limit: 1)), "processes");
 
@@ -99,7 +99,7 @@ public sealed class CloudAiReadLiveContractTests
             var stateByCode = await stateOnlyClient.GetDeviceClientStatesAsync(Query(
                 [Filter("deviceCode", environment.DeviceCode)],
                 limit: 20));
-            stateByCode.Items.Should().ContainSingle(item => item.DeviceId == environment.DeviceId);
+            stateByCode.Items.Should().ContainSingle(item => item.DeviceId == Guid.Parse(environment.DeviceId));
         }
 
         using (var forbiddenHttpClient = new HttpClient())

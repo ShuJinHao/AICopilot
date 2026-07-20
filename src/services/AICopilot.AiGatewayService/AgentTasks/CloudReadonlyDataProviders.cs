@@ -35,7 +35,6 @@ internal sealed class DisabledCloudReadonlyDataProvider : ICloudReadonlyDataProv
 }
 
 internal sealed class RealCloudReadonlyDataProvider(
-    ISemanticQueryPlanner semanticQueryPlanner,
     ICloudAiReadClient cloudAiReadClient,
     IOptions<CloudReadonlyOptions> options) : ICloudReadonlyDataProvider
 {
@@ -52,15 +51,7 @@ internal sealed class RealCloudReadonlyDataProvider(
                 "CloudReadonly Real mode requires CloudReadonly:Real and CloudAiRead to be explicitly enabled.");
         }
 
-        var planningResult = semanticQueryPlanner.Plan(request.Intent, request.Query);
-        if (!planningResult.IsSuccess || planningResult.Plan is null)
-        {
-            throw new CloudAiReadException(
-                AppProblemCodes.CloudReadonlyIntentUnsupported,
-                planningResult.ErrorMessage ?? "Cloud readonly semantic plan could not be built.");
-        }
-
-        var semanticPlan = planningResult.Plan;
+        var semanticPlan = request.SemanticPlan;
         if (!CloudAiReadSemanticSupport.IsSupported(semanticPlan.Target))
         {
             throw new CloudAiReadException(
@@ -118,13 +109,29 @@ internal static class CloudReadonlyAgentToolGuards
                 "Cloud readonly intent is missing from the agent plan.");
         }
 
+        var plan = request.SemanticPlan;
         if (CloudReadonlyAgentTextGuard.ContainsForbiddenWriteSemantic(request.Intent) ||
-            CloudReadonlyAgentTextGuard.ContainsForbiddenWriteSemantic(request.Query) ||
-            CloudReadonlyAgentTextGuard.ContainsUnsafePersistedPayload(request.Query))
+            !string.IsNullOrWhiteSpace(plan.QueryText) ||
+            !Enum.IsDefined(plan.Target) ||
+            !Enum.IsDefined(plan.Kind) ||
+            plan.Target == SemanticQueryTarget.Recipe ||
+            plan.Projection is null ||
+            plan.Projection.Fields is null ||
+            plan.Filters is null ||
+            plan.Filters.Any(filter =>
+                filter is null ||
+                string.IsNullOrWhiteSpace(filter.Field) ||
+                string.IsNullOrWhiteSpace(filter.Value) ||
+                !Enum.IsDefined(filter.Operator)) ||
+            !CloudAiReadRowLimitPolicy.IsWithinBounds(plan.Limit) ||
+            !string.Equals(
+                request.SemanticPlanDigest,
+                AgentTaskPlanCloudReadonlyIntentDocument.ComputeSemanticPlanDigest(plan),
+                StringComparison.Ordinal))
         {
             throw new CloudAiReadException(
                 AppProblemCodes.CloudReadonlyIntentUnsupported,
-                "Cloud readonly intent contains unsafe query semantics.");
+                "Cloud readonly intent violates the frozen typed semantic plan contract.");
         }
     }
 }
@@ -176,7 +183,8 @@ internal static class CloudReadonlyAgentToolResultBuilder
 
     public static int ResolveLimit(CloudReadonlySimulationQuery query, int defaultLimit)
     {
-        return query.Limit is > 0 ? Math.Clamp(query.Limit.Value, 1, 200) : defaultLimit;
+        return CloudAiReadRowLimitPolicy.Normalize(
+            query.Limit is > 0 ? query.Limit.Value : defaultLimit);
     }
 
     private static object? NormalizeValue(object? value)

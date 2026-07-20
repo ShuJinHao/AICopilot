@@ -270,8 +270,10 @@ export const chatService = {
       knowledgeBaseIds?: string[]
       artifactTypes?: string[]
       plannerMode?: 'Auto' | 'DynamicOnly' | 'StaticOnly'
-      skillCode?: string | null
-      preferredToolCodes?: string[]
+      pluginSelectionMode?: 'BuiltInOnly' | 'ExplicitAllowlist'
+      selectedPluginIds?: string[]
+      capabilitySelectionMode?: 'InferredFromGoal' | 'ExplicitAllowlist'
+      requestedCapabilityCodes?: string[]
     },
     callbacks: StreamCallbacks,
   ) {

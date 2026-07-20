@@ -55,6 +55,17 @@ public sealed class PersistenceAttemptContext
         return dbContext;
     }
 
+    public async Task<AiGatewayDbContext> CreateAiGatewayDbContextAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var options = new DbContextOptionsBuilder<AiGatewayDbContext>()
+            .UseNpgsql(transactionOwner.Database.GetDbConnection())
+            .Options;
+        var dbContext = new AiGatewayDbContext(options);
+        await dbContext.Database.UseTransactionAsync(transaction.GetDbTransaction(), cancellationToken);
+        return dbContext;
+    }
+
     internal async Task<PersistenceCommitMarkerDbContext> CreateMarkerDbContextAsync(
         CancellationToken cancellationToken)
     {

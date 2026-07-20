@@ -9,7 +9,10 @@
 - Chat 出口可以直接回答，或按安全策略执行已允许的低风险只读动作。
 - Plan 出口只能生成 `PlanDraft` 草案；用户确认前不得执行 Cloud 查询、MCP 工具、Tool 调用、Worker 入队或其他真实业务动作。
 - 用户确认 `PlanDraft` 后才允许转换为 `ExecutablePlan` / `AgentTask`，进入 Skill、Tool、Schema、Guard、审批和 Worker 执行链路。
-- Skill、Tool、MCP、Knowledge 或 DataSource 未匹配时，不能阻断 `PlanDraft`；只能在草案中说明能力缺口、降级为路线规划或要求用户补充目标。
+- Skill、Tool、MCP、Knowledge 或 DataSource 未匹配时，不能阻断服务端能力发现形成 `PlanDraft`；只能在草案中说明能力缺口、降级为路线规划或要求用户补充目标。该规则不允许恢复已退役的前端 `skillCode/preferredToolCodes` 选择入口。
+- Plan v2 公共请求的 `pluginSelectionMode/capabilitySelectionMode` 只接受大小写精确的字符串 enum 名；数字 token、未知字符串和大小写变体必须在 HTTP model binding 阶段拒绝，不得进入 stream handler、session/repository、Tool、Cloud 或消息持久化。
+- P0 的 `SkillCode/SkillName/SkillRoutingReason` 已从 Plan v2 canonical contract 退役。前端 plan-stream wire 不得发送 `skillCode/preferredToolCodes`；composer 仍有任一旧 Skill/Tool 选择时必须在 HTTP 前显示固定错误并停止，不能静默丢弃、自动猜测 Tool→Skill 或恢复影子路由。后端暂留 legacy request 字段只用于兼容期显式拒绝，并须在 stream handler 读取 session/repository 以及 command coordinator 准备/持久化前返回 `agent_plan_schema_invalid`；公共 SSE 只披露固定通用 schema detail，不泄漏内部拒绝原因。
+- Plan v2 的 `262144` UTF-8 byte 上限按“最终含 64 位 SHA-256 digest 的 canonical payload”计算。`AgentCanonicalJsonV1` 是排序、JavaScript 转义、数字规范化、root exclusion、共享结构限制与 byte count 的唯一 owner；Seal 必须先以同长度 64-hex placeholder 做 bounded canonical measure，正好上限允许，首次越界以专用内部信号短路为 `max+1` 并映射 `plan_payload_too_large`，不得让通用 canonical preflight 把业务超限泛化成 `agent_plan_invalid`，也不得放宽现有全局 `Canonicalize` 预检。
 - Plan 能力发现和真实 Tool 分支必须共用同一生产安全门禁；只有通过 `AiToolSafetyPolicy` 的 tool 才能进入草案或执行上下文。`GoldenEvalTests` 必须穿过真实 `AgentWorkflowPipeline` 或其正式生产组件，数据集必须版本化并记录变更理由；不得直接调用 leaf policy 自证。
 
 ## 2. 能力边界
@@ -58,6 +61,12 @@ Cloud 只读 Agent 当前正式能力限定为：
 - preview 只承载最多 3 个可识别 dictionary row 的扁平标量。值只走唯一 `SanitizeValue` 入口；JSON null/bool/number/string 可映射为同等标量，CLR 只显式允许 string、bool/数值、date、Guid 和 enum。JSON object/array 及其余任意 CLR object/collection 一律输出既有脱敏占位，不调用自定义 `ToString()` 透出内容，不递归展开第二层 key。
 - Semantic/FreeForm Widget 在 formatter 之前由各自真实 plan/summary/rows 生成，不消费最终 prompt label map；不得因最终上下文治理复制第二套 Widget 标签或值清洗器。
 
+### 2.3 P0 产物检查点与 Tool 输出边界
+
+- 声明产物目标的 Plan 必须且只能有一个最后步骤 `finalize_artifacts`，其 `StepType=Finalize`、`RequiresApproval=true`；该步骤是生命周期检查点，不是 provider tool，不能交给 built-in、MCP 或 mock executor 伪造执行成功。
+- P0 runtime 只允许 `BuiltInOnly`，没有可信 PlanCompiler 时生产 `ExecutablePlan` 必须 fail-closed；Draft 只披露 `plan_compiler_unavailable`，不得把测试用 fresh-read/downstream harness 带入生产注册。
+- Tool output 必须先通过注册表的 closed strict schema，才可记录 execution、step 或 run 成功。持久化 durable output 只保留规范化、版本化的安全 payload，不得保存 provider raw output；ArtifactWorkspace 文件/aggregate 的原子 staging、补偿、provenance 与 reconciliation 仍属于 P1，本 P0 契约不得宣称已经闭合。
+
 ## 3. Cloud 写入禁止
 
 - Agent workflow、MCP、Tool、后台任务、直接 SQL 和隐藏 adapter 均不得创建、修改、删除、补录、审批、派发或触发 Cloud 业务数据。
@@ -73,6 +82,9 @@ Cloud 只读 Agent 当前正式能力限定为：
 - 用户可见文案必须是安全摘要，不能包含 raw exception message、SQL、prompt、token、endpoint、连接串、密码、API key 或内部 provider 细节。
 - `UseCaseExceptionHandler` catch-all 不得把原始 exception 对象交给 logger 形成敏感日志。
 - 新增、删除或重命名错误码时，必须同步更新 `docs/frontend-integration-contract-package-2026-05-17.md` 并运行错误码目录测试。
+- `agent_plan_invalid`、`agent_plan_schema_invalid` 与 `plan_payload_too_large` 的公开 `code/detail/userFacingMessage` 必须由同一共享披露策略固定产生，REST unhandled、普通 `ReturnResult`、SSE exception/Result、AgentEvent 和 queue/DTO 不得从 exception `SafeDetail`、`ApiProblemDescriptor.Detail`、string error 或任何 Plan 可控文本派生用户可见内容。
+- `Result.Errors` 是有序多项序列：出口必须按序选择首个可公开的 Plan descriptor，安全 match 只能携带固定 disclosure 与精确 non-empty `Guid taskId`，不得携带原始 descriptor/extensions。没有 descriptor 时 Plan draft 按固定 `agent_plan_invalid` 处理；只有未知 descriptor 时保留原首项的普通 fallback 语义。
+- SSE `AgentEvent` payload 字段名固定为 `stage/code/detail/recoverable/suggestedAction/metadata`；不得因全局 serializer 默认而输出 PascalCase 变体，也不得为修单一 event 去改全局 JSON 契约。
 
 ### 4.1 提交结果未知
 

@@ -51,6 +51,7 @@ const {
   latestPlanVisibleToolCount,
   latestPlanIsCloudReadonly,
   isPlanDraftTask,
+  isPlanConfirmable,
 } = useAgentPlanPreview()
 const { latestTimelineSummary, timelineEventCount, timelineEventItems } = useAgentTimelineDisplay()
 
@@ -163,7 +164,7 @@ const primaryTaskAction = computed(() => {
         kind: 'approve-and-run' as PrimaryTaskActionKind,
         label: '确认计划并执行',
         icon: Play,
-        disabled: store.isAgentBusy,
+        disabled: store.isAgentBusy || !isPlanConfirmable.value,
       }
     case 'PlanApproved':
       return {

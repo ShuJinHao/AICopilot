@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel;
+using System.Globalization;
 using System.Text.Json.Serialization;
 using AICopilot.Visualization;
 using AICopilot.Visualization.Widgets;
@@ -82,7 +83,173 @@ public sealed record SemanticSort(
 public sealed record SemanticTimeRange(
     string Field,
     DateTimeOffset? Start,
-    DateTimeOffset? End);
+    DateTimeOffset? End,
+    string TimeZone = "UTC");
+
+public static class SemanticTimeZonePolicyV1
+{
+    public const string ContractVersion = "semantic-time-zone-policy:v1";
+
+    public static bool IsCanonical(string? timeZone)
+    {
+        if (string.Equals(timeZone, "UTC", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (TryParseFixedOffset(timeZone, out _))
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(timeZone))
+        {
+            return false;
+        }
+
+        try
+        {
+            return string.Equals(
+                TimeZoneInfo.FindSystemTimeZoneById(timeZone).Id,
+                timeZone,
+                StringComparison.Ordinal);
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            return false;
+        }
+        catch (InvalidTimeZoneException)
+        {
+            return false;
+        }
+    }
+
+    public static bool TryNormalizeLocalRange(
+        DateTimeOffset? start,
+        DateTimeOffset? end,
+        string? explicitTimeZone,
+        out DateTimeOffset? fromUtc,
+        out DateTimeOffset? toUtc,
+        out string canonicalTimeZone)
+    {
+        fromUtc = null;
+        toUtc = null;
+        canonicalTimeZone = string.Empty;
+        if (start is null && end is null || start > end)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(explicitTimeZone))
+        {
+            var offsets = new[] { start?.Offset, end?.Offset }
+                .Where(offset => offset.HasValue)
+                .Select(offset => offset!.Value)
+                .Distinct()
+                .ToArray();
+            if (offsets.Length != 1)
+            {
+                return false;
+            }
+
+            canonicalTimeZone = FormatFixedOffset(offsets[0]);
+        }
+        else
+        {
+            canonicalTimeZone = explicitTimeZone.Trim();
+            if (!IsCanonical(canonicalTimeZone) ||
+                !OffsetsMatch(canonicalTimeZone, start, end))
+            {
+                return false;
+            }
+        }
+
+        fromUtc = start?.ToUniversalTime();
+        toUtc = end?.ToUniversalTime();
+        return true;
+    }
+
+    public static bool TryNormalizeUtcRange(
+        DateTimeOffset? from,
+        DateTimeOffset? to,
+        string? timeZone,
+        out DateTimeOffset? fromUtc,
+        out DateTimeOffset? toUtc,
+        out string canonicalTimeZone)
+    {
+        fromUtc = null;
+        toUtc = null;
+        canonicalTimeZone = string.IsNullOrWhiteSpace(timeZone) ? "UTC" : timeZone.Trim();
+        if (from is null && to is null ||
+            from > to ||
+            from?.Offset != TimeSpan.Zero ||
+            to?.Offset != TimeSpan.Zero ||
+            !IsCanonical(canonicalTimeZone))
+        {
+            return false;
+        }
+
+        fromUtc = from;
+        toUtc = to;
+        return true;
+    }
+
+    private static bool OffsetsMatch(string timeZone, DateTimeOffset? start, DateTimeOffset? end)
+    {
+        if (TryParseFixedOffset(timeZone, out var fixedOffset))
+        {
+            return (start is null || start.Value.Offset == fixedOffset) &&
+                   (end is null || end.Value.Offset == fixedOffset);
+        }
+
+        TimeZoneInfo zone;
+        try
+        {
+            zone = TimeZoneInfo.FindSystemTimeZoneById(timeZone);
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            return false;
+        }
+        catch (InvalidTimeZoneException)
+        {
+            return false;
+        }
+
+        return (start is null || zone.GetUtcOffset(start.Value.UtcDateTime) == start.Value.Offset) &&
+               (end is null || zone.GetUtcOffset(end.Value.UtcDateTime) == end.Value.Offset);
+    }
+
+    private static bool TryParseFixedOffset(string? value, out TimeSpan offset)
+    {
+        offset = default;
+        if (value is null || value.Length != 9 ||
+            !value.StartsWith("UTC", StringComparison.Ordinal) ||
+            value[3] is not ('+' or '-') ||
+            value[6] != ':' ||
+            !int.TryParse(value.AsSpan(4, 2), NumberStyles.None, CultureInfo.InvariantCulture, out var hours) ||
+            !int.TryParse(value.AsSpan(7, 2), NumberStyles.None, CultureInfo.InvariantCulture, out var minutes) ||
+            hours > 14 || minutes > 59 || hours == 14 && minutes != 0)
+        {
+            return false;
+        }
+
+        offset = new TimeSpan(value[3] == '-' ? -hours : hours, value[3] == '-' ? -minutes : minutes, 0);
+        return true;
+    }
+
+    private static string FormatFixedOffset(TimeSpan offset)
+    {
+        if (offset == TimeSpan.Zero)
+        {
+            return "UTC";
+        }
+
+        var sign = offset < TimeSpan.Zero ? '-' : '+';
+        var absolute = offset.Duration();
+        return $"UTC{sign}{absolute.Hours:00}:{absolute.Minutes:00}";
+    }
+}
 
 public sealed record SemanticQueryPlan(
     string Intent,

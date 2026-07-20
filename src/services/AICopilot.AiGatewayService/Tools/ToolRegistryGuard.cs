@@ -65,10 +65,44 @@ public sealed class ToolRegistryGuard(
                 $"Tool '{tool.ToolCode}' is not executable by Agent policy.");
         }
 
+        var inputSchema = ToolInputSchemaValidator.ValidateSchema(tool.InputSchemaJson);
+        if (!inputSchema.IsValid)
+        {
+            return ToolRegistryDecision.Reject(
+                AppProblemCodes.PlannerToolSchemaUnsupported,
+                $"Tool '{tool.ToolCode}' has an unavailable input contract: {inputSchema.Error}");
+        }
+
+        var outputSchema = ToolOutputSchemaValidator.ValidateSchema(tool.OutputSchemaJson);
+        if (!outputSchema.IsValid)
+        {
+            return ToolRegistryDecision.Reject(
+                AppProblemCodes.PlannerToolSchemaUnsupported,
+                $"Tool '{tool.ToolCode}' has an unavailable output contract: {outputSchema.Error}");
+        }
+
+        var builtIn = BuiltInToolRegistrations.FindAgentRuntimeTool(tool.ToolCode);
+        if (builtIn is not null)
+        {
+            var builtInSchema = ToolInputSchemaContractV1.Validate(builtIn.InputSchemaJson);
+            var builtInOutputSchema = ToolOutputSchemaContractV1.Validate(builtIn.OutputSchemaJson);
+            if (!builtInSchema.IsValid ||
+                !builtInOutputSchema.IsValid ||
+                !string.Equals(inputSchema.CanonicalJson, builtInSchema.CanonicalJson, StringComparison.Ordinal) ||
+                !string.Equals(outputSchema.CanonicalJson, builtInOutputSchema.CanonicalJson, StringComparison.Ordinal) ||
+                tool.SchemaVersion != builtIn.SchemaVersion ||
+                tool.CatalogVersion != builtIn.CatalogVersion)
+            {
+                return ToolRegistryDecision.Reject(
+                    AppProblemCodes.PlannerToolSchemaUnsupported,
+                    $"Built-in tool '{tool.ToolCode}' does not match its frozen catalog input/output contract/version.");
+            }
+        }
+
         if (tool.ProviderType == ToolProviderType.CloudReadonly)
         {
-            var inputSchema = TryParseJson(tool.InputSchemaJson);
-            var outputSchema = TryParseJson(tool.OutputSchemaJson);
+            var cloudInputSchema = TryParseJson(inputSchema.CanonicalJson);
+            var cloudOutputSchema = TryParseJson(outputSchema.CanonicalJson);
             var safety = AiToolSafetyPolicy.Evaluate(
                 AiToolExternalSystemType.CloudReadOnly,
                 AiToolCapabilityKind.ReadOnlyQuery,
@@ -76,8 +110,8 @@ public sealed class ToolRegistryGuard(
                 tool.ToolCode,
                 tool.Description,
                 readOnlyDeclared: true,
-                inputSchema,
-                outputSchema);
+                cloudInputSchema,
+                cloudOutputSchema);
             if (!safety.IsAllowed)
             {
                 return ToolRegistryDecision.Reject(
@@ -132,6 +166,10 @@ public sealed class ToolRegistryGuard(
             if (decision.IsAllowed)
             {
                 allowed.Add(decision.Tool!);
+            }
+            else if (decision.Problem?.Code == AppProblemCodes.PlannerToolSchemaUnsupported)
+            {
+                throw new ToolRegistryGuardException(decision.Problem);
             }
         }
 

@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using AICopilot.AiGatewayService.Tools;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
@@ -12,6 +13,10 @@ public sealed record PlannerToolCatalog(
     IReadOnlyCollection<AgentPlannerToolSummary> Tools)
 {
     public const int CurrentVersion = BuiltInToolRegistrations.CurrentCatalogVersion;
+    public const int MaxInputSchemaUtf8Bytes = 4_000;
+    public const int MaxOutputSchemaUtf8Bytes = ToolOutputSchemaContractV1.MaxSchemaUtf8Bytes;
+    public const string StrictEmptyOutputSchemaJson =
+        "{\"additionalProperties\":false,\"properties\":{},\"type\":\"object\"}";
 }
 
 public static class PlannerToolCatalogMetadata
@@ -47,7 +52,12 @@ public sealed record AgentPlannerToolSummary(
     int CatalogVersion = PlannerToolCatalog.CurrentVersion,
     string ApprovalPolicy = "None",
     string ProviderKind = "BuiltIn",
-    bool IsMock = false);
+    bool IsMock = false,
+    string OutputSchemaJson = PlannerToolCatalog.StrictEmptyOutputSchemaJson,
+    string? RequiredPermission = null,
+    string SideEffectClass = "ReadOnly",
+    string InputSchemaHash = "",
+    string OutputSchemaHash = "");
 
 public sealed record PlannerToolSchemaSummary(
     string Type,
@@ -66,7 +76,6 @@ internal static class PlannerToolCatalogBuilder
 {
     private const int MaxSchemaProperties = 24;
     private const int MaxEnumValues = 12;
-    private const int MaxTextLength = 240;
 
     public static Result<PlannerToolCatalog> Build(
         IEnumerable<ToolRegistration> tools,
@@ -89,16 +98,86 @@ internal static class PlannerToolCatalogBuilder
                 continue;
             }
 
-            var inputSchema = SummarizeSchema(tool.InputSchemaJson, $"{tool.ToolCode} input");
+            var inputSchemaContract = ToolInputSchemaValidator.ValidateSchema(tool.InputSchemaJson);
+            if (!inputSchemaContract.IsValid)
+            {
+                return Result.Failure(new ApiProblemDescriptor(
+                    AppProblemCodes.PlannerToolSchemaUnsupported,
+                    $"Tool registry {tool.ToolCode} input schema is unavailable: {inputSchemaContract.Error}"));
+            }
+
+            var canonicalInputSchema = inputSchemaContract.CanonicalJson!;
+            if (Encoding.UTF8.GetByteCount(canonicalInputSchema) > PlannerToolCatalog.MaxInputSchemaUtf8Bytes)
+            {
+                return Result.Failure(new ApiProblemDescriptor(
+                    AppProblemCodes.PlannerToolSchemaUnsupported,
+                    $"Tool registry {tool.ToolCode} input schema exceeds the planner's exact {PlannerToolCatalog.MaxInputSchemaUtf8Bytes}-byte contract limit."));
+            }
+
+            if (!string.Equals(
+                    ToolExecutionRecordSanitizer.Sanitize(
+                        canonicalInputSchema,
+                        PlannerToolCatalog.MaxInputSchemaUtf8Bytes),
+                    canonicalInputSchema,
+                    StringComparison.Ordinal))
+            {
+                return Result.Failure(new ApiProblemDescriptor(
+                    AppProblemCodes.PlannerToolSchemaUnsupported,
+                    $"Tool registry {tool.ToolCode} input schema contains content that cannot be projected verbatim to the planner."));
+            }
+
+            var inputSchema = SummarizeSchema(canonicalInputSchema, $"{tool.ToolCode} input");
             if (!inputSchema.IsSuccess)
             {
                 return Result.From(inputSchema);
             }
 
-            var outputSchema = SummarizeSchema(tool.OutputSchemaJson, $"{tool.ToolCode} output");
+            if (inputSchema.Value!.IsTruncated)
+            {
+                return Result.Failure(new ApiProblemDescriptor(
+                    AppProblemCodes.PlannerToolSchemaUnsupported,
+                    $"Tool registry {tool.ToolCode} input schema cannot be represented exactly by the planner catalog."));
+            }
+
+            var outputSchemaContract = ToolOutputSchemaValidator.ValidateSchema(tool.OutputSchemaJson);
+            if (!outputSchemaContract.IsValid)
+            {
+                return Result.Failure(new ApiProblemDescriptor(
+                    AppProblemCodes.PlannerToolSchemaUnsupported,
+                    $"Tool registry {tool.ToolCode} output schema is unavailable: {outputSchemaContract.Error}"));
+            }
+
+            var canonicalOutputSchema = outputSchemaContract.CanonicalJson!;
+            if (Encoding.UTF8.GetByteCount(canonicalOutputSchema) > PlannerToolCatalog.MaxOutputSchemaUtf8Bytes)
+            {
+                return Result.Failure(new ApiProblemDescriptor(
+                    AppProblemCodes.PlannerToolSchemaUnsupported,
+                    $"Tool registry {tool.ToolCode} output schema exceeds the planner's exact {PlannerToolCatalog.MaxOutputSchemaUtf8Bytes}-byte contract limit."));
+            }
+
+            if (!string.Equals(
+                    ToolExecutionRecordSanitizer.Sanitize(
+                        canonicalOutputSchema,
+                        PlannerToolCatalog.MaxOutputSchemaUtf8Bytes),
+                    canonicalOutputSchema,
+                    StringComparison.Ordinal))
+            {
+                return Result.Failure(new ApiProblemDescriptor(
+                    AppProblemCodes.PlannerToolSchemaUnsupported,
+                    $"Tool registry {tool.ToolCode} output schema contains content that cannot be projected verbatim to the planner."));
+            }
+
+            var outputSchema = SummarizeSchema(canonicalOutputSchema, $"{tool.ToolCode} output");
             if (!outputSchema.IsSuccess)
             {
                 return Result.From(outputSchema);
+            }
+
+            if (outputSchema.Value!.IsTruncated)
+            {
+                return Result.Failure(new ApiProblemDescriptor(
+                    AppProblemCodes.PlannerToolSchemaUnsupported,
+                    $"Tool registry {tool.ToolCode} output schema cannot be represented exactly by the planner catalog."));
             }
 
             summaries.Add(new AgentPlannerToolSummary(
@@ -108,7 +187,7 @@ internal static class PlannerToolCatalogBuilder
                 tool.ProviderType.ToString(),
                 tool.TargetType.ToString(),
                 Sanitize(tool.TargetName, 200) ?? string.Empty,
-                Sanitize(tool.InputSchemaJson, 4000) ?? "{}",
+                canonicalInputSchema,
                 tool.RequiresApproval,
                 tool.RiskLevel.ToString(),
                 tool.TimeoutSeconds,
@@ -129,7 +208,14 @@ internal static class PlannerToolCatalogBuilder
                 tool.CatalogVersion,
                 Sanitize(tool.ApprovalPolicy, 120) ?? "None",
                 tool.ProviderType.ToString(),
-                tool.ProviderType == ToolProviderType.MockMcp));
+                tool.ProviderType == ToolProviderType.MockMcp,
+                canonicalOutputSchema,
+                Sanitize(tool.RequiredPermission, 160),
+                tool.DataBoundary == ToolDataBoundary.ArtifactDraftOnly
+                    ? "ArtifactWrite"
+                    : "ReadOnly",
+                CanonicalJson.ComputeSha256(canonicalInputSchema),
+                CanonicalJson.ComputeSha256(canonicalOutputSchema)));
         }
 
         return Result.Success(new PlannerToolCatalog(
@@ -235,10 +321,10 @@ internal static class PlannerToolCatalogBuilder
         return required
             .EnumerateArray()
             .Where(item => item.ValueKind == JsonValueKind.String)
-            .Select(item => Sanitize(item.GetString(), 120))
+            .Select(item => item.GetString())
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .Cast<string>()
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Distinct(StringComparer.Ordinal)
             .ToArray();
     }
 
@@ -265,7 +351,7 @@ internal static class PlannerToolCatalogBuilder
             var enumValues = ReadEnum(property.Value, out var enumTruncated);
             truncated |= enumTruncated;
             summaries.Add(new PlannerToolPropertySummary(
-                Sanitize(property.Name, 120) ?? property.Name,
+                property.Name,
                 Sanitize(ReadSchemaType(property.Value) ?? "any", 64) ?? "any",
                 enumValues,
                 required.Contains(property.Name, StringComparer.OrdinalIgnoreCase)));
@@ -292,7 +378,7 @@ internal static class PlannerToolCatalogBuilder
                 break;
             }
 
-            values.Add(Sanitize(item.ToString(), MaxTextLength) ?? string.Empty);
+            values.Add(item.ToString());
         }
 
         return values;

@@ -111,10 +111,17 @@ internal sealed class AgentTaskRunQueueWorkerCoordinator(
 
         if (!result.IsSuccess)
         {
-            var problem = result.Errors?.OfType<ApiProblemDescriptor>().FirstOrDefault();
+            var errors = result.Errors?.ToArray();
+            var publicPlanFailure = AgentPlanPublicFailureDisclosurePolicy.ResolveResultErrors(errors);
+            var problem = errors?.OfType<ApiProblemDescriptor>().FirstOrDefault();
+            var failureCode = publicPlanFailure?.Disclosure.Code
+                ?? problem?.Code
+                ?? "agent_task_run_failed";
             item.MarkFailed(
-                problem?.Code ?? "agent_task_run_failed",
-                problem?.Detail ?? "Agent task run failed before runtime execution completed.",
+                failureCode,
+                publicPlanFailure?.Disclosure.Detail
+                    ?? problem?.Detail
+                    ?? "Agent task run failed before runtime execution completed.",
                 now);
         }
         else if (task.Status == AgentTaskStatus.Cancelled)

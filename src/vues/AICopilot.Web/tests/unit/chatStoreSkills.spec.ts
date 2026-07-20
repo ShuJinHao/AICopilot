@@ -931,7 +931,7 @@ describe('chatStore skills', () => {
     expect(store.latestAgentTask?.sessionId).toBe('session-1')
   })
 
-  it('omits skill code in auto mode so the backend can route it', async () => {
+  it('omits retired skill and tool fields in auto mode before calling the Plan v2 stream', async () => {
     activateResolvedSession()
     const store = useChatStore()
     await store.loadSkills()
@@ -942,28 +942,32 @@ describe('chatStore skills', () => {
       expect.objectContaining({
         sessionId: 'session-1',
         goal: '查看 Cloud 设备日志',
-        skillCode: null,
+        pluginSelectionMode: 'BuiltInOnly',
+        selectedPluginIds: [],
+        capabilitySelectionMode: 'InferredFromGoal',
+        requestedCapabilityCodes: [],
       }),
       expect.any(Object),
     )
+    const payload = chatServiceMock.planAgentTaskStream.mock.calls.at(-1)?.[0]
+    expect(payload).not.toHaveProperty('skillCode')
+    expect(payload).not.toHaveProperty('preferredToolCodes')
   })
 
-  it('sends the selected skill code when planning an agent task', async () => {
+  it('blocks Plan v2 before HTTP when a legacy skill remains selected', async () => {
     activateResolvedSession()
     const store = useChatStore()
     await store.loadSkills()
     await store.selectSkill('knowledge_research')
 
-    await store.planAgentTask('查手册')
+    const planned = await store.planAgentTask('查手册')
 
-    expect(chatServiceMock.planAgentTaskStream).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sessionId: 'session-1',
-        goal: '查手册',
-        skillCode: 'knowledge_research',
-      }),
-      expect.any(Object),
+    expect(planned).toBeNull()
+    expect(chatServiceMock.planAgentTaskStream).not.toHaveBeenCalled()
+    expect(store.errorMessage).toBe(
+      '当前计划入口不再接受 Skill 或工具选择，请清除旧选择后重试。',
     )
+    expect(store.currentMessages).toEqual([])
   })
 
   it('adds plan mode goal and PlanDraft reply to the conversation flow', async () => {
@@ -1065,7 +1069,7 @@ describe('chatStore skills', () => {
     expect(store.timelineEvents).toEqual([timelineEvent])
   })
 
-  it('sends the selected knowledge base only for skills that allow knowledge retrieval', async () => {
+  it('blocks Plan v2 before HTTP when a knowledge skill selection remains active', async () => {
     activateResolvedSession()
     const store = useChatStore()
 
@@ -1076,28 +1080,20 @@ describe('chatStore skills', () => {
 
     await store.planAgentTask('查设备手册')
 
-    expect(chatServiceMock.planAgentTaskStream).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        skillCode: 'knowledge_research',
-        knowledgeBaseIds: ['kb-2'],
-      }),
-      expect.any(Object),
+    expect(chatServiceMock.planAgentTaskStream).not.toHaveBeenCalled()
+    expect(store.errorMessage).toBe(
+      '当前计划入口不再接受 Skill 或工具选择，请清除旧选择后重试。',
     )
 
     await store.selectSkill('data_analysis')
 
     await store.planAgentTask('分析产能')
 
-    expect(chatServiceMock.planAgentTaskStream).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        skillCode: 'data_analysis',
-        knowledgeBaseIds: [],
-      }),
-      expect.any(Object),
-    )
+    expect(chatServiceMock.planAgentTaskStream).not.toHaveBeenCalled()
+    expect(store.currentMessages).toEqual([])
   })
 
-  it('sends selected plugin tools as a planner preference without leaving auto skill mode', async () => {
+  it('blocks Plan v2 before HTTP when a legacy tool remains selected', async () => {
     activateResolvedSession()
     const store = useChatStore()
 
@@ -1105,16 +1101,15 @@ describe('chatStore skills', () => {
     await store.loadPluginTools()
     store.togglePluginTool('rag_search')
 
-    await store.planAgentTask('查资料并生成报告')
+    const planned = await store.planAgentTask('查资料并生成报告')
 
     expect(chatServiceMock.getToolCatalog).toHaveBeenCalledWith(null)
-    expect(chatServiceMock.planAgentTaskStream).toHaveBeenCalledWith(
-      expect.objectContaining({
-        skillCode: null,
-        preferredToolCodes: ['rag_search'],
-      }),
-      expect.any(Object),
+    expect(planned).toBeNull()
+    expect(chatServiceMock.planAgentTaskStream).not.toHaveBeenCalled()
+    expect(store.errorMessage).toBe(
+      '当前计划入口不再接受 Skill 或工具选择，请清除旧选择后重试。',
     )
+    expect(store.currentMessages).toEqual([])
   })
 
   it('treats a tool catalog response without tools as an empty catalog', async () => {

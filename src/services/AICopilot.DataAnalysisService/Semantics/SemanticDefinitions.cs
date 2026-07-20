@@ -18,7 +18,7 @@ public sealed class DeviceSemanticDefinition : SemanticEntityDefinition
                 [SemanticQueryKind.Status] = new(["deviceId", "deviceName", "clientCode", "softwareStatus", "runtimeStatus", "runtimeStartedAtUtc", "lastRuntimeHeartbeatAtUtc"])
             },
             defaultLimit: 50,
-            maxLimit: 100)
+            maxLimit: CloudAiReadRowLimitPolicy.MaxRows)
     {
     }
 }
@@ -39,7 +39,7 @@ public sealed class DeviceLogSemanticDefinition : SemanticEntityDefinition
                 [SemanticQueryKind.ByLevel] = new(["deviceId", "deviceName", "level", "message", "occurredAt"])
             },
             defaultLimit: 50,
-            maxLimit: 200)
+            maxLimit: CloudAiReadRowLimitPolicy.MaxRows)
     {
     }
 }
@@ -80,7 +80,7 @@ public sealed class CapacitySemanticDefinition : SemanticEntityDefinition
                 [SemanticQueryKind.ByDevice] = new(["shiftDate", "outputQty", "qualifiedQty", "occurredAt"])
             },
             defaultLimit: 100,
-            maxLimit: 200)
+            maxLimit: CloudAiReadRowLimitPolicy.MaxRows)
     {
     }
 }
@@ -101,7 +101,7 @@ public sealed class ProductionDataSemanticDefinition : SemanticEntityDefinition
                 [SemanticQueryKind.ByDevice] = new(["recordId", "typeKey", "typeName", "deviceId", "deviceName", "barcode", "result", "completedAt"])
             },
             defaultLimit: 100,
-            maxLimit: 200)
+            maxLimit: CloudAiReadRowLimitPolicy.MaxRows)
     {
     }
 }
@@ -121,7 +121,7 @@ public sealed class ProcessSemanticDefinition : SemanticEntityDefinition
                 [SemanticQueryKind.Detail] = new(["processId", "processCode", "processName"])
             },
             defaultLimit: 50,
-            maxLimit: 100)
+            maxLimit: CloudAiReadRowLimitPolicy.MaxRows)
     {
     }
 }
@@ -140,7 +140,7 @@ public sealed class ClientReleaseSemanticDefinition : SemanticEntityDefinition
                 [SemanticQueryKind.List] = new(["releaseId", "componentKind", "componentKey", "displayName", "channel", "targetRuntime", "version", "status", "createdAtUtc", "publishedAtUtc", "deletedAtUtc"])
             },
             defaultLimit: 50,
-            maxLimit: 100)
+            maxLimit: CloudAiReadRowLimitPolicy.MaxRows)
     {
     }
 }

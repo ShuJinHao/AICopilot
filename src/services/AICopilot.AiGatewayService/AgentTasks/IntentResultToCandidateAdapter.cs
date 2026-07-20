@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using AICopilot.AiGatewayService.Models;
 using AICopilot.Services.Contracts;
+using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Result;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
@@ -15,9 +16,7 @@ internal sealed record AgentIntentAdapterContext(
     IReadOnlyCollection<string> RequestedArtifacts,
     IReadOnlyCollection<string> KnownSkillCodes,
     IReadOnlyCollection<string> KnownActionIntentCodes,
-    IReadOnlyDictionary<string, string> AuthorizedDeviceIdsByCode,
-    string RouterVersion = "intent-router:v1",
-    string PromptVersion = "intent-prompt:v1");
+    IReadOnlyDictionary<string, string> AuthorizedDeviceIdsByCode);
 
 internal sealed record AgentIntentCatalogDescriptor(
     string IntentCode,
@@ -28,6 +27,8 @@ internal sealed record AgentIntentCatalogDescriptor(
 internal static class AgentIntentCatalogV1
 {
     public const string CatalogVersion = "intent-catalog:v1";
+    public const string RouterVersion = "intent-router:v1";
+    public const string PromptVersion = "intent-prompt:v1";
 
     private static readonly IReadOnlyDictionary<string, AgentIntentCatalogDescriptor> BaseDescriptors =
         BuildBaseDescriptors().ToDictionary(descriptor => descriptor.IntentCode, StringComparer.Ordinal);
@@ -45,49 +46,27 @@ internal static class AgentIntentCatalogV1
         }
 
         if (intentCode.StartsWith("Skill.", StringComparison.Ordinal) &&
-            context.KnownSkillCodes.Contains(intentCode["Skill.".Length..], StringComparer.OrdinalIgnoreCase))
+            context.KnownSkillCodes.Contains(intentCode["Skill.".Length..], StringComparer.Ordinal))
         {
             descriptor = new AgentIntentCatalogDescriptor(
                 intentCode,
                 AgentIntentClass.TransitionSkill,
-                AgentIntentAvailability.Available,
-                "LegacySkillCatalog");
+                AgentIntentAvailability.KnownButUnavailable,
+                "TransitionSkillRoster");
             return true;
         }
 
         if (intentCode.StartsWith("Action.", StringComparison.Ordinal) &&
-            context.KnownActionIntentCodes.Contains(intentCode, StringComparer.OrdinalIgnoreCase))
+            context.KnownActionIntentCodes.Any(code =>
+                string.Equals(code, intentCode, StringComparison.Ordinal) ||
+                string.Equals($"Action.{code}", intentCode, StringComparison.Ordinal)))
         {
             descriptor = new AgentIntentCatalogDescriptor(
                 intentCode,
                 AgentIntentClass.PluginAction,
-                AgentIntentAvailability.Available,
-                "PluginCatalog");
+                AgentIntentAvailability.KnownButUnavailable,
+                "PluginActionRoster");
             return true;
-        }
-
-        if (intentCode.StartsWith("Knowledge.", StringComparison.Ordinal) && context.KnowledgeBaseIds.Count == 1)
-        {
-            descriptor = new AgentIntentCatalogDescriptor(
-                intentCode,
-                AgentIntentClass.Knowledge,
-                AgentIntentAvailability.Available,
-                "KnowledgeBase");
-            return true;
-        }
-
-        if (intentCode.StartsWith("Analysis.", StringComparison.Ordinal))
-        {
-            var sourceName = intentCode["Analysis.".Length..];
-            if (context.DataSources.Any(source => string.Equals(source.Name, sourceName, StringComparison.OrdinalIgnoreCase)))
-            {
-                descriptor = new AgentIntentCatalogDescriptor(
-                    intentCode,
-                    AgentIntentClass.GovernedExploration,
-                    AgentIntentAvailability.Available,
-                    "BusinessDatabase");
-                return true;
-            }
         }
 
         descriptor = new AgentIntentCatalogDescriptor(
@@ -101,6 +80,8 @@ internal static class AgentIntentCatalogV1
     private static IEnumerable<AgentIntentCatalogDescriptor> BuildBaseDescriptors()
     {
         yield return Available("General.Chat", AgentIntentClass.General, "BuiltIn");
+        yield return Available("Knowledge.Retrieve", AgentIntentClass.Knowledge, "KnowledgeBase");
+        yield return Available("Analysis.GovernedQuery", AgentIntentClass.GovernedExploration, "BusinessDatabase");
 
         foreach (var policy in new[]
                  {
@@ -129,17 +110,18 @@ internal static class AgentIntentCatalogV1
                      "Analysis.Process.List",
                      "Analysis.ProductionData.ByDevice",
                      "Analysis.ProductionData.Latest",
-                     "Analysis.ProductionData.Range",
-                     "Analysis.Recipe.Detail",
-                     "Analysis.Recipe.List",
-                     "Analysis.Recipe.VersionHistory"
+                     "Analysis.ProductionData.Range"
                  })
         {
             yield return Available(cloudIntent, AgentIntentClass.CloudOnly, "CloudAiRead");
         }
 
-        yield return Unavailable("Prediction.Device.FailureRisk");
-        yield return Unavailable("Prediction.Device.RemainingUsefulLife");
+        yield return Unavailable("Analysis.Recipe.Detail", "CloudAiReadDenied");
+        yield return Unavailable("Analysis.Recipe.List", "CloudAiReadDenied");
+        yield return Unavailable("Analysis.Recipe.VersionHistory", "CloudAiReadDenied");
+
+        yield return Unavailable("Prediction.Device.FailureRisk", "PredictionCatalog");
+        yield return Unavailable("Prediction.Device.RemainingUsefulLife", "PredictionCatalog");
     }
 
     private static AgentIntentCatalogDescriptor Available(
@@ -154,13 +136,20 @@ internal static class AgentIntentCatalogV1
             providerCode);
     }
 
-    private static AgentIntentCatalogDescriptor Unavailable(string intentCode)
+    private static AgentIntentCatalogDescriptor Unavailable(string intentCode, string providerCode)
     {
         return new AgentIntentCatalogDescriptor(
             intentCode,
             AgentIntentClass.KnownButUnavailable,
             AgentIntentAvailability.KnownButUnavailable,
-            "PredictionCatalog");
+            providerCode);
+    }
+
+    public static bool TryGetFrozenDescriptor(
+        string intentCode,
+        out AgentIntentCatalogDescriptor descriptor)
+    {
+        return BaseDescriptors.TryGetValue(intentCode, out descriptor!);
     }
 
     private static string ComputeCatalogDigest()
@@ -195,6 +184,55 @@ internal sealed class IntentResultToCandidateAdapter
             ["in"] = "in"
         };
 
+    private static readonly IReadOnlySet<string> TypedRootProperties =
+        new HashSet<string>(["filters", "timeRange", "queryText"], StringComparer.OrdinalIgnoreCase);
+
+    private static readonly IReadOnlySet<string> FilterProperties =
+        new HashSet<string>(["field", "operator", "value"], StringComparer.OrdinalIgnoreCase);
+
+    private static readonly IReadOnlySet<string> TimeRangeProperties =
+        new HashSet<string>(["start", "end", "fromUtc", "toUtc", "timeZone"], StringComparer.OrdinalIgnoreCase);
+
+    internal static bool IsAllowedPredicateField(string intentCode, string fieldCode)
+    {
+        return CloudAiReadSemanticSchemaRegistry.IsAllowedField(intentCode, fieldCode);
+    }
+
+    internal static bool IsCanonicalPredicate(
+        string intentCode,
+        string fieldCode,
+        string @operator,
+        string value)
+    {
+        return CloudAiReadSemanticSchemaRegistry.TryNormalizeFilter(
+                   intentCode,
+                   fieldCode,
+                   @operator,
+                   value,
+                   out var canonical) &&
+               string.Equals(fieldCode, canonical.Field, StringComparison.Ordinal) &&
+               string.Equals(@operator, canonical.Operator, StringComparison.Ordinal) &&
+               string.Equals(value, canonical.Value, StringComparison.Ordinal);
+    }
+
+    internal static bool IsCanonicalTimeZone(string value)
+    {
+        return value.Length <= 80 &&
+               string.Equals(value, value.Trim(), StringComparison.Ordinal) &&
+               SemanticTimeZonePolicyV1.IsCanonical(value);
+    }
+
+    internal static bool MatchesCanonicalCapabilityGap(AgentIntentCandidateDocument candidate)
+    {
+        if (candidate.CapabilityGap is null)
+        {
+            return candidate.Availability == AgentIntentAvailability.Available;
+        }
+
+        var expected = CreateCapabilityGap(candidate.IntentCode, candidate.CapabilityGap.Code);
+        return expected is not null && candidate.CapabilityGap == expected;
+    }
+
     public Result<IReadOnlyCollection<AgentIntentCandidateDocument>> Adapt(
         IEnumerable<IntentResult> results,
         AgentIntentAdapterContext context)
@@ -211,11 +249,20 @@ internal sealed class IntentResultToCandidateAdapter
             candidates.Add(adapted.Value!);
         }
 
-        var merged = candidates
-            .GroupBy(candidate => candidate.IntentCode, StringComparer.Ordinal)
-            .Select(Merge)
-            .OrderBy(candidate => candidate.IntentCode, StringComparer.Ordinal)
-            .ToArray();
+        var merged = new List<AgentIntentCandidateDocument>();
+        foreach (var group in candidates
+                     .GroupBy(candidate => candidate.IntentCode, StringComparer.Ordinal)
+                     .OrderBy(group => group.Key, StringComparer.Ordinal))
+        {
+            var merge = Merge(group);
+            if (!merge.IsSuccess)
+            {
+                return Result.From(merge);
+            }
+
+            merged.Add(merge.Value!);
+        }
+
         return Result.Success<IReadOnlyCollection<AgentIntentCandidateDocument>>(merged);
     }
 
@@ -242,9 +289,20 @@ internal sealed class IntentResultToCandidateAdapter
                 "Intent routing requested a Cloud mutation or PLC/control action; Plan v2 compilation is blocked."));
         }
 
+        if (CloudReadonlyAgentTextGuard.ContainsUnsafePersistedPayload(result.Query))
+        {
+            return Invalid($"IntentResult '{intentCode}' contains a secret, SQL statement, connection string, or local path.");
+        }
+
         var isKnown = AgentIntentCatalogV1.TryResolve(intentCode, context, out var descriptor);
-        var typedQuery = ParseTypedQuery(result.Query, context);
-        var capabilityGap = ResolveCapabilityGap(descriptor, isKnown, typedQuery.ResourceResolutionRequired);
+        var typedQuery = ParseTypedQuery(result.Query, intentCode, context);
+        if (!typedQuery.IsSuccess)
+        {
+            return Result.From(typedQuery);
+        }
+
+        var typed = typedQuery.Value!;
+        var capabilityGap = ResolveCapabilityGap(descriptor, isKnown, typed.ResourceResolutionRequired);
         var availability = capabilityGap?.Code == "resource_resolution_required"
             ? AgentIntentAvailability.Unknown
             : descriptor.Availability;
@@ -261,32 +319,47 @@ internal sealed class IntentResultToCandidateAdapter
                 AgentIntentRequiredSource.ExplicitUserGoal,
                 RuleId: null),
             new AgentIntentRequestedResourcesDocument(
-                typedQuery.Devices,
-                ResolveDataSourceIds(descriptor, context),
+                typed.Devices,
+                descriptor.IntentClass == AgentIntentClass.GovernedExploration
+                    ? CanonicalGuids(context.DataSources.Select(source => source.Id))
+                    : [],
                 descriptor.IntentClass == AgentIntentClass.Knowledge
                     ? CanonicalGuids(context.KnowledgeBaseIds)
                     : [],
                 CanonicalGuids(context.UploadIds)),
             new AgentIntentFiltersDocument(
-                typedQuery.TimeRange,
-                typedQuery.Predicates),
+                typed.TimeRange,
+                typed.Predicates),
             CanonicalStrings(context.RequestedArtifacts),
             new AgentIntentProvenanceDocument(
-                context.RouterVersion,
-                context.PromptVersion,
+                AgentIntentCatalogV1.RouterVersion,
+                AgentIntentCatalogV1.PromptVersion,
                 AgentIntentCatalogV1.CatalogVersion,
                 AgentIntentCatalogV1.CatalogDigest),
             capabilityGap);
         return Result.Success(candidate);
     }
 
-    private static AgentIntentCandidateDocument Merge(
+    private static Result<AgentIntentCandidateDocument> Merge(
         IGrouping<string, AgentIntentCandidateDocument> group)
     {
         var ordered = group
             .OrderByDescending(candidate => candidate.Confidence)
             .ThenBy(candidate => candidate.ProviderCode, StringComparer.Ordinal)
+            .ThenBy(candidate => CanonicalJson.Serialize(candidate), StringComparer.Ordinal)
             .ToArray();
+        var timeRangeContracts = ordered
+            .Select(candidate => candidate.Filters.TimeRange is null
+                ? "null"
+                : CanonicalJson.Serialize(candidate.Filters.TimeRange))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (timeRangeContracts.Length > 1)
+        {
+            return Invalid(
+                $"IntentResult '{group.Key}' has ambiguous duplicate typed time ranges; clarify the scope before generating a PlanDraft.");
+        }
+
         var selected = ordered[0];
         var resources = new AgentIntentRequestedResourcesDocument(
             ordered.SelectMany(candidate => candidate.RequestedResources.Devices)
@@ -308,13 +381,13 @@ internal sealed class IntentResultToCandidateAdapter
         var timeRange = ordered
             .Select(candidate => candidate.Filters.TimeRange)
             .FirstOrDefault(value => value is not null);
-        return selected with
+        return Result.Success(selected with
         {
             RequestedResources = resources,
             Filters = new AgentIntentFiltersDocument(timeRange, predicates),
             RequestedArtifacts = CanonicalStrings(ordered.SelectMany(candidate => candidate.RequestedArtifacts)),
             CapabilityGap = ordered.Select(candidate => candidate.CapabilityGap).FirstOrDefault(gap => gap is not null)
-        };
+        });
     }
 
     private static string? NormalizeIntentCode(IntentResult result)
@@ -347,108 +420,134 @@ internal sealed class IntentResultToCandidateAdapter
     {
         if (resourceResolutionRequired)
         {
-            return new AgentCapabilityGapDocument(
-                "resource_resolution_required",
-                "A natural-language resource reference was not resolved to an authorized stable id before confirmation.",
-                "Select the target resource explicitly and generate a new PlanDraft.");
+            return CreateCapabilityGap(descriptor.IntentCode, AgentPlanCapabilityGapCodes.ResourceResolutionRequired);
         }
 
         if (descriptor.Availability == AgentIntentAvailability.KnownButUnavailable)
         {
-            return new AgentCapabilityGapDocument(
-                "known_capability_unavailable",
-                $"Capability '{descriptor.IntentCode}' is known but has no active production executor.",
-                "Keep the request as a non-executable capability gap.");
+            return CreateCapabilityGap(descriptor.IntentCode, AgentPlanCapabilityGapCodes.KnownCapabilityUnavailable);
         }
 
         if (!isKnown || descriptor.Availability == AgentIntentAvailability.Unknown)
         {
-            return new AgentCapabilityGapDocument(
-                "unknown_intent",
-                $"Intent '{descriptor.IntentCode}' is not in the frozen authorized catalog.",
-                "Clarify the goal or select an available capability.");
+            return CreateCapabilityGap(descriptor.IntentCode, AgentPlanCapabilityGapCodes.UnknownIntent);
         }
 
         return null;
     }
 
-    private static Guid[] ResolveDataSourceIds(
-        AgentIntentCatalogDescriptor descriptor,
-        AgentIntentAdapterContext context)
+    private static AgentCapabilityGapDocument? CreateCapabilityGap(string intentCode, string code)
     {
-        if (descriptor.IntentClass != AgentIntentClass.GovernedExploration)
+        return code switch
         {
-            return [];
-        }
-
-        var sourceName = descriptor.IntentCode["Analysis.".Length..];
-        return CanonicalGuids(context.DataSources
-            .Where(source => string.Equals(source.Name, sourceName, StringComparison.OrdinalIgnoreCase))
-            .Select(source => source.Id));
+            AgentPlanCapabilityGapCodes.ResourceResolutionRequired => new AgentCapabilityGapDocument(
+                code,
+                "A device-directed resource reference cannot be authorized by the P0 snapshot contract.",
+                "Remove the device-directed filter or wait for an authorized device roster contract."),
+            AgentPlanCapabilityGapCodes.KnownCapabilityUnavailable => new AgentCapabilityGapDocument(
+                code,
+                $"Capability '{intentCode}' is known but has no active production executor.",
+                "Keep the request as a non-executable capability gap."),
+            AgentPlanCapabilityGapCodes.UnknownIntent => new AgentCapabilityGapDocument(
+                code,
+                $"Intent '{intentCode}' is not in the frozen authorized catalog.",
+                "Clarify the goal or select an available capability."),
+            _ => null
+        };
     }
 
-    private static ParsedTypedQuery ParseTypedQuery(
+    private static Result<ParsedTypedQuery> ParseTypedQuery(
         string? rawQuery,
+        string intentCode,
         AgentIntentAdapterContext context)
     {
         if (string.IsNullOrWhiteSpace(rawQuery) || !rawQuery.TrimStart().StartsWith('{'))
         {
-            return ParsedTypedQuery.Empty;
+            return Result.Success(ParsedTypedQuery.Empty);
         }
 
         try
         {
-            using var document = JsonDocument.Parse(rawQuery);
-            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            if (Encoding.UTF8.GetByteCount(rawQuery) > AgentStructuredPayloadPolicyV1.MaxNodeToolInputUtf8Bytes)
             {
-                return ParsedTypedQuery.Empty;
+                return InvalidTypedQuery(intentCode);
             }
 
-            var predicates = ReadPredicates(document.RootElement);
+            var canonicalQuery = CanonicalJson.Canonicalize(
+                rawQuery,
+                AgentStructuredPayloadPolicyV1.MaxNodeToolInputUtf8Bytes);
+            using var document = JsonDocument.Parse(canonicalQuery);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return InvalidTypedQuery(intentCode);
+            }
+
+            var isCloudTypedIntent = CloudAiReadSemanticSchemaRegistry.TryGetIntentSchema(intentCode, out _);
+            if (HasCaseInsensitiveDuplicateProperties(document.RootElement) ||
+                isCloudTypedIntent &&
+                document.RootElement.EnumerateObject().Any(property => !TypedRootProperties.Contains(property.Name)) ||
+                TryGetProperty(document.RootElement, "queryText", out var queryText) &&
+                queryText.ValueKind is not (JsonValueKind.String or JsonValueKind.Null))
+            {
+                return InvalidTypedQuery(intentCode);
+            }
+
+            var predicates = ReadPredicates(document.RootElement, intentCode, out var invalidPredicates);
+            var timeRange = ReadTimeRange(document.RootElement, out var invalidTimeRange);
+            if (invalidPredicates || invalidTimeRange)
+            {
+                return InvalidTypedQuery(intentCode);
+            }
+
+            if (isCloudTypedIntent && !CloudAiReadSemanticSchemaRegistry.MatchesIntentScope(
+                    intentCode,
+                    predicates.Select(predicate => new CloudAiReadFilter(
+                        predicate.FieldCode,
+                        predicate.Operator,
+                        predicate.Value)).ToArray(),
+                    timeRange is not null))
+            {
+                return InvalidTypedQuery(intentCode);
+            }
             var devices = new List<AgentIntentResourceReferenceDocument>();
             var resourceResolutionRequired = false;
             foreach (var predicate in predicates)
             {
-                if (string.Equals(predicate.FieldCode, "deviceId", StringComparison.OrdinalIgnoreCase) &&
-                    Guid.TryParse(predicate.Value, out var deviceId) &&
-                    deviceId != Guid.Empty)
+                if (string.Equals(predicate.FieldCode, "deviceId", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(predicate.FieldCode, "deviceCode", StringComparison.OrdinalIgnoreCase))
                 {
-                    devices.Add(new AgentIntentResourceReferenceDocument("Device", deviceId.ToString("D")));
-                }
-                else if (string.Equals(predicate.FieldCode, "deviceCode", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (context.AuthorizedDeviceIdsByCode.TryGetValue(predicate.Value, out var stableId) &&
-                        !string.IsNullOrWhiteSpace(stableId))
-                    {
-                        devices.Add(new AgentIntentResourceReferenceDocument("Device", stableId.Trim()));
-                    }
-                    else
-                    {
-                        resourceResolutionRequired = true;
-                    }
+                    // P0 has no independently fresh-readable device authorization roster in
+                    // ExecutionSnapshot. Device-directed requests therefore remain a gap even
+                    // when the router emitted a syntactically valid stable id.
+                    resourceResolutionRequired = true;
                 }
             }
 
-            return new ParsedTypedQuery(
+            return Result.Success(new ParsedTypedQuery(
                 devices
                     .DistinctBy(device => $"{device.ResourceType}\u001f{device.ResourceId}", StringComparer.Ordinal)
                     .OrderBy(device => device.ResourceType, StringComparer.Ordinal)
                     .ThenBy(device => device.ResourceId, StringComparer.Ordinal)
                     .ToArray(),
                 predicates,
-                ReadTimeRange(document.RootElement),
-                resourceResolutionRequired);
+                timeRange,
+                resourceResolutionRequired));
         }
         catch (JsonException)
         {
-            return ParsedTypedQuery.Empty;
+            return InvalidTypedQuery(intentCode);
         }
     }
 
-    private static AgentIntentPredicateDocument[] ReadPredicates(JsonElement root)
+    private static AgentIntentPredicateDocument[] ReadPredicates(
+        JsonElement root,
+        string intentCode,
+        out bool invalid)
     {
+        invalid = false;
         if (!TryGetProperty(root, "filters", out var filters) || filters.ValueKind != JsonValueKind.Array)
         {
+            invalid = TryGetProperty(root, "filters", out _);
             return [];
         }
 
@@ -456,12 +555,14 @@ internal sealed class IntentResultToCandidateAdapter
         foreach (var filter in filters.EnumerateArray())
         {
             if (filter.ValueKind != JsonValueKind.Object ||
+                filter.EnumerateObject().Any(property => !FilterProperties.Contains(property.Name)) ||
                 !TryReadString(filter, "field", out var field) ||
                 !TryReadString(filter, "value", out var value) ||
                 !CanonicalCodePattern.IsMatch(field) ||
                 value.Length is 0 or > 240)
             {
-                continue;
+                invalid = true;
+                return [];
             }
 
             var operatorValue = TryReadString(filter, "operator", out var rawOperator)
@@ -469,10 +570,26 @@ internal sealed class IntentResultToCandidateAdapter
                 : "eq";
             if (!Operators.TryGetValue(operatorValue, out var canonicalOperator))
             {
-                continue;
+                invalid = true;
+                return [];
             }
 
-            predicates.Add(new AgentIntentPredicateDocument(field, canonicalOperator, value));
+            if (CloudReadonlyAgentTextGuard.ContainsUnsafePersistedPayload(value) ||
+                !CloudAiReadSemanticSchemaRegistry.TryNormalizeFilter(
+                    intentCode,
+                    field,
+                    canonicalOperator,
+                    value,
+                    out var canonicalFilter))
+            {
+                invalid = true;
+                return [];
+            }
+
+            predicates.Add(new AgentIntentPredicateDocument(
+                canonicalFilter.Field,
+                canonicalFilter.Operator,
+                canonicalFilter.Value));
         }
 
         return predicates
@@ -483,24 +600,87 @@ internal sealed class IntentResultToCandidateAdapter
             .ToArray();
     }
 
-    private static AgentIntentTimeRangeDocument? ReadTimeRange(JsonElement root)
+    private static AgentIntentTimeRangeDocument? ReadTimeRange(JsonElement root, out bool invalid)
     {
-        if (!TryGetProperty(root, "timeRange", out var range) || range.ValueKind != JsonValueKind.Object)
+        invalid = false;
+        if (!TryGetProperty(root, "timeRange", out var range))
         {
             return null;
         }
 
-        var from = TryReadDateTime(range, "start") ?? TryReadDateTime(range, "fromUtc");
-        var to = TryReadDateTime(range, "end") ?? TryReadDateTime(range, "toUtc");
-        if (from is null && to is null)
+        if (range.ValueKind == JsonValueKind.Null)
         {
             return null;
         }
 
-        var timeZone = TryReadString(range, "timeZone", out var value) && value.Length <= 80
-            ? value
-            : "UTC";
-        return new AgentIntentTimeRangeDocument(from?.ToUniversalTime(), to?.ToUniversalTime(), timeZone);
+        if (range.ValueKind != JsonValueKind.Object ||
+            range.EnumerateObject().Any(property => !TimeRangeProperties.Contains(property.Name)))
+        {
+            invalid = true;
+            return null;
+        }
+
+        var hasStart = TryGetProperty(range, "start", out var startElement);
+        var hasFromUtc = TryGetProperty(range, "fromUtc", out var fromUtcElement);
+        var hasEnd = TryGetProperty(range, "end", out var endElement);
+        var hasToUtc = TryGetProperty(range, "toUtc", out var toUtcElement);
+        var usesLocalBoundary = hasStart || hasEnd;
+        var usesUtcBoundary = hasFromUtc || hasToUtc;
+        if (hasStart && hasFromUtc ||
+            hasEnd && hasToUtc ||
+            usesLocalBoundary && usesUtcBoundary)
+        {
+            invalid = true;
+            return null;
+        }
+
+        if (!TryReadOptionalDateTime(hasStart ? startElement : fromUtcElement, hasStart || hasFromUtc, out var from) ||
+            !TryReadOptionalDateTime(hasEnd ? endElement : toUtcElement, hasEnd || hasToUtc, out var to) ||
+            from is null && to is null)
+        {
+            invalid = true;
+            return null;
+        }
+
+        var hasTimeZone = TryGetProperty(range, "timeZone", out var timeZoneElement);
+        var timeZone = hasTimeZone && timeZoneElement.ValueKind == JsonValueKind.String
+            ? timeZoneElement.GetString()?.Trim()
+            : null;
+        if (hasTimeZone && timeZone is null)
+        {
+            invalid = true;
+            return null;
+        }
+
+        var normalized = usesLocalBoundary
+            ? SemanticTimeZonePolicyV1.TryNormalizeLocalRange(
+                from,
+                to,
+                timeZone,
+                out var fromUtc,
+                out var toUtc,
+                out var canonicalTimeZone)
+            : SemanticTimeZonePolicyV1.TryNormalizeUtcRange(
+                from,
+                to,
+                timeZone,
+                out fromUtc,
+                out toUtc,
+                out canonicalTimeZone);
+        if (!normalized)
+        {
+            invalid = true;
+            return null;
+        }
+
+        return new AgentIntentTimeRangeDocument(fromUtc, toUtc, canonicalTimeZone);
+    }
+
+    private static Result<ParsedTypedQuery> InvalidTypedQuery(string intentCode)
+    {
+        return Result.Failure(new ApiProblemDescriptor(
+            AppProblemCodes.AgentPlanSchemaInvalid,
+            $"IntentResult '{intentCode}' does not match its frozen typed filter/time-range schema."));
     }
 
     private static bool TryGetProperty(JsonElement element, string propertyName, out JsonElement value)
@@ -530,13 +710,45 @@ internal sealed class IntentResultToCandidateAdapter
         return false;
     }
 
-    private static DateTimeOffset? TryReadDateTime(JsonElement element, string propertyName)
+    private static bool TryReadOptionalDateTime(
+        JsonElement element,
+        bool isPresent,
+        out DateTimeOffset? value)
     {
-        return TryGetProperty(element, propertyName, out var property) &&
-               property.ValueKind == JsonValueKind.String &&
-               property.TryGetDateTimeOffset(out var value)
-            ? value
-            : null;
+        value = null;
+        if (!isPresent || element.ValueKind == JsonValueKind.Null)
+        {
+            return true;
+        }
+
+        if (element.ValueKind != JsonValueKind.String || !element.TryGetDateTimeOffset(out var parsed))
+        {
+            return false;
+        }
+
+        value = parsed;
+        return true;
+    }
+
+    private static bool HasCaseInsensitiveDuplicateProperties(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var property in element.EnumerateObject())
+            {
+                if (!names.Add(property.Name) || HasCaseInsensitiveDuplicateProperties(property.Value))
+                {
+                    return true;
+                }
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            return element.EnumerateArray().Any(HasCaseInsensitiveDuplicateProperties);
+        }
+
+        return false;
     }
 
     private static string[] CanonicalStrings(IEnumerable<string> values)

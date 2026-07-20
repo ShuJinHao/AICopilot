@@ -17,6 +17,7 @@ public sealed class AgentTaskLifecycleCoordinator(
     IAgentTaskRunQueueStore queueStore,
     IAgentTaskRunAttemptStore runAttemptStore,
     IAgentTaskRunQueue runQueue,
+    AgentTaskPlanFreshReadGate freshReadGate,
     IOptions<AgentRunQueueOptions>? options = null,
     AgentAuditRecorder? auditRecorder = null)
 {
@@ -25,6 +26,15 @@ public sealed class AgentTaskLifecycleCoordinator(
         Guid requestedBy,
         CancellationToken cancellationToken)
     {
+        var integrity = await freshReadGate.VerifyAsync(
+            task,
+            requireExecutable: true,
+            cancellationToken);
+        if (!integrity.IsSuccess)
+        {
+            return Result.From(integrity);
+        }
+
         if (task.Status is not AgentTaskStatus.PlanApproved and not AgentTaskStatus.WaitingToolApproval)
         {
             return Result.Invalid("Only approved or waiting-approval agent tasks can be queued for execution.");
@@ -42,6 +52,15 @@ public sealed class AgentTaskLifecycleCoordinator(
         Guid requestedBy,
         CancellationToken cancellationToken)
     {
+        var integrity = await freshReadGate.VerifyAsync(
+            task,
+            requireExecutable: true,
+            cancellationToken);
+        if (!integrity.IsSuccess)
+        {
+            return Result.From(integrity);
+        }
+
         var activeQueue = await queueStore.FirstActiveByTaskAsync(task.Id, cancellationToken);
         if (activeQueue is not null)
         {

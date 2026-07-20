@@ -25,7 +25,9 @@ internal sealed class MockMcpAgentToolExecutor : IAgentToolExecutor
     public async Task<AgentToolExecutionResult> ExecuteAsync(AgentToolExecutionContext context)
     {
         var stopwatch = Stopwatch.StartNew();
-        var input = ParseInput(context.Step.InputJson);
+        var input = ParseInput(
+            context.Step.InputJson,
+            context.ToolRegistration.InputSchemaJson);
         var behavior = ReadString(input, "mockBehavior");
         if (string.Equals(behavior, "slow", StringComparison.OrdinalIgnoreCase))
         {
@@ -44,7 +46,7 @@ internal sealed class MockMcpAgentToolExecutor : IAgentToolExecutor
         else if (string.Equals(behavior, "schema-invalid", StringComparison.OrdinalIgnoreCase))
         {
             throw new AgentToolExecutionException(
-                AppProblemCodes.AgentPlanSchemaInvalid,
+                AppProblemCodes.ToolOutputSchemaInvalid,
                 $"Mock MCP tool '{context.ToolRegistration.ToolCode}' returned simulated schema-invalid.");
         }
 
@@ -61,7 +63,7 @@ internal sealed class MockMcpAgentToolExecutor : IAgentToolExecutor
 
         stopwatch.Stop();
         var resultHash = ComputeHash(payload);
-        return AgentToolExecutionResult.From(new
+        var contractOutput = new
         {
             isMock = true,
             providerKind = ToolProviderType.MockMcp.ToString(),
@@ -73,12 +75,32 @@ internal sealed class MockMcpAgentToolExecutor : IAgentToolExecutor
             durationMs = stopwatch.ElapsedMilliseconds,
             resultHash,
             payload
-        });
+        };
+        var outputValidation = ToolOutputSchemaValidator.ValidateAndCanonicalize(
+            contractOutput,
+            context.ToolRegistration.OutputSchemaJson);
+        if (!outputValidation.IsValid)
+        {
+            throw new AgentToolExecutionException(
+                outputValidation.IsPayloadTooLarge
+                    ? AppProblemCodes.EvidencePayloadTooLarge
+                    : AppProblemCodes.ToolOutputSchemaInvalid,
+                outputValidation.Error ?? "Mock MCP output does not match the registry schema.");
+        }
+
+        return AgentToolExecutionResult.FromValidatedProviderOutput(
+            context.ToolRegistration,
+            outputValidation,
+            AgentToolDurableOutputBuilder.BuildProviderEnvelope(
+                context.ToolRegistration,
+                outputValidation.CanonicalJson!));
     }
 
-    private static IReadOnlyDictionary<string, object?> ParseInput(string? inputJson)
+    private static IReadOnlyDictionary<string, object?> ParseInput(
+        string? inputJson,
+        string inputSchemaJson)
     {
-        var validation = ToolInputSchemaValidator.ValidateAndParse(inputJson, "{}");
+        var validation = ToolInputSchemaValidator.ValidateAndParse(inputJson, inputSchemaJson);
         if (!validation.IsValid)
         {
             throw new AgentToolExecutionException(

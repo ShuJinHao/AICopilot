@@ -86,15 +86,22 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         var session = new Session(UserId, ConversationTemplateId.New());
         var taskRepository = new InMemoryRepository<AgentTask>();
         var approvalRepository = new InMemoryRepository<ApprovalRequest>();
+        var disabledToolGuard = CreateGuard(CreateTool(
+            "query_cloud_data_readonly",
+            ToolProviderType.CloudReadonly,
+            isEnabled: false,
+            requiresApproval: true,
+            riskLevel: AiToolRiskLevel.RequiresApproval));
         var handler = new PlanAgentTaskCommandHandler(
             new PlanAgentTaskCoordinator(
                 taskRepository,
-                approvalRepository,
                 new InMemoryRepository<Session>(session),
                 new InMemoryRepository<UploadRecord>(),
                 new AgentAuditRecorder(new CapturingAuditLogWriter()),
                 [],
-                new TestCurrentUser(UserId)));
+                new TestCurrentUser(UserId),
+                planToolGuard: CreatePlanToolGuard(disabledToolGuard),
+                cloudReadonlyPlanService: new FixedCloudReadonlyAgentPlanService()));
 
         var result = await handler.Handle(
             new PlanAgentTaskCommand(session.Id.Value, "生成 Cloud 生产数据报告", AgentTaskType.CloudDataReport, null),
@@ -111,6 +118,11 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         plan.RootElement.GetProperty("isExecutable").GetBoolean().Should().BeFalse();
 
         var approvalAudit = new CapturingAuditLogWriter();
+        var confirmationService = new AgentPlanDraftConfirmationService(
+            CreatePlanToolGuard(disabledToolGuard),
+            AgentPlanV2TestData.CreateMatchingFreshReadGate(),
+            AgentPlanV2TestData.CreateMatchingRoutingSnapshotReader(),
+            new FixedCloudReadonlyAgentPlanService());
         var approveHandler = new ApproveAgentTaskPlanCommandHandler(
             taskRepository,
             approvalRepository,
@@ -120,13 +132,7 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
                 new InMemoryAgentTaskRunQueueStore()),
             new AgentAuditRecorder(approvalAudit),
             new TestCurrentUser(UserId),
-            new AgentPlanDraftConfirmationService(CreatePlanToolGuard(CreateGuard(CreateTool(
-                "query_cloud_data_readonly",
-                ToolProviderType.CloudReadonly,
-                isEnabled: false,
-                requiresApproval: true,
-                riskLevel: AiToolRiskLevel.RequiresApproval))),
-                new FixedCloudReadonlyAgentPlanService()));
+            confirmationService);
 
         var confirmation = await approveHandler.Handle(
             new ApproveAgentTaskPlanCommand(task.Id.Value),
@@ -153,12 +159,13 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         var handler = new PlanAgentTaskCommandHandler(
             new PlanAgentTaskCoordinator(
                 taskRepository,
-                new InMemoryRepository<ApprovalRequest>(),
                 new InMemoryRepository<Session>(session),
                 new InMemoryRepository<UploadRecord>(),
                 new AgentAuditRecorder(new CapturingAuditLogWriter()),
                 [],
-                new TestCurrentUser(UserId)));
+                new TestCurrentUser(UserId),
+                planToolGuard: CreatePlanToolGuard(CreateAgentRuntimeGuardWithCloudEnabled()),
+                cloudReadonlyPlanService: cloudReadonlyPlanService));
 
         var result = await handler.Handle(
             new PlanAgentTaskCommand(session.Id.Value, "read recipe version details", AgentTaskType.CloudDataReport, null),
@@ -168,18 +175,23 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         using var plan = JsonDocument.Parse(result.Value!.PlanJson);
         plan.RootElement.GetProperty("planKind").GetString().Should().Be("PlanDraft");
         plan.RootElement.GetProperty("cloudReadonlyIntent").ValueKind.Should().Be(JsonValueKind.Null);
+        plan.RootElement.GetProperty("capabilityGaps").EnumerateArray()
+            .Select(item => item.GetString())
+            .Should().Contain(item => item!.Contains(AppProblemCodes.CloudReadonlyIntentUnsupported, StringComparison.Ordinal));
 
         var task = taskRepository.Items.Should().ContainSingle().Which;
         var confirmation = await new AgentPlanDraftConfirmationService(
                 CreatePlanToolGuard(CreateAgentRuntimeGuardWithCloudEnabled()),
+                AgentPlanV2TestData.CreateMatchingFreshReadGate(),
+                AgentPlanV2TestData.CreateMatchingRoutingSnapshotReader(),
                 cloudReadonlyPlanService)
             .ConfirmAsync(task, DateTimeOffset.UtcNow, CancellationToken.None);
 
         confirmation.IsSuccess.Should().BeFalse();
         confirmation.Errors.Should().ContainSingle()
             .Which.Should().BeEquivalentTo(new ApiProblemDescriptor(
-                AppProblemCodes.CloudReadonlyIntentUnsupported,
-                "Recipe data is outside the Cloud readonly agent boundary."));
+                AppProblemCodes.AgentPlanInvalid,
+                "A PlanDraft with unresolved capability gaps cannot be confirmed."));
     }
     [Fact]
     public async Task ConfirmPlanDraft_ShouldReturnProblem_WhenPlanJsonIsInvalid()
@@ -197,6 +209,8 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
 
         var result = await new AgentPlanDraftConfirmationService(
                 CreatePlanToolGuard(CreateAgentRuntimeGuardWithCloudEnabled()),
+                AgentPlanV2TestData.CreateMatchingFreshReadGate(),
+                AgentPlanV2TestData.CreateMatchingRoutingSnapshotReader(),
                 new FixedCloudReadonlyAgentPlanService())
             .ConfirmAsync(task, DateTimeOffset.UtcNow, CancellationToken.None);
 
@@ -313,7 +327,7 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         plan.RootElement.GetProperty("plannerFallbackReason").ValueKind.Should().Be(JsonValueKind.Null);
     }
     [Fact]
-    public async Task PreferredToolCodes_ShouldNotNarrowPlannerCatalog_BeforePlanDraftConfirmation()
+    public async Task PreferredToolCodes_ShouldFailClosedBeforePlanDraftPersistence()
     {
         var session = new Session(UserId, ConversationTemplateId.New());
         var plannerModel = CreatePlannerModel();
@@ -324,11 +338,13 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
                 AgentStepType.ArtifactGeneration,
                 "generate_markdown_report",
                 false));
+        var taskRepository = new InMemoryRepository<AgentTask>();
         var handler = CreatePlanHandler(
             session,
             CreateAgentRuntimeGuardWithCloudEnabled(),
             dynamicPlanner,
-            [plannerModel]);
+            [plannerModel],
+            taskRepository: taskRepository);
 
         var result = await handler.Handle(
             new PlanAgentTaskCommand(
@@ -339,26 +355,29 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
                 PreferredToolCodes: ["generate_markdown_report"]),
             CancellationToken.None);
 
-        result.IsSuccess.Should().BeTrue();
+        result.IsSuccess.Should().BeFalse();
+        result.Errors.Should().ContainSingle().Which.Should().BeEquivalentTo(
+            new ApiProblemDescriptor(
+                AppProblemCodes.AgentPlanSchemaInvalid,
+                "preferredToolCodes is retired for Plan v2 and cannot be used as a planning selection input."));
         dynamicPlanner.LastRequest.Should().BeNull();
-        using var plan = JsonDocument.Parse(result.Value!.PlanJson);
-        plan.RootElement.GetProperty("plannerAvailableToolCount").GetInt32().Should().Be(0);
-        plan.RootElement.GetProperty("steps").EnumerateArray()
-            .Select(step => step.GetProperty("toolCode").GetString())
-            .Should().Contain("finalize_artifacts");
+        taskRepository.Items.Should().BeEmpty();
     }
     [Fact]
-    public async Task PreferredToolCodes_ShouldNotBlockPlanDraft_WhenToolIsOutsideCurrentCatalog()
+    public async Task SkillCode_ShouldFailClosedBeforePlanDraftPersistence_WhileNoSelectionRemainsValid()
     {
         var session = new Session(UserId, ConversationTemplateId.New());
         var plannerModel = CreatePlannerModel();
+        var dynamicPlanner = new FixedDynamicPlanner();
+        var taskRepository = new InMemoryRepository<AgentTask>();
         var handler = CreatePlanHandler(
             session,
             CreateGuard(
                 CreateTool("generate_markdown_report", ToolProviderType.Artifact),
                 CreateTool("finalize_artifacts", ToolProviderType.Artifact, requiresApproval: true, riskLevel: AiToolRiskLevel.RequiresApproval)),
-            new FixedDynamicPlanner(),
-            [plannerModel]);
+            dynamicPlanner,
+            [plannerModel],
+            taskRepository: taskRepository);
 
         var result = await handler.Handle(
             new PlanAgentTaskCommand(
@@ -366,16 +385,29 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
                 "generate a report",
                 AgentTaskType.ReportGeneration,
                 null,
-                PreferredToolCodes: ["generate_pdf"]),
+                SkillCode: "data_analysis"),
             CancellationToken.None);
 
-        result.IsSuccess.Should().BeTrue();
-        using var plan = JsonDocument.Parse(result.Value!.PlanJson);
+        result.IsSuccess.Should().BeFalse();
+        result.Errors.Should().ContainSingle().Which.Should().BeEquivalentTo(
+            new ApiProblemDescriptor(
+                AppProblemCodes.AgentPlanSchemaInvalid,
+                "skillCode is retired for Plan v2 and cannot be used as a planning selection input."));
+        dynamicPlanner.LastRequest.Should().BeNull();
+        taskRepository.Items.Should().BeEmpty();
+
+        var legal = await handler.Handle(
+            new PlanAgentTaskCommand(
+                session.Id.Value,
+                "generate a report",
+                AgentTaskType.ReportGeneration,
+                null),
+            CancellationToken.None);
+
+        legal.IsSuccess.Should().BeTrue();
+        taskRepository.Items.Should().ContainSingle();
+        using var plan = JsonDocument.Parse(legal.Value!.PlanJson);
         plan.RootElement.GetProperty("planKind").GetString().Should().Be("PlanDraft");
-        plan.RootElement.GetProperty("plannerAvailableToolCount").GetInt32().Should().Be(0);
-        plan.RootElement.GetProperty("capabilityGaps").EnumerateArray()
-            .Select(item => item.GetString())
-            .Should().NotContain(item => item!.Contains(AppProblemCodes.AgentPlanToolDenied, StringComparison.Ordinal));
     }
     [Fact]
     public async Task PlannerToolCatalog_ShouldFilterUnavailableTools_AndExposeSanitizedSchemaSummaries()
@@ -385,9 +417,9 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
             CreateGuard(
                 [
                     CreateTool(
-                        "generate_markdown_report",
+                        "custom_markdown_report",
                         ToolProviderType.Artifact,
-                        inputSchemaJson: """{"type":"object","description":"apiKey: sk-test C:\\secrets\\tool.txt SELECT * FROM production_records","properties":{"format":{"type":"string","enum":["markdown"]}},"required":["format"]}"""),
+                        inputSchemaJson: """{"type":"object","description":"Exact planner schema.","properties":{"format":{"type":"string","enum":["markdown"]}},"required":["format"],"additionalProperties":false}"""),
                     CreateTool("disabled_tool", isEnabled: false),
                     CreateTool("blocked_tool", riskLevel: AiToolRiskLevel.Blocked),
                     CreateTool("permission_tool", requiredPermission: "AiGateway.ToolRegistry.Manage"),
@@ -417,9 +449,9 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         var catalog = catalogResult.Value!;
         catalog.Version.Should().Be(PlannerToolCatalog.CurrentVersion);
         catalog.AvailableToolCount.Should().Be(2);
-        catalog.Tools.Select(tool => tool.ToolCode).Should().BeEquivalentTo(["generate_markdown_report", mcpToolCode]);
+        catalog.Tools.Select(tool => tool.ToolCode).Should().BeEquivalentTo(["custom_markdown_report", mcpToolCode]);
         catalog.Tools.Single(tool => tool.ToolCode == mcpToolCode).RuntimeAvailable.Should().BeTrue();
-        catalog.Tools.Single(tool => tool.ToolCode == "generate_markdown_report")
+        catalog.Tools.Single(tool => tool.ToolCode == "custom_markdown_report")
             .InputSchema!.Properties.Should().Contain(property => property.Name == "format" && property.Required);
 
         var serialized = JsonSerializer.Serialize(catalog, JsonSerializerOptions.Web);
@@ -441,7 +473,7 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         result.Errors.Should().ContainSingle()
             .Which.Should().BeEquivalentTo(new ApiProblemDescriptor(
                 AppProblemCodes.PlannerToolSchemaUnsupported,
-                "Tool registry bad_schema_tool input schema must be a JSON object."));
+                "Tool 'bad_schema_tool' has an unavailable input contract: Tool registry input schema must be an object schema from the supported strict subset."));
     }
     [Fact]
     public async Task SkillDefinition_ShouldNarrowPlannerCatalog_AfterToolRegistryGuard()
@@ -521,7 +553,7 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         task.Steps.Should().Contain(step => step.ToolCode == "query_cloud_data_readonly");
         using var plan = JsonDocument.Parse(task.PlanJson);
         plan.RootElement.GetProperty("skillCode").GetString().Should().Be("cloud_readonly");
-        plan.RootElement.GetProperty("skillRoutingReason").GetString().Should().Be("test selector");
+        plan.RootElement.GetProperty("skillRoutingReason").ValueKind.Should().Be(JsonValueKind.Null);
         plan.RootElement.GetProperty("taskType").GetString().Should().Be("CloudDataReport");
         plan.RootElement.GetProperty("plannerSafetySummary").GetProperty("planSource").GetString()
             .Should().Be("Skill.cloud_readonly");
@@ -652,6 +684,19 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
                 requiresApproval: true,
                 riskLevel: AiToolRiskLevel.RequiresApproval));
         var now = DateTimeOffset.UtcNow;
+        var planJson = AgentPlanV2TestData.Create(
+            [
+                new AgentPlanV2TestStep(
+                    "Build markdown",
+                    "Generate markdown report.",
+                    AgentStepType.ArtifactGeneration,
+                    "generate_markdown_report",
+                    InputJson: """{"format":"html"}""")
+            ],
+            executable: false,
+            taskType: AgentTaskType.ReportGeneration,
+            skillCode: null,
+            knowledgeBaseIds: null);
         var task = new AgentTask(
             SessionId.New(),
             UserId,
@@ -660,7 +705,7 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
             AgentTaskType.ReportGeneration,
             AgentTaskRiskLevel.Low,
             null,
-            CreatePlanJson("generate_markdown_report", inputJson: """{"format":"html"}"""),
+            planJson,
             now);
         task.AddStep(
             "Build markdown",
@@ -670,9 +715,18 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
             false,
             now,
             """{"format":"html"}""");
+        task.AddStep(
+            "Finalize artifacts",
+            "Wait for final output approval before publishing workspace artifacts.",
+            AgentStepType.Finalize,
+            "finalize_artifacts",
+            true,
+            now);
 
         var confirmation = await new AgentPlanDraftConfirmationService(
                 CreatePlanToolGuard(toolGuard),
+                AgentPlanV2TestData.CreateMatchingFreshReadGate(),
+                AgentPlanV2TestData.CreateMatchingRoutingSnapshotReader(),
                 new FixedCloudReadonlyAgentPlanService())
             .ConfirmAsync(task, DateTimeOffset.UtcNow, CancellationToken.None);
 
@@ -794,7 +848,7 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         var approval = new ApprovalRequest(
             task.Id,
             AgentApprovalType.ToolCall,
-            task.Steps.Single().Id.Value.ToString(),
+            task.Steps.Single(step => step.ToolCode == "generate_chart_data").Id.Value.ToString(),
             task.UserId,
             DateTimeOffset.UtcNow);
         var queueItem = new AgentTaskRunQueueItem(

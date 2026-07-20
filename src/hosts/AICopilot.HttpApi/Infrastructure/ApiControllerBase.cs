@@ -1,4 +1,5 @@
-﻿using AICopilot.SharedKernel.Result;
+﻿using AICopilot.Services.Contracts;
+using AICopilot.SharedKernel.Result;
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
 using IResult = AICopilot.SharedKernel.Result.IResult;
@@ -61,11 +62,20 @@ public abstract class ApiControllerBase(ISender sender) : ControllerBase
 
     private ProblemDetails CreateProblemDetails(int statusCode, IEnumerable<object>? errors)
     {
-        var problem = errors?.OfType<ApiProblemDescriptor>().FirstOrDefault();
+        var errorList = errors?.ToArray();
+        var publicPlanFailure = AgentPlanPublicFailureDisclosurePolicy.ResolveResultErrors(errorList);
+        var problem = publicPlanFailure is null
+            ? errorList?.OfType<ApiProblemDescriptor>().FirstOrDefault()
+            : new ApiProblemDescriptor(
+                publicPlanFailure.Disclosure.Code,
+                publicPlanFailure.Disclosure.Detail,
+                publicPlanFailure.TaskId is Guid taskId
+                    ? new Dictionary<string, object?> { ["taskId"] = taskId }
+                    : null);
         return ApiProblemDetailsFactory.Create(
             statusCode,
             problem,
-            errors?.Select(error => error?.ToString())
+            errorList?.Select(error => error?.ToString())
                 .FirstOrDefault(message => !string.IsNullOrWhiteSpace(message)),
             HttpContext.TraceIdentifier);
     }

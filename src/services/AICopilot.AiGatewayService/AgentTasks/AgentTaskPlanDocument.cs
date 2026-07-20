@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
+using AICopilot.Services.Contracts;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
 
@@ -34,11 +35,12 @@ internal sealed record AgentTaskPlanDocument(
     [property: JsonPropertyName("toolRiskSummary")] IReadOnlyDictionary<string, int>? ToolRiskSummary = null,
     [property: JsonPropertyName("mockMcpOnly")] bool MockMcpOnly = false,
     [property: JsonPropertyName("toolApprovalCheckpoints")] IReadOnlyCollection<string>? ToolApprovalCheckpoints = null,
-    [property: JsonPropertyName("skillCode")] string? SkillCode = null,
-    [property: JsonPropertyName("skillName")] string? SkillName = null,
-    [property: JsonPropertyName("skillRoutingReason")] string? SkillRoutingReason = null,
+    [property: JsonPropertyName("skillCode"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SkillCode = null,
+    [property: JsonPropertyName("skillName"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SkillName = null,
+    [property: JsonPropertyName("skillRoutingReason"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SkillRoutingReason = null,
     [property: JsonPropertyName("planKind")] string PlanKind = AgentTaskPlanKinds.ExecutablePlan,
     [property: JsonPropertyName("isExecutable")] bool IsExecutable = true,
+    [property: JsonPropertyName("lifecycleSealPadding")] string LifecycleSealPadding = "",
     [property: JsonPropertyName("capabilityGaps")] IReadOnlyCollection<string>? CapabilityGaps = null,
     [property: JsonPropertyName("schemaVersion")] string SchemaVersion = AgentPlanContractVersions.LegacyV1,
     [property: JsonPropertyName("planId")] Guid? PlanId = null,
@@ -65,24 +67,158 @@ internal static class AgentTaskPlanKinds
 }
 
 internal sealed record AgentTaskPlanCloudReadonlyIntentDocument(
+    [property: JsonPropertyName("schemaVersion")] string SchemaVersion,
     [property: JsonPropertyName("intent")] string Intent,
-    [property: JsonPropertyName("query")] string? Query,
+    [property: JsonPropertyName("semanticPlanDigest")] string SemanticPlanDigest,
     [property: JsonPropertyName("confidence")] double Confidence,
-    [property: JsonPropertyName("target")] string Target,
-    [property: JsonPropertyName("kind")] string Kind,
-    [property: JsonPropertyName("summary")] string Summary)
+    [property: JsonPropertyName("target")] SemanticQueryTarget Target,
+    [property: JsonPropertyName("kind")] SemanticQueryKind Kind,
+    [property: JsonPropertyName("projectionFields")] IReadOnlyCollection<string> ProjectionFields,
+    [property: JsonPropertyName("filters")] IReadOnlyCollection<AgentTaskPlanSemanticFilterDocument> Filters,
+    [property: JsonPropertyName("timeRange")] AgentTaskPlanSemanticTimeRangeDocument? TimeRange,
+    [property: JsonPropertyName("sort")] AgentTaskPlanSemanticSortDocument? Sort,
+    [property: JsonPropertyName("limit")] int Limit,
+    [property: JsonPropertyName("queryScope")] IReadOnlyCollection<string> QueryScope)
 {
     public static AgentTaskPlanCloudReadonlyIntentDocument From(CloudReadonlyAgentPlanIntent intent)
     {
-        return new AgentTaskPlanCloudReadonlyIntentDocument(
-            intent.Intent,
-            intent.Query,
+        var plan = intent.SemanticPlan;
+        var document = new AgentTaskPlanCloudReadonlyIntentDocument(
+            "cloud-readonly-semantic-plan:v1",
+            plan.Intent,
+            string.Empty,
             intent.Confidence,
-            intent.Target,
-            intent.Kind,
-            intent.Summary);
+            plan.Target,
+            plan.Kind,
+            plan.Projection.Fields
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(value => value, StringComparer.Ordinal)
+                .ToArray(),
+            plan.Filters
+                .Select(filter => new AgentTaskPlanSemanticFilterDocument(
+                    filter.Field,
+                    filter.Operator,
+                    filter.Value))
+                .Distinct()
+                .OrderBy(filter => filter.Field, StringComparer.Ordinal)
+                .ThenBy(filter => filter.Operator)
+                .ThenBy(filter => filter.Value, StringComparer.Ordinal)
+                .ToArray(),
+            plan.TimeRange is null
+                ? null
+                : new AgentTaskPlanSemanticTimeRangeDocument(
+                    plan.TimeRange.Field,
+                    plan.TimeRange.Start?.ToUniversalTime(),
+                    plan.TimeRange.End?.ToUniversalTime(),
+                    plan.TimeRange.TimeZone),
+            plan.Sort is null
+                ? null
+                : new AgentTaskPlanSemanticSortDocument(plan.Sort.Field, plan.Sort.Direction),
+            plan.Limit,
+            BuildQueryScope(plan));
+        var digest = ComputeSemanticPlanDigest(document);
+        if (!string.Equals(digest, intent.SemanticPlanDigest, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Cloud readonly typed semantic plan digest changed before PlanDraft sealing.");
+        }
+
+        return document with { SemanticPlanDigest = digest };
+    }
+
+    public SemanticQueryPlan ToSemanticPlan()
+    {
+        return new SemanticQueryPlan(
+            Intent,
+            Target,
+            Kind,
+            QueryText: null,
+            new SemanticProjection(ProjectionFields.ToArray()),
+            Filters.Select(filter => new SemanticFilter(
+                filter.Field,
+                filter.Operator,
+                filter.Value)).ToArray(),
+            TimeRange is null
+                ? null
+                : new SemanticTimeRange(TimeRange.Field, TimeRange.Start, TimeRange.End, TimeRange.TimeZone),
+            Sort is null
+                ? null
+                : new SemanticSort(Sort.Field, Sort.Direction),
+            Limit);
+    }
+
+    public static string ComputeSemanticPlanDigest(AgentTaskPlanCloudReadonlyIntentDocument document)
+    {
+        var canonical = CanonicalJson.Canonicalize(
+            CanonicalJson.Serialize(document with { SemanticPlanDigest = string.Empty }),
+            new HashSet<string>(["semanticPlanDigest", "confidence"], StringComparer.Ordinal));
+        return CanonicalJson.ComputeSha256(canonical);
+    }
+
+    public static string ComputeSemanticPlanDigest(SemanticQueryPlan plan)
+    {
+        var placeholder = FromUnchecked(plan, confidence: 1);
+        return ComputeSemanticPlanDigest(placeholder);
+    }
+
+    private static AgentTaskPlanCloudReadonlyIntentDocument FromUnchecked(
+        SemanticQueryPlan plan,
+        double confidence)
+    {
+        return new AgentTaskPlanCloudReadonlyIntentDocument(
+            "cloud-readonly-semantic-plan:v1",
+            plan.Intent,
+            string.Empty,
+            confidence,
+            plan.Target,
+            plan.Kind,
+            plan.Projection.Fields.Distinct(StringComparer.Ordinal).OrderBy(value => value, StringComparer.Ordinal).ToArray(),
+            plan.Filters.Select(filter => new AgentTaskPlanSemanticFilterDocument(filter.Field, filter.Operator, filter.Value))
+                .Distinct()
+                .OrderBy(filter => filter.Field, StringComparer.Ordinal)
+                .ThenBy(filter => filter.Operator)
+                .ThenBy(filter => filter.Value, StringComparer.Ordinal)
+                .ToArray(),
+            plan.TimeRange is null
+                ? null
+                : new AgentTaskPlanSemanticTimeRangeDocument(
+                    plan.TimeRange.Field,
+                    plan.TimeRange.Start?.ToUniversalTime(),
+                    plan.TimeRange.End?.ToUniversalTime(),
+                    plan.TimeRange.TimeZone),
+            plan.Sort is null ? null : new AgentTaskPlanSemanticSortDocument(plan.Sort.Field, plan.Sort.Direction),
+            plan.Limit,
+            BuildQueryScope(plan));
+    }
+
+    private static string[] BuildQueryScope(SemanticQueryPlan plan)
+    {
+        return new[]
+            {
+                $"target:{plan.Target}",
+                $"kind:{plan.Kind}"
+            }
+            .Concat(plan.Projection.Fields.Select(field => $"projection:{field}"))
+            .Concat(plan.Filters.Select(filter => $"filter:{filter.Field}"))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(value => value, StringComparer.Ordinal)
+            .ToArray();
     }
 }
+
+internal sealed record AgentTaskPlanSemanticFilterDocument(
+    [property: JsonPropertyName("field")] string Field,
+    [property: JsonPropertyName("operator")] SemanticFilterOperator Operator,
+    [property: JsonPropertyName("value")] string Value);
+
+internal sealed record AgentTaskPlanSemanticTimeRangeDocument(
+    [property: JsonPropertyName("field")] string Field,
+    [property: JsonPropertyName("start")] DateTimeOffset? Start,
+    [property: JsonPropertyName("end")] DateTimeOffset? End,
+    [property: JsonPropertyName("timeZone")] string TimeZone);
+
+internal sealed record AgentTaskPlanSemanticSortDocument(
+    [property: JsonPropertyName("field")] string Field,
+    [property: JsonPropertyName("direction")] SemanticSortDirection Direction);
 
 internal sealed record AgentTaskPlanStepDocument(
     [property: JsonPropertyName("title")] string Title,

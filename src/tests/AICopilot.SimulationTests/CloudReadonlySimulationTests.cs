@@ -1,6 +1,7 @@
 using System.Text.Json;
 using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.AiGatewayService.Runtime;
+using AICopilot.SharedKernel.Result;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 
@@ -50,10 +51,7 @@ public sealed class CloudReadonlySimulationTests
 
         foreach (var intent in intents)
         {
-            var result = await provider.QueryAsync(new CloudReadonlyAgentToolRequest(
-                intent,
-                """{"lineName":"LINE-A","days":7,"limit":20}""",
-                0.95));
+            var result = await provider.QueryAsync(CreateToolRequest(intent));
 
             result.SourceMode.Should().Be(CloudReadonlySourceMarkers.SimulationSourceMode);
             result.IsSimulation.Should().BeTrue();
@@ -130,7 +128,6 @@ public sealed class CloudReadonlySimulationTests
     public async Task RealProvider_ShouldRequireCloudReadonlyAndCloudAiReadDoubleEnable()
     {
         var provider = new RealCloudReadonlyDataProvider(
-            new FixedSemanticQueryPlanner(),
             new DisabledCloudAiReadClient(),
             Options.Create(new CloudReadonlyOptions
             {
@@ -142,10 +139,7 @@ public sealed class CloudReadonlySimulationTests
                 }
             }));
 
-        var action = () => provider.QueryAsync(new CloudReadonlyAgentToolRequest(
-            "Analysis.Device.List",
-            """{"lineName":"LINE-A"}""",
-            0.9));
+        var action = () => provider.QueryAsync(CreateToolRequest("Analysis.Device.List", confidence: 0.9));
 
         var exception = await action.Should().ThrowAsync<CloudAiReadException>();
         exception.Which.Code.Should().Be(CloudAiReadProblemCodes.NotConfigured);
@@ -154,9 +148,9 @@ public sealed class CloudReadonlySimulationTests
     [Fact]
     public async Task RealProvider_ShouldPropagateCloudAiReadFailureWithoutSimulationFallback()
     {
+        var cloudAiReadClient = new FailingCloudAiReadClient();
         var provider = new RealCloudReadonlyDataProvider(
-            new FixedSemanticQueryPlanner(),
-            new FailingCloudAiReadClient(),
+            cloudAiReadClient,
             Options.Create(new CloudReadonlyOptions
             {
                 Mode = CloudReadonlyDataSourceMode.Real,
@@ -166,15 +160,27 @@ public sealed class CloudReadonlySimulationTests
                     AllowProductionRead = true
                 }
             }));
+        var resolver = new FixedCloudReadonlyDataProviderResolver(provider);
+        var executor = new CloudReadonlyAgentToolExecutor(resolver);
 
-        var action = () => provider.QueryAsync(new CloudReadonlyAgentToolRequest(
-            "Analysis.Device.List",
-            """{"lineName":"LINE-A"}""",
-            0.9));
+        var overLimitAction = () => executor.ExecuteAsync(
+            CreateToolRequest("Analysis.Device.List", confidence: 0.9, limit: 101));
+
+        var overLimitException = await overLimitAction.Should().ThrowAsync<CloudAiReadException>();
+        overLimitException.Which.Code.Should().Be(AppProblemCodes.CloudReadonlyIntentUnsupported);
+        overLimitException.Which.Message.Should().Be(
+            "Cloud readonly intent violates the frozen typed semantic plan contract.");
+        resolver.ResolveCount.Should().Be(0, "the typed boundary must reject before resolving a provider");
+        cloudAiReadClient.QueryCount.Should().Be(0);
+
+        var action = () => executor.ExecuteAsync(
+            CreateToolRequest("Analysis.Device.List", confidence: 0.9));
 
         var exception = await action.Should().ThrowAsync<CloudAiReadException>();
         exception.Which.Code.Should().Be(CloudAiReadProblemCodes.Unavailable);
         exception.Which.Message.Should().NotContain("Simulation");
+        resolver.ResolveCount.Should().Be(1);
+        cloudAiReadClient.QueryCount.Should().Be(1);
     }
 
     [Fact]
@@ -246,6 +252,42 @@ public sealed class CloudReadonlySimulationTests
             Options.Create(CreateSimulationOptions()));
     }
 
+    private static CloudReadonlyAgentToolRequest CreateToolRequest(
+        string intent,
+        double confidence = 0.95,
+        int limit = 20)
+    {
+        var (target, kind) = intent switch
+        {
+            "Analysis.Device.Status" => (SemanticQueryTarget.Device, SemanticQueryKind.Status),
+            "Analysis.Device.List" => (SemanticQueryTarget.Device, SemanticQueryKind.List),
+            "Analysis.DeviceLog.Recent" => (SemanticQueryTarget.DeviceLog, SemanticQueryKind.Latest),
+            "Analysis.Capacity.Trend" => (SemanticQueryTarget.Capacity, SemanticQueryKind.Range),
+            "Analysis.Quality.Defect" => (SemanticQueryTarget.ProductionData, SemanticQueryKind.Range),
+            "Analysis.WorkOrder.Maintenance" => (SemanticQueryTarget.DeviceLog, SemanticQueryKind.Range),
+            "Analysis.Line.WeeklyReport" => (SemanticQueryTarget.Capacity, SemanticQueryKind.Range),
+            _ => throw new ArgumentOutOfRangeException(nameof(intent), intent, "Unsupported simulation intent fixture.")
+        };
+        var semanticPlan = new SemanticQueryPlan(
+            intent,
+            target,
+            kind,
+            QueryText: null,
+            new SemanticProjection([]),
+            [
+                new SemanticFilter("days", SemanticFilterOperator.Equal, "7"),
+                new SemanticFilter("lineName", SemanticFilterOperator.Equal, "LINE-A")
+            ],
+            TimeRange: null,
+            Sort: null,
+            Limit: limit);
+        var plannedIntent = CloudReadonlyAgentPlanIntent.FromSemanticPlan(semanticPlan, confidence);
+        return new CloudReadonlyAgentToolRequest(
+            plannedIntent.SemanticPlan,
+            plannedIntent.SemanticPlanDigest,
+            plannedIntent.Confidence);
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
@@ -276,23 +318,6 @@ public sealed class CloudReadonlySimulationTests
                 AlwaysMarkAsSimulation = true
             }
         };
-    }
-
-    private sealed class FixedSemanticQueryPlanner : ISemanticQueryPlanner
-    {
-        public SemanticPlanningResult Plan(string intent, string? query)
-        {
-            return SemanticPlanningResult.Success(new SemanticQueryPlan(
-                intent,
-                SemanticQueryTarget.Device,
-                SemanticQueryKind.List,
-                query,
-                new SemanticProjection(["deviceCode"]),
-                [],
-                null,
-                new SemanticSort("deviceCode", SemanticSortDirection.Asc),
-                20));
-        }
     }
 
     private sealed class DisabledCloudAiReadClient : ICloudAiReadClient
@@ -367,6 +392,8 @@ public sealed class CloudReadonlySimulationTests
     {
         public bool IsEnabled => true;
 
+        public int QueryCount { get; private set; }
+
         public Task<CloudAiReadResult<CloudAiReadDeviceDto>> GetDevicesAsync(
             CloudAiReadQuery query,
             CancellationToken cancellationToken = default)
@@ -427,6 +454,7 @@ public sealed class CloudReadonlySimulationTests
             SemanticQueryPlan plan,
             CancellationToken cancellationToken = default)
         {
+            QueryCount++;
             throw CreateUnavailableException();
         }
 
@@ -435,6 +463,18 @@ public sealed class CloudReadonlySimulationTests
             return new CloudAiReadException(
                 CloudAiReadProblemCodes.Unavailable,
                 "Cloud AiRead endpoint is unavailable.");
+        }
+    }
+
+    private sealed class FixedCloudReadonlyDataProviderResolver(ICloudReadonlyDataProvider provider)
+        : ICloudReadonlyDataProviderResolver
+    {
+        public int ResolveCount { get; private set; }
+
+        public ICloudReadonlyDataProvider Resolve()
+        {
+            ResolveCount++;
+            return provider;
         }
     }
 }

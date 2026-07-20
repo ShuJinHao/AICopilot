@@ -2,10 +2,12 @@
 import { Check, X } from 'lucide-vue-next'
 import { useAgentWorkbench } from '@/composables/useAgentWorkbench'
 import { useChatStore } from '@/stores/chatStore'
+import { useAgentPlanPreview } from '@/composables/useAgentPlanPreview'
 import type { AgentApprovalRequest } from '@/types/protocols'
 
 const store = useChatStore()
 const { approvalGroups, pendingAgentApprovals } = useAgentWorkbench()
+const { isPlanConfirmable } = useAgentPlanPreview()
 
 function approvalTypeLabel(type?: string | null) {
   if (type === 'Plan') return '计划'
@@ -42,6 +44,7 @@ async function approveAgentApproval(approvalId: string) {
   const approval = pendingAgentApprovals.value.find((item) => item.id === approvalId)
   if (!approval) return
   if (approval.type === 'Plan') {
+    if (!isPlanConfirmable.value) return
     await store.approveAndRunAgentTask(approval.taskId)
     return
   }
@@ -103,7 +106,8 @@ async function rejectAgentApproval(approvalId: string) {
             :disabled="
               !store.resolvedSessionId ||
               store.isSessionTransitionBlocked ||
-              store.isAgentApprovalAuthorityUnknown
+              store.isAgentApprovalAuthorityUnknown ||
+              (approval.type === 'Plan' && !isPlanConfirmable)
             "
             @click="approveAgentApproval(approval.id)"
           >

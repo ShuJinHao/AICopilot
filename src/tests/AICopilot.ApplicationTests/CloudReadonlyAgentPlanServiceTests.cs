@@ -32,8 +32,10 @@ public sealed class CloudReadonlyAgentPlanServiceTests
 
         result.IsSuccess.Should().BeTrue();
         result.Value!.Intent.Should().Be(intent);
-        result.Value.Target.Should().Be(expectedTarget);
-        result.Value.Kind.Should().Be(expectedKind);
+        result.Value.SemanticPlan.Target.ToString().Should().Be(expectedTarget);
+        result.Value.SemanticPlan.Kind.ToString().Should().Be(expectedKind);
+        result.Value.SemanticPlan.QueryText.Should().BeNull();
+        result.Value.SemanticPlanDigest.Should().MatchRegex("^[0-9a-f]{64}$");
     }
 
     [Fact]

@@ -1,4 +1,3 @@
-using System.Text.Json;
 using AICopilot.AgentPlugin;
 using AICopilot.AiGatewayService.Tools;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
@@ -13,8 +12,6 @@ internal sealed class McpAgentToolExecutor(
     IServiceProvider serviceProvider)
     : IAgentToolExecutor
 {
-    private const int MaxOutputSummaryLength = 6000;
-
     public bool CanExecute(ToolRegistration tool, AgentStep step)
     {
         return tool.ProviderType == ToolProviderType.Mcp &&
@@ -58,7 +55,24 @@ internal sealed class McpAgentToolExecutor(
             });
 
         var rawOutput = await tool.InvokeAsync(invocationContext, context.CancellationToken);
-        return AgentToolExecutionResult.From(BuildSafeOutput(context.ToolRegistration, tool, rawOutput));
+        var outputValidation = ToolOutputSchemaValidator.ValidateAndCanonicalize(
+            rawOutput,
+            context.ToolRegistration.OutputSchemaJson);
+        if (!outputValidation.IsValid)
+        {
+            throw new AgentToolExecutionException(
+                outputValidation.IsPayloadTooLarge
+                    ? AppProblemCodes.EvidencePayloadTooLarge
+                    : AppProblemCodes.ToolOutputSchemaInvalid,
+                outputValidation.Error ?? "MCP tool output does not match the registry schema.");
+        }
+
+        return AgentToolExecutionResult.FromValidatedProviderOutput(
+            context.ToolRegistration,
+            outputValidation,
+            AgentToolDurableOutputBuilder.BuildProviderEnvelope(
+                context.ToolRegistration,
+                outputValidation.CanonicalJson!));
     }
 
     private AiToolDefinition ResolveRuntimeTool(ToolRegistration registration)
@@ -79,6 +93,31 @@ internal sealed class McpAgentToolExecutor(
                 AppProblemCodes.ToolBlocked,
                 $"MCP tool '{registration.ToolCode}' runtime identity does not match registry target.");
         }
+
+        var registrySchema = ToolInputSchemaContractV1.Validate(registration.InputSchemaJson);
+        var runtimeSchema = ToolInputSchemaContractV1.Validate(tool.JsonSchema?.GetRawText());
+        if (!registrySchema.IsValid ||
+            !runtimeSchema.IsValid ||
+            !string.Equals(registrySchema.CanonicalJson, runtimeSchema.CanonicalJson, StringComparison.Ordinal))
+        {
+            throw new AgentToolExecutionException(
+                AppProblemCodes.PlannerToolSchemaUnsupported,
+                $"MCP tool '{registration.ToolCode}' runtime input contract does not exactly match the registry schema.");
+        }
+
+        var registryOutputSchema = ToolOutputSchemaContractV1.Validate(registration.OutputSchemaJson);
+        var runtimeOutputSchema = ToolOutputSchemaContractV1.Validate(tool.ReturnJsonSchema?.GetRawText());
+        if (!registryOutputSchema.IsValid ||
+            !runtimeOutputSchema.IsValid ||
+            !string.Equals(
+                registryOutputSchema.CanonicalJson,
+                runtimeOutputSchema.CanonicalJson,
+                StringComparison.Ordinal))
+        {
+            throw new AgentToolExecutionException(
+                AppProblemCodes.PlannerToolSchemaUnsupported,
+                $"MCP tool '{registration.ToolCode}' runtime output contract does not exactly match the registry schema.");
+        }
     }
 
     private static void EnsureMcpToolSafety(AiToolDefinition tool)
@@ -92,40 +131,4 @@ internal sealed class McpAgentToolExecutor(
         }
     }
 
-    private static object BuildSafeOutput(ToolRegistration registration, AiToolDefinition tool, object? rawOutput)
-    {
-        var serialized = SerializeSafe(rawOutput);
-        var sanitized = ToolExecutionRecordSanitizer.Sanitize(serialized, MaxOutputSummaryLength) ?? "{}";
-        return new
-        {
-            providerType = registration.ProviderType.ToString(),
-            toolCode = registration.ToolCode,
-            serverName = tool.TargetName!,
-            toolName = tool.ToolName!,
-            resultJson = sanitized,
-            isTruncated = serialized.Length > MaxOutputSummaryLength
-        };
-    }
-
-    private static string SerializeSafe(object? value)
-    {
-        if (value is null)
-        {
-            return "null";
-        }
-
-        try
-        {
-            return JsonSerializer.Serialize(value, JsonSerializerOptions.Web);
-        }
-        catch (Exception ex)
-        {
-            return JsonSerializer.Serialize(new
-            {
-                type = value.GetType().Name,
-                text = value.ToString(),
-                serializationError = ex.GetType().Name
-            }, JsonSerializerOptions.Web);
-        }
-    }
 }

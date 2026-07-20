@@ -9,12 +9,23 @@ using Microsoft.Extensions.Options;
 namespace AICopilot.AiGatewayService.AgentTasks;
 
 public sealed record CloudReadonlyAgentPlanIntent(
-    string Intent,
-    string? Query,
+    SemanticQueryPlan SemanticPlan,
     double Confidence,
-    string Target,
-    string Kind,
-    string Summary);
+    string SemanticPlanDigest)
+{
+    public string Intent => SemanticPlan.Intent;
+
+    public static CloudReadonlyAgentPlanIntent FromSemanticPlan(
+        SemanticQueryPlan semanticPlan,
+        double confidence)
+    {
+        ArgumentNullException.ThrowIfNull(semanticPlan);
+        return new CloudReadonlyAgentPlanIntent(
+            semanticPlan,
+            confidence,
+            AgentTaskPlanCloudReadonlyIntentDocument.ComputeSemanticPlanDigest(semanticPlan));
+    }
+}
 
 public interface ICloudReadonlyAgentPlanService
 {
@@ -22,6 +33,10 @@ public interface ICloudReadonlyAgentPlanService
         Guid sessionId,
         string goal,
         CancellationToken cancellationToken = default);
+
+    Result<CloudReadonlyAgentPlanIntent> CreateIntentFromRouted(
+        string goal,
+        IReadOnlyCollection<IntentResult> routedIntents);
 }
 
 public interface ICloudReadonlyAgentIntentRouter
@@ -71,6 +86,24 @@ public sealed class CloudReadonlyAgentPlanService(
         }
 
         var routedIntents = await intentRouter.RouteAsync(sessionId, goal, cancellationToken);
+        return CreateIntentFromRouted(goal, routedIntents);
+    }
+
+    public Result<CloudReadonlyAgentPlanIntent> CreateIntentFromRouted(
+        string goal,
+        IReadOnlyCollection<IntentResult> routedIntents)
+    {
+        if (CloudReadonlyAgentTextGuard.ContainsForbiddenWriteSemantic(goal))
+        {
+            return Unsupported("Cloud readonly agent plans cannot contain write semantics.");
+        }
+
+        if (cloudReadonlyOptions.Value.Mode == CloudReadonlyDataSourceMode.Simulation)
+        {
+            return Unsupported(
+                "Durable Plan v2 cannot seal Simulation as CloudAiRead; simulation remains a non-executable development path.");
+        }
+
         var candidate = routedIntents
             .Where(IsSupportedIntentFamily)
             .OrderByDescending(intent => intent.Confidence)
@@ -86,8 +119,7 @@ public sealed class CloudReadonlyAgentPlanService(
         }
 
         if (CloudReadonlyAgentTextGuard.ContainsForbiddenWriteSemantic(candidate.Intent) ||
-            CloudReadonlyAgentTextGuard.ContainsForbiddenWriteSemantic(candidate.Query) ||
-            CloudReadonlyAgentTextGuard.ContainsUnsafePersistedPayload(candidate.Query))
+            CloudReadonlyAgentTextGuard.ContainsForbiddenWriteSemantic(candidate.Query))
         {
             return Unsupported("Cloud readonly agent intent contains unsafe query semantics.");
         }
@@ -104,14 +136,71 @@ public sealed class CloudReadonlyAgentPlanService(
             return Unsupported($"Cloud readonly semantic target '{semanticPlan.Target}' is not supported.");
         }
 
-        var summary = $"target={semanticPlan.Target}; kind={semanticPlan.Kind}; filters={semanticPlan.Filters.Count}; hasTimeRange={semanticPlan.TimeRange is not null}; limit={semanticPlan.Limit}";
-        return Result.Success(new CloudReadonlyAgentPlanIntent(
-            semanticPlan.Intent,
-            CloudReadonlyAgentTextGuard.SanitizeForPlan(candidate.Query, 2000),
-            candidate.Confidence,
-            semanticPlan.Target.ToString(),
-            semanticPlan.Kind.ToString(),
-            summary));
+        var normalizedFilters = new List<SemanticFilter>(semanticPlan.Filters.Count);
+        foreach (var filter in semanticPlan.Filters)
+        {
+            var operatorCode = filter.Operator switch
+            {
+                SemanticFilterOperator.Contains => "contains",
+                SemanticFilterOperator.GreaterOrEqual => "gte",
+                SemanticFilterOperator.LessOrEqual => "lte",
+                SemanticFilterOperator.In => "in",
+                _ => "eq"
+            };
+            if (!CloudAiReadSemanticSchemaRegistry.TryNormalizeFilter(
+                    semanticPlan.Intent,
+                    filter.Field,
+                    operatorCode,
+                    filter.Value,
+                    out var normalized))
+            {
+                return Unsupported(
+                    $"Cloud readonly intent '{semanticPlan.Intent}' contains a filter outside the production provider schema.");
+            }
+
+            normalizedFilters.Add(new SemanticFilter(
+                normalized.Field,
+                normalized.Operator switch
+                {
+                    "contains" => SemanticFilterOperator.Contains,
+                    "gte" => SemanticFilterOperator.GreaterOrEqual,
+                    "lte" => SemanticFilterOperator.LessOrEqual,
+                    "in" => SemanticFilterOperator.In,
+                    _ => SemanticFilterOperator.Equal
+                },
+                normalized.Value));
+        }
+
+        if (!CloudAiReadSemanticSchemaRegistry.MatchesIntentScope(
+                semanticPlan.Intent,
+                normalizedFilters.Select(filter => new CloudAiReadFilter(
+                    filter.Field,
+                    filter.Operator switch
+                    {
+                        SemanticFilterOperator.Contains => "contains",
+                        SemanticFilterOperator.GreaterOrEqual => "gte",
+                        SemanticFilterOperator.LessOrEqual => "lte",
+                        SemanticFilterOperator.In => "in",
+                        _ => "eq"
+                    },
+                    filter.Value)).ToArray(),
+                semanticPlan.TimeRange is not null))
+        {
+            return Unsupported(
+                $"Cloud readonly intent '{semanticPlan.Intent}' does not match the production provider scope requirements.");
+        }
+
+        return Result.Success(CloudReadonlyAgentPlanIntent.FromSemanticPlan(
+            semanticPlan with
+            {
+                QueryText = null,
+                Filters = normalizedFilters
+                    .OrderBy(filter => filter.Field, StringComparer.Ordinal)
+                    .ThenBy(filter => filter.Operator)
+                    .ThenBy(filter => filter.Value, StringComparer.Ordinal)
+                    .ToArray()
+            },
+            candidate.Confidence));
     }
 
     private static bool IsSupportedIntentFamily(IntentResult intent)
@@ -133,9 +222,12 @@ public sealed class CloudReadonlyAgentPlanService(
 }
 
 public sealed record CloudReadonlyAgentToolRequest(
-    string Intent,
-    string? Query,
-    double Confidence);
+    SemanticQueryPlan SemanticPlan,
+    string SemanticPlanDigest,
+    double Confidence)
+{
+    public string Intent => SemanticPlan.Intent;
+}
 
 public sealed record CloudReadonlyAgentToolResult(
     string Status,

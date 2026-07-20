@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using AICopilot.Services.Contracts;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
 
@@ -116,7 +117,7 @@ internal sealed record CloudReadonlySimulationQuery(
     {
         var match = Regex.Match(text, @"(?i)(limit|top)\s*[:=]?\s*(?<limit>\d+)");
         return match.Success && int.TryParse(match.Groups["limit"].Value, out var limit)
-            ? Math.Clamp(limit, 1, 200)
+            ? CloudAiReadRowLimitPolicy.Normalize(limit)
             : null;
     }
 

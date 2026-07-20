@@ -9,7 +9,8 @@ public sealed class RepositoryPersistenceCommitter(
     AuditDbContext auditDbContext,
     PersistenceCommitEngine commitEngine,
     IEnumerable<IPersistenceOutboxSource> outboxSources,
-    IPersistenceCommitScope commitScope)
+    IPersistenceCommitScope commitScope,
+    IEnumerable<IRepositoryPersistenceAttemptValidator>? attemptValidators = null)
 {
     public async Task<int> SaveChangesAsync(
         DbContext businessDbContext,
@@ -41,6 +42,7 @@ public sealed class RepositoryPersistenceCommitter(
             auditDbContext,
             stagedAuditEntries,
             outboxSource,
+            attemptValidators?.ToArray() ?? [],
             requiresBusinessChange: reservedCommitId.HasValue);
 
         try
@@ -65,6 +67,7 @@ public sealed class RepositoryPersistenceCommitter(
         AuditDbContext stagedAuditDbContext,
         IReadOnlyCollection<AuditLogEntry> stagedAuditEntries,
         IPersistenceOutboxSource? outboxSource,
+        IReadOnlyCollection<IRepositoryPersistenceAttemptValidator> attemptValidators,
         bool requiresBusinessChange) : IPersistenceCommitParticipant<int>
     {
         public DbContext TransactionOwner => businessDbContext;
@@ -80,6 +83,26 @@ public sealed class RepositoryPersistenceCommitter(
             {
                 throw new InvalidOperationException(
                     "A staged persistence file requires a committed business row change.");
+            }
+
+            var applicableValidators = attemptValidators
+                .Where(validator => validator.Supports(businessDbContext))
+                .ToArray();
+            var hasAgentTaskWrites = businessDbContext.ChangeTracker
+                .Entries()
+                .Any(entry =>
+                    (entry.Entity is AICopilot.Core.AiGateway.Aggregates.AgentTasks.AgentTask or
+                        AICopilot.Core.AiGateway.Aggregates.AgentTasks.AgentStep) &&
+                    entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted);
+            if (hasAgentTaskWrites && applicableValidators.Length != 1)
+            {
+                throw new InvalidOperationException(
+                    $"AgentTask persistence requires exactly one transaction validator; configured={applicableValidators.Length}.");
+            }
+
+            foreach (var validator in applicableValidators)
+            {
+                await validator.ValidateAsync(businessDbContext, context, cancellationToken);
             }
 
             var affectedRows = businessAffectedRows;

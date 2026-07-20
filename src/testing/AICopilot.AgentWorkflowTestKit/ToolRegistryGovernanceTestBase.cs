@@ -52,8 +52,11 @@ public abstract class ToolRegistryGovernanceTestBase
         IEnumerable<IKnowledgeBaseAccessChecker>? knowledgeBaseAccessCheckers = null,
         IKnowledgeRetrievalService? knowledgeRetrievalService = null,
         IIdentityAccessService? identityAccessService = null,
-        SkillDefinitionGuard? skillDefinitionGuard = null)
+        SkillDefinitionGuard? skillDefinitionGuard = null,
+        AgentTaskPlanFreshReadGate? freshReadGate = null,
+        IAuditLogWriter? auditLogWriter = null)
     {
+        _ = skillDefinitionGuard;
         return new AgentTaskRuntime(
             taskRepository,
             runAttemptRepository ?? new InMemoryAgentTaskRunAttemptStore(),
@@ -71,9 +74,9 @@ public abstract class ToolRegistryGovernanceTestBase
             guard,
             new AgentRuntimeEventRecorder(
                 executionRepository,
-                new AgentAuditRecorder(new CapturingAuditLogWriter())),
+            new AgentAuditRecorder(auditLogWriter ?? new CapturingAuditLogWriter())),
             toolExecutors ?? [],
-            skillDefinitionGuard: skillDefinitionGuard);
+            freshReadGate ?? AgentPlanV2TestData.CreateMatchingFreshReadGate());
     }
 
     internal static AgentTaskLifecycleCoordinator CreateLifecycleCoordinator(
@@ -83,15 +86,20 @@ public abstract class ToolRegistryGovernanceTestBase
         IAgentTaskRunQueueStore queueRepository,
         IAgentTaskRunAttemptStore? runAttemptRepository = null,
         IOptions<AgentRunQueueOptions>? options = null,
-        AgentAuditRecorder? auditRecorder = null)
+        AgentAuditRecorder? auditRecorder = null,
+        AgentTaskPlanFreshReadGate? freshReadGate = null)
     {
+        var effectiveFreshReadGate = freshReadGate ?? AgentPlanV2TestData.CreateMatchingFreshReadGate();
         return new AgentTaskLifecycleCoordinator(
             taskRepository,
             approvalRepository,
             workspaceRepository,
             queueRepository,
             runAttemptRepository ?? new InMemoryAgentTaskRunAttemptStore(),
-            new AgentTaskRunQueue(queueRepository),
+            new AgentTaskRunQueue(
+                queueRepository,
+                effectiveFreshReadGate),
+            effectiveFreshReadGate,
             options,
             auditRecorder);
     }
@@ -132,6 +140,11 @@ public abstract class ToolRegistryGovernanceTestBase
         string? skillCode = null)
     {
         var now = DateTimeOffset.UtcNow;
+        var planJson = AgentPlanV2TestData.CreateSingleStep(
+            toolCode,
+            executable: false,
+            requiresApproval: requiresApproval,
+            skillCode: skillCode);
         var task = new AgentTask(
             SessionId.New(),
             UserId,
@@ -140,9 +153,9 @@ public abstract class ToolRegistryGovernanceTestBase
             AgentTaskType.ReportGeneration,
             AgentTaskRiskLevel.Low,
             null,
-            CreatePlanJson(toolCode, skillCode),
+            planJson,
             now);
-        task.AddStep("生成图表数据", "生成图表数据。", AgentStepType.ChartGeneration, toolCode, requiresApproval, now);
+        var trackedSteps = AddTrackedPlanSteps(task, planJson, now);
         var workspace = new ArtifactWorkspace(
             task.Id,
             $"ws_{Guid.NewGuid():N}",
@@ -150,7 +163,10 @@ public abstract class ToolRegistryGovernanceTestBase
             "/api/aigateway/workspaces/test",
             now);
         task.AttachWorkspace(workspace.Id, now);
-        task.ConfirmExecutablePlan(task.PlanJson, Array.Empty<int>(), now);
+        task.ConfirmExecutablePlan(
+            task.PlanJson,
+            trackedSteps.Where(step => step.RequiresApproval).Select(step => step.StepIndex).ToArray(),
+            now);
         task.ApprovePlan(now);
         return (task, workspace);
     }
@@ -168,7 +184,7 @@ public abstract class ToolRegistryGovernanceTestBase
             null,
             CreateRagPlanJson(knowledgeBaseId),
             now);
-        task.AddStep("Search RAG", "Search admin-visible knowledge base.", AgentStepType.DataQuery, "rag_search", false, now);
+        var trackedSteps = AddTrackedPlanSteps(task, task.PlanJson, now);
         var workspace = new ArtifactWorkspace(
             task.Id,
             $"ws_{Guid.NewGuid():N}",
@@ -176,7 +192,10 @@ public abstract class ToolRegistryGovernanceTestBase
             "/api/aigateway/workspaces/test",
             now);
         task.AttachWorkspace(workspace.Id, now);
-        task.ConfirmExecutablePlan(task.PlanJson, Array.Empty<int>(), now);
+        task.ConfirmExecutablePlan(
+            task.PlanJson,
+            trackedSteps.Where(step => step.RequiresApproval).Select(step => step.StepIndex).ToArray(),
+            now);
         task.ApprovePlan(now);
         return (task, workspace);
     }
@@ -194,8 +213,7 @@ public abstract class ToolRegistryGovernanceTestBase
             null,
             CreateCloudPlanJson(),
             now);
-        task.AddStep("Read Cloud", "Read Cloud readonly data.", AgentStepType.DataQuery, "query_cloud_data_readonly", requiresApproval: true, now);
-        task.AddStep("Generate Markdown", "Generate markdown report.", AgentStepType.ArtifactGeneration, "generate_markdown_report", requiresApproval: false, now);
+        var trackedSteps = AddTrackedPlanSteps(task, task.PlanJson, now);
         var workspace = new ArtifactWorkspace(
             task.Id,
             $"ws_{Guid.NewGuid():N}",
@@ -203,121 +221,50 @@ public abstract class ToolRegistryGovernanceTestBase
             "/api/aigateway/workspaces/test",
             now);
         task.AttachWorkspace(workspace.Id, now);
-        task.ConfirmExecutablePlan(task.PlanJson, Array.Empty<int>(), now);
+        task.ConfirmExecutablePlan(
+            task.PlanJson,
+            trackedSteps.Where(step => step.RequiresApproval).Select(step => step.StepIndex).ToArray(),
+            now);
         task.ApprovePlan(now);
         return (task, workspace);
     }
 
     internal static string CreatePlanJson(string toolCode, string? skillCode = null, string? inputJson = null)
     {
-        var plan = new
-        {
-            version = 1,
-            plannerTemplateCode = "agent_planner",
-            goal = "生成报告",
-            taskType = "ReportGeneration",
-            riskLevel = "Low",
-            uploadIds = Array.Empty<Guid>(),
-            knowledgeBaseIds = Array.Empty<Guid>(),
-            steps = new[]
-            {
-                new
-                {
-                    title = "生成图表数据",
-                    description = "生成图表数据。",
-                    stepType = "ChartGeneration",
-                    toolCode,
-                    requiresApproval = false,
-                    inputJson
-                }
-            },
-            runtimeSettings = new
-            {
-                agentPlanningHistoryCount = 30,
-                contextTokenLimit = 12000
-            },
-            skillCode
-        };
-        return JsonSerializer.Serialize(plan, JsonSerializerOptions.Web);
+        return AgentPlanV2TestData.CreateSingleStep(
+            toolCode,
+            executable: false,
+            skillCode: skillCode,
+            inputJson: inputJson);
     }
 
     internal static string CreateRagPlanJson(Guid knowledgeBaseId)
     {
-        var plan = new
-        {
-            version = 1,
-            plannerTemplateCode = "agent_planner",
-            goal = "RAG admin-only search",
-            taskType = "DataAnalysis",
-            riskLevel = "Low",
-            uploadIds = Array.Empty<Guid>(),
-            knowledgeBaseIds = new[] { knowledgeBaseId },
-            steps = new[]
-            {
-                new
-                {
-                    title = "Search RAG",
-                    description = "Search admin-visible knowledge base.",
-                    stepType = "DataQuery",
-                    toolCode = "rag_search",
-                    requiresApproval = false
-                }
-            },
-            runtimeSettings = new
-            {
-                agentPlanningHistoryCount = 30,
-                contextTokenLimit = 12000
-            }
-        };
-        return JsonSerializer.Serialize(plan, JsonSerializerOptions.Web);
+        return AgentPlanV2TestData.CreateRag(knowledgeBaseId, executable: false);
     }
 
     internal static string CreateCloudPlanJson()
     {
-        var plan = new
-        {
-            version = 1,
-            plannerTemplateCode = "agent_planner",
-            goal = "Cloud readonly report",
-            taskType = "CloudDataReport",
-            riskLevel = "Medium",
-            uploadIds = Array.Empty<Guid>(),
-            knowledgeBaseIds = Array.Empty<Guid>(),
-            cloudReadonlyIntent = new
-            {
-                intent = "Analysis.Device.List",
-                query = """{"filters":[{"field":"deviceCode","operator":"eq","value":"DEV-001"}],"limit":20}""",
-                confidence = 0.95,
-                target = "Device",
-                kind = "List",
-                summary = "target=Device; kind=List; filters=1; hasTimeRange=False; limit=20"
-            },
-            steps = new[]
-            {
-                new
-                {
-                    title = "Read Cloud",
-                    description = "Read Cloud readonly data.",
-                    stepType = "DataQuery",
-                    toolCode = "query_cloud_data_readonly",
-                    requiresApproval = true
-                },
-                new
-                {
-                    title = "Generate Markdown",
-                    description = "Generate markdown report.",
-                    stepType = "ArtifactGeneration",
-                    toolCode = "generate_markdown_report",
-                    requiresApproval = false
-                }
-            },
-            runtimeSettings = new
-            {
-                agentPlanningHistoryCount = 30,
-                contextTokenLimit = 12000
-            }
-        };
-        return JsonSerializer.Serialize(plan, JsonSerializerOptions.Web);
+        return AgentPlanV2TestData.CreateCloud(executable: false);
+    }
+
+    private static IReadOnlyCollection<AgentStep> AddTrackedPlanSteps(
+        AgentTask task,
+        string planJson,
+        DateTimeOffset now)
+    {
+        var plan = JsonSerializer.Deserialize<AgentTaskPlanDocument>(planJson, AgentRuntimeJson.Options)
+            ?? throw new InvalidOperationException("Test Plan v2 fixture is required.");
+        return plan.Steps
+            .Select(step => task.AddStep(
+                step.Title,
+                step.Description,
+                step.StepType,
+                step.ToolCode,
+                step.RequiresApproval,
+                now,
+                step.InputJson))
+            .ToArray();
     }
 
     internal static SemanticQueryPlan CreateDeviceSemanticPlan()
@@ -403,17 +350,23 @@ public abstract class ToolRegistryGovernanceTestBase
         SkillDefinitionGuard? skillDefinitionGuard = null,
         IAgentSkillAutoSelector? skillAutoSelector = null)
     {
+        _ = dynamicPlanner;
+        _ = models;
+        _ = skillAutoSelector;
+        var planToolGuard = new AgentPlanToolGuard(
+            guard,
+            new StubAgentPluginCatalog((runtimeTools ?? []).ToArray()),
+            skillDefinitionGuard);
         return new PlanAgentTaskCommandHandler(
             new PlanAgentTaskCoordinator(
                 taskRepository ?? new InMemoryRepository<AgentTask>(),
-                new InMemoryRepository<ApprovalRequest>(),
                 new InMemoryRepository<Session>(session),
                 new InMemoryRepository<UploadRecord>(),
                 new AgentAuditRecorder(new CapturingAuditLogWriter()),
                 [],
                 new TestCurrentUser(UserId),
-                skillDefinitionGuard: skillDefinitionGuard,
-                skillAutoSelector: skillAutoSelector));
+                planToolGuard: planToolGuard,
+                cloudReadonlyPlanService: cloudReadonlyPlanService ?? new FixedCloudReadonlyAgentPlanService()));
     }
 
     internal static LanguageModel CreatePlannerModel()
@@ -455,9 +408,10 @@ public abstract class ToolRegistryGovernanceTestBase
         bool requiresApproval = false,
         AiToolRiskLevel riskLevel = AiToolRiskLevel.Low,
         string? requiredPermission = null,
-        string inputSchemaJson = """{"type":"object"}""",
-        string outputSchemaJson = """{"type":"object"}""")
+        string? inputSchemaJson = null,
+        string? outputSchemaJson = null)
     {
+        var builtIn = BuiltInToolRegistrations.FindAgentRuntimeTool(toolCode);
         return new ToolRegistration(
             toolCode,
             toolCode,
@@ -465,15 +419,19 @@ public abstract class ToolRegistryGovernanceTestBase
             providerType,
             targetType,
             targetName,
-            inputSchemaJson,
-            outputSchemaJson,
+            inputSchemaJson ?? builtIn?.InputSchemaJson ??
+                """{"type":"object","properties":{},"additionalProperties":false}""",
+            outputSchemaJson ?? builtIn?.OutputSchemaJson ??
+                """{"type":"object","properties":{},"additionalProperties":false}""",
             riskLevel,
             requiredPermission,
             requiresApproval,
             isEnabled,
             120,
             ToolAuditLevel.Standard,
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            schemaVersion: builtIn?.SchemaVersion ?? BuiltInToolRegistrations.CurrentSchemaVersion,
+            catalogVersion: builtIn?.CatalogVersion ?? BuiltInToolRegistrations.CurrentCatalogVersion);
     }
 
     internal static ServiceProvider CreateQueueWorkerProvider(
@@ -486,7 +444,9 @@ public abstract class ToolRegistryGovernanceTestBase
         services.AddSingleton<IRepository<AgentTask>>(taskRepository);
         services.AddSingleton<IAgentTaskRunQueueStore>(queueRepository);
         services.AddSingleton<IAgentTaskRunAttemptStore>(attemptRepository);
-        services.AddSingleton<IAgentTaskRunQueue>(new AgentTaskRunQueue(queueRepository));
+        services.AddSingleton<IAgentTaskRunQueue>(new AgentTaskRunQueue(
+            queueRepository,
+            AgentPlanV2TestData.CreateMatchingFreshReadGate()));
         services.AddSingleton(runtime);
         services.AddSingleton<AgentTaskRunQueueWorkerCoordinator>();
         return services.BuildServiceProvider();
@@ -841,13 +801,18 @@ public abstract class ToolRegistryGovernanceTestBase
 
         public FixedCloudReadonlyAgentPlanService(Result<CloudReadonlyAgentPlanIntent>? result = null)
         {
-            this.result = result ?? Result.Success(new CloudReadonlyAgentPlanIntent(
-                "Analysis.Device.List",
-                """{"filters":[{"field":"deviceCode","operator":"eq","value":"DEV-001"}],"limit":20}""",
-                0.95,
-                "Device",
-                "List",
-                "target=Device; kind=List; filters=1; hasTimeRange=False; limit=20"));
+            this.result = result ?? Result.Success(CloudReadonlyAgentPlanIntent.FromSemanticPlan(
+                new SemanticQueryPlan(
+                    "Analysis.Device.List",
+                    SemanticQueryTarget.Device,
+                    SemanticQueryKind.List,
+                    null,
+                    new SemanticProjection(["deviceId", "deviceCode", "status"]),
+                    [],
+                    null,
+                    null,
+                    20),
+                0.95));
         }
 
         public Task<Result<CloudReadonlyAgentPlanIntent>> CreateIntentAsync(
@@ -856,6 +821,13 @@ public abstract class ToolRegistryGovernanceTestBase
             CancellationToken cancellationToken = default)
         {
             return Task.FromResult(result);
+        }
+
+        public Result<CloudReadonlyAgentPlanIntent> CreateIntentFromRouted(
+            string goal,
+            IReadOnlyCollection<IntentResult> routedIntents)
+        {
+            return result;
         }
     }
 
@@ -966,7 +938,7 @@ public abstract class ToolRegistryGovernanceTestBase
             }
         });
         return new CloudReadonlyAgentToolExecutor(new FixedCloudReadonlyDataProviderResolver(
-            new RealCloudReadonlyDataProvider(planner, cloudClient, options)));
+            new RealCloudReadonlyDataProvider(cloudClient, options)));
     }
 
     internal sealed class FixedCloudReadonlyDataProviderResolver(ICloudReadonlyDataProvider provider)

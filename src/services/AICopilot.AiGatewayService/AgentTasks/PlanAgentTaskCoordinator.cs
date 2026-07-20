@@ -1,13 +1,10 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using AICopilot.AiGatewayService.Agents;
 using AICopilot.AiGatewayService.Models;
 using AICopilot.AiGatewayService.Sessions;
-using AICopilot.AiGatewayService.Skills;
 using AICopilot.AiGatewayService.Tools;
 using AICopilot.AiGatewayService.Workflows;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
-using AICopilot.Core.AiGateway.Aggregates.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
 using AICopilot.Core.AiGateway.Aggregates.Skills;
 using AICopilot.Core.AiGateway.Aggregates.Uploads;
@@ -21,7 +18,6 @@ namespace AICopilot.AiGatewayService.AgentTasks;
 
 public sealed class PlanAgentTaskCoordinator(
     IRepository<AgentTask> repository,
-    IRepository<ApprovalRequest> approvalRepository,
     IReadRepository<Session> sessionRepository,
     IReadRepository<UploadRecord> uploadRepository,
     AgentAuditRecorder auditRecorder,
@@ -29,21 +25,25 @@ public sealed class PlanAgentTaskCoordinator(
     ICurrentUser currentUser,
     IBusinessDatabaseReadService? businessDatabaseReadService = null,
     MessageTimelineProjectionWriter? timelineProjectionWriter = null,
-    SkillDefinitionGuard? skillDefinitionGuard = null,
-    IAgentSkillAutoSelector? skillAutoSelector = null,
-    AgentWorkflowPipeline? workflowPipeline = null)
+    AgentWorkflowPipeline? workflowPipeline = null,
+    AgentPlanToolGuard? planToolGuard = null,
+    ICloudReadonlyAgentPlanService? cloudReadonlyPlanService = null,
+    AgentPlanDraftContractAuthority? planDraftContractAuthority = null)
 {
     private const int PlanDraftValidationVersion = 1;
-
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        Converters = { new JsonStringEnumConverter() }
-    };
 
     public async Task<Result<AgentTaskDto>> PlanAsync(
         PlanAgentTaskCommand request,
         CancellationToken cancellationToken)
     {
+        var retiredSelection = AgentPlanRetiredSelectionContract.Validate(
+            request.SkillCode,
+            request.PreferredToolCodes);
+        if (retiredSelection is not null)
+        {
+            return Result.Failure(retiredSelection);
+        }
+
         if (currentUser.Id is not { } userId)
         {
             return MissingUser();
@@ -74,48 +74,50 @@ public sealed class PlanAgentTaskCoordinator(
                 cancellationToken);
         }
 
-        var skillSelection = await ResolveEffectiveSkillAsync(request, cancellationToken);
-        skillSelection ??= SelectSkillFromWorkflow(workflowDraft);
-        if (AutoSkillSelectionRequired(request) && string.IsNullOrWhiteSpace(skillSelection?.SkillCode))
+        var effectiveTaskType = request.TaskType;
+        var effectiveQueryMode = request.QueryMode ??
+            (effectiveTaskType == AgentTaskType.CloudDataReport ? "CloudReadonly" : "TextToSql");
+        var effectivePlanSource = "PlanV2Contract";
+
+        var riskLevel = AgentTaskPlanMetadataBuilder.DetermineRiskLevel(effectiveTaskType);
+        var artifactTypesResult = AgentTaskPlanStepBuilder.ResolveArtifactTypes(request.ArtifactTypes);
+        if (!artifactTypesResult.IsSuccess)
         {
-            capabilityGaps.Add(skillSelection?.Reason?.Trim() is { Length: > 0 } reason
-                ? $"Skill 自动识别未命中：{reason}"
-                : "Skill 自动识别未命中；当前仅生成通用计划草案。");
+            return Result.From(artifactTypesResult);
         }
 
-        var effectiveSkillCode = skillSelection?.SkillCode;
-        SkillDefinition? selectedSkill = null;
-        if (skillDefinitionGuard is not null)
+        var effectiveArtifactTypes = artifactTypesResult.Value!
+            .OrderBy(value => value, StringComparer.Ordinal)
+            .ToArray();
+        var effectivePlannerMode = "PlanDraft";
+        string? plannerFallbackReason = null;
+        var plannerToolCatalog = new PlannerToolCatalog(PlannerToolCatalog.CurrentVersion, 0, []);
+        if (planToolGuard is not null)
         {
-            var skillResult = await skillDefinitionGuard.ResolveAsync(effectiveSkillCode, cancellationToken);
-            if (!skillResult.IsSuccess)
+            var catalogResult = await planToolGuard.GetAvailableToolCatalogAsync(
+                userId,
+                preparation.IsSimulationOnlyPlan,
+                preparation.BusinessDomains,
+                cancellationToken,
+                skillCode: null,
+                pluginSelectionMode: request.PluginSelectionMode ?? AgentPluginSelectionMode.BuiltInOnly);
+            if (catalogResult.IsSuccess)
             {
-                if (!string.IsNullOrWhiteSpace(request.SkillCode))
-                {
-                    return Result.From(skillResult);
-                }
-
-                capabilityGaps.Add(DescribeProblem("Skill 自动识别结果不可用", skillResult));
-                effectiveSkillCode = null;
+                plannerToolCatalog = catalogResult.Value!;
             }
             else
             {
-                selectedSkill = skillResult.Value;
+                capabilityGaps.Add(AgentPlanCapabilityGapCodes.ToolCatalogUnavailable);
+                plannerToolCatalog = new PlannerToolCatalog(PlannerToolCatalog.CurrentVersion, 0, []);
             }
         }
+        else
+        {
+            // The registry is the only authority for executable tool identity and
+            // schema. Runtime/plugin discovery cannot synthesize a parallel catalog.
+            capabilityGaps.Add(AgentPlanCapabilityGapCodes.ToolCatalogUnavailable);
+        }
 
-        var effectiveTaskType = ResolveEffectiveTaskType(request.TaskType, selectedSkill);
-        var effectiveQueryMode = request.QueryMode ??
-            (effectiveTaskType == AgentTaskType.CloudDataReport ? "CloudReadonly" : "TextToSql");
-        var effectivePlanSource = selectedSkill is null ? "FreeGoal" : $"Skill.{selectedSkill.SkillCode}";
-
-        var riskLevel = AgentTaskPlanMetadataBuilder.DetermineRiskLevel(effectiveTaskType);
-        var requestedArtifactTypes = AgentTaskPlanStepBuilder.NormalizeArtifactTypes(request.ArtifactTypes)?.ToArray();
-        var skillDefaultArtifactTypes = AgentTaskPlanStepBuilder.NormalizeArtifactTypes(selectedSkill?.OutputComponentTypes)?.ToArray();
-        var effectiveArtifactTypes = requestedArtifactTypes ?? skillDefaultArtifactTypes;
-        var effectivePlannerMode = "PlanDraft";
-        string? plannerFallbackReason = null;
-        var plannerToolCatalog = BuildPlannerToolCatalog(workflowDraft);
         var plannerToolCatalogVersion = plannerToolCatalog.Version;
         var plannerToolCount = plannerToolCatalog.AvailableToolCount;
         var toolRiskSummary = AgentTaskPlanMetadataBuilder.BuildToolRiskSummary(plannerToolCatalog);
@@ -150,6 +152,27 @@ public sealed class PlanAgentTaskCoordinator(
         steps = riskLevel >= AgentTaskRiskLevel.High
             ? steps.Select(step => step with { RequiresApproval = true }).ToArray()
             : steps;
+        if (planToolGuard is not null && steps.Count != 0)
+        {
+            var guardedStepsResult = await planToolGuard.ValidateStepsAsync(
+                steps,
+                effectiveTaskType,
+                userId,
+                preparation.IsSimulationOnlyPlan,
+                preparation.BusinessDomains,
+                cancellationToken,
+                skillCode: null,
+                pluginSelectionMode: request.PluginSelectionMode ?? AgentPluginSelectionMode.BuiltInOnly);
+            if (guardedStepsResult.IsSuccess)
+            {
+                steps = guardedStepsResult.Value!;
+            }
+            else
+            {
+                capabilityGaps.Add(AgentPlanCapabilityGapCodes.PlannedToolUnavailable);
+            }
+        }
+
         var approvalCheckpoints = steps
             .Where(step => step.RequiresApproval)
             .Select(step => string.IsNullOrWhiteSpace(step.ToolCode) ? step.Title : step.ToolCode!)
@@ -161,6 +184,33 @@ public sealed class PlanAgentTaskCoordinator(
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
         AgentTaskPlanCloudReadonlyIntentDocument? cloudReadonlyIntent = null;
+        CloudReadonlyAgentPlanIntent? resolvedCloudIntent = null;
+        if (effectiveTaskType == AgentTaskType.CloudDataReport)
+        {
+            if (cloudReadonlyPlanService is null)
+            {
+                capabilityGaps.Add(AgentPlanCapabilityGapCodes.CloudReadonlyResolverUnavailable);
+            }
+            else
+            {
+                Result<CloudReadonlyAgentPlanIntent> cloudIntentResult = workflowDraft is null
+                    ? Result.Failure(new ApiProblemDescriptor(
+                        AppProblemCodes.CloudReadonlyIntentUnsupported,
+                        "The single authoritative routing result is unavailable."))
+                    : cloudReadonlyPlanService.CreateIntentFromRouted(
+                    request.Goal,
+                    workflowDraft.Intents);
+                if (cloudIntentResult.IsSuccess)
+                {
+                    resolvedCloudIntent = cloudIntentResult.Value!;
+                    cloudReadonlyIntent = AgentTaskPlanCloudReadonlyIntentDocument.From(resolvedCloudIntent);
+                }
+                else
+                {
+                    capabilityGaps.Add(AgentPlanCapabilityGapCodes.CloudReadonlyIntentUnavailable);
+                }
+            }
+        }
 
         var plan = new AgentTaskPlanDocument(
             1,
@@ -209,15 +259,70 @@ public sealed class PlanAgentTaskCoordinator(
             toolRiskSummary,
             mockMcpOnly,
             toolApprovalCheckpoints,
-            SkillCode: selectedSkill?.SkillCode,
-            SkillName: selectedSkill?.DisplayName,
-            SkillRoutingReason: skillSelection?.Reason,
+            SkillCode: null,
+            SkillName: null,
+            SkillRoutingReason: null,
             PlanKind: AgentTaskPlanKinds.PlanDraft,
             IsExecutable: false,
             CapabilityGaps: capabilityGaps
                 .Where(gap => !string.IsNullOrWhiteSpace(gap))
                 .Distinct(StringComparer.Ordinal)
                 .ToArray());
+
+        var routedIntents = new List<IntentResult>();
+        if (resolvedCloudIntent is not null)
+        {
+            routedIntents.Add(new IntentResult
+            {
+                Intent = resolvedCloudIntent.Intent,
+                Query = BuildTypedIntentAdapterQuery(resolvedCloudIntent.SemanticPlan),
+                Confidence = resolvedCloudIntent.Confidence
+            });
+        }
+        else if (workflowDraft is not null)
+        {
+            routedIntents.AddRange(workflowDraft.Intents.Where(intent =>
+                !intent.Intent.StartsWith("Knowledge.", StringComparison.Ordinal) &&
+                !preparation.SelectedDataSources.Any(source =>
+                    string.Equals(intent.Intent, $"Analysis.{source.Name}", StringComparison.OrdinalIgnoreCase))));
+        }
+
+        if (preparation.KnowledgeBaseIds.Length > 0)
+        {
+            routedIntents.Add(new IntentResult { Intent = "Knowledge.Retrieve", Confidence = 1 });
+        }
+
+        if (preparation.SelectedDataSources.Any())
+        {
+            routedIntents.Add(new IntentResult { Intent = "Analysis.GovernedQuery", Confidence = 1 });
+        }
+        var contractAuthority = planDraftContractAuthority ?? new AgentPlanDraftContractAuthority(
+            new IntentResultToCandidateAdapter(),
+            new AgentPlanCanonicalizer());
+        var sealedPlanResult = contractAuthority.SealDraft(new AgentPlanDraftContractRequest(
+            request.Goal,
+            plan,
+            routedIntents,
+            new AgentIntentAdapterContext(
+                preparation.UploadIds,
+                preparation.KnowledgeBaseIds,
+                preparation.SelectedDataSources,
+                effectiveArtifactTypes ?? [],
+                ResolveRoutedSkillCodes(workflowDraft),
+                ResolveAuthorizedActionIntentCodes(workflowDraft),
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)),
+            plannerToolCatalog,
+            request.PluginSelectionMode,
+            request.SelectedPluginIds,
+            request.CapabilitySelectionMode,
+            request.RequestedCapabilityCodes,
+            workflowDraft?.ExecutionMetadata.RoutingConfiguration));
+        if (!sealedPlanResult.IsSuccess)
+        {
+            return Result.From(sealedPlanResult);
+        }
+
+        var sealedPlan = sealedPlanResult.Value!;
 
         var now = DateTimeOffset.UtcNow;
         var task = new AgentTask(
@@ -228,35 +333,28 @@ public sealed class PlanAgentTaskCoordinator(
             effectiveTaskType,
             riskLevel,
             request.ModelId.HasValue ? new(request.ModelId.Value) : null,
-            JsonSerializer.Serialize(plan, JsonOptions),
+            sealedPlan.CanonicalJson,
             now);
 
-        foreach (var step in steps)
+        foreach (var step in sealedPlan.Document.Steps)
         {
             task.AddStep(step.Title, step.Description, step.StepType, step.ToolCode, step.RequiresApproval, now, step.InputJson);
         }
 
-        var approval = new ApprovalRequest(
-            task.Id,
-            AgentApprovalType.Plan,
-            task.Id.Value.ToString(),
-            userId,
-            now);
         repository.Add(task);
-        approvalRepository.Add(approval);
         if (timelineProjectionWriter is not null)
         {
-            await timelineProjectionWriter.StageAgentTaskPlanCreatedAsync(task, approval, cancellationToken);
+            await timelineProjectionWriter.StageAgentTaskPlanCreatedAsync(task, approval: null, cancellationToken);
         }
 
         await auditRecorder.RecordPlanAsync(
             task,
             AuditResults.Succeeded,
-            "Agent task PlanDraft generated and is awaiting user confirmation.",
-            pendingApprovalCount: 1,
+            "Agent task PlanDraft contract generated; execution remains blocked until the trusted P2 PlanCompiler is available.",
+            pendingApprovalCount: 0,
             cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
-        return Result.Success(AgentTaskDtoMapper.Map(task, pendingApprovalCount: 1));
+        return Result.Success(AgentTaskDtoMapper.Map(task, pendingApprovalCount: 0));
     }
 
     private static Result MissingUser()
@@ -271,119 +369,69 @@ public sealed class PlanAgentTaskCoordinator(
         return string.Equals(currentUser.Role, "Admin", StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task<AgentSkillSelection?> ResolveEffectiveSkillAsync(
-        PlanAgentTaskCommand request,
-        CancellationToken cancellationToken)
-    {
-        if (!string.IsNullOrWhiteSpace(request.SkillCode))
-        {
-            return new AgentSkillSelection(request.SkillCode.Trim(), "用户手动选择 Skill。");
-        }
-
-        return skillAutoSelector is null
-            ? null
-            : await skillAutoSelector.SelectSkillAsync(request.SessionId, request.Goal, cancellationToken);
-    }
-
-    private bool AutoSkillSelectionRequired(PlanAgentTaskCommand request)
-    {
-        return skillAutoSelector is not null &&
-               string.IsNullOrWhiteSpace(request.SkillCode);
-    }
-
-    private static AgentTaskType ResolveEffectiveTaskType(AgentTaskType requestedTaskType, SkillDefinition? skill)
-    {
-        return skill?.SkillCode switch
-        {
-            "cloud_readonly" => AgentTaskType.CloudDataReport,
-            "data_analysis" => AgentTaskType.DataAnalysis,
-            "knowledge_research" => AgentTaskType.RagAnswer,
-            _ => requestedTaskType
-        };
-    }
-
-    private static PlannerToolCatalog BuildPlannerToolCatalog(AgentPlanDraftWorkflowResult? workflowDraft)
+    private static string[] ResolveAuthorizedActionIntentCodes(AgentPlanDraftWorkflowResult? workflowDraft)
     {
         if (workflowDraft is null || workflowDraft.Tools.Count == 0)
         {
-            return new PlannerToolCatalog(PlannerToolCatalog.CurrentVersion, 0, []);
+            return [];
         }
 
-        var tools = workflowDraft.Tools
-            .Select(tool =>
-            {
-                var toolCode = string.IsNullOrWhiteSpace(tool.ToolName) ? tool.Name : tool.ToolName!;
-                var targetType = tool.TargetType?.ToString() ?? "AgentRuntime";
-                var providerKind = tool.TargetType == AiToolTargetType.McpServer ? "Mcp" : "Plugin";
-                return new AgentPlannerToolSummary(
-                    toolCode,
-                    toolCode,
-                    tool.Description ?? string.Empty,
-                    providerKind,
-                    targetType,
-                    tool.TargetName ?? string.Empty,
-                    tool.JsonSchema?.GetRawText() ?? "{}",
-                    tool.RequiresApproval,
-                    tool.RiskLevel.ToString(),
-                    ProviderKind: providerKind,
-                    IsMock: IsMockTool(tool));
-            })
+        var loadedTargets = workflowDraft.Tools
+            .Select(tool => tool.TargetName)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return workflowDraft.Intents
+            .Select(intent => intent.Intent?.Trim())
+            .Where(code => code is not null && code.StartsWith("Action.", StringComparison.Ordinal))
+            .Select(code => code!)
+            .Where(code => loadedTargets.Contains(code["Action.".Length..]))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(code => code, StringComparer.Ordinal)
             .ToArray();
-
-        return new PlannerToolCatalog(
-            PlannerToolCatalog.CurrentVersion,
-            tools.Length,
-            tools);
     }
 
-    private static bool IsMockTool(AiToolDefinition tool)
+    private static string[] ResolveRoutedSkillCodes(AgentPlanDraftWorkflowResult? workflowDraft)
     {
-        return tool.AdditionalProperties.TryGetValue("isMock", out var isMockValue) &&
-               bool.TryParse(Convert.ToString(isMockValue, System.Globalization.CultureInfo.InvariantCulture), out var isMock) &&
-               isMock;
+        return workflowDraft?.Intents
+            .Select(intent => !string.IsNullOrWhiteSpace(intent.SkillCode)
+                ? intent.SkillCode!.Trim()
+                : intent.Intent.StartsWith("Skill.", StringComparison.Ordinal)
+                    ? intent.Intent["Skill.".Length..].Trim()
+                    : null)
+            .Where(code => !string.IsNullOrWhiteSpace(code))
+            .Select(code => code!)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(code => code, StringComparer.Ordinal)
+            .ToArray() ?? [];
     }
 
-    private static AgentSkillSelection? SelectSkillFromWorkflow(AgentPlanDraftWorkflowResult? workflowDraft)
+    private static string BuildTypedIntentAdapterQuery(SemanticQueryPlan plan)
     {
-        var skillIntent = workflowDraft?.Intents
-            .Where(intent => intent.Intent.StartsWith("Skill.", StringComparison.OrdinalIgnoreCase) ||
-                             !string.IsNullOrWhiteSpace(intent.SkillCode))
-            .OrderByDescending(intent => intent.Confidence)
-            .FirstOrDefault();
-        if (skillIntent is null)
+        var payload = new
         {
-            return null;
-        }
-
-        var skillCode = !string.IsNullOrWhiteSpace(skillIntent.SkillCode)
-            ? skillIntent.SkillCode
-            : skillIntent.Intent["Skill.".Length..];
-        if (string.IsNullOrWhiteSpace(skillCode))
-        {
-            return null;
-        }
-
-        var reason = skillIntent.Reason ??
-                     skillIntent.Reasoning ??
-                     $"Unified workflow selected Skill.{skillCode}.";
-        return new AgentSkillSelection(skillCode.Trim(), reason);
+            filters = plan.Filters.Select(filter => new
+            {
+                field = filter.Field,
+                @operator = filter.Operator switch
+                {
+                    SemanticFilterOperator.Contains => "contains",
+                    SemanticFilterOperator.GreaterOrEqual => "gte",
+                    SemanticFilterOperator.LessOrEqual => "lte",
+                    SemanticFilterOperator.In => "in",
+                    _ => "eq"
+                },
+                value = filter.Value
+            }).ToArray(),
+            timeRange = plan.TimeRange is null
+                ? null
+                : new
+                {
+                    fromUtc = plan.TimeRange.Start,
+                    toUtc = plan.TimeRange.End,
+                    timeZone = plan.TimeRange.TimeZone
+                }
+        };
+        return JsonSerializer.Serialize(payload, CanonicalJson.SerializerOptions);
     }
 
-    private static string DescribeProblem<T>(string prefix, Result<T> result)
-    {
-        var problem = result.Errors?
-            .OfType<ApiProblemDescriptor>()
-            .FirstOrDefault();
-        if (problem is not null)
-        {
-            return $"{prefix}: {problem.Code} - {problem.Detail}";
-        }
-
-        var detail = result.Errors?
-            .Select(error => error?.ToString())
-            .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
-        return string.IsNullOrWhiteSpace(detail)
-            ? prefix
-            : $"{prefix}: {detail}";
-    }
 }

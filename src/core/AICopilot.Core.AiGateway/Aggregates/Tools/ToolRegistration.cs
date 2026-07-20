@@ -108,9 +108,11 @@ public sealed class ToolRegistration : BaseEntity<ToolRegistrationId>, IAggregat
 
     public string TargetName { get; private set; } = string.Empty;
 
-    public string InputSchemaJson { get; private set; } = "{}";
+    public string InputSchemaJson { get; private set; } =
+        "{\"additionalProperties\":false,\"properties\":{},\"type\":\"object\"}";
 
-    public string OutputSchemaJson { get; private set; } = "{}";
+    public string OutputSchemaJson { get; private set; } =
+        "{\"additionalProperties\":false,\"properties\":{},\"type\":\"object\"}";
 
     public AiToolRiskLevel RiskLevel { get; private set; }
 
@@ -194,6 +196,38 @@ public sealed class ToolRegistration : BaseEntity<ToolRegistrationId>, IAggregat
             approvalPolicy ?? ApprovalPolicy);
     }
 
+    public bool DisableForUnavailableContract(
+        AiToolRiskLevel conservativeRiskLevel,
+        DateTimeOffset nowUtc)
+    {
+        if (!Enum.IsDefined(typeof(AiToolRiskLevel), conservativeRiskLevel))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(conservativeRiskLevel),
+                conservativeRiskLevel,
+                "Tool risk level is invalid.");
+        }
+
+        if (!IsEnabled &&
+            !IsExecutableByAgent &&
+            RequiresApproval &&
+            RiskLevel == conservativeRiskLevel &&
+            string.Equals(ApprovalPolicy, "RediscoveryReviewRequired", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        RiskLevel = conservativeRiskLevel;
+        RequiresApproval = true;
+        IsEnabled = false;
+        IsExecutableByAgent = false;
+        SchemaVersion = checked(SchemaVersion + 1);
+        CatalogVersion = checked(CatalogVersion + 1);
+        ApprovalPolicy = "RediscoveryReviewRequired";
+        UpdatedAt = nowUtc;
+        return true;
+    }
+
     private void Update(
         string displayName,
         string description,
@@ -220,6 +254,8 @@ public sealed class ToolRegistration : BaseEntity<ToolRegistrationId>, IAggregat
         string? approvalPolicy)
     {
         Validate(toolCode, displayName, description, providerType, targetType, targetName, riskLevel, timeoutSeconds, auditLevel, dataBoundary, schemaVersion, catalogVersion);
+        var normalizedInputSchema = NormalizeInputSchema(inputSchemaJson);
+        var normalizedOutputSchema = NormalizeOutputSchema(outputSchemaJson);
 
         ToolCode = NormalizeRequired(toolCode, nameof(toolCode), 160);
         DisplayName = NormalizeRequired(displayName, nameof(displayName), 160);
@@ -227,8 +263,8 @@ public sealed class ToolRegistration : BaseEntity<ToolRegistrationId>, IAggregat
         ProviderType = providerType;
         TargetType = targetType;
         TargetName = NormalizeRequired(targetName, nameof(targetName), 200);
-        InputSchemaJson = NormalizeJson(inputSchemaJson);
-        OutputSchemaJson = NormalizeJson(outputSchemaJson);
+        InputSchemaJson = normalizedInputSchema;
+        OutputSchemaJson = normalizedOutputSchema;
         RiskLevel = riskLevel;
         RequiredPermission = NormalizeOptional(requiredPermission, 160);
         RequiresApproval = requiresApproval || RiskRequiresApproval(riskLevel);
@@ -306,9 +342,30 @@ public sealed class ToolRegistration : BaseEntity<ToolRegistrationId>, IAggregat
         }
     }
 
-    private static string NormalizeJson(string? value)
+    private static string NormalizeInputSchema(string? value)
     {
-        return string.IsNullOrWhiteSpace(value) ? "{}" : value.Trim();
+        var contract = ToolInputSchemaContractV1.Validate(value);
+        if (!contract.IsValid)
+        {
+            throw new ArgumentException(
+                contract.Error ?? "Tool input schema is outside the supported strict subset.",
+                nameof(value));
+        }
+
+        return contract.CanonicalJson!;
+    }
+
+    private static string NormalizeOutputSchema(string? value)
+    {
+        var contract = ToolOutputSchemaContractV1.Validate(value);
+        if (!contract.IsValid)
+        {
+            throw new ArgumentException(
+                contract.Error ?? "Tool output schema is outside the supported strict subset.",
+                nameof(value));
+        }
+
+        return contract.CanonicalJson!;
     }
 
     private static string NormalizeRequired(string value, string paramName, int maxLength)

@@ -6,3 +6,4 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("AICopilot.ContractTests")]
 [assembly: InternalsVisibleTo("AICopilot.SimulationTests")]
 [assembly: InternalsVisibleTo("AICopilot.AgentWorkflowTestKit")]
+[assembly: InternalsVisibleTo("AICopilot.PersistenceTests")]

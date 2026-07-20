@@ -54,10 +54,10 @@ internal sealed class AgentTaskRuntime(
     ToolRegistryGuard toolRegistryGuard,
     AgentRuntimeEventRecorder runtimeEventRecorder,
     IEnumerable<IAgentToolExecutor> toolExecutors,
+    AgentTaskPlanFreshReadGate freshReadGate,
     IOptions<AgentRunQueueOptions>? runQueueOptions = null,
     IBusinessDatabaseReadService? businessDatabaseReadService = null,
     IBusinessTextToSqlRuntime? businessTextToSqlRuntime = null,
-    SkillDefinitionGuard? skillDefinitionGuard = null,
     CloudReadOnlyTextToSqlFallbackRunner? cloudTextToSqlFallbackRunner = null)
     : IAgentTaskRuntime
 {
@@ -90,6 +90,16 @@ internal sealed class AgentTaskRuntime(
         AgentTaskRunTriggerType triggerType = AgentTaskRunTriggerType.Manual,
         CancellationToken cancellationToken = default)
     {
+        var integrity = await freshReadGate.VerifyAsync(
+            task,
+            requireExecutable: true,
+            cancellationToken);
+        if (!integrity.IsSuccess)
+        {
+            return Result.From(integrity);
+        }
+
+        var plan = DeserializePlan(task.PlanJson);
         var attemptResult = await runAttemptCoordinator.BeginOrResumeAttemptAsync(task, triggerType, cancellationToken);
         if (!attemptResult.IsSuccess)
         {
@@ -108,7 +118,6 @@ internal sealed class AgentTaskRuntime(
             return Result.Invalid("Only approved or running agent tasks can be executed.");
         }
 
-        var plan = DeserializePlan(task.PlanJson);
         var workspace = await LoadWorkspaceAsync(task, cancellationToken);
         var state = new AgentTaskRunState();
         var executorResolver = CreateExecutorResolver();
@@ -131,20 +140,19 @@ internal sealed class AgentTaskRuntime(
             }
 
             var toolRegistration = toolDecision.Tool!;
-            if (skillDefinitionGuard is not null)
+            if (plan.PluginSelectionMode != AgentPluginSelectionMode.BuiltInOnly ||
+                toolRegistration.TargetType != ToolRegistrationTargetType.AgentRuntime ||
+                toolRegistration.ProviderType is ToolProviderType.Mcp or ToolProviderType.MockMcp)
             {
-                var skillDecision = await skillDefinitionGuard.ValidateToolAsync(
-                    plan.SkillCode,
-                    toolRegistration.ToolCode,
+                return await RejectStepAsync(
+                    task,
+                    workspace,
+                    step,
+                    attempt,
+                    new ApiProblemDescriptor(
+                        AppProblemCodes.AgentPlanToolDenied,
+                        $"Tool '{toolRegistration.ToolCode}' is outside BuiltInOnly runtime scope."),
                     cancellationToken);
-                if (!skillDecision.IsSuccess)
-                {
-                    var problem = skillDecision.Errors?.OfType<ApiProblemDescriptor>().FirstOrDefault()
-                                  ?? new ApiProblemDescriptor(
-                                      AppProblemCodes.AgentPlanToolDenied,
-                                      $"Tool '{toolRegistration.ToolCode}' is outside the task skill boundary.");
-                    return await RejectStepAsync(task, workspace, step, attempt, problem, cancellationToken);
-                }
             }
 
             if (RequiresRuntimeApproval(step, toolRegistration) && step.Status == AgentStepStatus.Pending)
@@ -238,16 +246,28 @@ internal sealed class AgentTaskRuntime(
                     state,
                     toolRegistration,
                     cancellationToken);
-                var output = (await ExecuteWithTimeoutAsync(executor, executionContext)).Output;
+                var executionResult = await ExecuteWithTimeoutAsync(executor, executionContext);
+                var outputValidation = AgentToolRuntimeOutputGate.Validate(
+                    toolRegistration,
+                    executionResult);
+                if (!outputValidation.IsValid)
+                {
+                    throw new AgentToolExecutionException(
+                        outputValidation.IsPayloadTooLarge
+                            ? AppProblemCodes.EvidencePayloadTooLarge
+                            : AppProblemCodes.ToolOutputSchemaInvalid,
+                        outputValidation.Error ?? "Tool output does not match the registry schema.");
+                }
+
+                step.Complete(executionResult.DurableOutput.CanonicalJson, DateTimeOffset.UtcNow);
                 var artifactId = runtimeEventRecorder.MarkToolExecutionSucceeded(
                     executionScope,
                     task,
                     workspace,
                     step,
                     toolRegistration,
-                    output,
+                    executionResult.DurableOutput.ToJsonElement(),
                     DateTimeOffset.UtcNow);
-                step.Complete(JsonSerializer.Serialize(output, AgentRuntimeJson.Options), DateTimeOffset.UtcNow);
                 await runtimeEventRecorder.StageStepCompletedAsync(task, step, cancellationToken);
 
                 await runtimeEventRecorder.RecordToolSucceededAsync(

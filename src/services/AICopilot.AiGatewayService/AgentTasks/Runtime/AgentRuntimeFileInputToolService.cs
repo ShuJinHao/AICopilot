@@ -71,7 +71,12 @@ internal sealed class AgentRuntimeFileInputToolService(
                 preview));
         }
 
-        return new { status = "completed", files = state.Uploads };
+        return new
+        {
+            status = "completed",
+            resultType = "upload-summary",
+            itemCount = state.Uploads.Count
+        };
     }
 
     public async Task<object> ParseTableFileAsync(
@@ -137,13 +142,9 @@ internal sealed class AgentRuntimeFileInputToolService(
         return new
         {
             status = "completed",
-            tables = state.Tables.Select(table => new
-            {
-                table.Name,
-                table.Columns,
-                rowCount = table.Rows.Count
-            }),
-            parsed = state.ParsedData
+            resultType = "table-summary",
+            itemCount = state.Tables.Count,
+            rowCount = state.Tables.Sum(table => table.Rows.Count)
         };
     }
 

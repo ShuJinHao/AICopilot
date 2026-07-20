@@ -30,6 +30,28 @@ public sealed class McpToolRegistrySynchronizer(IRepository<ToolRegistration> to
             var existing = await toolRepository.GetAsync(
                 item => item.ToolCode == discoveredTool.ToolCode,
                 cancellationToken: cancellationToken);
+            var inputSchemaContract = ToolInputSchemaContractV1.Validate(discoveredTool.InputSchemaJson);
+            var outputSchemaContract = ToolOutputSchemaContractV1.Validate(discoveredTool.OutputSchemaJson);
+            if (!inputSchemaContract.IsValid || !outputSchemaContract.IsValid)
+            {
+                // An invalid discovery contract is not registered as an open schema.
+                // If a previous version exists, make it non-executable so catalog and
+                // capability resolution see a typed unavailable tool.
+                if (existing is not null)
+                {
+                    if (existing.DisableForUnavailableContract(
+                            SelectConservativeRiskLevel(existing.RiskLevel, discoveredTool.RiskLevel),
+                            now))
+                    {
+                        toolRepository.Update(existing);
+                    }
+                }
+
+                continue;
+            }
+
+            var canonicalInputSchema = inputSchemaContract.CanonicalJson!;
+            var canonicalOutputSchema = outputSchemaContract.CanonicalJson!;
 
             if (existing is null)
             {
@@ -40,8 +62,8 @@ public sealed class McpToolRegistrySynchronizer(IRepository<ToolRegistration> to
                     ToolProviderType.Mcp,
                     ToolRegistrationTargetType.McpServer,
                     serverName,
-                    discoveredTool.InputSchemaJson,
-                    discoveredTool.OutputSchemaJson,
+                    canonicalInputSchema,
+                    canonicalOutputSchema,
                     discoveredTool.RiskLevel,
                     requiredPermission: null,
                     requiresApproval: true,
@@ -52,14 +74,47 @@ public sealed class McpToolRegistrySynchronizer(IRepository<ToolRegistration> to
                 continue;
             }
 
+            var hasGovernedContractDrift =
+                existing.ProviderType != ToolProviderType.Mcp ||
+                existing.TargetType != ToolRegistrationTargetType.McpServer ||
+                !string.Equals(existing.TargetName, serverName, StringComparison.Ordinal) ||
+                !string.Equals(existing.InputSchemaJson, canonicalInputSchema, StringComparison.Ordinal) ||
+                !string.Equals(existing.OutputSchemaJson, canonicalOutputSchema, StringComparison.Ordinal) ||
+                existing.RiskLevel != discoveredTool.RiskLevel;
+
+            if (hasGovernedContractDrift)
+            {
+                existing.Update(
+                    BuildDisplayName(serverName, discoveredTool.ToolName),
+                    BuildDescription(serverName, discoveredTool),
+                    ToolProviderType.Mcp,
+                    ToolRegistrationTargetType.McpServer,
+                    serverName,
+                    canonicalInputSchema,
+                    canonicalOutputSchema,
+                    SelectConservativeRiskLevel(existing.RiskLevel, discoveredTool.RiskLevel),
+                    existing.RequiredPermission,
+                    requiresApproval: true,
+                    isEnabled: false,
+                    existing.TimeoutSeconds,
+                    existing.AuditLevel,
+                    now,
+                    isExecutableByAgent: false,
+                    schemaVersion: checked(existing.SchemaVersion + 1),
+                    catalogVersion: checked(existing.CatalogVersion + 1),
+                    approvalPolicy: "RediscoveryReviewRequired");
+                toolRepository.Update(existing);
+                continue;
+            }
+
             existing.Update(
                 BuildDisplayName(serverName, discoveredTool.ToolName),
                 BuildDescription(serverName, discoveredTool),
                 ToolProviderType.Mcp,
                 ToolRegistrationTargetType.McpServer,
                 serverName,
-                discoveredTool.InputSchemaJson,
-                discoveredTool.OutputSchemaJson,
+                canonicalInputSchema,
+                canonicalOutputSchema,
                 existing.RiskLevel,
                 existing.RequiredPermission,
                 existing.RequiresApproval,
@@ -71,6 +126,40 @@ public sealed class McpToolRegistrySynchronizer(IRepository<ToolRegistration> to
         }
 
         await toolRepository.SaveChangesAsync(cancellationToken);
+    }
+
+    private static AiToolRiskLevel SelectConservativeRiskLevel(
+        AiToolRiskLevel existing,
+        AiToolRiskLevel discovered)
+    {
+        // AiToolRiskLevel values are intentionally not ordered by severity, so
+        // rediscovery governance must never rely on numeric Max/CompareTo.
+        if (existing == AiToolRiskLevel.Critical || discovered == AiToolRiskLevel.Critical)
+        {
+            return AiToolRiskLevel.Critical;
+        }
+
+        if (existing == AiToolRiskLevel.Blocked || discovered == AiToolRiskLevel.Blocked)
+        {
+            return AiToolRiskLevel.Blocked;
+        }
+
+        if (existing == AiToolRiskLevel.High || discovered == AiToolRiskLevel.High)
+        {
+            return AiToolRiskLevel.High;
+        }
+
+        if (existing == AiToolRiskLevel.RequiresApproval || discovered == AiToolRiskLevel.RequiresApproval)
+        {
+            return AiToolRiskLevel.RequiresApproval;
+        }
+
+        if (existing == AiToolRiskLevel.Medium || discovered == AiToolRiskLevel.Medium)
+        {
+            return AiToolRiskLevel.Medium;
+        }
+
+        return AiToolRiskLevel.Low;
     }
 
     private static string BuildDisplayName(string serverName, string toolName)

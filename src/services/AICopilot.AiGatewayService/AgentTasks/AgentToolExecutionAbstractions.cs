@@ -1,3 +1,5 @@
+using System.Text.Json;
+using AICopilot.AiGatewayService.Tools;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
@@ -14,9 +16,60 @@ internal sealed record AgentToolExecutionContext(
     ToolRegistration ToolRegistration,
     CancellationToken CancellationToken);
 
-internal sealed record AgentToolExecutionResult(object Output)
+internal sealed record AgentToolOutputSnapshot(
+    string CanonicalJson,
+    int Utf8ByteCount)
 {
-    public static AgentToolExecutionResult From(object output) => new(output);
+    internal JsonElement ToJsonElement()
+    {
+        using var document = JsonDocument.Parse(CanonicalJson);
+        return document.RootElement.Clone();
+    }
+
+    internal static AgentToolOutputSnapshot FromValidated(ToolOutputValidationResult validation)
+    {
+        if (!validation.IsValid || validation.CanonicalJson is null)
+        {
+            throw new AgentToolExecutionException(
+                validation.IsPayloadTooLarge
+                    ? AppProblemCodes.EvidencePayloadTooLarge
+                    : AppProblemCodes.ToolOutputSchemaInvalid,
+                validation.Error ?? "Tool output could not be captured as canonical JSON.");
+        }
+
+        return new AgentToolOutputSnapshot(validation.CanonicalJson, validation.Utf8ByteCount);
+    }
+
+    internal static AgentToolOutputSnapshot Capture(object? output) =>
+        FromValidated(ToolOutputSchemaValidator.CanonicalizeForPersistence(output));
+}
+
+internal sealed record AgentToolExecutionResult(
+    AgentToolOutputSnapshot ContractOutput,
+    AgentToolOutputSnapshot DurableOutput)
+{
+    public static AgentToolExecutionResult From(object output)
+    {
+        var snapshot = AgentToolOutputSnapshot.Capture(output);
+        return new AgentToolExecutionResult(snapshot, snapshot);
+    }
+
+    public static AgentToolExecutionResult FromValidatedProviderOutput(
+        ToolRegistration registration,
+        ToolOutputValidationResult contractOutput,
+        object durableOutput)
+    {
+        if (registration.ProviderType is not (ToolProviderType.Mcp or ToolProviderType.MockMcp))
+        {
+            throw new ArgumentException(
+                "Contract/durable split is reserved for MCP provider envelopes.",
+                nameof(registration));
+        }
+
+        return new AgentToolExecutionResult(
+            AgentToolOutputSnapshot.FromValidated(contractOutput),
+            AgentToolOutputSnapshot.Capture(durableOutput));
+    }
 }
 
 internal interface IAgentToolExecutor

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using AICopilot.AiGatewayService.Agents;
 using AICopilot.AiGatewayService.Safety;
+using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Result;
 
 namespace AICopilot.ContractTests;
@@ -116,6 +117,71 @@ public sealed class ChatErrorContractTests
         chunk.Content.Should().NotContain("provider.example");
         chunk.Content.Should().NotContain("secret");
         chunk.Content.Should().NotContain("/Users/test");
+
+        var planCases = new[]
+        {
+            (
+                AppProblemCodes.AgentPlanInvalid,
+                "Agent task plan failed integrity validation.",
+                "计划草案未通过完整性校验，请刷新后重新生成。"),
+            (
+                AppProblemCodes.AgentPlanSchemaInvalid,
+                "Agent task plan does not match the required schema.",
+                "计划草案结构无效，请刷新后重新生成。"),
+            (
+                AppProblemCodes.PlanPayloadTooLarge,
+                "Agent task plan exceeds the maximum allowed size of 262144 UTF-8 bytes.",
+                "计划草案超过 262144 UTF-8 字节上限，请缩小请求后重试。")
+        };
+
+        foreach (var (code, expectedDetail, expectedUserFacingMessage) in planCases)
+        {
+            const string unsafeDetail = "opaque-plan-secret-9f4c raw owner=node-controlled SELECT payroll";
+            const string unsafeUserFacingMessage = "opaque-user-secret-7a31";
+            var exceptionChunk = AgentStreamRuntime.CreateErrorChunk(
+                new AgentTaskPlanPersistenceIntegrityException(Guid.NewGuid(), code, unsafeDetail),
+                "test",
+                AppProblemCodes.ChatStreamFailed,
+                "对话执行失败，请稍后重试。");
+            var directChunk = AgentStreamRuntime.CreateErrorChunk(
+                code,
+                unsafeDetail,
+                "test",
+                unsafeUserFacingMessage);
+
+            foreach (var planChunk in new[] { exceptionChunk, directChunk })
+            {
+                var planPayload = ReadPayload(planChunk.Content);
+                planPayload.Code.Should().Be(code);
+                planPayload.Detail.Should().Be(expectedDetail);
+                planPayload.UserFacingMessage.Should().Be(expectedUserFacingMessage);
+                planChunk.Content.Should().NotContain("opaque-plan-secret-9f4c")
+                    .And.NotContain("node-controlled")
+                    .And.NotContain("payroll")
+                    .And.NotContain("opaque-user-secret-7a31");
+            }
+        }
+    }
+
+    [Fact]
+    public void ToolOutputSchemaFailure_ShouldUseDedicatedRecoveryMessageWithoutRawOutput()
+    {
+        var chunk = AgentStreamRuntime.CreateErrorChunk(
+            new AgentWorkflowException(
+                AppProblemCodes.ToolOutputSchemaInvalid,
+                "provider raw token=secret SELECT * FROM payroll",
+                "工具输出与注册契约不一致，请联系管理员。"),
+            "test",
+            AppProblemCodes.ChatStreamFailed,
+            "对话执行失败，请稍后重试。");
+
+        var payload = ReadPayload(chunk.Content);
+
+        payload.Code.Should().Be(AppProblemCodes.ToolOutputSchemaInvalid);
+        payload.Detail.Should().Contain("tool_output_schema_invalid")
+            .And.Contain("持久化绑定校验");
+        payload.UserFacingMessage.Should().Be("工具输出与注册契约不一致，请联系管理员。");
+        chunk.Content.Should().NotContain("token=secret").And.NotContain("payroll");
     }
 
     private static ChatErrorPayload ReadPayload(string content)

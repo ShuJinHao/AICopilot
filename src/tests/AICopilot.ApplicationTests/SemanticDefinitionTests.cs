@@ -62,5 +62,10 @@ public sealed class SemanticDefinitionTests
         clientRelease.AllowedFilterFields.Should().BeEquivalentTo(
             ["channel", "targetRuntime", "status", "includeArchived"]);
         clientRelease.AllowedSortFields.Should().BeEmpty();
+
+        CloudAiReadSemanticSchemaRegistry.GetOperationSchemas().Should().HaveCount(8);
+        new[] { device, deviceLog, capacity, productionData, process, clientRelease }
+            .Should().OnlyContain(definition =>
+                definition.MaxLimit == CloudAiReadRowLimitPolicy.MaxRows);
     }
 }

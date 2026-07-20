@@ -34,12 +34,23 @@ public sealed class AgentPlanToolGuard(
         bool simulationOnly,
         IReadOnlyCollection<string>? businessDomains,
         CancellationToken cancellationToken,
-        string? skillCode = null)
+        string? skillCode = null,
+        AgentPluginSelectionMode? pluginSelectionMode = null)
     {
         var runtimeMcpTools = ResolveRuntimeMcpToolCodes();
-        var tools = await toolRegistryGuard.ListAllowedAsync(userId, cancellationToken);
+        IReadOnlyCollection<ToolRegistration> tools;
+        try
+        {
+            tools = await toolRegistryGuard.ListAllowedAsync(userId, cancellationToken);
+        }
+        catch (ToolRegistryGuardException ex)
+        {
+            return Result.Failure(ex.Problem);
+        }
+
         var filtered = tools
-            .Where(tool => IsPlannerVisible(tool, simulationOnly, businessDomains))
+            .Where(tool => IsPlannerVisible(tool, simulationOnly, businessDomains) &&
+                           IsAllowedByPluginSelection(tool, pluginSelectionMode))
             .ToArray();
         if (skillDefinitionGuard is not null)
         {
@@ -96,7 +107,8 @@ public sealed class AgentPlanToolGuard(
         bool simulationOnly,
         IReadOnlyCollection<string>? businessDomains,
         CancellationToken cancellationToken,
-        string? skillCode = null)
+        string? skillCode = null,
+        AgentPluginSelectionMode? pluginSelectionMode = null)
     {
         var runtimeMcpTools = ResolveRuntimeMcpToolCodes();
         var validated = new List<AgentStepPlanDto>();
@@ -118,6 +130,13 @@ public sealed class AgentPlanToolGuard(
             }
 
             var tool = decision.Tool!;
+            if (!IsAllowedByPluginSelection(tool, pluginSelectionMode))
+            {
+                return Result.Failure(new ApiProblemDescriptor(
+                    AppProblemCodes.AgentPlanToolDenied,
+                    $"Tool '{tool.ToolCode}' is outside the frozen plugin/provider selection scope."));
+            }
+
             if (!tool.IsExecutableByAgent || !tool.IsVisibleToPlanner)
             {
                 return Result.Failure(new ApiProblemDescriptor(
@@ -182,6 +201,9 @@ public sealed class AgentPlanToolGuard(
 
             validated.Add(step with
             {
+                InputJson = string.IsNullOrWhiteSpace(step.InputJson)
+                    ? null
+                    : schemaValidation.CanonicalJson,
                 RequiresApproval = step.RequiresApproval ||
                                    tool.RequiresApproval ||
                                    tool.RiskLevel is AiToolRiskLevel.RequiresApproval
@@ -253,6 +275,20 @@ public sealed class AgentPlanToolGuard(
 
         return tool.BusinessDomains.Any(domain =>
             requestedDomains.Contains(domain, StringComparer.OrdinalIgnoreCase));
+    }
+
+    private static bool IsAllowedByPluginSelection(
+        ToolRegistration tool,
+        AgentPluginSelectionMode? pluginSelectionMode)
+    {
+        if (pluginSelectionMode is null)
+        {
+            return true;
+        }
+
+        return pluginSelectionMode == AgentPluginSelectionMode.BuiltInOnly &&
+               tool.TargetType == ToolRegistrationTargetType.AgentRuntime &&
+               tool.ProviderType is not (ToolProviderType.Mcp or ToolProviderType.MockMcp);
     }
 
     private bool IsMockMcpRuntimeAvailable()

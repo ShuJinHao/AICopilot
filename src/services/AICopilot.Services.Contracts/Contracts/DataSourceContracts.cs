@@ -149,6 +149,19 @@ public interface IBusinessDatabaseReadService
         CancellationToken cancellationToken = default);
 }
 
+/// <summary>
+/// Explicit user-bound data-source authorization reader for durable/background
+/// workflows. Implementations must not derive authorization from ambient request
+/// identity because the caller and task owner can differ.
+/// </summary>
+public interface IBusinessDatabaseAuthorizationReadService
+{
+    Task<IReadOnlyList<BusinessDatabaseDescriptor>> ListSelectableForUserAsync(
+        Guid userId,
+        DataSourceSelectionMode selectionMode,
+        CancellationToken cancellationToken = default);
+}
+
 public sealed record KnowledgeBaseDescriptor(
     Guid Id,
     string Name,

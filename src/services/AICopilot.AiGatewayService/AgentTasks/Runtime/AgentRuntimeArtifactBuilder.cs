@@ -30,7 +30,7 @@ internal sealed class AgentRuntimeArtifactBuilder(
             step.Id,
             sourceMetadata,
             cancellationToken);
-        return new { status = "completed", artifactId = artifact.Id.Value, artifact.RelativePath };
+        return BuildArtifactOutput("chart", artifact.Id.Value);
     }
 
     public async Task<object> GenerateMarkdownReportAsync(
@@ -52,7 +52,7 @@ internal sealed class AgentRuntimeArtifactBuilder(
             step.Id,
             sourceMetadata,
             cancellationToken);
-        return new { status = "completed", artifactId = artifact.Id.Value, artifact.RelativePath };
+        return BuildArtifactOutput("markdown", artifact.Id.Value);
     }
 
     public async Task<object> GenerateHtmlReportAsync(
@@ -74,7 +74,7 @@ internal sealed class AgentRuntimeArtifactBuilder(
             step.Id,
             sourceMetadata,
             cancellationToken);
-        return new { status = "completed", artifactId = artifact.Id.Value, artifact.RelativePath };
+        return BuildArtifactOutput("html", artifact.Id.Value);
     }
 
     public async Task<object> GeneratePdfReportAsync(
@@ -97,7 +97,7 @@ internal sealed class AgentRuntimeArtifactBuilder(
             step.Id,
             sourceMetadata,
             cancellationToken);
-        return new { status = "completed", artifactId = artifact.Id.Value, artifact.RelativePath };
+        return BuildArtifactOutput("pdf", artifact.Id.Value);
     }
 
     public async Task<object> GeneratePptxReportAsync(
@@ -120,7 +120,7 @@ internal sealed class AgentRuntimeArtifactBuilder(
             step.Id,
             sourceMetadata,
             cancellationToken);
-        return new { status = "completed", artifactId = artifact.Id.Value, artifact.RelativePath };
+        return BuildArtifactOutput("pptx", artifact.Id.Value);
     }
 
     public async Task<object> GenerateXlsxReportAsync(
@@ -143,7 +143,18 @@ internal sealed class AgentRuntimeArtifactBuilder(
             step.Id,
             sourceMetadata,
             cancellationToken);
-        return new { status = "completed", artifactId = artifact.Id.Value, artifact.RelativePath };
+        return BuildArtifactOutput("xlsx", artifact.Id.Value);
+    }
+
+    private static object BuildArtifactOutput(string artifactType, Guid artifactId)
+    {
+        return new
+        {
+            status = "completed",
+            resultType = "artifact",
+            artifactType,
+            artifactId
+        };
     }
 
     private static ArtifactSourceMetadata? BuildArtifactSourceMetadata(AgentTaskRunState state)

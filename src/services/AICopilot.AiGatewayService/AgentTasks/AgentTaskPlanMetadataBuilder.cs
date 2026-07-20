@@ -32,14 +32,16 @@ internal static class AgentTaskPlanMetadataBuilder
                 source.ExternalSystemType == DataSourceExternalSystemType.SimulationBusiness,
                 ResolveSourceLabel(source),
                 source.BusinessDomain))
+            .OrderBy(source => source.Id.ToString("D"), StringComparer.Ordinal)
             .ToArray();
     }
 
     public static IReadOnlyDictionary<string, int> BuildToolRiskSummary(PlannerToolCatalog? catalog)
     {
         return (catalog?.Tools ?? [])
-            .GroupBy(tool => tool.RiskLevel, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+            .GroupBy(tool => tool.RiskLevel, StringComparer.Ordinal)
+            .OrderBy(group => group.Key, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
     }
 
     public static AgentTaskRiskLevel DetermineRiskLevel(AgentTaskType taskType)
