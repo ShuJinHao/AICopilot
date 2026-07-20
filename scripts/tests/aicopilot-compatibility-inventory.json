@@ -6,6 +6,7 @@
       "AI-COMPAT-EF-HISTORY-SPLIT": "F:AICopilot.EntityFrameworkCore.MigrationHistoryTables.LegacyTableName",
       "AI-COMPAT-OBSOLETE-TOOL-CATALOG": "P:AICopilot.Core.AiGateway.Aggregates.Tools.BuiltInToolRegistrations.ObsoleteAgentRuntimeToolCodes",
       "AI-COMPAT-WIDGET-PAYLOAD-V1": "M:AICopilot.AiGatewayService.Workflows.Executors.DataAnalysisWidgetPayloadSerializer.Serialize(AICopilot.Visualization.Widgets.IWidget)",
+      "AI-COMPAT-COMPLETED-PLAN-V1-READONLY": "F:AICopilot.AiGatewayService.AgentTasks.AgentPlanContractVersions.LegacyV1",
       "AI-ORDINARY-MESSAGE-STRUCTURED-FALLBACK": "M:AICopilot.Core.AiGateway.Aggregates.Sessions.Message.BuildStructuredFallback(AICopilot.Core.AiGateway.Aggregates.Sessions.MessageType)",
       "AI-ORDINARY-CLOUD-READ-DOCUMENT-ADAPTER": "T:AICopilot.Infrastructure.CloudRead.CloudAiReadDocumentAdapter",
       "AI-ORDINARY-MODEL-PROVIDER-FALLBACK-POLICY": "T:AICopilot.AiRuntime.DefaultModelFallbackPolicy",
@@ -15,6 +16,7 @@
       "AI-ORDINARY-FINAL-AGENT-HISTORY-BUDGET-FALLBACK": "M:AICopilot.AiGatewayService.Workflows.Executors.FinalAgentBuildExecutor.BuildHistoryBudgetFallbacks(System.Collections.Generic.IReadOnlyCollection{AICopilot.Core.AiGateway.Aggregates.Sessions.Message})",
       "AI-ORDINARY-INTENT-ROUTING-FALLBACK": "T:AICopilot.AiGatewayService.Workflows.Executors.IntentRoutingFallbackClassifier",
       "AI-ORDINARY-PLANNER-SCHEMA-FALLBACK": "M:AICopilot.AiGatewayService.AgentTasks.AgentDynamicPlannerInputBuilder.BuildFallbackSchemaSummary(System.String)",
+      "AI-ORDINARY-PLAN-INTENT-ADAPTER": "T:AICopilot.AiGatewayService.AgentTasks.IntentResultToCandidateAdapter",
       "AI-ORDINARY-SQL-ALIAS-RESOLUTION": "M:AICopilot.Services.CrossCutting.Sql.SqlAllowlistColumnInspector.ResolveAliasColumns(TableAlias,System.Collections.Generic.IReadOnlySet{System.String})",
       "AI-ORDINARY-VISUALIZATION-ADAPTER": "T:AICopilot.Visualization.VisualizationAdapterExtensions"
     },
@@ -28,6 +30,11 @@
       ],
       "AI-COMPAT-OBSOLETE-TOOL-CATALOG/primary": [
         "P:AICopilot.Core.AiGateway.Aggregates.Tools.BuiltInToolRegistrations.ObsoleteAgentRuntimeToolCodes"
+      ],
+      "AI-COMPAT-COMPLETED-PLAN-V1-READONLY/primary": [
+        "F:AICopilot.AiGatewayService.AgentTasks.AgentPlanContractVersions.LegacyV1",
+        "F:AICopilot.AiGatewayService.AgentTasks.AgentTaskPlanMetadataResolver.LegacyCompletedReadOnly",
+        "M:AICopilot.AiGatewayService.AgentTasks.AgentTaskPlanMetadataResolver.IsLegacyV1(System.String)"
       ],
       "AI-ORDINARY-MESSAGE-STRUCTURED-FALLBACK/message-constructor": [
         "M:AICopilot.Core.AiGateway.Aggregates.Sessions.Message.BuildStructuredFallback(AICopilot.Core.AiGateway.Aggregates.Sessions.MessageType)"
@@ -62,6 +69,9 @@
       ],
       "AI-ORDINARY-PLANNER-SCHEMA-FALLBACK/planner-schema-builder": [
         "M:AICopilot.AiGatewayService.AgentTasks.AgentDynamicPlannerInputBuilder.BuildFallbackSchemaSummary(System.String)"
+      ],
+      "AI-ORDINARY-PLAN-INTENT-ADAPTER/draft-authority-adapter-call": [
+        "M:AICopilot.AiGatewayService.AgentTasks.IntentResultToCandidateAdapter.Adapt(System.Collections.Generic.IEnumerable{AICopilot.AiGatewayService.Models.IntentResult},AICopilot.AiGatewayService.AgentTasks.AgentIntentAdapterContext)"
       ],
       "AI-ORDINARY-SQL-ALIAS-RESOLUTION/alias-columns": [
         "M:AICopilot.Services.CrossCutting.Sql.SqlAllowlistColumnInspector.ResolveAliasColumns(TableAlias,System.Collections.Generic.IReadOnlySet{System.String})"
@@ -99,6 +109,13 @@
       "M:AICopilot.EntityFrameworkCore.Security.SecretStringEncryptor.ReEncryptLegacyCipher(System.String)": "AI-COMPAT-SECRET-ENCV1",
       "M:AICopilot.EntityFrameworkCore.Security.SecretStringEncryptor.DecryptLegacyCipher(System.String)": "AI-COMPAT-SECRET-ENCV1",
       "M:AICopilot.AiGatewayService.AgentTasks.AgentDynamicPlannerInputBuilder.BuildFallbackSchemaSummary(System.String)": "AI-ORDINARY-PLANNER-SCHEMA-FALLBACK",
+      "F:AICopilot.AiGatewayService.AgentTasks.AgentPlanContractVersions.LegacyV1": "AI-COMPAT-COMPLETED-PLAN-V1-READONLY",
+      "F:AICopilot.AiGatewayService.AgentTasks.AgentPlanDraftContractAuthority.intentAdapter": "AI-ORDINARY-PLAN-INTENT-ADAPTER",
+      "F:AICopilot.AiGatewayService.AgentTasks.AgentTaskPlanMetadataResolver.LegacyCompletedReadOnly": "AI-COMPAT-COMPLETED-PLAN-V1-READONLY",
+      "M:AICopilot.AiGatewayService.AgentTasks.AgentTaskPlanMetadataResolver.IsLegacyV1(System.String)": "AI-COMPAT-COMPLETED-PLAN-V1-READONLY",
+      "M:AICopilot.AiGatewayService.AgentTasks.PlanAgentTaskCoordinator.BuildTypedIntentAdapterQuery(AICopilot.Services.Contracts.SemanticQueryPlan)": "AI-ORDINARY-PLAN-INTENT-ADAPTER",
+      "T:AICopilot.AiGatewayService.AgentTasks.AgentIntentAdapterContext": "AI-ORDINARY-PLAN-INTENT-ADAPTER",
+      "T:AICopilot.AiGatewayService.AgentTasks.IntentResultToCandidateAdapter": "AI-ORDINARY-PLAN-INTENT-ADAPTER",
       "T:AICopilot.AiGatewayService.Workflows.Executors.CloudReadOnlyTextToSqlFallbackResult": "AI-ORDINARY-CLOUD-TEXT-TO-SQL-FALLBACK",
       "T:AICopilot.AiGatewayService.Workflows.Executors.CloudReadOnlyTextToSqlFallbackRunner": "AI-ORDINARY-CLOUD-TEXT-TO-SQL-FALLBACK",
       "M:AICopilot.AiGatewayService.Workflows.Executors.DataAnalysisAuditRecorder.RecordCloudReadOnlyTextToSqlFallbackAsync(AICopilot.Services.Contracts.BusinessDatabaseConnectionInfo,System.String,System.String,System.String,System.String,System.Int32,System.Boolean,System.Collections.Generic.IReadOnlyList{AICopilot.Services.Contracts.CloudReadOnlyTextToSqlRepairAttemptRecord},System.Threading.CancellationToken)": "AI-ORDINARY-CLOUD-TEXT-TO-SQL-FALLBACK",
@@ -326,6 +343,64 @@
         {
           "path": "src/vues/AICopilot.Web/tests/unit/widgetNormalizer.spec.ts",
           "contains": "raw array data"
+        }
+      ]
+    },
+    {
+      "id": "AI-COMPAT-COMPLETED-PLAN-V1-READONLY",
+      "producer": {
+        "path": "src/services/AICopilot.AiGatewayService/AgentTasks/AgentPlanContractV2.cs",
+        "contains": "LegacyV1 = \"1.0\""
+      },
+      "consumer": {
+        "path": "src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskDtos.cs",
+        "contains": "IsLegacyV1(task.PlanJson)"
+      },
+      "callEvidence": [
+        {
+          "path": "src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskPlanDocument.cs",
+          "contains": "SchemaVersion = AgentPlanContractVersions.LegacyV1"
+        },
+        {
+          "path": "src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskDtos.cs",
+          "contains": "AgentPlanContractVersions.LegacyV1"
+        },
+        {
+          "path": "src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskDtos.cs",
+          "contains": "LegacyCompletedReadOnly"
+        }
+      ],
+      "candidateEvidence": [
+        {
+          "path": "src/services/AICopilot.AiGatewayService/AgentTasks/AgentPlanContractV2.cs",
+          "contains": "LegacyV1"
+        },
+        {
+          "path": "src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskDtos.cs",
+          "contains": "Legacy"
+        }
+      ],
+      "callerScan": {
+        "roots": ["src/services/AICopilot.AiGatewayService/AgentTasks"],
+        "extensions": [".cs"],
+        "contains": "Legacy",
+        "countMode": "distinct-caller-member",
+        "excludePaths": [
+          "src/services/AICopilot.AiGatewayService/AgentTasks/AgentPlanContractV2.cs"
+        ]
+      },
+      "replacement": "All newly created and executable plans use canonical Plan v2; retained completed Plan v1 rows remain read-only history only.",
+      "deletionCondition": "The retained completed Plan v1 population is zero after the applicable history-retention and rollback windows close.",
+      "latestDeletionBatch": "2026-12",
+      "deletionDeadline": "2026-12-31",
+      "coverageTests": [
+        {
+          "path": "src/tests/AICopilot.UnitTests/AgentPlanContractV2Tests.cs",
+          "contains": "MetadataResolver_ShouldExposeOnlyCompletedLegacyV1AsReadOnlyHistory"
+        },
+        {
+          "path": "src/tests/AICopilot.PersistenceTests/AgentTaskPlanPersistenceAtomicityTests.cs",
+          "contains": "HistoricalCompletedV1_ShouldRemainReadableButAnyWriteMustRollback"
         }
       ]
     }
@@ -837,6 +912,50 @@
       ],
       "replacement": "notApplicable: current Vue I18n configuration",
       "deletionCondition": "Delete only if Vue I18n is removed or the application locale contract changes."
+    },
+    {
+      "id": "AI-ORDINARY-PLAN-INTENT-ADAPTER",
+      "disposition": "ordinaryAbstraction",
+      "decisionReason": "This is the current typed boundary that normalizes routed intents into Plan v2 intent candidates; it is not a bridge to an older contract.",
+      "producer": {
+        "path": "src/services/AICopilot.AiGatewayService/AgentTasks/IntentResultToCandidateAdapter.cs",
+        "contains": "internal sealed class IntentResultToCandidateAdapter"
+      },
+      "consumers": [
+        {
+          "path": "src/services/AICopilot.AiGatewayService/AgentTasks/AgentPlanDraftContractAuthority.cs",
+          "contains": "intentAdapter.Adapt(routedIntents, request.IntentContext)"
+        },
+        {
+          "path": "src/services/AICopilot.AiGatewayService/AgentTasks/PlanAgentTaskCoordinator.cs",
+          "contains": "new AgentIntentAdapterContext("
+        }
+      ],
+      "candidateEvidence": [
+        {
+          "path": "src/services/AICopilot.AiGatewayService/AgentTasks/IntentResultToCandidateAdapter.cs",
+          "contains": "Adapter"
+        },
+        {
+          "path": "src/services/AICopilot.AiGatewayService/AgentTasks/AgentPlanDraftContractAuthority.cs",
+          "contains": "intentAdapter"
+        },
+        {
+          "path": "src/services/AICopilot.AiGatewayService/AgentTasks/PlanAgentTaskCoordinator.cs",
+          "contains": "IntentAdapter"
+        }
+      ],
+      "callerScans": [
+        {
+          "id": "draft-authority-adapter-call",
+          "roots": ["src/services/AICopilot.AiGatewayService/AgentTasks"],
+          "extensions": [".cs"],
+          "contains": "intentAdapter.Adapt(",
+          "excludePaths": []
+        }
+      ],
+      "replacement": "notApplicable: current Plan v2 routed-intent normalization boundary",
+      "deletionCondition": "Delete only if every Plan v2 draft producer migrates to a reviewed typed intent-normalization replacement."
     }
   ]
 }

@@ -321,16 +321,16 @@ internal sealed class IntentResultToCandidateAdapter
             new AgentIntentRequestedResourcesDocument(
                 typed.Devices,
                 descriptor.IntentClass == AgentIntentClass.GovernedExploration
-                    ? CanonicalGuids(context.DataSources.Select(source => source.Id))
+                    ? AgentPlanCanonicalCollections.Guids(context.DataSources.Select(source => source.Id))
                     : [],
                 descriptor.IntentClass == AgentIntentClass.Knowledge
-                    ? CanonicalGuids(context.KnowledgeBaseIds)
+                    ? AgentPlanCanonicalCollections.Guids(context.KnowledgeBaseIds)
                     : [],
-                CanonicalGuids(context.UploadIds)),
+                AgentPlanCanonicalCollections.Guids(context.UploadIds)),
             new AgentIntentFiltersDocument(
                 typed.TimeRange,
                 typed.Predicates),
-            CanonicalStrings(context.RequestedArtifacts),
+            AgentPlanCanonicalCollections.Strings(context.RequestedArtifacts),
             new AgentIntentProvenanceDocument(
                 AgentIntentCatalogV1.RouterVersion,
                 AgentIntentCatalogV1.PromptVersion,
@@ -368,9 +368,9 @@ internal sealed class IntentResultToCandidateAdapter
                 .OrderBy(device => device.ResourceType, StringComparer.Ordinal)
                 .ThenBy(device => device.ResourceId, StringComparer.Ordinal)
                 .ToArray(),
-            CanonicalGuids(ordered.SelectMany(candidate => candidate.RequestedResources.DataSourceIds)),
-            CanonicalGuids(ordered.SelectMany(candidate => candidate.RequestedResources.KnowledgeBaseIds)),
-            CanonicalGuids(ordered.SelectMany(candidate => candidate.RequestedResources.UploadIds)));
+            AgentPlanCanonicalCollections.Guids(ordered.SelectMany(candidate => candidate.RequestedResources.DataSourceIds)),
+            AgentPlanCanonicalCollections.Guids(ordered.SelectMany(candidate => candidate.RequestedResources.KnowledgeBaseIds)),
+            AgentPlanCanonicalCollections.Guids(ordered.SelectMany(candidate => candidate.RequestedResources.UploadIds)));
         var predicates = ordered.SelectMany(candidate => candidate.Filters.Predicates)
             .GroupBy(predicate => $"{predicate.FieldCode}\u001f{predicate.Operator}\u001f{predicate.Value}", StringComparer.Ordinal)
             .Select(predicate => predicate.First())
@@ -385,7 +385,7 @@ internal sealed class IntentResultToCandidateAdapter
         {
             RequestedResources = resources,
             Filters = new AgentIntentFiltersDocument(timeRange, predicates),
-            RequestedArtifacts = CanonicalStrings(ordered.SelectMany(candidate => candidate.RequestedArtifacts)),
+            RequestedArtifacts = AgentPlanCanonicalCollections.Strings(ordered.SelectMany(candidate => candidate.RequestedArtifacts)),
             CapabilityGap = ordered.Select(candidate => candidate.CapabilityGap).FirstOrDefault(gap => gap is not null)
         });
     }
@@ -749,25 +749,6 @@ internal sealed class IntentResultToCandidateAdapter
         }
 
         return false;
-    }
-
-    private static string[] CanonicalStrings(IEnumerable<string> values)
-    {
-        return values
-            .Where(value => !string.IsNullOrWhiteSpace(value))
-            .Select(value => value.Trim())
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(value => value, StringComparer.Ordinal)
-            .ToArray();
-    }
-
-    private static Guid[] CanonicalGuids(IEnumerable<Guid> values)
-    {
-        return values
-            .Where(value => value != Guid.Empty)
-            .Distinct()
-            .OrderBy(value => value.ToString("D"), StringComparer.Ordinal)
-            .ToArray();
     }
 
     private static Result<AgentIntentCandidateDocument> Invalid(string detail)

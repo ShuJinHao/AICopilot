@@ -293,7 +293,6 @@ internal static class AgentPlanContractSchemaAuthority
 internal static class AgentPlanCapabilityGapCodes
 {
     public const string SkillSelectionUnresolved = "skill_selection_unresolved";
-    public const string LegacySkillDependencyUnavailable = "legacy_skill_dependency_unavailable";
     public const string ToolCatalogUnavailable = "tool_catalog_unavailable";
     public const string PlannedToolUnavailable = "planned_tool_unavailable";
     public const string CloudReadonlyResolverUnavailable = "cloud_readonly_resolver_unavailable";
@@ -308,7 +307,6 @@ internal static class AgentPlanCapabilityGapCodes
     private static readonly IReadOnlySet<string> Frozen = new HashSet<string>(
     [
         SkillSelectionUnresolved,
-        LegacySkillDependencyUnavailable,
         ToolCatalogUnavailable,
         PlannedToolUnavailable,
         CloudReadonlyResolverUnavailable,

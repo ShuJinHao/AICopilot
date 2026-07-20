@@ -79,6 +79,27 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
         ],
         StringComparer.Ordinal);
 
+    private static readonly IReadOnlySet<string> FrozenForbiddenExecutionSemanticTokens = new HashSet<string>(
+        [
+            "cloudwrite",
+            "cloud_write",
+            "cloudmutation",
+            "cloud_mutation",
+            "mutation",
+            "write",
+            "update",
+            "plc",
+            "control",
+            "controlnode",
+            "control_action",
+            "recipe_update",
+            "recipe_write",
+            "device_disable",
+            "disable",
+            "delete"
+        ],
+        StringComparer.Ordinal);
+
     public Result<CanonicalAgentPlan> Seal(AgentTaskPlanDocument plan)
     {
         var structure = ValidateStructure(plan, verifyDigest: false, requireExecutable: false);
@@ -696,11 +717,12 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
 
     private static Result ValidateCandidate(AgentIntentCandidateDocument candidate)
     {
-        if (candidate.Required is null ||
-            candidate.RequestedResources is null ||
-            candidate.Filters is null ||
-            candidate.Provenance is null ||
-            candidate.RequestedArtifacts is null ||
+        if (!AllRequiredFieldsPresent(
+                candidate.Required,
+                candidate.RequestedResources,
+                candidate.Filters,
+                candidate.Provenance,
+                candidate.RequestedArtifacts) ||
             !string.Equals(candidate.SchemaVersion, AgentPlanContractVersions.IntentV1, StringComparison.Ordinal) ||
             string.IsNullOrWhiteSpace(candidate.IntentCode) ||
             string.IsNullOrWhiteSpace(candidate.ProviderCode) ||
@@ -737,11 +759,12 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             return artifacts;
         }
 
-        if (candidate.RequestedResources.Devices is null ||
-            candidate.RequestedResources.DataSourceIds is null ||
-            candidate.RequestedResources.KnowledgeBaseIds is null ||
-            candidate.RequestedResources.UploadIds is null ||
-            candidate.Filters.Predicates is null)
+        if (!AllRequiredFieldsPresent(
+                candidate.RequestedResources.Devices,
+                candidate.RequestedResources.DataSourceIds,
+                candidate.RequestedResources.KnowledgeBaseIds,
+                candidate.RequestedResources.UploadIds,
+                candidate.Filters.Predicates))
         {
             return InvalidResult($"IntentCandidate '{candidate.IntentCode}' typed collections must be explicit and non-null.");
         }
@@ -1285,22 +1308,8 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
         }
 
         var normalized = value.Trim().ToLowerInvariant();
-        return normalized.Contains("cloudwrite", StringComparison.Ordinal) ||
-               normalized.Contains("cloud_write", StringComparison.Ordinal) ||
-               normalized.Contains("cloudmutation", StringComparison.Ordinal) ||
-               normalized.Contains("cloud_mutation", StringComparison.Ordinal) ||
-               normalized.Contains("mutation", StringComparison.Ordinal) ||
-               normalized.Contains("write", StringComparison.Ordinal) ||
-               normalized.Contains("update", StringComparison.Ordinal) ||
-               normalized.Contains("plc", StringComparison.Ordinal) ||
-               normalized.Contains("control", StringComparison.Ordinal) ||
-               normalized.Contains("controlnode", StringComparison.Ordinal) ||
-               normalized.Contains("control_action", StringComparison.Ordinal) ||
-               normalized.Contains("recipe_update", StringComparison.Ordinal) ||
-               normalized.Contains("recipe_write", StringComparison.Ordinal) ||
-               normalized.Contains("device_disable", StringComparison.Ordinal) ||
-               normalized.Contains("disable", StringComparison.Ordinal) ||
-               normalized.Contains("delete", StringComparison.Ordinal);
+        return FrozenForbiddenExecutionSemanticTokens.Any(
+            token => normalized.Contains(token, StringComparison.Ordinal));
     }
 
     private static bool IsSha256(string? value)
@@ -1316,6 +1325,16 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
                value.StartsWith(prefix, StringComparison.Ordinal) &&
                value.Length == prefix.Length + 64 &&
                IsSha256(value[prefix.Length..]);
+    }
+
+    private static bool HasAnyNull(params object?[] values)
+    {
+        return values.Any(value => value is null);
+    }
+
+    private static bool AllRequiredFieldsPresent(params object?[] values)
+    {
+        return !HasAnyNull(values);
     }
 
     private static Result ValidateCanonicalStringSet(IReadOnlyCollection<string>? values, string name)

@@ -20,6 +20,15 @@ public sealed class CloudAiReadClient(
     private const string DeviceLogsPath = "/api/v1/ai/read/device-logs";
     private const string ProductionRecordsPath = "/api/v1/ai/read/production-records";
 
+    private static readonly Func<JsonElement, string, int, CloudAiReadResult<CloudAiReadDeviceDto>> DevicesDocumentMapper = static (root, path, limit) => CloudAiReadDocumentAdapter.MapDevices(root, path, limit);
+    private static readonly Func<JsonElement, string, int, CloudAiReadResult<CloudAiReadProcessDto>> ProcessesDocumentMapper = static (root, path, limit) => CloudAiReadDocumentAdapter.MapProcesses(root, path, limit);
+    private static readonly Func<JsonElement, string, int, CloudAiReadResult<CloudAiReadClientReleaseVersionDto>> ClientReleasesDocumentMapper = static (root, path, limit) => CloudAiReadDocumentAdapter.MapClientReleases(root, path, limit);
+    private static readonly Func<JsonElement, string, int, CloudAiReadResult<CloudAiReadDeviceClientStateDto>> DeviceClientStatesDocumentMapper = static (root, path, limit) => CloudAiReadDocumentAdapter.MapDeviceClientStates(root, path, limit);
+    private static readonly Func<JsonElement, string, int, CloudAiReadResult<CloudAiReadCapacitySummaryDto>> CapacitySummaryDocumentMapper = static (root, path, limit) => CloudAiReadDocumentAdapter.MapCapacitySummary(root, path, limit);
+    private static readonly Func<JsonElement, string, int, CloudAiReadResult<CloudAiReadCapacityHourlyDto>> CapacityHourlyDocumentMapper = static (root, path, limit) => CloudAiReadDocumentAdapter.MapCapacityHourly(root, path, limit);
+    private static readonly Func<JsonElement, string, int, CloudAiReadResult<CloudAiReadDeviceLogDto>> DeviceLogsDocumentMapper = static (root, path, limit) => CloudAiReadDocumentAdapter.MapDeviceLogs(root, path, limit);
+    private static readonly Func<JsonElement, string, int, CloudAiReadResult<CloudAiReadProductionRecordDto>> ProductionRecordsDocumentMapper = static (root, path, limit) => CloudAiReadDocumentAdapter.MapProductionRecords(root, path, limit);
+
     private readonly CloudAiReadHttpTransport httpTransport = new(httpClient, logger);
 
     public bool IsEnabled => options.Value.Enabled;
@@ -45,108 +54,116 @@ public sealed class CloudAiReadClient(
             cancellationToken);
     }
 
-    public async Task<CloudAiReadResult<CloudAiReadDeviceDto>> GetDevicesAsync(
+    public Task<CloudAiReadResult<CloudAiReadDeviceDto>> GetDevicesAsync(
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default)
     {
-        query = NormalizeQueryLimit(query);
-        using var document = await GetJsonAsync(
+        return GetMappedAsync(
             DevicesPath,
-            CloudAiReadQueryParameterBuilder.BuildDeviceQueryParameters(query),
+            query,
+            CloudAiReadQueryParameterBuilder.BuildDeviceQueryParameters,
+            DevicesDocumentMapper,
             cancellationToken);
-
-        return CloudAiReadDocumentAdapter.MapDevices(document.RootElement, DevicesPath, query.Limit);
     }
 
-    public async Task<CloudAiReadResult<CloudAiReadProcessDto>> GetProcessesAsync(
+    public Task<CloudAiReadResult<CloudAiReadProcessDto>> GetProcessesAsync(
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default)
     {
-        query = NormalizeQueryLimit(query);
-        using var document = await GetJsonAsync(
+        return GetMappedAsync(
             ProcessesPath,
-            CloudAiReadQueryParameterBuilder.BuildProcessQueryParameters(query),
+            query,
+            CloudAiReadQueryParameterBuilder.BuildProcessQueryParameters,
+            ProcessesDocumentMapper,
             cancellationToken);
-
-        return CloudAiReadDocumentAdapter.MapProcesses(document.RootElement, ProcessesPath, query.Limit);
     }
 
-    public async Task<CloudAiReadResult<CloudAiReadClientReleaseVersionDto>> GetClientReleasesAsync(
+    public Task<CloudAiReadResult<CloudAiReadClientReleaseVersionDto>> GetClientReleasesAsync(
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default)
     {
-        query = NormalizeQueryLimit(query);
-        using var document = await GetJsonAsync(
+        return GetMappedAsync(
             ClientReleasesPath,
-            CloudAiReadQueryParameterBuilder.BuildClientReleaseQueryParameters(query),
+            query,
+            CloudAiReadQueryParameterBuilder.BuildClientReleaseQueryParameters,
+            ClientReleasesDocumentMapper,
             cancellationToken);
-
-        return CloudAiReadDocumentAdapter.MapClientReleases(document.RootElement, ClientReleasesPath, query.Limit);
     }
 
-    public async Task<CloudAiReadResult<CloudAiReadDeviceClientStateDto>> GetDeviceClientStatesAsync(
+    public Task<CloudAiReadResult<CloudAiReadDeviceClientStateDto>> GetDeviceClientStatesAsync(
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default)
     {
-        query = NormalizeQueryLimit(query);
-        using var document = await GetJsonAsync(
+        return GetMappedAsync(
             DeviceClientStatesPath,
-            CloudAiReadQueryParameterBuilder.BuildDeviceClientStateQueryParameters(query),
+            query,
+            CloudAiReadQueryParameterBuilder.BuildDeviceClientStateQueryParameters,
+            DeviceClientStatesDocumentMapper,
             cancellationToken);
-
-        return CloudAiReadDocumentAdapter.MapDeviceClientStates(document.RootElement, DeviceClientStatesPath, query.Limit);
     }
 
-    public async Task<CloudAiReadResult<CloudAiReadCapacitySummaryDto>> GetCapacitySummaryAsync(
+    public Task<CloudAiReadResult<CloudAiReadCapacitySummaryDto>> GetCapacitySummaryAsync(
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default)
     {
-        query = NormalizeQueryLimit(query);
-        using var document = await GetJsonAsync(
+        return GetMappedAsync(
             CapacitySummaryPath,
-            CloudAiReadQueryParameterBuilder.BuildCapacityQueryParameters(query),
+            query,
+            CloudAiReadQueryParameterBuilder.BuildCapacityQueryParameters,
+            CapacitySummaryDocumentMapper,
             cancellationToken);
-
-        return CloudAiReadDocumentAdapter.MapCapacitySummary(document.RootElement, CapacitySummaryPath, query.Limit);
     }
 
-    public async Task<CloudAiReadResult<CloudAiReadCapacityHourlyDto>> GetCapacityHourlyAsync(
+    public Task<CloudAiReadResult<CloudAiReadCapacityHourlyDto>> GetCapacityHourlyAsync(
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default)
     {
-        query = NormalizeQueryLimit(query);
-        using var document = await GetJsonAsync(
+        return GetMappedAsync(
             CapacityHourlyPath,
-            CloudAiReadQueryParameterBuilder.BuildCapacityHourlyQueryParameters(query),
+            query,
+            CloudAiReadQueryParameterBuilder.BuildCapacityHourlyQueryParameters,
+            CapacityHourlyDocumentMapper,
             cancellationToken);
-
-        return CloudAiReadDocumentAdapter.MapCapacityHourly(document.RootElement, CapacityHourlyPath, query.Limit);
     }
 
-    public async Task<CloudAiReadResult<CloudAiReadDeviceLogDto>> GetDeviceLogsAsync(
+    public Task<CloudAiReadResult<CloudAiReadDeviceLogDto>> GetDeviceLogsAsync(
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default)
     {
-        query = NormalizeQueryLimit(query);
-        using var document = await GetJsonAsync(
+        return GetMappedAsync(
             DeviceLogsPath,
-            CloudAiReadQueryParameterBuilder.BuildDeviceLogQueryParameters(query),
+            query,
+            CloudAiReadQueryParameterBuilder.BuildDeviceLogQueryParameters,
+            DeviceLogsDocumentMapper,
             cancellationToken);
-
-        return CloudAiReadDocumentAdapter.MapDeviceLogs(document.RootElement, DeviceLogsPath, query.Limit);
     }
 
-    public async Task<CloudAiReadResult<CloudAiReadProductionRecordDto>> GetProductionRecordsAsync(
+    public Task<CloudAiReadResult<CloudAiReadProductionRecordDto>> GetProductionRecordsAsync(
         CloudAiReadQuery query,
         CancellationToken cancellationToken = default)
     {
+        return GetMappedAsync(
+            ProductionRecordsPath,
+            query,
+            CloudAiReadQueryParameterBuilder.BuildProductionRecordQueryParameters,
+            ProductionRecordsDocumentMapper,
+            cancellationToken);
+    }
+
+    private async Task<CloudAiReadResult<T>> GetMappedAsync<T>(
+        string path,
+        CloudAiReadQuery query,
+        Func<CloudAiReadQuery, Dictionary<string, string?>> buildQueryParameters,
+        Func<JsonElement, string, int, CloudAiReadResult<T>> mapDocument,
+        CancellationToken cancellationToken)
+    {
         query = NormalizeQueryLimit(query);
         using var document = await GetJsonAsync(
-            ProductionRecordsPath,
-            CloudAiReadQueryParameterBuilder.BuildProductionRecordQueryParameters(query),
+            path,
+            buildQueryParameters(query),
             cancellationToken);
 
-        return CloudAiReadDocumentAdapter.MapProductionRecords(document.RootElement, ProductionRecordsPath, query.Limit);
+        return mapDocument(document.RootElement, path, query.Limit);
     }
 
     public async Task<CloudAiReadResult<object>> QuerySemanticAsync(

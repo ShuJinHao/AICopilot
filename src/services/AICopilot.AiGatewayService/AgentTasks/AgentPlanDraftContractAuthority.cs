@@ -319,7 +319,7 @@ public sealed class AgentPlanDraftContractAuthority
     internal Result<CanonicalAgentPlan> SealDraft(AgentPlanDraftContractRequest request)
     {
         var pluginMode = request.PluginSelectionMode ?? AgentPluginSelectionMode.BuiltInOnly;
-        var selectedPluginIds = CanonicalGuids(request.SelectedPluginIds ?? []);
+        var selectedPluginIds = AgentPlanCanonicalCollections.Guids(request.SelectedPluginIds ?? []);
         if (pluginMode == AgentPluginSelectionMode.BuiltInOnly && selectedPluginIds.Length != 0)
         {
             return Invalid("BuiltInOnly requires selectedPluginIds=[].");
@@ -335,7 +335,7 @@ public sealed class AgentPlanDraftContractAuthority
         var routedIntents = request.RoutedIntents.Count == 0
             ? [new IntentResult { Intent = "General.Chat", Confidence = 1 }]
             : request.RoutedIntents.ToArray();
-        var explicitCapabilities = CanonicalStrings(request.RequestedCapabilityCodes ?? []);
+        var explicitCapabilities = AgentPlanCanonicalCollections.Strings(request.RequestedCapabilityCodes ?? []);
         var adapted = intentAdapter.Adapt(routedIntents, request.IntentContext);
         if (!adapted.IsSuccess)
         {
@@ -345,7 +345,7 @@ public sealed class AgentPlanDraftContractAuthority
         var allCandidates = adapted.Value!.ToArray();
         var requestedCapabilities = capabilityMode == AgentCapabilitySelectionMode.ExplicitAllowlist
             ? explicitCapabilities
-            : CanonicalStrings(allCandidates.Select(candidate => candidate.IntentCode));
+            : AgentPlanCanonicalCollections.Strings(allCandidates.Select(candidate => candidate.IntentCode));
         var candidates = capabilityMode == AgentCapabilitySelectionMode.ExplicitAllowlist
             ? allCandidates
                 .Where(candidate => requestedCapabilities.Contains(candidate.IntentCode, StringComparer.Ordinal))
@@ -377,7 +377,7 @@ public sealed class AgentPlanDraftContractAuthority
             .Distinct(StringComparer.Ordinal)
             .OrderBy(value => value, StringComparer.Ordinal)
             .ToArray();
-        var capabilityGaps = CanonicalStrings(
+        var capabilityGaps = AgentPlanCanonicalCollections.Strings(
             (request.CurrentPlan.CapabilityGaps ?? [])
             .Concat(candidates
                 .Where(candidate => candidate.CapabilityGap is not null)
@@ -389,7 +389,7 @@ public sealed class AgentPlanDraftContractAuthority
                 ? [AgentPlanCapabilityGapCodes.CapabilitySelectionEmpty]
                 : [])
             .Append(AgentPlanCapabilityGapCodes.PlanCompilerUnavailable));
-        var artifactTargets = CanonicalStrings(request.CurrentPlan.ArtifactTypes ?? []);
+        var artifactTargets = AgentPlanCanonicalCollections.Strings(request.CurrentPlan.ArtifactTypes ?? []);
         var toolRiskSummary = request.ToolCatalog.Tools
             .GroupBy(tool => tool.RiskLevel, StringComparer.Ordinal)
             .OrderBy(group => group.Key, StringComparer.Ordinal)
@@ -398,15 +398,15 @@ public sealed class AgentPlanDraftContractAuthority
         {
             Version = 2,
             Goal = BuildSafeGoalSummary(request.CurrentPlan.TaskType, request.RawGoal),
-            UploadIds = CanonicalGuids(request.CurrentPlan.UploadIds),
-            KnowledgeBaseIds = CanonicalGuids(request.CurrentPlan.KnowledgeBaseIds),
+            UploadIds = AgentPlanCanonicalCollections.Guids(request.CurrentPlan.UploadIds),
+            KnowledgeBaseIds = AgentPlanCanonicalCollections.Guids(request.CurrentPlan.KnowledgeBaseIds),
             Steps = steps,
-            DataSourceIds = CanonicalGuids(request.CurrentPlan.DataSourceIds ?? []),
-            BusinessDomains = CanonicalStrings(request.CurrentPlan.BusinessDomains ?? []),
+            DataSourceIds = AgentPlanCanonicalCollections.Guids(request.CurrentPlan.DataSourceIds ?? []),
+            BusinessDomains = AgentPlanCanonicalCollections.Strings(request.CurrentPlan.BusinessDomains ?? []),
             ArtifactTypes = artifactTargets,
             PlannerToolCatalogVersion = request.ToolCatalog.Version,
             PlannerAvailableToolCount = request.ToolCatalog.AvailableToolCount,
-            ForcedStepCodes = CanonicalStrings(request.CurrentPlan.ForcedStepCodes ?? []),
+            ForcedStepCodes = AgentPlanCanonicalCollections.Strings(request.CurrentPlan.ForcedStepCodes ?? []),
             ApprovalCheckpoints = approvalCheckpoints,
             ToolApprovalCheckpoints = toolApprovalCheckpoints,
             DataSourceSummaries = (request.CurrentPlan.DataSourceSummaries ?? [])
@@ -505,25 +505,6 @@ public sealed class AgentPlanDraftContractAuthority
     {
         var digest = CanonicalJson.ComputeSha256(rawGoal.Trim());
         return $"{taskType} task; goalSha256={digest}";
-    }
-
-    private static string[] CanonicalStrings(IEnumerable<string> values)
-    {
-        return values
-            .Where(value => !string.IsNullOrWhiteSpace(value))
-            .Select(value => value.Trim())
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(value => value, StringComparer.Ordinal)
-            .ToArray();
-    }
-
-    private static Guid[] CanonicalGuids(IEnumerable<Guid> values)
-    {
-        return values
-            .Where(value => value != Guid.Empty)
-            .Distinct()
-            .OrderBy(value => value.ToString("D"), StringComparer.Ordinal)
-            .ToArray();
     }
 
     private static Result<CanonicalAgentPlan> Invalid(string detail)
