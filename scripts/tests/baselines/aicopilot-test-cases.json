@@ -4580,8 +4580,8 @@
     {
       "assembly": "AICopilot.ApplicationTests",
       "class": "AICopilot.ApplicationTests.ToolRegistryApplicationTests",
-      "method": "ConfirmPlanDraft_ShouldRejectInputJson_WhenSchemaDoesNotMatch",
-      "case": "AICopilot.ApplicationTests.ToolRegistryApplicationTests.ConfirmPlanDraft_ShouldRejectInputJson_WhenSchemaDoesNotMatch",
+      "method": "ConfirmPlanDraft_ShouldFailClosedAtMissingCompiler_BeforeInputSchemaValidation",
+      "case": "AICopilot.ApplicationTests.ToolRegistryApplicationTests.ConfirmPlanDraft_ShouldFailClosedAtMissingCompiler_BeforeInputSchemaValidation",
       "kind": "Application",
       "runtime": "Pure",
       "capability": "AgentWorkflow",
@@ -4620,8 +4620,8 @@
     {
       "assembly": "AICopilot.ApplicationTests",
       "class": "AICopilot.ApplicationTests.ToolRegistryApplicationTests",
-      "method": "PlanAgentTask_ShouldCreateDraftWhenAutoSkillSelectorCannotMatch",
-      "case": "AICopilot.ApplicationTests.ToolRegistryApplicationTests.PlanAgentTask_ShouldCreateDraftWhenAutoSkillSelectorCannotMatch",
+      "method": "PlanAgentTask_ShouldNotInvokeRetiredAutoSkillSelector_WhenSelectorWouldNotMatch",
+      "case": "AICopilot.ApplicationTests.ToolRegistryApplicationTests.PlanAgentTask_ShouldNotInvokeRetiredAutoSkillSelector_WhenSelectorWouldNotMatch",
       "kind": "Application",
       "runtime": "Pure",
       "capability": "AgentWorkflow",
@@ -4660,8 +4660,8 @@
     {
       "assembly": "AICopilot.ApplicationTests",
       "class": "AICopilot.ApplicationTests.ToolRegistryApplicationTests",
-      "method": "PlanAgentTask_ShouldUseAutoSelectedCloudReadonlySkill",
-      "case": "AICopilot.ApplicationTests.ToolRegistryApplicationTests.PlanAgentTask_ShouldUseAutoSelectedCloudReadonlySkill",
+      "method": "PlanAgentTask_ShouldNotInvokeRetiredAutoSkillSelector_WhenSelectorWouldMatch",
+      "case": "AICopilot.ApplicationTests.ToolRegistryApplicationTests.PlanAgentTask_ShouldNotInvokeRetiredAutoSkillSelector_WhenSelectorWouldMatch",
       "kind": "Application",
       "runtime": "Pure",
       "capability": "AgentWorkflow",
@@ -4820,8 +4820,8 @@
     {
       "assembly": "AICopilot.ApplicationTests",
       "class": "AICopilot.ApplicationTests.ToolRegistryApplicationTests",
-      "method": "PlannerToolCatalog_ShouldRejectUnsupportedSchema",
-      "case": "AICopilot.ApplicationTests.ToolRegistryApplicationTests.PlannerToolCatalog_ShouldRejectUnsupportedSchema",
+      "method": "ToolRegistration_ShouldRejectUnsupportedInputSchemaAtConstruction",
+      "case": "AICopilot.ApplicationTests.ToolRegistryApplicationTests.ToolRegistration_ShouldRejectUnsupportedInputSchemaAtConstruction",
       "kind": "Application",
       "runtime": "Pure",
       "capability": "AgentWorkflow",

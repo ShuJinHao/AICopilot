@@ -6,17 +6,17 @@
     "gitTree": "88aee67db521a1a33ff6de524c0163d513396123",
     "declarationCount": 785,
     "orderedSymbolSha256": "62a8fa4fe89e98b8b7be0a74f020db16c5bbdac3714b1838e194b2bef189e312",
-    "transitionContentSha256": "21c311961acafbba600a2d5b7f5f43b472858317cdd550d1bba4b4f9be2589b8"
+    "transitionContentSha256": "4a079e7f0a8145125ac0b929a4a8d12b19c473dea73b08bb166c16d40783964f"
   },
   "current": {
     "baselinePath": "scripts/tests/baselines/aicopilot-test-cases.json",
     "availableDeclarationCount": 845
   },
   "summary": {
-    "retainedSelf": 628,
+    "retainedSelf": 624,
     "retiredDuplicate": 0,
     "retiredSourceGuard": 2,
-    "replaced": 155
+    "replaced": 159
   },
   "transitions": [
     {
@@ -738,11 +738,11 @@
     },
     {
       "oldSymbol": "AICopilot.BackendTests.ToolRegistryGovernanceTests.PlannerToolCatalog_ShouldRejectUnsupportedSchema()",
-      "disposition": "retained-self",
+      "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.ApplicationTests.ToolRegistryApplicationTests.PlannerToolCatalog_ShouldRejectUnsupportedSchema"
+        "AICopilot.ApplicationTests.ToolRegistryApplicationTests.ToolRegistration_ShouldRejectUnsupportedInputSchemaAtConstruction"
       ],
-      "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
+      "reason": "不受支持的 Tool input schema 已在 ToolRegistration 构造边界 fail-fast，由 aggregate 责任 owner 的无变更异常断言覆盖。"
     },
     {
       "oldSymbol": "AICopilot.BackendTests.UploadValidationTests.UploadPolicy_ShouldRejectContentThatDoesNotMatchExtension()",
@@ -2661,11 +2661,13 @@
     },
     {
       "oldSymbol": "AICopilot.BackendTests.ToolRegistryGovernanceTests.ConfirmPlanDraft_ShouldRejectInputJson_WhenSchemaDoesNotMatch()",
-      "disposition": "retained-self",
+      "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.ApplicationTests.ToolRegistryApplicationTests.ConfirmPlanDraft_ShouldRejectInputJson_WhenSchemaDoesNotMatch"
+        "AICopilot.ApplicationTests.ToolRegistryApplicationTests.ConfirmPlanDraft_ShouldFailClosedAtMissingCompiler_BeforeInputSchemaValidation",
+        "AICopilot.UnitTests.ToolRegistryUnitTests.ToolInputSchemaValidator_ShouldValidateNestedObjectsAndArrayItems",
+        "AICopilot.WorkflowTests.ToolRegistryWorkflowTests.AgentTaskRuntime_ShouldFailMcpTool_WhenRegistryInputSchemaDoesNotMatch"
       ],
-      "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
+      "reason": "P0 PlanDraft 确认在缺少可信 Compiler 时先 fail-closed；strict input schema 的 enum/nested 校验与 runtime provider 调用前拒绝由各自可执行 owner 成对覆盖。"
     },
     {
       "oldSymbol": "AICopilot.BackendTests.LocalPersistenceFileStorageTests.LocalPersistenceStorage_ShouldStripWindowsClientPathOnUnixHosts()",
@@ -4540,11 +4542,11 @@
     },
     {
       "oldSymbol": "AICopilot.BackendTests.ToolRegistryGovernanceTests.PlanAgentTask_ShouldCreateDraftWhenAutoSkillSelectorCannotMatch()",
-      "disposition": "retained-self",
+      "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.ApplicationTests.ToolRegistryApplicationTests.PlanAgentTask_ShouldCreateDraftWhenAutoSkillSelectorCannotMatch"
+        "AICopilot.ApplicationTests.ToolRegistryApplicationTests.PlanAgentTask_ShouldNotInvokeRetiredAutoSkillSelector_WhenSelectorWouldNotMatch"
       ],
-      "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
+      "reason": "P0 canonical PlanDraft 不再消费 retired auto Skill selector；即使 selector 预设为不匹配，仍必须零调用并生成不含 Skill 字段的 contract-only Draft。"
     },
     {
       "oldSymbol": "AICopilot.BackendTests.SemanticSummaryBuilderTests.Builder_ShouldSummarizeDeviceRecords()",
@@ -5767,11 +5769,11 @@
     },
     {
       "oldSymbol": "AICopilot.BackendTests.ToolRegistryGovernanceTests.PlanAgentTask_ShouldUseAutoSelectedCloudReadonlySkill()",
-      "disposition": "retained-self",
+      "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.ApplicationTests.ToolRegistryApplicationTests.PlanAgentTask_ShouldUseAutoSelectedCloudReadonlySkill"
+        "AICopilot.ApplicationTests.ToolRegistryApplicationTests.PlanAgentTask_ShouldNotInvokeRetiredAutoSkillSelector_WhenSelectorWouldMatch"
       ],
-      "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
+      "reason": "P0 canonical PlanDraft 不再消费 retired auto Skill selector；即使 selector 预设可匹配 Cloud Skill，仍必须零调用、不生成 query_cloud Step 并只披露 PlanV2Contract。"
     },
     {
       "oldSymbol": "AICopilot.BackendTests.SecurityHardeningTests.AuditRuntimeServices_ShouldUseDedicatedAuditDbContext()",

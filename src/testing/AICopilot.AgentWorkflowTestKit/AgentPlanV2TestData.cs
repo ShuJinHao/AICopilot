@@ -165,6 +165,32 @@ public static class AgentPlanV2TestData
             requireCanonicalBuiltInCatalog: true);
     }
 
+    /// <summary>
+    /// Projects every sealed Plan v2 execution step into the aggregate test fixture.
+    /// This keeps persistence-bound tests byte-for-byte aligned with the canonical
+    /// Plan owner, including contract-owned steps that the fixture did not request.
+    /// </summary>
+    public static IReadOnlyList<AgentStep> AddTrackedPlanSteps(
+        AgentTask task,
+        string canonicalPlanJson,
+        DateTimeOffset nowUtc)
+    {
+        ArgumentNullException.ThrowIfNull(task);
+        var plan = JsonSerializer.Deserialize<AgentTaskPlanDocument>(canonicalPlanJson, AgentRuntimeJson.Options)
+            ?? throw new InvalidOperationException("The canonical Plan v2 fixture is required.");
+
+        return plan.Steps
+            .Select(step => task.AddStep(
+                step.Title,
+                step.Description,
+                step.StepType,
+                step.ToolCode,
+                step.RequiresApproval,
+                nowUtc,
+                step.InputJson))
+            .ToArray();
+    }
+
     public static void AssertCanonicalBuiltInPlanIdentity(
         string planJson,
         AgentTaskType taskType,

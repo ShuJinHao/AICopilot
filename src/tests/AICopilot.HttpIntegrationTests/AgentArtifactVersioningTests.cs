@@ -259,6 +259,12 @@ public sealed class AgentArtifactVersioningTests
         await File.WriteAllTextAsync(fullPath, content, Encoding.UTF8);
 
         await using var dbContext = await CreateAiGatewayDbContextAsync();
+        var generationPlanStep = CreateArtifactGenerationPlanStep(artifactType, relativePath);
+        var planJson = AgentPlanV2TestData.CreateCanonicalBuiltInPlanDraft(
+            [generationPlanStep],
+            AgentTaskType.CloudDataReport,
+            skillCode: null,
+            knowledgeBaseIds: null);
         var task = new AgentTask(
             new SessionId(Guid.NewGuid()),
             ownerId,
@@ -267,15 +273,13 @@ public sealed class AgentArtifactVersioningTests
             AgentTaskType.CloudDataReport,
             AgentTaskRiskLevel.Medium,
             null,
-            """{"version":1}""",
+            planJson,
             now);
-        var step = task.AddStep(
-            "Generate draft artifact",
-            "Generate draft artifact for versioning tests.",
-            AgentStepType.ArtifactGeneration,
-            "generate_report",
-            requiresApproval: false,
-            now);
+        var step = AgentPlanV2TestData.AddTrackedPlanSteps(task, planJson, now)
+            .Single(item => string.Equals(
+                item.ToolCode,
+                generationPlanStep.ToolCode,
+                StringComparison.Ordinal));
         var workspace = new ArtifactWorkspace(
             task.Id,
             workspaceCode,
@@ -301,6 +305,50 @@ public sealed class AgentArtifactVersioningTests
         await dbContext.SaveChangesAsync();
 
         return new SeededArtifact(task.Id.Value, workspace.WorkspaceCode, artifact.Id.Value);
+    }
+
+    private static AgentPlanV2TestStep CreateArtifactGenerationPlanStep(
+        ArtifactType artifactType,
+        string relativePath)
+    {
+        return artifactType switch
+        {
+            ArtifactType.Chart or ArtifactType.Json => new AgentPlanV2TestStep(
+                "Generate chart data",
+                $"Generate chart data for '{relativePath}'.",
+                AgentStepType.ArtifactGeneration,
+                "generate_chart_data"),
+            ArtifactType.Markdown => new AgentPlanV2TestStep(
+                "Generate Markdown report",
+                $"Generate the Markdown artifact '{relativePath}'.",
+                AgentStepType.ArtifactGeneration,
+                "generate_markdown_report"),
+            ArtifactType.Html => new AgentPlanV2TestStep(
+                "Generate HTML report",
+                $"Generate the HTML artifact '{relativePath}'.",
+                AgentStepType.ArtifactGeneration,
+                "generate_html_report"),
+            ArtifactType.Pdf => new AgentPlanV2TestStep(
+                "Generate PDF",
+                $"Generate the PDF artifact '{relativePath}'.",
+                AgentStepType.ArtifactGeneration,
+                "generate_pdf",
+                RequiresApproval: true),
+            ArtifactType.Pptx => new AgentPlanV2TestStep(
+                "Generate PowerPoint",
+                $"Generate the PowerPoint artifact '{relativePath}'.",
+                AgentStepType.ArtifactGeneration,
+                "generate_pptx",
+                RequiresApproval: true),
+            ArtifactType.Xlsx => new AgentPlanV2TestStep(
+                "Generate Excel workbook",
+                $"Generate the Excel artifact '{relativePath}'.",
+                AgentStepType.ArtifactGeneration,
+                "generate_xlsx",
+                RequiresApproval: true),
+            _ => throw new InvalidOperationException(
+                $"Artifact fixture '{relativePath}' ({artifactType}) has no canonical Plan v2 artifact target.")
+        };
     }
 
     private async Task<CreatedRoleDto> CreateRoleAsync(string roleName, IReadOnlyCollection<string> permissions)

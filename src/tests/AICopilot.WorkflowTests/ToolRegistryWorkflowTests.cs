@@ -961,7 +961,8 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
             executionRepository,
             CreateGuard(CreateTool("rag_search", ToolProviderType.BuiltIn)),
             knowledgeBaseAccessCheckers: [accessChecker],
-            identityAccessService: new StubIdentityAccessService([], roleName: "Admin"));
+            identityAccessService: new StubIdentityAccessService([], roleName: "Admin"),
+            freshReadGate: AgentPlanV2TestData.CreateDownstreamRuntimeHarnessFreshReadGate());
 
         var result = await runtime.RunAsync(task, CancellationToken.None);
 

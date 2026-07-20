@@ -1,7 +1,6 @@
 using System.Linq.Expressions;
 using System.Net.Http;
 using System.Text;
-using System.Text.Json;
 using AICopilot.AgentPlugin;
 using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.AiGatewayService.Approvals;
@@ -253,18 +252,7 @@ public abstract class ToolRegistryGovernanceTestBase
         string planJson,
         DateTimeOffset now)
     {
-        var plan = JsonSerializer.Deserialize<AgentTaskPlanDocument>(planJson, AgentRuntimeJson.Options)
-            ?? throw new InvalidOperationException("Test Plan v2 fixture is required.");
-        return plan.Steps
-            .Select(step => task.AddStep(
-                step.Title,
-                step.Description,
-                step.StepType,
-                step.ToolCode,
-                step.RequiresApproval,
-                now,
-                step.InputJson))
-            .ToArray();
+        return AgentPlanV2TestData.AddTrackedPlanSteps(task, planJson, now);
     }
 
     internal static SemanticQueryPlan CreateDeviceSemanticPlan()
@@ -833,11 +821,14 @@ public abstract class ToolRegistryGovernanceTestBase
 
     internal sealed class FixedSkillAutoSelector(string? skillCode, string? reason = "test selector") : IAgentSkillAutoSelector
     {
+        public int CallCount { get; private set; }
+
         public Task<AgentSkillSelection?> SelectSkillAsync(
             Guid sessionId,
             string goal,
             CancellationToken cancellationToken)
         {
+            CallCount++;
             return Task.FromResult<AgentSkillSelection?>(new AgentSkillSelection(skillCode, reason));
         }
     }

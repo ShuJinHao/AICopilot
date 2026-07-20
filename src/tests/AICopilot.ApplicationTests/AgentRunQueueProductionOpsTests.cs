@@ -93,6 +93,9 @@ public sealed class AgentRunQueueProductionOpsTests
     [Fact]
     public async Task RetryAgentTaskCommand_ShouldApplyBackoffLimitAndAudit()
     {
+        // This frozen runtime case deliberately crosses the test-only downstream boundary;
+        // production P0 confirmation and fresh-read validation remain fail-closed.
+        var downstreamRuntimeHarnessFreshReadGate = AgentPlanV2TestData.CreateDownstreamRuntimeHarnessFreshReadGate();
         var task = CreateFailedTask();
         var previousRetry1 = FailedRetryItem(task, DateTimeOffset.UtcNow.AddMinutes(-6));
         var previousRetry2 = FailedRetryItem(task, DateTimeOffset.UtcNow.AddMinutes(-4));
@@ -110,7 +113,8 @@ public sealed class AgentRunQueueProductionOpsTests
                 approvalRepository,
                 queueRepository,
                 options: Options.Create(new AgentRunQueueOptions()),
-                auditRecorder: new AgentAuditRecorder(audit)),
+                auditRecorder: new AgentAuditRecorder(audit),
+                freshReadGate: downstreamRuntimeHarnessFreshReadGate),
             new TestCurrentUser(UserId));
 
         var before = DateTimeOffset.UtcNow;
@@ -140,7 +144,8 @@ public sealed class AgentRunQueueProductionOpsTests
                 maxedWorkspaceRepository,
                 maxedApprovalRepository,
                 maxedQueue,
-                options: Options.Create(new AgentRunQueueOptions())),
+                options: Options.Create(new AgentRunQueueOptions()),
+                freshReadGate: downstreamRuntimeHarnessFreshReadGate),
             new TestCurrentUser(UserId));
 
         var maxed = await maxedHandler.Handle(new RetryAgentTaskCommand(maxedTask.Id.Value), CancellationToken.None);
@@ -294,7 +299,16 @@ public sealed class AgentRunQueueProductionOpsTests
             AgentTaskType.ReportGeneration,
             AgentTaskRiskLevel.Low,
             null,
-            AgentPlanV2TestData.CreateSingleStep("generate_chart_data", executable: false),
+            AgentPlanV2TestData.Create(
+                [new AgentPlanV2TestStep(
+                    "Generate",
+                    "Generate output",
+                    AgentStepType.ArtifactGeneration,
+                    "generate_chart_data")],
+                executable: false,
+                AgentTaskType.ReportGeneration,
+                skillCode: null,
+                knowledgeBaseIds: null),
             now);
         var step = task.AddStep(
             "Generate",
@@ -354,8 +368,10 @@ public sealed class AgentRunQueueProductionOpsTests
         InMemoryAgentTaskRunQueueStore queueRepository,
         InMemoryAgentTaskRunAttemptStore? attemptRepository = null,
         IOptions<AgentRunQueueOptions>? options = null,
-        AgentAuditRecorder? auditRecorder = null)
+        AgentAuditRecorder? auditRecorder = null,
+        AgentTaskPlanFreshReadGate? freshReadGate = null)
     {
+        var effectiveFreshReadGate = freshReadGate ?? AgentPlanV2TestData.CreateMatchingFreshReadGate();
         return new AgentTaskLifecycleCoordinator(
             taskRepository,
             approvalRepository,
@@ -364,8 +380,8 @@ public sealed class AgentRunQueueProductionOpsTests
             attemptRepository ?? new InMemoryAgentTaskRunAttemptStore(),
             new AgentTaskRunQueue(
                 queueRepository,
-                AgentPlanV2TestData.CreateMatchingFreshReadGate()),
-            AgentPlanV2TestData.CreateMatchingFreshReadGate(),
+                effectiveFreshReadGate),
+            effectiveFreshReadGate,
             options,
             auditRecorder);
     }

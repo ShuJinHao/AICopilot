@@ -29,10 +29,12 @@
     <ProjectReference Include="..\..\infrastructure\AICopilot.Infrastructure\AICopilot.Infrastructure.csproj" />
     <ProjectReference Include="..\..\services\AICopilot.Services.Contracts\AICopilot.Services.Contracts.csproj" />
     <ProjectReference Include="..\..\shared\AICopilot.SharedKernel\AICopilot.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\testing\AICopilot.AgentWorkflowTestKit\AICopilot.AgentWorkflowTestKit.csproj" />
     <ProjectReference Include="..\..\testing\AICopilot.AspireIntegrationTestKit\AICopilot.AspireIntegrationTestKit.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Aspire.Hosting.ApplicationModel" />
+    <Using Include="AICopilot.AgentWorkflowTestKit" />
     <Using Include="AICopilot.AspireIntegrationTestKit" />
     <Using Include="FluentAssertions" />
     <Using Include="Microsoft.Extensions.DependencyInjection" />

@@ -47,10 +47,24 @@ public sealed class AgentRuntimeBusinessQueryToolServiceTests
         state.CloudReadonlySourcePath.Should().Be("BusinessDataSourceCenter/CloudReadOnlyTextToSql");
         state.BusinessQueryResults.Should().ContainSingle()
             .Which.SourceMode.Should().Be(DataSourceExternalSystemType.CloudReadOnly.ToString());
+        state.CloudReadonlyRows.Should().ContainSingle()
+            .Which["client_code"].Should().Be("DEV-001");
 
         var json = JsonSerializer.Serialize(output, JsonSerializerOptions.Web);
+        using var returnedSummary = JsonDocument.Parse(json);
+        returnedSummary.RootElement.EnumerateObject()
+            .Select(property => property.Name)
+            .Should().BeEquivalentTo(
+                "status",
+                "resultType",
+                "sourceMode",
+                "isSimulation",
+                "rowCount",
+                "isTruncated",
+                "resultHash");
         json.Should().Contain("CloudReadOnly");
-        json.Should().Contain("DEV-001");
+        json.Should().NotContain("DEV-001");
+        json.Should().NotContain("client_code");
         json.Should().NotContain("SELECT");
     }
 

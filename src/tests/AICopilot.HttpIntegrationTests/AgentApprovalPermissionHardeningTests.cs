@@ -163,6 +163,16 @@ public sealed class AgentApprovalPermissionHardeningTests
     {
         var now = DateTimeOffset.UtcNow;
         await using var dbContext = await CreateAiGatewayDbContextAsync();
+        var planJson = AgentPlanV2TestData.CreateCanonicalBuiltInPlanDraft(
+            [new AgentPlanV2TestStep(
+                "Generate PDF",
+                "Approval-gated tool step.",
+                AgentStepType.ArtifactGeneration,
+                "generate_pdf",
+                RequiresApproval: true)],
+            AgentTaskType.DataAnalysis,
+            skillCode: null,
+            knowledgeBaseIds: null);
         var task = new AgentTask(
             new SessionId(Guid.NewGuid()),
             ownerId,
@@ -171,15 +181,10 @@ public sealed class AgentApprovalPermissionHardeningTests
             AgentTaskType.DataAnalysis,
             AgentTaskRiskLevel.Medium,
             null,
-            """{"version":1}""",
+            planJson,
             now);
-        var step = task.AddStep(
-            "Generate PDF",
-            "Approval-gated tool step.",
-            AgentStepType.ArtifactGeneration,
-            "generate_pdf",
-            requiresApproval: true,
-            now);
+        var step = AgentPlanV2TestData.AddTrackedPlanSteps(task, planJson, now)
+            .Single(item => string.Equals(item.ToolCode, "generate_pdf", StringComparison.Ordinal));
         task.ConfirmExecutablePlan(task.PlanJson, Array.Empty<int>(), now);
         task.ApprovePlan(now);
         task.Start(now);
@@ -213,14 +218,23 @@ public sealed class AgentApprovalPermissionHardeningTests
         var now = DateTimeOffset.UtcNow;
         var workspaceCode = $"ws_approval_{Guid.NewGuid():N}"[..38];
         var workspaceRoot = Path.Combine(GetWorkspaceRoot(), workspaceCode);
-        var artifacts = artifactInputs ?? new[]
-        {
-            new SeedArtifactInput(
-                ArtifactType.Markdown,
-                "draft/report.md",
-                "# Approval permission hardening",
-                "text/markdown")
-        };
+        var artifacts = artifactInputs ?? (includeToolApproval
+            ?
+            [
+                new SeedArtifactInput(
+                    ArtifactType.Pdf,
+                    "draft/report.pdf",
+                    "%PDF-1.4 approval permission hardening",
+                    "application/pdf")
+            ]
+            :
+            [
+                new SeedArtifactInput(
+                    ArtifactType.Markdown,
+                    "draft/report.md",
+                    "# Approval permission hardening",
+                    "text/markdown")
+            ]);
         var artifactFiles = new List<(SeedArtifactInput Artifact, string FullPath)>();
         foreach (var artifact in artifacts)
         {
@@ -231,6 +245,18 @@ public sealed class AgentApprovalPermissionHardeningTests
         }
 
         await using var dbContext = await CreateAiGatewayDbContextAsync();
+        var generationPlanSteps = artifacts
+            .Select(CreateArtifactGenerationPlanStep)
+            .DistinctBy(step => step.ToolCode, StringComparer.Ordinal)
+            .Select((step, index) => index == 0 && includeToolApproval
+                ? step with { RequiresApproval = true }
+                : step)
+            .ToArray();
+        var planJson = AgentPlanV2TestData.CreateCanonicalBuiltInPlanDraft(
+            generationPlanSteps,
+            AgentTaskType.CloudDataReport,
+            skillCode: null,
+            knowledgeBaseIds: null);
         var task = new AgentTask(
             new SessionId(Guid.NewGuid()),
             ownerId,
@@ -239,27 +265,15 @@ public sealed class AgentApprovalPermissionHardeningTests
             AgentTaskType.CloudDataReport,
             AgentTaskRiskLevel.Medium,
             null,
-            """{"version":1}""",
+            planJson,
             now);
-        AgentStep? toolStep = null;
-        if (includeToolApproval)
-        {
-            toolStep = task.AddStep(
-                "Generate PDF",
-                "Approval-gated tool step.",
-                AgentStepType.ArtifactGeneration,
-                "generate_pdf",
-                requiresApproval: true,
-                now);
-        }
-
-        var finalStep = task.AddStep(
-            "Finalize",
-            "Approval-gated final output step.",
-            AgentStepType.Finalize,
-            "finalize_artifacts",
-            requiresApproval: true,
-            now);
+        var trackedPlanSteps = AgentPlanV2TestData.AddTrackedPlanSteps(task, planJson, now);
+        var generationStepsByToolCode = trackedPlanSteps
+            .Where(step => generationPlanSteps.Any(planStep =>
+                string.Equals(planStep.ToolCode, step.ToolCode, StringComparison.Ordinal)))
+            .ToDictionary(step => step.ToolCode!, StringComparer.Ordinal);
+        var toolStep = generationStepsByToolCode.Values
+            .SingleOrDefault(step => step.RequiresApproval);
         var workspace = new ArtifactWorkspace(
             task.Id,
             workspaceCode,
@@ -274,7 +288,7 @@ public sealed class AgentApprovalPermissionHardeningTests
                 artifact.Artifact.RelativePath,
                 new FileInfo(artifact.FullPath).Length,
                 artifact.Artifact.MimeType,
-                finalStep.Id,
+                generationStepsByToolCode[ResolveArtifactGenerationToolCode(artifact.Artifact)].Id,
                 now);
         }
 
@@ -320,6 +334,63 @@ public sealed class AgentApprovalPermissionHardeningTests
             workspace.WorkspaceCode,
             toolApproval?.Id.Value,
             finalApproval?.Id.Value);
+    }
+
+    private static AgentPlanV2TestStep CreateArtifactGenerationPlanStep(SeedArtifactInput artifact)
+    {
+        return ResolveArtifactGenerationToolCode(artifact) switch
+        {
+            "generate_chart_data" => new AgentPlanV2TestStep(
+                "Generate chart data",
+                "Generate chart data for workspace artifacts.",
+                AgentStepType.ArtifactGeneration,
+                "generate_chart_data"),
+            "generate_markdown_report" => new AgentPlanV2TestStep(
+                "Generate Markdown report",
+                "Generate the Markdown workspace artifact.",
+                AgentStepType.ArtifactGeneration,
+                "generate_markdown_report"),
+            "generate_html_report" => new AgentPlanV2TestStep(
+                "Generate HTML report",
+                "Generate the HTML workspace artifact.",
+                AgentStepType.ArtifactGeneration,
+                "generate_html_report"),
+            "generate_pdf" => new AgentPlanV2TestStep(
+                "Generate PDF",
+                "Generate the PDF workspace artifact.",
+                AgentStepType.ArtifactGeneration,
+                "generate_pdf",
+                RequiresApproval: true),
+            "generate_pptx" => new AgentPlanV2TestStep(
+                "Generate PowerPoint",
+                "Generate the PowerPoint workspace artifact.",
+                AgentStepType.ArtifactGeneration,
+                "generate_pptx",
+                RequiresApproval: true),
+            "generate_xlsx" => new AgentPlanV2TestStep(
+                "Generate Excel workbook",
+                "Generate the Excel workspace artifact.",
+                AgentStepType.ArtifactGeneration,
+                "generate_xlsx",
+                RequiresApproval: true),
+            var toolCode => throw new InvalidOperationException(
+                $"Unsupported canonical artifact generation tool '{toolCode}'.")
+        };
+    }
+
+    private static string ResolveArtifactGenerationToolCode(SeedArtifactInput artifact)
+    {
+        return artifact.Type switch
+        {
+            ArtifactType.Chart or ArtifactType.Json => "generate_chart_data",
+            ArtifactType.Markdown => "generate_markdown_report",
+            ArtifactType.Html => "generate_html_report",
+            ArtifactType.Pdf => "generate_pdf",
+            ArtifactType.Pptx => "generate_pptx",
+            ArtifactType.Xlsx => "generate_xlsx",
+            _ => throw new InvalidOperationException(
+                $"Artifact fixture '{artifact.RelativePath}' ({artifact.Type}) has no canonical Plan v2 artifact target.")
+        };
     }
 
     private async Task<Guid> GetApprovalIdAsync(Guid taskId, AgentApprovalType approvalType)

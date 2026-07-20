@@ -116,6 +116,10 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         using var plan = JsonDocument.Parse(task.PlanJson);
         plan.RootElement.GetProperty("planKind").GetString().Should().Be("PlanDraft");
         plan.RootElement.GetProperty("isExecutable").GetBoolean().Should().BeFalse();
+        plan.RootElement.GetProperty("capabilityGaps").EnumerateArray()
+            .Select(item => item.GetString())
+            .Should().Contain(AgentPlanCapabilityGapCodes.PlannedToolUnavailable)
+            .And.Contain(AgentPlanCapabilityGapCodes.PlanCompilerUnavailable);
 
         var approvalAudit = new CapturingAuditLogWriter();
         var confirmationService = new AgentPlanDraftConfirmationService(
@@ -141,8 +145,8 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         confirmation.IsSuccess.Should().BeFalse();
         confirmation.Errors.Should().ContainSingle()
             .Which.Should().BeEquivalentTo(new ApiProblemDescriptor(
-            AppProblemCodes.CloudReadonlyToolDisabled,
-            "Tool 'query_cloud_data_readonly' is disabled."));
+                AppProblemCodes.AgentPlanInvalid,
+                "P0 PlanDraft is contract-only and cannot be confirmed until the trusted P2 LinearV1 PlanCompiler produces a non-empty Node graph."));
         task.Status.Should().Be(AgentTaskStatus.Draft);
         approvalRepository.Items.Should().ContainSingle()
             .Which.Status.Should().Be(AgentApprovalStatus.Pending);
@@ -177,7 +181,8 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         plan.RootElement.GetProperty("cloudReadonlyIntent").ValueKind.Should().Be(JsonValueKind.Null);
         plan.RootElement.GetProperty("capabilityGaps").EnumerateArray()
             .Select(item => item.GetString())
-            .Should().Contain(item => item!.Contains(AppProblemCodes.CloudReadonlyIntentUnsupported, StringComparison.Ordinal));
+            .Should().Contain(AgentPlanCapabilityGapCodes.CloudReadonlyIntentUnavailable)
+            .And.Contain(AgentPlanCapabilityGapCodes.PlanCompilerUnavailable);
 
         var task = taskRepository.Items.Should().ContainSingle().Which;
         var confirmation = await new AgentPlanDraftConfirmationService(
@@ -191,7 +196,7 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         confirmation.Errors.Should().ContainSingle()
             .Which.Should().BeEquivalentTo(new ApiProblemDescriptor(
                 AppProblemCodes.AgentPlanInvalid,
-                "A PlanDraft with unresolved capability gaps cannot be confirmed."));
+                "P0 PlanDraft is contract-only and cannot be confirmed until the trusted P2 LinearV1 PlanCompiler produces a non-empty Node graph."));
     }
     [Fact]
     public async Task ConfirmPlanDraft_ShouldReturnProblem_WhenPlanJsonIsInvalid()
@@ -242,7 +247,15 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         plan.RootElement.GetProperty("plannerMode").GetString().Should().Be("PlanDraft");
         plan.RootElement.GetProperty("plannerFallbackReason").ValueKind.Should().Be(JsonValueKind.Null);
         plan.RootElement.GetProperty("plannerValidationVersion").GetInt32().Should().Be(1);
-        plan.RootElement.GetProperty("plannerAvailableToolCount").GetInt32().Should().Be(0);
+        var draftSummary = new
+        {
+            AvailableToolCount = plan.RootElement.GetProperty("plannerAvailableToolCount").GetInt32(),
+            IsExecutable = plan.RootElement.GetProperty("isExecutable").GetBoolean()
+        };
+        draftSummary.Should().BeEquivalentTo(new { AvailableToolCount = 8, IsExecutable = false });
+        plan.RootElement.GetProperty("capabilityGaps").EnumerateArray()
+            .Select(item => item.GetString())
+            .Should().Contain(AgentPlanCapabilityGapCodes.PlanCompilerUnavailable);
         plan.RootElement.GetProperty("steps").EnumerateArray()
             .Select(step => step.GetProperty("toolCode").GetString())
             .Should().Contain("generate_markdown_report");
@@ -461,19 +474,14 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         serialized.Should().NotContain("production_records");
     }
     [Fact]
-    public async Task PlannerToolCatalog_ShouldRejectUnsupportedSchema()
+    public void ToolRegistration_ShouldRejectUnsupportedInputSchemaAtConstruction()
     {
-        var guard = CreatePlanToolGuard(CreateGuard(CreateTool(
+        Action create = () => CreateTool(
             "bad_schema_tool",
-            inputSchemaJson: "[]")));
+            inputSchemaJson: "[]");
 
-        var result = await guard.GetAvailableToolCatalogAsync(UserId, CancellationToken.None);
-
-        result.IsSuccess.Should().BeFalse();
-        result.Errors.Should().ContainSingle()
-            .Which.Should().BeEquivalentTo(new ApiProblemDescriptor(
-                AppProblemCodes.PlannerToolSchemaUnsupported,
-                "Tool 'bad_schema_tool' has an unavailable input contract: Tool registry input schema must be an object schema from the supported strict subset."));
+        create.Should().Throw<ArgumentException>()
+            .WithMessage("*Tool registry input schema must be an object schema from the supported strict subset.*");
     }
     [Fact]
     public async Task SkillDefinition_ShouldNarrowPlannerCatalog_AfterToolRegistryGuard()
@@ -523,10 +531,11 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
                 "Tool 'generate_pdf' is outside skill 'restricted_skill'."));
     }
     [Fact]
-    public async Task PlanAgentTask_ShouldUseAutoSelectedCloudReadonlySkill()
+    public async Task PlanAgentTask_ShouldNotInvokeRetiredAutoSkillSelector_WhenSelectorWouldMatch()
     {
         var session = new Session(UserId, ConversationTemplateId.New());
         var taskRepository = new InMemoryRepository<AgentTask>();
+        var skillAutoSelector = new FixedSkillAutoSelector("cloud_readonly");
         var skillGuard = CreateSkillGuard(CreateSkill(
             "cloud_readonly",
             [
@@ -541,47 +550,63 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
             CreateAgentRuntimeGuardWithCloudEnabled(),
             taskRepository: taskRepository,
             skillDefinitionGuard: skillGuard,
-            skillAutoSelector: new FixedSkillAutoSelector("cloud_readonly"));
+            skillAutoSelector: skillAutoSelector);
 
         var result = await handler.Handle(
             new PlanAgentTaskCommand(session.Id.Value, "查看 DEV-001 最近设备日志", AgentTaskType.ReportGeneration, null),
             CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
+        skillAutoSelector.CallCount.Should().Be(0);
+        var frozenSkill = await skillGuard.ResolveAsync("cloud_readonly", CancellationToken.None);
+        frozenSkill.IsSuccess.Should().BeTrue();
+        frozenSkill.Value.Should().NotBeNull();
+        frozenSkill.Value!.AllowsTool("query_cloud_data_readonly").Should().BeTrue();
         var task = taskRepository.Items.Should().ContainSingle().Which;
-        task.TaskType.Should().Be(AgentTaskType.CloudDataReport);
-        task.Steps.Should().Contain(step => step.ToolCode == "query_cloud_data_readonly");
+        task.TaskType.Should().Be(AgentTaskType.ReportGeneration);
+        task.Steps.Should().NotContain(step => step.ToolCode == "query_cloud_data_readonly");
         using var plan = JsonDocument.Parse(task.PlanJson);
-        plan.RootElement.GetProperty("skillCode").GetString().Should().Be("cloud_readonly");
-        plan.RootElement.GetProperty("skillRoutingReason").ValueKind.Should().Be(JsonValueKind.Null);
-        plan.RootElement.GetProperty("taskType").GetString().Should().Be("CloudDataReport");
+        var retiredSkillProperties = new[] { "skillCode", "skillName", "skillRoutingReason" };
+        retiredSkillProperties
+            .Where(propertyName => plan.RootElement.TryGetProperty(propertyName, out _))
+            .Should().BeEmpty();
+        plan.RootElement.GetProperty("taskType").GetString().Should().Be("ReportGeneration");
         plan.RootElement.GetProperty("plannerSafetySummary").GetProperty("planSource").GetString()
-            .Should().Be("Skill.cloud_readonly");
+            .Should().Be("PlanV2Contract");
+        plan.RootElement.GetProperty("capabilityGaps").EnumerateArray()
+            .Select(item => item.GetString())
+            .Should().Contain(AgentPlanCapabilityGapCodes.PlanCompilerUnavailable);
     }
     [Fact]
-    public async Task PlanAgentTask_ShouldCreateDraftWhenAutoSkillSelectorCannotMatch()
+    public async Task PlanAgentTask_ShouldNotInvokeRetiredAutoSkillSelector_WhenSelectorWouldNotMatch()
     {
         var session = new Session(UserId, ConversationTemplateId.New());
         var taskRepository = new InMemoryRepository<AgentTask>();
+        var skillAutoSelector = new FixedSkillAutoSelector(null, "目标不明确，需要用户补充。");
         var handler = CreatePlanHandler(
             session,
             CreateAgentRuntimeGuardWithCloudEnabled(),
             taskRepository: taskRepository,
             skillDefinitionGuard: CreateSkillGuard(),
-            skillAutoSelector: new FixedSkillAutoSelector(null, "目标不明确，需要用户补充。"));
+            skillAutoSelector: skillAutoSelector);
 
         var result = await handler.Handle(
             new PlanAgentTaskCommand(session.Id.Value, "帮我看看", AgentTaskType.ReportGeneration, null),
             CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
+        skillAutoSelector.CallCount.Should().Be(0);
         var task = taskRepository.Items.Should().ContainSingle().Which;
         using var plan = JsonDocument.Parse(task.PlanJson);
         plan.RootElement.GetProperty("planKind").GetString().Should().Be("PlanDraft");
-        plan.RootElement.GetProperty("skillCode").ValueKind.Should().Be(JsonValueKind.Null);
+        var retiredSkillProperties = new[] { "skillCode", "skillName", "skillRoutingReason" };
+        retiredSkillProperties
+            .Where(propertyName => plan.RootElement.TryGetProperty(propertyName, out _))
+            .Should().BeEmpty();
         plan.RootElement.GetProperty("capabilityGaps").EnumerateArray()
             .Select(item => item.GetString())
-            .Should().Contain("Skill 自动识别未命中：目标不明确，需要用户补充。");
+            .Should().Contain(AgentPlanCapabilityGapCodes.PlanCompilerUnavailable)
+            .And.NotContain("Skill 自动识别未命中：目标不明确，需要用户补充。");
     }
     [Fact]
     public async Task PlanDraft_ShouldNotCreateToolCatalogGap_WhenCatalogWouldBeEmpty()
@@ -668,11 +693,22 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         var task = taskRepository.Items.Should().ContainSingle().Which;
         task.Steps.Should().NotContain(step => string.Equals(step.ToolCode, mcpToolCode, StringComparison.OrdinalIgnoreCase));
         using var plan = JsonDocument.Parse(task.PlanJson);
-        plan.RootElement.GetProperty("plannerAvailableToolCount").GetInt32().Should().Be(0);
+        var draftSummary = new
+        {
+            AvailableToolCount = plan.RootElement.GetProperty("plannerAvailableToolCount").GetInt32(),
+            IsExecutable = plan.RootElement.GetProperty("isExecutable").GetBoolean()
+        };
+        draftSummary.Should().BeEquivalentTo(new { AvailableToolCount = 1, IsExecutable = false });
+        plan.RootElement.GetProperty("capabilityGaps").EnumerateArray()
+            .Select(item => item.GetString())
+            .Should().Contain(AgentPlanCapabilityGapCodes.PlanCompilerUnavailable);
     }
     [Fact]
-    public async Task ConfirmPlanDraft_ShouldRejectInputJson_WhenSchemaDoesNotMatch()
+    public async Task ConfirmPlanDraft_ShouldFailClosedAtMissingCompiler_BeforeInputSchemaValidation()
     {
+        // The strict schema semantics remain covered at their executable owners by
+        // ToolRegistryUnitTests.ToolInputSchemaValidator_ShouldValidateNestedObjectsAndArrayItems
+        // and ToolRegistryWorkflowTests.AgentTaskRuntime_ShouldFailMcpTool_WhenRegistryInputSchemaDoesNotMatch.
         var toolGuard = CreateGuard(
             CreateTool(
                 "generate_markdown_report",
@@ -733,8 +769,8 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         confirmation.IsSuccess.Should().BeFalse();
         confirmation.Errors.Should().ContainSingle()
             .Which.Should().BeEquivalentTo(new ApiProblemDescriptor(
-                AppProblemCodes.AgentPlanSchemaInvalid,
-                "Tool input field '$.format' is not one of the allowed values."));
+                AppProblemCodes.AgentPlanInvalid,
+                "P0 PlanDraft is contract-only and cannot be confirmed until the trusted P2 LinearV1 PlanCompiler produces a non-empty Node graph."));
     }
     [Fact]
     public async Task PlanDraft_ShouldNotRejectExplicitModelBeforeExecutableConfirmation()
@@ -1061,6 +1097,9 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
     [Fact]
     public async Task ArtifactGenerationFailure_ShouldNotCreatePlaceholderArtifact()
     {
+        // This frozen runtime case deliberately crosses the test-only downstream boundary;
+        // production P0 confirmation and fresh-read validation remain fail-closed.
+        var downstreamRuntimeHarnessFreshReadGate = AgentPlanV2TestData.CreateDownstreamRuntimeHarnessFreshReadGate();
         var (task, workspace) = CreateApprovedTask("generate_pdf");
         var executionRepository = new InMemoryToolExecutionAuditStore();
         var runtime = CreateRuntime(
@@ -1068,7 +1107,8 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
             new InMemoryRepository<ArtifactWorkspace>(workspace),
             new InMemoryRepository<ApprovalRequest>(),
             executionRepository,
-            CreateGuard(CreateTool("generate_pdf", ToolProviderType.Artifact)));
+            CreateGuard(CreateTool("generate_pdf", ToolProviderType.Artifact)),
+            freshReadGate: downstreamRuntimeHarnessFreshReadGate);
 
         var result = await runtime.RunAsync(task, CancellationToken.None);
 

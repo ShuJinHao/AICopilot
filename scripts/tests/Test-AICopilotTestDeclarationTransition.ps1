@@ -31,7 +31,7 @@ if ([int]$ledger.schemaVersion -ne 2) {
 $expectedSourceCommit = '198cc59318f4a1748c719b9b8ecff1d969952ce8'
 $expectedSourcePath = 'src/tests'
 $expectedSourceTree = '88aee67db521a1a33ff6de524c0163d513396123'
-$expectedTransitionContentSha256 = '21c311961acafbba600a2d5b7f5f43b472858317cdd550d1bba4b4f9be2589b8'
+$expectedTransitionContentSha256 = '4a079e7f0a8145125ac0b929a4a8d12b19c473dea73b08bb166c16d40783964f'
 if ([string]$ledger.source.commit -cne $expectedSourceCommit -or
     [string]$ledger.source.sourcePath -cne $expectedSourcePath -or
     [string]$ledger.source.gitTree -cne $expectedSourceTree -or
