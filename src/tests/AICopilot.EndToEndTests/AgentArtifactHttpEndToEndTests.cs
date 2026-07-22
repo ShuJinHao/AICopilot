@@ -14,7 +14,7 @@ public sealed class AgentArtifactHttpEndToEndTests(CoreAICopilotAppFixture fixtu
     : AgentTaskHttpScenarioTestBase(fixture)
 {
     [Fact]
-    public async Task PlanCompilerUnavailable_ShouldFailClosedWithoutWorkspaceArtifactOrApproval()
+    public async Task ExecutionSnapshotUnavailable_ShouldFailClosedWithoutWorkspaceArtifactOrApproval()
     {
         await AuthenticateAsAdminAsync();
 
@@ -25,7 +25,7 @@ public sealed class AgentArtifactHttpEndToEndTests(CoreAICopilotAppFixture fixtu
         var task = await PostPlanStreamAsync(new
         {
             sessionId = session.Id,
-            goal = "Generate a controlled Markdown report without bypassing the P0 compiler boundary.",
+            goal = "Generate a controlled Markdown report without bypassing the execution snapshot boundary.",
             taskType = AgentTaskType.ReportGeneration,
             modelId = (Guid?)null,
             uploadIds = Array.Empty<Guid>(),
@@ -58,7 +58,7 @@ public sealed class AgentArtifactHttpEndToEndTests(CoreAICopilotAppFixture fixtu
                 .EnumerateArray()
                 .Select(item => item.GetString())
                 .Should()
-                .Contain("plan_compiler_unavailable");
+                .Contain("execution_snapshot_unavailable");
             root.GetProperty("artifactTargets")
                 .EnumerateArray()
                 .Select(item => item.GetString())

@@ -70,6 +70,7 @@ public sealed class AiGatewayDbContext(DbContextOptions<AiGatewayDbContext> opti
     protected override void OnModelCreating(ModelBuilder builder)
     {
         builder.HasDefaultSchema("aigateway");
+        builder.HasSequence<long>("model_quota_fencing_seq", "aigateway");
         builder.ApplyConfiguration(new LanguageModelConfiguration());
         builder.ApplyConfiguration(new ConversationTemplateConfiguration());
         builder.ApplyConfiguration(new ApprovalPolicyConfiguration());

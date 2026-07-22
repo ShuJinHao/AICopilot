@@ -149,10 +149,10 @@ internal static class AgentPlanContractSchemaAuthority
         plannerFallbackReason = "null",
         compilerPolicy = new
         {
-            phase = "P0-contract-with-development-simulation-bridge",
-            trustedCompilerAvailable = "development-simulation-only",
-            draftGap = AgentPlanCapabilityGapCodes.PlanCompilerUnavailable,
-            executablePolicy = "fail-closed-except-explicit-development-simulation-linear-bridge",
+            phase = "P2-deterministic-linear-v1",
+            trustedCompiler = DeterministicLinearAgentPlanCompiler.CompilerVersion,
+            missingExecutionSnapshotGap = AgentPlanCapabilityGapCodes.ExecutionSnapshotUnavailable,
+            executablePolicy = "gap-free-snapshot-bound-linear-v1-only",
             productionSimulation = "disabled",
             fallbackPolicy = "real-cloud-never-falls-back-to-simulation",
             requiredCandidateCoverage = "every-required-available-candidate-needs-producer-node",

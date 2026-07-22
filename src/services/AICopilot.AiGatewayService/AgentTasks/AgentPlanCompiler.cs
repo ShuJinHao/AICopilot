@@ -1,4 +1,5 @@
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
+using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
 
 namespace AICopilot.AiGatewayService.AgentTasks;

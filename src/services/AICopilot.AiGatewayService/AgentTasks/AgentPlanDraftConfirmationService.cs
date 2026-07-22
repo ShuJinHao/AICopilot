@@ -46,18 +46,16 @@ public sealed class AgentPlanDraftConfirmationService(
             return InvalidPlan("Only a sealed non-executable PlanDraft v2 can be confirmed.");
         }
 
-        if (plan.CapabilityGaps?.Contains(
-                AgentPlanCapabilityGapCodes.PlanCompilerUnavailable,
-                StringComparer.Ordinal) == true ||
-            plan.Nodes is not { Count: > 0 })
-        {
-            return InvalidPlan(
-                "P0 PlanDraft is contract-only and cannot be confirmed until the trusted P2 LinearV1 PlanCompiler produces a non-empty Node graph.");
-        }
-
         if (plan.CapabilityGaps is { Count: > 0 })
         {
-            return InvalidPlan("A PlanDraft with unresolved capability gaps cannot be confirmed.");
+            return InvalidPlan(
+                "A PlanDraft with unresolved capability gaps cannot be confirmed.");
+        }
+
+        if (plan.Nodes is not { Count: > 0 })
+        {
+            return InvalidPlan(
+                "A gap-free PlanDraft requires a non-empty authoritative LinearV1 compiler graph before confirmation.");
         }
 
         if (plan.Steps.Count == 0 || plan.RequestedCapabilityCodes is null || plan.RequestedCapabilityCodes.Count == 0)

@@ -40,7 +40,7 @@ public sealed class AgentPlanRejectionEndToEndTests(CoreAICopilotAppFixture fixt
                 "Host=localhost;Database=p0_boundary;",
                 DbProviderType.PostgreSql,
                 isReadOnly: true,
-                externalSystemType: BusinessDataExternalSystemType.SimulationBusiness,
+                externalSystemType: BusinessDataExternalSystemType.CloudReadOnly,
                 readOnlyCredentialVerified: true,
                 isEnabled: true,
                 isSelectableInChat: false,

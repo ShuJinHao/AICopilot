@@ -17,6 +17,7 @@ public sealed class AgentScopeLifecycleTests
         var secretProtector = new EndpointPoolSecretProtector();
         builder.Services.AddScoped<ScopedLifecycleProbe>();
         builder.Services.AddScoped<IChatClientProvider, ProbeChatClientProvider>();
+        builder.Services.AddSingleton<IModelQuotaReservationStore, UnusedModelQuotaReservationStore>();
         builder.Services.AddSingleton<ISecretProtector>(secretProtector);
         builder.AddAiRuntime();
 
@@ -57,6 +58,31 @@ public sealed class AgentScopeLifecycleTests
         public void Dispose()
         {
             IsDisposed = true;
+        }
+    }
+
+    private sealed class UnusedModelQuotaReservationStore : IModelQuotaReservationStore
+    {
+        public Task<ModelQuotaReservationOutcome> TryReserveAsync(
+            ModelQuotaReservationRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("This lifecycle test does not execute a model call.");
+        }
+
+        public Task<ModelQuotaReservationResult> SettleAsync(
+            ModelQuotaSettlement settlement,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("This lifecycle test does not execute a model call.");
+        }
+
+        public Task<int> ReclaimExpiredAsync(
+            DateTimeOffset nowUtc,
+            int maxItems,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(0);
         }
     }
 

@@ -35,6 +35,13 @@ public sealed class AgentTaskLifecycleCoordinator(
             return Result.From(integrity);
         }
 
+        if (task.Status == AgentTaskStatus.Queued)
+        {
+            return Result.Failure(new ApiProblemDescriptor(
+                AppProblemCodes.AgentTaskRunInProgress,
+                "Agent task already has an active queued run."));
+        }
+
         if (task.Status is not AgentTaskStatus.PlanApproved and not AgentTaskStatus.WaitingToolApproval)
         {
             return Result.Invalid("Only approved or waiting-approval agent tasks can be queued for execution.");

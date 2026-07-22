@@ -119,7 +119,7 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         plan.RootElement.GetProperty("capabilityGaps").EnumerateArray()
             .Select(item => item.GetString())
             .Should().Contain(AgentPlanCapabilityGapCodes.PlannedToolUnavailable)
-            .And.Contain(AgentPlanCapabilityGapCodes.PlanCompilerUnavailable);
+            .And.Contain(AgentPlanCapabilityGapCodes.ExecutionSnapshotUnavailable);
 
         var approvalAudit = new CapturingAuditLogWriter();
         var confirmationService = new AgentPlanDraftConfirmationService(
@@ -146,7 +146,7 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         confirmation.Errors.Should().ContainSingle()
             .Which.Should().BeEquivalentTo(new ApiProblemDescriptor(
                 AppProblemCodes.AgentPlanInvalid,
-                "P0 PlanDraft is contract-only and cannot be confirmed until the trusted P2 LinearV1 PlanCompiler produces a non-empty Node graph."));
+                "A PlanDraft with unresolved capability gaps cannot be confirmed."));
         task.Status.Should().Be(AgentTaskStatus.Draft);
         approvalRepository.Items.Should().ContainSingle()
             .Which.Status.Should().Be(AgentApprovalStatus.Pending);
@@ -182,7 +182,7 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         plan.RootElement.GetProperty("capabilityGaps").EnumerateArray()
             .Select(item => item.GetString())
             .Should().Contain(AgentPlanCapabilityGapCodes.CloudReadonlyIntentUnavailable)
-            .And.Contain(AgentPlanCapabilityGapCodes.PlanCompilerUnavailable);
+            .And.Contain(AgentPlanCapabilityGapCodes.ExecutionSnapshotUnavailable);
 
         var task = taskRepository.Items.Should().ContainSingle().Which;
         var confirmation = await new AgentPlanDraftConfirmationService(
@@ -196,7 +196,7 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         confirmation.Errors.Should().ContainSingle()
             .Which.Should().BeEquivalentTo(new ApiProblemDescriptor(
                 AppProblemCodes.AgentPlanInvalid,
-                "P0 PlanDraft is contract-only and cannot be confirmed until the trusted P2 LinearV1 PlanCompiler produces a non-empty Node graph."));
+                "A PlanDraft with unresolved capability gaps cannot be confirmed."));
     }
     [Fact]
     public async Task ConfirmPlanDraft_ShouldReturnProblem_WhenPlanJsonIsInvalid()
@@ -255,7 +255,7 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         draftSummary.Should().BeEquivalentTo(new { AvailableToolCount = 8, IsExecutable = false });
         plan.RootElement.GetProperty("capabilityGaps").EnumerateArray()
             .Select(item => item.GetString())
-            .Should().Contain(AgentPlanCapabilityGapCodes.PlanCompilerUnavailable);
+            .Should().Contain(AgentPlanCapabilityGapCodes.ExecutionSnapshotUnavailable);
         plan.RootElement.GetProperty("steps").EnumerateArray()
             .Select(step => step.GetProperty("toolCode").GetString())
             .Should().Contain("generate_markdown_report");
@@ -575,7 +575,7 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
             .Should().Be("PlanV2Contract");
         plan.RootElement.GetProperty("capabilityGaps").EnumerateArray()
             .Select(item => item.GetString())
-            .Should().Contain(AgentPlanCapabilityGapCodes.PlanCompilerUnavailable);
+            .Should().Contain(AgentPlanCapabilityGapCodes.ExecutionSnapshotUnavailable);
     }
     [Fact]
     public async Task PlanAgentTask_ShouldNotInvokeRetiredAutoSkillSelector_WhenSelectorWouldNotMatch()
@@ -605,7 +605,7 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
             .Should().BeEmpty();
         plan.RootElement.GetProperty("capabilityGaps").EnumerateArray()
             .Select(item => item.GetString())
-            .Should().Contain(AgentPlanCapabilityGapCodes.PlanCompilerUnavailable)
+            .Should().Contain(AgentPlanCapabilityGapCodes.ExecutionSnapshotUnavailable)
             .And.NotContain("Skill 自动识别未命中：目标不明确，需要用户补充。");
     }
     [Fact]
@@ -701,7 +701,7 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         draftSummary.Should().BeEquivalentTo(new { AvailableToolCount = 1, IsExecutable = false });
         plan.RootElement.GetProperty("capabilityGaps").EnumerateArray()
             .Select(item => item.GetString())
-            .Should().Contain(AgentPlanCapabilityGapCodes.PlanCompilerUnavailable);
+            .Should().Contain(AgentPlanCapabilityGapCodes.ExecutionSnapshotUnavailable);
     }
     [Fact]
     public async Task ConfirmPlanDraft_ShouldFailClosedAtMissingCompiler_BeforeInputSchemaValidation()
@@ -770,7 +770,7 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         confirmation.Errors.Should().ContainSingle()
             .Which.Should().BeEquivalentTo(new ApiProblemDescriptor(
                 AppProblemCodes.AgentPlanInvalid,
-                "P0 PlanDraft is contract-only and cannot be confirmed until the trusted P2 LinearV1 PlanCompiler produces a non-empty Node graph."));
+                "A PlanDraft with unresolved capability gaps cannot be confirmed."));
     }
     [Fact]
     public async Task PlanDraft_ShouldNotRejectExplicitModelBeforeExecutableConfirmation()

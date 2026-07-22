@@ -83,7 +83,6 @@ public static class DependencyInjection
         builder.Services.AddScoped<IAgentNodeOutcomeReconciliationStore, AgentNodeOutcomeReconciliationStore>();
         builder.Services.AddScoped<IModelQuotaReservationStore, PostgresModelQuotaReservationStore>();
         builder.Services.AddScoped<IArtifactFileSetOperationStore, ArtifactFileSetOperationStore>();
-        builder.Services.AddScoped<IArtifactFileSetMaintenanceService, ArtifactFileSetMaintenanceService>();
         builder.Services.AddScoped<IAgentTaskPlanFreshReadVerifier, AgentTaskPlanFreshReadVerifier>();
         builder.Services.AddScoped<IAgentWorkerHeartbeatStore, AgentWorkerHeartbeatStore>();
         builder.Services.AddScoped<IReadRepository<ArtifactWorkspace>>(provider => provider.GetRequiredService<AiGatewayRepository<ArtifactWorkspace>>());
@@ -150,5 +149,11 @@ public static class DependencyInjection
         })
             .AddRoles<IdentityRole<Guid>>()
             .AddEntityFrameworkStores<IdentityStoreDbContext>();
+    }
+
+    public static IServiceCollection AddArtifactFileSetMaintenance(this IServiceCollection services)
+    {
+        services.AddScoped<IArtifactFileSetMaintenanceService, ArtifactFileSetMaintenanceService>();
+        return services;
     }
 }

@@ -241,7 +241,7 @@ public sealed class AgentRunQueueProductionOpsTests
         queueItem.Status.Should().Be(AgentTaskRunQueueStatus.Failed);
         queueItem.FailureCode.Should().Be(AppProblemCodes.AgentTaskRunQueueLeaseExpired);
         audit.Requests.Should().ContainSingle(request => request.ActionCode == "Agent.RunQueueStaleLeaseFailed")
-            .Which.Metadata!["oldStatus"].Should().Be(AgentTaskRunQueueStatus.Leased.ToString());
+            .Which.Metadata!["oldStatus"].Should().Be(AgentTaskRunQueueStatus.Started.ToString());
 
         var planFailureTask = CreateFailedTask();
         planFailureTask.PrepareRetry(DateTimeOffset.UtcNow);
@@ -354,6 +354,11 @@ public sealed class AgentRunQueueProductionOpsTests
         services.AddSingleton<IAgentTaskRunQueue>(new AgentTaskRunQueue(
             queueRepository,
             AgentPlanV2TestData.CreateMatchingFreshReadGate()));
+        services.AddSingleton<IOptions<AgentRunQueueOptions>>(
+            Options.Create(new AgentRunQueueOptions
+            {
+                StaleLeaseAction = AgentRunQueueStaleLeaseAction.Fail
+            }));
         services.AddSingleton(runtime);
         services.AddSingleton(auditLogWriter);
         services.AddSingleton<AgentAuditRecorder>();
@@ -372,12 +377,17 @@ public sealed class AgentRunQueueProductionOpsTests
         AgentTaskPlanFreshReadGate? freshReadGate = null)
     {
         var effectiveFreshReadGate = freshReadGate ?? AgentPlanV2TestData.CreateMatchingFreshReadGate();
+        var effectiveAttemptRepository = attemptRepository ?? new InMemoryAgentTaskRunAttemptStore();
         return new AgentTaskLifecycleCoordinator(
             taskRepository,
             approvalRepository,
             workspaceRepository,
             queueRepository,
-            attemptRepository ?? new InMemoryAgentTaskRunAttemptStore(),
+            new ToolRegistryGovernanceTestBase.InMemoryAgentTaskCancellationStore(
+                taskRepository,
+                approvalRepository,
+                queueRepository,
+                effectiveAttemptRepository),
             new AgentTaskRunQueue(
                 queueRepository,
                 effectiveFreshReadGate),
@@ -511,7 +521,7 @@ public sealed class AgentRunQueueProductionOpsTests
 
         private static bool IsActive(AgentTaskRunQueueItem item)
         {
-            return item.Status is AgentTaskRunQueueStatus.Queued or AgentTaskRunQueueStatus.Leased;
+            return item.IsActive;
         }
     }
 

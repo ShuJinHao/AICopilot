@@ -22,6 +22,8 @@ using AICopilot.Core.AiGateway.Aggregates.Skills;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Core.AiGateway.Aggregates.Uploads;
 using AICopilot.Core.AiGateway.Ids;
+using AICopilot.Core.AiGateway.Specifications.AgentTasks;
+using AICopilot.Core.AiGateway.Specifications.Approvals;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Domain;
@@ -107,7 +109,11 @@ public abstract class ToolRegistryGovernanceTestBase
             approvalRepository,
             workspaceRepository,
             queueRepository,
-            runAttemptRepository ?? new InMemoryAgentTaskRunAttemptStore(),
+            new InMemoryAgentTaskCancellationStore(
+                taskRepository,
+                approvalRepository,
+                queueRepository,
+                runAttemptRepository ?? new InMemoryAgentTaskRunAttemptStore()),
             new AgentTaskRunQueue(
                 queueRepository,
                 effectiveFreshReadGate),
@@ -448,6 +454,14 @@ public abstract class ToolRegistryGovernanceTestBase
         services.AddSingleton<IAgentTaskRunQueue>(new AgentTaskRunQueue(
             queueRepository,
             AgentPlanV2TestData.CreateMatchingFreshReadGate()));
+        services.AddSingleton<IAgentDurableTaskClaimStore>(
+            new InMemoryAgentDurableTaskClaimStore(taskRepository, queueRepository, attemptRepository));
+        services.AddSingleton<DurableTaskClaimCoordinator>();
+        services.AddSingleton<IOptions<AgentRunQueueOptions>>(
+            Options.Create(new AgentRunQueueOptions
+            {
+                StaleLeaseAction = AgentRunQueueStaleLeaseAction.Fail
+            }));
         services.AddSingleton(runtime);
         services.AddSingleton<AgentTaskRunQueueWorkerCoordinator>();
         return services.BuildServiceProvider();
@@ -485,6 +499,117 @@ public abstract class ToolRegistryGovernanceTestBase
             task.ReleaseRunLease(now, clearActiveAttempt: false);
             await attemptRepository.SaveChangesAsync(cancellationToken);
             return Result.Success(task);
+        }
+
+        public async Task<Result<AgentTask>> RunClaimedAsync(
+            DurableTaskClaim claim,
+            CancellationToken cancellationToken = default)
+        {
+            var now = DateTimeOffset.UtcNow;
+            claim.RunAttempt.WaitForApproval(now, "Waiting for final output approval.");
+            claim.Task.ReleaseRunLease(now, clearActiveAttempt: false);
+            await attemptRepository.SaveChangesAsync(cancellationToken);
+            return Result.Success(claim.Task);
+        }
+    }
+
+    private sealed class InMemoryAgentDurableTaskClaimStore(
+        InMemoryRepository<AgentTask> taskRepository,
+        InMemoryAgentTaskRunQueueStore queueRepository,
+        InMemoryAgentTaskRunAttemptStore attemptRepository)
+        : IAgentDurableTaskClaimStore
+    {
+        public Task<DurableTaskClaim?> TryClaimNextAsync(
+            string leaseOwner,
+            TimeSpan leaseDuration,
+            CancellationToken cancellationToken = default)
+        {
+            var now = DateTimeOffset.UtcNow;
+            var queueItem = queueRepository.Items
+                .Where(item => item.CanBeLeased(now))
+                .OrderBy(item => item.AvailableAt)
+                .ThenBy(item => item.CreatedAt)
+                .FirstOrDefault();
+            if (queueItem is null)
+            {
+                return Task.FromResult<DurableTaskClaim?>(null);
+            }
+
+            var task = taskRepository.Items.Single(item => item.Id == queueItem.TaskId);
+            var attempt = new AgentTaskRunAttempt(
+                task.Id,
+                task.RunAttemptCount + 1,
+                queueItem.TriggerType,
+                leaseOwner,
+                now,
+                leaseDuration);
+            attemptRepository.Add(attempt);
+            task.BeginRunAttempt(
+                attempt.Id,
+                attempt.AttemptNo,
+                attempt.LeaseId!.Value,
+                leaseOwner,
+                attempt.LeaseExpiresAt!.Value,
+                now);
+            attempt.BindTaskFencingToken(task.RunFencingToken);
+            queueItem.AcquireLease(
+                attempt.LeaseId.Value,
+                leaseOwner,
+                now,
+                leaseDuration,
+                task.RunFencingToken);
+            queueItem.LinkRunAttempt(attempt.Id, now);
+
+            return Task.FromResult<DurableTaskClaim?>(new DurableTaskClaim(
+                queueItem,
+                task,
+                attempt,
+                task.RunFencingToken,
+                attempt.LeaseId.Value,
+                attempt.LeaseExpiresAt.Value));
+        }
+
+        public Task<AgentFencedWriteResult> TryMarkStartedAsync(
+            DurableTaskClaim claim,
+            DateTimeOffset startedAtUtc,
+            CancellationToken cancellationToken = default)
+        {
+            claim.QueueItem.MarkStarted(claim.RunAttempt.Id, startedAtUtc);
+            return Task.FromResult(AgentFencedWriteResult.Succeeded);
+        }
+
+        public Task<AgentFencedWriteResult> TryCompleteAsync(
+            DurableTaskClaim claim,
+            AgentTaskRunQueueStatus terminalStatus,
+            string? failureCode,
+            string safeMessage,
+            DateTimeOffset completedAtUtc,
+            CancellationToken cancellationToken = default)
+        {
+            switch (terminalStatus)
+            {
+                case AgentTaskRunQueueStatus.Succeeded:
+                    claim.QueueItem.MarkSucceeded(completedAtUtc, safeMessage);
+                    break;
+                case AgentTaskRunQueueStatus.Failed:
+                    claim.QueueItem.MarkFailed(failureCode ?? "agent_task_run_failed", safeMessage, completedAtUtc);
+                    break;
+                case AgentTaskRunQueueStatus.Cancelled:
+                    claim.QueueItem.Cancel(completedAtUtc, safeMessage);
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(terminalStatus));
+            }
+
+            return Task.FromResult(AgentFencedWriteResult.Succeeded);
+        }
+
+        public Task<int> RecoverExpiredStartedAsync(
+            DateTimeOffset nowUtc,
+            int maxItems,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(0);
         }
     }
 
@@ -659,7 +784,7 @@ public abstract class ToolRegistryGovernanceTestBase
 
         private static bool IsActive(AgentTaskRunQueueItem item)
         {
-            return item.Status is AgentTaskRunQueueStatus.Queued or AgentTaskRunQueueStatus.Leased;
+            return item.IsActive;
         }
     }
 
@@ -702,6 +827,103 @@ public abstract class ToolRegistryGovernanceTestBase
         public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
         {
             return Task.FromResult(1);
+        }
+    }
+
+    internal sealed class InMemoryAgentTaskCancellationStore(
+        IRepository<AgentTask> taskRepository,
+        IRepository<ApprovalRequest> approvalRepository,
+        IAgentTaskRunQueueStore queueRepository,
+        IAgentTaskRunAttemptStore runAttemptRepository)
+        : IAgentTaskCancellationStore
+    {
+        public async Task<AgentTaskCancellationCheckpoint> RequestAsync(
+            AgentTaskId taskId,
+            DateTimeOffset requestedAtUtc,
+            string safeMessage,
+            CancellationToken cancellationToken = default)
+        {
+            var task = await taskRepository.FirstOrDefaultAsync(
+                new AgentTaskByIdSpec(taskId, includeSteps: true),
+                cancellationToken);
+            if (task is null)
+            {
+                return new AgentTaskCancellationCheckpoint(
+                    AgentTaskCancellationDisposition.StateConflict,
+                    [],
+                    "Agent task no longer exists.");
+            }
+
+            var queues = await queueRepository.ListActiveByTaskAsync(taskId, cancellationToken);
+            var queueSnapshots = queues
+                .Select(item => new AgentTaskCancellationQueueItem(item, item.Status))
+                .ToArray();
+            if (task.Status is AgentTaskStatus.Completed
+                or AgentTaskStatus.Finalized
+                or AgentTaskStatus.Failed
+                or AgentTaskStatus.Rejected
+                or AgentTaskStatus.Cancelled)
+            {
+                return new AgentTaskCancellationCheckpoint(
+                    AgentTaskCancellationDisposition.AlreadyTerminal,
+                    queueSnapshots,
+                    "Agent task is already terminal.");
+            }
+
+            AgentTaskRunAttempt? attempt = null;
+            if (task.ActiveRunAttemptId is not null)
+            {
+                attempt = await runAttemptRepository.FirstByIdAsync(
+                    task.ActiveRunAttemptId.Value,
+                    cancellationToken);
+                if (attempt is null)
+                {
+                    return new AgentTaskCancellationCheckpoint(
+                        AgentTaskCancellationDisposition.StateConflict,
+                        queueSnapshots,
+                        "Active run attempt is missing; cancellation did not guess a terminal state.");
+                }
+            }
+
+            var approvals = await approvalRepository.ListAsync(
+                new ApprovalRequestsByTaskSpec(taskId, pendingOnly: true),
+                cancellationToken);
+            foreach (var approval in approvals)
+            {
+                approval.Cancel(requestedAtUtc);
+                approvalRepository.Update(approval);
+            }
+
+            if (attempt is not null && !attempt.IsTerminal)
+            {
+                attempt.Cancel(requestedAtUtc, safeMessage);
+                runAttemptRepository.Update(attempt);
+            }
+
+            foreach (var queue in queues)
+            {
+                queue.Cancel(requestedAtUtc, safeMessage);
+                queueRepository.Update(queue);
+            }
+
+            foreach (var step in task.Steps.Where(step =>
+                         step.Status is not AgentStepStatus.Completed
+                             and not AgentStepStatus.Failed
+                             and not AgentStepStatus.Cancelled))
+            {
+                step.Cancel(requestedAtUtc);
+            }
+
+            task.Cancel(requestedAtUtc);
+            taskRepository.Update(task);
+            await approvalRepository.SaveChangesAsync(cancellationToken);
+            await runAttemptRepository.SaveChangesAsync(cancellationToken);
+            await queueRepository.SaveChangesAsync(cancellationToken);
+            await taskRepository.SaveChangesAsync(cancellationToken);
+            return new AgentTaskCancellationCheckpoint(
+                AgentTaskCancellationDisposition.Cancelled,
+                queueSnapshots,
+                safeMessage);
         }
     }
 
@@ -1134,6 +1356,32 @@ public abstract class ToolRegistryGovernanceTestBase
             artifact.ApplySourceMetadata(sourceMetadata);
             return Task.FromResult(artifact);
         }
+
+        public Task<IReadOnlyList<Artifact>> WriteDraftArtifactSetAsync(
+            ArtifactWorkspace workspace,
+            IReadOnlyCollection<AgentDraftArtifactWriteRequest> artifacts,
+            CancellationToken cancellationToken)
+        {
+            if (throwOnWrite)
+            {
+                throw new InvalidOperationException(@"apiKey: sk-test C:\secrets\report.txt Host=db;Password=super-secret;");
+            }
+
+            var created = artifacts.Select(request =>
+            {
+                var artifact = workspace.AddDraftArtifact(
+                    request.ArtifactType,
+                    request.Name,
+                    request.RelativePath,
+                    request.Content.Length,
+                    request.MimeType,
+                    request.StepId,
+                    DateTimeOffset.UtcNow);
+                artifact.ApplySourceMetadata(request.SourceMetadata);
+                return artifact;
+            }).ToArray();
+            return Task.FromResult<IReadOnlyList<Artifact>>(created);
+        }
     }
 
     internal sealed class CapturingWorkspaceService(ArtifactWorkspace workspace) : IAgentArtifactWorkspaceService
@@ -1193,6 +1441,34 @@ public abstract class ToolRegistryGovernanceTestBase
                 DateTimeOffset.UtcNow);
             artifact.ApplySourceMetadata(sourceMetadata);
             return Task.FromResult(artifact);
+        }
+
+        public Task<IReadOnlyList<Artifact>> WriteDraftArtifactSetAsync(
+            ArtifactWorkspace artifactWorkspace,
+            IReadOnlyCollection<AgentDraftArtifactWriteRequest> artifacts,
+            CancellationToken cancellationToken)
+        {
+            var created = artifacts.Select(request =>
+            {
+                if (request.MimeType.StartsWith("text/", StringComparison.OrdinalIgnoreCase) ||
+                    request.MimeType.Contains("json", StringComparison.OrdinalIgnoreCase) ||
+                    request.MimeType.Contains("markdown", StringComparison.OrdinalIgnoreCase))
+                {
+                    TextArtifacts[request.RelativePath] = Encoding.UTF8.GetString(request.Content);
+                }
+
+                var artifact = artifactWorkspace.AddDraftArtifact(
+                    request.ArtifactType,
+                    request.Name,
+                    request.RelativePath,
+                    request.Content.Length,
+                    request.MimeType,
+                    request.StepId,
+                    DateTimeOffset.UtcNow);
+                artifact.ApplySourceMetadata(request.SourceMetadata);
+                return artifact;
+            }).ToArray();
+            return Task.FromResult<IReadOnlyList<Artifact>>(created);
         }
     }
 

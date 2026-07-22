@@ -52,7 +52,8 @@ public sealed class ToolRegistryUnitTests : ToolRegistryGovernanceTestBase
         tools["generate_business_chart"].DisplayName.Should().Be("生成业务图表");
         tools["finalize_artifacts"].DisplayName.Should().Be("最终产物确认");
         tools["finalize_artifacts"].TargetName.Should().Be("ArtifactWorkspaceLifecycleCoordinator");
-        tools["finalize_artifacts"].Description.Should().Contain("FinalizeAsync alone produces the output");
+        tools["finalize_artifacts"].Description.Should()
+            .Contain("approved durable NodeRun atomically commits final files");
         BuiltInToolRegistrations.IsLifecycleCheckpoint("finalize_artifacts").Should().BeTrue();
         var finalizationRegistration = CreateTool(
             "finalize_artifacts",
@@ -63,7 +64,7 @@ public sealed class ToolRegistryUnitTests : ToolRegistryGovernanceTestBase
         var dispatcherExecutor = new RuntimeBuiltInAgentToolExecutor(_ =>
             Task.FromResult<object>(new { mustNotExecute = true }));
         dispatcherExecutor.CanExecute(finalizationRegistration, null!).Should().BeFalse(
-            "the finalization checkpoint is owned only by ArtifactWorkspaceLifecycleCoordinator.FinalizeAsync");
+            "the durable finalization checkpoint must not dispatch through a provider executor");
         var displayNames = tools.Values.Select(tool => tool.DisplayName).ToArray();
         displayNames.Should().NotContain("Finalize artifacts");
         displayNames.Should().NotContain("Generate business chart");

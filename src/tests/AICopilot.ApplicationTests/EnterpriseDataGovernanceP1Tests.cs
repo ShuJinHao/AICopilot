@@ -83,7 +83,7 @@ public sealed class EnterpriseDataGovernanceP1Tests
     }
 
     [Fact]
-    public void ModelEndpointPoolScheduler_ShouldHandleMockLoadAndCircuitStatistics()
+    public void ModelEndpointPoolScheduler_ShouldTrackLocalLoadAndCircuitStatisticsWithoutAuthorizingQuota()
     {
         var scheduler = new InMemoryModelEndpointPoolScheduler(
             Options.Create(new ModelProviderReliabilityOptions
@@ -121,9 +121,8 @@ public sealed class EnterpriseDataGovernanceP1Tests
             .Should()
             .OnlyContain(count => count == 2);
 
-        Action selectOverflow = () => scheduler.SelectEndpoint("TextToSqlPool");
-        selectOverflow.Should().Throw<InvalidOperationException>()
-            .WithMessage("*no healthy endpoint with available concurrency*");
+        scheduler.SelectEndpoint("TextToSqlPool").EndpointId
+            .Should().BeOneOf("mock-a", "mock-b", "mock-c");
 
         scheduler.RecordRateLimited("mock-a");
         scheduler.RecordFailed("mock-a", TimeSpan.FromMilliseconds(120), new TimeoutException());

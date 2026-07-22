@@ -137,12 +137,21 @@ internal sealed class QuotaReservedRuntimeChatAgent(
         ModelCallBudget budget,
         CancellationToken cancellationToken)
     {
-        var poolOptions = reliabilityOptions.EndpointPools.GetValueOrDefault(poolName);
+        var fallbackEndpointId = $"model:{createRequest.Model.Id.Value:D}";
+        var isLanguageModelFallback = string.Equals(
+            endpoint.EndpointId,
+            fallbackEndpointId,
+            StringComparison.OrdinalIgnoreCase);
+        var poolOptions = reliabilityOptions.EndpointPools.GetValueOrDefault(poolName)
+                          ?? (isLanguageModelFallback ? new ModelEndpointPoolOptions() : null);
         var endpointOptions = poolOptions?.Endpoints
             .SingleOrDefault(candidate => string.Equals(
                 candidate.EndpointId,
                 endpoint.EndpointId,
-                StringComparison.OrdinalIgnoreCase));
+                StringComparison.OrdinalIgnoreCase))
+                              ?? (isLanguageModelFallback
+                                  ? new ModelEndpointOptions { EndpointId = fallbackEndpointId }
+                                  : null);
         if (poolOptions is null || endpointOptions is null)
         {
             throw new ModelQuotaReservationDeniedException(
@@ -159,7 +168,7 @@ internal sealed class QuotaReservedRuntimeChatAgent(
             createRequest.Model.Id.Value.ToString("D"),
             endpoint.EndpointId,
             caller?.UserId?.ToString("D") ?? "anonymous"));
-        var timeoutMs = endpointOptions?.TimeoutMs is > 0
+        var timeoutMs = endpointOptions.TimeoutMs is > 0
             ? endpointOptions.TimeoutMs
             : 60_000;
         var outcome = await quotaStore.TryReserveAsync(

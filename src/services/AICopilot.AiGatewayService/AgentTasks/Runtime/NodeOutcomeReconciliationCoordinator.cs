@@ -132,7 +132,7 @@ internal sealed class NodeOutcomeReconciliationCoordinator(
             cancellationToken);
         if (claim is null)
         {
-            return Result.Conflict(new ApiProblemDescriptor(
+            return Result.Failure(new ApiProblemDescriptor(
                 AppProblemCodes.AgentNodeRunFenceStale,
                 "Outcome-unknown node is no longer available for manual reconciliation."));
         }
@@ -238,10 +238,10 @@ internal sealed class NodeOutcomeReconciliationCoordinator(
         return writeResult switch
         {
             AgentFencedWriteResult.Succeeded or AgentFencedWriteResult.Duplicate => Result.Success(),
-            AgentFencedWriteResult.StaleFence => Result.Conflict(new ApiProblemDescriptor(
+            AgentFencedWriteResult.StaleFence => Result.Failure(new ApiProblemDescriptor(
                 AppProblemCodes.AgentNodeRunFenceStale,
                 "Outcome reconciliation decision was fenced by a newer authority.")),
-            _ => Result.Conflict(new ApiProblemDescriptor(
+            _ => Result.Failure(new ApiProblemDescriptor(
                 AppProblemCodes.AgentNodeRunStateConflict,
                 "Outcome reconciliation decision conflicts with the authoritative node state."))
         };

@@ -65,6 +65,23 @@ public sealed class AICopilotArchitectureAnalyzerTests
                 Task WriteAsync(AuditLogWriteRequest request, CancellationToken cancellationToken = default);
                 Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
             }
+            public sealed record ModelQuotaReservationRequest;
+            public sealed record ModelQuotaReservationOutcome;
+            public sealed record ModelQuotaSettlement;
+            public enum ModelQuotaReservationResult { Granted }
+            public interface IModelQuotaReservationStore
+            {
+                Task<ModelQuotaReservationOutcome> TryReserveAsync(
+                    ModelQuotaReservationRequest request,
+                    CancellationToken cancellationToken = default);
+                Task<ModelQuotaReservationResult> SettleAsync(
+                    ModelQuotaSettlement settlement,
+                    CancellationToken cancellationToken = default);
+                Task<int> ReclaimExpiredAsync(
+                    DateTimeOffset nowUtc,
+                    int maxItems,
+                    CancellationToken cancellationToken = default);
+            }
         }
         """);
 
@@ -2511,6 +2528,215 @@ public sealed class AICopilotArchitectureAnalyzerTests
         wrongContextDiagnostics.Should().ContainSingle(diagnostic =>
             diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId &&
             diagnostic.GetMessage().Contains("AuditLogWriter", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AIARCH006_ShouldAllowOnlyTheExactModelQuotaOperationalStore()
+    {
+        var quotaImplementationReference = new FixtureAssemblyReference(
+            "AICopilot.EntityFrameworkCore",
+            """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            namespace AICopilot.EntityFrameworkCore
+            {
+                public sealed class AiGatewayDbContext : Microsoft.EntityFrameworkCore.DbContext { }
+            }
+            namespace AICopilot.EntityFrameworkCore.Transactions
+            {
+                public sealed class AgentExecutionTransactionRunner(
+                    AICopilot.EntityFrameworkCore.AiGatewayDbContext db)
+                {
+                    public Task<TResult> ExecuteAsync<TResult>(Func<TResult> action)
+                    {
+                        _ = db.SaveChanges();
+                        return Task.FromResult(action());
+                    }
+                }
+            }
+            namespace AICopilot.EntityFrameworkCore.Repository
+            {
+                public sealed class PostgresModelQuotaReservationStore(
+                    AICopilot.EntityFrameworkCore.Transactions.AgentExecutionTransactionRunner runner)
+                    : AICopilot.Services.Contracts.IModelQuotaReservationStore
+                {
+                    public Task<AICopilot.Services.Contracts.ModelQuotaReservationOutcome> TryReserveAsync(
+                        AICopilot.Services.Contracts.ModelQuotaReservationRequest request,
+                        CancellationToken cancellationToken = default) =>
+                        runner.ExecuteAsync(() => new AICopilot.Services.Contracts.ModelQuotaReservationOutcome());
+
+                    public Task<AICopilot.Services.Contracts.ModelQuotaReservationResult> SettleAsync(
+                        AICopilot.Services.Contracts.ModelQuotaSettlement settlement,
+                        CancellationToken cancellationToken = default) =>
+                        runner.ExecuteAsync(() => AICopilot.Services.Contracts.ModelQuotaReservationResult.Granted);
+
+                    public Task<int> ReclaimExpiredAsync(
+                        DateTimeOffset nowUtc,
+                        int maxItems,
+                        CancellationToken cancellationToken = default) =>
+                        runner.ExecuteAsync(() => 1);
+
+                    public Task<int> WriteBusinessAsync() => runner.ExecuteAsync(() => 1);
+                }
+            }
+            """);
+        const string valid = """
+            using System.Threading.Tasks;
+            namespace Fixture
+            {
+                public sealed class CloudReadonlyRunner(
+                    AICopilot.Services.Contracts.ICloudAiReadClient client,
+                    AICopilot.Services.Contracts.IModelQuotaReservationStore quota)
+                {
+                    public Task<AICopilot.Services.Contracts.ModelQuotaReservationOutcome> RunAsync()
+                    {
+                        _ = client.Read();
+                        return quota.TryReserveAsync(new AICopilot.Services.Contracts.ModelQuotaReservationRequest());
+                    }
+                }
+            }
+            """;
+        const string invalidImplementationMethod = """
+            using System.Threading.Tasks;
+            namespace Fixture
+            {
+                public sealed class CloudReadonlyRunner(
+                    AICopilot.Services.Contracts.ICloudAiReadClient client,
+                    AICopilot.EntityFrameworkCore.Repository.PostgresModelQuotaReservationStore quota)
+                {
+                    public Task<int> RunAsync()
+                    {
+                        _ = client.Read();
+                        return quota.WriteBusinessAsync();
+                    }
+                }
+            }
+            """;
+        const string rogueImplementation = """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            namespace AICopilot.EntityFrameworkCore.Repository
+            {
+                public sealed class RogueModelQuotaReservationStore
+                    : AICopilot.Services.Contracts.IModelQuotaReservationStore
+                {
+                    public Task<AICopilot.Services.Contracts.ModelQuotaReservationOutcome> TryReserveAsync(
+                        AICopilot.Services.Contracts.ModelQuotaReservationRequest request,
+                        CancellationToken cancellationToken = default) =>
+                        Task.FromResult(new AICopilot.Services.Contracts.ModelQuotaReservationOutcome());
+                    public Task<AICopilot.Services.Contracts.ModelQuotaReservationResult> SettleAsync(
+                        AICopilot.Services.Contracts.ModelQuotaSettlement settlement,
+                        CancellationToken cancellationToken = default) =>
+                        Task.FromResult(AICopilot.Services.Contracts.ModelQuotaReservationResult.Granted);
+                    public Task<int> ReclaimExpiredAsync(
+                        DateTimeOffset nowUtc,
+                        int maxItems,
+                        CancellationToken cancellationToken = default) => Task.FromResult(0);
+                }
+            }
+            """;
+        const string wrongContextForFormalStore = """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            namespace AICopilot.EntityFrameworkCore
+            {
+                public sealed class IdentityDbContext : Microsoft.EntityFrameworkCore.DbContext { }
+            }
+            namespace AICopilot.EntityFrameworkCore.Transactions
+            {
+                public sealed class AgentExecutionTransactionRunner(
+                    AICopilot.EntityFrameworkCore.IdentityDbContext db) { }
+            }
+            namespace AICopilot.EntityFrameworkCore.Repository
+            {
+                public sealed class PostgresModelQuotaReservationStore(
+                    AICopilot.EntityFrameworkCore.Transactions.AgentExecutionTransactionRunner runner)
+                    : AICopilot.Services.Contracts.IModelQuotaReservationStore
+                {
+                    public Task<AICopilot.Services.Contracts.ModelQuotaReservationOutcome> TryReserveAsync(
+                        AICopilot.Services.Contracts.ModelQuotaReservationRequest request,
+                        CancellationToken cancellationToken = default) =>
+                        Task.FromResult(new AICopilot.Services.Contracts.ModelQuotaReservationOutcome());
+                    public Task<AICopilot.Services.Contracts.ModelQuotaReservationResult> SettleAsync(
+                        AICopilot.Services.Contracts.ModelQuotaSettlement settlement,
+                        CancellationToken cancellationToken = default) =>
+                        Task.FromResult(AICopilot.Services.Contracts.ModelQuotaReservationResult.Granted);
+                    public Task<int> ReclaimExpiredAsync(
+                        DateTimeOffset nowUtc,
+                        int maxItems,
+                        CancellationToken cancellationToken = default) => Task.FromResult(0);
+                }
+            }
+            """;
+        const string sameNameFake = """
+            using System.Threading.Tasks;
+            namespace Fixture
+            {
+                public interface IModelQuotaReservationStore { Task<int> TryReserveAsync(); }
+                public sealed class FakeModelQuotaReservationStore(Microsoft.EntityFrameworkCore.DbContext db)
+                    : IModelQuotaReservationStore
+                {
+                    public Task<int> TryReserveAsync()
+                    {
+                        _ = db.SaveChanges();
+                        return Task.FromResult(1);
+                    }
+                }
+                public sealed class CloudReadonlyRunner(
+                    AICopilot.Services.Contracts.ICloudAiReadClient client,
+                    IModelQuotaReservationStore quota)
+                {
+                    public Task<int> RunAsync()
+                    {
+                        _ = client.Read();
+                        return quota.TryReserveAsync();
+                    }
+                }
+            }
+            """;
+
+        var validDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.AiGatewayService",
+            [valid],
+            [ServicesContractsReference]);
+        var crossProjectValidDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.HttpApi",
+            [valid],
+            [EntityFrameworkReference, ServicesContractsReference, quotaImplementationReference]);
+        var invalidImplementationMethodDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.HttpApi",
+            [invalidImplementationMethod],
+            [EntityFrameworkReference, ServicesContractsReference, quotaImplementationReference]);
+        var rogueImplementationDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.EntityFrameworkCore",
+            [rogueImplementation],
+            [EntityFrameworkReference, ServicesContractsReference]);
+        var wrongContextDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.EntityFrameworkCore",
+            [wrongContextForFormalStore],
+            [EntityFrameworkReference, ServicesContractsReference]);
+        var sameNameFakeDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.AiGatewayService",
+            [sameNameFake],
+            [EntityFrameworkReference, ServicesContractsReference]);
+
+        validDiagnostics.Should().NotContain(
+            diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId);
+        crossProjectValidDiagnostics.Should().NotContain(
+            diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId);
+        invalidImplementationMethodDiagnostics.Should().ContainSingle(
+            diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId);
+        rogueImplementationDiagnostics.Should().ContainSingle(diagnostic =>
+            diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId &&
+            diagnostic.GetMessage().Contains("RogueModelQuotaReservationStore", StringComparison.Ordinal));
+        wrongContextDiagnostics.Should().ContainSingle(diagnostic =>
+            diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId &&
+            diagnostic.GetMessage().Contains("PostgresModelQuotaReservationStore", StringComparison.Ordinal));
+        sameNameFakeDiagnostics.Should().ContainSingle(
+            diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId);
     }
 
     [Fact]

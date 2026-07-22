@@ -33,6 +33,7 @@ public class FinalAgentRunExecutor(
         AiUsageDetails? observedUsage = null;
         var grantedToolExecutions = new Dictionary<string, GrantedToolExecution>(StringComparer.Ordinal);
         var suspendForApproval = false;
+        var hasApprovedDecision = false;
         var thinkTagFilter = new StreamingThinkTagFilter();
 
         var isApprovalResumption = agentContext.FunctionApprovalRequestContents.Count != 0
@@ -59,6 +60,7 @@ public class FinalAgentRunExecutor(
 
                 if (decision.IsApproved)
                 {
+                    hasApprovedDecision = true;
                     grantedToolExecutions[requestContent.ToolCall.CallId] = new GrantedToolExecution(
                         toolName,
                         requestContent.ToolCall.Identity);
@@ -82,6 +84,14 @@ public class FinalAgentRunExecutor(
             }
 
             agentContext.ApprovalDecisions.Clear();
+
+            if (!hasApprovedDecision)
+            {
+                const string rejectionText = "已拒绝工具执行。";
+                assistantText.Append(rejectionText);
+                yield return new ChatChunk(ExecutorId, ChunkType.Text, rejectionText);
+                yield break;
+            }
         }
         else
         {

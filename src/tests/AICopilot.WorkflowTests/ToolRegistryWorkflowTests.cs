@@ -193,7 +193,7 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
         var result = await handler.Handle(new RetryAgentTaskCommand(task.Id.Value), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
-        task.Status.Should().Be(AgentTaskStatus.PlanApproved);
+        task.Status.Should().Be(AgentTaskStatus.Queued);
         task.PlanJson.Should().Be(executablePlanJson);
         step.Status.Should().Be(AgentStepStatus.Pending);
         task.RunAttemptCount.Should().Be(0);
@@ -954,12 +954,21 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
         var (task, workspace) = CreateRagApprovedTask(knowledgeBaseId);
         var executionRepository = new InMemoryToolExecutionAuditStore();
         var accessChecker = new RecordingKnowledgeBaseAccessChecker();
+        var workspaceService = new CapturingWorkspaceService(workspace);
         var runtime = CreateRuntime(
             new InMemoryRepository<AgentTask>(task),
             new InMemoryRepository<ArtifactWorkspace>(workspace),
             new InMemoryRepository<ApprovalRequest>(),
             executionRepository,
-            CreateGuard(CreateTool("rag_search", ToolProviderType.BuiltIn)),
+            CreateGuard(
+                CreateTool("rag_search", ToolProviderType.BuiltIn),
+                CreateTool("generate_markdown_report", ToolProviderType.Artifact),
+                CreateTool(
+                    "finalize_artifacts",
+                    ToolProviderType.Artifact,
+                    requiresApproval: true,
+                    riskLevel: AiToolRiskLevel.RequiresApproval)),
+            workspaceService,
             knowledgeBaseAccessCheckers: [accessChecker],
             identityAccessService: new StubIdentityAccessService([], roleName: "Admin"),
             freshReadGate: AgentPlanV2TestData.CreateDownstreamRuntimeHarnessFreshReadGate());
@@ -967,10 +976,11 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
         var result = await runtime.RunAsync(task, CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
-        task.Status.Should().Be(AgentTaskStatus.WaitingFinalApproval);
+        task.Status.Should().Be(AgentTaskStatus.WaitingFinalApproval, task.FinalSummary);
         accessChecker.ObservedUserId.Should().Be(UserId);
         accessChecker.ObservedIsAdmin.Should().BeTrue();
-        executionRepository.Items.Should().ContainSingle().Which.Status.Should().Be(ToolExecutionStatus.Succeeded);
+        executionRepository.Items.Should().ContainSingle(item => item.ToolCode == "rag_search")
+            .Which.Status.Should().Be(ToolExecutionStatus.Succeeded);
     }
     [Fact]
     public async Task GetSessionTimeline_ShouldExposeRagStepSummaryWithoutRawOutput()

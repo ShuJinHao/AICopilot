@@ -51,7 +51,7 @@ internal sealed class AgentNodeRunStore(
                     token);
                 var attempt = await context.AgentTaskRunAttempts
                     .FromSqlInterpolated($$"""
-                        SELECT * FROM aigateway.agent_task_run_attempts
+                        SELECT attempt.*, attempt.xmin FROM aigateway.agent_task_run_attempts AS attempt
                         WHERE id = {{claim.RunAttempt.Id.Value}}
                           AND task_id = {{claim.Task.Id.Value}}
                           AND task_fencing_token = {{claim.TaskFencingToken}}
@@ -189,7 +189,7 @@ internal sealed class AgentNodeRunStore(
 
                 var node = await context.AgentNodeRuns
                     .FromSqlInterpolated($$"""
-                        SELECT * FROM aigateway.agent_node_runs
+                        SELECT node.*, node.xmin FROM aigateway.agent_node_runs AS node
                         WHERE id = {{nodeRunId.Value}}
                           AND run_attempt_id = {{runAttemptId.Value}}
                           AND status = 'WaitingApproval'

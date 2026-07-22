@@ -8,7 +8,6 @@ using Microsoft.EntityFrameworkCore;
 namespace AICopilot.EntityFrameworkCore.Repository;
 
 internal sealed class AgentDurableTaskClaimStore(
-    AiGatewayDbContext dbContext,
     AgentExecutionTransactionRunner transactionRunner)
     : IAgentDurableTaskClaimStore
 {
@@ -30,7 +29,7 @@ internal sealed class AgentDurableTaskClaimStore(
                 var now = DateTimeOffset.UtcNow;
                 var queueItem = await context.AgentTaskRunQueueItems
                     .FromSqlInterpolated($$"""
-                        SELECT q.*
+                        SELECT q.*, q.xmin
                         FROM aigateway.agent_task_run_queue_items AS q
                         INNER JOIN aigateway.agent_tasks AS t ON t.id = q.task_id
                         WHERE q.status IN ('Queued', 'Claimed')
@@ -49,8 +48,8 @@ internal sealed class AgentDurableTaskClaimStore(
 
                 var task = await context.AgentTasks
                     .FromSqlInterpolated($$"""
-                        SELECT *
-                        FROM aigateway.agent_tasks
+                        SELECT task.*, task.xmin
+                        FROM aigateway.agent_tasks AS task
                         WHERE id = {{queueItem.TaskId.Value}}
                         FOR UPDATE
                         """)
@@ -69,8 +68,8 @@ internal sealed class AgentDurableTaskClaimStore(
                 {
                     attempt = await context.AgentTaskRunAttempts
                         .FromSqlInterpolated($$"""
-                            SELECT *
-                            FROM aigateway.agent_task_run_attempts
+                            SELECT attempt.*, attempt.xmin
+                            FROM aigateway.agent_task_run_attempts AS attempt
                             WHERE id = {{task.ActiveRunAttemptId.Value.Value}}
                             FOR UPDATE
                             """)
@@ -146,8 +145,8 @@ internal sealed class AgentDurableTaskClaimStore(
             {
                 var queueItem = await context.AgentTaskRunQueueItems
                     .FromSqlInterpolated($$"""
-                        SELECT *
-                        FROM aigateway.agent_task_run_queue_items
+                        SELECT queue_item.*, queue_item.xmin
+                        FROM aigateway.agent_task_run_queue_items AS queue_item
                         WHERE id = {{claim.QueueItem.Id.Value}}
                           AND run_attempt_id = {{claim.RunAttempt.Id.Value}}
                           AND task_fencing_token = {{claim.TaskFencingToken}}
@@ -212,8 +211,8 @@ internal sealed class AgentDurableTaskClaimStore(
             {
                 var task = await context.AgentTasks
                     .FromSqlInterpolated($$"""
-                        SELECT *
-                        FROM aigateway.agent_tasks
+                        SELECT task.*, task.xmin
+                        FROM aigateway.agent_tasks AS task
                         WHERE id = {{claim.Task.Id.Value}}
                           AND run_fencing_token = {{claim.TaskFencingToken}}
                           AND (active_run_attempt_id = {{claim.RunAttempt.Id.Value}} OR active_run_attempt_id IS NULL)
@@ -229,8 +228,8 @@ internal sealed class AgentDurableTaskClaimStore(
 
                 var queueItem = await context.AgentTaskRunQueueItems
                     .FromSqlInterpolated($$"""
-                        SELECT *
-                        FROM aigateway.agent_task_run_queue_items
+                        SELECT queue_item.*, queue_item.xmin
+                        FROM aigateway.agent_task_run_queue_items AS queue_item
                         WHERE id = {{claim.QueueItem.Id.Value}}
                           AND run_attempt_id = {{claim.RunAttempt.Id.Value}}
                           AND task_fencing_token = {{claim.TaskFencingToken}}
@@ -246,8 +245,8 @@ internal sealed class AgentDurableTaskClaimStore(
 
                 var attempt = await context.AgentTaskRunAttempts
                     .FromSqlInterpolated($$"""
-                        SELECT *
-                        FROM aigateway.agent_task_run_attempts
+                        SELECT attempt.*, attempt.xmin
+                        FROM aigateway.agent_task_run_attempts AS attempt
                         WHERE id = {{claim.RunAttempt.Id.Value}}
                           AND task_id = {{claim.Task.Id.Value}}
                           AND task_fencing_token = {{claim.TaskFencingToken}}
@@ -317,8 +316,8 @@ internal sealed class AgentDurableTaskClaimStore(
             {
                 var expired = await context.AgentTaskRunQueueItems
                     .FromSqlInterpolated($$"""
-                        SELECT *
-                        FROM aigateway.agent_task_run_queue_items
+                        SELECT queue_item.*, queue_item.xmin
+                        FROM aigateway.agent_task_run_queue_items AS queue_item
                         WHERE status = 'Started'
                           AND lease_expires_at IS NOT NULL
                           AND lease_expires_at <= {{nowUtc}}
@@ -338,7 +337,7 @@ internal sealed class AgentDurableTaskClaimStore(
 
                     var attempt = await context.AgentTaskRunAttempts
                         .FromSqlInterpolated($$"""
-                            SELECT * FROM aigateway.agent_task_run_attempts
+                            SELECT attempt.*, attempt.xmin FROM aigateway.agent_task_run_attempts AS attempt
                             WHERE id = {{queueItem.RunAttemptId.Value.Value}}
                               AND task_fencing_token = {{queueItem.TaskFencingToken}}
                             FOR UPDATE
@@ -353,7 +352,7 @@ internal sealed class AgentDurableTaskClaimStore(
                     {
                         var terminalTask = await context.AgentTasks
                             .FromSqlInterpolated($$"""
-                                SELECT * FROM aigateway.agent_tasks
+                                SELECT task.*, task.xmin FROM aigateway.agent_tasks AS task
                                 WHERE id = {{queueItem.TaskId.Value}}
                                   AND run_fencing_token = {{queueItem.TaskFencingToken}}
                                 FOR UPDATE
@@ -476,7 +475,7 @@ internal sealed class AgentDurableTaskClaimStore(
                     {
                         var task = await context.AgentTasks
                             .FromSqlInterpolated($$"""
-                                SELECT * FROM aigateway.agent_tasks
+                                SELECT task.*, task.xmin FROM aigateway.agent_tasks AS task
                                 WHERE id = {{queueItem.TaskId.Value}}
                                   AND active_run_attempt_id = {{queueItem.RunAttemptId.Value.Value}}
                                   AND run_fencing_token = {{queueItem.TaskFencingToken}}

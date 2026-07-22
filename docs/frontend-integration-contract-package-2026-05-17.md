@@ -42,6 +42,8 @@ For `agent_plan_invalid`, `agent_plan_schema_invalid`, and `plan_payload_too_lar
 | `model_request_timeout` | Model provider did not return a response before the configured response timeout. |
 | `approval_stream_failed` | Approval stream failed. |
 | `approval_already_processed` | Approval was already processed. |
+| `agent_approval_state_conflict` | Agent approval state no longer matches the durable task checkpoint; refresh the task before retrying. |
+| `agent_approval_rejected` | Agent approval was explicitly rejected; do not continue the rejected operation automatically. |
 | `approval_pending` | Approval is pending. |
 | `capability_not_allowed` | Requested capability is not allowed. |
 | `control_action_blocked` | Control or write action was blocked. |
@@ -79,8 +81,13 @@ For `agent_plan_invalid`, `agent_plan_schema_invalid`, and `plan_payload_too_lar
 | `agent_task_run_queued` | Agent task run was queued. |
 | `agent_task_run_queue_not_found` | Agent task run queue item was not found. |
 | `agent_task_run_queue_lease_expired` | Agent task run queue lease expired. |
+| `agent_task_run_fence_stale` | Agent task run fencing token is stale; the worker must stop writing and reload durable state. |
+| `agent_node_run_fence_stale` | Agent node run fencing token is stale; the node execution must stop writing and be reconciled. |
+| `agent_node_run_state_conflict` | Durable Agent node state conflicts with the requested transition; refresh or reconcile before continuing. |
+| `agent_run_budget_exceeded` | The sealed Agent run budget was exceeded; execution stopped without expanding the approved budget. |
 | `agent_worker_unavailable` | Agent worker is unavailable. |
 | `agent_worker_workspace_mismatch` | Agent worker workspace does not match HttpApi workspace. |
+| `agent_finalization_state_conflict` | Final artifact approval or durable finalization state is inconsistent; refresh the task and do not publish automatically. |
 | `agent_run_queue_dead_letter_not_allowed` | Agent run queue dead-letter operation is not allowed. |
 | `agent_run_queue_operation_denied` | Agent run queue operation is denied. |
 

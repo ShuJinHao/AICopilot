@@ -333,15 +333,19 @@ public sealed class AgentPlanContractV2Tests
     }
 
     [Fact]
-    public void SealExecutable_ShouldFailClosedUntilTrustedP2CompilerExists()
+    public void SealExecutable_ShouldPromoteAuthoritativeGapFreeDraft()
     {
         var result = new AgentPlanDraftContractAuthority(
                 new IntentResultToCandidateAdapter(),
                 new AgentPlanCanonicalizer())
             .SealExecutable(CreatePlan());
 
-        ProblemCode(result).Should().Be(AppProblemCodes.AgentPlanInvalid);
-        ProblemDetail(result).Should().Contain("PlanCompiler");
+        result.IsSuccess.Should().BeTrue(FailureSummary(result));
+        result.Value!.Document.PlanKind.Should().Be(AgentTaskPlanKinds.ExecutablePlan);
+        result.Value.Document.IsExecutable.Should().BeTrue();
+        result.Value.Document.PlanVersion.Should().Be(2);
+        new AgentPlanCanonicalizer().ValidatePersisted(result.Value.CanonicalJson)
+            .IsSuccess.Should().BeTrue();
     }
 
     [Theory]
@@ -1113,7 +1117,7 @@ public sealed class AgentPlanContractV2Tests
             PlanKind: AgentTaskPlanKinds.PlanDraft,
             IsExecutable: false,
             LifecycleSealPadding: "0000",
-            CapabilityGaps: [AgentPlanCapabilityGapCodes.PlanCompilerUnavailable],
+            CapabilityGaps: [],
             SchemaVersion: AgentPlanContractVersions.PlanV2,
             PlanId: PlanId,
             PlanVersion: 1,

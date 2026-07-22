@@ -30,8 +30,8 @@ internal sealed class AgentNodeRunClaimStore(
             {
                 var task = await context.AgentTasks
                     .FromSqlInterpolated($$"""
-                        SELECT *
-                        FROM aigateway.agent_tasks
+                        SELECT task.*, task.xmin
+                        FROM aigateway.agent_tasks AS task
                         WHERE active_run_attempt_id = {{runAttemptId.Value}}
                           AND run_fencing_token = {{taskFencingToken}}
                           AND run_lease_id IS NOT NULL
@@ -48,8 +48,8 @@ internal sealed class AgentNodeRunClaimStore(
 
                 var attempt = await context.AgentTaskRunAttempts
                     .FromSqlInterpolated($$"""
-                        SELECT *
-                        FROM aigateway.agent_task_run_attempts
+                        SELECT attempt.*, attempt.xmin
+                        FROM aigateway.agent_task_run_attempts AS attempt
                         WHERE id = {{runAttemptId.Value}}
                           AND task_id = {{task.Id.Value}}
                           AND task_fencing_token = {{taskFencingToken}}
@@ -80,8 +80,8 @@ internal sealed class AgentNodeRunClaimStore(
 
                 var node = await context.AgentNodeRuns
                     .FromSqlInterpolated($$"""
-                        SELECT *
-                        FROM aigateway.agent_node_runs
+                        SELECT node.*, node.xmin
+                        FROM aigateway.agent_node_runs AS node
                         WHERE run_attempt_id = {{runAttemptId.Value}}
                           AND queue_item_id = {{queueItem.Id.Value}}
                           AND task_fencing_token = {{taskFencingToken}}
@@ -178,7 +178,7 @@ internal sealed class AgentNodeRunClaimStore(
             {
                 var task = await context.AgentTasks
                     .FromSqlInterpolated($$"""
-                        SELECT * FROM aigateway.agent_tasks
+                        SELECT task.*, task.xmin FROM aigateway.agent_tasks AS task
                         WHERE id = {{claim.NodeRun.TaskId.Value}}
                           AND active_run_attempt_id = {{claim.RunAttemptId.Value}}
                           AND run_fencing_token = {{claim.TaskFencingToken}}
@@ -188,7 +188,7 @@ internal sealed class AgentNodeRunClaimStore(
                     .SingleOrDefaultAsync(token);
                 var attempt = await context.AgentTaskRunAttempts
                     .FromSqlInterpolated($$"""
-                        SELECT * FROM aigateway.agent_task_run_attempts
+                        SELECT attempt.*, attempt.xmin FROM aigateway.agent_task_run_attempts AS attempt
                         WHERE id = {{claim.RunAttemptId.Value}}
                           AND task_fencing_token = {{claim.TaskFencingToken}}
                           AND lease_id = {{claim.TaskLeaseId}}
@@ -197,7 +197,7 @@ internal sealed class AgentNodeRunClaimStore(
                     .SingleOrDefaultAsync(token);
                 var queueItem = await context.AgentTaskRunQueueItems
                     .FromSqlInterpolated($$"""
-                        SELECT * FROM aigateway.agent_task_run_queue_items
+                        SELECT queue_item.*, queue_item.xmin FROM aigateway.agent_task_run_queue_items AS queue_item
                         WHERE id = {{claim.QueueItemId.Value}}
                           AND run_attempt_id = {{claim.RunAttemptId.Value}}
                           AND task_fencing_token = {{claim.TaskFencingToken}}
@@ -256,7 +256,7 @@ internal sealed class AgentNodeRunClaimStore(
     {
         return context.AgentNodeRuns
             .FromSqlInterpolated($$"""
-                SELECT * FROM aigateway.agent_node_runs
+                SELECT node.*, node.xmin FROM aigateway.agent_node_runs AS node
                 WHERE id = {{claim.NodeRun.Id.Value}}
                   AND run_attempt_id = {{claim.RunAttemptId.Value}}
                   AND task_fencing_token = {{claim.TaskFencingToken}}

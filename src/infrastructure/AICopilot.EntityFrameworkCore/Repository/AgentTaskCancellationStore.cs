@@ -27,7 +27,7 @@ internal sealed class AgentTaskCancellationStore(
             {
                 var task = await context.AgentTasks
                     .FromSqlInterpolated($$"""
-                        SELECT * FROM aigateway.agent_tasks
+                        SELECT task.*, task.xmin FROM aigateway.agent_tasks AS task
                         WHERE id = {{taskId.Value}}
                         FOR UPDATE
                         """)
@@ -42,7 +42,7 @@ internal sealed class AgentTaskCancellationStore(
 
                 var queues = await context.AgentTaskRunQueueItems
                     .FromSqlInterpolated($$"""
-                        SELECT * FROM aigateway.agent_task_run_queue_items
+                        SELECT queue_item.*, queue_item.xmin FROM aigateway.agent_task_run_queue_items AS queue_item
                         WHERE task_id = {{taskId.Value}}
                           AND status IN ('Queued', 'Claimed', 'Started')
                         ORDER BY created_at, id
@@ -62,7 +62,7 @@ internal sealed class AgentTaskCancellationStore(
 
                 var steps = await context.Set<AgentStep>()
                     .FromSqlInterpolated($$"""
-                        SELECT * FROM aigateway.agent_steps
+                        SELECT step.*, step.xmin FROM aigateway.agent_steps AS step
                         WHERE task_id = {{taskId.Value}}
                         ORDER BY step_index
                         FOR UPDATE
@@ -70,7 +70,7 @@ internal sealed class AgentTaskCancellationStore(
                     .ToListAsync(token);
                 var pendingApprovals = await context.ApprovalRequests
                     .FromSqlInterpolated($$"""
-                        SELECT * FROM aigateway.approval_requests
+                        SELECT approval.*, approval.xmin FROM aigateway.approval_requests AS approval
                         WHERE task_id = {{taskId.Value}}
                           AND status = 'Pending'
                         ORDER BY created_at, id
@@ -83,7 +83,7 @@ internal sealed class AgentTaskCancellationStore(
                 {
                     attempt = await context.AgentTaskRunAttempts
                         .FromSqlInterpolated($$"""
-                            SELECT * FROM aigateway.agent_task_run_attempts
+                            SELECT attempt.*, attempt.xmin FROM aigateway.agent_task_run_attempts AS attempt
                             WHERE id = {{task.ActiveRunAttemptId.Value.Value}}
                               AND task_id = {{taskId.Value}}
                             FOR UPDATE
@@ -99,7 +99,7 @@ internal sealed class AgentTaskCancellationStore(
 
                     nodes = await context.AgentNodeRuns
                         .FromSqlInterpolated($$"""
-                            SELECT * FROM aigateway.agent_node_runs
+                            SELECT node.*, node.xmin FROM aigateway.agent_node_runs AS node
                             WHERE run_attempt_id = {{attempt.Id.Value}}
                             ORDER BY created_at, node_id, id
                             FOR UPDATE

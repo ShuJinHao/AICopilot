@@ -198,7 +198,8 @@ internal sealed class PostgresModelQuotaReservationStore(
             {
                 var reservation = await context.ModelQuotaReservations
                     .FromSqlInterpolated($$"""
-                        SELECT * FROM aigateway.model_quota_reservations
+                        SELECT reservation.*, reservation.xmin
+                        FROM aigateway.model_quota_reservations AS reservation
                         WHERE id = {{settlement.Lease.ReservationId.Value}}
                         FOR UPDATE
                         """)
@@ -258,7 +259,8 @@ internal sealed class PostgresModelQuotaReservationStore(
             {
                 var expired = await context.ModelQuotaReservations
                     .FromSqlInterpolated($$"""
-                        SELECT * FROM aigateway.model_quota_reservations
+                        SELECT reservation.*, reservation.xmin
+                        FROM aigateway.model_quota_reservations AS reservation
                         WHERE status IN ('Active', 'ReconciliationRequired')
                           AND expires_at_utc <= {{nowUtc}}
                         ORDER BY expires_at_utc, id

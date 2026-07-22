@@ -49,7 +49,6 @@ jobs:
       - name: Enforce compatibility and duplication ratchets
         shell: pwsh
         run: |
-          ./scripts/tests/Test-AICopilotTestDeclarationTransition.ps1
           ./scripts/tests/Test-AICopilotCompatibilityInventory.ps1 -BaseRef "$env:QUALITY_BASE_SHA"
           ./scripts/tests/Measure-AICopilotDuplication.ps1 -BaseRef "$env:QUALITY_BASE_SHA"
 

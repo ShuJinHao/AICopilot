@@ -3,13 +3,14 @@ using AICopilot.Core.AiGateway.Aggregates.Artifacts;
 using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.AiGateway.Specifications.Artifacts;
 using AICopilot.Core.AiGateway.Runtime.AgentExecution;
+using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
 
 namespace AICopilot.AiGatewayService.Workspaces;
 
-public sealed class AgentArtifactWorkspaceService(
+internal sealed class AgentArtifactWorkspaceService(
     IRepository<ArtifactWorkspace> workspaceRepository,
     IArtifactWorkspaceFileStore fileStore,
     IArtifactWorkspaceFileSetStore fileSetStore,

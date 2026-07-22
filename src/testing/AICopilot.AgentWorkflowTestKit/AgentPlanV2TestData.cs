@@ -118,11 +118,18 @@ public static class AgentPlanV2TestData
     public static string CreateRag(Guid knowledgeBaseId, bool executable = false)
     {
         return Create(
-            [new AgentPlanV2TestStep(
-                "Search RAG",
-                "Search admin-visible knowledge base.",
-                AgentStepType.RagSearch,
-                "rag_search")],
+            [
+                new AgentPlanV2TestStep(
+                    "Search RAG",
+                    "Search admin-visible knowledge base.",
+                    AgentStepType.RagSearch,
+                    "rag_search"),
+                new AgentPlanV2TestStep(
+                    "Generate Markdown",
+                    "Generate a governed summary of the retrieved knowledge.",
+                    AgentStepType.ArtifactGeneration,
+                    "generate_markdown_report")
+            ],
             executable,
             AgentTaskType.DataAnalysis,
             skillCode: null,

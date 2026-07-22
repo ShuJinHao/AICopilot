@@ -33,6 +33,17 @@ internal sealed record CanonicalAgentPlan(
 
 internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
 {
+    private static readonly string[] DevelopmentSimulationToolSequence =
+    [
+        "query_business_database_readonly",
+        "summarize_business_query_result",
+        "generate_markdown_report",
+        "finalize_artifacts"
+    ];
+
+    private static readonly string[] DevelopmentSimulationCapabilitySequence =
+        ["Analysis.GovernedQuery", "General.Chat"];
+
     private static readonly IReadOnlySet<string> FrozenCoreToolCodes = new HashSet<string>(
         [
             "read_uploaded_file",
@@ -385,9 +396,6 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             return InvalidResult("capabilityGaps must contain only frozen server-owned gap codes.");
         }
 
-        var hasCompilerGap = plan.CapabilityGaps.Contains(
-            AgentPlanCapabilityGapCodes.PlanCompilerUnavailable,
-            StringComparer.Ordinal);
         var hasExactSimulationSourceBoundary =
             plan.DataSourceIds.Count == 1 &&
             plan.DataSourceSummaries.Count == 1 &&
@@ -420,23 +428,31 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
                 StringComparer.Ordinal) &&
             plan.Nodes.Count == DevelopmentSimulationToolSequence.Length &&
             plan.CapabilityGaps.Count == 0;
-        if (validDraftLifecycle && !isDevelopmentSimulationGraph &&
-            (!hasCompilerGap || plan.Nodes.Count != 0))
+        var hasUnresolvedCapabilityGaps = plan.CapabilityGaps.Count != 0;
+        if (validDraftLifecycle && hasUnresolvedCapabilityGaps && plan.Nodes.Count != 0)
         {
             return InvalidResult(
-                "A non-simulation P0 PlanDraft must remain node-free and disclose plan_compiler_unavailable.");
+                "A PlanDraft with unresolved capability gaps must remain node-free.");
         }
 
-        if (validDraftLifecycle && isDevelopmentSimulationGraph && plan.CapabilityGaps.Count != 0)
+        if (validDraftLifecycle && !hasUnresolvedCapabilityGaps && plan.Nodes.Count == 0)
         {
             return InvalidResult(
-                "A compiled Development Simulation PlanDraft cannot retain unresolved capability gaps.");
+                "A gap-free PlanDraft must contain the authoritative LinearV1 compiler graph.");
         }
 
-        if (validExecutableLifecycle && !isDevelopmentSimulationGraph)
+        if (plan.PlannerSafetySummary.IsSimulationOnly &&
+            !hasUnresolvedCapabilityGaps &&
+            !isDevelopmentSimulationGraph)
         {
             return InvalidResult(
-                "ExecutablePlan v2 remains fail-closed except for an explicitly marked Development Simulation graph.");
+                "A gap-free Development Simulation plan must match the fixed governed four-step graph.");
+        }
+
+        if (validExecutableLifecycle && (hasUnresolvedCapabilityGaps || plan.Nodes.Count == 0))
+        {
+            return InvalidResult(
+                "ExecutablePlan v2 requires a gap-free authoritative LinearV1 compiler graph.");
         }
 
         if (plan.QueryMode is not ("CloudReadonly" or "TextToSql") ||
@@ -709,7 +725,8 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             plan.Nodes,
             plan.Steps,
             plan.RequestedCapabilityCodes,
-            plan.IntentCandidates);
+            plan.IntentCandidates,
+            plan.Budgets);
         if (!nodesResult.IsSuccess)
         {
             return nodesResult;
@@ -1089,7 +1106,8 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
         IReadOnlyCollection<AgentPlanNodeDocument> nodes,
         IReadOnlyCollection<AgentTaskPlanStepDocument> steps,
         IReadOnlyCollection<string> topLevelCapabilities,
-        IReadOnlyCollection<AgentIntentCandidateDocument> candidates)
+        IReadOnlyCollection<AgentIntentCandidateDocument> candidates,
+        AgentPlanBudgetDocument planBudgets)
     {
         var orderedNodes = nodes.ToArray();
         var orderedSteps = steps.ToArray();
@@ -1161,7 +1179,7 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
                 node.Budget.MaxOutputTokens < 0 ||
                 node.Budget.MaxRows < 0 ||
                 node.Budget.MaxCostAmount < 0 ||
-                node.Budget.MaxCostAmount > plan.Budgets.MaxCostAmount ||
+                node.Budget.MaxCostAmount > planBudgets.MaxCostAmount ||
                 node.Budget.MaxArtifactCount < 0 ||
                 node.Budget.MaxArtifactBytes < 0 ||
                 string.IsNullOrWhiteSpace(node.ApprovalPolicy.PolicyCode) ||
@@ -1292,14 +1310,14 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             }
         }
 
-        if (totalToolCalls > plan.Budgets.MaxToolCalls ||
-            totalModelCalls > plan.Budgets.MaxModelCalls ||
-            totalInputTokens > plan.Budgets.MaxInputTokens ||
-            totalOutputTokens > plan.Budgets.MaxOutputTokens ||
-            totalRetries > plan.Budgets.MaxRetries ||
-            totalArtifactCount > plan.Budgets.MaxArtifactCount ||
-            totalArtifactBytes > plan.Budgets.MaxArtifactBytes ||
-            totalCostAmount > plan.Budgets.MaxCostAmount)
+        if (totalToolCalls > planBudgets.MaxToolCalls ||
+            totalModelCalls > planBudgets.MaxModelCalls ||
+            totalInputTokens > planBudgets.MaxInputTokens ||
+            totalOutputTokens > planBudgets.MaxOutputTokens ||
+            totalRetries > planBudgets.MaxRetries ||
+            totalArtifactCount > planBudgets.MaxArtifactCount ||
+            totalArtifactBytes > planBudgets.MaxArtifactBytes ||
+            totalCostAmount > planBudgets.MaxCostAmount)
         {
             return InvalidResult("Node upper-bound budgets exceed the immutable task budget.");
         }

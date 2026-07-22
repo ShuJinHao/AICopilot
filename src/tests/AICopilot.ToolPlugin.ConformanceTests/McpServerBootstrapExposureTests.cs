@@ -81,7 +81,7 @@ public sealed class McpServerBootstrapExposureTests
     }
 
     [Fact]
-    public async Task StartAsync_ShouldOnlyRegisterEnabledAllowlistedAdvisoryServers()
+    public async Task StartAsync_ShouldOnlyExposeEnabledAllowlistedAdvisoryServers_AndFailClosedOnMissingOutputSchema()
     {
         var exposedServer = new McpServerInfo(
             "advisory-mcp",
@@ -234,12 +234,12 @@ public sealed class McpServerBootstrapExposureTests
                 loader.GetPlugin(excludedPlugin).Should().BeNull();
             }
             loader.GetPlugin("advisory-mcp")!.GetTools()!.Should().HaveCount(1);
-            toolRepository.Items.Should().ContainSingle(registration =>
-                registration.TargetName == "advisory-mcp" &&
-                registration.ToolCode == AiToolIdentity.CreateRuntimeName(
-                    AiToolTargetType.McpServer,
-                    "advisory-mcp",
-                    "QueryDeviceLogs"));
+            var discoveredTools = await ((McpClient)clients.Single()).ListToolsAsync(
+                cancellationToken: CancellationToken.None);
+            var discoveredDeviceLogs = discoveredTools.Single(tool => tool.Name == "queryDeviceLogs");
+            discoveredDeviceLogs.ReturnJsonSchema.Should().BeNull();
+            toolRepository.Items.Should().BeEmpty(
+                "MCP discovery without a closed output schema must not create an executable registry contract");
         }
         finally
         {

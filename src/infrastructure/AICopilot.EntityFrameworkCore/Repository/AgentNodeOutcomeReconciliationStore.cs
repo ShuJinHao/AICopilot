@@ -32,8 +32,8 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
             {
                 var node = await context.AgentNodeRuns
                     .FromSqlInterpolated($$"""
-                        SELECT *
-                        FROM aigateway.agent_node_runs
+                        SELECT node.*, node.xmin
+                        FROM aigateway.agent_node_runs AS node
                         WHERE status = 'OutcomeUnknown'
                           AND next_attempt_at <= {{nowUtc}}
                           AND (reconciliation_lease_expires_at IS NULL OR reconciliation_lease_expires_at <= {{nowUtc}})
@@ -71,8 +71,8 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
             {
                 var node = await context.AgentNodeRuns
                     .FromSqlInterpolated($$"""
-                        SELECT *
-                        FROM aigateway.agent_node_runs
+                        SELECT node.*, node.xmin
+                        FROM aigateway.agent_node_runs AS node
                         WHERE id = {{nodeRunId.Value}}
                           AND status = 'OutcomeUnknown'
                           AND (reconciliation_lease_expires_at IS NULL OR reconciliation_lease_expires_at <= {{nowUtc}})
@@ -118,7 +118,7 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
         AgentOutcomeReconciliationSuccessCheckpoint checkpoint,
         CancellationToken cancellationToken = default)
     {
-        return transactionRunner.ExecuteAsync(
+        return transactionRunner.ExecuteAsync<AgentFencedWriteResult>(
             "Agent.NodeOutcomeReconciliationSucceeded",
             async (context, token) =>
             {
@@ -153,8 +153,8 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
                 }
 
                 if (!TrySettleBudget(
-                        locked.Value.Attempt,
-                        locked.Value.Node,
+                        locked.Attempt,
+                        locked.Node,
                         checkpoint.Usage,
                         checkpoint.DecidedAtUtc,
                         conservativelyConsumed: false))
@@ -184,10 +184,10 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
                     checkpoint.ProviderReceiptHash,
                     checkpoint.DecisionDigest,
                     checkpoint.DecidedAtUtc));
-                var cancellationRequested = locked.Value.Node.ReconciliationPolicy?.StartsWith(
+                var cancellationRequested = locked.Node.ReconciliationPolicy?.StartsWith(
                     "cancellation-",
                     StringComparison.Ordinal) == true;
-                locked.Value.Node.CompleteReconciledCheckpoint(
+                locked.Node.CompleteReconciledCheckpoint(
                     checkpoint.Claim.TaskFencingToken,
                     checkpoint.Claim.NodeFencingToken,
                     checkpoint.Claim.ReconciliationFencingToken,
@@ -203,7 +203,7 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
                 {
                     await CancelWorkflowAfterReconciledSuccessAsync(
                         context,
-                        locked.Value,
+                        locked,
                         checkpoint.DecidedAtUtc,
                         token);
                     return Attempt(AgentFencedWriteResult.Succeeded);
@@ -214,7 +214,7 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
                     checkpoint.Claim.RunAttemptId,
                     checkpoint.DecidedAtUtc,
                     token);
-                ResumeWorkflow(locked.Value, checkpoint.DecidedAtUtc);
+                ResumeWorkflow(locked, checkpoint.DecidedAtUtc);
                 return Attempt(AgentFencedWriteResult.Succeeded);
             },
             cancellationToken);
@@ -224,7 +224,7 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
         AgentOutcomeReconciliationNegativeDecision decision,
         CancellationToken cancellationToken = default)
     {
-        return transactionRunner.ExecuteAsync(
+        return transactionRunner.ExecuteAsync<AgentFencedWriteResult>(
             "Agent.NodeOutcomeReconciliationNegative",
             async (context, token) =>
             {
@@ -257,8 +257,8 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
                 }
 
                 if (!TrySettleBudget(
-                        locked.Value.Attempt,
-                        locked.Value.Node,
+                        locked.Attempt,
+                        locked.Node,
                         usage: null,
                         nowUtc: decision.DecidedAtUtc,
                         conservativelyConsumed: true))
@@ -285,7 +285,7 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
                 if (decision.Resolution is AgentOutcomeReconciliationResolution.ConfirmedCancelled
                     or AgentOutcomeReconciliationResolution.ManualAbandonedAsCancelled)
                 {
-                    locked.Value.Node.ResolveReconciledCancelled(
+                    locked.Node.ResolveReconciledCancelled(
                         decision.Claim.TaskFencingToken,
                         decision.Claim.NodeFencingToken,
                         decision.Claim.ReconciliationFencingToken,
@@ -294,13 +294,13 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
                         decision.DecisionDigest,
                         decision.SafeMessage,
                         decision.DecidedAtUtc);
-                    locked.Value.Queue.Cancel(decision.DecidedAtUtc, decision.SafeMessage);
-                    locked.Value.Attempt.Cancel(decision.DecidedAtUtc, decision.SafeMessage);
-                    locked.Value.Task.Cancel(decision.DecidedAtUtc);
+                    locked.Queue.Cancel(decision.DecidedAtUtc, decision.SafeMessage);
+                    locked.Attempt.Cancel(decision.DecidedAtUtc, decision.SafeMessage);
+                    locked.Task.Cancel(decision.DecidedAtUtc);
                     return Attempt(AgentFencedWriteResult.Succeeded);
                 }
 
-                locked.Value.Node.ResolveReconciledNotOccurred(
+                locked.Node.ResolveReconciledNotOccurred(
                     decision.Claim.TaskFencingToken,
                     decision.Claim.NodeFencingToken,
                     decision.Claim.ReconciliationFencingToken,
@@ -313,14 +313,14 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
                     decision.RetryAtUtc);
                 if (decision.AllowNodeRetry)
                 {
-                    ResumeWorkflow(locked.Value, decision.DecidedAtUtc);
+                    ResumeWorkflow(locked, decision.DecidedAtUtc);
                 }
                 else
                 {
-                    locked.Value.Queue.MarkFailed(decision.ReasonCode, decision.SafeMessage, decision.DecidedAtUtc);
-                    locked.Value.Attempt.MarkFailed(decision.ReasonCode, decision.SafeMessage, decision.DecidedAtUtc);
-                    locked.Value.Task.Fail(decision.SafeMessage, decision.DecidedAtUtc);
-                    locked.Value.Task.ReleaseRunLease(decision.DecidedAtUtc, clearActiveAttempt: true);
+                    locked.Queue.MarkFailed(decision.ReasonCode, decision.SafeMessage, decision.DecidedAtUtc);
+                    locked.Attempt.MarkFailed(decision.ReasonCode, decision.SafeMessage, decision.DecidedAtUtc);
+                    locked.Task.Fail(decision.SafeMessage, decision.DecidedAtUtc);
+                    locked.Task.ReleaseRunLease(decision.DecidedAtUtc, clearActiveAttempt: true);
                 }
 
                 return Attempt(AgentFencedWriteResult.Succeeded);
@@ -332,7 +332,7 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
         AgentOutcomeReconciliationDeferral deferral,
         CancellationToken cancellationToken = default)
     {
-        return transactionRunner.ExecuteAsync(
+        return transactionRunner.ExecuteAsync<AgentFencedWriteResult>(
             "Agent.NodeOutcomeReconciliationDeferred",
             async (context, token) =>
             {
@@ -373,7 +373,7 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
                     deferral.ProviderReceiptHash,
                     deferral.DecisionDigest,
                     deferral.DecidedAtUtc));
-                locked.Value.Node.DeferReconciliation(
+                locked.Node.DeferReconciliation(
                     deferral.Claim.TaskFencingToken,
                     deferral.Claim.NodeFencingToken,
                     deferral.Claim.ReconciliationFencingToken,
@@ -455,7 +455,7 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
     {
         var task = await context.AgentTasks
             .FromSqlInterpolated($$"""
-                SELECT * FROM aigateway.agent_tasks
+                SELECT task.*, task.xmin FROM aigateway.agent_tasks AS task
                 WHERE id = {{taskId.Value}}
                   AND active_run_attempt_id = {{runAttemptId.Value}}
                   AND run_fencing_token = {{taskFencingToken}}
@@ -471,7 +471,7 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
         await context.Entry(task).Collection(candidate => candidate.Steps).LoadAsync(cancellationToken);
         var attempt = await context.AgentTaskRunAttempts
             .FromSqlInterpolated($$"""
-                SELECT * FROM aigateway.agent_task_run_attempts
+                SELECT attempt.*, attempt.xmin FROM aigateway.agent_task_run_attempts AS attempt
                 WHERE id = {{runAttemptId.Value}}
                   AND task_id = {{taskId.Value}}
                   AND task_fencing_token = {{taskFencingToken}}
@@ -486,7 +486,7 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
 
         var queue = await context.AgentTaskRunQueueItems
             .FromSqlInterpolated($$"""
-                SELECT * FROM aigateway.agent_task_run_queue_items
+                SELECT queue_item.*, queue_item.xmin FROM aigateway.agent_task_run_queue_items AS queue_item
                 WHERE id = {{queueItemId.Value}}
                   AND task_id = {{taskId.Value}}
                   AND run_attempt_id = {{runAttemptId.Value}}
@@ -505,7 +505,7 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
     {
         return context.AgentNodeRuns
             .FromSqlInterpolated($$"""
-                SELECT * FROM aigateway.agent_node_runs
+                SELECT node.*, node.xmin FROM aigateway.agent_node_runs AS node
                 WHERE id = {{claim.NodeRun.Id.Value}}
                   AND task_id = {{claim.TaskId.Value}}
                   AND run_attempt_id = {{claim.RunAttemptId.Value}}

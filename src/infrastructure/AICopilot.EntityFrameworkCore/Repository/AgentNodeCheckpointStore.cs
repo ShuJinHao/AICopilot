@@ -287,7 +287,7 @@ internal sealed class AgentNodeCheckpointStore(
         var mutation = checkpoint.Finalization!;
         var workspace = await context.ArtifactWorkspaces
             .FromSqlInterpolated($$"""
-                SELECT * FROM aigateway.artifact_workspaces
+                SELECT workspace.*, workspace.xmin FROM aigateway.artifact_workspaces AS workspace
                 WHERE id = {{mutation.WorkspaceId.Value}}
                 FOR UPDATE
                 """)
@@ -299,7 +299,7 @@ internal sealed class AgentNodeCheckpointStore(
 
         var artifacts = await context.Set<Artifact>()
             .FromSqlInterpolated($$"""
-                SELECT * FROM aigateway.artifacts
+                SELECT artifact.*, artifact.xmin FROM aigateway.artifacts AS artifact
                 WHERE workspace_id = {{mutation.WorkspaceId.Value}}
                 ORDER BY id
                 FOR UPDATE
@@ -307,7 +307,7 @@ internal sealed class AgentNodeCheckpointStore(
             .ToListAsync(cancellationToken);
         var steps = await context.Set<AgentStep>()
             .FromSqlInterpolated($$"""
-                SELECT * FROM aigateway.agent_steps
+                SELECT step.*, step.xmin FROM aigateway.agent_steps AS step
                 WHERE task_id = {{task.Id.Value}}
                 ORDER BY step_index
                 FOR UPDATE
@@ -315,7 +315,7 @@ internal sealed class AgentNodeCheckpointStore(
             .ToListAsync(cancellationToken);
         var approval = await context.ApprovalRequests
             .FromSqlInterpolated($$"""
-                SELECT * FROM aigateway.approval_requests
+                SELECT approval.*, approval.xmin FROM aigateway.approval_requests AS approval
                 WHERE id = {{mutation.ApprovalRequestId.Value}}
                 FOR UPDATE
                 """)
@@ -601,7 +601,7 @@ internal sealed class AgentNodeCheckpointStore(
     {
         var task = await context.AgentTasks
             .FromSqlInterpolated($$"""
-                SELECT * FROM aigateway.agent_tasks
+                SELECT task.*, task.xmin FROM aigateway.agent_tasks AS task
                 WHERE id = {{taskId}}
                   AND active_run_attempt_id = {{runAttemptId}}
                   AND run_fencing_token = {{taskFencingToken}}
@@ -615,7 +615,7 @@ internal sealed class AgentNodeCheckpointStore(
 
         var attempt = await context.AgentTaskRunAttempts
             .FromSqlInterpolated($$"""
-                SELECT * FROM aigateway.agent_task_run_attempts
+                SELECT attempt.*, attempt.xmin FROM aigateway.agent_task_run_attempts AS attempt
                 WHERE id = {{runAttemptId}}
                   AND task_id = {{taskId}}
                   AND task_fencing_token = {{taskFencingToken}}
@@ -637,7 +637,7 @@ internal sealed class AgentNodeCheckpointStore(
         var status = expectedStatus?.ToString();
         return context.AgentNodeRuns
             .FromSqlInterpolated($$"""
-                SELECT * FROM aigateway.agent_node_runs
+                SELECT node.*, node.xmin FROM aigateway.agent_node_runs AS node
                 WHERE id = {{nodeRunId}}
                   AND run_attempt_id = {{runAttemptId}}
                   AND task_fencing_token = {{taskFencingToken}}

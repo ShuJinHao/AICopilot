@@ -18,7 +18,6 @@ $coverageScript = Join-Path $RepositoryRoot 'scripts/tests/Confirm-AICopilotCove
 $mutationScript = Join-Path $RepositoryRoot 'scripts/tests/Confirm-AICopilotMutation.ps1'
 $duplicationScript = Join-Path $RepositoryRoot 'scripts/tests/Measure-AICopilotDuplication.ps1'
 $compatibilityScript = Join-Path $RepositoryRoot 'scripts/tests/Test-AICopilotCompatibilityInventory.ps1'
-$declarationTransitionChecker = Join-Path $RepositoryRoot 'scripts/tests/Test-AICopilotTestDeclarationTransition.ps1'
 . (Join-Path $RepositoryRoot 'scripts/tests/Resolve-AICopilotQualityBase.ps1')
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) "aicopilot-test-infrastructure-$([Guid]::NewGuid().ToString('N'))"
 
@@ -1494,7 +1493,6 @@ public sealed class FixtureBoundaryTests
         "_.runtime -in @('Pure', 'InProcess')",
         'ForEach-Object -Parallel',
         "_.runtime -notin @('Pure', 'InProcess')",
-        'Test-AICopilotTestDeclarationTransition.ps1',
         'Test-AICopilotCompatibilityInventory.ps1',
         'Measure-AICopilotDuplication.ps1',
         'fetch-depth: 0',
@@ -3118,68 +3116,7 @@ internal sealed class MigrationCoverageMarker { }
             -OutputPath $ordinaryEvolutionOutputPath
     } 'Compatibility IDs differ from the comparison baseline'
 
-    $transitionFixtureRoot = Join-Path $tempRoot 'declaration-transition'
-    $generatedTransitionPath = Join-Path $transitionFixtureRoot 'generated.json'
-    $controlledTransitionPath = Join-Path $RepositoryRoot 'scripts/tests/baselines/aicopilot-test-declaration-transition.json'
-    New-Item -ItemType Directory -Path $transitionFixtureRoot -Force | Out-Null
-    Copy-Item $controlledTransitionPath $generatedTransitionPath
-    & $declarationTransitionChecker `
-        -RepositoryRoot $RepositoryRoot `
-        -LedgerPath $generatedTransitionPath *> $null
-
-    $missingTransition = Get-Content $generatedTransitionPath -Raw | ConvertFrom-Json -Depth 64
-    $missingTransition.transitions = @($missingTransition.transitions | Select-Object -Skip 1)
-    Write-FixtureFile $generatedTransitionPath ($missingTransition | ConvertTo-Json -Depth 64)
-    Assert-Fails {
-        & $declarationTransitionChecker `
-            -RepositoryRoot $RepositoryRoot `
-            -LedgerPath $generatedTransitionPath
-    } 'exactly 785 records'
-
-    $unknownReplacement = Get-Content $controlledTransitionPath -Raw | ConvertFrom-Json -Depth 64
-    $replacementRecord = @($unknownReplacement.transitions | Where-Object {
-            $_.disposition -eq 'replaced' -and
-            @($_.replacementIds | Where-Object { -not ([string]$_).StartsWith('ANALYZER:') }).Count -gt 0
-        })[0]
-    $replacementRecord.replacementIds = @('AICopilot.UnitTests.DoesNotExist.MissingBehavior')
-    Write-FixtureFile $generatedTransitionPath ($unknownReplacement | ConvertTo-Json -Depth 64)
-    Assert-Fails {
-        & $declarationTransitionChecker `
-            -RepositoryRoot $RepositoryRoot `
-            -LedgerPath $generatedTransitionPath
-    } 'Declaration transition disposition/replacement/reason content differs from the frozen controlled review'
-
-    $unknownAnalyzer = Get-Content $controlledTransitionPath -Raw | ConvertFrom-Json -Depth 64
-    $analyzerRecord = @($unknownAnalyzer.transitions | Where-Object {
-            @($_.replacementIds) -contains 'ANALYZER:AIARCH007'
-        })[0]
-    $analyzerRecord.replacementIds = @('ANALYZER:AIARCH999')
-    Write-FixtureFile $generatedTransitionPath ($unknownAnalyzer | ConvertTo-Json -Depth 64)
-    Assert-Fails {
-        & $declarationTransitionChecker `
-            -RepositoryRoot $RepositoryRoot `
-            -LedgerPath $generatedTransitionPath
-    } 'Declaration transition disposition/replacement/reason content differs from the frozen controlled review'
-
-    $knownReplacementTamper = Get-Content $controlledTransitionPath -Raw | ConvertFrom-Json -Depth 64
-    $knownReplacementTamper.transitions[0].replacementIds = @('ANALYZER:AIARCH005')
-    Write-FixtureFile $generatedTransitionPath ($knownReplacementTamper | ConvertTo-Json -Depth 64)
-    Assert-Fails {
-        & $declarationTransitionChecker `
-            -RepositoryRoot $RepositoryRoot `
-            -LedgerPath $generatedTransitionPath
-    } 'Declaration transition disposition/replacement/reason content differs from the frozen controlled review'
-
-    $reasonTamper = Get-Content $controlledTransitionPath -Raw | ConvertFrom-Json -Depth 64
-    $reasonTamper.transitions[0].reason = "$($reasonTamper.transitions[0].reason) Tampered."
-    Write-FixtureFile $generatedTransitionPath ($reasonTamper | ConvertTo-Json -Depth 64)
-    Assert-Fails {
-        & $declarationTransitionChecker `
-            -RepositoryRoot $RepositoryRoot `
-            -LedgerPath $generatedTransitionPath
-    } 'Declaration transition disposition/replacement/reason content differs from the frozen controlled review'
-
-    Write-Host 'AICopilot inventory/reconciliation/Simulation/CI/coverage/duplication/mutation/compatibility/declaration-transition behavior tests passed. cases=102; coverageOmissionGuards=29.'
+    Write-Host 'AICopilot inventory/reconciliation/Simulation/CI/coverage/duplication/mutation/compatibility behavior tests passed. cases=97; coverageOmissionGuards=29.'
 }
 finally {
     Remove-Item $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

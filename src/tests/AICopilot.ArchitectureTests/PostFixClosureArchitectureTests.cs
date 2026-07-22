@@ -98,6 +98,10 @@ public sealed class PostFixClosureArchitectureTests
     [Fact]
     public void ProductionCompositionRoot_ShouldExposeOnlyCanonicalPlanIntegrityBoundary()
     {
+        const string planCompilerContract =
+            "AICopilot.AiGatewayService.AgentTasks.IAgentPlanCompiler";
+        const string canonicalPlanCompiler =
+            "AICopilot.AiGatewayService.AgentTasks.DeterministicLinearAgentPlanCompiler";
         var builder = Host.CreateApplicationBuilder();
 
         builder.AddAiGatewayService();
@@ -116,9 +120,16 @@ public sealed class PostFixClosureArchitectureTests
         builder.Services.Should().ContainSingle(descriptor =>
             descriptor.ServiceType == typeof(AgentTaskPlanFreshReadGate) &&
             descriptor.Lifetime == ServiceLifetime.Scoped);
+        builder.Services.Should().ContainSingle(descriptor =>
+            descriptor.ServiceType.FullName == planCompilerContract &&
+            descriptor.ImplementationType != null &&
+            descriptor.ImplementationType.FullName == canonicalPlanCompiler &&
+            descriptor.Lifetime == ServiceLifetime.Singleton);
         builder.Services.Should().NotContain(descriptor =>
+            descriptor.ServiceType.FullName != planCompilerContract &&
             descriptor.ServiceType.Name.Contains("PlanCompiler", StringComparison.Ordinal) ||
             descriptor.ImplementationType != null &&
+            descriptor.ImplementationType.FullName != canonicalPlanCompiler &&
             descriptor.ImplementationType.Name.Contains("PlanCompiler", StringComparison.Ordinal));
 
         using var provider = builder.Services.BuildServiceProvider();
