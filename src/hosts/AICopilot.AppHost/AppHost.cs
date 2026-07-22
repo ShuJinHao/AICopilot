@@ -4,6 +4,15 @@ using Projects;
 var builder = DistributedApplication.CreateBuilder(args);
 
 var appHostOptions = AppHostOptions.FromConfiguration(builder.Configuration);
+var cloudReadonlyMode = builder.Configuration["CloudReadonly:Mode"] ?? "Disabled";
+var cloudReadonlySimulationEnabled = builder.Configuration
+    .GetValue("CloudReadonly:Simulation:Enabled", false)
+    .ToString()
+    .ToLowerInvariant();
+var cloudReadonlySimulationAlwaysMarked = builder.Configuration
+    .GetValue("CloudReadonly:Simulation:AlwaysMarkAsSimulation", true)
+    .ToString()
+    .ToLowerInvariant();
 
 if (appHostOptions.EnableDockerComposeEnvironment)
 {
@@ -76,6 +85,9 @@ var migration = builder.AddProject<AICopilot_MigrationWorkApp>("aicopilot-migrat
     .WithEnvironment("AICopilotSecurity__ApiKeyEncryptionKey", apiKeyEncryptionKey)
     .WithEnvironment("BootstrapAdmin__UserName", bootstrapAdminUserName)
     .WithEnvironment("BootstrapAdmin__Password", bootstrapAdminPassword)
+    .WithEnvironment("CloudReadonly__Mode", cloudReadonlyMode)
+    .WithEnvironment("CloudReadonly__Simulation__Enabled", cloudReadonlySimulationEnabled)
+    .WithEnvironment("CloudReadonly__Simulation__AlwaysMarkAsSimulation", cloudReadonlySimulationAlwaysMarked)
     .WaitFor(postgresdb);
 
 var httpapi = builder.AddProject<AICopilot_HttpApi>("aicopilot-httpapi")
@@ -96,6 +108,9 @@ var httpapi = builder.AddProject<AICopilot_HttpApi>("aicopilot-httpapi")
     .WithEnvironment("CloudOidc__BootstrapAdminUserName", bootstrapAdminUserName)
     .WithEnvironment("ArtifactWorkspace__RootPath", appHostOptions.ArtifactWorkspaceRootPath)
     .WithEnvironment("AiGateway__FinalAgentContextStore__Provider", "Redis")
+    .WithEnvironment("CloudReadonly__Mode", cloudReadonlyMode)
+    .WithEnvironment("CloudReadonly__Simulation__Enabled", cloudReadonlySimulationEnabled)
+    .WithEnvironment("CloudReadonly__Simulation__AlwaysMarkAsSimulation", cloudReadonlySimulationAlwaysMarked)
     .WaitForCompletion(migration);
 
 if (appHostOptions.EnableRagWorker)
@@ -120,6 +135,9 @@ if (appHostOptions.EnableDataWorker)
         .WithReference(qdrant)
         .WithEnvironment("AICopilotSecurity__ApiKeyEncryptionKey", apiKeyEncryptionKey)
         .WithEnvironment("ArtifactWorkspace__RootPath", appHostOptions.ArtifactWorkspaceRootPath)
+        .WithEnvironment("CloudReadonly__Mode", cloudReadonlyMode)
+        .WithEnvironment("CloudReadonly__Simulation__Enabled", cloudReadonlySimulationEnabled)
+        .WithEnvironment("CloudReadonly__Simulation__AlwaysMarkAsSimulation", cloudReadonlySimulationAlwaysMarked)
         .WaitFor(postgresdb)
         .WaitFor(rabbitmq)
         .WaitFor(qdrant)

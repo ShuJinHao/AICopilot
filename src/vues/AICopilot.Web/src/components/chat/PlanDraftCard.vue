@@ -9,6 +9,7 @@ const { latestTask, blockedStep } = useAgentWorkbench()
 const {
   latestPlan,
   latestPlanCapabilityGaps,
+  latestPlanIsSimulation,
   isPlanDraftTask,
   previewPlanSteps,
   totalPreviewPlanStepCount,
@@ -40,6 +41,7 @@ function planStepTag(step: { requiresApproval: boolean }) {
   <section v-if="latestTask" class="agent-plan" data-testid="inline-plan-card">
     <div class="section-title">
       <strong>{{ latestTask.title || '计划摘要' }}</strong>
+      <AiTag v-if="latestPlanIsSimulation" tone="warning">Simulation · 只读模拟</AiTag>
       <span>{{ previewPlanSteps.length }} / {{ totalPreviewPlanStepCount }} 个步骤</span>
     </div>
     <p class="agent-plan-goal">{{ latestTask.goal }}</p>

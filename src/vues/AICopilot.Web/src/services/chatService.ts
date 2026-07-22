@@ -288,6 +288,14 @@ export const chatService = {
     )
   },
 
+  async rejectAgentTaskPlan(id: string) {
+    return await apiClient.post<AgentTask>(
+      '/aigateway/agent/task/reject-plan',
+      { id, reason: 'Plan rejected from primary PlanDraft action.' },
+      CHAT_MUTATION_REQUEST_OPTIONS,
+    )
+  },
+
   async runAgentTask(id: string) {
     return await apiClient.post<AgentTask>(
       '/aigateway/agent/task/run',

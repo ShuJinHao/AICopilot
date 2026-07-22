@@ -14,7 +14,9 @@ const {
   completedStepCount,
   draftArtifactCount,
   finalArtifactCount,
+  finalArtifacts,
   taskArtifacts,
+  auditSummary,
   agentStageCards,
   onsiteStatus
 } = useAgentWorkbench()
@@ -27,12 +29,38 @@ const {
   latestPlanSchemaVersion,
   latestPlanDigest,
   latestPlanTopologyProfile,
-  latestPlanIntegrityStatus
+  latestPlanIntegrityStatus,
+  latestPlanIsSimulation
 } = useAgentPlanPreview()
 const {
   timelineEventItems,
   latestTimelineSummary
 } = useAgentTimelineDisplay()
+
+const visibleEvidenceMetadataKeys = new Set([
+  'stepOrder',
+  'toolName',
+  'artifactId',
+  'sourceMode',
+  'isSimulation',
+  'queryHash',
+  'resultHash',
+  'rowCount',
+  'isTruncated',
+])
+
+function formatAuditTime(value: string) {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime())
+    ? '-'
+    : date.toLocaleTimeString('zh-CN', { hour12: false })
+}
+
+function evidenceMetadataEntries(metadata: Record<string, string>) {
+  return Object.entries(metadata).filter(
+    ([key, value]) => visibleEvidenceMetadataKeys.has(key) && Boolean(value),
+  )
+}
 </script>
 
 <template>
@@ -74,10 +102,11 @@ const {
         <div class="boundary-runtime" data-testid="inline-boundary-row">
           <ShieldCheck :size="20" />
           <div>
-            <strong>Cloud 只读边界</strong>
-            <span>现场确认：{{ onsiteStatus.label }}</span>
+            <strong>{{ latestPlanIsSimulation ? 'Simulation 只读边界' : 'Cloud 只读边界' }}</strong>
+            <span v-if="latestPlanIsSimulation">AI 独立模拟业务库 · 不回退、不冒充 Cloud 正式数据</span>
+            <span v-else>现场确认：{{ onsiteStatus.label }}</span>
           </div>
-          <button type="button" :disabled="!store.resolvedSessionId || store.isSessionTransitionBlocked" @click="store.confirmOnsitePresence(30)">确认在岗</button>
+          <button v-if="!latestPlanIsSimulation" type="button" :disabled="!store.resolvedSessionId || store.isSessionTransitionBlocked" @click="store.confirmOnsitePresence(30)">确认在岗</button>
         </div>
       </section>
 
@@ -176,6 +205,46 @@ const {
               </details>
             </div>
             <AiTag :tone="item.tone">{{ item.status }}</AiTag>
+          </div>
+        </div>
+      </section>
+
+      <section v-if="auditSummary.length" class="runtime-section-block" data-testid="agent-evidence-summary">
+        <div class="runtime-section-title">
+          <strong>受控证据</strong>
+          <span>{{ auditSummary.length }} 条真实审计记录</span>
+        </div>
+        <div class="timeline-list">
+          <div v-for="audit in auditSummary" :key="audit.id" class="timeline-row">
+            <time>{{ formatAuditTime(audit.createdAt) }}</time>
+            <div class="timeline-row-main">
+              <strong>{{ audit.actionCode }} · {{ audit.targetName }}</strong>
+              <span>{{ audit.summary }}</span>
+              <details v-if="evidenceMetadataEntries(audit.metadata).length" class="step-detail-fold">
+                <summary>证据字段</summary>
+                <code v-for="entry in evidenceMetadataEntries(audit.metadata)" :key="`${audit.id}:${entry[0]}`">
+                  {{ entry[0] }}={{ entry[1] }}
+                </code>
+              </details>
+            </div>
+            <AiTag :tone="audit.result === 'Succeeded' ? 'success' : 'danger'">{{ audit.result }}</AiTag>
+          </div>
+        </div>
+      </section>
+
+      <section v-if="latestTask?.finalSummary || finalArtifacts.length" class="runtime-section-block" data-testid="agent-final-result">
+        <div class="runtime-section-title">
+          <strong>最终结果</strong>
+          <span>{{ finalArtifacts.length }} 个正式产物</span>
+        </div>
+        <div class="plan-grid">
+          <div>
+            <span>任务结论</span>
+            <strong>{{ latestTask?.finalSummary || '后端未返回最终摘要。' }}</strong>
+          </div>
+          <div>
+            <span>数据边界</span>
+            <strong>{{ latestPlanIsSimulation ? 'Simulation · 只读模拟' : latestPlanSource }}</strong>
           </div>
         </div>
       </section>

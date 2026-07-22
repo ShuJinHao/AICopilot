@@ -67,7 +67,7 @@ internal sealed class AgentBuiltInToolDispatcher(
             "parse_table_file" => await fileInputTools.ParseTableFileAsync(task.UserId, workspace, step, plan, state, cancellationToken),
             "rag_search" => await ragTools.SearchRagAsync(task, plan, state, cancellationToken),
             "query_cloud_data_readonly" => await cloudReadonlyTools.QueryCloudReadonlyAsync(plan, state, cancellationToken),
-            "query_business_database_readonly" => await businessQueryTools.QueryBusinessDatabaseReadonlyP1Async(plan, state, cancellationToken),
+            "query_business_database_readonly" => await businessQueryTools.QueryBusinessDatabaseReadonlyP1Async(task, plan, state, cancellationToken),
             "summarize_business_query_result" => businessQueryTools.SummarizeBusinessQueryResult(state),
             "generate_business_chart" => await artifactBuilder.GenerateChartDataAsync(workspace, step, state, cancellationToken),
             "generate_chart_data" => await artifactBuilder.GenerateChartDataAsync(workspace, step, state, cancellationToken),

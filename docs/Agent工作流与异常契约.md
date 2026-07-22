@@ -64,7 +64,7 @@ Cloud 只读 Agent 当前正式能力限定为：
 ### 2.3 P0 产物检查点与 Tool 输出边界
 
 - 声明产物目标的 Plan 必须且只能有一个最后步骤 `finalize_artifacts`，其 `StepType=Finalize`、`RequiresApproval=true`；该步骤是生命周期检查点，不是 provider tool，不能交给 built-in、MCP 或 mock executor 伪造执行成功。
-- P0 runtime 只允许 `BuiltInOnly`，没有可信 PlanCompiler 时生产 `ExecutablePlan` 必须 fail-closed；Draft 只披露 `plan_compiler_unavailable`，不得把测试用 fresh-read/downstream harness 带入生产注册。
+- P0 runtime 只允许 `BuiltInOnly`，没有可信 PlanCompiler 时生产 `ExecutablePlan` 默认必须 fail-closed；普通 Draft 只披露 `plan_compiler_unavailable`，不得把测试用 fresh-read/downstream harness 带入生产注册。唯一例外是显式 `Development + CloudReadonly:Mode=Simulation + Simulation.Enabled=true + AlwaysMarkAsSimulation=true` profile：它只能把唯一已授权 `SimulationBusiness` 数据源编译为固定的 `query_business_database_readonly → summarize_business_query_result → generate_markdown_report → finalize_artifacts` 四步 `LinearV1` 图。该例外不得接 Cloud、MCP、Plugin、上传或 RAG，不得混合/回退 Real/Cloud 数据源；Plan 确认、入队和 Worker 每次 fresh-read 都必须重新校验 Development Simulation profile，配置关闭后旧计划立即 fail-closed。
 - Tool output 必须先通过注册表的 closed strict schema，才可记录 execution、step 或 run 成功。持久化 durable output 只保留规范化、版本化的安全 payload，不得保存 provider raw output；ArtifactWorkspace 文件/aggregate 的原子 staging、补偿、provenance 与 reconciliation 仍属于 P1，本 P0 契约不得宣称已经闭合。
 
 ## 3. Cloud 写入禁止

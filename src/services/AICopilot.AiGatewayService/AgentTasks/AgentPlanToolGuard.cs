@@ -268,6 +268,14 @@ public sealed class AgentPlanToolGuard(
             .Where(domain => !string.IsNullOrWhiteSpace(domain))
             .Select(domain => domain.Trim())
             .ToArray();
+        if (simulationOnly && tool.DataBoundary == ToolDataBoundary.SimulationBusinessOnly)
+        {
+            // The selected SimulationBusiness descriptor is already the authorized
+            // boundary. Its umbrella domain (for example Manufacturing) must not
+            // hide the profile's governed read tools whose catalog uses subdomains.
+            return true;
+        }
+
         if (requestedDomains.Length == 0 || tool.BusinessDomains.Length == 0)
         {
             return true;

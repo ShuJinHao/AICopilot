@@ -15,7 +15,7 @@ import SessionList from './SessionList.vue'
 const store = useChatStore()
 const uiLayoutStore = useUiLayoutStore()
 const { latestTask, taskSteps, pendingAgentApprovals, taskArtifacts } = useAgentWorkbench()
-const { latestPlanIsCloudReadonly } = useAgentPlanPreview()
+const { latestPlanIsCloudReadonly, latestPlanIsSimulation } = useAgentPlanPreview()
 
 const scrollContainer = ref<HTMLElement | null>(null)
 const isMobile = ref(typeof window !== 'undefined' ? window.innerWidth < 1024 : false)
@@ -162,8 +162,8 @@ onBeforeUnmount(() => {
           <AiTag :tone="workbenchStatusTone">
             {{ workbenchStatusLabel }}
           </AiTag>
-          <AiTag :tone="latestPlanIsCloudReadonly ? 'warning' : 'success'">
-            {{ latestPlanIsCloudReadonly ? 'Cloud 只读' : '只读分析' }}
+          <AiTag :tone="latestPlanIsSimulation || latestPlanIsCloudReadonly ? 'warning' : 'success'">
+            {{ latestPlanIsSimulation ? 'Simulation · 只读' : latestPlanIsCloudReadonly ? 'Cloud 只读' : '只读分析' }}
           </AiTag>
           <button
             class="soft-action"

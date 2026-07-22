@@ -30,6 +30,9 @@ public sealed record PlanAgentTaskCommand(
 [AuthorizeRequirement("AiGateway.ApproveAgentTaskPlan")]
 public sealed record ApproveAgentTaskPlanCommand(Guid Id) : ICommand<Result<AgentTaskDto>>;
 
+[AuthorizeRequirement("AiGateway.ApproveAgentTaskPlan")]
+public sealed record RejectAgentTaskPlanCommand(Guid Id, string? Reason = null) : ICommand<Result<AgentTaskDto>>;
+
 [AuthorizeRequirement("AiGateway.RunAgentTask")]
 public sealed record RunAgentTaskCommand(Guid Id) : ICommand<Result<AgentTaskDto>>;
 

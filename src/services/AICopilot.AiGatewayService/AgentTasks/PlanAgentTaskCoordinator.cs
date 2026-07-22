@@ -13,6 +13,8 @@ using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
 
@@ -28,7 +30,10 @@ public sealed class PlanAgentTaskCoordinator(
     AgentWorkflowPipeline? workflowPipeline = null,
     AgentPlanToolGuard? planToolGuard = null,
     ICloudReadonlyAgentPlanService? cloudReadonlyPlanService = null,
-    AgentPlanDraftContractAuthority? planDraftContractAuthority = null)
+    AgentPlanDraftContractAuthority? planDraftContractAuthority = null,
+    IOptions<CloudReadonlyOptions>? cloudReadonlyOptions = null,
+    IHostEnvironment? hostEnvironment = null,
+    IBusinessDatabaseAuthorizationReadService? businessDatabaseAuthorizationReadService = null)
 {
     private const int PlanDraftValidationVersion = 1;
 
@@ -49,16 +54,28 @@ public sealed class PlanAgentTaskCoordinator(
             return MissingUser();
         }
 
+        var useDevelopmentSimulationProfile = IsDevelopmentSimulationProfile();
+        if (useDevelopmentSimulationProfile &&
+            (request.TaskType == AgentTaskType.CloudDataReport ||
+             request.QueryMode is not null &&
+             !string.Equals(request.QueryMode, "TextToSql", StringComparison.Ordinal)))
+        {
+            return Result.Invalid(
+                "The Development Simulation profile accepts the governed TextToSql report chain only; CloudReadonly never falls back to Simulation.");
+        }
+
         var preparationService = new AgentTaskPlanPreparationService(
             sessionRepository,
             uploadRepository,
             knowledgeBaseAccessCheckers,
-            businessDatabaseReadService);
+            businessDatabaseReadService,
+            businessDatabaseAuthorizationReadService);
         var preparationResult = await preparationService.PrepareAsync(
             request,
             userId,
             IsAdmin(),
-            cancellationToken);
+            cancellationToken,
+            useDevelopmentSimulationProfile);
         if (!preparationResult.IsSuccess)
         {
             return Result.From(preparationResult);
@@ -69,18 +86,24 @@ public sealed class PlanAgentTaskCoordinator(
         AgentPlanDraftWorkflowResult? workflowDraft = null;
         if (workflowPipeline is not null)
         {
-            workflowDraft = await workflowPipeline.RunPlanDraftWorkflowAsync(
-                new ChatStreamRequest(request.SessionId, request.Goal),
-                cancellationToken);
+            var workflowRequest = new ChatStreamRequest(request.SessionId, request.Goal);
+            workflowDraft = useDevelopmentSimulationProfile
+                ? await workflowPipeline.RunPlanDraftRoutingOnlyAsync(workflowRequest, cancellationToken)
+                : await workflowPipeline.RunPlanDraftWorkflowAsync(workflowRequest, cancellationToken);
         }
 
         var effectiveTaskType = request.TaskType;
         var effectiveQueryMode = request.QueryMode ??
             (effectiveTaskType == AgentTaskType.CloudDataReport ? "CloudReadonly" : "TextToSql");
         var effectivePlanSource = "PlanV2Contract";
+        var effectivePlannerModelId = useDevelopmentSimulationProfile
+            ? workflowDraft?.ExecutionMetadata.RoutingConfiguration?.ModelId ?? request.ModelId
+            : request.ModelId;
 
         var riskLevel = AgentTaskPlanMetadataBuilder.DetermineRiskLevel(effectiveTaskType);
-        var artifactTypesResult = AgentTaskPlanStepBuilder.ResolveArtifactTypes(request.ArtifactTypes);
+        var requestedArtifactTypes = request.ArtifactTypes ??
+            (useDevelopmentSimulationProfile ? ["markdown"] : null);
+        var artifactTypesResult = AgentTaskPlanStepBuilder.ResolveArtifactTypes(requestedArtifactTypes);
         if (!artifactTypesResult.IsSuccess)
         {
             return Result.From(artifactTypesResult);
@@ -232,7 +255,7 @@ public sealed class PlanAgentTaskCoordinator(
             new AgentTaskPlanRuntimeSettingsDocument(0, 0),
             effectivePlannerMode,
             plannerFallbackReason,
-            request.ModelId,
+            effectivePlannerModelId,
             PlanDraftValidationVersion,
             plannerToolCatalogVersion,
             plannerToolCount,
@@ -270,7 +293,15 @@ public sealed class PlanAgentTaskCoordinator(
                 .ToArray());
 
         var routedIntents = new List<IntentResult>();
-        if (resolvedCloudIntent is not null)
+        if (useDevelopmentSimulationProfile && preparation.IsSimulationOnlyPlan)
+        {
+            // The explicit local profile has one fixed, read-only capability envelope.
+            // Dynamic routing still produced the frozen configuration snapshot above,
+            // but cannot expand this plan into Cloud, MCP, plugin, or control intents.
+            routedIntents.Add(new IntentResult { Intent = "General.Chat", Confidence = 1 });
+            routedIntents.Add(new IntentResult { Intent = "Analysis.GovernedQuery", Confidence = 1 });
+        }
+        else if (resolvedCloudIntent is not null)
         {
             routedIntents.Add(new IntentResult
             {
@@ -292,7 +323,11 @@ public sealed class PlanAgentTaskCoordinator(
             routedIntents.Add(new IntentResult { Intent = "Knowledge.Retrieve", Confidence = 1 });
         }
 
-        if (preparation.SelectedDataSources.Any())
+        if (preparation.SelectedDataSources.Any() &&
+            !routedIntents.Any(intent => string.Equals(
+                intent.Intent,
+                "Analysis.GovernedQuery",
+                StringComparison.Ordinal)))
         {
             routedIntents.Add(new IntentResult { Intent = "Analysis.GovernedQuery", Confidence = 1 });
         }
@@ -316,7 +351,8 @@ public sealed class PlanAgentTaskCoordinator(
             request.SelectedPluginIds,
             request.CapabilitySelectionMode,
             request.RequestedCapabilityCodes,
-            workflowDraft?.ExecutionMetadata.RoutingConfiguration));
+            workflowDraft?.ExecutionMetadata.RoutingConfiguration,
+            AllowDevelopmentSimulationExecution: useDevelopmentSimulationProfile));
         if (!sealedPlanResult.IsSuccess)
         {
             return Result.From(sealedPlanResult);
@@ -332,7 +368,7 @@ public sealed class PlanAgentTaskCoordinator(
             request.Goal,
             effectiveTaskType,
             riskLevel,
-            request.ModelId.HasValue ? new(request.ModelId.Value) : null,
+            effectivePlannerModelId.HasValue ? new(effectivePlannerModelId.Value) : null,
             sealedPlan.CanonicalJson,
             now);
 
@@ -350,7 +386,9 @@ public sealed class PlanAgentTaskCoordinator(
         await auditRecorder.RecordPlanAsync(
             task,
             AuditResults.Succeeded,
-            "Agent task PlanDraft contract generated; execution remains blocked until the trusted P2 PlanCompiler is available.",
+            useDevelopmentSimulationProfile && preparation.IsSimulationOnlyPlan
+                ? "Development Simulation PlanDraft generated with an explicit read-only execution graph; no tool, Cloud, MCP, or Worker execution occurred before confirmation."
+                : "Agent task PlanDraft contract generated; execution remains blocked until the trusted P2 PlanCompiler is available.",
             pendingApprovalCount: 0,
             cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
@@ -367,6 +405,16 @@ public sealed class PlanAgentTaskCoordinator(
     private bool IsAdmin()
     {
         return string.Equals(currentUser.Role, "Admin", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool IsDevelopmentSimulationProfile()
+    {
+        var options = cloudReadonlyOptions?.Value;
+        return hostEnvironment?.IsDevelopment() == true &&
+               options is not null &&
+               options.Mode == CloudReadonlyDataSourceMode.Simulation &&
+               options.Simulation.Enabled &&
+               options.Simulation.AlwaysMarkAsSimulation;
     }
 
     private static string[] ResolveAuthorizedActionIntentCodes(AgentPlanDraftWorkflowResult? workflowDraft)

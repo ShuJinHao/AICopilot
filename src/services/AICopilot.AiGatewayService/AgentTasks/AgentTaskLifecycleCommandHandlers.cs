@@ -109,6 +109,81 @@ public sealed class RunAgentTaskCommandHandler(
     }
 }
 
+public sealed class RejectAgentTaskPlanCommandHandler(
+    IRepository<AgentTask> repository,
+    IRepository<ApprovalRequest> approvalRepository,
+    AgentTaskDtoQueryService dtoQueryService,
+    AgentAuditRecorder auditRecorder,
+    ICurrentUser currentUser,
+    MessageTimelineProjectionWriter? timelineProjectionWriter = null)
+    : ICommandHandler<RejectAgentTaskPlanCommand, Result<AgentTaskDto>>
+{
+    public async Task<Result<AgentTaskDto>> Handle(
+        RejectAgentTaskPlanCommand request,
+        CancellationToken cancellationToken)
+    {
+        var taskResult = await AgentTaskCommandLoader.LoadTaskAsync(
+            repository,
+            currentUser,
+            request.Id,
+            cancellationToken);
+        if (!taskResult.IsSuccess)
+        {
+            return Result.From(taskResult);
+        }
+
+        var task = taskResult.Value!;
+        if (task.Status == AgentTaskStatus.Rejected)
+        {
+            return Result.Success(await dtoQueryService.MapAsync(task, cancellationToken));
+        }
+
+        if (task.Status is not AgentTaskStatus.Draft and not AgentTaskStatus.WaitingPlanApproval)
+        {
+            return Result.Invalid("Only a PlanDraft waiting for confirmation can be rejected.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var reason = string.IsNullOrWhiteSpace(request.Reason)
+            ? "Plan rejected by user."
+            : request.Reason.Trim();
+        var approval = await approvalRepository.FirstOrDefaultAsync(
+            new PendingApprovalRequestByTaskAndTargetSpec(
+                task.Id,
+                AgentApprovalType.Plan,
+                task.Id.Value.ToString()),
+            cancellationToken);
+        if (approval is null)
+        {
+            approval = new ApprovalRequest(
+                task.Id,
+                AgentApprovalType.Plan,
+                task.Id.Value.ToString(),
+                task.UserId,
+                now);
+            approvalRepository.Add(approval);
+        }
+
+        approval.Reject(currentUser.Id!.Value, reason, now);
+        task.Reject(reason, now);
+        approvalRepository.Update(approval);
+        repository.Update(task);
+        if (timelineProjectionWriter is not null)
+        {
+            await timelineProjectionWriter.StageApprovalDecidedAsync(task, approval, cancellationToken);
+        }
+
+        await auditRecorder.RecordApprovalDecisionAsync(
+            approval,
+            task,
+            AuditResults.Rejected,
+            "Agent task PlanDraft rejected by user.",
+            cancellationToken);
+        await repository.SaveChangesAsync(cancellationToken);
+        return Result.Success(await dtoQueryService.MapAsync(task, cancellationToken));
+    }
+}
+
 public sealed class RetryAgentTaskCommandHandler(
     IRepository<AgentTask> repository,
     AgentTaskDtoQueryService dtoQueryService,

@@ -43,6 +43,18 @@ public class AgentWorkflowPipeline(
             routing.ExecutionMetadata);
     }
 
+    public async Task<AgentPlanDraftWorkflowResult> RunPlanDraftRoutingOnlyAsync(
+        ChatStreamRequest request,
+        CancellationToken ct = default)
+    {
+        var routing = await intentRouting.ExecuteAsync(request, ct);
+        return new AgentPlanDraftWorkflowResult(
+            routing.Scene.ToString(),
+            routing.Intents,
+            [],
+            routing.ExecutionMetadata);
+    }
+
     public async IAsyncEnumerable<ChatChunk> RunIntentWorkflowAsync(
         ChatStreamRequest request,
         SessionRuntimeSnapshot? session,

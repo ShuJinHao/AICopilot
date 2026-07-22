@@ -10,6 +10,7 @@ import {
   Sparkles,
   TriangleAlert,
   Wrench,
+  X,
 } from 'lucide-vue-next'
 import AiTag from '@/components/ai/AiTag.vue'
 import { useAgentWorkbench } from '@/composables/useAgentWorkbench'
@@ -50,6 +51,7 @@ const {
   latestPlanKindLabel,
   latestPlanVisibleToolCount,
   latestPlanIsCloudReadonly,
+  latestPlanIsSimulation,
   isPlanDraftTask,
   isPlanConfirmable,
 } = useAgentPlanPreview()
@@ -116,6 +118,10 @@ const agentRunReply = computed(() => {
 
   if (task.status === 'Failed') {
     return '执行已停止，错误原因会显示在当前对话块里，重试会基于已确认计划继续。'
+  }
+
+  if (task.status === 'Rejected') {
+    return '计划已拒绝，未进入工具调用、Cloud 查询或 Worker 执行。'
   }
 
   if (task.status === 'WorkspaceReady' || task.status === 'WaitingFinalApproval') {
@@ -266,6 +272,12 @@ async function runPrimaryTaskAction() {
   }
 }
 
+async function rejectCurrentPlan() {
+  const task = latestTask.value
+  if (!task || !isPlanDraftTask.value || store.isAgentBusy) return
+  await store.rejectAgentTaskPlan(task.id)
+}
+
 async function previewArtifact(artifactId: string) {
   if (!store.resolvedSessionId || store.isSessionTransitionBlocked) return
   await store.loadArtifactPreview(artifactId)
@@ -317,7 +329,7 @@ onBeforeUnmount(stopRuntimePolling)
         </span>
         <span>
           <ShieldCheck :size="14" />
-          {{ latestPlanIsCloudReadonly ? 'Cloud 只读' : '只读分析' }}
+          {{ latestPlanIsSimulation ? 'Simulation · AI 独立模拟业务库' : latestPlanIsCloudReadonly ? 'Cloud 只读' : '只读分析' }}
         </span>
         <span v-if="timelineEventCount">
           <ListChecks :size="14" />
@@ -345,6 +357,10 @@ onBeforeUnmount(stopRuntimePolling)
         <button type="button" :disabled="primaryTaskAction.disabled" @click="runPrimaryTaskAction">
           <component :is="primaryTaskAction.icon" :size="17" />
           {{ primaryTaskAction.label }}
+        </button>
+        <button v-if="isPlanDraftTask" type="button" :disabled="store.isAgentBusy" @click="rejectCurrentPlan">
+          <X :size="17" />
+          拒绝计划
         </button>
       </div>
 

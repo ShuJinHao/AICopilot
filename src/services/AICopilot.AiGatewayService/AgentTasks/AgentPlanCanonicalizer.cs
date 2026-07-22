@@ -33,6 +33,17 @@ internal sealed record CanonicalAgentPlan(
 
 internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
 {
+    private static readonly string[] DevelopmentSimulationToolSequence =
+    [
+        "query_business_database_readonly",
+        "summarize_business_query_result",
+        "generate_markdown_report",
+        "finalize_artifacts"
+    ];
+
+    private static readonly string[] DevelopmentSimulationCapabilitySequence =
+        ["Analysis.GovernedQuery", "General.Chat"];
+
     private static readonly IReadOnlySet<string> FrozenCoreToolCodes = new HashSet<string>(
         [
             "read_uploaded_file",
@@ -385,16 +396,58 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             return InvalidResult("capabilityGaps must contain only frozen server-owned gap codes.");
         }
 
-        if (validDraftLifecycle &&
-            !plan.CapabilityGaps.Contains(AgentPlanCapabilityGapCodes.PlanCompilerUnavailable, StringComparer.Ordinal))
-        {
-            return InvalidResult("P0 PlanDraft must disclose the frozen plan_compiler_unavailable capability gap.");
-        }
-
-        if (validExecutableLifecycle)
+        var hasCompilerGap = plan.CapabilityGaps.Contains(
+            AgentPlanCapabilityGapCodes.PlanCompilerUnavailable,
+            StringComparer.Ordinal);
+        var hasExactSimulationSourceBoundary =
+            plan.DataSourceIds.Count == 1 &&
+            plan.DataSourceSummaries.Count == 1 &&
+            plan.DataSourceSummaries.Single() is { } simulationSource &&
+            simulationSource.Id == plan.DataSourceIds.Single() &&
+            simulationSource.IsSimulation &&
+            string.Equals(
+                simulationSource.SourceMode,
+                DataSourceExternalSystemType.SimulationBusiness.ToString(),
+                StringComparison.Ordinal);
+        if (plan.PlannerSafetySummary.IsSimulationOnly != hasExactSimulationSourceBoundary)
         {
             return InvalidResult(
-                "P0 has no trusted LinearV1 PlanCompiler; ExecutablePlan v2 remains fail-closed until P2.");
+                "plannerSafetySummary.isSimulationOnly must exactly match one marked SimulationBusiness source.");
+        }
+
+        var isDevelopmentSimulationGraph =
+            plan.PlannerSafetySummary.IsSimulationOnly &&
+            hasExactSimulationSourceBoundary &&
+            taskType == AgentTaskType.ReportGeneration &&
+            string.Equals(plan.QueryMode, "TextToSql", StringComparison.Ordinal) &&
+            plan.UploadIds.Count == 0 &&
+            plan.KnowledgeBaseIds.Count == 0 &&
+            plan.ArtifactTargets.SequenceEqual(["markdown"], StringComparer.Ordinal) &&
+            plan.Steps.Select(step => step?.ToolCode ?? string.Empty).SequenceEqual(
+                DevelopmentSimulationToolSequence,
+                StringComparer.Ordinal) &&
+            plan.IntentCandidates.Select(candidate => candidate?.IntentCode ?? string.Empty).SequenceEqual(
+                DevelopmentSimulationCapabilitySequence,
+                StringComparer.Ordinal) &&
+            plan.Nodes.Count == DevelopmentSimulationToolSequence.Length &&
+            plan.CapabilityGaps.Count == 0;
+        if (validDraftLifecycle && !isDevelopmentSimulationGraph &&
+            (!hasCompilerGap || plan.Nodes.Count != 0))
+        {
+            return InvalidResult(
+                "A non-simulation P0 PlanDraft must remain node-free and disclose plan_compiler_unavailable.");
+        }
+
+        if (validDraftLifecycle && isDevelopmentSimulationGraph && plan.CapabilityGaps.Count != 0)
+        {
+            return InvalidResult(
+                "A compiled Development Simulation PlanDraft cannot retain unresolved capability gaps.");
+        }
+
+        if (validExecutableLifecycle && !isDevelopmentSimulationGraph)
+        {
+            return InvalidResult(
+                "ExecutablePlan v2 remains fail-closed except for an explicitly marked Development Simulation graph.");
         }
 
         if (plan.QueryMode is not ("CloudReadonly" or "TextToSql") ||

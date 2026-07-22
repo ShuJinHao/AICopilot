@@ -1,6 +1,9 @@
+using System.Text.Json;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Result;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
 
@@ -13,7 +16,9 @@ namespace AICopilot.AiGatewayService.AgentTasks;
 /// </summary>
 public sealed class AgentTaskPlanFreshReadGate(
     IAgentTaskPlanFreshReadVerifier freshReadVerifier,
-    IAgentPlanIntegrityValidator planIntegrityValidator)
+    IAgentPlanIntegrityValidator planIntegrityValidator,
+    IOptions<CloudReadonlyOptions>? cloudReadonlyOptions = null,
+    IHostEnvironment? hostEnvironment = null)
 {
     public async Task<Result<AgentPlanContractMetadata>> VerifyAsync(
         AgentTask task,
@@ -21,6 +26,12 @@ public sealed class AgentTaskPlanFreshReadGate(
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(task);
+
+        var simulationProfile = VerifyDevelopmentSimulationProfile(task.PlanJson);
+        if (!simulationProfile.IsSuccess)
+        {
+            return Result.From(simulationProfile);
+        }
 
         var executionContract = planIntegrityValidator.ReadExecutionContract(
             task.PlanJson,
@@ -63,5 +74,41 @@ public sealed class AgentTaskPlanFreshReadGate(
         }
 
         return planIntegrityValidator.ValidatePersisted(task.PlanJson, requireExecutable);
+    }
+
+    private Result VerifyDevelopmentSimulationProfile(string planJson)
+    {
+        AgentTaskPlanDocument? plan;
+        try
+        {
+            plan = JsonSerializer.Deserialize<AgentTaskPlanDocument>(
+                planJson,
+                CanonicalJson.SerializerOptions);
+        }
+        catch (Exception exception) when (exception is JsonException or NotSupportedException)
+        {
+            return Result.Failure(new ApiProblemDescriptor(
+                AppProblemCodes.AgentPlanInvalid,
+                "Agent task plan JSON is invalid."));
+        }
+
+        if (plan?.PlannerSafetySummary?.IsSimulationOnly != true)
+        {
+            return Result.Success();
+        }
+
+        var options = cloudReadonlyOptions?.Value;
+        if (hostEnvironment?.IsDevelopment() != true ||
+            options is null ||
+            options.Mode != CloudReadonlyDataSourceMode.Simulation ||
+            !options.Simulation.Enabled ||
+            !options.Simulation.AlwaysMarkAsSimulation)
+        {
+            return Result.Failure(new ApiProblemDescriptor(
+                AppProblemCodes.AgentPlanInvalid,
+                "Simulation Agent execution is disabled. Regenerate the plan under the explicit Development Simulation profile; Real/Cloud execution will not fall back to Simulation."));
+        }
+
+        return Result.Success();
     }
 }

@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using AICopilot.AiGatewayService.Workflows.Executors;
+using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Result;
 
@@ -11,7 +12,33 @@ internal sealed class AgentRuntimeBusinessQueryToolService(
     IBusinessTextToSqlRuntime? businessTextToSqlRuntime,
     CloudReadOnlyTextToSqlFallbackRunner? cloudTextToSqlFallbackRunner)
 {
-    public async Task<object> QueryBusinessDatabaseReadonlyP1Async(
+    public Task<object> QueryBusinessDatabaseReadonlyP1Async(
+        AgentTaskPlanDocument plan,
+        AgentTaskRunState state,
+        CancellationToken cancellationToken)
+    {
+        return QueryBusinessDatabaseReadonlyCoreAsync(
+            plan.Goal,
+            plan,
+            state,
+            cancellationToken);
+    }
+
+    public Task<object> QueryBusinessDatabaseReadonlyP1Async(
+        AgentTask task,
+        AgentTaskPlanDocument plan,
+        AgentTaskRunState state,
+        CancellationToken cancellationToken)
+    {
+        return QueryBusinessDatabaseReadonlyCoreAsync(
+            task.Goal,
+            plan,
+            state,
+            cancellationToken);
+    }
+
+    private async Task<object> QueryBusinessDatabaseReadonlyCoreAsync(
+        string taskGoal,
         AgentTaskPlanDocument plan,
         AgentTaskRunState state,
         CancellationToken cancellationToken)
@@ -40,6 +67,7 @@ internal sealed class AgentRuntimeBusinessQueryToolService(
                            selectedDomains.Contains(item.Category))
             .ToArray();
 
+        var simulationOnly = plan.PlannerSafetySummary?.IsSimulationOnly == true;
         var cloudSource = candidates
             .Where(item => item.ExternalSystemType == DataSourceExternalSystemType.CloudReadOnly)
             .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
@@ -48,18 +76,22 @@ internal sealed class AgentRuntimeBusinessQueryToolService(
             .Where(item => item.ExternalSystemType == DataSourceExternalSystemType.SimulationBusiness)
             .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
             .FirstOrDefault();
-        var source = cloudSource is not null && (simulationSource is null || selectedIds.Contains(cloudSource.Id))
-            ? cloudSource
-            : simulationSource;
+        var source = simulationOnly
+            ? simulationSource
+            : cloudSource is not null && (simulationSource is null || selectedIds.Contains(cloudSource.Id))
+                ? cloudSource
+                : simulationSource;
 
         if (source is null)
         {
-            throw new InvalidOperationException("No authorized SimulationBusiness or CloudReadOnly data source is available for this agent task.");
+            throw new InvalidOperationException(simulationOnly
+                ? "The confirmed SimulationBusiness source is no longer available; Cloud/Real fallback is forbidden."
+                : "No authorized SimulationBusiness or CloudReadOnly data source is available for this agent task.");
         }
 
         if (source.ExternalSystemType == DataSourceExternalSystemType.CloudReadOnly)
         {
-            return await QueryCloudReadOnlyBusinessDatabaseAsync(source, plan, state, cancellationToken);
+            return await QueryCloudReadOnlyBusinessDatabaseAsync(source, taskGoal, state, cancellationToken);
         }
 
         if (businessTextToSqlRuntime is null)
@@ -70,7 +102,7 @@ internal sealed class AgentRuntimeBusinessQueryToolService(
         var draftResult = await businessTextToSqlRuntime.GenerateDraftAsync(
             new BusinessTextToSqlDraftRequest(
                 source.Id,
-                plan.Goal,
+                taskGoal,
                 plan.BusinessDomains,
                 source.DefaultQueryLimit,
                 PreviewOnly: false),
@@ -81,6 +113,15 @@ internal sealed class AgentRuntimeBusinessQueryToolService(
         }
 
         var draft = draftResult.Value;
+        if (simulationOnly &&
+            (draft.DataSourceId != source.Id ||
+             draft.SourceMode != DataSourceExternalSystemType.SimulationBusiness ||
+             !draft.IsSimulation))
+        {
+            throw new InvalidOperationException(
+                "The SimulationBusiness draft is unmarked or bound to a different source; execution stopped without fallback.");
+        }
+
         var queryResult = await businessTextToSqlRuntime.ExecuteAsync(
             new BusinessTextToSqlExecuteRequest(DraftId: draft.DraftId, RequestedLimit: source.DefaultQueryLimit),
             cancellationToken);
@@ -90,6 +131,15 @@ internal sealed class AgentRuntimeBusinessQueryToolService(
         }
 
         var result = queryResult.Value;
+        if (simulationOnly &&
+            (result.DataSourceId != source.Id ||
+             result.SourceMode != DataSourceExternalSystemType.SimulationBusiness ||
+             !result.IsSimulation))
+        {
+            throw new InvalidOperationException(
+                "The SimulationBusiness runtime returned an unmarked or mismatched source; execution stopped without fallback.");
+        }
+
         var rows = result.Rows
             .Select(row => row.ToDictionary(item => item.Key, item => item.Value))
             .ToArray();
@@ -129,7 +179,7 @@ internal sealed class AgentRuntimeBusinessQueryToolService(
 
     private async Task<object> QueryCloudReadOnlyBusinessDatabaseAsync(
         BusinessDatabaseDescriptor source,
-        AgentTaskPlanDocument plan,
+        string taskGoal,
         AgentTaskRunState state,
         CancellationToken cancellationToken)
     {
@@ -146,7 +196,7 @@ internal sealed class AgentRuntimeBusinessQueryToolService(
 
         var fallbackResult = await cloudTextToSqlFallbackRunner.RunAsync(
             database,
-            plan.Goal,
+            taskGoal,
             source.DefaultQueryLimit,
             cancellationToken);
         if (!fallbackResult.Succeeded)

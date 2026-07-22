@@ -949,6 +949,35 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  async function rejectAgentTaskPlan(taskId: string) {
+    const sessionId = resolvedSessionId.value
+    if (!sessionId || isSessionTransitionBlocked.value) {
+      return null
+    }
+    if (!ownsCurrentTask(taskId, sessionId) || agentTaskStore.isApprovalAuthorityUnknown(taskId)) {
+      rejectForeignSessionTarget()
+      return null
+    }
+
+    isAgentBusy.value = true
+    clearCurrentSessionError()
+    try {
+      const updated = await chatService.rejectAgentTaskPlan(taskId)
+      upsertAgentTask(updated)
+      await loadAgentApprovals(taskId)
+      await loadAgentAuditSummary(taskId)
+      await loadTimeline(sessionId)
+      return updated
+    } catch (error) {
+      const failureMessage = toFriendlyMessage(error)
+      await tryRefreshAgentTaskSnapshotForSession(sessionId)
+      setCurrentSessionError(failureMessage)
+      return null
+    } finally {
+      isAgentBusy.value = false
+    }
+  }
+
   async function decideAgentApproval(
     approval: AgentApprovalRequest,
     decision: 'approve' | 'reject',
@@ -1614,6 +1643,7 @@ export const useChatStore = defineStore('chat', () => {
     runAgentTask,
     retryAgentTask,
     approveAndRunAgentTask,
+    rejectAgentTaskPlan,
     decideAgentApproval,
     refreshAgentTaskSnapshot,
     loadAgentAuditSummary,

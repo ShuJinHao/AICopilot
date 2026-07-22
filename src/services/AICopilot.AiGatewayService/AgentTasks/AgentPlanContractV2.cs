@@ -131,10 +131,12 @@ internal static class AgentPlanContractSchemaAuthority
         plannerFallbackReason = "null",
         compilerPolicy = new
         {
-            phase = "P0-contract-only",
-            trustedCompilerAvailable = false,
+            phase = "P0-contract-with-development-simulation-bridge",
+            trustedCompilerAvailable = "development-simulation-only",
             draftGap = AgentPlanCapabilityGapCodes.PlanCompilerUnavailable,
-            executablePolicy = "fail-closed-until-single-p2-linear-compiler",
+            executablePolicy = "fail-closed-except-explicit-development-simulation-linear-bridge",
+            productionSimulation = "disabled",
+            fallbackPolicy = "real-cloud-never-falls-back-to-simulation",
             requiredCandidateCoverage = "every-required-available-candidate-needs-producer-node",
             requestedCapabilities = "hard-upper-bound-not-synthetic-required-work"
         },

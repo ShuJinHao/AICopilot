@@ -35,6 +35,7 @@ export type AgentPlanPreview = {
   dataSourceSummaries?: Array<{
     name?: string
     sourceMode?: string
+    isSimulation?: boolean
     sourceLabel?: string
   }>
   plannerSafetySummary?: {
@@ -43,6 +44,7 @@ export type AgentPlanPreview = {
     plannerModelSummary?: string | null
     plannerToolCatalogVersion?: number
     availableToolCount?: number
+    isSimulationOnly?: boolean
     toolRiskSummary?: Record<string, number>
   }
   steps?: AgentPlanPreviewStep[]
@@ -183,9 +185,10 @@ export function useAgentPlanPreview() {
     return '计划草案'
   })
   const isPlanDraftTask = computed(() =>
-    latestTask.value?.status === 'Draft' ||
-    latestPlan.value?.planKind === 'PlanDraft' ||
-    latestPlan.value?.isExecutable === false
+    (latestTask.value?.status === 'Draft' || latestTask.value?.status === 'WaitingPlanApproval') &&
+    (!latestPlan.value ||
+      latestPlan.value.planKind === 'PlanDraft' ||
+      latestPlan.value.isExecutable === false)
   )
   const draftPlanSteps = computed<AgentStep[]>(() =>
     (latestPlan.value?.steps ?? []).map((step, index) => ({
@@ -216,6 +219,12 @@ export function useAgentPlanPreview() {
     latestPlanDataSource.value?.sourceMode?.includes('CloudReadonly') ||
     false
   )
+  const latestPlanIsSimulation = computed(() =>
+    latestPlan.value?.plannerSafetySummary?.isSimulationOnly === true ||
+    latestPlanDataSource.value?.isSimulation === true ||
+    latestPlanDataSource.value?.sourceMode === 'SimulationBusiness' ||
+    latestPlanDataSource.value?.sourceMode === 'Simulation'
+  )
   const previewPlanSteps = computed(() => displayPlanSteps.value.slice(0, 4))
   const totalPreviewPlanStepCount = computed(() => displayPlanSteps.value.length)
   const hiddenPlanStepCount = computed(() => Math.max(0, totalPreviewPlanStepCount.value - previewPlanSteps.value.length))
@@ -235,6 +244,7 @@ export function useAgentPlanPreview() {
     latestPlanKindLabel,
     latestPlanSource,
     latestPlanIsCloudReadonly,
+    latestPlanIsSimulation,
     isPlanDraftTask,
     previewPlanSteps,
     totalPreviewPlanStepCount,

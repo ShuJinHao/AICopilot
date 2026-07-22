@@ -24,6 +24,12 @@ public class AiGatewayAgentTaskController(ISender sender) : ApiControllerBase(se
         return ReturnResult(await Sender.Send(command));
     }
 
+    [HttpPost("agent/task/reject-plan")]
+    public async Task<IActionResult> RejectAgentTaskPlan(RejectAgentTaskPlanCommand command)
+    {
+        return ReturnResult(await Sender.Send(command));
+    }
+
     [HttpPost("agent/task/run")]
     public async Task<IActionResult> RunAgentTask(RunAgentTaskCommand command)
     {
