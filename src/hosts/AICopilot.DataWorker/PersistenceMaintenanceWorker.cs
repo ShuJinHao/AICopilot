@@ -1,4 +1,5 @@
 using AICopilot.EntityFrameworkCore.Persistence;
+using AICopilot.Services.Contracts;
 using Microsoft.Extensions.Options;
 
 namespace AICopilot.DataWorker;
@@ -38,14 +39,34 @@ public sealed class PersistenceMaintenanceWorker(
                     TimeSpan.FromDays(settings.MarkerRetentionDays),
                     settings.BatchSize,
                     stoppingToken);
+                var artifactFileSetMaintenance = scope.ServiceProvider
+                    .GetRequiredService<IArtifactFileSetMaintenanceService>();
+                var artifactFileSetResult = await artifactFileSetMaintenance.RunOnceAsync(
+                    DateTimeOffset.UtcNow,
+                    TimeSpan.FromMinutes(settings.ReconciliationDelayMinutes),
+                    settings.BatchSize,
+                    stoppingToken);
+                var quotaStore = scope.ServiceProvider.GetService<IModelQuotaReservationStore>();
+                var reclaimedQuotaReservations = quotaStore is null
+                    ? 0
+                    : await quotaStore.ReclaimExpiredAsync(
+                        DateTimeOffset.UtcNow,
+                        settings.BatchSize,
+                        stoppingToken);
                 logger.LogInformation(
-                    "Persistence maintenance completed. CommittedFiles={CommittedFiles}; RolledBackFiles={RolledBackFiles}; FailedFiles={FailedFiles}; ActiveFiles={ActiveFiles}; DeletedMarkers={DeletedMarkers}; MarkerCleanupSkipped={MarkerCleanupSkipped}",
+                    "Persistence maintenance completed. CommittedFiles={CommittedFiles}; RolledBackFiles={RolledBackFiles}; FailedFiles={FailedFiles}; ActiveFiles={ActiveFiles}; DeletedMarkers={DeletedMarkers}; MarkerCleanupSkipped={MarkerCleanupSkipped}; ArtifactFileSetsConfirmed={ArtifactFileSetsConfirmed}; ArtifactFileSetsRolledBack={ArtifactFileSetsRolledBack}; ArtifactFileSetsFailed={ArtifactFileSetsFailed}; ArtifactFileSetsActive={ArtifactFileSetsActive}; ArtifactJournalUnreadable={ArtifactJournalUnreadable}; ReclaimedQuotaReservations={ReclaimedQuotaReservations}",
                     result.ReconciledCommittedFiles,
                     result.ReconciledRolledBackFiles,
                     result.FailedFileReconciliations,
                     result.SkippedActiveFileReconciliations,
                     result.DeletedCommitMarkers,
-                    result.MarkerCleanupSkipped);
+                    result.MarkerCleanupSkipped,
+                    artifactFileSetResult.ConfirmedOperations,
+                    artifactFileSetResult.RolledBackOperations,
+                    artifactFileSetResult.FailedOperations,
+                    artifactFileSetResult.ActiveOperations,
+                    artifactFileSetResult.HasUnreadableJournal,
+                    reclaimedQuotaReservations);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

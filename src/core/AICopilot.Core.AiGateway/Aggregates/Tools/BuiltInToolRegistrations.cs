@@ -182,7 +182,7 @@ public static class BuiltInToolRegistrations
         return new ToolRegistrationSeed(
             FinalizationCheckpointToolCode,
             "最终产物确认",
-            "Plan/lifecycle checkpoint: requests explicit final-output approval; ArtifactWorkspaceLifecycleCoordinator.FinalizeAsync alone produces the output, and no dispatcher or provider executes this entry.",
+            "Plan/lifecycle checkpoint: requests explicit final-output approval; the approved durable NodeRun atomically commits final files, Evidence, Usage, and terminal task state without provider dispatch.",
             ToolProviderType.Artifact,
             ToolRegistrationTargetType.AgentRuntime,
             ArtifactWorkspaceLifecycleTarget,

@@ -33,17 +33,6 @@ internal sealed record CanonicalAgentPlan(
 
 internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
 {
-    private static readonly string[] DevelopmentSimulationToolSequence =
-    [
-        "query_business_database_readonly",
-        "summarize_business_query_result",
-        "generate_markdown_report",
-        "finalize_artifacts"
-    ];
-
-    private static readonly string[] DevelopmentSimulationCapabilitySequence =
-        ["Analysis.GovernedQuery", "General.Chat"];
-
     private static readonly IReadOnlySet<string> FrozenCoreToolCodes = new HashSet<string>(
         [
             "read_uploaded_file",
@@ -578,10 +567,25 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             return InvalidResult("LinearV1 requires joinPolicies=[].");
         }
 
-        if (plan.Budgets.MaxNodes != 16 ||
-            plan.Budgets.MaxElapsedSeconds != 1800 ||
+        if (plan.Budgets.MaxNodes != AgentPlanContractVersions.DefaultMaxNodes ||
+            plan.Budgets.MaxToolCalls != AgentPlanContractVersions.DefaultMaxToolCalls ||
+            plan.Budgets.MaxModelCalls != AgentPlanContractVersions.DefaultMaxModelCalls ||
+            plan.Budgets.MaxInputTokens != AgentPlanContractVersions.DefaultMaxInputTokens ||
+            plan.Budgets.MaxOutputTokens != AgentPlanContractVersions.DefaultMaxOutputTokens ||
+            plan.Budgets.MaxElapsedSeconds != AgentPlanContractVersions.DefaultMaxElapsedSeconds ||
+            plan.Budgets.MaxCostAmount != AgentPlanContractVersions.DefaultMaxCostAmount ||
+            !string.Equals(
+                plan.Budgets.CostCurrency,
+                AgentPlanContractVersions.DefaultCostCurrency,
+                StringComparison.Ordinal) ||
+            plan.Budgets.MaxRetries != AgentPlanContractVersions.DefaultMaxRetries ||
+            plan.Budgets.MaxArtifactCount != AgentPlanContractVersions.DefaultMaxArtifactCount ||
+            plan.Budgets.MaxArtifactBytes != AgentPlanContractVersions.DefaultMaxArtifactBytes ||
             plan.Budgets.MaxCanonicalBytes != AgentPlanContractVersions.MaxPlanCanonicalBytes ||
-            !string.Equals(plan.Budgets.PolicyVersion, "budget-policy:v1", StringComparison.Ordinal))
+            !string.Equals(
+                plan.Budgets.PolicyVersion,
+                AgentPlanContractVersions.BudgetPolicyV1,
+                StringComparison.Ordinal))
         {
             return InvalidResult("Plan v2 budgets are outside the frozen P0 range/policy.");
         }
@@ -1105,6 +1109,14 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
         var allowedDataScopes = candidates.SelectMany(candidate => candidate.RequestedResources.DataSourceIds).ToHashSet();
         var allowedKnowledgeScopes = candidates.SelectMany(candidate => candidate.RequestedResources.KnowledgeBaseIds).ToHashSet();
         var nodeIds = new HashSet<string>(StringComparer.Ordinal);
+        long totalToolCalls = 0;
+        long totalModelCalls = 0;
+        long totalInputTokens = 0;
+        long totalOutputTokens = 0;
+        long totalRetries = 0;
+        long totalArtifactCount = 0;
+        long totalArtifactBytes = 0;
+        decimal totalCostAmount = 0m;
         for (var index = 0; index < orderedNodes.Length; index++)
         {
             var node = orderedNodes[index];
@@ -1143,9 +1155,15 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
                 node.RetryPolicy.MaxAttempts is < 1 or > 5 ||
                 !string.Equals(node.RetryPolicy.PolicyVersion, "retry-policy:v1", StringComparison.Ordinal) ||
                 node.RetryPolicy.BackoffClass is not ("None" or "Fixed" or "Exponential") ||
+                node.Budget.MaxToolCalls is < 0 or > 1 ||
+                node.Budget.MaxModelCalls < 0 ||
                 node.Budget.MaxInputTokens < 0 ||
                 node.Budget.MaxOutputTokens < 0 ||
                 node.Budget.MaxRows < 0 ||
+                node.Budget.MaxCostAmount < 0 ||
+                node.Budget.MaxCostAmount > plan.Budgets.MaxCostAmount ||
+                node.Budget.MaxArtifactCount < 0 ||
+                node.Budget.MaxArtifactBytes < 0 ||
                 string.IsNullOrWhiteSpace(node.ApprovalPolicy.PolicyCode) ||
                 !string.Equals(node.IdempotencyPolicy.PolicyVersion, "idempotency-policy:v1", StringComparison.Ordinal) ||
                 node.IdempotencyPolicy.Mode is not ("Deterministic" or "ReadOnly" or "Fenced") ||
@@ -1153,6 +1171,24 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             {
                 return InvalidResult($"Node '{node.NodeId}' has an invalid input/policy/range/side-effect contract.");
             }
+
+            if (node.SideEffectClass == "ReadOnly" &&
+                (node.Budget.MaxArtifactCount != 0 || node.Budget.MaxArtifactBytes != 0) ||
+                node.SideEffectClass == "ArtifactDraftOnly" &&
+                (node.Budget.MaxArtifactCount is < 1 or > AgentPlanContractVersions.DefaultNodeMaxArtifactCount ||
+                 node.Budget.MaxArtifactBytes is < 1 or > AgentPlanContractVersions.DefaultNodeMaxArtifactBytes))
+            {
+                return InvalidResult($"Node '{node.NodeId}' artifact budget does not match its side-effect class.");
+            }
+
+            totalToolCalls += node.Budget.MaxToolCalls;
+            totalModelCalls += node.Budget.MaxModelCalls;
+            totalInputTokens += node.Budget.MaxInputTokens;
+            totalOutputTokens += node.Budget.MaxOutputTokens;
+            totalRetries += node.RetryPolicy.MaxAttempts - 1;
+            totalArtifactCount += node.Budget.MaxArtifactCount;
+            totalArtifactBytes += node.Budget.MaxArtifactBytes;
+            totalCostAmount += node.Budget.MaxCostAmount;
 
             if (ContainsForbiddenExecutionSemantic(node.NodeKind) ||
                 node.RequestedToolCodes.Any(ContainsForbiddenExecutionSemantic) ||
@@ -1254,6 +1290,18 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             {
                 return InvalidResult($"Runtime Step at index {index} does not match its frozen Node/tool contract.");
             }
+        }
+
+        if (totalToolCalls > plan.Budgets.MaxToolCalls ||
+            totalModelCalls > plan.Budgets.MaxModelCalls ||
+            totalInputTokens > plan.Budgets.MaxInputTokens ||
+            totalOutputTokens > plan.Budgets.MaxOutputTokens ||
+            totalRetries > plan.Budgets.MaxRetries ||
+            totalArtifactCount > plan.Budgets.MaxArtifactCount ||
+            totalArtifactBytes > plan.Budgets.MaxArtifactBytes ||
+            totalCostAmount > plan.Budgets.MaxCostAmount)
+        {
+            return InvalidResult("Node upper-bound budgets exceed the immutable task budget.");
         }
 
         var missingRequiredProducer = orderedNodes.Length == 0
@@ -1549,6 +1597,7 @@ internal static class AgentEvidenceCanonicalizer
                 "ModelPrediction" => "ModelPrediction",
                 "LlmInference" => "LlmInference",
                 "PolicyDecision" => "Recommendation",
+                "ArtifactReference" => "ObservedFact",
                 _ => null
             };
             if (!string.Equals(evidence.TruthClass, expectedTruthClass, StringComparison.Ordinal))
@@ -1608,26 +1657,40 @@ internal static class AgentEvidenceCanonicalizer
                 return InvalidEvidence("Non-prediction Evidence must set prediction=null.");
             }
 
-            if (!string.Equals(
-                    evidence.Payload.PolicyVersion,
-                    AgentPlanContractVersions.InlineEvidencePolicyV1,
-                    StringComparison.Ordinal))
-            {
-                return InvalidEvidence("Evidence payload policyVersion must be inline-evidence-policy:v1.");
-            }
-
             if (string.Equals(evidence.Payload.StorageMode, "ArtifactReference", StringComparison.Ordinal) ||
                 string.Equals(evidence.EvidenceKind, "ArtifactReference", StringComparison.Ordinal))
             {
-                return InvalidEvidence(
-                    "ArtifactReference Evidence is disabled until AI-PERSIST-01d / AI-SEC-047 is closed.");
-            }
-
-            if (string.Equals(evidence.Payload.StorageMode, "InlineCanonicalJson", StringComparison.Ordinal))
-            {
-                if (string.IsNullOrWhiteSpace(evidence.Payload.InlineCanonicalJson))
+                if (!string.Equals(evidence.Payload.StorageMode, "ArtifactReference", StringComparison.Ordinal) ||
+                    !string.Equals(evidence.EvidenceKind, "ArtifactReference", StringComparison.Ordinal) ||
+                    !string.Equals(
+                        evidence.Payload.PolicyVersion,
+                        AgentPlanContractVersions.ArtifactReferenceEvidencePolicyV1,
+                        StringComparison.Ordinal) ||
+                    evidence.Payload.InlineCanonicalJson is not null ||
+                    string.IsNullOrWhiteSpace(evidence.Payload.PayloadRef) ||
+                    !evidence.Payload.PayloadRef.StartsWith("artifact-fileset:", StringComparison.Ordinal) ||
+                    evidence.Payload.PayloadRef.Length != "artifact-fileset:".Length + 32 ||
+                    !Guid.TryParseExact(evidence.Payload.PayloadRef["artifact-fileset:".Length..], "N", out _) ||
+                    evidence.Payload.ByteLength <= 0 ||
+                    !IsSha256(evidence.Payload.Sha256) ||
+                    !evidence.Payload.IsComplete ||
+                    string.IsNullOrWhiteSpace(evidence.Payload.MediaType) ||
+                    !string.Equals(evidence.Lineage.OutputDigest, evidence.Payload.Sha256, StringComparison.Ordinal))
                 {
-                    return InvalidEvidence("InlineCanonicalJson evidence requires a complete inline payload.");
+                    return InvalidEvidence(
+                        "ArtifactReference Evidence requires a verified opaque file-set reference, complete digest metadata, and artifact-reference-evidence-policy:v1.");
+                }
+            }
+            else if (string.Equals(evidence.Payload.StorageMode, "InlineCanonicalJson", StringComparison.Ordinal))
+            {
+                if (!string.Equals(
+                        evidence.Payload.PolicyVersion,
+                        AgentPlanContractVersions.InlineEvidencePolicyV1,
+                        StringComparison.Ordinal) ||
+                    string.IsNullOrWhiteSpace(evidence.Payload.InlineCanonicalJson))
+                {
+                    return InvalidEvidence(
+                        "InlineCanonicalJson evidence requires inline-evidence-policy:v1 and a complete inline payload.");
                 }
 
                 var rawPayloadBytes = Encoding.UTF8.GetByteCount(evidence.Payload.InlineCanonicalJson);
@@ -1658,7 +1721,7 @@ internal static class AgentEvidenceCanonicalizer
             }
             else
             {
-                return InvalidEvidence("P0 Evidence storageMode must be InlineCanonicalJson.");
+                return InvalidEvidence("Evidence storageMode is not supported by the frozen Evidence v1 policy.");
             }
 
             var unsigned = evidence with { Digest = string.Empty };

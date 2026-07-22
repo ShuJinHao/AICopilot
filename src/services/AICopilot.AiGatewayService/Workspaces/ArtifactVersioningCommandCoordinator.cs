@@ -3,6 +3,7 @@ using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
+using AICopilot.Core.AiGateway.Runtime.AgentExecution;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
@@ -14,6 +15,8 @@ public sealed class ArtifactVersioningCommandCoordinator(
     IReadRepository<AgentTask> taskReadRepository,
     IReadRepository<ApprovalRequest> approvalRepository,
     IArtifactWorkspaceFileStore fileStore,
+    IArtifactWorkspaceFileSetStore fileSetStore,
+    IArtifactFileSetOperationStore fileSetOperationStore,
     AgentAuditRecorder auditRecorder,
     ICurrentUser currentUser,
     IIdentityAccessService identityAccessService)
@@ -41,37 +44,40 @@ public sealed class ArtifactVersioningCommandCoordinator(
 
         var context = access.Value!;
         var oldVersion = context.Artifact.Version;
-        var archive = await ArtifactVersioningFiles.ArchiveCurrentVersionAsync(
+        var fileSetDraft = await ArtifactVersioningFiles.PrepareAtomicUpdateAsync(
             fileStore,
             context.Workspace.WorkspaceCode,
             context.Artifact,
+            request.Content,
             request.Comment,
             cancellationToken);
-        if (!archive.IsSuccess)
+        if (!fileSetDraft.IsSuccess)
         {
-            return Result.From(archive);
+            return Result.From(fileSetDraft);
         }
 
-        var written = await fileStore.WriteTextAsync(
+        var stage = await fileSetStore.StageAsync(
             context.Workspace.WorkspaceCode,
-            context.Artifact.RelativePath,
-            request.Content,
-            context.Artifact.MimeType,
-            cancellationToken);
+            "UpdateArtifactContent",
+            "draft/.committed",
+            fileSetDraft.Value!.Files,
+            cancellationToken,
+            new ArtifactFileSetAuthority(
+                context.Task.Id.Value,
+                NodeRunId: null,
+                context.Task.RunFencingToken,
+                NodeFencingToken: 0));
         var sha256 = ArtifactVersioningFiles.ComputeSha256(request.Content);
-        context.Artifact.AddVersion(written.RelativePath, written.FileSize, DateTimeOffset.UtcNow);
-
-        workspaceRepository.Update(context.Workspace);
-        await auditRecorder.RecordArtifactUpdatedAsync(
-            context.Task,
-            context.Workspace,
-            context.Artifact,
+        await CommitVersionUpdateAsync(
+            context,
+            stage,
+            fileSetDraft.Value.CurrentRelativePath,
             oldVersion,
-            context.Artifact.Version,
             sha256,
             request.Comment,
+            isRestore: false,
+            restoredVersion: null,
             cancellationToken);
-        await workspaceRepository.SaveChangesAsync(cancellationToken);
 
         var files = await fileStore.ListAsync(context.Workspace.WorkspaceCode, cancellationToken);
         return Result.Success(ArtifactWorkspaceMapper.Map(context.Workspace, context.Task, files));
@@ -106,41 +112,112 @@ public sealed class ArtifactVersioningCommandCoordinator(
         }
 
         var oldVersion = context.Artifact.Version;
-        var archive = await ArtifactVersioningFiles.ArchiveCurrentVersionAsync(
+        var fileSetDraft = await ArtifactVersioningFiles.PrepareAtomicUpdateAsync(
             fileStore,
             context.Workspace.WorkspaceCode,
             context.Artifact,
+            source.Value!,
             request.Comment,
             cancellationToken);
-        if (!archive.IsSuccess)
+        if (!fileSetDraft.IsSuccess)
         {
-            return Result.From(archive);
+            return Result.From(fileSetDraft);
         }
 
-        var written = await fileStore.WriteTextAsync(
+        var stage = await fileSetStore.StageAsync(
             context.Workspace.WorkspaceCode,
-            context.Artifact.RelativePath,
-            source.Value!,
-            context.Artifact.MimeType,
-            cancellationToken);
+            "RestoreArtifactVersion",
+            "draft/.committed",
+            fileSetDraft.Value!.Files,
+            cancellationToken,
+            new ArtifactFileSetAuthority(
+                context.Task.Id.Value,
+                NodeRunId: null,
+                context.Task.RunFencingToken,
+                NodeFencingToken: 0));
         var sha256 = ArtifactVersioningFiles.ComputeSha256(source.Value!);
-        context.Artifact.AddVersion(written.RelativePath, written.FileSize, DateTimeOffset.UtcNow);
-
-        workspaceRepository.Update(context.Workspace);
-        await auditRecorder.RecordArtifactVersionRestoredAsync(
-            context.Task,
-            context.Workspace,
-            context.Artifact,
-            request.Version,
+        await CommitVersionUpdateAsync(
+            context,
+            stage,
+            fileSetDraft.Value.CurrentRelativePath,
             oldVersion,
-            context.Artifact.Version,
             sha256,
             request.Comment,
+            isRestore: true,
+            restoredVersion: request.Version,
             cancellationToken);
-        await workspaceRepository.SaveChangesAsync(cancellationToken);
 
         var files = await fileStore.ListAsync(context.Workspace.WorkspaceCode, cancellationToken);
         return Result.Success(ArtifactWorkspaceMapper.Map(context.Workspace, context.Task, files));
+    }
+
+    private async Task CommitVersionUpdateAsync(
+        ArtifactVersioningContext context,
+        ArtifactFileSetStage stage,
+        string currentRelativePath,
+        int oldVersion,
+        string sha256,
+        string? comment,
+        bool isRestore,
+        int? restoredVersion,
+        CancellationToken cancellationToken)
+    {
+        var published = stage.Files.Single(file =>
+            file.RelativePath.EndsWith($"/{currentRelativePath}", StringComparison.Ordinal));
+        await fileSetStore.ExecuteAsync(
+            stage,
+            async commitCancellationToken =>
+            {
+                var now = DateTimeOffset.UtcNow;
+                context.Artifact.AddVersion(published.RelativePath, published.FileSize, now);
+                var operation = new ArtifactFileSetOperation(
+                    stage.CommitId,
+                    context.Task.Id,
+                    context.Workspace.Id,
+                    nodeRunId: null,
+                    context.Task.RunFencingToken,
+                    nodeFencingToken: 0,
+                    stage.OperationKind,
+                    stage.ManifestJson,
+                    stage.ManifestDigest,
+                    stage.StagingReference,
+                    now);
+                operation.MarkPublished(stage.PublishedReference, stage.ManifestDigest, now);
+                operation.MarkDatabaseCommitted(now);
+                operation.Complete(now);
+                fileSetOperationStore.AddCompleted(operation);
+
+                workspaceRepository.Update(context.Workspace);
+                if (isRestore)
+                {
+                    await auditRecorder.RecordArtifactVersionRestoredAsync(
+                        context.Task,
+                        context.Workspace,
+                        context.Artifact,
+                        restoredVersion!.Value,
+                        oldVersion,
+                        context.Artifact.Version,
+                        sha256,
+                        comment,
+                        commitCancellationToken);
+                }
+                else
+                {
+                    await auditRecorder.RecordArtifactUpdatedAsync(
+                        context.Task,
+                        context.Workspace,
+                        context.Artifact,
+                        oldVersion,
+                        context.Artifact.Version,
+                        sha256,
+                        comment,
+                        commitCancellationToken);
+                }
+
+                await workspaceRepository.SaveChangesAsync(commitCancellationToken);
+                return true;
+            },
+            cancellationToken);
     }
 
     private async Task<Result<ArtifactVersioningContext>> LoadEditableArtifactAsync(

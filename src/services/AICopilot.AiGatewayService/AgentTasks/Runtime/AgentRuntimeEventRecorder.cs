@@ -23,6 +23,20 @@ internal sealed class AgentRuntimeEventRecorder(
             : timelineProjectionWriter.StageApprovalRequestedAsync(task, approval, cancellationToken);
     }
 
+    public async Task StageFinalReviewSubmittedAsync(
+        AgentTask task,
+        ArtifactWorkspace workspace,
+        ApprovalRequest approval,
+        CancellationToken cancellationToken)
+    {
+        await auditRecorder.RecordFinalReviewSubmittedAsync(
+            task,
+            workspace,
+            approval,
+            cancellationToken);
+        await StageApprovalRequestedAsync(task, approval, cancellationToken);
+    }
+
     public Task StageStepStartedAsync(
         AgentTask task,
         AgentStep step,

@@ -15,7 +15,8 @@ internal sealed class AgentTaskRunQueueWorkerCoordinator(
     IAgentTaskRunQueue runQueue,
     IAgentTaskRuntime runtime,
     IOptions<AgentRunQueueOptions>? options = null,
-    AgentAuditRecorder? auditRecorder = null)
+    AgentAuditRecorder? auditRecorder = null,
+    DurableTaskClaimCoordinator? durableTaskClaimCoordinator = null)
 {
     private AgentRunQueueOptions QueueOptions => options?.Value ?? new AgentRunQueueOptions();
 
@@ -27,8 +28,126 @@ internal sealed class AgentTaskRunQueueWorkerCoordinator(
         return runQueue.LeaseNextAsync(leaseOwner, leaseDuration, cancellationToken);
     }
 
+    public Task<Result<DurableTaskClaim?>> ClaimNextAsync(
+        string leaseOwner,
+        TimeSpan leaseDuration,
+        CancellationToken cancellationToken)
+    {
+        return durableTaskClaimCoordinator is null
+            ? Task.FromResult<Result<DurableTaskClaim?>>(Result.Failure(new ApiProblemDescriptor(
+                AppProblemCodes.AgentTaskRunFenceStale,
+                "Durable task claim coordinator is unavailable.")))
+            : durableTaskClaimCoordinator.ClaimNextAsync(
+                leaseOwner,
+                leaseDuration,
+                cancellationToken);
+    }
+
+    public async Task ExecuteClaimAsync(
+        DurableTaskClaim claim,
+        CancellationToken cancellationToken)
+    {
+        if (durableTaskClaimCoordinator is null)
+        {
+            throw new InvalidOperationException("Durable task claim coordinator is unavailable.");
+        }
+
+        var started = await durableTaskClaimCoordinator.MarkStartedAsync(
+            claim,
+            DateTimeOffset.UtcNow,
+            cancellationToken);
+        if (!started.IsSuccess)
+        {
+            return;
+        }
+
+        var result = await runtime.RunClaimedAsync(claim, cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        if (claim.Task.Status == AgentTaskStatus.ReconciliationRequired)
+        {
+            return;
+        }
+
+        var terminalStatus = AgentTaskRunQueueStatus.Succeeded;
+        string? failureCode = null;
+        string safeMessage;
+        if (!result.IsSuccess)
+        {
+            var errors = result.Errors?.ToArray();
+            var publicPlanFailure = AgentPlanPublicFailureDisclosurePolicy.ResolveResultErrors(errors);
+            var problem = errors?.OfType<ApiProblemDescriptor>().FirstOrDefault();
+            terminalStatus = AgentTaskRunQueueStatus.Failed;
+            failureCode = publicPlanFailure?.Disclosure.Code
+                ?? problem?.Code
+                ?? "agent_task_run_failed";
+            safeMessage = publicPlanFailure?.Disclosure.Detail
+                ?? problem?.Detail
+                ?? "Agent task run failed before runtime execution completed.";
+        }
+        else if (claim.Task.Status == AgentTaskStatus.Cancelled)
+        {
+            terminalStatus = AgentTaskRunQueueStatus.Cancelled;
+            failureCode = AppProblemCodes.AgentTaskCancellationRequested;
+            safeMessage = "Agent task cancellation requested.";
+        }
+        else if (claim.Task.Status == AgentTaskStatus.Failed)
+        {
+            terminalStatus = AgentTaskRunQueueStatus.Failed;
+            failureCode = claim.RunAttempt.FailureCode ?? "agent_task_failed";
+            safeMessage = claim.RunAttempt.SafeMessage
+                ?? claim.Task.FinalSummary
+                ?? "Agent task failed.";
+        }
+        else
+        {
+            safeMessage = $"Agent task run reached {claim.Task.Status}.";
+        }
+
+        await durableTaskClaimCoordinator.CompleteAsync(
+            claim,
+            terminalStatus,
+            failureCode,
+            safeMessage,
+            now,
+            cancellationToken);
+    }
+
+    public async Task FailClaimAsync(
+        DurableTaskClaim claim,
+        string failureCode,
+        string safeMessage,
+        CancellationToken cancellationToken)
+    {
+        if (durableTaskClaimCoordinator is null)
+        {
+            return;
+        }
+
+        var sanitized = ToolExecutionRecordSanitizer.Sanitize(safeMessage, 2000)
+            ?? "Agent task run worker failed.";
+        await durableTaskClaimCoordinator.CompleteAsync(
+            claim,
+            AgentTaskRunQueueStatus.Failed,
+            failureCode,
+            sanitized,
+            DateTimeOffset.UtcNow,
+            cancellationToken);
+    }
+
     public async Task RecoverExpiredStartedLeasesAsync(CancellationToken cancellationToken)
     {
+        if (QueueOptions.StaleLeaseAction == AgentRunQueueStaleLeaseAction.Recover)
+        {
+            if (durableTaskClaimCoordinator is not null)
+            {
+                await durableTaskClaimCoordinator.RecoverExpiredStartedAsync(
+                    DateTimeOffset.UtcNow,
+                    cancellationToken);
+            }
+
+            return;
+        }
+
         if (QueueOptions.StaleLeaseAction != AgentRunQueueStaleLeaseAction.Fail)
         {
             return;

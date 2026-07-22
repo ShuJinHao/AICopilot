@@ -29,6 +29,7 @@ internal static class DataWorkerComposition
         builder.Services.AddScoped<ICurrentUser, WorkerCurrentUser>();
         builder.Services.AddHostedService<OutboxDispatcher>();
         builder.Services.AddHostedService<AgentTaskRunQueueWorker>();
+        builder.Services.AddHostedService<AgentOutcomeReconciliationWorker>();
         builder.Services.AddScoped<PersistenceFileMaintenanceService>();
         builder.Services.AddOptions<PersistenceMaintenanceOptions>()
             .BindConfiguration(PersistenceMaintenanceOptions.SectionName)

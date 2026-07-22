@@ -29,6 +29,8 @@ public static class AppProblemCodes
     public const string ModelRequestTimeout = "model_request_timeout";
     public const string ApprovalStreamFailed = "approval_stream_failed";
     public const string ApprovalAlreadyProcessed = "approval_already_processed";
+    public const string AgentApprovalStateConflict = "agent_approval_state_conflict";
+    public const string AgentApprovalRejected = "agent_approval_rejected";
     public const string ApprovalPending = "approval_pending";
     public const string CapabilityNotAllowed = "capability_not_allowed";
     public const string ControlActionBlocked = "control_action_blocked";
@@ -66,8 +68,13 @@ public static class AppProblemCodes
     public const string AgentTaskRunQueued = "agent_task_run_queued";
     public const string AgentTaskRunQueueNotFound = "agent_task_run_queue_not_found";
     public const string AgentTaskRunQueueLeaseExpired = "agent_task_run_queue_lease_expired";
+    public const string AgentTaskRunFenceStale = "agent_task_run_fence_stale";
+    public const string AgentNodeRunFenceStale = "agent_node_run_fence_stale";
+    public const string AgentNodeRunStateConflict = "agent_node_run_state_conflict";
+    public const string AgentRunBudgetExceeded = "agent_run_budget_exceeded";
     public const string AgentWorkerUnavailable = "agent_worker_unavailable";
     public const string AgentWorkerWorkspaceMismatch = "agent_worker_workspace_mismatch";
+    public const string AgentFinalizationStateConflict = "agent_finalization_state_conflict";
     public const string AgentRunQueueDeadLetterNotAllowed = "agent_run_queue_dead_letter_not_allowed";
     public const string AgentRunQueueOperationDenied = "agent_run_queue_operation_denied";
 }

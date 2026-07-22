@@ -54,6 +54,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<IAgentRuntimeSettingsProvider, AgentRuntimeSettingsProvider>();
         builder.Services.AddScoped<IAgentArtifactWorkspaceService, AgentArtifactWorkspaceService>();
         builder.Services.AddScoped<IAgentTaskRuntime, AgentTaskRuntime>();
+        builder.Services.AddScoped<IAgentPlanRuntimeSnapshotVerifier, AgentPlanRuntimeSnapshotVerifier>();
         builder.Services.AddScoped<IAgentPlanAuthorizationFreshVerifier, AgentPlanAuthorizationFreshVerifier>();
         builder.Services.AddScoped<IAgentTaskRunQueue, AgentTaskRunQueue>();
         builder.Services.AddScoped<AgentTaskDtoQueryService>();
@@ -68,6 +69,16 @@ public static class DependencyInjection
         builder.Services.AddScoped<ArtifactWorkspaceP9Coordinator>();
         builder.Services.AddScoped<AgentRuntimeEventRecorder>();
         builder.Services.AddScoped<AgentTaskRunQueueWorkerCoordinator>();
+        builder.Services.AddScoped<DurableTaskClaimCoordinator>();
+        builder.Services.AddScoped<AgentNodeRunMaterializer>();
+        builder.Services.AddScoped<NodeRunClaimCoordinator>();
+        builder.Services.AddScoped<NodeCheckpointCoordinator>();
+        builder.Services.AddScoped<AgentFinalizationNodeExecutor>();
+        builder.Services.AddScoped<NodeOutcomeReconciliationCoordinator>();
+        builder.Services.AddScoped<IAgentOutcomeAuthorityProbe, ArtifactFileSetOutcomeAuthorityProbe>();
+        builder.Services.AddScoped<AgentArtifactReferenceEvidenceResolver>();
+        builder.Services.AddScoped<AgentArtifactFileSetCheckpointGate>();
+        builder.Services.AddScoped<AgentRuntimeWriteAuthorityAccessor>();
         builder.Services.AddScoped<SessionTimelineQueryCoordinator>();
         builder.Services.AddScoped<AgentTaskAuditQueryCoordinator>();
         builder.Services.AddScoped<AgentTaskToolExecutionQueryCoordinator>();
@@ -104,9 +115,11 @@ public static class DependencyInjection
             provider.GetRequiredService<AgentPlanCanonicalizer>());
         builder.Services.AddSingleton<IAgentTaskPlanPersistencePolicy, AgentTaskPlanPersistencePolicy>();
         builder.Services.AddSingleton<IntentResultToCandidateAdapter>();
+        builder.Services.AddSingleton<IAgentPlanCompiler, DeterministicLinearAgentPlanCompiler>();
         builder.Services.AddSingleton(provider => new AgentPlanDraftContractAuthority(
             provider.GetRequiredService<IntentResultToCandidateAdapter>(),
-            provider.GetRequiredService<AgentPlanCanonicalizer>()));
+            provider.GetRequiredService<AgentPlanCanonicalizer>(),
+            provider.GetRequiredService<IAgentPlanCompiler>()));
         builder.Services.AddScoped<AgentAuditRecorder>();
         builder.Services.TryAddSingleton<ISessionExecutionLock, InMemorySessionExecutionLock>();
         builder.Services.AddSingleton<IRequestValidator<ChatStreamRequest>, ChatStreamRequestValidator>();

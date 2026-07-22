@@ -37,6 +37,7 @@ public static class DependencyInjection
 
         AddLocalFileStorage(builder.Services);
         builder.Services.AddSingleton<IArtifactWorkspaceFileStore, LocalArtifactWorkspaceFileStore>();
+        builder.Services.AddScoped<IArtifactWorkspaceFileSetStore, LocalArtifactWorkspaceFileSetStore>();
         builder.Services.AddSingleton<IAgentTableFileParser, AgentTableFileParser>();
         builder.Services.AddSingleton<IAgentArtifactDocumentGenerator, AgentArtifactDocumentGenerator>();
         builder.Services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();

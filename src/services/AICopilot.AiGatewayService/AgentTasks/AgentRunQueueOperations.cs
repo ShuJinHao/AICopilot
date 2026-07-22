@@ -251,12 +251,12 @@ public sealed class GetAgentRunQueueSummaryQueryHandler(
             .FirstOrDefault();
         return new AgentRunQueueSummaryDto(
             queueItems.Count(item => item.Status == AgentTaskRunQueueStatus.Queued),
-            queueItems.Count(item => item.Status == AgentTaskRunQueueStatus.Leased),
+            queueItems.Count(item => item.Status is AgentTaskRunQueueStatus.Claimed or AgentTaskRunQueueStatus.Started),
             queueItems.Count(item => item.Status == AgentTaskRunQueueStatus.Succeeded),
             queueItems.Count(item => item.Status == AgentTaskRunQueueStatus.Failed),
             queueItems.Count(item => item.Status == AgentTaskRunQueueStatus.Cancelled),
             queueItems.Count(item => item.Status == AgentTaskRunQueueStatus.DeadLetter),
-            queueItems.Count(item => item.Status == AgentTaskRunQueueStatus.Leased &&
+            queueItems.Count(item => (item.Status is AgentTaskRunQueueStatus.Claimed or AgentTaskRunQueueStatus.Started) &&
                                      item.LeaseExpiresAt.HasValue &&
                                      item.LeaseExpiresAt.Value <= nowUtc),
             oldestQueuedAt,
@@ -411,8 +411,8 @@ internal static class AgentWorkerStatusCalculator
             httpApiWorkspaceRootHash,
             activeWorkers.Length,
             queueItems.Count(item => item.Status == AgentTaskRunQueueStatus.Queued),
-            queueItems.Count(item => item.Status == AgentTaskRunQueueStatus.Leased),
-            queueItems.Count(item => item.Status == AgentTaskRunQueueStatus.Leased &&
+            queueItems.Count(item => item.Status is AgentTaskRunQueueStatus.Claimed or AgentTaskRunQueueStatus.Started),
+            queueItems.Count(item => (item.Status is AgentTaskRunQueueStatus.Claimed or AgentTaskRunQueueStatus.Started) &&
                                      item.LeaseExpiresAt.HasValue &&
                                      item.LeaseExpiresAt.Value <= nowUtc),
             queueItems

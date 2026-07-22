@@ -3,6 +3,7 @@ using AICopilot.AiGatewayService.Sessions;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
+using AICopilot.Core.AiGateway.Runtime.AgentExecution;
 using AICopilot.Core.AiGateway.Specifications.Approvals;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Repository;
@@ -16,6 +17,7 @@ public sealed class ArtifactWorkspaceLifecycleCoordinator(
     IRepository<ApprovalRequest> approvalRepository,
     IAgentTaskRunAttemptStore runAttemptStore,
     IArtifactWorkspaceFileStore fileStore,
+    IAgentTaskRunQueue runQueue,
     AgentAuditRecorder auditRecorder,
     ICurrentUser currentUser,
     IIdentityAccessService identityAccessService,
@@ -68,7 +70,7 @@ public sealed class ArtifactWorkspaceLifecycleCoordinator(
 
         if (finalApproval?.Status == AgentApprovalStatus.Approved)
         {
-            return Result.Invalid("Workspace final output is already approved; call finalize to publish final artifacts.");
+            return Result.Invalid("Workspace final output is already approved and can only be published by the durable finalization NodeRun.");
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -135,119 +137,50 @@ public sealed class ArtifactWorkspaceLifecycleCoordinator(
             return Result.Invalid("Workspace has no draft artifacts to finalize.");
         }
 
-        var now = DateTimeOffset.UtcNow;
         var approvals = await approvalRepository.ListAsync(
             new ApprovalRequestsByTaskSpec(task.Id),
             cancellationToken);
-        var approval = approvals.FirstOrDefault(item =>
-            item.ApprovalType == AgentApprovalType.FinalOutput &&
-            string.Equals(item.TargetId, workspace.WorkspaceCode, StringComparison.Ordinal));
-        if (approval is null)
+        if (task.IsRunInProgress(DateTimeOffset.UtcNow))
         {
-            return Result.Invalid("Final output approval is required before workspace finalization.");
+            var activeFiles = await fileStore.ListAsync(workspace.WorkspaceCode, cancellationToken);
+            return Result.Success(ArtifactWorkspaceMapper.Map(workspace, task, activeFiles));
         }
 
-        if (approval.Status == AgentApprovalStatus.Pending)
+        var attempts = await runAttemptStore.ListByTaskAsync(task.Id, cancellationToken);
+        var checkpoint = AgentFinalizationCheckpointStateValidator.ValidatePaused(
+            task,
+            workspace,
+            approvals,
+            attempts);
+        if (!checkpoint.IsSuccess)
+        {
+            return Result.From(checkpoint);
+        }
+
+        if (checkpoint.Value!.Phase != AgentFinalizationCheckpointPhase.Approved)
         {
             return Result.Invalid("Final output approval is still pending.");
         }
 
-        if (approval.Status == AgentApprovalStatus.Rejected)
+        if (currentUser.Id is not { } requestedBy)
         {
-            return Result.Invalid("Workspace final output approval was rejected.");
+            return Result.Unauthorized(new ApiProblemDescriptor(
+                AuthProblemCodes.Unauthorized,
+                "Current user id is missing or invalid."));
         }
 
-        if (approval.Status is AgentApprovalStatus.Cancelled or AgentApprovalStatus.Expired)
-        {
-            return Result.Invalid("Workspace final output approval is no longer valid.");
-        }
-
-        if (approval.Status != AgentApprovalStatus.Approved)
-        {
-            return Result.Invalid("Final output approval is not approved.");
-        }
-
-        foreach (var artifact in workspace.Artifacts.Where(item => item.Status != ArtifactStatus.Final))
-        {
-            if (artifact.Status is ArtifactStatus.Rejected or ArtifactStatus.Deleted)
-            {
-                return Result.Invalid($"Artifact {artifact.Name} cannot be finalized from status {artifact.Status}.");
-            }
-
-            if (artifact.Status is ArtifactStatus.Draft or ArtifactStatus.Reviewing)
-            {
-                artifact.Approve(now);
-            }
-
-            var currentPath = ArtifactPathGuard.NormalizeRelativePath(artifact.RelativePath);
-            var finalPath = $"final/{currentPath}";
-            await fileStore.CopyAsync(workspace.WorkspaceCode, currentPath, finalPath, artifact.MimeType, cancellationToken);
-            artifact.MarkFinal(finalPath, now);
-        }
-
-        workspace.FinalizeWorkspace(now);
-        if (task.Status == AgentTaskStatus.WorkspaceReady)
-        {
-            task.WaitForFinalApproval(now);
-        }
-
-        if (task.Status == AgentTaskStatus.WaitingFinalApproval)
-        {
-            task.MarkFinalized(now);
-        }
-
-        if (task.Status == AgentTaskStatus.Finalized)
-        {
-            task.Complete("产物已确认并输出到 final 目录。", now);
-        }
-
-        var activeRunAttemptId = task.ActiveRunAttemptId;
-        var finalStep = task.Steps
-            .OrderByDescending(step => step.StepIndex)
-            .FirstOrDefault(step => string.Equals(step.ToolCode, "finalize_artifacts", StringComparison.OrdinalIgnoreCase));
-        if (finalStep is not null &&
-            finalStep.Status is AgentStepStatus.WaitingApproval or AgentStepStatus.Approved)
-        {
-            finalStep.Complete("""{"status":"finalized"}""", now);
-        }
-
-        if (activeRunAttemptId is not null)
-        {
-            var attempt = await runAttemptStore.FirstByIdAsync(activeRunAttemptId.Value, cancellationToken);
-            if (attempt is not null && !attempt.IsTerminal)
-            {
-                attempt.MarkSucceeded(now, "Workspace final output approved.");
-                runAttemptStore.Update(attempt);
-                task.ReleaseRunLease(now, clearActiveAttempt: true);
-            }
-        }
-
-        workspaceRepository.Update(workspace);
-        taskRepository.Update(task);
-        await auditRecorder.RecordApprovalDecisionAsync(
-            approval,
+        var queued = await runQueue.EnqueueAsync(
             task,
-            AuditResults.Succeeded,
-            "Workspace final output approved.",
+            AgentTaskRunTriggerType.ApprovalResume,
+            requestedBy,
             cancellationToken);
-        await auditRecorder.RecordWorkspaceFinalizedAsync(
-            task,
-            workspace,
-            AuditResults.Succeeded,
-            "Workspace artifacts finalized.",
-            cancellationToken);
-        if (timelineProjectionWriter is not null)
+        var alreadyQueued = queued.Errors?
+            .OfType<ApiProblemDescriptor>()
+            .Any(error => error.Code == AppProblemCodes.AgentTaskRunInProgress) == true;
+        if (!queued.IsSuccess && !alreadyQueued)
         {
-            if (finalStep is not null &&
-                finalStep.Status == AgentStepStatus.Completed)
-            {
-                await timelineProjectionWriter.StageStepCompletedAsync(task, finalStep, cancellationToken);
-            }
-
-            await timelineProjectionWriter.StageWorkspaceFinalizedAsync(task, workspace, cancellationToken);
+            return Result.From(queued);
         }
-
-        await workspaceRepository.SaveChangesAsync(cancellationToken);
 
         var files = await fileStore.ListAsync(workspace.WorkspaceCode, cancellationToken);
         return Result.Success(ArtifactWorkspaceMapper.Map(workspace, task, files));

@@ -15,7 +15,7 @@ public sealed class AgentTaskLifecycleCoordinator(
     IRepository<ApprovalRequest> approvalRepository,
     IReadRepository<ArtifactWorkspace> workspaceRepository,
     IAgentTaskRunQueueStore queueStore,
-    IAgentTaskRunAttemptStore runAttemptStore,
+    IAgentTaskCancellationStore cancellationStore,
     IAgentTaskRunQueue runQueue,
     AgentTaskPlanFreshReadGate freshReadGate,
     IOptions<AgentRunQueueOptions>? options = null,
@@ -144,47 +144,40 @@ public sealed class AgentTaskLifecycleCoordinator(
         }
 
         var now = DateTimeOffset.UtcNow;
-        var activeBeforeCancel = await queueStore.ListActiveByTaskAsync(task.Id, cancellationToken);
-        var oldStatuses = activeBeforeCancel.ToDictionary(
-            item => item.Id,
-            item => item.Status.ToString());
-        var cancelledItems = await runQueue.CancelActiveAsync(
-            task,
+        var checkpoint = await cancellationStore.RequestAsync(
+            task.Id,
             now,
             "Agent task cancellation requested.",
             cancellationToken);
-        await CancelPendingApprovalsAsync(task, now, cancellationToken);
-
-        if (task.ActiveRunAttemptId is not null)
+        if (checkpoint.Disposition == AgentTaskCancellationDisposition.StateConflict)
         {
-            var attempt = await runAttemptStore.FirstByIdAsync(task.ActiveRunAttemptId.Value, cancellationToken);
-            if (attempt is not null && !attempt.IsTerminal)
-            {
-                attempt.Cancel(now, "Agent task cancellation requested.");
-                runAttemptStore.Update(attempt);
-            }
+            return Result.Failure(new ApiProblemDescriptor(
+                AppProblemCodes.AgentNodeRunStateConflict,
+                checkpoint.SafeMessage));
         }
 
-        task.Cancel(now);
-        taskRepository.Update(task);
-        await taskRepository.SaveChangesAsync(cancellationToken);
+        var affectedItems = checkpoint.QueueItems.Select(snapshot => snapshot.Item).ToArray();
         if (auditRecorder is not null)
         {
-            foreach (var item in cancelledItems)
+            foreach (var snapshot in checkpoint.QueueItems)
             {
                 await auditRecorder.RecordRunQueueOperationAsync(
-                    "Agent.RunQueueCancel",
-                    item,
+                    checkpoint.Disposition == AgentTaskCancellationDisposition.ReconciliationRequired
+                        ? "Agent.RunQueueCancelReconciliationRequired"
+                        : "Agent.RunQueueCancel",
+                    snapshot.Item,
                     AuditResults.Succeeded,
-                    "Agent task run queue item cancelled.",
-                    oldStatuses.GetValueOrDefault(item.Id, AgentTaskRunQueueStatus.Queued.ToString()),
+                    checkpoint.SafeMessage,
+                    snapshot.PreviousStatus.ToString(),
                     attempt: null,
                     retryAttemptNo: null,
                     cancellationToken);
             }
+
+            await taskRepository.SaveChangesAsync(cancellationToken);
         }
 
-        return Result.Success(cancelledItems);
+        return Result.Success<IReadOnlyCollection<AgentTaskRunQueueItem>>(affectedItems);
     }
 
     private async Task CancelPendingApprovalsAsync(

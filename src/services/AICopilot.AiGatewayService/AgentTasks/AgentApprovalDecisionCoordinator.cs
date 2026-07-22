@@ -119,7 +119,8 @@ public sealed class AgentApprovalDecisionCoordinator(
 
         await approvalRepository.SaveChangesAsync(cancellationToken);
 
-        if (isApproved && approval.ApprovalType == AgentApprovalType.ToolCall)
+        if (isApproved && approval.ApprovalType is
+                AgentApprovalType.ToolCall or AgentApprovalType.FinalOutput)
         {
             _ = await runQueue.EnqueueAsync(
                 task,

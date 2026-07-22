@@ -41,7 +41,8 @@ public sealed class AgentTaskRunQueueStore(
     {
         return await dbContext.AgentTaskRunQueueItems
             .Where(item => item.Status == AgentTaskRunQueueStatus.Queued ||
-                           item.Status == AgentTaskRunQueueStatus.Leased)
+                           item.Status == AgentTaskRunQueueStatus.Claimed ||
+                           item.Status == AgentTaskRunQueueStatus.Started)
             .OrderBy(item => item.AvailableAt)
             .ToListAsync(cancellationToken);
     }
@@ -84,7 +85,8 @@ public sealed class AgentTaskRunQueueStore(
         return dbContext.AgentTaskRunQueueItems
             .Where(item => item.TaskId == taskId)
             .Where(item => item.Status == AgentTaskRunQueueStatus.Queued ||
-                           item.Status == AgentTaskRunQueueStatus.Leased);
+                           item.Status == AgentTaskRunQueueStatus.Claimed ||
+                           item.Status == AgentTaskRunQueueStatus.Started);
     }
 }
 

@@ -18,7 +18,9 @@ internal static class AgentPlanContractVersions
     public const string ExecutionSnapshotV1 = "execution-snapshot:v1";
     public const string PlanPolicyV1 = "plan-contract-policy:v1";
     public const string ConcurrencyPolicyV1 = "linear-sequential-concurrency:v1";
+    public const string BudgetPolicyV1 = "budget-policy:v1";
     public const string InlineEvidencePolicyV1 = "inline-evidence-policy:v1";
+    public const string ArtifactReferenceEvidencePolicyV1 = "artifact-reference-evidence-policy:v1";
 
     public const int MaxPlanCanonicalBytes = 262_144;
     public const int MaxNodeInputCanonicalBytes = AgentStructuredPayloadPolicyV1.MaxNodeToolInputUtf8Bytes;
@@ -26,6 +28,22 @@ internal static class AgentPlanContractVersions
     public const int MaxStepTitleCharacters = 200;
     public const int MaxStepDescriptionCharacters = 1_000;
     public const int MaxStepToolCodeCharacters = 100;
+
+    // P1 freezes a complete workflow budget into Plan v2. These are product-policy
+    // ceilings for the current production compiler, not runtime fallbacks.
+    public const int DefaultMaxNodes = 16;
+    public const int DefaultMaxToolCalls = 32;
+    public const int DefaultMaxModelCalls = 8;
+    public const int DefaultMaxInputTokens = 64_000;
+    public const int DefaultMaxOutputTokens = 16_000;
+    public const int DefaultMaxElapsedSeconds = 1_800;
+    public const decimal DefaultMaxCostAmount = 100m;
+    public const string DefaultCostCurrency = "CNY";
+    public const int DefaultMaxRetries = 8;
+    public const int DefaultMaxArtifactCount = 32;
+    public const long DefaultMaxArtifactBytes = 536_870_912;
+    public const int DefaultNodeMaxArtifactCount = 1;
+    public const long DefaultNodeMaxArtifactBytes = 134_217_728;
 }
 
 internal static class AgentPlanRetiredSelectionContract
@@ -508,9 +526,14 @@ internal sealed record AgentPlanRetryPolicyDocument(
     [property: JsonPropertyName("backoffClass")] string BackoffClass);
 
 internal sealed record AgentPlanNodeBudgetDocument(
+    [property: JsonPropertyName("maxToolCalls")] int MaxToolCalls,
+    [property: JsonPropertyName("maxModelCalls")] int MaxModelCalls,
     [property: JsonPropertyName("maxInputTokens")] int MaxInputTokens,
     [property: JsonPropertyName("maxOutputTokens")] int MaxOutputTokens,
-    [property: JsonPropertyName("maxRows")] int MaxRows);
+    [property: JsonPropertyName("maxRows")] int MaxRows,
+    [property: JsonPropertyName("maxCostAmount")] decimal MaxCostAmount,
+    [property: JsonPropertyName("maxArtifactCount")] int MaxArtifactCount,
+    [property: JsonPropertyName("maxArtifactBytes")] long MaxArtifactBytes);
 
 internal sealed record AgentPlanApprovalPolicyDocument(
     [property: JsonPropertyName("required")] bool Required,
@@ -523,7 +546,16 @@ internal sealed record AgentPlanIdempotencyPolicyDocument(
 internal sealed record AgentPlanBudgetDocument(
     [property: JsonPropertyName("policyVersion")] string PolicyVersion,
     [property: JsonPropertyName("maxNodes")] int MaxNodes,
+    [property: JsonPropertyName("maxToolCalls")] int MaxToolCalls,
+    [property: JsonPropertyName("maxModelCalls")] int MaxModelCalls,
+    [property: JsonPropertyName("maxInputTokens")] int MaxInputTokens,
+    [property: JsonPropertyName("maxOutputTokens")] int MaxOutputTokens,
     [property: JsonPropertyName("maxElapsedSeconds")] int MaxElapsedSeconds,
+    [property: JsonPropertyName("maxCostAmount")] decimal MaxCostAmount,
+    [property: JsonPropertyName("costCurrency")] string CostCurrency,
+    [property: JsonPropertyName("maxRetries")] int MaxRetries,
+    [property: JsonPropertyName("maxArtifactCount")] int MaxArtifactCount,
+    [property: JsonPropertyName("maxArtifactBytes")] long MaxArtifactBytes,
     [property: JsonPropertyName("maxCanonicalBytes")] int MaxCanonicalBytes);
 
 internal sealed record AgentPlanApprovalSummaryDocument(

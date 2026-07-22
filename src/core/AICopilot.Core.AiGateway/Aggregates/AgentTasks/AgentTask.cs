@@ -72,6 +72,8 @@ public sealed class AgentTask : BaseEntity<AgentTaskId>, IAggregateRoot<AgentTas
 
     public DateTimeOffset? RunLeaseExpiresAt { get; private set; }
 
+    public long RunFencingToken { get; private set; }
+
     public string PlanJson { get; private set; } = string.Empty;
 
     public string? FinalSummary { get; private set; }
@@ -104,7 +106,15 @@ public sealed class AgentTask : BaseEntity<AgentTaskId>, IAggregateRoot<AgentTas
 
         ActiveRunAttemptId = attemptId;
         RunAttemptCount = Math.Max(RunAttemptCount, attemptNo);
+        AdvanceRunFencingToken(nowUtc);
         AcquireRunLease(leaseId, leaseOwner, leaseExpiresAt, nowUtc);
+    }
+
+    public long AdvanceRunFencingToken(DateTimeOffset nowUtc)
+    {
+        RunFencingToken = checked(RunFencingToken + 1);
+        UpdatedAt = nowUtc;
+        return RunFencingToken;
     }
 
     public void AcquireRunLease(
@@ -202,12 +212,56 @@ public sealed class AgentTask : BaseEntity<AgentTaskId>, IAggregateRoot<AgentTas
 
     public void Start(DateTimeOffset nowUtc)
     {
-        if (Status is not AgentTaskStatus.PlanApproved and not AgentTaskStatus.WaitingToolApproval)
+        if (Status is not AgentTaskStatus.PlanApproved
+            and not AgentTaskStatus.Queued
+            and not AgentTaskStatus.WaitingToolApproval)
         {
             throw new InvalidOperationException("Only approved agent tasks can start.");
         }
 
         Status = AgentTaskStatus.Running;
+        UpdatedAt = nowUtc;
+    }
+
+    public void MarkQueued(DateTimeOffset nowUtc)
+    {
+        if (Status != AgentTaskStatus.PlanApproved)
+        {
+            throw new InvalidOperationException("Only an approved task can enter the durable queue.");
+        }
+
+        Status = AgentTaskStatus.Queued;
+        UpdatedAt = nowUtc;
+    }
+
+    public void RequireReconciliation(DateTimeOffset nowUtc)
+    {
+        if (Status is not AgentTaskStatus.Running
+            and not AgentTaskStatus.GeneratingArtifacts
+            and not AgentTaskStatus.WaitingToolApproval
+            and not AgentTaskStatus.WaitingFinalApproval)
+        {
+            throw new InvalidOperationException("Only an executing task can require reconciliation.");
+        }
+
+        Status = AgentTaskStatus.ReconciliationRequired;
+        RunLeaseId = null;
+        RunLeaseOwner = null;
+        RunLeaseExpiresAt = null;
+        UpdatedAt = nowUtc;
+    }
+
+    public void ResumeFromReconciliation(DateTimeOffset nowUtc)
+    {
+        if (Status != AgentTaskStatus.ReconciliationRequired || ActiveRunAttemptId is null)
+        {
+            throw new InvalidOperationException("Only a reconciliation-blocked task with an active attempt can resume.");
+        }
+
+        Status = AgentTaskStatus.Queued;
+        RunLeaseId = null;
+        RunLeaseOwner = null;
+        RunLeaseExpiresAt = null;
         UpdatedAt = nowUtc;
     }
 

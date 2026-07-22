@@ -10,6 +10,7 @@ using AICopilot.Core.AiGateway.Aggregates.Sessions;
 using AICopilot.Core.AiGateway.Aggregates.Skills;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Core.AiGateway.Aggregates.Uploads;
+using AICopilot.Core.AiGateway.Runtime.AgentExecution;
 using AICopilot.EntityFrameworkCore.Configuration.AiGateway;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
@@ -37,6 +38,18 @@ public sealed class AiGatewayDbContext(DbContextOptions<AiGatewayDbContext> opti
     public DbSet<AgentTaskRunAttempt> AgentTaskRunAttempts => Set<AgentTaskRunAttempt>();
 
     public DbSet<AgentTaskRunQueueItem> AgentTaskRunQueueItems => Set<AgentTaskRunQueueItem>();
+
+    public DbSet<AgentNodeRun> AgentNodeRuns => Set<AgentNodeRun>();
+
+    public DbSet<AgentEvidenceRecord> AgentEvidenceRecords => Set<AgentEvidenceRecord>();
+
+    public DbSet<AgentRunUsageLedgerEntry> AgentRunUsageLedgerEntries => Set<AgentRunUsageLedgerEntry>();
+
+    public DbSet<AgentNodeReconciliationDecision> AgentNodeReconciliationDecisions => Set<AgentNodeReconciliationDecision>();
+
+    public DbSet<ModelQuotaReservation> ModelQuotaReservations => Set<ModelQuotaReservation>();
+
+    public DbSet<ArtifactFileSetOperation> ArtifactFileSetOperations => Set<ArtifactFileSetOperation>();
 
     public DbSet<AgentWorkerHeartbeat> AgentWorkerHeartbeats => Set<AgentWorkerHeartbeat>();
 
@@ -67,6 +80,12 @@ public sealed class AiGatewayDbContext(DbContextOptions<AiGatewayDbContext> opti
         builder.ApplyConfiguration(new AgentTaskConfiguration());
         builder.ApplyConfiguration(new AgentTaskRunAttemptConfiguration());
         builder.ApplyConfiguration(new AgentTaskRunQueueItemConfiguration());
+        builder.ApplyConfiguration(new AgentNodeRunConfiguration());
+        builder.ApplyConfiguration(new AgentEvidenceRecordConfiguration());
+        builder.ApplyConfiguration(new AgentRunUsageLedgerEntryConfiguration());
+        builder.ApplyConfiguration(new AgentNodeReconciliationDecisionConfiguration());
+        builder.ApplyConfiguration(new ModelQuotaReservationConfiguration());
+        builder.ApplyConfiguration(new ArtifactFileSetOperationConfiguration());
         builder.ApplyConfiguration(new AgentWorkerHeartbeatConfiguration());
         builder.ApplyConfiguration(new AgentStepConfiguration());
         builder.ApplyConfiguration(new ArtifactWorkspaceConfiguration());

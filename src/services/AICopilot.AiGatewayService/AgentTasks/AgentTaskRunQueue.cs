@@ -13,12 +13,6 @@ public interface IAgentTaskRunQueue
         CancellationToken cancellationToken,
         DateTimeOffset? availableAt = null);
 
-    Task<IReadOnlyCollection<AgentTaskRunQueueItem>> CancelActiveAsync(
-        AgentTask task,
-        DateTimeOffset nowUtc,
-        string safeMessage,
-        CancellationToken cancellationToken);
-
     Task<Result<AgentTaskRunQueueItem?>> LeaseNextAsync(
         string leaseOwner,
         TimeSpan leaseDuration,
@@ -68,30 +62,14 @@ internal sealed class AgentTaskRunQueue(
             requestedBy,
             now,
             availableAt);
+        if (task.Status == AgentTaskStatus.PlanApproved)
+        {
+            task.MarkQueued(now);
+        }
+
         queueStore.Add(item);
         await queueStore.SaveChangesAsync(cancellationToken);
         return Result.Success(item);
-    }
-
-    public async Task<IReadOnlyCollection<AgentTaskRunQueueItem>> CancelActiveAsync(
-        AgentTask task,
-        DateTimeOffset nowUtc,
-        string safeMessage,
-        CancellationToken cancellationToken)
-    {
-        var activeItems = await queueStore.ListActiveByTaskAsync(task.Id, cancellationToken);
-        foreach (var item in activeItems)
-        {
-            item.Cancel(nowUtc, safeMessage);
-            queueStore.Update(item);
-        }
-
-        if (activeItems.Count > 0)
-        {
-            await queueStore.SaveChangesAsync(cancellationToken);
-        }
-
-        return activeItems;
     }
 
     public async Task<Result<AgentTaskRunQueueItem?>> LeaseNextAsync(

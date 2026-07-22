@@ -121,4 +121,18 @@ public interface IAgentArtifactWorkspaceService
         AgentStepId? stepId,
         ArtifactSourceMetadata? sourceMetadata,
         CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<Artifact>> WriteDraftArtifactSetAsync(
+        ArtifactWorkspace workspace,
+        IReadOnlyCollection<AgentDraftArtifactWriteRequest> artifacts,
+        CancellationToken cancellationToken);
 }
+
+public sealed record AgentDraftArtifactWriteRequest(
+    ArtifactType ArtifactType,
+    string Name,
+    string RelativePath,
+    byte[] Content,
+    string MimeType,
+    AgentStepId? StepId,
+    ArtifactSourceMetadata? SourceMetadata);

@@ -1,4 +1,5 @@
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
+using AICopilot.Services.Contracts;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -52,26 +53,36 @@ public sealed class AgentTaskRunQueueWorker(
         await MarkHeartbeatAsync(scope.ServiceProvider, null, cancellationToken);
         await workerCoordinator.RecoverExpiredStartedLeasesAsync(cancellationToken);
 
-        var leased = await workerCoordinator.LeaseNextAsync(leaseOwner, QueueOptions.LeaseDuration, cancellationToken);
-        if (!leased.IsSuccess || leased.Value is null)
+        var claimed = await workerCoordinator.ClaimNextAsync(
+            leaseOwner,
+            QueueOptions.LeaseDuration,
+            cancellationToken);
+        if (!claimed.IsSuccess || claimed.Value is null)
         {
             await MarkHeartbeatAsync(scope.ServiceProvider, null, cancellationToken);
             return false;
         }
 
-        await MarkHeartbeatAsync(scope.ServiceProvider, leased.Value, cancellationToken);
+        await MarkHeartbeatAsync(scope.ServiceProvider, claimed.Value.QueueItem, cancellationToken);
         try
         {
-            await workerCoordinator.ExecuteQueueItemAsync(leased.Value, cancellationToken);
+            await workerCoordinator.ExecuteClaimAsync(claimed.Value, cancellationToken);
+        }
+        catch (PersistenceCommitOutcomeUnknownException ex)
+        {
+            logger.LogWarning(
+                "Agent task run queue item {QueueItemId} stopped on a commit-unknown boundary. CommitId={CommitId}; the active lease will expire into reconciliation.",
+                claimed.Value.QueueItem.Id.Value,
+                ex.CommitId);
         }
         catch (Exception ex)
         {
             logger.LogError(
                 "Agent task run queue item {QueueItemId} failed before runtime completed. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
-                leased.Value.Id.Value,
+                claimed.Value.QueueItem.Id.Value,
                 ex.GetType().Name);
-            await workerCoordinator.FailQueueItemAsync(
-                leased.Value,
+            await workerCoordinator.FailClaimAsync(
+                claimed.Value,
                 "agent_task_run_worker_failed",
                 "Agent task run worker failed before runtime completed.",
                 cancellationToken);

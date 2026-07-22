@@ -22,12 +22,35 @@ internal static class ArtifactVersioningFiles
         CancellationToken cancellationToken)
     {
         var versions = new List<ArtifactVersionDto>();
-        for (var version = 1; version < artifact.Version; version++)
+        var indexedVersions = await ReadVersionIndexAsync(
+            fileStore,
+            workspaceCode,
+            artifact,
+            cancellationToken);
+        if (!indexedVersions.IsSuccess)
         {
-            var metadata = await ReadMetadataAsync(fileStore, workspaceCode, artifact, version, cancellationToken);
-            if (metadata.IsSuccess && metadata.Value is not null)
+            return Result.From(indexedVersions);
+        }
+
+        if (indexedVersions.Value is not null)
+        {
+            versions.AddRange(indexedVersions.Value.Versions.Select(metadata =>
+                ToDto(artifact.Id.Value, metadata, isCurrent: false)));
+        }
+        else
+        {
+            for (var version = 1; version < artifact.Version; version++)
             {
-                versions.Add(ToDto(artifact.Id.Value, metadata.Value, isCurrent: false));
+                var metadata = await ReadLegacyMetadataAsync(
+                    fileStore,
+                    workspaceCode,
+                    artifact,
+                    version,
+                    cancellationToken);
+                if (metadata.IsSuccess && metadata.Value is not null)
+                {
+                    versions.Add(ToDto(artifact.Id.Value, metadata.Value, isCurrent: false));
+                }
             }
         }
 
@@ -133,52 +156,96 @@ internal static class ArtifactVersioningFiles
         return Result.Success(await reader.ReadToEndAsync(cancellationToken));
     }
 
-    public static async Task<Result<ArtifactVersionMetadata>> ArchiveCurrentVersionAsync(
+    public static async Task<Result<ArtifactVersionFileSetDraft>> PrepareAtomicUpdateAsync(
         IArtifactWorkspaceFileStore fileStore,
         string workspaceCode,
         Artifact artifact,
+        string newContent,
         string? comment,
         CancellationToken cancellationToken)
     {
-        var content = await ReadTextAsync(
+        var currentContent = await ReadTextAsync(
             fileStore,
             workspaceCode,
             artifact.RelativePath,
             artifact.MimeType,
             ArtifactVersioningPolicy.MaxContentBytes,
             cancellationToken);
-        if (!content.IsSuccess)
+        if (!currentContent.IsSuccess)
         {
-            return Result.From(content);
+            return Result.From(currentContent);
         }
 
-        var versionRoot = GetVersionRoot(artifact, artifact.Version);
-        var extension = Path.GetExtension(artifact.RelativePath);
-        var contentPath = $"{versionRoot}/content{extension}";
-        var written = await fileStore.WriteTextAsync(
+        var indexedVersions = await ReadVersionIndexAsync(
+            fileStore,
             workspaceCode,
-            contentPath,
-            content.Value!,
-            artifact.MimeType,
+            artifact,
             cancellationToken);
+        if (!indexedVersions.IsSuccess)
+        {
+            return Result.From(indexedVersions);
+        }
+
+        var history = indexedVersions.Value?.Versions.ToList() ?? [];
+        if (indexedVersions.Value is null)
+        {
+            for (var version = 1; version < artifact.Version; version++)
+            {
+                var legacy = await ReadLegacyMetadataAsync(
+                    fileStore,
+                    workspaceCode,
+                    artifact,
+                    version,
+                    cancellationToken);
+                if (!legacy.IsSuccess)
+                {
+                    return Result.From(legacy);
+                }
+
+                if (legacy.Value is not null)
+                {
+                    history.Add(legacy.Value);
+                    continue;
+                }
+
+                return Result.Invalid($"Artifact version {version} metadata is missing.");
+            }
+        }
 
         var metadata = new ArtifactVersionMetadata(
             artifact.Version,
             Path.GetFileName(artifact.RelativePath),
             artifact.RelativePath,
-            written.RelativePath,
-            written.FileSize,
+            artifact.RelativePath,
+            Encoding.UTF8.GetByteCount(currentContent.Value!),
             artifact.MimeType,
-            ComputeSha256(content.Value!),
+            ComputeSha256(currentContent.Value!),
             DateTimeOffset.UtcNow,
             NormalizeComment(comment));
-        await fileStore.WriteTextAsync(
-            workspaceCode,
-            GetMetadataPath(artifact, artifact.Version),
-            JsonSerializer.Serialize(metadata, JsonOptions),
-            "application/json",
-            cancellationToken);
-        return Result.Success(metadata);
+        history.RemoveAll(item => item.Version == artifact.Version);
+        history.Add(metadata);
+        history.Sort(static (left, right) => left.Version.CompareTo(right.Version));
+
+        var currentFileName = Path.GetFileName(artifact.RelativePath);
+        var currentRelativePath = $"current/{currentFileName}";
+        var indexRelativePath = "versions/index.json";
+        var index = new ArtifactVersionIndex(
+            "artifact-version-index-v1",
+            artifact.Id.Value,
+            artifact.Version + 1,
+            history);
+        return Result.Success(new ArtifactVersionFileSetDraft(
+            currentRelativePath,
+            [
+                new ArtifactFileSetWriteRequest(
+                    currentRelativePath,
+                    Encoding.UTF8.GetBytes(newContent),
+                    artifact.MimeType),
+                new ArtifactFileSetWriteRequest(
+                    indexRelativePath,
+                    Encoding.UTF8.GetBytes(JsonSerializer.Serialize(index, JsonOptions)),
+                    "application/json")
+            ]));
     }
 
     public static string ComputeSha256(string content)
@@ -206,7 +273,15 @@ internal static class ArtifactVersioningFiles
                 artifact.MimeType));
         }
 
-        var metadata = await ReadMetadataAsync(fileStore, workspaceCode, artifact, version, cancellationToken);
+        var index = await ReadVersionIndexAsync(fileStore, workspaceCode, artifact, cancellationToken);
+        if (!index.IsSuccess)
+        {
+            return Result.From(index);
+        }
+
+        var metadata = index.Value?.Versions.FirstOrDefault(item => item.Version == version) is { } indexed
+            ? Result.Success<ArtifactVersionMetadata?>(indexed)
+            : await ReadLegacyMetadataAsync(fileStore, workspaceCode, artifact, version, cancellationToken);
         if (!metadata.IsSuccess || metadata.Value is null)
         {
             return Result.NotFound("Artifact version metadata does not exist.");
@@ -218,7 +293,7 @@ internal static class ArtifactVersioningFiles
             metadata.Value.MimeType));
     }
 
-    private static async Task<Result<ArtifactVersionMetadata?>> ReadMetadataAsync(
+    private static async Task<Result<ArtifactVersionMetadata?>> ReadLegacyMetadataAsync(
         IArtifactWorkspaceFileStore fileStore,
         string workspaceCode,
         Artifact artifact,
@@ -250,6 +325,82 @@ internal static class ArtifactVersioningFiles
         {
             return Result.Invalid("Artifact version metadata is invalid.");
         }
+    }
+
+    private static async Task<Result<ArtifactVersionIndex?>> ReadVersionIndexAsync(
+        IArtifactWorkspaceFileStore fileStore,
+        string workspaceCode,
+        Artifact artifact,
+        CancellationToken cancellationToken)
+    {
+        var indexPath = TryGetVersionIndexPath(artifact.RelativePath);
+        if (indexPath is null)
+        {
+            return Result.Success<ArtifactVersionIndex?>(null);
+        }
+
+        var file = await fileStore.OpenReadAsync(
+            workspaceCode,
+            indexPath,
+            "application/json",
+            cancellationToken);
+        if (file is null)
+        {
+            return Result.Invalid("Artifact version index is missing from its committed file set.");
+        }
+
+        await using var stream = file.Stream;
+        try
+        {
+            var index = await JsonSerializer.DeserializeAsync<ArtifactVersionIndex>(
+                stream,
+                JsonOptions,
+                cancellationToken);
+            if (index is null ||
+                !string.Equals(index.SchemaVersion, "artifact-version-index-v1", StringComparison.Ordinal) ||
+                index.ArtifactId != artifact.Id.Value ||
+                index.CurrentVersion != artifact.Version ||
+                index.Versions.Count != artifact.Version - 1 ||
+                index.Versions.Any(item => item.Version <= 0 || item.Version >= artifact.Version) ||
+                index.Versions.Select(item => item.Version).Distinct().Count() != index.Versions.Count ||
+                !index.Versions.OrderBy(item => item.Version).Select(item => item.Version)
+                    .SequenceEqual(Enumerable.Range(1, artifact.Version - 1)))
+            {
+                return Result.Invalid("Artifact version index is invalid.");
+            }
+
+            return Result.Success<ArtifactVersionIndex?>(index);
+        }
+        catch (JsonException)
+        {
+            return Result.Invalid("Artifact version index is invalid.");
+        }
+    }
+
+    private static string? TryGetVersionIndexPath(string currentRelativePath)
+    {
+        var normalized = ArtifactPathGuard.NormalizeRelativePath(currentRelativePath);
+        var marker = "/.committed/";
+        var markerIndex = normalized.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0)
+        {
+            return null;
+        }
+
+        var commitSegmentStart = markerIndex + marker.Length;
+        var commitSegmentEnd = normalized.IndexOf('/', commitSegmentStart);
+        if (commitSegmentEnd <= commitSegmentStart ||
+            !Guid.TryParseExact(normalized[commitSegmentStart..commitSegmentEnd], "N", out _))
+        {
+            return null;
+        }
+
+        if (!normalized[(commitSegmentEnd + 1)..].StartsWith("current/", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return $"{normalized[..commitSegmentEnd]}/versions/index.json";
     }
 
     private static ArtifactVersionDto ToDto(Guid artifactId, ArtifactVersionMetadata metadata, bool isCurrent)
@@ -311,3 +462,13 @@ internal sealed record ArtifactVersionMetadata(
     string Sha256,
     DateTimeOffset CreatedAt,
     string? Comment);
+
+internal sealed record ArtifactVersionIndex(
+    string SchemaVersion,
+    Guid ArtifactId,
+    int CurrentVersion,
+    IReadOnlyList<ArtifactVersionMetadata> Versions);
+
+internal sealed record ArtifactVersionFileSetDraft(
+    string CurrentRelativePath,
+    IReadOnlyList<ArtifactFileSetWriteRequest> Files);

@@ -27,6 +27,7 @@ internal sealed class AgentRuntimeFileInputToolService(
         CancellationToken cancellationToken)
     {
         var uploads = await LoadUploadsAsync(plan.UploadIds, userId, cancellationToken);
+        var sourceArtifacts = new List<AgentDraftArtifactWriteRequest>();
         foreach (var upload in uploads)
         {
             if (state.Uploads.Any(item => item.Id == upload.Id.Value))
@@ -47,16 +48,14 @@ internal sealed class AgentRuntimeFileInputToolService(
 
                     if (writeSourceArtifacts && workspace is not null && step is not null)
                     {
-                        await workspaceService.WriteDraftBinaryArtifactAsync(
-                            workspace,
+                        sourceArtifacts.Add(new AgentDraftArtifactWriteRequest(
                             ResolveArtifactType(upload.FileName),
                             upload.FileName,
-                            $"source/{SafeFileName(upload.FileName)}",
+                            $"source/{upload.Id.Value:N}-{SafeFileName(upload.FileName)}",
                             bytes,
                             upload.ContentType,
                             step.Id,
-                            sourceMetadata: null,
-                            cancellationToken);
+                            SourceMetadata: null));
                     }
                 }
             }
@@ -69,6 +68,14 @@ internal sealed class AgentRuntimeFileInputToolService(
                 upload.Sha256,
                 upload.StoragePath,
                 preview));
+        }
+
+        if (workspace is not null && sourceArtifacts.Count > 0)
+        {
+            await workspaceService.WriteDraftArtifactSetAsync(
+                workspace,
+                sourceArtifacts,
+                cancellationToken);
         }
 
         return new
@@ -92,6 +99,7 @@ internal sealed class AgentRuntimeFileInputToolService(
             await ReadUploadedFilesAsync(userId, workspace, step, plan, state, writeSourceArtifacts: false, cancellationToken: cancellationToken);
         }
 
+        var normalizedArtifacts = new List<AgentDraftArtifactWriteRequest>();
         foreach (var upload in state.Uploads)
         {
             if (string.IsNullOrWhiteSpace(upload.StoragePath))
@@ -115,27 +123,31 @@ internal sealed class AgentRuntimeFileInputToolService(
 
             state.Tables.Add(table);
             state.ParsedData.Add(new AgentParsedData(upload.FileName, "table", BuildTablePreview(table)));
-            var fileStem = SafeFileStem(upload.FileName);
+            var fileStem = $"{upload.Id:N}-{SafeFileStem(upload.FileName)}";
             var json = JsonSerializer.Serialize(table, AgentRuntimeJson.Options);
-            await workspaceService.WriteDraftTextArtifactAsync(
-                workspace,
+            normalizedArtifacts.Add(new AgentDraftArtifactWriteRequest(
                 ArtifactType.Json,
                 $"{fileStem}.normalized.json",
                 $"data/{fileStem}.normalized.json",
-                json,
+                Encoding.UTF8.GetBytes(json),
                 "application/json",
                 step.Id,
-                sourceMetadata: null,
-                cancellationToken);
-            await workspaceService.WriteDraftTextArtifactAsync(
-                workspace,
+                SourceMetadata: null));
+            normalizedArtifacts.Add(new AgentDraftArtifactWriteRequest(
                 ArtifactType.Csv,
                 $"{fileStem}.normalized.csv",
                 $"data/{fileStem}.normalized.csv",
-                BuildCsv(table),
+                Encoding.UTF8.GetBytes(BuildCsv(table)),
                 "text/csv",
                 step.Id,
-                sourceMetadata: null,
+                SourceMetadata: null));
+        }
+
+        if (normalizedArtifacts.Count > 0)
+        {
+            await workspaceService.WriteDraftArtifactSetAsync(
+                workspace,
+                normalizedArtifacts,
                 cancellationToken);
         }
 

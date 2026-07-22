@@ -295,40 +295,31 @@ internal static class AgentPlanCatalogSnapshotAuthority
 
 }
 
-// P0 remains fail-closed for production execution. The only executable bridge
-// here is a server-owned four-step LinearV1 graph for the explicit Development
-// Simulation profile; it cannot compile Cloud, MCP, plugin, or control work.
 public sealed class AgentPlanDraftContractAuthority
 {
-    private static readonly string[] DevelopmentSimulationToolSequence =
-    [
-        "query_business_database_readonly",
-        "summarize_business_query_result",
-        "generate_markdown_report",
-        "finalize_artifacts"
-    ];
-
     private readonly IntentResultToCandidateAdapter intentAdapter;
     private readonly AgentPlanCanonicalizer canonicalizer;
+    private readonly IAgentPlanCompiler planCompiler;
 
     internal AgentPlanDraftContractAuthority(
         IntentResultToCandidateAdapter intentAdapter,
-        AgentPlanCanonicalizer canonicalizer)
+        AgentPlanCanonicalizer canonicalizer,
+        IAgentPlanCompiler? planCompiler = null)
     {
         this.intentAdapter = intentAdapter;
         this.canonicalizer = canonicalizer;
+        this.planCompiler = planCompiler ?? new DeterministicLinearAgentPlanCompiler();
     }
 
     internal Result<CanonicalAgentPlan> SealExecutable(AgentTaskPlanDocument draft)
     {
-        if (draft.PlannerSafetySummary?.IsSimulationOnly != true ||
-            !string.Equals(draft.PlanKind, AgentTaskPlanKinds.PlanDraft, StringComparison.Ordinal) ||
+        if (!string.Equals(draft.PlanKind, AgentTaskPlanKinds.PlanDraft, StringComparison.Ordinal) ||
             draft.IsExecutable ||
             draft.Nodes is not { Count: > 0 } ||
             draft.CapabilityGaps is not { Count: 0 })
         {
             return Invalid(
-                "Only a gap-free PlanDraft compiled by the explicit Development Simulation bridge can become executable before P2.");
+                "Only a gap-free PlanDraft produced by the authoritative LinearV1 PlanCompiler can become executable.");
         }
 
         if (draft.PlanVersion == int.MaxValue)
@@ -395,18 +386,6 @@ public sealed class AgentPlanDraftContractAuthority
         var steps = explicitEmptyCapabilitySelection
             ? Array.Empty<AgentTaskPlanStepDocument>()
             : stepsResult.Value!.ToArray();
-        var approvalCheckpoints = steps
-            .Where(step => step.RequiresApproval)
-            .Select(step => string.IsNullOrWhiteSpace(step.ToolCode) ? step.Title : step.ToolCode!)
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(value => value, StringComparer.Ordinal)
-            .ToArray();
-        var toolApprovalCheckpoints = steps
-            .Where(step => step.RequiresApproval && !string.IsNullOrWhiteSpace(step.ToolCode))
-            .Select(step => step.ToolCode!)
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(value => value, StringComparer.Ordinal)
-            .ToArray();
         var unresolvedCapabilityGaps = AgentPlanCanonicalCollections.Strings(
             (request.CurrentPlan.CapabilityGaps ?? [])
             .Concat(candidates
@@ -434,36 +413,42 @@ public sealed class AgentPlanDraftContractAuthority
             dataSourceIds,
             request.CurrentPlan.KnowledgeBaseIds,
             candidates);
-        IReadOnlyCollection<AgentPlanNodeDocument> nodes = [];
-        var canCompileDevelopmentSimulation =
-            request.AllowDevelopmentSimulationExecution &&
-            request.CurrentPlan.PlannerSafetySummary?.IsSimulationOnly == true &&
-            unresolvedCapabilityGaps.Length == 0;
-        if (canCompileDevelopmentSimulation)
-        {
-            var nodesResult = BuildDevelopmentSimulationNodes(
-                steps,
+        var compilation = unresolvedCapabilityGaps.Length == 0
+            ? planCompiler.Compile(new AgentPlanCompilerRequest(
+                Enum.Parse<AgentTaskType>(request.CurrentPlan.TaskType, ignoreCase: false),
                 candidates,
+                capabilityMode,
+                requestedCapabilities,
+                pluginMode,
+                selectedPluginIds,
                 request.ToolCatalog,
+                AgentPlanCanonicalCollections.Guids(request.CurrentPlan.UploadIds),
+                AgentPlanCanonicalCollections.Guids(request.CurrentPlan.KnowledgeBaseIds),
+                request.CurrentPlan.CloudReadonlyIntent,
                 dataSourceIds,
                 businessDomains,
                 dataSourceSummaries,
                 artifactTargets,
-                executionSnapshot.DataContractDigest,
-                request.CurrentPlan.UploadIds,
-                request.CurrentPlan.KnowledgeBaseIds);
-            if (!nodesResult.IsSuccess)
-            {
-                return Result.From(nodesResult);
-            }
-
-            nodes = nodesResult.Value!;
-        }
-
-        var capabilityGaps = canCompileDevelopmentSimulation
-            ? unresolvedCapabilityGaps
-            : AgentPlanCanonicalCollections.Strings(
-                unresolvedCapabilityGaps.Append(AgentPlanCapabilityGapCodes.PlanCompilerUnavailable));
+                request.CurrentPlan.RequiresDataApproval,
+                request.CurrentPlan.PlannerSafetySummary?.IsSimulationOnly == true,
+                executionSnapshot.DataContractDigest))
+            : new AgentPlanCompilation([], [], unresolvedCapabilityGaps);
+        var capabilityGaps = AgentPlanCanonicalCollections.Strings(
+            unresolvedCapabilityGaps.Concat(compilation.CapabilityGaps));
+        var nodes = capabilityGaps.Length == 0 ? compilation.Nodes : [];
+        steps = capabilityGaps.Length == 0 ? compilation.Steps.ToArray() : steps;
+        var approvalCheckpoints = steps
+            .Where(step => step.RequiresApproval)
+            .Select(step => string.IsNullOrWhiteSpace(step.ToolCode) ? step.Title : step.ToolCode!)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(value => value, StringComparer.Ordinal)
+            .ToArray();
+        var toolApprovalCheckpoints = steps
+            .Where(step => step.RequiresApproval && !string.IsNullOrWhiteSpace(step.ToolCode))
+            .Select(step => step.ToolCode!)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(value => value, StringComparer.Ordinal)
+            .ToArray();
         var plan = request.CurrentPlan with
         {
             Version = 2,
@@ -517,9 +502,18 @@ public sealed class AgentPlanDraftContractAuthority
             Nodes = nodes,
             JoinPolicies = [],
             Budgets = new AgentPlanBudgetDocument(
-                "budget-policy:v1",
-                16,
-                1800,
+                AgentPlanContractVersions.BudgetPolicyV1,
+                AgentPlanContractVersions.DefaultMaxNodes,
+                AgentPlanContractVersions.DefaultMaxToolCalls,
+                AgentPlanContractVersions.DefaultMaxModelCalls,
+                AgentPlanContractVersions.DefaultMaxInputTokens,
+                AgentPlanContractVersions.DefaultMaxOutputTokens,
+                AgentPlanContractVersions.DefaultMaxElapsedSeconds,
+                AgentPlanContractVersions.DefaultMaxCostAmount,
+                AgentPlanContractVersions.DefaultCostCurrency,
+                AgentPlanContractVersions.DefaultMaxRetries,
+                AgentPlanContractVersions.DefaultMaxArtifactCount,
+                AgentPlanContractVersions.DefaultMaxArtifactBytes,
                 AgentPlanContractVersions.MaxPlanCanonicalBytes),
             ApprovalSummary = new AgentPlanApprovalSummaryDocument(
                 true,
@@ -535,143 +529,6 @@ public sealed class AgentPlanDraftContractAuthority
         };
 
         return canonicalizer.Seal(plan);
-    }
-
-    private static Result<IReadOnlyCollection<AgentPlanNodeDocument>> BuildDevelopmentSimulationNodes(
-        IReadOnlyCollection<AgentTaskPlanStepDocument> steps,
-        IReadOnlyCollection<AgentIntentCandidateDocument> candidates,
-        PlannerToolCatalog toolCatalog,
-        IReadOnlyCollection<Guid> dataSourceIds,
-        IReadOnlyCollection<string> businessDomains,
-        IReadOnlyCollection<AgentTaskPlanDataSourceSummaryDocument> dataSourceSummaries,
-        IReadOnlyCollection<string> artifactTargets,
-        string governedSchemaDigest,
-        IReadOnlyCollection<Guid> uploadIds,
-        IReadOnlyCollection<Guid> knowledgeBaseIds)
-    {
-        var orderedSteps = steps.ToArray();
-        if (!orderedSteps.Select(step => step.ToolCode).SequenceEqual(
-                DevelopmentSimulationToolSequence,
-                StringComparer.Ordinal) ||
-            !artifactTargets.SequenceEqual(["markdown"], StringComparer.Ordinal) ||
-            uploadIds.Count != 0 ||
-            knowledgeBaseIds.Count != 0)
-        {
-            return InvalidNodes(
-                "The Development Simulation bridge only compiles the governed-query, summary, Markdown draft, and final-output checkpoint chain without upload or RAG expansion.");
-        }
-
-        if (dataSourceIds.Count != 1 ||
-            dataSourceSummaries.Count != 1 ||
-            dataSourceSummaries.Single().Id != dataSourceIds.Single() ||
-            !dataSourceSummaries.Single().IsSimulation ||
-            !string.Equals(
-                dataSourceSummaries.Single().SourceMode,
-                DataSourceExternalSystemType.SimulationBusiness.ToString(),
-                StringComparison.Ordinal))
-        {
-            return InvalidNodes(
-                "The Development Simulation bridge requires exactly one explicitly marked SimulationBusiness source.");
-        }
-
-        var expectedCapabilities = new[] { "Analysis.GovernedQuery", "General.Chat" };
-        if (!candidates.Select(candidate => candidate.IntentCode).SequenceEqual(
-                expectedCapabilities,
-                StringComparer.Ordinal) ||
-            candidates.Any(candidate =>
-                candidate.Availability != AgentIntentAvailability.Available ||
-                candidate.CapabilityGap is not null))
-        {
-            return InvalidNodes(
-                "The Development Simulation bridge accepts only General.Chat and Analysis.GovernedQuery capabilities.");
-        }
-
-        var tools = toolCatalog.Tools.ToDictionary(tool => tool.ToolCode, StringComparer.Ordinal);
-        if (DevelopmentSimulationToolSequence.Any(toolCode => !tools.ContainsKey(toolCode)))
-        {
-            return InvalidNodes(
-                "The Development Simulation tool catalog is incomplete; no fallback executor is allowed.");
-        }
-
-        var governedPermission = tools["query_business_database_readonly"].RequiredPermission;
-        if (string.IsNullOrWhiteSpace(governedPermission))
-        {
-            return InvalidNodes("The governed SimulationBusiness read permission is unavailable.");
-        }
-
-        var dataSourceId = dataSourceIds.Single();
-        var nodes = new List<AgentPlanNodeDocument>(orderedSteps.Length);
-        for (var index = 0; index < orderedSteps.Length; index++)
-        {
-            var step = orderedSteps[index];
-            var toolCode = step.ToolCode!;
-            var tool = tools[toolCode];
-            if (step.RequiresApproval != tool.RequiresApproval)
-            {
-                return InvalidNodes(
-                    $"Simulation step '{toolCode}' approval policy does not match the frozen tool catalog.");
-            }
-
-            var isGovernedRead = toolCode is
-                "query_business_database_readonly" or
-                "summarize_business_query_result";
-            var nodeId = $"simulation-node-{index + 1:00}";
-            var sideEffectClass = string.Equals(
-                tool.SideEffectClass,
-                "ArtifactWrite",
-                StringComparison.Ordinal)
-                ? "ArtifactDraftOnly"
-                : "ReadOnly";
-            nodes.Add(new AgentPlanNodeDocument(
-                AgentPlanContractVersions.NodeV1,
-                nodeId,
-                isGovernedRead
-                    ? "GovernedDataReadNode"
-                    : string.Equals(toolCode, "finalize_artifacts", StringComparison.Ordinal)
-                        ? "ApprovalCheckpointNode"
-                        : "DeterministicComputeNode",
-                index == 0 ? [] : [nodes[index - 1].NodeId],
-                true,
-                "node-input:v1",
-                $"evidence:{toolCode}:v1",
-                [toolCode],
-                [isGovernedRead ? "Analysis.GovernedQuery" : "General.Chat"],
-                isGovernedRead ? [dataSourceId] : [],
-                [],
-                [],
-                new AgentPlanNodeInputDocument(
-                    SemanticIntent: null,
-                    SemanticPlanDigest: null,
-                    TypedProvider: null,
-                    RequestedScope: isGovernedRead ? [$"data-source:{dataSourceId:D}"] : [],
-                    MaxRows: isGovernedRead ? 200 : null,
-                    ExecutionMode: isGovernedRead ? "TextToSql" : null,
-                    DataSourceId: isGovernedRead ? dataSourceId : null,
-                    BusinessDomains: isGovernedRead ? businessDomains : [],
-                    GovernedSchemaDigest: isGovernedRead ? governedSchemaDigest : null,
-                    RequestedPermission: isGovernedRead ? governedPermission : null,
-                    CanonicalInputJson: step.InputJson),
-                null,
-                new AgentPlanTimeoutPolicyDocument("timeout-policy:v1", tool.TimeoutSeconds),
-                new AgentPlanRetryPolicyDocument("retry-policy:v1", 1, "None"),
-                new AgentPlanNodeBudgetDocument(0, 0, isGovernedRead ? 200 : 0),
-                new AgentPlanApprovalPolicyDocument(
-                    step.RequiresApproval,
-                    string.IsNullOrWhiteSpace(tool.ApprovalPolicy) ? "None" : tool.ApprovalPolicy),
-                new AgentPlanIdempotencyPolicyDocument(
-                    "idempotency-policy:v1",
-                    isGovernedRead ? "ReadOnly" : "Fenced"),
-                sideEffectClass,
-                JoinPolicy: null));
-        }
-
-        return Result.Success<IReadOnlyCollection<AgentPlanNodeDocument>>(nodes);
-    }
-
-    private static Result<IReadOnlyCollection<AgentPlanNodeDocument>> InvalidNodes(string detail)
-    {
-        return Result.Failure(
-            new ApiProblemDescriptor(AppProblemCodes.AgentPlanInvalid, detail));
     }
 
     private static Result<IReadOnlyCollection<AgentTaskPlanStepDocument>> NormalizeSteps(

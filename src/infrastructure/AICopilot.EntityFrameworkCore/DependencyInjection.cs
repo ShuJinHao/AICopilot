@@ -75,6 +75,15 @@ public static class DependencyInjection
         builder.Services.AddScoped<IRepository<AgentTask>>(provider => provider.GetRequiredService<AiGatewayRepository<AgentTask>>());
         builder.Services.AddScoped<IAgentTaskRunAttemptStore, AgentTaskRunAttemptStore>();
         builder.Services.AddScoped<IAgentTaskRunQueueStore, AgentTaskRunQueueStore>();
+        builder.Services.AddScoped<IAgentDurableTaskClaimStore, AgentDurableTaskClaimStore>();
+        builder.Services.AddScoped<IAgentTaskCancellationStore, AgentTaskCancellationStore>();
+        builder.Services.AddScoped<IAgentNodeRunStore, AgentNodeRunStore>();
+        builder.Services.AddScoped<IAgentNodeRunClaimStore, AgentNodeRunClaimStore>();
+        builder.Services.AddScoped<IAgentNodeCheckpointStore, AgentNodeCheckpointStore>();
+        builder.Services.AddScoped<IAgentNodeOutcomeReconciliationStore, AgentNodeOutcomeReconciliationStore>();
+        builder.Services.AddScoped<IModelQuotaReservationStore, PostgresModelQuotaReservationStore>();
+        builder.Services.AddScoped<IArtifactFileSetOperationStore, ArtifactFileSetOperationStore>();
+        builder.Services.AddScoped<IArtifactFileSetMaintenanceService, ArtifactFileSetMaintenanceService>();
         builder.Services.AddScoped<IAgentTaskPlanFreshReadVerifier, AgentTaskPlanFreshReadVerifier>();
         builder.Services.AddScoped<IAgentWorkerHeartbeatStore, AgentWorkerHeartbeatStore>();
         builder.Services.AddScoped<IReadRepository<ArtifactWorkspace>>(provider => provider.GetRequiredService<AiGatewayRepository<ArtifactWorkspace>>());
@@ -117,6 +126,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<IPersistenceCommitScope>(provider =>
             provider.GetRequiredService<PersistenceCommitScope>());
         builder.Services.AddScoped<RepositoryPersistenceCommitter>();
+        builder.Services.AddScoped<AgentExecutionTransactionRunner>();
         builder.Services.AddScoped<IRepositoryPersistenceAttemptValidator, AgentTaskPlanPersistenceAttemptValidator>();
         builder.Services.AddScoped<AiGatewayDomainEventOutboxSource>();
         builder.Services.AddScoped<IPersistenceOutboxSource>(provider =>

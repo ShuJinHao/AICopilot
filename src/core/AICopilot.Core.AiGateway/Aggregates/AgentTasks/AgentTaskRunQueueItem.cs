@@ -48,6 +48,8 @@ public sealed class AgentTaskRunQueueItem : BaseEntity<AgentTaskRunQueueItemId>
 
     public DateTimeOffset? LeaseExpiresAt { get; private set; }
 
+    public long TaskFencingToken { get; private set; }
+
     public DateTimeOffset AvailableAt { get; private set; }
 
     public DateTimeOffset? StartedAt { get; private set; }
@@ -62,11 +64,13 @@ public sealed class AgentTaskRunQueueItem : BaseEntity<AgentTaskRunQueueItemId>
 
     public DateTimeOffset UpdatedAt { get; private set; }
 
-    public bool IsActive => Status is AgentTaskRunQueueStatus.Queued or AgentTaskRunQueueStatus.Leased;
+    public bool IsActive => Status is AgentTaskRunQueueStatus.Queued
+        or AgentTaskRunQueueStatus.Claimed
+        or AgentTaskRunQueueStatus.Started;
 
     public bool HasActiveLease(DateTimeOffset nowUtc)
     {
-        return Status == AgentTaskRunQueueStatus.Leased &&
+        return (Status is AgentTaskRunQueueStatus.Claimed or AgentTaskRunQueueStatus.Started) &&
                LeaseExpiresAt.HasValue &&
                LeaseExpiresAt.Value > nowUtc;
     }
@@ -78,14 +82,13 @@ public sealed class AgentTaskRunQueueItem : BaseEntity<AgentTaskRunQueueItemId>
             return AvailableAt <= nowUtc;
         }
 
-        return Status == AgentTaskRunQueueStatus.Leased &&
-               StartedAt is null &&
+        return Status == AgentTaskRunQueueStatus.Claimed &&
                (!LeaseExpiresAt.HasValue || LeaseExpiresAt.Value <= nowUtc);
     }
 
     public bool IsExpiredStartedLease(DateTimeOffset nowUtc)
     {
-        return Status == AgentTaskRunQueueStatus.Leased &&
+        return Status == AgentTaskRunQueueStatus.Started &&
                StartedAt is not null &&
                LeaseExpiresAt.HasValue &&
                LeaseExpiresAt.Value <= nowUtc;
@@ -95,12 +98,17 @@ public sealed class AgentTaskRunQueueItem : BaseEntity<AgentTaskRunQueueItemId>
     {
         return Status == AgentTaskRunQueueStatus.Queued ||
                Status == AgentTaskRunQueueStatus.Failed ||
-               (Status == AgentTaskRunQueueStatus.Leased &&
+               ((Status is AgentTaskRunQueueStatus.Claimed or AgentTaskRunQueueStatus.Started) &&
                 LeaseExpiresAt.HasValue &&
                 LeaseExpiresAt.Value <= nowUtc);
     }
 
-    public void AcquireLease(Guid leaseId, string leaseOwner, DateTimeOffset nowUtc, TimeSpan leaseDuration)
+    public void AcquireLease(
+        Guid leaseId,
+        string leaseOwner,
+        DateTimeOffset nowUtc,
+        TimeSpan leaseDuration,
+        long taskFencingToken = 0)
     {
         if (!CanBeLeased(nowUtc))
         {
@@ -112,10 +120,11 @@ public sealed class AgentTaskRunQueueItem : BaseEntity<AgentTaskRunQueueItemId>
             throw new ArgumentOutOfRangeException(nameof(leaseDuration), "Queue lease duration must be positive.");
         }
 
-        Status = AgentTaskRunQueueStatus.Leased;
+        Status = AgentTaskRunQueueStatus.Claimed;
         LeaseId = leaseId == Guid.Empty ? Guid.NewGuid() : leaseId;
         LeaseOwner = NormalizeOptional(leaseOwner, 120) ?? "agent-run-queue";
         LeaseExpiresAt = nowUtc.Add(leaseDuration);
+        TaskFencingToken = taskFencingToken;
         FailureCode = null;
         SafeMessage = null;
         UpdatedAt = nowUtc;
@@ -123,9 +132,9 @@ public sealed class AgentTaskRunQueueItem : BaseEntity<AgentTaskRunQueueItemId>
 
     public void MarkStarted(AgentTaskRunAttemptId? runAttemptId, DateTimeOffset nowUtc)
     {
-        if (Status != AgentTaskRunQueueStatus.Leased)
+        if (Status != AgentTaskRunQueueStatus.Claimed)
         {
-            throw new InvalidOperationException("Only leased queue items can be started.");
+            throw new InvalidOperationException("Only claimed queue items can be started.");
         }
 
         if (runAttemptId is not null)
@@ -134,12 +143,61 @@ public sealed class AgentTaskRunQueueItem : BaseEntity<AgentTaskRunQueueItemId>
         }
 
         StartedAt ??= nowUtc;
+        Status = AgentTaskRunQueueStatus.Started;
         UpdatedAt = nowUtc;
     }
 
     public void LinkRunAttempt(AgentTaskRunAttemptId runAttemptId, DateTimeOffset nowUtc)
     {
         RunAttemptId = runAttemptId;
+        UpdatedAt = nowUtc;
+    }
+
+    public void RecoverExpiredStartForReclaim(DateTimeOffset nowUtc)
+    {
+        if (!IsExpiredStartedLease(nowUtc))
+        {
+            throw new InvalidOperationException("Only an expired started queue claim can be recovered.");
+        }
+
+        Status = AgentTaskRunQueueStatus.Claimed;
+        LeaseId = null;
+        LeaseOwner = null;
+        LeaseExpiresAt = null;
+        FailureCode = null;
+        SafeMessage = "Recovering durable task from its last authoritative checkpoint.";
+        UpdatedAt = nowUtc;
+    }
+
+    public void ResumeAfterReconciliationForReclaim(DateTimeOffset nowUtc)
+    {
+        if (Status != AgentTaskRunQueueStatus.Started || RunAttemptId is null)
+        {
+            throw new InvalidOperationException("Only a started reconciliation queue item can resume.");
+        }
+
+        Status = AgentTaskRunQueueStatus.Claimed;
+        LeaseId = null;
+        LeaseOwner = null;
+        LeaseExpiresAt = null;
+        FailureCode = null;
+        SafeMessage = "Outcome reconciliation completed; resuming from the authoritative checkpoint.";
+        UpdatedAt = nowUtc;
+    }
+
+    public void RefreshLease(
+        long taskFencingToken,
+        Guid leaseId,
+        DateTimeOffset nowUtc,
+        TimeSpan leaseDuration)
+    {
+        if (TaskFencingToken != taskFencingToken || LeaseId != leaseId ||
+            Status is not AgentTaskRunQueueStatus.Claimed and not AgentTaskRunQueueStatus.Started)
+        {
+            throw new InvalidOperationException("Queue claim fencing token is stale.");
+        }
+
+        LeaseExpiresAt = nowUtc.Add(leaseDuration);
         UpdatedAt = nowUtc;
     }
 

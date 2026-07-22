@@ -2,7 +2,8 @@ namespace AICopilot.AiGatewayService.AgentTasks;
 
 public enum AgentRunQueueStaleLeaseAction
 {
-    Fail = 0
+    Recover = 0,
+    Fail = 1
 }
 
 public sealed class AgentRunQueueOptions
@@ -19,7 +20,7 @@ public sealed class AgentRunQueueOptions
 
     public int MaxRetryBackoffSeconds { get; set; } = 300;
 
-    public AgentRunQueueStaleLeaseAction StaleLeaseAction { get; set; } = AgentRunQueueStaleLeaseAction.Fail;
+    public AgentRunQueueStaleLeaseAction StaleLeaseAction { get; set; } = AgentRunQueueStaleLeaseAction.Recover;
 
     public TimeSpan LeaseDuration => SecondsOrDefault(LeaseDurationSeconds, 300);
 

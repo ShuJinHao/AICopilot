@@ -17,7 +17,8 @@ public sealed class PersistenceFileMaintenanceService(
     IPersistenceFileReconciliationJournal journal,
     IPersistenceFileReconciliationLeaseManager leaseManager,
     IFileStorageService fileStorage,
-    ILogger<PersistenceFileMaintenanceService> logger)
+    ILogger<PersistenceFileMaintenanceService> logger,
+    IArtifactWorkspaceFileSetStore? artifactFileSetStore = null)
 {
     public async Task<PersistenceFileMaintenanceResult> RunOnceAsync(
         DateTime utcNow,
@@ -114,7 +115,26 @@ public sealed class PersistenceFileMaintenanceService(
             }
         }
 
-        if (snapshot.HasUnreadableEntries)
+        var artifactJournalUnreadable = false;
+        if (artifactFileSetStore is not null)
+        {
+            try
+            {
+                artifactJournalUnreadable = (await artifactFileSetStore.GetPendingAsync(
+                    maximumEntries: 1,
+                    DateTimeOffset.MaxValue,
+                    cancellationToken)).HasUnreadableEntries;
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                artifactJournalUnreadable = true;
+                logger.LogError(
+                    "Persistence commit marker cleanup was blocked because artifact file-set journals could not be inspected. ErrorType={ErrorType}",
+                    exception.GetType().Name);
+            }
+        }
+
+        if (snapshot.HasUnreadableEntries || artifactJournalUnreadable)
         {
             logger.LogError(
                 "Persistence commit marker cleanup was skipped because one or more file reconciliation journals are unreadable.");
@@ -150,7 +170,9 @@ public sealed class PersistenceFileMaintenanceService(
             foreach (var markerId in markerCandidates)
             {
                 if (!protectedCommitIds.Contains(markerId) &&
-                    !await journal.ExistsAsync(markerId, cancellationToken))
+                    !await journal.ExistsAsync(markerId, cancellationToken) &&
+                    (artifactFileSetStore is null ||
+                     !await artifactFileSetStore.ExistsPendingAsync(markerId, cancellationToken)))
                 {
                     deletableMarkerIds.Add(markerId);
                     if (deletableMarkerIds.Count == batchSize)

@@ -10,7 +10,8 @@ public sealed class ActiveAgentTaskRunQueueItemByTaskSpec : Specification<AgentT
     {
         FilterCondition = item => item.TaskId == taskId &&
                                   (item.Status == AgentTaskRunQueueStatus.Queued ||
-                                   item.Status == AgentTaskRunQueueStatus.Leased);
+                                   item.Status == AgentTaskRunQueueStatus.Claimed ||
+                                   item.Status == AgentTaskRunQueueStatus.Started);
         SetOrderByDescending(item => item.CreatedAt);
     }
 }
@@ -37,7 +38,8 @@ public sealed class AgentTaskRunQueueActiveItemsSpec : Specification<AgentTaskRu
     public AgentTaskRunQueueActiveItemsSpec()
     {
         FilterCondition = item => item.Status == AgentTaskRunQueueStatus.Queued ||
-                                  item.Status == AgentTaskRunQueueStatus.Leased;
+                                  item.Status == AgentTaskRunQueueStatus.Claimed ||
+                                  item.Status == AgentTaskRunQueueStatus.Started;
         SetOrderBy(item => item.AvailableAt);
     }
 }

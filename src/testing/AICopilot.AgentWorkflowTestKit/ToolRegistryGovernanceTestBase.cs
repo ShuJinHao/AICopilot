@@ -71,11 +71,24 @@ public abstract class ToolRegistryGovernanceTestBase
             cloudReadonlyToolExecutor ?? new ThrowingCloudReadonlyAgentToolExecutor(),
             identityAccessService ?? new StubIdentityAccessService([]),
             guard,
+            new MatchingAgentPlanRuntimeSnapshotVerifier(),
             new AgentRuntimeEventRecorder(
                 executionRepository,
             new AgentAuditRecorder(auditLogWriter ?? new CapturingAuditLogWriter())),
             toolExecutors ?? [],
             freshReadGate ?? AgentPlanV2TestData.CreateMatchingFreshReadGate());
+    }
+
+    private sealed class MatchingAgentPlanRuntimeSnapshotVerifier : IAgentPlanRuntimeSnapshotVerifier
+    {
+        public Task<Result> VerifyAsync(
+            AgentTaskPlanDocument plan,
+            Guid userId,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(Result.Success());
+        }
     }
 
     internal static AgentTaskLifecycleCoordinator CreateLifecycleCoordinator(

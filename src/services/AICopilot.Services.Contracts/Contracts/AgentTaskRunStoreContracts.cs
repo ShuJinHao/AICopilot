@@ -48,3 +48,29 @@ public interface IAgentTaskRunAttemptStore
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }
+
+public enum AgentTaskCancellationDisposition
+{
+    Cancelled = 0,
+    ReconciliationRequired = 1,
+    AlreadyTerminal = 2,
+    StateConflict = 3
+}
+
+public sealed record AgentTaskCancellationQueueItem(
+    AgentTaskRunQueueItem Item,
+    AgentTaskRunQueueStatus PreviousStatus);
+
+public sealed record AgentTaskCancellationCheckpoint(
+    AgentTaskCancellationDisposition Disposition,
+    IReadOnlyCollection<AgentTaskCancellationQueueItem> QueueItems,
+    string SafeMessage);
+
+public interface IAgentTaskCancellationStore
+{
+    Task<AgentTaskCancellationCheckpoint> RequestAsync(
+        AgentTaskId taskId,
+        DateTimeOffset requestedAtUtc,
+        string safeMessage,
+        CancellationToken cancellationToken = default);
+}

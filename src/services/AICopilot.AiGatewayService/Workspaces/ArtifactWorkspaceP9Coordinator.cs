@@ -3,6 +3,7 @@ using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
+using AICopilot.Core.AiGateway.Runtime.AgentExecution;
 using AICopilot.Core.AiGateway.Specifications.Approvals;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Repository;
@@ -15,6 +16,8 @@ public sealed class ArtifactWorkspaceP9Coordinator(
     IRepository<AgentTask> taskRepository,
     IRepository<ApprovalRequest> approvalRepository,
     IArtifactWorkspaceFileStore fileStore,
+    IArtifactWorkspaceFileSetStore fileSetStore,
+    IArtifactFileSetOperationStore fileSetOperationStore,
     AgentAuditRecorder auditRecorder,
     IAuditLogWriter auditLogWriter,
     ICurrentUser currentUser,
@@ -153,37 +156,69 @@ public sealed class ArtifactWorkspaceP9Coordinator(
         }
 
         var oldVersion = context.Artifact.Version;
-        var archive = await ArtifactVersioningFiles.ArchiveCurrentVersionAsync(
+        var fileSetDraft = await ArtifactVersioningFiles.PrepareAtomicUpdateAsync(
             fileStore,
             context.Workspace.WorkspaceCode,
             context.Artifact,
+            request.Content,
             request.Comment,
             cancellationToken);
-        if (!archive.IsSuccess)
+        if (!fileSetDraft.IsSuccess)
         {
-            return Result.From(archive);
+            return Result.From(fileSetDraft);
         }
 
-        var written = await fileStore.WriteTextAsync(
+        var stage = await fileSetStore.StageAsync(
             context.Workspace.WorkspaceCode,
-            context.Artifact.RelativePath,
-            request.Content,
-            context.Artifact.MimeType,
-            cancellationToken);
+            "RegenerateDraftArtifact",
+            "draft/.committed",
+            fileSetDraft.Value!.Files,
+            cancellationToken,
+            new ArtifactFileSetAuthority(
+                context.Task.Id.Value,
+                NodeRunId: null,
+                context.Task.RunFencingToken,
+                NodeFencingToken: 0));
         var sha256 = ArtifactVersioningFiles.ComputeSha256(request.Content);
-        context.Artifact.AddVersion(written.RelativePath, written.FileSize, DateTimeOffset.UtcNow);
+        var published = stage.Files.Single(file =>
+            file.RelativePath.EndsWith($"/{fileSetDraft.Value.CurrentRelativePath}", StringComparison.Ordinal));
+        await fileSetStore.ExecuteAsync(
+            stage,
+            async commitCancellationToken =>
+            {
+                var now = DateTimeOffset.UtcNow;
+                context.Artifact.AddVersion(published.RelativePath, published.FileSize, now);
+                var operation = new ArtifactFileSetOperation(
+                    stage.CommitId,
+                    context.Task.Id,
+                    context.Workspace.Id,
+                    nodeRunId: null,
+                    context.Task.RunFencingToken,
+                    nodeFencingToken: 0,
+                    stage.OperationKind,
+                    stage.ManifestJson,
+                    stage.ManifestDigest,
+                    stage.StagingReference,
+                    now);
+                operation.MarkPublished(stage.PublishedReference, stage.ManifestDigest, now);
+                operation.MarkDatabaseCommitted(now);
+                operation.Complete(now);
+                fileSetOperationStore.AddCompleted(operation);
 
-        workspaceRepository.Update(context.Workspace);
-        await auditRecorder.RecordArtifactUpdatedAsync(
-            context.Task,
-            context.Workspace,
-            context.Artifact,
-            oldVersion,
-            context.Artifact.Version,
-            sha256,
-            request.Comment,
+                workspaceRepository.Update(context.Workspace);
+                await auditRecorder.RecordArtifactUpdatedAsync(
+                    context.Task,
+                    context.Workspace,
+                    context.Artifact,
+                    oldVersion,
+                    context.Artifact.Version,
+                    sha256,
+                    request.Comment,
+                    commitCancellationToken);
+                await workspaceRepository.SaveChangesAsync(commitCancellationToken);
+                return true;
+            },
             cancellationToken);
-        await workspaceRepository.SaveChangesAsync(cancellationToken);
 
         var files = await fileStore.ListAsync(context.Workspace.WorkspaceCode, cancellationToken);
         return Result.Success(ArtifactWorkspaceMapper.Map(context.Workspace, context.Task, files));

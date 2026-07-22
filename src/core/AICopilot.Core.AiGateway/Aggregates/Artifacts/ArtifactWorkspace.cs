@@ -80,6 +80,19 @@ public sealed class ArtifactWorkspace : BaseEntity<ArtifactWorkspaceId>, IAggreg
         UpdatedAt = nowUtc;
     }
 
+    public void RemoveUncommittedDraftArtifact(ArtifactId artifactId, DateTimeOffset nowUtc)
+    {
+        var artifact = _artifacts.SingleOrDefault(candidate => candidate.Id == artifactId)
+            ?? throw new InvalidOperationException("Uncommitted artifact is not attached to the workspace.");
+        if (artifact.Status != ArtifactStatus.Draft)
+        {
+            throw new InvalidOperationException("Only an uncommitted draft artifact can be removed after rollback.");
+        }
+
+        _artifacts.Remove(artifact);
+        UpdatedAt = nowUtc;
+    }
+
     private static string NormalizeCode(string workspaceCode)
     {
         var code = NormalizeRequired(workspaceCode, nameof(workspaceCode), 100);

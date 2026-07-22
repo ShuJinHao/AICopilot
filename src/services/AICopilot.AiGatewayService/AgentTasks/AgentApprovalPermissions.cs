@@ -15,6 +15,7 @@ internal static class AgentApprovalPermissions
     public const string ApproveFinalOutput = "AiGateway.ApproveFinalOutput";
     public const string SubmitFinalReview = "AiGateway.SubmitFinalReview";
     public const string FinalizeWorkspace = "AiGateway.FinalizeWorkspace";
+    public const string ReconcileAgentOutcome = "AiGateway.ReconcileAgentOutcome";
 
     public static string GetRequiredDecisionPermission(AgentApprovalType approvalType)
     {

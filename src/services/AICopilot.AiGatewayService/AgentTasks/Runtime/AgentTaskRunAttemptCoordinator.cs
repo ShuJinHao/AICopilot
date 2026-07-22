@@ -75,6 +75,7 @@ internal sealed class AgentTaskRunAttemptCoordinator(
             attempt.LeaseOwner ?? RunLeaseOwner,
             attempt.LeaseExpiresAt!.Value,
             now);
+        attempt.BindTaskFencingToken(task.RunFencingToken);
         taskRepository.Update(task);
         await taskRepository.SaveChangesAsync(cancellationToken);
         return Result.Success(attempt);
@@ -87,11 +88,13 @@ internal sealed class AgentTaskRunAttemptCoordinator(
     {
         var now = DateTimeOffset.UtcNow;
         attempt.AcquireLease(Guid.NewGuid(), RunLeaseOwner, now, RunLeaseDuration);
+        task.AdvanceRunFencingToken(now);
         task.AcquireRunLease(
             attempt.LeaseId!.Value,
             attempt.LeaseOwner ?? RunLeaseOwner,
             attempt.LeaseExpiresAt!.Value,
             now);
+        attempt.BindTaskFencingToken(task.RunFencingToken);
         runAttemptStore.Update(attempt);
         taskRepository.Update(task);
         await taskRepository.SaveChangesAsync(cancellationToken);

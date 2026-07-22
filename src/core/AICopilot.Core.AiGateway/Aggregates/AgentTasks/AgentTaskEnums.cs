@@ -29,7 +29,9 @@ public enum AgentTaskStatus
     Rejected = 10,
     Failed = 11,
     Cancelled = 12,
-    Draft = 100
+    Draft = 100,
+    Queued = 101,
+    ReconciliationRequired = 102
 }
 
 public enum AgentTaskRiskLevel
@@ -71,7 +73,9 @@ public enum AgentTaskRunAttemptStatus
     WaitingApproval = 1,
     Succeeded = 2,
     Failed = 3,
-    Cancelled = 4
+    Cancelled = 4,
+    Created = 5,
+    ReconciliationRequired = 6
 }
 
 public enum AgentTaskRunTriggerType
@@ -84,9 +88,11 @@ public enum AgentTaskRunTriggerType
 public enum AgentTaskRunQueueStatus
 {
     Queued = 0,
-    Leased = 1,
+    Claimed = 1,
+    Leased = Claimed,
     Succeeded = 2,
     Failed = 3,
     Cancelled = 4,
-    DeadLetter = 5
+    DeadLetter = 5,
+    Started = 6
 }

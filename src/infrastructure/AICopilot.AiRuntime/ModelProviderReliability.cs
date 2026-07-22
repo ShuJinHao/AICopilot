@@ -18,9 +18,21 @@ public sealed class ModelProviderReliabilityOptions
 
     public int PerUserRpmLimit { get; set; }
 
+    public int PerUserTpmLimit { get; set; }
+
+    public int PerUserConcurrencyLimit { get; set; }
+
     public int PerRoleRpmLimit { get; set; }
 
+    public int PerRoleTpmLimit { get; set; }
+
+    public int PerRoleConcurrencyLimit { get; set; }
+
     public int PerTenantRpmLimit { get; set; }
+
+    public int PerTenantTpmLimit { get; set; }
+
+    public int PerTenantConcurrencyLimit { get; set; }
 
     public Dictionary<string, ModelEndpointPoolOptions> EndpointPools { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
@@ -34,6 +46,10 @@ public sealed class ModelEndpointPoolOptions
     public int QueueTimeoutMs { get; set; } = 10000;
 
     public int ModelConcurrencyLimit { get; set; }
+
+    public int ModelRpmLimit { get; set; }
+
+    public int ModelTpmLimit { get; set; }
 
     public List<ModelEndpointOptions> Endpoints { get; set; } = [];
 }

@@ -7,6 +7,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace AICopilot.AiRuntime;
 
@@ -18,6 +19,7 @@ internal sealed class AgentRuntimeFactory(
     IModelCircuitBreaker circuitBreaker,
     IModelCostBudgetPolicy costBudgetPolicy,
     ILogger<AgentRuntimeFactory> logger,
+    IOptions<ModelProviderReliabilityOptions> reliabilityOptions,
     IModelEndpointPoolScheduler? endpointPoolScheduler = null) : IAgentRuntimeFactory
 {
     public ScopedRuntimeAgent Create(AgentRuntimeCreateRequest request)
@@ -25,11 +27,15 @@ internal sealed class AgentRuntimeFactory(
         var scope = serviceScopeFactory.CreateScope();
         try
         {
+            var quotaStore = scope.ServiceProvider.GetService<IModelQuotaReservationStore>()
+                ?? throw new InvalidOperationException(
+                    "PostgreSQL model quota reservation store is required before any model call can run.");
             var context = BuildExecutionContext(request);
             costBudgetPolicy.EnsureWithinBudget(request, context);
             var providers = scope.ServiceProvider.GetServices<IChatClientProvider>().ToArray();
             var endpointLease = TryAcquireEndpoint(request, context);
             var endpointSelection = endpointLease?.Selection;
+            var poolName = ResolvePoolName(request, context);
             var runtimeModel = endpointSelection is null
                 ? request.Model
                 : CreateEndpointModel(request.Model, endpointSelection);
@@ -88,8 +94,22 @@ internal sealed class AgentRuntimeFactory(
                     var agent = chatClientBuilder.BuildAIAgent(agentOptions, services: scope.ServiceProvider);
                     circuitBreaker.RecordSuccess(providerName);
 
+                    var quotaEndpoint = endpointSelection ?? new ModelEndpointSelection(
+                        poolName,
+                        $"model:{request.Model.Id.Value:D}",
+                        runtimeModel.ProtocolType,
+                        runtimeModel.BaseUrl,
+                        !string.IsNullOrWhiteSpace(runtimeModel.ApiKey),
+                        ApiKey: null);
+
                     return new ScopedRuntimeAgent(
-                        new MicrosoftAgentRuntimeChatAgent(agent),
+                        new QuotaReservedRuntimeChatAgent(
+                            new MicrosoftAgentRuntimeChatAgent(agent),
+                            quotaStore,
+                            request,
+                            quotaEndpoint,
+                            poolName,
+                            reliabilityOptions.Value),
                         new AgentRuntimeHandle(agent, scope, endpointLease));
                 }
                 catch (Exception ex)

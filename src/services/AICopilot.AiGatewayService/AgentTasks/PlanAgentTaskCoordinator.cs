@@ -331,6 +331,20 @@ public sealed class PlanAgentTaskCoordinator(
         {
             routedIntents.Add(new IntentResult { Intent = "Analysis.GovernedQuery", Confidence = 1 });
         }
+
+        if ((request.CapabilitySelectionMode ?? AgentCapabilitySelectionMode.InferredFromGoal) ==
+                AgentCapabilitySelectionMode.InferredFromGoal &&
+            !routedIntents.Any(intent => string.Equals(
+                intent.Intent,
+                "General.Chat",
+                StringComparison.Ordinal)))
+        {
+            // Linear deterministic report/file/artifact nodes need a non-data
+            // synthesis capability. This is a server-owned derived dependency for
+            // inferred planning; an explicit allowlist remains a hard upper bound
+            // and is never silently expanded here.
+            routedIntents.Add(new IntentResult { Intent = "General.Chat", Confidence = 1 });
+        }
         var contractAuthority = planDraftContractAuthority ?? new AgentPlanDraftContractAuthority(
             new IntentResultToCandidateAdapter(),
             new AgentPlanCanonicalizer());
