@@ -1,6 +1,6 @@
-# AI 完整修复计划（HTTP-only 修正版）
+# AI 历史治理清单与 Rule ID 索引
 
-本文档是 AICopilot 当前安全和架构修复的完整执行计划，也是 AI 端治理清单。长期规则仍以 `AGENTS.md`、`资料/AICopilot业务规则.md`、`AICopilot 项目部署与维护指南.md` 和 `deploy/enterprise-ai/README.md` 为准。
+本文档保存 AICopilot 历史治理状态和 Rule ID 追溯信息，不是当前任务的默认执行计划。当前长期规则以工作区 `../docs/总规则.md`、`AGENTS.md`、`资料/AICopilot业务规则.md` 和命中的专题契约为准；只在当前改动命中具体 Rule ID、历史回归或未关闭风险时读取对应条目，禁止全文加载。本文中的旧候选、旧测试数量、旧全量验收和已被新契约取代的结论只作历史证据，不得覆盖当前 task mode、动态测试选择或统一业务数据查询契约。
 
 专题契约入口：
 
@@ -14,8 +14,8 @@
 - 当前内网生产部署必须保持 HTTP-only。不得把 HTTPS redirection、HSTS、nginx 443 listener、证书申请/续期或 OIDC HTTPS metadata 强制校验列为当前修复门槛。
 - 如果未来要切 HTTPS，必须由用户另行批准传输层方案和证书来源；不能在 AI 安全整改中夹带。
 - HTTP-only 不代表放弃安全。当前安全整改必须优先落内网可执行项：端口收敛、同源代理、CORS 白名单、强 secret、短期 token、非 root 容器、敏感信息脱敏、Cloud 只读边界、除 HSTS 外的安全响应头和部署 preflight。
-- 所有修复项必须进入本清单，编号、严重级、状态、验证命令和复盘结论齐全；未进入清单的项视为未处理。
-- 每批代码或文档改动完成前，必须更新 `docs/改动复盘与规则沉淀.md`，并判断是否需要沉淀到项目规则或部署文档。
+- 需要长期追踪的架构/安全风险可以继续使用本清单的 Rule ID；普通业务修改不要求登记清单。
+- 只有形成长期规则、修复历史回归、处理生产事故或改变部署机制时才更新项目滚动复盘；普通业务与测试同批调整不写任务流水。
 
 ## 1. 总体优先级
 
@@ -62,7 +62,7 @@
 
 ## 1.1 测试架构治理（AI-TEST）
 
-测试架构总纲以 `../../docs/三项目测试架构治理总计划.md` 为专题执行入口。本节只记录 AICopilot 当前可执行状态；历史运行、已退役治理实验和事故证据只保留在项目滚动复盘或 Git 历史。
+本节仅保存历史测试治理状态，不是当前执行入口。当前只认项目规则与 `Select-AICopilotCiTests.ps1`/`Invoke-AICopilotCiSelectedTests.ps1` 的任务模式；表内固定 runner、case、coverage、mutation 或 baseline 数量均不得作为当前业务测试门禁。
 
 | 编号 | 严重级 | 状态 | 当前结论 | 下一关闭条件 |
 | --- | --- | --- | --- | --- |
@@ -139,7 +139,7 @@ git log --oneline -n 20 -- AICopilot.slnx deploy src docs AGENTS.md 资料
 - DataAnalysis / Text-to-SQL：`src/services/AICopilot.DataAnalysisService`、`src/infrastructure/AICopilot.Dapper`、`src/services/AICopilot.Services.CrossCutting/Sql`。
 - Agent workflow / MCP / Tool / Approval：`src/services/AICopilot.AiGatewayService/AgentTasks`、`src/services/AICopilot.AiGatewayService/Tools`、`src/services/AICopilot.McpService`。
 - 前端错误和运行详情：`src/vues/AICopilot.Web/src/services`、`src/vues/AICopilot.Web/src/stores`、`src/vues/AICopilot.Web/src/protocol`、`src/vues/AICopilot.Web/src/views`。
-- 架构和回归测试：`src/tests` 下由 `Get-AICopilotTestInventory.ps1` 发现的 required 物理 runner、`src/testing` 固定 TestKit support 项目、Analyzer/AnalyzerTests，以及 `src/vues/AICopilot.Web/tests`。
+- 架构和回归测试：`src/tests` 下由 `Select-AICopilotCiTests.ps1` 按源码依赖与 owner 选中的当前 runner、`Invoke-AICopilotCiSelectedTests.ps1` 生成的本次动态发现证据、`src/testing` TestKit support 项目、Analyzer/AnalyzerTests，以及按当前前端改动选中的 `src/vues/AICopilot.Web/tests`。
 
 每个批次必须先定位到以上目录和对应测试，再改代码或文档。找不到源码证据的项只能标为外部依赖、待审计或不纳入，不能写成 Done。
 
@@ -290,7 +290,7 @@ git log --oneline -n 20 -- AICopilot.slnx deploy src docs AGENTS.md 资料
 - `CloudReadonlyChatBoundaryTests` 阻断 Cloud 业务修改、禁用设备、补录产能、删除日志和上传生产数据等写语义。
 - `CloudReadonlySimulationTests` 固化 Simulation 只能在 Development 使用，Real 模式必须双开 `CloudReadonly:Real` 和 `CloudAiRead`，Cloud AiRead 不可用时不得降级返回 Simulation。
 - `CloudAiReadClientContractTests` 固化 `/api/v1/ai/read/devices`、`processes`、`client-releases`、`device-client-states`、`device-logs`、`capacity/summary`、`capacity/hourly`、`production-records` 端点和参数契约；`deviceCode` 只有在未截断搜索结果中唯一精确匹配时才能解析成 `deviceId`，设备状态随后只向 `/device-client-states` 发送正式 `deviceId`，不得把 `deviceCode` 或整句自然语言降级为 keyword。
-- `SemanticAnalysisRunnerTests` 以唯一六类目标数据源覆盖 Cloud 合法空集、规划失败、关闭和错误都不 fallback，并单独证明 Recipe 在 planner 前拒绝；Direct DB / Text-to-SQL 只保留在正式语义执行器之外的治理白名单补充分析。
+- 统一业务查询管线覆盖六类能力的插件结果分类；`Empty`、`NeedClarification`、`Unauthorized` 终止，只有 `Unsupported` 或同源 `Unavailable` 可由确认计划选择同源 Text-to-SQL。Recipe 仍在 planner 前拒绝，Simulation 和跨源 fallback 始终禁止。
 - `DeviceLogFollowUpIntentRewriterTests` 固化追问日志级别、设备、工序、时间窗口时重新生成 `Analysis.DeviceLog.*` 查询。
 
 ### 7.1 2026-07-10 AI-only 契约、安全、Agent 与前端修复
@@ -299,7 +299,7 @@ git log --oneline -n 20 -- AICopilot.slnx deploy src docs AGENTS.md 资料
 
 | 编号 | 严重级 | 状态 | 范围 | 修复要求 | 验收 |
 | --- | --- | --- | --- | --- | --- |
-| AI-SEC-029 | HIGH | Done | Device 语义/CloudRead/Direct DB | 设备主数据、最后上报运行状态和最新日志级别分离；`Analysis.Device.Status` 只消费 `/device-client-states`，不得回退 Direct DB/Text-to-SQL/Simulation | Contract/Unit/Application/Workflow/EndToEnd 对应语义 + required runner 全量对账 |
+| AI-SEC-029 | HIGH | Superseded | Device 语义/CloudRead | 设备主数据、最后上报运行状态和最新日志级别继续分离；旧“任何情况都不回退 Text-to-SQL”已由统一查询契约取代。插件成功/空结果终止，只有 `Unsupported` 或同源 `Unavailable` 可按确认计划进入同源 Text-to-SQL，始终禁止 Simulation 和跨源回退 | 受影响 Contract/Unit/Application/Workflow |
 | AI-SEC-030 | HIGH | Done | production records | `typeName/typeKey` 不得冒充 `processName/stationName`；正式字段缺失保持空 | `CloudAiReadClientContractTests` 负向 fixture + required runner 全量对账 |
 | AI-SEC-031 | HIGH | Done | Cloud AiRead transport | 删除可配置 POST、任意 method/path 公共传输和双轨接口；只保留八个正式 GET，且不破坏 Cloud identity status GET 校验 | `CloudAiReadClientContractTests` + `ToolRegistryApplicationTests` + ArchitectureTests + required runner 全量对账 |
 | AI-SEC-032 | HIGH | Done | JWT runtime | HttpApi 启动统一校验 issuer、audience、至少 64 字符 secret 和正数 token lifetime | Unit/Architecture/HttpIntegration 安全测试 + required runner 全量对账 |
@@ -339,7 +339,7 @@ git log --oneline -n 20 -- AICopilot.slnx deploy src docs AGENTS.md 资料
 
 | 编号 | 严重级 | 状态 | 范围 | 修复要求 | 验收 |
 | --- | --- | --- | --- | --- | --- |
-| AI-SEC-044 | HIGH | Done | SemanticAnalysisRunner | Recipe 必须在 planner 前拒绝；六类正式语义在成功、空集、规划失败、关闭和 Cloud 错误时只走 Cloud AiRead 且不 fallback；物理删除 Runner 内不可达 Direct DB/SQL/fallback 分支和专用测试桩 | `SemanticAnalysisRunnerTests` 七目标边界与六类矩阵 + ArchitectureTests + required runner 全量对账 + solution build |
+| AI-SEC-044 | HIGH | Superseded | 统一业务查询入口 | Recipe 继续在 planner 前拒绝；六类正式能力改由 provider registry、确认上下文和结构化结果统一编排。旧“关闭或不可用也绝不回退”已被同源条件 fallback 契约取代；不得恢复第二套 Runner/Guard/Prompt | 受影响 `SemanticAnalysisRunnerTests`、查询管线与 Architecture/Security |
 
 本批没有重命名或迁移既有 HTTP route、配置键、physical mapping / semantic source status 运维诊断及其消费者，也没有删除 `SemanticSqlGenerator` 独立实现和测试；这些表面不属于正式语义执行器，后续若治理必须重新做生产与测试消费者审计，不能借本批 no-fallback 收口扩大删除范围。
 
@@ -399,69 +399,14 @@ git log --oneline -n 20 -- AICopilot.slnx deploy src docs AGENTS.md 资料
 - `AgentSafetyApplicationTests` 构造 SQL、连接串、sourceName、tableName、prompt injection、DeviceLog 内部字段，最终上下文和展示块必须脱敏或移除。
 - `PromptGovernanceTests` 固化 chat answer 和 cloud readonly text-to-sql prompt 的只读、governed schema、不得暴露 SQL/数据库名/物理表名约束。
 
-## 9. 第七批：测试、部署 preflight 和发布验收
+## 9. 当前测试与发布路由
 
-PR 前必须过：
-
-```bash
-rg -n "USER root|CipherMode.CBC|CHANGE_ME|dummy-key|(10\\.[0-9]{1,3}\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.)|Strict-Transport-Security|UseHttpsRedirection|listen 443|ssl_certificate" deploy src docs
-bash -n deploy/enterprise-ai/*.sh deploy/enterprise-ai/scripts/*.sh
-head_sha="$(git rev-parse HEAD)"
-dotnet build AICopilot.slnx -c Release --no-restore "-p:SourceRevisionId=$head_sha"
-pwsh -NoProfile -File scripts/tests/Test-AICopilotTestInfrastructureBehavior.ps1
-pwsh -NoProfile -File scripts/tests/Test-AICopilotCompatibilityInventory.ps1
-pwsh -NoProfile -File scripts/tests/Measure-AICopilotDuplication.ps1
-pwsh -NoProfile -File scripts/tests/Get-AICopilotTestInventory.ps1 -OutputPath artifacts/test-inventory.json -SynchronizeRunnerBuildIdentity
-# 按 .github/workflows/aicopilot-ci.yml 执行 inventory 中全部 17 个 required runner：每个 runner 紧邻 dotnet test 前先调用 Bind-AICopilotRunnerBuildIdentity.ps1，分别写 artifacts/runner-inputs/<runner>.json；Pure/InProcess 并行收集 coverage，资源 runner 串行，全部输出 TRX。
-bash deploy/enterprise-ai/tests/deployment-behavior.sh 2>&1 | tee artifacts/test-results/deployment-behavior.log
-cd src/vues/AICopilot.Web
-npm run test:unit -- --reporter=json --outputFile=../../../artifacts/test-results/vitest.json
-PLAYWRIGHT_JSON_OUTPUT_NAME=../../../artifacts/test-results/playwright.json npm run test:smoke -- --reporter=json
-npm run build
-cd ../../..
-pwsh -NoProfile -File scripts/tests/Confirm-AICopilotCoverage.ps1
-pwsh -NoProfile -File scripts/tests/Confirm-AICopilotRequiredTestResults.ps1 -InventoryPath artifacts/test-inventory.json -ResultsDirectory artifacts/test-results -VitestPath artifacts/test-results/vitest.json -PlaywrightPath artifacts/test-results/playwright.json -DeploymentPath artifacts/test-results/deployment-behavior.log
-```
-
-定向 `dotnet test --filter ...` 只能用于失败后的窄范围诊断，不能作为 PR 或合 main 的完成证据。合 main 前必须重复上述完整 required runner/Web/deployment 对账，不得用单项目或 filter 结果代替。
-
-AI-SEC-011/012 secret-protection mutation 是独立 report-only 质量证据，不与 required 执行数混算：
-
-```bash
-pwsh -NoProfile -File scripts/tests/Invoke-AICopilotMutation.ps1
-# 已有真实 Stryker JSON 时可单独重验：
-pwsh -NoProfile -File scripts/tests/Confirm-AICopilotMutation.ps1 -ReportPath artifacts/mutation/reports/aicopilot-secret-encryption-mutation.json
-```
-
-发版前必须过：
-
-```powershell
-pwsh ../deploy/Deploy.ps1 -Target AICopilot -Doctor
-pwsh ../deploy/Deploy.ps1 -Target AICopilot -Services <实际服务列表> -DryRun
-```
-
-下面是 AICopilot 仓内只读配置/安全专项诊断，不替代工作区统一入口；从 AICopilot 仓库根执行：
-
-```bash
-docker compose --env-file deploy/enterprise-ai/.env.example -f deploy/enterprise-ai/docker-compose.yaml config -q
-curl -I http://<intranet-host>:82
-curl -I http://<intranet-host>:82/api/identity/cloud-oidc/status
-./deploy/enterprise-ai/scripts/check-release-security-attestation.sh --dry-run
-./deploy/enterprise-ai/scripts/check-runner-security-attestation.sh --dry-run
-./deploy/enterprise-ai/scripts/check-platform-attestation-record.sh --record <filled-runner-platform-attestation.md>
-./deploy/enterprise-ai/scripts/check-model-secret-migration.sh --dry-run
-./deploy/enterprise-ai/scripts/check-model-provider-openai.sh --base-url http://model.internal.example:40034/v1 --model smoke-model --api-key explicit-test-key --dry-run
-```
-
-线上发布后必须确认：
-
-- HTTP 首页 200。
-- OIDC 状态接口 200。
-- Web 响应头包含 HTTP 兼容安全头，不包含 HSTS。
-- `deploy-release.sh` 自动运行 `./scripts/check-release-security-attestation.sh` 并在 release summary 写入结果，覆盖 Web 安全头、Cloud OIDC 状态接口、Web 非 root 和 API key 迁移；必要时手工复跑通过。
-- 模型 provider smoke 通过或明确禁用并记录原因。
-- CloudReadOnly direct DB 启用时 readonly grant preflight 通过。
-- 当前 release summary 写入部署服务、git sha、验证结果和清理结果。
+- 默认 push/PR 与业务开发使用 `Select-AICopilotCiTests.ps1 -Mode Default`，只运行 Architecture、Security 和受影响 Business，并按当次 discovery/TRX 对账。
+- 普通部署只允许工作区 `deploy/Deploy-Changed.ps1` 调用 `Deployment` 模式，复用同 SHA、同 changed-files scope 的绿色证据，只补缺失的受影响 Architecture、Security、DeploymentContract。
+- 全仓 required、coverage、mutation、duplication、完整 Web/Playwright、Quality、Full 和 CrossProject 均为用户显式模式，不得由 push、普通部署或 nightly 自动追加。
+- 普通部署视代码已经完成，只接受 clean、已提交的 `main`；可以 push 现有 HEAD，但不得创建提交、编辑文件或失败后修代码。配置、迁移、健康、只读权限和回滚登记按部署计划验证。
+- 三端从零部署只走工作区 `deploy/Deploy-FromZero.ps1`，由 canonical Keychain schema 提供根密钥；它不运行业务测试，也不创建设备、不注册 `ClientCode`、不轮换设备 bootstrap secret。
+- 发布后的 HTTP/OIDC、模型 provider、Cloud readonly grant 和 release summary 检查按本次受影响服务执行；未执行不得冒充通过。
 
 ## 10. 外部依赖和跨项目项
 

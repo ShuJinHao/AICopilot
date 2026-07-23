@@ -1,7 +1,10 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
+using AICopilot.AiGatewayService.Agents;
 using AICopilot.AiGatewayService.Models;
 using AICopilot.AiGatewayService.Workflows;
 using AICopilot.AiGatewayService.Workflows.Executors;
+using AICopilot.DataAnalysisService.BusinessDatabases;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace AICopilot.ApplicationTests;
@@ -32,8 +35,9 @@ public sealed class SemanticAnalysisRunnerTests
         var runner = CreateRunner(cloudClient, planner);
 
         var result = await runner.RunAsync(
-            new IntentResult { Intent = intent, Query = "查询正式业务数据" },
+            CreateConfirmedIntent(intent, "查询正式业务数据"),
             sink: null,
+            CreateSession(),
             CancellationToken.None);
         var safeOutput = GetSafeOutput(result);
 
@@ -48,6 +52,214 @@ public sealed class SemanticAnalysisRunnerTests
     }
 
     [Fact]
+    public async Task RunAsync_LowConfidenceWithoutConfirmedTaskContext_ShouldAskBeforeProvider()
+    {
+        const string intent = "Analysis.Device.List";
+        var planner = new RecordingSemanticQueryPlanner(
+            SemanticPlanningResult.Success(CreatePlan(intent, SemanticQueryTarget.Device)));
+        var cloudClient = new RecordingCloudAiReadClient(
+            isEnabled: true,
+            resultFactory: plan => CreateCloudResult(plan.Target, []));
+        var runner = CreateRunner(cloudClient, planner);
+
+        var result = await runner.RunAsync(
+            new IntentResult
+            {
+                Intent = intent,
+                Query = "设备条件不明确",
+                Confidence = 0.42
+            },
+            sink: null,
+            CreateSession(),
+            CancellationToken.None);
+
+        result.Status.Should().Be(BranchExecutionStatus.Failed);
+        GetSafeOutput(result).Should().Contain("置信度不足");
+        cloudClient.RequestedPlans.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RunAsync_HighConfidenceSessionWithoutExplicitScopeConfirmation_ShouldAskBeforeProvider()
+    {
+        const string intent = "Analysis.Process.List";
+        var planner = new RecordingSemanticQueryPlanner(
+            SemanticPlanningResult.Success(CreatePlan(intent, SemanticQueryTarget.Process)));
+        var cloudClient = new RecordingCloudAiReadClient(
+            isEnabled: true,
+            resultFactory: plan => CreateCloudResult(plan.Target, []));
+        var runner = CreateRunner(cloudClient, planner);
+
+        var result = await runner.RunAsync(
+            new IntentResult
+            {
+                Intent = intent,
+                Query = "查看工序",
+                Confidence = 0.99
+            },
+            sink: null,
+            CreateSession(),
+            CancellationToken.None);
+
+        result.Status.Should().Be(BranchExecutionStatus.Failed);
+        GetSafeOutput(result).Should().Contain("请确认");
+        cloudClient.RequestedPlans.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RunAsync_ConfirmedUnavailablePlugin_ShouldExecuteSameSourceFallback()
+    {
+        const string intent = "Analysis.Device.List";
+        var planner = new RecordingSemanticQueryPlanner(
+            SemanticPlanningResult.Success(CreatePlan(intent, SemanticQueryTarget.Device)));
+        var cloudClient = new RecordingCloudAiReadClient(
+            isEnabled: false,
+            resultFactory: plan => CreateCloudResult(plan.Target, []));
+        var source = new FixedBusinessDatabaseReadService();
+        var fallback = new RecordingTextToSqlFallbackRunner();
+        var runner = CreateRunner(
+            cloudClient,
+            planner,
+            businessDatabaseReadService: source,
+            fallbackRunner: fallback);
+
+        var result = await runner.RunAsync(
+            CreateConfirmedIntent(intent, "查看设备"),
+            sink: null,
+            CreateSession(),
+            CancellationToken.None);
+
+        result.Status.Should().Be(BranchExecutionStatus.Succeeded);
+        fallback.Contexts.Should().ContainSingle()
+            .Which.DataSourceId.Should().Be(source.Descriptor.Id);
+        GetSafeOutput(result).Should().Contain("business_data_preview");
+    }
+
+    [Fact]
+    public void BusinessDataSourceBindingResolver_ShouldBindFutureNonCloudSourceByKeyAndOptionalId()
+    {
+        var mes = CreateNonCloudDescriptor(Guid.NewGuid(), "mes-readonly");
+        var erp = CreateNonCloudDescriptor(Guid.NewGuid(), "erp-readonly");
+        var context = new BusinessQueryContext(
+            Guid.NewGuid(),
+            "mes-readonly",
+            mes.Id,
+            DataSourceExternalSystemType.NonCloud,
+            BusinessDataCapability.ProductionRecord,
+            "查询 MES 生产记录",
+            SourceExplicitlySelected: true,
+            BusinessQueryConfirmation.Complete,
+            ConfirmedAtUtc: DateTimeOffset.UtcNow);
+
+        BusinessDataSourceBindingResolver.Resolve(context, [mes, erp])
+            .Should().ContainSingle().Which.Should().Be(mes);
+        BusinessDataSourceBindingResolver.Resolve(
+                context with { DataSourceId = null },
+                [mes, erp])
+            .Should().ContainSingle().Which.Should().Be(mes);
+        BusinessDataSourceBindingResolver.Resolve(
+                context with { DataSourceId = erp.Id },
+                [mes, erp])
+            .Should().BeEmpty("the confirmed source key and id must both match");
+        BusinessDataSourceBindingResolver.Resolve(
+                context with { SourceKey = "erp-readonly", DataSourceId = null },
+                [mes, erp])
+            .Should().ContainSingle().Which.Should().Be(erp);
+    }
+
+    [Fact]
+    public async Task RunAsync_ExactChallengeReply_ShouldExecuteStoredScopeOnce()
+    {
+        const string intent = "Analysis.Device.List";
+        var plan = CreatePlan(intent, SemanticQueryTarget.Device);
+        var planner = new RecordingSemanticQueryPlanner(
+            SemanticPlanningResult.Success(plan));
+        var cloudClient = new RecordingCloudAiReadClient(
+            isEnabled: true,
+            resultFactory: targetPlan => CreateCloudResult(targetPlan.Target, []));
+        var contextStore = new BusinessQueryContextStore();
+        var runner = CreateRunner(cloudClient, planner, contextStore);
+        var session = CreateSession();
+
+        var challengeResult = await runner.RunAsync(
+            new IntentResult
+            {
+                Intent = intent,
+                Query = "查看全部设备",
+                Confidence = 0.99
+            },
+            sink: null,
+            session,
+            CancellationToken.None);
+        var challengeMessage = GetSafeOutput(challengeResult);
+        var token = Regex.Match(
+            challengeMessage,
+            @"确认查询 (?<token>[0-9a-f]{32})",
+            RegexOptions.CultureInvariant).Groups["token"].Value;
+        token.Should().HaveLength(32);
+        contextStore.TryConfirmPending(
+                session.Id,
+                $"确认查询 {token}",
+                out var confirmed)
+            .Should().BeTrue();
+
+        var confirmedResult = await runner.RunAsync(
+            new IntentResult
+            {
+                Intent = intent,
+                Query = confirmed.Question,
+                Confidence = 1,
+                RoutingNote = "server-confirmed-business-query",
+                BusinessDataSourceExplicitlySelected = true,
+                ConfirmedBusinessQueryContext = BusinessQueryConfirmation.Complete,
+                ConfirmedBusinessQuery = confirmed
+            },
+            sink: null,
+            session,
+            CancellationToken.None);
+
+        confirmedResult.Status.Should().Be(BranchExecutionStatus.Empty);
+        cloudClient.RequestedPlans.Should().ContainSingle();
+        contextStore.TryConfirmPending(
+                session.Id,
+                $"确认查询 {token}",
+                out _)
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task RunAsync_LowConfidenceFollowUp_ShouldReuseConfirmedSourceWithinSameTask()
+    {
+        const string intent = "Analysis.Device.List";
+        var planner = new RecordingSemanticQueryPlanner(
+            SemanticPlanningResult.Success(CreatePlan(intent, SemanticQueryTarget.Device)));
+        var cloudClient = new RecordingCloudAiReadClient(
+            isEnabled: true,
+            resultFactory: plan => CreateCloudResult(plan.Target, []));
+        var contextStore = new BusinessQueryContextStore();
+        var runner = CreateRunner(cloudClient, planner, contextStore);
+        var session = CreateSession();
+
+        await runner.RunAsync(
+            CreateConfirmedIntent(intent, "确认查询设备", confidence: 0.95),
+            sink: null,
+            session,
+            CancellationToken.None);
+        var followUp = await runner.RunAsync(
+            new IntentResult
+            {
+                Intent = intent,
+                Query = "继续看这些设备",
+                Confidence = 0.42
+            },
+            sink: null,
+            session,
+            CancellationToken.None);
+
+        followUp.Status.Should().Be(BranchExecutionStatus.Empty);
+        cloudClient.RequestedPlans.Should().HaveCount(2);
+    }
+
+    [Fact]
     public async Task RunAsync_RecipeTarget_ShouldRejectBeforePlannerEvenWhenPlanningWouldFail()
     {
         var planner = new RecordingSemanticQueryPlanner(
@@ -58,8 +270,9 @@ public sealed class SemanticAnalysisRunnerTests
         var runner = CreateRunner(cloudClient, planner);
 
         var result = await runner.RunAsync(
-            new IntentResult { Intent = "Analysis.Recipe.Detail", Query = "查询配方详情" },
+            new IntentResult { Intent = "Analysis.Recipe.Detail", Query = "查询配方详情", Confidence = 0.9 },
             sink: null,
+            CreateSession(),
             CancellationToken.None);
         var safeOutput = GetSafeOutput(result);
 
@@ -74,6 +287,7 @@ public sealed class SemanticAnalysisRunnerTests
         string intent,
         SemanticQueryTarget target)
     {
+        _ = target;
         var planner = new RecordingSemanticQueryPlanner(
             SemanticPlanningResult.Failure("invalid semantic payload"));
         var cloudClient = new RecordingCloudAiReadClient(
@@ -82,13 +296,15 @@ public sealed class SemanticAnalysisRunnerTests
         var runner = CreateRunner(cloudClient, planner);
 
         var result = await runner.RunAsync(
-            new IntentResult { Intent = intent, Query = "查询正式业务数据" },
+            CreateConfirmedIntent(intent, "查询正式业务数据"),
             sink: null,
+            CreateSession(),
             CancellationToken.None);
         var safeOutput = GetSafeOutput(result);
 
         AssertNoCloudRead(planner, cloudClient, expectedPlannerCalls: 1);
-        AssertCloudOnlyFailure(safeOutput, target);
+        safeOutput.Should().Contain("尚未形成可执行的结构化");
+        safeOutput.Should().NotContain("Text-to-SQL 补充分析");
     }
 
     [Theory]
@@ -105,13 +321,23 @@ public sealed class SemanticAnalysisRunnerTests
         var runner = CreateRunner(cloudClient, planner);
 
         var result = await runner.RunAsync(
-            new IntentResult { Intent = intent, Query = "查询正式业务数据" },
+            CreateConfirmedIntent(intent, "查询正式业务数据"),
             sink: null,
+            CreateSession(),
             CancellationToken.None);
         var safeOutput = GetSafeOutput(result);
 
         AssertNoCloudRead(planner, cloudClient, expectedPlannerCalls: 1);
-        AssertCloudOnlyFailure(safeOutput, target);
+        if (target == SemanticQueryTarget.ClientRelease)
+        {
+            safeOutput.Should().Contain("Unavailable");
+            safeOutput.Should().Contain("capability_fallback_disabled");
+        }
+        else
+        {
+            safeOutput.Should().Contain("Text-to-SQL 当前未配置");
+        }
+        safeOutput.Should().NotContain("Simulation");
     }
 
     [Theory]
@@ -131,25 +357,34 @@ public sealed class SemanticAnalysisRunnerTests
         var runner = CreateRunner(cloudClient, planner);
 
         var result = await runner.RunAsync(
-            new IntentResult { Intent = intent, Query = "查询正式业务数据" },
+            CreateConfirmedIntent(intent, "查询正式业务数据"),
             sink: null,
+            CreateSession(),
             CancellationToken.None);
         var safeOutput = GetSafeOutput(result);
 
         AssertCloudReadRequested(planner, cloudClient, target);
-        safeOutput.Should().Contain("Cloud AiRead");
-        safeOutput.Should().Contain("只读接口暂不可用");
+        if (target == SemanticQueryTarget.ClientRelease)
+        {
+            safeOutput.Should().Contain("Unavailable");
+            safeOutput.Should().Contain("capability_fallback_disabled");
+        }
+        else
+        {
+            safeOutput.Should().Contain("Text-to-SQL 当前未配置");
+        }
         safeOutput.Should().NotContain("provider detail");
         safeOutput.Should().NotContain("DataAnalysis/Text-to-SQL 补充分析");
         safeOutput.Should().NotContain("Simulation");
     }
 
     [Theory]
-    [InlineData(CloudAiReadProblemCodes.InvalidRequest, "参数不符合正式接口契约")]
-    [InlineData(CloudAiReadProblemCodes.Unauthorized, "未通过身份凭据校验")]
-    [InlineData(CloudAiReadProblemCodes.Forbidden, "权限或设备范围不足")]
-    [InlineData(CloudAiReadProblemCodes.RateLimited, "当前受到限流")]
-    [InlineData(CloudAiReadProblemCodes.RequestBlocked, "未通过只读白名单校验")]
+    [InlineData(CloudAiReadProblemCodes.InvalidRequest, "缺少必要条件")]
+    [InlineData(CloudAiReadProblemCodes.Unauthorized, "明确终止")]
+    [InlineData(CloudAiReadProblemCodes.Forbidden, "明确终止")]
+    [InlineData(CloudAiReadProblemCodes.RateLimited, "Text-to-SQL 当前未配置")]
+    [InlineData(CloudAiReadProblemCodes.RequestBlocked, "明确终止")]
+    [InlineData("future_cloud_auth_boundary", "明确终止")]
     public async Task RunAsync_ShouldMapCloudProblemCodesWithoutLeakingProviderDetail(
         string problemCode,
         string expectedMessage)
@@ -164,8 +399,9 @@ public sealed class SemanticAnalysisRunnerTests
         var runner = CreateRunner(cloudClient, planner);
 
         var result = await runner.RunAsync(
-            new IntentResult { Intent = intent, Query = "查询设备状态" },
+            CreateConfirmedIntent(intent, "查询设备状态"),
             sink: null,
+            CreateSession(),
             CancellationToken.None);
         var safeOutput = GetSafeOutput(result);
 
@@ -215,7 +451,10 @@ public sealed class SemanticAnalysisRunnerTests
                 new SemanticFilter("deviceId", SemanticFilterOperator.Equal, "11111111-1111-1111-1111-111111111111"),
                 new SemanticFilter("level", SemanticFilterOperator.In, "ERROR,WARN")
             ],
-            null,
+            new SemanticTimeRange(
+                "occurredAt",
+                DateTimeOffset.Parse("2026-04-20T00:00:00Z"),
+                DateTimeOffset.Parse("2026-04-21T00:00:00Z")),
             new SemanticSort("occurredAt", SemanticSortDirection.Desc),
             10);
         var planner = new RecordingSemanticQueryPlanner(SemanticPlanningResult.Success(plan));
@@ -226,8 +465,9 @@ public sealed class SemanticAnalysisRunnerTests
         var sink = new AgentWorkflowSink();
 
         var result = await runner.RunAsync(
-            new IntentResult { Intent = intent, Query = plan.QueryText },
+            CreateConfirmedIntent(intent, plan.QueryText),
             sink,
+            CreateSession(),
             CancellationToken.None);
         sink.Complete();
         var chunks = new List<ChatChunk>();
@@ -267,15 +507,6 @@ public sealed class SemanticAnalysisRunnerTests
     private static string GetSafeOutput(AgentAnalysisNodeResult result) =>
         result.Evidence?.SafeContext ?? result.SafeMessage ?? string.Empty;
 
-    private static void AssertCloudOnlyFailure(string safeOutput, SemanticQueryTarget target)
-    {
-        safeOutput.Should().Contain(target == SemanticQueryTarget.Device
-            ? SemanticAnalysisRunner.DeviceStatusSourceUnavailableMarker
-            : SemanticAnalysisRunner.CloudOnlySemanticSourceUnavailableMarker);
-        safeOutput.Should().Contain("不会回退 Direct DB、Text-to-SQL 或 Simulation");
-        safeOutput.Should().NotContain("DataAnalysis/Text-to-SQL 补充分析");
-    }
-
     private static void AssertCloudReadRequested(
         RecordingSemanticQueryPlanner planner,
         RecordingCloudAiReadClient cloudClient,
@@ -296,12 +527,58 @@ public sealed class SemanticAnalysisRunnerTests
 
     private static SemanticAnalysisRunner CreateRunner(
         ICloudAiReadClient cloudAiReadClient,
-        ISemanticQueryPlanner planner)
+        ISemanticQueryPlanner planner,
+        IBusinessQueryContextStore? contextStore = null,
+        IBusinessDatabaseReadService? businessDatabaseReadService = null,
+        IBusinessTextToSqlFallbackRunner? fallbackRunner = null)
     {
+        var profileRegistry = new BusinessDataSourceProfileRegistry(
+            [new CloudReadOnlyBusinessDataSourceProfileProvider()]);
         return new SemanticAnalysisRunner(
-            cloudAiReadClient,
             planner,
-            NullLogger<SemanticAnalysisRunner>.Instance);
+            NullLogger<SemanticAnalysisRunner>.Instance,
+            new BusinessQueryProviderRegistry(
+                [new CloudAiReadBusinessQueryProvider(cloudAiReadClient)],
+                profileRegistry),
+            profileRegistry,
+            contextStore ?? new BusinessQueryContextStore(),
+            businessDatabaseReadService,
+            fallbackRunner);
+    }
+
+    private static SessionRuntimeSnapshot CreateSession() => new()
+    {
+        Id = Guid.NewGuid(),
+        UserId = Guid.NewGuid(),
+        Title = "semantic-runner-test"
+    };
+
+    private static BusinessDatabaseDescriptor CreateNonCloudDescriptor(
+        Guid id,
+        string sourceKey) =>
+        new(
+            id,
+            sourceKey,
+            "future external readonly source",
+            DatabaseProviderType.PostgreSql,
+            IsEnabled: true,
+            IsReadOnly: true,
+            DataSourceExternalSystemType.NonCloud,
+            ReadOnlyCredentialVerified: true);
+
+    private static IntentResult CreateConfirmedIntent(
+        string intent,
+        string? query,
+        double confidence = 0.9)
+    {
+        return new IntentResult
+        {
+            Intent = intent,
+            Query = query,
+            Confidence = confidence,
+            BusinessDataSourceExplicitlySelected = true,
+            ConfirmedBusinessQueryContext = BusinessQueryConfirmation.Complete
+        };
     }
 
     private static SemanticQueryPlan CreatePlan(string intent, SemanticQueryTarget target)
@@ -323,14 +600,43 @@ public sealed class SemanticAnalysisRunnerTests
             _ => throw new ArgumentOutOfRangeException(nameof(target), target, null)
         };
 
+        var filters = target switch
+        {
+            SemanticQueryTarget.DeviceLog or SemanticQueryTarget.Capacity =>
+                new[]
+                {
+                    new SemanticFilter(
+                        "deviceId",
+                        SemanticFilterOperator.Equal,
+                        "11111111-1111-1111-1111-111111111111")
+                },
+            SemanticQueryTarget.ProductionData =>
+                [new SemanticFilter("barcode", SemanticFilterOperator.Equal, "BC-001")],
+            _ => []
+        };
+        var timeRange = target switch
+        {
+            SemanticQueryTarget.DeviceLog or SemanticQueryTarget.ProductionData =>
+                new SemanticTimeRange(
+                    "occurredAt",
+                    DateTimeOffset.Parse("2026-04-20T00:00:00Z"),
+                    DateTimeOffset.Parse("2026-04-21T00:00:00Z")),
+            SemanticQueryTarget.Capacity =>
+                new SemanticTimeRange(
+                    "shiftDate",
+                    DateTimeOffset.Parse("2026-04-20T00:00:00Z"),
+                    DateTimeOffset.Parse("2026-04-21T00:00:00Z")),
+            _ => null
+        };
+
         return new SemanticQueryPlan(
             intent,
             target,
             kind,
             "查询正式业务数据",
             new SemanticProjection(fields),
-            [],
-            null,
+            filters,
+            timeRange,
             null,
             20);
     }
@@ -431,6 +737,66 @@ public sealed class SemanticAnalysisRunnerTests
         private static Task<CloudAiReadResult<T>> UnexpectedTypedCall<T>()
         {
             throw new InvalidOperationException("Semantic runner tests must use QuerySemanticAsync.");
+        }
+    }
+
+    private sealed class FixedBusinessDatabaseReadService : IBusinessDatabaseReadService
+    {
+        public BusinessDatabaseDescriptor Descriptor { get; } = new(
+            Guid.NewGuid(),
+            "CloudPlatformReadonly",
+            "Cloud readonly",
+            DatabaseProviderType.PostgreSql,
+            IsEnabled: true,
+            IsReadOnly: true,
+            DataSourceExternalSystemType.CloudReadOnly,
+            ReadOnlyCredentialVerified: true);
+
+        public Task<IReadOnlyList<BusinessDatabaseDescriptor>> ListEnabledAsync(
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<BusinessDatabaseDescriptor>>([Descriptor]);
+
+        public Task<IReadOnlyList<BusinessDatabaseDescriptor>> ListSelectableAsync(
+            DataSourceSelectionMode selectionMode,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<BusinessDatabaseDescriptor>>([Descriptor]);
+
+        public Task<BusinessDatabaseConnectionInfo?> GetByNameAsync(
+            string name,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<BusinessDatabaseConnectionInfo?>(new BusinessDatabaseConnectionInfo(
+                Descriptor.Id,
+                Descriptor.Name,
+                Descriptor.Description,
+                "Host=localhost;Database=cloud;Username=readonly;Password=fake-test-only",
+                Descriptor.Provider,
+                Descriptor.IsEnabled,
+                Descriptor.IsReadOnly,
+                Descriptor.ExternalSystemType,
+                Descriptor.ReadOnlyCredentialVerified));
+    }
+
+    private sealed class RecordingTextToSqlFallbackRunner : IBusinessTextToSqlFallbackRunner
+    {
+        public List<BusinessQueryContext> Contexts { get; } = [];
+
+        public Task<BusinessTextToSqlFallbackResult> RunAsync(
+            BusinessQueryContext context,
+            BusinessDatabaseConnectionInfo database,
+            string? question,
+            int? requestedLimit,
+            CancellationToken cancellationToken)
+        {
+            Contexts.Add(context);
+            return Task.FromResult(new BusinessTextToSqlFallbackResult(
+                Succeeded: true,
+                Context: """{"business_data_preview":[{"client_code":"DEV-001"}]}""",
+                Rows: [new Dictionary<string, object?> { ["client_code"] = "DEV-001" }],
+                RowCount: 1,
+                IsTruncated: false,
+                QueryHash: "test-query-hash",
+                RepairAttempts: [],
+                SafeMessage: "ok"));
         }
     }
 }

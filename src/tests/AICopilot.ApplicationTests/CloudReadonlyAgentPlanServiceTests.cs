@@ -2,8 +2,6 @@ using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.AiGatewayService.Models;
 using AICopilot.DataAnalysisService.Semantics;
 using AICopilot.Services.Contracts;
-using AICopilot.SharedKernel.Result;
-using Microsoft.Extensions.Options;
 
 namespace AICopilot.ApplicationTests;
 
@@ -14,7 +12,7 @@ public sealed class CloudReadonlyAgentPlanServiceTests
     [InlineData("Analysis.Process.Detail", "{\"filters\":[{\"field\":\"processCode\",\"operator\":\"eq\",\"value\":\"CUT\"}]}", "Process", "Detail")]
     [InlineData("Analysis.ClientRelease.List", "{\"filters\":[{\"field\":\"channel\",\"operator\":\"eq\",\"value\":\"stable\"}]}", "ClientRelease", "List")]
     [InlineData("Analysis.Device.Status", "{\"filters\":[{\"field\":\"deviceCode\",\"operator\":\"eq\",\"value\":\"DEV-001\"}]}", "Device", "Status")]
-    public async Task CreateIntentAsync_ShouldExposeConfirmedCloudReadonlyCapabilities(
+    public void CreateIntentFromRouted_ShouldExposeConfirmedCloudReadonlyCapabilities(
         string intent,
         string query,
         string expectedTarget,
@@ -28,7 +26,17 @@ public sealed class CloudReadonlyAgentPlanServiceTests
             RoutingNote = "test"
         });
 
-        var result = await service.CreateIntentAsync(Guid.NewGuid(), "只读查询");
+        var routed = new[]
+        {
+            new IntentResult
+            {
+                Intent = intent,
+                Query = query,
+                Confidence = 0.95,
+                RoutingNote = "test"
+            }
+        };
+        var result = service.CreateIntentFromRouted("只读查询", routed);
 
         result.IsSuccess.Should().BeTrue();
         result.Value!.Intent.Should().Be(intent);
@@ -48,8 +56,8 @@ public sealed class CloudReadonlyAgentPlanServiceTests
             .ToArray();
 
         constructorParameters.Should().NotContain(typeof(ICloudAiReadClient));
-        constructorParameters.Should().Contain(typeof(ICloudReadonlyAgentIntentRouter));
         constructorParameters.Should().Contain(typeof(ISemanticQueryPlanner));
+        constructorParameters.Should().HaveCount(1);
     }
 
     [Fact]
@@ -83,34 +91,36 @@ public sealed class CloudReadonlyAgentPlanServiceTests
                 character >= '0' && character <= '9' || character >= 'a' && character <= 'f'));
     }
 
+    [Fact]
+    public void CreateIntentFromRouted_ShouldNotRejectReadonlyNaturalLanguageContainingWriteWords()
+    {
+        var routed = new[]
+        {
+            new IntentResult
+            {
+                Intent = "Analysis.Device.List",
+                Query = """
+                        {"filters":[{"field":"deviceName","operator":"contains","value":"update-delete-station"}],"limit":20}
+                        """,
+                Confidence = 0.95
+            }
+        };
+        var service = CreateService(routed);
+
+        var result = service.CreateIntentFromRouted(
+            "查看名称里包含 update 或 delete 的设备，只读返回列表",
+            routed);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value!.SemanticPlan.Filters.Should().ContainSingle()
+            .Which.Value.Should().Be("update-delete-station");
+    }
+
     private static CloudReadonlyAgentPlanService CreateService(params IntentResult[] intents)
     {
+        _ = intents;
         var definitions = new SemanticDefinitionCatalog();
         var planner = new SemanticQueryPlanner(new SemanticQuerySchemaRegistry(definitions), definitions);
-        return new CloudReadonlyAgentPlanService(
-            new FixedIntentRouter(intents),
-            planner,
-            Options.Create(new CloudReadonlyOptions { Mode = CloudReadonlyDataSourceMode.Real }),
-            new ThrowingSimulationPlanner());
-    }
-
-    private sealed class FixedIntentRouter(IReadOnlyCollection<IntentResult> intents)
-        : ICloudReadonlyAgentIntentRouter
-    {
-        public Task<IReadOnlyCollection<IntentResult>> RouteAsync(
-            Guid sessionId,
-            string goal,
-            CancellationToken cancellationToken = default)
-        {
-            return Task.FromResult(intents);
-        }
-    }
-
-    private sealed class ThrowingSimulationPlanner : ICloudReadonlySimulationIntentPlanner
-    {
-        public Result<CloudReadonlyAgentPlanIntent> CreateIntent(string goal)
-        {
-            throw new InvalidOperationException("Real Agent planning must not use the Simulation planner.");
-        }
+        return new CloudReadonlyAgentPlanService(planner);
     }
 }

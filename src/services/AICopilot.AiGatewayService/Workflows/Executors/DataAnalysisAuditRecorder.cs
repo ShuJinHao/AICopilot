@@ -24,7 +24,7 @@ public sealed class DataAnalysisAuditRecorder(IAuditLogWriter auditLogWriter)
         await auditLogWriter.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task RecordCloudReadOnlyTextToSqlFallbackAsync(
+    public async Task RecordBusinessTextToSqlFallbackAsync(
         BusinessDatabaseConnectionInfo businessDatabase,
         string result,
         string summary,
@@ -39,7 +39,7 @@ public sealed class DataAnalysisAuditRecorder(IAuditLogWriter auditLogWriter)
         await auditLogWriter.WriteAsync(
             new AuditLogWriteRequest(
                 "DataAnalysis",
-                "DataAnalysis.CloudReadOnlyTextToSqlFallback",
+                "DataAnalysis.BusinessTextToSqlFallback",
                 "BusinessDatabase",
                 businessDatabase.Id.ToString(),
                 businessDatabase.Name,

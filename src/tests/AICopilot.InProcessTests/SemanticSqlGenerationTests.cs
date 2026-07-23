@@ -35,7 +35,7 @@ public sealed class SemanticSqlGenerationTests
         var sql = _sqlGenerator.Generate(plan, mapping);
 
         sql.SqlText.Should().StartWith("SELECT");
-        sql.SqlText.Should().Contain("FROM device_log_view t");
+        sql.SqlText.Should().Contain("FROM public.device_log_view t");
         sql.SqlText.Should().Contain("t.device_code = @p");
         sql.SqlText.Should().Contain("t.log_level = @p");
         sql.SqlText.Should().Contain("t.occurred_at >= @p");
@@ -61,7 +61,7 @@ public sealed class SemanticSqlGenerationTests
 
         var sql = _sqlGenerator.Generate(plan, mapping);
 
-        sql.SqlText.Should().Contain("FROM production_data_view t");
+        sql.SqlText.Should().Contain("FROM public.production_data_view t");
         sql.SqlText.Should().Contain("t.device_code = @p0");
         sql.SqlText.Should().Contain("t.occurred_at >= @p1");
         sql.SqlText.Should().Contain("t.occurred_at <= @p2");
@@ -130,7 +130,7 @@ public sealed class SemanticSqlGenerationTests
 
         var sql = _sqlGenerator.Generate(plan, mapping);
 
-        sql.SqlText.Should().Contain("FROM device_logs l INNER JOIN devices d ON d.id = l.device_id");
+        sql.SqlText.Should().Contain("FROM public.device_logs l INNER JOIN public.devices d ON d.id = l.device_id");
         sql.SqlText.Should().Contain("d.client_code = @p0");
         sql.SqlText.Should().Contain("l.level = @p1");
         sql.SqlText.Should().Contain("ORDER BY l.log_time DESC");
@@ -160,7 +160,7 @@ public sealed class SemanticSqlGenerationTests
 
         var sql = _sqlGenerator.Generate(planningResult.Plan!, mapping);
 
-        sql.SqlText.Should().Contain("FROM device_logs l INNER JOIN devices d ON l.device_id = d.id LEFT JOIN mfg_processes mp ON d.process_id = mp.id");
+        sql.SqlText.Should().Contain("FROM public.device_logs l INNER JOIN public.devices d ON l.device_id = d.id LEFT JOIN public.mfg_processes mp ON d.process_id = mp.id");
         sql.SqlText.Should().Contain("d.device_name AS deviceName");
         sql.SqlText.Should().NotContain("mp.process_name AS processName");
         sql.SqlText.Should().NotContain("mp.process_name ILIKE @p");
@@ -291,7 +291,19 @@ public sealed class SemanticSqlGenerationTests
     {
         var guardrail = new AstSqlGuardrail();
 
-        var result = guardrail.Validate("SELECT * FROM device_log_view; DROP TABLE device_log_view;", DatabaseProviderType.PostgreSql);
+        var result = guardrail.Validate(
+            "SELECT device_code FROM public.device_log_view; DROP TABLE public.device_log_view;",
+            DatabaseProviderType.PostgreSql,
+            BusinessQuerySecurityProfile.TableOnly(
+                new HashSet<string>(["public"], StringComparer.OrdinalIgnoreCase),
+                new HashSet<string>(["device_log_view"], StringComparer.OrdinalIgnoreCase),
+                new Dictionary<string, IReadOnlySet<string>>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["device_log_view"] = new HashSet<string>(
+                        ["device_code"],
+                        StringComparer.OrdinalIgnoreCase)
+                },
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase)));
 
         result.IsSafe.Should().BeFalse();
         result.ErrorMessage.Should().Contain("禁止");

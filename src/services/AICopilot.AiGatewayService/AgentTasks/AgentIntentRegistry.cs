@@ -310,7 +310,7 @@ internal static class AgentIntentRegistryV1
                 AgentIntentClass.CloudOnly,
                 "CloudAiRead",
                 ["CloudReadNode", "DeterministicComputeNode"],
-                ["query_cloud_data_readonly", "assess_cloud_health"],
+                ["query_business_database_readonly", "assess_cloud_health"],
                 "TypedCloudQuery",
                 "ObservedFact");
         }
@@ -575,8 +575,7 @@ internal sealed class AgentIntentRegistryProjector
             return Invalid($"IntentResult '{intentCode}' confidence must be between 0 and 1.");
         }
 
-        if (ContainsForbiddenAction(intentCode) ||
-            CloudReadonlyAgentTextGuard.ContainsForbiddenWriteSemantic(result.Query))
+        if (ContainsForbiddenAction(intentCode))
         {
             return Result.Failure(new ApiProblemDescriptor(
                 AppProblemCodes.ControlActionBlocked,
@@ -585,7 +584,7 @@ internal sealed class AgentIntentRegistryProjector
 
         if (CloudReadonlyAgentTextGuard.ContainsUnsafePersistedPayload(result.Query))
         {
-            return Invalid($"IntentResult '{intentCode}' contains a secret, SQL statement, connection string, or local path.");
+            return Invalid($"IntentResult '{intentCode}' contains a secret, connection string, or local path.");
         }
 
         var isKnown = AgentIntentRegistryV1.TryResolve(intentCode, context, out var descriptor);

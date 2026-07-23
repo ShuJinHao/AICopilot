@@ -5,7 +5,9 @@ namespace AICopilot.DataAnalysisService.BusinessDatabases;
 
 internal static class BusinessDatabaseDtoMapper
 {
-    public static BusinessDatabaseDto Map(BusinessDatabase db)
+    public static BusinessDatabaseDto Map(
+        BusinessDatabase db,
+        IBusinessDataSourceProfileRegistry profileRegistry)
     {
         return new BusinessDatabaseDto
         {
@@ -33,8 +35,12 @@ internal static class BusinessDatabaseDtoMapper
             SourceLabel = db.ExternalSystemType == BusinessDataExternalSystemType.SimulationBusiness
                 ? BusinessQueryResultMapper.SimulationSourceLabel
                 : db.Name,
-            IsGovernedQueryEnabled = BusinessDataSourceGovernancePolicy.HasExecutableGovernedSchema(db),
-            GovernanceStatus = BusinessDataSourceGovernancePolicy.ResolveGovernanceStatus(db)
+            IsGovernedQueryEnabled = BusinessDataSourceGovernancePolicy.HasExecutableGovernedSchema(
+                db,
+                profileRegistry),
+            GovernanceStatus = BusinessDataSourceGovernancePolicy.ResolveGovernanceStatus(
+                db,
+                profileRegistry)
         };
     }
 

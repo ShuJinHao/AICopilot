@@ -17,7 +17,7 @@ public class DapperDatabaseConnector(
     ISqlGuardrail sqlGuardrail,
     ILogger<DapperDatabaseConnector> logger) : IDatabaseConnector
 {
-    public IDbConnection GetConnection(BusinessDatabaseConnectionInfo database)
+    private static IDbConnection CreateConnection(BusinessDatabaseConnectionInfo database)
     {
         var connectionString = database.ConnectionString;
         if (string.IsNullOrWhiteSpace(connectionString))
@@ -36,31 +36,23 @@ public class DapperDatabaseConnector(
         };
     }
 
-    public async Task<IEnumerable<dynamic>> ExecuteQueryAsync(
-        BusinessDatabaseConnectionInfo database,
-        string sql,
-        object? parameters = null,
-        CancellationToken cancellationToken = default)
-    {
-        var result = await ExecuteQueryWithMetadataAsync(
-            database,
-            sql,
-            parameters,
-            cancellationToken: cancellationToken);
-
-        return result.Rows.Select(row => (dynamic)row).ToArray();
-    }
-
     public async Task<DatabaseQueryResult> ExecuteQueryWithMetadataAsync(
         BusinessDatabaseConnectionInfo database,
         string sql,
+        BusinessQuerySecurityProfile securityProfile,
         object? parameters = null,
         DatabaseQueryOptions? options = null,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(securityProfile);
+        securityProfile.EnsureComplete();
         EnsureQueryableDataSource(database);
 
-        var guardResult = sqlGuardrail.Validate(sql, database.Provider);
+        var effectiveOptions = options ?? new DatabaseQueryOptions();
+        var guardResult = sqlGuardrail.Validate(
+            sql,
+            database.Provider,
+            securityProfile);
         if (!guardResult.IsSafe)
         {
             var sqlLogMetadata = BuildSqlLogMetadata(sql);
@@ -74,8 +66,7 @@ public class DapperDatabaseConnector(
             throw new InvalidOperationException(guardResult.ErrorMessage);
         }
 
-        var effectiveOptions = options ?? new DatabaseQueryOptions();
-        using var connection = GetConnection(database);
+        using var connection = CreateConnection(database);
         var commandParameters = NormalizeParameters(parameters);
         var stopwatch = Stopwatch.StartNew();
         var resetPostgreSqlReadOnlySession = false;
@@ -146,24 +137,6 @@ public class DapperDatabaseConnector(
                 await ResetReadOnlySessionAsync(connection, database.Provider, CancellationToken.None);
             }
         }
-    }
-
-    public async Task<IEnumerable<dynamic>> GetSchemaInfoAsync(
-        BusinessDatabaseConnectionInfo database,
-        CancellationToken cancellationToken = default)
-    {
-        EnsureQueryableDataSource(database);
-
-        var sql = database.Provider switch
-        {
-            DatabaseProviderType.PostgreSql => @"
-                SELECT table_name, table_schema
-                FROM information_schema.tables
-                WHERE table_schema = 'public' AND table_type = 'BASE TABLE';",
-            _ => throw new NotSupportedException("Unsupported database provider")
-        };
-
-        return await ExecuteQueryAsync(database, sql, cancellationToken: cancellationToken);
     }
 
     private static object? NormalizeParameters(object? parameters)
@@ -373,11 +346,13 @@ public class DapperDatabaseConnector(
             throw new InvalidOperationException($"Data source '{database.Name}' is not configured as read-only (只读模式).");
         }
 
-        if (database.ExternalSystemType == DataSourceExternalSystemType.CloudReadOnly &&
+        if ((database.ExternalSystemType is
+                 DataSourceExternalSystemType.CloudReadOnly or
+                 DataSourceExternalSystemType.NonCloud) &&
             !database.ReadOnlyCredentialVerified)
         {
             throw new InvalidOperationException(
-                $"Data source '{database.Name}' targets Cloud read-only data but its database account has not been verified as read-only.");
+                $"Data source '{database.Name}' targets a real external system but its database account has not been verified as read-only.");
         }
 
         if (database.Provider != DatabaseProviderType.PostgreSql &&

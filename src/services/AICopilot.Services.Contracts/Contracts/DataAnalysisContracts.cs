@@ -6,11 +6,6 @@ using AICopilot.Visualization.Widgets;
 
 namespace AICopilot.Services.Contracts;
 
-public static class DataAnalysisPluginNames
-{
-    public const string DataAnalysisPlugin = "DataAnalysisPlugin";
-}
-
 public interface ISqlDialectInstructionProvider
 {
     string GetInstructions(DatabaseProviderType providerType);

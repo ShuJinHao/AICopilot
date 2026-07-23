@@ -26,9 +26,13 @@ public sealed class CloudReadOnlyTextToSqlRepairClassifierTests
 
     [Theory]
     [InlineData("Only SELECT statements are allowed.", CloudReadOnlyTextToSqlFailureCode.WriteSql)]
+    [InlineData("安全拦截：仅允许执行 SELECT 或 WITH ... SELECT 查询。", CloudReadOnlyTextToSqlFailureCode.WriteSql)]
     [InlineData("Multiple SQL statements are not allowed.", CloudReadOnlyTextToSqlFailureCode.MultiStatement)]
+    [InlineData("安全拦截：禁止在单次调用中执行多条 SQL 语句。", CloudReadOnlyTextToSqlFailureCode.MultiStatement)]
     [InlineData("Sensitive fields such as passwords, tokens, keys, or connection strings are not allowed.", CloudReadOnlyTextToSqlFailureCode.SensitiveField)]
+    [InlineData("安全拦截：查询引用了当前业务数据源禁止访问的敏感字段。", CloudReadOnlyTextToSqlFailureCode.SensitiveField)]
     [InlineData("System catalog metadata is not allowed in business queries.", CloudReadOnlyTextToSqlFailureCode.SystemCatalog)]
+    [InlineData("安全拦截：禁止访问数据库系统目录。", CloudReadOnlyTextToSqlFailureCode.SystemCatalog)]
     [InlineData("Cloud read-only data source requires a verified readonly credential before execution.", CloudReadOnlyTextToSqlFailureCode.Credential)]
     [InlineData("Current user is not authorized to query this business data source.", CloudReadOnlyTextToSqlFailureCode.Forbidden)]
     [InlineData("Business readonly query timed out.", CloudReadOnlyTextToSqlFailureCode.Timeout)]
@@ -41,6 +45,21 @@ public sealed class CloudReadOnlyTextToSqlRepairClassifierTests
             errorMessage);
 
         decision.Code.Should().Be(expectedCode);
+        decision.CanRepairSql.Should().BeFalse();
+        decision.CanRetry.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("DROP TABLE devices")]
+    [InlineData("DELETE FROM devices")]
+    [InlineData("UPDATE devices SET device_name = 'bad'")]
+    public void Classifier_ShouldNotReparseSqlTextAsASecondGuard(string rawSqlText)
+    {
+        var decision = CloudReadOnlyTextToSqlRepairClassifier.Classify(
+            CloudReadOnlyTextToSqlFailureStage.Guard,
+            rawSqlText);
+
+        decision.Code.Should().Be(CloudReadOnlyTextToSqlFailureCode.Unknown);
         decision.CanRepairSql.Should().BeFalse();
         decision.CanRetry.Should().BeFalse();
     }

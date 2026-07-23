@@ -1,16 +1,15 @@
 namespace AICopilot.Services.Contracts;
 
-public sealed record CloudReadOnlyTextToSqlGenerationRequest(
+public sealed record BusinessTextToSqlGenerationRequest(
     string Question,
     int Limit,
-    IReadOnlySet<string> AllowedTables,
-    IReadOnlyDictionary<string, IReadOnlySet<string>> AllowedColumns,
+    BusinessDataSourceProfile SourceProfile,
     IReadOnlyList<CloudReadOnlyTextToSqlRepairAttemptRecord> RepairHistory)
 {
     public string? PreviousSqlForRepair { get; init; }
 }
 
-public sealed record CloudReadOnlyTextToSqlGenerationResult(
+public sealed record BusinessTextToSqlGenerationResult(
     bool IsSuccess,
     string? Sql,
     IReadOnlyDictionary<string, object?> Parameters,
@@ -18,13 +17,13 @@ public sealed record CloudReadOnlyTextToSqlGenerationResult(
     IReadOnlyList<string> Warnings,
     string? FailureReason)
 {
-    public static CloudReadOnlyTextToSqlGenerationResult Success(
+    public static BusinessTextToSqlGenerationResult Success(
         string sql,
         string explanation,
         IReadOnlyDictionary<string, object?>? parameters = null,
         IReadOnlyList<string>? warnings = null)
     {
-        return new CloudReadOnlyTextToSqlGenerationResult(
+        return new BusinessTextToSqlGenerationResult(
             true,
             sql,
             parameters ?? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase),
@@ -33,9 +32,9 @@ public sealed record CloudReadOnlyTextToSqlGenerationResult(
             null);
     }
 
-    public static CloudReadOnlyTextToSqlGenerationResult Failure(string failureReason)
+    public static BusinessTextToSqlGenerationResult Failure(string failureReason)
     {
-        return new CloudReadOnlyTextToSqlGenerationResult(
+        return new BusinessTextToSqlGenerationResult(
             false,
             null,
             new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase),
@@ -45,9 +44,9 @@ public sealed record CloudReadOnlyTextToSqlGenerationResult(
     }
 }
 
-public interface ICloudReadOnlyTextToSqlGenerator
+public interface IBusinessTextToSqlGenerator
 {
-    Task<CloudReadOnlyTextToSqlGenerationResult> GenerateAsync(
-        CloudReadOnlyTextToSqlGenerationRequest request,
+    Task<BusinessTextToSqlGenerationResult> GenerateAsync(
+        BusinessTextToSqlGenerationRequest request,
         CancellationToken cancellationToken = default);
 }

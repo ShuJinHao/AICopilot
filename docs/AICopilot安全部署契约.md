@@ -1,6 +1,6 @@
 # AICopilot 安全部署契约
 
-本文档是 AICopilot 部署安全的专题契约。总计划见 `docs/AI架构治理清单.md`，项目规则见 `AGENTS.md` 和 `资料/AICopilot业务规则.md`。
+本文档是 AICopilot 部署安全的专题契约。项目规则见 `AGENTS.md` 和 `资料/AICopilot业务规则.md`；`docs/AI架构治理清单.md` 只在命中具体 Rule ID 或追溯历史风险时定向读取，不是部署任务的默认前置材料。
 
 ## 1. 部署红线
 
@@ -64,13 +64,15 @@ Cloud OIDC 使用 HTTP issuer 时必须满足全部条件：
 - 日常发布前 Doctor 必须校验 `.env` 私有权限、Compose 可解析、Docker/non-root、稳定 Runner 和 `releases/routine-*` / backup 目录可写性；模板占位、弱 secret、HTTP-only URL、Cloud OIDC、direct Cloud readonly 和 support 目标深度校验保留在 CI/独立基础设施维护门禁，不能每次重复同步 support。
 - `deploy-release.sh --validate-only` 是不发布的配置校验入口；该模式不得拉镜像、不得执行 Docker Compose、不得改写 release tag，但必须提前暴露 root-owned release state 这类标准 non-root 路径问题。
 - 模型、Embedding、endpoint pool API key 必须是 `encv2:` AES-GCM 受保护格式；旧 `encv1:` 只能由 migration worker 迁移重加密，runtime provider 不得长期兼容旧格式或明文。
-- 私有模型 seed 的真实 `AICOPILOT_PRIVATE_MODEL_BASE_URL`、`AICOPILOT_PRIVATE_MODEL_API_KEY` 和启用状态只能来自服务器真实 `.env` 或本机非 git 私密手册；仓库默认使用 `model.internal.example` 占位 URL、空 API key 和禁用状态。生产标准 context window 是 `65536`，API key 播种入库前必须加密为 `encv2:`。
+- 私有模型 seed 的本机真实值只来自 macOS Keychain canonical schema，并由从零部署生成服务器受限 `.env`；标准流程不读取私密 Markdown 或旧 env。仓库默认使用占位 URL、空 API key 和禁用状态，API key 入库前必须加密为 `encv2:`。
+- Cloud readonly 连接、AiRead token、模式开关和 readonly role 不得通过 GitHub secrets 加手动 workflow 写入生产。新环境或清空重建只由工作区 `Deploy-FromZero.ps1` 从 Keychain 建立；用户明确批准的独立基础设施维护只能调用内部 apply/check 脚本并消费服务器受限 `.env`，不得形成第二套 secret 真值或应用重建入口。
 
 ## 7. 镜像、SSH 和 runner
 
 - AICopilot 生产镜像必须使用 Harbor mirror 基础镜像，不能默认从 Docker Hub 或 MCR 拉生产基础镜像。
 - 应用和 Web 运行容器必须非 root。
-- 日常标准发布路径是工作区 `Deploy-Changed.ps1` 自动 push Git、读取生产 SHA，按改动和依赖闭包只选择受影响镜像，再由 `Deploy.ps1` 从 fresh 远端 tip 隔离构建、推 Harbor 并请求稳定服务器 Runner。影响无法归属禁止退化全量；`local-release.sh` / `deploy-release.sh` 只保留给基础设施维护和旧事务恢复。
+- 日常标准发布路径是工作区 `Deploy-Changed.ps1`：只接受 clean、已提交的 `main`，可 push 现有 HEAD但不创建提交或修改 tracked 文件；复用同 SHA Architecture/Security/DeploymentContract 证据，只补受影响缺口，再按依赖闭包发布受影响镜像。全量、coverage、mutation、duplication、CrossProject 不属于部署，影响无法归属时停止。
+- 三端从零部署只走工作区 `Deploy-FromZero.ps1`；AICopilot 阶段执行 readonly 权限、migration、模型 seed 和健康检查。缺 Keychain 根密钥时远端零写入；设备、`ClientCode` 和设备 bootstrap secret 均不自动管理。
 - 稳定 Runner 必须使用专用 non-root 部署用户；root 只允许一次性修复 owner/mode，不得进入日常应用发布。
 - 当前如果与 Cloud 共用同一台生产宿主机，必须在工作区总入口明确共享宿主机事实、共享标准发布人和两个独立部署根；不得把 Cloud 根的权限漂移和 AICopilot 根的权限状态混写成同一个“整机问题”。
 - root 应急路径如果写入了 `releases/*`、`current-release.summary.md` 或 deploy support files，关闭任务前必须恢复 owner/mode，并重新验证标准 non-root `./deploy-release.sh --validate-only`。
@@ -119,7 +121,7 @@ dotnet test src/tests/AICopilot.InProcessTests/AICopilot.InProcessTests.csproj -
 dotnet test src/tests/AICopilot.UnitTests/AICopilot.UnitTests.csproj --filter "SecurityPolicyUnitTests" --no-restore
 ```
 
-上述 .NET 命令是部署安全的定向诊断集，不是任务完成口径；PR/合 main 仍必须按 `docs/AI架构治理清单.md` 和 `.github/workflows/aicopilot-ci.yml` 对账全部 required runner、Web 和 deployment behavior。
+上述 .NET 命令是受影响部署安全诊断集；普通任务和部署不再追加全部 runner、Web、coverage 或质量全量，除非用户显式授权相应模式。
 
 发布前/发布的对外标准命令：
 

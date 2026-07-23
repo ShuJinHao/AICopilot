@@ -33,18 +33,6 @@ public static class AgentWorkflowPipelineFixture
         IReadOnlyCollection<AiToolDefinition> tools)
     {
         var pluginCatalog = new FixedPluginCatalog(PluginName, tools);
-        var registrations = tools
-            .Where(tool => tool.TargetType == AiToolTargetType.McpServer)
-            .Select(CreateRegistration)
-            .ToArray();
-        var registryGuard = new AICopilot.AiGatewayService.Tools.ToolRegistryGuard(
-            new InMemoryReadRepository<ToolRegistration>(registrations),
-            new AllowAllIdentityAccessService());
-        var toolResolver = new ApprovalToolResolver(
-            pluginCatalog,
-            new ApprovalRequirementResolver(new InMemoryReadRepository<ApprovalPolicy>()),
-            registryGuard,
-            new TestCurrentUser(UserId));
 
         return new AgentWorkflowPipeline(
             CreateIntentRoutingExecutor(
@@ -54,7 +42,6 @@ public static class AgentWorkflowPipelineFixture
                     Intent = $"Action.{PluginName}",
                     Confidence = 1.0
                 }),
-            new ToolsPackExecutor(toolResolver, NullLogger<ToolsPackExecutor>.Instance),
             null!,
             null!,
             null!,
@@ -86,14 +73,12 @@ public static class AgentWorkflowPipelineFixture
                     Query = "observe cancellation quiescence"
                 },
                 knowledgeBaseReadService),
-            new ToolsPackExecutor(null!, NullLogger<ToolsPackExecutor>.Instance),
             new KnowledgeRetrievalExecutor(
                 null!,
                 knowledgeBaseReadService,
                 NullLogger<KnowledgeRetrievalExecutor>.Instance),
             new DataAnalysisExecutor(
                 semanticCatalog,
-                null!,
                 null!,
                 NullLogger<DataAnalysisExecutor>.Instance),
             new BusinessPolicyExecutor(
@@ -135,7 +120,6 @@ public static class AgentWorkflowPipelineFixture
             configuredFactory,
             pluginCatalog,
             knowledgeBaseReadService ?? EmptyKnowledgeBaseReadService.Instance,
-            EmptyBusinessDatabaseReadService.Instance,
             businessSemantics,
             new FixedRoutingModelResolver(),
             metadata);

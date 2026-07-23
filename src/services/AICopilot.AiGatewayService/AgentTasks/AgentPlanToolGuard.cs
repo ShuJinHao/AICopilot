@@ -136,9 +136,6 @@ public sealed class AgentPlanToolGuard(
             if (tool.ProviderType == ToolProviderType.CloudReadonly)
             {
                 if (taskType != AgentTaskType.CloudDataReport ||
-                    CloudReadonlyAgentTextGuard.ContainsForbiddenWriteSemantic(step.Title) ||
-                    CloudReadonlyAgentTextGuard.ContainsForbiddenWriteSemantic(step.Description) ||
-                    CloudReadonlyAgentTextGuard.ContainsForbiddenWriteSemantic(step.InputJson) ||
                     CloudReadonlyAgentTextGuard.ContainsUnsafePersistedPayload(step.InputJson))
                 {
                     return Result.Failure(new ApiProblemDescriptor(
@@ -227,6 +224,7 @@ public sealed class AgentPlanToolGuard(
 
             if (tool.DataBoundary is not (ToolDataBoundary.NoData
                 or ToolDataBoundary.SimulationBusinessOnly
+                or ToolDataBoundary.GovernedBusinessReadOnly
                 or ToolDataBoundary.RagContextOnly
                 or ToolDataBoundary.ArtifactDraftOnly
                 or ToolDataBoundary.AuthorizedEvidenceOnly))
@@ -239,7 +237,10 @@ public sealed class AgentPlanToolGuard(
             .Where(domain => !string.IsNullOrWhiteSpace(domain))
             .Select(domain => domain.Trim())
             .ToArray();
-        if (simulationOnly && tool.DataBoundary == ToolDataBoundary.SimulationBusinessOnly)
+        if (simulationOnly &&
+            tool.DataBoundary is
+                ToolDataBoundary.SimulationBusinessOnly or
+                ToolDataBoundary.GovernedBusinessReadOnly)
         {
             // The selected SimulationBusiness descriptor is already the authorized
             // boundary. Its umbrella domain (for example Manufacturing) must not
@@ -286,13 +287,6 @@ public sealed class AgentPlanToolGuard(
                 "Agent plan contains shell or arbitrary path semantics.");
         }
 
-        if (ContainsSqlStatementSemantic(combined))
-        {
-            return new ApiProblemDescriptor(
-                AppProblemCodes.AgentPlanToolDenied,
-                "Agent plan contains SQL statement semantics.");
-        }
-
         return null;
     }
 
@@ -326,13 +320,4 @@ public sealed class AgentPlanToolGuard(
             $@"(?i)(^|[^\p{{L}}\p{{N}}_]){System.Text.RegularExpressions.Regex.Escape(token)}([^\p{{L}}\p{{N}}_]|$)");
     }
 
-    private static bool ContainsSqlStatementSemantic(string value)
-    {
-        return System.Text.RegularExpressions.Regex.IsMatch(
-                   value,
-                   @"(?is)\bselect\b.+\bfrom\b") ||
-               System.Text.RegularExpressions.Regex.IsMatch(
-                   value,
-                   @"(?i)\b(insert\s+into|update\s+\w+|delete\s+from|drop\s+(table|view|database)|alter\s+(table|view)|create\s+(table|view|database)|truncate\s+table|merge\s+into)\b");
-    }
 }

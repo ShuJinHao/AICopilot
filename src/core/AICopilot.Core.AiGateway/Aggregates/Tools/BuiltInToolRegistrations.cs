@@ -28,7 +28,7 @@ public sealed record ToolRegistrationSeed(
 
 public static class BuiltInToolRegistrations
 {
-    public const int CurrentCatalogVersion = 18;
+    public const int CurrentCatalogVersion = 19;
     public const int CurrentSchemaVersion = 3;
     public const string FinalizationCheckpointToolCode = "finalize_artifacts";
 
@@ -46,10 +46,8 @@ public static class BuiltInToolRegistrations
         """{"type":"object","properties":{"status":{"type":"string","enum":["completed"]},"resultType":{"type":"string","enum":["table-summary"]},"itemCount":{"type":"integer"},"rowCount":{"type":"integer"}},"required":["status","resultType","itemCount","rowCount"],"additionalProperties":false}""";
     private const string RagSummaryOutputSchema =
         """{"type":"object","properties":{"status":{"type":"string","enum":["completed"]},"resultType":{"type":"string","enum":["rag-summary"]},"itemCount":{"type":"integer"},"lowConfidence":{"type":"boolean"}},"required":["status","resultType","itemCount","lowConfidence"],"additionalProperties":false}""";
-    private const string CloudQuerySummaryOutputSchema =
-        """{"type":"object","properties":{"status":{"type":"string","enum":["completed"]},"resultType":{"type":"string","enum":["cloud-query-summary"]},"sourceMode":{"type":"string"},"isSimulation":{"type":"boolean"},"rowCount":{"type":"integer"},"isTruncated":{"type":"boolean"},"resultHash":{"type":"string"}},"required":["status","resultType","sourceMode","isSimulation","rowCount","isTruncated","resultHash"],"additionalProperties":false}""";
     private const string BusinessQuerySummaryOutputSchema =
-        """{"type":"object","properties":{"status":{"type":"string","enum":["completed"]},"resultType":{"type":"string","enum":["business-query-summary"]},"sourceMode":{"type":"string"},"isSimulation":{"type":"boolean"},"rowCount":{"type":"integer"},"isTruncated":{"type":"boolean"},"resultHash":{"type":"string"}},"required":["status","resultType","sourceMode","isSimulation","rowCount","isTruncated","resultHash"],"additionalProperties":false}""";
+        """{"type":"object","properties":{"status":{"type":"string","enum":["completed","needs-clarification"]},"resultType":{"type":"string","enum":["business-query-summary","business-query-guidance"]},"sourceMode":{"type":"string"},"isSimulation":{"type":"boolean"},"rowCount":{"type":"integer"},"isTruncated":{"type":"boolean"},"resultHash":{"type":"string"},"outcome":{"type":"string","enum":["Success","Empty","NeedClarification","Unsupported","Unavailable","Unauthorized"]},"safeMessage":{"type":"string"},"missingFields":{"type":"array","items":{"type":"string","enum":["source","capability","businessObject","timeRange","filters"]}}},"required":["status","resultType","sourceMode"],"additionalProperties":false}""";
     private const string EvidenceJoinOutputSchema =
         """{"type":"object","properties":{"status":{"type":"string","enum":["completed"]},"resultType":{"type":"string","enum":["evidence-join"]},"joinPolicy":{"type":"string","enum":["AllRequired","OptionalBestEffort"]},"requiredEvidenceCount":{"type":"integer"},"optionalEvidenceCount":{"type":"integer"},"missingOptionalCount":{"type":"integer"}},"required":["status","resultType","joinPolicy","requiredEvidenceCount","optionalEvidenceCount","missingOptionalCount"],"additionalProperties":false}""";
     private const string AgentReasoningOutputSchema =
@@ -83,13 +81,12 @@ public static class BuiltInToolRegistrations
         Low("parse_csv_json", "解析 CSV/JSON", "Parse CSV or JSON input into structured table data.", "Workspace", ToolDataBoundary.ArtifactDraftOnly),
         Low("parse_table_file", "解析表格文件", "Parse CSV, JSON, or XLSX input into structured table data.", "Workspace", ToolDataBoundary.ArtifactDraftOnly),
         Low("rag_search", "检索知识库", "Search authorized RAG context for the current task.", "RAG", ToolDataBoundary.RagContextOnly),
-        CloudReadonly("query_cloud_data_readonly", "查询 Cloud 只读数据", "Cloud AiRead readonly query boundary. Real mode stays disabled by default."),
-        BusinessReadonly("query_business_database_readonly", "查询只读业务库", "Query authorized SimulationBusiness data through Text-to-SQL readonly guardrails."),
-        Low("summarize_business_query_result", "总结查询结果", "Summarize approved BusinessDatabase readonly query results with source markers.", "DataAnalysis", ToolDataBoundary.SimulationBusinessOnly),
+        BusinessReadonly("query_business_database_readonly", "查询只读业务数据", "Query one confirmed business source through its structured plugin, with explicitly selected same-source Text-to-SQL fallback only."),
+        Low("summarize_business_query_result", "总结查询结果", "Summarize approved BusinessDatabase readonly query results with source markers.", "DataAnalysis", ToolDataBoundary.GovernedBusinessReadOnly),
         Low("join_evidence", "合并证据", "Deterministically join authorized parent Evidence under the sealed DAG policy.", "Workflow", ToolDataBoundary.AuthorizedEvidenceOnly),
         Low("assess_cloud_health", "评估当前运行健康", "Derive a replayable current device runtime health assessment from authorized Cloud status Evidence.", "DataAnalysis", ToolDataBoundary.AuthorizedEvidenceOnly),
         Low("agent_reasoning", "受控证据综合", "Run one evidence-only child reasoning turn plus at most one recovery turn; no model tools are exposed.", "Workflow", ToolDataBoundary.AuthorizedEvidenceOnly),
-        Low("generate_business_chart", "生成业务图表", "Generate controlled chart data from approved BusinessDatabase readonly query results.", "Artifacts", ToolDataBoundary.SimulationBusinessOnly, ToolProviderType.Artifact),
+        Low("generate_business_chart", "生成业务图表", "Generate controlled chart data from approved BusinessDatabase readonly query results.", "Artifacts", ToolDataBoundary.GovernedBusinessReadOnly, ToolProviderType.Artifact),
         Low("generate_chart_data", "生成图表数据", "Generate chart preview data from controlled task inputs.", "Artifacts", ToolDataBoundary.ArtifactDraftOnly, ToolProviderType.Artifact),
         Low("generate_markdown_report", "生成 Markdown 报告", "Generate a Markdown draft inside the controlled artifact workspace.", "Artifacts", ToolDataBoundary.ArtifactDraftOnly, ToolProviderType.Artifact),
         Low("generate_html_report", "生成 HTML 报告", "Generate an HTML draft inside the controlled artifact workspace.", "Artifacts", ToolDataBoundary.ArtifactDraftOnly, ToolProviderType.Artifact),
@@ -108,7 +105,8 @@ public static class BuiltInToolRegistrations
         "query_cloud_sandbox_readonly",
         "query_cloud_pilot_readiness_readonly",
         "query_cloud_production_pilot_readonly",
-        "query_cloud_production_controlled_readonly"
+        "query_cloud_production_controlled_readonly",
+        "query_cloud_data_readonly"
     ];
 
     public static ToolRegistrationSeed? FindAgentRuntimeTool(string? toolCode)
@@ -215,33 +213,6 @@ public static class BuiltInToolRegistrations
             ApprovalPolicy: "FinalOutputApproval");
     }
 
-    private static ToolRegistrationSeed CloudReadonly(string code, string displayName, string description)
-    {
-        return new ToolRegistrationSeed(
-            code,
-            displayName,
-            description,
-            ToolProviderType.CloudReadonly,
-            ToolRegistrationTargetType.AgentRuntime,
-            AgentRuntimeTarget,
-            EmptyObjectInputSchema,
-            ResolveOutputSchema(code),
-            AiToolRiskLevel.High,
-            null,
-            RequiresApproval: true,
-            IsEnabled: false,
-            TimeoutSeconds: 60,
-            ToolAuditLevel.Standard,
-            "CloudReadonly",
-            BusinessDomains: [],
-            ToolDataBoundary.NoData,
-            IsVisibleToPlanner: false,
-            IsExecutableByAgent: false,
-            SchemaVersion: CurrentSchemaVersion,
-            CatalogVersion: CurrentCatalogVersion,
-            ApprovalPolicy: "DisabledRealCloudReadonly");
-    }
-
     private static ToolRegistrationSeed BusinessReadonly(string code, string displayName, string description)
     {
         return new ToolRegistrationSeed(
@@ -261,7 +232,7 @@ public static class BuiltInToolRegistrations
             ToolAuditLevel.Standard,
             "DataAnalysis",
             BusinessDomains: ["Production", "Quality", "Inventory", "Sales", "Employee"],
-            ToolDataBoundary.SimulationBusinessOnly,
+            ToolDataBoundary.GovernedBusinessReadOnly,
             IsVisibleToPlanner: true,
             IsExecutableByAgent: true,
             SchemaVersion: CurrentSchemaVersion,
@@ -310,7 +281,6 @@ public static class BuiltInToolRegistrations
             "read_uploaded_file" => UploadSummaryOutputSchema,
             "parse_csv_json" or "parse_table_file" => TableSummaryOutputSchema,
             "rag_search" => RagSummaryOutputSchema,
-            "query_cloud_data_readonly" => CloudQuerySummaryOutputSchema,
             "query_business_database_readonly" or "summarize_business_query_result" => BusinessQuerySummaryOutputSchema,
             "join_evidence" => EvidenceJoinOutputSchema,
             "assess_cloud_health" => CloudHealthAssessmentOutputSchema,

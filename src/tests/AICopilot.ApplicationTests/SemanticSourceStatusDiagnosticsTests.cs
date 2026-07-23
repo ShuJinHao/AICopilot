@@ -8,7 +8,6 @@ using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.DataAnalysisService.Semantics;
 using AICopilot.Services.Contracts;
-using System.Data;
 using Document = AICopilot.Core.Rag.Aggregates.KnowledgeBase.Document;
 
 namespace AICopilot.ApplicationTests;
@@ -27,7 +26,8 @@ public sealed class SemanticSourceStatusDiagnosticsTests
 
         inspection.SourceExists.Should().BeTrue();
         inspection.MissingRequiredFields.Should().BeEmpty();
-        connector.ExecutedSql.Should().Contain(sql => sql.Contains("FROM vw_device_readonly", StringComparison.Ordinal));
+        connector.ExecutedSql.Should().Contain(sql =>
+            sql.Contains("FROM public.vw_device_readonly", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -218,12 +218,7 @@ public sealed class SemanticSourceStatusDiagnosticsTests
 
         public HashSet<string> MissingExpressions { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
-        public IDbConnection GetConnection(BusinessDatabaseConnectionInfo database)
-        {
-            throw new NotSupportedException("The test connector does not create real database connections.");
-        }
-
-        public Task<IEnumerable<dynamic>> ExecuteQueryAsync(
+        private Task ExecuteQueryAsync(
             BusinessDatabaseConnectionInfo database,
             string sql,
             object? parameters = null,
@@ -233,7 +228,7 @@ public sealed class SemanticSourceStatusDiagnosticsTests
 
             foreach (var source in MissingSources)
             {
-                if (sql.Contains($"FROM {source}", StringComparison.OrdinalIgnoreCase))
+                if (sql.Contains($"FROM public.{source}", StringComparison.OrdinalIgnoreCase))
                 {
                     throw new InvalidOperationException($"Source '{source}' does not exist.");
                 }
@@ -247,25 +242,19 @@ public sealed class SemanticSourceStatusDiagnosticsTests
                 }
             }
 
-            return Task.FromResult<IEnumerable<dynamic>>([]);
+            return Task.CompletedTask;
         }
 
         public async Task<DatabaseQueryResult> ExecuteQueryWithMetadataAsync(
             BusinessDatabaseConnectionInfo database,
             string sql,
+            BusinessQuerySecurityProfile securityProfile,
             object? parameters = null,
             DatabaseQueryOptions? options = null,
             CancellationToken cancellationToken = default)
         {
             await ExecuteQueryAsync(database, sql, parameters, cancellationToken);
             return new DatabaseQueryResult([], 0, false, 0);
-        }
-
-        public Task<IEnumerable<dynamic>> GetSchemaInfoAsync(
-            BusinessDatabaseConnectionInfo database,
-            CancellationToken cancellationToken = default)
-        {
-            return Task.FromResult<IEnumerable<dynamic>>([]);
         }
     }
 

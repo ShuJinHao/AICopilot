@@ -6,10 +6,9 @@
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <AICopilotTestKind>EndToEnd</AICopilotTestKind>
+    <AICopilotCiCategory>Quality</AICopilotCiCategory>
     <AICopilotTestRuntime>Aspire</AICopilotTestRuntime>
-    <AICopilotTestCadence>PR</AICopilotTestCadence>
     <AICopilotTestOwner>CrossServiceAcceptance</AICopilotTestOwner>
-    <AICopilotRequired>true</AICopilotRequired>
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />

@@ -82,10 +82,22 @@ public sealed class SemanticSourceInspector(IDatabaseConnector databaseConnector
             return new SemanticSourceInspection(false, SemanticSourceContractCatalog.GetRequiredFields(mapping.Target));
         }
 
+        GovernedSemanticMappingSource governedSource;
+        try
+        {
+            governedSource = SemanticMappingSecurityProfileFactory.Create(mapping);
+        }
+        catch (InvalidOperationException)
+        {
+            return new SemanticSourceInspection(
+                false,
+                SemanticSourceContractCatalog.GetRequiredFields(mapping.Target));
+        }
+
         var sourceExists = await ProbeSourceExistsAsync(
             database,
             mapping.Provider,
-            effectiveSourceName,
+            governedSource,
             cancellationToken);
 
         if (!sourceExists)
@@ -96,7 +108,7 @@ public sealed class SemanticSourceInspector(IDatabaseConnector databaseConnector
         var missingRequiredFields = await GetMissingRequiredFieldsAsync(
             database,
             mapping,
-            effectiveSourceName,
+            governedSource,
             cancellationToken);
 
         return new SemanticSourceInspection(true, missingRequiredFields);
@@ -112,14 +124,16 @@ public sealed class SemanticSourceInspector(IDatabaseConnector databaseConnector
     private async Task<bool> ProbeSourceExistsAsync(
         BusinessDatabaseConnectionInfo database,
         DatabaseProviderType provider,
-        string sourceExpression,
+        GovernedSemanticMappingSource governedSource,
         CancellationToken cancellationToken)
     {
         try
         {
-            await databaseConnector.ExecuteQueryAsync(
+            await databaseConnector.ExecuteQueryWithMetadataAsync(
                 database,
-                BuildSourceProbeSql(provider, sourceExpression),
+                BuildSourceProbeSql(provider, governedSource.QualifiedFromClause),
+                governedSource.SecurityProfile,
+                options: new DatabaseQueryOptions(MaxRows: 1),
                 cancellationToken: cancellationToken);
             return true;
         }
@@ -132,7 +146,7 @@ public sealed class SemanticSourceInspector(IDatabaseConnector databaseConnector
     private async Task<IReadOnlyList<string>> GetMissingRequiredFieldsAsync(
         BusinessDatabaseConnectionInfo database,
         SemanticPhysicalMapping mapping,
-        string sourceExpression,
+        GovernedSemanticMappingSource governedSource,
         CancellationToken cancellationToken)
     {
         var requiredFields = SemanticSourceContractCatalog.GetRequiredFields(mapping.Target);
@@ -143,9 +157,15 @@ public sealed class SemanticSourceInspector(IDatabaseConnector databaseConnector
 
         try
         {
-            await databaseConnector.ExecuteQueryAsync(
+            await databaseConnector.ExecuteQueryWithMetadataAsync(
                 database,
-                BuildProjectionProbeSql(mapping.Provider, sourceExpression, mapping, requiredFields),
+                BuildProjectionProbeSql(
+                    mapping.Provider,
+                    governedSource.QualifiedFromClause,
+                    mapping,
+                    requiredFields),
+                governedSource.SecurityProfile,
+                options: new DatabaseQueryOptions(MaxRows: 1),
                 cancellationToken: cancellationToken);
             return [];
         }
@@ -167,9 +187,15 @@ public sealed class SemanticSourceInspector(IDatabaseConnector databaseConnector
 
             try
             {
-                await databaseConnector.ExecuteQueryAsync(
+                await databaseConnector.ExecuteQueryWithMetadataAsync(
                     database,
-                    BuildFieldProbeSql(mapping.Provider, sourceExpression, physicalExpression, field),
+                    BuildFieldProbeSql(
+                        mapping.Provider,
+                        governedSource.QualifiedFromClause,
+                        physicalExpression,
+                        field),
+                    governedSource.SecurityProfile,
+                    options: new DatabaseQueryOptions(MaxRows: 1),
                     cancellationToken: cancellationToken);
             }
             catch

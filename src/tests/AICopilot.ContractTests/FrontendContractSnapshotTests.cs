@@ -78,7 +78,7 @@ public sealed class FrontendContractSnapshotTests
           "steps": [
             {
               "title": "查询设备状态",
-              "toolCode": "query_cloud_data_readonly",
+              "toolCode": "query_business_database_readonly",
               "requiresApproval": true,
               "inputJson": { "target": "Device", "deviceCode": "D-001" }
             }
@@ -111,7 +111,7 @@ public sealed class FrontendContractSnapshotTests
                     Description: "调用 Cloud 只读工具",
                     StepType: "DataQuery",
                     Status: "WaitingApproval",
-                    ToolCode: "query_cloud_data_readonly",
+                    ToolCode: "query_business_database_readonly",
                     RequiresApproval: true,
                     ErrorMessage: null)
             ],
@@ -434,7 +434,7 @@ public sealed class FrontendContractSnapshotTests
             TaskId: taskId,
             StepId: Guid.NewGuid(),
             RunAttemptId: Guid.NewGuid(),
-            ToolCode: "query_cloud_data_readonly",
+            ToolCode: "query_business_database_readonly",
             InputSummary: """{"target":"Device","deviceCode":"D-001"}""",
             OutputSummary: """{"rowCount":1,"truncated":false}""",
             Status: "Succeeded",
@@ -447,7 +447,7 @@ public sealed class FrontendContractSnapshotTests
             AuditMetadata: """{"providerType":"CloudReadonly","auditLevel":"Full"}""");
         var registration = new ToolRegistrationDto(
             Id: Guid.NewGuid(),
-            ToolCode: "query_cloud_data_readonly",
+            ToolCode: "query_business_database_readonly",
             DisplayName: "Cloud 只读查询",
             Description: "受控 Cloud 只读工具",
             ProviderType: "CloudReadonly",

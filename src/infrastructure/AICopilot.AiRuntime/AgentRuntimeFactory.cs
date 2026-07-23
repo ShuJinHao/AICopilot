@@ -157,7 +157,7 @@ internal sealed class AgentRuntimeFactory(
             tools.Any(tool => tool.Kind == AiToolCallKind.Mcp),
             tools.Any(tool => tool.RequiresApproval || tool.RiskLevel == AiToolRiskLevel.RequiresApproval),
             tools.Any(tool => tool.CapabilityKind == AiToolCapabilityKind.SideEffecting),
-            tools.Any(tool => string.Equals(tool.TargetName, DataAnalysisPluginNames.DataAnalysisPlugin, StringComparison.OrdinalIgnoreCase)));
+            HasDataAnalysisSqlToolChain: false);
     }
 
     private ModelEndpointLease? TryAcquireEndpoint(

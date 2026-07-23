@@ -19,6 +19,13 @@ public sealed class UpdateToolRegistrationCommandHandler(
         UpdateToolRegistrationCommand request,
         CancellationToken cancellationToken)
     {
+        if (BuiltInToolRegistrations.ObsoleteAgentRuntimeToolCodes.Contains(
+                request.ToolCode,
+                StringComparer.OrdinalIgnoreCase))
+        {
+            return Result.Invalid("The requested tool code has been retired and cannot be registered or activated.");
+        }
+
         var tool = await repository.GetAsync(
             item => item.ToolCode == request.ToolCode,
             cancellationToken: cancellationToken);
@@ -37,17 +44,6 @@ public sealed class UpdateToolRegistrationCommandHandler(
         if (!ToolRegistryUpdatePolicy.TryParseDataBoundary(request.DataBoundary, out var dataBoundary))
         {
             return Result.Invalid("DataBoundary is invalid.");
-        }
-
-        var safetyError = ProtectedCloudReadonlyToolPolicy.ValidateSafeState(
-            tool.ToolCode,
-            request.IsEnabled ?? tool.IsEnabled,
-            request.IsVisibleToPlanner ?? tool.IsVisibleToPlanner,
-            request.IsExecutableByAgent ?? tool.IsExecutableByAgent,
-            request.ApprovalPolicy ?? tool.ApprovalPolicy);
-        if (safetyError is not null)
-        {
-            return Result.Invalid(safetyError);
         }
 
         var effectiveInputSchema = request.InputSchemaJson ?? tool.InputSchemaJson;
@@ -97,11 +93,6 @@ public sealed class UpdateToolRegistrationCommandHandler(
             request.CatalogVersion ?? tool.CatalogVersion,
             request.ApprovalPolicy ?? tool.ApprovalPolicy);
 
-        if (ProtectedCloudReadonlyToolPolicy.IsProtected(tool.ToolCode))
-        {
-            ProtectedCloudReadonlyToolPolicy.ForceDisabled(tool, DateTimeOffset.UtcNow);
-        }
-
         repository.Update(tool);
         await auditLogWriter.WriteAsync(
             new AuditLogWriteRequest(
@@ -129,6 +120,13 @@ public sealed class UpsertToolDefinitionCommandHandler(
         UpsertToolDefinitionCommand request,
         CancellationToken cancellationToken)
     {
+        if (BuiltInToolRegistrations.ObsoleteAgentRuntimeToolCodes.Contains(
+                request.ToolCode,
+                StringComparer.OrdinalIgnoreCase))
+        {
+            return Result.Invalid("The requested tool code has been retired and cannot be registered or activated.");
+        }
+
         if (!Enum.TryParse<ToolAuditLevel>(request.AuditLevel, ignoreCase: true, out var auditLevel))
         {
             return Result.Invalid("AuditLevel is invalid.");
@@ -137,17 +135,6 @@ public sealed class UpsertToolDefinitionCommandHandler(
         if (!Enum.TryParse<ToolDataBoundary>(request.DataBoundary, ignoreCase: true, out var dataBoundary))
         {
             return Result.Invalid("DataBoundary is invalid.");
-        }
-
-        var safetyError = ProtectedCloudReadonlyToolPolicy.ValidateSafeState(
-            request.ToolCode,
-            request.IsEnabled,
-            request.IsVisibleToPlanner,
-            request.IsExecutableByAgent,
-            request.ApprovalPolicy);
-        if (safetyError is not null)
-        {
-            return Result.Invalid(safetyError);
         }
 
         var inputSchemaContract = ToolRegistrationInputContractPolicy.Validate(
@@ -201,10 +188,6 @@ public sealed class UpsertToolDefinitionCommandHandler(
                 request.SchemaVersion,
                 request.CatalogVersion,
                 request.ApprovalPolicy);
-            if (ProtectedCloudReadonlyToolPolicy.IsProtected(tool.ToolCode))
-            {
-                ProtectedCloudReadonlyToolPolicy.ForceDisabled(tool, now);
-            }
             repository.Add(tool);
         }
         else
@@ -232,10 +215,6 @@ public sealed class UpsertToolDefinitionCommandHandler(
                 request.SchemaVersion,
                 request.CatalogVersion,
                 request.ApprovalPolicy);
-            if (ProtectedCloudReadonlyToolPolicy.IsProtected(tool.ToolCode))
-            {
-                ProtectedCloudReadonlyToolPolicy.ForceDisabled(tool, now);
-            }
             repository.Update(tool);
         }
 
@@ -266,6 +245,13 @@ public sealed class ActivateToolDefinitionVersionCommandHandler(
         ActivateToolDefinitionVersionCommand request,
         CancellationToken cancellationToken)
     {
+        if (BuiltInToolRegistrations.ObsoleteAgentRuntimeToolCodes.Contains(
+                request.ToolCode,
+                StringComparer.OrdinalIgnoreCase))
+        {
+            return Result.Invalid("The requested tool code has been retired and cannot be registered or activated.");
+        }
+
         var tool = await repository.GetAsync(item => item.ToolCode == request.ToolCode, cancellationToken: cancellationToken);
         if (tool is null)
         {

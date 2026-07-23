@@ -46,7 +46,7 @@ public sealed class ToolRegistryUnitTests : ToolRegistryGovernanceTestBase
 
         tools["read_uploaded_file"].DisplayName.Should().Be("读取上传文件");
         tools["parse_csv_json"].DisplayName.Should().Be("解析 CSV/JSON");
-        tools["query_cloud_data_readonly"].DisplayName.Should().Be("查询 Cloud 只读数据");
+        tools["query_business_database_readonly"].DisplayName.Should().Be("查询只读业务数据");
         tools["generate_business_chart"].DisplayName.Should().Be("生成业务图表");
         tools["finalize_artifacts"].DisplayName.Should().Be("最终产物确认");
         tools["finalize_artifacts"].TargetName.Should().Be("ArtifactWorkspaceLifecycleCoordinator");
@@ -97,7 +97,7 @@ public sealed class ToolRegistryUnitTests : ToolRegistryGovernanceTestBase
     [Fact]
     public void BuiltInToolCatalog_ShouldOwnExactStrictInputSchemasForEveryRuntimeTool()
     {
-        BuiltInToolRegistrations.CurrentCatalogVersion.Should().Be(18);
+        BuiltInToolRegistrations.CurrentCatalogVersion.Should().Be(19);
         BuiltInToolRegistrations.CurrentSchemaVersion.Should().Be(3);
 
         foreach (var tool in BuiltInToolRegistrations.AgentRuntimeTools)
@@ -822,9 +822,8 @@ public sealed class ToolRegistryUnitTests : ToolRegistryGovernanceTestBase
     public void AgentToolExecutorResolver_ShouldResolveBuiltInCloudReadonlyAndMcpExecutors()
     {
         var builtInExecutor = new TestAgentToolExecutor(tool => tool.ProviderType == ToolProviderType.BuiltIn);
-        var cloudExecutor = new TestAgentToolExecutor(tool => tool.ProviderType == ToolProviderType.CloudReadonly);
         var mcpExecutor = new TestAgentToolExecutor(tool => tool.ProviderType == ToolProviderType.Mcp);
-        var resolver = new AgentToolExecutorResolver([builtInExecutor, cloudExecutor, mcpExecutor]);
+        var resolver = new AgentToolExecutorResolver([builtInExecutor, mcpExecutor]);
         var now = DateTimeOffset.UtcNow;
         var task = new AgentTask(
             SessionId.New(),
@@ -845,12 +844,6 @@ public sealed class ToolRegistryUnitTests : ToolRegistryGovernanceTestBase
             now);
 
         resolver.Resolve(CreateTool("read_uploaded_file"), step).Should().BeSameAs(builtInExecutor);
-        resolver.Resolve(CreateTool(
-            "query_cloud_data_readonly",
-            ToolProviderType.CloudReadonly,
-            isEnabled: true,
-            requiresApproval: true,
-            riskLevel: AiToolRiskLevel.RequiresApproval), step).Should().BeSameAs(cloudExecutor);
         resolver.Resolve(CreateTool(
             "mcp_runtime_mcp_read",
             ToolProviderType.Mcp,
@@ -1153,16 +1146,6 @@ public sealed class ToolRegistryUnitTests : ToolRegistryGovernanceTestBase
                 resultType = "rag-summary",
                 itemCount = 1,
                 lowConfidence = false
-            },
-            "query_cloud_data_readonly" => new
-            {
-                status = "completed",
-                resultType = "cloud-query-summary",
-                sourceMode = "Simulation",
-                isSimulation = true,
-                rowCount = 2,
-                isTruncated = false,
-                resultHash = "cloud-hash"
             },
             "query_business_database_readonly" or "summarize_business_query_result" => new
             {

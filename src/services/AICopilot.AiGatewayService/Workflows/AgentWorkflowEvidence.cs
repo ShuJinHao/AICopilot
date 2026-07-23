@@ -260,23 +260,6 @@ internal static class AgentWorkflowEvidenceNormalizer
     {
         return result.Type switch
         {
-            BranchType.Tools when result.Tools is { Length: > 0 } =>
-            [
-                new AgentBranchEvidenceSeed(
-                    "PolicyValidationNode",
-                    string.Empty,
-                    AgentWorkflowEvidenceKind.ToolCatalog,
-                    AgentWorkflowEvidenceTruthClass.PolicyDecision,
-                    "tool-safety-policy:v1",
-                    "ToolRegistry",
-                    "FilteredReadOnlyCapabilityView",
-                    IsSimulation: null,
-                    SemanticIntent: null,
-                    result.Tools.Select(tool => $"tool:{tool.Name}")
-                        .Distinct(StringComparer.Ordinal)
-                        .OrderBy(value => value, StringComparer.Ordinal)
-                        .ToArray())
-            ],
             BranchType.Knowledge when !string.IsNullOrWhiteSpace(result.Knowledge) =>
             [
                 new AgentBranchEvidenceSeed(

@@ -24,9 +24,9 @@ readonly privilege probe.
 
 Options:
   --env-file <path>       Deploy .env file. Default: deploy/enterprise-ai/.env.
-  --username <name>       Readonly role name. Default: parsed from connection string.
-  --password <value>      Readonly role password. Default: parsed from connection string.
-  --database <name>       Cloud database name. Default: parsed from connection string.
+  --username <name>       Readonly role name. Default: canonical dedicated env value.
+  --password <value>      Readonly role password. Default: canonical dedicated env value.
+  --database <name>       Cloud database name. Default: canonical dedicated env value.
   --dry-run               Print the actions without touching PostgreSQL.
   --help                  Show this help.
 USAGE
@@ -44,18 +44,22 @@ read_env_value() {
     index($0, prefix) == 1 {
       value = substr($0, length(prefix) + 1)
       sub(/\r$/, "", value)
+      if (length(value) >= 2 &&
+          substr(value, 1, 1) == "\"" &&
+          substr(value, length(value), 1) == "\"") {
+        value = substr(value, 2, length(value) - 2)
+        gsub(/\$\$/, "$", value)
+        gsub(/\\"/, sprintf("%c", 34), value)
+        gsub(/\\\\/, sprintf("%c", 92), value)
+      } else if (length(value) >= 2 &&
+                 substr(value, 1, 1) == "\047" &&
+                 substr(value, length(value), 1) == "\047") {
+        value = substr(value, 2, length(value) - 2)
+      }
       print value
       exit
     }
   ' "$ENV_FILE"
-}
-
-connection_part() {
-  local key="$1"
-  local value="$2"
-  printf '%s' "$value" |
-    tr ';' '\n' |
-    awk -F= -v key="$key" 'tolower($1) == tolower(key) { print $2; exit }'
 }
 
 validate_identifier() {
@@ -171,10 +175,9 @@ done
 [ -x "$CHECK_SCRIPT" ] || fail "Missing executable check script: $CHECK_SCRIPT"
 command -v docker >/dev/null || fail "Required command not found: docker"
 
-connection_string="$(read_env_value DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING)"
-READONLY_USERNAME="${READONLY_USERNAME:-$(connection_part Username "$connection_string")}"
-READONLY_PASSWORD="${READONLY_PASSWORD:-$(connection_part Password "$connection_string")}"
-READONLY_DATABASE="${READONLY_DATABASE:-$(connection_part Database "$connection_string")}"
+READONLY_USERNAME="${READONLY_USERNAME:-$(read_env_value DATA_ANALYSIS_CLOUD_READONLY_USERNAME)}"
+READONLY_PASSWORD="${READONLY_PASSWORD:-$(read_env_value DATA_ANALYSIS_CLOUD_READONLY_PASSWORD)}"
+READONLY_DATABASE="${READONLY_DATABASE:-$(read_env_value DATA_ANALYSIS_CLOUD_READONLY_DATABASE)}"
 
 [ -n "$READONLY_USERNAME" ] || fail "Missing readonly username."
 [ -n "$READONLY_PASSWORD" ] || fail "Missing readonly password."

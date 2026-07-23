@@ -21,7 +21,10 @@ public sealed class DapperDatabaseConnectorSecurityTests
             IsEnabled: true,
             IsReadOnly: true);
 
-        var action = async () => await connector.ExecuteQueryWithMetadataAsync(database, sensitiveSql);
+        var action = async () => await connector.ExecuteQueryWithMetadataAsync(
+            database,
+            sensitiveSql,
+            StandardBusinessDataSourceProfiles.CloudReadOnly.QuerySecurity);
 
         await action.Should().ThrowAsync<InvalidOperationException>();
         var log = logger.Entries.Should().ContainSingle(entry => entry.Level == LogLevel.Warning).Subject;
@@ -40,29 +43,42 @@ public sealed class DapperDatabaseConnectorSecurityTests
         var writable = CreateDatabase("writable-source", isReadOnly: false);
         var disabled = CreateDatabase("disabled-source", isEnabled: false);
 
-        var writableAction = async () => await connector.ExecuteQueryWithMetadataAsync(writable, "SELECT 1");
-        var disabledAction = async () => await connector.ExecuteQueryWithMetadataAsync(disabled, "SELECT 1");
+        var writableAction = async () => await connector.ExecuteQueryWithMetadataAsync(
+            writable,
+            "SELECT d.client_code FROM public.devices d",
+            StandardBusinessDataSourceProfiles.CloudReadOnly.QuerySecurity);
+        var disabledAction = async () => await connector.ExecuteQueryWithMetadataAsync(
+            disabled,
+            "SELECT d.client_code FROM public.devices d",
+            StandardBusinessDataSourceProfiles.CloudReadOnly.QuerySecurity);
 
         await writableAction.Should().ThrowAsync<InvalidOperationException>().WithMessage("*只读模式*");
         await disabledAction.Should().ThrowAsync<InvalidOperationException>().WithMessage("*已被禁用*");
         logger.Entries.Should().BeEmpty("source eligibility must fail before SQL validation or connection I/O");
     }
 
-    [Fact]
-    public async Task SqlServerSource_ShouldRequireVerifiedReadOnlyCredential()
+    [Theory]
+    [InlineData(DatabaseProviderType.PostgreSql)]
+    [InlineData(DatabaseProviderType.SqlServer)]
+    [InlineData(DatabaseProviderType.MySql)]
+    public async Task NonCloudSource_ShouldRequireVerifiedReadOnlyCredential(
+        DatabaseProviderType provider)
     {
         var connector = new DapperDatabaseConnector(
             new AstSqlGuardrail(),
             new CapturingLogger<DapperDatabaseConnector>());
         var database = CreateDatabase(
-            "sql-server-source",
-            provider: DatabaseProviderType.SqlServer,
+            "non-cloud-source",
+            provider: provider,
             externalSystemType: DataSourceExternalSystemType.NonCloud);
 
-        var action = async () => await connector.ExecuteQueryWithMetadataAsync(database, "SELECT 1");
+        var action = async () => await connector.ExecuteQueryWithMetadataAsync(
+            database,
+            "SELECT d.client_code FROM public.devices d",
+            StandardBusinessDataSourceProfiles.CloudReadOnly.QuerySecurity);
 
         await action.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*verified read-only database account is required*");
+            .WithMessage("*not been verified as read-only*");
     }
 
     [Fact]
@@ -75,24 +91,13 @@ public sealed class DapperDatabaseConnectorSecurityTests
             "cloud-reporting-source",
             externalSystemType: DataSourceExternalSystemType.CloudReadOnly);
 
-        var action = async () => await connector.ExecuteQueryWithMetadataAsync(database, "SELECT 1");
+        var action = async () => await connector.ExecuteQueryWithMetadataAsync(
+            database,
+            "SELECT d.client_code FROM public.devices d",
+            StandardBusinessDataSourceProfiles.CloudReadOnly.QuerySecurity);
 
         await action.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*database account has not been verified as read-only*");
-    }
-
-    [Fact]
-    public void DapperConnector_ShouldRejectEmptyConnectionString()
-    {
-        var connector = new DapperDatabaseConnector(
-            new AstSqlGuardrail(),
-            new CapturingLogger<DapperDatabaseConnector>());
-        var database = CreateDatabase("empty-connection", connectionString: " ");
-
-        var action = () => connector.GetConnection(database);
-
-        action.Should().Throw<ArgumentException>()
-            .WithMessage("*Connection string is required*");
     }
 
     private static BusinessDatabaseConnectionInfo CreateDatabase(

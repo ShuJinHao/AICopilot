@@ -720,15 +720,6 @@ public static class DataAnalysisFinalContextFormatter
             return true;
         }
 
-        if (CloudReadOnlyGovernedSchema.BlockedFieldFragments.Any(fragment =>
-                normalized.Contains(
-                    fragment.Replace("_", string.Empty, StringComparison.Ordinal)
-                        .Replace("-", string.Empty, StringComparison.Ordinal),
-                    StringComparison.OrdinalIgnoreCase)))
-        {
-            return true;
-        }
-
         return InternalFieldFragments.Any(fragment =>
             normalized.Contains(fragment, StringComparison.OrdinalIgnoreCase));
     }

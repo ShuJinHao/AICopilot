@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 using System.Text.Json.Serialization;
+using AICopilot.Services.Contracts;
 
 namespace AICopilot.AiGatewayService.Models;
 
@@ -35,6 +36,26 @@ public record IntentResult
     /// </summary>
     [JsonIgnore]
     public string? RoutingNote { get; set; }
+
+    /// <summary>
+    /// 由服务端确认流程写入的业务查询确认状态。
+    /// 模型路由输出、会话存在或高置信度都不能设置或替代该状态。
+    /// </summary>
+    [JsonIgnore]
+    public BusinessQueryConfirmation? ConfirmedBusinessQueryContext { get; set; }
+
+    /// <summary>
+    /// 仅当用户在本次任务中明确选择业务数据源时由服务端设置。
+    /// </summary>
+    [JsonIgnore]
+    public bool BusinessDataSourceExplicitlySelected { get; set; }
+
+    /// <summary>
+    /// 服务端通过一次性确认 challenge 恢复的完整查询上下文。
+    /// 该值不接受模型 JSON，也不持久化到路由输出。
+    /// </summary>
+    [JsonIgnore]
+    public BusinessQueryContext? ConfirmedBusinessQuery { get; set; }
 
     /// <summary>
     /// 检索参数

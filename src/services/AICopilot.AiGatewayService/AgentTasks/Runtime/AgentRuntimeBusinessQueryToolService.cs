@@ -10,8 +10,13 @@ namespace AICopilot.AiGatewayService.AgentTasks;
 internal sealed class AgentRuntimeBusinessQueryToolService(
     IBusinessDatabaseReadService? businessDatabaseReadService,
     IBusinessTextToSqlRuntime? businessTextToSqlRuntime,
-    CloudReadOnlyTextToSqlFallbackRunner? cloudTextToSqlFallbackRunner)
+    BusinessTextToSqlFallbackRunner? businessTextToSqlFallbackRunner,
+    IBusinessDataSourceProfileRegistry profileRegistry,
+    IBusinessQueryProviderRegistry providerRegistry,
+    IBusinessQueryContextStore queryContextStore)
 {
+    private const double MinimumConfirmedSemanticConfidence = 0.65;
+
     public Task<object> QueryBusinessDatabaseReadonlyP1Async(
         AgentTaskPlanDocument plan,
         AgentTaskRunState state,
@@ -19,7 +24,9 @@ internal sealed class AgentRuntimeBusinessQueryToolService(
     {
         return QueryBusinessDatabaseReadonlyCoreAsync(
             plan.Goal,
+            plan.PlanId ?? Guid.Empty,
             plan,
+            ResolveSingleSemanticIntent(plan),
             state,
             cancellationToken);
     }
@@ -32,14 +39,34 @@ internal sealed class AgentRuntimeBusinessQueryToolService(
     {
         return QueryBusinessDatabaseReadonlyCoreAsync(
             task.Goal,
+            task.Id.Value,
             plan,
+            ResolveSingleSemanticIntent(plan),
+            state,
+            cancellationToken);
+    }
+
+    public Task<object> QueryBusinessDatabaseReadonlyP1Async(
+        AgentTask task,
+        AgentTaskPlanDocument plan,
+        AgentStep step,
+        AgentTaskRunState state,
+        CancellationToken cancellationToken)
+    {
+        return QueryBusinessDatabaseReadonlyCoreAsync(
+            task.Goal,
+            task.Id.Value,
+            plan,
+            ResolveBoundSemanticIntent(plan, step),
             state,
             cancellationToken);
     }
 
     private async Task<object> QueryBusinessDatabaseReadonlyCoreAsync(
         string taskGoal,
+        Guid taskId,
         AgentTaskPlanDocument plan,
+        AgentTaskPlanCloudReadonlyIntentDocument? semanticIntent,
         AgentTaskRunState state,
         CancellationToken cancellationToken)
     {
@@ -58,40 +85,86 @@ internal sealed class AgentRuntimeBusinessQueryToolService(
             .Where(domain => !string.IsNullOrWhiteSpace(domain))
             .Select(domain => domain.Trim())
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var selectedCapability = TryResolveCapability(selectedDomains);
+        var selectedSourceFilters = selectedDomains
+            .Where(domain => !Enum.TryParse<BusinessDataCapability>(
+                domain,
+                ignoreCase: true,
+                out _))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var candidates = enabledSources
             .Where(item => item.IsSelectableInAgent)
             .Where(item => selectedIds.Count == 0 || selectedIds.Contains(item.Id))
-            .Where(item => selectedDomains.Count == 0 ||
-                           selectedDomains.Contains(item.BusinessDomain) ||
-                           selectedDomains.Contains(item.Category))
+            .Where(item => selectedSourceFilters.Count == 0 ||
+                           selectedSourceFilters.Contains(item.BusinessDomain) ||
+                           selectedSourceFilters.Contains(item.Category))
             .ToArray();
 
         var simulationOnly = plan.PlannerSafetySummary?.IsSimulationOnly == true;
-        var cloudSource = candidates
-            .Where(item => item.ExternalSystemType == DataSourceExternalSystemType.CloudReadOnly)
-            .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
-            .FirstOrDefault();
+        if (simulationOnly && selectedIds.Count != 1)
+        {
+            throw new InvalidOperationException(
+                "SimulationBusiness execution requires exactly one data source explicitly selected in the confirmed plan.");
+        }
+
         var simulationSource = candidates
             .Where(item => item.ExternalSystemType == DataSourceExternalSystemType.SimulationBusiness)
             .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
             .FirstOrDefault();
-        var source = simulationOnly
-            ? simulationSource
-            : cloudSource is not null && (simulationSource is null || selectedIds.Contains(cloudSource.Id))
-                ? cloudSource
-                : simulationSource;
+        BusinessDatabaseDescriptor? source;
+        if (simulationOnly)
+        {
+            source = simulationSource;
+        }
+        else if (selectedIds.Count > 0)
+        {
+            source = candidates.Length == 1 ? candidates.Single() : null;
+        }
+        else
+        {
+            var defaultCloudSources = candidates
+                .Where(item => item.ExternalSystemType == DataSourceExternalSystemType.CloudReadOnly)
+                .ToArray();
+            source = defaultCloudSources.Length == 1
+                ? defaultCloudSources.Single()
+                : null;
+        }
 
         if (source is null)
         {
             throw new InvalidOperationException(simulationOnly
                 ? "The confirmed SimulationBusiness source is no longer available; Cloud/Real fallback is forbidden."
-                : "No authorized SimulationBusiness or CloudReadOnly data source is available for this agent task.");
+                : "The confirmed business query does not resolve to exactly one authorized data source.");
         }
 
-        if (source.ExternalSystemType == DataSourceExternalSystemType.CloudReadOnly)
+        var sourceWasExplicitlySelected =
+            selectedIds.Contains(source.Id);
+        if (source.ExternalSystemType == DataSourceExternalSystemType.SimulationBusiness &&
+            !sourceWasExplicitlySelected)
         {
-            return await QueryCloudReadOnlyBusinessDatabaseAsync(source, taskGoal, state, cancellationToken);
+            throw new InvalidOperationException(
+                "SimulationBusiness must be explicitly selected for this agent task; implicit Simulation fallback is forbidden.");
+        }
+
+        if (source.ExternalSystemType != DataSourceExternalSystemType.SimulationBusiness)
+        {
+            return await QueryGovernedBusinessSourceAsync(
+                source,
+                taskGoal,
+                taskId,
+                plan,
+                semanticIntent,
+                selectedCapability,
+                sourceWasExplicitlySelected,
+                state,
+                cancellationToken);
+        }
+
+        if (!IsTextToSqlFallbackSelected(plan))
+        {
+            throw new InvalidOperationException(
+                "The confirmed plan did not explicitly select the SimulationBusiness Text-to-SQL execution mode.");
         }
 
         if (businessTextToSqlRuntime is null)
@@ -157,44 +230,142 @@ internal sealed class AgentRuntimeBusinessQueryToolService(
         };
     }
 
-    private async Task<object> QueryCloudReadOnlyBusinessDatabaseAsync(
+    private async Task<object> QueryGovernedBusinessSourceAsync(
         BusinessDatabaseDescriptor source,
         string taskGoal,
+        Guid taskId,
+        AgentTaskPlanDocument plan,
+        AgentTaskPlanCloudReadonlyIntentDocument? semanticIntent,
+        BusinessDataCapability? selectedCapability,
+        bool sourceWasExplicitlySelected,
         AgentTaskRunState state,
         CancellationToken cancellationToken)
     {
-        if (businessDatabaseReadService is null || cloudTextToSqlFallbackRunner is null)
+        if (businessDatabaseReadService is null)
         {
-            throw new InvalidOperationException("CloudReadOnly Text-to-SQL runtime is not configured.");
+            throw new InvalidOperationException("Business database read service is not configured.");
+        }
+
+        var sourceKey = source.ExternalSystemType == DataSourceExternalSystemType.CloudReadOnly
+            ? StandardBusinessDataSourceProfiles.CloudReadOnly.Code
+            : source.Name;
+        var requestedProfile = ResolveProfile(
+            sourceKey,
+            source.ExternalSystemType);
+        if (requestedProfile.RequiresExplicitSelection &&
+            !sourceWasExplicitlySelected)
+        {
+            throw new InvalidOperationException(
+                "The selected business data-source profile requires explicit source selection.");
+        }
+
+        var requestedCapability = semanticIntent is null
+            ? selectedCapability
+            : BusinessDataCapabilityMapper.FromSemanticTarget(semanticIntent.Target);
+        var semanticPlan = semanticIntent?.ToSemanticPlan();
+        var confirmation = BuildConfirmation(
+            plan.IsExecutable,
+            requestedCapability,
+            semanticIntent is { Confidence: >= MinimumConfirmedSemanticConfidence },
+            semanticPlan);
+        var requestedContext = new BusinessQueryContext(
+            taskId,
+            requestedProfile.Code,
+            source.Id,
+            source.ExternalSystemType,
+            requestedCapability ?? BusinessDataCapability.ProductionRecord,
+            taskGoal,
+            sourceWasExplicitlySelected,
+            confirmation,
+            SemanticPlan: semanticPlan);
+        var context = queryContextStore.Resolve(requestedContext);
+
+        BusinessQueryProviderResult pluginResult;
+        if (!context.IsConfirmed)
+        {
+            pluginResult = BusinessQueryProviderResult.FromOutcome(
+                context,
+                "semantic-context-validation",
+                BusinessQueryOutcome.NeedClarification,
+                $"Please confirm the missing business query context fields: {string.Join(", ", context.Confirmation.MissingFields())}.");
+        }
+        else
+        {
+            context = context.Confirm();
+            var provider = providerRegistry.ResolveRequired(context);
+            pluginResult = await provider.QueryAsync(context, cancellationToken);
+            BusinessQueryProviderResultContract.EnsureMatches(context, provider, pluginResult);
+        }
+
+        if (pluginResult.Outcome is BusinessQueryOutcome.Success or BusinessQueryOutcome.Empty)
+        {
+            RememberConfirmedContext(context);
+            return ApplyProviderResult(source, context, pluginResult, state);
+        }
+
+        if (pluginResult.Outcome == BusinessQueryOutcome.NeedClarification)
+        {
+            return ApplyNeedClarificationResult(source, context, pluginResult, state);
+        }
+
+        if (pluginResult.Outcome == BusinessQueryOutcome.Unauthorized)
+        {
+            throw new UnauthorizedAccessException(
+                $"Business query provider explicitly denied the confirmed source. Provider={pluginResult.ProviderCode}; Outcome={pluginResult.Outcome}.");
+        }
+
+        var sourceProfile = ResolveProfile(context.SourceKey, context.SourceType);
+        var fallbackDecision = BusinessQueryFallbackPolicy.EvaluateSameSourceTextToSql(
+            context,
+            pluginResult,
+            sourceProfile);
+        if (!fallbackDecision.IsEligible)
+        {
+            throw new InvalidOperationException(
+                $"Business query plugin stopped without Text-to-SQL fallback. Outcome={pluginResult.Outcome}; Reason={fallbackDecision.ReasonCode}.");
+        }
+
+        if (!IsTextToSqlFallbackSelected(plan))
+        {
+            throw new InvalidOperationException(
+                $"Same-source Text-to-SQL fallback is eligible but was not selected by the confirmed plan. Reason={fallbackDecision.ReasonCode}.");
+        }
+
+        if (businessTextToSqlFallbackRunner is null)
+        {
+            throw new InvalidOperationException("Governed business Text-to-SQL runtime is not configured.");
         }
 
         var database = await businessDatabaseReadService.GetByNameAsync(source.Name, cancellationToken);
         if (database is null)
         {
-            throw new InvalidOperationException("Selected CloudReadOnly data source is not available for this agent task.");
+            throw new InvalidOperationException(
+                "The selected governed data source is no longer available for this agent task.");
         }
 
-        var fallbackResult = await cloudTextToSqlFallbackRunner.RunAsync(
+        var fallbackResult = await businessTextToSqlFallbackRunner.RunAsync(
+            context,
             database,
             taskGoal,
             source.DefaultQueryLimit,
             cancellationToken);
         if (!fallbackResult.Succeeded)
         {
-            throw new InvalidOperationException($"CloudReadOnly Text-to-SQL fallback failed: {fallbackResult.SafeMessage}");
+            throw new InvalidOperationException($"Governed Text-to-SQL fallback failed: {fallbackResult.SafeMessage}");
         }
 
+        RememberConfirmedContext(context);
         var rows = fallbackResult.Rows
             .Select(row => row.ToDictionary(item => item.Key, item => item.Value))
             .ToArray();
-        var sourceLabel = "Cloud 已有正式只读数据（DataAnalysis/Text-to-SQL 补充分析）";
+        var sourceLabel = $"{source.Name}（受控 Text-to-SQL 补充分析）";
 
         state.CloudReadonlySummary =
-            $"BusinessDatabase CloudReadOnly Text-to-SQL executed. sourceType=BusinessDatabase; sourceMode=CloudReadOnly; isSimulation=false; sourceLabel={sourceLabel}; queryHash={fallbackResult.QueryHash}; rows={fallbackResult.RowCount}; truncated={fallbackResult.IsTruncated.ToString().ToLowerInvariant()}; repairAttempts={fallbackResult.RepairAttempts.Count}.";
+            $"BusinessDatabase governed Text-to-SQL executed. sourceType=BusinessDatabase; sourceMode={context.SourceType}; isSimulation=false; sourceLabel={sourceLabel}; queryHash={fallbackResult.QueryHash}; rows={fallbackResult.RowCount}; truncated={fallbackResult.IsTruncated.ToString().ToLowerInvariant()}; repairAttempts={fallbackResult.RepairAttempts.Count}.";
         state.CloudReadonlyRows = rows;
         state.CloudReadonlySourceLabel = sourceLabel;
-        state.CloudReadonlySourcePath = "BusinessDataSourceCenter/CloudReadOnlyTextToSql";
-        state.CloudReadonlySourceMode = DataSourceExternalSystemType.CloudReadOnly.ToString();
+        state.CloudReadonlySourcePath = "BusinessDataSourceCenter/GovernedTextToSql";
+        state.CloudReadonlySourceMode = context.SourceType.ToString();
         state.CloudReadonlyIsSimulation = false;
         state.CloudReadonlyRowCount = fallbackResult.RowCount;
         state.CloudReadonlyIsTruncated = fallbackResult.IsTruncated;
@@ -202,7 +373,7 @@ internal sealed class AgentRuntimeBusinessQueryToolService(
         state.BusinessQueryResults.Add(new AgentBusinessQuerySummary(
             source.Id,
             source.Name,
-            DataSourceExternalSystemType.CloudReadOnly.ToString(),
+            context.SourceType.ToString(),
             IsSimulation: false,
             sourceLabel,
             fallbackResult.QueryHash,
@@ -214,7 +385,7 @@ internal sealed class AgentRuntimeBusinessQueryToolService(
         {
             status = "completed",
             resultType = "business-query-summary",
-            sourceMode = DataSourceExternalSystemType.CloudReadOnly.ToString(),
+            sourceMode = context.SourceType.ToString(),
             isSimulation = false,
             rowCount = fallbackResult.RowCount,
             isTruncated = fallbackResult.IsTruncated,
@@ -222,79 +393,170 @@ internal sealed class AgentRuntimeBusinessQueryToolService(
         };
     }
 
-    public async Task<object> QueryBusinessDatabaseReadonlyAsync(
-        AgentTaskPlanDocument plan,
-        AgentTaskRunState state,
-        CancellationToken cancellationToken)
+    private BusinessDataSourceProfile ResolveProfile(
+        string sourceKey,
+        DataSourceExternalSystemType sourceType)
     {
-        if (businessDatabaseReadService is null)
+        return profileRegistry.GetRequired(sourceKey, sourceType);
+    }
+
+    private static BusinessDataCapability? TryResolveCapability(
+        IReadOnlyCollection<string>? businessDomains)
+    {
+        var capabilities = new HashSet<BusinessDataCapability>();
+        foreach (var domain in businessDomains ?? [])
         {
-            throw new InvalidOperationException("Business database read service is not configured.");
+            if (Enum.TryParse<BusinessDataCapability>(
+                    domain,
+                    ignoreCase: true,
+                    out var capability))
+            {
+                capabilities.Add(capability);
+            }
         }
 
-        var enabledSources = await businessDatabaseReadService.ListEnabledAsync(cancellationToken);
-        var selectedIds = (plan.DataSourceIds ?? [])
-            .Where(id => id != Guid.Empty)
-            .ToHashSet();
-        var selectedDomains = (plan.BusinessDomains ?? [])
-            .Where(domain => !string.IsNullOrWhiteSpace(domain))
-            .Select(domain => domain.Trim())
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return capabilities.Count == 1
+            ? capabilities.Single()
+            : null;
+    }
 
-        var candidates = enabledSources
-            .Where(source => source.IsSelectableInAgent)
-            .Where(source => selectedIds.Count == 0 || selectedIds.Contains(source.Id))
-            .Where(source => selectedDomains.Count == 0 ||
-                             selectedDomains.Contains(source.BusinessDomain) ||
-                             selectedDomains.Contains(source.Category))
+    private void RememberConfirmedContext(BusinessQueryContext context)
+    {
+        if (context.IsConfirmed)
+        {
+            queryContextStore.Remember(context);
+        }
+    }
+
+    private static BusinessQueryConfirmation BuildConfirmation(
+        bool planIsExecutable,
+        BusinessDataCapability? capability,
+        bool confidenceConfirmed,
+        SemanticQueryPlan? semanticPlan)
+    {
+        return BusinessQueryConfirmationPolicy.FromSemanticPlan(
+            sourceConfirmed: planIsExecutable,
+            capabilityConfirmed: capability is not null,
+            confidenceConfirmed: confidenceConfirmed,
+            semanticPlan: semanticPlan,
+            businessObjectConfirmed: planIsExecutable && semanticPlan is not null,
+            timeRangeConfirmed: planIsExecutable && semanticPlan is not null,
+            filtersConfirmed: planIsExecutable && semanticPlan is not null);
+    }
+
+    private static object ApplyNeedClarificationResult(
+        BusinessDatabaseDescriptor source,
+        BusinessQueryContext context,
+        BusinessQueryProviderResult result,
+        AgentTaskRunState state)
+    {
+        state.CloudReadonlySummary =
+            $"Business query requires clarification. provider={result.ProviderCode}; sourceMode={result.SourceType}; outcome={result.Outcome}.";
+        state.CloudReadonlyRows = [];
+        state.CloudReadonlySourceLabel = source.Name;
+        state.CloudReadonlySourcePath = result.ProviderCode;
+        state.CloudReadonlySourceMode = context.SourceType.ToString();
+        state.CloudReadonlyIsSimulation = false;
+        state.CloudReadonlyRowCount = 0;
+        state.CloudReadonlyIsTruncated = false;
+
+        return new
+        {
+            status = "needs-clarification",
+            resultType = "business-query-guidance",
+            outcome = result.Outcome.ToString(),
+            sourceMode = context.SourceType.ToString(),
+            safeMessage = result.SafeMessage,
+            missingFields = context.Confirmation.MissingFields()
+        };
+    }
+
+    private static object ApplyProviderResult(
+        BusinessDatabaseDescriptor source,
+        BusinessQueryContext context,
+        BusinessQueryProviderResult result,
+        AgentTaskRunState state)
+    {
+        var rows = result.Rows
+            .Select(row => row.ToDictionary(item => item.Key, item => item.Value))
             .ToArray();
-
-        if (candidates.Length == 0)
-        {
-            throw new InvalidOperationException("No authorized BusinessDatabase data source is available for this agent task.");
-        }
-
-        var rows = candidates.Select(source => new Dictionary<string, object?>
-        {
-            ["dataSourceId"] = source.Id,
-            ["dataSourceName"] = source.Name,
-            ["sourceType"] = "BusinessDatabase",
-            ["sourceMode"] = source.ExternalSystemType.ToString(),
-            ["isSimulation"] = source.ExternalSystemType == DataSourceExternalSystemType.SimulationBusiness,
-            ["sourceLabel"] = source.ExternalSystemType == DataSourceExternalSystemType.SimulationBusiness
-                ? "AI 独立模拟业务库"
-                : source.Name,
-            ["businessDomain"] = source.BusinessDomain,
-            ["category"] = source.Category,
-            ["sensitivityLevel"] = source.SensitivityLevel,
-            ["defaultQueryLimit"] = source.DefaultQueryLimit,
-            ["maxQueryLimit"] = source.MaxQueryLimit
-        }).ToArray();
-
-        var hasSimulation = candidates.Any(source => source.ExternalSystemType == DataSourceExternalSystemType.SimulationBusiness);
-        var queryHash = ComputeHash($"{plan.Goal}|{string.Join(',', candidates.Select(source => source.Id))}|{plan.QueryMode ?? "TextToSql"}");
+        var queryHash = ComputeHash(
+            $"{context.SourceKey}|{context.Capability}|{context.Question}");
+        var sourceLabel = string.IsNullOrWhiteSpace(result.SourceLabel)
+            ? source.Name
+            : result.SourceLabel;
+        var sourcePath = string.IsNullOrWhiteSpace(result.SourcePath)
+            ? result.ProviderCode
+            : result.SourcePath;
 
         state.CloudReadonlySummary =
-            $"BusinessDatabase readonly query prepared. sourceType=BusinessDatabase; sourceMode={(hasSimulation ? "SimulationBusiness" : "NonCloud")}; isSimulation={hasSimulation.ToString().ToLowerInvariant()}; sourceLabel={(hasSimulation ? "AI 独立模拟业务库" : string.Join(", ", candidates.Select(source => source.Name)))}; queryHash={queryHash}.";
+            $"Business query plugin completed. provider={result.ProviderCode}; sourceMode={result.SourceType}; outcome={result.Outcome}; rows={result.RowCount}; truncated={result.IsTruncated.ToString().ToLowerInvariant()}.";
         state.CloudReadonlyRows = rows;
-        state.CloudReadonlySourceLabel = hasSimulation ? "AI 独立模拟业务库" : string.Join(", ", candidates.Select(source => source.Name));
-        state.CloudReadonlySourcePath = "BusinessDataSourceCenter";
-        state.CloudReadonlySourceMode = hasSimulation ? "SimulationBusiness" : "NonCloud";
-        state.CloudReadonlyIsSimulation = hasSimulation;
-        state.CloudReadonlyRowCount = rows.Length;
-        state.CloudReadonlyIsTruncated = false;
+        state.CloudReadonlySourceLabel = sourceLabel;
+        state.CloudReadonlySourcePath = sourcePath;
+        state.CloudReadonlySourceMode = result.SourceType.ToString();
+        state.CloudReadonlyIsSimulation = false;
+        state.CloudReadonlyRowCount = result.RowCount;
+        state.CloudReadonlyIsTruncated = result.IsTruncated;
+        state.CloudReadonlyQueriedAtUtc = result.QueriedAtUtc;
         state.BusinessQueryHash = queryHash;
+        state.BusinessQueryResults.Add(new AgentBusinessQuerySummary(
+            source.Id,
+            source.Name,
+            result.SourceType.ToString(),
+            IsSimulation: false,
+            sourceLabel,
+            queryHash,
+            result.RowCount,
+            result.IsTruncated,
+            ArtifactId: null));
 
         return new
         {
             status = "completed",
             resultType = "business-query-summary",
-            sourceMode = state.CloudReadonlySourceMode ?? "Unavailable",
-            isSimulation = state.CloudReadonlyIsSimulation,
-            rowCount = rows.Length,
-            isTruncated = false,
+            outcome = result.Outcome.ToString(),
+            sourceMode = result.SourceType.ToString(),
+            isSimulation = false,
+            rowCount = result.RowCount,
+            isTruncated = result.IsTruncated,
             resultHash = queryHash
         };
+    }
+
+    private static bool IsTextToSqlFallbackSelected(AgentTaskPlanDocument plan)
+    {
+        return string.Equals(plan.QueryMode, "TextToSql", StringComparison.Ordinal);
+    }
+
+    private static AgentTaskPlanCloudReadonlyIntentDocument? ResolveSingleSemanticIntent(
+        AgentTaskPlanDocument plan)
+    {
+        return plan.CloudReadonlyIntents?.Count == 1
+            ? plan.CloudReadonlyIntents.Single()
+            : null;
+    }
+
+    private static AgentTaskPlanCloudReadonlyIntentDocument? ResolveBoundSemanticIntent(
+        AgentTaskPlanDocument plan,
+        AgentStep step)
+    {
+        var node = plan.Nodes?.ElementAtOrDefault(step.StepIndex - 1);
+        if (node?.Input is not
+            {
+                SemanticIntent: { } semanticIntent,
+                SemanticPlanDigest: { } semanticPlanDigest
+            })
+        {
+            return null;
+        }
+
+        return plan.CloudReadonlyIntents?.SingleOrDefault(candidate =>
+            string.Equals(candidate.Intent, semanticIntent, StringComparison.Ordinal) &&
+            string.Equals(
+                candidate.SemanticPlanDigest,
+                semanticPlanDigest,
+                StringComparison.Ordinal));
     }
 
     public object SummarizeBusinessQueryResult(AgentTaskRunState state)

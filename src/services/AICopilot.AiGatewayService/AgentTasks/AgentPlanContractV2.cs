@@ -115,7 +115,7 @@ internal static class AgentPlanContractSchemaAuthority
         topologyProfiles = new[] { "DagV1", "LinearV1" },
         planKinds = new[] { "ExecutablePlan", "PlanDraft" },
         lifecycleTuples = new[] { "PlanDraft|false|0000", "ExecutablePlan|true|" },
-        queryModes = new[] { "CloudReadonly", "TextToSql" },
+        queryModes = new[] { "CloudReadonly", "PluginOnly", "TextToSql" },
         capabilitySelectionModes = new[] { "ExplicitAllowlist", "InferredFromGoal" },
         pluginSelectionModes = new[] { "BuiltInOnly" },
         artifactTargets = new[] { "chart", "html", "markdown", "pdf", "pptx", "xlsx" },

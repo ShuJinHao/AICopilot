@@ -45,14 +45,16 @@ public abstract class ToolRegistryGovernanceTestBase
         IToolExecutionAuditStore executionRepository,
         ToolRegistryGuard guard,
         IAgentArtifactWorkspaceService? workspaceService = null,
-        ICloudReadonlyAgentToolExecutor? cloudReadonlyToolExecutor = null,
         IEnumerable<IAgentToolExecutor>? toolExecutors = null,
         IAgentTaskRunAttemptStore? runAttemptRepository = null,
         IEnumerable<IKnowledgeBaseAccessChecker>? knowledgeBaseAccessCheckers = null,
         IKnowledgeRetrievalService? knowledgeRetrievalService = null,
         IIdentityAccessService? identityAccessService = null,
         AgentTaskPlanFreshReadGate? freshReadGate = null,
-        IAuditLogWriter? auditLogWriter = null)
+        IAuditLogWriter? auditLogWriter = null,
+        IBusinessDataSourceProfileRegistry? businessDataSourceProfileRegistry = null,
+        IBusinessQueryProviderRegistry? businessQueryProviderRegistry = null,
+        IBusinessQueryContextStore? businessQueryContextStore = null)
     {
         return new AgentTaskRuntime(
             taskRepository,
@@ -66,7 +68,6 @@ public abstract class ToolRegistryGovernanceTestBase
             new NoopDocumentGenerator(),
             knowledgeRetrievalService ?? new NoopKnowledgeRetrievalService(),
             knowledgeBaseAccessCheckers ?? [],
-            cloudReadonlyToolExecutor ?? new ThrowingCloudReadonlyAgentToolExecutor(),
             identityAccessService ?? new StubIdentityAccessService([]),
             guard,
             new MatchingAgentPlanRuntimeSnapshotVerifier(),
@@ -74,7 +75,10 @@ public abstract class ToolRegistryGovernanceTestBase
                 executionRepository,
             new AgentAuditRecorder(auditLogWriter ?? new CapturingAuditLogWriter())),
             toolExecutors ?? [],
-            freshReadGate ?? AgentPlanV2TestData.CreateMatchingFreshReadGate());
+            freshReadGate ?? AgentPlanV2TestData.CreateMatchingFreshReadGate(),
+            businessDataSourceProfileRegistry ?? new FixedBusinessDataSourceProfileRegistry(),
+            businessQueryProviderRegistry ?? new ThrowingBusinessQueryProviderRegistry(),
+            businessQueryContextStore ?? new PassthroughBusinessQueryContextStore());
     }
 
     private sealed class MatchingAgentPlanRuntimeSnapshotVerifier : IAgentPlanRuntimeSnapshotVerifier
@@ -286,8 +290,8 @@ public abstract class ToolRegistryGovernanceTestBase
     {
         return CreateGuard(
             CreateTool(
-                "query_cloud_data_readonly",
-                ToolProviderType.CloudReadonly,
+                "query_business_database_readonly",
+                ToolProviderType.BuiltIn,
                 isEnabled: true,
                 requiresApproval: true,
                 riskLevel: AiToolRiskLevel.RequiresApproval),
@@ -990,14 +994,6 @@ public abstract class ToolRegistryGovernanceTestBase
                 0.95));
         }
 
-        public Task<Result<CloudReadonlyAgentPlanIntent>> CreateIntentAsync(
-            Guid sessionId,
-            string goal,
-            CancellationToken cancellationToken = default)
-        {
-            return Task.FromResult(result);
-        }
-
         public Result<CloudReadonlyAgentPlanIntent> CreateIntentFromRouted(
             string goal,
             IReadOnlyCollection<IntentResult> routedIntents)
@@ -1045,16 +1041,6 @@ public abstract class ToolRegistryGovernanceTestBase
         }
     }
 
-    internal sealed class ThrowingCloudReadonlyAgentToolExecutor : ICloudReadonlyAgentToolExecutor
-    {
-        public Task<CloudReadonlyAgentToolResult> ExecuteAsync(
-            CloudReadonlyAgentToolRequest request,
-            CancellationToken cancellationToken = default)
-        {
-            throw new InvalidOperationException("Cloud readonly tool executor should not be called by this test.");
-        }
-    }
-
     internal sealed class FixedSemanticQueryPlanner(SemanticQueryPlan plan) : ISemanticQueryPlanner
     {
         public SemanticPlanningResult Plan(string intent, string? query)
@@ -1063,30 +1049,56 @@ public abstract class ToolRegistryGovernanceTestBase
         }
     }
 
-    internal static CloudReadonlyAgentToolExecutor CreateRealCloudReadonlyExecutor(
-        ISemanticQueryPlanner planner,
-        ICloudAiReadClient cloudClient)
+    private sealed class FixedBusinessDataSourceProfileRegistry : IBusinessDataSourceProfileRegistry
     {
-        var options = Options.Create(new CloudReadonlyOptions
+        public IReadOnlyCollection<BusinessDataSourceProfile> GetAll() =>
+            [StandardBusinessDataSourceProfiles.CloudReadOnly];
+
+        public bool TryGet(
+            string sourceKey,
+            DataSourceExternalSystemType expectedSourceType,
+            out BusinessDataSourceProfile profile)
         {
-            Mode = CloudReadonlyDataSourceMode.Real,
-            Real = new CloudReadonlyRealOptions
-            {
-                Enabled = true,
-                AllowProductionRead = true
-            }
-        });
-        return new CloudReadonlyAgentToolExecutor(new FixedCloudReadonlyDataProviderResolver(
-            new RealCloudReadonlyDataProvider(cloudClient, options)));
+            profile = StandardBusinessDataSourceProfiles.CloudReadOnly;
+            return string.Equals(sourceKey, profile.Code, StringComparison.OrdinalIgnoreCase) &&
+                   expectedSourceType == profile.SourceType;
+        }
+
+        public BusinessDataSourceProfile GetRequired(
+            string sourceKey,
+            DataSourceExternalSystemType expectedSourceType)
+        {
+            return TryGet(sourceKey, expectedSourceType, out var profile)
+                ? profile
+                : throw new InvalidOperationException("No governed profile is registered for the test source.");
+        }
     }
 
-    internal sealed class FixedCloudReadonlyDataProviderResolver(ICloudReadonlyDataProvider provider)
-        : ICloudReadonlyDataProviderResolver
+    private sealed class ThrowingBusinessQueryProviderRegistry : IBusinessQueryProviderRegistry
     {
-        public ICloudReadonlyDataProvider Resolve()
+        public IBusinessQueryProvider ResolveRequired(BusinessQueryContext context)
         {
-            return provider;
+            throw new InvalidOperationException("No business query provider is configured for this test.");
         }
+    }
+
+    private sealed class PassthroughBusinessQueryContextStore : IBusinessQueryContextStore
+    {
+        public BusinessQueryContext Resolve(BusinessQueryContext requested) => requested;
+
+        public void Remember(BusinessQueryContext context)
+        {
+        }
+
+        public BusinessQueryConfirmationChallenge BeginConfirmation(BusinessQueryContext requested) =>
+            throw new NotSupportedException();
+
+        public bool TryConfirmPending(Guid taskId, string userMessage, out BusinessQueryContext confirmed)
+        {
+            confirmed = null!;
+            return false;
+        }
+
     }
 
     internal sealed class FixedRuntimeSettingsProvider : IAgentRuntimeSettingsProvider

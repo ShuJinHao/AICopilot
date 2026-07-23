@@ -58,7 +58,13 @@ public sealed class AICopilotArchitectureAnalyzerTests
             public interface ITransactionalExecutionService { Task ExecuteAsync(Func<Task> action); }
             public interface IIdentityEnabledAdminInvariantGuard { Task AcquireAsync(); }
             public interface ICloudAiReadClient { int Read(); }
-            public interface ICloudReadOnlyTextToSqlGenerator { }
+            public interface IBusinessTextToSqlGenerator { }
+            public interface IBusinessQueryProvider { int Read(); }
+            public interface IBusinessQueryProviderRegistry { int Read(); }
+            public interface IBusinessDataSourceProfileRegistry { int Read(); }
+            public interface IBusinessQueryContextStore { int Read(); }
+            public interface IDatabaseConnector { int Read(); }
+            public interface ISqlGuardrail { int Read(); }
             public sealed record AuditLogWriteRequest;
             public interface IAuditLogWriter
             {
@@ -2375,6 +2381,40 @@ public sealed class AICopilotArchitectureAnalyzerTests
             diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId);
     }
 
+    [Theory]
+    [InlineData("IBusinessQueryProviderRegistry")]
+    [InlineData("IBusinessDataSourceProfileRegistry")]
+    [InlineData("IBusinessQueryContextStore")]
+    [InlineData("IDatabaseConnector")]
+    [InlineData("ISqlGuardrail")]
+    public async Task AIARCH006_ShouldTreatUnifiedBusinessQueryBoundariesAsCloudReadRoots(
+        string boundaryType)
+    {
+        var source = $$"""
+            namespace Fixture
+            {
+                public sealed class BusinessQueryBoundary(
+                    AICopilot.Services.Contracts.{{boundaryType}} boundary,
+                    Microsoft.EntityFrameworkCore.DbContext db)
+                {
+                    public int Run()
+                    {
+                        _ = boundary.Read();
+                        return db.SaveChanges();
+                    }
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.AiGatewayService",
+            [source],
+            [EntityFrameworkReference, ServicesContractsReference]);
+
+        diagnostics.Should().ContainSingle(diagnostic =>
+            diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId);
+    }
+
     [Fact]
     public async Task AIARCH006_ShouldAllowOnlyTheExactAICopilotAuditWriterSideEffect()
     {
@@ -2755,7 +2795,7 @@ public sealed class AICopilotArchitectureAnalyzerTests
             }
             namespace AICopilot.AiGatewayService.Workflows.Executors
             {
-                public sealed class CloudReadOnlyTextToSqlFallbackRunner(
+                public sealed class BusinessTextToSqlFallbackRunner(
                     Fixture.ISender sender,
                     AICopilot.AiGatewayService.AgentTasks.IAgentToolExecutor toolExecutor)
                 {
@@ -2775,7 +2815,7 @@ public sealed class AICopilotArchitectureAnalyzerTests
             }
             namespace AICopilot.AiGatewayService.Workflows.Executors
             {
-                public sealed class CloudReadOnlyTextToSqlFallbackRunner(
+                public sealed class BusinessTextToSqlFallbackRunner(
                     Fixture.ISender sender,
                     Fixture.McpAgentToolExecutor toolExecutor)
                 {

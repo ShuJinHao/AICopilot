@@ -136,7 +136,7 @@ public sealed class PromptGovernanceTests
             .And.Contain("运行详情")
             .And.Contain("可以读取、查询和分析已授权只读数据");
 
-        BuiltInConversationTemplates.Find("cloud_readonly_text_to_sql")!.SystemPrompt
+        BuiltInConversationTemplates.Find("business_readonly_text_to_sql")!.SystemPrompt
             .Should().Contain("结构化 JSON 草案")
             .And.Contain("不执行查询")
             .And.Contain("governedSchema")
@@ -144,7 +144,8 @@ public sealed class PromptGovernanceTests
             .And.Contain("joinHints")
             .And.Contain("@parameter_name")
             .And.Contain("不调用工具")
-            .And.Contain("不写入 Cloud");
+            .And.Contain("不选择或切换数据源")
+            .And.Contain("共享 AST guard");
 
         BuiltInConversationTemplates.Find("chat_answer")!.SystemPrompt
             .Should().Contain("运行详情")

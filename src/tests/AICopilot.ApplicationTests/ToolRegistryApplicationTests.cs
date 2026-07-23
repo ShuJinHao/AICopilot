@@ -64,94 +64,6 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         authorized.IsAllowed.Should().BeTrue();
     }
     [Fact]
-    public async Task ToolRegistryGuard_ShouldReturnStableCode_WhenCloudReadonlyToolIsDisabled()
-    {
-        var tool = CreateTool(
-            "query_cloud_data_readonly",
-            ToolProviderType.CloudReadonly,
-            isEnabled: false,
-            requiresApproval: true,
-            riskLevel: AiToolRiskLevel.RequiresApproval);
-
-        var result = await CreateGuard(tool).ValidateAsync(tool.ToolCode, UserId, CancellationToken.None);
-
-        result.IsAllowed.Should().BeFalse();
-        result.Problem!.Code.Should().Be(AppProblemCodes.CloudReadonlyToolDisabled);
-    }
-    [Fact]
-    public async Task PlanAgentTask_ShouldCreateDraft_WhenCloudReadonlyToolIsDisabled_AndRejectOnConfirm()
-    {
-        var session = new Session(UserId, ConversationTemplateId.New());
-        var taskRepository = new InMemoryRepository<AgentTask>();
-        var approvalRepository = new InMemoryRepository<ApprovalRequest>();
-        var disabledToolGuard = CreateGuard(CreateTool(
-            "query_cloud_data_readonly",
-            ToolProviderType.CloudReadonly,
-            isEnabled: false,
-            requiresApproval: true,
-            riskLevel: AiToolRiskLevel.RequiresApproval));
-        var handler = new PlanAgentTaskCommandHandler(
-            new PlanAgentTaskCoordinator(
-                taskRepository,
-                new AgentTaskPlanPreparationService(
-                    new InMemoryRepository<Session>(session),
-                    new InMemoryRepository<UploadRecord>(),
-                    [],
-                    null),
-                new AgentAuditRecorder(new CapturingAuditLogWriter()),
-                new TestCurrentUser(UserId),
-                planToolGuard: CreatePlanToolGuard(disabledToolGuard),
-                cloudReadonlyPlanService: new FixedCloudReadonlyAgentPlanService()));
-
-        var result = await handler.Handle(
-            new PlanAgentTaskCommand(session.Id.Value, "生成 Cloud 生产数据报告", AgentTaskType.CloudDataReport, null),
-            CancellationToken.None);
-
-        result.IsSuccess.Should().BeTrue();
-        result.Value!.WorkspaceId.Should().BeNull();
-        result.Value.WorkspaceCode.Should().BeNull();
-        var task = taskRepository.Items.Should().ContainSingle().Which;
-        task.Status.Should().Be(AgentTaskStatus.Draft);
-        task.WorkspaceId.Should().BeNull();
-        using var plan = JsonDocument.Parse(task.PlanJson);
-        plan.RootElement.GetProperty("planKind").GetString().Should().Be("PlanDraft");
-        plan.RootElement.GetProperty("isExecutable").GetBoolean().Should().BeFalse();
-        plan.RootElement.GetProperty("capabilityGaps").EnumerateArray()
-            .Select(item => item.GetString())
-            .Should().Contain(AgentPlanCapabilityGapCodes.CloudReadonlyIntentUnavailable)
-            .And.Contain(AgentPlanCapabilityGapCodes.ExecutionSnapshotUnavailable);
-
-        var approvalAudit = new CapturingAuditLogWriter();
-        var confirmationService = new AgentPlanDraftConfirmationService(
-            CreatePlanToolGuard(disabledToolGuard),
-            AgentPlanV2TestData.CreateMatchingFreshReadGate(),
-            AgentPlanV2TestData.CreateMatchingRoutingSnapshotReader());
-        var approveHandler = new AgentTaskPlanDecisionCommandHandler(
-            taskRepository,
-            approvalRepository,
-            CreateAgentTaskDtoQueryService(
-                new InMemoryRepository<ArtifactWorkspace>(),
-                approvalRepository,
-                new InMemoryAgentTaskRunQueueStore()),
-            new AgentAuditRecorder(approvalAudit),
-            new TestCurrentUser(UserId),
-            confirmationService);
-
-        var confirmation = await approveHandler.Handle(
-            new ApproveAgentTaskPlanCommand(task.Id.Value),
-            CancellationToken.None);
-
-        confirmation.IsSuccess.Should().BeFalse();
-        confirmation.Errors.Should().ContainSingle()
-            .Which.Should().BeEquivalentTo(new ApiProblemDescriptor(
-                AppProblemCodes.AgentPlanInvalid,
-                "A PlanDraft with unresolved capability gaps cannot be confirmed."));
-        task.Status.Should().Be(AgentTaskStatus.Draft);
-        approvalRepository.Items.Should().ContainSingle()
-            .Which.Status.Should().Be(AgentApprovalStatus.Pending);
-        approvalAudit.Requests.Should().BeEmpty();
-    }
-    [Fact]
     public async Task ConfirmPlanDraft_ShouldRejectCloudDataReport_WhenCloudReadonlyIntentIsUnsupported()
     {
         var session = new Session(UserId, ConversationTemplateId.New());
@@ -327,8 +239,8 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
                 CreateTool("blocked_tool", riskLevel: AiToolRiskLevel.Blocked),
                 CreateTool("permission_tool", requiredPermission: "AiGateway.ToolRegistry.Manage"),
                 CreateTool(
-                    "query_cloud_data_readonly",
-                    ToolProviderType.CloudReadonly,
+                    "query_business_database_readonly",
+                    ToolProviderType.BuiltIn,
                     isEnabled: true,
                     requiresApproval: true,
                     riskLevel: AiToolRiskLevel.RequiresApproval),
@@ -364,13 +276,12 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
             .Should().BeEquivalentTo(new ApiProblemDescriptor(AppProblemCodes.ToolPermissionDenied, "Current user lacks required tool permission 'AiGateway.ToolRegistry.Manage'."));
 
         var cloudWrite = await guard.ValidateStepsAsync(
-            [new AgentStepPlanDto("Query", "update Cloud device status", AgentStepType.DataQuery, "query_cloud_data_readonly", false)],
+            [new AgentStepPlanDto("Query", "update Cloud device status", AgentStepType.DataQuery, "query_business_database_readonly", false)],
             AgentTaskType.CloudDataReport,
             UserId,
             CancellationToken.None);
-        cloudWrite.Errors!.Single().Should().BeEquivalentTo(new ApiProblemDescriptor(
-            AppProblemCodes.AgentPlanToolDenied,
-            "Agent plan contains SQL statement semantics."));
+        cloudWrite.IsSuccess.Should().BeTrue(
+            "natural-language words such as update do not constitute SQL or mutation authority");
 
         var shell = await guard.ValidateStepsAsync(
             [new AgentStepPlanDto("Run powershell", "generate report", AgentStepType.ArtifactGeneration, "generate_markdown_report", false)],

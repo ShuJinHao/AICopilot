@@ -1,4 +1,3 @@
-using System.Data;
 using System.Linq.Expressions;
 using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
 using AICopilot.Core.DataAnalysis.Ids;
@@ -30,7 +29,9 @@ public sealed class DataSourceAuthorizationTests
             databaseRepository,
             connector,
             accessService,
-            audit);
+            audit,
+            new BusinessDataSourceProfileRegistry(
+                [new SimulationBusinessDataSourceProfileProvider()]));
 
         var result = await executor.ExecuteAsync(
             database.Id,
@@ -65,7 +66,9 @@ public sealed class DataSourceAuthorizationTests
             databaseRepository,
             new BusinessDatabaseAccessService(
                 grantRepository,
-                new TestCurrentUser(UserId, role: "Analyst")));
+                new TestCurrentUser(UserId, role: "Analyst")),
+            new BusinessDataSourceProfileRegistry(
+                [new SimulationBusinessDataSourceProfileProvider()]));
 
         var candidates = await readService.ListEnabledAsync(CancellationToken.None);
 
@@ -93,24 +96,10 @@ public sealed class DataSourceAuthorizationTests
     {
         public int ExecuteCount { get; private set; }
 
-        public IDbConnection GetConnection(BusinessDatabaseConnectionInfo database)
-        {
-            throw new NotSupportedException();
-        }
-
-        public Task<IEnumerable<dynamic>> ExecuteQueryAsync(
-            BusinessDatabaseConnectionInfo database,
-            string sql,
-            object? parameters = null,
-            CancellationToken cancellationToken = default)
-        {
-            ExecuteCount++;
-            return Task.FromResult<IEnumerable<dynamic>>([]);
-        }
-
         public Task<DatabaseQueryResult> ExecuteQueryWithMetadataAsync(
             BusinessDatabaseConnectionInfo database,
             string sql,
+            BusinessQuerySecurityProfile securityProfile,
             object? parameters = null,
             DatabaseQueryOptions? options = null,
             CancellationToken cancellationToken = default)
@@ -121,13 +110,6 @@ public sealed class DataSourceAuthorizationTests
                 ReturnedRowCount: 1,
                 IsTruncated: false,
                 ElapsedMilliseconds: 1));
-        }
-
-        public Task<IEnumerable<dynamic>> GetSchemaInfoAsync(
-            BusinessDatabaseConnectionInfo database,
-            CancellationToken cancellationToken = default)
-        {
-            return Task.FromResult<IEnumerable<dynamic>>([]);
         }
     }
 

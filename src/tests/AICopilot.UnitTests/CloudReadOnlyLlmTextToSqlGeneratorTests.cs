@@ -18,7 +18,7 @@ public sealed class CloudReadOnlyLlmTextToSqlGeneratorTests
             """
             {
               "isSuccess": true,
-              "sql": "SELECT d.client_code FROM devices d WHERE d.client_code = @client_code LIMIT 10",
+              "sql": "SELECT d.client_code FROM public.devices d WHERE d.client_code = @client_code LIMIT 10",
               "parameters": { "client_code": "DEV-001" },
               "explanation": "Generated governed readonly SQL.",
               "warnings": []
@@ -26,11 +26,10 @@ public sealed class CloudReadOnlyLlmTextToSqlGeneratorTests
             """);
         var generator = CreateGenerator(runtimeFactory);
 
-        var result = await generator.GenerateAsync(new CloudReadOnlyTextToSqlGenerationRequest(
+        var result = await generator.GenerateAsync(new BusinessTextToSqlGenerationRequest(
             "查看 DEV-001 设备",
             10,
-            CloudReadOnlyGovernedSchema.AllowedTables,
-            CloudReadOnlyGovernedSchema.AllowedColumns,
+            StandardBusinessDataSourceProfiles.CloudReadOnly,
             []));
 
         result.IsSuccess.Should().BeTrue();
@@ -39,13 +38,15 @@ public sealed class CloudReadOnlyLlmTextToSqlGeneratorTests
             .WhoseValue.Should().Be("DEV-001");
 
         runtimeFactory.LastCreateRequest.Should().NotBeNull();
-        runtimeFactory.LastCreateRequest!.Template.Name.Should().Be("cloud_readonly_text_to_sql");
+        runtimeFactory.LastCreateRequest!.Template.Name.Should().Be("business_readonly_text_to_sql");
         runtimeFactory.LastCreateRequest.Options.Tools.Should().BeEmpty();
         runtimeFactory.LastCreateRequest.Options.Temperature.Should().Be(0);
         runtimeFactory.LastRun.Should().NotBeNull();
         runtimeFactory.LastRun!.Options!.Options.Tools.Should().BeEmpty();
         runtimeFactory.LastRun.Options.Options.Temperature.Should().Be(0);
         runtimeFactory.LastRun.InputText.Should().Contain("governedSchema");
+        runtimeFactory.LastRun.InputText.Should().Contain("allowedSchemas");
+        runtimeFactory.LastRun.InputText.Should().Contain("schema.table");
         runtimeFactory.LastRun.InputText.Should().Contain("columnTypes");
         runtimeFactory.LastRun.InputText.Should().Contain("valueHint");
         runtimeFactory.LastRun.InputText.Should().Contain("joinHints");
@@ -67,7 +68,7 @@ public sealed class CloudReadOnlyLlmTextToSqlGeneratorTests
             """
             {
               "isSuccess": true,
-              "sql": "SELECT d.client_code FROM devices d WHERE d.client_code = @client_code LIMIT 10",
+              "sql": "SELECT d.client_code FROM public.devices d WHERE d.client_code = @client_code LIMIT 10",
               "parameters": { "client_code": ["DEV-001"] },
               "explanation": "Generated governed readonly SQL.",
               "warnings": []
@@ -75,32 +76,90 @@ public sealed class CloudReadOnlyLlmTextToSqlGeneratorTests
             """);
         var generator = CreateGenerator(runtimeFactory);
 
-        var result = await generator.GenerateAsync(new CloudReadOnlyTextToSqlGenerationRequest(
+        var result = await generator.GenerateAsync(new BusinessTextToSqlGenerationRequest(
             "查看 DEV-001 设备",
             10,
-            CloudReadOnlyGovernedSchema.AllowedTables,
-            CloudReadOnlyGovernedSchema.AllowedColumns,
+            StandardBusinessDataSourceProfiles.CloudReadOnly,
             []));
 
         result.IsSuccess.Should().BeFalse();
         result.FailureReason.Should().Contain("scalar JSON value");
     }
 
-    private static CloudReadOnlyLlmTextToSqlGenerator CreateGenerator(FakeRuntimeAgentFactory runtimeFactory)
+    [Fact]
+    public async Task GenerateAsync_ShouldUseSelectedProfileDialectAndSchema()
+    {
+        var runtimeFactory = new FakeRuntimeAgentFactory();
+        runtimeFactory.EnqueueStructuredResultJson(
+            """
+            {
+              "isSuccess": false,
+              "failureReason": "additional business conditions are required"
+            }
+            """);
+        var generator = CreateGenerator(runtimeFactory);
+        var profile = new BusinessDataSourceProfile(
+            "mes-readonly",
+            DataSourceExternalSystemType.NonCloud,
+            DatabaseProviderType.SqlServer,
+            IsRealExternalSource: true,
+            RequiresExplicitSelection: true,
+            SupportsTextToSqlFallback: true,
+            new HashSet<BusinessDataCapability> { BusinessDataCapability.Device },
+            new BusinessQuerySecurityProfile(
+                new HashSet<string>(["mes_devices"], StringComparer.OrdinalIgnoreCase),
+                new Dictionary<string, IReadOnlySet<string>>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["mes_devices"] = new HashSet<string>(
+                        ["device_id", "device_name"],
+                        StringComparer.OrdinalIgnoreCase)
+                },
+                new HashSet<string>(["credential"], StringComparer.OrdinalIgnoreCase),
+                new HashSet<string>(["dbo"], StringComparer.OrdinalIgnoreCase)),
+            new BusinessTextToSqlProfile(
+                "SQL Server",
+                "governed-business-readonly-text-to-sql",
+                new Dictionary<string, IReadOnlyDictionary<string, string>>(
+                    StringComparer.OrdinalIgnoreCase)
+                {
+                    ["mes_devices"] = new Dictionary<string, string>(
+                        StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["device_id"] = "uniqueidentifier",
+                        ["device_name"] = "nvarchar"
+                    }
+                },
+                new Dictionary<string, IReadOnlyDictionary<string, string>>(
+                    StringComparer.OrdinalIgnoreCase),
+                []));
+
+        await generator.GenerateAsync(new BusinessTextToSqlGenerationRequest(
+            "查看 MES 设备",
+            10,
+            profile,
+            []));
+
+        runtimeFactory.LastRun!.InputText.Should().Contain("\"dialect\":\"SQL Server\"");
+        runtimeFactory.LastRun.InputText.Should().Contain("mes_devices");
+        runtimeFactory.LastRun.InputText.Should().Contain("uniqueidentifier");
+        runtimeFactory.LastRun.InputText.Should().NotContain("\"table\":\"devices\"");
+    }
+
+    private static BusinessLlmTextToSqlGenerator CreateGenerator(FakeRuntimeAgentFactory runtimeFactory)
     {
         var model = FakeRuntimeAgentFactory.CreateModel();
-        var definition = BuiltInConversationTemplates.Find("cloud_readonly_text_to_sql")!;
+        var definition = BuiltInConversationTemplates.Find("business_readonly_text_to_sql")!;
         var template = BuiltInConversationTemplates.CreateTemplate(definition, model.Id);
         var configuredFactory = new ConfiguredAgentRuntimeFactory(
             new InMemoryReadRepository<ConversationTemplate>([template]),
             new InMemoryReadRepository<LanguageModel>([model]),
             runtimeFactory);
 
-        return new CloudReadOnlyLlmTextToSqlGenerator(
+        return new BusinessLlmTextToSqlGenerator(
             configuredFactory,
             Options.Create(new CloudReadOnlyTextToSqlOptions
             {
-                TemplateName = "cloud_readonly_text_to_sql"
+                TemplateName = "business_readonly_text_to_sql"
             }));
     }
 }

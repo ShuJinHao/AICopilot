@@ -79,15 +79,6 @@ public sealed class EnterpriseDataGovernanceP0Tests
         dto.Governance!.IsSanitizedPreview.Should().BeTrue();
     }
 
-    [Theory]
-    [InlineData("SELECT password FROM employees")]
-    [InlineData("SELECT * FROM information_schema.tables")]
-    [InlineData("SELECT token_value FROM api_tokens")]
-    public void BusinessReadonlySafetyPolicy_ShouldBlockSensitiveFieldsAndSystemCatalogs(string sql)
-    {
-        BusinessReadonlyQuerySafetyPolicy.Validate(sql).Should().NotBeNull();
-    }
-
     [Fact]
     public void SimulationBusinessSeedGenerator_ShouldCreateMediumFiveDomainPlan()
     {

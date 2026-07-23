@@ -4,16 +4,14 @@ function Get-AICopilotCanonicalBaselineRelativePath {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [ValidateSet('Compatibility', 'Coverage', 'Duplication', 'Mutation', 'TestCases')]
+        [ValidateSet('Compatibility', 'Duplication', 'Mutation')]
         [string]$BaselineKind
     )
 
     switch ($BaselineKind) {
         'Compatibility' { return 'scripts/tests/baselines/aicopilot-compatibility.json' }
-        'Coverage' { return 'scripts/tests/baselines/aicopilot-coverage.json' }
         'Duplication' { return 'scripts/tests/baselines/aicopilot-duplication.json' }
         'Mutation' { return 'scripts/tests/baselines/aicopilot-mutation.json' }
-        'TestCases' { return 'scripts/tests/baselines/aicopilot-test-cases.json' }
     }
 }
 
@@ -22,7 +20,7 @@ function Resolve-AICopilotCanonicalBaselinePath {
     param(
         [Parameter(Mandatory)] [string]$RepositoryRoot,
         [Parameter(Mandatory)]
-        [ValidateSet('Compatibility', 'Coverage', 'Duplication', 'Mutation', 'TestCases')]
+        [ValidateSet('Compatibility', 'Duplication', 'Mutation')]
         [string]$BaselineKind,
         [Parameter(Mandatory)] [string]$BaselinePath
     )
@@ -86,7 +84,7 @@ function Get-AICopilotBaselineContext {
         [Parameter(Mandatory)] [string]$RepositoryRoot,
         [Parameter(Mandatory)] [string]$BaseRef,
         [Parameter(Mandatory)]
-        [ValidateSet('Compatibility', 'Coverage', 'Duplication', 'Mutation')]
+        [ValidateSet('Compatibility', 'Duplication', 'Mutation')]
         [string]$BaselineKind,
         [Parameter(Mandatory)] [string]$BaselinePath
     )

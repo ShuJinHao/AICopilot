@@ -1,6 +1,6 @@
 # Agent 工作流与异常契约
 
-本文档约束 AICopilot Agent workflow、Plan/Chat 模式、MCP/Tool/Human-in-the-loop 边界、后端异常和前端错误展示。总计划见 `docs/AI架构治理清单.md`。
+本文档约束 AICopilot Agent workflow、Plan/Chat 模式、MCP/Tool/Human-in-the-loop 边界、后端异常和前端错误展示。`docs/AI架构治理清单.md` 仅用于按具体 Rule ID 追溯历史治理状态，不是本契约的默认前置材料。
 
 ## 1. 统一工作流主干
 
@@ -49,14 +49,14 @@ Cloud 只读 Agent 当前正式能力限定为：
 - `Analysis.Process.List/Detail`：工序主数据列表与唯一精确详情。
 - `Analysis.ClientRelease.List`：Cloud 返回的客户端发布版本列表。
 
-以上能力必须复用统一语义定义、`CloudReadonlyAgentPlanService` 和唯一 Cloud AiRead 客户端；成功、合法空集、语义规划失败或 Cloud 数据源不可用时都必须返回真实边界，不得回退 Direct DB、Text-to-SQL、Simulation、MCP 或隐藏适配器。`PlanAgentTaskCoordinator` 只能创建和维护草案，不得持有查询客户端或执行查询；语义 intent 只能在用户确认草案后创建，运行时工具只能在确认后的执行链调用。
+以上能力必须进入统一业务数据查询管线：确认 Cloud 数据源、能力、业务对象、时间和过滤条件后，先调用对应 Cloud 业务插件，并返回 `Success`、`Empty`、`NeedClarification`、`Unsupported`、`Unavailable` 或 `Unauthorized`。`Success`/`Empty` 直接终止，`NeedClarification` 继续询问，`Unauthorized` 禁止绕过；只有 `Unsupported` 或同源 `Unavailable` 才可调用同一 Cloud profile 的受控 Text-to-SQL。Chat 在首次业务查询范围确认后直接复用该确认，不得为 fallback 再制造第二次确认；Plan/Worker 必须由已确认计划明确选择 `TextToSql`。禁止跨源、Simulation、MCP 或隐藏适配器 fallback。`PlanAgentTaskCoordinator` 只能创建和维护草案，不得持有查询客户端或执行查询；语义 intent 只能在用户确认草案后创建，运行时工具只能在确认后的执行链调用。
 
-`Analysis.Recipe.*` 的具体配方数据请求必须在调用语义规划器前返回禁读边界，即使规划器本会失败也不能进入 provider、数据库或 fallback。Chat 语义执行器只持有 Cloud AiRead 客户端、语义规划器和日志器；Direct DB、physical mapping、SQL generator、数据库审计与 Text-to-SQL fallback 只能留在各自独立治理链，不能重新挂回正式语义执行器。
+`Analysis.Recipe.*` 的具体配方数据请求必须在调用语义规划器前返回禁读边界，即使规划器本会失败也不能进入 provider、数据库或 fallback。Chat、Plan 和 Worker 的真实业务查询必须复用同一 provider registry、确认上下文和 fallback policy；语义入口不得再维护一套 Cloud 专用 SQL guard、写动词清单、Runner 或隐藏回退。Text-to-SQL 的生成/repair 可以保持独立实现，但只能由统一策略在同源且结果类型符合条件时调度，最终 SQL 统一经过执行咽喉的 profile-aware AST guard 和只读数据库账号。
 
 ### 2.2 DataAnalysis 最终上下文边界
 
 - `analysis.metadata` 与 `business_data_preview` 必须共用同一份大小写不敏感字段标签映射；同一 raw field 的 metadata name/description 和 preview property key 必须一致，重名标签只在该唯一入口稳定加后缀。
-- raw field 为 SQL、表/视图、数据源、数据库、host/user 等 formatter 内部显示字段，或命中 `CloudReadOnlyGovernedSchema.BlockedFieldFragments` 的 key/credential/secret/token/password 等共享敏感标识时，必须整项丢弃，不能换一个业务名后继续输出其值。
+- raw field 为 SQL、表/视图、数据源、数据库、host/user 等 formatter 通用内部显示字段时必须整项丢弃。业务插件结果在 formatter 之前必须通过当前 provider/capability 声明的允许字段与敏感字段契约；Text-to-SQL 结果必须通过当前 source profile。formatter 不得静态依赖 Cloud schema，也不能把被上游契约拒绝的字段换一个业务名继续输出。
 - 标签候选只允许 metadata description 再回退 raw field；指令型/内部文本、控制字符、换行或超过 80 字符的候选不得成为 JSON key，两个候选都不安全时使用固定业务 fallback。
 - preview 只承载最多 3 个可识别 dictionary row 的扁平标量。值只走唯一 `SanitizeValue` 入口；JSON null/bool/number/string 可映射为同等标量，CLR 只显式允许 string、bool/数值、date、Guid 和 enum。JSON object/array 及其余任意 CLR object/collection 一律输出既有脱敏占位，不调用自定义 `ToString()` 透出内容，不递归展开第二层 key。
 - Semantic/FreeForm Widget 在 formatter 之前由各自真实 plan/summary/rows 生成，不消费最终 prompt label map；不得因最终上下文治理复制第二套 Widget 标签或值清洗器。
@@ -65,7 +65,7 @@ Cloud 只读 Agent 当前正式能力限定为：
 
 - 声明产物目标的 Plan 必须且只能有一个最后步骤 `finalize_artifacts`，其 `StepType=Finalize`、`RequiresApproval=true`；该步骤是生命周期检查点，不是 provider tool，不能交给 built-in、MCP 或 mock executor 伪造执行成功。
 - 当前生产 Plan 只允许 `BuiltInOnly`；唯一权威 `DeterministicAgentPlanCompiler` 只消费同一版本 `AgentIntentRegistry` 的 typed candidate 与服务器冻结快照。它可以生成显式 `LinearV1`，或在存在多个独立只读 Evidence 根时生成受限 `DagV1`；`DagV1` 只允许固定节点类型、2–4 并行、显式 `dependsOn`、`AllRequired/OptionalBestEffort` 合流和确定性节点 ID，不得另建 general compiler、模型自由拓扑或 Runtime 猜测 profile。缺少执行快照、资源、工具或能力必须披露稳定 gap；任何带 gap 的 Draft 都保持 node-free、不可确认、不可入队。
-- 同一个 Plan 可冻结多个 `cloudReadonlyIntents`，每个 `CloudReadNode` 必须精确绑定自己的 semantic intent、plan digest、scope、time range 和 row limit；`Analysis.Device.Status` 的健康评估只能是该状态节点的确定性子节点。Cloud 失败、空集或未配置不得创建、调度或回退 `GovernedDataReadNode`/Simulation/Text-to-SQL/MCP。
+- 同一个 Plan 可冻结多个 `cloudReadonlyIntents`，每个 `CloudReadNode` 必须精确绑定自己的 semantic intent、plan digest、scope、time range 和 row limit；`Analysis.Device.Status` 的健康评估只能是该状态节点的确定性子节点。插件 `Empty`、`NeedClarification`、`Unauthorized` 不得创建或调度 fallback；只有 `Unsupported` 或同源 `Unavailable` 可在确认计划明确选择后进入同一 Cloud profile 的 Text-to-SQL，且始终禁止 Simulation、MCP 或跨数据源回退。
 - 每个成功 `NodeRun` 必须在同一 fenced checkpoint 写入唯一 sealed Evidence；恢复只能从已授权 Evidence 与 checkpoint 重建，不得读取子 Agent 原始对话。并行根各自在独立 state 中运行，fan-in 只按 canonical 规则合并 Evidence payload；required 失败阻止下游，optional 缺失必须显式保留质量标记。
 - `AgentReasoningNode` 派生深度固定为 1，只消费 `EvidenceOnly + SafeSummary`，不得 spawn、继续 Tool 调用、扩权或把 `LlmInference/Recommendation` 伪装成 `ObservedFact/DerivedFact/ModelPrediction`。最后一次 recovery 仍不能产生合法 typed output 时节点失败。
 - 显式 `Development + CloudReadonly:Mode=Simulation + Simulation.Enabled=true + AlwaysMarkAsSimulation=true` profile 仍只能把唯一已授权 `SimulationBusiness` 数据源编译为固定的 `query_business_database_readonly → summarize_business_query_result → generate_markdown_report → finalize_artifacts` 四步图。该 profile 不得接 Cloud、MCP、Plugin、上传或 RAG，不得混合/回退 Real/Cloud 数据源；Plan 确认、入队和 Worker 每次 fresh-read 都必须重新校验 Simulation profile，配置关闭后旧计划立即 fail-closed。
@@ -161,7 +161,7 @@ Cloud 只读 Agent 当前正式能力限定为：
 
 ## 9. 验收命令
 
-以下命令用于 Agent/异常专题定向诊断；任务完成仍必须对账 inventory 中全部 required runner、Web 和 deployment behavior，不得用 filter 结果代替。
+以下命令只用于 Agent/异常专题的受影响范围诊断。任务完成按当前 task mode 和 selector 运行 Architecture/Security 与受影响 Business；不得自动追加全仓 required、Web、coverage、mutation、duplication 或 deployment 全量。只有用户显式授权 `Quality`、`Full` 或 `CrossProject` 时，才进入对应完整验收。
 
 ```bash
 dotnet test src/tests/AICopilot.WorkflowTests/AICopilot.WorkflowTests.csproj --no-restore

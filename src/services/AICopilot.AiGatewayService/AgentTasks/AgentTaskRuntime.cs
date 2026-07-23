@@ -57,13 +57,15 @@ internal sealed class AgentTaskRuntime(
     IAgentArtifactDocumentGenerator documentGenerator,
     IKnowledgeRetrievalService knowledgeRetrievalService,
     IEnumerable<IKnowledgeBaseAccessChecker> knowledgeBaseAccessCheckers,
-    ICloudReadonlyAgentToolExecutor cloudReadonlyToolExecutor,
     IIdentityAccessService identityAccessService,
     ToolRegistryGuard toolRegistryGuard,
     IAgentPlanRuntimeSnapshotVerifier runtimeSnapshotVerifier,
     AgentRuntimeEventRecorder runtimeEventRecorder,
     IEnumerable<IAgentToolExecutor> toolExecutors,
     AgentTaskPlanFreshReadGate freshReadGate,
+    IBusinessDataSourceProfileRegistry businessDataSourceProfileRegistry,
+    IBusinessQueryProviderRegistry businessQueryProviderRegistry,
+    IBusinessQueryContextStore businessQueryContextStore,
     AgentNodeRunMaterializer? nodeRunMaterializer = null,
     NodeRunClaimCoordinator? nodeRunClaimCoordinator = null,
     NodeCheckpointCoordinator? nodeCheckpointCoordinator = null,
@@ -75,7 +77,7 @@ internal sealed class AgentTaskRuntime(
     IOptions<AgentRunQueueOptions>? runQueueOptions = null,
     IBusinessDatabaseReadService? businessDatabaseReadService = null,
     IBusinessTextToSqlRuntime? businessTextToSqlRuntime = null,
-    CloudReadOnlyTextToSqlFallbackRunner? cloudTextToSqlFallbackRunner = null,
+    BusinessTextToSqlFallbackRunner? businessTextToSqlFallbackRunner = null,
     AgentReasoningNodeExecutor? reasoningNodeExecutor = null,
     IServiceScopeFactory? serviceScopeFactory = null)
     : IAgentTaskRuntime
@@ -92,12 +94,14 @@ internal sealed class AgentTaskRuntime(
         tableFileParser,
         knowledgeRetrievalService,
         knowledgeBaseAccessCheckers,
-        cloudReadonlyToolExecutor,
         identityAccessService,
         new AgentRuntimeArtifactBuilder(workspaceService, documentGenerator),
+        businessDataSourceProfileRegistry,
+        businessQueryProviderRegistry,
+        businessQueryContextStore,
         businessDatabaseReadService,
         businessTextToSqlRuntime,
-        cloudTextToSqlFallbackRunner,
+        businessTextToSqlFallbackRunner,
         reasoningNodeExecutor);
 
     public Task<Result<AgentTask>> RunAsync(AgentTask task, CancellationToken cancellationToken = default)

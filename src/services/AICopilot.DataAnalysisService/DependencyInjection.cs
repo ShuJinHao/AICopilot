@@ -30,6 +30,10 @@ public static class DependencyInjection
         builder.Services.AddScoped<ISemanticSourceInspector, SemanticSourceInspector>();
         builder.Services.AddScoped<ISemanticQueryPlanner, SemanticQueryPlanner>();
         builder.Services.AddScoped<ISemanticSqlGenerator, SemanticSqlGenerator>();
+        builder.Services.AddSingleton<IBusinessDataSourceProfileProvider, CloudReadOnlyBusinessDataSourceProfileProvider>();
+        builder.Services.AddSingleton<IBusinessDataSourceProfileProvider, SimulationBusinessDataSourceProfileProvider>();
+        builder.Services.AddSingleton<IBusinessDataSourceProfileRegistry, BusinessDataSourceProfileRegistry>();
+        builder.Services.AddSingleton<IBusinessQueryContextStore, BusinessQueryContextStore>();
         builder.Services.AddScoped<BusinessDatabaseAccessService>();
         builder.Services.AddScoped<IBusinessDatabaseAuthorizationReadService, BusinessDatabaseAuthorizationReadService>();
         builder.Services.AddScoped<IBusinessDatabaseReadService, BusinessDatabaseReadService>();

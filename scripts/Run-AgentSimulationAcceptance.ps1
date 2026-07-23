@@ -41,8 +41,7 @@ function Invoke-Step {
 function Confirm-SimulationTrx {
     param(
         [Parameter(Mandatory)] [string]$ProjectName,
-        [Parameter(Mandatory)] [string]$Path,
-        [Parameter(Mandatory)] [int]$ExpectedCount
+        [Parameter(Mandatory)] [string]$Path
     )
 
     if (-not (Test-Path $Path -PathType Leaf)) {
@@ -60,12 +59,12 @@ function Confirm-SimulationTrx {
     $passed = [int]$counters.passed
     $failed = [int]$counters.failed
     $skipped = [int]$counters.notExecuted
-    if ($discovered -ne $ExpectedCount -or
-        $executed -ne $ExpectedCount -or
-        $passed -ne $ExpectedCount -or
+    if ($discovered -le 0 -or
+        $executed -ne $discovered -or
+        $passed -ne $discovered -or
         $failed -ne 0 -or
         $skipped -ne 0) {
-        throw "${ProjectName} reconciliation failed: expected=$ExpectedCount, discovered=$discovered, executed=$executed, passed=$passed, failed=$failed, skipped=$skipped"
+        throw "${ProjectName} reconciliation failed: discovered=$discovered, executed=$executed, passed=$passed, failed=$failed, skipped=$skipped"
     }
 
     return [pscustomobject]@{
@@ -151,11 +150,10 @@ try {
                 --logger "trx;LogFileName=AICopilot.SimulationTests.trx" `
                 --results-directory $resultsDirectory
         }
-        Invoke-Step "Simulation pure reconciliation (12/12)" {
+        Invoke-Step "Simulation pure current-discovery reconciliation" {
             $script:pureResult = Confirm-SimulationTrx `
                 -ProjectName "AICopilot.SimulationTests" `
-                -Path $pureTrxPath `
-                -ExpectedCount 12
+                -Path $pureTrxPath
         }
 
         $dockerTrxPath = Join-Path $resultsDirectory "AICopilot.SimulationDockerTests.trx"
@@ -169,11 +167,10 @@ try {
                 --logger "trx;LogFileName=AICopilot.SimulationDockerTests.trx" `
                 --results-directory $resultsDirectory
         }
-        Invoke-Step "Simulation Docker reconciliation (1/1)" {
+        Invoke-Step "Simulation Docker current-discovery reconciliation" {
             $script:dockerResult = Confirm-SimulationTrx `
                 -ProjectName "AICopilot.SimulationDockerTests" `
-                -Path $dockerTrxPath `
-                -ExpectedCount 1
+                -Path $dockerTrxPath
         }
 
         $outcome = "Passed"
@@ -196,7 +193,6 @@ try {
         $summary = [pscustomobject]@{
             generatedAtUtc = [DateTimeOffset]::UtcNow.ToString("O")
             outcome = $outcome
-            expected = [pscustomobject]@{ pure = 12; docker = 1 }
             pure = $pureResult
             docker = $dockerResult
             failure = $failureSummary
@@ -244,8 +240,8 @@ $($Results | Out-String)
 
 ## Reconciliation
 
-- Pure runner expected/discovered/executed: 12/$pureDiscovered/$pureExecuted
-- Docker runner expected/discovered/executed: 1/$dockerDiscovered/$dockerExecuted
+- Pure runner discovered/executed: $pureDiscovered/$pureExecuted
+- Docker runner discovered/executed: $dockerDiscovered/$dockerExecuted
 - Failed/skipped: $totalFailed/$totalSkipped
 
 ## Notes

@@ -15,7 +15,6 @@ namespace AICopilot.AiGatewayService.Workflows.Executors;
 public class DataAnalysisExecutor(
     ISemanticQuerySchemaRegistry semanticQuerySchemaRegistry,
     SemanticAnalysisRunner semanticRunner,
-    FreeFormDbaAnalysisRunner freeFormRunner,
     ILogger<DataAnalysisExecutor> logger)
 {
     public const string ExecutorId = nameof(DataAnalysisExecutor);
@@ -60,12 +59,14 @@ public class DataAnalysisExecutor(
         var nodeResults = new List<AgentAnalysisNodeResult>();
         foreach (var intent in semanticIntents)
         {
-            nodeResults.Add(await semanticRunner.RunAsync(intent, sink, ct));
+            nodeResults.Add(await semanticRunner.RunAsync(intent, sink, session, ct));
         }
 
         foreach (var intent in databaseIntents)
         {
-            nodeResults.Add(await freeFormRunner.RunAsync(intent, sink, session, ct));
+            nodeResults.Add(AgentAnalysisNodeResult.Failed(
+                AppProblemCodes.AgentPlanToolDenied,
+                $"数据分析意图 {intent.Intent} 未绑定已确认的业务能力与数据源 profile；Chat 不允许按数据库名称或 Simulation 直接执行 Text-to-SQL。"));
         }
 
         var failed = nodeResults.FirstOrDefault(result => result.Status == BranchExecutionStatus.Failed);

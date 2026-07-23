@@ -39,11 +39,11 @@ internal sealed class PlanAgentTaskCoordinator(
         var useDevelopmentSimulationProfile = IsDevelopmentSimulationProfile();
         if (useDevelopmentSimulationProfile &&
             (request.TaskType == AgentTaskType.CloudDataReport ||
-             request.QueryMode is not null &&
-             !string.Equals(request.QueryMode, "TextToSql", StringComparison.Ordinal)))
+             !string.Equals(request.QueryMode, "TextToSql", StringComparison.Ordinal) ||
+             request.DataSourceIds is not { Count: > 0 }))
         {
             return Result.Invalid(
-                "The Development Simulation profile accepts the governed TextToSql report chain only; CloudReadonly never falls back to Simulation.");
+                "The Development Simulation profile requires an explicitly selected SimulationBusiness data source and the exact TextToSql query mode; configuration alone never selects or executes Simulation.");
         }
 
         var preparationResult = await preparationService.PrepareAsync(
@@ -70,7 +70,9 @@ internal sealed class PlanAgentTaskCoordinator(
 
         var effectiveTaskType = request.TaskType;
         var effectiveQueryMode = request.QueryMode ??
-            (effectiveTaskType == AgentTaskType.CloudDataReport ? "CloudReadonly" : "TextToSql");
+            (effectiveTaskType == AgentTaskType.CloudDataReport
+                ? "CloudReadonly"
+                : "PluginOnly");
         var effectivePlanSource = "PlanV2Contract";
         var effectivePlannerModelId = useDevelopmentSimulationProfile
             ? workflowDraft?.ExecutionMetadata.RoutingConfiguration?.ModelId ?? request.ModelId

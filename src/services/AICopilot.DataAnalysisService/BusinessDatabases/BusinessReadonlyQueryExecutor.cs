@@ -11,7 +11,8 @@ public sealed class BusinessReadonlyQueryExecutor(
     IReadRepository<BusinessDatabase> repository,
     IDatabaseConnector databaseConnector,
     BusinessDatabaseAccessService accessService,
-    IAuditLogWriter auditLogWriter)
+    IAuditLogWriter auditLogWriter,
+    IBusinessDataSourceProfileRegistry profileRegistry)
 {
     private readonly BusinessReadonlyQueryAuditRecorder auditRecorder = new(auditLogWriter);
 
@@ -69,7 +70,9 @@ public sealed class BusinessReadonlyQueryExecutor(
             return Result.Invalid("Business database is disabled or not readonly.");
         }
 
-        var credentialError = BusinessDataSourceGovernancePolicy.ValidateReadOnlyCredential(database);
+        var credentialError = BusinessDataSourceGovernancePolicy.ValidateReadOnlyCredential(
+            database,
+            profileRegistry);
         if (credentialError is not null)
         {
             await auditRecorder.WriteAsync(
@@ -105,7 +108,10 @@ public sealed class BusinessReadonlyQueryExecutor(
             return Result.Invalid("P1 Text-to-SQL only executes SimulationBusiness data sources.");
         }
 
-        var effectiveSafetySchema = safetySchema ?? BusinessDataSourceGovernancePolicy.ResolveSafetySchema(database);
+        var effectiveSafetySchema = safetySchema ??
+                                    BusinessDataSourceGovernancePolicy.ResolveSafetySchema(
+                                        database,
+                                        profileRegistry);
         if (effectiveSafetySchema is null)
         {
             const string schemaError = "Governed semantic schema is required before executing this business data source.";
@@ -124,22 +130,31 @@ public sealed class BusinessReadonlyQueryExecutor(
             return Result.Invalid(schemaError);
         }
 
-        var safetyError = BusinessReadonlyQuerySafetyPolicy.Validate(sql, effectiveSafetySchema);
-        if (safetyError is not null)
+        var contractSourceType =
+            BusinessDatabaseContractMapper.ToContractExternalSystemType(database.ExternalSystemType);
+        var sourceKey = BusinessDataSourceGovernancePolicy.ResolveProfileKey(database);
+        BusinessDataSourceProfile sourceProfile;
+        try
         {
+            sourceProfile = profileRegistry.GetRequired(sourceKey, contractSourceType);
+        }
+        catch (InvalidOperationException)
+        {
+            const string profileError =
+                "Governed data-source profile is required before executing this business query.";
             await auditRecorder.WriteAsync(
                 database,
                 sql,
                 AuditResults.Rejected,
-                $"Business readonly query rejected. Reason={safetyError}",
+                profileError,
                 rowCount: 0,
                 isTruncated: false,
                 durationMs: 0,
                 selectionMode,
-                warningCode: BusinessDataSourceGovernancePolicy.ResolveWarningCode(safetyError),
+                warningCode: "GOVERNED_PROFILE_REQUIRED",
                 auditAction,
                 cancellationToken);
-            return Result.Invalid(safetyError);
+            return Result.Invalid(profileError);
         }
 
         var maxRows = ResolveLimit(database, limit);
@@ -152,6 +167,7 @@ public sealed class BusinessReadonlyQueryExecutor(
             var queryResult = await databaseConnector.ExecuteQueryWithMetadataAsync(
                 BusinessDatabaseContractMapper.ToConnectionInfo(database),
                 sql,
+                sourceProfile.QuerySecurity,
                 options: queryOptions,
                 cancellationToken: cancellationToken);
 

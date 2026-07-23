@@ -1543,9 +1543,9 @@ public sealed class AgentPlanContractV2Tests
             "ObservedFact",
             new AgentEvidenceProducerDocument(
                 "CloudReadNode",
-                "built-in:query_cloud_data_readonly",
-                "query_cloud_data_readonly",
-                Hash("query-cloud-output-schema"),
+                "built-in:query_business_database_readonly",
+                "query_business_database_readonly",
+                Hash("business-query-output-schema"),
                 null,
                 null,
                 null),

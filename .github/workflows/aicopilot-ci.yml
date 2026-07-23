@@ -4,162 +4,112 @@ on:
   push:
     branches: [main]
   pull_request: {}
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "default=Architecture/Security + affected Business; heavy lanes require an explicit mode"
+        required: true
+        type: choice
+        default: default
+        options:
+          - default
+          - quality
+          - cross-project
+          - full
+      cloud_ref:
+        description: "Cloud ref used only by cross-project mode"
+        required: false
+        type: string
+        default: main
 
 permissions:
   contents: read
 
 env:
+  DOTNET_NOLOGO: true
+  CI_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'default' }}
   QUALITY_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
 
 jobs:
-  governance_gates:
-    name: governance-gates
+  build-test:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.mode != 'cross-project' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 120
 
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Setup .NET
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
-          dotnet-version: "10.0.301"
-
-      - name: Setup Node
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
-        with:
-          node-version: "22"
-          cache: "npm"
-          cache-dependency-path: "src/vues/AICopilot.Web/package-lock.json"
+          global-json-file: global.json
 
       - name: Verify .NET SDK
         run: test "$(dotnet --version)" = "10.0.301"
 
-      - name: Restore governance TypeScript dependencies
-        working-directory: src/vues/AICopilot.Web
-        run: npm ci
-
-      - name: Test inventory and reconciliation behavior
-        shell: pwsh
-        run: ./scripts/tests/Test-AICopilotTestInfrastructureBehavior.ps1
-
-      - name: Enforce compatibility and duplication ratchets
+      - name: Select current scope and validate selector only when affected
+        id: select
         shell: pwsh
         run: |
-          ./scripts/tests/Test-AICopilotCompatibilityInventory.ps1 -BaseRef "$env:QUALITY_BASE_SHA"
-          ./scripts/tests/Measure-AICopilotDuplication.ps1 -BaseRef "$env:QUALITY_BASE_SHA"
+          $baseRef = $env:QUALITY_BASE_SHA
+          if ([string]::IsNullOrWhiteSpace($baseRef)) {
+            $baseRef = 'HEAD^'
+          }
+          $selectorInputs = @(
+            & git diff --name-only $baseRef HEAD -- `
+              '.github/workflows/aicopilot-ci.yml' `
+              'scripts/tests/Select-AICopilotCiTests.ps1' `
+              'scripts/tests/Invoke-AICopilotCiSelectedTests.ps1' `
+              'scripts/tests/Test-AICopilotCiTestSelection.ps1'
+          )
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Unable to determine whether the AICopilot CI selector changed.'
+          }
+          if ($selectorInputs.Count -gt 0) {
+            ./scripts/tests/Test-AICopilotCiTestSelection.ps1
+          } else {
+            Write-Host 'AICopilot CI selector behavior test skipped because selector inputs are unaffected.'
+          }
+          ./scripts/tests/Select-AICopilotCiTests.ps1 `
+            -Mode $env:CI_MODE `
+            -BaseRef $baseRef `
+            -HeadRef HEAD `
+            -OutputPath artifacts/ci-selection.json
 
-      - name: Upload governance evidence
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: aicopilot-required-governance
-          path: artifacts/
-          if-no-files-found: error
-          retention-days: 1
-
-  dotnet_tests:
-    name: dotnet-tests
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-        with:
-          fetch-depth: 0
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
-        with:
-          dotnet-version: "10.0.301"
-
-      - name: Verify .NET SDK
-        run: test "$(dotnet --version)" = "10.0.301"
-
-      - name: Restore AICopilot solution
-        run: dotnet restore AICopilot.slnx
-
-      - name: Require Linux Docker runtime
+      - name: Require container runtime only when selected tests need it
+        if: ${{ steps.select.outputs.requires_docker == 'true' }}
         run: docker info
 
-      - name: Build AICopilot solution
+      - name: Restore selected .NET test projects
         shell: pwsh
         run: |
-          $head = ((& git rev-parse HEAD) -join "`n").Trim().ToLowerInvariant()
-          if ($LASTEXITCODE -ne 0 -or $head -notmatch '^[0-9a-f]{40}$') {
-            throw "Canonical build HEAD is not a full Git commit: $head"
-          }
-          & dotnet build AICopilot.slnx -c Release --no-restore "-p:SourceRevisionId=$head"
-          if ($LASTEXITCODE -ne 0) {
-            throw "Canonical AICopilot solution build failed with exit code $LASTEXITCODE."
+          $selection = Get-Content artifacts/ci-selection.json -Raw | ConvertFrom-Json
+          foreach ($project in @($selection.selectedDotNetProjects)) {
+            & dotnet restore $project.path
+            if ($LASTEXITCODE -ne 0) {
+              throw "Restore failed for selected project: $($project.path)"
+            }
           }
 
-      - name: Discover required AICopilot test runners
-        shell: pwsh
-        run: ./scripts/tests/Get-AICopilotTestInventory.ps1 -BaseRef "$env:QUALITY_BASE_SHA" -OutputPath artifacts/test-inventory.json -SynchronizeRunnerBuildIdentity
-
-      - name: Run required no-external .NET tests in parallel and resource tests serially
+      - name: Run selected .NET tests and record current discovery
         shell: pwsh
         run: |
-          $inventory = Get-Content artifacts/test-inventory.json -Raw | ConvertFrom-Json
-          $required = @($inventory.projects | Where-Object { $_.role -eq 'Runner' -and [bool]$_.required })
-          $noExternal = @($required | Where-Object { $_.runtime -in @('Pure', 'InProcess') })
-          $resource = @($required | Where-Object { $_.runtime -notin @('Pure', 'InProcess') })
-          $repositoryRoot = (Get-Location).Path
-          $bindingScript = Join-Path $repositoryRoot 'scripts/tests/Bind-AICopilotRunnerBuildIdentity.ps1'
-          $noExternal | ForEach-Object -Parallel {
-            $project = $_
-            $runnerResults = "artifacts/test-results/$($project.projectName)"
-            $runnerInput = "artifacts/runner-inputs/$($project.projectName).json"
-            & pwsh -NoProfile -File $using:bindingScript -RepositoryRoot $using:repositoryRoot -InventoryPath artifacts/test-inventory.json -ProjectName $project.projectName -OutputPath $runnerInput -SynchronizeRunnerBuildIdentity
-            if ($LASTEXITCODE -ne 0) {
-              throw "Required no-external runner input binding failed: $($project.path)"
-            }
-            & dotnet test $project.path -c Release --no-build --no-restore --collect "XPlat Code Coverage" --logger "trx;LogFileName=$($project.projectName).trx" --results-directory $runnerResults
-            if ($LASTEXITCODE -ne 0) {
-              throw "Required no-external test runner failed: $($project.path)"
-            }
-          } -ThrottleLimit 4
-          foreach ($project in $resource) {
-            $runnerResults = "artifacts/test-results/$($project.projectName)"
-            $runnerInput = "artifacts/runner-inputs/$($project.projectName).json"
-            & pwsh -NoProfile -File $bindingScript -RepositoryRoot $repositoryRoot -InventoryPath artifacts/test-inventory.json -ProjectName $project.projectName -OutputPath $runnerInput -SynchronizeRunnerBuildIdentity
-            if ($LASTEXITCODE -ne 0) {
-              throw "Required resource runner input binding failed: $($project.path)"
-            }
-            & dotnet test $project.path -c Release --no-build --no-restore --collect "XPlat Code Coverage" --logger "trx;LogFileName=$($project.projectName).trx" --results-directory $runnerResults
-            if ($LASTEXITCODE -ne 0) {
-              throw "Required resource test runner failed: $($project.path)"
-            }
+          $parameters = @{
+            SelectionPath = 'artifacts/ci-selection.json'
+            ResultsDirectory = 'artifacts/ci-test-results'
+            Configuration = 'Release'
           }
-
-      - name: Reconcile all required production coverage
-        shell: pwsh
-        run: ./scripts/tests/Confirm-AICopilotCoverage.ps1 -BaseRef "$env:QUALITY_BASE_SHA"
-
-      - name: Upload .NET test evidence
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: aicopilot-required-dotnet
-          path: artifacts/
-          if-no-files-found: error
-          retention-days: 1
-
-  web_deployment_tests:
-    name: web-deployment-tests
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+          if ($env:CI_MODE -in @('quality', 'full')) {
+            $parameters.CollectCoverage = $true
+          }
+          ./scripts/tests/Invoke-AICopilotCiSelectedTests.ps1 @parameters
 
       - name: Setup Node
+        if: ${{ steps.select.outputs.web_affected == 'true' || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'quality' || inputs.mode == 'full')) }}
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: "22"
@@ -167,127 +117,134 @@ jobs:
           cache-dependency-path: "src/vues/AICopilot.Web/package-lock.json"
 
       - name: Restore web dependencies
+        if: ${{ steps.select.outputs.web_affected == 'true' || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'quality' || inputs.mode == 'full')) }}
         working-directory: src/vues/AICopilot.Web
         run: npm ci
 
-      - name: Enforce incremental deployment policy
+      - name: Lint, type-check, build and test affected web scope
+        if: ${{ steps.select.outputs.web_affected == 'true' }}
         shell: pwsh
-        run: ./deploy/enterprise-ai/tests/TestDeploymentPolicy.ps1
+        working-directory: src/vues/AICopilot.Web
+        run: |
+          npm run lint:check
+          if ($LASTEXITCODE -ne 0) { throw 'AICopilot Web lint failed.' }
+          npm run type-check
+          if ($LASTEXITCODE -ne 0) { throw 'AICopilot Web type-check failed.' }
+          npm run build-only
+          if ($LASTEXITCODE -ne 0) { throw 'AICopilot Web build failed.' }
+          $selection = Get-Content ../../../artifacts/ci-selection.json -Raw | ConvertFrom-Json
+          if ([bool]$selection.web.full) {
+            npm run test:unit
+          } else {
+            $files = @($selection.web.changedFiles | ForEach-Object {
+                ([string]$_).Substring('src/vues/AICopilot.Web/'.Length)
+              })
+            if ($files.Count -gt 0) {
+              npx vitest related @files --run --config vitest.config.ts --passWithNoTests
+            }
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'AICopilot Web selected tests failed.' }
 
-      - name: Run deployment behavior tests
+      - name: Run deployment policy and behavior only when affected
+        if: ${{ steps.select.outputs.deployment_affected == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p artifacts/test-results
-          bash deploy/enterprise-ai/tests/deployment-behavior.sh 2>&1 | tee artifacts/test-results/deployment-behavior.log
+          mkdir -p artifacts/ci-test-results
+          pwsh -NoProfile -File deploy/enterprise-ai/tests/TestDeploymentPolicy.ps1
+          bash deploy/enterprise-ai/tests/deployment-behavior.sh 2>&1 | tee artifacts/ci-test-results/deployment-behavior.log
 
-      - name: Install Playwright Chromium
-        working-directory: src/vues/AICopilot.Web
-        run: npx playwright install --with-deps chromium
+      - name: Run explicit quality gates
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'quality' || inputs.mode == 'full') }}
+        shell: pwsh
+        run: |
+          $baseRef = if ([string]::IsNullOrWhiteSpace($env:QUALITY_BASE_SHA)) { 'HEAD^' } else { $env:QUALITY_BASE_SHA }
+          ./scripts/tests/Test-AICopilotCompatibilityInventory.ps1 -BaseRef $baseRef
+          ./scripts/tests/Measure-AICopilotDuplication.ps1 -BaseRef $baseRef
+          ./scripts/tests/Invoke-AICopilotMutation.ps1 -BaseRef $baseRef
 
-      - name: Test and build web app
+      - name: Run full browser smoke only in explicit full mode
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'full' }}
         working-directory: src/vues/AICopilot.Web
         env:
           PLAYWRIGHT_CHANNEL: chromium
-          PLAYWRIGHT_JSON_OUTPUT_NAME: ../../../artifacts/test-results/playwright.json
         run: |
-          npm run lint:check
-          npm run test:unit -- --reporter=json --outputFile=../../../artifacts/test-results/vitest.json
-          npm run test:smoke -- --reporter=json
-          npm run build
+          npx playwright install --with-deps chromium
+          npm run test:smoke
 
-      - name: Upload Web and deployment evidence
-        if: always()
+      - name: Upload selected test evidence
+        if: ${{ always() }}
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: aicopilot-required-web-deployment
-          path: artifacts/
-          if-no-files-found: error
-          retention-days: 1
+          name: aicopilot-ci-${{ env.CI_MODE }}-evidence
+          path: |
+            artifacts/ci-selection.json
+            artifacts/ci-test-results/**
+            artifacts/mutation/**
+            artifacts/quality/**
+          if-no-files-found: warn
+          retention-days: 14
 
-  mutation_gate:
-    name: mutation-gate
+  cross-project:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'cross-project' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 90
+
     steps:
-      - name: Checkout
+      - name: Checkout AICopilot candidate
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 0
+          path: AICopilot
+
+      - name: Checkout Cloud candidate
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: ShuJinHao/IIoT.CloudPlatform
+          ref: ${{ inputs.cloud_ref }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: IIoT.CloudPlatform
 
       - name: Setup .NET
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
-          dotnet-version: "10.0.301"
+          global-json-file: IIoT.CloudPlatform/global.json
 
-      - name: Verify .NET SDK
-        run: test "$(dotnet --version)" = "10.0.301"
+      - name: Require container runtime
+        run: docker info
 
-      - name: Enforce AI-SEC-011/012 mutation quality against event quality base
+      - name: Select and restore Cloud/AICopilot workspace runner
         shell: pwsh
-        run: ./scripts/tests/Invoke-AICopilotMutation.ps1 -BaseRef "$env:QUALITY_BASE_SHA"
-
-      - name: Upload mutation evidence
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: aicopilot-mutation-report
-          path: |
-            artifacts/mutation/**
-            artifacts/quality/aicopilot-mutation.json
-          if-no-files-found: error
-
-  build-test:
-    needs: [governance_gates, dotnet_tests, web_deployment_tests, mutation_gate]
-    if: ${{ always() }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-
-    steps:
-      - name: Verify required lane conclusions
-        shell: pwsh
-        env:
-          GOVERNANCE_RESULT: ${{ needs.governance_gates.result }}
-          DOTNET_RESULT: ${{ needs.dotnet_tests.result }}
-          WEB_DEPLOYMENT_RESULT: ${{ needs.web_deployment_tests.result }}
-          MUTATION_RESULT: ${{ needs.mutation_gate.result }}
+        working-directory: IIoT.CloudPlatform
         run: |
-          $results = [ordered]@{
-            governance = $env:GOVERNANCE_RESULT
-            dotnet = $env:DOTNET_RESULT
-            webDeployment = $env:WEB_DEPLOYMENT_RESULT
-            mutation = $env:MUTATION_RESULT
+          ./scripts/tests/Select-CloudCiTests.ps1 `
+            -Mode CrossProject `
+            -ChangedFiles @() `
+            -OutputPath artifacts/ci-selection.json `
+            -GitHubOutputPath ''
+          $selection = Get-Content artifacts/ci-selection.json -Raw | ConvertFrom-Json
+          foreach ($project in @($selection.selectedDotNetProjects)) {
+            & dotnet restore $project.path --disable-build-servers --nologo -noAutoResponse
+            if ($LASTEXITCODE -ne 0) {
+              throw "Restore failed for cross-project runner: $($project.path)"
+            }
           }
-          $failures = @($results.GetEnumerator() | Where-Object { $_.Value -ne 'success' })
-          if ($failures.Count -ne 0) {
-            $summary = ($failures | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join '; '
-            throw "Required CI lane failure: $summary"
-          }
 
-      - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-
-      - name: Download required lane evidence
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          pattern: aicopilot-required-*
-          path: artifacts
-          merge-multiple: true
-
-      - name: Download mutation evidence
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: aicopilot-mutation-report
-          path: artifacts
-
-      - name: Reconcile required test results
+      - name: Run Cloud/AICopilot workspace alignment
         shell: pwsh
-        run: ./scripts/tests/Confirm-AICopilotRequiredTestResults.ps1 -InventoryPath artifacts/test-inventory.json -ResultsDirectory artifacts/test-results -VitestPath artifacts/test-results/vitest.json -PlaywrightPath artifacts/test-results/playwright.json -DeploymentPath artifacts/test-results/deployment-behavior.log -ExpectedVitestCount 168 -ExpectedPlaywrightCount 43 -ExpectedDeploymentCount 33
+        working-directory: IIoT.CloudPlatform
+        env:
+          AICOPILOT_REPOSITORY_ROOT: ${{ github.workspace }}/AICopilot
+        run: ./scripts/tests/Invoke-CloudCiSelectedTests.ps1 -SelectionPath artifacts/ci-selection.json -ResultsDirectory artifacts/ci-test-results -Configuration Release
 
-      - name: Upload required test evidence
-        if: always()
+      - name: Upload cross-project evidence
+        if: ${{ always() }}
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: aicopilot-required-test-results
-          path: artifacts/
+          name: aicopilot-cloud-cross-project-evidence
+          path: |
+            IIoT.CloudPlatform/artifacts/ci-selection.json
+            IIoT.CloudPlatform/artifacts/ci-test-results/**
           if-no-files-found: warn
+          retention-days: 14

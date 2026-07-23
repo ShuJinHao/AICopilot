@@ -7,9 +7,7 @@
     <IsTestProject>true</IsTestProject>
     <AICopilotTestKind>Aggregate</AICopilotTestKind>
     <AICopilotTestRuntime>Pure</AICopilotTestRuntime>
-    <AICopilotTestCadence>PR</AICopilotTestCadence>
     <AICopilotTestOwner>DomainModel</AICopilotTestOwner>
-    <AICopilotRequired>true</AICopilotRequired>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\core\AICopilot.Core.AiGateway\AICopilot.Core.AiGateway.csproj" />

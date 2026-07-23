@@ -112,11 +112,12 @@ public sealed class FreshDatabaseSeedTests
             .ToDictionary(tool => tool.ToolCode, tool => tool.TargetName, StringComparer.OrdinalIgnoreCase);
         tools.Should().OnlyContain(tool => tool.TargetName == toolTargets[tool.ToolCode]);
 
-        var cloudReadonlyTool = tools.Single(tool => tool.ToolCode == "query_cloud_data_readonly");
-        cloudReadonlyTool.ProviderType.Should().Be(ToolProviderType.CloudReadonly);
-        cloudReadonlyTool.IsEnabled.Should().BeFalse();
-        cloudReadonlyTool.RequiresApproval.Should().BeTrue();
-        cloudReadonlyTool.RiskLevel.Should().Be(AiToolRiskLevel.High);
+        var businessReadonlyTool = tools.Single(
+            tool => tool.ToolCode == "query_business_database_readonly");
+        businessReadonlyTool.ProviderType.Should().Be(ToolProviderType.BuiltIn);
+        businessReadonlyTool.IsEnabled.Should().BeTrue();
+        businessReadonlyTool.RequiresApproval.Should().BeTrue();
+        businessReadonlyTool.RiskLevel.Should().Be(AiToolRiskLevel.High);
 
         tools.Where(tool => tool.ToolCode is "generate_pdf" or "generate_pptx" or "generate_xlsx" or "finalize_artifacts")
             .Should()

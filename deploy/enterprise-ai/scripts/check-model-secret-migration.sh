@@ -36,6 +36,18 @@ read_env_value() {
     index($0, prefix) == 1 {
       value = substr($0, length(prefix) + 1)
       sub(/\r$/, "", value)
+      if (length(value) >= 2 &&
+          substr(value, 1, 1) == "\"" &&
+          substr(value, length(value), 1) == "\"") {
+        value = substr(value, 2, length(value) - 2)
+        gsub(/\$\$/, "$", value)
+        gsub(/\\"/, sprintf("%c", 34), value)
+        gsub(/\\\\/, sprintf("%c", 92), value)
+      } else if (length(value) >= 2 &&
+                 substr(value, 1, 1) == "\047" &&
+                 substr(value, length(value), 1) == "\047") {
+        value = substr(value, 2, length(value) - 2)
+      }
       print value
       exit
     }

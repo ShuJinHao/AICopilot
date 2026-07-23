@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using AICopilot.Services.Contracts;
 using SqlParser;
 using SqlParser.Ast;
 using SqlParser.Dialects;
@@ -7,14 +8,30 @@ namespace AICopilot.Services.CrossCutting.Sql;
 
 public static partial class SqlAllowlistColumnInspector
 {
+    private static readonly IReadOnlySet<string> AllowedBusinessQueryFunctions =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "AVG",
+            "COALESCE",
+            "COUNT",
+            "DATE_PART",
+            "DATE_TRUNC",
+            "MAX",
+            "MIN",
+            "NULLIF",
+            "ROUND",
+            "SUM"
+        };
+
     private static readonly IReadOnlyDictionary<string, SourceBinding> EmptySources =
         new Dictionary<string, SourceBinding>(StringComparer.OrdinalIgnoreCase);
 
     private static readonly IReadOnlySet<string> EmptyAliases =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-    public static string? ValidatePostgreSqlSelectColumns(
+    public static string? ValidateSelectColumns(
         string sql,
+        DatabaseProviderType provider,
         IReadOnlySet<string> allowedTables,
         IReadOnlyDictionary<string, IReadOnlySet<string>> allowedColumns)
     {
@@ -23,7 +40,7 @@ public static partial class SqlAllowlistColumnInspector
         {
             statements = new SqlQueryParser().Parse(
                 ParameterPlaceholderRegex().Replace(sql, "NULL"),
-                new PostgreSqlDialect());
+                CreateDialect(provider));
         }
         catch (Exception)
         {
@@ -46,6 +63,17 @@ public static partial class SqlAllowlistColumnInspector
             allowedTables,
             allowedColumns,
             out _);
+    }
+
+    private static Dialect CreateDialect(DatabaseProviderType provider)
+    {
+        return provider switch
+        {
+            DatabaseProviderType.PostgreSql => new PostgreSqlDialect(),
+            DatabaseProviderType.SqlServer => new MsSqlDialect(),
+            DatabaseProviderType.MySql => new MySqlDialect(),
+            _ => new GenericDialect()
+        };
     }
 
     private static string? ValidateQuery(
@@ -521,6 +549,14 @@ public static partial class SqlAllowlistColumnInspector
         IReadOnlySet<string> allowedTables,
         IReadOnlyDictionary<string, IReadOnlySet<string>> allowedColumns)
     {
+        var functionName = function.Name.Values.LastOrDefault()?.Value;
+        if (string.IsNullOrWhiteSpace(functionName) ||
+            function.Name.Values.Count != 1 ||
+            !AllowedBusinessQueryFunctions.Contains(functionName))
+        {
+            return "Function is not allowed for governed business query execution.";
+        }
+
         foreach (var arguments in EnumerateNullable(function.Args, function.Parameters))
         {
             var argumentError = ValidateFunctionArguments(arguments, scope, allowedTables, allowedColumns);
@@ -804,7 +840,7 @@ public static partial class SqlAllowlistColumnInspector
         {
             return outerScope is null
                 ? sources.Values
-                : sources.Values.Concat(outerScope.ResolveSources());
+                : sources.Values.Concat(outerScope.ResolveSources()).Distinct();
         }
     }
 

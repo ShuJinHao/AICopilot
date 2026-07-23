@@ -9,7 +9,8 @@ public sealed class BusinessDatabaseAuthorizationReadService(
     IReadRepository<BusinessDatabase> databaseRepository,
     IReadRepository<DataSourcePermissionGrant> grantRepository,
     IIdentityAccessService identityAccessService,
-    IExternalIdentityBindingStore externalIdentityBindingStore)
+    IExternalIdentityBindingStore externalIdentityBindingStore,
+    IBusinessDataSourceProfileRegistry profileRegistry)
     : IBusinessDatabaseAuthorizationReadService
 {
     public async Task<IReadOnlyList<BusinessDatabaseDescriptor>> ListSelectableForUserAsync(
@@ -53,7 +54,10 @@ public sealed class BusinessDatabaseAuthorizationReadService(
         }
 
         return authorized
-            .Where(database => BusinessDataSourceGovernancePolicy.IsSelectableForMode(database, selectionMode))
+            .Where(database => BusinessDataSourceGovernancePolicy.IsSelectableForMode(
+                database,
+                selectionMode,
+                profileRegistry))
             .Select(BusinessDatabaseContractMapper.ToDescriptor)
             .ToArray();
     }

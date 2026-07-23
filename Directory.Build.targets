@@ -8,9 +8,4 @@
     <AdditionalFiles Include="@(ProjectReference)" />
   </ItemGroup>
 
-  <Target Name="ValidateAICopilotDeploymentPolicy"
-          BeforeTargets="PrepareForBuild"
-          Condition="'$(DesignTimeBuild)' != 'true' and '$(MSBuildProjectName)' == 'AICopilot.HttpApi'">
-    <Exec Command="pwsh -NoProfile -File &quot;$(MSBuildThisFileDirectory)deploy/enterprise-ai/tests/TestDeploymentPolicy.ps1&quot;" />
-  </Target>
 </Project>

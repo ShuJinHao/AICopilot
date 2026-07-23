@@ -37,20 +37,3 @@ public sealed record BusinessQuerySafetySchema(
     IReadOnlySet<string>? AllowedColumnFragments = null,
     IReadOnlySet<string>? SensitiveColumnFragments = null,
     IReadOnlyDictionary<string, IReadOnlySet<string>>? AllowedColumns = null);
-
-internal static class CloudReadOnlyBusinessQuerySchema
-{
-    public static readonly IReadOnlySet<string> AllowedTables = CloudReadOnlyGovernedSchema.AllowedTables;
-
-    public static readonly IReadOnlyList<string> BlockedFieldFragments = CloudReadOnlyGovernedSchema.BlockedFieldFragments;
-
-    public static readonly BusinessQuerySafetySchema SafetySchema =
-        new(
-            AllowedTables,
-            BlockedFieldFragments.ToHashSet(StringComparer.OrdinalIgnoreCase),
-            AllowedColumnFragments: CloudReadOnlyGovernedSchema.AllowedColumns.Values
-                .SelectMany(columns => columns)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase),
-            SensitiveColumnFragments: BlockedFieldFragments.ToHashSet(StringComparer.OrdinalIgnoreCase),
-            AllowedColumns: CloudReadOnlyGovernedSchema.AllowedColumns);
-}

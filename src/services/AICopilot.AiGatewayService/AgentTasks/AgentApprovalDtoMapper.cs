@@ -38,7 +38,6 @@ internal static class AgentApprovalDtoMapper
     {
         return toolCode switch
         {
-            "query_cloud_data_readonly" => AgentTaskRiskLevel.Medium.ToString(),
             "generate_pdf" or "generate_pptx" or "generate_xlsx" or "finalize_artifacts" => AgentTaskRiskLevel.High.ToString(),
             _ => AgentTaskRiskLevel.Low.ToString()
         };

@@ -7,37 +7,42 @@ internal static class BusinessDataSourceGovernancePolicy
 {
     public static bool IsSelectableForMode(
         BusinessDatabase database,
-        DataSourceSelectionMode selectionMode)
+        DataSourceSelectionMode selectionMode,
+        IBusinessDataSourceProfileRegistry profileRegistry)
     {
         if (!database.IsEnabled || !database.IsReadOnly)
         {
             return false;
         }
 
+        var hasGovernedProfile = HasExecutableGovernedSchema(database, profileRegistry);
         return selectionMode switch
         {
-            DataSourceSelectionMode.Agent => database.IsSelectableInAgent &&
-                                             (database.ExternalSystemType == BusinessDataExternalSystemType.SimulationBusiness ||
-                                              database.ExternalSystemType == BusinessDataExternalSystemType.CloudReadOnly &&
-                                              HasExecutableGovernedSchema(database)),
-            DataSourceSelectionMode.Chat => database.IsSelectableInChat,
-            DataSourceSelectionMode.TextToSql => database.IsSelectableInChat &&
-                                                 database.ExternalSystemType == BusinessDataExternalSystemType.SimulationBusiness,
-            DataSourceSelectionMode.GovernedSql => true,
-            DataSourceSelectionMode.Query => true,
+            DataSourceSelectionMode.Agent => database.IsSelectableInAgent && hasGovernedProfile,
+            DataSourceSelectionMode.Chat => false,
+            DataSourceSelectionMode.TextToSql =>
+                database.IsSelectableInChat &&
+                database.ExternalSystemType == BusinessDataExternalSystemType.SimulationBusiness &&
+                hasGovernedProfile,
+            DataSourceSelectionMode.GovernedSql => hasGovernedProfile,
+            DataSourceSelectionMode.Query => hasGovernedProfile,
             _ => false
         };
     }
 
-    public static bool HasExecutableGovernedSchema(BusinessDatabase database)
+    public static bool HasExecutableGovernedSchema(
+        BusinessDatabase database,
+        IBusinessDataSourceProfileRegistry profileRegistry)
     {
         return database.IsEnabled &&
                database.IsReadOnly &&
-               ResolveSafetySchema(database) is not null &&
-               ValidateReadOnlyCredential(database) is null;
+               ResolveSafetySchema(database, profileRegistry) is not null &&
+               ValidateReadOnlyCredential(database, profileRegistry) is null;
     }
 
-    public static string ResolveGovernanceStatus(BusinessDatabase database)
+    public static string ResolveGovernanceStatus(
+        BusinessDatabase database,
+        IBusinessDataSourceProfileRegistry profileRegistry)
     {
         if (!database.IsEnabled)
         {
@@ -49,41 +54,70 @@ internal static class BusinessDataSourceGovernancePolicy
             return "BlockedNotReadOnly";
         }
 
-        var credentialError = ValidateReadOnlyCredential(database);
+        var credentialError = ValidateReadOnlyCredential(database, profileRegistry);
         if (credentialError is not null)
         {
             return "BlockedUnverifiedReadOnlyCredential";
         }
 
-        return ResolveSafetySchema(database) is null
+        return ResolveSafetySchema(database, profileRegistry) is null
             ? "BlockedUntilGovernedSchema"
             : "GovernedSchemaReady";
     }
 
-    public static BusinessQuerySafetySchema? ResolveSafetySchema(BusinessDatabase database)
+    public static BusinessQuerySafetySchema? ResolveSafetySchema(
+        BusinessDatabase database,
+        IBusinessDataSourceProfileRegistry profileRegistry)
     {
-        return database.ExternalSystemType switch
+        var sourceType = BusinessDatabaseContractMapper.ToContractExternalSystemType(
+            database.ExternalSystemType);
+        var sourceKey = ResolveProfileKey(database);
+        if (!profileRegistry.TryGet(sourceKey, sourceType, out var profile))
         {
-            BusinessDataExternalSystemType.SimulationBusiness => SimulationBusinessQuerySchema.SafetySchema,
-            BusinessDataExternalSystemType.CloudReadOnly => CloudReadOnlyBusinessQuerySchema.SafetySchema,
-            _ => null
-        };
+            return null;
+        }
+
+        return new BusinessQuerySafetySchema(
+            profile.QuerySecurity.AllowedTables,
+            profile.QuerySecurity.BlockedIdentifierFragments,
+            AllowedColumnFragments: profile.QuerySecurity.AllowedColumns.Values
+                .SelectMany(columns => columns)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase),
+            SensitiveColumnFragments: profile.QuerySecurity.BlockedIdentifierFragments,
+            AllowedColumns: profile.QuerySecurity.AllowedColumns.Count == 0
+                ? null
+                : profile.QuerySecurity.AllowedColumns);
     }
 
-    public static string? ValidateReadOnlyCredential(BusinessDatabase database)
+    public static string ResolveProfileKey(BusinessDatabase database)
+    {
+        return BusinessDataSourceProfileKeyResolver.Resolve(
+            database.Name,
+            BusinessDatabaseContractMapper.ToContractExternalSystemType(
+                database.ExternalSystemType));
+    }
+
+    public static string? ValidateReadOnlyCredential(
+        BusinessDatabase database,
+        IBusinessDataSourceProfileRegistry profileRegistry)
     {
         if (!database.IsEnabled)
         {
             return null;
         }
 
-        if (database.ExternalSystemType == BusinessDataExternalSystemType.CloudReadOnly &&
+        var sourceType = BusinessDatabaseContractMapper.ToContractExternalSystemType(
+            database.ExternalSystemType);
+        var sourceKey = ResolveProfileKey(database);
+        if (profileRegistry.TryGet(sourceKey, sourceType, out var profile) &&
+            profile.IsRealExternalSource &&
             !database.ReadOnlyCredentialVerified)
         {
-            return "Cloud read-only data source requires a verified readonly credential before execution.";
+            return "Real external data source requires a verified readonly credential before execution.";
         }
 
-        if (database.Provider != DbProviderType.PostgreSql && !database.ReadOnlyCredentialVerified)
+        if (database.Provider != DbProviderType.PostgreSql &&
+            !database.ReadOnlyCredentialVerified)
         {
             return "SQL Server/MySQL data source requires a verified readonly credential before execution.";
         }

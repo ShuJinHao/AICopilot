@@ -71,7 +71,7 @@ internal static class BusinessQueryResultMapper
         IReadOnlyList<Dictionary<string, object?>> rows,
         BusinessQuerySafetySchema safetySchema)
     {
-        var blockedFragments = BusinessReadonlyQuerySafetyPolicy.AllSensitiveFragments(safetySchema);
+        var blockedFragments = BusinessQuerySensitiveFieldCatalog.GetAll(safetySchema);
         var redactedColumnHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var redactedValueCount = 0;
         var columnMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

@@ -4,15 +4,11 @@
 
 ## 0. 改动收口门禁
 
-- 修改 `AICopilot` 代码前，必须先读工作区 `AGENTS.md`、`../../docs/总规则.md`、项目 `AGENTS.md`、本文档、相关专题契约、相关源码、相关测试和近期 git/GitHub 历史。
-- 已验收功能默认冻结；不能因为局部重构、测试修复、文档整理或 UI 调整顺手改变已有 AI 工作流、Cloud 只读边界、审批边界、工具边界、会话状态或错误契约。
-- 每次代码改动完成前，必须更新项目滚动复盘文档 `../docs/改动复盘与规则沉淀.md`，最新记录放在最前。
-- 每次复盘必须写明改动范围、改动原因、影响面、验证命令、验证结果和规则提炼结论。
-- 必须判断是否形成长期规则；有则写入项目 `AGENTS.md`、本文档、专题契约或工作区长期规则，无则在复盘中写明“无新增长期规则”及原因。
+- 工作区 `../../docs/总规则.md` 是唯一默认必读入口。进入 AICopilot 实际修改后，只读取本文档与本批模块相关的章节、相关源码和受影响测试；专题契约按边界触发，近期 git/GitHub 历史按回归或故障追溯条件读取。
+- 只有形成长期规则、修复历史回归、处理生产事故或改变部署机制时，才更新 `../docs/改动复盘与规则沉淀.md`；普通业务修改和测试同批调整不写流水。
+- 形成长期约束时直接写入本文档、专题契约或工作区总规则；项目 `AGENTS.md` 只保留按需路由和少量不可缺失的项目硬边界，不作为第二份详细规则库。
 - 新增、删除或重命名后端错误码时，必须同批更新 `docs/frontend-integration-contract-package-2026-05-17.md`，并运行 `ErrorCodeCatalogTests`，确保前端错误契约不漂移。
-- 大范围架构、管道、权限、工作流或契约改动不得只以 filtered tests 作为完成依据；`Get-AICopilotTestInventory.ps1` 发现的全部 required 物理 runner 未执行/未完成发现数与执行数对账、CI 全量未确认或环境依赖失败时，最终回复和复盘必须明确标注。
-- 最终回复必须列出复盘文档、规则沉淀位置和验证命令；缺任一项，不得称为完成。
-- 默认只更新项目滚动复盘文档，不为每个任务新增单独流水文档；只有形成可长期复用的业务或技术契约，才新增专题文档。
+- 默认只运行 Architecture/Security 与 owner 映射选出的受影响 Business；全量、coverage、mutation、duplication 和 CrossProject 只在用户明确要求时运行。
 - `资料/` 保留为 AICopilot 业务规则入口；执行复盘和改动沉淀流水统一放在项目 `docs/`。
 
 ## 1. 核心职责
@@ -28,6 +24,8 @@
 - Human-in-the-loop：控制 AICopilot 自身高风险动作。
 
 `AICopilot` 不是 Cloud 制造主数据系统，不是 Edge 现场运行系统。
+
+模型、prompt、plugin、MCP server、approval threshold 等运行行为优先使用配置或明确存储数据，不得隐藏在业务代码常量中。
 
 ## 2. Cloud 只读边界
 
@@ -62,7 +60,7 @@ Cloud AiRead 设备契约：
 - `deviceCode`/`ClientCode` 只用于设备查询、展示或 bootstrap 寻址，不得作为 `deviceId` 发送。
 - `Analysis.Device.List/Detail` 只表达 `/api/v1/ai/read/devices` 的设备主数据；`Analysis.Device.Status` 只读取 `/api/v1/ai/read/device-client-states` 的 Cloud 权威 `softwareStatus`、运行心跳原值和唯一 freshness 时间。无心跳设备返回 `MissingRuntimeHeartbeat` 行；只有超过 24 小时才是 `RuntimeHeartbeatStale`，恰好 24 小时不 stale，Stale 不得冒充 Offline/Stopped；空集只表示授权范围内无匹配设备。
 - `Analysis.Process.List/Detail` 只读取 `/api/v1/ai/read/processes`；支持 `processId` 精确过滤及 `keyword/processCode/processName` 搜索，详情必须唯一精确命中且搜索结果未截断，`processId` 必须作为正式 GUID 参数发送、不得塞入 keyword，不得回退其它数据源。
-- `Analysis.ClientRelease.List` 只读取 `/api/v1/ai/read/client-releases`，只允许 `channel/targetRuntime/status/includeArchived`；版本、hash、下载地址、发布说明和发布状态只能来自 Cloud 返回，不得生成或补齐，不得回退 Direct DB、Text-to-SQL 或 Simulation。
+- `Analysis.ClientRelease.List` 的 Cloud business plugin 只读取 `/api/v1/ai/read/client-releases`，只允许 `channel/targetRuntime/status/includeArchived`；版本、hash、下载地址、发布说明和发布状态只能来自 Cloud 返回，不得生成或补齐。`Empty`、`NeedClarification`、`Unauthorized` 不 fallback；只有该插件返回 `Unsupported` 或同源 `Unavailable` 时，才允许按统一规则尝试同源 Text-to-SQL，绝不切换来源或进入 Simulation。
 - AICopilot 的 Cloud AiRead 客户端和 endpoint allowlist 必须逐项覆盖 Cloud `AI只读接口契约.md` 已批准的正式 `GET /api/v1/ai/read/*` 表面；高频 DeviceLog/Capacity/ProductionData 接通不等于全量接口对齐。
 - Cloud AiRead 客户端只保留八个正式 typed GET，不得暴露任意 method/path 传输、可配置 POST allowlist、legacy adapter 或双轨接口；非 GET 必须在发送 HTTP 请求前拒绝。
 - `production-records` 当前正式提供 `typeKey/typeName/deviceId/deviceName` 等字段，不提供 `processName/stationName/deviceCode`；缺失字段保持不存在或空，不得用 `typeName`、`typeKey` 或其他显示字段代填、推断工序、工位或设备编码。
@@ -86,18 +84,19 @@ Cloud AiRead 设备契约：
 ## 5. DataAnalysis 规则
 
 - DataAnalysis 只能连接只读业务数据源。
-- SQL 必须经过只读 guardrail。
+- 当前唯一真实外部业务数据源是 Cloud；MES、ERP 后续只能通过统一 provider/profile registry 扩展。插件只注册 provider、dialect、schema、能力和执行 adapter，不复制 Runner、Guard、RepairLoop 或 Prompt。
+- 每个分析任务首次执行前必须确认数据源、数据类型、设备/业务对象、时间范围和过滤条件；来源不唯一、信息不足或置信度不足时先询问。同一任务后续追问复用已确认 `BusinessQueryContext`。
+- 数据能力统一为 `Device`、`DeviceLog`、`Capacity`、`ProductionRecord`、`Process`、`ClientRelease`，插件必须声明支持范围和结果契约。
+- 插件结果统一为 `Success`、`Empty`、`NeedClarification`、`Unsupported`、`Unavailable`、`Unauthorized`。只有 `Unsupported` 或同一来源的 `Unavailable` 可由模型决定是否尝试同源 Text-to-SQL；`Empty` 是真实空集，`NeedClarification` 继续询问，权限/凭据失败不得绕过，禁止跨源 fallback。
+- SQL 安全唯一 owner 是执行咽喉的共享 AST guard + 已选择 source profile；只允许单条只读查询，拒绝 DML、DDL、管理语句和多语句，表列范围来自 profile，数据库账号保持只读。
 - 查询结果只用于分析展示，不产生业务写入。
 - 不能为了分析便利放宽 `MaxRows`、read-only session 或 SQL 安全检查。
-- 内部开发直连真实 Cloud PostgreSQL 时，只能注册为 DataAnalysis `CloudReadOnly` 只读业务数据源，必须使用已验证只读数据库账号，并绑定白名单表字段和只读 SQL guard。
-- `Device`、`DeviceLog`、`Capacity`、`ProductionData`、`Process`、`ClientRelease` 六类已覆盖正式 `Analysis.*` 语义必须只走 Cloud AiRead 八个 typed GET；成功、空集和任何 provider 错误都不得回退 Direct DB、Text-to-SQL、Simulation、MCP 或隐藏适配器。
-- CloudReadOnly Direct DB / Text-to-SQL 只服务上述正式语义覆盖外的低频自由探索和治理白名单内补充分析；探索型 Text-to-SQL 只能在未覆盖问题或其 Direct DB SQL 失败后受控 fallback，不得执行、拆分、重命名或旁路已覆盖 `Analysis.*` intent。
-- CloudReadOnly Text-to-SQL fallback 必须使用共享白名单 schema、已验证只读凭据、LLM 结构化生成、SELECT-only SQL guard、BusinessQuery safety policy 双层表/列白名单、只读执行、最多受控修复重试和 hash-only 审计；生产 fallback 不得退化为规则 SQL 模板。
+- Cloud 同时配置 typed business plugin 和受控 Text-to-SQL profile。Text-to-SQL 只由上述 `Unsupported`/同源 `Unavailable` 触发；Simulation 必须显式选择，不得暗中接管 Cloud 空集、失败或未确认来源。
 - CloudReadOnly Text-to-SQL LLM prompt 可见的物理 schema 只能来自 `CloudReadOnlyGovernedSchema` 治理白名单，最多包含批准表名、列名、列类型、join hints 和必要业务描述；不得把连接串、凭据、role/权限细节、样例数据、查询结果、参数值、非白名单表字段或系统/敏感字段发给模型。
 - CloudReadOnly Text-to-SQL 修复重试默认最多 3 次、硬上限 5 次；timeout、权限、凭据、非只读、系统表、敏感字段、多语句或写 SQL 默认不可修复、不重试。
 - CloudReadOnly Text-to-SQL 修复历史不得保存完整 SQL、用户 prompt、连接串、参数值或敏感字段；上一轮失败 SQL 只允许在当前调用内以内存参数临时回传给 LLM 生成下一版，不能写入审计、日志、state、结果或持久化对象。
-- Legacy `DataSourceSelectionMode.TextToSql` / Business Text-to-SQL draft runtime 仍只服务 SimulationBusiness；Agent 侧 CloudReadOnly 查询只能走 governed fallback runner，不能复用会生成 SimulationBusiness SQL 的旧 draft runtime。
-- Direct DB 语义映射中的工序名来自只读 `mfg_processes.process_name`；新增 join 表必须同步进入 `CloudReadOnlyGovernedSchema` 表/列/类型/join hint、SQL guard、BusinessQuery safety schema、只读 role 授权 SQL、授权探针、部署 preflight、RealSource 模板、架构测试和部署文档。
+- Prompt 只负责澄清、方言、schema 与结构化输出，不维护写操作动词黑名单；Cloud 专用 runner/policy 不再复制结构只读 guard。
+- Direct DB 语义映射中的工序名来自只读 `mfg_processes.process_name`；新增 join 表必须同步进入 `CloudReadOnlyGovernedSchema` 表/列/类型/join hint、所选 source profile 的 security schema、唯一共享 AST guard、只读 role 授权 SQL、授权探针、部署 preflight、RealSource 模板、架构测试和部署文档。
 - DeviceLog 语义查询必须使用真实 Cloud PostgreSQL 日志级别枚举值 `ERROR`、`WARN`、`INFO`，不能生成 `Error`/`Warn`/`Info` 这类大小写不匹配条件。
 - 用户要求“错误警告”“异常分析”“分析错误信息”等场景时，DeviceLog 必须支持 `ERROR + WARN` 多级别只读查询；不能只查 `ERROR` 后把 `WARN` 推断为没有。
 - DeviceLog 自然语言中的工序/设备范围必须落到只读 `devices` / `mfg_processes` join 暴露的业务字段过滤；不得让最终回答模型按文字自行猜测设备、工序或范围。
@@ -156,7 +155,7 @@ Cloud AiRead 设备契约：
 - Cloud 只读 Agent 当前正式能力覆盖 `Analysis.Device.List/Detail/Status`、`Analysis.DeviceLog.Latest/Range/ByLevel`、`Analysis.Capacity.Range/ByDevice`、`Analysis.ProductionData.Latest/Range/ByDevice`、`Analysis.Process.List/Detail` 和 `Analysis.ClientRelease.List`；`Analysis.Capacity.ByProcess` 尚无正式聚合契约。意图只能在用户确认后进入执行链，且必须复用唯一 Cloud AiRead 语义实现。
 - Tool、MCP、Knowledge、DataSource、Provider 或资源未匹配时，不能阻断 `PlanDraft`；必须记录稳定 capability gap，且草案保持 node-free、不可确认、不可入队。
 - 执行阶段失败后的重试应基于已确认的 `ExecutablePlan` / `AgentTask` 重新入队，不应重新生成 `PlanDraft` 或丢失用户确认。
-- 一个目标包含设备、日志、产能等多个 Cloud 只读意图时，计划和执行必须保留全部已确认意图；每个查询的设备/工序、时间范围、筛选条件和数量上限都必须分别冻结，不能只返回最后一次查询或让 Cloud 失败回退 Simulation、Text-to-SQL、MCP 或其他来源。
+- 一个目标包含设备、日志、产能等多个 Cloud 只读意图时，计划和执行必须保留全部已确认意图；每个查询的对象、时间范围、筛选条件和上限分别冻结。Simulation、MCP 或其他来源永不 fallback；同源 Text-to-SQL 只接受对应插件的 `Unsupported`/`Unavailable` 结构化结果。
 - 多分支执行只能把已授权 Evidence 合流给综合分析 Agent；AI 推断必须明确标为 `LlmInference`，建议必须明确标为 `Recommendation`，不得把 AI 推断、健康评估或建议说成 Cloud 已观测事实或预测模型结果。
 - 同一完成任务生成的回答、图表、Markdown、HTML、PDF、PPTX 和 XLSX 必须绑定同一 `EvidenceSetDigest`，跨格式关键事实不得漂移。
 - 用户只有主动选择“基于此结果追问”时，Chat 才能引用当前会话内该 `Completed` 任务的封存证据；引用是一次性的，不能自动取最近任务、跨会话/跨用户复用或从旧回答文本反推事实。用户改变设备、工序、日志级别或时间范围时必须重新执行新的只读查询。
@@ -169,15 +168,18 @@ Cloud AiRead 设备契约：
 - Cloud OIDC 使用 HTTP issuer 时必须显式启用内网 HTTP OIDC，只允许 loopback、私网 IPv4 或保留内网 DNS 后缀（`.internal.example`、`.internal`、`.lan`、`.local`）；公共 HTTP 域名即使开启内网 HTTP 开关也必须拒绝。
 - 文档、测试和部署 preflight 出现 HTTPS/HSTS/443/certificate 强制项时，必须先改回 HTTP-only 口径，再继续执行其他安全修复。
 - Web 到 HttpApi 的标准生产路径必须是 nginx 同源 `/api/` 反代；HttpApi CORS 默认不开放跨源。确需浏览器直连后端时，只允许配置精确 http/https origin，禁止 `*`、通配子域、带 path/query/fragment 的 origin 或运行时任意放行。
-- 部署模板、文档示例、滚动复盘、历史诊断记录、workflow 默认值、脚本默认值、migration seed 和 fresh DB seed 不得携带真实内网 IP、弱 secret、`CHANGE_ME`、`dummy-key` 或默认 `root@` 发布目标；真实生产值只能放在服务器 `.env`、GitHub secrets、管理员录入或命令行环境变量中。root SSH 只允许显式设置 `ALLOW_ROOT_SSH_DEPLOY=true` 的应急路径，标准发布必须使用专用部署用户。
+- macOS Keychain 是本机生产密钥唯一 canonical 来源；仓库只提交无值 schema。现有非 git 私密手册/旧 env 只允许一次性静默迁移且不删除旧文件，标准部署不得回退读取。服务器只消费由部署生成的受限 `.env`。
+- Cloud readonly 连接、AiRead token、模式开关和 readonly role 不得通过 GitHub secrets 加手动 workflow 写入生产。新环境或清空重建只由工作区 `Deploy-FromZero.ps1` 从 Keychain 建立；明确批准的独立基础设施维护只可调用内部 apply/check 脚本并消费服务器受限 `.env`，不得形成第二套 secret 真值或应用重建入口。
 - 如果当前真实部署根目录、稳定 Runner、Docker Root Dir、基础设施维护目标、工作区入口参数或标准部署用户与模板不同，必须先更新工作区 `deploy/Deploy.ps1`、`deploy/Invoke-WorkspaceDeploy.ps1`、`deploy/profiles/*.json`、项目部署指南/README 和工作区部署总览，再允许继续改脚本或发布。
 - 如果当前 `AICopilot` 与 `Cloud` 共用同一台生产宿主机，必须在工作区总入口明确写出共享宿主机事实、共享标准发布人和两个独立部署根；不得把同机双部署根问题写成两套互不相关的环境。
 - root 应急路径一旦写入 `releases/*`、`current-release.summary.md` 或 deploy support files，关闭任务前必须恢复 owner/mode，并重新验证标准 non-root `./deploy-release.sh --validate-only`；不得留下 root-owned 状态文件后直接收口。
-- 工作区根 `deploy/Deploy-Changed.ps1` 是日常应用唯一入口；正式发布先自动 push 已提交的本地 `main`，再读取生产 SHA，并按 Git 改动和项目依赖闭包只构建、推送 Harbor、部署受影响镜像。影响无法归属禁止退化成全量；后端 HttpApi/DataWorker/RagWorker 自动闭包 migration。`Deploy.ps1` 只作为统一入口内部执行器和显式恢复入口，Runner/Compose/support files/cleanup/GC/深度巡检独立维护。
+- 工作区根 `deploy/Deploy-Changed.ps1` 是日常应用唯一入口；正式发布只接受 clean、已提交的本地 `main`，可 push 现有 HEAD但不得创建提交或修改 tracked 文件。它复用同 SHA 证据，只补受影响 Architecture/Security/DeploymentContract，再按依赖闭包发布受影响镜像；全量、coverage、mutation、duplication 和 CrossProject 不属于部署。失败只停止报告，不修代码。
+- 工作区 `deploy/Deploy-FromZero.ps1` 是三端从零部署唯一入口；AI 阶段只执行 Cloud readonly 凭据/权限、AICopilot migration、真实模型 seed 和健康验证。缺 Keychain 根密钥时远端零写入；不得创建设备、注册 `ClientCode` 或轮换设备 bootstrap secret。
+- `deploy/enterprise-ai/tests/TestDeploymentPolicy.ps1` 只由受影响 selector 归入 `DeploymentContract`；普通项目 build 不得无条件触发部署测试。删除生产状态 inspect、受影响服务集合、migration 闭包或恢复日常全量 fallback 时必须失败。
 - 内网 HTTP Harbor 推送后的不可变镜像解析必须选择唯一 `linux/amd64` manifest digest；`buildx` HTTPS inspection 失败时可使用 `docker manifest inspect --insecure --verbose`，但不得退化为 tag、attestation digest 或跳过 digest-bound request。
 - AICopilot 后端多服务在同一候选内顺序 publish 时，源码 detached worktree 与按 service 隔离的 .NET SDK artifacts 根都必须放在工作区统一 deployment artifacts 根；不得落入 macOS `TMPDIR=/private/var/folders/...`、共享 `bin/obj`、混用 `/private/var` 与 `/var` 路径别名或靠调整服务顺序规避依赖图污染。
 - support release 必须包含 compose、执行 staging/SHA256 校验，并让 support reservation、全局 release lock 和 deploy 使用同一 token/digest；`.env`、release state、锁和备份不得进入同步包。健康前失败必须恢复持久状态；active/stale lock、真实退出码、timeout、信号释放锁和同 SHA 健康幂等必须有行为回归。
-- 正式发布和健康 no-op 必须绑定 workspace plan/profile、固定 Git SHA、显式服务闭包、immutable OCI、全局配置 fingerprint 与实际运行容器身份；配置 fingerprint 漂移只能走全量服务发布，后端服务必须显式包含 migration。Running/Restarting/OOM/RestartCount 和已有 Docker Health 任一不满足时不得提交或 no-op。
+- 正式发布和健康 no-op 必须绑定 workspace plan/profile、固定 Git SHA、显式服务闭包、immutable OCI、全局配置 fingerprint 与实际运行容器身份；配置 fingerprint 漂移时普通部署停止并要求独立配置维护或从零部署，不得自动扩大成全量服务发布。后端服务闭包仍显式包含 migration。
 - support、compose、release state、三项基础设施和全部常驻 runtime 必须一起恢复并验证；基础设施身份以事务前冻结的 RepoDigest/runtime image id 为准，不得用可变 tag 冒充旧运行态。恢复或阻断证据不确定统一返回 `86` 并永久 fail-closed；reservation 原子 transition 与断联对账失败/active/unknown 返回 `87`，禁止自动取消或重试。
 - 模型 smoke 的 `AICOPILOT_MODEL_SMOKE_API_KEY=dummy-key` 只允许作为真实模型网关的显式兼容例外，必须同时设置 `AICOPILOT_MODEL_SMOKE_ALLOW_DUMMY_KEY=true` 或手工 smoke 命令传 `--allow-dummy-key`；默认 preflight 必须拒绝该弱值。
 - HttpApi JWT 配置必须由唯一运行时入口校验：Issuer、Audience 非空，SecretKey 至少 64 字符，AccessTokenExpirationMinutes 大于 0；绕过部署脚本直接启动也必须 fail-fast，错误不得回显 secret，默认有效期保持 30 分钟。
@@ -192,16 +194,17 @@ Cloud AiRead 设备契约：
 ### 8.4 私有模型生产 seed
 
 - fresh DB seed 默认创建禁用的私有 OpenAI-compatible 模型记录，只能使用 `model.internal.example` 占位 URL、空 API key 和 64k context window；仓库、示例 `.env`、测试和长期文档不得写真实模型网关内网地址或真实 key。
-- 生产服务器必须通过真实 `.env` 明确配置 `AICOPILOT_PRIVATE_MODEL_*`：provider、model、base URL、API key、context window、max output、temperature 和 enabled。真实值同步记录在工作区非 git 私密部署手册，不进入仓库。
+- 生产服务器必须通过受限 `.env` 明确配置 `AICOPILOT_PRIVATE_MODEL_*`；本机真实值只从 macOS Keychain 读取，不再以非 git 私密手册作为标准真值。
 - 当前私有模型标准 context window 是 64k，即 `AICOPILOT_PRIVATE_MODEL_CONTEXT_TOKENS=65536`；模型名和 API key 不允许硬编码在运行时代码里。
 - migration worker 播种私有模型时，API key 入库前必须经过 `SecretStringEncryptor` 加密为 `encv2:`；已存在同 provider/model 的记录不强行覆盖现场 base URL、启用状态或运行参数，只做密钥格式修复。
 
 ## 9. 文档入口
 
-- 长期规则入口只保留 `AGENTS.md`、本文档、项目 `docs/改动复盘与规则沉淀.md` 和工作区 `docs/历史核心记录.md`。
-- 当前 AI 安全治理和修复执行入口是 `docs/AI架构治理清单.md`；它不是阶段流水，必须逐项记录编号、严重级、状态、验证命令和外部依赖。
+- 当前规则入口只保留 `AGENTS.md`、本文档和按边界触发的专题契约；项目复盘与工作区历史记录只供命中追溯条件时定向检索，不是规则入口。
+- `docs/AI架构治理清单.md` 是历史治理状态与 Rule ID 索引，不是默认执行入口。只有当前任务命中具体 `AIARCH`/`AI-SEC` 编号、修复历史回归或需要追溯未关闭风险时，才按编号读取对应条目；不得全文加载，也不得把其中的旧候选、旧数量或旧全量验收口径当成当前门禁。
 - 当前长期专题契约包括 `docs/AICopilot安全部署契约.md`、`docs/Cloud只读数据分析契约.md`、`docs/Agent工作流与异常契约.md` 和 `docs/DDD聚合根边界.md`；触碰部署、Cloud 只读、Text-to-SQL、Agent workflow、MCP/Tool、异常、前端错误、聚合/repository 或 DB owner 时必须先读对应契约。
-- 部署入口只保留 `AICopilot 项目部署与维护指南.md` 和 `deploy/enterprise-ai`。
+- 只有修改 `src/vues/AICopilot.Web` 时才读取该目录的 `AGENTS.md`；后端、部署和数据查询任务不得顺带加载前端会话/UI 规则。
+- 部署说明只保留 `AICopilot 项目部署与维护指南.md`；工作区 `../../deploy/Deploy-Changed.ps1` 和 `../../deploy/Deploy-FromZero.ps1` 是操作入口，`deploy/enterprise-ai` 仅是被统一入口调用的 AI 内部实现与支持目录。
 - 阶段计划、批次验收报告、PR 草案和一次性 acceptance 输出不得继续作为执行入口；有效结论必须沉淀到长期规则或部署指南后再清理。
 - 清理文档时必须先检查引用，避免留下指向已删除阶段文件的脚本、测试或说明。
 - 旧的 Simulation/Real/Sandbox/Pilot 阶段说明只可作为历史材料，不得覆盖当前部署指南和生产验收口径。
@@ -209,16 +212,20 @@ Cloud AiRead 设备契约：
 ## 10. 工程边界
 
 - AICopilot DDD 聚合根、投影、队列、审计和运行时记录的长期技术契约见 `../docs/DDD聚合根边界.md`；新增或调整聚合根、仓储注册、EF `DbSet`、Agent runtime timeline/queue/audit 记录时必须同步更新架构测试。
-- 架构 Analyzer/ArchitectureTests 严格保护分层、聚合、owner 和 Cloud 只读边界；领域、Application、Workflow、Contract、Persistence、HTTP、UI 与 Eval 业务测试随功能同批正常增删改移。测试 inventory/baseline 只用于发现漏跑、Skip 和未说明的质量回退，不得成为业务测试变更的额外授权或账本。
-- `AICopilot.Architecture.Analyzers` 是生产编译的架构 owner；`AIARCH001`–`AIARCH007` 必须保持 `Error + IsEnabledByDefault + NotConfigurable`，CompilationEnd 规则同时保留 `CompilationEnd` tag，由独立 required `AICopilot.Architecture.AnalyzerTests` 同时保有语义夹具和真实临时 csproj 正/反编译及 suppression 夹具。inventory 必须拒绝 `NoWarn`、`.editorconfig/.globalconfig` severity、`#pragma warning disable`、`SuppressMessage/UnconditionalSuppressMessage`和 Analyzer 关闭。Analyzer 属性和例外必须按完全限定 symbol identity 识别；`AIARCH004` 必须证明减员在 transaction delegate 内且 invariant guard 先于变更，inline/stored 与 field/property 中的 lambda/method-group 都必须在 CompilationEnd 形成 edge-aware caller→delegate 语义边，synthetic transaction edge 不能掩护同一 target 的真实直接调用；public/internal/private/protected 中没有源码 incoming edge 的真实宿主入口均须检查，不能靠可见性降级绕过。`AIARCH006` 必须对所有源码方法先按该方法自身的直接调用/构造/泛型解析、签名/字段/ctor 正式 client 或正式 workflow symbol 判定 Cloud root，命中后才检查完整 reachable graph；本地 DI factory、private helper 返回、object creation、field/property delegate 和 Cloud root 内的 interface dispatch 都不能绕过。Repository、command、Dapper 和 MCP 写边只接受专题契约列出的完全限定 symbol；同名伪 repository/command/`SqlMapper`/MCP executor、Generic orchestrator、仅计划/DTO 类型或方法名均不得扩大入口或写边。规则例外只能是专题契约中记录的完全限定类型/项目，禁止 `NoWarn`、降级 warning、optional gate 或恢复同义字符串/Regex 影子路径。
+- 生产分层固定为：`src/core` 领域核心，`src/services` 命令、查询、workflow 与应用编排，`src/infrastructure` EF/Dapper/embedding/event bus/provider/MCP 技术实现，`src/hosts` 只做组合根和启动 wiring，`src/shared` 只放真正共享抽象，`src/vues` 只放前端逻辑；不得跨层回填实现。
+- HTTP Controller 必须默认授权，或对确需公开的 action 显式声明匿名。MediatR 普通与 stream 横切行为只允许由 `AddAICopilotMediatRPipeline` 统一注册，顺序固定为 Telemetry → Validation → Authorization；service 模块不得复制注册。stream 授权必须在进入 handler 前完成并逐项透传，禁止预读或缓冲；telemetry 只记录类型、阶段、耗时、结果和异常类型，不得记录 prompt、SQL、token、连接串、API key 或业务明细。
+- `ProblemDetails.extensions` 的 `code`、`traceId` 是大小写不敏感的保留键；复制 descriptor extensions 时必须丢弃全部大小写变体，再分别以 descriptor code 和当前请求 trace 写入唯一 canonical 小写键，禁止调用方覆盖或制造歧义键。
+- 架构 Analyzer/ArchitectureTests 严格保护分层、聚合、owner 和 Cloud 只读边界；领域、Application、Workflow、Contract、Persistence、HTTP、UI 与 Eval 业务测试随功能同批正常增删改移。测试清单只描述当前提交实际发现和执行的结果，不提交固定 case 数、required runner roster 或业务覆盖率 baseline，也不得成为业务测试变更的额外授权或账本。
+- `AICopilot.Architecture.Analyzers` 是生产编译的架构 owner；`AIARCH001`–`AIARCH007` 必须保持 `Error + IsEnabledByDefault + NotConfigurable`，CompilationEnd 规则同时保留 `CompilationEnd` tag，由独立 `AICopilot.Architecture.AnalyzerTests` 同时保有语义夹具和真实临时 csproj 正/反编译及 suppression 夹具。Analyzer/Architecture 夹具必须拒绝 `NoWarn`、`.editorconfig/.globalconfig` severity、`#pragma warning disable`、`SuppressMessage/UnconditionalSuppressMessage`和 Analyzer 关闭。Analyzer 属性和例外必须按完全限定 symbol identity 识别；`AIARCH004` 必须证明减员在 transaction delegate 内且 invariant guard 先于变更，inline/stored 与 field/property 中的 lambda/method-group 都必须在 CompilationEnd 形成 edge-aware caller→delegate 语义边，synthetic transaction edge 不能掩护同一 target 的真实直接调用；public/internal/private/protected 中没有源码 incoming edge 的真实宿主入口均须检查，不能靠可见性降级绕过。`AIARCH006` 必须对所有源码方法先按该方法自身的直接调用/构造/泛型解析、签名/字段/ctor 正式 client 或正式 workflow symbol 判定 Cloud root，命中后才检查完整 reachable graph；本地 DI factory、private helper 返回、object creation、field/property delegate 和 Cloud root 内的 interface dispatch 都不能绕过。Repository、command、Dapper 和 MCP 写边只接受专题契约列出的完全限定 symbol；同名伪 repository/command/`SqlMapper`/MCP executor、Generic orchestrator、仅计划/DTO 类型或方法名均不得扩大入口或写边。规则例外只能是专题契约中记录的完全限定类型/项目，禁止 `NoWarn`、降级 warning、optional gate 或恢复同义字符串/Regex 影子路径。
 - 跨项目 Analyzer 调用图必须由源生成器输出版本化、定长上限、精确 `producer assembly + contract assembly + documentation method id` 摘要；消费方必须校验数量、producer 身份和全量内容一致。object creation 的 delegate 实参必须按构造参数 symbol 绑定，普通 invocation 的 delegate 实参按调用参数绑定；隐式 optional delegate 默认值不得伪造未知 callback，真实无法解析的 delegate 仍须 fail-closed。正式 `IAuditLogWriter` 只允许按完全限定 contract identity 截断 AICopilot 审计边；正式 `IModelQuotaReservationStore` 只允许 `TryReserveAsync`、`SettleAsync`、`ReclaimExpiredAsync` 三个契约方法截断 AICopilot 模型配额边，且唯一生产实现必须是 `PostgresModelQuotaReservationStore`，只能经 `AgentExecutionTransactionRunner` 写唯一 `AiGatewayDbContext`。同名接口、其他实现、其他 DbContext、adapter/wrapper 或实现类额外写方法均不得获得例外；两类例外都不得写 Cloud 业务数据。
 - `AIARCH001` 必须对当前真实的 `AICopilot.*` 生产项目使用显式分类；任何未分类生产项目无论出现在引用源或目标都必须 fail-closed。
 - Aggregate runner 只能是 Pure 且只直接依赖 core/shared；Application runner 只能是 Pure 且不得直接依赖 host、EF/Dapper、Aspire/Persistence fixture；文件持久化测试必须进入 `PersistenceFilesystemTests`。五个 TestKit 不得依赖 test SDK、xUnit/NUnit/MSTest 或断言 package，生命周期适配和断言 helper 留在 runner。
 - Runner/TestKit 依赖边界只认指定 Configuration 下 MSBuild evaluated `ProjectReference` / `PackageReference` 图，必须包含隐式 `Directory.Build.*`、递归 import、生效复合条件、逐 TargetFramework item 和 TestKit 传递闭包；raw XML 扫描不能作为证据，评估异常或缺失规范化 identity 必须 fail-closed。Direct kind boundary、Pure closure、TestKit consumers 和 production→TestKit 禁令必须复用同一图。
-- Required coverage 必须绑定 clean committed HEAD 的完整生产源码、程序集和 portable PDB universe；每个 required runner 恰好一份 TRX、至少一份由其唯一绑定的 XPlat 物理副本。VSTest deployment/collector 多副本只有 SHA256 完全相同才可归一为一份逻辑报告，内容不同或同一 digest 跨 runner 复用必须 fail-closed；逻辑报告合并后必须观察全部生产程序集和全部含 sequence point 的生产源码。Cobertura 的 source root 与 filename 只能解析为仓内唯一精确生产路径；外部伪生产路径、多根歧义、dirty tree、HEAD/hash 不一致、逻辑报告缺失/新增或新增源码未被任何 required runner 加载必须失败。inventory 之后的真实临时 csproj Analyzer 夹具只能通过 `<Analyzer Include>` 消费已绑定的 Release DLL，不得用 `ProjectReference` 重建生产 Analyzer，并必须锁定执行前后 DLL/PDB 指纹不变。子进程宿主需要 testhost 覆盖时，必须让真实 `Program` 与测试调用同一生产组合入口并验证实际 DI/行为，禁止空反射、无语义 type touch 或专用 coverage wrapper；baseline 只能在完整 universe 已观察且指标不回退后更新。
-- Required 质量门禁只能使用事件固定的一个比较基点：PR 使用 base SHA，main push 使用 before SHA；不得提供 `workflow_dispatch`、手工 snapshot、输入参数、环境变量或第二脚本入口选择质量基点。比较 commit 为空、全零、无法解析、等于 candidate HEAD 或非祖先都必须失败。base 已有同类 baseline 时执行 no-regression ratchet；base 尚无 baseline 时只允许首次 bootstrap，candidate baseline 必须与当前实测精确一致。该比较基点只用于质量回归对账，不是代码授权、review、waiver 或 trust root。
+- 测试 runner 必须以项目元数据声明 kind/runtime/owner 并进入 `AICopilot.slnx`；不得用 Phase/Batch/Suite filter 代替物理 owner。默认 lane 只对 selector 选中的 runner 生成 TRX，并要求 `discovered = executed = passed`、`failed = 0`、`skipped = 0`，不保存历史 case 总数。
+- compatibility 项跨多个公开 legacy surface 时必须登记完整精确符号并集；同一 caller 命中多个 surface 时按可解析的 distinct caller member 去重，任一 surface 新增 caller 都命中同一既有上限。MCP TestKit executable 与 in-process server 暴露同一 canonical tool 时，名称和只读/破坏性 annotation 必须一致；变更后用精确 FQN 枚举证明恰好 1 项并真实执行对应 E2E。
+- Coverage、duplication、mutation 和 compatibility 统一属于用户显式 `Quality` 模式，不进入 push/PR、nightly 或普通部署默认链。运行时必须绑定 clean committed HEAD、当前生产源码/程序集/PDB 和真实 ancestor；报告数量从本次实际执行动态得出，不固定历史 runner/case 数，也不得阻止业务测试随业务同批增删改。
 - compatibility baseline 只记录真实兼容/迁移项，bootstrap 后只能删除或收紧 deadline/call-site 上限，禁止新增 ID、扩大调用方或换名回避。普通 abstraction 不进 baseline；inventory 必须证明唯一活跃声明、至少一个真实可执行调用点、`AI-ORDINARY-*` 身份且不含兼容生命周期字段，注释、字符串和声明不算调用方。
-- 重复度门禁必须以 `path+line` 计数每个出现实例，同文件重复不得被去重；同时锁定汇总指标和每个 signature 的实例数/重复行/重复 token。base 尚无重复度 baseline 时只允许一次 candidate-exact bootstrap；base 已有 baseline 后只能在真实重复先减少时收紧，不得用总量持平、signature swap、放宽或重生成 baseline 换绿。
+- 用户显式 `Quality` 模式下的重复度门禁只治理生产源码，不扫描或冻结 `src/tests`、`src/testing` 与前端测试。生产重复以 `path+line` 计数每个出现实例，同文件重复不得被去重；同时锁定汇总指标和每个 signature 的实例数/重复行/重复 token。base 尚无重复度 baseline 时只允许一次 candidate-exact bootstrap；base 已有 baseline 后只能在真实重复先减少时收紧，不得用总量持平、signature swap、放宽或重生成 baseline 换绿。
 - `IAggregateRoot<>` 只用于独立维护业务不变量和生命周期的领域根；队列项、timeline 投影、工具执行审计、worker 心跳和执行尝试记录不得作为新增聚合根方向，历史债务只能减少不能增加。
 - `DataSourcePermissionGrant` 当前保留为独立聚合根但标记待评估；后续如果授权生命周期可归入 `BusinessDatabase`，应下沉为子实体或专用权限记录并移出聚合根白名单。
 - `AiCopilotDbContext` 是主基础设施迁移上下文，也是 Outbox 与 persistence commit marker 的唯一 migration owner；`AuditDbContext` 负责审计查询和运行时审计写入，`DataAnalysisDbContext` 只承载数据分析配置，`OutboxDbContext` 与 `PersistenceCommitMarkerDbContext` 只作为运行时短生命周期参与者，不拥有 migration。
@@ -228,8 +235,10 @@ Cloud AiRead 设备契约：
 - 普通 repository 的业务、Outbox、审计和 durable commit marker 必须由唯一 `PersistenceCommitEngine` / `RepositoryPersistenceCommitter` 在同一数据库事务中提交；每个 execution-strategy attempt 对业务 Context 只允许一次 `SaveChangesAsync(false)`，事务确认后才 `AcceptAllChanges`、清领域事件或清 RAG factory buffer。Identity 通过 `ITransactionalExecutionService` / `IdentityTransactionalExecutionService` 复用同一 engine；非成功 `Result` 必须回滚 UserManager/RoleManager 已触发的所有中间保存，拒绝审计只能在回滚后另行提交，禁止恢复 `EfTransactionalExecutionService` 或复制第二套 transaction/retry。
 - EF execution-strategy 必须使用官方 `ExecuteInTransactionAsync(... verifySucceeded ...)` 或等价官方入口，禁止手写业务重试循环。commit-unknown 不能用 `SaveChanges(false)`、Outbox 或 audit 是否存在推断成功；必须写入同事务 durable marker，并由 fresh context 在独立超时与 execution strategy 下验证，真实 PostgreSQL 必须覆盖 commit-ACK 丢失、verification transient/persistent failure、caller cancellation 和数据库生成 identity 重放。
 - marker 写入后不得再让 caller cancellation 中断 commit/verification；fresh verification 无法确认时返回稳定 503 `persistence_commit_outcome_unknown` 和非敏感 commit id，不自动重放业务。RAG `UploadDocument` 与 AiGateway SessionTemp/AgentInput `UploadRecord` 必须先写持久化对账日志再写物理文件，并复用同一 commit id；请求与 DataWorker 通过 PostgreSQL advisory lease 互斥，结果未知时保留文件和日志，后台看到 marker 才保留文件并清日志，看不到 marker 才删除文件。RAG 删除事件必须按 storage path 查 journal、取得同一 lease 并在锁内退休 journal 后再删文件；journal 不可读或 lease 活跃必须重试，禁止直接删或记录原始客户端路径。知识库文件唯一写入口是 RAG Document API，禁止恢复 AiGateway KB shadow scope/bridge；`ArtifactWorkspace` 多文件必须走独立 file-set journal/manifest/fencing/checkpoint/rollback/reconciliation。源码接入不等于 `AI-PERSIST-01d / AI-SEC-047` 已关单，必须通过真实文件系统 + PostgreSQL 故障矩阵；历史 KB shadow 清库仍属 `AI-PERSIST-01e / AI-SEC-048`。
+- RAG/AiGateway 数据库绑定上传调用方必须复用唯一 `PersistenceFileCommitProtocol`；repository 未消费预留 commit id 时，确认必须 fail-closed、回滚未提交文件并保留失败信号，不得因 callback 正常返回就清除 journal。
 - 标准容器共享卷只允许受信任的 AICopilot 后端写入。当前路径边界拒绝既有 symlink/reparse traversal，但不把同 UID 恶意进程在检查与打开之间替换目录的 TOCTOU 视为已解决；扩大威胁模型前必须增加容器权限隔离或 dirfd/`openat` 原子路径操作。
-- HttpApi 与 DataWorker 必须共享 `/var/lib/aicopilot`；commit marker 默认保留 30 天并按 `created_at_utc` 索引，保留期必须长于对账延迟，有待处理日志的 marker 不得删除。对账日志不可读时必须停止 marker 清理，禁止用 cron、手工删除或另一套清理任务替代。`AI-PERSIST-01b/01c` 后续变更必须同时通过真实 PostgreSQL、migration、部署配置和全量门禁。
+- 容器必须把可写 `FileStorage:RootPath` 和 `ArtifactWorkspace:RootPath` 固定在共享卷的 `/var/lib/aicopilot/storage` 与 `/var/lib/aicopilot/artifact-workspaces`，不得回退容器层、`/app`、`LocalApplicationData` 或共享卷外路径。当前 durable local file/journal backend 只支持 Linux/macOS，生产固定 Linux；Windows 必须明确拒绝该 backend，不能用 `MoveFileEx` 或空操作冒充父目录 durability barrier。
+- HttpApi 与 DataWorker 必须共享 `/var/lib/aicopilot`；commit marker 默认保留 30 天并按 `created_at_utc` 索引，保留期必须长于对账延迟，有待处理日志的 marker 不得删除。对账日志不可读时必须停止 marker 清理。相关改动由 selector 选择真实 PostgreSQL、migration 和部署配置验证；全量仅在用户显式授权时运行。
 - MCP runtime 配置变更必须进入 runtime registry refresh cycle，禁用、删除或配置变更后不能继续暴露未来工具解析。
 - 身份安全以 security stamp 驱动会话失效；Cloud role 不直接成为 AICopilot 本地 role。
 - 多 DbContext 迁移历史必须通过 `__EFMigrationsHistory` 的上下文隔离或迁移历史表拆分规则治理，不能让单一上下文回滚污染其他上下文状态。

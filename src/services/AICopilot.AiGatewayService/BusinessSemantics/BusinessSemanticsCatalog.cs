@@ -104,7 +104,7 @@ public sealed class BusinessSemanticsCatalog : IBusinessSemanticsCatalog
         "Choose Analysis.ProductionData.* only for production record, station record, or barcode trace questions.",
         "Choose Analysis.Process.* only for Cloud process master-data questions.",
         "Choose Analysis.ClientRelease.List only for Cloud client-release version questions; do not invent a version, hash, download URL, or release notes.",
-        "Analysis intents are read-only. Device master/status, device logs, capacity, production data, process master data, and client releases use their fixed Cloud AiRead GET APIs and never fall back to Direct DB, Text-to-SQL, Simulation, MCP, or another hidden HTTP path; recipe data remains blocked."
+        "Analysis intents are read-only. Device master/status, device logs, capacity, production data, process master data, and client releases first use their typed Cloud AiRead plugin. Only structured Unsupported or same-source Unavailable may attempt same-source governed Text-to-SQL within the already-confirmed business query scope. Empty, NeedClarification, Unauthorized, and credential failures are terminal. Never switch to Simulation, MCP, another data source, or a hidden HTTP path; recipe data remains blocked."
     ],
     [
         "Concrete recipe list/detail/version-history data questions should choose Analysis.Recipe.* only for the boundary response; recipe lifecycle rule questions should choose Policy.RecipeVersioning.",

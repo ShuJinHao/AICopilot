@@ -15,7 +15,8 @@ internal sealed class AgentTaskPlanPreparationService(
     IReadRepository<UploadRecord> uploadRepository,
     IEnumerable<IKnowledgeBaseAccessChecker> knowledgeBaseAccessCheckers,
     IBusinessDatabaseReadService? businessDatabaseReadService,
-    IBusinessDatabaseAuthorizationReadService? businessDatabaseAuthorizationReadService = null)
+    IBusinessDatabaseAuthorizationReadService? businessDatabaseAuthorizationReadService = null,
+    IBusinessDataSourceProfileRegistry? businessDataSourceProfileRegistry = null)
 {
     public async Task<Result<AgentTaskPlanPreparation>> PrepareAsync(
         PlanAgentTaskCommand request,
@@ -84,7 +85,13 @@ internal sealed class AgentTaskPlanPreparationService(
             .OrderBy(id => id.ToString("D"), StringComparer.Ordinal)
             .ToArray();
         BusinessDatabaseDescriptor[] selectedDataSources = [];
-        if (dataSourceIds.Length > 0 || useDevelopmentSimulationProfile)
+        if (useDevelopmentSimulationProfile && dataSourceIds.Length == 0)
+        {
+            return Result.Invalid(
+                "The Development Simulation profile does not select a SimulationBusiness data source; DataSourceIds must explicitly name one authorized source.");
+        }
+
+        if (dataSourceIds.Length > 0)
         {
             if (businessDatabaseReadService is null)
             {
@@ -110,38 +117,29 @@ internal sealed class AgentTaskPlanPreparationService(
                 .OrderBy(source => source.Id.ToString("D"), StringComparer.Ordinal)
                 .ToArray();
 
-            if (useDevelopmentSimulationProfile && dataSourceIds.Length == 0)
-            {
-                var simulationSources = selectableDataSources
-                    .Where(source => source.ExternalSystemType == DataSourceExternalSystemType.SimulationBusiness)
-                    .ToArray();
-                if (simulationSources.Length != 1)
-                {
-                    return Result.Invalid(
-                        "The explicit Development Simulation profile requires exactly one selectable SimulationBusiness data source; no Real/Cloud fallback is allowed.");
-                }
-
-                selectedDataSources = simulationSources;
-                dataSourceIds = simulationSources.Select(source => source.Id).ToArray();
-            }
-            else
-            {
-                selectedDataSources = selectableDataSources
-                    .Where(source => dataSourceIds.Contains(source.Id))
-                    .ToArray();
-            }
+            selectedDataSources = selectableDataSources
+                .Where(source => dataSourceIds.Contains(source.Id))
+                .ToArray();
 
             if (selectedDataSources.Length != dataSourceIds.Length)
             {
                 return Result.NotFound();
             }
 
-            if (selectedDataSources.Any(source => source.ExternalSystemType is not (
-                    DataSourceExternalSystemType.SimulationBusiness or
-                    DataSourceExternalSystemType.CloudReadOnly)))
+            if (businessDataSourceProfileRegistry is null)
+            {
+                return Result.Failure(
+                    "Business data-source profile registry is not configured.");
+            }
+
+            if (selectedDataSources.Any(source =>
+                    !businessDataSourceProfileRegistry.TryGet(
+                        ResolveProfileKey(source),
+                        source.ExternalSystemType,
+                        out _)))
             {
                 return Result.Invalid(
-                    "Governed agent data tasks require an explicitly authorized SimulationBusiness or CloudReadOnly data source.");
+                    "Governed agent data tasks require an explicitly authorized source with a registered profile.");
             }
 
             var containsSimulation = selectedDataSources.Any(source =>
@@ -195,5 +193,10 @@ internal sealed class AgentTaskPlanPreparationService(
             businessDomains,
             isSimulationOnlyPlan,
             hasBusinessDataSourcesForPlan));
+    }
+
+    private static string ResolveProfileKey(BusinessDatabaseDescriptor source)
+    {
+        return BusinessDataSourceProfileKeyResolver.Resolve(source);
     }
 }

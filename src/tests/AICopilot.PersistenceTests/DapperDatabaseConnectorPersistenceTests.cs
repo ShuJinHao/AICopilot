@@ -35,14 +35,19 @@ public sealed class DapperDatabaseConnectorPersistenceTests(PostgresPersistenceF
             DatabaseProviderType.PostgreSql,
             IsEnabled: true,
             IsReadOnly: true);
+        var securityProfile = CreateProfile(
+            "samples",
+            "id");
 
         var transactionMode = await connector.ExecuteQueryWithMetadataAsync(
             source,
-            "SELECT current_setting('transaction_read_only') AS read_only",
+            "SELECT current_setting('transaction_read_only') AS read_only FROM public.samples LIMIT 1",
+            securityProfile,
             options: new DatabaseQueryOptions(MaxRows: 1));
         var bounded = await connector.ExecuteQueryWithMetadataAsync(
             source,
-            "SELECT id FROM samples ORDER BY id",
+            "SELECT id FROM public.samples ORDER BY id",
+            securityProfile,
             options: new DatabaseQueryOptions(MaxRows: 2));
 
         transactionMode.Rows.Should().ContainSingle();
@@ -61,7 +66,7 @@ public sealed class DapperDatabaseConnectorPersistenceTests(PostgresPersistenceF
         var logger = new CapturingLogger<DapperDatabaseConnector>();
         var connector = new DapperDatabaseConnector(new AstSqlGuardrail(), logger);
         const string sensitiveSql =
-            "SELECT * FROM missing_orders WHERE customer_name = 'secret customer'";
+            "SELECT customer_name FROM public.missing_orders WHERE customer_name = 'secret customer'";
         var source = new BusinessDatabaseConnectionInfo(
             Guid.NewGuid(),
             "readonly-postgres-error",
@@ -71,7 +76,10 @@ public sealed class DapperDatabaseConnectorPersistenceTests(PostgresPersistenceF
             IsEnabled: true,
             IsReadOnly: true);
 
-        var action = async () => await connector.ExecuteQueryWithMetadataAsync(source, sensitiveSql);
+        var action = async () => await connector.ExecuteQueryWithMetadataAsync(
+            source,
+            sensitiveSql,
+            CreateProfile("missing_orders", "customer_name"));
 
         await action.Should().ThrowAsync<PostgresException>();
         var log = logger.Entries.Should().ContainSingle(entry => entry.Level == LogLevel.Error).Subject;
@@ -98,5 +106,19 @@ public sealed class DapperDatabaseConnectorPersistenceTests(PostgresPersistenceF
         {
             log.Message.Should().NotContain(forbidden);
         }
+    }
+
+    private static BusinessQuerySecurityProfile CreateProfile(
+        string table,
+        params string[] columns)
+    {
+        return BusinessQuerySecurityProfile.TableOnly(
+            new HashSet<string>(["public"], StringComparer.OrdinalIgnoreCase),
+            new HashSet<string>([table], StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, IReadOnlySet<string>>(StringComparer.OrdinalIgnoreCase)
+            {
+                [table] = new HashSet<string>(columns, StringComparer.OrdinalIgnoreCase)
+            },
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase));
     }
 }

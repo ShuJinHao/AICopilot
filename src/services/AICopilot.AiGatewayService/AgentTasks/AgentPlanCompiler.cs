@@ -239,10 +239,14 @@ internal sealed class DeterministicAgentPlanCompiler : IAgentPlanCompiler
                 break;
             }
 
-            var isCloudRead = spec.ToolCode == "query_cloud_data_readonly";
+            var isCloudRead =
+                spec.ToolCode == "query_business_database_readonly" &&
+                spec.CloudIntentCode is not null;
             var isCloudHealth = spec.ToolCode == "assess_cloud_health";
             var isCloudSemanticNode = isCloudRead || isCloudHealth;
-            var isGovernedRead = spec.ToolCode == "query_business_database_readonly";
+            var isGovernedRead =
+                spec.ToolCode == "query_business_database_readonly" &&
+                !isCloudRead;
             var isFinalization = spec.ToolCode == "finalize_artifacts";
             var isReasoning = spec.NodeKind == "AgentReasoningNode";
             var cloudIntent = spec.CloudIntentCode is null
@@ -308,7 +312,7 @@ internal sealed class DeterministicAgentPlanCompiler : IAgentPlanCompiler
                     MaxRows: isCloudSemanticNode
                         ? cloudIntent!.Limit
                         : isGovernedRead ? 200 : null,
-                    ExecutionMode: isGovernedRead ? "TextToSql" : null,
+                    ExecutionMode: isGovernedRead ? "GovernedSql" : null,
                     DataSourceId: dataSourceId,
                     BusinessDomains: isGovernedRead
                         ? AgentPlanCanonicalCollections.Strings(request.BusinessDomains)
@@ -408,7 +412,7 @@ internal sealed class DeterministicAgentPlanCompiler : IAgentPlanCompiler
                 var cloudReadNodeId = $"04-cloud-{cloudIndex:00}-read";
                 specs.Add(new NodeSpec(
                     cloudReadNodeId,
-                    "query_cloud_data_readonly",
+                    "query_business_database_readonly",
                     "CloudReadNode",
                     [],
                     true,
@@ -585,7 +589,7 @@ internal sealed class DeterministicAgentPlanCompiler : IAgentPlanCompiler
 
         IEnumerable<AgentIntentCandidateDocument> candidates = toolCode switch
         {
-            "query_cloud_data_readonly" or "assess_cloud_health" => available.Where(candidate => candidate.IntentClass == AgentIntentClass.CloudOnly),
+            "assess_cloud_health" => available.Where(candidate => candidate.IntentClass == AgentIntentClass.CloudOnly),
             "query_business_database_readonly" or "summarize_business_query_result" => available.Where(candidate =>
                 candidate.IntentClass == AgentIntentClass.GovernedExploration),
             "rag_search" => available.Where(candidate => candidate.IntentClass == AgentIntentClass.Knowledge),
@@ -606,7 +610,7 @@ internal sealed class DeterministicAgentPlanCompiler : IAgentPlanCompiler
     {
         "read_uploaded_file" => AgentStepType.FileRead,
         "rag_search" => AgentStepType.RagSearch,
-        "query_cloud_data_readonly" or "query_business_database_readonly" => AgentStepType.DataQuery,
+        "query_business_database_readonly" => AgentStepType.DataQuery,
         "parse_table_file" or "summarize_business_query_result" or "assess_cloud_health" or
         "join_evidence" or "agent_reasoning" => AgentStepType.Analysis,
         "generate_business_chart" or "generate_chart_data" => AgentStepType.ChartGeneration,

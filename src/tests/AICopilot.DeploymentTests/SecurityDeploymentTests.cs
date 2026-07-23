@@ -77,7 +77,7 @@ public sealed class SecurityDeploymentTests
         httpDevelopmentSettings.Should().Contain("\"MockOnly\": true");
     }
     [Fact]
-    public void DeploymentWorkflows_ShouldUseIntranetRunnerAndHarborOnly()
+    public void DeploymentWorkflows_ShouldKeepEmergencyRunnerAndAffectedCiBoundaries()
     {
         var solutionRoot = FindSolutionRoot();
         var imageWorkflow = File.ReadAllText(Path.Combine(
@@ -105,56 +105,59 @@ public sealed class SecurityDeploymentTests
             "deploy",
             "enterprise-ai",
             "local-release.sh"));
+        var duplicationSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "scripts",
+            "tests",
+            "Measure-AICopilotDuplication.ps1"));
+        var duplicationBaselineSource = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "scripts",
+            "tests",
+            "baselines",
+            "aicopilot-duplication.json"));
 
         buildAndPush.Should().Contain("IIOT_ROUTINE_BUILD_PROTOCOL=1");
         ciWorkflow.Should().Contain(
-            "  governance_gates:\n    name: governance-gates\n    runs-on: ubuntu-24.04\n    timeout-minutes: 15");
+            "default=Architecture/Security + affected Business; heavy lanes require an explicit mode");
+        ciWorkflow.Should().Contain("  build-test:");
+        ciWorkflow.Should().Contain("Select-AICopilotCiTests.ps1");
+        ciWorkflow.Should().Contain("Invoke-AICopilotCiSelectedTests.ps1");
         ciWorkflow.Should().Contain(
-            "  dotnet_tests:\n    name: dotnet-tests\n    runs-on: ubuntu-24.04\n    timeout-minutes: 60");
+            "github.event_name == 'workflow_dispatch' && (inputs.mode == 'quality' || inputs.mode == 'full')");
         ciWorkflow.Should().Contain(
-            "  web_deployment_tests:\n    name: web-deployment-tests\n    runs-on: ubuntu-24.04\n    timeout-minutes: 15");
+            "github.event_name == 'workflow_dispatch' && inputs.mode == 'cross-project'");
         ciWorkflow.Should().Contain(
-            "  mutation_gate:\n    name: mutation-gate\n    runs-on: ubuntu-24.04\n    timeout-minutes: 15");
-        ciWorkflow.Should().Contain(
-            "  build-test:\n"
-            + "    needs: [governance_gates, dotnet_tests, web_deployment_tests, mutation_gate]\n"
-            + "    if: ${{ always() }}\n"
-            + "    runs-on: ubuntu-24.04\n"
-            + "    timeout-minutes: 10");
-        ciWorkflow.Should().NotContain(
-            "  build-test:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 25");
-        foreach (var canonicalCiFragment in new[]
-                 {
-                     "git rev-parse HEAD",
-                     "-p:SourceRevisionId=$head",
-                     "-SynchronizeRunnerBuildIdentity",
-                     "Bind-AICopilotRunnerBuildIdentity.ps1",
-                     "pwsh -NoProfile -File $using:bindingScript",
-                     "pwsh -NoProfile -File $bindingScript",
-                     "artifacts/runner-inputs/",
-                     "Restore governance TypeScript dependencies",
-                     "Required CI lane failure:",
-                     "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
-                     "merge-multiple: true",
-                     "Confirm-AICopilotRequiredTestResults.ps1"
-                 })
-        {
-            ciWorkflow.Should().Contain(canonicalCiFragment);
-        }
-        Regex.IsMatch(
-                ciWorkflow,
-                @"(?ms)^\s*& pwsh -NoProfile -File \$using:bindingScript[^\r\n]*"
-                + @"\r?\n\s*if \(\$LASTEXITCODE -ne 0\) \{.*?"
-                + @"\r?\n\s*& dotnet test \$project\.path")
-            .Should().BeTrue();
-        Regex.IsMatch(
-                ciWorkflow,
-                @"(?ms)^\s*& pwsh -NoProfile -File \$bindingScript[^\r\n]*"
-                + @"\r?\n\s*if \(\$LASTEXITCODE -ne 0\) \{.*?"
-                + @"\r?\n\s*& dotnet test \$project\.path")
-            .Should().BeTrue();
-        Regex.IsMatch(ciWorkflow, @"(?m)^\s*& \$using:bindingScript[^\r\n]*$")
+            "github.event_name == 'workflow_dispatch' && inputs.mode == 'full'");
+        ciWorkflow.Should().NotContain("schedule:");
+        ciWorkflow.Should().NotContain("  governance_gates:");
+        ciWorkflow.Should().NotContain("  mutation_gate:");
+        ciWorkflow.Should().NotContain("Confirm-AICopilotRequiredTestResults.ps1");
+        ciWorkflow.Should().NotContain("Bind-AICopilotRunnerBuildIdentity.ps1");
+        File.Exists(Path.Combine(
+                solutionRoot,
+                "scripts",
+                "tests",
+                "Get-AICopilotTestInventory.ps1"))
             .Should().BeFalse();
+        File.Exists(Path.Combine(
+                solutionRoot,
+                "scripts",
+                "tests",
+                "baselines",
+                "aicopilot-test-cases.json"))
+            .Should().BeFalse();
+        File.Exists(Path.Combine(
+                solutionRoot,
+                "scripts",
+                "tests",
+                "baselines",
+                "aicopilot-coverage.json"))
+            .Should().BeFalse();
+        duplicationSource.Should().NotContain("testSupportHelpers");
+        duplicationSource.Should().NotContain("testAssertionFlows");
+        duplicationBaselineSource.Should().NotContain("\"testSupportHelpers\"");
+        duplicationBaselineSource.Should().NotContain("\"testAssertionFlows\"");
 
         imageWorkflow.Should().Contain("runs-on: [self-hosted, iiot-linux-prod]");
         imageWorkflow.Should().Contain("Self-hosted runner must not run as root.");
@@ -250,10 +253,7 @@ public sealed class SecurityDeploymentTests
             .BeEquivalentTo(
                 "aicopilot-ai-read-diagnostics.yml",
                 "aicopilot-deploy.yml",
-                "aicopilot-enable-direct-cloud-readonly-db.yml",
-                "aicopilot-enable-real-cloud-ai-read.yml",
                 "aicopilot-image.yml",
-                "aicopilot-provision-cloud-readonly-db-role.yml",
                 "aicopilot-routine-request.yml");
 
         foreach (var workflow in guardedWorkflows)

@@ -29,11 +29,6 @@ public sealed record CloudReadonlyAgentPlanIntent(
 
 public interface ICloudReadonlyAgentPlanService
 {
-    Task<Result<CloudReadonlyAgentPlanIntent>> CreateIntentAsync(
-        Guid sessionId,
-        string goal,
-        CancellationToken cancellationToken = default);
-
     Result<CloudReadonlyAgentPlanIntent> CreateIntentFromRouted(
         string goal,
         IReadOnlyCollection<IntentResult> routedIntents);
@@ -43,55 +38,10 @@ public interface ICloudReadonlyAgentPlanService
         IReadOnlyCollection<IntentResult> routedIntents);
 }
 
-public interface ICloudReadonlyAgentIntentRouter
-{
-    Task<IReadOnlyCollection<IntentResult>> RouteAsync(
-        Guid sessionId,
-        string goal,
-        CancellationToken cancellationToken = default);
-}
-
-public sealed class CloudReadonlyAgentIntentRouter(IntentRoutingExecutor intentRoutingExecutor)
-    : ICloudReadonlyAgentIntentRouter
-{
-    public async Task<IReadOnlyCollection<IntentResult>> RouteAsync(
-        Guid sessionId,
-        string goal,
-        CancellationToken cancellationToken = default)
-    {
-        var result = await intentRoutingExecutor.ExecuteAsync(
-            new ChatStreamRequest(sessionId, goal),
-            cancellationToken);
-        return result.Intents;
-    }
-}
-
 public sealed class CloudReadonlyAgentPlanService(
-    ICloudReadonlyAgentIntentRouter intentRouter,
-    ISemanticQueryPlanner semanticQueryPlanner,
-    IOptions<CloudReadonlyOptions> cloudReadonlyOptions,
-    ICloudReadonlySimulationIntentPlanner simulationIntentPlanner) : ICloudReadonlyAgentPlanService
+    ISemanticQueryPlanner semanticQueryPlanner) : ICloudReadonlyAgentPlanService
 {
     private const double MinimumConfidence = 0.65;
-
-    public async Task<Result<CloudReadonlyAgentPlanIntent>> CreateIntentAsync(
-        Guid sessionId,
-        string goal,
-        CancellationToken cancellationToken = default)
-    {
-        if (CloudReadonlyAgentTextGuard.ContainsForbiddenWriteSemantic(goal))
-        {
-            return Unsupported("Cloud readonly agent plans cannot contain write semantics.");
-        }
-
-        if (cloudReadonlyOptions.Value.Mode == CloudReadonlyDataSourceMode.Simulation)
-        {
-            return simulationIntentPlanner.CreateIntent(goal);
-        }
-
-        var routedIntents = await intentRouter.RouteAsync(sessionId, goal, cancellationToken);
-        return CreateIntentFromRouted(goal, routedIntents);
-    }
 
     public Result<CloudReadonlyAgentPlanIntent> CreateIntentFromRouted(
         string goal,
@@ -113,17 +63,6 @@ public sealed class CloudReadonlyAgentPlanService(
         string goal,
         IReadOnlyCollection<IntentResult> routedIntents)
     {
-        if (CloudReadonlyAgentTextGuard.ContainsForbiddenWriteSemantic(goal))
-        {
-            return UnsupportedMany("Cloud readonly agent plans cannot contain write semantics.");
-        }
-
-        if (cloudReadonlyOptions.Value.Mode == CloudReadonlyDataSourceMode.Simulation)
-        {
-            return UnsupportedMany(
-                "Durable Plan v2 cannot seal Simulation as CloudAiRead; simulation remains a non-executable development path.");
-        }
-
         var candidates = routedIntents
             .Where(IsSupportedIntentFamily)
             .GroupBy(intent => intent.Intent, StringComparer.Ordinal)
@@ -158,12 +97,6 @@ public sealed class CloudReadonlyAgentPlanService(
         if (candidate.Confidence < MinimumConfidence)
         {
             return Unsupported("Cloud readonly agent intent confidence is below the execution threshold.");
-        }
-
-        if (CloudReadonlyAgentTextGuard.ContainsForbiddenWriteSemantic(candidate.Intent) ||
-            CloudReadonlyAgentTextGuard.ContainsForbiddenWriteSemantic(candidate.Query))
-        {
-            return Unsupported("Cloud readonly agent intent contains unsafe query semantics.");
         }
 
         var planningResult = semanticQueryPlanner.Plan(candidate.Intent, candidate.Query);
@@ -270,111 +203,8 @@ public sealed class CloudReadonlyAgentPlanService(
     }
 }
 
-public sealed record CloudReadonlyAgentToolRequest(
-    SemanticQueryPlan SemanticPlan,
-    string SemanticPlanDigest,
-    double Confidence)
-{
-    public string Intent => SemanticPlan.Intent;
-}
-
-public sealed record CloudReadonlyAgentToolResult(
-    string Status,
-    string Intent,
-    string Target,
-    string Kind,
-    string SourcePath,
-    string SourceLabel,
-    string SourceMode,
-    bool IsSimulation,
-    DateTimeOffset QueriedAtUtc,
-    int Limit,
-    bool IsTruncated,
-    int RowCount,
-    IReadOnlyList<Dictionary<string, object?>> Rows,
-    string Summary);
-
-public interface ICloudReadonlyAgentToolExecutor
-{
-    Task<CloudReadonlyAgentToolResult> ExecuteAsync(
-        CloudReadonlyAgentToolRequest request,
-        CancellationToken cancellationToken = default);
-}
-
-public interface ICloudReadonlyDataProvider
-{
-    CloudReadonlyDataSourceMode Mode { get; }
-
-    Task<CloudReadonlyAgentToolResult> QueryAsync(
-        CloudReadonlyAgentToolRequest request,
-        CancellationToken cancellationToken = default);
-}
-
-public interface ICloudReadonlyDataProviderResolver
-{
-    ICloudReadonlyDataProvider Resolve();
-}
-
-public interface ICloudReadonlySimulationIntentPlanner
-{
-    Result<CloudReadonlyAgentPlanIntent> CreateIntent(string goal);
-}
-
-public sealed class CloudReadonlyAgentToolExecutor(
-    ICloudReadonlyDataProviderResolver providerResolver) : ICloudReadonlyAgentToolExecutor
-{
-    public Task<CloudReadonlyAgentToolResult> ExecuteAsync(
-        CloudReadonlyAgentToolRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        CloudReadonlyAgentToolGuards.ValidateRequest(request);
-        return providerResolver.Resolve().QueryAsync(request, cancellationToken);
-    }
-}
-
 internal static class CloudReadonlyAgentTextGuard
 {
-    private static readonly string[] ForbiddenWriteTokens =
-    [
-        "create",
-        "update",
-        "delete",
-        "register",
-        "disable",
-        "approve",
-        "dispatch",
-        "trigger",
-        "backfill",
-        "correct",
-        "upload",
-        "submit",
-        "write",
-        "修改",
-        "删除",
-        "新增",
-        "禁用",
-        "审批",
-        "派发",
-        "触发",
-        "补录",
-        "回填",
-        "上传",
-        "写入"
-    ];
-
-    public static bool ContainsForbiddenWriteSemantic(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return false;
-        }
-
-        return ForbiddenWriteTokens.Any(token =>
-            token.Any(ch => ch > 127)
-                ? value.Contains(token, StringComparison.OrdinalIgnoreCase)
-                : Regex.IsMatch(value, $@"(?i)(^|[^\p{{L}}\p{{N}}_]){Regex.Escape(token)}([^\p{{L}}\p{{N}}_]|$)"));
-    }
-
     public static bool ContainsUnsafePersistedPayload(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -383,8 +213,7 @@ internal static class CloudReadonlyAgentTextGuard
         }
 
         return Regex.IsMatch(value, @"(?i)(api[_-]?key|token|password|secret|connection\s*string)\s*[""':=]") ||
-               Regex.IsMatch(value, @"[A-Za-z]:\\[^\s""']+") ||
-               Regex.IsMatch(value, @"(?is)\b(select|insert|update|delete|drop|alter|truncate|merge)\b.+\b(from|into|table|set)\b");
+               Regex.IsMatch(value, @"[A-Za-z]:\\[^\s""']+");
     }
 
     public static string? SanitizeForPlan(string? value, int maxLength)

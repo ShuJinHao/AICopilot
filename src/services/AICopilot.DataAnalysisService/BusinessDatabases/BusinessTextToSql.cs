@@ -112,14 +112,6 @@ internal sealed class BusinessTextToSqlRuntime(
 
         var limit = ResolveLimit(database, request.RequestedLimit);
         var generated = BusinessTextToSqlRuleBasedGenerator.Generate(request.Question, limit);
-        var safetyError = BusinessReadonlyQuerySafetyPolicy.Validate(
-            generated.Sql,
-            SimulationBusinessQuerySchema.SafetySchema);
-        if (safetyError is not null)
-        {
-            await WriteDraftAuditAsync(database, request.Question, generated.Sql, AuditResults.Rejected, safetyError, cancellationToken);
-            return Result.Invalid(safetyError);
-        }
 
         var sourceMode = BusinessDatabaseContractMapper.ToContractExternalSystemType(database.ExternalSystemType);
         var now = DateTimeOffset.UtcNow;
@@ -302,6 +294,22 @@ internal static class SimulationBusinessQuerySchema
             "customer_complaints"
         };
 
+    public static readonly IReadOnlyDictionary<string, IReadOnlySet<string>> AllowedColumns =
+        new Dictionary<string, IReadOnlySet<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["employees"] = Columns("employee_id", "employee_no", "employee_name", "department", "position_name", "hire_date", "employment_status"),
+            ["attendance"] = Columns("attendance_id", "employee_id", "attendance_date", "shift_code", "work_hours", "overtime_hours", "leave_type"),
+            ["production_devices"] = Columns("device_id", "device_code", "device_name", "workshop", "line_code", "device_status"),
+            ["production_records"] = Columns("record_id", "device_id", "production_date", "product_code", "planned_qty", "actual_qty", "scrap_qty", "shift_code"),
+            ["device_events"] = Columns("event_id", "device_id", "event_time", "event_type", "severity", "duration_minutes"),
+            ["quality_inspections"] = Columns("inspection_id", "production_record_id", "inspection_time", "product_code", "sample_qty", "defect_qty", "defect_type", "result"),
+            ["inventory_movements"] = Columns("movement_id", "material_code", "warehouse_code", "movement_time", "movement_type", "quantity", "unit"),
+            ["purchase_orders"] = Columns("purchase_order_id", "supplier_code", "material_code", "order_date", "promised_date", "quantity", "received_quantity"),
+            ["sales_orders"] = Columns("sales_order_id", "customer_code", "order_date", "promised_date", "product_code", "order_qty", "delivered_qty", "order_status"),
+            ["delivery_records"] = Columns("delivery_id", "sales_order_id", "delivery_date", "delivered_qty", "carrier_code", "delivery_status"),
+            ["customer_complaints"] = Columns("complaint_id", "sales_order_id", "complaint_date", "complaint_type", "severity", "resolution_status")
+        };
+
     public static readonly IReadOnlyList<string> BlockedFieldFragments =
     [
         "api_key",
@@ -313,7 +321,19 @@ internal static class SimulationBusinessQuerySchema
     ];
 
     public static readonly BusinessQuerySafetySchema SafetySchema =
-        new(AllowedTables, BlockedFieldFragments.ToHashSet(StringComparer.OrdinalIgnoreCase));
+        new(
+            AllowedTables,
+            BlockedFieldFragments.ToHashSet(StringComparer.OrdinalIgnoreCase),
+            AllowedColumnFragments: AllowedColumns.Values
+                .SelectMany(columns => columns)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase),
+            SensitiveColumnFragments: BlockedFieldFragments.ToHashSet(StringComparer.OrdinalIgnoreCase),
+            AllowedColumns: AllowedColumns);
+
+    private static IReadOnlySet<string> Columns(params string[] columns)
+    {
+        return columns.ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
 }
 
 internal sealed record GeneratedBusinessSql(
@@ -331,8 +351,8 @@ internal static class BusinessTextToSqlRuleBasedGenerator
             return new GeneratedBusinessSql(
                 $"""
                  SELECT so.customer_code, cc.complaint_type, cc.severity, COUNT(*) AS complaint_count
-                 FROM customer_complaints cc
-                 JOIN sales_orders so ON so.sales_order_id = cc.sales_order_id
+                 FROM public.customer_complaints cc
+                 JOIN public.sales_orders so ON so.sales_order_id = cc.sales_order_id
                  GROUP BY so.customer_code, cc.complaint_type, cc.severity
                  ORDER BY complaint_count DESC
                  LIMIT {limit}
@@ -346,8 +366,8 @@ internal static class BusinessTextToSqlRuleBasedGenerator
             return new GeneratedBusinessSql(
                 $"""
                  SELECT e.department, COUNT(DISTINCT e.employee_id) AS employee_count, COUNT(a.attendance_id) AS leave_records
-                 FROM employees e
-                 LEFT JOIN attendance a ON a.employee_id = e.employee_id AND a.leave_type IS NOT NULL
+                 FROM public.employees e
+                 LEFT JOIN public.attendance a ON a.employee_id = e.employee_id AND a.leave_type IS NOT NULL
                  GROUP BY e.department
                  ORDER BY leave_records DESC
                  LIMIT {limit}
@@ -362,7 +382,7 @@ internal static class BusinessTextToSqlRuleBasedGenerator
                 $"""
                  SELECT product_code, defect_type, COUNT(*) AS inspection_count, SUM(defect_qty) AS defect_qty,
                         ROUND(SUM(defect_qty)::numeric / NULLIF(SUM(sample_qty), 0), 4) AS defect_rate
-                 FROM quality_inspections
+                 FROM public.quality_inspections
                  GROUP BY product_code, defect_type
                  ORDER BY defect_rate DESC, defect_qty DESC
                  LIMIT {limit}
@@ -376,8 +396,8 @@ internal static class BusinessTextToSqlRuleBasedGenerator
             return new GeneratedBusinessSql(
                 $"""
                  SELECT pd.device_code, pd.line_code, COUNT(*) AS event_count, SUM(de.duration_minutes) AS downtime_minutes
-                 FROM device_events de
-                 JOIN production_devices pd ON pd.device_id = de.device_id
+                 FROM public.device_events de
+                 JOIN public.production_devices pd ON pd.device_id = de.device_id
                  WHERE de.event_type IS NOT NULL AND de.duration_minutes > 0
                  GROUP BY pd.device_code, pd.line_code
                  ORDER BY downtime_minutes DESC, event_count DESC
@@ -394,7 +414,7 @@ internal static class BusinessTextToSqlRuleBasedGenerator
                  SELECT material_code, warehouse_code,
                         SUM(quantity) AS movement_quantity,
                         COUNT(*) AS movement_count
-                 FROM inventory_movements
+                 FROM public.inventory_movements
                  GROUP BY material_code, warehouse_code
                  ORDER BY movement_count DESC
                  LIMIT {limit}
@@ -409,7 +429,7 @@ internal static class BusinessTextToSqlRuleBasedGenerator
                 $"""
                  SELECT customer_code, product_code, COUNT(*) AS order_count, SUM(order_qty) AS order_qty,
                         SUM(delivered_qty) AS delivered_qty, SUM(order_qty - delivered_qty) AS backlog_qty
-                 FROM sales_orders
+                 FROM public.sales_orders
                  GROUP BY customer_code, product_code
                  ORDER BY backlog_qty DESC, order_count DESC
                  LIMIT {limit}
@@ -425,8 +445,8 @@ internal static class BusinessTextToSqlRuleBasedGenerator
                  SELECT pr.production_date, pd.line_code, SUM(pr.planned_qty) AS planned_qty,
                         SUM(pr.actual_qty) AS actual_qty, SUM(pr.scrap_qty) AS scrap_qty,
                         ROUND(SUM(pr.actual_qty)::numeric / NULLIF(SUM(pr.planned_qty), 0), 4) AS completion_rate
-                 FROM production_records pr
-                 JOIN production_devices pd ON pd.device_id = pr.device_id
+                 FROM public.production_records pr
+                 JOIN public.production_devices pd ON pd.device_id = pr.device_id
                  GROUP BY pr.production_date, pd.line_code
                  ORDER BY pr.production_date DESC, pd.line_code
                  LIMIT {limit}
@@ -437,15 +457,12 @@ internal static class BusinessTextToSqlRuleBasedGenerator
 
         return new GeneratedBusinessSql(
             $"""
-             SELECT 'production_records' AS table_name, COUNT(*) AS row_count FROM production_records
-             UNION ALL SELECT 'quality_inspections', COUNT(*) FROM quality_inspections
-             UNION ALL SELECT 'inventory_movements', COUNT(*) FROM inventory_movements
-             UNION ALL SELECT 'sales_orders', COUNT(*) FROM sales_orders
-             UNION ALL SELECT 'employees', COUNT(*) FROM employees
+             SELECT COUNT(*) AS row_count
+             FROM public.production_records
              LIMIT {limit}
              """,
-            "Returns a high-level row-count overview of the SimulationBusiness core tables.",
-            ["The question did not match a specific P1 scenario, so a safe overview query was generated."]);
+            "Returns a row-count overview of the SimulationBusiness production records table.",
+            ["The question did not match a specific P1 scenario, so a single-table safe overview query was generated."]);
     }
 
     private static bool ContainsAny(string value, params string[] terms)

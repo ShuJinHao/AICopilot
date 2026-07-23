@@ -2,5 +2,8 @@ namespace AICopilot.Services.Contracts;
 
 public interface ISqlGuardrail
 {
-    (bool IsSafe, string? ErrorMessage) Validate(string sql, DatabaseProviderType provider);
+    (bool IsSafe, string? ErrorMessage) Validate(
+        string sql,
+        DatabaseProviderType provider,
+        BusinessQuerySecurityProfile profile);
 }

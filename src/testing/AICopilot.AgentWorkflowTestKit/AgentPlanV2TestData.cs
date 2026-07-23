@@ -99,7 +99,7 @@ public static class AgentPlanV2TestData
                     "Read Cloud",
                     "Read Cloud readonly data.",
                     AgentStepType.DataQuery,
-                    "query_cloud_data_readonly",
+                    "query_business_database_readonly",
                     true),
                 new AgentPlanV2TestStep(
                     "Generate Markdown",
@@ -530,7 +530,9 @@ public static class AgentPlanV2TestData
                     $"Executable component fixture tool '{step.ToolCode}' is absent from its frozen catalog.");
             }
 
-            var isCloudRead = string.Equals(step.ToolCode, "query_cloud_data_readonly", StringComparison.Ordinal);
+            var isCloudRead =
+                string.Equals(step.ToolCode, "query_business_database_readonly", StringComparison.Ordinal) &&
+                cloudIntent is not null;
             var isKnowledgeRead = string.Equals(step.ToolCode, "rag_search", StringComparison.Ordinal);
             var isFinalization = string.Equals(
                 step.ToolCode,
@@ -546,7 +548,8 @@ public static class AgentPlanV2TestData
                     : primaryCapability;
             var nodeKind = step.ToolCode switch
             {
-                "query_cloud_data_readonly" => "CloudReadNode",
+                "query_business_database_readonly" when cloudIntent is not null => "CloudReadNode",
+                "query_business_database_readonly" => "GovernedDataReadNode",
                 "rag_search" => "KnowledgeRetrievalNode",
                 "read_uploaded_file" or "parse_table_file" => "FileAnalysisNode",
                 "finalize_artifacts" => "ApprovalCheckpointNode",
@@ -714,7 +717,7 @@ public static class AgentPlanV2TestData
         var toolCode = step.ToolCode;
         var provider = toolCode switch
         {
-            "query_cloud_data_readonly" => "CloudReadonly",
+            "query_business_database_readonly" => "BuiltIn",
             "generate_business_chart" or "generate_chart_data" or "generate_markdown_report" or
                 "generate_html_report" or "generate_pdf" or "generate_pptx" or "generate_xlsx" or
                 "finalize_artifacts" => "Artifact",

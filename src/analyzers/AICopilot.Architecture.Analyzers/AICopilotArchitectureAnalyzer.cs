@@ -157,16 +157,26 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
         ImmutableHashSet.Create(
             StringComparer.Ordinal,
             "AICopilot.Services.Contracts.ICloudAiReadClient",
-            "AICopilot.Services.Contracts.ICloudReadOnlyTextToSqlGenerator",
+            "AICopilot.Services.Contracts.IBusinessTextToSqlGenerator",
+            "AICopilot.Services.Contracts.IBusinessQueryProvider",
+            "AICopilot.Services.Contracts.IBusinessQueryProviderRegistry",
+            "AICopilot.Services.Contracts.IBusinessDataSourceProfileRegistry",
+            "AICopilot.Services.Contracts.IBusinessQueryContextStore",
+            "AICopilot.Services.Contracts.IDatabaseConnector",
+            "AICopilot.Services.Contracts.ISqlGuardrail",
             "AICopilot.Infrastructure.CloudRead.CloudAiReadClient",
-            "AICopilot.AiGatewayService.AgentTasks.ICloudReadonlyAgentToolExecutor",
-            "AICopilot.AiGatewayService.AgentTasks.ICloudReadonlyDataProvider");
+            "AICopilot.Dapper.DapperDatabaseConnector",
+            "AICopilot.Dapper.Security.AstSqlGuardrail");
     private static readonly ImmutableHashSet<string> FormalCloudReadOnlyWorkflowTypeNames =
         ImmutableHashSet.Create(
             StringComparer.Ordinal,
-            "AICopilot.AiGatewayService.Workflows.Executors.CloudReadOnlyTextToSqlFallbackRunner",
-            "AICopilot.AiGatewayService.AgentTasks.CloudReadonlyAgentToolExecutor",
-            "AICopilot.AiGatewayService.AgentTasks.RealCloudReadonlyDataProvider");
+            "AICopilot.AiGatewayService.Workflows.Executors.BusinessTextToSqlFallbackRunner",
+            "AICopilot.AiGatewayService.Workflows.Executors.BusinessQueryProviderRegistry",
+            "AICopilot.AiGatewayService.Workflows.Executors.CloudAiReadBusinessQueryProvider",
+            "AICopilot.DataAnalysisService.BusinessDatabases.BusinessDataSourceProfileRegistry",
+            "AICopilot.DataAnalysisService.BusinessDatabases.BusinessQueryContextStore",
+            "AICopilot.Dapper.DapperDatabaseConnector",
+            "AICopilot.Dapper.Security.AstSqlGuardrail");
     private static readonly ImmutableArray<string> ExplicitProductionAssemblyNamesByDescendingLength =
     [
         "AICopilot.Services.CrossCutting",
@@ -3502,7 +3512,7 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
 
         var definition = named.OriginalDefinition.ToDisplayString();
         if (definition is "AICopilot.Services.Contracts.ICloudAiReadClient" or
-                "AICopilot.Services.Contracts.ICloudReadOnlyTextToSqlGenerator" or
+                "AICopilot.Services.Contracts.IBusinessTextToSqlGenerator" or
                 "AICopilot.Infrastructure.CloudRead.CloudAiReadClient" &&
             HasExpectedAssemblyIdentity(named.OriginalDefinition, definition))
         {

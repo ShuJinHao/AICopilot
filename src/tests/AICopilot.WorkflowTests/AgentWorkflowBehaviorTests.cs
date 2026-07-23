@@ -74,7 +74,6 @@ public sealed class AgentWorkflowBehaviorTests
             .Select(branch => branch.BranchType)
             .Should()
             .Equal(
-                BranchType.Tools,
                 BranchType.Knowledge,
                 BranchType.DataAnalysis,
                 BranchType.BusinessPolicy);

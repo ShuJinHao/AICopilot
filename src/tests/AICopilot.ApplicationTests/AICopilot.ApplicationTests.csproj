@@ -7,9 +7,7 @@
     <IsTestProject>true</IsTestProject>
     <AICopilotTestKind>Application</AICopilotTestKind>
     <AICopilotTestRuntime>Pure</AICopilotTestRuntime>
-    <AICopilotTestCadence>PR</AICopilotTestCadence>
     <AICopilotTestOwner>ApplicationServices</AICopilotTestOwner>
-    <AICopilotRequired>true</AICopilotRequired>
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />

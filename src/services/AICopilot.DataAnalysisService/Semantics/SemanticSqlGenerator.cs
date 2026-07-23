@@ -19,6 +19,7 @@ public sealed class SemanticSqlGenerator(
         }
 
         ValidateFromClause(mapping);
+        var governedSource = SemanticMappingSecurityProfileFactory.Create(mapping);
 
         var selectSegments = new List<string>();
         foreach (var field in plan.Projection.Fields)
@@ -96,7 +97,7 @@ public sealed class SemanticSqlGenerator(
 
         sql.Append(string.Join(", ", selectSegments));
         sql.Append(" FROM ");
-        sql.Append(ResolveFromClause(mapping));
+        sql.Append(governedSource.QualifiedFromClause);
 
         if (whereSegments.Count > 0)
         {
@@ -116,7 +117,10 @@ public sealed class SemanticSqlGenerator(
         }
 
         var sqlText = sql.ToString();
-        var guardResult = sqlGuardrail.Validate(sqlText, mapping.Provider);
+        var guardResult = sqlGuardrail.Validate(
+            sqlText,
+            mapping.Provider,
+            governedSource.SecurityProfile);
         if (!guardResult.IsSafe)
         {
             throw new InvalidOperationException(guardResult.ErrorMessage);
@@ -225,6 +229,15 @@ public sealed class SemanticSqlGenerator(
         if (string.IsNullOrWhiteSpace(mapping.FromClause))
         {
             ValidateIdentifier(mapping.SourceName, "Source");
+            return;
+        }
+
+        foreach (var token in UnsafeFromClauseTokens)
+        {
+            if (mapping.FromClause.Contains(token, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"FROM clause contains unsafe token '{token}'.");
+            }
         }
     }
 

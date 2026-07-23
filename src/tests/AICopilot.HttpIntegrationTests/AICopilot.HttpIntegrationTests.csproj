@@ -6,10 +6,10 @@
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <AICopilotTestKind>Integration</AICopilotTestKind>
+    <AICopilotCiCategory>Quality</AICopilotCiCategory>
+    <AICopilotCiSecurityFilter>FullyQualifiedName~AICopilot.HttpIntegrationTests.AgentApprovalPermissionHardeningTests|FullyQualifiedName~AICopilot.HttpIntegrationTests.AgentRunQueuePermissionTests|FullyQualifiedName~AICopilot.HttpIntegrationTests.AgentSafetyApprovalHttpTests|FullyQualifiedName~AICopilot.HttpIntegrationTests.IdentityAccessManagementTests|FullyQualifiedName~AICopilot.HttpIntegrationTests.IdentityHttpBoundaryTests|FullyQualifiedName~AICopilot.HttpIntegrationTests.McpToolGovernancePermissionTests|FullyQualifiedName~AICopilot.HttpIntegrationTests.ModelApiKeyProtectionTests</AICopilotCiSecurityFilter>
     <AICopilotTestRuntime>Aspire</AICopilotTestRuntime>
-    <AICopilotTestCadence>PR</AICopilotTestCadence>
     <AICopilotTestOwner>IdentityHttp</AICopilotTestOwner>
-    <AICopilotRequired>true</AICopilotRequired>
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />

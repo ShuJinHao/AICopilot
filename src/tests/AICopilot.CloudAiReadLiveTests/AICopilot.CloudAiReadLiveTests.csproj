@@ -7,10 +7,9 @@
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <AICopilotTestKind>Contract</AICopilotTestKind>
+    <AICopilotCiCategory>CrossProject</AICopilotCiCategory>
     <AICopilotTestRuntime>LiveExternal</AICopilotTestRuntime>
-    <AICopilotTestCadence>Manual</AICopilotTestCadence>
     <AICopilotTestOwner>CloudContract</AICopilotTestOwner>
-    <AICopilotRequired>false</AICopilotRequired>
   </PropertyGroup>
 
   <ItemGroup>

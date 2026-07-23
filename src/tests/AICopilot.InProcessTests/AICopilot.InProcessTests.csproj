@@ -6,10 +6,9 @@
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <AICopilotTestKind>Integration</AICopilotTestKind>
+    <AICopilotCiSecurityFilter>FullyQualifiedName~AICopilot.InProcessTests.CloudOidcOptionsTests|FullyQualifiedName~AICopilot.InProcessTests.DapperDatabaseConnectorSecurityTests|FullyQualifiedName~AICopilot.InProcessTests.JwtSettingsTests|FullyQualifiedName~AICopilot.InProcessTests.MigrationWorkerCloudReadOnlySeederTests|FullyQualifiedName~AICopilot.InProcessTests.MigrationWorkerSecretMigratorTests|FullyQualifiedName~AICopilot.InProcessTests.ModelSecretRuntimeBoundaryTests|FullyQualifiedName~AICopilot.InProcessTests.RagControllerUploadValidationTests|FullyQualifiedName~AICopilot.InProcessTests.SecretStringEncryptorTests|FullyQualifiedName~AICopilot.InProcessTests.SqlGuardrailTests|FullyQualifiedName~AICopilot.InProcessTests.UnhandledApiExceptionPolicyTests</AICopilotCiSecurityFilter>
     <AICopilotTestRuntime>InProcess</AICopilotTestRuntime>
-    <AICopilotTestCadence>PR</AICopilotTestCadence>
     <AICopilotTestOwner>InProcessBoundary</AICopilotTestOwner>
-    <AICopilotRequired>true</AICopilotRequired>
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />

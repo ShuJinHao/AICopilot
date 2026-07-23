@@ -7,7 +7,8 @@ namespace AICopilot.DataAnalysisService.BusinessDatabases;
 
 public sealed class BusinessDatabaseReadService(
     IReadRepository<BusinessDatabase> repository,
-    BusinessDatabaseAccessService accessService)
+    BusinessDatabaseAccessService accessService,
+    IBusinessDataSourceProfileRegistry profileRegistry)
     : IBusinessDatabaseReadService
 {
     public async Task<IReadOnlyList<BusinessDatabaseDescriptor>> ListEnabledAsync(
@@ -23,7 +24,10 @@ public sealed class BusinessDatabaseReadService(
         var databases = await repository.ListAsync(new EnabledBusinessDatabasesSpec(), cancellationToken);
         var authorized = await accessService.FilterQueryAuthorizedAsync(databases, cancellationToken);
         return authorized
-            .Where(database => BusinessDataSourceGovernancePolicy.IsSelectableForMode(database, selectionMode))
+            .Where(database => BusinessDataSourceGovernancePolicy.IsSelectableForMode(
+                database,
+                selectionMode,
+                profileRegistry))
             .Select(BusinessDatabaseContractMapper.ToDescriptor)
             .ToArray();
     }

@@ -8,7 +8,7 @@ public sealed class CloudReadOnlyTextToSqlOptions
 
     public bool Enabled { get; set; } = true;
 
-    public string TemplateName { get; set; } = "cloud_readonly_text_to_sql";
+    public string TemplateName { get; set; } = "business_readonly_text_to_sql";
 
     public int MaxRepairAttempts { get; set; } = DefaultMaxRepairAttempts;
 

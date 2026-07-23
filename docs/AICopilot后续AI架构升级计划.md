@@ -1,6 +1,6 @@
 # AICopilot 后续 AI 架构升级总计划
 
-> 状态：最终实施总计划 v2.2，已吸收两轮独立评审并完成关键架构裁决
+> 状态：历史设计计划 v2.2，已被当前总规则、项目规则和专题契约取代；不是默认材料或实施入口，仅在追溯对应历史决策时定向读取
 >
 > 日期：2026-07-17
 >
@@ -930,8 +930,8 @@ NodeKind 是执行器类型，不是权限包，也不是新 Skill。
 - Cloud 失败、空集或未配置时不得回退 Simulation 冒充真实数据。
 - 对已经覆盖的正式 Cloud-only `Analysis.*` 语义，当前八个 Cloud AiRead typed GET 继续作为唯一执行路径。
 - `QuerySemanticAsync` 仅是这八个 typed GET 之上的内部语义分派门面，不新增 HTTP 表面。
-- Cloud-only intent 的失败、空集、关闭、规划失败、拒绝、限流、超时或非法响应都不得回退 Direct DB、Text-to-SQL、Simulation、MCP 或隐藏适配器。
-- Direct DB 和 Text-to-SQL 只服务正式语义未覆盖的低频自由探索和治理白名单补充分析，必须走独立 `GovernedDataReadNode`。
+- 当前统一查询契约已取代这里的旧“任何失败都不回退”设计：`Empty`、`NeedClarification`、`Unauthorized` 终止；只有插件 `Unsupported` 或同源 `Unavailable`，且确认计划明确选择时，才可进入同一 Cloud profile 的受控 Text-to-SQL。
+- Text-to-SQL 不得成为第二条隐式数据源或独立安全轨；它只能由统一 provider/fallback policy 调度，并经过共享 AST guard 与只读数据库账号。
 - Unknown intent 不得因为无法识别就自动进入 Direct DB 或 Text-to-SQL。
 - 两条路径使用不同权限、执行模式和 Evidence 来源，禁止自动互相 fallback。
 - 新的预测读取端点必须通过单独跨项目契约增加，不能在 AICopilot 内自行假设。

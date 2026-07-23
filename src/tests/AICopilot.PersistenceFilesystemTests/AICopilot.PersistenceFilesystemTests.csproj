@@ -6,10 +6,9 @@
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <AICopilotTestKind>Persistence</AICopilotTestKind>
+    <AICopilotCiSecurityFilter>FullyQualifiedName~AICopilot.PersistenceFilesystemTests.LocalFileStorageSecurityTests.LocalFileStorageService_ShouldConstrainAccessToConfiguredRoot</AICopilotCiSecurityFilter>
     <AICopilotTestRuntime>Filesystem</AICopilotTestRuntime>
-    <AICopilotTestCadence>PR</AICopilotTestCadence>
     <AICopilotTestOwner>Persistence</AICopilotTestOwner>
-    <AICopilotRequired>true</AICopilotRequired>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="FluentAssertions" Version="8.8.0" />

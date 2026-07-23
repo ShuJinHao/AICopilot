@@ -17,12 +17,14 @@ internal sealed class AgentBuiltInToolDispatcher(
     IAgentTableFileParser tableFileParser,
     IKnowledgeRetrievalService knowledgeRetrievalService,
     IEnumerable<IKnowledgeBaseAccessChecker> knowledgeBaseAccessCheckers,
-    ICloudReadonlyAgentToolExecutor cloudReadonlyToolExecutor,
     IIdentityAccessService identityAccessService,
     AgentRuntimeArtifactBuilder artifactBuilder,
+    IBusinessDataSourceProfileRegistry businessDataSourceProfileRegistry,
+    IBusinessQueryProviderRegistry businessQueryProviderRegistry,
+    IBusinessQueryContextStore businessQueryContextStore,
     IBusinessDatabaseReadService? businessDatabaseReadService = null,
     IBusinessTextToSqlRuntime? businessTextToSqlRuntime = null,
-    CloudReadOnlyTextToSqlFallbackRunner? cloudTextToSqlFallbackRunner = null,
+    BusinessTextToSqlFallbackRunner? businessTextToSqlFallbackRunner = null,
     AgentReasoningNodeExecutor? reasoningNodeExecutor = null)
 {
     private readonly AgentRuntimeFileInputToolService fileInputTools = new(
@@ -36,12 +38,13 @@ internal sealed class AgentBuiltInToolDispatcher(
         knowledgeBaseAccessCheckers,
         identityAccessService);
 
-    private readonly AgentRuntimeCloudReadonlyToolService cloudReadonlyTools = new(cloudReadonlyToolExecutor);
-
     private readonly AgentRuntimeBusinessQueryToolService businessQueryTools = new(
         businessDatabaseReadService,
         businessTextToSqlRuntime,
-        cloudTextToSqlFallbackRunner);
+        businessTextToSqlFallbackRunner,
+        businessDataSourceProfileRegistry,
+        businessQueryProviderRegistry,
+        businessQueryContextStore);
 
     public Task<object> ExecuteAsync(AgentToolExecutionContext context)
     {
@@ -89,8 +92,7 @@ internal sealed class AgentBuiltInToolDispatcher(
             "parse_csv_json" => await fileInputTools.ParseTableFileAsync(task.UserId, workspace, step, plan, state, cancellationToken),
             "parse_table_file" => await fileInputTools.ParseTableFileAsync(task.UserId, workspace, step, plan, state, cancellationToken),
             "rag_search" => await ragTools.SearchRagAsync(task, plan, state, cancellationToken),
-            "query_cloud_data_readonly" => await cloudReadonlyTools.QueryCloudReadonlyAsync(plan, step, state, cancellationToken),
-            "query_business_database_readonly" => await businessQueryTools.QueryBusinessDatabaseReadonlyP1Async(task, plan, state, cancellationToken),
+            "query_business_database_readonly" => await businessQueryTools.QueryBusinessDatabaseReadonlyP1Async(task, plan, step, state, cancellationToken),
             "summarize_business_query_result" => businessQueryTools.SummarizeBusinessQueryResult(state),
             "join_evidence" => AgentRuntimeEvidenceJoinTool.Join(plan, step, inputEvidence ?? []),
             "assess_cloud_health" => AgentCloudHealthAssessmentTool.Assess(plan, state, inputEvidence ?? []),

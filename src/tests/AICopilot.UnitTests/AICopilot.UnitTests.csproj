@@ -6,10 +6,9 @@
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <AICopilotTestKind>Unit</AICopilotTestKind>
+    <AICopilotCiSecurityFilter>FullyQualifiedName~AICopilot.UnitTests.EnabledAdminInvariantPolicyTests</AICopilotCiSecurityFilter>
     <AICopilotTestRuntime>Pure</AICopilotTestRuntime>
-    <AICopilotTestCadence>PR</AICopilotTestCadence>
     <AICopilotTestOwner>IdentityPolicy</AICopilotTestOwner>
-    <AICopilotRequired>true</AICopilotRequired>
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />

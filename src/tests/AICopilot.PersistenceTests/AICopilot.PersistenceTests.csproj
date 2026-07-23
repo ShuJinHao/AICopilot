@@ -6,10 +6,9 @@
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <AICopilotTestKind>Persistence</AICopilotTestKind>
+    <AICopilotCiSecurityFilter>FullyQualifiedName~AICopilot.PersistenceTests.IdentityEnabledAdminInvariantTests</AICopilotCiSecurityFilter>
     <AICopilotTestRuntime>Postgres</AICopilotTestRuntime>
-    <AICopilotTestCadence>PR</AICopilotTestCadence>
     <AICopilotTestOwner>IdentityPersistence</AICopilotTestOwner>
-    <AICopilotRequired>true</AICopilotRequired>
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />

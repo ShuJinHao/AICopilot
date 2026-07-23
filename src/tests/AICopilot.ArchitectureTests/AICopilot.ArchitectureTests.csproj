@@ -8,9 +8,7 @@
     <IsTestProject>true</IsTestProject>
     <AICopilotTestKind>Architecture</AICopilotTestKind>
     <AICopilotTestRuntime>Filesystem</AICopilotTestRuntime>
-    <AICopilotTestCadence>PR</AICopilotTestCadence>
     <AICopilotTestOwner>Architecture</AICopilotTestOwner>
-    <AICopilotRequired>true</AICopilotRequired>
   </PropertyGroup>
 
   <ItemGroup>

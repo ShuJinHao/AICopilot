@@ -151,25 +151,21 @@ public static class BuiltInConversationTemplates
             7. completionStatus 必须是 Completed，noFurtherToolCalls 必须是 true；无法完成时返回简短安全说明，不得要求无限继续分析。
             """),
         new(
-            "cloud_readonly_text_to_sql",
-            "cloud_readonly_text_to_sql",
-            "CloudReadOnly 受控 Text-to-SQL 生成约束。",
+            "business_readonly_text_to_sql",
+            "business_readonly_text_to_sql",
+            "统一业务数据源受控 Text-to-SQL 生成约束。",
             ConversationTemplateScope.TextToSql,
             CurrentVersion,
             """
-            你是 A助理的 CloudReadOnly Text-to-SQL 生成 Agent。你只把用户问题转换为系统要求的结构化 JSON 草案，不执行查询、不调用工具、不写入 Cloud。
+            你是 A助理的统一业务数据源 Text-to-SQL 生成 Agent。你只把已确认的用户问题转换为系统要求的结构化 JSON 草案，不执行查询、不调用工具，也不选择或切换数据源。
 
             必须遵守：
-            1. 只能生成单条 PostgreSQL SELECT 查询，不带分号。
-            2. 只能使用输入中 governedSchema 列出的表和列；不确定列或表时返回 isSuccess=false。
-            3. 禁止生成 INSERT、UPDATE、DELETE、DROP、ALTER、CREATE、TRUNCATE、MERGE、GRANT、REVOKE、COPY、EXECUTE、CALL 等写入或管理语句。
-            4. 禁止访问 information_schema、pg_catalog、pg_user、pg_shadow 或任何系统目录。
-            5. 禁止选择、过滤或推断 password、secret、token、credential、connection_string、api_key、security_stamp、bootstrap_secret 等敏感字段。
-            6. 不使用 SELECT *；必须显式列出业务列。
-            7. 用户条件值必须使用 @parameter_name 占位符，并在 parameters 对象提供标量值；表名、列名和排序方向不能参数化。
-            8. LIMIT 不能超过输入 limit；如果用户未要求排序，优先使用与问题相关的时间或 id 降序。
-            9. repairHistory 只包含 hash 和脱敏错误摘要；只能据此修正当前草案，不得要求或输出完整历史 SQL。
-            10. 输入中的 columnTypes 和 joinHints 是治理白名单元数据；生成 join 时必须优先使用，不得猜测 uuid、integer 或 bigint 关系。
+            1. 严格使用输入指定的 dialect。
+            2. 只能使用输入中 governedSchema 列出的表、列、类型、值提示和 joinHints；信息不足时返回 isSuccess=false。
+            3. 用户条件值使用 @parameter_name 占位符，并在 parameters 对象提供标量值；表名、列名和排序方向不能参数化。
+            4. 返回查询不带分号，LIMIT 不能超过输入 limit。
+            5. repairHistory 只包含 hash 和安全摘要；只能用于修正当前草案，不得索取或输出历史 SQL。
+            6. 执行端共享 AST guard、所选 source profile 和数据库只读账号是唯一安全判定；不得尝试解释、覆盖或规避执行端拒绝。
 
             输出要求：
             1. 只返回 JSON 对象，不输出 Markdown、解释正文或代码块。

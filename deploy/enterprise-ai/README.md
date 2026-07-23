@@ -1,5 +1,7 @@
 # AICopilot enterprise-ai deploy
 
+> 读取边界：只有 AICopilot 部署实现或具体故障命中本目录时才读取对应章节；普通发布不默认读取历史状态和未命中的旧事务细节。
+
 本目录是 AICopilot 镜像构建和旧事务维护实现目录。新接手日常部署先读工作区根 `deploy/README.md` 和 `deploy/Deploy-Changed.ps1`，再按需查看本文件、仓库根目录的 `AICopilot 项目部署与维护指南.md`、`AGENTS.md` 和 `资料/AICopilot业务规则.md`。
 
 > 当前状态（2026-07-11）：AICopilot 全量应用已完成真实 Harbor、生产 Runner、PostgreSQL 备份、migration、rollout 与健康检查；自动增量入口的编译门禁、依赖影响测试和生产 SHA 只读 inspect 已通过，但尚未用新的单服务业务变更执行生产发布，因此不得把全量成功冒充增量生产 E2E。
@@ -13,8 +15,8 @@
 ## 部署口径
 
 - 生产环境使用 Docker Compose 单机编排，服务器目录为 `/srv/enterprise-ai/deploy`。
-- 工作区日常标准发布走 `pwsh ./deploy/Deploy-Changed.ps1 -Targets AICopilot`；入口自动 push 已提交的 main、读取生产 SHA，并按依赖闭包只选择受影响镜像。本目录 `build-and-push.sh` 只负责显式服务镜像，`local-release.sh` / `deploy-release.sh` 只保留给基础设施维护和旧链恢复。
-- 日常入口只接受 clean/main，未提交内容直接阻断。每次远端阶段只投递一份 digest-bound 请求；`Auto` 在 SSH TCP 不可达时经 `aicopilot-routine-request.yml` self-hosted Runner 交给同一稳定 Runner。
+- 工作区日常标准发布走 `pwsh ./deploy/Deploy-Changed.ps1 -Targets AICopilot`；入口只接受 clean、已提交的 main，可 push 现有 HEAD但不创建提交或修改 tracked 文件；复用同 SHA 证据，只补受影响 Architecture/Security/DeploymentContract，再按依赖闭包发布受影响镜像。全量、coverage、mutation、duplication 和 CrossProject 不属于部署。
+- 三端从零部署走 `pwsh ./deploy/Deploy-FromZero.ps1 -Targets Cloud,AICopilot,Edge -ConfirmFromZero`；本机根密钥只从 macOS Keychain canonical schema 读取，缺键时远端零写入。AI 阶段只做 readonly 权限、migration、模型 seed 和健康。
 - AICopilot 选择 HttpApi/DataWorker/RagWorker 时自动包含 migration。Runner 在 migration 前生成 PostgreSQL dump/checksum，随后只对选中应用服务执行 `--no-deps` 更新；PostgreSQL、RabbitMQ、Qdrant 不随应用发布重建。
 - Runner/Compose/scripts/cloud-readonly 支持文件升级、深度安全巡检、cleanup 和 Harbor GC 均是独立维护任务，不得塞回日常应用热路径。
 - 多 agent 可以同时准备本地候选，但远端 support install、release state、容器变更和 cleanup 必须由托管锁串行化；第二个发布遇到 active lock 时立即返回 `75`，不得静默等待或绕锁重发。
@@ -24,7 +26,7 @@
 - 灾备 workflow 当前仍依赖 GitHub production environment secrets；它只允许最小仓库权限和非 root runner。runner 机器权限收敛、短期凭据或 Vault/OIDC 接入必须单独作为基础设施项验收，不能用 workflow 代码改动替代；runner 脚本只证明本机事实，不证明 GitHub environment secrets 或 Vault/OIDC 已完成。
 - 应用镜像和基础镜像全部来自 Harbor，不从 Docker Hub/MCR 作为生产依赖源直接拉取。
 - AICopilot 应用镜像不保留历史版本；Harbor 和服务器本机只保留当前生产正在运行的 `sha-*` 应用镜像。
-- 日常本地构建 + SSH 标准链使用服务器预置且 mode `0600` 的真实 `.env`，support sync 明确排除它；GitHub secret `DEPLOY_ENV_FILE` 只服务灾备 workflow。真实 `.env` 不提交到仓库。
+- 日常链使用服务器预置且 mode `0600` 的真实 `.env`，support sync 明确排除它；从零部署按 Keychain 生成该文件。Markdown、旧 env 与 GitHub `DEPLOY_ENV_FILE` 不作为标准流程 fallback。
 - 当前内网部署红线是 HTTP-only。部署脚本、compose、nginx 模板和验收命令不得把 HTTPS redirection、HSTS、443 listener、证书申请/续期或 OIDC HTTPS metadata 强制校验作为当前门槛；安全加固改走内网隔离、端口收敛、同源代理、CORS 白名单、强 secret、短期 token、非 root 容器、只读边界和除 HSTS 外的安全响应头。
 - AICopilot 对 Cloud 业务数据保持只读边界；不得通过 MCP、Tool、Agent workflow、后台任务或隐藏适配器写 Cloud。
 - 当前标准 non-root 发布还要求 `releases/current-release*`、`staged-release*`、`previous-release*`、`current-release.summary.md` 和 deploy support files 对标准部署用户可读可写；root 应急路径一旦写入这些状态，关闭任务前必须恢复 owner/mode。
@@ -64,29 +66,15 @@ deploy/enterprise-ai/
   releases/               # 服务器发布状态，不提交仓库
 ```
 
-## GitHub 配置
+## GitHub 只读状态 inspect
 
-Secrets:
+`aicopilot-routine-request.yml` 只读导出白名单生产状态，只需要生产目录定位：
 
 ```text
-OCI_REGISTRY=harbor.internal.example:80
-OCI_NAMESPACE=enterprise-ai
-OCI_REGISTRY_USERNAME=<Harbor robot 或用户>
-OCI_REGISTRY_PASSWORD=<Harbor 密码或 token>
 DEPLOY_TARGET_DIR=/srv/enterprise-ai/deploy
-DEPLOY_ENV_FILE=<完整生产 .env 内容>
-DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING=<可选，Cloud PostgreSQL 只读账号连接串>
-DATA_ANALYSIS_CLOUD_READONLY_USERNAME=<可选，仅用于自动创建/轮换只读 DB 角色>
-DATA_ANALYSIS_CLOUD_READONLY_PASSWORD=<可选，仅用于自动创建/轮换只读 DB 角色>
 ```
 
-Variables:
-
-```text
-VITE_CLOUD_PLATFORM_URL=http://cloud.internal.example:81
-```
-
-`DEPLOY_ENV_FILE` 内容从 `.env.example` 复制后替换强密码和 token。不得把真实 `.env`、JWT secret、数据库密码、Qdrant key 或 Cloud service token 写入仓库。
+标准发布的 Harbor、模型、管理员、Cloud readonly 与数据库凭据全部来自 macOS Keychain。`DEPLOY_ENV_FILE`、GitHub Cloud readonly secrets、Markdown 和旧 env 都不得作为普通部署 fallback；Emergency workflow 的独立 secret 只在用户明确授权灾备时按对应 workflow 检查。
 标准 non-root 发布还要求 `releases/current-release*`、`staged-release*`、`previous-release*`、`current-release.summary.md` 和 deploy support files 对标准部署用户可读可写；root 应急路径一旦写入这些状态，关闭任务前必须恢复 owner/mode。
 
 Runner 机器侧验收：
@@ -103,8 +91,10 @@ cd /srv/enterprise-ai/deploy
 平台侧留痕使用 `runner-platform-attestation.template.md` 复制一份填写，填好的记录不要提交真实 secret 或敏感截图；完成后用
 `scripts/check-platform-attestation-record.sh --record <filled-attestation.md>` 做静态完整性校验。该 linter 会拒绝模板占位符、未勾选项、空签署人和 `pending` / `not implemented` / `N/A` 等弱证明词，并要求记录包含 GitHub production environment secret 限制、`contents: read`、`self-hosted + iiot-linux-prod`、生产/secret workflow 无 GitHub hosted runner 的证据；如果 OIDC/Vault 或等价短期凭据尚未落地，记录里只能写成已批准的基础设施例外，并按结构化字段给出 `Ticket or change id`、`Exception owner`、`Due date` 和 `Current mitigation`。该 linter 只检查事实记录是否完整，不能替代 GitHub、Vault、OIDC 或 runner 真实验收。
 
-内部开发需要让 AICopilot 直连真实 Cloud 只读数据库时，连接串只放在 GitHub production environment secret
-`DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING`，并通过 `aicopilot-enable-direct-cloud-readonly-db` 写入服务器 `.env`。
+真实 Cloud 只读数据库的连接配置、模式开关和 readonly role 不再通过 GitHub production environment
+secret 或手动 workflow 写入生产。新环境或清空重建统一由工作区
+`deploy/Deploy-FromZero.ps1` 从 macOS Keychain canonical schema 生成受限服务器 `.env`、
+建立并验证只读授权；普通增量部署只消费既有配置，不修改它。
 该模式只注册 AICopilot 自身的 DataAnalysis `CloudReadOnly` 数据源，不写 Cloud 业务表；数据库账号必须先确认为只读账号。
 Cloud Postgres 不发布到宿主端口，AICopilot 部署脚本会创建外部 Docker 网络
 `enterprise-ai-cloud-readonly`，并把 Cloud compose 的 `deploy/postgres` 容器连接为别名
@@ -116,12 +106,10 @@ Cloud PostgreSQL readonly role 的授权权威载体是
 `devices`、`mfg_processes`、`device_logs`、`hourly_capacity`、`pass_station_records`
 做显式表级 `GRANT SELECT`，并校验写权限、schema create 权限均不存在；不得改成
 `GRANT SELECT ON ALL TABLES`、默认权限、未来表自动授权或列级/表级混用口径。
-如果还没有只读账号，标准做法是在可访问服务器和 Cloud PostgreSQL 容器的机器上运行
-`deploy/enterprise-ai/scripts/apply-cloud-readonly-grants.sh`；随后用
-`deploy/enterprise-ai/scripts/check-cloud-readonly-grants.sh` 验证。历史
-`scripts/Provision-AICopilotCloudReadOnlyDbRole.sh` 和
-`aicopilot-provision-cloud-readonly-db-role` workflow 只保留为带确认词的手动兜底，
-且必须读取同一组 `cloud-readonly/*.sql`，不得再维护内联 GRANT 清单。
+`deploy/enterprise-ai/scripts/apply-cloud-readonly-grants.sh` 和
+`deploy/enterprise-ai/scripts/check-cloud-readonly-grants.sh` 只作为统一从零入口的内部实现，
+或在用户明确批准的独立基础设施维护中由服务器受限 `.env` 调用；它们不是第二套标准操作入口，
+不得读取 GitHub secrets、生成本机 canonical 密钥或维护内联 GRANT 清单。
 
 启用 direct DB 后，服务器 `deploy-release.sh` 会在重启服务前自动执行
 `scripts/check-cloud-readonly-grants.sh`；preflight 失败必须停止部署并先修 readonly
@@ -318,12 +306,17 @@ cd /srv/enterprise-ai/deploy
 仓库侧验证：
 
 ```bash
-dotnet build src/hosts/AICopilot.HttpApi/AICopilot.HttpApi.csproj
-dotnet build AICopilot.slnx --no-restore
-dotnet test src/tests/AICopilot.ArchitectureTests/AICopilot.ArchitectureTests.csproj
-dotnet test src/tests/AICopilot.DeploymentTests/AICopilot.DeploymentTests.csproj
-pwsh -NoProfile -File scripts/tests/Test-AICopilotTestInfrastructureBehavior.ps1
+pwsh -NoProfile -File scripts/tests/Select-AICopilotCiTests.ps1 \
+  -Mode Deployment \
+  -ChangedFiles <exact-sha-affected-files> \
+  -OutputPath artifacts/ci-test-selection.json
+pwsh -NoProfile -File scripts/tests/Invoke-AICopilotCiSelectedTests.ps1 \
+  -SelectionPath artifacts/ci-test-selection.json
 ```
+
+这里的 `Deployment` 选择只服务统一部署入口生成的精确 SHA 影响清单；日常生产发布必须从工作区
+`deploy/Deploy-Changed.ps1 -Targets AICopilot` 进入。该流程不得运行单仓全量、coverage、mutation、
+duplication 或跨仓对齐，也不得在部署过程中修改源码、测试或规则。
 
 服务器侧验证：
 

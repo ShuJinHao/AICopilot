@@ -86,20 +86,6 @@ internal static class AgentToolExecutionAuditBuilder
         ToolRegistration? tool,
         object? output = null)
     {
-        var cloudReadonly = output is CloudReadonlyAgentToolResult cloudResult
-            ? new
-            {
-                cloudResult.SourceMode,
-                cloudResult.IsSimulation,
-                cloudResult.SourceLabel,
-                cloudResult.SourcePath,
-                cloudResult.Intent,
-                cloudResult.Target,
-                cloudResult.Kind,
-                cloudResult.RowCount,
-                cloudResult.IsTruncated
-            }
-            : null;
         var businessQuery = TryReadBusinessQueryAudit(output);
         var toolOutputAudit = TryReadToolOutputAudit(output);
         var payload = new
@@ -125,7 +111,6 @@ internal static class AgentToolExecutionAuditBuilder
             toolCatalogVersion = tool?.CatalogVersion,
             toolRunId = toolOutputAudit.ToolRunId,
             resultHash = toolOutputAudit.ResultHash,
-            cloudReadonly,
             businessQuery
         };
         return SanitizeSummary(JsonSerializer.Serialize(payload, AgentRuntimeJson.Options), 4000) ?? "{}";

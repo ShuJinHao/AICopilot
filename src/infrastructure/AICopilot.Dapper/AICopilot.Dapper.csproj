@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\services\AICopilot.Services.Contracts\AICopilot.Services.Contracts.csproj" />
+    <ProjectReference Include="..\..\services\AICopilot.Services.CrossCutting\AICopilot.Services.CrossCutting.csproj" />
   </ItemGroup>
 
 </Project>

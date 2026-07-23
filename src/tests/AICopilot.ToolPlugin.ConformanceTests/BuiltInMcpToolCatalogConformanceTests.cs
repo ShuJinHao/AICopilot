@@ -27,10 +27,8 @@ public sealed class BuiltInMcpToolCatalogConformanceTests
         ticketPreview.RequiresApproval.Should().BeTrue();
         ticketPreview.ApprovalPolicy.Should().Be("ToolApproval");
 
-        var cloudReadonly = tools.Should().ContainSingle(tool => tool.ToolCode == "query_cloud_data_readonly").Which;
-        cloudReadonly.IsEnabled.Should().BeFalse();
-        cloudReadonly.IsVisibleToPlanner.Should().BeFalse();
-        cloudReadonly.IsExecutableByAgent.Should().BeFalse();
+        tools.Should().NotContain(tool =>
+            BuiltInToolRegistrations.ObsoleteAgentRuntimeToolCodes.Contains(tool.ToolCode));
 
         var businessReadonly = tools.Should().ContainSingle(tool => tool.ToolCode == "query_business_database_readonly").Which;
         businessReadonly.RequiredPermission.Should().Be("DataSource.TextToSql");

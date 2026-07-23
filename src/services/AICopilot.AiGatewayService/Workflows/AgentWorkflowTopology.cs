@@ -30,9 +30,8 @@ public static class AgentWorkflowTopology
 
     public static IReadOnlyList<AgentWorkflowParallelBranchDescriptor> ParallelBranches { get; } =
     [
-        new(BranchType.Tools, 10),
-        new(BranchType.Knowledge, 20),
-        new(BranchType.DataAnalysis, 30),
-        new(BranchType.BusinessPolicy, 40)
+        new(BranchType.Knowledge, 10),
+        new(BranchType.DataAnalysis, 20),
+        new(BranchType.BusinessPolicy, 30)
     ];
 }

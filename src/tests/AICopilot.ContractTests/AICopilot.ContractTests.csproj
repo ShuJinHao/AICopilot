@@ -7,9 +7,7 @@
     <IsTestProject>true</IsTestProject>
     <AICopilotTestKind>Contract</AICopilotTestKind>
     <AICopilotTestRuntime>Pure</AICopilotTestRuntime>
-    <AICopilotTestCadence>PR</AICopilotTestCadence>
     <AICopilotTestOwner>IdentityContract</AICopilotTestOwner>
-    <AICopilotRequired>true</AICopilotRequired>
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />

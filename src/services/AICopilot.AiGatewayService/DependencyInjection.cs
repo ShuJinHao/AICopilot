@@ -72,15 +72,9 @@ public static class DependencyInjection
             typeof(UploadRecordCoordinator));
         builder.Services.AddScoped<IAgentWorkspaceFingerprintProvider, AgentWorkspaceFingerprintProvider>();
         builder.Services.AddScoped<IAgentWorkerHeartbeatService, AgentWorkerHeartbeatService>();
-        builder.Services.AddScoped<ICloudReadonlyAgentIntentRouter, CloudReadonlyAgentIntentRouter>();
         builder.Services.AddScoped<ICloudReadonlyAgentPlanService, CloudReadonlyAgentPlanService>();
-        builder.Services.AddSingleton<CloudReadonlySimulationDataSet>();
-        builder.Services.AddSingleton<ICloudReadonlySimulationIntentPlanner, CloudReadonlySimulationIntentPlanner>();
-        builder.Services.AddScoped<ICloudReadonlyDataProvider, DisabledCloudReadonlyDataProvider>();
-        builder.Services.AddScoped<ICloudReadonlyDataProvider, SimulationCloudReadonlyDataProvider>();
-        builder.Services.AddScoped<ICloudReadonlyDataProvider, RealCloudReadonlyDataProvider>();
-        builder.Services.AddScoped<ICloudReadonlyDataProviderResolver, CloudReadonlyDataProviderResolver>();
-        builder.Services.AddScoped<ICloudReadonlyAgentToolExecutor, CloudReadonlyAgentToolExecutor>();
+        builder.Services.AddScoped<IBusinessQueryProvider, CloudAiReadBusinessQueryProvider>();
+        builder.Services.AddScoped<IBusinessQueryProviderRegistry, BusinessQueryProviderRegistry>();
         var mockMcpEnabled = builder.Environment.IsDevelopment() &&
                              builder.Configuration
                                  .GetSection(MockMcpOptions.SectionName)
@@ -132,15 +126,17 @@ public static class DependencyInjection
         });
 
         AddScopedComponents(builder.Services,
-            typeof(IntentRoutingAgentBuilder), typeof(DataAnalysisAgentBuilder),
-            typeof(IntentRoutingExecutor), typeof(ToolsPackExecutor), typeof(KnowledgeRetrievalExecutor),
-            typeof(SemanticAnalysisRunner), typeof(CloudReadOnlyTextToSqlFallbackRunner), typeof(FreeFormDbaAnalysisRunner),
+            typeof(IntentRoutingAgentBuilder),
+            typeof(IntentRoutingExecutor), typeof(KnowledgeRetrievalExecutor),
+            typeof(SemanticAnalysisRunner), typeof(BusinessTextToSqlFallbackRunner),
             typeof(DataAnalysisWidgetEmitter), typeof(DataAnalysisAuditRecorder), typeof(ToolExecutionAuditRecorder),
             typeof(DataAnalysisExecutor), typeof(BusinessPolicyExecutor), typeof(ContextAggregatorExecutor),
             typeof(FinalAgentBuildExecutor), typeof(FinalAgentRunExecutor), typeof(AgentWorkflowPipeline));
         builder.Services.AddScoped<IAgentRoutingConfigurationSnapshotReader>(services =>
             services.GetRequiredService<IntentRoutingAgentBuilder>());
-        builder.Services.AddScoped<ICloudReadOnlyTextToSqlGenerator, CloudReadOnlyLlmTextToSqlGenerator>();
+        builder.Services.AddScoped<IBusinessTextToSqlGenerator, BusinessLlmTextToSqlGenerator>();
+        builder.Services.AddScoped<IBusinessTextToSqlFallbackRunner>(services =>
+            services.GetRequiredService<BusinessTextToSqlFallbackRunner>());
         builder.Services.AddScoped<IAgentTaskChatEvidenceProvider, AgentTaskChatEvidenceProvider>();
     }
 

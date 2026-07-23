@@ -24,8 +24,7 @@ foreach ($keyword in @(
 
 function Get-SourceFiles {
     param(
-        [Parameter(Mandatory)][string[]]$Roots,
-        [switch]$Tests
+        [Parameter(Mandatory)][string[]]$Roots
     )
 
     $files = foreach ($relativeRoot in $Roots) {
@@ -39,7 +38,7 @@ function Get-SourceFiles {
             $_.FullName -notmatch '[/\\](bin|obj|node_modules|dist|coverage)[/\\]' -and
             $_.FullName -notmatch '[/\\]Migrations[/\\]' -and
             $_.Name -notmatch '(\.Designer|ModelSnapshot|\.g)\.cs$' -and
-            ($Tests -or $_.FullName -notmatch '[/\\](tests|testing)[/\\]')
+            $_.FullName -notmatch '[/\\](tests|testing)[/\\]'
         }
     }
 
@@ -78,8 +77,7 @@ function Get-CloneMeasurement {
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][IO.FileInfo[]]$Files,
         [Parameter(Mandatory)][ValidateSet('Exact', 'Near', 'Structural')][string]$Mode,
-        [Parameter(Mandatory)][int]$WindowSize,
-        [switch]$AssertionsOnly
+        [Parameter(Mandatory)][int]$WindowSize
     )
 
     $signatures = @{}
@@ -89,10 +87,6 @@ function Get-CloneMeasurement {
         $lineNumber = 0
         foreach ($line in [IO.File]::ReadLines($file.FullName)) {
             $lineNumber++
-            if ($AssertionsOnly -and $line -notmatch '(\.Should\(|Assert\.|expect\(|\.to(Be|Equal|Match|Contain|Throw)|Shouldly)') {
-                continue
-            }
-
             $normalized = Normalize-SourceLine $line $Mode
             if ($null -ne $normalized) {
                 $logicalLines.Add([pscustomobject]@{ Number = $lineNumber; Text = $normalized })
@@ -172,15 +166,10 @@ $productionFiles = @(Get-SourceFiles @(
     'src/shared',
     'src/vues/AICopilot.Web/src'
 ))
-$supportFiles = @(Get-SourceFiles @('src/testing') -Tests)
-$testFiles = @(Get-SourceFiles @('src/tests', 'src/vues/AICopilot.Web/tests') -Tests)
-
 $measurements = [ordered]@{
     productionExact = Get-CloneMeasurement $productionFiles Exact 8
     productionNear = Get-CloneMeasurement $productionFiles Near 8
     productionStructural = Get-CloneMeasurement $productionFiles Structural 8
-    testSupportHelpers = Get-CloneMeasurement $supportFiles Near 6
-    testAssertionFlows = Get-CloneMeasurement $testFiles Near 3 -AssertionsOnly
 }
 
 $report = [ordered]@{
@@ -189,8 +178,6 @@ $report = [ordered]@{
     generatedAtUtc = [DateTime]::UtcNow.ToString('O')
     sourceCounts = [ordered]@{
         production = $productionFiles.Count
-        testSupport = $supportFiles.Count
-        tests = $testFiles.Count
     }
     categories = [ordered]@{}
 }

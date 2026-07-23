@@ -3,7 +3,7 @@ using Microsoft.Extensions.Options;
 
 namespace AICopilot.AiGatewayService.Workflows.Executors;
 
-public sealed record CloudReadOnlyTextToSqlFallbackResult(
+public sealed record BusinessTextToSqlFallbackResult(
     bool Succeeded,
     string Context,
     IReadOnlyList<Dictionary<string, object?>> Rows,
@@ -13,23 +13,58 @@ public sealed record CloudReadOnlyTextToSqlFallbackResult(
     IReadOnlyList<CloudReadOnlyTextToSqlRepairAttemptRecord> RepairAttempts,
     string SafeMessage);
 
-public sealed class CloudReadOnlyTextToSqlFallbackRunner(
-    ICloudReadOnlyTextToSqlGenerator generator,
+public interface IBusinessTextToSqlFallbackRunner
+{
+    Task<BusinessTextToSqlFallbackResult> RunAsync(
+        BusinessQueryContext context,
+        BusinessDatabaseConnectionInfo database,
+        string? question,
+        int? requestedLimit,
+        CancellationToken cancellationToken);
+}
+
+public sealed class BusinessTextToSqlFallbackRunner(
+    IBusinessTextToSqlGenerator generator,
     IDatabaseConnector databaseConnector,
     DataAnalysisAuditRecorder auditRecorder,
+    IBusinessDataSourceProfileRegistry profileRegistry,
     IOptions<CloudReadOnlyTextToSqlOptions>? options = null)
+    : IBusinessTextToSqlFallbackRunner
 {
-    public async Task<CloudReadOnlyTextToSqlFallbackResult> RunAsync(
+    public async Task<BusinessTextToSqlFallbackResult> RunAsync(
+        BusinessQueryContext context,
         BusinessDatabaseConnectionInfo database,
         string? question,
         int? requestedLimit,
         CancellationToken cancellationToken)
     {
+        var registeredSourceProfile = profileRegistry.GetRequired(
+            context.SourceKey,
+            context.SourceType);
+        if (!registeredSourceProfile.TryResolveCapabilityQueryProfile(
+                context.Capability,
+                out var sourceProfile))
+        {
+            const string capabilityProfileMessage =
+                "Governed Text-to-SQL has no capability-specific table and column profile for the confirmed query capability.";
+            await auditRecorder.RecordBusinessTextToSqlFallbackAsync(
+                database,
+                AuditResults.Rejected,
+                capabilityProfileMessage,
+                ComputeHash(question),
+                string.Empty,
+                0,
+                false,
+                [],
+                cancellationToken);
+            return Failed(capabilityProfileMessage, []);
+        }
+
         var resolvedOptions = options?.Value ?? new CloudReadOnlyTextToSqlOptions();
         if (!resolvedOptions.Enabled)
         {
-            const string disabledMessage = "Cloud readonly Text-to-SQL fallback is disabled.";
-            await auditRecorder.RecordCloudReadOnlyTextToSqlFallbackAsync(
+            const string disabledMessage = "Governed business Text-to-SQL fallback is disabled.";
+            await auditRecorder.RecordBusinessTextToSqlFallbackAsync(
                 database,
                 AuditResults.Rejected,
                 disabledMessage,
@@ -42,10 +77,10 @@ public sealed class CloudReadOnlyTextToSqlFallbackRunner(
             return Failed(disabledMessage, []);
         }
 
-        var validationError = ValidateDatabase(database);
+        var validationError = ValidateDatabase(context, database, sourceProfile);
         if (validationError is not null)
         {
-            await auditRecorder.RecordCloudReadOnlyTextToSqlFallbackAsync(
+            await auditRecorder.RecordBusinessTextToSqlFallbackAsync(
                 database,
                 AuditResults.Rejected,
                 validationError,
@@ -58,9 +93,29 @@ public sealed class CloudReadOnlyTextToSqlFallbackRunner(
             return Failed(validationError, []);
         }
 
+        if (!sourceProfile.SupportsTextToSqlFallback ||
+            sourceProfile.TextToSql is null)
+        {
+            const string profileMessage =
+                "Governed Text-to-SQL requires a registered source profile with dialect and schema metadata.";
+            await auditRecorder.RecordBusinessTextToSqlFallbackAsync(
+                database,
+                AuditResults.Rejected,
+                profileMessage,
+                ComputeHash(question),
+                string.Empty,
+                0,
+                false,
+                [],
+                cancellationToken);
+            return Failed(profileMessage, []);
+        }
+
         var limit = ResolveLimit(database, requestedLimit);
         var attempts = new List<CloudReadOnlyTextToSqlRepairAttemptRecord>();
-        var safeQuestion = string.IsNullOrWhiteSpace(question) ? "Cloud readonly data query" : question.Trim();
+        var safeQuestion = string.IsNullOrWhiteSpace(question)
+            ? "Governed readonly business data query"
+            : question.Trim();
         var maxRepairAttempts = resolvedOptions.ResolveMaxRepairAttempts();
         var queryOptions = resolvedOptions.ResolveQueryOptions();
         string? previousSqlForRepair = null;
@@ -69,11 +124,10 @@ public sealed class CloudReadOnlyTextToSqlFallbackRunner(
              attemptIndex <= maxRepairAttempts + 1;
              attemptIndex++)
         {
-            var generationRequest = new CloudReadOnlyTextToSqlGenerationRequest(
+            var generationRequest = new BusinessTextToSqlGenerationRequest(
                 safeQuestion,
                 limit,
-                CloudReadOnlyGovernedSchema.AllowedTables,
-                CloudReadOnlyGovernedSchema.AllowedColumns,
+                sourceProfile,
                 attempts)
             {
                 PreviousSqlForRepair = previousSqlForRepair
@@ -89,29 +143,11 @@ public sealed class CloudReadOnlyTextToSqlFallbackRunner(
                     attemptIndex,
                     CloudReadOnlyTextToSqlFailureStage.Draft,
                     generated.Sql,
-                    generated.FailureReason ?? "Cloud readonly Text-to-SQL generation failed.",
-                    maxRepairAttempts: maxRepairAttempts);
+                    generated.FailureReason ?? "Governed business Text-to-SQL generation failed.",
+                    maxRepairAttempts: maxRepairAttempts,
+                    securityProfile: sourceProfile.QuerySecurity);
                 attempts.Add(draftAttempt);
                 break;
-            }
-
-            var safetyError = CloudReadOnlySemanticSqlGuard.Validate(generated.Sql);
-            if (safetyError is not null)
-            {
-                var guardAttempt = CloudReadOnlyTextToSqlRepairClassifier.CreateAttemptRecord(
-                    attemptIndex,
-                    CloudReadOnlyTextToSqlFailureStage.Guard,
-                    generated.Sql,
-                    safetyError,
-                    maxRepairAttempts: maxRepairAttempts);
-                attempts.Add(guardAttempt);
-                if (!guardAttempt.CanRetry)
-                {
-                    break;
-                }
-
-                previousSqlForRepair = generated.Sql;
-                continue;
             }
 
             try
@@ -119,23 +155,24 @@ public sealed class CloudReadOnlyTextToSqlFallbackRunner(
                 var queryResult = await databaseConnector.ExecuteQueryWithMetadataAsync(
                     database,
                     generated.Sql,
+                    sourceProfile.QuerySecurity,
                     generated.Parameters,
                     options: queryOptions,
                     cancellationToken: cancellationToken);
                 var rows = queryResult.Rows
                     .Select(row => row.ToDictionary(item => item.Key, item => item.Value, StringComparer.OrdinalIgnoreCase))
                     .ToList();
-                var analysis = BuildAnalysis(rows, queryResult, attempts);
-                var context = DataAnalysisFinalContextFormatter.FormatFreeForm(
+                var analysis = BuildAnalysis(database, rows, queryResult, attempts);
+                var formattedContext = DataAnalysisFinalContextFormatter.FormatFreeForm(
                     analysis,
                     decision: null,
                     rows,
                     schema: null);
                 var sqlHash = CloudReadOnlyTextToSqlRepairClassifier.ComputeSqlHash(generated.Sql);
-                await auditRecorder.RecordCloudReadOnlyTextToSqlFallbackAsync(
+                await auditRecorder.RecordBusinessTextToSqlFallbackAsync(
                     database,
                     AuditResults.Succeeded,
-                    $"Cloud readonly Text-to-SQL fallback executed. RowsObserved={queryResult.ReturnedRowCount}; Truncated={queryResult.IsTruncated}; RepairAttempts={attempts.Count}.",
+                    $"Governed business Text-to-SQL fallback executed. RowsObserved={queryResult.ReturnedRowCount}; Truncated={queryResult.IsTruncated}; RepairAttempts={attempts.Count}.",
                     ComputeHash(safeQuestion),
                     sqlHash,
                     queryResult.ReturnedRowCount,
@@ -143,15 +180,15 @@ public sealed class CloudReadOnlyTextToSqlFallbackRunner(
                     attempts,
                     cancellationToken);
 
-                return new CloudReadOnlyTextToSqlFallbackResult(
+                return new BusinessTextToSqlFallbackResult(
                     true,
-                    context,
+                    formattedContext,
                     rows,
                     queryResult.ReturnedRowCount,
                     queryResult.IsTruncated,
                     sqlHash,
                     attempts,
-                    "Cloud readonly Text-to-SQL fallback executed.");
+                    "Governed business Text-to-SQL fallback executed.");
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -164,7 +201,8 @@ public sealed class CloudReadOnlyTextToSqlFallbackRunner(
                     CloudReadOnlyTextToSqlFailureStage.Runtime,
                     generated.Sql,
                     ex.Message,
-                    maxRepairAttempts: maxRepairAttempts);
+                    maxRepairAttempts: maxRepairAttempts,
+                    securityProfile: sourceProfile.QuerySecurity);
                 attempts.Add(runtimeAttempt);
                 if (!runtimeAttempt.CanRetry)
                 {
@@ -176,11 +214,11 @@ public sealed class CloudReadOnlyTextToSqlFallbackRunner(
         }
 
         var safeMessage = attempts.LastOrDefault()?.SafeErrorSummary ??
-                          "Cloud readonly Text-to-SQL fallback did not produce an executable readonly query.";
-        await auditRecorder.RecordCloudReadOnlyTextToSqlFallbackAsync(
+                          "Governed business Text-to-SQL fallback did not produce an executable readonly query.";
+        await auditRecorder.RecordBusinessTextToSqlFallbackAsync(
             database,
             AuditResults.Rejected,
-            $"Cloud readonly Text-to-SQL fallback failed. LastError={safeMessage}; RepairAttempts={attempts.Count}.",
+            $"Governed business Text-to-SQL fallback failed. LastError={safeMessage}; RepairAttempts={attempts.Count}.",
             ComputeHash(safeQuestion),
             attempts.LastOrDefault()?.SqlHash ?? string.Empty,
             0,
@@ -191,11 +229,11 @@ public sealed class CloudReadOnlyTextToSqlFallbackRunner(
         return Failed(safeMessage, attempts);
     }
 
-    private static CloudReadOnlyTextToSqlFallbackResult Failed(
+    private static BusinessTextToSqlFallbackResult Failed(
         string safeMessage,
         IReadOnlyList<CloudReadOnlyTextToSqlRepairAttemptRecord> attempts)
     {
-        return new CloudReadOnlyTextToSqlFallbackResult(
+        return new BusinessTextToSqlFallbackResult(
             false,
             string.Empty,
             [],
@@ -207,6 +245,7 @@ public sealed class CloudReadOnlyTextToSqlFallbackRunner(
     }
 
     private static AnalysisDto BuildAnalysis(
+        BusinessDatabaseConnectionInfo database,
         IReadOnlyList<Dictionary<string, object?>> rows,
         DatabaseQueryResult queryResult,
         IReadOnlyCollection<CloudReadOnlyTextToSqlRepairAttemptRecord> attempts)
@@ -231,34 +270,46 @@ public sealed class CloudReadOnlyTextToSqlFallbackRunner(
 
         return new AnalysisDto
         {
-            SourceLabel = "Cloud 已有正式只读数据（DataAnalysis/Text-to-SQL 补充分析）",
+            SourceLabel = $"{database.Name}（受控 Text-to-SQL 补充分析）",
             Description = queryResult.IsTruncated
-                ? "Cloud 只读 Text-to-SQL 补充查询已执行，结果已截断。"
-                : "Cloud 只读 Text-to-SQL 补充查询已执行。",
+                ? "受控只读 Text-to-SQL 补充查询已执行，结果已截断。"
+                : "受控只读 Text-to-SQL 补充查询已执行。",
             Metadata = metadata
         };
     }
 
-    private static string? ValidateDatabase(BusinessDatabaseConnectionInfo database)
+    private static string? ValidateDatabase(
+        BusinessQueryContext context,
+        BusinessDatabaseConnectionInfo database,
+        BusinessDataSourceProfile sourceProfile)
     {
+        if (!context.IsConfirmed)
+        {
+            return "Governed Text-to-SQL requires a confirmed business query context.";
+        }
+
+        if (context.DataSourceId != database.Id ||
+            context.SourceType != database.ExternalSystemType ||
+            context.SourceType != sourceProfile.SourceType ||
+            database.Provider != sourceProfile.DatabaseProvider ||
+            !string.Equals(context.SourceKey, sourceProfile.Code, StringComparison.OrdinalIgnoreCase))
+        {
+            return "Governed Text-to-SQL source binding does not match the confirmed profile.";
+        }
+
         if (!database.IsEnabled)
         {
-            return "Cloud readonly data source is disabled.";
+            return "Governed readonly data source is disabled.";
         }
 
         if (!database.IsReadOnly)
         {
-            return "Cloud readonly Text-to-SQL requires a readonly data source.";
-        }
-
-        if (database.ExternalSystemType != DataSourceExternalSystemType.CloudReadOnly)
-        {
-            return "Cloud readonly Text-to-SQL only supports CloudReadOnly data sources.";
+            return "Governed Text-to-SQL requires a readonly data source.";
         }
 
         return database.ReadOnlyCredentialVerified
             ? null
-            : "Cloud read-only data source requires a verified readonly credential before execution.";
+            : "Governed Text-to-SQL requires a verified readonly credential before execution.";
     }
 
     private static int ResolveLimit(BusinessDatabaseConnectionInfo database, int? requestedLimit)
@@ -278,13 +329,13 @@ public sealed class CloudReadOnlyTextToSqlFallbackRunner(
     }
 }
 
-internal sealed class DisabledCloudReadOnlyTextToSqlGenerator : ICloudReadOnlyTextToSqlGenerator
+internal sealed class DisabledBusinessTextToSqlGenerator : IBusinessTextToSqlGenerator
 {
-    public Task<CloudReadOnlyTextToSqlGenerationResult> GenerateAsync(
-        CloudReadOnlyTextToSqlGenerationRequest request,
+    public Task<BusinessTextToSqlGenerationResult> GenerateAsync(
+        BusinessTextToSqlGenerationRequest request,
         CancellationToken cancellationToken = default)
     {
-        return Task.FromResult(CloudReadOnlyTextToSqlGenerationResult.Failure(
-            "Cloud readonly Text-to-SQL generator is not configured."));
+        return Task.FromResult(BusinessTextToSqlGenerationResult.Failure(
+            "Governed business Text-to-SQL generator is not configured."));
     }
 }

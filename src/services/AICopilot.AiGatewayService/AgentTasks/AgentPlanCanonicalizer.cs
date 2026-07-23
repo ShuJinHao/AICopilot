@@ -37,7 +37,6 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
         [
             "read_uploaded_file",
             "parse_table_file",
-            "query_cloud_data_readonly",
             "query_business_database_readonly",
             "summarize_business_query_result",
             "join_evidence",
@@ -424,11 +423,16 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
                 "ExecutablePlan v2 requires a gap-free authoritative compiler graph.");
         }
 
-        if (plan.QueryMode is not ("CloudReadonly" or "TextToSql") ||
-            taskType == AgentTaskType.CloudDataReport !=
-            string.Equals(plan.QueryMode, "CloudReadonly", StringComparison.Ordinal))
+        if (plan.QueryMode is not ("CloudReadonly" or "PluginOnly" or "TextToSql") ||
+            taskType == AgentTaskType.CloudDataReport &&
+            string.Equals(plan.QueryMode, "PluginOnly", StringComparison.Ordinal) ||
+            taskType != AgentTaskType.CloudDataReport &&
+            string.Equals(plan.QueryMode, "CloudReadonly", StringComparison.Ordinal) ||
+            plan.PlannerSafetySummary.IsSimulationOnly &&
+            !string.Equals(plan.QueryMode, "TextToSql", StringComparison.Ordinal))
         {
-            return InvalidResult("queryMode must be the exact task-bound CloudReadonly/TextToSql value.");
+            return InvalidResult(
+                "queryMode must be PluginOnly by default, exact TextToSql only when fallback/execution was explicitly selected, or CloudReadonly for typed Cloud plans.");
         }
 
         var expectedArtifactTools = artifactTargets
@@ -1327,7 +1331,7 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
                  node.DependsOn.Count != 1 ||
                  orderedNodes.Take(index).SingleOrDefault(parent =>
                      string.Equals(parent.NodeId, node.DependsOn.Single(), StringComparison.Ordinal)) is not { NodeKind: "CloudReadNode" } parentNode ||
-                 !parentNode.RequestedToolCodes.Contains("query_cloud_data_readonly", StringComparer.Ordinal) ||
+                 !parentNode.RequestedToolCodes.Contains("query_business_database_readonly", StringComparer.Ordinal) ||
                  cloudReadonlyIntent is null ||
                  !string.Equals(cloudReadonlyIntent.Intent, "Analysis.Device.Status", StringComparison.Ordinal) ||
                  !string.Equals(parentNode.Input!.SemanticIntent, cloudReadonlyIntent.Intent, StringComparison.Ordinal) ||

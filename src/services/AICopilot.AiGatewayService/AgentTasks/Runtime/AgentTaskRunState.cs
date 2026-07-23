@@ -31,26 +31,6 @@ internal sealed class AgentTaskRunState
         });
     }
 
-    public void ApplyCloudReadonlyResult(
-        AgentTaskPlanCloudReadonlyIntentDocument intent,
-        CloudReadonlyAgentToolResult result)
-    {
-        CloudReadonlyResults.RemoveAll(snapshot =>
-            string.Equals(snapshot.Intent, intent.Intent, StringComparison.Ordinal));
-        CloudReadonlyResults.Add(new AgentCloudReadonlyQuerySnapshot(
-            intent.Intent, intent.SemanticPlanDigest, result.Summary, result.Rows,
-            result.SourceLabel, result.SourceMode, result.IsSimulation, result.RowCount,
-            result.IsTruncated, result.QueriedAtUtc));
-        CloudReadonlyResults.Sort(static (left, right) =>
-            StringComparer.Ordinal.Compare(left.Intent, right.Intent));
-        (CloudReadonlySummary, CloudReadonlyRows, CloudReadonlySourceLabel, CloudReadonlySourcePath,
-            CloudReadonlySourceMode, CloudReadonlyIsSimulation, CloudReadonlyRowCount,
-            CloudReadonlyIsTruncated, CloudReadonlyQueriedAtUtc, CloudHealthAssessment) =
-            (result.Summary, result.Rows, result.SourceLabel, result.SourcePath,
-                result.SourceMode, result.IsSimulation, result.RowCount,
-                result.IsTruncated, result.QueriedAtUtc, null);
-    }
-
     public string? CloudReadonlySummary { get; set; }
 
     public IReadOnlyList<Dictionary<string, object?>> CloudReadonlyRows { get; set; } = [];

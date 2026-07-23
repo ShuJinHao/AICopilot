@@ -56,30 +56,17 @@ public static class CloudReadOnlyTextToSqlRepairClassifier
 {
     private const int MaxSummaryLength = 500;
 
-    private static readonly string[] DangerousSqlVerbs =
-    [
-        "insert",
-        "update",
-        "delete",
-        "drop",
-        "alter",
-        "create",
-        "truncate",
-        "merge",
-        "grant",
-        "revoke",
-        "copy",
-        "execute",
-        "call"
-    ];
-
     public static CloudReadOnlyTextToSqlRepairDecision Classify(
         CloudReadOnlyTextToSqlFailureStage stage,
-        string? errorMessage)
+        string? errorMessage,
+        BusinessQuerySecurityProfile? securityProfile = null)
     {
-        var safeSummary = TryBuildPermissionDeniedSummary(errorMessage, out var permissionDeniedSummary)
+        var safeSummary = TryBuildPermissionDeniedSummary(
+                errorMessage,
+                securityProfile,
+                out var permissionDeniedSummary)
             ? permissionDeniedSummary
-            : SanitizeErrorSummary(errorMessage);
+            : SanitizeErrorSummary(errorMessage, securityProfile);
         var lower = (errorMessage ?? string.Empty).ToLowerInvariant();
 
         if (string.IsNullOrWhiteSpace(lower))
@@ -112,29 +99,52 @@ public static class CloudReadOnlyTextToSqlRepairClassifier
             return Decision(stage, CloudReadOnlyTextToSqlFailureCode.GovernedSchemaMissing, canRepairSql: false, safeSummary);
         }
 
-        if (ContainsAny(lower, "system catalog", "information_schema.", "pg_catalog.", "pg_user", "pg_shadow", "sys.", "mysql."))
+        if (ContainsAny(
+                lower,
+                "system catalog",
+                "禁止访问数据库系统目录",
+                "information_schema.",
+                "pg_catalog.",
+                "pg_user",
+                "pg_shadow",
+                "sys.",
+                "mysql."))
         {
             return Decision(stage, CloudReadOnlyTextToSqlFailureCode.SystemCatalog, canRepairSql: false, safeSummary);
         }
 
-        if (ContainsAny(lower, "sensitive field", "sensitive fields") ||
-            CloudReadOnlyGovernedSchema.BlockedFieldFragments.Any(fragment => lower.Contains(fragment, StringComparison.OrdinalIgnoreCase)))
+        if (ContainsAny(lower, "sensitive field", "sensitive fields", "敏感字段") ||
+            ResolveBlockedFragments(securityProfile).Any(fragment =>
+                lower.Contains(fragment, StringComparison.OrdinalIgnoreCase)))
         {
             return Decision(stage, CloudReadOnlyTextToSqlFailureCode.SensitiveField, canRepairSql: false, safeSummary);
         }
 
-        if (ContainsAny(lower, "multiple sql statements", "multiple statements", "semicolon"))
+        if (ContainsAny(
+                lower,
+                "multiple sql statements",
+                "multiple statements",
+                "semicolon",
+                "禁止在单次调用中执行多条 sql"))
         {
             return Decision(stage, CloudReadOnlyTextToSqlFailureCode.MultiStatement, canRepairSql: false, safeSummary);
         }
 
-        if (ContainsAny(lower, "only select statements are allowed", "ddl and dml statements are not allowed") ||
-            DangerousSqlVerbs.Any(verb => Regex.IsMatch(lower, $@"\b{Regex.Escape(verb)}\b", RegexOptions.CultureInvariant)))
+        if (ContainsAny(
+                lower,
+                "only select statements are allowed",
+                "ddl and dml statements are not allowed",
+                "仅允许执行 select"))
         {
             return Decision(stage, CloudReadOnlyTextToSqlFailureCode.WriteSql, canRepairSql: false, safeSummary);
         }
 
-        if (ContainsAny(lower, "wildcard select", "wildcard projection", "select *"))
+        if (ContainsAny(
+                lower,
+                "wildcard select",
+                "wildcard projection",
+                "select *",
+                "禁止使用通配符投影"))
         {
             return Decision(stage, CloudReadOnlyTextToSqlFailureCode.WildcardProjection, canRepairSql: true, safeSummary);
         }
@@ -175,9 +185,10 @@ public static class CloudReadOnlyTextToSqlRepairClassifier
         string? sql,
         string? errorMessage,
         DateTimeOffset? createdAt = null,
-        int maxRepairAttempts = CloudReadOnlyTextToSqlOptions.DefaultMaxRepairAttempts)
+        int maxRepairAttempts = CloudReadOnlyTextToSqlOptions.DefaultMaxRepairAttempts,
+        BusinessQuerySecurityProfile? securityProfile = null)
     {
-        var decision = Classify(stage, errorMessage);
+        var decision = Classify(stage, errorMessage, securityProfile);
         var resolvedMaxRepairAttempts = Math.Clamp(
             maxRepairAttempts,
             0,
@@ -199,7 +210,9 @@ public static class CloudReadOnlyTextToSqlRepairClassifier
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sql ?? string.Empty))).ToLowerInvariant();
     }
 
-    public static string SanitizeErrorSummary(string? errorMessage)
+    public static string SanitizeErrorSummary(
+        string? errorMessage,
+        BusinessQuerySecurityProfile? securityProfile = null)
     {
         if (string.IsNullOrWhiteSpace(errorMessage))
         {
@@ -224,7 +237,7 @@ public static class CloudReadOnlyTextToSqlRepairClassifier
             },
             RegexOptions.CultureInvariant);
 
-        foreach (var fragment in CloudReadOnlyGovernedSchema.BlockedFieldFragments
+        foreach (var fragment in ResolveBlockedFragments(securityProfile)
                      .Where(fragment => !string.IsNullOrWhiteSpace(fragment))
                      .OrderByDescending(fragment => fragment.Length))
         {
@@ -255,7 +268,10 @@ public static class CloudReadOnlyTextToSqlRepairClassifier
         return terms.Any(term => value.Contains(term, StringComparison.OrdinalIgnoreCase));
     }
 
-    private static bool TryBuildPermissionDeniedSummary(string? errorMessage, out string safeSummary)
+    private static bool TryBuildPermissionDeniedSummary(
+        string? errorMessage,
+        BusinessQuerySecurityProfile? securityProfile,
+        out string safeSummary)
     {
         safeSummary = string.Empty;
         if (string.IsNullOrWhiteSpace(errorMessage) ||
@@ -271,13 +287,21 @@ public static class CloudReadOnlyTextToSqlRepairClassifier
         if (match.Success)
         {
             var tableName = match.Groups["table"].Value;
-            safeSummary = CloudReadOnlyGovernedSchema.IsAllowedTable(tableName)
-                ? $"CloudReadOnly permission denied for table {tableName}."
-                : "CloudReadOnly permission denied.";
+            safeSummary = securityProfile?.AllowedTables.Contains(tableName) == true
+                ? $"Readonly permission denied for table {tableName}."
+                : "Readonly permission denied.";
             return true;
         }
 
-        safeSummary = "CloudReadOnly permission denied.";
+        safeSummary = "Readonly permission denied.";
         return true;
+    }
+
+    private static IEnumerable<string> ResolveBlockedFragments(
+        BusinessQuerySecurityProfile? securityProfile)
+    {
+        return securityProfile is null
+            ? CloudReadOnlyGovernedSchema.BlockedFieldFragments
+            : securityProfile.BlockedIdentifierFragments;
     }
 }

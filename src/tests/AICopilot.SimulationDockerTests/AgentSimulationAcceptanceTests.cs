@@ -23,20 +23,18 @@ public sealed class AgentSimulationAcceptanceTests
     }
 
     [Fact]
-    public async Task OfflineSimulation_ShouldKeepProductionCloudReadonlyToolProtected()
+    public async Task OfflineSimulation_ShouldExposeOnlyTheUnifiedBusinessQueryTool()
     {
         await AuthenticateAsAdminAsync();
-        await PatchJsonExpectingStatusAsync(
-            "/api/aigateway/tools/query_cloud_data_readonly",
-            new
-            {
-                isEnabled = true,
-                requiresApproval = true
-            },
-            HttpStatusCode.BadRequest);
 
-        var tool = await GetJsonAsync<ToolRegistrationDto>("/api/aigateway/tools/query_cloud_data_readonly");
-        tool.IsEnabled.Should().BeFalse();
+        using var obsoleteResponse = await _fixture.HttpClient.GetAsync(
+            "/api/aigateway/tools/query_cloud_data_readonly");
+        obsoleteResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+        var tool = await GetJsonAsync<ToolRegistrationDto>(
+            "/api/aigateway/tools/query_business_database_readonly");
+        tool.ToolCode.Should().Be("query_business_database_readonly");
+        tool.IsEnabled.Should().BeTrue();
         tool.RequiresApproval.Should().BeTrue();
     }
 

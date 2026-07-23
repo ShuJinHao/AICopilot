@@ -17,7 +17,7 @@ public sealed class AgentWorkflowBranchSemanticsTests
     [Fact]
     public void BranchResult_ShouldDistinguishSkippedEmptySucceededAndFailed()
     {
-        BranchResult.Skipped(BranchType.Tools).Status.Should().Be(BranchExecutionStatus.Skipped);
+        BranchResult.Skipped(BranchType.Knowledge).Status.Should().Be(BranchExecutionStatus.Skipped);
         BranchResult.FromKnowledge(string.Empty).Status.Should().Be(BranchExecutionStatus.Empty);
         BranchResult.FromDataAnalysis("safe context").Status.Should().Be(BranchExecutionStatus.Succeeded);
 
@@ -74,8 +74,7 @@ public sealed class AgentWorkflowBranchSemanticsTests
                     BranchType.DataAnalysis,
                     AppProblemCodes.ChatStreamFailed,
                     "Password=raw-secret-value")
-                .WithRequirement(true),
-            BranchResult.Skipped(BranchType.Tools).WithRequirement(false)
+                .WithRequirement(true)
         ]);
 
         failureChunk.Should().NotBeNull();
@@ -121,8 +120,7 @@ public sealed class AgentWorkflowBranchSemanticsTests
                 BranchResult.Failed(
                     BranchType.BusinessPolicy,
                     AppProblemCodes.ChatStreamFailed,
-                    "safe failure"),
-                BranchResult.Skipped(BranchType.Tools)
+                    "safe failure")
             ]);
 
         context.DataAnalysisContext.Should().Be("verified rows");
@@ -168,11 +166,9 @@ public sealed class AgentWorkflowBranchSemanticsTests
 
         DataAnalysisExecutor.IsRelevant(intents, registry).Should().BeTrue();
         KnowledgeRetrievalExecutor.IsRelevant(intents, registry).Should().BeTrue();
-        ToolsPackExecutor.IsRelevant(intents, registry).Should().BeTrue();
 
         var generalChat = new[] { new IntentResult { Intent = "General.Chat", Confidence = 1.0 } };
         DataAnalysisExecutor.IsRelevant(generalChat, registry).Should().BeFalse();
         KnowledgeRetrievalExecutor.IsRelevant(generalChat, registry).Should().BeFalse();
-        ToolsPackExecutor.IsRelevant(generalChat, registry).Should().BeFalse();
     }
 }

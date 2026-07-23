@@ -9,9 +9,7 @@
     <AICopilotTestKind>Architecture</AICopilotTestKind>
     <AICopilotTestRole>Analyzer</AICopilotTestRole>
     <AICopilotTestRuntime>Pure</AICopilotTestRuntime>
-    <AICopilotTestCadence>PR</AICopilotTestCadence>
     <AICopilotTestOwner>Architecture</AICopilotTestOwner>
-    <AICopilotRequired>true</AICopilotRequired>
   </PropertyGroup>
 
   <ItemGroup>

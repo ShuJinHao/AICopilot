@@ -6,11 +6,10 @@
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <AICopilotTestKind>Application</AICopilotTestKind>
+    <AICopilotCiCategory>Quality</AICopilotCiCategory>
     <AICopilotTestRuntime>Pure</AICopilotTestRuntime>
-    <AICopilotTestCadence>Manual</AICopilotTestCadence>
     <AICopilotTestProfile>Simulation</AICopilotTestProfile>
     <AICopilotTestOwner>CloudReadonlySimulation</AICopilotTestOwner>
-    <AICopilotRequired>false</AICopilotRequired>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="FluentAssertions" Version="8.8.0" />

@@ -21,7 +21,6 @@ public class IntentRoutingAgentBuilder : IAgentRoutingConfigurationSnapshotReade
 
     private readonly ConfiguredAgentRuntimeFactory _agentFactory;
     private readonly IKnowledgeBaseReadService _knowledgeBaseReadService;
-    private readonly IBusinessDatabaseReadService _businessDatabaseReadService;
     private readonly IBusinessSemanticsCatalog _businessSemanticsCatalog;
     private readonly IAgentPluginCatalog _pluginCatalog;
     private readonly IRoutingModelResolver _routingModelResolver;
@@ -31,7 +30,6 @@ public class IntentRoutingAgentBuilder : IAgentRoutingConfigurationSnapshotReade
         ConfiguredAgentRuntimeFactory agentFactory,
         IAgentPluginCatalog pluginCatalog,
         IKnowledgeBaseReadService knowledgeBaseReadService,
-        IBusinessDatabaseReadService businessDatabaseReadService,
         IBusinessSemanticsCatalog businessSemanticsCatalog,
         IRoutingModelResolver routingModelResolver,
         IAgentExecutionMetadataAccessor executionMetadataAccessor)
@@ -39,7 +37,6 @@ public class IntentRoutingAgentBuilder : IAgentRoutingConfigurationSnapshotReade
         _agentFactory = agentFactory;
         _pluginCatalog = pluginCatalog;
         _knowledgeBaseReadService = knowledgeBaseReadService;
-        _businessDatabaseReadService = businessDatabaseReadService;
         _businessSemanticsCatalog = businessSemanticsCatalog;
         _routingModelResolver = routingModelResolver;
         _executionMetadataAccessor = executionMetadataAccessor;
@@ -136,22 +133,12 @@ public class IntentRoutingAgentBuilder : IAgentRoutingConfigurationSnapshotReade
                 descriptor.ExampleQuestions.FirstOrDefault(),
                 descriptor.QueryJsonExample)));
 
-        var businessDatabases = await _businessDatabaseReadService.ListEnabledAsync(cancellationToken);
-        var selectableDatabases = businessDatabases
-            .Where(database => database.IsEnabled && database.IsReadOnly && database.IsSelectableInChat)
-            .ToArray();
-        EnsureDynamicCodesDoNotCollideWithFrozenRegistry(
-            selectableDatabases.Select(database => $"Analysis.{database.Name}"));
-        definitions.AddRange(selectableDatabases
-            .Select(database => new AgentIntentRegistryPromptDefinition(
-                $"Analysis.{database.Name}",
-                NormalizeDescription(database.Description, "Registered governed read-only data source."))));
-
         var guidance = new List<string>
         {
             "restart, reboot, shutdown, write parameter, recipe download, PLC write, state change, or any control request must not be routed to Action intents.",
             "Cloud business mutations such as modifying recipes, disabling devices, backfilling capacity, deleting logs, uploading production data, approving, dispatching, or submitting must not be routed to Action intents.",
-            "if the user requests a control or Cloud write action, fall back to General.Chat and explain that the assistant only supports observation, diagnosis, suggestion, and knowledge answers."
+            "if the user requests a control or Cloud write action, fall back to General.Chat and explain that the assistant only supports observation, diagnosis, suggestion, and knowledge answers.",
+            "Chat must route business facts only to the registered typed business capabilities; never expose a database-name or Simulation intent."
         };
         AppendGuidance(guidance, _businessSemanticsCatalog.PolicyRoutingGuidance);
         AppendGuidance(guidance, _businessSemanticsCatalog.StructuredRoutingGuidance);
