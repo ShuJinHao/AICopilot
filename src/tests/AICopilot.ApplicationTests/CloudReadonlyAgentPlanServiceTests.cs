@@ -66,7 +66,7 @@ public sealed class CloudReadonlyAgentPlanServiceTests
             new IntentResult
             {
                 Intent = "Analysis.Capacity.ByDevice",
-                Query = "{\"filters\":[{\"field\":\"deviceId\",\"operator\":\"eq\",\"value\":\"22222222-2222-4222-8222-222222222222\"}]}",
+                Query = "{\"filters\":[{\"field\":\"deviceId\",\"operator\":\"eq\",\"value\":\"22222222-2222-4222-8222-222222222222\"},{\"field\":\"shiftDate\",\"operator\":\"eq\",\"value\":\"2026-07-22\"}]}",
                 Confidence = 0.9
             }
         };
