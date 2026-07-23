@@ -92,12 +92,12 @@ function formatRuntimeTime(value?: string | null) {
     : date.toLocaleString('zh-CN', { hour12: false })
 }
 
-type RuntimeTone = 'success' | 'info' | 'warning' | 'neutral' | 'danger'
+type RuntimeTone = 'success' | 'blue' | 'warning' | 'neutral' | 'danger'
 
 const runtimeTones: Record<string, RuntimeTone> = {
-  'truth:ObservedFact': 'success', 'truth:DerivedFact': 'info', 'truth:ModelPrediction': 'warning',
+  'truth:ObservedFact': 'success', 'truth:DerivedFact': 'blue', 'truth:ModelPrediction': 'warning',
   'truth:LlmInference': 'neutral', 'truth:Recommendation': 'warning', 'node:Completed': 'success',
-  'node:Succeeded': 'success', 'node:Failed': 'danger', 'node:OutcomeUnknown': 'danger', 'node:Running': 'info',
+  'node:Succeeded': 'success', 'node:Failed': 'danger', 'node:OutcomeUnknown': 'danger', 'node:Running': 'blue',
   'node:WaitingApproval': 'warning', 'metric:Healthy': 'success', 'metric:Recorded': 'success',
   'metric:DerivedFromRuntimeRecord': 'success', 'metric:Warning': 'warning', 'metric:Unavailable': 'warning',
   'metric:ProviderUsageUnavailable': 'warning', 'metric:NotRecorded': 'warning', 'metric:Failed': 'danger',
