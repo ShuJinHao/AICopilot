@@ -107,7 +107,29 @@ internal sealed record AgentBranchEvidenceSeed(
     string SourceMode,
     bool? IsSimulation,
     string? SemanticIntent,
-    IReadOnlyCollection<string> SanitizedScope);
+    IReadOnlyCollection<string> SanitizedScope)
+{
+    internal static AgentBranchEvidenceSeed CreateObservedDataQuery(
+        string nodeKind,
+        string safeContext,
+        string producerId,
+        string provider,
+        string sourceMode,
+        bool? isSimulation,
+        string? semanticIntent,
+        IReadOnlyCollection<string> sanitizedScope) =>
+        new(
+            nodeKind,
+            safeContext,
+            AgentWorkflowEvidenceKind.DataQuery,
+            AgentWorkflowEvidenceTruthClass.ObservedFact,
+            producerId,
+            provider,
+            sourceMode,
+            isSimulation,
+            semanticIntent,
+            sanitizedScope);
+}
 
 internal sealed record AgentAnalysisNodeResult(
     BranchExecutionStatus Status,

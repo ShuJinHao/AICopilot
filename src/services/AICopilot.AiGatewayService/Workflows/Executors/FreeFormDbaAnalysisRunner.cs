@@ -74,15 +74,13 @@ public sealed class FreeFormDbaAnalysisRunner(
                 output.Decision,
                 rawData,
                 schema);
-            var evidence = new AgentBranchEvidenceSeed(
+            var evidence = AgentBranchEvidenceSeed.CreateObservedDataQuery(
                 "GovernedDataReadNode",
                 safeContext,
-                AgentWorkflowEvidenceKind.DataQuery,
-                AgentWorkflowEvidenceTruthClass.ObservedFact,
                 "governed-text-to-sql:v1",
                 "GovernedTextToSql",
                 "GovernedReadOnly",
-                IsSimulation: null,
+                isSimulation: null,
                 intent.Intent,
                 ["governed-readonly"]);
             return vizContext.HasData

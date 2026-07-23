@@ -141,15 +141,13 @@ public sealed class SemanticAnalysisRunner(
                 queryResult.IsTruncated,
                 plan,
                 queryResult.RowCount);
-            var evidence = new AgentBranchEvidenceSeed(
+            var evidence = AgentBranchEvidenceSeed.CreateObservedDataQuery(
                 "CloudReadNode",
                 safeContext,
-                AgentWorkflowEvidenceKind.DataQuery,
-                AgentWorkflowEvidenceTruthClass.ObservedFact,
                 "cloud-ai-read:v1",
                 "CloudAiRead",
                 "CloudReadOnly",
-                IsSimulation: false,
+                isSimulation: false,
                 plan.Intent,
                 string.IsNullOrWhiteSpace(queryResult.QueryScope)
                     ? []

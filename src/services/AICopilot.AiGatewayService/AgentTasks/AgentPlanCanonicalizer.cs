@@ -292,28 +292,51 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             return InvalidResult("Plan v2 arrays, selection modes, budgets, approval, snapshot, and security summaries must be explicit and non-null.");
         }
 
-        var capabilitySelectionMode = plan.CapabilitySelectionMode!.Value;
-        var pluginSelectionMode = plan.PluginSelectionMode!.Value;
-        var cloudReadonlyIntents = plan.CloudReadonlyIntents!;
-        var dataSourceIds = plan.DataSourceIds!;
-        var businessDomains = plan.BusinessDomains!;
-        var forcedStepCodes = plan.ForcedStepCodes!;
-        var planApprovalCheckpoints = plan.ApprovalCheckpoints!;
-        var dataSourceSummaries = plan.DataSourceSummaries!;
-        var toolRiskSummary = plan.ToolRiskSummary!;
-        var toolApprovalCheckpoints = plan.ToolApprovalCheckpoints!;
-        var capabilityGaps = plan.CapabilityGaps!;
-        var intentCandidates = plan.IntentCandidates!;
-        var requestedCapabilityCodes = plan.RequestedCapabilityCodes!;
-        var selectedPluginIds = plan.SelectedPluginIds!;
-        var artifactTargets = plan.ArtifactTargets!;
-        var nodes = plan.Nodes!;
-        var joinPolicies = plan.JoinPolicies!;
-        var budgets = plan.Budgets!;
-        var concurrencyPolicy = plan.ConcurrencyPolicy!;
-        var approvalSummary = plan.ApprovalSummary!;
-        var executionSnapshot = plan.ExecutionSnapshot!;
-        var securitySummary = plan.SecuritySummary!;
+        var (
+            capabilitySelectionMode,
+            pluginSelectionMode,
+            cloudReadonlyIntents,
+            dataSourceIds,
+            businessDomains,
+            forcedStepCodes,
+            planApprovalCheckpoints,
+            dataSourceSummaries,
+            toolRiskSummary,
+            toolApprovalCheckpoints,
+            capabilityGaps,
+            intentCandidates,
+            requestedCapabilityCodes,
+            selectedPluginIds,
+            artifactTargets,
+            nodes,
+            joinPolicies,
+            budgets,
+            concurrencyPolicy,
+            approvalSummary,
+            executionSnapshot,
+            securitySummary) = (
+            plan.CapabilitySelectionMode!.Value,
+            plan.PluginSelectionMode!.Value,
+            plan.CloudReadonlyIntents!,
+            plan.DataSourceIds!,
+            plan.BusinessDomains!,
+            plan.ForcedStepCodes!,
+            plan.ApprovalCheckpoints!,
+            plan.DataSourceSummaries!,
+            plan.ToolRiskSummary!,
+            plan.ToolApprovalCheckpoints!,
+            plan.CapabilityGaps!,
+            plan.IntentCandidates!,
+            plan.RequestedCapabilityCodes!,
+            plan.SelectedPluginIds!,
+            plan.ArtifactTargets!,
+            plan.Nodes!,
+            plan.JoinPolicies!,
+            plan.Budgets!,
+            plan.ConcurrencyPolicy!,
+            plan.ApprovalSummary!,
+            plan.ExecutionSnapshot!,
+            plan.SecuritySummary!);
 
         if (!Enum.IsDefined(capabilitySelectionMode) ||
             !Enum.IsDefined(pluginSelectionMode) ||

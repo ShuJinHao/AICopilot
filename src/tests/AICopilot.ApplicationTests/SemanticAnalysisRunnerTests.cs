@@ -37,8 +37,7 @@ public sealed class SemanticAnalysisRunnerTests
             CancellationToken.None);
         var safeOutput = GetSafeOutput(result);
 
-        planner.CallCount.Should().Be(1);
-        cloudClient.RequestedPlans.Should().ContainSingle().Which.Target.Should().Be(target);
+        AssertCloudReadRequested(planner, cloudClient, target);
         safeOutput.Should().Contain("Cloud AiRead");
         using var resultDocument = JsonDocument.Parse(safeOutput);
         resultDocument.RootElement.GetProperty("query_execution").GetProperty("returned_row_count").GetInt32()
@@ -66,8 +65,7 @@ public sealed class SemanticAnalysisRunnerTests
 
         safeOutput.Should().Contain(SemanticAnalysisRunner.RecipeDataReadBoundaryMarker);
         safeOutput.Should().Contain("不能查询具体配方");
-        planner.CallCount.Should().Be(0);
-        cloudClient.RequestedPlans.Should().BeEmpty();
+        AssertNoCloudRead(planner, cloudClient, expectedPlannerCalls: 0);
     }
 
     [Theory]
@@ -89,13 +87,8 @@ public sealed class SemanticAnalysisRunnerTests
             CancellationToken.None);
         var safeOutput = GetSafeOutput(result);
 
-        planner.CallCount.Should().Be(1);
-        cloudClient.RequestedPlans.Should().BeEmpty();
-        safeOutput.Should().Contain(target == SemanticQueryTarget.Device
-            ? SemanticAnalysisRunner.DeviceStatusSourceUnavailableMarker
-            : SemanticAnalysisRunner.CloudOnlySemanticSourceUnavailableMarker);
-        safeOutput.Should().Contain("不会回退 Direct DB、Text-to-SQL 或 Simulation");
-        safeOutput.Should().NotContain("DataAnalysis/Text-to-SQL 补充分析");
+        AssertNoCloudRead(planner, cloudClient, expectedPlannerCalls: 1);
+        AssertCloudOnlyFailure(safeOutput, target);
     }
 
     [Theory]
@@ -117,13 +110,8 @@ public sealed class SemanticAnalysisRunnerTests
             CancellationToken.None);
         var safeOutput = GetSafeOutput(result);
 
-        planner.CallCount.Should().Be(1);
-        cloudClient.RequestedPlans.Should().BeEmpty();
-        safeOutput.Should().Contain(target == SemanticQueryTarget.Device
-            ? SemanticAnalysisRunner.DeviceStatusSourceUnavailableMarker
-            : SemanticAnalysisRunner.CloudOnlySemanticSourceUnavailableMarker);
-        safeOutput.Should().Contain("不会回退 Direct DB、Text-to-SQL 或 Simulation");
-        safeOutput.Should().NotContain("DataAnalysis/Text-to-SQL 补充分析");
+        AssertNoCloudRead(planner, cloudClient, expectedPlannerCalls: 1);
+        AssertCloudOnlyFailure(safeOutput, target);
     }
 
     [Theory]
@@ -148,8 +136,7 @@ public sealed class SemanticAnalysisRunnerTests
             CancellationToken.None);
         var safeOutput = GetSafeOutput(result);
 
-        planner.CallCount.Should().Be(1);
-        cloudClient.RequestedPlans.Should().ContainSingle().Which.Target.Should().Be(target);
+        AssertCloudReadRequested(planner, cloudClient, target);
         safeOutput.Should().Contain("Cloud AiRead");
         safeOutput.Should().Contain("只读接口暂不可用");
         safeOutput.Should().NotContain("provider detail");
@@ -279,6 +266,33 @@ public sealed class SemanticAnalysisRunnerTests
 
     private static string GetSafeOutput(AgentAnalysisNodeResult result) =>
         result.Evidence?.SafeContext ?? result.SafeMessage ?? string.Empty;
+
+    private static void AssertCloudOnlyFailure(string safeOutput, SemanticQueryTarget target)
+    {
+        safeOutput.Should().Contain(target == SemanticQueryTarget.Device
+            ? SemanticAnalysisRunner.DeviceStatusSourceUnavailableMarker
+            : SemanticAnalysisRunner.CloudOnlySemanticSourceUnavailableMarker);
+        safeOutput.Should().Contain("不会回退 Direct DB、Text-to-SQL 或 Simulation");
+        safeOutput.Should().NotContain("DataAnalysis/Text-to-SQL 补充分析");
+    }
+
+    private static void AssertCloudReadRequested(
+        RecordingSemanticQueryPlanner planner,
+        RecordingCloudAiReadClient cloudClient,
+        SemanticQueryTarget target)
+    {
+        planner.CallCount.Should().Be(1);
+        cloudClient.RequestedPlans.Should().ContainSingle().Which.Target.Should().Be(target);
+    }
+
+    private static void AssertNoCloudRead(
+        RecordingSemanticQueryPlanner planner,
+        RecordingCloudAiReadClient cloudClient,
+        int expectedPlannerCalls)
+    {
+        planner.CallCount.Should().Be(expectedPlannerCalls);
+        cloudClient.RequestedPlans.Should().BeEmpty();
+    }
 
     private static SemanticAnalysisRunner CreateRunner(
         ICloudAiReadClient cloudAiReadClient,
