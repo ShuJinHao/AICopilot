@@ -470,10 +470,9 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
               finalizationSteps[0].Step.StepType == AgentStepType.Finalize &&
               finalizationSteps[0].Step.RequiresApproval &&
               plan.Steps.Count(step => step.StepType == AgentStepType.Finalize) == 1;
-        var hasCanonicalArtifactProjection = hasUnresolvedCapabilityGaps
-            ? plan.Steps.Count == 0
-            : actualArtifactTools.SequenceEqual(expectedArtifactTools, StringComparer.Ordinal) &&
-              hasCanonicalFinalizationStep;
+        var hasCanonicalArtifactProjection = hasUnresolvedCapabilityGaps ||
+            actualArtifactTools.SequenceEqual(expectedArtifactTools, StringComparer.Ordinal) &&
+            hasCanonicalFinalizationStep;
         if (artifactTargets.Any(target => target is not ("chart" or "markdown" or "html" or "pdf" or "pptx" or "xlsx")) ||
             !hasCanonicalArtifactProjection)
         {
