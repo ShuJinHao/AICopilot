@@ -11,15 +11,6 @@ public enum AgentApprovalType
     FinalOutput = 3
 }
 
-public enum AgentApprovalStatus
-{
-    Pending = 0,
-    Approved = 1,
-    Rejected = 2,
-    Cancelled = 3,
-    Expired = 4
-}
-
 public sealed class ApprovalRequest : BaseEntity<ApprovalRequestId>, IAggregateRoot<ApprovalRequestId>
 {
     private ApprovalRequest()

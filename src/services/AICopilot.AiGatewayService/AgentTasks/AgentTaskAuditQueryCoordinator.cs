@@ -166,12 +166,11 @@ public sealed class AgentTaskAuditQueryCoordinator(
         string? latestArtifactEvidenceSetDigest = null;
         foreach (var record in evidenceRecords.OrderBy(item => item.CreatedAt).ThenBy(item => item.NodeId))
         {
-            nodesById.TryGetValue(record.NodeId, out var producerNode);
             var access = AgentEvidenceAccessChecker.ValidateDurable(
                 record,
                 task,
                 attempt.Id.Value,
-                producerNode,
+                nodesById,
                 nowUtc);
             if (!access.IsSuccess)
             {
@@ -505,32 +504,17 @@ public sealed class AgentTaskAuditQueryCoordinator(
     private static string ResolveNodeLabel(string nodeKind, string? toolCode = null) =>
         string.Equals(toolCode, "assess_cloud_health", StringComparison.Ordinal)
             ? "当前运行健康评估"
-            : nodeKind switch
-    {
-        "CloudReadNode" => "Cloud 只读查询",
-        "GovernedDataReadNode" => "受控数据查询",
-        "KnowledgeRetrievalNode" => "知识检索",
-        "FileAnalysisNode" => "文件分析",
-        "JoinNode" => "证据汇合",
-        "AgentReasoningNode" => "AI 证据推断",
-        "ArtifactGenerationNode" => "结果产物生成",
-        "ApprovalCheckpointNode" => "最终确认",
-        "DeterministicComputeNode" => "确定性计算",
-        _ => "受控执行节点"
-    };
+            : ResolveNodePresentation(nodeKind).Label;
 
-    private static string ResolveNodeKind(string nodeKind) => nodeKind switch
+    private static string ResolveNodeKind(string nodeKind) => ResolveNodePresentation(nodeKind).Kind;
+
+    private static (string Label, string Kind) ResolveNodePresentation(string nodeKind) => nodeKind switch
     {
-        "CloudReadNode" => "CloudRead",
-        "GovernedDataReadNode" => "GovernedRead",
-        "KnowledgeRetrievalNode" => "KnowledgeRead",
-        "FileAnalysisNode" => "FileAnalysis",
-        "JoinNode" => "EvidenceJoin",
-        "AgentReasoningNode" => "AiInference",
-        "ArtifactGenerationNode" => "Artifact",
-        "ApprovalCheckpointNode" => "Approval",
-        "DeterministicComputeNode" => "DeterministicCompute",
-        _ => "ControlledNode"
+        "CloudReadNode" => ("Cloud 只读查询", "CloudRead"), "GovernedDataReadNode" => ("受控数据查询", "GovernedRead"),
+        "KnowledgeRetrievalNode" => ("知识检索", "KnowledgeRead"), "FileAnalysisNode" => ("文件分析", "FileAnalysis"),
+        "JoinNode" => ("证据汇合", "EvidenceJoin"), "AgentReasoningNode" => ("AI 证据推断", "AiInference"),
+        "ArtifactGenerationNode" => ("结果产物生成", "Artifact"), "ApprovalCheckpointNode" => ("最终确认", "Approval"),
+        "DeterministicComputeNode" => ("确定性计算", "DeterministicCompute"), _ => ("受控执行节点", "ControlledNode")
     };
 
     private static string ResolveTruthLabel(string truthClass) => truthClass switch

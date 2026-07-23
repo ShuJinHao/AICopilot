@@ -37,21 +37,9 @@ internal static class ArtifactVersioningFiles
             versions.AddRange(indexedVersions.Value.Versions.Select(metadata =>
                 ToDto(artifact.Id.Value, metadata, isCurrent: false)));
         }
-        else
+        else if (artifact.Version > 1)
         {
-            for (var version = 1; version < artifact.Version; version++)
-            {
-                var metadata = await ReadLegacyMetadataAsync(
-                    fileStore,
-                    workspaceCode,
-                    artifact,
-                    version,
-                    cancellationToken);
-                if (metadata.IsSuccess && metadata.Value is not null)
-                {
-                    versions.Add(ToDto(artifact.Id.Value, metadata.Value, isCurrent: false));
-                }
-            }
+            return Result.Invalid("Artifact version history is missing its committed file-set index.");
         }
 
         var currentFile = await fileStore.OpenReadAsync(
@@ -187,29 +175,9 @@ internal static class ArtifactVersioningFiles
         }
 
         var history = indexedVersions.Value?.Versions.ToList() ?? [];
-        if (indexedVersions.Value is null)
+        if (indexedVersions.Value is null && artifact.Version > 1)
         {
-            for (var version = 1; version < artifact.Version; version++)
-            {
-                var legacy = await ReadLegacyMetadataAsync(
-                    fileStore,
-                    workspaceCode,
-                    artifact,
-                    version,
-                    cancellationToken);
-                if (!legacy.IsSuccess)
-                {
-                    return Result.From(legacy);
-                }
-
-                if (legacy.Value is not null)
-                {
-                    history.Add(legacy.Value);
-                    continue;
-                }
-
-                return Result.Invalid($"Artifact version {version} metadata is missing.");
-            }
+            return Result.Invalid("Artifact version history is missing its committed file-set index.");
         }
 
         var metadata = new ArtifactVersionMetadata(
@@ -279,52 +247,16 @@ internal static class ArtifactVersioningFiles
             return Result.From(index);
         }
 
-        var metadata = index.Value?.Versions.FirstOrDefault(item => item.Version == version) is { } indexed
-            ? Result.Success<ArtifactVersionMetadata?>(indexed)
-            : await ReadLegacyMetadataAsync(fileStore, workspaceCode, artifact, version, cancellationToken);
-        if (!metadata.IsSuccess || metadata.Value is null)
+        var metadata = index.Value?.Versions.FirstOrDefault(item => item.Version == version);
+        if (metadata is null)
         {
             return Result.NotFound("Artifact version metadata does not exist.");
         }
 
         return Result.Success(new ResolvedVersionPath(
-            metadata.Value.ContentRelativePath,
-            metadata.Value.FileName,
-            metadata.Value.MimeType));
-    }
-
-    private static async Task<Result<ArtifactVersionMetadata?>> ReadLegacyMetadataAsync(
-        IArtifactWorkspaceFileStore fileStore,
-        string workspaceCode,
-        Artifact artifact,
-        int version,
-        CancellationToken cancellationToken)
-    {
-        var file = await fileStore.OpenReadAsync(
-            workspaceCode,
-            GetMetadataPath(artifact, version),
-            "application/json",
-            cancellationToken);
-        if (file is null)
-        {
-            return Result.Success<ArtifactVersionMetadata?>(null);
-        }
-
-        await using var stream = file.Stream;
-        try
-        {
-            var metadata = await JsonSerializer.DeserializeAsync<ArtifactVersionMetadata>(
-                stream,
-                JsonOptions,
-                cancellationToken);
-            return metadata is null
-                ? Result.Invalid("Artifact version metadata is empty.")
-                : Result.Success<ArtifactVersionMetadata?>(metadata);
-        }
-        catch (JsonException)
-        {
-            return Result.Invalid("Artifact version metadata is invalid.");
-        }
+            metadata.ContentRelativePath,
+            metadata.FileName,
+            metadata.MimeType));
     }
 
     private static async Task<Result<ArtifactVersionIndex?>> ReadVersionIndexAsync(
@@ -414,16 +346,6 @@ internal static class ArtifactVersioningFiles
             metadata.CreatedAt,
             isCurrent,
             DownloadUrl(artifactId, metadata.Version));
-    }
-
-    private static string GetVersionRoot(Artifact artifact, int version)
-    {
-        return $"draft/.versions/{artifact.Id.Value:N}/v{version}";
-    }
-
-    private static string GetMetadataPath(Artifact artifact, int version)
-    {
-        return $"{GetVersionRoot(artifact, version)}/metadata.json";
     }
 
     private static string DownloadUrl(Guid artifactId, int version)

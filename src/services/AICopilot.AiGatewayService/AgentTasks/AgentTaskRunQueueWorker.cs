@@ -28,7 +28,7 @@ public sealed class AgentTaskRunQueueWorker(
                 var processed = await ProcessOnceAsync(stoppingToken);
                 if (!processed)
                 {
-                    await Task.Delay(PollInterval, stoppingToken);
+                    await DelayUntilNextPollAsync(stoppingToken);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -40,10 +40,13 @@ public sealed class AgentTaskRunQueueWorker(
                 logger.LogError(
                     "Agent task run queue worker iteration failed. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
                     ex.GetType().Name);
-                await Task.Delay(PollInterval, stoppingToken);
+                await DelayUntilNextPollAsync(stoppingToken);
             }
         }
     }
+
+    private static Task DelayUntilNextPollAsync(CancellationToken cancellationToken) =>
+        Task.Delay(PollInterval, cancellationToken);
 
     public async Task<bool> ProcessOnceAsync(CancellationToken cancellationToken)
     {

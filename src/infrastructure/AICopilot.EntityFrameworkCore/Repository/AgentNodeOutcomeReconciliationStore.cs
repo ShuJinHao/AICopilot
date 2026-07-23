@@ -1,6 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.AiGateway.Runtime.AgentExecution;
@@ -15,22 +12,17 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
     : IAgentNodeOutcomeReconciliationStore
 {
     public Task<AgentOutcomeReconciliationClaim?> TryClaimNextAsync(
-        string owner,
-        TimeSpan leaseDuration,
-        DateTimeOffset nowUtc,
-        CancellationToken cancellationToken = default)
+        string owner, TimeSpan leaseDuration, DateTimeOffset nowUtc, CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
-        if (leaseDuration <= TimeSpan.Zero)
-        {
-            throw new ArgumentOutOfRangeException(nameof(leaseDuration));
-        }
+        ValidateClaimRequest(owner, leaseDuration);
 
-        return transactionRunner.ExecuteAsync(
+        return TryClaimCoreAsync(
             "Agent.NodeOutcomeReconciliationClaim",
-            async (context, token) =>
-            {
-                var node = await context.AgentNodeRuns
+            owner,
+            leaseDuration,
+            nowUtc,
+            ignoreSchedule: false,
+            (context, token) => context.AgentNodeRuns
                     .FromSqlInterpolated($$"""
                         SELECT node.*, node.xmin
                         FROM aigateway.agent_node_runs AS node
@@ -41,35 +33,23 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
                         FOR UPDATE SKIP LOCKED
                         LIMIT 1
                         """)
-                    .SingleOrDefaultAsync(token);
-                if (node is null)
-                {
-                    return Attempt<AgentOutcomeReconciliationClaim?>(null);
-                }
-
-                return await ClaimNodeAsync(context, node, owner, leaseDuration, nowUtc, ignoreSchedule: false, token);
-            },
+                    .SingleOrDefaultAsync(token),
             cancellationToken);
     }
 
     public Task<AgentOutcomeReconciliationClaim?> TryClaimAsync(
-        AgentNodeRunId nodeRunId,
-        string owner,
-        TimeSpan leaseDuration,
-        DateTimeOffset nowUtc,
+        AgentNodeRunId nodeRunId, string owner, TimeSpan leaseDuration, DateTimeOffset nowUtc,
         CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
-        if (leaseDuration <= TimeSpan.Zero)
-        {
-            throw new ArgumentOutOfRangeException(nameof(leaseDuration));
-        }
+        ValidateClaimRequest(owner, leaseDuration);
 
-        return transactionRunner.ExecuteAsync(
+        return TryClaimCoreAsync(
             "Agent.NodeOutcomeReconciliationClaimById",
-            async (context, token) =>
-            {
-                var node = await context.AgentNodeRuns
+            owner,
+            leaseDuration,
+            nowUtc,
+            ignoreSchedule: true,
+            (context, token) => context.AgentNodeRuns
                     .FromSqlInterpolated($$"""
                         SELECT node.*, node.xmin
                         FROM aigateway.agent_node_runs AS node
@@ -78,10 +58,27 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
                           AND (reconciliation_lease_expires_at IS NULL OR reconciliation_lease_expires_at <= {{nowUtc}})
                         FOR UPDATE SKIP LOCKED
                         """)
-                    .SingleOrDefaultAsync(token);
+                    .SingleOrDefaultAsync(token),
+            cancellationToken);
+    }
+
+    private Task<AgentOutcomeReconciliationClaim?> TryClaimCoreAsync(
+        string operationName,
+        string owner,
+        TimeSpan leaseDuration,
+        DateTimeOffset nowUtc,
+        bool ignoreSchedule,
+        Func<AiGatewayDbContext, CancellationToken, Task<AgentNodeRun?>> loadNode,
+        CancellationToken cancellationToken)
+    {
+        return transactionRunner.ExecuteAsync(
+            operationName,
+            async (context, token) =>
+            {
+                var node = await loadNode(context, token);
                 return node is null
                     ? Attempt<AgentOutcomeReconciliationClaim?>(null)
-                    : await ClaimNodeAsync(context, node, owner, leaseDuration, nowUtc, ignoreSchedule: true, token);
+                    : await ClaimNodeAsync(context, node, owner, leaseDuration, nowUtc, ignoreSchedule, token);
             },
             cancellationToken);
     }
@@ -118,16 +115,11 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
         AgentOutcomeReconciliationSuccessCheckpoint checkpoint,
         CancellationToken cancellationToken = default)
     {
-        return transactionRunner.ExecuteAsync<AgentFencedWriteResult>(
+        return ExecuteLockedAsync(
             "Agent.NodeOutcomeReconciliationSucceeded",
-            async (context, token) =>
+            checkpoint.Claim,
+            async (context, locked, token) =>
             {
-                var locked = await LockAllAsync(context, checkpoint.Claim, token);
-                if (locked is null)
-                {
-                    return Attempt(AgentFencedWriteResult.StaleFence);
-                }
-
                 if (!MatchesSuccessAuthority(checkpoint) ||
                     !MatchesDecisionDigest(
                         checkpoint.Claim,
@@ -152,9 +144,10 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
                     return Attempt(AgentFencedWriteResult.Duplicate);
                 }
 
-                if (!TrySettleBudget(
+                if (!AgentNodeRunBudgetSettlement.TrySettle(
                         locked.Attempt,
                         locked.Node,
+                        checkpoint.Claim.NodeFencingToken,
                         checkpoint.Usage,
                         checkpoint.DecidedAtUtc,
                         conservativelyConsumed: false))
@@ -162,7 +155,7 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
                     return Attempt(AgentFencedWriteResult.StateConflict);
                 }
 
-                var evidenceSetDigest = await ComputeEvidenceSetDigestAsync(
+                var evidenceSetDigest = await AgentEvidenceSetDigest.ComputeAsync(
                     context,
                     checkpoint.Claim.RunAttemptId,
                     checkpoint.Evidence,
@@ -209,7 +202,7 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
                     return Attempt(AgentFencedWriteResult.Succeeded);
                 }
 
-                await PromoteRunnableDependentsAsync(
+                await AgentNodeRunDependencyPromoter.PromoteAsync(
                     context,
                     checkpoint.Claim.RunAttemptId,
                     checkpoint.DecidedAtUtc,
@@ -224,16 +217,11 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
         AgentOutcomeReconciliationNegativeDecision decision,
         CancellationToken cancellationToken = default)
     {
-        return transactionRunner.ExecuteAsync<AgentFencedWriteResult>(
+        return ExecuteLockedAsync(
             "Agent.NodeOutcomeReconciliationNegative",
-            async (context, token) =>
+            decision.Claim,
+            async (context, locked, token) =>
             {
-                var locked = await LockAllAsync(context, decision.Claim, token);
-                if (locked is null)
-                {
-                    return Attempt(AgentFencedWriteResult.StaleFence);
-                }
-
                 if ((decision.Resolution is not AgentOutcomeReconciliationResolution.ConfirmedNotOccurred
                         and not AgentOutcomeReconciliationResolution.ConfirmedCancelled
                         and not AgentOutcomeReconciliationResolution.ManualAbandonedAsFailed
@@ -256,9 +244,10 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
                     return Attempt(AgentFencedWriteResult.StateConflict);
                 }
 
-                if (!TrySettleBudget(
+                if (!AgentNodeRunBudgetSettlement.TrySettle(
                         locked.Attempt,
                         locked.Node,
+                        decision.Claim.NodeFencingToken,
                         usage: null,
                         nowUtc: decision.DecidedAtUtc,
                         conservativelyConsumed: true))
@@ -285,15 +274,7 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
                 if (decision.Resolution is AgentOutcomeReconciliationResolution.ConfirmedCancelled
                     or AgentOutcomeReconciliationResolution.ManualAbandonedAsCancelled)
                 {
-                    locked.Node.ResolveReconciledCancelled(
-                        decision.Claim.TaskFencingToken,
-                        decision.Claim.NodeFencingToken,
-                        decision.Claim.ReconciliationFencingToken,
-                        decision.Claim.ReconciliationLeaseId,
-                        decision.ReasonCode,
-                        decision.DecisionDigest,
-                        decision.SafeMessage,
-                        decision.DecidedAtUtc);
+                    locked.Node.ResolveReconciledCancelled(CreateResolutionInput(decision));
                     locked.Queue.Cancel(decision.DecidedAtUtc, decision.SafeMessage);
                     locked.Attempt.Cancel(decision.DecidedAtUtc, decision.SafeMessage);
                     locked.Task.Cancel(decision.DecidedAtUtc);
@@ -301,15 +282,8 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
                 }
 
                 locked.Node.ResolveReconciledNotOccurred(
-                    decision.Claim.TaskFencingToken,
-                    decision.Claim.NodeFencingToken,
-                    decision.Claim.ReconciliationFencingToken,
-                    decision.Claim.ReconciliationLeaseId,
-                    decision.ReasonCode,
-                    decision.DecisionDigest,
-                    decision.SafeMessage,
+                    CreateResolutionInput(decision),
                     decision.AllowNodeRetry,
-                    decision.DecidedAtUtc,
                     decision.RetryAtUtc);
                 if (decision.AllowNodeRetry)
                 {
@@ -332,16 +306,11 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
         AgentOutcomeReconciliationDeferral deferral,
         CancellationToken cancellationToken = default)
     {
-        return transactionRunner.ExecuteAsync<AgentFencedWriteResult>(
+        return ExecuteLockedAsync(
             "Agent.NodeOutcomeReconciliationDeferred",
-            async (context, token) =>
+            deferral.Claim,
+            async (context, locked, token) =>
             {
-                var locked = await LockAllAsync(context, deferral.Claim, token);
-                if (locked is null)
-                {
-                    return Attempt(AgentFencedWriteResult.StaleFence);
-                }
-
                 if (deferral.Resolution is not AgentOutcomeReconciliationResolution.StillUnknown
                     and not AgentOutcomeReconciliationResolution.ConflictingEvidence ||
                     !MatchesDecisionDigest(
@@ -383,6 +352,25 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
                     deferral.SafeMessage,
                     deferral.Resolution == AgentOutcomeReconciliationResolution.ConflictingEvidence);
                 return Attempt(AgentFencedWriteResult.Succeeded);
+            },
+            cancellationToken);
+    }
+
+    private Task<AgentFencedWriteResult> ExecuteLockedAsync(
+        string operationName,
+        AgentOutcomeReconciliationClaim claim,
+        Func<AiGatewayDbContext, LockedAuthority, CancellationToken,
+            Task<AgentExecutionTransactionAttempt<AgentFencedWriteResult>>> action,
+        CancellationToken cancellationToken)
+    {
+        return transactionRunner.ExecuteAsync(
+            operationName,
+            async (context, token) =>
+            {
+                var locked = await LockAllAsync(context, claim, token);
+                return locked is null
+                    ? Attempt(AgentFencedWriteResult.StaleFence)
+                    : await action(context, locked, token);
             },
             cancellationToken);
     }
@@ -453,49 +441,28 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
         long taskFencingToken,
         CancellationToken cancellationToken)
     {
-        var task = await context.AgentTasks
-            .FromSqlInterpolated($$"""
-                SELECT task.*, task.xmin FROM aigateway.agent_tasks AS task
-                WHERE id = {{taskId.Value}}
-                  AND active_run_attempt_id = {{runAttemptId.Value}}
-                  AND run_fencing_token = {{taskFencingToken}}
-                  AND status = 'ReconciliationRequired'
-                FOR UPDATE
-                """)
-            .SingleOrDefaultAsync(cancellationToken);
-        if (task is null)
+        var task = await AgentExecutionRowLock.ByIdAsync<AgentTask>(context, taskId.Value, cancellationToken);
+        if (task is null || task.ActiveRunAttemptId != runAttemptId ||
+            task.RunFencingToken != taskFencingToken || task.Status != AgentTaskStatus.ReconciliationRequired)
         {
             return null;
         }
 
         await context.Entry(task).Collection(candidate => candidate.Steps).LoadAsync(cancellationToken);
-        var attempt = await context.AgentTaskRunAttempts
-            .FromSqlInterpolated($$"""
-                SELECT attempt.*, attempt.xmin FROM aigateway.agent_task_run_attempts AS attempt
-                WHERE id = {{runAttemptId.Value}}
-                  AND task_id = {{taskId.Value}}
-                  AND task_fencing_token = {{taskFencingToken}}
-                  AND status = 'ReconciliationRequired'
-                FOR UPDATE
-                """)
-            .SingleOrDefaultAsync(cancellationToken);
-        if (attempt is null)
+        var attempt = await AgentExecutionRowLock.ByIdAsync<AgentTaskRunAttempt>(
+            context, runAttemptId.Value, cancellationToken);
+        if (attempt is null || attempt.TaskId != taskId || attempt.TaskFencingToken != taskFencingToken ||
+            attempt.Status != AgentTaskRunAttemptStatus.ReconciliationRequired)
         {
             return null;
         }
 
-        var queue = await context.AgentTaskRunQueueItems
-            .FromSqlInterpolated($$"""
-                SELECT queue_item.*, queue_item.xmin FROM aigateway.agent_task_run_queue_items AS queue_item
-                WHERE id = {{queueItemId.Value}}
-                  AND task_id = {{taskId.Value}}
-                  AND run_attempt_id = {{runAttemptId.Value}}
-                  AND task_fencing_token = {{taskFencingToken}}
-                  AND status = 'Started'
-                FOR UPDATE
-                """)
-            .SingleOrDefaultAsync(cancellationToken);
-        return queue is null ? null : (task, attempt, queue);
+        var queue = await AgentExecutionRowLock.ByIdAsync<AgentTaskRunQueueItem>(
+            context, queueItemId.Value, cancellationToken);
+        return queue is null || queue.TaskId != taskId || queue.RunAttemptId != runAttemptId ||
+               queue.TaskFencingToken != taskFencingToken || queue.Status != AgentTaskRunQueueStatus.Started
+            ? null
+            : (task, attempt, queue);
     }
 
     private static Task<AgentNodeRun?> LockReconciliationNodeAsync(
@@ -548,112 +515,16 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
         DateTimeOffset decidedAtUtc,
         string decisionDigest)
     {
-        var canonical = string.Join('|',
-            claim.TaskId.Value.ToString("D"),
-            claim.RunAttemptId.Value.ToString("D"),
-            claim.NodeRun.Id.Value.ToString("D"),
-            claim.TaskFencingToken,
-            claim.NodeFencingToken,
-            claim.ReconciliationFencingToken,
+        var computed = AgentOutcomeReconciliationDecisionDigest.Compute(
+            claim,
             resolution,
-            reasonCode.Trim(),
-            actorType.Trim(),
-            actorIdHash.Trim(),
-            evidenceDigest?.Trim() ?? string.Empty,
-            providerReceiptHash?.Trim() ?? string.Empty,
-            decidedAtUtc.ToUniversalTime().ToString("O"));
-        var computed = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)))
-            .ToLowerInvariant();
+            reasonCode,
+            actorType,
+            actorIdHash,
+            evidenceDigest,
+            providerReceiptHash,
+            decidedAtUtc);
         return string.Equals(computed, decisionDigest, StringComparison.Ordinal);
-    }
-
-    private static async Task<string> ComputeEvidenceSetDigestAsync(
-        AiGatewayDbContext context,
-        AgentTaskRunAttemptId runAttemptId,
-        AgentEvidenceRecord current,
-        CancellationToken cancellationToken)
-    {
-        var components = await context.AgentEvidenceRecords
-            .AsNoTracking()
-            .Where(evidence => evidence.RunAttemptId == runAttemptId && !evidence.IsRevoked)
-            .Select(evidence => new
-            {
-                evidence.Id,
-                evidence.NodeId,
-                evidence.EnvelopeDigest,
-                evidence.OutputDigest
-            })
-            .ToListAsync(cancellationToken);
-        components.Add(new
-        {
-            current.Id,
-            current.NodeId,
-            current.EnvelopeDigest,
-            current.OutputDigest
-        });
-        var canonical = string.Join(
-            "\n",
-            components
-                .OrderBy(component => component.NodeId, StringComparer.Ordinal)
-                .ThenBy(component => component.Id.Value)
-                .Select(component =>
-                    $"{component.Id.Value:D}|{component.NodeId}|{component.EnvelopeDigest}|{component.OutputDigest}"));
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)))
-            .ToLowerInvariant();
-    }
-
-    private static async Task PromoteRunnableDependentsAsync(
-        AiGatewayDbContext context,
-        AgentTaskRunAttemptId runAttemptId,
-        DateTimeOffset nowUtc,
-        CancellationToken cancellationToken)
-    {
-        var nodes = await context.AgentNodeRuns
-            .Where(node => node.RunAttemptId == runAttemptId)
-            .ToListAsync(cancellationToken);
-        var changed = true;
-        while (changed)
-        {
-            changed = false;
-            var byNodeId = nodes.ToDictionary(node => node.NodeId, StringComparer.Ordinal);
-            foreach (var candidate in nodes.Where(node => node.Status is
-                         AgentNodeRunStatus.Pending or
-                         AgentNodeRunStatus.WaitingApproval))
-            {
-                var dependencies = JsonSerializer.Deserialize<string[]>(candidate.DependenciesJson) ?? [];
-                var parents = dependencies.Select(dependency =>
-                    byNodeId.TryGetValue(dependency, out var parent)
-                        ? parent
-                        : throw new InvalidOperationException(
-                            $"NodeRun '{candidate.NodeId}' references unknown dependency '{dependency}'."))
-                    .ToArray();
-                var failedRequired = parents.FirstOrDefault(parent =>
-                    parent.IsRequired &&
-                    (parent.Status is AgentNodeRunStatus.Failed or AgentNodeRunStatus.Cancelled));
-                var failedStrict = candidate.JoinPolicy != "OptionalBestEffort"
-                    ? parents.FirstOrDefault(parent => parent.Status is
-                        AgentNodeRunStatus.Failed or AgentNodeRunStatus.Cancelled)
-                    : null;
-                var failedParent = failedRequired ?? failedStrict;
-                if (failedParent is not null)
-                {
-                    candidate.CancelFromDependencyFailure(failedParent.NodeId, nowUtc);
-                    changed = true;
-                    continue;
-                }
-
-                var dependenciesSatisfied = parents.All(parent =>
-                    parent.Status == AgentNodeRunStatus.Succeeded ||
-                    candidate.JoinPolicy == "OptionalBestEffort" &&
-                    !parent.IsRequired &&
-                    (parent.Status is AgentNodeRunStatus.Failed or AgentNodeRunStatus.Cancelled));
-                if (dependenciesSatisfied && candidate.Status == AgentNodeRunStatus.Pending)
-                {
-                    candidate.MakeRunnable(nowUtc);
-                    changed = true;
-                }
-            }
-        }
     }
 
     private static async Task CancelWorkflowAfterReconciledSuccessAsync(
@@ -704,59 +575,30 @@ internal sealed class AgentNodeOutcomeReconciliationStore(
         authority.Task.ResumeFromReconciliation(nowUtc);
     }
 
-    private static bool TrySettleBudget(
-        AgentTaskRunAttempt attempt,
-        AgentNodeRun node,
-        AgentRunUsageLedgerEntry? usage,
-        DateTimeOffset nowUtc,
-        bool conservativelyConsumed)
+    private static AgentExecutionTransactionAttempt<T> Attempt<T>(T result) => new(result);
+
+    private static AgentNodeReconciliationResolutionInput CreateResolutionInput(
+        AgentOutcomeReconciliationDecisionCommand decision)
     {
-        if (usage is not null &&
-            !string.Equals(
-                usage.CostCurrency,
-                attempt.BudgetCostCurrency,
-                StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        AgentRunBudgetCharge reservation;
-        try
-        {
-            reservation = node.GetActiveBudgetReservation(node.NodeFencingToken);
-        }
-        catch (InvalidOperationException)
-        {
-            return false;
-        }
-
-        var actual = usage is null
-            ? AgentRunBudgetCharge.Zero
-            : new AgentRunBudgetCharge(
-                usage.ToolCalls,
-                usage.ModelCalls,
-                usage.InputTokens,
-                usage.OutputTokens,
-                usage.ElapsedMilliseconds,
-                usage.CostAmount,
-                reservation.RetryCount,
-                usage.ArtifactCount,
-                usage.ArtifactBytes);
-        if (!attempt.TrySettleBudget(reservation, actual, conservativelyConsumed))
-        {
-            return false;
-        }
-
-        node.CloseBudgetReservation(
-            node.NodeFencingToken,
-            conservativelyConsumed
-                ? AgentBudgetReservationStatus.ConservativelyConsumed
-                : AgentBudgetReservationStatus.Settled,
-            nowUtc);
-        return true;
+        return new AgentNodeReconciliationResolutionInput(
+            decision.Claim.TaskFencingToken,
+            decision.Claim.NodeFencingToken,
+            decision.Claim.ReconciliationFencingToken,
+            decision.Claim.ReconciliationLeaseId,
+            decision.ReasonCode,
+            decision.DecisionDigest,
+            decision.SafeMessage,
+            decision.DecidedAtUtc);
     }
 
-    private static AgentExecutionTransactionAttempt<T> Attempt<T>(T result) => new(result);
+    private static void ValidateClaimRequest(string owner, TimeSpan leaseDuration)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
+        if (leaseDuration <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(leaseDuration));
+        }
+    }
 
     private sealed record LockedAuthority(
         AgentTask Task,

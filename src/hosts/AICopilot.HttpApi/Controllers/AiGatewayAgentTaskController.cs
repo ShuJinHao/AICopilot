@@ -12,17 +12,15 @@ public class AiGatewayAgentTaskController(ISender sender) : ApiControllerBase(se
 {
     [HttpPost("agent/task/plan-stream")]
     [EnableRateLimiting("chat")]
-    public IResult PlanAgentTaskStream(PlanAgentTaskStreamRequest request)
+    public IResult PlanAgentTaskStream(PlanAgentTaskCommand request)
     {
         var stream = Sender.CreateStream(request);
         return Results.ServerSentEvents(stream);
     }
 
     [HttpPost("agent/task/approve-plan")]
-    public async Task<IActionResult> ApproveAgentTaskPlan(ApproveAgentTaskPlanCommand command)
-    {
-        return ReturnResult(await Sender.Send(command));
-    }
+    public async Task<IActionResult> ApproveAgentTaskPlan(ApproveAgentTaskPlanCommand command) =>
+        ReturnResult(await Sender.Send(command));
 
     [HttpPost("agent/task/reject-plan")]
     public async Task<IActionResult> RejectAgentTaskPlan(RejectAgentTaskPlanCommand command)

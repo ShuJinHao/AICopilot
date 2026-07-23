@@ -2,7 +2,7 @@ using AICopilot.Services.Contracts;
 
 namespace AICopilot.AiRuntime;
 
-public sealed class ModelProviderReliabilityOptions
+public sealed partial class ModelProviderReliabilityOptions
 {
     public const string SectionName = "AiRuntime:ProviderReliability";
 
@@ -27,12 +27,6 @@ public sealed class ModelProviderReliabilityOptions
     public int PerRoleTpmLimit { get; set; }
 
     public int PerRoleConcurrencyLimit { get; set; }
-
-    public int PerTenantRpmLimit { get; set; }
-
-    public int PerTenantTpmLimit { get; set; }
-
-    public int PerTenantConcurrencyLimit { get; set; }
 
     public Dictionary<string, ModelEndpointPoolOptions> EndpointPools { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }

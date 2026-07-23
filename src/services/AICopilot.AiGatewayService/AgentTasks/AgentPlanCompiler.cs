@@ -473,22 +473,10 @@ internal sealed class DeterministicAgentPlanCompiler : IAgentPlanCompiler
                 .Any(spec => !spec.Required)
                 ? "OptionalBestEffort"
                 : "AllRequired";
-            specs.Add(new NodeSpec(
-                "07-evidence-join",
-                "join_evidence",
-                "JoinNode",
-                evidenceProducers,
-                true,
-                joinPolicy,
-                joinCapabilities));
-            specs.Add(new NodeSpec(
-                "08-agent-reasoning",
-                "agent_reasoning",
-                "AgentReasoningNode",
-                evidenceProducers,
-                true,
-                joinPolicy,
-                joinCapabilities));
+            specs.Add(CreateEvidenceAggregationNode(
+                "07-evidence-join", "join_evidence", "JoinNode", evidenceProducers, joinPolicy, joinCapabilities));
+            specs.Add(CreateEvidenceAggregationNode(
+                "08-agent-reasoning", "agent_reasoning", "AgentReasoningNode", evidenceProducers, joinPolicy, joinCapabilities));
             artifactDependencies = ["07-evidence-join", "08-agent-reasoning"];
         }
         else
@@ -538,6 +526,24 @@ internal sealed class DeterministicAgentPlanCompiler : IAgentPlanCompiler
                 timeRange.Start,
                 timeRange.End,
                 timeRange.TimeZone);
+
+    private static NodeSpec CreateEvidenceAggregationNode(
+        string nodeId,
+        string capability,
+        string nodeKind,
+        IReadOnlyCollection<string> evidenceProducers,
+        string joinPolicy,
+        IReadOnlyCollection<string> capabilities)
+    {
+        return new NodeSpec(
+            nodeId,
+            capability,
+            nodeKind,
+            evidenceProducers,
+            Required: true,
+            joinPolicy,
+            capabilities);
+    }
 
     private static bool RequiresDag(IReadOnlyCollection<NodeSpec> specs)
     {

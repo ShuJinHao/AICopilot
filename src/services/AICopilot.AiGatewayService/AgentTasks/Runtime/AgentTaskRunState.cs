@@ -14,6 +14,43 @@ internal sealed class AgentTaskRunState
 
     public List<AgentCloudReadonlyQuerySnapshot> CloudReadonlyResults { get; } = [];
 
+    public void MergeCloudReadonlyResults(IEnumerable<AgentCloudReadonlyQuerySnapshot> snapshots)
+    {
+        foreach (var snapshot in snapshots)
+        {
+            CloudReadonlyResults.RemoveAll(existing => existing.HasSameQueryIdentity(snapshot));
+            CloudReadonlyResults.Add(snapshot);
+        }
+
+        CloudReadonlyResults.Sort(static (left, right) =>
+        {
+            var comparison = StringComparer.Ordinal.Compare(left.Intent, right.Intent);
+            return comparison != 0
+                ? comparison
+                : StringComparer.Ordinal.Compare(left.SemanticPlanDigest, right.SemanticPlanDigest);
+        });
+    }
+
+    public void ApplyCloudReadonlyResult(
+        AgentTaskPlanCloudReadonlyIntentDocument intent,
+        CloudReadonlyAgentToolResult result)
+    {
+        CloudReadonlyResults.RemoveAll(snapshot =>
+            string.Equals(snapshot.Intent, intent.Intent, StringComparison.Ordinal));
+        CloudReadonlyResults.Add(new AgentCloudReadonlyQuerySnapshot(
+            intent.Intent, intent.SemanticPlanDigest, result.Summary, result.Rows,
+            result.SourceLabel, result.SourceMode, result.IsSimulation, result.RowCount,
+            result.IsTruncated, result.QueriedAtUtc));
+        CloudReadonlyResults.Sort(static (left, right) =>
+            StringComparer.Ordinal.Compare(left.Intent, right.Intent));
+        (CloudReadonlySummary, CloudReadonlyRows, CloudReadonlySourceLabel, CloudReadonlySourcePath,
+            CloudReadonlySourceMode, CloudReadonlyIsSimulation, CloudReadonlyRowCount,
+            CloudReadonlyIsTruncated, CloudReadonlyQueriedAtUtc, CloudHealthAssessment) =
+            (result.Summary, result.Rows, result.SourceLabel, result.SourcePath,
+                result.SourceMode, result.IsSimulation, result.RowCount,
+                result.IsTruncated, result.QueriedAtUtc, null);
+    }
+
     public string? CloudReadonlySummary { get; set; }
 
     public IReadOnlyList<Dictionary<string, object?>> CloudReadonlyRows { get; set; } = [];
@@ -68,7 +105,12 @@ internal sealed record AgentCloudReadonlyQuerySnapshot(
     bool IsSimulation,
     int RowCount,
     bool IsTruncated,
-    DateTimeOffset QueriedAtUtc);
+    DateTimeOffset QueriedAtUtc)
+{
+    public bool HasSameQueryIdentity(AgentCloudReadonlyQuerySnapshot other) =>
+        string.Equals(Intent, other.Intent, StringComparison.Ordinal) &&
+        string.Equals(SemanticPlanDigest, other.SemanticPlanDigest, StringComparison.Ordinal);
+}
 
 internal sealed record AgentUploadSummary(
     Guid Id,

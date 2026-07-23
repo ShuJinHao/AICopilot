@@ -98,7 +98,7 @@ public class IntentRoutingAgentBuilder : IAgentRoutingConfigurationSnapshotReade
         var exposedPlugins = _pluginCatalog.GetAllPlugin()
             .Where(plugin => plugin.ChatExposureMode.CanExposeInChat())
             .ToArray();
-        EnsureDynamicCodesDoNotShadowFrozenRegistry(
+        EnsureDynamicCodesDoNotCollideWithFrozenRegistry(
             exposedPlugins.Select(plugin => $"Action.{plugin.Name}"));
         definitions.AddRange(exposedPlugins
             .Select(plugin => new AgentIntentRegistryPromptDefinition(
@@ -112,7 +112,7 @@ public class IntentRoutingAgentBuilder : IAgentRoutingConfigurationSnapshotReade
                     .ToArray())));
 
         var knowledgeBases = await _knowledgeBaseReadService.ListAsync(cancellationToken);
-        EnsureDynamicCodesDoNotShadowFrozenRegistry(
+        EnsureDynamicCodesDoNotCollideWithFrozenRegistry(
             knowledgeBases.Select(knowledgeBase => $"Knowledge.{knowledgeBase.Name}"));
         definitions.AddRange(knowledgeBases.Select(knowledgeBase =>
             new AgentIntentRegistryPromptDefinition(
@@ -140,7 +140,7 @@ public class IntentRoutingAgentBuilder : IAgentRoutingConfigurationSnapshotReade
         var selectableDatabases = businessDatabases
             .Where(database => database.IsEnabled && database.IsReadOnly && database.IsSelectableInChat)
             .ToArray();
-        EnsureDynamicCodesDoNotShadowFrozenRegistry(
+        EnsureDynamicCodesDoNotCollideWithFrozenRegistry(
             selectableDatabases.Select(database => $"Analysis.{database.Name}"));
         definitions.AddRange(selectableDatabases
             .Select(database => new AgentIntentRegistryPromptDefinition(
@@ -180,7 +180,7 @@ public class IntentRoutingAgentBuilder : IAgentRoutingConfigurationSnapshotReade
         target.AddRange(guidance.Notes);
     }
 
-    private static void EnsureDynamicCodesDoNotShadowFrozenRegistry(IEnumerable<string> intentCodes)
+    private static void EnsureDynamicCodesDoNotCollideWithFrozenRegistry(IEnumerable<string> intentCodes)
     {
         var collision = intentCodes.FirstOrDefault(code =>
             AgentIntentRegistryV1.TryGetDescriptor(code, out _));

@@ -2,6 +2,7 @@ using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.AiGateway.Runtime.AgentExecution;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using static AICopilot.EntityFrameworkCore.Configuration.AiGateway.AgentExecutionRuntimeConfigurationMapping;
 
 namespace AICopilot.EntityFrameworkCore.Configuration.AiGateway;
 
@@ -10,12 +11,7 @@ public sealed class AgentNodeReconciliationDecisionConfiguration
 {
     public void Configure(EntityTypeBuilder<AgentNodeReconciliationDecision> builder)
     {
-        builder.ToTable("agent_node_reconciliation_decisions");
-        builder.HasKey(decision => decision.Id);
-        builder.Property(decision => decision.Id)
-            .HasConversion(id => id.Value, value => new AgentNodeReconciliationDecisionId(value))
-            .HasColumnName("id");
-        builder.Property<uint>("RowVersion").IsRowVersion();
+        ConfigureEntity(builder, "agent_node_reconciliation_decisions", decision => decision.Id, id => id.Value, value => new AgentNodeReconciliationDecisionId(value));
         builder.Property(decision => decision.TaskId)
             .HasConversion(id => id.Value, value => new AgentTaskId(value))
             .HasColumnName("task_id");
@@ -53,12 +49,7 @@ public sealed class ModelQuotaReservationConfiguration : IEntityTypeConfiguratio
 {
     public void Configure(EntityTypeBuilder<ModelQuotaReservation> builder)
     {
-        builder.ToTable("model_quota_reservations");
-        builder.HasKey(reservation => reservation.Id);
-        builder.Property(reservation => reservation.Id)
-            .HasConversion(id => id.Value, value => new ModelQuotaReservationId(value))
-            .HasColumnName("id");
-        builder.Property<uint>("RowVersion").IsRowVersion();
+        ConfigureEntity(builder, "model_quota_reservations", reservation => reservation.Id, id => id.Value, value => new ModelQuotaReservationId(value));
         builder.Property(reservation => reservation.TenantKeyHash).HasMaxLength(128).HasColumnName("tenant_key_hash");
         builder.Property(reservation => reservation.UserId).HasColumnName("user_id");
         builder.Property(reservation => reservation.RoleKeyHash).HasMaxLength(128).HasColumnName("role_key_hash");
@@ -110,12 +101,7 @@ public sealed class ArtifactFileSetOperationConfiguration : IEntityTypeConfigura
 {
     public void Configure(EntityTypeBuilder<ArtifactFileSetOperation> builder)
     {
-        builder.ToTable("artifact_file_set_operations");
-        builder.HasKey(operation => operation.Id);
-        builder.Property(operation => operation.Id)
-            .HasConversion(id => id.Value, value => new ArtifactFileSetOperationId(value))
-            .HasColumnName("id");
-        builder.Property<uint>("RowVersion").IsRowVersion();
+        ConfigureEntity(builder, "artifact_file_set_operations", operation => operation.Id, id => id.Value, value => new ArtifactFileSetOperationId(value));
         builder.Property(operation => operation.CommitId).HasColumnName("commit_id");
         builder.Property(operation => operation.TaskId)
             .HasConversion(id => id.Value, value => new AgentTaskId(value))

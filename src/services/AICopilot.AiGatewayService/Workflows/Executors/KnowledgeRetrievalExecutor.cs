@@ -15,21 +15,16 @@ public class KnowledgeRetrievalExecutor(
     public const string ExecutorId = nameof(KnowledgeRetrievalExecutor);
     private const string KnowledgeIntentPrefix = "Knowledge.";
 
-    internal static bool IsRelevant(
-        IEnumerable<IntentResult> intentResults,
-        AgentIntentRegistrySnapshot registry)
-    {
-        return intentResults.Any(intent => IsKnowledgeIntent(intent, registry));
-    }
+    internal static bool IsRelevant(IEnumerable<IntentResult> intents, AgentIntentRegistrySnapshot registry) =>
+        AgentWorkflowIntentSelector.Any(intents, registry, 0.6, "Knowledge.Retrieve", AgentIntentClass.Knowledge);
 
     public async Task<BranchResult> ExecuteAsync(
         List<IntentResult> intentResults,
         AgentIntentRegistrySnapshot registry,
         CancellationToken ct = default)
     {
-        var knowledgeIntents = intentResults
-            .Where(intent => IsKnowledgeIntent(intent, registry))
-            .ToList();
+        var knowledgeIntents = AgentWorkflowIntentSelector.Select(
+            intentResults, registry, 0.6, "Knowledge.Retrieve", AgentIntentClass.Knowledge);
 
         if (knowledgeIntents.Count == 0)
         {
@@ -139,15 +134,4 @@ public class KnowledgeRetrievalExecutor(
         }
     }
 
-    private static bool IsKnowledgeIntent(
-        IntentResult intent,
-        AgentIntentRegistrySnapshot registry)
-    {
-        return intent.Confidence > 0.6 &&
-               AgentIntentRegistryV1.IsIntentClass(
-                   registry,
-                   intent.Intent,
-                   AgentIntentClass.Knowledge) &&
-               !string.Equals(intent.Intent, "Knowledge.Retrieve", StringComparison.Ordinal);
-    }
 }

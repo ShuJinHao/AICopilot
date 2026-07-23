@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using AICopilot.AiGatewayService.Workspaces;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
@@ -12,6 +13,13 @@ internal sealed class AgentRuntimeArtifactBuilder(
     IAgentArtifactWorkspaceService workspaceService,
     IAgentArtifactDocumentGenerator documentGenerator)
 {
+    private static readonly ArtifactDraftTarget ChartTarget = new(ArtifactType.Chart, "chart-data.json", "charts/chart-data.json", "application/json", "chart");
+    private static readonly ArtifactDraftTarget MarkdownTarget = new(ArtifactType.Markdown, "report.md", "draft/report.md", "text/markdown", "markdown");
+    private static readonly ArtifactDraftTarget HtmlTarget = new(ArtifactType.Html, "report.html", "draft/report.html", "text/html", "html");
+    private static readonly ArtifactDraftTarget PdfTarget = new(ArtifactType.Pdf, "report.pdf", "draft/report.pdf", "application/pdf", "pdf");
+    private static readonly ArtifactDraftTarget PptxTarget = new(ArtifactType.Pptx, "report.pptx", "draft/report.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", "pptx");
+    private static readonly ArtifactDraftTarget XlsxTarget = new(ArtifactType.Xlsx, "report.xlsx", "draft/report.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx");
+
     public void BindEvidenceSet(
         AgentTaskRunState state,
         IReadOnlyCollection<AgentEvidenceRecord> inputEvidence)
@@ -74,139 +82,49 @@ internal sealed class AgentRuntimeArtifactBuilder(
             .FirstOrDefault();
     }
 
-    public async Task<object> GenerateChartDataAsync(
-    ArtifactWorkspace workspace,
-    AgentStep step,
-    AgentTaskRunState state,
-    CancellationToken cancellationToken)
-    {
-        var payload = AgentReportComposer.BuildChartPayload(state);
-        var content = JsonSerializer.Serialize(payload, AgentRuntimeJson.Options);
-        var sourceMetadata = BuildArtifactSourceMetadata(state);
-        var artifact = await workspaceService.WriteDraftTextArtifactAsync(
-            workspace,
-            ArtifactType.Chart,
-            "chart-data.json",
-            "charts/chart-data.json",
-            content,
-            "application/json",
-            step.Id,
-            sourceMetadata,
-            cancellationToken);
-        return BuildArtifactOutput("chart", artifact.Id.Value);
-    }
-
-    public async Task<object> GenerateMarkdownReportAsync(
+    public async Task<object> GenerateArtifactAsync(
+        string toolCode,
         AgentTask task,
         ArtifactWorkspace workspace,
         AgentStep step,
         AgentTaskRunState state,
         CancellationToken cancellationToken)
     {
-        var markdown = AgentReportComposer.BuildMarkdownReport(task, state);
-        var sourceMetadata = BuildArtifactSourceMetadata(state);
-        var artifact = await workspaceService.WriteDraftTextArtifactAsync(
-            workspace,
-            ArtifactType.Markdown,
-            "report.md",
-            "draft/report.md",
-            markdown,
-            "text/markdown",
-            step.Id,
-            sourceMetadata,
-            cancellationToken);
-        return BuildArtifactOutput("markdown", artifact.Id.Value);
+        var generation = toolCode switch
+        {
+            "generate_business_chart" or "generate_chart_data" => (ChartTarget, Encoding.UTF8.GetBytes(JsonSerializer.Serialize(AgentReportComposer.BuildChartPayload(state), AgentRuntimeJson.Options))),
+            "generate_markdown_report" => (MarkdownTarget, Encoding.UTF8.GetBytes(AgentReportComposer.BuildMarkdownReport(task, state))),
+            "generate_html_report" => (HtmlTarget, Encoding.UTF8.GetBytes(AgentReportComposer.BuildHtmlReport(task, state))),
+            "generate_pdf" => (PdfTarget, await documentGenerator.GeneratePdfAsync(AgentReportComposer.BuildReportDocument(task, state), cancellationToken)),
+            "generate_pptx" => (PptxTarget, await documentGenerator.GeneratePptxAsync(AgentReportComposer.BuildReportDocument(task, state), cancellationToken)),
+            "generate_xlsx" => (XlsxTarget, await documentGenerator.GenerateXlsxAsync(AgentReportComposer.BuildReportDocument(task, state), cancellationToken)),
+            _ => throw new InvalidOperationException($"Unsupported artifact tool code: {toolCode}")
+        };
+        EnsureGeneratedContent(generation.Item2, generation.Item1.OutputType.ToUpperInvariant());
+        return await WriteDraftAsync(workspace, step, state, generation.Item1, generation.Item2, cancellationToken);
     }
 
-    public async Task<object> GenerateHtmlReportAsync(
-        AgentTask task,
+    private async Task<object> WriteDraftAsync(
         ArtifactWorkspace workspace,
         AgentStep step,
         AgentTaskRunState state,
+        ArtifactDraftTarget target,
+        byte[] content,
         CancellationToken cancellationToken)
     {
-        var html = AgentReportComposer.BuildHtmlReport(task, state);
         var sourceMetadata = BuildArtifactSourceMetadata(state);
-        var artifact = await workspaceService.WriteDraftTextArtifactAsync(
+        var artifact = await workspaceService.WriteDraftArtifactAsync(
             workspace,
-            ArtifactType.Html,
-            "report.html",
-            "draft/report.html",
-            html,
-            "text/html",
-            step.Id,
-            sourceMetadata,
+            new AgentDraftArtifactWriteRequest(
+                target.ArtifactType,
+                target.FileName,
+                target.RelativePath,
+                content,
+                target.ContentType,
+                step.Id,
+                sourceMetadata),
             cancellationToken);
-        return BuildArtifactOutput("html", artifact.Id.Value);
-    }
-
-    public async Task<object> GeneratePdfReportAsync(
-        AgentTask task,
-        ArtifactWorkspace workspace,
-        AgentStep step,
-        AgentTaskRunState state,
-        CancellationToken cancellationToken)
-    {
-        var content = await documentGenerator.GeneratePdfAsync(AgentReportComposer.BuildReportDocument(task, state), cancellationToken);
-        EnsureGeneratedContent(content, "PDF");
-        var sourceMetadata = BuildArtifactSourceMetadata(state);
-        var artifact = await workspaceService.WriteDraftBinaryArtifactAsync(
-            workspace,
-            ArtifactType.Pdf,
-            "report.pdf",
-            "draft/report.pdf",
-            content,
-            "application/pdf",
-            step.Id,
-            sourceMetadata,
-            cancellationToken);
-        return BuildArtifactOutput("pdf", artifact.Id.Value);
-    }
-
-    public async Task<object> GeneratePptxReportAsync(
-        AgentTask task,
-        ArtifactWorkspace workspace,
-        AgentStep step,
-        AgentTaskRunState state,
-        CancellationToken cancellationToken)
-    {
-        var content = await documentGenerator.GeneratePptxAsync(AgentReportComposer.BuildReportDocument(task, state), cancellationToken);
-        EnsureGeneratedContent(content, "PPTX");
-        var sourceMetadata = BuildArtifactSourceMetadata(state);
-        var artifact = await workspaceService.WriteDraftBinaryArtifactAsync(
-            workspace,
-            ArtifactType.Pptx,
-            "report.pptx",
-            "draft/report.pptx",
-            content,
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            step.Id,
-            sourceMetadata,
-            cancellationToken);
-        return BuildArtifactOutput("pptx", artifact.Id.Value);
-    }
-
-    public async Task<object> GenerateXlsxReportAsync(
-        AgentTask task,
-        ArtifactWorkspace workspace,
-        AgentStep step,
-        AgentTaskRunState state,
-        CancellationToken cancellationToken)
-    {
-        var content = await documentGenerator.GenerateXlsxAsync(AgentReportComposer.BuildReportDocument(task, state), cancellationToken);
-        EnsureGeneratedContent(content, "XLSX");
-        var sourceMetadata = BuildArtifactSourceMetadata(state);
-        var artifact = await workspaceService.WriteDraftBinaryArtifactAsync(
-            workspace,
-            ArtifactType.Xlsx,
-            "report.xlsx",
-            "draft/report.xlsx",
-            content,
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            step.Id,
-            sourceMetadata,
-            cancellationToken);
-        return BuildArtifactOutput("xlsx", artifact.Id.Value);
+        return BuildArtifactOutput(target.OutputType, artifact.Id.Value);
     }
 
     private static object BuildArtifactOutput(string artifactType, Guid artifactId)
@@ -228,14 +146,14 @@ internal sealed class AgentRuntimeArtifactBuilder(
             return new ArtifactSourceMetadata(
                 business.SourceMode,
                 Boundary: null,
-                business.IsSimulation,
+                EvidenceSetDigest: state.ReportEvidenceSetDigest,
+                IsSimulation: business.IsSimulation,
                 IsSandbox: false,
-                business.SourceLabel,
-                business.QueryHash,
+                SourceLabel: business.SourceLabel,
+                QueryHash: business.QueryHash,
                 ResultHash: null,
-                business.RowCount,
-                business.IsTruncated,
-                EvidenceSetDigest: state.ReportEvidenceSetDigest);
+                RowCount: business.RowCount,
+                IsTruncated: business.IsTruncated);
         }
 
         if (!string.IsNullOrWhiteSpace(state.CloudReadonlySourceMode) ||
@@ -244,14 +162,14 @@ internal sealed class AgentRuntimeArtifactBuilder(
             return new ArtifactSourceMetadata(
                 state.CloudReadonlySourceMode,
                 Boundary: null,
-                state.CloudReadonlyIsSimulation,
+                EvidenceSetDigest: state.ReportEvidenceSetDigest,
+                IsSimulation: state.CloudReadonlyIsSimulation,
                 IsSandbox: false,
-                state.CloudReadonlySourceLabel,
-                state.BusinessQueryHash,
+                SourceLabel: state.CloudReadonlySourceLabel,
+                QueryHash: state.BusinessQueryHash,
                 ResultHash: null,
-                state.CloudReadonlyRowCount,
-                state.CloudReadonlyIsTruncated,
-                EvidenceSetDigest: state.ReportEvidenceSetDigest);
+                RowCount: state.CloudReadonlyRowCount,
+                IsTruncated: state.CloudReadonlyIsTruncated);
         }
 
         if (!string.IsNullOrWhiteSpace(state.ReportEvidenceSetDigest))
@@ -259,14 +177,14 @@ internal sealed class AgentRuntimeArtifactBuilder(
             return new ArtifactSourceMetadata(
                 "Evidence",
                 Boundary: "AuthorizedEvidenceSet",
+                EvidenceSetDigest: state.ReportEvidenceSetDigest,
                 IsSimulation: false,
                 IsSandbox: false,
                 SourceLabel: "Authorized task Evidence",
                 QueryHash: null,
                 ResultHash: null,
                 RowCount: 0,
-                IsTruncated: false,
-                EvidenceSetDigest: state.ReportEvidenceSetDigest);
+                IsTruncated: false);
         }
 
         return null;
@@ -279,5 +197,12 @@ internal sealed class AgentRuntimeArtifactBuilder(
             throw new InvalidOperationException($"{AppProblemCodes.ArtifactGenerationFailed}: {artifactType} generator returned an empty artifact.");
         }
     }
+
+    private sealed record ArtifactDraftTarget(
+        ArtifactType ArtifactType,
+        string FileName,
+        string RelativePath,
+        string ContentType,
+        string OutputType);
 
 }

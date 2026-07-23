@@ -1,7 +1,9 @@
+using AICopilot.AiGatewayService.Models;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.SharedKernel.Messaging;
 using AICopilot.SharedKernel.Result;
+using MediatR;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
 
@@ -21,7 +23,8 @@ public sealed record PlanAgentTaskCommand(
     AgentPluginSelectionMode? PluginSelectionMode = null,
     IReadOnlyCollection<Guid>? SelectedPluginIds = null,
     AgentCapabilitySelectionMode? CapabilitySelectionMode = null,
-    IReadOnlyCollection<string>? RequestedCapabilityCodes = null) : ICommand<Result<AgentTaskDto>>;
+    IReadOnlyCollection<string>? RequestedCapabilityCodes = null)
+    : ICommand<Result<AgentTaskDto>>, IStreamRequest<ChatChunk>;
 
 [AuthorizeRequirement("AiGateway.ApproveAgentTaskPlan")]
 public sealed record ApproveAgentTaskPlanCommand(Guid Id) : ICommand<Result<AgentTaskDto>>;
@@ -38,7 +41,7 @@ public sealed record RetryAgentTaskCommand(Guid Id) : ICommand<Result<AgentTaskD
 [AuthorizeRequirement("AiGateway.CancelAgentTask")]
 public sealed record CancelAgentTaskCommand(Guid Id) : ICommand<Result<AgentTaskDto>>;
 
-public sealed class PlanAgentTaskCommandHandler(
+internal sealed class PlanAgentTaskCommandHandler(
     PlanAgentTaskCoordinator planCoordinator)
     : ICommandHandler<PlanAgentTaskCommand, Result<AgentTaskDto>>
 {

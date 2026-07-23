@@ -106,18 +106,19 @@ public sealed class PostFixClosureArchitectureTests
 
         builder.AddAiGatewayService();
 
-        builder.Services.Should().ContainSingle(descriptor =>
-            descriptor.ServiceType == typeof(IAgentPlanIntegrityValidator) &&
-            descriptor.Lifetime == ServiceLifetime.Singleton);
-        builder.Services.Should().ContainSingle(descriptor =>
-            descriptor.ServiceType == typeof(IAgentTaskPlanPersistencePolicy) &&
-            descriptor.Lifetime == ServiceLifetime.Singleton);
-        builder.Services.Should().ContainSingle(descriptor =>
-            descriptor.ServiceType == typeof(AgentPlanDraftContractAuthority) &&
-            descriptor.Lifetime == ServiceLifetime.Singleton);
-        builder.Services.Should().ContainSingle(descriptor =>
-            descriptor.ServiceType == typeof(AgentTaskPlanFreshReadGate) &&
-            descriptor.Lifetime == ServiceLifetime.Scoped);
+        (Type ServiceType, ServiceLifetime Lifetime)[] expectedRegistrations =
+        [
+            (typeof(IAgentPlanIntegrityValidator), ServiceLifetime.Singleton),
+            (typeof(IAgentTaskPlanPersistencePolicy), ServiceLifetime.Singleton),
+            (typeof(AgentPlanDraftContractAuthority), ServiceLifetime.Singleton),
+            (typeof(AgentTaskPlanFreshReadGate), ServiceLifetime.Scoped)
+        ];
+        foreach (var expected in expectedRegistrations)
+        {
+            builder.Services.Should().ContainSingle(descriptor =>
+                descriptor.ServiceType == expected.ServiceType &&
+                descriptor.Lifetime == expected.Lifetime);
+        }
         builder.Services.Should().ContainSingle(descriptor =>
             descriptor.ServiceType.FullName == planCompilerContract &&
             descriptor.ImplementationType != null &&

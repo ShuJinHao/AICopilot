@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import { chatService } from '@/services/chatService'
+import type { AgentChartPreview } from '@/types/app'
 import type {
   AgentArtifactPreview,
   AgentTask,
@@ -8,23 +9,7 @@ import type {
   ArtifactWorkspace,
   UploadRecord,
 } from '@/types/protocols'
-import { toFriendlyMessage } from './chatErrorStore'
-
-type ErrorReporter = (message: string) => void
-
-function reportLoadError(reportError: ErrorReporter | undefined, action: string, error: unknown) {
-  reportError?.(`${action}失败：${toFriendlyMessage(error)}`)
-}
-
-export interface AgentChartPreview {
-  labels: string[]
-  values: number[]
-  source?: string
-  sourceMode?: string
-  sourceLabel?: string
-  isSimulation?: boolean
-  queryHash?: string
-}
+import { loadNullableResource, reportLoadError, type ErrorReporter } from './storeErrorReporter'
 
 export const useArtifactWorkspaceStore = defineStore('artifactWorkspace', () => {
   const uploadedFiles = ref<UploadRecord[]>([])
@@ -70,15 +55,13 @@ export const useArtifactWorkspaceStore = defineStore('artifactWorkspace', () => 
   }
 
   async function loadArtifactPreview(artifactId: string, reportError?: ErrorReporter) {
-    try {
-      currentArtifactPreview.value = await chatService.getArtifactPreview(artifactId)
-      return currentArtifactPreview.value
-    } catch (error) {
-      console.error('Failed to load artifact preview.', error)
-      reportLoadError(reportError, '加载产物预览', error)
-      currentArtifactPreview.value = null
-      return null
-    }
+    currentArtifactPreview.value = await loadNullableResource(
+      () => chatService.getArtifactPreview(artifactId),
+      reportError,
+      '加载产物预览',
+      'Failed to load artifact preview.',
+    )
+    return currentArtifactPreview.value
   }
 
   async function refreshChartPreview(reportError?: ErrorReporter) {

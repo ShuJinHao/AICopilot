@@ -100,26 +100,9 @@ public interface IAgentArtifactWorkspaceService
 {
     Task<ArtifactWorkspace> CreateForTaskAsync(AgentTask task, DateTimeOffset nowUtc, CancellationToken cancellationToken);
 
-    Task<Artifact> WriteDraftTextArtifactAsync(
+    Task<Artifact> WriteDraftArtifactAsync(
         ArtifactWorkspace workspace,
-        ArtifactType artifactType,
-        string name,
-        string relativePath,
-        string content,
-        string mimeType,
-        AgentStepId? stepId,
-        ArtifactSourceMetadata? sourceMetadata,
-        CancellationToken cancellationToken);
-
-    Task<Artifact> WriteDraftBinaryArtifactAsync(
-        ArtifactWorkspace workspace,
-        ArtifactType artifactType,
-        string name,
-        string relativePath,
-        byte[] content,
-        string mimeType,
-        AgentStepId? stepId,
-        ArtifactSourceMetadata? sourceMetadata,
+        AgentDraftArtifactWriteRequest artifact,
         CancellationToken cancellationToken);
 
     Task<IReadOnlyList<Artifact>> WriteDraftArtifactSetAsync(

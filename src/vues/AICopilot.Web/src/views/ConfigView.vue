@@ -42,51 +42,25 @@ type AgentSlotDefinition = {
 
 const store = useConfigStore()
 
+function defineAgentSlot(
+  key: AgentSlotKey,
+  title: string,
+  subtitle: string,
+  modelUsage: LanguageModelUsage,
+  icon: typeof Network,
+  tone: AgentSlotDefinition['tone'],
+  templateCode: string,
+  templateScope: string,
+  defaultModelName: string
+): AgentSlotDefinition {
+  return { key, title, subtitle, modelUsage, icon, tone, templateCode, templateScope, defaultModelName }
+}
+
 const slotDefinitions: AgentSlotDefinition[] = [
-  {
-    key: 'intent',
-    title: '意图识别',
-    subtitle: '只识别结构化意图，不回答、不计划、不执行。',
-    modelUsage: 'Routing',
-    icon: Network,
-    tone: 'blue',
-    templateCode: 'IntentRoutingAgent',
-    templateScope: 'IntentRouting',
-    defaultModelName: 'Intent Routing Model'
-  },
-  {
-    key: 'planner',
-    title: '计划生成',
-    subtitle: '只根据目标生成可确认计划，不调用工具、不写文件。',
-    modelUsage: 'Planner',
-    icon: ClipboardList,
-    tone: 'teal',
-    templateCode: 'agent_planner',
-    templateScope: 'AgentPlanner',
-    defaultModelName: 'Plan Generator Model'
-  },
-  {
-    key: 'executor',
-    title: '最终执行',
-    subtitle: '只执行已确认计划，只使用授权能力，结果写入受控工作区。',
-    modelUsage: 'Chat',
-    icon: Bot,
-    tone: 'violet',
-    templateCode: 'agent_executor',
-    templateScope: 'AgentExecutor',
-    defaultModelName: 'Executor Model'
-  },
-  {
-    key: 'reasoning',
-    title: '证据推理',
-    subtitle: '只综合已授权 Evidence，无工具、无子 Agent、最多一次恢复。',
-    modelUsage: 'Chat',
-    icon: Bot,
-    tone: 'violet',
-    templateCode: 'agent_reasoning_node',
-    templateScope: 'AgentExecutor',
-    defaultModelName: 'Evidence Reasoning Model'
-  }
+  defineAgentSlot('intent', '意图识别', '只识别结构化意图，不回答、不计划、不执行。', 'Routing', Network, 'blue', 'IntentRoutingAgent', 'IntentRouting', 'Intent Routing Model'),
+  defineAgentSlot('planner', '计划生成', '只根据目标生成可确认计划，不调用工具、不写文件。', 'Planner', ClipboardList, 'teal', 'agent_planner', 'AgentPlanner', 'Plan Generator Model'),
+  defineAgentSlot('executor', '最终执行', '只执行已确认计划，只使用授权能力，结果写入受控工作区。', 'Chat', Bot, 'violet', 'agent_executor', 'AgentExecutor', 'Executor Model'),
+  defineAgentSlot('reasoning', '证据推理', '只综合已授权 Evidence，无工具、无子 Agent、最多一次恢复。', 'Chat', Bot, 'violet', 'agent_reasoning_node', 'AgentExecutor', 'Evidence Reasoning Model')
 ]
 
 const protocolOptions = [
@@ -178,18 +152,16 @@ const slotsUseSingleModel = computed(() => {
     slot.model?.provider === firstModel.provider
   )
 })
-const usageChat = computed({
-  get: () => store.currentLanguageModel.usages.includes('Chat'),
-  set: (value: boolean) => toggleUsage('Chat', value)
-})
-const usageRouting = computed({
-  get: () => store.currentLanguageModel.usages.includes('Routing'),
-  set: (value: boolean) => toggleUsage('Routing', value)
-})
-const usagePlanner = computed({
-  get: () => store.currentLanguageModel.usages.includes('Planner'),
-  set: (value: boolean) => toggleUsage('Planner', value)
-})
+function usageToggle(usage: LanguageModelUsage) {
+  return computed({
+    get: () => store.currentLanguageModel.usages.includes(usage),
+    set: (value: boolean) => toggleUsage(usage, value),
+  })
+}
+
+const usageChat = usageToggle('Chat')
+const usageRouting = usageToggle('Routing')
+const usagePlanner = usageToggle('Planner')
 
 function findTemplate(slot: AgentSlotDefinition) {
   const code = slot.templateCode.toLowerCase()

@@ -122,18 +122,12 @@ internal sealed class AgentTaskCancellationStore(
                                  node.Status == AgentNodeRunStatus.Running &&
                                  node.SideEffectClass is not (AgentNodeSideEffectClass.ReadOnly or AgentNodeSideEffectClass.DeterministicInternal)))
                     {
-                        node.MarkOutcomeUnknown(
-                            node.TaskFencingToken,
-                            node.NodeFencingToken,
-                            node.ProviderOperationCode ?? node.ToolCode ?? node.NodeKind,
-                            node.ProviderReceiptHash,
+                        AgentNodeOutcomeUnknownMarker.Mark(
+                            node,
                             "cancellation-receipt-or-manual-v1",
                             "user-cancelled-after-side-effect-dispatch",
-                            "not-confirmed",
                             "Cancellation was requested after a side-effecting node began; outcome reconciliation is required.",
-                            requestedAtUtc,
-                            requestedAtUtc.AddMinutes(1),
-                            requestedAtUtc.AddHours(24));
+                            requestedAtUtc);
                     }
 
                     if (task.Status != AgentTaskStatus.ReconciliationRequired)

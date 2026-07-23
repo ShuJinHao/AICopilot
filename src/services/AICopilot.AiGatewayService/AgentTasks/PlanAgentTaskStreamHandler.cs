@@ -8,31 +8,12 @@ using AICopilot.AiGatewayService.Sessions;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
 using AICopilot.Services.Contracts;
-using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.Services.CrossCutting.Serialization;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
 using MediatR;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
-
-[AuthorizeRequirement("AiGateway.PlanAgentTask")]
-public sealed record PlanAgentTaskStreamRequest(
-    Guid SessionId,
-    string Goal,
-    AgentTaskType TaskType,
-    Guid? ModelId,
-    IReadOnlyCollection<Guid>? UploadIds = null,
-    IReadOnlyCollection<Guid>? KnowledgeBaseIds = null,
-    IReadOnlyCollection<Guid>? DataSourceIds = null,
-    IReadOnlyCollection<string>? BusinessDomains = null,
-    string? QueryMode = null,
-    bool RequiresDataApproval = false,
-    IReadOnlyCollection<string>? ArtifactTargets = null,
-    AgentPluginSelectionMode? PluginSelectionMode = null,
-    IReadOnlyCollection<Guid>? SelectedPluginIds = null,
-    AgentCapabilitySelectionMode? CapabilitySelectionMode = null,
-    IReadOnlyCollection<string>? RequestedCapabilityCodes = null) : IStreamRequest<ChatChunk>;
 
 public sealed class PlanAgentTaskStreamHandler(
     IReadRepository<Session> sessionRepository,
@@ -45,17 +26,18 @@ public sealed class PlanAgentTaskStreamHandler(
     ISessionExecutionLock sessionExecutionLock,
     IAgentExecutionMetadataAccessor executionMetadataAccessor,
     IAgentStreamRuntime chatStreamRuntime)
-    : IStreamRequestHandler<PlanAgentTaskStreamRequest, ChatChunk>
+    : IStreamRequestHandler<PlanAgentTaskCommand, ChatChunk>
 {
     private const string Source = nameof(PlanAgentTaskStreamHandler);
 
     public async IAsyncEnumerable<ChatChunk> Handle(
-        PlanAgentTaskStreamRequest request,
+        PlanAgentTaskCommand request,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        var assistantText = new StringBuilder();
-        var assistantRenderChunks = new List<ChatChunk>();
-        var pendingMessages = new List<SessionMessageAppend>();
+        var responseBuffers = AgentStreamRuntime.CreateResponseBuffers();
+        var assistantText = responseBuffers.AssistantText;
+        var assistantRenderChunks = responseBuffers.AssistantRenderChunks;
+        var pendingMessages = responseBuffers.PendingMessages;
         SessionRuntimeSnapshot? session = null;
         ChatChunk? earlyErrorChunk = null;
 
@@ -215,7 +197,7 @@ public sealed class PlanAgentTaskStreamHandler(
     }
 
     private async IAsyncEnumerable<ChatChunk> HandleCore(
-        PlanAgentTaskStreamRequest request,
+        PlanAgentTaskCommand request,
         StringBuilder assistantText,
         ICollection<SessionMessageAppend> pendingMessages,
         [EnumeratorCancellation] CancellationToken ct)
@@ -272,7 +254,7 @@ public sealed class PlanAgentTaskStreamHandler(
             "capability_discovery",
             detail: "Discovering allowed capabilities and tool descriptions without execution.");
 
-        var result = await sender.Send(ToCommand(request), ct);
+        var result = await sender.Send(request, ct);
         if (!result.IsSuccess || result.Value is null)
         {
             yield return CreateFailureEventChunk(result);
@@ -296,26 +278,6 @@ public sealed class PlanAgentTaskStreamHandler(
             });
         yield return CreateTextChunk(assistantText, summary);
         yield return new ChatChunk(Source, ChunkType.AgentTask, result.Value.ToJson());
-    }
-
-    private static PlanAgentTaskCommand ToCommand(PlanAgentTaskStreamRequest request)
-    {
-        return new PlanAgentTaskCommand(
-            request.SessionId,
-            request.Goal,
-            request.TaskType,
-            request.ModelId,
-            request.UploadIds,
-            request.KnowledgeBaseIds,
-            request.DataSourceIds,
-            request.BusinessDomains,
-            request.QueryMode,
-            request.RequiresDataApproval,
-            request.ArtifactTargets,
-            request.PluginSelectionMode,
-            request.SelectedPluginIds,
-            request.CapabilitySelectionMode,
-            request.RequestedCapabilityCodes);
     }
 
     private static ChatChunk CreateTextChunk(StringBuilder assistantText, string content)

@@ -46,75 +46,14 @@ internal sealed class AgentArtifactWorkspaceService(
         return workspace;
     }
 
-    public async Task<Artifact> WriteDraftTextArtifactAsync(
+    public async Task<Artifact> WriteDraftArtifactAsync(
         ArtifactWorkspace workspace,
-        ArtifactType artifactType,
-        string name,
-        string relativePath,
-        string content,
-        string mimeType,
-        AgentStepId? stepId,
-        ArtifactSourceMetadata? sourceMetadata,
-        CancellationToken cancellationToken)
-    {
-        EnsureCanWriteDraftArtifact(workspace);
-        return await WriteDraftArtifactAsync(
-            workspace,
-            artifactType,
-            name,
-            relativePath,
-            System.Text.Encoding.UTF8.GetBytes(content),
-            mimeType,
-            stepId,
-            sourceMetadata,
-            cancellationToken);
-    }
-
-    public async Task<Artifact> WriteDraftBinaryArtifactAsync(
-        ArtifactWorkspace workspace,
-        ArtifactType artifactType,
-        string name,
-        string relativePath,
-        byte[] content,
-        string mimeType,
-        AgentStepId? stepId,
-        ArtifactSourceMetadata? sourceMetadata,
-        CancellationToken cancellationToken)
-    {
-        EnsureCanWriteDraftArtifact(workspace);
-        return await WriteDraftArtifactAsync(
-            workspace,
-            artifactType,
-            name,
-            relativePath,
-            content,
-            mimeType,
-            stepId,
-            sourceMetadata,
-            cancellationToken);
-    }
-
-    private async Task<Artifact> WriteDraftArtifactAsync(
-        ArtifactWorkspace workspace,
-        ArtifactType artifactType,
-        string name,
-        string relativePath,
-        byte[] content,
-        string mimeType,
-        AgentStepId? stepId,
-        ArtifactSourceMetadata? sourceMetadata,
+        AgentDraftArtifactWriteRequest artifact,
         CancellationToken cancellationToken)
     {
         var artifacts = await WriteDraftArtifactSetAsync(
             workspace,
-            [new AgentDraftArtifactWriteRequest(
-                artifactType,
-                name,
-                relativePath,
-                content,
-                mimeType,
-                stepId,
-                sourceMetadata)],
+            [artifact],
             cancellationToken);
         return artifacts.Single();
     }
@@ -200,21 +139,14 @@ internal sealed class AgentArtifactWorkspaceService(
                         createdArtifacts.Add(artifact);
                     }
 
-                    operation = new ArtifactFileSetOperation(
-                        stage.CommitId,
+                    operation = ArtifactFileSetOperationFactory.CreateCompleted(
+                        stage,
                         workspace.TaskId,
                         workspace.Id,
                         writeAuthority?.NodeRunId,
                         writeAuthority?.TaskFencingToken ?? 0,
                         writeAuthority?.NodeFencingToken ?? 0,
-                        stage.OperationKind,
-                        stage.ManifestJson,
-                        stage.ManifestDigest,
-                        stage.StagingReference,
                         now);
-                    operation.MarkPublished(stage.PublishedReference, stage.ManifestDigest, now);
-                    operation.MarkDatabaseCommitted(now);
-                    operation.Complete(now);
                     operationStore.AddCompleted(operation);
                     workspaceRepository.Update(workspace);
                     await workspaceRepository.SaveChangesAsync(commitCancellationToken);

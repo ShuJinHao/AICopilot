@@ -32,10 +32,7 @@ public sealed class PersistenceFileMaintenanceService(
             throw new ArgumentException("Maintenance time must be UTC.", nameof(utcNow));
         }
 
-        if (reconciliationDelay <= TimeSpan.Zero)
-        {
-            throw new ArgumentOutOfRangeException(nameof(reconciliationDelay));
-        }
+        PersistenceMaintenanceGuard.RequirePositiveDelay(reconciliationDelay);
 
         if (markerRetention <= reconciliationDelay)
         {
@@ -44,10 +41,7 @@ public sealed class PersistenceFileMaintenanceService(
                 "Commit marker retention must be longer than the reconciliation delay.");
         }
 
-        if (batchSize <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(batchSize));
-        }
+        PersistenceMaintenanceGuard.RequirePositiveBatchSize(batchSize);
 
         var snapshot = await journal.GetPendingAsync(
             batchSize,

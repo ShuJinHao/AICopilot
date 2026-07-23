@@ -235,14 +235,7 @@ internal sealed class AgentTaskRuntime(
                 plan,
                 DateTimeOffset.UtcNow,
                 cancellationToken);
-            durableNodesByStep = plan.Nodes!
-                .Select((node, index) => new
-                {
-                    StepIndex = index + 1,
-                    Node = materialized.Single(runtimeNode =>
-                        string.Equals(runtimeNode.NodeId, node.NodeId, StringComparison.Ordinal))
-                })
-                .ToDictionary(item => item.StepIndex, item => item.Node);
+            durableNodesByStep = IndexNodesByStep(plan, materialized);
             durableNodesById = materialized.ToDictionary(
                 node => node.NodeId,
                 StringComparer.Ordinal);
@@ -364,14 +357,7 @@ internal sealed class AgentTaskRuntime(
             var refreshedNodes = await nodeRunStore!.ListByAttemptAsync(
                 durableClaim.RunAttempt.Id,
                 cancellationToken);
-            durableNodesByStep = plan.Nodes!
-                .Select((node, index) => new
-                {
-                    StepIndex = index + 1,
-                    Node = refreshedNodes.Single(runtimeNode =>
-                        string.Equals(runtimeNode.NodeId, node.NodeId, StringComparison.Ordinal))
-                })
-                .ToDictionary(item => item.StepIndex, item => item.Node);
+            durableNodesByStep = IndexNodesByStep(plan, refreshedNodes);
             durableNodesById = refreshedNodes.ToDictionary(
                 node => node.NodeId,
                 StringComparer.Ordinal);
@@ -511,18 +497,14 @@ internal sealed class AgentTaskRuntime(
                         if (durableClaim is not null && durableNode is not null &&
                             durableNode.Status == AgentNodeRunStatus.WaitingApproval)
                         {
-                            var released = await nodeRunMaterializer!.ReleaseApprovedNodeAsync(
-                                durableNode.Id,
+                            var releaseError = await ReleaseApprovedNodeAsync(
+                                durableNode,
                                 durableClaim,
-                                DateTimeOffset.UtcNow,
+                                "Approved NodeRun could not become runnable under the current task fence.",
                                 cancellationToken);
-                            if (released != AgentFencedWriteResult.Succeeded)
+                            if (releaseError is not null)
                             {
-                                return Result.Failure(new ApiProblemDescriptor(
-                                    released == AgentFencedWriteResult.StaleFence
-                                        ? AppProblemCodes.AgentNodeRunFenceStale
-                                        : AppProblemCodes.AgentNodeRunStateConflict,
-                                    "Approved NodeRun could not become runnable under the current task fence."));
+                                return Result.Failure(releaseError);
                             }
                         }
                     }
@@ -590,13 +572,12 @@ internal sealed class AgentTaskRuntime(
                         "Approved final-output checkpoint is missing the materialized NodeRun roster."));
                 }
 
-                var parentSelection = AgentEvidenceSelector.SelectForNode(
+                var parentSelection = SelectFinalizationParentEvidence(
+                    task,
+                    durableNodesById,
                     nodeContract,
                     durableEvidence,
-                    task,
-                    attempt.Id.Value,
-                    durableNodesById,
-                    DateTimeOffset.UtcNow);
+                    attempt.Id.Value);
                 if (!parentSelection.IsSuccess)
                 {
                     return Result.From(parentSelection);
@@ -685,13 +666,12 @@ internal sealed class AgentTaskRuntime(
                 durableNodesById = refreshedProducerNodes.ToDictionary(
                     node => node.NodeId,
                     StringComparer.Ordinal);
-                var parentSelection = AgentEvidenceSelector.SelectForNode(
+                var parentSelection = SelectParentEvidence(
                     nodeContract,
                     durableEvidence,
                     task,
                     attempt.Id.Value,
-                    durableNodesById,
-                    DateTimeOffset.UtcNow);
+                    durableNodesById);
                 if (!parentSelection.IsSuccess)
                 {
                     return Result.From(parentSelection);
@@ -761,7 +741,7 @@ internal sealed class AgentTaskRuntime(
                 var executionResult = await AgentNodeExecutionPlane.ExecuteAsync(
                     AgentNodeExecutionContract.ForDurable(nodeContract),
                     executionToken => activeNodeClaim is null
-                        ? ExecuteWithTimeoutAsync(
+                        ? AgentToolExecutionTimeout.ExecuteAsync(
                             executor,
                             executionContext with { CancellationToken = executionToken })
                         : ExecuteWithLeaseRenewalAsync(
@@ -771,17 +751,7 @@ internal sealed class AgentTaskRuntime(
                             executionToken),
                     cancellationToken,
                     attemptCount => executionAttempts = attemptCount);
-                var outputValidation = AgentToolRuntimeOutputGate.Validate(
-                    toolRegistration,
-                    executionResult);
-                if (!outputValidation.IsValid)
-                {
-                    throw new AgentToolExecutionException(
-                        outputValidation.IsPayloadTooLarge
-                            ? AppProblemCodes.EvidencePayloadTooLarge
-                            : AppProblemCodes.ToolOutputSchemaInvalid,
-                        outputValidation.Error ?? "Tool output does not match the registry schema.");
-                }
+                AgentToolRuntimeOutputGate.EnsureValid(toolRegistration, executionResult);
 
                 var artifactBinding = AgentArtifactOutputBindingGate.Validate(
                     task,
@@ -958,17 +928,15 @@ internal sealed class AgentTaskRuntime(
                             return Result.From(unknown);
                         }
 
-                        step.Fail(safeMessage, DateTimeOffset.UtcNow);
-                        await runtimeEventRecorder.RecordToolFailedAsync(
-                            executionScope,
+                        await RecordOutcomeUnknownStepFailureAsync(
                             task,
                             workspace,
+                            executionScope,
                             step,
-                            toolRegistration,
                             attempt,
+                            toolRegistration,
                             errorCode,
                             safeMessage,
-                            DateTimeOffset.UtcNow,
                             cancellationToken);
                         await SaveAsync(task, workspace, attempt, cancellationToken);
                         return Result.Success(task);
@@ -1005,8 +973,7 @@ internal sealed class AgentTaskRuntime(
                     }
                 }
 
-                step.Fail(safeMessage, DateTimeOffset.UtcNow);
-                await runtimeEventRecorder.RecordToolFailedAsync(
+                await RecordStepFailureAsync(
                     executionScope,
                     task,
                     workspace,
@@ -1015,7 +982,6 @@ internal sealed class AgentTaskRuntime(
                     attempt,
                     errorCode,
                     safeMessage,
-                    DateTimeOffset.UtcNow,
                     cancellationToken);
                 if (durableClaim is not null &&
                     activeNodeClaim is not null &&
@@ -1030,10 +996,10 @@ internal sealed class AgentTaskRuntime(
                     AgentRuntimeTelemetry.RecordRequiredNodeFailure(nodeContract.NodeKind);
                 }
 
-                task.Fail($"步骤 {step.StepIndex} 执行失败：{safeMessage}", DateTimeOffset.UtcNow);
-                attempt.MarkFailed(errorCode, safeMessage, DateTimeOffset.UtcNow);
-                task.ReleaseRunLease(DateTimeOffset.UtcNow, clearActiveAttempt: true);
-                await SaveAsync(task, workspace, attempt, cancellationToken);
+                var failedAt = DateTimeOffset.UtcNow;
+                await FailAndSaveAsync(
+                    task, workspace, attempt, $"步骤 {step.StepIndex} 执行失败：{safeMessage}",
+                    errorCode, safeMessage, failedAt, cancellationToken);
                 return Result.Success(task);
             }
         }
@@ -1041,10 +1007,9 @@ internal sealed class AgentTaskRuntime(
         var failedAt = DateTimeOffset.UtcNow;
         const string message =
             "Agent plan did not pause at the canonical final-output checkpoint; no final approval was created.";
-        task.Fail(message, failedAt);
-        attempt.MarkFailed(AppProblemCodes.AgentFinalizationStateConflict, message, failedAt);
-        task.ReleaseRunLease(failedAt, clearActiveAttempt: true);
-        await SaveAsync(task, workspace, attempt, cancellationToken);
+        await FailAndSaveAsync(
+            task, workspace, attempt, message, AppProblemCodes.AgentFinalizationStateConflict,
+            message, failedAt, cancellationToken);
         return Result.Success(task);
     }
 
@@ -1076,18 +1041,14 @@ internal sealed class AgentTaskRuntime(
 
         if (durableNode.Status == AgentNodeRunStatus.WaitingApproval)
         {
-            var released = await nodeRunMaterializer.ReleaseApprovedNodeAsync(
-                durableNode.Id,
+            var releaseError = await ReleaseApprovedNodeAsync(
+                durableNode,
                 durableClaim,
-                DateTimeOffset.UtcNow,
+                "Approved final-output NodeRun could not become runnable under the active task fence.",
                 cancellationToken);
-            if (released != AgentFencedWriteResult.Succeeded)
+            if (releaseError is not null)
             {
-                return Result.Failure(new ApiProblemDescriptor(
-                    released == AgentFencedWriteResult.StaleFence
-                        ? AppProblemCodes.AgentNodeRunFenceStale
-                        : AppProblemCodes.AgentNodeRunStateConflict,
-                    "Approved final-output NodeRun could not become runnable under the active task fence."));
+                return Result.Failure(releaseError);
             }
         }
         else if (durableNode.Status != AgentNodeRunStatus.Runnable)
@@ -1189,10 +1150,9 @@ internal sealed class AgentTaskRuntime(
             problem.Detail,
             failedAt,
             cancellationToken);
-        task.Fail($"最终产物确认失败：{problem.Detail}", failedAt);
-        attempt.MarkFailed(problem.Code, problem.Detail, failedAt);
-        task.ReleaseRunLease(failedAt, clearActiveAttempt: true);
-        await SaveAsync(task, workspace, attempt, cancellationToken);
+        await FailAndSaveAsync(
+            task, workspace, attempt, $"最终产物确认失败：{problem.Detail}",
+            problem.Code, problem.Detail, failedAt, cancellationToken);
         return Result.Success(task);
     }
 
@@ -1465,15 +1425,15 @@ internal sealed class AgentTaskRuntime(
 
         if (requiredFailure is not null)
         {
-            task.Fail(
+            await FailAndSaveAsync(
+                task,
+                workspace,
+                attempt,
                 $"步骤 {requiredFailure.StepIndex} 执行失败：{requiredFailure.SafeMessage}",
-                requiredFailure.FailedAtUtc);
-            attempt.MarkFailed(
                 requiredFailure.FailureCode,
                 requiredFailure.SafeMessage,
-                requiredFailure.FailedAtUtc);
-            task.ReleaseRunLease(requiredFailure.FailedAtUtc, clearActiveAttempt: true);
-            await SaveAsync(task, workspace, attempt, cancellationToken);
+                requiredFailure.FailedAtUtc,
+                cancellationToken);
             return Result.Success(new AgentParallelDagRootState(
                 evidence,
                 durableOutputByNodeRun,
@@ -1607,25 +1567,6 @@ internal sealed class AgentTaskRuntime(
             toolExecutors.Append(new RuntimeBuiltInAgentToolExecutor(builtInToolDispatcher.ExecuteAsync)));
     }
 
-    private static async Task<AgentToolExecutionResult> ExecuteWithTimeoutAsync(
-        IAgentToolExecutor executor,
-        AgentToolExecutionContext context)
-    {
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken);
-        timeoutCts.CancelAfter(TimeSpan.FromSeconds(context.ToolRegistration.TimeoutSeconds));
-
-        try
-        {
-            return await executor.ExecuteAsync(context with { CancellationToken = timeoutCts.Token });
-        }
-        catch (OperationCanceledException) when (!context.CancellationToken.IsCancellationRequested)
-        {
-            throw new AgentToolExecutionException(
-                AppProblemCodes.ToolExecutionTimeout,
-                $"Tool '{context.ToolRegistration.ToolCode}' exceeded timeout {context.ToolRegistration.TimeoutSeconds} seconds.");
-        }
-    }
-
     private static AgentRunUsageLedgerEntry CreateFailureUsage(
         DurableTaskClaim taskClaim,
         AgentNodeRunClaim nodeClaim,
@@ -1690,7 +1631,7 @@ internal sealed class AgentTaskRuntime(
             30_000d);
         var renewalInterval = TimeSpan.FromMilliseconds(renewalMilliseconds);
         using var executionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var execution = ExecuteWithTimeoutAsync(
+        var execution = AgentToolExecutionTimeout.ExecuteAsync(
             executor,
             context with { CancellationToken = executionCts.Token });
         while (!execution.IsCompleted)
@@ -1856,6 +1797,106 @@ internal sealed class AgentTaskRuntime(
                 !string.Equals(pending[0].TargetId, targetId, StringComparison.Ordinal));
     }
 
+    private async Task<ApiProblemDescriptor?> ReleaseApprovedNodeAsync(
+        AgentNodeRun node,
+        DurableTaskClaim taskClaim,
+        string conflictDetail,
+        CancellationToken cancellationToken)
+    {
+        var released = await nodeRunMaterializer!.ReleaseApprovedNodeAsync(
+            node.Id,
+            taskClaim,
+            DateTimeOffset.UtcNow,
+            cancellationToken);
+        return released == AgentFencedWriteResult.Succeeded
+            ? null
+            : new ApiProblemDescriptor(
+                released == AgentFencedWriteResult.StaleFence
+                    ? AppProblemCodes.AgentNodeRunFenceStale
+                    : AppProblemCodes.AgentNodeRunStateConflict,
+                conflictDetail);
+    }
+
+    private static Result<IReadOnlyCollection<AgentEvidenceRecord>> SelectParentEvidence(
+        AgentPlanNodeDocument nodeContract,
+        IReadOnlyCollection<AgentEvidenceRecord> availableEvidence,
+        AgentTask task,
+        Guid runAttemptId,
+        IReadOnlyDictionary<string, AgentNodeRun> producerNodes)
+    {
+        return AgentEvidenceSelector.SelectForNode(
+            nodeContract,
+            availableEvidence,
+            task,
+            runAttemptId,
+            producerNodes,
+            DateTimeOffset.UtcNow);
+    }
+
+    private static Result<IReadOnlyCollection<AgentEvidenceRecord>> SelectFinalizationParentEvidence(
+        AgentTask task,
+        IReadOnlyDictionary<string, AgentNodeRun> producerNodes,
+        AgentPlanNodeDocument nodeContract,
+        IReadOnlyCollection<AgentEvidenceRecord> availableEvidence,
+        Guid runAttemptId)
+    {
+        return SelectParentEvidence(
+            nodeContract,
+            availableEvidence,
+            task,
+            runAttemptId,
+            producerNodes);
+    }
+
+    private async Task RecordStepFailureAsync(
+        AgentToolExecutionAuditScope? executionScope,
+        AgentTask task,
+        ArtifactWorkspace workspace,
+        AgentStep step,
+        ToolRegistration tool,
+        AgentTaskRunAttempt attempt,
+        string errorCode,
+        string safeMessage,
+        CancellationToken cancellationToken)
+    {
+        var failedAtUtc = DateTimeOffset.UtcNow;
+        step.Fail(safeMessage, failedAtUtc);
+        await runtimeEventRecorder.RecordToolFailedAsync(
+            executionScope,
+            task,
+            workspace,
+            step,
+            tool,
+            attempt,
+            errorCode,
+            safeMessage,
+            failedAtUtc,
+            cancellationToken);
+    }
+
+    private Task RecordOutcomeUnknownStepFailureAsync(
+        AgentTask task,
+        ArtifactWorkspace workspace,
+        AgentToolExecutionAuditScope? executionScope,
+        AgentStep step,
+        AgentTaskRunAttempt attempt,
+        ToolRegistration tool,
+        string errorCode,
+        string safeMessage,
+        CancellationToken cancellationToken)
+    {
+        return RecordStepFailureAsync(
+            executionScope,
+            task,
+            workspace,
+            step,
+            tool,
+            attempt,
+            errorCode,
+            safeMessage,
+            cancellationToken);
+    }
+
     private async Task<Result<AgentTask>> RejectStepAsync(
         AgentTask task,
         ArtifactWorkspace workspace,
@@ -1877,11 +1918,40 @@ internal sealed class AgentTaskRuntime(
             cancellationToken);
 
         step.Fail(safeMessage, now);
-        task.Fail($"步骤 {step.StepIndex} 执行失败：{safeMessage}", now);
-        attempt.MarkFailed(problem.Code, safeMessage, now);
-        task.ReleaseRunLease(now, clearActiveAttempt: true);
-        await SaveAsync(task, workspace, attempt, cancellationToken);
+        await FailAndSaveAsync(
+            task, workspace, attempt, $"步骤 {step.StepIndex} 执行失败：{safeMessage}",
+            problem.Code, safeMessage, now, cancellationToken);
         return Result.Success(task);
+    }
+
+    private static IReadOnlyDictionary<int, AgentNodeRun> IndexNodesByStep(
+        AgentTaskPlanDocument plan,
+        IReadOnlyCollection<AgentNodeRun> runtimeNodes)
+    {
+        return plan.Nodes!
+            .Select((node, index) => new
+            {
+                StepIndex = index + 1,
+                Node = runtimeNodes.Single(runtimeNode =>
+                    string.Equals(runtimeNode.NodeId, node.NodeId, StringComparison.Ordinal))
+            })
+            .ToDictionary(item => item.StepIndex, item => item.Node);
+    }
+
+    private async Task FailAndSaveAsync(
+        AgentTask task,
+        ArtifactWorkspace workspace,
+        AgentTaskRunAttempt attempt,
+        string taskMessage,
+        string failureCode,
+        string safeMessage,
+        DateTimeOffset failedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        task.Fail(taskMessage, failedAtUtc);
+        attempt.MarkFailed(failureCode, safeMessage, failedAtUtc);
+        task.ReleaseRunLease(failedAtUtc, clearActiveAttempt: true);
+        await SaveAsync(task, workspace, attempt, cancellationToken);
     }
 
     private static bool RequiresRuntimeApproval(AgentStep step, ToolRegistration tool)

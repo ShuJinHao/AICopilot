@@ -99,6 +99,14 @@ async function sendEventStream(path: string, payload: unknown, callbacks: Stream
   }
 }
 
+function postAgentTaskAction(path: string, id: string, extra: Record<string, unknown> = {}) {
+  return apiClient.post<AgentTask>(
+    path,
+    { id, ...extra },
+    CHAT_MUTATION_REQUEST_OPTIONS,
+  )
+}
+
 export const chatService = {
   async getSessions() {
     return await apiClient.get<Session[]>(
@@ -271,43 +279,27 @@ export const chatService = {
   },
 
   async approveAgentTaskPlan(id: string) {
-    return await apiClient.post<AgentTask>(
-      '/aigateway/agent/task/approve-plan',
-      { id },
-      CHAT_MUTATION_REQUEST_OPTIONS,
-    )
+    return await postAgentTaskAction('/aigateway/agent/task/approve-plan', id)
   },
 
   async rejectAgentTaskPlan(id: string) {
-    return await apiClient.post<AgentTask>(
+    return await postAgentTaskAction(
       '/aigateway/agent/task/reject-plan',
-      { id, reason: 'Plan rejected from primary PlanDraft action.' },
-      CHAT_MUTATION_REQUEST_OPTIONS,
+      id,
+      { reason: 'Plan rejected from primary PlanDraft action.' },
     )
   },
 
   async runAgentTask(id: string) {
-    return await apiClient.post<AgentTask>(
-      '/aigateway/agent/task/run',
-      { id },
-      CHAT_MUTATION_REQUEST_OPTIONS,
-    )
+    return await postAgentTaskAction('/aigateway/agent/task/run', id)
   },
 
   async retryAgentTask(id: string) {
-    return await apiClient.post<AgentTask>(
-      '/aigateway/agent/task/retry',
-      { id },
-      CHAT_MUTATION_REQUEST_OPTIONS,
-    )
+    return await postAgentTaskAction('/aigateway/agent/task/retry', id)
   },
 
   async cancelAgentTask(id: string) {
-    return await apiClient.post<AgentTask>(
-      '/aigateway/agent/task/cancel',
-      { id },
-      CHAT_MUTATION_REQUEST_OPTIONS,
-    )
+    return await postAgentTaskAction('/aigateway/agent/task/cancel', id)
   },
 
   async getAgentTasksBySession(sessionId: string) {

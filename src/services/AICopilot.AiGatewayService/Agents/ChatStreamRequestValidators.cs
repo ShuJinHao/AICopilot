@@ -55,10 +55,10 @@ public sealed class ApprovalDecisionStreamRequestValidator : IRequestValidator<A
     }
 }
 
-public sealed class PlanAgentTaskStreamRequestValidator : IRequestValidator<PlanAgentTaskStreamRequest>
+public sealed class PlanAgentTaskCommandValidator : IRequestValidator<PlanAgentTaskCommand>
 {
     public ValueTask<ApiProblemDescriptor?> ValidateAsync(
-        PlanAgentTaskStreamRequest request,
+        PlanAgentTaskCommand request,
         CancellationToken cancellationToken)
     {
         if (request.SessionId == Guid.Empty)

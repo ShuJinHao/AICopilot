@@ -2,6 +2,7 @@ using AICopilot.Core.AiGateway.Aggregates.Artifacts;
 using AICopilot.Core.AiGateway.Ids;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using static AICopilot.EntityFrameworkCore.Configuration.AiGateway.AgentExecutionRuntimeConfigurationMapping;
 
 namespace AICopilot.EntityFrameworkCore.Configuration.AiGateway;
 
@@ -73,7 +74,6 @@ public sealed class ArtifactConfiguration : IEntityTypeConfiguration<Artifact>
     public void Configure(EntityTypeBuilder<Artifact> builder)
     {
         builder.ToTable("artifacts");
-
         builder.HasKey(artifact => artifact.Id);
         builder.Property(artifact => artifact.Id)
             .HasConversion(id => id.Value, value => new ArtifactId(value))
@@ -124,13 +124,9 @@ public sealed class ArtifactConfiguration : IEntityTypeConfiguration<Artifact>
             .IsRequired()
             .HasColumnName("status");
 
-        builder.Property(artifact => artifact.SourceMode)
-            .HasMaxLength(80)
-            .HasColumnName("source_mode");
-
-        builder.Property(artifact => artifact.Boundary)
-            .HasMaxLength(120)
-            .HasColumnName("boundary");
+        MapTextColumns(builder,
+            (nameof(Artifact.SourceMode), "source_mode", 80), (nameof(Artifact.Boundary), "boundary", 120), (nameof(Artifact.SourceLabel), "source_label", 200),
+            (nameof(Artifact.QueryHash), "query_hash", 128), (nameof(Artifact.ResultHash), "result_hash", 128), (nameof(Artifact.EvidenceSetDigest), "evidence_set_digest", 64));
 
         builder.Property(artifact => artifact.IsSimulation)
             .IsRequired()
@@ -139,22 +135,6 @@ public sealed class ArtifactConfiguration : IEntityTypeConfiguration<Artifact>
         builder.Property(artifact => artifact.IsSandbox)
             .IsRequired()
             .HasColumnName("is_sandbox");
-
-        builder.Property(artifact => artifact.SourceLabel)
-            .HasMaxLength(200)
-            .HasColumnName("source_label");
-
-        builder.Property(artifact => artifact.QueryHash)
-            .HasMaxLength(128)
-            .HasColumnName("query_hash");
-
-        builder.Property(artifact => artifact.ResultHash)
-            .HasMaxLength(128)
-            .HasColumnName("result_hash");
-
-        builder.Property(artifact => artifact.EvidenceSetDigest)
-            .HasMaxLength(64)
-            .HasColumnName("evidence_set_digest");
 
         builder.Property(artifact => artifact.RowCount)
             .IsRequired()

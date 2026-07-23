@@ -47,12 +47,19 @@ public sealed record GetAgentTaskRunQueueQuery(
 
 public sealed class GetAgentTaskAuditSummaryQueryHandler(
     AgentTaskAuditQueryCoordinator auditQueryCoordinator)
-    : IQueryHandler<GetAgentTaskAuditSummaryQuery, Result<IReadOnlyCollection<AgentTaskAuditSummaryDto>>>
+    : IQueryHandler<GetAgentTaskAuditSummaryQuery, Result<IReadOnlyCollection<AgentTaskAuditSummaryDto>>>,
+      IQueryHandler<GetAgentTaskRuntimeSnapshotQuery, Result<AgentTaskRuntimeSnapshotDto>>
 {
     public Task<Result<IReadOnlyCollection<AgentTaskAuditSummaryDto>>> Handle(
         GetAgentTaskAuditSummaryQuery request,
         CancellationToken cancellationToken) =>
         auditQueryCoordinator.GetSummaryAsync(request, cancellationToken);
+
+    public Task<Result<AgentTaskRuntimeSnapshotDto>> Handle(
+        GetAgentTaskRuntimeSnapshotQuery request,
+        CancellationToken cancellationToken) =>
+        auditQueryCoordinator.GetRuntimeSnapshotAsync(request, cancellationToken);
+
 }
 
 public sealed class GetAgentTaskToolExecutionsQueryHandler(
@@ -75,7 +82,7 @@ public sealed class GetAgentTaskRunAttemptsQueryHandler(
         auditQueryCoordinator.GetRunAttemptsAsync(request, cancellationToken);
 }
 
-public sealed class GetAgentTaskRunQueueQueryHandler(
+internal sealed class GetAgentTaskRunQueueQueryHandler(
     AgentTaskAuditQueryCoordinator auditQueryCoordinator)
     : IQueryHandler<GetAgentTaskRunQueueQuery, Result<AgentTaskRunQueuePageDto>>
 {
@@ -83,14 +90,4 @@ public sealed class GetAgentTaskRunQueueQueryHandler(
         GetAgentTaskRunQueueQuery request,
         CancellationToken cancellationToken) =>
         auditQueryCoordinator.GetRunQueueAsync(request, cancellationToken);
-}
-
-public sealed class GetAgentTaskRuntimeSnapshotQueryHandler(
-    AgentTaskAuditQueryCoordinator auditQueryCoordinator)
-    : IQueryHandler<GetAgentTaskRuntimeSnapshotQuery, Result<AgentTaskRuntimeSnapshotDto>>
-{
-    public Task<Result<AgentTaskRuntimeSnapshotDto>> Handle(
-        GetAgentTaskRuntimeSnapshotQuery request,
-        CancellationToken cancellationToken) =>
-        auditQueryCoordinator.GetRuntimeSnapshotAsync(request, cancellationToken);
 }

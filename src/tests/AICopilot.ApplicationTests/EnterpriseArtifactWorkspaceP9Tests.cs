@@ -27,14 +27,14 @@ public sealed class EnterpriseArtifactWorkspaceP9Tests
         artifact.ApplySourceMetadata(new ArtifactSourceMetadata(
             SourceMode: "SimulationBusiness",
             Boundary: "SimulationBusiness",
+            EvidenceSetDigest: new string('a', 64),
             IsSimulation: true,
             IsSandbox: false,
             SourceLabel: "AI 独立模拟业务库",
             QueryHash: "sim-query-hash-001",
             ResultHash: "sim-result-hash-001",
             RowCount: 12,
-            IsTruncated: false,
-            EvidenceSetDigest: new string('a', 64)));
+            IsTruncated: false));
         artifact.EvidenceSetDigest.Should().Be(new string('a', 64));
 
         var store = new InMemoryArtifactWorkspaceFileStore();
@@ -85,6 +85,7 @@ public sealed class EnterpriseArtifactWorkspaceP9Tests
         artifact.ApplySourceMetadata(new ArtifactSourceMetadata(
             SourceMode: "CloudReadonlySandbox",
             Boundary: "SandboxControlledTrial",
+            EvidenceSetDigest: null,
             IsSimulation: false,
             IsSandbox: true,
             SourceLabel: "Cloud 只读 Sandbox（非生产）",

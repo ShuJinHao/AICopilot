@@ -1,3 +1,4 @@
+using AICopilot.AiGatewayService.Models;
 using AICopilot.AiGatewayService.Workflows.Executors;
 
 namespace AICopilot.UnitTests;
@@ -17,9 +18,7 @@ public sealed class IntentRoutingResultParserTests
         var parsed = IntentRoutingResultParser.TryParse(text, out var intents);
 
         parsed.Should().BeTrue();
-        intents.Should().ContainSingle();
-        intents[0].Intent.Should().Be("General.Chat");
-        intents[0].Confidence.Should().BeApproximately(0.99, 0.001);
+        VerifySingleIntent(intents, "General.Chat", 0.99);
     }
 
     [Fact]
@@ -42,9 +41,7 @@ public sealed class IntentRoutingResultParserTests
             out var intents);
 
         parsed.Should().BeTrue();
-        intents.Should().ContainSingle();
-        intents[0].Intent.Should().Be("Analysis.Device.List");
-        intents[0].Confidence.Should().BeApproximately(0.92, 0.001);
+        VerifySingleIntent(intents, "Analysis.Device.List", 0.92);
     }
 
     [Fact]
@@ -56,5 +53,15 @@ public sealed class IntentRoutingResultParserTests
 
         parsed.Should().BeFalse();
         intents.Should().BeEmpty();
+    }
+
+    private static void VerifySingleIntent(
+        IReadOnlyList<IntentResult> intents,
+        string expectedIntent,
+        double expectedConfidence)
+    {
+        intents.Should().ContainSingle();
+        intents[0].Intent.Should().Be(expectedIntent);
+        intents[0].Confidence.Should().BeApproximately(expectedConfidence, 0.001);
     }
 }

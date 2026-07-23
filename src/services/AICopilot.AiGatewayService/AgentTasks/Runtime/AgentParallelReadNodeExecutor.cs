@@ -97,22 +97,12 @@ internal sealed class AgentParallelReadNodeExecutor(
                 InputEvidence: []);
             var executionResult = await AgentNodeExecutionPlane.ExecuteAsync(
                 AgentNodeExecutionContract.ForDurable(request.NodeContract),
-                executionToken => ExecuteWithTimeoutAsync(
+                executionToken => AgentToolExecutionTimeout.ExecuteAsync(
                     executor,
                     context with { CancellationToken = executionToken }),
                 cancellationToken,
                 attemptCount => toolCallCount = attemptCount);
-            var outputValidation = AgentToolRuntimeOutputGate.Validate(
-                request.ToolRegistration,
-                executionResult);
-            if (!outputValidation.IsValid)
-            {
-                throw new AgentToolExecutionException(
-                    outputValidation.IsPayloadTooLarge
-                        ? AppProblemCodes.EvidencePayloadTooLarge
-                        : AppProblemCodes.ToolOutputSchemaInvalid,
-                    outputValidation.Error ?? "Tool output does not match the registry schema.");
-            }
+            AgentToolRuntimeOutputGate.EnsureValid(request.ToolRegistration, executionResult);
 
             var artifactBinding = AgentArtifactOutputBindingGate.Validate(
                 request.Task,
@@ -169,21 +159,4 @@ internal sealed class AgentParallelReadNodeExecutor(
             failureCode,
             safeMessage);
 
-    private static async Task<AgentToolExecutionResult> ExecuteWithTimeoutAsync(
-        IAgentToolExecutor executor,
-        AgentToolExecutionContext context)
-    {
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken);
-        timeoutCts.CancelAfter(TimeSpan.FromSeconds(context.ToolRegistration.TimeoutSeconds));
-        try
-        {
-            return await executor.ExecuteAsync(context with { CancellationToken = timeoutCts.Token });
-        }
-        catch (OperationCanceledException) when (!context.CancellationToken.IsCancellationRequested)
-        {
-            throw new AgentToolExecutionException(
-                AppProblemCodes.ToolExecutionTimeout,
-                $"Tool '{context.ToolRegistration.ToolCode}' exceeded timeout {context.ToolRegistration.TimeoutSeconds} seconds.");
-        }
-    }
 }

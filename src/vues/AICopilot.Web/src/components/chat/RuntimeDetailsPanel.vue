@@ -92,86 +92,36 @@ function formatRuntimeTime(value?: string | null) {
     : date.toLocaleString('zh-CN', { hour12: false })
 }
 
-function truthTone(truthClass: string) {
-  switch (truthClass) {
-    case 'ObservedFact':
-      return 'success'
-    case 'DerivedFact':
-      return 'info'
-    case 'ModelPrediction':
-      return 'warning'
-    case 'LlmInference':
-      return 'neutral'
-    case 'Recommendation':
-      return 'warning'
-    default:
-      return 'neutral'
-  }
+type RuntimeTone = 'success' | 'info' | 'warning' | 'neutral' | 'danger'
+
+const runtimeTones: Record<string, RuntimeTone> = {
+  'truth:ObservedFact': 'success', 'truth:DerivedFact': 'info', 'truth:ModelPrediction': 'warning',
+  'truth:LlmInference': 'neutral', 'truth:Recommendation': 'warning', 'node:Completed': 'success',
+  'node:Succeeded': 'success', 'node:Failed': 'danger', 'node:OutcomeUnknown': 'danger', 'node:Running': 'info',
+  'node:WaitingApproval': 'warning', 'metric:Healthy': 'success', 'metric:Recorded': 'success',
+  'metric:DerivedFromRuntimeRecord': 'success', 'metric:Warning': 'warning', 'metric:Unavailable': 'warning',
+  'metric:ProviderUsageUnavailable': 'warning', 'metric:NotRecorded': 'warning', 'metric:Failed': 'danger',
 }
 
-function runtimeNodeTone(status: string) {
-  switch (status) {
-    case 'Completed':
-    case 'Succeeded':
-      return 'success'
-    case 'Failed':
-    case 'OutcomeUnknown':
-      return 'danger'
-    case 'Running':
-      return 'info'
-    case 'WaitingApproval':
-      return 'warning'
-    default:
-      return 'neutral'
-  }
+const runtimeLabels: Record<string, string> = {
+  'node:Pending': '待调度', 'node:Runnable': '可执行', 'node:Claimed': '已领取', 'node:Running': '执行中',
+  'node:WaitingApproval': '暂停待审批', 'node:Completed': '已完成', 'node:Succeeded': '已成功',
+  'node:Failed': '已失败', 'node:Cancelled': '已取消', 'node:OutcomeUnknown': '结果待核对',
+  'metric:Recorded': '已记录', 'metric:DerivedFromRuntimeRecord': '由运行记录确定', 'metric:ObservedByTelemetryOnly': '仅遥测观测',
+  'metric:ProviderUsageUnavailable': '供应商未回传', 'metric:Pending': '待记录', 'metric:NotStarted': '未开始',
+  'metric:NotRecorded': '未记录', 'metric:Failed': '不一致', 'evidence:futureHeartbeatCount': '时钟超前心跳',
+  'evidence:missingHeartbeatCount': '缺失心跳', 'evidence:reportedIssueStatusCount': '明确异常状态',
+  'evidence:staleHeartbeatCount': '陈旧心跳', 'evidence:totalDeviceCount': '评估设备数',
+  'evidence:unknownRuntimeStatusCount': '未知运行状态', 'evidence:rowCount': '记录数',
+  'evidence:fileCount': '文件数', 'evidence:itemCount': '条目数', 'evidence:artifactCount': '产物数',
 }
 
-function metricTone(status: string) {
-  switch (status) {
-    case 'Healthy':
-    case 'Recorded':
-    case 'DerivedFromRuntimeRecord':
-      return 'success'
-    case 'Warning':
-    case 'Unavailable':
-    case 'ProviderUsageUnavailable':
-    case 'NotRecorded':
-      return 'warning'
-    case 'Failed':
-      return 'danger'
-    default:
-      return 'neutral'
-  }
+function runtimeTone(scope: string, value: string) {
+  return runtimeTones[`${scope}:${value}`] ?? 'neutral'
 }
 
-function runtimeNodeStatusLabel(status: string) {
-  const labels: Record<string, string> = {
-    Pending: '待调度',
-    Runnable: '可执行',
-    Claimed: '已领取',
-    Running: '执行中',
-    WaitingApproval: '暂停待审批',
-    Completed: '已完成',
-    Succeeded: '已成功',
-    Failed: '已失败',
-    Cancelled: '已取消',
-    OutcomeUnknown: '结果待核对',
-  }
-  return labels[status] ?? '未知状态'
-}
-
-function metricStatusLabel(status: string) {
-  const labels: Record<string, string> = {
-    Recorded: '已记录',
-    DerivedFromRuntimeRecord: '由运行记录确定',
-    ObservedByTelemetryOnly: '仅遥测观测',
-    ProviderUsageUnavailable: '供应商未回传',
-    Pending: '待记录',
-    NotStarted: '未开始',
-    NotRecorded: '未记录',
-    Failed: '不一致',
-  }
-  return labels[status] ?? '状态未记录'
+function runtimeLabel(scope: string, value: string, fallback: string) {
+  return runtimeLabels[`${scope}:${value}`] ?? fallback
 }
 
 function evidenceFreshnessLabel(freshness: string) {
@@ -187,15 +137,9 @@ function evidenceFreshnessLabel(freshness: string) {
 
 function evidenceQualityWarnings(flags: string[]) {
   const labels: Record<string, string> = {
-    'source-truncated': '输入数据已截断',
-    'parent-evidence-truncated': '父证据已截断',
-    'source-stale': '数据可能陈旧',
-    'missing-data': '存在缺失数据',
-    'low-confidence': '低置信度',
-    'simulation-source': 'Simulation 数据',
-    'simulation-evidence': 'Simulation 证据',
-    'metric-conflict': '同名指标存在冲突',
-    'potential-evidence-conflict': '证据可能冲突',
+    'source-truncated': '输入数据已截断', 'parent-evidence-truncated': '父证据已截断', 'source-stale': '数据可能陈旧',
+    'missing-data': '存在缺失数据', 'low-confidence': '低置信度', 'simulation-source': 'Simulation 数据',
+    'simulation-evidence': 'Simulation 证据', 'metric-conflict': '同名指标存在冲突', 'potential-evidence-conflict': '证据可能冲突',
     'optional-evidence-missing': '可选证据缺失',
     'no-results': '来源未返回记录',
     'data-insufficient': '数据不足',
@@ -219,21 +163,6 @@ function formatMetric(value?: number | null, unit?: string) {
   return unit ? `${formatted} ${unit}` : formatted
 }
 
-function evidenceMetricLabel(code: string) {
-  const labels: Record<string, string> = {
-    futureHeartbeatCount: '时钟超前心跳',
-    missingHeartbeatCount: '缺失心跳',
-    reportedIssueStatusCount: '明确异常状态',
-    staleHeartbeatCount: '陈旧心跳',
-    totalDeviceCount: '评估设备数',
-    unknownRuntimeStatusCount: '未知运行状态',
-    rowCount: '记录数',
-    fileCount: '文件数',
-    itemCount: '条目数',
-    artifactCount: '产物数',
-  }
-  return labels[code] ?? '确定性指标'
-}
 </script>
 
 <template>
@@ -359,7 +288,7 @@ function evidenceMetricLabel(code: string) {
                 {{ node.safeMessage }}
               </span>
             </div>
-            <AiTag :tone="runtimeNodeTone(node.status)">{{ runtimeNodeStatusLabel(node.status) }}</AiTag>
+            <AiTag :tone="runtimeTone('node', node.status)">{{ runtimeLabel('node', node.status, '未知状态') }}</AiTag>
           </div>
         </div>
       </section>
@@ -434,11 +363,13 @@ function evidenceMetricLabel(code: string) {
                 </span>
                 <span v-for="finding in evidence.findings" :key="finding">{{ finding }}</span>
                 <span v-for="(value, name) in evidence.typedMetrics" :key="name">
-                  {{ evidenceMetricLabel(name) }}：{{ formatMetric(value) }}
+                  {{ runtimeLabel('evidence', name, '确定性指标') }}：{{ formatMetric(value) }}
                 </span>
               </details>
             </div>
-            <AiTag :tone="truthTone(evidence.truthClass)">{{ evidence.truthLabel }}</AiTag>
+            <AiTag
+              :tone="runtimeTone('truth', evidence.truthClass)"
+            >{{ evidence.truthLabel }}</AiTag>
           </div>
         </div>
       </section>
@@ -452,7 +383,7 @@ function evidenceMetricLabel(code: string) {
           <div v-for="metric in runtimeMetrics" :key="metric.code" class="status-tile">
             <span>{{ metric.label }}</span>
             <strong class="ai-number">{{ formatMetric(metric.value, metric.unit) }}</strong>
-            <AiTag :tone="metricTone(metric.status)">{{ metricStatusLabel(metric.status) }}</AiTag>
+            <AiTag :tone="runtimeTone('metric', metric.status)">{{ runtimeLabel('metric', metric.status, '状态未记录') }}</AiTag>
           </div>
         </div>
       </section>
@@ -475,7 +406,9 @@ function evidenceMetricLabel(code: string) {
                 </span>
               </details>
             </div>
-            <AiTag :tone="audit.result === 'Succeeded' ? 'success' : 'danger'">{{ audit.result }}</AiTag>
+            <AiTag :tone="audit.result === 'Succeeded' ? 'success' : 'danger'">
+              {{ audit.result }}
+            </AiTag>
           </div>
         </div>
       </section>

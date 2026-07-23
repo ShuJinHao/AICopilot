@@ -159,7 +159,7 @@ internal sealed class NodeOutcomeReconciliationCoordinator(
         DateTimeOffset decidedAtUtc,
         CancellationToken cancellationToken)
     {
-        var decisionDigest = ComputeDecisionDigest(
+        var decisionDigest = AgentOutcomeReconciliationDecisionDigest.Compute(
             claim,
             result.Resolution,
             result.ReasonCode,
@@ -167,6 +167,17 @@ internal sealed class NodeOutcomeReconciliationCoordinator(
             actorIdHash,
             result.EvidenceDigest,
             result.ProviderReceiptHash,
+            decidedAtUtc);
+        var decision = new AgentOutcomeReconciliationDecision(
+            claim,
+            result.Resolution,
+            result.ReasonCode,
+            result.SafeMessage,
+            actorType,
+            actorIdHash,
+            result.EvidenceDigest,
+            result.ProviderReceiptHash,
+            decisionDigest,
             decidedAtUtc);
         AgentFencedWriteResult writeResult;
         switch (result.Resolution)
@@ -198,18 +209,9 @@ internal sealed class NodeOutcomeReconciliationCoordinator(
             case AgentOutcomeReconciliationResolution.ManualAbandonedAsCancelled:
                 writeResult = await store.CommitNegativeDecisionAsync(
                     new AgentOutcomeReconciliationNegativeDecision(
-                        claim,
-                        result.Resolution,
-                        result.ReasonCode,
-                        result.SafeMessage,
-                        actorType,
-                        actorIdHash,
-                        result.EvidenceDigest,
-                        result.ProviderReceiptHash,
-                        decisionDigest,
+                        decision,
                         result.AllowNodeRetry,
-                        result.RetryAtUtc,
-                        decidedAtUtc),
+                        result.RetryAtUtc),
                     cancellationToken);
                 break;
 
@@ -217,17 +219,8 @@ internal sealed class NodeOutcomeReconciliationCoordinator(
             case AgentOutcomeReconciliationResolution.ConflictingEvidence:
                 writeResult = await store.DeferAsync(
                     new AgentOutcomeReconciliationDeferral(
-                        claim,
-                        result.Resolution,
-                        result.ReasonCode,
-                        result.SafeMessage,
-                        actorType,
-                        actorIdHash,
-                        result.EvidenceDigest,
-                        result.ProviderReceiptHash,
-                        decisionDigest,
-                        result.NextCheckAtUtc ?? NextCheck(claim, decidedAtUtc),
-                        decidedAtUtc),
+                        decision,
+                        result.NextCheckAtUtc ?? NextCheck(claim, decidedAtUtc)),
                     cancellationToken);
                 break;
 
@@ -252,33 +245,6 @@ internal sealed class NodeOutcomeReconciliationCoordinator(
         return nowUtc >= claim.ReconciliationDeadlineAt
             ? nowUtc.AddHours(6)
             : nowUtc.AddMinutes(Math.Min(30, Math.Max(1, claim.NodeRun.ReconciliationAttemptNo * 2)));
-    }
-
-    private static string ComputeDecisionDigest(
-        AgentOutcomeReconciliationClaim claim,
-        AgentOutcomeReconciliationResolution resolution,
-        string reasonCode,
-        string actorType,
-        string actorIdHash,
-        string? evidenceDigest,
-        string? providerReceiptHash,
-        DateTimeOffset decidedAtUtc)
-    {
-        var canonical = string.Join('|',
-            claim.TaskId.Value.ToString("D"),
-            claim.RunAttemptId.Value.ToString("D"),
-            claim.NodeRun.Id.Value.ToString("D"),
-            claim.TaskFencingToken,
-            claim.NodeFencingToken,
-            claim.ReconciliationFencingToken,
-            resolution,
-            reasonCode.Trim(),
-            actorType.Trim(),
-            actorIdHash.Trim(),
-            evidenceDigest?.Trim() ?? string.Empty,
-            providerReceiptHash?.Trim() ?? string.Empty,
-            decidedAtUtc.ToUniversalTime().ToString("O"));
-        return Hash(canonical);
     }
 
     private static string Hash(string value)

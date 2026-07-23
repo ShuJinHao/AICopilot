@@ -74,27 +74,13 @@ internal sealed class PostgresModelQuotaReservationStore(
                         reservation.WindowStartedAtUtc == windowStart &&
                         reservation.Status != ModelQuotaReservationStatus.Released)
                     .ToListAsync(token);
-                var endpoint = windowReservations.Where(reservation =>
-                    reservation.ModelId == request.ModelId &&
-                    reservation.EndpointId == request.EndpointId).ToArray();
-                var model = windowReservations.Where(reservation =>
-                    reservation.ModelId == request.ModelId).ToArray();
-                var tenant = windowReservations.Where(reservation =>
-                    reservation.TenantKeyHash == request.TenantKeyHash).ToArray();
-                var user = request.UserId.HasValue
-                    ? windowReservations.Where(reservation =>
-                        reservation.TenantKeyHash == request.TenantKeyHash &&
-                        reservation.UserId == request.UserId).ToArray()
-                    : [];
-                var role = windowReservations.Where(reservation =>
-                    reservation.TenantKeyHash == request.TenantKeyHash &&
-                    reservation.RoleKeyHash == request.RoleKeyHash).ToArray();
+                var scopes = Partition(windowReservations, request);
 
-                if (ExceedsCount(endpoint.Length, request.EndpointRpmLimit) ||
-                    ExceedsCount(model.Length, request.ModelRpmLimit) ||
-                    request.UserId.HasValue && ExceedsCount(user.Length, request.UserRpmLimit) ||
-                    ExceedsCount(role.Length, request.RoleRpmLimit) ||
-                    ExceedsCount(tenant.Length, request.TenantRpmLimit))
+                if (ExceedsCount(scopes.Endpoint.Length, request.EndpointRpmLimit) ||
+                    ExceedsCount(scopes.Model.Length, request.ModelRpmLimit) ||
+                    request.UserId.HasValue && ExceedsCount(scopes.User.Length, request.UserRpmLimit) ||
+                    ExceedsCount(scopes.Role.Length, request.RoleRpmLimit) ||
+                    ExceedsCount(scopes.Tenant.Length, request.TenantRpmLimit))
                 {
                     return Attempt(Denied(
                         ModelQuotaReservationResult.RateLimited,
@@ -103,11 +89,11 @@ internal sealed class PostgresModelQuotaReservationStore(
                 }
 
                 var tokenEstimate = checked(request.EstimatedInputTokens + request.EstimatedOutputTokens);
-                if (ExceedsTokens(endpoint, tokenEstimate, request.EndpointTpmLimit) ||
-                    ExceedsTokens(model, tokenEstimate, request.ModelTpmLimit) ||
-                    request.UserId.HasValue && ExceedsTokens(user, tokenEstimate, request.UserTpmLimit) ||
-                    ExceedsTokens(role, tokenEstimate, request.RoleTpmLimit) ||
-                    ExceedsTokens(tenant, tokenEstimate, request.TenantTpmLimit))
+                if (ExceedsTokens(scopes.Endpoint, tokenEstimate, request.EndpointTpmLimit) ||
+                    ExceedsTokens(scopes.Model, tokenEstimate, request.ModelTpmLimit) ||
+                    request.UserId.HasValue && ExceedsTokens(scopes.User, tokenEstimate, request.UserTpmLimit) ||
+                    ExceedsTokens(scopes.Role, tokenEstimate, request.RoleTpmLimit) ||
+                    ExceedsTokens(scopes.Tenant, tokenEstimate, request.TenantTpmLimit))
                 {
                     return Attempt(Denied(
                         ModelQuotaReservationResult.TokenLimited,
@@ -122,27 +108,13 @@ internal sealed class PostgresModelQuotaReservationStore(
                          reservation.Status == ModelQuotaReservationStatus.ReconciliationRequired) &&
                         reservation.ExpiresAtUtc > now)
                     .ToArrayAsync(token);
-                var activeEndpoint = activeReservations.Where(reservation =>
-                    reservation.ModelId == request.ModelId &&
-                    reservation.EndpointId == request.EndpointId).ToArray();
-                var activeModel = activeReservations.Where(reservation =>
-                    reservation.ModelId == request.ModelId).ToArray();
-                var activeTenant = activeReservations.Where(reservation =>
-                    reservation.TenantKeyHash == request.TenantKeyHash).ToArray();
-                var activeUser = request.UserId.HasValue
-                    ? activeReservations.Where(reservation =>
-                        reservation.TenantKeyHash == request.TenantKeyHash &&
-                        reservation.UserId == request.UserId).ToArray()
-                    : [];
-                var activeRole = activeReservations.Where(reservation =>
-                    reservation.TenantKeyHash == request.TenantKeyHash &&
-                    reservation.RoleKeyHash == request.RoleKeyHash).ToArray();
-                if (ExceedsConcurrency(activeEndpoint, request.ConcurrencySlots, request.EndpointConcurrencyLimit) ||
-                    ExceedsConcurrency(activeModel, request.ConcurrencySlots, request.ModelConcurrencyLimit) ||
+                var activeScopes = Partition(activeReservations, request);
+                if (ExceedsConcurrency(activeScopes.Endpoint, request.ConcurrencySlots, request.EndpointConcurrencyLimit) ||
+                    ExceedsConcurrency(activeScopes.Model, request.ConcurrencySlots, request.ModelConcurrencyLimit) ||
                     request.UserId.HasValue &&
-                    ExceedsConcurrency(activeUser, request.ConcurrencySlots, request.UserConcurrencyLimit) ||
-                    ExceedsConcurrency(activeRole, request.ConcurrencySlots, request.RoleConcurrencyLimit) ||
-                    ExceedsConcurrency(activeTenant, request.ConcurrencySlots, request.TenantConcurrencyLimit))
+                    ExceedsConcurrency(activeScopes.User, request.ConcurrencySlots, request.UserConcurrencyLimit) ||
+                    ExceedsConcurrency(activeScopes.Role, request.ConcurrencySlots, request.RoleConcurrencyLimit) ||
+                    ExceedsConcurrency(activeScopes.Tenant, request.ConcurrencySlots, request.TenantConcurrencyLimit))
                 {
                     var retryAt = activeReservations
                         .Select(reservation => reservation.ExpiresAtUtc)
@@ -250,10 +222,14 @@ internal sealed class PostgresModelQuotaReservationStore(
     public Task<int> ReclaimExpiredAsync(
         DateTimeOffset nowUtc,
         int maxItems,
-        CancellationToken cancellationToken = default)
-    {
-        var take = Math.Clamp(maxItems, 1, 1000);
-        return transactionRunner.ExecuteAsync(
+        CancellationToken cancellationToken = default) =>
+        ReclaimExpiredCoreAsync(nowUtc, Math.Clamp(maxItems, 1, 1000), cancellationToken);
+
+    private Task<int> ReclaimExpiredCoreAsync(
+        DateTimeOffset nowUtc,
+        int take,
+        CancellationToken cancellationToken) =>
+        transactionRunner.ExecuteAsync(
             "Agent.ModelQuotaReclaimExpired",
             async (context, token) =>
             {
@@ -276,9 +252,22 @@ internal sealed class PostgresModelQuotaReservationStore(
                 return Attempt(expired.Count);
             },
             cancellationToken);
-    }
 
     private static bool ExceedsCount(int current, int limit) => limit > 0 && current + 1 > limit;
+
+    private static ReservationScopes Partition(
+        IReadOnlyCollection<ModelQuotaReservation> reservations,
+        ModelQuotaReservationRequest request)
+    {
+        return new ReservationScopes(
+            reservations.Where(item => item.ModelId == request.ModelId && item.EndpointId == request.EndpointId).ToArray(),
+            reservations.Where(item => item.ModelId == request.ModelId).ToArray(),
+            reservations.Where(item => item.TenantKeyHash == request.TenantKeyHash).ToArray(),
+            request.UserId.HasValue
+                ? reservations.Where(item => item.TenantKeyHash == request.TenantKeyHash && item.UserId == request.UserId).ToArray()
+                : [],
+            reservations.Where(item => item.TenantKeyHash == request.TenantKeyHash && item.RoleKeyHash == request.RoleKeyHash).ToArray());
+    }
 
     private static bool ExceedsTokens(
         IReadOnlyCollection<ModelQuotaReservation> reservations,
@@ -337,4 +326,11 @@ internal sealed class PostgresModelQuotaReservationStore(
     }
 
     private static AgentExecutionTransactionAttempt<T> Attempt<T>(T value) => new(value);
+
+    private sealed record ReservationScopes(
+        ModelQuotaReservation[] Endpoint,
+        ModelQuotaReservation[] Model,
+        ModelQuotaReservation[] Tenant,
+        ModelQuotaReservation[] User,
+        ModelQuotaReservation[] Role);
 }

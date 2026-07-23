@@ -8,13 +8,7 @@ import type {
   AgentTaskRuntimeSnapshot,
 } from '@/types/protocols'
 import type { SessionTimelineEvent } from '@/types/app'
-import { toFriendlyMessage } from './chatErrorStore'
-
-type ErrorReporter = (message: string) => void
-
-function reportLoadError(reportError: ErrorReporter | undefined, action: string, error: unknown) {
-  reportError?.(`${action}失败：${toFriendlyMessage(error)}`)
-}
+import { loadNullableResource, reportLoadError, type ErrorReporter } from './storeErrorReporter'
 
 export const useAgentTaskStore = defineStore('agentTask', () => {
   const agentTasks = ref<AgentTask[]>([])
@@ -131,15 +125,13 @@ export const useAgentTaskStore = defineStore('agentTask', () => {
       return null
     }
 
-    try {
-      runtimeSnapshot.value = await chatService.getAgentTaskRuntimeSnapshot(taskId)
-      return runtimeSnapshot.value
-    } catch (error) {
-      console.error('Failed to load agent runtime snapshot.', error)
-      reportLoadError(reportError, '加载运行详情', error)
-      runtimeSnapshot.value = null
-      return null
-    }
+    runtimeSnapshot.value = await loadNullableResource(
+      () => chatService.getAgentTaskRuntimeSnapshot(taskId),
+      reportError,
+      '加载运行详情',
+      'Failed to load agent runtime snapshot.',
+    )
+    return runtimeSnapshot.value
   }
 
   function findPendingPlanApproval(taskId: string) {

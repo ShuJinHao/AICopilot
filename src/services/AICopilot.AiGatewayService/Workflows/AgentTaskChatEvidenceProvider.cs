@@ -108,12 +108,11 @@ internal sealed class AgentTaskChatEvidenceProvider(
         var nowUtc = DateTimeOffset.UtcNow;
         foreach (var record in evidence)
         {
-            nodesById.TryGetValue(record.NodeId, out var producerNode);
             var access = AgentEvidenceAccessChecker.ValidateDurable(
                 record,
                 task,
                 attempt.Id.Value,
-                producerNode,
+                nodesById,
                 nowUtc);
             if (!access.IsSuccess)
             {

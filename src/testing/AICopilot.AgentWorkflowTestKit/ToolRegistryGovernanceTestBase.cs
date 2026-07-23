@@ -1201,6 +1201,22 @@ public abstract class ToolRegistryGovernanceTestBase
         }
     }
 
+    private static Artifact AddDraftArtifact(
+        ArtifactWorkspace workspace,
+        AgentDraftArtifactWriteRequest request)
+    {
+        var artifact = workspace.AddDraftArtifact(
+            request.ArtifactType,
+            request.Name,
+            request.RelativePath,
+            request.Content.Length,
+            request.MimeType,
+            request.StepId,
+            DateTimeOffset.UtcNow);
+        artifact.ApplySourceMetadata(request.SourceMetadata);
+        return artifact;
+    }
+
     internal sealed class ThrowingWorkspaceService(bool throwOnWrite = false) : IAgentArtifactWorkspaceService
     {
         public Task<ArtifactWorkspace> CreateForTaskAsync(
@@ -1216,55 +1232,13 @@ public abstract class ToolRegistryGovernanceTestBase
                 nowUtc));
         }
 
-        public Task<Artifact> WriteDraftTextArtifactAsync(
+        public Task<Artifact> WriteDraftArtifactAsync(
             ArtifactWorkspace workspace,
-            ArtifactType artifactType,
-            string name,
-            string relativePath,
-            string content,
-            string mimeType,
-            AgentStepId? stepId,
-            ArtifactSourceMetadata? sourceMetadata,
+            AgentDraftArtifactWriteRequest request,
             CancellationToken cancellationToken)
         {
-            if (throwOnWrite)
-            {
-                throw new InvalidOperationException(@"apiKey: sk-test C:\secrets\report.txt Host=db;Password=super-secret;");
-            }
-
-            var artifact = workspace.AddDraftArtifact(
-                artifactType,
-                name,
-                relativePath,
-                content.Length,
-                mimeType,
-                stepId,
-                DateTimeOffset.UtcNow);
-            artifact.ApplySourceMetadata(sourceMetadata);
-            return Task.FromResult(artifact);
-        }
-
-        public Task<Artifact> WriteDraftBinaryArtifactAsync(
-            ArtifactWorkspace workspace,
-            ArtifactType artifactType,
-            string name,
-            string relativePath,
-            byte[] content,
-            string mimeType,
-            AgentStepId? stepId,
-            ArtifactSourceMetadata? sourceMetadata,
-            CancellationToken cancellationToken)
-        {
-            var artifact = workspace.AddDraftArtifact(
-                artifactType,
-                name,
-                relativePath,
-                content.Length,
-                mimeType,
-                stepId,
-                DateTimeOffset.UtcNow);
-            artifact.ApplySourceMetadata(sourceMetadata);
-            return Task.FromResult(artifact);
+            EnsureWriteAllowed();
+            return Task.FromResult(AddDraftArtifact(workspace, request));
         }
 
         public Task<IReadOnlyList<Artifact>> WriteDraftArtifactSetAsync(
@@ -1272,25 +1246,17 @@ public abstract class ToolRegistryGovernanceTestBase
             IReadOnlyCollection<AgentDraftArtifactWriteRequest> artifacts,
             CancellationToken cancellationToken)
         {
+            EnsureWriteAllowed();
+            var created = artifacts.Select(request => AddDraftArtifact(workspace, request)).ToArray();
+            return Task.FromResult<IReadOnlyList<Artifact>>(created);
+        }
+
+        private void EnsureWriteAllowed()
+        {
             if (throwOnWrite)
             {
                 throw new InvalidOperationException(@"apiKey: sk-test C:\secrets\report.txt Host=db;Password=super-secret;");
             }
-
-            var created = artifacts.Select(request =>
-            {
-                var artifact = workspace.AddDraftArtifact(
-                    request.ArtifactType,
-                    request.Name,
-                    request.RelativePath,
-                    request.Content.Length,
-                    request.MimeType,
-                    request.StepId,
-                    DateTimeOffset.UtcNow);
-                artifact.ApplySourceMetadata(request.SourceMetadata);
-                return artifact;
-            }).ToArray();
-            return Task.FromResult<IReadOnlyList<Artifact>>(created);
         }
     }
 
@@ -1306,79 +1272,31 @@ public abstract class ToolRegistryGovernanceTestBase
             return Task.FromResult(workspace);
         }
 
-        public Task<Artifact> WriteDraftTextArtifactAsync(
+        public Task<Artifact> WriteDraftArtifactAsync(
             ArtifactWorkspace artifactWorkspace,
-            ArtifactType artifactType,
-            string name,
-            string relativePath,
-            string content,
-            string mimeType,
-            AgentStepId? stepId,
-            ArtifactSourceMetadata? sourceMetadata,
-            CancellationToken cancellationToken)
-        {
-            TextArtifacts[relativePath] = content;
-            var artifact = artifactWorkspace.AddDraftArtifact(
-                artifactType,
-                name,
-                relativePath,
-                content.Length,
-                mimeType,
-                stepId,
-                DateTimeOffset.UtcNow);
-            artifact.ApplySourceMetadata(sourceMetadata);
-            return Task.FromResult(artifact);
-        }
-
-        public Task<Artifact> WriteDraftBinaryArtifactAsync(
-            ArtifactWorkspace artifactWorkspace,
-            ArtifactType artifactType,
-            string name,
-            string relativePath,
-            byte[] content,
-            string mimeType,
-            AgentStepId? stepId,
-            ArtifactSourceMetadata? sourceMetadata,
-            CancellationToken cancellationToken)
-        {
-            var artifact = artifactWorkspace.AddDraftArtifact(
-                artifactType,
-                name,
-                relativePath,
-                content.Length,
-                mimeType,
-                stepId,
-                DateTimeOffset.UtcNow);
-            artifact.ApplySourceMetadata(sourceMetadata);
-            return Task.FromResult(artifact);
-        }
+            AgentDraftArtifactWriteRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(CaptureDraftArtifact(artifactWorkspace, request));
 
         public Task<IReadOnlyList<Artifact>> WriteDraftArtifactSetAsync(
             ArtifactWorkspace artifactWorkspace,
             IReadOnlyCollection<AgentDraftArtifactWriteRequest> artifacts,
-            CancellationToken cancellationToken)
-        {
-            var created = artifacts.Select(request =>
-            {
-                if (request.MimeType.StartsWith("text/", StringComparison.OrdinalIgnoreCase) ||
-                    request.MimeType.Contains("json", StringComparison.OrdinalIgnoreCase) ||
-                    request.MimeType.Contains("markdown", StringComparison.OrdinalIgnoreCase))
-                {
-                    TextArtifacts[request.RelativePath] = Encoding.UTF8.GetString(request.Content);
-                }
+            CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<Artifact>>(
+                artifacts.Select(request => CaptureDraftArtifact(artifactWorkspace, request)).ToArray());
 
-                var artifact = artifactWorkspace.AddDraftArtifact(
-                    request.ArtifactType,
-                    request.Name,
-                    request.RelativePath,
-                    request.Content.Length,
-                    request.MimeType,
-                    request.StepId,
-                    DateTimeOffset.UtcNow);
-                artifact.ApplySourceMetadata(request.SourceMetadata);
-                return artifact;
-            }).ToArray();
-            return Task.FromResult<IReadOnlyList<Artifact>>(created);
+        private Artifact CaptureDraftArtifact(
+            ArtifactWorkspace artifactWorkspace,
+            AgentDraftArtifactWriteRequest request)
+        {
+            if (request.MimeType.StartsWith("text/", StringComparison.OrdinalIgnoreCase) ||
+                request.MimeType.Contains("json", StringComparison.OrdinalIgnoreCase) ||
+                request.MimeType.Contains("markdown", StringComparison.OrdinalIgnoreCase))
+            {
+                TextArtifacts[request.RelativePath] = Encoding.UTF8.GetString(request.Content);
+            }
+
+            return AddDraftArtifact(artifactWorkspace, request);
         }
     }
 

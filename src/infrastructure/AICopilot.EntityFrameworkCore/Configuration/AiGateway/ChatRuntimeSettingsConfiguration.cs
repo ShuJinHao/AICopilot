@@ -2,6 +2,7 @@ using AICopilot.Core.AiGateway.Aggregates.RuntimeSettings;
 using AICopilot.Core.AiGateway.Ids;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using static AICopilot.EntityFrameworkCore.Configuration.AiGateway.AgentExecutionRuntimeConfigurationMapping;
 
 namespace AICopilot.EntityFrameworkCore.Configuration.AiGateway;
 
@@ -9,14 +10,7 @@ public sealed class ChatRuntimeSettingsConfiguration : IEntityTypeConfiguration<
 {
     public void Configure(EntityTypeBuilder<ChatRuntimeSettings> builder)
     {
-        builder.ToTable("chat_runtime_settings");
-
-        builder.HasKey(settings => settings.Id);
-        builder.Property(settings => settings.Id)
-            .HasConversion(id => id.Value, value => new ChatRuntimeSettingsId(value))
-            .HasColumnName("id");
-
-        builder.Property<uint>("RowVersion").IsRowVersion();
+        ConfigureEntity(builder, "chat_runtime_settings", settings => settings.Id, id => id.Value, value => new ChatRuntimeSettingsId(value));
 
         builder.Property(settings => settings.RoutingHistoryCount)
             .IsRequired()

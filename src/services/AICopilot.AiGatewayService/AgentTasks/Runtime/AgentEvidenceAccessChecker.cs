@@ -56,6 +56,17 @@ internal static class AgentEvidenceAccessChecker
         AgentEvidenceRecord evidence,
         AgentTask task,
         Guid runAttemptId,
+        IReadOnlyDictionary<string, AgentNodeRun> producerNodes,
+        DateTimeOffset nowUtc)
+    {
+        producerNodes.TryGetValue(evidence.NodeId, out var producerNode);
+        return ValidateDurable(evidence, task, runAttemptId, producerNode, nowUtc);
+    }
+
+    public static Result ValidateDurable(
+        AgentEvidenceRecord evidence,
+        AgentTask task,
+        Guid runAttemptId,
         AgentNodeRun? producerNode,
         DateTimeOffset nowUtc)
     {
@@ -219,6 +230,12 @@ internal static class AgentEvidenceSelector
 
 internal static class AgentEvidenceSetDigestAuthority
 {
+    public static Guid[] OrderedIds(IEnumerable<AgentEvidenceRecord> evidence) => evidence
+        .Select(item => item.Id.Value)
+        .Distinct()
+        .Order()
+        .ToArray();
+
     public static bool TryComputeEffective(
         IReadOnlyCollection<AgentEvidenceRecord> evidence,
         out string? digest)

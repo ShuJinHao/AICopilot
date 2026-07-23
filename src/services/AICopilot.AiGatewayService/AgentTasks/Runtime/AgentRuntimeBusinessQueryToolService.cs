@@ -107,38 +107,18 @@ internal sealed class AgentRuntimeBusinessQueryToolService(
                 source.DefaultQueryLimit,
                 PreviewOnly: false),
             cancellationToken);
-        if (!draftResult.IsSuccess || draftResult.Value is null)
-        {
-            throw new InvalidOperationException($"Business Text-to-SQL draft failed: {BuildResultErrorSummary(draftResult)}");
-        }
-
-        var draft = draftResult.Value;
-        if (simulationOnly &&
-            (draft.DataSourceId != source.Id ||
-             draft.SourceMode != DataSourceExternalSystemType.SimulationBusiness ||
-             !draft.IsSimulation))
-        {
-            throw new InvalidOperationException(
-                "The SimulationBusiness draft is unmarked or bound to a different source; execution stopped without fallback.");
-        }
+        var draft = RequireResultValue(draftResult, "draft");
+        RequireSimulationSourceBinding(
+            simulationOnly, source.Id, draft.DataSourceId, draft.SourceMode, draft.IsSimulation,
+            "The SimulationBusiness draft is unmarked or bound to a different source; execution stopped without fallback.");
 
         var queryResult = await businessTextToSqlRuntime.ExecuteAsync(
             new BusinessTextToSqlExecuteRequest(DraftId: draft.DraftId, RequestedLimit: source.DefaultQueryLimit),
             cancellationToken);
-        if (!queryResult.IsSuccess || queryResult.Value is null)
-        {
-            throw new InvalidOperationException($"Business Text-to-SQL execution failed: {BuildResultErrorSummary(queryResult)}");
-        }
-
-        var result = queryResult.Value;
-        if (simulationOnly &&
-            (result.DataSourceId != source.Id ||
-             result.SourceMode != DataSourceExternalSystemType.SimulationBusiness ||
-             !result.IsSimulation))
-        {
-            throw new InvalidOperationException(
-                "The SimulationBusiness runtime returned an unmarked or mismatched source; execution stopped without fallback.");
-        }
+        var result = RequireResultValue(queryResult, "execution");
+        RequireSimulationSourceBinding(
+            simulationOnly, source.Id, result.DataSourceId, result.SourceMode, result.IsSimulation,
+            "The SimulationBusiness runtime returned an unmarked or mismatched source; execution stopped without fallback.");
 
         var rows = result.Rows
             .Select(row => row.ToDictionary(item => item.Key, item => item.Value))
@@ -342,6 +322,34 @@ internal sealed class AgentRuntimeBusinessQueryToolService(
         return result.Errors is null
             ? result.Status.ToString()
             : string.Join("; ", result.Errors.Select(error => error?.ToString()).Where(error => !string.IsNullOrWhiteSpace(error)));
+    }
+
+    private static T RequireResultValue<T>(Result<T> result, string stage)
+    {
+        if (!result.IsSuccess || result.Value is null)
+        {
+            throw new InvalidOperationException(
+                $"Business Text-to-SQL {stage} failed: {BuildResultErrorSummary(result)}");
+        }
+
+        return result.Value;
+    }
+
+    private static void RequireSimulationSourceBinding(
+        bool simulationOnly,
+        Guid expectedSourceId,
+        Guid actualSourceId,
+        DataSourceExternalSystemType sourceMode,
+        bool isSimulation,
+        string failureMessage)
+    {
+        if (simulationOnly &&
+            (actualSourceId != expectedSourceId ||
+             sourceMode != DataSourceExternalSystemType.SimulationBusiness ||
+             !isSimulation))
+        {
+            throw new InvalidOperationException(failureMessage);
+        }
     }
 
     private static string ComputeHash(string value)

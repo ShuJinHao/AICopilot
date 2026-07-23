@@ -193,31 +193,17 @@ internal sealed class ArtifactFileSetOutcomeAuthorityProbe(
                 ProviderOperationCode: claim.NodeRun.ProviderOperationCode,
                 SemanticIntent: null,
                 QueryScope: []),
-            new AgentEvidenceQualityDocument(
-                RowCount: stage.Files.Count,
-                IsTruncated: false,
-                Freshness: "manifest-verified",
-                MissingRate: 0,
-                Confidence: 1,
-                QualityFlags: ["file-set-manifest-verified"]),
-            new AgentEvidencePayloadDocument(
-                AgentPlanContractVersions.ArtifactReferenceEvidencePolicyV1,
-                AgentEvidenceStorageMode.ArtifactReference.ToString(),
+            AgentArtifactFileSetEvidenceDocuments.CreateQuality(
+                stage.Files.Count,
+                humanApproved: false),
+            AgentArtifactFileSetEvidenceDocuments.CreatePayload(
                 payloadRef,
-                "application/vnd.aicopilot.artifact-file-set+json",
                 payloadBytes,
-                operation.ManifestDigest,
-                IsComplete: true,
-                InlineCanonicalJson: null),
-            new AgentEvidenceContentDocument(
+                operation.ManifestDigest),
+            AgentArtifactFileSetEvidenceDocuments.CreateContent(
                 "Artifact file set was committed and its manifest and file digests were verified.",
-                new Dictionary<string, decimal>
-                {
-                    ["fileCount"] = stage.Files.Count,
-                    ["payloadBytes"] = stage.Files.Sum(file => (decimal)file.FileSize)
-                },
-                Findings: [],
-                CitationRefs: [],
+                stage.Files.Count,
+                stage.Files.Sum(file => (decimal)file.FileSize),
                 artifactRefs),
             new AgentEvidenceLineageDocument(
                 ParentEvidenceIds: [],

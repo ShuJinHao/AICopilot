@@ -13,13 +13,9 @@ internal sealed class NodeCheckpointCoordinator(
     {
         var started = Stopwatch.GetTimestamp();
         var result = await checkpointStore.CommitSuccessAsync(checkpoint, cancellationToken);
-        RecordCheckpoint(result, started);
-        if (result == AgentFencedWriteResult.Succeeded)
-        {
-            AgentRuntimeTelemetry.RecordUsage(checkpoint.Usage);
-        }
-
-        return Map(result, duplicateIsSuccess: true);
+        return CompleteCheckpoint(
+            result, started, duplicateIsSuccess: true,
+            () => AgentRuntimeTelemetry.RecordUsage(checkpoint.Usage));
     }
 
     public async Task<Result> CommitFailureAsync(
@@ -43,13 +39,24 @@ internal sealed class NodeCheckpointCoordinator(
     {
         var started = Stopwatch.GetTimestamp();
         var result = await checkpointStore.CommitOutcomeUnknownAsync(checkpoint, cancellationToken);
+        return CompleteCheckpoint(
+            result, started, duplicateIsSuccess: false,
+            AgentRuntimeTelemetry.RecordOutcomeUnknown);
+    }
+
+    private static Result CompleteCheckpoint(
+        AgentFencedWriteResult result,
+        long started,
+        bool duplicateIsSuccess,
+        Action recordSuccess)
+    {
         RecordCheckpoint(result, started);
         if (result == AgentFencedWriteResult.Succeeded)
         {
-            AgentRuntimeTelemetry.RecordOutcomeUnknown();
+            recordSuccess();
         }
 
-        return Map(result, duplicateIsSuccess: false);
+        return Map(result, duplicateIsSuccess);
     }
 
     private static void RecordCheckpoint(AgentFencedWriteResult result, long started)

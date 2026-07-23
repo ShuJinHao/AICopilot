@@ -5,8 +5,6 @@ using AICopilot.AiGatewayService.Sessions;
 using AICopilot.AiGatewayService.Tools;
 using AICopilot.AiGatewayService.Workflows;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
-using AICopilot.Core.AiGateway.Aggregates.Sessions;
-using AICopilot.Core.AiGateway.Aggregates.Uploads;
 using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
@@ -17,23 +15,15 @@ using Microsoft.Extensions.Options;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
 
-public sealed class PlanAgentTaskCoordinator(
+internal sealed class PlanAgentTaskCoordinator(
     IRepository<AgentTask> repository,
-    IReadRepository<Session> sessionRepository,
-    IReadRepository<UploadRecord> uploadRepository,
+    AgentTaskPlanPreparationService preparationService,
     AgentAuditRecorder auditRecorder,
-    IEnumerable<IKnowledgeBaseAccessChecker> knowledgeBaseAccessCheckers,
     ICurrentUser currentUser,
-    IBusinessDatabaseReadService? businessDatabaseReadService = null,
-    MessageTimelineProjectionWriter? timelineProjectionWriter = null,
-    AgentWorkflowPipeline? workflowPipeline = null,
-    AgentPlanToolGuard? planToolGuard = null,
-    ICloudReadonlyAgentPlanService? cloudReadonlyPlanService = null,
-    AgentPlanDraftContractAuthority? planDraftContractAuthority = null,
-    IOptions<CloudReadonlyOptions>? cloudReadonlyOptions = null,
-    IHostEnvironment? hostEnvironment = null,
-    IBusinessDatabaseAuthorizationReadService? businessDatabaseAuthorizationReadService = null,
-    ConfiguredAgentRuntimeFactory? configuredAgentRuntimeFactory = null)
+    MessageTimelineProjectionWriter? timelineProjectionWriter = null, AgentWorkflowPipeline? workflowPipeline = null,
+    AgentPlanToolGuard? planToolGuard = null, ICloudReadonlyAgentPlanService? cloudReadonlyPlanService = null,
+    AgentPlanDraftContractAuthority? planDraftContractAuthority = null, IOptions<CloudReadonlyOptions>? cloudReadonlyOptions = null,
+    IHostEnvironment? hostEnvironment = null, ConfiguredAgentRuntimeFactory? configuredAgentRuntimeFactory = null)
 {
     private const int PlanDraftValidationVersion = 1;
 
@@ -56,12 +46,6 @@ public sealed class PlanAgentTaskCoordinator(
                 "The Development Simulation profile accepts the governed TextToSql report chain only; CloudReadonly never falls back to Simulation.");
         }
 
-        var preparationService = new AgentTaskPlanPreparationService(
-            sessionRepository,
-            uploadRepository,
-            knowledgeBaseAccessCheckers,
-            businessDatabaseReadService,
-            businessDatabaseAuthorizationReadService);
         var preparationResult = await preparationService.PrepareAsync(
             request,
             userId,

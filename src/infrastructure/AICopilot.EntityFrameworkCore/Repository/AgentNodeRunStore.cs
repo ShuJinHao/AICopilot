@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using AICopilot.Core.AiGateway.Runtime.AgentExecution;
 using AICopilot.Core.AiGateway.Ids;
 using AICopilot.EntityFrameworkCore.Transactions;
@@ -76,32 +77,7 @@ internal sealed class AgentNodeRunStore(
                     var existingIds = existing.Select(node => node.NodeId).Order(StringComparer.Ordinal).ToArray();
                     var seedsById = seeds.ToDictionary(seed => seed.NodeId, StringComparer.Ordinal);
                     if (!seedIds.SequenceEqual(existingIds, StringComparer.Ordinal) ||
-                        existing.Any(node =>
-                        {
-                            var seed = seedsById[node.NodeId];
-                            return node.PlanDigest != seed.PlanDigest ||
-                                   node.ExecutionSnapshotDigest != seed.ExecutionSnapshotDigest ||
-                                   node.NodeKind != seed.NodeKind ||
-                                   node.ToolCode != seed.ToolCode ||
-                                   node.DependenciesJson != seed.DependenciesJson ||
-                                   node.InputJson != seed.InputJson ||
-                                   node.InputDigest != seed.InputDigest ||
-                                   node.OutputSchemaRef != seed.OutputSchemaRef ||
-                                   node.IsRequired != seed.IsRequired ||
-                                   node.RequiresApproval != seed.RequiresApproval ||
-                                   node.SideEffectClass != seed.SideEffectClass ||
-                                   node.IdempotencyKeyHash != seed.IdempotencyKeyHash ||
-                                   node.MaxAttempts != seed.MaxAttempts ||
-                                   node.TimeoutSeconds != seed.TimeoutSeconds ||
-                                   node.MaxToolCalls != seed.Budget.MaxToolCalls ||
-                                   node.MaxModelCalls != seed.Budget.MaxModelCalls ||
-                                   node.MaxInputTokens != seed.Budget.MaxInputTokens ||
-                                   node.MaxOutputTokens != seed.Budget.MaxOutputTokens ||
-                                   node.MaxCostAmount != seed.Budget.MaxCostAmount ||
-                                   node.MaxArtifactCount != seed.Budget.MaxArtifactCount ||
-                                   node.MaxArtifactBytes != seed.Budget.MaxArtifactBytes ||
-                                   node.JoinPolicy != seed.JoinPolicy;
-                        }))
+                        existing.Any(node => !MatchesImmutableTopology(node, seedsById[node.NodeId])))
                     {
                         throw new InvalidOperationException(
                             "Existing NodeRun topology does not match the immutable Plan v2 snapshot.");
@@ -171,36 +147,60 @@ internal sealed class AgentNodeRunStore(
         AgentTaskRunAttemptId runAttemptId,
         CancellationToken cancellationToken = default)
     {
-        return await dbContext.AgentNodeRuns
-            .AsNoTracking()
-            .Where(node => node.RunAttemptId == runAttemptId)
-            .OrderBy(node => node.CreatedAt)
-            .ThenBy(node => node.NodeId)
-            .ToListAsync(cancellationToken);
+        return await ListAttemptRecordsAsync(
+            dbContext.AgentNodeRuns, node => node.RunAttemptId == runAttemptId,
+            node => node.CreatedAt, node => node.NodeId, cancellationToken);
     }
 
     public async Task<IReadOnlyCollection<AgentEvidenceRecord>> ListEvidenceByAttemptAsync(
         AgentTaskRunAttemptId runAttemptId,
         CancellationToken cancellationToken = default)
     {
-        return await dbContext.AgentEvidenceRecords
-            .AsNoTracking()
-            .Where(evidence => evidence.RunAttemptId == runAttemptId && !evidence.IsRevoked)
-            .OrderBy(evidence => evidence.CreatedAt)
-            .ThenBy(evidence => evidence.NodeId)
-            .ToListAsync(cancellationToken);
+        return await ListAttemptRecordsAsync(
+            dbContext.AgentEvidenceRecords,
+            evidence => evidence.RunAttemptId == runAttemptId && !evidence.IsRevoked,
+            evidence => evidence.CreatedAt, evidence => evidence.NodeId, cancellationToken);
     }
 
     public async Task<IReadOnlyCollection<AgentRunUsageLedgerEntry>> ListUsageByAttemptAsync(
         AgentTaskRunAttemptId runAttemptId,
         CancellationToken cancellationToken = default)
     {
-        return await dbContext.AgentRunUsageLedgerEntries
+        return await ListAttemptRecordsAsync(
+            dbContext.AgentRunUsageLedgerEntries, usage => usage.RunAttemptId == runAttemptId,
+            usage => usage.CreatedAt, usage => usage.Id, cancellationToken);
+    }
+
+    private static async Task<IReadOnlyCollection<TRecord>> ListAttemptRecordsAsync<TRecord, TOrder>(
+        IQueryable<TRecord> records,
+        Expression<Func<TRecord, bool>> filter,
+        Expression<Func<TRecord, DateTimeOffset>> createdAt,
+        Expression<Func<TRecord, TOrder>> stableOrder,
+        CancellationToken cancellationToken)
+    {
+        return await records
             .AsNoTracking()
-            .Where(usage => usage.RunAttemptId == runAttemptId)
-            .OrderBy(usage => usage.CreatedAt)
-            .ThenBy(usage => usage.Id)
+            .Where(filter)
+            .OrderBy(createdAt)
+            .ThenBy(stableOrder)
             .ToListAsync(cancellationToken);
+    }
+
+    private static bool MatchesImmutableTopology(AgentNodeRun node, AgentNodeRunSeed seed)
+    {
+        return (
+            node.PlanDigest, node.ExecutionSnapshotDigest, node.NodeKind, node.ToolCode,
+            node.DependenciesJson, node.InputJson, node.InputDigest, node.OutputSchemaRef,
+            node.IsRequired, node.RequiresApproval, node.SideEffectClass, node.IdempotencyKeyHash,
+            node.MaxAttempts, node.TimeoutSeconds, node.MaxToolCalls, node.MaxModelCalls,
+            node.MaxInputTokens, node.MaxOutputTokens, node.MaxCostAmount, node.MaxArtifactCount,
+            node.MaxArtifactBytes, node.JoinPolicy) == (
+            seed.PlanDigest, seed.ExecutionSnapshotDigest, seed.NodeKind, seed.ToolCode,
+            seed.DependenciesJson, seed.InputJson, seed.InputDigest, seed.OutputSchemaRef,
+            seed.IsRequired, seed.RequiresApproval, seed.SideEffectClass, seed.IdempotencyKeyHash,
+            seed.MaxAttempts, seed.TimeoutSeconds, seed.Budget.MaxToolCalls, seed.Budget.MaxModelCalls,
+            seed.Budget.MaxInputTokens, seed.Budget.MaxOutputTokens, seed.Budget.MaxCostAmount, seed.Budget.MaxArtifactCount,
+            seed.Budget.MaxArtifactBytes, seed.JoinPolicy);
     }
 
     public Task<AgentFencedWriteResult> TryReleaseApprovalAsync(

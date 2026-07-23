@@ -330,11 +330,7 @@ internal sealed class AgentFinalizationNodeExecutor(
                 "Final-output NodeRun inputs do not match the frozen Evidence selectors."));
         }
 
-        var parentIds = parentEvidence
-            .Select(evidence => evidence.Id.Value)
-            .Distinct()
-            .Order()
-            .ToArray();
+        var parentIds = AgentEvidenceSetDigestAuthority.OrderedIds(parentEvidence);
         if (nodeContract.EvidenceSelectors.Count != parentIds.Length)
         {
             return Result.Failure(new ApiProblemDescriptor(
@@ -356,24 +352,11 @@ internal sealed class AgentFinalizationNodeExecutor(
             .Select(artifact => artifact.Id.Value.ToString("D"))
             .OrderBy(value => value, StringComparer.Ordinal)
             .ToArray();
-        var allowedConsumerScope = new[]
-        {
-            $"session:{taskClaim.Task.SessionId.Value:D}",
-            $"task:{taskClaim.Task.Id.Value:D}",
-            $"user:{taskClaim.Task.UserId:D}"
-        }.OrderBy(value => value, StringComparer.Ordinal).ToArray();
         var evidenceId = AgentEvidenceRecordId.New();
-        var document = new AgentEvidenceEnvelopeDocument(
-            AgentPlanContractVersions.EvidenceV1,
-            evidenceId.Value,
-            TenantId: null,
-            taskClaim.Task.UserId,
-            taskClaim.Task.SessionId.Value,
-            taskClaim.Task.Id.Value,
-            taskClaim.RunAttempt.Id.Value,
-            nodeContract.NodeId,
-            AgentEvidenceKind.ArtifactReference.ToString(),
-            AgentEvidenceTruthClass.ObservedFact.ToString(),
+        var authority = AgentEvidenceRecordAuthority.From(taskClaim, nodeClaim, nodeContract.NodeId);
+        var envelopeDraft = new AgentEvidenceEnvelopeDraft(
+            AgentEvidenceKind.ArtifactReference,
+            AgentEvidenceTruthClass.ObservedFact,
             new AgentEvidenceProducerDocument(
                 nodeContract.NodeKind,
                 "artifact-workspace-finalization:v1",
@@ -395,102 +378,58 @@ internal sealed class AgentFinalizationNodeExecutor(
                 ProviderOperationCode: BuiltInToolRegistrations.FinalizationCheckpointToolCode,
                 SemanticIntent: null,
                 QueryScope: []),
-            new AgentEvidenceQualityDocument(
-                RowCount: stage.Files.Count,
-                IsTruncated: false,
-                Freshness: "manifest-verified",
-                MissingRate: 0,
-                Confidence: 1,
-                QualityFlags: ["file-set-manifest-verified", "human-approved-final-output"]),
-            new AgentEvidencePayloadDocument(
-                AgentPlanContractVersions.ArtifactReferenceEvidencePolicyV1,
-                AgentEvidenceStorageMode.ArtifactReference.ToString(),
+            AgentArtifactFileSetEvidenceDocuments.CreateQuality(
+                stage.Files.Count,
+                humanApproved: true),
+            AgentArtifactFileSetEvidenceDocuments.CreatePayload(
                 payloadRef,
-                "application/vnd.aicopilot.artifact-file-set+json",
                 payloadBytes,
-                stage.ManifestDigest,
-                IsComplete: true,
-                InlineCanonicalJson: null),
-            new AgentEvidenceContentDocument(
+                stage.ManifestDigest),
+            AgentArtifactFileSetEvidenceDocuments.CreateContent(
                 "Human-approved final artifact file set was committed and manifest-verified.",
-                new Dictionary<string, decimal>
-                {
-                    ["fileCount"] = stage.Files.Count,
-                    ["payloadBytes"] = stage.Files.Sum(file => (decimal)file.FileSize)
-                },
-                Findings: [],
-                CitationRefs: [],
+                stage.Files.Count,
+                stage.Files.Sum(file => (decimal)file.FileSize),
                 artifactRefs),
             new AgentEvidenceLineageDocument(
                 parentIds,
                 nodeClaim.NodeRun.InputDigest,
                 stage.ManifestDigest,
                 evidenceSetDigest),
-            new AgentEvidenceGovernanceDocument(
-                "Internal",
-                "Redacted",
-                allowedConsumerScope,
-                "TaskLifetime"),
             Prediction: null,
-            completedAtUtc,
-            Digest: string.Empty);
-        var sealedEnvelope = AgentEvidenceCanonicalizer.Seal(document);
-        if (!sealedEnvelope.IsSuccess)
-        {
-            return Result.From(sealedEnvelope);
-        }
-
-        var canonical = sealedEnvelope.Value!;
-        var evidence = new AgentEvidenceRecord(
-            evidenceId,
-            tenantId: null,
-            taskClaim.Task.UserId,
-            taskClaim.Task.SessionId,
-            taskClaim.Task.Id,
-            taskClaim.RunAttempt.Id,
-            nodeClaim.NodeRun.Id,
-            nodeContract.NodeId,
-            AgentEvidenceKind.ArtifactReference,
-            AgentEvidenceTruthClass.ObservedFact,
-            AgentEvidenceStorageMode.ArtifactReference,
-            canonical.CanonicalJson,
-            canonical.Digest,
-            stage.ManifestDigest,
-            inlinePayloadJson: null,
-            payloadRef,
-            "application/vnd.aicopilot.artifact-file-set+json",
-            payloadBytes,
-            stage.ManifestDigest,
-            CanonicalJson.Serialize(allowedConsumerScope),
-            taskClaim.TaskFencingToken,
-            nodeClaim.NodeFencingToken,
             completedAtUtc);
-        var usage = new AgentRunUsageLedgerEntry(
-            taskClaim.Task.Id,
-            taskClaim.RunAttempt.Id,
-            nodeClaim.NodeRun.Id,
-            taskClaim.TaskFencingToken,
-            nodeClaim.NodeFencingToken,
-            inputTokens: 0,
-            outputTokens: 0,
-            modelCalls: 0,
-            toolCalls: 1,
-            elapsedMilliseconds: Math.Min(
+        var evidenceResult = AgentEvidenceRecordFactory.Seal(
+            evidenceId,
+            authority,
+            envelopeDraft,
+            new AgentEvidenceRecordPayload(
+                AgentEvidenceStorageMode.ArtifactReference,
+                stage.ManifestDigest,
+                InlinePayloadJson: null,
+                payloadRef,
+                "application/vnd.aicopilot.artifact-file-set+json",
+                payloadBytes,
+                stage.ManifestDigest));
+        return AgentNormalizedNodeCheckpointFactory.Create(
+            evidenceResult,
+            authority,
+            taskClaim.RunAttempt.BudgetCostCurrency,
+            new AgentRunUsageDraft(
+                ModelCalls: 0,
+                ToolCalls: 1,
+                Math.Min(
                 Math.Max(0, (long)(completedAtUtc - startedAtUtc).TotalMilliseconds),
                 nodeClaim.NodeRun.ReservedElapsedMilliseconds),
-            costAmount: 0m,
-            artifactCount: stage.Files.Count,
-            artifactBytes: stage.Files.Sum(file => file.FileSize),
-            costCurrency: taskClaim.RunAttempt.BudgetCostCurrency,
-            correlationHash: CanonicalJson.ComputeSha256(CanonicalJson.Serialize(new
-            {
-                taskClaim.TaskFencingToken,
-                nodeClaim.NodeFencingToken,
-                stage.CommitId,
-                stage.ManifestDigest
-            })),
-            completedAtUtc);
-        return Result.Success(new AgentNormalizedNodeCheckpoint(evidence, usage, stage.ManifestDigest));
+                stage.Files.Count,
+                stage.Files.Sum(file => file.FileSize),
+                CanonicalJson.ComputeSha256(CanonicalJson.Serialize(new
+                {
+                    taskClaim.TaskFencingToken,
+                    nodeClaim.NodeFencingToken,
+                    stage.CommitId,
+                    stage.ManifestDigest
+                })),
+                completedAtUtc),
+            stage.ManifestDigest);
     }
 
     private static Result<AgentFinalizationNodeExecutionResult> Conflict(string detail) =>

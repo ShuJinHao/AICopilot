@@ -70,7 +70,8 @@ internal sealed class NodeRunClaimCoordinator(
         }
         else
         {
-            AgentRuntimeTelemetry.RecordBudgetReject(outcome.Code.ToString());
+            AgentRuntimeTelemetry.RecordBudgetReject(
+                outcome.BudgetResult?.ToString() ?? outcome.Code.ToString());
         }
 
         return Result.Failure(new ApiProblemDescriptor(

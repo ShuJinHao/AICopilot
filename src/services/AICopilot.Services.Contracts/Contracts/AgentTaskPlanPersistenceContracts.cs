@@ -108,6 +108,11 @@ public static class AgentPlanPublicFailureDisclosurePolicy
 {
     public static AgentPlanPublicFailureDisclosure? Resolve(string? code)
     {
+        if (!AppProblemCodes.IsAgentPlanIntegrityCode(code))
+        {
+            return null;
+        }
+
         return code switch
         {
             AppProblemCodes.AgentPlanInvalid => new AgentPlanPublicFailureDisclosure(

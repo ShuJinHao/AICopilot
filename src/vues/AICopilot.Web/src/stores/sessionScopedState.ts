@@ -1,5 +1,5 @@
 import { reactive } from 'vue'
-import type { SessionTimelineEvent } from '@/types/app'
+import type { AgentChartPreview, SessionTimelineEvent } from '@/types/app'
 import type {
   AgentApprovalRequest,
   AgentArtifactPreview,
@@ -8,16 +8,6 @@ import type {
   ArtifactWorkspace,
   UploadRecord
 } from '@/types/protocols'
-
-export interface AgentChartPreview {
-  labels: string[]
-  values: number[]
-  source?: string
-  sourceMode?: string
-  sourceLabel?: string
-  isSimulation?: boolean
-  queryHash?: string
-}
 
 export type ChatRunPhase =
   | 'understanding'

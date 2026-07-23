@@ -42,45 +42,14 @@ public sealed class ArtifactVersioningCommandCoordinator(
             return Result.From(access);
         }
 
-        var context = access.Value!;
-        var oldVersion = context.Artifact.Version;
-        var fileSetDraft = await ArtifactVersioningFiles.PrepareAtomicUpdateAsync(
-            fileStore,
-            context.Workspace.WorkspaceCode,
-            context.Artifact,
+        return await CommitContentUpdateAsync(
+            access.Value!,
             request.Content,
             request.Comment,
-            cancellationToken);
-        if (!fileSetDraft.IsSuccess)
-        {
-            return Result.From(fileSetDraft);
-        }
-
-        var stage = await fileSetStore.StageAsync(
-            context.Workspace.WorkspaceCode,
             "UpdateArtifactContent",
-            "draft/.committed",
-            fileSetDraft.Value!.Files,
-            cancellationToken,
-            new ArtifactFileSetAuthority(
-                context.Task.Id.Value,
-                NodeRunId: null,
-                context.Task.RunFencingToken,
-                NodeFencingToken: 0));
-        var sha256 = ArtifactVersioningFiles.ComputeSha256(request.Content);
-        await CommitVersionUpdateAsync(
-            context,
-            stage,
-            fileSetDraft.Value.CurrentRelativePath,
-            oldVersion,
-            sha256,
-            request.Comment,
             isRestore: false,
             restoredVersion: null,
             cancellationToken);
-
-        var files = await fileStore.ListAsync(context.Workspace.WorkspaceCode, cancellationToken);
-        return Result.Success(ArtifactWorkspaceMapper.Map(context.Workspace, context.Task, files));
     }
 
     public async Task<Result<ArtifactWorkspaceDto>> RestoreVersionAsync(
@@ -111,13 +80,32 @@ public sealed class ArtifactVersioningCommandCoordinator(
             return Result.From(source);
         }
 
+        return await CommitContentUpdateAsync(
+            context,
+            source.Value!,
+            request.Comment,
+            "RestoreArtifactVersion",
+            isRestore: true,
+            restoredVersion: request.Version,
+            cancellationToken);
+    }
+
+    internal async Task<Result<ArtifactWorkspaceDto>> CommitContentUpdateAsync(
+        ArtifactVersioningContext context,
+        string content,
+        string? comment,
+        string operationKind,
+        bool isRestore,
+        int? restoredVersion,
+        CancellationToken cancellationToken)
+    {
         var oldVersion = context.Artifact.Version;
         var fileSetDraft = await ArtifactVersioningFiles.PrepareAtomicUpdateAsync(
             fileStore,
             context.Workspace.WorkspaceCode,
             context.Artifact,
-            source.Value!,
-            request.Comment,
+            content,
+            comment,
             cancellationToken);
         if (!fileSetDraft.IsSuccess)
         {
@@ -126,7 +114,7 @@ public sealed class ArtifactVersioningCommandCoordinator(
 
         var stage = await fileSetStore.StageAsync(
             context.Workspace.WorkspaceCode,
-            "RestoreArtifactVersion",
+            operationKind,
             "draft/.committed",
             fileSetDraft.Value!.Files,
             cancellationToken,
@@ -135,16 +123,15 @@ public sealed class ArtifactVersioningCommandCoordinator(
                 NodeRunId: null,
                 context.Task.RunFencingToken,
                 NodeFencingToken: 0));
-        var sha256 = ArtifactVersioningFiles.ComputeSha256(source.Value!);
         await CommitVersionUpdateAsync(
             context,
             stage,
             fileSetDraft.Value.CurrentRelativePath,
             oldVersion,
-            sha256,
-            request.Comment,
-            isRestore: true,
-            restoredVersion: request.Version,
+            ArtifactVersioningFiles.ComputeSha256(content),
+            comment,
+            isRestore,
+            restoredVersion,
             cancellationToken);
 
         var files = await fileStore.ListAsync(context.Workspace.WorkspaceCode, cancellationToken);
@@ -170,21 +157,14 @@ public sealed class ArtifactVersioningCommandCoordinator(
             {
                 var now = DateTimeOffset.UtcNow;
                 context.Artifact.AddVersion(published.RelativePath, published.FileSize, now);
-                var operation = new ArtifactFileSetOperation(
-                    stage.CommitId,
+                var operation = ArtifactFileSetOperationFactory.CreateCompleted(
+                    stage,
                     context.Task.Id,
                     context.Workspace.Id,
                     nodeRunId: null,
                     context.Task.RunFencingToken,
                     nodeFencingToken: 0,
-                    stage.OperationKind,
-                    stage.ManifestJson,
-                    stage.ManifestDigest,
-                    stage.StagingReference,
                     now);
-                operation.MarkPublished(stage.PublishedReference, stage.ManifestDigest, now);
-                operation.MarkDatabaseCommitted(now);
-                operation.Complete(now);
                 fileSetOperationStore.AddCompleted(operation);
 
                 workspaceRepository.Update(context.Workspace);

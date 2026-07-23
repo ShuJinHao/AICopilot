@@ -38,7 +38,7 @@ public sealed class FrontendContractSnapshotTests
         }
         """;
 
-        var request = JsonSerializer.Deserialize<PlanAgentTaskStreamRequest>(json, JsonOptions);
+        var request = JsonSerializer.Deserialize<PlanAgentTaskCommand>(json, JsonOptions);
 
         request.Should().NotBeNull();
         request!.TaskType.Should().Be(expected);
@@ -47,10 +47,10 @@ public sealed class FrontendContractSnapshotTests
         request.CapabilitySelectionMode.Should().Be(AgentCapabilitySelectionMode.InferredFromGoal);
         request.RequestedCapabilityCodes.Should().BeEmpty();
 
-        Action numericPluginMode = () => JsonSerializer.Deserialize<PlanAgentTaskStreamRequest>(
+        Action numericPluginMode = () => JsonSerializer.Deserialize<PlanAgentTaskCommand>(
             json.Replace("\"pluginSelectionMode\": \"BuiltInOnly\"", "\"pluginSelectionMode\": 1", StringComparison.Ordinal),
             JsonOptions);
-        Action unknownCapabilityMode = () => JsonSerializer.Deserialize<PlanAgentTaskStreamRequest>(
+        Action unknownCapabilityMode = () => JsonSerializer.Deserialize<PlanAgentTaskCommand>(
             json.Replace("\"capabilitySelectionMode\": \"InferredFromGoal\"", "\"capabilitySelectionMode\": \"Unknown\"", StringComparison.Ordinal),
             JsonOptions);
 

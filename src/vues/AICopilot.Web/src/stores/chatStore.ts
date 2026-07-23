@@ -285,16 +285,10 @@ export const useChatStore = defineStore('chat', () => {
 
   function captureSessionRuntimeSnapshot() {
     return {
-      agentTasks: [...agentTaskStore.agentTasks],
-      agentApprovals: [...agentTaskStore.agentApprovals],
-      agentAuditSummary: [...agentTaskStore.agentAuditSummary],
-      approvalAuthorityUnknownTaskIds: new Set(agentTaskStore.approvalAuthorityUnknownTaskIds),
+      agentProjection: captureAgentProjectionSnapshot(),
       timelineEvents: [...agentTaskStore.timelineEvents],
       runtimeSnapshot: agentTaskStore.runtimeSnapshot,
       uploadedFiles: [...artifactWorkspaceStore.uploadedFiles],
-      currentWorkspace: artifactWorkspaceStore.currentWorkspace,
-      currentArtifactPreview: artifactWorkspaceStore.currentArtifactPreview,
-      chartPreview: artifactWorkspaceStore.chartPreview,
       availableKnowledgeBases: [...catalogStore.availableKnowledgeBases],
       selectedKnowledgeBaseId: catalogStore.selectedKnowledgeBaseId,
     }
@@ -303,18 +297,10 @@ export const useChatStore = defineStore('chat', () => {
   function restoreSessionRuntimeSnapshot(
     snapshot: ReturnType<typeof captureSessionRuntimeSnapshot>,
   ) {
-    agentTaskStore.agentTasks = snapshot.agentTasks
-    agentTaskStore.agentApprovals = snapshot.agentApprovals
-    agentTaskStore.agentAuditSummary = snapshot.agentAuditSummary
-    agentTaskStore.approvalAuthorityUnknownTaskIds = new Set(
-      snapshot.approvalAuthorityUnknownTaskIds,
-    )
+    restoreAgentProjectionSnapshot(snapshot.agentProjection)
     agentTaskStore.timelineEvents = snapshot.timelineEvents
     agentTaskStore.runtimeSnapshot = snapshot.runtimeSnapshot
     artifactWorkspaceStore.uploadedFiles = snapshot.uploadedFiles
-    artifactWorkspaceStore.currentWorkspace = snapshot.currentWorkspace
-    artifactWorkspaceStore.currentArtifactPreview = snapshot.currentArtifactPreview
-    artifactWorkspaceStore.chartPreview = snapshot.chartPreview
     catalogStore.availableKnowledgeBases = snapshot.availableKnowledgeBases
     catalogStore.selectedKnowledgeBaseId = snapshot.selectedKnowledgeBaseId
   }
@@ -484,6 +470,19 @@ export const useChatStore = defineStore('chat', () => {
 
   function ownsCurrentTask(taskId: string, sessionId: string) {
     return agentTasks.value.some((task) => task.id === taskId && task.sessionId === sessionId)
+  }
+
+  function resolveOwnedTaskSession(taskId: string) {
+    const sessionId = resolvedSessionId.value
+    if (!sessionId || isSessionTransitionBlocked.value) {
+      return null
+    }
+    if (!ownsCurrentTask(taskId, sessionId) || agentTaskStore.isApprovalAuthorityUnknown(taskId)) {
+      rejectForeignSessionTarget()
+      return null
+    }
+
+    return sessionId
   }
 
   function ownsCurrentApproval(approval: AgentApprovalRequest, sessionId: string) {
@@ -821,9 +820,7 @@ export const useChatStore = defineStore('chat', () => {
       await loadAgentAuditSummary(latestAgentTask.value?.id ?? null)
       return currentWorkspace.value
     } catch (error) {
-      const failureMessage = toFriendlyMessage(error)
-      await tryRefreshAgentTaskSnapshotForSession(sessionId)
-      setCurrentSessionError(failureMessage)
+      await recoverAgentMutationFailure(sessionId, error)
       return null
     } finally {
       isAgentBusy.value = false
@@ -834,12 +831,8 @@ export const useChatStore = defineStore('chat', () => {
     taskId: string,
     execute: (id: string) => ReturnType<typeof chatService.runAgentTask>,
   ) {
-    const sessionId = resolvedSessionId.value
-    if (!sessionId || isSessionTransitionBlocked.value) {
-      return null
-    }
-    if (!ownsCurrentTask(taskId, sessionId) || agentTaskStore.isApprovalAuthorityUnknown(taskId)) {
-      rejectForeignSessionTarget()
+    const sessionId = resolveOwnedTaskSession(taskId)
+    if (!sessionId) {
       return null
     }
 
@@ -847,16 +840,9 @@ export const useChatStore = defineStore('chat', () => {
     clearCurrentSessionError()
     try {
       const updated = await execute(taskId)
-      upsertAgentTask(updated)
-      await loadAgentApprovals(taskId)
-      await loadAgentAuditSummary(taskId)
-      await refreshWorkspace(updated)
-      await loadTimeline(sessionId)
-      return updated
+      return await applyAgentTaskActionResult(updated, sessionId, true)
     } catch (error) {
-      const failureMessage = toFriendlyMessage(error)
-      await tryRefreshAgentTaskSnapshotForSession(sessionId)
-      setCurrentSessionError(failureMessage)
+      await recoverAgentMutationFailure(sessionId, error)
       return null
     } finally {
       isAgentBusy.value = false
@@ -876,12 +862,8 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function approveAndRunAgentTask(taskId: string) {
-    const sessionId = resolvedSessionId.value
-    if (!sessionId || isSessionTransitionBlocked.value) {
-      return null
-    }
-    if (!ownsCurrentTask(taskId, sessionId) || agentTaskStore.isApprovalAuthorityUnknown(taskId)) {
-      rejectForeignSessionTarget()
+    const sessionId = resolveOwnedTaskSession(taskId)
+    if (!sessionId) {
       return null
     }
 
@@ -906,12 +888,7 @@ export const useChatStore = defineStore('chat', () => {
 
       planApproved = true
       const updated = await chatService.runAgentTask(taskId)
-      upsertAgentTask(updated)
-      await loadAgentApprovals(taskId)
-      await loadAgentAuditSummary(taskId)
-      await refreshWorkspace(updated)
-      await loadTimeline(sessionId)
-      return updated
+      return await applyAgentTaskActionResult(updated, sessionId, true)
     } catch (error) {
       const failureMessage = toFriendlyMessage(error)
       if (approvalMutationStarted) {
@@ -926,12 +903,8 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function rejectAgentTaskPlan(taskId: string) {
-    const sessionId = resolvedSessionId.value
-    if (!sessionId || isSessionTransitionBlocked.value) {
-      return null
-    }
-    if (!ownsCurrentTask(taskId, sessionId) || agentTaskStore.isApprovalAuthorityUnknown(taskId)) {
-      rejectForeignSessionTarget()
+    const sessionId = resolveOwnedTaskSession(taskId)
+    if (!sessionId) {
       return null
     }
 
@@ -939,19 +912,34 @@ export const useChatStore = defineStore('chat', () => {
     clearCurrentSessionError()
     try {
       const updated = await chatService.rejectAgentTaskPlan(taskId)
-      upsertAgentTask(updated)
-      await loadAgentApprovals(taskId)
-      await loadAgentAuditSummary(taskId)
-      await loadTimeline(sessionId)
-      return updated
+      return await applyAgentTaskActionResult(updated, sessionId, false)
     } catch (error) {
-      const failureMessage = toFriendlyMessage(error)
-      await tryRefreshAgentTaskSnapshotForSession(sessionId)
-      setCurrentSessionError(failureMessage)
+      await recoverAgentMutationFailure(sessionId, error)
       return null
     } finally {
       isAgentBusy.value = false
     }
+  }
+
+  async function applyAgentTaskActionResult(
+    updated: AgentTask,
+    sessionId: string,
+    refreshArtifact: boolean,
+  ) {
+    upsertAgentTask(updated)
+    await loadAgentApprovals(updated.id)
+    await loadAgentAuditSummary(updated.id)
+    if (refreshArtifact) {
+      await refreshWorkspace(updated)
+    }
+    await loadTimeline(sessionId)
+    return updated
+  }
+
+  async function recoverAgentMutationFailure(sessionId: string, error: unknown) {
+    const failureMessage = toFriendlyMessage(error)
+    await tryRefreshAgentTaskSnapshotForSession(sessionId)
+    setCurrentSessionError(failureMessage)
   }
 
   async function decideAgentApproval(

@@ -119,21 +119,12 @@ public sealed record AgentRuntimeEvidenceQualityDto(
     IReadOnlyCollection<string> Flags);
 
 public sealed record AgentRuntimeEvidenceDto(
-    string NodeId,
-    string NodeLabel,
-    string EvidenceKind,
-    string TruthClass,
-    string TruthLabel,
-    string SourceLabel,
-    string SourceMode,
-    bool IsSimulation,
-    DateTimeOffset? AsOfUtc,
-    DateTimeOffset? TimeRangeStartUtc,
-    DateTimeOffset? TimeRangeEndUtc,
-    AgentRuntimeEvidenceQualityDto Quality,
-    string SafeSummary,
-    IReadOnlyCollection<string> Findings,
-    IReadOnlyDictionary<string, decimal> TypedMetrics,
+    string NodeId, string NodeLabel, string EvidenceKind,
+    string TruthClass, string TruthLabel, string SourceLabel,
+    string SourceMode, bool IsSimulation, DateTimeOffset? AsOfUtc,
+    DateTimeOffset? TimeRangeStartUtc, DateTimeOffset? TimeRangeEndUtc,
+    AgentRuntimeEvidenceQualityDto Quality, string SafeSummary,
+    IReadOnlyCollection<string> Findings, IReadOnlyDictionary<string, decimal> TypedMetrics,
     int CitationCount);
 
 public sealed record AgentRuntimeMetricDto(

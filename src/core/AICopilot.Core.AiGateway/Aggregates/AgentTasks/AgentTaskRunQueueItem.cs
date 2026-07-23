@@ -160,13 +160,9 @@ public sealed class AgentTaskRunQueueItem : BaseEntity<AgentTaskRunQueueItemId>
             throw new InvalidOperationException("Only an expired started queue claim can be recovered.");
         }
 
-        Status = AgentTaskRunQueueStatus.Claimed;
-        LeaseId = null;
-        LeaseOwner = null;
-        LeaseExpiresAt = null;
-        FailureCode = null;
-        SafeMessage = "Recovering durable task from its last authoritative checkpoint.";
-        UpdatedAt = nowUtc;
+        ResetClaimForReclaim(
+            nowUtc,
+            "Recovering durable task from its last authoritative checkpoint.");
     }
 
     public void ResumeAfterReconciliationForReclaim(DateTimeOffset nowUtc)
@@ -176,12 +172,19 @@ public sealed class AgentTaskRunQueueItem : BaseEntity<AgentTaskRunQueueItemId>
             throw new InvalidOperationException("Only a started reconciliation queue item can resume.");
         }
 
+        ResetClaimForReclaim(
+            nowUtc,
+            "Outcome reconciliation completed; resuming from the authoritative checkpoint.");
+    }
+
+    private void ResetClaimForReclaim(DateTimeOffset nowUtc, string safeMessage)
+    {
         Status = AgentTaskRunQueueStatus.Claimed;
         LeaseId = null;
         LeaseOwner = null;
         LeaseExpiresAt = null;
         FailureCode = null;
-        SafeMessage = "Outcome reconciliation completed; resuming from the authoritative checkpoint.";
+        SafeMessage = safeMessage;
         UpdatedAt = nowUtc;
     }
 

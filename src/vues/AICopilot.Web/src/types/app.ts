@@ -276,6 +276,16 @@ export type LanguageModelDetail = LanguageModelSummary
 export type LanguageModelApiKeyAction = 'keep' | 'replace' | 'clear'
 export type LanguageModelUsage = 'Chat' | 'Routing' | 'Planner' | 'Embedding'
 
+export interface AgentChartPreview {
+  labels: string[]
+  values: number[]
+  source?: string
+  sourceMode?: string
+  sourceLabel?: string
+  isSimulation?: boolean
+  queryHash?: string
+}
+
 export interface LanguageModelFormModel {
   id?: string
   provider: string

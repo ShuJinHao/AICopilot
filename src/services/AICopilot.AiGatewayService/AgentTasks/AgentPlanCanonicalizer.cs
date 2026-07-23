@@ -287,32 +287,7 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             return InvalidResult("Runtime requires a confirmed ExecutablePlan v2.");
         }
 
-        if (plan.UploadIds is null ||
-            plan.KnowledgeBaseIds is null ||
-            plan.CloudReadonlyIntents is null ||
-            plan.Steps is null ||
-            plan.RuntimeSettings is null ||
-            plan.DataSourceIds is null ||
-            plan.BusinessDomains is null ||
-            plan.ForcedStepCodes is null ||
-            plan.ApprovalCheckpoints is null ||
-            plan.DataSourceSummaries is null ||
-            plan.ToolRiskSummary is null ||
-            plan.ToolApprovalCheckpoints is null ||
-            plan.CapabilityGaps is null ||
-            plan.IntentCandidates is null ||
-            plan.RequestedCapabilityCodes is null ||
-            plan.SelectedPluginIds is null ||
-            plan.ArtifactTargets is null ||
-            plan.Nodes is null ||
-            plan.JoinPolicies is null ||
-            plan.Budgets is null ||
-            plan.ConcurrencyPolicy is null ||
-            plan.ApprovalSummary is null ||
-            plan.ExecutionSnapshot is null ||
-            plan.SecuritySummary is null ||
-            plan.CapabilitySelectionMode is null ||
-            plan.PluginSelectionMode is null)
+        if (HasIncompletePlanShape(plan))
         {
             return InvalidResult("Plan v2 arrays, selection modes, budgets, approval, snapshot, and security summaries must be explicit and non-null.");
         }
@@ -1126,27 +1101,7 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
         for (var index = 0; index < orderedNodes.Length; index++)
         {
             var node = orderedNodes[index];
-            if (node is null ||
-                node.DependsOn is null ||
-                node.RequestedToolCodes is null ||
-                node.RequestedCapabilityCodes is null ||
-                node.DataScopes is null ||
-                node.KnowledgeScopes is null ||
-                node.EvidenceSelectors is null ||
-                node.Input is null ||
-                node.TimeoutPolicy is null ||
-                node.RetryPolicy is null ||
-                node.Budget is null ||
-                node.ApprovalPolicy is null ||
-                node.IdempotencyPolicy is null ||
-                !string.Equals(node.SchemaVersion, AgentPlanContractVersions.NodeV1, StringComparison.Ordinal) ||
-                string.IsNullOrWhiteSpace(node.NodeId) ||
-                !nodeIds.Add(node.NodeId) ||
-                !AgentPlanContractSchemaAuthority.AllowedNodeKinds.Contains(node.NodeKind) ||
-                !string.Equals(node.InputSchemaRef, "node-input:v1", StringComparison.Ordinal) ||
-                string.IsNullOrWhiteSpace(node.OutputSchemaRef) ||
-                !node.OutputSchemaRef.StartsWith("evidence:", StringComparison.Ordinal) ||
-                !node.OutputSchemaRef.EndsWith(":v1", StringComparison.Ordinal))
+            if (HasInvalidNodeShape(node, nodeIds))
             {
                 return InvalidResult($"Node at index {index} violates the active Node v1 contract.");
             }
@@ -1676,6 +1631,35 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
     {
         return value is { Length: 64 } && value.All(character =>
             character is >= '0' and <= '9' or >= 'a' and <= 'f');
+    }
+
+    private static bool HasIncompletePlanShape(AgentTaskPlanDocument plan) =>
+        !AllRequiredFieldsPresent(
+            plan.UploadIds, plan.KnowledgeBaseIds, plan.CloudReadonlyIntents, plan.Steps, plan.RuntimeSettings,
+            plan.DataSourceIds, plan.BusinessDomains, plan.ForcedStepCodes, plan.ApprovalCheckpoints, plan.DataSourceSummaries,
+            plan.ToolRiskSummary, plan.ToolApprovalCheckpoints, plan.CapabilityGaps, plan.IntentCandidates, plan.RequestedCapabilityCodes,
+            plan.SelectedPluginIds, plan.ArtifactTargets, plan.Nodes, plan.JoinPolicies, plan.Budgets,
+            plan.ConcurrencyPolicy, plan.ApprovalSummary, plan.ExecutionSnapshot, plan.SecuritySummary,
+            plan.CapabilitySelectionMode, plan.PluginSelectionMode);
+
+    private static bool HasInvalidNodeShape(AgentPlanNodeDocument? node, ISet<string> nodeIds)
+    {
+        if (node is null || !AllRequiredFieldsPresent(
+                node.DependsOn, node.RequestedToolCodes, node.RequestedCapabilityCodes, node.DataScopes,
+                node.KnowledgeScopes, node.EvidenceSelectors, node.Input, node.TimeoutPolicy,
+                node.RetryPolicy, node.Budget, node.ApprovalPolicy, node.IdempotencyPolicy))
+        {
+            return true;
+        }
+
+        return !string.Equals(node.SchemaVersion, AgentPlanContractVersions.NodeV1, StringComparison.Ordinal) ||
+               string.IsNullOrWhiteSpace(node.NodeId) ||
+               !nodeIds.Add(node.NodeId) ||
+               !AgentPlanContractSchemaAuthority.AllowedNodeKinds.Contains(node.NodeKind) ||
+               !string.Equals(node.InputSchemaRef, "node-input:v1", StringComparison.Ordinal) ||
+               string.IsNullOrWhiteSpace(node.OutputSchemaRef) ||
+               !node.OutputSchemaRef.StartsWith("evidence:", StringComparison.Ordinal) ||
+               !node.OutputSchemaRef.EndsWith(":v1", StringComparison.Ordinal);
     }
 
     private static bool IsCanonicalGoalSummary(string taskType, string? value)

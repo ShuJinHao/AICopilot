@@ -86,6 +86,21 @@ internal static class AgentToolDurableOutputBuilder
 /// </summary>
 internal static class AgentToolRuntimeOutputGate
 {
+    internal static void EnsureValid(
+        ToolRegistration registration,
+        AgentToolExecutionResult executionResult)
+    {
+        var validation = Validate(registration, executionResult);
+        if (!validation.IsValid)
+        {
+            throw new AgentToolExecutionException(
+                validation.IsPayloadTooLarge
+                    ? AppProblemCodes.EvidencePayloadTooLarge
+                    : AppProblemCodes.ToolOutputSchemaInvalid,
+                validation.Error ?? "Tool output does not match the registry schema.");
+        }
+    }
+
     internal static ToolOutputValidationResult Validate(
         ToolRegistration registration,
         AgentToolExecutionResult executionResult)

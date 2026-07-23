@@ -93,10 +93,12 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         var handler = new PlanAgentTaskCommandHandler(
             new PlanAgentTaskCoordinator(
                 taskRepository,
-                new InMemoryRepository<Session>(session),
-                new InMemoryRepository<UploadRecord>(),
+                new AgentTaskPlanPreparationService(
+                    new InMemoryRepository<Session>(session),
+                    new InMemoryRepository<UploadRecord>(),
+                    [],
+                    null),
                 new AgentAuditRecorder(new CapturingAuditLogWriter()),
-                [],
                 new TestCurrentUser(UserId),
                 planToolGuard: CreatePlanToolGuard(disabledToolGuard),
                 cloudReadonlyPlanService: new FixedCloudReadonlyAgentPlanService()));
@@ -160,10 +162,12 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         var handler = new PlanAgentTaskCommandHandler(
             new PlanAgentTaskCoordinator(
                 taskRepository,
-                new InMemoryRepository<Session>(session),
-                new InMemoryRepository<UploadRecord>(),
+                new AgentTaskPlanPreparationService(
+                    new InMemoryRepository<Session>(session),
+                    new InMemoryRepository<UploadRecord>(),
+                    [],
+                    null),
                 new AgentAuditRecorder(new CapturingAuditLogWriter()),
-                [],
                 new TestCurrentUser(UserId),
                 planToolGuard: CreatePlanToolGuard(CreateAgentRuntimeGuardWithCloudEnabled()),
                 cloudReadonlyPlanService: cloudReadonlyPlanService));

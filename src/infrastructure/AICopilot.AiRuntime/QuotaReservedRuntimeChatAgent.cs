@@ -104,32 +104,13 @@ internal sealed class QuotaReservedRuntimeChatAgent(
         RuntimeAgentRunOptions? options = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var budget = ResolveBudget(
-            [new AiChatMessage(AiChatRole.User, input)],
-            options);
-        var lease = await ReserveAsync(budget, cancellationToken);
-        var usage = new AiUsageDetails();
-        var completed = false;
-        try
+        await foreach (var update in RunStreamingAsync(
+                           [new AiChatMessage(AiChatRole.User, input)],
+                           session,
+                           options,
+                           cancellationToken))
         {
-            await foreach (var update in inner.RunStreamingAsync(input, session, options, cancellationToken))
-            {
-                AccumulateUsage(update, usage);
-                yield return update;
-            }
-
-            completed = true;
-        }
-        finally
-        {
-            if (completed)
-            {
-                await SettleKnownAsync(lease, ResolveActualUsage(budget, usage), CancellationToken.None);
-            }
-            else
-            {
-                await SettleUnknownOrReleaseAsync(lease, budget, wasDispatched: true, CancellationToken.None);
-            }
+            yield return update;
         }
     }
 

@@ -33,32 +33,7 @@ internal sealed class AgentRuntimeCloudReadonlyBasicToolService(ICloudReadonlyAg
                 intent.Confidence),
             cancellationToken);
 
-        state.CloudReadonlyResults.RemoveAll(snapshot =>
-            string.Equals(snapshot.Intent, intent.Intent, StringComparison.Ordinal));
-        state.CloudReadonlyResults.Add(new AgentCloudReadonlyQuerySnapshot(
-            intent.Intent,
-            intent.SemanticPlanDigest,
-            result.Summary,
-            result.Rows,
-            result.SourceLabel,
-            result.SourceMode,
-            result.IsSimulation,
-            result.RowCount,
-            result.IsTruncated,
-            result.QueriedAtUtc));
-        state.CloudReadonlyResults.Sort((left, right) =>
-            StringComparer.Ordinal.Compare(left.Intent, right.Intent));
-
-        state.CloudReadonlySummary = result.Summary;
-        state.CloudReadonlyRows = result.Rows;
-        state.CloudReadonlySourceLabel = result.SourceLabel;
-        state.CloudReadonlySourcePath = result.SourcePath;
-        state.CloudReadonlySourceMode = result.SourceMode;
-        state.CloudReadonlyIsSimulation = result.IsSimulation;
-        state.CloudReadonlyRowCount = result.RowCount;
-        state.CloudReadonlyIsTruncated = result.IsTruncated;
-        state.CloudReadonlyQueriedAtUtc = result.QueriedAtUtc;
-        state.CloudHealthAssessment = null;
+        state.ApplyCloudReadonlyResult(intent, result);
         var canonicalResult = AgentCanonicalJsonV1.Canonicalize(
             JsonSerializer.Serialize(result, AgentRuntimeJson.Options));
         var resultHash = Convert.ToHexString(

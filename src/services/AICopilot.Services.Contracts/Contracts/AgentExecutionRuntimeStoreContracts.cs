@@ -55,23 +55,14 @@ public enum AgentNodeRunClaimOutcomeCode
     Claimed = 0,
     NoneAvailable = 1,
     StaleTaskFence = 2,
-    BudgetNotInitialized = 3,
-    WorkflowElapsedExceeded = 4,
-    ToolCallsExceeded = 5,
-    ModelCallsExceeded = 6,
-    InputTokensExceeded = 7,
-    OutputTokensExceeded = 8,
-    ElapsedUsageExceeded = 9,
-    CostExceeded = 10,
-    RetriesExceeded = 11,
-    ArtifactCountExceeded = 12,
-    ArtifactBytesExceeded = 13
+    BudgetRejected = 3
 }
 
 public sealed record AgentNodeRunClaimOutcome(
     AgentNodeRunClaimOutcomeCode Code,
     AgentNodeRunClaim? Claim,
-    string SafeReason);
+    string SafeReason,
+    AgentRunBudgetReservationResult? BudgetResult = null);
 
 public sealed record AgentFinalizationArtifactBinding(
     ArtifactId ArtifactId,
@@ -90,6 +81,19 @@ public sealed record AgentNodeFinalizationMutation(
     string FinalStepOutputJson,
     string FinalSummary);
 
+public interface IAgentNodeCheckpointAuthority
+{
+    AgentTaskId TaskId { get; }
+
+    AgentTaskRunAttemptId RunAttemptId { get; }
+
+    AgentNodeRunId NodeRunId { get; }
+
+    long TaskFencingToken { get; }
+
+    long NodeFencingToken { get; }
+}
+
 public sealed record AgentNodeSuccessCheckpoint(
     AgentTaskId TaskId,
     AgentTaskRunAttemptId RunAttemptId,
@@ -102,7 +106,7 @@ public sealed record AgentNodeSuccessCheckpoint(
     string? ProviderOperationCode,
     string? ProviderReceiptHash,
     DateTimeOffset CompletedAtUtc,
-    AgentNodeFinalizationMutation? Finalization = null);
+    AgentNodeFinalizationMutation? Finalization = null) : IAgentNodeCheckpointAuthority;
 
 public sealed record AgentNodeFailureCheckpoint(
     AgentTaskId TaskId,
@@ -114,7 +118,7 @@ public sealed record AgentNodeFailureCheckpoint(
     string SafeMessage,
     AgentRunUsageLedgerEntry Usage,
     DateTimeOffset FailedAtUtc,
-    DateTimeOffset? RetryAtUtc);
+    DateTimeOffset? RetryAtUtc) : IAgentNodeCheckpointAuthority;
 
 public sealed record AgentNodeOutcomeUnknownCheckpoint(
     AgentTaskId TaskId,
@@ -130,7 +134,7 @@ public sealed record AgentNodeOutcomeUnknownCheckpoint(
     string SafeMessage,
     DateTimeOffset NextCheckAtUtc,
     DateTimeOffset ReconciliationDeadlineAtUtc,
-    DateTimeOffset RecordedAtUtc);
+    DateTimeOffset RecordedAtUtc) : IAgentNodeCheckpointAuthority;
 
 public sealed record AgentOutcomeReconciliationClaim(
     AgentNodeRun NodeRun,
@@ -156,7 +160,7 @@ public sealed record AgentOutcomeReconciliationSuccessCheckpoint(
     string DecisionDigest,
     DateTimeOffset DecidedAtUtc);
 
-public sealed record AgentOutcomeReconciliationNegativeDecision(
+public sealed record AgentOutcomeReconciliationDecision(
     AgentOutcomeReconciliationClaim Claim,
     AgentOutcomeReconciliationResolution Resolution,
     string ReasonCode,
@@ -166,22 +170,31 @@ public sealed record AgentOutcomeReconciliationNegativeDecision(
     string? EvidenceDigest,
     string? ProviderReceiptHash,
     string DecisionDigest,
-    bool AllowNodeRetry,
-    DateTimeOffset? RetryAtUtc,
     DateTimeOffset DecidedAtUtc);
 
+public abstract record AgentOutcomeReconciliationDecisionCommand(
+    AgentOutcomeReconciliationDecision Decision)
+{
+    public AgentOutcomeReconciliationClaim Claim => Decision.Claim;
+    public AgentOutcomeReconciliationResolution Resolution => Decision.Resolution;
+    public string ReasonCode => Decision.ReasonCode;
+    public string SafeMessage => Decision.SafeMessage;
+    public string ActorType => Decision.ActorType;
+    public string ActorIdHash => Decision.ActorIdHash;
+    public string? EvidenceDigest => Decision.EvidenceDigest;
+    public string? ProviderReceiptHash => Decision.ProviderReceiptHash;
+    public string DecisionDigest => Decision.DecisionDigest;
+    public DateTimeOffset DecidedAtUtc => Decision.DecidedAtUtc;
+}
+
+public sealed record AgentOutcomeReconciliationNegativeDecision(
+    AgentOutcomeReconciliationDecision Decision,
+    bool AllowNodeRetry,
+    DateTimeOffset? RetryAtUtc) : AgentOutcomeReconciliationDecisionCommand(Decision);
+
 public sealed record AgentOutcomeReconciliationDeferral(
-    AgentOutcomeReconciliationClaim Claim,
-    AgentOutcomeReconciliationResolution Resolution,
-    string ReasonCode,
-    string SafeMessage,
-    string ActorType,
-    string ActorIdHash,
-    string? EvidenceDigest,
-    string? ProviderReceiptHash,
-    string DecisionDigest,
-    DateTimeOffset NextCheckAtUtc,
-    DateTimeOffset DecidedAtUtc);
+    AgentOutcomeReconciliationDecision Decision,
+    DateTimeOffset NextCheckAtUtc) : AgentOutcomeReconciliationDecisionCommand(Decision);
 
 public enum ModelQuotaReservationResult
 {
@@ -330,21 +343,6 @@ public interface IAgentNodeRunClaimStore
         TimeSpan taskLeaseDuration,
         TimeSpan nodeLeaseDuration,
         DateTimeOffset nowUtc,
-        CancellationToken cancellationToken = default);
-}
-
-public interface IAgentNodeCheckpointStore
-{
-    Task<AgentFencedWriteResult> CommitSuccessAsync(
-        AgentNodeSuccessCheckpoint checkpoint,
-        CancellationToken cancellationToken = default);
-
-    Task<AgentFencedWriteResult> CommitFailureAsync(
-        AgentNodeFailureCheckpoint checkpoint,
-        CancellationToken cancellationToken = default);
-
-    Task<AgentFencedWriteResult> CommitOutcomeUnknownAsync(
-        AgentNodeOutcomeUnknownCheckpoint checkpoint,
         CancellationToken cancellationToken = default);
 }
 

@@ -470,10 +470,14 @@ test('config renders fixed agent slots without internal operations preload', asy
   await expect(plannerSlot).toBeVisible()
   await expect(page.getByTestId('agent-slot-executor')).toBeVisible()
   await expect(page.getByTestId('agent-slot-reasoning')).toBeVisible()
-  await expect(page.getByText('IntentRoutingAgent', { exact: true }).first()).toBeHidden()
-  await expect(page.getByText('agent_planner', { exact: true }).first()).toBeHidden()
-  await expect(page.getByText('agent_executor', { exact: true }).first()).toBeHidden()
-  await expect(page.getByText('agent_reasoning_node', { exact: true }).first()).toBeHidden()
+  for (const templateIdentifier of [
+    'IntentRoutingAgent',
+    'agent_planner',
+    'agent_executor',
+    'agent_reasoning_node',
+  ]) {
+    await expect(page.getByText(templateIdentifier, { exact: true }).first()).toBeHidden()
+  }
   await expect(page.getByText('受控 Agent 计划生成约束').first()).toBeHidden()
   await plannerSlot.getByText('配置详情').click()
   const plannerTemplateIdentifiers = plannerSlot.getByText('agent_planner', { exact: true })

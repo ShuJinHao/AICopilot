@@ -56,36 +56,20 @@ public static class DependencyInjection
         builder.Services.AddScoped<IAgentPlanRuntimeSnapshotVerifier, AgentPlanRuntimeSnapshotVerifier>();
         builder.Services.AddScoped<IAgentPlanAuthorizationFreshVerifier, AgentPlanAuthorizationFreshVerifier>();
         builder.Services.AddScoped<IAgentTaskRunQueue, AgentTaskRunQueue>();
-        builder.Services.AddScoped<AgentTaskDtoQueryService>();
-        builder.Services.AddScoped<PlanAgentTaskCoordinator>();
-        builder.Services.AddScoped<AgentTaskLifecycleCoordinator>();
-        builder.Services.AddScoped<AgentApprovalQueryCoordinator>();
-        builder.Services.AddScoped<AgentApprovalDecisionCoordinator>();
-        builder.Services.AddScoped<ArtifactWorkspaceLifecycleCoordinator>();
-        builder.Services.AddScoped<ArtifactWorkspaceQueryCoordinator>();
-        builder.Services.AddScoped<ArtifactVersioningQueryCoordinator>();
-        builder.Services.AddScoped<ArtifactVersioningCommandCoordinator>();
-        builder.Services.AddScoped<ArtifactWorkspaceP9Coordinator>();
-        builder.Services.AddScoped<AgentRuntimeEventRecorder>();
-        builder.Services.AddScoped<AgentTaskRunQueueWorkerCoordinator>();
-        builder.Services.AddScoped<DurableTaskClaimCoordinator>();
-        builder.Services.AddScoped<AgentNodeRunMaterializer>();
-        builder.Services.AddScoped<NodeRunClaimCoordinator>();
-        builder.Services.AddScoped<NodeCheckpointCoordinator>();
-        builder.Services.AddScoped<AgentRuntimeArtifactBuilder>();
-        builder.Services.AddScoped<AgentReasoningNodeExecutor>();
-        builder.Services.AddScoped<AgentBuiltInToolDispatcher>();
-        builder.Services.AddScoped<AgentParallelReadNodeExecutor>();
-        builder.Services.AddScoped<AgentFinalizationNodeExecutor>();
-        builder.Services.AddScoped<NodeOutcomeReconciliationCoordinator>();
-        builder.Services.AddScoped<IAgentOutcomeAuthorityProbe, ArtifactFileSetOutcomeAuthorityProbe>();
-        builder.Services.AddScoped<AgentArtifactReferenceEvidenceResolver>();
-        builder.Services.AddScoped<AgentArtifactFileSetCheckpointGate>();
-        builder.Services.AddScoped<AgentRuntimeWriteAuthorityAccessor>();
-        builder.Services.AddScoped<SessionTimelineQueryCoordinator>();
-        builder.Services.AddScoped<AgentTaskAuditQueryCoordinator>();
-        builder.Services.AddScoped<AgentTaskToolExecutionQueryCoordinator>();
-        builder.Services.AddScoped<UploadRecordCoordinator>();
+        AddScopedComponents(builder.Services,
+            typeof(AgentTaskDtoQueryService), typeof(AgentTaskPlanPreparationService), typeof(PlanAgentTaskCoordinator), typeof(AgentTaskLifecycleCoordinator),
+            typeof(AgentApprovalQueryCoordinator), typeof(AgentApprovalDecisionCoordinator), typeof(ArtifactWorkspaceLifecycleCoordinator),
+            typeof(ArtifactWorkspaceQueryCoordinator), typeof(ArtifactVersioningQueryCoordinator), typeof(ArtifactVersioningCommandCoordinator),
+            typeof(ArtifactWorkspaceP9Coordinator), typeof(AgentRuntimeEventRecorder), typeof(AgentTaskRunQueueWorkerCoordinator),
+            typeof(DurableTaskClaimCoordinator), typeof(AgentNodeRunMaterializer), typeof(NodeRunClaimCoordinator),
+            typeof(NodeCheckpointCoordinator));
+        AddAgentRuntimeComponents(builder.Services);
+        AddScopedComponents(builder.Services,
+            typeof(AgentFinalizationNodeExecutor), typeof(NodeOutcomeReconciliationCoordinator),
+            typeof(AgentArtifactReferenceEvidenceResolver), typeof(AgentArtifactFileSetCheckpointGate),
+            typeof(AgentRuntimeWriteAuthorityAccessor), typeof(SessionTimelineQueryCoordinator),
+            typeof(AgentTaskAuditQueryCoordinator), typeof(AgentTaskToolExecutionQueryCoordinator),
+            typeof(UploadRecordCoordinator));
         builder.Services.AddScoped<IAgentWorkspaceFingerprintProvider, AgentWorkspaceFingerprintProvider>();
         builder.Services.AddScoped<IAgentWorkerHeartbeatService, AgentWorkerHeartbeatService>();
         builder.Services.AddScoped<ICloudReadonlyAgentIntentRouter, CloudReadonlyAgentIntentRouter>();
@@ -126,7 +110,7 @@ public static class DependencyInjection
         builder.Services.TryAddSingleton<ISessionExecutionLock, InMemorySessionExecutionLock>();
         builder.Services.AddSingleton<IRequestValidator<ChatStreamRequest>, ChatStreamRequestValidator>();
         builder.Services.AddSingleton<IRequestValidator<ApprovalDecisionStreamRequest>, ApprovalDecisionStreamRequestValidator>();
-        builder.Services.AddSingleton<IRequestValidator<PlanAgentTaskStreamRequest>, PlanAgentTaskStreamRequestValidator>();
+        builder.Services.AddSingleton<IRequestValidator<PlanAgentTaskCommand>, PlanAgentTaskCommandValidator>();
         builder.Services.AddSingleton<IOperationalBoundaryPolicy, ManufacturingOperationalBoundaryPolicy>();
         builder.Services.AddSingleton<IManufacturingSceneClassifier, KeywordManufacturingSceneClassifier>();
         builder.Services.AddSingleton<ITokenBudgetPolicy, ChatTokenBudgetPolicy>();
@@ -147,27 +131,33 @@ public static class DependencyInjection
             registrar.RegisterPluginFromAssembly(Assembly.GetExecutingAssembly());
         });
 
-        builder.Services.AddScoped<IntentRoutingAgentBuilder>();
+        AddScopedComponents(builder.Services,
+            typeof(IntentRoutingAgentBuilder), typeof(DataAnalysisAgentBuilder),
+            typeof(IntentRoutingExecutor), typeof(ToolsPackExecutor), typeof(KnowledgeRetrievalExecutor),
+            typeof(SemanticAnalysisRunner), typeof(CloudReadOnlyTextToSqlFallbackRunner), typeof(FreeFormDbaAnalysisRunner),
+            typeof(DataAnalysisWidgetEmitter), typeof(DataAnalysisAuditRecorder), typeof(ToolExecutionAuditRecorder),
+            typeof(DataAnalysisExecutor), typeof(BusinessPolicyExecutor), typeof(ContextAggregatorExecutor),
+            typeof(FinalAgentBuildExecutor), typeof(FinalAgentRunExecutor), typeof(AgentWorkflowPipeline));
         builder.Services.AddScoped<IAgentRoutingConfigurationSnapshotReader>(services =>
             services.GetRequiredService<IntentRoutingAgentBuilder>());
-        builder.Services.AddScoped<DataAnalysisAgentBuilder>();
         builder.Services.AddScoped<ICloudReadOnlyTextToSqlGenerator, CloudReadOnlyLlmTextToSqlGenerator>();
-
-        builder.Services.AddScoped<IntentRoutingExecutor>();
-        builder.Services.AddScoped<ToolsPackExecutor>();
-        builder.Services.AddScoped<KnowledgeRetrievalExecutor>();
-        builder.Services.AddScoped<SemanticAnalysisRunner>();
-        builder.Services.AddScoped<CloudReadOnlyTextToSqlFallbackRunner>();
-        builder.Services.AddScoped<FreeFormDbaAnalysisRunner>();
-        builder.Services.AddScoped<DataAnalysisWidgetEmitter>();
-        builder.Services.AddScoped<DataAnalysisAuditRecorder>();
-        builder.Services.AddScoped<ToolExecutionAuditRecorder>();
-        builder.Services.AddScoped<DataAnalysisExecutor>();
-        builder.Services.AddScoped<BusinessPolicyExecutor>();
-        builder.Services.AddScoped<ContextAggregatorExecutor>();
         builder.Services.AddScoped<IAgentTaskChatEvidenceProvider, AgentTaskChatEvidenceProvider>();
-        builder.Services.AddScoped<FinalAgentBuildExecutor>();
-        builder.Services.AddScoped<FinalAgentRunExecutor>();
-        builder.Services.AddScoped<AgentWorkflowPipeline>();
+    }
+
+    private static void AddAgentRuntimeComponents(IServiceCollection services)
+    {
+        AddScopedComponents(
+            services,
+            typeof(AgentRuntimeArtifactBuilder), typeof(AgentReasoningNodeExecutor),
+            typeof(AgentBuiltInToolDispatcher), typeof(AgentParallelReadNodeExecutor));
+        services.AddScoped<IAgentOutcomeAuthorityProbe, ArtifactFileSetOutcomeAuthorityProbe>();
+    }
+
+    private static void AddScopedComponents(IServiceCollection services, params Type[] componentTypes)
+    {
+        foreach (var componentType in componentTypes)
+        {
+            services.AddScoped(componentType);
+        }
     }
 }

@@ -1,6 +1,7 @@
 using System.Text;
 using AICopilot.Core.AiGateway.Ids;
 using AICopilot.SharedKernel.Domain;
+using static AICopilot.Core.AiGateway.Runtime.AgentExecution.AgentRuntimeValueNormalizer;
 
 namespace AICopilot.Core.AiGateway.Runtime.AgentExecution;
 
@@ -63,6 +64,16 @@ public enum AgentOutcomeReconciliationResolution
     ManualAbandonedAsFailed = 5,
     ManualAbandonedAsCancelled = 6
 }
+
+public sealed record AgentNodeReconciliationResolutionInput(
+    long TaskFencingToken,
+    long NodeFencingToken,
+    long ReconciliationFencingToken,
+    Guid ReconciliationLeaseId,
+    string ResolutionCode,
+    string DecisionDigest,
+    string SafeMessage,
+    DateTimeOffset DecidedAtUtc);
 
 public enum ModelQuotaReservationStatus
 {
@@ -144,6 +155,10 @@ public readonly record struct AgentRunBudgetCharge(
     long ArtifactBytes)
 {
     public static AgentRunBudgetCharge Zero => new(0, 0, 0, 0, 0, 0m, 0, 0, 0);
+
+    public static AgentRunBudgetCharge operator +(AgentRunBudgetCharge left, AgentRunBudgetCharge right) => new(checked(left.ToolCalls + right.ToolCalls), checked(left.ModelCalls + right.ModelCalls), checked(left.InputTokens + right.InputTokens), checked(left.OutputTokens + right.OutputTokens), checked(left.ElapsedMilliseconds + right.ElapsedMilliseconds), left.CostAmount + right.CostAmount, checked(left.RetryCount + right.RetryCount), checked(left.ArtifactCount + right.ArtifactCount), checked(left.ArtifactBytes + right.ArtifactBytes));
+
+    public static AgentRunBudgetCharge operator -(AgentRunBudgetCharge left, AgentRunBudgetCharge right) => new(checked(left.ToolCalls - right.ToolCalls), checked(left.ModelCalls - right.ModelCalls), checked(left.InputTokens - right.InputTokens), checked(left.OutputTokens - right.OutputTokens), checked(left.ElapsedMilliseconds - right.ElapsedMilliseconds), left.CostAmount - right.CostAmount, checked(left.RetryCount - right.RetryCount), checked(left.ArtifactCount - right.ArtifactCount), checked(left.ArtifactBytes - right.ArtifactBytes));
 
     public bool IsNonNegative =>
         ToolCalls >= 0 &&
@@ -865,32 +880,17 @@ public sealed class AgentNodeRun : BaseEntity<AgentNodeRunId>
     }
 
     public void ResolveReconciledNotOccurred(
-        long taskFencingToken,
-        long nodeFencingToken,
-        long reconciliationFencingToken,
-        Guid reconciliationLeaseId,
-        string resolutionCode,
-        string decisionDigest,
-        string safeMessage,
+        AgentNodeReconciliationResolutionInput decision,
         bool allowRetry,
-        DateTimeOffset nowUtc,
         DateTimeOffset? retryAt)
     {
-        EnsureReconciliationFence(
-            taskFencingToken,
-            nodeFencingToken,
-            reconciliationFencingToken,
-            reconciliationLeaseId);
-        ReconciliationResolutionCode = NormalizeRequired(resolutionCode, nameof(resolutionCode), 120);
-        ReconciliationDecisionDigest = NormalizeRequired(decisionDigest, nameof(decisionDigest), 128);
-        SafeMessage = NormalizeRequired(safeMessage, nameof(safeMessage), 2000);
-        ReconciledAt = nowUtc;
+        ApplyReconciliationDecision(decision);
         ProviderReceiptHash = null;
         if (allowRetry)
         {
             IdempotencyGeneration = checked(IdempotencyGeneration + 1);
             Status = AgentNodeRunStatus.Runnable;
-            NextAttemptAt = retryAt ?? nowUtc;
+            NextAttemptAt = retryAt ?? decision.DecidedAtUtc;
             FailureCode = null;
             CompletedAt = null;
         }
@@ -898,40 +898,43 @@ public sealed class AgentNodeRun : BaseEntity<AgentNodeRunId>
         {
             Status = AgentNodeRunStatus.Failed;
             FailureCode = ReconciliationResolutionCode;
-            CompletedAt = nowUtc;
+            CompletedAt = decision.DecidedAtUtc;
             NextAttemptAt = null;
         }
 
         RequiresManualResolution = false;
         ReleaseReconciliationLease();
-        UpdatedAt = nowUtc;
+        UpdatedAt = decision.DecidedAtUtc;
     }
 
-    public void ResolveReconciledCancelled(
-        long taskFencingToken,
-        long nodeFencingToken,
-        long reconciliationFencingToken,
-        Guid reconciliationLeaseId,
-        string resolutionCode,
-        string decisionDigest,
-        string safeMessage,
-        DateTimeOffset nowUtc)
+    public void ResolveReconciledCancelled(AgentNodeReconciliationResolutionInput decision)
     {
-        EnsureReconciliationFence(
-            taskFencingToken,
-            nodeFencingToken,
-            reconciliationFencingToken,
-            reconciliationLeaseId);
-        ReconciliationResolutionCode = NormalizeRequired(resolutionCode, nameof(resolutionCode), 120);
-        ReconciliationDecisionDigest = NormalizeRequired(decisionDigest, nameof(decisionDigest), 128);
-        SafeMessage = NormalizeRequired(safeMessage, nameof(safeMessage), 2000);
+        ApplyReconciliationDecision(decision);
         Status = AgentNodeRunStatus.Cancelled;
-        CompletedAt = nowUtc;
-        ReconciledAt = nowUtc;
+        CompletedAt = decision.DecidedAtUtc;
         NextAttemptAt = null;
         RequiresManualResolution = false;
         ReleaseReconciliationLease();
-        UpdatedAt = nowUtc;
+        UpdatedAt = decision.DecidedAtUtc;
+    }
+
+    private void ApplyReconciliationDecision(AgentNodeReconciliationResolutionInput decision)
+    {
+        EnsureReconciliationFence(
+            decision.TaskFencingToken,
+            decision.NodeFencingToken,
+            decision.ReconciliationFencingToken,
+            decision.ReconciliationLeaseId);
+        ReconciliationResolutionCode = NormalizeRequired(
+            decision.ResolutionCode,
+            nameof(decision.ResolutionCode),
+            120);
+        ReconciliationDecisionDigest = NormalizeRequired(
+            decision.DecisionDigest,
+            nameof(decision.DecisionDigest),
+            128);
+        SafeMessage = NormalizeRequired(decision.SafeMessage, nameof(decision.SafeMessage), 2000);
+        ReconciledAt = decision.DecidedAtUtc;
     }
 
     private void EnsureFence(long taskFencingToken, long nodeFencingToken)
@@ -970,27 +973,6 @@ public sealed class AgentNodeRun : BaseEntity<AgentNodeRunId>
         ReconciliationLeaseId = null;
         ReconciliationOwner = null;
         ReconciliationLeaseExpiresAt = null;
-    }
-
-    private static string NormalizeRequired(string value, string paramName, int? maxLength = null)
-    {
-        var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-        if (normalized is null)
-        {
-            throw new ArgumentException($"{paramName} is required.", paramName);
-        }
-
-        return maxLength.HasValue && normalized.Length > maxLength.Value
-            ? normalized[..maxLength.Value]
-            : normalized;
-    }
-
-    private static string? NormalizeOptional(string? value, int maxLength)
-    {
-        var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-        return normalized is { Length: > 0 } && normalized.Length > maxLength
-            ? normalized[..maxLength]
-            : normalized;
     }
 
     private static string? NormalizeJoinPolicy(string? value)
@@ -1138,26 +1120,6 @@ public sealed class AgentEvidenceRecord : BaseEntity<AgentEvidenceRecordId>
         ExpiresAt = nowUtc;
     }
 
-    private static string Required(string value, string paramName, int? maxLength = null)
-    {
-        var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-        if (normalized is null)
-        {
-            throw new ArgumentException($"{paramName} is required.", paramName);
-        }
-
-        return maxLength.HasValue && normalized.Length > maxLength.Value
-            ? normalized[..maxLength.Value]
-            : normalized;
-    }
-
-    private static string? Optional(string? value, int maxLength)
-    {
-        var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-        return normalized is { Length: > 0 } && normalized.Length > maxLength
-            ? normalized[..maxLength]
-            : normalized;
-    }
 }
 
 public sealed class AgentRunUsageLedgerEntry : BaseEntity<AgentRunUsageLedgerEntryId>
@@ -1212,37 +1174,37 @@ public sealed class AgentRunUsageLedgerEntry : BaseEntity<AgentRunUsageLedgerEnt
         CreatedAt = nowUtc;
     }
 
-    public AgentTaskId TaskId { get; private set; }
+    public AgentTaskId TaskId { get; private init; }
 
-    public AgentTaskRunAttemptId RunAttemptId { get; private set; }
+    public AgentTaskRunAttemptId RunAttemptId { get; private init; }
 
-    public AgentNodeRunId NodeRunId { get; private set; }
+    public AgentNodeRunId NodeRunId { get; private init; }
 
-    public long TaskFencingToken { get; private set; }
+    public long TaskFencingToken { get; private init; }
 
-    public long NodeFencingToken { get; private set; }
+    public long NodeFencingToken { get; private init; }
 
-    public int InputTokens { get; private set; }
+    public int InputTokens { get; private init; }
 
-    public int OutputTokens { get; private set; }
+    public int OutputTokens { get; private init; }
 
-    public int ModelCalls { get; private set; }
+    public int ModelCalls { get; private init; }
 
-    public int ToolCalls { get; private set; }
+    public int ToolCalls { get; private init; }
 
-    public long ElapsedMilliseconds { get; private set; }
+    public long ElapsedMilliseconds { get; private init; }
 
-    public decimal CostAmount { get; private set; }
+    public decimal CostAmount { get; private init; }
 
-    public int ArtifactCount { get; private set; }
+    public int ArtifactCount { get; private init; }
 
-    public long ArtifactBytes { get; private set; }
+    public long ArtifactBytes { get; private init; }
 
-    public string CostCurrency { get; private set; } = "CNY";
+    public string CostCurrency { get; private init; } = "CNY";
 
-    public string CorrelationHash { get; private set; } = string.Empty;
+    public string CorrelationHash { get; private init; } = string.Empty;
 
-    public DateTimeOffset CreatedAt { get; private set; }
+    public DateTimeOffset CreatedAt { get; private init; }
 }
 
 public sealed class AgentNodeReconciliationDecision : BaseEntity<AgentNodeReconciliationDecisionId>
@@ -1317,24 +1279,6 @@ public sealed class AgentNodeReconciliationDecision : BaseEntity<AgentNodeReconc
 
     public DateTimeOffset DecidedAtUtc { get; private set; }
 
-    private static string Required(string value, string paramName, int maxLength)
-    {
-        var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-        if (normalized is null)
-        {
-            throw new ArgumentException($"{paramName} is required.", paramName);
-        }
-
-        return normalized.Length <= maxLength ? normalized : normalized[..maxLength];
-    }
-
-    private static string? Optional(string? value, int maxLength)
-    {
-        var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-        return normalized is null || normalized.Length <= maxLength
-            ? normalized
-            : normalized[..maxLength];
-    }
 }
 
 public sealed class ModelQuotaReservation : BaseEntity<ModelQuotaReservationId>
@@ -1472,16 +1416,6 @@ public sealed class ModelQuotaReservation : BaseEntity<ModelQuotaReservationId>
         }
     }
 
-    private static string Required(string value, string paramName, int maxLength)
-    {
-        var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-        if (normalized is null)
-        {
-            throw new ArgumentException($"{paramName} is required.", paramName);
-        }
-
-        return normalized.Length <= maxLength ? normalized : normalized[..maxLength];
-    }
 }
 
 public sealed class ArtifactFileSetOperation : BaseEntity<ArtifactFileSetOperationId>
@@ -1578,64 +1512,52 @@ public sealed class ArtifactFileSetOperation : BaseEntity<ArtifactFileSetOperati
         UpdatedAtUtc = nowUtc;
     }
 
-    public void MarkDatabaseCommitted(DateTimeOffset nowUtc)
+    public void MarkDatabaseCommitted(DateTimeOffset nowUtc) => Transition(
+        ArtifactFileSetOperationStatus.Published, ArtifactFileSetOperationStatus.DatabaseCommitted,
+        "Artifact files must be published before metadata can become authoritative.", nowUtc, complete: false);
+
+    public void Complete(DateTimeOffset nowUtc) => Transition(
+        ArtifactFileSetOperationStatus.DatabaseCommitted, ArtifactFileSetOperationStatus.Completed,
+        "Artifact file-set operation cannot complete before its database checkpoint.", nowUtc, complete: true);
+
+    public void RequireReconciliation(string failureCode, string safeMessage, DateTimeOffset nowUtc) =>
+        ApplyFailureState(ArtifactFileSetOperationStatus.ReconciliationRequired, failureCode, safeMessage, nowUtc, complete: false);
+
+    public void MarkRollbackPending(string failureCode, string safeMessage, DateTimeOffset nowUtc) =>
+        ApplyFailureState(ArtifactFileSetOperationStatus.RollbackPending, failureCode, safeMessage, nowUtc, complete: false);
+
+    public void Fail(string failureCode, string safeMessage, DateTimeOffset nowUtc) =>
+        ApplyFailureState(ArtifactFileSetOperationStatus.Failed, failureCode, safeMessage, nowUtc, complete: true);
+
+    private void Transition(
+        ArtifactFileSetOperationStatus expected,
+        ArtifactFileSetOperationStatus next,
+        string invalidMessage,
+        DateTimeOffset nowUtc,
+        bool complete)
     {
-        if (Status != ArtifactFileSetOperationStatus.Published)
+        if (Status != expected)
         {
-            throw new InvalidOperationException("Artifact files must be published before metadata can become authoritative.");
+            throw new InvalidOperationException(invalidMessage);
         }
 
-        Status = ArtifactFileSetOperationStatus.DatabaseCommitted;
+        Status = next;
         UpdatedAtUtc = nowUtc;
+        CompletedAtUtc = complete ? nowUtc : CompletedAtUtc;
     }
 
-    public void Complete(DateTimeOffset nowUtc)
-    {
-        if (Status != ArtifactFileSetOperationStatus.DatabaseCommitted)
-        {
-            throw new InvalidOperationException("Artifact file-set operation cannot complete before its database checkpoint.");
-        }
-
-        Status = ArtifactFileSetOperationStatus.Completed;
-        UpdatedAtUtc = nowUtc;
-        CompletedAtUtc = nowUtc;
-    }
-
-    public void RequireReconciliation(string failureCode, string safeMessage, DateTimeOffset nowUtc)
+    private void ApplyFailureState(
+        ArtifactFileSetOperationStatus status,
+        string failureCode,
+        string safeMessage,
+        DateTimeOffset nowUtc,
+        bool complete)
     {
         FailureCode = Required(failureCode, nameof(failureCode), 120);
         SafeMessage = Required(safeMessage, nameof(safeMessage), 2000);
-        Status = ArtifactFileSetOperationStatus.ReconciliationRequired;
+        Status = status;
         UpdatedAtUtc = nowUtc;
+        CompletedAtUtc = complete ? nowUtc : CompletedAtUtc;
     }
 
-    public void MarkRollbackPending(string failureCode, string safeMessage, DateTimeOffset nowUtc)
-    {
-        FailureCode = Required(failureCode, nameof(failureCode), 120);
-        SafeMessage = Required(safeMessage, nameof(safeMessage), 2000);
-        Status = ArtifactFileSetOperationStatus.RollbackPending;
-        UpdatedAtUtc = nowUtc;
-    }
-
-    public void Fail(string failureCode, string safeMessage, DateTimeOffset nowUtc)
-    {
-        FailureCode = Required(failureCode, nameof(failureCode), 120);
-        SafeMessage = Required(safeMessage, nameof(safeMessage), 2000);
-        Status = ArtifactFileSetOperationStatus.Failed;
-        UpdatedAtUtc = nowUtc;
-        CompletedAtUtc = nowUtc;
-    }
-
-    private static string Required(string value, string paramName, int? maxLength = null)
-    {
-        var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-        if (normalized is null)
-        {
-            throw new ArgumentException($"{paramName} is required.", paramName);
-        }
-
-        return maxLength.HasValue && normalized.Length > maxLength.Value
-            ? normalized[..maxLength.Value]
-            : normalized;
-    }
 }

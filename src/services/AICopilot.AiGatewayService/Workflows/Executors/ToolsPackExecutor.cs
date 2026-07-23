@@ -13,12 +13,8 @@ public class ToolsPackExecutor(
     public const string ExecutorId = nameof(ToolsPackExecutor);
     private const string ActionIntentPrefix = "Action.";
 
-    internal static bool IsRelevant(
-        IEnumerable<IntentResult> intentResults,
-        AgentIntentRegistrySnapshot registry)
-    {
-        return intentResults.Any(intent => IsActionIntent(intent, registry));
-    }
+    internal static bool IsRelevant(IEnumerable<IntentResult> intents, AgentIntentRegistrySnapshot registry) =>
+        AgentWorkflowIntentSelector.Any(intents, registry, 0.8, null, AgentIntentClass.PluginAction);
 
     public async Task<BranchResult> DiscoverAsync(
         List<IntentResult> intentResults,
@@ -27,9 +23,8 @@ public class ToolsPackExecutor(
     {
         try
         {
-            var actionIntents = intentResults
-                .Where(intent => IsActionIntent(intent, registry))
-                .ToList();
+            var actionIntents = AgentWorkflowIntentSelector.Select(
+                intentResults, registry, 0.8, null, AgentIntentClass.PluginAction);
 
             if (actionIntents.Count == 0)
             {
@@ -65,14 +60,4 @@ public class ToolsPackExecutor(
         }
     }
 
-    private static bool IsActionIntent(
-        IntentResult intent,
-        AgentIntentRegistrySnapshot registry)
-    {
-        return intent.Confidence > 0.8 &&
-               AgentIntentRegistryV1.IsIntentClass(
-                   registry,
-                   intent.Intent,
-                   AgentIntentClass.PluginAction);
-    }
 }

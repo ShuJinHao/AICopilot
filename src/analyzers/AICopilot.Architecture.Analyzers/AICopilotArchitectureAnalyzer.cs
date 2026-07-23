@@ -136,14 +136,13 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
         "AICopilot.EntityFrameworkCore.AuditLogs.AuditLogWriter";
     private const string FormalAuditDbContextName =
         "AICopilot.EntityFrameworkCore.AuditLogs.AuditDbContext";
-    private const string FormalModelQuotaReservationStoreContractName =
-        "AICopilot.Services.Contracts.IModelQuotaReservationStore";
-    private const string FormalModelQuotaReservationStoreName =
-        "AICopilot.EntityFrameworkCore.Repository.PostgresModelQuotaReservationStore";
-    private const string FormalAgentExecutionTransactionRunnerName =
-        "AICopilot.EntityFrameworkCore.Transactions.AgentExecutionTransactionRunner";
-    private const string FormalAiGatewayDbContextName =
-        "AICopilot.EntityFrameworkCore.AiGatewayDbContext";
+    private static class FormalQuotaTypes
+    {
+        public const string Contract = "AICopilot.Services.Contracts.IModelQuotaReservationStore";
+        public const string Store = "AICopilot.EntityFrameworkCore.Repository.PostgresModelQuotaReservationStore";
+        public const string TransactionRunner = "AICopilot.EntityFrameworkCore.Transactions.AgentExecutionTransactionRunner";
+        public const string DbContext = "AICopilot.EntityFrameworkCore.AiGatewayDbContext";
+    }
     private const int MaximumEffectSummaryEntries = 4096;
     private const int CrossProjectIdentityEffect = 1;
     private const int CrossProjectCloudSideEffect = 2;
@@ -434,11 +433,10 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
         SymbolAnalysisContext context,
         CompilationState state)
     {
-        if (!IsProductionAssembly(state.AssemblyName) ||
-            ContainsTestAssemblyMarker(state.AssemblyName) ||
-            type.TypeKind != TypeKind.Class ||
-            type.IsAbstract ||
-            !ImplementsFullyQualified(type, "AICopilot.Services.Contracts.IAuditLogWriter"))
+        if (!IsConcreteProductionImplementation(
+                type,
+                state,
+                "AICopilot.Services.Contracts.IAuditLogWriter"))
         {
             return;
         }
@@ -472,11 +470,7 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
         SymbolAnalysisContext context,
         CompilationState state)
     {
-        if (!IsProductionAssembly(state.AssemblyName) ||
-            ContainsTestAssemblyMarker(state.AssemblyName) ||
-            type.TypeKind != TypeKind.Class ||
-            type.IsAbstract ||
-            !ImplementsFullyQualified(type, FormalModelQuotaReservationStoreContractName))
+        if (!IsConcreteProductionImplementation(type, state, FormalQuotaTypes.Contract))
         {
             return;
         }
@@ -488,12 +482,12 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
                                        constructors[0].Parameters.Length == 1 &&
                                        HasExpectedTypeIdentity(
                                            constructors[0].Parameters[0].Type as INamedTypeSymbol,
-                                           FormalAgentExecutionTransactionRunnerName);
+                                           FormalQuotaTypes.TransactionRunner);
         var transactionRunner = constructors
             .SelectMany(constructor => constructor.Parameters)
             .Select(parameter => parameter.Type as INamedTypeSymbol)
             .SingleOrDefault(parameterType =>
-                HasExpectedTypeIdentity(parameterType, FormalAgentExecutionTransactionRunnerName));
+                HasExpectedTypeIdentity(parameterType, FormalQuotaTypes.TransactionRunner));
         var runnerDatabaseContexts = transactionRunner?.InstanceConstructors
             .SelectMany(constructor => constructor.Parameters)
             .Select(parameter => parameter.Type)
@@ -503,9 +497,9 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
         var hasOnlyExactAiGatewayContext = runnerDatabaseContexts.Length == 1 &&
                                            HasExpectedTypeIdentity(
                                                runnerDatabaseContexts[0] as INamedTypeSymbol,
-                                               FormalAiGatewayDbContextName);
+                                               FormalQuotaTypes.DbContext);
 
-        if (HasExpectedTypeIdentity(type, FormalModelQuotaReservationStoreName) &&
+        if (HasExpectedTypeIdentity(type, FormalQuotaTypes.Store) &&
             hasExactStoreConstructor &&
             hasOnlyExactAiGatewayContext)
         {
@@ -516,8 +510,18 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
             CloudReadOnlyBoundaryRule,
             FirstSourceLocation(type),
             type.ToDisplayString(),
-            $"{FormalModelQuotaReservationStoreContractName} has one approved production implementation: {FormalModelQuotaReservationStoreName}, using only {FormalAgentExecutionTransactionRunnerName} backed by {FormalAiGatewayDbContextName}"));
+            $"{FormalQuotaTypes.Contract} has one approved production implementation: {FormalQuotaTypes.Store}, using only {FormalQuotaTypes.TransactionRunner} backed by {FormalQuotaTypes.DbContext}"));
     }
+
+    private static bool IsConcreteProductionImplementation(
+        INamedTypeSymbol type,
+        CompilationState state,
+        string contractTypeName) =>
+        IsProductionAssembly(state.AssemblyName) &&
+        !ContainsTestAssemblyMarker(state.AssemblyName) &&
+        type.TypeKind == TypeKind.Class &&
+        !type.IsAbstract &&
+        ImplementsFullyQualified(type, contractTypeName);
 
     private static void AnalyzePluginType(
         INamedTypeSymbol type,
@@ -3257,24 +3261,10 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
             return false;
         }
 
-        foreach (var auditContract in method.ContainingType.AllInterfaces.Where(@interface =>
-                     HasExpectedTypeIdentity(
-                         @interface,
-                         "AICopilot.Services.Contracts.IAuditLogWriter")))
-        {
-            foreach (var contractMethod in auditContract.GetMembers()
-                         .OfType<IMethodSymbol>()
-                         .Where(IsFormalAuditWriteContractMethod))
-            {
-                if (method.ContainingType.FindImplementationForInterfaceMember(contractMethod) is IMethodSymbol implementation &&
-                    SymbolEqualityComparer.Default.Equals(Normalize(implementation), method))
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
+        return ImplementsFormalContractMethod(
+            method,
+            "AICopilot.Services.Contracts.IAuditLogWriter",
+            IsFormalAuditWriteContractMethod);
     }
 
     private static bool IsFormalAuditWriteContractMethod(IMethodSymbol method)
@@ -3302,28 +3292,15 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
         };
     }
 
-    private static bool IsAllowedCloudReadOnlyOperationalWrite(IMethodSymbol method) =>
-        IsAuditWrite(method) || IsModelQuotaOperationalWrite(method);
-
-    private static bool IsModelQuotaOperationalWrite(IMethodSymbol method)
+    private static bool ImplementsFormalContractMethod(
+        IMethodSymbol method,
+        string contractTypeName,
+        Func<IMethodSymbol, bool> isFormalContractMethod)
     {
-        method = Normalize(method);
-        if (IsFormalModelQuotaOperationalContractMethod(method))
+        foreach (var contract in method.ContainingType.AllInterfaces.Where(@interface =>
+                     HasExpectedTypeIdentity(@interface, contractTypeName)))
         {
-            return true;
-        }
-
-        if (!HasExpectedTypeIdentity(method.ContainingType, FormalModelQuotaReservationStoreName))
-        {
-            return false;
-        }
-
-        foreach (var quotaContract in method.ContainingType.AllInterfaces.Where(@interface =>
-                     HasExpectedTypeIdentity(@interface, FormalModelQuotaReservationStoreContractName)))
-        {
-            foreach (var contractMethod in quotaContract.GetMembers()
-                         .OfType<IMethodSymbol>()
-                         .Where(IsFormalModelQuotaOperationalContractMethod))
+            foreach (var contractMethod in contract.GetMembers().OfType<IMethodSymbol>().Where(isFormalContractMethod))
             {
                 if (method.ContainingType.FindImplementationForInterfaceMember(contractMethod) is IMethodSymbol implementation &&
                     SymbolEqualityComparer.Default.Equals(Normalize(implementation), method))
@@ -3336,32 +3313,46 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
         return false;
     }
 
+    private static bool IsAllowedCloudReadOnlyOperationalWrite(IMethodSymbol method) =>
+        IsAuditWrite(method) || IsModelQuotaOperationalWrite(method);
+
+    private static bool IsModelQuotaOperationalWrite(IMethodSymbol method)
+    {
+        method = Normalize(method);
+        if (IsFormalModelQuotaOperationalContractMethod(method))
+        {
+            return true;
+        }
+
+        if (!HasExpectedTypeIdentity(method.ContainingType, FormalQuotaTypes.Store))
+        {
+            return false;
+        }
+
+        return ImplementsFormalContractMethod(
+            method,
+            FormalQuotaTypes.Contract,
+            IsFormalModelQuotaOperationalContractMethod);
+    }
+
     private static bool IsFormalModelQuotaOperationalContractMethod(IMethodSymbol method)
     {
         method = Normalize(method);
-        if (!HasExpectedTypeIdentity(method.ContainingType, FormalModelQuotaReservationStoreContractName))
+        if (!HasExpectedTypeIdentity(method.ContainingType, FormalQuotaTypes.Contract))
         {
             return false;
         }
 
         return method.Name switch
         {
-            "TryReserveAsync" =>
-                method.Parameters.Length == 2 &&
-                HasExpectedTypeIdentity(
-                    method.Parameters[0].Type as INamedTypeSymbol,
-                    "AICopilot.Services.Contracts.ModelQuotaReservationRequest") &&
-                method.Parameters[1].Type.ToDisplayString() == "System.Threading.CancellationToken" &&
-                method.ReturnType.ToDisplayString() ==
-                "System.Threading.Tasks.Task<AICopilot.Services.Contracts.ModelQuotaReservationOutcome>",
-            "SettleAsync" =>
-                method.Parameters.Length == 2 &&
-                HasExpectedTypeIdentity(
-                    method.Parameters[0].Type as INamedTypeSymbol,
-                    "AICopilot.Services.Contracts.ModelQuotaSettlement") &&
-                method.Parameters[1].Type.ToDisplayString() == "System.Threading.CancellationToken" &&
-                method.ReturnType.ToDisplayString() ==
-                "System.Threading.Tasks.Task<AICopilot.Services.Contracts.ModelQuotaReservationResult>",
+            "TryReserveAsync" => MatchesFormalQuotaOperation(
+                method,
+                "AICopilot.Services.Contracts.ModelQuotaReservationRequest",
+                "AICopilot.Services.Contracts.ModelQuotaReservationOutcome"),
+            "SettleAsync" => MatchesFormalQuotaOperation(
+                method,
+                "AICopilot.Services.Contracts.ModelQuotaSettlement",
+                "AICopilot.Services.Contracts.ModelQuotaReservationResult"),
             "ReclaimExpiredAsync" =>
                 method.Parameters.Length == 3 &&
                 method.Parameters[0].Type.ToDisplayString() == "System.DateTimeOffset" &&
@@ -3370,6 +3361,17 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
                 method.ReturnType.ToDisplayString() == "System.Threading.Tasks.Task<int>",
             _ => false
         };
+    }
+
+    private static bool MatchesFormalQuotaOperation(
+        IMethodSymbol method,
+        string requestType,
+        string resultType)
+    {
+        return method.Parameters.Length == 2 &&
+               HasExpectedTypeIdentity(method.Parameters[0].Type as INamedTypeSymbol, requestType) &&
+               method.Parameters[1].Type.ToDisplayString() == "System.Threading.CancellationToken" &&
+               method.ReturnType.ToDisplayString() == $"System.Threading.Tasks.Task<{resultType}>";
     }
 
     private static bool IsCloudReadOnlyOperation(IMethodSymbol method, MethodFacts facts)

@@ -151,7 +151,10 @@ internal sealed class AgentNodeRunClaimStore(
                 var budgetResult = attempt.TryReserveBudget(reservation, nowUtc);
                 if (budgetResult != AgentRunBudgetReservationResult.Reserved)
                 {
-                    return Outcome(MapBudgetResult(budgetResult), BudgetReason(budgetResult));
+                    return Outcome(
+                        AgentNodeRunClaimOutcomeCode.BudgetRejected,
+                        BudgetReason(budgetResult),
+                        budgetResult);
                 }
 
                 node.Claim(taskFencingToken, leaseOwner, nowUtc, leaseDuration);
@@ -224,38 +227,19 @@ internal sealed class AgentNodeRunClaimStore(
             "Agent.NodeRunRenewLeases",
             async (context, token) =>
             {
-                var task = await context.AgentTasks
-                    .FromSqlInterpolated($$"""
-                        SELECT task.*, task.xmin FROM aigateway.agent_tasks AS task
-                        WHERE id = {{claim.NodeRun.TaskId.Value}}
-                          AND active_run_attempt_id = {{claim.RunAttemptId.Value}}
-                          AND run_fencing_token = {{claim.TaskFencingToken}}
-                          AND run_lease_id = {{claim.TaskLeaseId}}
-                        FOR UPDATE
-                        """)
-                    .SingleOrDefaultAsync(token);
-                var attempt = await context.AgentTaskRunAttempts
-                    .FromSqlInterpolated($$"""
-                        SELECT attempt.*, attempt.xmin FROM aigateway.agent_task_run_attempts AS attempt
-                        WHERE id = {{claim.RunAttemptId.Value}}
-                          AND task_fencing_token = {{claim.TaskFencingToken}}
-                          AND lease_id = {{claim.TaskLeaseId}}
-                        FOR UPDATE
-                        """)
-                    .SingleOrDefaultAsync(token);
-                var queueItem = await context.AgentTaskRunQueueItems
-                    .FromSqlInterpolated($$"""
-                        SELECT queue_item.*, queue_item.xmin FROM aigateway.agent_task_run_queue_items AS queue_item
-                        WHERE id = {{claim.QueueItemId.Value}}
-                          AND run_attempt_id = {{claim.RunAttemptId.Value}}
-                          AND task_fencing_token = {{claim.TaskFencingToken}}
-                          AND lease_id = {{claim.TaskLeaseId}}
-                          AND status = 'Started'
-                        FOR UPDATE
-                        """)
-                    .SingleOrDefaultAsync(token);
+                var task = await AgentExecutionRowLock.ByIdAsync<AgentTask>(
+                    context, claim.NodeRun.TaskId.Value, token);
+                var attempt = await AgentExecutionRowLock.ByIdAsync<AgentTaskRunAttempt>(
+                    context, claim.RunAttemptId.Value, token);
+                var queueItem = await AgentExecutionRowLock.ByIdAsync<AgentTaskRunQueueItem>(
+                    context, claim.QueueItemId.Value, token);
                 var node = await LockNodeAsync(context, claim, null, token);
                 if (task is null || attempt is null || queueItem is null || node is null ||
+                    task.ActiveRunAttemptId != claim.RunAttemptId ||
+                    task.RunFencingToken != claim.TaskFencingToken || task.RunLeaseId != claim.TaskLeaseId ||
+                    attempt.TaskFencingToken != claim.TaskFencingToken || attempt.LeaseId != claim.TaskLeaseId ||
+                    queueItem.RunAttemptId != claim.RunAttemptId || queueItem.TaskFencingToken != claim.TaskFencingToken ||
+                    queueItem.LeaseId != claim.TaskLeaseId || queueItem.Status != AgentTaskRunQueueStatus.Started ||
                     node.Status is not AgentNodeRunStatus.Claimed and not AgentNodeRunStatus.Running)
                 {
                     return new AgentExecutionTransactionAttempt<AgentFencedWriteResult>(
@@ -318,29 +302,11 @@ internal sealed class AgentNodeRunClaimStore(
 
     private static AgentExecutionTransactionAttempt<AgentNodeRunClaimOutcome> Outcome(
         AgentNodeRunClaimOutcomeCode code,
-        string reason)
+        string reason,
+        AgentRunBudgetReservationResult? budgetResult = null)
     {
         return new AgentExecutionTransactionAttempt<AgentNodeRunClaimOutcome>(
-            new AgentNodeRunClaimOutcome(code, Claim: null, SafeReason: reason));
-    }
-
-    private static AgentNodeRunClaimOutcomeCode MapBudgetResult(AgentRunBudgetReservationResult result)
-    {
-        return result switch
-        {
-            AgentRunBudgetReservationResult.BudgetNotInitialized => AgentNodeRunClaimOutcomeCode.BudgetNotInitialized,
-            AgentRunBudgetReservationResult.WorkflowElapsedExceeded => AgentNodeRunClaimOutcomeCode.WorkflowElapsedExceeded,
-            AgentRunBudgetReservationResult.ToolCallsExceeded => AgentNodeRunClaimOutcomeCode.ToolCallsExceeded,
-            AgentRunBudgetReservationResult.ModelCallsExceeded => AgentNodeRunClaimOutcomeCode.ModelCallsExceeded,
-            AgentRunBudgetReservationResult.InputTokensExceeded => AgentNodeRunClaimOutcomeCode.InputTokensExceeded,
-            AgentRunBudgetReservationResult.OutputTokensExceeded => AgentNodeRunClaimOutcomeCode.OutputTokensExceeded,
-            AgentRunBudgetReservationResult.ElapsedUsageExceeded => AgentNodeRunClaimOutcomeCode.ElapsedUsageExceeded,
-            AgentRunBudgetReservationResult.CostExceeded => AgentNodeRunClaimOutcomeCode.CostExceeded,
-            AgentRunBudgetReservationResult.RetriesExceeded => AgentNodeRunClaimOutcomeCode.RetriesExceeded,
-            AgentRunBudgetReservationResult.ArtifactCountExceeded => AgentNodeRunClaimOutcomeCode.ArtifactCountExceeded,
-            AgentRunBudgetReservationResult.ArtifactBytesExceeded => AgentNodeRunClaimOutcomeCode.ArtifactBytesExceeded,
-            _ => throw new InvalidOperationException("Unsupported task-budget reservation result.")
-        };
+            new AgentNodeRunClaimOutcome(code, Claim: null, SafeReason: reason, BudgetResult: budgetResult));
     }
 
     private static string BudgetReason(AgentRunBudgetReservationResult result)

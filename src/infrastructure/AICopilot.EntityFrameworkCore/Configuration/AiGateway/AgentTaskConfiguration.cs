@@ -2,6 +2,7 @@ using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Ids;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using static AICopilot.EntityFrameworkCore.Configuration.AiGateway.AgentExecutionRuntimeConfigurationMapping;
 
 namespace AICopilot.EntityFrameworkCore.Configuration.AiGateway;
 
@@ -9,14 +10,7 @@ public sealed class AgentTaskConfiguration : IEntityTypeConfiguration<AgentTask>
 {
     public void Configure(EntityTypeBuilder<AgentTask> builder)
     {
-        builder.ToTable("agent_tasks");
-
-        builder.HasKey(task => task.Id);
-        builder.Property(task => task.Id)
-            .HasConversion(id => id.Value, value => new AgentTaskId(value))
-            .HasColumnName("id");
-
-        builder.Property<uint>("RowVersion").IsRowVersion();
+        ConfigureEntity(builder, "agent_tasks", task => task.Id, id => id.Value, value => new AgentTaskId(value));
 
         builder.Property(task => task.TaskCode)
             .IsRequired()
@@ -88,21 +82,7 @@ public sealed class AgentTaskConfiguration : IEntityTypeConfiguration<AgentTask>
             .HasDefaultValue(0)
             .HasColumnName("run_attempt_count");
 
-        builder.Property(task => task.RunLeaseId)
-            .HasColumnName("run_lease_id");
-
-        builder.Property(task => task.RunLeaseOwner)
-            .HasMaxLength(120)
-            .HasColumnName("run_lease_owner");
-
-        builder.Property(task => task.RunLeaseExpiresAt)
-            .HasColumnType("timestamp with time zone")
-            .HasColumnName("run_lease_expires_at");
-
-        builder.Property(task => task.RunFencingToken)
-            .IsRequired()
-            .HasDefaultValue(0L)
-            .HasColumnName("run_fencing_token");
+        MapLeaseColumns(builder, (nameof(AgentTask.RunLeaseId), "run_lease_id"), (nameof(AgentTask.RunLeaseOwner), "run_lease_owner"), (nameof(AgentTask.RunLeaseExpiresAt), "run_lease_expires_at"), (nameof(AgentTask.RunFencingToken), "run_fencing_token"));
 
         builder.Property(task => task.PlanJson)
             .IsRequired()
@@ -138,14 +118,7 @@ public sealed class AgentTaskRunAttemptConfiguration : IEntityTypeConfiguration<
 {
     public void Configure(EntityTypeBuilder<AgentTaskRunAttempt> builder)
     {
-        builder.ToTable("agent_task_run_attempts");
-
-        builder.HasKey(attempt => attempt.Id);
-        builder.Property(attempt => attempt.Id)
-            .HasConversion(id => id.Value, value => new AgentTaskRunAttemptId(value))
-            .HasColumnName("id");
-
-        builder.Property<uint>("RowVersion").IsRowVersion();
+        ConfigureEntity(builder, "agent_task_run_attempts", attempt => attempt.Id, id => id.Value, value => new AgentTaskRunAttemptId(value));
 
         builder.Property(attempt => attempt.TaskId)
             .HasConversion(id => id.Value, value => new AgentTaskId(value))
@@ -168,53 +141,20 @@ public sealed class AgentTaskRunAttemptConfiguration : IEntityTypeConfiguration<
             .IsRequired()
             .HasColumnName("trigger_type");
 
-        builder.Property(attempt => attempt.LeaseId)
-            .HasColumnName("lease_id");
+        MapLeaseColumns(builder, (nameof(AgentTaskRunAttempt.LeaseId), "lease_id"), (nameof(AgentTaskRunAttempt.LeaseOwner), "lease_owner"), (nameof(AgentTaskRunAttempt.LeaseExpiresAt), "lease_expires_at"), (nameof(AgentTaskRunAttempt.TaskFencingToken), "task_fencing_token"));
 
-        builder.Property(attempt => attempt.LeaseOwner)
-            .HasMaxLength(120)
-            .HasColumnName("lease_owner");
-
-        builder.Property(attempt => attempt.LeaseExpiresAt)
-            .HasColumnType("timestamp with time zone")
-            .HasColumnName("lease_expires_at");
-
-        builder.Property(attempt => attempt.TaskFencingToken)
-            .IsRequired()
-            .HasDefaultValue(0L)
-            .HasColumnName("task_fencing_token");
-
-        builder.Property(attempt => attempt.IsBudgetInitialized).HasColumnName("is_budget_initialized");
-        builder.Property(attempt => attempt.BudgetPolicyVersion).HasMaxLength(120).HasColumnName("budget_policy_version");
-        builder.Property(attempt => attempt.BudgetMaxNodes).HasColumnName("budget_max_nodes");
-        builder.Property(attempt => attempt.BudgetMaxToolCalls).HasColumnName("budget_max_tool_calls");
-        builder.Property(attempt => attempt.BudgetMaxModelCalls).HasColumnName("budget_max_model_calls");
-        builder.Property(attempt => attempt.BudgetMaxInputTokens).HasColumnName("budget_max_input_tokens");
-        builder.Property(attempt => attempt.BudgetMaxOutputTokens).HasColumnName("budget_max_output_tokens");
-        builder.Property(attempt => attempt.BudgetMaxElapsedSeconds).HasColumnName("budget_max_elapsed_seconds");
-        builder.Property(attempt => attempt.BudgetMaxCostAmount).HasPrecision(18, 6).HasColumnName("budget_max_cost_amount");
-        builder.Property(attempt => attempt.BudgetCostCurrency).HasMaxLength(8).HasColumnName("budget_cost_currency");
-        builder.Property(attempt => attempt.BudgetMaxRetries).HasColumnName("budget_max_retries");
-        builder.Property(attempt => attempt.BudgetMaxArtifactCount).HasColumnName("budget_max_artifact_count");
-        builder.Property(attempt => attempt.BudgetMaxArtifactBytes).HasColumnName("budget_max_artifact_bytes");
-        builder.Property(attempt => attempt.BudgetReservedToolCalls).HasColumnName("budget_reserved_tool_calls");
-        builder.Property(attempt => attempt.BudgetReservedModelCalls).HasColumnName("budget_reserved_model_calls");
-        builder.Property(attempt => attempt.BudgetReservedInputTokens).HasColumnName("budget_reserved_input_tokens");
-        builder.Property(attempt => attempt.BudgetReservedOutputTokens).HasColumnName("budget_reserved_output_tokens");
-        builder.Property(attempt => attempt.BudgetReservedElapsedMilliseconds).HasColumnName("budget_reserved_elapsed_milliseconds");
-        builder.Property(attempt => attempt.BudgetReservedCostAmount).HasPrecision(18, 6).HasColumnName("budget_reserved_cost_amount");
-        builder.Property(attempt => attempt.BudgetReservedRetries).HasColumnName("budget_reserved_retries");
-        builder.Property(attempt => attempt.BudgetReservedArtifactCount).HasColumnName("budget_reserved_artifact_count");
-        builder.Property(attempt => attempt.BudgetReservedArtifactBytes).HasColumnName("budget_reserved_artifact_bytes");
-        builder.Property(attempt => attempt.BudgetConsumedToolCalls).HasColumnName("budget_consumed_tool_calls");
-        builder.Property(attempt => attempt.BudgetConsumedModelCalls).HasColumnName("budget_consumed_model_calls");
-        builder.Property(attempt => attempt.BudgetConsumedInputTokens).HasColumnName("budget_consumed_input_tokens");
-        builder.Property(attempt => attempt.BudgetConsumedOutputTokens).HasColumnName("budget_consumed_output_tokens");
-        builder.Property(attempt => attempt.BudgetConsumedElapsedMilliseconds).HasColumnName("budget_consumed_elapsed_milliseconds");
-        builder.Property(attempt => attempt.BudgetConsumedCostAmount).HasPrecision(18, 6).HasColumnName("budget_consumed_cost_amount");
-        builder.Property(attempt => attempt.BudgetConsumedRetries).HasColumnName("budget_consumed_retries");
-        builder.Property(attempt => attempt.BudgetConsumedArtifactCount).HasColumnName("budget_consumed_artifact_count");
-        builder.Property(attempt => attempt.BudgetConsumedArtifactBytes).HasColumnName("budget_consumed_artifact_bytes");
+        MapColumns(builder,
+            (nameof(AgentTaskRunAttempt.IsBudgetInitialized), "is_budget_initialized"), (nameof(AgentTaskRunAttempt.BudgetMaxNodes), "budget_max_nodes"), (nameof(AgentTaskRunAttempt.BudgetMaxToolCalls), "budget_max_tool_calls"), (nameof(AgentTaskRunAttempt.BudgetMaxModelCalls), "budget_max_model_calls"),
+            (nameof(AgentTaskRunAttempt.BudgetMaxInputTokens), "budget_max_input_tokens"), (nameof(AgentTaskRunAttempt.BudgetMaxOutputTokens), "budget_max_output_tokens"), (nameof(AgentTaskRunAttempt.BudgetMaxElapsedSeconds), "budget_max_elapsed_seconds"), (nameof(AgentTaskRunAttempt.BudgetMaxRetries), "budget_max_retries"), (nameof(AgentTaskRunAttempt.BudgetMaxArtifactCount), "budget_max_artifact_count"), (nameof(AgentTaskRunAttempt.BudgetMaxArtifactBytes), "budget_max_artifact_bytes"),
+            (nameof(AgentTaskRunAttempt.BudgetReservedToolCalls), "budget_reserved_tool_calls"), (nameof(AgentTaskRunAttempt.BudgetReservedModelCalls), "budget_reserved_model_calls"), (nameof(AgentTaskRunAttempt.BudgetReservedInputTokens), "budget_reserved_input_tokens"), (nameof(AgentTaskRunAttempt.BudgetReservedOutputTokens), "budget_reserved_output_tokens"), (nameof(AgentTaskRunAttempt.BudgetReservedElapsedMilliseconds), "budget_reserved_elapsed_milliseconds"), (nameof(AgentTaskRunAttempt.BudgetReservedRetries), "budget_reserved_retries"),
+            (nameof(AgentTaskRunAttempt.BudgetReservedArtifactCount), "budget_reserved_artifact_count"), (nameof(AgentTaskRunAttempt.BudgetReservedArtifactBytes), "budget_reserved_artifact_bytes"), (nameof(AgentTaskRunAttempt.BudgetConsumedToolCalls), "budget_consumed_tool_calls"), (nameof(AgentTaskRunAttempt.BudgetConsumedModelCalls), "budget_consumed_model_calls"), (nameof(AgentTaskRunAttempt.BudgetConsumedInputTokens), "budget_consumed_input_tokens"), (nameof(AgentTaskRunAttempt.BudgetConsumedOutputTokens), "budget_consumed_output_tokens"),
+            (nameof(AgentTaskRunAttempt.BudgetConsumedElapsedMilliseconds), "budget_consumed_elapsed_milliseconds"), (nameof(AgentTaskRunAttempt.BudgetConsumedRetries), "budget_consumed_retries"),
+            (nameof(AgentTaskRunAttempt.BudgetConsumedArtifactCount), "budget_consumed_artifact_count"), (nameof(AgentTaskRunAttempt.BudgetConsumedArtifactBytes), "budget_consumed_artifact_bytes"));
+        MapTextColumns(builder,
+            (nameof(AgentTaskRunAttempt.BudgetPolicyVersion), "budget_policy_version", 120), (nameof(AgentTaskRunAttempt.BudgetCostCurrency), "budget_cost_currency", 8));
+        MapDecimalColumns(builder,
+            (nameof(AgentTaskRunAttempt.BudgetMaxCostAmount), "budget_max_cost_amount"), (nameof(AgentTaskRunAttempt.BudgetReservedCostAmount), "budget_reserved_cost_amount"),
+            (nameof(AgentTaskRunAttempt.BudgetConsumedCostAmount), "budget_consumed_cost_amount"));
 
         builder.Property(attempt => attempt.StartedAt)
             .HasColumnType("timestamp with time zone")
@@ -281,21 +221,7 @@ public sealed class AgentTaskRunQueueItemConfiguration : IEntityTypeConfiguratio
                 value => value.HasValue ? new AgentTaskRunAttemptId(value.Value) : null)
             .HasColumnName("run_attempt_id");
 
-        builder.Property(item => item.LeaseId)
-            .HasColumnName("lease_id");
-
-        builder.Property(item => item.LeaseOwner)
-            .HasMaxLength(120)
-            .HasColumnName("lease_owner");
-
-        builder.Property(item => item.LeaseExpiresAt)
-            .HasColumnType("timestamp with time zone")
-            .HasColumnName("lease_expires_at");
-
-        builder.Property(item => item.TaskFencingToken)
-            .IsRequired()
-            .HasDefaultValue(0L)
-            .HasColumnName("task_fencing_token");
+        MapLeaseColumns(builder, (nameof(AgentTaskRunQueueItem.LeaseId), "lease_id"), (nameof(AgentTaskRunQueueItem.LeaseOwner), "lease_owner"), (nameof(AgentTaskRunQueueItem.LeaseExpiresAt), "lease_expires_at"), (nameof(AgentTaskRunQueueItem.TaskFencingToken), "task_fencing_token"));
 
         builder.Property(item => item.AvailableAt)
             .HasColumnType("timestamp with time zone")
@@ -337,10 +263,7 @@ public sealed class AgentTaskRunQueueItemConfiguration : IEntityTypeConfiguratio
         builder.HasIndex(item => item.RunAttemptId)
             .HasDatabaseName("ix_agent_task_run_queue_items_run_attempt_id");
 
-        builder.HasIndex(item => item.TaskId)
-            .IsUnique()
-            .HasFilter("status IN ('Queued', 'Claimed', 'Started')")
-            .HasDatabaseName("ux_agent_task_run_queue_items_active_task");
+        MapUniqueFilteredIndex(builder, item => item.TaskId, "status IN ('Queued', 'Claimed', 'Started')", "ux_agent_task_run_queue_items_active_task");
     }
 }
 
@@ -348,14 +271,7 @@ public sealed class AgentWorkerHeartbeatConfiguration : IEntityTypeConfiguration
 {
     public void Configure(EntityTypeBuilder<AgentWorkerHeartbeat> builder)
     {
-        builder.ToTable("agent_worker_heartbeats");
-
-        builder.HasKey(heartbeat => heartbeat.Id);
-        builder.Property(heartbeat => heartbeat.Id)
-            .HasConversion(id => id.Value, value => new AgentWorkerHeartbeatId(value))
-            .HasColumnName("id");
-
-        builder.Property<uint>("RowVersion").IsRowVersion();
+        ConfigureEntity(builder, "agent_worker_heartbeats", heartbeat => heartbeat.Id, id => id.Value, value => new AgentWorkerHeartbeatId(value));
 
         builder.Property(heartbeat => heartbeat.WorkerId)
             .IsRequired()
@@ -413,12 +329,7 @@ public sealed class AgentStepConfiguration : IEntityTypeConfiguration<AgentStep>
 {
     public void Configure(EntityTypeBuilder<AgentStep> builder)
     {
-        builder.ToTable("agent_steps");
-
-        builder.HasKey(step => step.Id);
-        builder.Property(step => step.Id)
-            .HasConversion(id => id.Value, value => new AgentStepId(value))
-            .HasColumnName("id");
+        ConfigureEntity(builder, "agent_steps", step => step.Id, id => id.Value, value => new AgentStepId(value), usesRowVersion: false);
 
         builder.Property(step => step.TaskId)
             .HasConversion(id => id.Value, value => new AgentTaskId(value))

@@ -99,6 +99,7 @@ public sealed record AgentNodeExecutionEvent(
 
 internal sealed record AgentBranchEvidenceSeed(
     string NodeKind,
+    string SafeContext,
     AgentWorkflowEvidenceKind EvidenceKind,
     AgentWorkflowEvidenceTruthClass TruthClass,
     string ProducerId,
@@ -106,8 +107,7 @@ internal sealed record AgentBranchEvidenceSeed(
     string SourceMode,
     bool? IsSimulation,
     string? SemanticIntent,
-    IReadOnlyCollection<string> SanitizedScope,
-    string SafeContext);
+    IReadOnlyCollection<string> SanitizedScope);
 
 internal sealed record AgentAnalysisNodeResult(
     BranchExecutionStatus Status,
@@ -242,6 +242,7 @@ internal static class AgentWorkflowEvidenceNormalizer
             [
                 new AgentBranchEvidenceSeed(
                     "PolicyValidationNode",
+                    string.Empty,
                     AgentWorkflowEvidenceKind.ToolCatalog,
                     AgentWorkflowEvidenceTruthClass.PolicyDecision,
                     "tool-safety-policy:v1",
@@ -252,13 +253,13 @@ internal static class AgentWorkflowEvidenceNormalizer
                     result.Tools.Select(tool => $"tool:{tool.Name}")
                         .Distinct(StringComparer.Ordinal)
                         .OrderBy(value => value, StringComparer.Ordinal)
-                        .ToArray(),
-                    string.Empty)
+                        .ToArray())
             ],
             BranchType.Knowledge when !string.IsNullOrWhiteSpace(result.Knowledge) =>
             [
                 new AgentBranchEvidenceSeed(
                     "KnowledgeRetrievalNode",
+                    result.Knowledge,
                     AgentWorkflowEvidenceKind.RagCitation,
                     AgentWorkflowEvidenceTruthClass.ObservedFact,
                     "knowledge-retrieval:v1",
@@ -266,13 +267,13 @@ internal static class AgentWorkflowEvidenceNormalizer
                     "AuthorizedRagRead",
                     IsSimulation: null,
                     SemanticIntent: "Knowledge.Retrieve",
-                    [],
-                    result.Knowledge)
+                    [])
             ],
             BranchType.DataAnalysis when !string.IsNullOrWhiteSpace(result.DataAnalysis) =>
             [
                 new AgentBranchEvidenceSeed(
                     "DeterministicComputeNode",
+                    result.DataAnalysis,
                     AgentWorkflowEvidenceKind.DerivedMetric,
                     AgentWorkflowEvidenceTruthClass.DerivedFact,
                     "data-analysis-compat-adapter:v1",
@@ -280,13 +281,13 @@ internal static class AgentWorkflowEvidenceNormalizer
                     "CompatibilityAdapter",
                     IsSimulation: null,
                     SemanticIntent: null,
-                    [],
-                    result.DataAnalysis)
+                    [])
             ],
             BranchType.BusinessPolicy when !string.IsNullOrWhiteSpace(result.BusinessPolicy) =>
             [
                 new AgentBranchEvidenceSeed(
                     "PolicyValidationNode",
+                    result.BusinessPolicy,
                     AgentWorkflowEvidenceKind.PolicyDecision,
                     AgentWorkflowEvidenceTruthClass.PolicyDecision,
                     "business-policy:v1",
@@ -294,8 +295,7 @@ internal static class AgentWorkflowEvidenceNormalizer
                     "ServerOwnedPolicyCatalog",
                     IsSimulation: false,
                     SemanticIntent: null,
-                    [],
-                    result.BusinessPolicy)
+                    [])
             ],
             _ => []
         };

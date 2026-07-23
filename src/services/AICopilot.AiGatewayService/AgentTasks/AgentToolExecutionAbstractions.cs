@@ -84,6 +84,28 @@ internal interface IAgentToolExecutor
     Task<AgentToolExecutionResult> ExecuteAsync(AgentToolExecutionContext context);
 }
 
+internal static class AgentToolExecutionTimeout
+{
+    public static async Task<AgentToolExecutionResult> ExecuteAsync(
+        IAgentToolExecutor executor,
+        AgentToolExecutionContext context)
+    {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(context.ToolRegistration.TimeoutSeconds));
+
+        try
+        {
+            return await executor.ExecuteAsync(context with { CancellationToken = timeoutCts.Token });
+        }
+        catch (OperationCanceledException) when (!context.CancellationToken.IsCancellationRequested)
+        {
+            throw new AgentToolExecutionException(
+                AppProblemCodes.ToolExecutionTimeout,
+                $"Tool '{context.ToolRegistration.ToolCode}' exceeded timeout {context.ToolRegistration.TimeoutSeconds} seconds.");
+        }
+    }
+}
+
 internal sealed class AgentToolExecutorResolver(IEnumerable<IAgentToolExecutor> executors)
 {
     private readonly IAgentToolExecutor[] executors = executors.ToArray();

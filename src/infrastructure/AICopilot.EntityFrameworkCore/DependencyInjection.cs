@@ -72,18 +72,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<IMessageTimelineProjectionStore, MessageTimelineProjectionStore>();
         builder.Services.AddScoped<IReadRepository<AgentTask>>(provider => provider.GetRequiredService<AiGatewayRepository<AgentTask>>());
         builder.Services.AddScoped<IRepository<AgentTask>>(provider => provider.GetRequiredService<AiGatewayRepository<AgentTask>>());
-        builder.Services.AddScoped<IAgentTaskRunAttemptStore, AgentTaskRunAttemptStore>();
-        builder.Services.AddScoped<IAgentTaskRunQueueStore, AgentTaskRunQueueStore>();
-        builder.Services.AddScoped<IAgentDurableTaskClaimStore, AgentDurableTaskClaimStore>();
-        builder.Services.AddScoped<IAgentTaskCancellationStore, AgentTaskCancellationStore>();
-        builder.Services.AddScoped<IAgentNodeRunStore, AgentNodeRunStore>();
-        builder.Services.AddScoped<IAgentNodeRunClaimStore, AgentNodeRunClaimStore>();
-        builder.Services.AddScoped<IAgentNodeCheckpointStore, AgentNodeCheckpointStore>();
-        builder.Services.AddScoped<IAgentNodeOutcomeReconciliationStore, AgentNodeOutcomeReconciliationStore>();
-        builder.Services.AddScoped<IModelQuotaReservationStore, PostgresModelQuotaReservationStore>();
-        builder.Services.AddScoped<IArtifactFileSetOperationStore, ArtifactFileSetOperationStore>();
-        builder.Services.AddScoped<IAgentTaskPlanFreshReadVerifier, AgentTaskPlanFreshReadVerifier>();
-        builder.Services.AddScoped<IAgentWorkerHeartbeatStore, AgentWorkerHeartbeatStore>();
+        AddAgentRuntimeStores(builder.Services);
         builder.Services.AddScoped<IReadRepository<ArtifactWorkspace>>(provider => provider.GetRequiredService<AiGatewayRepository<ArtifactWorkspace>>());
         builder.Services.AddScoped<IRepository<ArtifactWorkspace>>(provider => provider.GetRequiredService<AiGatewayRepository<ArtifactWorkspace>>());
         builder.Services.AddScoped<IReadRepository<ApprovalRequest>>(provider => provider.GetRequiredService<AiGatewayRepository<ApprovalRequest>>());
@@ -152,5 +141,22 @@ public static class DependencyInjection
     {
         services.AddScoped<IArtifactFileSetMaintenanceService, ArtifactFileSetMaintenanceService>();
         return services;
+    }
+
+    private static void AddAgentRuntimeStores(IServiceCollection services)
+    {
+        (Type Contract, Type Implementation)[] registrations =
+        [
+            (typeof(IAgentTaskRunAttemptStore), typeof(AgentTaskRunAttemptStore)), (typeof(IAgentTaskRunQueueStore), typeof(AgentTaskRunQueueStore)),
+            (typeof(IAgentDurableTaskClaimStore), typeof(AgentDurableTaskClaimStore)), (typeof(IAgentTaskCancellationStore), typeof(AgentTaskCancellationStore)),
+            (typeof(IAgentNodeRunStore), typeof(AgentNodeRunStore)), (typeof(IAgentNodeRunClaimStore), typeof(AgentNodeRunClaimStore)),
+            (typeof(IAgentNodeCheckpointStore), typeof(AgentNodeCheckpointStore)), (typeof(IAgentNodeOutcomeReconciliationStore), typeof(AgentNodeOutcomeReconciliationStore)),
+            (typeof(IModelQuotaReservationStore), typeof(PostgresModelQuotaReservationStore)), (typeof(IArtifactFileSetOperationStore), typeof(ArtifactFileSetOperationStore)),
+            (typeof(IAgentTaskPlanFreshReadVerifier), typeof(AgentTaskPlanFreshReadVerifier)), (typeof(IAgentWorkerHeartbeatStore), typeof(AgentWorkerHeartbeatStore))
+        ];
+        foreach (var registration in registrations)
+        {
+            services.AddScoped(registration.Contract, registration.Implementation);
+        }
     }
 }

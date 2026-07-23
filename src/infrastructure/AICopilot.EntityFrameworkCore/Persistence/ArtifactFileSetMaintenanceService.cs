@@ -19,10 +19,8 @@ internal sealed class ArtifactFileSetMaintenanceService(
         int batchSize,
         CancellationToken cancellationToken = default)
     {
-        if (reconciliationDelay <= TimeSpan.Zero || batchSize <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(reconciliationDelay));
-        }
+        PersistenceMaintenanceGuard.RequirePositiveDelay(reconciliationDelay);
+        PersistenceMaintenanceGuard.RequirePositiveBatchSize(batchSize);
 
         var snapshot = await fileSetStore.GetPendingAsync(
             batchSize,

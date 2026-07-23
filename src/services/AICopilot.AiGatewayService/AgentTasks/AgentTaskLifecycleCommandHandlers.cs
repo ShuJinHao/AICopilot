@@ -11,7 +11,7 @@ using AICopilot.SharedKernel.Result;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
 
-public sealed class ApproveAgentTaskPlanCommandHandler(
+public sealed class AgentTaskPlanDecisionCommandHandler(
     IRepository<AgentTask> repository,
     IRepository<ApprovalRequest> approvalRepository,
     AgentTaskDtoQueryService dtoQueryService,
@@ -19,7 +19,8 @@ public sealed class ApproveAgentTaskPlanCommandHandler(
     ICurrentUser currentUser,
     AgentPlanDraftConfirmationService planDraftConfirmationService,
     MessageTimelineProjectionWriter? timelineProjectionWriter = null)
-    : ICommandHandler<ApproveAgentTaskPlanCommand, Result<AgentTaskDto>>
+    : ICommandHandler<ApproveAgentTaskPlanCommand, Result<AgentTaskDto>>,
+      ICommandHandler<RejectAgentTaskPlanCommand, Result<AgentTaskDto>>
 {
     public async Task<Result<AgentTaskDto>> Handle(ApproveAgentTaskPlanCommand request, CancellationToken cancellationToken)
     {
@@ -84,40 +85,7 @@ public sealed class ApproveAgentTaskPlanCommandHandler(
         await repository.SaveChangesAsync(cancellationToken);
         return Result.Success(await dtoQueryService.MapAsync(task, cancellationToken));
     }
-}
 
-public sealed class RunAgentTaskCommandHandler(
-    IRepository<AgentTask> repository,
-    AgentTaskDtoQueryService dtoQueryService,
-    AgentTaskLifecycleCoordinator lifecycleCoordinator,
-    ICurrentUser currentUser)
-    : ICommandHandler<RunAgentTaskCommand, Result<AgentTaskDto>>
-{
-    public async Task<Result<AgentTaskDto>> Handle(RunAgentTaskCommand request, CancellationToken cancellationToken)
-    {
-        var taskResult = await AgentTaskCommandLoader.LoadTaskAsync(repository, currentUser, request.Id, cancellationToken);
-        if (!taskResult.IsSuccess)
-        {
-            return Result.From(taskResult);
-        }
-
-        var task = taskResult.Value!;
-        var queued = await lifecycleCoordinator.QueueRunAsync(task, currentUser.Id!.Value, cancellationToken);
-        return queued.IsSuccess
-            ? Result.Success(await dtoQueryService.MapAsync(task, cancellationToken))
-            : Result.From(queued);
-    }
-}
-
-public sealed class RejectAgentTaskPlanCommandHandler(
-    IRepository<AgentTask> repository,
-    IRepository<ApprovalRequest> approvalRepository,
-    AgentTaskDtoQueryService dtoQueryService,
-    AgentAuditRecorder auditRecorder,
-    ICurrentUser currentUser,
-    MessageTimelineProjectionWriter? timelineProjectionWriter = null)
-    : ICommandHandler<RejectAgentTaskPlanCommand, Result<AgentTaskDto>>
-{
     public async Task<Result<AgentTaskDto>> Handle(
         RejectAgentTaskPlanCommand request,
         CancellationToken cancellationToken)
@@ -184,13 +152,30 @@ public sealed class RejectAgentTaskPlanCommandHandler(
     }
 }
 
-public sealed class RetryAgentTaskCommandHandler(
+public sealed class AgentTaskLifecycleCommandHandler(
     IRepository<AgentTask> repository,
     AgentTaskDtoQueryService dtoQueryService,
     AgentTaskLifecycleCoordinator lifecycleCoordinator,
     ICurrentUser currentUser)
-    : ICommandHandler<RetryAgentTaskCommand, Result<AgentTaskDto>>
+    : ICommandHandler<RunAgentTaskCommand, Result<AgentTaskDto>>,
+      ICommandHandler<RetryAgentTaskCommand, Result<AgentTaskDto>>,
+      ICommandHandler<CancelAgentTaskCommand, Result<AgentTaskDto>>
 {
+    public async Task<Result<AgentTaskDto>> Handle(RunAgentTaskCommand request, CancellationToken cancellationToken)
+    {
+        var taskResult = await AgentTaskCommandLoader.LoadTaskAsync(repository, currentUser, request.Id, cancellationToken);
+        if (!taskResult.IsSuccess)
+        {
+            return Result.From(taskResult);
+        }
+
+        var task = taskResult.Value!;
+        var queued = await lifecycleCoordinator.QueueRunAsync(task, currentUser.Id!.Value, cancellationToken);
+        return queued.IsSuccess
+            ? Result.Success(await dtoQueryService.MapAsync(task, cancellationToken))
+            : Result.From(queued);
+    }
+
     public async Task<Result<AgentTaskDto>> Handle(RetryAgentTaskCommand request, CancellationToken cancellationToken)
     {
         var taskResult = await AgentTaskCommandLoader.LoadTaskAsync(repository, currentUser, request.Id, cancellationToken);
@@ -208,15 +193,7 @@ public sealed class RetryAgentTaskCommandHandler(
 
         return Result.Success(await dtoQueryService.MapAsync(task, cancellationToken));
     }
-}
 
-public sealed class CancelAgentTaskCommandHandler(
-    IRepository<AgentTask> repository,
-    AgentTaskDtoQueryService dtoQueryService,
-    AgentTaskLifecycleCoordinator lifecycleCoordinator,
-    ICurrentUser currentUser)
-    : ICommandHandler<CancelAgentTaskCommand, Result<AgentTaskDto>>
-{
     public async Task<Result<AgentTaskDto>> Handle(CancelAgentTaskCommand request, CancellationToken cancellationToken)
     {
         var taskResult = await AgentTaskCommandLoader.LoadTaskAsync(repository, currentUser, request.Id, cancellationToken);

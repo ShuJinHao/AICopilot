@@ -734,41 +734,9 @@ public sealed record CloudAiReadProductionRecordDto(
     IReadOnlyList<CloudAiReadProductionFieldSchemaDto> FieldSchema,
     IReadOnlyDictionary<string, object?> AdditionalFields);
 
-public interface ICloudAiReadClient
+public partial interface ICloudAiReadClient
 {
     bool IsEnabled { get; }
-
-    Task<CloudAiReadResult<CloudAiReadDeviceDto>> GetDevicesAsync(
-        CloudAiReadQuery query,
-        CancellationToken cancellationToken = default);
-
-    Task<CloudAiReadResult<CloudAiReadProcessDto>> GetProcessesAsync(
-        CloudAiReadQuery query,
-        CancellationToken cancellationToken = default);
-
-    Task<CloudAiReadResult<CloudAiReadClientReleaseVersionDto>> GetClientReleasesAsync(
-        CloudAiReadQuery query,
-        CancellationToken cancellationToken = default);
-
-    Task<CloudAiReadResult<CloudAiReadDeviceClientStateDto>> GetDeviceClientStatesAsync(
-        CloudAiReadQuery query,
-        CancellationToken cancellationToken = default);
-
-    Task<CloudAiReadResult<CloudAiReadCapacitySummaryDto>> GetCapacitySummaryAsync(
-        CloudAiReadQuery query,
-        CancellationToken cancellationToken = default);
-
-    Task<CloudAiReadResult<CloudAiReadCapacityHourlyDto>> GetCapacityHourlyAsync(
-        CloudAiReadQuery query,
-        CancellationToken cancellationToken = default);
-
-    Task<CloudAiReadResult<CloudAiReadDeviceLogDto>> GetDeviceLogsAsync(
-        CloudAiReadQuery query,
-        CancellationToken cancellationToken = default);
-
-    Task<CloudAiReadResult<CloudAiReadProductionRecordDto>> GetProductionRecordsAsync(
-        CloudAiReadQuery query,
-        CancellationToken cancellationToken = default);
 
     Task<CloudAiReadResult<object>> QuerySemanticAsync(
         SemanticQueryPlan plan,

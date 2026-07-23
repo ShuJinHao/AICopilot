@@ -74,11 +74,7 @@ internal static class AgentEvidenceNormalizer
                 "Node checkpoint inputs do not match the frozen Evidence selectors."));
         }
 
-        var parentIds = parentEvidence
-            .Select(evidence => evidence.Id.Value)
-            .Distinct()
-            .Order()
-            .ToArray();
+        var parentIds = AgentEvidenceSetDigestAuthority.OrderedIds(parentEvidence);
         if (!AgentEvidenceSetDigestAuthority.TryComputeEffective(
                 parentEvidence,
                 out var evidenceSetDigest) ||
@@ -204,23 +200,10 @@ internal static class AgentEvidenceNormalizer
             reasoningOutput,
             healthOutput,
             nowUtc);
-        var allowedConsumerScope = new[]
-        {
-            $"session:{taskClaim.Task.SessionId.Value:D}",
-            $"task:{taskClaim.Task.Id.Value:D}",
-            $"user:{taskClaim.Task.UserId:D}"
-        }.OrderBy(value => value, StringComparer.Ordinal).ToArray();
-        var document = new AgentEvidenceEnvelopeDocument(
-            AgentPlanContractVersions.EvidenceV1,
-            evidenceId.Value,
-            TenantId: null,
-            taskClaim.Task.UserId,
-            taskClaim.Task.SessionId.Value,
-            taskClaim.Task.Id.Value,
-            taskClaim.RunAttempt.Id.Value,
-            nodeContract.NodeId,
-            evidenceKind.ToString(),
-            truthClass.ToString(),
+        var authority = AgentEvidenceRecordAuthority.From(taskClaim, nodeClaim, nodeContract.NodeId);
+        var envelopeDraft = new AgentEvidenceEnvelopeDraft(
+            evidenceKind,
+            truthClass,
             new AgentEvidenceProducerDocument(
                 nodeContract.NodeKind,
                 healthOutput is not null
@@ -282,71 +265,41 @@ internal static class AgentEvidenceNormalizer
                 nodeClaim.NodeRun.InputDigest,
                 payloadDigest,
                 evidenceSetDigest),
-            new AgentEvidenceGovernanceDocument(
-                "Internal",
-                "Redacted",
-                allowedConsumerScope,
-                "TaskLifetime"),
             Prediction: null,
-            nowUtc,
-            Digest: string.Empty);
-        var sealedEnvelope = AgentEvidenceCanonicalizer.Seal(document);
-        if (!sealedEnvelope.IsSuccess)
-        {
-            return Result.From(sealedEnvelope);
-        }
-
-        var canonical = sealedEnvelope.Value!;
-        var evidence = new AgentEvidenceRecord(
+            nowUtc);
+        var evidenceResult = AgentEvidenceRecordFactory.Seal(
             evidenceId,
-            tenantId: null,
-            taskClaim.Task.UserId,
-            taskClaim.Task.SessionId,
-            taskClaim.Task.Id,
-            taskClaim.RunAttempt.Id,
-            nodeClaim.NodeRun.Id,
-            nodeContract.NodeId,
-            evidenceKind,
-            truthClass,
-            AgentEvidenceStorageMode.InlineCanonicalJson,
-            canonical.CanonicalJson,
-            canonical.Digest,
-            payloadDigest,
-            payloadJson,
-            payloadRef: null,
-            "application/json",
-            payloadBytes,
-            payloadDigest,
-            CanonicalJson.Serialize(allowedConsumerScope),
-            taskClaim.TaskFencingToken,
-            nodeClaim.NodeFencingToken,
-            nowUtc: nowUtc);
-        var usage = new AgentRunUsageLedgerEntry(
-            taskClaim.Task.Id,
-            taskClaim.RunAttempt.Id,
-            nodeClaim.NodeRun.Id,
-            taskClaim.TaskFencingToken,
-            nodeClaim.NodeFencingToken,
-            inputTokens: 0,
-            outputTokens: 0,
-            modelCalls: reasoningOutput?.ModelCalls ?? 0,
-            toolCalls: toolCallCount,
-            elapsedMilliseconds: Math.Min(
+            authority,
+            envelopeDraft,
+            new AgentEvidenceRecordPayload(
+                AgentEvidenceStorageMode.InlineCanonicalJson,
+                payloadDigest,
+                payloadJson,
+                PayloadRef: null,
+                "application/json",
+                payloadBytes,
+                payloadDigest));
+        return AgentNormalizedNodeCheckpointFactory.Create(
+            evidenceResult,
+            authority,
+            taskClaim.RunAttempt.BudgetCostCurrency,
+            new AgentRunUsageDraft(
+                reasoningOutput?.ModelCalls ?? 0,
+                toolCallCount,
+                Math.Min(
                 Math.Max(0, (long)elapsed.TotalMilliseconds),
                 nodeClaim.NodeRun.ReservedElapsedMilliseconds),
-            costAmount: 0m,
-            artifactCount: producedArtifacts.Length,
-            artifactBytes: producedArtifacts.Sum(artifact => artifact.FileSize),
-            costCurrency: taskClaim.RunAttempt.BudgetCostCurrency,
-            correlationHash: CanonicalJson.ComputeSha256(CanonicalJson.Serialize(new
-            {
-                taskClaim.TaskFencingToken,
-                nodeClaim.NodeFencingToken,
-                nodeId = nodeContract.NodeId,
-                payloadDigest
-            })),
-            nowUtc);
-        return Result.Success(new AgentNormalizedNodeCheckpoint(evidence, usage, payloadDigest));
+                producedArtifacts.Length,
+                producedArtifacts.Sum(artifact => artifact.FileSize),
+                CanonicalJson.ComputeSha256(CanonicalJson.Serialize(new
+                {
+                    taskClaim.TaskFencingToken,
+                    nodeClaim.NodeFencingToken,
+                    nodeId = nodeContract.NodeId,
+                    payloadDigest
+                })),
+                nowUtc),
+            payloadDigest);
     }
 
     private static AgentEvidencePresentation BuildPresentation(

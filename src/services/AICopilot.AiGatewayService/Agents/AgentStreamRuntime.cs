@@ -154,6 +154,12 @@ public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequi
         };
     }
 
+    public static (
+        StringBuilder AssistantText,
+        List<ChatChunk> AssistantRenderChunks,
+        List<SessionMessageAppend> PendingMessages) CreateResponseBuffers() =>
+        (new StringBuilder(), [], []);
+
     public static ChatChunk CreateErrorChunk(
         Exception exception,
         string source,

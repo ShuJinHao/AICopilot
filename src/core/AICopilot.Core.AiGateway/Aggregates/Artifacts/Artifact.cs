@@ -203,11 +203,11 @@ public sealed class Artifact : IEntity<ArtifactId>
 public sealed record ArtifactSourceMetadata(
     string? SourceMode,
     string? Boundary,
+    string? EvidenceSetDigest,
     bool IsSimulation,
     bool IsSandbox,
     string? SourceLabel,
     string? QueryHash,
     string? ResultHash,
     int RowCount,
-    bool IsTruncated,
-    string? EvidenceSetDigest = null);
+    bool IsTruncated);

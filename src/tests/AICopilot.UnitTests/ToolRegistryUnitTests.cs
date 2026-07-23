@@ -600,14 +600,19 @@ public sealed class ToolRegistryUnitTests : ToolRegistryGovernanceTestBase
 
         var result = ToolExecutionRecordSanitizer.Sanitize(unsafeText, 2_000);
 
-        result.Should().Contain("[redacted-model-reasoning]");
-        result.Should().Contain("Bearer ******");
-        result.Should().Contain("[redacted-endpoint]");
-        result.Should().Contain("[redacted-plc-address]");
-        result.Should().Contain("[redacted-exception-frame]");
-        result.Should().NotContain("private reasoning");
-        result.Should().NotContain("internal.example");
-        result.Should().NotContain("/Users/operator");
+        foreach (var marker in new[]
+                 {
+                     "[redacted-model-reasoning]", "Bearer ******", "[redacted-endpoint]",
+                     "[redacted-plc-address]", "[redacted-exception-frame]"
+                 })
+        {
+            result.Should().Contain(marker);
+        }
+
+        foreach (var unsafeFragment in new[] { "private reasoning", "internal.example", "/Users/operator" })
+        {
+            result.Should().NotContain(unsafeFragment);
+        }
     }
     [Fact]
     public void ToolInputSchemaValidator_ShouldValidateNestedObjectsAndArrayItems()

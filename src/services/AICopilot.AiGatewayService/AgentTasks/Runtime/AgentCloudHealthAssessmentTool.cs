@@ -1,31 +1,18 @@
 using System.Globalization;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using AICopilot.Core.AiGateway.Runtime.AgentExecution;
 using AICopilot.SharedKernel.Result;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
 
 internal sealed record AgentCloudHealthAssessmentOutput(
-    [property: JsonPropertyName("status")] string Status,
-    [property: JsonPropertyName("resultType")] string ResultType,
-    [property: JsonPropertyName("algorithmVersion")] string AlgorithmVersion,
-    [property: JsonPropertyName("assessmentType")] string AssessmentType,
-    [property: JsonPropertyName("truthClass")] string TruthClass,
-    [property: JsonPropertyName("healthScore")] int HealthScore,
-    [property: JsonPropertyName("healthLevel")] string HealthLevel,
-    [property: JsonPropertyName("safeSummary")] string SafeSummary,
-    [property: JsonPropertyName("findings")] IReadOnlyCollection<string> Findings,
-    [property: JsonPropertyName("confidence")] double Confidence,
-    [property: JsonPropertyName("missingRate")] double MissingRate,
-    [property: JsonPropertyName("inputEvidenceCount")] int InputEvidenceCount,
-    [property: JsonPropertyName("evidenceSetDigest")] string EvidenceSetDigest,
-    [property: JsonPropertyName("sourceAsOfUtc")] DateTimeOffset SourceAsOfUtc,
-    [property: JsonPropertyName("sourceMode")] string SourceMode,
-    [property: JsonPropertyName("isSimulation")] bool IsSimulation,
-    [property: JsonPropertyName("rowCount")] int RowCount,
-    [property: JsonPropertyName("isTruncated")] bool IsTruncated,
-    [property: JsonPropertyName("typedMetrics")] IReadOnlyDictionary<string, decimal> TypedMetrics);
+    string Status, string ResultType, string AlgorithmVersion,
+    string AssessmentType, string TruthClass, int HealthScore,
+    string HealthLevel, string SafeSummary, IReadOnlyCollection<string> Findings,
+    double Confidence, double MissingRate, int InputEvidenceCount,
+    string EvidenceSetDigest, DateTimeOffset SourceAsOfUtc, string SourceMode,
+    bool IsSimulation, int RowCount, bool IsTruncated,
+    IReadOnlyDictionary<string, decimal> TypedMetrics);
 
 internal static class AgentCloudHealthAssessmentOutputAuthority
 {
@@ -345,20 +332,7 @@ internal static class AgentCloudHealthAssessmentTool
         destination.CloudReadonlyRowCount = selectedSnapshot?.RowCount ?? source.CloudReadonlyRowCount;
         destination.CloudReadonlyIsTruncated = selectedSnapshot?.IsTruncated ?? source.CloudReadonlyIsTruncated;
         destination.CloudReadonlyQueriedAtUtc = selectedSnapshot?.QueriedAtUtc ?? source.CloudReadonlyQueriedAtUtc;
-        foreach (var snapshot in source.CloudReadonlyResults)
-        {
-            destination.CloudReadonlyResults.RemoveAll(existing =>
-                string.Equals(existing.Intent, snapshot.Intent, StringComparison.Ordinal) &&
-                string.Equals(existing.SemanticPlanDigest, snapshot.SemanticPlanDigest, StringComparison.Ordinal));
-            destination.CloudReadonlyResults.Add(snapshot);
-        }
-        destination.CloudReadonlyResults.Sort((left, right) =>
-        {
-            var comparison = StringComparer.Ordinal.Compare(left.Intent, right.Intent);
-            return comparison != 0
-                ? comparison
-                : StringComparer.Ordinal.Compare(left.SemanticPlanDigest, right.SemanticPlanDigest);
-        });
+        destination.MergeCloudReadonlyResults(source.CloudReadonlyResults);
     }
 
     private static IReadOnlyCollection<string> BuildFindings(

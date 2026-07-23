@@ -6,8 +6,6 @@ namespace AICopilot.AiGatewayService.AgentTasks;
 internal static class AgentTaskRunStateCheckpointCodec
 {
     private const string ContractVersion = "agent-run-state-checkpoint:v3";
-    private const string LegacyContractVersionV2 = "agent-run-state-checkpoint:v2";
-    private const string LegacyContractVersionV1 = "agent-run-state-checkpoint:v1";
     private const string EvidencePayloadContractVersion = "agent-node-evidence-payload:v1";
 
     public static string CaptureEvidencePayload(
@@ -28,18 +26,7 @@ internal static class AgentTaskRunStateCheckpointCodec
         AgentTaskRunState state,
         string canonicalJson)
     {
-        var payload = JsonSerializer.Deserialize<AgentNodeEvidencePayload>(
-            canonicalJson,
-            AgentRuntimeJson.Options)
-            ?? throw new InvalidOperationException("Node Evidence payload deserialized to null.");
-        if (!string.Equals(
-                payload.ContractVersion,
-                EvidencePayloadContractVersion,
-                StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException("Node Evidence payload contract version is unsupported.");
-        }
-
+        var payload = ReadEvidencePayload(canonicalJson);
         Restore(state, CanonicalJson.Canonicalize(payload.StateCheckpoint.GetRawText()));
         return CanonicalJson.Canonicalize(payload.DurableOutput.GetRawText());
     }
@@ -48,18 +35,7 @@ internal static class AgentTaskRunStateCheckpointCodec
         AgentTaskRunState state,
         string canonicalJson)
     {
-        var payload = JsonSerializer.Deserialize<AgentNodeEvidencePayload>(
-            canonicalJson,
-            AgentRuntimeJson.Options)
-            ?? throw new InvalidOperationException("Node Evidence payload deserialized to null.");
-        if (!string.Equals(
-                payload.ContractVersion,
-                EvidencePayloadContractVersion,
-                StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException("Node Evidence payload contract version is unsupported.");
-        }
-
+        var payload = ReadEvidencePayload(canonicalJson);
         var branchState = new AgentTaskRunState();
         Restore(branchState, CanonicalJson.Canonicalize(payload.StateCheckpoint.GetRawText()));
         Merge(state, branchState);
@@ -106,17 +82,6 @@ internal static class AgentTaskRunStateCheckpointCodec
             state.CloudReadonlyResults
                 .OrderBy(result => result.Intent, StringComparer.Ordinal)
                 .ThenBy(result => result.SemanticPlanDigest, StringComparer.Ordinal)
-                .Select(result => new AgentCloudReadonlyQueryCheckpoint(
-                    result.Intent,
-                    result.SemanticPlanDigest,
-                    result.Summary,
-                    result.Rows,
-                    result.SourceLabel,
-                    result.SourceMode,
-                    result.IsSimulation,
-                    result.RowCount,
-                    result.IsTruncated,
-                    result.QueriedAtUtc))
                 .ToArray(),
             state.ReasoningOutcome);
         return CanonicalJson.Canonicalize(JsonSerializer.Serialize(snapshot, AgentRuntimeJson.Options));
@@ -128,9 +93,7 @@ internal static class AgentTaskRunStateCheckpointCodec
             canonicalJson,
             AgentRuntimeJson.Options)
             ?? throw new InvalidOperationException("Evidence state checkpoint deserialized to null.");
-        if (!string.Equals(snapshot.ContractVersion, ContractVersion, StringComparison.Ordinal) &&
-            !string.Equals(snapshot.ContractVersion, LegacyContractVersionV2, StringComparison.Ordinal) &&
-            !string.Equals(snapshot.ContractVersion, LegacyContractVersionV1, StringComparison.Ordinal))
+        if (!string.Equals(snapshot.ContractVersion, ContractVersion, StringComparison.Ordinal))
         {
             throw new InvalidOperationException("Evidence state checkpoint contract version is unsupported.");
         }
@@ -152,31 +115,9 @@ internal static class AgentTaskRunStateCheckpointCodec
         state.RagResults.AddRange(snapshot.RagResults);
         state.CloudReadonlyResults.Clear();
         state.CloudReadonlyResults.AddRange((snapshot.CloudReadonlyResults ?? [])
-            .Select(result => new AgentCloudReadonlyQuerySnapshot(
-                result.Intent,
-                result.SemanticPlanDigest,
-                result.Summary,
-                result.Rows,
-                result.SourceLabel,
-                result.SourceMode,
-                result.IsSimulation,
-                result.RowCount,
-                result.IsTruncated,
-                result.QueriedAtUtc))
             .OrderBy(result => result.Intent, StringComparer.Ordinal)
             .ThenBy(result => result.SemanticPlanDigest, StringComparer.Ordinal));
-        state.CloudReadonlyRows = snapshot.CloudReadonlyRows;
-        state.CloudReadonlySourceMode = snapshot.CloudReadonlySourceMode;
-        state.CloudReadonlyIsSimulation = snapshot.CloudReadonlyIsSimulation;
-        state.CloudReadonlyRowCount = snapshot.CloudReadonlyRowCount;
-        state.CloudReadonlyIsTruncated = snapshot.CloudReadonlyIsTruncated;
-        state.CloudReadonlyQueriedAtUtc = snapshot.CloudReadonlyQueriedAtUtc;
-        state.CloudHealthAssessment = snapshot.CloudHealthAssessment;
-        state.ReasoningOutcome = snapshot.ReasoningOutcome;
-        state.ReportEvidenceSetDigest = snapshot.ReportEvidenceSetDigest;
-        state.ReportTruthClasses = snapshot.ReportTruthClasses ?? [];
-        state.ReportEvidenceAsOfUtc = snapshot.ReportEvidenceAsOfUtc;
-        state.BusinessQueryHash = snapshot.BusinessQueryHash;
+        RestoreScalarState(state, snapshot);
         state.CloudReadonlySummary = snapshot.CloudReadonlySourceMode is null
             ? null
             : $"Authorized evidence restored. sourceMode={snapshot.CloudReadonlySourceMode}; rows={snapshot.CloudReadonlyRowCount}; truncated={snapshot.CloudReadonlyIsTruncated.ToString().ToLowerInvariant()}.";
@@ -243,22 +184,7 @@ internal static class AgentTaskRunStateCheckpointCodec
         MergeCanonical(destination.Tables, source.Tables);
         MergeCanonical(destination.RagResults, source.RagResults);
 
-        foreach (var cloudResult in source.CloudReadonlyResults
-                     .OrderBy(item => item.Intent, StringComparer.Ordinal)
-                     .ThenBy(item => item.SemanticPlanDigest, StringComparer.Ordinal))
-        {
-            destination.CloudReadonlyResults.RemoveAll(item =>
-                string.Equals(item.Intent, cloudResult.Intent, StringComparison.Ordinal) &&
-                string.Equals(item.SemanticPlanDigest, cloudResult.SemanticPlanDigest, StringComparison.Ordinal));
-            destination.CloudReadonlyResults.Add(cloudResult);
-        }
-        destination.CloudReadonlyResults.Sort((left, right) =>
-        {
-            var comparison = StringComparer.Ordinal.Compare(left.Intent, right.Intent);
-            return comparison != 0
-                ? comparison
-                : StringComparer.Ordinal.Compare(left.SemanticPlanDigest, right.SemanticPlanDigest);
-        });
+        destination.MergeCloudReadonlyResults(source.CloudReadonlyResults);
 
         foreach (var query in source.BusinessQueryResults
                      .OrderBy(item => item.DataSourceId)
@@ -283,15 +209,11 @@ internal static class AgentTaskRunStateCheckpointCodec
         }
         else if (source.CloudReadonlySourceMode is not null)
         {
-            destination.CloudReadonlySummary = source.CloudReadonlySummary;
-            destination.CloudReadonlyRows = source.CloudReadonlyRows;
-            destination.CloudReadonlySourceLabel = source.CloudReadonlySourceLabel;
-            destination.CloudReadonlySourcePath = null;
-            destination.CloudReadonlySourceMode = source.CloudReadonlySourceMode;
-            destination.CloudReadonlyIsSimulation = source.CloudReadonlyIsSimulation;
-            destination.CloudReadonlyRowCount = source.CloudReadonlyRowCount;
-            destination.CloudReadonlyIsTruncated = source.CloudReadonlyIsTruncated;
-            destination.CloudReadonlyQueriedAtUtc = source.CloudReadonlyQueriedAtUtc;
+            ApplyCurrentCloudSnapshot(
+                destination, source.CloudReadonlySummary, source.CloudReadonlyRows,
+                source.CloudReadonlySourceLabel, source.CloudReadonlySourceMode,
+                source.CloudReadonlyIsSimulation, source.CloudReadonlyRowCount,
+                source.CloudReadonlyIsTruncated, source.CloudReadonlyQueriedAtUtc);
         }
 
         destination.BusinessQueryHash = source.BusinessQueryHash ?? destination.BusinessQueryHash;
@@ -303,6 +225,23 @@ internal static class AgentTaskRunStateCheckpointCodec
             destination.ReportTruthClasses = source.ReportTruthClasses;
             destination.ReportEvidenceAsOfUtc = source.ReportEvidenceAsOfUtc;
         }
+    }
+
+    private static AgentNodeEvidencePayload ReadEvidencePayload(string canonicalJson)
+    {
+        var payload = JsonSerializer.Deserialize<AgentNodeEvidencePayload>(
+            canonicalJson,
+            AgentRuntimeJson.Options)
+            ?? throw new InvalidOperationException("Node Evidence payload deserialized to null.");
+        if (!string.Equals(
+                payload.ContractVersion,
+                EvidencePayloadContractVersion,
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Node Evidence payload contract version is unsupported.");
+        }
+
+        return payload;
     }
 
     private static void MergeCanonical<T>(List<T> destination, IEnumerable<T> source)
@@ -326,15 +265,41 @@ internal static class AgentTaskRunStateCheckpointCodec
         AgentTaskRunState state,
         AgentCloudReadonlyQuerySnapshot snapshot)
     {
-        state.CloudReadonlySummary = snapshot.Summary;
-        state.CloudReadonlyRows = snapshot.Rows;
-        state.CloudReadonlySourceLabel = snapshot.SourceLabel;
-        state.CloudReadonlySourcePath = null;
-        state.CloudReadonlySourceMode = snapshot.SourceMode;
-        state.CloudReadonlyIsSimulation = snapshot.IsSimulation;
-        state.CloudReadonlyRowCount = snapshot.RowCount;
-        state.CloudReadonlyIsTruncated = snapshot.IsTruncated;
-        state.CloudReadonlyQueriedAtUtc = snapshot.QueriedAtUtc;
+        ApplyCurrentCloudSnapshot(
+            state, snapshot.Summary, snapshot.Rows, snapshot.SourceLabel, snapshot.SourceMode,
+            snapshot.IsSimulation, snapshot.RowCount, snapshot.IsTruncated, snapshot.QueriedAtUtc);
+    }
+
+    private static void ApplyCurrentCloudSnapshot(
+        AgentTaskRunState state,
+        string? summary,
+        IReadOnlyList<Dictionary<string, object?>> rows,
+        string? sourceLabel,
+        string? sourceMode,
+        bool isSimulation,
+        int rowCount,
+        bool isTruncated,
+        DateTimeOffset? queriedAtUtc)
+    {
+        (state.CloudReadonlySummary, state.CloudReadonlyRows, state.CloudReadonlySourceLabel, state.CloudReadonlySourcePath) =
+            (summary, rows, sourceLabel, null);
+        (state.CloudReadonlySourceMode, state.CloudReadonlyIsSimulation, state.CloudReadonlyRowCount) =
+            (sourceMode, isSimulation, rowCount);
+        (state.CloudReadonlyIsTruncated, state.CloudReadonlyQueriedAtUtc) = (isTruncated, queriedAtUtc);
+    }
+
+    private static void RestoreScalarState(
+        AgentTaskRunState state,
+        AgentTaskRunStateCheckpoint snapshot)
+    {
+        (state.CloudReadonlyRows, state.CloudReadonlySourceMode, state.CloudReadonlyIsSimulation) =
+            (snapshot.CloudReadonlyRows, snapshot.CloudReadonlySourceMode, snapshot.CloudReadonlyIsSimulation);
+        (state.CloudReadonlyRowCount, state.CloudReadonlyIsTruncated, state.CloudReadonlyQueriedAtUtc) =
+            (snapshot.CloudReadonlyRowCount, snapshot.CloudReadonlyIsTruncated, snapshot.CloudReadonlyQueriedAtUtc);
+        (state.CloudHealthAssessment, state.ReasoningOutcome, state.BusinessQueryHash) =
+            (snapshot.CloudHealthAssessment, snapshot.ReasoningOutcome, snapshot.BusinessQueryHash);
+        (state.ReportEvidenceSetDigest, state.ReportTruthClasses, state.ReportEvidenceAsOfUtc) =
+            (snapshot.ReportEvidenceSetDigest, snapshot.ReportTruthClasses ?? [], snapshot.ReportEvidenceAsOfUtc);
     }
 
     private sealed record AgentTaskRunStateCheckpoint(
@@ -355,7 +320,7 @@ internal static class AgentTaskRunStateCheckpointCodec
         string? ReportEvidenceSetDigest = null,
         IReadOnlyCollection<string>? ReportTruthClasses = null,
         DateTimeOffset? ReportEvidenceAsOfUtc = null,
-        IReadOnlyCollection<AgentCloudReadonlyQueryCheckpoint>? CloudReadonlyResults = null,
+        IReadOnlyCollection<AgentCloudReadonlyQuerySnapshot>? CloudReadonlyResults = null,
         AgentReasoningToolOutput? ReasoningOutcome = null);
 
     private sealed record AgentNodeEvidencePayload(
@@ -380,15 +345,4 @@ internal static class AgentTaskRunStateCheckpointCodec
         bool IsTruncated,
         Guid? ArtifactId);
 
-    private sealed record AgentCloudReadonlyQueryCheckpoint(
-        string Intent,
-        string SemanticPlanDigest,
-        string Summary,
-        IReadOnlyList<Dictionary<string, object?>> Rows,
-        string SourceLabel,
-        string SourceMode,
-        bool IsSimulation,
-        int RowCount,
-        bool IsTruncated,
-        DateTimeOffset QueriedAtUtc);
 }

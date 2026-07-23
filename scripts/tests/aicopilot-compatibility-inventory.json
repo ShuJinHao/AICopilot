@@ -63,7 +63,7 @@
         "M:AICopilot.AiGatewayService.Workflows.Executors.FinalAgentBuildExecutor.BuildHistoryBudgetFallbacks(System.Collections.Generic.IReadOnlyCollection{AICopilot.Core.AiGateway.Aggregates.Sessions.Message})"
       ],
       "AI-ORDINARY-INTENT-ROUTING-FALLBACK/routing-executor": [
-        "M:AICopilot.AiGatewayService.Workflows.Executors.IntentRoutingFallbackClassifier.TryClassify(System.String,System.String,System.Collections.Generic.List{AICopilot.AiGatewayService.Models.IntentResult}@)"
+        "M:AICopilot.AiGatewayService.Workflows.Executors.IntentRoutingFallbackClassifier.TryClassify(System.String,System.String,AICopilot.AiGatewayService.AgentTasks.AgentIntentRegistrySnapshot,System.Collections.Generic.List{AICopilot.AiGatewayService.Models.IntentResult}@)"
       ],
       "AI-ORDINARY-SQL-ALIAS-RESOLUTION/alias-columns": [
         "M:AICopilot.Services.CrossCutting.Sql.SqlAllowlistColumnInspector.ResolveAliasColumns(TableAlias,System.Collections.Generic.IReadOnlySet{System.String})"
@@ -110,7 +110,8 @@
       "T:AICopilot.AiGatewayService.Workflows.Executors.DeviceLogFollowUpIntentRewriter.SemanticFallbackFilter": "AI-ORDINARY-DEVICE-LOG-SEMANTIC-FALLBACK",
       "T:AICopilot.AiGatewayService.Workflows.Executors.DeviceLogFollowUpIntentRewriter.SemanticFallbackSort": "AI-ORDINARY-DEVICE-LOG-SEMANTIC-FALLBACK",
       "M:AICopilot.AiGatewayService.Workflows.Executors.FinalAgentBuildExecutor.BuildHistoryBudgetFallbacks(System.Collections.Generic.IReadOnlyCollection{AICopilot.Core.AiGateway.Aggregates.Sessions.Message})": "AI-ORDINARY-FINAL-AGENT-HISTORY-BUDGET-FALLBACK",
-      "M:AICopilot.AiGatewayService.Workflows.Executors.IntentRoutingExecutor.CreateFallbackIntents(System.String,System.String)": "AI-ORDINARY-INTENT-ROUTING-FALLBACK",
+      "M:AICopilot.AiGatewayService.Workflows.Executors.IntentRoutingExecutor.CreateFallbackIntents(System.String,System.String,AICopilot.AiGatewayService.AgentTasks.AgentIntentRegistrySnapshot)": "AI-ORDINARY-INTENT-ROUTING-FALLBACK",
+      "P:AICopilot.AiGatewayService.AgentTasks.AgentIntentRegistryV1.FallbackIntentCodes": "AI-ORDINARY-INTENT-ROUTING-FALLBACK",
       "T:AICopilot.AiGatewayService.Workflows.Executors.IntentRoutingFallbackClassifier": "AI-ORDINARY-INTENT-ROUTING-FALLBACK",
       "T:AICopilot.AiGatewayService.Workflows.Executors.IntentRoutingFallbackClassifier.SemanticFallbackPayload": "AI-ORDINARY-INTENT-ROUTING-FALLBACK",
       "T:AICopilot.AiGatewayService.Workflows.Executors.IntentRoutingFallbackClassifier.SemanticFallbackFilter": "AI-ORDINARY-INTENT-ROUTING-FALLBACK",
@@ -640,6 +641,7 @@
       ],
       "candidateEvidence": [
         { "path": "src/services/AICopilot.AiGatewayService/Workflows/Executors/IntentRoutingExecutor.cs", "contains": "CreateFallbackIntents" },
+        { "path": "src/services/AICopilot.AiGatewayService/AgentTasks/AgentIntentRegistry.cs", "contains": "FallbackIntentCodes" },
         { "path": "src/services/AICopilot.AiGatewayService/Workflows/Executors/IntentRoutingFallbackClassifier.cs", "contains": "Fallback" }
       ],
       "callerScans": [
@@ -741,38 +743,6 @@
       ],
       "replacement": "notApplicable: current widget payload transformation",
       "deletionCondition": "Delete only with a reviewed replacement for both production widget transformation calls."
-    },
-    {
-      "id": "AI-ORDINARY-WEB-PLAN-FALLBACK-STATE",
-      "disposition": "ordinaryAbstraction",
-      "decisionReason": "plannerFallbackReason is a current plan-status field rendered to the user, not a retired payload alias.",
-      "producer": {
-        "path": "src/vues/AICopilot.Web/src/composables/useAgentPlanPreview.ts",
-        "contains": "plannerFallbackReason?: string | null"
-      },
-      "consumers": [
-        {
-          "path": "src/vues/AICopilot.Web/src/components/chat/PlanDraftCard.vue",
-          "contains": "latestPlan?.plannerFallbackReason"
-        }
-      ],
-      "candidateEvidence": [
-        {
-          "path": "src/vues/AICopilot.Web/src/composables/useAgentPlanPreview.ts",
-          "contains": "plannerFallbackReason"
-        }
-      ],
-      "callerScans": [
-        {
-          "id": "plan-card-render",
-          "roots": ["src/vues/AICopilot.Web/src/components"],
-          "extensions": [".vue"],
-          "contains": "latestPlan?.plannerFallbackReason",
-          "excludePaths": []
-        }
-      ],
-      "replacement": "notApplicable: current plan runtime status",
-      "deletionCondition": "Delete only with a versioned plan contract change and migrated UI consumers."
     },
     {
       "id": "AI-ORDINARY-WEB-EVENT-SAFE-FALLBACK",

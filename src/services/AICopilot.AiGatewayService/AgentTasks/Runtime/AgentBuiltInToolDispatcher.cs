@@ -94,13 +94,9 @@ internal sealed class AgentBuiltInToolDispatcher(
             "summarize_business_query_result" => businessQueryTools.SummarizeBusinessQueryResult(state),
             "join_evidence" => AgentRuntimeEvidenceJoinTool.Join(plan, step, inputEvidence ?? []),
             "assess_cloud_health" => AgentCloudHealthAssessmentTool.Assess(plan, state, inputEvidence ?? []),
-            "generate_business_chart" => await artifactBuilder.GenerateChartDataAsync(workspace, step, state, cancellationToken),
-            "generate_chart_data" => await artifactBuilder.GenerateChartDataAsync(workspace, step, state, cancellationToken),
-            "generate_markdown_report" => await artifactBuilder.GenerateMarkdownReportAsync(task, workspace, step, state, cancellationToken),
-            "generate_html_report" => await artifactBuilder.GenerateHtmlReportAsync(task, workspace, step, state, cancellationToken),
-            "generate_pdf" => await artifactBuilder.GeneratePdfReportAsync(task, workspace, step, state, cancellationToken),
-            "generate_pptx" => await artifactBuilder.GeneratePptxReportAsync(task, workspace, step, state, cancellationToken),
-            "generate_xlsx" => await artifactBuilder.GenerateXlsxReportAsync(task, workspace, step, state, cancellationToken),
+            "generate_business_chart" or "generate_chart_data" or "generate_markdown_report" or
+                "generate_html_report" or "generate_pdf" or "generate_pptx" or "generate_xlsx" =>
+                await artifactBuilder.GenerateArtifactAsync(step.ToolCode, task, workspace, step, state, cancellationToken),
             _ => throw new InvalidOperationException($"Unsupported agent tool code: {step.ToolCode}")
         };
     }

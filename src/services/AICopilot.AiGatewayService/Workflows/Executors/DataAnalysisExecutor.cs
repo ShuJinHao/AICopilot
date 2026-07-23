@@ -21,12 +21,10 @@ public class DataAnalysisExecutor(
     public const string ExecutorId = nameof(DataAnalysisExecutor);
     public const string AnalysisIntentPrefix = "Analysis.";
 
-    internal static bool IsRelevant(
-        IEnumerable<IntentResult> intentResults,
-        AgentIntentRegistrySnapshot registry)
-    {
-        return intentResults.Any(intent => IsAnalysisIntent(intent, registry));
-    }
+    internal static bool IsRelevant(IEnumerable<IntentResult> intents, AgentIntentRegistrySnapshot registry) =>
+        AgentWorkflowIntentSelector.Any(
+            intents, registry, 0.6, null,
+            AgentIntentClass.CloudOnly, AgentIntentClass.GovernedExploration, AgentIntentClass.KnownButUnavailable);
 
     public async Task<BranchResult> ExecuteAsync(
         List<IntentResult> intentResults,
@@ -35,9 +33,9 @@ public class DataAnalysisExecutor(
         SessionRuntimeSnapshot? session,
         CancellationToken ct = default)
     {
-        var analysisIntents = intentResults
-            .Where(intent => IsAnalysisIntent(intent, registry))
-            .ToList();
+        var analysisIntents = AgentWorkflowIntentSelector.Select(
+            intentResults, registry, 0.6, null,
+            AgentIntentClass.CloudOnly, AgentIntentClass.GovernedExploration, AgentIntentClass.KnownButUnavailable);
 
         if (analysisIntents.Count == 0)
         {
@@ -95,22 +93,6 @@ public class DataAnalysisExecutor(
         }
 
         return BranchResult.FromDataAnalysis(output.ToString(), succeededEvidence);
-    }
-
-    private static bool IsAnalysisIntent(
-        IntentResult intent,
-        AgentIntentRegistrySnapshot registry)
-    {
-        if (intent.Confidence <= 0.6 ||
-            !registry.TryGet(intent.Intent, out var descriptor))
-        {
-            return false;
-        }
-
-        return descriptor.IntentClass is
-            AgentIntentClass.CloudOnly or
-            AgentIntentClass.GovernedExploration or
-            AgentIntentClass.KnownButUnavailable;
     }
 
     private static AnalysisDto BuildSemanticAnalysis(

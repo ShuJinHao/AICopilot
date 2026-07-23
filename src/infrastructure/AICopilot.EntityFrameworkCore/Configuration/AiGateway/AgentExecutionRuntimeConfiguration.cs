@@ -1,7 +1,9 @@
+using System.Linq.Expressions;
 using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.AiGateway.Runtime.AgentExecution;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using static AICopilot.EntityFrameworkCore.Configuration.AiGateway.AgentExecutionRuntimeConfigurationMapping;
 
 namespace AICopilot.EntityFrameworkCore.Configuration.AiGateway;
 
@@ -9,92 +11,40 @@ public sealed class AgentNodeRunConfiguration : IEntityTypeConfiguration<AgentNo
 {
     public void Configure(EntityTypeBuilder<AgentNodeRun> builder)
     {
-        builder.ToTable("agent_node_runs");
-        builder.HasKey(node => node.Id);
-        builder.Property(node => node.Id)
-            .HasConversion(id => id.Value, value => new AgentNodeRunId(value))
-            .HasColumnName("id");
-        builder.Property<uint>("RowVersion").IsRowVersion();
-        builder.Property(node => node.TaskId)
-            .HasConversion(id => id.Value, value => new AgentTaskId(value))
-            .HasColumnName("task_id");
-        builder.Property(node => node.RunAttemptId)
-            .HasConversion(id => id.Value, value => new AgentTaskRunAttemptId(value))
-            .HasColumnName("run_attempt_id");
-        builder.Property(node => node.QueueItemId)
-            .HasConversion(id => id.Value, value => new AgentTaskRunQueueItemId(value))
-            .HasColumnName("queue_item_id");
-        builder.Property(node => node.PlanDigest).HasMaxLength(128).HasColumnName("plan_digest");
-        builder.Property(node => node.ExecutionSnapshotDigest).HasMaxLength(128).HasColumnName("execution_snapshot_digest");
-        builder.Property(node => node.NodeId).HasMaxLength(160).HasColumnName("node_id");
-        builder.Property(node => node.NodeKind).HasMaxLength(80).HasColumnName("node_kind");
-        builder.Property(node => node.ToolCode).HasMaxLength(120).HasColumnName("tool_code");
-        builder.Property(node => node.DependenciesJson).HasColumnName("dependencies_json");
-        builder.Property(node => node.InputJson).HasColumnName("input_json");
-        builder.Property(node => node.InputDigest).HasMaxLength(128).HasColumnName("input_digest");
-        builder.Property(node => node.OutputSchemaRef).HasMaxLength(160).HasColumnName("output_schema_ref");
-        builder.Property(node => node.IsRequired).HasColumnName("is_required");
-        builder.Property(node => node.RequiresApproval).HasColumnName("requires_approval");
-        builder.Property(node => node.JoinPolicy).HasMaxLength(40).HasColumnName("join_policy");
-        builder.Property(node => node.SideEffectClass).HasConversion<string>().HasMaxLength(40).HasColumnName("side_effect_class");
-        builder.Property(node => node.Status).HasConversion<string>().HasMaxLength(40).HasColumnName("status");
-        builder.Property(node => node.AttemptNo).HasColumnName("attempt_no");
-        builder.Property(node => node.MaxAttempts).HasColumnName("max_attempts");
-        builder.Property(node => node.TimeoutSeconds).HasColumnName("timeout_seconds");
-        builder.Property(node => node.MaxToolCalls).HasColumnName("max_tool_calls");
-        builder.Property(node => node.MaxModelCalls).HasColumnName("max_model_calls");
-        builder.Property(node => node.MaxInputTokens).HasColumnName("max_input_tokens");
-        builder.Property(node => node.MaxOutputTokens).HasColumnName("max_output_tokens");
-        builder.Property(node => node.MaxCostAmount).HasPrecision(18, 6).HasColumnName("max_cost_amount");
-        builder.Property(node => node.MaxArtifactCount).HasColumnName("max_artifact_count");
-        builder.Property(node => node.MaxArtifactBytes).HasColumnName("max_artifact_bytes");
-        builder.Property(node => node.BudgetReservationStatus).HasConversion<string>().HasMaxLength(40).HasColumnName("budget_reservation_status");
-        builder.Property(node => node.BudgetReservationNodeFencingToken).HasColumnName("budget_reservation_node_fencing_token");
-        builder.Property(node => node.ReservedToolCalls).HasColumnName("reserved_tool_calls");
-        builder.Property(node => node.ReservedModelCalls).HasColumnName("reserved_model_calls");
-        builder.Property(node => node.ReservedInputTokens).HasColumnName("reserved_input_tokens");
-        builder.Property(node => node.ReservedOutputTokens).HasColumnName("reserved_output_tokens");
-        builder.Property(node => node.ReservedElapsedMilliseconds).HasColumnName("reserved_elapsed_milliseconds");
-        builder.Property(node => node.ReservedCostAmount).HasPrecision(18, 6).HasColumnName("reserved_cost_amount");
-        builder.Property(node => node.ReservedRetryCount).HasColumnName("reserved_retry_count");
-        builder.Property(node => node.ReservedArtifactCount).HasColumnName("reserved_artifact_count");
-        builder.Property(node => node.ReservedArtifactBytes).HasColumnName("reserved_artifact_bytes");
-        builder.Property(node => node.TaskFencingToken).HasColumnName("task_fencing_token");
-        builder.Property(node => node.NodeFencingToken).HasColumnName("node_fencing_token");
-        builder.Property(node => node.IdempotencyGeneration).HasColumnName("idempotency_generation");
-        builder.Property(node => node.LeaseId).HasColumnName("lease_id");
-        builder.Property(node => node.LeaseOwner).HasMaxLength(120).HasColumnName("lease_owner");
-        builder.Property(node => node.LeaseExpiresAt).HasColumnType("timestamp with time zone").HasColumnName("lease_expires_at");
-        builder.Property(node => node.IdempotencyKeyHash).HasMaxLength(128).HasColumnName("idempotency_key_hash");
-        builder.Property(node => node.ProviderOperationCode).HasMaxLength(160).HasColumnName("provider_operation_code");
-        builder.Property(node => node.ProviderReceiptHash).HasMaxLength(128).HasColumnName("provider_receipt_hash");
-        builder.Property(node => node.ReconciliationPolicy).HasMaxLength(120).HasColumnName("reconciliation_policy");
-        builder.Property(node => node.LastConfirmedStage).HasMaxLength(120).HasColumnName("last_confirmed_stage");
-        builder.Property(node => node.IntegrityStatus).HasMaxLength(80).HasColumnName("integrity_status");
-        builder.Property(node => node.ReconciliationFencingToken).HasColumnName("reconciliation_fencing_token");
-        builder.Property(node => node.ReconciliationAttemptNo).HasColumnName("reconciliation_attempt_no");
-        builder.Property(node => node.ReconciliationLeaseId).HasColumnName("reconciliation_lease_id");
-        builder.Property(node => node.ReconciliationOwner).HasMaxLength(120).HasColumnName("reconciliation_owner");
-        builder.Property(node => node.ReconciliationLeaseExpiresAt).HasColumnType("timestamp with time zone").HasColumnName("reconciliation_lease_expires_at");
-        builder.Property(node => node.ReconciliationDeadlineAt).HasColumnType("timestamp with time zone").HasColumnName("reconciliation_deadline_at");
-        builder.Property(node => node.RequiresManualResolution).HasColumnName("requires_manual_resolution");
-        builder.Property(node => node.ReconciliationResolutionCode).HasMaxLength(120).HasColumnName("reconciliation_resolution_code");
-        builder.Property(node => node.ReconciliationDecisionDigest).HasMaxLength(128).HasColumnName("reconciliation_decision_digest");
-        builder.Property(node => node.ReconciledAt).HasColumnType("timestamp with time zone").HasColumnName("reconciled_at");
-        builder.Property(node => node.OutputDigest).HasMaxLength(128).HasColumnName("output_digest");
+        ConfigureEntity(builder, "agent_node_runs", node => node.Id, id => id.Value, value => new AgentNodeRunId(value));
+        MapGuidId(builder, node => node.TaskId, id => id.Value, value => new AgentTaskId(value), "task_id");
+        MapGuidId(builder, node => node.RunAttemptId, id => id.Value, value => new AgentTaskRunAttemptId(value), "run_attempt_id");
+        MapGuidId(builder, node => node.QueueItemId, id => id.Value, value => new AgentTaskRunQueueItemId(value), "queue_item_id");
+        MapTextColumns(builder,
+            (nameof(AgentNodeRun.PlanDigest), "plan_digest", 128), (nameof(AgentNodeRun.ExecutionSnapshotDigest), "execution_snapshot_digest", 128),
+            (nameof(AgentNodeRun.NodeId), "node_id", 160), (nameof(AgentNodeRun.NodeKind), "node_kind", 80), (nameof(AgentNodeRun.ToolCode), "tool_code", 120), (nameof(AgentNodeRun.InputDigest), "input_digest", 128),
+            (nameof(AgentNodeRun.OutputSchemaRef), "output_schema_ref", 160), (nameof(AgentNodeRun.JoinPolicy), "join_policy", 40), (nameof(AgentNodeRun.IdempotencyKeyHash), "idempotency_key_hash", 128), (nameof(AgentNodeRun.LeaseOwner), "lease_owner", 120),
+            (nameof(AgentNodeRun.ProviderOperationCode), "provider_operation_code", 160), (nameof(AgentNodeRun.ProviderReceiptHash), "provider_receipt_hash", 128), (nameof(AgentNodeRun.ReconciliationPolicy), "reconciliation_policy", 120), (nameof(AgentNodeRun.LastConfirmedStage), "last_confirmed_stage", 120),
+            (nameof(AgentNodeRun.IntegrityStatus), "integrity_status", 80), (nameof(AgentNodeRun.ReconciliationOwner), "reconciliation_owner", 120), (nameof(AgentNodeRun.ReconciliationResolutionCode), "reconciliation_resolution_code", 120), (nameof(AgentNodeRun.ReconciliationDecisionDigest), "reconciliation_decision_digest", 128),
+            (nameof(AgentNodeRun.OutputDigest), "output_digest", 128), (nameof(AgentNodeRun.EvidenceSetDigest), "evidence_set_digest", 128), (nameof(AgentNodeRun.FailureCode), "failure_code", 120), (nameof(AgentNodeRun.SafeMessage), "safe_message", 2000));
+        MapColumns(builder,
+            (nameof(AgentNodeRun.DependenciesJson), "dependencies_json"), (nameof(AgentNodeRun.InputJson), "input_json"), (nameof(AgentNodeRun.IsRequired), "is_required"), (nameof(AgentNodeRun.RequiresApproval), "requires_approval"),
+            (nameof(AgentNodeRun.AttemptNo), "attempt_no"), (nameof(AgentNodeRun.MaxAttempts), "max_attempts"), (nameof(AgentNodeRun.TimeoutSeconds), "timeout_seconds"), (nameof(AgentNodeRun.MaxToolCalls), "max_tool_calls"), (nameof(AgentNodeRun.MaxModelCalls), "max_model_calls"), (nameof(AgentNodeRun.MaxInputTokens), "max_input_tokens"),
+            (nameof(AgentNodeRun.MaxOutputTokens), "max_output_tokens"), (nameof(AgentNodeRun.MaxArtifactCount), "max_artifact_count"), (nameof(AgentNodeRun.MaxArtifactBytes), "max_artifact_bytes"), (nameof(AgentNodeRun.BudgetReservationNodeFencingToken), "budget_reservation_node_fencing_token"), (nameof(AgentNodeRun.ReservedToolCalls), "reserved_tool_calls"), (nameof(AgentNodeRun.ReservedModelCalls), "reserved_model_calls"),
+            (nameof(AgentNodeRun.ReservedInputTokens), "reserved_input_tokens"), (nameof(AgentNodeRun.ReservedOutputTokens), "reserved_output_tokens"), (nameof(AgentNodeRun.ReservedElapsedMilliseconds), "reserved_elapsed_milliseconds"), (nameof(AgentNodeRun.ReservedRetryCount), "reserved_retry_count"), (nameof(AgentNodeRun.ReservedArtifactCount), "reserved_artifact_count"), (nameof(AgentNodeRun.ReservedArtifactBytes), "reserved_artifact_bytes"),
+            (nameof(AgentNodeRun.TaskFencingToken), "task_fencing_token"), (nameof(AgentNodeRun.NodeFencingToken), "node_fencing_token"), (nameof(AgentNodeRun.IdempotencyGeneration), "idempotency_generation"), (nameof(AgentNodeRun.LeaseId), "lease_id"), (nameof(AgentNodeRun.ReconciliationFencingToken), "reconciliation_fencing_token"), (nameof(AgentNodeRun.ReconciliationAttemptNo), "reconciliation_attempt_no"),
+            (nameof(AgentNodeRun.ReconciliationLeaseId), "reconciliation_lease_id"), (nameof(AgentNodeRun.RequiresManualResolution), "requires_manual_resolution"));
+        MapEnumColumns(builder,
+            (nameof(AgentNodeRun.SideEffectClass), "side_effect_class"), (nameof(AgentNodeRun.Status), "status"),
+            (nameof(AgentNodeRun.BudgetReservationStatus), "budget_reservation_status"));
+        MapDecimalColumns(builder,
+            (nameof(AgentNodeRun.MaxCostAmount), "max_cost_amount"), (nameof(AgentNodeRun.ReservedCostAmount), "reserved_cost_amount"));
+        MapTimestampColumns(builder,
+            (nameof(AgentNodeRun.LeaseExpiresAt), "lease_expires_at"), (nameof(AgentNodeRun.ReconciliationLeaseExpiresAt), "reconciliation_lease_expires_at"),
+            (nameof(AgentNodeRun.ReconciliationDeadlineAt), "reconciliation_deadline_at"), (nameof(AgentNodeRun.ReconciledAt), "reconciled_at"),
+            (nameof(AgentNodeRun.NextAttemptAt), "next_attempt_at"), (nameof(AgentNodeRun.StartedAt), "started_at"),
+            (nameof(AgentNodeRun.CompletedAt), "completed_at"), (nameof(AgentNodeRun.CreatedAt), "created_at"),
+            (nameof(AgentNodeRun.UpdatedAt), "updated_at"));
         builder.Property(node => node.EvidenceId)
             .HasConversion(
                 id => id.HasValue ? id.Value.Value : (Guid?)null,
                 value => value.HasValue ? new AgentEvidenceRecordId(value.Value) : null)
             .HasColumnName("evidence_id");
-        builder.Property(node => node.EvidenceSetDigest).HasMaxLength(128).HasColumnName("evidence_set_digest");
-        builder.Property(node => node.FailureCode).HasMaxLength(120).HasColumnName("failure_code");
-        builder.Property(node => node.SafeMessage).HasMaxLength(2000).HasColumnName("safe_message");
-        builder.Property(node => node.NextAttemptAt).HasColumnType("timestamp with time zone").HasColumnName("next_attempt_at");
-        builder.Property(node => node.StartedAt).HasColumnType("timestamp with time zone").HasColumnName("started_at");
-        builder.Property(node => node.CompletedAt).HasColumnType("timestamp with time zone").HasColumnName("completed_at");
-        builder.Property(node => node.CreatedAt).HasColumnType("timestamp with time zone").HasColumnName("created_at");
-        builder.Property(node => node.UpdatedAt).HasColumnType("timestamp with time zone").HasColumnName("updated_at");
 
         builder.HasIndex(node => new { node.RunAttemptId, node.NodeId })
             .IsUnique()
@@ -105,10 +55,7 @@ public sealed class AgentNodeRunConfiguration : IEntityTypeConfiguration<AgentNo
             .HasDatabaseName("ix_agent_node_runs_lease_expires_at");
         builder.HasIndex(node => new { node.Status, node.NextAttemptAt, node.ReconciliationLeaseExpiresAt })
             .HasDatabaseName("ix_agent_node_runs_reconciliation");
-        builder.HasIndex(node => node.EvidenceId)
-            .IsUnique()
-            .HasFilter("evidence_id IS NOT NULL")
-            .HasDatabaseName("ux_agent_node_runs_evidence_id");
+        MapUniqueFilteredIndex(builder, node => node.EvidenceId, "evidence_id IS NOT NULL", "ux_agent_node_runs_evidence_id");
     }
 }
 
@@ -116,44 +63,26 @@ public sealed class AgentEvidenceRecordConfiguration : IEntityTypeConfiguration<
 {
     public void Configure(EntityTypeBuilder<AgentEvidenceRecord> builder)
     {
-        builder.ToTable("agent_evidence_records");
-        builder.HasKey(evidence => evidence.Id);
-        builder.Property(evidence => evidence.Id)
-            .HasConversion(id => id.Value, value => new AgentEvidenceRecordId(value))
-            .HasColumnName("id");
-        builder.Property<uint>("RowVersion").IsRowVersion();
-        builder.Property(evidence => evidence.TenantId).HasColumnName("tenant_id");
-        builder.Property(evidence => evidence.UserId).HasColumnName("user_id");
-        builder.Property(evidence => evidence.SessionId)
-            .HasConversion(id => id.Value, value => new SessionId(value))
-            .HasColumnName("session_id");
-        builder.Property(evidence => evidence.TaskId)
-            .HasConversion(id => id.Value, value => new AgentTaskId(value))
-            .HasColumnName("task_id");
-        builder.Property(evidence => evidence.RunAttemptId)
-            .HasConversion(id => id.Value, value => new AgentTaskRunAttemptId(value))
-            .HasColumnName("run_attempt_id");
-        builder.Property(evidence => evidence.NodeRunId)
-            .HasConversion(id => id.Value, value => new AgentNodeRunId(value))
-            .HasColumnName("node_run_id");
-        builder.Property(evidence => evidence.NodeId).HasMaxLength(160).HasColumnName("node_id");
-        builder.Property(evidence => evidence.EvidenceKind).HasConversion<string>().HasMaxLength(40).HasColumnName("evidence_kind");
-        builder.Property(evidence => evidence.TruthClass).HasConversion<string>().HasMaxLength(40).HasColumnName("truth_class");
-        builder.Property(evidence => evidence.StorageMode).HasConversion<string>().HasMaxLength(40).HasColumnName("storage_mode");
-        builder.Property(evidence => evidence.CanonicalEnvelopeJson).HasColumnName("canonical_envelope_json");
-        builder.Property(evidence => evidence.EnvelopeDigest).HasMaxLength(128).HasColumnName("envelope_digest");
-        builder.Property(evidence => evidence.OutputDigest).HasMaxLength(128).HasColumnName("output_digest");
-        builder.Property(evidence => evidence.InlinePayloadJson).HasColumnName("inline_payload_json");
-        builder.Property(evidence => evidence.PayloadRef).HasMaxLength(400).HasColumnName("payload_ref");
-        builder.Property(evidence => evidence.MediaType).HasMaxLength(160).HasColumnName("media_type");
-        builder.Property(evidence => evidence.ByteLength).HasColumnName("byte_length");
-        builder.Property(evidence => evidence.PayloadSha256).HasMaxLength(128).HasColumnName("payload_sha256");
-        builder.Property(evidence => evidence.AllowedConsumerScopeJson).HasColumnName("allowed_consumer_scope_json");
-        builder.Property(evidence => evidence.TaskFencingToken).HasColumnName("task_fencing_token");
-        builder.Property(evidence => evidence.NodeFencingToken).HasColumnName("node_fencing_token");
-        builder.Property(evidence => evidence.IsRevoked).HasColumnName("is_revoked");
-        builder.Property(evidence => evidence.CreatedAt).HasColumnType("timestamp with time zone").HasColumnName("created_at");
-        builder.Property(evidence => evidence.ExpiresAt).HasColumnType("timestamp with time zone").HasColumnName("expires_at");
+        ConfigureEntity(builder, "agent_evidence_records", evidence => evidence.Id, id => id.Value, value => new AgentEvidenceRecordId(value));
+        MapColumns(builder,
+            (nameof(AgentEvidenceRecord.TenantId), "tenant_id"), (nameof(AgentEvidenceRecord.UserId), "user_id"),
+            (nameof(AgentEvidenceRecord.CanonicalEnvelopeJson), "canonical_envelope_json"), (nameof(AgentEvidenceRecord.InlinePayloadJson), "inline_payload_json"),
+            (nameof(AgentEvidenceRecord.ByteLength), "byte_length"), (nameof(AgentEvidenceRecord.AllowedConsumerScopeJson), "allowed_consumer_scope_json"),
+            (nameof(AgentEvidenceRecord.TaskFencingToken), "task_fencing_token"), (nameof(AgentEvidenceRecord.NodeFencingToken), "node_fencing_token"),
+            (nameof(AgentEvidenceRecord.IsRevoked), "is_revoked"));
+        MapGuidId(builder, evidence => evidence.SessionId, id => id.Value, value => new SessionId(value), "session_id");
+        MapGuidId(builder, evidence => evidence.TaskId, id => id.Value, value => new AgentTaskId(value), "task_id");
+        MapGuidId(builder, evidence => evidence.RunAttemptId, id => id.Value, value => new AgentTaskRunAttemptId(value), "run_attempt_id");
+        MapGuidId(builder, evidence => evidence.NodeRunId, id => id.Value, value => new AgentNodeRunId(value), "node_run_id");
+        MapTextColumns(builder,
+            (nameof(AgentEvidenceRecord.NodeId), "node_id", 160), (nameof(AgentEvidenceRecord.EnvelopeDigest), "envelope_digest", 128),
+            (nameof(AgentEvidenceRecord.OutputDigest), "output_digest", 128), (nameof(AgentEvidenceRecord.PayloadRef), "payload_ref", 400),
+            (nameof(AgentEvidenceRecord.MediaType), "media_type", 160), (nameof(AgentEvidenceRecord.PayloadSha256), "payload_sha256", 128));
+        MapEnumColumns(builder,
+            (nameof(AgentEvidenceRecord.EvidenceKind), "evidence_kind"), (nameof(AgentEvidenceRecord.TruthClass), "truth_class"),
+            (nameof(AgentEvidenceRecord.StorageMode), "storage_mode"));
+        MapTimestampColumns(builder,
+            (nameof(AgentEvidenceRecord.CreatedAt), "created_at"), (nameof(AgentEvidenceRecord.ExpiresAt), "expires_at"));
 
         builder.HasIndex(evidence => new { evidence.NodeRunId, evidence.NodeFencingToken })
             .IsUnique()
@@ -169,39 +98,132 @@ public sealed class AgentRunUsageLedgerEntryConfiguration : IEntityTypeConfigura
 {
     public void Configure(EntityTypeBuilder<AgentRunUsageLedgerEntry> builder)
     {
-        builder.ToTable("agent_run_usage_ledger");
-        builder.HasKey(usage => usage.Id);
-        builder.Property(usage => usage.Id)
-            .HasConversion(id => id.Value, value => new AgentRunUsageLedgerEntryId(value))
-            .HasColumnName("id");
-        builder.Property<uint>("RowVersion").IsRowVersion();
-        builder.Property(usage => usage.TaskId)
-            .HasConversion(id => id.Value, value => new AgentTaskId(value))
-            .HasColumnName("task_id");
-        builder.Property(usage => usage.RunAttemptId)
-            .HasConversion(id => id.Value, value => new AgentTaskRunAttemptId(value))
-            .HasColumnName("run_attempt_id");
-        builder.Property(usage => usage.NodeRunId)
-            .HasConversion(id => id.Value, value => new AgentNodeRunId(value))
-            .HasColumnName("node_run_id");
-        builder.Property(usage => usage.TaskFencingToken).HasColumnName("task_fencing_token");
-        builder.Property(usage => usage.NodeFencingToken).HasColumnName("node_fencing_token");
-        builder.Property(usage => usage.InputTokens).HasColumnName("input_tokens");
-        builder.Property(usage => usage.OutputTokens).HasColumnName("output_tokens");
-        builder.Property(usage => usage.ModelCalls).HasColumnName("model_calls");
-        builder.Property(usage => usage.ToolCalls).HasColumnName("tool_calls");
-        builder.Property(usage => usage.ElapsedMilliseconds).HasColumnName("elapsed_milliseconds");
-        builder.Property(usage => usage.CostAmount).HasPrecision(18, 6).HasColumnName("cost_amount");
-        builder.Property(usage => usage.ArtifactCount).HasColumnName("artifact_count");
-        builder.Property(usage => usage.ArtifactBytes).HasColumnName("artifact_bytes");
-        builder.Property(usage => usage.CostCurrency).HasMaxLength(8).HasColumnName("cost_currency");
-        builder.Property(usage => usage.CorrelationHash).HasMaxLength(128).HasColumnName("correlation_hash");
-        builder.Property(usage => usage.CreatedAt).HasColumnType("timestamp with time zone").HasColumnName("created_at");
+        ConfigureEntity(builder, "agent_run_usage_ledger", usage => usage.Id, id => id.Value, value => new AgentRunUsageLedgerEntryId(value));
+        MapGuidId(builder, usage => usage.TaskId, id => id.Value, value => new AgentTaskId(value), "task_id");
+        MapGuidId(builder, usage => usage.RunAttemptId, id => id.Value, value => new AgentTaskRunAttemptId(value), "run_attempt_id");
+        MapGuidId(builder, usage => usage.NodeRunId, id => id.Value, value => new AgentNodeRunId(value), "node_run_id");
+        MapColumns(builder,
+            (nameof(AgentRunUsageLedgerEntry.TaskFencingToken), "task_fencing_token"), (nameof(AgentRunUsageLedgerEntry.NodeFencingToken), "node_fencing_token"),
+            (nameof(AgentRunUsageLedgerEntry.InputTokens), "input_tokens"), (nameof(AgentRunUsageLedgerEntry.OutputTokens), "output_tokens"),
+            (nameof(AgentRunUsageLedgerEntry.ModelCalls), "model_calls"), (nameof(AgentRunUsageLedgerEntry.ToolCalls), "tool_calls"),
+            (nameof(AgentRunUsageLedgerEntry.ElapsedMilliseconds), "elapsed_milliseconds"), (nameof(AgentRunUsageLedgerEntry.ArtifactCount), "artifact_count"),
+            (nameof(AgentRunUsageLedgerEntry.ArtifactBytes), "artifact_bytes"));
+        MapDecimalColumns(builder, (nameof(AgentRunUsageLedgerEntry.CostAmount), "cost_amount"));
+        MapTextColumns(builder,
+            (nameof(AgentRunUsageLedgerEntry.CostCurrency), "cost_currency", 8), (nameof(AgentRunUsageLedgerEntry.CorrelationHash), "correlation_hash", 128));
+        MapTimestampColumns(builder, (nameof(AgentRunUsageLedgerEntry.CreatedAt), "created_at"));
 
         builder.HasIndex(usage => new { usage.NodeRunId, usage.NodeFencingToken })
             .IsUnique()
             .HasDatabaseName("ux_agent_run_usage_node_fence");
         builder.HasIndex(usage => new { usage.TaskId, usage.RunAttemptId })
             .HasDatabaseName("ix_agent_run_usage_attempt");
+    }
+}
+
+internal static class AgentExecutionRuntimeConfigurationMapping
+{
+    public static void ConfigureEntity<TEntity, TId>(
+        EntityTypeBuilder<TEntity> builder,
+        string table,
+        Expression<Func<TEntity, TId>> idProperty,
+        Expression<Func<TId, Guid>> toProvider,
+        Expression<Func<Guid, TId>> fromProvider,
+        bool usesRowVersion = true)
+        where TEntity : class
+    {
+        builder.ToTable(table);
+        builder.HasKey(idProperty);
+        builder.Property(idProperty).HasConversion(toProvider, fromProvider).HasColumnName("id");
+        if (usesRowVersion)
+        {
+            builder.Property<uint>("RowVersion").IsRowVersion();
+        }
+    }
+
+    public static void MapGuidId<TEntity, TId>(
+        EntityTypeBuilder<TEntity> builder,
+        Expression<Func<TEntity, TId>> property,
+        Expression<Func<TId, Guid>> toProvider,
+        Expression<Func<Guid, TId>> fromProvider,
+        string column)
+        where TEntity : class =>
+        builder.Property(property).HasConversion(toProvider, fromProvider).HasColumnName(column);
+
+    public static void MapLeaseColumns<TEntity>(
+        EntityTypeBuilder<TEntity> builder,
+        (string Property, string Column) leaseId,
+        (string Property, string Column) leaseOwner,
+        (string Property, string Column) leaseExpiresAt,
+        (string Property, string Column) fencingToken)
+        where TEntity : class
+    {
+        builder.Property(leaseId.Property).HasColumnName(leaseId.Column);
+        builder.Property(leaseOwner.Property).HasMaxLength(120).HasColumnName(leaseOwner.Column);
+        builder.Property(leaseExpiresAt.Property).HasColumnType("timestamp with time zone").HasColumnName(leaseExpiresAt.Column);
+        builder.Property(fencingToken.Property).IsRequired().HasDefaultValue(0L).HasColumnName(fencingToken.Column);
+    }
+
+    public static void MapUniqueFilteredIndex<TEntity, TProperty>(
+        EntityTypeBuilder<TEntity> builder,
+        Expression<Func<TEntity, TProperty>> property,
+        string filter,
+        string databaseName)
+        where TEntity : class =>
+        builder.HasIndex(property).IsUnique().HasFilter(filter).HasDatabaseName(databaseName);
+
+    public static void MapColumns<TEntity>(
+        EntityTypeBuilder<TEntity> builder,
+        params (string Property, string Column)[] mappings)
+        where TEntity : class
+    {
+        foreach (var mapping in mappings)
+        {
+            builder.Property(mapping.Property).HasColumnName(mapping.Column);
+        }
+    }
+
+    public static void MapTextColumns<TEntity>(
+        EntityTypeBuilder<TEntity> builder,
+        params (string Property, string Column, int MaxLength)[] mappings)
+        where TEntity : class
+    {
+        foreach (var mapping in mappings)
+        {
+            builder.Property(mapping.Property).HasMaxLength(mapping.MaxLength).HasColumnName(mapping.Column);
+        }
+    }
+
+    public static void MapEnumColumns<TEntity>(
+        EntityTypeBuilder<TEntity> builder,
+        params (string Property, string Column)[] mappings)
+        where TEntity : class
+    {
+        foreach (var mapping in mappings)
+        {
+            builder.Property(mapping.Property).HasConversion<string>().HasMaxLength(40).HasColumnName(mapping.Column);
+        }
+    }
+
+    public static void MapDecimalColumns<TEntity>(
+        EntityTypeBuilder<TEntity> builder,
+        params (string Property, string Column)[] mappings)
+        where TEntity : class
+    {
+        foreach (var mapping in mappings)
+        {
+            builder.Property(mapping.Property).HasPrecision(18, 6).HasColumnName(mapping.Column);
+        }
+    }
+
+    public static void MapTimestampColumns<TEntity>(
+        EntityTypeBuilder<TEntity> builder,
+        params (string Property, string Column)[] mappings)
+        where TEntity : class
+    {
+        foreach (var mapping in mappings)
+        {
+            builder.Property(mapping.Property).HasColumnType("timestamp with time zone").HasColumnName(mapping.Column);
+        }
     }
 }

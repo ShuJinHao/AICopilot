@@ -92,7 +92,8 @@ public sealed class AgentTaskRunAttempt : BaseEntity<AgentTaskRunAttemptId>
 
     public long BudgetReservedElapsedMilliseconds { get; private set; }
 
-    public decimal BudgetReservedCostAmount { get; private set; }
+    private decimal _budgetReservedCostAmount;
+    public decimal BudgetReservedCostAmount => _budgetReservedCostAmount;
 
     public int BudgetReservedRetries { get; private set; }
 
@@ -100,23 +101,24 @@ public sealed class AgentTaskRunAttempt : BaseEntity<AgentTaskRunAttemptId>
 
     public long BudgetReservedArtifactBytes { get; private set; }
 
-    public int BudgetConsumedToolCalls { get; private set; }
-
-    public int BudgetConsumedModelCalls { get; private set; }
-
-    public int BudgetConsumedInputTokens { get; private set; }
-
-    public int BudgetConsumedOutputTokens { get; private set; }
-
-    public long BudgetConsumedElapsedMilliseconds { get; private set; }
-
-    public decimal BudgetConsumedCostAmount { get; private set; }
-
-    public int BudgetConsumedRetries { get; private set; }
-
-    public int BudgetConsumedArtifactCount { get; private set; }
-
-    public long BudgetConsumedArtifactBytes { get; private set; }
+    private int _budgetConsumedToolCalls;
+    public int BudgetConsumedToolCalls => _budgetConsumedToolCalls;
+    private int _budgetConsumedModelCalls;
+    public int BudgetConsumedModelCalls => _budgetConsumedModelCalls;
+    private int _budgetConsumedInputTokens;
+    public int BudgetConsumedInputTokens => _budgetConsumedInputTokens;
+    private int _budgetConsumedOutputTokens;
+    public int BudgetConsumedOutputTokens => _budgetConsumedOutputTokens;
+    private long _budgetConsumedElapsedMilliseconds;
+    public long BudgetConsumedElapsedMilliseconds => _budgetConsumedElapsedMilliseconds;
+    private decimal _budgetConsumedCostAmount;
+    public decimal BudgetConsumedCostAmount => _budgetConsumedCostAmount;
+    private int _budgetConsumedRetries;
+    public int BudgetConsumedRetries => _budgetConsumedRetries;
+    private int _budgetConsumedArtifactCount;
+    public int BudgetConsumedArtifactCount => _budgetConsumedArtifactCount;
+    private long _budgetConsumedArtifactBytes;
+    public long BudgetConsumedArtifactBytes => _budgetConsumedArtifactBytes;
 
     public bool IsTerminal => Status is AgentTaskRunAttemptStatus.Succeeded
         or AgentTaskRunAttemptStatus.Failed
@@ -191,15 +193,7 @@ public sealed class AgentTaskRunAttempt : BaseEntity<AgentTaskRunAttemptId>
             return result;
         }
 
-        BudgetReservedToolCalls = checked(BudgetReservedToolCalls + reservation.ToolCalls);
-        BudgetReservedModelCalls = checked(BudgetReservedModelCalls + reservation.ModelCalls);
-        BudgetReservedInputTokens = checked(BudgetReservedInputTokens + reservation.InputTokens);
-        BudgetReservedOutputTokens = checked(BudgetReservedOutputTokens + reservation.OutputTokens);
-        BudgetReservedElapsedMilliseconds = checked(BudgetReservedElapsedMilliseconds + reservation.ElapsedMilliseconds);
-        BudgetReservedCostAmount += reservation.CostAmount;
-        BudgetReservedRetries = checked(BudgetReservedRetries + reservation.RetryCount);
-        BudgetReservedArtifactCount = checked(BudgetReservedArtifactCount + reservation.ArtifactCount);
-        BudgetReservedArtifactBytes = checked(BudgetReservedArtifactBytes + reservation.ArtifactBytes);
+        SetReservedBudget(checked(ReservedBudget + reservation));
         return AgentRunBudgetReservationResult.Reserved;
     }
 
@@ -216,17 +210,9 @@ public sealed class AgentTaskRunAttempt : BaseEntity<AgentTaskRunAttemptId>
             return false;
         }
 
-        RemoveReservation(reservation);
+        SetReservedBudget(checked(ReservedBudget - reservation));
         var charge = conservativelyConsumed ? reservation : actual;
-        BudgetConsumedToolCalls = checked(BudgetConsumedToolCalls + charge.ToolCalls);
-        BudgetConsumedModelCalls = checked(BudgetConsumedModelCalls + charge.ModelCalls);
-        BudgetConsumedInputTokens = checked(BudgetConsumedInputTokens + charge.InputTokens);
-        BudgetConsumedOutputTokens = checked(BudgetConsumedOutputTokens + charge.OutputTokens);
-        BudgetConsumedElapsedMilliseconds = checked(BudgetConsumedElapsedMilliseconds + charge.ElapsedMilliseconds);
-        BudgetConsumedCostAmount += charge.CostAmount;
-        BudgetConsumedRetries = checked(BudgetConsumedRetries + charge.RetryCount);
-        BudgetConsumedArtifactCount = checked(BudgetConsumedArtifactCount + charge.ArtifactCount);
-        BudgetConsumedArtifactBytes = checked(BudgetConsumedArtifactBytes + charge.ArtifactBytes);
+        SetConsumedBudget(checked(ConsumedBudget + charge));
         return true;
     }
 
@@ -417,44 +403,36 @@ public sealed class AgentTaskRunAttempt : BaseEntity<AgentTaskRunAttemptId>
 
     private bool HasReserved(AgentRunBudgetCharge reservation)
     {
-        return BudgetReservedToolCalls >= reservation.ToolCalls &&
-               BudgetReservedModelCalls >= reservation.ModelCalls &&
-               BudgetReservedInputTokens >= reservation.InputTokens &&
-               BudgetReservedOutputTokens >= reservation.OutputTokens &&
-               BudgetReservedElapsedMilliseconds >= reservation.ElapsedMilliseconds &&
-               BudgetReservedCostAmount >= reservation.CostAmount &&
-               BudgetReservedRetries >= reservation.RetryCount &&
-               BudgetReservedArtifactCount >= reservation.ArtifactCount &&
-               BudgetReservedArtifactBytes >= reservation.ArtifactBytes;
+        return reservation.IsWithin(ReservedBudget);
     }
 
-    private void RemoveReservation(AgentRunBudgetCharge reservation)
+    private AgentRunBudgetCharge ReservedBudget => new(BudgetReservedToolCalls, BudgetReservedModelCalls, BudgetReservedInputTokens, BudgetReservedOutputTokens, BudgetReservedElapsedMilliseconds, BudgetReservedCostAmount, BudgetReservedRetries, BudgetReservedArtifactCount, BudgetReservedArtifactBytes);
+
+    private AgentRunBudgetCharge ConsumedBudget => new(BudgetConsumedToolCalls, BudgetConsumedModelCalls, BudgetConsumedInputTokens, BudgetConsumedOutputTokens, BudgetConsumedElapsedMilliseconds, BudgetConsumedCostAmount, BudgetConsumedRetries, BudgetConsumedArtifactCount, BudgetConsumedArtifactBytes);
+
+    private void SetReservedBudget(AgentRunBudgetCharge value)
     {
-        BudgetReservedToolCalls -= reservation.ToolCalls;
-        BudgetReservedModelCalls -= reservation.ModelCalls;
-        BudgetReservedInputTokens -= reservation.InputTokens;
-        BudgetReservedOutputTokens -= reservation.OutputTokens;
-        BudgetReservedElapsedMilliseconds -= reservation.ElapsedMilliseconds;
-        BudgetReservedCostAmount -= reservation.CostAmount;
-        BudgetReservedRetries -= reservation.RetryCount;
-        BudgetReservedArtifactCount -= reservation.ArtifactCount;
-        BudgetReservedArtifactBytes -= reservation.ArtifactBytes;
+        (BudgetReservedToolCalls, BudgetReservedModelCalls, BudgetReservedInputTokens, BudgetReservedOutputTokens, BudgetReservedElapsedMilliseconds, _budgetReservedCostAmount, BudgetReservedRetries, BudgetReservedArtifactCount, BudgetReservedArtifactBytes) =
+            (value.ToolCalls, value.ModelCalls, value.InputTokens, value.OutputTokens, value.ElapsedMilliseconds, value.CostAmount, value.RetryCount, value.ArtifactCount, value.ArtifactBytes);
+    }
+
+    private void SetConsumedBudget(AgentRunBudgetCharge value)
+    {
+        _budgetConsumedToolCalls = value.ToolCalls;
+        _budgetConsumedModelCalls = value.ModelCalls;
+        _budgetConsumedInputTokens = value.InputTokens;
+        _budgetConsumedOutputTokens = value.OutputTokens;
+        _budgetConsumedElapsedMilliseconds = value.ElapsedMilliseconds;
+        _budgetConsumedCostAmount = value.CostAmount;
+        _budgetConsumedRetries = value.RetryCount;
+        _budgetConsumedArtifactCount = value.ArtifactCount;
+        _budgetConsumedArtifactBytes = value.ArtifactBytes;
     }
 
     private bool MatchesBudget(AgentRunBudgetLimits limits, string policyVersion, string currency)
     {
-        return string.Equals(BudgetPolicyVersion, policyVersion, StringComparison.Ordinal) &&
-               BudgetMaxNodes == limits.MaxNodes &&
-               BudgetMaxToolCalls == limits.MaxToolCalls &&
-               BudgetMaxModelCalls == limits.MaxModelCalls &&
-               BudgetMaxInputTokens == limits.MaxInputTokens &&
-               BudgetMaxOutputTokens == limits.MaxOutputTokens &&
-               BudgetMaxElapsedSeconds == limits.MaxElapsedSeconds &&
-               BudgetMaxCostAmount == limits.MaxCostAmount &&
-               string.Equals(BudgetCostCurrency, currency, StringComparison.Ordinal) &&
-               BudgetMaxRetries == limits.MaxRetries &&
-               BudgetMaxArtifactCount == limits.MaxArtifactCount &&
-               BudgetMaxArtifactBytes == limits.MaxArtifactBytes;
+        var persisted = new AgentRunBudgetLimits(BudgetPolicyVersion, BudgetMaxNodes, BudgetMaxToolCalls, BudgetMaxModelCalls, BudgetMaxInputTokens, BudgetMaxOutputTokens, BudgetMaxElapsedSeconds, BudgetMaxCostAmount, BudgetCostCurrency, BudgetMaxRetries, BudgetMaxArtifactCount, BudgetMaxArtifactBytes);
+        return persisted == limits with { PolicyVersion = policyVersion, CostCurrency = currency };
     }
 
     private static bool WouldExceed(int consumed, int reserved, int requested, int maximum)

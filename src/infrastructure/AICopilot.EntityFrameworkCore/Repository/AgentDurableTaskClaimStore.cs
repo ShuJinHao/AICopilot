@@ -43,20 +43,14 @@ internal sealed class AgentDurableTaskClaimStore(
                     .SingleOrDefaultAsync(token);
                 if (queueItem is null)
                 {
-                    return new AgentExecutionTransactionAttempt<DurableTaskClaim?>(null);
+                    return Attempt<DurableTaskClaim?>(null);
                 }
 
-                var task = await context.AgentTasks
-                    .FromSqlInterpolated($$"""
-                        SELECT task.*, task.xmin
-                        FROM aigateway.agent_tasks AS task
-                        WHERE id = {{queueItem.TaskId.Value}}
-                        FOR UPDATE
-                        """)
-                    .SingleOrDefaultAsync(token);
+                var task = await AgentExecutionRowLock.ByIdAsync<AgentTask>(
+                    context, queueItem.TaskId.Value, token);
                 if (task is null || task.IsRunInProgress(now))
                 {
-                    return new AgentExecutionTransactionAttempt<DurableTaskClaim?>(null);
+                    return Attempt<DurableTaskClaim?>(null);
                 }
 
                 await context.Entry(task)
@@ -66,21 +60,15 @@ internal sealed class AgentDurableTaskClaimStore(
                 AgentTaskRunAttempt? attempt = null;
                 if (task.ActiveRunAttemptId is not null)
                 {
-                    attempt = await context.AgentTaskRunAttempts
-                        .FromSqlInterpolated($$"""
-                            SELECT attempt.*, attempt.xmin
-                            FROM aigateway.agent_task_run_attempts AS attempt
-                            WHERE id = {{task.ActiveRunAttemptId.Value.Value}}
-                            FOR UPDATE
-                            """)
-                        .SingleOrDefaultAsync(token);
+                    attempt = await AgentExecutionRowLock.ByIdAsync<AgentTaskRunAttempt>(
+                        context, task.ActiveRunAttemptId.Value.Value, token);
                     if (attempt is not null && attempt.IsTerminal)
                     {
                         attempt = null;
                     }
                     else if (attempt?.HasActiveLease(now) == true)
                     {
-                        return new AgentExecutionTransactionAttempt<DurableTaskClaim?>(null);
+                        return Attempt<DurableTaskClaim?>(null);
                     }
                 }
 
@@ -129,7 +117,7 @@ internal sealed class AgentDurableTaskClaimStore(
                     task.RunFencingToken,
                     attempt.LeaseId.Value,
                     attempt.LeaseExpiresAt!.Value);
-                return new AgentExecutionTransactionAttempt<DurableTaskClaim?>(claim);
+                return Attempt<DurableTaskClaim?>(claim);
             },
             cancellationToken);
     }
@@ -143,51 +131,46 @@ internal sealed class AgentDurableTaskClaimStore(
             "Agent.DurableTaskStart",
             async (context, token) =>
             {
-                var queueItem = await context.AgentTaskRunQueueItems
-                    .FromSqlInterpolated($$"""
-                        SELECT queue_item.*, queue_item.xmin
-                        FROM aigateway.agent_task_run_queue_items AS queue_item
-                        WHERE id = {{claim.QueueItem.Id.Value}}
-                          AND run_attempt_id = {{claim.RunAttempt.Id.Value}}
-                          AND task_fencing_token = {{claim.TaskFencingToken}}
-                          AND lease_id = {{claim.LeaseId}}
-                          AND status = 'Claimed'
-                        FOR UPDATE
-                        """)
-                    .SingleOrDefaultAsync(token);
-                if (queueItem is null)
+                var queueItem = await AgentExecutionRowLock.ByIdAsync<AgentTaskRunQueueItem>(
+                    context, claim.QueueItem.Id.Value, token);
+                if (queueItem is null || queueItem.RunAttemptId != claim.RunAttempt.Id ||
+                    queueItem.TaskFencingToken != claim.TaskFencingToken || queueItem.LeaseId != claim.LeaseId ||
+                    queueItem.Status != AgentTaskRunQueueStatus.Claimed)
                 {
-                    return new AgentExecutionTransactionAttempt<AgentFencedWriteResult>(
-                        AgentFencedWriteResult.StaleFence);
+                    return Attempt(AgentFencedWriteResult.StaleFence);
                 }
 
-                var taskFenceValid = await context.AgentTasks
-                    .AnyAsync(task =>
-                        task.Id == claim.Task.Id &&
-                        task.ActiveRunAttemptId == claim.RunAttempt.Id &&
-                        task.RunFencingToken == claim.TaskFencingToken &&
-                        task.RunLeaseId == claim.LeaseId &&
-                        task.RunLeaseExpiresAt > startedAtUtc,
-                        token);
-                var attemptFenceValid = await context.AgentTaskRunAttempts
-                    .AnyAsync(attempt =>
-                        attempt.Id == claim.RunAttempt.Id &&
-                        attempt.TaskId == claim.Task.Id &&
-                        attempt.TaskFencingToken == claim.TaskFencingToken &&
-                        attempt.LeaseId == claim.LeaseId &&
-                        attempt.LeaseExpiresAt > startedAtUtc,
-                        token);
-                if (!taskFenceValid || !attemptFenceValid)
+                if (!await ClaimFenceMatchesAsync(context, claim, startedAtUtc, token))
                 {
-                    return new AgentExecutionTransactionAttempt<AgentFencedWriteResult>(
-                        AgentFencedWriteResult.StaleFence);
+                    return Attempt(AgentFencedWriteResult.StaleFence);
                 }
 
                 queueItem.MarkStarted(claim.RunAttempt.Id, startedAtUtc);
-                return new AgentExecutionTransactionAttempt<AgentFencedWriteResult>(
-                    AgentFencedWriteResult.Succeeded);
+                return Attempt(AgentFencedWriteResult.Succeeded);
             },
             cancellationToken);
+    }
+
+    private static async Task<bool> ClaimFenceMatchesAsync(
+        AiGatewayDbContext context,
+        DurableTaskClaim claim,
+        DateTimeOffset startedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        var task = await AgentExecutionRowLock.ByIdAsync<AgentTask>(
+            context, claim.Task.Id.Value, cancellationToken);
+        if (task is null || task.ActiveRunAttemptId != claim.RunAttempt.Id ||
+            task.RunFencingToken != claim.TaskFencingToken || task.RunLeaseId != claim.LeaseId ||
+            task.RunLeaseExpiresAt <= startedAtUtc)
+        {
+            return false;
+        }
+
+        var attempt = await AgentExecutionRowLock.ByIdAsync<AgentTaskRunAttempt>(
+            context, claim.RunAttempt.Id.Value, cancellationToken);
+        return attempt is not null && attempt.TaskId == claim.Task.Id &&
+               attempt.TaskFencingToken == claim.TaskFencingToken && attempt.LeaseId == claim.LeaseId &&
+               attempt.LeaseExpiresAt > startedAtUtc;
     }
 
     public Task<AgentFencedWriteResult> TryCompleteAsync(
@@ -209,55 +192,31 @@ internal sealed class AgentDurableTaskClaimStore(
             "Agent.DurableTaskComplete",
             async (context, token) =>
             {
-                var task = await context.AgentTasks
-                    .FromSqlInterpolated($$"""
-                        SELECT task.*, task.xmin
-                        FROM aigateway.agent_tasks AS task
-                        WHERE id = {{claim.Task.Id.Value}}
-                          AND run_fencing_token = {{claim.TaskFencingToken}}
-                          AND (active_run_attempt_id = {{claim.RunAttempt.Id.Value}} OR active_run_attempt_id IS NULL)
-                          AND status <> 'ReconciliationRequired'
-                        FOR UPDATE
-                        """)
-                    .SingleOrDefaultAsync(token);
-                if (task is null)
+                var task = await AgentExecutionRowLock.ByIdAsync<AgentTask>(
+                    context, claim.Task.Id.Value, token);
+                if (task is null || task.RunFencingToken != claim.TaskFencingToken ||
+                    task.ActiveRunAttemptId is not null && task.ActiveRunAttemptId != claim.RunAttempt.Id ||
+                    task.Status == AgentTaskStatus.ReconciliationRequired)
                 {
-                    return new AgentExecutionTransactionAttempt<AgentFencedWriteResult>(
-                        AgentFencedWriteResult.StaleFence);
+                    return Attempt(AgentFencedWriteResult.StaleFence);
                 }
 
-                var queueItem = await context.AgentTaskRunQueueItems
-                    .FromSqlInterpolated($$"""
-                        SELECT queue_item.*, queue_item.xmin
-                        FROM aigateway.agent_task_run_queue_items AS queue_item
-                        WHERE id = {{claim.QueueItem.Id.Value}}
-                          AND run_attempt_id = {{claim.RunAttempt.Id.Value}}
-                          AND task_fencing_token = {{claim.TaskFencingToken}}
-                          AND status = 'Started'
-                        FOR UPDATE
-                        """)
-                    .SingleOrDefaultAsync(token);
-                if (queueItem is null)
+                var queueItem = await AgentExecutionRowLock.ByIdAsync<AgentTaskRunQueueItem>(
+                    context, claim.QueueItem.Id.Value, token);
+                if (queueItem is null || queueItem.RunAttemptId != claim.RunAttempt.Id ||
+                    queueItem.TaskFencingToken != claim.TaskFencingToken ||
+                    queueItem.Status != AgentTaskRunQueueStatus.Started)
                 {
-                    return new AgentExecutionTransactionAttempt<AgentFencedWriteResult>(
-                        AgentFencedWriteResult.StaleFence);
+                    return Attempt(AgentFencedWriteResult.StaleFence);
                 }
 
-                var attempt = await context.AgentTaskRunAttempts
-                    .FromSqlInterpolated($$"""
-                        SELECT attempt.*, attempt.xmin
-                        FROM aigateway.agent_task_run_attempts AS attempt
-                        WHERE id = {{claim.RunAttempt.Id.Value}}
-                          AND task_id = {{claim.Task.Id.Value}}
-                          AND task_fencing_token = {{claim.TaskFencingToken}}
-                          AND status <> 'ReconciliationRequired'
-                        FOR UPDATE
-                        """)
-                    .SingleOrDefaultAsync(token);
-                if (attempt is null)
+                var attempt = await AgentExecutionRowLock.ByIdAsync<AgentTaskRunAttempt>(
+                    context, claim.RunAttempt.Id.Value, token);
+                if (attempt is null || attempt.TaskId != claim.Task.Id ||
+                    attempt.TaskFencingToken != claim.TaskFencingToken ||
+                    attempt.Status == AgentTaskRunAttemptStatus.ReconciliationRequired)
                 {
-                    return new AgentExecutionTransactionAttempt<AgentFencedWriteResult>(
-                        AgentFencedWriteResult.StaleFence);
+                    return Attempt(AgentFencedWriteResult.StaleFence);
                 }
 
                 switch (terminalStatus)
@@ -298,8 +257,7 @@ internal sealed class AgentDurableTaskClaimStore(
                         break;
                 }
 
-                return new AgentExecutionTransactionAttempt<AgentFencedWriteResult>(
-                    AgentFencedWriteResult.Succeeded);
+                return Attempt(AgentFencedWriteResult.Succeeded);
             },
             cancellationToken);
     }
@@ -335,30 +293,18 @@ internal sealed class AgentDurableTaskClaimStore(
                         continue;
                     }
 
-                    var attempt = await context.AgentTaskRunAttempts
-                        .FromSqlInterpolated($$"""
-                            SELECT attempt.*, attempt.xmin FROM aigateway.agent_task_run_attempts AS attempt
-                            WHERE id = {{queueItem.RunAttemptId.Value.Value}}
-                              AND task_fencing_token = {{queueItem.TaskFencingToken}}
-                            FOR UPDATE
-                            """)
-                        .SingleOrDefaultAsync(token);
-                    if (attempt is null)
+                    var attempt = await AgentExecutionRowLock.ByIdAsync<AgentTaskRunAttempt>(
+                        context, queueItem.RunAttemptId.Value.Value, token);
+                    if (attempt is null || attempt.TaskFencingToken != queueItem.TaskFencingToken)
                     {
                         continue;
                     }
 
                     if (attempt.IsTerminal)
                     {
-                        var terminalTask = await context.AgentTasks
-                            .FromSqlInterpolated($$"""
-                                SELECT task.*, task.xmin FROM aigateway.agent_tasks AS task
-                                WHERE id = {{queueItem.TaskId.Value}}
-                                  AND run_fencing_token = {{queueItem.TaskFencingToken}}
-                                FOR UPDATE
-                                """)
-                            .SingleOrDefaultAsync(token);
-                        if (terminalTask is null)
+                        var terminalTask = await AgentExecutionRowLock.ByIdAsync<AgentTask>(
+                            context, queueItem.TaskId.Value, token);
+                        if (terminalTask is null || terminalTask.RunFencingToken != queueItem.TaskFencingToken)
                         {
                             continue;
                         }
@@ -451,18 +397,12 @@ internal sealed class AgentDurableTaskClaimStore(
                             continue;
                         }
 
-                        node.MarkOutcomeUnknown(
-                            node.TaskFencingToken,
-                            node.NodeFencingToken,
-                            node.ProviderOperationCode ?? node.ToolCode ?? node.NodeKind,
-                            node.ProviderReceiptHash,
+                        AgentNodeOutcomeUnknownMarker.Mark(
+                            node,
                             "worker-loss-receipt-or-manual-v1",
                             "worker-lease-expired-after-dispatch",
-                            "not-confirmed",
                             "Worker lease expired after a side-effecting node began; automatic replay is blocked.",
-                            nowUtc,
-                            nowUtc.AddMinutes(1),
-                            nowUtc.AddHours(24));
+                            nowUtc);
                         requiresReconciliation = true;
                     }
 
@@ -473,16 +413,11 @@ internal sealed class AgentDurableTaskClaimStore(
 
                     if (requiresReconciliation)
                     {
-                        var task = await context.AgentTasks
-                            .FromSqlInterpolated($$"""
-                                SELECT task.*, task.xmin FROM aigateway.agent_tasks AS task
-                                WHERE id = {{queueItem.TaskId.Value}}
-                                  AND active_run_attempt_id = {{queueItem.RunAttemptId.Value.Value}}
-                                  AND run_fencing_token = {{queueItem.TaskFencingToken}}
-                                FOR UPDATE
-                                """)
-                            .SingleOrDefaultAsync(token);
-                        if (task is not null && task.Status != AgentTaskStatus.ReconciliationRequired)
+                        var task = await AgentExecutionRowLock.ByIdAsync<AgentTask>(
+                            context, queueItem.TaskId.Value, token);
+                        if (task is not null && task.ActiveRunAttemptId == queueItem.RunAttemptId &&
+                            task.RunFencingToken == queueItem.TaskFencingToken &&
+                            task.Status != AgentTaskStatus.ReconciliationRequired)
                         {
                             await context.Entry(task).Collection(candidate => candidate.Steps).LoadAsync(token);
                             task.RequireReconciliation(nowUtc);
@@ -502,8 +437,10 @@ internal sealed class AgentDurableTaskClaimStore(
                     recovered++;
                 }
 
-                return new AgentExecutionTransactionAttempt<int>(recovered);
+                return Attempt(recovered);
             },
             cancellationToken);
     }
+
+    private static AgentExecutionTransactionAttempt<T> Attempt<T>(T value) => new(value);
 }

@@ -156,23 +156,12 @@ public sealed class LocalPersistenceFileStorageService(
     private async Task ReleaseLeaseAsync(Guid commitId)
     {
         var lease = activeLease;
-        activeLease = null;
         activeStage = null;
-        if (lease is null)
-        {
-            return;
-        }
-
-        try
-        {
-            await lease.DisposeAsync();
-        }
-        catch (Exception exception)
-        {
-            logger.LogWarning(
-                "Persistence file reconciliation lease cleanup failed; connection disposal was attempted. CommitId={CommitId}; ErrorType={ErrorType}",
-                commitId,
-                exception.GetType().Name);
-        }
+        activeLease = null;
+        await PersistenceReconciliationLeaseDisposer.DisposeBestEffortAsync(
+            lease,
+            commitId,
+            "PersistenceFile",
+            logger);
     }
 }

@@ -1,6 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
@@ -21,110 +18,11 @@ internal sealed class AgentNodeCheckpointStore(
         AgentNodeSuccessCheckpoint checkpoint,
         CancellationToken cancellationToken = default)
     {
-        return transactionRunner.ExecuteAsync(
+        return ExecuteCheckpointAsync(
             "Agent.NodeCheckpointSuccess",
-            async (context, token) =>
-            {
-                var authority = await LockAuthorityAsync(
-                    context,
-                    checkpoint.TaskId.Value,
-                    checkpoint.RunAttemptId.Value,
-                    checkpoint.TaskFencingToken,
-                    token);
-                if (authority is null)
-                {
-                    return Stale();
-                }
-
-                var node = await LockNodeAsync(
-                    context,
-                    checkpoint.NodeRunId.Value,
-                    checkpoint.RunAttemptId.Value,
-                    checkpoint.TaskFencingToken,
-                    checkpoint.NodeFencingToken,
-                    AgentNodeRunStatus.Running,
-                    token);
-                if (node is null)
-                {
-                    var duplicate = await context.AgentEvidenceRecords.AsNoTracking().AnyAsync(evidence =>
-                        evidence.NodeRunId == checkpoint.NodeRunId &&
-                        evidence.NodeFencingToken == checkpoint.NodeFencingToken &&
-                        evidence.EnvelopeDigest == checkpoint.Evidence.EnvelopeDigest,
-                        token);
-                    return new AgentExecutionTransactionAttempt<AgentFencedWriteResult>(
-                        duplicate ? AgentFencedWriteResult.Duplicate : AgentFencedWriteResult.StaleFence);
-                }
-
-                if (!MatchesCheckpointAuthority(checkpoint, node))
-                {
-                    return new AgentExecutionTransactionAttempt<AgentFencedWriteResult>(
-                        AgentFencedWriteResult.StateConflict);
-                }
-
-                FinalizationAuthority? finalizationAuthority = null;
-                if (checkpoint.Finalization is not null)
-                {
-                    finalizationAuthority = await LockAndValidateFinalizationAsync(
-                        context,
-                        authority.Value.Task,
-                        authority.Value.Attempt,
-                        node,
-                        checkpoint,
-                        token);
-                    if (finalizationAuthority is null)
-                    {
-                        return new AgentExecutionTransactionAttempt<AgentFencedWriteResult>(
-                            AgentFencedWriteResult.StateConflict);
-                    }
-                }
-
-                if (!TrySettleBudget(
-                        authority.Value.Attempt,
-                        node,
-                        checkpoint.NodeFencingToken,
-                        checkpoint.Usage,
-                        checkpoint.CompletedAtUtc,
-                        conservativelyConsumed: false))
-                {
-                    return new AgentExecutionTransactionAttempt<AgentFencedWriteResult>(
-                        AgentFencedWriteResult.StateConflict);
-                }
-
-                var evidenceSetDigest = await ComputeEvidenceSetDigestAsync(
-                    context,
-                    checkpoint.RunAttemptId,
-                    checkpoint.Evidence,
-                    token);
-                context.AgentEvidenceRecords.Add(checkpoint.Evidence);
-                context.AgentRunUsageLedgerEntries.Add(checkpoint.Usage);
-                if (finalizationAuthority is not null)
-                {
-                    ApplyFinalization(
-                        context,
-                        authority.Value.Task,
-                        authority.Value.Attempt,
-                        finalizationAuthority,
-                        checkpoint);
-                }
-
-                node.CompleteCheckpoint(
-                    checkpoint.TaskFencingToken,
-                    checkpoint.NodeFencingToken,
-                    checkpoint.Evidence.Id,
-                    checkpoint.OutputDigest,
-                    evidenceSetDigest,
-                    checkpoint.ProviderOperationCode,
-                    checkpoint.ProviderReceiptHash,
-                    checkpoint.CompletedAtUtc);
-
-                await PromoteRunnableDependentsAsync(
-                    context,
-                    checkpoint.RunAttemptId,
-                    checkpoint.CompletedAtUtc,
-                    token);
-                return new AgentExecutionTransactionAttempt<AgentFencedWriteResult>(
-                    AgentFencedWriteResult.Succeeded);
-            },
+            checkpoint,
+            (context, authority, token) =>
+                CommitSuccessCoreAsync(context, authority, checkpoint, token),
             cancellationToken);
     }
 
@@ -132,64 +30,11 @@ internal sealed class AgentNodeCheckpointStore(
         AgentNodeFailureCheckpoint checkpoint,
         CancellationToken cancellationToken = default)
     {
-        return transactionRunner.ExecuteAsync(
+        return ExecuteCheckpointAsync(
             "Agent.NodeCheckpointFailure",
-            async (context, token) =>
-            {
-                var authority = await LockAuthorityAsync(
-                    context,
-                    checkpoint.TaskId.Value,
-                    checkpoint.RunAttemptId.Value,
-                    checkpoint.TaskFencingToken,
-                    token);
-                if (authority is null)
-                {
-                    return Stale();
-                }
-
-                var node = await LockNodeAsync(
-                    context,
-                    checkpoint.NodeRunId.Value,
-                    checkpoint.RunAttemptId.Value,
-                    checkpoint.TaskFencingToken,
-                    checkpoint.NodeFencingToken,
-                    expectedStatus: null,
-                    token);
-                if (node is null ||
-                    node.Status is not AgentNodeRunStatus.Claimed and not AgentNodeRunStatus.Running)
-                {
-                    return Stale();
-                }
-
-                if (!MatchesUsageAuthority(checkpoint, node) ||
-                    !TrySettleBudget(
-                        authority.Value.Attempt,
-                        node,
-                        checkpoint.NodeFencingToken,
-                        checkpoint.Usage,
-                        checkpoint.FailedAtUtc,
-                        conservativelyConsumed: false))
-                {
-                    return new AgentExecutionTransactionAttempt<AgentFencedWriteResult>(
-                        AgentFencedWriteResult.StateConflict);
-                }
-
-                context.AgentRunUsageLedgerEntries.Add(checkpoint.Usage);
-                node.Fail(
-                    checkpoint.TaskFencingToken,
-                    checkpoint.NodeFencingToken,
-                    checkpoint.FailureCode,
-                    checkpoint.SafeMessage,
-                    checkpoint.FailedAtUtc,
-                    checkpoint.RetryAtUtc);
-                await PromoteRunnableDependentsAsync(
-                    context,
-                    checkpoint.RunAttemptId,
-                    checkpoint.FailedAtUtc,
-                    token);
-                return new AgentExecutionTransactionAttempt<AgentFencedWriteResult>(
-                    AgentFencedWriteResult.Succeeded);
-            },
+            checkpoint,
+            (context, authority, token) =>
+                CommitFailureCoreAsync(context, authority, checkpoint, token),
             cancellationToken);
     }
 
@@ -197,89 +42,218 @@ internal sealed class AgentNodeCheckpointStore(
         AgentNodeOutcomeUnknownCheckpoint checkpoint,
         CancellationToken cancellationToken = default)
     {
-        return transactionRunner.ExecuteAsync(
+        return ExecuteCheckpointAsync(
             "Agent.NodeCheckpointOutcomeUnknown",
-            async (context, token) =>
-            {
-                var authority = await LockAuthorityAsync(
-                    context,
-                    checkpoint.TaskId.Value,
-                    checkpoint.RunAttemptId.Value,
-                    checkpoint.TaskFencingToken,
-                    token);
-                if (authority is null)
-                {
-                    return Stale();
-                }
-
-                var node = await LockNodeAsync(
-                    context,
-                    checkpoint.NodeRunId.Value,
-                    checkpoint.RunAttemptId.Value,
-                    checkpoint.TaskFencingToken,
-                    checkpoint.NodeFencingToken,
-                    AgentNodeRunStatus.Running,
-                    token);
-                if (node is null)
-                {
-                    return Stale();
-                }
-
-                node.MarkOutcomeUnknown(
-                    checkpoint.TaskFencingToken,
-                    checkpoint.NodeFencingToken,
-                    checkpoint.ProviderOperationCode,
-                    checkpoint.ProviderReceiptHash,
-                    checkpoint.ReconciliationPolicy,
-                    checkpoint.LastConfirmedStage,
-                    checkpoint.IntegrityStatus,
-                    checkpoint.SafeMessage,
-                    checkpoint.RecordedAtUtc,
-                    checkpoint.NextCheckAtUtc,
-                    checkpoint.ReconciliationDeadlineAtUtc);
-                authority.Value.Task.RequireReconciliation(checkpoint.RecordedAtUtc);
-                authority.Value.Attempt.RequireReconciliation(
-                    checkpoint.RecordedAtUtc,
-                    checkpoint.SafeMessage);
-                return new AgentExecutionTransactionAttempt<AgentFencedWriteResult>(
-                    AgentFencedWriteResult.Succeeded);
-            },
+            checkpoint,
+            (context, authority, token) =>
+                CommitOutcomeUnknownCoreAsync(context, authority, checkpoint, token),
             cancellationToken);
+    }
+
+    private static async Task<AgentExecutionTransactionAttempt<AgentFencedWriteResult>> CommitSuccessCoreAsync(
+        AiGatewayDbContext context,
+        (AgentTask Task, AgentTaskRunAttempt Attempt) authority,
+        AgentNodeSuccessCheckpoint checkpoint,
+        CancellationToken cancellationToken)
+    {
+        var node = await LockRunningNodeAsync(context, checkpoint, cancellationToken);
+        if (node is null)
+        {
+            var duplicate = await context.AgentEvidenceRecords.AsNoTracking().AnyAsync(evidence =>
+                evidence.NodeRunId == checkpoint.NodeRunId &&
+                evidence.NodeFencingToken == checkpoint.NodeFencingToken &&
+                evidence.EnvelopeDigest == checkpoint.Evidence.EnvelopeDigest,
+                cancellationToken);
+            return new AgentExecutionTransactionAttempt<AgentFencedWriteResult>(
+                duplicate ? AgentFencedWriteResult.Duplicate : AgentFencedWriteResult.StaleFence);
+        }
+
+        if (!MatchesCheckpointAuthority(checkpoint, node))
+        {
+            return new AgentExecutionTransactionAttempt<AgentFencedWriteResult>(
+                AgentFencedWriteResult.StateConflict);
+        }
+
+        FinalizationAuthority? finalizationAuthority = null;
+        if (checkpoint.Finalization is not null)
+        {
+            finalizationAuthority = await LockAndValidateFinalizationAsync(
+                context,
+                authority.Task,
+                authority.Attempt,
+                node,
+                checkpoint,
+                cancellationToken);
+            if (finalizationAuthority is null)
+            {
+                return new AgentExecutionTransactionAttempt<AgentFencedWriteResult>(
+                    AgentFencedWriteResult.StateConflict);
+            }
+        }
+
+        if (!AgentNodeRunBudgetSettlement.TrySettle(
+                authority.Attempt,
+                node,
+                checkpoint.NodeFencingToken,
+                checkpoint.Usage,
+                checkpoint.CompletedAtUtc,
+                conservativelyConsumed: false))
+        {
+            return new AgentExecutionTransactionAttempt<AgentFencedWriteResult>(
+                AgentFencedWriteResult.StateConflict);
+        }
+
+        var evidenceSetDigest = await AgentEvidenceSetDigest.ComputeAsync(
+            context,
+            checkpoint.RunAttemptId,
+            checkpoint.Evidence,
+            cancellationToken);
+        context.AgentEvidenceRecords.Add(checkpoint.Evidence);
+        context.AgentRunUsageLedgerEntries.Add(checkpoint.Usage);
+        if (finalizationAuthority is not null)
+        {
+            ApplyFinalization(
+                context,
+                authority.Task,
+                authority.Attempt,
+                finalizationAuthority,
+                checkpoint);
+        }
+
+        node.CompleteCheckpoint(
+            checkpoint.TaskFencingToken,
+            checkpoint.NodeFencingToken,
+            checkpoint.Evidence.Id,
+            checkpoint.OutputDigest,
+            evidenceSetDigest,
+            checkpoint.ProviderOperationCode,
+            checkpoint.ProviderReceiptHash,
+            checkpoint.CompletedAtUtc);
+        return await PromoteAndSucceedAsync(
+            context, checkpoint.RunAttemptId, checkpoint.CompletedAtUtc, cancellationToken);
+    }
+
+    private static async Task<AgentExecutionTransactionAttempt<AgentFencedWriteResult>> CommitFailureCoreAsync(
+        AiGatewayDbContext context,
+        (AgentTask Task, AgentTaskRunAttempt Attempt) authority,
+        AgentNodeFailureCheckpoint checkpoint,
+        CancellationToken cancellationToken)
+    {
+        var node = await LockNodeAsync(
+            context,
+            checkpoint.NodeRunId.Value,
+            checkpoint.RunAttemptId.Value,
+            checkpoint.TaskFencingToken,
+            checkpoint.NodeFencingToken,
+            expectedStatus: null,
+            cancellationToken);
+        if (node is null ||
+            node.Status is not AgentNodeRunStatus.Claimed and not AgentNodeRunStatus.Running)
+        {
+            return Stale();
+        }
+
+        if (!MatchesUsageAuthority(checkpoint, node) ||
+            !AgentNodeRunBudgetSettlement.TrySettle(
+                authority.Attempt,
+                node,
+                checkpoint.NodeFencingToken,
+                checkpoint.Usage,
+                checkpoint.FailedAtUtc,
+                conservativelyConsumed: false))
+        {
+            return new AgentExecutionTransactionAttempt<AgentFencedWriteResult>(
+                AgentFencedWriteResult.StateConflict);
+        }
+
+        context.AgentRunUsageLedgerEntries.Add(checkpoint.Usage);
+        node.Fail(
+            checkpoint.TaskFencingToken,
+            checkpoint.NodeFencingToken,
+            checkpoint.FailureCode,
+            checkpoint.SafeMessage,
+            checkpoint.FailedAtUtc,
+            checkpoint.RetryAtUtc);
+        return await PromoteAndSucceedAsync(
+            context, checkpoint.RunAttemptId, checkpoint.FailedAtUtc, cancellationToken);
+    }
+
+    private static async Task<AgentExecutionTransactionAttempt<AgentFencedWriteResult>> PromoteAndSucceedAsync(
+        AiGatewayDbContext context,
+        AgentTaskRunAttemptId runAttemptId,
+        DateTimeOffset completedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        await AgentNodeRunDependencyPromoter.PromoteAsync(
+            context, runAttemptId, completedAtUtc, cancellationToken);
+        return new AgentExecutionTransactionAttempt<AgentFencedWriteResult>(
+            AgentFencedWriteResult.Succeeded);
+    }
+
+    private static async Task<AgentExecutionTransactionAttempt<AgentFencedWriteResult>> CommitOutcomeUnknownCoreAsync(
+        AiGatewayDbContext context,
+        (AgentTask Task, AgentTaskRunAttempt Attempt) authority,
+        AgentNodeOutcomeUnknownCheckpoint checkpoint,
+        CancellationToken token)
+    {
+        var node = await LockRunningNodeAsync(context, checkpoint, token);
+        if (node is null)
+        {
+            return Stale();
+        }
+
+        node.MarkOutcomeUnknown(
+            checkpoint.TaskFencingToken,
+            checkpoint.NodeFencingToken,
+            checkpoint.ProviderOperationCode,
+            checkpoint.ProviderReceiptHash,
+            checkpoint.ReconciliationPolicy,
+            checkpoint.LastConfirmedStage,
+            checkpoint.IntegrityStatus,
+            checkpoint.SafeMessage,
+            checkpoint.RecordedAtUtc,
+            checkpoint.NextCheckAtUtc,
+            checkpoint.ReconciliationDeadlineAtUtc);
+        authority.Task.RequireReconciliation(checkpoint.RecordedAtUtc);
+        authority.Attempt.RequireReconciliation(
+            checkpoint.RecordedAtUtc,
+            checkpoint.SafeMessage);
+        return new AgentExecutionTransactionAttempt<AgentFencedWriteResult>(
+            AgentFencedWriteResult.Succeeded);
     }
 
     private static bool MatchesCheckpointAuthority(
         AgentNodeSuccessCheckpoint checkpoint,
         AgentNodeRun node)
     {
-        var evidence = checkpoint.Evidence;
-        var usage = checkpoint.Usage;
         return node.TaskId == checkpoint.TaskId &&
-               evidence.TaskId == checkpoint.TaskId &&
-               evidence.RunAttemptId == checkpoint.RunAttemptId &&
-               evidence.NodeRunId == checkpoint.NodeRunId &&
-               evidence.NodeId == node.NodeId &&
-               evidence.TaskFencingToken == checkpoint.TaskFencingToken &&
-               evidence.NodeFencingToken == checkpoint.NodeFencingToken &&
-               evidence.OutputDigest == checkpoint.OutputDigest &&
-               usage.TaskId == checkpoint.TaskId &&
-               usage.RunAttemptId == checkpoint.RunAttemptId &&
-               usage.NodeRunId == checkpoint.NodeRunId &&
-               usage.TaskFencingToken == checkpoint.TaskFencingToken &&
-               usage.NodeFencingToken == checkpoint.NodeFencingToken;
+               MatchesEvidenceAuthority(checkpoint, node) &&
+               MatchesUsageAuthority(checkpoint.Usage, checkpoint);
     }
 
     private static bool MatchesUsageAuthority(
         AgentNodeFailureCheckpoint checkpoint,
         AgentNodeRun node)
     {
-        var usage = checkpoint.Usage;
         return node.TaskId == checkpoint.TaskId &&
-               usage.TaskId == checkpoint.TaskId &&
-               usage.RunAttemptId == checkpoint.RunAttemptId &&
-               usage.NodeRunId == checkpoint.NodeRunId &&
-               usage.TaskFencingToken == checkpoint.TaskFencingToken &&
-               usage.NodeFencingToken == checkpoint.NodeFencingToken;
+               MatchesUsageAuthority(checkpoint.Usage, checkpoint);
     }
+
+    private static bool MatchesEvidenceAuthority(AgentNodeSuccessCheckpoint checkpoint, AgentNodeRun node)
+    {
+        var evidence = checkpoint.Evidence;
+        return evidence.TaskId == checkpoint.TaskId && evidence.RunAttemptId == checkpoint.RunAttemptId &&
+               evidence.NodeRunId == checkpoint.NodeRunId && evidence.NodeId == node.NodeId &&
+               evidence.TaskFencingToken == checkpoint.TaskFencingToken && evidence.NodeFencingToken == checkpoint.NodeFencingToken &&
+               evidence.OutputDigest == checkpoint.OutputDigest;
+    }
+
+    private static bool MatchesUsageAuthority(
+        AgentRunUsageLedgerEntry usage,
+        IAgentNodeCheckpointAuthority checkpoint) =>
+        usage.TaskId == checkpoint.TaskId && usage.RunAttemptId == checkpoint.RunAttemptId &&
+        usage.NodeRunId == checkpoint.NodeRunId && usage.TaskFencingToken == checkpoint.TaskFencingToken &&
+        usage.NodeFencingToken == checkpoint.NodeFencingToken;
 
     private static async Task<FinalizationAuthority?> LockAndValidateFinalizationAsync(
         AiGatewayDbContext context,
@@ -302,22 +276,10 @@ internal sealed class AgentNodeCheckpointStore(
             return null;
         }
 
-        var artifacts = await context.Set<Artifact>()
-            .FromSqlInterpolated($$"""
-                SELECT artifact.*, artifact.xmin FROM aigateway.artifacts AS artifact
-                WHERE workspace_id = {{mutation.WorkspaceId.Value}}
-                ORDER BY id
-                FOR UPDATE
-                """)
-            .ToListAsync(cancellationToken);
-        var steps = await context.Set<AgentStep>()
-            .FromSqlInterpolated($$"""
-                SELECT step.*, step.xmin FROM aigateway.agent_steps AS step
-                WHERE task_id = {{task.Id.Value}}
-                ORDER BY step_index
-                FOR UPDATE
-                """)
-            .ToListAsync(cancellationToken);
+        var artifacts = await AgentExecutionRowLock.ByAggregateOwnerAsync<Artifact>(
+            context, mutation.WorkspaceId.Value, cancellationToken);
+        var steps = await AgentExecutionRowLock.ByAggregateOwnerAsync<AgentStep>(
+            context, task.Id.Value, cancellationToken);
         var approval = await context.ApprovalRequests
             .FromSqlInterpolated($$"""
                 SELECT approval.*, approval.xmin FROM aigateway.approval_requests AS approval
@@ -458,172 +420,42 @@ internal sealed class AgentNodeCheckpointStore(
         task.ReleaseRunLease(checkpoint.CompletedAtUtc, clearActiveAttempt: true);
 
         var stage = mutation.FileSetStage;
-        var operation = new ArtifactFileSetOperation(
-            stage.CommitId,
+        var operation = ArtifactFileSetOperationFactory.CreateCompleted(
+            stage,
             task.Id,
             authority.Workspace.Id,
             checkpoint.NodeRunId,
             checkpoint.TaskFencingToken,
             checkpoint.NodeFencingToken,
-            stage.OperationKind,
-            stage.ManifestJson,
-            stage.ManifestDigest,
-            stage.StagingReference,
             checkpoint.CompletedAtUtc);
-        operation.MarkPublished(stage.PublishedReference, stage.ManifestDigest, checkpoint.CompletedAtUtc);
-        operation.MarkDatabaseCommitted(checkpoint.CompletedAtUtc);
-        operation.Complete(checkpoint.CompletedAtUtc);
         context.ArtifactFileSetOperations.Add(operation);
     }
 
-    private static bool TrySettleBudget(
-        AgentTaskRunAttempt attempt,
-        AgentNodeRun node,
-        long nodeFencingToken,
-        AgentRunUsageLedgerEntry usage,
-        DateTimeOffset nowUtc,
-        bool conservativelyConsumed)
-    {
-        if (!string.Equals(
-                usage.CostCurrency,
-                attempt.BudgetCostCurrency,
-                StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        AgentRunBudgetCharge reservation;
-        try
-        {
-            reservation = node.GetActiveBudgetReservation(nodeFencingToken);
-        }
-        catch (InvalidOperationException)
-        {
-            return false;
-        }
-
-        var actual = new AgentRunBudgetCharge(
-            usage.ToolCalls,
-            usage.ModelCalls,
-            usage.InputTokens,
-            usage.OutputTokens,
-            usage.ElapsedMilliseconds,
-            usage.CostAmount,
-            reservation.RetryCount,
-            usage.ArtifactCount,
-            usage.ArtifactBytes);
-        if (!attempt.TrySettleBudget(reservation, actual, conservativelyConsumed))
-        {
-            return false;
-        }
-
-        node.CloseBudgetReservation(
-            nodeFencingToken,
-            conservativelyConsumed
-                ? AgentBudgetReservationStatus.ConservativelyConsumed
-                : AgentBudgetReservationStatus.Settled,
-            nowUtc);
-        return true;
-    }
-
-    private static async Task<string> ComputeEvidenceSetDigestAsync(
-        AiGatewayDbContext context,
-        AgentTaskRunAttemptId runAttemptId,
-        AgentEvidenceRecord current,
+    private Task<AgentFencedWriteResult> ExecuteCheckpointAsync(
+        string operationName,
+        IAgentNodeCheckpointAuthority checkpoint,
+        Func<
+            AiGatewayDbContext,
+            (AgentTask Task, AgentTaskRunAttempt Attempt),
+            CancellationToken,
+            Task<AgentExecutionTransactionAttempt<AgentFencedWriteResult>>> execute,
         CancellationToken cancellationToken)
     {
-        var components = await context.AgentEvidenceRecords
-            .AsNoTracking()
-            .Where(evidence => evidence.RunAttemptId == runAttemptId && !evidence.IsRevoked)
-            .Select(evidence => new
+        return transactionRunner.ExecuteAsync(
+            operationName,
+            async (context, token) =>
             {
-                evidence.Id,
-                evidence.NodeId,
-                evidence.EnvelopeDigest,
-                evidence.OutputDigest
-            })
-            .ToListAsync(cancellationToken);
-        components.Add(new
-        {
-            current.Id,
-            current.NodeId,
-            current.EnvelopeDigest,
-            current.OutputDigest
-        });
-        var canonical = string.Join(
-            "\n",
-            components
-                .OrderBy(component => component.NodeId, StringComparer.Ordinal)
-                .ThenBy(component => component.Id.Value)
-                .Select(component =>
-                    $"{component.Id.Value:D}|{component.NodeId}|{component.EnvelopeDigest}|{component.OutputDigest}"));
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)))
-            .ToLowerInvariant();
-    }
-
-    private static async Task PromoteRunnableDependentsAsync(
-        AiGatewayDbContext context,
-        AgentTaskRunAttemptId runAttemptId,
-        DateTimeOffset nowUtc,
-        CancellationToken cancellationToken)
-    {
-        var nodes = await context.AgentNodeRuns
-            .Where(node => node.RunAttemptId == runAttemptId)
-            .ToListAsync(cancellationToken);
-        var changed = true;
-        while (changed)
-        {
-            changed = false;
-            var byNodeId = nodes.ToDictionary(node => node.NodeId, StringComparer.Ordinal);
-            foreach (var candidate in nodes.Where(node => node.Status is
-                         AgentNodeRunStatus.Pending or
-                         AgentNodeRunStatus.WaitingApproval))
-            {
-                string[] dependencies;
-                try
-                {
-                    dependencies = JsonSerializer.Deserialize<string[]>(candidate.DependenciesJson) ?? [];
-                }
-                catch (JsonException exception)
-                {
-                    throw new InvalidOperationException(
-                        $"NodeRun '{candidate.NodeId}' contains invalid dependency JSON.",
-                        exception);
-                }
-
-                var parents = dependencies.Select(dependency =>
-                    byNodeId.TryGetValue(dependency, out var parent)
-                        ? parent
-                        : throw new InvalidOperationException(
-                            $"NodeRun '{candidate.NodeId}' references unknown dependency '{dependency}'."))
-                    .ToArray();
-                var failedRequired = parents.FirstOrDefault(parent =>
-                    parent.IsRequired &&
-                    (parent.Status is AgentNodeRunStatus.Failed or AgentNodeRunStatus.Cancelled));
-                var failedStrict = candidate.JoinPolicy != "OptionalBestEffort"
-                    ? parents.FirstOrDefault(parent => parent.Status is
-                        AgentNodeRunStatus.Failed or AgentNodeRunStatus.Cancelled)
-                    : null;
-                var failedParent = failedRequired ?? failedStrict;
-                if (failedParent is not null)
-                {
-                    candidate.CancelFromDependencyFailure(failedParent.NodeId, nowUtc);
-                    changed = true;
-                    continue;
-                }
-
-                var dependenciesSatisfied = parents.All(parent =>
-                    parent.Status == AgentNodeRunStatus.Succeeded ||
-                    candidate.JoinPolicy == "OptionalBestEffort" &&
-                    !parent.IsRequired &&
-                    (parent.Status is AgentNodeRunStatus.Failed or AgentNodeRunStatus.Cancelled));
-                if (dependenciesSatisfied && candidate.Status == AgentNodeRunStatus.Pending)
-                {
-                    candidate.MakeRunnable(nowUtc);
-                    changed = true;
-                }
-            }
-        }
+                var authority = await LockAuthorityAsync(
+                    context,
+                    checkpoint.TaskId.Value,
+                    checkpoint.RunAttemptId.Value,
+                    checkpoint.TaskFencingToken,
+                    token);
+                return authority is null
+                    ? Stale()
+                    : await execute(context, authority.Value, token);
+            },
+            cancellationToken);
     }
 
     private static async Task<(AgentTask Task, AgentTaskRunAttempt Attempt)?> LockAuthorityAsync(
@@ -633,30 +465,18 @@ internal sealed class AgentNodeCheckpointStore(
         long taskFencingToken,
         CancellationToken cancellationToken)
     {
-        var task = await context.AgentTasks
-            .FromSqlInterpolated($$"""
-                SELECT task.*, task.xmin FROM aigateway.agent_tasks AS task
-                WHERE id = {{taskId}}
-                  AND active_run_attempt_id = {{runAttemptId}}
-                  AND run_fencing_token = {{taskFencingToken}}
-                FOR UPDATE
-                """)
-            .SingleOrDefaultAsync(cancellationToken);
-        if (task is null)
+        var task = await AgentExecutionRowLock.ByIdAsync<AgentTask>(context, taskId, cancellationToken);
+        if (task is null ||
+            task.ActiveRunAttemptId?.Value != runAttemptId ||
+            task.RunFencingToken != taskFencingToken)
         {
             return null;
         }
 
-        var attempt = await context.AgentTaskRunAttempts
-            .FromSqlInterpolated($$"""
-                SELECT attempt.*, attempt.xmin FROM aigateway.agent_task_run_attempts AS attempt
-                WHERE id = {{runAttemptId}}
-                  AND task_id = {{taskId}}
-                  AND task_fencing_token = {{taskFencingToken}}
-                FOR UPDATE
-                """)
-            .SingleOrDefaultAsync(cancellationToken);
-        return attempt is null ? null : (task, attempt);
+        var attempt = await AgentExecutionRowLock.ByIdAsync<AgentTaskRunAttempt>(context, runAttemptId, cancellationToken);
+        return attempt is null || attempt.TaskId.Value != taskId || attempt.TaskFencingToken != taskFencingToken
+            ? null
+            : (task, attempt);
     }
 
     private static Task<AgentNodeRun?> LockNodeAsync(
@@ -680,6 +500,21 @@ internal sealed class AgentNodeCheckpointStore(
                 FOR UPDATE
                 """)
             .SingleOrDefaultAsync(cancellationToken);
+    }
+
+    private static Task<AgentNodeRun?> LockRunningNodeAsync(
+        AiGatewayDbContext context,
+        IAgentNodeCheckpointAuthority checkpoint,
+        CancellationToken cancellationToken)
+    {
+        return LockNodeAsync(
+            context,
+            checkpoint.NodeRunId.Value,
+            checkpoint.RunAttemptId.Value,
+            checkpoint.TaskFencingToken,
+            checkpoint.NodeFencingToken,
+            AgentNodeRunStatus.Running,
+            cancellationToken);
     }
 
     private static AgentExecutionTransactionAttempt<AgentFencedWriteResult> Stale() =>

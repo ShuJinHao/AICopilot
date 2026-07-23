@@ -114,18 +114,24 @@ public sealed class LocalArtifactWorkspaceFileSetStore(
         }
         catch
         {
-            if (journalWritten)
-            {
-                await RollbackBestEffortAsync(stage, CancellationToken.None);
-            }
-            else
-            {
-                commitScope.ReleaseCommitId(commitId);
-                await ReleaseLeaseAsync(commitId);
-            }
-
+            await CleanupFailedStageAsync(stage, journalWritten, commitId);
             throw;
         }
+    }
+
+    private async Task CleanupFailedStageAsync(
+        ArtifactFileSetStage stage,
+        bool journalWritten,
+        Guid commitId)
+    {
+        if (journalWritten)
+        {
+            await RollbackBestEffortAsync(stage, CancellationToken.None);
+            return;
+        }
+
+        commitScope.ReleaseCommitId(commitId);
+        await ReleaseLeaseAsync(commitId);
     }
 
     public async Task ConfirmBestEffortAsync(
@@ -139,27 +145,19 @@ public sealed class LocalArtifactWorkspaceFileSetStore(
                 "Artifact file-set cannot be confirmed before database persistence consumes its commit id.");
         }
 
-        try
-        {
-            if (!await VerifyPublishedAsync(stage, cancellationToken))
+        await CompleteBestEffortAsync(
+            stage,
+            "confirmation",
+            async token =>
             {
-                throw new InvalidOperationException("Committed artifact file-set no longer matches its manifest.");
-            }
+                if (!await VerifyPublishedAsync(stage, token))
+                {
+                    throw new InvalidOperationException("Committed artifact file-set no longer matches its manifest.");
+                }
 
-            DeleteJournal(stage.CommitId);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            logger.LogWarning(
-                "Artifact file-set confirmation remains pending. CommitId={CommitId}; ErrorType={ErrorType}",
-                stage.CommitId,
-                exception.GetType().Name);
-        }
-        finally
-        {
-            commitScope.ReleaseCommitId(stage.CommitId);
-            await ReleaseLeaseAsync(stage.CommitId);
-        }
+                DeleteJournal(stage.CommitId);
+            },
+            cancellationToken);
     }
 
     public async Task RollbackBestEffortAsync(
@@ -167,15 +165,33 @@ public sealed class LocalArtifactWorkspaceFileSetStore(
         CancellationToken cancellationToken = default)
     {
         EnsureActiveStage(stage);
+        await CompleteBestEffortAsync(
+            stage,
+            "rollback",
+            token =>
+            {
+                DeleteStagePaths(stage, token);
+                DeleteJournal(stage.CommitId);
+                return Task.CompletedTask;
+            },
+            cancellationToken);
+    }
+
+    private async Task CompleteBestEffortAsync(
+        ArtifactFileSetStage stage,
+        string completionKind,
+        Func<CancellationToken, Task> complete,
+        CancellationToken cancellationToken)
+    {
         try
         {
-            DeleteStagePaths(stage, cancellationToken);
-            DeleteJournal(stage.CommitId);
+            await complete(cancellationToken);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             logger.LogWarning(
-                "Artifact file-set rollback remains pending. CommitId={CommitId}; ErrorType={ErrorType}",
+                "Artifact file-set {CompletionKind} remains pending. CommitId={CommitId}; ErrorType={ErrorType}",
+                completionKind,
                 stage.CommitId,
                 exception.GetType().Name);
         }
@@ -595,23 +611,11 @@ public sealed class LocalArtifactWorkspaceFileSetStore(
     private async Task ReleaseLeaseAsync(Guid commitId)
     {
         var lease = activeLease;
-        activeLease = null;
-        activeStage = null;
-        if (lease is null)
-        {
-            return;
-        }
-
-        try
-        {
-            await lease.DisposeAsync();
-        }
-        catch (Exception exception)
-        {
-            logger.LogWarning(
-                "Artifact file-set reconciliation lease cleanup failed. CommitId={CommitId}; ErrorType={ErrorType}",
-                commitId,
-                exception.GetType().Name);
-        }
+        (activeLease, activeStage) = (null, null);
+        await PersistenceReconciliationLeaseDisposer.DisposeBestEffortAsync(
+            lease,
+            commitId,
+            "ArtifactFileSet",
+            logger);
     }
 }
