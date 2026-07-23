@@ -85,6 +85,9 @@ describe('chatErrorStore', () => {
     expect(resolveChatErrorMessage({ code: 'model_provider_unavailable' })).toBe(
       '模型服务暂时不可用，请稍后重试或联系管理员检查模型网络。',
     )
+    expect(resolveChatErrorMessage({ code: 'planner_model_unavailable' })).toBe(
+      '计划生成模型暂时不可用，请稍后重试或联系管理员检查模型配置。',
+    )
     expect(resolveChatErrorMessage({ code: 'model_request_timeout' })).toBe(
       '模型响应超时，请稍后重试或缩小问题范围。',
     )
