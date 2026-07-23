@@ -171,7 +171,7 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
             queueRepository,
             freshReadGate: AgentPlanV2TestData.CreateDownstreamRuntimeHarnessFreshReadGate());
         var executablePlanJson = task.PlanJson;
-        var handler = new RetryAgentTaskCommandHandler(
+        var handler = new AgentTaskLifecycleCommandHandler(
             taskRepository,
             CreateAgentTaskDtoQueryService(workspaceRepository, approvalRepository, queueRepository),
             lifecycleCoordinator,
@@ -209,7 +209,7 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
             approvalRepository,
             queueRepository,
             freshReadGate: AgentPlanV2TestData.CreateDownstreamRuntimeHarnessFreshReadGate());
-        var handler = new RetryAgentTaskCommandHandler(
+        var handler = new AgentTaskLifecycleCommandHandler(
             taskRepository,
             CreateAgentTaskDtoQueryService(workspaceRepository, approvalRepository, queueRepository),
             lifecycleCoordinator,
@@ -256,7 +256,7 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
             approvalRepository,
             queueRepository,
             runAttemptRepository);
-        var handler = new CancelAgentTaskCommandHandler(
+        var handler = new AgentTaskLifecycleCommandHandler(
             taskRepository,
             CreateAgentTaskDtoQueryService(workspaceRepository, approvalRepository, queueRepository),
             lifecycleCoordinator,
@@ -343,7 +343,7 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
             approvalRepository,
             queueRepository,
             freshReadGate: AgentPlanV2TestData.CreateDownstreamRuntimeHarnessFreshReadGate());
-        var handler = new RunAgentTaskCommandHandler(
+        var handler = new AgentTaskLifecycleCommandHandler(
             taskRepository,
             CreateAgentTaskDtoQueryService(workspaceRepository, approvalRepository, queueRepository),
             lifecycleCoordinator,

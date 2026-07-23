@@ -126,7 +126,7 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
             CreatePlanToolGuard(disabledToolGuard),
             AgentPlanV2TestData.CreateMatchingFreshReadGate(),
             AgentPlanV2TestData.CreateMatchingRoutingSnapshotReader());
-        var approveHandler = new ApproveAgentTaskPlanCommandHandler(
+        var approveHandler = new AgentTaskPlanDecisionCommandHandler(
             taskRepository,
             approvalRepository,
             CreateAgentTaskDtoQueryService(

@@ -817,7 +817,7 @@ public sealed class AgentPlanContractV2Tests
         {
             NodeId = "cloud-device-status",
             NodeKind = "CloudReadNode",
-            Input = basePlan.Nodes.Single().Input with
+            Input = basePlan.Nodes!.Single().Input! with
             {
                 SemanticIntent = cloudIntent.Intent,
                 SemanticPlanDigest = cloudIntent.SemanticPlanDigest,

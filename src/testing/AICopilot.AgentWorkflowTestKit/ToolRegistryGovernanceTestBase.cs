@@ -329,10 +329,12 @@ public abstract class ToolRegistryGovernanceTestBase
         return new PlanAgentTaskCommandHandler(
             new PlanAgentTaskCoordinator(
                 taskRepository ?? new InMemoryRepository<AgentTask>(),
-                new InMemoryRepository<Session>(session),
-                new InMemoryRepository<UploadRecord>(),
+                new AgentTaskPlanPreparationService(
+                    new InMemoryRepository<Session>(session),
+                    new InMemoryRepository<UploadRecord>(),
+                    [],
+                    null),
                 new AgentAuditRecorder(new CapturingAuditLogWriter()),
-                [],
                 new TestCurrentUser(UserId),
                 planToolGuard: planToolGuard,
                 cloudReadonlyPlanService: cloudReadonlyPlanService ?? new FixedCloudReadonlyAgentPlanService()));

@@ -80,7 +80,7 @@ public sealed class CloudReadonlyAgentPlanServiceTests
             "Analysis.Device.Status");
         result.Value.Should().OnlyContain(intent =>
             intent.SemanticPlanDigest.Length == 64 && intent.SemanticPlanDigest.All(character =>
-                character is >= '0' and <= '9' or >= 'a' and <= 'f'));
+                character >= '0' && character <= '9' || character >= 'a' && character <= 'f'));
     }
 
     private static CloudReadonlyAgentPlanService CreateService(params IntentResult[] intents)

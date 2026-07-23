@@ -104,7 +104,7 @@ public sealed class AgentRunQueueProductionOpsTests
         var workspaceRepository = new InMemoryRepository<ArtifactWorkspace>();
         var approvalRepository = new InMemoryRepository<ApprovalRequest>();
         var audit = new CapturingAuditLogWriter();
-        var handler = new RetryAgentTaskCommandHandler(
+        var handler = new AgentTaskLifecycleCommandHandler(
             taskRepository,
             CreateAgentTaskDtoQueryService(workspaceRepository, approvalRepository, queueRepository),
             CreateLifecycleCoordinator(
@@ -136,7 +136,7 @@ public sealed class AgentRunQueueProductionOpsTests
         var maxedTaskRepository = new InMemoryRepository<AgentTask>(maxedTask);
         var maxedWorkspaceRepository = new InMemoryRepository<ArtifactWorkspace>();
         var maxedApprovalRepository = new InMemoryRepository<ApprovalRequest>();
-        var maxedHandler = new RetryAgentTaskCommandHandler(
+        var maxedHandler = new AgentTaskLifecycleCommandHandler(
             maxedTaskRepository,
             CreateAgentTaskDtoQueryService(maxedWorkspaceRepository, maxedApprovalRepository, maxedQueue),
             CreateLifecycleCoordinator(
@@ -168,7 +168,7 @@ public sealed class AgentRunQueueProductionOpsTests
         var workspaceRepository = new InMemoryRepository<ArtifactWorkspace>();
         var approvalRepository = new InMemoryRepository<ApprovalRequest>();
         var attemptRepository = new InMemoryAgentTaskRunAttemptStore();
-        var handler = new CancelAgentTaskCommandHandler(
+        var handler = new AgentTaskLifecycleCommandHandler(
             taskRepository,
             CreateAgentTaskDtoQueryService(workspaceRepository, approvalRepository, queueRepository),
             CreateLifecycleCoordinator(

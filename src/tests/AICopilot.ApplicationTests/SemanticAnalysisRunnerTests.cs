@@ -35,16 +35,17 @@ public sealed class SemanticAnalysisRunnerTests
             new IntentResult { Intent = intent, Query = "查询正式业务数据" },
             sink: null,
             CancellationToken.None);
+        var safeOutput = GetSafeOutput(result);
 
         planner.CallCount.Should().Be(1);
         cloudClient.RequestedPlans.Should().ContainSingle().Which.Target.Should().Be(target);
-        result.Should().Contain("Cloud AiRead");
-        using var resultDocument = JsonDocument.Parse(result);
+        safeOutput.Should().Contain("Cloud AiRead");
+        using var resultDocument = JsonDocument.Parse(safeOutput);
         resultDocument.RootElement.GetProperty("query_execution").GetProperty("returned_row_count").GetInt32()
             .Should().Be(0);
         resultDocument.RootElement.GetProperty("business_data_preview").GetArrayLength().Should().Be(0);
-        result.Should().NotContain("DataAnalysis/Text-to-SQL 补充分析");
-        result.Should().NotContain("Simulation");
+        safeOutput.Should().NotContain("DataAnalysis/Text-to-SQL 补充分析");
+        safeOutput.Should().NotContain("Simulation");
     }
 
     [Fact]
@@ -61,9 +62,10 @@ public sealed class SemanticAnalysisRunnerTests
             new IntentResult { Intent = "Analysis.Recipe.Detail", Query = "查询配方详情" },
             sink: null,
             CancellationToken.None);
+        var safeOutput = GetSafeOutput(result);
 
-        result.Should().Contain(SemanticAnalysisRunner.RecipeDataReadBoundaryMarker);
-        result.Should().Contain("不能查询具体配方");
+        safeOutput.Should().Contain(SemanticAnalysisRunner.RecipeDataReadBoundaryMarker);
+        safeOutput.Should().Contain("不能查询具体配方");
         planner.CallCount.Should().Be(0);
         cloudClient.RequestedPlans.Should().BeEmpty();
     }
@@ -85,14 +87,15 @@ public sealed class SemanticAnalysisRunnerTests
             new IntentResult { Intent = intent, Query = "查询正式业务数据" },
             sink: null,
             CancellationToken.None);
+        var safeOutput = GetSafeOutput(result);
 
         planner.CallCount.Should().Be(1);
         cloudClient.RequestedPlans.Should().BeEmpty();
-        result.Should().Contain(target == SemanticQueryTarget.Device
+        safeOutput.Should().Contain(target == SemanticQueryTarget.Device
             ? SemanticAnalysisRunner.DeviceStatusSourceUnavailableMarker
             : SemanticAnalysisRunner.CloudOnlySemanticSourceUnavailableMarker);
-        result.Should().Contain("不会回退 Direct DB、Text-to-SQL 或 Simulation");
-        result.Should().NotContain("DataAnalysis/Text-to-SQL 补充分析");
+        safeOutput.Should().Contain("不会回退 Direct DB、Text-to-SQL 或 Simulation");
+        safeOutput.Should().NotContain("DataAnalysis/Text-to-SQL 补充分析");
     }
 
     [Theory]
@@ -112,14 +115,15 @@ public sealed class SemanticAnalysisRunnerTests
             new IntentResult { Intent = intent, Query = "查询正式业务数据" },
             sink: null,
             CancellationToken.None);
+        var safeOutput = GetSafeOutput(result);
 
         planner.CallCount.Should().Be(1);
         cloudClient.RequestedPlans.Should().BeEmpty();
-        result.Should().Contain(target == SemanticQueryTarget.Device
+        safeOutput.Should().Contain(target == SemanticQueryTarget.Device
             ? SemanticAnalysisRunner.DeviceStatusSourceUnavailableMarker
             : SemanticAnalysisRunner.CloudOnlySemanticSourceUnavailableMarker);
-        result.Should().Contain("不会回退 Direct DB、Text-to-SQL 或 Simulation");
-        result.Should().NotContain("DataAnalysis/Text-to-SQL 补充分析");
+        safeOutput.Should().Contain("不会回退 Direct DB、Text-to-SQL 或 Simulation");
+        safeOutput.Should().NotContain("DataAnalysis/Text-to-SQL 补充分析");
     }
 
     [Theory]
@@ -142,14 +146,15 @@ public sealed class SemanticAnalysisRunnerTests
             new IntentResult { Intent = intent, Query = "查询正式业务数据" },
             sink: null,
             CancellationToken.None);
+        var safeOutput = GetSafeOutput(result);
 
         planner.CallCount.Should().Be(1);
         cloudClient.RequestedPlans.Should().ContainSingle().Which.Target.Should().Be(target);
-        result.Should().Contain("Cloud AiRead");
-        result.Should().Contain("只读接口暂不可用");
-        result.Should().NotContain("provider detail");
-        result.Should().NotContain("DataAnalysis/Text-to-SQL 补充分析");
-        result.Should().NotContain("Simulation");
+        safeOutput.Should().Contain("Cloud AiRead");
+        safeOutput.Should().Contain("只读接口暂不可用");
+        safeOutput.Should().NotContain("provider detail");
+        safeOutput.Should().NotContain("DataAnalysis/Text-to-SQL 补充分析");
+        safeOutput.Should().NotContain("Simulation");
     }
 
     [Theory]
@@ -175,9 +180,10 @@ public sealed class SemanticAnalysisRunnerTests
             new IntentResult { Intent = intent, Query = "查询设备状态" },
             sink: null,
             CancellationToken.None);
+        var safeOutput = GetSafeOutput(result);
 
-        result.Should().Contain(expectedMessage);
-        result.Should().NotContain("provider detail");
+        safeOutput.Should().Contain(expectedMessage);
+        safeOutput.Should().NotContain("provider detail");
         cloudClient.RequestedPlans.Should().ContainSingle();
     }
 
@@ -266,10 +272,13 @@ public sealed class SemanticAnalysisRunnerTests
         });
         using var tableDocument = JsonDocument.Parse(tableChunk.Content);
         tableDocument.RootElement.GetProperty("data").GetProperty("rows").GetArrayLength().Should().Be(3);
-        using var resultDocument = JsonDocument.Parse(result);
+        using var resultDocument = JsonDocument.Parse(GetSafeOutput(result));
         resultDocument.RootElement.GetProperty("display_blocks").GetArrayLength().Should().Be(5);
         cloudClient.RequestedPlans.Should().ContainSingle();
     }
+
+    private static string GetSafeOutput(AgentAnalysisNodeResult result) =>
+        result.Evidence?.SafeContext ?? result.SafeMessage ?? string.Empty;
 
     private static SemanticAnalysisRunner CreateRunner(
         ICloudAiReadClient cloudAiReadClient,
