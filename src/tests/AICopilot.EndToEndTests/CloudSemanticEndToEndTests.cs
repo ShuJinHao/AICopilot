@@ -15,6 +15,7 @@ using AICopilot.Infrastructure.Mcp;
 using AICopilot.McpService;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
+using AICopilot.SharedKernel.Result;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
@@ -300,8 +301,10 @@ public sealed class CloudSemanticEndToEndTests : EndToEndScenarioTestBase
                 messages.Count >= 20 &&
                 messages.Count(message => message.Type == MessageType.User) >= 10 &&
                 messages.Count(message => message.Type == MessageType.Assistant) >= 10 &&
-                messages.Any(message => message.Type == MessageType.Assistant && message.Content.Contains("正式 Cloud AiRead 数据源不可用", StringComparison.OrdinalIgnoreCase)) &&
-                messages.Where(message => message.Type == MessageType.Assistant).All(message => !message.Content.Contains("Motor overload", StringComparison.OrdinalIgnoreCase)));
+                messages.Where(message => message.Type == MessageType.Assistant).All(message =>
+                    message.RenderPayloadJson is not null &&
+                    message.RenderPayloadJson.Contains(AppProblemCodes.ChatStreamFailed, StringComparison.Ordinal) &&
+                    !message.Content.Contains("Motor overload", StringComparison.OrdinalIgnoreCase)));
         }
         finally
         {

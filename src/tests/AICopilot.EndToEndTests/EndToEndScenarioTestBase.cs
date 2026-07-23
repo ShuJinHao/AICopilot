@@ -15,6 +15,7 @@ using AICopilot.Infrastructure.Mcp;
 using AICopilot.McpService;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
+using AICopilot.SharedKernel.Result;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
@@ -398,18 +399,15 @@ public abstract class EndToEndScenarioTestBase
             message
         });
 
-        events.Should().NotContain(item => item.Type == "Error");
-        events.Should().Contain(item => item.Type == "Intent" && item.Content.Contains(expectedIntent, StringComparison.OrdinalIgnoreCase));
+        AssertRequiredCloudBranchFailure(events, expectedIntent);
 
         var text = string.Concat(events.Where(item => item.Type == "Text").Select(item => item.Content));
-        text.Should().NotBeNullOrWhiteSpace();
-        text.Should().Contain("结论：");
-        text.Should().Contain("正式 Cloud AiRead 数据源不可用");
-        text.Should().Contain("未回退 Direct DB、Text-to-SQL 或 Simulation");
-        text.Should().NotContain("关键指标：");
-        text.Should().NotContain("关键记录：");
+        foreach (var expectedTextFragment in expectedTextFragments)
+        {
+            text.Should().NotContain(expectedTextFragment,
+                "a failed required Cloud branch must not expose seeded fallback data as a final answer");
+        }
 
-        text.Contains("SELECT", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
         text.Contains("device_master_view", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
         text.Contains("device_log_view", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
         text.Contains("device_master_cloud_sim_view", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
@@ -427,17 +425,33 @@ public abstract class EndToEndScenarioTestBase
     {
         var events = await PostChatAsync(new { sessionId, message });
 
-        events.Should().NotContain(item => item.Type == "Error");
+        AssertRequiredCloudBranchFailure(events, expectedIntent);
+    }
+
+    private static void AssertRequiredCloudBranchFailure(
+        IReadOnlyCollection<ChatChunkDto> events,
+        string expectedIntent)
+    {
         events.Should().Contain(item =>
             item.Type == "Intent" &&
             item.Content.Contains(expectedIntent, StringComparison.OrdinalIgnoreCase));
+        events.Should().Contain(item =>
+            item.Type == "AgentEvent" &&
+            item.Content.Contains(AppProblemCodes.CloudReadonlyIntentUnsupported, StringComparison.Ordinal) &&
+            item.Content.Contains("\"required\":true", StringComparison.Ordinal));
+        events.Should().NotContain(item => item.Type == "Text",
+            "required branch failure must stop final synthesis instead of generating an availability narrative");
 
-        var text = string.Concat(
-            events.Where(item => item.Type == "Text").Select(item => item.Content));
-        text.Should().Contain("正式 Cloud AiRead 数据源不可用");
-        text.Should().Contain("未回退 Direct DB、Text-to-SQL 或 Simulation");
-        text.Should().NotContain("Running");
-        text.Contains("SELECT", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
+        var error = events.Should().ContainSingle(item => item.Type == "Error").Which;
+        var problem = JsonSerializer.Deserialize<ProblemChunkDto>(error.Content, JsonOptions);
+        problem.Should().NotBeNull();
+        problem!.Code.Should().Be(AppProblemCodes.ChatStreamFailed);
+        problem.Detail.Should().Contain("required workflow branches");
+        problem.UserFacingMessage.Should().Contain("停止生成最终回答");
+
+        var disclosedPayload = string.Concat(events.Select(item => item.Content));
+        disclosedPayload.Contains("SELECT", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
+        disclosedPayload.Contains("Running", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
     }
 
     protected async Task AssertRecipeDataReadBlockedAsync(
@@ -451,21 +465,16 @@ public abstract class EndToEndScenarioTestBase
             message
         });
 
-        events.Should().NotContain(item => item.Type == "Error");
-        events.Should().Contain(item => item.Type == "Intent" && item.Content.Contains(expectedIntent, StringComparison.OrdinalIgnoreCase));
+        AssertRequiredCloudBranchFailure(events, expectedIntent);
 
-        var text = string.Concat(events.Where(item => item.Type == "Text").Select(item => item.Content));
-        text.Should().NotBeNullOrWhiteSpace();
-        text.Should().Contain("当前 AI 不读取云端配方主数据或配方版本数据");
-        text.Should().Contain("不能查询具体配方");
-        text.Should().NotContain("Recipe-Cut-01");
-        text.Should().NotContain("V2.0");
-        text.Should().NotContain("V1.0");
-        text.Should().NotContain("DEV-001");
-        text.Contains("SELECT", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
-        text.Contains("recipe_cloud_sim_view", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
-        text.Contains("vw_recipe_readonly", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
-        text.Contains("DeviceSemanticReadonly", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
+        var errorPayload = events.Single(item => item.Type == "Error").Content;
+        errorPayload.Should().NotContain("Recipe-Cut-01");
+        errorPayload.Should().NotContain("V2.0");
+        errorPayload.Should().NotContain("V1.0");
+        errorPayload.Should().NotContain("DEV-001");
+        errorPayload.Contains("recipe_cloud_sim_view", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
+        errorPayload.Contains("vw_recipe_readonly", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
+        errorPayload.Contains("DeviceSemanticReadonly", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
     }
 
     protected async Task<T> GetJsonAsync<T>(string uri)
