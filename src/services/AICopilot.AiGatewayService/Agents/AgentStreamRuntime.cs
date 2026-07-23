@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using AICopilot.AiGatewayService.Approvals;
 using AICopilot.AiGatewayService.Models;
 using AICopilot.AiGatewayService.Safety;
+using AICopilot.AiGatewayService.Sessions;
 using AICopilot.AiGatewayService.Workflows;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
 using AICopilot.Core.AiGateway.Ids;

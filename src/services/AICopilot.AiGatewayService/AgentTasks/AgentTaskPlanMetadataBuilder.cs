@@ -7,20 +7,6 @@ internal static class AgentTaskPlanMetadataBuilder
 {
     private const string SimulationBusinessSourceLabel = "AI 独立模拟业务库";
 
-    public static IReadOnlyCollection<AgentPlannerDataSourceSummary> BuildPlannerDataSourceSummaries(
-        IReadOnlyCollection<BusinessDatabaseDescriptor> dataSources)
-    {
-        return dataSources
-            .Select(source => new AgentPlannerDataSourceSummary(
-                source.Id,
-                source.Name,
-                source.ExternalSystemType.ToString(),
-                source.BusinessDomain,
-                source.ExternalSystemType == DataSourceExternalSystemType.SimulationBusiness,
-                ResolveSourceLabel(source)))
-            .ToArray();
-    }
-
     public static IReadOnlyCollection<AgentTaskPlanDataSourceSummaryDocument> BuildPlanDataSourceSummaries(
         IReadOnlyCollection<BusinessDatabaseDescriptor> dataSources)
     {

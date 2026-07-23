@@ -292,8 +292,31 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             return InvalidResult("Plan v2 arrays, selection modes, budgets, approval, snapshot, and security summaries must be explicit and non-null.");
         }
 
-        if (!Enum.IsDefined(plan.CapabilitySelectionMode.Value) ||
-            !Enum.IsDefined(plan.PluginSelectionMode.Value) ||
+        var capabilitySelectionMode = plan.CapabilitySelectionMode!.Value;
+        var pluginSelectionMode = plan.PluginSelectionMode!.Value;
+        var cloudReadonlyIntents = plan.CloudReadonlyIntents!;
+        var dataSourceIds = plan.DataSourceIds!;
+        var businessDomains = plan.BusinessDomains!;
+        var forcedStepCodes = plan.ForcedStepCodes!;
+        var planApprovalCheckpoints = plan.ApprovalCheckpoints!;
+        var dataSourceSummaries = plan.DataSourceSummaries!;
+        var toolRiskSummary = plan.ToolRiskSummary!;
+        var toolApprovalCheckpoints = plan.ToolApprovalCheckpoints!;
+        var capabilityGaps = plan.CapabilityGaps!;
+        var intentCandidates = plan.IntentCandidates!;
+        var requestedCapabilityCodes = plan.RequestedCapabilityCodes!;
+        var selectedPluginIds = plan.SelectedPluginIds!;
+        var artifactTargets = plan.ArtifactTargets!;
+        var nodes = plan.Nodes!;
+        var joinPolicies = plan.JoinPolicies!;
+        var budgets = plan.Budgets!;
+        var concurrencyPolicy = plan.ConcurrencyPolicy!;
+        var approvalSummary = plan.ApprovalSummary!;
+        var executionSnapshot = plan.ExecutionSnapshot!;
+        var securitySummary = plan.SecuritySummary!;
+
+        if (!Enum.IsDefined(capabilitySelectionMode) ||
+            !Enum.IsDefined(pluginSelectionMode) ||
             !Enum.TryParse<AgentTaskType>(plan.TaskType, ignoreCase: false, out var taskType) ||
             !Enum.IsDefined(taskType) ||
             !string.Equals(plan.TaskType, taskType.ToString(), StringComparison.Ordinal) ||
@@ -338,16 +361,16 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             return failedRootSet;
         }
 
-        if (plan.CapabilityGaps.Any(gap => !AgentPlanCapabilityGapCodes.IsFrozen(gap)))
+        if (capabilityGaps.Any(gap => !AgentPlanCapabilityGapCodes.IsFrozen(gap)))
         {
             return InvalidResult("capabilityGaps must contain only frozen server-owned gap codes.");
         }
 
         var hasExactSimulationSourceBoundary =
-            plan.DataSourceIds.Count == 1 &&
-            plan.DataSourceSummaries.Count == 1 &&
-            plan.DataSourceSummaries.Single() is { } simulationSource &&
-            simulationSource.Id == plan.DataSourceIds.Single() &&
+            dataSourceIds.Count == 1 &&
+            dataSourceSummaries.Count == 1 &&
+            dataSourceSummaries.Single() is { } simulationSource &&
+            simulationSource.Id == dataSourceIds.Single() &&
             simulationSource.IsSimulation &&
             string.Equals(
                 simulationSource.SourceMode,
@@ -359,20 +382,20 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
                 "plannerSafetySummary.isSimulationOnly must exactly match one marked SimulationBusiness source.");
         }
 
-        var hasUnresolvedCapabilityGaps = plan.CapabilityGaps.Count != 0;
-        if (validDraftLifecycle && hasUnresolvedCapabilityGaps && plan.Nodes.Count != 0)
+        var hasUnresolvedCapabilityGaps = capabilityGaps.Count != 0;
+        if (validDraftLifecycle && hasUnresolvedCapabilityGaps && nodes.Count != 0)
         {
             return InvalidResult(
                 "A PlanDraft with unresolved capability gaps must remain node-free.");
         }
 
-        if (validDraftLifecycle && !hasUnresolvedCapabilityGaps && plan.Nodes.Count == 0)
+        if (validDraftLifecycle && !hasUnresolvedCapabilityGaps && nodes.Count == 0)
         {
             return InvalidResult(
                 "A gap-free PlanDraft must contain the authoritative compiler graph.");
         }
 
-        if (validExecutableLifecycle && (hasUnresolvedCapabilityGaps || plan.Nodes.Count == 0))
+        if (validExecutableLifecycle && (hasUnresolvedCapabilityGaps || nodes.Count == 0))
         {
             return InvalidResult(
                 "ExecutablePlan v2 requires a gap-free authoritative compiler graph.");
@@ -385,10 +408,10 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             return InvalidResult("queryMode must be the exact task-bound CloudReadonly/TextToSql value.");
         }
 
-        var expectedArtifactTools = plan.ArtifactTargets
+        var expectedArtifactTools = artifactTargets
             .Select(target => target switch
             {
-                "chart" => plan.DataSourceIds.Count > 0
+                "chart" => dataSourceIds.Count > 0
                     ? "generate_business_chart"
                     : "generate_chart_data",
                 "markdown" => "generate_markdown_report",
@@ -416,7 +439,7 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
                 "finalize_artifacts",
                 StringComparison.Ordinal))
             .ToArray();
-        var hasCanonicalFinalizationStep = plan.ArtifactTargets.Count == 0
+        var hasCanonicalFinalizationStep = artifactTargets.Count == 0
             ? finalizationSteps.Length == 0 &&
               plan.Steps.All(step => step.StepType != AgentStepType.Finalize)
             : finalizationSteps.Length == 1 &&
@@ -424,7 +447,7 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
               finalizationSteps[0].Step.StepType == AgentStepType.Finalize &&
               finalizationSteps[0].Step.RequiresApproval &&
               plan.Steps.Count(step => step.StepType == AgentStepType.Finalize) == 1;
-        if (plan.ArtifactTargets.Any(target => target is not ("chart" or "markdown" or "html" or "pdf" or "pptx" or "xlsx")) ||
+        if (artifactTargets.Any(target => target is not ("chart" or "markdown" or "html" or "pdf" or "pptx" or "xlsx")) ||
             !actualArtifactTools.SequenceEqual(expectedArtifactTools, StringComparer.Ordinal) ||
             !hasCanonicalFinalizationStep)
         {
@@ -437,23 +460,23 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             .Where(toolCode => !string.IsNullOrWhiteSpace(toolCode))
             .Select(toolCode => toolCode!)
             .ToHashSet(StringComparer.Ordinal);
-        if (plan.ForcedStepCodes.Any(code => !stepToolCodes.Contains(code)))
+        if (forcedStepCodes.Any(code => !stepToolCodes.Contains(code)))
         {
             return InvalidResult("forcedStepCodes must be a subset of the frozen runtime Step tools.");
         }
 
-        if (plan.DataSourceSummaries.Any(summary =>
+        if (dataSourceSummaries.Any(summary =>
                 summary is null ||
                 summary.Id == Guid.Empty ||
                 string.IsNullOrWhiteSpace(summary.Name) ||
                 string.IsNullOrWhiteSpace(summary.SourceMode) ||
                 string.IsNullOrWhiteSpace(summary.SourceLabel)) ||
-            !IsCanonicalOrder(plan.DataSourceSummaries.Select(summary => summary.Id.ToString("D"))) ||
-            !plan.DataSourceIds.SequenceEqual(
-                plan.DataSourceSummaries.Select(summary => summary.Id),
+            !IsCanonicalOrder(dataSourceSummaries.Select(summary => summary.Id.ToString("D"))) ||
+            !dataSourceIds.SequenceEqual(
+                dataSourceSummaries.Select(summary => summary.Id),
                 EqualityComparer<Guid>.Default) ||
-            !plan.BusinessDomains.SequenceEqual(
-                plan.DataSourceSummaries
+            !businessDomains.SequenceEqual(
+                dataSourceSummaries
                     .Select(summary => summary.BusinessDomain)
                     .Where(domain => !string.IsNullOrWhiteSpace(domain))
                     .Select(domain => domain!)
@@ -465,146 +488,146 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
         }
 
         var validRiskNames = Enum.GetNames<AiToolRiskLevel>().ToHashSet(StringComparer.Ordinal);
-        if (plan.ToolRiskSummary.Any(pair =>
+        if (toolRiskSummary.Any(pair =>
                 !validRiskNames.Contains(pair.Key) || pair.Value < 0) ||
             plan.PlannerSafetySummary!.ToolRiskSummary is null ||
-            !plan.ToolRiskSummary.OrderBy(pair => pair.Key, StringComparer.Ordinal)
+            !toolRiskSummary.OrderBy(pair => pair.Key, StringComparer.Ordinal)
                 .SequenceEqual(plan.PlannerSafetySummary.ToolRiskSummary.OrderBy(pair => pair.Key, StringComparer.Ordinal)) ||
-            plan.ToolRiskSummary.Values.Sum() != plan.VisibleToolCount ||
+            toolRiskSummary.Values.Sum() != plan.VisibleToolCount ||
             plan.VisibleToolCount != plan.PlannerAvailableToolCount)
         {
             return InvalidResult("tool risk/count summaries must exactly match the frozen planner-visible catalog summary.");
         }
 
-        if (plan.PluginSelectionMode != AgentPluginSelectionMode.BuiltInOnly ||
-            plan.SelectedPluginIds.Count != 0)
+        if (pluginSelectionMode != AgentPluginSelectionMode.BuiltInOnly ||
+            selectedPluginIds.Count != 0)
         {
             return InvalidResult("P0 requires pluginSelectionMode=BuiltInOnly and selectedPluginIds=[].");
         }
 
-        if (plan.CapabilitySelectionMode == AgentCapabilitySelectionMode.InferredFromGoal &&
-            plan.Nodes.Count > 0 &&
-            plan.RequestedCapabilityCodes.Count == 0)
+        if (capabilitySelectionMode == AgentCapabilitySelectionMode.InferredFromGoal &&
+            nodes.Count > 0 &&
+            requestedCapabilityCodes.Count == 0)
         {
             return InvalidResult("InferredFromGoal executable nodes require a non-empty canonical capability set.");
         }
 
-        if (plan.CapabilitySelectionMode == AgentCapabilitySelectionMode.ExplicitAllowlist &&
-            plan.RequestedCapabilityCodes.Count == 0 &&
-            plan.Nodes.Count > 0)
+        if (capabilitySelectionMode == AgentCapabilitySelectionMode.ExplicitAllowlist &&
+            requestedCapabilityCodes.Count == 0 &&
+            nodes.Count > 0)
         {
             return InvalidResult("An explicit empty capability allowlist cannot contain executable nodes.");
         }
 
         var expectedJoinPolicies = AgentPlanCanonicalCollections.Strings(
-            plan.Nodes.Select(node => node.JoinPolicy).Where(policy => policy is not null).Select(policy => policy!));
-        if (!plan.JoinPolicies.SequenceEqual(expectedJoinPolicies, StringComparer.Ordinal))
+            nodes.Select(node => node.JoinPolicy).Where(policy => policy is not null).Select(policy => policy!));
+        if (!joinPolicies.SequenceEqual(expectedJoinPolicies, StringComparer.Ordinal))
         {
             return InvalidResult("joinPolicies must exactly match the canonical policies used by Plan nodes.");
         }
 
         if (plan.TopologyProfile == "LinearV1" &&
-            (plan.JoinPolicies.Count != 0 ||
-             plan.ConcurrencyPolicy.MaxParallelism != 1 ||
+            (joinPolicies.Count != 0 ||
+             concurrencyPolicy.MaxParallelism != 1 ||
              !string.Equals(
-                 plan.ConcurrencyPolicy.PolicyVersion,
+                 concurrencyPolicy.PolicyVersion,
                  AgentPlanContractVersions.LinearConcurrencyPolicyV1,
                  StringComparison.Ordinal)) ||
             plan.TopologyProfile == "DagV1" &&
-            (plan.ConcurrencyPolicy.MaxParallelism is < AgentPlanContractVersions.DagMinParallelism
+            (concurrencyPolicy.MaxParallelism is < AgentPlanContractVersions.DagMinParallelism
                 or > AgentPlanContractVersions.DagMaxParallelism ||
              !string.Equals(
-                 plan.ConcurrencyPolicy.PolicyVersion,
+                 concurrencyPolicy.PolicyVersion,
                  AgentPlanContractVersions.DagConcurrencyPolicyV1,
                  StringComparison.Ordinal)))
         {
             return InvalidResult("Topology profile and bounded concurrency policy do not match.");
         }
 
-        if (plan.Budgets.MaxNodes != AgentPlanContractVersions.DefaultMaxNodes ||
-            plan.Budgets.MaxToolCalls != AgentPlanContractVersions.DefaultMaxToolCalls ||
-            plan.Budgets.MaxModelCalls != AgentPlanContractVersions.DefaultMaxModelCalls ||
-            plan.Budgets.MaxInputTokens != AgentPlanContractVersions.DefaultMaxInputTokens ||
-            plan.Budgets.MaxOutputTokens != AgentPlanContractVersions.DefaultMaxOutputTokens ||
-            plan.Budgets.MaxElapsedSeconds != AgentPlanContractVersions.DefaultMaxElapsedSeconds ||
-            plan.Budgets.MaxCostAmount != AgentPlanContractVersions.DefaultMaxCostAmount ||
+        if (budgets.MaxNodes != AgentPlanContractVersions.DefaultMaxNodes ||
+            budgets.MaxToolCalls != AgentPlanContractVersions.DefaultMaxToolCalls ||
+            budgets.MaxModelCalls != AgentPlanContractVersions.DefaultMaxModelCalls ||
+            budgets.MaxInputTokens != AgentPlanContractVersions.DefaultMaxInputTokens ||
+            budgets.MaxOutputTokens != AgentPlanContractVersions.DefaultMaxOutputTokens ||
+            budgets.MaxElapsedSeconds != AgentPlanContractVersions.DefaultMaxElapsedSeconds ||
+            budgets.MaxCostAmount != AgentPlanContractVersions.DefaultMaxCostAmount ||
             !string.Equals(
-                plan.Budgets.CostCurrency,
+                budgets.CostCurrency,
                 AgentPlanContractVersions.DefaultCostCurrency,
                 StringComparison.Ordinal) ||
-            plan.Budgets.MaxRetries != AgentPlanContractVersions.DefaultMaxRetries ||
-            plan.Budgets.MaxArtifactCount != AgentPlanContractVersions.DefaultMaxArtifactCount ||
-            plan.Budgets.MaxArtifactBytes != AgentPlanContractVersions.DefaultMaxArtifactBytes ||
-            plan.Budgets.MaxCanonicalBytes != AgentPlanContractVersions.MaxPlanCanonicalBytes ||
+            budgets.MaxRetries != AgentPlanContractVersions.DefaultMaxRetries ||
+            budgets.MaxArtifactCount != AgentPlanContractVersions.DefaultMaxArtifactCount ||
+            budgets.MaxArtifactBytes != AgentPlanContractVersions.DefaultMaxArtifactBytes ||
+            budgets.MaxCanonicalBytes != AgentPlanContractVersions.MaxPlanCanonicalBytes ||
             !string.Equals(
-                plan.Budgets.PolicyVersion,
+                budgets.PolicyVersion,
                 AgentPlanContractVersions.BudgetPolicyV1,
                 StringComparison.Ordinal))
         {
             return InvalidResult("Plan v2 budgets are outside the frozen P0 range/policy.");
         }
 
-        if (plan.Steps.Count > plan.Budgets.MaxNodes ||
-            plan.Nodes.Count > plan.Budgets.MaxNodes ||
-            plan.Nodes.Count > 0 && plan.Nodes.Count != plan.Steps.Count)
+        if (plan.Steps.Count > budgets.MaxNodes ||
+            nodes.Count > budgets.MaxNodes ||
+            nodes.Count > 0 && nodes.Count != plan.Steps.Count)
         {
             return InvalidResult(
                 "Plan v2 Steps/Nodes must stay within maxNodes and use a one-to-one execution projection.");
         }
 
-        if (plan.ExecutionSnapshot.ToolCatalogVersion <= 0 ||
-            !IsSha256(plan.ExecutionSnapshot.ToolCatalogDigest) ||
-            !IsSha256(plan.ExecutionSnapshot.ProviderCatalogDigest) ||
-            !IsSha256(plan.ExecutionSnapshot.PluginCatalogDigest) ||
-            !IsSha256(plan.ExecutionSnapshot.McpCatalogDigest) ||
+        if (executionSnapshot.ToolCatalogVersion <= 0 ||
+            !IsSha256(executionSnapshot.ToolCatalogDigest) ||
+            !IsSha256(executionSnapshot.ProviderCatalogDigest) ||
+            !IsSha256(executionSnapshot.PluginCatalogDigest) ||
+            !IsSha256(executionSnapshot.McpCatalogDigest) ||
             !AgentPlanCatalogSnapshotAuthority.HasValidFrozenNonCatalogFields(
-                plan.ExecutionSnapshot,
+                executionSnapshot,
                 plan.PlannerModelId) ||
             !AgentPlanCatalogSnapshotAuthority.MatchesAuthorizedRosters(
-                plan.ExecutionSnapshot,
-                plan.DataSourceIds,
+                executionSnapshot,
+                dataSourceIds,
                 plan.KnowledgeBaseIds,
-                plan.IntentCandidates) ||
+                intentCandidates) ||
             !string.Equals(
-                plan.ExecutionSnapshot.ConcurrencyPolicyVersion,
-                plan.ConcurrencyPolicy.PolicyVersion,
+                executionSnapshot.ConcurrencyPolicyVersion,
+                concurrencyPolicy.PolicyVersion,
                 StringComparison.Ordinal))
         {
             return InvalidResult("ExecutionSnapshot is incomplete, stale, or outside the frozen P0 snapshot contract.");
         }
 
-        if (plan.IsExecutable && plan.ExecutionSnapshot.ModelId is null)
+        if (plan.IsExecutable && executionSnapshot.ModelId is null)
         {
             return InvalidResult("ExecutablePlan requires an authoritative prompt/model/context-window snapshot.");
         }
 
-        if (!plan.SecuritySummary.CloudReadOnly ||
-            plan.SecuritySummary.CloudMutationAllowed ||
-            plan.SecuritySummary.PlcControlAllowed ||
-            plan.SecuritySummary.PreConfirmationExecutionAllowed ||
-            plan.SecuritySummary.RawPromptPersisted ||
-            plan.SecuritySummary.RawRouterReasoningPersisted)
+        if (!securitySummary.CloudReadOnly ||
+            securitySummary.CloudMutationAllowed ||
+            securitySummary.PlcControlAllowed ||
+            securitySummary.PreConfirmationExecutionAllowed ||
+            securitySummary.RawPromptPersisted ||
+            securitySummary.RawRouterReasoningPersisted)
         {
             return InvalidResult("Plan v2 securitySummary violates the permanent Cloud-readonly/PLC/raw-prompt boundary.");
         }
 
         var approvalCheckpoints = ValidateCanonicalStringSet(
-            plan.ApprovalSummary.ApprovalCheckpoints,
+            approvalSummary.ApprovalCheckpoints,
             "approvalSummary.approvalCheckpoints");
-        if (!approvalCheckpoints.IsSuccess || !plan.ApprovalSummary.RequiresPlanConfirmation)
+        if (!approvalCheckpoints.IsSuccess || !approvalSummary.RequiresPlanConfirmation)
         {
             return !approvalCheckpoints.IsSuccess
                 ? approvalCheckpoints
                 : InvalidResult("Plan v2 must require explicit plan confirmation.");
         }
 
-        if (!IsCanonicalOrder(plan.IntentCandidates.Select(candidate => candidate?.IntentCode ?? string.Empty)))
+        if (!IsCanonicalOrder(intentCandidates.Select(candidate => candidate?.IntentCode ?? string.Empty)))
         {
             return InvalidResult("intentCandidates must be a non-null, duplicate-free ordinal canonical array.");
         }
 
         var candidateCodes = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var candidate in plan.IntentCandidates)
+        foreach (var candidate in intentCandidates)
         {
             if (candidate is null)
             {
@@ -624,37 +647,37 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
         }
 
         var orderedCandidateCodes = candidateCodes.OrderBy(value => value, StringComparer.Ordinal).ToArray();
-        if (!plan.RequestedCapabilityCodes.SequenceEqual(orderedCandidateCodes, StringComparer.Ordinal))
+        if (!requestedCapabilityCodes.SequenceEqual(orderedCandidateCodes, StringComparer.Ordinal))
         {
             return InvalidResult(
                 "requestedCapabilityCodes must exactly match the canonical IntentCandidate catalog subset.");
         }
 
-        if (plan.IntentCandidates.Any(candidate =>
-                candidate.RequestedResources.DataSourceIds.Any(id => !plan.DataSourceIds.Contains(id)) ||
+        if (intentCandidates.Any(candidate =>
+                candidate.RequestedResources.DataSourceIds.Any(id => !dataSourceIds.Contains(id)) ||
                 candidate.RequestedResources.KnowledgeBaseIds.Any(id => !plan.KnowledgeBaseIds.Contains(id)) ||
                 candidate.RequestedResources.UploadIds.Any(id => !plan.UploadIds.Contains(id))))
         {
             return InvalidResult("IntentCandidate resource ids must be subsets of the Plan-authorized root resource roster.");
         }
 
-        if (validExecutableLifecycle && plan.CapabilityGaps.Count != 0)
+        if (validExecutableLifecycle && capabilityGaps.Count != 0)
         {
             return InvalidResult("ExecutablePlan cannot retain unresolved capability gaps.");
         }
 
-        if (validExecutableLifecycle && plan.IntentCandidates.Any(candidate =>
+        if (validExecutableLifecycle && intentCandidates.Any(candidate =>
                 candidate.Availability != AgentIntentAvailability.Available ||
                 candidate.CapabilityGap is not null))
         {
             return InvalidResult("ExecutablePlan requires every requested IntentCandidate to be available and gap-free.");
         }
 
-        var orderedCloudIntentCodes = plan.CloudReadonlyIntents
+        var orderedCloudIntentCodes = cloudReadonlyIntents
             .Select(intent => intent.Intent)
             .OrderBy(value => value, StringComparer.Ordinal)
             .ToArray();
-        if (!plan.CloudReadonlyIntents
+        if (!cloudReadonlyIntents
                 .Select(intent => intent.Intent)
                 .SequenceEqual(orderedCloudIntentCodes, StringComparer.Ordinal) ||
             orderedCloudIntentCodes.Length != orderedCloudIntentCodes.Distinct(StringComparer.Ordinal).Count())
@@ -662,7 +685,7 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             return InvalidResult("Cloud readonly typed semantic plans must be unique and ordered by canonical intent code.");
         }
 
-        foreach (var intent in plan.CloudReadonlyIntents)
+        foreach (var intent in cloudReadonlyIntents)
         {
             var cloudIntent = ValidateCloudReadonlyIntent(intent, candidateCodes);
             if (!cloudIntent.IsSuccess)
@@ -671,7 +694,7 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             }
         }
 
-        var expectedCloudIntentCodes = plan.IntentCandidates
+        var expectedCloudIntentCodes = intentCandidates
             .Where(candidate =>
                 candidate.IntentClass == AgentIntentClass.CloudOnly &&
                 candidate.Availability == AgentIntentAvailability.Available &&
@@ -687,22 +710,22 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
 
         if (validExecutableLifecycle &&
             taskType == AgentTaskType.CloudDataReport &&
-            plan.CloudReadonlyIntents.Count == 0)
+            cloudReadonlyIntents.Count == 0)
         {
             return InvalidResult("Executable CloudDataReport requires at least one frozen typed Cloud readonly semantic plan.");
         }
 
         var nodesResult = ValidateNodes(
-            plan.Nodes,
+            nodes,
             plan.Steps,
-            plan.RequestedCapabilityCodes,
-            plan.IntentCandidates,
-            plan.Budgets,
+            requestedCapabilityCodes,
+            intentCandidates,
+            budgets,
             plan.TopologyProfile,
-            plan.ConcurrencyPolicy,
-            plan.ExecutionSnapshot.ModelId,
-            plan.ExecutionSnapshot.ModelParametersHash,
-            plan.CloudReadonlyIntents);
+            concurrencyPolicy,
+            executionSnapshot.ModelId,
+            executionSnapshot.ModelParametersHash,
+            cloudReadonlyIntents);
         if (!nodesResult.IsSuccess)
         {
             return nodesResult;
@@ -710,16 +733,16 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
 
         if (validExecutableLifecycle)
         {
-            var binding = ValidateExecutableStepCapabilityBindings(plan.Steps, plan.IntentCandidates);
+            var binding = ValidateExecutableStepCapabilityBindings(plan.Steps, intentCandidates);
             if (!binding.IsSuccess)
             {
                 return binding;
             }
         }
 
-        foreach (var candidate in plan.IntentCandidates)
+        foreach (var candidate in intentCandidates)
         {
-            var matchingNodes = plan.Nodes
+            var matchingNodes = nodes
                 .Where(node => node.RequestedCapabilityCodes.Contains(candidate.IntentCode, StringComparer.Ordinal))
                 .ToArray();
             if (candidate.IntentClass == AgentIntentClass.CloudOnly &&
@@ -751,11 +774,11 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             .Distinct(StringComparer.Ordinal)
             .OrderBy(value => value, StringComparer.Ordinal)
             .ToArray();
-        if (!plan.ApprovalSummary.ApprovalCheckpoints.SequenceEqual(
+        if (!approvalSummary.ApprovalCheckpoints.SequenceEqual(
                 expectedApprovalCheckpoints,
                 StringComparer.Ordinal) ||
-            !plan.ApprovalCheckpoints.SequenceEqual(expectedApprovalCheckpoints, StringComparer.Ordinal) ||
-            !plan.ToolApprovalCheckpoints.SequenceEqual(
+            !planApprovalCheckpoints.SequenceEqual(expectedApprovalCheckpoints, StringComparer.Ordinal) ||
+            !toolApprovalCheckpoints.SequenceEqual(
                 plan.Steps
                     .Where(step => step.RequiresApproval && !string.IsNullOrWhiteSpace(step.ToolCode))
                     .Select(step => step.ToolCode!)
@@ -1106,16 +1129,17 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
                 return InvalidResult($"Node at index {index} violates the active Node v1 contract.");
             }
 
-            var cloudReadonlyIntent = node.Input.SemanticIntent is { } semanticIntent &&
+            var nodeInput = node.Input!;
+            var cloudReadonlyIntent = nodeInput.SemanticIntent is { } semanticIntent &&
                                       cloudIntentsByCode.TryGetValue(semanticIntent, out var matchedCloudIntent)
                 ? matchedCloudIntent
                 : null;
 
-            if (node.Input.RequestedScope is null ||
-                node.Input.BusinessDomains is null ||
-                !IsCanonicalOrder(node.Input.RequestedScope) ||
-                !IsCanonicalOrder(node.Input.BusinessDomains) ||
-                node.Input.TimeRange is { } inputRange &&
+            if (nodeInput.RequestedScope is null ||
+                nodeInput.BusinessDomains is null ||
+                !IsCanonicalOrder(nodeInput.RequestedScope) ||
+                !IsCanonicalOrder(nodeInput.BusinessDomains) ||
+                nodeInput.TimeRange is { } inputRange &&
                     (string.IsNullOrWhiteSpace(inputRange.TimeZone) ||
                      inputRange.FromUtc is null && inputRange.ToUtc is null ||
                      inputRange.FromUtc > inputRange.ToUtc) ||
@@ -1169,12 +1193,12 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             if (ContainsForbiddenExecutionSemantic(node.NodeKind) ||
                 node.RequestedToolCodes.Any(ContainsForbiddenExecutionSemantic) ||
                 node.RequestedCapabilityCodes.Any(ContainsForbiddenExecutionSemantic) ||
-                ContainsForbiddenExecutionSemantic(node.Input.SemanticIntent) ||
-                ContainsForbiddenExecutionSemantic(node.Input.TypedProvider) ||
-                ContainsForbiddenExecutionSemantic(node.Input.ExecutionMode) ||
-                ContainsForbiddenExecutionSemantic(node.Input.RequestedPermission) ||
-                node.Input.RequestedScope.Any(ContainsForbiddenExecutionSemantic) ||
-                node.Input.BusinessDomains.Any(ContainsForbiddenExecutionSemantic))
+                ContainsForbiddenExecutionSemantic(nodeInput.SemanticIntent) ||
+                ContainsForbiddenExecutionSemantic(nodeInput.TypedProvider) ||
+                ContainsForbiddenExecutionSemantic(nodeInput.ExecutionMode) ||
+                ContainsForbiddenExecutionSemantic(nodeInput.RequestedPermission) ||
+                nodeInput.RequestedScope.Any(ContainsForbiddenExecutionSemantic) ||
+                nodeInput.BusinessDomains.Any(ContainsForbiddenExecutionSemantic))
             {
                 return InvalidResult($"Node '{node.NodeId}' requests Cloud mutation or PLC/control execution.");
             }
@@ -1240,7 +1264,7 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
                     $"Node '{node.NodeId}' requests a tool outside the strict intersection of its requested capability codes and frozen tool allowlists.");
             }
 
-            if (node.Input.CanonicalInputJson is { } inputJson)
+            if (nodeInput.CanonicalInputJson is { } inputJson)
             {
                 var inputResult = ValidateCanonicalNodeInput(inputJson, node.NodeId);
                 if (!inputResult.IsSuccess)
@@ -1250,22 +1274,22 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             }
 
             if (node.NodeKind == "CloudReadNode" &&
-                (!string.Equals(node.Input.TypedProvider, "CloudAiRead", StringComparison.Ordinal) ||
-                 string.IsNullOrWhiteSpace(node.Input.SemanticIntent) ||
+                (!string.Equals(nodeInput.TypedProvider, "CloudAiRead", StringComparison.Ordinal) ||
+                 string.IsNullOrWhiteSpace(nodeInput.SemanticIntent) ||
                  cloudReadonlyIntent is null ||
-                 !string.Equals(node.Input.SemanticIntent, cloudReadonlyIntent.Intent, StringComparison.Ordinal) ||
-                 !node.RequestedCapabilityCodes.Contains(node.Input.SemanticIntent, StringComparer.Ordinal) ||
-                 !IsSha256(node.Input.SemanticPlanDigest) ||
-                 !string.Equals(node.Input.SemanticPlanDigest, cloudReadonlyIntent.SemanticPlanDigest, StringComparison.Ordinal) ||
-                 node.Input.RequestedScope.Count == 0 ||
-                 !node.Input.RequestedScope.SequenceEqual(cloudReadonlyIntent.QueryScope, StringComparer.Ordinal) ||
-                 !MatchesTimeRange(node.Input.TimeRange, cloudReadonlyIntent.TimeRange) ||
-                 !CloudAiReadRowLimitPolicy.IsWithinBounds(node.Input.MaxRows ?? 0) ||
-                 node.Input.MaxRows != cloudReadonlyIntent.Limit ||
-                 !string.IsNullOrWhiteSpace(node.Input.ExecutionMode) ||
-                 node.Input.DataSourceId is not null ||
-                 node.Input.BusinessDomains.Count != 0 ||
-                 node.Input.CanonicalInputJson is not null ||
+                 !string.Equals(nodeInput.SemanticIntent, cloudReadonlyIntent.Intent, StringComparison.Ordinal) ||
+                 !node.RequestedCapabilityCodes.Contains(nodeInput.SemanticIntent, StringComparer.Ordinal) ||
+                 !IsSha256(nodeInput.SemanticPlanDigest) ||
+                 !string.Equals(nodeInput.SemanticPlanDigest, cloudReadonlyIntent.SemanticPlanDigest, StringComparison.Ordinal) ||
+                 nodeInput.RequestedScope.Count == 0 ||
+                 !nodeInput.RequestedScope.SequenceEqual(cloudReadonlyIntent.QueryScope, StringComparer.Ordinal) ||
+                 !MatchesTimeRange(nodeInput.TimeRange, cloudReadonlyIntent.TimeRange) ||
+                 !CloudAiReadRowLimitPolicy.IsWithinBounds(nodeInput.MaxRows ?? 0) ||
+                 nodeInput.MaxRows != cloudReadonlyIntent.Limit ||
+                 !string.IsNullOrWhiteSpace(nodeInput.ExecutionMode) ||
+                 nodeInput.DataSourceId is not null ||
+                 nodeInput.BusinessDomains.Count != 0 ||
+                 nodeInput.CanonicalInputJson is not null ||
                  !string.Equals(node.SideEffectClass, "ReadOnly", StringComparison.Ordinal)))
             {
                 return InvalidResult($"CloudReadNode '{node.NodeId}' must use the typed CloudAiRead input without SQL/data-source fallback.");
@@ -1281,20 +1305,20 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
                  !parentNode.RequestedToolCodes.Contains("query_cloud_data_readonly", StringComparer.Ordinal) ||
                  cloudReadonlyIntent is null ||
                  !string.Equals(cloudReadonlyIntent.Intent, "Analysis.Device.Status", StringComparison.Ordinal) ||
-                 !string.Equals(parentNode.Input.SemanticIntent, cloudReadonlyIntent.Intent, StringComparison.Ordinal) ||
+                 !string.Equals(parentNode.Input!.SemanticIntent, cloudReadonlyIntent.Intent, StringComparison.Ordinal) ||
                  !string.Equals(parentNode.Input.SemanticPlanDigest, cloudReadonlyIntent.SemanticPlanDigest, StringComparison.Ordinal) ||
-                 !string.Equals(node.Input.TypedProvider, "DeterministicHealthAssessment", StringComparison.Ordinal) ||
-                 !string.Equals(node.Input.SemanticIntent, cloudReadonlyIntent.Intent, StringComparison.Ordinal) ||
-                 !string.Equals(node.Input.SemanticPlanDigest, cloudReadonlyIntent.SemanticPlanDigest, StringComparison.Ordinal) ||
-                 !node.Input.RequestedScope.SequenceEqual(cloudReadonlyIntent.QueryScope, StringComparer.Ordinal) ||
-                 node.Input.MaxRows != cloudReadonlyIntent.Limit ||
-                 !MatchesTimeRange(node.Input.TimeRange, cloudReadonlyIntent.TimeRange) ||
-                 node.Input.ExecutionMode is not null ||
-                 node.Input.DataSourceId is not null ||
-                 node.Input.BusinessDomains.Count != 0 ||
-                 node.Input.GovernedSchemaDigest is not null ||
-                 node.Input.RequestedPermission is not null ||
-                 node.Input.CanonicalInputJson is not null ||
+                 !string.Equals(nodeInput.TypedProvider, "DeterministicHealthAssessment", StringComparison.Ordinal) ||
+                 !string.Equals(nodeInput.SemanticIntent, cloudReadonlyIntent.Intent, StringComparison.Ordinal) ||
+                 !string.Equals(nodeInput.SemanticPlanDigest, cloudReadonlyIntent.SemanticPlanDigest, StringComparison.Ordinal) ||
+                 !nodeInput.RequestedScope.SequenceEqual(cloudReadonlyIntent.QueryScope, StringComparer.Ordinal) ||
+                 nodeInput.MaxRows != cloudReadonlyIntent.Limit ||
+                 !MatchesTimeRange(nodeInput.TimeRange, cloudReadonlyIntent.TimeRange) ||
+                 nodeInput.ExecutionMode is not null ||
+                 nodeInput.DataSourceId is not null ||
+                 nodeInput.BusinessDomains.Count != 0 ||
+                 nodeInput.GovernedSchemaDigest is not null ||
+                 nodeInput.RequestedPermission is not null ||
+                 nodeInput.CanonicalInputJson is not null ||
                  node.SideEffectClass != "DeterministicInternal" ||
                  node.ApprovalPolicy.Required ||
                  node.ModelPolicy is not null ||
@@ -1310,18 +1334,18 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
 
             if (node.NodeKind != "CloudReadNode" &&
                 !node.RequestedToolCodes.Contains("assess_cloud_health", StringComparer.Ordinal) &&
-                node.Input.TimeRange is not null)
+                nodeInput.TimeRange is not null)
             {
                 return InvalidResult($"Node '{node.NodeId}' cannot carry a Cloud Evidence time range.");
             }
 
             if (node.NodeKind == "GovernedDataReadNode" &&
-                (node.Input.DataSourceId is null ||
-                 node.Input.ExecutionMode is not ("GovernedSql" or "TextToSql") ||
-                 !string.IsNullOrWhiteSpace(node.Input.TypedProvider) ||
-                 !IsSha256(node.Input.GovernedSchemaDigest) ||
-                 string.IsNullOrWhiteSpace(node.Input.RequestedPermission) ||
-                 node.Input.MaxRows is < 1 or > 200 ||
+                (nodeInput.DataSourceId is null ||
+                 nodeInput.ExecutionMode is not ("GovernedSql" or "TextToSql") ||
+                 !string.IsNullOrWhiteSpace(nodeInput.TypedProvider) ||
+                 !IsSha256(nodeInput.GovernedSchemaDigest) ||
+                 string.IsNullOrWhiteSpace(nodeInput.RequestedPermission) ||
+                 nodeInput.MaxRows is < 1 or > 200 ||
                  !string.Equals(node.SideEffectClass, "ReadOnly", StringComparison.Ordinal)))
             {
                 return InvalidResult($"GovernedDataReadNode '{node.NodeId}' must use its distinct governed data input contract.");

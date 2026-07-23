@@ -13,7 +13,7 @@ public sealed class FreeFormDbaAnalysisRunner(
     DataAnalysisWidgetEmitter widgetEmitter,
     ILogger<FreeFormDbaAnalysisRunner> logger)
 {
-    public async Task<AgentAnalysisNodeResult> RunAsync(
+    internal async Task<AgentAnalysisNodeResult> RunAsync(
         IntentResult intent,
         AgentWorkflowSink? sink,
         SessionRuntimeSnapshot? session,
@@ -76,6 +76,7 @@ public sealed class FreeFormDbaAnalysisRunner(
                 schema);
             var evidence = new AgentBranchEvidenceSeed(
                 "GovernedDataReadNode",
+                safeContext,
                 AgentWorkflowEvidenceKind.DataQuery,
                 AgentWorkflowEvidenceTruthClass.ObservedFact,
                 "governed-text-to-sql:v1",
@@ -83,8 +84,7 @@ public sealed class FreeFormDbaAnalysisRunner(
                 "GovernedReadOnly",
                 IsSimulation: null,
                 intent.Intent,
-                ["governed-readonly"],
-                safeContext);
+                ["governed-readonly"]);
             return vizContext.HasData
                 ? AgentAnalysisNodeResult.Succeeded(evidence)
                 : AgentAnalysisNodeResult.Empty(evidence);

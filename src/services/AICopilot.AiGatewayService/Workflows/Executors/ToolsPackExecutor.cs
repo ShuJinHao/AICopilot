@@ -16,7 +16,7 @@ public class ToolsPackExecutor(
     internal static bool IsRelevant(IEnumerable<IntentResult> intents, AgentIntentRegistrySnapshot registry) =>
         AgentWorkflowIntentSelector.Any(intents, registry, 0.8, null, AgentIntentClass.PluginAction);
 
-    public async Task<BranchResult> DiscoverAsync(
+    internal async Task<BranchResult> DiscoverAsync(
         List<IntentResult> intentResults,
         AgentIntentRegistrySnapshot registry,
         CancellationToken ct = default)

@@ -18,7 +18,7 @@ public class KnowledgeRetrievalExecutor(
     internal static bool IsRelevant(IEnumerable<IntentResult> intents, AgentIntentRegistrySnapshot registry) =>
         AgentWorkflowIntentSelector.Any(intents, registry, 0.6, "Knowledge.Retrieve", AgentIntentClass.Knowledge);
 
-    public async Task<BranchResult> ExecuteAsync(
+    internal async Task<BranchResult> ExecuteAsync(
         List<IntentResult> intentResults,
         AgentIntentRegistrySnapshot registry,
         CancellationToken ct = default)

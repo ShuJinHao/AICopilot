@@ -177,6 +177,7 @@ internal sealed class AgentNodeRunStore(
         Expression<Func<TRecord, DateTimeOffset>> createdAt,
         Expression<Func<TRecord, TOrder>> stableOrder,
         CancellationToken cancellationToken)
+        where TRecord : class
     {
         return await records
             .AsNoTracking()

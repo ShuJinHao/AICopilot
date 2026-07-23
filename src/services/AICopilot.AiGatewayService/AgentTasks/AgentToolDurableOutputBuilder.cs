@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using AICopilot.AiGatewayService.Tools;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
+using AICopilot.SharedKernel.Result;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
 

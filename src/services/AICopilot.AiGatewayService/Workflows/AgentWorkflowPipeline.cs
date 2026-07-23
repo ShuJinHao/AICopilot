@@ -18,7 +18,7 @@ public sealed record AgentPlanDraftWorkflowResult(
     IReadOnlyCollection<AiToolDefinition> Tools,
     ChatExecutionMetadataSnapshot ExecutionMetadata)
 {
-    internal required AgentIntentRegistrySnapshot RegistrySnapshot { get; init; }
+    internal AgentIntentRegistrySnapshot RegistrySnapshot { get; init; } = AgentIntentRegistryV1.FrozenSnapshot;
 }
 
 public class AgentWorkflowPipeline(

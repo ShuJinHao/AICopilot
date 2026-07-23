@@ -17,15 +17,24 @@ internal sealed class AgentRuntimeCloudReadonlyBasicToolService(ICloudReadonlyAg
         CancellationToken cancellationToken)
     {
         var node = plan.Nodes?.ElementAtOrDefault(step.StepIndex - 1);
-        var intent = node?.Input.SemanticIntent is { } semanticIntent &&
-                     node.Input.SemanticPlanDigest is { } semanticPlanDigest
-            ? plan.CloudReadonlyIntents?.SingleOrDefault(candidate =>
+        AgentTaskPlanCloudReadonlyIntentDocument? intent = null;
+        if (node?.Input is
+            {
+                SemanticIntent: { } semanticIntent,
+                SemanticPlanDigest: { } semanticPlanDigest
+            })
+        {
+            intent = plan.CloudReadonlyIntents?.SingleOrDefault(candidate =>
                 string.Equals(candidate.Intent, semanticIntent, StringComparison.Ordinal) &&
-                string.Equals(candidate.SemanticPlanDigest, semanticPlanDigest, StringComparison.Ordinal))
-            : null;
-        intent ??= throw new CloudAiReadException(
-            AppProblemCodes.CloudReadonlyIntentUnsupported,
-            "Cloud readonly node is not bound to exactly one frozen typed semantic intent.");
+                string.Equals(candidate.SemanticPlanDigest, semanticPlanDigest, StringComparison.Ordinal));
+        }
+
+        if (intent is null)
+        {
+            throw new CloudAiReadException(
+                AppProblemCodes.CloudReadonlyIntentUnsupported,
+                "Cloud readonly node is not bound to exactly one frozen typed semantic intent.");
+        }
         var result = await cloudReadonlyToolExecutor.ExecuteAsync(
             new CloudReadonlyAgentToolRequest(
                 intent.ToSemanticPlan(),

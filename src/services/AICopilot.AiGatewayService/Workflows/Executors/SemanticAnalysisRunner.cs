@@ -18,7 +18,7 @@ public sealed class SemanticAnalysisRunner(
     private const string RecipeDataReadBoundaryMessage =
         "[系统提示]: " + RecipeDataReadBoundaryMarker + "。可以回答配方版本规则问题，但不能查询具体配方、设备配方清单或版本记录。";
 
-    public async Task<AgentAnalysisNodeResult> RunAsync(
+    internal async Task<AgentAnalysisNodeResult> RunAsync(
         IntentResult intent,
         AgentWorkflowSink? sink,
         CancellationToken cancellationToken)
@@ -143,6 +143,7 @@ public sealed class SemanticAnalysisRunner(
                 queryResult.RowCount);
             var evidence = new AgentBranchEvidenceSeed(
                 "CloudReadNode",
+                safeContext,
                 AgentWorkflowEvidenceKind.DataQuery,
                 AgentWorkflowEvidenceTruthClass.ObservedFact,
                 "cloud-ai-read:v1",
@@ -152,8 +153,7 @@ public sealed class SemanticAnalysisRunner(
                 plan.Intent,
                 string.IsNullOrWhiteSpace(queryResult.QueryScope)
                     ? []
-                    : [queryResult.QueryScope],
-                safeContext);
+                    : [queryResult.QueryScope]);
             return queryResult.RowCount == 0
                 ? AgentAnalysisNodeResult.Empty(evidence)
                 : AgentAnalysisNodeResult.Succeeded(evidence);

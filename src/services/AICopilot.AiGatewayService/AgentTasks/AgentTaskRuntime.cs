@@ -996,10 +996,10 @@ internal sealed class AgentTaskRuntime(
                     AgentRuntimeTelemetry.RecordRequiredNodeFailure(nodeContract.NodeKind);
                 }
 
-                var failedAt = DateTimeOffset.UtcNow;
+                var stepFailedAt = DateTimeOffset.UtcNow;
                 await FailAndSaveAsync(
                     task, workspace, attempt, $"步骤 {step.StepIndex} 执行失败：{safeMessage}",
-                    errorCode, safeMessage, failedAt, cancellationToken);
+                    errorCode, safeMessage, stepFailedAt, cancellationToken);
                 return Result.Success(task);
             }
         }

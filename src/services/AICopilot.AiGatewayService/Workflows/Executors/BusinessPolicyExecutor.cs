@@ -26,7 +26,7 @@ public class BusinessPolicyExecutor(
             && businessSemanticsCatalog.TryGetPolicyIntent(item.Intent, out _));
     }
 
-    public Task<BranchResult> ExecuteAsync(
+    internal Task<BranchResult> ExecuteAsync(
         List<IntentResult> intentResults,
         string? userQuestion,
         AgentIntentRegistrySnapshot registry,

@@ -22,7 +22,7 @@ public sealed record IntentRoutingStepResult(
     string? ResponseText,
     ChatExecutionMetadataSnapshot ExecutionMetadata)
 {
-    internal required AgentIntentRegistrySnapshot RegistrySnapshot { get; init; }
+    internal AgentIntentRegistrySnapshot RegistrySnapshot { get; init; } = AgentIntentRegistryV1.FrozenSnapshot;
 }
 
 internal sealed record IntentRoutingResponseLogMetadata(

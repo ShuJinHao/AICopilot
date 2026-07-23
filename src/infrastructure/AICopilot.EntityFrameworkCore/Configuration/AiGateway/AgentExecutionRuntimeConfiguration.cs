@@ -133,7 +133,10 @@ internal static class AgentExecutionRuntimeConfigurationMapping
         where TEntity : class
     {
         builder.ToTable(table);
-        builder.HasKey(idProperty);
+        var keyProperty = Expression.Lambda<Func<TEntity, object?>>(
+            Expression.Convert(idProperty.Body, typeof(object)),
+            idProperty.Parameters);
+        builder.HasKey(keyProperty);
         builder.Property(idProperty).HasConversion(toProvider, fromProvider).HasColumnName("id");
         if (usesRowVersion)
         {
@@ -164,9 +167,9 @@ internal static class AgentExecutionRuntimeConfigurationMapping
         builder.Property(fencingToken.Property).IsRequired().HasDefaultValue(0L).HasColumnName(fencingToken.Column);
     }
 
-    public static void MapUniqueFilteredIndex<TEntity, TProperty>(
+    public static void MapUniqueFilteredIndex<TEntity>(
         EntityTypeBuilder<TEntity> builder,
-        Expression<Func<TEntity, TProperty>> property,
+        Expression<Func<TEntity, object?>> property,
         string filter,
         string databaseName)
         where TEntity : class =>

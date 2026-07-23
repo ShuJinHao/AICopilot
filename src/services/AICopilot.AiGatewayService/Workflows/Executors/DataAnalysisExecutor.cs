@@ -26,7 +26,7 @@ public class DataAnalysisExecutor(
             intents, registry, 0.6, null,
             AgentIntentClass.CloudOnly, AgentIntentClass.GovernedExploration, AgentIntentClass.KnownButUnavailable);
 
-    public async Task<BranchResult> ExecuteAsync(
+    internal async Task<BranchResult> ExecuteAsync(
         List<IntentResult> intentResults,
         AgentIntentRegistrySnapshot registry,
         AgentWorkflowSink? sink,

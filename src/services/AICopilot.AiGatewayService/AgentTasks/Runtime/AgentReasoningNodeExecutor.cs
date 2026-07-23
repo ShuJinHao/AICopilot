@@ -4,6 +4,7 @@ using System.Text.Json;
 using AICopilot.AiGatewayService.Agents;
 using AICopilot.AiGatewayService.Tools;
 using AICopilot.Core.AiGateway.Ids;
+using AICopilot.Core.AiGateway.Runtime.AgentExecution;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Result;
